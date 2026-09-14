@@ -480,10 +480,10 @@ def test_niter_exhausted_stage_transfers_final_xc_like_vmec2000() -> None:
     assert result.r00 == pytest.approx(3.8635255062, rel=2e-10)
 
 
-def test_prefetch_serves_second_rung_and_legend_prints_once():
+def test_prefetch_serves_second_rung_and_legend_prints_once(monkeypatch):
     """While rung 1 iterates, a background thread AOT-compiles rung 2's
-    block lane; the ``(prefetched)`` compile notice proves rung 2 was served
-    by it.  The ``BEGIN FORCE ITERATIONS`` legend appears exactly once per
+    block lane; a successful executable call proves rung 2 was served
+    by it, rather than falling back after an argument mismatch.  The ``BEGIN FORCE ITERATIONS`` legend appears exactly once per
     run (runvmec.f) while every rung keeps its banner and column header,
     and a no-prefetch ladder must be bit-identical (cache warming only)."""
     inp = _load_input("solovev")
@@ -493,6 +493,17 @@ def test_prefetch_serves_second_rung_and_legend_prints_once():
                   niter_array=[731, 733])
 
     lines: list[str] = []
+    served = []
+
+    class Executables(dict):
+        def __setitem__(self, key, executable):
+            def recorded(carry, runtime):
+                result = executable(carry, runtime)
+                served.append(runtime.resolution.ns)
+                return result
+            super().__setitem__(key, recorded)
+
+    monkeypatch.setattr(solver, "_LANE_EXECUTABLES", Executables())
 
     def collect(text: str = "", end: str = "\n") -> None:
         lines.append(str(text) + end)
@@ -510,6 +521,7 @@ def test_prefetch_serves_second_rung_and_legend_prints_once():
     # B2: attribution — rung 1 compiles on demand, rung 2 was prefetched.
     assert " compiling NS = 5 executable...\n" in output
     assert " compiling NS = 9 executable... (prefetched)\n" in output
+    assert served and set(served) == {9}
 
     baseline = multigrid.solve_multigrid(inp, prefetch_compile=False, **ladder)
     np.testing.assert_array_equal(result.fsq_history, baseline.fsq_history)

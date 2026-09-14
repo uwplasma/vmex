@@ -43,6 +43,7 @@ plus the per-figure helpers each of those dispatches to.
 from __future__ import annotations
 
 import dataclasses
+import textwrap
 import time
 import weakref
 from collections import OrderedDict
@@ -468,26 +469,27 @@ def _eval_modes(cos_coeff, sin_coeff, xm, xn, theta, phi, *, dtheta: int = 0, dp
     """
     xm = np.asarray(xm, dtype=float)
     xn = np.asarray(xn, dtype=float)
-    # (mn, ntheta, nphi) phase table; grids here are small (<=260x260).
-    angle = (
-        xm[:, None, None] * np.asarray(theta)[None, :, None]
-        - xn[:, None, None] * np.asarray(phi)[None, None, :]
-    )
     cos_coeff = None if cos_coeff is None else np.asarray(cos_coeff, dtype=float)
     sin_coeff = None if sin_coeff is None else np.asarray(sin_coeff, dtype=float)
-    if dtheta == 0 and dphi == 0:
-        terms = [(cos_coeff, np.cos(angle)), (sin_coeff, np.sin(angle))]
-    else:
+    if dtheta or dphi:
         factor = xm if dtheta else -xn
-        terms = [
-            (None if cos_coeff is None else cos_coeff * factor.reshape((1,) * (cos_coeff.ndim - 1) + (-1,)), -np.sin(angle)),
-            (None if sin_coeff is None else sin_coeff * factor.reshape((1,) * (sin_coeff.ndim - 1) + (-1,)), np.cos(angle)),
-        ]
+        cos_coeff, sin_coeff = (
+            None if sin_coeff is None else sin_coeff * factor,
+            None if cos_coeff is None else -cos_coeff * factor,
+        )
+    # Angle addition avoids allocating a modes x theta x phi phase table.
+    # Coefficient leading dimensions (e.g. radial surfaces) remain batched.
+    mt = np.multiply.outer(np.asarray(theta), xm)
+    np_ = np.multiply.outer(xn, np.asarray(phi))
+    cm, sm = np.cos(mt), np.sin(mt)
+    cn, sn = np.cos(np_), np.sin(np_)
     out = None
-    for coeff, basis in terms:
-        if coeff is None:
-            continue
-        term = np.tensordot(coeff, basis, axes=(-1, 0))
+    if cos_coeff is not None:
+        c = cos_coeff[..., None, :]
+        out = (cm * c) @ cn + (sm * c) @ sn
+    if sin_coeff is not None:
+        s = sin_coeff[..., None, :]
+        term = (sm * s) @ cn - (cm * s) @ sn
         out = term if out is None else out + term
     assert out is not None
     return out
@@ -1160,7 +1162,13 @@ def _j_invariant_map(
     bounce integrals reuse the differentiable sine-mapped Gauss-Legendre
     kernel of :func:`vmex.core.bounce.bounce_action`, also used by DESC.
     """
+    import jax
     from .bounce import bounce_action_from_boozer
+
+    bounce_action_from_boozer = jax.jit(
+        bounce_action_from_boozer,
+        static_argnames=("nfp", "points_per_period", "num_periods",
+                         "max_wells", "quadrature_order"))
 
     bmnc_b = booz["bmnc_b"]
     nsurf = int(bmnc_b.shape[0])
@@ -1299,10 +1307,10 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
     well_ax.spines["right"].set_color(_LINE_COLORS[2])
     title = r"Mercier, resistive interchange, and $V''(s)$"
     if vacuum:
-        title += "\n(vacuum limits are not finite-pressure stability certificates)"
+        title += "\n(vacuum limits are not finite-pressure\nstability certificates)"
     if not d_r_info.get("valid"):
         title += ("\n($D_R$ unavailable for LASYM WOUT)" if "LASYM" in note
-                  else f"\n($D_R$ unavailable: {note})")
+                  else "\n$D_R$ unavailable:\n" + textwrap.fill(str(note), width=38))
     ax.set_title(title)
     ax.legend(
         lines, [line.get_label() for line in lines], loc="upper center",
@@ -1393,6 +1401,9 @@ def _relative_force_error_profile(wout) -> tuple[np.ndarray, np.ndarray]:
 
     ``equif[0]`` and ``equif[-1]`` are linear extrapolations made while
     writing WOUT, so neither belongs in a maximum-error certificate.
+    In vacuum, the pressure gradient vanishes and this ratio approaches one
+    for any nonzero radial Lorentz residual; it is not a residual-magnitude
+    certificate. The stored normalization is retained.
     """
     ns = int(wout.ns)
     rho = np.sqrt(np.linspace(0.0, 1.0, ns))
@@ -1413,6 +1424,14 @@ def _relative_force_error_panel(ax, wout) -> float:
     if error.size:
         ax.semilogy(rho, np.maximum(error, floor), ".-", color=_LINE_COLORS[0])
         maximum = float(np.max(error))
+        if positive.size and np.min(positive) > np.max(positive) / 10.0:
+            from matplotlib.ticker import MaxNLocator, NullLocator, ScalarFormatter
+
+            # One formatter owns the narrow-range offset; separate major and
+            # minor offsets would label the same logarithmic axis differently.
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+            ax.yaxis.set_minor_locator(NullLocator())
+            ax.yaxis.set_major_formatter(ScalarFormatter(useOffset=True))
     else:
         ax.text(0.5, 0.5, "force error unavailable", ha="center", va="center",
                 transform=ax.transAxes)

@@ -6,8 +6,8 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-89 committed artifacts: 35 standalone records and 1 grouped directory holding
-54 files. 31 of the 36 entries below are cited by a page, a test or another
+90 committed artifacts: 36 standalone records and 1 grouped directory holding
+54 files. 32 of the 37 entries below are cited by a page, a test or another
 script; 5 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -50,6 +50,7 @@ hand rather than by a script in this tree.
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst` |
 | `benchmarks/review_20260905.json` |  |  | 2026-09-06 | *nothing* |
 | `benchmarks/review_20260913.json` |  | `f09288b3` | 2026-09-13 | `benchmarks/review_20260913_equilibrium.py`, `benchmarks/review_20260913_exterior.py`, `plan.md` |
+| `benchmarks/single_stage_profile_m4.json` | `benchmarks/single_stage_profile.py` | `50814b65` | 2026-09-13 | `examples/optimization/single_stage_optimization.py`, `plan.md` |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json`, `docs/explanation/high-order-force-balance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_m4.json` | `benchmarks/strong_force.py` | `9481f64a` |  | `docs/reference/performance.rst` |

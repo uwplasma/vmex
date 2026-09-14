@@ -25,8 +25,10 @@ Preview: this script needs ESSOS branch ``rj/vmex-optimization-interfaces``.
 """
 
 from dataclasses import replace
+import json
 import os
 from pathlib import Path
+import time
 
 import jax
 import jax.numpy as jnp
@@ -48,6 +50,7 @@ except ImportError as error:
         "(uwplasma/ESSOS#58)."
     ) from error
 
+started = time.perf_counter()
 SURFACES = np.linspace(0.1, 1.0, 6)
 # FTOL = 1e-9 rather than 1e-10: measured on this deck at u = 0, the tighter
 # root costs 154 s against 59 s and moves the gradient by 0.6%, while 1e-8
@@ -115,27 +118,34 @@ tuples = [(qs.residuals_state, 0.0, 1.0),
           (opt.aspect_ratio, ASPECT_TARGET, 1.0),
           (iota_floor, 0.0, 10.0)]
 
+# The free-boundary pullback assembles its projected residual on the host, so
+# the solve and its adjoint run eagerly and cannot sit under jax.jit.  Every
+# term after the solve is compiled once here and reused by each trial.
+@jax.jit
+def accepted_terms(equilibrium_state, u):
+    residual = opt.residuals_from_tuples(equilibrium_state, solver_context, tuples)
+    coils = coils_from_u(u)
+    costs = jnp.asarray([
+        0.5 * LENGTH_WEIGHT * jnp.sum(
+            (coils.length - LENGTH_TARGET)**2),
+        0.5 * CURVATURE_WEIGHT * jnp.sum(
+            jnp.maximum(coils.curvature - CURVATURE_LIMIT, 0.0)**2),
+        0.5 * COIL_DISTANCE_WEIGHT * loss_coil_separation(
+            coils, COIL_DISTANCE_LIMIT, block_size=32),
+    ])
+    return 0.5 * jnp.vdot(residual, residual) + jnp.sum(costs), (residual, costs)
+
 def objective(u):
     equilibrium_state, status, _, _ = vj.solve_free_boundary_implicit_status(params, u, config)
 
     def accepted(_):
-        residual = opt.residuals_from_tuples(equilibrium_state, solver_context, tuples)
-        coils = coils_from_u(u)
-        costs = jnp.asarray([
-            0.5 * LENGTH_WEIGHT * jnp.sum(
-                (coils.length - LENGTH_TARGET)**2),
-            0.5 * CURVATURE_WEIGHT * jnp.sum(
-                jnp.maximum(coils.curvature - CURVATURE_LIMIT, 0.0)**2),
-            0.5 * COIL_DISTANCE_WEIGHT * loss_coil_separation(
-                coils, COIL_DISTANCE_LIMIT, block_size=32),
-        ])
-        return 0.5 * jnp.vdot(residual, residual) + jnp.sum(costs), (residual, costs, status)
+        value, (residual, costs) = accepted_terms(equilibrium_state, u)
+        return value, (residual, costs, status)
 
     def rejected(_):
         # A smooth, finite wall lets SciPy backtrack after a failed trial. Its
         # derivative is explicit here; the failed equilibrium contributes zero.
-        residual = jnp.zeros_like(opt.residuals_from_tuples(
-            equilibrium_state, solver_context, tuples))
+        residual = jnp.zeros_like(accepted_terms(equilibrium_state, u)[1][0])
         wall = 1.0e3 * (1.0 + jnp.sqrt(1.0e-12 + jnp.vdot(u, u)))**2
         return wall, (residual, jnp.zeros(3), status)
 
@@ -143,8 +153,10 @@ def objective(u):
 
 monitor = opt.OptimizationMonitor()
 value_and_grad_jax = jax.value_and_grad(objective, has_aux=True)
+trials = {"count": 0}
 
 def value_and_grad(u):
+    trials["count"] += 1
     (value, (residual, coil_costs, status)), gradient = value_and_grad_jax(jnp.asarray(u))
     rows = np.asarray(residual); parts = (rows[:-2], rows[-2:-1], rows[-1:])
     terms = {name: 0.5 * float(part @ part)
@@ -181,12 +193,36 @@ wout = vj.wout_from_state(
     vacuum_output=free_result.vacuum)
 
 # Print results
-print(f"[final] QA = {float(qs.total_state(free_result.state, solver_context)):.5e}, "
-      f"aspect = {float(opt.aspect_ratio(free_result.state, solver_context)):.3f}, "
-      f"min |iota| = {float(opt.min_abs_iota(free_result.state, solver_context)):.3f}")
+final_qa = float(qs.total_state(free_result.state, solver_context))
+final_aspect = float(opt.aspect_ratio(free_result.state, solver_context))
+minimum_iota = float(opt.min_abs_iota(free_result.state, solver_context))
+maximum_curvature = float(np.max(np.asarray(coils_final.curvature)))
+print(f"[final] QA = {final_qa:.5e}, aspect = {final_aspect:.3f}, min |iota| = {minimum_iota:.3f}")
 print(f"Objective = {float(final_cost):.6e} after {iterations} {METHOD} iterations")
 print(f"Coil lengths = {np.asarray(coils_final.length)}")
-print(f"Maximum curvature = {float(np.max(np.asarray(coils_final.curvature))):.3f} 1/m")
+print(f"Maximum curvature = {maximum_curvature:.3f} 1/m")
+print(f"Minimum |iota| = {minimum_iota:.4f} (target >= {IOTA_FLOOR:.4f}); "
+      f"aspect {final_aspect:.3f} is a least-squares term toward {ASPECT_TARGET:.1f}")
+# The output solve is independent of the optimizer's, so it is the one checked.
+unmet = []
+if minimum_iota < IOTA_FLOOR:
+    unmet.append(f"minimum |iota| {minimum_iota:.4f} below the {IOTA_FLOOR:.4f} floor")
+if not bool(np.all(np.asarray(free_result.converged))):
+    unmet.append("the output free-boundary solve did not converge")
+if unmet:
+    print("This run did NOT meet its stated targets: " + "; ".join(unmet) + ".")
+    if ci_smoke:
+        print("Smoke mode runs no optimizer iterations; exit status 0.")
+Path("single_stage_free_boundary_optimization_summary.json").write_text(json.dumps({
+    "example": "single_stage_free_boundary_optimization.py", "smoke": ci_smoke,
+    "optimization_seconds": round(time.perf_counter() - started, 1),
+    "trials": trials["count"], "lbfgsb_iterations": int(iterations),
+    "free_boundary_solves": trials["count"] + 1,  # one per trial plus the output solve
+    "final": {"QA": final_qa, "aspect": final_aspect, "min |iota|": minimum_iota,
+              "maximum curvature": maximum_curvature,
+              "output solve converged": bool(np.all(np.asarray(free_result.converged)))},
+    "targets": {"min |iota| >=": IOTA_FLOOR, "aspect (least squares)": ASPECT_TARGET},
+    "unmet": unmet, "met": not unmet}, indent=2) + "\n")
 
 # Save results
 input_path = inp.to_indata("input.single_stage_free_boundary_optimized")
@@ -207,3 +243,5 @@ monitor.plot("single_stage_free_boundary_objectives.png", title="Free-boundary o
 vj.plot_optimization_objects("single_stage_free_boundary_optimization.png",
     ("Initial", surface_initial, coils0), ("Optimized", surface_final, coils_final))
 print("Wrote single_stage_free_boundary_optimization.png and objective history")
+if unmet and not ci_smoke:
+    raise SystemExit(1)

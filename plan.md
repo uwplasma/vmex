@@ -226,7 +226,7 @@ attribution. One heavy local job at a time; the office box takes one.
 |---|---|---|---|
 | B1 Newton finish | in `solver.py`/`implicit.py`: when `fsq` falls below a switch threshold, take matrix-free Newton–GCROT steps inside the descent (the `_newton_step` lane with exact JVPs and the true-residual check) so the returned state is a certified root; delete the separate refinement pass; value-only trials get the same root; #302's anchor contract folds in here | refinement is 51 % of a gradient call; drift 1.5 % → 6e-8 when refined | objective replay at a repeated `x` agrees to 1e-9 on the QI and single-stage cases; the joint phase exits without precision loss; gradient call ≤ 0.5× today; certificate values unchanged on the P1 matrix |
 | B2 warm starts everywhere | perturbation predictor into the free-boundary cache; rung skipping for `initial_state`; hot restart for CLI and `solve_file` sequences; `mode="jit"` inside the callback | 806 → 212 iterations at a 1e-4 move | iterations per accepted trial ≤ 0.3× cold on the QI example |
-| B3 exact block adjoint, then Krylov recycling | on the seed deck the QI adjoint's GCROT stalls at 2.6e-5 and takes 13,228 iterations (78 s), while the raw block factorization is exact at the state, so first solve the adjoint by transposing that factorization together with the 1-D preconditioner (one direct solve; B1 is measuring it); keep GCROT as fallback and certifier; then return the adjoint's Krylov iteration count from compiled programs (A1's counters report `None` for every compiled adjoint, which covers scalar `minimize()` gradients); then warm-start λ across trials, reuse the GCROT deflation space across Newton and adjoint solves, and freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5×, measured by the returned count |
+| B3 exact block adjoint (measured on both decks: adjoint residual ≤ 1.2e-10 in one factorization, 300–5,000× cheaper than production with the Jacobian's factor reused, while production Krylov gradients are off by 9e-5 to 1.6e-3), then Krylov recycling | on the seed deck the QI adjoint's GCROT stalls at 2.6e-5 and takes 13,228 iterations (78 s), while the raw block factorization is exact at the state, so first solve the adjoint by transposing that factorization together with the 1-D preconditioner (one direct solve; B1 is measuring it); keep GCROT as fallback and certifier; then return the adjoint's Krylov iteration count from compiled programs (A1's counters report `None` for every compiled adjoint, which covers scalar `minimize()` gradients); then warm-start λ across trials, reuse the GCROT deflation space across Newton and adjoint solves, and freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5×, measured by the returned count |
 | B4 compile hygiene | `x0` out of the jit key; configs keyed by content; one compile per resolution; persistent cache where jaxlib allows; the JAX value-and-gradient lane must reuse the host lane's executables instead of compiling its own | 102 compiles in a five-evaluation warm campaign; on the A1 rows (#310) the JAX value-and-gradient lane spends 41.6 s (QA) and 71.0 s (QI) compiling after the host derivative has already compiled, and builds take 244–500 XLA compiles | cold to first gradient ≤ 20 s CPU on the QI example; zero recompiles across `max_mode` stages; the second lane adds under 5 s of compile |
 | B5 per-iteration constant | one bounded experiment (≤ 1 week), in this order: ms per iteration for VMEX and VMEC++ at 1, 2 and 4 threads; an HLO census of the iteration (ops, loops, loop trips; the CPU tridiagonal solve is two `lax.scan` Thomas sweeps, about 100 serial trips per iteration at ns = 50); a dispatch arm with a batched tridiagonal kernel; and only if the thread scaling shows headroom, `shard_map` with radial slabs and the tridiagonal solve split over modes, as VMEC++'s OpenMP does | 2.4 vs 0.9 ms per iteration; JAX's CPU thunk runtime has documented 2.5–14× regressions on many-small-kernel workloads and host devices share one thread pool | warm ns = 50 QA below 1.5 ms per iteration; the dispatch arm keeps iteration counts identical and the final state within 1e-12 relative; kill sharding below 1.25× on four devices or with collectives above 30 % of the iteration |
 
@@ -328,17 +328,19 @@ check that may be red.
 | vmex #308 | this plan, documentation only | merged; agents read `plan.md` on `main` |
 | vmex #300 | DESC input bridge; lanes green except a cancelled Python 3.12 fast lane, re-run | merge when that lane is green |
 | vmex #309 (A4) | documentation matched to records | merged `1aa5465e` |
-| vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
+| vmex #312 (A2, merged `68a119e9`) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
 | vmex #310 (A1) | optimization counters and their record `benchmarks/optimization_counters_20260913.json` | merged `2b9d3a3e`; next #319 → #320 → B4b |
-| vmex #311 (A3, refreshed against `main` as `6aaca414`) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
-| vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; #314's c3d failure is a test defect already on `main`: `test_qi_regression_pin_and_jit` pins the QI total on the axisymmetric Solov'ev deck, whose toroidal Boozer coefficients are about 1e-16, so the well argmin ties and 1e-15 noise flips the total between 0.13626 and 0.13500; a test-only PR moves the pin to a non-tied case without the shared solved-state cache before the S1 pieces merge; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
+| vmex #311 (A3, merged `0c083539`) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
+| vmex #313 and #314 (merged `373f1e83`, `746215d3`), #315, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; #316's CTH free-boundary gradient check passes locally; #318 needs its counter rows before merge; #314's c3d failure was a test defect already on `main`: `test_qi_regression_pin_and_jit` pins the QI total on the axisymmetric Solov'ev deck, whose toroidal Boozer coefficients are about 1e-16, so the well argmin ties and 1e-15 noise flips the total between 0.13626 and 0.13500; #323 (merged `b0646713`) moves the pin to the golden `wout_li383_low_res`, whose minimum is unique; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
 | vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck: at the reachable |P(gc)| ≈ 1.88e-7 every trial would fail `primal_tol` and return value-only, so the optimizer would never receive an implicit gradient (B1); no finish certifies better than 6.6e-9 on that deck, and the floor comes from non-gauge soft λ modes | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
-| vmex #319 (B4a, rebased onto `main` as `109656fa`; its extra build programs are second copies caused by the committed final carry, with build compile time 4.66 → 4.64 s on QA and 8.09 → 8.86 s on QI, not removable without restoring the across-trial duplicates it removes) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
-| vmex #320 (B1a) | refinement stops after an unconverged step that does not lower |F| (+14/−9 in `implicit.py`, jit-exercised test on both JAX versions); stacked on #319 as `9b77a10e`, calling the shared commitment helper at both refinement call sites with one compile per lane pinned; QI first derivative 58.9 → 40.2 s with value, gradient, residual, Jacobian and refined state bit-identical | merge after #319, when its benchmark rows show 6,000 → 2,000 GCROT iterations with bit-identical outputs and CI is green |
-| vmex #321 (B4b) | stacked on #319: concrete JAX-lane calls reuse the host lane's certified executables while traced calls keep the compiled program; JAX-lane compile 41.6 → 0.10 s (QA) and 71.0 → 0.12 s (QI), benchmark wall 107.8 → 56.1 s and 164.9 → 77.3 s with host values and gradients bit-identical; constraint baselines 4 → 1 compiles and predictor 2 → 1; +36/−6 library lines | merge after #320 when CI is green |
-| vmex #307 | seven lines on #299's branch, fails `test_ladder_compile_counts_and_walltime` | close; superseded by #319 |
+| vmex #319 (B4a, merged `c5ee2e0d`; total compile seconds 53.1 → 48.8 on QA and 50.2 → 36.5 on QI; its extra build programs are second copies caused by the committed final carry, with build compile time 4.66 → 4.64 s on QA and 8.09 → 8.86 s on QI, not removable without restoring the across-trial duplicates it removes) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
+| vmex #320 (B1a, retargeted to `main`; B1's QA_lowres run shows the plain rule would discard a certification, so it gains a linear-progress guard: stop only when the unconverged inner solve gained fewer than three digits and the step made no progress) | refinement stops after an unconverged step that does not lower |F| (+14/−9 in `implicit.py`, jit-exercised test on both JAX versions); stacked on #319 as `9b77a10e`, calling the shared commitment helper at both refinement call sites with one compile per lane pinned; QI first derivative 58.9 → 40.2 s with value, gradient, residual, Jacobian and refined state bit-identical | merge after #319, when its benchmark rows show 6,000 → 2,000 GCROT iterations with bit-identical outputs and CI is green |
+| vmex #321 (B4b, retargeted to `main`) | stacked on #319: concrete JAX-lane calls reuse the host lane's certified executables while traced calls keep the compiled program; JAX-lane compile 41.6 → 0.10 s (QA) and 71.0 → 0.12 s (QI), benchmark wall 107.8 → 56.1 s and 164.9 → 77.3 s with host values and gradients bit-identical; constraint baselines 4 → 1 compiles and predictor 2 → 1; +36/−6 library lines | merge after #320 when CI is green |
+| vmex #324 (B4c, first commit) | the Jacobian retry keeps the caller's `use_fft`; the new test fails without the fix | merge after #321 when CI is green |
+| vmex #325 (B4d) | `_block_lane` compiles once across default-device contexts; stacked on B4c's branch | merge after B4c; fold its guard and #321's into one device helper |
+| vmex #307 | superseded by #319 | closed |
 | vmex #301, #303, #304 | winding surface | parked |
 | booz_xform_jax #8 | opt-in magnetic-only projection, checks green; magnetic-only value 2.99 → 0.99 ms (symmetric) and 5.02 → 1.50 ms (asymmetric) on an RTX A4000 | merged `8e0208ae`; tagging 0.3.0 is the maintainer's release step |
 | SOLVAX #105 | release 0.21.0 of merged #100–#104: checked Thomas GPU launch overhead, halved principal inverses, nonfinite root rejection | merged `60a87b21`; tagging 0.21.0 publishes it to PyPI and is the maintainer's release step; VMEX raises its floor once 0.21.0 is on PyPI |
@@ -660,6 +662,27 @@ state. The block-tridiagonal tangent is exact at the state (solve defect
 6,000 iterations. It is accepted only through a tenfold slack, after 13,228
 iterations and 78 s.
 
+**QA_lowres reverses part of the seed-deck picture (B1 measurement).** On
+`input.LandremanPaul2021_QA_lowres` (MPOL = NTOR = 8, ns = 50) the raw
+Jacobian's condition number is about 2e12 with no spectral gap; its near-null
+modes are m = 0 λ modes with linear response, which the 1-D preconditioner
+restores, carrying 4 % of the certificate residual. Main's refinement
+certifies there (6.34e-7 → 5.66e-12 in 5,343 GCROT iterations, through an
+unconverged first step whose linear residual still falls to 5.2e-5), and
+Newton preconditioned by the block factorization, switched in at
+`fsq` ≈ 1e-6, certifies 9e-13 in four full steps at a seventh of the work of
+descent plus refinement. The seed deck is the pathological case: its first
+step stalls at 4.2e-3 and nothing certifies. Decisions: #320 stops only when
+the unconverged inner solve gained fewer than three digits (threshold 1e-3,
+one named constant, two measured decks) and the step made no progress; B1c,
+after B3, switches to block-preconditioned Newton at `fsq` ≈ 1e-6 and falls
+back to descent when two full steps fail to lower `fsq` tenfold, judging kill
+rules on full steps only; the primal certificate becomes goal-oriented,
+|μᵀF_raw| ≤ 1e-8·max(|m|, m_ref) from B3's exact adjoint with a fresh raw FSQ
+and geometry check, keeping 1e-10 only where no block path exists, which
+supersedes #302's absolute `primal_tol`. Deflating the near-null modes is
+unusable: it moves the QI gradient by 23–36 %.
+
 **Precedent and risk.** Every code that finishes a VMEC-type descent with
 Krylov (VMEC2000's `PRECON_TYPE` modes, PARVMEC, SIESTA) preconditions it with
 the 2-D radial block operator; SIESTA reaches a 1e-19 residual in 6–11
@@ -740,8 +763,7 @@ boundary-free keys inexact, and a `[1, 1]` `max_mode` stage recompiles
 **Change.** Move axis re-guess and the bounded retries into
 `lax.cond`/`lax.while_loop` with fixed shapes, gated on the same flags, so the
 traced solve follows the host solve's decisions. Then remove the
-`_block_lane` context split. Write the content-key analysis as a design note
-before any code.
+`_block_lane` context split. The content-key design note is written (B4e) and the work is deferred: a `[1, 1]` stage recompiles 8 programs in 25.8 s because `_canonical_config` hashes all of `cfg.inp`, compiled lanes bake deck values, and problem closures bake `x0`, `params0` and the penalty scale; splitting structure tokens from traced values touches about 25 call sites across three owners, which ranks below B3, B4c and C1.
 
 **Gate.** On both seed decks the full-jit value and gradient match the host
 lane to 1e-10 with no host callback, iteration counts and final states are
@@ -1019,3 +1041,52 @@ heavy job is running and the heavy-job lock is released. State to resume from:
   committed from branch `b1/newton-finish`.
 - Five other tests in `tests/test_optimize.py` still read the shared `/tmp`
   Solov'ev state (a test-isolation follow-up). No package was tagged.
+
+**2026-09-14, resumed: merges and decisions.** Merged: #323 (`b0646713`),
+#313 (`373f1e83`), #314 (`746215d3`), #312 (`68a119e9`), #322 (`08d92161`),
+#311 (`0c083539`) and #319 (`c5ee2e0d`); #307 closed. #320, #321 and #324 are
+retargeted to `main`. B1's two-deck record decides four things: the exact
+block adjoint is B3's implementation and a correctness fix for scalar-loss
+gradients; #320 keeps refinement's certification on well-resolved decks
+through a linear-progress guard; the primal certificate becomes goal-oriented
+after B3; and B1c switches to block-preconditioned Newton inside the descent.
+B4e's content-keyed lanes are deferred with a written design. The heavy-job
+lock and CI capacity remain the pacing constraints.
+
+**2026-09-14, paused again.** Stopped on maintainer request; no agent, watch
+or heavy job runs on the laptop or the office workstation, and both heavy-job
+locks are released. The office worktrees under `~/vmex-agents` remain for
+reuse. State to resume from:
+
+- Awaiting CI, then admin-merge when every real lane is green: #300 (its
+  Python 3.12 fast lane was re-run), #315, #316 (the CTH free-boundary
+  gradient check passed locally), #317 and #324, plus this logbook (#327).
+  #317's and #318's Python 3.12 fast lane hit the 8-minute cap under runner
+  contention (main's run takes 6:18); re-run it, and trim #317's new
+  parametrized plotting tests if it times out again.
+- #318 does not merge on its cold 8-dof rows, which show no gain beyond
+  run-to-run spread. It needs one warm 48-dof QI measurement on the office box
+  (`--max-mode 3 --optimizer least_squares --nfev 3`, main vs #318,
+  alternating): merge if the warm Jacobian time or peak memory improves beyond
+  spread, otherwise close it with its source kept in #299's history. The job
+  was killed before it produced rows.
+- **Open regression to bisect first:** on the office workstation (JAX 0.9.2,
+  CPU), `problem.jax_value_and_grad` on `main` (`c5ee2e0d`) requests a
+  251 GB allocation in `jit(residual_value_and_gradient)` for both the QA and
+  QI benchmark rows; JAX 0.11.1 on the laptop runs the same lane. #321 avoids
+  it for concrete calls, but traced calls still build that program. Bisect
+  `373f1e83` against `746215d3` (#314's automatic Jacobian batch width is the
+  first suspect), then fix minimally in its own PR, or report it as JAX 0.9.2
+  behaviour on older commits for a floor decision.
+- #321 (`b8c815e5`) still needs its final benchmark rows against a same-machine
+  `main` baseline; it merges after #324. B4c's traced recovery branch
+  (`f6157303`, not yet pushed at that head) waits on its full-jit seed gate,
+  which was killed partway through its QI case on the office workstation;
+  #325 (`06b0e4b2` locally) stacks on it.
+- #320 needs the linear-progress guard (stop only when the unconverged inner
+  solve gained fewer than three digits and the step made no progress), then
+  its two-deck re-verification against `main`.
+- #326 (B1's two-deck record) needs compaction before merge: the JSON under
+  about 1,000 lines and the script trimmed toward 450–500 lines.
+- After that: B3 (exact block adjoint), the goal-oriented certificate PR,
+  and B1c. Close #299 when the last S1 piece merges.

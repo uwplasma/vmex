@@ -288,3 +288,31 @@ def _put_numeric_leaves(value: Any, device: Any):
         put,
         value,
     )
+
+
+def commit_to_single_device(tree: Any) -> Any:
+    """Commit ``tree``'s JAX arrays to the one single-device placement they share.
+
+    JAX keys a compiled executable on array commitment as well as on shapes
+    and dtypes, so arguments that mix committed and uncommitted arrays on the
+    same device compile a second executable.  When every JAX-array leaf has
+    the same ``SingleDeviceSharding``, put them all there: values and device
+    are unchanged, only the commitment flag becomes uniform.  A tree with no
+    array leaves, a tracer, or any other layout is returned unchanged, and
+    non-array leaves always pass through untouched.
+    """
+    leaves, treedef = jax.tree.flatten(tree)
+    if any(isinstance(leaf, jax.core.Tracer) for leaf in leaves):
+        return tree
+    arrays = [index for index, leaf in enumerate(leaves) if isinstance(leaf, jax.Array)]
+    if not arrays:
+        return tree
+    sharding = leaves[arrays[0]].sharding
+    if not isinstance(sharding, jax.sharding.SingleDeviceSharding) or any(
+        leaves[index].sharding != sharding for index in arrays
+    ):
+        return tree
+    placed = jax.device_put([leaves[index] for index in arrays], sharding)
+    for index, leaf in zip(arrays, placed):
+        leaves[index] = leaf
+    return jax.tree.unflatten(treedef, leaves)
