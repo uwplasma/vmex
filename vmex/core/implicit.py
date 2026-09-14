@@ -10,14 +10,17 @@ coefficients).  :func:`solve_implicit` wraps the opaque host solver
 
     ``(dF/dx)^T lambda = g_x``
 
-matrix-free (one ``jax.vjp`` linearization of the residual, re-applied by a
-recycling GCROT(m, k) Krylov solve staged as one reusable per-config
-executable — see ``_adjoint_gcrot_core``) and returns
-``g_p - lambda^T dF/dp`` with one more VJP — O(1) memory in the forward
-iteration count.  The adjoint solve executes host-eagerly on the caller's
+exactly: at the root the gradient needs only the multiplier of the raw force
+residual, whose Jacobian is block tridiagonal in radius, so one transposed
+block-Thomas solve refined once against an independent pullback, staged as one
+reusable per-config executable (``_adjoint_block_core``), returns
+``g_p - mu^T dF_raw/dp`` with one more VJP — O(1) memory in the forward
+iteration count.  Recycling GCROT(m, k) on the preconditioned transpose
+(``_adjoint_gcrot_core``) is the host fallback when that certificate fails.
+The adjoint solve executes host-eagerly on the caller's
 thread and is bound to the config's carried device on its own (see the
-"Adjoint execution site" section note); its convergence is enforced — an
-exhausted Krylov budget raises the typed
+"Adjoint execution site" section note); its convergence is enforced — a
+missed certificate raises the typed
 :class:`~vmex.core.errors.AdjointSolveError` instead of silently returning a
 plausible-but-wrong gradient — and setting ``VMEX_ADJOINT_DEBUG=1`` prints
 per-stage device/norm lines for hardware placement triage.
@@ -2729,6 +2732,53 @@ class _AdjointStats(NamedTuple):
     tolerance: Array
 
 
+def _block_adjoint(system: _RawBlockSystem, pullback: Callable,
+                   b: SpectralState, cfg: ImplicitConfig):
+    """Raw multiplier ``J_raw^-T b`` from the transposed block factors.
+
+    One refinement pass solves again for the residual measured with
+    ``pullback``, the independent raw VJP.  Returns ``(mu, residual_norm,
+    tolerance)`` with the tolerance of :func:`_adjoint_acceptance`.
+    """
+    def defect(mu):
+        return jax.tree.map(jnp.subtract, b, system.project(pullback(mu)))
+
+    mu = _raw_block_apply(system, b, transpose=True)
+    mu = jax.tree.map(jnp.add, mu, _raw_block_apply(system, defect(mu), transpose=True))
+    return mu, _tree_norm(defect(mu)), _adjoint_acceptance(cfg, _tree_norm(b))
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _adjoint_block_core(params: ImplicitParams, z_star: SpectralState,
+                        frozen: SpectralState, dof_mask: SpectralState,
+                        b: SpectralState, cfg: ImplicitConfig):
+    """Staged exact adjoint ``(dF_raw/dz)^T mu = b``; returns ``(mu, stats)``.
+
+    The implicit residual is ``F = M F_raw`` with ``M`` the 1-D preconditioner,
+    so at the root ``lambda^T dF/dp = mu^T dF_raw/dp`` for ``mu = M^T lambda``:
+    the gradient needs only the raw multiplier.  The raw Jacobian is exactly
+    block tridiagonal in radius, so one transposed Thomas solve refined once
+    reaches round-off, where GCROT on the preconditioned transpose stalls (the
+    QI objective of the benchmark seed deck: 16,161 Krylov iterations and a
+    gradient 1.1e-3 away from this one).  The probe width is the square root
+    of the block size, independent of free memory, so the executable is reused.
+    ``mu`` is NaN-poisoned when it misses the adjoint acceptance, as in
+    :func:`_adjoint_gcrot_core`.
+    """
+    fields = _active_state_fields(cfg)
+    probe = int(np.ceil(np.sqrt(len(fields) * int(dof_mask.R_cos.shape[1]))))
+    system = _raw_block_system(params, cfg, frozen, dof_mask, fields, probe)
+    raw = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+    _, pullback = jax.vjp(lambda z: raw(z, params), z_star)
+    mu, residual_norm, tolerance = _block_adjoint(
+        system, lambda value: pullback(value)[0], b, cfg)
+    ok = residual_norm <= tolerance
+    mu = jax.tree.map(lambda value: jnp.where(ok, value, jnp.nan), mu)
+    return mu, _AdjointStats(residual_norm=residual_norm,
+                             iterations=jnp.zeros((), jnp.int32),
+                             converged=ok, tolerance=tolerance)
+
+
 # The reverse-pass adjoint solve as ONE reusable executable per config.
 # Module scope with ``cfg`` static and the per-call linearization data as
 # traced arguments is what makes it reusable (exactly the residual-lane
@@ -2744,6 +2794,8 @@ def _adjoint_gcrot_core(params: ImplicitParams, z_star: SpectralState,
                         b: SpectralState, cfg: ImplicitConfig):
     """Staged ``(dF/dz)^T lambda = b`` GCROT solve; returns ``(lam, stats)``.
 
+    The host fallback of :func:`_solve_implicit_bwd_impl` when the exact block
+    adjoint (:func:`_adjoint_block_core`) misses its certificate.
     Linearizes the preconditioned residual at ``(z_star, params)`` and runs
     the same GCROT(m, k) solve as :func:`_adjoint_solve_gcrot` under one
     ``jax.jit``.  Convergence enforcement is split across the staging
@@ -2816,7 +2868,7 @@ def _solve_implicit_bwd_impl(cfg, res, gbar):
     frozen = jax.lax.stop_gradient(x_star)
     edge_mask = _edge_mask(cfg)
     P = _dof_projector(cfg, dof_mask)
-    F = residual_fn(cfg, frozen, dof_mask)
+    F = residual_fn(cfg, frozen, dof_mask, formulation="raw")
 
     z_star = P(x_star)
 
@@ -2828,9 +2880,10 @@ def _solve_implicit_bwd_impl(cfg, res, gbar):
               f"{jax.config.jax_default_device} cfg.device={cfg.device}",
               file=sys.stderr)
 
-    # (dF/dz)^T lambda = P gbar, staged once per config (_adjoint_gcrot_core:
-    # the linearization happens INSIDE the jitted core so its residuals are
-    # traced arguments, not per-call closure constants).
+    # (dF_raw/dz)^T mu = P gbar through the block factors, staged once per
+    # config (_adjoint_block_core: the linearization and factorization happen
+    # INSIDE the jitted core so its residuals are traced arguments, not
+    # per-call closure constants).
     b = P(gbar)
     if debug:
         _debug_stage("adjoint rhs P(gbar)", b)
@@ -2838,9 +2891,15 @@ def _solve_implicit_bwd_impl(cfg, res, gbar):
         # places the whole matvec chain (jitted-residual transpose included).
         _, dbg_vjp_z = jax.vjp(lambda z: F(z, params), z_star)
         _debug_stage("operator application (dF/dz)^T b", dbg_vjp_z(b)[0])
-    lam, stats = _adjoint_gcrot_core(params, z_star, frozen, dof_mask, b, cfg)
+    lam, stats = _adjoint_block_core(params, z_star, frozen, dof_mask, b, cfg)
+    staged = any(isinstance(value, jax.core.Tracer) for value in stats)
+    if not staged and not bool(np.asarray(stats.converged)):
+        # A missed block certificate (a far-from-root anchor or a singular
+        # factor) falls back to the preconditioned Krylov adjoint.
+        lam, stats = _adjoint_gcrot_core(params, z_star, frozen, dof_mask, b, cfg)
+        F = residual_fn(cfg, frozen, dof_mask)
     _enforce_adjoint_stats(cfg, stats)
-    if any(isinstance(value, jax.core.Tracer) for value in stats):
+    if staged:
         # A compiled adjoint: how often it runs is not observable on the host.
         _SOLVE_STATS.setdefault(cfg, dict.fromkeys(_COUNTERS, 0)).update(
             adjoints=None, adjoint_krylov_iterations=None, adjoint_seconds=None)
@@ -2909,10 +2968,10 @@ def implicit_state_pullback_multi_rhs(
 
     This preserves the scalar solve_implicit VJP and only adds a helper for
     callers that already have several state cotangents for the same fixed
-    point.  ``solver="gcrot"`` (default) is the ordinary reverse rule.
-    ``solver="block"`` factors the raw nearest-neighbor radial Jacobian once,
-    reuses the same factors with ``transpose=True`` as a right preconditioner,
-    and certifies the ordinary preconditioned VJP.  Runs inside the config's
+    point.  ``solver="gcrot"`` (default) solves every row with preconditioned
+    Krylov.  ``solver="block"`` factors the raw nearest-neighbor radial
+    Jacobian once and solves every row exactly with the transposed factors,
+    refined once and certified like the scalar rule.  Runs inside the config's
     device context (see ``_solve_implicit_bwd``); the two chunk sizes bound
     probe assembly and right-hand-side solves independently — each a
     positive int (default 1, unchanged behavior) or opt-in ``"auto"``,
@@ -2948,7 +3007,8 @@ def _implicit_state_pullback_multi_rhs_impl(
     frozen = jax.lax.stop_gradient(x_star)
     edge_mask = _edge_mask(cfg)
     P = _dof_projector(cfg, dof_mask)
-    F = residual_fn(cfg, frozen, dof_mask)
+    F = residual_fn(cfg, frozen, dof_mask,
+                    formulation="raw" if solver == "block" else "preconditioned")
     z_star = P(x_star)
 
     _, vjp_z = jax.vjp(lambda z: F(z, params), z_star)
@@ -2964,13 +3024,12 @@ def _implicit_state_pullback_multi_rhs_impl(
             params, cfg, frozen, dof_mask, active_fields, probe_chunk_size
         )
         def solve_row(rhs):
-            lam, sol = _adjoint_solve_gcrot(
-                lambda value: vjp_z(value)[0], rhs, cfg,
-                precond=lambda value: _raw_block_apply(
-                    system, value, transpose=True
-                ),
-            )
-            return lam, _linear_response_report(sol, rhs, cfg)
+            lam, residual_norm, tolerance = _block_adjoint(
+                system, lambda value: vjp_z(value)[0], rhs, cfg)
+            return lam, LinearResponseReport(
+                residual_norm=residual_norm, tolerance=tolerance,
+                iterations=jnp.zeros((), jnp.int32),
+                converged=residual_norm <= tolerance)
 
         lam_batch, report = chunk_map(
             solve_row, rhs_batch,
@@ -3003,7 +3062,7 @@ def _implicit_state_pullback_multi_rhs_impl(
                 cfg, iterations=int(np.asarray(iter_batch)[worst]),
                 residual_norm=float(np.asarray(res_batch)[worst]),
                 tolerance=float(np.asarray(accept)[worst]),
-                method=("block-preconditioned GCROT" if solver == "block" else None))
+                method=("block-tridiagonal adjoint" if solver == "block" else None))
     lam_batch = jax.tree.map(
         lambda value: jnp.where(
             conv_batch.reshape((conv_batch.shape[0],)

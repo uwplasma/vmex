@@ -14,6 +14,7 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
+from jax.flatten_util import ravel_pytree
 import numpy as np
 import pytest
 
@@ -60,6 +61,43 @@ def _tree_dot(left, right):
     )
 
 
+def _relative_difference(got, reference):
+    difference = jax.tree.map(jnp.subtract, got, reference)
+    return float(jnp.sqrt(_tree_dot(difference, difference) / _tree_dot(reference, reference)))
+
+
+def _dense_raw_pullback(params, cfg, state, mask, gbar):
+    """Parameter cotangent from a dense solve of the raw adjoint on range(P).
+
+    Independent of the block factors: the raw residual's Jacobian is built
+    densely, restricted to the projector's range through an eigenbasis (P is
+    a symmetric idempotent), and solved directly.  Then ``-mu^T dF_raw/dp``
+    plus the direct boundary term, as in the scalar rule.
+    """
+    frozen = jax.lax.stop_gradient(state)
+    project = im._dof_projector(cfg, mask)
+    edge = im._edge_mask(cfg)
+    raw = im.residual_fn(cfg, frozen, mask, formulation="raw")
+    z_star = project(state)
+    flat_z, unravel = ravel_pytree(z_star)
+    projector = np.asarray(jax.vmap(
+        lambda e: ravel_pytree(project(unravel(e)))[0])(jnp.eye(flat_z.size)))
+    eigenvalues, eigenvectors = np.linalg.eigh(0.5 * (projector + projector.T))
+    basis = eigenvectors[:, eigenvalues > 0.5]
+    jacobian = np.asarray(jax.jacfwd(
+        lambda v: ravel_pytree(raw(unravel(v), params))[0])(flat_z))
+    rhs = np.asarray(ravel_pytree(project(gbar))[0])
+    reduced = basis.T @ jacobian @ basis
+    mu = unravel(jnp.asarray(basis @ np.linalg.solve(reduced.T, basis.T @ rhs)))
+    implicit = jax.vjp(lambda prm: raw(z_star, prm), params)[1](
+        jax.tree.map(jnp.negative, mu))[0]
+    direct = jax.vjp(
+        lambda prm: im._assemble(
+            z_star, im.runtime_from_params(prm, cfg), frozen, project, edge),
+        params)[1](gbar)[0]
+    return jax.tree.map(jnp.add, implicit, direct)
+
+
 def test_solve_implicit_with_aux_matches_solve_implicit():
     """The aux helper returns the same converged state as solve_implicit."""
     _, cfg, p0 = _solovev_setup()
@@ -77,7 +115,16 @@ def test_solve_implicit_with_aux_matches_solve_implicit():
 
 @pytest.mark.full
 def test_multi_rhs_pullback_matches_scalar_vjp():
-    """Batched pullback == stacking the scalar solve_implicit VJP per cotangent."""
+    """Batched pullbacks match the scalar solve_implicit VJP, formulation by formulation.
+
+    The scalar rule and ``solver="block"`` both solve the raw-force adjoint
+    with one block factorization, so they agree to round-off: this checks the
+    batching.  The independent raw reference is the dense solve in
+    ``test_block_response_forward_transpose_and_fd``.  The default
+    ``solver="gcrot"`` solves the preconditioned adjoint, which differs from
+    the raw one by the formulation difference where the anchor is not an exact
+    root (at most 1.1e-3 on record, benchmarks/adjoint_formulation_20260914.json).
+    """
     _, cfg, p0 = _solovev_setup()
     x_star, mask = im.solve_implicit_with_aux(p0, cfg)
 
@@ -87,18 +134,24 @@ def test_multi_rhs_pullback_matches_scalar_vjp():
              for k in keys]
     gbar_batch = jax.tree.map(lambda *a: jnp.stack(a), *gbars)
 
-    g_multi = im.implicit_state_pullback_multi_rhs(p0, cfg, x_star, mask, gbar_batch)
+    g_block = im.implicit_state_pullback_multi_rhs(
+        p0, cfg, x_star, mask, gbar_batch, solver="block")
+    g_gcrot = im.implicit_state_pullback_multi_rhs(p0, cfg, x_star, mask, gbar_batch)
 
     # scalar reference: the actual solve_implicit custom-VJP, applied per cotangent
     _, pullback = jax.vjp(lambda p: im.solve_implicit(p, cfg), p0)
     for i, gbar in enumerate(gbars):
         g_scalar = pullback(gbar)[0]
-        g_multi_i = jax.tree.map(lambda a: a[i], g_multi)
-        for a, b in zip(jax.tree.leaves(g_scalar), jax.tree.leaves(g_multi_i)):
+        g_block_i = jax.tree.map(lambda a: a[i], g_block)
+        for a, b in zip(jax.tree.leaves(g_scalar), jax.tree.leaves(g_block_i)):
             a = np.asarray(a); b = np.asarray(b)
+            assert a.shape == b.shape
+            if a.size == 0:  # parameter families this deck does not use
+                continue
             scale = np.max(np.abs(a)) + 1e-30
-            assert np.max(np.abs(a - b)) <= 1e-8 * scale, "multi-rhs != scalar VJP"
-
+            assert np.max(np.abs(a - b)) <= 1e-8 * scale, "block multi-rhs != scalar VJP"
+        g_gcrot_i = jax.tree.map(lambda a: a[i], g_gcrot)
+        assert _relative_difference(g_gcrot_i, g_scalar) < 1e-3
 
 def test_block_response_forward_transpose_and_fd():
     """One factorization serves tangent and transpose responses accurately."""
@@ -136,13 +189,26 @@ def test_block_response_forward_transpose_and_fd():
     rhs = _tree_dot(tangent_batch, pullback)
     np.testing.assert_allclose(lhs, rhs, rtol=2e-8, atol=2e-10)
 
-    reference = im.implicit_state_pullback_multi_rhs(
+    # An independent reference in the block pullback's own raw formulation:
+    # a dense solve on range(P).  The scalar rule shares the block factors.
+    for i in range(2):
+        reference = _dense_raw_pullback(
+            p0, cfg, state, mask,
+            jax.tree.map(lambda value: value[i], cotangents))
+        for got, expected in zip(
+            jax.tree.leaves(jax.tree.map(lambda value: value[i], pullback)),
+            jax.tree.leaves(reference),
+        ):
+            np.testing.assert_allclose(got, expected, rtol=2e-8, atol=2e-10)
+
+    # The default GCROT pullback solves the preconditioned adjoint.  Where the
+    # anchor is not an exact root the formulations differ by O(|F|); the
+    # largest difference on record is 1.1e-3, on the QI seed state
+    # (benchmarks/adjoint_formulation_20260914.json).
+    preconditioned = im.implicit_state_pullback_multi_rhs(
         p0, cfg, state, mask, cotangents
     )
-    for got, expected in zip(
-        jax.tree.leaves(pullback), jax.tree.leaves(reference)
-    ):
-        np.testing.assert_allclose(got, expected, rtol=2e-8, atol=2e-10)
+    assert _relative_difference(pullback, preconditioned) < 1e-3
 
     for i, (tangent, step) in enumerate(zip(tangents, (3e-5, 1e-4))):
         directional = jax.jvp(

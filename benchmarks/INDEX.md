@@ -19,6 +19,7 @@ hand rather than by a script in this tree.
 
 | artifact | generator | commit | date | cited by |
 | --- | --- | --- | --- | --- |
+| `benchmarks/adjoint_formulation_20260914.json` | `benchmarks/adjoint_formulation.py` | `53ae863e` |  | `tests/test_implicit_multi_rhs.py` |
 | `benchmarks/baseline.json` | `benchmarks/run_baseline.py` | `314e5ba5` |  | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `docs/reference/index.md`, `docs/reference/performance.rst`, `tests/test_cited_paths.py`, `tests/test_performance_docs.py`, `tools/render_performance_docs.py` |
 | `benchmarks/cache_entry_scaling_m4_2026-09-03.json` |  | `2d3be2c0` | 2026-09-03 | `docs/reference/performance.rst` |
 | `benchmarks/capabilities.json` | `tools/render_capabilities.py` |  |  | `docs/reference/capabilities.rst`, `docs/reference/index.md` |

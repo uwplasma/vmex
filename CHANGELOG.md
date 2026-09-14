@@ -22,6 +22,12 @@ revision it was measured at, and the pages that cite it.
   and `R0` the effective major radius, so GKX's minor radius is physical (#271).
 - Optimization seed refinement is a deferred per-configuration executable, on the
   scalar, free-boundary implicit and mirror Newton-Krylov paths (#240, #241).
+- Reverse-mode implicit gradients (`jax.grad` through `solve_implicit`, scalar
+  `VmecProblem` lanes, `minimize()`) differentiate the raw force residual, like
+  the least-squares Jacobian lane, and solve its adjoint in one block
+  factorization instead of 1,100 to 17,000 Krylov iterations. Where the anchor is
+  not an exact root the scalar gradient moves by the formulation difference, up
+  to 1.1e-3 on the QI benchmark objective.
 - A concrete call to `problem.jax_value_and_grad` returns the host lane's pair, and
   shares its solve memo, warm-start stash and counters; with `jac_solver="block"`
   forced it raises the typed error instead of falling back. Traced calls are unchanged (#321).
