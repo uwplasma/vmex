@@ -6,8 +6,8 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-90 committed artifacts: 36 standalone records and 1 grouped directory holding
-54 files. 32 of the 37 entries below are cited by a page, a test or another
+91 committed artifacts: 37 standalone records and 1 grouped directory holding
+54 files. 33 of the 38 entries below are cited by a page, a test or another
 script; 5 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
