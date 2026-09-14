@@ -145,6 +145,9 @@ def test_multi_rhs_pullback_matches_scalar_vjp():
         g_block_i = jax.tree.map(lambda a: a[i], g_block)
         for a, b in zip(jax.tree.leaves(g_scalar), jax.tree.leaves(g_block_i)):
             a = np.asarray(a); b = np.asarray(b)
+            assert a.shape == b.shape
+            if a.size == 0:  # parameter families this deck does not use
+                continue
             scale = np.max(np.abs(a)) + 1e-30
             assert np.max(np.abs(a - b)) <= 1e-8 * scale, "block multi-rhs != scalar VJP"
         g_gcrot_i = jax.tree.map(lambda a: a[i], g_gcrot)
