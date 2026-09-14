@@ -25,6 +25,10 @@ revision it was measured at, and the pages that cite it.
 - A concrete call to `problem.jax_value_and_grad` returns the host lane's pair, and
   shares its solve memo, warm-start stash and counters; with `jac_solver="block"`
   forced it raises the typed error instead of falling back. Traced calls are unchanged (#321).
+- The fixed-point refinement every optimizer trial pays finishes with Newton through one
+  raw block factorization: 7 to 16 GMRES iterations instead of about 2,000 to 3,000 Krylov
+  iterations on the single-stage and QI example decks, at a certificate at or below today's.
+  Decks where that Newton phase stalls replay the previous refinement and keep its anchor.
 
 ### Fixed
 
