@@ -2,7 +2,7 @@
 """Quasi-axisymmetric boundary optimization with a magnetic well."""
 
 import os
-os.environ["XLA_FLAGS"] = "--xla_cpu_parallel_codegen_split_count=2"  # default is 32; cap
+#os.environ["XLA_FLAGS"] = "--xla_cpu_parallel_codegen_split_count=2"  # default is 32; cap
                                                                         # concurrent LLVM codegen
                                                                         # workers to bound peak
                                                                         # compile-time memory
