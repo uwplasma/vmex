@@ -145,7 +145,7 @@ def test_adjoint_counters_cover_eager_and_staged_gradients() -> None:
         jax.grad(volume)(p0)
         stats = im._SOLVE_STATS[cfg]
         assert stats["adjoints"] == 1 and stats["adjoint_seconds"] > 0.0
-        assert stats["adjoint_krylov_iterations"] >= 1
+        assert stats["adjoint_krylov_iterations"] == 0  # the exact block adjoint
         previous = bool(jax.config.jax_disable_jit)
         jax.config.update("jax_disable_jit", False)  # the suite default is eager
         try:
