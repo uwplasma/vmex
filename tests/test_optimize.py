@@ -888,6 +888,14 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     np.testing.assert_allclose(problem.jax_fun(problem.x0), jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_value, jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_gradient, jax_gradient, rtol=1e-12)
+    # Concrete calls reuse the host lane; the traced program (a user's
+    # jax.jit) must still agree with it.
+    with jax.disable_jit(False):
+        traced_value, traced_gradient = jax.jit(problem.jax_value_and_grad)(
+            jax.numpy.asarray(problem.x0)
+        )
+    np.testing.assert_allclose(traced_value, jax_value, rtol=1e-10)
+    np.testing.assert_allclose(traced_gradient, jax_gradient, rtol=1e-10)
     assert np.all(np.isfinite(np.asarray(problem.jax_residual_jac(problem.x0))))
     assert problem.input_from_x(problem.x0) == inp
     np.testing.assert_array_equal(problem.x_from_input(inp), problem.x0)

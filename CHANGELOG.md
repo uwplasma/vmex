@@ -28,6 +28,9 @@ revision it was measured at, and the pages that cite it.
   factorization instead of 1,100 to 17,000 Krylov iterations. Where the anchor is
   not an exact root the scalar gradient moves by the formulation difference, up
   to 1.1e-3 on the QI benchmark objective.
+- A concrete call to `problem.jax_value_and_grad` returns the host lane's pair, and
+  shares its solve memo, warm-start stash and counters; with `jac_solver="block"`
+  forced it raises the typed error instead of falling back. Traced calls are unchanged (#321).
 
 ### Fixed
 
