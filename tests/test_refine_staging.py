@@ -183,15 +183,16 @@ def test_rejected_trial_charges_solve_time_but_counts_no_solve(monkeypatch) -> N
         im._LAST_STATUS_ERROR.pop(cfg, None)
 
 
-@pytest.mark.parametrize("converged, steps", [(False, 1), (True, im._REFINE_MAX_STEPS)])
-def test_unconverged_step_without_progress_ends_refinement(
-        monkeypatch, converged, steps) -> None:
-    """A missed forcing term with no decrease in ``|F|`` is not a Newton step.
+@pytest.mark.parametrize("linear, steps", [
+    (10.0 * im._REFINE_MIN_PROGRESS, 1), (0.1 * im._REFINE_MIN_PROGRESS, im._REFINE_MAX_STEPS)])
+def test_step_without_krylov_progress_ends_refinement(monkeypatch, linear, steps) -> None:
+    """A solve with fewer than three digits and no decrease in ``|F|`` stops.
 
     The staged step runs compiled with its inner GCROT correction reversed,
     so ``|F|`` roughly doubles instead of falling (a zero correction would
-    leave compiled and eager norms a round-off apart). Unconverged, the
-    refinement stops after that step; converged, the non-monotone Newton
+    leave compiled and eager norms a round-off apart), and with the solve's
+    relative residual set to ``linear``. Above ``_REFINE_MIN_PROGRESS`` the
+    refinement stops after that step; below it the non-monotone Newton
     budget is unchanged. Either way the host state is returned untouched. A
     second trial starts from the first one's returned state, as the next
     optimizer evaluation does, and neither staged lane compiles again.
@@ -205,7 +206,8 @@ def test_unconverged_step_without_progress_ends_refinement(
 
     def no_progress(matvec, b, **kwargs):
         solution = real_gcrot(matvec, b, **kwargs)
-        return solution._replace(x=-solution.x, converged=jnp.asarray(converged))
+        return solution._replace(x=-solution.x,
+                                 residual_norm=linear * jnp.linalg.norm(b))
 
     monkeypatch.setattr(im, "_solvax_gcrot", no_progress)
     lanes = (im._refine_step_core, im._preconditioned_residual_lane)
