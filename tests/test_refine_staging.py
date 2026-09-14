@@ -199,6 +199,9 @@ def test_step_without_krylov_progress_ends_refinement(monkeypatch) -> None:
     params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
     state, mask = jax.tree.map(
         jnp.asarray, im._host_solve_and_mask(cfg, params_np, refine=False))
+    # The Krylov steps' stopping rule; the block Newton phase that runs before
+    # them has its own tests below.
+    monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)
     real_step, default = im._refine_step, im._REFINE_MIN_PROGRESS
 
     def without_progress(config, params, frozen, dof_mask, z, fz):
@@ -226,3 +229,99 @@ def test_step_without_krylov_progress_ends_refinement(monkeypatch) -> None:
     for result in (refined, again):
         for result_leaf, state_leaf in zip(jax.tree.leaves(result), jax.tree.leaves(state)):
             np.testing.assert_array_equal(np.asarray(result_leaf), np.asarray(state_leaf))
+
+
+def _host_state(cfg, p0):
+    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
+    return jax.tree.map(
+        jnp.asarray, im._host_solve_and_mask(cfg, params_np, refine=False))
+
+
+def test_block_finish_reaches_the_krylov_anchor_with_one_factorization(monkeypatch) -> None:
+    """The block Newton finish certifies at or below the Krylov anchor, cheaper.
+
+    Both arms start from the descent's stopping point on the shared small
+    deck. The Krylov arm is today's refinement (no block steps); the default
+    arm takes Newton steps through one raw block factorization first.
+    """
+    _, cfg, p0 = _small_solovev_setup()
+    state, mask = _host_state(cfg, p0)
+    P = im._dof_projector(cfg, mask)
+    F = im.residual_fn(cfg, state, mask)
+
+    def certificate(value):
+        return float(im._tree_norm(F(P(value), p0)))
+
+    def counted(**patch):
+        keys = ("refinement_krylov_iterations", "refinement_factorizations")
+        stats = im._SOLVE_STATS.setdefault(cfg, dict.fromkeys(im._COUNTERS, 0))
+        before = {key: stats[key] for key in keys}
+        with monkeypatch.context() as m:
+            for name, value in patch.items():
+                m.setattr(im, name, value)
+            refined = im._refined_state(cfg, p0, state, mask)
+        return refined, {key: stats[key] - before[key] for key in keys}
+
+    assert certificate(state) > cfg.refine_tol  # the descent stops short of the root
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)  # the suite default is eager
+    try:
+        krylov, krylov_work = counted(_REFINE_BLOCK_MAX_STEPS=0)
+        block, block_work = counted()
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+
+    assert certificate(krylov) <= cfg.refine_tol
+    assert certificate(block) <= max(certificate(krylov), 1.0e-3 * cfg.refine_tol)
+    assert krylov_work["refinement_factorizations"] == 0
+    assert block_work["refinement_factorizations"] == 1
+    assert block_work["refinement_krylov_iterations"] < krylov_work["refinement_krylov_iterations"]
+    moved = im._tree_norm(jax.tree.map(jnp.subtract, block, krylov))
+    assert float(moved) <= 1.0e-8 * float(im._tree_norm(krylov))
+
+
+def test_block_finish_lowering_is_shared_across_trial_points() -> None:
+    """The block factorization and step lower identically at two trial points."""
+    _, cfg, p0 = _small_solovev_setup()
+    state, mask = im.solve_implicit_with_aux(p0, cfg)
+    P = im._dof_projector(cfg, mask)
+    z0 = P(state)
+    z1 = jax.tree.map(lambda a: a * (1.0 + 1.0e-6), z0)
+    p1 = dataclasses.replace(p0, rbc=p0.rbc * (1.0 + 1.0e-6))
+    factor_a = im._refine_block_factor_core.lower(z0, p0, state, mask, cfg=cfg).as_text()
+    factor_b = im._refine_block_factor_core.lower(z1, p1, state, mask, cfg=cfg).as_text()
+    assert factor_a == factor_b
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        factors = im._refine_block_factor_core(z0, p0, state, mask, cfg)
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+    step_a = im._refine_block_step_core.lower(z0, p0, state, mask, factors, cfg=cfg).as_text()
+    step_b = im._refine_block_step_core.lower(z1, p1, state, mask, factors, cfg=cfg).as_text()
+    assert step_a == step_b
+
+
+def test_block_finish_without_progress_replays_the_krylov_anchor(monkeypatch) -> None:
+    """A block phase that lowers nothing returns the Krylov refinement bit for bit."""
+    _, cfg, p0 = _small_solovev_setup()
+    state, mask = _host_state(cfg, p0)
+    real_block_step = im._refine_block_step
+
+    def without_progress(config, params, frozen, dof_mask, z, factors):
+        _, _, _, linear = real_block_step(config, params, frozen, dof_mask, z, factors)
+        fz = im.residual_fn(config, frozen, dof_mask)(z, params)
+        return z, fz, im._tree_norm(fz), linear
+
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)
+            krylov = im._refined_state(cfg, p0, state, mask)
+        monkeypatch.setattr(im, "_refine_block_step", without_progress)
+        replayed = im._refined_state(cfg, p0, state, mask)
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+    for replayed_leaf, krylov_leaf in zip(jax.tree.leaves(replayed), jax.tree.leaves(krylov)):
+        np.testing.assert_array_equal(np.asarray(replayed_leaf), np.asarray(krylov_leaf))

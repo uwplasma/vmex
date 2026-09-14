@@ -221,19 +221,35 @@ def test_summary_confinement_axis_draws_only_valid_profiles(summary_figure):
 
 
 def test_summary_reports_force_error(solved_case, summary_figure):
-    """The force panel keeps its equation, log scale, and scalar-card max."""
+    """The force panel states its normalization; the card gives its volume average."""
     _, meta = summary_figure
     force = meta["axes"]["force_balance"]
     assert force.get_yscale() == "log"
     assert r"\rho=\sqrt{s}" in force.get_xlabel()
     assert r"s=\psi/\psi_B" in force.get_xlabel()
-    assert "relative force error" in force.get_ylabel()
-    assert r"\mathbf{J}" in force.get_ylabel() and r"\nabla p" in force.get_ylabel()
+    assert r"\nabla p" in force.get_ylabel() and r"\nabla(B^2/2\mu_0)" in force.get_ylabel()
+    assert r"0.1\leq s\leq 0.99" in force.get_ylabel()
     _, wout = solved_case
-    expected = float(np.max(np.abs(np.asarray(wout.equif)[1:-1])))
-    assert meta["max_relative_force_error"] == pytest.approx(expected)
+    assert meta["force_error"] == plotting._relative_force_error_profile(wout)[2]
+    # Converged finite-beta deck: 1.3e-3 measured, while equif reaches 0.94.
+    assert meta["force_error"] < 1.0e-2
     card_text = " ".join(text.get_text() for text in meta["axes"]["card"].texts)
-    assert r"max $\epsilon_F$" in card_text
+    assert r"\nabla B^2/2\mu_0" in card_text
+
+
+@pytest.mark.parametrize("niter,low,high", [(3000, 0.0, 1.0e-2), (40, 5.0e-2, np.inf)])
+def test_force_error_resolves_vacuum_convergence(niter, low, high):
+    """equif is 1 on a currentless vacuum at any residual; the plotted error is not."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres"),
+        ns_array=[16], niter_array=[niter], ftol_array=[1e-12],
+    )
+    wout = wout_from_state(inp=inp, state=opt.solve_equilibrium(inp).state, fsqr=0.0, fsqz=0.0, fsql=0.0)
+    np.testing.assert_allclose(np.abs(wout.equif[1:-1]), 1.0, atol=1e-6)
+    rho, profile, average = plotting._relative_force_error_profile(wout)
+    assert rho.size == 14 and np.all(profile > 0.0)
+    # Measured 1.6e-3 converged and 0.14 after 40 iterations.
+    assert low < average < high
 
 
 def test_summary_style_constants():
@@ -767,15 +783,17 @@ def test_plot_fourier_synthesis_matches_dense_series(derivative, parity, batch_s
     np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=2e-11)
 
 
-def test_near_unity_force_ticks_and_long_stability_status_fit():
-    """Vacuum-limit diagnostics keep distinct values and readable failure notes."""
+def test_near_unity_force_ticks_and_long_stability_status_fit(monkeypatch):
+    """Narrow-range force profiles keep distinct ticks; failure notes stay readable."""
     plt = plotting._import_matplotlib()
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
-    wout = SimpleNamespace(ns=31, equif=np.linspace(1 - 1e-10, 1., 31),
-                          DMerc=np.linspace(-1., -2., 31), betatotal=0.,
+    wout = SimpleNamespace(ns=31, DMerc=np.linspace(-1., -2., 31), betatotal=0.,
                           vp=np.linspace(1., 2., 31))
+    narrow = np.linspace(1 - 1e-10, 1., 29)
+    monkeypatch.setattr(plotting, "_relative_force_error_profile",
+                        lambda _: (np.linspace(0.2, 0.98, 29), narrow, 1.0))
     try:
-        plotting._relative_force_error_panel(axes[0], wout)
+        assert plotting._relative_force_error_panel(axes[0], wout) == 1.0
         plotting._stability_panel(axes[1], wout, {
             "valid": False, "note": "D_R self-check failed (DMerc mismatch 3.8e-02)"
         }, s_plot_ignore=.2)
@@ -787,7 +805,7 @@ def test_near_unity_force_ticks_and_long_stability_status_fit():
         assert len(labels) > 1 and len(labels) == len(set(labels))
         assert axes[0].get_yscale() == "log"
         assert axes[0].yaxis.get_offset_text().get_text()
-        np.testing.assert_array_equal(axes[0].lines[0].get_ydata(), wout.equif[1:-1])
+        np.testing.assert_array_equal(axes[0].lines[0].get_ydata(), narrow)
         extent = axes[1].title.get_window_extent(fig.canvas.get_renderer())
         assert extent.x0 >= fig.bbox.x0 and extent.x1 <= fig.bbox.x1
         assert "self-check failed" in axes[1].get_title()

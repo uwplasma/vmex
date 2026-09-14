@@ -122,6 +122,62 @@ def test_mixed_commitment_reuses_lane_without_donating_inputs():
             np.testing.assert_array_equal(actual, expected)
 
 
+def test_default_device_context_reuses_lane():
+    """A committed solve inside and outside a default-device context shares one lane executable."""
+    import jax
+
+    with jax.disable_jit(False):
+        rt = _small_runtime(1.0)
+        state = solver._initial_state(rt.setup)
+        device = next(iter(state.R_cos.devices()))
+        solver._block_lane.clear_cache()
+        results, sizes = [], []
+        for inside in (False, True):
+            def run():
+                return solver._run_loop(
+                    state, rt, mode="cli", ijacob=0, verbose=False, emit=None,
+                    time_step0=0.9, nstep=200,
+                )
+            if inside:
+                with jax.default_device(device):
+                    result = run()
+            else:
+                result = run()
+            jax.block_until_ready(result)
+            results.append(result)
+            sizes.append(solver._block_lane._cache_size())
+        assert sizes == [1, 1]
+        for x, y in zip(jax.tree.leaves(results[0]), jax.tree.leaves(results[1])):
+            np.testing.assert_array_equal(x, y)
+
+
+def test_failed_prefetched_executable_falls_back_to_the_lane(monkeypatch):
+    """A prefetched executable that rejects its arguments hands the rung to the jitted lane."""
+    import jax
+
+    def run():
+        return solver._run_loop(
+            state, rt, mode="cli", ijacob=0, verbose=False, emit=None,
+            time_step0=0.9, nstep=200,
+        )
+
+    def rejecting(carry, runtime):
+        raise TypeError("argument drift")
+
+    class Prefetched(dict):
+        def get(self, key, default=None):
+            return rejecting
+
+    with jax.disable_jit(False):
+        rt = _small_runtime(1.0)
+        state = solver._initial_state(rt.setup)
+        expected = run()
+        monkeypatch.setattr(solver, "_LANE_EXECUTABLES", Prefetched())
+        fallback = run()
+    for x, y in zip(jax.tree.leaves(expected), jax.tree.leaves(fallback)):
+        np.testing.assert_array_equal(x, y)
+
+
 def test_mixed_named_sharding_is_not_normalized(monkeypatch):
     """A single-device state must not overwrite another leaf's named layout."""
     import jax
