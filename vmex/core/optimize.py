@@ -2535,7 +2535,7 @@ def _least_squares_implicit(
     import scipy.optimize
 
     from . import implicit as imp
-    from .device import resolve_implicit_device
+    from .device import commit_to_single_device, resolve_implicit_device
 
     # ``jac=None`` forwards the complete ``solve_kwargs`` dictionary to
     # ``solve_equilibrium``.  The implicit lane has a static solver config,
@@ -3071,9 +3071,20 @@ def _least_squares_implicit(
         problem_jit_key, "jac", lambda: jax.jit(jac_impl))
     gmres_jit = _problem_jit(
         problem_jit_key, "jac_gmres", lambda: jax.jit(jacobian_rows))
+    def jacobian_rows_reverse(x: jnp.ndarray) -> jnp.ndarray:
+        """Reverse Jacobian, pulled back in batches of the tangent-lane width.
+
+        ``jax.jacrev`` vmaps the adjoint over every residual row, so the GCROT
+        basis alone needs rows x (m + 1) x state doubles: 47 GiB per buffer
+        for the 8-dof seed QA benchmark (6722 rows, m = 100, 9300 entries).
+        """
+        rows, pullback = jax.vjp(residual_rows, x)
+        return chunk_map(
+            lambda i: pullback(jax.nn.one_hot(i, residual_size, dtype=rows.dtype))[0],
+            jnp.arange(residual_size), chunk_size=ndof if chunk is None else chunk)
+
     reverse_jit = _problem_jit(
-        problem_jit_key, "jac_reverse",
-        lambda: jax.jit(jax.jacrev(residual_rows)))
+        problem_jit_key, "jac_reverse", lambda: jax.jit(jacobian_rows_reverse))
 
     # The strict seed preflight above already evaluated and validated every
     # residual row.  Carry that known shape instead of compiling ``rows_jit``
@@ -3141,8 +3152,8 @@ def _least_squares_implicit(
         if lin is not None and lin[0].shape == np.shape(x):
             seed = jax.tree.map(
                 lambda a: np.asarray(a, dtype=np.float64),
-                jax.device_get(predicted_state(
-                    _place(x), _place(lin[0]), lin[1], lin[2])))
+                jax.device_get(predicted_state(*commit_to_single_device(
+                    (_place(x), _place(lin[0]), lin[1], lin[2])))))
             if all(np.all(np.isfinite(a)) for a in jax.tree.leaves(seed)):
                 imp._PERTURB_SEED[cfg] = seed
         try:
@@ -3483,6 +3494,13 @@ def _least_squares_implicit(
         problem_jit_key, "residual_value_grad",
         lambda: jax.jit(residual_value_and_gradient))
 
+    def residual_value_grad(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Concrete calls reuse the host lane's executables; traces inline."""
+        if isinstance(x, jax.core.Tracer):
+            return residual_value_grad_jit(x)
+        value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
+        return _place(np.asarray(value)), _place(gradient)
+
     def jax_state_runtime(x: jnp.ndarray):
         """Converged implicit state/runtime pair for differentiable field APIs."""
         params = params_of(x)
@@ -3500,7 +3518,7 @@ def _least_squares_implicit(
         return scalar_loss_jit(x)
 
     def residual_scalar_public_fwd(x):
-        value, gradient = residual_value_grad_jit(x)
+        value, gradient = residual_value_grad(x)
         return value, gradient
 
     def residual_scalar_public_bwd(gradient, cotangent):
@@ -3535,7 +3553,7 @@ def _least_squares_implicit(
             ),
             jax_value_and_grad=(
                 value_grad_jit if traceable_scalar is not None
-                else residual_value_grad_jit
+                else residual_value_grad
             ),
             jax_residual=(None if traceable_scalar is not None else rows_jit),
             jax_residual_jac=(None if traceable_scalar is not None else jax_jac_public),

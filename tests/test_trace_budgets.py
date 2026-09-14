@@ -25,6 +25,7 @@ same commit, stating the new measured value.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -355,3 +356,205 @@ def test_problem_construction_compile_budget_and_no_refinement():
         "trials — a fresh per-call jit or an identity-keyed cache crept "
         "into the per-trial path."
     )
+
+
+#: New XLA programs when the JAX lanes run concretely right after the host
+#: derivative of the same problem (small solovev deck below).  Concrete
+#: ``jax_value_and_grad`` calls return the host lane's certified pair, so
+#: the only new programs are the host lane's own warm-start predictor
+#: (``jit(predicted_state)``, 0.06 s) and one scalar glue program.
+#: Measured 2026-09-13 (jax 0.9.2: 1 program; jax 0.11.1: 2), CPU, x64,
+#: persistent compilation cache disabled; ``jax.value_and_grad(jax_fun)``
+#: then compiles 1 (``jit(multiply)``) and a repeated call 0.  Before, the
+#: first call compiled ``jit(residual_value_and_gradient)``, which inlines
+#: the block Jacobian again: 28.8 s on this deck, 41.6 s (QA) and 71.0 s
+#: (QI) on the A1 benchmark rows.
+_JAX_LANE_AFTER_HOST_PROGRAM_CEILING = 2
+_JAX_GRAPH_AFTER_HOST_PROGRAM_CEILING = 1
+#: The full-jit reference: ``jax.jit(jax.value_and_grad(loss))`` with the
+#: equilibrium solve as the solver's ``lax.while_loop`` lane inside the
+#: implicit rule (the existing adjoint as its backward) and no host
+#: callback.  One program (``jit(loss)``, 9-12 s) and zero on a warm call,
+#: both jax versions.  It matches the host lane to 5.8e-11 (value) and
+#: 1.4e-11 (gradient) at the default ``refine_tol=1e-10`` when its loop
+#: runs to ``ftol=1e-20``; at the config's own ``ftol=1e-10`` it stops at
+#: 3.2e-7, and the remaining gap is the host root's refinement tolerance
+#: (1.8e-13 / 2.3e-14 at ``refine_tol=1e-13``, loop ``ftol=1e-24``).
+_FULL_JIT_PROGRAMS = 1
+_FULL_JIT_HOST_AGREEMENT = 1.0e-10
+
+_JAX_LANE_SCRIPT = """\
+import dataclasses
+import functools
+import json
+import logging
+
+import numpy as np
+
+import vmex  # must precede the handler: import configures JAX logging
+from vmex import optimize as opt
+from vmex.core import implicit as imp, solver
+from vmex.core.input import VmecInput
+import jax
+import jax.numpy as jnp
+
+
+class CompileCounter(logging.Handler):
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.names = []
+        self.signatures = []
+
+    def emit(self, record):
+        message = record.getMessage()
+        if "Finished XLA compilation of" in message:
+            self.names.append(message.split("Finished XLA compilation of ")[1]
+                              .rsplit(" in ", 1)[0])
+        elif (message.startswith("Compiling ")
+              and " with global shapes and types " in message):
+            name, shapes = message[len("Compiling "):].split(
+                " with global shapes and types ", 1)
+            self.signatures.append((name, shapes.split(". Argument mapping")[0]))
+
+
+counter = CompileCounter()
+jax_logger = logging.getLogger("jax")
+jax_logger.addHandler(counter)
+jax_logger.setLevel(logging.INFO)  # compile records log at WARNING
+jax.config.update("jax_log_compiles", True)
+jax.config.update("jax_enable_compilation_cache", False)
+
+inp = VmecInput.from_file("examples/data/input.solovev")
+inp = dataclasses.replace(
+    inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4),
+    ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+    niter_array=np.asarray([1000]))
+terms = [(opt.aspect_ratio, 4.0, 1.0), (opt.magnetic_well, 0.05, 1.0),
+         (opt.max_elongation, 1.0, 1.0)]  # the last two depend on the interior
+problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=1, use_ess=False)
+x0 = jnp.asarray(problem.x0)
+report = {}
+
+
+def new_programs(name, function):
+    start = len(counter.names)
+    result = function()
+    report[name] = counter.names[start:]
+    return result
+
+
+def relative(pair, reference):
+    value, gradient = (np.asarray(item, dtype=float) for item in pair)
+    return max(float(abs(value - reference[0]) / abs(reference[0])),
+               float(np.linalg.norm(gradient - reference[1])
+                     / np.linalg.norm(reference[1])))
+
+
+host = problem.value_and_grad(problem.x0)
+jax_pair = new_programs("jax_lane", lambda: problem.jax_value_and_grad(x0))
+graph_pair = new_programs(
+    "graph", lambda: jax.value_and_grad(problem.jax_fun)(x0))
+new_programs("repeat", lambda: problem.jax_value_and_grad(x0))
+report["jax_rel"] = relative(jax_pair, host)
+report["graph_rel"] = relative(graph_pair, host)
+
+# Later host trials must reuse the commitment-sensitive lanes: one compile
+# per argument signature, whatever commitment the trial's seed arrives with.
+for step in (1.0e-3, 2.0e-3):
+    problem.value_and_grad(problem.x0 + step)
+report["signatures"] = {}
+for lane in ("jit(_block_lane)", "jit(_constraint_baselines_lane)",
+             "jit(predicted_state)"):
+    counts = {}
+    for name, shapes in counter.signatures:
+        if name == lane:
+            counts[shapes] = counts.get(shapes, 0) + 1
+    report["signatures"][lane] = sorted(counts.values())
+
+# Full-jit reference: the same objective with the host callback replaced by
+# the solver's while-loop lane inside the implicit rule.
+cfg = problem.metadata["config"]
+rows_of = problem.metadata["jax_residual_from_state"]
+mask = jax.tree.map(jnp.asarray, imp._fixed_boundary_dof_mask(cfg))
+time_step0, _ = solver._loop_driver_config(cfg.inp)
+
+
+@functools.partial(jax.custom_vjp, nondiff_argnums=(1,))
+def traced_solve(params, config):
+    return traced_solve_fwd(params, config)[0]
+
+
+def traced_solve_fwd(params, config):
+    runtime = dataclasses.replace(
+        imp.runtime_from_params(params, config), ftol=jnp.asarray(1.0e-20))
+    carry = solver._initial_carry(
+        solver._initial_state(runtime.setup), runtime, ijacob=0,
+        time_step0=time_step0)
+    carry = solver._while_lane(jax.tree.map(jnp.array, carry), runtime)
+    return carry.state, (params, carry.state, mask)
+
+
+def traced_solve_bwd(config, residuals, cotangent):
+    return (imp._solve_implicit_bwd(config, residuals, cotangent)[0],)
+
+
+traced_solve.defvjp(traced_solve_fwd, traced_solve_bwd)
+imp.solve_implicit = traced_solve
+state_runtime = problem.metadata["jax_state_runtime"]
+
+
+def loss(x):
+    state, runtime = state_runtime(x)
+    rows = rows_of(state, runtime)
+    return 0.5 * jnp.vdot(rows, rows)
+
+
+full_jit = jax.jit(jax.value_and_grad(loss))
+report["callbacks"] = "callback" in str(jax.make_jaxpr(full_jit)(x0))
+full_pair = new_programs("full_jit", lambda: full_jit(x0))
+new_programs("full_jit_warm", lambda: full_jit(x0))
+report["full_jit_rel"] = relative(full_pair, host)
+print("REPORT:", json.dumps(report))
+"""
+
+
+def test_jax_lanes_reuse_host_executables_and_full_jit_reference_agrees():
+    """One cold subprocess (~1-2 min: a host derivative and one full-jit compile).
+
+    Pins B4's lane sharing — after the host derivative, the concrete JAX
+    value-and-gradient lanes return the host pair exactly and compile no
+    second copy of the Jacobian — and the full-jit reference the host lane
+    is checked against: one program, no callback, no warm recompile, and
+    agreement to ``_FULL_JIT_HOST_AGREEMENT``.
+    """
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(ROOT), env.get("PYTHONPATH", "")) if part
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", _JAX_LANE_SCRIPT],
+        capture_output=True, text=True, timeout=900, cwd=ROOT, env=env,
+    )
+    assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-4000:]
+    match = re.search(r"REPORT: (\{.*\})", proc.stdout)
+    assert match, proc.stdout[-4000:] + proc.stderr[-4000:]
+    report = json.loads(match.group(1))
+    assert not any("residual_value_and_gradient" in name
+                   for name in report["jax_lane"] + report["graph"]), report
+    assert len(report["jax_lane"]) <= _JAX_LANE_AFTER_HOST_PROGRAM_CEILING, report
+    assert len(report["graph"]) <= _JAX_GRAPH_AFTER_HOST_PROGRAM_CEILING, report
+    assert report["repeat"] == [], report
+    assert report["jax_rel"] == 0.0 and report["graph_rel"] == 0.0, report
+    assert not report["callbacks"], report
+    assert 0 < len(report["full_jit"]) <= _FULL_JIT_PROGRAMS, report
+    assert report["full_jit_warm"] == [], report
+    assert report["full_jit_rel"] <= _FULL_JIT_HOST_AGREEMENT, report
+    # Compiles per argument signature over the construction solve and three
+    # host trials: the baselines lane, the perturbation predictor and the
+    # block lane each compile once.  The block lane compiled twice before
+    # #315 moved the host trial solves out of the callback's device context
+    # (measured 2026-09-14, jax 0.9.2 and 0.11.1).
+    signatures = report["signatures"]
+    assert signatures["jit(_constraint_baselines_lane)"] == [1], report
+    assert signatures["jit(predicted_state)"] == [1], report
+    assert signatures["jit(_block_lane)"] == [1], report

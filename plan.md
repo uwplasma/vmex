@@ -226,7 +226,7 @@ attribution. One heavy local job at a time; the office box takes one.
 |---|---|---|---|
 | B1 Newton finish | in `solver.py`/`implicit.py`: when `fsq` falls below a switch threshold, take matrix-free Newton–GCROT steps inside the descent (the `_newton_step` lane with exact JVPs and the true-residual check) so the returned state is a certified root; delete the separate refinement pass; value-only trials get the same root; #302's anchor contract folds in here | refinement is 51 % of a gradient call; drift 1.5 % → 6e-8 when refined | objective replay at a repeated `x` agrees to 1e-9 on the QI and single-stage cases; the joint phase exits without precision loss; gradient call ≤ 0.5× today; certificate values unchanged on the P1 matrix |
 | B2 warm starts everywhere | perturbation predictor into the free-boundary cache; rung skipping for `initial_state`; hot restart for CLI and `solve_file` sequences; `mode="jit"` inside the callback | 806 → 212 iterations at a 1e-4 move | iterations per accepted trial ≤ 0.3× cold on the QI example |
-| B3 exact block adjoint (measured on both decks: adjoint residual ≤ 1.2e-10 in one factorization, 300–5,000× cheaper than production with the Jacobian's factor reused, while production Krylov gradients are off by 9e-5 to 1.6e-3), then Krylov recycling | on the seed deck the QI adjoint's GCROT stalls at 2.6e-5 and takes 13,228 iterations (78 s), while the raw block factorization is exact at the state, so first solve the adjoint by transposing that factorization together with the 1-D preconditioner (one direct solve; B1 is measuring it); keep GCROT as fallback and certifier; then return the adjoint's Krylov iteration count from compiled programs (A1's counters report `None` for every compiled adjoint, which covers scalar `minimize()` gradients); then warm-start λ across trials, reuse the GCROT deflation space across Newton and adjoint solves, and freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5×, measured by the returned count |
+| B3 exact block adjoint (measured on both decks: adjoint residual ≤ 1.2e-10 in one factorization, 300–5,000× cheaper than production with the Jacobian's factor reused, while B1's dense check puts the production Krylov error at 9e-6 (QA) to 3e-5 (QI); the 1.1e-3 QI gap between lanes is the raw-versus-preconditioned formulation at non-root anchors, which B3 aligns on the raw formulation), then Krylov recycling | on the seed deck the QI adjoint's GCROT stalls at 2.6e-5 and takes 13,228 iterations (78 s), while the raw block factorization is exact at the state, so first solve the adjoint by transposing that factorization together with the 1-D preconditioner (one direct solve; B1 is measuring it); keep GCROT as fallback and certifier; then return the adjoint's Krylov iteration count from compiled programs (A1's counters report `None` for every compiled adjoint, which covers scalar `minimize()` gradients); then warm-start λ across trials, reuse the GCROT deflation space across Newton and adjoint solves, and freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5×, measured by the returned count |
 | B4 compile hygiene | `x0` out of the jit key; configs keyed by content; one compile per resolution; persistent cache where jaxlib allows; the JAX value-and-gradient lane must reuse the host lane's executables instead of compiling its own | 102 compiles in a five-evaluation warm campaign; on the A1 rows (#310) the JAX value-and-gradient lane spends 41.6 s (QA) and 71.0 s (QI) compiling after the host derivative has already compiled, and builds take 244–500 XLA compiles | cold to first gradient ≤ 20 s CPU on the QI example; zero recompiles across `max_mode` stages; the second lane adds under 5 s of compile |
 | B5 per-iteration constant | one bounded experiment (≤ 1 week), in this order: ms per iteration for VMEX and VMEC++ at 1, 2 and 4 threads; an HLO census of the iteration (ops, loops, loop trips; the CPU tridiagonal solve is two `lax.scan` Thomas sweeps, about 100 serial trips per iteration at ns = 50); a dispatch arm with a batched tridiagonal kernel; and only if the thread scaling shows headroom, `shard_map` with radial slabs and the tridiagonal solve split over modes, as VMEC++'s OpenMP does | 2.4 vs 0.9 ms per iteration; JAX's CPU thunk runtime has documented 2.5–14× regressions on many-small-kernel workloads and host devices share one thread pool | warm ns = 50 QA below 1.5 ms per iteration; the dispatch arm keeps iteration counts identical and the final state within 1e-12 relative; kill sharding below 1.25× on four devices or with collectives above 30 % of the iteration |
 
@@ -361,6 +361,18 @@ B1), recompilation in the jitted lane (42–71 s, B4) and Jacobian assembly
   A4000 GPUs (`ssh office`). Numerical comparisons use isolated environments:
   Python 3.12 with JAX 0.11.1 and VMEC++ 0.7.4 for the head, Python 3.11 with
   JAX 0.9.2 for the floor. VMEC++ wheels older than 0.7 are not references.
+- **Heavy-job locks and load.** Laptop `~/local/.vmex-heavy.lock`, office
+  `~/vmex-agents/.heavy.lock`; take a lock with `mkdir` and set the release trap
+  only after acquiring it. Other sessions share both machines, so a timing or
+  peak-memory row counts only when the 1-minute load at its start and end is at
+  most 20 on the laptop (14 cores) or 24 on the office workstation (36 cores);
+  counts, identities and targets count at any load.
+  On the office workstation only A/B timing rows take `.heavy.lock`.
+  Whole-example runs longer than twenty minutes take one of two slots,
+  `~/vmex-agents/.long.lock` or `.long2.lock`, with four threads, and report
+  wall time to the minute. Untimed work (seed evaluations, counts,
+  identities, focused tests) takes no lock while the load is at most 24 and
+  at least 16 GB is free.
 - **External references.** VMEC++ 0.7.4 wheel; DESC 0.17.x in its own
   environment; simsopt for QS metrics; ESSOS for coils; virtual_casing_jax 0.0.5.
 - **Reproduction** (from the checkout, float64):
@@ -823,6 +835,123 @@ target status; and point the README's exterior-field distance rule at the
 section #312 adds to `nestor-vacuum.rst`. Owns those docstrings, pages and
 lines, after #309, #311, #312 and #313–#318 merge.
 
+### B3. Exact block adjoint, in two PRs
+
+**Facts.** On the seed deck the production GCROT adjoint takes 1,100
+iterations and 9.8 s (QA) and 17,270 iterations and 50.7 s (QI), with Krylov
+error 8.7e-6 and 3.2e-5 against a dense solve on range(P). The block adjoint
+matches the exact raw adjoint to 4e-13 and 6e-10 in 0.66 s warm. The raw and
+preconditioned formulations differ by 1.3e-6 (QA) and 1.1e-3 (QI) at this
+non-root anchor, because the 1-D preconditioner is recomputed from the state.
+Least-squares problems take J^T r from the block Jacobian and never reach this
+adjoint; scalar losses (`from_loss`), direct `jax.grad`,
+`minimize(objective_terms)` and the single-stage example do, and the
+single-stage example pays one solve and one adjoint per trial (#311: 2,959 s
+for 301 trials).
+
+**Change.** B3a (`b3a/exact-block-adjoint`): the backward rule of
+`solve_implicit` solves the raw adjoint by transposing the block
+factorization, with GCROT kept as fallback and certifier; the CHANGELOG entry
+is under Changed and states the formulation alignment. B3b (after #328): the
+reverse Jacobian and `minimize(objective_terms)` share one factorization
+across rows (first probe whether XLA already hoists it out of #328's chunked
+map), and the value-and-gradient fallback becomes one VJP of ½|r|².
+
+**Gate.** B3a: adjoint residual ≤ 1e-10; the jitted gradient equals the raw
+block tangent to 1e-10; the Solov'ev, li383 and LASYM gradient-versus-FD tests
+pass; `from_loss` QA and QI rows and eager `jax.grad` adjoint counters before
+and after; single-stage per-trial seconds and adjoint iterations before and
+after (smoke mode plus about ten trials, on the office workstation). B3b: one
+factorization per point, with seconds, adjoint iterations and peak RSS on seed
+QA. After B3a merges, B4c's QI gate re-runs at 1e-10.
+
+**Owns.** B3a: the backward rule in `vmex/core/implicit.py` and
+`benchmarks/adjoint_formulation.py`. B3b: the reverse lanes in
+`vmex/core/optimize.py`.
+
+### D0. A QI example that starts near QI
+
+**Facts.** `examples/optimization/QI_optimization.py` perturbs the
+circular-like `input.minimal_seed_nfp2` and runs one stage at `max_mode = 3`
+with up to 250 evaluations of `ConstructedQIResidual`, Goodman's
+squash-and-shuffle residual on a traceable Boozer transform
+(`quasi_isodynamic_residual`, `optimize.py:969`). No full-run record exists;
+§2 has only five-evaluation rows. Two near-QI decks ship but this example does
+not use them: `input.QI_stel_seed_3127` (near-axis, nfp 3, order r1,
+MPOL = NTOR = 5) and `input.QI_nfp2_initial` (simsopt, nfp 2, the seed of the
+jaxopt and optax variants). Every published QI optimization started from a
+near-axis seed.
+
+**Change.** First record one full run of today's example on the office
+workstation with A1 counters: wall time, evaluations, failed trials, final
+constructed-QI total and its fine-grid validation, and the aspect, ι, mirror
+and elongation targets. Then seed from the near-QI deck that measures best,
+run a `[2, 3]` / `[20, 60]` mode ladder, and add Goodman's `phimin` sign rule
+only if the residual needs it. D3 joins this branch only with its own
+measurement: `oversample = 1` validated by the fine-grid check (the
+magnetic-only projection is already used with booz_xform_jax ≥ 0.2.0).
+
+**Gate.** The example reaches the baseline's final validation metric or
+better, with every constraint target met, in at most half the baseline's wall
+time and with zero failed trials; the record is committed under `benchmarks/`
+with its index row; CI smoke mode is no slower.
+
+**Owns.** `examples/optimization/QI_optimization.py`, its record, and the QI
+wall-time sentence in `docs/reference/objectives.rst`. Branch
+`d0/qi-near-axis-seed`.
+
+### D1. A differentiable QI well location
+
+**Facts.** `quasi_isodynamic_residual` (`optimize.py:969–1153`) picks each
+field line's well with `jnp.argmin` (lines 1054 and 1083), builds the monotone
+branches with `jnp.maximum.accumulate` and maps them with `jnp.interp` (line
+1128). `argmin` has zero derivative, so the well location is frozen in every
+Jacobian, and a trial that moves the minimum to another grid point changes the
+residual discontinuously; the #299 record's 1.5 % drift was this sensitivity.
+The omnigenity residual in `omnigenity.py` (line 555) repeats the pattern.
+
+**Change.** Replace the hard minimum by a soft location (a softmin-weighted
+periodic phase) and the running maximum by a smooth one (logsumexp with a
+width tied to the grid spacing), keeping the residual's rows and weights so
+that the sharp limit recovers today's values.
+
+**Gate.** The Taylor test's first-order remainder converges in both directions
+on the minimal seed and on D0's seed; at the chosen width the residual differs
+from today's by at most 1e-3 relative at those seeds; D0's run reaches its
+final validation metric within 5 % with zero failed trials and no more
+evaluations; the new path runs under `jax.jit` in a test.
+
+**Owns.** The two residual kernels and their tests. Starts after D0's baseline,
+so it is measured on D0's example. Branch `d1/smooth-qi-well`.
+
+### C3. Single stage as one least-squares problem
+
+**Facts.** The fixed-boundary single-stage example (#311) runs a
+Powell–Hestenes–Rockafellar augmented Lagrangian around L-BFGS-B on
+`jax.value_and_grad` through the implicit solve and meets every target in
+2,959 s and 301 trials (`benchmarks/single_stage_profile_m4.json`). The
+collaborator run in §2 needed 63 evaluations in its plasma stage against
+188 evaluations and 176 gradients for joint BFGS, which exited on precision
+loss. The plasma residual already has a certified block Jacobian lane.
+
+**Change.** One `scipy.optimize.least_squares` (trust-region reflective, with
+bounds) on `[r_plasma; r_coil; constraint rows]` with Jacobian
+`[J_plasma from the block lane; J_coil by jacfwd of the ESSOS terms]`,
+evaluated only at accepted points; constraints stay augmented-Lagrangian
+multipliers updated between least-squares stages unless bounded residual rows
+meet the targets. A library helper is added only if it shortens both
+single-stage examples.
+
+**Gate.** Meets #311's targets (min |ι| ≥ 0.42, aspect ≤ 4, B·n RMS ≤ 1 %, coil
+clearance and curvature limits, the independent ns = 101 check) in at most
+0.4 of #311's 2,959 s on the same machine class, with trials and Jacobians
+counted; smoke mode is no slower; the example stays one file. Measure after
+B3a merges or state which adjoint the rows used.
+
+**Owns.** `examples/optimization/single_stage_optimization.py`, its profile
+record and any helper. Needs ESSOS with uwplasma/ESSOS#58, merged at
+`1b3210ca` (its branch is deleted). Branch `c3/single-stage-least-squares`.
+
 ### Literature checks left open (optional)
 
 - **L1, behind B1 and B5: done 2026-09-13.** Folded into the B1 brief (block
@@ -1046,8 +1175,8 @@ heavy job is running and the heavy-job lock is released. State to resume from:
 #313 (`373f1e83`), #314 (`746215d3`), #312 (`68a119e9`), #322 (`08d92161`),
 #311 (`0c083539`) and #319 (`c5ee2e0d`); #307 closed. #320, #321 and #324 are
 retargeted to `main`. B1's two-deck record decides four things: the exact
-block adjoint is B3's implementation and a correctness fix for scalar-loss
-gradients; #320 keeps refinement's certification on well-resolved decks
+block adjoint is B3's implementation and aligns scalar-loss gradients with
+the Jacobian lane's raw formulation (corrected in the afternoon entry); #320 keeps refinement's certification on well-resolved decks
 through a linear-progress guard; the primal certificate becomes goal-oriented
 after B3; and B1c switches to block-preconditioned Newton inside the descent.
 B4e's content-keyed lanes are deferred with a written design. The heavy-job
@@ -1090,3 +1219,61 @@ reuse. State to resume from:
   about 1,000 lines and the script trimmed toward 450–500 lines.
 - After that: B3 (exact block adjoint), the goal-oriented certificate PR,
   and B1c. Close #299 when the last S1 piece merges.
+
+**2026-09-14, afternoon: merges, the 251 GB cause, and the next user-facing
+work.** Merged: #317 (`39f0bead`) and #316 (`9a6b5efc`). The office
+workstation is reachable again, and heavy rows move there (§7).
+
+- **251 GB request, found and fixed (#328).** `reverse_jit = jit(jacrev(residual_rows))`
+  vmapped the GCROT(m = 100) adjoint over all 6,722 residual rows, giving
+  buffers of shape (6722, 101, 9300), 47 GiB each. It sits in the `lax.cond`
+  fallback taken only when the block Jacobian misses its certificate, so it
+  allocated on office and not on the laptop. It is neither a JAX 0.9.2 nor a
+  #314 regression: both JAX versions trace the same buffers. #328 pulls rows
+  back in tangent-lane batches (0 intermediates above 64 MiB, from 9,138). A
+  `make_jaxpr` scan of intermediate sizes found it without executing anything;
+  the runtime bisect had passed because the laptop never took the branch.
+- **Correction to B3's evidence.** B1's dense check on the seed deck (rank
+  4,207 on range(P), condition 6.3e12 raw and 1.5e12 preconditioned) puts the
+  production Krylov error at 8.7e-6 (QA) and 3.2e-5 (QI). The 1.1e-3 QI gap
+  attributed to it is the raw-versus-preconditioned formulation at a non-root
+  anchor: the 1-D preconditioner is recomputed from the state, so its implicit
+  derivative carries an O(|F|) term. The least-squares Jacobian lane is raw
+  and the scalar adjoint lane is preconditioned, so the two disagree by up to
+  1.1e-3 on QI today. B3 aligns them on the raw formulation (a Changed entry,
+  not a Fixed one). Jitted and eager QI gradients on `main` also differ by
+  5.2e-5, the stagnating Krylov solve's level; B3a's direct solve removes it.
+- **Where QI least-squares time goes.** The QA and QI benchmark rows never
+  reach the implicit adjoint: their gradient is J^T r from the certified block
+  Jacobian. The 51-second QI adjoint matters for scalar losses, direct
+  `jax.grad`, `minimize(objective_terms)` and the single-stage example.
+  Least-squares QI time is forward solves, refinement and certification
+  (#320, B1c), then the objective's convergence (D0, D1).
+- **#320 (refinement stops after a non-improving step).** QA_lowres is
+  bit-identical to `main`. On the seed deck, main's refined anchor moves by up
+  to 2.87e-2 under a 2.2e-15 input perturbation (gradient 2.8e-4) while #320's
+  moves by O(1e-15). The goal-oriented error ratio |μᵀF_raw| (#320 / main)
+  over four rounding draws is 2.31, 2.19, 1.00, 1.47 (QA) and 1.20, 1.16,
+  1.00, 0.69 (QI), which passes the rule set before measuring (merge unless
+  main is more than 2× lower in at least 3 of 4 draws). The seed deck's QI
+  accuracy floor is about 2e-3 at both anchors. Main's first refinement step
+  raises |P gc| from 1.9e-7 to 6.5e-6–1.4e-5 and steps 2–3 carry its progress;
+  that is B1c's target. At load under 20: refinement 18.1 → 12.9 s (QA) and
+  21.0 → 11.4 s (QI); first derivative 43.1 → 38.8 s and 51.7 → 42.1 s.
+- **#321 rows** (JAX 0.11.1, load ≤ 20, `main` `0a8e3068` vs `be360e47`): QA
+  row 95.3 → 51.0–57.1 s, QI 117.5–121.0 → 61.8–62.3 s; JAX value and gradient
+  39 → 1.5 s and 55 → 1.6 s; host values and gradients identical. It merges on
+  green CI.
+- **B4c gate** (one program, no callback, 0 warm compiles, decisions identical
+  to the host loop): QA gradient within 3–5e-12 of the same-backward reference
+  on both JAX versions; QI within 5.2e-5 and 6.3e-6, inside the Krylov error.
+  The objective's state cotangent agrees eager vs jit to 4.7e-14. QI re-gates
+  at 1e-10 after B3a.
+- **#318:** counts match `main` except refinement Krylov iterations (16,643 vs
+  16,645); its timing and memory verdict comes from a quiet office run.
+- **#300:** README condensed to its 300-line cap; the DESC caveat sentences
+  are unchanged.
+- **Next user-facing work.** Briefs B3, D0, D1 and C3 (§8). B3a speeds every
+  scalar-loss and single-stage trial; D0 and D1 target QI convergence; C3
+  replaces the single-stage augmented-Lagrangian L-BFGS-B with one least-squares
+  problem.
