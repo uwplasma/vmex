@@ -16,7 +16,8 @@ and coil optimization.
 - **Design with gradients:** SciPy or JAX optimizers, scalar adjoints and residual Jacobians.
 - **Inspect the physics:** Boozer transforms, magnetic fields and spatial derivatives,
   quasisymmetry, quasi-isodynamicity and stability diagnostics.
-- **Choose the hardware:** CPU or GPU execution, reusable compilation and independent-case ensembles.
+- **Choose the hardware:** CPU or GPU equilibrium solves (optimization gradients default to CPU),
+  reusable compilation and independent-case ensembles.
 - **Connect coils:** ESSOS fields, NESTOR free boundary and finite-beta exterior fields.
 
 ![VMEX equilibria and diagnostics](docs/_static/figures/readme_equilibrium_showcase.webp)
@@ -149,16 +150,18 @@ SciPy, JAXopt and Optax drivers.
 NESTOR free boundary driven by ESSOS coils, ramping beta and tracking the
 Shafranov shift: `python examples/free_boundary_essos_coils.py`. Free-boundary
 runs also accept an MGRID table, and `VmecExtender` evaluates the exterior
-field including the plasma's own virtual-casing contribution.
+field with the plasma's own virtual-casing contribution, within the distance
+limits [below](#fields-coils-and-free-boundary).
 
 ### Single-stage plasma and coil design
 
-`examples/optimization/single_stage_optimization.py` optimizes the plasma
-boundary and the coils against one objective, with the equilibrium solved
-implicitly at every step; `single_stage_free_boundary_optimization.py` does the
-same through a true free-boundary solve. Both report coil length, curvature,
-separation and normal-field error beside the plasma metrics, because a lower
-weighted penalty with infeasible coils is not a design.
+`examples/optimization/single_stage_optimization.py` adjusts the plasma
+boundary and the coils against one weighted objective, solving the equilibrium
+implicitly at every step; `single_stage_free_boundary_optimization.py` couples
+them through a true free-boundary solve. Both print final plasma and coil
+metrics; `single_stage_optimization.py` also states whether it met its
+rotational-transform and normal-field targets. A lower weighted penalty with
+unmet targets is not a design.
 
 ### Open mirrors and stellarator-mirror hybrids
 
@@ -227,11 +230,20 @@ interior evaluation points.
 
 For an exterior field, `vj.VmecExtender.from_file("wout_my_case.nc",
 external_field=coils.B)` combines the plasma's virtual-casing contribution with
-the supplied coil field. Its points must be outside the plasma and away from
-source surfaces/currents; an MGRID field also has a finite tabulated domain.
-See [field and coil usage](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+the supplied coil field. The plasma part is a quadrature over a source grid on
+the plasma surface (32 points per field period in each angle by default) whose
+error grows rapidly near that surface: evaluate at distances of at least about
+twice the toroidal source-grid spacing from the plasma surface. Closer in,
+`with_near_surface_continuation` uses a first-order continuation of the
+on-surface field. Targets must also stay away from coil filaments, and an MGRID
+field has a finite tabulated domain. See the [exterior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/nestor-vacuum.html)
+and [field and coil usage](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
-![Free-boundary beta ramp and Shafranov shift](docs/_static/figures/readme_essos_beta_scan.webp)
+![Exterior field lines of a finite-beta QA with coils only and with coils plus plasma](docs/_static/figures/readme_extender_exterior_islands.webp)
+
+Field lines seeded within 5 mm outside a finite-beta QA boundary, in the coil
+field alone and with the plasma's field added, stopped 55 mm out where the
+continuation ends: `python examples/vmex_fieldline_tracing_finite_beta.py` (needs ESSOS).
 
 Joint boundary/coil optimization and the boundary-Schur adjoint remain advanced
 workflows with substantial solve costs. Open mirrors support defined isotropic

@@ -328,12 +328,20 @@ class Equilibrium:
 
 
 def _auto_jac_chunk(dim: int) -> int:
-    """Bound device-aware batching by the conservative square-root policy."""
-    return min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    """Avoid a second remainder graph without expanding the memory budget."""
+    bound = min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    # lax.map traces a separate vmap for the tail. Prefer a nearby divisor,
+    # but retain the original width when avoiding a tail would serialize it.
+    widths = range(bound, (bound + 1) // 2 - 1, -1)
+    return next((width for width in widths if dim % width == 0), bound)
 
 
 def _linear_response_summary(report: Any) -> jnp.ndarray:
-    """Return ``[iterations, failed columns, residual, tolerance]``."""
+    """Return ``[iterations, failed columns, residual, tolerance, total, columns]``.
+
+    ``iterations`` is the largest per-column Krylov count and ``total`` their
+    sum over the ``columns`` solves.
+    """
     iterations = jnp.asarray(getattr(report, "iterations", 0)).ravel()
     converged = jnp.asarray(getattr(report, "converged", True)).ravel()
     residual = jnp.asarray(getattr(report, "residual_norm", 0.0)).ravel()
@@ -345,12 +353,19 @@ def _linear_response_summary(report: Any) -> jnp.ndarray:
         jnp.sum(jnp.logical_not(converged)).astype(jnp.float64),
         residual[worst].astype(jnp.float64),
         tolerance[worst].astype(jnp.float64),
+        jnp.sum(iterations).astype(jnp.float64),
+        jnp.asarray(iterations.size, dtype=jnp.float64),
     ))
 
 
 def _record_linear_response(holder: dict, summary: Any, cfg: Any = None) -> None:
     """Record solver effort and warn once before a failed-column fallback."""
     values = np.asarray(jax.device_get(summary), dtype=float).ravel()
+    if cfg is not None and values.size >= 6 and np.all(np.isfinite(values[4:6])):
+        from . import implicit as imp
+
+        imp._count(cfg, jacobians=1, jacobian_columns=int(values[5]),
+                   jacobian_krylov_iterations=int(values[4]))
     if values.size < 2 or not np.all(np.isfinite(values)):
         return
     iterations, unconverged = int(values[0]), int(values[1])
@@ -2078,7 +2093,8 @@ def least_squares(
     :func:`solvax.chunk_map`: ``"auto"`` (default) caps SOLVAX's
     device-aware width by a conservative square-root policy, so an
     accelerator memory report cannot expand the full probe batch; an ``int``
-    fixes that many dofs at a time; ``None`` forces one wide batch.  Column
+    fixes that many dofs at a time; ``None`` forces one wide batch. Automatic
+    widths prefer a nearby divisor to avoid compiling a separate tail. Column
     blocks are mathematically independent, so the assembled Jacobian is
     identical across chunk sizes to float64 round-off.
 
@@ -2127,8 +2143,8 @@ def least_squares(
     attributes: ``input`` (optimized :class:`VmecInput`), ``equilibrium``
     (last successfully solved :class:`Equilibrium`), ``stage_results``
     (per-``max_mode`` results for schedules) and, in implicit mode,
-    ``solve_stats`` (``{"solves", "iterations"}`` totals of the stage's host
-    forward solves).
+    ``solve_stats`` (cumulative solve, refinement, Jacobian and adjoint
+    counters of the stage's configuration, see ``implicit._SOLVE_STATS``).
     """
     import scipy.optimize
 
@@ -2807,9 +2823,8 @@ def _least_squares_implicit(
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         return bool(np.isfinite(fsq) and fsq <= cfg.max_fsq_ratio * cfg.ftol)
 
-    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+    def rows_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         return jax.lax.cond(
             status == 0,
@@ -2822,12 +2837,17 @@ def _least_squares_implicit(
             operand=None,
         )
 
+    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return rows_at_state(x, state, status)
+
+    host_rows_jit = _problem_jit(
+        problem_jit_key, "host_rows", lambda: jax.jit(rows_at_state))
     rows_jit = _problem_jit(
         problem_jit_key, "rows", lambda: jax.jit(residual_rows))
 
-    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+    def scalar_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         def accepted(_):
             rows = term_rows(state, runtime)
@@ -2839,6 +2859,12 @@ def _least_squares_implicit(
             operand=None,
         )
 
+    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return scalar_at_state(x, state, status)
+
+    host_scalar_jit = _problem_jit(
+        problem_jit_key, "host_scalar", lambda: jax.jit(scalar_at_state))
     scalar_loss_jit = _problem_jit(
         problem_jit_key, "scalar_loss", lambda: jax.jit(scalar_loss))
     value_grad_jit = _problem_jit(
@@ -3101,6 +3127,15 @@ def _least_squares_implicit(
         else:  # unexpected call pattern: better no seed than a wrong one
             holder["lin"] = None
 
+    def host_evaluate(x, evaluate):
+        # A retry can encounter new grid shapes. Compiling their GPU kernels
+        # inside a running GPU pure_callback can deadlock. The host optimizer
+        # owns this solve; stage only the objective evaluation on its result.
+        placed = _place(x)
+        params_np = jax.tree.map(np.asarray, params_of(placed))
+        state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
+        return evaluate(placed, jax.tree.map(_place, state), status)
+
     def fun(x: np.ndarray) -> np.ndarray:
         lin = holder["lin"]
         if lin is not None and lin[0].shape == np.shape(x):
@@ -3112,7 +3147,7 @@ def _least_squares_implicit(
                 imp._PERTURB_SEED[cfg] = seed
         try:
             residual = np.asarray(
-                jax.device_get(rows_jit(_place(x))), dtype=float)
+                jax.device_get(host_evaluate(x, host_rows_jit)), dtype=float)
         except Exception as exc:  # zero-crash policy: penalize, don't die
             if holder["nres"] is None:
                 raise
@@ -3129,8 +3164,12 @@ def _least_squares_implicit(
         return residual
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
+        with imp._timed(cfg, "jacobian"):
+            return jacobian_host(x)
+
+    def jacobian_host(x: np.ndarray) -> np.ndarray:
         # A direct residual_jac(x) call need not be preceded by residual(x).
-        # Establish the point's status through the exception-free callback
+        # Establish the point's status through the exception-free host solve
         # unless the exact-key solve memo already proves it usable.
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
@@ -3144,10 +3183,10 @@ def _least_squares_implicit(
             or imp._LAST_STATUS_ERROR.get(cfg) is not None
         ):
             # A cached converged point can be revisited after a different trial
-            # failed.  Refresh the status callback in that rare case so the old
+            # failed. Refresh the host solve in that rare case so the old
             # error cannot turn this point's exact Jacobian into a penalty row.
-            jax.device_get(rows_jit(_place(x)))
-        if imp._LAST_STATUS_ERROR.get(cfg) is not None:
+            fun(x)
+        if not certified_trial(x):
             holder["lin"] = None
             return failure_jacobian(x)
 
@@ -3302,7 +3341,7 @@ def _least_squares_implicit(
                     return value
             return failure_value_and_gradient(xh)[0]
         try:
-            value = float(jax.device_get(scalar_loss_jit(_place(xh))))
+            value = float(jax.device_get(host_evaluate(xh, host_scalar_jit)))
         except Exception:
             if not holder.get("scalar_certified"):
                 raise

@@ -110,6 +110,7 @@ __all__ = [
     "PlasmaVacuumInterface",
     "FreeBoundaryDiffProblem",
     "external_B_cartesian",
+    "offsurface_error_estimate",
     "have_virtual_casing_jax",
 ]
 
@@ -126,8 +127,7 @@ def _require_vcj() -> None:
             "vmex.core.virtual_casing requires the optional dependency "
             "'virtual_casing_jax' (canonical repository "
             "https://github.com/uwplasma/virtual_casing_jax). Install it "
-            "with `pip install vmex[freeb]` (virtual-casing-jax>=0.0.4); "
-            "earlier releases predate the batch-stable exterior gradient."
+            "with `pip install vmex[freeb]` (virtual-casing-jax>=0.0.5)."
         ) from _IMPORT_ERROR
 
 
@@ -633,6 +633,119 @@ def plasma_field_on_boundary(
     if hasattr(field, "B_plasma_on_surface"):
         return field.B_plasma_on_surface(**kwargs)
     return field._vc.compute_internal_B(field.B_total, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Achieved accuracy of the direct off-surface schedule
+# ---------------------------------------------------------------------------
+
+
+def offsurface_error_estimate(field, xyz, B_plasma=None) -> jax.Array:
+    """Estimated relative error of the direct off-surface plasma field.
+
+    ``virtual_casing_jax`` evaluates the exterior plasma field with a periodic
+    trapezoid rule on a fixed schedule of source grids (levels are full-torus
+    ``(n_toroidal, n_poloidal)`` counts).  Target by target it returns the
+    first level whose double-layer self-test ``min(|1 + U|, |U|)`` is at most
+    ``10**-digits``, or the last level, and discards that test (release
+    0.0.5).  The self-test alone is not an error estimate: it cannot see
+    source-grid resolution, and because it accepts ``U`` near either ``0`` or
+    ``-1`` it can pass a badly resolved target.  This function reproduces the
+    level selection and reports, per target,
+
+    - for a target returned on a coarser level, ``|B_returned - B_finest|``:
+      the returned field's error against the finest level, which carries both
+      quadrature and source-resolution error;
+    - for a target returned on the finest level, the larger of ``|U|`` on that
+      level (the double-layer quadrature error for a point outside the surface,
+      where the exact ``U`` is zero) and the square of the relative change
+      between the last two levels.  Halving the spacing squares the trapezoid
+      error factor ``exp(-2 pi d / h)``, so that square extrapolates the finest
+      level's error from the coarser one.
+
+    Field differences are divided by the RMS of ``|B_total|`` on the surface, so
+    the estimate is dimensionless and compares with ``10**-digits``.  Targets
+    must lie outside the surface; an inside target reports about 1.  The cost is
+    one double-layer evaluation per visited level plus one field evaluation on
+    each of the last two levels: warm, 1.2 to 1.5 times the field evaluation
+    itself for 1000 targets on 24 x 24 and 48 x 48 torus grids.  The function
+    is traceable.
+
+    Parameters
+    ----------
+    field:
+        A ``virtual_casing_jax.VirtualCasingExteriorField`` using the jitted
+        schedule and the internal branch (the VMEX construction).
+    xyz:
+        Cartesian target points, shape ``(n, 3)``, in metres.
+    B_plasma:
+        Optional already computed ``field.B_plasma_xyz(xyz)``, shape ``(n, 3)``,
+        to avoid evaluating it twice.
+
+    Returns
+    -------
+    Array of shape ``(n,)``, dimensionless.
+    """
+    _require_vcj()
+    from virtual_casing_jax.integrals import laplace_dx_u_eval
+    from virtual_casing_jax.surface_ops import grad2d, resample, surf_normal_area_elem
+
+    if not bool(getattr(field.config, "use_jit_schedule", True)):
+        raise NotImplementedError("the estimate reproduces the jitted schedule only")
+    if getattr(field.config, "branch", "internal") != "internal":
+        raise NotImplementedError("the estimate covers the internal branch only")
+    digits = int(field.config.digits)
+    X_src, _, _ = field._vc._offsurface_densities(field.B_total, digits)
+    nt0, np0 = int(X_src.shape[1]), int(X_src.shape[2])
+    points = jnp.asarray(xyz, dtype=X_src.dtype)
+    targets = points.T
+    tolerance = 10.0 ** (-digits)
+    chunk_size, target_chunk_size = field._vc._resolve_chunk_sizes(
+        "boff", field.config.chunk_size, field.config.target_chunk_size,
+        nsrc=nt0 * np0, ntrg=int(targets.shape[1]))
+
+    def double_layer(nt, npol):
+        X = resample(X_src, nt0, np0, nt, npol)
+        normal, area = surf_normal_area_elem(grad2d(X, nt, npol), X)
+        return jnp.asarray(laplace_dx_u_eval(
+            X, normal, targets, jnp.ones((nt, npol), dtype=X.dtype), area,
+            chunk_size=chunk_size, target_chunk_size=target_chunk_size)).reshape(-1)
+
+    def self_test(potential):
+        return jnp.minimum(jnp.abs(1.0 + potential), jnp.abs(potential))
+
+    levels = tuple((int(nt), int(npol)) for nt, npol in field.schedule_levels)
+    potential = double_layer(*levels[0])
+    level = jnp.zeros(potential.shape, dtype=jnp.int32)
+    for index, (nt, npol) in enumerate(levels[1:], start=1):
+        def refine(state, index=index, nt=nt, npol=npol):
+            previous, previous_level = state
+            move = self_test(previous) > tolerance
+            return (jnp.where(move, double_layer(nt, npol), previous),
+                    jnp.where(move, index, previous_level))
+
+        potential, level = jax.lax.cond(
+            jnp.any(self_test(potential) > tolerance), refine, lambda state: state,
+            (potential, level))
+
+    scale = jnp.sqrt(jnp.mean(jnp.sum(jnp.asarray(field.B_total) ** 2, axis=0)))
+    on_finest = level == len(levels) - 1
+    if len(levels) == 1:
+        return jnp.abs(potential)
+    if B_plasma is None:
+        B_plasma = field.B_plasma_xyz(points)
+
+    def level_field(nt, npol):
+        return field._vc.compute_internal_B_offsurf_schedule(
+            field.B_total, X_trg=targets, levels=((nt, npol),), digits=digits,
+            chunk_size=field.config.chunk_size,
+            target_chunk_size=field.config.target_chunk_size).T
+
+    finest = level_field(*levels[-1])
+    coarse_error = jnp.linalg.norm(jnp.asarray(B_plasma) - finest, axis=1) / scale
+    change = jnp.linalg.norm(finest - level_field(*levels[-2]), axis=1) / scale
+    finest_error = jnp.maximum(jnp.abs(potential), change ** 2)
+    return jnp.where(on_finest, finest_error, coarse_error)
 
 
 # ---------------------------------------------------------------------------
