@@ -34,6 +34,10 @@ revision it was measured at, and the pages that cite it.
   per-point kernel: W7-X standard certifies at 3.0 GiB, not 34 (`benchmarks/polish_memory_w7x.json`).
 - Force-error reporting separates native accuracy from WOUT reconstruction; the
   corrected pair is `benchmarks/polish_force_error_2026-09-03.json` (#280, #282).
+- The summary plot's force panel no longer reads 1 on converged vacuum equilibria. It plots
+  `|J x B - grad p|` over the volume-averaged `|grad(B^2/2mu0)|` on `0.1 <= s <= 0.99`
+  (DESC's normalization) instead of WOUT's `equif`, which is bounded by 1 and equals 1
+  on every surface without pressure or current; `equif` itself is unchanged.
 
 ### Removed
 
