@@ -163,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help=(
-            "VMEC input file (input.* namelist or VMEC++ .json) to solve, or a "
+            "VMEC input file (input.* namelist or VMEC++ .json), DESC text/HDF5/pickle file to solve, or a "
             "wout_*.nc/mout_*.nc/boozmn_*.nc file for --plot/--booz."
         ),
     )
@@ -174,6 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SCALE",
         help="with --scale: optional multiplicative B_scale R_scale factors",
     )
+    p.add_argument("--desc-tol", type=float, default=0.01,
+                   help="DESC boundary truncation bound (0..0.01; 0 retains all nonzero modes).")
     p.add_argument(
         "--scale",
         action="store_true",
@@ -1249,6 +1251,12 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             _run_trace(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         return 0
 
+    from .desc import is_desc_file, write_desc_input
+
+    if is_desc_file(input_path):
+        input_path = write_desc_input(input_path, outdir, tolerance=args.desc_tol)
+        if not quiet:
+            emit(f" Wrote DESC-derived VMEC input: {input_path}")
     return _solve_input_file(args, input_path, outdir, emit=emit)
 
 

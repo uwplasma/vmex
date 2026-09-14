@@ -34,6 +34,7 @@ dependencies = [
   # 1.15 added least_squares(callback=), used by the optimization examples.
   "scipy>=1.15",
   "netCDF4",
+  "h5py",
   "matplotlib",
   "packaging",
   # JAX's persistent compilation cache uses file locks across processes.
