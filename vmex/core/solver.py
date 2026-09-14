@@ -1998,7 +1998,7 @@ def _initial_carry(
         fsqr1=one, fsqz1=one, fsql1=one,
         wb=zero, wp=zero, r00=zero,
         iteration=int_(1), iter1=int_(1),
-        ijacob=int_(int(ijacob)),
+        ijacob=int_(ijacob),
         done=jnp.zeros((), dtype=bool), ier=int_(NORM_TERM_FLAG),
         trajectory=jnp.zeros((rt.max_iterations, _TRAJ_COLS), dtype=dtype),
     )
@@ -2467,12 +2467,8 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
         # once.  A high finite first force uses the same transfer while
         # preserving the triggering pass's momentum.
         retry_reason = int(carry.ier)
-        if (
-            allow_axis_reguess
-            and try_axis_reguess
-            and retry_reason in (BAD_JACOBIAN_FLAG, AXIS_REGUESS_FLAG)
-            and int(carry.ijacob) == 0
-            and attempt_rt.resolution.ns >= 3
+        if allow_axis_reguess and try_axis_reguess and _axis_retry(
+            retry_reason, int(carry.ijacob), attempt_rt.resolution.ns
         ):
             if verbose:
                 if retry_reason == BAD_JACOBIAN_FLAG:
@@ -2535,6 +2531,11 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
     return carry
 
 
+def _axis_retry(ier, ijacob, ns):
+    """``eqsolve.f``: re-guess the axis after this pass (host ints or traced arrays)."""
+    return ((ier == BAD_JACOBIAN_FLAG) | (ier == AXIS_REGUESS_FLAG)) & (ijacob == 0) & (ns >= 3)
+
+
 def _solve_stage_traced(rt: SolverRuntime, state0: SpectralState | None, *,
                         time_step0: float, use_fft: bool = False) -> _LoopCarry:
     """:func:`_solve_stage` as one traceable program, for a solve inside ``jax.jit``.
@@ -2547,7 +2548,6 @@ def _solve_stage_traced(rt: SolverRuntime, state0: SpectralState | None, *,
     host: they change the static ``lmove_axis``, so a traced solve returns
     that flag instead.
     """
-    lane = _while_lane_fft if use_fft else _while_lane
     state0 = _initial_state(rt.setup) if state0 is None else state0
     zeros = jax.tree.map(jnp.zeros_like, state0)
     one = jnp.ones((), dtype=rt.setup.s_full.dtype)
@@ -2555,12 +2555,11 @@ def _solve_stage_traced(rt: SolverRuntime, state0: SpectralState | None, *,
 
     def trip(loop):
         _, first, state, runtime, ijacob, xcdot, residuals, _ = loop
-        carry = _initial_carry(state, runtime, ijacob=0, time_step0=time_step0,
-                               xcdot=xcdot, residuals=residuals)
-        carry = lane(jax.tree.map(jnp.array, replace(carry, ijacob=ijacob)), runtime)
+        carry = _run_loop(state, runtime, mode="jit", ijacob=ijacob, verbose=False, emit=None,
+                          time_step0=time_step0, nstep=1, use_fft=use_fft,
+                          initial_xcdot=xcdot, initial_residuals=residuals)
         axis_transfer = carry.ier == AXIS_REGUESS_FLAG
-        retry = (first & ((carry.ier == BAD_JACOBIAN_FLAG) | axis_transfer)
-                 & (carry.ijacob == 0) & (runtime.resolution.ns >= 3))
+        retry = first & _axis_retry(carry.ier, carry.ijacob, runtime.resolution.ns)
 
         def reguess(_):
             new_rt, new_state, _axis = reguess_initial_axis(
