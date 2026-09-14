@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _provenance import git_state  # noqa: E402
+from _provenance import assert_repo_vmex, git_state  # noqa: E402
 from single_stage_profile import _git, environment  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -53,10 +53,11 @@ def child(script: str, row_path: str) -> None:
     import numpy as np
     import scipy.optimize
 
+    import vmex
     from vmex import optimize as opt
     from vmex.core import implicit as imp
 
-    row: dict[str, object] = {"stages": []}
+    row: dict[str, object] = {"stages": [], "vmex_module": assert_repo_vmex(vmex.__file__, REPO)}
     problems: list[tuple[object, dict, float]] = []
 
     def counters(problem) -> dict:
@@ -114,6 +115,8 @@ def run(mode: str, timeout: float, baseline_commit: str | None, log_copy: Path) 
     """Run the example in a fresh process, keep its stdout, and return its measured row."""
     env = {key: value for key, value in os.environ.items() if key != "VMEX_EXAMPLES_CI"}
     env["MPLBACKEND"] = "Agg"
+    # The child runs in an empty directory, so a relative PYTHONPATH would import an installed VMEX.
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (str(REPO), env.get("PYTHONPATH"))))
     if mode == "smoke":
         env["VMEX_EXAMPLES_CI"] = "1"
     with tempfile.TemporaryDirectory(prefix="vmex-qi-profile-") as scratch:
