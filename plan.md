@@ -1052,3 +1052,41 @@ through a linear-progress guard; the primal certificate becomes goal-oriented
 after B3; and B1c switches to block-preconditioned Newton inside the descent.
 B4e's content-keyed lanes are deferred with a written design. The heavy-job
 lock and CI capacity remain the pacing constraints.
+
+**2026-09-14, paused again.** Stopped on maintainer request; no agent, watch
+or heavy job runs on the laptop or the office workstation, and both heavy-job
+locks are released. The office worktrees under `~/vmex-agents` remain for
+reuse. State to resume from:
+
+- Awaiting CI, then admin-merge when every real lane is green: #300 (its
+  Python 3.12 fast lane was re-run), #315, #316 (the CTH free-boundary
+  gradient check passed locally), #317 and #324, plus this logbook (#327).
+  #317's and #318's Python 3.12 fast lane hit the 8-minute cap under runner
+  contention (main's run takes 6:18); re-run it, and trim #317's new
+  parametrized plotting tests if it times out again.
+- #318 does not merge on its cold 8-dof rows, which show no gain beyond
+  run-to-run spread. It needs one warm 48-dof QI measurement on the office box
+  (`--max-mode 3 --optimizer least_squares --nfev 3`, main vs #318,
+  alternating): merge if the warm Jacobian time or peak memory improves beyond
+  spread, otherwise close it with its source kept in #299's history. The job
+  was killed before it produced rows.
+- **Open regression to bisect first:** on the office workstation (JAX 0.9.2,
+  CPU), `problem.jax_value_and_grad` on `main` (`c5ee2e0d`) requests a
+  251 GB allocation in `jit(residual_value_and_gradient)` for both the QA and
+  QI benchmark rows; JAX 0.11.1 on the laptop runs the same lane. #321 avoids
+  it for concrete calls, but traced calls still build that program. Bisect
+  `373f1e83` against `746215d3` (#314's automatic Jacobian batch width is the
+  first suspect), then fix minimally in its own PR, or report it as JAX 0.9.2
+  behaviour on older commits for a floor decision.
+- #321 (`b8c815e5`) still needs its final benchmark rows against a same-machine
+  `main` baseline; it merges after #324. B4c's traced recovery branch
+  (`f6157303`, not yet pushed at that head) waits on its full-jit seed gate,
+  which was killed partway through its QI case on the office workstation;
+  #325 (`06b0e4b2` locally) stacks on it.
+- #320 needs the linear-progress guard (stop only when the unconverged inner
+  solve gained fewer than three digits and the step made no progress), then
+  its two-deck re-verification against `main`.
+- #326 (B1's two-deck record) needs compaction before merge: the JSON under
+  about 1,000 lines and the script trimmed toward 450–500 lines.
+- After that: B3 (exact block adjoint), the goal-oriented certificate PR,
+  and B1c. Close #299 when the last S1 piece merges.
