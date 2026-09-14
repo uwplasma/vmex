@@ -103,7 +103,8 @@ def child(script: str, row_path: str) -> None:
     scipy.optimize.least_squares = observed_least_squares
     sys.argv = [script]
     names = runpy.run_path(script, run_name="__main__")
-    row["constants"] = {name: names.get(name) for name in CONSTANTS}
+    row["constants"] = {name: Path(value).name if isinstance(value, Path) else value  # no private paths
+                        for name, value in ((name, names.get(name)) for name in CONSTANTS)}
     row["min |iota| final"] = float(opt.EquilibriumReporter(
         ("min |iota|", opt.min_abs_iota, ".6f"))("final", names["final_equilibrium"])["min |iota|"])
     write()
