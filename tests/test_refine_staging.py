@@ -25,7 +25,6 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from vmex.core import implicit as im
 from vmex.core.errors import VmecError
@@ -183,49 +182,47 @@ def test_rejected_trial_charges_solve_time_but_counts_no_solve(monkeypatch) -> N
         im._LAST_STATUS_ERROR.pop(cfg, None)
 
 
-@pytest.mark.parametrize("linear, steps", [
-    (10.0 * im._REFINE_MIN_PROGRESS, 1), (0.1 * im._REFINE_MIN_PROGRESS, im._REFINE_MAX_STEPS)])
-def test_step_without_krylov_progress_ends_refinement(monkeypatch, linear, steps) -> None:
-    """A solve with fewer than three digits and no decrease in ``|F|`` stops.
+def test_step_without_krylov_progress_ends_refinement(monkeypatch) -> None:
+    """A step whose solve kept fewer than three digits and did not lower ``|F|`` stops.
 
-    The staged step runs compiled with its inner GCROT correction reversed,
-    so ``|F|`` roughly doubles instead of falling (a zero correction would
-    leave compiled and eager norms a round-off apart), and with the solve's
-    relative residual set to ``linear``. Above ``_REFINE_MIN_PROGRESS`` the
-    refinement stops after that step; below it the non-monotone Newton
-    budget is unchanged. Either way the host state is returned untouched. A
-    second trial starts from the first one's returned state, as the next
-    optimizer evaluation does, and neither staged lane compiles again.
+    Two trials run compiled on the shared small config, the second from the
+    first one's returned state, as the next optimizer evaluation does. Every
+    step runs the real staged executable; its host wrapper only reports the
+    step as non-improving (the iterate moves, ``|F|`` does not fall). With
+    ``_REFINE_MIN_PROGRESS`` at zero every solve counts as fewer than three
+    digits, so the first trial stops after one step; at its default the small
+    deck's solves converge and the second trial keeps the whole non-monotone
+    budget. The branch is decided on the host, so the second trial compiles
+    nothing, and neither trial moves the host state.
     """
-    inp, _, p0 = _small_solovev_setup()
-    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-300)
+    _, cfg, p0 = _small_solovev_setup()
     params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
     state, mask = jax.tree.map(
         jnp.asarray, im._host_solve_and_mask(cfg, params_np, refine=False))
-    real_gcrot = im._solvax_gcrot
+    real_step, default = im._refine_step, im._REFINE_MIN_PROGRESS
 
-    def no_progress(matvec, b, **kwargs):
-        solution = real_gcrot(matvec, b, **kwargs)
-        return solution._replace(x=-solution.x,
-                                 residual_norm=linear * jnp.linalg.norm(b))
+    def without_progress(config, params, frozen, dof_mask, z, fz):
+        z_new, _, _, linear = real_step(config, params, frozen, dof_mask, z, fz)
+        return z_new, fz, im._tree_norm(fz), linear
 
-    monkeypatch.setattr(im, "_solvax_gcrot", no_progress)
+    monkeypatch.setattr(im, "_refine_step", without_progress)
     lanes = (im._refine_step_core, im._preconditioned_residual_lane)
+    steps = lambda: im._SOLVE_STATS.get(cfg, {}).get("refinement_steps", 0)  # noqa: E731
     previous = bool(jax.config.jax_disable_jit)
-    for lane in lanes:
-        lane.clear_cache()
-    im._SOLVE_STATS.pop(cfg, None)
     jax.config.update("jax_disable_jit", False)  # the suite default is eager
     try:
+        start = steps()
+        monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", 0.0)
         refined = im._refined_state(cfg, p0, state, mask)
+        assert steps() - start == 1
+        compiled = [lane._cache_size() for lane in lanes]
+        assert min(compiled) >= 1  # both staged programs ran
+        monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", default)
         again = im._refined_state(cfg, p0, refined, mask)
-        assert [lane._cache_size() for lane in lanes] == [1, 1]
-        assert im._SOLVE_STATS[cfg]["refinement_steps"] == 2 * steps
+        assert steps() - start == 1 + im._REFINE_MAX_STEPS
+        assert [lane._cache_size() for lane in lanes] == compiled
     finally:
         jax.config.update("jax_disable_jit", previous)
-        for lane in lanes:
-            lane.clear_cache()
-        im._SOLVE_STATS.pop(cfg, None)
     for result in (refined, again):
         for result_leaf, state_leaf in zip(jax.tree.leaves(result), jax.tree.leaves(state)):
             np.testing.assert_array_equal(np.asarray(result_leaf), np.asarray(state_leaf))
