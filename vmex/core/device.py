@@ -316,3 +316,22 @@ def commit_to_single_device(tree: Any) -> Any:
     for index, leaf in zip(arrays, placed):
         leaves[index] = leaf
     return jax.tree.unflatten(treedef, leaves)
+
+
+def placement_neutral(tree: Any):
+    """Context that keeps the caller's default device out of jitted calls on ``tree``.
+
+    JAX keys an executable on the ``jax.default_device`` in effect, so identical
+    committed arguments compile twice when one call runs inside a device
+    context and another outside it.  When jit is enabled and every JAX-array
+    leaf of ``tree`` is concretely committed, the arguments already fix
+    placement and the context is cleared; otherwise (jit disabled, a tracer,
+    an uncommitted leaf, no arrays) the caller's context stands.  Use a fresh
+    call per ``with`` block.
+    """
+    arrays = [leaf for leaf in jax.tree.leaves(tree) if isinstance(leaf, jax.Array)]
+    if not jax.config.jax_disable_jit and arrays and all(
+        not isinstance(leaf, jax.core.Tracer) and leaf.committed for leaf in arrays
+    ):
+        return jax.default_device(None)
+    return contextlib.nullcontext()

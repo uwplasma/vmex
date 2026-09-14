@@ -1329,6 +1329,7 @@ def test_nearby_refinement_seed_is_guarded_and_conservative(monkeypatch):
     monkeypatch.setattr(im, "_dof_projector", lambda *_: lambda value: value)
     monkeypatch.setattr(im, "residual_fn", lambda *_: lambda z, _params: z)
     monkeypatch.setattr(im, "_REFINE_MAX_STEPS", 1)
+    monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)  # the Krylov steps' guard
 
     calls = []
 

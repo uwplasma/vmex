@@ -373,3 +373,29 @@ def test_all_fourier_families_and_axis_match_desc(tmp_path, desc_equilibrium):
     phase = -np.arange(inp.ntor+1)*3*zeta[:, None]
     for i, c, ss in [(0, inp.raxis_c, inp.raxis_s), (2, inp.zaxis_c, inp.zaxis_s)]:
         np.testing.assert_allclose(np.sum(c*np.cos(phase)+ss*np.sin(phase), axis=1), data[:, i], atol=1e-12)
+
+
+@pytest.mark.parametrize("variant,rtol", [("solved", 0.1), ("initial_guess", 1e-2)])
+def test_summary_force_error_matches_desc(tmp_path, desc_equilibrium, variant, rtol):
+    """The summary force error is DESC's <|F|>/<|grad(|B|^2)|/2mu0> on 0.1 <= s <= 0.99.
+
+    precise_QA (vacuum) saved on 101 surfaces measured a ratio of 1.038 solved
+    and 1.000 at DESC's initial guess, where the error is of order one.
+    """
+    import desc.examples
+    from desc.grid import QuadratureGrid
+    from desc.vmec import VMECIO
+    from vmex.core.plotting import _relative_force_error_profile
+    from vmex.core.wout import read_wout
+
+    eq = desc.examples.get("precise_QA")
+    if variant == "initial_guess":
+        eq.set_initial_guess()
+    grid = QuadratureGrid(L=2 * eq.L, M=2 * eq.M, N=2 * eq.N, NFP=eq.NFP)
+    data = eq.compute(["|F|", "|grad(|B|^2)|/2mu0", "sqrt(g)"], grid=grid)
+    s = grid.nodes[:, 0] ** 2
+    weight = np.abs(data["sqrt(g)"]) * grid.weights * ((s >= 0.1) & (s <= 0.99))
+    expected = np.sum(weight * data["|F|"]) / np.sum(weight * data["|grad(|B|^2)|/2mu0"])
+    VMECIO.save(eq, str(tmp_path / "wout_desc.nc"), surfs=101, verbose=0)
+    measured = _relative_force_error_profile(read_wout(str(tmp_path / "wout_desc.nc")))[2]
+    assert measured == pytest.approx(expected, rel=rtol)

@@ -134,6 +134,7 @@ from .device import (
     _put_numeric_leaves,
     commit_to_single_device,
     device_context,
+    placement_neutral,
 )
 from .errors import (
     AXIS_REGUESS_FLAG, BAD_JACOBIAN_FLAG, JAC75_FLAG, MISC_ERROR_FLAG, MORE_ITER_FLAG,
@@ -846,13 +847,8 @@ def _constraint_baselines(
     always passed by keyword.  Values are unchanged.
     """
     state, rt = commit_to_single_device((state, replace(rt, rcon0=None, zcon0=None)))
-    arrays = [leaf for leaf in jax.tree.leaves((state, rt)) if isinstance(leaf, jax.Array)]
-    if arrays and all(
-        not isinstance(leaf, jax.core.Tracer) and leaf.committed for leaf in arrays
-    ):
-        with jax.default_device(None):
-            return _constraint_baselines_lane(state, rt, use_fft=bool(use_fft))
-    return _constraint_baselines_lane(state, rt, use_fft=bool(use_fft))
+    with placement_neutral((state, rt)):
+        return _constraint_baselines_lane(state, rt, use_fft=bool(use_fft))
 
 
 @functools.partial(jax.jit, static_argnames="use_fft")
@@ -2371,18 +2367,25 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             emit(compile_notice(rt.resolution.ns,
                                 prefetched=executable is not None), end="")
         _USED_LANE_KEYS.add(key)
+    # Committed arguments already fix placement, so keep the caller's
+    # default-device context out of the lane's jit key: a construction solve
+    # and trial solves run inside a device context then share one executable.
+    def step(fn, carry):
+        with placement_neutral((carry, rt)):
+            return fn(carry, rt)
+
     for _ in range(max_passes):
         if executable is not None:
             try:
-                carry = executable(carry, rt)
+                carry = step(executable, carry)
             except Exception:
                 # Structural/placement drift (argument validation precedes
                 # execution and donation, so the carry is intact): fall back
                 # to the on-demand jitted lane for the rest of the rung.
                 executable = None
-                carry = lane(carry, rt)
+                carry = step(lane, carry)
         else:
-            carry = lane(carry, rt)
+            carry = step(lane, carry)
         done = bool(carry.done)
         upto = int(carry.iteration) if done else int(carry.iteration) - 1
         # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
