@@ -1355,3 +1355,55 @@ A session limit stopped three agents mid-task; their office jobs had finished.
   take one of two long slots; untimed work runs lock-free at load ≤ 24.
 - **Force-balance panel:** users report errors near 100 %; brief F-err (§8)
   investigates the saturating `equif` normalization against DESC and VMEC2000.
+
+**2026-09-14, night: the solver work lands.** Merged: #333 (QI example,
+`f78efafe`), #336 (`395fea8b`), #337 (force panel, `5a474463`), #325
+(`d52f9d81`), #338 (B1c, `8b17fe06`), #339 (`382561da`), #340 (`2caf2516`),
+#330 (B3a, `b5f84b10`) and #335 (B3b, `9dfa18a2`). PRs whose CI predated a
+merge that touched the same files were checked on a tree merged with `main`
+first; one such check caught a stale benchmark index on #330 before it merged.
+
+- **B1c (#338), refinement as a block-preconditioned Newton finish.** On the
+  office workstation, same day, at load ≤ 24: #333's QI example 565.1 → 359.1 s
+  wall, least squares 366.9 → 127.5 s, refinement 333.0 s and 63,316 Krylov
+  iterations → 66.7 s, 153 GMRES iterations and 20 factorizations, with the
+  same 17,251 descent iterations, 0 failed trials and final cost within
+  7.2e-7. The single-stage example ran 30.8 → 22.3 s per trial (refinement
+  0.34×; the rest, about 211 s, is solves, the plasma gradient, coils and
+  compile), finals within 1.2e-11, peak memory 2.42 → 2.80 GiB. Objective
+  replay at a repeated x holds within 1e-9 on both decks. Where the Newton
+  phase stalls (the seed benchmark deck) it replays today's Krylov anchor bit
+  for bit at +5.9 % warm time and a 14 s first compile. The ≤ 0.5× gate is met
+  on QI least squares and not on single stage, and was accepted as measured.
+- **B3a (#330) and B3b (#335).** The implicit backward rule solves the raw
+  adjoint through one block factorization: QI eager `jax.grad` 203.9 → 55.5 s
+  and single-stage trials 31.2 → 26.0 s before B1c. B3b shares one
+  factorization across reverse-Jacobian rows: on seed QA the reverse Jacobian
+  takes 238.9 s, where #330's per-chunk path had not finished after 4,111 s,
+  with the value identical and the gradient within 1.8e-13 of the block lane.
+  A gradient at a new point builds two factorizations, B1c's preconditioner at
+  the start iterate and the adjoint at the refined anchor.
+- **B4c QI gate after B3a.** The full-jit QI gradient agrees with the
+  same-backward reference to 4.85e-10 (JAX 0.11.1) and 3.71e-10 (0.9.2),
+  from 5.2e-5 and 6.3e-6. The staged and host adjoints agree within 6.5e-11;
+  the traced forward carries the rest (state 6.7e-14 and 1.1e-13 apart on a
+  deck with raw condition near 6e12). Recorded floor: QI full-jit gradient
+  within 1e-9 of the same-backward reference on the seed deck; QA stays at
+  1e-10. One program, no warm compiles, no callbacks.
+- **Force panel (#337).** WOUT's `equif` matches all nine VMEC2000 goldens to
+  5e-13 and is bounded by 1, equal to 1 on currentless vacuum; the summary now
+  plots DESC's normalized force error (converged vacuum QA 2.65e-4, 0.143 after
+  40 iterations; within 12 % of DESC's own value on DESC-solved equilibria).
+- **CI budget.** The Python 3.12 fast lane ran past 8 minutes because pytest
+  workers each recompiled the refinement-staging tests (#336 moves that module
+  and `test_mgrid.py` to their parity lanes). The c2 parity lane ran past 25
+  minutes (#340 moves seven slow diagnostics modules to a new c4 lane: c2
+  12:46, c4 13:49).
+- **Benchmark harness (#339).** The QI profile child runs in an empty
+  directory, so a relative `PYTHONPATH` imported an installed VMEX; the child
+  now prepends the checkout and asserts the import. #333's record used absolute
+  paths and stands. On the office workstation, always use absolute paths.
+- **Next.** D1 (a differentiable QI well location) is running on #333's
+  example. A wall-time split of both examples on this `main` ranks the next
+  lever: about 230 s of the QI example sit outside least squares and about
+  211 s of a single-stage run outside refinement.
