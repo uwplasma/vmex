@@ -34,7 +34,7 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     # A test module runs the lanes that own it, and nothing else.
     lanes = ci_scope.needed_lanes(["tests/test_gammac.py"])
     assert lanes and lanes < {entry["selector"] for entry in entries} | lanes
-    assert "pr-parity-c2" in lanes
+    assert "pr-parity-c4" in lanes
     assert ci_scope.needed_lanes(["tests/test_gammac.py"]) == lanes
 
     # Benchmarks and examples are attributed through the tests that name them.
