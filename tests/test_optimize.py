@@ -1240,6 +1240,9 @@ def test_reverse_lane_factors_once_per_point(monkeypatch):
             jacobian_batch_size=1, use_ess=False,
         )
         x = jnp.asarray(problem.x0)
+        # Solve and refine at x first: the refinement's Newton finish factors
+        # the raw block Jacobian too, and its memo serves the calls counted below.
+        problem.residual(problem.x0)
         factorizations.clear()
         jacobian = np.asarray(problem.jax_residual_jac(x))
         assert jacobian.shape[0] > 1
