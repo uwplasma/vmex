@@ -952,6 +952,38 @@ B3a merges or state which adjoint the rows used.
 record and any helper. Needs ESSOS with uwplasma/ESSOS#58, merged at
 `1b3210ca` (its branch is deleted). Branch `c3/single-stage-least-squares`.
 
+### F-err. A force-balance diagnostic users can read
+
+**Facts.** Users report that the force-balance error panel always shows
+errors near 100 %. The panel plots `abs(wout.equif)`
+(`plotting.py`, `_relative_force_error_panel`), VMEC2000's `calc_fbal`
+normalization computed in `postprocess.py::force_balance`: the radial residual
+divided by the sum of the magnitudes of its current and pressure terms. By the
+triangle inequality that ratio cannot exceed 1, and with no pressure gradient
+(vacuum, which most shipped optimization examples are) it tends to 1 wherever
+the current terms do not cancel. #280 found the same saturation in the polish
+certificate and added non-saturating measures there (⟨|F|⟩/⟨|∇p|⟩, the DESC-style
+|F|/⟨|∇(B²/2μ₀)|⟩, dimensional ⟨|F|⟩); the plot and the summary's "max ε_F"
+still use the saturating ratio. Whether `equif` is also wrong on converged
+finite-β cases is not yet known.
+
+**Change.** Establish with evidence whether this is a bug, a misleading
+normalization, or both: `equif` against VMEC2000 golden WOUTs; converged vacuum,
+converged finite-β and deliberately unconverged states; DESC's normalized
+force error on the same equilibrium. Keep `wout.equif` for file compatibility.
+Plot and summarize a vacuum-safe, non-saturating measure that reuses the #280
+functions, with the normalization in the axis label. Fix `equif` only if the
+golden comparison shows a bug.
+
+**Gate.** The panel metric is small on converged vacuum and finite-β decks,
+large on an unconverged state, and agrees with DESC's normalized force error
+within a stated tolerance where DESC is available; golden `equif` parity is
+unchanged; tests run in a PR lane.
+
+**Owns.** The force panel and summary in `vmex/core/plotting.py`, a
+`force_balance` fix only if the golden comparison demands it, and their tests.
+Branch `ferr/force-balance-diagnostic`.
+
 ### Literature checks left open (optional)
 
 - **L1, behind B1 and B5: done 2026-09-13.** Folded into the B1 brief (block
@@ -1277,3 +1309,43 @@ workstation is reachable again, and heavy rows move there (§7).
   scalar-loss and single-stage trial; D0 and D1 target QI convergence; C3
   replaces the single-stage augmented-Lagrangian L-BFGS-B with one least-squares
   problem.
+
+**2026-09-14, evening: merges, the QI example fix, and a force-panel report.**
+Merged: #326 (`efd04f5f`), #328 (`ac379d87`), #329 (`533d6760`), #320
+(`2fbe4e57`), #321 (`b208df4f`), #332 (`afee5265`), #331 (B4c, `c4329b75`) and
+#300 (DESC bridge, `066c35c7`). #321 and #300 were tested on a tree merged with
+current `main` first, because their CI predated later merges. #318 closed: on
+office its warm Jacobian gain (4.29/5.13 s against 4.83/5.10 s) was inside
+spread and peak memory fell 4–5.5 %, not the 32 % in #299's record; #299 closed.
+A session limit stopped three agents mid-task; their office jobs had finished.
+
+- **The shipped QI example failed.** On `main`'s library the unchanged example
+  ran 1,456 s, then raised in its final ns = 101 solve: the circular seed drives
+  the optimizer to a design with no converged equilibrium at ns = 31 or 101,
+  which trials accept under `max_fsq_ratio = 1e6`. #333 seeds from
+  `input.QI_nfp2_initial`, runs one `max_mode = 2` stage and penalizes the mirror
+  ratio from 1 % below its limit: 612 s, 0 failed trials (5 before), constructed
+  QI 3.0e-3 (0.789 before), ι, mirror and elongation limits met, final solve
+  converged. Refinement is still 361 s of its 410 s least-squares phase.
+- **B3a (#330)** timings at office load ≤ 24: QI eager `jax.grad` 203.9 → 55.5 s,
+  QI `from_loss` first value and gradient 190.2 → 89.0 s, single-stage example
+  31.2 → 26.0 s per trial. Its multi-RHS test had compared the raw block pullback
+  with the preconditioned Krylov one; it now uses an independent raw reference.
+  The full-marked multi-RHS test failed on `main` on an empty parameter leaf;
+  #330 fixes it. XLA does not hoist the block factorization out of #328's
+  chunked map (1.77 s per chunk against 1.52 s per factorization), so B3b shares
+  one factorization.
+- **B4c gate:** the full-jit QI gradient is bit-identical to `jit` with the
+  host-callback forward; the 5e-5 gap to eager evaluation is the stalling Krylov
+  adjoint (16,161 against 17,270 iterations), which B3a replaces.
+- **C3 (single stage as least squares)** is not adopted yet: at trials 20/40/60
+  #311's augmented-Lagrangian L-BFGS-B reached violation/objective
+  0.082/2.885, 0.085/2.413, 0.189/1.499; least squares 0.208/1.899,
+  0.196/1.723, 0.163/1.707, and `x_scale="jac"` 0.135/2.166 at 60. A full run
+  diverged at stage 4. Reverse-mode coil rows cut a warm coil Jacobian from
+  4.0 s to 0.094 s. #320's guard never fires in this example: refinement is
+  about 1,700 GCROT iterations per trial on both libraries, B1c's target.
+- **Office runbook:** only A/B timing rows take `.heavy.lock`; whole-example runs
+  take one of two long slots; untimed work runs lock-free at load ≤ 24.
+- **Force-balance panel:** users report errors near 100 %; brief F-err (§8)
+  investigates the saturating `equif` normalization against DESC and VMEC2000.
