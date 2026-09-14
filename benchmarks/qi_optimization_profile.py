@@ -27,6 +27,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -92,6 +93,8 @@ def child(script: str, row_path: str) -> None:
                              and isinstance(before.get(key), (int, float)) else value
                              for key, value in after.items()},
             })
+            problem.input_from_x(result.x).to_indata(
+                str(Path(row_path).with_name(f"input.stage{len(row['stages'])}")))
             write()
         return result
 
@@ -140,6 +143,8 @@ def run(mode: str, timeout: float, baseline_commit: str | None, log_copy: Path) 
         process.returncode = exit_code = os.waitstatus_to_exitcode(status)
         text = log_path.read_text(errors="replace")
         log_copy.write_text(text)
+        for deck in cwd.glob("input.*"):  # stage decks and the example's own output
+            shutil.copy(deck, log_copy.with_name(f"{log_copy.stem}.{deck.name}"))
         observed = json.loads(row_path.read_text()) if row_path.exists() else {}
     peak = usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024)
     final = {}
