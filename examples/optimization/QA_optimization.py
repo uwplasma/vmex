@@ -69,68 +69,75 @@ SPECTRAL_WEIGHT = 0.02
 WINDING_NTHETA = 24
 WINDING_NPHI = 24
 
+def _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min):
+    """(m, n)-grid of ``(m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle``.
+
+    Shared by every Fourier-sum helper below so each one is a single
+    vectorized contraction against this basis instead of an unrolled Python
+    double loop that indexes the coefficient array one (m, n) pair at a
+    time -- the loop form is differentiated (jaxopt's LBFGS gradient step,
+    plus this script's own root_jvp) many times over in nested contexts,
+    and reverse-mode AD through dozens of chained single-element gathers is
+    what actually drove the resolution-independent compile blowup, not the
+    grid size or LBFGS maxiter.
+    """
+    m_idx = jnp.arange(num_m_modes) + m_min
+    n_idx = jnp.arange(num_n_modes) + n_min
+    return m_idx[:, None] * pol_angle - n_idx[None, :] * nfp * tor_angle, m_idx, n_idx
+
+
 def r_surface(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs = None, n_min = None, m_min = 0):
-    num_m_modes = len(rsurfacecc)
-    num_n_modes = len(rsurfacecc[0])
+    rsurfacecc = jnp.asarray(rsurfacecc)
+    num_m_modes, num_n_modes = rsurfacecc.shape
     if n_min is None:
         n_min = -(num_n_modes - 1)/2
-    r = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            r += rsurfacecc[m][n]*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+    angle, _, _ = _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min)
+    r = jnp.sum(rsurfacecc * jnp.cos(angle))
     if rsurfacecs is not None:
-        assert len(rsurfacecc) == len(rsurfacecs), 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                r += rsurfacecs[m][n]*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+        rsurfacecs = jnp.asarray(rsurfacecs)
+        assert rsurfacecc.shape == rsurfacecs.shape, 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
+        r = r + jnp.sum(rsurfacecs * jnp.sin(angle))
     return r
 
 def z_surface(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc = None, n_min = None, m_min=0):
-    num_m_modes = len(zsurfacecs)
-    num_n_modes = len(zsurfacecs[0])
+    zsurfacecs = jnp.asarray(zsurfacecs)
+    num_m_modes, num_n_modes = zsurfacecs.shape
     if n_min is None:
         n_min = -(num_n_modes - 1)/2
-    z = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            z += zsurfacecs[m][n]*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+    angle, _, _ = _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min)
+    z = jnp.sum(zsurfacecs * jnp.sin(angle))
     if zsurfacecc is not None:
-        assert len(zsurfacecs) == len(zsurfacecc), 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                z += zsurfacecc[m][n]*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+        zsurfacecc = jnp.asarray(zsurfacecc)
+        assert zsurfacecs.shape == zsurfacecc.shape, 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
+        z = z + jnp.sum(zsurfacecc * jnp.cos(angle))
     return z
 
 def r_surface_prime_phi(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs = None, n_min = None, m_min = 0):
-    num_m_modes = len(rsurfacecc)
-    num_n_modes = len(rsurfacecc[0])
+    rsurfacecc = jnp.asarray(rsurfacecc)
+    num_m_modes, num_n_modes = rsurfacecc.shape
     if n_min is None:
         n_min = -(num_n_modes - 1)/2
-    r_phi = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            r_phi += rsurfacecc[m][n]*(n+n_min)*nfp*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+    angle, _, n_idx = _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min)
+    coef_n = n_idx[None, :] * nfp
+    r_phi = jnp.sum(rsurfacecc * coef_n * jnp.sin(angle))
     if rsurfacecs is not None:
-        assert len(rsurfacecc) == len(rsurfacecs), 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                r_phi += -rsurfacecs[m][n]*(n+n_min)*nfp*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+        rsurfacecs = jnp.asarray(rsurfacecs)
+        assert rsurfacecc.shape == rsurfacecs.shape, 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
+        r_phi = r_phi + jnp.sum(-rsurfacecs * coef_n * jnp.cos(angle))
     return r_phi
 
 def z_surface_prime_phi(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc = None, n_min = None, m_min=0):
-    num_m_modes = len(zsurfacecs)
-    num_n_modes = len(zsurfacecs[0])
+    zsurfacecs = jnp.asarray(zsurfacecs)
+    num_m_modes, num_n_modes = zsurfacecs.shape
     if n_min is None:
         n_min = -(num_n_modes - 1)/2
-    z_phi = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            z_phi += -zsurfacecs[m][n]*(n+n_min)*nfp*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+    angle, _, n_idx = _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min)
+    coef_n = n_idx[None, :] * nfp
+    z_phi = jnp.sum(-zsurfacecs * coef_n * jnp.cos(angle))
     if zsurfacecc is not None:
-        assert len(zsurfacecs) == len(zsurfacecc), 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                z_phi += zsurfacecc[m][n]*(n+n_min)*nfp*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+        zsurfacecc = jnp.asarray(zsurfacecc)
+        assert zsurfacecs.shape == zsurfacecc.shape, 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
+        z_phi = z_phi + jnp.sum(zsurfacecc * coef_n * jnp.sin(angle))
     return z_phi
 
 def surface_del_phi(rsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle, rsurfacecs = None, zsurfacecc = None, n_min = None, m_min = 0):
@@ -142,35 +149,31 @@ def surface_del_phi(rsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle, rsurfacec
     return [r_phi*costerm - r*sinterm, r_phi*sinterm + r*costerm, z_phi]
 
 def r_surface_prime_theta(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs = None, n_min = None, m_min = 0):
-    num_m_modes = len(rsurfacecc)
-    num_n_modes = len(rsurfacecc[0])
+    rsurfacecc = jnp.asarray(rsurfacecc)
+    num_m_modes, num_n_modes = rsurfacecc.shape
     if n_min is None:
         n_min = -(num_n_modes - 1)/2
-    r_theta = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            r_theta += -rsurfacecc[m][n]*(m+m_min)*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+    angle, m_idx, _ = _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min)
+    coef_m = m_idx[:, None]
+    r_theta = jnp.sum(-rsurfacecc * coef_m * jnp.sin(angle))
     if rsurfacecs is not None:
-        assert len(rsurfacecc) == len(rsurfacecs), 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                r_theta += rsurfacecs[m][n]*(m+m_min)*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+        rsurfacecs = jnp.asarray(rsurfacecs)
+        assert rsurfacecc.shape == rsurfacecs.shape, 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
+        r_theta = r_theta + jnp.sum(rsurfacecs * coef_m * jnp.cos(angle))
     return r_theta
 
 def z_surface_prime_theta(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc = None, n_min = None, m_min=0):
-    num_m_modes = len(zsurfacecs)
-    num_n_modes = len(zsurfacecs[0])
+    zsurfacecs = jnp.asarray(zsurfacecs)
+    num_m_modes, num_n_modes = zsurfacecs.shape
     if n_min is None:
         n_min = -(num_n_modes - 1)/2
-    z_theta = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            z_theta += zsurfacecs[m][n]*(m+m_min)*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+    angle, m_idx, _ = _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min)
+    coef_m = m_idx[:, None]
+    z_theta = jnp.sum(zsurfacecs * coef_m * jnp.cos(angle))
     if zsurfacecc is not None:
-        assert len(zsurfacecs) == len(zsurfacecc), 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                z_theta += -zsurfacecc[m][n]*(m+m_min)*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
+        zsurfacecc = jnp.asarray(zsurfacecc)
+        assert zsurfacecs.shape == zsurfacecc.shape, 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
+        z_theta = z_theta + jnp.sum(-zsurfacecc * coef_m * jnp.sin(angle))
     return z_theta
 
 def surface_del_theta(rsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle, rsurfacecs = None, zsurfacecc = None, n_min = None, m_min = 0):
@@ -595,16 +598,16 @@ def winding_surface_objective(equilibrium_state, solver_context):
 
     _, _, _, opt_distance, _ = calc_objectives(winding_solution, plasma_points, plasma_normals, local_weights, winding_R_cos)
 
-    return 1 + jnp.tanh(-opt_distance+1)
+    return 1 / opt_distance
 
 # Objective function terms
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [
-         (qs, 0.0, 1.0),
-         (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-         (iota_floor, 0.0, 10.0),
-         (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
-         (winding_surface_objective, 0.0, 1.0)
+         #(qs, 0.0, 1.0),
+         #(opt.aspect_ratio, ASPECT_TARGET, 1.0),
+         #(iota_floor, 0.0, 10.0),
+         #(opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
+         (winding_surface_objective, 0.0, 1.0),
          ]
 
 report = opt.EquilibriumReporter(
