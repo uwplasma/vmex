@@ -109,8 +109,10 @@ MAX_TRIALS = 300  # objective evaluations: one equilibrium solve and one adjoint
 PARAMETER_BOUND = 3.0
 # Circular coils leave B.n/B near 11% RMS on this seed.  Fitting the coils to
 # the frozen seed boundary first costs no equilibrium solve, and it keeps the
-# normal-field constraint from dominating the first joint stage.
-COIL_FIT_MAXITER = 400
+# normal-field constraint from dominating the first joint stage.  B.n/B RMS
+# levels off near 0.58% by 200 iterations (0.571% at 400); later iterations
+# mostly shorten the coils, which the joint stages also optimize.
+COIL_FIT_MAXITER = 200
 
 # A toroidal grid commensurate with the coil count can alias narrow B.n/B structure.
 NPHI, NTHETA = 37, 32
