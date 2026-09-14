@@ -488,3 +488,22 @@ def test_commit_to_single_device_only_normalizes_one_shared_placement():
         lambda x: traced.append(dev.commit_to_single_device((x, pinned))[0] is x) or x
     )(loose)
     assert traced == [True]
+
+
+def test_placement_neutral_clears_the_context_only_for_committed_jit_arguments():
+    loose = jax.numpy.arange(3.0)
+    target = next(iter(loose.devices()))
+    pinned = jax.device_put(np.ones(2), target)
+
+    def clears(tree):
+        with jax.default_device(target):
+            with dev.placement_neutral(tree):
+                return jax.config.jax_default_device is None
+
+    with jax.disable_jit(False):
+        assert clears((pinned, "label"))
+        assert not clears((loose, pinned))
+        assert not clears({"x": 1.0})
+        assert isinstance(dev.placement_neutral((loose,)), contextlib.nullcontext)
+    with jax.disable_jit(True):
+        assert not clears((pinned,))
