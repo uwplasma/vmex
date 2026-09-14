@@ -367,9 +367,12 @@ B1), recompilation in the jitted lane (42–71 s, B4) and Jacobian assembly
   peak-memory row counts only when the 1-minute load at its start and end is at
   most 20 on the laptop (14 cores) or 24 on the office workstation (36 cores);
   counts, identities and targets count at any load.
-  Whole-example runs longer than twenty minutes take `~/vmex-agents/.long.lock`
-  on the office workstation instead, one at a time with four threads, so they
-  never block a short A/B row; their wall time is reported to the minute.
+  On the office workstation only A/B timing rows take `.heavy.lock`.
+  Whole-example runs longer than twenty minutes take one of two slots,
+  `~/vmex-agents/.long.lock` or `.long2.lock`, with four threads, and report
+  wall time to the minute. Untimed work (seed evaluations, counts,
+  identities, focused tests) takes no lock while the load is at most 24 and
+  at least 16 GB is free.
 - **External references.** VMEC++ 0.7.4 wheel; DESC 0.17.x in its own
   environment; simsopt for QS metrics; ESSOS for coils; virtual_casing_jax 0.0.5.
 - **Reproduction** (from the checkout, float64):
