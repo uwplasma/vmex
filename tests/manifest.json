@@ -192,6 +192,7 @@
     ],
     "pr-implicit-response-b": [
       "tests/test_optimize.py::test_least_squares_implicit_jac_solver_block",
+      "tests/test_optimize.py::test_reverse_lane_factors_once_per_point",
       "tests/test_optimize.py::test_public_problem_factory_validation",
       "tests/test_optimize.py::test_scipy_bfgs_scalar_lane_completes_and_descends",
       "tests/test_optimize.py::test_certified_trial_guards_reject_stale_or_missing_memo",

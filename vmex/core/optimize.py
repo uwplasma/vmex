@@ -3071,20 +3071,66 @@ def _least_squares_implicit(
         problem_jit_key, "jac", lambda: jax.jit(jac_impl))
     gmres_jit = _problem_jit(
         problem_jit_key, "jac_gmres", lambda: jax.jit(jacobian_rows))
-    def jacobian_rows_reverse(x: jnp.ndarray) -> jnp.ndarray:
-        """Reverse Jacobian, pulled back in batches of the tangent-lane width.
+    reverse_width = ndof if chunk is None else chunk
 
-        ``jax.jacrev`` vmaps the adjoint over every residual row, so the GCROT
-        basis alone needs rows x (m + 1) x state doubles: 47 GiB per buffer
-        for the 8-dof seed QA benchmark (6722 rows, m = 100, 9300 entries).
+    def reverse_pullback(x, state, status, cotangent_of, count):
+        """Rows ``cotangent_of(i)^T J`` for ``i < count`` at one solved state.
+
+        Each row is pulled back to the state and the direct ``x`` path, the
+        state cotangent goes through one shared raw block factorization
+        (``imp._block_state_pullback``), and ``params_of`` maps the result
+        back to ``x``.  Mapping the pullback of ``residual_rows`` instead
+        repeats the implicit rule's factorization in every chunk, because XLA
+        does not hoist it out of the map (1.77 s per extra chunk against
+        1.52 s for one factorization on the seed QA problem).  Rows run in
+        batches of the tangent-lane width: ``jax.jacrev`` would vmap every
+        row's adjoint at once.  A failed trial keeps the penalty rows' direct
+        derivative and a zero implicit pullback, as ``solve_implicit_status``
+        does.
         """
-        rows, pullback = jax.vjp(residual_rows, x)
-        return chunk_map(
-            lambda i: pullback(jax.nn.one_hot(i, residual_size, dtype=rows.dtype))[0],
-            jnp.arange(residual_size), chunk_size=ndof if chunk is None else chunk)
+        frozen = jax.lax.stop_gradient(state)
+        _, direct = jax.vjp(
+            lambda point, solved: rows_at_state(point, solved, status),
+            x, frozen)
+        _, boundary = jax.vjp(params_of, x)
+        indices = jnp.arange(count)
+
+        def converged(_):
+            pullback = imp._block_state_pullback(
+                params_of(x), cfg, frozen, mask_const,
+                active_fields=active_fields, probe_chunk_size=probe_chunk)
+
+            def row(i):
+                x_bar, state_bar = direct(cotangent_of(i))
+                params_bar, _ = pullback(state_bar)
+                return x_bar + boundary(params_bar)[0]
+
+            return chunk_map(row, indices, chunk_size=reverse_width)
+
+        def failed(_):
+            return chunk_map(lambda i: direct(cotangent_of(i))[0], indices,
+                             chunk_size=reverse_width)
+
+        return jax.lax.cond(status == 0, converged, failed, operand=None)
+
+    def jacobian_rows_reverse(x: jnp.ndarray) -> jnp.ndarray:
+        """Reverse Jacobian from one solve and one block factorization."""
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return reverse_pullback(
+            x, state, status,
+            lambda i: jax.nn.one_hot(i, residual_size, dtype=jnp.float64),
+            residual_size)
 
     reverse_jit = _problem_jit(
         problem_jit_key, "jac_reverse", lambda: jax.jit(jacobian_rows_reverse))
+
+    def reverse_gradient(x: jnp.ndarray, rows: jnp.ndarray) -> jnp.ndarray:
+        """``J^T rows`` from one pullback: the reverse lane's scalar gradient."""
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return reverse_pullback(x, state, status, lambda _: rows, 1)[0]
+
+    reverse_gradient_jit = _problem_jit(
+        problem_jit_key, "gradient_reverse", lambda: jax.jit(reverse_gradient))
 
     # The strict seed preflight above already evaluated and validated every
     # residual row.  Carry that known shape instead of compiling ``rows_jit``
@@ -3286,8 +3332,8 @@ def _least_squares_implicit(
         Objective-term problems assemble the pair from the same certified
         residual/Jacobian lane the least-squares driver uses (``0.5 r.r``,
         ``J^T r``): one warm memoized host solve, the block-factorized
-        implicit Jacobian, and the perturbation warm-start stash — no
-        separate reverse-adjoint graph.  Scalar-loss problems keep the
+        implicit Jacobian, and the perturbation warm-start stash.  The reverse
+        lane pulls back ``r`` once instead of assembling ``J``.  Scalar-loss problems keep the
         single reverse adjoint.  Both lanes gate on
         :func:`certified_trial`: a trial without a usable fixed point gets
         the smooth consistent penalty pair instead of a derivative of an
@@ -3301,6 +3347,18 @@ def _least_squares_implicit(
             residual = fun(xh)
             if certified_trial(xh):
                 value = 0.5 * float(residual @ residual)
+                if jac_solver == "reverse":
+                    # The reverse lane needs J^T r, not J: one pullback of r.
+                    # A one-row problem's Jacobian already costs one pullback,
+                    # so the automatic lane keeps its memoized Jacobian.  A
+                    # non-finite result goes through the Jacobian lane below,
+                    # which owns the retries and the typed errors.
+                    gradient = np.asarray(jax.device_get(reverse_gradient_jit(
+                        _place(xh), _place(residual))), dtype=float)
+                    if np.isfinite(value) and np.all(np.isfinite(gradient)):
+                        holder["lin"] = None
+                        holder["scalar_certified"] = True
+                        return value, gradient
                 gradient = jac_fn(xh).T @ residual
                 if (
                     holder.get("last_jac_key") == FunctionProblem._key(xh)
@@ -3475,15 +3533,33 @@ def _least_squares_implicit(
         )
 
     def residual_value_and_gradient(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """JAX scalar pair from the same certified residual/Jacobian lane."""
+        """JAX scalar pair from the same certified residual/Jacobian lane.
+
+        The gradient is ``J^T r``.  The reverse lane, and the block lane when
+        its Jacobian misses the certificate, pull back the one cotangent
+        ``r`` instead of assembling the reverse Jacobian row by row.
+        """
         params = params_of(x)
         state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
+        reverse = (
+            jac_solver == "reverse"
+            or (jac_solver == "auto" and holder["nres"] == 1)
+        )
 
         def accepted(_):
             rows = term_rows(state, runtime)
-            jacobian = jax_residual_jacobian(x)
-            return 0.5 * jnp.vdot(rows, rows), jacobian.T @ rows
+
+            def pulled_back():
+                return reverse_pullback(x, state, status, lambda _: rows, 1)[0]
+
+            if reverse:
+                gradient = pulled_back()
+            else:
+                jacobian, _dz_cols, summary = jac_jit(x)
+                gradient = _select_jax_jacobian(
+                    jacobian.T @ rows, summary, pulled_back)
+            return 0.5 * jnp.vdot(rows, rows), gradient
 
         return jax.lax.cond(
             status == 0, accepted,

@@ -1302,6 +1302,12 @@ def _count(cfg: ImplicitConfig, **increments: float) -> None:
             stats[key] = stats.get(key, 0) + value
 
 
+def _mark_compiled_adjoint(cfg: ImplicitConfig) -> None:
+    """An adjoint traced into a compiled program: its counts are unknown."""
+    _SOLVE_STATS.setdefault(cfg, dict.fromkeys(_COUNTERS, 0)).update(
+        adjoints=None, adjoint_krylov_iterations=None, adjoint_seconds=None)
+
+
 @contextlib.contextmanager
 def _timed(cfg: ImplicitConfig, part: str):
     """Charge the block's host wall time, minus nested sections, to ``part``."""
@@ -2901,8 +2907,7 @@ def _solve_implicit_bwd_impl(cfg, res, gbar):
     _enforce_adjoint_stats(cfg, stats)
     if staged:
         # A compiled adjoint: how often it runs is not observable on the host.
-        _SOLVE_STATS.setdefault(cfg, dict.fromkeys(_COUNTERS, 0)).update(
-            adjoints=None, adjoint_krylov_iterations=None, adjoint_seconds=None)
+        _mark_compiled_adjoint(cfg)
     else:
         _count(cfg, adjoints=1,
                adjoint_krylov_iterations=int(np.asarray(stats.iterations)))
@@ -2999,16 +3004,102 @@ def implicit_state_pullback_multi_rhs(
             response_chunk_size=response_chunk_size))
 
 
+def _block_state_pullback(
+    params: ImplicitParams,
+    cfg: ImplicitConfig,
+    x_star: SpectralState,
+    dof_mask: SpectralState,
+    *,
+    active_fields: tuple[str, ...],
+    probe_chunk_size: int,
+) -> Callable[[SpectralState], tuple[ImplicitParams, LinearResponseReport]]:
+    """One raw block factorization shared by every state-cotangent row.
+
+    Returns ``pullback(gbar) -> (parameter cotangent, report)`` for one row:
+    the exact block adjoint refined once (:func:`_block_adjoint`), NaN where
+    its certificate misses, then ``-mu^T dF_raw/dp`` plus the direct boundary
+    term, as in the scalar rule.  The linearization and factors are built
+    here, before the caller maps rows: XLA does not hoist a factorization out
+    of a mapped pullback, so mapping the scalar rule over rows pays one
+    factorization per chunk.
+    """
+    frozen = jax.lax.stop_gradient(x_star)
+    edge_mask = _edge_mask(cfg)
+    P = _dof_projector(cfg, dof_mask)
+    F = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+    z_star = P(x_star)
+    system = _raw_block_system(
+        params, cfg, frozen, dof_mask, active_fields, probe_chunk_size
+    )
+    if isinstance(system.diagonal, jax.core.Tracer):
+        _mark_compiled_adjoint(cfg)
+    _, vjp_z = jax.vjp(lambda z: F(z, params), z_star)
+    _, vjp_p = jax.vjp(lambda prm: F(z_star, prm), params)
+    _, vjp_p2 = jax.vjp(
+        lambda prm: _assemble(z_star, runtime_from_params(prm, cfg),
+                              frozen, P, edge_mask), params)
+
+    def pullback(gbar):
+        mu, residual_norm, tolerance = _block_adjoint(
+            system, lambda value: vjp_z(value)[0], P(gbar), cfg)
+        converged = residual_norm <= tolerance
+        mu = jax.tree.map(
+            lambda value: jnp.where(converged, value, jnp.nan), mu)
+        gradient = jax.tree.map(
+            jnp.add, vjp_p(jax.tree.map(jnp.negative, mu))[0],
+            vjp_p2(gbar)[0])
+        return gradient, LinearResponseReport(
+            residual_norm=residual_norm, tolerance=tolerance,
+            iterations=jnp.zeros((), jnp.int32), converged=converged)
+
+    return pullback
+
+
+def _raise_unconverged_rows(cfg: ImplicitConfig, report: LinearResponseReport,
+                            method: str | None) -> None:
+    """Raise the worst missed row host-eagerly; traced rows stay NaN."""
+    if isinstance(report.converged, jax.core.Tracer):
+        return
+    bad = ~np.asarray(report.converged)
+    if np.any(bad):
+        residual = np.asarray(report.residual_norm)
+        worst = int(np.argmax(np.where(bad, residual, -1.0)))
+        _raise_adjoint_unconverged(
+            cfg, iterations=int(np.asarray(report.iterations)[worst]),
+            residual_norm=float(residual[worst]),
+            tolerance=float(np.asarray(report.tolerance)[worst]),
+            method=method)
+
+
 def _implicit_state_pullback_multi_rhs_impl(
     params, cfg, x_star, dof_mask, gbar_batch,
     *, solver="gcrot", active_fields=(), probe_chunk_size=1,
     response_chunk_size=1,
 ) -> ImplicitParams:
+    if solver == "block":
+        pullback = _block_state_pullback(
+            params, cfg, x_star, dof_mask, active_fields=active_fields,
+            probe_chunk_size=probe_chunk_size)
+        # Rows cross the map as flat vectors: chunk_map cannot reshape the
+        # zero-size state families of a stellarator-symmetric state.
+        _, unravel_state = ravel_pytree(x_star)
+        _, unravel_params = ravel_pytree(params)
+
+        def flat_row(flat_gbar):
+            gradient, report = pullback(unravel_state(flat_gbar))
+            return ravel_pytree(gradient)[0], report
+
+        flat_gradients, report = chunk_map(
+            flat_row, jax.vmap(lambda gbar: ravel_pytree(gbar)[0])(gbar_batch),
+            chunk_size=max(1, int(response_chunk_size)),
+        )
+        _raise_unconverged_rows(cfg, report, "block-tridiagonal adjoint")
+        return jax.vmap(unravel_params)(flat_gradients)
+
     frozen = jax.lax.stop_gradient(x_star)
     edge_mask = _edge_mask(cfg)
     P = _dof_projector(cfg, dof_mask)
-    F = residual_fn(cfg, frozen, dof_mask,
-                    formulation="raw" if solver == "block" else "preconditioned")
+    F = residual_fn(cfg, frozen, dof_mask)
     z_star = P(x_star)
 
     _, vjp_z = jax.vjp(lambda z: F(z, params), z_star)
@@ -3017,52 +3108,16 @@ def _implicit_state_pullback_multi_rhs_impl(
         lambda prm: _assemble(z_star, runtime_from_params(prm, cfg),
                               frozen, P, edge_mask), params)
 
-    rhs_batch = jax.vmap(P)(gbar_batch)
-
-    if solver == "block":
-        system = _raw_block_system(
-            params, cfg, frozen, dof_mask, active_fields, probe_chunk_size
+    def solve_row(rhs):
+        lam, sol = _adjoint_solve_gcrot(
+            lambda v: vjp_z(v)[0], rhs, cfg
         )
-        def solve_row(rhs):
-            lam, residual_norm, tolerance = _block_adjoint(
-                system, lambda value: vjp_z(value)[0], rhs, cfg)
-            return lam, LinearResponseReport(
-                residual_norm=residual_norm, tolerance=tolerance,
-                iterations=jnp.zeros((), jnp.int32),
-                converged=residual_norm <= tolerance)
+        return lam, _linear_response_report(sol, rhs, cfg)
 
-        lam_batch, report = chunk_map(
-            solve_row, rhs_batch,
-            chunk_size=max(1, int(response_chunk_size)),
-        )
-        res_batch = report.residual_norm
-        iter_batch = report.iterations
-        conv_batch = report.converged
-        accept = report.tolerance
-    else:
-        def solve_row(rhs):
-            lam, sol = _adjoint_solve_gcrot(
-                lambda v: vjp_z(v)[0], rhs, cfg
-            )
-            return lam, _linear_response_report(sol, rhs, cfg)
-
-        lam_batch, report = jax.vmap(solve_row)(rhs_batch)
-        res_batch = report.residual_norm
-        iter_batch = report.iterations
-        conv_batch = report.converged
-        accept = report.tolerance
-
-    # A vmapped Krylov row is traced and therefore NaN-poisoned on failure;
-    # Both solver paths use the same host-eager convergence contract.
-    if not isinstance(conv_batch, jax.core.Tracer):
-        bad = ~np.asarray(conv_batch)
-        if np.any(bad):
-            worst = int(np.argmax(np.where(bad, np.asarray(res_batch), -1.0)))
-            _raise_adjoint_unconverged(
-                cfg, iterations=int(np.asarray(iter_batch)[worst]),
-                residual_norm=float(np.asarray(res_batch)[worst]),
-                tolerance=float(np.asarray(accept)[worst]),
-                method=("block-tridiagonal adjoint" if solver == "block" else None))
+    lam_batch, report = jax.vmap(solve_row)(jax.vmap(P)(gbar_batch))
+    # A vmapped Krylov row is traced and therefore NaN-poisoned on failure.
+    _raise_unconverged_rows(cfg, report, None)
+    conv_batch = report.converged
     lam_batch = jax.tree.map(
         lambda value: jnp.where(
             conv_batch.reshape((conv_batch.shape[0],)

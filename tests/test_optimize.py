@@ -1199,6 +1199,79 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
                           jac_solver="svd", max_nfev=1)
 
 
+def test_reverse_lane_factors_once_per_point(monkeypatch):
+    """Reverse rows and gradients reuse one raw block factorization.
+
+    Mapping the implicit rule's pullback over residual rows factors the raw
+    block Jacobian once per row batch: XLA does not hoist it out of the map.
+    The reverse lane factors once per point and must still equal the
+    row-by-row pullback of the residual.  Its scalar gradient, and the block
+    lane's certificate fallback, pull back ``r`` once.
+    """
+    from vmex.core import implicit as implicit_module
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
+    inp = dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+
+    def radial_profile(state, runtime):
+        del runtime
+        return state.R_cos[1:, 1]
+
+    terms = [(opt.aspect_ratio, 4.0, 1.0), (radial_profile, 0.0, 1.0)]
+    factorizations = []
+    real_system = implicit_module._raw_block_system
+
+    def counted_system(*args, **kwargs):
+        system = real_system(*args, **kwargs)
+        jax.debug.callback(lambda: factorizations.append(1))
+        return system
+
+    monkeypatch.setattr(implicit_module, "_raw_block_system", counted_system)
+    with jax.disable_jit(False):
+        problem = opt.VmecProblem.from_tuples(
+            inp, terms, max_mode=1,
+            implicit_jacobian_method="reverse_adjoint",
+            jacobian_batch_size=1, use_ess=False,
+        )
+        x = jnp.asarray(problem.x0)
+        factorizations.clear()
+        jacobian = np.asarray(problem.jax_residual_jac(x))
+        assert jacobian.shape[0] > 1
+        assert len(factorizations) == 1
+
+        rows, pullback = jax.vjp(problem.jax_residual, x)
+        reference = np.stack([
+            np.asarray(pullback(row)[0]) for row in jnp.eye(rows.size)
+        ])
+        np.testing.assert_allclose(jacobian, reference, rtol=1e-9, atol=1e-12)
+        expected = reference.T @ np.asarray(rows)
+
+        factorizations.clear()
+        value, gradient = problem.jax_value_and_grad(x)
+        assert len(factorizations) == 1
+        np.testing.assert_allclose(value, 0.5 * float(rows @ rows), rtol=1e-12)
+        np.testing.assert_allclose(gradient, expected, rtol=1e-9, atol=1e-12)
+        _, traced = jax.jit(problem.jax_value_and_grad)(x)
+        np.testing.assert_allclose(traced, expected, rtol=1e-9, atol=1e-12)
+
+        block = opt.VmecProblem.from_tuples(
+            inp, terms, max_mode=1,
+            implicit_jacobian_method="block_tridiagonal", use_ess=False,
+        )
+        monkeypatch.setattr(
+            opt, "_select_jax_jacobian",
+            lambda candidate, summary, reverse_candidate: reverse_candidate(),
+        )
+        _, fallback = jax.jit(block.jax_value_and_grad)(x)
+        np.testing.assert_allclose(fallback, expected, rtol=1e-9, atol=1e-12)
+
+
 def test_public_problem_factory_validation():
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     term = [(opt.aspect_ratio, 4.0, 1.0)]
