@@ -946,8 +946,8 @@ counted; smoke mode is no slower; the example stays one file. Measure after
 B3a merges or state which adjoint the rows used.
 
 **Owns.** `examples/optimization/single_stage_optimization.py`, its profile
-record and any helper. Needs ESSOS branch `rj/vmex-optimization-interfaces`
-(uwplasma/ESSOS#58). Branch `c3/single-stage-least-squares`.
+record and any helper. Needs ESSOS with uwplasma/ESSOS#58, merged at
+`1b3210ca` (its branch is deleted). Branch `c3/single-stage-least-squares`.
 
 ### Literature checks left open (optional)
 
