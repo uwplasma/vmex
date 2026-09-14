@@ -550,12 +550,11 @@ def test_jax_lanes_reuse_host_executables_and_full_jit_reference_agrees():
     assert report["full_jit_warm"] == [], report
     assert report["full_jit_rel"] <= _FULL_JIT_HOST_AGREEMENT, report
     # Compiles per argument signature over the construction solve and three
-    # host trials.  The baselines lane and the perturbation predictor compile
-    # once.  _block_lane still compiles twice for its one signature: the
-    # construction solve runs without a default device and the trial solves
-    # inside one, and jax keys executables on that context (measured
-    # 2026-09-13, jax 0.9.2 and 0.11.1).  Move this pin to [1] with that fix.
+    # host trials: the baselines lane, the perturbation predictor and the
+    # block lane each compile once.  The block lane compiled twice before
+    # #315 moved the host trial solves out of the callback's device context
+    # (measured 2026-09-14, jax 0.9.2 and 0.11.1).
     signatures = report["signatures"]
     assert signatures["jit(_constraint_baselines_lane)"] == [1], report
     assert signatures["jit(predicted_state)"] == [1], report
-    assert signatures["jit(_block_lane)"] == [2], report
+    assert signatures["jit(_block_lane)"] == [1], report
