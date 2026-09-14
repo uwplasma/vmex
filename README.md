@@ -73,14 +73,8 @@ for a saved WOUT. [Restart](https://vmex.readthedocs.io/en/latest/howto/restart-
 and [CLI](https://vmex.readthedocs.io/en/latest/reference/cli.html) guides cover
 resolution changes, devices, profiles and output controls.
 
-```console
-vmex equilibrium.h5  # writes input.equilibrium and solves it to write wout_equilibrium.nc
-vmex input.equilibrium  # reproduce the WOUT
-```
-
-Reads DESC text inputs and HDF5/pickle outputs without installing DESC, using the final stage or equilibrium.
-`--desc-tol 0` retains all boundary modes. The default 1% boundary tolerance does not guarantee magnetic-field accuracy.
-WOUT iota has the opposite sign to DESC.
+`vmex equilibrium.h5` reads DESC text inputs and HDF5/pickle outputs without installing DESC, using the final stage or equilibrium; it writes `input.equilibrium` and solves it to write `wout_equilibrium.nc`.
+`--desc-tol 0` retains all boundary modes. The default 1% boundary tolerance does not guarantee magnetic-field accuracy. WOUT iota has the opposite sign to DESC.
 
 ## Differentiate and optimize
 
