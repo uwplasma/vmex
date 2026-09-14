@@ -71,7 +71,9 @@ unvalidated. The force error is rebuilt from the WOUT tables on the interior
 surfaces and divided by the volume average of $|\nabla(B^2/2\mu_0)|$ over
 $V$: $0.1\le s\le 0.99$, the normalization DESC and the polish certificate
 report; the scalar card gives the volume average of the ratio. It does not
-saturate and stays defined in vacuum. WOUT's `equif`
+saturate and stays defined in vacuum. A converged low-resolution deck (for
+example `mpol = ntor = 2`) can still read high: that is spectral truncation
+error, which `equif` could not show, not a solver failure. WOUT's `equif`
 ({func}`~vmex.core.postprocess.force_balance`) is not plotted: it is bounded
 by 1 and equals 1 on every surface of a currentless vacuum, however well
 converged.

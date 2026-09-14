@@ -37,7 +37,9 @@ revision it was measured at, and the pages that cite it.
 - The summary plot's force panel no longer reads 1 on converged vacuum equilibria. It plots
   `|J x B - grad p|` over the volume-averaged `|grad(B^2/2mu0)|` on `0.1 <= s <= 0.99`
   (DESC's normalization) instead of WOUT's `equif`, which is bounded by 1 and equals 1
-  on every surface without pressure or current; `equif` itself is unchanged.
+  on every surface without pressure or current; `equif` itself is unchanged. The figure
+  metadata from `plotting._summary_figure` (behind `plot_summary`) replaces the key
+  `max_relative_force_error`, a maximum of `equif`, with `force_error`, the volume average.
 
 ### Removed
 
