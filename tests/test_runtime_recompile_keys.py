@@ -151,6 +151,33 @@ def test_default_device_context_reuses_lane():
             np.testing.assert_array_equal(x, y)
 
 
+def test_failed_prefetched_executable_falls_back_to_the_lane(monkeypatch):
+    """A prefetched executable that rejects its arguments hands the rung to the jitted lane."""
+    import jax
+
+    def run():
+        return solver._run_loop(
+            state, rt, mode="cli", ijacob=0, verbose=False, emit=None,
+            time_step0=0.9, nstep=200,
+        )
+
+    def rejecting(carry, runtime):
+        raise TypeError("argument drift")
+
+    class Prefetched(dict):
+        def get(self, key, default=None):
+            return rejecting
+
+    with jax.disable_jit(False):
+        rt = _small_runtime(1.0)
+        state = solver._initial_state(rt.setup)
+        expected = run()
+        monkeypatch.setattr(solver, "_LANE_EXECUTABLES", Prefetched())
+        fallback = run()
+    for x, y in zip(jax.tree.leaves(expected), jax.tree.leaves(fallback)):
+        np.testing.assert_array_equal(x, y)
+
+
 def test_mixed_named_sharding_is_not_normalized(monkeypatch):
     """A single-device state must not overwrite another leaf's named layout."""
     import jax
