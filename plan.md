@@ -1342,9 +1342,15 @@ A session limit stopped three agents mid-task; their office jobs had finished.
   #311's augmented-Lagrangian L-BFGS-B reached violation/objective
   0.082/2.885, 0.085/2.413, 0.189/1.499; least squares 0.208/1.899,
   0.196/1.723, 0.163/1.707, and `x_scale="jac"` 0.135/2.166 at 60. A full run
-  diverged at stage 4. Reverse-mode coil rows cut a warm coil Jacobian from
-  4.0 s to 0.094 s. #320's guard never fires in this example: refinement is
-  about 1,700 GCROT iterations per trial on both libraries, B1c's target.
+  diverged at stage 4. With the coil fit matched (2,000 trials, 0.628 % B·n) and
+  `x_scale="jac"`, least squares reached 0.043/2.527, 0.063/1.916 and
+  0.051/1.868: more feasible than #311 at trial 60 but with a 25 % higher
+  objective, so no variant earned a full run and the example keeps #311's
+  optimizer with B3a's gain. Reverse-mode coil rows cut a warm coil Jacobian
+  from 4.0 s to 0.094 s. #320's guard never fires in this example: refinement
+  is about 1,700 GCROT iterations and 96 % of each value-only trial on both
+  libraries. B1c is therefore the next lever for single stage and QI (88 % of
+  #333's least-squares phase), and least squares gets one more proxy after it.
 - **Office runbook:** only A/B timing rows take `.heavy.lock`; whole-example runs
   take one of two long slots; untimed work runs lock-free at load ≤ 24.
 - **Force-balance panel:** users report errors near 100 %; brief F-err (§8)
