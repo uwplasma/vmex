@@ -2371,18 +2371,31 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             emit(compile_notice(rt.resolution.ns,
                                 prefetched=executable is not None), end="")
         _USED_LANE_KEYS.add(key)
+    # Committed arguments already fix placement, so keep the caller's
+    # default-device context out of the lane's jit key: a construction solve
+    # and trial solves run inside a device context then share one executable.
+    placed = not jax.config.jax_disable_jit and all(
+        leaf.committed for leaf in jax.tree.leaves((carry, rt)) if isinstance(leaf, jax.Array)
+    )
+
+    def step(fn, carry):
+        if not placed:
+            return fn(carry, rt)
+        with jax.default_device(None):
+            return fn(carry, rt)
+
     for _ in range(max_passes):
         if executable is not None:
             try:
-                carry = executable(carry, rt)
+                carry = step(executable, carry)
             except Exception:
                 # Structural/placement drift (argument validation precedes
                 # execution and donation, so the carry is intact): fall back
                 # to the on-demand jitted lane for the rest of the rung.
                 executable = None
-                carry = lane(carry, rt)
+                carry = step(lane, carry)
         else:
-            carry = lane(carry, rt)
+            carry = step(lane, carry)
         done = bool(carry.done)
         upto = int(carry.iteration) if done else int(carry.iteration) - 1
         # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
