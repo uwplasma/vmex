@@ -89,6 +89,7 @@ def child(script: str, row_path: str) -> None:
                 "status": int(result.status), "cost": float(result.cost),
                 "optimality": float(result.optimality),
                 "failed_trials": problem.metadata["holder"].get("failed_trials"),
+                "x": [float(value) for value in result.x],
                 "counters": {key: value - before[key] if isinstance(value, (int, float))
                              and isinstance(before.get(key), (int, float)) else value
                              for key, value in after.items()},
