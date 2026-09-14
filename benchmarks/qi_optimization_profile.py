@@ -78,21 +78,21 @@ def child(script: str, row_path: str) -> None:
         started = time.perf_counter()
         result = least_squares(fun, x0, *args, **kwargs)
         seconds = time.perf_counter() - started
-        for problem, before, build_seconds in problems:
-            if fun == problem.residual:
-                after = counters(problem)
-                row["stages"].append({
-                    "dofs": int(np.size(x0)), "build_seconds": round(build_seconds, 1),
-                    "least_squares_seconds": round(seconds, 1), "nfev": int(result.nfev),
-                    "njev": None if result.njev is None else int(result.njev),
-                    "status": int(result.status), "cost": float(result.cost),
-                    "optimality": float(result.optimality),
-                    "failed_trials": problem.metadata["holder"].get("failed_trials"),
-                    "counters": {key: value - before[key] if isinstance(value, (int, float))
-                                 and isinstance(before.get(key), (int, float)) else value
-                                 for key, value in after.items()},
-                })
-                write()
+        if problems:  # the example builds each stage's problem just before its solve
+            problem, before, build_seconds = problems[-1]
+            after = counters(problem)
+            row["stages"].append({
+                "dofs": int(np.size(x0)), "build_seconds": round(build_seconds, 1),
+                "least_squares_seconds": round(seconds, 1), "nfev": int(result.nfev),
+                "njev": None if result.njev is None else int(result.njev),
+                "status": int(result.status), "cost": float(result.cost),
+                "optimality": float(result.optimality),
+                "failed_trials": problem.metadata["holder"].get("failed_trials"),
+                "counters": {key: value - before[key] if isinstance(value, (int, float))
+                             and isinstance(before.get(key), (int, float)) else value
+                             for key, value in after.items()},
+            })
+            write()
         return result
 
     opt.VmecProblem.from_tuples = staticmethod(observed_build)
@@ -105,8 +105,8 @@ def child(script: str, row_path: str) -> None:
     write()
 
 
-def run(mode: str, timeout: float, baseline_commit: str | None) -> dict[str, object]:
-    """Run the example in a fresh process and return its measured row."""
+def run(mode: str, timeout: float, baseline_commit: str | None, log_copy: Path) -> dict[str, object]:
+    """Run the example in a fresh process, keep its stdout, and return its measured row."""
     env = {key: value for key, value in os.environ.items() if key != "VMEX_EXAMPLES_CI"}
     env["MPLBACKEND"] = "Agg"
     if mode == "smoke":
@@ -139,6 +139,7 @@ def run(mode: str, timeout: float, baseline_commit: str | None) -> dict[str, obj
         wall = time.perf_counter() - started
         process.returncode = exit_code = os.waitstatus_to_exitcode(status)
         text = log_path.read_text(errors="replace")
+        log_copy.write_text(text)
         observed = json.loads(row_path.read_text()) if row_path.exists() else {}
     peak = usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024)
     final = {}
@@ -196,7 +197,8 @@ def main(argv: list[str] | None = None) -> int:
     for spec in args.runs:
         mode, _, baseline = spec.partition(":")
         print(f"running {spec}", flush=True)
-        row = run(mode, args.timeout, baseline_commit if baseline else None)
+        row = run(mode, args.timeout, baseline_commit if baseline else None,
+                  args.output.with_suffix(f".{len(record['runs'])}.log"))
         record["runs"].append(row)
         print(f"  {row['wall_seconds']} s, exit {row['exit_code']}, capped {row['capped_at_timeout']}, "
               f"final {row['final']}, failed trials {row['failed_trials']}", flush=True)
