@@ -6,9 +6,9 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-91 committed artifacts: 37 standalone records and 1 grouped directory holding
-54 files. 33 of the 38 entries below are cited by a page, a test or another
-script; 5 are cited by nothing.
+92 committed artifacts: 38 standalone records and 1 grouped directory holding
+54 files. 33 of the 39 entries below are cited by a page, a test or another
+script; 6 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
 `date` its recorded measurement date; both are blank where the schema of
@@ -19,6 +19,7 @@ hand rather than by a script in this tree.
 
 | artifact | generator | commit | date | cited by |
 | --- | --- | --- | --- | --- |
+| `benchmarks/adjoint_formulation_20260914.json` | `benchmarks/adjoint_formulation.py` | `53ae863e` |  | *nothing* |
 | `benchmarks/baseline.json` | `benchmarks/run_baseline.py` | `314e5ba5` |  | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `docs/reference/index.md`, `docs/reference/performance.rst`, `tests/test_cited_paths.py`, `tests/test_performance_docs.py`, `tools/render_performance_docs.py` |
 | `benchmarks/cache_entry_scaling_m4_2026-09-03.json` |  | `2d3be2c0` | 2026-09-03 | `docs/reference/performance.rst` |
 | `benchmarks/capabilities.json` | `tools/render_capabilities.py` |  |  | `docs/reference/capabilities.rst`, `docs/reference/index.md` |
@@ -34,7 +35,7 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_free_boundary_axisymmetric.json` |  | `d4f56dae` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py`, `tests/test_capability_docs.py` |
 | `benchmarks/mirror_free_boundary_nonaxisymmetric.json` |  | `f9eb6a44` |  | `benchmarks/capabilities.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
-| `benchmarks/newton_finish_arms_20260913.json` | `benchmarks/newton_finish_arms.py` | `eb9d0376` | 2026-09-13 | `plan.md` |
+| `benchmarks/newton_finish_arms_20260913.json` | `benchmarks/newton_finish_arms.py` | `eb9d0376` | 2026-09-13 | `plan.md`, `vmex/core/implicit.py` |
 | `benchmarks/optimization_counters_20260913.json` | `benchmarks/optimization.py` | `142d6c92` | 2026-09-13 | `plan.md` |
 | `benchmarks/polish3d_tuning.md` |  |  |  | `docs/explanation/validation.md`, `docs/reference/api/advanced.rst`, `vmex/core/polish_driver.py` |
 | `benchmarks/polish_cost_office.json` | `benchmarks/polish_cost.py` | `529f1789` |  | `docs/reference/performance.rst` |
@@ -70,6 +71,7 @@ Workflows in `benchmarks/baselines/m4/`: B1, B2, C1, C2, F1, F2, F3, F4, F5, F6,
 These records are committed evidence that no page, test or script
 reads. They are kept, not deleted; the list exists so that stays visible.
 
+- `benchmarks/adjoint_formulation_20260914.json`
 - `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md`
 - `benchmarks/polish_force_error_2026-09-03.md`
 - `benchmarks/profile.json`
