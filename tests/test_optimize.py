@@ -413,6 +413,23 @@ def test_qi_regression_pin_and_jit():
     np.testing.assert_allclose(total_wrap, total, rtol=1e-12)
 
 
+@pytest.mark.parametrize("periodic", [True, False])
+def test_well_branches_sharp_limit_is_argmin_and_running_max(monkeypatch, periodic):
+    """At zero width the smooth well is the argmin split with running maxima."""
+    monkeypatch.setattr(opt, "_WELL_SOFTNESS", 0.0)
+    line = np.random.default_rng(3).random((2, 3, 25))
+    n, steps = line.shape[-1], np.arange(13 if periodic else 25)
+    location, branches = opt._well_branches(jnp.asarray(line), steps.size, periodic=periodic)
+    imin = np.argmin(line, axis=-1)
+    np.testing.assert_array_equal(np.asarray(location), imin)
+    for sign, branch in zip((-1, 1), branches):
+        index = imin[..., None] + sign * steps
+        inside = np.take_along_axis(line, np.clip(index, 0, n - 1), -1)
+        expected = (np.take_along_axis(line, index % n, -1) if periodic
+                    else np.where((index >= 0) & (index < n), inside, 1.0))
+        np.testing.assert_array_equal(np.asarray(branch), np.maximum.accumulate(expected, axis=-1))
+
+
 # ---------------------------------------------------------------------------
 # Boundary dofs + least-squares driver
 # ---------------------------------------------------------------------------

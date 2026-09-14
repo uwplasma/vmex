@@ -966,6 +966,54 @@ def _qi_grid(bmnc_b, xm_b, xn_b, iota_b, *, bmns_b=None, nfp: int, weights, nphi
     return weights_arr, phi0, phi1, phi, alpha, bmag, bnorm, levels, eps
 
 
+# Well-location and envelope width, in units of sin(pi / cells)**2: the normalized
+# |B| rise one grid cell from the bottom of a unit cosine well.
+_WELL_SOFTNESS = 0.1
+
+
+def _well_branches(line, nsteps: int, *, periodic: bool):
+    """Monotone branches of each normalized ``|B|`` line about a continuous well location.
+
+    ``line[..., j]`` samples one field period on ``n`` periodic cells, or on
+    ``n - 1`` cells with both endpoints.  The well sits at the argmin plus the
+    softmin-weighted mean offset of every sample from it (offsets wrapped by
+    the period), so it moves continuously when the minimum changes grid point.
+    The branches are linear samples ``k < nsteps`` cells left and right of it
+    (a non-periodic line reads 1 beyond its ends) made monotone by running
+    maxima.  The location carries no derivative: a differentiable location
+    made the Gauss-Newton model too local for the QI example's trust region
+    (plan D1).  At zero width this is ``argmin``, ``take_along_axis`` and
+    ``maximum.accumulate``.  Returns ``(location, (left, right))``.
+    """
+    dtype = line.dtype
+    n = int(line.shape[-1])
+    cells = n if periodic else n - 1
+    width = jnp.maximum(jnp.asarray(_WELL_SOFTNESS * np.sin(np.pi / cells) ** 2, dtype=dtype),
+                        jnp.finfo(dtype).eps)
+    imin = jnp.argmin(line, axis=-1)
+    # Offsets wrap by the period, so both endpoint samples of a boundary well are at 0.
+    offset = jnp.mod(jnp.arange(n) - imin[..., None] + cells // 2, cells) - cells // 2
+    location = imin + jnp.sum(jax.nn.softmax(-line / width, axis=-1) * offset, axis=-1)
+    if not periodic:  # a well past the window edge is read at the edge
+        location = jnp.clip(location, 0.0, n - 1.0)
+        pad = jnp.ones((*line.shape[:-1], 1), dtype=dtype)
+        line = jnp.concatenate([pad, line, pad], axis=-1)
+    location = jax.lax.stop_gradient(location)
+    steps = jnp.arange(nsteps, dtype=dtype)
+
+    def branch(sign):
+        position = location[..., None] + sign * steps
+        cell = jnp.floor(position)
+        index = cell.astype(jnp.int32)[..., None] + jnp.arange(2)
+        index = jnp.mod(index, n) if periodic else jnp.clip(index + 1, 0, n + 1)
+        values = jnp.take_along_axis(line, index.reshape(*index.shape[:-2], -1), axis=-1)
+        values = values.reshape(index.shape)
+        raw = values[..., 0] + (position - cell) * (values[..., 1] - values[..., 0])
+        return jnp.maximum.accumulate(raw, axis=-1)
+
+    return location, (branch(-1), branch(1))
+
+
 def quasi_isodynamic_residual(
     *,
     bmnc_b,
@@ -1051,11 +1099,7 @@ def quasi_isodynamic_residual(
         bper = jnp.swapaxes(bnorm[:, :-1, :], 1, 2)           # periodic, (nsurf, nalpha, nper)
         nper = nphi_ - 1
         offs = jnp.arange(max(1, nper // 2) + 1, dtype=jnp.int32)
-        imin = jnp.argmin(bper, axis=-1)
-        left = jnp.maximum.accumulate(
-            jnp.take_along_axis(bper, jnp.mod(imin[:, :, None] - offs[None, None, :], nper), axis=-1), axis=-1)
-        right = jnp.maximum.accumulate(
-            jnp.take_along_axis(bper, jnp.mod(imin[:, :, None] + offs[None, None, :], nper), axis=-1), axis=-1)
+        _, (left, right) = _well_branches(bper, int(offs.shape[0]), periodic=True)
         left = (left - left[..., :1]) / jnp.maximum(left[..., -1:] - left[..., :1], tiny)
         right = (right - right[..., :1]) / jnp.maximum(right[..., -1:] - right[..., :1], tiny)
         distance = jnp.asarray(offs, dtype=dtype) / jnp.asarray(nper, dtype=dtype)
@@ -1076,19 +1120,9 @@ def quasi_isodynamic_residual(
     # -- branch-shuffle profile comparison ----------------------------------
     if float(shuffle_profile_weight) != 0.0:
         b_alpha = jnp.swapaxes(bnorm, 1, 2)                   # (nsurf, nalpha, nphi)
-        offs = jnp.arange(nphi_, dtype=jnp.int32)
-        offs_f = jnp.asarray(offs, dtype=dtype)
         dphi = (phi1 - phi0) / jnp.asarray(nphi_ - 1, dtype=dtype)
         period = phi1 - phi0
-        imin = jnp.argmin(b_alpha, axis=-1)
-        li_raw = imin[:, :, None] - offs[None, None, :]
-        ri_raw = imin[:, :, None] + offs[None, None, :]
-        lvalid, rvalid = li_raw >= 0, ri_raw < nphi_
-        lraw = jnp.take_along_axis(b_alpha, jnp.clip(li_raw, 0, nphi_ - 1), axis=-1)
-        rraw = jnp.take_along_axis(b_alpha, jnp.clip(ri_raw, 0, nphi_ - 1), axis=-1)
-        one = jnp.asarray(1.0, dtype=dtype)
-        left = jnp.maximum.accumulate(jnp.where(lvalid, lraw, one), axis=-1)
-        right = jnp.maximum.accumulate(jnp.where(rvalid, rraw, one), axis=-1)
+        location, (left, right) = _well_branches(b_alpha, nphi_, periodic=False)
 
         seps = jnp.maximum(jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
                            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
@@ -1102,10 +1136,10 @@ def quasi_isodynamic_residual(
         bw = lcross + rcross
         bw_mean = jnp.mean(bw, axis=1, keepdims=True)
 
-        min_phi = phi0 + jnp.asarray(imin, dtype=dtype) * dphi
+        min_phi = phi0 + location * dphi
         lend = jnp.maximum(min_phi - phi0, 0.0)
         rend = jnp.maximum(phi1 - min_phi, 0.0)
-        signed_phi = (offs_f[None, None, :] - jnp.asarray(imin[:, :, None], dtype=dtype)) * dphi
+        signed_phi = (jnp.arange(nphi_, dtype=dtype) - location[:, :, None]) * dphi
 
         level_full = jnp.concatenate([jnp.zeros((1,), dtype=dtype), levels,
                                       jnp.ones((1,), dtype=dtype)])
@@ -1120,15 +1154,15 @@ def quasi_isodynamic_residual(
         rfull = jnp.maximum.accumulate(
             jnp.concatenate([zeros, rtarget, rend[:, :, None]], axis=-1), axis=-1)
         x_target = jnp.concatenate([-jnp.flip(lfull, axis=-1), rfull[:, :, 1:]], axis=-1)
-        ramp = (jnp.arange(x_target.shape[-1], dtype=dtype)
+        # The ramp starts one step in, so the first sample reads the cap by left fill.
+        ramp = (jnp.arange(1, x_target.shape[-1] + 1, dtype=dtype)
                 * jnp.asarray(1.0e-14, dtype=dtype) * period)
         x_target = x_target + ramp[None, None, :]
 
         def interp_one(xp, x):
             return jnp.interp(x, xp, y_target)
 
-        shuffled = jax.vmap(jax.vmap(interp_one, in_axes=(0, 0)), in_axes=(0, 0))(
-            x_target, signed_phi)
+        shuffled = jax.vmap(jax.vmap(interp_one))(x_target, signed_phi)
         constructed_bnorm = shuffled
         shuffle_res = (shuffled - b_alpha) * sqrt_w * shuffle_profile_weight
         pieces.append(jnp.ravel(shuffle_res)
