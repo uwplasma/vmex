@@ -7,8 +7,8 @@ missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
 92 committed artifacts: 38 standalone records and 1 grouped directory holding
-54 files. 33 of the 39 entries below are cited by a page, a test or another
-script; 6 are cited by nothing.
+54 files. 34 of the 39 entries below are cited by a page, a test or another
+script; 5 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
 `date` its recorded measurement date; both are blank where the schema of
@@ -19,7 +19,7 @@ hand rather than by a script in this tree.
 
 | artifact | generator | commit | date | cited by |
 | --- | --- | --- | --- | --- |
-| `benchmarks/adjoint_formulation_20260914.json` | `benchmarks/adjoint_formulation.py` | `53ae863e` |  | *nothing* |
+| `benchmarks/adjoint_formulation_20260914.json` | `benchmarks/adjoint_formulation.py` | `53ae863e` |  | `tests/test_implicit_multi_rhs.py` |
 | `benchmarks/baseline.json` | `benchmarks/run_baseline.py` | `314e5ba5` |  | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `docs/reference/index.md`, `docs/reference/performance.rst`, `tests/test_cited_paths.py`, `tests/test_performance_docs.py`, `tools/render_performance_docs.py` |
 | `benchmarks/cache_entry_scaling_m4_2026-09-03.json` |  | `2d3be2c0` | 2026-09-03 | `docs/reference/performance.rst` |
 | `benchmarks/capabilities.json` | `tools/render_capabilities.py` |  |  | `docs/reference/capabilities.rst`, `docs/reference/index.md` |
@@ -71,7 +71,6 @@ Workflows in `benchmarks/baselines/m4/`: B1, B2, C1, C2, F1, F2, F3, F4, F5, F6,
 These records are committed evidence that no page, test or script
 reads. They are kept, not deleted; the list exists so that stays visible.
 
-- `benchmarks/adjoint_formulation_20260914.json`
 - `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md`
 - `benchmarks/polish_force_error_2026-09-03.md`
 - `benchmarks/profile.json`
