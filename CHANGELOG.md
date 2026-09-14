@@ -25,6 +25,8 @@ revision it was measured at, and the pages that cite it.
 
 ### Fixed
 
+- The reverse Jacobian fallback pulls residual rows back in tangent-lane batches, so an
+  uncertified block Jacobian no longer allocates the adjoint basis once per residual row.
 - Polish sizes its force sweep from the deck's own mode table and checkpoints the
   per-point kernel: W7-X standard certifies at 3.0 GiB, not 34 (`benchmarks/polish_memory_w7x.json`).
 - Force-error reporting separates native accuracy from WOUT reconstruction; the

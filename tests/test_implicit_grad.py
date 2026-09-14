@@ -1337,7 +1337,7 @@ def test_nearby_refinement_seed_is_guarded_and_conservative(monkeypatch):
         # Both paths improve, but neither reaches the requested tolerance.
         delta = 1.0 if float(fz[0]) < 7.0 else 2.0
         z_new = z - delta
-        return z_new, z_new, jnp.linalg.norm(z_new)
+        return z_new, z_new, jnp.linalg.norm(z_new), jnp.asarray(0.0)
 
     monkeypatch.setattr(im, "_refine_step", incomplete_step)
     legacy = im._refined_state(cfg, params, state, state)

@@ -3068,9 +3068,20 @@ def _least_squares_implicit(
         problem_jit_key, "jac", lambda: jax.jit(jac_impl))
     gmres_jit = _problem_jit(
         problem_jit_key, "jac_gmres", lambda: jax.jit(jacobian_rows))
+    def jacobian_rows_reverse(x: jnp.ndarray) -> jnp.ndarray:
+        """Reverse Jacobian, pulled back in batches of the tangent-lane width.
+
+        ``jax.jacrev`` vmaps the adjoint over every residual row, so the GCROT
+        basis alone needs rows x (m + 1) x state doubles: 47 GiB per buffer
+        for the 8-dof seed QA benchmark (6722 rows, m = 100, 9300 entries).
+        """
+        rows, pullback = jax.vjp(residual_rows, x)
+        return chunk_map(
+            lambda i: pullback(jax.nn.one_hot(i, residual_size, dtype=rows.dtype))[0],
+            jnp.arange(residual_size), chunk_size=ndof if chunk is None else chunk)
+
     reverse_jit = _problem_jit(
-        problem_jit_key, "jac_reverse",
-        lambda: jax.jit(jax.jacrev(residual_rows)))
+        problem_jit_key, "jac_reverse", lambda: jax.jit(jacobian_rows_reverse))
 
     # The strict seed preflight above already evaluated and validated every
     # residual row.  Carry that known shape instead of compiling ``rows_jit``

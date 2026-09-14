@@ -23,6 +23,7 @@ import dataclasses
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 from vmex.core import implicit as im
@@ -179,3 +180,49 @@ def test_rejected_trial_charges_solve_time_but_counts_no_solve(monkeypatch) -> N
     finally:
         im._SOLVE_STATS.pop(cfg, None)
         im._LAST_STATUS_ERROR.pop(cfg, None)
+
+
+def test_step_without_krylov_progress_ends_refinement(monkeypatch) -> None:
+    """A step whose solve kept fewer than three digits and did not lower ``|F|`` stops.
+
+    Two trials run compiled on the shared small config, the second from the
+    first one's returned state, as the next optimizer evaluation does. Every
+    step runs the real staged executable; its host wrapper only reports the
+    step as non-improving (the iterate moves, ``|F|`` does not fall). With
+    ``_REFINE_MIN_PROGRESS`` at zero every solve counts as fewer than three
+    digits, so the first trial stops after one step; at its default the small
+    deck's solves converge and the second trial keeps the whole non-monotone
+    budget. The branch is decided on the host, so the second trial compiles
+    nothing, and neither trial moves the host state.
+    """
+    _, cfg, p0 = _small_solovev_setup()
+    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
+    state, mask = jax.tree.map(
+        jnp.asarray, im._host_solve_and_mask(cfg, params_np, refine=False))
+    real_step, default = im._refine_step, im._REFINE_MIN_PROGRESS
+
+    def without_progress(config, params, frozen, dof_mask, z, fz):
+        z_new, _, _, linear = real_step(config, params, frozen, dof_mask, z, fz)
+        return z_new, fz, im._tree_norm(fz), linear
+
+    monkeypatch.setattr(im, "_refine_step", without_progress)
+    lanes = (im._refine_step_core, im._preconditioned_residual_lane)
+    steps = lambda: im._SOLVE_STATS.get(cfg, {}).get("refinement_steps", 0)  # noqa: E731
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)  # the suite default is eager
+    try:
+        start = steps()
+        monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", 0.0)
+        refined = im._refined_state(cfg, p0, state, mask)
+        assert steps() - start == 1
+        compiled = [lane._cache_size() for lane in lanes]
+        assert min(compiled) >= 1  # both staged programs ran
+        monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", default)
+        again = im._refined_state(cfg, p0, refined, mask)
+        assert steps() - start == 1 + im._REFINE_MAX_STEPS
+        assert [lane._cache_size() for lane in lanes] == compiled
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+    for result in (refined, again):
+        for result_leaf, state_leaf in zip(jax.tree.leaves(result), jax.tree.leaves(state)):
+            np.testing.assert_array_equal(np.asarray(result_leaf), np.asarray(state_leaf))

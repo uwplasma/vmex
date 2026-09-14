@@ -149,7 +149,9 @@ from solvax import (
     gmres as _solvax_gmres,
 )
 
-from .device import AUTO, _put_numeric_leaves, resolve_implicit_device
+from .device import (
+    AUTO, _put_numeric_leaves, commit_to_single_device, resolve_implicit_device,
+)
 from .errors import AdjointSolveError, VmecError
 from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
@@ -1408,6 +1410,16 @@ _REFINE_FORCING = 1.0e-6
 #: the worst landing measured across the gradient decks.
 _REFINE_MAX_RESTARTS = 20
 
+#: Refinement stops after a step whose Krylov solve kept fewer than three
+#: digits (final relative residual above this) and did not lower ``|F|``:
+#: such a correction is not an inexact Newton direction, and later steps
+#: from it only wander.  A solve with three digits whose ``|F|`` rises is a
+#: Newton step outside its quadratic region and is continued.  Two measured
+#: decks (``benchmarks/newton_finish_arms_20260913.json``): the benchmark seed
+#: deck (mpol = ntor = 5) stalls at 4.2e-3 and is stopped; QA_lowres
+#: (mpol = ntor = 8) reaches 5.2e-5, raises ``|F|`` and certifies two steps later.
+_REFINE_MIN_PROGRESS = 1.0e-3
+
 
 def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState,
@@ -1446,15 +1458,15 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
 def _refine_step_core(z: SpectralState, fz: SpectralState,
                       params: ImplicitParams, frozen: SpectralState,
                       dof_mask: SpectralState, cfg: ImplicitConfig):
-    """Staged inexact-Newton refinement step; returns ``(z, F(z), |F(z)|, its)``.
+    """Staged inexact-Newton step; returns ``(z, F(z), |F(z)|, its, linear)``.
 
     Linearizes the preconditioned residual at ``z``, runs the same
     GCROT(m, k) solve as the eager :func:`_adjoint_solve_gcrot` lane with
     the refinement's forcing term and cycle budget (best-effort: the host
     caller in :func:`_refined_state` applies the acceptance policy on the
-    concrete residual norm, so convergence is never enforced here), and
-    evaluates the residual at the stepped iterate inside the same
-    executable.
+    concrete residual norm and the solve's final relative residual
+    ``linear``, so convergence is never enforced here), and evaluates the
+    residual at the stepped iterate inside the same executable.
     """
     F = residual_fn(cfg, frozen, dof_mask)
     _, jvp = jax.linearize(lambda t: F(t, params), z)
@@ -1471,7 +1483,8 @@ def _refine_step_core(z: SpectralState, fz: SpectralState,
         max_restarts=_REFINE_MAX_RESTARTS)
     z_new = jax.tree.map(jnp.subtract, z, unravel(sol.x))
     fz_new = F(z_new, params)
-    return z_new, fz_new, _tree_norm(fz_new), sol.iterations
+    return (z_new, fz_new, _tree_norm(fz_new), sol.iterations,
+            sol.residual_norm / jnp.linalg.norm(b_flat))
 
 
 def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
@@ -1485,13 +1498,15 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
     as one compiled program.  Arguments are committed to ``cfg.device``
     exactly like the eager Krylov lane's RHS pin.
     """
-    z, fz, residual_norm, iterations = _refine_step_core(
-        _pin_concrete(cfg, z), _pin_concrete(cfg, fz),
-        _pin_concrete(cfg, params), _pin_concrete(cfg, frozen),
-        _pin_concrete(cfg, dof_mask), cfg)
+    # The first step receives eager arrays and later steps this executable's
+    # committed outputs; one commitment keeps one compiled step.
+    arguments = commit_to_single_device(tuple(
+        _pin_concrete(cfg, tree) for tree in (z, fz, params, frozen, dof_mask)))
+    z, fz, residual_norm, iterations, linear = _refine_step_core(
+        *arguments, cfg)
     _count(cfg, refinement_steps=1,
            refinement_krylov_iterations=int(iterations))
-    return z, fz, residual_norm
+    return z, fz, residual_norm, linear
 
 
 def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
@@ -1520,6 +1535,9 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     tol = float(cfg.refine_tol)
     if not np.isfinite(tol) or tol <= 0.0:
         return state
+    # A first trial passes eager arrays and a later one the previous refined,
+    # committed state; one commitment keeps one residual executable.
+    state, params, dof_mask = commit_to_single_device((state, params, dof_mask))
     P = _dof_projector(cfg, dof_mask)
     F = residual_fn(cfg, state, dof_mask)
     z0 = P(state)
@@ -1534,9 +1552,9 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
             # restarted GMRES on this fixed-point solve; the linearize +
             # solve + residual evaluation run as one staged per-config
             # executable (see _refine_step_core).
-            z, fz, residual_norm = _refine_step(
+            z, fz, residual_norm, linear = _refine_step(
                 cfg, params, state, dof_mask, z, fz)
-            residual = float(residual_norm)
+            previous, residual = residual, float(residual_norm)
             if not np.isfinite(residual):
                 break
             # Newton need not be monotone: iterate from the latest point but
@@ -1544,6 +1562,9 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
             if residual < best:
                 best_z, best = z, residual
             if best <= tol:
+                break
+            # No Newton direction: see _REFINE_MIN_PROGRESS.
+            if float(linear) > _REFINE_MIN_PROGRESS and residual >= previous:
                 break
         return best_z, best
 
