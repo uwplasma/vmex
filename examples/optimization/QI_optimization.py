@@ -14,9 +14,8 @@ from vmex import optimize as opt
 from vmex.core.input import VmecInput
 from vmex.core.qi import ConstructedQIResidual
 
-nfp = 2  # number of field periods
 SURFACES = np.linspace(0.1, 1.0, 6)
-MAX_MODES, MAX_NFEV = [3], [250]  # mode-ladder alternative: [1, 2], [20, 20]
+MAX_MODES, MAX_NFEV = [2], [20]  # a max_mode = 3 stage lowered cost 1 % for 45 % of the run
 ASPECT_TARGET = 5.0
 IOTA_FLOOR = 0.51
 MIRROR_LIMIT = 0.21
@@ -24,7 +23,6 @@ ELONGATION_LIMIT = 8.0
 ESS_ALPHA = 1.2  # lower only after a low-mode QI basin has converged
 MINIMUM_MPOL = 5
 VARY_MAJOR_RADIUS = False  # set True to optimize RBC(0,0) instead of fixing it
-SEED_PERTURBATION = 0.05
 qi_options = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 validation_options = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
 
@@ -34,11 +32,11 @@ if ci_smoke:
     validation_options = qi_options
     MAX_MODES, MAX_NFEV = [2], [5]
 
-DATA = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{nfp}"
-inp = VmecInput.from_file(DATA)
-rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-inp = replace(inp, rbc=rbc, zbs=zbs)
+# Start near QI: this nfp = 2 seed scores constructed QI 5e-3 where a perturbed
+# circular seed scores 1.3 (benchmarks/qi_optimization_profile_office.json).
+DATA = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
+inp = replace(VmecInput.from_file(DATA), ns_array=np.array([31]),
+              ftol_array=np.array([1.0e-12]), niter_array=np.array([5500]))
 
 # Objective function terms
 qi = ConstructedQIResidual(SURFACES, **qi_options)
@@ -51,9 +49,11 @@ def iota_floor(equilibrium_state, solver_context):
     return jnp.maximum(
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
+# A finite-weight hinge settles just above its threshold, and the final ns = 101
+# solve reads the mirror ratio ~4e-4 above the ns = 31 stage: penalize from 1 % below.
 def mirror_excess(equilibrium_state, solver_context):
     return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
+        opt.mirror_ratio(equilibrium_state, solver_context) - 0.99 * MIRROR_LIMIT, 0.0)
 
 def elongation_excess(equilibrium_state, solver_context):
     return jnp.maximum(
@@ -62,14 +62,15 @@ def elongation_excess(equilibrium_state, solver_context):
 objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, 0.005),
     (iota_floor, 0.0, 10.0),
-    (mirror_excess, 0.0, 10.0),
+    (mirror_excess, 0.0, 1000.0),
     (elongation_excess, 0.0, 10.0),
 ]
 qi_terms = [(qi, 0.0, 10.0), *objective_function_terms]
 
 report = opt.EquilibriumReporter(
     ("constructed QI", qi.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
-    ("mean iota", opt.mean_iota, ".4f"), ("mirror", opt.mirror_ratio, ".4f"),
+    ("mean iota", opt.mean_iota, ".4f"), ("min |iota|", opt.min_abs_iota, ".4f"),
+    ("mirror", opt.mirror_ratio, ".4f"),
     ("elongation", opt.max_elongation, ".4f"))
 monitor = opt.OptimizationMonitor()
 

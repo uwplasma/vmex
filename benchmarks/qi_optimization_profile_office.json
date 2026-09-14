@@ -1,0 +1,228 @@
+{
+ "schema_version": 1,
+ "created_utc": "2026-09-14T17:29:30+00:00",
+ "_provenance": {"measurement_commit": "3ee6ca580b01b219818261cf6723ca5f76157359", "measurement_dirty": false, "input_data_embedded": false, "baseline_commit": "b208df4f890faf820ce0277237298c92acf0aba6", "command": "python benchmarks/qi_optimization_profile.py, one invocation per row (each row carries its command)"},
+ "environment": {
+  "python": "3.12.13",
+  "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+  "machine": "x86_64",
+  "cpu_count": 36,
+  "OMP_NUM_THREADS": "4",
+  "VMEX_COMPILATION_CACHE": "disabled",
+  "versions": {"vmex": "0.8.1", "jax": "0.11.1", "jaxlib": "0.11.1", "numpy": "2.5.2", "scipy": "1.18.1", "essos": null, "essos_commit": null},
+  "XLA_FLAGS": "--xla_cpu_parallel_codegen_split_count=128",
+  "OPENBLAS_NUM_THREADS": "4"
+ },
+ "timing_note": "Office workstation, one whole-example run at a time under ~/vmex-agents/.long.lock, 4 threads, VMEX_COMPILATION_CACHE=disabled. The gate pair ran back to back on library b208df4f; smoke arms alternate in fresh processes under .heavy.lock.",
+ "gate": {"wall_limit_seconds": 728.1, "qi_to_beat": 0.7886336, "iota_floor": 0.51, "mirror_limit": 0.21, "elongation_limit": 8.0, "failed_trials": 0},
+ "runs": [
+  {
+   "label": "previous example on main (final solve raised)",
+   "measurement_commit": "4474716f2690bacbdfe2dc606e6e6453ac5bc9bc",
+   "example_commit": "b208df4f890faf820ce0277237298c92acf0aba6",
+   "command": "python benchmarks/qi_optimization_profile.py --runs full:baseline --baseline-ref b208df4f --timeout 14400",
+   "source": "git show b208df4f",
+   "mode": "full",
+   "wall_seconds": 1456.2,
+   "peak_rss_gib": 2.7,
+   "exit_code": 1,
+   "capped_at_timeout": false,
+   "load_average_before": [21.86, 15.9, 15.05],
+   "load_average_after": [19.11, 19.05, 19.07],
+   "final": {},
+   "constraints_met": null,
+   "failed_trials": 5,
+   "stage_lines": ["[QI mode 3] constructed QI = 7.886336e-01, aspect = 11.9100, mean iota = -0.4802, mirror = 0.2560, elongation = 4.4650"],
+   "constants": {},
+   "stages": [
+    {
+     "dofs": 48,
+     "build_seconds": 27.7,
+     "least_squares_seconds": 1190.4,
+     "nfev": 34,
+     "njev": 12,
+     "status": 3,
+     "cost": 4.081012939578271,
+     "optimality": 397.8274918845512,
+     "failed_trials": 5,
+     "x": [-0.003322303937506411, -0.0009843576106552867, -0.00021535411756475994, 0.0003073571703580214, 0.0024149506235411674, -0.06137769504941421, 0.10814252204660596, -0.003410731427238733, -0.0016129847778378135, 0.00012107700688580233, 0.000273146343701602, -7.421283818537538e-05, -0.0020053124529037423, -0.0023671272156043834, 6.148464104114514e-06, -0.0014256069304193779, 0.0006415525605660102, -0.0004593569297407253, -0.000586126931222875, -0.0011672617766835456, 0.00024031303151979302, -0.00029901998913342515, 8.730850582411449e-05, -0.00015007991577582598, 0.00773354899160564, 0.0002959374308427296, 0.0006941866419582185, 7.812781507402858e-05, 0.0009941487845335324, 0.05627738651515116, 0.09707213291641095, 0.0024186339046602633, 0.00042174861941490376, 0.0006499092385512779, 0.0003497194180832408, 0.0002445677312791669, 0.0018892649139242606, 0.0005033449669232466, -0.0029741368462252596, 0.0015077283393997454, -0.0015251363230423616, 0.001372551011255525, -0.0003941212976896805, 0.001368742677093745, -0.0016243043816951926, 0.0011769468819133972, -0.0013969388462655272, 0.0018248316924299051],
+     "counters": {"solves": 28, "iterations": 148972, "solve_seconds": 397.88948035263456, "refinements": 29, "refinement_steps": 68, "refinement_krylov_iterations": 131605, "refinement_seconds": 746.0062119825743, "jacobians": 13, "jacobian_columns": 624, "jacobian_krylov_iterations": 4258, "jacobian_seconds": 166.70454616867937, "adjoints": 0, "adjoint_krylov_iterations": 0, "adjoint_seconds": 0}
+    }
+   ],
+   "stdout_tail": ["  File \"vmex/core/solver.py\", line 2467, in _finalize", "    raise VmecConvergenceError(", "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED"]
+  },
+  {
+   "label": "this example on main",
+   "measurement_commit": "3ee6ca580b01b219818261cf6723ca5f76157359",
+   "example_commit": "3ee6ca580b01b219818261cf6723ca5f76157359",
+   "command": "python benchmarks/qi_optimization_profile.py --runs full --baseline-ref b208df4f --timeout 14400",
+   "source": "working tree",
+   "mode": "full",
+   "wall_seconds": 612.1,
+   "peak_rss_gib": 2.85,
+   "exit_code": 0,
+   "capped_at_timeout": false,
+   "load_average_before": [13.22, 15.9, 17.78],
+   "load_average_after": [13.78, 13.28, 15.52],
+   "final": {"constructed QI": 0.003027556, "aspect": 7.5333, "mean iota": -0.5656, "min |iota|": 0.539276, "mirror": 0.2088, "elongation": 7.305, "fine-grid validation": 0.002767},
+   "constraints_met": {"iota": true, "mirror": true, "elongation": true},
+   "failed_trials": 0,
+   "stage_lines": ["[QI mode 2] constructed QI = 3.020769e-03, aspect = 7.5333, mean iota = -0.5655, min |iota| = 0.5399, mirror = 0.2081, elongation = 7.3050"],
+   "constants": {"DATA": "examples/data/input.QI_nfp2_initial", "MAX_MODES": [2], "MAX_NFEV": [20], "ASPECT_TARGET": 5.0, "IOTA_FLOOR": 0.51, "MIRROR_LIMIT": 0.21, "ELONGATION_LIMIT": 8.0},
+   "stages": [
+    {
+     "dofs": 24,
+     "build_seconds": 30.4,
+     "least_squares_seconds": 409.9,
+     "nfev": 20,
+     "njev": 11,
+     "status": 0,
+     "cost": 0.03116700484110253,
+     "optimality": 0.2393391715087925,
+     "failed_trials": 0,
+     "counters": {"solves": 19, "iterations": 17251, "solve_seconds": 43.13562008040026, "refinements": 20, "refinement_steps": 39, "refinement_krylov_iterations": 63316, "refinement_seconds": 361.53223229339346, "jacobians": 12, "jacobian_columns": 288, "jacobian_krylov_iterations": 0, "jacobian_seconds": 107.09920670185238, "adjoints": 0, "adjoint_krylov_iterations": 0, "adjoint_seconds": 0}
+    }
+   ]
+  }
+ ],
+ "smoke_ab": [
+  {
+   "source": "git show b208df4f",
+   "measurement_commit": "3ee6ca58",
+   "wall_seconds": 246.0,
+   "exit_code": 0,
+   "load_start_end": [11.85, 12.35],
+   "failed_trials": 1,
+   "nfev_njev_per_stage": [[5, 3]],
+   "refinement_seconds": 69.9,
+   "last_stage": "[QI mode 2] constructed QI = 7.539740e-01, aspect = 9.5424, mean iota = -0.4292, mirror = 0.3117, elongation = 6.2453",
+   "final": {"constructed QI": 0.753974, "aspect": 9.5424, "mean iota": -0.4292, "min |iota|": 0.379072, "mirror": 0.3117, "elongation": 6.2453, "fine-grid validation": 0.754}
+  },
+  {
+   "source": "working tree",
+   "measurement_commit": "3ee6ca58",
+   "wall_seconds": 236.0,
+   "exit_code": 0,
+   "load_start_end": [12.35, 11.47],
+   "failed_trials": 1,
+   "nfev_njev_per_stage": [[5, 3]],
+   "refinement_seconds": 80.7,
+   "last_stage": "[QI mode 2] constructed QI = 6.307021e-03, aspect = 8.6893, mean iota = -0.5371, min |iota| = 0.5155, mirror = 0.2151, elongation = 7.2323",
+   "final": {"constructed QI": 0.006307021, "aspect": 8.6893, "mean iota": -0.5371, "min |iota|": 0.515528, "mirror": 0.2151, "elongation": 7.2323, "fine-grid validation": 0.006307}
+  },
+  {
+   "source": "git show b208df4f",
+   "measurement_commit": "3ee6ca58",
+   "wall_seconds": 241.0,
+   "exit_code": 0,
+   "load_start_end": [11.47, 10.23],
+   "failed_trials": 1,
+   "nfev_njev_per_stage": [[5, 3]],
+   "refinement_seconds": 69.4,
+   "last_stage": "[QI mode 2] constructed QI = 7.539740e-01, aspect = 9.5424, mean iota = -0.4292, mirror = 0.3117, elongation = 6.2453",
+   "final": {"constructed QI": 0.753974, "aspect": 9.5424, "mean iota": -0.4292, "min |iota|": 0.379072, "mirror": 0.3117, "elongation": 6.2453, "fine-grid validation": 0.754}
+  },
+  {
+   "source": "working tree",
+   "measurement_commit": "3ee6ca58",
+   "wall_seconds": 226.0,
+   "exit_code": 0,
+   "load_start_end": [10.23, 11.79],
+   "failed_trials": 1,
+   "nfev_njev_per_stage": [[5, 3]],
+   "refinement_seconds": 80.4,
+   "last_stage": "[QI mode 2] constructed QI = 6.307021e-03, aspect = 8.6893, mean iota = -0.5371, min |iota| = 0.5155, mirror = 0.2151, elongation = 7.2323",
+   "final": {"constructed QI": 0.006307021, "aspect": 8.6893, "mean iota": -0.5371, "min |iota|": 0.515528, "mirror": 0.2151, "elongation": 7.2323, "fine-grid validation": 0.006307}
+  }
+ ],
+ "supplementary_fixed_library_9a6b5efc": [
+  {
+   "label": "previous example",
+   "source": "git show 9a6b5efc",
+   "measurement_commit": "2a5dc923",
+   "wall_seconds": 1712.3,
+   "exit_code": 1,
+   "load_start_end": [8.07, 19.53],
+   "failed_trials": 5,
+   "nfev_njev_per_stage": [[34, 12]],
+   "refinement_seconds": 994.6,
+   "last_stage": "[QI mode 3] constructed QI = 7.886336e-01, aspect = 11.9100, mean iota = -0.4802, mirror = 0.2560, elongation = 4.4650",
+   "final": {}
+  },
+  {
+   "label": "near-QI seed, [2, 3] / [20, 60], mirror weight 10",
+   "source": "working tree",
+   "measurement_commit": "137b870d",
+   "wall_seconds": 1244.2,
+   "exit_code": 0,
+   "load_start_end": [13.2, 11.16],
+   "failed_trials": 1,
+   "nfev_njev_per_stage": [[20, 13], [21, 8]],
+   "refinement_seconds": 810.2,
+   "last_stage": "[QI mode 3] constructed QI = 2.635028e-03, aspect = 6.1470, mean iota = -0.6608, min |iota| = 0.6434, mirror = 0.2220, elongation = 7.9868",
+   "final": {"constructed QI": 0.002655282, "aspect": 6.147, "mean iota": -0.6608, "min |iota|": 0.642936, "mirror": 0.2227, "elongation": 7.9868, "fine-grid validation": 0.002481}
+  },
+  {
+   "label": "previous example, smoke",
+   "source": "git show 9a6b5efc",
+   "measurement_commit": "2a5dc923",
+   "wall_seconds": 217.0,
+   "exit_code": 0,
+   "load_start_end": [9.09, 8.07],
+   "failed_trials": 1,
+   "nfev_njev_per_stage": [[5, 3]],
+   "refinement_seconds": 60.2,
+   "last_stage": "[QI mode 2] constructed QI = 7.539740e-01, aspect = 9.5424, mean iota = -0.4292, mirror = 0.3117, elongation = 6.2453",
+   "final": {"constructed QI": 0.753974, "aspect": 9.5424, "mean iota": -0.4292, "min |iota|": 0.379072, "mirror": 0.3117, "elongation": 6.2453, "fine-grid validation": 0.754}
+  },
+  {
+   "label": "near-QI seed, [2, 3] ladder, smoke",
+   "source": "working tree",
+   "measurement_commit": "137b870d",
+   "wall_seconds": 283.1,
+   "exit_code": 0,
+   "load_start_end": [17.22, 13.2],
+   "failed_trials": 0,
+   "nfev_njev_per_stage": [[5, 4]],
+   "refinement_seconds": 102.6,
+   "last_stage": "[QI mode 2] constructed QI = 4.874311e-03, aspect = 6.5140, mean iota = -0.6046, min |iota| = 0.5586, mirror = 0.2438, elongation = 7.6560",
+   "final": {"constructed QI": 0.004874311, "aspect": 6.514, "mean iota": -0.6046, "min |iota|": 0.558617, "mirror": 0.2438, "elongation": 7.656, "fine-grid validation": 0.004874}
+  }
+ ],
+ "exploration_mirror_weight_1000": {
+  "commit": "137b870d",
+  "max_modes_nfev": [[2], [25]],
+  "wall_seconds": 720.3,
+  "failed_trials": 0,
+  "nfev_njev": [[25, 17]],
+  "refinement_seconds": 426.7,
+  "stage_mirror": 0.2104,
+  "final_mirror": 0.2108,
+  "final_constructed_qi": 0.00291974,
+  "fine_grid_validation": 0.002715
+ },
+ "seeds": {
+  "minimal_seed_nfp2+perturbation (today)": {"nfp": 2, "cost": 6.838358, "constructed QI": 1.333206, "validation QI": 1.319777, "aspect": 11.546236, "min |iota|": 0.397108, "mirror": 0.144206, "elongation": 3.041135},
+  "QI_stel_seed_3127": {"nfp": 3, "cost": 350.089458, "constructed QI": 0.083923, "validation QI": 0.082915, "aspect": 9.892364, "min |iota|": 0.088683, "mirror": 0.241372, "elongation": 16.351208},
+  "QI_nfp2_initial": {"nfp": 2, "cost": 0.092475, "constructed QI": 0.004887, "validation QI": 0.004406, "aspect": 9.997162, "min |iota|": 0.509382, "mirror": 0.24351, "elongation": 5.925687}
+ },
+ "final_solve_study": {
+  "near-QI optimized design (cand2 stage deck, 9a6b5efc)": {
+   "_deck": "cand2_full.0.input.stage2",
+   "_stage (deck numerics)": {"converged": true, "iterations": 3717, "fsq_reached": 9.984e-13, "constructed QI": 0.0026350090205550787, "fine-grid validation": 0.002446875970456709, "seconds": 17.6},
+   "today: ns 101, ftol 1e-14, niter 8000, warm": {"converged": true, "iterations": 3873, "fsq_reached": 9.989e-15, "constructed QI": 0.002655473331685646, "fine-grid validation": 0.0024807105361925536, "seconds": 40.6},
+   "ns 101, ftol 1e-14, niter 30000, warm": {"converged": true, "iterations": 3873, "fsq_reached": 9.989e-15, "constructed QI": 0.002655473331685646, "fine-grid validation": 0.0024807105361925536, "seconds": 29.0},
+   "ns 101, ftol 1e-13, niter 8000, warm": {"converged": true, "iterations": 2818, "fsq_reached": 9.975e-14, "constructed QI": 0.0026551536651867633, "fine-grid validation": 0.002479935208155793, "seconds": 19.6},
+   "ns 101, ftol 1e-12, niter 8000, warm": {"converged": true, "iterations": 2054, "fsq_reached": 9.937e-13, "constructed QI": 0.002654572706902586, "fine-grid validation": 0.0024782494763238424, "seconds": 15.3},
+   "ladder 31/51/101, ftol 1e-12/1e-13/1e-14, niter 5500/8000/20000": {"converged": true, "iterations": 3341, "fsq_reached": 9.956e-15, "constructed QI": 0.0026656358370458736, "fine-grid validation": 0.00248866825478813, "seconds": 55.6},
+   "ladder 31/51/101, ftol 1e-12, niter 5500/8000/8000": {"converged": true, "iterations": 1792, "fsq_reached": 9.99e-13, "constructed QI": 0.0026589722660960366, "fine-grid validation": 0.002487249066940669, "seconds": 30.4},
+   "ns 51, ftol 1e-14, niter 8000, warm": {"converged": true, "iterations": 3099, "fsq_reached": 9.919e-15, "constructed QI": 0.0026356041119359338, "fine-grid validation": 0.002458985637620993, "seconds": 13.6},
+   "ns 51, ftol 1e-12, niter 8000, warm": {"converged": true, "iterations": 1542, "fsq_reached": 9.905e-13, "constructed QI": 0.002634610518287176, "fine-grid validation": 0.002457141965844789, "seconds": 7.7}
+  },
+  "previous example's design (main stage deck; stopped after two settings)": {
+   "_deck": "b0main_full.0.input.stage1",
+   "_stage (deck numerics)": {"converged": false, "iterations": 5500, "fsq_reached": 7.966e-09, "constructed QI": 0.7995397261449445, "fine-grid validation": 0.7747191062445171, "seconds": 24.3},
+   "today: ns 101, ftol 1e-14, niter 8000, warm": {"converged": false, "iterations": 8000, "fsq_reached": 8.643e-08, "constructed QI": 0.8058242094379428, "fine-grid validation": 0.7842414285306255, "seconds": 59.9}
+  }
+ }
+}
