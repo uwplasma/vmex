@@ -1286,6 +1286,7 @@ _SOLVE_STATS: weakref.WeakKeyDictionary[ImplicitConfig, dict[str, Any]] = \
     weakref.WeakKeyDictionary()
 _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "refinement_steps", "refinement_krylov_iterations",
+             "refinement_factorizations",
              "refinement_seconds", "jacobians", "jacobian_columns",
              "jacobian_krylov_iterations", "jacobian_seconds", "adjoints",
              "adjoint_krylov_iterations", "adjoint_seconds")
@@ -1429,6 +1430,22 @@ _REFINE_MAX_RESTARTS = 20
 #: (mpol = ntor = 8) reaches 5.2e-5, raises ``|F|`` and certifies two steps later.
 _REFINE_MIN_PROGRESS = 1.0e-3
 
+#: Newton steps through one raw block factorization, taken before the Krylov
+#: steps above.  The raw force Jacobian is exactly block tridiagonal in
+#: radius, so its factorization is the natural 2-D preconditioner (VMEC2000's
+#: ``precon2d``): on the single-stage example deck two steps with one or two
+#: GMRES iterations each reach ``refine_tol`` from the descent's stopping
+#: point, where the Krylov steps take about 2,000 iterations.
+_REFINE_BLOCK_MAX_STEPS = 6
+
+#: GMRES iterations per block-preconditioned step.  A step that needs more is
+#: outside the factorization's basin; the Krylov steps then take over.
+_REFINE_BLOCK_MAX_ITERATIONS = 50
+
+#: A block step lowering ``|F|`` by less than this factor counts as stalled;
+#: two stalled steps in a row, or one past ``refine_tol``, end the Newton phase.
+_REFINE_BLOCK_STALL = 0.1
+
 
 def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState,
@@ -1518,6 +1535,77 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
     return z, fz, residual_norm, linear
 
 
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _refine_block_factor_core(z: SpectralState, params: ImplicitParams,
+                              frozen: SpectralState, dof_mask: SpectralState,
+                              cfg: ImplicitConfig):
+    """Raw block factors linearized at the iterate ``z``."""
+    fields = _active_state_fields(cfg)
+    probe = int(np.ceil(np.sqrt(len(fields) * int(dof_mask.R_cos.shape[1]))))
+    system = _raw_block_system(params, cfg, frozen, dof_mask, fields, probe, z_star=z)
+    return system.factors, system.row_scale, system.column_scale
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _refine_block_step_core(z: SpectralState, params: ImplicitParams,
+                            frozen: SpectralState, dof_mask: SpectralState,
+                            factors, cfg: ImplicitConfig):
+    """Block-preconditioned Newton step; returns ``(z, F(z), |F(z)|, its, linear)``.
+
+    Solves the raw residual's linearization at ``z`` with GMRES
+    right-preconditioned by ``factors`` (the raw block factorization, possibly
+    from an earlier iterate) to the refinement's forcing term, and evaluates
+    the preconditioned residual the anchor is certified on at the new iterate.
+    Raw and preconditioned residuals share the root.
+    """
+    raw = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+    F = residual_fn(cfg, frozen, dof_mask)
+    project = _dof_projector(cfg, dof_mask)
+    value, linear = jax.linearize(lambda t: raw(t, params), z)
+    b_flat, unravel = ravel_pytree(value)
+    block_factors, row_scale, column_scale = factors
+
+    def precondition(w):
+        return ravel_pytree(_block_inverse_apply(
+            block_factors, lambda tree: _pack_active(cfg, tree),
+            lambda matrix: _unpack_active(cfg, matrix), project,
+            row_scale, column_scale, unravel(w)))[0]
+
+    restart = min(_REFINE_BLOCK_MAX_ITERATIONS, int(b_flat.shape[0]))
+    sol = _solvax_gmres(
+        lambda y: ravel_pytree(linear(unravel(y)))[0], -b_flat,
+        precond=precondition, restart=restart, rtol=_REFINE_FORCING, atol=0.0,
+        max_restarts=1)
+    z_new = jax.tree.map(jnp.add, z, unravel(sol.x))
+    fz_new = F(z_new, params)
+    return (z_new, fz_new, _tree_norm(fz_new), sol.iterations,
+            sol.residual_norm / jnp.linalg.norm(b_flat))
+
+
+def _refine_block_factors(cfg: ImplicitConfig, params: ImplicitParams,
+                          frozen: SpectralState, dof_mask: SpectralState,
+                          z: SpectralState):
+    """Raw block factors at ``z`` through the staged per-config executable."""
+    arguments = commit_to_single_device(tuple(
+        _pin_concrete(cfg, tree) for tree in (z, params, frozen, dof_mask)))
+    factors = _refine_block_factor_core(*arguments, cfg)
+    _count(cfg, refinement_factorizations=1)
+    return factors
+
+
+def _refine_block_step(cfg: ImplicitConfig, params: ImplicitParams,
+                       frozen: SpectralState, dof_mask: SpectralState,
+                       z: SpectralState, factors):
+    """One block-preconditioned Newton step (see :func:`_refine_block_step_core`)."""
+    arguments = commit_to_single_device(tuple(
+        _pin_concrete(cfg, tree) for tree in (z, params, frozen, dof_mask)))
+    z, fz, residual_norm, iterations, linear = _refine_block_step_core(
+        *arguments, factors, cfg)
+    _count(cfg, refinement_steps=1,
+           refinement_krylov_iterations=int(iterations))
+    return z, fz, residual_norm, linear
+
+
 def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
                    state: SpectralState,
                    dof_mask: SpectralState,
@@ -1554,7 +1642,36 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     base = float(_tree_norm(fz))
     if not np.isfinite(base) or base <= tol:
         return state
+    def block_from(z, residual):
+        # Newton through one raw block factorization at the start iterate.
+        # Past ``tol`` a step continues only while it still gains a decade,
+        # so the anchor lands at the residual floor, not just under ``tol``.
+        if _REFINE_BLOCK_MAX_STEPS <= 0:
+            return z, residual
+        factors = _refine_block_factors(cfg, params, state, dof_mask, z)
+        best_z, best, stalled = z, residual, 0
+        for _ in range(_REFINE_BLOCK_MAX_STEPS):
+            z, _, residual_norm, linear = _refine_block_step(
+                cfg, params, state, dof_mask, z, factors)
+            previous, residual = residual, float(residual_norm)
+            if not np.isfinite(residual):
+                break
+            if residual < best:
+                best_z, best = z, residual
+            stalled = stalled + 1 if residual > _REFINE_BLOCK_STALL * previous else 0
+            if stalled and best <= tol:
+                break
+            if stalled >= 2 or (float(linear) > _REFINE_MIN_PROGRESS
+                                and residual >= previous):
+                break
+        return best_z, best
+
     def refine_from(z, fz, residual):
+        block_z, block = block_from(z, residual)
+        if block <= tol:
+            return block_z, block
+        # The block finish missed: replay the Krylov refinement from the same
+        # start and keep whichever lands lower.
         best_z, best = z, residual
         for _ in range(_REFINE_MAX_STEPS):
             # GCROT avoids the small-eigenvalue stagnation seen with ordinary
@@ -1575,6 +1692,8 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
             # No Newton direction: see _REFINE_MIN_PROGRESS.
             if float(linear) > _REFINE_MIN_PROGRESS and residual >= previous:
                 break
+        if block < best:
+            return block_z, block
         return best_z, best
 
     if initial_correction is not None:

@@ -68,6 +68,7 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/polish_force_error_*.json", "benchmarks/strong_polish.py"),
     ("benchmarks/qa_optimization_startup_*.json", "benchmarks/qa_optimization_startup.py"),
     ("benchmarks/single_stage_profile_*.json", "benchmarks/single_stage_profile.py"),
+    ("benchmarks/qi_optimization_profile_*.json", "benchmarks/qi_optimization_profile.py"),
     ("benchmarks/optimization_counters_*.json", "benchmarks/optimization.py"),
     ("benchmarks/adjoint_formulation_*.json", "benchmarks/adjoint_formulation.py"),
     ("benchmarks/newton_finish_arms_*.json", "benchmarks/newton_finish_arms.py"),

@@ -6,8 +6,8 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-92 committed artifacts: 38 standalone records and 1 grouped directory holding
-54 files. 34 of the 39 entries below are cited by a page, a test or another
+93 committed artifacts: 39 standalone records and 1 grouped directory holding
+54 files. 35 of the 40 entries below are cited by a page, a test or another
 script; 5 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -50,6 +50,7 @@ hand rather than by a script in this tree.
 | `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst`, `plan.md` |
 | `benchmarks/qa_optimization_startup_main_m4.json` | `benchmarks/qa_optimization_startup.py` | `980b602a` |  | *nothing* |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst` |
+| `benchmarks/qi_optimization_profile_office.json` | `benchmarks/qi_optimization_profile.py` | `3ee6ca58` | 2026-09-14 | `docs/reference/objectives.rst`, `examples/optimization/QI_optimization.py` |
 | `benchmarks/review_20260905.json` |  |  | 2026-09-06 | *nothing* |
 | `benchmarks/review_20260913.json` |  | `f09288b3` | 2026-09-13 | `benchmarks/review_20260913_equilibrium.py`, `benchmarks/review_20260913_exterior.py`, `plan.md` |
 | `benchmarks/single_stage_profile_m4.json` | `benchmarks/single_stage_profile.py` | `50814b65` | 2026-09-13 | `examples/optimization/single_stage_optimization.py`, `plan.md` |

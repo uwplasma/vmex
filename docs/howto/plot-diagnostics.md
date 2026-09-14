@@ -53,9 +53,8 @@ $\epsilon_{\rm eff}^{3/2}$ (NEO_JAX at the bounded
 {func}`~vmex.core.neoclassical.diagnostic_neo_config` resolution) and the
 fast-ion proxy $\Gamma_c$
 ({func}`~vmex.core.gammac.gamma_c_from_wout` at a compact radial-trend
-sampling) sharing one dimensionless right axis — the relative radial
-force error
-$\epsilon_F=|(\mathbf J\times\mathbf B-\nabla p)_s|/(|(\mathbf J\times\mathbf B)_s|+|(\nabla p)_s|)$,
+sampling) sharing one dimensionless right axis — the force error
+$\langle|\mathbf J\times\mathbf B-\nabla p|\rangle_s/\langle|\nabla(B^2/2\mu_0)|\rangle_V$,
 Mercier `DMerc` and the Glasser
 resistive-interchange $D_R$ with $V''(s)$ on a color-matched right axis,
 a 3-D LCFS, and the second adiabatic invariant in the polar disk
@@ -68,14 +67,16 @@ a host-side reconstruction of the WOUT file, which carries the sine-parity
 partner tables and so covers both symmetry classes. The reconstruction checks
 itself by reproducing the stored `DMerc` profile from the same integrals; on
 mismatch the curve is omitted with a panel note rather than drawn
-unvalidated. The force-error maximum in the scalar card uses the solved
-interior surfaces; WOUT's axis and boundary values are extrapolations. The
-normalization breaks down in vacuum: with $\nabla p=0$ and no net current,
-both the numerator and every term of the denominator
-({func}`~vmex.core.postprocess.force_balance`) are radial differences of
-near-constant `buco`/`bvco`, so the ratio is $O(1)$ discretization noise
-rather than a force error. Read the panel only for finite-pressure or
-current-carrying cases.
+unvalidated. The force error is rebuilt from the WOUT tables on the interior
+surfaces and divided by the volume average of $|\nabla(B^2/2\mu_0)|$ over
+$V$: $0.1\le s\le 0.99$, the normalization DESC and the polish certificate
+report; the scalar card gives the volume average of the ratio. It does not
+saturate and stays defined in vacuum. A converged low-resolution deck (for
+example `mpol = ntor = 2`) can still read high: that is spectral truncation
+error, which `equif` could not show, not a solver failure. WOUT's `equif`
+({func}`~vmex.core.postprocess.force_balance`) is not plotted: it is bounded
+by 1 and equals 1 on every surface of a currentless vacuum, however well
+converged.
 The confinement panel's two right-axis profiles are radial *trends*, not
 transport numbers: both diagnostics run at bounded summary resolution, they
 share the summary's one in-process Boozer transform where the mathematics is
