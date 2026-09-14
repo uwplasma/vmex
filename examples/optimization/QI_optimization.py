@@ -15,7 +15,7 @@ from vmex.core.input import VmecInput
 from vmex.core.qi import ConstructedQIResidual
 
 SURFACES = np.linspace(0.1, 1.0, 6)
-MAX_MODES, MAX_NFEV = [2, 3], [20, 60]
+MAX_MODES, MAX_NFEV = [2], [20]  # a max_mode = 3 stage lowered cost 1 % for 45 % of the run
 ASPECT_TARGET = 5.0
 IOTA_FLOOR = 0.51
 MIRROR_LIMIT = 0.21
@@ -49,9 +49,11 @@ def iota_floor(equilibrium_state, solver_context):
     return jnp.maximum(
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
+# A finite-weight hinge settles just above its threshold, and the final ns = 101
+# solve reads the mirror ratio ~4e-4 above the ns = 31 stage: penalize from 1 % below.
 def mirror_excess(equilibrium_state, solver_context):
     return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
+        opt.mirror_ratio(equilibrium_state, solver_context) - 0.99 * MIRROR_LIMIT, 0.0)
 
 def elongation_excess(equilibrium_state, solver_context):
     return jnp.maximum(
@@ -60,7 +62,7 @@ def elongation_excess(equilibrium_state, solver_context):
 objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, 0.005),
     (iota_floor, 0.0, 10.0),
-    (mirror_excess, 0.0, 10.0),
+    (mirror_excess, 0.0, 1000.0),
     (elongation_excess, 0.0, 10.0),
 ]
 qi_terms = [(qi, 0.0, 10.0), *objective_function_terms]
