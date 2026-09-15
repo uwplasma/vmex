@@ -26,14 +26,17 @@ def _neo_imports():
 def diagnostic_neo_config():
     """Return the bounded NEO resolution used by VMEX summary figures.
 
-    This setting is intended for radial trends, not final transport numbers.
-    Pass a ``neo_jax.NeoConfig`` with tighter tolerances to
-    :func:`epsilon_effective_from_wout` for publication calculations.
+    On the bundled NFP=2 QA and NFP=4 QI finite-beta decks this stays within
+    4% of NEO_JAX's default ``NeoConfig``.  A 16 x 16 spline grid aliases the
+    summary Boozer spectrum (``mboz=16``) and fewer than 20 steps per field
+    period or 200 field periods leave 7-30% errors.  Pass a
+    ``neo_jax.NeoConfig`` to :func:`epsilon_effective_from_wout` for
+    publication calculations.
     """
     NeoConfig, _ = _neo_imports()
     return NeoConfig(
-        theta_n=16, phi_n=16, npart=8, multra=1, no_bins=12,
-        nstep_per=4, nstep_min=20, nstep_max=40, acc_req=0.2,
+        theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
+        nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
         max_rational_field_periods=100000,
     )
 
