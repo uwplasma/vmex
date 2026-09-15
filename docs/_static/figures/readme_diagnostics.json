@@ -2,7 +2,7 @@
   "schema": "vmex.readme-diagnostics-figures/1",
   "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
   "provenance": {
-    "measurement_commit": "3353ad7993b66865c3b9c0a31ea5eed409204be4",
+    "measurement_commit": "edb61e31070d4148fe8a6f17dfe375362f7eb810",
     "measurement_dirty": false,
     "input_data_embedded": false,
     "measurement_date": "2026-09-14",
@@ -12,7 +12,8 @@
     "versions": {
       "vmex": "0.8.1",
       "jax": "0.11.1",
-      "matplotlib": "3.11.1"
+      "matplotlib": "3.11.1",
+      "neo_jax": "1.0.2"
     }
   },
   "cases": [
@@ -23,7 +24,7 @@
       "deck_sha256": "90de9afb5a70e764f1f31a56223df8606787c971ce27aa3297c0e4b1986fd405",
       "cli_equivalent": "vmex examples/data/input.nfp2_QA_finite_beta --plot",
       "figure": "docs/_static/figures/readme_diagnostics_qa.webp",
-      "figure_sha256": "609493b1f3ab6426d19d430cb9afe5b7e5418473aa627ba0e30f769570879f70",
+      "figure_sha256": "da14f18251bb69c7c78d0c511f90372dce0223988ca7005aeb351c6fb6523f0b",
       "figure_pixels": [
         1760,
         1349
@@ -43,7 +44,7 @@
       "deck_sha256": "a13dea2bdeb7643d377bfca0d9b96efd3b39b37614a442e2025982e618312ff1",
       "cli_equivalent": "vmex examples/data/input.nfp4_QI_finite_beta --plot",
       "figure": "docs/_static/figures/readme_diagnostics_summary.webp",
-      "figure_sha256": "ff5d77ef392db4b7b2081939d4993bac87374de3a6a95a673c5437478ebc560d",
+      "figure_sha256": "1808d0d80b37c637f93d08276b7515aab55e4f583ff8b32289454a5e9e9ddbcd",
       "figure_pixels": [
         1760,
         1349
