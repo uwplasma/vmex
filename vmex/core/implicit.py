@@ -2716,6 +2716,11 @@ def _raw_block_apply(
         system.row_scale, system.column_scale, rhs, transpose=transpose)
 
 
+#: Raw-block refinement passes for a response column the corrector left
+#: uncertified (fixed, so a hard point can never loop).
+_BLOCK_REFINEMENT_PASSES = 2
+
+
 def _implicit_evolved_tangent_multi_rhs(
     params: ImplicitParams,
     cfg: ImplicitConfig,
@@ -2781,6 +2786,36 @@ def _implicit_evolved_tangent_multi_rhs(
         correct, (tangent_batch, initial),
         chunk_size=max(1, int(response_chunk_size)),
     )
+
+    def refine(args):
+        # Iterative refinement through the stored raw block factors, as the
+        # block adjoint does, for a column the corrector left uncertified.
+        tangent, x, converged = args
+        b = raw_rhs(tangent)
+        for _ in range(_BLOCK_REFINEMENT_PASSES):
+            defect = jax.tree.map(jnp.subtract, b, system.operator(x))
+            x = jax.tree.map(jnp.add, x, _raw_block_apply(system, defect))
+        ok = _tree_norm(jax.tree.map(jnp.subtract, b, system.operator(x))) <= \
+            _adjoint_acceptance(cfg, _tree_norm(b), certify_rtol)
+        return x, jnp.logical_and(ok, jnp.logical_not(converged))
+
+    def refine_uncertified(_):
+        refined, gained = chunk_map(
+            refine, (tangent_batch, solution, report.converged),
+            chunk_size=max(1, int(response_chunk_size)),
+        )
+        kept = jax.tree.map(
+            lambda new, old: jnp.where(
+                gained.reshape((-1,) + (1,) * (new.ndim - 1)), new, old),
+            refined, solution)
+        return kept, report._replace(
+            converged=jnp.logical_or(report.converged, gained))
+
+    # Paid only when a column misses: a fixed number of passes, so a hard
+    # point costs a few block solves instead of the reverse lane's row map.
+    solution, report = jax.lax.cond(
+        jnp.all(report.converged), lambda _: (solution, report),
+        refine_uncertified, operand=None)
     # The caller decides how to handle a missed certificate. Public optimizer
     # lanes never expose such a response as an exact derivative.
     return solution, report
