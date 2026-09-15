@@ -171,9 +171,11 @@ def test_multigrid_moves_residual_continuation_with_the_state():
             break
     if len(devices) < 2:
         pytest.skip("two devices unavailable")
+    # Two short rungs: the failure is in how the second rung's carry is
+    # assembled, so it needs a rung boundary, not convergence.
     inp = replace(
         VmecInput.from_file(DATA / "input.solovev"),
-        ns_array=[5, 11], niter_array=[200, 200], ftol_array=[1e-9, 1e-11],
+        ns_array=[3, 5], niter_array=[2, 2], ftol_array=[1.0, 1.0],
     )
     placements = []
 
@@ -194,6 +196,7 @@ def test_multigrid_moves_residual_continuation_with_the_state():
 
     assert placements[:2] == [devices[0], devices[1]]
     assert np.all(np.isfinite(np.asarray(result.rmnc)))
+    assert np.asarray(result.rmnc).shape[0] == 5  # the fine rung really ran
 
 
 def test_fixed_boundary_honors_second_device_without_outer_context():

@@ -260,7 +260,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The lane ran 6:39-7:06 before the cross-device multigrid guard joined it
+    # and hit the 10-minute cap at 10:17 with a heavier first draft of that
+    # test.  The guard is now a two-iteration ladder, but a two-core runner has
+    # little headroom left at 10.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:
