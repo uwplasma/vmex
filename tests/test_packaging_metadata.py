@@ -106,3 +106,26 @@ def test_import_guard_names_found_required_and_fix(monkeypatch) -> None:
     with pytest.raises(ImportError, match=(
             r'scipy >= 1\.16 \(found 1\.15\.3\).*pip install -U "scipy>=1\.16"')):
         vmex._check_supported_versions()
+
+
+def test_import_guard_rejects_python_310(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import vmex
+
+    monkeypatch.setattr(vmex, "_sys", SimpleNamespace(
+        version_info=(3, 10, 14), version="3.10.14 (main, Mar 1 2026)"))
+    with pytest.raises(ImportError, match=r"Python >= 3\.11 \(found 3\.10\.14\)"):
+        vmex._check_supported_versions()
+
+
+def test_import_guard_skips_packages_without_metadata(monkeypatch) -> None:
+    import vmex
+
+    def version(name):
+        if name == "scipy":
+            raise vmex._PackageNotFoundError(name)
+        return "0.11.1"
+
+    monkeypatch.setattr(vmex, "_package_version", version)
+    assert vmex._check_supported_versions() is None
