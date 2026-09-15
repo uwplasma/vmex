@@ -9,7 +9,7 @@ name = "vmex"
 version = "0.8.1"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{name = "Rogerio Jorge", email = "rogerio.jorge@wisc.edu"}]
 license = "MIT"
 keywords = ["vmec", "stellarator", "mhd", "jax", "optimization"]
@@ -17,7 +17,6 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Physics",
@@ -25,14 +24,15 @@ classifiers = [
 
 dependencies = [
   "numpy",
-  # 0.4.36 added the jax_logging_level config option that vmex/__init__ sets
-  # at import to quiet XLA/PjRt; an older JAX only gets a RuntimeWarning and
-  # environment-level suppression.  The macOS persistent-cache guard in
-  # vmex/_compat.py is conditional on the installed jaxlib and needs no floor.
-  "jax>=0.4.36",
-  "jaxlib>=0.4.36",
-  # 1.15 added least_squares(callback=), used by the optimization examples.
-  "scipy>=1.15",
+  # 0.9.2 is the oldest JAX a CI lane tests (ci.yml jax-compatibility).
+  # vmex/__init__.py refuses older jax/jaxlib/scipy at import with the same
+  # floors.  The macOS persistent-cache guard in vmex/_compat.py still applies
+  # to jaxlib 0.9.x.
+  "jax>=0.9.2",
+  "jaxlib>=0.9.2",
+  # 1.16 added least_squares(callback=), which the optimization examples pass;
+  # SciPy 1.16 needs Python 3.11, hence requires-python.
+  "scipy>=1.16",
   "netCDF4",
   "h5py",
   "matplotlib",
@@ -49,7 +49,6 @@ dependencies = [
   # 0.20.0 adds the matrix-free least-squares APIs used by strong-force
   # polishing. 0.19.0 contains continuation but predates the least-squares PR.
   "solvax>=0.20.0",
-  "tomli; python_version < '3.11'",
 ]
 
 [project.scripts]

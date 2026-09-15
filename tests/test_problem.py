@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmex
 from vmex.core.problem import Evaluation, FunctionProblem, VmecProblem
 
 
@@ -567,12 +566,6 @@ def test_vmex_jax_logging_default_and_override() -> None:
         capture_output=True, text=True,
     )
     assert standard_override.stdout.strip() == "INFO"
-
-
-def test_old_jax_gets_one_actionable_logging_notice() -> None:
-    old_jax = SimpleNamespace(__version__="0.4.35", config=SimpleNamespace())
-    with pytest.warns(RuntimeWarning, match="JAX 0.4.35.*Upgrade JAX"):
-        vmex._configure_jax_logging(old_jax)
 
 
 def test_direct_jaxopt_and_optax_contracts():

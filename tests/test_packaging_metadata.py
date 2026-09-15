@@ -3,13 +3,11 @@ from __future__ import annotations
 from importlib.metadata import version as package_version
 
 from packaging.requirements import Requirement
+from packaging.version import Version
 from pathlib import Path
-import sys
+import tomllib
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,3 +81,28 @@ def test_build_system_declares_setuptools_license_validation_dependency() -> Non
 
     assert "setuptools" in build_requires
     assert "packaging" in build_requires
+
+
+def test_import_guard_floors_match_pyproject() -> None:
+    import vmex
+
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert data["project"]["requires-python"] == ">=3.11"
+    floors = {}
+    for requirement in map(Requirement, data["project"]["dependencies"]):
+        if requirement.name in vmex._MINIMUM_VERSIONS:
+            (spec,) = requirement.specifier
+            assert spec.operator == ">="
+            floors[requirement.name] = Version(spec.version).release
+    assert floors == vmex._MINIMUM_VERSIONS
+
+
+def test_import_guard_names_found_required_and_fix(monkeypatch) -> None:
+    import vmex
+
+    monkeypatch.setattr(
+        vmex, "_package_version",
+        lambda name: "1.15.3" if name == "scipy" else "0.11.1")
+    with pytest.raises(ImportError, match=(
+            r'scipy >= 1\.16 \(found 1\.15\.3\).*pip install -U "scipy>=1\.16"')):
+        vmex._check_supported_versions()

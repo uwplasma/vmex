@@ -146,7 +146,34 @@ from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _package_version
 import os as _os
 from pathlib import Path as _Path
-import warnings as _warnings
+import sys as _sys
+
+from packaging.version import Version as _Version
+
+# Oldest supported versions, equal to the pyproject.toml floors.  SciPy 1.16
+# added the least_squares(callback=) that the optimization examples pass.
+_MINIMUM_VERSIONS = {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2)}
+
+
+def _check_supported_versions() -> None:
+    """Fail at import, not deep inside an example, on an unsupported stack."""
+    if _sys.version_info < (3, 11):
+        raise ImportError(
+            f"vmex requires Python >= 3.11 (found {_sys.version.split()[0]}); "
+            "install vmex in a Python 3.11+ environment.")
+    for name, minimum in _MINIMUM_VERSIONS.items():
+        try:
+            found = _package_version(name)
+        except _PackageNotFoundError:
+            continue  # the import below reports a missing package itself
+        if _Version(found).release < minimum:
+            required = ".".join(map(str, minimum))
+            raise ImportError(
+                f"vmex requires {name} >= {required} (found {found}); "
+                f'run: pip install -U "{name}>={required}"')
+
+
+_check_supported_versions()
 
 from ._compat import _default_compilation_cache_dir as _default_jax_cache_dir
 
@@ -188,18 +215,7 @@ import jax as _jax
 
 
 def _configure_jax_logging(jax_module) -> None:
-    """Quiet JAX by default, with explicit overrides and an old-JAX notice."""
-    if not hasattr(jax_module.config, "jax_logging_level"):
-        _warnings.warn(
-            f"JAX {getattr(jax_module, '__version__', 'unknown')} does not "
-            "provide jax_logging_level (available since JAX 0.4.36). VMEX "
-            "will use environment-level log suppression, but repeated "
-            "XLA/PjRt warnings may still appear. Upgrade JAX to silence them "
-            "reliably.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return
+    """Quiet JAX by default, with explicit overrides."""
     level = _os.environ.get("VMEX_JAX_LOGGING_LEVEL")
     if level is None:
         level = _os.environ.get("JAX_LOGGING_LEVEL", "ERROR")

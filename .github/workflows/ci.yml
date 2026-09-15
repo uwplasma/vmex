@@ -110,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -127,8 +127,8 @@ jobs:
           echo "working tree: ${size_kb} KiB"
           test "$size_kb" -lt 40960
       - name: Load the docs configuration
-        # The `quality` job builds the docs on 3.12 only, so a 3.11+ construct
-        # in docs/conf.py (tomllib, say) would break the docs build on the
+        # The `quality` job builds the docs on 3.12 only, so a 3.12+ construct
+        # in docs/conf.py would break the docs build on the
         # declared floor with no job noticing. Executing conf.py needs no Sphinx.
         run: python -c "import runpy; runpy.run_path('docs/conf.py')"
       - name: Run fast tests

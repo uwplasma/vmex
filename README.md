@@ -1,7 +1,7 @@
 # VMEX
 
 [![PyPI version](https://img.shields.io/pypi/v/vmex.svg)](https://pypi.org/project/vmex/)
-[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/github/license/uwplasma/vmex)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/uwplasma/vmex/ci.yml?branch=main&label=ci)](https://github.com/uwplasma/vmex/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
@@ -35,7 +35,7 @@ vmex --doctor
 vmex --test
 ```
 
-Python 3.10–3.12 is tested. CPU JAX is included; for GPUs follow the
+Python 3.11–3.12 is tested. CPU JAX is included; for GPUs follow the
 [JAX installation guide](https://docs.jax.dev/en/latest/installation.html) and
 [VMEX GPU guide](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html).
 Optional extras include `vmex[coils]` (ESSOS), `vmex[freeb]` (virtual casing),
