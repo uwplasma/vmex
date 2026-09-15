@@ -236,7 +236,7 @@ def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "jit_restoration_probe",
          "tests/test_scaling.py::test_input_scaling_changes_only_dimensional_quantities",
-         "tests/test_cli_freeboundary.py::test_free_boundary_default_raises_before_wout",
+         "tests/test_cli_freeboundary.py::test_free_boundary_keeps_the_state_on_iteration_exhaustion",
          "tests/test_optimize.py::test_public_problem_factory_validation"],
         cwd=ROOT, env=env, text=True, capture_output=True, timeout=120,
     )

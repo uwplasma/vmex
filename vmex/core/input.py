@@ -708,7 +708,7 @@ class VmecInput:
     tcon0: float = 1.0           #: constraint-force multiplier (bcovar.f)
     lforbal: bool = False        #: replace m=1,n=0 R/Z forces by average force balance
     lmove_axis: bool = True      #: improve the axis when the first force sum is > 1e2
-    lfull3d1out: bool = False    #: write a WOUT when the iteration limit is reached
+    lfull3d1out: bool = False    #: request the full threed1 output (J. Geiger)
     aphi: Any = None             #: radial-flux remap polynomial (default [1,0,...], len 20)
     phiedge: float = 1.0         #: total enclosed toroidal flux [Wb]
     nstep: int = 10              #: iterations between progress prints

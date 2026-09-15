@@ -49,7 +49,7 @@ def test_fixed_boundary_cli_forwards_device(monkeypatch, tmp_path, choice, expec
     assert cli._solve_input_file(args, tmp_path / "input.case", tmp_path, emit=print) == 0
     assert seen["device"] == expected
     assert seen["release_stage_cache"] is True
-    assert seen["raise_on_max_iterations"] is True
+    assert seen["raise_on_max_iterations"] is False
     assert seen["prefetch_compile"] is True
 
 
@@ -84,7 +84,7 @@ def test_free_boundary_cli_forwards_device(monkeypatch, tmp_path):
     assert seen["device"] == "gpu"
     assert seen["ftol_array"] is ftol_array
     assert seen["niter_array"] is niter_array
-    # VMEC2000 only forces an NITER-exhausted state through fileout when
-    # LFULL3D1OUT=T. The default false value therefore raises before WOUT.
-    assert seen["raise_on_max_iterations"] is True
+    # vmec.f sends an NITER-exhausted state through fileout whatever
+    # LFULL3D1OUT is, so the CLI never raises before the WOUT path.
+    assert seen["raise_on_max_iterations"] is False
     assert seen["prefetch_compile"] is False

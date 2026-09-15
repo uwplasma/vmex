@@ -43,6 +43,16 @@ behavior, where a mere NITER exhaustion of the final grid still terminates
 normally through the output path.  The exit code remains the distinct
 ``ier_flag = 2``.  Fatal numerical/Jacobian errors never produce a WOUT
 and exit with their own ``ier_flag`` codes.
+
+``LFULL3D1OUT`` does not gate that WOUT.  ``vmec.f`` re-enters ``runvmec``
+with ``ictrl(1) = output_flag + cleanup_flag`` on ``more_iter_flag``, and
+sets ``ictrl(2) = 0`` (``norm_term_flag``); ``LFULL3D1OUT=T`` only upgrades
+that to ``successful_term_flag`` for the extra threed1 request message.
+``runvmec.f`` calls ``fileout`` whenever ``ier_flag /= more_iter_flag``, and
+``fileout.f`` computes ``lwrite = lterm .or. ier_flag == more_iter_flag``
+before ``wrout``, so the WOUT is written either way.  VMEX keeps the
+non-convergence visible where VMEC2000 loses it: ``wout.ier_flag`` records
+``2`` rather than the ``0`` ``vmec.f`` substitutes.
 """
 
 from __future__ import annotations
@@ -801,10 +811,9 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             restart_from=restart_source,
             verbose=verbose,
             emit=emit,
-            # vmec.f only forces an NITER-exhausted state through fileout
-            # when LFULL3D1OUT=T.  Otherwise the typed ier_flag=2 error
-            # returns before the WOUT path.
-            raise_on_max_iterations=not bool(inp.lfull3d1out),
+            # vmec.f sends an NITER-exhausted state through fileout whether
+            # or not LFULL3D1OUT is set; see the module docstring.
+            raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
             # Opt-in cold-run overlap; the library default is also False.
@@ -829,7 +838,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             verbose=verbose,
             emit=emit,
             # vmec.f/fileout.f semantics — see the free-boundary call above.
-            raise_on_max_iterations=not bool(effective_inp.lfull3d1out),
+            raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
             # Opt-in cold-run overlap; background compiler threads otherwise
@@ -867,6 +876,14 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
         emit(f"\n Wrote WOUT file: {wout_path}")
         if not bool(result.converged):
             emit("\n HINT : increase NITER or loosen FTOL")
+    elif not bool(result.converged):
+        # The typed termination message used to reach --quiet runs through
+        # the raised convergence error.  The CLI keeps the state instead, so
+        # say why the exit code is non-zero rather than exiting silently.
+        from .errors import WERROR_MESSAGES
+
+        emit(f"\n {WERROR_MESSAGES.get(int(result.ier_flag), 'UNKNOWN TERMINATION CODE')}")
+        emit(f" Wrote WOUT file: {wout_path}")
 
     plot_dir = outdir if outdir is not None else input_path.parent
     if args.plot is not None:

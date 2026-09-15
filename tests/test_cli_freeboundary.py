@@ -205,14 +205,14 @@ def test_missing_mgrid_falls_back_to_fixed_boundary_without_wout(tmp_path):
     assert "FIXED-BOUNDARY" in stdout
     assert "VACUUM PRESSURE TURNED ON" not in stdout
     assert "In VACUUM" not in stdout
-    # The capped fixed-boundary fallback exhausts NITER.  With the deck's
-    # default LFULL3D1OUT=F, VMEC2000 returns ier=2 before fileout.
+    # The capped fixed-boundary fallback exhausts NITER: ier=2 with the
+    # state kept, as vmec.f/fileout.f do.
     assert rc == MORE_ITER_FLAG
-    assert not (tmp_path / f"wout_{CASE}.nc").exists()
+    assert (tmp_path / f"wout_{CASE}.nc").exists()
 
 
-def test_free_boundary_default_raises_before_wout(monkeypatch, tmp_path):
-    """The free solver receives the same LFULL3D1OUT gate as fixed boundary."""
+def test_free_boundary_keeps_the_state_on_iteration_exhaustion(monkeypatch, tmp_path):
+    """The free solver reaches the WOUT path on ier=2, as fixed boundary does."""
     deck = tmp_path / DECK.name
     shutil.copyfile(DECK, deck)
     shutil.copyfile(MGRID, tmp_path / MGRID.name)
@@ -232,7 +232,7 @@ def test_free_boundary_default_raises_before_wout(monkeypatch, tmp_path):
 
     monkeypatch.setattr(multigrid, "solve_free_boundary_multigrid", fake_solve)
     rc, stdout = _run_cli([str(deck), "--outdir", str(tmp_path)])
-    assert seen == {"raise_on_max_iterations": True}
+    assert seen == {"raise_on_max_iterations": False}
     assert rc == MORE_ITER_FLAG
     assert WERROR_MESSAGES[MORE_ITER_FLAG] in stdout
     assert not (tmp_path / f"wout_{CASE}.nc").exists()
