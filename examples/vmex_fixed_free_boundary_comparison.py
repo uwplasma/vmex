@@ -16,7 +16,8 @@ not uniquely reconstruct those removed volume currents. The comparison makes
 that physical limitation measurable instead of treating the two problems as
 mathematically identical.
 
-Preview: this script needs ESSOS branch ``rj/vmex-optimization-interfaces``.
+Preview: this script needs ESSOS with uwplasma/ESSOS#58 (commit ``1b3210ca``), which
+PyPI essos 0.16 predates.
 """
 
 from dataclasses import replace
@@ -44,8 +45,8 @@ from essos.fields import BiotSavart
 
 if not all(hasattr(Coils, name) for name in ("from_json", "with_dofs")):
     raise ImportError(
-        "This example needs ESSOS branch rj/vmex-optimization-interfaces "
-        "(uwplasma/ESSOS#58)."
+        "This example needs ESSOS with uwplasma/ESSOS#58, which PyPI essos 0.16 predates: "
+        'pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"'
     )
 
 DATA = Path(__file__).resolve().parent / "data"

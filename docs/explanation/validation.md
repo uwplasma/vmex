@@ -249,8 +249,10 @@ remaining functional/chart limitations.
 
 The bundled `input.nfp4_QI_finite_beta` run reached **2.53% beta** at
 `ns=51` in 2,599 iterations. This is an equilibrium/diagnostic example, not
-a new optimization result or a continuous-force certificate. Its input,
-figure and solve provenance are recorded in
+a new optimization result or a continuous-force certificate. The README's QA
+panel, from the bundled `input.nfp2_QA_finite_beta`, reached **2.70% beta** at
+`ns=45` in 757 iterations and is the same kind of example. Their inputs,
+figures and solve provenance are recorded in
 [readme_diagnostics.json](../_static/figures/readme_diagnostics.json).
 
 ![Finite-beta QI equilibrium diagnostics](../_static/figures/readme_diagnostics_summary.webp)
@@ -263,7 +265,7 @@ solve. The tests below check particular cases; they do not guarantee that
 every returned state satisfies both conditions. The ordinary refinement
 fallback and polished nonlinear stationarity gate remain under review.
 
-**Fixed boundary** (`tests/test_implicit_grad.py`). Four adjoint gradients on
+**Fixed boundary** (`tests/test_implicit_grad.py`, `tests/test_implicit_grad_fd.py`). Four adjoint gradients on
 `solovev` — `d(wb)/d(RBC)`, `d(aspect)/d(RBC)`, `d(wb)/d(phiedge)`,
 `d(wp)/d(pres_scale)` — must match central finite differences to
 `rel <= 1e-6`. The 3-D `li383_low_res` boundary gradient is checked at

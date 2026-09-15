@@ -93,8 +93,9 @@ turbulence = [
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
 ]
-# ESSOS 0.16 is VMEX's stable coil/CLI interface. Examples that need branch
-# rj/vmex-optimization-interfaces (PR #58) fail early with a clear message.
+# ESSOS 0.16 is VMEX's stable coil/CLI interface. Examples that need the unreleased
+# uwplasma/ESSOS#58 (ESSOS commit 1b3210ca) fail early and print the pip command that
+# installs it; PyPI does not accept a git URL here, so the extra cannot pin it.
 coils = [
   "essos>=0.16",
 ]

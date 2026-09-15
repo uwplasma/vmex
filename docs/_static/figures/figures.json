@@ -94,23 +94,43 @@
       ]
     },
     {
+      "path": "docs/_static/figures/readme_diagnostics_qa.webp",
+      "sha256": "da14f18251bb69c7c78d0c511f90372dce0223988ca7005aeb351c6fb6523f0b",
+      "bytes": 135808,
+      "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
+      "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
+      "inputs": [
+        "examples/data/input.nfp2_QA_finite_beta"
+      ],
+      "record": "docs/_static/figures/readme_diagnostics.json",
+      "generated": "2026-09-14",
+      "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "The `vmex examples/data/input.nfp2_QA_finite_beta --plot` summary panel, rendered with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple) and the DESC-normalized force panel, and downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars, the equivalent CLI command, and the run's commit and versions."
+    },
+    {
       "path": "docs/_static/figures/readme_diagnostics_summary.webp",
-      "sha256": "7e87a2dc037da1e6152900ea8b68f86333b8500ab414c9be6372ac2089cc7dc7",
-      "bytes": 414012,
+      "sha256": "1808d0d80b37c637f93d08276b7515aab55e4f583ff8b32289454a5e9e9ddbcd",
+      "bytes": 177730,
       "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "inputs": [
         "examples/data/input.nfp4_QI_finite_beta"
       ],
       "record": "docs/_static/figures/readme_diagnostics.json",
-      "generated": "2026-09-03",
+      "generated": "2026-09-14",
       "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
+        "README.md",
         "docs/explanation/validation.md"
       ],
-      "note": "Regenerated from a bundled deck in 2026-09; the figure it replaced had no generator and no recorded input. The record file carries the deck hash, the solved scalars the README quotes, and the run's commit and versions."
+      "note": "Regenerated from a bundled deck in 2026-09; the figure it replaced had no generator and no recorded input. Re-rendered on 2026-09-14 as the `vmex examples/data/input.nfp4_QI_finite_beta --plot` summary panel with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple), the DESC-normalized force panel and D_R reconstructed on the solver grid, downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars the validation page quotes, the equivalent CLI command, and the run's commit and versions."
     },
     {
       "path": "docs/_static/figures/readme_equilibrium_showcase.webp",

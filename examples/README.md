@@ -1,9 +1,9 @@
 # Examples
 
 All runnable examples live under this single `examples/` tree. Examples marked
-*preview* need ESSOS branch
-[`rj/vmex-optimization-interfaces`](https://github.com/uwplasma/ESSOS/tree/rj/vmex-optimization-interfaces)
-(PR #58).
+*preview* need ESSOS with
+[uwplasma/ESSOS#58](https://github.com/uwplasma/ESSOS/pull/58), which is not on PyPI:
+`pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"`.
 
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):

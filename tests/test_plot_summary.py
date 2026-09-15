@@ -629,6 +629,64 @@ def test_d_r_self_check_rejects_inconsistent_dmerc(solved_case):
     assert info["d_r"] is None
 
 
+def _mirror_toroidal_angle(wout):
+    """Return the WOUT of the same equilibrium seen through ``zeta -> -zeta``.
+
+    Modes ``(m, n)`` with ``m > 0`` move to ``(m, -n)``; ``m = 0`` sine
+    coefficients change sign.  The pseudo-scalars (iota, the poloidal
+    covariant field, ``B_s`` and ``<J.B>``) flip.  This is the map a solve of
+    the mirrored deck produces, checked table by table on the NFP=4 QI deck
+    to 5e-10.
+    """
+    def flip(table, xm, xn, *, sine, negate):
+        xm = np.asarray(xm, dtype=int)
+        xn = np.asarray(xn, dtype=int)
+        column = {(m, n): k for k, (m, n) in enumerate(zip(xm, xn))}
+        order = [column[(m, -n)] if m > 0 else k for k, (m, n) in enumerate(zip(xm, xn))]
+        out = np.asarray(table, dtype=float)[:, order]
+        if sine:
+            out[:, xm == 0] *= -1.0
+        return -out if negate else out
+
+    base, nyq = (wout.xm, wout.xn), (wout.xm_nyq, wout.xn_nyq)
+    return dataclasses.replace(
+        wout,
+        rmnc=flip(wout.rmnc, *base, sine=False, negate=False),
+        zmns=flip(wout.zmns, *base, sine=True, negate=False),
+        gmnc=flip(wout.gmnc, *nyq, sine=False, negate=False),
+        bmnc=flip(wout.bmnc, *nyq, sine=False, negate=False),
+        bsubumnc=flip(wout.bsubumnc, *nyq, sine=False, negate=True),
+        bsubvmnc=flip(wout.bsubvmnc, *nyq, sine=False, negate=False),
+        bsubsmns=flip(wout.bsubsmns, *nyq, sine=True, negate=True),
+        iotas=-np.asarray(wout.iotas), iotaf=-np.asarray(wout.iotaf),
+        buco=-np.asarray(wout.buco), jdotb=-np.asarray(wout.jdotb),
+    )
+
+
+def test_d_r_self_check_holds_for_both_iota_signs_on_the_solver_grid(solved_case):
+    """D_R and its self-check do not depend on the sign of iota.
+
+    The stored DMerc is a quadrature on the solver's angular grid, and the
+    reconstruction integrates on that grid, so both orientations reproduce
+    it to round-off.  The finer grid it used before disagreed by 3.8e-2 on
+    the negative-iota NFP=4 QI deck, which dropped that deck's D_R curve.
+    """
+    _, wout = solved_case
+    mirrored = _mirror_toroidal_angle(wout)
+    iota_edge = float(np.asarray(wout.iotaf)[-1])
+    assert iota_edge != 0.0
+    assert float(np.asarray(mirrored.iotaf)[-1]) == -iota_edge
+    infos = [plotting._glasser_d_r_from_wout(case) for case in (wout, mirrored)]
+    for info in infos:
+        assert info["valid"], info["note"]
+        # measured 1e-13 on this deck; the previous fixed 64-point grid left 5.4e-9
+        assert info["mismatch"] < 1.0e-11
+    interior = slice(2, -1)
+    scale = float(np.max(np.abs(np.asarray(wout.DMerc)[interior])))
+    np.testing.assert_allclose(
+        infos[1]["d_r"][interior], infos[0]["d_r"][interior], rtol=0.0, atol=1.0e-9 * scale)
+
+
 def test_j_invariant_map_rejects_degenerate_field():
     """A constant Boozer |B| cannot define a trapped-particle pitch."""
     booz = {

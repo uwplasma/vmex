@@ -225,6 +225,47 @@ def test_block_response_forward_transpose_and_fd():
         )
 
 
+@pytest.mark.usefixtures("_module_jit_enabled")
+def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeypatch):
+    """A column the corrector leaves uncertified is refined through the block factors.
+
+    Before refinement, one such column sent the automatic optimizer Jacobian to the
+    reverse lane, which maps a pullback over every residual row (655 s instead of
+    27 s for 17,716 rows and 48 columns). A stalled corrector is simulated here: it
+    returns a perturbed warm start with a non-converged report.
+    """
+    inp, cfg, p0 = _small_solovev_setup()
+    state, mask = im.solve_implicit_with_aux(p0, cfg)
+    zero = jax.tree.map(jnp.zeros_like, p0)
+    tangent_batch = jax.tree.map(lambda *x: jnp.stack(x), dataclasses.replace(
+        zero, rbc=zero.rbc.at[inp.ntor, 1].set(1.0)), dataclasses.replace(
+        zero, pres_scale=jnp.ones_like(zero.pres_scale)))
+
+    def respond():
+        return jax.jit(lambda: im._implicit_evolved_tangent_multi_rhs(
+            p0, cfg, state, mask, tangent_batch,
+            active_fields=im._active_state_fields(cfg), probe_chunk_size=4,
+            response_chunk_size=2, certify_rtol=1e-8, certify_maxiter=1))()
+
+    reference, report = respond()
+    assert np.all(np.asarray(report.converged))
+
+    def stalled(A, b, cfg, *, x0=None, max_restarts=None, rtol=None):
+        return jax.tree.map(lambda value: 1.001 * value, x0), im.LinearResponseReport(
+            residual_norm=jnp.asarray(1.0e30), tolerance=jnp.asarray(0.0),
+            iterations=jnp.asarray(1, jnp.int32), converged=jnp.asarray(False))
+
+    monkeypatch.setattr(im, "_adjoint_solve", stalled)
+    passes = im._BLOCK_REFINEMENT_PASSES
+    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", 0)
+    _, unrefined = respond()
+    assert not np.any(np.asarray(unrefined.converged))
+    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", passes)
+    refined, report = respond()
+    assert np.all(np.asarray(report.converged))
+    assert _relative_difference(refined, reference) < 1e-8
+
+
 def test_raw_block_probe_chunking_preserves_exact_factors():
     """Bounded VJP batches assemble the same local block Jacobian."""
 
@@ -256,7 +297,7 @@ def test_block_pullback_rejects_unconverged_response():
         cfg, adjoint_tol=1e-30, adjoint_maxiter=1, adjoint_restart=2
     )
     cotangent = jax.tree.map(lambda value: value[None], state)
-    with pytest.raises(AdjointSolveError, match="block-preconditioned GCROT"):
+    with pytest.raises(AdjointSolveError, match="block-tridiagonal adjoint"):
         im.implicit_state_pullback_multi_rhs(
             p0, impossible, state, mask, cotangent,
             solver="block", probe_chunk_size=4,

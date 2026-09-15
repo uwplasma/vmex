@@ -61,7 +61,7 @@ def test_released_essos_reads_bundled_coil_fixtures() -> None:
 
 
 def test_essos_examples_name_the_required_branch() -> None:
-    """ESSOS 0.16 reports the branch to install, not a missing symbol."""
+    """ESSOS 0.16 reports the commit to install, not a missing symbol."""
     pytest.importorskip("essos")
     from essos.coils import Coils
 
@@ -88,7 +88,8 @@ def test_essos_examples_name_the_required_branch() -> None:
     for script in ESSOS_BRANCH_EXAMPLES:
         with pytest.raises(
             ImportError,
-            match="needs ESSOS branch rj/vmex-optimization-interfaces",
+            match=(r"needs ESSOS with uwplasma/ESSOS#58.*"
+                   r"essos @ git\+https://github\.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"),
         ):
             runpy.run_path(str(script))
 

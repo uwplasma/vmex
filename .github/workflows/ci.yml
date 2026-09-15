@@ -69,7 +69,7 @@ jobs:
         name: Select the parity lanes this change needs
         shell: bash
         env:
-          ALL: '[{"lane":"a-free","selector":"pr-parity-a1","parallel":"-n 2"},{"lane":"a-core","selector":"pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c1","selector":"pr-parity-c1","parallel":"-n 4"},{"lane":"c3d","selector":"pr-parity-c3 pr-parity-d","parallel":"-n 4"},{"lane":"e-polish","selector":"pr-parity-e","parallel":"-n 4"},{"lane":"f-options","selector":"pr-parity-f","parallel":"-n 4"},{"lane":"c2","selector":"pr-parity-c2","parallel":"-n 4"},{"lane":"c4","selector":"pr-parity-c4","parallel":"-n 4"},{"lane":"misc","selector":"pr-examples pr-external pr-full-only pr-gradient","parallel":"-n 4"}]'
+          ALL: '[{"lane":"a-free","selector":"pr-parity-a1","parallel":"-n 2"},{"lane":"a-core","selector":"pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c1","selector":"pr-parity-c1","parallel":"-n 4"},{"lane":"c3d","selector":"pr-parity-c3 pr-parity-d","parallel":"-n 4"},{"lane":"e-polish","selector":"pr-parity-e","parallel":"-n 4"},{"lane":"f-options","selector":"pr-parity-f","parallel":"-n 4"},{"lane":"c2","selector":"pr-parity-c2","parallel":"-n 4"},{"lane":"c4","selector":"pr-parity-c4","parallel":"-n 4"},{"lane":"gradient","selector":"pr-gradient","parallel":"-n 4"},{"lane":"misc","selector":"pr-examples pr-external pr-full-only pr-gradient-fd","parallel":"-n 4"}]'
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
