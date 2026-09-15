@@ -32,6 +32,26 @@ def test_package_exposes_installed_version() -> None:
         assert vmex.__version__ == package_version("vmex")
 
 
+def test_citation_version_matches_the_package_version() -> None:
+    """CITATION.cff is part of the release, so it has to move with it.
+
+    Nothing else compares the two, and a stale citation version is invisible
+    until someone cites the wrong release.
+    """
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    citation = (ROOT / "CITATION.cff").read_text()
+
+    declared = next(
+        line.split(":", 1)[1].strip()
+        for line in citation.splitlines()
+        if line.startswith("version:")
+    )
+    assert declared == data["project"]["version"], (
+        f"CITATION.cff says {declared!r}, pyproject.toml says "
+        f"{data['project']['version']!r}"
+    )
+
+
 def test_project_metadata_has_public_package_links() -> None:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text())
     project = data["project"]

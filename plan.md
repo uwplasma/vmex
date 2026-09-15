@@ -219,6 +219,7 @@ attribution. One heavy local job at a time; the office box takes one.
 | A2 exterior oracles | `tests/test_virtual_casing_physics.py`, `vmex/core/virtual_casing.py`, `extender.py`, `docs/explanation/nestor-vacuum.rst`, `examples/vmex_get_B_outside_plasma.py` | tests for the vacuum identity outside, the interior identity inside and Malhotra on-surface parity; `B_plasma_xyz` returns achieved digits and a failed schedule raises or warns; the `d ≳ 2h` rule and the default grid documented; the example uses a grid that passes its own check |
 | A3 honest single stage | `examples/optimization/single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` | seed with mean ι ≥ 0.3; ι and aspect as bounds or constraints (ESSOS augmented Lagrangian or `trust-constr`); QS normalized by ι; the objective jitted; the example meets its targets or fails loudly; a committed profile row exists for both examples |
 | A4 documentation truth | `README.md`, `docs/reference/performance.rst`, `docs/reference/objectives.rst`, `docs/explanation/adjoint-gradients.md`, `docs/howto/run-on-gpu.md`, `docs/howto/parameter-scans.md`, `docs/_static/figures/figures.json` | the 14.5-minute QA, 17.3-minute QI and 33× adjoint prose numbers either gain a record or go; the README qualifies the exterior field and GPU optimization; the orphaned extender figure is cited or removed; prose gate and cited-path test pass |
+| A5 robustness against the external corpus | the 23 named decks, then whatever the classification points at | `itpplasma/benchmark_vmec` runs 344 cases through twelve codes. VMEX is strictly converged on all 168 it reports — third in the VMEC family, ahead of VMEC++ at 157 — but 23 cases converge for a peer and not for VMEX (`atf*`, `bean14`, `belt20`, `c82vac20`, `qas14`, `w7s20`, `cooper`, `Q2_KINK`, `HSX_QHS`, `WISTELL-A`, W7-X `d23p4_tm`, `qhs46`, ITER hybrid). Fetch them, run them, classify each failure (INDATA feature not parsed / Jacobian reset / iteration budget / genuine non-convergence), and fix only what the classification shows. Gate: the strictly-converged count reaches vmec2000's 179, with no case regressing. Independent of B–F; after A1–A4 |
 
 ### Phase B, weeks 1–3: one certified solve per trial
 
@@ -269,10 +270,19 @@ attribution. One heavy local job at a time; the office box takes one.
 
 ### Phase G, weeks 7–9: the comparison and the package
 
-One table on named hardware from `benchmarks/optimization.py` records: VMEX
-against VMEC++ 0.7.4 (cold, warm, hot, adjoint) and against DESC's omnigenity
-time-to-metric; the three-way gradient comparison and the Taylor test of the
-2026-09-06 plan then close on the fixed anchor. Then §5 resumes.
+The cross-code table this phase was going to build already exists, is
+third-party, and includes VMEX: `itpplasma/benchmark_vmec`, 344 cases through
+twelve codes, published 2026-09-14. Phase G is therefore to reproduce that row
+rather than duplicate it — read it by joining `comparison_table.csv` with
+`plots/quality.csv` on `residual_over_tolerance`, not by the `status` column,
+which counts unconverged runs as successes for several codes — and to
+contribute an adapter fix upstream if the harness invokes VMEX in a way that
+misrepresents it. What that corpus does not carry, and this phase still owes,
+is the differentiable comparison: VMEX against VMEC++ 0.7.4 on cold, warm, hot
+and adjoint costs on named hardware, and against DESC's omnigenity
+time-to-metric, from `benchmarks/optimization.py` records; the three-way
+gradient comparison and the Taylor test of the 2026-09-06 plan then close on
+the fixed anchor. Then §5 resumes.
 
 ### Kill rules and things not to repeat
 
@@ -346,14 +356,16 @@ check that may be red.
 | SOLVAX #105 | release 0.21.0 of merged #100–#104: checked Thomas GPU launch overhead, halved principal inverses, nonfinite root rejection | merged `60a87b21`; tagging 0.21.0 publishes it to PyPI and is the maintainer's release step; VMEX raises its floor once 0.21.0 is on PyPI |
 | virtual_casing_jax | nothing open; 0.0.5 suffices for #312 | open an upstream PR for E0 (level choice by a calibrated estimate, per-period default schedule); no release needed for 0.9.0 |
 
-**Release candidate, VMEX 0.9.0.** Ready once #308, #300, #309, #310, #311,
-#312 and #313–#318 merge, with booz_xform_jax 0.3.0 and SOLVAX 0.21.0 on
-PyPI. It ships the DESC bridge, documentation and examples that match their
-records, an exterior field that reports its achieved accuracy, per-evaluation
-counters, and #299's component speedups. It does not fix the slow
-optimizations users report: refinement (29–40 s of each first derivative,
-B1), recompilation in the jitted lane (42–71 s, B4) and Jacobian assembly
-(C1) follow in the next release, and the 0.9.0 notes say so.
+**VMEX 0.9.0, released 2026-09-15.** It ships the DESC bridge, an exterior
+field that reports its achieved accuracy, per-evaluation counters,
+documentation and examples that match their records, #299's component
+speedups, and — beyond what this section planned for it — B1c's Newton
+finish, B3a/B3b's exact block adjoint and B4a–B4d's compile hygiene, so the
+QI and single-stage examples converge and meet the targets they print.
+booz_xform_jax 0.3.0 and essos 0.17 were still untagged at the tag, so the
+magnetic-only Boozer projection and the twelve ESSOS examples need a git
+install; SOLVAX 0.22.0 is on PyPI. It does not fix cold compile (B4's
+remainder, B5) or block-Jacobian assembly (C1), and the 0.9.0 notes say so.
 
 ## 7. Environment and runbook
 
@@ -1407,3 +1419,78 @@ first; one such check caught a stale benchmark index on #330 before it merged.
   example. A wall-time split of both examples on this `main` ranks the next
   lever: about 230 s of the QI example sit outside least squares and about
   211 s of a single-stage run outside refinement.
+
+**2026-09-15, the 0.9.0 release round.** Merged since the last entry:
+#342 (single-stage coil pre-fit capped at 200 iterations, `35e7170a`), #343
+(compilation-cache trim keeps recent entries, `04afcf9e`), #344 (README `--plot`
+summaries, `9441d403`), #345 (`0a6b1da1`), #346 (installable ESSOS commit named,
+`fed67192`), #348 (per-test ESSOS skips so the module still collects,
+`46149d5d`), #349 (misc parity lane split, `c59dbccf`), #350 (LASYM QH two-stage
+budget restored, `6539d679`), #351 (refine uncertified block Jacobian columns
+instead of mapping the reverse lane over every row, `e26b3f83`). Then today's
+round: #352, #353, #354, #355 and the two defects below.
+
+- **The independent cross-code scoreboard exists, and Phase G should use it
+  rather than rebuild it.** `itpplasma/benchmark_vmec` published a 4,128-row
+  result on 2026-09-14: 344 cases through twelve codes, VMEX among them. Read by
+  the `status` column alone VMEX ranks last of the VMEC family (168 successes
+  against vmec2000's 198); joining `comparison_table.csv` with
+  `plots/quality.csv` on `residual_over_tolerance` inverts that reading. Strictly
+  converged (residual at or below the requested tolerance): vmec2000 179,
+  parvmec 177, **vmex 168**, vmecpp 157, jvmec 140, educational_vmec 94, gvec 40.
+  VMEX and jVMEC are the only codes whose reported successes are all converged —
+  VMEX's worst `residual_over_tolerance` is 0.9999, against 1e+30 for vmecpp and
+  4e+22 for educational_vmec. Median wall per case, one case per process:
+  educational_vmec 0.90 s, vmec2000 2.04 s, vmecpp 3.35 s, **vmex 23.11 s**,
+  desc 75.28 s — the compile tax of §2, measured by a third party.
+- **Of the 35 cases where VMEX fails and a VMEC-family peer succeeds, 12 were a
+  file-writing policy and 23 are a robustness backlog.** 141 of VMEX's 176
+  failures are corpus-wide (GVEC/SPEC/SPECTRE-native inputs, missing mgrid
+  fixtures) and every VMEC-like code fails them. Of the remaining 35, twelve are
+  cases where every peer that "succeeded" was itself unconverged. Four of those
+  are VMEX's own shipped decks, including `input.LandremanPaul2021_QA_lowres`:
+  `vmex` on that deck reaches FSQR 2.63e-13 against its deck's 1e-13, prints
+  MORE ITERATIONS REQUIRED, exits 2 and writes **nothing**, discarding 29 s of
+  work. Cause, `cli.py:807,832`: `raise_on_max_iterations=not lfull3d1out`.
+  VMEC2000 does not do this — `vmec.f`'s `more_iter_flag` branch with
+  `lmoreiter = .false.` re-enters `runvmec` with `ictrl(2) = 0`, `runvmec.f`
+  calls `fileout` whenever `ier_flag /= more_iter_flag`, and `fileout.f` sets
+  `lwrite = lterm .or. ier_flag == more_iter_flag` before `wrout`; `LFULL3D1OUT`
+  governs threed1 fullness only. Fixed in #356: the WOUT is written, the exit
+  code stays 2, and `wout.ier_flag` records 2 rather than the 0 `vmec.f`
+  substitutes. The other 23 are a genuine convergence backlog on legacy 3-D
+  decks (`atf*`, `bean14`, `belt20`, `c82vac20`, `qas14`, `w7s20`, `cooper`,
+  `Q2_KINK`, `HSX_QHS`, `WISTELL-A`, W7-X `d23p4_tm`, `qhs46`, ITER hybrid) and
+  are not on this plan; see A5 in §4.
+- **A manifest-owned test ran in no workflow for six weeks (#357).**
+  `test_use_fft_reaches_every_free_boundary_lane` spied on `_make_body` with a
+  re-declared keyword list; `_make_body` gained `evaluation_synthesis` on
+  2026-08-01 (`8c4d83bb`) and the spy has raised `TypeError` ever since, the
+  moment the vacuum steady lane is traced. It hid because the node needed
+  `examples/data/mgrid_cth_like.nc` from `reference-nc`, which PR lanes do not
+  fetch by policy, so it skipped everywhere; Weekly's hmfb campaigns select four
+  named nodes and not this one. The fix keeps the policy: the spy takes
+  `**kwargs`, asserts it reached the steady lane, and runs on the generated
+  modular-coil fixture. Found by the run no lane performs — the whole suite with
+  every bundle installed. On this `main` that run is 1 failed, 1,835 passed,
+  128 skipped, 2 xfailed in 24 min; it belongs in the release checklist.
+- **The field, checked 2026-09-15.** VMEC++ is building VMEX's differentiator:
+  an implicit adjoint through Enzyme (#710, #841, #854), block-tridiagonal
+  `H_SS^T` for a direct adjoint solve (#857 — the same move as B3a), m = 1 gauge
+  pinning so the equilibrium is a function of the boundary (#849), and an open
+  proposal to ship Enzyme kernels in pip wheels (#814). §2's "pip users of
+  VMEC++ have no derivatives" is true today and has a visible expiry date. DESC
+  0.17.3 adds a sparse pullback giving an N-fold Jacobian speedup (#2170) and
+  reuses the Jacobian QR across the Levenberg-Marquardt sweep — both are Phase C
+  comparisons.
+- **Floors.** solvax 0.22.0 is on PyPI, so §6's ≥ 0.21.0 gate is clear.
+  `booz_xform_jax` 0.3.0 and `essos` 0.17 remain untagged, so the magnetic-only
+  Boozer projection and twelve ESSOS examples are still unavailable to a plain
+  `pip install`. jax/jaxlib 0.11.x require Python ≥ 3.12; 3.11 caps a user at
+  JAX 0.10.2.
+- **Limitation.** Every timing above is either third-party or a single-run
+  laptop sample; nothing here is an A/B row. The GPU workflow has no registered
+  self-hosted runner and last succeeded 2026-07-31, so 0.9.0 ships without a
+  current GPU result.
+- **Next action.** Phase D (D1, a differentiable QI well location) as before,
+  plus A5 for the 23-deck robustness backlog and the Phase G retarget above.
