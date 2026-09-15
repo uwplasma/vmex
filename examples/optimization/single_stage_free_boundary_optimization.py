@@ -61,6 +61,11 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 NS, MPOL, NTOR, NITER, FTOL = 25, 5, 5, 2000, 1.0e-9
 MAXITER, METHOD, PARAMETER_BOUND = 20, "L-BFGS-B", 1.0
 ASPECT_TARGET, IOTA_FLOOR = 6.0, 0.42
+# The seed coils give min |iota| 0.4137 (smooth minimum 0.4194) on both the
+# optimizer's solve and the output solve.  At weight 10 on the smooth minimum the
+# floor cost 1.3e-5 beside a 2.8e-2 coil-length term, so the run ended at 0.4136.
+# A quadratic hinge settles slightly below its threshold, hence 0.43 here.
+IOTA_CONSTRAINT, IOTA_FLOOR_WEIGHT = 0.43, 1.0e3
 # 5.2 m against 5.25 m coils, not the former 3.5: at 3.5 the term was
 # 0.5*sum((L - 3.5)^2) = 23.598 against QA at 3.44e-04, i.e. 99.998% of the
 # objective, so the optimizer only ever fought an unreachable length.  A
@@ -107,17 +112,17 @@ solver_context = im.runtime_from_params(params, config.implicit)
 # Floor the profile minimum, not its average: a mean target is satisfiable while
 # an interior surface sits near zero transform, which is what a current-carried
 # finite-beta profile does. opt.mean_iota targets the average instead, and
-# opt.soft_min_abs_iota is the smooth-minimum variant.
+# opt.soft_min_abs_iota is the smooth-minimum variant, but it sits above the
+# hard minimum by the width of its softmax, so a floor on it misses this check.
 def iota_floor(equilibrium_state, solver_context):
     return jnp.maximum(
-        IOTA_FLOOR - opt.soft_min_abs_iota(
-            equilibrium_state, solver_context), 0.0)
+        IOTA_CONSTRAINT - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
 
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 tuples = [(qs.residuals_state, 0.0, 1.0),
           (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-          (iota_floor, 0.0, 10.0)]
+          (iota_floor, 0.0, IOTA_FLOOR_WEIGHT)]
 
 # The free-boundary pullback assembles its projected residual on the host, so
 # the solve and its adjoint run eagerly and cannot sit under jax.jit.  Every
