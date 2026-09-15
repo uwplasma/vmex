@@ -30,6 +30,9 @@ PRES_SCALES = [0.0, 2000.0, 4000.0, 6000.0]   # Pa scale of the parabolic pressu
 CI = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if CI:
     PRES_SCALES = [0.0, 3000.0, 6000.0]
+if not MGRID_FILE.is_file():  # release asset, not tracked in git
+    raise SystemExit(f"{MGRID_FILE} is missing; fetch it with "
+                     "`python tools/fetch_assets.py --bundle reference-nc`")
 
 base = vj.VmecInput.from_file(INPUT_FILE)
 # parabolic pressure p(s) = PRES_SCALE * (1 - s); coil currents held fixed
