@@ -112,6 +112,26 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.omnigenity_j",
         "j_invariant_qi_maxj_residual_from_boozer",
     ),
+    # Resolved physical-J objectives (additive to the smooth local surrogate).
+    "JInvariantPhysicalQIResidual": (".core.qi", "JInvariantQIResidual"),
+    "MaximumJResidual": (".core.maxj", "MaximumJResidual"),
+    "JInvariantQIAndMaximumJResidual": (
+        ".core.maxj",
+        "JInvariantQIAndMaximumJResidual",
+    ),
+    "common_trapped_pitches": (".core.maxj", "common_trapped_pitches"),
+    "common_trapped_pitches_state": (
+        ".core.maxj",
+        "common_trapped_pitches_state",
+    ),
+    "physical_j_invariant_qi_residual_from_boozer": (
+        ".core.qi",
+        "j_invariant_qi_residual_from_boozer",
+    ),
+    "physical_maximum_j_residual_from_boozer": (
+        ".core.maxj",
+        "maximum_j_residual_from_boozer",
+    ),
     # modules
     "core": (".core", None),
     "errors": (".core.errors", None),
