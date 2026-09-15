@@ -1,0 +1,109 @@
+name: Full examples (scratch)
+
+# Scratch-branch only: runs the optimization examples at their user budgets
+# (VMEX_EXAMPLES_CI unset), one hosted job per example.
+on:
+  push:
+    branches: [ci/full-examples-scratch]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-examples-scratch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  example:
+    name: ${{ matrix.name }}
+    if: github.ref == 'refs/heads/ci/full-examples-scratch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        include:
+          - {name: QP_optimization_finite_beta_scalar, path: optimization/QP_optimization_finite_beta_scalar.py}
+          - {name: QA_optimization_ballooning, path: optimization/QA_optimization_ballooning.py}
+          - {name: QA_optimization_bootstrap, path: optimization/QA_optimization_bootstrap.py}
+          - {name: QA_optimization_global, path: optimization/QA_optimization_global.py}
+          - {name: QA_optimization_DMerc_vacuum, path: optimization/QA_optimization_DMerc_vacuum.py}
+          - {name: QA_maxJ_continuation, path: optimization/QA_maxJ_continuation.py}
+          - {name: omnigenity_epsilon_gammac_maxj, path: optimization/omnigenity_epsilon_gammac_maxj.py}
+          - {name: QA_optimization_scalar, path: optimization/QA_optimization_scalar.py}
+          - {name: QP_optimization_scalar, path: optimization/QP_optimization_scalar.py}
+          - {name: QI_optimization_optax, path: optimization/QI_optimization_optax.py}
+          - {name: QI_optimization_bootstrap, path: optimization/QI_optimization_bootstrap.py}
+          - {name: QI_optimization_finite_beta_scalar, path: optimization/QI_optimization_finite_beta_scalar.py}
+          - {name: QI_maxJ_continuation, path: optimization/QI_maxJ_continuation.py}
+          - {name: single_stage_free_boundary_optimization_finite_beta, path: optimization/single_stage_free_boundary_optimization_finite_beta.py}
+          - {name: asym_QA_optimization, path: optimization/stellarator_asymmetry/QA_optimization.py}
+          - {name: asym_QA_optimization_finite_beta, path: optimization/stellarator_asymmetry/QA_optimization_finite_beta.py}
+          - {name: asym_QH_optimization_finite_beta, path: optimization/stellarator_asymmetry/QH_optimization_finite_beta.py}
+          - {name: asym_QI_optimization, path: optimization/stellarator_asymmetry/QI_optimization.py}
+          - {name: asym_QI_optimization_finite_beta, path: optimization/stellarator_asymmetry/QI_optimization_finite_beta.py}
+          - {name: asym_QP_optimization, path: optimization/stellarator_asymmetry/QP_optimization.py}
+          - {name: asym_QP_optimization_finite_beta, path: optimization/stellarator_asymmetry/QP_optimization_finite_beta.py}
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install ".[coils,freeb,optimizers,neoclassical]"
+          python -m pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"
+          command -v /usr/bin/time >/dev/null || (sudo apt-get update && sudo apt-get install -y time)
+      - name: Verify install
+        run: |
+          mkdir -p "$RUNNER_TEMP/run"
+          cd "$RUNNER_TEMP/run"
+          python -c "import vmex; print(vmex.__file__, vmex.__version__)"
+          python -m pip show vmex essos neo-jax virtual-casing-jax optax jaxopt jax | grep -E '^(Name|Version|Location)'
+      - run: python tools/fetch_assets.py --bundle reference-nc
+      - name: Add XLA compile headroom
+        run: |
+          sudo fallocate -l 8G /mnt/vmex-swap
+          sudo chmod 600 /mnt/vmex-swap
+          sudo mkswap /mnt/vmex-swap
+          sudo swapon /mnt/vmex-swap
+      - name: Run example (full budget)
+        timeout-minutes: 340
+        run: |
+          set -o pipefail
+          unset VMEX_EXAMPLES_CI
+          cd "$RUNNER_TEMP/run"
+          {
+            echo "example: ${{ matrix.path }}"
+            echo "commit: $GITHUB_SHA"
+            echo "nproc: $(nproc)"
+            free -g
+            python -c "import vmex; print('vmex', vmex.__file__, vmex.__version__)"
+            echo "---- start $(date -u +%FT%TZ) ----"
+          } 2>&1 | tee log.txt
+          rc=0
+          /usr/bin/time -v python "$GITHUB_WORKSPACE/examples/${{ matrix.path }}" 2>&1 | tee -a log.txt || rc=$?
+          echo "---- end $(date -u +%FT%TZ) rc=$rc ----" | tee -a log.txt
+          echo "$rc" > rc.txt
+          exit "$rc"
+      - name: Summary
+        if: always()
+        run: |
+          cd "$RUNNER_TEMP/run" 2>/dev/null || exit 0
+          rc="$(cat rc.txt 2>/dev/null || echo timeout-or-cancelled)"
+          wall="$(grep -m1 'Elapsed (wall clock) time' log.txt 2>/dev/null | sed 's/.*: //')"
+          rss="$(grep -m1 'Maximum resident set size' log.txt 2>/dev/null | sed 's/.*: //')"
+          echo "${{ matrix.name }}: exit=$rc wall=${wall:-n/a} peak_rss_kb=${rss:-n/a} nproc=$(nproc)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: log-${{ matrix.name }}
+          path: ${{ runner.temp }}/run/log.txt
+          if-no-files-found: warn
+          retention-days: 14
