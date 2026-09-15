@@ -172,6 +172,13 @@ def _invoked_lanes() -> set[str]:
     for declaration in re.findall(r"^\s*ALL:\s*'(\[.*\])'\s*$", text, re.M):
         for entry in json.loads(declaration):
             invoked.update(str(entry.get("selector", "")).split())
+    # ``select full-${{ matrix.campaign }}`` over ``campaign: [opt-qi, ...]``.
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        body = path.read_text()
+        values = [value.strip() for group in re.findall(r"^\s*campaign:\s*\[(.*)\]", body, re.M)
+                  for value in group.split(",")]
+        for prefix in re.findall(r"select ([a-z-]+)\$\{\{ matrix\.campaign \}\}", body):
+            invoked.update(prefix + value for value in values)
     return invoked
 
 
@@ -200,6 +207,14 @@ def test_every_primary_pr_lane_is_invoked_by_a_workflow() -> None:
         f"run in CI: {missing}. Add a matrix entry in .github/workflows/ci.yml "
         "or move the modules to a lane that has one."
     )
+
+
+def test_every_full_lane_is_invoked_by_a_workflow() -> None:
+    """``full`` tests run only where a scheduled job selects their lane (#345)."""
+    data, records = test_manifest.load()
+    full = {lane for record in records for lane in record["lanes"] if lane.startswith("full-")}
+    missing = sorted((full | set(data["campaigns"])) - _invoked_lanes())
+    assert not missing, f"full lanes that no workflow invokes: {missing}"
 
 
 def test_workflow_selects_manifest_lanes() -> None:
