@@ -150,6 +150,52 @@ def test_gpu_request_on_cpu_machine_raises():
             dev.resolve_device("gpu", _res(ns=11, mpol=6, ntor=0))
 
 
+def test_multigrid_moves_residual_continuation_with_the_state():
+    """A rung placed on a new device must not leave the previous rung's
+    residual scalars behind.
+
+    ``solve_multigrid`` moves the state to each rung's placement device but
+    carried ``(fsqr, fsqz, fsql)`` from the rung before straight through, so
+    an AUTO ladder that crossed the CPU/GPU work threshold built a carry with
+    the state on one device and its residual scalars on another; the jitted
+    while lane rejects that.  Forcing consecutive rungs onto two devices
+    reproduces it without needing a GPU.
+    """
+    devices = []
+    for platform in ("gpu", "cpu"):
+        try:
+            devices = jax.devices(platform)
+        except RuntimeError:
+            pass
+        if len(devices) >= 2:
+            break
+    if len(devices) < 2:
+        pytest.skip("two devices unavailable")
+    inp = replace(
+        VmecInput.from_file(DATA / "input.solovev"),
+        ns_array=[5, 11], niter_array=[200, 200], ftol_array=[1e-9, 1e-11],
+    )
+    placements = []
+
+    def alternating(_device, _resolution):
+        target = devices[min(len(placements), 1)]
+        placements.append(target)
+        return target
+
+    original = multigrid._placement_device
+    multigrid._placement_device = alternating
+    try:
+        result = multigrid.solve_multigrid(
+            inp, mode="jit", device="auto", verbose=False,
+            prefetch_compile=False,
+        )
+    finally:
+        multigrid._placement_device = original
+
+    assert placements[:2] == [devices[0], devices[1]]
+    assert np.all(np.isfinite(np.asarray(result.rmnc)))
+
+
 def test_fixed_boundary_honors_second_device_without_outer_context():
     devices = []
     for platform in ("gpu", "cpu"):
