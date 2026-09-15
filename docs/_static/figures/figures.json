@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/_static/figures/readme_diagnostics_qa.webp",
-      "sha256": "da14f18251bb69c7c78d0c511f90372dce0223988ca7005aeb351c6fb6523f0b",
-      "bytes": 135808,
+      "sha256": "5b85ba75503b0de056441a7ea3c3ff7352f15874d4a6bca2774aff85dc21dea8",
+      "bytes": 135652,
       "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "inputs": [
@@ -114,8 +114,8 @@
     },
     {
       "path": "docs/_static/figures/readme_diagnostics_summary.webp",
-      "sha256": "1808d0d80b37c637f93d08276b7515aab55e4f583ff8b32289454a5e9e9ddbcd",
-      "bytes": 177730,
+      "sha256": "32fcbe29dd4e5226d3043bed896e3a17b2ee47afbd8cc3956d781fa6b7c27ed4",
+      "bytes": 177570,
       "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "inputs": [

@@ -2,10 +2,10 @@
   "schema": "vmex.readme-diagnostics-figures/1",
   "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
   "provenance": {
-    "measurement_commit": "edb61e31070d4148fe8a6f17dfe375362f7eb810",
+    "measurement_commit": "08f3f9e0e9d152538a5035959aecb643b236f225",
     "measurement_dirty": false,
     "input_data_embedded": false,
-    "measurement_date": "2026-09-14",
+    "measurement_date": "2026-09-15",
     "host": "Darwin 23.4.0 (arm64), CPU",
     "cpu": "Apple M3 Max",
     "python": "3.12.9",
@@ -24,7 +24,7 @@
       "deck_sha256": "90de9afb5a70e764f1f31a56223df8606787c971ce27aa3297c0e4b1986fd405",
       "cli_equivalent": "vmex examples/data/input.nfp2_QA_finite_beta --plot",
       "figure": "docs/_static/figures/readme_diagnostics_qa.webp",
-      "figure_sha256": "da14f18251bb69c7c78d0c511f90372dce0223988ca7005aeb351c6fb6523f0b",
+      "figure_sha256": "5b85ba75503b0de056441a7ea3c3ff7352f15874d4a6bca2774aff85dc21dea8",
       "figure_pixels": [
         1760,
         1349
@@ -44,7 +44,7 @@
       "deck_sha256": "a13dea2bdeb7643d377bfca0d9b96efd3b39b37614a442e2025982e618312ff1",
       "cli_equivalent": "vmex examples/data/input.nfp4_QI_finite_beta --plot",
       "figure": "docs/_static/figures/readme_diagnostics_summary.webp",
-      "figure_sha256": "1808d0d80b37c637f93d08276b7515aab55e4f583ff8b32289454a5e9e9ddbcd",
+      "figure_sha256": "32fcbe29dd4e5226d3043bed896e3a17b2ee47afbd8cc3956d781fa6b7c27ed4",
       "figure_pixels": [
         1760,
         1349
