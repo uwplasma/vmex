@@ -5,6 +5,10 @@ All runnable examples live under this single `examples/` tree. Examples marked
 [uwplasma/ESSOS#58](https://github.com/uwplasma/ESSOS/pull/58), which is not on PyPI:
 `pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"`.
 
+`free_boundary_mgrid.py` and `free_boundary_beta_scan.py` also need
+`data/mgrid_cth_like.nc`, a release asset rather than a tracked file; install it
+once from the repository root with `python tools/fetch_assets.py --bundle reference-nc`.
+
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.
