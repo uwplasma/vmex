@@ -157,8 +157,8 @@ separates the converged total VMEX field into plasma-current and external-coil
 parts; it does not run NESTOR or a free-boundary equilibrium. The preview
 ``single_stage_free_boundary_optimization*.py`` examples instead hold the
 plasma boundary implicit and vary only coil parameters through the coupled
-NESTOR derivative below. They need ESSOS branch
-``rj/vmex-optimization-interfaces`` (PR #58).
+NESTOR derivative below. They need ESSOS with
+uwplasma/ESSOS#58 (commit ``1b3210ca``, not on PyPI).
 
 The reported normalized total-pressure jump is
 
@@ -199,7 +199,7 @@ field or MGRID field and :class:`~vmex.core.extender.VmecExtender` adds the two.
 This distinction matters for finite-beta exterior tracing and coil design.
 
 ``vmex_get_B_gradB.py`` demonstrates the stable interior API. The exterior
-field and tracing previews need ESSOS branch ``rj/vmex-optimization-interfaces``. The
+field and tracing previews need ESSOS with uwplasma/ESSOS#58 (commit ``1b3210ca``). The
 single-stage previews write initial and optimized surface/coil VTK files;
 setting
 ``MAKE_MOVIE=True`` adds a compact animation of accepted iterates. Set the
@@ -331,7 +331,7 @@ stack physics rows with :func:`vmex.core.optimize.residuals_from_tuples`, and
 apply ``jax.value_and_grad``. ``take_free_boundary_gradients.py`` checks one
 direction against independent re-solves. The free-boundary single-stage
 previews pass the same scalar pair to SciPy. These examples need the unreleased
-ESSOS branch ``rj/vmex-optimization-interfaces``.
+ESSOS commit ``1b3210ca`` (uwplasma/ESSOS#58).
 
 This path is currently limited to reverse mode. Its low-memory host Krylov
 lane peaks near 3--5 GB on the bundled coarse examples, but the first coupled

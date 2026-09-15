@@ -98,8 +98,9 @@ VMEC--NESTOR free-boundary root itself:
 {func}`vmex.core.freeboundary_implicit.solve_free_boundary_implicit` takes the
 reverse-mode derivative of the coupled fixed point with respect to plasma
 profiles and direct coil shape/current dofs. The default transpose is
-`coupled_gcrot`; `boundary_schur` is opt-in. The example needs ESSOS branch
-`rj/vmex-optimization-interfaces` (PR #58). This CPU-only path remains experimental because its
+`coupled_gcrot`; `boundary_schur` is opt-in. The example needs ESSOS with
+uwplasma/ESSOS#58 (commit `1b3210ca`, not on PyPI). This CPU-only path remains
+experimental because its
 cold compile, memory use, and failed-trial recovery are not yet bounded. See
 {doc}`reference/capabilities` for its validation grade and
 {doc}`explanation/adjoint-gradients` for the method.
