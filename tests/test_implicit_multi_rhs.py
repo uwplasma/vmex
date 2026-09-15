@@ -256,7 +256,7 @@ def test_block_pullback_rejects_unconverged_response():
         cfg, adjoint_tol=1e-30, adjoint_maxiter=1, adjoint_restart=2
     )
     cotangent = jax.tree.map(lambda value: value[None], state)
-    with pytest.raises(AdjointSolveError, match="block-preconditioned GCROT"):
+    with pytest.raises(AdjointSolveError, match="block-tridiagonal adjoint"):
         im.implicit_state_pullback_multi_rhs(
             p0, impossible, state, mask, cotangent,
             solver="block", probe_chunk_size=4,
