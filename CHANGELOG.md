@@ -39,12 +39,11 @@ independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
 - **The supported floor is Python 3.11, SciPy 1.16 and JAX 0.9.2.** SciPy added
   `least_squares(callback=)` in 1.16 and 1.16 needs Python 3.11, so a 3.10 install
   resolved SciPy 1.15.3 and every optimization example died at its
-  `least_squares(` call after minutes of compiling. Python 3.10 also resolved JAX
-  0.6.2, which differentiates the QA residual wrongly — RBC(1,0) and ZBS(1,0) are
-  off by factors of 6 and 9 against central finite differences, and the example
-  ends at QS total 5.29e-3 instead of 3.72e-4. `import vmex` now checks the four
-  versions before importing JAX and names the fix. jax 0.11 requires Python 3.12,
-  so a 3.11 environment resolves JAX 0.10.2 (#347).
+  `least_squares(` call. Python 3.10 also resolved JAX 0.6.2, which
+  differentiates the QA residual wrongly — RBC(1,0) and ZBS(1,0) off by factors
+  of 6 and 9 against finite differences, ending at QS total 5.29e-3 instead of
+  3.72e-4. `import vmex` now checks the four versions before importing JAX and
+  names the fix; jax 0.11 needs Python 3.12, so 3.11 caps at JAX 0.10.2 (#347).
 - **The persistent compilation cache is off under jaxlib < 0.10 everywhere, not
   only on macOS.** jaxlib 0.9.2 segfaults loading a large cached executable on
   Linux too (reproduced without VMEX: cold exits 0, warm exits 139; 0.6.2,
@@ -73,11 +72,10 @@ independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
   executables are reused across trial seeds; the axis re-guess is traced so a
   solve inside `jax.jit` follows the host driver; and the default-device context
   is out of the block lane's jit key (#319, #321, #325, #331).
-- **The QI example converges.** It seeds from `input.QI_nfp2_initial` instead of
-  a circular torus, runs one `max_mode = 2` stage and penalizes the mirror ratio
-  from 1 % below its limit: 612 s, 0 failed trials (5 before), constructed QI
-  3.0e-3 (0.789 before), limits met, final ns = 101 solve converged. The
-  unchanged example ran 1,456 s and then raised in that final solve (#333).
+- **The QI example converges.** Seeded from `input.QI_nfp2_initial` rather than a
+  circular torus, with one `max_mode = 2` stage and a mirror-ratio penalty from
+  1 % below the limit: 612 s, 0 failed trials (5 before), constructed QI 3.0e-3
+  (0.789 before), limits met. It previously ran 1,456 s and then raised (#333).
 - **The single-stage examples meet their stated targets or fail loudly.** The
   fixed-boundary example seeds at mean iota >= 0.3 and meets every target on a
   full run (min |iota| 0.4277, aspect 3.979, B.n RMS 0.80 %, coil clearances and
@@ -116,24 +114,26 @@ independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
 
 ### Fixed
 
+- An AUTO ladder crossing the CPU/GPU work threshold raised `Received
+  incompatible devices`: each rung placed its state on its own device but
+  carried the previous rung's residual scalars straight through, so the jitted
+  while lane saw a split carry. Introduced by #321 and caught by the first GPU
+  run since 2026-07-31; a guard now reproduces it on two CPU devices (#360).
 - A `jacrev` fallback vmapped the GCROT adjoint over all 6,722 residual rows,
   asking for 47 GiB buffers and a 251 GB peak; it now pulls rows back in
   tangent-lane batches, with no intermediate above 64 MiB (from 9,138) (#328).
 - A Jacobian retry rebinding the baselines dropped the stage's `use_fft` (#324).
 - The single-stage coil pre-fit ran without an iteration cap; it stops at 200 (#342).
 - The LASYM QH example lost its second stage's budget (#350).
-- The two CTH-like free-boundary examples failed with a bare
-  `MgridNotFoundError`; they now name the fetch that installs it (#353).
+- The CTH-like free-boundary examples raised a bare `MgridNotFoundError`; they
+  now name the fetch that installs the file (#353).
 - `test_use_fft_reaches_every_free_boundary_lane` spied on `_make_body` with a
-  re-declared keyword list, so it raised `TypeError` the moment the vacuum steady
-  lane was traced — unable to run since 2026-08-01, and executed by no workflow
-  because it needed an asset no PR lane fetches. It now takes `**kwargs`, asserts
-  it reached the steady lane, and runs on generated coils.
-- Polish sizes its force sweep from the deck's own mode table and checkpoints
-  the per-point kernel: W7-X standard certifies at 3.0 GiB, not 34
-  (`benchmarks/polish_memory_w7x.json`).
-- Force-error reporting separates native accuracy from WOUT reconstruction
-  (`benchmarks/polish_force_error_2026-09-03.json`, #280, #282).
+  re-declared keyword list, raising `TypeError` once the vacuum steady lane was
+  traced — broken since 2026-08-01 and run by no workflow. It now takes
+  `**kwargs` and generated coils (#357).
+- Polish sizes its force sweep from the deck's mode table and checkpoints the
+  per-point kernel: W7-X certifies at 3.0 GiB, not 34 (`polish_memory_w7x.json`).
+- Force-error reporting separates native accuracy from WOUT reconstruction (#280, #282).
 
 ### Removed
 

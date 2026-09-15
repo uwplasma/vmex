@@ -39,7 +39,7 @@ hand rather than by a script in this tree.
 | `benchmarks/optimization_counters_20260913.json` | `benchmarks/optimization.py` | `142d6c92` | 2026-09-13 | `CHANGELOG.md`, `plan.md` |
 | `benchmarks/polish3d_tuning.md` |  |  |  | `docs/explanation/validation.md`, `docs/reference/api/advanced.rst`, `vmex/core/polish_driver.py` |
 | `benchmarks/polish_cost_office.json` | `benchmarks/polish_cost.py` | `529f1789` |  | `docs/reference/performance.rst` |
-| `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `CHANGELOG.md`, `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
+| `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_force_error_2026-09-03.md` |  |  |  | *nothing* |
 | `benchmarks/polish_force_error_solovev_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_implicit_m4.json` | `benchmarks/polish_implicit.py` | `e176b1ac` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
