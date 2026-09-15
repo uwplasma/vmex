@@ -446,6 +446,26 @@ def test_prune_cache_entries_keeps_the_most_recently_used(tmp_path):
     assert _compat._prune_cache_entries(str(tmp_path), 10) == 0
 
 
+def test_prune_cache_entries_keeps_recent_entries_up_to_four_times_the_cap(tmp_path):
+    """Recent entries survive the cap; stale ones are pruned to it."""
+    import time
+
+    now = time.time_ns()
+    _seed_cache(tmp_path, 30)  # atimes 0..29: long stale
+    for i in range(25):
+        (tmp_path / f"r{i}-cache").write_bytes(b"x")
+        (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 30
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(25))
+
+    # a workload's recent entries are still bounded, at four times the cap
+    for i in range(25, 50):
+        (tmp_path / f"r{i}-cache").write_bytes(b"x")
+        (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 10
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(40))
+
+
 def test_prune_cache_entries_survives_a_hostile_directory(tmp_path):
     _seed_cache(tmp_path, 5)
     (tmp_path / "k2-atime").unlink()  # entry with no atime sidecar

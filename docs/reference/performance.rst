@@ -498,6 +498,17 @@ time keeps the working set.  Set ``VMEX_CACHE_MAX_ENTRIES`` to change the
 bound, or to ``0`` to disable trimming.  The measurements, with provenance,
 are in ``benchmarks/cache_entry_scaling_m4_2026-09-03.json``.
 
+A fixed bound alone evicts a large workload's own working set: the QI
+optimization example writes 1,342 executables, so the ``1024`` bound dropped
+318 of them at every import and every returning run recompiled them.  Entries
+used in the last 24 hours are therefore kept up to four times the bound, and
+only older entries are trimmed to it.  On a 36-thread Xeon the QI example's
+warm run then misses nothing (its compile falls from 68.0 s to 38.6 s); a cold
+seed-deck solve against 4,026 stale entries still sees the cache trimmed to
+``1024`` (10.2 s, against 9.7 s with the plain bound); and the worst case,
+4,026 entries all used within the day, costs 17.9 s, where a fixed ``4096``
+bound costs 19.0 s on any mature cache.
+
 Fresh decks against ``xvmec2000`` (2026-09-02)
 -----------------------------------------------
 

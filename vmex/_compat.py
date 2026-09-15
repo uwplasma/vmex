@@ -29,6 +29,7 @@ import platform
 
 _CACHE_FORMAT_VERSION = "3"
 _CACHE_MAX_ENTRIES = 1024            # resident executables; see _prune_cache_entries
+_CACHE_RECENT_SECONDS = 24 * 3600    # entries used this recently survive the cap, up to 4x it
 _CACHE_SIZE_FLOOR = 2 << 30          # 2 GiB
 _CACHE_SIZE_CEILING = 20 << 30       # 20 GiB
 _CACHE_DISK_FRACTION = 0.10
@@ -74,7 +75,18 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
     small, so it never fires.
 
     Bounding the entry count instead costs one scan per process rather than
-    one per write.  Returns the number of entries removed.
+    one per write.  A fixed bound alone evicts a large workload's own working
+    set: the QI optimization example writes 1,342 executables, so a 1,024 cap
+    dropped 318 of them at every import, and every returning run recompiled
+    and rewrote the same 318.  Entries used within ``_CACHE_RECENT_SECONDS``
+    are therefore kept up to four times ``max_entries``, and only older ones
+    are trimmed to ``max_entries``.  Measured on a 36-thread Xeon: the QI
+    example's warm run misses nothing (its compile 68.0 s -> 38.6 s); a cold
+    seed-deck solve against 4,026 stale entries still sees the cache pruned to
+    1,024 (10.2 s, against 9.7 s with the plain cap); and the worst case, 4,026
+    recent entries, costs 17.9 s, where a fixed 4,096 cap costs 19.0 s on any
+    mature cache (a write scans 99 ms at 4,026 entries against 26 ms at 1,024).
+    Returns the number of entries removed.
     """
     try:
         import pathlib
@@ -107,7 +119,14 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
             except Exception:
                 return 0
 
-        for entry in sorted(entries, key=_atime)[: len(entries) - max_entries]:
+        import time
+
+        atimes = {entry: _atime(entry) for entry in entries}
+        ordered = sorted(entries, key=atimes.__getitem__, reverse=True)
+        recent_cutoff = time.time_ns() - _CACHE_RECENT_SECONDS * 1_000_000_000
+        recent = sum(1 for entry in ordered if atimes[entry] >= recent_cutoff)
+        keep = max(max_entries, min(recent, 4 * max_entries))
+        for entry in ordered[keep:]:
             sidecar = entry.with_name(
                 entry.name[: -len(_CACHE_ENTRY_SUFFIX)] + _CACHE_ATIME_SUFFIX
             )

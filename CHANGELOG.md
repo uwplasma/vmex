@@ -18,6 +18,9 @@ revision it was measured at, and the pages that cite it.
 
 ### Changed
 
+- The persistent compilation cache keeps entries used within the last 24 hours when it trims to
+  its 1,024-entry bound, up to four times the bound: the QI example's warm run no longer
+  recompiles the 318 programs the trim evicted at every import, and stale caches are trimmed as before.
 - The gyrokinetic flux-tube `epsilon` is the field-line `|B|` modulation depth
   and `R0` the effective major radius, so GKX's minor radius is physical (#271).
 - Optimization seed refinement is a deferred per-configuration executable, on the
