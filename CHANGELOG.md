@@ -26,8 +26,8 @@ independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
 - Exterior-field accuracy is observable: `B_plasma_xyz` returns the accuracy the
   adaptive schedule achieved, a schedule failing its own self-test warns instead
   of silently returning its last level, and known-answer oracles cover the vacuum
-  identity outside, the interior identity inside and Malhotra on-surface parity.
-  The `d >= 2h` rule and the default grid are documented (#312).
+  identity outside, the interior identity inside and Malhotra on-surface parity
+  (#312).
 - Every `OptimizationRecord` and benchmark row carries counters: descent
   iterations, refinement calls, steps and matvecs, Jacobian calls and columns,
   certifier iterations, adjoint calls and matvecs, and host wall time in each
@@ -59,31 +59,27 @@ independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
   stalls replay the previous refinement and keep its anchor (#320, #338).
 - **The implicit adjoint is solved exactly through the raw block
   factorization**, not 1,100 to 17,000 Krylov iterations: QI eager `jax.grad`
-  203.9 -> 55.5 s, QI `from_loss` first value and gradient 190.2 -> 89.0 s.
-  Reverse-mode gradients differentiate the raw force residual like the
-  least-squares lane; at a non-root anchor the scalar gradient moves by the
-  formulation difference, up to 1.1e-3 on the QI benchmark objective (#330). The
-  reverse Jacobian lane factors once per point, not once per batch of rows: seed
-  QA 238.9 s, where the per-chunk path had not finished after 4,111 s (#335, #351).
+  203.9 -> 55.5 s, `from_loss` first value and gradient 190.2 -> 89.0 s. At a
+  non-root anchor the scalar gradient moves by the formulation difference, up to
+  1.1e-3 on QI (#330). The reverse Jacobian lane factors once per point: seed QA
+  238.9 s, where the per-chunk path had not finished after 4,111 s (#335, #351).
 - **The compiled lanes stopped recompiling.** A concrete
   `problem.jax_value_and_grad` returns the host lane's pair and shares its solve
   memo, warm-start stash and counters (JAX value and gradient 39 -> 1.5 s on QA,
-  55 -> 1.6 s on QI; benchmark wall 95.3 -> 51.0 s and 117.5 -> 61.8 s); solver
-  executables are reused across trial seeds; the axis re-guess is traced so a
-  solve inside `jax.jit` follows the host driver; and the default-device context
-  is out of the block lane's jit key (#319, #321, #325, #331).
+  55 -> 1.6 s on QI; benchmark wall 95.3 -> 51.0 s and 117.5 -> 61.8 s). Solver
+  executables are reused across trial seeds, the axis re-guess is traced, and
+  the default-device context is out of the block lane's jit key (#319, #321,
+  #325, #331).
 - **The QI example converges.** Seeded from `input.QI_nfp2_initial` rather than a
   circular torus, with one `max_mode = 2` stage and a mirror-ratio penalty from
   1 % below the limit: 612 s, 0 failed trials (5 before), constructed QI 3.0e-3
   (0.789 before), limits met. It previously ran 1,456 s and then raised (#333).
 - **The single-stage examples meet their stated targets or fail loudly.** The
   fixed-boundary example seeds at mean iota >= 0.3 and meets every target on a
-  full run (min |iota| 0.4277, aspect 3.979, B.n RMS 0.80 %, coil clearances and
-  curvature within limits, independent ns = 101 check converged). The
-  free-boundary example floors the quantity it checks rather than its smooth
-  surrogate and reaches min |iota| 0.4271 in 614 s where it exited 1 at 0.4136
-  after 1,339 s — at the cost of quasi-axisymmetry (QA total 7.3e-4 -> 4.5e-2),
-  which it does not constrain (#311, #352).
+  full run (min |iota| 0.4277, aspect 3.979, B.n RMS 0.80 %, an independent
+  ns = 101 check converged). The free-boundary example floors the quantity it
+  checks and reaches min |iota| 0.4271 in 614 s where it exited 1 at 0.4136 --
+  at the cost of quasi-axisymmetry (7.3e-4 -> 4.5e-2) (#311, #352).
 - **The CLI keeps the equilibrium when the final grid exhausts NITER.** It wrote
   no WOUT unless `LFULL3D1OUT` was set, discarding the run; `vmec.f` and
   `fileout.f` reach `wrout` on `more_iter_flag` either way, and `LFULL3D1OUT`
@@ -114,11 +110,15 @@ independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
 
 ### Fixed
 
+- The finite-beta single-stage example ran 19:37 and then raised: its final
+  ns = 31/51/101 check burned all 20,000 iterations per rung. `max_fsq_ratio`'s
+  1e6 default differentiated trials at 1e-6 against the deck's 1e-12, letting
+  the line search walk somewhere unsolvable; requiring 1e2 keeps every trial at
+  a root and the ladder converges (9.9e-15 at ns = 101) in 5:03 (#361).
 - An AUTO ladder crossing the CPU/GPU work threshold raised `Received
   incompatible devices`: each rung placed its state on its own device but
-  carried the previous rung's residual scalars straight through, so the jitted
-  while lane saw a split carry. Introduced by #321 and caught by the first GPU
-  run since 2026-07-31; a guard now reproduces it on two CPU devices (#360).
+  carried the previous rung's residual scalars through. Introduced by #321 and
+  caught by the first GPU run since 2026-07-31 (#360).
 - A `jacrev` fallback vmapped the GCROT adjoint over all 6,722 residual rows,
   asking for 47 GiB buffers and a 251 GB peak; it now pulls rows back in
   tangent-lane batches, with no intermediate above 64 MiB (from 9,138) (#328).
