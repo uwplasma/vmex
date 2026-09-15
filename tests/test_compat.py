@@ -78,7 +78,7 @@ def test_cache_dir_env_precedence(clean_cache_env):
 
 
 def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
-    """macOS + jaxlib < 0.10 kills the process reading big cache entries
+    """jaxlib < 0.10 kills the process reading big cache entries
     (LLVM ORC materializes per-kernel objects recursively and overflows a
     worker-thread stack inside PyClient::DeserializeExecutable), so the
     cache defaults off there — but explicit user choices always win."""
@@ -98,15 +98,14 @@ def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
     assert _compat._default_compilation_cache_dir() == "/tmp/vmexcache"
 
 
-def test_cache_deserialize_unsafe_is_darwin_and_jaxlib_scoped(monkeypatch):
+@pytest.mark.parametrize("system", ["Linux", "Darwin"])
+def test_cache_deserialize_unsafe_is_jaxlib_scoped_on_every_platform(
+        monkeypatch, system):
+    monkeypatch.setattr(_compat.platform, "system", lambda: system)
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 9, 2))
-    monkeypatch.setattr(_compat.platform, "system", lambda: "Linux")
-    assert _compat._cache_deserialize_unsafe() is False  # macOS-only crash
-
-    monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
     assert _compat._cache_deserialize_unsafe() is True   # affected jaxlib
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 10, 0))
-    assert _compat._cache_deserialize_unsafe() is False  # fixed in 0.10.0
+    assert _compat._cache_deserialize_unsafe() is False  # fixed in 0.10
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: None)
     assert _compat._cache_deserialize_unsafe() is True   # unknown = unsafe
 

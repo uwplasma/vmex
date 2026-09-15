@@ -185,20 +185,19 @@ def _jaxlib_version_tuple() -> tuple[int, ...] | None:
 def _cache_deserialize_unsafe() -> bool:
     """True when *reading* the persistent cache can kill this process.
 
-    jaxlib < 0.10 on macOS dies with SIGBUS/SIGILL inside
-    ``PyClient::DeserializeExecutable`` when loading a cached XLA:CPU
-    executable holding more than a few hundred kernels: LLVM ORC
-    materializes the per-kernel Mach-O objects recursively on one
-    fixed-size worker-thread stack (RTDyldObjectLinkingLayer::emit ->
+    jaxlib < 0.10 dies inside ``PyClient::DeserializeExecutable`` when
+    loading a cached XLA:CPU executable holding more than a few hundred
+    kernels (SIGBUS/SIGILL on macOS, SIGSEGV on Linux): LLVM ORC
+    materializes the per-kernel objects recursively on one fixed-size
+    worker-thread stack (RTDyldObjectLinkingLayer::emit ->
     ExecutionSession::lookup -> dispatchOutstandingMUs -> emit -> ...),
     and every vmex solve/adjoint executable is large enough to overflow
     it deterministically on the first warm rerun.  Reproduced on jaxlib
-    0.9.2 with a 300-kernel jit program; verified fixed in jaxlib 0.10.0.
+    0.9.2 with a 300-kernel jit program on both platforms; the same
+    program reloads cleanly on jaxlib 0.10.
     An unknown jaxlib version counts as unsafe: losing the cache costs a
     recompile, trusting it can cost the process.
     """
-    if platform.system() != "Darwin":
-        return False
     version = _jaxlib_version_tuple()
     return version is None or version < _CACHE_DESERIALIZE_SAFE_JAXLIB
 
@@ -315,8 +314,8 @@ def _default_compilation_cache_dir() -> str | None:
 
     The persistent cache is enabled **by default on every backend** (CPU too)
     so repeated cold-process CLI/API runs reuse compiled kernels instead of
-    recompiling (a solovev CLI rerun drops 4.3 s -> 1.2 s) — except on
-    macOS with jaxlib < 0.10, where deserializing a large cached CPU
+    recompiling (a solovev CLI rerun drops 4.3 s -> 1.2 s) — except with
+    jaxlib < 0.10, where deserializing a large cached CPU
     executable crashes the process (see :func:`_cache_deserialize_unsafe`)
     and the default is therefore off until jaxlib is upgraded;
     ``VMEX_COMPILATION_CACHE=1`` or an explicit cache-dir variable still
@@ -346,8 +345,8 @@ def _default_compilation_cache_dir() -> str | None:
     if cache_flag in ("disabled", "0", "false", "no", "off"):
         return None
 
-    # macOS + jaxlib < 0.10 crashes deserializing large cached CPU
-    # executables (see _cache_deserialize_unsafe): default the cache off
+    # jaxlib < 0.10 crashes deserializing large cached CPU executables on
+    # every platform (see _cache_deserialize_unsafe): default the cache off
     # there.  An explicit VMEX_COMPILATION_CACHE=1 (or a *_CACHE_DIR path
     # above) still turns it on.
     if (cache_flag not in ("1", "true", "yes", "on", "enabled")

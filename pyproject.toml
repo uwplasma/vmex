@@ -26,8 +26,8 @@ dependencies = [
   "numpy",
   # 0.9.2 is the oldest JAX a CI lane tests (ci.yml jax-compatibility).
   # vmex/__init__.py refuses older jax/jaxlib/scipy at import with the same
-  # floors.  The macOS persistent-cache guard in vmex/_compat.py still applies
-  # to jaxlib 0.9.x.
+  # floors.  jaxlib 0.9.x crashes loading large cached executables, so
+  # vmex/_compat.py keeps the persistent cache off below 0.10.
   "jax>=0.9.2",
   "jaxlib>=0.9.2",
   # 1.16 added least_squares(callback=), which the optimization examples pass;

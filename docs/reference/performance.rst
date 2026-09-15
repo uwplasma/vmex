@@ -731,8 +731,9 @@ unaffected.  Library :func:`~vmex.core.multigrid.solve_multigrid` and
 executables by default (the right policy for scans and repeated solves) and
 accept ``release_stage_cache=True`` to opt into the one-shot behaviour.
 The machine-scoped disk cache is bounded to 10% of the free disk (2 GiB
-floor, 20 GiB ceiling).  On macOS with jaxlib < 0.10 the cache defaults to
-off: those jaxlib releases crash with ``SIGBUS``/``SIGILL`` inside
+floor, 20 GiB ceiling).  With jaxlib < 0.10 the cache defaults to off on
+every platform: those jaxlib releases crash (``SIGBUS``/``SIGILL`` on macOS,
+``SIGSEGV`` on Linux) inside
 ``PyClient::DeserializeExecutable`` when loading a cached CPU executable
 holding more than a few hundred kernels (LLVM ORC materializes the
 per-kernel objects recursively on one fixed-size worker-thread stack), and
