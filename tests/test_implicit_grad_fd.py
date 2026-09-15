@@ -19,7 +19,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from tests import test_implicit_grad as _base
-from tests.test_implicit_grad import CASES, DATA_DIR, _fd, _tnorm
+from tests.test_implicit_grad import CASES, DATA_DIR, _fd
 from vmex.core import implicit as im
 from vmex.core.input import VmecInput
 
@@ -28,41 +28,6 @@ from vmex.core.input import VmecInput
 _jit_enabled = _base._jit_enabled
 _release_jax_caches_in_full_matrix = _base._release_jax_caches_in_full_matrix
 solovev = _base.solovev
-
-
-# ---------------------------------------------------------------------------
-# 4. adjoint GMRES: preconditioned formulation converges, raw does not
-# ---------------------------------------------------------------------------
-
-
-def test_adjoint_gmres_preconditioner_value(solovev):
-    name, inp, cfg, p0, x_star, rt, mask = solovev
-    P = im._dof_projector(cfg, mask)
-    gbar = jax.grad(lambda s: im.mhd_energy(s, rt)[0])(x_star)
-    b = P(gbar)
-    nb = _tnorm(b)
-    assert nb > 0.0
-
-    budgets = {}
-    for formulation in ("preconditioned", "raw"):
-        A = im.adjoint_matvec(cfg, p0, x_star, mask, formulation=formulation)
-        lam, _ = jax.scipy.sparse.linalg.gmres(
-            A, b, tol=1e-13, atol=0.0, restart=30, maxiter=10,
-            solve_method="incremental",
-        )  # <= 300 matvecs
-        residual = jax.tree.map(lambda u, v: u - v, A(lam), b)
-        budgets[formulation] = _tnorm(residual) / nb
-
-    print(f"\n[{name}] adjoint GMRES relative residual after <= 300 matvecs "
-          f"(restart=30, maxiter=10):")
-    for formulation, rel in budgets.items():
-        print(f"  {formulation:15s}: {rel:.3e}")
-
-    # preconditioned-residual formulation: converged well below 1e-10
-    assert budgets["preconditioned"] < 1e-10
-    # raw force without the 1D preconditioner: stuck orders of magnitude away
-    assert budgets["raw"] > 1e-6
-    assert budgets["raw"] / budgets["preconditioned"] > 1e4
 
 
 # ---------------------------------------------------------------------------

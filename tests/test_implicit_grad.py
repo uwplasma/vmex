@@ -16,7 +16,7 @@ sides, disk-cached per (case, parameter, step, ftol); chosen so truncation
 ~ h^2 sits above solver-termination noise ~ eps_wb / h: solovev h = 3e-5
 (boundary), 1e-5 (phiedge), 1e-4 (pres_scale); li383 h = 4e-4 (boundary).
 
-Sections 4-9 (adjoint GMRES through multigrid) run from
+Sections 5-9 (li383 through multigrid) run from
 ``test_implicit_grad_fd.py`` so the pull-request lanes fit their time cap.
 """
 
@@ -634,6 +634,41 @@ def test_solovev_gradients_vs_fd(solovev):
         print(f"  d({out})/d({field}{'' if idx is None else idx}) "
               f"h={h:.0e}: AD={a:+.12e}  FD={fd:+.12e}  rel={rel:.2e}")
         assert rel <= 1e-6, f"{out}/{field}: rel error {rel:.3e}"
+
+
+# ---------------------------------------------------------------------------
+# 4. adjoint GMRES: preconditioned formulation converges, raw does not
+# ---------------------------------------------------------------------------
+
+
+def test_adjoint_gmres_preconditioner_value(solovev):
+    name, inp, cfg, p0, x_star, rt, mask = solovev
+    P = im._dof_projector(cfg, mask)
+    gbar = jax.grad(lambda s: im.mhd_energy(s, rt)[0])(x_star)
+    b = P(gbar)
+    nb = _tnorm(b)
+    assert nb > 0.0
+
+    budgets = {}
+    for formulation in ("preconditioned", "raw"):
+        A = im.adjoint_matvec(cfg, p0, x_star, mask, formulation=formulation)
+        lam, _ = jax.scipy.sparse.linalg.gmres(
+            A, b, tol=1e-13, atol=0.0, restart=30, maxiter=10,
+            solve_method="incremental",
+        )  # <= 300 matvecs
+        residual = jax.tree.map(lambda u, v: u - v, A(lam), b)
+        budgets[formulation] = _tnorm(residual) / nb
+
+    print(f"\n[{name}] adjoint GMRES relative residual after <= 300 matvecs "
+          f"(restart=30, maxiter=10):")
+    for formulation, rel in budgets.items():
+        print(f"  {formulation:15s}: {rel:.3e}")
+
+    # preconditioned-residual formulation: converged well below 1e-10
+    assert budgets["preconditioned"] < 1e-10
+    # raw force without the 1D preconditioner: stuck orders of magnitude away
+    assert budgets["raw"] > 1e-6
+    assert budgets["raw"] / budgets["preconditioned"] > 1e4
 
 
 def _assert_stability_gradients(
