@@ -12,6 +12,7 @@ end.  Skips cleanly without ESSOS.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 from pathlib import Path
 
@@ -20,7 +21,6 @@ import pytest
 
 netCDF4 = pytest.importorskip("netCDF4")
 jax = pytest.importorskip("jax")
-pytest.importorskip("essos")
 
 jax.config.update("jax_enable_x64", True)
 
@@ -28,7 +28,12 @@ from vmex.core import cli
 from vmex.core.tracing import essos_vmec_field, trace_alphas
 from vmex.core.wout import read_wout
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
+# Skip per test, not at import: a module that collects nothing breaks the
+# manifest ownership check wherever ESSOS is not installed.
+pytestmark = [
+    pytest.mark.usefixtures("_module_jit_enabled"),
+    pytest.mark.skipif(importlib.util.find_spec("essos") is None, reason="requires ESSOS"),
+]
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SOLOVEV_DECK = DATA_DIR / "input.solovev"
