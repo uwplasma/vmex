@@ -53,6 +53,7 @@
     ["tests/test_high_mode_free_boundary_parity.py", "free-boundary", "campaign", "campaign", "cpu-gpu", "generated", "vmec2000", ["pr-parity-a1"]],
     ["tests/test_implicit_device.py", "ad", "ad", "medium", "cpu-gpu", "none", "fd", ["pr-parity-c3", "gpu-smoke", "full-core-i"]],
     ["tests/test_implicit_grad.py", "ad", "ad", "campaign", "cpu-gpu", "golden", "fd", ["pr-gradient", "full-core-i-grad"]],
+    ["tests/test_implicit_grad_fd.py", "ad", "ad", "campaign", "cpu-gpu", "none", "fd", ["pr-gradient-fd", "full-core-i-grad"]],
     ["tests/test_implicit_multi_rhs.py", "ad", "ad", "medium", "cpu-gpu", "none", "analytic", ["pr-parity-c3", "full-core-i"]],
     ["tests/test_api_reference_completeness.py", "infrastructure", "unit", "fast", "cpu", "none", "none", ["pr-parity-c2", "pr-fast", "full-core-a-c"]],
     ["tests/test_aphi_flux_normalization.py", "equilibrium", "unit", "fast", "cpu", "none", "vmec2000", ["pr-parity-c1", "pr-fast", "full-core-i"]],
