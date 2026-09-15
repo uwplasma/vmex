@@ -613,11 +613,12 @@ def _pi_ticks(ax, axis: str = "y") -> None:
 # Glasser D_R reconstruction from wout tables (mercier.f integrals)
 # ==========================================================================
 
-def _glasser_d_r_from_wout(wout, *, ntheta: int | None = None, nzeta: int | None = None) -> dict[str, Any]:
+def _glasser_d_r_from_wout(wout) -> dict[str, Any]:
     """Glasser--Greene--Johnson ``D_R`` profile reconstructed from a wout file.
 
     Re-evaluates the ``mercier.f`` surface integrals (``tpp/tbb/tjb/tjj``)
-    from the wout Fourier tables on a uniform angular grid and assembles
+    from the wout Fourier tables on the solver's own uniform angular grid (so
+    the integrals match the stored ``DMerc`` quadrature) and assembles
 
         ``H   = S (tjb - tbb * mu0 <J.B>/<B.B>)``
         ``D_R = -DMerc + (H - S^2/2)^2 / S^2``     (0 where the shear vanishes)
@@ -653,11 +654,14 @@ def _glasser_d_r_from_wout(wout, *, ntheta: int | None = None, nzeta: int | None
     xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
     xm = np.asarray(wout.xm, dtype=float)
     xn = np.asarray(wout.xn, dtype=float)
-    if ntheta is None:
-        ntheta = int(min(256, max(64, 4 * (int(xm_nyq.max()) + 1))))
-    if nzeta is None:
-        n_over_nfp = int(np.max(np.abs(xn_nyq))) // max(nfp, 1)
-        nzeta = int(min(256, max(64, 4 * (n_over_nfp + 1))))
+    # The solver's own angular grid, recovered from the Nyquist extents
+    # (VMEC2000: mnyq = ntheta1/2, nnyq = nzeta/2; an odd NZETA comes back one
+    # point short).  The stored DMerc is a quadrature on that grid, so D_R
+    # takes both of its terms from the same quadrature.  That grid is not
+    # angularly converged in general: on the NFP=4 QI deck, raising
+    # NTHETA/NZETA from 16/14 to 48 moves DMerc by 4.35% at s = 0.04.
+    ntheta = max(1, 2 * int(xm_nyq.max()))
+    nzeta = max(1, 2 * (int(np.max(np.abs(xn_nyq))) // max(nfp, 1)))
     theta = 2.0 * np.pi * np.arange(ntheta) / ntheta
     zeta = 2.0 * np.pi * np.arange(nzeta) / (nzeta * nfp)
 
@@ -758,7 +762,7 @@ def _glasser_d_r_from_wout(wout, *, ntheta: int | None = None, nzeta: int | None
             h_glasser = shear[i] * (tjb - tbb * ratio[i])
             d_r[i] = -dmerc_stored[i] + (h_glasser - 0.5 * shear[i] ** 2) ** 2 / shear[i] ** 2
 
-    # Self-check: the reconstructed integrals must reproduce the stored DMerc.
+    # Self-check: consistency with the stored DMerc (same quadrature), not angular convergence.
     interior = slice(2, ns - 1)
     scale = float(np.max(np.abs(dmerc_stored[interior])))
     if scale == 0.0:

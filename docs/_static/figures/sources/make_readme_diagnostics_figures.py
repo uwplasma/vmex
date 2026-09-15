@@ -15,6 +15,9 @@ its sha256, the solved scalars the README quotes, and the commit, host, and
 package versions of the run.  ``tests/test_figure_provenance.py`` fails when
 the figure changes without that record.
 
+The effective-ripple curve needs NEO_JAX, so the script refuses to run
+without the ``vmex[neoclassical]`` extra.
+
 Usage::
 
     python docs/_static/figures/sources/make_readme_diagnostics_figures.py
@@ -141,6 +144,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--only", action="append", choices=sorted(CASES))
     args = parser.parse_args()
+    if _package_version("neo-jax") is None:
+        parser.error(
+            "the README panels show effective ripple; install vmex[neoclassical] first"
+        )
 
     # Record the source state before the run rewrites its own outputs, which
     # would otherwise mark every regenerated figure as a dirty measurement.
@@ -163,6 +170,7 @@ def main() -> int:
                 "vmex": _package_version("vmex"),
                 "jax": _package_version("jax"),
                 "matplotlib": _package_version("matplotlib"),
+                "neo_jax": _package_version("neo-jax"),
             },
         }
     )
