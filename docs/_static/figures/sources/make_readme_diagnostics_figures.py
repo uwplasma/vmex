@@ -59,7 +59,7 @@ CASES: dict[str, dict[str, object]] = {
 # its panel labels stay legible, and stored as lossy webp to keep the file
 # small.  Pillow's encoder is deterministic for fixed pixels and settings.
 WEBP_WIDTH = 1760
-WEBP_QUALITY = 82
+WEBP_QUALITY = 75
 
 
 def _package_version(name: str) -> str | None:

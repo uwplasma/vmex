@@ -249,8 +249,10 @@ remaining functional/chart limitations.
 
 The bundled `input.nfp4_QI_finite_beta` run reached **2.53% beta** at
 `ns=51` in 2,599 iterations. This is an equilibrium/diagnostic example, not
-a new optimization result or a continuous-force certificate. Its input,
-figure and solve provenance are recorded in
+a new optimization result or a continuous-force certificate. The README's QA
+panel, from the bundled `input.nfp2_QA_finite_beta`, reached **2.70% beta** at
+`ns=45` in 757 iterations and is the same kind of example. Their inputs,
+figures and solve provenance are recorded in
 [readme_diagnostics.json](../_static/figures/readme_diagnostics.json).
 
 ![Finite-beta QI equilibrium diagnostics](../_static/figures/readme_diagnostics_summary.webp)
