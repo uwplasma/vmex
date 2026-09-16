@@ -5,7 +5,10 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
-## Unreleased
+## 0.9.1 - 2026-09-16
+
+One behaviour change, carried straight out of a user report: the optimizer no
+longer differentiates a trial the solver has not brought near a root.
 
 ### Changed
 
