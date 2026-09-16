@@ -1541,8 +1541,17 @@ error estimates and ratios are not affected.
 
   `recommended_device` answers `gpu` for `QA_lowres` (work proxy 1,536,000
   against a 100,000 threshold), and on this hardware that is the wrong answer
-  cold and warm. `GPU_MIN_ITERATION_WORK` needs re-measuring on A4000-class
-  hardware, or the policy needs a second term.
+  cold and warm. The full sweep then settled it
+  (`benchmarks/gpu_a4000_2026-09-16.json`, `run_gpu_matrix.py --skip-tridiag`):
+  **the GPU wins no cell**, warm gain 0.17x (solovev) to 0.83x
+  (`NuhrenbergZille_1988_QHS`, the largest case at 111 s of warm CPU work and
+  the very deck the July baseline claimed up to 3x for), with the synthetic
+  `ns` x `mnmax` scan walking from ns 35 to 151 without crossing over. So
+  `GPU_MIN_ITERATION_WORK` is not merely mis-tuned here: the crossover it
+  encodes does not exist on this hardware and JAX version. Do not move the
+  constant on one machine -- the July numbers were honestly measured on
+  another; the how-to now carries both, and the work package is a
+  hardware-labelled policy rather than a single global threshold.
 - **No terabyte anywhere.** Single-stage finite-beta value-and-gradient at
   ns = 15, mpol = 5, 24 dof: peak device 0.16 GiB, peak host 3.17 GiB on
   office and 2.2-2.5 GiB on the laptop, largest single traced intermediate

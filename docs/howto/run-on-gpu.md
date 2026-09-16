@@ -70,21 +70,31 @@ On the two shipped decks that prints `1632 100000` / `cpu` for
 `input.LandremanPaul2021_QA_lowres`.
 
 ```{warning}
-The thresholds come from `benchmarks/gpu_baseline.json`, measured 2026-07-09 on
-different hardware, and they do not hold everywhere. Re-measured on 2026-09-16
-on two RTX A4000s (JAX 0.11.1, one process per cell), the GPU lost on both
-shipped decks — including the one the policy recommends it for:
+**The crossover these thresholds encode does not transfer between machines.**
+They come from `benchmarks/gpu_baseline.json`, measured 2026-07-09. The same
+sweep re-run on 2026-09-16 on two RTX A4000s (JAX 0.11.1, driver 580.173,
+one process per cell — `benchmarks/gpu_a4000_2026-09-16.json`) found **no cell
+where the GPU wins**, warm wall in seconds:
 
-| deck | CPU cold | CPU warm | GPU cold | GPU warm |
-| --- | --- | --- | --- | --- |
-| `input.circular_tokamak` | 6.74 s | 0.22 s | 12.82 s | 1.19 s |
-| `input.LandremanPaul2021_QA_lowres` | 16.99 s | 6.20 s | 35.96 s | 6.91 s |
+| case | CPU warm | GPU warm | GPU gain |
+| --- | --- | --- | --- |
+| `solovev` | 0.07 | 0.31 | 0.21x |
+| `cth_like_fixed_bdy` | 0.42 | 0.74 | 0.57x |
+| `nfp4_QH_warm_start` | 0.32 | 1.45 | 0.22x |
+| `LandremanPaul2021_QA_lowres` | 0.29 | 0.43 | 0.67x |
+| `NuhrenbergZille_1988_QHS` | 110.91 | 133.64 | 0.83x |
+| synthetic nfp4 QH, ns 35 to 151 | 0.12–0.71 | 0.47–1.41 | 0.22–0.51x |
 
-Peak device memory was 0.16 GiB in both cases. Time the deck you actually run
-before trusting the recommendation; `benchmarks/run_gpu_matrix.py` produces the
-comparison. The implicit-gradient path is the exception that now works: the same
-single-stage finite-beta value-and-gradient is 1.3–1.6 s warm on the GPU against
-2.15 s on that machine's CPU.
+`NuhrenbergZille_1988_QHS` is the largest case in the sweep at 111 s of warm CPU
+work, and the synthetic scan walks `ns` and `mnmax` up without crossing over, so
+this is not a threshold that is merely set too low here. Cold wall was about 2x
+the CPU's throughout and peak device memory never exceeded 0.16 GiB.
+
+So treat `recommended_device` as a starting guess and time the deck you actually
+run: `python benchmarks/run_gpu_matrix.py --skip-tridiag` reproduces the table
+above on your own hardware. The implicit-gradient path is the exception that
+does pay off — the single-stage finite-beta value-and-gradient is 1.3–1.6 s warm
+on the GPU against 2.15 s on that machine's CPU.
 ```
 
 ## What stays on CPU regardless

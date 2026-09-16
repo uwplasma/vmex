@@ -6,8 +6,8 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-91 committed artifacts: 37 standalone records and 1 grouped directory holding
-54 files. 35 of the 38 entries below are cited by a page, a test or another
+92 committed artifacts: 38 standalone records and 1 grouped directory holding
+54 files. 36 of the 39 entries below are cited by a page, a test or another
 script; 3 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -29,7 +29,8 @@ hand rather than by a script in this tree.
 | `benchmarks/freeboundary_multigrid.json` | `benchmarks/run_freeboundary_multigrid.py` | `b0cc789e` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json` |  | `8ef81c44` | 2026-09-02 | `docs/explanation/validation.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md` |  |  |  | *nothing* |
-| `benchmarks/gpu_baseline.json` | `benchmarks/run_gpu_matrix.py` | `a324f503` | 2026-07-09 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/architecture.rst`, `docs/explanation/validation.md`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py`, `vmex/core/__init__.py`, `vmex/core/device.py` |
+| `benchmarks/gpu_a4000_2026-09-16.json` | `benchmarks/run_gpu_matrix.py` | `5ee94c93` | 2026-09-16 | `CHANGELOG.md`, `docs/howto/run-on-gpu.md`, `plan.md` |
+| `benchmarks/gpu_baseline.json` | `benchmarks/run_gpu_matrix.py` | `a324f503` | 2026-07-09 | `benchmarks/gpu_a4000_2026-09-16.json`, `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/architecture.rst`, `docs/explanation/validation.md`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py`, `vmex/core/__init__.py`, `vmex/core/device.py` |
 | `benchmarks/high_mode_fft.json` | `benchmarks/run_high_mode_fft.py` | `ecfbe31d` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/mirror_fixed_boundary.json` |  | `e02dcea7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_free_boundary_axisymmetric.json` |  | `d4f56dae` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py`, `tests/test_capability_docs.py` |

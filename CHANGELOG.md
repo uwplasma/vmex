@@ -24,8 +24,10 @@ the boundary.
   A4000s all three ways of asking agree, peak device memory 0.16 GiB, warm
   value-and-gradient 1.3–1.6 s against 2.15 s on that machine's CPU.
 - The "When the GPU pays off" snippet referred to an undefined `runtime` (#157).
-  That page now also records a re-measurement: the GPU lost on both shipped
-  decks, including the one `recommended_device` answers `gpu` for.
+  That page now carries a full re-measurement of the CPU-vs-GPU sweep
+  (`benchmarks/gpu_a4000_2026-09-16.json`): on two RTX A4000s the GPU wins no
+  cell, warm gain 0.17x to 0.83x across every shipped deck and every point of
+  the synthetic size scan. The thresholds do not transfer between machines.
 
 ### Changed
 

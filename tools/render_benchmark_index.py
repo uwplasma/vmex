@@ -54,6 +54,7 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/baselines/m4/*.json", "benchmarks/profile_workflows.py"),
     ("benchmarks/baseline.json", "benchmarks/run_baseline.py"),
     ("benchmarks/gpu_baseline.json", "benchmarks/run_gpu_matrix.py"),
+    ("benchmarks/gpu_a4000_*.json", "benchmarks/run_gpu_matrix.py"),
     ("benchmarks/freeboundary_multigrid.json", "benchmarks/run_freeboundary_multigrid.py"),
     ("benchmarks/high_mode_fft.json", "benchmarks/run_high_mode_fft.py"),
     ("benchmarks/convergence_nfp4_ns51.json", "benchmarks/make_readme_figures.py"),
