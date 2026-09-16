@@ -1073,6 +1073,20 @@ class VmecExtender(MagneticField):
     ) -> "VmecExtender":
         """Return a fast first-order local continuation from the LCFS.
 
+        .. warning::
+
+           **This path does not currently reproduce the direct quadrature and
+           should not be used for physics.** Measured 2026-09-16 on the shipped
+           QA wout at the default grid (finest 256 x 128, ``h_tor`` 0.030 m,
+           ``a`` 0.077 m): preparing it took 416 s, and the field it returns is
+           ~1e-5 in magnitude at every distance while the direct field falls
+           from 0.52 T at ``d = 0.25 h`` to 4e-6 T at ``4 h``. Where the direct
+           quadrature carries a certified estimate of 3.7e-08 (``d = 3 h``) and
+           1.7e-10 (``4 h``) the two disagree by factors of 4 and 7, so the
+           disagreement is the continuation's, not the reference's. It also has
+           no error estimate of its own -- :meth:`B_error_estimate` raises on
+           it. Use the direct path, at a distance its estimate certifies.
+
         The Taylor field is intended for nearby point queries. Long field-line
         traces must use a distance stopping criterion or a separately validated
         volume representation; unrestricted extrapolation can change topology.
