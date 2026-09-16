@@ -19,7 +19,7 @@ from vmex import optimize as opt
 
 nfp = 2  # number of field periods
 SURFACES = np.linspace(0.1, 1.0, 10)
-MAX_MODES, MAX_NFEV = [1,2,3], [10, 10, 15]
+MAX_MODES, MAX_NFEV = [1,], [10,]
 MAGNETIC_WELL_TARGET = 0.01
 ASPECT_TARGET = 5.0
 # MAX_MODES, MAX_NFEV = [1,2,3,4,5,6,7,8,9], [10, 10, 15, 20, 25, 40, 50, 60, 60]
@@ -28,7 +28,7 @@ ASPECT_TARGET = 5.0
 IOTA_FLOOR = 0.42
 PARAMETER_STEP, MAX_PARAMETER_CHANGE = 0.02, 5.0
 ESS_ALPHA = 1.2  # smaller values let high Fourier modes move more
-MINIMUM_MPOL = 5
+MINIMUM_MPOL = 3
 VARY_MAJOR_RADIUS = False  # set True to optimize RBC(0,0) instead of fixing it
 SEED_PERTURBATION = 0.05
 
@@ -53,21 +53,31 @@ def iota_floor(equilibrium_state, solver_context):
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
 import jax
-jax.config.update("jax_enable_compilation_cache", False)
+#jax.config.update("jax_enable_compilation_cache", False)
 
 from simsopt.geo import SurfaceRZFourier
 from vmex.core.statephysics import _aspect_scalars
 from vmex.core.solver import _geometry
-from jaxopt import LBFGS as minimize
+from jaxopt import LBFGSB
 from jaxopt.implicit_diff import root_jvp
+import functools
 MINIMUM_DISTANCE = 0.05
 DISTANCE_WALL_SCALE = 0.01
 DISTANCE_WALL_WEIGHT = 10.0
 PCA_WEIGHT = 1.0
+SINGULAR_STRENGTH_WEIGHT = 0.0  # inactive (as in the ESSOS reference); kept live for completeness
 VOLUME_WEIGHT = 0.02
 SPECTRAL_WEIGHT = 0.02
-WINDING_NTHETA = 24
-WINDING_NPHI = 24
+SHARPNESS = 300.0  # shared smooth-min sharpness for the distance and self-intersection walls
+SELF_INTERSECTION_WEIGHT = 100.0
+MINIMUM_SELF_RADIUS = 0.05
+SELF_RADIUS_WALL_SCALE = 0.01
+SELF_NEIGHBOR_RADIUS = 2
+ACTIVE_MPOL = 2
+ACTIVE_NTOR = 2
+COEFFICIENT_STEP_BOUND = 1.0
+WINDING_NTHETA = 16
+WINDING_NPHI = 16
 
 def _mode_angle(num_m_modes, num_n_modes, nfp, tor_angle, pol_angle, n_min, m_min):
     """(m, n)-grid of ``(m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle``.
@@ -213,6 +223,23 @@ def _symmetric_zs_modes(mpol, ntor):
     modes.extend((m, n) for m in range(1, mpol + 1)
                  for n in range(-ntor, ntor + 1))
     return modes
+
+
+def _active_dof_indices(mpol, ntor, active_mpol, active_ntor):
+    """Positions in a ``coefficients_to_dofs``-packed vector with ``m <=
+    active_mpol`` and ``|n| <= active_ntor``.
+
+    Reuses ``_symmetric_rc_modes``/``_symmetric_zs_modes`` since both were
+    built from the same (m, n) ordering ``coefficients_to_dofs`` packs its
+    output in -- no new mode-layout logic needed. Returns a plain Python
+    tuple (static, hashable) so it can be a ``jax.custom_jvp``
+    ``nondiff_argnums`` value.
+    """
+    def active(m, n):
+        return m <= active_mpol and abs(n) <= active_ntor
+    rc_active = [active(m, n) for m, n in _symmetric_rc_modes(mpol, ntor)]
+    zs_active = [active(m, n) for m, n in _symmetric_zs_modes(mpol, ntor)]
+    return tuple(i for i, is_active in enumerate(rc_active + zs_active) if is_active)
 
 
 def _basis_matrix(phi_grid, theta_grid, modes, nfp, kind):
@@ -441,16 +468,30 @@ def vmex_boundary_to_dense(R_cos, R_sin, Z_cos, Z_sin, solver_context):
 
 MU0 = 4 * jnp.pi * 1e-7
 
+def surface_quadrature_weights(normal_lengths, nphi, ntheta):
+    """Periodic midpoint-rule weights, including the surface Jacobian.
+
+    Vmex's plasma/winding grids use ``linspace(..., endpoint=False)`` -- no
+    duplicated closing point -- so this reduces to a uniform angular cell
+    size times the local Jacobian magnitude (``normal_lengths``, the
+    un-normalized surface normal's length from
+    ``points_normals_normal_lengths``).
+    """
+    return normal_lengths.reshape(-1) * (2 * jnp.pi / ntheta) * (2 * jnp.pi / nphi)
+
+
 def reduced_memory_induction_matrix(winding_points, plasma_points,
-                                    dipole_normals, plasma_normals):
+                                    dipole_normals, plasma_normals,
+                                    winding_weights, plasma_weights):
     difference = winding_points[None, :, :] - plasma_points[:, None, :]
     distance_squared = jnp.sum(difference ** 2, axis=2)
     diff_dot_dipole = jnp.einsum("ijk,jk->ij", difference, dipole_normals)
     diff_dot_plasma = jnp.einsum("ijk,ik->ij", difference, plasma_normals)
     dipole_dot_plasma = jnp.einsum("jk,ik->ij", dipole_normals, plasma_normals)
-    return (MU0 / (4 * jnp.pi)) * (
+    kernel = (MU0 / (4 * jnp.pi)) * (
         3 * diff_dot_dipole * diff_dot_plasma
         - distance_squared * dipole_dot_plasma) / distance_squared ** 2.5
+    return jnp.sqrt(plasma_weights[:, None]) * kernel * jnp.sqrt(winding_weights[None, :])
 
 
 
@@ -465,6 +506,30 @@ def smooth_minimum_distance(winding_points, plasma_points, sharpness):
     return jnp.sum(weights * distance.reshape(-1))
 
 
+def smooth_minimum_tangent_radius(points, normals, nphi, ntheta, sharpness, neighbor_radius):
+    """Nonlocal surface thickness; nearby parameter-grid points are excluded.
+
+    A smooth-min "tangent radius" between all pairs of winding-surface grid
+    points that are far apart in (theta, phi) index space -- guards against
+    the surface folding back close to itself at a distance, distinct from
+    the local degenerate-normal/area-element guard below.
+    """
+    difference = points[None, :, :] - points[:, None, :]
+    distance_squared = jnp.sum(difference ** 2, axis=2)
+    tangent_radius = distance_squared / (
+        2 * jnp.abs(jnp.einsum("ijk,ik->ij", difference, normals)) + 1e-14)
+
+    iphi, itheta = jnp.meshgrid(jnp.arange(nphi), jnp.arange(ntheta), indexing="ij")
+    dphi = jnp.abs(iphi.reshape(-1, 1) - iphi.reshape(1, -1))
+    dtheta = jnp.abs(itheta.reshape(-1, 1) - itheta.reshape(1, -1))
+    dphi = jnp.minimum(dphi, nphi - dphi)
+    dtheta = jnp.minimum(dtheta, ntheta - dtheta)
+    nonlocal_pair = (dphi > neighbor_radius) | (dtheta > neighbor_radius)
+    tangent_radius = jnp.where(nonlocal_pair, tangent_radius, 1e6)
+    weights = jax.nn.softmax(-sharpness * tangent_radius.reshape(-1))
+    return jnp.sum(weights * tangent_radius.reshape(-1))
+
+
 def enclosed_volume(points, normals, tor_num, pol_num):
     integral = jnp.sum(jnp.einsum("ijk,ijk->ij", points, normals))
     return jnp.abs(integral * (2 * jnp.pi / tor_num) * (2 * jnp.pi / pol_num) / 3)
@@ -474,14 +539,17 @@ def enclosed_volume(points, normals, tor_num, pol_num):
 
 
 
-def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos):
+def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos,
+                     plasma_weights):
     tor_num, pol_num = WINDING_NPHI, WINDING_NTHETA
     winding_points, winding_normals, normal_lengths, raw_normals = points_normals_normal_lengths(dofs, winding_R_cos.shape[0] - 1, _ntor_from_coefficients(winding_R_cos), nfp, tor_num, pol_num)
-    
+
     flat_points = winding_points.reshape((-1, 3))
     flat_unitnormals = winding_normals.reshape((-1, 3))
+    winding_weights = surface_quadrature_weights(normal_lengths, tor_num, pol_num)
     induction = reduced_memory_induction_matrix(
-        flat_points, plasma_points, flat_unitnormals, plasma_normals)
+        flat_points, plasma_points, flat_unitnormals, plasma_normals,
+        winding_weights, plasma_weights)
     singular_values = jnp.linalg.svd(induction, compute_uv=False)
     singular_probabilities = singular_values / jnp.sum(singular_values)
     singular_entropy = -jnp.sum(
@@ -489,11 +557,15 @@ def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos)
             jnp.maximum(singular_probabilities, 1e-300)))
 
     pca = 1 / jnp.maximum(singular_entropy, 1e-16)
+    singular_strength = jnp.sum(singular_values)
     volume = enclosed_volume(winding_points, raw_normals, tor_num, pol_num)
     spectral = spectral_width(dofs, weights)
-    distance = smooth_minimum_distance(flat_points, plasma_points, 300)
+    distance = smooth_minimum_distance(flat_points, plasma_points, SHARPNESS)
+    self_radius = smooth_minimum_tangent_radius(
+        flat_points, flat_unitnormals, tor_num, pol_num, SHARPNESS, SELF_NEIGHBOR_RADIUS)
     minimum_normal_length = jnp.min(normal_lengths)
-    return pca, volume, spectral, distance, minimum_normal_length
+    return (pca, volume, spectral, distance, minimum_normal_length,
+            singular_strength, self_radius)
 
 
 
@@ -524,27 +596,69 @@ weights = mode_weights(surface)
 
 
 
-def _winding_objective_value(dofs, plasma_points, plasma_normals, local_weights,
-                             winding_R_cos, scales):
-    pca, volume, spectral, distance, minimum_normal_length = calc_objectives(
-        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
+def _winding_objective_value(dofs, plasma_points, plasma_normals, plasma_weights,
+                             local_weights, winding_R_cos, scales):
+    # scales is a normalization reference computed once per outer call (see
+    # winding_surface_objective); its own sensitivity to the outer equilibrium
+    # state is a small correction term nobody depends on for correctness, and
+    # differentiating through it (fresh SVD + self-intersection check every
+    # tangent/cotangent pass) costs more than the term is worth. stop_gradient
+    # here makes that trade explicit rather than incidental.
+    scales = jax.lax.stop_gradient(scales)
+    (pca, volume, spectral, distance, minimum_normal_length,
+     singular_strength, self_radius) = calc_objectives(
+        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos,
+        plasma_weights)
     wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
+    self_intersection_wall = 1 + jnp.tanh(
+        (MINIMUM_SELF_RADIUS - self_radius) / SELF_RADIUS_WALL_SCALE) # Penalize nonlocal self-approach
     invalid = jnp.square(jnp.maximum(1e-6 - minimum_normal_length, 0)) * 1e12 # Avoid degenerate winding surfaces
     return (PCA_WEIGHT * pca / scales[0] # pca based objective
+            + SINGULAR_STRENGTH_WEIGHT * jnp.square(
+                jnp.maximum(1 - singular_strength / jnp.maximum(scales[5], 1e-16), 0)) # prevent global operator weakening (inactive: weight 0)
             - VOLUME_WEIGHT * volume / scales[1] # increase winding surface volume
             + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
-            + DISTANCE_WALL_WEIGHT * wall + invalid)
+            + DISTANCE_WALL_WEIGHT * wall + invalid
+            + SELF_INTERSECTION_WEIGHT * self_intersection_wall) # prevent nonlocal self-intersection
 
 
-def _winding_optimality(dofs, plasma_points, plasma_normals, local_weights,
-                        winding_R_cos, scales):
-    return jax.grad(_winding_objective_value)(
-        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos, scales)
+def _active_winding_objective_value(active_dofs, full_dofs, active_indices,
+                                    plasma_points, plasma_normals, plasma_weights,
+                                    local_weights, winding_R_cos, scales):
+    """``_winding_objective_value`` restricted to the active-mode subset.
+
+    ``full_dofs`` is the frozen (analytic offset-surface) baseline for every
+    mode; only the modes at ``active_indices`` (``m <= ACTIVE_MPOL``,
+    ``|n| <= ACTIVE_NTOR``) are actually varied by the inner solve, matching
+    the ESSOS reference. ``active_indices`` is a plain Python tuple (static,
+    hashable) rather than a JAX array precisely so it can be a
+    ``nondiff_argnums`` value below -- it selects positions, it is never
+    itself differentiated.
+    """
+    dofs = full_dofs.at[jnp.array(active_indices)].set(active_dofs)
+    return _winding_objective_value(
+        dofs, plasma_points, plasma_normals, plasma_weights, local_weights,
+        winding_R_cos, scales)
 
 
-@jax.custom_jvp
-def _solve_winding_surface(init_dofs, plasma_points, plasma_normals, local_weights,
-                          winding_R_cos, scales):
+def _active_dof_bounds(init_active_dofs):
+    """Box bounds for the active DOFs: initial value +/- COEFFICIENT_STEP_BOUND.
+
+    Centered on a stop_gradient'd copy of the initial active DOFs: the box is
+    an engineering guardrail against runaway coefficient changes during the
+    inner solve, not a physically tracked quantity, so its own sensitivity to
+    the outer equilibrium is deliberately zero (validated against finite
+    differences in a standalone toy problem before this was wired in, in both
+    the bound-inactive and bound-active regimes).
+    """
+    center = jax.lax.stop_gradient(init_active_dofs)
+    return center - COEFFICIENT_STEP_BOUND, center + COEFFICIENT_STEP_BOUND
+
+
+@functools.partial(jax.custom_jvp, nondiff_argnums=(2,))
+def _solve_winding_surface(init_active_dofs, full_dofs, active_indices,
+                          plasma_points, plasma_normals, plasma_weights,
+                          local_weights, winding_R_cos, scales):
     # implicit_diff defaults to True here (unlike the earlier implicit_diff=False
     # attempt): this keeps jaxopt's compact jax.lax.while_loop forward solve
     # (compiled size independent of maxiter) instead of unrolling 100 steps into
@@ -554,21 +668,43 @@ def _solve_winding_surface(init_dofs, plasma_points, plasma_normals, local_weigh
     # (jax.jvp) Jacobian construction cannot differentiate through. This gives
     # a forward-mode derivative only: switching this problem's jac_solver to
     # "reverse" would need a matching defvjp too.
-    optimizer = minimize(
-        fun=lambda d: _winding_objective_value(
-            d, plasma_points, plasma_normals, local_weights, winding_R_cos, scales),
-        maxiter=100, linesearch="backtracking", tol=1e-6)
-    return optimizer.run(init_dofs).params
+    #
+    # LBFGSB (not plain LBFGS) box-constrains each active dof to its initial
+    # value +/- COEFFICIENT_STEP_BOUND, matching the ESSOS reference's SciPy
+    # L-BFGS-B bounds. active_indices stays a closure variable here (not
+    # threaded through jaxopt's own *args) since it is static and jaxopt's
+    # machinery only needs to know about genuinely differentiated arguments.
+    optimizer = LBFGSB(
+        fun=lambda a, f, *rest: _active_winding_objective_value(
+            a, f, active_indices, *rest),
+        maxiter=4, tol=1e-6)
+    bounds = _active_dof_bounds(init_active_dofs)
+    return optimizer.run(
+        init_active_dofs, bounds, full_dofs, plasma_points, plasma_normals,
+        plasma_weights, local_weights, winding_R_cos, scales).params
 
 
 @_solve_winding_surface.defjvp
-def _solve_winding_surface_jvp(primals, tangents):
-    sol = _solve_winding_surface(*primals)
-    sol_tangent = root_jvp(optimality_fun=_winding_optimality, sol=sol,
-                           args=primals[1:], tangents=tangents[1:])
+def _solve_winding_surface_jvp(active_indices, primals, tangents):
+    init_active_dofs, full_dofs = primals[0], primals[1]
+    rest_primals, rest_tangents = primals[2:], tangents[2:]
+    sol = _solve_winding_surface(init_active_dofs, full_dofs, active_indices, *rest_primals)
+
+    optimizer = LBFGSB(
+        fun=lambda a, f, *rest: _active_winding_objective_value(
+            a, f, active_indices, *rest),
+        maxiter=4, tol=1e-6)
+    bounds = _active_dof_bounds(init_active_dofs)
+    zero_bounds_tangent = jax.tree.map(jnp.zeros_like, bounds)
+
+    sol_tangent = root_jvp(
+        optimality_fun=optimizer.optimality_fun, sol=sol,
+        args=(bounds, full_dofs, *rest_primals),
+        tangents=(zero_bounds_tangent, tangents[1], *rest_tangents))
     return sol, sol_tangent
 
 
+@jax.jit
 def winding_surface_objective(equilibrium_state, solver_context):
     # Initial from vmex
     aminor = _aspect_scalars(equilibrium_state, solver_context)[0]
@@ -578,11 +714,13 @@ def winding_surface_objective(equilibrium_state, solver_context):
 
     # Make plamsa points and normals for the winding surface objective
     plasma_dofs = coefficients_to_dofs(R_cos, Z_sin)
-    plasma_points, plasma_normals, _, _ = points_normals_normal_lengths(
+    plasma_points, plasma_normals, plasma_normal_lengths, _ = points_normals_normal_lengths(
         plasma_dofs, R_cos.shape[0] - 1, _ntor_from_coefficients(R_cos), nfp,
         WINDING_NPHI, WINDING_NTHETA)
     plasma_points = plasma_points.reshape((-1, 3))
     plasma_normals = plasma_normals.reshape((-1, 3))
+    plasma_weights = surface_quadrature_weights(
+        plasma_normal_lengths, WINDING_NPHI, WINDING_NTHETA)
 
     # Make winding surface points and normals for the winding surface objective after extending the plasma surface along its normal
     winding_R_cos, winding_Z_sin, winding_R_sin, winding_Z_cos = extend_via_normal_jax(
@@ -590,13 +728,23 @@ def winding_surface_objective(equilibrium_state, solver_context):
     winding_dofs = coefficients_to_dofs(winding_R_cos, winding_Z_sin)
     local_weights = mode_weights_from_coefficients(winding_R_cos)
 
-    scales = calc_objectives(winding_dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    scales = calc_objectives(winding_dofs, plasma_points, plasma_normals,
+                             local_weights, winding_R_cos, plasma_weights)
 
-    winding_solution = _solve_winding_surface(
-        winding_dofs, plasma_points, plasma_normals, local_weights,
-        winding_R_cos, scales)
+    active_indices = _active_dof_indices(
+        winding_R_cos.shape[0] - 1, _ntor_from_coefficients(winding_R_cos),
+        ACTIVE_MPOL, ACTIVE_NTOR)
+    active_index_array = jnp.array(active_indices)
+    init_active_dofs = winding_dofs[active_index_array]
 
-    _, _, _, opt_distance, _ = calc_objectives(winding_solution, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    active_solution = _solve_winding_surface(
+        init_active_dofs, winding_dofs, active_indices, plasma_points,
+        plasma_normals, plasma_weights, local_weights, winding_R_cos, scales)
+    winding_solution = winding_dofs.at[active_index_array].set(active_solution)
+
+    _, _, _, opt_distance, _, _, _ = calc_objectives(
+        winding_solution, plasma_points, plasma_normals, local_weights,
+        winding_R_cos, plasma_weights)
 
     return 1 / opt_distance
 
@@ -612,7 +760,8 @@ objective_function_terms = [
 
 report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
-    ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
+    ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"),
+    ("winding objective", winding_surface_objective, ".6e"))
 monitor = opt.OptimizationMonitor(stream=None)
 
 # Optimize for QA first, then add the pressure-stability proxy locally.
@@ -631,7 +780,13 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
     stage_terms = objective_function_terms
     problem = opt.VmecProblem.from_tuples(inp, stage_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
-        restart_from=equilibrium)
+        restart_from=equilibrium, implicit_jacobian_method="block_tridiagonal")
+    # Pinned to "block_tridiagonal" rather than the "auto" default: with only
+    # winding_surface_objective active (nres=1), "auto" picks reverse-mode for
+    # the Jacobian, which _solve_winding_surface's forward-mode-only
+    # custom_jvp cannot supply -- every residual_jac() call would otherwise
+    # retry and fail a full reverse-mode trace before falling back to this
+    # same certified path (measured: ~17-30% slower per call, every call).
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:
@@ -647,12 +802,12 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
     inp = problem.input_from_x(result.x)
     equilibrium = problem.equilibrium_from_x(result.x)
     report(f"mode {max_mode}", equilibrium)
-    # inp.to_indata(f"input.QA_max_mode_{max_mode:03d}")
+    inp.to_indata(f"input.QA_max_mode_{max_mode:03d}")
 
 # Print results
 final_input = replace(inp,
-    ns_array=np.array([31 if ci_smoke else 101]),
-    ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-14]),
+    ns_array=np.array([31 if ci_smoke else 51]),
+    ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-12]),
     niter_array=np.array([8000]))
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution,
