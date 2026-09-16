@@ -1605,3 +1605,29 @@ error estimates and ratios are not affected.
   `input.finite_beta_stellarator_polished` takes **328.0 s** for solve plus
   polish, certified. So "over five minutes for a single run" is true of the
   finite-beta stellarator and not of the tokamak.
+- **Repo-size audit, by reference rather than by size.** 9.9 MB tracked across
+  607 files, so this is a file-count and organization question, not a byte one:
+  `tests` 133, `benchmarks` 131, `examples` 123, `docs` 100, `vmex` 79,
+  `tools` 17, root 12, `assets` 1. Four files were referenced by nothing and are
+  gone (the QI sheet-current mgrid builder, a repo census carrying branch and PR
+  counts, a stale profile record, and the pre-commit config, which duplicated
+  `tools/preflight.py` with a separately pinned ruff and a 200 kB file cap the
+  tracked tree already exceeds). Everything else in `tools/` is referenced --
+  `fetch_assets.py` 23 times and in three workflows, `test_manifest.py` in four
+  -- and `assets/manifest.json` is read by eight places including `MANIFEST.in`,
+  so the one-file directory stays.
+- **`benchmarks/baselines/m4/` should NOT be consolidated.** It is 54 files,
+  8.7 % of the tree, and nothing reads them programmatically -- so merging them
+  into one keyed record looks like the biggest available win. It is not:
+  `profile_workflows.py` writes `{workflow}_{regime}.json` one cell at a time
+  and re-executes itself in a subprocess for the cold regimes, so one file per
+  cell is what lets a partial run on a shared machine keep its completed cells.
+  Consolidating would trade that for a cosmetic count. The file count there is a
+  consequence of a sound design; leave it.
+- **21 of 66 shipped examples were run by no test and nothing said so.**
+  `tests/test_examples.py` now parses every example and requires each to be
+  named by a test or listed in `UNTESTED_EXAMPLES` with a reason. The QH, QI and
+  QP entries drive the same code as a tested QA sibling, which is the reason
+  they are exempt rather than uncovered. `take_fixed_boundary_gradients.py` got
+  a test instead of an exemption: 5.0e-06 at the smoke settings against 1.1e-07
+  at the shipped ones.
