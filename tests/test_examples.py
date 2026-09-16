@@ -97,6 +97,76 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
         assert hasattr(Coils, name), name
 
 
+#: Shipped examples that no test runs, each with the reason it is exempt.
+#: The QH, QI and QP entries drive the same code as a tested QA sibling on a
+#: different symmetry class, so the driver is covered and only the deck is not.
+#: Keeping the list explicit is what makes the gap reviewable: a new example
+#: that nothing tests fails the guard below until it is either tested or
+#: listed here on purpose.
+UNTESTED_EXAMPLES = {
+    "examples/mirror/pleiades_mirror_reference.py": "needs an unshipped reference deck",
+    "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py": "mirror hybrid, covered by tests/mirror",
+    "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
+    "examples/optimization/QA_optimization_bootstrap.py": "bootstrap driver covered by tests/test_bootstrap.py",
+    "examples/optimization/QH_optimization_bootstrap.py": "QA sibling is tested",
+    "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
+    "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
+    "examples/optimization/QI_optimization_bootstrap.py": "QA sibling is tested",
+    "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
+    "examples/optimization/QI_optimization_scalar.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization_finite_beta_scalar.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization_scalar.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization_scipy.py": "QA sibling is tested",
+    "examples/optimization/stellarator_asymmetry/QA_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QP_optimization.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
+}
+
+
+def _shipped_examples() -> list[Path]:
+    return sorted(p for p in EXAMPLES.rglob("*.py") if not p.name.startswith("_"))
+
+
+def test_every_example_parses() -> None:
+    """Every shipped example compiles.
+
+    Cheap, and it catches the class of damage an edit across many examples can
+    do -- a removed import guard, a stranded ``except`` -- without running any
+    of them.
+    """
+    import ast
+
+    for script in _shipped_examples():
+        try:
+            ast.parse(script.read_text(), filename=str(script))
+        except SyntaxError as error:  # pragma: no cover - the failure is the point
+            raise AssertionError(f"{script.relative_to(REPO)}: {error}") from error
+
+
+def test_every_example_is_tested_or_listed_as_untested() -> None:
+    """No example is uncovered by accident."""
+    # The UNTESTED_EXAMPLES entries above are themselves test source, so drop
+    # those lines before searching or every listed example would look covered.
+    tests_text = "\n".join(
+        line
+        for path in sorted((REPO / "tests").rglob("test_*.py"))
+        for line in path.read_text().splitlines()
+        if not line.lstrip().startswith('"examples/'))
+    uncovered = {
+        str(script.relative_to(REPO))
+        for script in _shipped_examples()
+        if script.name not in tests_text
+    }
+    assert uncovered == set(UNTESTED_EXAMPLES), {
+        "missing a test or an entry": sorted(uncovered - set(UNTESTED_EXAMPLES)),
+        "listed but now tested": sorted(set(UNTESTED_EXAMPLES) - uncovered),
+    }
+
+
 def _run_example(script: Path, cwd: Path, timeout: int = 2400,
                  args: tuple[str, ...] = (), **extra_env: str) -> str:
     env = dict(os.environ, VMEX_EXAMPLES_CI="1", **extra_env)
@@ -266,6 +336,22 @@ def test_free_boundary_mgrid(tmp_path):
     out = _run_example(EXAMPLES / "free_boundary_mgrid.py", tmp_path, timeout=900)
     assert "converged = True" in out
     assert (tmp_path / "output_free_boundary_mgrid" / "wout_cth_like_free_bdy.nc").exists()
+
+
+@pytest.mark.full  # one fixed solve, its adjoint, and two re-solves for the FD
+def test_take_fixed_boundary_gradients(tmp_path):
+    """The fixed-boundary counterpart certifies against a difference quotient.
+
+    Unlike the free boundary, a fixed-boundary re-solve follows the same path,
+    so the quotient is usable: at the shipped settings the example reports
+    1.1e-07, and the smoke settings (ns 11, mpol 3, ftol 1e-9) stay well inside
+    the bound below.
+    """
+    out = _run_example(EXAMPLES / "take_fixed_boundary_gradients.py", tmp_path,
+                       timeout=900)
+    match = re.search(r"relative error = ([0-9.eE+-]+)", out)
+    assert match is not None, out[-2000:]
+    assert float(match.group(1)) < 1.0e-3, out[-2000:]
 
 
 @pytest.mark.full  # one free solve and both adjoint solvers
