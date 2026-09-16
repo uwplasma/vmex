@@ -1,5 +1,7 @@
 """Public naming contract for prescribed-interface virtual casing."""
 
+from pathlib import Path
+
 import vmex as vj
 from vmex.core import virtual_casing
 
@@ -46,5 +48,22 @@ def test_exterior_source_grid_is_sized_from_the_boundary():
     assert ext._source_nphi_for_digits(qa, 12) > 64
     assert ext._source_nphi_for_digits(_Wout(100.0, 0.01, 1), 12) == ext._MAX_SOURCE_NPHI
 
-    # A wout the rule cannot read falls back rather than raising.
+    # A boundary the rule cannot read falls back rather than raising.
     assert ext._source_nphi_for_digits(object(), 6) == ext._DEFAULT_SOURCE_NPHI
+
+    # from_state feeds it a VmecInput instead of a wout; the same boundary has
+    # to give the same answer through either, or a live equilibrium and its
+    # exported wout would be extended on different grids.
+    from vmex.core.input import VmecInput
+    from vmex.core.wout import read_wout
+
+    data = Path(__file__).resolve().parents[1] / "examples" / "data"
+    reference = data / "wout_LandremanPaul2021_QA_lowres_reference.nc"
+    if reference.exists():
+        assert (ext._source_nphi_for_digits(read_wout(reference), 6)
+                == ext._source_nphi_for_digits(
+                    VmecInput.from_file(data / "input.LandremanPaul2021_QA_lowres"), 6)
+                == 64)
+    assert ext._source_nphi_for_digits(
+        VmecInput.from_file(data / "input.circular_tokamak"), 6
+    ) == ext._DEFAULT_SOURCE_NPHI

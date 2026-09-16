@@ -849,8 +849,11 @@ def _mgrid_from_wout(wout: Any, base_dir: Path | None) -> MgridField | None:
     return MgridField.from_mgrid_data(data, extcur=scaled)
 
 
-def _source_nphi_for_digits(wout: Any, digits: int) -> int:
-    """Per-period toroidal source count that reaches ``digits`` one minor radius out.
+def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
+    """Per-period source sampling that reaches ``digits`` one minor radius out.
+
+    ``boundary`` is a wout (``rmnc``/``xm``) or a ``VmecInput`` (``rbc``); both
+    carry ``nfp`` and enough of the boundary to get ``R0`` and ``a``.
 
     The off-surface quadrature error decays as ``exp(-2 pi d / h)`` with ``h``
     the finest source level's largest spacing, whose toroidal part over the
@@ -869,11 +872,19 @@ def _source_nphi_for_digits(wout: Any, digits: int) -> int:
     four orders -- are refined.
     """
     try:
-        rmnc = np.asarray(wout.rmnc)[-1]
-        xm = np.asarray(wout.xm)
-        nfp = max(int(wout.nfp), 1)
-        outboard = float(rmnc.sum())
-        inboard = float((rmnc * np.cos(xm * np.pi)).sum())
+        nfp = max(int(boundary.nfp), 1)
+        if hasattr(boundary, "rmnc"):
+            # A wout: the last full-mesh surface, with its own mode table.
+            coefficients = np.asarray(boundary.rmnc)[-1]
+            poloidal = np.asarray(boundary.xm)
+        else:
+            # A VmecInput: rbc is indexed [n + ntor, m], and the outboard point
+            # R(theta = 0, phi = 0) sums every n, so reduce the toroidal axis
+            # first and keep one coefficient per poloidal mode.
+            coefficients = np.asarray(boundary.rbc).sum(axis=0)
+            poloidal = np.arange(coefficients.size, dtype=float)
+        outboard = float(coefficients.sum())
+        inboard = float((coefficients * np.cos(poloidal * np.pi)).sum())
         minor = 0.5 * (outboard - inboard)
         major = 0.5 * (outboard + inboard)
     except Exception:
@@ -1091,10 +1102,12 @@ class VmecExtender(MagneticField):
         ``target_chunk_size`` bounds evaluation points. ``"auto"`` delegates
         both memory/performance choices to virtual-casing-jax.
 
-        ``levels`` are full-torus ``(n_toroidal, n_poloidal)`` source grids
-        (toroidal counts rounded up to a multiple of ``nfp``); the default
-        ``((nphi, ntheta), (2 nphi, 2 ntheta))`` therefore has ``2 nphi``
-        toroidal points on the whole torus, not per field period.
+        ``levels`` are full-torus ``(n_toroidal, n_poloidal)`` source grids.
+        ``surface_data.gamma`` is sampled on ONE field period, so the default
+        schedule carries the ``nfp`` factor:
+        ``((nfp nphi, ntheta), (2 nfp nphi, 2 ntheta))``. Without it an nfp = 5
+        boundary sampled at 32 points per period was resolved by a finest level
+        of 64 over the whole torus -- 13 per period.
         """
         from . import virtual_casing as vc
 
@@ -1286,19 +1299,26 @@ class VmecExtender(MagneticField):
         state: Any,
         *,
         external_field: Any | None = None,
-        nphi: int = 32,
-        ntheta: int = 32,
+        nphi: int | None = None,
+        ntheta: int | None = None,
         digits: int = 6,
         levels: tuple[tuple[int, int], ...] | None = None,
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
         accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
-        """Construct the differentiable finite-beta path from a live VMEX state."""
+        """Construct the differentiable finite-beta path from a live VMEX state.
+
+        ``nphi`` and ``ntheta`` default from the boundary exactly as in
+        :meth:`from_wout`; pass either explicitly to override.
+        """
         from . import virtual_casing as vc
 
+        chosen = _source_nphi_for_digits(inp, digits)
         surface = vc.surface_field_data_from_state(
-            inp, state, nphi=nphi, ntheta=ntheta
+            inp, state,
+            nphi=chosen if nphi is None else nphi,
+            ntheta=chosen if ntheta is None else ntheta,
         )
         return cls.from_surface_data(
             surface,
