@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """True finite-beta free-boundary QA optimization with only coil dofs.
 
-Preview: this script needs ESSOS with uwplasma/ESSOS#58 (commit ``1b3210ca``), which
-PyPI essos 0.16 predates.
 """
 
 from dataclasses import replace
@@ -19,16 +17,10 @@ from vmex import optimize as opt
 from vmex.core import implicit as im
 from vmex.core.bootstrap import ELEMENTARY_CHARGE, KineticProfiles, RedlBootstrapMismatch
 
-try:
-    from essos.coils import Coils
-    from essos.fields import BiotSavart
-    from essos.objective_functions import loss_coil_separation
-    from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
-except ImportError as error:
-    raise ImportError(
-        "This example needs ESSOS with uwplasma/ESSOS#58, which PyPI essos 0.16 predates: "
-        'pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"'
-    ) from error
+from essos.coils import Coils
+from essos.fields import BiotSavart
+from essos.objective_functions import loss_coil_separation
+from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
 
 TARGET_BETA = 0.025
 SURFACES = np.linspace(0.1, 0.9, 8)

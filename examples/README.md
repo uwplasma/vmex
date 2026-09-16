@@ -1,9 +1,8 @@
 # Examples
 
-All runnable examples live under this single `examples/` tree. Examples marked
-*preview* need ESSOS with
-[uwplasma/ESSOS#58](https://github.com/uwplasma/ESSOS/pull/58), which is not on PyPI:
-`pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"`.
+All runnable examples live under this single `examples/` tree. The coil and
+exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
+or `pip install "vmex[all]"` for everything the examples use.
 
 `free_boundary_mgrid.py` and `free_boundary_beta_scan.py` also need
 `data/mgrid_cth_like.nc`, a release asset rather than a tracked file; install it

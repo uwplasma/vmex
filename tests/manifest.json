@@ -204,7 +204,7 @@
     ],
     "pr-physics-field": [
       "tests/test_examples.py::test_released_essos_reads_bundled_coil_fixtures",
-      "tests/test_examples.py::test_essos_examples_name_the_required_branch",
+      "tests/test_examples.py::test_coil_examples_need_only_the_pinned_essos_release",
       "tests/test_stability.py::test_lasym_mercier_current_tables_are_exercised",
       "tests/test_freeboundary_implicit.py::test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient",
       "tests/test_boozer_tables.py",

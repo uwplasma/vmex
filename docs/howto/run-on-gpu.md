@@ -53,11 +53,21 @@ The policy in {mod}`vmex.core.device` is measured, not guessed
 Ask the policy directly:
 
 ```python
+import vmex as vj
 from vmex.core.device import GPU_MIN_ITERATION_WORK, iteration_work, recommended_device
+from vmex.core.solver import resolution_from_input
 
-print(iteration_work(runtime.resolution), GPU_MIN_ITERATION_WORK)
-print(recommended_device(runtime.resolution))    # "cpu" or "gpu"
+inp = vj.VmecInput.from_file("input.my_case")
+# The finest multigrid stage is the one that dominates the run.
+resolution = resolution_from_input(inp, ns=int(inp.ns_array[-1]))
+
+print(iteration_work(resolution), GPU_MIN_ITERATION_WORK)
+print(recommended_device(resolution))    # "cpu" or "gpu"
 ```
+
+On the two shipped decks that prints `1632 100000` / `cpu` for
+`input.circular_tokamak` and `1536000 100000` / `gpu` for
+`input.LandremanPaul2021_QA_lowres`.
 
 ## What stays on CPU regardless
 

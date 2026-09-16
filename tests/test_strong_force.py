@@ -178,7 +178,7 @@ def test_high_order_surface_composes_with_essos_objective():
     essos_surfaces = pytest.importorskip("essos.surfaces")
     squared_flux = getattr(essos_surfaces, "SquaredFlux", None)
     if squared_flux is None:
-        pytest.skip("SquaredFlux is not part of released ESSOS 0.16")
+        pytest.skip("SquaredFlux is not part of released ESSOS (0.17)")
 
     @jax.tree_util.register_pytree_node_class
     class PositionDependentField:

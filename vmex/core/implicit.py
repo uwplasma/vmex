@@ -1883,8 +1883,21 @@ def _callback_sharding(cfg: ImplicitConfig):
     ``cuda:1`` but the ``wb`` boundary gradient exactly 0.0).  A
     ``SingleDeviceSharding`` on the carried device commits both outputs where
     every other stage of the operation already lives.
+
+    The pin is only expressible WITHIN one platform.  JAX requires the pinned
+    device to appear in the enclosing computation's device assignment, and a
+    jit compiled for an accelerator does not contain the CPU.  On a GPU box
+    :func:`~vmex.core.device.resolve_implicit_device` deliberately stands this
+    path down to the CPU, so every ``jax.jit``-wrapped optimization gradient
+    pinned cpu:0 inside a cuda:0 computation and died in JAX's lowering with
+    ``ValueError: tuple.index(x): x not in tuple`` -- no VMEX frame, no
+    actionable message.  Across platforms the callback therefore follows the
+    computation, which is JAX's own default; the two-GPU case the paragraph
+    above describes keeps its pin, because there both devices are accelerators.
     """
     if cfg.device is None:
+        return None
+    if getattr(cfg.device, "platform", None) != jax.default_backend():
         return None
     return jax.sharding.SingleDeviceSharding(cfg.device)
 

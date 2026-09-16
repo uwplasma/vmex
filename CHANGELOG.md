@@ -7,17 +7,46 @@ revision it was measured at, and the pages that cite it.
 
 ## 0.9.1 - 2026-09-16
 
-One behaviour change, carried straight out of a user report: the optimizer no
-longer differentiates a trial the solver has not brought near a root.
+Optimization gradients now compile on a machine that has a GPU, the coil
+examples install from PyPI, and the exterior field sizes its source grid from
+the boundary instead of a constant.
+
+### Fixed
+
+- **Optimization gradients could not be compiled on any machine with a GPU.**
+  The implicit path is deliberately stood down to the CPU on an accelerator
+  backend, and the host callback was pinned there — but JAX requires a pinned
+  device to be in the enclosing computation's device assignment, and a jit
+  compiled for `cuda:0` does not contain `cpu:0`. Every jitted
+  `jax_value_and_grad` died in JAX's lowering with
+  `ValueError: tuple.index(x): x not in tuple`, with no VMEX frame
+  (jax-ml/jax#40722). The pin now applies only within one platform. On two RTX
+  A4000s all three ways of asking now agree, peak device memory 0.16 GiB, warm
+  value-and-gradient 1.3–1.6 s against 2.15 s on the same machine's CPU.
+- The "When the GPU pays off" snippet referred to an undefined `runtime` (#157).
 
 ### Changed
 
 - `max_fsq_ratio` defaults to `1e2`, not `1e6`. The implicit adjoint assumes
   `F = 0`, so differentiating a trial whose residual is 1e-6 against a 1e-12
-  deck carries an O(|F|) error and lets a line search walk the design somewhere
-  the solver cannot resolve; that is what stalled the finite-beta single stage
-  (#361). The QA, QH, QI, QP, QA-scalar and QI-scipy examples produce identical
-  output either way, so the looser bar bought nothing.
+  deck carries an O(norm(F)) error and lets a line search walk the design
+  somewhere the solver cannot resolve; that is what stalled the finite-beta
+  single stage (#361).
+- **The coil examples install from PyPI.** ESSOS 0.17 carries uwplasma/ESSOS#58,
+  so the `coils` extra pins `essos>=0.17` and the git-install instruction is
+  gone from nine examples, five documentation pages and the examples README. A
+  new `all` extra installs everything the examples use.
+- **The exterior field sizes its source grid from the boundary.**
+  `VmecExtender.from_wout` hard-coded `nphi=ntheta=32`, and the level schedule
+  read a per-field-period sampling as a whole-torus count; on the shipped QA
+  wout (`R0/a` = 15.9) the achieved error one minor radius out was 2.46e-02
+  against a requested 1e-6. Sizing from the geometry gives 4.31e-07 at 0.116 s
+  per call against 0.226 s — more accurate and no slower. A tokamak-like aspect
+  ratio stays on the historical floor; explicit `nphi`, `ntheta` or `levels`
+  are honored unchanged.
+- `take_free_boundary_gradients.py` certifies against the second adjoint solver
+  instead of a central difference, which on a free boundary has no usable step.
+  The coupled GCROT and edge Schur adjoints agree to 1.6e-04.
 
 ## 0.9.0 - 2026-09-15
 
@@ -165,28 +194,7 @@ independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
 
 ## 0.8.1 - 2026-09-02
 
-The cold-start performance release. Cold CLI, python, and optimization runs
-are faster than every previous VMEX release, including v0.3.0, on every
-deck measured, on x86 and arm64: 36-core x86 QA_lowres 43.1 s (v0.3.0) ->
-32.4 s, solovev 12.1 -> 7.0 s; Apple M4 QA 22.3 s (v0.8.0) -> 12.4 s, li383
--> 4.0 s, solovev -> 3.1 s. At QA resolution the cold start compiles 343 XLA
-programs (v0.8.0: 773; v0.3.0: 523).
-
-- Eager setup, WOUT-export, stage-interpolation, and printout passes became
-  module-level jitted lanes (#227, #230).
-- The iteration body traces the funct3d chain once (halving every lane's
-  compile), and the ns4 preconditioner refresh runs only on its VMEC2000
-  cadence (#229).
-- Print cadence, initial DELT, and ftol no longer key lane recompilation
-  (#231); non-finite iterations are detected from the residual scalars
-  with full classification on trip (#232).
-- 3-D polishing no longer stalls in XLA constant folding: the Ruiz/probe
-  jits stopped baking linearization residuals as constants (#234).
-- CI pins compile budgets (lane HLO size, cold-solve program count) and
-  disables the persistent compilation cache on ephemeral runners, whose
-  eviction lock had been timing every lane out (#228, #233).
-- Numerical statement: per-iteration physics unchanged; graph
-  restructuring shifts XLA fusion, so trajectories can differ from v0.8.0 at
-  1 ULP per iteration with identical iteration counts and converged
-  geometry agreeing at 1e-12.
-
+The cold-start performance release: cold CLI, Python and optimization runs
+faster than every previous release on every deck measured, from 773 XLA
+programs at QA resolution to 343 (#227-#234). Full notes in the GitHub
+release.

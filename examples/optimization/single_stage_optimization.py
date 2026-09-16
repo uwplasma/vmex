@@ -17,8 +17,6 @@ values in ``benchmarks/single_stage_profile_m4.json``.
 
 Use the commented ``Coils.from_simsopt`` line to replace the generated coils
 with a SIMSOPT coil JSON while keeping the objective and derivative code.
-Preview: this script needs ESSOS with uwplasma/ESSOS#58 (commit ``1b3210ca``), which
-PyPI essos 0.16 predates.
 """
 
 from dataclasses import replace
@@ -36,16 +34,10 @@ from vmex import optimize as opt
 import jax
 import jax.numpy as jnp
 
-try:
-    from essos.coils import Coils, CreateEquallySpacedCurves
-    from essos.fields import BiotSavart
-    from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
-    from essos.surfaces import surfacerzfourier_from_boundary
-except ImportError as error:
-    raise ImportError(
-        "This example needs ESSOS with uwplasma/ESSOS#58, which PyPI essos 0.16 predates: "
-        'pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"'
-    ) from error
+from essos.coils import Coils, CreateEquallySpacedCurves
+from essos.fields import BiotSavart
+from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
+from essos.surfaces import surfacerzfourier_from_boundary
 
 started = time.perf_counter()
 nfp = 2  # number of field periods

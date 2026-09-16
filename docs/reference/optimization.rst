@@ -373,11 +373,8 @@ distance implementation.
 .. warning::
 
    The joint coil, exterior VJP, and field-line tracing examples need ESSOS
-   with uwplasma/ESSOS#58, which is not on PyPI:
-   ``pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"``.
-   VMEX 0.6 supports ESSOS 0.16 for CLI
-   coil tabulation, direct Biot--Savart fields, and free-boundary coil solves.
-   VMEX does not vendor or pin the pending ESSOS code.
+   0.17 or newer: ``pip install "vmex[coils]"``. Earlier releases lack the
+   ``Coils.from_json``/``Coils.with_dofs`` API these examples use.
 
 For a finite-beta prescribed boundary, virtual casing gives the field of the
 enclosed plasma currents. The physical exterior field is that contribution

@@ -1494,3 +1494,114 @@ round: #352, #353, #354, #355 and the two defects below.
   current GPU result.
 - **Next action.** Phase D (D1, a differentiable QI well location) as before,
   plus A5 for the 23-deck robustness backlog and the Phase G retarget above.
+
+
+**2026-09-16: 0.9.1, and where the cold seconds, the GPU failures and the
+gradient doubts actually are.** Merged #362 (`8db9c825`). ESSOS 0.17,
+`booz_xform_jax` 0.3.0 and solvax 0.22.0 are all on PyPI, so the coil examples
+install from PyPI and every floor the plan gates on is raisable. Measurements
+below are from this laptop (14 cores, JAX 0.11.1, x64) and from the office box
+(2x RTX A4000, driver 580.173, JAX 0.11.1 CUDA), with
+`VMEX_COMPILATION_CACHE=disabled` where a cold compile is the subject.  Both
+machines carried other jobs, so wall times are upper bounds; byte counts,
+error estimates and ratios are not affected.
+
+- **Optimization gradients could not be compiled on any machine with a GPU
+  (fixed).** `resolve_implicit_device` stands the implicit path down to the CPU
+  on an accelerator backend, `_callback_sharding` pinned the host callback
+  there, and JAX requires a pinned device to appear in the enclosing
+  computation's device assignment -- which for a jit compiled on a GPU box is
+  `[cuda:0]`. All three ways of asking (default placement,
+  `jax.default_device(gpu)`, `vmex device_scope("gpu")`) died in JAX's lowering
+  with `ValueError: tuple.index(x): x not in tuple`, no VMEX frame; the same
+  program under `JAX_PLATFORMS=cpu` returned `f = 8.2959e-11`. JAX catches
+  `IndexError` there where `tuple.index` raises `ValueError`, so its own
+  actionable message never printed -- worth an upstream issue. The pin is now
+  applied only within one platform.
+- **The GPU loses on both shipped decks, including the one the policy
+  recommends for it.** Office, one process per row, peak device memory from the
+  allocator's own counter with preallocation off:
+
+  | deck | CPU cold | CPU warm | GPU cold | GPU warm | peak device |
+  |---|---|---|---|---|---|
+  | `circular_tokamak` | 6.74 s | 0.22 s | 12.82 s | 1.19 s | 0.16 GiB |
+  | `QA_lowres` | 16.99 s | 6.20 s | 35.96 s | 6.91 s | 0.16 GiB |
+
+  `recommended_device` answers `gpu` for `QA_lowres` (work proxy 1,536,000
+  against a 100,000 threshold), and on this hardware that is the wrong answer
+  cold and warm. `GPU_MIN_ITERATION_WORK` needs re-measuring on A4000-class
+  hardware, or the policy needs a second term.
+- **No terabyte anywhere.** Single-stage finite-beta value-and-gradient at
+  ns = 15, mpol = 5, 24 dof: peak device 0.16 GiB, peak host 3.17 GiB on
+  office and 2.2-2.5 GiB on the laptop, largest single traced intermediate
+  7.7 MiB out of 148,500 equations. The full example at its shipped settings
+  finishes in 900 s and 3.8 GB, driving the total objective 31.66 -> 4.06 over
+  eight accepted iterations. The peak is XLA's *compile* working set, as
+  `implicit.py:1137` already says.
+- **The single-stage compile is already an 8x once-per-machine cost.** Same
+  gradient, two processes sharing a persistent cache: process 1 trace+lower
+  14.1 s, compile 49.8 s, run 19.5 s; process 2 trace+lower 10.1 s, compile
+  **6.0 s**, run 5.4 s (380 entries, 12 MB). So the 50-70 s compile is paid
+  once per machine, not once per run, and what is left to attack is the 10 s of
+  Python-side tracing, which no cache can help.
+- **Cold start is compilation, and a third of it is incidental.** A per-module
+  census of one `input.circular_tokamak` solve counts **152 XLA compilations**
+  (7.1 s) for a 7.6 s cold solve whose warm repeat is 0.16 s. Four are named
+  lanes (`_block_lane` twice, 2.49 s, one per rung); the other ~130 are single
+  eager JAX ops, each compiling its own module -- `broadcast_in_dim` 22,
+  `multiply` 19, `copy` 17, `where` 8 -- in `setup.py`, `solver.py:2345`
+  (leaf-by-leaf carry copy) and `solver.py:914` (`_zero_cache`). A two-change
+  prototype (one jitted whole-tree copy, `device_put` of NumPy zeros) takes 152
+  to 129 without touching physics. `QA_lowres` compiles 230 modules. This is
+  B4's target, now with line numbers.
+- **Four codes, same decks, same machine, one process each.**
+  `input.circular_tokamak`: VMEC2000 0.23 s, VMEC++ 1.20 s, VMEX 0.16 s warm
+  and 7.6 s cold, DESC 24.3 s -- all four at volume 473.74101, and VMEX against
+  VMEC++ wout by wout at 3.6e-16 on volume, 1.0e-15 on aspect, 1.2e-16 on
+  `iotaf`, 4.7e-12 on `jcuru`. At `QA_lowres`'s shipped
+  `NITER_ARRAY = 600 1000 1000` against `FTOL 1e-13`, **no VMEC-family code
+  converges** -- VMEC2000 `ierr=2`, VMEC++ raises, VMEX `ier_flag 2` at FSQ
+  2.63e-13. Raised to 2000/4000/8000 all three converge: VMEC2000 10.30 s,
+  VMEC++ 11.12 s, VMEX 13.87 s warm and 31.6 s cold (`ier 11`, 1115
+  iterations, FSQ 9.92e-14), DESC 47.0 s, volume agreeing to eight figures.
+- **The free-boundary adjoint is right; its certification was not.** Fixed
+  boundary certifies at **1.09e-07** against a central difference; free boundary
+  stopped at 1.06e-02 on the same script, which reads as a 1 % gradient error.
+  Sweeping the step at ftol 1e-10: 1e-2 -> 3.22e-02, 1e-3 -> 5.04e-02,
+  1e-4 -> -9.84e-02, 1e-5 -> -2.18e+01. It changes sign and diverges by three
+  orders as the step shrinks -- noise, not a systematic offset. The two adjoint
+  solvers **agree to 9.67e-05** (coupled GCROT 2.23693204e-02, `boundary_schur`
+  2.23671581e-02), which closes the arbitration the F series wanted. The
+  example now certifies against the second adjoint and prints 1.57e-04 at its
+  shipped settings.
+- **Gradient cost, steady state** (ns = 15, mpol = ntor = 3): fixed vacuum
+  **1.91x** the value, fixed finite beta **5.87x**, free boundary **41.5x**.
+  First adjoint in a process costs 20.8 s, 11.5 s and 70.6 s to compile. F1b's
+  3x gate is 14x away.
+- **`booz_xform_jax` is not a bottleneck; the exterior field's default grid
+  was.** Boozer transform of 8 surfaces, warm: 16 ms at mboz/nboz 16/12, 33 ms
+  at 24/18, 58 ms at 32/24. Virtual casing costs ~0.45 s per call *independent
+  of target count* to 1024 (4096 targets, 0.84 s), so batch targets and never
+  loop. `from_wout` hard-coded `nphi=ntheta=32`, and `from_surface_data`
+  treated a per-period sampling as a full-torus level count; on the shipped QA
+  wout the achieved error one minor radius off the boundary was **2.46e-02
+  against a requested 1e-6**. Sizing the grid from the geometry and carrying
+  the `nfp` factor, with the poloidal count following the toroidal one, gives
+  **4.31e-07** at one minor radius and 5.05e-07 at two, at **0.116 s per call
+  against 0.226 s** -- more accurate and no slower (the coarse grid fails its
+  own self-test and the adaptive schedule then does more work, so the finer
+  default measured faster; the mechanism is inferred, the two timings are not). Calibration (finest level, source points,
+  error at `d = a`): (32,32) 128x64, 8,192, 6.4e-04; (64,32) 256x64, 16,384,
+  7.1e-06; (64,64) 256x128, 32,768, 4.3e-07; (96,48) 384x96, 36,864, 1.4e-08;
+  (128,64) 512x128, 65,536, 3.5e-11. Poloidal beyond 64 buys nothing
+  ((64,96) repeats (64,64) exactly), which is why the rule pairs the two.
+- **Force-balance polishing is not the five-minute item.** The shaped tokamak:
+  `solve_file` (equilibrium + polish + WOUT export) 114.2 s of which the polish
+  itself is 55.8 s over 3 nonlinear iterations, certified, eps_F volume L2
+  1.284e-02 -> 1.820e-03; `plot_wout` is 12.2 s per figure set. The example
+  reads as 312 s because it renders two full sets and pays a cold compile --
+  the same script on a warm cache is 114 s + plots, and 82.1 s on a third run.
+  The stellarator is the one that is genuinely long:
+  `input.finite_beta_stellarator_polished` takes **328.0 s** for solve plus
+  polish, certified. So "over five minutes for a single run" is true of the
+  finite-beta stellarator and not of the tokamak.

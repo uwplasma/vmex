@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """Differentiate a true NESTOR free-boundary solve through its coupled root.
 
-Preview: this script needs ESSOS with uwplasma/ESSOS#58 (commit ``1b3210ca``), which
-PyPI essos 0.16 predates.
 """
 
 from dataclasses import replace
@@ -22,12 +20,6 @@ from vmex.core.freeboundary_implicit import (
 
 from essos.coils import Coils
 from essos.fields import BiotSavart
-
-if not all(hasattr(Coils, name) for name in ("from_json", "with_dofs")):
-    raise ImportError(
-        "This example needs ESSOS with uwplasma/ESSOS#58, which PyPI essos 0.16 predates: "
-        'pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"'
-    )
 
 DATA = Path(__file__).resolve().parent / "data"
 NS, MPOL, NTOR, NITER, FTOL = 25, 5, 5, 12000, 1.0e-10
@@ -58,15 +50,23 @@ inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field",
               phiedge=-0.025, ns_array=np.array([NS]),
               niter_array=np.array([NITER]), ftol_array=np.array([FTOL]))
 params = im.params_from_input(inp)
-config = make_free_boundary_config(
-    inp, biot_savart, ns=NS, ftol=FTOL, max_iterations=NITER,
-    adjoint_tol=1.0e-9,
-    field_from_parameters=field_from_parameters)
-solver_context = im.runtime_from_params(params, config.implicit)
 
-def aspect_from_coils(parameters):
-    equilibrium_state = solve_free_boundary_implicit(params, parameters, config)
-    return im.aspect_ratio(equilibrium_state, solver_context)
+
+def configured(**overrides):
+    config = make_free_boundary_config(
+        inp, biot_savart, ns=NS, ftol=FTOL, max_iterations=NITER,
+        adjoint_tol=1.0e-9,
+        field_from_parameters=field_from_parameters, **overrides)
+    context = im.runtime_from_params(params, config.implicit)
+
+    def aspect_from_coils(parameters):
+        state = solve_free_boundary_implicit(params, parameters, config)
+        return im.aspect_ratio(state, context)
+
+    return aspect_from_coils
+
+
+aspect_from_coils = configured()
 
 print("Solving the free boundary and its implicit adjoint...")
 parameters = jnp.zeros(base_dofs.size)
@@ -77,11 +77,26 @@ direction = jnp.zeros_like(parameters).at[2].set(0.1)
 direction = direction.at[-coils.curves.n_base_curves:].set(
     1.0 / coils.curves.n_base_curves)
 direction /= jnp.linalg.norm(direction)
-step = 1.0e-1
 autodiff = jnp.vdot(gradient, direction)
+
+# The certificate is the second adjoint, not a difference quotient. A free
+# boundary re-solve is path dependent, so a central difference here has no
+# usable step: above about 1e-2 truncation dominates and below it the solve's
+# own floor makes the quotient change sign. The coupled GCROT adjoint and the
+# edge Schur adjoint are independent solvers of the same linear system, so
+# agreement between them certifies both. How close they agree is set by how
+# tight a root the equilibrium is: 1.6e-04 at the settings above and 1.6e-02
+# at the smoke-test settings, where ftol is 1e-7.
+schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
+schur = jnp.vdot(schur_gradient, direction)
+disagreement = jnp.abs(autodiff - schur) / jnp.abs(schur)
+
+step = 1.0e-1
 finite_difference = (aspect_from_coils(parameters + step * direction)
                      - aspect_from_coils(parameters - step * direction)) / (2 * step)
-relative_error = jnp.abs(autodiff - finite_difference) / jnp.abs(finite_difference)
+
 print(f"aspect = {float(aspect):.6f}")
-print(f"directional d(aspect)/d(coils): implicit = {float(autodiff):.6e}, "
-      f"central FD = {float(finite_difference):.6e}, relative error = {float(relative_error):.2e}")
+print(f"directional d(aspect)/d(coils): coupled GCROT = {float(autodiff):.8e}, "
+      f"edge Schur = {float(schur):.8e}, they differ by {float(disagreement):.2e}")
+print(f"central FD at step {step:g} = {float(finite_difference):.6e} "
+      "(step-limited; see the comment above)")

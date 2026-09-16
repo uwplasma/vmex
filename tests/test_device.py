@@ -556,3 +556,33 @@ def test_placement_neutral_clears_the_context_only_for_committed_jit_arguments()
         assert isinstance(dev.placement_neutral((loose,)), contextlib.nullcontext)
     with jax.disable_jit(True):
         assert not clears((pinned,))
+
+
+def test_host_callback_is_not_pinned_across_platforms():
+    """A CPU pin inside an accelerator computation is not expressible in JAX.
+
+    ``resolve_implicit_device`` stands the implicit-gradient path down to the
+    CPU on an accelerator backend.  Pinning the host callback there while the
+    enclosing jit compiles for the accelerator made JAX's lowering raise
+    ``tuple.index(x): x not in tuple`` -- every jitted optimization gradient on
+    a GPU machine.  Same-platform pins, including the two-accelerator case the
+    pin exists for, are kept.
+    """
+    import dataclasses
+
+    from vmex.core import implicit as im
+
+    class _FakeDevice:
+        def __init__(self, platform: str) -> None:
+            self.platform = platform
+
+    cfg = im.make_config(VmecInput.from_file(DATA / "input.solovev"), multigrid=True)
+    here = jax.default_backend()
+    other = "gpu" if here != "gpu" else "tpu"
+
+    assert im._callback_sharding(dataclasses.replace(cfg, device=None)) is None
+    assert im._callback_sharding(
+        dataclasses.replace(cfg, device=_FakeDevice(other))) is None
+    same = im._callback_sharding(
+        dataclasses.replace(cfg, device=jax.devices(here)[0]))
+    assert isinstance(same, jax.sharding.SingleDeviceSharding)

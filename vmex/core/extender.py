@@ -9,6 +9,7 @@ explicit-point methods remain JAX-transformable.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Callable, Literal, cast
 
@@ -29,6 +30,13 @@ __all__ = [
     "VmecInteriorField",
     "VmecExtender",
 ]
+
+
+#: Source sampling per field period when the caller does not choose one.  The
+#: floor is the historical constant; the ceiling bounds the cost of the
+#: geometry rule on a very high aspect ratio boundary.
+_DEFAULT_SOURCE_NPHI = 32
+_MAX_SOURCE_NPHI = 256
 
 
 class ExteriorFieldAccuracyWarning(UserWarning):
@@ -841,6 +849,45 @@ def _mgrid_from_wout(wout: Any, base_dir: Path | None) -> MgridField | None:
     return MgridField.from_mgrid_data(data, extcur=scaled)
 
 
+def _source_nphi_for_digits(wout: Any, digits: int) -> int:
+    """Per-period toroidal source count that reaches ``digits`` one minor radius out.
+
+    The off-surface quadrature error decays as ``exp(-2 pi d / h)`` with ``h``
+    the finest source level's largest spacing, whose toroidal part over the
+    full torus is ``2 pi R0 / n_toroidal``.  Asking for ``10**-digits`` at
+    ``d = a`` gives ``n_toroidal >= digits ln(10) R0 / a``, and the default
+    schedule's finest level has ``2 nfp nphi`` toroidal points, so
+
+        nphi >= digits ln(10) R0 / (2 nfp a).
+
+    Measured against the shipped QA wout (``R0/a = 15.9``, ``nfp = 2``) with
+    ``ntheta = nphi``, the achieved error at ``d = a`` against a requested 1e-6
+    is 6.4e-04 at ``nphi = 32``, 4.3e-07 at 64 and 3.5e-11 at 128; the rule
+    returns 64 here.  A boundary of tokamak-like aspect ratio (``R0/a = 3``,
+    ``nfp = 1``) lands on the 32 floor, so its grid is unchanged and only
+    high-aspect boundaries -- where a fixed 32 missed the requested accuracy by
+    four orders -- are refined.
+    """
+    try:
+        rmnc = np.asarray(wout.rmnc)[-1]
+        xm = np.asarray(wout.xm)
+        nfp = max(int(wout.nfp), 1)
+        outboard = float(rmnc.sum())
+        inboard = float((rmnc * np.cos(xm * np.pi)).sum())
+        minor = 0.5 * (outboard - inboard)
+        major = 0.5 * (outboard + inboard)
+    except Exception:
+        return _DEFAULT_SOURCE_NPHI
+    if not (np.isfinite(minor) and np.isfinite(major)) or minor <= 0.0:
+        return _DEFAULT_SOURCE_NPHI
+    needed = math.log(10.0) * digits * major / (2.0 * nfp * minor)
+    # Round up to a power of two so repeated calls share compiled kernels, and
+    # keep it inside a range whose cost is measured (0.6 s to 0.8 s per call on
+    # the shipped QA wout, both dominated by fixed overhead).
+    power = max(_DEFAULT_SOURCE_NPHI, 1 << max(0, math.ceil(math.log2(max(needed, 1.0)))))
+    return int(min(power, _MAX_SOURCE_NPHI))
+
+
 class VmecExtender(MagneticField):
     """Total field outside the last closed VMEC flux surface.
 
@@ -1053,7 +1100,13 @@ class VmecExtender(MagneticField):
 
         vc._require_vcj()
         nphi, ntheta = map(int, surface_data.gamma.shape[1:])
-        schedule = levels or ((nphi, ntheta), (2 * nphi, 2 * ntheta))
+        # ``gamma`` is sampled on ONE field period, while ``levels`` counts the
+        # whole torus, so the default schedule has to carry the nfp factor --
+        # without it an nfp = 5 boundary sampled at 32 points per period was
+        # resolved by a finest level of 64 over the torus, 13 per period.
+        nfp = max(int(getattr(surface_data, "nfp", 1) or 1), 1)
+        full = nphi * nfp
+        schedule = levels or ((full, ntheta), (2 * full, 2 * ntheta))
         config = vc.ExteriorFieldConfig(
             digits=digits,
             src_nphi=nphi,
@@ -1162,8 +1215,8 @@ class VmecExtender(MagneticField):
         *,
         external_field: Any | None = None,
         plasma: PlasmaMode = "auto",
-        nphi: int = 32,
-        ntheta: int = 32,
+        nphi: int | None = None,
+        ntheta: int | None = None,
         digits: int = 6,
         levels: tuple[tuple[int, int], ...] | None = None,
         chunk_size: int | str = "auto",
@@ -1171,9 +1224,20 @@ class VmecExtender(MagneticField):
         base_dir: str | Path | None = None,
         accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
-        """Construct an exterior field from a wout-like object."""
+        """Construct an exterior field from a wout-like object.
+
+        ``nphi`` and ``ntheta`` default to the per-period source sampling that
+        reaches ``digits`` one minor radius off the boundary
+        (:func:`_source_nphi_for_digits`).  Both directions matter: on the
+        shipped QA wout, the measured achieved error at ``d = a`` against a
+        requested 1e-6 is 6.4e-04 at (32, 32), 7.1e-06 at (64, 32) and
+        4.3e-07 at (64, 64) -- and (64, 64) is also the cheapest of the three
+        per call, so the poloidal count follows the toroidal one.  Pass either
+        explicitly to override.
+        """
         if plasma not in ("auto", "include", "vacuum"):
             raise ValueError("plasma must be 'auto', 'include', or 'vacuum'")
+        chosen = _source_nphi_for_digits(wout, digits)
         if external_field is None:
             external_field = _mgrid_from_wout(
                 wout, None if base_dir is None else Path(base_dir)
@@ -1187,7 +1251,9 @@ class VmecExtender(MagneticField):
             from . import virtual_casing as vc
 
             surface = vc.surface_field_data_from_wout(
-                wout, nphi=nphi, ntheta=ntheta
+                wout,
+                nphi=chosen if nphi is None else nphi,
+                ntheta=chosen if ntheta is None else ntheta,
             )
             return cls.from_surface_data(
                 surface,

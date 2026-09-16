@@ -94,11 +94,18 @@ turbulence = [
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
 ]
-# ESSOS 0.16 is VMEX's stable coil/CLI interface. Examples that need the unreleased
-# uwplasma/ESSOS#58 (ESSOS commit 1b3210ca) fail early and print the pip command that
-# installs it; PyPI does not accept a git URL here, so the extra cannot pin it.
+# 0.17 is the first release carrying uwplasma/ESSOS#58: Coils.from_json,
+# Coils.with_dofs, the coil-separation and coil-surface-distance losses,
+# surfacerzfourier_from_boundary and LevelsetStoppingCriterion. Every coil
+# example uses that API, so 0.16 is not enough and there is no longer any
+# reason to install ESSOS from git.
 coils = [
-  "essos>=0.16",
+  "essos>=0.17",
+]
+# Everything the examples and the documented workflows need, so a reader does
+# not have to assemble the list themselves.
+all = [
+  "vmex[coils,freeb,neoclassical,optimizers,turbulence]",
 ]
 docs = [
   "sphinx",

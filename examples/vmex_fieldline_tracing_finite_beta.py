@@ -3,8 +3,6 @@
 
 The commented ``Coils.from_simsopt`` line accepts a SIMSOPT coil JSON without
 changing the VMEX virtual-casing or ESSOS tracing workflow.
-Preview: this script needs ESSOS with uwplasma/ESSOS#58 (commit ``1b3210ca``), which
-PyPI essos 0.16 predates.
 
 Outside the CI smoke run, the phi=0 Poincare panel pair the README embeds is
 also written straight into ``docs/_static/figures`` as lossless WebP, so
@@ -28,16 +26,10 @@ from vmex import optimize as opt
 from vmex.core import virtual_casing as vc
 from vmex.core.extender import VmecExtender
 
-try:
-    from essos.coils import Coils
-    from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
-    from essos.fields import BiotSavart
-    from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
-except ImportError as error:
-    raise ImportError(
-        "This example needs ESSOS with uwplasma/ESSOS#58, which PyPI essos 0.16 predates: "
-        'pip install "essos @ git+https://github.com/uwplasma/ESSOS@1b3210ca34efaceec09272aa29599c9788c4ec35"'
-    ) from error
+from essos.coils import Coils
+from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
+from essos.fields import BiotSavart
+from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
 
 DATA = Path(__file__).resolve().parent / "data"
 README_FIGURE = (Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
