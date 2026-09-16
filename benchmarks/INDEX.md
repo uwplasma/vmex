@@ -36,14 +36,14 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_free_boundary_nonaxisymmetric.json` |  | `f9eb6a44` |  | `benchmarks/capabilities.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/newton_finish_arms_20260913.json` | `benchmarks/newton_finish_arms.py` | `eb9d0376` | 2026-09-13 | `plan.md`, `vmex/core/implicit.py` |
-| `benchmarks/optimization_counters_20260913.json` | `benchmarks/optimization.py` | `142d6c92` | 2026-09-13 | `CHANGELOG.md`, `plan.md` |
+| `benchmarks/optimization_counters_20260913.json` | `benchmarks/optimization.py` | `142d6c92` | 2026-09-13 | `plan.md` |
 | `benchmarks/polish3d_tuning.md` |  |  |  | `docs/explanation/validation.md`, `docs/reference/api/advanced.rst`, `vmex/core/polish_driver.py` |
 | `benchmarks/polish_cost_office.json` | `benchmarks/polish_cost.py` | `529f1789` |  | `docs/reference/performance.rst` |
 | `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_force_error_2026-09-03.md` |  |  |  | *nothing* |
 | `benchmarks/polish_force_error_solovev_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_implicit_m4.json` | `benchmarks/polish_implicit.py` | `e176b1ac` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
-| `benchmarks/polish_memory_w7x.json` | `benchmarks/polish_memory.py` | `529f1789` |  | `CHANGELOG.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
+| `benchmarks/polish_memory_w7x.json` | `benchmarks/polish_memory.py` | `529f1789` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_preconditioner_m4.json` | `benchmarks/polish_preconditioner.py` | `7bb306e0` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
 | `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst`, `plan.md` |

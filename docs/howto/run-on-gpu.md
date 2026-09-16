@@ -69,6 +69,24 @@ On the two shipped decks that prints `1632 100000` / `cpu` for
 `input.circular_tokamak` and `1536000 100000` / `gpu` for
 `input.LandremanPaul2021_QA_lowres`.
 
+```{warning}
+The thresholds come from `benchmarks/gpu_baseline.json`, measured 2026-07-09 on
+different hardware, and they do not hold everywhere. Re-measured on 2026-09-16
+on two RTX A4000s (JAX 0.11.1, one process per cell), the GPU lost on both
+shipped decks — including the one the policy recommends it for:
+
+| deck | CPU cold | CPU warm | GPU cold | GPU warm |
+| --- | --- | --- | --- | --- |
+| `input.circular_tokamak` | 6.74 s | 0.22 s | 12.82 s | 1.19 s |
+| `input.LandremanPaul2021_QA_lowres` | 16.99 s | 6.20 s | 35.96 s | 6.91 s |
+
+Peak device memory was 0.16 GiB in both cases. Time the deck you actually run
+before trusting the recommendation; `benchmarks/run_gpu_matrix.py` produces the
+comparison. The implicit-gradient path is the exception that now works: the same
+single-stage finite-beta value-and-gradient is 1.3–1.6 s warm on the GPU against
+2.15 s on that machine's CPU.
+```
+
 ## What stays on CPU regardless
 
 - **Ensembles.** Multi-solve ensembles are CPU-threaded
