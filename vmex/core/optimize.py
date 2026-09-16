@@ -1875,9 +1875,9 @@ def make_problem(
     close an iteration-limited trial must be to that tolerance before VMEX
     differentiates it.  The default accepts ``FSQ / forward_ftol <= 1e2``.
 
-    The implicit adjoint assumes ``F = 0`` and carries an O(|F|) error at a
-    trial that is not a root, so a permissive bar lets a line search move the
-    design somewhere the solver cannot resolve at all.  The previous default,
+    The implicit adjoint assumes ``F = 0`` and carries an error of order
+    ``norm(F)`` at a trial that is not a root, so a permissive bar lets a line
+    search move the design somewhere the solver cannot resolve at all.  The previous default,
     ``1e6``, differentiated trials whose residual was 1e-6 against a 1e-12
     deck; on the finite-beta single stage that walk ended with no converged
     equilibrium at any of ns = 31, 51 or 101 (#361).  Raise it only with a
