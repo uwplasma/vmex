@@ -7,6 +7,15 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+### Changed
+
+- `max_fsq_ratio` defaults to `1e2`, not `1e6`. The implicit adjoint assumes
+  `F = 0`, so differentiating a trial whose residual is 1e-6 against a 1e-12
+  deck carries an O(|F|) error and lets a line search walk the design somewhere
+  the solver cannot resolve; that is what stalled the finite-beta single stage
+  (#361). The QA, QH, QI, QP, QA-scalar and QI-scipy examples produce identical
+  output either way, so the looser bar bought nothing.
+
 ## 0.9.0 - 2026-09-15
 
 The optimization release. The two workflows users reported as slow and
@@ -178,23 +187,3 @@ programs (v0.8.0: 773; v0.3.0: 523).
   1 ULP per iteration with identical iteration counts and converged
   geometry agreeing at 1e-12.
 
-## 0.8.0 - 2026-08-30
-
-- Certified force-balance polishing: `--polish`, `!@VMEX POLISH = AUTO`, or
-  `solve_file(..., polish="auto")` lift a converged fixed-boundary state to
-  axis-regular cubic B-splines and drive both physical force channels to
-  zero on an overdetermined collocation grid with matrix-free SOLVAX
-  Gauss-Newton steps; acceptance is an independent certificate (volume L2
-  force error below 1e-2, radial-refinement stability within 1e-3, positive
-  signed Jacobian) with tangent/adjoint derivatives through the polished
-  root.
-- Execution directives (`!@VMEX KEY = VALUE`, JSON `_vmex`, keywords, CLI)
-  separate how to run from what to solve; VMEC2000 reads the same files.
-- Implicit lane recompilation per optimization trial removed (steady
-  campaign step 16.6 -> 10.8 s, warm value+gradient repeat 28.8 -> 3.0 s,
-  bit-identical); polished solves reuse compiled programs (warm 52.9 ->
-  22.8 s).
-- `benchmarks/profile_workflows.py`: seventeen principal workflows in five
-  timing regimes with compile counts and committed M4 baselines.
-- CI attempt wall clock roughly halved by resharding; `tools/preflight.py`
-  runs the static gates, guard tests, and diff-affected tests locally.

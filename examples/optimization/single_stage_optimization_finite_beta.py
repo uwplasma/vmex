@@ -50,12 +50,6 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 # iterations mostly buy line-search excursions that each cost an equilibrium
 # solve and a gradient.  Raise it for a production run.
 MAX_MODE, MAXITER = 2, 7
-# A trial whose equilibrium did not converge must not be differentiated: the
-# implicit adjoint assumes F = 0 and carries an O(|F|) error otherwise.  The
-# library default accepts FSQ / ftol <= 1e6, i.e. 1e-6 against this deck's
-# 1e-12, which lets the line search walk the boundary into a region the solver
-# cannot resolve at all.
-MAX_FSQ_RATIO = 1.0e2
 N_CURRENT_SPLINE = 6
 ASPECT_TARGET, IOTA_FLOOR = 6.0, 0.42
 VARY_MAJOR_RADIUS = False
@@ -146,7 +140,7 @@ plasma_terms = [
 ]
 plasma_problem = opt.VmecProblem.from_tuples(inp, plasma_terms, max_mode=MAX_MODE,
     current_dofs=N_CURRENT_SPLINE - 1, vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
-    restart_from=equilibrium, progress=not ci_smoke, max_fsq_ratio=MAX_FSQ_RATIO)
+    restart_from=equilibrium, progress=not ci_smoke)
 
 curves0 = CreateEquallySpacedCurves(N_COILS, COIL_ORDER, COIL_MAJOR_RADIUS, COIL_MINOR_RADIUS,
     n_segments=N_SEGMENTS, nfp=inp.nfp, stellsym=True)

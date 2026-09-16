@@ -251,7 +251,7 @@ accepts the same two names for one-off forward solves:
        inp, terms, max_mode=5,
        forward_ftol=1e-12,
        forward_max_iterations=5500,
-       max_fsq_ratio=1e6,
+       max_fsq_ratio=1e2,
    )
 
 VMEC reports ``FSQ = fsqr + fsqz + fsql``. A converged trial is always

@@ -1808,7 +1808,7 @@ def make_problem(
     jacobian_adjoint_tol: float = 1e-4,
     jacobian_adjoint_maxiter: int = 10,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
@@ -1873,8 +1873,16 @@ def make_problem(
     ``forward_ftol`` and ``forward_max_iterations`` override the final VMEC
     solve stage for either derivative method.  ``max_fsq_ratio`` controls how
     close an iteration-limited trial must be to that tolerance before VMEX
-    differentiates it.  The default accepts ``FSQ / forward_ftol <= 1e6``;
-    stricter studies can reduce it without changing VMEX internals.
+    differentiates it.  The default accepts ``FSQ / forward_ftol <= 1e2``.
+
+    The implicit adjoint assumes ``F = 0`` and carries an O(|F|) error at a
+    trial that is not a root, so a permissive bar lets a line search move the
+    design somewhere the solver cannot resolve at all.  The previous default,
+    ``1e6``, differentiated trials whose residual was 1e-6 against a 1e-12
+    deck; on the finite-beta single stage that walk ended with no converged
+    equilibrium at any of ns = 31, 51 or 101 (#361).  Raise it only with a
+    reason, and read ``fsq_ratio`` from ``problem.evaluate(x).diagnostics``
+    when you do.
 
     ``adjoint_tol`` is a relative Krylov tolerance with a certified true
     residual check; ``adjoint_maxiter`` is the restart budget.
@@ -2022,7 +2030,7 @@ def least_squares(
     jacobian_adjoint_tol: float = 1e-4,
     jacobian_adjoint_maxiter: int = 10,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
@@ -2273,7 +2281,7 @@ def minimize(
     method: str = "L-BFGS-B",
     adjoint_tol: float = 1e-6,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
@@ -2486,7 +2494,7 @@ def _least_squares_implicit(
     jacobian_adjoint_tol: float = 1e-4,
     jacobian_adjoint_maxiter: int = 10,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,

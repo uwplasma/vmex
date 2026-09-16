@@ -1389,3 +1389,25 @@ def test_equilibrium_wout_is_cached(solovev_eq):
     """Equilibrium.wout is computed once and reused (cached_property)."""
     assert solovev_eq.wout is solovev_eq.wout
     assert dataclasses.is_dataclass(solovev_eq.wout)
+
+
+def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
+    """A trial that is not a root must not be differentiated by default.
+
+    The implicit adjoint assumes ``F = 0``; at ``1e6`` the library accepted a
+    residual of 1e-6 against a 1e-12 deck, and the finite-beta single stage
+    walked to a design with no converged equilibrium at ns = 31, 51 or 101
+    (#361).  Every public entry point carries the same bar.
+    """
+    import inspect
+
+    from vmex.core import optimize as optimize_module
+
+    defaults = {
+        name: inspect.signature(fn).parameters["max_fsq_ratio"].default
+        for name, fn in inspect.getmembers(optimize_module, inspect.isfunction)
+        if "max_fsq_ratio" in inspect.signature(fn).parameters
+    }
+    assert defaults, "no entry point exposes max_fsq_ratio"
+    assert set(defaults.values()) == {1.0e2}, defaults
+
