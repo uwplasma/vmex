@@ -6,6 +6,7 @@
   "measurement_commit": "5ee94c930696d1c16d28cb651ad389124f17ffb2",
   "measurement_date": "2026-09-16",
   "note": "Companion to benchmarks/gpu_baseline.json (2026-07-09, different hardware). On this machine the GPU does not win any cell: warm gain runs 0.17x to 0.83x across every shipped deck and every point of the synthetic ns x mnmax scan, including NuhrenbergZille_1988_QHS at 111 s of warm CPU work. The GPU_MIN_ITERATION_WORK crossover therefore does not transfer; see docs/howto/run-on-gpu.md.",
+  "reading_note": "Every cell records backend='gpu' and both CUDA devices: that is jax.default_backend()/jax.devices() from the worker process, which sees the accelerator whatever device the solve is pinned to, so it does NOT say where a cell ran. Read placement from peak_device_mem_mb instead -- null on cpu/ cells, 4.8 to 113.5 MB on gpu/ cells -- and note that iteration counts match exactly between the cpu/ and gpu/ cell of each deck and lane (434, 2829, 125, 189), which is the control that the two ran the same physics on different hardware.",
   "software": "JAX 0.11.1 with jax[cuda12], Python 3.12, x64 enabled"
  },
  "matrix": {

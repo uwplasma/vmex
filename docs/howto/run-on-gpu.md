@@ -88,7 +88,9 @@ where the GPU wins**, warm wall in seconds:
 `NuhrenbergZille_1988_QHS` is the largest case in the sweep at 111 s of warm CPU
 work, and the synthetic scan walks `ns` and `mnmax` up without crossing over, so
 this is not a threshold that is merely set too low here. Cold wall was about 2x
-the CPU's throughout and peak device memory never exceeded 0.16 GiB.
+the CPU's throughout, and the iteration counts match exactly between each deck's
+CPU and GPU cell (434, 2829, 125, 189), so the two ran the same physics. Peak
+device memory across every GPU cell was 4.8 to 113.5 MB.
 
 So treat `recommended_device` as a starting guess and time the deck you actually
 run: `python benchmarks/run_gpu_matrix.py --skip-tridiag` reproduces the table
