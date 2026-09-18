@@ -1,6 +1,9 @@
 #!/usr/bin/env python
-"""Quasi-axisymmetric boundary optimization with a winding-surface
-coil-complexity proxy."""
+"""Quasi-axisymmetric optimization with a winding-surface complexity proxy.
+
+Performance and derivative-fidelity evidence for this nested objective lives in
+``benchmarks/winding_surface_optimization.md``.
+"""
 
 import functools
 import os
