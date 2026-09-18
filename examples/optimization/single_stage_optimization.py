@@ -4,10 +4,25 @@
 The stated targets are constraints, not weighted penalties.  The
 rotational-transform floor, the aspect-ratio limit and the coil normal-field
 limit enter a Powell-Hestenes-Rockafellar augmented Lagrangian around SciPy's
-L-BFGS-B; quasisymmetry and the coil regularization are the objective.  A
-weighted penalty trades a missed target against a lower objective: the
-previous version of this example, seeded at a mean iota of 0.08 with the floor
-as a hinge, ended at min |iota| 0.07 against its 0.42 floor.
+L-BFGS-B; quasisymmetry and the coil regularization are the objective.
+
+That machinery is worth its cost, measured on this seed rather than assumed.
+A penalized variant -- the same seed, physics, coils, targets and 301-trial
+budget, with every constraint a one-sided quadratic penalty and one bounded
+L-BFGS-B solve -- was run at three tunings and met the targets at none of them:
+
+    constraint weight 1e3          aspect 4.0114, coil-coil 0.1308
+    constraint weight 1e4          aspect 3.9825, coil-coil 0.1168
+    plus coil distance weight 2e4  aspect 3.9840, coil-coil 0.1467
+
+against limits of 4.0 and 0.15.  Raising the weight fixes the target it is
+aimed at and moves another the wrong way, because one scalar weight cannot
+serve constraints of different curvature; and the coil separation term is
+itself a quadratic hinge, so inside a penalty formulation the weight is the
+only lever there is.  This file, unchanged, reaches aspect 3.9800 and coil-coil
+0.1746 with every other target met.  L-BFGS-B rather than BFGS throughout: at
+the solution 3 of the 99 coil dofs sit exactly on the +/-3.0 parameter bound,
+which BFGS cannot represent.
 
 Every target is checked at the end on an independent, finer solve and surface
 grid.  A run that misses one says which and exits with status 1; smoke mode
@@ -83,7 +98,12 @@ COIL_CURRENT = 2.7e5
 N_SEGMENTS = 64
 STELLSYM = True
 
-LENGTH_TARGET = 4.1  # close to the seed circumference, 2*pi*0.65 = 4.08 m
+# The seed coils have circumference 2*pi*0.65 = 4.08 m, so the former 4.1 m
+# target left 0.4 % of slack and the length term fought every change the
+# normal-field term asked for.  4.6 m leaves 12.6 %, matching the 11.4 %
+# single_stage_optimization_finite_beta.py already allows (3.5 m against its
+# 3.14 m circumference).
+LENGTH_TARGET = 4.6
 LENGTH_WEIGHT = 1.0
 CURVATURE_WEIGHT = 10.0
 COIL_DISTANCE_WEIGHT = 1.0e3

@@ -1652,3 +1652,29 @@ error estimates and ratios are not affected.
   they are exempt rather than uncovered. `take_fixed_boundary_gradients.py` got
   a test instead of an exemption: 5.0e-06 at the smoke settings against 1.1e-07
   at the shipped ones.
+- **The single stage's augmented Lagrangian earns its complexity, measured.**
+  The example's docstring justified it with a penalty run that ended at
+  min |iota| 0.07 against a 0.42 floor -- but that was the OLD seed at mean iota
+  0.08, and the seed has since moved to 0.408/0.391/4.03, so the justification
+  was stale. Re-measured on the current seed: a penalized variant (same seed,
+  physics, coils, targets and 301-trial budget; every constraint a one-sided
+  quadratic penalty; one bounded L-BFGS-B solve) met the targets at none of
+  three tunings -- weight 1e3 gave aspect 4.0114 and coil-coil 0.1308, weight
+  1e4 gave 3.9825 and 0.1168, and adding coil-distance weight 2e4 gave 3.9840
+  and 0.1467, against limits 4.0 and 0.15. Raising a weight fixes the target it
+  aims at and moves another the wrong way, and `loss_coil_separation` is itself
+  a quadratic hinge, so inside a penalty formulation the weight is the only
+  lever. The augmented Lagrangian reaches 3.9800 and 0.1746 with every other
+  target met. The penalized file was therefore NOT added: an example that
+  cannot reach the targets it prints would exit 1 forever.
+- **`LENGTH_TARGET` 4.1 -> 4.6 on the fixed-boundary single stage.** The seed
+  coils have circumference `2*pi*0.65 = 4.08 m`, so 4.1 left 0.4 % of slack
+  while `single_stage_optimization_finite_beta.py` allows 11.4 %; 4.6 leaves
+  12.6 %. Every target still met (aspect 3.9800, min |iota| 0.4276, B.n/B RMS
+  0.800 %, coil-surface 0.2303, coil-coil 0.1746, curvature 6.883 against
+  6.909 at 4.1). The coils settle near 5.3 m under either target, which is the
+  point: 4.1 was never reachable, so it was a constant tug with nothing to show.
+- **L-BFGS-B is required, not preferred, on this problem.** At the full-budget
+  solution 3 of the 99 coil dofs sit exactly on the +/-3.0 parameter bound, in
+  both the augmented-Lagrangian and the penalized runs. BFGS cannot represent a
+  bound, so it would leave the region the seed solve is known to converge on.
