@@ -10,6 +10,7 @@ exactly, so the batched path is a pure efficiency win with identical gradients.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -26,6 +27,29 @@ def _solovev_setup():
     cfg = im.make_config(inp, ftol=1e-13, max_iterations=2000)
     p0 = im.params_from_input(inp)
     return inp, cfg, p0
+
+
+def test_multigrid_implicit_config_forwards_niter_failure_policy(monkeypatch):
+    """Strict external optimizers may reject rather than consume NITER states."""
+
+    inp = VmecInput.from_file(str(DATA / "input.solovev"))
+    params = im.params_from_input(inp)
+    calls = []
+
+    def fake_solve_multigrid(_inp, **kwargs):
+        calls.append(bool(kwargs["raise_on_max_iterations"]))
+        return SimpleNamespace(state=object(), converged=True, iterations=1)
+
+    monkeypatch.setattr(im, "solve_multigrid", fake_solve_multigrid)
+    for strict in (False, True):
+        cfg = im.make_config(
+            inp,
+            multigrid=True,
+            raise_on_max_iterations=strict,
+        )
+        im._host_solve(cfg, params)
+
+    assert calls == [False, True]
 
 
 def test_solve_implicit_with_aux_matches_solve_implicit():

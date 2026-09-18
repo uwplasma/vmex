@@ -246,6 +246,12 @@ class ImplicitConfig:
     mode: str = "cli"
     multigrid: bool = False
     lconm1: bool = True
+    #: Raise when the final multigrid stage exhausts NITER instead of
+    #: returning its last state.  False preserves the established VMEX
+    #: optimization/diagnostic policy; callers that require a genuine fixed
+    #: point (for example an external optimizer's implicit-gradient lane) can
+    #: opt in so their own zero-crash penalty handler rejects the trial.
+    raise_on_max_iterations: bool = False
     adjoint_tol: float = 1e-11
     adjoint_restart: int = 30
     adjoint_maxiter: int = 300
@@ -275,6 +281,7 @@ def make_config(
     mode: str = "cli",
     multigrid: bool = False,
     lconm1: bool = True,
+    raise_on_max_iterations: bool = False,
     adjoint_tol: float = 1e-11,
     adjoint_restart: int = 30,
     adjoint_maxiter: int = 300,
@@ -294,6 +301,7 @@ def make_config(
         inp=inp, resolution=resolution, ftol=float(ftol),
         max_iterations=int(max_iterations), mode=str(mode),
         multigrid=bool(multigrid), lconm1=bool(lconm1),
+        raise_on_max_iterations=bool(raise_on_max_iterations),
         adjoint_tol=float(adjoint_tol), adjoint_restart=int(adjoint_restart),
         adjoint_maxiter=int(adjoint_maxiter),
         adjoint_gcrot_m=int(adjoint_gcrot_m), adjoint_gcrot_k=int(adjoint_gcrot_k),
@@ -892,12 +900,15 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
         ns_arr = np.asarray(inp2.ns_array)
         ftol_arr = np.asarray(inp2.ftol_array, dtype=float).copy()
         ftol_arr[-1] = cfg.ftol
-        # NITER-exhausted final stages still return a usable (penalized)
-        # state — matching the optimize.least_squares trial-solve policy
-        # (VMEC2000 behaves the same way).
+        # The default keeps VMEX's established optimization/diagnostic policy:
+        # an NITER-exhausted final stage returns its last state.  External
+        # optimizers can opt into a typed failure so their existing zero-crash
+        # handler assigns a large penalty instead of differentiating that
+        # non-fixed-point state.
         run = lambda init: solve_multigrid(  # noqa: E731
             inp2, ns_array=ns_arr, ftol_array=ftol_arr, mode=cfg.mode,
-            lconm1=cfg.lconm1, raise_on_max_iterations=False,
+            lconm1=cfg.lconm1,
+            raise_on_max_iterations=cfg.raise_on_max_iterations,
             initial_state=init)
     else:
         run = lambda init: solve(  # noqa: E731
