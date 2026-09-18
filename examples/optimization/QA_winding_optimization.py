@@ -2,7 +2,6 @@
 """Quasi-axisymmetric boundary optimization with a winding-surface
 coil-complexity proxy."""
 
-import functools
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -11,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxopt import LBFGSB
-from jaxopt.implicit_diff import root_jvp
+from jaxopt.linear_solve import solve_lu
 from scipy.optimize import least_squares
 
 import vmex as vj
@@ -578,13 +577,13 @@ def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos,
 
 def _winding_objective_value(dofs, plasma_points, plasma_normals, plasma_weights,
                              local_weights, winding_R_cos, scales):
-    # scales is a normalization reference computed once per outer call (see
-    # winding_surface_objective); its own sensitivity to the outer equilibrium
-    # state is a small correction term nobody depends on for correctness, and
-    # differentiating through it (fresh SVD + self-intersection check every
-    # tangent/cotangent pass) costs more than the term is worth. stop_gradient
-    # here makes that trade explicit rather than incidental.
-    scales = jax.lax.stop_gradient(scales)
+    # scales is a normalization reference recomputed once per outer call (see
+    # winding_surface_objective), so it moves with the boundary and the inner
+    # optimum moves with it. Its sensitivity used to be stop_gradient'd here;
+    # measured against central differences of the residual scipy actually
+    # evaluates, dropping it biased directional derivatives by 4-17%, while
+    # keeping it costs one extra cotangent pass through calc_objectives per
+    # Jacobian (one, not one per boundary dof, in the reverse lane below).
     (pca, volume, spectral, distance, minimum_normal_length,
      singular_strength, self_radius) = calc_objectives(
         dofs, plasma_points, plasma_normals, local_weights, winding_R_cos,
@@ -635,19 +634,26 @@ def _active_dof_bounds(init_active_dofs):
     return center - COEFFICIENT_STEP_BOUND, center + COEFFICIENT_STEP_BOUND
 
 
-@functools.partial(jax.custom_jvp, nondiff_argnums=(2,))
 def _solve_winding_surface(init_active_dofs, full_dofs, active_indices,
                           plasma_points, plasma_normals, plasma_weights,
                           local_weights, winding_R_cos, scales):
-    # implicit_diff defaults to True here (unlike the earlier implicit_diff=False
-    # attempt): this keeps jaxopt's compact jax.lax.while_loop forward solve
-    # (compiled size independent of maxiter) instead of unrolling 100 steps into
-    # every traced residual/Jacobian evaluation. The custom_jvp below supplies
-    # the (forward-mode-compatible) sensitivity in place of jaxopt's own
-    # reverse-mode-only custom_vjp rule, which VMEX's default forward-mode
-    # (jax.jvp) Jacobian construction cannot differentiate through. This gives
-    # a forward-mode derivative only: switching this problem's jac_solver to
-    # "reverse" would need a matching defvjp too.
+    # maxiter is a cap, not a budget: tol=1e-6 on the projected gradient is
+    # what stops the solve (69 iterations on the seed, all bounds inactive).
+    # The former maxiter=4 stopped at a projected-gradient norm of 4.8 and a
+    # clearance 28% below the optimum, so the implicit derivative -- which
+    # differentiates the optimality conditions, not four L-BFGS-B steps --
+    # described a different map than the residual scipy evaluated: directional
+    # errors of 16-157%, with sign flips. Converging the solve makes the two
+    # agree, and matches the ESSOS reference, which solves its inner problem.
+    #
+    # implicit_diff=True is jaxopt's default and is stated here because it is
+    # load-bearing: it keeps the compact jax.lax.while_loop forward solve
+    # (compiled size independent of maxiter) and supplies a reverse-mode rule
+    # at the optimum. solve_lu factors the 25x25 optimality Jacobian directly
+    # instead of the solve_normal_cg default, whose iterative answer was 32%
+    # off here and which, having no transpose rule, made reverse mode raise
+    # NotImplementedError. This replaces a hand-written custom_jvp wrapping
+    # root_jvp, so the problem below asks for the reverse Jacobian lane.
     #
     # LBFGSB (not plain LBFGS) box-constrains each active dof to its initial
     # value +/- COEFFICIENT_STEP_BOUND, matching the ESSOS reference's SciPy
@@ -657,31 +663,12 @@ def _solve_winding_surface(init_active_dofs, full_dofs, active_indices,
     optimizer = LBFGSB(
         fun=lambda a, f, *rest: _active_winding_objective_value(
             a, f, active_indices, *rest),
-        maxiter=4, tol=1e-6)
+        maxiter=200, tol=1e-6, implicit_diff=True,
+        implicit_diff_solve=solve_lu)
     bounds = _active_dof_bounds(init_active_dofs)
     return optimizer.run(
         init_active_dofs, bounds, full_dofs, plasma_points, plasma_normals,
         plasma_weights, local_weights, winding_R_cos, scales).params
-
-
-@_solve_winding_surface.defjvp
-def _solve_winding_surface_jvp(active_indices, primals, tangents):
-    init_active_dofs, full_dofs = primals[0], primals[1]
-    rest_primals, rest_tangents = primals[2:], tangents[2:]
-    sol = _solve_winding_surface(init_active_dofs, full_dofs, active_indices, *rest_primals)
-
-    optimizer = LBFGSB(
-        fun=lambda a, f, *rest: _active_winding_objective_value(
-            a, f, active_indices, *rest),
-        maxiter=4, tol=1e-6)
-    bounds = _active_dof_bounds(init_active_dofs)
-    zero_bounds_tangent = jax.tree.map(jnp.zeros_like, bounds)
-
-    sol_tangent = root_jvp(
-        optimality_fun=optimizer.optimality_fun, sol=sol,
-        args=(bounds, full_dofs, *rest_primals),
-        tangents=(zero_bounds_tangent, tangents[1], *rest_tangents))
-    return sol, sol_tangent
 
 
 @jax.jit
@@ -771,13 +758,16 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
     stage_terms = objective_function_terms
     problem = opt.VmecProblem.from_tuples(inp, stage_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
-        restart_from=equilibrium, implicit_jacobian_method="block_tridiagonal")
-    # Pinned to "block_tridiagonal" rather than the "auto" default: with only
-    # winding_surface_objective active (nres=1), "auto" picks reverse-mode for
-    # the Jacobian, which _solve_winding_surface's forward-mode-only
-    # custom_jvp cannot supply -- every residual_jac() call would otherwise
-    # retry and fail a full reverse-mode trace before falling back to this
-    # same certified path (measured: ~17-30% slower per call, every call).
+        restart_from=equilibrium, implicit_jacobian_method="reverse_adjoint")
+    # One reverse adjoint per residual row instead of one forward response per
+    # boundary dof. The residual here is a single row, and the winding term
+    # only ever enters through it, so the winding derivative stops scaling
+    # with the dof count: at max_mode=3 (48 dofs) it adds 0.23 s to a Jacobian
+    # rather than 6.1 s, and adds no measurable compile time rather than 17 s.
+    # Pinned rather than left to "auto" so that uncommenting one of the
+    # dormant terms above (nres > 1, where "auto" would switch to the forward
+    # block-tridiagonal response) still reaches the reverse lane: jaxopt's
+    # implicit rule for the inner solve is reverse-mode only.
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:
