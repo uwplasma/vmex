@@ -11,6 +11,7 @@ Item I.8a dead-code prune — the core is JAX-only.
 from __future__ import annotations
 
 import re
+import sys
 import types
 
 import pytest
@@ -77,7 +78,7 @@ def test_cache_dir_env_precedence(clean_cache_env):
 
 
 def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
-    """macOS + jaxlib < 0.10 kills the process reading big cache entries
+    """jaxlib < 0.10 kills the process reading big cache entries
     (LLVM ORC materializes per-kernel objects recursively and overflows a
     worker-thread stack inside PyClient::DeserializeExecutable), so the
     cache defaults off there — but explicit user choices always win."""
@@ -97,15 +98,14 @@ def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
     assert _compat._default_compilation_cache_dir() == "/tmp/vmexcache"
 
 
-def test_cache_deserialize_unsafe_is_darwin_and_jaxlib_scoped(monkeypatch):
+@pytest.mark.parametrize("system", ["Linux", "Darwin"])
+def test_cache_deserialize_unsafe_is_jaxlib_scoped_on_every_platform(
+        monkeypatch, system):
+    monkeypatch.setattr(_compat.platform, "system", lambda: system)
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 9, 2))
-    monkeypatch.setattr(_compat.platform, "system", lambda: "Linux")
-    assert _compat._cache_deserialize_unsafe() is False  # macOS-only crash
-
-    monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
     assert _compat._cache_deserialize_unsafe() is True   # affected jaxlib
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 10, 0))
-    assert _compat._cache_deserialize_unsafe() is False  # fixed in 0.10.0
+    assert _compat._cache_deserialize_unsafe() is False  # fixed in 0.10
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: None)
     assert _compat._cache_deserialize_unsafe() is True   # unknown = unsafe
 
@@ -140,6 +140,73 @@ def test_cache_machine_fingerprint_shape_and_stability():
     fp = _compat._cache_machine_fingerprint()
     assert re.fullmatch(r"[a-z0-9_]+-[a-z0-9_]+-[0-9a-f]{16}", fp)
     assert fp == _compat._cache_machine_fingerprint()
+
+
+def test_cache_machine_fingerprint_changes_with_jaxlib(monkeypatch):
+    real_version = _compat.importlib_metadata.version
+    selected = {"jax": "0.9.2", "jaxlib": "0.9.2"}
+
+    def version(name):
+        return selected.get(name, real_version(name))
+
+    monkeypatch.setattr(_compat.importlib_metadata, "version", version)
+    old = _compat._cache_machine_fingerprint()
+    selected["jax"] = "0.10.1"
+    selected["jaxlib"] = "0.10.1"
+    new = _compat._cache_machine_fingerprint()
+    assert old != new
+
+
+def test_cache_machine_fingerprint_tracks_runtime_jaxlib(monkeypatch):
+    """An in-place jaxlib downgrade must move the cache even when the
+    distribution metadata is stale.
+
+    Reproduced hazard: metadata kept reporting one version while the
+    jaxlib actually imported — whose AOT loader rejects the old entries'
+    CPU target features, then segfaults — changed underneath.  The
+    fingerprint must follow the runtime module, not the metadata.
+    """
+    jaxlib_version = pytest.importorskip("jaxlib.version")
+    real_version = _compat.importlib_metadata.version
+
+    def stale(name):
+        return "1.0.0" if name in ("jax", "jaxlib") else real_version(name)
+
+    monkeypatch.setattr(_compat.importlib_metadata, "version", stale)
+    monkeypatch.setattr(jaxlib_version, "__version__", "0.11.1")
+    old = _compat._cache_machine_fingerprint()
+    monkeypatch.setattr(jaxlib_version, "__version__", "0.9.2")
+    new = _compat._cache_machine_fingerprint()
+    assert old != new
+
+
+def test_jaxlib_backend_identity_tracks_native_extension(tmp_path, monkeypatch):
+    """The identity digest follows the native XLA extension's content."""
+    jaxlib = pytest.importorskip("jaxlib")
+    (tmp_path / "__init__.py").write_text("")
+    monkeypatch.setattr(jaxlib, "__file__", str(tmp_path / "__init__.py"))
+    ext = tmp_path / "_jax.so"
+
+    ext.write_bytes(b"one" * 100)
+    first = _compat._jaxlib_backend_identity()
+    ext.write_bytes(b"two" * 100)
+    second = _compat._jaxlib_backend_identity()
+
+    assert any(part.startswith("jaxlib-runtime=") for part in first)
+    assert any(part.startswith("jaxlib-ext=") for part in first)
+    assert first != second
+
+
+def test_jaxlib_backend_identity_degrades_gracefully(monkeypatch):
+    """Failures drop fingerprint parts; they never raise into the caller."""
+    jaxlib = pytest.importorskip("jaxlib")
+    # An unreadable package path drops only the extension digest.
+    monkeypatch.setattr(jaxlib, "__file__", None)
+    parts = _compat._jaxlib_backend_identity()
+    assert parts and all(part.startswith("jaxlib-runtime=") for part in parts)
+    # An unimportable jaxlib.version yields no parts at all.
+    monkeypatch.setitem(sys.modules, "jaxlib.version", None)
+    assert _compat._jaxlib_backend_identity() == []
 
 
 class _FakeConfig:
@@ -191,7 +258,10 @@ def test_compilation_cache_defaults_are_bounded_and_selective(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", raising=False)
     fake = types.SimpleNamespace(config=_FakeConfig())
     _compat._configure_compilation_cache(fake, "/tmp/cachedir")
-    assert fake.config.updates["jax_persistent_cache_min_compile_time_secs"] == 1.0
+    # Floor 0: storing the polish path's many sub-second programs halves the
+    # CLI rerun (60.6 s -> 31.6 s measured); the eviction bound below keeps
+    # the disk cost finite.
+    assert fake.config.updates["jax_persistent_cache_min_compile_time_secs"] == 0.0
     # The bound stays finite (JAX only locks the cache when eviction is on)
     # but scales with the disk: the old fixed 1 GiB sat at its cap and evicted
     # the executables the next optimization stage asked for.
@@ -349,3 +419,130 @@ def test_configure_compilation_cache_applies_and_survives_failures(monkeypatch):
     })
     _compat._configure_compilation_cache(jx, "/tmp/vmex-cache-test")
     assert jx.config.updates == {}
+
+
+# ---------------------------------------------------------------------------
+# resident-entry bound (JAX re-scans the cache directory on every write)
+# ---------------------------------------------------------------------------
+
+
+def _seed_cache(path, count):
+    """Write ``count`` cache entries whose atimes increase with the index."""
+    for i in range(count):
+        (path / f"k{i}-cache").write_bytes(b"x")
+        (path / f"k{i}-atime").write_bytes(i.to_bytes(8, "little"))
+
+
+def test_prune_cache_entries_keeps_the_most_recently_used(tmp_path):
+    _seed_cache(tmp_path, 50)
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 40
+    kept = sorted(int(p.name[1:-6]) for p in tmp_path.glob("*-cache"))
+    assert kept == list(range(40, 50))
+    # the atime sidecars go with their entries, so the directory does not
+    # accumulate orphans that the next scan would still have to stat
+    assert len(list(tmp_path.glob("*-atime"))) == 10
+    # already inside the bound: no work, no deletions
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 0
+
+
+def test_prune_cache_entries_keeps_recent_entries_up_to_four_times_the_cap(tmp_path):
+    """Recent entries survive the cap; stale ones are pruned to it."""
+    import time
+
+    now = time.time_ns()
+    _seed_cache(tmp_path, 30)  # atimes 0..29: long stale
+    for i in range(25):
+        (tmp_path / f"r{i}-cache").write_bytes(b"x")
+        (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 30
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(25))
+
+    # a workload's recent entries are still bounded, at four times the cap
+    for i in range(25, 50):
+        (tmp_path / f"r{i}-cache").write_bytes(b"x")
+        (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 10
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(40))
+
+
+def test_prune_cache_entries_survives_a_hostile_directory(tmp_path):
+    _seed_cache(tmp_path, 5)
+    (tmp_path / "k2-atime").unlink()  # entry with no atime sidecar
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 3
+    assert len(list(tmp_path.glob("*-cache"))) == 2
+    # a missing directory is not an error: the cache may not exist yet
+    assert _compat._prune_cache_entries(str(tmp_path / "absent"), 1) == 0
+
+
+def test_configure_compilation_cache_bounds_resident_entries(tmp_path, monkeypatch):
+    monkeypatch.delenv("VMEX_CACHE_MAX_ENTRIES", raising=False)
+    monkeypatch.delenv("VMEC_JAX_CACHE_MAX_ENTRIES", raising=False)
+    _seed_cache(tmp_path, _compat._CACHE_MAX_ENTRIES + 7)
+    fake = types.SimpleNamespace(config=_FakeConfig())
+    _compat._configure_compilation_cache(fake, str(tmp_path))
+    assert len(list(tmp_path.glob("*-cache"))) == _compat._CACHE_MAX_ENTRIES
+
+    # the bound is tunable, and 0 turns it off
+    monkeypatch.setenv("VMEX_CACHE_MAX_ENTRIES", "3")
+    _compat._configure_compilation_cache(fake, str(tmp_path))
+    assert len(list(tmp_path.glob("*-cache"))) == 3
+    monkeypatch.setenv("VMEX_CACHE_MAX_ENTRIES", "0")
+    _seed_cache(tmp_path, 20)
+    before = len(list(tmp_path.glob("*-cache")))
+    _compat._configure_compilation_cache(fake, str(tmp_path))
+    assert len(list(tmp_path.glob("*-cache"))) == before
+
+
+def test_prune_cache_entries_gives_up_quietly_on_every_failure(tmp_path, monkeypatch):
+    """Pruning is housekeeping: no failure of it may stop a solve.
+
+    Each branch that returns early or skips an entry is exercised: an
+    unreadable directory, a lock another process holds, an entry that cannot
+    be removed, and a sidecar that vanished first.
+    """
+    import pathlib
+
+    import filelock
+
+    _seed_cache(tmp_path, 6)
+
+    # an unreadable directory (glob itself fails) is not an error
+    monkeypatch.setattr(pathlib.Path, "glob", lambda self, pattern: (_ for _ in ()).throw(OSError("unreadable")))
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 0
+    monkeypatch.undo()
+
+    # a lock held elsewhere means someone else is pruning: leave it to them
+    def _busy(self, timeout=None, **kwargs):
+        raise filelock.Timeout(str(self.lock_file))
+
+    monkeypatch.setattr(filelock.FileLock, "acquire", _busy)
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 0
+    assert len(list(tmp_path.glob("*-cache"))) == 6
+    monkeypatch.undo()
+
+    # an entry that cannot be unlinked is skipped, and a sidecar that is
+    # already gone does not stop the sweep
+    (tmp_path / "k0-atime").unlink()
+    real_unlink = pathlib.Path.unlink
+
+    def _stubborn(self, *args, **kwargs):
+        if self.name == "k1-cache":
+            raise OSError("busy")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", _stubborn)
+    removed = _compat._prune_cache_entries(str(tmp_path), 2)
+    monkeypatch.undo()
+    assert removed == 3
+    assert (tmp_path / "k1-cache").exists()
+    assert len(list(tmp_path.glob("*-cache"))) == 3
+
+
+def test_configure_compilation_cache_ignores_an_unparseable_entry_bound(tmp_path, monkeypatch):
+    monkeypatch.setenv("VMEX_CACHE_MAX_ENTRIES", "many")
+    _seed_cache(tmp_path, 4)
+    fake = types.SimpleNamespace(config=_FakeConfig())
+    _compat._configure_compilation_cache(fake, str(tmp_path))
+    # the bound is skipped, the rest of the configuration still lands
+    assert len(list(tmp_path.glob("*-cache"))) == 4
+    assert fake.config.updates["jax_compilation_cache_dir"] == str(tmp_path)

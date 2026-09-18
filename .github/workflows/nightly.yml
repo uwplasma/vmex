@@ -13,6 +13,7 @@ permissions:
   contents: read
 
 env:
+  VMEX_COMPILATION_CACHE: disabled
   JAX_ENABLE_X64: "1"
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
@@ -66,10 +67,17 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install released optional integrations
+        # neoclassical, optimizers and simsopt are installed by no other job, so
+        # every effective-ripple, jaxopt/optax and simsopt-comparison test used
+        # to skip in every lane -- which is how #354's aliased effective ripple
+        # shipped.  This is the one job that exercises the released extras.
         run: |
-          python -m pip install ".[coils,turbulence,freeb]" pytest pytest-xdist
+          python -m pip install ".[coils,turbulence,freeb,neoclassical,optimizers]" \
+            simsopt pytest pytest-xdist
       - name: Verify imports
-        run: python -c "import essos, gkx, virtual_casing_jax"
+        run: |
+          python -c "import essos, gkx, virtual_casing_jax, neo_jax, jaxopt, optax"
+          python -c "import simsopt"
       - name: Fetch reference assets
         run: python tools/fetch_assets.py --bundle reference-nc
       - name: Run integration contracts
@@ -83,10 +91,75 @@ jobs:
         run: |
           pytest -q tests/test_examples.py::test_free_boundary_essos_coils \
             --vmex-report=test-report-coils.json
+      # The strong-force polish is too slow for the PR example lane (~2 min for
+      # the solve, the polish, and both figure sets) but is the only run-level
+      # check that the certificate the docs quote is still produced.
+      - name: Run force-balance polishing smoke
+        env:
+          RUN_FULL: "1"
+        run: |
+          pytest -q tests/test_examples.py::test_force_balance_polishing_example \
+            --vmex-report=test-report-polish.json
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: test-report-optional
           path: test-report-*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  nonlinear-contracts:
+    name: ${{ matrix.selector }} (JAX ${{ matrix.jax }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - selector: full-polish-gn
+            jax: "0.11.1"
+          - selector: full-polish-homotopy
+            jax: "0.11.1"
+          - selector: full-polish-linear
+            jax: "0.9.2"
+          - selector: full-polish-linear
+            jax: "0.11.1"
+          - selector: full-run-options
+            jax: "0.11.1"
+          - selector: full-free-boundary-adjoint
+            jax: "0.11.1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install tested numerical versions
+        run: python -m pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
+      - name: Add XLA compile headroom
+        run: |
+          sudo fallocate -l 12G /mnt/vmex-swap
+          sudo chmod 600 /mnt/vmex-swap
+          sudo mkswap /mnt/vmex-swap
+          sudo swapon /mnt/vmex-swap
+      - name: Fetch the free-boundary reference fixture
+        if: matrix.selector == 'full-free-boundary-adjoint'
+        run: |
+          python tools/fetch_assets.py --bundle ncsx-mgrid
+          test -f examples/data/mgrid_ncsx_c09r00_small.nc
+      - name: Run retained nonlinear contracts
+        env:
+          RUN_FULL: "1"
+          JAX_PLATFORMS: cpu
+        run: |
+          python -m pip freeze
+          FILES="$(python tools/test_manifest.py select ${{ matrix.selector }})"
+          pytest -q $FILES --durations=20 --vmex-report=nonlinear-report.json
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: nonlinear-${{ matrix.selector }}-${{ matrix.jax }}
+          path: nonlinear-report.json
           if-no-files-found: warn
           retention-days: 7

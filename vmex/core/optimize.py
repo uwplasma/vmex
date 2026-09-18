@@ -58,6 +58,7 @@ reduced ``[0, pi]`` grid.
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import inspect
 import warnings
@@ -180,7 +181,9 @@ __all__ = [
     "minimize",
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
+    "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
     "gamma_c_state",  # noqa: F822 - provided lazily by __getattr__ below
+    "gamma_c_smooth_state",  # noqa: F822 - provided lazily by __getattr__ below
 ]
 
 Array = Any
@@ -194,7 +197,7 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
         return RedlBootstrapMismatch
     # gammac.py sits on the stability/turbulence field-line lane; the lazy
     # re-export keeps the fast-ion proxy import-light like the f_boot term.
-    if name in ("GammaC", "gamma_c_state"):
+    if name in ("GammaC", "GammaCSmooth", "gamma_c_state", "gamma_c_smooth_state"):
         from . import gammac
         return getattr(gammac, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -325,12 +328,20 @@ class Equilibrium:
 
 
 def _auto_jac_chunk(dim: int) -> int:
-    """Bound device-aware batching by the conservative square-root policy."""
-    return min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    """Avoid a second remainder graph without expanding the memory budget."""
+    bound = min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    # lax.map traces a separate vmap for the tail. Prefer a nearby divisor,
+    # but retain the original width when avoiding a tail would serialize it.
+    widths = range(bound, (bound + 1) // 2 - 1, -1)
+    return next((width for width in widths if dim % width == 0), bound)
 
 
 def _linear_response_summary(report: Any) -> jnp.ndarray:
-    """Return ``[iterations, failed columns, residual, tolerance]``."""
+    """Return ``[iterations, failed columns, residual, tolerance, total, columns]``.
+
+    ``iterations`` is the largest per-column Krylov count and ``total`` their
+    sum over the ``columns`` solves.
+    """
     iterations = jnp.asarray(getattr(report, "iterations", 0)).ravel()
     converged = jnp.asarray(getattr(report, "converged", True)).ravel()
     residual = jnp.asarray(getattr(report, "residual_norm", 0.0)).ravel()
@@ -342,12 +353,19 @@ def _linear_response_summary(report: Any) -> jnp.ndarray:
         jnp.sum(jnp.logical_not(converged)).astype(jnp.float64),
         residual[worst].astype(jnp.float64),
         tolerance[worst].astype(jnp.float64),
+        jnp.sum(iterations).astype(jnp.float64),
+        jnp.asarray(iterations.size, dtype=jnp.float64),
     ))
 
 
 def _record_linear_response(holder: dict, summary: Any, cfg: Any = None) -> None:
     """Record solver effort and warn once before a failed-column fallback."""
     values = np.asarray(jax.device_get(summary), dtype=float).ravel()
+    if cfg is not None and values.size >= 6 and np.all(np.isfinite(values[4:6])):
+        from . import implicit as imp
+
+        imp._count(cfg, jacobians=1, jacobian_columns=int(values[5]),
+                   jacobian_krylov_iterations=int(values[4]))
     if values.size < 2 or not np.all(np.isfinite(values)):
         return
     iterations, unconverged = int(values[0]), int(values[1])
@@ -427,6 +445,7 @@ def solve_equilibrium(
     verbose: bool = False,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
+    polish_force_balance: bool | str = False,
     **solve_kwargs,
 ) -> Equilibrium:
     """Converge ``inp`` with the core multigrid solver -> :class:`Equilibrium`.
@@ -439,6 +458,8 @@ def solve_equilibrium(
     :func:`vmex.core.multigrid.solve_multigrid`. ``forward_ftol`` and
     ``forward_max_iterations`` replace the input ladder's final tolerance and
     iteration cap, using the same names as the optimization problem API.
+    Force-balance polishing is strictly opt-in: the default
+    ``polish_force_balance=False`` returns the ordinary converged VMEC state.
     """
     if forward_ftol is not None and "ftol_array" in solve_kwargs:
         raise ValueError("forward_ftol and ftol_array cannot both be supplied")
@@ -449,11 +470,17 @@ def solve_equilibrium(
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
     result = solve_multigrid(
         inp, verbose=verbose, initial_state=initial_state,
-        raise_on_max_iterations=raise_on_max_iterations, **solve_kwargs,
+        raise_on_max_iterations=raise_on_max_iterations,
+        polish_force_balance=polish_force_balance, **solve_kwargs,
     )
-    ns = int(np.shape(result.state.R_cos)[0])
+    state = (
+        result.polished_state
+        if result.polished_state is not None
+        else result.state
+    )
+    ns = int(np.shape(state.R_cos)[0])
     runtime = prepare_runtime(inp, resolution_from_input(inp, ns=ns))
-    return Equilibrium(inp=inp, state=result.state, runtime=runtime, result=result)
+    return Equilibrium(inp=inp, state=state, runtime=runtime, result=result)
 
 
 # ===========================================================================
@@ -653,7 +680,7 @@ class QuasisymmetryRatioResidual:
                 # it poisons reverse AD with 0 * inf although it is unused.
                 return jnp.asarray(a)[1:, i_src, k_src]
 
-        # |B| on the half-mesh internal grid (bcovar.f: bsq = |B|^2/2 + p).
+        # ``|B|`` on the half-mesh internal grid (bcovar.f: bsq = ``|B|``^2/2 + p).
         bsq2 = 2.0 * (jnp.asarray(fields.total_pressure)
                       - jnp.asarray(fields.pressure)[:, None, None])
         tiny = jnp.asarray(jnp.finfo(bsq2.dtype).tiny, dtype=bsq2.dtype)
@@ -756,6 +783,12 @@ class QuasisymmetryRatioResidual:
 def mirror_ratio(state: SpectralState, rt: SolverRuntime, *, s_index: int = -1) -> Array:
     """Mirror ratio ``(Bmax - Bmin) / (Bmax + Bmin)`` on one half-mesh surface.
 
+    Note the convention: this is the ``|B|`` *modulation depth* on a surface, the
+    standard QI optimization knob, not ``R_m = Bmax / Bmin``.  The two are
+    related by ``R_m = (1 + m) / (1 - m)``.  The open-mirror lane reports
+    ``R_m`` proper — ``R_m,axis`` per leg and ``R_m,LCFS`` separately — through
+    :mod:`vmex.mirror.metrics`.
+
     ``|B|`` is evaluated on the solver's internal angular grid from the
     half-mesh field state (``|B|^2 = 2 (bsq - p)``, ``bcovar.f``); ``s_index``
     selects the half-mesh surface (default: outermost).  Hard max/min — smooth
@@ -771,12 +804,11 @@ def mirror_ratio(state: SpectralState, rt: SolverRuntime, *, s_index: int = -1) 
 
 
 def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
-    """VMEC/simsopt magnetic-well proxy ``(V'(0) - V'(1)) / V'(0)``.
+    """simsopt's ``Vmec.vacuum_well`` proxy ``(V'(0) - V'(1)) / V'(0)``.
 
     ``V' = dV/ds`` endpoints are linear extrapolations of the half-mesh
     differential volume ``vp`` (``bcovar.f``); positive values mean a
-    favorable well (``vacuum_well`` in simsopt).  Ported from legacy
-    ``vmex.finite_beta.magnetic_well_from_vp``.
+    favorable well.  Ported from legacy ``vmex.finite_beta.magnetic_well_from_vp``.
     """
     _, _, _, _, energies = _field_chain(state, rt)
     dvol = jnp.abs(jnp.asarray(energies.vp))[1:]
@@ -807,7 +839,7 @@ def d_merc(eq) -> jnp.ndarray:
 def l_grad_b(eq, *, s_index: int = -1, ntheta: int = 24, nphi: int = 24) -> Array:
     """Magnetic-gradient scale length ``min L_grad_B`` on one half-mesh surface.
 
-    ``L_grad_B = |B| sqrt(2 / (grad B : grad B))`` (squared Frobenius norm of
+    ``L_grad_B = ``|B|`` sqrt(2 / (grad B : grad B))`` (squared Frobenius norm of
     the Cartesian field-gradient tensor) — the Kappel/Landreman
     coil-complexity / compactness proxy.  Evaluated from the wout tables of
     the converged state (``bsupumnc/bsupvmnc`` Nyquist spectra, spectral
@@ -1344,7 +1376,7 @@ def unpack_boundary(
 
 
 #: curtor dof storage scale (dof = CURTOR/1e6, i.e. MA) — keeps the trust
-#: region O(1) alongside the boundary dofs (spec notes_r26g section 6.4).
+#: region O(1) alongside the boundary dofs.
 _CURTOR_SCALE = 1.0e6
 
 
@@ -1461,6 +1493,16 @@ def _apply_current(inp: VmecInput, xc, k: int, ac_scale: float) -> VmecInput:
     return dataclasses.replace(inp, ac=values, curtor=float(xc[k]) * _CURTOR_SCALE)
 
 
+def _accepts_state_runtime(fun: Callable) -> bool:
+    """Whether ``fun`` takes two required positional ``(state, runtime)`` args."""
+    try:
+        params = [p for p in inspect.signature(fun).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        return len(params) >= 2 and params[1].default is inspect.Parameter.empty
+    except (TypeError, ValueError):  # builtins / partials without signature
+        return False
+
+
 def _call_term(fun: Callable, eq: Equilibrium) -> np.ndarray:
     """Evaluate an objective callable against an :class:`Equilibrium`.
 
@@ -1469,13 +1511,8 @@ def _call_term(fun: Callable, eq: Equilibrium) -> np.ndarray:
     callables receive the :class:`Equilibrium` (e.g.
     ``QuasisymmetryRatioResidual.J`` or user lambdas).
     """
-    try:
-        params = [p for p in inspect.signature(fun).parameters.values()
-                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
-        two_positional = len(params) >= 2 and params[1].default is inspect.Parameter.empty
-    except (TypeError, ValueError):  # builtins / partials without signature
-        two_positional = False
-    value = fun(eq.state, eq.runtime) if two_positional else fun(eq)
+    value = (fun(eq.state, eq.runtime) if _accepts_state_runtime(fun)
+             else fun(eq))
     return np.atleast_1d(np.asarray(jax.device_get(value), dtype=float)).ravel()
 
 
@@ -1771,7 +1808,8 @@ def make_problem(
     jacobian_adjoint_tol: float = 1e-4,
     jacobian_adjoint_maxiter: int = 10,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
+    refine_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -1835,11 +1873,23 @@ def make_problem(
     ``forward_ftol`` and ``forward_max_iterations`` override the final VMEC
     solve stage for either derivative method.  ``max_fsq_ratio`` controls how
     close an iteration-limited trial must be to that tolerance before VMEX
-    differentiates it.  The default accepts ``FSQ / forward_ftol <= 1e6``;
-    stricter studies can reduce it without changing VMEX internals.
+    differentiates it.  The default accepts ``FSQ / forward_ftol <= 1e2``.
+
+    The implicit adjoint assumes ``F = 0`` and carries an error of order
+    ``norm(F)`` at a trial that is not a root, so a permissive bar lets a line
+    search move the design somewhere the solver cannot resolve at all.  The previous default,
+    ``1e6``, differentiated trials whose residual was 1e-6 against a 1e-12
+    deck; on the finite-beta single stage that walk ended with no converged
+    equilibrium at any of ns = 31, 51 or 101 (#361).  Raise it only with a
+    reason, and read ``fsq_ratio`` from ``problem.evaluate(x).diagnostics``
+    when you do.
 
     ``adjoint_tol`` is a relative Krylov tolerance with a certified true
     residual check; ``adjoint_maxiter`` is the restart budget.
+
+    ``refine_tol`` is the frozen fixed-point residual required before
+    implicit differentiation. The default preserves strict gradients;
+    ``numpy.inf`` explicitly disables refinement for legacy comparisons.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
@@ -1929,6 +1979,7 @@ def make_problem(
             jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio,
+            refine_tol=refine_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
@@ -1960,6 +2011,7 @@ def make_problem(
     problem.metadata["forward_ftol"] = float(np.asarray(inp.ftol_array).ravel()[-1])
     problem.metadata["forward_max_iterations"] = int(np.asarray(inp.niter_array).ravel()[-1])
     problem.metadata["max_fsq_ratio"] = float(max_fsq_ratio)
+    problem.metadata["refine_tol"] = float(refine_tol)
     return problem
 
 
@@ -1978,7 +2030,8 @@ def least_squares(
     jacobian_adjoint_tol: float = 1e-4,
     jacobian_adjoint_maxiter: int = 10,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
+    refine_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2048,7 +2101,8 @@ def least_squares(
     :func:`solvax.chunk_map`: ``"auto"`` (default) caps SOLVAX's
     device-aware width by a conservative square-root policy, so an
     accelerator memory report cannot expand the full probe batch; an ``int``
-    fixes that many dofs at a time; ``None`` forces one wide batch.  Column
+    fixes that many dofs at a time; ``None`` forces one wide batch. Automatic
+    widths prefer a nearby divisor to avoid compiling a separate tail. Column
     blocks are mathematically independent, so the assembled Jacobian is
     identical across chunk sizes to float64 round-off.
 
@@ -2058,8 +2112,8 @@ def least_squares(
     solve per residual row.  ``"block"`` amortizes one block-tridiagonal
     factorization of the *raw* force Jacobian — whose radial coupling is
     exactly nearest-neighbor, so ns dense ``(3*mn, 3*mn)`` blocks assembled
-    by 3-colored ``jax.jvp`` probes capture it completely at a cost
-    independent of the dof count — then backsolves every dof right-hand side
+    by chunked three-surface VJPs capture it completely at a cost independent
+    of the dof count — then backsolves every dof right-hand side
     (:func:`solvax.block_thomas_factor` / :func:`solvax.block_thomas_solve`)
     and certifies each column with a warm-started GMRES pass against the
     preconditioned system (same ``adjoint_tol`` and configured iteration
@@ -2097,8 +2151,8 @@ def least_squares(
     attributes: ``input`` (optimized :class:`VmecInput`), ``equilibrium``
     (last successfully solved :class:`Equilibrium`), ``stage_results``
     (per-``max_mode`` results for schedules) and, in implicit mode,
-    ``solve_stats`` (``{"solves", "iterations"}`` totals of the stage's host
-    forward solves).
+    ``solve_stats`` (cumulative solve, refinement, Jacobian and adjoint
+    counters of the stage's configuration, see ``implicit._SOLVE_STATS``).
     """
     import scipy.optimize
 
@@ -2119,7 +2173,8 @@ def least_squares(
                 current_dofs=current_dofs, jac=jac,
                 jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
                 adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-                max_fsq_ratio=max_fsq_ratio, hot_restart=hot_restart,
+                max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+                hot_restart=hot_restart,
                 warm_start=warm_start, use_ess=use_ess,
                 ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
                 verbose=verbose, **scipy_kwargs)
@@ -2147,7 +2202,7 @@ def least_squares(
             current_dofs=current_dofs,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-            max_fsq_ratio=max_fsq_ratio,
+            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             device=device, verbose=verbose, **scipy_kwargs)
@@ -2226,7 +2281,8 @@ def minimize(
     method: str = "L-BFGS-B",
     adjoint_tol: float = 1e-6,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
+    refine_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     **scipy_kwargs,
@@ -2270,6 +2326,7 @@ def minimize(
                 device=device, solve_kwargs=solve_kwargs, verbose=verbose,
                 method=method, adjoint_tol=adjoint_tol,
                 adjoint_maxiter=adjoint_maxiter, max_fsq_ratio=max_fsq_ratio,
+                refine_tol=refine_tol,
                 **scipy_kwargs)
             stage_results.append(result)
             current = result.input
@@ -2281,7 +2338,7 @@ def minimize(
         current_dofs=current_dofs, jac_solver="reverse",
         warm_start=("state" if hot_restart else None),
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-        max_fsq_ratio=max_fsq_ratio,
+        max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
         solve_kwargs=dict(solve_kwargs or {}), device=device, verbose=verbose,
         minimize_method=method, **scipy_kwargs)
 
@@ -2306,13 +2363,7 @@ def _traceable_term(fun: Callable) -> Callable:
     owner = getattr(fun, "__self__", fun)
     if hasattr(owner, "residuals_state"):
         return owner.residuals_state
-    try:
-        params = [p for p in inspect.signature(fun).parameters.values()
-                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
-        two_positional = len(params) >= 2 and params[1].default is inspect.Parameter.empty
-    except (TypeError, ValueError):
-        two_positional = False
-    if two_positional:
+    if _accepts_state_runtime(fun):
         return fun
     raise ValueError(
         f"objective term {fun!r} is not implicit-differentiable: jac='implicit' "
@@ -2321,6 +2372,25 @@ def _traceable_term(fun: Callable) -> Callable:
         "host NumPy — use jac=None (finite differences) for those, or the "
         "traceable d_merc_state / mercier_stability_residual and "
         "l_grad_b_state alternatives.")
+
+
+def _traceable_scalar_loss(fun: Callable) -> Callable:
+    """Scalar ``loss`` callable -> the same callable, validated as traceable.
+
+    The ``loss=`` lane honors the passed callable literally: a bound scalar
+    method such as ``QuasisymmetryRatioResidual.total_state`` is used exactly
+    as given, never swapped for its owner's vector ``residuals_state`` — that
+    substitution belongs to the objective-tuple lane of
+    :func:`_traceable_term`, where residual rows are the desired shape.
+    """
+    if _accepts_state_runtime(fun):
+        return fun
+    raise ValueError(
+        f"loss {fun!r} is not implicit-differentiable: loss= needs a traceable "
+        "(state, runtime) -> scalar callable, e.g. an objective's total_state "
+        "method or a lambda composing such callables. Wout-engine callables "
+        "(J, residuals, d_merc, ...) run on host NumPy — use "
+        "derivative_method='finite_difference' for those.")
 
 
 def residuals_from_tuples(
@@ -2353,6 +2423,62 @@ def residuals_from_tuples(
     return jnp.concatenate(rows)
 
 
+#: Bounded per-process registry of the per-problem jitted callables built by
+#: :func:`_least_squares_implicit`, keyed on the construction content their
+#: closures bake in (the ``implicit._canonical_config`` precedent one level
+#: up: ``jax.jit`` caches per function OBJECT, so the fresh closures this
+#: factory mints re-traced every graph on repeated problem construction in
+#: one process).  Entries hold the jitted callables, whose closures keep the
+#: keyed term/loss callables alive — identity keys therefore cannot be
+#: recycled while their entry lives.  Eviction only costs a later retrace,
+#: never correctness.
+_PROBLEM_JIT_CACHE: "collections.OrderedDict[tuple, dict[str, Any]]" = (
+    collections.OrderedDict()
+)
+_PROBLEM_JIT_CACHE_MAX = 8
+
+
+def _problem_callable_token(fun: Callable) -> tuple:
+    """Hashable identity token of one user term/loss callable.
+
+    Bound methods are minted fresh on every attribute access, so their own
+    ``id`` never repeats across constructions; token the OWNER instance
+    instead (the cached closures hold the owner via the wrapped term, so the
+    id stays valid).  Plain callables are tokened — and kept alive — by
+    identity.  Limitation (documented on the public factories): equal-content
+    but distinct callables (fresh lambdas per construction) lawfully miss,
+    and owners are assumed frozen after construction, matching the repo-wide
+    frozen-input convention.
+    """
+    owner = getattr(fun, "__self__", None)
+    if owner is not None:
+        return ("bound", id(owner), type(owner).__qualname__,
+                fun.__func__.__qualname__)
+    return ("callable", id(fun), getattr(fun, "__qualname__", repr(fun)))
+
+
+def _problem_jit(cache_key: tuple, slot: str, build: Callable):
+    """One shared jitted callable per ``(problem content, slot)``.
+
+    ``build`` runs at most once per live cache entry; a hit returns the
+    earlier construction's jitted callable, whose closures are content-equal
+    by construction of the key (same canonical config identity, term
+    identities/targets/weights, dof layout, seed point, and Jacobian
+    routing), so tracing and executables are shared instead of rebuilt.
+    """
+    entry = _PROBLEM_JIT_CACHE.get(cache_key)
+    if entry is None:
+        entry = {}
+        _PROBLEM_JIT_CACHE[cache_key] = entry
+    else:
+        _PROBLEM_JIT_CACHE.move_to_end(cache_key)
+    if slot not in entry:
+        entry[slot] = build()
+    while len(_PROBLEM_JIT_CACHE) > _PROBLEM_JIT_CACHE_MAX:
+        _PROBLEM_JIT_CACHE.popitem(last=False)
+    return entry[slot]
+
+
 def _least_squares_implicit(
     objective_terms: Sequence[tuple[Callable, float, Any]],
     inp: VmecInput,
@@ -2368,7 +2494,8 @@ def _least_squares_implicit(
     jacobian_adjoint_tol: float = 1e-4,
     jacobian_adjoint_maxiter: int = 10,
     adjoint_maxiter: int = 300,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
+    refine_tol: float = 1.0e-10,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
@@ -2404,11 +2531,19 @@ def _least_squares_implicit(
     launch-bound, dof-count-scaling GPU compile (R1); an explicit
     ``device=`` overrides this.  The forward equilibrium callback uses the
     solver's independent automatic per-stage placement policy.
+
+    Repeated construction with identical content reuses the earlier
+    problem's jitted residual/Jacobian callables (``_PROBLEM_JIT_CACHE``,
+    bounded at 8).  User term/loss callables are keyed by IDENTITY (bound
+    methods by their owner instance): pass the same callable objects to hit
+    the cache — freshly minted lambdas per construction lawfully rebuild —
+    and treat term owners as frozen after construction, matching the
+    repo-wide frozen-input convention.
     """
     import scipy.optimize
 
     from . import implicit as imp
-    from .device import resolve_implicit_device
+    from .device import commit_to_single_device, resolve_implicit_device
 
     # ``jac=None`` forwards the complete ``solve_kwargs`` dictionary to
     # ``solve_equilibrium``.  The implicit lane has a static solver config,
@@ -2443,7 +2578,8 @@ def _least_squares_implicit(
         weight = _least_squares_weight(w, weight_semantics)
         terms.append((_traceable_term(f), float(t), jnp.asarray(weight)))
     traceable_scalar = (
-        None if scalar_objective is None else _traceable_term(scalar_objective)
+        None if scalar_objective is None
+        else _traceable_scalar_loss(scalar_objective)
     )
     modes = _dof_modes(inp, max_mode)
     nm = len(modes)
@@ -2475,6 +2611,7 @@ def _least_squares_implicit(
         jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
         adjoint_maxiter=adjoint_maxiter,
         max_fsq_ratio=max_fsq_ratio,
+        refine_tol=refine_tol,
     )
     # Pin the residual/Jacobian graphs to the fastest device for this
     # launch-bound path (CPU by default; explicit device= honored; None
@@ -2483,7 +2620,11 @@ def _least_squares_implicit(
     # and the custom-VJP backward re-enter the same placement context on
     # their own — no outer jax.default_device context needed.
     jac_device = resolve_implicit_device(device, cfg.resolution)
-    cfg = dataclasses.replace(cfg, device=jac_device)
+    # Re-canonicalize after the device replace (the implicit.run precedent):
+    # a fresh config identity here missed every identity-keyed implicit
+    # cache (_template_runtime, the residual lane, _LAST_SOLVE) on repeated
+    # problem construction with identical content.
+    cfg = imp._canonical_config(dataclasses.replace(cfg, device=jac_device))
     if initial_state is not None:
         imp._HOT_CACHE[cfg] = initial_state
 
@@ -2500,6 +2641,31 @@ def _least_squares_implicit(
         if k_cur:
             x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
     x0 = np.asarray(x0, dtype=float)
+
+    # Content key of every degree of freedom the jitted closures below bake
+    # in: the canonical config identity (input deck, resolution, tolerances,
+    # device), the term/loss identities with resolved targets/weights, the
+    # dof layout, the seed point (penalty-wall center), and the Jacobian
+    # routing knobs.  Repeated problem construction with equal content then
+    # reuses the earlier jitted callables through _problem_jit instead of
+    # re-tracing every graph.
+    problem_jit_key = (
+        id(cfg),
+        tuple(
+            (_problem_callable_token(f_orig), float(t_res),
+             np.asarray(w_res).tobytes())
+            for (f_orig, _t, _w), (_f, t_res, w_res)
+            in zip(objective_terms, terms)
+        ),
+        (None if scalar_objective is None
+         else _problem_callable_token(scalar_objective)),
+        int(max_mode), bool(vary_major_radius),
+        None if current_dofs is None else int(current_dofs),
+        x0.shape, x0.tobytes(),
+        (jac_chunk_size if jac_chunk_size is None
+         or isinstance(jac_chunk_size, int) else str(jac_chunk_size)),
+        str(jac_solver),
+    )
 
     def params_of(x: jnp.ndarray):
         repl = dict(rbc=params0.rbc.at[row_idx, col_idx].set(x[:nm]),
@@ -2535,7 +2701,12 @@ def _least_squares_implicit(
     params0_np = jax.tree.map(
         lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x0))
     )
-    state0_np, mask_np = imp._host_solve_and_mask(cfg, params0_np)
+    # ``refine=False``: the preflight validates the seed solve and the
+    # residual shape but never differentiates this state, so it does not pay
+    # for the fixed-point anchor here.  The first derivative evaluation
+    # memo-hits this exact solve and refines then — under the compile
+    # heartbeat instead of the silent factory (user-visible startup gap).
+    state0_np, mask_np = imp._host_solve_and_mask(cfg, params0_np, refine=False)
     state0 = jax.tree.map(_place, state0_np)
     params_at_x0 = params_of(_place(x0))
     runtime0 = imp.runtime_from_params(params_at_x0, cfg)
@@ -2545,6 +2716,13 @@ def _least_squares_implicit(
     if initial_rows.size == 0 or not np.all(np.isfinite(initial_rows)):
         raise FloatingPointError("non-finite or empty objective at the initial point")
     residual_size = int(initial_rows.size)
+    if traceable_scalar is not None and residual_size != 1:
+        raise ValueError(
+            f"loss returned {residual_size} values at the initial point; "
+            "loss= must return a scalar. Vector residual rows (e.g. a "
+            "residuals_state method) belong in objective_terms / "
+            "least_squares, or reduce them: "
+            "lambda state, runtime: jnp.sum(term.residuals_state(state, runtime)**2).")
     if traceable_scalar is None:
         sizes = [int(np.asarray(jax.device_get(
             jnp.atleast_1d(w * (jnp.asarray(f(state0, runtime0)) - t)).ravel()
@@ -2653,9 +2831,8 @@ def _least_squares_implicit(
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         return bool(np.isfinite(fsq) and fsq <= cfg.max_fsq_ratio * cfg.ftol)
 
-    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+    def rows_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         return jax.lax.cond(
             status == 0,
@@ -2668,11 +2845,17 @@ def _least_squares_implicit(
             operand=None,
         )
 
-    rows_jit = jax.jit(residual_rows)
+    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return rows_at_state(x, state, status)
 
-    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+    host_rows_jit = _problem_jit(
+        problem_jit_key, "host_rows", lambda: jax.jit(rows_at_state))
+    rows_jit = _problem_jit(
+        problem_jit_key, "rows", lambda: jax.jit(residual_rows))
+
+    def scalar_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         def accepted(_):
             rows = term_rows(state, runtime)
@@ -2684,8 +2867,17 @@ def _least_squares_implicit(
             operand=None,
         )
 
-    scalar_loss_jit = jax.jit(scalar_loss)
-    value_grad_jit = jax.jit(jax.value_and_grad(scalar_loss))
+    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return scalar_at_state(x, state, status)
+
+    host_scalar_jit = _problem_jit(
+        problem_jit_key, "host_scalar", lambda: jax.jit(scalar_at_state))
+    scalar_loss_jit = _problem_jit(
+        problem_jit_key, "scalar_loss", lambda: jax.jit(scalar_loss))
+    value_grad_jit = _problem_jit(
+        problem_jit_key, "value_grad",
+        lambda: jax.jit(jax.value_and_grad(scalar_loss)))
 
     # The evolved-dof mask was fetched by the strict seed preflight above.
     mask_const = jax.tree.map(_place, mask_np)
@@ -2830,17 +3022,17 @@ def _least_squares_implicit(
     # *preconditioned* formulation is dense in radius because the 1D
     # preconditioner applies per-mode radial tridiagonal *solves*.  Both
     # share the fixed point, so dz_j = -(dF/dz)^{-1} dF/dp t_j is the same
-    # through either: assemble the raw blocks with 3-colored jvp probes
-    # (~3*(3*mn) linearizations, dof-count independent), factor once (solvax
+    # through either: assemble the raw blocks with chunked three-surface VJPs
+    # (~3*mn reverse linearizations, dof-count independent), factor once (solvax
     # block Thomas), backsolve every dof RHS, then one warm-started GMRES pass
     # per column certifies cfg.adjoint_tol (solvax checks the initial residual
     # first, so columns already at tolerance cost one matvec).
     active_fields = imp._active_state_fields(cfg)
     m_block = len(active_fields) * int(np.asarray(mask_np.R_cos).shape[1])
     if jac_chunk_size == "auto":
-        probe_chunk = _auto_jac_chunk(3 * m_block)
+        probe_chunk = _auto_jac_chunk(m_block)
     elif jac_chunk_size is None:
-        probe_chunk = 3 * m_block
+        probe_chunk = m_block
     else:
         probe_chunk = chunk
 
@@ -2883,9 +3075,70 @@ def _least_squares_implicit(
         jac_impl = jacobian_rows_block
     else:
         jac_impl = jacobian_rows
-    jac_jit = jax.jit(jac_impl)
-    gmres_jit = jax.jit(jacobian_rows)
-    reverse_jit = jax.jit(jax.jacrev(residual_rows))
+    jac_jit = _problem_jit(
+        problem_jit_key, "jac", lambda: jax.jit(jac_impl))
+    gmres_jit = _problem_jit(
+        problem_jit_key, "jac_gmres", lambda: jax.jit(jacobian_rows))
+    reverse_width = ndof if chunk is None else chunk
+
+    def reverse_pullback(x, state, status, cotangent_of, count):
+        """Rows ``cotangent_of(i)^T J`` for ``i < count`` at one solved state.
+
+        Each row is pulled back to the state and the direct ``x`` path, the
+        state cotangent goes through one shared raw block factorization
+        (``imp._block_state_pullback``), and ``params_of`` maps the result
+        back to ``x``.  Mapping the pullback of ``residual_rows`` instead
+        repeats the implicit rule's factorization in every chunk, because XLA
+        does not hoist it out of the map (1.77 s per extra chunk against
+        1.52 s for one factorization on the seed QA problem).  Rows run in
+        batches of the tangent-lane width: ``jax.jacrev`` would vmap every
+        row's adjoint at once.  A failed trial keeps the penalty rows' direct
+        derivative and a zero implicit pullback, as ``solve_implicit_status``
+        does.
+        """
+        frozen = jax.lax.stop_gradient(state)
+        _, direct = jax.vjp(
+            lambda point, solved: rows_at_state(point, solved, status),
+            x, frozen)
+        _, boundary = jax.vjp(params_of, x)
+        indices = jnp.arange(count)
+
+        def converged(_):
+            pullback = imp._block_state_pullback(
+                params_of(x), cfg, frozen, mask_const,
+                active_fields=active_fields, probe_chunk_size=probe_chunk)
+
+            def row(i):
+                x_bar, state_bar = direct(cotangent_of(i))
+                params_bar, _ = pullback(state_bar)
+                return x_bar + boundary(params_bar)[0]
+
+            return chunk_map(row, indices, chunk_size=reverse_width)
+
+        def failed(_):
+            return chunk_map(lambda i: direct(cotangent_of(i))[0], indices,
+                             chunk_size=reverse_width)
+
+        return jax.lax.cond(status == 0, converged, failed, operand=None)
+
+    def jacobian_rows_reverse(x: jnp.ndarray) -> jnp.ndarray:
+        """Reverse Jacobian from one solve and one block factorization."""
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return reverse_pullback(
+            x, state, status,
+            lambda i: jax.nn.one_hot(i, residual_size, dtype=jnp.float64),
+            residual_size)
+
+    reverse_jit = _problem_jit(
+        problem_jit_key, "jac_reverse", lambda: jax.jit(jacobian_rows_reverse))
+
+    def reverse_gradient(x: jnp.ndarray, rows: jnp.ndarray) -> jnp.ndarray:
+        """``J^T rows`` from one pullback: the reverse lane's scalar gradient."""
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return reverse_pullback(x, state, status, lambda _: rows, 1)[0]
+
+    reverse_gradient_jit = _problem_jit(
+        problem_jit_key, "gradient_reverse", lambda: jax.jit(reverse_gradient))
 
     # The strict seed preflight above already evaluated and validated every
     # residual row.  Carry that known shape instead of compiling ``rows_jit``
@@ -2910,7 +3163,6 @@ def _least_squares_implicit(
     P_seed = imp._dof_projector(cfg, mask_const)
     edge_seed = imp._edge_mask(cfg)
 
-    @jax.jit
     def predicted_state(x_trial, x_ref, frozen, dz_cols):
         """First-order trial-state prediction around the stashed jac point.
 
@@ -2926,6 +3178,10 @@ def _least_squares_implicit(
         z = jax.tree.map(jnp.add, P_seed(frozen), dz)
         return imp._assemble(z, rt_p, frozen, P_seed, edge_seed)
 
+    predicted_state = _problem_jit(
+        problem_jit_key, "predicted_state",
+        lambda fn=predicted_state: jax.jit(fn))
+
     def _stash_linearization(x: np.ndarray, dz_cols) -> None:
         """Record ``(x_ref, converged state, dz columns)`` for trial seeding."""
         hit = imp._LAST_SOLVE.get(cfg)
@@ -2936,18 +3192,27 @@ def _least_squares_implicit(
         else:  # unexpected call pattern: better no seed than a wrong one
             holder["lin"] = None
 
+    def host_evaluate(x, evaluate):
+        # A retry can encounter new grid shapes. Compiling their GPU kernels
+        # inside a running GPU pure_callback can deadlock. The host optimizer
+        # owns this solve; stage only the objective evaluation on its result.
+        placed = _place(x)
+        params_np = jax.tree.map(np.asarray, params_of(placed))
+        state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
+        return evaluate(placed, jax.tree.map(_place, state), status)
+
     def fun(x: np.ndarray) -> np.ndarray:
         lin = holder["lin"]
         if lin is not None and lin[0].shape == np.shape(x):
             seed = jax.tree.map(
                 lambda a: np.asarray(a, dtype=np.float64),
-                jax.device_get(predicted_state(
-                    _place(x), _place(lin[0]), lin[1], lin[2])))
+                jax.device_get(predicted_state(*commit_to_single_device(
+                    (_place(x), _place(lin[0]), lin[1], lin[2])))))
             if all(np.all(np.isfinite(a)) for a in jax.tree.leaves(seed)):
                 imp._PERTURB_SEED[cfg] = seed
         try:
             residual = np.asarray(
-                jax.device_get(rows_jit(_place(x))), dtype=float)
+                jax.device_get(host_evaluate(x, host_rows_jit)), dtype=float)
         except Exception as exc:  # zero-crash policy: penalize, don't die
             if holder["nres"] is None:
                 raise
@@ -2964,8 +3229,12 @@ def _least_squares_implicit(
         return residual
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
+        with imp._timed(cfg, "jacobian"):
+            return jacobian_host(x)
+
+    def jacobian_host(x: np.ndarray) -> np.ndarray:
         # A direct residual_jac(x) call need not be preceded by residual(x).
-        # Establish the point's status through the exception-free callback
+        # Establish the point's status through the exception-free host solve
         # unless the exact-key solve memo already proves it usable.
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
@@ -2979,10 +3248,10 @@ def _least_squares_implicit(
             or imp._LAST_STATUS_ERROR.get(cfg) is not None
         ):
             # A cached converged point can be revisited after a different trial
-            # failed.  Refresh the status callback in that rare case so the old
+            # failed. Refresh the host solve in that rare case so the old
             # error cannot turn this point's exact Jacobian into a penalty row.
-            jax.device_get(rows_jit(_place(x)))
-        if imp._LAST_STATUS_ERROR.get(cfg) is not None:
+            fun(x)
+        if not certified_trial(x):
             holder["lin"] = None
             return failure_jacobian(x)
 
@@ -3071,8 +3340,8 @@ def _least_squares_implicit(
         Objective-term problems assemble the pair from the same certified
         residual/Jacobian lane the least-squares driver uses (``0.5 r.r``,
         ``J^T r``): one warm memoized host solve, the block-factorized
-        implicit Jacobian, and the perturbation warm-start stash — no
-        separate reverse-adjoint graph.  Scalar-loss problems keep the
+        implicit Jacobian, and the perturbation warm-start stash.  The reverse
+        lane pulls back ``r`` once instead of assembling ``J``.  Scalar-loss problems keep the
         single reverse adjoint.  Both lanes gate on
         :func:`certified_trial`: a trial without a usable fixed point gets
         the smooth consistent penalty pair instead of a derivative of an
@@ -3086,6 +3355,18 @@ def _least_squares_implicit(
             residual = fun(xh)
             if certified_trial(xh):
                 value = 0.5 * float(residual @ residual)
+                if jac_solver == "reverse":
+                    # The reverse lane needs J^T r, not J: one pullback of r.
+                    # A one-row problem's Jacobian already costs one pullback,
+                    # so the automatic lane keeps its memoized Jacobian.  A
+                    # non-finite result goes through the Jacobian lane below,
+                    # which owns the retries and the typed errors.
+                    gradient = np.asarray(jax.device_get(reverse_gradient_jit(
+                        _place(xh), _place(residual))), dtype=float)
+                    if np.isfinite(value) and np.all(np.isfinite(gradient)):
+                        holder["lin"] = None
+                        holder["scalar_certified"] = True
+                        return value, gradient
                 gradient = jac_fn(xh).T @ residual
                 if (
                     holder.get("last_jac_key") == FunctionProblem._key(xh)
@@ -3137,7 +3418,7 @@ def _least_squares_implicit(
                     return value
             return failure_value_and_gradient(xh)[0]
         try:
-            value = float(jax.device_get(scalar_loss_jit(_place(xh))))
+            value = float(jax.device_get(host_evaluate(xh, host_scalar_jit)))
         except Exception:
             if not holder.get("scalar_certified"):
                 raise
@@ -3209,6 +3490,8 @@ def _least_squares_implicit(
                 "external_field_from_parameters", None)
             external_dof_names = tuple(kwargs.pop("external_dof_names", ()))
             digits = int(kwargs.pop("digits", 6)); levels = kwargs.pop("levels", None)
+            chunk_size = kwargs.pop("chunk_size", "auto")
+            target_chunk_size = kwargs.pop("target_chunk_size", "auto")
             plasma = kwargs.pop("plasma", "auto")
             if plasma not in ("auto", "include", "vacuum"):
                 raise ValueError("plasma must be 'auto', 'include', or 'vacuum'")
@@ -3228,7 +3511,8 @@ def _least_squares_implicit(
                 external_parameters=external_parameters,
                 external_field_from_parameters=external_field_from_parameters,
                 external_dof_names=external_dof_names,
-                digits=digits, levels=levels, dof_names=tuple(names))
+                digits=digits, levels=levels, chunk_size=chunk_size,
+                target_chunk_size=target_chunk_size, dof_names=tuple(names))
 
         return Equilibrium(
             inp=result_input,
@@ -3257,22 +3541,49 @@ def _least_squares_implicit(
         )
 
     def residual_value_and_gradient(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """JAX scalar pair from the same certified residual/Jacobian lane."""
+        """JAX scalar pair from the same certified residual/Jacobian lane.
+
+        The gradient is ``J^T r``.  The reverse lane, and the block lane when
+        its Jacobian misses the certificate, pull back the one cotangent
+        ``r`` instead of assembling the reverse Jacobian row by row.
+        """
         params = params_of(x)
         state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
+        reverse = (
+            jac_solver == "reverse"
+            or (jac_solver == "auto" and holder["nres"] == 1)
+        )
 
         def accepted(_):
             rows = term_rows(state, runtime)
-            jacobian = jax_residual_jacobian(x)
-            return 0.5 * jnp.vdot(rows, rows), jacobian.T @ rows
+
+            def pulled_back():
+                return reverse_pullback(x, state, status, lambda _: rows, 1)[0]
+
+            if reverse:
+                gradient = pulled_back()
+            else:
+                jacobian, _dz_cols, summary = jac_jit(x)
+                gradient = _select_jax_jacobian(
+                    jacobian.T @ rows, summary, pulled_back)
+            return 0.5 * jnp.vdot(rows, rows), gradient
 
         return jax.lax.cond(
             status == 0, accepted,
             lambda _: failure_value_and_gradient_jax(x), operand=None,
         )
 
-    residual_value_grad_jit = jax.jit(residual_value_and_gradient)
+    residual_value_grad_jit = _problem_jit(
+        problem_jit_key, "residual_value_grad",
+        lambda: jax.jit(residual_value_and_gradient))
+
+    def residual_value_grad(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Concrete calls reuse the host lane's executables; traces inline."""
+        if isinstance(x, jax.core.Tracer):
+            return residual_value_grad_jit(x)
+        value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
+        return _place(np.asarray(value)), _place(gradient)
 
     def jax_state_runtime(x: jnp.ndarray):
         """Converged implicit state/runtime pair for differentiable field APIs."""
@@ -3291,7 +3602,7 @@ def _least_squares_implicit(
         return scalar_loss_jit(x)
 
     def residual_scalar_public_fwd(x):
-        value, gradient = residual_value_grad_jit(x)
+        value, gradient = residual_value_grad(x)
         return value, gradient
 
     def residual_scalar_public_bwd(gradient, cotangent):
@@ -3326,7 +3637,7 @@ def _least_squares_implicit(
             ),
             jax_value_and_grad=(
                 value_grad_jit if traceable_scalar is not None
-                else residual_value_grad_jit
+                else residual_value_grad
             ),
             jax_residual=(None if traceable_scalar is not None else rows_jit),
             jax_residual_jac=(None if traceable_scalar is not None else jax_jac_public),

@@ -6,6 +6,12 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``printing``        VMEC2000-format console output (byte-exact)
 - ``input``           VmecInput: INDATA + VMEC++-JSON parsing, round-trip writers
 - ``profiles``        pressure/iota/current parameterizations (pure jnp)
+- ``radial_basis``    local high-order splines + rho^|m| axis regularity
+- ``strong_force``    continuous reconstruction + independent JxB-grad(p) oracle
+- ``polish``          high/low transfer + stored raw-block polish preconditioner
+- ``polish_driver``   Gauss--Newton strong-root correction and reports
+- ``polish_homotopy`` square PTC/continuation route, kept for diagnostics
+- ``polish_implicit`` matrix-free IFT tangents/adjoints of a polished root
 - ``fourier``         Resolution, ModeTable, trig tables (fixaray.f)
 - ``transforms``      totzsps/totzspa/tomnsps/tomnspa as batched matmuls
 - ``geometry``        real-space R/Z/lambda, half-mesh jacobian (jacobian.f)
@@ -24,7 +30,6 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``freeboundary_implicit`` coupled NESTOR/VMEC implicit differentiation
 - ``stability``       differentiable ideal-MHD stability (Mercier and infinite-n ballooning)
 - ``virtual_casing`` plasma-current fields and residuals on a prescribed interface
-- ``freeboundary_diff`` compatibility name for the original virtual-casing API
 - ``device``          CPU/GPU placement policy (measured: benchmarks/gpu_baseline.json)
 
 Every module is validated by A/B equivalence tests against the legacy

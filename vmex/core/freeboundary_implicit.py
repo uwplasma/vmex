@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import warnings
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -53,11 +54,13 @@ class FreeBoundaryImplicitConfig:
     implicit: im.ImplicitConfig
     field_from_parameters: Callable[[Any], Any]
     adjoint_solver: str = "coupled_gcrot"
+    adjoint_fail: str = "error"
     schur_probe_chunk_size: int = 1
     vacuum_program: Any = None
 
     @property
     def resolution(self):
+        """Solve resolution of the shared implicit configuration (static)."""
         return self.implicit.resolution
 
 
@@ -73,6 +76,7 @@ def make_free_boundary_config(
     adjoint_gcrot_m: int = 30,
     adjoint_gcrot_k: int = 5,
     adjoint_solver: str = "coupled_gcrot",
+    adjoint_fail: str = "error",
     schur_probe_chunk_size: int = 1,
     field_from_parameters: Callable[[Any], Any] | None = None,
     device: Any = AUTO,
@@ -87,7 +91,12 @@ def make_free_boundary_config(
     accelerator host unless the process already pins JAX placement; pass an
     explicit device to override that measured lower-memory default.
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
-    ``"boundary_schur"`` selects the advanced radial-elimination path.
+    ``"boundary_schur"`` selects the advanced radial-elimination path, which
+    stays well conditioned on marginally converged roots where the coupled
+    Krylov solve stalls. ``adjoint_fail="best_effort"`` returns the stalled
+    Krylov solution with a warning instead of raising, so one bad trial in an
+    optimization is a poor search direction the line search rejects rather
+    than a dead run; a non-finite adjoint always raises.
     """
     if not inp.lfreeb:
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
@@ -104,6 +113,8 @@ def make_free_boundary_config(
     if adjoint_solver not in {"boundary_schur", "coupled_gcrot"}:
         raise ValueError(
             "adjoint_solver must be 'boundary_schur' or 'coupled_gcrot'")
+    if adjoint_fail not in {"error", "best_effort"}:
+        raise ValueError("adjoint_fail must be 'error' or 'best_effort'")
     if schur_probe_chunk_size < 1:
         raise ValueError("schur_probe_chunk_size must be positive")
     config = FreeBoundaryImplicitConfig(
@@ -111,6 +122,7 @@ def make_free_boundary_config(
         field_from_parameters=(lambda value: value) if field_from_parameters is None
         else field_from_parameters,
         adjoint_solver=adjoint_solver,
+        adjoint_fail=adjoint_fail,
         schur_probe_chunk_size=int(schur_probe_chunk_size),
     )
     return dataclasses.replace(config, vacuum_program=_vacuum_program(config))
@@ -148,40 +160,77 @@ def _projected_residual(
     ``fixed_bsqvac`` freezes only NESTOR's edge pressure.  The resulting raw
     Jacobian is exactly block tridiagonal in radius and is the bulk operator
     used by the boundary-Schur adjoint.
+
+    The returned closure is memoized on ``(cfg, formulation, mask content)``
+    (``fixed_bsqvac=None`` only): the host callback hands each backward pass
+    a fresh numpy mask tree of identical content, and a stable closure
+    identity lets :func:`_prepare_transpose` reuse its compiled
+    linearization across gradient calls.  A ``fixed_bsqvac`` closure changes
+    value every iterate and is never a jit key, so it is not cached; the
+    pressure still enters the lane as a traced argument, never a baked
+    constant.
     """
     if formulation not in {"preconditioned", "raw"}:
         raise ValueError(f"unknown formulation {formulation!r}")
+
+    def residual(z, params, field_parameters, frozen, rcon0, zcon0):
+        return _projected_residual_lane(
+            z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
+            fixed_bsqvac, cfg=cfg, formulation=formulation)
+
+    if fixed_bsqvac is not None:
+        return residual
+    key = (cfg, formulation, tuple(
+        np.asarray(leaf).tobytes() for leaf in jax.tree.leaves(dof_mask)))
+    cached = _RESIDUAL_CLOSURE_CACHE.get(key)
+    if cached is None:
+        _RESIDUAL_CLOSURE_CACHE[key] = cached = residual
+        while len(_RESIDUAL_CLOSURE_CACHE) > _RESIDUAL_CLOSURE_CACHE_MAX:
+            _RESIDUAL_CLOSURE_CACHE.pop(next(iter(_RESIDUAL_CLOSURE_CACHE)))
+    return cached
+
+
+_RESIDUAL_CLOSURE_CACHE: dict[tuple, Callable] = {}
+_RESIDUAL_CLOSURE_CACHE_MAX = 8
+
+
+# Module scope with ``cfg``/``formulation`` static and the per-iterate arrays
+# (mask included) as traced arguments, the ``implicit.
+# _preconditioned_residual_lane`` idiom: the previous per-call ``@jax.jit``
+# closure inside :func:`_projected_residual` was a fresh function object, so
+# every backward pass of a free-boundary optimization re-traced and
+# recompiled the coupled NESTOR+VMEC residual up to four times (both
+# formulations plus the Schur frozen root) before its first adjoint matvec.
+@functools.partial(jax.jit, static_argnames=("cfg", "formulation"))
+def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
+                             zcon0, dof_mask, fixed_bsqvac, *,
+                             cfg: FreeBoundaryImplicitConfig,
+                             formulation: str):
     icfg = cfg.implicit
     project = im._dof_projector(icfg, dof_mask)
-    # The executable/topology was fixed concretely when the config was built;
-    # all equilibrium and coil values below remain dynamic traced arrays.
-    fused = cfg.vacuum_program
-
-    @jax.jit
-    def residual(z, params, field_parameters, frozen, rcon0, zcon0):
-        # Unlike fixed boundary, every active edge coefficient comes from z;
-        # the input boundary is only the forward solver's initial guess.
-        dz = project(jax.tree.map(lambda a, b: a - b, z, frozen))
-        state = jax.tree.map(jnp.add, frozen, dz)
-        rt = dataclasses.replace(
-            im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
-            lfreeb=True, jmax=int(icfg.resolution.ns),
-            presf_ns_scale=_presf_ns_scale_traceable(
-                params, icfg.inp, int(icfg.resolution.ns)),
-        )
-        if fixed_bsqvac is None:
-            external_field = cfg.field_from_parameters(field_parameters)
-            bsqvac = fused.bsq(state, rt, external_field)
-        else:
-            bsqvac = fixed_bsqvac
-        rt = dataclasses.replace(rt, bsqvac_edge=bsqvac)
-        if formulation == "preconditioned":
-            force, _, _ = evaluate_forces(state, rt)
-        else:
-            force = im._raw_force_state(state, rt, include_edge=True)
-        return project(force)
-
-    return residual
+    # Unlike fixed boundary, every active edge coefficient comes from z;
+    # the input boundary is only the forward solver's initial guess.
+    dz = project(jax.tree.map(lambda a, b: a - b, z, frozen))
+    state = jax.tree.map(jnp.add, frozen, dz)
+    rt = dataclasses.replace(
+        im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=int(icfg.resolution.ns),
+        presf_ns_scale=_presf_ns_scale_traceable(
+            params, icfg.inp, int(icfg.resolution.ns)),
+    )
+    if fixed_bsqvac is None:
+        # The executable/topology was fixed concretely when the config was
+        # built; all equilibrium and coil values stay dynamic traced arrays.
+        external_field = cfg.field_from_parameters(field_parameters)
+        bsqvac = cfg.vacuum_program.bsq(state, rt, external_field)
+    else:
+        bsqvac = fixed_bsqvac
+    rt = dataclasses.replace(rt, bsqvac_edge=bsqvac)
+    if formulation == "preconditioned":
+        force, _, _ = evaluate_forces(state, rt)
+    else:
+        force = im._raw_force_state(state, rt, include_edge=True)
+    return project(force)
 
 
 _FREE_MASK_CACHE: dict[tuple, SpectralState] = {}
@@ -339,7 +388,62 @@ def solve_free_boundary_implicit(
     field_parameters: Any,
     cfg: FreeBoundaryImplicitConfig,
 ) -> SpectralState:
-    """Return a differentiable converged free-boundary spectral state."""
+    """Return a differentiable converged free-boundary spectral state.
+
+    Solves the coupled plasma--vacuum root: the VMEC force balance in the
+    interior together with NESTOR's vacuum pressure on the moving edge, for
+    the boundary and profile parameters in ``params`` and the coil or
+    current parameters in ``field_parameters``.  The forward pass is the
+    ordinary host free-boundary solver behind a ``jax.pure_callback``, so
+    the solver's own iterations never enter the AD tape; the reverse pass
+    is one matrix-free adjoint of the converged root.
+
+    Parameters
+    ----------
+    params:
+        Differentiable equilibrium parameters, an
+        :class:`~vmex.core.implicit.ImplicitParams` pytree: the dense INDATA
+        boundary arrays ``rbc``/``rbs``/``zbc``/``zbs`` in metres, the
+        profile coefficient arrays ``am`` (pressure, Pa before
+        ``pres_scale``), ``ai`` (rotational transform, dimensionless) and
+        ``ac`` (current), the optimizable current-spline knot values
+        ``ac_aux_f``, and the scalars ``phiedge`` (total enclosed toroidal
+        flux, Wb), ``pres_scale`` and ``curtor`` (total toroidal current,
+        A).  The boundary here is only the forward solver's initial guess:
+        in a free-boundary solve every active edge coefficient is an
+        unknown of the root.
+    field_parameters:
+        Second differentiable argument, passed through
+        ``cfg.field_from_parameters`` to build the external field.  With the
+        default identity map this *is* the external-field pytree — an
+        :class:`~vmex.core.mgrid.MgridField` (differentiable in its
+        ``extcur`` currents, A) or a coil field closing over its own dofs.
+        Pass a ``field_from_parameters`` to
+        :func:`make_free_boundary_config` instead and this becomes just the
+        coil shape and current degrees of freedom, which keeps the AD graph
+        small.
+    cfg:
+        The static :class:`FreeBoundaryImplicitConfig` from
+        :func:`make_free_boundary_config`.  It is a non-differentiable
+        argument of the custom VJP and a jit key, so it must be a stable
+        object: build it once and reuse it across the optimization.  It
+        fixes the resolution, the forward tolerances, the adjoint solver,
+        and the compiled NESTOR program.
+
+    Returns
+    -------
+    The converged :class:`~vmex.core.solver.SpectralState` — the spectral
+    coefficient arrays of the equilibrium, differentiable with respect to
+    both ``params`` and ``field_parameters``.
+
+    A forward solve that does not converge raises
+    :class:`~vmex.core.errors.VmecError` (retried once from a cold start
+    when a hot-restart seed was in play).  That makes this entry point
+    unsuitable for an optimizer that probes infeasible trial points; use
+    :func:`solve_free_boundary_implicit_status`, which reports failure as a
+    status value instead of raising and suppresses the pullback for a trial
+    whose derivatives are not certified.
+    """
     icfg = cfg.implicit
     with im._device_context(icfg):
         params, field_parameters = im._device_pin(
@@ -374,13 +478,6 @@ def _solve_bwd_impl(cfg, saved, state_bar):
     residual = _projected_residual(cfg, mask)
     z_star = project(state)
 
-    _, state_pullback = jax.vjp(
-        lambda z: residual(
-            z, params, field_parameters, frozen, rcon0, zcon0), z_star
-    )
-    def operator(cotangent):
-        return state_pullback(cotangent)[0]
-
     rhs = project(state_bar)
     traced = any(
         isinstance(value, jax.core.Tracer) for value in jax.tree.leaves(rhs)
@@ -389,17 +486,22 @@ def _solve_bwd_impl(cfg, saved, state_bar):
         # An outer jax.jit needs a staged Krylov loop. Ordinary SciPy/JAXopt
         # drivers call the concrete lane below, which compiles only one
         # transpose matvec and has a much smaller cold memory peak.
-        lam, _ = im._adjoint_solve_gcrot(operator, rhs, cfg.implicit)
+        _, state_pullback = jax.vjp(
+            lambda z: residual(
+                z, params, field_parameters, frozen, rcon0, zcon0), z_star
+        )
+        lam, _ = im._adjoint_solve_gcrot(
+            lambda cotangent: state_pullback(cotangent)[0], rhs, cfg.implicit)
     elif cfg.adjoint_solver == "boundary_schur":
         lam = _host_boundary_schur_adjoint(
             cfg, z_star, params, field_parameters, frozen, rcon0, zcon0,
-            mask, rhs,
+            mask, rhs, fail=cfg.adjoint_fail,
         )
         residual = _projected_residual(cfg, mask, formulation="raw")
     else:
         lam = _host_adjoint(
             residual, z_star, params, field_parameters, frozen, rcon0, zcon0,
-            rhs, cfg.implicit)
+            rhs, cfg.implicit, fail=cfg.adjoint_fail)
 
     _, parameter_pullback = jax.vjp(
         lambda p, field: residual(
@@ -414,6 +516,7 @@ def _solve_bwd_impl(cfg, saved, state_bar):
 
 def _host_boundary_schur_adjoint(
     cfg, z_star, params, field_parameters, frozen, rcon0, zcon0, mask, rhs,
+    *, fail="error",
 ):
     """Solve the coupled adjoint through an exact edge Schur complement.
 
@@ -666,7 +769,7 @@ def _host_boundary_schur_adjoint(
         # a small correction rather than a cold whole-state Krylov search.
         return _host_adjoint(
             coupled_residual, z_star, params, field_parameters, frozen, rcon0,
-            zcon0, rhs, icfg, x0=solution)
+            zcon0, rhs, icfg, x0=solution, fail=fail)
     return solution
 
 
@@ -680,6 +783,23 @@ def solve_free_boundary_implicit_status(
 
     Status 0 is derivative-certified, 1 denotes a failed solve, and 2 an
     under-converged solve. Only status 0 evaluates the implicit pullback.
+
+    The arguments are exactly those of :func:`solve_free_boundary_implicit`.
+    The difference is the failure contract: a solve that would raise there
+    returns here with status 1, the last hot-restart state (or a fresh
+    initial state) in place of a converged one, and zero cotangents for both
+    differentiable arguments, so an optimizer may probe infeasible points
+    without an exception and without picking up a meaningless gradient.
+
+    Returns
+    -------
+    ``(state, status, fsq, ratio)``.  ``state`` is the
+    :class:`~vmex.core.solver.SpectralState`, differentiable only at status
+    0.  ``status`` is the int32 code above.  ``fsq`` is the summed final
+    force residual ``fsqr + fsqz + fsql``, and ``ratio`` is ``fsq / ftol``;
+    status 2 is exactly ``ratio`` exceeding the configuration's
+    ``max_fsq_ratio`` on a solve that did not converge.  Both are infinite
+    on a failed solve.
     """
     icfg = cfg.implicit
     with im._device_context(icfg):
@@ -724,9 +844,28 @@ def _solve_status_bwd(cfg, saved, cotangents):
     )
 
 
+# ``residual`` is a static jit key, so its identity must be stable across
+# gradient calls — :func:`_projected_residual`'s memo provides exactly that.
+# The previous per-call ``@jax.jit`` closure re-lowered and recompiled this
+# transpose (the largest program of the backward pass) on every host adjoint.
+@functools.partial(jax.jit, static_argnames=("residual",))
+def _prepare_transpose(z, p, field, base, rcon, zcon, *, residual):
+    """Save the coupled primal once; return a pytree of pullback residuals."""
+    return jax.vjp(
+        lambda zz: residual(zz, p, field, base, rcon, zcon), z
+    )[1]
+
+
+@jax.jit
+def _transpose_matvec(value, pullback, template):
+    """Apply the saved transpose without repeating the NESTOR/VMEC primal."""
+    _, unravel = ravel_pytree(template)
+    return ravel_pytree(pullback(unravel(value))[0])[0]
+
+
 def _host_adjoint(
     residual, z_star, params, field_parameters, frozen, rcon0, zcon0, rhs, cfg,
-    *, x0=None,
+    *, x0=None, fail="error",
 ):
     """Solve one adjoint while reusing a separately compiled JAX matvec.
 
@@ -734,19 +873,19 @@ def _host_adjoint(
     inline that large operator into every Arnoldi loop and greatly increases
     cold compilation memory. SciPy keeps the small Krylov bookkeeping on the
     host and calls one compiled JAX operator; only vectors cross the boundary.
+    Saved primal intermediates stay on the device for this solve and are
+    rebuilt at the next linearization point.
     """
     rhs_flat, unravel = ravel_pytree(rhs)
 
-    @jax.jit
-    def matvec(value, z, p, field, base, rcon, zcon):
-        _, pullback = jax.vjp(
-            lambda zz: residual(zz, p, field, base, rcon, zcon), z
-        )
-        return ravel_pytree(pullback(unravel(value))[0])[0]
+    pullback = _prepare_transpose(
+        z_star, params, field_parameters, frozen, rcon0, zcon0,
+        residual=residual)
 
-    dynamic = (z_star, params, field_parameters, frozen, rcon0, zcon0)
+    def matvec(value):
+        return _transpose_matvec(value, pullback, z_star)
 
-    matvec(rhs_flat, *dynamic).block_until_ready()
+    matvec(rhs_flat).block_until_ready()
     dtype = np.asarray(rhs_flat).dtype
     shape = rhs_flat.shape
     calls = 0
@@ -754,8 +893,7 @@ def _host_adjoint(
     def apply(value):
         nonlocal calls
         calls += 1
-        return np.asarray(matvec(
-            jnp.asarray(value, dtype=rhs_flat.dtype), *dynamic))
+        return np.asarray(matvec(jnp.asarray(value, dtype=rhs_flat.dtype)))
 
     matrix = LinearOperator((shape[0], shape[0]), matvec=apply, dtype=dtype)
     x0_flat = None if x0 is None else np.asarray(ravel_pytree(x0)[0])
@@ -769,9 +907,18 @@ def _host_adjoint(
     tolerance = float(im._adjoint_acceptance(
         cfg, np.linalg.norm(np.asarray(rhs_flat))))
     if not np.isfinite(residual_norm) or residual_norm > tolerance:
-        im._raise_adjoint_unconverged(
-            cfg, iterations=calls, residual_norm=residual_norm,
-            tolerance=tolerance, method="host GCROT",
+        if fail != "best_effort" or not np.isfinite(residual_norm):
+            im._raise_adjoint_unconverged(
+                cfg, iterations=calls, residual_norm=residual_norm,
+                tolerance=tolerance, method="host GCROT",
+            )
+        warnings.warn(
+            "free-boundary adjoint stalled: residual "
+            f"{residual_norm:.3e} > acceptance {tolerance:.3e} after {calls} "
+            "Krylov iterations; returning the best-effort solution because "
+            "adjoint_fail='best_effort'. The gradient at this point is "
+            "inaccurate; a line search should reject it.",
+            RuntimeWarning, stacklevel=2,
         )
     return unravel(jnp.asarray(solution, dtype=rhs_flat.dtype))
 

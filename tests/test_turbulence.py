@@ -131,6 +131,44 @@ def test_geometry_internal_identities(shaped_eq):
     bgrad_fd = np.asarray(mapping["gradpar"]) * d_bmag / bmag
     scale = np.max(np.abs(bgrad_fd))
     assert np.max(np.abs(np.asarray(mapping["bgrad"]) - bgrad_fd)) < 0.05 * scale
+    # Scalar metadata: epsilon is the field-line |B| modulation depth (GKX's
+    # own bmag = 1/(1 + eps cos theta) has exactly this eps) and R0 the wout
+    # Rmajor_p, so GKX's derived aminor = epsilon * R0 is a length in metres.
+    depth = (bmag.max() - bmag.min()) / (bmag.max() + bmag.min())
+    assert float(mapping["epsilon"]) == pytest.approx(depth, rel=1e-12)
+    assert 0.0 < depth < 1.0
+    assert abs(float(np.std(bmag) / np.mean(bmag)) - depth) > 1e-3   # not std/mean
+    meta = mapping["vmex"]
+    assert float(mapping["R0"]) == pytest.approx(float(shaped_eq.wout.Rmajor_p), rel=1e-10)
+    assert float(meta["R_major"]) == float(mapping["R0"])
+    assert float(mapping["R0"]) > float(meta["L_ref"]) > 0.0
+    assert float(meta["L_ref"]) == pytest.approx(float(shaped_eq.wout.Aminor_p), rel=1e-10)
+
+
+def test_b_modulation_depth_is_gkx_analytic_epsilon():
+    """``b_modulation_depth`` recovers GKX's ``epsilon`` from its own bmag model."""
+    theta = jnp.linspace(-jnp.pi, jnp.pi, 257)     # includes theta = 0 and +-pi
+    for eps in (0.1, 0.18, 0.5):
+        bmag = 1.0 / (1.0 + eps * jnp.cos(theta))
+        assert float(turb.b_modulation_depth(bmag)) == pytest.approx(eps, rel=1e-12)
+    assert float(turb.b_modulation_depth(jnp.ones(16))) == 0.0
+
+
+def test_epsilon_is_local_inverse_aspect_ratio_on_circular_tokamak(vacuum_eq):
+    """On a ``1/R`` field the modulation depth is ``r / R_center`` of the surface.
+
+    The circular vacuum tokamak (``R = 6``, ``a = 2``) has ``|B| ~ 1/R`` up to
+    the ``O((eps iota)^2)`` poloidal-field share, so ``epsilon`` must land on
+    ``sqrt(s) L_ref / R0`` up to that and the current-driven Shafranov shift
+    of the surface centre.  ``std/mean`` would sit near ``eps / sqrt(2)``.
+    """
+    mapping = turb.gk_fieldline_geometry(vacuum_eq.state, vacuum_eq.runtime,
+                                         s_index=7, ntheta=128)
+    meta = mapping["vmex"]
+    expected = float(jnp.sqrt(meta["s"]) * meta["L_ref"] / meta["R_major"])
+    assert float(mapping["epsilon"]) == pytest.approx(expected, rel=0.1)
+    assert float(mapping["R0"]) == pytest.approx(6.0, rel=0.05)
+    assert float(meta["L_ref"]) == pytest.approx(2.0, rel=0.05)
 
 
 def test_vacuum_limit_cvdrift_equals_gbdrift(vacuum_eq):
@@ -170,8 +208,42 @@ def test_surface_index_validation(shaped_eq):
         turb.gk_fieldline_geometry(shaped_eq.state, shaped_eq.runtime, ntheta=4)
 
 
+def test_wout_geometry_matches_live_state_without_reconstruction(shaped_eq, tmp_path):
+    """The read-only WOUT route reproduces the live-state mapping."""
+    import vmex
+
+    kwargs = dict(s_index=7, alpha=0.3, zeta0=0.2, ntheta=32,
+                  equal_arc=False)
+    live = turb.gk_fieldline_geometry(shaped_eq.state, shaped_eq.runtime, **kwargs)
+    memory = turb.gk_fieldline_geometry_from_wout(shaped_eq.wout, **kwargs)
+    path = vmex.write_wout(tmp_path / "wout_geometry.nc", shaped_eq.wout)
+    file_mapping = turb.gk_fieldline_geometry_from_wout(path, **kwargs)
+
+    for name in turb.GK_GEOMETRY_FIELDS + ("jacobian", "grho"):
+        expected = np.asarray(live[name])
+        np.testing.assert_allclose(np.asarray(memory[name]), expected,
+                                   rtol=2e-11, atol=2e-12, err_msg=name)
+        np.testing.assert_allclose(np.asarray(file_mapping[name]), expected,
+                                   rtol=2e-11, atol=2e-12, err_msg=name)
+    for name in ("q", "s_hat", "epsilon", "R0", "B0"):
+        assert float(memory[name]) == pytest.approx(float(live[name]), rel=2e-11,
+                                                    abs=2e-12)
+        assert float(file_mapping[name]) == pytest.approx(float(live[name]), rel=2e-11,
+                                                          abs=2e-12)
+    assert memory["nfp"] == file_mapping["nfp"] == live["nfp"]
+
+
+def test_wout_geometry_rejects_invalid_normalization(shaped_eq):
+    with pytest.raises(ValueError, match="Aminor_p"):
+        turb.gk_fieldline_geometry_from_wout(
+            dataclasses.replace(shaped_eq.wout, Aminor_p=0.0))
+    with pytest.raises(ValueError, match="Rmajor_p"):
+        turb.gk_fieldline_geometry_from_wout(
+            dataclasses.replace(shaped_eq.wout, Rmajor_p=0.0))
+
+
 # ---------------------------------------------------------------------------
-# GKX contract + proxies (importorskip-gated, like freeboundary_diff)
+# GKX contract + proxies (importorskip-gated, like virtual_casing)
 # ---------------------------------------------------------------------------
 
 
@@ -416,6 +488,11 @@ def test_gk_geometry_matches_simsopt_vmec_fieldlines(deck, overrides, ns, tmp_pa
     alpha, s_index = 0.7, int(round(0.4 * (ns - 1)))
     geom = turb.gk_fieldline_geometry(eq.state, eq.runtime, s_index=s_index,
                                       alpha=alpha, ntheta=16, equal_arc=False)
+    imported = turb.gk_fieldline_geometry_from_wout(
+        wout_path, s_index=s_index, alpha=alpha, ntheta=16, equal_arc=False)
+    for name in turb.GK_GEOMETRY_FIELDS + ("jacobian", "grho"):
+        np.testing.assert_allclose(np.asarray(imported[name]), np.asarray(geom[name]),
+                                   rtol=2e-10, atol=2e-11, err_msg=name)
     s_value = float(np.asarray(stab._ballooning_context(
         eq.state, eq.runtime)["s"])[s_index])
     theta = np.asarray(geom["theta"])

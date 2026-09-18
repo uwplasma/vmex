@@ -11,6 +11,8 @@ vs central FD; and the real cth-like ``extcur``/coil-dof gradients vs FD
 
 from __future__ import annotations
 
+import warnings
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +24,11 @@ import jax.numpy as jnp  # noqa: E402
 jax.config.update("jax_enable_x64", True)
 
 from vmex.core import virtual_casing as VC  # noqa: E402
-from vmex.core.extender import VmecExtender  # noqa: E402
+from vmex.core.extender import (  # noqa: E402
+    ExteriorFieldAccuracyError,
+    ExteriorFieldAccuracyWarning,
+    VmecExtender,
+)
 from vmex.core.mgrid import MgridField, read_mgrid  # noqa: E402
 from vmex.core.wout import read_wout  # noqa: E402
 
@@ -96,6 +102,59 @@ def _synthetic_surface(nphi=12, ntheta=12, nfp=3, R0=1.0, a=0.3, B0=1.0):
                                 source_convention="synthetic")
 
 
+def _ring_field(points, *, R0=1.0, current=3.0e5, segments=1024):
+    """Independent Biot-Savart field of a circular filament of radius ``R0`` at z = 0.
+
+    The trapezoid rule on a closed smooth loop converges geometrically; at the
+    distances used here (at least 0.04 m) 1024 segments are exact to rounding.
+    """
+    angle = 2.0 * np.pi * np.arange(segments) / segments
+    source = np.stack([R0 * np.cos(angle), R0 * np.sin(angle), np.zeros(segments)], axis=1)
+    tangent = np.stack([-np.sin(angle), np.cos(angle), np.zeros(segments)], axis=1)
+    separation = np.asarray(points)[:, None, :] - source[None]
+    kernel = np.cross(tangent[None], separation) / np.linalg.norm(
+        separation, axis=-1, keepdims=True) ** 3
+    return VC.MU0 * current * R0 / (2.0 * segments) * kernel.sum(axis=1)
+
+
+def _two_source_torus(nphi, ntheta, *, R0=1.0, a=0.3, current=3.0e5):
+    """Torus carrying the field of an outside and an inside current.
+
+    ``_synthetic_surface`` already holds ``B0 R0 / R`` along phi, the field of a
+    straight current on the z-axis (outside the surface).  A circular filament
+    on the magnetic axis (inside) adds a field with ``B . n != 0``, so both
+    virtual-casing layer densities are exercised.  The internal branch must
+    return the filament field outside the surface and on it, and minus the
+    z-axis field inside.
+    """
+    surface = _synthetic_surface(nphi=nphi, ntheta=ntheta, nfp=1, R0=R0, a=a)
+    gamma = np.asarray(surface.gamma)
+    ring = _ring_field(gamma.reshape(3, -1).T, R0=R0, current=current)
+    return replace(surface, B_total=surface.B_total + jnp.asarray(ring.T.reshape(gamma.shape)))
+
+
+def _torus_points(distance, *, R0=1.0, a=0.3, count=8, seed=0):
+    """Points at a signed ``distance`` along the outward normal of the circular torus."""
+    rng = np.random.default_rng(seed)
+    theta = rng.uniform(0.0, 2.0 * np.pi, count)
+    phi = rng.uniform(0.0, 2.0 * np.pi, count)
+    radius = R0 + (a + distance) * np.cos(theta)
+    return np.stack([radius * np.cos(phi), radius * np.sin(phi),
+                     (a + distance) * np.sin(theta)], axis=1)
+
+
+def _z_axis_field(points, *, B0R0=1.0):
+    x, y = points[:, 0], points[:, 1]
+    radius2 = x * x + y * y
+    return B0R0 * np.stack([-y / radius2, x / radius2, np.zeros_like(x)], axis=1)
+
+
+def _finest_spacing(field, *, R0=1.0, a=0.3):
+    """Largest source spacing of the finest schedule level (full-torus counts)."""
+    n_toroidal, n_poloidal = field.plasma_field.schedule_levels[-1]
+    return max(2.0 * np.pi * (R0 + a) / n_toroidal, 2.0 * np.pi * a / n_poloidal)
+
+
 def _directional_fd(fun, x0, v, h):
     return (float(fun(x0 + h * v)) - float(fun(x0 - h * v))) / (2.0 * h)
 
@@ -155,6 +214,8 @@ def test_finite_beta_extender_field_and_gradient_outside_lcfs(monkeypatch):
         external_field=coil_field,
         digits=3,
         levels=((13, 13), (26, 26)),
+        chunk_size=17,
+        target_chunk_size=1,
     )
     points = jnp.array([[1.8, 0.0, 0.1], [0.0, 1.9, -0.1]])
     assert field.uses_virtual_casing
@@ -228,6 +289,78 @@ def test_parameterized_extender_vjp_matches_rebuilt_surface_fd():
     finite_difference = (scalar(1.0 + step) - scalar(1.0 - step)) / (2.0 * step)
     np.testing.assert_allclose(autodiff, finite_difference, rtol=3e-4, atol=3e-6)
     assert field.dof_names == ("R0",)
+
+
+def test_two_source_torus_exterior_interior_and_on_surface_identities():
+    """Known answers of the internal branch, away from and on the source surface.
+
+    Targets sit three finest-level spacings off the surface.  Outside, the
+    plasma field must be the inside filament's field; inside, minus the z-axis
+    field; on the surface the singular (Malhotra et al.) quadrature must also
+    give the filament field.  The strict check must not fire.
+    """
+    digits = 4
+    surface = _two_source_torus(24, 24)
+    field = VmecExtender.from_surface_data(
+        surface, digits=digits, levels=((48, 24), (96, 48)), accuracy_check="raise")
+    h = _finest_spacing(field)
+    scale = float(np.sqrt(np.mean(np.sum(np.asarray(surface.B_total) ** 2, axis=0))))
+
+    outside = _torus_points(3.0 * h)
+    value = np.asarray(field.B(jnp.asarray(outside)))  # raises if the estimate misses
+    error = np.linalg.norm(value - _ring_field(outside), axis=1) / scale
+    assert error.max() <= 10.0 ** -digits, error
+    assert float(np.max(field.B_error_estimate(jnp.asarray(outside)))) <= 10.0 ** -digits
+
+    inside = _torus_points(-3.0 * h)
+    value = np.asarray(field.plasma_field.B_plasma_xyz(jnp.asarray(inside)))
+    error = np.linalg.norm(value + _z_axis_field(inside), axis=1) / scale
+    assert error.max() <= 10.0 ** -digits, error
+
+    on_surface = np.asarray(VC.plasma_field_on_boundary(
+        surface, digits=digits, virtual_casing_field=field.plasma_field))
+    ring = _ring_field(np.asarray(surface.gamma).reshape(3, -1).T).T.reshape(on_surface.shape)
+    error = np.linalg.norm(on_surface - ring, axis=0) / scale
+    assert error.max() <= 10.0 ** -digits, error.max()
+
+
+def test_exterior_error_estimate_flags_unresolved_targets_and_fails_loudly():
+    """Targets inside one grid spacing are flagged, warned about or refused; values unchanged."""
+    digits = 4
+    surface = _synthetic_surface(nphi=12, ntheta=12, nfp=1)
+    field = VmecExtender.from_surface_data(surface, digits=digits, accuracy_check="off")
+    near = jnp.asarray(_torus_points(0.5 * _finest_spacing(field)))
+    scale = float(np.sqrt(np.mean(np.sum(np.asarray(surface.B_total) ** 2, axis=0))))
+
+    quiet = np.asarray(field.B(near))
+    # the exact plasma field outside is zero: the flag reports a real error
+    error = np.linalg.norm(quiet, axis=1) / scale
+    estimate = np.asarray(field.B_error_estimate(near))
+    assert estimate.shape == (near.shape[0],)
+    assert np.all(error > 10.0 ** -digits) and np.all(estimate > 10.0 ** -digits)
+
+    field.accuracy_check = "warn"
+    with pytest.warns(ExteriorFieldAccuracyWarning, match="above the requested 1e-4"):
+        loud = np.asarray(field.B(near))
+    np.testing.assert_array_equal(loud, quiet)
+    field.accuracy_check = "raise"
+    with pytest.raises(ExteriorFieldAccuracyError, match="8 of 8 points"):
+        field.B(near)
+
+    # traced calls never check; they expose the estimate instead
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        traced = np.asarray(jax.jit(field.B)(near))
+    np.testing.assert_allclose(traced, quiet, rtol=1e-12, atol=1e-14)
+    np.testing.assert_allclose(
+        jax.jit(field.B_error_estimate)(near), estimate, rtol=1e-10, atol=1e-14)
+
+    with pytest.raises(ValueError, match="accuracy_check"):
+        field.accuracy_check = "loud"
+    with pytest.raises(RuntimeError, match="near-surface"):
+        VmecExtender(None, field.plasma_field, near_surface_plan=object()).B_error_estimate(near)
+    with pytest.raises(RuntimeError, match="no virtual-casing"):
+        VmecExtender(lambda xyz: jnp.zeros_like(xyz)).B_error_estimate(near)
 
 
 @pytest.mark.full

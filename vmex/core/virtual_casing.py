@@ -46,7 +46,6 @@ section of ``docs/explanation/nestor-vacuum.rst``.
 
 ``virtual_casing_jax`` is an optional dependency. Surface-data construction
 remains available without it; virtual-casing solver paths raise a clear error.
-The old :mod:`vmex.core.freeboundary_diff` name is a compatibility shim.
 """
 
 from __future__ import annotations
@@ -106,10 +105,12 @@ __all__ = [
     "VmecSurfaceFieldData",
     "surface_field_data_from_wout",
     "surface_field_data_from_state",
+    "surface_field_data_from_high_order",
     "plasma_field_on_boundary",
     "PlasmaVacuumInterface",
     "FreeBoundaryDiffProblem",
     "external_B_cartesian",
+    "offsurface_error_estimate",
     "have_virtual_casing_jax",
 ]
 
@@ -126,8 +127,7 @@ def _require_vcj() -> None:
             "vmex.core.virtual_casing requires the optional dependency "
             "'virtual_casing_jax' (canonical repository "
             "https://github.com/uwplasma/virtual_casing_jax). Install it "
-            "with `pip install vmex[freeb]` (virtual-casing-jax>=0.0.4); "
-            "earlier releases predate the batch-stable exterior gradient."
+            "with `pip install vmex[freeb]` (virtual-casing-jax>=0.0.5)."
         ) from _IMPORT_ERROR
 
 
@@ -453,6 +453,101 @@ def surface_field_data_from_state(
         nphi=nphi, ntheta=ntheta, source_convention="vmex_state")
 
 
+def _carries_asymmetric_harmonics(state) -> bool:
+    """True when a high-order state has non-zero stellarator-asymmetric families.
+
+    Returns ``False`` for traced arrays: the values are unavailable, so the
+    caller's declaration stands.
+    """
+    for family in (state.R_sin, state.Z_cos):
+        array = jnp.asarray(family)
+        if isinstance(array, jax.core.Tracer):
+            continue
+        if bool(np.any(np.asarray(array) != 0.0)):
+            return True
+    return False
+
+
+def surface_field_data_from_high_order(
+    state,
+    *,
+    nphi: int = 32,
+    ntheta: int = 32,
+    use_stellsym: bool = True,
+) -> "VmecSurfaceFieldData":
+    """Build virtual-casing surface data directly from a polished native state.
+
+    Geometry tangents and the edge field come from the continuous high-order
+    representation. No sampled wout tables or finite differences are used.
+
+    ``use_stellsym`` is a request, not an assertion: a state carrying
+    asymmetric harmonics is reported as asymmetric whatever the caller asks
+    for, matching :func:`surface_field_data_from_wout`, whose ``stellsym`` is
+    ``(not lasym) and use_stellsym``. Handing an asymmetric state to the
+    exterior solver as symmetric would fold the boundary onto a half period
+    that does not describe it. Under tracing the harmonics cannot be
+    inspected, so the request is taken at face value.
+    This is the third route to the same container, alongside
+    :func:`surface_field_data_from_wout` (sampled tables) and
+    :func:`surface_field_data_from_state` (live spectral state).  Here the
+    boundary is evaluated at ``rho = 1`` of the continuous reconstruction, so
+    the tangents ``e_theta`` and ``e_phi`` are analytic derivatives rather
+    than differences of a Fourier table, and the edge field needs no
+    half-mesh extrapolation.
+
+    Parameters
+    ----------
+    state:
+        A :class:`~vmex.core.strong_force.HighOrderEquilibriumState` — the
+        axis-regular continuous reconstruction produced by the force-balance
+        polishing lane, not a solver ``SpectralState``.  Its ``nfp`` sets the
+        toroidal period and its ``jacobian_sign`` becomes ``signgs``.
+    nphi, ntheta:
+        Sample counts of the returned grid, over ``phi in [0, 2 pi / nfp)``
+        (one field period, geometric toroidal angle) and
+        ``theta in [0, 2 pi)``, both without the endpoint and both in
+        radians.  They set the source resolution of the virtual-casing
+        integral, so raising them costs quadrature time.
+    use_stellsym:
+        Recorded as the container's ``stellsym`` flag, which tells the
+        virtual-casing solver it may fold the source integral over the
+        half period.  Set it ``False`` for a non-stellarator-symmetric
+        boundary.
+
+    Returns
+    -------
+    A :class:`~virtual_casing_jax.VmecSurfaceFieldData` (the duck-typed
+    stand-in when ``virtual_casing_jax`` is not installed — this function is
+    pure VMEX numerics and needs no optional dependency) holding, in the
+    package's structure-of-arrays layout ``(3, nphi, ntheta)``: ``gamma``,
+    the Cartesian boundary points ``(R cos phi, R sin phi, Z)`` in metres;
+    ``B_total``, the total interior field on that boundary in tesla;
+    ``normal``, the outward unit normal; and ``area_vector``,
+    ``e_theta x e_phi`` in m^2 per radian^2, whose length is the area
+    element.  Both are flipped together, by one shared sign, so that their
+    mean projection onto the outward radial direction
+    ``d(position) / d(rho)`` is positive.  ``theta`` and ``phi`` carry the
+    two one-dimensional angle grids.
+    """
+
+    from .strong_force import evaluate_high_order_surface
+
+    surface = evaluate_high_order_surface(state, nphi=nphi, ntheta=ntheta)
+    stellsym = bool(use_stellsym) and not _carries_asymmetric_harmonics(state)
+    return VmecSurfaceFieldData(
+        gamma=jnp.moveaxis(surface.gamma, -1, 0),
+        B_total=jnp.moveaxis(surface.B_total, -1, 0),
+        normal=jnp.moveaxis(surface.unitnormal, -1, 0),
+        area_vector=jnp.moveaxis(surface.normal, -1, 0),
+        theta=surface.theta,
+        phi=surface.phi,
+        nfp=int(state.nfp),
+        stellsym=stellsym,
+        signgs=int(state.jacobian_sign),
+        source_convention="vmex_high_order",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Plasma field on the boundary (accurate on-surface virtual casing)
 # ---------------------------------------------------------------------------
@@ -538,6 +633,119 @@ def plasma_field_on_boundary(
     if hasattr(field, "B_plasma_on_surface"):
         return field.B_plasma_on_surface(**kwargs)
     return field._vc.compute_internal_B(field.B_total, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Achieved accuracy of the direct off-surface schedule
+# ---------------------------------------------------------------------------
+
+
+def offsurface_error_estimate(field, xyz, B_plasma=None) -> jax.Array:
+    """Estimated relative error of the direct off-surface plasma field.
+
+    ``virtual_casing_jax`` evaluates the exterior plasma field with a periodic
+    trapezoid rule on a fixed schedule of source grids (levels are full-torus
+    ``(n_toroidal, n_poloidal)`` counts).  Target by target it returns the
+    first level whose double-layer self-test ``min(|1 + U|, |U|)`` is at most
+    ``10**-digits``, or the last level, and discards that test (release
+    0.0.5).  The self-test alone is not an error estimate: it cannot see
+    source-grid resolution, and because it accepts ``U`` near either ``0`` or
+    ``-1`` it can pass a badly resolved target.  This function reproduces the
+    level selection and reports, per target,
+
+    - for a target returned on a coarser level, ``|B_returned - B_finest|``:
+      the returned field's error against the finest level, which carries both
+      quadrature and source-resolution error;
+    - for a target returned on the finest level, the larger of ``|U|`` on that
+      level (the double-layer quadrature error for a point outside the surface,
+      where the exact ``U`` is zero) and the square of the relative change
+      between the last two levels.  Halving the spacing squares the trapezoid
+      error factor ``exp(-2 pi d / h)``, so that square extrapolates the finest
+      level's error from the coarser one.
+
+    Field differences are divided by the RMS of ``|B_total|`` on the surface, so
+    the estimate is dimensionless and compares with ``10**-digits``.  Targets
+    must lie outside the surface; an inside target reports about 1.  The cost is
+    one double-layer evaluation per visited level plus one field evaluation on
+    each of the last two levels: warm, 1.2 to 1.5 times the field evaluation
+    itself for 1000 targets on 24 x 24 and 48 x 48 torus grids.  The function
+    is traceable.
+
+    Parameters
+    ----------
+    field:
+        A ``virtual_casing_jax.VirtualCasingExteriorField`` using the jitted
+        schedule and the internal branch (the VMEX construction).
+    xyz:
+        Cartesian target points, shape ``(n, 3)``, in metres.
+    B_plasma:
+        Optional already computed ``field.B_plasma_xyz(xyz)``, shape ``(n, 3)``,
+        to avoid evaluating it twice.
+
+    Returns
+    -------
+    Array of shape ``(n,)``, dimensionless.
+    """
+    _require_vcj()
+    from virtual_casing_jax.integrals import laplace_dx_u_eval
+    from virtual_casing_jax.surface_ops import grad2d, resample, surf_normal_area_elem
+
+    if not bool(getattr(field.config, "use_jit_schedule", True)):
+        raise NotImplementedError("the estimate reproduces the jitted schedule only")
+    if getattr(field.config, "branch", "internal") != "internal":
+        raise NotImplementedError("the estimate covers the internal branch only")
+    digits = int(field.config.digits)
+    X_src, _, _ = field._vc._offsurface_densities(field.B_total, digits)
+    nt0, np0 = int(X_src.shape[1]), int(X_src.shape[2])
+    points = jnp.asarray(xyz, dtype=X_src.dtype)
+    targets = points.T
+    tolerance = 10.0 ** (-digits)
+    chunk_size, target_chunk_size = field._vc._resolve_chunk_sizes(
+        "boff", field.config.chunk_size, field.config.target_chunk_size,
+        nsrc=nt0 * np0, ntrg=int(targets.shape[1]))
+
+    def double_layer(nt, npol):
+        X = resample(X_src, nt0, np0, nt, npol)
+        normal, area = surf_normal_area_elem(grad2d(X, nt, npol), X)
+        return jnp.asarray(laplace_dx_u_eval(
+            X, normal, targets, jnp.ones((nt, npol), dtype=X.dtype), area,
+            chunk_size=chunk_size, target_chunk_size=target_chunk_size)).reshape(-1)
+
+    def self_test(potential):
+        return jnp.minimum(jnp.abs(1.0 + potential), jnp.abs(potential))
+
+    levels = tuple((int(nt), int(npol)) for nt, npol in field.schedule_levels)
+    potential = double_layer(*levels[0])
+    level = jnp.zeros(potential.shape, dtype=jnp.int32)
+    for index, (nt, npol) in enumerate(levels[1:], start=1):
+        def refine(state, index=index, nt=nt, npol=npol):
+            previous, previous_level = state
+            move = self_test(previous) > tolerance
+            return (jnp.where(move, double_layer(nt, npol), previous),
+                    jnp.where(move, index, previous_level))
+
+        potential, level = jax.lax.cond(
+            jnp.any(self_test(potential) > tolerance), refine, lambda state: state,
+            (potential, level))
+
+    scale = jnp.sqrt(jnp.mean(jnp.sum(jnp.asarray(field.B_total) ** 2, axis=0)))
+    on_finest = level == len(levels) - 1
+    if len(levels) == 1:
+        return jnp.abs(potential)
+    if B_plasma is None:
+        B_plasma = field.B_plasma_xyz(points)
+
+    def level_field(nt, npol):
+        return field._vc.compute_internal_B_offsurf_schedule(
+            field.B_total, X_trg=targets, levels=((nt, npol),), digits=digits,
+            chunk_size=field.config.chunk_size,
+            target_chunk_size=field.config.target_chunk_size).T
+
+    finest = level_field(*levels[-1])
+    coarse_error = jnp.linalg.norm(jnp.asarray(B_plasma) - finest, axis=1) / scale
+    change = jnp.linalg.norm(finest - level_field(*levels[-2]), axis=1) / scale
+    finest_error = jnp.maximum(jnp.abs(potential), change ** 2)
+    return jnp.where(on_finest, finest_error, coarse_error)
 
 
 # ---------------------------------------------------------------------------
@@ -763,19 +971,3 @@ class PlasmaVacuumInterface:
 # Published before the prescribed-interface/free-boundary distinction was made
 # explicit. Keep the old class name as an exact alias through the 0.x series.
 FreeBoundaryDiffProblem = PlasmaVacuumInterface
-
-
-def value_and_grad_bnormal(
-    problem: "PlasmaVacuumInterface",
-    external_field: Any,
-) -> tuple[jax.Array, Any]:
-    """``(J, dJ/d external_field)`` of the normal-field objective via ``jax.value_and_grad``.
-
-    ``external_field`` is a pytree (an ``MgridField``, or a callable closing over
-    coil dofs); the gradient has the same structure (``extcur``, or the coil dofs).
-    """
-
-    def fun(ef: Any) -> jax.Array:
-        return problem.bnormal_objective(ef)
-
-    return jax.value_and_grad(fun)(external_field)

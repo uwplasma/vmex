@@ -43,6 +43,16 @@ behavior, where a mere NITER exhaustion of the final grid still terminates
 normally through the output path.  The exit code remains the distinct
 ``ier_flag = 2``.  Fatal numerical/Jacobian errors never produce a WOUT
 and exit with their own ``ier_flag`` codes.
+
+``LFULL3D1OUT`` does not gate that WOUT.  ``vmec.f`` re-enters ``runvmec``
+with ``ictrl(1) = output_flag + cleanup_flag`` on ``more_iter_flag``, and
+sets ``ictrl(2) = 0`` (``norm_term_flag``); ``LFULL3D1OUT=T`` only upgrades
+that to ``successful_term_flag`` for the extra threed1 request message.
+``runvmec.f`` calls ``fileout`` whenever ``ier_flag /= more_iter_flag``, and
+``fileout.f`` computes ``lwrite = lterm .or. ier_flag == more_iter_flag``
+before ``wrout``, so the WOUT is written either way.  VMEX keeps the
+non-convergence visible where VMEC2000 loses it: ``wout.ier_flag`` records
+``2`` rather than the ``0`` ``vmec.f`` substitutes.
 """
 
 from __future__ import annotations
@@ -163,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help=(
-            "VMEC input file (input.* namelist or VMEC++ .json) to solve, or a "
+            "VMEC input file (input.* namelist or VMEC++ .json), DESC text/HDF5/pickle file to solve, or a "
             "wout_*.nc/mout_*.nc/boozmn_*.nc file for --plot/--booz."
         ),
     )
@@ -174,6 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SCALE",
         help="with --scale: optional multiplicative B_scale R_scale factors",
     )
+    p.add_argument("--desc-tol", type=float, default=0.01,
+                   help="DESC boundary truncation bound (0..0.01; 0 retains all nonzero modes).")
     p.add_argument(
         "--scale",
         action="store_true",
@@ -270,6 +282,62 @@ def build_parser() -> argparse.ArgumentParser:
             "follow JAX, or an explicit platform."
         ),
     )
+    p.add_argument(
+        "--polish",
+        metavar="MODE",
+        type=str,
+        nargs="?",
+        const="true",
+        default=None,
+        choices=("auto", "true", "false"),
+        help=(
+            "Force-balance polishing after the finest fixed-boundary stage: "
+            "'auto', 'true' (the bare flag), or 'false'. Overrides the "
+            "!@VMEX POLISH input directive; the default follows the file."
+        ),
+    )
+    p.add_argument(
+        "--no-polish",
+        dest="polish",
+        action="store_const",
+        const="false",
+        help="Disable polishing regardless of the input directive.",
+    )
+    p.add_argument(
+        "--polish-tol", type=float, default=None,
+        help="Override the polish force tolerance (PolishConfig.tolerance).")
+    p.add_argument(
+        "--polish-fail",
+        type=str,
+        default=None,
+        choices=("error", "fallback", "warn"),
+        help=(
+            "What a failed polish does: raise (error), return the unpolished "
+            "state (fallback), or return it with a warning (warn)."
+        ),
+    )
+    p.add_argument(
+        "--polish-degree", type=int, default=None, choices=(3, 5, 7),
+        help="Radial B-spline degree of the polished representation.")
+    p.add_argument(
+        "--polish-max-iter", type=int, default=None,
+        help=(
+            "Cap the polish Gauss-Newton iterations "
+            "(PolishConfig.max_nonlinear_iterations)."
+        ))
+    p.add_argument(
+        "--polish-spans", type=int, default=None,
+        help=(
+            "Radial B-spline spans of the polished representation "
+            "(default: derived from the solve resolution)."
+        ))
+    p.add_argument(
+        "--polish-budget", type=float, default=None, metavar="SECONDS",
+        help=(
+            "Wall-clock ceiling --polish auto will commit to before it "
+            "declines and returns the equilibrium unpolished "
+            "(PolishConfig.auto_budget_seconds). --polish true ignores it."
+        ))
     p.add_argument("--ftol", type=float, default=None, help="Override the final-stage FTOL_ARRAY tolerance.")
     p.add_argument("--max-iter", type=int, default=None, help="Override the final-stage NITER_ARRAY iteration cap.")
     p.add_argument(
@@ -427,10 +495,15 @@ def _timing_block(read_s: float, solve_s: float, wout_s: float) -> str:
 
 def _read_input(input_path: Path):
     """Parse the deck into a :class:`VmecInput` (typed error on failure)."""
-    from .input import VmecInput
+    return _read_request(input_path).input
+
+
+def _read_request(input_path: Path):
+    """Parse the deck plus its VMEX execution directives."""
+    from .run_options import read_input_request
 
     try:
-        return VmecInput.from_file(input_path)
+        return read_input_request(input_path)
     except VmecError:
         raise
     except Exception as exc:
@@ -438,6 +511,35 @@ def _read_input(input_path: Path):
             WERROR_MESSAGES[INPUT_ERROR_FLAG],
             hint=f"{input_path.name}: {exc}",
         ) from exc
+
+
+def _resolve_polish_cli(args, file_options):
+    """CLI flags > file directive > default, with the source recorded."""
+    from .run_options import resolve_run_options
+
+    polish = None
+    if args.polish is not None:
+        polish = {"auto": "auto", "true": True, "false": False}[args.polish]
+    options, sources = resolve_run_options(
+        file_options,
+        polish=polish,
+        polish_tol=args.polish_tol,
+        polish_fail=args.polish_fail,
+        polish_degree=args.polish_degree,
+        polish_max_iter=args.polish_max_iter,
+        polish_spans=args.polish_spans,
+        polish_budget=args.polish_budget,
+    )
+    cli_supplied = {
+        "polish": args.polish, "polish_tol": args.polish_tol,
+        "polish_fail": args.polish_fail, "polish_degree": args.polish_degree,
+        "polish_max_iter": args.polish_max_iter,
+        "polish_spans": args.polish_spans,
+        "polish_budget": args.polish_budget,
+    }
+    sources = {name: ("cli" if cli_supplied[name] is not None else origin)
+               for name, origin in sources.items()}
+    return options, sources
 
 
 #: MGRID_FILE sentinel selecting the direct-coil Biot-Savart external field.
@@ -621,9 +723,30 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path,
             nextcur=freeb_plan.nextcur, extcur=freeb_plan.extcur,
             mgrid_mode=freeb_plan.mgrid_mode, curlabel=freeb_plan.curlabel,
         )
+    state = (
+        result.polished_state
+        if result.polished_state is not None
+        else result.state
+    )
+    if (
+        result.native_equilibrium is not None
+        and result.polish_report is not None
+        and bool(result.polish_report.converged)
+    ):
+        # A certified polish lives between the solve-mesh nodes; sampled at
+        # the solve resolution the stable wout reconstruction cannot recover
+        # it (see polished_wout_state).  Export the native state on the
+        # denser certifiable mesh instead.  Unpolished results (and failed
+        # polishes) take the unchanged path above.
+        from .polish_driver import polished_wout_state
+
+        state = polished_wout_state(
+            result.native_equilibrium, inp,
+            solve_ns=int(np.shape(np.asarray(result.state.R_cos))[0]),
+        )
     wout = wout_from_state(
         inp=inp,
-        state=result.state,
+        state=state,
         fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
         fsqt=fsqt,
         niter=int(result.iterations),
@@ -642,7 +765,9 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
     verbose = not bool(args.quiet)
 
     t0 = time.perf_counter()
-    inp = _read_input(input_path)
+    request = _read_request(input_path)
+    inp = request.input
+    polish_options, polish_sources = _resolve_polish_cli(args, request.options)
     read_s = time.perf_counter() - t0
 
     if verbose:
@@ -664,8 +789,19 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
 
         effective_inp = dataclasses.replace(inp, lfreeb=False)
 
+    if verbose and polish_options.polish is not False:
+        emit(f" POLISH  : {polish_options.polish!r} "
+             f"(from {polish_sources['polish']})")
+
     t1 = time.perf_counter()
     if freeb_plan is not None:
+        if polish_options.polish is not False:
+            raise VmecInputError(
+                "force-balance polishing requires a fixed-boundary input",
+                hint=("the polish request came from the "
+                      f"{polish_sources['polish']}; drop it or pass "
+                      "--no-polish"),
+            )
         from .multigrid import solve_free_boundary_multigrid
 
         ftol_array, niter_array = _stage_overrides(
@@ -675,10 +811,9 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             restart_from=restart_source,
             verbose=verbose,
             emit=emit,
-            # vmec.f only forces an NITER-exhausted state through fileout
-            # when LFULL3D1OUT=T.  Otherwise the typed ier_flag=2 error
-            # returns before the WOUT path.
-            raise_on_max_iterations=not bool(inp.lfull3d1out),
+            # vmec.f sends an NITER-exhausted state through fileout whether
+            # or not LFULL3D1OUT is set; see the module docstring.
+            raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
             # Opt-in cold-run overlap; the library default is also False.
@@ -689,9 +824,13 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
     else:
         from .multigrid import solve_multigrid
 
+        from .run_options import polish_config_from_options
+
         ftol_array, niter_array = _stage_overrides(inp, ftol=args.ftol, max_iter=args.max_iter)
         result = solve_multigrid(
             effective_inp,
+            polish_force_balance=polish_options.polish,
+            polish_config=polish_config_from_options(polish_options),
             ftol_array=ftol_array,
             niter_array=niter_array,
             restart_from=restart_source,
@@ -699,7 +838,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             verbose=verbose,
             emit=emit,
             # vmec.f/fileout.f semantics — see the free-boundary call above.
-            raise_on_max_iterations=not bool(effective_inp.lfull3d1out),
+            raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
             # Opt-in cold-run overlap; background compiler threads otherwise
@@ -707,6 +846,12 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             prefetch_compile=bool(args.prefetch_compile),
             jacobian_retries=int(args.jacobian_retries),
         )
+        if (polish_options.polish_fail == "warn"
+                and result.polish_report is not None
+                and not bool(result.polish_report.converged)):
+            emit(" POLISH  : failed "
+                 f"({result.polish_report.termination_reason}); "
+                 "returning the unpolished equilibrium")
     solve_s = time.perf_counter() - t1
 
     wout_path = resolve_wout_path(input_path=input_path, outdir=outdir)
@@ -731,6 +876,14 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
         emit(f"\n Wrote WOUT file: {wout_path}")
         if not bool(result.converged):
             emit("\n HINT : increase NITER or loosen FTOL")
+    elif not bool(result.converged):
+        # The typed termination message used to reach --quiet runs through
+        # the raised convergence error.  The CLI keeps the state instead, so
+        # say why the exit code is non-zero rather than exiting silently.
+        from .errors import WERROR_MESSAGES
+
+        emit(f"\n {WERROR_MESSAGES.get(int(result.ier_flag), 'UNKNOWN TERMINATION CODE')}")
+        emit(f" Wrote WOUT file: {wout_path}")
 
     plot_dir = outdir if outdir is not None else input_path.parent
     if args.plot is not None:
@@ -760,6 +913,15 @@ def _plot_wout_file(wout_path: Path, outdir: Path, *, emit, quiet: bool) -> None
     for key, path in plot_wout(wout_path, outdir=outdir).items():
         if not quiet:
             emit(f"   Saved {key}: {path}")
+    # Memory policy lives here, not in the diagnostic libraries: after every
+    # requested figure is on disk, release the plot-only executables (Boozer,
+    # NEO, Gamma_c field lines) that an end-of-run CLI process never reuses.
+    import gc
+
+    import jax
+
+    jax.clear_caches()
+    gc.collect()
 
 
 def _plot_mout_file(mout_path: Path, outdir: Path, *, emit, quiet: bool) -> None:
@@ -1106,6 +1268,12 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             _run_trace(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         return 0
 
+    from .desc import is_desc_file, write_desc_input
+
+    if is_desc_file(input_path):
+        input_path = write_desc_input(input_path, outdir, tolerance=args.desc_tol)
+        if not quiet:
+            emit(f" Wrote DESC-derived VMEC input: {input_path}")
     return _solve_input_file(args, input_path, outdir, emit=emit)
 
 

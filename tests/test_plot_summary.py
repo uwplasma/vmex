@@ -3,9 +3,14 @@
 One in-process solve of the bundled ``cth_like_fixed_bdy`` deck feeds every
 check, so the module needs no golden fixtures and stays network-free:
 
-- the summary figure carries the full required panel set (iota full-mesh,
-  pressure, ``<J.B>``, combined Mercier/Glasser/well profiles, 3-D LCFS,
+- the summary figure carries the full required panel set (iota full-mesh
+  with ``<J.B>`` on its right axis, pressure with the
+  ``eps_eff^(3/2)``/``Gamma_c`` confinement axis, relative radial force
+  balance, combined Mercier/Glasser/well profiles, 3-D LCFS,
   polar ``J(alpha, s)``, two Boozer ``|B|`` panels, scalar card);
+- the confinement bundle is cached per in-memory WOUT (bounded, weakly
+  keyed), reuses one Boozer transform and one ``Gamma_c`` executable, and
+  drops an unavailable diagnostic with a stated reason instead of a zero;
 - style invariants are pinned: every ``|B|`` contour set is non-filled and
   jet-mapped, the 3-D surface colormap constant is jet, all text is >= 11 pt,
   every drawn text artist stays inside the canvas, saved PNGs are >= 200 dpi;
@@ -17,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,7 +47,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 DECK = "cth_like_fixed_bdy"
 
 EXPECTED_PANELS = {
-    "iota", "pressure", "jdotb", "stability", "boundary_3d",
+    "iota", "profiles", "force_balance", "stability", "boundary_3d",
     "j_invariant", "card", "boozer_mid", "boozer_lcfs",
 }
 
@@ -165,6 +171,87 @@ def test_summary_combines_stability_and_well(summary_figure):
         stability.get_window_extent(renderer).y0 + 2)
 
 
+def test_summary_combines_iota_current_and_confinement(
+    solved_case, summary_figure,
+):
+    """iota carries <J.B> on its right axis; pressure carries confinement."""
+    _, meta = summary_figure
+    iota = meta["axes"]["iota"]
+    current = meta["current_axis"]
+    assert len(iota.lines) == 1 and len(current.lines) == 1
+    assert "rotational transform and parallel current" in iota.get_title()
+    labels = [text.get_text() for text in iota.get_legend().get_texts()]
+    assert any(label == r"$\iota$" for label in labels)
+    assert any(r"\mathbf{J}" in label for label in labels)
+
+    profiles = meta["axes"]["profiles"]
+    assert len(profiles.lines) == 1
+    assert "pressure and confinement" in profiles.get_title()
+    labels = [text.get_text() for text in profiles.get_legend().get_texts()]
+    assert any(label == r"$p$" for label in labels)
+
+
+def test_summary_confinement_axis_draws_only_valid_profiles(summary_figure):
+    """The right confinement axis carries exactly the valid diagnostics.
+
+    On this deck ``Gamma_c`` always evaluates; the effective ripple rides
+    along when NEO_JAX is installed and is dropped **with its reason
+    recorded** when not — an invalid diagnostic must never appear as a
+    plausible zero curve.
+    """
+    _, meta = summary_figure
+    conf = meta["confinement"]
+    axis = meta["confinement_axis"]
+    assert conf.validity["gamma_c"], conf.notes["gamma_c"]
+    labels = {line.get_label(): line for line in axis.lines}
+    assert r"$\Gamma_c$" in labels
+    gamma_line = labels[r"$\Gamma_c$"]
+    values = np.asarray(gamma_line.get_ydata(), dtype=float)
+    assert np.all(np.isfinite(values)) and np.all(values != 0.0)
+    np.testing.assert_allclose(values, conf.gamma_c)
+    assert conf.timing["gamma_c"] > 0.0
+    if conf.validity["epsilon_effective"]:
+        assert r"$\epsilon_{\mathrm{eff}}^{3/2}$" in labels
+    else:
+        assert conf.notes["epsilon_effective"]
+        assert r"$\epsilon_{\mathrm{eff}}^{3/2}$" not in labels
+    # distinct styles on the shared axis
+    styles = {(line.get_linestyle(), line.get_marker()) for line in axis.lines}
+    assert len(styles) == len(axis.lines)
+
+
+def test_summary_reports_force_error(solved_case, summary_figure):
+    """The force panel states its normalization; the card gives its volume average."""
+    _, meta = summary_figure
+    force = meta["axes"]["force_balance"]
+    assert force.get_yscale() == "log"
+    assert r"\rho=\sqrt{s}" in force.get_xlabel()
+    assert r"s=\psi/\psi_B" in force.get_xlabel()
+    assert r"\nabla p" in force.get_ylabel() and r"\nabla(B^2/2\mu_0)" in force.get_ylabel()
+    assert r"0.1\leq s\leq 0.99" in force.get_ylabel()
+    _, wout = solved_case
+    assert meta["force_error"] == plotting._relative_force_error_profile(wout)[2]
+    # Converged finite-beta deck: 1.3e-3 measured, while equif reaches 0.94.
+    assert meta["force_error"] < 1.0e-2
+    card_text = " ".join(text.get_text() for text in meta["axes"]["card"].texts)
+    assert r"\nabla B^2/2\mu_0" in card_text
+
+
+@pytest.mark.parametrize("niter,low,high", [(3000, 0.0, 1.0e-2), (40, 5.0e-2, np.inf)])
+def test_force_error_resolves_vacuum_convergence(niter, low, high):
+    """equif is 1 on a currentless vacuum at any residual; the plotted error is not."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres"),
+        ns_array=[16], niter_array=[niter], ftol_array=[1e-12],
+    )
+    wout = wout_from_state(inp=inp, state=opt.solve_equilibrium(inp).state, fsqr=0.0, fsqz=0.0, fsql=0.0)
+    np.testing.assert_allclose(np.abs(wout.equif[1:-1]), 1.0, atol=1e-6)
+    rho, profile, average = plotting._relative_force_error_profile(wout)
+    assert rho.size == 14 and np.all(profile > 0.0)
+    # Measured 1.6e-3 converged and 0.14 after 40 iterations.
+    assert low < average < high
+
+
 def test_summary_style_constants():
     """CLI plots keep publication resolution, smooth 3-D grids, and jet |B|."""
     assert plotting._DPI >= 200
@@ -172,6 +259,249 @@ def test_summary_style_constants():
     assert plotting._CMAP_MODB == "jet"
     signature = inspect.signature(plotting.plot_boundary_3d)
     assert signature.parameters["ntheta"].default >= 120
+
+
+def test_force_panel_reports_missing_data_deliberately():
+    import matplotlib.pyplot as plt
+
+    assert plotting._fmt_compact(float("nan")) == "unavailable"
+    fig, ax = plt.subplots()
+    try:
+        maximum = plotting._relative_force_error_panel(
+            ax, SimpleNamespace(ns=3, equif=np.full((3,), np.nan))
+        )
+        assert np.isnan(maximum)
+        assert [text.get_text() for text in ax.texts] == ["force error unavailable"]
+    finally:
+        plt.close(fig)
+
+
+# ==========================================================================
+# Confinement summary: shared work, cache, and unavailability semantics
+# ==========================================================================
+
+def _fresh_conf(wout):
+    """confinement_summary through a cleared cache (fresh computation)."""
+    plotting._CONFINEMENT_CACHE.clear()
+    return plotting.confinement_summary(wout, None, booz_note="not sampled")
+
+
+def test_confinement_summary_is_cached_and_never_recompiles(solved_case):
+    """Same WOUT + settings: one computation, one XLA executable.
+
+    The second call must be a pure cache hit (same object, effectively
+    instant — the bounded runtime gate for repeated summary generation), and
+    a from-scratch recomputation for the same shapes must reuse the jitted
+    ``Gamma_c`` executable rather than compile a second one.
+    """
+    from vmex.core import gammac
+
+    _, wout = solved_case
+    plotting._CONFINEMENT_CACHE.clear()
+    first = plotting.confinement_summary(wout, None, booz_note="not sampled")
+    start = time.perf_counter()
+    again = plotting.confinement_summary(wout, None, booz_note="not sampled")
+    elapsed = time.perf_counter() - start
+    assert again is first
+    assert elapsed < 0.5
+    compiled = gammac._gamma_c_rows_from_tables._cache_size()
+    recomputed = _fresh_conf(wout)
+    assert recomputed is not first
+    np.testing.assert_allclose(recomputed.gamma_c, first.gamma_c)
+    assert gammac._gamma_c_rows_from_tables._cache_size() == compiled
+
+
+def test_confinement_cache_is_bounded_and_weakly_keyed(solved_case, monkeypatch):
+    """At most ``_CONFINEMENT_CACHE_SIZE`` entries; dead WOUTs are evicted."""
+    import dataclasses as dc
+
+    monkeypatch.setattr(
+        plotting, "_gamma_c_profile",
+        lambda wout: (np.array([0.5]), np.array([1.0e-3]), ""))
+    monkeypatch.setattr(
+        plotting, "_epsilon_effective_profile",
+        lambda booz, note: (None, None, "skipped"))
+    _, wout = solved_case
+    plotting._CONFINEMENT_CACHE.clear()
+    clones = [dc.replace(wout) for _ in range(plotting._CONFINEMENT_CACHE_SIZE + 2)]
+    for clone in clones:
+        plotting.confinement_summary(clone, None, booz_note="x")
+    assert len(plotting._CONFINEMENT_CACHE) == plotting._CONFINEMENT_CACHE_SIZE
+    del clones, clone
+    import gc
+
+    gc.collect()
+    plotting.confinement_summary(wout, None, booz_note="x")
+    assert len(plotting._CONFINEMENT_CACHE) == 1
+
+
+def test_confinement_missing_neo_and_lasym_notes(solved_case, monkeypatch):
+    """Missing NEO_JAX and symmetric-only Boozer tables give stated reasons."""
+    from vmex.core import neoclassical
+
+    _, wout = solved_case
+
+    def _no_neo():
+        raise ImportError("effective ripple requires NEO_JAX")
+
+    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", _no_neo)
+    booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
+    plotting._CONFINEMENT_CACHE.clear()
+    conf = plotting.confinement_summary(wout, booz)
+    assert not conf.validity["epsilon_effective"]
+    assert "NEO_JAX" in conf.notes["epsilon_effective"]
+    assert conf.validity["gamma_c"]
+
+    plotting._CONFINEMENT_CACHE.clear()
+    conf = plotting.confinement_summary(wout, {**booz, "neo_booz": None})
+    assert not conf.validity["epsilon_effective"]
+    assert "symmetric-only" in conf.notes["epsilon_effective"]
+
+
+def test_confinement_one_valid_one_invalid_and_never_zero(
+    solved_case, monkeypatch,
+):
+    """A failing Gamma_c is dropped with a reason while eps still plots.
+
+    A failed or nonconverged diagnostic must never be drawn as zero: the
+    panel keeps only the valid curve and the note carries the cause.
+    """
+    import matplotlib.pyplot as plt
+
+    from vmex.core import gammac, neoclassical
+
+    _, wout = solved_case
+
+    def _fake_eps(booz, *, config=None):
+        return np.array([0.3, 0.6, 0.9]), np.array([1e-4, 2e-4, 4e-4])
+
+    def _broken_gamma(*args, **kwargs):
+        raise RuntimeError("synthetic gamma failure")
+
+    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", lambda: None)
+    monkeypatch.setattr(
+        neoclassical, "epsilon_effective_from_boozer", _fake_eps)
+    monkeypatch.setattr(gammac, "gamma_c_from_wout", _broken_gamma)
+    plotting._CONFINEMENT_CACHE.clear()
+    booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
+    conf = plotting.confinement_summary(wout, booz)
+    assert conf.validity["epsilon_effective"]
+    assert not conf.validity["gamma_c"]
+    assert "RuntimeError" in conf.notes["gamma_c"]
+
+    fig, ax = plt.subplots()
+    try:
+        axis, lines = plotting._confinement_panel(ax, conf)
+        assert [line.get_label() for line in lines] == [
+            r"$\epsilon_{\mathrm{eff}}^{3/2}$"]
+        assert axis.get_yscale() == "linear"  # 4x dynamic range: no log
+    finally:
+        plt.close(fig)
+
+
+def test_confinement_guards_report_failures_and_skip_cache(
+    solved_case, monkeypatch,
+):
+    """Every defensive branch reports its reason; no silent zeros anywhere.
+
+    NEO raising mid-evaluation, NEO returning nothing positive, an all-NaN
+    ``Gamma_c`` (iota ~ 0 poison on every surface), and a wout stand-in that
+    cannot be weak-referenced (computed uncached rather than crashing).
+    """
+    from vmex.core import gammac, neoclassical
+
+    _, wout = solved_case
+    booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
+    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", lambda: None)
+
+    def _raises(_booz, *, config=None):
+        raise RuntimeError("synthetic NEO failure")
+
+    monkeypatch.setattr(neoclassical, "epsilon_effective_from_boozer", _raises)
+    plotting._CONFINEMENT_CACHE.clear()
+    conf = plotting.confinement_summary(wout, booz)
+    assert conf.notes["epsilon_effective"] == "NEO evaluation failed: RuntimeError"
+
+    monkeypatch.setattr(
+        neoclassical, "epsilon_effective_from_boozer",
+        lambda _booz, *, config=None: (np.array([0.5]), np.array([0.0])))
+    monkeypatch.setattr(
+        gammac, "gamma_c_from_wout",
+        lambda w, **kw: {"s": np.array([0.5]), "gamma_c": np.array([np.nan])})
+    plotting._CONFINEMENT_CACHE.clear()
+    conf = plotting.confinement_summary(wout, booz)
+    assert conf.notes["epsilon_effective"] == "NEO returned no finite positive values"
+    assert conf.notes["gamma_c"] == "no surface returned a finite Gamma_c"
+    assert not conf.validity["gamma_c"] and conf.gamma_c is None
+
+    class SlotsWout:
+        __slots__ = ("ns",)                   # no __weakref__: uncacheable
+
+    monkeypatch.setattr(
+        plotting, "_gamma_c_profile",
+        lambda w: (np.array([0.5]), np.array([1e-3]), ""))
+    plotting._CONFINEMENT_CACHE.clear()
+    conf = plotting.confinement_summary(SlotsWout(), booz)
+    assert conf.validity["gamma_c"]
+    assert len(plotting._CONFINEMENT_CACHE) == 0  # computed, not cached
+
+
+def test_confinement_panel_annotates_when_nothing_is_valid():
+    """Both diagnostics invalid: an explicit note, no fabricated curves."""
+    import matplotlib.pyplot as plt
+
+    conf = plotting.ConfinementSummary(
+        surfaces={}, epsilon_effective=None, gamma_c=None,
+        validity={"epsilon_effective": False, "gamma_c": False},
+        notes={"epsilon_effective": "a", "gamma_c": "b"}, timing={})
+    fig, ax = plt.subplots()
+    try:
+        axis, lines = plotting._confinement_panel(ax, conf)
+        assert lines == []
+        assert any(
+            "confinement diagnostics unavailable" in t.get_text()
+            for t in axis.texts)
+    finally:
+        plt.close(fig)
+
+
+def test_confinement_log_scale_needs_positive_wide_range():
+    """Log scale only for all-positive data spanning >= two decades."""
+    import matplotlib.pyplot as plt
+
+    base = dict(
+        epsilon_effective=None, gamma_c=np.array([1e-6, 5e-4, 2e-3]),
+        validity={"epsilon_effective": False, "gamma_c": True},
+        notes={"epsilon_effective": "no", "gamma_c": ""}, timing={})
+    wide = plotting.ConfinementSummary(
+        surfaces={"gamma_c": np.array([0.3, 0.6, 0.9])}, **base)
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    try:
+        axis, _ = plotting._confinement_panel(ax1, wide)
+        assert axis.get_yscale() == "log"
+        base["gamma_c"] = np.array([0.0, 5e-4, 2e-3])   # zero: no log
+        zero = plotting.ConfinementSummary(
+            surfaces={"gamma_c": np.array([0.3, 0.6, 0.9])}, **base)
+        axis, _ = plotting._confinement_panel(ax2, zero)
+        assert axis.get_yscale() == "linear"
+    finally:
+        plt.close(fig)
+
+
+def test_gamma_c_from_wout_matches_live_state(solved_case):
+    """The plot route reproduces the validated live-state Gamma_c exactly."""
+    from vmex.core import gammac
+
+    eq, wout = solved_case
+    kwargs = dict(surfaces=(0.3, 0.6), **plotting._GAMMA_C_DIAGNOSTIC)
+    live = gammac.gamma_c_state(eq.state, eq.runtime, **kwargs)
+    from_wout = gammac.gamma_c_from_wout(wout, **kwargs)
+    # measured on this deck: 2.8e-11 relative; the atol floor only covers
+    # exact-cancellation surfaces where Gamma_c is pure roundoff (~1e-28)
+    np.testing.assert_allclose(
+        np.asarray(from_wout["gamma_c"]), np.asarray(live["gamma_c"]),
+        rtol=1e-8, atol=1e-20)
+    assert from_wout["surface_rows"] == live["surface_rows"]
 
 
 def test_d_r_reconstruction_matches_traceable(solved_case):
@@ -243,11 +573,14 @@ def test_frozen_pressure_scan_guards(solved_case, tmp_path):
 
 
 def test_saved_summary_png_resolution(solved_case, tmp_path):
-    """plot_wout writes the summary PNG at >= 200 dpi pixel dimensions."""
+    """plot_wout writes the summary at >= 200 dpi and closes its figures."""
     import matplotlib.image as mpimg
+    import matplotlib.pyplot as plt
 
     _, wout = solved_case
+    open_before = set(plt.get_fignums())
     paths = plotting.plot_wout(wout, tmp_path, which=("summary",), name=DECK)
+    assert set(plt.get_fignums()) == open_before  # no leaked figures
     png = paths["summary"]
     assert png.exists()
     pixels = mpimg.imread(str(png))
@@ -296,6 +629,64 @@ def test_d_r_self_check_rejects_inconsistent_dmerc(solved_case):
     assert info["d_r"] is None
 
 
+def _mirror_toroidal_angle(wout):
+    """Return the WOUT of the same equilibrium seen through ``zeta -> -zeta``.
+
+    Modes ``(m, n)`` with ``m > 0`` move to ``(m, -n)``; ``m = 0`` sine
+    coefficients change sign.  The pseudo-scalars (iota, the poloidal
+    covariant field, ``B_s`` and ``<J.B>``) flip.  This is the map a solve of
+    the mirrored deck produces, checked table by table on the NFP=4 QI deck
+    to 5e-10.
+    """
+    def flip(table, xm, xn, *, sine, negate):
+        xm = np.asarray(xm, dtype=int)
+        xn = np.asarray(xn, dtype=int)
+        column = {(m, n): k for k, (m, n) in enumerate(zip(xm, xn))}
+        order = [column[(m, -n)] if m > 0 else k for k, (m, n) in enumerate(zip(xm, xn))]
+        out = np.asarray(table, dtype=float)[:, order]
+        if sine:
+            out[:, xm == 0] *= -1.0
+        return -out if negate else out
+
+    base, nyq = (wout.xm, wout.xn), (wout.xm_nyq, wout.xn_nyq)
+    return dataclasses.replace(
+        wout,
+        rmnc=flip(wout.rmnc, *base, sine=False, negate=False),
+        zmns=flip(wout.zmns, *base, sine=True, negate=False),
+        gmnc=flip(wout.gmnc, *nyq, sine=False, negate=False),
+        bmnc=flip(wout.bmnc, *nyq, sine=False, negate=False),
+        bsubumnc=flip(wout.bsubumnc, *nyq, sine=False, negate=True),
+        bsubvmnc=flip(wout.bsubvmnc, *nyq, sine=False, negate=False),
+        bsubsmns=flip(wout.bsubsmns, *nyq, sine=True, negate=True),
+        iotas=-np.asarray(wout.iotas), iotaf=-np.asarray(wout.iotaf),
+        buco=-np.asarray(wout.buco), jdotb=-np.asarray(wout.jdotb),
+    )
+
+
+def test_d_r_self_check_holds_for_both_iota_signs_on_the_solver_grid(solved_case):
+    """D_R and its self-check do not depend on the sign of iota.
+
+    The stored DMerc is a quadrature on the solver's angular grid, and the
+    reconstruction integrates on that grid, so both orientations reproduce
+    it to round-off.  The finer grid it used before disagreed by 3.8e-2 on
+    the negative-iota NFP=4 QI deck, which dropped that deck's D_R curve.
+    """
+    _, wout = solved_case
+    mirrored = _mirror_toroidal_angle(wout)
+    iota_edge = float(np.asarray(wout.iotaf)[-1])
+    assert iota_edge != 0.0
+    assert float(np.asarray(mirrored.iotaf)[-1]) == -iota_edge
+    infos = [plotting._glasser_d_r_from_wout(case) for case in (wout, mirrored)]
+    for info in infos:
+        assert info["valid"], info["note"]
+        # measured 1e-13 on this deck; the previous fixed 64-point grid left 5.4e-9
+        assert info["mismatch"] < 1.0e-11
+    interior = slice(2, -1)
+    scale = float(np.max(np.abs(np.asarray(wout.DMerc)[interior])))
+    np.testing.assert_allclose(
+        infos[1]["d_r"][interior], infos[0]["d_r"][interior], rtol=0.0, atol=1.0e-9 * scale)
+
+
 def test_j_invariant_map_rejects_degenerate_field():
     """A constant Boozer |B| cannot define a trapped-particle pitch."""
     booz = {
@@ -311,12 +702,10 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     """A radial maximum-J diagnostic holds physical pitch fixed."""
     import vmex.core.bounce as bounce
 
-    pitches = []
-
     def _fake_bounce(*, alpha, pitch, **_kwargs):
-        pitches.append(float(np.asarray(pitch)[0]))
         shape = (1, len(alpha), 1, 1)
-        return {"action": np.ones(shape), "usable_mask": np.ones(shape, dtype=bool)}
+        return {"action": jax.numpy.broadcast_to(pitch, shape),
+                "usable_mask": jax.numpy.ones(shape, dtype=bool)}
 
     monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)
     booz = {
@@ -326,17 +715,15 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
         "s_b": np.array([0.25, 0.75]),
     }
     result = plotting._j_invariant_map(booz, pitch_fraction=0.5, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 1.05, 1.0 / 1.05], rtol=0.0, atol=2e-4)
-    np.testing.assert_allclose(result["pitch"], pitches[0])
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05, rtol=0.0, atol=2e-4)
+    np.testing.assert_allclose(result["j_map"], result["pitch"])
 
-    pitches.clear()
     result = plotting._j_invariant_map(booz, pitch=1.0 / 1.05, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 1.05, 1.0 / 1.05])
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05)
     np.testing.assert_allclose(result["pitch_inverse"], 1.05)
 
-    pitches.clear()
     result = plotting._j_invariant_map(booz, pitch=1.0 / 0.85, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 0.85])
+    np.testing.assert_allclose(result["j_map"][0], 1.0 / 0.85)
     np.testing.assert_array_equal(result["trapped_surface"], [True, False])
     assert np.all(np.isfinite(result["j_map"][0]))
     assert np.all(np.isnan(result["j_map"][1]))
@@ -389,97 +776,6 @@ def test_summary_survives_boozer_failure(solved_case, monkeypatch):
         plt.close(fig)
 
 
-def test_summary_plots_the_effective_ripple_profile_when_neo_is_available(
-    solved_case, monkeypatch,
-):
-    """With NEO_JAX present the pressure panel gains an eps_eff^(3/2) twin axis.
-
-    ``epsilon_eff^(3/2)`` (Nemov PoP 6, 4622 (1999)) spans decades across the
-    minor radius, so the diagnostic overlay must be logarithmic and share the
-    pressure panel's legend rather than replace the pressure curve.
-    """
-    import matplotlib.pyplot as plt
-
-    from vmex.core import neoclassical
-
-    _, wout = solved_case
-    surfaces = np.linspace(0.15, 0.95, 5)
-    values = np.geomspace(1.0e-6, 1.0e-3, 5)
-    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", lambda: None)
-    monkeypatch.setattr(
-        neoclassical, "epsilon_effective_from_wout",
-        lambda _wout, **_kwargs: (surfaces, values))
-    saved = dict(plotting._EPSILON_EFFECTIVE_CACHE)
-    plotting._EPSILON_EFFECTIVE_CACHE.clear()
-
-    fig, meta = plotting._summary_figure(wout)
-    try:
-        info = meta["epsilon_effective"]
-        assert info["valid"] and info["note"] == "diagnostic resolution"
-        axis = meta["epsilon_axis"]
-        assert axis.get_yscale() == "log"
-        np.testing.assert_allclose(axis.lines[0].get_ydata(), values)
-        labels = [t.get_text() for t in meta["axes"]["pressure"].get_legend().get_texts()]
-        assert len(labels) == 2 and any("epsilon" in t or r"\epsilon" in t for t in labels)
-    finally:
-        plt.close(fig)
-        plotting._EPSILON_EFFECTIVE_CACHE.clear()
-        plotting._EPSILON_EFFECTIVE_CACHE.update(saved)
-
-
-def test_epsilon_effective_panel_resolves_a_sub_decade_profile(
-    solved_case, monkeypatch,
-):
-    """A ripple profile flatter than one decade gets a readable linear axis.
-
-    An optimized configuration is exactly the case where eps_eff^(3/2) varies
-    by a factor of a few rather than by decades, and there the log autoscale
-    snaps to powers of ten: the curve flattens against a limit, the radial
-    minimum stops being visible, and the axis carries a single tick label.
-    The minimum is the feature the panel exists to show.
-    """
-    import matplotlib.pyplot as plt
-
-    from vmex.core import neoclassical
-
-    _, wout = solved_case
-    surfaces = np.linspace(0.15, 0.95, 5)
-    values = np.array([4.4e-3, 2.6e-3, 1.6e-3, 2.1e-3, 3.9e-3])  # 2.7x span
-    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", lambda: None)
-    monkeypatch.setattr(
-        neoclassical, "epsilon_effective_from_wout",
-        lambda _wout, **_kwargs: (surfaces, values))
-    saved = dict(plotting._EPSILON_EFFECTIVE_CACHE)
-    plotting._EPSILON_EFFECTIVE_CACHE.clear()
-
-    fig, meta = plotting._summary_figure(wout)
-    try:
-        axis = meta["epsilon_axis"]
-        assert axis.get_yscale() == "linear"
-        low, high = axis.get_ylim()
-        assert low < values.min() and values.max() < high
-        assert len([t for t in axis.get_yticks() if low <= t <= high]) >= 4
-    finally:
-        plt.close(fig)
-        plotting._EPSILON_EFFECTIVE_CACHE.clear()
-        plotting._EPSILON_EFFECTIVE_CACHE.update(saved)
-
-
-def test_epsilon_effective_summary_tolerates_an_unreferenceable_wout(monkeypatch):
-    """A missing backend or an unhashable wout never breaks the summary."""
-    from vmex.core import neoclassical
-
-    def unavailable(_wout, **_kwargs):
-        raise ImportError("effective ripple requires NEO_JAX")
-
-    monkeypatch.setattr(neoclassical, "epsilon_effective_from_wout", unavailable)
-    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", lambda: None)
-    before = dict(plotting._EPSILON_EFFECTIVE_CACHE)
-    info = plotting._epsilon_effective_summary({"ns": 3})  # dict: no weak reference
-    assert info["valid"] is False and "ImportError" in info["note"]
-    assert plotting._EPSILON_EFFECTIVE_CACHE == before
-
-
 def test_summary_survives_j_map_failure(solved_case, monkeypatch):
     """J-map failure annotates its panel; Boozer |B| panels still render."""
     import matplotlib.pyplot as plt
@@ -516,3 +812,60 @@ def test_plot_profiles_without_fsqt_history(solved_case, tmp_path):
     assert not np.any(np.asarray(wout.fsqt) > 0.0)  # in-memory wout: no history
     path = plotting.plot_profiles(wout, tmp_path / "profiles.png")
     assert path.exists() and path.stat().st_size > 0
+
+
+@pytest.mark.parametrize("derivative", ({}, {"dtheta": 1}, {"dphi": 1}))
+@pytest.mark.parametrize("parity", ("cos", "sin", "both"))
+@pytest.mark.parametrize("batch_shape", ((), (3,), (2, 3)))
+def test_plot_fourier_synthesis_matches_dense_series(derivative, parity, batch_shape):
+    """Signed modes, asymmetric partners and radial batches keep their series."""
+    rng = np.random.default_rng(918)
+    m, n = np.meshgrid(np.arange(16), np.arange(-12, 13), indexing="ij")
+    m, n = m.ravel(), 3 * n.ravel()
+    theta = np.linspace(0., 2 * np.pi, 31)
+    phi = np.linspace(0., 2 * np.pi / 3, 37)
+    c, s = rng.normal(size=(2, *batch_shape, m.size))
+    c = None if parity == "sin" else c
+    s = None if parity == "cos" else s
+    phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * phi
+    cosine, sine = np.cos(phase), np.sin(phase)
+    if derivative:
+        factor = m if "dtheta" in derivative else -n
+        cosine, sine = -sine * factor[:, None, None], cosine * factor[:, None, None]
+    expected = np.zeros((*batch_shape, theta.size, phi.size))
+    if c is not None:
+        expected += np.tensordot(c, cosine, axes=(-1, 0))
+    if s is not None:
+        expected += np.tensordot(s, sine, axes=(-1, 0))
+    actual = plotting._eval_modes(c, s, m, n, theta, phi, **derivative)
+    np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=2e-11)
+
+
+def test_near_unity_force_ticks_and_long_stability_status_fit(monkeypatch):
+    """Narrow-range force profiles keep distinct ticks; failure notes stay readable."""
+    plt = plotting._import_matplotlib()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
+    wout = SimpleNamespace(ns=31, DMerc=np.linspace(-1., -2., 31), betatotal=0.,
+                          vp=np.linspace(1., 2., 31))
+    narrow = np.linspace(1 - 1e-10, 1., 29)
+    monkeypatch.setattr(plotting, "_relative_force_error_profile",
+                        lambda _: (np.linspace(0.2, 0.98, 29), narrow, 1.0))
+    try:
+        assert plotting._relative_force_error_panel(axes[0], wout) == 1.0
+        plotting._stability_panel(axes[1], wout, {
+            "valid": False, "note": "D_R self-check failed (DMerc mismatch 3.8e-02)"
+        }, s_plot_ignore=.2)
+        fig.canvas.draw()
+        labels = [text.get_text() for text in _drawn_tick_labels(axes[0].yaxis)]
+        lo, hi = axes[0].get_ylim()
+        labels += [tick.label1.get_text() for tick in axes[0].yaxis.get_minor_ticks()
+                   if lo <= tick.get_loc() <= hi and tick.label1.get_text()]
+        assert len(labels) > 1 and len(labels) == len(set(labels))
+        assert axes[0].get_yscale() == "log"
+        assert axes[0].yaxis.get_offset_text().get_text()
+        np.testing.assert_array_equal(axes[0].lines[0].get_ydata(), narrow)
+        extent = axes[1].title.get_window_extent(fig.canvas.get_renderer())
+        assert extent.x0 >= fig.bbox.x0 and extent.x1 <= fig.bbox.x1
+        assert "self-check failed" in axes[1].get_title()
+    finally:
+        plt.close(fig)

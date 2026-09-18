@@ -15,7 +15,9 @@ two layers:
    ballooning objective in :mod:`vmex.core.stability`, whose spectral
    point-evaluation machinery is reused here, extended with the
    ``grad s``/``grad psi`` metric and drift projections.  Exact trig sums
-   + JAX AD throughout: jit/grad-transparent, no gkx import.
+   + JAX AD throughout: jit/grad-transparent, no gkx import.  The read-only
+   :func:`gk_fieldline_geometry_from_wout` route evaluates the same contract
+   from any compatible WOUT without reconstructing or re-solving a state.
 
 2. **Objective wrappers** — thin two-positional ``(state, runtime)``
    callables around the proxies GKX itself promotes for VMEX-side
@@ -74,6 +76,18 @@ Scope notes
   ``psi = s * psi_edge`` in vmex's internal (signed) edge-flux
   convention.  The default single-``kx`` proxies (``nx = 1``) are
   insensitive to this overall sign, matching GKX's own VMEC bridge.
+- The scalar metadata ``epsilon`` and ``R0`` carry GKX's meaning of those
+  keys -- the meaning it applies when it writes run artifacts
+  (``aminor = epsilon * R0``, ``a_ref``, ``rmaj``) and in its analytic model
+  ``|B| = B0 / (1 + epsilon cos theta)``.  ``epsilon`` is the field-line
+  ``|B|`` modulation depth ``(max|B| - min|B|) / (max|B| + min|B|)``
+  (:func:`b_modulation_depth`): exactly that model's ``epsilon``, and the
+  local inverse aspect ratio ``r / R0`` of a ``1/R`` tokamak field.  ``R0``
+  is the wout ``Rmajor_p`` (``volume_p / (2 pi <area>)``, metres), not
+  ``L_ref``.  :func:`vmex.mirror.gk_closed_fieldline_geometry` exports the
+  same two definitions (there ``R0 = L_axis / (2 pi)``, the same volume
+  identity), so the lanes never split on either key.  Neither enters GKX's
+  solver.  ``std(|B|) / mean(|B|)`` is no longer exported under the key.
 """
 
 from __future__ import annotations
@@ -82,6 +96,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from .solver import SolverRuntime, SpectralState
 from .statephysics import aspect_ratio
@@ -95,7 +110,9 @@ __all__ = [
     "GK_GEOMETRY_FIELDS",
     "TURBULENCE_OBJECTIVE_NAMES",
     "gk_fieldline_geometry",
+    "gk_fieldline_geometry_from_wout",
     "flux_tube_geometry",
+    "b_modulation_depth",
     "turbulence_objective_vector",
     "turbulent_growth_rate",
     "quasilinear_flux_proxy",
@@ -219,10 +236,28 @@ def _line_arrays(ctx: dict, j: int, alpha: float, zeta0: float, x: Array):
 # ---------------------------------------------------------------------------
 
 
-def gk_fieldline_geometry(
-    state: SpectralState,
-    rt: SolverRuntime,
+def b_modulation_depth(bmag: Array) -> Array:
+    """``(max|B| - min|B|) / (max|B| + min|B|)`` along a sampled field line.
+
+    The ``epsilon`` of the flux-tube contract, shared by
+    :func:`gk_fieldline_geometry` and
+    :func:`vmex.mirror.gk_closed_fieldline_geometry`.  GKX's analytic
+    geometry is ``|B| = B0 / (1 + epsilon cos theta)`` with ``epsilon`` the
+    inverse aspect ratio, and GKX writes ``aminor = epsilon * R0`` into its
+    run artifacts; this depth *is* that ``epsilon`` for that model and for any
+    ``1/R`` field, and, unlike ``r / R0``, it exists on a straight mirror.
+    The field-line mirror ratio is ``max|B| / min|B| = (1 + eps) / (1 - eps)``.
+    Hard max/min, smooth almost everywhere (ties aside) -- the same depth
+    :func:`vmex.core.optimize.mirror_ratio` takes over a whole surface.
+    """
+    bmax, bmin = jnp.max(bmag), jnp.min(bmag)
+    return (bmax - bmin) / (bmax + bmin)
+
+
+def _gk_fieldline_geometry_from_context(
+    ctx: dict,
     *,
+    nfp: int,
     s_index: int | None = None,
     alpha: float = 0.0,
     zeta0: float = 0.0,
@@ -230,7 +265,7 @@ def gk_fieldline_geometry(
     equal_arc: bool = True,
     arc_oversample: int = 4,
 ) -> dict:
-    """Flux-tube geometry mapping of one field line of a converged state.
+    """Flux-tube geometry mapping from a normalized spectral context.
 
     Returns the in-memory geometry contract consumed by
     ``gkx.flux_tube_geometry_from_mapping`` (keys
@@ -239,9 +274,12 @@ def gk_fieldline_geometry(
     ``nfp``), all in the GS2/GX normalizations of simsopt
     ``vmec_fieldlines`` with ``L_ref`` the effective minor radius and
     ``B_ref = 2 |psi_edge| / L_ref^2`` (identical to
-    :mod:`vmex.core.stability`).  A ``"vmex"`` sub-dict carries
-    diagnostics used by the parity tests (``dp_drho``, ``gradpar_profile``,
-    the sampled PEST angles, …).  Pure jnp — traceable and differentiable
+    :mod:`vmex.core.stability`).  ``epsilon`` is the field-line ``|B|``
+    modulation depth (:func:`b_modulation_depth`) and ``R0`` the wout
+    ``Rmajor_p`` in metres -- GKX's meaning of both keys (module notes).  A
+    ``"vmex"`` sub-dict carries diagnostics used by the parity tests
+    (``dp_drho``, ``gradpar_profile``, ``L_ref``/``B_ref``/``R_major``, the
+    sampled PEST angles, …).  Pure jnp — traceable and differentiable
     w.r.t. ``(state, runtime)``; no gkx import.
 
     Parameters
@@ -269,7 +307,6 @@ def gk_fieldline_geometry(
     """
     if int(ntheta) < 8:
         raise ValueError("ntheta must be >= 8")
-    ctx = _ballooning_context(state, rt)
     j = _resolve_surface(s_index, ctx["ns"])
     dtype = ctx["s"].dtype
 
@@ -281,7 +318,7 @@ def gk_fieldline_geometry(
     diota = (iotas[j + 1] - iotas[j]) / hs
     dpres = (pres[j + 1] - pres[j]) / hs            # internal units: mu0 dp/ds
     shat = -2.0 * s_j * diota / iota                # (r/q) dq/dr, r = L_ref sqrt(s)
-    L_ref, B_ref = ctx["L_ref"], ctx["B_ref"]
+    L_ref, B_ref, R_major = ctx["L_ref"], ctx["B_ref"], ctx["R_major"]
     psi_edge, sign_psi = ctx["psi_edge"], ctx["sign_psi"]
     alpha_c = jnp.asarray(alpha, dtype=dtype)
     zeta0_c = jnp.asarray(zeta0, dtype=dtype)
@@ -323,7 +360,6 @@ def gk_fieldline_geometry(
     bgrad = L_ref * b_dot_gradb / (modB * modB)           # b . grad ln|B|, normalized
     grho = L_ref * jnp.sqrt(gss) / (2.0 * sqrt_s)         # |grad rho| L_ref, rho = sqrt(s)
 
-    mean_b = jnp.mean(bmag)
     return {
         "theta": theta,
         "gradpar": gradpar,
@@ -340,11 +376,11 @@ def gk_fieldline_geometry(
         "grho": grho,
         "q": 1.0 / jnp.abs(iota),
         "s_hat": shat,
-        "epsilon": jnp.std(bmag) / mean_b,
-        "R0": L_ref,
+        "epsilon": b_modulation_depth(bmag),
+        "R0": R_major,
         "B0": B_ref,
         "alpha": float(alpha),
-        "nfp": int(rt.resolution.nfp),
+        "nfp": int(nfp),
         "vmex": {
             "surface_index": j,
             "s": s_j,
@@ -354,6 +390,7 @@ def gk_fieldline_geometry(
             "dp_drho": 2.0 * sqrt_s * dpres / (B_ref * B_ref),
             "L_ref": L_ref,
             "B_ref": B_ref,
+            "R_major": R_major,
             "psi_edge": psi_edge,
             "sign_psi": sign_psi,
             "theta_pest": alpha_c + x_eval,
@@ -363,6 +400,136 @@ def gk_fieldline_geometry(
                 "vmec_fieldlines normalizations; internal signed psi_edge",
         },
     }
+
+
+def gk_fieldline_geometry(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    s_index: int | None = None,
+    alpha: float = 0.0,
+    zeta0: float = 0.0,
+    ntheta: int = 32,
+    equal_arc: bool = True,
+    arc_oversample: int = 4,
+) -> dict:
+    """Flux-tube geometry mapping of one field line of a converged state.
+
+    This is the differentiable live-state route.  See
+    :func:`gk_fieldline_geometry_from_wout` for read-only evaluation of an
+    existing VMEC-compatible WOUT without reconstructing or solving an
+    equilibrium.
+    """
+    return _gk_fieldline_geometry_from_context(
+        _ballooning_context(state, rt),
+        nfp=int(rt.resolution.nfp),
+        s_index=s_index,
+        alpha=alpha,
+        zeta0=zeta0,
+        ntheta=ntheta,
+        equal_arc=equal_arc,
+        arc_oversample=arc_oversample,
+    )
+
+
+def _wout_ballooning_context(wout: Any) -> dict:
+    """Normalize a VMEC-compatible WOUT to the live-state spectral context."""
+    from .postprocess import MU0, lambda_full_mesh_from_wout
+
+    ns = int(wout.ns)
+    if ns < 5:
+        raise ValueError(f"field-line geometry needs ns >= 5, got ns = {ns}")
+    s = np.linspace(0.0, 1.0, ns)
+    hs = s[1] - s[0]
+    m = np.asarray(wout.xm, dtype=int)
+    signgs = int(wout.signgs)
+    if signgs not in (-1, 1):
+        raise ValueError(f"WOUT signgs must be -1 or 1, got {signgs}")
+    phipf = np.asarray(wout.phipf, dtype=float) / (2.0 * np.pi * signgs)
+    unit_flux = np.ones(ns, dtype=float)
+    lmns = lambda_full_mesh_from_wout(
+        lmns_half=wout.lmns,
+        m_modes=m,
+        s=s,
+        phipf_internal=unit_flux,
+        lamscale=1.0,
+    )
+    lmnc = None
+    if bool(wout.lasym):
+        lmnc = lambda_full_mesh_from_wout(
+            lmns_half=wout.lmnc,
+            m_modes=m,
+            s=s,
+            phipf_internal=unit_flux,
+            lamscale=1.0,
+        )
+    L_ref = float(wout.Aminor_p)
+    if not np.isfinite(L_ref) or L_ref <= 0.0:
+        raise ValueError(f"WOUT Aminor_p must be finite and positive, got {L_ref}")
+    R_major = float(wout.Rmajor_p)
+    if not np.isfinite(R_major) or R_major <= 0.0:
+        raise ValueError(f"WOUT Rmajor_p must be finite and positive, got {R_major}")
+    psi_edge = float(np.asarray(wout.phi, dtype=float)[-1]) / (2.0 * np.pi * signgs)
+    if not np.isfinite(psi_edge) or psi_edge == 0.0:
+        raise ValueError(f"WOUT edge toroidal flux must be finite and nonzero, got {psi_edge}")
+    return {
+        "s": jnp.asarray(s),
+        "hs": jnp.asarray(hs),
+        "ns": ns,
+        "m": jnp.asarray(m, dtype=float),
+        "xn": jnp.asarray(np.asarray(wout.xn, dtype=float)),
+        "rmnc": jnp.asarray(wout.rmnc),
+        "zmns": jnp.asarray(wout.zmns),
+        "lmns": jnp.asarray(lmns),
+        "rmns": None if not bool(wout.lasym) else jnp.asarray(wout.rmns),
+        "zmnc": None if not bool(wout.lasym) else jnp.asarray(wout.zmnc),
+        "lmnc": None if lmnc is None else jnp.asarray(lmnc),
+        "lasym": bool(wout.lasym),
+        "iotas": jnp.asarray(wout.iotas),
+        "pres": jnp.asarray(np.asarray(wout.pres, dtype=float) * MU0),
+        "phipf": jnp.asarray(phipf),
+        "psi_edge": jnp.asarray(psi_edge),
+        "sign_psi": jnp.asarray(np.sign(psi_edge)),
+        "L_ref": jnp.asarray(L_ref),
+        "B_ref": jnp.asarray(2.0 * abs(psi_edge) / (L_ref * L_ref)),
+        "R_major": jnp.asarray(R_major),
+    }
+
+
+def gk_fieldline_geometry_from_wout(
+    wout: Any,
+    *,
+    s_index: int | None = None,
+    alpha: float = 0.0,
+    zeta0: float = 0.0,
+    ntheta: int = 32,
+    equal_arc: bool = True,
+    arc_oversample: int = 4,
+) -> dict:
+    """Flux-tube mapping from a VMEC-compatible WOUT, without a solve.
+
+    ``wout`` may be a :class:`~vmex.core.wout.WoutData` or a filesystem path
+    accepted by :func:`vmex.read_wout`.  The returned mapping has the same
+    keys, normalization, field-line policy, and spectral evaluation as
+    :func:`gk_fieldline_geometry`.  This read-only route does not reconstruct
+    a solver state and does not re-converge the equilibrium.
+    """
+    from pathlib import Path
+
+    from .wout import read_wout
+
+    if isinstance(wout, (str, Path)):
+        wout = read_wout(wout)
+    return _gk_fieldline_geometry_from_context(
+        _wout_ballooning_context(wout),
+        nfp=int(wout.nfp),
+        s_index=s_index,
+        alpha=alpha,
+        zeta0=zeta0,
+        ntheta=ntheta,
+        equal_arc=equal_arc,
+        arc_oversample=arc_oversample,
+    )
 
 
 def flux_tube_geometry(

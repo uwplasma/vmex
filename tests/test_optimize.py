@@ -30,11 +30,7 @@ from vmex.core import optimize as opt  # noqa: E402
 from tests.conftest import resolve_golden_dir  # noqa: E402
 
 GOLDEN_DIR = resolve_golden_dir()
-pytestmark = [
-    pytest.mark.skipif(
-        GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)"),
-    pytest.mark.usefixtures("_module_jit_enabled"),  # full solves: run jitted
-]
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmex_test_cache_optimize")
 
@@ -42,6 +38,8 @@ SURFACES = [0.25, 0.5, 0.75, 1.0]
 
 
 def _golden_wout(case: str):
+    if GOLDEN_DIR is None:
+        pytest.skip("golden VMEC2000 fixtures unavailable (offline?)")
     path = GOLDEN_DIR / case / f"wout_{case}.nc"
     if not path.exists():
         pytest.skip(f"missing golden file {path}")
@@ -62,7 +60,6 @@ def solovev_eq() -> opt.Equilibrium:
 
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     cache = CACHE_DIR / "solovev_state.npz"
-    jax.config.update("jax_disable_jit", False)  # tests/conftest disables jit globally
     if cache.exists():
         data = np.load(cache)
         state = SpectralState(**{k: jax.numpy.asarray(data[k]) for k in _STATE_FIELDS})
@@ -192,6 +189,9 @@ def test_solve_equilibrium_forwards_verbose(monkeypatch, solovev_eq):
         fsql=solovev_eq.result.fsql,
         iterations=solovev_eq.result.iterations,
         converged=solovev_eq.result.converged,
+        # solve_equilibrium prefers the polished state when one exists, so
+        # the stub must carry the real result's polished_state=None default.
+        polished_state=None,
     )
 
     def fake_solve_multigrid(inp, **kwargs):
@@ -211,6 +211,7 @@ def test_solve_equilibrium_forwards_verbose(monkeypatch, solovev_eq):
     assert captured["initial_state"] is solovev_eq.state
     assert captured["raise_on_max_iterations"] is True
     assert captured["verbose"] is True
+    assert captured["polish_force_balance"] is False
     assert solved.inp.ftol_array[-1] == 2.0e-11
     assert solved.inp.niter_array[-1] == 4321
     with pytest.raises(ValueError, match="cannot both"):
@@ -324,7 +325,6 @@ def test_l_grad_b(solovev_eq):
     """LgradB objective: finiteness, jit parity, grid convergence, pins
     (recorded 2026-07-09, x64 CPU: golden nfp4_QH 0.3238956855163282 m,
     cached solovev 2.2782393147008424 m ~ minor-radius scale)."""
-    jax.config.update("jax_disable_jit", False)
     gqh = _golden_wout("nfp4_QH_warm_start")
     val = float(opt.l_grad_b(gqh))
     assert np.isfinite(val) and 0.0 < val < 100.0
@@ -370,23 +370,37 @@ def test_qi_residual_golden_pin():
     assert float(ours["total"]) > 0.0
 
 
-def test_qi_regression_pin_and_jit(solovev_eq):
-    """QI residual on a cached converged state: pin, finiteness, jit parity.
-    Pin recorded 2026-07-09 (x64 CPU; solovev ns=11 ftol 1e-14, surfaces
-    (0.5, 1.0), mboz=nboz=8) -> total = 0.13626; rtol 1e-3 because the
-    residual amplifies convergence-path drift (~1e-4 between BLAS/jit
-    configurations)."""
+def test_qi_regression_pin_and_jit():
+    """QI residual on the golden li383_low_res wout: pin, finiteness, jit parity.
+
+    Pin recorded 2026-09-13 (x64 CPU, JAX 0.9.2 and 0.11.1 agree; surfaces
+    (0.5, 1.0), mboz=nboz=8) -> total = 0.357984; rtol 1e-3 as before. The
+    golden VMEC2000 wout needs no solve and no /tmp state cache. The former
+    solovev pin sat on an argmin tie: an axisymmetric |B| has equal minima
+    along each field line, so rounding picked the well and the total flipped
+    between 0.13626 and 0.13500. The guard below keeps the pinned wells
+    unique; smooth wells (plan D1) remove the argmin altogether."""
     pytest.importorskip("booz_xform_jax")
-    jax.config.update("jax_disable_jit", False)
-    booz = opt.boozer_modes_from_wout(solovev_eq.wout, surfaces=[0.5, 1.0],
-                                      mboz=8, nboz=8)
+    w = _golden_wout("li383_low_res")
+    booz = opt.boozer_modes_from_wout(w, surfaces=[0.5, 1.0], mboz=8, nboz=8)
     out = opt.quasi_isodynamic_residual(
         bmnc_b=booz["bmnc_b"], xm_b=booz["xm_b"], xn_b=booz["xn_b"],
         iota_b=booz["iota_b"], nfp=booz["nfp"], **QI_KW)
     res = np.asarray(out["residuals1d"])
     total = float(out["total"])
     assert np.all(np.isfinite(res))
-    np.testing.assert_allclose(total, 0.1362660686195369, rtol=1e-3)
+    # The residual's two argmins read normalized |B| (range 1) per field line
+    # over the periodic and the endpoint-inclusive samples.
+    grid = opt._qi_grid(
+        booz["bmnc_b"], booz["xm_b"], booz["xn_b"], booz["iota_b"], nfp=booz["nfp"],
+        weights=None, phimin=0.0,
+        **{k: QI_KW[k] for k in ("nphi", "nalpha", "n_bounce",
+                                 "include_bounce_endpoints", "softness")})
+    bnorm = np.swapaxes(np.asarray(grid[6]), 1, 2)
+    for samples in (bnorm[..., :-1], bnorm):
+        ordered = np.sort(samples, axis=-1)
+        assert np.min(ordered[..., 1] - ordered[..., 0]) > 1.0e-6, "tied well minimum"
+    np.testing.assert_allclose(total, 0.35798447568604536, rtol=1e-3)
 
     total_jit = jax.jit(
         lambda bm: opt.quasi_isodynamic_residual(
@@ -395,7 +409,7 @@ def test_qi_regression_pin_and_jit(solovev_eq):
     np.testing.assert_allclose(float(total_jit), total, rtol=1e-12)
     # the wout-level convenience wrapper agrees (same booz configuration)
     total_wrap = float(opt.quasi_isodynamic_residual_from_wout(
-        solovev_eq.wout, surfaces=[0.5, 1.0], mboz=8, nboz=8, **QI_KW)["total"])
+        w, surfaces=[0.5, 1.0], mboz=8, nboz=8, **QI_KW)["total"])
     np.testing.assert_allclose(total_wrap, total, rtol=1e-12)
 
 
@@ -462,7 +476,6 @@ def test_least_squares_smoke(solovev_eq):
     the initial aspect is ~3.118, the target 4.0, and a handful of
     finite-difference trust-region steps must strictly reduce the cost.
     """
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     aspect0 = float(opt.aspect_ratio(solovev_eq.state, solovev_eq.runtime))
     cost0 = 0.5 * (aspect0 - 4.0) ** 2
@@ -487,7 +500,6 @@ def test_least_squares_implicit_smoke(solovev_eq):
     boundary plus one linearized-KKT solve for all dofs — gradient cost
     ~O(1 equilibrium solve) independent of the dof count.
     """
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     aspect0 = float(opt.aspect_ratio(solovev_eq.state, solovev_eq.runtime))
     cost0 = 0.5 * (aspect0 - 4.0) ** 2
@@ -501,7 +513,6 @@ def test_least_squares_implicit_smoke(solovev_eq):
 
 def test_minimize_scalarized_implicit_smoke(solovev_eq):
     """L-BFGS-B lowers the same cost with a finite reverse gradient."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     x0 = opt.pack_boundary(inp, 1)
     cost0 = 0.5 * (float(opt.aspect_ratio(
@@ -529,7 +540,6 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     this 2-dof problem: BFGS 3.89e-01 -> 1.55e-06 in 3 iterations (6
     evaluations), L-BFGS-B -> 3.64e-05 in 2; bounds carry ample margin.
     """
-    jax.config.update("jax_disable_jit", False)
     import scipy.optimize
 
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
@@ -574,6 +584,36 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     np.testing.assert_array_equal(bad_gradient, np.zeros_like(problem.x0))
 
 
+def test_from_loss_honors_bound_scalar_method_literally():
+    """The ``loss=`` lane uses a bound scalar objective method exactly as passed.
+
+    ``QuasisymmetryRatioResidual.total_state`` is bound to an owner that also
+    exposes the vector ``residuals_state``; the scalar lane used to swap in
+    those rows through the objective-tuple substitution, which surfaced as a
+    confusing ``jax.lax.cond`` branch-shape error (``float64[N]`` vs
+    ``float64[]``) at the first ``fun`` evaluation.  The loss must be honored
+    literally, and vector or non-traceable losses must be rejected with
+    actionable errors before any optimizer sees them.
+    """
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    qs = opt.QuasisymmetryRatioResidual(SURFACES, 1, -1)
+
+    problem = opt.VmecProblem.from_loss(inp, qs.total_state, max_mode=1)
+    value = float(problem.fun(problem.x0))
+    assert np.isfinite(value)
+    eq = problem.equilibrium_from_x(problem.x0)
+    expected = float(jax.device_get(qs.total_state(eq.state, eq.runtime)))
+    # The problem evaluates the guarded-refinement fixed point; the
+    # materialized equilibrium is the host solve, so agreement is at the
+    # solver-refinement level, not machine precision.
+    np.testing.assert_allclose(value, expected, rtol=1e-5, atol=1e-10)
+
+    with pytest.raises(ValueError, match="must return a scalar"):
+        opt.VmecProblem.from_loss(inp, qs.residuals_state, max_mode=1)
+    with pytest.raises(ValueError, match=r"\(state, runtime\)"):
+        opt.VmecProblem.from_loss(inp, qs.J, max_mode=1)
+
+
 def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
     """Certification refuses derivatives when the trial memo cannot vouch for x.
 
@@ -591,7 +631,6 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
 
     from vmex.core import implicit as implicit_module
 
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     inp = inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
     inp = dataclasses.replace(
@@ -668,7 +707,6 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
     (:func:`solvax.chunk_map`), so the Jacobian at the initial boundary must
     be identical.  ``max_nfev=1`` keeps it cheap; solovev has 2 dofs so
     ``jac_chunk_size=1`` is a real 2-chunk pass."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     obj = [(opt.aspect_ratio, 4.0, 1.0)]
     # explicit None pins the unchunked reference (default is "auto")
@@ -686,7 +724,10 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
 def test_auto_jac_chunk_stays_bounded_with_large_device(monkeypatch):
     """A reported accelerator budget must not turn ``auto`` into one vmap."""
     monkeypatch.setattr(opt, "auto_chunk_size", lambda dim: dim)
-    assert opt._auto_jac_chunk(120) == 11
+    assert opt._auto_jac_chunk(120) == 10
+    assert opt._auto_jac_chunk(8) == 2
+    assert opt._auto_jac_chunk(48) == 6
+    assert opt._auto_jac_chunk(53) == 8  # do not serialize a prime-size batch
 
 
 def test_jacobian_certificate_retains_the_worst_residual_evidence():
@@ -697,7 +738,7 @@ def test_jacobian_certificate_retains_the_worst_residual_evidence():
         tolerance=jnp.array([1.0e-6, 1.0e-4]),
     )
     np.testing.assert_allclose(
-        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4]
+        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4, 8, 2]
     )
 
 
@@ -786,7 +827,6 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     jvp probes, one :func:`solvax.block_thomas_factor`, GMRES-certified
     columns) must agree with the per-dof GMRES path to the solver tolerance
     (``adjoint_tol = 1e-6``)."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     inp = inp.change_resolution(
         mpol=3, ntor=0, ntheta=12, nzeta=4,
@@ -848,6 +888,14 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     np.testing.assert_allclose(problem.jax_fun(problem.x0), jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_value, jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_gradient, jax_gradient, rtol=1e-12)
+    # Concrete calls reuse the host lane; the traced program (a user's
+    # jax.jit) must still agree with it.
+    with jax.disable_jit(False):
+        traced_value, traced_gradient = jax.jit(problem.jax_value_and_grad)(
+            jax.numpy.asarray(problem.x0)
+        )
+    np.testing.assert_allclose(traced_value, jax_value, rtol=1e-10)
+    np.testing.assert_allclose(traced_gradient, jax_gradient, rtol=1e-10)
     assert np.all(np.isfinite(np.asarray(problem.jax_residual_jac(problem.x0))))
     assert problem.input_from_x(problem.x0) == inp
     np.testing.assert_array_equal(problem.x_from_input(inp), problem.x0)
@@ -900,9 +948,30 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
 
     from vmex.core import implicit as implicit_module
 
+    config = problem.metadata["config"]
+    # Cold trial/retry kernels must compile on the optimizer's host thread,
+    # outside a running GPU callback. Cached derivative callbacks are fine.
+    import threading
+
+    solve_threads = []
+    real_host_solve = implicit_module._host_solve
+
+    def record_uncached_solve(cfg, params):
+        hit = implicit_module._LAST_SOLVE.get(cfg)
+        if hit is None or hit[0] != implicit_module._params_key(params):
+            solve_threads.append(threading.get_ident())
+        return real_host_solve(cfg, params)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(implicit_module, "_host_solve", record_uncached_solve)
+        trial = problem.x0.copy()
+        trial[0] += 2.0e-5
+        direct_jacobian = problem.residual_jac(trial)
+        np.testing.assert_allclose(
+            direct_jacobian, problem.jax_residual_jac(trial), rtol=1e-6, atol=1e-8)
+    assert solve_threads == [threading.get_ident()]
     # A rejected equilibrium gets the exact derivative of its smooth penalty
     # residual, never a Jacobian cached for a different physical point.
-    config = problem.metadata["config"]
     rejected_trial = problem.x0.copy()
     rejected_trial[0] += 1.0e-5
     real_device_get = opt.jax.device_get
@@ -1040,6 +1109,14 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     evaluation = problem.evaluate(problem.x0)
     assert evaluation.success
     assert evaluation.diagnostics["solve_stats"]["solves"] >= 1
+    counters = evaluation.diagnostics["solve_stats"]
+    assert counters["jacobian_columns"] >= counters["jacobians"] >= 1
+    assert counters["jacobian_seconds"] > 0.0 and counters["solve_seconds"] > 0.0
+    assert counters["refinements"] >= 1
+    record = opt.OptimizationMonitor(problem, stream=None).record(
+        problem.x0, cost=0.0, terms={})
+    assert record.counters == counters
+    assert record.rejected_trials == problem.metadata["holder"]["failed_trials"]
     scalar = opt.VmecProblem.from_loss(
         inp,
         lambda state, runtime: 0.5 * (opt.aspect_ratio(state, runtime) - 4.0) ** 2,
@@ -1052,6 +1129,13 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     assert scalar.fun(np.full_like(scalar.x0, np.nan)) == 1.0e12
     assert np.isfinite(float(scalar.jax_fun(scalar.x0)))
     assert scalar.equilibrium_from_x(scalar.x0).result.converged
+    solve_threads.clear()
+    with monkeypatch.context() as patch:
+        patch.setattr(implicit_module, "_host_solve", record_uncached_solve)
+        trial = scalar.x0.copy()
+        trial[0] += 2.0e-5
+        np.testing.assert_allclose(scalar.fun(trial), scalar.jax_fun(trial), rtol=1e-10)
+    assert solve_threads == [threading.get_ident()]
 
     holder = scalar.metadata["holder"]
     real_device_get = opt.jax.device_get
@@ -1115,6 +1199,82 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
                           jac_solver="svd", max_nfev=1)
 
 
+def test_reverse_lane_factors_once_per_point(monkeypatch):
+    """Reverse rows and gradients reuse one raw block factorization.
+
+    Mapping the implicit rule's pullback over residual rows factors the raw
+    block Jacobian once per row batch: XLA does not hoist it out of the map.
+    The reverse lane factors once per point and must still equal the
+    row-by-row pullback of the residual.  Its scalar gradient, and the block
+    lane's certificate fallback, pull back ``r`` once.
+    """
+    from vmex.core import implicit as implicit_module
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
+    inp = dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+
+    def radial_profile(state, runtime):
+        del runtime
+        return state.R_cos[1:, 1]
+
+    terms = [(opt.aspect_ratio, 4.0, 1.0), (radial_profile, 0.0, 1.0)]
+    factorizations = []
+    real_system = implicit_module._raw_block_system
+
+    def counted_system(*args, **kwargs):
+        system = real_system(*args, **kwargs)
+        jax.debug.callback(lambda: factorizations.append(1))
+        return system
+
+    monkeypatch.setattr(implicit_module, "_raw_block_system", counted_system)
+    with jax.disable_jit(False):
+        problem = opt.VmecProblem.from_tuples(
+            inp, terms, max_mode=1,
+            implicit_jacobian_method="reverse_adjoint",
+            jacobian_batch_size=1, use_ess=False,
+        )
+        x = jnp.asarray(problem.x0)
+        # Solve and refine at x first: the refinement's Newton finish factors
+        # the raw block Jacobian too, and its memo serves the calls counted below.
+        problem.residual(problem.x0)
+        factorizations.clear()
+        jacobian = np.asarray(problem.jax_residual_jac(x))
+        assert jacobian.shape[0] > 1
+        assert len(factorizations) == 1
+
+        rows, pullback = jax.vjp(problem.jax_residual, x)
+        reference = np.stack([
+            np.asarray(pullback(row)[0]) for row in jnp.eye(rows.size)
+        ])
+        np.testing.assert_allclose(jacobian, reference, rtol=1e-9, atol=1e-12)
+        expected = reference.T @ np.asarray(rows)
+
+        factorizations.clear()
+        value, gradient = problem.jax_value_and_grad(x)
+        assert len(factorizations) == 1
+        np.testing.assert_allclose(value, 0.5 * float(rows @ rows), rtol=1e-12)
+        np.testing.assert_allclose(gradient, expected, rtol=1e-9, atol=1e-12)
+        _, traced = jax.jit(problem.jax_value_and_grad)(x)
+        np.testing.assert_allclose(traced, expected, rtol=1e-9, atol=1e-12)
+
+        block = opt.VmecProblem.from_tuples(
+            inp, terms, max_mode=1,
+            implicit_jacobian_method="block_tridiagonal", use_ess=False,
+        )
+        monkeypatch.setattr(
+            opt, "_select_jax_jacobian",
+            lambda candidate, summary, reverse_candidate: reverse_candidate(),
+        )
+        _, fallback = jax.jit(block.jax_value_and_grad)(x)
+        np.testing.assert_allclose(fallback, expected, rtol=1e-9, atol=1e-12)
+
+
 def test_public_problem_factory_validation():
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     term = [(opt.aspect_ratio, 4.0, 1.0)]
@@ -1166,6 +1326,8 @@ def test_public_problem_factory_validation():
         opt.make_problem(inp, objective_terms=term, jacobian_batch_size=0)
     with pytest.raises(ValueError, match="max_fsq_ratio"):
         opt.make_problem(inp, objective_terms=term, max_fsq_ratio=0.0)
+    with pytest.raises(ValueError, match="refine_tol"):
+        opt.make_problem(inp, objective_terms=term, refine_tol=np.nan)
     with pytest.raises(ValueError, match="forward_ftol"):
         opt.make_problem(inp, objective_terms=term, forward_ftol=0.0)
     with pytest.raises(ValueError, match="forward_max_iterations"):
@@ -1192,7 +1354,6 @@ def test_least_squares_implicit_warm_start_modes(solovev_eq):
     restart: ``warm_start`` only changes each trial's initial guess, never
     the fixed point, so the optimizer walks the same trust-region path;
     ``solve_stats`` exposes the effort totals the R25.4 benchmark compares."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     obj = [(opt.aspect_ratio, 4.0, 1.0)]
     ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
@@ -1214,7 +1375,6 @@ def test_least_squares_max_mode_schedule():
     """Staged max_mode continuation: two ultra-short stages chain through
     result.input; the second starts from — and does not regress — the
     first stage's boundary."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     res = opt.least_squares([(opt.aspect_ratio, 4.0, 1.0)], inp,
                             max_mode=(1, 1), max_nfev=2, diff_step=1e-4,
@@ -1229,3 +1389,25 @@ def test_equilibrium_wout_is_cached(solovev_eq):
     """Equilibrium.wout is computed once and reused (cached_property)."""
     assert solovev_eq.wout is solovev_eq.wout
     assert dataclasses.is_dataclass(solovev_eq.wout)
+
+
+def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
+    """A trial that is not a root must not be differentiated by default.
+
+    The implicit adjoint assumes ``F = 0``; at ``1e6`` the library accepted a
+    residual of 1e-6 against a 1e-12 deck, and the finite-beta single stage
+    walked to a design with no converged equilibrium at ns = 31, 51 or 101
+    (#361).  Every public entry point carries the same bar.
+    """
+    import inspect
+
+    from vmex.core import optimize as optimize_module
+
+    defaults = {
+        name: inspect.signature(fn).parameters["max_fsq_ratio"].default
+        for name, fn in inspect.getmembers(optimize_module, inspect.isfunction)
+        if "max_fsq_ratio" in inspect.signature(fn).parameters
+    }
+    assert defaults, "no entry point exposes max_fsq_ratio"
+    assert set(defaults.values()) == {1.0e2}, defaults
+

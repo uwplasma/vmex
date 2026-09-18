@@ -3,6 +3,14 @@
 The theory and the design rationale — why VMEX works the way it does. Read
 in any order; each page opens with what it covers.
 
+## What the code is known to do
+
+```{toctree}
+:maxdepth: 1
+
+validation
+```
+
 ## The physics and numerics
 
 ```{toctree}
@@ -10,6 +18,7 @@ in any order; each page opens with what it covers.
 
 variational-problem
 spectral-representation
+high-order-force-balance
 iteration
 preconditioners
 multigrid
@@ -38,6 +47,8 @@ confinement
 :maxdepth: 1
 
 mirror-geometry
+mirror-boundary-conditions
+mirror-gyrokinetics
 architecture
 parallelization
 ```

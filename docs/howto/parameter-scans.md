@@ -1,9 +1,12 @@
 # Scan a parameter fast
 
 Solve the first point cold, then seed every successive point from the
-previous converged state: warm restarts converge in about one iteration
-instead of hundreds, and because VMEX caches one compiled executable per
-solver structure, the whole scan recompiles nothing.
+previous converged state. A warm restart takes fewer iterations than a cold
+solve of the same point, by a margin that shrinks as the step between points
+grows; it still takes many iterations, not one. Because VMEX caches one
+compiled executable per solver structure, points after the first compile
+nothing at fixed resolution: the new-parameter warm run in
+`benchmarks/baselines/m4/F1_warm_newparams.json` records zero compiles.
 
 ## The hot-restart scan pattern
 
@@ -53,4 +56,4 @@ shift, and the Mercier `DMerc` profile — hot-restarting each step:
 ## Independent points: thread them
 
 When scan points do not build on each other, solve them concurrently
-instead: {doc}`parallel-ensembles` (measured 3.29x at 8 workers).
+instead: {doc}`parallel-ensembles`.

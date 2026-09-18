@@ -288,3 +288,50 @@ def _put_numeric_leaves(value: Any, device: Any):
         put,
         value,
     )
+
+
+def commit_to_single_device(tree: Any) -> Any:
+    """Commit ``tree``'s JAX arrays to the one single-device placement they share.
+
+    JAX keys a compiled executable on array commitment as well as on shapes
+    and dtypes, so arguments that mix committed and uncommitted arrays on the
+    same device compile a second executable.  When every JAX-array leaf has
+    the same ``SingleDeviceSharding``, put them all there: values and device
+    are unchanged, only the commitment flag becomes uniform.  A tree with no
+    array leaves, a tracer, or any other layout is returned unchanged, and
+    non-array leaves always pass through untouched.
+    """
+    leaves, treedef = jax.tree.flatten(tree)
+    if any(isinstance(leaf, jax.core.Tracer) for leaf in leaves):
+        return tree
+    arrays = [index for index, leaf in enumerate(leaves) if isinstance(leaf, jax.Array)]
+    if not arrays:
+        return tree
+    sharding = leaves[arrays[0]].sharding
+    if not isinstance(sharding, jax.sharding.SingleDeviceSharding) or any(
+        leaves[index].sharding != sharding for index in arrays
+    ):
+        return tree
+    placed = jax.device_put([leaves[index] for index in arrays], sharding)
+    for index, leaf in zip(arrays, placed):
+        leaves[index] = leaf
+    return jax.tree.unflatten(treedef, leaves)
+
+
+def placement_neutral(tree: Any):
+    """Context that keeps the caller's default device out of jitted calls on ``tree``.
+
+    JAX keys an executable on the ``jax.default_device`` in effect, so identical
+    committed arguments compile twice when one call runs inside a device
+    context and another outside it.  When jit is enabled and every JAX-array
+    leaf of ``tree`` is concretely committed, the arguments already fix
+    placement and the context is cleared; otherwise (jit disabled, a tracer,
+    an uncommitted leaf, no arrays) the caller's context stands.  Use a fresh
+    call per ``with`` block.
+    """
+    arrays = [leaf for leaf in jax.tree.leaves(tree) if isinstance(leaf, jax.Array)]
+    if not jax.config.jax_disable_jit and arrays and all(
+        not isinstance(leaf, jax.core.Tracer) and leaf.committed for leaf in arrays
+    ):
+        return jax.default_device(None)
+    return contextlib.nullcontext()

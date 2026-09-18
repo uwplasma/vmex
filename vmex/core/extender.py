@@ -9,6 +9,7 @@ explicit-point methods remain JAX-transformable.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Callable, Literal, cast
 
@@ -20,8 +21,30 @@ from .mgrid import MgridField, read_mgrid
 
 Array = Any
 PlasmaMode = Literal["auto", "include", "vacuum"]
+AccuracyCheck = Literal["warn", "raise", "off"]
 
-__all__ = ["MagneticField", "VmecInteriorField", "VmecExtender"]
+__all__ = [
+    "ExteriorFieldAccuracyError",
+    "ExteriorFieldAccuracyWarning",
+    "MagneticField",
+    "VmecInteriorField",
+    "VmecExtender",
+]
+
+
+#: Source sampling per field period when the caller does not choose one.  The
+#: floor is the historical constant; the ceiling bounds the cost of the
+#: geometry rule on a very high aspect ratio boundary.
+_DEFAULT_SOURCE_NPHI = 32
+_MAX_SOURCE_NPHI = 256
+
+
+class ExteriorFieldAccuracyWarning(UserWarning):
+    """Direct virtual-casing quadrature missed its requested ``digits``."""
+
+
+class ExteriorFieldAccuracyError(RuntimeError):
+    """Raised instead of the warning when ``accuracy_check="raise"``."""
 
 
 def _check_points(points: Array, name: str = "points") -> Array:
@@ -78,6 +101,65 @@ class MagneticField:
 
     ``gradB`` has axes ``(point, B_i, x_j)``.  The SIMSOPT-compatible
     ``dB_by_dX`` swaps the last two axes to ``(point, x_j, B_i)``.
+
+    Every method takes points as Cartesian ``xyz`` in metres with shape
+    ``(n, 3)`` and returns ``B`` in tesla with the same shape; the
+    cylindrical helpers convert to and from the ``(R, phi, Z)`` layout with
+    ``phi`` in radians.  Points may be passed explicitly or stored once with
+    :meth:`set_points`.
+
+    The optional parameter arguments make the field differentiable with
+    respect to degrees of freedom that are not spatial coordinates — coil
+    currents, coil shapes, or equilibrium parameters — which is what the
+    ``*_vjp`` methods pull back.  There are two mutually exclusive ways to
+    supply that dependence, and either one requires ``parameters``: the
+    direct path (``parameterized_B_fn``) and the factored path
+    (``parameter_data_fn`` with ``B_from_data``).  Providing both, or one
+    half of the factored pair, raises :exc:`ValueError`.
+
+    Parameters
+    ----------
+    B_fn:
+        Cartesian field callable, ``xyz (n, 3) [m] -> B (n, 3) [T]``.  This
+        is the only required argument; a returned shape other than the
+        input shape raises :exc:`ValueError`.
+    gradB_fn:
+        Optional first spatial derivative, ``xyz (n, 3) -> (n, 3, 3)``
+        holding ``dB_i/dx_j`` in T/m with axes ``(point, B_i, x_j)``.  When
+        ``None``, :meth:`gradB` differentiates ``B_fn`` with a per-point
+        ``jax.jacfwd``, which is exact but costs one extra AD pass.
+    gradgradB_fn:
+        Optional second derivative, ``(n, 3, 3, 3)`` holding
+        ``d2B_i/dx_j dx_k`` in T/m^2, axes ``(point, B_i, x_j, x_k)``.
+        ``None`` nests two ``jax.jacfwd`` passes over ``B_fn``.
+    gradgradgradB_fn:
+        Optional third derivative, ``(n, 3, 3, 3, 3)`` holding
+        ``d3B_i/dx_j dx_k dx_l`` in T/m^3.  ``None`` nests three
+        ``jax.jacfwd`` passes over ``B_fn``.
+    parameters:
+        Optimizable field degrees of freedom, flattened to one dimension.
+        Required by, and only meaningful with, one of the two parameterized
+        paths; without it the ``*_vjp`` methods raise :exc:`RuntimeError`.
+        The units are whatever the parameterization uses (A for coil
+        currents, m for coil Fourier coefficients).
+    parameterized_B_fn:
+        Direct path: ``(parameters, xyz) -> B``, differentiated end to end
+        on every parameter VJP.
+    parameter_data_fn:
+        Factored path, first half: ``parameters -> data``, where ``data``
+        is any JAX pytree of intermediate quantities (for VMEX, the
+        equilibrium spectra or the boundary surface arrays).  Its VJP is
+        built once per point set and reused for every derivative order, so
+        an expensive parameters-to-data map is not repeated.
+    B_from_data:
+        Factored path, second half: ``(data, xyz) -> B``.  Must be supplied
+        together with ``parameter_data_fn``.
+    dof_names:
+        One name per entry of ``parameters``, in the same order, for
+        labelling gradient output.  ``None`` or ``()`` leaves the names
+        unset.  A mismatched length raises :exc:`ValueError`, but only when
+        ``parameters`` was also given — there is nothing to compare
+        against otherwise.
     """
 
     def __init__(
@@ -517,6 +599,44 @@ class VmecInteriorField(MagneticField):
     differentiable Newton solve.  Spectral angular evaluation and radial
     interpolation then recover ``B``.  Points outside the last closed surface
     return NaNs; use :class:`VmecExtender` there.
+
+    ``s`` is the normalised toroidal flux ``psi / psi_edge`` on ``[0, 1]``,
+    and ``theta`` (poloidal) and ``phi`` (geometric toroidal) are in radians.
+    A point is rejected — every field component set to NaN — when the
+    converged ``s`` leaves ``[0, 1]`` by more than ``1e-8`` or the inverted
+    ``(R, Z)`` still misses the query point by more than ``1e-7`` m, so a
+    non-converged inversion cannot be mistaken for a field value.
+
+    Parameters
+    ----------
+    spectra:
+        VMEC Fourier tables of one equilibrium, in the layout built by
+        ``vmex.core.virtual_casing._state_field_spectra`` (also what
+        :meth:`from_state` produces).  The keys read here are ``rmnc`` and
+        ``zmns``, full-mesh geometry coefficients of shape ``(ns, mnmax)``
+        in metres; ``xm`` and ``xn``, shape ``(mnmax,)``, the poloidal mode
+        number ``m`` and the *already field-period-scaled* toroidal mode
+        number ``n * nfp`` of the wout convention, so the angle is
+        ``m theta - n_scaled phi``; ``bsupu`` and ``bsupv``, the
+        contravariant field cosine coefficients ``B^theta`` and ``B^phi``
+        in T/m of shape ``(ns, mnmax_nyq)`` on the VMEC half mesh with row 0
+        the unused axis row; and their Nyquist mode numbers ``xmn`` and
+        ``xnn``, shape ``(mnmax_nyq,)``.  Only the stellarator-symmetric
+        (``lasym = False``) families are evaluated.  Values may be JAX
+        tracers, which is what makes the whole field differentiable.
+    newton_iterations:
+        Number of Newton steps taken to invert ``(R, Z) -> (s, theta)`` at
+        every query point.  The count is fixed rather than
+        residual-driven so the loop stays jit- and grad-transparent; raise
+        it for strongly shaped boundaries whose geometric first guess is
+        poor.
+    parameters, parameterized_B_fn, parameter_data_fn, B_from_data, dof_names:
+        Optimizable-parameter arguments forwarded unchanged to
+        :class:`MagneticField`; see its documentation.  On the factored
+        path ``parameter_data_fn`` returns a ``spectra`` mapping of the
+        same shape, and after :meth:`set_points_flux` the parameter VJPs
+        reuse the stored flux coordinates as Newton seeds and hold the
+        mapped Cartesian points fixed.
     """
 
     def __init__(
@@ -729,6 +849,56 @@ def _mgrid_from_wout(wout: Any, base_dir: Path | None) -> MgridField | None:
     return MgridField.from_mgrid_data(data, extcur=scaled)
 
 
+def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
+    """Per-period source sampling that reaches ``digits`` one minor radius out.
+
+    ``boundary`` is a wout (``rmnc``/``xm``) or a ``VmecInput`` (``rbc``); both
+    carry ``nfp`` and enough of the boundary to get ``R0`` and ``a``.
+
+    The off-surface quadrature error decays as ``exp(-2 pi d / h)`` with ``h``
+    the finest source level's largest spacing, whose toroidal part over the
+    full torus is ``2 pi R0 / n_toroidal``.  Asking for ``10**-digits`` at
+    ``d = a`` gives ``n_toroidal >= digits ln(10) R0 / a``, and the default
+    schedule's finest level has ``2 nfp nphi`` toroidal points, so
+
+        nphi >= digits ln(10) R0 / (2 nfp a).
+
+    Measured against the shipped QA wout (``R0/a = 15.9``, ``nfp = 2``) with
+    ``ntheta = nphi``, the achieved error at ``d = a`` against a requested 1e-6
+    is 6.4e-04 at ``nphi = 32``, 4.3e-07 at 64 and 3.5e-11 at 128; the rule
+    returns 64 here.  A boundary of tokamak-like aspect ratio (``R0/a = 3``,
+    ``nfp = 1``) lands on the 32 floor, so its grid is unchanged and only
+    high-aspect boundaries -- where a fixed 32 missed the requested accuracy by
+    four orders -- are refined.
+    """
+    try:
+        nfp = max(int(boundary.nfp), 1)
+        if hasattr(boundary, "rmnc"):
+            # A wout: the last full-mesh surface, with its own mode table.
+            coefficients = np.asarray(boundary.rmnc)[-1]
+            poloidal = np.asarray(boundary.xm)
+        else:
+            # A VmecInput: rbc is indexed [n + ntor, m], and the outboard point
+            # R(theta = 0, phi = 0) sums every n, so reduce the toroidal axis
+            # first and keep one coefficient per poloidal mode.
+            coefficients = np.asarray(boundary.rbc).sum(axis=0)
+            poloidal = np.arange(coefficients.size, dtype=float)
+        outboard = float(coefficients.sum())
+        inboard = float((coefficients * np.cos(poloidal * np.pi)).sum())
+        minor = 0.5 * (outboard - inboard)
+        major = 0.5 * (outboard + inboard)
+    except Exception:
+        return _DEFAULT_SOURCE_NPHI
+    if not (np.isfinite(minor) and np.isfinite(major)) or minor <= 0.0:
+        return _DEFAULT_SOURCE_NPHI
+    needed = math.log(10.0) * digits * major / (2.0 * nfp * minor)
+    # Round up to a power of two so repeated calls share compiled kernels, and
+    # keep it inside a range whose cost is measured (0.6 s to 0.8 s per call on
+    # the shipped QA wout, both dominated by fixed overhead).
+    power = max(_DEFAULT_SOURCE_NPHI, 1 << max(0, math.ceil(math.log2(max(needed, 1.0)))))
+    return int(min(power, _MAX_SOURCE_NPHI))
+
+
 class VmecExtender(MagneticField):
     """Total field outside the last closed VMEC flux surface.
 
@@ -736,11 +906,53 @@ class VmecExtender(MagneticField):
     finite pressure or plasma current, the internal-current virtual-casing
     branch is added.  External coil currents must lie outside the query region;
     targets must not lie exactly on the source surface.
+
+    :meth:`B` is the plain sum of whichever contributions are present, in
+    tesla at Cartesian points in metres.  Spatial derivatives come from
+    differentiating that same Cartesian graph, so they carry no separate
+    cylindrical-axis singularity.  Prefer the classmethods
+    (:meth:`from_wout`, :meth:`from_file`, :meth:`from_state`,
+    :meth:`from_equilibrium`, :meth:`from_surface_data`) — this constructor
+    is the low-level form that takes already-built pieces.
+
+    Parameters
+    ----------
+    external_field:
+        The coil or vacuum field, evaluated directly at the query points.
+        Either an object exposing ``b_cyl(r, phi, z) -> (B_R, B_phi, B_Z)``
+        such as an :class:`~vmex.core.mgrid.MgridField`, or a plain callable
+        ``xyz (n, 3) [m] -> B (n, 3) [T]`` such as an ESSOS Biot-Savart coil
+        field.  May be ``None`` for the plasma field alone, but then
+        ``plasma_field`` must be given.
+    plasma_field:
+        Optional virtual-casing exterior field carrying the field of the
+        currents inside the last closed flux surface — a
+        ``virtual_casing_jax.VirtualCasingExteriorField``, normally built by
+        :meth:`from_surface_data`.  ``None`` selects the pure vacuum path,
+        correct only for a current-free equilibrium.
+    near_surface_plan:
+        Optional precomputed continuation plan from the plasma field's
+        ``plan_near_surface``; supply it through
+        :meth:`with_near_surface_continuation` rather than directly.  When
+        present, plasma-field targets are evaluated by the fast first-order
+        Taylor continuation off the boundary instead of the full off-surface
+        virtual-casing schedule, which is accurate only near the surface.
+        It requires ``plasma_field``.
+    accuracy_check:
+        What an eager :meth:`B` call does when the direct virtual-casing
+        quadrature misses the ``digits`` it was built with, judged by
+        :meth:`B_error_estimate`: ``"warn"`` (default) emits
+        :class:`ExteriorFieldAccuracyWarning`, ``"raise"`` raises
+        :class:`ExteriorFieldAccuracyError`, ``"off"`` skips the estimate.
+        Traced calls (``jit``, ``grad``, field-line integrators) never check;
+        call :meth:`B_error_estimate` there.  The returned field is the same
+        in every mode.  The attribute may also be set after construction.
     """
 
     def __init__(
         self, external_field: Any, plasma_field: Any | None = None,
-        near_surface_plan: Any | None = None,
+        near_surface_plan: Any | None = None, *,
+        accuracy_check: AccuracyCheck = "warn",
     ) -> None:
         if external_field is None and plasma_field is None:
             raise ValueError("at least one external or plasma field is required")
@@ -749,6 +961,7 @@ class VmecExtender(MagneticField):
         self.external_field = external_field
         self.plasma_field = plasma_field
         self.near_surface_plan = near_surface_plan
+        self.accuracy_check = accuracy_check
 
         def B_fn(points: Array) -> Array:
             value = jnp.zeros_like(points)
@@ -768,6 +981,83 @@ class VmecExtender(MagneticField):
         super().__init__(B_fn)
 
     @property
+    def accuracy_check(self) -> AccuracyCheck:
+        """``"warn"``, ``"raise"`` or ``"off"``; see the class documentation."""
+        return self._accuracy_check
+
+    @accuracy_check.setter
+    def accuracy_check(self, mode: AccuracyCheck) -> None:
+        """Set the eager accuracy-check mode; any other value raises ``ValueError``."""
+        if mode not in ("warn", "raise", "off"):
+            raise ValueError("accuracy_check must be 'warn', 'raise', or 'off'")
+        self._accuracy_check = mode
+
+    def B(self, points: Array | None = None) -> Array:
+        """Return Cartesian ``B``; eager calls check the quadrature accuracy."""
+        value = super().B(points)
+        if (self._accuracy_check != "off" and self.near_surface_plan is None
+                and hasattr(self.plasma_field, "schedule_levels")
+                and not isinstance(value, jax.core.Tracer)):
+            xyz = self._require_points() if points is None else _check_points(points)
+            plasma = value
+            if self.external_field is not None:
+                plasma = value - _field_cartesian(self.external_field, xyz)
+            self._check_accuracy(xyz, plasma)
+        return value
+
+    def B_error_estimate(self, points: Array | None = None) -> Array:
+        """Estimated relative error of the plasma field, shape ``(n,)``.
+
+        Per point, the difference between the value the virtual-casing
+        schedule returned and its finest source grid, or, for points already
+        on the finest grid, that grid's double-layer quadrature error
+        (:func:`~vmex.core.virtual_casing.offsurface_error_estimate`).  It is
+        relative to the RMS surface ``|B|``, compares with ``10**-digits``,
+        and ``-log10`` of it is the achieved digits.  The error decays as
+        ``exp(-2 pi d / h)`` with ``d`` the distance to the surface and ``h``
+        the largest spacing of the finest level, whose toroidal part is
+        ``2 pi R / n_toroidal`` over the full torus.  Points must lie outside
+        the surface.  Derivatives lose accuracy faster than ``B``.  Costs
+        slightly more than the plasma part of a :meth:`B` call (1.2 to 1.5
+        times, warm) and is traceable; ``accuracy_check="off"`` avoids paying
+        it on every eager call.
+        """
+        if self.plasma_field is None:
+            raise RuntimeError("the field has no virtual-casing plasma contribution")
+        if self.near_surface_plan is not None:
+            raise RuntimeError(
+                "the near-surface continuation has no quadrature error estimate")
+        from . import virtual_casing as vc
+
+        xyz = self._require_points() if points is None else _check_points(points)
+        return vc.offsurface_error_estimate(self.plasma_field, xyz)
+
+    def _check_accuracy(self, xyz: Array, plasma: Array) -> None:
+        from . import virtual_casing as vc
+
+        estimate = np.asarray(vc.offsurface_error_estimate(
+            self.plasma_field, xyz, B_plasma=plasma))
+        digits = int(self.plasma_field.config.digits)
+        missed = ~(estimate <= 10.0 ** (-digits))
+        if not np.any(missed):
+            return
+        worst = float(np.max(np.where(np.isfinite(estimate), estimate, np.inf)))
+        nt, npol = self.plasma_field.schedule_levels[-1]
+        message = (
+            f"virtual-casing exterior field: {int(missed.sum())} of {missed.size} "
+            f"points have estimated quadrature error up to {worst:.1e}, above the "
+            f"requested 1e-{digits}. The direct quadrature on the finest source "
+            f"grid ({nt} toroidal x {npol} poloidal points over the full torus) "
+            "needs targets about two grid spacings off the surface; move the "
+            "points out, raise nphi/ntheta or levels, or use "
+            "with_near_surface_continuation().")
+        if self._accuracy_check == "raise":
+            raise ExteriorFieldAccuracyError(message)
+        import warnings
+
+        warnings.warn(message, ExteriorFieldAccuracyWarning, stacklevel=3)
+
+    @property
     def uses_virtual_casing(self) -> bool:
         """Whether plasma-current virtual casing contributes to the field."""
         return self.plasma_field is not None
@@ -783,6 +1073,20 @@ class VmecExtender(MagneticField):
     ) -> "VmecExtender":
         """Return a fast first-order local continuation from the LCFS.
 
+        .. warning::
+
+           **This path does not currently reproduce the direct quadrature and
+           should not be used for physics.** Measured 2026-09-16 on the shipped
+           QA wout at the default grid (finest 256 x 128, ``h_tor`` 0.030 m,
+           ``a`` 0.077 m): preparing it took 416 s, and the field it returns is
+           ~1e-5 in magnitude at every distance while the direct field falls
+           from 0.52 T at ``d = 0.25 h`` to 4e-6 T at ``4 h``. Where the direct
+           quadrature carries a certified estimate of 3.7e-08 (``d = 3 h``) and
+           1.7e-10 (``4 h``) the two disagree by factors of 4 and 7, so the
+           disagreement is the continuation's, not the reference's. It also has
+           no error estimate of its own -- :meth:`B_error_estimate` raises on
+           it. Use the direct path, at a distance its estimate certifies.
+
         The Taylor field is intended for nearby point queries. Long field-line
         traces must use a distance stopping criterion or a separately validated
         volume representation; unrestricted extrapolation can change topology.
@@ -791,7 +1095,8 @@ class VmecExtender(MagneticField):
             raise RuntimeError("near-surface continuation requires virtual casing")
         plan = self.plasma_field.plan_near_surface(
             digits=digits, precision=precision, B_surface=B_surface)
-        return type(self)(self.external_field, self.plasma_field, plan)
+        return type(self)(self.external_field, self.plasma_field, plan,
+                          accuracy_check=self._accuracy_check)
 
     @classmethod
     def from_surface_data(
@@ -801,22 +1106,45 @@ class VmecExtender(MagneticField):
         external_field: Any | None = None,
         digits: int = 6,
         levels: tuple[tuple[int, int], ...] | None = None,
+        chunk_size: int | str = "auto",
+        target_chunk_size: int | str = "auto",
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
-        """Construct the finite-beta path from traceable VMEX surface data."""
+        """Construct the finite-beta path from traceable VMEX surface data.
+
+        ``chunk_size`` bounds source points per virtual-casing batch;
+        ``target_chunk_size`` bounds evaluation points. ``"auto"`` delegates
+        both memory/performance choices to virtual-casing-jax.
+
+        ``levels`` are full-torus ``(n_toroidal, n_poloidal)`` source grids.
+        ``surface_data.gamma`` is sampled on ONE field period, so the default
+        schedule carries the ``nfp`` factor:
+        ``((nfp nphi, ntheta), (2 nfp nphi, 2 ntheta))``. Without it an nfp = 5
+        boundary sampled at 32 points per period was resolved by a finest level
+        of 64 over the whole torus -- 13 per period.
+        """
         from . import virtual_casing as vc
 
         vc._require_vcj()
         nphi, ntheta = map(int, surface_data.gamma.shape[1:])
-        schedule = levels or ((nphi, ntheta), (2 * nphi, 2 * ntheta))
+        # ``gamma`` is sampled on ONE field period, while ``levels`` counts the
+        # whole torus, so the default schedule has to carry the nfp factor --
+        # without it an nfp = 5 boundary sampled at 32 points per period was
+        # resolved by a finest level of 64 over the torus, 13 per period.
+        nfp = max(int(getattr(surface_data, "nfp", 1) or 1), 1)
+        full = nphi * nfp
+        schedule = levels or ((full, ntheta), (2 * full, 2 * ntheta))
         config = vc.ExteriorFieldConfig(
             digits=digits,
             src_nphi=nphi,
             src_ntheta=ntheta,
             levels=schedule,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
             branch="internal",
         )
         plasma_field = vc.VirtualCasingExteriorField(surface_data, config)
-        return cls(external_field, plasma_field)
+        return cls(external_field, plasma_field, accuracy_check=accuracy_check)
 
     @classmethod
     def from_parameterized_surface_data(
@@ -830,7 +1158,10 @@ class VmecExtender(MagneticField):
         external_dof_names: tuple[str, ...] = (),
         digits: int = 6,
         levels: tuple[tuple[int, int], ...] | None = None,
+        chunk_size: int | str = "auto",
+        target_chunk_size: int | str = "auto",
         dof_names: tuple[str, ...] = (),
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
         """Construct a virtual-casing field with VJPs in ``parameters``.
 
@@ -891,11 +1222,13 @@ class VmecExtender(MagneticField):
             live_external_field = make_external(external_dofs)
             return cls.from_surface_data(
                 data, external_field=live_external_field, digits=digits,
-                levels=levels).B(points)
+                levels=levels, chunk_size=chunk_size,
+                target_chunk_size=target_chunk_size).B(points)
 
         field = cls.from_surface_data(
             initial_surface_data, external_field=initial_external_field,
-            digits=digits, levels=levels)
+            digits=digits, levels=levels, chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size, accuracy_check=accuracy_check)
         field._parameters = all_parameters
         field._parameter_data_fn = differentiable_surface_data
         field._B_from_data = B_from_surface_arrays
@@ -909,15 +1242,29 @@ class VmecExtender(MagneticField):
         *,
         external_field: Any | None = None,
         plasma: PlasmaMode = "auto",
-        nphi: int = 32,
-        ntheta: int = 32,
+        nphi: int | None = None,
+        ntheta: int | None = None,
         digits: int = 6,
         levels: tuple[tuple[int, int], ...] | None = None,
+        chunk_size: int | str = "auto",
+        target_chunk_size: int | str = "auto",
         base_dir: str | Path | None = None,
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
-        """Construct an exterior field from a wout-like object."""
+        """Construct an exterior field from a wout-like object.
+
+        ``nphi`` and ``ntheta`` default to the per-period source sampling that
+        reaches ``digits`` one minor radius off the boundary
+        (:func:`_source_nphi_for_digits`).  Both directions matter: on the
+        shipped QA wout, the measured achieved error at ``d = a`` against a
+        requested 1e-6 is 6.4e-04 at (32, 32), 7.1e-06 at (64, 32) and
+        4.3e-07 at (64, 64) -- and (64, 64) is also the cheapest of the three
+        per call, so the poloidal count follows the toroidal one.  Pass either
+        explicitly to override.
+        """
         if plasma not in ("auto", "include", "vacuum"):
             raise ValueError("plasma must be 'auto', 'include', or 'vacuum'")
+        chosen = _source_nphi_for_digits(wout, digits)
         if external_field is None:
             external_field = _mgrid_from_wout(
                 wout, None if base_dir is None else Path(base_dir)
@@ -931,20 +1278,25 @@ class VmecExtender(MagneticField):
             from . import virtual_casing as vc
 
             surface = vc.surface_field_data_from_wout(
-                wout, nphi=nphi, ntheta=ntheta
+                wout,
+                nphi=chosen if nphi is None else nphi,
+                ntheta=chosen if ntheta is None else ntheta,
             )
             return cls.from_surface_data(
                 surface,
                 external_field=external_field,
                 digits=digits,
                 levels=levels,
+                chunk_size=chunk_size,
+                target_chunk_size=target_chunk_size,
+                accuracy_check=accuracy_check,
             )
 
         if external_field is None and plasma_field is None:
             raise ValueError(
                 "a vacuum extension needs an mgrid file or external_field"
             )
-        return cls(external_field, plasma_field)
+        return cls(external_field, plasma_field, accuracy_check=accuracy_check)
 
     @classmethod
     def from_file(cls, path: str | Path, **kwargs: Any) -> "VmecExtender":
@@ -961,22 +1313,35 @@ class VmecExtender(MagneticField):
         state: Any,
         *,
         external_field: Any | None = None,
-        nphi: int = 32,
-        ntheta: int = 32,
+        nphi: int | None = None,
+        ntheta: int | None = None,
         digits: int = 6,
         levels: tuple[tuple[int, int], ...] | None = None,
+        chunk_size: int | str = "auto",
+        target_chunk_size: int | str = "auto",
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
-        """Construct the differentiable finite-beta path from a live VMEX state."""
+        """Construct the differentiable finite-beta path from a live VMEX state.
+
+        ``nphi`` and ``ntheta`` default from the boundary exactly as in
+        :meth:`from_wout`; pass either explicitly to override.
+        """
         from . import virtual_casing as vc
 
+        chosen = _source_nphi_for_digits(inp, digits)
         surface = vc.surface_field_data_from_state(
-            inp, state, nphi=nphi, ntheta=ntheta
+            inp, state,
+            nphi=chosen if nphi is None else nphi,
+            ntheta=chosen if ntheta is None else ntheta,
         )
         return cls.from_surface_data(
             surface,
             external_field=external_field,
             digits=digits,
             levels=levels,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+            accuracy_check=accuracy_check,
         )
 
     @classmethod

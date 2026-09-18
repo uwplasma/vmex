@@ -78,8 +78,9 @@ from .printing import (
 from .solver import (
     SolveResult, SolverRuntime, SpectralState, VacuumOutput,
     _LANE_EXECUTABLES, _USED_LANE_KEYS,
+    _due_rows_pending,
     _finalize, _geometry, _initial_carry, _initial_state, _leaf_signature,
-    _make_body,
+    _loop_driver_config, _make_body,
     _result_from_carry, _zero_cache, prepare_runtime, resolution_from_input,
     reguess_initial_axis, runtime_with_baselines,
     _resolve_use_fft,
@@ -412,6 +413,19 @@ def _jacobian_ok(state: SpectralState, rt: SolverRuntime,
     return jnp.logical_not(
         half_mesh_jacobian(geometry, s=rt.setup.s_full).jacobian_sign_changed
     )
+
+
+@jax.jit
+def _carried_edge_radius_lane(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Boundary-row ``R = R_even(ns) + R_odd(ns)`` (``sqrts(ns) = 1``).
+
+    The carried-rbsq edge conversion at a radial transition needs only this
+    angular array; eager, the full ``_geometry`` synthesis it sits on
+    dispatches ~1e2 single-op XLA programs per transition.  Module-level
+    ``jax.jit`` lane keyed structurally on ``rt`` (``solver._while_lane``).
+    """
+    _, geometry = _geometry(state, rt)
+    return geometry.R_even[-1] + geometry.R_odd[-1]
 
 
 @functools.partial(jax.jit, static_argnames=("use_fft",))
@@ -1252,10 +1266,11 @@ def _prefetch_stage_lane_set(
     to on-demand compilation.
     """
     resolution = free_boundary_resolution(inp, external_field, ns=int(ns))
+    time_step0, _ = _loop_driver_config(inp, time_step=time_step, nstep=nstep)
     with device_context(device, resolution):
         rt = prepare_runtime(
             inp, resolution, ftol=ftol, max_iterations=max_iterations,
-            time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+            tcon0=tcon0, gamma=gamma,
             lconm1=lconm1, precon_type=precon_type,
             prec2d_threshold=prec2d_threshold, prec2d=prec2d, use_fft=use_fft,
         )
@@ -1279,8 +1294,10 @@ def _prefetch_stage_lane_set(
             presf_ns_scale=jnp.asarray(
                 _presf_ns_scale(inp, ns_i), dtype=dtype),
         )
-        carry_fixed = _initial_carry(state, rt_fixed, ijacob=0)
-        carry_freeb = _initial_carry(state, rt_freeb, ijacob=0)
+        carry_fixed = _initial_carry(
+            state, rt_fixed, ijacob=0, time_step0=time_step0)
+        carry_freeb = _initial_carry(
+            state, rt_freeb, ijacob=0, time_step0=time_step0)
         out = jax.eval_shape(fused.full, state, rt_freeb, external_field)
         z = lambda sd: jnp.zeros(sd.shape, dtype=sd.dtype)  # noqa: E731
         int_dtype = carry_freeb.iteration.dtype
@@ -1659,9 +1676,14 @@ def _solve_free_boundary_stage(
                 hint="use free_boundary_resolution(), NZETA = 0, or a "
                      "divisor of the mgrid plane count",
             )
+    # Host loop-driver scalars (initial DELT, NSTEP cadence): call-signature
+    # config, never runtime pytree structure (solver._loop_driver_config).
+    time_step0, nstep_cadence = _loop_driver_config(
+        inp, time_step=time_step, nstep=nstep
+    )
     rt = prepare_runtime(
         inp, resolution, ftol=ftol, max_iterations=max_iterations,
-        time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+        tcon0=tcon0, gamma=gamma,
         lconm1=lconm1, precon_type=precon_type,
         prec2d_threshold=prec2d_threshold, prec2d=prec2d,
         use_fft=use_fft,
@@ -1705,11 +1727,9 @@ def _solve_free_boundary_stage(
     # free boundary must do it *before* constructing the fused axis-current
     # filament, otherwise a recoverable bad axis can fail the static-topology
     # guard before iteration 1.
-    _, _initial_geometry = _geometry(_init_state, rt)
-    _initial_jacobian = half_mesh_jacobian(_initial_geometry, s=rt.setup.s_full)
     if (
         allow_initial_axis_reguess
-        and bool(_initial_jacobian.jacobian_sign_changed)
+        and not bool(_jacobian_ok(_init_state, rt))
         and ns >= 3
     ):
         if verbose:
@@ -1723,9 +1743,7 @@ def _solve_free_boundary_stage(
                 zaxis_cc=_axis[2] if resolution.lasym else None,
             ), end="")
         _initial_ijacob = 1
-        _, _retry_geometry = _geometry(_init_state, rt)
-        _retry_jacobian = half_mesh_jacobian(_retry_geometry, s=rt.setup.s_full)
-        if bool(_retry_jacobian.jacobian_sign_changed):
+        if not bool(_jacobian_ok(_init_state, rt)):
             # Preserve the normal typed solver failure and its remedy hint;
             # do not let the later axis-filament topology guard obscure it.
             from .errors import BAD_JACOBIAN_FLAG, VmecJacobianError, WERROR_MESSAGES
@@ -1751,8 +1769,7 @@ def _solve_free_boundary_stage(
             # funct3d skips IVAC0, so forces.f consumes the coarse-stage rbsq
             # verbatim.  Express that product as an equivalent bsqvac on the
             # new geometry for the shared force seam.
-            _, carried_geometry = _geometry(_init_state, rt)
-            r_edge = carried_geometry.R_even[-1] + carried_geometry.R_odd[-1]
+            r_edge = _carried_edge_radius_lane(_init_state, rt)
             pres_ns = _vacuum_scalars(_init_state, rt)[5]
             rbsq = jnp.asarray(vacuum_continuation.rbsq, dtype=dtype)
             carried_edge = jnp.where(
@@ -1821,8 +1838,8 @@ def _solve_free_boundary_stage(
         prefetch = _launch_free_lane_prefetch(
             inp, external_field=external_field, ns=ns, ftol=float(rt.ftol),
             max_iterations=int(rt.max_iterations),
-            time_step=float(rt.time_step0), tcon0=float(rt.tcon0),
-            gamma=float(rt.gamma), nstep=int(rt.nstep), lconm1=lconm1,
+            time_step=time_step0, tcon0=float(rt.tcon0),
+            gamma=float(rt.gamma), nstep=nstep_cadence, lconm1=lconm1,
             precon_type=precon_type, prec2d_threshold=prec2d_threshold,
             prec2d=prec2d, use_fft=use_fft, device=prefetch_device,
             lmove_axis=bool(rt.lmove_axis), vacuum_on=bool(vacuum_active),
@@ -1837,7 +1854,7 @@ def _solve_free_boundary_stage(
 
     try:
         if verbose:
-            emit(stage_banner(ns, resolution.mnmax, rt.ftol, rt.max_iterations), end="")
+            emit(stage_banner(ns, resolution.mnmax, float(rt.ftol), rt.max_iterations), end="")
             # runvmec.f prints the residual legend once per run; later radial
             # rungs of a ladder keep only the NS banner and the column header.
             if emit_legend:
@@ -1851,25 +1868,42 @@ def _solve_free_boundary_stage(
             _init_state,
             rt_initial,
             ijacob=_initial_ijacob,
+            time_step0=time_step0,
             residuals=residual_continuation,
         )
         printed: set[int] = set()
+        emit_start = 1
         #: per-iteration DEL-BSQ recorded by the batched steady-state lane; rows
         #: not covered (pre-activation, turn-on pass) fall back to ``fb.delbsq``
         #: exactly as the per-pass driver printed them.
         delbsq_rows: dict[int, float] = {}
 
         def _emit_due(final: bool) -> None:
+            # Resume-index scan + transfer gate (solver._emit_lines twin):
+            # rows below ``emit_start`` are printed or permanently non-due,
+            # and a pass with no due row in range transfers nothing.  A due
+            # row whose slot is not yet written pins the resume index, so a
+            # later pass prints it exactly as the full rescan did — with the
+            # then-current DEL-BSQ fallback, as before.
+            nonlocal emit_start
             if not verbose:
                 return
             upto = int(carry.iteration) if bool(carry.done) or final else int(carry.iteration) - 1
+            if not _due_rows_pending(
+                    emit_start, upto, nstep=nstep_cadence, final=final):
+                return
             trajectory = np.asarray(carry.trajectory[: max(upto, 0)])
-            for it_p in range(1, upto + 1):
-                due = (it_p == 1) or (it_p % rt.nstep == 0) or (final and it_p == upto)
+            advancing = True
+            resume = max(1, emit_start)
+            for it_p in range(resume, upto + 1):
+                due = (it_p == 1) or (it_p % nstep_cadence == 0) or (final and it_p == upto)
                 if not due or it_p in printed:
+                    if advancing:
+                        resume = it_p + 1
                     continue
                 row = trajectory[it_p - 1]
                 if int(row[0]) != it_p:
+                    advancing = False
                     continue
                 emit(screen_line(
                     it_p, float(row[1]), float(row[2]), float(row[3]),
@@ -1878,6 +1912,14 @@ def _solve_free_boundary_stage(
                     del_bsq=delbsq_rows.get(it_p, float(fb.delbsq)),
                 ), end="")
                 printed.add(it_p)
+                if advancing:
+                    resume = it_p + 1
+            if bool(carry.done) and not final:
+                # A done carry keeps this ``upto`` for the terminating
+                # _emit_due(final=True) call, where row ``upto`` becomes
+                # unconditionally due — never resume past it.
+                resume = min(resume, max(upto, 1))
+            emit_start = resume
 
         # VMEC2000's LMOVE_AXIS path is triggered by the *first force pass*, not
         # only by a bad Jacobian.  Run that pass explicitly before entering the
@@ -1919,10 +1961,7 @@ def _solve_free_boundary_stage(
             if (vacuum_continuation is not None
                     and vacuum_continuation.turned_on):
                 if vacuum_continuation.rbsq is not None:
-                    _, carried_geometry = _geometry(_init_state, rt)
-                    r_edge = (
-                        carried_geometry.R_even[-1] + carried_geometry.R_odd[-1]
-                    )
+                    r_edge = _carried_edge_radius_lane(_init_state, rt)
                     pres_ns = _vacuum_scalars(_init_state, rt)[5]
                     rbsq = jnp.asarray(vacuum_continuation.rbsq, dtype=dtype)
                     carried_edge = jnp.where(
@@ -1953,6 +1992,7 @@ def _solve_free_boundary_stage(
             retry_xcdot = carry.xcdot
             carry = _initial_carry(
                 _init_state, rt_initial, ijacob=_initial_ijacob,
+                time_step0=time_step0,
                 xcdot=retry_xcdot,
                 residuals=(carry.fsqr, carry.fsqz, carry.fsql),
             )
@@ -2125,15 +2165,17 @@ def _solve_free_boundary_stage(
         _emit_due(final=True)
         ier = int(carry.ier)
         if ier == JAC75_FLAG and int(jacobian_retries) > 0:
-            retry_step = min(0.5, 0.5 * float(rt.time_step0))
+            retry_step = min(0.5, 0.5 * time_step0)
             if verbose:
                 emit(
                     " JACOBIAN RECOVERY RETRY: RESTARTING BEST FINITE "
                     f"STATE WITH DELT = {retry_step:.6g}"
                 )
-            # Retire this stage's prefetch before recursing: the retry's
-            # halved DELT is static meta, so none of the pending lanes match
-            # its structures (the finally below re-joins harmlessly).
+            # Retire this stage's prefetch before recursing: DELT is host
+            # loop-driver config (not meta), so the retry's lane structures
+            # match and any already-compiled executables are reused; the
+            # recursed stage relaunches its own worker for the remainder
+            # (the finally below re-joins harmlessly).
             if prefetch is not None:
                 prefetch[1].set()
                 prefetch[0].join()

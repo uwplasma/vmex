@@ -74,9 +74,8 @@ part :math:`w` of the Boozer generating potential, fixed by
    \frac{\partial w}{\partial\zeta}  = B_\zeta,
 
 with :math:`B_\theta,B_\zeta` the covariant components on the surface
-(:func:`~vmex.core.fields.magnetic_fields`). In
-:func:`~vmex.core.omnigenity.boozer_bmnc_state` this is inverted
-spectrally: after an FFT, the non-axisymmetric (:math:`m\ne 0`) harmonics of
+(:func:`~vmex.core.fields.magnetic_fields`). ``booz_xform_jax``'s kernel
+inverts this spectrally: the non-axisymmetric (:math:`m\ne 0`) harmonics of
 :math:`w` come from :math:`B_\theta` and the axisymmetric (:math:`m=0`)
 harmonics from :math:`B_\zeta`, matching the mode split of the Fortran
 ``booz_xform``. The coordinate shift is then
@@ -99,15 +98,19 @@ the angle bracket being the surface average over the original
 :math:`(\theta,\zeta)` grid. These are the ``bmnc_b`` coefficients (physical
 mode numbers ``xm_b``, ``xn_b``) consumed by every metric below.
 
-Two implementations share these equations. The host driver
-:func:`vmex.core.boozer.run_booz_xform` calls ``booz_xform_jax`` on a
-``wout_*.nc`` file and writes a standard ``boozmn_*.nc`` (used by ``vmec
---booz`` and by :func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout`).
-The traceable :func:`~vmex.core.omnigenity.boozer_bmnc_state` evaluates the
-*same* transform in pure ``jax.numpy`` directly from the solver's internal
-half-mesh field tables, so the Boozer spectrum — and any metric built on it —
-carries exact implicit gradients. The two agree to :math:`\sim10^{-6}` on the
-dominant modes.
+One transform implementation — ``booz_xform_jax``'s — executes these
+equations; vmex only feeds it. The host driver
+:func:`vmex.core.boozer.run_booz_xform` calls it on a ``wout_*.nc`` file and
+writes a standard ``boozmn_*.nc`` (used by ``vmec --booz`` and by
+:func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout`). The
+traceable :func:`~vmex.core.omnigenity.boozer_spectrum_state` calls the same
+jittable kernel in memory on wout-convention tables built from the solver's
+internal state (:func:`~vmex.core.boozer_tables.boozer_input_tables`), so
+the Boozer spectrum — and any metric built on it — carries exact implicit
+gradients. The two routes differ only through the table construction (the
+wout file stores half-mesh finite-difference averages of some families) and
+agree on the bundled QI deck to a measured :math:`1.7\times10^{-6}\,B_{00}`
+absolute and :math:`2\times10^{-5}` relative on the dominant modes.
 
 
 Quasisymmetry
@@ -140,13 +143,13 @@ units of ``nfp``):
      - :math:`|B|` contours in Boozer angles
    * - QA (quasi-axisymmetric)
      - :math:`(1,0)`
-     - close poloidally (tokamak-like)
+     - close toroidally (tokamak-like)
    * - QH (quasi-helical)
      - :math:`(1,\pm\mathrm{nfp})`
      - close helically
    * - QP (quasi-poloidal)
      - :math:`(0,1)`
-     - close toroidally
+     - close poloidally (QI-like)
 
 The two-term residual
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -163,13 +166,18 @@ requested surface, sampled on a uniform :math:`(\theta,\phi)` grid,
        - (\mathbf B\cdot\nabla B)\,(M G + N I)}{B^{3}},
 
 with :math:`M=` ``helicity_m``, :math:`N=` ``helicity_n``\ :math:`\times`\
-``nfp``, and :math:`G,I` the Boozer covariant averages ``bvco``/``buco``. The
-key algebraic fact is that :math:`f_{\mathrm{QS}}` **vanishes identically iff**
-:math:`|B|` is quasisymmetric with helicity :math:`(M,N)`; there is no residual
-symmetry-breaking harmonic left to penalize. The flux-surface sum
+``nfp``, and :math:`G,I` the Boozer covariant averages ``bvco``/``buco``; this
+is the residual inside eq. (1) of Landreman & Paul, Phys. Rev. Lett. 128,
+035001 (2022). The key algebraic fact is that :math:`f_{\mathrm{QS}}`
+**vanishes identically iff** :math:`|B|` is quasisymmetric with helicity
+:math:`(M,N)` (Helander, Rep. Prog. Phys. 77, 087001 (2014)); there is no
+residual symmetry-breaking harmonic left to penalize. The flux-surface sum
 :math:`\sum f_{\mathrm{QS}}^2`, weighted by the surface measure
-:math:`\sqrt{\mathrm{nfp}\,\Delta\theta\,\Delta\phi\,|\sqrt g|/V'}`, reproduces
-simsopt's ``QuasisymmetryRatioResidual`` A/B bit-for-bit. Kept in
+:math:`\sqrt{\mathrm{nfp}\,\Delta\theta\,\Delta\phi\,|\sqrt g|/V'}`, is
+simsopt's ``QuasisymmetryRatioResidual`` A/B formula on the same grid with the
+same weighting. No simsopt oracle runs in this test suite, so the gated
+comparison is VMEX's own traceable lane against its wout lane
+(``tests/test_optimize_traceable_qs.py``). Kept in
 Gauss–Newton (per-point) form, it feeds the least-squares driver as an exact
 residual vector rather than a pre-summed scalar. The metric is evaluated from
 the parity-proven wout tables (:mod:`vmex.core.nyquist`) and also exposes a
@@ -283,8 +291,9 @@ line, a marginal or merged level, or more wells than ``max_wells`` returns NaN
 with a false ``valid_pitch`` flag. This makes a topology error visible instead
 of turning it into a favorable zero. The low-level Boozer-spectrum function
 accepts cosine and sine harmonics, and so does the equilibrium objective:
-:func:`~vmex.core.omnigenity.boozer_bmnc_state` dispatches ``lasym`` states to
-the full booz_xform transform and returns ``bmns_b`` alongside ``bmnc_b``,
+:func:`~vmex.core.omnigenity.boozer_spectrum_state` runs symmetric and
+``lasym`` states through the same booz_xform kernel and returns ``bmns_b``
+alongside ``bmnc_b`` (all-zero in the symmetric case),
 which every QI residual above passes through. On an up-down-asymmetric deck
 the traceable cosine and sine spectra are gated against the host
 booz_xform_jax reconstruction at ``2e-2`` and ``3e-2`` relative, and the QI
@@ -461,7 +470,9 @@ Assuming the ideal prerequisite :math:`D_{\rm Merc}>0`, the
 Glasser--Greene--Johnson necessary condition for local resistive interchange
 stability is :math:`D_R \leq 0`.  In the VMEC Mercier normalization, with
 :math:`S=d\iota/d\Phi` and
-:math:`D_{\rm shear}=S^2/4`, Landreman--Jorge's relation is
+:math:`D_{\rm shear}=S^2/4`, the Landreman--Jorge relation (J. Plasma
+Phys. 86, 905860510 (2020), eq. (5.6); :math:`D_R` and :math:`H` are
+their eqs. (5.1) and (5.4)) is
 
 .. math::
 
@@ -681,12 +692,19 @@ bounce-averaged drift and the flux surface,
      \frac{B}{\sqrt{1-\lambda B}}\,\gamma_c^{2}\right\rangle,
 
 with :math:`v_r` and :math:`v_p` the bounce-averaged radial and
-poloidal-tangential magnetic drifts and :math:`\Gamma_c^{2}` the
-prompt-loss scaling used in optimization (Velasco et al., Nucl. Fusion 61,
-116059 (2021), eqs. 14-16, the KNOSOS/CIEMAT-QI form; Bader et al. and
-Paul et al. document that such proxies correlate imperfectly with measured
+poloidal-tangential magnetic drifts (Velasco et al., Nucl. Fusion 61,
+116059 (2021), eqs. 14-16, in the Nemov/DESC form with the surface-tangency
+factor evaluated at the field minimum of each well; KNOSOS uses the
+:math:`\gamma_c^*` variant, which drops that factor).  The residual rows
+are :math:`\Gamma_c` per surface, so the least-squares cost is the sum of
+:math:`w\,\Gamma_c^{2}`; the square is the least-squares form, and
+:math:`\Gamma_c` itself is a proxy rather than a loss law — Velasco et al.
+2021 (section 5.4) find the prompt-loss fraction follows their
+:math:`|\gamma_c^*|` variant (eq. 21) more linearly, and validate
+:math:`\Gamma_\alpha` as the predictor.  Bader et al. and Paul et
+al. document that such proxies correlate imperfectly with measured
 energetic-particle losses, which bounds what any :math:`\Gamma_c` value
-claims). :class:`~vmex.core.gammac.GammaC` evaluates the drift ratio in
+claims. :class:`~vmex.core.gammac.GammaC` evaluates the drift ratio in
 Nemov's own form — DESC's rewrite into single-valued periodic maps
 (``desc.compute._fast_ion`` on the bounce kernel of Unalmis et al., J.
 Plasma Phys. 92(3), 2026, doi:10.1017/S0022377826101652, DESC's sibling
@@ -714,3 +732,30 @@ any well-slot overflow so an under-provisioned evaluation is visible.
 Axisymmetry sends
 :math:`\Gamma_c \to 0` exactly (:math:`\partial_\alpha J = 0`), which the
 tests anchor together with the QA-versus-unoptimized ordering.
+
+**The hard value is not a gradient objective.** The discretized
+:class:`~vmex.core.gammac.GammaC` gradient is exact but not convergent:
+hard well detection and hard branch selection make the discretized
+:math:`\Gamma_c` piecewise in the boundary coefficients with
+grid-dependent breakpoints, and the measured li383 refinement ladder flips
+sign three times (``tests/test_gammac.py``).  Two structures carry the
+noise, both identified by direct gradient decomposition: a pitch node
+landing at distance :math:`d` from a barrier top inherits the
+:math:`1/d` level-curvature of the logarithmically divergent bounce time,
+and a well cell whose radial *and* tangential bounce-averaged drifts
+cancel simultaneously (a superbanana corner) contributes
+:math:`\mathrm d(\arctan(v_r/v_p))/\mathrm dp \sim 1/\|(v_r, v_p)\|` with
+arbitrary sign.  :class:`~vmex.core.gammac.GammaCSmooth` regularizes
+exactly these two structures on the same wells and bounce quadrature — a
+kernel floor :math:`1/\sqrt{\max(1-\lambda B, 0) + \delta}` with
+:math:`\delta` a fixed, stop-gradiented fraction of the trapped range
+(which also removes the birth/death jump of the well-connection graph of
+Ochs 2025, since a newborn well's floored bounce time starts at zero
+rather than the finite oscillator period), and a per-well corner floor
+that compares the drift cancellation against the well's own
+absolute-value bounce integrals.  Its boundary derivative holds one sign
+with bounded magnitude spread on the same ladder; its value sits below
+the hard one (the smoothing deliberately cannot see structure below
+:math:`\delta` — the near-omnigenous QA ripple most of all) and anneals
+toward it as ``temperature`` decreases with a correspondingly finer
+budget.  Optimize the surrogate, report the hard value.

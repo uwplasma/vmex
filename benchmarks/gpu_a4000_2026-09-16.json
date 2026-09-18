@@ -1,0 +1,902 @@
+{
+ "_provenance": {
+  "command": "python benchmarks/run_gpu_matrix.py --skip-tridiag --timeout 900",
+  "generator": "benchmarks/run_gpu_matrix.py",
+  "hardware": "2x NVIDIA RTX A4000 (16 GiB each), driver 580.173.02, CUDA 12",
+  "measurement_commit": "5ee94c930696d1c16d28cb651ad389124f17ffb2",
+  "measurement_date": "2026-09-16",
+  "note": "Companion to benchmarks/gpu_baseline.json (2026-07-09, different hardware). On this machine the GPU does not win any cell: warm gain runs 0.17x to 0.83x across every shipped deck and every point of the synthetic ns x mnmax scan, including NuhrenbergZille_1988_QHS at 111 s of warm CPU work. The GPU_MIN_ITERATION_WORK crossover therefore does not transfer; see docs/howto/run-on-gpu.md.",
+  "reading_note": "Every cell records backend='gpu' and both CUDA devices: that is jax.default_backend()/jax.devices() from the worker process, which sees the accelerator whatever device the solve is pinned to, so it does NOT say where a cell ran. Read placement from peak_device_mem_mb instead -- null on cpu/ cells, 4.8 to 113.5 MB on gpu/ cells -- and note that iteration counts match exactly between the cpu/ and gpu/ cell of each deck and lane (434, 2829, 125, 189), which is the control that the two ran the same physics on different hardware.",
+  "software": "JAX 0.11.1 with jax[cuda12], Python 3.12, x64 enabled"
+ },
+ "matrix": {
+  "LandremanPaul2021_QA_lowres": {
+   "cpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 24.96
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 5.487,
+    "compile_est_s": 5.198,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.99,
+    "iterations": 189,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 1.531,
+    "subprocess_wall_s": 7.521,
+    "warm_wall_s": 0.289
+   },
+   "gpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 46.413
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 10.146,
+    "compile_est_s": 9.714,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.921,
+    "iterations": 189,
+    "ok": true,
+    "peak_device_mem_mb": 80.6,
+    "per_iter_ms": 2.287,
+    "subprocess_wall_s": 12.395,
+    "warm_wall_s": 0.432
+   }
+  },
+  "NuhrenbergZille_1988_QHS": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 154.432,
+    "compile_est_s": 43.527,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.826,
+    "iterations": 2829,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 39.203,
+    "subprocess_wall_s": 267.362,
+    "warm_wall_s": 110.905
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 6.079,
+    "compile_est_s": 5.85,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.939,
+    "iterations": 125,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 1.837,
+    "subprocess_wall_s": 8.053,
+    "warm_wall_s": 0.23
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 228.381,
+    "compile_est_s": 94.744,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.835,
+    "iterations": 2829,
+    "ok": true,
+    "peak_device_mem_mb": 113.5,
+    "per_iter_ms": 47.238,
+    "subprocess_wall_s": 364.178,
+    "warm_wall_s": 133.637
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 10.725,
+    "compile_est_s": 10.408,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.888,
+    "iterations": 125,
+    "ok": true,
+    "peak_device_mem_mb": 80.5,
+    "per_iter_ms": 2.537,
+    "subprocess_wall_s": 12.82,
+    "warm_wall_s": 0.317
+   }
+  },
+  "cth_like_fixed_bdy": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 6.428,
+    "compile_est_s": 6.007,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.821,
+    "iterations": 434,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 0.972,
+    "subprocess_wall_s": 8.233,
+    "warm_wall_s": 0.422
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 2.898,
+    "compile_est_s": 2.505,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.846,
+    "iterations": 434,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 0.907,
+    "subprocess_wall_s": 4.861,
+    "warm_wall_s": 0.394
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 11.831,
+    "compile_est_s": 11.094,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.849,
+    "iterations": 434,
+    "ok": true,
+    "peak_device_mem_mb": 72.3,
+    "per_iter_ms": 1.698,
+    "subprocess_wall_s": 14.087,
+    "warm_wall_s": 0.737
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 5.836,
+    "compile_est_s": 5.117,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.832,
+    "iterations": 434,
+    "ok": true,
+    "peak_device_mem_mb": 4.8,
+    "per_iter_ms": 1.657,
+    "subprocess_wall_s": 8.19,
+    "warm_wall_s": 0.719
+   }
+  },
+  "nfp4_QH_warm_start": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 7.304,
+    "compile_est_s": 6.98,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.84,
+    "iterations": 450,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 0.719,
+    "subprocess_wall_s": 9.019,
+    "warm_wall_s": 0.324
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 4.922,
+    "compile_est_s": 4.642,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.837,
+    "iterations": 450,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 0.621,
+    "subprocess_wall_s": 6.767,
+    "warm_wall_s": 0.279
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 12.264,
+    "compile_est_s": 10.815,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.839,
+    "iterations": 450,
+    "ok": true,
+    "peak_device_mem_mb": 80.2,
+    "per_iter_ms": 3.221,
+    "subprocess_wall_s": 15.223,
+    "warm_wall_s": 1.449
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 8.792,
+    "compile_est_s": 7.368,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.832,
+    "iterations": 450,
+    "ok": true,
+    "peak_device_mem_mb": 80.2,
+    "per_iter_ms": 3.164,
+    "subprocess_wall_s": 11.883,
+    "warm_wall_s": 1.424
+   }
+  },
+  "solovev": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 5.715,
+    "compile_est_s": 5.65,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.901,
+    "iterations": 215,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 0.301,
+    "subprocess_wall_s": 7.199,
+    "warm_wall_s": 0.065
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 2.579,
+    "compile_est_s": 2.527,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.822,
+    "iterations": 215,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 0.243,
+    "subprocess_wall_s": 4.11,
+    "warm_wall_s": 0.052
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "cold_wall_s": 8.434,
+    "compile_est_s": 8.124,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.862,
+    "iterations": 215,
+    "ok": true,
+    "peak_device_mem_mb": 0.2,
+    "per_iter_ms": 1.442,
+    "subprocess_wall_s": 10.265,
+    "warm_wall_s": 0.31
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 4.635,
+    "compile_est_s": 4.331,
+    "converged": true,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.832,
+    "iterations": 215,
+    "ok": true,
+    "peak_device_mem_mb": 0.2,
+    "per_iter_ms": 1.413,
+    "subprocess_wall_s": 6.549,
+    "warm_wall_s": 0.304
+   }
+  },
+  "synth_nfp4QH_ns151_mpol2_ntor2": {
+   "cpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 6.109
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 5.172,
+    "compile_est_s": 4.832,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.855,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 2.272,
+    "subprocess_wall_s": 7.158,
+    "warm_wall_s": 0.341
+   },
+   "gpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 10.29
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 8.779,
+    "compile_est_s": 7.734,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.818,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": 5.5,
+    "per_iter_ms": 6.968,
+    "subprocess_wall_s": 11.536,
+    "warm_wall_s": 1.045
+   }
+  },
+  "synth_nfp4QH_ns151_mpol4_ntor4": {
+   "cpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 6.595
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 5.317,
+    "compile_est_s": 4.603,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.847,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 4.761,
+    "subprocess_wall_s": 7.678,
+    "warm_wall_s": 0.714
+   },
+   "gpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 12.902
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 10.183,
+    "compile_est_s": 8.778,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.838,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": 12.4,
+    "per_iter_ms": 9.368,
+    "subprocess_wall_s": 13.333,
+    "warm_wall_s": 1.405
+   }
+  },
+  "synth_nfp4QH_ns35_mpol2_ntor2": {
+   "cpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 4.884
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 5.063,
+    "compile_est_s": 4.943,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.889,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 0.801,
+    "subprocess_wall_s": 6.848,
+    "warm_wall_s": 0.12
+   },
+   "gpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 7.262
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 8.403,
+    "compile_est_s": 7.866,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.838,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": 1.3,
+    "per_iter_ms": 3.576,
+    "subprocess_wall_s": 10.652,
+    "warm_wall_s": 0.536
+   }
+  },
+  "synth_nfp4QH_ns35_mpol4_ntor4": {
+   "cpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 8.167
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 4.851,
+    "compile_est_s": 4.633,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 1.01,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 1.45,
+    "subprocess_wall_s": 6.864,
+    "warm_wall_s": 0.217
+   },
+   "gpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 16.312
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 9.504,
+    "compile_est_s": 9.032,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.846,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": 32.3,
+    "per_iter_ms": 3.145,
+    "subprocess_wall_s": 11.705,
+    "warm_wall_s": 0.472
+   }
+  },
+  "synth_nfp4QH_ns75_mpol2_ntor2": {
+   "cpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 6.11
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 4.928,
+    "compile_est_s": 4.748,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.859,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 1.197,
+    "subprocess_wall_s": 6.754,
+    "warm_wall_s": 0.18
+   },
+   "gpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 9.77
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 8.171,
+    "compile_est_s": 7.495,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.832,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": 2.7,
+    "per_iter_ms": 4.502,
+    "subprocess_wall_s": 10.575,
+    "warm_wall_s": 0.675
+   }
+  },
+  "synth_nfp4QH_ns75_mpol4_ntor4": {
+   "cpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 6.239
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 4.959,
+    "compile_est_s": 4.551,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.849,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms": 2.724,
+    "subprocess_wall_s": 7.019,
+    "warm_wall_s": 0.409
+   },
+   "gpu/multigrid": {
+    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "ok": false,
+    "subprocess_wall_s": 12.243
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "cold_wall_s": 9.343,
+    "compile_est_s": 8.473,
+    "converged": false,
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.837,
+    "iterations": 150,
+    "ok": true,
+    "peak_device_mem_mb": 32.7,
+    "per_iter_ms": 5.802,
+    "subprocess_wall_s": 11.941,
+    "warm_wall_s": 0.87
+   }
+  }
+ },
+ "meta": {
+  "date": "2026-09-16 09:34",
+  "host": "pop-os",
+  "office": false,
+  "synth_niter": 150,
+  "xla_flags": null
+ },
+ "stepscan": {
+  "ns151_mpol2_ntor2": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 2.1247,
+    "per_solve_overhead_s": 0.062,
+    "subprocess_wall_s": 9.65,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.381,
+    "wall_450_s": 1.018
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 2.007,
+    "per_solve_overhead_s": 0.035,
+    "subprocess_wall_s": 11.391,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.337,
+    "wall_450_s": 0.939
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 9.0,
+    "per_iter_ms_marginal": 6.3082,
+    "per_solve_overhead_s": 0.143,
+    "subprocess_wall_s": 19.417,
+    "unexpected_failures": 0,
+    "wall_150_s": 1.09,
+    "wall_450_s": 2.982
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 9.0,
+    "per_iter_ms_marginal": 6.1703,
+    "per_solve_overhead_s": 0.089,
+    "subprocess_wall_s": 22.512,
+    "unexpected_failures": 0,
+    "wall_150_s": 1.014,
+    "wall_450_s": 2.865
+   }
+  },
+  "ns151_mpol4_ntor4": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 4.4819,
+    "per_solve_overhead_s": 0.092,
+    "subprocess_wall_s": 14.109,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.764,
+    "wall_450_s": 2.108
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 4.4131,
+    "per_solve_overhead_s": 0.05,
+    "subprocess_wall_s": 15.926,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.712,
+    "wall_450_s": 2.036
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 17.4,
+    "per_iter_ms_marginal": 8.5346,
+    "per_solve_overhead_s": 0.199,
+    "subprocess_wall_s": 24.806,
+    "unexpected_failures": 0,
+    "wall_150_s": 1.479,
+    "wall_450_s": 4.039
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 17.4,
+    "per_iter_ms_marginal": 8.4912,
+    "per_solve_overhead_s": 0.114,
+    "subprocess_wall_s": 28.54,
+    "unexpected_failures": 0,
+    "wall_150_s": 1.388,
+    "wall_450_s": 3.935
+   }
+  },
+  "ns35_mpol2_ntor2": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 0.603,
+    "per_solve_overhead_s": 0.041,
+    "subprocess_wall_s": 6.717,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.131,
+    "wall_450_s": 0.312
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 0.5515,
+    "per_solve_overhead_s": 0.031,
+    "subprocess_wall_s": 8.817,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.114,
+    "wall_450_s": 0.28
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 2.0,
+    "per_iter_ms_marginal": 2.9824,
+    "per_solve_overhead_s": 0.111,
+    "subprocess_wall_s": 13.199,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.559,
+    "wall_450_s": 1.453
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 2.0,
+    "per_iter_ms_marginal": 2.9712,
+    "per_solve_overhead_s": 0.076,
+    "subprocess_wall_s": 16.454,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.522,
+    "wall_450_s": 1.413
+   }
+  },
+  "ns35_mpol4_ntor4": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 1.2088,
+    "per_solve_overhead_s": 0.05,
+    "subprocess_wall_s": 7.906,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.232,
+    "wall_450_s": 0.594
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 1.1436,
+    "per_solve_overhead_s": 0.037,
+    "subprocess_wall_s": 9.873,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.209,
+    "wall_450_s": 0.552
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 4.7,
+    "per_iter_ms_marginal": 2.5521,
+    "per_solve_overhead_s": 0.112,
+    "subprocess_wall_s": 13.202,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.495,
+    "wall_450_s": 1.261
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 4.7,
+    "per_iter_ms_marginal": 2.5735,
+    "per_solve_overhead_s": 0.077,
+    "subprocess_wall_s": 16.888,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.463,
+    "wall_450_s": 1.235
+   }
+  },
+  "ns75_mpol2_ntor2": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 1.0292,
+    "per_solve_overhead_s": 0.044,
+    "subprocess_wall_s": 7.446,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.199,
+    "wall_450_s": 0.507
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 0.9705,
+    "per_solve_overhead_s": 0.032,
+    "subprocess_wall_s": 9.435,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.177,
+    "wall_450_s": 0.468
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 4.6,
+    "per_iter_ms_marginal": 3.9498,
+    "per_solve_overhead_s": 0.118,
+    "subprocess_wall_s": 14.864,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.711,
+    "wall_450_s": 1.896
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 4.6,
+    "per_iter_ms_marginal": 3.9008,
+    "per_solve_overhead_s": 0.079,
+    "subprocess_wall_s": 18.209,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.664,
+    "wall_450_s": 1.835
+   }
+  },
+  "ns75_mpol4_ntor4": {
+   "cpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 2.546,
+    "per_solve_overhead_s": 0.061,
+    "subprocess_wall_s": 10.523,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.442,
+    "wall_450_s": 1.206
+   },
+   "cpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": null,
+    "per_iter_ms_marginal": 2.458,
+    "per_solve_overhead_s": 0.04,
+    "subprocess_wall_s": 12.296,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.409,
+    "wall_450_s": 1.146
+   },
+   "gpu/multigrid": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 9.4,
+    "per_iter_ms_marginal": 4.5983,
+    "per_solve_overhead_s": 0.142,
+    "subprocess_wall_s": 17.159,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.832,
+    "wall_450_s": 2.211
+   },
+   "gpu/single_jit": {
+    "backend": "gpu",
+    "ok": true,
+    "peak_device_mem_mb": 9.4,
+    "per_iter_ms_marginal": 4.6476,
+    "per_solve_overhead_s": 0.087,
+    "subprocess_wall_s": 21.126,
+    "unexpected_failures": 0,
+    "wall_150_s": 0.784,
+    "wall_450_s": 2.178
+   }
+  }
+ },
+ "tridiag": {}
+}

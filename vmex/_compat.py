@@ -27,10 +27,14 @@ import os
 import platform
 
 
-_CACHE_FORMAT_VERSION = "2"
+_CACHE_FORMAT_VERSION = "3"
+_CACHE_MAX_ENTRIES = 1024            # resident executables; see _prune_cache_entries
+_CACHE_RECENT_SECONDS = 24 * 3600    # entries used this recently survive the cap, up to 4x it
 _CACHE_SIZE_FLOOR = 2 << 30          # 2 GiB
 _CACHE_SIZE_CEILING = 20 << 30       # 20 GiB
 _CACHE_DISK_FRACTION = 0.10
+_CACHE_ENTRY_SUFFIX = "-cache"       # jax._src.lru_cache naming
+_CACHE_ATIME_SUFFIX = "-atime"
 
 
 def _default_cache_max_size(path: str | None = None) -> int:
@@ -54,6 +58,93 @@ def _default_cache_max_size(path: str | None = None) -> int:
         return _CACHE_SIZE_FLOOR
     scaled = int(_CACHE_DISK_FRACTION * float(free))
     return int(min(_CACHE_SIZE_CEILING, max(_CACHE_SIZE_FLOOR, scaled)))
+
+
+def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
+    """Drop the least recently used cache entries above ``max_entries``.
+
+    JAX's LRU cache re-scans the whole cache directory on every *write*: each
+    ``put`` globs the directory, stats every entry and reads every atime
+    sidecar, all under the directory-wide lock.  The cost is linear in the
+    number of resident entries and, measured on an Apple M4, is 0.028 ms per
+    entry -- 5.7 ms per write at 250 entries but 304 ms at 10880, the size a
+    developer machine reaches in a few weeks.  With vmex's floor-0 policy (we
+    store every program, which is worth it on reload) a cold QA solve writes
+    ~170 entries, so a mature cache turned a 7.5 s solve into 31.3 s, 82% of
+    it directory scans.  JAX's own bound is on bytes, and these entries are
+    small, so it never fires.
+
+    Bounding the entry count instead costs one scan per process rather than
+    one per write.  A fixed bound alone evicts a large workload's own working
+    set: the QI optimization example writes 1,342 executables, so a 1,024 cap
+    dropped 318 of them at every import, and every returning run recompiled
+    and rewrote the same 318.  Entries used within ``_CACHE_RECENT_SECONDS``
+    are therefore kept up to four times ``max_entries``, and only older ones
+    are trimmed to ``max_entries``.  Measured on a 36-thread Xeon: the QI
+    example's warm run misses nothing (its compile 68.0 s -> 38.6 s); a cold
+    seed-deck solve against 4,026 stale entries still sees the cache pruned to
+    1,024 (10.2 s, against 9.7 s with the plain cap); and the worst case, 4,026
+    recent entries, costs 17.9 s, where a fixed 4,096 cap costs 19.0 s on any
+    mature cache (a write scans 99 ms at 4,026 entries against 26 ms at 1,024).
+    Returns the number of entries removed.
+    """
+    try:
+        import pathlib
+
+        path = pathlib.Path(cache_dir)
+        entries = list(path.glob(f"*{_CACHE_ENTRY_SUFFIX}"))
+        if len(entries) <= max_entries:
+            return 0
+    except Exception:  # missing directory, unreadable filesystem
+        return 0
+
+    lock = None
+    try:
+        import filelock
+
+        lock = filelock.FileLock(path / ".lockfile")
+        lock.acquire(timeout=5)
+    except Exception:
+        # No filelock, or another process holds it and is likely pruning too.
+        return 0
+
+    removed = 0
+    try:
+        def _atime(entry: "pathlib.Path") -> int:
+            sidecar = entry.with_name(
+                entry.name[: -len(_CACHE_ENTRY_SUFFIX)] + _CACHE_ATIME_SUFFIX
+            )
+            try:
+                return int.from_bytes(sidecar.read_bytes(), "little")
+            except Exception:
+                return 0
+
+        import time
+
+        atimes = {entry: _atime(entry) for entry in entries}
+        ordered = sorted(entries, key=atimes.__getitem__, reverse=True)
+        recent_cutoff = time.time_ns() - _CACHE_RECENT_SECONDS * 1_000_000_000
+        recent = sum(1 for entry in ordered if atimes[entry] >= recent_cutoff)
+        keep = max(max_entries, min(recent, 4 * max_entries))
+        for entry in ordered[keep:]:
+            sidecar = entry.with_name(
+                entry.name[: -len(_CACHE_ENTRY_SUFFIX)] + _CACHE_ATIME_SUFFIX
+            )
+            try:
+                entry.unlink()
+                removed += 1
+            except OSError:
+                continue
+            try:
+                sidecar.unlink()
+            except OSError:
+                pass
+    finally:
+        try:
+            lock.release()
+        except Exception:
+            pass
+    return removed
 
 
 def _env(name: str, default: str = "") -> str:
@@ -94,22 +185,63 @@ def _jaxlib_version_tuple() -> tuple[int, ...] | None:
 def _cache_deserialize_unsafe() -> bool:
     """True when *reading* the persistent cache can kill this process.
 
-    jaxlib < 0.10 on macOS dies with SIGBUS/SIGILL inside
-    ``PyClient::DeserializeExecutable`` when loading a cached XLA:CPU
-    executable holding more than a few hundred kernels: LLVM ORC
-    materializes the per-kernel Mach-O objects recursively on one
-    fixed-size worker-thread stack (RTDyldObjectLinkingLayer::emit ->
+    jaxlib < 0.10 dies inside ``PyClient::DeserializeExecutable`` when
+    loading a cached XLA:CPU executable holding more than a few hundred
+    kernels (SIGBUS/SIGILL on macOS, SIGSEGV on Linux): LLVM ORC
+    materializes the per-kernel objects recursively on one fixed-size
+    worker-thread stack (RTDyldObjectLinkingLayer::emit ->
     ExecutionSession::lookup -> dispatchOutstandingMUs -> emit -> ...),
     and every vmex solve/adjoint executable is large enough to overflow
     it deterministically on the first warm rerun.  Reproduced on jaxlib
-    0.9.2 with a 300-kernel jit program; verified fixed in jaxlib 0.10.0.
+    0.9.2 with a 300-kernel jit program on both platforms; the same
+    program reloads cleanly on jaxlib 0.10.
     An unknown jaxlib version counts as unsafe: losing the cache costs a
     recompile, trusting it can cost the process.
     """
-    if platform.system() != "Darwin":
-        return False
     version = _jaxlib_version_tuple()
     return version is None or version < _CACHE_DESERIALIZE_SAFE_JAXLIB
+
+
+_EXT_DIGEST_CHUNK = 1 << 20
+
+
+def _jaxlib_backend_identity() -> list[str]:
+    """Fingerprint parts tied to the jaxlib build that will actually run.
+
+    Distribution metadata can survive an in-place up/downgrade stale or
+    broken — and that is exactly when reusing the old cache is most
+    dangerous: XLA:CPU AOT entries record the target features the compiling
+    backend chose (e.g. ``+prefer-no-gather``), and a different jaxlib's AOT
+    loader rejects them or segfaults.  Record the version constant of the
+    module Python will import, plus a bounded content digest (size, leading
+    and trailing :data:`_EXT_DIGEST_CHUNK` bytes) of the native XLA
+    extension, so any compiler/loader change lands in a fresh cache
+    directory.  ``jaxlib.version`` is pure Python; nothing here loads the
+    native extension.
+    """
+    parts: list[str] = []
+    try:
+        import jaxlib.version
+        parts.append(f"jaxlib-runtime={jaxlib.version.__version__}")
+    except Exception:
+        return parts
+    try:
+        ext_dir = os.path.dirname(jaxlib.__file__ or "")
+        digest = hashlib.sha256()
+        for name in sorted(os.listdir(ext_dir)):
+            if (name.split(".", 1)[0] in ("_jax", "xla_extension")
+                    and name.endswith((".so", ".pyd", ".dylib"))):
+                path = os.path.join(ext_dir, name)
+                size = os.path.getsize(path)
+                digest.update(f"{name}:{size}".encode())
+                with open(path, "rb") as fh:
+                    digest.update(fh.read(_EXT_DIGEST_CHUNK))
+                    fh.seek(max(size - _EXT_DIGEST_CHUNK, _EXT_DIGEST_CHUNK))
+                    digest.update(fh.read(_EXT_DIGEST_CHUNK))
+        parts.append(f"jaxlib-ext={digest.hexdigest()[:16]}")
+    except Exception:
+        pass
+    return parts
 
 
 def _cache_machine_fingerprint() -> str:
@@ -118,9 +250,11 @@ def _cache_machine_fingerprint() -> str:
     XLA CPU persistent-cache entries are native executables.  On shared home
     directories, reusing an entry compiled on another CPU can trigger XLA AOT
     loader errors or even illegal-instruction failures.  The fingerprint keeps
-    vmex's default cache portable by separating entries by OS, machine, and
-    CPU-feature/model signature.  Users who deliberately want a shared cache can
-    still set ``VMEX_COMPILATION_CACHE_DIR`` or ``JAX_COMPILATION_CACHE_DIR``.
+    vmex's default cache portable by separating entries by OS, machine,
+    CPU-feature/model signature, and jaxlib compiler/loader identity
+    (:func:`_jaxlib_backend_identity`).  Users who deliberately want a shared
+    cache can still set ``VMEX_COMPILATION_CACHE_DIR`` or
+    ``JAX_COMPILATION_CACHE_DIR``.
     """
 
     parts = [
@@ -135,6 +269,7 @@ def _cache_machine_fingerprint() -> str:
             parts.append(f"{package}={importlib_metadata.version(package)}")
         except Exception:
             pass
+    parts.extend(_jaxlib_backend_identity())
     try:
         if os.path.exists("/proc/cpuinfo"):
             wanted = ("model name", "cpu family", "model", "stepping", "flags", "Features")
@@ -179,8 +314,8 @@ def _default_compilation_cache_dir() -> str | None:
 
     The persistent cache is enabled **by default on every backend** (CPU too)
     so repeated cold-process CLI/API runs reuse compiled kernels instead of
-    recompiling (a solovev CLI rerun drops 4.3 s -> 1.2 s) — except on
-    macOS with jaxlib < 0.10, where deserializing a large cached CPU
+    recompiling (a solovev CLI rerun drops 4.3 s -> 1.2 s) — except with
+    jaxlib < 0.10, where deserializing a large cached CPU
     executable crashes the process (see :func:`_cache_deserialize_unsafe`)
     and the default is therefore off until jaxlib is upgraded;
     ``VMEX_COMPILATION_CACHE=1`` or an explicit cache-dir variable still
@@ -210,8 +345,8 @@ def _default_compilation_cache_dir() -> str | None:
     if cache_flag in ("disabled", "0", "false", "no", "off"):
         return None
 
-    # macOS + jaxlib < 0.10 crashes deserializing large cached CPU
-    # executables (see _cache_deserialize_unsafe): default the cache off
+    # jaxlib < 0.10 crashes deserializing large cached CPU executables on
+    # every platform (see _cache_deserialize_unsafe): default the cache off
     # there.  An explicit VMEX_COMPILATION_CACHE=1 (or a *_CACHE_DIR path
     # above) still turns it on.
     if (cache_flag not in ("1", "true", "yes", "on", "enabled")
@@ -238,6 +373,14 @@ def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None
     if cache_dir is None:
         return
     try:
+        # Keep the directory small before anything writes to it: every write
+        # re-scans it (see _prune_cache_entries).  0 disables the bound.
+        max_entries = int(_env("CACHE_MAX_ENTRIES", str(_CACHE_MAX_ENTRIES)))
+        if max_entries > 0:
+            _prune_cache_entries(cache_dir, max_entries)
+    except Exception:
+        pass
+    try:
         jax_module.config.update("jax_enable_compilation_cache", True)
     except Exception:
         pass
@@ -246,9 +389,13 @@ def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None
     except Exception:
         pass
     try:
-        # Keep JAX's useful default: tiny elementwise kernels are cheaper to
-        # rebuild than to store and were creating tens of thousands of files.
-        min_compile = _env("CACHE_MIN_COMPILE_TIME_SECS", "1")
+        # Store every compilation. The 1 s floor JAX defaults to left most of
+        # the polishing path's programs unstored - hundreds of sub-second
+        # compiles whose reload savings add up: the polished shaped-tokamak
+        # CLI rerun measured 60.6 s at floor 1 versus 31.6 s at floor 0
+        # (first runs 81.5 s versus 90.7 s, the write cost, paid once). Disk
+        # stays bounded by the eviction cap configured below.
+        min_compile = _env("CACHE_MIN_COMPILE_TIME_SECS", "0")
         jax_module.config.update("jax_persistent_cache_min_compile_time_secs", float(min_compile))
     except Exception:
         pass
@@ -310,10 +457,12 @@ def _configure_jax_environment() -> None:
         # memory is reclaimed at callback boundaries; users can still override
         # this before import with JAX_CPU_ENABLE_ASYNC_DISPATCH=true.
         os.environ.setdefault("JAX_CPU_ENABLE_ASYNC_DISPATCH", "false")
-        # Suppress harmless informational C++ logs from XLA/PjRt (e.g.
-        # repeated "Assume version compatibility..." on persistent-cache
-        # hits).  Level 0=INFO, 1=WARNING, 2=ERROR — default to ERROR-only so
-        # genuine errors still surface.
+        # Suppress harmless informational C++ logs from XLA/PjRt.  Level
+        # 0=INFO, 1=WARNING, 2=ERROR — default to ERROR-only so genuine errors
+        # still surface.  JAX/jaxlib 0.9.1-0.9.2 can nevertheless print a
+        # spurious PJRT warning on persistent-cache hits; the upstream fix is
+        # in 0.10.0+, and the WSL driver-parser fix joins it in 0.10.1.  Do not
+        # raise this to level 3 merely to hide the separate CUDA error stream.
         os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
         os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
         os.environ.setdefault("GLOG_minloglevel", "2")

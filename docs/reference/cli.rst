@@ -37,7 +37,8 @@ Options
    * - ``--plot [PATH]``
      - Generate plots. With a ``wout_*.nc`` file, plot the summary (including
        automatic Boozer ``|B|`` and 3-D LCFS), cross-sections, profiles, and
-       standalone Mercier/pressure-ramp stability and 3-D LCFS figures; with
+       standalone normalized radial force-balance,
+       Mercier/pressure-ramp stability, and 3-D LCFS figures; with
        a ``mout_*.nc`` file, plot horizontal straight-axis mirror diagnostics;
        with a ``boozmn_*.nc`` file, plot Boozer diagnostics; with an input
        file, solve first and plot the resulting WOUT.
@@ -86,6 +87,33 @@ Options
      - Override the final-stage ``FTOL_ARRAY`` tolerance.
    * - ``--max-iter N``
      - Override the final-stage ``NITER_ARRAY`` iteration cap.
+   * - ``--polish [MODE]`` / ``--no-polish``
+     - Force-balance polishing after the finest fixed-boundary stage:
+       ``auto``, ``true`` (the bare flag), or ``false``. Overrides the
+       ``!@VMEX POLISH`` input directive. With no flag or directive,
+       polishing is disabled.
+       Precedence is ``CLI > Python keyword > file directive > default``.
+   * - ``--polish-tol VALUE``
+     - Override the polish force tolerance
+       (:class:`vmex.PolishConfig` ``tolerance``).
+   * - ``--polish-fail {error,fallback,warn}``
+     - What a failed polish does: raise, return the unpolished state, or
+       return it and print a warning. Never a silent substitution.
+   * - ``--polish-degree {3,5,7}``
+     - Radial B-spline degree of the polished representation.
+   * - ``--polish-max-iter N``
+     - Cap the polish Gauss-Newton iterations
+       (:class:`vmex.PolishConfig` ``max_nonlinear_iterations``).
+   * - ``--polish-spans N``
+     - Radial B-spline spans of the polished representation
+       (default: derived from the solve resolution, at most 32).
+   * - ``--polish-budget SECONDS``
+     - Wall-clock ceiling ``--polish auto`` will commit to.  AUTO times one
+       Gauss-Newton linear product on the problem at hand, multiplies by the
+       iteration limits, and returns the equilibrium unpolished if the
+       result exceeds this (:class:`vmex.PolishConfig`
+       ``auto_budget_seconds``, default 3600).  ``--polish true`` never
+       consults it.
    * - ``--restart WOUT``
      - Hot-restart the solve from a ``wout_*.nc`` file (VMEX- or
        VMEC2000-written): the equilibrium state is rebuilt from the file,

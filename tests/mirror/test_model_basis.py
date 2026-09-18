@@ -44,6 +44,7 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
         "build_qi_mirror_hybrid",
         "splice_straight_legs",
         "trace_closed_field_line",
+        "gk_closed_fieldline_geometry",
         "solve_fixed_boundary",
         "solve_fixed_boundary_from_radius",
         "solve_free_boundary",
@@ -57,6 +58,9 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
         "save_free_boundary_restart",
         "load_free_boundary_restart",
         "summarize_axisymmetric_beta_scan",
+        "mirror_ratio_diagnostics",
+        "MirrorRatioDiagnostics",
+        "MirrorWell",
     }
     internal = {
         "ChebyshevBasis",
@@ -66,7 +70,7 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
     }
     assert required <= set(mirror_api.__all__)
     assert internal.isdisjoint(mirror_api.__all__)
-    assert len(mirror_api.__all__) == 28
+    assert len(mirror_api.__all__) == 32
     assert mirror_api.solve_fixed_boundary.__module__ == "vmex.mirror.splines"
 
 

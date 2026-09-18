@@ -14,10 +14,12 @@ from vmex import optimize as opt
 
 nfp = 2  # number of field periods
 SURFACES = np.linspace(0.1, 1.0, 10)
-MAX_MODES, MAX_NFEV = [1,2,3], [10, 10, 15]
+MAX_MODES, MAX_NFEV = [1, 2, 3], [10, 10, 15]
 MAGNETIC_WELL_TARGET = 0.01
 ASPECT_TARGET = 5.0
-# MAX_MODES, MAX_NFEV = [1,2,3,4,5,6,7,8,9], [10, 10, 15, 20, 25, 40, 50, 60, 60]
+# For a larger design space use:
+# MAX_MODES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+# MAX_NFEV = [10, 10, 15, 20, 25, 40, 50, 60, 60]
 # MAGNETIC_WELL_TARGET = 0.07
 # ASPECT_TARGET = 3.5
 IOTA_FLOOR = 0.42
@@ -61,7 +63,10 @@ report = opt.EquilibriumReporter(
     ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
 monitor = opt.OptimizationMonitor(stream=None)
 
-# Optimize for QA first, then add the pressure-stability proxy locally.
+# The canonical example retains nonlinear least squares so users can inspect
+# individual residual rows and use SciPy's trust-region model. The companion
+# QA_optimization_scalar.py minimizes the identical aggregate cost with one
+# reverse equilibrium adjoint per gradient.
 equilibrium = opt.solve_equilibrium(inp)
 # If a RuntimeWarning reports uncertified Jacobian columns, it is expected
 # once the optimizer leaves the seed and needs no action: the shipped
@@ -69,15 +74,15 @@ equilibrium = opt.solve_equilibrium(inp)
 # optimum, since ten times that budget moved the Jacobian by 2e-8 and
 # certified no extra column. Both are from_tuples arguments; pass
 # evaluation_progress=False to drop the per-evaluation timing lines.
-for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
+for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
     inp = replace(inp, delt=0.5).change_resolution(
         mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-    stage_terms = objective_function_terms
-    problem = opt.VmecProblem.from_tuples(inp, stage_terms, max_mode=max_mode,
-        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
-        restart_from=equilibrium)
+    problem = opt.VmecProblem.from_tuples(
+        inp, objective_function_terms, max_mode=max_mode,
+        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
+        ess_alpha=ESS_ALPHA, restart_from=equilibrium)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:
@@ -85,11 +90,10 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
     step = PARAMETER_STEP * problem.scales
     result = least_squares(
         problem.residual, problem.x0, jac=problem.residual_jac,
-        x_scale=step,max_nfev=max_nfev, bounds=(
-                problem.x0 - MAX_PARAMETER_CHANGE * step,
+        x_scale=step, max_nfev=max_nfev,
+        bounds=(problem.x0 - MAX_PARAMETER_CHANGE * step,
                 problem.x0 + MAX_PARAMETER_CHANGE * step),
-        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor
-    )
+        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
     inp = problem.input_from_x(result.x)
     equilibrium = problem.equilibrium_from_x(result.x)
     report(f"mode {max_mode}", equilibrium)

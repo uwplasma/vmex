@@ -150,6 +150,55 @@ def test_gpu_request_on_cpu_machine_raises():
             dev.resolve_device("gpu", _res(ns=11, mpol=6, ntor=0))
 
 
+def test_multigrid_moves_residual_continuation_with_the_state():
+    """A rung placed on a new device must not leave the previous rung's
+    residual scalars behind.
+
+    ``solve_multigrid`` moves the state to each rung's placement device but
+    carried ``(fsqr, fsqz, fsql)`` from the rung before straight through, so
+    an AUTO ladder that crossed the CPU/GPU work threshold built a carry with
+    the state on one device and its residual scalars on another; the jitted
+    while lane rejects that.  Forcing consecutive rungs onto two devices
+    reproduces it without needing a GPU.
+    """
+    devices = []
+    for platform in ("gpu", "cpu"):
+        try:
+            devices = jax.devices(platform)
+        except RuntimeError:
+            pass
+        if len(devices) >= 2:
+            break
+    if len(devices) < 2:
+        pytest.skip("two devices unavailable")
+    # Two short rungs: the failure is in how the second rung's carry is
+    # assembled, so it needs a rung boundary, not convergence.
+    inp = replace(
+        VmecInput.from_file(DATA / "input.solovev"),
+        ns_array=[3, 5], niter_array=[2, 2], ftol_array=[1.0, 1.0],
+    )
+    placements = []
+
+    def alternating(_device, _resolution):
+        target = devices[min(len(placements), 1)]
+        placements.append(target)
+        return target
+
+    original = multigrid._placement_device
+    multigrid._placement_device = alternating
+    try:
+        result = multigrid.solve_multigrid(
+            inp, mode="jit", device="auto", verbose=False,
+            prefetch_compile=False,
+        )
+    finally:
+        multigrid._placement_device = original
+
+    assert placements[:2] == [devices[0], devices[1]]
+    assert np.all(np.isfinite(np.asarray(result.rmnc)))
+    assert np.asarray(result.rmnc).shape[0] == 5  # the fine rung really ran
+
+
 def test_fixed_boundary_honors_second_device_without_outer_context():
     devices = []
     for platform in ("gpu", "cpu"):
@@ -456,3 +505,84 @@ def test_free_boundary_uses_shared_device_context(monkeypatch):
     assert seen["solve"][1]["max_iterations"] == 3
     assert freeboundary.solve_free_boundary.__kwdefaults__["device"] == dev.AUTO
     assert multigrid.solve_free_boundary_multigrid.__kwdefaults__["device"] == dev.AUTO
+
+
+def test_commit_to_single_device_only_normalizes_one_shared_placement():
+    loose = jax.numpy.arange(3.0)
+    target = next(iter(loose.devices()))
+    pinned = jax.device_put(np.ones(2), target)
+    assert not loose._committed and pinned._committed
+    host = np.zeros(1)
+    tree = {"loose": loose, "pinned": pinned, "label": "kept", "host": host, "none": None}
+
+    out = dev.commit_to_single_device(tree)
+
+    assert out["loose"]._committed and out["pinned"]._committed
+    assert out["loose"].sharding == loose.sharding
+    np.testing.assert_array_equal(out["loose"], loose)
+    np.testing.assert_array_equal(out["pinned"], pinned)
+    assert out["label"] == "kept" and out["host"] is host and out["none"] is None
+
+    scalars = {"x": 1.0, "host": host}
+    assert dev.commit_to_single_device(scalars) is scalars
+    mesh = jax.sharding.Mesh(np.asarray([target]), ("device",))
+    named = jax.device_put(
+        np.ones(2), jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
+    )
+    mixed = (loose, named)
+    assert dev.commit_to_single_device(mixed) is mixed
+
+    traced = []
+    jax.make_jaxpr(
+        lambda x: traced.append(dev.commit_to_single_device((x, pinned))[0] is x) or x
+    )(loose)
+    assert traced == [True]
+
+
+def test_placement_neutral_clears_the_context_only_for_committed_jit_arguments():
+    loose = jax.numpy.arange(3.0)
+    target = next(iter(loose.devices()))
+    pinned = jax.device_put(np.ones(2), target)
+
+    def clears(tree):
+        with jax.default_device(target):
+            with dev.placement_neutral(tree):
+                return jax.config.jax_default_device is None
+
+    with jax.disable_jit(False):
+        assert clears((pinned, "label"))
+        assert not clears((loose, pinned))
+        assert not clears({"x": 1.0})
+        assert isinstance(dev.placement_neutral((loose,)), contextlib.nullcontext)
+    with jax.disable_jit(True):
+        assert not clears((pinned,))
+
+
+def test_host_callback_is_not_pinned_across_platforms():
+    """A CPU pin inside an accelerator computation is not expressible in JAX.
+
+    ``resolve_implicit_device`` stands the implicit-gradient path down to the
+    CPU on an accelerator backend.  Pinning the host callback there while the
+    enclosing jit compiles for the accelerator made JAX's lowering raise
+    ``tuple.index(x): x not in tuple`` -- every jitted optimization gradient on
+    a GPU machine.  Same-platform pins, including the two-accelerator case the
+    pin exists for, are kept.
+    """
+    import dataclasses
+
+    from vmex.core import implicit as im
+
+    class _FakeDevice:
+        def __init__(self, platform: str) -> None:
+            self.platform = platform
+
+    cfg = im.make_config(VmecInput.from_file(DATA / "input.solovev"), multigrid=True)
+    here = jax.default_backend()
+    other = "gpu" if here != "gpu" else "tpu"
+
+    assert im._callback_sharding(dataclasses.replace(cfg, device=None)) is None
+    assert im._callback_sharding(
+        dataclasses.replace(cfg, device=_FakeDevice(other))) is None
+    same = im._callback_sharding(
+        dataclasses.replace(cfg, device=jax.devices(here)[0]))
+    assert isinstance(same, jax.sharding.SingleDeviceSharding)

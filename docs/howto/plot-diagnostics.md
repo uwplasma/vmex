@@ -36,7 +36,8 @@ paths = vj.plot_wout(wout_data, outdir="figs",
 
 `plot_wout` accepts a path or an in-memory
 {class}`~vmex.core.wout.WoutData`, and `which=` selects a subset of
-`("summary", "surfaces", "modB", "profiles", "stability", "3d")`. Per-figure helpers
+`("summary", "surfaces", "modB", "profiles", "stability", "3d")`.
+Per-figure helpers
 ({func}`~vmex.core.plotting.plot_summary`,
 {func}`~vmex.core.plotting.plot_stability`, ...) return single figures for
 embedding in your own scripts; `examples/plot_and_boozer.py` is the worked
@@ -45,8 +46,16 @@ version.
 ## The summary figure
 
 `*_summary.png` is a publication-style diagnostic set: rotational transform
-(full mesh), pressure, the parallel bootstrap current
-$\langle \mathbf{J}\cdot\mathbf{B} \rangle$, Mercier `DMerc` and the Glasser
+(full mesh) with the parallel bootstrap current
+$\langle \mathbf{J}\cdot\mathbf{B} \rangle$ on its right axis, a combined
+confinement panel — pressure on the left axis, with the effective ripple
+$\epsilon_{\rm eff}^{3/2}$ (NEO_JAX at the bounded
+{func}`~vmex.core.neoclassical.diagnostic_neo_config` resolution) and the
+fast-ion proxy $\Gamma_c$
+({func}`~vmex.core.gammac.gamma_c_from_wout` at a compact radial-trend
+sampling) sharing one dimensionless right axis — the force error
+$\langle|\mathbf J\times\mathbf B-\nabla p|\rangle_s/\langle|\nabla(B^2/2\mu_0)|\rangle_V$,
+Mercier `DMerc` and the Glasser
 resistive-interchange $D_R$ with $V''(s)$ on a color-matched right axis,
 a 3-D LCFS, and the second adiabatic invariant in the polar disk
 $x=s\cos\alpha$, $y=s\sin\alpha$. Concentric $J$ contours diagnose
@@ -58,18 +67,30 @@ a host-side reconstruction of the WOUT file, which carries the sine-parity
 partner tables and so covers both symmetry classes. The reconstruction checks
 itself by reproducing the stored `DMerc` profile from the same integrals; on
 mismatch the curve is omitted with a panel note rather than drawn
-unvalidated.
-With `vmex[neoclassical]` installed, the pressure panel also shows the
-conventional NEO quantity $\epsilon_{\rm eff}^{3/2}$ at bounded diagnostic
-resolution. If NEO_JAX is unavailable, the right axis says so instead of
-silently omitting the diagnostic. Use
+unvalidated. The force error is rebuilt from the WOUT tables on the interior
+surfaces and divided by the volume average of $|\nabla(B^2/2\mu_0)|$ over
+$V$: $0.1\le s\le 0.99$, the normalization DESC and the polish certificate
+report; the scalar card gives the volume average of the ratio. It does not
+saturate and stays defined in vacuum. A converged low-resolution deck (for
+example `mpol = ntor = 2`) can still read high: that is spectral truncation
+error, which `equif` could not show, not a solver failure. WOUT's `equif`
+({func}`~vmex.core.postprocess.force_balance`) is not plotted: it is bounded
+by 1 and equals 1 on every surface of a currentless vacuum, however well
+converged.
+The confinement panel's two right-axis profiles are radial *trends*, not
+transport numbers: both diagnostics run at bounded summary resolution, they
+share the summary's one in-process Boozer transform where the mathematics is
+common (NEO consumes it directly; $\Gamma_c$ keeps its validated real-space
+field-line route), and the computed profiles are cached per in-memory WOUT so
+repeated summary generation does not recompute or recompile them.  A
+diagnostic that is unavailable (NEO_JAX not installed, `lasym` Boozer
+tables, a failed evaluation) is dropped from the panel with the reason
+recorded — never drawn as zero.  Use
 {func}`vmex.core.neoclassical.epsilon_effective_from_wout` with an explicit
-`neo_jax.NeoConfig` for a converged transport calculation; the summary curve
-is intended only to show radial trends.
-The WOUT adapter releases completed JAX executables before its first NEO
-compile, avoiding the large cold-start time and memory observed when VMEX and
-NEO executables coexist. This is appropriate for an end-of-run plot; pass
-`clear_jax_caches=False` when preserving warm executables for subsequent solves.
+`neo_jax.NeoConfig` when a publication effective-ripple calculation is
+wanted; the library default no longer clears process-wide JAX caches
+(`clear_jax_caches=False`) — the CLI releases the plot-only executables
+itself after all requested diagnostics.
 The two stability indices and $V''(s)$ use separate scales whose zero levels
 are aligned; $V''(s)<0$ denotes a magnetic well. Their legend sits below the
 panel so it cannot hide a curve.

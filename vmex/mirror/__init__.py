@@ -29,6 +29,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "splice_straight_legs": (".splines", "splice_straight_legs"),
     "QIMirrorSplice": (".splines", "QIMirrorSplice"),
     "trace_closed_field_line": (".splines", "trace_closed_field_line"),
+    "gk_closed_fieldline_geometry": (
+        ".turbulence",
+        "gk_closed_fieldline_geometry",
+    ),
     "solve_fixed_boundary": (".splines", "solve_fixed_boundary"),
     "solve_fixed_boundary_from_radius": (
         ".splines",
@@ -67,6 +71,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".output",
         "summarize_axisymmetric_beta_scan",
     ),
+    # Reported mirror ratios and mirror lengths (one definition, section 31.4-R3).
+    "MirrorRatioDiagnostics": (".metrics", "MirrorRatioDiagnostics"),
+    "MirrorWell": (".metrics", "MirrorWell"),
+    "mirror_ratio_diagnostics": (".metrics", "mirror_ratio_diagnostics"),
 }
 
 __all__ = sorted(_LAZY_ATTRS)

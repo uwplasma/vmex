@@ -15,6 +15,9 @@ FD steps: central differences with the same ftol/iteration policy on both
 sides, disk-cached per (case, parameter, step, ftol); chosen so truncation
 ~ h^2 sits above solver-termination noise ~ eps_wb / h: solovev h = 3e-5
 (boundary), 1e-5 (phiedge), 1e-4 (pres_scale); li383 h = 4e-4 (boundary).
+
+Sections 5-9 (li383 through multigrid) run from
+``test_implicit_grad_fd.py`` so the pull-request lanes fit their time cap.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ import jax.numpy as jnp
 from vmex.core import implicit as im
 from vmex.core import solver
 from vmex.core import stability as stab
+from vmex.core.errors import AdjointSolveError
 from vmex.core.input import VmecInput
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
@@ -136,6 +140,33 @@ def _tnorm(tree) -> float:
 def _tree_dot(left, right) -> float:
     return float(sum(jnp.vdot(a, b) for a, b in zip(
         jax.tree.leaves(left), jax.tree.leaves(right), strict=True)))
+
+
+def _compiles_during(fn) -> list[str]:
+    """Run ``fn`` under ``jax_log_compiles``; return the compile messages."""
+    import logging
+
+    compiles: list[str] = []
+
+    class _Handler(logging.Handler):
+        def emit(self, record):
+            message = record.getMessage()
+            if message.startswith("Compiling "):
+                compiles.append(message.split(" with global shapes")[0])
+
+    handler = _Handler()
+    logger = logging.getLogger("jax")
+    previous_level = logger.level
+    jax.config.update("jax_log_compiles", True)
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        fn()
+    finally:
+        jax.config.update("jax_log_compiles", False)
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+    return compiles
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +292,9 @@ def test_three_surface_raw_kernel_matches_global_nonlinear_rows(case):
 
 def test_residual_zero_at_fixed_point(case):
     name, inp, cfg, p0, x_star, rt, mask = case
+    assert _mask_bit_ident(mask, im._fixed_boundary_dof_mask(cfg)), (
+        f"{name}: analytic fixed-boundary support differs from the VJP oracle"
+    )
     P = im._dof_projector(cfg, mask)
     F = im.residual_fn(cfg, jax.lax.stop_gradient(x_star), mask)
     r0 = _tnorm(F(P(x_star), p0))
@@ -282,6 +316,243 @@ def _mask_bit_ident(a, b) -> bool:
                for f in im._STATE_FIELDS)
 
 
+def test_residual_lane_reuses_one_executable_across_trial_boundaries(solovev):
+    """Same-shape residuals from different frozen states share one program.
+
+    residual_fn used to return a fresh per-call ``@jax.jit`` closure that
+    baked ``frozen`` and the dof mask in as constants, so every trial
+    boundary of an optimization campaign recompiled it — five compilations
+    and more than half the wall time of a steady-state F7 campaign step in
+    the committed baseline. The lane is keyed on the (held) config and leaf
+    shapes only; new same-shape values must be cache hits.
+    """
+    import logging
+
+    _name, _inp, cfg, p0, x_star, _rt, mask = solovev
+    compiles: list[str] = []
+
+    class _Handler(logging.Handler):
+        def emit(self, record):
+            message = record.getMessage()
+            if (message.startswith("Compiling ")
+                    and "_preconditioned_residual_lane" in message):
+                compiles.append(message)
+
+    handler = _Handler()
+    logger = logging.getLogger("jax")
+    previous_level = logger.level
+    jax.config.update("jax_log_compiles", True)
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        jax.clear_caches()
+        z = im._dof_projector(cfg, mask)(x_star)
+        base = jax.block_until_ready(
+            im.residual_fn(cfg, x_star, mask)(z, p0))
+        after_first = len(compiles)
+        # Additive: a multiplicative bump is inert on the zero blocks.
+        trial_frozen = jax.tree.map(lambda a: a + 1.0e-6, x_star)
+        trial = jax.block_until_ready(
+            im.residual_fn(cfg, trial_frozen, mask)(z, p0))
+    finally:
+        jax.config.update("jax_log_compiles", False)
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+    assert after_first == 1
+    assert len(compiles) == 1, "a new frozen state recompiled the residual"
+    for leaf in jax.tree.leaves(base) + jax.tree.leaves(trial):
+        assert np.all(np.isfinite(leaf))
+    # The frozen state genuinely flows as data, not as a baked-in constant.
+    assert any(
+        not np.array_equal(a, b)
+        for a, b in zip(jax.tree.leaves(base), jax.tree.leaves(trial)))
+
+
+def test_repeated_same_shape_gradients_do_not_recompile(solovev):
+    """A warm un-jitted ``jax.grad`` repeat reuses every executable.
+
+    The host-eager backward used to hand ``solvax.gcrot`` a fresh closure
+    over each call's linearization residuals, so every repeat recompiled the
+    staged Krylov ``jit(while)`` — 5.4-6.5 s per repeat, most of the
+    measured F11 warm-gradient stage — and each ``run`` re-staged an
+    identity-keyed ``jit(pure_callback)``.  The adjoint solve is now one
+    module-level executable keyed on the canonical config
+    (``_adjoint_gcrot_core``) and the callback callable is memoized per
+    config, so a same-shape repeat must compile nothing.
+    """
+    _name, inp, cfg, p0, _x_star, _rt, _mask = solovev
+
+    def gradient():
+        jax.block_until_ready(jax.grad(
+            lambda p: im.run(inp, p, ftol=cfg.ftol,
+                             max_iterations=cfg.max_iterations).wb)(p0))
+
+    gradient()  # warm-up: the first evaluation may compile freely
+    compiles = _compiles_during(gradient)
+    assert compiles == [], f"warm gradient repeat recompiled: {compiles}"
+
+
+def test_enforce_adjoint_stats_typed_error_policy(solovev):
+    """The staged core's convergence certificate keeps the typed-error
+    contract: concrete unaccepted stats raise :class:`AdjointSolveError`
+    carrying the iteration/residual evidence (end-to-end with a starved
+    Krylov budget on the two-device rig in ``test_gpu_ci.py``), accepted
+    stats pass, and traced stats are a no-op — there the core has already
+    NaN-poisoned the returned lambda."""
+    _name, _inp, cfg, _p0, _x_star, _rt, _mask = solovev
+    bad = im._AdjointStats(
+        residual_norm=jnp.asarray(2.0e-3), iterations=jnp.asarray(7),
+        converged=jnp.asarray(False), tolerance=jnp.asarray(1.0e-9))
+    with pytest.raises(AdjointSolveError) as caught:
+        im._enforce_adjoint_stats(cfg, bad)
+    assert caught.value.iterations == 7
+    assert caught.value.residual_norm == 2.0e-3
+    assert caught.value.tolerance == 1.0e-9
+    im._enforce_adjoint_stats(cfg, bad._replace(converged=jnp.asarray(True)))
+    jax.jit(lambda stats: im._enforce_adjoint_stats(cfg, stats))(bad)
+
+
+def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
+    """The reverse rule's multiplier is exact and is the transpose of the raw tangent.
+
+    ``_adjoint_block_core`` solves ``(dF_raw/dz)^T mu = P gbar`` with the
+    transposed block factors refined once: its residual, measured here with an
+    independent raw pullback, is at round-off.  The pullback it feeds is the
+    transpose of the raw block tangent (the Jacobian lane's uncorrected
+    columns), so for random state cotangents and parameter directions the
+    reverse and forward dot products agree, under jit.  A tangent certified in
+    the preconditioned formulation differs from both by the anchor's residual,
+    not by solver error.  Both sides linearize at the lane's own anchor (the
+    refined state and structural mask of ``solve_implicit_with_aux``), not at
+    the fixture's unrefined host state.
+    """
+    _name, _inp, cfg, p0, _host_state, _rt, _mask = solovev
+    x_star, mask = im.solve_implicit_with_aux(p0, cfg)
+    rng = np.random.default_rng(7)
+    cotangent, direction = (
+        jax.tree.map(lambda a: jnp.asarray(rng.standard_normal(np.shape(a))), tree)
+        for tree in (x_star, p0))
+    P = im._dof_projector(cfg, mask)
+    z_star, b = P(x_star), P(cotangent)
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)  # the suite default is eager
+    try:
+        mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg)
+        raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
+        pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
+        defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
+        gradient = jax.jit(lambda p: jax.vjp(
+            lambda q: im.solve_implicit(q, cfg), p)[1](cotangent)[0])(p0)
+        system = im._raw_block_system(p0, cfg, x_star, mask, im._active_state_fields(cfg), 4)
+        rhs = jax.tree.map(jnp.negative, jax.jvp(lambda q: raw(z_star, q), (p0,), (direction,))[1])
+        dz = im._raw_block_apply(system, rhs)  # the band, refined once on the full raw JVP
+        dz = jax.tree.map(jnp.add, dz, im._raw_block_apply(system, jax.tree.map(
+            jnp.subtract, rhs, jax.jvp(lambda z: raw(z, p0), (z_star,), (dz,))[1])))
+        tangent = jax.jvp(
+            lambda z, q: im._assemble(z, im.runtime_from_params(q, cfg), x_star, P, im._edge_mask(cfg)),
+            (z_star, p0), (P(dz), direction))[1]
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+    assert bool(stats.converged) and defect <= 1e-10
+    reverse = sum(float(jnp.vdot(g, t)) for g, t in
+                  zip(jax.tree.leaves(gradient), jax.tree.leaves(direction)))
+    forward = sum(float(jnp.vdot(c, s)) for c, s in
+                  zip(jax.tree.leaves(cotangent), jax.tree.leaves(tangent)))
+    assert abs(reverse - forward) <= 1e-10 * abs(forward)
+
+
+def test_block_adjoint_certificate_failure_falls_back_to_krylov(monkeypatch, solovev):
+    """A missed block certificate falls back to the preconditioned GCROT adjoint."""
+    _name, _inp, cfg, p0, x_star, _rt, _mask = solovev
+    cotangent = jax.tree.map(jnp.ones_like, x_star)
+
+    def gradient():
+        return jax.vjp(lambda p: im.solve_implicit(p, cfg), p0)[1](cotangent)[0]
+
+    exact = gradient()
+    real_block, real_gcrot, calls = im._adjoint_block_core, im._adjoint_gcrot_core, []
+
+    def failed(*args):
+        mu, stats = real_block(*args)
+        return mu, stats._replace(converged=jnp.asarray(False))
+
+    def counted(*args):
+        calls.append(1)
+        return real_gcrot(*args)
+
+    monkeypatch.setattr(im, "_adjoint_block_core", failed)
+    monkeypatch.setattr(im, "_adjoint_gcrot_core", counted)
+    fallback = gradient()
+    assert calls == [1]
+    difference = _tnorm(jax.tree.map(jnp.subtract, fallback, exact))
+    assert difference <= 1e-8 * _tnorm(exact)
+
+
+def test_adjoint_debug_stages_on_default_device(monkeypatch, capfd, solovev):
+    """``VMEX_ADJOINT_DEBUG=1`` prints every reverse-pass stage line on the
+    ordinary single-device lane: the staged adjoint core keeps the eager
+    operator-application probe under the debug gate.  The two-device
+    placement variant lives in ``test_gpu_ci.py``."""
+    _name, inp, cfg, p0, _x_star, _rt, _mask = solovev
+    monkeypatch.setenv("VMEX_ADJOINT_DEBUG", "1")
+    gradient = jax.grad(
+        lambda p: im.run(inp, p, ftol=cfg.ftol,
+                         max_iterations=cfg.max_iterations).wb)(p0)
+    assert np.all(np.isfinite(np.asarray(gradient.rbc)))
+    err = capfd.readouterr().err
+    for stage in (
+        "backward entry",
+        "adjoint rhs P(gbar)",
+        "operator application (dF/dz)^T b",
+        "recovered lambda",
+        "implicit parameter contribution -lambda^T dF/dp",
+        "direct parameter contribution",
+    ):
+        assert f"[vmex adjoint] {stage}" in err, stage
+
+
+def test_content_token_distinguishes_each_supported_kind():
+    """Every branch of the config content key: arrays by bytes (numpy and
+    device arrays alike), sequences by element, devices and other
+    identity-like objects by repr."""
+    a = np.asarray([1.0, 2.0])
+    assert im._content_token(a) == im._content_token(a.copy())
+    assert im._content_token(a) != im._content_token(np.asarray([1.0, 3.0]))
+    assert im._content_token(jnp.asarray(a)) == im._content_token(a)
+    assert im._content_token((1, [2.0, "x"])) == ("tuple", (
+        1, ("list", (2.0, "x"))))
+    device = jax.devices()[0]
+    assert im._content_token(device) == ("repr", repr(device))
+
+
+def test_make_config_canonicalizes_equal_content(solovev):
+    """Equal-content configs share one instance; distinct content does not.
+
+    ``ImplicitConfig`` is ``eq=False``, so the residual lane's static
+    argument, ``_LAST_SOLVE``, and the template-runtime cache all key on
+    object identity. ``run``/``make_config`` mint a fresh config per
+    objective evaluation; without canonicalization the F4 baseline
+    recompiled the residual lane fourteen times per warm repeat of an
+    identical evaluation. The registry is a small LRU: eviction only costs
+    a later recompile, never correctness.
+    """
+    name, inp, _cfg, _p0, _x_star, _rt, _mask = solovev
+    cfg_a = im.make_config(inp, **CASES[name])
+    cfg_b = im.make_config(inp, **CASES[name])
+    assert cfg_a is cfg_b
+    cfg_c = im.make_config(inp, ftol=CASES[name]["ftol"] * 0.5,
+                           max_iterations=CASES[name]["max_iterations"])
+    assert cfg_c is not cfg_a
+    # The registry stays bounded: churning distinct contents evicts the
+    # oldest entries without breaking previously returned instances.
+    for extra in range(im._CONFIG_CANON_MAX + 3):
+        im.make_config(inp, ftol=1.0e-9 / (extra + 2),
+                       max_iterations=CASES[name]["max_iterations"])
+    assert len(im._CONFIG_CANON) <= im._CONFIG_CANON_MAX
+    assert im.make_config(inp, **CASES[name]).ftol == cfg_a.ftol
+
+
 def test_dof_mask_structural_invariance_and_cache(solovev):
     """The dof mask depends only on structure (resolution / lconm1 / ncurr),
     so ``_MASK_CACHE`` (keyed by ``_mask_cache_key``) reuses it across the
@@ -290,10 +561,15 @@ def test_dof_mask_structural_invariance_and_cache(solovev):
     across two fresh configs of the same structure."""
     name, inp, cfg, p0, x_star, rt, mask = solovev
 
-    # fresh configs of the same structure share one hashable structural key,
-    # even though ImplicitConfig is eq=False (object-identity equality).
-    cfg_a = im.make_config(inp, **CASES[name])
-    cfg_b = im.make_config(inp, **CASES[name])
+    # Configs of the same structure but different content share one
+    # structural key while remaining distinct instances (equal content is
+    # canonicalized to one instance -- see
+    # test_make_config_canonicalizes_equal_content -- so different ftol is
+    # what "fresh configs" means now).
+    cfg_a = im.make_config(inp, ftol=CASES[name]["ftol"],
+                           max_iterations=CASES[name]["max_iterations"])
+    cfg_b = im.make_config(inp, ftol=CASES[name]["ftol"] * 0.5,
+                           max_iterations=CASES[name]["max_iterations"])
     assert cfg_a is not cfg_b and cfg_a != cfg_b
     key = im._mask_cache_key(cfg)
     assert im._mask_cache_key(cfg_a) == key == im._mask_cache_key(cfg_b)
@@ -306,6 +582,7 @@ def test_dof_mask_structural_invariance_and_cache(solovev):
     mask_pert = im._dof_mask(x_star, rt1, cfg, seed=0)
     assert _mask_bit_ident(mask, mask_seed), f"{name}: mask not seed-invariant"
     assert _mask_bit_ident(mask, mask_pert), f"{name}: mask not parameter-invariant"
+    assert _mask_bit_ident(mask, im._fixed_boundary_dof_mask(cfg))
 
     # end-to-end: the module cache hits across two fresh configs (one entry).
     saved = dict(im._MASK_CACHE)
@@ -392,163 +669,6 @@ def test_adjoint_gmres_preconditioner_value(solovev):
     # raw force without the 1D preconditioner: stuck orders of magnitude away
     assert budgets["raw"] > 1e-6
     assert budgets["raw"] / budgets["preconditioned"] > 1e4
-
-
-# ---------------------------------------------------------------------------
-# 5. one 3D case: li383, d(wb)/d(boundary coefficient) vs FD
-# ---------------------------------------------------------------------------
-
-
-def test_li383_boundary_gradient_vs_fd():
-    name = "li383_low_res"
-    inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
-    cfg = im.make_config(inp, **CASES[name])
-    p0 = im.params_from_input(inp)
-    ntor = int(inp.ntor)
-
-    grad = jax.grad(
-        lambda p: im.run(inp, p, ftol=cfg.ftol,
-                         max_iterations=cfg.max_iterations).wb)(p0)
-    ad = float(np.asarray(grad.rbc)[ntor, 1])
-    fd = _fd(name, inp, cfg, p0, "rbc", (ntor, 1), 4e-4)["wb"]
-    rel = abs(ad / fd - 1.0)
-    print(f"\n[{name}] d(wb)/d(RBC(0,1)) h=4e-4: AD={ad:+.10e} FD={fd:+.10e} "
-          f"rel={rel:.2e} (FD noise floor ~3e-5)")
-    assert rel <= 2e-4
-
-
-# ---------------------------------------------------------------------------
-# 6. iteration-policy independence + memory sanity (informational)
-# ---------------------------------------------------------------------------
-
-
-def test_gradient_independent_of_iteration_policy(solovev):
-    """Only the fixed point defines the derivative; RSS prints are the
-    O(1)-memory sanity (backward = a few residual linearizations, no tape)."""
-    import resource
-
-    name, inp, cfg, p0, _, _, _ = solovev
-    rss = lambda: resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6  # noqa: E731
-
-    grads = {}
-    r0 = rss()
-    for cap in (500, 5000):
-        grads[cap] = jax.grad(
-            lambda p: im.run(inp, p, ftol=cfg.ftol, max_iterations=cap).wb)(p0)
-        print(f"\n[{name}] grad(wb) with max_iterations={cap}: "
-              f"peak RSS delta so far = {rss() - r0:.0f} MB")
-
-    a = np.asarray(grads[500].rbc)
-    b = np.asarray(grads[5000].rbc)
-    np.testing.assert_allclose(a, b, rtol=1e-9, atol=1e-14)
-    assert np.all(np.isfinite(a))
-
-
-# ---------------------------------------------------------------------------
-# 7. solver-sensitive metric (iota_edge, ncurr=1): the implicit adjoint equals
-#    the FROZEN-PATH FD; a naive full re-solve FD is NOT a valid reference.
-# ---------------------------------------------------------------------------
-
-
-def test_iota_edge_gradient_vs_frozen_path_fd():
-    """``d(iota_edge)/d(boundary)`` on the 3D ``ncurr=1`` case: the implicit
-    adjoint must equal the frozen-path central FD to solver accuracy.  A naive
-    re-solve FD is deliberately NOT the reference (measured, ``h=1e-4``):
-
-        RBC(n=-1,m=1):  adjoint -0.77343,  frozen-path FD -0.77343,  naive FD +0.04543  (sign flip)
-        RBC(n=+1,m=1):  adjoint -1.26567,  frozen-path FD -1.26567,  naive FD -2.14135  (69% off)
-    """
-    name = "li383_low_res"
-    inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
-    cfg = im.make_config(inp, **CASES[name])
-    p0 = im.params_from_input(inp)
-    ntor = int(inp.ntor)
-    assert int(inp.ncurr) == 1  # derived-iota case where the effect is largest
-
-    grad = jax.grad(
-        lambda p: im.run(inp, p, ftol=cfg.ftol,
-                         max_iterations=cfg.max_iterations).iota_edge)(p0)
-    zero = jax.tree.map(jnp.zeros_like, p0)
-    print(f"\n[{name}] d(iota_edge)/d(RBC): implicit adjoint vs frozen-path FD")
-    for n in (ntor - 1, ntor + 1):          # m=1, n=-1 (naive-FD sign flip) and n=+1
-        ad = float(np.asarray(grad.rbc)[n, 1])
-        tangent = dataclasses.replace(zero, rbc=zero.rbc.at[n, 1].set(1.0))
-        fd, info = im.frozen_path_directional_fd(
-            p0, cfg, im.iota_edge, tangent, h=1e-4)
-        res = max(info["newton_res"])
-        rel = abs(ad / fd - 1.0) if fd else abs(ad - fd)
-        print(f"  RBC(n={n - ntor:+d},m=1): AD={ad:+.9e}  frozen-FD={fd:+.9e}  "
-              f"rel={rel:.2e}  (Newton res {res:.0e})")
-        assert res < 1e-8, f"n={n - ntor}: frozen solve not converged (res {res:.1e})"
-        assert rel <= 3e-4, (
-            f"RBC(n={n - ntor},1): adjoint {ad:.5e} vs frozen-path FD {fd:.5e} "
-            f"(rel {rel:.2e}) — the implicit gradient must match the frozen path")
-
-
-# ---------------------------------------------------------------------------
-# 8. typed errors through pure_callback (zero-crash policy, plan Item I.1)
-# ---------------------------------------------------------------------------
-
-
-def test_typed_error_through_pure_callback():
-    """A failing host solve raises the SHORT typed exception, not callback
-    noise: the ``_HOST_ERROR`` relay stashes the typed exception in the host
-    callback and re-raises it at the ``pure_callback`` site with ``from
-    None`` (previously a ~3.7 KB raw ``JaxRuntimeError``)."""
-    from vmex.core.errors import VmecConvergenceError
-
-    inp = VmecInput.from_file(str(DATA_DIR / "input.solovev"))
-    with pytest.raises(VmecConvergenceError) as excinfo:
-        im.run(inp, ftol=1e-14, max_iterations=3)
-    exc = excinfo.value
-    assert len(str(exc)) < 200, f"typed message must stay short: {len(str(exc))} chars"
-    assert "MORE ITERATIONS REQUIRED" in str(exc)
-    assert exc.__cause__ is None and exc.__suppress_context__  # noise killed
-    assert exc.ftol == 1e-14  # diagnostics preserved
-
-    # the custom-vjp forward rule call site relays the typed exception too
-    p0 = im.params_from_input(inp)
-    with pytest.raises(VmecConvergenceError):
-        jax.grad(lambda p: im.run(inp, p, ftol=1e-14, max_iterations=3).wb)(p0)
-
-
-# ---------------------------------------------------------------------------
-# 9. multigrid implicit gradient vs frozen-path FD (plan Item I.4)
-# ---------------------------------------------------------------------------
-
-
-def test_multigrid_gradient_vs_frozen_path_fd():
-    """``im.run(multigrid=True)`` through a genuine ns 5 -> 11 solovev ladder:
-    the adjoint must match the frozen-path central FD of ``wb`` along
-    ``RBC(0,1)`` (only the final fixed point defines the derivative)."""
-    inp0 = VmecInput.from_file(str(DATA_DIR / "input.solovev"))
-    inp = dataclasses.replace(
-        inp0,
-        ns_array=np.array([5, 11]),
-        ftol_array=np.array([1e-10, 1e-14]),
-        niter_array=np.array([1000, 2000]),
-    )
-    cfg = im.make_config(inp, multigrid=True, ftol=1e-14)
-    assert cfg.multigrid and int(cfg.resolution.ns) == 11
-    p0 = im.params_from_input(inp)
-    ntor = int(inp.ntor)
-
-    grad = jax.grad(
-        lambda p: im.run(inp, p, multigrid=True, ftol=1e-14).wb)(p0)
-    ad = float(np.asarray(grad.rbc)[ntor, 1])
-
-    zero = jax.tree.map(jnp.zeros_like, p0)
-    tangent = dataclasses.replace(zero, rbc=zero.rbc.at[ntor, 1].set(1.0))
-    fd, info = im.frozen_path_directional_fd(p0, cfg, lambda s, rt:
-                                             im.mhd_energy(s, rt)[0],
-                                             tangent, h=3e-5)
-    res = max(info["newton_res"])
-    rel = abs(ad / fd - 1.0)
-    print(f"\n[solovev multigrid ns=5->11] d(wb)/d(RBC(0,1)) h=3e-5: "
-          f"AD={ad:+.10e}  frozen-FD={fd:+.10e}  rel={rel:.2e} "
-          f"(Newton res {res:.0e})")
-    assert res < 1e-8, f"frozen solve not converged (res {res:.1e})"
-    assert rel <= 1e-6
 
 
 def _assert_stability_gradients(
@@ -711,6 +831,13 @@ def lasym():
     rt = im.runtime_from_params(p0, cfg)
     mask = im._dof_mask(result.state, rt, cfg)
     return "up_down_asymmetric_tokamak", inp, cfg, p0, result.state, rt, mask
+
+
+def test_lasym_fixed_boundary_mask_matches_vjp_oracle(lasym):
+    """Exact 2-D asymmetric support retains both parity families."""
+
+    name, _inp, cfg, _p0, _state, _rt, mask = lasym
+    assert _mask_bit_ident(mask, im._fixed_boundary_dof_mask(cfg)), name
 
 
 def test_lasym_delta_rotation_traceable():
@@ -895,6 +1022,27 @@ def test_lasym_wb_aspect_gradient_vs_fd(lasym):
         assert rel <= tol, f"{out}/{field}{idx}: rel {rel:.3e} > {tol:.0e}"
 
 
+def test_lasym_repeated_same_shape_gradients_do_not_recompile(lasym):
+    """Same-shape LASYM repeated evaluations do not recompile (plan 14.6).
+
+    The LASYM gradient runs the identical reverse lane as the symmetric one
+    (the per-config staged ``_adjoint_gcrot_core`` plus the memoized host
+    callback), so a warm value-and-gradient repeat of an asymmetric deck
+    must be compile-free too — the acceptance gate for the measured
+    per-repeat ``jit(while)`` GCROT recompile of the F11 profile.
+    """
+    _name, inp, cfg, p0, _x_star, _rt, _mask = lasym
+
+    def value_and_gradient():
+        jax.block_until_ready(jax.value_and_grad(
+            lambda p: im.run(inp, p, ftol=cfg.ftol,
+                             max_iterations=cfg.max_iterations).wb)(p0))
+
+    value_and_gradient()  # warm-up: the first evaluation may compile freely
+    compiles = _compiles_during(value_and_gradient)
+    assert compiles == [], f"warm LASYM repeat recompiled: {compiles}"
+
+
 @pytest.mark.full
 def test_lasym_adjoint_vs_frozen_path_fd(lasym):
     """Lasym-adjoint correctness lock: the analytic directional derivative and
@@ -1026,7 +1174,8 @@ def test_lasym_3d_gradient_vs_frozen_path_fd(lasym_3d):
     """``jax.grad`` through ``im.run`` on a 3D lasym boundary vs frozen-path
     central FD: toroidal (n = 1) rbs/zbc dofs plus the symmetric rbc family
     as a regression guard; measured agreement ~1e-6..1e-8 (printed)."""
-    name, inp, cfg, p0, _, _, _ = lasym_3d
+    name, inp, cfg, p0, _, _, mask = lasym_3d
+    assert _mask_bit_ident(mask, im._fixed_boundary_dof_mask(cfg)), name
     ntor = int(inp.ntor)
 
     def outs(p):
@@ -1089,6 +1238,48 @@ def test_lasym_3d_state_is_anchored_at_the_frozen_root(lasym_3d):
           f"|x| = {_tnorm(host):.2e})")
     assert r_host > 1.0e-8, "the host stopping point already sits at the root"
     assert r_anchored <= cfg.refine_tol
+
+
+def test_nearby_refinement_seed_is_guarded_and_conservative(monkeypatch):
+    """A reused Newton displacement must improve F or replay the old path."""
+    class Config:
+        refine_tol = 0.1
+
+    cfg = Config()
+    state = jnp.asarray([10.0])
+    params = jnp.asarray([0.0])
+    monkeypatch.setattr(im, "_dof_projector", lambda *_: lambda value: value)
+    monkeypatch.setattr(im, "residual_fn", lambda *_: lambda z, _params: z)
+    monkeypatch.setattr(im, "_REFINE_MAX_STEPS", 1)
+    monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)  # the Krylov steps' guard
+
+    calls = []
+
+    def incomplete_step(_config, _params, _frozen, _dof_mask, z, fz):
+        calls.append(float(fz[0]))
+        # Both paths improve, but neither reaches the requested tolerance.
+        delta = 1.0 if float(fz[0]) < 7.0 else 2.0
+        z_new = z - delta
+        return z_new, z_new, jnp.linalg.norm(z_new), jnp.asarray(0.0)
+
+    monkeypatch.setattr(im, "_refine_step", incomplete_step)
+    legacy = im._refined_state(cfg, params, state, state)
+    warm = im._refined_state(
+        cfg, params, state, state, initial_correction=jnp.asarray([-5.0]))
+    np.testing.assert_array_equal(legacy, [8.0])
+    np.testing.assert_array_equal(warm, legacy)
+    assert calls == [10.0, 5.0, 10.0]
+
+    calls.clear()
+    exact = im._refined_state(
+        cfg, params, state, state, initial_correction=jnp.asarray([-10.0]))
+    np.testing.assert_array_equal(exact, [0.0])
+    assert calls == []
+
+    worse = im._refined_state(
+        cfg, params, state, state, initial_correction=jnp.asarray([1.0]))
+    np.testing.assert_array_equal(worse, legacy)
+    assert calls == [10.0]
 
 
 @pytest.mark.full

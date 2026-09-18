@@ -31,7 +31,10 @@ from vmex.core.multigrid import (  # noqa: E402
 )
 from vmex.core.solver import resolution_from_input  # noqa: E402
 
-from tests.test_qi_free_boundary_case import qi_free_field  # noqa: E402
+from tests.test_qi_free_boundary_case import (  # noqa: E402
+    qi_free_field,
+    qi_free_input,
+)
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
@@ -399,32 +402,40 @@ def test_use_fft_reaches_every_free_boundary_lane(tmp_path, monkeypatch):
     spy records what each lane receives during a short real solve."""
     import vmex.core.freeboundary as FBmod
 
-    mgrid = DATA / "mgrid_cth_like.nc"
-    if not mgrid.exists():
-        pytest.skip("mgrid fixture not fetched")
-
     seen: list[bool] = []
+    steady: list[bool] = []
     original = FBmod._make_body
 
-    def recording(rt, *, evaluation_state=None, use_fft=False):
+    # **kwargs, not the argument list of the day: a spy that re-declares
+    # _make_body's keywords goes stale the moment one is added, and the
+    # TypeError then surfaces inside a traced lane, far from its cause.
+    def recording(rt, *, use_fft=False, **kwargs):
         seen.append(bool(use_fft))
-        return original(rt, evaluation_state=evaluation_state, use_fft=use_fft)
+        # The steady vacuum lane is the only caller that hands the pass's
+        # single synthesis down.  Recording it is how this test proves it
+        # reached that lane and not the eqsolve one alone.
+        if kwargs.get("evaluation_synthesis") is not None:
+            steady.append(bool(use_fft))
+        return original(rt, use_fft=use_fft, **kwargs)
 
     monkeypatch.setattr(FBmod, "_make_body", recording)
     # fresh vacuum-lane cache: the steady lane bakes use_fft into its traced
     # body, so a cached lane from another test would bypass the spy
     monkeypatch.setattr(FBmod, "_VACUUM_EXECUTABLE_CACHE", {})
 
-    import dataclasses
+    # Generated modular coils, not the released CTH mgrid: the assertion is
+    # about which body each lane traces, not about a particular machine, and
+    # a pull-request lane must not depend on a release bundle.
+    inp = qi_free_input(ns_array=(9, 15), niter=40)
+    field = qi_free_field(int(inp.nfp))
 
-    inp = dataclasses.replace(
-        VmecInput.from_file(str(DATA / "input.cth_like_free_bdy")),
-        ns_array=[15], ftol_array=[1.0e-8], niter_array=[80])
-    from vmex.core.freeboundary import solve_free_boundary
-
-    solve_free_boundary(inp, mgrid_path=str(mgrid), use_fft=True,
-                        error_on_no_convergence=False)
+    solve_free_boundary_multigrid(
+        inp, external_field=field, use_fft=True,
+        raise_on_max_iterations=False)
     assert seen, "no lane was traced -- the spy never fired"
+    assert steady, (
+        "the steady vacuum lane was never traced -- the test would pass "
+        "without exercising freeboundary.py's own _make_body call")
     assert all(seen), (
         f"{seen.count(False)} lane trace(s) fell back to the dense body")
 

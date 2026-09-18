@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, fields
 from typing import Any, Callable
 
@@ -49,6 +50,37 @@ from .splines import (
 
 Array = Any
 _DENSE_JACOBIAN_MAX_SIZE = 32
+
+_NET_AXIAL_CURRENT_MESSAGE = (
+    "the free-boundary mirror lane requires current_derivative == 0. The "
+    "exterior vacuum is represented by a single-valued scalar potential that "
+    "decays at infinity on a topologically spherical Green surface "
+    "(vmex.mirror.exterior), whose exterior is simply connected, so it carries "
+    "no azimuthal field. A net axial plasma current I(s) != 0 produces "
+    "B_phi = mu0 I / (2 pi r) inside the plasma with no counterpart outside, "
+    "and the interface residual would then balance the plasma total pressure "
+    "against a vacuum field missing that component. Use the fixed-boundary "
+    "lane (solve_fixed_boundary), where the current closes through the end "
+    "plates, or set current_derivative=0 here."
+)
+
+
+def reject_net_axial_current(current_derivative: Any) -> None:
+    """Raise when a free-boundary mirror solve is given a net axial current.
+
+    The guard is a correctness gate, not a convenience check: with a nonzero
+    ``I'(s)`` the coupled residual compares physically inconsistent fields and
+    converges to a wrong answer without any diagnostic saying so.  See
+    ``plan.md`` sections 17.3 and 31.4-R2.
+    """
+
+    if isinstance(current_derivative, jax.core.Tracer):
+        # Traced controls are checked once on the concrete values the problem
+        # was built with; a tracer carries no value to test here.
+        return
+    values = np.asarray(current_derivative, dtype=float)
+    if np.any(values != 0.0):
+        raise ValueError(_NET_AXIAL_CURRENT_MESSAGE)
 
 
 @dataclass(frozen=True)
@@ -250,11 +282,15 @@ class _FreeEquilibriumProblem:
 
         def matvec(direction: np.ndarray) -> np.ndarray:
             tangent = jnp.asarray(direction).reshape(-1)
-            return np.asarray(jax.jvp(residual, (point,), (tangent,))[1], dtype=float)
+            return np.asarray(
+                _tangent_action_lane(point, tangent, residual=residual),
+                dtype=float)
 
         def rmatvec(cotangent: np.ndarray) -> np.ndarray:
             cotangent = jnp.asarray(cotangent).reshape(-1)
-            return np.asarray(jax.vjp(residual, point)[1](cotangent)[0], dtype=float)
+            return np.asarray(
+                _adjoint_action_lane(point, cotangent, residual=residual),
+                dtype=float)
 
         return LinearOperator(
             (residual_size, self.size),
@@ -267,13 +303,27 @@ class _FreeEquilibriumProblem:
         """Return the JAX-native exact residual Jacobian action."""
 
         point = jnp.asarray(vector)
-        return jax.jit(
-            lambda direction: jax.jvp(
-                self.residual_function,
-                (point,),
-                (direction,),
-            )[1]
-        )
+        return lambda direction: _tangent_action_lane(
+            point, direction, residual=self.residual_function)
+
+
+# Module scope with ``residual`` static and the linearization point traced —
+# ``residual_function`` is built once per problem, so its identity keys one
+# compiled program per problem.  The previous per-call staging paid per
+# Newton step (``linear_action``: a fresh ``jax.jit`` closure re-tracing and
+# recompiling the residual JVP) or per Krylov iteration
+# (``linear_operator``: an eager ``jax.jvp``/``jax.vjp`` re-linearizing the
+# residual on every LSMR matvec of the host trust-region solve).
+@functools.partial(jax.jit, static_argnames=("residual",))
+def _tangent_action_lane(point: Array, direction: Array, *,
+                         residual: Callable[[Array], Array]) -> Array:
+    return jax.jvp(residual, (point,), (direction,))[1]
+
+
+@functools.partial(jax.jit, static_argnames=("residual",))
+def _adjoint_action_lane(point: Array, cotangent: Array, *,
+                         residual: Callable[[Array], Array]) -> Array:
+    return jax.vjp(residual, point)[1](cotangent)[0]
 
 
 def _spline_boundary_work(
@@ -406,6 +456,7 @@ def _build_free_equilibrium_problem(
     grid = discretization.grid
     if grid.ntheta != 1:
         raise ValueError("free-boundary mirrors currently support only axisymmetric geometry")
+    reject_net_axial_current(current_derivative)
     calibrate_pressure = target_central_pressure is not None
     vectorizer = _SplineFreeBoundaryVectorizer.build(
         initial_boundary,
@@ -551,8 +602,13 @@ def solve_free_boundary(
     and ``None`` follow the common VMEX placement contract. Numeric values
     captured by a field callable can be relocated only when the callable is a
     registered pytree such as :class:`jax.tree_util.Partial`.
+
+    A nonzero ``current_derivative`` is rejected: the exterior vacuum model
+    cannot represent the azimuthal field of a net axial plasma current
+    (:func:`reject_net_axial_current`).
     """
 
+    reject_net_axial_current(current_derivative)
     if device is not None:
         target = _mirror_placement_device(device)
         with mirror_device_context(device):
@@ -905,8 +961,13 @@ def solve_beta_scan(
     exterior_spectral_side_density: bool = False,
     device: Any = AUTO,
 ) -> tuple[FreeBoundaryMirrorResult, ...]:
-    """Continue one free-boundary state through beta on one selected device."""
+    """Continue one free-boundary state through beta on one selected device.
 
+    A nonzero ``current_derivative`` is rejected for the same reason as in
+    :func:`solve_free_boundary`.
+    """
+
+    reject_net_axial_current(current_derivative)
     if device is not None:
         target = _mirror_placement_device(device)
         restart = initial_restart

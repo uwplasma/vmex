@@ -16,7 +16,6 @@ not uniquely reconstruct those removed volume currents. The comparison makes
 that physical limitation measurable instead of treating the two problems as
 mathematically identical.
 
-Preview: this script needs ESSOS branch ``rj/vmex-optimization-interfaces``.
 """
 
 from dataclasses import replace
@@ -41,12 +40,6 @@ from vmex.core.solver import prepare_runtime, resolution_from_input
 
 from essos.coils import Coils
 from essos.fields import BiotSavart
-
-if not all(hasattr(Coils, name) for name in ("from_json", "with_dofs")):
-    raise ImportError(
-        "This example needs ESSOS branch rj/vmex-optimization-interfaces "
-        "(uwplasma/ESSOS#58)."
-    )
 
 DATA = Path(__file__).resolve().parent / "data"
 # The bundled coils were optimized at 2.5% beta. A short continuation reaches

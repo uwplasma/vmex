@@ -2,6 +2,12 @@ name: Weekly high resolution
 
 on:
   workflow_dispatch:
+    inputs:
+      job:
+        description: Which job to run
+        type: choice
+        options: [all, campaign, full-lanes]
+        default: all
   schedule:
     - cron: "17 1 * * 6"
 
@@ -15,6 +21,7 @@ permissions:
 jobs:
   campaign:
     name: Weekly ${{ matrix.campaign }}
+    if: inputs.job != 'full-lanes'
     runs-on: ubuntu-latest
     # Each campaign retains its converged physics contract while staying
     # bounded to one hour on a cold hosted runner.
@@ -60,5 +67,108 @@ jobs:
         with:
           name: test-report-weekly-${{ matrix.campaign }}
           path: test-report-weekly-${{ matrix.campaign }}.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  full-lanes:
+    # The ``full``-marked tests of every full-* manifest lane that no other
+    # workflow runs; pull-request lanes deselect them.  Nodes a weekly-*
+    # campaign already owns are skipped here.  ``vmec2000_live`` tests need a
+    # local VMEC2000 build and ``--run-vmec2000``, so they stay local-only.
+    name: Weekly ${{ matrix.lane }}
+    if: inputs.job != 'campaign'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: core
+            selector: full-core-a-c full-core-d-f0 full-core-g-h full-core-i full-core-j-m full-core-n-s full-core-t-z full-core-fb-a
+            parallel: "-n 4"
+            timeout: 120
+          - lane: core-fb
+            selector: full-core-fb-b
+            parallel: "-n 2"
+            timeout: 120
+          - lane: core-fb-stress
+            selector: full-core-fb-stress-a full-core-fb-stress-b
+            parallel: ""
+            timeout: 120
+          - lane: i-grad
+            selector: full-core-i-grad
+            parallel: "-n 2"
+            timeout: 120
+          - lane: mirror
+            selector: full-mirror-equilibrium full-mirror-field full-mirror-spline
+            parallel: "-n 2"
+            timeout: 120
+          - lane: qi-gate
+            selector: full-qi-gate-fixed full-qi-gate-free full-qi-gate-ladder full-qi-gate-ladder-fft full-qi-gate-ladder-055
+            parallel: ""
+            timeout: 120
+          - lane: hmfb
+            selector: full-hmfb-ladders full-hmfb-combined full-hmfb-fft537
+            parallel: ""
+            timeout: 120
+          - lane: examples-1
+            selector: full-examples
+            shard: "1/3"
+            parallel: "-n 2"
+            timeout: 120
+          - lane: examples-2
+            selector: full-examples
+            shard: "2/3"
+            parallel: "-n 2"
+            timeout: 120
+          - lane: examples-3
+            selector: full-examples
+            shard: "3/3"
+            parallel: "-n 2"
+            timeout: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install ".[coils,turbulence,freeb]" pytest pytest-xdist
+      - name: Fetch reference assets
+        run: python tools/fetch_assets.py --bundle reference-nc --bundle golden-v1 --bundle ncsx-mgrid
+      - name: Add XLA compile headroom
+        run: |
+          sudo fallocate -l 12G /mnt/vmex-swap
+          sudo chmod 600 /mnt/vmex-swap
+          sudo mkswap /mnt/vmex-swap
+          sudo swapon /mnt/vmex-swap
+      - name: Run the full lanes
+        env:
+          JAX_ENABLE_X64: "1"
+          RUN_FULL: "1"
+          SHARD: ${{ matrix.shard || '1/1' }}
+        run: |
+          FILES="" WEEKLY=""
+          for LANE in ${{ matrix.selector }}; do
+            FILES="$FILES $(python tools/test_manifest.py select "$LANE")"
+          done
+          for LANE in weekly-hmfb-fixed weekly-hmfb-free weekly-mirror weekly-free-boundary-adjoint; do
+            WEEKLY="$WEEKLY $(python tools/test_manifest.py select "$LANE")"
+          done
+          FILES="$(printf '%s\n' $FILES | sort -u | tr '\n' ' ')"
+          # An array: parametrized ids such as ``[QI-constructed QI]`` hold spaces.
+          mapfile -t NODES < <(pytest --collect-only -q -p no:warnings -m full $FILES | grep '::' \
+            | grep -vxF -f <(printf '%s\n' $WEEKLY) \
+            | awk -v i="${SHARD%/*}" -v n="${SHARD#*/}" 'NR % n == i % n')
+          (( ${#NODES[@]} )) || { echo "no full nodes selected"; exit 1; }
+          pytest -q ${{ matrix.parallel }} "${NODES[@]}" --durations=25 \
+            --vmex-report="test-report-full-${{ matrix.lane }}.json"
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: test-report-full-${{ matrix.lane }}
+          path: test-report-full-${{ matrix.lane }}.json
           if-no-files-found: warn
           retention-days: 14

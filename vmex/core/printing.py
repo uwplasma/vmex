@@ -214,6 +214,221 @@ def threed1_line(
     return line + "\n"
 
 
+def polish_banner(
+    *,
+    mode: str,
+    degree: int,
+    spans: int | None,
+    ns: int,
+    tolerance: float,
+    certificate_tolerance: float,
+    max_iterations: int,
+) -> str:
+    """Polish-phase opening banner (VMEX-native; no VMEC2000 counterpart).
+
+    Printed in the register of :data:`FORCE_ITERATIONS_BANNER` when the
+    optional force-balance polish starts, stating the resolved
+    :class:`~vmex.core.polish_driver.PolishConfig`: the request mode, radial
+    B-spline degree and spans (``spans=None`` means the resolution-derived
+    default of ``lift_high_order_state``), the solve radial resolution
+    feeding the lift (``ns``; the driver reports the actual collocation grid
+    on its own lines), the Gauss--Newton relative tolerance, the independent
+    certificate tolerance, and the nonlinear iteration cap.
+    """
+    spans_text = "AUTO" if spans is None else f"{int(spans)}"
+    return (
+        "\n -----------------------\n"
+        " BEGIN FORCE POLISHING\n"
+        " -----------------------\n"
+        f"  MODE = {mode.upper()}  DEGREE = {int(degree)}"
+        f"  SPANS = {spans_text}  NS = {int(ns):4d}\n"
+        f"  TOL = {float(tolerance):9.3E}"
+        f"  CERTIFICATE TOL = {float(certificate_tolerance):9.3E}"
+        f"  MAX ITER = {int(max_iterations):4d}\n"
+    )
+
+
+#: Column header for the Gauss--Newton polish rows (:func:`polish_screen_line`).
+POLISH_SCREEN_HEADER = (
+    "\n  ITER    COST      GRAD     DAMPING     RATIO   LIN-ITS\n"
+)
+
+
+def polish_progress_line(
+    *,
+    elapsed_seconds: float,
+    products: int,
+    product_budget: int,
+    cost: float,
+) -> str:
+    """One live heartbeat from inside the jitted Gauss--Newton solve.
+
+    The Gauss--Newton loop is a single ``lax.while_loop``, so its per-step
+    table (:func:`polish_screen_line`) can only print once the solve returns.
+    At production stellarator resolution that window is hours long, which
+    reads as a hang.  This line is emitted from a device callback on the
+    matrix-free normal-equation products instead, so the console advances
+    while the solve runs.  ``products`` counts those applications and
+    ``product_budget`` is ``max_steps * linear_max_steps`` — the worst case,
+    not a prediction, so the percentage only ever overstates what remains.
+    """
+
+    total = max(int(product_budget), 1)
+    done = int(products)
+    hours, remainder = divmod(max(float(elapsed_seconds), 0.0), 3600.0)
+    minutes, seconds = divmod(remainder, 60.0)
+    return (
+        f"  polish {int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+        f"  {done}/{total} linear products ({100.0 * done / total:4.1f}%)"
+        f"  cost {float(cost):10.3E}\n"
+    )
+
+
+def polish_screen_line(
+    iteration: int,
+    cost: float,
+    gradient_norm: float,
+    damping: float,
+    *,
+    ratio: float | None = None,
+    linear_iterations: int | None = None,
+    accepted: bool = True,
+) -> str:
+    """One Gauss--Newton polish row in the screen-line register.
+
+    Row 0 is the initial state and carries no trial diagnostics; later rows
+    add the trust ratio, the inner PCG iteration count, and a ``rejected``
+    marker for trial steps the trust region refused (their damping still
+    adapts, so the row is informative even without an accepted move).
+    """
+    line = f"{iteration:5d}{cost:10.2E}{gradient_norm:10.2E}{damping:10.2E}"
+    if ratio is not None and linear_iterations is not None:
+        line += f"{ratio:10.2E}{linear_iterations:8d}"
+        if not accepted:
+            line += "  rejected"
+    return line + "\n"
+
+
+#: Screen wording for the ``eps_F`` ceiling.  ``F = JxB - grad(p)`` obeys
+#: ``|F| <= |JxB| + |grad(p)|`` pointwise, so ``eps_F`` cannot exceed 2 no
+#: matter how badly force balance is violated; it reaches 2 wherever the
+#: denominator collapses, which is everywhere in vacuum.  Printing the bound
+#: next to the number stops a reader from reading "1.99" as a 200% error.
+EPS_F_SATURATION_NOTICE = (
+    "EPS-F IS BOUNDED BY 2 BY CONSTRUCTION: IT SATURATES WHERE ITS",
+    "DENOMINATOR COLLAPSES (VACUUM). THE ROWS BELOW CANNOT SATURATE.",
+)
+
+
+def _measure_row(label: str, initial: float, final: float | None) -> str:
+    """One ``label  before -> after`` row, or ``before`` alone."""
+    cell = f"{float(initial):10.3E}" if initial == initial else "       n/a"
+    if final is None:
+        return f"   {label:<30s}{cell}"
+    tail = f"{float(final):10.3E}" if final == final else "       n/a"
+    return f"   {label:<30s}{cell} -> {tail}"
+
+
+def force_error_rows(
+    measures: tuple[tuple[str, float, float | None], ...],
+    *,
+    window: tuple[float, float] | None = None,
+) -> tuple[str, ...]:
+    """Render the non-saturating force-error rows for a certificate block.
+
+    ``measures`` carries ``(label, initial, final)`` triples; pass ``None``
+    as ``final`` for a single-state report.  ``window`` appends the flux
+    window the volume averages cover, because a volume average over the
+    whole domain is dominated by the coordinate-singular axis and the edge.
+    A ``nan`` prints as ``n/a`` — the Panici ratio is undefined in vacuum
+    and a floored stand-in would read as a real measurement.
+    """
+    rows = [_measure_row(label, initial, final) for label, initial, final in measures]
+    if window is not None and rows:
+        rows.append(
+            f"   (volume averages over s in "
+            f"[{float(window[0]):.2f}, {float(window[1]):.2f}])"
+        )
+    return tuple(rows)
+#: ``termination_reason`` of a polish AUTO declined on predicted cost.  The
+#: caller-visible marker for "measured, not attempted, not failed".
+POLISH_AUTO_DECLINED = "auto-declined-cost"
+
+
+def polish_cost_decline(
+    *,
+    seconds_per_product: float,
+    products: int,
+    predicted_seconds: float,
+    budget_seconds: float,
+    chart_size: int,
+    residual_rows: int,
+) -> str:
+    """Explain an AUTO decline in the numbers that produced it.
+
+    An automatic mode that silently spends eleven hours is worse than one
+    that does nothing, so the decline states what was measured on this
+    machine, what it implies, and every knob that changes the outcome --
+    including the one that simply overrules it.
+    """
+
+    def clock(seconds: float) -> str:
+        if seconds < 90.0:
+            return f"{seconds:.3G} s"
+        if seconds < 5400.0:
+            return f"{seconds / 60.0:.0f} min"
+        if seconds < 172800.0:
+            return f"{seconds / 3600.0:.1f} h"
+        return f"{seconds / 86400.0:.1f} days"
+
+    return (
+        "\n POLISH AUTO: DECLINED ON PREDICTED COST\n"
+        f"  collocation {int(residual_rows)} rows, {int(chart_size)} unknowns;"
+        f" one Gauss-Newton linear product measured at"
+        f" {float(seconds_per_product):.3G} s\n"
+        f"  the configured iteration limits allow {int(products)} products,"
+        f" so the solve could run {clock(float(predicted_seconds))}"
+        f" against an AUTO budget of {clock(float(budget_seconds))}\n"
+        "  the equilibrium is returned unpolished, unchanged and uncertified\n"
+        "  raise the ceiling with !@VMEX POLISH_BUDGET = <seconds>, shorten"
+        " the solve with !@VMEX POLISH_MAX_ITER = <n>,\n"
+        "  or run it regardless with !@VMEX POLISH = .TRUE.\n"
+    )
+
+
+def polish_certificate_summary(
+    initial_l2: float,
+    final_l2: float,
+    tolerance: float,
+    *,
+    verdict: str,
+    failed_checks: tuple[str, ...] = (),
+    measures: tuple[tuple[str, float, float | None], ...] = (),
+    window: tuple[float, float] | None = None,
+) -> str:
+    """Closing certificate block for one polish attempt.
+
+    ``verdict`` is the human-readable outcome (``CERTIFIED``, ``ALREADY
+    CERTIFIED``, ``FAILED``); ``failed_checks`` names each independent check
+    that rejected the state so a failure is diagnosable from the console
+    alone.  ``measures`` carries the non-saturating quantities that make the
+    ``eps_F`` pair readable — the dimensional ``<|F|>`` and the
+    volume-averaged normalizations — and is printed under an explicit
+    statement of the ``eps_F`` ceiling.
+    """
+    lines = [
+        "",
+        f" POLISH CERTIFICATE : EPS-F {float(initial_l2):10.3E} ->"
+        f" {float(final_l2):10.3E}  (TOLERANCE {float(tolerance):10.3E})",
+    ]
+    if measures:
+        lines.extend(f"   {notice}" for notice in EPS_F_SATURATION_NOTICE)
+        lines.extend(force_error_rows(measures, window=window))
+    lines.append(f" POLISH {verdict}")
+    lines.extend(f"   FAILED CHECK : {check}" for check in failed_checks)
+    return "\n".join(lines) + "\n"
+
+
 def termination_summary(
     ier_flag: int,
     input_name: str,

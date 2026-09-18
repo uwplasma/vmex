@@ -1,9 +1,12 @@
 # Examples
 
-All runnable examples live under this single `examples/` tree. Examples marked
-*preview* need ESSOS branch
-[`rj/vmex-optimization-interfaces`](https://github.com/uwplasma/ESSOS/tree/rj/vmex-optimization-interfaces)
-(PR #58).
+All runnable examples live under this single `examples/` tree. The coil and
+exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
+or `pip install "vmex[all]"` for everything the examples use.
+
+`free_boundary_mgrid.py` and `free_boundary_beta_scan.py` also need
+`data/mgrid_cth_like.nc`, a release asset rather than a tracked file; install it
+once from the repository root with `python tools/fetch_assets.py --bundle reference-nc`.
 
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
@@ -21,6 +24,9 @@ All runnable examples live under this single `examples/` tree. Examples marked
     state; warm restarts converge in ~1 iteration and recompile nothing.
   - `finite_beta_scan.py` — ramp the pressure (hot-restarted) and read beta,
     the Shafranov shift (magnetic-axis motion), and Mercier `DMerc` stability.
+  - `force_balance_polishing.py` — enable the optional, VMEC-safe polishing
+    directive on the bundled shaped tokamak, inspect its independent
+    certificate, and save/plot the WOUT before and after the correction.
   - `parallel_ensemble_scan.py` — solve an ensemble of independent equilibria
     concurrently on CPU (`vmex.parallel.solve_ensemble`); prints the measured
     strong-scaling curve and checks the results are bit-identical to serial.
@@ -56,7 +62,27 @@ All runnable examples live under this single `examples/` tree. Examples marked
   - `vmex_fixed_free_boundary_comparison.py` *(preview)* — compare a parent
     free boundary with an `s=0.5` fixed-boundary solve and its exterior field.
 - `optimization/`: compact QA/QH/QP/QI scripts using `(function, target,
-  weight)` terms with SciPy least-squares, BFGS, or L-BFGS-B.
+  weight)` terms with SciPy least-squares, BFGS, or L-BFGS-B. The canonical
+  `QA_optimization.py` keeps the explicit residual/Jacobian workflow. Its
+  scalar companion forms the identical `0.5 * r.T @ r` objective before
+  implicit differentiation, so L-BFGS-B needs one equilibrium adjoint per
+  gradient rather than the complete residual Jacobian. The same comparison is
+  available for all four symmetry objectives:
+
+  | Family | Vacuum scalar example | Finite-beta scalar example |
+  | --- | --- | --- |
+  | QA | `QA_optimization_scalar.py` | `QA_optimization_finite_beta_scalar.py` |
+  | QH | `QH_optimization_scalar.py` | `QH_optimization_finite_beta_scalar.py` |
+  | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
+  | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
+
+  The finite-beta examples calibrate a prescribed linear pressure profile and
+  include radially weighted Mercier and resistive-interchange terms. The shared
+  `_scalar_driver.py` contains only the optimizer wiring; each runnable file
+  keeps its physical targets, resolution, save names, and validation visible.
+  The scalar lane trades objective progress per evaluation (roughly 3x higher
+  objective at a matched budget on the QA workflow) for a cheaper cold start and
+  lower peak memory; `QA_optimization.py` remains the default.
   `single_stage_optimization.py` *(preview)* varies a prescribed boundary and
   coil Fourier coefficients; it does not call a free-boundary solve.
   `QA_optimization_bootstrap.py`, `QH_optimization_bootstrap.py` and
@@ -80,6 +106,11 @@ All runnable examples live under this single `examples/` tree. Examples marked
 - `optimization/QA_maxJ_continuation.py` and `QI_maxJ_continuation.py` walk the
   constructed maximum-J target into the resolved certificate; the QA script
   states where maximum-J and quasisymmetry conflict near the axis.
+- `optimization/omnigenity_epsilon_gammac_maxj.py` refines the finite-beta QA
+  with one seed-normalized scalar objective — quasisymmetry ratio (effective
+  ripple proxy), the derivative-safe `GammaCSmooth` surrogate, and the
+  outer-volume maximum-J residual — then reports hard `Gamma_c` and NEO_JAX
+  `epsilon_eff^(3/2)` before and after.
 - `epsilon_effective.py` computes the NEO_JAX effective ripple from a solved
   equilibrium without writing a `boozmn` file; raise its `NeoConfig` controls
   for anything beyond a radial trend.

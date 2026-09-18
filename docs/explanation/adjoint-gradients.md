@@ -84,6 +84,13 @@ gradient agrees with that reference to rel 5.4e-07 when they do, against
 4.2e-03 at the host stopping point and 5.7e-03 with the linearization alone
 refined.
 
+Nearby optimization trials reuse the previous Newton displacement as a guess.
+VMEX evaluates the new frozen residual before accepting that guess; if it does
+not reach `refine_tol`, VMEX discards it and replays the original refinement.
+This changes work, not the accepted numerical path. Public optimization
+factories expose the same `refine_tol`; keep 1e-10 for production gradients
+and use `numpy.inf` only for an explicit legacy comparison.
+
 ## The six SOLVAX solve classes
 
 Every linear solve in the gradient stack goes through SOLVAX. The complete
@@ -179,25 +186,17 @@ structural fact: in the **raw** force formulation the radial coupling of
 $\partial F/\partial z$ is exactly nearest-neighbor, so the operator is
 *exactly* block-tridiagonal — `ns` dense $(3\,mn \times 3\,mn)$ blocks.
 (The preconditioned formulation used by the adjoint is dense in radius,
-because the 1D preconditioner's inverse is.) Measured: the warm Jacobian
-phase of the benchmark optimization step drops from 20.35 s to 0.61 s (33x;
-`docs/_static/figures/gradient_stack_speedup.webp`, reproduced by
-`docs/_static/figures/sources/make_optimization_docs_figures.py`). The same
-per-dof responses $dz_j$ double as a first-order perturbation warm start for
-the optimizer's next trial solves — the DESC-style `eq.perturb` pattern —
-measured 3.7x fewer total forward iterations over 20 trials (23,685 to
-6,364). How these plug into an optimization campaign is
-{doc}`/howto/optimize-a-boundary`.
-
-```{figure} /_static/figures/gradient_stack_speedup.webp
-:alt: measured before/after of the three gradient-stack optimizations
-:width: 100%
-
-Measured gradient-stack speedups on the nfp2 minimal-seed deck (Jacobian
-phase and trial iterations) and the full QA campaign (right); 2026-07-12,
-CPU. Regenerate with
-`python docs/_static/figures/sources/make_optimization_docs_figures.py`.
-```
+because the 1D preconditioner's inverse is.) The block path factors those
+blocks once, back-solves every dof right-hand side, and certifies each column
+with a warm-started GMRES pass on the preconditioned system; columns already
+at tolerance cost one matvec. No committed record measures its cost against
+the per-column GMRES fallback (`jac_solver="gmres"`), so this page quotes no
+speedup. The same per-dof responses $dz_j$ double as a first-order
+perturbation warm start for the optimizer's next trial solves — the
+DESC-style `eq.perturb` pattern, and the default
+`warm_start="perturbation"` — which changes only the inner iteration count,
+not the fixed point; its saving has no committed record either. How these
+plug into an optimization campaign is {doc}`/howto/optimize-a-boundary`.
 
 ## Free-boundary root
 

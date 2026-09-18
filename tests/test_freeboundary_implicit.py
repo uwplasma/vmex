@@ -72,6 +72,87 @@ def test_free_boundary_config_validates_adjoint_solver():
         make_free_boundary_config(inp, field, adjoint_solver="dense")
 
 
+def test_free_boundary_config_validates_adjoint_fail():
+    """The adjoint failure policy is opt-in and defaults to raising.
+
+    ``best_effort`` returns a stalled Krylov solution so that one bad trial
+    in an optimization is a poor search direction rather than a dead run; a
+    typo must not silently select it.
+    """
+    inp, field = lasym_free_input(DATA), lasym_free_field()
+    assert make_free_boundary_config(inp, field).adjoint_fail == "error"
+    assert make_free_boundary_config(
+        inp, field, adjoint_fail="best_effort").adjoint_fail == "best_effort"
+    with pytest.raises(ValueError, match="'error' or 'best_effort'"):
+        make_free_boundary_config(inp, field, adjoint_fail="warn")
+
+
+def test_host_adjoint_refreshes_saved_pullback_at_each_point():
+    """Reusing an executable must not reuse a previous root's linearization."""
+    def residual(z, p, *_args):
+        return jnp.asarray([z[0]**2 + p * z[1], z[0] * z[1] + z[1]**2])
+
+    cfg = SimpleNamespace(
+        adjoint_tol=1e-10, adjoint_gcrot_m=2, adjoint_gcrot_k=1,
+        adjoint_maxiter=10,
+    )
+    rhs = jnp.asarray([1., -2.])
+    for z, p in [(jnp.asarray([2., 3.]), 0.5), (jnp.asarray([3., 2.]), 1.5)]:
+        solved = fbi._host_adjoint(residual, z, p, None, None, None, None, rhs, cfg)
+        jacobian = np.array([[2 * z[0], p], [z[1], z[0] + 2 * z[1]]])
+        np.testing.assert_allclose(solved, np.linalg.solve(jacobian.T, rhs), rtol=1e-9)
+
+
+def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
+    """Under an outer jax.jit the pullback is taken at the root, then staged GCROT."""
+    def residual(z, p, field, *_args):
+        return jnp.asarray([z[0]**2 + p * z[1] + field, z[0] * z[1] + z[1]**2 - p])
+
+    monkeypatch.setattr(fbi, "_projected_residual", lambda *_args, **_kwargs: residual)
+    monkeypatch.setattr(im, "_dof_projector", lambda *_args: (lambda tree: tree))
+    cfg = SimpleNamespace(
+        implicit=SimpleNamespace(adjoint_tol=1e-12, adjoint_gcrot_m=2,
+                                 adjoint_gcrot_k=1, adjoint_maxiter=10),
+        adjoint_solver="coupled_gcrot", adjoint_fail="error",
+    )
+    z, p, field = jnp.asarray([2., 3.]), jnp.asarray(0.5), jnp.asarray(0.25)
+    rhs = jnp.asarray([1., -2.])
+    params_bar, field_bar = jax.jit(
+        lambda bar: fbi._solve_bwd_impl(cfg, (p, field, z, None, None, None), bar))(rhs)
+    lam = np.linalg.solve(np.array([[4., 0.5], [3., 8.]]).T, rhs)
+    np.testing.assert_allclose(params_bar, -(np.array([3., -1.]) @ lam), rtol=1e-10)
+    np.testing.assert_allclose(field_bar, -lam[0], rtol=1e-10)
+
+
+def test_host_adjoint_best_effort_warns_instead_of_raising(monkeypatch):
+    """A stalled Krylov solve is a warning under the opt-in policy, not a stop.
+
+    The stall arrives inside the VJP, where an optimizer's own
+    ``lax.cond`` on the solve status cannot catch it, so a raise ends the
+    whole run over one bad line-search trial.  Under ``best_effort`` the
+    inaccurate direction is returned instead and the line search rejects it.
+    """
+    cfg = SimpleNamespace(adjoint_tol=1.0e-10, adjoint_maxiter=5,
+                          adjoint_gcrot_m=2, adjoint_gcrot_k=1)
+
+    def residual(z, params, field, base, rcon, zcon):
+        return 2.0 * z
+
+    z_star, rhs = jnp.arange(4.0), jnp.ones(4)
+    # A Krylov solve that returns a deliberately wrong answer, so the true
+    # residual check that follows it cannot pass.
+    monkeypatch.setattr(fbi, "gcrotmk", lambda *args, **kwargs: (np.zeros(4), 0))
+    def call(**kwargs):
+        return fbi._host_adjoint(
+            residual, z_star, None, None, z_star, None, None, rhs, cfg, **kwargs)
+
+    with pytest.raises(AdjointSolveError, match="did not converge"):
+        call()
+    with pytest.warns(RuntimeWarning, match="best_effort"):
+        solution = call(fail="best_effort")
+    np.testing.assert_allclose(np.asarray(solution), np.zeros(4))
+
+
 def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     """A bad cached state is discarded, but implementation errors are not."""
     inp = dataclasses.replace(
@@ -126,6 +207,7 @@ def test_free_boundary_host_adjoint_rejects_a_false_solver_success(monkeypatch):
                           jnp.ones(2), cfg)
 
 
+@pytest.mark.full
 def test_free_boundary_current_gradient_matches_resolve_finite_difference():
     """The implicit coil-current response agrees with two independent solves."""
     inp = lasym_free_input(DATA)
@@ -263,6 +345,7 @@ def test_free_boundary_pressure_gradient_matches_resolve_finite_difference():
         derivative, finite_difference, rtol=1.0e-1, atol=1.0e-7)
 
 
+@pytest.mark.full
 def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient():
     """Both adjoint solvers invert the same converged plasma-vacuum Jacobian.
 
@@ -410,6 +493,7 @@ def _flat(tree):
     return jnp.concatenate([jnp.ravel(leaf) for leaf in jax.tree.leaves(tree)])
 
 
+@pytest.mark.full
 def test_free_boundary_gradient_is_certified_factor_by_factor():
     """A certificate whose tolerances come from arithmetic, not solver noise.
 
@@ -540,6 +624,7 @@ def test_free_boundary_gradient_is_certified_factor_by_factor():
     assert abs(forward_side - adjoint_side) / abs(adjoint_side) < 1.0e-6
 
 
+@pytest.mark.full
 def test_free_boundary_root_reproducibility_bounds_the_gradient():
     """Two entry points, two roots, and the gradient amplifies the gap.
 

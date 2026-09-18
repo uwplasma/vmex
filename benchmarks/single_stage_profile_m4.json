@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-09-13T20:08:56+00:00",
+  "_provenance": {
+    "measurement_commit": "50814b65d81d386595c4ce6f424d8eb08d0daca3",
+    "measurement_dirty": false,
+    "input_data_embedded": false,
+    "baseline_commit": "f09288b37bac7d7122e98220192795e76770cd1f",
+    "command": "python benchmarks/single_stage_profile.py --runs fixed:smoke:baseline fixed:smoke fixed:smoke:baseline fixed:smoke free:smoke:baseline free:smoke fixed:full --baseline-ref f09288b3 --timeout 5400"
+  },
+  "timing_note": "Wall times are diagnostic samples on a shared machine, each with its load average; compare only adjacent baseline and candidate runs of this record.",
+  "environment": {
+    "python": "3.11.14",
+    "platform": "macOS-14.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "cpu_count": 14,
+    "OMP_NUM_THREADS": "4",
+    "VMEX_COMPILATION_CACHE": "disabled",
+    "versions": {
+      "vmex": "0.8.1",
+      "jax": "0.9.2",
+      "jaxlib": "0.9.2",
+      "numpy": "2.4.6",
+      "scipy": "1.17.1",
+      "essos": "0.17.dev236+g754e59530",
+      "essos_commit": "1b3210ca34efaceec09272aa29599c9788c4ec35"
+    }
+  },
+  "runs": [
+    {
+      "example": "examples/optimization/single_stage_optimization.py",
+      "source": "git show f09288b37bac7d7122e98220192795e76770cd1f",
+      "mode": "smoke",
+      "wall_seconds": 191.8,
+      "peak_rss_gib": 4.95,
+      "exit_code": 0,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        8.86,
+        10.87,
+        15.88
+      ],
+      "load_average_after": [
+        9.72,
+        10.33,
+        14.62
+      ],
+      "reported": {
+        "min |iota|": 0.0712,
+        "aspect": 10.1901,
+        "B.n/B RMS percent": 3.091
+      },
+      "summary": null,
+      "stdout_tail": [
+        "A lower weighted objective with an unmet target is not a design. Raise the weight, reseed, or extend the budget before using it.",
+        "Wrote input.single_stage_optimized",
+        "Wrote wout_single_stage_optimized.nc",
+        "Wrote coils_single_stage_optimized.json",
+        "Wrote initial and optimized surface/coils VTK files",
+        "Plotting results...",
+        "Wrote single_stage_optimization.png",
+        "Wrote single_stage_objectives.csv and single_stage_objectives.png",
+        "Making movie of accepted iterates...",
+        "Wrote single_stage_optimized_summary.png",
+        "Wrote single_stage_optimized_surfaces.png",
+        "Wrote single_stage_optimized_modB.png",
+        "Wrote single_stage_optimized_profiles.png",
+        "Wrote single_stage_optimized_stability.png",
+        "Wrote single_stage_optimized_boundary3d.png"
+      ]
+    },
+    {
+      "example": "examples/optimization/single_stage_optimization.py",
+      "source": "working tree",
+      "mode": "smoke",
+      "wall_seconds": 138.6,
+      "peak_rss_gib": 4.09,
+      "exit_code": 0,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        9.72,
+        10.33,
+        14.62
+      ],
+      "load_average_after": [
+        15.25,
+        12.26,
+        14.73
+      ],
+      "reported": {
+        "min |iota|": 0.3849,
+        "aspect": 4.0515,
+        "B.n/B RMS percent": 11.536
+      },
+      "summary": {
+        "example": "single_stage_optimization.py",
+        "smoke": true,
+        "optimization_seconds": 80.5,
+        "coil_fit_iterations": 2,
+        "trials": 4,
+        "stages": 1,
+        "lbfgsb_iterations": 1,
+        "equilibrium_solves": 4,
+        "seed": {
+          "QA total": 0.1009921653956628,
+          "aspect": 4.029114820126907,
+          "mean iota": 0.40839371286751874,
+          "min |iota|": 0.3914243143364031
+        },
+        "final": {
+          "QA total": 0.10987290093229662,
+          "aspect": 4.051506258016183,
+          "mean iota": 0.39992733412463366,
+          "min |iota|": 0.3849060294607858,
+          "B.n/B RMS": 0.1153625648433552,
+          "B.n/B max": 0.42807359794218014,
+          "coil-surface distance": 0.11821847115947871,
+          "coil-coil distance": 0.06830236975546247,
+          "maximum curvature": 5.461031197414729,
+          "verification solve converged": true
+        },
+        "targets": {
+          "min |iota| >=": 0.42,
+          "aspect <=": 4.0,
+          "B.n/B RMS <=": 0.01,
+          "coil-surface distance >=": 0.2,
+          "coil-coil distance >=": 0.15,
+          "maximum curvature <=": 7.0
+        },
+        "unmet": [
+          "minimum |iota| 0.3849 below the 0.42 limit",
+          "aspect ratio 4.052 above the 4 limit",
+          "B.n/B RMS 0.1154 above the 0.01 limit",
+          "minimum coil-surface distance 0.1182 below the 0.2 limit",
+          "minimum coil-coil distance 0.0683 below the 0.15 limit"
+        ],
+        "met": false
+      },
+      "stage_lines": [
+        "[stage 1] 1 L-BFGS-B iterations, 4 trials, violation = 6.995e+00, multipliers = [ 1.0484  0.1797 69.9507], penalty = 1.0e+01"
+      ]
+    },
+    {
+      "example": "examples/optimization/single_stage_optimization.py",
+      "source": "git show f09288b37bac7d7122e98220192795e76770cd1f",
+      "mode": "smoke",
+      "wall_seconds": 198.8,
+      "peak_rss_gib": 4.83,
+      "exit_code": 0,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        15.25,
+        12.26,
+        14.73
+      ],
+      "load_average_after": [
+        15.02,
+        15.21,
+        15.61
+      ],
+      "reported": {
+        "min |iota|": 0.0712,
+        "aspect": 10.1901,
+        "B.n/B RMS percent": 3.091
+      },
+      "summary": null,
+      "stdout_tail": [
+        "A lower weighted objective with an unmet target is not a design. Raise the weight, reseed, or extend the budget before using it.",
+        "Wrote input.single_stage_optimized",
+        "Wrote wout_single_stage_optimized.nc",
+        "Wrote coils_single_stage_optimized.json",
+        "Wrote initial and optimized surface/coils VTK files",
+        "Plotting results...",
+        "Wrote single_stage_optimization.png",
+        "Wrote single_stage_objectives.csv and single_stage_objectives.png",
+        "Making movie of accepted iterates...",
+        "Wrote single_stage_optimized_summary.png",
+        "Wrote single_stage_optimized_surfaces.png",
+        "Wrote single_stage_optimized_modB.png",
+        "Wrote single_stage_optimized_profiles.png",
+        "Wrote single_stage_optimized_stability.png",
+        "Wrote single_stage_optimized_boundary3d.png"
+      ]
+    },
+    {
+      "example": "examples/optimization/single_stage_optimization.py",
+      "source": "working tree",
+      "mode": "smoke",
+      "wall_seconds": 134.5,
+      "peak_rss_gib": 3.77,
+      "exit_code": 0,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        15.02,
+        15.21,
+        15.61
+      ],
+      "load_average_after": [
+        17.76,
+        16.16,
+        15.94
+      ],
+      "reported": {
+        "min |iota|": 0.3849,
+        "aspect": 4.0515,
+        "B.n/B RMS percent": 11.536
+      },
+      "summary": {
+        "example": "single_stage_optimization.py",
+        "smoke": true,
+        "optimization_seconds": 82.9,
+        "coil_fit_iterations": 2,
+        "trials": 4,
+        "stages": 1,
+        "lbfgsb_iterations": 1,
+        "equilibrium_solves": 4,
+        "seed": {
+          "QA total": 0.1009921653956628,
+          "aspect": 4.029114820126907,
+          "mean iota": 0.40839371286751874,
+          "min |iota|": 0.3914243143364031
+        },
+        "final": {
+          "QA total": 0.10987290093229662,
+          "aspect": 4.051506258016183,
+          "mean iota": 0.39992733412463366,
+          "min |iota|": 0.3849060294607858,
+          "B.n/B RMS": 0.1153625648433552,
+          "B.n/B max": 0.42807359794218014,
+          "coil-surface distance": 0.11821847115947871,
+          "coil-coil distance": 0.06830236975546247,
+          "maximum curvature": 5.461031197414729,
+          "verification solve converged": true
+        },
+        "targets": {
+          "min |iota| >=": 0.42,
+          "aspect <=": 4.0,
+          "B.n/B RMS <=": 0.01,
+          "coil-surface distance >=": 0.2,
+          "coil-coil distance >=": 0.15,
+          "maximum curvature <=": 7.0
+        },
+        "unmet": [
+          "minimum |iota| 0.3849 below the 0.42 limit",
+          "aspect ratio 4.052 above the 4 limit",
+          "B.n/B RMS 0.1154 above the 0.01 limit",
+          "minimum coil-surface distance 0.1182 below the 0.2 limit",
+          "minimum coil-coil distance 0.0683 below the 0.15 limit"
+        ],
+        "met": false
+      },
+      "stage_lines": [
+        "[stage 1] 1 L-BFGS-B iterations, 4 trials, violation = 6.995e+00, multipliers = [ 1.0484  0.1797 69.9507], penalty = 1.0e+01"
+      ]
+    },
+    {
+      "example": "examples/optimization/single_stage_free_boundary_optimization.py",
+      "source": "git show f09288b37bac7d7122e98220192795e76770cd1f",
+      "mode": "smoke",
+      "wall_seconds": 90.4,
+      "peak_rss_gib": 3.37,
+      "exit_code": 0,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        17.76,
+        16.16,
+        15.94
+      ],
+      "load_average_after": [
+        20.05,
+        17.33,
+        16.4
+      ],
+      "reported": {
+        "free-boundary final line": "[final] QA = 1.09682e-02, aspect = 6.082, min |iota| = 0.341"
+      },
+      "summary": null,
+      "stdout_tail": [
+        "Running single_stage_free_boundary_optimization.py",
+        "True NESTOR free boundary + ESSOS: 136 coil variables; no boundary dofs or mgrid file",
+        "dof_names = ('coil[0].x0', 'coil[0].xs(1)', 'coil[0].xc(1)', 'coil[0].xs(2)', 'coil[0].xc(2)', 'coil[0].xs(3)', 'coil[0].xc(3)', 'coil[0].xs(4)', 'coil[0].xc(4)', 'coil[0].xs(5)', 'coil[0].xc(5)', 'coil[0].y0', 'coil[0].ys(1)', 'coil[0].yc(1)', 'coil[0].ys(2)', 'coil[0].yc(2)', 'coil[0].ys(3)', 'coil[0].yc(3)', 'coil[0].ys(4)', 'coil[0].yc(4)', 'coil[0].ys(5)', 'coil[0].yc(5)', 'coil[0].z0', 'coil[0].zs(1)', 'coil[0].zc(1)', 'coil[0].zs(2)', 'coil[0].zc(2)', 'coil[0].zs(3)', 'coil[0].zc(3)', 'coil[0].zs(4)', 'coil[0].zc(4)', 'coil[0].zs(5)', 'coil[0].zc(5)', 'coil[1].x0', 'coil[1].xs(1)', 'coil[1].xc(1)', 'coil[1].xs(2)', 'coil[1].xc(2)', 'coil[1].xs(3)', 'coil[1].xc(3)', 'coil[1].xs(4)', 'coil[1].xc(4)', 'coil[1].xs(5)', 'coil[1].xc(5)', 'coil[1].y0', 'coil[1].ys(1)', 'coil[1].yc(1)', 'coil[1].ys(2)', 'coil[1].yc(2)', 'coil[1].ys(3)', 'coil[1].yc(3)', 'coil[1].ys(4)', 'coil[1].yc(4)', 'coil[1].ys(5)', 'coil[1].yc(5)', 'coil[1].z0', 'coil[1].zs(1)', 'coil[1].zc(1)', 'coil[1].zs(2)', 'coil[1].zc(2)', 'coil[1].zs(3)', 'coil[1].zc(3)', 'coil[1].zs(4)', 'coil[1].zc(4)', 'coil[1].zs(5)', 'coil[1].zc(5)', 'coil[2].x0', 'coil[2].xs(1)', 'coil[2].xc(1)', 'coil[2].xs(2)', 'coil[2].xc(2)', 'coil[2].xs(3)', 'coil[2].xc(3)', 'coil[2].xs(4)', 'coil[2].xc(4)', 'coil[2].xs(5)', 'coil[2].xc(5)', 'coil[2].y0', 'coil[2].ys(1)', 'coil[2].yc(1)', 'coil[2].ys(2)', 'coil[2].yc(2)', 'coil[2].ys(3)', 'coil[2].yc(3)', 'coil[2].ys(4)', 'coil[2].yc(4)', 'coil[2].ys(5)', 'coil[2].yc(5)', 'coil[2].z0', 'coil[2].zs(1)', 'coil[2].zc(1)', 'coil[2].zs(2)', 'coil[2].zc(2)', 'coil[2].zs(3)', 'coil[2].zc(3)', 'coil[2].zs(4)', 'coil[2].zc(4)', 'coil[2].zs(5)', 'coil[2].zc(5)', 'coil[3].x0', 'coil[3].xs(1)', 'coil[3].xc(1)', 'coil[3].xs(2)', 'coil[3].xc(2)', 'coil[3].xs(3)', 'coil[3].xc(3)', 'coil[3].xs(4)', 'coil[3].xc(4)', 'coil[3].xs(5)', 'coil[3].xc(5)', 'coil[3].y0', 'coil[3].ys(1)', 'coil[3].yc(1)', 'coil[3].ys(2)', 'coil[3].yc(2)', 'coil[3].ys(3)', 'coil[3].yc(3)', 'coil[3].ys(4)', 'coil[3].yc(4)', 'coil[3].ys(5)', 'coil[3].yc(5)', 'coil[3].z0', 'coil[3].zs(1)', 'coil[3].zc(1)', 'coil[3].zs(2)', 'coil[3].zc(2)', 'coil[3].zs(3)', 'coil[3].zc(3)', 'coil[3].zs(4)', 'coil[3].zc(4)', 'coil[3].zs(5)', 'coil[3].zc(5)', 'coil[0].current', 'coil[1].current', 'coil[2].current', 'coil[3].current')",
+        " iter          cost     reduction   optimality  eq solves  rejected",
+        "    0  6.239037e-02             -  2.556269e+02          -         -",
+        "Solving the optimized free boundary for output...",
+        "[final] QA = 1.09682e-02, aspect = 6.082, min |iota| = 0.341",
+        "Objective = 6.239037e-02 after 0 L-BFGS-B iterations",
+        "Coil lengths = [5.25006281 5.25022826 5.24807902 5.11735727 5.25006281 5.25022826",
+        " 5.24807902 5.11735727 5.25006281 5.25022826 5.24807902 5.11735727",
+        " 5.25006281 5.25022826 5.24807902 5.11735727]",
+        "Maximum curvature = 5.173 1/m",
+        "Wrote input.single_stage_free_boundary_optimized",
+        "Wrote wout_single_stage_free_boundary_optimized.nc",
+        "Wrote single_stage_free_boundary_optimization.png and objective history"
+      ]
+    },
+    {
+      "example": "examples/optimization/single_stage_free_boundary_optimization.py",
+      "source": "working tree",
+      "mode": "smoke",
+      "wall_seconds": 81.4,
+      "peak_rss_gib": 3.34,
+      "exit_code": 0,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        20.05,
+        17.33,
+        16.4
+      ],
+      "load_average_after": [
+        12.11,
+        15.46,
+        15.77
+      ],
+      "reported": {
+        "min |iota|": 0.341,
+        "free-boundary final line": "[final] QA = 1.09682e-02, aspect = 6.082, min |iota| = 0.341"
+      },
+      "summary": {
+        "example": "single_stage_free_boundary_optimization.py",
+        "smoke": true,
+        "optimization_seconds": 76.7,
+        "trials": 1,
+        "lbfgsb_iterations": 0,
+        "free_boundary_solves": 2,
+        "final": {
+          "QA": 0.010968246652587171,
+          "aspect": 6.081798440056646,
+          "min |iota|": 0.34099399541313913,
+          "maximum curvature": 5.17297910693811,
+          "output solve converged": true
+        },
+        "targets": {
+          "min |iota| >=": 0.42,
+          "aspect (least squares)": 6.0
+        },
+        "unmet": [
+          "minimum |iota| 0.3410 below the 0.4200 floor"
+        ],
+        "met": false
+      },
+      "stage_lines": []
+    },
+    {
+      "example": "examples/optimization/single_stage_optimization.py",
+      "source": "working tree",
+      "mode": "full",
+      "wall_seconds": 2959.1,
+      "peak_rss_gib": 3.86,
+      "exit_code": 0,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        12.11,
+        15.46,
+        15.77
+      ],
+      "load_average_after": [
+        14.61,
+        15.39,
+        16.81
+      ],
+      "reported": {
+        "min |iota|": 0.4277,
+        "aspect": 3.9786,
+        "B.n/B RMS percent": 0.8
+      },
+      "summary": {
+        "example": "single_stage_optimization.py",
+        "smoke": false,
+        "optimization_seconds": 2641.9,
+        "coil_fit_iterations": 400,
+        "trials": 301,
+        "stages": 7,
+        "lbfgsb_iterations": 171,
+        "equilibrium_solves": 295,
+        "seed": {
+          "QA total": 0.1009921653956628,
+          "aspect": 4.029114820126907,
+          "mean iota": 0.40839371286751874,
+          "min |iota|": 0.3914243143364031
+        },
+        "final": {
+          "QA total": 0.11340276311727124,
+          "aspect": 3.978576598724608,
+          "mean iota": 0.44401109726882676,
+          "min |iota|": 0.4277489521041445,
+          "B.n/B RMS": 0.007997666639891602,
+          "B.n/B max": 0.028556055094875653,
+          "coil-surface distance": 0.2314376979152147,
+          "coil-coil distance": 0.1714044210173695,
+          "maximum curvature": 6.908463528833265,
+          "verification solve converged": true
+        },
+        "targets": {
+          "min |iota| >=": 0.42,
+          "aspect <=": 4.0,
+          "B.n/B RMS <=": 0.01,
+          "coil-surface distance >=": 0.2,
+          "coil-coil distance >=": 0.15,
+          "maximum curvature <=": 7.0
+        },
+        "unmet": [],
+        "met": true
+      },
+      "stage_lines": [
+        "[stage 1] 25 L-BFGS-B iterations, 71 trials, violation = 1.271e-01, multipliers = [0.7879 0.181  1.2712], penalty = 1.0e+01",
+        "[stage 2] 25 L-BFGS-B iterations, 104 trials, violation = 7.271e-02, multipliers = [1.515  0.5515 1.3141], penalty = 1.0e+01",
+        "[stage 3] 25 L-BFGS-B iterations, 156 trials, violation = 6.412e-02, multipliers = [2.719  6.9638 2.5869], penalty = 1.0e+02",
+        "[stage 4] 25 L-BFGS-B iterations, 188 trials, violation = 4.512e-03, multipliers = [ 5.8132 11.4755  3.8961], penalty = 1.0e+03",
+        "[stage 5] 25 L-BFGS-B iterations, 236 trials, violation = 1.997e-03, multipliers = [3.8163 9.9228 5.3272], penalty = 1.0e+03",
+        "[stage 6] 25 L-BFGS-B iterations, 271 trials, violation = 3.497e-04, multipliers = [ 6.5849 13.4203  3.4717], penalty = 1.0e+04",
+        "[stage 7] 21 L-BFGS-B iterations, 301 trials, violation = 3.576e-04, multipliers = [5.5321 9.8439 0.554 ], penalty = 1.0e+04"
+      ]
+    }
+  ]
+}

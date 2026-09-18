@@ -1,47 +1,144 @@
 """vmex: a JAX implementation of VMEC2000 for fixed and free-boundary equilibria.
 
-Public API (lazily imported; ``import vmex as vj``):
+Every name below is a lazy attribute of the top-level package
+(``import vmex as vj``): the owning module is imported on first access, and
+``vmex.__all__`` lists exactly these names plus ``__version__``.  Each entry
+links to the module that documents it.
+
+**Inputs and run controls**
 
 - :class:`~vmex.core.input.VmecInput` — INDATA / VMEC++-JSON input pytree
+- :class:`~vmex.core.run_options.RunOptions` /
+  :class:`~vmex.core.run_options.InputRequest` /
+  :func:`~vmex.core.run_options.read_input_request` — ``!@VMEX`` directives
+  and the JSON ``_vmex`` section (execution metadata, never physics)
+
+**Solvers**
+
 - :func:`~vmex.core.solver.solve` — single-grid fixed-boundary solve
 - :func:`~vmex.core.multigrid.solve_multigrid` — NS_ARRAY ladder (runvmec.f)
-- :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
+- :func:`~vmex.core.multigrid.solve_file` — run a deck the way the CLI does
+  (directives honored, ``wout_<case>.nc`` written)
 - :func:`~vmex.core.freeboundary.solve_free_boundary` — NESTOR free boundary
-- :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit` —
-  coupled NESTOR/VMEC implicit derivative
-- :func:`~vmex.core.wout.read_wout` / :func:`~vmex.core.wout.write_wout`
-  / :func:`~vmex.core.wout.wout_from_state` / :class:`~vmex.core.wout.WoutData`
+- :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
+- :func:`~vmex.core.freeboundary_implicit.make_free_boundary_config` /
+  :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit` /
+  :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit_status`
+  — coupled NESTOR/VMEC implicit derivative
 - :func:`~vmex.core.restart.state_from_wout` /
   :func:`~vmex.core.restart.restart_state` — hot restart from any wout
   (also ``solve*(..., restart_from=...)``)
-- :func:`~vmex.core.plotting.plot_wout` / :func:`~vmex.core.plotting.plot_boozmn`
-- :func:`~vmex.core.plotting.plot_optimization_objects` — surfaces and coils
-- :func:`~vmex.core.boozer.run_booz_xform` — Boozer transform (booz_xform_jax)
-- :func:`~vmex.core.neoclassical.epsilon_effective_from_wout` — optional
-  NEO_JAX effective-ripple profile
-- :func:`~vmex.core.tracing.essos_vmec_field` — hand a solved equilibrium to
-  ESSOS as an ``essos.fields.Vmec`` (optional ESSOS dependency)
-- :func:`~vmex.core.tracing.trace_alphas` /
-  :func:`~vmex.core.plotting.plot_tracing` — optional ESSOS alpha-particle
-  tracing (exact loss fraction; also ``vmex --trace``)
-- :func:`~vmex.core.mgrid.read_mgrid` / :func:`~vmex.core.mgrid.write_mgrid`
-  / :func:`~vmex.core.mgrid.tabulate_cartesian_field`
-  / :class:`~vmex.core.mgrid.MgridField` (mgrid or tabulated direct field;
-  ``MgridField.from_coils`` tabulates an ESSOS coil set)
-- :class:`~vmex.core.extender.VmecInteriorField` — field inside the plasma
-- :class:`~vmex.core.extender.VmecExtender` — field outside the plasma surface
-- :class:`~vmex.core.virtual_casing.PlasmaVacuumInterface` — virtual-casing
-  diagnostics on a prescribed plasma-vacuum interface
+
+**Outputs and scaling**
+
+- :class:`~vmex.core.wout.WoutData` / :func:`~vmex.core.wout.read_wout` /
+  :func:`~vmex.core.wout.write_wout` / :func:`~vmex.core.wout.wout_from_state`
+- :func:`~vmex.core.turbulence.gk_fieldline_geometry_from_wout` — GK
+  field-line geometry from any compatible wout, without a solve
 - :func:`~vmex.core.scaling.scale_input` / :func:`~vmex.core.scaling.scale_wout`
-  — dimensional similarity transforms
+  / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms
+
+**High-order reconstruction and strong-force certificate**
+
+- :class:`~vmex.core.strong_force.HighOrderEquilibriumState` /
+  :func:`~vmex.core.strong_force.high_order_state_from_wout` /
+  :func:`~vmex.core.strong_force.lift_high_order_state` — axis-regular
+  continuous reconstruction
+- :func:`~vmex.core.strong_force.evaluate_high_order_fields` →
+  :class:`~vmex.core.strong_force.HighOrderFieldSamples`;
+  :func:`~vmex.core.strong_force.evaluate_high_order_surface` →
+  :class:`~vmex.core.strong_force.HighOrderSurfaceSamples`
+- :func:`~vmex.core.strong_force.evaluate_strong_force` →
+  :class:`~vmex.core.strong_force.StrongForceSamples`;
+  :func:`~vmex.core.strong_force.certify_strong_force` →
+  :class:`~vmex.core.strong_force.StrongForceReport` (carrying two
+  :class:`~vmex.core.strong_force.ForceErrorNormalizations`, whole-domain
+  and windowed) /
+  :func:`~vmex.core.strong_force.plot_strong_force_report` — independent
+  strong-force certificate
+- :func:`~vmex.core.omnigenity.boozer_spectrum_state` /
+  :func:`~vmex.core.omnigenity.boozer_spectrum_high_order` — Boozer ``|B|``
+  spectrum without a sampled radial mesh
+
+**Force-balance polishing**
+
+- :class:`~vmex.core.polish_driver.PolishConfig` /
+  :class:`~vmex.core.polish_driver.PolishContext` /
+  :class:`~vmex.core.polish_driver.PolishResult` /
+  :class:`~vmex.core.polish_driver.PolishReport` — strong-root correction
+  (``solve*(..., polish=...)``)
+- :class:`~vmex.core.polish_implicit.PolishLinearConfig` /
+  :func:`~vmex.core.polish_implicit.collocation_polish_tangent` /
+  :func:`~vmex.core.polish_implicit.collocation_polish_adjoint` /
+  :func:`~vmex.core.polish_implicit.implicit_collocation_polished_state`
+  — derivatives through a polished root
+
+**Optimization**
+
 - ``vmex.optimize`` — objectives + least-squares driver (module)
-- :class:`~vmex.core.monitoring.OptimizationMonitor` — accepted iterations
-- :class:`~vmex.core.monitoring.EquilibriumReporter` — compact diagnostics
 - ``vmex.implicit`` — implicit differentiation of the equilibrium (module)
 - ``vmex.parallel`` — concurrent ensembles of independent solves (module)
-- ``vmex.errors`` — typed zero-crash exceptions (also exported directly)
+- :class:`~vmex.core.problem.VmecProblem` /
+  :class:`~vmex.core.problem.FunctionProblem` /
+  :class:`~vmex.core.problem.Evaluation` — optimizer-neutral value,
+  residual, and derivative callables
+- :class:`~vmex.core.monitoring.OptimizationMonitor` /
+  :class:`~vmex.core.monitoring.OptimizationRecord` — accepted iterations;
+  :class:`~vmex.core.monitoring.EquilibriumReporter` — compact diagnostics
 
-The ``vmec`` console entry point lives in :mod:`vmex.core.cli`.
+**Post-processing and plotting**
+
+- :func:`~vmex.core.boozer.run_booz_xform` — Boozer transform (booz_xform_jax)
+- :func:`~vmex.core.neoclassical.epsilon_effective_from_wout` /
+  :func:`~vmex.core.neoclassical.epsilon_effective_from_boozer` — optional
+  NEO_JAX effective-ripple profile
+- :func:`~vmex.core.gammac.gamma_c_from_wout` — fast-ion ``Gamma_c`` profile
+  from any compatible wout, without a solve
+- :func:`~vmex.core.tracing.essos_vmec_field` — hand a solved equilibrium to
+  ESSOS as an ``essos.fields.Vmec`` (optional ESSOS dependency)
+- :func:`~vmex.core.tracing.trace_alphas` →
+  :class:`~vmex.core.tracing.AlphaTracingResult` /
+  :func:`~vmex.core.plotting.plot_tracing` — optional ESSOS alpha-particle
+  tracing (exact loss fraction; also ``vmex --trace``)
+- :func:`~vmex.core.plotting.plot_wout` / :func:`~vmex.core.plotting.plot_boozmn`
+  / :func:`~vmex.core.plotting.plot_bootstrap_current`
+  / :func:`~vmex.core.plotting.plot_optimization_movie`
+  / :func:`~vmex.core.plotting.plot_optimization_objects` — wout, boozmn,
+  bootstrap, optimization-history, and surfaces-and-coils plots
+
+**External fields**
+
+- :class:`~vmex.core.mgrid.MgridData` / :class:`~vmex.core.mgrid.MgridField`
+  / :func:`~vmex.core.mgrid.read_mgrid` / :func:`~vmex.core.mgrid.write_mgrid`
+  / :func:`~vmex.core.mgrid.tabulate_cartesian_field` — mgrid or tabulated
+  direct field (``MgridField.from_coils`` tabulates an ESSOS coil set)
+- :class:`~vmex.core.extender.MagneticField` — base JAX field with explicit
+  and stored-point evaluation;
+  :class:`~vmex.core.extender.VmecInteriorField` — field inside the plasma;
+  :class:`~vmex.core.extender.VmecExtender` — field outside the plasma surface
+- :class:`~vmex.core.virtual_casing.PlasmaVacuumInterface` /
+  :func:`~vmex.core.virtual_casing.surface_field_data_from_state` /
+  :func:`~vmex.core.virtual_casing.surface_field_data_from_high_order` /
+  :func:`~vmex.core.virtual_casing.surface_field_data_from_wout` —
+  virtual-casing diagnostics on a prescribed plasma-vacuum interface
+
+**Errors, diagnostics, and modules**
+
+- ``vmex.errors`` — typed zero-crash exceptions (module); also exported
+  directly: :class:`~vmex.core.errors.VmecError`,
+  :class:`~vmex.core.errors.VmecInputError`,
+  :class:`~vmex.core.errors.VmecJacobianError`,
+  :class:`~vmex.core.errors.VmecConvergenceError`,
+  :class:`~vmex.core.errors.VmecNumericalError`,
+  :class:`~vmex.core.errors.MgridNotFoundError`,
+  :class:`~vmex.core.errors.StrongForceContinuationError`,
+  :class:`~vmex.core.errors.StrongForceCertificationError`,
+  :class:`~vmex.core.errors.StrongForceLinearSolveError`
+- ``vmex.doctor`` — installation diagnostics behind ``vmex --doctor`` (module)
+- ``vmex.core`` — the solver internals (module)
+
+The ``vmex`` console entry point (``vmec`` is an alias) lives in
+:mod:`vmex.core.cli`.
 """
 
 from importlib import import_module as _import_module
@@ -49,7 +146,34 @@ from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _package_version
 import os as _os
 from pathlib import Path as _Path
-import warnings as _warnings
+import sys as _sys
+
+from packaging.version import Version as _Version
+
+# Oldest supported versions, equal to the pyproject.toml floors.  SciPy 1.16
+# added the least_squares(callback=) that the optimization examples pass.
+_MINIMUM_VERSIONS = {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2)}
+
+
+def _check_supported_versions() -> None:
+    """Fail at import, not deep inside an example, on an unsupported stack."""
+    if _sys.version_info < (3, 11):
+        raise ImportError(
+            f"vmex requires Python >= 3.11 (found {_sys.version.split()[0]}); "
+            "install vmex in a Python 3.11+ environment.")
+    for name, minimum in _MINIMUM_VERSIONS.items():
+        try:
+            found = _package_version(name)
+        except _PackageNotFoundError:
+            continue  # the import below reports a missing package itself
+        if _Version(found).release < minimum:
+            required = ".".join(map(str, minimum))
+            raise ImportError(
+                f"vmex requires {name} >= {required} (found {found}); "
+                f'run: pip install -U "{name}>={required}"')
+
+
+_check_supported_versions()
 
 from ._compat import _default_compilation_cache_dir as _default_jax_cache_dir
 
@@ -91,18 +215,7 @@ import jax as _jax
 
 
 def _configure_jax_logging(jax_module) -> None:
-    """Quiet JAX by default, with explicit overrides and an old-JAX notice."""
-    if not hasattr(jax_module.config, "jax_logging_level"):
-        _warnings.warn(
-            f"JAX {getattr(jax_module, '__version__', 'unknown')} does not "
-            "provide jax_logging_level (available since JAX 0.4.36). VMEX "
-            "will use environment-level log suppression, but repeated "
-            "XLA/PjRt warnings may still appear. Upgrade JAX to silence them "
-            "reliably.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return
+    """Quiet JAX by default, with explicit overrides."""
     level = _os.environ.get("VMEX_JAX_LOGGING_LEVEL")
     if level is None:
         level = _os.environ.get("JAX_LOGGING_LEVEL", "ERROR")
@@ -141,9 +254,36 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "read_wout": (".core.wout", "read_wout"),
     "write_wout": (".core.wout", "write_wout"),
     "wout_from_state": (".core.wout", "wout_from_state"),
+    "gk_fieldline_geometry_from_wout": (
+        ".core.turbulence", "gk_fieldline_geometry_from_wout"),
     # hot restart
     "restart_state": (".core.restart", "restart_state"),
     "state_from_wout": (".core.restart", "state_from_wout"),
+    # high-order reconstruction and independent strong-force certificate
+    "HighOrderEquilibriumState": (
+        ".core.strong_force", "HighOrderEquilibriumState"),
+    "HighOrderFieldSamples": (".core.strong_force", "HighOrderFieldSamples"),
+    "HighOrderSurfaceSamples": (
+        ".core.strong_force", "HighOrderSurfaceSamples"),
+    "ForceErrorNormalizations": (
+        ".core.strong_force", "ForceErrorNormalizations"),
+    "StrongForceReport": (".core.strong_force", "StrongForceReport"),
+    "StrongForceSamples": (".core.strong_force", "StrongForceSamples"),
+    "certify_strong_force": (".core.strong_force", "certify_strong_force"),
+    "evaluate_high_order_fields": (
+        ".core.strong_force", "evaluate_high_order_fields"),
+    "evaluate_high_order_surface": (
+        ".core.strong_force", "evaluate_high_order_surface"),
+    "boozer_spectrum_high_order": (
+        ".core.omnigenity", "boozer_spectrum_high_order"),
+    "boozer_spectrum_state": (
+        ".core.omnigenity", "boozer_spectrum_state"),
+    "evaluate_strong_force": (".core.strong_force", "evaluate_strong_force"),
+    "high_order_state_from_wout": (
+        ".core.strong_force", "high_order_state_from_wout"),
+    "lift_high_order_state": (".core.strong_force", "lift_high_order_state"),
+    "plot_strong_force_report": (
+        ".core.strong_force", "plot_strong_force_report"),
     # plotting + Boozer
     "plot_wout": (".core.plotting", "plot_wout"),
     "plot_boozmn": (".core.plotting", "plot_boozmn"),
@@ -155,6 +295,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.neoclassical", "epsilon_effective_from_boozer"),
     "epsilon_effective_from_wout": (
         ".core.neoclassical", "epsilon_effective_from_wout"),
+    "gamma_c_from_wout": (".core.gammac", "gamma_c_from_wout"),
     # alpha-particle tracing (ESSOS)
     "AlphaTracingResult": (".core.tracing", "AlphaTracingResult"),
     "essos_vmec_field": (".core.tracing", "essos_vmec_field"),
@@ -167,6 +308,22 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "EquilibriumReporter": (".core.monitoring", "EquilibriumReporter"),
     "OptimizationMonitor": (".core.monitoring", "OptimizationMonitor"),
     "OptimizationRecord": (".core.monitoring", "OptimizationRecord"),
+    # high-order strong-force polishing
+    "PolishConfig": (".core.polish_driver", "PolishConfig"),
+    "PolishContext": (".core.polish_driver", "PolishContext"),
+    "PolishReport": (".core.polish_driver", "PolishReport"),
+    "PolishResult": (".core.polish_driver", "PolishResult"),
+    "PolishLinearConfig": (".core.polish_implicit", "PolishLinearConfig"),
+    "InputRequest": (".core.run_options", "InputRequest"),
+    "RunOptions": (".core.run_options", "RunOptions"),
+    "read_input_request": (".core.run_options", "read_input_request"),
+    "solve_file": (".core.multigrid", "solve_file"),
+    "collocation_polish_adjoint": (
+        ".core.polish_implicit", "collocation_polish_adjoint"),
+    "collocation_polish_tangent": (
+        ".core.polish_implicit", "collocation_polish_tangent"),
+    "implicit_collocation_polished_state": (
+        ".core.polish_implicit", "implicit_collocation_polished_state"),
     # external fields
     "MgridData": (".core.mgrid", "MgridData"),
     "MgridField": (".core.mgrid", "MgridField"),
@@ -180,6 +337,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.virtual_casing", "PlasmaVacuumInterface"),
     "surface_field_data_from_state": (
         ".core.virtual_casing", "surface_field_data_from_state"),
+    "surface_field_data_from_high_order": (
+        ".core.virtual_casing", "surface_field_data_from_high_order"),
     "surface_field_data_from_wout": (
         ".core.virtual_casing", "surface_field_data_from_wout"),
     # dimensional scaling
@@ -192,6 +351,12 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "VmecJacobianError": (".core.errors", "VmecJacobianError"),
     "VmecConvergenceError": (".core.errors", "VmecConvergenceError"),
     "VmecNumericalError": (".core.errors", "VmecNumericalError"),
+    "StrongForceContinuationError": (
+        ".core.errors", "StrongForceContinuationError"),
+    "StrongForceCertificationError": (
+        ".core.errors", "StrongForceCertificationError"),
+    "StrongForceLinearSolveError": (
+        ".core.errors", "StrongForceLinearSolveError"),
     "MgridNotFoundError": (".core.errors", "MgridNotFoundError"),
     # modules
     "core": (".core", None),

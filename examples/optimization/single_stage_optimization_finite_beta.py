@@ -5,7 +5,6 @@ The boundary is varied but each VMEX evaluation is a fixed-boundary solve.
 Virtual casing only separates the converged total field into its plasma and
 required external-coil parts; no free-boundary equilibrium is solved here.
 Use the commented ``Coils.from_simsopt`` line to load a SIMSOPT coil JSON.
-Preview: this script needs ESSOS branch ``rj/vmex-optimization-interfaces``.
 """
 
 from dataclasses import replace
@@ -26,16 +25,10 @@ from vmex.core.bootstrap import (ELEMENTARY_CHARGE, KineticProfiles, RedlBootstr
 import jax
 import jax.numpy as jnp
 
-try:
-    from essos.coils import Coils, CreateEquallySpacedCurves
-    from essos.fields import BiotSavart
-    from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
-    from essos.surfaces import surfacerzfourier_from_boundary
-except ImportError as error:
-    raise ImportError(
-        "This example needs ESSOS branch rj/vmex-optimization-interfaces "
-        "(uwplasma/ESSOS#58)."
-    ) from error
+from essos.coils import Coils, CreateEquallySpacedCurves
+from essos.fields import BiotSavart
+from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
+from essos.surfaces import surfacerzfourier_from_boundary
 
 nfp = 2  # number of field periods
 MAKE_MOVIE = True  # set True for a compact GIF of accepted iterates
@@ -44,7 +37,11 @@ MOVIE_SURFACE_COLOR = "absB"
 
 TARGET_BETA = 0.025
 SURFACES = np.linspace(0.1, 0.9, 8)
-MAX_MODE, MAXITER = 2, 25
+# MAXITER = 7: L-BFGS-B reaches cost 4.06 from 31.7 by iteration 7 on this deck
+# and the reduction per iteration is already below 3 % there, so the remaining
+# iterations mostly buy line-search excursions that each cost an equilibrium
+# solve and a gradient.  Raise it for a production run.
+MAX_MODE, MAXITER = 2, 7
 N_CURRENT_SPLINE = 6
 ASPECT_TARGET, IOTA_FLOOR = 6.0, 0.42
 VARY_MAJOR_RADIUS = False

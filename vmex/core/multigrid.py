@@ -35,6 +35,7 @@ host round-trips of traced values.
 from __future__ import annotations
 
 import gc
+import functools
 import threading
 from dataclasses import replace
 from typing import Any
@@ -54,9 +55,11 @@ from .preconditioner_2d import Prec2DConfig
 from .printing import emit_flushed
 from .restart import restart_state, skip_ladder_rungs
 from .solver import (
-    SolveResult, SpectralState, _finalize, _prefetch_block_lane,
-    _release_used_lane_executables, _result_from_carry, _solve_stage,
-    _resolve_use_fft, hot_restart_state, prepare_runtime, resolution_from_input,
+    SolveResult, SpectralState, _finalize, _loop_driver_config,
+    _prefetch_block_lane,
+    _polish_solve_result, _release_used_lane_executables, _result_from_carry,
+    _resolve_force_balance_polish, _solve_stage, _resolve_use_fft,
+    hot_restart_state, prepare_runtime, resolution_from_input,
     runtime_with_baselines,
 )
 from .transforms import odd_m_sqrt_s_scaling
@@ -174,8 +177,23 @@ def interpolate_state(
     ns_state = int(jnp.shape(state_coarse.R_cos)[0])
     if ns_coarse is not None and int(ns_coarse) != ns_state:
         raise ValueError(f"ns_coarse={ns_coarse} does not match state ns={ns_state}")
-    m = np.asarray(modes.m, dtype=np.int64)
-    interp = lambda x: interpolate_coefficients(x, m=m, ns_fine=int(ns_fine))  # noqa: E731
+    return _interpolate_state_lane(
+        state_coarse, m=tuple(int(v) for v in modes.m), ns_fine=int(ns_fine)
+    )
+
+
+@functools.partial(jax.jit, static_argnames=("m", "ns_fine"))
+def _interpolate_state_lane(
+    state_coarse: SpectralState, *, m: tuple, ns_fine: int
+) -> SpectralState:
+    """All six coefficient interpolations as one XLA program.
+
+    Module-level ``jax.jit``: eager, each stage transition dispatches
+    ~120 single-op XLA programs (six fields x ~20 ops).  ``m`` is a tuple
+    so the static key hashes by value across freshly built mode tables.
+    """
+    m_arr = np.asarray(m, dtype=np.int64)
+    interp = lambda x: interpolate_coefficients(x, m=m_arr, ns_fine=ns_fine)  # noqa: E731
     return SpectralState(
         R_cos=interp(state_coarse.R_cos), R_sin=interp(state_coarse.R_sin),
         Z_cos=interp(state_coarse.Z_cos), Z_sin=interp(state_coarse.Z_sin),
@@ -214,16 +232,21 @@ def _launch_lane_prefetch(
     def worker() -> None:
         try:
             resolution = resolution_from_input(inp, ns=ns_next)
+            time_step0, _ = _loop_driver_config(
+                inp, time_step=time_step, nstep=nstep
+            )
             with device_context(device, resolution):
                 rt = prepare_runtime(
                     inp, resolution, ftol=float(ftol_next),
                     max_iterations=int(niter_next), lconm1=lconm1,
-                    time_step=time_step, tcon0=tcon0, gamma=gamma,
-                    nstep=nstep, precon_type=precon_type,
+                    tcon0=tcon0, gamma=gamma,
+                    precon_type=precon_type,
                     prec2d_threshold=prec2d_threshold, prec2d=prec2d,
                     use_fft=use_fft,
                 )
-                _prefetch_block_lane(rt, use_fft=use_fft)
+                _prefetch_block_lane(
+                    rt, use_fft=use_fft, time_step0=time_step0
+                )
         except Exception:      # silent fallback: on-demand compilation
             pass
 
@@ -257,6 +280,8 @@ def solve_multigrid(
     use_fft: bool | None = None,
     release_stage_cache: bool = False,
     prefetch_compile: bool = False,
+    polish_force_balance: bool | str = False,
+    polish_config: Any = None,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
 
@@ -317,7 +342,8 @@ def solve_multigrid(
 
     Executable reuse: stage runtimes are structural pytrees (solver.py), so
     one XLA executable is compiled per distinct stage structure ``(ns,
-    ftol, niter, ...)`` per session, and repeated ladders (parameter scans,
+    niter, ...)`` per session (``ftol`` is pytree data, so tolerance-only
+    rung changes share it), and repeated ladders (parameter scans,
     hot restarts) recompile nothing.  Full radial padding to
     ``max(ns_array)`` — ONE executable for all stages — would need masked
     radial reductions through geometry/fields/forces/preconditioner and is
@@ -350,12 +376,20 @@ def solve_multigrid(
     *before* the ``release_stage_cache`` point, and the prefetched
     executable is held as a standalone object, so releasing rung k's caches
     cannot evict rung k+1's just-built executable.  Only the ``mode="cli"``
-    block lane is prefetched, and equal-structure reruns (same ``ns``,
-    ``ftol``, ``niter``) skip the prefetch because the previous rung's
-    executable is reused directly.
+    block lane is prefetched, and equal-structure reruns (same ``ns`` and
+    ``niter``; ``ftol`` is data) skip the prefetch because the previous
+    rung's executable is reused directly.
+
+    ``polish_force_balance=False`` is the default and leaves the established
+    VMEC continuation solve unchanged. Set it to ``True`` or ``"auto"`` to
+    run polishing once after the final radial stage. Input-file directives
+    are handled by :func:`solve_file`, not by this physics-only API.
 
     Returns the final stage's :class:`~vmex.core.solver.SolveResult`.
     """
+    polish = _resolve_force_balance_polish(
+        inp, None, polish_force_balance
+    )
     ns_arr = _vmec_ns_prefix(inp.ns_array if ns_array is None else ns_array)
     if ns_arr.size == 0:
         raise ValueError("ns_array has no positive stages")
@@ -392,6 +426,11 @@ def solve_multigrid(
     residual_continuation = None
     carry = rt = None
     prefetch_thread: threading.Thread | None = None
+    # runvmec.f resets DELT to the input value at every stage; the loop-driver
+    # scalars are host config shared by all rungs (never pytree structure).
+    time_step0, nstep_cadence = _loop_driver_config(
+        inp, time_step=time_step, nstep=nstep
+    )
     for igrid in range(n_stages):
         nsval = int(ns_arr[igrid])
         resolution = resolution_from_input(inp, ns=nsval)
@@ -400,13 +439,19 @@ def solve_multigrid(
             rt = prepare_runtime(
                 inp, resolution, ftol=float(ftol_arr[igrid]),
                 max_iterations=int(niter_arr[igrid]), lconm1=lconm1,
-                time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+                tcon0=tcon0, gamma=gamma,
                 precon_type=precon_type, prec2d_threshold=prec2d_threshold,
                 prec2d=prec2d, use_fft=stage_use_fft,
             )
-            state = _put_numeric_leaves(
-                state, _placement_device(device, resolution)
-            )
+            target = _placement_device(device, resolution)
+            state = _put_numeric_leaves(state, target)
+            # The previous rung's residual scalars ride into this rung's
+            # carry.  AUTO can place two rungs on different devices, and the
+            # jit lane rejects a carry whose leaves disagree, so they move
+            # with the state -- as the free-boundary driver already does for
+            # its own continuations.
+            residual_continuation = _put_numeric_leaves(
+                residual_continuation, target)
             if state is not None and int(state.R_cos.shape[0]) != nsval:
                 state = interpolate_state(state, ns_fine=nsval, modes=rt.modes)
             if state is not None:
@@ -419,7 +464,8 @@ def solve_multigrid(
         # Overlapped compilation (see the docstring): start building rung
         # igrid+1's executable now, so it is (mostly) ready when this rung's
         # iterations finish.  Equal-structure next rungs reuse this rung's
-        # executable directly, so nothing needs prefetching.
+        # executable directly, so nothing needs prefetching (ftol is pytree
+        # DATA — a tolerance-only change is not a new structure).
         if (
             prefetch_compile
             and mode == "cli"
@@ -427,7 +473,6 @@ def solve_multigrid(
             and not jax.config.jax_disable_jit
             and (
                 int(ns_arr[igrid + 1]) != nsval
-                or float(ftol_arr[igrid + 1]) != float(ftol_arr[igrid])
                 or int(niter_arr[igrid + 1]) != int(niter_arr[igrid])
             )
         ):
@@ -456,6 +501,7 @@ def solve_multigrid(
         with device_context(device, resolution):
             carry = _solve_stage(
                 rt, state, mode=mode, verbose=verbose, emit=emit,
+                time_step0=time_step0, nstep=nstep_cadence,
                 # initialize_radial.f resets ijacob at every NS stage, so
                 # both bad-Jacobian and LMOVE_AXIS first-force retries remain
                 # available after interpolation and on hot starts.
@@ -513,6 +559,8 @@ def solve_multigrid(
                 use_fft=use_fft,
                 release_stage_cache=release_stage_cache,
                 prefetch_compile=prefetch_compile,
+                polish_force_balance=polish,
+                polish_config=polish_config,
             )
         last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
         if ier not in (SUCCESSFUL_TERM_FLAG, MORE_ITER_FLAG) or (
@@ -549,8 +597,19 @@ def solve_multigrid(
 
     with device_context(device, resolution):
         if int(carry.ier) == MORE_ITER_FLAG and not raise_on_max_iterations:
-            return _result_from_carry(carry, rt)
-        return _finalize(carry, rt)
+            result = _result_from_carry(carry, rt)
+        else:
+            result = _finalize(carry, rt)
+    return _polish_solve_result(
+        inp,
+        resolution,
+        result,
+        polish=polish,
+        polish_config=polish_config,
+        lconm1=lconm1,
+        verbose=verbose,
+        emit=emit,
+    )
 
 
 def solve_free_boundary_multigrid(
@@ -929,3 +988,105 @@ def solve_free_boundary_multigrid(
     if stage_result is None:  # defensive; positive ns_arr guarantees a stage
         raise ValueError("ns_array has no executable stages")
     return stage_result.result
+
+
+def solve_file(
+    path,
+    *,
+    polish: bool | str | None = None,
+    polish_config: Any = None,
+    polish_tol: float | None = None,
+    polish_fail: str | None = None,
+    polish_degree: int | None = None,
+    polish_max_iter: int | None = None,
+    polish_spans: int | None = None,
+    polish_budget: float | None = None,
+    write_wout: bool = True,
+    outdir=None,
+    **solve_kwargs,
+):
+    """Solve one input file the way the CLI does, honoring its directives.
+
+    ``VmecInput.from_file`` returns physics only; this entry point also reads
+    the VMEX execution directives (``!@VMEX POLISH = AUTO`` and friends, or a
+    ``_vmex`` JSON section) and applies the documented precedence: an explicit
+    Python keyword overrides the file, and ``None`` means use the file.
+
+    ``polish_fail`` selects what a failed polish does: ``"error"`` raises
+    (driver default), ``"fallback"`` returns the unpolished state, ``"warn"``
+    does the same and emits a :class:`RuntimeWarning`.  ``polish_tol``,
+    ``polish_degree``, ``polish_max_iter``, ``polish_spans``, and
+    ``polish_budget`` (the wall-clock ceiling ``polish="auto"`` commits to
+    before declining) override
+    the matching :class:`~vmex.core.polish_driver.PolishConfig` fields, with
+    the documented precedence ``CLI flag > Python keyword > file directive >
+    package default``; an explicit ``polish_config`` wins over the scalar
+    overrides entirely.
+
+    ``write_wout=True`` writes ``wout_<case>.nc`` beside the input (or into
+    ``outdir``) — the same output contract as ``vmex <input>``.  When
+    polishing succeeded the file samples the certified native state on the
+    denser :func:`~vmex.core.polish_driver.polished_wout_ns` export mesh.  Free-boundary decks solve
+    through the free-boundary ladder and reject polish requests, matching the
+    fixed-boundary-only scope of the polishing lane.
+
+    Returns the final :class:`~vmex.core.solver.SolveResult`.
+    """
+    from pathlib import Path as _Path
+
+    from .run_options import (
+        polish_config_from_options, read_input_request, resolve_run_options,
+    )
+
+    request = read_input_request(path)
+    options, sources = resolve_run_options(
+        request.options, polish=polish, polish_tol=polish_tol,
+        polish_fail=polish_fail, polish_degree=polish_degree,
+        polish_max_iter=polish_max_iter, polish_spans=polish_spans,
+        polish_budget=polish_budget,
+    )
+    config = polish_config_from_options(options, polish_config)
+    inp = request.input
+
+    if bool(inp.lfreeb):
+        if options.polish is not False:
+            raise ValueError(
+                "force-balance polishing requires a fixed-boundary input; "
+                f"the polish request came from the {sources['polish']}"
+            )
+        result = solve_free_boundary_multigrid(inp, **solve_kwargs)
+    else:
+        if bool(solve_kwargs.get("verbose")) and options.polish is not False:
+            print(f"polish = {options.polish!r} (from {sources['polish']})")
+        result = solve_multigrid(
+            inp, polish_force_balance=options.polish,
+            polish_config=config, **solve_kwargs,
+        )
+        # "fallback"/"warn" mapped onto the driver's return_unpolished, so a
+        # failed polish arrives here as an unconverged report rather than an
+        # exception -- no second solve, the legacy state is the checkpoint.
+        # An AUTO decline is exempt: nothing was attempted, so nothing
+        # failed, and it announces itself on its own terms.
+        from .printing import POLISH_AUTO_DECLINED
+
+        if (options.polish_fail == "warn"
+                and result.polish_report is not None
+                and not bool(result.polish_report.converged)
+                and result.polish_report.termination_reason
+                != POLISH_AUTO_DECLINED):
+            import warnings
+
+            warnings.warn(
+                "force-balance polishing failed "
+                f"({result.polish_report.termination_reason}); returning the "
+                "unpolished equilibrium", RuntimeWarning, stacklevel=2)
+
+    if write_wout:
+        from .cli import _write_wout_from_result, case_from_input
+
+        source = _Path(path)
+        directory = _Path(outdir) if outdir is not None else source.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        wout_path = directory / f"wout_{case_from_input(source)}.nc"
+        _write_wout_from_result(inp, source, result, wout_path)
+    return result

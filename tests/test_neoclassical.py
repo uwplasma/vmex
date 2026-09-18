@@ -61,19 +61,52 @@ def test_epsilon_effective_rejects_lasym_before_importing_optional_backend():
         neoclassical.epsilon_effective_from_wout(SimpleNamespace(lasym=True))
 
 
+def test_epsilon_effective_default_is_library_safe():
+    """A diagnostic call must not clear process-wide JAX caches by default.
+
+    Cache release is memory *policy* and belongs to the caller (the CLI does
+    it after all requested diagnostics); a library default of ``True`` would
+    silently discard every warm executable of the surrounding program.
+    """
+    import inspect
+
+    signature = inspect.signature(neoclassical.epsilon_effective_from_wout)
+    assert signature.parameters["clear_jax_caches"].default is False
+
+
 def test_diagnostic_config_is_the_bounded_summary_resolution(monkeypatch):
     """Summary figures ask NEO for a radial trend, not a transport number.
 
     The bounded settings (Nemov PoP 6, 4622 (1999) integrates along field
-    lines until ``acc_req`` is met) keep one plot within seconds; publication
-    numbers pass their own ``NeoConfig``.
+    lines until ``acc_req`` is met) resolve the summary Boozer spectrum
+    without aliasing; publication numbers pass their own ``NeoConfig``.
     """
     monkeypatch.setattr(
         neoclassical, "_neo_imports", lambda: (SimpleNamespace, None))
     config = neoclassical.diagnostic_neo_config()
-    assert (config.theta_n, config.phi_n, config.npart) == (16, 16, 8)
-    assert config.acc_req == 0.2                      # loose on purpose
-    assert config.nstep_max >= config.nstep_min > 0
+    assert (config.theta_n, config.phi_n, config.npart) == (32, 32, 24)
+    assert (config.nstep_per, config.nstep_min, config.nstep_max) == (20, 200, 500)
+    assert config.acc_req == 0.02
+
+
+@pytest.mark.usefixtures("_module_jit_enabled")
+def test_diagnostic_config_matches_converged_neo_on_the_qi_deck():
+    """The ``--plot`` resolution reproduces converged NEO without aliasing dips.
+
+    The fixture is the summary Boozer transform (``mboz=16, nboz=12``) of the
+    solved ``examples/data/input.nfp4_QI_finite_beta`` deck on s = 0.43, 0.49,
+    0.55.  A 16 x 16 NEO spline grid aliases its m = 13-15 harmonics and gave
+    5.9e-7 and 1.7e-9 on the outer surfaces of this trio.  The reference is
+    NEO_JAX's default ``NeoConfig``, which moves by less than 5% when any
+    resolution control is doubled.
+    """
+    pytest.importorskip("neo_jax")
+    with np.load(Path(__file__).parent / "data" / "boozer_nfp4_QI_finite_beta.npz") as data:
+        booz = {key: data[key] for key in data.files}
+    s, values = neoclassical.epsilon_effective_from_boozer(
+        booz, config=neoclassical.diagnostic_neo_config())
+    np.testing.assert_allclose(s, [0.43, 0.49, 0.55], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(values, [5.239e-4, 4.838e-4, 4.557e-4], rtol=0.05)
 
 
 def test_epsilon_effective_from_wout_snaps_surfaces_and_negates_the_nu_table(
@@ -135,7 +168,11 @@ def test_epsilon_effective_from_wout_snaps_surfaces_and_negates_the_nu_table(
 
 @pytest.mark.full
 def test_epsilon_effective_matches_neo_reference():
-    """The in-memory adapter retains a NEO/STELLOPT-parity QA profile."""
+    """The in-memory adapter retains the summary QA profile.
+
+    These values are within 1.4% of NEO_JAX's default ``NeoConfig`` on the
+    same surfaces; the earlier 16 x 16 summary grid pinned values 7-20x larger.
+    """
     pytest.importorskip("neo_jax")
     script = f"""
 import json
@@ -154,4 +191,4 @@ print(json.dumps([list(map(float, s)), list(map(float, values))]))
     s, values = json.loads(completed.stdout.splitlines()[-1])
     np.testing.assert_allclose(s, [0.19387755, 0.5, 0.80612245], rtol=0, atol=1e-7)
     np.testing.assert_allclose(
-        values, [1.29683058e-7, 2.17541367e-7, 2.49843084e-7], rtol=5e-5)
+        values, [1.90173919e-8, 1.09848947e-8, 1.84568599e-8], rtol=5e-5)

@@ -154,6 +154,41 @@ def test_lfull3d1out_default_explicit_true_and_indata_round_trip(
     ).lfull3d1out is True
 
 
+def test_vmex_polish_directive_is_execution_metadata_not_physics(
+        tmp_path: Path) -> None:
+    """Directives never become VmecInput fields; run_options owns them.
+
+    ``VmecInput.from_file`` ignores execution metadata while preserving all
+    physics, and ``to_indata`` writes physics only.  The directive still
+    round-trips through :func:`vmex.core.run_options.read_input_request` and
+    :func:`~vmex.core.run_options.format_indata_directives`, which is the
+    contract the CLI and ``solve_file`` use.
+    """
+    from vmex.core.run_options import (
+        RunOptions, format_indata_directives, read_input_request,
+    )
+
+    text = "! VMEX: POLISH_FORCE_BALANCE = .TRUE.\n&INDATA\nMPOL = 3\n/\n"
+    inp = VmecInput.from_indata_text(text)
+    assert not hasattr(inp, "polish_force_balance")
+    assert inp.mpol == 3
+
+    source = tmp_path / "input.polished"
+    source.write_text(text, encoding="utf-8")
+    request = read_input_request(source)
+    assert request.options.polish is True
+    assert request.input.mpol == 3
+
+    written = inp.to_indata(tmp_path / "input.physics_only")
+    assert "POLISH" not in written.read_text(encoding="utf-8")
+
+    directives = format_indata_directives(RunOptions(polish=True))
+    rewritten = tmp_path / "input.rewritten"
+    rewritten.write_text(
+        directives + written.read_text(encoding="utf-8"), encoding="utf-8")
+    assert read_input_request(rewritten).options.polish is True
+
+
 def test_legacy_ns_array_zero_expands_via_nsin() -> None:
     """VMEC2000's explicit old-style sentinel builds the NSIN -> 31 ladder."""
     inp = VmecInput.from_indata_text(

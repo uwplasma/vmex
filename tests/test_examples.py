@@ -8,9 +8,9 @@ this module keeps their example wiring explicit.
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -26,8 +26,10 @@ EXAMPLES = REPO / "examples"
 DATA_DIR = EXAMPLES / "data"
 
 _COST_RE = re.compile(r"^\s*\d+\s+\d+\s+([0-9.eE+-]+)", re.MULTILINE)
+_SCALAR_COST_RE = re.compile(
+    r"optimizer scalar cost:\s*([0-9.eE+-]+)\s*->\s*([0-9.eE+-]+)")
 
-ESSOS_BRANCH_EXAMPLES = (
+ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "take_free_boundary_gradients.py",
     EXAMPLES / "vmex_fixed_free_boundary_comparison.py",
     EXAMPLES / "vmex_get_B_outside_plasma.py",
@@ -57,37 +59,112 @@ def test_released_essos_reads_bundled_coil_fixtures() -> None:
         assert np.all(np.isfinite(np.asarray(coils.currents)))
 
 
-def test_essos_examples_name_the_required_branch() -> None:
-    """ESSOS 0.16 reports the branch to install, not a missing symbol."""
-    pytest.importorskip("essos")
+def test_coil_examples_need_only_the_pinned_essos_release() -> None:
+    """Every coil example runs on the ESSOS the ``coils`` extra installs.
+
+    These examples used to raise with a ``pip install essos @ git+...`` line
+    because the API they need (uwplasma/ESSOS#58) was unreleased. ESSOS 0.17
+    carries it, the extra pins that floor, and the instruction is gone -- so
+    what has to stay true is that the floor and the API agree.
+    """
+    import tomllib
+    from importlib.metadata import version
+
+    from packaging.version import Version
+
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
+    coils = pyproject["project"]["optional-dependencies"]["coils"]
+    assert coils == ["essos>=0.17"], coils
+
+    for script in ESSOS_COIL_EXAMPLES:
+        text = script.read_text()
+        assert "git+https://github.com/uwplasma/ESSOS" not in text, script.name
+
+    essos = pytest.importorskip("essos")
+    assert Version(version("essos")) >= Version("0.17"), version("essos")
     from essos.coils import Coils
+    from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
+    from essos.objective_functions import (
+        loss_coil_separation,
+        loss_coil_surface_distance,
+    )
+    from essos.surfaces import surfacerzfourier_from_boundary
 
-    try:
-        from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
-        from essos.objective_functions import (
-            loss_coil_separation,
-            loss_coil_surface_distance,
-        )
-        from essos.surfaces import surfacerzfourier_from_boundary
-    except ImportError:
-        has_branch_api = False
-    else:
-        del (LevelsetStoppingCriterion, trace_field_lines,
-             loss_coil_separation, loss_coil_surface_distance,
-             surfacerzfourier_from_boundary)
-        has_branch_api = all(
-            hasattr(Coils, name)
-            for name in ("from_json", "with_dofs", "dof_names")
-        )
-    if has_branch_api:
-        pytest.skip("the required ESSOS branch API is installed")
+    del (essos, LevelsetStoppingCriterion, trace_field_lines,
+         loss_coil_separation, loss_coil_surface_distance,
+         surfacerzfourier_from_boundary)
+    for name in ("from_json", "with_dofs", "dof_names"):
+        assert hasattr(Coils, name), name
 
-    for script in ESSOS_BRANCH_EXAMPLES:
-        with pytest.raises(
-            ImportError,
-            match="needs ESSOS branch rj/vmex-optimization-interfaces",
-        ):
-            runpy.run_path(str(script))
+
+#: Shipped examples that no test runs, each with the reason it is exempt.
+#: The QH, QI and QP entries drive the same code as a tested QA sibling on a
+#: different symmetry class, so the driver is covered and only the deck is not.
+#: Keeping the list explicit is what makes the gap reviewable: a new example
+#: that nothing tests fails the guard below until it is either tested or
+#: listed here on purpose.
+UNTESTED_EXAMPLES = {
+    "examples/mirror/pleiades_mirror_reference.py": "needs an unshipped reference deck",
+    "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py": "mirror hybrid, covered by tests/mirror",
+    "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
+    "examples/optimization/QA_optimization_bootstrap.py": "bootstrap driver covered by tests/test_bootstrap.py",
+    "examples/optimization/QH_optimization_bootstrap.py": "QA sibling is tested",
+    "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
+    "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
+    "examples/optimization/QI_optimization_bootstrap.py": "QA sibling is tested",
+    "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
+    "examples/optimization/QI_optimization_scalar.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization_finite_beta_scalar.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization_scalar.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization_scipy.py": "QA sibling is tested",
+    "examples/optimization/stellarator_asymmetry/QA_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QP_optimization.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
+}
+
+
+def _shipped_examples() -> list[Path]:
+    return sorted(p for p in EXAMPLES.rglob("*.py") if not p.name.startswith("_"))
+
+
+def test_every_example_parses() -> None:
+    """Every shipped example compiles.
+
+    Cheap, and it catches the class of damage an edit across many examples can
+    do -- a removed import guard, a stranded ``except`` -- without running any
+    of them.
+    """
+    import ast
+
+    for script in _shipped_examples():
+        try:
+            ast.parse(script.read_text(), filename=str(script))
+        except SyntaxError as error:  # pragma: no cover - the failure is the point
+            raise AssertionError(f"{script.relative_to(REPO)}: {error}") from error
+
+
+def test_every_example_is_tested_or_listed_as_untested() -> None:
+    """No example is uncovered by accident."""
+    # The UNTESTED_EXAMPLES entries above are themselves test source, so drop
+    # those lines before searching or every listed example would look covered.
+    tests_text = "\n".join(
+        line
+        for path in sorted((REPO / "tests").rglob("test_*.py"))
+        for line in path.read_text().splitlines()
+        if not line.lstrip().startswith('"examples/'))
+    uncovered = {
+        str(script.relative_to(REPO))
+        for script in _shipped_examples()
+        if script.name not in tests_text
+    }
+    assert uncovered == set(UNTESTED_EXAMPLES), {
+        "missing a test or an entry": sorted(uncovered - set(UNTESTED_EXAMPLES)),
+        "listed but now tested": sorted(set(UNTESTED_EXAMPLES) - uncovered),
+    }
 
 
 def _run_example(script: Path, cwd: Path, timeout: int = 2400,
@@ -107,9 +184,13 @@ def _run_example(script: Path, cwd: Path, timeout: int = 2400,
 
 def _assert_cost_decreased(stdout: str, name: str) -> None:
     costs = [float(c) for c in _COST_RE.findall(stdout)]
-    assert len(costs) >= 2, f"{name}: expected scipy iteration rows, got {costs}"
+    if len(costs) < 2:
+        scalar_costs = _SCALAR_COST_RE.search(stdout)
+        costs = [] if scalar_costs is None else [
+            float(scalar_costs.group(1)), float(scalar_costs.group(2))]
+    assert len(costs) >= 2, f"{name}: expected optimizer cost evidence, got {costs}"
     assert min(costs) < costs[0], (
-        f"{name}: least-squares cost did not decrease: first {costs[0]:.6e}, "
+        f"{name}: optimizer cost did not decrease: first {costs[0]:.6e}, "
         f"best {min(costs):.6e}")
 
 
@@ -127,7 +208,9 @@ def test_plot_and_boozer(tmp_path):
     outdir = tmp_path / "output_plot_and_boozer"
     assert (outdir / "wout_li383_low_res.nc").exists()
     # every plot_wout figure kind is written unconditionally
-    for suffix in ("summary", "surfaces", "modB", "profiles", "stability", "boundary3d"):
+    for suffix in (
+        "summary", "surfaces", "modB", "profiles", "stability", "boundary3d",
+    ):
         assert (outdir / f"li383_low_res_{suffix}.png").exists()
 
 
@@ -156,6 +239,81 @@ def test_run_from_json(tmp_path):
     assert (tmp_path / "output_run_from_json" / "wout_circular_tokamak.nc").exists()
 
 
+def test_epsilon_effective_example_bounds_the_neo_controls() -> None:
+    """The example must stay responsive and must not chase a rational surface.
+
+    ``max_rational_field_periods=0`` asks NEO_JAX for an unlimited exact
+    rational correction, which on a near-rational surface does not finish in
+    an example's budget; the script documents the bound and keeps it finite.
+    """
+    source = (EXAMPLES / "epsilon_effective.py").read_text()
+    assert "epsilon_effective_from_wout" in source
+    assert "max_rational_field_periods=100000" in source
+    assert "input.LandremanPaul2021_QA_lowres" in source
+    # a radial profile, not a single surface: the trend is the result
+    assert "SURFACES = np.linspace(0.15, 0.95, 5)" in source
+    assert "surfaces=SURFACES" in source and "config=NEO_CONFIG" in source
+
+
+# NEO_JAX is the optional ``neoclassical`` extra, which no CI lane installs
+# today, so this skips everywhere in CI; it is the on-demand check for the
+# example (``pip install vmex[neoclassical]``, then RUN_FULL=1).
+@pytest.mark.full  # ~3.5 min: one solve, then a Boozer transform per surface
+def test_epsilon_effective_example(tmp_path):
+    pytest.importorskip("neo_jax")
+    out = _run_example(EXAMPLES / "epsilon_effective.py", tmp_path, timeout=1800)
+    values = re.search(r"epsilon_eff\^\(3/2\) = \[(.+?)\]", out, re.S)
+    assert values is not None, out
+    profile = np.array([float(v) for v in values.group(1).split()])
+    assert profile.size == 5 and np.all(np.isfinite(profile))
+    # a QA ripple is small but nonzero, and rises toward the boundary
+    assert np.all(profile > 0) and np.all(profile < 1e-2)
+    assert profile[-1] > profile[0], f"eps_eff should rise outward: {profile}"
+    assert (tmp_path / "epsilon_effective.png").stat().st_size > 10_000
+
+
+def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None:
+    """The polish is only evidence if the example stops when it fails.
+
+    ``solve_file`` returns a polished state whenever the deck asks for one;
+    the certificate is the ``polish_report``. Exporting the dense-mesh WOUT
+    without checking ``converged`` would ship an uncertified equilibrium as
+    if it were polished, so keep both guards explicit.
+    """
+    deck = EXAMPLES / "data" / "input.shaped_tokamak_pressure_polished"
+    assert "POLISH_FORCE_BALANCE = .TRUE." in deck.read_text()
+    source = (EXAMPLES / "force_balance_polishing.py").read_text()
+    assert "result.polished_state is None or result.polish_report is None" in source
+    assert "if not report.converged:" in source
+    for field in ("initial_normalized_l2", "final_normalized_l2",
+                  "nonlinear_iterations", "termination_reason"):
+        assert field in source
+
+
+@pytest.mark.full  # nightly: ordinary solve + strong-force polish + 12 figures (~2 min)
+def test_force_balance_polishing_example(tmp_path):
+    out = _run_example(EXAMPLES / "force_balance_polishing.py", tmp_path, timeout=1200)
+    assert "POLISH CERTIFIED" in out
+    assert "independent strong-force certificate over s in [0.10, 0.99]:" in out
+    for label in ("eps_F volume L2 (<= 2 by construction)", "<|F|> [N m^-3]",
+                  "<|F|>/<|grad(B^2/2mu0)|>"):
+        certificate = re.search(
+            re.escape(label) + r"\s+([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+        assert certificate is not None, out
+        initial, final = (float(g) for g in certificate.groups())
+        assert np.isfinite([initial, final]).all() and 0 <= final < initial, (
+            f"the polish must lower the reported {label}: {out}")
+    outdir = tmp_path / "output_force_balance_polishing"
+    for name in ("wout_shaped_tokamak_before_polish.nc",
+                 "wout_shaped_tokamak_pressure_polished.nc"):
+        assert (outdir / name).exists()
+    # both stages plot, so the before/after comparison the docstring promises
+    # is actually produced
+    for stage, stem in (("before", "shaped_tokamak_before_polish"),
+                        ("after", "shaped_tokamak_pressure_polished")):
+        assert (outdir / stage / f"{stem}_summary.png").stat().st_size > 10_000
+
+
 def test_hot_restart_scan(tmp_path):
     out = _run_example(EXAMPLES / "hot_restart_scan.py", tmp_path, timeout=900)
     base = re.search(r"cold base solve:\s*(\d+) iters", out)
@@ -180,11 +338,32 @@ def test_free_boundary_mgrid(tmp_path):
     assert (tmp_path / "output_free_boundary_mgrid" / "wout_cth_like_free_bdy.nc").exists()
 
 
-@pytest.mark.full  # one free solve, coupled adjoint, and two independent re-solves
+@pytest.mark.full  # one fixed solve, its adjoint, and two re-solves for the FD
+def test_take_fixed_boundary_gradients(tmp_path):
+    """The fixed-boundary counterpart certifies against a difference quotient.
+
+    Unlike the free boundary, a fixed-boundary re-solve follows the same path,
+    so the quotient is usable: at the shipped settings the example reports
+    1.1e-07, and the smoke settings (ns 11, mpol 3, ftol 1e-9) stay well inside
+    the bound below.
+    """
+    out = _run_example(EXAMPLES / "take_fixed_boundary_gradients.py", tmp_path,
+                       timeout=900)
+    match = re.search(r"relative error = ([0-9.eE+-]+)", out)
+    assert match is not None, out[-2000:]
+    assert float(match.group(1)) < 1.0e-3, out[-2000:]
+
+
+@pytest.mark.full  # one free solve and both adjoint solvers
 def test_take_free_boundary_gradients(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(EXAMPLES / "take_free_boundary_gradients.py", tmp_path, timeout=900)
-    match = re.search(r"relative error = ([0-9.eE+-]+)", out)
+    # The certificate is the two independent adjoint solvers agreeing, not the
+    # difference quotient: on a free boundary the quotient changes sign as the
+    # step shrinks.  The smoke settings run at ftol 1e-7, where the equilibrium
+    # is not a tight enough root for better than ~2e-2; the shipped settings
+    # give 1.6e-04.
+    match = re.search(r"they differ by ([0-9.eE+-]+)", out)
     assert match is not None and float(match.group(1)) < 3.0e-2
 
 
@@ -227,6 +406,43 @@ def test_global_optimization_example_exposes_optimizer_contract():
     assert "ess_alpha=ESS_ALPHA" in text
 
 
+def test_qa_optimization_keeps_explicit_least_squares_lane():
+    """The canonical QA example keeps its residual/Jacobian tutorial."""
+    text = (EXAMPLES / "optimization" / "QA_optimization.py").read_text()
+    assert "VmecProblem.from_tuples" in text
+    assert "compile_residual_and_jacobian" in text
+    assert "least_squares(" in text
+    assert "VmecProblem.from_loss" not in text
+    assert "ess_alpha=ESS_ALPHA" in text
+
+
+@pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])
+@pytest.mark.parametrize("finite_beta", [False, True])
+def test_scalar_optimization_examples_expose_one_adjoint_lane(case, finite_beta):
+    """All eight scalar examples share wiring but keep physics visible."""
+    suffix = "_finite_beta_scalar" if finite_beta else "_scalar"
+    text = (EXAMPLES / "optimization" / f"{case}_optimization{suffix}.py").read_text()
+    assert "from _scalar_driver import run_scalar_stage" in text
+    assert "objective_terms" in text
+    assert "run_scalar_stage(" in text
+    assert "POLISH_FORCE_BALANCE = False" in text
+    assert f"input.{case}_" in text and f"wout_{case}_" in text
+    if finite_beta:
+        assert "TARGET_BETA" in text
+        assert "opt.volume_average_beta" in text
+        assert "opt.mercier_stability_residual" in text
+        assert "opt.glasser_stability_residual" in text
+    else:
+        assert "TARGET_BETA" not in text
+
+    helper = (EXAMPLES / "optimization" / "_scalar_driver.py").read_text()
+    assert "VmecProblem.from_loss" in helper
+    assert "residuals_from_tuples" in helper
+    assert "0.5 * jnp.vdot(rows, rows)" in helper
+    assert "compile_value_and_gradient" in helper
+    assert 'method="L-BFGS-B"' in helper
+
+
 @pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])
 @pytest.mark.parametrize("suffix", ["", "_finite_beta"])
 def test_stellarator_asymmetry_examples_expose_all_boundary_families(case, suffix):
@@ -248,6 +464,17 @@ def test_qa_maxj_example_states_its_physical_scope():
     assert "opt.magnetic_well" in text
 
 
+def test_combined_confinement_example_states_the_surrogate_policy():
+    """Optimize GammaCSmooth, report hard values, promise no zero losses."""
+    text = (EXAMPLES / "optimization" / "omnigenity_epsilon_gammac_maxj.py").read_text()
+    assert "optimize the surrogate, report the hard values" in text
+    assert "GammaCSmooth(" in text and "GammaC(" in text
+    assert "does not promise" in text
+    assert "normalized by its seed value" in text
+    assert "VmecProblem.from_loss" in text  # one aggregate scalar adjoint
+    assert "epsilon_eff unavailable" in text  # optional NEO_JAX states its absence
+
+
 @pytest.mark.full  # one direct-coil free solve, coupled adjoint, and output solve (~2 min)
 def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
     pytest.importorskip("essos")
@@ -256,6 +483,12 @@ def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
         tmp_path, timeout=600)
     assert "no boundary dofs or mgrid file" in out
     assert re.search(r"\[final\] QA = ([0-9.eE+-]+)", out)
+    # Smoke mode exits 0 even when a target is missed, so the report must say so.
+    assert re.search(r"Minimum \|iota\| = [0-9.]+ \(target >= [0-9.]+\)", out)
+    summary = json.loads(
+        (tmp_path / "single_stage_free_boundary_optimization_summary.json").read_text())
+    assert summary["met"] == (not summary["unmet"])
+    assert summary["met"] or "did NOT meet its stated targets" in out
     for name in ("wout_single_stage_free_boundary_optimized.nc",
                  "single_stage_free_boundary_optimization.png",
                  "single_stage_free_boundary_objectives.png"):
@@ -413,6 +646,32 @@ def test_qs_optimization_examples(case, tmp_path):
     assert match is not None and np.isfinite(float(match.group(1)))
 
 
+def test_qa_scalar_optimization_example(tmp_path):
+    """The vacuum scalar driver descends and writes distinct outputs."""
+    script = EXAMPLES / "optimization" / "QA_optimization_scalar.py"
+    out = _run_example(script, tmp_path)
+    match = re.search(r"scalar cost: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    assert match is not None and float(match.group(2)) < float(match.group(1))
+    assert "[final] QS total" in out
+    assert (tmp_path / "input.QA_scalar_optimized").exists()
+    assert (tmp_path / "wout_QA_scalar_optimized.nc").exists()
+    assert (tmp_path / "QA_scalar_optimized_summary.png").exists()
+
+
+@pytest.mark.full
+def test_qa_finite_beta_scalar_optimization_example(tmp_path):
+    """The finite-beta scalar driver includes pressure and stability rows."""
+    script = EXAMPLES / "optimization" / "QA_optimization_finite_beta_scalar.py"
+    out = _run_example(script, tmp_path)
+    match = re.search(r"scalar cost: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    assert match is not None and float(match.group(2)) < float(match.group(1))
+    beta = re.search(r"\[final\].*beta = ([0-9.]+)%", out)
+    assert beta is not None and 0.5 < float(beta.group(1)) < 2.0
+    assert (tmp_path / "input.QA_finite_beta_scalar_optimized").exists()
+    assert (tmp_path / "wout_QA_finite_beta_scalar_optimized.nc").exists()
+    assert (tmp_path / "QA_finite_beta_scalar_optimized_summary.png").exists()
+
+
 @pytest.mark.full  # nightly: shared Boozer + bounce-action Jacobian is cold-compile heavy
 def test_qi_maxj_continuation_example(tmp_path):
     """Reduced-budget QI+maximum-J continuation smoke test."""
@@ -431,6 +690,26 @@ def test_qi_maxj_continuation_example(tmp_path):
     assert (tmp_path / "input.QI_maxJ_optimized").exists()
     assert (tmp_path / "wout_QI_maxJ_optimized.nc").exists()
     assert (tmp_path / "QI_maxJ_optimized_summary.png").stat().st_size > 10_000
+
+
+@pytest.mark.full  # nightly: Gamma_c surrogate + Boozer action adjoint is cold-compile heavy
+def test_combined_confinement_objective_example(tmp_path):
+    """Reduced-budget epsilon/Gamma_c/maximum-J combined-objective smoke test."""
+    script = EXAMPLES / "optimization" / "omnigenity_epsilon_gammac_maxj.py"
+    out = _run_example(script, tmp_path, timeout=1800)
+    _assert_cost_decreased(out, "eps-gammac-maxJ")
+    hard = re.search(r"hard Gamma_c mean = ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    assert hard is not None
+    assert all(np.isfinite(float(v)) and float(v) > 0.0 for v in hard.groups())
+    assert re.search(
+        r"maximum-J residual = ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    # the hard ripple line appears when NEO_JAX is installed; its absence
+    # must be stated, never silently skipped
+    assert (re.search(r"epsilon_eff\^\(3/2\) mean = ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+            or "epsilon_eff unavailable" in out)
+    assert (tmp_path / "input.QA_eps_gammac_maxJ").exists()
+    assert (tmp_path / "wout_QA_eps_gammac_maxJ.nc").exists()
+    assert (tmp_path / "QA_eps_gammac_maxJ_summary.png").stat().st_size > 10_000
 
 
 @pytest.mark.full  # nightly: QI mode ladder + Boozer, subprocess cold-start heavy
@@ -558,13 +837,21 @@ def test_fixed_boundary_single_stage_optimization(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization.py", tmp_path, timeout=1800)
+    # Smoke mode is one stage at fixed multipliers, so its objective must fall.
     match = re.search(r"Objective: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
     assert match is not None and float(match.group(2)) < float(match.group(1))
+    assert re.search(r"\[stage 1\] \d+ L-BFGS-B iterations, \d+ trials, violation = ", out)
     for diagnostic in ("B.n/B: area-weighted RMS", "Minimum coil-surface distance",
-                       "Minimum coil-coil distance", "Maximum curvature", "Coil lengths"):
+                       "Minimum coil-coil distance", "Maximum curvature", "Coil lengths",
+                       "Minimum |iota| = ", "Aspect ratio = "):
         assert diagnostic in out
     normal = re.search(r"B\.n/B: area-weighted RMS = ([0-9.]+)%, max = ([0-9.]+)%", out)
     assert normal is not None and all(np.isfinite(float(value)) for value in normal.groups())
+    summary = json.loads((tmp_path / "single_stage_optimization_summary.json").read_text())
+    assert summary["smoke"] and summary["trials"] >= 1
+    assert summary["met"] == (not summary["unmet"])
+    verdict = "All stated targets met." if summary["met"] else "did NOT meet its stated targets"
+    assert verdict in out
     for name in ("wout_single_stage_optimized.nc", "single_stage_objectives.png",
                  "surface_single_stage_initial.vts", "coils_single_stage_initial.vtu",
                  "surface_single_stage_optimized.vts", "coils_single_stage_optimized.vtu"):
@@ -643,6 +930,25 @@ def test_single_stage_examples_use_general_surface_output_and_movie_colors() -> 
     assert "surface_initial.to_vtk" in finite and "extra_data=" in finite
     for source in (vacuum, finite):
         assert "MOVIE_SURFACE_COLOR" in source and "surface_color=" in source
+
+
+def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
+    """Targets are constraints checked at the end; a missed one is a non-zero exit."""
+    fixed = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
+    free = (EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py").read_text()
+    assert "def augmented_lagrangian(" in fixed and 'method="L-BFGS-B"' in fixed
+    for constraint in ("IOTA_CONSTRAINT", "ASPECT_CONSTRAINT", "NORMAL_FIELD_CONSTRAINT"):
+        assert constraint in fixed
+    # One equilibrium solve and one scalar adjoint per trial: no residual
+    # Jacobian lane and no second residual callback.
+    assert "jax_objective_from_state" in fixed
+    assert "jax_value_and_grad" not in fixed and "jax_residual" not in fixed
+    # The free-boundary pullback is host-eager; everything after the solve is jitted.
+    assert "@jax.jit\ndef accepted_terms(" in free
+    for source in (fixed, free):
+        assert "did NOT meet its stated targets" in source
+        assert "if unmet and not ci_smoke:\n    raise SystemExit(1)" in source
+        assert "_summary.json" in source
 
 
 @pytest.mark.full  # nightly: two bounded ESSOS tracing integrations (~40 s total)

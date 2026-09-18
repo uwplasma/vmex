@@ -13,6 +13,75 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import test_manifest  # noqa: E402
+import ci_scope  # noqa: E402
+
+
+def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
+    """Lane narrowing is an optimisation, so every doubt returns the full matrix."""
+    entries = [
+        {"lane": "a-free", "selector": "pr-parity-a1"},
+        {"lane": "c2", "selector": "pr-parity-c2"},
+        {"lane": "core", "selector": "pr-physics-core"},
+    ]
+    everything = ci_scope.select_lanes(["vmex/core/solver.py"], entries)
+    assert everything == entries, "package code must keep every lane"
+    for path in (".github/workflows/ci.yml", "tools/ci_scope.py", "pyproject.toml"):
+        assert ci_scope.select_lanes([path], entries) == entries, path
+    assert ci_scope.select_lanes(
+        ["vmex/core/solver.py", "tests/test_gammac.py"], entries
+    ) == entries, "a mixed change keeps every lane"
+
+    # A test module runs the lanes that own it, and nothing else.
+    lanes = ci_scope.needed_lanes(["tests/test_gammac.py"])
+    assert lanes and lanes < {entry["selector"] for entry in entries} | lanes
+    assert "pr-parity-c4" in lanes
+    assert ci_scope.needed_lanes(["tests/test_gammac.py"]) == lanes
+
+    # Benchmarks and examples are attributed through the tests that name them.
+    assert ci_scope.needed_lanes(["benchmarks/e2_dense_reference.py"])
+    assert ci_scope.needed_lanes(["examples/optimization/QA_optimization.py"])
+
+    # A new benchmark nothing names still inherits the lanes of every test that
+    # imports the package, which is the safe direction to err in.
+    assert ci_scope.needed_lanes(["benchmarks/_brand_new_probe.py"]) == ci_scope.needed_lanes(
+        ["benchmarks/e2_dense_reference.py"]
+    )
+    # A module the manifest does not own gives no ownership to narrow by.
+    assert ci_scope.needed_lanes(["tests/test_not_in_the_manifest.py"]) is None
+    # Data files under a narrowable prefix need no numerical lane.
+    assert ci_scope.needed_lanes(["docs/_static/figures/figures.json"]) == set()
+
+    # Root prose is narrowable wherever it lives, because the logbook rides
+    # along with almost every change and cannot alter what the package
+    # computes. It still runs the lanes owning the guards that read it.
+    plan_lanes = ci_scope.needed_lanes(["plan.md"])
+    assert plan_lanes is not None and "pr-parity-c2" in plan_lanes
+    assert ci_scope.needed_lanes(["README.md"]) is not None
+    mixed = ci_scope.needed_lanes(
+        ["examples/optimization/single_stage_optimization.py", "plan.md"]
+    )
+    assert mixed is not None and mixed >= plan_lanes, (
+        "a change carrying the logbook must still run the logbook's guards"
+    )
+    # Prose alongside package code keeps the full matrix.
+    assert ci_scope.needed_lanes(["vmex/core/solver.py", "plan.md"]) is None
+
+
+def test_ci_scope_skips_only_documentation_and_rendered_media() -> None:
+    assert ci_scope.classify(
+        ["docs/howto/gpu.rst", "README.md", "docs/figure.webp"]
+    ) == (False, False)
+    assert ci_scope.classify(["docs/howto/gpu.rst", "vmex/doctor.py"]) == (
+        True,
+        True,
+    )
+    assert ci_scope.classify(["tests/test_doctor.py"]) == (True, False)
+    assert ci_scope.classify([".github/workflows/ci.yml"]) == (True, False)
+
+
+def test_ci_scope_keeps_empty_and_main_branch_changes_conservative() -> None:
+    assert ci_scope.classify([]) == (True, True)
+    assert ci_scope.classify(["README.md"], force_all=True) == (True, True)
 
 
 def test_collected_suite_has_exact_manifest_ownership() -> None:
@@ -94,9 +163,22 @@ def _invoked_lanes() -> set[str]:
     text = "\n".join(
         path.read_text() for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")))
     invoked: set[str] = set()
-    for value in re.findall(r"^\s*selector:\s*(.+?)\s*$", text, re.M):
+    for value in re.findall(r"^\s*(?:-\s*)?selector:\s*(.+?)\s*$", text, re.M):
         invoked.update(value.split())          # a matrix value may list several
     invoked |= set(re.findall(r"test_manifest\.py select ([a-z][A-Za-z0-9-]*)", text))
+    # The physics and parity matrices are computed per change, so their lanes
+    # are declared once as the JSON that selection filters. That declaration is
+    # the authority the narrowing reads, so it is the authority checked here.
+    for declaration in re.findall(r"^\s*ALL:\s*'(\[.*\])'\s*$", text, re.M):
+        for entry in json.loads(declaration):
+            invoked.update(str(entry.get("selector", "")).split())
+    # ``select full-${{ matrix.campaign }}`` over ``campaign: [opt-qi, ...]``.
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        body = path.read_text()
+        values = [value.strip() for group in re.findall(r"^\s*campaign:\s*\[(.*)\]", body, re.M)
+                  for value in group.split(",")]
+        for prefix in re.findall(r"select ([a-z-]+)\$\{\{ matrix\.campaign \}\}", body):
+            invoked.update(prefix + value for value in values)
     return invoked
 
 
@@ -127,6 +209,14 @@ def test_every_primary_pr_lane_is_invoked_by_a_workflow() -> None:
     )
 
 
+def test_every_full_lane_is_invoked_by_a_workflow() -> None:
+    """``full`` tests run only where a scheduled job selects their lane (#345)."""
+    data, records = test_manifest.load()
+    full = {lane for record in records for lane in record["lanes"] if lane.startswith("full-")}
+    missing = sorted((full | set(data["campaigns"])) - _invoked_lanes())
+    assert not missing, f"full lanes that no workflow invokes: {missing}"
+
+
 def test_workflow_selects_manifest_lanes() -> None:
     workflows = {
         path.name: path.read_text()
@@ -142,3 +232,91 @@ def test_workflow_selects_manifest_lanes() -> None:
     assert "timeout-minutes: 45" in nightly
     for stale in ("A1_FILES=", "C2_FILES=", "core-a-c)"):
         assert stale not in "".join(workflows.values())
+
+
+def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
+    """Exercise real module setup/teardown in one worker, where leaks matter."""
+    plugin = tmp_path / "jit_restoration_probe.py"
+    plugin.write_text(
+        "import jax, pytest\n"
+        "@pytest.hookimpl(wrapper=True)\n"
+        "def pytest_runtest_teardown(item, nextitem):\n"
+        "    result = yield\n"
+        "    if nextitem is None or nextitem.module is not item.module:\n"
+        "        assert jax.config.jax_disable_jit, item.nodeid\n"
+        "    return result\n"
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), env.get("PYTHONPATH", "")])
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "jit_restoration_probe",
+         "tests/test_scaling.py::test_input_scaling_changes_only_dimensional_quantities",
+         "tests/test_cli_freeboundary.py::test_free_boundary_keeps_the_state_on_iteration_exhaustion",
+         "tests/test_optimize.py::test_public_problem_factory_validation"],
+        cwd=ROOT, env=env, text=True, capture_output=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "3 passed" in result.stdout
+
+
+def test_deferred_nonlinear_contracts_have_scheduled_jobs() -> None:
+    nightly = (ROOT / ".github/workflows/nightly.yml").read_text()
+    for lane in ("full-polish-gn", "full-polish-linear", "full-polish-homotopy",
+                 "full-run-options", "full-free-boundary-adjoint"):
+        assert test_manifest.select(lane)
+        assert lane in _invoked_lanes()
+        assert f"selector: {lane}" in nightly
+    assert 'RUN_FULL: "1"' in nightly
+    bundles = json.loads((ROOT / "assets/manifest.json").read_text())["bundles"]
+    ncsx = next(bundle["name"] for bundle in bundles
+                if "examples/data/mgrid_ncsx_c09r00_small.nc" in bundle["common_paths"])
+    assert f"tools/fetch_assets.py --bundle {ncsx}" in nightly
+    assert "test -f examples/data/mgrid_ncsx_c09r00_small.nc" in nightly
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert 'jax: ["0.9.2", "0.11.1"]' in ci
+    assert "device, jax-compatibility, changed-coverage]" in ci
+
+
+def test_nonlinear_integrations_are_full_but_linear_contracts_remain_in_pr() -> None:
+    env = os.environ.copy()
+    env.pop("RUN_FULL", None)
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-m", "full",
+         "tests/test_polish_preconditioner.py", "tests/test_polish_linear.py",
+         "tests/test_polish_homotopy.py", "tests/test_run_options.py",
+         "tests/test_freeboundary_implicit.py"],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    nodes = {line for line in result.stdout.splitlines() if "::" in line}
+    for node in (
+        "tests/test_polish_linear.py::test_collocation_polish_primal_and_derivatives",
+        "tests/test_polish_linear.py::test_physics_accepted_polish_can_fail_derivative_stationarity",
+        "tests/test_polish_preconditioner.py::test_auto_declines_a_solve_it_priced_above_its_budget",
+        "tests/test_polish_preconditioner.py::test_public_solver_auto_corrects_a_lift_that_fails_quadrature",
+        "tests/test_run_options.py::test_solve_file_polish_directive_activates_polishing",
+        "tests/test_freeboundary_implicit.py::test_free_boundary_current_gradient_matches_resolve_finite_difference",
+    ):
+        assert node in nodes
+    assert not any("::test_polish_linear_true_certificate" in node for node in nodes)
+    assert not any("::test_solve_file_directives_reach_driver_once" in node for node in nodes)
+
+
+def _declared_lanes(job: str) -> set[str]:
+    """Selectors the ``changes`` job declares for one computed matrix."""
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    block = ci.split(f"- id: {job}", 1)[1]
+    declaration = re.search(r"^\s*ALL:\s*'(\[.*\])'\s*$", block, re.M)
+    assert declaration, f"the {job} matrix declaration is missing"
+    return {selector
+            for entry in json.loads(declaration.group(1))
+            for selector in str(entry.get("selector", "")).split()}
+
+
+def test_mirror_primary_suite_runs_once_in_physics() -> None:
+    physics, parity = _declared_lanes("physics"), _declared_lanes("parity")
+    assert "pr-mirror-spline" in physics
+    assert "pr-mirror-spline" not in parity
+    assert not physics & parity, "a lane declared in both matrices runs twice"
+    # The complete primary selector includes the former separate output job.
+    assert set(test_manifest.select("pr-physics-mirror-output")) <= set(
+        test_manifest.select("pr-mirror-spline"))

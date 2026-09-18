@@ -117,7 +117,9 @@ and composable with both gradient modes:
   transform, for decks that genuinely want a target rather than a floor;
 - :func:`~vmex.core.optimize.mirror_ratio` — ``(Bmax - Bmin)/(Bmax +
   Bmin)`` on one half-mesh surface (outermost by default), the practical QI
-  knob;
+  knob.  It is the ``|B|`` *modulation depth*, not :math:`R_m = B_{\max}/B_{\min}`
+  (they are related by :math:`R_m = (1+m)/(1-m)`); the open-mirror lane
+  reports :math:`R_m` proper through :mod:`vmex.mirror.metrics`;
 - :func:`~vmex.core.optimize.elongation_profile` /
   :func:`~vmex.core.optimize.max_elongation` — equivalent-ellipse boundary
   elongation from Fourier-exact area and perimeter line integrals over one
@@ -211,7 +213,7 @@ result is numerically defined but not a valid GGJ stability claim.
 ``L_grad_B`` additionally has a fully traceable
 ``(equilibrium_state, solver_context)`` lane,
 :func:`~vmex.core.optimize.l_grad_b_state` — same convention
-(``L_grad_B = |B| sqrt(2 / ||grad B||_F^2)``, same sampling grid and radial
+(``L_grad_B = ``|B|`` sqrt(2 / ||grad B||_F^2)``, same sampling grid and radial
 stencils, wout-lane parity to float round-off), rebuilt from the state-field
 chain in pure JAX, so it works under ``jac="implicit"``.  The default hard
 minimum over the surface grid is exact but has a jumping gradient when the
@@ -260,11 +262,19 @@ independent resolved grid for reporting:
        inp, max_mode=5, jac="implicit", use_ess=True)
    reported_qi = qi_report.total(result.equilibrium)
 
-Sanity anchors (CI-gated): an analytically QI field scores ``< 1e-24``, the
-bundled ``nfp1_QI`` deck scores 36x below a circular tokamak and 138x below
-the (QA, deliberately non-QI) Landreman–Paul configuration.  The measured
-single-call campaign — seed 4.5e-1 to 1.8e-2 (25x) in 17.3 minutes — is in
-:doc:`/howto/optimize-a-boundary`.  The earlier Goodman-style *wout-lane* residual
+Sanity anchors, asserted for :class:`~vmex.core.omnigenity.QIResidual` in
+``tests/test_omnigenity.py``: an analytically QI field scores ``< 1e-24``;
+the bundled ``nfp1_QI`` deck scores at least 20x below a circular tokamak,
+and lowest of the three when the (QA, deliberately non-QI) Landreman–Paul
+configuration is added.  ``examples/optimization/QI_optimization.py`` starts
+from the near-QI ``input.QI_nfp2_initial`` seed and runs one ``max_mode = 2``
+stage of 20 evaluations: on a 36-core workstation at four threads it reaches
+constructed QI 3.0e-3 (fine-grid validation 2.8e-3) with the ι, mirror and
+elongation limits met in 612 s, where the previous circular-seed example ran
+1,456 s and ended in a final solve that did not converge
+(``benchmarks/qi_optimization_profile_office.json``);
+:doc:`/howto/optimize-a-boundary` describes the workflow.  The
+earlier Goodman-style *wout-lane* residual
 (:func:`~vmex.core.optimize.quasi_isodynamic_residual`, host NumPy,
 ``jac=None``) remains available for diagnostics and cross-checks.
 
@@ -333,18 +343,37 @@ Fast-ion confinement (Gamma_c)
 surface — the Nemov fast-ion proxy (Nemov et al. 2008, eq. 61, in the
 organization of Velasco et al. 2021, eq. 16; the sibling of DESC's
 ``GammaC``), so the least-squares cost is the weighted sum of
-``Gamma_c**2``, the prompt-loss scaling.  Physics, formula, and the
-numerical policy are on :doc:`/explanation/confinement`:
+``Gamma_c**2``.  The square is the least-squares form, not a physical
+scaling, and ``Gamma_c`` is a proxy rather than a loss law: Velasco et al.
+2021 (section 5.4) find the prompt-loss fraction follows their
+``|gamma_c*|`` variant (eq. 21) more linearly, and validate ``Gamma_alpha``
+as the predictor.  **Use it as the reported value,
+never as the gradient objective**: its discretized boundary derivative is
+exact yet flips sign under grid refinement (the measured ladder is pinned
+in ``tests/test_gammac.py``).  For optimization use
+:class:`~vmex.core.gammac.GammaCSmooth` — the same wells and bounce
+quadrature with the two branch-noise structures regularized (separatrix
+kernel floor + superbanana corner floor), whose derivative holds sign and
+magnitude on the same refinement ladder — and recompute the hard value on
+the accepted result.  Physics, formula, and the numerical policy are on
+:doc:`/explanation/confinement`:
 
 .. code-block:: python
 
-   from vmex.core.gammac import GammaC
+   from vmex.core.gammac import GammaC, GammaCSmooth
 
-   gamma_c = GammaC([0.35, 0.6, 0.85], nalpha=9, num_transit=4)
+   gamma_c = GammaCSmooth(
+       [0.35, 0.6, 0.85], nalpha=9, num_transit=4, temperature=0.15)
    result = opt.least_squares(
        [(qs, 0.0, 1.0), (gamma_c, 0.0, 1.0)],
        inp, max_mode=6, jac="implicit")
+   report = GammaC([0.35, 0.6, 0.85])(result.equilibrium)   # hard value
 
+``temperature`` sets both smoothing floors as a fraction of the trapped
+range; annealing = re-optimizing at a lower value with a finer budget.
+The surrogate value sits below the hard one (it cannot see wells
+shallower than its floor — the near-omnigenous QA ripple most of all)
+while preserving the tokamak << QA << unoptimized-3D ordering.
 Stellarator-symmetric states with ``iota != 0`` on the target surfaces
 (surfaces through ``iota ~ 0`` return NaN rather than a plausible number).
 Superbanana layers make the objective demanding on ``nalpha``/``num_pitch``;
@@ -539,10 +568,13 @@ JAX-native Hermite–Laguerre flux-tube solver, formerly SPECTRAX-GK;
 (plan R26h.h4):
 
 - :func:`~vmex.core.turbulence.gk_fieldline_geometry` /
+  :func:`~vmex.core.turbulence.gk_fieldline_geometry_from_wout` /
   :func:`~vmex.core.turbulence.flux_tube_geometry` — sample one field
   line of the converged interior solution into GS2/GX-normalized flux-tube
   geometry (``bmag``, ``gds2/gds21/gds22``, curvature/grad-B drifts, …),
-  pure JAX, no gkx import needed;
+  pure JAX, no gkx import needed.  The WOUT route accepts an in-memory object
+  or any VMEC-compatible file and evaluates the same spectral contract without
+  reconstructing or re-solving an equilibrium;
 - :func:`~vmex.core.turbulence.turbulent_growth_rate` — the dominant
   linear ITG/TEM growth rate on that flux tube.  Fully differentiable in
   *both* gradient modes.  ``r_over_lt``/``r_over_ln`` are ``R/L`` and are
@@ -605,6 +637,10 @@ Which objectives differentiate how
      - yes
      - yes
      - traceable field-line drift kernels on tapered bounded traces
+   * - :class:`~vmex.core.gammac.GammaCSmooth`
+     - yes
+     - yes
+     - refinement-stable derivative via separatrix and corner floors
    * - :class:`~vmex.core.bootstrap.RedlBootstrapMismatch`
      - yes
      - yes

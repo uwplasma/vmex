@@ -129,7 +129,7 @@ enclosed plasma currents is the internal branch
 :math:`-\nabla G[\sigma]-\mathrm{BiotSavart}[\mathbf{J}]`, evaluated with an
 accurate singular quadrature (reused from the optional
 ``virtual_casing_jax`` package,
-required as ``virtual-casing-jax >= 0.0.4`` from the canonical
+required as ``virtual-casing-jax >= 0.0.5`` from the canonical
 ``uwplasma/virtual_casing_jax`` repository;
 :func:`~vmex.core.virtual_casing.surface_field_data_from_wout`
 adapts a converged boundary + field, and
@@ -142,8 +142,8 @@ assembled by
 smooth JAX function of the external-field dofs alone (coil Fourier
 coefficients/currents of a callable ESSOS coil field via
 :func:`~vmex.core.virtual_casing.external_B_cartesian`, or
-``extcur``), and its ``value_and_grad_bnormal`` helper returns gradients
-validated against finite differences — no NESTOR adjoint is required.
+``extcur``), so ``jax.value_and_grad`` returns gradients validated against
+finite differences — no NESTOR adjoint is required.
 
 The finite-beta single-stage example uses a pressure profile that vanishes at
 the LCFS. It therefore needs no prescribed physical sheet current in the jump
@@ -157,8 +157,8 @@ separates the converged total VMEX field into plasma-current and external-coil
 parts; it does not run NESTOR or a free-boundary equilibrium. The preview
 ``single_stage_free_boundary_optimization*.py`` examples instead hold the
 plasma boundary implicit and vary only coil parameters through the coupled
-NESTOR derivative below. They need ESSOS branch
-``rj/vmex-optimization-interfaces`` (PR #58).
+NESTOR derivative below. They need ESSOS
+(``pip install "vmex[coils]"``).
 
 The reported normalized total-pressure jump is
 
@@ -199,13 +199,111 @@ field or MGRID field and :class:`~vmex.core.extender.VmecExtender` adds the two.
 This distinction matters for finite-beta exterior tracing and coil design.
 
 ``vmex_get_B_gradB.py`` demonstrates the stable interior API. The exterior
-field and tracing previews need ESSOS branch ``rj/vmex-optimization-interfaces``. The
+field and tracing previews need ESSOS (``pip install "vmex[coils]"``). The
 single-stage previews write initial and optimized surface/coil VTK files;
 setting
 ``MAKE_MOVIE=True`` adds a compact animation of accepted iterates. Set the
 examples' ``MOVIE_SURFACE_COLOR`` to ``None``, ``"absB"``, ``"B.n/B"``, or
 a scalar-field callable to control boundary coloring without storing VTK data
 for every iteration.
+
+Accuracy outside the surface
+----------------------------
+
+The direct path (:meth:`~vmex.core.extender.VmecExtender.B` without a
+continuation plan) evaluates the virtual-casing integrals with the periodic
+trapezoid rule on a fixed schedule of source grids. At a target a distance
+:math:`d` from the surface its error behaves as :math:`e^{-2\pi d/h}`, up to a
+weak algebraic factor, where :math:`h` is the largest source spacing of the
+finest schedule level. Schedule levels count points over the **full torus**:
+the default ``levels`` of ``from_wout``, ``from_state`` and ``exterior_field``
+is ``((nphi, ntheta), (2 nphi, 2 ntheta))``, so the finest level has
+``2 nphi`` toroidal points on the whole torus and a toroidal spacing
+:math:`h = 2\pi R/(2\,\mathrm{nphi})` whatever ``nfp`` is (for ``nfp = 2``
+this equals :math:`2\pi R/(\mathrm{nfp}\cdot\mathrm{nphi})`). Keep
+:math:`d \gtrsim 2h`: one spacing gives about three digits, two spacings about
+four. The default ``nphi = ntheta = 32`` on a QA configuration with
+:math:`R \approx 1` m has :math:`h \approx 0.1` m, about 0.6 minor radii.
+
+The requested ``digits`` does not bound the returned error. The schedule
+stops, target by target, at the first level whose double-layer self-test
+passes, and that test can pass for a target whose field is still wrong. On the
+vacuum deck ``input.LandremanPaul2021_QA_lowres`` (``ctor`` of order
+:math:`10^{-11}` A, so the exact plasma field outside is zero) the returned
+field has these median | maximum errors relative to ``volavgB``, for 40
+targets along the outward normal, ``digits = 4``, versus distance in minor
+radii :math:`a` and per-period source grid ``nphi = ntheta = N``:
+
+.. list-table::
+   :header-rows: 1
+
+   * - N
+     - d = a
+     - 0.5 a
+     - 0.2 a
+     - 0.1 a
+     - 0.05 a
+     - 0.02 a
+   * - 32 (default)
+     - 3e-5 | 3e-3
+     - 6e-3 | 1.3e-2
+     - 0.12 | 0.18
+     - 0.31 | 0.56
+     - 0.45 | 1.3
+     - 0.55 | 2.7
+   * - 64
+     - 2e-5 | 3e-4
+     - 4e-5 | 3e-4
+     - 1.8e-2 | 3e-2
+     - 0.13 | 0.17
+     - 0.30 | 0.62
+     - 0.49 | 1.9
+
+Each doubling of the grid moves a given error level about twice as close to the
+surface, so no affordable grid reaches :math:`10^{-4}` within 0.1 a. The
+known-answer tests in ``tests/test_virtual_casing_physics.py`` check the
+identities on a circular torus carrying an outside z-axis current and an
+inside axis filament: the internal branch returns the filament field outside
+and on the surface and minus the z-axis field inside, to :math:`10^{-4}` at
+three finest-level spacings.
+
+Eager :meth:`~vmex.core.extender.VmecExtender.B` calls therefore check an
+estimate of the returned error,
+:meth:`~vmex.core.extender.VmecExtender.B_error_estimate`
+(:func:`~vmex.core.virtual_casing.offsurface_error_estimate`). It reproduces
+the schedule's choice of level and reports, per point, the difference between
+the returned value and the finest level when the schedule stopped early, and
+otherwise the larger of the finest level's double-layer error and the square
+of the relative change between the last two levels (halving the spacing
+squares the trapezoid error factor). Errors are relative to the RMS of
+:math:`|B|` on the surface. When any point exceeds :math:`10^{-\mathrm{digits}}`,
+``B`` emits :class:`~vmex.core.extender.ExteriorFieldAccuracyWarning`, or raises
+:class:`~vmex.core.extender.ExteriorFieldAccuracyError` with
+``accuracy_check="raise"``; ``accuracy_check="off"`` skips the estimate. The
+returned field is identical in every mode. Traced calls (``jit``, ``grad``,
+field-line integration) never check and can call the estimate directly. It
+costs 1.2 to 1.5 times the plasma-field evaluation it checks.
+
+On 816 targets at ``digits = 4`` (the vacuum deck above at N = 32 and 64 over
+six distances, and the torus oracle on two schedules from 0.25 to 4 finest
+spacings) no target that passed the estimate had an error above
+:math:`1.5\times10^{-4}`, no target with an error below :math:`3\times10^{-5}`
+was flagged, and the error was within 1.7 times the estimate for nine targets
+in ten and within 21 times for 99 in 100. The schedule's own self-test passed
+11 of the same targets with errors above :math:`3\times10^{-4}`, one of them
+at 0.30. The estimate does not see truncation of the source data on the finest
+grid itself: at d = a with N = 64 the error reached 26 times the estimate for
+one target in ten, while staying below :math:`3\times10^{-4}`.
+
+Use the direct path above about 0.5 a with ``N >= 64``. Below about 0.2 a use
+:meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation`: on
+the 2.5 % beta QA deck with a 32 x 32 grid it was within 0.1--0.2 % of
+:math:`|B|` at 0.1--0.2 a against a 256 x 256 direct reference, where the
+direct default was 12--31 % off, but its first-order continuation is worse
+than the direct path at 0.5 a (0.7--2 %) and the plan took about one to one
+and a half minutes to build on one laptop CPU. Between the two, check the
+estimate. These timings and errors are from a single review measurement on
+2026-09-13, not a committed benchmark record.
 
 Coupled free-boundary adjoint
 -----------------------------
@@ -232,8 +330,8 @@ coil vector to a field with ``field_from_parameters``, call the implicit solve,
 stack physics rows with :func:`vmex.core.optimize.residuals_from_tuples`, and
 apply ``jax.value_and_grad``. ``take_free_boundary_gradients.py`` checks one
 direction against independent re-solves. The free-boundary single-stage
-previews pass the same scalar pair to SciPy. These examples need the unreleased
-ESSOS branch ``rj/vmex-optimization-interfaces``.
+previews pass the same scalar pair to SciPy. These examples need ESSOS
+(``pip install "vmex[coils]"``).
 
 This path is currently limited to reverse mode. Its low-memory host Krylov
 lane peaks near 3--5 GB on the bundled coarse examples, but the first coupled

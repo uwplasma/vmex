@@ -84,6 +84,6 @@ residual. The coupled NESTOR fixed point is differentiated by
 {func}`vmex.core.freeboundary_implicit.solve_free_boundary_implicit`, which
 reverse-differentiates the reconverged plasma--vacuum root against plasma
 profiles and direct coil variables. This path is experimental and CPU-only.
-Its coil examples need ESSOS branch `rj/vmex-optimization-interfaces` (PR #58). Scope is in
+Its coil examples need ESSOS (`pip install "vmex[coils]"`). Scope is in
 {doc}`/reference/capabilities` and the mechanism in
 {doc}`/explanation/nestor-vacuum`.

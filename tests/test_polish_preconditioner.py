@@ -1,0 +1,1078 @@
+"""Gauss-Newton, physical-chart and export contracts."""
+
+from __future__ import annotations
+
+import dataclasses
+from pathlib import Path
+from types import SimpleNamespace
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+from vmex.core import implicit
+from vmex.core import solver
+from vmex.core.errors import (
+    StrongForceCertificationError,
+)
+from vmex.core.input import VmecInput
+from vmex.core.polish import (
+    build_low_order_preconditioner,
+    make_high_low_transfer,
+    make_strong_structured_chart,
+    make_strong_root_layout,
+    make_strong_root_runtime,
+    sample_high_order_state,
+    _streaming_ruiz_scales,
+    _physical_coordinate_blocks,
+    _physical_equation_chart,
+    strong_collocation_residual,
+    strong_root_residual_at_native,
+)
+from vmex.core.polish_driver import (
+    PolishConfig,
+    PolishContext,
+    polish_collocation_least_squares,
+    polished_wout_ns,
+)
+from vmex.core.polish_homotopy import (
+    strong_projection_diagnostics,
+    strong_physical_residual,
+)
+from vmex.core.polish_implicit import (
+    collocation_polish_tangent, collocation_polish_adjoint,
+    implicit_collocation_polished_state,
+)
+from vmex.core.strong_force import (
+    FORCE_ERROR_MEASURE_LABELS,
+    lift_high_order_state,
+)
+
+jax.config.update("jax_enable_x64", True)
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
+
+DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
+
+
+def _tree_dot(left, right):
+    return sum(
+        jnp.vdot(a, b).real
+        for a, b in zip(jax.tree.leaves(left), jax.tree.leaves(right), strict=True)
+    )
+
+
+def _tree_norm(value) -> float:
+    return float(jnp.sqrt(_tree_dot(value, value)))
+
+
+def _matrix_residual(matrix):
+    """Module-level builder: the lane's static argument must be identity-stable."""
+
+    def residual(vector):
+        return matrix @ vector
+
+    return residual
+
+
+def test_streaming_equilibration_improves_conditioning_without_dropping_dofs():
+    matrix = jnp.asarray([[1.0e-8, 0.0], [0.0, 2.0]])
+    rows, columns = _streaming_ruiz_scales(
+        _matrix_residual,
+        matrix,
+        jnp.zeros((2,)),
+    )
+    balanced = rows[:, None] * np.asarray(matrix) * columns[None, :]
+    assert np.all(rows > 0.0)
+    assert np.all(columns > 0.0)
+    assert np.linalg.matrix_rank(balanced) == 2
+    assert np.linalg.cond(balanced) < 1.01
+
+
+def test_streaming_equilibration_is_deterministic_and_validates_controls():
+    matrix = jnp.asarray([[2.0, -1.0], [3.0, 4.0]])
+
+    first = _streaming_ruiz_scales(_matrix_residual, matrix, jnp.zeros((2,)), probes=2)
+    second = _streaming_ruiz_scales(_matrix_residual, matrix, jnp.zeros((2,)), probes=2)
+    for actual, expected in zip(first, second, strict=True):
+        np.testing.assert_array_equal(actual, expected)
+        assert np.all(actual > 0.0)
+    with pytest.raises(ValueError, match="iterations"):
+        _streaming_ruiz_scales(_matrix_residual, matrix, jnp.zeros((2,)), iterations=0)
+    with pytest.raises(ValueError, match="probes"):
+        _streaming_ruiz_scales(_matrix_residual, matrix, jnp.zeros((2,)), probes=0)
+
+
+def _random_like(value, seed: int):
+    leaves, structure = jax.tree.flatten(value)
+    keys = jax.random.split(jax.random.PRNGKey(seed), len(leaves))
+    return jax.tree.unflatten(
+        structure,
+        [jax.random.normal(key, leaf.shape, leaf.dtype) for key, leaf in zip(keys, leaves)],
+    )
+
+
+def _small_solovev_input():
+    inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
+        mpol=3,
+        ntor=0,
+        ntheta=12,
+        nzeta=4,
+    )
+    return dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+
+
+@pytest.fixture(scope="module")
+def small_adapter():
+    inp = _small_solovev_input()
+    config = implicit.make_config(inp, ftol=1.0e-10, max_iterations=1000)
+    params = implicit.params_from_input(inp)
+    state, mask = implicit.solve_implicit_with_aux(params, config)
+    runtime = implicit.runtime_from_params(params, config)
+    native = lift_high_order_state(state, runtime, degree=3)
+    adapter = build_low_order_preconditioner(
+        native,
+        params,
+        config,
+        state,
+        mask,
+        probe_chunk_size=4,
+    )
+    return native, runtime, state, mask, adapter
+
+
+@pytest.fixture(scope="module")
+def small_strong_root(small_adapter):
+    native, _, _, mask, adapter = small_adapter
+    return make_strong_root_runtime(native, adapter, mask)
+
+
+def test_transfer_preserves_constraints_and_roundtrips_range(small_adapter):
+    native, _, _, _, adapter = small_adapter
+    transfer = adapter.transfer
+    high = _random_like(transfer.zeros_high(jnp.float64), 1)
+    projected = transfer.project_high(high)
+    low = jax.jit(transfer.restrict)(high)
+    roundtrip = transfer.restrict(transfer.prolong(low))
+
+    assert native.radial_basis.size < transfer.ns
+    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin"):
+        np.testing.assert_array_equal(np.asarray(getattr(projected, name)[:, -1]), 0.0)
+        np.testing.assert_array_equal(np.asarray(getattr(low, name)[-1]), 0.0)
+    for name in ("R_sin", "Z_cos", "L_cos"):
+        np.testing.assert_array_equal(np.asarray(getattr(projected, name)), 0.0)
+    gauge = (transfer.m == 0) & (transfer.n == 0)
+    np.testing.assert_array_equal(np.asarray(projected.L_sin[gauge]), 0.0)
+    difference = jax.tree.map(jnp.subtract, roundtrip, low)
+    assert _tree_norm(difference) <= 2.0e-12 * max(_tree_norm(low), 1.0)
+
+
+def test_transfer_forward_and_transpose_are_exact_duals(small_adapter):
+    *_, adapter = small_adapter
+    transfer = adapter.transfer
+    high = _random_like(transfer.zeros_high(jnp.float64), 2)
+    high_bar = _random_like(transfer.zeros_high(jnp.float64), 3)
+    low = _random_like(transfer.restrict(high), 4)
+    low_bar = _random_like(transfer.restrict(high), 5)
+
+    lhs_restrict = _tree_dot(transfer.restrict(high), low_bar)
+    rhs_restrict = _tree_dot(high, transfer.restrict_transpose(low_bar))
+    lhs_prolong = _tree_dot(transfer.prolong(low), high_bar)
+    rhs_prolong = _tree_dot(low, transfer.prolong_transpose(high_bar))
+    np.testing.assert_allclose(lhs_restrict, rhs_restrict, rtol=2.0e-13, atol=2.0e-13)
+    np.testing.assert_allclose(lhs_prolong, rhs_prolong, rtol=2.0e-13, atol=2.0e-13)
+
+
+def test_three_dimensional_m1_projector_transposes_without_scatter_failure():
+    inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
+        mpol=3,
+        ntor=1,
+        ntheta=12,
+        nzeta=4,
+    )
+    inp = dataclasses.replace(inp, ns_array=np.asarray([5]))
+    config = implicit.make_config(inp, ftol=1.0e-8, max_iterations=1)
+    params = implicit.params_from_input(inp)
+    runtime = implicit.runtime_from_params(params, config)
+    state = solver._initial_state(runtime.setup)
+    one = jnp.ones_like(state.R_cos)
+    zero = jnp.zeros_like(one)
+    edge_free = one.at[-1].set(0.0)
+    lambda_free = one.at[0].set(0.0)
+    mask = solver.SpectralState(
+        R_cos=edge_free,
+        R_sin=zero,
+        Z_cos=zero,
+        Z_sin=edge_free,
+        L_cos=zero,
+        L_sin=lambda_free,
+    )
+    native = lift_high_order_state(state, runtime, degree=3)
+    transfer = make_high_low_transfer(
+        native,
+        runtime,
+        project_config=config,
+        project_mask=mask,
+    )
+    high = _random_like(transfer.zeros_high(jnp.float64), 31)
+    low_bar = _random_like(transfer.restrict(high), 32)
+    lhs = _tree_dot(transfer.restrict(high), low_bar)
+    rhs = _tree_dot(high, transfer.restrict_transpose(low_bar))
+    np.testing.assert_allclose(lhs, rhs, rtol=3.0e-13, atol=3.0e-13)
+
+    layout = make_strong_root_layout(
+        mask, native, transfer=transfer, lconm1=True
+    )
+    # Every active constrained +/-n pair contributes one, not two, Z dofs.
+    active_z = int(np.count_nonzero(np.asarray(mask.Z_sin)))
+    active_l = int(np.count_nonzero(np.asarray(mask.L_sin)))
+    assert layout.size < (
+        int(np.count_nonzero(np.asarray(mask.R_cos))) + active_z + active_l
+    )
+    vector = jax.random.normal(jax.random.PRNGKey(35), (layout.size,))
+    tangent = layout.unpack(vector)
+    np.testing.assert_allclose(layout.pack(tangent), vector, rtol=2.0e-15, atol=2.0e-15)
+
+    low = _random_like(low_bar, 33)
+    high_bar = _random_like(high, 34)
+    lhs = _tree_dot(transfer.prolong(low), high_bar)
+    rhs = _tree_dot(low, transfer.prolong_transpose(high_bar))
+    np.testing.assert_allclose(lhs, rhs, rtol=3.0e-13, atol=3.0e-13)
+
+
+def test_stored_block_preconditioner_reuses_factors_and_transposes(small_adapter):
+    *_, adapter = small_adapter
+    transfer = adapter.transfer
+    left = _random_like(transfer.zeros_high(jnp.float64), 6)
+    right = _random_like(transfer.zeros_high(jnp.float64), 7)
+    applied = adapter.apply(left)
+    applied_again = adapter.apply(left)
+    transpose = adapter.apply_transpose(right)
+
+    assert adapter.factor_build_seconds > 0.0
+    for first, second in zip(
+        jax.tree.leaves(applied), jax.tree.leaves(applied_again), strict=True
+    ):
+        np.testing.assert_array_equal(first, second)
+        assert np.all(np.isfinite(np.asarray(first)))
+    lhs = _tree_dot(applied, right)
+    rhs = _tree_dot(left, transpose)
+    np.testing.assert_allclose(lhs, rhs, rtol=2.0e-10, atol=2.0e-10)
+
+
+def test_transfer_validation_rejects_bad_tables_and_shapes(small_adapter):
+    native, runtime, *_ = small_adapter
+    invalid = dataclasses.replace(native, m=np.asarray(native.m) + 1)
+    with pytest.raises(ValueError, match="mode tables"):
+        make_high_low_transfer(invalid, runtime)
+
+    transfer = small_adapter[-1].transfer
+    malformed = dataclasses.replace(
+        transfer.zeros_high(),
+        R_cos=jnp.zeros((transfer.mnmax, transfer.nbasis + 1)),
+    )
+    with pytest.raises(ValueError, match="R_cos has shape"):
+        transfer.project_high(malformed)
+
+
+def test_structured_chart_uses_only_physical_layout_channels(small_strong_root):
+    runtime = small_strong_root
+    chart = make_strong_structured_chart(runtime)
+    assert chart.full_size == runtime.layout.size
+    assert chart.size + chart.gauge_rank == chart.full_size
+    assert chart.gauge_rank > 0
+    np.testing.assert_allclose(
+        np.asarray(chart.coordinate_basis),
+        np.asarray(chart.equation_basis),
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(chart.coordinate_basis.T @ chart.coordinate_basis),
+        np.eye(chart.size),
+        rtol=2.0e-12,
+        atol=2.0e-12,
+    )
+    zero = jnp.zeros((chart.size,), dtype=jnp.float64)
+    jacobian = jax.jacfwd(
+        lambda value: strong_physical_residual(value, runtime, chart, 1.0)
+    )(zero)
+    singular_values = jnp.linalg.svd(jacobian, compute_uv=False)
+    rank = int(jnp.sum(singular_values > 1.0e-8 * singular_values[0]))
+    assert rank == chart.size
+
+    diagnostics = strong_projection_diagnostics(zero, runtime, chart)
+    collocation = strong_collocation_residual(zero, runtime, chart)
+    values = np.asarray(tuple(diagnostics))
+    assert np.all(np.isfinite(values))
+    assert diagnostics.sampled_rms > 0.0
+    assert diagnostics.unresolved_rms >= 0.0
+    assert diagnostics.unresolved_fraction >= 0.0
+    assert diagnostics.angular_unresolved_fraction >= 0.0
+    assert diagnostics.radial_fit_unresolved_fraction >= 0.0
+    assert diagnostics.radial_unresolved_fraction >= 0.0
+    assert diagnostics.helical_unresolved_fraction >= 0.0
+    assert diagnostics.equation_discarded_fraction < 1.0e-12
+    point_count = (
+        runtime.radial_nodes.size * runtime.theta.size * runtime.zeta.size
+    )
+    assert collocation.shape == (2 * point_count,)
+    np.testing.assert_allclose(
+        jnp.linalg.norm(collocation) / np.sqrt(float(point_count)),
+        diagnostics.sampled_rms,
+        rtol=2.0e-13,
+        atol=2.0e-13,
+    )
+
+
+def test_strong_root_validation_branches(small_adapter, small_strong_root):
+    native, _, _, mask, adapter = small_adapter
+    layout = small_strong_root.layout
+    with pytest.raises(ValueError, match="free vector"):
+        layout.unpack(jnp.zeros((layout.size + 1,)))
+    with pytest.raises(ValueError, match="force_floor"):
+        make_strong_root_runtime(native, adapter, mask, force_floor=0.0)
+    with pytest.raises(ValueError, match="balance_iterations"):
+        make_strong_root_runtime(native, adapter, mask, balance_iterations=0)
+    zero_mask = jax.tree.map(jnp.zeros_like, mask)
+    with pytest.raises(ValueError, match="no free physical displacement"):
+        make_strong_root_runtime(native, adapter, zero_mask)
+    mismatched = dataclasses.replace(mask, Z_sin=mask.Z_sin[:, :-1])
+    with pytest.raises(ValueError, match="layout must match"):
+        make_strong_root_layout(mismatched, native)
+    with pytest.raises(ValueError, match="high/low transfer"):
+        make_strong_root_layout(mask, native)
+
+    unbalanced = make_strong_root_runtime(
+        native, adapter, mask, balance_full_root=False
+    )
+    assert unbalanced.layout.size == layout.size
+
+
+def test_strong_runtime_and_chart_pytree_roundtrip(small_strong_root):
+    """JIT reconstruction preserves the numeric runtime and physical chart."""
+
+    chart = make_strong_structured_chart(small_strong_root)
+    for original in (small_strong_root, chart):
+        leaves, structure = jax.tree.flatten(original)
+        rebuilt = jax.tree.unflatten(structure, leaves)
+        assert type(rebuilt) is type(original)
+        np.testing.assert_allclose(rebuilt.coordinate_scale, original.coordinate_scale)
+    # The layout is a child pytree now (its basis arrays are traced leaves,
+    # not baked metadata), so a round trip reconstructs an equivalent layout
+    # rather than preserving object identity.
+    rebuilt_layout = jax.tree.unflatten(
+        jax.tree.structure(small_strong_root),
+        jax.tree.leaves(small_strong_root),
+    ).layout
+    original_layout = small_strong_root.layout
+    assert rebuilt_layout.mnmax == original_layout.mnmax
+    assert rebuilt_layout.nbasis == original_layout.nbasis
+    assert len(rebuilt_layout.groups) == len(original_layout.groups)
+    for rebuilt_group, group in zip(rebuilt_layout.groups,
+                                    original_layout.groups):
+        np.testing.assert_array_equal(rebuilt_group.high_indices,
+                                      group.high_indices)
+        np.testing.assert_allclose(rebuilt_group.basis, group.basis)
+        assert (rebuilt_group.start, rebuilt_group.stop) == (
+            group.start, group.stop)
+    # What compile reuse actually needs: two flattens of one runtime share a
+    # treedef even though the layout and preconditioner are rebuilt objects.
+    assert jax.tree.structure(small_strong_root) == jax.tree.structure(
+        jax.tree.unflatten(
+            jax.tree.structure(small_strong_root),
+            jax.tree.leaves(small_strong_root)))
+    assert jax.tree.unflatten(
+        jax.tree.structure(chart), jax.tree.leaves(chart)
+    ).gauge_rank == chart.gauge_rank
+
+
+def test_physical_chart_adapters_and_validation(small_strong_root):
+    chart = make_strong_structured_chart(small_strong_root)
+    residual = strong_root_residual_at_native(
+        jnp.zeros((small_strong_root.layout.size,)),
+        small_strong_root.native,
+        small_strong_root,
+    )
+    assert residual.shape == (small_strong_root.layout.size,)
+    with pytest.raises(ValueError, match="poloidal_bandwidth"):
+        _physical_coordinate_blocks(small_strong_root, chart, 0)
+    with pytest.raises(ValueError, match="no physical force-output"):
+        _physical_equation_chart(dataclasses.replace(small_strong_root.layout, groups=()))
+    empty_chart = dataclasses.replace(
+        chart, coordinate_basis=jnp.zeros_like(chart.coordinate_basis)
+    )
+    with pytest.raises(ValueError, match="local structured chart"):
+        _physical_coordinate_blocks(small_strong_root, empty_chart, 1)
+    first = small_strong_root.layout.groups[0]
+    zero_group = dataclasses.replace(first, basis=jnp.zeros_like(first.basis))
+    _physical_equation_chart(
+        dataclasses.replace(
+            small_strong_root.layout,
+            groups=(zero_group, *small_strong_root.layout.groups[1:]),
+        )
+    )
+    asymmetric = dataclasses.replace(
+        small_strong_root,
+        transfer=dataclasses.replace(small_strong_root.transfer, lasym=True),
+    )
+    with pytest.raises(ValueError, match="stellarator symmetry"):
+        make_strong_structured_chart(asymmetric)
+
+
+def test_implicit_polish_rejects_mismatched_inputs(small_strong_root):
+    chart = make_strong_structured_chart(small_strong_root)
+    good = PolishContext(
+        small_strong_root,
+        chart,
+        jnp.zeros((chart.size,)),
+        jnp.ones((chart.size,)),
+    )
+    bad = good._replace(correction=jnp.zeros((chart.size + 1,)))
+    with pytest.raises(ValueError, match="correction has shape"):
+        collocation_polish_tangent(bad, small_strong_root.native)
+    with pytest.raises(ValueError, match="correction has shape"):
+        collocation_polish_adjoint(bad, small_strong_root.native)
+    with pytest.raises(ValueError, match="native_tangent"):
+        collocation_polish_tangent(good, jnp.asarray(0.0))
+    with pytest.raises(ValueError, match="polished_cotangent"):
+        collocation_polish_adjoint(good, jnp.asarray(0.0))
+    with pytest.raises(ValueError, match="native must have"):
+        implicit_collocation_polished_state(jnp.asarray(0.0), good)
+
+
+
+@pytest.mark.parametrize("route", ["legacy", "continuation", "continuation-final", "collocation"])
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [("normalized_l2", 0.01, True),
+     ("normalized_l2", 0.011, False),
+     ("normalized_l2", -1.0, False),
+     ("radial_refinement_difference", 0.001, True),
+     ("radial_refinement_difference", 0.002, False),
+     ("radial_refinement_difference", -1.0, False),
+     ("minimum_signed_jacobian", 0.0, False),
+     ("minimum_signed_jacobian", -1.0, False)]
+    + [(field, value, False)
+       for field in ("normalized_l2", "radial_refinement_difference",
+                     "minimum_signed_jacobian")
+       for value in (np.nan, np.inf, -np.inf)],
+)
+def test_polish_certificate_routes(monkeypatch, route, field, value, accepted):
+    """Exercise the driver decisions while substituting costly physics kernels."""
+    from vmex.core import polish_driver as driver
+    from vmex.core import polish_homotopy as homotopy
+    from vmex.core import strong_force
+
+    certificate = SimpleNamespace(
+        normalized_l2=0.0, radial_refinement_difference=0.0,
+        minimum_signed_jacobian=0.5,
+        # the driver reports the non-saturating window normalizations
+        # beside eps_F on every route, so the stand-in carries them
+        window_normalizations=SimpleNamespace(
+            volume_average_force=jnp.asarray(1.0),
+            relative_force_error=jnp.asarray(1.0),
+            magnetic_relative_force_error=jnp.asarray(1.0),
+            s_min=0.1, s_max=0.99,
+        ),
+    )
+    setattr(certificate, field, value)
+    native = SimpleNamespace(R_cos=jnp.zeros(1))
+    runtime = SimpleNamespace(
+        native=native, layout=SimpleNamespace(size=1), operator_balance=1.0,
+        low_preconditioner=SimpleNamespace(factor_build_seconds=0.0),
+    )
+    config = PolishConfig(fail_policy="return_unpolished")
+    failed = driver._failed_certificate_checks(certificate, config)
+    assert bool(failed) != accepted
+    if not np.isfinite(value):
+        assert "nonfinite" in failed[0]
+
+    class NeedsCorrection(Exception):
+        pass
+
+    def correction_required(*args, **kwargs):
+        raise NeedsCorrection
+
+    if route == "continuation":
+        monkeypatch.setattr(homotopy, "_solvax_continuation_api", correction_required)
+        run = lambda: homotopy.polish_strong_root(  # noqa: E731
+            runtime, config=config, initial_certificate=certificate)
+    elif route == "legacy":
+        for name in ("make_config", "params_from_input", "runtime_from_params",
+                     "_dof_mask", "_refined_state"):
+            monkeypatch.setattr(implicit, name, lambda *a, **k: native)
+        monkeypatch.setattr(strong_force, "lift_high_order_state", lambda *a, **k: native)
+        monkeypatch.setattr(strong_force, "certify_strong_force", lambda *a, **k: certificate)
+        monkeypatch.setattr(driver, "build_low_order_preconditioner", correction_required)
+        run = lambda: driver.polish_legacy_solution(  # noqa: E731
+            _small_solovev_input(), SimpleNamespace(ns=5), native, config=config)
+    elif route == "continuation-final":
+        config = dataclasses.replace(config, preconditioner="none")
+        initial = SimpleNamespace(normalized_l2=1.0, radial_refinement_difference=0.0,
+                                  minimum_signed_jacobian=0.5,
+            window_normalizations=SimpleNamespace(
+                volume_average_force=jnp.asarray(1.0), relative_force_error=jnp.asarray(1.0),
+                magnetic_relative_force_error=jnp.asarray(1.0), s_min=0.1, s_max=0.99))
+        continuation = lambda *a, **k: SimpleNamespace(  # noqa: E731
+            x=jnp.zeros(1), alpha=1.0, converged=True, steps=())
+        monkeypatch.setattr(homotopy, "_solvax_continuation_api",
+                            lambda: (None, None, continuation, None, None))
+        monkeypatch.setattr(homotopy, "_ptc_config", lambda *a, **k: None)
+        monkeypatch.setattr(homotopy, "_continuation_config", lambda *a: None)
+        monkeypatch.setattr(homotopy, "_minimum_signed_jacobian", lambda *a: 0.5)
+        monkeypatch.setattr(homotopy, "_solve_residual", lambda *a: jnp.zeros(1))
+        monkeypatch.setattr(homotopy, "_normalized_low_residual_norm", lambda *a: 0.0)
+        monkeypatch.setattr(homotopy, "_corrected_state", lambda *a: native)
+        monkeypatch.setattr(homotopy, "certify_strong_force", lambda *a, **k: certificate)
+        result = homotopy.polish_strong_root(runtime, config=config, initial_certificate=initial)
+        assert result.polish_report.converged == accepted
+        assert result.polish_report.radial_refinement_tolerance == 0.001
+        if not accepted:
+            with pytest.raises(StrongForceCertificationError) as failure:
+                homotopy.polish_strong_root(
+                    runtime, config=dataclasses.replace(config, fail_policy="raise"),
+                    initial_certificate=initial)
+            assert failure.value.solver_converged
+            np.testing.assert_equal(failure.value.radial_refinement,
+                                    certificate.radial_refinement_difference)
+        return
+    else:
+        chart = SimpleNamespace(size=1, lift=lambda x: x)
+        monkeypatch.setattr(driver, "strong_collocation_residual", lambda *a: jnp.ones(1))
+        monkeypatch.setattr(driver, "_collocation_variable_scale", lambda *a: np.ones(1))
+        monkeypatch.setattr(driver, "_corrected_state", lambda *a: native)
+        monkeypatch.setattr(driver, "certify_strong_force", lambda *a, **k: certificate)
+        monkeypatch.setattr(driver, "_gauss_newton_polish_lane", lambda *a, **k: SimpleNamespace(
+            x=jnp.zeros(1), accepted_steps=0, rejected_steps=0, steps=1,
+            linear_iterations=1, cost=0.0, gradient_norm=1.0,
+            history=SimpleNamespace(gradient_norm=jnp.ones(1)),
+            converged=False, damping=0.001,
+        ))
+        monkeypatch.setattr(jax, "block_until_ready", lambda x: x)
+        result = driver.polish_collocation_least_squares(
+            runtime, chart=chart, config=config, initial_certificate=certificate)
+        assert result.polish_report.converged == accepted
+        assert (result.context is not None) == accepted
+        if not accepted:
+            with pytest.raises(StrongForceCertificationError, match=failed[0].split()[0]):
+                driver.polish_collocation_least_squares(
+                    runtime, chart=chart, config=dataclasses.replace(config, fail_policy="raise"),
+                    initial_certificate=certificate)
+        return
+    if not accepted:
+        with pytest.raises(NeedsCorrection):
+            run()
+    else:
+        result = run()
+        assert result.polish_report.converged
+        assert result.polish_report.termination_reason == "already-certified"
+        assert result.polish_report.radial_refinement_tolerance == 0.001
+
+
+@pytest.mark.full
+def test_collocation_polish_announces_each_phase(small_strong_root):
+    """Every silent setup phase emits a notice before it starts.
+
+    A W7-X-scale user run showed the banner and then nothing for minutes;
+    the notices exist so a quiet console is always attributable to a named
+    phase.  Chart and certificate are deliberately NOT prebuilt here so the
+    driver's own build paths (and their notices) execute.
+    """
+    lines: list[str] = []
+
+    def capture(text="", **kwargs):
+        lines.append(str(text))
+
+    polish_collocation_least_squares(
+        small_strong_root,
+        config=PolishConfig(
+            tolerance=2.0,
+            validation_tolerance=10.0,
+            radial_refinement_tolerance=10.0,
+            collocation_scale_probes=2,
+            max_nonlinear_iterations=1,
+            fail_policy="return_unpolished",
+        ),
+        verbose=True,
+        emit=capture,
+    )
+    text = "\n".join(lines)
+    assert "building the polish chart" in text
+    assert "evaluating the initial force certificate" in text
+    assert "collocation:" in text
+    # The closing block quotes the before/after eps_F pair, so it must also
+    # carry the bound and the non-saturating before/after rows.
+    assert "EPS-F IS BOUNDED BY 2 BY CONSTRUCTION" in text
+    assert "POLISH CERTIFICATE : EPS-F" in text
+    summary = text[text.index("POLISH CERTIFICATE : EPS-F"):]
+    assert summary.count(" -> ") >= len(FORCE_ERROR_MEASURE_LABELS)
+
+
+@pytest.mark.full
+def test_normalization_fields_report_both_ends_of_the_window_averages():
+    """``PolishReport`` must carry a pair that can move, not only eps_F.
+
+    With one certificate the fields report the same state at both ends, as
+    the eps_F pair already does for an attempt that produced no correction;
+    with two they straddle the correction.
+    """
+    from vmex.core.polish_driver import _normalization_fields
+    from vmex.core.strong_force import certify_strong_force
+
+    inp = _small_solovev_input()
+    runtime = solver.prepare_runtime(inp, solver.resolution_from_input(inp, ns=5))
+    native = lift_high_order_state(
+        solver._initial_state(runtime.setup), runtime, degree=3
+    )
+    initial = certify_strong_force(native)
+    final = certify_strong_force(native, window=(0.3, 0.8))
+
+    single = _normalization_fields(initial)
+    assert single["normalization_window"] == (0.1, 0.99)
+    assert single["initial_volume_average_force"] == single[
+        "final_volume_average_force"
+    ]
+    assert single["initial_volume_average_force"] == pytest.approx(
+        float(initial.window_normalizations.volume_average_force)
+    )
+
+    pair = _normalization_fields(initial, final)
+    assert pair["final_volume_average_force"] == pytest.approx(
+        float(final.window_normalizations.volume_average_force)
+    )
+    assert pair["final_volume_average_force"] != pair[
+        "initial_volume_average_force"
+    ]
+    # The window reported is the one the *initial* certificate used, which
+    # is the window the pair is comparable in.
+    assert pair["normalization_window"] == (0.1, 0.99)
+    assert pair["initial_magnetic_relative_force_error"] == pytest.approx(
+        float(initial.window_normalizations.magnetic_relative_force_error)
+    )
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"tolerance": 0.0}, "tolerances"),
+        ({"validation_tolerance": 0.0}, "tolerances"),
+        ({"radial_degree": 4}, "radial_degree"),
+        ({"radial_spans": 0}, "radial_spans"),
+        ({"radial_quadrature_order": 1}, "radial_quadrature_order"),
+        ({"radial_refinement_tolerance": 0.0}, "radial_refinement_tolerance"),
+        ({"collocation_scale_probes": -1}, "collocation_scale_probes"),
+        ({"least_squares_initial_damping": 0.0}, "least_squares_initial_damping"),
+        ({"alpha_min_step": 0.1}, "alpha_min_step"),
+        ({"ptc_initial_dtau": 0.0}, "ptc_initial_dtau"),
+        ({"max_continuation_stages": 0}, "iteration limits"),
+        ({"linear_restart": 0}, "linear/backtracking"),
+        ({"preconditioner": "bad"}, "preconditioner"),
+        ({"minimum_jacobian_ratio": 0.0}, "minimum_jacobian_ratio"),
+        ({"minimum_jacobian_floor": 0.0}, "minimum_jacobian_floor"),
+        ({"arclength_step": 0.0}, "pseudo-arclength"),
+        ({"fail_policy": "bad"}, "fail_policy"),
+        ({"tolerance": float("nan")}, "finite"),
+    ],
+)
+def test_polish_config_validation(updates, message):
+    with pytest.raises(ValueError, match=message):
+        PolishConfig(**updates)
+
+
+def test_public_solver_rejects_unknown_polish_mode_before_solving():
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    with pytest.raises(ValueError, match="False, True, or 'auto'"):
+        solver.solve(inp, polish="unknown")
+
+
+def test_public_solver_resolves_polish_keywords_only():
+    """Directives live in run_options; the solver sees only its keywords."""
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    assert solver._resolve_force_balance_polish(inp, None, None) is False
+    assert solver._resolve_force_balance_polish(inp, True, None) is True
+    assert solver._resolve_force_balance_polish(inp, True, False) is True
+    assert solver._resolve_force_balance_polish(inp, "auto", None) == "auto"
+    with pytest.raises(ValueError, match="either polish or polish_force_balance"):
+        solver._resolve_force_balance_polish(inp, False, True)
+
+
+@pytest.mark.full
+def test_public_solver_auto_corrects_a_lift_that_fails_quadrature(monkeypatch):
+    from vmex.core import strong_force
+
+    initial_certificates = []
+    certify = strong_force.certify_strong_force
+
+    def record_certificate(*args, **kwargs):
+        report = certify(*args, **kwargs)
+        initial_certificates.append(report)
+        return report
+
+    monkeypatch.setattr(strong_force, "certify_strong_force", record_certificate)
+    inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
+        mpol=3,
+        ntor=0,
+        ntheta=12,
+        nzeta=4,
+    )
+    inp = dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+    result = solver.solve(
+        inp,
+        ftol=1.0e-10,
+        max_iterations=1000,
+        polish="auto",
+        polish_config=PolishConfig(
+            radial_degree=3,
+            validation_tolerance=3.0,
+            # AUTO prices the solve from one measured linear product times
+            # the iteration limits, so the price scales with machine load:
+            # this deck priced 501 s on an idle 36-core host and 45 068 s on
+            # a loaded laptop, and the default budget then declines it.
+            # This test is about the correction of a lift that fails
+            # quadrature, not the gate, which has its own tests.
+            auto_budget_seconds=1.0e9,
+        ),
+    )
+    assert result.converged
+    assert result.native_equilibrium is not None
+    assert result.strong_force is not None
+    assert result.polish_report.converged
+    initial = initial_certificates[0]
+    assert float(initial.normalized_l2) <= 3.0
+    assert float(initial.radial_refinement_difference) > 1.0e-3
+    assert result.polish_report.termination_reason == "independently-certified"
+    assert result.polish_report.nonlinear_iterations > 0
+    assert float(result.strong_force.radial_refinement_difference) <= 1.0e-3
+    assert float(result.strong_force.minimum_signed_jacobian) > 0.0
+    assert result.polished_state is not None
+    assert result.state.R_cos.shape == (5, 3)
+    assert result.polished_state.R_cos.shape == result.state.R_cos.shape
+    assert np.all(np.isfinite(result.polished_state.R_cos))
+    assert result.native_equilibrium.R_cos.shape == (3, 4)
+
+
+def test_sample_high_order_state_inverts_the_lift_on_any_mesh(small_adapter):
+    native, _, state, _, _ = small_adapter
+    inp = _small_solovev_input()
+    for ns in (5, 11):
+        runtime = solver.prepare_runtime(
+            inp, solver.resolution_from_input(inp, ns=ns)
+        )
+        sampled = sample_high_order_state(native, runtime)
+        assert np.shape(np.asarray(sampled.R_cos)) == (ns, native.m.size)
+        relift = lift_high_order_state(
+            sampled, runtime, radial_basis=native.radial_basis, degree=3
+        )
+        for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"):
+            np.testing.assert_allclose(
+                np.asarray(getattr(relift, name)),
+                np.asarray(getattr(native, name)),
+                rtol=0.0,
+                atol=1.0e-11,
+            )
+    # The solve-mesh sample reproduces the fixed boundary row exactly: the
+    # lift pinned the edge spline coefficients to the legacy edge values.
+    solve_mesh = solver.prepare_runtime(
+        inp, solver.resolution_from_input(inp, ns=5)
+    )
+    sampled = sample_high_order_state(native, solve_mesh)
+    np.testing.assert_allclose(
+        np.asarray(sampled.R_cos[-1]), np.asarray(state.R_cos[-1]),
+        rtol=0.0, atol=1.0e-13,
+    )
+    np.testing.assert_allclose(
+        np.asarray(sampled.Z_sin[-1]), np.asarray(state.Z_sin[-1]),
+        rtol=0.0, atol=1.0e-13,
+    )
+
+
+def test_sample_high_order_state_requires_matching_mode_tables(small_adapter):
+    native, *_ = small_adapter
+    other = VmecInput.from_file(DATA / "input.solovev").change_resolution(
+        mpol=4, ntor=0, ntheta=12, nzeta=4
+    )
+    runtime = solver.prepare_runtime(
+        other, solver.resolution_from_input(other, ns=5)
+    )
+    with pytest.raises(ValueError, match="mode tables"):
+        sample_high_order_state(native, runtime)
+
+
+def test_polished_wout_ns_covers_reconstruction_and_the_native_basis():
+    native = SimpleNamespace(radial_basis=SimpleNamespace(size=17))
+    # The stable wout lift caps at 32 spans; four samples per capped span.
+    assert polished_wout_ns(native, solve_ns=31) == 129
+    # A finer solve mesh is never coarsened.
+    assert polished_wout_ns(native, solve_ns=201) == 201
+    # A native basis beyond the cap still stays fully determined.
+    wide = SimpleNamespace(radial_basis=SimpleNamespace(size=90))
+    assert polished_wout_ns(wide, solve_ns=31) == 181
+
+
+@pytest.mark.full
+def test_polished_wout_export_certifies_near_the_native_state(tmp_path):
+    pytest.importorskip("netCDF4")
+    import vmex as vj
+    from vmex.core.strong_force import (
+        certify_strong_force,
+        high_order_state_from_wout,
+    )
+    from vmex.core.wout import read_wout
+
+    inp = _small_solovev_input()
+    physics = inp.to_indata(tmp_path / "input.polished_export")
+    source = tmp_path / "input.polished_export_directive"
+    source.write_text(
+        "!@VMEX POLISH = .TRUE.\n" + physics.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    config = PolishConfig(radial_degree=3, validation_tolerance=3.0)
+    result = vj.solve_file(source, outdir=tmp_path, polish_config=config)
+    assert bool(result.polish_report.converged)
+    # The in-memory API contract is untouched: polished_state still matches
+    # the solve mesh.  Only the exported file gets the certifiable mesh.
+    assert result.polished_state.R_cos.shape == result.state.R_cos.shape
+
+    wout_path = tmp_path / "wout_polished_export_directive.nc"
+    solve_ns = int(np.shape(np.asarray(result.state.R_cos))[0])
+    exported_ns = int(read_wout(wout_path).ns)
+    assert exported_ns == polished_wout_ns(
+        result.native_equilibrium, solve_ns=solve_ns
+    )
+    assert exported_ns > solve_ns
+
+    native_l2 = float(np.asarray(result.strong_force.normalized_l2))
+    exported = high_order_state_from_wout(wout_path, inp=inp, degree=5)
+    exported_l2 = float(np.asarray(certify_strong_force(exported).normalized_l2))
+    # The export is the only carrier of the polish gain for downstream wout
+    # consumers: the stable default reconstruction of the file must
+    # re-certify within 10% of the native continuous certificate.
+    assert exported_l2 <= 1.1 * native_l2
+
+
+def _small_polish_deck():
+    """Smallest converging Solov'ev case that still builds a real chart."""
+
+    inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
+        mpol=4, ntor=0, ntheta=16, nzeta=4)
+    return dataclasses.replace(
+        inp,
+        ns_array=np.asarray([9]),
+        ftol_array=np.asarray([1.0e-11]),
+        niter_array=np.asarray([2000]),
+    )
+
+
+_BOUNDED_POLISH = dict(
+    radial_degree=3,
+    validation_tolerance=1.0e-4,
+    max_nonlinear_iterations=3,
+    linear_restart=10,
+    linear_max_restarts=2,
+    fail_policy="return_unpolished",
+)
+
+
+@pytest.mark.full
+def test_auto_declines_a_solve_it_priced_above_its_budget():
+    """AUTO must measure the cost and refuse to spend past its ceiling.
+
+    The reported W7-X standard run spent 10 h 35 m in Gauss--Newton before
+    saying anything about whether that was worth doing.  AUTO now times one
+    inner product first, and an unaffordable prediction returns the
+    equilibrium untouched -- as a decision, not a certification failure, so
+    it never raises and never warns whatever the fail policy says.
+    """
+
+    lines: list[str] = []
+    result = solver.solve(
+        _small_polish_deck(),
+        ftol=1.0e-11,
+        max_iterations=2000,
+        polish="auto",
+        polish_config=PolishConfig(
+            auto_budget_seconds=1.0e-9,
+            fail_policy="raise",
+            **{k: v for k, v in _BOUNDED_POLISH.items() if k != "fail_policy"},
+        ),
+        verbose=True,
+        emit=lambda text, end="\n": lines.append(text),
+    )
+    report = result.polish_report
+    assert report.termination_reason == "auto-declined-cost"
+    assert report.converged is False
+    assert report.nonlinear_iterations == 0
+    assert report.linear_iterations == 0
+    assert report.seconds_per_linear_product > 0.0
+    assert report.predicted_solve_seconds > report.auto_budget_seconds
+    # The unpolished equilibrium comes back intact and uncertified.
+    assert result.native_equilibrium is not None
+    assert float(report.final_normalized_l2) == float(report.initial_normalized_l2)
+
+    console = "".join(lines)
+    assert "DECLINED ON PREDICTED COST" in console
+    # Every escape hatch is named where the decision is announced.
+    for knob in ("POLISH_BUDGET", "POLISH_MAX_ITER", "POLISH = .TRUE."):
+        assert knob in console
+
+
+@pytest.mark.full  # 150-310 s each on an M4: real polishes; the PR lane keeps the decline path
+def test_explicit_polish_never_prices_and_never_declines():
+    """``POLISH = ON`` is a request, not a proposal.
+
+    An explicit polish must not pay for the timing probe or consult the
+    budget, so an unreachable budget cannot turn it into a no-op.
+    """
+
+    lines: list[str] = []
+    result = solver.solve(
+        _small_polish_deck(),
+        ftol=1.0e-11,
+        max_iterations=2000,
+        polish=True,
+        polish_config=PolishConfig(auto_budget_seconds=1.0e-9, **_BOUNDED_POLISH),
+        verbose=True,
+        emit=lambda text, end="\n": lines.append(text),
+    )
+    console = "".join(lines)
+    assert "DECLINED" not in console
+    assert "timing one Gauss-Newton product" not in console
+    assert result.polish_report.termination_reason != "auto-declined-cost"
+    assert result.polish_report.seconds_per_linear_product is None
+    assert result.polish_report.nonlinear_iterations >= 1
+
+
+@pytest.mark.full  # 150-310 s each on an M4: real polishes; the PR lane keeps the decline path
+def test_auto_within_budget_records_the_price_it_was_allowed_on():
+    """A permitted AUTO still reports the prediction that permitted it."""
+
+    result = solver.solve(
+        _small_polish_deck(),
+        ftol=1.0e-11,
+        max_iterations=2000,
+        polish="auto",
+        polish_config=PolishConfig(
+            auto_budget_seconds=1.0e9, **_BOUNDED_POLISH),
+    )
+    report = result.polish_report
+    assert report.termination_reason != "auto-declined-cost"
+    assert report.seconds_per_linear_product > 0.0
+    assert report.predicted_solve_seconds > 0.0
+    assert report.auto_budget_seconds == 1.0e9
+
+
+@pytest.mark.full  # 150-310 s each on an M4: real polishes; the PR lane keeps the decline path
+def test_gauss_newton_progress_prints_live_and_changes_nothing():
+    """The heartbeat must reach the console mid-solve and cost no accuracy.
+
+    The rows read out of the SOLVAX history only appear once the jitted
+    while_loop returns.  The heartbeat is emitted from device callbacks
+    inside it, which run on the host outside the traced arithmetic, so the
+    solve must be bit-identical with and without it.
+    """
+
+    from vmex.core import polish_driver
+
+    inp = _small_polish_deck()
+    config = PolishConfig(**_BOUNDED_POLISH)
+    quiet = solver.solve(inp, ftol=1.0e-11, max_iterations=2000,
+                         polish=True, polish_config=config)
+    lines: list[str] = []
+    previous = polish_driver._POLISH_PROGRESS_INTERVAL_SECONDS
+    polish_driver._POLISH_PROGRESS_INTERVAL_SECONDS = 0.0
+    try:
+        loud = solver.solve(inp, ftol=1.0e-11, max_iterations=2000,
+                            polish=True, polish_config=config, verbose=True,
+                            emit=lambda text, end="\n": lines.append(text))
+    finally:
+        polish_driver._POLISH_PROGRESS_INTERVAL_SECONDS = previous
+
+    heartbeats = [
+        line for line in "".join(lines).splitlines()
+        if line.lstrip().startswith("polish 0")
+    ]
+    assert heartbeats, "no live line reached the console during the solve"
+    assert "linear products" in heartbeats[0]
+    assert float(quiet.polish_report.least_squares_cost) == float(
+        loud.polish_report.least_squares_cost)
+    np.testing.assert_array_equal(
+        np.asarray(quiet.native_equilibrium.R_cos),
+        np.asarray(loud.native_equilibrium.R_cos),
+    )
+
+
+def test_polish_config_rejects_an_unusable_budget():
+    with pytest.raises(ValueError, match="auto_budget_seconds must be positive"):
+        PolishConfig(auto_budget_seconds=0.0)
+
+
+def test_progress_callbacks_are_inert_without_an_active_reporter():
+    """The staged callbacks outlive any one polish call.
+
+    ``jax.debug.callback`` bakes its Python callable into the compiled
+    executable, which later polish calls of the same shape reuse.  The baked
+    callables therefore dispatch through a module global, and must do
+    nothing at all when no verbose polish is running rather than report into
+    a finished call's console.
+    """
+
+    from vmex.core import polish_driver
+
+    assert polish_driver._ACTIVE_POLISH_PROGRESS is None
+    polish_driver._polish_progress_product(0.0)
+    polish_driver._polish_progress_cost(1.0)
+
+    emitted: list[str] = []
+    reporter = polish_driver._PolishProgress(
+        lambda text, end="\n": emitted.append(text),
+        product_budget=4, interval=0.0)
+    with polish_driver._polish_progress(reporter):
+        assert polish_driver._ACTIVE_POLISH_PROGRESS is reporter
+        polish_driver._polish_progress_cost(2.5)
+        polish_driver._polish_progress_product(0.0)
+    assert polish_driver._ACTIVE_POLISH_PROGRESS is None
+    assert reporter.lines == 1
+    assert "1/4 linear products" in emitted[0]
+    assert "2.500E+00" in emitted[0]
+    # The throttle suppresses output, never the accounting.
+    quiet = polish_driver._PolishProgress(
+        lambda text, end="\n": emitted.append(text),
+        product_budget=4, interval=1.0e6)
+    with polish_driver._polish_progress(quiet):
+        quiet.product()
+        quiet.product()
+    assert quiet.lines == 1
+
+
+@pytest.mark.full
+def test_declined_auto_does_not_warn_under_the_warn_fail_policy(tmp_path):
+    """``POLISH_FAIL = WARN`` reports failures, and a decline is not one."""
+
+    import warnings
+
+    from vmex.core.multigrid import solve_file
+
+    path = tmp_path / "input.declined"
+    _small_polish_deck().to_indata(path)
+    path.write_text(
+        "!@VMEX POLISH = AUTO\n"
+        "!@VMEX POLISH_BUDGET = 1.0E-9\n"
+        "!@VMEX POLISH_FAIL = WARN\n"
+        "!@VMEX POLISH_MAX_ITER = 3\n"
+        + path.read_text()
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        result = solve_file(path, write_wout=False)
+    assert result.polish_report.termination_reason == "auto-declined-cost"

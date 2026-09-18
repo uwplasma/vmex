@@ -24,8 +24,10 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 from vmex.core import solver
-from vmex.core.boozer_tables import boozer_input_tables
+from vmex.core.boozer_tables import boozer_input_tables, high_order_boozer_input_tables
 from vmex.core.input import VmecInput
+from vmex.core.omnigenity import boozer_spectrum_high_order, boozer_spectrum_state
+from vmex.core.strong_force import lift_high_order_state
 from vmex.core.wout import wout_from_state
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solve: run jitted
@@ -360,7 +362,7 @@ def _boozer_range_matches_wout(eq, booz, tolerance=0.1):
 def test_boozer_transform_preserves_the_field_strength_range(symmetric_eq):
     """The Boozer map is a relabelling: |B| extrema on a surface are invariant.
 
-    Re-synthesizing ``|B|`` from ``boozer_bmnc_state`` on a fine Boozer grid
+    Re-synthesizing ``|B|`` from ``boozer_spectrum_state`` on a fine Boozer grid
     must recover the same surface minimum and maximum as the wout tables in
     VMEC angles (booz_xform, Sanchez et al. 2000: the transform changes the
     angle labels, not the field).  ``solovev`` is axisymmetric, so every
@@ -369,7 +371,7 @@ def test_boozer_transform_preserves_the_field_strength_range(symmetric_eq):
     from vmex.core import omnigenity as omn
 
     eq = symmetric_eq
-    booz = omn.boozer_bmnc_state(eq.state, eq.runtime, surfaces=[0.5],
+    booz = omn.boozer_spectrum_state(eq.state, eq.runtime, surfaces=[0.5],
                                  mboz=6, nboz=2)
     _boozer_range_matches_wout(eq, booz)
     # Axisymmetric deck: no toroidal harmonics, and no sine family at all.
@@ -382,7 +384,7 @@ def test_boozer_transform_preserves_the_field_strength_range(symmetric_eq):
 def test_lasym_boozer_transform_preserves_the_field_strength_range(lasym_solved):
     """``LASYM`` states keep the same invariant through the asymmetric route.
 
-    ``boozer_bmnc_state`` routes them through booz_xform_jax's asymmetric
+    ``boozer_spectrum_state`` routes them through booz_xform_jax's asymmetric
     transform, so the surface extrema must still match the wout tables and the
     sine family must carry the deck's actual asymmetry rather than vanish.
     """
@@ -390,7 +392,7 @@ def test_lasym_boozer_transform_preserves_the_field_strength_range(lasym_solved)
     from vmex.core import optimize as opt
 
     eq = lasym_solved
-    booz = omn.boozer_bmnc_state(eq.state, eq.runtime, surfaces=[0.5],
+    booz = omn.boozer_spectrum_state(eq.state, eq.runtime, surfaces=[0.5],
                                  mboz=6, nboz=6)
     row, span = _boozer_range_matches_wout(eq, booz)
     # The sine family is populated at the amplitude the wout engine reports;
@@ -441,6 +443,62 @@ def test_field_tables_jit_matches_eager(symmetric_eq):
         np.testing.assert_allclose(np.asarray(jitted[key]),
                                    np.asarray(eager[key]), rtol=1e-9,
                                    atol=1e-13 * scale, err_msg=key)
+
+
+def test_high_order_boozer_matches_live_state_without_file_io(symmetric_eq):
+    eq = symmetric_eq
+    ns = int(eq.runtime.resolution.ns)
+    row = ns // 2
+    surface = float(
+        0.5
+        * (eq.runtime.setup.s_full[row] + eq.runtime.setup.s_full[row - 1])
+    )
+    native_state = lift_high_order_state(
+        eq.state,
+        eq.runtime,
+        degree=3,
+        max_spans=4,
+    )
+    with pytest.raises(ValueError, match="projection grids"):
+        high_order_boozer_input_tables(native_state, np.sqrt(surface), ntheta=1)
+    with pytest.raises(ValueError, match="0 < s <= 1"):
+        boozer_spectrum_high_order(native_state, surfaces=[0.0])
+    live = boozer_spectrum_state(
+        eq.state,
+        eq.runtime,
+        surfaces=[surface],
+        mboz=8,
+        nboz=2,
+        oversample=1,
+    )
+    native = boozer_spectrum_high_order(
+        native_state,
+        surfaces=[surface],
+        mboz=8,
+        nboz=2,
+        ntheta=20,
+        nzeta=8,
+    )
+    live_modes = {
+        (int(m), int(n)): index
+        for index, (m, n) in enumerate(zip(live["xm_b"], live["xn_b"]))
+    }
+    native_modes = {
+        (int(m), int(n)): index
+        for index, (m, n) in enumerate(zip(native["xm_b"], native["xn_b"]))
+    }
+    common = sorted(live_modes.keys() & native_modes.keys())
+    live_B = np.asarray(
+        [live["bmnc_b"][0, live_modes[mode]] for mode in common]
+    )
+    native_B = np.asarray(
+        [native["bmnc_b"][0, native_modes[mode]] for mode in common]
+    )
+    relative = np.linalg.norm(native_B - live_B) / np.linalg.norm(live_B)
+    assert relative < 5.0e-4
+    np.testing.assert_allclose(native["iota_b"], live["iota_b"], rtol=2e-12)
+    np.testing.assert_allclose(native["G_b"], live["G_b"], rtol=5e-4)
+    np.testing.assert_allclose(native["I_b"], live["I_b"], rtol=5e-4)
 
 
 def test_bsupvmnc_jvp_from_boundary_tangent_is_live(symmetric_eq):
@@ -507,3 +565,129 @@ def test_refine_booz_grids_is_the_identity_at_oversample_one():
     same_constants, same_grids = _refine_booz_grids(constants, grids, 1, 3)
     assert same_constants is constants
     assert same_grids is grids
+
+
+@pytest.mark.parametrize("asym", [False, True])
+def test_refine_booz_grids_preserves_the_parity_grid_layout(asym):
+    """Refinement keeps booz_xform's own theta-domain convention.
+
+    The stellarator-symmetric quadrature spans theta in ``[0, pi]`` only
+    (``nu2_b`` rows; the kernel half-weights the boundary rows and reads its
+    normalization off ``nu2_b``), while the asymmetric quadrature spans the
+    full circle (``ntheta`` rows).  A refinement that rebuilt the full
+    circle for a symmetric run would hand the kernel twice the domain it
+    normalizes for and corrupt every spectrum, so pin the layout per parity.
+    """
+    pytest.importorskip("booz_xform_jax")
+    from booz_xform_jax.jax_api import prepare_booz_xform_constants
+
+    from vmex.core.omnigenity import _refine_booz_grids
+
+    nfp, mboz, nboz, factor = 3, 4, 3, 2
+    m = np.arange(5)
+    constants, grids = prepare_booz_xform_constants(
+        nfp=nfp, mboz=mboz, nboz=nboz, asym=asym, xm=m, xn=0 * m,
+        xm_nyq=m, xn_nyq=0 * m)
+    fine_c, fine_g = _refine_booz_grids(constants, grids, factor, nfp)
+
+    ntheta = factor * int(constants.ntheta)
+    nzeta = factor * int(constants.nzeta)
+    assert int(fine_c.ntheta) == ntheta
+    assert int(fine_c.nzeta) == nzeta
+    assert int(fine_c.nu2_b) == ntheta // 2 + 1
+    rows = ntheta if asym else ntheta // 2 + 1
+    theta = np.asarray(fine_g.theta_grid)
+    zeta = np.asarray(fine_g.zeta_grid)
+    assert theta.shape == zeta.shape == (rows * nzeta,)
+    # Same flattened layout and spacing the kernel's boundary-row indexing
+    # (idx_theta0/idx_thetapi) and Fourier normalization assume.
+    assert theta[-1] == pytest.approx(
+        2.0 * np.pi * (rows - 1) / ntheta)
+    assert np.max(theta) == pytest.approx(np.pi if not asym else
+                                          2.0 * np.pi * (ntheta - 1) / ntheta)
+    assert np.max(zeta) == pytest.approx(2.0 * np.pi * (nzeta - 1) / (nzeta * nfp))
+    coarse_rows = int(constants.ntheta) if asym else int(constants.nu2_b)
+    assert np.allclose(np.asarray(grids.theta_grid).reshape(coarse_rows, -1)[:, 0],
+                       theta.reshape(rows, -1)[::factor, 0][:coarse_rows])
+
+
+def test_boozer_high_order_uses_the_symmetry_the_state_carries():
+    """``asym`` sets the transform's poloidal range; the sine families always go.
+
+    A state carrying asymmetric harmonics with ``asym=False`` integrates that
+    geometry over a half period and returns a spectrum for a plasma that does
+    not exist, with nothing said. The flag now follows the state.
+    """
+    import numpy as np
+
+    from vmex.core.omnigenity import _tables_are_asymmetric
+
+    class _State:
+        def __init__(self):
+            self.nfp = 2
+            self.R_sin = np.zeros((3, 4))
+            self.Z_cos = np.zeros((3, 4))
+
+    assert _tables_are_asymmetric(_State()) is False
+
+    poloidal = _State()
+    poloidal.R_sin[1, 2] = 1.0e-6
+    assert _tables_are_asymmetric(poloidal) is True
+
+    # either family is enough, at any magnitude
+    vertical = _State()
+    vertical.Z_cos[0, 0] = -2.0e-8
+    assert _tables_are_asymmetric(vertical) is True
+
+
+@pytest.mark.parametrize("deck", ["input.li383_low_res", "input.basic_non_stellsym_simsopt"])
+def test_lambda_defines_straight_field_lines_on_native_half_mesh(deck):
+    """B·grad(theta+lambda) = iota B·grad(phi), including axis-adjacent rows.
+
+    This kinematic identity holds before force convergence and for both
+    parities, so a generated lambda perturbation needs no equilibrium solve.
+    It also holds under differentiation of the physical field and its labels.
+    """
+    import dataclasses
+    import jax.numpy as jnp
+    from vmex.core.fields import magnetic_fields, metric_elements
+    from vmex.core.geometry import half_mesh_jacobian
+
+    inp = VmecInput.from_file(str(DATA_DIR / deck))
+    rt = solver.prepare_runtime(inp, solver.resolution_from_input(inp, ns=9))
+    state = solver._initial_state(rt.setup)
+    radial = jnp.asarray(rt.setup.s_full)[:, None]
+    direction = radial * (0.03 + 0.01 * radial) * jnp.sin(
+        jnp.arange(state.L_sin.shape[1])[None, :] + 0.4)
+    shape = (rt.resolution.ntheta3, rt.resolution.nzeta)
+    theta = 2 * np.pi * np.arange(shape[0]) / rt.resolution.ntheta
+    phi = 2 * np.pi * np.arange(shape[1]) / (shape[1] * rt.resolution.nfp)
+
+    @jax.jit
+    def defect(scale):
+        trial = dataclasses.replace(
+            state, L_sin=state.L_sin + scale * direction,
+            L_cos=state.L_cos + (scale * direction if rt.setup.lasym else 0.))
+        _, geometry = solver._geometry(trial, rt)
+        fields = magnetic_fields(
+            geometry=geometry, jacobian=half_mesh_jacobian(geometry, s=rt.setup.s_full),
+            metrics=metric_elements(geometry, s=rt.setup.s_full), trig=rt.trig,
+            s=rt.setup.s_full, phips=rt.setup.phips, phipf=rt.setup.phipf,
+            chips=rt.setup.chips, signgs=rt.setup.signgs, gamma=rt.gamma,
+            mass=rt.setup.mass, ncurr=rt.setup.ncurr, enclosed_current=rt.setup.icurv)
+        errors = []
+        for row in (1, 4, 8):
+            table = boozer_input_tables(trial, rt, row)
+            m, n = table["xm"], table["xn"]
+            phase = theta[:, None, None] * m - phi[None, :, None] * n
+            angular = table["lmns"] * jnp.cos(phase) - table["lmnc"] * jnp.sin(phase)
+            lt, lp = jnp.sum(angular * m, axis=-1), -jnp.sum(angular * n, axis=-1)
+            bu, bv = fields.bsupu[row], fields.bsupv[row]
+            target = table["iota"] * bv
+            errors.append((bu * (1 + lt) + bv * lp - target)
+                          / jnp.maximum(jnp.abs(bu) + jnp.abs(target), 1e-20))
+        return jnp.stack(errors)
+
+    value, tangent = jax.jvp(defect, (jnp.asarray(0.7),), (jnp.asarray(1.),))
+    np.testing.assert_allclose(value, 0., atol=2e-12)
+    np.testing.assert_allclose(tangent, 0., atol=2e-11)

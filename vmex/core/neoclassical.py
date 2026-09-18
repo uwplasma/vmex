@@ -26,14 +26,17 @@ def _neo_imports():
 def diagnostic_neo_config():
     """Return the bounded NEO resolution used by VMEX summary figures.
 
-    This setting is intended for radial trends, not final transport numbers.
-    Pass a ``neo_jax.NeoConfig`` with tighter tolerances to
-    :func:`epsilon_effective_from_wout` for publication calculations.
+    On the bundled NFP=2 QA and NFP=4 QI finite-beta decks this stays within
+    4% of NEO_JAX's default ``NeoConfig``.  A 16 x 16 spline grid aliases the
+    summary Boozer spectrum (``mboz=16``) and fewer than 20 steps per field
+    period or 200 field periods leave 7-30% errors.  Pass a
+    ``neo_jax.NeoConfig`` to :func:`epsilon_effective_from_wout` for
+    publication calculations.
     """
     NeoConfig, _ = _neo_imports()
     return NeoConfig(
-        theta_n=16, phi_n=16, npart=8, multra=1, no_bins=12,
-        nstep_per=4, nstep_min=20, nstep_max=40, acc_req=0.2,
+        theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
+        nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
         max_rational_field_periods=100000,
     )
 
@@ -70,18 +73,19 @@ def epsilon_effective_from_wout(
     mboz: int = 16,
     nboz: int = 12,
     config=None,
-    clear_jax_caches: bool = True,
+    clear_jax_caches: bool = False,
 ):
     """Compute ``epsilon_eff**(3/2)`` directly from an in-memory VMEX wout.
 
     VMEX performs the Boozer transform in memory and passes its arrays to
     NEO_JAX; no ``boozmn`` file is required. NEO_JAX currently represents the
     stellarator-symmetric cosine/sine convention, so ``LASYM`` wouts are
-    rejected rather than silently dropping asymmetric harmonics. By default,
-    completed VMEX executables are released before compiling NEO; this keeps
-    end-of-run plotting responsive and memory-bounded. Set
-    ``clear_jax_caches=False`` when preserving other warm JAX executables
-    matters more than peak memory.
+    rejected rather than silently dropping asymmetric harmonics. The default
+    is library-safe: a diagnostic call never clears the process-wide JAX
+    executable caches behind its caller's back. Pass ``clear_jax_caches=True``
+    to release completed executables before compiling NEO when peak memory
+    matters more than warm executables — the CLI does this itself after all
+    requested diagnostics instead (:mod:`vmex.core.cli`).
     """
     if bool(getattr(wout, "lasym", False)):
         raise NotImplementedError(

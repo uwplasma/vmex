@@ -42,6 +42,117 @@ profiles, and transforms (it is not elapsed run time). Use
 :meth:`~vmex.core.problem.FunctionProblem.from_functions` when the user already
 has decision-vector-level functions and derivatives.
 
+Vector least squares or one scalar adjoint
+-------------------------------------------
+
+The residual and scalar interfaces can represent the same mathematical cost
+while asking for different derivatives. Let ``z`` be the converged equilibrium,
+``x`` the boundary/current decision vector, and
+
+.. math::
+
+   g(z,x)=0, \qquad
+   \Phi(z,x)=\tfrac12 r(z,x)^T r(z,x).
+
+The residual/Jacobian route builds
+
+.. math::
+
+   J_r = \frac{d r}{d x}
+       = r_x-r_z g_z^{-1}g_x,
+   \qquad \nabla_x\Phi=J_r^T r.
+
+This is what ``VmecProblem.from_tuples`` plus SciPy ``least_squares`` needs.
+The optimizer receives every residual row and the complete
+``n_residuals``-by-``n_dofs`` Jacobian. It can form a Gauss--Newton trust-region
+model, report individual rows, and stop on residual/Jacobian criteria. VMEX
+uses its block response algorithm to amortize the equilibrium linear algebra,
+but the complete residual Jacobian is still computed and materialized.
+
+When the optimizer only needs a scalar value and gradient, form ``Phi`` before
+differentiating. The adjoint is
+
+.. math::
+
+   g_z^T\lambda=\Phi_z^T= r_z^T r,
+   \qquad
+   \nabla_x\Phi=\Phi_x-\lambda^T g_x.
+
+There is one equilibrium-adjoint right-hand side per scalar gradient,
+independent of the number of residual rows and decision variables. ``One``
+describes the number of adjoint solves; its cost still depends on equilibrium
+resolution, linear conditioning, and the work needed to evaluate the objective
+VJP. VMEX does not tape the nonlinear equilibrium iterations.
+
+The explicit scalar construction is:
+
+.. code-block:: python
+
+   def loss(state, runtime):
+       rows = opt.residuals_from_tuples(state, runtime, terms)
+       return 0.5 * jnp.vdot(rows, rows)
+
+   problem = opt.VmecProblem.from_loss(
+       inp, loss, max_mode=5, use_ess=True)
+   problem.compile_value_and_gradient()
+
+   result = scipy.optimize.minimize(
+       problem.value_and_grad, problem.x0,
+       jac=True, method="L-BFGS-B", bounds=problem.bounds)
+
+For a single tuple-defined stage, :func:`vmex.core.optimize.minimize` is the
+short form of the same route:
+
+.. code-block:: python
+
+   result = opt.minimize(
+       terms, inp, max_mode=5, method="L-BFGS-B",
+       options={"maxiter": 100})
+
+The longer ``from_loss`` form is useful when the scalar is not a sum of tuple
+rows, or when a script owns stage-specific scaled coordinates and monitoring.
+
+The two constructions use the same rows, targets, weights, and scalar cost.
+They do **not** use the same optimization algorithm. ``least_squares`` uses
+the explicit residual Jacobian and Gauss--Newton curvature; L-BFGS-B sees only
+``Phi`` and its gradient and builds limited-memory curvature from accepted
+steps. Their iterates, stopping tests, and possibly the local minimum reached
+can differ. Always compare final physical terms and held-out validation
+metrics, not iteration counts alone.
+
+Measured on the QA workflow at a matched evaluation budget, the least-squares
+driver reached roughly a 3x lower objective than the scalar lane; the scalar
+lane's gains are a cheaper cold start and lower peak memory (44.7 s to 32.2 s
+wall, 2965 to 2574 MiB peak RSS on an Apple M4), so it is the cold-start and
+low-memory option, not a replacement for the least-squares driver.
+
+Choose deliberately:
+
+* Keep the vector route when residual-level diagnostics, a least-squares trust
+  region, or Gauss--Newton curvature is valuable.
+* Prefer the scalar route when a large pointwise objective makes cold Jacobian
+  compilation or materialization the bottleneck and the optimizer only needs
+  ``(value, gradient)``.
+* A scalar loss must be fully JAX-traceable. Opaque WOUT/host callbacks require
+  a traceable implementation or the finite-difference derivative lane.
+* ``compile_value_and_gradient`` makes the first scalar compile explicit;
+  it does not turn a cold timing into a warm timing.
+
+The committed QA startup measurements make the tradeoff concrete for 6,723
+rows and 48 boundary degrees of freedom on one Apple CPU host. Cold startup
+dropped from 44.7 s and 2,965 MiB peak RSS for the residual Jacobian to 32.2 s
+and 2,574 MiB for the scalar adjoint. Warm value/gradient medians were 16.6 s
+and 17.4 s, respectively, so the scalar path did not improve warm throughput
+in that measurement. The raw records are
+``benchmarks/qa_optimization_startup_least_squares_m4.json`` and
+``benchmarks/qa_optimization_startup_scalar_m4.json``; neither
+record is a GPU or persistent-cache claim.
+
+The canonical ``QA_optimization.py`` remains the residual/Jacobian tutorial.
+The eight ``{QA,QH,QP,QI}_optimization[_finite_beta]_scalar.py`` companions
+show the scalar route in vacuum and at finite beta without replacing the
+least-squares examples.
+
 Callable contracts
 ------------------
 
@@ -74,6 +185,13 @@ least-squares pair
 The SciPy and JAX callables therefore return the same value and gradient.
 VMEX maintains one exact-key host cache to avoid repeated work when an
 optimizer requests the value and derivative separately.
+
+For a custom vector diagnostic, use
+:meth:`~vmex.core.problem.VmecProblem.jax_quantity_from_state`. It returns the
+floating-point quantity and the equilibrium status from one implicit solve;
+rejected trials return NaNs rather than a plausible value. Form only the
+contraction an algorithm needs with ``jax.vjp`` instead of materializing a
+full residual Jacobian.
 
 ``problem.dof_names`` is ordered exactly like ``problem.x0`` and every
 optimizer vector passed to the problem. For example,
@@ -133,7 +251,7 @@ accepts the same two names for one-off forward solves:
        inp, terms, max_mode=5,
        forward_ftol=1e-12,
        forward_max_iterations=5500,
-       max_fsq_ratio=1e6,
+       max_fsq_ratio=1e2,
    )
 
 VMEC reports ``FSQ = fsqr + fsqz + fsql``. A converged trial is always
@@ -255,9 +373,8 @@ distance implementation.
 .. warning::
 
    The joint coil, exterior VJP, and field-line tracing examples need ESSOS
-   branch ``rj/vmex-optimization-interfaces`` (PR #58). VMEX 0.6 supports ESSOS 0.16 for CLI
-   coil tabulation, direct Biot--Savart fields, and free-boundary coil solves.
-   VMEX does not vendor or pin the pending ESSOS code.
+   0.17 or newer: ``pip install "vmex[coils]"``. Earlier releases lack the
+   ``Coils.from_json``/``Coils.with_dofs`` API these examples use.
 
 For a finite-beta prescribed boundary, virtual casing gives the field of the
 enclosed plasma currents. The physical exterior field is that contribution
@@ -482,6 +599,9 @@ ESSOS update used by an optimization:
    )
 
 ``field.dof_names`` then lists VMEX variables followed by ESSOS variables.
+For unusually large surfaces or target arrays, ``chunk_size`` and
+``target_chunk_size`` cap virtual-casing batches; keep the default ``"auto"``
+unless memory measurements justify an override.
 The factored reverse pass differentiates the equilibrium and coil data once,
 rather than nesting the implicit equilibrium solve inside each Cartesian
 spatial derivative. Third spatial derivatives and their parameter VJPs remain

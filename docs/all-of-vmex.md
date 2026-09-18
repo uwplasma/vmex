@@ -88,17 +88,19 @@ skipping rungs the seed already covers
 
 Fixed-boundary equilibria are differentiable in boundary Fourier
 coefficients, profiles, `phiedge`, `pres_scale`, and `curtor` through the
-implicit function theorem on the converged fixed point — validated against
-finite differences at 2e-9 relative on the bundled Solovev case
-(`examples/take_gradients.py`). Coil/`extcur` derivatives on a specified
+implicit function theorem on the converged fixed point — checked against
+central finite differences on the bundled Solovev case
+(`examples/take_gradients.py`, which prints the relative agreement it
+reaches; `tests/test_examples.py::test_take_gradients` fails above `1e-4`). Coil/`extcur` derivatives on a specified
 boundary go through the virtual-casing residual — the mature single-stage
 lane. VMEX also differentiates the reconverged
 VMEC--NESTOR free-boundary root itself:
 {func}`vmex.core.freeboundary_implicit.solve_free_boundary_implicit` takes the
 reverse-mode derivative of the coupled fixed point with respect to plasma
 profiles and direct coil shape/current dofs. The default transpose is
-`coupled_gcrot`; `boundary_schur` is opt-in. The example needs ESSOS branch
-`rj/vmex-optimization-interfaces` (PR #58). This CPU-only path remains experimental because its
+`coupled_gcrot`; `boundary_schur` is opt-in. The example needs ESSOS, which
+`pip install "vmex[coils]"` installs. This CPU-only path remains
+experimental because its
 cold compile, memory use, and failed-trial recovery are not yet bounded. See
 {doc}`reference/capabilities` for its validation grade and
 {doc}`explanation/adjoint-gradients` for the method.

@@ -1,16 +1,12 @@
 #!/usr/bin/env python
-"""Generate the two optimization-docs figures (docs/optimization.rst).
+"""Generate the optimization-docs figure.
 
-Outputs (both < 100 KB, light-theme PNGs matching the README figures):
+Output (light-theme WebP matching the README figures):
 
 - ``docs/_static/figures/ess_x_scale.webp`` — the Exponential Spectral
   Scaling trust-region weights ``x_scale = exp(-alpha*max(|m|,|n|)) /
   exp(-alpha)`` per harmonic level, for the example alpha = 0.7 and the
   default alpha = 1.2 (pure formula, no solves).
-- ``docs/_static/figures/gradient_stack_speedup.webp`` — measured
-  before/after of the R25 gradient stack (block-tridiagonal Jacobian,
-  perturbation warm start, single-call ESS campaign), numbers from the
-  R25/R26k measurements quoted in docs/optimization.rst.
 
 Run from the repo root::
 
@@ -28,7 +24,6 @@ import numpy as np
 OUT = Path(__file__).resolve().parents[1]
 
 BLUE = "#2a78d6"       # categorical slot 1 (after / vmex)
-BLUE_LIGHT = "#9ec5f4"  # same hue, light step (before)
 AQUA = "#1baf7a"        # categorical slot 2
 INK = "#0b0b0b"
 INK2 = "#52514e"
@@ -74,65 +69,10 @@ def ess_figure() -> None:
                 textcoords="offset points", xytext=(-86, 6),
                 color=INK2, fontsize=8)
     fig.tight_layout()
-    fig.savefig(OUT / "ess_x_scale.webp")
-    plt.close(fig)
-
-
-def stack_figure() -> None:
-    panels = [
-        {
-            "title": "implicit Jacobian, warm\n(nfp2 seed, max_mode 2)",
-            "unit": "s",
-            "rows": [("per-dof GMRES", 20.35), ("block-tridiagonal", 0.61)],
-            "ratio": "33x",
-        },
-        {
-            "title": "forward-solve iterations\n(20 trust-region trials)",
-            "unit": "iters",
-            "rows": [("plain hot restart", 23685),
-                     ("perturbation seed", 6364)],
-            "ratio": "3.7x",
-        },
-        {
-            "title": "QA campaign to precise QS\n(36-core CPU)",
-            "unit": "min",
-            "rows": [("max_mode ladder 1→5", 25.5),
-                     ("single-call ESS", 14.5)],
-            "ratio": "1.8x",
-        },
-    ]
-    fig, axes = plt.subplots(1, 3, figsize=(9.0, 2.5), dpi=150)
-    fig.subplots_adjust(wspace=0.9)
-    for ax, panel in zip(axes, panels):
-        labels = [r[0] for r in panel["rows"]]
-        values = [r[1] for r in panel["rows"]]
-        y = [1, 0]  # before on top
-        ax.barh(y, values, height=0.62, color=[BLUE_LIGHT, BLUE], zorder=3)
-        # before-bar label inside the bar; after-bar label just outside it
-        ax.annotate(f"{values[0]:,g} {panel['unit']}", (values[0], 1),
-                    textcoords="offset points", xytext=(-4, 0),
-                    ha="right", va="center", fontsize=8, color=INK)
-        ax.annotate(f"{values[1]:,g} {panel['unit']}", (values[1], 0),
-                    textcoords="offset points", xytext=(4, 6),
-                    va="center", fontsize=8, color=INK)
-        ax.annotate(panel["ratio"] + " less", (values[1], 0),
-                    textcoords="offset points", xytext=(4, -7),
-                    va="center", fontsize=9, fontweight="bold", color=BLUE)
-        ax.set_yticks(y, labels, fontsize=8)
-        ax.set_title(panel["title"], fontsize=8.5, loc="left", color=INK)
-        ax.set_xlim(0, max(values) * 1.06)
-        ax.set_ylim(-0.55, 1.55)
-        ax.set_xticks([])
-        ax.spines[["top", "right", "bottom"]].set_visible(False)
-    fig.suptitle("The measured gradient stack (2026-07-12, CPU)",
-                 fontsize=10, x=0.02, ha="left")
-    fig.tight_layout(rect=(0, 0, 1, 0.92))
-    fig.savefig(OUT / "gradient_stack_speedup.webp")
+    fig.savefig(OUT / "ess_x_scale.webp", pil_kwargs={"lossless": True})
     plt.close(fig)
 
 
 if __name__ == "__main__":
     ess_figure()
-    stack_figure()
-    for name in ("ess_x_scale.webp", "gradient_stack_speedup.webp"):
-        print(name, (OUT / name).stat().st_size, "bytes")
+    print("ess_x_scale.webp", (OUT / "ess_x_scale.webp").stat().st_size, "bytes")

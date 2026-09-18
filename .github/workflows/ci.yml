@@ -12,13 +12,75 @@ concurrency:
 env:
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
+  # Runners are ephemeral, so the persistent compilation cache can never pay
+  # for itself here — but it can hang the suite: the floor-0 default writes
+  # every compiled program, each write takes JAX's cross-process eviction
+  # lock, and pytest -n 4 workers on a 2-core runner serialize on it until
+  # the lane hits its timeout (every Fast API / physics / parity lane ran to
+  # exactly its timeout-minutes from 2026-08-31T21:00Z on, on every branch).
+  VMEX_COMPILATION_CACHE: disabled
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Select required CI scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      run_tests: ${{ steps.scope.outputs.run_tests }}
+      run_coverage: ${{ steps.scope.outputs.run_coverage }}
+      physics: ${{ steps.physics.outputs.matrix }}
+      parity: ${{ steps.parity.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Classify changed paths
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
+              python tools/ci_scope.py --null >> "$GITHUB_OUTPUT"
+          else
+            python tools/ci_scope.py --all </dev/null >> "$GITHUB_OUTPUT"
+          fi
+      - id: physics
+        # Narrowing reuses the manifest ownership the lanes are built from.
+        # Anything it cannot attribute returns every lane, so a miss costs
+        # runner time and never coverage.
+        name: Select the physics lanes this change needs
+        shell: bash
+        env:
+          ALL: '[{"lane":"core","selector":"pr-physics-core","parallel":"-n 2"},{"lane":"implicit-response-a","selector":"pr-implicit-response-a","parallel":""},{"lane":"implicit-response-b","selector":"pr-implicit-response-b","parallel":""},{"lane":"free-boundary-adjoint","selector":"pr-free-boundary-adjoint","parallel":""},{"lane":"field-api","selector":"pr-physics-field","parallel":"-n 2"},{"lane":"mirror-equilibrium","selector":"pr-mirror-equilibrium","parallel":""},{"lane":"mirror-field","selector":"pr-mirror-field","parallel":""},{"lane":"mirror-spline","selector":"pr-mirror-spline","parallel":""}]'
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
+              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          else
+            python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          fi
+      - id: parity
+        # Narrowing reuses the manifest ownership the lanes are built from.
+        # Anything it cannot attribute returns every lane, so a miss costs
+        # runner time and never coverage.
+        name: Select the parity lanes this change needs
+        shell: bash
+        env:
+          ALL: '[{"lane":"a-free","selector":"pr-parity-a1","parallel":"-n 2"},{"lane":"a-core","selector":"pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c1","selector":"pr-parity-c1","parallel":"-n 4"},{"lane":"c3d","selector":"pr-parity-c3 pr-parity-d","parallel":"-n 4"},{"lane":"e-polish","selector":"pr-parity-e","parallel":"-n 4"},{"lane":"f-options","selector":"pr-parity-f","parallel":"-n 4"},{"lane":"c2","selector":"pr-parity-c2","parallel":"-n 4"},{"lane":"c4","selector":"pr-parity-c4","parallel":"-n 4"},{"lane":"gradient","selector":"pr-gradient","parallel":"-n 4"},{"lane":"misc","selector":"pr-examples pr-external pr-full-only pr-gradient-fd","parallel":"-n 4"}]'
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
+              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          else
+            python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          fi
+
   quality:
     name: Quality, package, and docs
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -41,12 +103,14 @@ jobs:
 
   fast:
     name: Fast API tests (py${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -63,8 +127,8 @@ jobs:
           echo "working tree: ${size_kb} KiB"
           test "$size_kb" -lt 40960
       - name: Load the docs configuration
-        # The `quality` job builds the docs on 3.12 only, so a 3.11+ construct
-        # in docs/conf.py (tomllib, say) would break the docs build on the
+        # The `quality` job builds the docs on 3.12 only, so a 3.12+ construct
+        # in docs/conf.py would break the docs build on the
         # declared floor with no job noticing. Executing conf.py needs no Sphinx.
         run: python -c "import runpy; runpy.run_path('docs/conf.py')"
       - name: Run fast tests
@@ -88,39 +152,16 @@ jobs:
 
   physics:
     name: Representative ${{ matrix.lane }} physics
+    needs: changes
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      needs.changes.outputs.physics != '[]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - lane: core
-            selector: pr-physics-core
-            parallel: "-n 2"
-          - lane: implicit-response-a
-            selector: pr-implicit-response-a
-            parallel: ""
-          - lane: implicit-response-b
-            selector: pr-implicit-response-b
-            parallel: ""
-          - lane: free-boundary-adjoint
-            selector: pr-free-boundary-adjoint
-            parallel: ""
-          - lane: field-api
-            selector: pr-physics-field
-            parallel: "-n 2"
-          - lane: mirror-equilibrium
-            selector: pr-mirror-equilibrium
-            parallel: ""
-          - lane: mirror-field
-            selector: pr-mirror-field
-            parallel: ""
-          - lane: mirror-spline
-            selector: pr-physics-mirror-spline
-            parallel: ""
-          - lane: mirror-output
-            selector: pr-physics-mirror-output
-            parallel: ""
+        include: ${{ fromJSON(needs.changes.outputs.physics) }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -162,39 +203,18 @@ jobs:
 
   parity:
     name: Manifest parity lane (${{ matrix.lane }})
+    needs: changes
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      needs.changes.outputs.parity != '[]'
     runs-on: ubuntu-latest
-    # The primary-lane partition is the whole pull-request suite; these four
-    # jobs are the part no other job was running.  Measured on the runner at
-    # -n 2: 30m00s, 27m40s, 26m54s, 21m22s, which put total CI wall clock at
-    # 30 minutes against a ~14-minute budget before.  The four run in parallel
-    # with the nine physics jobs, so the fix is per-job width, not fewer tests.
-    # Measured at -n 4: c1 25m36s (from 27m40s), c2 15m07s (from 21m22s),
-    # misc 24m43s (from 26m54s) -- and lane a killed outright.  So the width
-    # is per-lane: a stays at -n 2, the rest keep the gain.
-    timeout-minutes: 45
+    # Real polish and free-boundary adjoint solves run in Nightly. Keep the
+    # PR partition bounded; a timeout is a failure, never a passing benchmark.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - lane: a
-            selector: pr-parity-a1 pr-parity-a2 pr-parity-b
-            # -n 2, not 4: this lane carries the free-boundary modules
-            # (test_freeboundary_implicit alone has two ~8-minute tests), and
-            # four concurrent free-boundary solves exhaust the runner.  At -n 4
-            # it was killed mid-run at 73% with no test failure -- "The
-            # operation was canceled" at 32m10s, twice, on two different pull
-            # requests.  The other three lanes keep -n 4, which measurably
-            # helps them.
-            parallel: "-n 2"
-          - lane: c1
-            selector: pr-parity-c1 pr-parity-c3 pr-parity-d
-            parallel: "-n 4"
-          - lane: c2
-            selector: pr-parity-c2
-            parallel: "-n 4"
-          - lane: misc
-            selector: pr-examples pr-external pr-full-only pr-gradient pr-mirror-spline
-            parallel: "-n 4"
+        include: ${{ fromJSON(needs.changes.outputs.parity) }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -237,8 +257,14 @@ jobs:
 
   device:
     name: Two-device placement and AD
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The lane ran 6:39-7:06 before the cross-device multigrid guard joined it
+    # and hit the 10-minute cap at 10:17 with a heavier first draft of that
+    # test.  The guard is now a two-iteration ladder, but a two-core runner has
+    # little headroom left at 10.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -266,11 +292,76 @@ jobs:
           path: coverage.device
           retention-days: 3
 
+  desc:
+    # DESC-generated fixtures and CLI round trips take minutes, which the
+    # 8-minute fast lane cannot hold; without DESC those tests skip there.
+    name: DESC interoperability
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install . 'desc-opt>=0.17' pytest pytest-cov pytest-xdist
+      - name: Run the DESC bridge tests
+        env:
+          JAX_ENABLE_X64: "1"
+        run: |
+          pytest -q -n 4 tests/test_desc.py --durations=10 --cov=vmex --cov-report=term
+          mv .coverage coverage.desc
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: coverage-desc
+          path: coverage.desc
+          retention-days: 3
+
+  jax-compatibility:
+    name: Stationarity contract (JAX ${{ matrix.jax }})
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        jax: ["0.9.2", "0.11.1"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install tested numerical versions
+        run: python -m pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
+      - name: Record environment and exercise eager and compiled certificates
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: |
+          python -m pip freeze
+          pytest -q -m "not full and not weekly" tests/test_polish_linear.py --durations=10
+
   changed-coverage:
     name: Changed executable lines (>= 95%)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [fast, physics, parity, device]
+    needs: [changes, fast, physics, parity, device, desc]
+    permissions:
+      contents: read
+      id-token: write
+    if: >-
+      always() &&
+      needs.changes.outputs.run_coverage == 'true' &&
+      needs.fast.result == 'success' &&
+      needs.physics.result == 'success' &&
+      needs.parity.result == 'success' &&
+      needs.device.result == 'success' &&
+      needs.desc.result == 'success'
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -286,9 +377,23 @@ jobs:
           merge-multiple: true
       - name: Combine coverage and enforce the mirror floor
         run: |
-          coverage combine coverage.device coverage.fast coverage.physics-* coverage.parity-*
+          coverage combine coverage.device coverage.desc coverage.fast coverage.physics-* coverage.parity-*
           coverage report --include='*/vmex/mirror/*' --fail-under=90
           coverage xml
+      - name: Publish combined coverage
+        uses: codecov/codecov-action@v5.5.5
+        with:
+          # OIDC upload 404s ("Repository not found") because the Codecov
+          # project still carries the pre-rename vmec_jax identity, so the
+          # upload authenticates with the repository token instead.  The
+          # step stays best-effort either way: with fail_ci_if_error it
+          # aborted this job BEFORE the changed-line gate below could run,
+          # killing a local gate over a third-party outage.  The enforced
+          # gates are the mirror floor above and diff-cover below; the
+          # upload is telemetry.
+          fail_ci_if_error: false
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
       - name: Enforce changed-line coverage
         if: github.event_name == 'pull_request'
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
@@ -298,10 +403,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [quality, fast, physics, parity, device, changed-coverage]
+    needs: [changes, quality, fast, physics, parity, desc, device, jax-compatibility, changed-coverage]
     steps:
       - name: Require every review gate
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: |
-          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")'

@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmex
 from vmex.core.problem import Evaluation, FunctionProblem, VmecProblem
 
 
@@ -193,6 +192,21 @@ def test_vmec_problem_state_objective_hides_failed_trial_branches():
     assert float(rejected_value) == 0.0
     np.testing.assert_array_equal(rejected_terms, [0.0, 0.0])
 
+    def quantity(problem, x):
+        return problem.jax_quantity_from_state(
+            x, lambda state, runtime: jnp.asarray([state[0], runtime[0]]))
+
+    value, status = quantity(accepted, jnp.asarray([2.0]))
+    np.testing.assert_allclose(value, [4.0, 3.0])
+    assert int(status) == 0
+    np.testing.assert_allclose(
+        jax.jacrev(lambda x: quantity(accepted, x)[0])(jnp.asarray([2.0])),
+        [[2.0], [1.0]],
+    )
+    value, status = quantity(rejected, jnp.asarray([2.0]))
+    assert np.isnan(value).all()
+    assert int(status) == 1
+
     with pytest.raises(ValueError, match="positive"):
         accepted.jax_objective_from_state(
             jnp.asarray([2.0]), lambda _state, _runtime: jnp.asarray([]),
@@ -220,6 +234,12 @@ def test_vmec_problem_state_objective_hides_failed_trial_branches():
         ordinary.jax_extra_costs_from_state(
             jnp.asarray([1.0]), lambda _state, _runtime: jnp.asarray([0.0]),
             n_extra_terms=1)
+    with pytest.raises(AttributeError, match="state quantities"):
+        ordinary.jax_quantity_from_state(
+            jnp.asarray([1.0]), lambda _state, _runtime: jnp.asarray([0.0]))
+    with pytest.raises(TypeError, match="floating-point"):
+        accepted.jax_quantity_from_state(
+            jnp.asarray([1.0]), lambda _state, _runtime: jnp.asarray([1]))
 
 
 def test_vmec_problem_field_facades_validate_and_route(monkeypatch):
@@ -261,13 +281,15 @@ def test_vmec_problem_field_facades_validate_and_route(monkeypatch):
         problem.x0, external_parameters=np.array([2.0]),
         external_field_from_parameters=lambda p: p,
         external_dof_names=("coil current",), nphi=7, ntheta=9,
-        digits=4, levels=((7, 9),))
+        digits=4, levels=((7, 9),), chunk_size=11, target_chunk_size=3)
     interior = problem.interior_field(problem.x0, newton_iterations=6)
     assert exterior[0] == ("input", "state", {"runtime": "runtime", "nphi": 7, "ntheta": 9})
     np.testing.assert_array_equal(exterior[1], problem.x0)
     assert exterior[2]["dof_names"] == problem.dof_names
     np.testing.assert_array_equal(exterior[2]["external_parameters"], [2.0])
     assert exterior[2]["external_dof_names"] == ("coil current",)
+    assert exterior[2]["chunk_size"] == 11
+    assert exterior[2]["target_chunk_size"] == 3
     assert interior[0:2] == ("input", ("state", "runtime"))
     assert interior[3] == {"dof_names": problem.dof_names, "newton_iterations": 6}
 
@@ -544,12 +566,6 @@ def test_vmex_jax_logging_default_and_override() -> None:
         capture_output=True, text=True,
     )
     assert standard_override.stdout.strip() == "INFO"
-
-
-def test_old_jax_gets_one_actionable_logging_notice() -> None:
-    old_jax = SimpleNamespace(__version__="0.4.35", config=SimpleNamespace())
-    with pytest.warns(RuntimeWarning, match="JAX 0.4.35.*Upgrade JAX"):
-        vmex._configure_jax_logging(old_jax)
 
 
 def test_direct_jaxopt_and_optax_contracts():

@@ -170,6 +170,132 @@ def test_compile_notice_variants():
     )
 
 
+def test_polish_banner_states_the_resolved_config():
+    banner = printing.polish_banner(
+        mode="auto", degree=3, spans=None, ns=31,
+        tolerance=1e-3, certificate_tolerance=1e-2, max_iterations=80)
+    assert "BEGIN FORCE POLISHING" in banner
+    assert "MODE = AUTO" in banner and "DEGREE = 3" in banner
+    assert "SPANS = AUTO" in banner and "NS =   31" in banner
+    assert "TOL = 1.000E-03" in banner
+    assert "CERTIFICATE TOL = 1.000E-02" in banner
+    assert "MAX ITER =   80" in banner
+    explicit = printing.polish_banner(
+        mode="on", degree=5, spans=16, ns=51,
+        tolerance=1e-2, certificate_tolerance=1e-2, max_iterations=40)
+    assert "MODE = ON" in explicit and "SPANS = 16" in explicit
+
+
+def test_polish_screen_rows():
+    assert printing.polish_screen_line(0, 1.23e-1, 4.5, 1e-3) == (
+        "    0  1.23E-01  4.50E+00  1.00E-03\n"
+    )
+    accepted = printing.polish_screen_line(
+        3, 2.3e-2, 1.1, 2.5e-4, ratio=0.98, linear_iterations=12)
+    assert accepted == "    3  2.30E-02  1.10E+00  2.50E-04  9.80E-01      12\n"
+    rejected = printing.polish_screen_line(
+        4, 2.3e-2, 1.1, 1e-3, ratio=-0.5, linear_iterations=30,
+        accepted=False)
+    assert rejected.endswith("  rejected\n")
+
+
+def test_polish_progress_line_shows_elapsed_work_and_last_cost():
+    """The live line has to answer 'is it moving' without a history table."""
+
+    line = printing.polish_progress_line(
+        elapsed_seconds=3 * 3600 + 25 * 60 + 7.5,
+        products=450, product_budget=900, cost=4.1234e4)
+    assert line.startswith("  polish 03:25:07")
+    assert "450/900 linear products" in line
+    assert "50.0%" in line
+    assert "4.123E+04" in line
+    # A zero budget must not divide by zero on the way to the console.
+    assert "0/1 linear products" in printing.polish_progress_line(
+        elapsed_seconds=0.0, products=0, product_budget=0, cost=float("nan"))
+
+
+def test_polish_cost_decline_states_the_measurement_and_every_override():
+    """A refusal has to be arguable: numbers first, then the knobs."""
+
+    text = printing.polish_cost_decline(
+        seconds_per_product=42.4, products=48000,
+        predicted_seconds=2035200.0, budget_seconds=3600.0,
+        chart_size=10573, residual_rows=135792)
+    assert "DECLINED ON PREDICTED COST" in text
+    assert "10573 unknowns" in text and "135792 rows" in text
+    assert "42.4 s" in text
+    assert "23.6 days" in text and "60 min" in text
+    assert "unpolished" in text
+    for knob in ("POLISH_BUDGET", "POLISH_MAX_ITER", "POLISH = .TRUE."):
+        assert knob in text
+    # Every magnitude the clock has to render, so no branch reaches a user
+    # for the first time in production.
+    for seconds, expect in ((12.5, "12.5 s"), (600.0, "10 min"),
+                            (7200.0, "2.0 h"), (864000.0, "10.0 days")):
+        rendered = printing.polish_cost_decline(
+            seconds_per_product=1.0, products=1, predicted_seconds=seconds,
+            budget_seconds=seconds, chart_size=1, residual_rows=1)
+        assert expect in rendered
+
+
+def test_polish_certificate_summary_names_failed_checks():
+    certified = printing.polish_certificate_summary(
+        1.281e-2, 1.807e-3, 1e-2, verdict="CERTIFIED")
+    assert "1.281E-02" in certified and "1.807E-03" in certified
+    assert certified.rstrip().endswith("POLISH CERTIFIED")
+    failed = printing.polish_certificate_summary(
+        1.281e-2, 2.3e-2, 1e-2, verdict="FAILED",
+        failed_checks=(
+            "independent force L2 2.300E-02 > tolerance 1.000E-02",))
+    assert "POLISH FAILED" in failed
+    assert "FAILED CHECK : independent force L2" in failed
+
+
+def test_polish_certificate_summary_discloses_the_eps_f_ceiling():
+    """A block that quotes eps_F must also say what eps_F cannot do.
+
+    ``eps_F`` is bounded above by 2, so on a low-beta or vacuum state both
+    ends of the pair sit at the ceiling and the pair reports nothing.  The
+    block therefore names the bound and prints the non-saturating measures
+    beside it; an undefined measure prints ``n/a`` rather than a floored
+    number that would read as a real one.
+    """
+    summary = printing.polish_certificate_summary(
+        1.918, 1.791, 1e-2, verdict="FAILED",
+        failed_checks=("independent force L2 1.791E+00 > tolerance 1.000E-02",),
+        measures=(
+            ("<|F|>  [N m^-3]", 2.039e1, 1.090e1),
+            ("<|F|>/<|grad p|>", float("nan"), float("nan")),
+            ("<|F|>/<|grad B^2/2mu0|>", 2.542e-3, 1.360e-3),
+        ),
+        window=(0.1, 0.99))
+    assert "EPS-F IS BOUNDED BY 2 BY CONSTRUCTION" in summary
+    assert "2.039E+01 ->  1.090E+01" in summary
+    assert "<|F|>/<|grad p|>                     n/a ->        n/a" in summary
+    assert "(volume averages over s in [0.10, 0.99])" in summary
+    assert "POLISH FAILED" in summary
+    assert max(len(line) for line in summary.splitlines()) <= 120
+
+
+def test_polish_certificate_summary_without_measures_is_unchanged():
+    """Callers that pass no measures keep the exact shipped block."""
+    assert printing.polish_certificate_summary(
+        1.281e-2, 1.807e-3, 1e-2, verdict="CERTIFIED") == (
+        "\n POLISH CERTIFICATE : EPS-F  1.281E-02 ->  1.807E-03"
+        "  (TOLERANCE  1.000E-02)\n POLISH CERTIFIED\n")
+
+
+def test_force_error_rows_render_single_and_paired_states():
+    single = printing.force_error_rows(
+        (("<|F|>  [N m^-3]", 2.039e1, None),))
+    assert single == ("   <|F|>  [N m^-3]                2.039E+01",)
+    paired = printing.force_error_rows(
+        (("<|F|>  [N m^-3]", 2.039e1, 1.090e1),), window=(0.1, 0.99))
+    assert paired[0].endswith("2.039E+01 ->  1.090E+01")
+    assert paired[1] == "   (volume averages over s in [0.10, 0.99])"
+    assert printing.force_error_rows((), window=(0.1, 0.99)) == ()
+
+
 def test_emit_flushed_writes_and_flushes(capsys):
     """The CLI sink must flush every line so file-redirected cluster logs
     stream in real time (an unflushed run shows nothing for hours)."""
