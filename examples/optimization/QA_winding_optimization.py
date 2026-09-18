@@ -1,6 +1,9 @@
 #!/usr/bin/env python
-"""Quasi-axisymmetric boundary optimization with a winding-surface
-coil-complexity proxy."""
+"""Quasi-axisymmetric optimization with a winding-surface complexity proxy.
+
+Performance and derivative-fidelity evidence for this nested objective lives in
+``benchmarks/winding_surface_optimization.md``.
+"""
 
 import functools
 import os
@@ -13,6 +16,7 @@ import numpy as np
 from jaxopt import LBFGSB
 from jaxopt.implicit_diff import root_jvp
 from scipy.optimize import least_squares
+from solvax import gcrot
 
 import vmex as vj
 from vmex import optimize as opt
@@ -91,6 +95,10 @@ ACTIVE_NTOR = 2
 COEFFICIENT_STEP_BOUND = 1.0
 WINDING_NTHETA = 16
 WINDING_NPHI = 16
+WINDING_MAXITER = 100
+WINDING_OPTIMALITY_TOL = 1e-6
+WINDING_LINEAR_RTOL = 1e-8
+WINDING_LINEAR_MAX_RESTARTS = 10
 
 # --- numerical-safety epsilon floor ---
 DENOMINATOR_EPS = 1e-16  # shared division-by-zero guard for calc_objectives' scale-normalized terms
@@ -507,6 +515,49 @@ def reduced_memory_induction_matrix(winding_points, plasma_points,
     return jnp.sqrt(plasma_weights[:, None]) * kernel * jnp.sqrt(winding_weights[None, :])
 
 
+def _periodic_induction_singular_values(
+        winding_points, plasma_points, dipole_normals, plasma_normals,
+        winding_weights, plasma_weights, field_periods, tor_num, pol_num):
+    """Return the exact full-torus spectrum from one block row.
+
+    Uniform full-torus grids of field-periodic surfaces make the weighted
+    induction matrix block circulant.  A block discrete Fourier transform
+    therefore splits an ``(field_periods * block_size)`` SVD into
+    ``field_periods`` independent ``block_size`` SVDs without discarding any
+    Fourier sector.  Only one target-period block row is assembled, which also
+    reduces kernel construction by ``field_periods``.
+
+    If the toroidal grid cannot be divided evenly into field periods, this
+    helper falls back to the full matrix.  The result is consequently exact
+    for every resolution, with symmetry reduction used whenever the sampling
+    admits it.
+    """
+    if field_periods <= 1 or tor_num % field_periods:
+        induction = reduced_memory_induction_matrix(
+            winding_points, plasma_points, dipole_normals, plasma_normals,
+            winding_weights, plasma_weights)
+        return jnp.linalg.svd(induction, compute_uv=False)
+
+    block_size = (tor_num // field_periods) * pol_num
+    first_block_row = reduced_memory_induction_matrix(
+        winding_points, plasma_points[:block_size], dipole_normals,
+        plasma_normals[:block_size], winding_weights,
+        plasma_weights[:block_size])
+    blocks = jnp.transpose(
+        first_block_row.reshape((block_size, field_periods, block_size)),
+        (1, 0, 2))
+
+    if field_periods == 2:
+        # Keep the two NFP=2 sectors real; a complex FFT is unnecessary here.
+        sectors = jnp.stack((blocks[0] + blocks[1],
+                             blocks[0] - blocks[1]))
+    else:
+        sectors = jnp.fft.fft(blocks, axis=0)
+    spectra = jax.vmap(
+        lambda sector: jnp.linalg.svd(sector, compute_uv=False))(sectors)
+    return spectra.reshape(-1)
+
+
 def spectral_width(dofs, mode_weights):
     return jnp.sum(mode_weights * dofs ** 2)
 
@@ -547,18 +598,23 @@ def enclosed_volume(points, normals, tor_num, pol_num):
     return jnp.abs(integral * (2 * jnp.pi / tor_num) * (2 * jnp.pi / pol_num) / 3)
 
 
-def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos,
-                     plasma_weights):
+def _calc_objectives(dofs, plasma_points, plasma_normals, weights,
+                     winding_R_cos, plasma_weights, *, periodic=False):
     tor_num, pol_num = WINDING_NPHI, WINDING_NTHETA
     winding_points, winding_normals, normal_lengths, raw_normals = points_normals_normal_lengths(dofs, winding_R_cos.shape[0] - 1, _ntor_from_coefficients(winding_R_cos), nfp, tor_num, pol_num)
 
     flat_points = winding_points.reshape((-1, 3))
     flat_unitnormals = winding_normals.reshape((-1, 3))
     winding_weights = surface_quadrature_weights(normal_lengths, tor_num, pol_num)
-    induction = reduced_memory_induction_matrix(
-        flat_points, plasma_points, flat_unitnormals, plasma_normals,
-        winding_weights, plasma_weights)
-    singular_values = jnp.linalg.svd(induction, compute_uv=False)
+    if periodic:
+        singular_values = _periodic_induction_singular_values(
+            flat_points, plasma_points, flat_unitnormals, plasma_normals,
+            winding_weights, plasma_weights, nfp, tor_num, pol_num)
+    else:
+        induction = reduced_memory_induction_matrix(
+            flat_points, plasma_points, flat_unitnormals, plasma_normals,
+            winding_weights, plasma_weights)
+        singular_values = jnp.linalg.svd(induction, compute_uv=False)
     singular_probabilities = singular_values / jnp.sum(singular_values)
     singular_entropy = -jnp.sum(
         singular_probabilities * jnp.log(
@@ -576,19 +632,60 @@ def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos,
             singular_strength, self_radius)
 
 
+def calc_objectives(dofs, plasma_points, plasma_normals, weights,
+                    winding_R_cos, plasma_weights):
+    """Evaluate objectives for unrestricted sampled plasma geometry."""
+    return _calc_objectives(
+        dofs, plasma_points, plasma_normals, weights, winding_R_cos,
+        plasma_weights)
+
+
+def _periodic_objectives(dofs, plasma_dofs, weights, winding_R_cos):
+    """Evaluate objectives on the field-periodic coefficient domain.
+
+    Constructing the plasma geometry here ensures that every differentiated
+    perturbation preserves field-period symmetry.  That restriction is what
+    makes the block-DFT spectrum exact for gradients and Hessian-vector
+    products as well as values.
+    """
+    tor_num, pol_num = WINDING_NPHI, WINDING_NTHETA
+    plasma_points, plasma_normals, plasma_normal_lengths, _ = (
+        points_normals_normal_lengths(
+            plasma_dofs, winding_R_cos.shape[0] - 1,
+            _ntor_from_coefficients(winding_R_cos), nfp, tor_num, pol_num))
+    plasma_points = plasma_points.reshape((-1, 3))
+    plasma_normals = plasma_normals.reshape((-1, 3))
+    plasma_weights = surface_quadrature_weights(
+        plasma_normal_lengths, tor_num, pol_num)
+    return _calc_objectives(
+        dofs, plasma_points, plasma_normals, weights, winding_R_cos,
+        plasma_weights, periodic=True)
+
+
 def _winding_objective_value(dofs, plasma_points, plasma_normals, plasma_weights,
                              local_weights, winding_R_cos, scales):
-    # scales is a normalization reference computed once per outer call (see
-    # winding_surface_objective); its own sensitivity to the outer equilibrium
-    # state is a small correction term nobody depends on for correctness, and
-    # differentiating through it (fresh SVD + self-intersection check every
-    # tangent/cotangent pass) costs more than the term is worth. stop_gradient
-    # here makes that trade explicit rather than incidental.
-    scales = jax.lax.stop_gradient(scales)
-    (pca, volume, spectral, distance, minimum_normal_length,
-     singular_strength, self_radius) = calc_objectives(
+    objectives = calc_objectives(
         dofs, plasma_points, plasma_normals, local_weights, winding_R_cos,
         plasma_weights)
+    return _combine_winding_objectives(objectives, scales)
+
+
+def _periodic_winding_objective_value(
+        dofs, plasma_dofs, local_weights, winding_R_cos, scales):
+    """Winding objective restricted to physical field-periodic geometry."""
+    objectives = _periodic_objectives(
+        dofs, plasma_dofs, local_weights, winding_R_cos)
+    return _combine_winding_objectives(objectives, scales)
+
+
+def _combine_winding_objectives(objectives, scales):
+    """Apply normalized weights and guardrails to objective components."""
+    (pca, volume, spectral, distance, minimum_normal_length,
+     singular_strength, self_radius) = objectives
+    # The reference scales are computed once per outer call.  Their own
+    # sensitivity is a small normalization correction, while differentiating
+    # it would repeat the spectrum and self-intersection work on every pass.
+    scales = jax.lax.stop_gradient(scales)
     wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
     self_intersection_wall = 1 + jnp.tanh(
         (MINIMUM_SELF_RADIUS - self_radius) / SELF_RADIUS_WALL_SCALE) # Penalize nonlocal self-approach
@@ -603,9 +700,9 @@ def _winding_objective_value(dofs, plasma_points, plasma_normals, plasma_weights
 
 
 def _active_winding_objective_value(active_dofs, full_dofs, active_indices,
-                                    plasma_points, plasma_normals, plasma_weights,
-                                    local_weights, winding_R_cos, scales):
-    """``_winding_objective_value`` restricted to the active-mode subset.
+                                    plasma_dofs, local_weights, winding_R_cos,
+                                    scales):
+    """Periodic winding objective restricted to the active-mode subset.
 
     ``full_dofs`` is the frozen (analytic offset-surface) baseline for every
     mode; only the modes at ``active_indices`` (``m <= ACTIVE_MPOL``,
@@ -616,9 +713,8 @@ def _active_winding_objective_value(active_dofs, full_dofs, active_indices,
     itself differentiated.
     """
     dofs = full_dofs.at[jnp.array(active_indices)].set(active_dofs)
-    return _winding_objective_value(
-        dofs, plasma_points, plasma_normals, plasma_weights, local_weights,
-        winding_R_cos, scales)
+    return _periodic_winding_objective_value(
+        dofs, plasma_dofs, local_weights, winding_R_cos, scales)
 
 
 def _active_dof_bounds(init_active_dofs):
@@ -637,17 +733,16 @@ def _active_dof_bounds(init_active_dofs):
 
 @functools.partial(jax.custom_jvp, nondiff_argnums=(2,))
 def _solve_winding_surface(init_active_dofs, full_dofs, active_indices,
-                          plasma_points, plasma_normals, plasma_weights,
-                          local_weights, winding_R_cos, scales):
+                          plasma_dofs, local_weights, winding_R_cos, scales):
     # implicit_diff defaults to True here (unlike the earlier implicit_diff=False
     # attempt): this keeps jaxopt's compact jax.lax.while_loop forward solve
     # (compiled size independent of maxiter) instead of unrolling 100 steps into
     # every traced residual/Jacobian evaluation. The custom_jvp below supplies
     # the (forward-mode-compatible) sensitivity in place of jaxopt's own
-    # reverse-mode-only custom_vjp rule, which VMEX's default forward-mode
-    # (jax.jvp) Jacobian construction cannot differentiate through. This gives
-    # a forward-mode derivative only: switching this problem's jac_solver to
-    # "reverse" would need a matching defvjp too.
+    # reverse-mode-only custom_vjp rule, which VMEX's forward Jacobian paths
+    # cannot differentiate through.  The custom linear solve used by the JVP
+    # is explicitly transposable, so JAX can derive the scalar reverse/adjoint
+    # path from the same rule without unrolling optimizer iterations.
     #
     # LBFGSB (not plain LBFGS) box-constrains each active dof to its initial
     # value +/- COEFFICIENT_STEP_BOUND, matching the ESSOS reference's SciPy
@@ -657,11 +752,37 @@ def _solve_winding_surface(init_active_dofs, full_dofs, active_indices,
     optimizer = LBFGSB(
         fun=lambda a, f, *rest: _active_winding_objective_value(
             a, f, active_indices, *rest),
-        maxiter=4, tol=1e-6)
+        maxiter=WINDING_MAXITER, tol=WINDING_OPTIMALITY_TOL)
     bounds = _active_dof_bounds(init_active_dofs)
     return optimizer.run(
-        init_active_dofs, bounds, full_dofs, plasma_points, plasma_normals,
-        plasma_weights, local_weights, winding_R_cos, scales).params
+        init_active_dofs, bounds, full_dofs, plasma_dofs, local_weights,
+        winding_R_cos, scales).params
+
+
+def _winding_linear_solve(
+        matvec, rhs, *, rtol=WINDING_LINEAR_RTOL,
+        max_restarts=WINDING_LINEAR_MAX_RESTARTS):
+    """Solve and certify the original optimality-Jacobian system.
+
+    JAXopt's default ``root_jvp`` solver applies CG to normal equations,
+    squaring the condition number and requiring both forward and transpose
+    Hessian-vector products in every iteration.  GCROT instead solves the
+    original system.  ``custom_linear_solve`` supplies its transpose solve to
+    reverse-mode AD without differentiating through the Krylov iterations.
+    """
+    _, operator = jax.linearize(matvec, jnp.zeros_like(rhs))
+
+    def solve(action, value):
+        result = gcrot(
+            action, value, rtol=rtol, max_restarts=max_restarts)
+        residual = action(result.x) - value
+        tolerance = rtol * jnp.linalg.norm(value)
+        certified = result.converged & (
+            jnp.linalg.norm(residual) <= tolerance)
+        return jnp.where(certified, result.x, jnp.nan)
+
+    return jax.lax.custom_linear_solve(
+        operator, rhs, solve=solve, transpose_solve=solve)
 
 
 @_solve_winding_surface.defjvp
@@ -673,15 +794,21 @@ def _solve_winding_surface_jvp(active_indices, primals, tangents):
     optimizer = LBFGSB(
         fun=lambda a, f, *rest: _active_winding_objective_value(
             a, f, active_indices, *rest),
-        maxiter=4, tol=1e-6)
+        maxiter=WINDING_MAXITER, tol=WINDING_OPTIMALITY_TOL)
     bounds = _active_dof_bounds(init_active_dofs)
     zero_bounds_tangent = jax.tree.map(jnp.zeros_like, bounds)
 
     sol_tangent = root_jvp(
         optimality_fun=optimizer.optimality_fun, sol=sol,
         args=(bounds, full_dofs, *rest_primals),
-        tangents=(zero_bounds_tangent, tangents[1], *rest_tangents))
-    return sol, sol_tangent
+        tangents=(zero_bounds_tangent, tangents[1], *rest_tangents),
+        solve=_winding_linear_solve)
+    # Match LBFGSB's infinity-norm stopping criterion.  An L2 check would grow
+    # with the number of active modes and could reject a solve that the
+    # optimizer correctly certified after a future resolution increase.
+    stationary = jnp.max(jnp.abs(optimizer.optimality_fun(
+        sol, bounds, full_dofs, *rest_primals))) <= WINDING_OPTIMALITY_TOL
+    return sol, jnp.where(stationary, sol_tangent, jnp.nan)
 
 
 @jax.jit
@@ -692,15 +819,9 @@ def winding_surface_objective(equilibrium_state, solver_context):
     R_cos, R_sin, Z_cos, Z_sin = vmex_boundary_to_dense(
         R_cos, R_sin, Z_cos, Z_sin, solver_context)
 
-    # Make plamsa points and normals for the winding surface objective
+    # Keep plasma geometry in its field-periodic Fourier coefficient space so
+    # the exact block-DFT spectrum remains valid under differentiation.
     plasma_dofs = coefficients_to_dofs(R_cos, Z_sin)
-    plasma_points, plasma_normals, plasma_normal_lengths, _ = points_normals_normal_lengths(
-        plasma_dofs, R_cos.shape[0] - 1, _ntor_from_coefficients(R_cos), nfp,
-        WINDING_NPHI, WINDING_NTHETA)
-    plasma_points = plasma_points.reshape((-1, 3))
-    plasma_normals = plasma_normals.reshape((-1, 3))
-    plasma_weights = surface_quadrature_weights(
-        plasma_normal_lengths, WINDING_NPHI, WINDING_NTHETA)
 
     # Make winding surface points and normals for the winding surface objective after extending the plasma surface along its normal
     winding_R_cos, winding_Z_sin, _, _ = extend_via_normal_jax(
@@ -708,8 +829,8 @@ def winding_surface_objective(equilibrium_state, solver_context):
     winding_dofs = coefficients_to_dofs(winding_R_cos, winding_Z_sin)
     local_weights = mode_weights_from_coefficients(winding_R_cos)
 
-    scales = calc_objectives(winding_dofs, plasma_points, plasma_normals,
-                             local_weights, winding_R_cos, plasma_weights)
+    scales = _periodic_objectives(
+        winding_dofs, plasma_dofs, local_weights, winding_R_cos)
 
     active_indices = _active_dof_indices(
         winding_R_cos.shape[0] - 1, _ntor_from_coefficients(winding_R_cos),
@@ -718,13 +839,12 @@ def winding_surface_objective(equilibrium_state, solver_context):
     init_active_dofs = winding_dofs[active_index_array]
 
     active_solution = _solve_winding_surface(
-        init_active_dofs, winding_dofs, active_indices, plasma_points,
-        plasma_normals, plasma_weights, local_weights, winding_R_cos, scales)
+        init_active_dofs, winding_dofs, active_indices, plasma_dofs,
+        local_weights, winding_R_cos, scales)
     winding_solution = winding_dofs.at[active_index_array].set(active_solution)
 
-    _, _, _, opt_distance, _, _, _ = calc_objectives(
-        winding_solution, plasma_points, plasma_normals, local_weights,
-        winding_R_cos, plasma_weights)
+    _, _, _, opt_distance, _, _, _ = _periodic_objectives(
+        winding_solution, plasma_dofs, local_weights, winding_R_cos)
 
     return 1 / opt_distance
 
@@ -771,13 +891,10 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
     stage_terms = objective_function_terms
     problem = opt.VmecProblem.from_tuples(inp, stage_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
-        restart_from=equilibrium, implicit_jacobian_method="block_tridiagonal")
-    # Pinned to "block_tridiagonal" rather than the "auto" default: with only
-    # winding_surface_objective active (nres=1), "auto" picks reverse-mode for
-    # the Jacobian, which _solve_winding_surface's forward-mode-only
-    # custom_jvp cannot supply -- every residual_jac() call would otherwise
-    # retry and fail a full reverse-mode trace before falling back to this
-    # same certified path (measured: ~17-30% slower per call, every call).
+        restart_from=equilibrium, implicit_jacobian_method="auto")
+    # With one residual row, "auto" uses one reverse equilibrium adjoint.  The
+    # winding custom JVP is transposable through _winding_linear_solve, giving
+    # a nested adjoint rather than one forward winding response per plasma DOF.
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:
