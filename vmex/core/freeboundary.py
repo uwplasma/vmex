@@ -787,6 +787,7 @@ class FusedVacuum:
     full: Any
     skip: Any
     bsq: Any
+    bsq_edge: Any = None
     cache_key: Any = None
     solve_device: Any = None
 
@@ -909,10 +910,15 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
             "bsubuvac": bsubuvac, "bsubvvac": bsubvvac,
         }
 
-    def _bsq(state: SpectralState, rt: SolverRuntime, field: MgridField):
-        """Only the converged edge ``0.5|B|²`` needed by implicit AD."""
-        ctor, _, axis_r, axis_z, _, _ = _vacuum_scalars(state, rt)
-        rmnc, zmns, rmns, zmnc = _edge_fourier_jax(state, rt)
+    def _bsq_edge(rmnc, zmns, rmns, zmnc, ctor, axis_r, axis_z,
+                  field: MgridField):
+        """Edge ``0.5|B|²`` as a function of NESTOR's own plasma inputs.
+
+        The plasma reaches NESTOR only through the edge Fourier coefficients,
+        the enclosed toroidal current and the magnetic axis.  Exposing that
+        map lets the implicit adjoint build one dense response to those few
+        inputs and replace every later NESTOR reverse sweep by a multiply.
+        """
         boundary = _boundary_from_coefficients_jax(
             rmnc, zmns, rmns, zmnc, modes=modes, basis=basis
         )
@@ -923,9 +929,15 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
             guu=ext["guu"], guv=ext["guv"], gvv=ext["gvv"],
         )[0]
 
+    def _bsq(state: SpectralState, rt: SolverRuntime, field: MgridField):
+        """Only the converged edge ``0.5|B|²`` needed by implicit AD."""
+        ctor, _, axis_r, axis_z, _, _ = _vacuum_scalars(state, rt)
+        rmnc, zmns, rmns, zmnc = _edge_fourier_jax(state, rt)
+        return _bsq_edge(rmnc, zmns, rmns, zmnc, ctor, axis_r, axis_z, field)
+
     return FusedVacuum(
         full=jax.jit(_full), skip=jax.jit(_skip), bsq=jax.jit(_bsq),
-        solve_device=solve_device,
+        bsq_edge=jax.jit(_bsq_edge), solve_device=solve_device,
     )
 
 
