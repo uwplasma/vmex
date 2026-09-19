@@ -517,20 +517,28 @@ def test_free_boundary_537_modes_fft_auto_smoke(tmp_path, monkeypatch):
     resolved: list[tuple[bool | None, bool]] = []
     original_resolve = FBmod._resolve_use_fft
 
-    def recording_resolve(use_fft, device, resolution):
-        out = original_resolve(use_fft, device, resolution)
+    def recording_resolve(use_fft, *args, **kwargs):
+        out = original_resolve(use_fft, *args, **kwargs)
         resolved.append((use_fft, bool(out)))
         return out
 
     monkeypatch.setattr(FBmod, "_resolve_use_fft", recording_resolve)
 
     seen: list[bool] = []
+    steady: list[bool] = []
     original_body = FBmod._make_body
 
-    def recording_body(rt, *, evaluation_state=None, use_fft=False):
+    # **kwargs, not the argument list of the day: a spy that re-declares
+    # _make_body's keywords goes stale the moment one is added, and the
+    # TypeError then surfaces inside a traced lane, far from its cause.
+    def recording_body(rt, *, use_fft=False, **kwargs):
         seen.append(bool(use_fft))
-        return original_body(
-            rt, evaluation_state=evaluation_state, use_fft=use_fft)
+        # The steady vacuum lane is the only caller that hands the pass's
+        # single synthesis down; recording it proves the FFT resolution
+        # reached that lane and not the eqsolve one alone.
+        if kwargs.get("evaluation_synthesis") is not None:
+            steady.append(bool(use_fft))
+        return original_body(rt, use_fft=use_fft, **kwargs)
 
     monkeypatch.setattr(FBmod, "_make_body", recording_body)
     # fresh vacuum-lane cache: the steady lane bakes use_fft into its traced
@@ -553,6 +561,9 @@ def test_free_boundary_537_modes_fft_auto_smoke(tmp_path, monkeypatch):
     assert seen and all(seen), (
         f"{seen.count(False)} traced lane bod(y/ies) received the dense "
         f"transform despite the FFT auto-selection")
+    assert steady, (
+        "the steady vacuum lane was never traced -- the smoke would pass "
+        "without exercising the 537-mode vacuum body")
     output = "\n".join(lines)
     assert "VACUUM PRESSURE TURNED ON" in output, (
         "537-mode FFT smoke never activated the vacuum within its budget")
