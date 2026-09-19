@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,6 +196,65 @@ def test_high_spatial_derivatives_and_parameter_vjps_are_exact():
     for value, method, expected_method in zip(values, methods, vjps):
         cotangent = jnp.ones_like(value)
         np.testing.assert_allclose(method(cotangent), expected_method(cotangent))
+
+
+def test_spatial_derivatives_compile_once_per_order():
+    """Nested ``jacfwd`` must run in one compiled kernel, giving the same values.
+
+    Before the per-order cache the expanded third-derivative graph was
+    dispatched primitive by primitive: over a thousand XLA compilations for a
+    single point, which is what made the field examples exceed their budgets.
+    The suite runs with ``jax_disable_jit``, so enable jit explicitly here.
+    """
+    parameters = jnp.array([1.2, -0.7])
+    points = jnp.array([[0.4, -0.2, 0.3]])
+
+    def parameterized_field(p, xyz):
+        x, y, z = xyz.T
+        return jnp.stack((p[0] * x**3 + p[1] * y,
+                          p[0] * x * y**2 + p[1] * z**2,
+                          p[0] * z + p[1] * x**2 * y), axis=-1)
+
+    def build():
+        return MagneticField(
+            lambda xyz: parameterized_field(parameters, xyz), parameters=parameters,
+            parameter_data_fn=lambda p: {"coefficients": p},
+            B_from_data=lambda data, xyz: parameterized_field(
+                data["coefficients"], xyz)).set_points(points)
+
+    eager = build()
+    reference = [eager.gradB(), eager.gradgradB(), eager.gradgradgradB(),
+                 eager.gradgradgradB_vjp(jnp.ones((1, 3, 3, 3, 3)))]
+
+    compiled: list[str] = []
+
+    class _Counter(logging.Handler):
+        def emit(self, record):
+            if "Finished XLA compilation of" in record.getMessage():
+                compiled.append(record.getMessage())
+
+    field = build()
+    logger, handler, level = logging.getLogger("jax"), _Counter(), None
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    counts = []
+    try:
+        with jax.disable_jit(False):
+            for _ in range(2):
+                compiled.clear()
+                with jax.log_compiles():
+                    jitted = [field.gradB(), field.gradgradB(), field.gradgradgradB(),
+                              field.gradgradgradB_vjp(jnp.ones((1, 3, 3, 3, 3)))]
+                counts.append(len(compiled))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+    for expected, got in zip(reference, jitted):
+        np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-12)
+    # A zero first count would mean the counted message was renamed upstream.
+    assert 1 <= counts[0] <= 12, f"the derivative chain took {counts[0]} compilations"
+    assert counts[1] == 0, f"repeating the calls recompiled {counts[1]} times"
 
 
 def test_extender_helper_contracts_and_public_equilibrium_aliases():
@@ -413,6 +473,8 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
     expected_vjp = jax.grad(lambda p: jnp.vdot(seeded_B(p), weight))(parameters)
     np.testing.assert_allclose(
         parameterized.B_vjp(weight), expected_vjp, rtol=2e-10, atol=2e-10)
+    with pytest.raises(ValueError, match="cotangent has shape"):
+        parameterized.B_vjp(jnp.ones(weight.shape + (3,)))
 
 
 def test_magnetic_field_cylindrical_points_round_trip():

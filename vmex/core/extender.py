@@ -186,6 +186,7 @@ class MagneticField:
         self._B_from_data = B_from_data
         self._parameter_data_vjp = None
         self._data_pullbacks: dict[int, Callable[[Any, Array], Any]] = {}
+        self._spatial_fns: dict[int, Callable[[Array], Array]] = {}
         self.dof_names = tuple(dof_names or ())
         direct = parameterized_B_fn is not None
         factored = parameter_data_fn is not None or B_from_data is not None
@@ -242,7 +243,12 @@ class MagneticField:
     def B(self, points: Array | None = None) -> Array:
         """Return Cartesian ``B`` at explicit or stored points."""
         xyz = self._require_points() if points is None else _check_points(points)
-        value = jnp.asarray(self._B_fn(xyz))
+        batch = self._spatial_fns.get(0)
+        if batch is None:
+            B_fn = self._B_fn  # bind the callable, not self: no reference cycle
+            batch = self._spatial_fns[0] = jax.jit(
+                lambda p: jnp.asarray(B_fn(p)))
+        value = batch(xyz)
         if value.shape != xyz.shape:
             raise ValueError(f"field returned shape {value.shape}, expected {xyz.shape}")
         return value
@@ -277,15 +283,31 @@ class MagneticField:
         """Return SIMSOPT-compatible ``|B|`` with shape ``(n, 1)``."""
         return self.absB(points)[:, None]
 
+    def _spatial_derivative(self, order: int, xyz: Array) -> Array:
+        """Return the ``order``-th Cartesian derivative of ``B_fn``, compiled once.
+
+        Nesting ``jacfwd`` outside ``jit`` dispatches every primitive of the
+        expanded graph on its own, which for the third derivative costs orders
+        of magnitude more than the one compiled kernel.  The compiled callable
+        is kept per order, so repeated queries pay compilation once.  Order 0 is
+        reserved by :meth:`B` for the batched ``B_fn`` itself.
+        """
+        function = self._spatial_fns.get(order)
+        if function is None:
+            B_fn = self._B_fn  # bind the callable, not self: no reference cycle
+            point_field = lambda point: jnp.asarray(B_fn(point[None, :]))[0]  # noqa: E731
+            for _ in range(order):
+                point_field = jax.jacfwd(point_field)
+            function = self._spatial_fns[order] = jax.jit(jax.vmap(point_field))
+        return function(xyz)
+
     def gradB(self, points: Array | None = None) -> Array:
         """Return ``dB_i/dx_j`` with shape ``(n, 3, 3)``."""
         xyz = self._require_points() if points is None else _check_points(points)
         if self._gradB_fn is not None:
             value = jnp.asarray(self._gradB_fn(xyz))
         else:
-            value = jax.vmap(
-                jax.jacfwd(lambda point: self._B_fn(point[None, :])[0])
-            )(xyz)
+            value = self._spatial_derivative(1, xyz)
         expected = xyz.shape + (3,)
         if value.shape != expected:
             raise ValueError(f"field gradient returned shape {value.shape}, expected {expected}")
@@ -297,8 +319,7 @@ class MagneticField:
         if self._gradgradB_fn is not None:
             value = jnp.asarray(self._gradgradB_fn(xyz))
         else:
-            value = jax.vmap(jax.jacfwd(jax.jacfwd(
-                lambda point: self._B_fn(point[None, :])[0])))(xyz)
+            value = self._spatial_derivative(2, xyz)
         expected = xyz.shape + (3, 3)
         if value.shape != expected:
             raise ValueError(
@@ -311,9 +332,7 @@ class MagneticField:
         if self._gradgradgradB_fn is not None:
             value = jnp.asarray(self._gradgradgradB_fn(xyz))
         else:
-            point_field = lambda point: self._B_fn(point[None, :])[0]  # noqa: E731
-            value = jax.vmap(
-                jax.jacfwd(jax.jacfwd(jax.jacfwd(point_field))))(xyz)
+            value = self._spatial_derivative(3, xyz)
         expected = xyz.shape + (3, 3, 3)
         if value.shape != expected:
             raise ValueError(
@@ -344,11 +363,13 @@ class MagneticField:
             def quantity_from_data(field_data):
                 return spatial_quantity(lambda xyz: B_from_data(field_data, xyz))
 
-            value = quantity_from_data(data)
+            # The pullback below evaluates this graph anyway; take the shape
+            # from an abstract trace rather than a second eager evaluation.
+            expected = jax.eval_shape(quantity_from_data, data).shape
             vector = jnp.asarray(cotangent)
-            if vector.shape != value.shape:
+            if vector.shape != expected:
                 raise ValueError(
-                    f"cotangent has shape {vector.shape}, expected {value.shape}")
+                    f"cotangent has shape {vector.shape}, expected {expected}")
             if order not in self._data_pullbacks:
                 self._data_pullbacks[order] = jax.jit(jax.grad(
                     lambda field_data, weight: jnp.vdot(
@@ -653,6 +674,7 @@ class VmecInteriorField(MagneticField):
         self.spectra = spectra
         self.newton_iterations = int(newton_iterations)
         self._points_flux: Array | None = None
+        self._seeded_fns: dict[int, Callable[[Array, Array], Array]] = {}
 
         def B_fn(points):
             return _interior_coordinates_and_B(
@@ -679,24 +701,32 @@ class VmecInteriorField(MagneticField):
         return self
 
     def _stored_flux_quantity(self, order: int) -> Array:
-        """Evaluate a Cartesian field derivative from known flux seeds."""
+        """Evaluate a Cartesian field derivative from known flux seeds.
+
+        Compiled once per order and cached on this field, for the reason given
+        in :meth:`MagneticField._spatial_derivative`.
+        """
         xyz, seeds = self._require_points(), cast(Array, self._points_flux)
+        evaluate = self._seeded_fns.get(order)
+        if evaluate is None:
+            spectra, iterations = self.spectra, self.newton_iterations
 
-        def point_field(point, seed):
-            return _interior_coordinates_and_B(
-                self.spectra, point[None, :], newton_iterations=self.newton_iterations,
-                initial_flux=seed[None, :])[1][0]
+            def point_field(point, seed):
+                return _interior_coordinates_and_B(
+                    spectra, point[None, :], newton_iterations=iterations,
+                    initial_flux=seed[None, :])[1][0]
 
-        def differentiated(previous):
-            """One more Cartesian derivative of ``previous`` at fixed seed."""
-            def stepped(point, seed):
-                return jax.jacfwd(lambda value: previous(value, seed))(point)
-            return stepped
+            def differentiated(previous):
+                """One more Cartesian derivative of ``previous`` at fixed seed."""
+                def stepped(point, seed):
+                    return jax.jacfwd(lambda value: previous(value, seed))(point)
+                return stepped
 
-        function = point_field
-        for _ in range(order):
-            function = differentiated(function)
-        return jax.vmap(function)(xyz, seeds)
+            function = point_field
+            for _ in range(order):
+                function = differentiated(function)
+            evaluate = self._seeded_fns[order] = jax.jit(jax.vmap(function))
+        return evaluate(xyz, seeds)
 
     def _parameter_vjp(self, order: int, cotangent: Array) -> Array:
         """Differentiate at fixed Cartesian points using known flux seeds."""
@@ -726,11 +756,11 @@ class VmecInteriorField(MagneticField):
                     lambda value: previous(value, seed))(point)
             return jax.vmap(function)(points, seeds)
 
-        value = quantity_from_data(data)
+        expected = jax.eval_shape(quantity_from_data, data).shape
         vector = jnp.asarray(cotangent)
-        if vector.shape != value.shape:
+        if vector.shape != expected:
             raise ValueError(
-                f"cotangent has shape {vector.shape}, expected {value.shape}")
+                f"cotangent has shape {vector.shape}, expected {expected}")
         cache_key = order + 4
         if cache_key not in self._data_pullbacks:
             self._data_pullbacks[cache_key] = jax.jit(jax.grad(
