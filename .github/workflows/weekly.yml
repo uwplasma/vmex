@@ -83,18 +83,51 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - lane: core
-            selector: full-core-a-c full-core-d-f0 full-core-g-h full-core-i full-core-j-m full-core-n-s full-core-t-z full-core-fb-a
+          - lane: core-1
+            selector: full-core-a-c full-core-d-f0 full-core-g-h full-core-t-z full-core-fb-a
             parallel: "-n 4"
-            timeout: 120
+            timeout: 15
+          - lane: core-2
+            selector: full-core-i full-core-j-m
+            parallel: "-n 4"
+            timeout: 70
+          - lane: core-3
+            selector: full-core-n-s
+            shard: "1/5"
+            parallel: "-n 4"
+            timeout: 10
+          - lane: core-4
+            selector: full-core-n-s
+            shard: "2/5"
+            parallel: "-n 4"
+            timeout: 18
+          - lane: core-5
+            selector: full-core-n-s
+            shard: "3/5"
+            parallel: "-n 4"
+            timeout: 20
+          - lane: core-6
+            selector: full-core-n-s
+            shard: "4/5"
+            parallel: "-n 4"
+            timeout: 40
+          - lane: core-7
+            selector: full-core-n-s
+            shard: "5/5"
+            parallel: "-n 4"
+            timeout: 40
           - lane: core-fb
             selector: full-core-fb-b
             parallel: "-n 2"
             timeout: 120
-          - lane: core-fb-stress
-            selector: full-core-fb-stress-a full-core-fb-stress-b
+          - lane: core-fb-stress-a
+            selector: full-core-fb-stress-a
             parallel: ""
-            timeout: 120
+            timeout: 100
+          - lane: core-fb-stress-b
+            selector: full-core-fb-stress-b
+            parallel: ""
+            timeout: 90
           - lane: i-grad
             selector: full-core-i-grad
             parallel: "-n 2"
