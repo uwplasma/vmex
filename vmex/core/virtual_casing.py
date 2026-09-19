@@ -192,6 +192,7 @@ def surface_field_data_from_wout(
     ntheta: int = 32,
     s_index: int = -1,
     use_stellsym: bool = True,
+    project_current: bool = False,
 ) -> "VmecSurfaceFieldData":
     """Build a :class:`~virtual_casing_jax.VmecSurfaceFieldData` from a wout.
 
@@ -239,13 +240,68 @@ def surface_field_data_from_wout(
         lasym=lasym, use_stellsym=use_stellsym,
         signgs=int(getattr(wout, "signgs", -1)),
         nphi=nphi, ntheta=ntheta, source_convention="vmex_wout",
+        project_current=bool(project_current),
     )
+
+
+def _project_covariant_to_surface_gradient(b_theta, b_phi, nfp: int):
+    """Keep the part of a covariant boundary pair that is a surface gradient.
+
+    Virtual casing of tangential boundary data is the field of the sheet
+    current ``K = n x B``.  Outside the surface that field is curl-free only if
+    the sheet current is conserved, ``div_s K = 0``, i.e.
+
+        ``d_theta B_phi - d_phi B_theta = mu0 sqrt(g) J^s = 0``,
+
+    which VMEC's discrete ``J^s`` satisfies only to truncation.  The residual is
+    not small in its effect: the exterior field it produces has
+    ``|curl B| / |grad B|`` of order ``5e-3`` one minor radius out, rising to
+    ``0.2`` near the boundary.  It is a property of the source data, invisible
+    to any quadrature error estimate, and a higher-order edge extrapolation does
+    not remove it.
+
+    The true pair is a surface gradient, ``(B_theta, B_phi) = grad_s nu`` with
+    ``nu = I theta + G phi + periodic``, so mode by mode the admissible pairs are
+    those parallel to ``(k_theta, k_phi)``.  This takes the orthogonal projection
+    onto that line, which cannot increase the source-data error in the same norm.
+
+    Two families are left alone or dropped rather than projected.  The ``(0, 0)``
+    mode is the net poloidal and toroidal current, which is not a gradient of a
+    periodic function and is not removable, so it is kept exactly.  A Nyquist
+    mode has no representable derivative on the grid -- its difference aliases to
+    zero -- so it cannot belong to a surface gradient at all, and is dropped.
+
+    ``b_theta`` and ``b_phi`` have shape ``(nphi, ntheta)`` with ``phi`` covering
+    ONE field period, so the toroidal wavenumbers carry the ``nfp`` factor.
+    Everything is ``jnp``, so this differentiates in the boundary like the rest
+    of the assembly.
+    """
+    nphi, ntheta = b_theta.shape
+    k_theta = jnp.fft.fftfreq(ntheta, 1.0 / ntheta)[None, :]
+    k_phi = (jnp.fft.fftfreq(nphi, 1.0 / nphi) * float(nfp))[:, None]
+    f_theta = jnp.fft.fft2(b_theta)
+    f_phi = jnp.fft.fft2(b_phi)
+
+    k_squared = k_theta**2 + k_phi**2
+    weight = (k_theta * f_theta + k_phi * f_phi) / jnp.where(k_squared > 0.0, k_squared, 1.0)
+    p_theta = k_theta * weight
+    p_phi = k_phi * weight
+
+    p_theta = p_theta.at[0, 0].set(f_theta[0, 0])
+    p_phi = p_phi.at[0, 0].set(f_phi[0, 0])
+    if ntheta % 2 == 0:
+        p_theta = p_theta.at[:, ntheta // 2].set(0.0)
+        p_phi = p_phi.at[:, ntheta // 2].set(0.0)
+    if nphi % 2 == 0:
+        p_theta = p_theta.at[nphi // 2, :].set(0.0)
+        p_phi = p_phi.at[nphi // 2, :].set(0.0)
+    return jnp.real(jnp.fft.ifft2(p_theta)), jnp.real(jnp.fft.ifft2(p_phi))
 
 
 def _assemble_surface_field_data(
     *, nfp, ns, j, xm, xn, xmn, xnn, rmnc, zmns, rmns, zmnc,
     bsupu, bsupv, bsupu_s, bsupv_s, lasym, use_stellsym, signgs,
-    nphi, ntheta, source_convention,
+    nphi, ntheta, source_convention, project_current: bool = False,
 ) -> "VmecSurfaceFieldData":
     """Assemble a :class:`VmecSurfaceFieldData` from boundary Fourier spectra.
 
@@ -295,6 +351,20 @@ def _assemble_surface_field_data(
 
     bu = _nyquist_synth(bu_edge, bu_edge_s, xmn, xnn, theta, phi)
     bv = _nyquist_synth(bv_edge, bv_edge_s, xmn, xnn, theta, phi)
+
+    if project_current:
+        # go through the covariant pair, project, and come back: the metric is
+        # exact here because the field is tangential by construction
+        g_tt = jnp.sum(e_theta * e_theta, axis=0)
+        g_tp = jnp.sum(e_theta * e_phi, axis=0)
+        g_pp = jnp.sum(e_phi * e_phi, axis=0)
+        b_theta, b_phi = _project_covariant_to_surface_gradient(
+            bu * g_tt + bv * g_tp, bu * g_tp + bv * g_pp, nfp
+        )
+        determinant = g_tt * g_pp - g_tp * g_tp
+        bu = (g_pp * b_theta - g_tp * b_phi) / determinant
+        bv = (g_tt * b_phi - g_tp * b_theta) / determinant
+
     B_total = bu[None, :, :] * e_theta + bv[None, :, :] * e_phi
 
     # -- normal / area, oriented outward --
@@ -438,6 +508,7 @@ def surface_field_data_from_state(
     ntheta: int = 32,
     s_index: int = -1,
     use_stellsym: bool = True,
+    project_current: bool = False,
 ) -> "VmecSurfaceFieldData":
     """Traceable :class:`VmecSurfaceFieldData` straight from a ``SpectralState``.
 
@@ -450,7 +521,8 @@ def surface_field_data_from_state(
     spectra = _state_field_spectra(inp, state, runtime)
     return _assemble_surface_field_data(
         **spectra, j=int(s_index % spectra["ns"]), use_stellsym=use_stellsym,
-        nphi=nphi, ntheta=ntheta, source_convention="vmex_state")
+        nphi=nphi, ntheta=ntheta, source_convention="vmex_state",
+        project_current=bool(project_current))
 
 
 def _carries_asymmetric_harmonics(state) -> bool:
