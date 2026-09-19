@@ -101,9 +101,14 @@ def make_free_boundary_config(
 
     ``max_fsq_ratio`` is the largest ``(fsqr + fsqz + fsql) / ftol`` at which
     :func:`solve_free_boundary_implicit_status` still certifies a solve that
-    ran out of iterations.  The default of 1 certifies only solves that met
-    ``ftol``; an unconverged state is a failed trial (status 2), because its
-    adjoint is taken off the root and its value depends on the path there.
+    ran out of iterations.  It governs only those: a solve VMEC calls
+    converged is certified whatever the ratio, and because that flag is per
+    component (``fsqr``, ``fsqz`` and ``fsql`` each under ``ftol``) a converged
+    solve routinely carries a summed ratio near 1.5 and up to 3.  The default
+    of 1 therefore certifies the converged solves and nothing else, where the
+    previous 1e6 also admitted roots that stopped 49x past ``ftol``; an
+    uncertified state is a failed trial (status 2), because its adjoint is
+    taken off the root and its value depends on the path there.
     """
     if not inp.lfreeb:
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
