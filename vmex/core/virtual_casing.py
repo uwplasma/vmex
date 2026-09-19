@@ -710,16 +710,18 @@ def offsurface_error_estimate(field, xyz, B_plasma=None) -> jax.Array:
 
     Delegates to ``virtual_casing_jax``'s own achieved-error estimate, which
     also drives the schedule's level choice (>= 0.0.6).  Per target it reports
-    ``max(|U|, (relative change between the last two levels) ** 2)``: ``|U|`` is
-    the single-layer potential of a unit density, exactly zero at a target
-    outside the surface, and halving the spacing squares the trapezoid error
-    factor ``exp(-2 pi d / h)``, so the squared change extrapolates the finest
-    level's error.  Differences are divided by the RMS of ``|B_total|`` on the
-    surface, so the result is dimensionless and compares with ``10**-digits``.
+    ``max(min(|U|, |1 + U|), (relative change between the last two levels) ** 2)``:
+    ``U`` is the double-layer potential of a unit density, exactly 0 at a
+    target outside the surface and -1 inside it, and halving the spacing
+    squares the trapezoid error factor ``exp(-2 pi d / h)``, so the squared
+    change extrapolates the finest level's error.  Differences are divided by
+    the RMS of ``|B_total|`` on the surface, so the result is dimensionless
+    and compares with ``10**-digits``.
 
-    Targets must lie outside the surface; an inside target, or one closer than
-    about two source-grid spacings, reports an error of order one.  The
-    function is traceable.
+    Valid on either side of the surface; a target closer than about two
+    source-grid spacings reports a large error.  It certifies the field only:
+    each spatial derivative taken through the same level loses roughly a
+    factor of the grid count.  The function is traceable.
 
     Parameters
     ----------
