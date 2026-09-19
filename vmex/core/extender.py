@@ -243,12 +243,7 @@ class MagneticField:
     def B(self, points: Array | None = None) -> Array:
         """Return Cartesian ``B`` at explicit or stored points."""
         xyz = self._require_points() if points is None else _check_points(points)
-        batch = self._spatial_fns.get(0)
-        if batch is None:
-            B_fn = self._B_fn  # bind the callable, not self: no reference cycle
-            batch = self._spatial_fns[0] = jax.jit(
-                lambda p: jnp.asarray(B_fn(p)))
-        value = batch(xyz)
+        value = jnp.asarray(self._B_fn(xyz))
         if value.shape != xyz.shape:
             raise ValueError(f"field returned shape {value.shape}, expected {xyz.shape}")
         return value
@@ -289,8 +284,9 @@ class MagneticField:
         Nesting ``jacfwd`` outside ``jit`` dispatches every primitive of the
         expanded graph on its own, which for the third derivative costs orders
         of magnitude more than the one compiled kernel.  The compiled callable
-        is kept per order, so repeated queries pay compilation once.  Order 0 is
-        reserved by :meth:`B` for the batched ``B_fn`` itself.
+        is kept per order, so repeated queries pay compilation once.  ``B_fn``
+        itself is never wrapped: with explicit derivative callables it may be a
+        NumPy function that cannot be traced.
         """
         function = self._spatial_fns.get(order)
         if function is None:

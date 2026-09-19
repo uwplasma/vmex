@@ -515,6 +515,14 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
     )
     assert (supplied.gradB(points).shape, supplied.gradgradB(points).shape,
             supplied.gradgradgradB(points).shape) == expected
+    # A NumPy-only B_fn cannot be traced; with an explicit derivative it is a
+    # supported field, so B() must never wrap B_fn in jit (enabled here).
+    numpy_only = MagneticField(
+        lambda xyz: 2.0 * np.asarray(xyz),
+        gradB_fn=lambda xyz: np.broadcast_to(2.0 * np.eye(3), xyz.shape + (3,)))
+    with jax.disable_jit(False):
+        np.testing.assert_allclose(numpy_only.B(points), 2.0 * points)
+        np.testing.assert_allclose(numpy_only.gradB(points)[0], 2.0 * np.eye(3))
     for name, function in (
         ("gradient", lambda xyz: jnp.zeros(xyz.shape)),
         ("second", lambda xyz: jnp.zeros(xyz.shape + (3,))),

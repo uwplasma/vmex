@@ -50,7 +50,9 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
     NESTOR--VMEX adjoint with independent coil-field re-solves.
   - `vmex_get_B_gradB.py` queries the stable finite-beta interior API.
     `vmex_get_B_outside_plasma.py` *(preview)* adds coils, virtual casing, and
-    named VMEX/ESSOS VJPs.
+    named VMEX/ESSOS VJPs. Neither reads `VMEX_EXAMPLES_CI`: their cost is XLA
+    compilation of the derivative graphs, which a coarser equilibrium does not
+    shorten.
   - `vmex_fieldline_tracing_vacuum.py` and
     `vmex_fieldline_tracing_finite_beta.py` *(preview)* — compare VMEX,
     coil-only, and self-consistent exterior traces in 3-D and Poincare plots.

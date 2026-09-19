@@ -1,7 +1,10 @@
 """Run the documented examples at reduced, deterministic CI budgets.
 
-Each script reads ``VMEX_EXAMPLES_CI=1``; the tests require a clean exit,
-physics progress where applicable, and the documented output artifacts.
+Every test sets ``VMEX_EXAMPLES_CI=1`` and requires a clean exit, physics
+progress where applicable, and the documented output artifacts.  Most scripts
+read the variable to shrink their work; a few have no smoke path and run as
+shipped, among them ``vmex_get_B_gradB.py`` and ``vmex_get_B_outside_plasma.py``,
+whose cost is XLA compilation that a coarser equilibrium does not reduce.
 Commented optional objective terms are exercised by their physics/AD unit tests;
 this module keeps their example wiring explicit.
 """
