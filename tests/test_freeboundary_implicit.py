@@ -124,6 +124,50 @@ def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
     np.testing.assert_allclose(field_bar, -lam[0], rtol=1e-10)
 
 
+@pytest.mark.full
+def test_jitted_free_boundary_gradient_matches_the_eager_path():
+    """A jitted free-boundary objective runs and reproduces the eager gradient.
+
+    The test above stubs :func:`_projected_residual` out, so nothing exercised
+    the real closure under a trace.  Its memo keys on the mask bytes, which a
+    traced mask does not have, and every jitted free-boundary value-and-gradient
+    raised ``TracerArrayConversionError`` there before its first adjoint matvec.
+
+    Both calls start from the same hot state: the root is history-dependent at
+    a finite ``ftol`` (see the reproducibility test at the end of this file),
+    so a cold first call would compare two roots rather than two lanes.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([16]),
+        ftol_array=np.array([1.0e-7]), niter_array=np.array([2500]),
+    )
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+    cfg = make_free_boundary_config(
+        inp, field, ns=16, ftol=1.0e-7, max_iterations=2500,
+        adjoint_tol=1.0e-10, adjoint_maxiter=400,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current),
+    )
+
+    def objective(current):
+        state, _, _, _ = solve_free_boundary_implicit_status(params, current, cfg)
+        return jnp.mean(state.R_cos[-1] ** 2 + state.Z_sin[-1] ** 2)
+
+    current = jnp.asarray(field.extcur)
+    objective(current)
+    eager_value, eager_gradient = jax.value_and_grad(objective)(current)
+    jit_value, jit_gradient = jax.jit(jax.value_and_grad(objective))(current)
+    np.testing.assert_allclose(jit_value, eager_value, rtol=1.0e-12)
+    # Host and staged GCROT solve the same system to ``adjoint_tol``, not to
+    # machine precision, so their gradients agree to that solve tolerance.
+    np.testing.assert_allclose(jit_gradient, eager_gradient, rtol=1.0e-6,
+                               atol=1.0e-9 * float(jnp.linalg.norm(eager_gradient)))
+    # The eager memo still hits: equal mask content returns one closure.
+    mask = fbi._FREE_MASK_CACHE[fbi._mask_key(cfg)]
+    assert fbi._projected_residual(cfg, mask) is fbi._projected_residual(cfg, mask)
+
+
 def test_host_adjoint_best_effort_warns_instead_of_raising(monkeypatch):
     """A stalled Krylov solve is a warning under the opt-in policy, not a stop.
 
