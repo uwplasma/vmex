@@ -686,6 +686,11 @@ def test_finite_beta_free_boundary_single_stage_optimization(tmp_path):
         tmp_path, timeout=900)
     assert "True finite-beta NESTOR + ESSOS" in out
     assert re.search(r"f_boot = ([0-9.eE+-]+), beta = ([0-9.]+)%", out)
+    summary = json.loads((
+        tmp_path / "single_stage_free_boundary_optimization_finite_beta_summary.json"
+    ).read_text())
+    assert summary["met"] == (not summary["unmet"])
+    assert summary["met"] or "did NOT meet its stated targets" in out
     for name in ("wout_single_stage_free_boundary_finite_beta_optimized.nc",
                  "single_stage_free_boundary_finite_beta_optimization.png",
                  "single_stage_free_boundary_finite_beta_bootstrap_current.png"):

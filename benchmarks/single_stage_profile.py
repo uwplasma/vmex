@@ -49,6 +49,7 @@ REPO = Path(__file__).resolve().parents[1]
 EXAMPLES = {
     "fixed": "single_stage_optimization",
     "free": "single_stage_free_boundary_optimization",
+    "free_beta": "single_stage_free_boundary_optimization_finite_beta",
 }
 MODES = ("smoke", "full")
 #: Final values both the current and the baseline examples print.
