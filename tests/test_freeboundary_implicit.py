@@ -124,6 +124,22 @@ def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
     np.testing.assert_allclose(field_bar, -lam[0], rtol=1e-10)
 
 
+def test_projected_residual_memo_skips_a_traced_mask():
+    """The closure memo keys on mask bytes; a traced mask has none.
+
+    This is the fast guard for the line the stubbed test above never reaches:
+    the real :func:`_projected_residual` is called under ``jax.jit`` (enabled
+    for this module) with a traced mask, and eagerly with a concrete one.
+    """
+    cfg = make_free_boundary_config(lasym_free_input(DATA), lasym_free_field())
+    mask = {"rows": jnp.zeros((4, 3))}
+    eager = fbi._projected_residual(cfg, mask)
+    assert fbi._projected_residual(cfg, mask) is eager  # the eager memo hits
+    traced = []
+    jax.jit(lambda m: traced.append(fbi._projected_residual(cfg, m)) or 0.0)(mask)
+    assert len(traced) == 1 and traced[0] is not eager
+
+
 @pytest.mark.full
 def test_jitted_free_boundary_gradient_matches_the_eager_path():
     """A jitted free-boundary objective runs and reproduces the eager gradient.
