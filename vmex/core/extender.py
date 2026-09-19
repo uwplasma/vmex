@@ -1113,15 +1113,17 @@ class VmecExtender(MagneticField):
         if key not in self._plasma_fns:
             if any(other[1:] != key[1:] for other in self._plasma_fns):
                 self._plasma_fns.clear()  # a replaced field or plan: drop its kernels
+            function: Callable[..., Array]
             if name == "estimate":
                 from . import virtual_casing as vc
 
-                function = lambda xyz, B: vc.offsurface_error_estimate(  # noqa: E731
-                    field, xyz, B_plasma=B)
+                def function(xyz: Array, B: Array | None) -> Array:
+                    return vc.offsurface_error_estimate(field, xyz, B_plasma=B)
             elif plan is None:
                 function = field.B_plasma_xyz
             else:
-                function = lambda xyz: field.B_plasma_near_surface_xyz(xyz, plan)  # noqa: E731
+                def function(xyz: Array) -> Array:  # type: ignore[misc]
+                    return field.B_plasma_near_surface_xyz(xyz, plan)
             self._plasma_fns[key] = jax.jit(function)
         return self._plasma_fns[key]
 
