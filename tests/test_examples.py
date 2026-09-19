@@ -36,6 +36,7 @@ ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "vmex_fieldline_tracing_vacuum.py",
     EXAMPLES / "vmex_fieldline_tracing_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_optimization.py",
+    EXAMPLES / "optimization" / "single_stage_optimization_penalty.py",
     EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
@@ -830,6 +831,37 @@ def test_scalar_optimizer_examples(script_name, dependency, output, tmp_path):
     out = _run_example(EXAMPLES / "optimization" / script_name, tmp_path, timeout=1800)
     assert "final cost" in out
     assert (tmp_path / output).exists()
+
+
+@pytest.mark.full  # nightly: the penalized companion, one L-BFGS-B solve
+def test_fixed_boundary_single_stage_penalty(tmp_path):
+    """The simple companion runs the same physics with plain penalties.
+
+    It must fall and produce the same diagnostics as the augmented-Lagrangian
+    example; which of the two reaches the targets at full budget is recorded in
+    the examples README, not asserted here, because smoke mode reaches neither.
+    """
+    pytest.importorskip("essos")
+    out = _run_example(
+        EXAMPLES / "optimization" / "single_stage_optimization_penalty.py",
+        tmp_path, timeout=1800)
+    match = re.search(r"Objective: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    assert match is not None and float(match.group(2)) < float(match.group(1))
+    # One solve, no stage loop: the line that proves the machinery is gone.
+    assert re.search(r"\[solve\] \d+ L-BFGS-B iterations, \d+ trials, status ", out)
+    assert "[stage 1]" not in out
+    for diagnostic in ("B.n/B: area-weighted RMS", "Minimum coil-surface distance",
+                       "Minimum coil-coil distance", "Maximum curvature", "Coil lengths",
+                       "Minimum |iota| = ", "Aspect ratio = "):
+        assert diagnostic in out
+    summary = json.loads((tmp_path / "single_stage_penalty_summary.json").read_text())
+    assert summary["smoke"] and summary["trials"] >= 1
+    assert summary["met"] == (not summary["unmet"])
+    assert "stages" not in summary
+    for name in ("wout_single_stage_penalty_optimized.nc",
+                 "single_stage_penalty_objectives.png",
+                 "coils_single_stage_penalty_optimized.vtu"):
+        assert (tmp_path / name).exists()
 
 
 @pytest.mark.full  # nightly: exact VMEX+ESSOS reverse-mode graph and ParaView output
