@@ -10,6 +10,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from jax.flatten_util import ravel_pytree
+from scipy.sparse.linalg import LinearOperator, gcrotmk
 
 from tests.test_lasym_free_case import lasym_free_field, lasym_free_input
 from vmex.core import implicit as im
@@ -429,8 +431,39 @@ def test_ncsx_free_boundary_current_gradient_matches_resolve_finite_difference()
 
 
 @pytest.mark.full
-def test_free_boundary_pressure_gradient_matches_resolve_finite_difference():
-    """The solved objective retains the edge-pressure normalization response."""
+def test_free_boundary_pressure_gradient_is_certified_at_one_root():
+    """The pressure response, certified without re-solving anything.
+
+    This test used to central-difference two independent re-solves in
+    ``am[0]``.  That measured the solver's stopping point, not a derivative:
+    on this deck every solve halts at its iteration budget with fsq 1.1e-9 to
+    2.1e-9 against ftol 1e-9, each in a slightly different place, and the
+    objective inherits the difference.  Over a +/-1e-3 scan the objective
+    departs from its own best-fit line by 4.8e-6, 155 times the 3.1e-8 that
+    the true derivative contributes across that span, and the re-solve
+    difference returns +7.4e-4, +3.0e-3, -1.8e-4, +5.7e-4 and -2.1e-3 at
+    steps 1e-2, 3e-3, 1e-3, 3e-4 and 1e-4 -- ten to two hundred times the
+    adjoint, with the sign flipping at random.  Making the root a function of
+    the parameters removed the run-to-run spread but not that roughness, and
+    no step size recovers an asymptotic regime, so the re-solve difference is
+    retired here rather than re-tuned.  Do not restore it without first
+    converging this deck about a thousand times below where it stops.
+
+    What is certified instead, both at one saved root:
+
+    1.  ``dF/dp`` in the pressure direction against a central difference *of
+        the residual itself*.  Nothing is solved, so the only error is FD
+        truncation, and the gate is 1e-6 relative.
+    2.  The assembled gradient against forward-adjoint duality: the adjoint
+        contraction against ``<dJ/dz, dz>`` with ``(dF/dz) dz = -(dF/dp) dp``
+        from an independent forward solve of the same linear system.  The two
+        sides differ only by how far each Krylov solve ran, so the gate is
+        the configuration's own ``adjoint_tol`` with the same factor of ten
+        that ``_adjoint_acceptance`` uses; measured here at 7.8e-8.
+
+    Together these fix the sign, the scale and the ``presf_ns_scale`` term of
+    the pressure entry without depending on where the nonlinear solver stops.
+    """
     inp = dataclasses.replace(
         lasym_free_input(DATA), ns_array=np.array([8]),
         ftol_array=np.array([1.0e-9]), niter_array=np.array([4000]))
@@ -442,28 +475,56 @@ def test_free_boundary_pressure_gradient_matches_resolve_finite_difference():
         field_from_parameters=lambda current: dataclasses.replace(
             field, extcur=current), device="cpu")
 
-    def objective(relative_am0):
-        trial = dataclasses.replace(
-            params, am=params.am.at[0].set(params.am[0] * (1.0 + relative_am0)))
-        state, _, _, _ = solve_free_boundary_implicit_status(
-            trial, field.extcur, cfg)
-        return jnp.mean(state.R_cos[-1]**2 + state.Z_sin[-1]**2)
+    (_state, status, _fsq, _ratio), saved = fbi._solve_status_fwd(
+        params, field.extcur, cfg)
+    assert int(status) == 0
+    prm, current, solved, mask, rcon0, zcon0, _ = saved
+    frozen = jax.lax.stop_gradient(solved)
+    project = im._dof_projector(cfg.implicit, mask)
+    z_star = project(solved)
+    residual = fbi._projected_residual(cfg, mask)
+    direction = dataclasses.replace(
+        jax.tree.map(jnp.zeros_like, prm),
+        am=jnp.zeros_like(prm.am).at[0].set(prm.am[0]))
 
-    derivative = jax.grad(objective)(0.0)
-    step = 1.0e-2
-    values = []
-    for sign in (-1.0, 1.0):
-        # Independent cold re-solves prevent continuation history from
-        # manufacturing agreement with the implicit derivative.
-        fbi._FREE_HOT_CACHE.pop(cfg, None)
-        values.append(objective(sign * step))
-    finite_difference = (values[1] - values[0]) / (2.0 * step)
+    def lane(parameters):
+        return residual(z_star, parameters, current, frozen, rcon0, zcon0)
 
-    assert abs(float(finite_difference)) > 1.0e-7
-    # This ns=8 campaign is limited by the independently reconverged nonlinear
-    # roots. The missing presf_ns_scale term changes the response by O(1).
+    analytic = jax.jvp(lane, (prm,), (direction,))[1]
+    assert float(im._tree_norm(analytic)) > 0.0
+    step = 1.0e-4
+    shifted = [jax.tree.map(lambda a, b, sign=sign: a + sign * step * b,
+                            prm, direction) for sign in (1.0, -1.0)]
+    finite = jax.tree.map(
+        lambda plus, minus: (plus - minus) / (2.0 * step),
+        lane(shifted[0]), lane(shifted[1]))
+    assert float(im._tree_norm(jax.tree.map(
+        jnp.subtract, analytic, finite))) <= 1.0e-6 * float(
+            im._tree_norm(analytic))
+
+    state_bar = jax.grad(
+        lambda s: jnp.mean(s.R_cos[-1] ** 2 + s.Z_sin[-1] ** 2))(solved)
+    params_bar, _ = fbi._solve_bwd_impl(
+        cfg, (prm, current, solved, mask, rcon0, zcon0), state_bar)
+    adjoint = float(sum(
+        jnp.vdot(left, right) for left, right in zip(
+            jax.tree.leaves(params_bar), jax.tree.leaves(direction))))
+    assert adjoint > 0.0  # more pressure pushes the boundary outward
+
+    rhs_flat = ravel_pytree(project(state_bar))[0]
+    forcing, unravel = ravel_pytree(jax.tree.map(jnp.negative, analytic))
+    operator = LinearOperator(
+        (forcing.size,) * 2,
+        matvec=lambda value: np.asarray(ravel_pytree(jax.jvp(
+            lambda z: residual(z, prm, current, frozen, rcon0, zcon0),
+            (z_star,), (unravel(jnp.asarray(value, forcing.dtype)),))[1])[0]),
+        dtype=np.asarray(forcing).dtype)
+    tangent, info = gcrotmk(operator, np.asarray(forcing), rtol=1.0e-9,
+                            atol=0.0, m=30, k=5, maxiter=300)
+    assert info == 0
+    forward = float(np.dot(np.asarray(rhs_flat), tangent))
     np.testing.assert_allclose(
-        derivative, finite_difference, rtol=1.0e-1, atol=1.0e-7)
+        adjoint, forward, rtol=10.0 * cfg.implicit.adjoint_tol, atol=0.0)
 
 
 @pytest.mark.full
