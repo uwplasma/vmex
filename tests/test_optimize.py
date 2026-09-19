@@ -928,7 +928,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     assert "converged equilibrium" in problem.metadata["derivative_description"]
     assert problem.metadata["weight_semantics"] == "cost"
     assert problem.metadata["implicit_jacobian_method"] == "block_tridiagonal"
-    assert problem.metadata["jacobian_batch_size"] == 1
+    assert problem.metadata["jacobian_batch_size"] == "auto"
     assert problem.metadata["input_resolution"] == {
         "mpol": inp.mpol,
         "ntor": inp.ntor,

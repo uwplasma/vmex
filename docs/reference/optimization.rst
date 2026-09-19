@@ -225,11 +225,15 @@ explicit host method    raise :class:`vmex.core.errors.AdjointSolveError`
 ``jax_residual_jac``     select the reverse branch inside the JAX graph
 ======================  ================================================
 
-``jacobian_batch_size=1`` minimizes cold compilation complexity and peak
-memory for the usual QI/QS problems through ``max_mode=5``.
-``jacobian_batch_size="auto"`` may improve warm throughput in long campaigns
-that reuse one array shape. ``adjoint_tol`` and ``adjoint_maxiter`` control the
-certified Krylov solves.
+``jacobian_batch_size="auto"`` is the default. It sizes from the available
+memory the batch of probe rows the block system assembles at once, which is
+where a block Jacobian spends its time: a warm QI Jacobian measures 3.0-3.9 s
+at ``1`` against 0.83 s at ``"auto"`` and 0.56 s at ``None``, and the Jacobian
+agrees to 6e-11 across every width from ``(1, 1)`` to ``(150, 150)``. Set
+``jacobian_batch_size=1`` for the serial pass when peak memory, not
+throughput, is the binding constraint; ``None`` is the widest and the most
+memory-hungry. ``adjoint_tol`` and ``adjoint_maxiter`` control the certified
+Krylov solves.
 
 ``derivative_method="finite_difference"`` accepts opaque host objectives. It
 uses independent equilibrium probes and ``workers=None`` automatically uses
