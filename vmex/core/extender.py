@@ -19,6 +19,7 @@ import numpy as np
 
 from .errors import VmecNumericalError
 from .mgrid import MgridField, read_mgrid
+from .profiles import MU0
 
 Array = Any
 PlasmaMode = Literal["auto", "include", "vacuum"]
@@ -935,17 +936,47 @@ class VmecInteriorField(MagneticField):
             dof_names=dof_names)
 
 
+#: Below this, a normalized pressure or current is this equilibrium's own noise.
+_SOURCE_FLOOR = 1.0e-8
+
+
+def _scalar(wout: Any, name: str) -> float:
+    """Return a finite wout scalar, or ``0.0`` when it is absent or not finite."""
+    value = getattr(wout, name, None)
+    if value is None:
+        return 0.0
+    number = float(np.asarray(value).reshape(()) if np.ndim(value) else value)
+    return number if np.isfinite(number) else 0.0
+
+
 def _has_plasma_sources(wout: Any) -> bool:
-    """Detect pressure or current sources, including zero-net-current cases."""
-    for name in ("betatotal", "wp", "ctor"):
-        value = getattr(wout, name, 0.0)
-        if value is not None and abs(float(value)) > 1.0e-14:
+    """Detect pressure or current sources, including zero-net-current cases.
+
+    The quantities are dimensional, so they are judged against this
+    equilibrium's own field scale rather than an absolute floor.  A fixed
+    ``1e-14`` misfires: the shipped vacuum QA wout carries ``ctor`` of 1.5e-10 A
+    and up to 9.9e4 A/m^2 of axis noise in the current-density spectra, so
+    ``plasma="auto"`` ran virtual casing on a vacuum equilibrium and returned
+    quadrature noise where the answer is zero.  The current-density spectra are
+    no longer consulted at all: near the axis they are noise with no scale of
+    their own to be judged against, and a pressure or a net current is what
+    actually sources an exterior plasma field.
+    """
+    if abs(_scalar(wout, "betatotal")) > _SOURCE_FLOOR:
+        return True
+    field = abs(_scalar(wout, "b0")) or abs(_scalar(wout, "volavgB"))
+    pressure = getattr(wout, "presf", None)
+    if pressure is not None and np.any(np.isfinite(np.asarray(pressure, dtype=float))):
+        peak = float(np.nanmax(np.abs(np.asarray(pressure, dtype=float))))
+        if peak > 0.0 and (field <= 0.0
+                           or 2.0 * MU0 * peak / field**2 > _SOURCE_FLOOR):
             return True
-    for name in ("presf", "currumnc", "currvmnc", "currumns", "currvmns"):
-        value = getattr(wout, name, None)
-        if value is not None and np.any(np.abs(np.asarray(value)) > 1.0e-14):
-            return True
-    return False
+    current, reference = _scalar(wout, "ctor"), abs(_scalar(wout, "rbtor"))
+    if current != 0.0 and (reference <= 0.0
+                           or MU0 * abs(current) / (2.0 * np.pi * reference)
+                           > _SOURCE_FLOOR):
+        return True
+    return abs(_scalar(wout, "wp")) > 0.0 and field <= 0.0
 
 
 def _mgrid_from_wout(wout: Any, base_dir: Path | None) -> MgridField | None:

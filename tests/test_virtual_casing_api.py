@@ -63,6 +63,22 @@ def test_exterior_source_grid_is_sized_from_the_boundary():
     with jax.disable_jit(False), pytest.raises(TypeError, match="traced boundary"):
         jax.jit(traced)(1.2237)
 
+    # The two facades that build an exterior field from a problem or an
+    # equilibrium used to hard-code 32 x 32, bypassing this rule entirely.
+    import inspect
+
+    from vmex.core.problem import VmecProblem
+
+    signature = inspect.signature(VmecProblem.exterior_field)
+    assert signature.parameters["nphi"].default is None
+    assert signature.parameters["ntheta"].default is None
+    assert "accuracy_check" in signature.parameters
+    from vmex.core import optimize as opt
+
+    factory = inspect.getsource(opt).split("def exterior_field_factory", 1)[1]
+    assert "_source_nphi_for_digits(inp, digits)" in factory
+    assert 'kwargs.pop("accuracy_check"' in factory
+
     # from_state feeds it a VmecInput instead of a wout; the same boundary has
     # to give the same answer through either, or a live equilibrium and its
     # exported wout would be extended on different grids.

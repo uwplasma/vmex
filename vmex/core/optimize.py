@@ -3448,7 +3448,8 @@ def _least_squares_implicit(
         x: np.ndarray, *, newton_iterations: int = 10
     ) -> Equilibrium:
         """Materialize the exact accepted state already used by the objective."""
-        from .extender import VmecExtender, VmecInteriorField
+        from .extender import (
+            VmecExtender, VmecInteriorField, _source_nphi_for_digits)
 
         x = np.asarray(x, dtype=float)
         params_np = jax.tree.map(
@@ -3483,13 +3484,19 @@ def _least_squares_implicit(
         def exterior_field_factory(**kwargs):
             from . import virtual_casing as vc
 
-            nphi = int(kwargs.pop("nphi", 32)); ntheta = int(kwargs.pop("ntheta", 32))
+            nphi = kwargs.pop("nphi", None); ntheta = kwargs.pop("ntheta", None)
+            accuracy_check = kwargs.pop("accuracy_check", "warn")
             external_field = kwargs.pop("external_field", None)
             external_parameters = kwargs.pop("external_parameters", None)
             external_field_from_parameters = kwargs.pop(
                 "external_field_from_parameters", None)
             external_dof_names = tuple(kwargs.pop("external_dof_names", ()))
             digits = int(kwargs.pop("digits", 6)); levels = kwargs.pop("levels", None)
+            # The boundary-sized source grid of the VmecExtender classmethods,
+            # not a fixed 32: a high-aspect boundary needs far more.
+            chosen = _source_nphi_for_digits(inp, digits)
+            nphi = chosen if nphi is None else int(nphi)
+            ntheta = chosen if ntheta is None else int(ntheta)
             chunk_size = kwargs.pop("chunk_size", "auto")
             target_chunk_size = kwargs.pop("target_chunk_size", "auto")
             plasma = kwargs.pop("plasma", "auto")
@@ -3512,7 +3519,8 @@ def _least_squares_implicit(
                 external_field_from_parameters=external_field_from_parameters,
                 external_dof_names=external_dof_names,
                 digits=digits, levels=levels, chunk_size=chunk_size,
-                target_chunk_size=target_chunk_size, dof_names=tuple(names))
+                target_chunk_size=target_chunk_size, dof_names=tuple(names),
+                accuracy_check=accuracy_check)
 
         return Equilibrium(
             inp=result_input,

@@ -901,9 +901,10 @@ class VmecProblem(FunctionProblem):
         external_parameters: Array | None = None,
         external_field_from_parameters: Callable[[Array], Any] | None = None,
         external_dof_names: tuple[str, ...] = (),
-        nphi: int = 32,
-        ntheta: int = 32,
+        nphi: int | None = None,
+        ntheta: int | None = None,
         digits: int = 6,
+        accuracy_check: str = "warn",
         levels: tuple[tuple[int, int], ...] | None = None,
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
@@ -914,7 +915,10 @@ class VmecProblem(FunctionProblem):
         from coil filaments.  The returned field follows the stored-point API:
         ``field.set_points(xyz); field.B(); field.B_vjp(cotangent)``.
         Set the source and target chunk sizes only to cap virtual-casing
-        memory; ``"auto"`` is the tuned default.
+        memory; ``"auto"`` is the tuned default.  ``nphi`` and ``ntheta``
+        default to the boundary-sized source grid the ``VmecExtender``
+        classmethods use, so a high-aspect boundary is not extended on a grid
+        four orders too coarse for its ``digits``; pass them to override.
         """
         state_runtime = self.metadata.get("jax_state_runtime")
         inp = self.metadata.get("input")
@@ -922,14 +926,18 @@ class VmecProblem(FunctionProblem):
             raise AttributeError(
                 "this problem does not expose a differentiable equilibrium field")
         from . import virtual_casing as vc
-        from .extender import VmecExtender
+        from .extender import VmecExtender, _source_nphi_for_digits
 
         parameters = self._x(x)
+        chosen = _source_nphi_for_digits(inp, digits)
+        source_nphi = chosen if nphi is None else int(nphi)
+        source_ntheta = chosen if ntheta is None else int(ntheta)
 
         def surface_data(p):
             state, runtime = state_runtime(p)
             return vc.surface_field_data_from_state(
-                inp, state, runtime=runtime, nphi=nphi, ntheta=ntheta)
+                inp, state, runtime=runtime,
+                nphi=source_nphi, ntheta=source_ntheta)
 
         return VmecExtender.from_parameterized_surface_data(
             surface_data, parameters, external_field=external_field,
@@ -937,7 +945,8 @@ class VmecProblem(FunctionProblem):
             external_field_from_parameters=external_field_from_parameters,
             external_dof_names=external_dof_names,
             digits=digits, levels=levels, chunk_size=chunk_size,
-            target_chunk_size=target_chunk_size, dof_names=self.dof_names)
+            target_chunk_size=target_chunk_size, dof_names=self.dof_names,
+            accuracy_check=accuracy_check)
 
     def interior_field(
         self, x: Array, *, newton_iterations: int = 10

@@ -619,6 +619,20 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
 
     assert ext._has_plasma_sources(SimpleNamespace(
         betatotal=0.0, wp=0.0, ctor=0.0, presf=np.array([0.0, 1.0])))
+    # Dimensional quantities are judged against this equilibrium's own field
+    # scale. A vacuum wout carries a residual net current and axis noise in the
+    # current-density spectra; an absolute floor called that a plasma source and
+    # ran virtual casing on a vacuum equilibrium.
+    vacuum = SimpleNamespace(betatotal=1.0e-30, wp=0.0, ctor=1.5e-10, rbtor=2.4,
+                             b0=1.2, presf=np.zeros(4),
+                             currumnc=np.full(4, 9.9e4))
+    assert not ext._has_plasma_sources(vacuum)
+    assert ext._has_plasma_sources(SimpleNamespace(
+        betatotal=5.0e-3, wp=1.0, ctor=1.0e4, rbtor=2.4, b0=1.2,
+        presf=np.full(4, 1.0e4)))
+    # A net current large enough to matter is caught with beta still zero.
+    assert ext._has_plasma_sources(
+        SimpleNamespace(betatotal=0.0, wp=0.0, ctor=1.0e5, rbtor=2.4, b0=1.2))
     data = SimpleNamespace(nextcur=2, mgrid_mode="R", raw_coil_cur=[2.0, 4.0])
     captured = {}
     monkeypatch.setattr(ext, "read_mgrid", lambda path: data)
