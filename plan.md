@@ -1692,3 +1692,18 @@ error estimates and ratios are not affected.
   seed solve is known to converge on. A joint least-squares driver (plan C3)
   would change the optimizer, not the constraint handling: its residuals are
   still weighted, so it would inherit the penalized form's threshold offset.
+- **The single stage is three self-contained scripts, not a shared module.** A
+  first pass factored the seed, the coil model and the verify/save/plot tail
+  into `_single_stage.py`, which cut each script from ~490 to ~190 lines. That
+  was the wrong trade for a teaching example: a reader then has to hold two
+  files at once. Reverted, following simsopt's `stage_two_optimization.py`
+  convention instead -- a docstring that states the objective, a labelled block
+  of input parameters closed by an explicit end-of-inputs banner, then sections
+  for the equilibrium, the coils, the objective, the optimizer, the run and the
+  results. `single_stage_optimization.py` is the L-BFGS-B penalty form (447
+  lines), `_auglag.py` the augmented Lagrangian (509) and `_least_squares.py`
+  the joint Gauss-Newton form (462). Length is not the metric; being readable
+  end to end in one file is.
+- **Outstanding on that branch:** none of the three has been re-verified at full
+  budget since the rewrite, and the finite-beta and the two free-boundary
+  single-stage examples still need the same treatment.
