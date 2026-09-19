@@ -35,8 +35,8 @@ FIXED ladder has no floor and must converge at 1e-8.
 
 from __future__ import annotations
 
+import importlib.util
 import re
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -49,7 +49,10 @@ jax = pytest.importorskip("jax")
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
+# Spelled as a path, not a sys.path search: the builder is a hard dependency
+# of this gate, and an import name alone reads as an optional one (it was
+# once dropped as orphaned, and only the weekly lane noticed).
+BUILDER_PATH = ROOT / "tools" / "build_qi_sheet_mgrid.py"
 
 from vmex.core.input import VmecInput  # noqa: E402
 from vmex.core.multigrid import (  # noqa: E402
@@ -139,7 +142,12 @@ def _wout_parity_aspect(inp: VmecInput, result) -> float:
 @pytest.fixture(scope="module")
 def sheet_field(tmp_path_factory):
     """Build the public QI sheet field once (~3 min, deterministic)."""
-    import build_qi_sheet_mgrid as builder
+    spec = importlib.util.spec_from_file_location(
+        "build_qi_sheet_mgrid", BUILDER_PATH)
+    assert spec is not None and spec.loader is not None, (
+        f"the gate's field builder is missing: {BUILDER_PATH.name}")
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
 
     outdir = tmp_path_factory.mktemp("qi_sheet")
     meta = builder.build(outdir)
