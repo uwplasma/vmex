@@ -21,7 +21,7 @@ import pytest
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp  # noqa: E402
 
-from vmex.core.errors import MgridNotFoundError  # noqa: E402
+from vmex.core.errors import MgridNotFoundError, VmecNumericalError  # noqa: E402
 from vmex.core import extender as ext  # noqa: E402
 from vmex.core.extender import MagneticField, VmecExtender, VmecInteriorField  # noqa: E402
 from vmex.core.mgrid import (  # noqa: E402
@@ -433,6 +433,40 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
     shaped_mapped_B = jax.vmap(lambda point: jax.jacfwd(shaped_tracer.to_xyz)(point)
         @ shaped_tracer.B_contravariant(point))(coordinates)
     np.testing.assert_allclose(shaped_mapped_B, shaped_field.B(), rtol=2e-11, atol=2e-11)
+
+    # The derivative methods differentiate explicitly in flux coordinates at
+    # the root; nesting jacfwd through the implicitly differentiated inversion
+    # is the independent route to the same numbers.
+    shaped_points = points + jnp.array([[0.01, -0.02, 0.015], [-0.02, 0.01, 0.01]])
+    def shaped_B(point):
+        return ext._interior_coordinates_and_B(
+            shaped_spectra, point[None], newton_iterations=10)[1][0]
+    nested = shaped_B
+    with jax.disable_jit(False):
+        for method in (shaped_field.gradB, shaped_field.gradgradB,
+                       shaped_field.gradgradgradB):
+            nested = jax.jacfwd(nested)
+            expected_nested = jax.jit(jax.vmap(nested))(shaped_points)
+            np.testing.assert_allclose(
+                method(shaped_points), expected_nested, rtol=1e-10,
+                atol=1e-10 * float(jnp.abs(expected_nested).max()))
+
+        # Too few Newton steps from the geometric guess must not pass for a
+        # field value; a point outside the plasma is still a quiet NaN.
+        # The geometric guess is exact for a circle, so elongate the section.
+        elongated = dict(shaped_spectra, zmns=1.8 * shaped_spectra["zmns"])
+        inside = ext._flux_coordinates_to_xyz(elongated, coordinates)
+        starved = VmecInteriorField(elongated, newton_iterations=1)
+        with pytest.raises(VmecNumericalError, match="did not converge at 2 of 2"):
+            starved.B(inside)
+        with pytest.raises(VmecNumericalError, match="newton_iterations=1"):
+            starved.flux_coordinates(inside)
+        assert jnp.all(jnp.isnan(jax.jit(starved.B)(inside)))  # traced: cannot raise
+        np.testing.assert_allclose(
+            VmecInteriorField(elongated).flux_coordinates(inside), coordinates,
+            rtol=0, atol=2e-12)
+        outside = jnp.array([[major_radius + 1.5 * minor_radius, 0.0, 0.0]])
+        assert jnp.all(jnp.isnan(shaped_field.B(outside)))
 
     # Known flux coordinates avoid a fragile generic inverse-map guess for
     # strongly shaped cross-sections while Cartesian derivatives stay fixed

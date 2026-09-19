@@ -17,6 +17,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from .errors import VmecNumericalError
 from .mgrid import MgridField, read_mgrid
 
 Array = Any
@@ -185,7 +186,7 @@ class MagneticField:
         self._parameter_data_fn = parameter_data_fn
         self._B_from_data = B_from_data
         self._parameter_data_vjp = None
-        self._data_pullbacks: dict[int, Callable[[Any, Array], Any]] = {}
+        self._data_pullbacks: dict[Any, Callable[..., Any]] = {}
         self._spatial_fns: dict[int, Callable[[Array], Array]] = {}
         self.dof_names = tuple(dof_names or ())
         direct = parameterized_B_fn is not None
@@ -335,6 +336,19 @@ class MagneticField:
                 f"third field derivative returned shape {value.shape}, expected {expected}")
         return value
 
+    def _data_and_pullback(self) -> tuple[Any, Callable[[Any], Any]]:
+        """``parameter_data_fn`` at the parameters and its pullback, each compiled once.
+
+        Left eager, the forward pass of ``jax.vjp`` dispatches the whole
+        parameters-to-data graph one primitive at a time, and so does every
+        later call of the pullback.
+        """
+        if self._parameter_data_vjp is None:
+            data_fn = cast(Callable[[Array], Any], self._parameter_data_fn)
+            data, pullback = jax.jit(lambda p: jax.vjp(data_fn, p))(self._parameters)
+            self._parameter_data_vjp = (data, jax.jit(pullback))
+        return cast(tuple[Any, Callable[[Any], Any]], self._parameter_data_vjp)
+
     def _parameter_vjp(self, order: int, cotangent: Array) -> Array:
         if self._parameters is None:
             raise RuntimeError(
@@ -349,11 +363,7 @@ class MagneticField:
             return jax.vmap(function)(points)
 
         if self._parameter_data_fn is not None:
-            if self._parameter_data_vjp is None:
-                self._parameter_data_vjp = jax.vjp(
-                    self._parameter_data_fn, self._parameters)
-            data, pullback = cast(tuple[Any, Callable[[Any], Any]],
-                                  self._parameter_data_vjp)
+            data, pullback = self._data_and_pullback()
             B_from_data = cast(Callable[[Any, Array], Array], self._B_from_data)
 
             def quantity_from_data(field_data):
@@ -520,32 +530,88 @@ def _full_mesh_contravariant(coefficients: Array, modes: Array) -> Array:
     return jnp.concatenate((axis[None], interior, edge[None]), axis=0)
 
 
-def _interior_coordinates_and_B(
+def _geometry(spectra: dict[str, Array], s: Array, theta: Array, phi: Array):
+    """Return ``R, Z`` and their ``s``, ``theta`` and ``phi`` derivatives at one point."""
+    xm, xn = spectra["xm"], spectra["xn"]
+    rc, rcs = _radial_value_and_derivative(spectra["rmnc"], s, xm)
+    zs, zss = _radial_value_and_derivative(spectra["zmns"], s, xm)
+    phase = xm * theta - xn * phi
+    cosine, sine = jnp.cos(phase), jnp.sin(phase)
+    R, Z = jnp.vdot(rc, cosine), jnp.vdot(zs, sine)
+    Rs, Zs = jnp.vdot(rcs, cosine), jnp.vdot(zss, sine)
+    Rt, Zt = jnp.vdot(-xm * rc, sine), jnp.vdot(xm * zs, cosine)
+    Rp, Zp = jnp.vdot(xn * rc, sine), jnp.vdot(-xn * zs, cosine)
+    return R, Z, Rs, Zs, Rt, Zt, Rp, Zp
+
+
+def _position_and_field(spectra: dict[str, Array], coordinates: Array) -> tuple[Array, Array]:
+    """Cartesian position and ``B`` at one ``(rho, theta, phi)``, ``rho = sqrt(s)``."""
+    rho, theta, phi = coordinates
+    s = rho**2
+    xmn, xnn = spectra["xmn"], spectra["xnn"]
+    R, Z, _Rs, _Zs, Rt, Zt, Rp, Zp = _geometry(spectra, s, theta, phi)
+    bu_coeff, _ = _radial_value_and_derivative(
+        _full_mesh_contravariant(spectra["bsupu"], xmn), s, xmn)
+    bv_coeff, _ = _radial_value_and_derivative(
+        _full_mesh_contravariant(spectra["bsupv"], xmn), s, xmn)
+    nyquist_phase = xmn * theta - xnn * phi
+    bu = jnp.vdot(bu_coeff, jnp.cos(nyquist_phase))
+    bv = jnp.vdot(bv_coeff, jnp.cos(nyquist_phase))
+    cphi, sphi = jnp.cos(phi), jnp.sin(phi)
+    e_theta = jnp.array((Rt * cphi, Rt * sphi, Zt))
+    e_phi = jnp.array((Rp * cphi - R * sphi, Rp * sphi + R * cphi, Zp))
+    return jnp.array((R * cphi, R * sphi, Z)), bu * e_theta + bv * e_phi
+
+
+def _inverse3(matrix: Array) -> Array:
+    """Adjugate inverse of one 3 x 3 matrix: a few products under nested AD."""
+    (a, b, c), (d, e, f), (g, h, i) = matrix
+    cofactors = jnp.array(((e * i - f * h, c * h - b * i, b * f - c * e),
+                           (f * g - d * i, a * i - c * g, c * d - a * f),
+                           (d * h - e * g, b * g - a * h, a * e - b * d)))
+    return cofactors / (a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g))
+
+
+def _cartesian_derivative(
+    spectra: dict[str, Array], order: int, coordinates: Array, valid: Array,
+) -> Array:
+    """``order``-th Cartesian derivative of ``B`` at ``(rho, theta, phi)`` points.
+
+    In flux coordinates ``w`` a Cartesian derivative is ``d/dw`` times the
+    inverse Jacobian of the position, so every order is an explicit function of
+    ``w``.  Neither the coordinate inversion nor its implicit-function rule is
+    nested into the derivative graph, which roughly halves what XLA compiles.
+    """
+    position = lambda w: _position_and_field(spectra, w)[0]  # noqa: E731
+    function = lambda w: _position_and_field(spectra, w)[1]  # noqa: E731
+    for _ in range(order):
+        function = (lambda previous: lambda w: jax.jacfwd(previous)(w) @ _inverse3(
+            jax.jacfwd(position)(w)))(function)
+    value = jax.vmap(function)(coordinates)
+    return jnp.where(valid.reshape(valid.shape + (1,) * (value.ndim - 1)), value, jnp.nan)
+
+
+def _invert_coordinates(
     spectra: dict[str, Array], points: Array, *, newton_iterations: int,
     initial_flux: Array | None = None,
 ) -> tuple[Array, Array]:
-    """Invert VMEC coordinates and synthesize the interior Cartesian field."""
+    """Invert Cartesian points to ``(rho, theta, phi)`` and flag the valid ones.
+
+    ``(rho, theta)`` is an implicit function of the point and of the spectra,
+    so its derivatives come from the residual at the root through a 2 x 2
+    solve (:func:`jax.lax.custom_root`), at every order.  The Newton loop
+    itself is never differentiated: it runs to a tolerance, at most
+    ``newton_iterations`` steps plus one polishing step.
+    """
     points = _check_points(points)
-    if initial_flux is not None:
-        initial_flux = _check_points(initial_flux, "initial flux coordinates")
-        if initial_flux.shape != points.shape:
-            raise ValueError("initial_flux and points must have the same shape")
-    xm, xn = spectra["xm"], spectra["xn"]
-    xmn, xnn = spectra["xmn"], spectra["xnn"]
-    rmnc, zmns = spectra["rmnc"], spectra["zmns"]
-    bu_full = _full_mesh_contravariant(spectra["bsupu"], xmn)
-    bv_full = _full_mesh_contravariant(spectra["bsupv"], xmn)
+    if initial_flux is None:
+        initial_flux = jnp.full_like(points, jnp.nan)
+    initial_flux = _check_points(initial_flux, "initial flux coordinates")
+    if initial_flux.shape != points.shape:
+        raise ValueError("initial_flux and points must have the same shape")
 
     def geometry(s, theta, phi):
-        rc, rcs = _radial_value_and_derivative(rmnc, s, xm)
-        zs, zss = _radial_value_and_derivative(zmns, s, xm)
-        phase = xm * theta - xn * phi
-        cosine, sine = jnp.cos(phase), jnp.sin(phase)
-        R, Z = jnp.vdot(rc, cosine), jnp.vdot(zs, sine)
-        Rs, Zs = jnp.vdot(rcs, cosine), jnp.vdot(zss, sine)
-        Rt, Zt = jnp.vdot(-xm * rc, sine), jnp.vdot(xm * zs, cosine)
-        Rp, Zp = jnp.vdot(xn * rc, sine), jnp.vdot(-xn * zs, cosine)
-        return R, Z, Rs, Zs, Rt, Zt, Rp, Zp
+        return _geometry(spectra, s, theta, phi)
 
     def one_point(point, initial):
         x, y, z = point
@@ -572,50 +638,73 @@ def _interior_coordinates_and_B(
         rho0 = jnp.where(jnp.isfinite(initial[0]), jnp.sqrt(initial[0]), geometric_rho)
         theta0 = jnp.where(jnp.isfinite(initial[1]), initial[1], geometric_theta)
 
-        def update(_, coordinates):
+        def residual(coordinates):
+            R, Z, *_ = geometry(coordinates[0] ** 2, coordinates[1], phi)
+            return jnp.stack((R - radius, Z - z))
+
+        def newton_step(coordinates):
             rho, theta = coordinates
-            s = rho**2
-            R, Z, Rs, Zs, Rt, Zt, *_ = geometry(s, theta, phi)
+            R, Z, Rs, Zs, Rt, Zt, *_ = geometry(rho**2, theta, phi)
             Rrho, Zrho = 2.0 * rho * Rs, 2.0 * rho * Zs
             determinant = Rrho * Zt - Rt * Zrho
             safe = jnp.where(jnp.abs(determinant) > 1.0e-14, determinant, 1.0e-14)
             residual_R, residual_Z = R - radius, Z - z
             drho = (Zt * residual_R - Rt * residual_Z) / safe
             dt = (-Zrho * residual_R + Rrho * residual_Z) / safe
-            return jnp.clip(rho - drho, 1.0e-12, jnp.sqrt(1.05)), jnp.mod(
-                theta - dt, 2.0 * jnp.pi)
+            return jnp.stack((jnp.clip(rho - drho, 1.0e-12, jnp.sqrt(1.05)),
+                              jnp.mod(theta - dt, 2.0 * jnp.pi)))
 
-        rho, theta = jax.lax.fori_loop(
-            0, int(newton_iterations), update,
-            (jnp.clip(rho0, 1.0e-12, 1.0), theta0))
+        def solve(_, guess):
+            def unconverged(carry):
+                count, coordinates = carry
+                return (count < int(newton_iterations)) & (
+                    jnp.linalg.norm(residual(coordinates)) > 1.0e-9)
+
+            _, coordinates = jax.lax.while_loop(
+                unconverged, lambda carry: (carry[0] + 1, newton_step(carry[1])),
+                (0, guess))
+            return newton_step(coordinates)  # quadratic polish down to round-off
+
+        def tangent_solve(linearized, rhs):
+            (a, c), (b, d) = (linearized(jnp.array((1.0, 0.0), dtype=rhs.dtype)),
+                              linearized(jnp.array((0.0, 1.0), dtype=rhs.dtype)))
+            determinant = a * d - b * c
+            safe = jnp.where(jnp.abs(determinant) > 1.0e-14, determinant, 1.0e-14)
+            return jnp.stack((d * rhs[0] - b * rhs[1], a * rhs[1] - c * rhs[0])) / safe
+
+        rho, theta = jax.lax.custom_root(
+            residual, jnp.stack((jnp.clip(rho0, 1.0e-12, 1.0), theta0)),
+            solve, tangent_solve)
         s = rho**2
-        R, Z, _Rs, _Zs, Rt, Zt, Rp, Zp = geometry(s, theta, phi)
-        bu_coeff, _ = _radial_value_and_derivative(bu_full, s, xmn)
-        bv_coeff, _ = _radial_value_and_derivative(bv_full, s, xmn)
-        nyquist_phase = xmn * theta - xnn * phi
-        bu = jnp.vdot(bu_coeff, jnp.cos(nyquist_phase))
-        bv = jnp.vdot(bv_coeff, jnp.cos(nyquist_phase))
-        cphi, sphi = jnp.cos(phi), jnp.sin(phi)
-        e_theta = jnp.array((Rt * cphi, Rt * sphi, Zt))
-        e_phi = jnp.array((Rp * cphi - R * sphi, Rp * sphi + R * cphi, Zp))
-        field = bu * e_theta + bv * e_phi
-        error = jnp.hypot(R - radius, Z - z)
+        error = jnp.linalg.norm(residual(jnp.stack((rho, theta))))
         valid = (s >= -1.0e-8) & (s <= 1.0 + 1.0e-8) & (error <= 1.0e-7)
-        return jnp.array((s, theta, phi)), jnp.where(valid, field, jnp.nan)
+        return jnp.stack((rho, theta, phi)), valid
 
-    if initial_flux is None:
-        initial_flux = jnp.full_like(points, jnp.nan)
-    coordinates, field = jax.vmap(one_point)(points, initial_flux)
-    return coordinates, field
+    return jax.vmap(one_point)(points, initial_flux)
+
+
+def _interior_coordinates_and_B(
+    spectra: dict[str, Array], points: Array, *, newton_iterations: int,
+    initial_flux: Array | None = None,
+) -> tuple[Array, Array]:
+    """Invert VMEC coordinates and synthesize the interior Cartesian field."""
+    coordinates, valid = _invert_coordinates(
+        spectra, points, newton_iterations=newton_iterations, initial_flux=initial_flux)
+    field = _cartesian_derivative(spectra, 0, coordinates, valid)
+    return coordinates.at[:, 0].set(coordinates[:, 0] ** 2), field
 
 
 class VmecInteriorField(MagneticField):
     """VMEC magnetic field at Cartesian points inside the plasma boundary.
 
-    Cartesian points are inverted to ``(s, theta, phi)`` with a fixed-count
-    differentiable Newton solve.  Spectral angular evaluation and radial
-    interpolation then recover ``B``.  Points outside the last closed surface
-    return NaNs; use :class:`VmecExtender` there.
+    Cartesian points are inverted to ``(s, theta, phi)`` by a Newton solve run
+    to a tolerance, differentiated implicitly at its root rather than through
+    its iterations.  Spectral angular evaluation and radial interpolation then
+    recover ``B``, and its Cartesian derivatives are taken explicitly in flux
+    coordinates.  Points outside the last closed surface return NaNs; use
+    :class:`VmecExtender` there.  An eager call whose inversion did not
+    converge inside the plasma raises
+    :class:`~vmex.core.errors.VmecNumericalError` instead.
 
     ``s`` is the normalised toroidal flux ``psi / psi_edge`` on ``[0, 1]``,
     and ``theta`` (poloidal) and ``phi`` (geometric toroidal) are in radians.
@@ -642,11 +731,12 @@ class VmecInteriorField(MagneticField):
         (``lasym = False``) families are evaluated.  Values may be JAX
         tracers, which is what makes the whole field differentiable.
     newton_iterations:
-        Number of Newton steps taken to invert ``(R, Z) -> (s, theta)`` at
-        every query point.  The count is fixed rather than
-        residual-driven so the loop stays jit- and grad-transparent; raise
-        it for strongly shaped boundaries whose geometric first guess is
-        poor.
+        Largest number of Newton steps taken to invert ``(R, Z) -> (s,
+        theta)`` at a query point; the loop stops as soon as the position
+        residual falls below ``1e-9`` m and then polishes once.  The loop is
+        never differentiated, so the bound costs nothing in derivative
+        graphs; raise it for strongly shaped boundaries whose geometric
+        first guess is poor.
     parameters, parameterized_B_fn, parameter_data_fn, B_from_data, dof_names:
         Optimizable-parameter arguments forwarded unchanged to
         :class:`MagneticField`; see its documentation.  On the factored
@@ -670,7 +760,7 @@ class VmecInteriorField(MagneticField):
         self.spectra = spectra
         self.newton_iterations = int(newton_iterations)
         self._points_flux: Array | None = None
-        self._seeded_fns: dict[int, Callable[[Array, Array], Array]] = {}
+        self._derivative_fns: dict[tuple[int, int, int], Callable[[Array, Array], Array]] = {}
 
         def B_fn(points):
             return _interior_coordinates_and_B(
@@ -696,99 +786,97 @@ class VmecInteriorField(MagneticField):
         super().set_points(_flux_coordinates_to_xyz(self.spectra, self._points_flux))
         return self
 
-    def _stored_flux_quantity(self, order: int) -> Array:
-        """Evaluate a Cartesian field derivative from known flux seeds.
+    def _seeds(self, points: Array | None) -> tuple[Array, Array]:
+        """Cartesian points and their Newton seeds (NaN selects the geometric guess)."""
+        if points is None and self._points_flux is not None:
+            return self._require_points(), self._points_flux
+        xyz = self._require_points() if points is None else _check_points(points)
+        return xyz, jnp.full_like(xyz, jnp.nan)
 
-        Compiled once per order and cached on this field, for the reason given
-        in :meth:`MagneticField._spatial_derivative`.
-        """
-        xyz, seeds = self._require_points(), cast(Array, self._points_flux)
-        evaluate = self._seeded_fns.get(order)
+    def _evaluate(self, order: int, points: Array | None) -> Array:
+        """``order``-th Cartesian derivative of ``B``, compiled once per order."""
+        xyz, seeds = self._seeds(points)
+        spectra, iterations = self.spectra, self.newton_iterations
+        key = (order, id(spectra), iterations)  # a reassigned attribute recompiles
+        evaluate = self._derivative_fns.get(key)
         if evaluate is None:
-            spectra, iterations = self.spectra, self.newton_iterations
 
-            def point_field(point, seed):
-                return _interior_coordinates_and_B(
-                    spectra, point[None, :], newton_iterations=iterations,
-                    initial_flux=seed[None, :])[1][0]
+            def evaluate(xyz, seeds):
+                return _cartesian_derivative(spectra, order, *_invert_coordinates(
+                    spectra, xyz, newton_iterations=iterations, initial_flux=seeds))
 
-            def differentiated(previous):
-                """One more Cartesian derivative of ``previous`` at fixed seed."""
-                def stepped(point, seed):
-                    return jax.jacfwd(lambda value: previous(value, seed))(point)
-                return stepped
+            evaluate = self._derivative_fns[key] = jax.jit(evaluate)
+        return self._loud(evaluate(xyz, seeds), xyz, seeds)
 
-            function = point_field
-            for _ in range(order):
-                function = differentiated(function)
-            evaluate = self._seeded_fns[order] = jax.jit(jax.vmap(function))
-        return evaluate(xyz, seeds)
+    def _loud(self, value: Array, xyz: Array, seeds: Array) -> Array:
+        """Raise when an eager result is NaN because the inversion stalled.
+
+        A point outside the plasma still returns NaN.  One whose inverted ``s``
+        lies inside ``[0, 1]`` but whose position misses the query point did
+        not converge, and that must not pass for a field value.  Traced calls
+        cannot raise and keep the NaN.
+        """
+        if isinstance(value, jax.core.Tracer) or not bool(jnp.isnan(value).any()):
+            return value
+        coordinates, valid = _invert_coordinates(
+            self.spectra, xyz, newton_iterations=self.newton_iterations,
+            initial_flux=seeds)
+        stalled = ~valid & (coordinates[:, 0] ** 2 <= 1.0 + 1.0e-8)
+        if bool(stalled.any()):
+            raise VmecNumericalError(
+                f"the Cartesian-to-flux Newton inversion did not converge at "
+                f"{int(stalled.sum())} of {stalled.size} interior points within "
+                f"newton_iterations={self.newton_iterations}",
+                hint="raise newton_iterations, or pass flux coordinates with "
+                "set_points_flux()")
+        return value
 
     def _parameter_vjp(self, order: int, cotangent: Array) -> Array:
-        """Differentiate at fixed Cartesian points using known flux seeds."""
-        if self._points_flux is None or self._parameter_data_fn is None:
+        """Differentiate at fixed Cartesian points, the root following the spectra."""
+        if self._parameter_data_fn is None:
             return super()._parameter_vjp(order, cotangent)
         if self._parameters is None:
             raise RuntimeError(
                 "this field was not constructed with optimizable parameters")
-        points, seeds = self._require_points(), self._points_flux
-        if self._parameter_data_vjp is None:
-            self._parameter_data_vjp = jax.vjp(
-                self._parameter_data_fn, self._parameters)
-        data, pullback = cast(tuple[Any, Callable[[Any], Any]],
-                              self._parameter_data_vjp)
+        points, seeds = self._seeds(None)
+        data, pullback = self._data_and_pullback()
+        iterations = self.newton_iterations
 
-        def quantity_from_data(field_data):
-            def point_field(point, seed):
-                return _interior_coordinates_and_B(
-                    field_data, point[None, :],
-                    newton_iterations=self.newton_iterations,
-                    initial_flux=seed[None, :])[1][0]
+        def quantity_from_data(field_data, points, seeds):
+            # Only first-order implicit differentiation of the root is needed:
+            # the derivative order lives in the explicit flux-coordinate graph.
+            return _cartesian_derivative(field_data, order, *_invert_coordinates(
+                field_data, points, newton_iterations=iterations, initial_flux=seeds))
 
-            function = point_field
-            for _ in range(order):
-                previous = function
-                function = lambda point, seed, previous=previous: jax.jacfwd(  # noqa: E731
-                    lambda value: previous(value, seed))(point)
-            return jax.vmap(function)(points, seeds)
-
-        expected = jax.eval_shape(quantity_from_data, data).shape
+        expected = points.shape + (3,) * order
         vector = jnp.asarray(cotangent)
         if vector.shape != expected:
             raise ValueError(
                 f"cotangent has shape {vector.shape}, expected {expected}")
-        cache_key = order + 4
+        cache_key = (order, iterations)  # distinct from the base class's integer keys
         if cache_key not in self._data_pullbacks:
             self._data_pullbacks[cache_key] = jax.jit(jax.grad(
-                lambda field_data, weight: jnp.vdot(
-                    quantity_from_data(field_data), weight),
+                lambda field_data, weight, points, seeds: jnp.vdot(
+                    quantity_from_data(field_data, points, seeds), weight),
                 argnums=0, allow_int=True))
-        data_bar = self._data_pullbacks[cache_key](data, vector)
+        data_bar = self._data_pullbacks[cache_key](data, vector, points, seeds)
         return pullback(data_bar)[0]
 
     def B(self, points: Array | None = None) -> Array:
-        """Return Cartesian ``B``, reusing known flux coordinates when set."""
-        if points is not None or self._points_flux is None:
-            return super().B(points)
-        return self._stored_flux_quantity(0)
+        """Return Cartesian ``B``, seeded by stored flux coordinates when known."""
+        return self._evaluate(0, points)
 
     def gradB(self, points: Array | None = None) -> Array:
         """Return ``dB_i/dx_j``, seeded by stored flux coordinates when known."""
-        if points is not None or self._points_flux is None:
-            return super().gradB(points)
-        return self._stored_flux_quantity(1)
+        return self._evaluate(1, points)
 
     def gradgradB(self, points: Array | None = None) -> Array:
-        """Return the second Cartesian derivative of ``B`` at stored points."""
-        if points is not None or self._points_flux is None:
-            return super().gradgradB(points)
-        return self._stored_flux_quantity(2)
+        """Return the second Cartesian derivative of ``B``."""
+        return self._evaluate(2, points)
 
     def gradgradgradB(self, points: Array | None = None) -> Array:
-        """Return the third Cartesian derivative of ``B`` at stored points."""
-        if points is not None or self._points_flux is None:
-            return super().gradgradgradB(points)
-        return self._stored_flux_quantity(3)
+        """Return the third Cartesian derivative of ``B``."""
+        return self._evaluate(3, points)
 
     def get_points_flux(self) -> Array:
         """Return stored points as VMEC ``(s, theta, phi)`` coordinates."""
@@ -802,9 +890,11 @@ class VmecInteriorField(MagneticField):
         """Return inverted ``(s, theta, phi)`` at explicit or stored points."""
         if points is None and self._points_flux is not None:
             return self._points_flux
-        xyz = self._require_points() if points is None else _check_points(points)
-        return _interior_coordinates_and_B(
-            self.spectra, xyz, newton_iterations=self.newton_iterations)[0]
+        xyz, seeds = self._seeds(points)
+        coordinates, field = _interior_coordinates_and_B(
+            self.spectra, xyz, newton_iterations=self.newton_iterations)
+        self._loud(field, xyz, seeds)
+        return coordinates
 
     @classmethod
     def from_state(cls, inp: Any, state: Any, *, runtime: Any = None,
@@ -913,7 +1003,13 @@ def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
         inboard = float((coefficients * np.cos(poloidal * np.pi)).sum())
         minor = 0.5 * (outboard - inboard)
         major = 0.5 * (outboard + inboard)
-    except Exception:
+    except jax.errors.JAXTypeError as error:
+        # Falling back here would silently change the source resolution.
+        raise TypeError(
+            "the virtual-casing source grid is a static choice and cannot be "
+            "derived from a traced boundary; pass nphi and ntheta explicitly"
+        ) from error
+    except (AttributeError, IndexError, TypeError, ValueError):
         return _DEFAULT_SOURCE_NPHI
     if not (np.isfinite(minor) and np.isfinite(major)) or minor <= 0.0:
         return _DEFAULT_SOURCE_NPHI
@@ -988,23 +1084,46 @@ class VmecExtender(MagneticField):
         self.plasma_field = plasma_field
         self.near_surface_plan = near_surface_plan
         self.accuracy_check = accuracy_check
+        self._plasma_fns: dict[tuple[str, int, int], Callable[..., Array]] = {}
 
         def B_fn(points: Array) -> Array:
             value = jnp.zeros_like(points)
             if self.external_field is not None:
                 value = value + _field_cartesian(self.external_field, points)
             if self.plasma_field is not None:
-                if self.near_surface_plan is None:
-                    value = value + self.plasma_field.B_plasma_xyz(points)
-                else:
-                    value = value + self.plasma_field.B_plasma_near_surface_xyz(
-                        points, self.near_surface_plan)
+                value = value + self._plasma("B")(points)
             return value
 
         # Differentiate the same Cartesian field graph used by B().  This is
         # both simpler and avoids the cylindrical-axis singularity in older
         # virtual_casing_jax ``gradB_plasma_xyz`` implementations.
         super().__init__(B_fn)
+
+    def _plasma(self, name: str) -> Callable[..., Array]:
+        """Compiled virtual-casing field (``"B"``) or its error estimate.
+
+        This is VMEX's own JAX graph, about a thousand primitives: dispatched
+        eagerly one call costs a quarter second, compiled two milliseconds.
+        The key is the identity of the plasma field and continuation plan, so
+        replacing either attribute rebuilds the callable; the external field
+        stays unwrapped because a user callable need not be traceable.
+        """
+        field, plan = self.plasma_field, self.near_surface_plan
+        key = (name, id(field), id(plan))
+        if key not in self._plasma_fns:
+            if any(other[1:] != key[1:] for other in self._plasma_fns):
+                self._plasma_fns.clear()  # a replaced field or plan: drop its kernels
+            if name == "estimate":
+                from . import virtual_casing as vc
+
+                function = lambda xyz, B: vc.offsurface_error_estimate(  # noqa: E731
+                    field, xyz, B_plasma=B)
+            elif plan is None:
+                function = field.B_plasma_xyz
+            else:
+                function = lambda xyz: field.B_plasma_near_surface_xyz(xyz, plan)  # noqa: E731
+            self._plasma_fns[key] = jax.jit(function)
+        return self._plasma_fns[key]
 
     @property
     def accuracy_check(self) -> AccuracyCheck:
@@ -1053,16 +1172,11 @@ class VmecExtender(MagneticField):
         if self.near_surface_plan is not None:
             raise RuntimeError(
                 "the near-surface continuation has no quadrature error estimate")
-        from . import virtual_casing as vc
-
         xyz = self._require_points() if points is None else _check_points(points)
-        return vc.offsurface_error_estimate(self.plasma_field, xyz)
+        return self._plasma("estimate")(xyz, None)
 
     def _check_accuracy(self, xyz: Array, plasma: Array) -> None:
-        from . import virtual_casing as vc
-
-        estimate = np.asarray(vc.offsurface_error_estimate(
-            self.plasma_field, xyz, B_plasma=plasma))
+        estimate = np.asarray(self._plasma("estimate")(xyz, plasma))
         digits = int(self.plasma_field.config.digits)
         missed = ~(estimate <= 10.0 ** (-digits))
         if not np.any(missed):

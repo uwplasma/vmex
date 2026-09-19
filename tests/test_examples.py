@@ -932,13 +932,13 @@ def test_field_query_examples_cover_inside_outside_and_vjps() -> None:
     assert "ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json" in exterior
 
 
-# Wall time here is XLA compilation of a few very large graphs: the order-3
-# forward derivative plus one parameter-adjoint per derivative order, over a
-# Newton-unrolled spectral inverse map. It is set by that structure, not by
-# resolution or by the number of evaluated points, so a coarser smoke
-# equilibrium does not move it. Cold, on two cores: 5.5 min (interior) and
-# 5.9 min (exterior); this lane runs with ``-n 2``, so a four-core runner gives
-# each test about that share.
+# Wall time here is XLA compilation of a few large graphs: the order-3 forward
+# derivative plus one parameter adjoint per order. It is set by that structure,
+# not by resolution or by the number of evaluated points, so a coarser smoke
+# equilibrium does not move it. Taking those derivatives in flux coordinates at
+# the root, rather than through the inverse map, cut it roughly in half: cold,
+# on two cores, 2.8 min (interior) and 3.8 min (exterior), from 5.5 and 5.9.
+# This lane runs with ``-n 2``, so a four-core runner gives each test that share.
 @pytest.mark.full  # nightly: two bounded high-order field/VJP compilations
 @pytest.mark.parametrize(("script", "message"), [
     ("vmex_get_B_gradB.py", "gradgradgradB VJP shapes"),
@@ -948,8 +948,14 @@ def test_field_query_examples_run(script, message, tmp_path):
     if "outside" in script:
         pytest.importorskip("essos")
         pytest.importorskip("virtual_casing_jax")
-    out = _run_example(EXAMPLES / script, tmp_path, timeout=900)
+    out = _run_example(EXAMPLES / script, tmp_path, timeout=600)
     assert message in out and "dof_names =" in out
+    # A clean exit is not a field: a stalled inversion used to print NaN here.
+    for label in (r"B \[T\]", r"\|B\| \[T\]", "largest VJP entries"):
+        line = re.search(rf"^{label} = (.*)$", out, flags=re.MULTILINE)
+        assert line is not None, label
+        values = [float(v) for v in re.findall(r"[-+]?(?:\d[\d.]*(?:e[-+]?\d+)?|nan|inf)", line.group(1))]
+        assert values and np.all(np.isfinite(values)) and np.any(np.abs(values) > 0.0), line.group(0)
 
 
 def test_fieldline_example_uses_vmex_virtual_casing_and_actual_essos_coils() -> None:
@@ -993,8 +999,10 @@ def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
         assert "_summary.json" in source
 
 
-# Cold, on two cores, the finite-beta script takes 1.9 min; most of it is the
+# Cold, on two cores, the finite-beta script takes 1.4 min; most of it is the
 # virtual-casing and tracing compilations, and this lane runs with ``-n 2``.
+# Nothing here changed, so this budget stays where it is: 300 s is the value
+# that timed out on a runner.
 @pytest.mark.full  # nightly: two bounded ESSOS tracing integrations
 @pytest.mark.parametrize(("script", "message", "output"), [
     ("vmex_fieldline_tracing_vacuum.py", "VMEX exterior API outside", "vmex_fieldline_tracing_vacuum.png"),

@@ -79,3 +79,5 @@ print("gradB, gradgradB, gradgradgradB shapes =",
 print("dof_names =", outside.dof_names)
 print("B, gradB, gradgradB, gradgradgradB VJP shapes =",
       dBdx.shape, dgradBdx.shape, d2Bdx.shape, d3Bdx.shape)
+print("largest VJP entries =",
+      [float(jnp.abs(vjp).max()) for vjp in (dBdx, dgradBdx, d2Bdx, d3Bdx)])
