@@ -226,8 +226,9 @@ four. The default ``nphi = ntheta = 32`` on a QA configuration with
 :math:`R \approx 1` m has :math:`h \approx 0.1` m, about 0.6 minor radii.
 
 The requested ``digits`` does not bound the returned error. The schedule
-stops, target by target, at the first level whose double-layer self-test
-passes, and that test can pass for a target whose field is still wrong. On the
+refines, target by target, until the achieved-error estimate below meets the
+tolerance, but it cannot refine past its finest level, and the estimate does
+not see truncation of the source data on that grid itself. On the
 vacuum deck ``input.LandremanPaul2021_QA_lowres`` (``ctor`` of order
 :math:`10^{-11}` A, so the exact plasma field outside is zero) the returned
 field has these median | maximum errors relative to ``volavgB``, for 40
@@ -270,13 +271,12 @@ three finest-level spacings.
 Eager :meth:`~vmex.core.extender.VmecExtender.B` calls therefore check an
 estimate of the returned error,
 :meth:`~vmex.core.extender.VmecExtender.B_error_estimate`
-(:func:`~vmex.core.virtual_casing.offsurface_error_estimate`). It reproduces
-the schedule's choice of level and reports, per point, the difference between
-the returned value and the finest level when the schedule stopped early, and
-otherwise the larger of the finest level's double-layer error and the square
-of the relative change between the last two levels (halving the spacing
-squares the trapezoid error factor). Errors are relative to the RMS of
-:math:`|B|` on the surface. When any point exceeds :math:`10^{-\mathrm{digits}}`,
+(:func:`~vmex.core.virtual_casing.offsurface_error_estimate`). Since
+virtual-casing-jax 0.0.6 the same estimate also chooses the schedule's level,
+so the two can no longer disagree; it reports, per point, the larger of the
+returned level's double-layer error and the square of the relative change
+between the last two levels (halving the spacing squares the trapezoid error
+factor). Errors are relative to the RMS of :math:`|B|` on the surface. When any point exceeds :math:`10^{-\mathrm{digits}}`,
 ``B`` emits :class:`~vmex.core.extender.ExteriorFieldAccuracyWarning`, or raises
 :class:`~vmex.core.extender.ExteriorFieldAccuracyError` with
 ``accuracy_check="raise"``; ``accuracy_check="off"`` skips the estimate. The
@@ -289,9 +289,10 @@ six distances, and the torus oracle on two schedules from 0.25 to 4 finest
 spacings) no target that passed the estimate had an error above
 :math:`1.5\times10^{-4}`, no target with an error below :math:`3\times10^{-5}`
 was flagged, and the error was within 1.7 times the estimate for nine targets
-in ten and within 21 times for 99 in 100. The schedule's own self-test passed
-11 of the same targets with errors above :math:`3\times10^{-4}`, one of them
-at 0.30. The estimate does not see truncation of the source data on the finest
+in ten and within 21 times for 99 in 100. The double-layer self-test that
+chose the level before virtual-casing-jax 0.0.6 passed 11 of the same targets
+with errors above :math:`3\times10^{-4}`, one of them at 0.30, which is why
+the estimate now chooses the level. The estimate does not see truncation of the source data on the finest
 grid itself: at d = a with N = 64 the error reached 26 times the estimate for
 one target in ten, while staying below :math:`3\times10^{-4}`.
 

@@ -77,7 +77,7 @@ neoclassical = [
 # equilibrium adjoint. Version 0.0.5 provides the reusable surface-precision
 # and near-surface plans used by exterior tracing.
 freeb = [
-    "virtual-casing-jax>=0.0.5",
+    "virtual-casing-jax>=0.0.6",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
@@ -148,7 +148,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.5
+# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.6
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is
