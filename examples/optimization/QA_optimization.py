@@ -115,30 +115,50 @@ monitor = opt.OptimizationMonitor(stream=None)
 ### Run the optimization ######################################################
 
 equilibrium = opt.solve_equilibrium(inp)
+# Stages that share a boundary resolution share ONE problem. A max_mode stage
+# only frees more of the same boundary harmonics, so problem.subproblem() cuts
+# the stage out of a problem built at the largest max_mode of its resolution
+# group and freezes the rest; every jitted residual, Jacobian and predictor
+# graph is then traced and compiled once for the whole group. Rebuilding per
+# stage instead is a cache miss by construction -- the decision vector changes
+# length, although MINIMUM_MPOL keeps every array shape inside the solve
+# identical -- and on the shipped ladder that recompilation is about half the
+# run. A stage that raises mpol still starts a new group.
+resolution_of = {max_mode: max(max_mode + 2, MINIMUM_MPOL) for max_mode in MAX_MODES}
+group_max_mode = {
+    max_mode: max(other for other in MAX_MODES
+                  if resolution_of[other] == resolution_of[max_mode])
+    for max_mode in MAX_MODES}
+problem, mpol = None, None
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA stage, max_mode = {max_mode} =====")
-    mpol = max(max_mode + 2, MINIMUM_MPOL)
-    inp = replace(inp, delt=0.5).change_resolution(
-        mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-    # A RuntimeWarning about uncertified Jacobian columns is expected once the
-    # optimizer leaves the seed and needs no action; see examples/README.md.
-    problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms, max_mode=max_mode,
-        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
-        ess_alpha=ESS_ALPHA, restart_from=equilibrium)
-    print(f"dof_names = {problem.dof_names}")
-    monitor.problem = problem
-    if not ci_smoke:
-        problem.compile_residual_and_jacobian()
-    step = PARAMETER_STEP * problem.scales
+    if resolution_of[max_mode] != mpol:
+        mpol = resolution_of[max_mode]
+        inp = replace(inp, delt=0.5).change_resolution(
+            mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+        # A RuntimeWarning about uncertified Jacobian columns is expected once
+        # the optimizer leaves the seed and needs no action; see
+        # examples/README.md.
+        problem = opt.VmecProblem.from_tuples(
+            inp, objective_function_terms, max_mode=group_max_mode[max_mode],
+            vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
+            ess_alpha=ESS_ALPHA, restart_from=equilibrium)
+        x = problem.x0
+        monitor.problem = problem
+        if not ci_smoke:
+            problem.compile_residual_and_jacobian()
+    stage = problem.subproblem(max_mode=max_mode, x=x)
+    print(f"dof_names = {stage.dof_names}")
+    step = PARAMETER_STEP * stage.scales
     result = least_squares(
-        problem.residual, problem.x0, jac=problem.residual_jac,
+        stage.residual, stage.x0, jac=stage.residual_jac,
         x_scale=step, max_nfev=max_nfev,
-        bounds=(problem.x0 - MAX_PARAMETER_CHANGE * step,
-                problem.x0 + MAX_PARAMETER_CHANGE * step),
+        bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
+                stage.x0 + MAX_PARAMETER_CHANGE * step),
         ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
-    inp = problem.input_from_x(result.x)
-    equilibrium = problem.equilibrium_from_x(result.x)
+    x = stage.embed(result.x)
+    inp = problem.input_from_x(x)
+    equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)
 
 ### Check the result ##########################################################

@@ -775,3 +775,96 @@ def test_evaluation_progress_reports_slow_calls_and_stays_quiet_otherwise(capsys
                             residual_jac=lambda _x: np.ones((1, 1)))
     quiet.residual(np.array([0.0]))
     assert capsys.readouterr().out == ""
+
+
+def _staged_problem():
+    """Four variables, a residual and Jacobian that depend on every one."""
+    weights = np.array([1.0, 2.0, 3.0, 4.0])
+
+    def residual_and_jac(x):
+        return weights * x, np.diag(weights)
+
+    return FunctionProblem(
+        [1.0, 2.0, 3.0, 4.0],
+        residual_and_jac=residual_and_jac,
+        names=("a", "b", "c", "d"),
+        bounds=(np.full(4, -9.0), np.arange(4.0)),
+        scales=[1.0, 2.0, 4.0, 8.0],
+        metadata={"shared": []},
+    )
+
+
+def test_subproblem_freezes_everything_outside_the_active_set():
+    """A sub-problem optimizes its own variables and holds the rest, and the
+    full vector it embeds into differs from the base in exactly those."""
+    problem = _staged_problem()
+    base = np.array([10.0, 20.0, 30.0, 40.0])
+    sub = problem.subproblem(["a", "c"], x=base)
+
+    assert tuple(sub.dof_names) == ("a", "c")
+    np.testing.assert_array_equal(sub.x0, [10.0, 30.0])
+    np.testing.assert_array_equal(sub.scales, [1.0, 4.0])
+    np.testing.assert_array_equal(sub.free_indices, [0, 2])
+    np.testing.assert_array_equal(sub.frozen_indices, [1, 3])
+    assert sub.frozen_names == ("b", "d")
+    np.testing.assert_array_equal(sub.frozen_values, [20.0, 40.0])
+    np.testing.assert_array_equal(sub.bounds[0], [-9.0, -9.0])
+    np.testing.assert_array_equal(sub.bounds[1], [0.0, 2.0])
+
+    full = sub.embed([-1.0, -3.0])
+    np.testing.assert_array_equal(full, [-1.0, 20.0, -3.0, 40.0])
+    # The point of the view: nothing outside the active set may move, and the
+    # check is on the embedded vector rather than on the sub-vector, because a
+    # leak here would change a design silently.
+    np.testing.assert_array_equal(full[sub.frozen_indices], sub.frozen_values)
+
+    residual, jacobian = sub.residual_and_jac([-1.0, -3.0])
+    np.testing.assert_allclose(residual, problem.residual(full))
+    assert jacobian.shape == (4, 2)
+    np.testing.assert_allclose(jacobian, problem.residual_jac(full)[:, [0, 2]])
+
+
+def test_subproblem_accepts_indices_and_shares_the_parent_metadata():
+    problem = _staged_problem()
+    sub = problem.subproblem([3, 1])
+    assert tuple(sub.dof_names) == ("d", "b")  # the caller's order, not sorted
+    np.testing.assert_array_equal(sub.x0, [4.0, 2.0])
+    np.testing.assert_array_equal(sub.embed([7.0, 8.0]), [1.0, 8.0, 3.0, 7.0])
+    assert sub.parent is problem
+    # The shared mutable counters a monitor reads stay one object.
+    assert sub.metadata["shared"] is problem.metadata["shared"]
+
+
+def test_subproblem_rejects_a_malformed_active_set():
+    problem = _staged_problem()
+    with pytest.raises(ValueError, match="not decision variables"):
+        problem.subproblem(["a", "zzz"])
+    with pytest.raises(ValueError, match="repeats"):
+        problem.subproblem([1, 1])
+    with pytest.raises(ValueError, match="out-of-range"):
+        problem.subproblem([0, 4])
+    with pytest.raises(TypeError, match="all names or all indices"):
+        problem.subproblem(["a", 2])
+    with pytest.raises(ValueError, match="shape"):
+        problem.subproblem(["a"], x=[1.0, 2.0])
+    sub = problem.subproblem(["a", "c"])
+    with pytest.raises(ValueError, match="expected 2 free variables"):
+        sub.embed([1.0])
+
+
+def test_subproblem_carries_scalar_bounds_and_rejects_a_wrong_length():
+    def value_and_grad(x):
+        return 0.5 * float(x @ x), np.asarray(x, dtype=float)
+
+    problem = FunctionProblem(
+        [1.0, 2.0, 3.0], value_and_grad=value_and_grad, names=("a", "b", "c"),
+        bounds=(-1.0, 1.0))
+    sub = problem.subproblem(["b"])
+    assert sub.bounds == (-1.0, 1.0)
+    value, gradient = sub.value_and_grad([5.0])
+    assert value == pytest.approx(0.5 * (1.0 + 25.0 + 9.0))
+    np.testing.assert_allclose(gradient, [5.0])
+
+    problem.bounds = (np.zeros(2), np.ones(2))
+    with pytest.raises(ValueError, match="one entry per decision variable"):
+        problem.subproblem(["b"])

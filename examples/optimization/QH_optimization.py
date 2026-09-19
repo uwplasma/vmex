@@ -121,11 +121,18 @@ monitor = opt.OptimizationMonitor()
 ### Run the optimization ######################################################
 
 equilibrium = opt.solve_equilibrium(inp)
+# Consecutive stages that share a boundary resolution and a term list share ONE
+# problem: problem.subproblem() frees that stage's boundary harmonics and
+# freezes the higher ones, so the whole group is traced and compiled once.
+# Rebuilding per stage is a cache miss by construction (the decision vector
+# changes length, although MINIMUM_MPOL keeps every array shape inside the
+# solve identical), and that recompilation is about half of a shipped ladder
+# run. A stage that raises mpol -- or, with USE_TRIAL_STABILITY, one that adds
+# residual rows -- starts a new group.
+resolution_of = {max_mode: max(max_mode + 2, MINIMUM_MPOL) for max_mode in MAX_MODES}
+problem, mpol, built_terms = None, None, None
 for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
     print(f"\n===== QH stage, max_mode = {max_mode} =====")
-    mpol = max(max_mode + 2, MINIMUM_MPOL)
-    inp = replace(inp, delt=0.5).change_resolution(
-        mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
     stage_terms = objective_function_terms
     if USE_TRIAL_STABILITY and stage > 0:
         # Normalize each dimensional row at the established QH seed, so the
@@ -138,25 +145,38 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
             (trial_dmerc, 0.0, stability_weights), (trial_dr, 0.0, stability_weights)]
         print(f"Adding trial-pressure stability on s >= {STABILITY_MIN_S:.1f}; "
               "weights rise smoothly toward the edge.")
-    # A RuntimeWarning about uncertified Jacobian columns is expected once the
-    # optimizer leaves the seed and needs no action; see examples/README.md.
-    problem = opt.VmecProblem.from_tuples(
-        inp, stage_terms, max_mode=max_mode,
-        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
-        ess_alpha=ESS_ALPHA, restart_from=equilibrium)
-    print(f"dof_names = {problem.dof_names}")
-    monitor.problem = problem
-    if not ci_smoke:
-        problem.compile_residual_and_jacobian()
-    step = PARAMETER_STEP * problem.scales
+    if resolution_of[max_mode] != mpol or stage_terms is not built_terms:
+        mpol, built_terms = resolution_of[max_mode], stage_terms
+        group = max_mode  # this group runs while the resolution holds -- and,
+        if not USE_TRIAL_STABILITY:  # with trial stability, ends here, since
+            for other in MAX_MODES[stage:]:  # every later stage adds rows
+                if resolution_of[other] != mpol:
+                    break
+                group = max(group, other)
+        inp = replace(inp, delt=0.5).change_resolution(
+            mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+        # A RuntimeWarning about uncertified Jacobian columns is expected once
+        # the optimizer leaves the seed and needs no action; see
+        # examples/README.md.
+        problem = opt.VmecProblem.from_tuples(inp, stage_terms, max_mode=group,
+            vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
+            restart_from=equilibrium)
+        x = problem.x0
+        monitor.problem = problem
+        if not ci_smoke:
+            problem.compile_residual_and_jacobian()
+    stage_problem = problem.subproblem(max_mode=max_mode, x=x)
+    print(f"dof_names = {stage_problem.dof_names}")
+    step = PARAMETER_STEP * stage_problem.scales
     result = least_squares(
-        problem.residual, problem.x0, jac=problem.residual_jac,
-        x_scale=step, max_nfev=max_nfev,
-        bounds=(problem.x0 - MAX_PARAMETER_CHANGE * step,
-                problem.x0 + MAX_PARAMETER_CHANGE * step),
-        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
-    inp = problem.input_from_x(result.x)
-    equilibrium = problem.equilibrium_from_x(result.x)
+        stage_problem.residual, stage_problem.x0, jac=stage_problem.residual_jac,
+        x_scale=step, bounds=(stage_problem.x0 - MAX_PARAMETER_CHANGE * step,
+                              stage_problem.x0 + MAX_PARAMETER_CHANGE * step),
+        max_nfev=max_nfev, ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor
+    )
+    x = stage_problem.embed(result.x)
+    inp = problem.input_from_x(x)
+    equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)
 
 ### Check the result ##########################################################

@@ -22,6 +22,36 @@ Array = Any
 HostFun = Callable[[np.ndarray], Any]
 
 
+def _slice_bounds(bounds: Any, free: np.ndarray, size: int) -> Any:
+    """Restrict carried box constraints to the ``free`` decision variables.
+
+    Scalar entries apply to every variable and are carried through; a
+    per-variable array is sliced.  Anything else is rejected rather than
+    handed on at the wrong length, which an optimizer would apply to the
+    wrong variables.
+    """
+    if bounds is None:
+        return None
+
+    def one(entry: Any) -> Any:
+        array = np.asarray(entry, dtype=float)
+        if array.ndim == 0:
+            return entry
+        if array.size == size:
+            return array.reshape(-1)[free]
+        raise ValueError(
+            "bounds must be scalar or carry one entry per decision variable "
+            f"({size}), got {array.size}")
+
+    lower = getattr(bounds, "lb", None)
+    if lower is not None:
+        return type(bounds)(one(lower), one(bounds.ub))
+    if isinstance(bounds, (tuple, list)) and len(bounds) == 2:
+        return (one(bounds[0]), one(bounds[1]))
+    raise TypeError(
+        "bounds must be None, a (lower, upper) pair, or expose lb/ub")
+
+
 def _run_with_progress(
     function: Callable[[], Any],
     *,
@@ -516,6 +546,189 @@ class FunctionProblem:
             stream=stream,
         )
 
+    def _embedding(
+        self, active: Any, x: Array | None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Callable[[Array], np.ndarray]]:
+        """Resolve ``active`` and build the frozen-dof embedding for it.
+
+        Returns ``(base, free, frozen, embed)``: the full vector the frozen
+        variables are held at, the positions that stay free, the positions
+        that are held, and ``embed(u) -> full x``.
+        """
+        base = (self.x0 if x is None else self._x(x)).astype(float).copy()
+        if base.shape != self.x0.shape:
+            raise ValueError(
+                f"x must have shape {self.x0.shape}, got {base.shape}")
+        entries = list(active)
+        if any(isinstance(entry, str) for entry in entries):
+            if not all(isinstance(entry, str) for entry in entries):
+                raise TypeError("active must be all names or all indices")
+            lookup: dict[str, int] = {}
+            for position, name in enumerate(self.names):
+                lookup.setdefault(name, position)
+            missing = [name for name in entries if name not in lookup]
+            if missing:
+                raise ValueError(
+                    "not decision variables of this problem: "
+                    + ", ".join(map(str, missing)))
+            free = np.array([lookup[name] for name in entries], dtype=int)
+        else:
+            free = np.asarray(entries, dtype=int).reshape(-1)
+        if free.size and (free.min() < 0 or free.max() >= self.x0.size):
+            raise ValueError("active contains an out-of-range index")
+        if np.unique(free).size != free.size:
+            raise ValueError("active repeats a degree of freedom")
+        frozen = np.setdiff1d(np.arange(self.x0.size, dtype=int), free)
+
+        def embed(u: Array) -> np.ndarray:
+            values = np.asarray(u, dtype=float).reshape(-1)
+            if values.size != free.size:
+                raise ValueError(
+                    f"expected {free.size} free variables, got {values.size}")
+            full = base.copy()
+            full[free] = values
+            return full
+
+        return base, free, frozen, embed
+
+    def subproblem(
+        self,
+        active: Sequence[int] | Sequence[str],
+        *,
+        x: Array | None = None,
+    ) -> "FunctionProblem":
+        """Return a problem over a subset of these decision variables.
+
+        Every variable outside ``active`` is held at its value in ``x``
+        (default :attr:`x0`), and the returned problem's decision vector is
+        the ``active`` sub-vector, in the order given.  The callables,
+        compiled graphs, caches, and metadata of *this* problem are reused
+        unchanged: a sub-problem is a view, not a rebuild.
+
+        This is what a ``max_mode`` continuation ladder wants.  Building a
+        fresh problem per stage retraces and recompiles every graph, because
+        the decision vector changes length even when the underlying
+        equilibrium arrays do not; one problem built at the largest stage,
+        sub-setted per stage, compiles once.
+
+        Parameters
+        ----------
+        active:
+            The variables that stay free, given as positions in this
+            problem's decision vector or as entries of :attr:`dof_names`.
+            Duplicates and out-of-range entries are rejected.
+        x:
+            The full vector the frozen variables are held at.  The default
+            is this problem's :attr:`x0`; a continuation stage passes the
+            previous stage's result, embedded with :meth:`embed`.
+
+        Returns
+        -------
+        A problem of this class whose ``x0``, ``scales``, ``bounds``, and
+        ``dof_names`` are the ``active`` entries of this one's.  It carries
+        ``embed``, ``free_indices``, ``frozen_indices``, ``frozen_names``,
+        and ``parent`` so a caller can map a sub-vector back to a full one
+        and check what was held.
+        """
+        base, free, frozen, embed = self._embedding(active, x)
+        sub = type(self)(base[free], **self._subproblem_kwargs(base, free, embed))
+        sub.embed = embed  # type: ignore[attr-defined]
+        sub.parent = self  # type: ignore[attr-defined]
+        sub.free_indices = free  # type: ignore[attr-defined]
+        sub.frozen_indices = frozen  # type: ignore[attr-defined]
+        sub.frozen_names = tuple(  # type: ignore[attr-defined]
+            self.names[position] for position in frozen)
+        sub.frozen_values = base[frozen].copy()  # type: ignore[attr-defined]
+        return sub
+
+    def _subproblem_kwargs(
+        self, base: np.ndarray, free: np.ndarray,
+        embed: Callable[[Array], np.ndarray],
+    ) -> dict[str, Any]:
+        """Constructor arguments for :meth:`subproblem`'s frozen-dof view."""
+
+        def host(function: HostFun | None) -> HostFun | None:
+            return None if function is None else (lambda u: function(embed(u)))
+
+        def columns(function: HostFun | None) -> HostFun | None:
+            if function is None:
+                return None
+
+            def sliced(u: Array) -> Any:
+                return np.asarray(function(embed(u)), dtype=float)[..., free]
+
+            return sliced
+
+        def gradient(function: HostFun | None) -> HostFun | None:
+            if function is None:
+                return None
+
+            def restricted(u: Array) -> Any:
+                return np.asarray(function(embed(u)), dtype=float).reshape(-1)[free]
+
+            return restricted
+
+        def pair(function: HostFun | None) -> HostFun | None:
+            if function is None:
+                return None
+
+            def both(u: Array) -> Any:
+                first, second = function(embed(u))
+                return first, np.asarray(second, dtype=float)[..., free]
+
+            return both
+
+        def scalar_pair(function: HostFun | None) -> HostFun | None:
+            if function is None:
+                return None
+
+            def both(u: Array) -> Any:
+                value, grad = function(embed(u))
+                return value, np.asarray(grad, dtype=float).reshape(-1)[free]
+
+            return both
+
+        def traced(u: Array) -> Array:
+            import jax.numpy as jnp  # local: keep this module importable bare
+
+            return jnp.asarray(base).at[free].set(u)
+
+        def jax_value(function: Any) -> Any:
+            return None if function is None else (lambda u: function(traced(u)))
+
+        def jax_columns(function: Any) -> Any:
+            return (None if function is None
+                    else (lambda u: function(traced(u))[..., free]))
+
+        def jax_scalar_pair(function: Any) -> Any:
+            if function is None:
+                return None
+
+            def both(u: Array) -> Any:
+                value, grad = function(traced(u))
+                return value, grad.reshape(-1)[free]
+
+            return both
+
+        return dict(
+            fun=host(self._fun),
+            grad=gradient(self._grad),
+            value_and_grad=scalar_pair(self._value_and_grad),
+            residual=host(self._residual),
+            residual_jac=columns(self._residual_jac),
+            residual_and_jac=pair(self._residual_and_jac),
+            jax_fun=jax_value(self._jax_fun),
+            jax_value_and_grad=jax_scalar_pair(self._jax_value_and_grad),
+            jax_residual=jax_value(self._jax_residual),
+            jax_residual_jac=jax_columns(self._jax_residual_jac),
+            names=[self.names[position] for position in free],
+            bounds=_slice_bounds(self.bounds, free, self.x0.size),
+            scales=self.scales[free],
+            metadata=self.metadata,
+            evaluation_progress=self.evaluation_progress,
+            report_interval=self.report_interval,
+        )
+
     def compile_value_and_gradient(
         self,
         x: Array | None = None,
@@ -732,6 +945,95 @@ class VmecProblem(FunctionProblem):
         return make_problem(
             inp, loss=lambda _state, _runtime: 0.0,
             problem_class=cls, **kwargs)
+
+    def subproblem(  # type: ignore[override]
+        self,
+        active: Sequence[int] | Sequence[str] | None = None,
+        *,
+        max_mode: int | None = None,
+        x: Array | None = None,
+    ) -> "VmecProblem":
+        """Return this problem restricted to one continuation stage.
+
+        Pass ``max_mode`` to free exactly the boundary harmonics a problem
+        built at that ``max_mode`` would have had — plus every non-boundary
+        degree of freedom, such as the current dofs, which no stage freezes
+        — and hold every higher harmonic at its value in ``x``.  Pass
+        ``active`` instead to choose the free variables directly, as for
+        :meth:`FunctionProblem.subproblem`.
+
+        A ``max_mode`` ladder built this way compiles once.  Building a
+        fresh problem per stage does not: the decision vector changes
+        length, so every jitted residual, Jacobian and predictor graph is a
+        cache miss, even though ``MINIMUM_MPOL``-style examples keep the
+        equilibrium resolution — and therefore every array shape inside
+        the solve — identical from stage to stage.  A stage that *does*
+        raise the resolution still needs its own problem; group the stages
+        that share one.
+
+        The returned problem maps its sub-vector through the same
+        :meth:`input_from_x`, :meth:`x_from_input`, :meth:`equilibrium_from_x`
+        and :meth:`boundary_from_x` as this one, so the deck and equilibrium
+        it produces carry the frozen harmonics unchanged.
+        """
+        if (active is None) == (max_mode is None):
+            raise TypeError("pass exactly one of active= or max_mode=")
+        if max_mode is not None:
+            active = self.stage_dof_names(max_mode)
+        base, free, frozen, embed = self._embedding(active, x)
+        kwargs = self._subproblem_kwargs(base, free, embed)
+        if max_mode is not None:
+            # The stage's own max_mode, so a further subproblem() of this one
+            # cuts from the right ladder rung; everything else -- the config,
+            # the shared solve-counter holder, the residual slices -- is the
+            # parent's, because it is the same compiled problem.
+            kwargs["metadata"] = {**self.metadata, "max_mode": int(max_mode)}
+        kwargs["input_from_x"] = lambda u: self._input_from_x(embed(u))
+        kwargs["x_from_input"] = lambda deck: np.asarray(
+            self._x_from_input(deck), dtype=float).reshape(-1)[free]
+        if self._equilibrium_from_x is not None:
+            source = self._equilibrium_from_x
+            kwargs["equilibrium_from_x"] = (
+                lambda u, **kw: source(embed(u), **kw))
+        if self._boundary_from_x is not None:
+            boundary = self._boundary_from_x
+            kwargs["boundary_from_x"] = lambda u: boundary(embed(u))
+        sub = VmecProblem(base[free], **kwargs)
+        sub.embed = embed  # type: ignore[attr-defined]
+        sub.parent = self  # type: ignore[attr-defined]
+        sub.free_indices = free  # type: ignore[attr-defined]
+        sub.frozen_indices = frozen  # type: ignore[attr-defined]
+        sub.frozen_names = tuple(  # type: ignore[attr-defined]
+            self.names[position] for position in frozen)
+        sub.frozen_values = base[frozen].copy()  # type: ignore[attr-defined]
+        return sub
+
+    def stage_dof_names(self, max_mode: int) -> list[str]:
+        """Names of the degrees of freedom free at continuation ``max_mode``.
+
+        The boundary harmonics a problem built at ``max_mode`` would carry,
+        in this problem's own order, followed by every degree of freedom
+        that is not a boundary harmonic of this problem (the optional
+        current dofs), which a ``max_mode`` stage does not freeze.
+        """
+        from .optimize import boundary_dof_names
+
+        deck = self.metadata.get("input")
+        built_at = self.metadata.get("max_mode")
+        if deck is None or built_at is None:
+            raise AttributeError(
+                "this problem does not record the input deck and max_mode a "
+                "continuation stage would be cut from; pass active= instead")
+        if int(max_mode) > int(built_at):
+            raise ValueError(
+                f"max_mode={int(max_mode)} exceeds the max_mode this problem "
+                f"was built at ({int(built_at)})")
+        vary = bool(self.metadata.get("vary_major_radius", False))
+        names = list(boundary_dof_names(
+            deck, int(max_mode), vary_major_radius=vary))
+        boundary = len(boundary_dof_names(
+            deck, int(built_at), vary_major_radius=vary))
+        return names + list(self.names[boundary:])
 
     def input_from_x(self, x: Array) -> Any:
         """Return a new :class:`VmecInput` containing decision vector ``x``."""

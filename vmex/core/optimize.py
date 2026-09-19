@@ -1749,6 +1749,7 @@ def _make_finite_difference_problem(
             "vary_major_radius": vary_major_radius,
             "term_slices": term_slices,
             "holder": holder,
+            "input": inp,
         },
     )
     if loss is not None:
