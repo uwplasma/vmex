@@ -213,6 +213,57 @@ def test_host_adjoint_best_effort_warns_instead_of_raising(monkeypatch):
     np.testing.assert_allclose(np.asarray(solution), np.zeros(4))
 
 
+def test_cold_start_ladders_only_where_a_coarse_rung_exists(monkeypatch):
+    """Cold solves start from a coarse rung; tiny grids have none to start from."""
+    inp = lasym_free_input(DATA)
+    field = lasym_free_field()
+    asked = []
+
+    def ladder(_inp, *, ns_array, external_field, **_kwargs):
+        asked.append(tuple(int(value) for value in ns_array))
+        return SimpleNamespace(state="coarse")
+
+    monkeypatch.setattr(
+        "vmex.core.multigrid.solve_free_boundary_multigrid", ladder)
+    for ns, expected in ((4, None), (8, (4, 8)), (31, (15, 31))):
+        cfg = make_free_boundary_config(inp, field, ns=ns, ftol=1.0e-6,
+                                        max_iterations=20)
+        state = fbi._cold_state(cfg.implicit, inp, field)
+        assert state == (None if expected is None else "coarse")
+        assert (asked[-1] if expected is not None else None) == expected
+
+
+def test_restart_carries_the_reference_continuation_but_not_its_vacuum_cache():
+    """The trial's own field rebuilds the vacuum caches; the rest continues."""
+    stage = SimpleNamespace(
+        continuation_state="state", vacuum="vacuum", rcon0="rcon", zcon0="zcon",
+        result=SimpleNamespace(fsqr=1.0, fsqz=2.0, fsql=3.0))
+    restart = fbi._continuation(stage)
+    assert restart == {
+        "initial_state": "state", "vacuum_continuation": "vacuum",
+        "constraint_continuation": ("rcon", "zcon"),
+        "residual_continuation": (1.0, 2.0, 3.0)}
+    assert "reuse_vacuum_cache" not in restart
+
+
+def test_traced_pullback_says_it_cannot_run_the_host_schur_lane(monkeypatch):
+    """boundary_schur is a host lane; under jit the staged solve replaces it."""
+    def residual(z, p, field, *_args):
+        return jnp.asarray([z[0]**2 + p * z[1] + field, z[0] * z[1] + z[1]**2 - p])
+
+    monkeypatch.setattr(fbi, "_projected_residual", lambda *_a, **_k: residual)
+    monkeypatch.setattr(im, "_dof_projector", lambda *_args: (lambda tree: tree))
+    cfg = SimpleNamespace(
+        implicit=SimpleNamespace(adjoint_tol=1.0e-12, adjoint_gcrot_m=2,
+                                 adjoint_gcrot_k=1, adjoint_maxiter=10),
+        adjoint_solver="boundary_schur", adjoint_fail="error")
+    saved = (jnp.asarray(0.5), jnp.asarray(0.25), jnp.asarray([2., 3.]),
+             None, None, None)
+    with pytest.warns(UserWarning, match="cannot run under jax.jit"):
+        jax.jit(lambda bar: fbi._solve_bwd_impl(cfg, saved, bar))(
+            jnp.asarray([1., -2.]))
+
+
 def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     """A bad cached state is discarded, but implementation errors are not."""
     inp = dataclasses.replace(
@@ -227,8 +278,14 @@ def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     # monkeypatch.setitem restores both entries at teardown; a bare assignment
     # would hand the all-zero mask to the next free-boundary case sharing that
     # key, which reaches the Schur lane as an edge basis with no columns.
+    # The cache holds the reference stage whose whole continuation restarts
+    # every solve; only its spectral state identifies it to the stub below.
     seed = object()
-    monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, seed)
+    reference = SimpleNamespace(
+        continuation_state=seed, vacuum=None, rcon0=runtime.rcon0,
+        zcon0=runtime.zcon0,
+        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+    monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
     calls = []
@@ -243,6 +300,10 @@ def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
                                rcon0=runtime.rcon0, zcon0=runtime.zcon0)
 
     monkeypatch.setattr(fbi, "_solve_free_boundary_stage", solve)
+    # The cold retry builds its start from a coarse rung; that ladder is a real
+    # solve, which this stubbed unit test does not need in order to check that
+    # the bad reference is dropped.
+    monkeypatch.setattr(fbi, "_cold_state", lambda *_args: None)
     solved, *_ = fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
     assert calls == [seed, None]
     np.testing.assert_allclose(solved.R_cos, state.R_cos)
@@ -685,22 +746,17 @@ def test_free_boundary_gradient_is_certified_factor_by_factor():
 
 
 @pytest.mark.full
-def test_free_boundary_root_reproducibility_bounds_the_gradient():
-    """Two entry points, two roots, and the gradient amplifies the gap.
+def test_free_boundary_root_is_a_function_of_the_parameters():
+    """Two entry points and repeated calls return one root, bit for bit.
 
-    ``solve_free_boundary_implicit_status`` and ``_host_solve_and_mask`` solve
-    the same problem, and the certificate above shows the adjoint of either
-    root is exact to 3.5e-12.  They do not return the same root: measured
-    4.7e-4 in relative state norm at ``ftol = 1e-7``, which moves
-    ``dJ/dI`` by 1.9e-3 -- a 4x amplification.
-
-    That is the accuracy limit of the free-boundary gradient, and it is the
-    same class the fixed-boundary lane fixed by refining the returned state
-    before linearizing: ``ftol`` gates a sum of squares, so a converged solve
-    stops with ``|F| ~ sqrt(ftol)``, and where ``dF/dz`` has a small singular
-    value that is a real displacement.  This test pins the amplification so a
-    regression in either direction is visible; it is deliberately not a tight
-    gate on the difference itself.
+    They used to not: both entry points solved from whatever state the last
+    call left behind, so the same parameters gave different roots -- measured
+    4.7e-4 in relative state norm at ``ftol = 1e-7``, which moved ``dJ/dI`` by
+    1.9e-3, a 4x amplification, and on the finite-beta free-boundary deck at
+    ns = 31 moved the example's objective by 57 %.  An optimizer cannot line
+    search through that.  Every solve now restarts from one converged
+    reference per configuration instead of from the previous trial, so the
+    returned root depends on the parameters alone.
     """
     inp = dataclasses.replace(
         lasym_free_input(DATA), ns_array=np.array([16]),
@@ -716,12 +772,12 @@ def test_free_boundary_root_reproducibility_bounds_the_gradient():
     )
     current = jnp.asarray(field.extcur)
 
-    status_root, *_ = solve_free_boundary_implicit_status(params, current, cfg)
+    first, *_ = solve_free_boundary_implicit_status(params, current, cfg)
+    repeat, *_ = solve_free_boundary_implicit_status(params, current, cfg)
     host_root, *_ = fbi._host_solve_and_mask(cfg, params, current)
     host_root = jax.tree.map(jnp.asarray, host_root)
-    gap = float(jnp.linalg.norm(_flat(
-        jax.tree.map(jnp.subtract, status_root, host_root))))
-    scale = float(jnp.linalg.norm(_flat(status_root)))
-    relative_gap = gap / scale
-    # Both are "converged" by the same ftol; neither is wrong.
-    assert 1.0e-6 < relative_gap < 1.0e-2, relative_gap
+    scale = float(jnp.linalg.norm(_flat(first)))
+    for label, other in (("repeat", repeat), ("host entry point", host_root)):
+        gap = float(jnp.linalg.norm(_flat(
+            jax.tree.map(jnp.subtract, first, other))))
+        assert gap / scale == 0.0, (label, gap / scale)
