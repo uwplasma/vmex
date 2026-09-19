@@ -153,8 +153,8 @@ def test_host_adjoint_best_effort_warns_instead_of_raising(monkeypatch):
     np.testing.assert_allclose(np.asarray(solution), np.zeros(4))
 
 
-def test_cold_start_ladders_only_where_a_coarse_rung_exists(monkeypatch):
-    """Cold solves start from a coarse rung; tiny grids have none to start from."""
+def test_cold_start_ladders_only_when_one_rung_cannot_converge(monkeypatch):
+    """A converged single rung is kept; a stalled one falls back to a ladder."""
     inp = lasym_free_input(DATA)
     field = lasym_free_field()
     asked = []
@@ -165,12 +165,21 @@ def test_cold_start_ladders_only_where_a_coarse_rung_exists(monkeypatch):
 
     monkeypatch.setattr(
         "vmex.core.multigrid.solve_free_boundary_multigrid", ladder)
-    for ns, expected in ((4, None), (8, (4, 8)), (31, (15, 31))):
+    for ns, converged, expected in ((31, True, None), (4, False, None),
+                                    (8, False, (4, 8)), (31, False, (15, 31))):
         cfg = make_free_boundary_config(inp, field, ns=ns, ftol=1.0e-6,
                                         max_iterations=20)
-        state = fbi._cold_state(cfg.implicit, inp, field)
-        assert state == (None if expected is None else "coarse")
-        assert (asked[-1] if expected is not None else None) == expected
+        seen = []
+
+        def solve(*, initial_state, _seen=seen, _converged=converged):
+            _seen.append(initial_state)
+            return SimpleNamespace(
+                result=SimpleNamespace(converged=_converged), seed=initial_state)
+
+        stage = fbi._cold_reference(solve, cfg.implicit, inp, field)
+        assert seen[0] is None  # the single rung is always tried first
+        assert (asked[-1] if asked else None) == expected
+        assert stage.seed == ("coarse" if expected is not None else None)
 
 
 def test_restart_carries_the_reference_continuation_but_not_its_vacuum_cache():
@@ -243,7 +252,8 @@ def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     # The cold retry builds its start from a coarse rung; that ladder is a real
     # solve, which this stubbed unit test does not need in order to check that
     # the bad reference is dropped.
-    monkeypatch.setattr(fbi, "_cold_state", lambda *_args: None)
+    monkeypatch.setattr(fbi, "_cold_reference",
+                        lambda solve, *_args: solve(initial_state=None))
     solved, *_ = fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
     assert calls == [seed, None]
     np.testing.assert_allclose(solved.R_cos, state.R_cos)

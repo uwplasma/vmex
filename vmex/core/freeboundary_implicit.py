@@ -241,7 +241,10 @@ def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
 
 
 _FREE_MASK_CACHE: dict[tuple, SpectralState] = {}
-#: One converged reference stage per configuration; every solve restarts from it.
+#: One reference stage per configuration; every solve restarts from it.  It is
+#: kept whether or not it converged: a configuration with no reachable root
+#: must still answer deterministically, and :func:`_host_solve_and_mask_status`
+#: is what reports the miss.
 _FREE_HOT_CACHE: dict[FreeBoundaryImplicitConfig, Any] = {}
 _FREE_LAST_RESULT: dict[FreeBoundaryImplicitConfig, Any] = {}
 
@@ -262,34 +265,38 @@ def _host_solve_and_mask(
         )
 
 
-def _cold_state(icfg, inp, field):
-    """Converged coarse-to-fine start for a cold solve; ``None`` on small grids.
+def _cold_reference(solve, icfg, inp, field):
+    """Solve cold, falling back to a coarse rung when one rung cannot converge.
 
     A single fine rung started from the input guess can stall above ``ftol``
-    for any iteration budget, where the ``[ns // 2, ns]`` ladder converges in
-    a few hundred iterations: at ns = 31 on the finite-beta free-boundary deck
+    at any iteration budget, where a ``[ns // 2, ns]`` ladder converges in a
+    few hundred iterations: at ns = 31 on the finite-beta free-boundary deck
     fsq is 9.3e-8 after 2500 iterations and 9.3e-7 after 12000, against
     ftol = 1e-9, while the ladder reaches 1.4e-9 in 106; on the ns = 8 lasym
-    deck at ftol = 1e-8 the single rung stops at fsq 4.9e-7 after 2500
-    iterations where the ``[4, 8]`` ladder converges in 163.
+    deck at ftol = 1e-8 the single rung stops at fsq 4.9e-7 after 2500 where
+    the ``[4, 8]`` ladder converges in 163.
+
+    The ladder is not free -- it compiles and solves a second resolution -- so
+    a deck whose single rung already converges never pays for it.
     """
+    stage = solve(initial_state=None)
     ns = int(icfg.resolution.ns)
-    if ns < 8:
-        return None
+    if bool(stage.result.converged) or ns < 8:
+        return stage
     from .multigrid import solve_free_boundary_multigrid
 
-    return solve_free_boundary_multigrid(
+    return solve(initial_state=solve_free_boundary_multigrid(
         inp, ns_array=np.array([max(3, ns // 2), ns]),
         ftol_array=np.full(2, icfg.ftol),
         niter_array=np.full(2, icfg.max_iterations), external_field=field,
-        raise_on_max_iterations=False).state
+        raise_on_max_iterations=False).state)
 
 
 def _continuation(stage) -> dict:
     """Restart arguments that continue ``stage`` instead of repeating turn-on.
 
-    Every solve of a configuration restarts from the same converged reference,
-    never from the previous trial, so the returned state is a function of the
+    Every solve of a configuration restarts from the same reference, never
+    from the previous trial, so the returned state is a function of the
     parameters alone.  The constraint and residual continuation travel with
     the state, as they do between multigrid rungs; the vacuum continuation is
     a starting guess for this trial's field, which differs from the
@@ -319,14 +326,12 @@ def _host_solve_and_mask_impl(
         error_on_no_convergence=error_on_no_convergence, use_fft=False)
     reference = _FREE_HOT_CACHE.get(cfg)
     if reference is None:
-        reference = solve(initial_state=_cold_state(icfg, inp, field))
-        if bool(reference.result.converged):
-            _FREE_HOT_CACHE[cfg] = reference
+        reference = _FREE_HOT_CACHE[cfg] = _cold_reference(solve, icfg, inp, field)
     try:
         stage = solve(**_continuation(reference))
     except VmecError:
         # The reference may be too far from this trial; start over cold.
-        stage = solve(initial_state=_cold_state(icfg, inp, field))
+        stage = _cold_reference(solve, icfg, inp, field)
     _FREE_LAST_RESULT[cfg] = stage.result
     state = stage.result.state
     rcon0, zcon0 = stage.rcon0, stage.zcon0
