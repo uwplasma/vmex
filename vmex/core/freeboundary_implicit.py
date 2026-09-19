@@ -80,6 +80,7 @@ def make_free_boundary_config(
     schur_probe_chunk_size: int = 1,
     field_from_parameters: Callable[[Any], Any] | None = None,
     device: Any = AUTO,
+    max_fsq_ratio: float = 1.0,
 ) -> FreeBoundaryImplicitConfig:
     """Build a coupled free-boundary derivative configuration.
 
@@ -97,6 +98,12 @@ def make_free_boundary_config(
     Krylov solution with a warning instead of raising, so one bad trial in an
     optimization is a poor search direction the line search rejects rather
     than a dead run; a non-finite adjoint always raises.
+
+    ``max_fsq_ratio`` is the largest ``(fsqr + fsqz + fsql) / ftol`` at which
+    :func:`solve_free_boundary_implicit_status` still certifies a solve that
+    ran out of iterations.  The default of 1 certifies only solves that met
+    ``ftol``; an unconverged state is a failed trial (status 2), because its
+    adjoint is taken off the root and its value depends on the path there.
     """
     if not inp.lfreeb:
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
@@ -106,7 +113,7 @@ def make_free_boundary_config(
         inp, ns=resolution.ns, ftol=ftol, max_iterations=max_iterations,
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
         adjoint_gcrot_m=adjoint_gcrot_m, adjoint_gcrot_k=adjoint_gcrot_k,
-        device=solve_device,
+        device=solve_device, max_fsq_ratio=max_fsq_ratio,
     )
     if cfg.resolution != resolution:
         cfg = dataclasses.replace(cfg, resolution=resolution)
@@ -234,7 +241,8 @@ def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
 
 
 _FREE_MASK_CACHE: dict[tuple, SpectralState] = {}
-_FREE_HOT_CACHE: dict[FreeBoundaryImplicitConfig, SpectralState] = {}
+#: One converged reference stage per configuration; every solve restarts from it.
+_FREE_HOT_CACHE: dict[FreeBoundaryImplicitConfig, Any] = {}
 _FREE_LAST_RESULT: dict[FreeBoundaryImplicitConfig, Any] = {}
 
 
@@ -254,6 +262,46 @@ def _host_solve_and_mask(
         )
 
 
+def _cold_state(icfg, inp, field):
+    """Converged coarse-to-fine start for a cold solve; ``None`` on small grids.
+
+    A single fine rung started from the input guess can stall above ``ftol``
+    for any iteration budget, where the ``[ns // 2, ns]`` ladder converges in
+    a few hundred iterations: at ns = 31 on the finite-beta free-boundary deck
+    fsq is 9.3e-8 after 2500 iterations and 9.3e-7 after 12000, against
+    ftol = 1e-9, while the ladder reaches 1.4e-9 in 106; on the ns = 8 lasym
+    deck at ftol = 1e-8 the single rung stops at fsq 4.9e-7 after 2500
+    iterations where the ``[4, 8]`` ladder converges in 163.
+    """
+    ns = int(icfg.resolution.ns)
+    if ns < 8:
+        return None
+    from .multigrid import solve_free_boundary_multigrid
+
+    return solve_free_boundary_multigrid(
+        inp, ns_array=np.array([max(3, ns // 2), ns]),
+        ftol_array=np.full(2, icfg.ftol),
+        niter_array=np.full(2, icfg.max_iterations), external_field=field,
+        raise_on_max_iterations=False).state
+
+
+def _continuation(stage) -> dict:
+    """Restart arguments that continue ``stage`` instead of repeating turn-on.
+
+    Every solve of a configuration restarts from the same converged reference,
+    never from the previous trial, so the returned state is a function of the
+    parameters alone.  The constraint and residual continuation travel with
+    the state, as they do between multigrid rungs; the vacuum continuation is
+    a starting guess for this trial's field, which differs from the
+    reference's, so its caches are rebuilt rather than reused.
+    """
+    return dict(
+        initial_state=stage.continuation_state, vacuum_continuation=stage.vacuum,
+        constraint_continuation=(stage.rcon0, stage.zcon0),
+        residual_continuation=(
+            stage.result.fsqr, stage.result.fsqz, stage.result.fsql))
+
+
 def _host_solve_and_mask_impl(
     cfg, params_np, field_parameters_np, *, error_on_no_convergence=True,
 ):
@@ -264,23 +312,21 @@ def _host_solve_and_mask_impl(
         icfg, jax.tree.map(jnp.asarray, field_parameters_np))
     field = cfg.field_from_parameters(field_parameters)
     inp = im.input_with_params(icfg.inp, params)
-    seed = _FREE_HOT_CACHE.get(cfg)
+    solve = functools.partial(
+        _solve_free_boundary_stage, inp, external_field=field,
+        resolution=icfg.resolution, ftol=icfg.ftol,
+        max_iterations=icfg.max_iterations,
+        error_on_no_convergence=error_on_no_convergence, use_fft=False)
+    reference = _FREE_HOT_CACHE.get(cfg)
+    if reference is None:
+        reference = solve(initial_state=_cold_state(icfg, inp, field))
+        if bool(reference.result.converged):
+            _FREE_HOT_CACHE[cfg] = reference
     try:
-        stage = _solve_free_boundary_stage(
-            inp, external_field=field, resolution=icfg.resolution,
-            ftol=icfg.ftol, max_iterations=icfg.max_iterations,
-            error_on_no_convergence=error_on_no_convergence,
-            initial_state=seed, use_fft=False,
-        )
+        stage = solve(**_continuation(reference))
     except VmecError:
-        if seed is None:
-            raise
-        stage = _solve_free_boundary_stage(
-            inp, external_field=field, resolution=icfg.resolution,
-            ftol=icfg.ftol, max_iterations=icfg.max_iterations,
-            error_on_no_convergence=error_on_no_convergence, use_fft=False,
-        )
-    _FREE_HOT_CACHE[cfg] = stage.continuation_state
+        # The reference may be too far from this trial; start over cold.
+        stage = solve(initial_state=_cold_state(icfg, inp, field))
     _FREE_LAST_RESULT[cfg] = stage.result
     state = stage.result.state
     rcon0, zcon0 = stage.rcon0, stage.zcon0
@@ -327,10 +373,10 @@ def _host_solve_and_mask_status(cfg, params_np, field_parameters_np):
         )
     except VmecError:
         icfg = cfg.implicit
-        state = _FREE_HOT_CACHE.get(cfg)
+        reference = _FREE_HOT_CACHE.get(cfg)
         runtime = im._template_runtime(icfg)
-        if state is None:
-            state = im._initial_state(runtime.setup)
+        state = (im._initial_state(runtime.setup) if reference is None
+                 else reference.continuation_state)
         mask = _FREE_MASK_CACHE.get(_mask_key(cfg))
         if mask is None:
             mask = jax.tree.map(jnp.zeros_like, state)
@@ -486,6 +532,12 @@ def _solve_bwd_impl(cfg, saved, state_bar):
         # An outer jax.jit needs a staged Krylov loop. Ordinary SciPy/JAXopt
         # drivers call the concrete lane below, which compiles only one
         # transpose matvec and has a much smaller cold memory peak.
+        if cfg.adjoint_solver == "boundary_schur":
+            warnings.warn(
+                "adjoint_solver='boundary_schur' is a host lane and cannot run "
+                "under jax.jit; this pullback uses the staged coupled GCROT "
+                "solve instead. Call the objective eagerly to keep the Schur "
+                "adjoint.", stacklevel=2)
         _, state_pullback = jax.vjp(
             lambda z: residual(
                 z, params, field_parameters, frozen, rcon0, zcon0), z_star
