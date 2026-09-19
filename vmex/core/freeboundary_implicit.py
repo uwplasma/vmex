@@ -185,10 +185,15 @@ def _projected_residual(
             z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
             fixed_bsqvac, cfg=cfg, formulation=formulation)
 
-    if fixed_bsqvac is not None:
+    leaves = jax.tree.leaves(dof_mask)
+    if fixed_bsqvac is not None or any(
+            isinstance(leaf, jax.core.Tracer) for leaf in leaves):
+        # Under an outer jax.jit the mask is a tracer, so it has no bytes to
+        # key on; the whole pullback is staged once anyway, which is what the
+        # cache buys the eager path.
         return residual
     key = (cfg, formulation, tuple(
-        np.asarray(leaf).tobytes() for leaf in jax.tree.leaves(dof_mask)))
+        np.asarray(leaf).tobytes() for leaf in leaves))
     cached = _RESIDUAL_CLOSURE_CACHE.get(key)
     if cached is None:
         _RESIDUAL_CLOSURE_CACHE[key] = cached = residual
