@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """True finite-beta free-boundary QA optimization with only coil dofs.
 
+Full-run record, with wall time, peak memory, trials and the targets the
+run reached: ``benchmarks/single_stage_profile_office.json``.
 """
 
 from dataclasses import replace
