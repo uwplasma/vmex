@@ -83,17 +83,16 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   The scalar lane trades objective progress per evaluation (roughly 3x higher
   objective at a matched budget on the QA workflow) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
-  `single_stage_optimization_penalty.py` *(preview)* is the simplest joint
-  plasma-and-coil script and the one to copy for a new problem: every
-  constraint is a quadratic penalty and the optimizer is one bounded L-BFGS-B
-  solve. `single_stage_optimization.py` *(preview)* is the same problem with
-  the constraints in a Powell-Hestenes-Rockafellar augmented Lagrangian. Both
-  vary a prescribed boundary and coil Fourier coefficients, neither calls a
-  free-boundary solve, and both reach every target at the full budget; the
-  augmented Lagrangian gets there with the limits stated as they are and a 1.4x
-  lower objective, while the penalized file needs tightened thresholds and
-  tuned weights because a quadratic penalty settles just inside whatever
-  threshold it is given. Each docstring carries the measured comparison.
+  `single_stage_optimization.py` *(preview)* varies a prescribed boundary and
+  coil Fourier coefficients together; it does not call a free-boundary solve.
+  Its constraints are quadratic penalties and one bounded L-BFGS-B solve, which
+  makes it the one to copy for a new problem.
+  `single_stage_optimization_auglag.py` carries the same three limits as real
+  constraints in a Powell-Hestenes-Rockafellar augmented Lagrangian, and
+  `single_stage_optimization_least_squares.py` keeps the terms as a residual
+  vector for Gauss-Newton. Each is self-contained -- imports, parameters,
+  equilibrium, objective, optimizer, results -- so a script can be read and
+  modified without opening another file.
   `QA_optimization_bootstrap.py`, `QH_optimization_bootstrap.py` and
   `QI_optimization_bootstrap.py` also vary
   a stage-refined current spline against self-consistent Redl, DMerc, and DR
