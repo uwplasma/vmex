@@ -68,7 +68,7 @@ wout = vj.wout_from_state(
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 wout_path = vj.write_wout(OUTPUT_DIR / f"wout_{case}.nc", wout)
-print(f"converged = {result.converged}; Wrote {wout_path}")
+print(f"converged = {result.converged}; wrote {wout_path}")
 
 # plot_wout accepts a WoutData or a path and returns {key: written_png_path}.
 figures = vj.plot_wout(wout_path, OUTPUT_DIR, which=FIGURES)
