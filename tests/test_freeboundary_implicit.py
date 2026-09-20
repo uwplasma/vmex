@@ -370,7 +370,21 @@ def test_free_boundary_current_gradient_matches_resolve_finite_difference():
         lambda value: jnp.mean(solve_free_boundary_implicit(
             params, value, cfg).R_cos[-1] ** 2), current)
     derivative = jax.grad(objective)(current)[0]
-    step = 2.0e-4
+    # A re-solve finite difference only measures the derivative while both
+    # legs stay on the same root; a step large enough to move one of them
+    # measures the root change instead, and does so by orders of magnitude.
+    # That is the rule both re-solve anchors in this file teach.  Measured
+    # here, adjoint against the central difference at three steps:
+    #
+    #   step   2e-4        2e-5        2e-6
+    #   FD    -4.293e-02  -2.306e-01  -2.366e-01   (adjoint -2.270e-01)
+    #
+    # The 2e-4 leg lands on a different root and collapses the difference by
+    # 5x; 2e-5 and 2e-6 agree with the adjoint to 1.6 % and 4.0 %, and 2e-5 is
+    # the least noisy of the usable steps.  The adjoint itself is insensitive
+    # to all of this: it moves by 0.1 % across solver revisions that move the
+    # 2e-4 difference by 5x.
+    step = 2.0e-5
     finite_difference = (
         objective(current + step) - objective(current - step)
     ) / (2.0 * step)
