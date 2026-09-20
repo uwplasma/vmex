@@ -26,7 +26,7 @@ from vmex.mirror import (  # noqa: E402
     build_qi_mirror_hybrid,
     splice_straight_legs,
 )
-from vmex.mirror.splines import _closed_tangent, _sample_closed_polyline  # noqa: E402
+from vmex.mirror.splines import _closed_tangent, sample_closed_polyline  # noqa: E402
 from vmex.mirror.basis import CubicBSplineBasis  # noqa: E402
 
 _STELL_SYMMETRY = np.diag([1.0, -1.0, -1.0])
@@ -70,7 +70,7 @@ def test_splice_is_tangent_aligned_stellarator_symmetric_and_closes() -> None:
     assert splice.corner_angle < 5.0  # degrees, sampling-limited
     # every leg is an exactly-straight segment
     for start, stop in splice.leg_windows:
-        samples = _sample_closed_polyline(
+        samples = sample_closed_polyline(
             splice.points, np.linspace(start + 0.05, stop - 0.05, 40)
         )
         directions = np.diff(samples, axis=0)
@@ -100,13 +100,13 @@ def test_bspline_reproduces_legs_better_than_fourier() -> None:
 
     dense = np.linspace(0.0, 2.0 * np.pi, 2000, endpoint=False)
     arc = dense / (2.0 * np.pi) * splice.total_length
-    target = _sample_closed_polyline(splice.points, arc)
+    target = sample_closed_polyline(splice.points, arc)
 
     # B-spline midpoint of a leg: machine precision once backed by enough controls
     basis = CubicBSplineBasis.periodic_uniform(256)
     nodes = np.asarray(basis.collocation_nodes)
     coefficients = basis.fit(
-        _sample_closed_polyline(splice.points, nodes / (2.0 * np.pi) * splice.total_length),
+        sample_closed_polyline(splice.points, nodes / (2.0 * np.pi) * splice.total_length),
         axis=0,
     )
     start, stop = splice.leg_windows[0]
@@ -114,7 +114,7 @@ def test_bspline_reproduces_legs_better_than_fourier() -> None:
     fitted = np.asarray(
         basis.evaluate(coefficients, np.array([midpoint / splice.total_length * 2.0 * np.pi]), axis=0)
     )[0]
-    exact = _sample_closed_polyline(splice.points, np.array([midpoint]))[0]
+    exact = sample_closed_polyline(splice.points, np.array([midpoint]))[0]
     bspline_leg = float(np.linalg.norm(fitted - exact))
 
     # Fourier least-squares at comparable resolution: residual ringing on the leg

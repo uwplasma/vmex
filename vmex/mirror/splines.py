@@ -533,8 +533,23 @@ def _closed_tangent(points: np.ndarray, index: int) -> np.ndarray:
     return direction / norm
 
 
-def _sample_closed_polyline(points: np.ndarray, arc_length: np.ndarray) -> np.ndarray:
-    """Interpolate a closed polyline at requested arc-length coordinates."""
+def sample_closed_polyline(points: np.ndarray, arc_length: np.ndarray) -> np.ndarray:
+    """Interpolate a closed polyline at requested arc-length coordinates.
+
+    ``points`` is an ``(n, 3)`` array of Cartesian vertices of a closed curve,
+    given once each: the closing segment from the last back to the first is
+    implied, not repeated.  ``arc_length`` is measured along that polyline from
+    ``points[0]`` and wraps, so a coordinate outside ``[0, L)`` is reduced
+    modulo the total length ``L`` and negative values sample backwards from the
+    start.  The return has shape ``arc_length.shape + (3,)``.
+
+    Interpolation is linear between neighbouring vertices, so the result lies
+    on the polyline itself rather than on a smooth curve through it.  That is
+    what makes it the reference a spline or Fourier fit is judged against: the
+    closed-axis B-spline lane fits its control values through this function,
+    and ``examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py`` measures
+    both representations against it.
+    """
 
     closed = np.concatenate((points, points[:1]), axis=0)
     lengths = np.linalg.norm(np.diff(closed, axis=0), axis=1)
@@ -721,7 +736,7 @@ def build_qi_mirror_hybrid(
     )
     basis = discretization.spline
     nodes = np.asarray(basis.collocation_nodes)
-    control_values = _sample_closed_polyline(
+    control_values = sample_closed_polyline(
         splice.points, nodes / (2.0 * np.pi) * splice.total_length
     )
     axis_coefficients = jnp.asarray(basis.fit(control_values, axis=0))
