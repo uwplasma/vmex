@@ -13,14 +13,42 @@ with ``sqrt(g)`` built from the same ``R`` and ``Z`` series the position uses,
 so only the radial profiles are interpolated and ``div B`` vanishes in the
 angles identically rather than approximately.
 
-Two tests here, because the change has two independent ways to be wrong.
+The conventions it has to honour, read off ``vmex.core.fields.magnetic_fields``
+and ``lambda_scale``:
+
+===========================  ============  ==================================
+quantity                     mesh          definition
+===========================  ============  ==================================
+``phip``                     full          ``signgs * phipf_wout / (2 pi)``
+``chip`` (``chips``)         half          ``d(chi)/ds``, VMEC-internal
+``lamscale``                 scalar        ``sqrt(hs * sum phips**2)``
+``lamscale * lambda``        full          evolved internally, sine for
+                                           stellarator symmetry
+``sqrt(g)``                  half          ``R (R_theta Z_s - R_s Z_theta)``,
+                                           the ``ru12*zs - rs*zu12`` ordering
+                                           of ``jacobian.f``
+===========================  ============  ==================================
+
+The ``+`` on the ``dlambda/dzeta`` term in the ``magnetic_fields`` class
+docstring disagrees with its own ``lv = -lamscale * dlambda/dzeta`` and with
+the code; the code is authoritative.
+
+Three tests, because the change has three independent ways to be wrong.
 :func:`test_native_form_matches_the_fitted_field_on_a_solved_equilibrium` pins
-every VMEC convention the form depends on — the sign of the Jacobian, VMEC's
-``lamscale``, the internal ``phip``, ``chips``'s half mesh — by requiring the
-two paths to agree on a real equilibrium to the accuracy the fitted one has.
-Any convention error moves that by far more than the tolerance.
-:func:`test_native_form_reaches_the_second_derivative_gate` then measures what
-the change was for, against a field known in closed form.
+every convention in that table at once, by requiring the two paths to agree on
+a real equilibrium to the accuracy the fitted one has; any convention error
+moves that by far more than the tolerance.
+:func:`test_native_form_reaches_the_second_derivative_gate` measures what the
+change was for, against a field known in closed form.
+:func:`test_fitted_fallback_keeps_its_measured_accuracy` measures the path
+callers still get when their spectra predate this change.
+
+The oracles came from PR #382, which committed them on their own, before the
+fix existed, as bands asserting how wrong the code was.  That is a fair thing
+to decline, and it was declined.  What they asserted has changed with them: the
+breathing circle now asserts the gates the native form meets, and the purely
+toroidal one documents a fallback's accuracy rather than pinning a defect
+awaiting repair.
 """
 
 from __future__ import annotations
@@ -46,9 +74,19 @@ SECOND_DERIVATIVE_GATE = 1.0e-3
 THIRD_DERIVATIVE_GATE = 1.0e-2
 DIVERGENCE_GATE = 1.0e-12
 
-#: Flux labels the oracle is sampled at, and the poloidal angle it uses.
+#: Flux labels the oracles are sampled at, and the poloidal angle they use.
 SAMPLES = np.array([0.3, 0.55, 0.8, 0.95])
 ANGLE = 0.7
+
+#: Purely-toroidal oracle: concentric circles of radius ``a rho`` carrying
+#: ``B = F/R phi_hat``.  Ceilings on what the fitted fallback achieves on it,
+#: measured at ``ns = 41, 81, 161`` (see the test's docstring for the table).
+#: They are upper bounds, not bands: an improved fallback passes unchanged.
+FALLBACK_MINOR, FALLBACK_FLUX = 0.1, 2.0
+#: Applied at the FINEST resolution tested; the coarse end is documented in
+#: the test's table rather than asserted, because it is not usable there.
+FALLBACK_CEILINGS = {"B": 3.0e-6, "gradB": 1.0e-4,
+                     "gradgradB": 5.0e-3, "gradgradgradB": 1.0e0}
 
 
 def _radius(s):
@@ -119,6 +157,56 @@ def _oracle_spectra(ns, native):
     return spectra
 
 
+def _toroidal_spectra(ns):
+    """Concentric circles carrying ``B = F/R phi_hat``, no native fields.
+
+    Linear interpolation is exact for this geometry, so the fitted path's error
+    here is the radial interpolation of its contravariant tables and nothing
+    else.  The field cannot be expressed in the native form on this geometry —
+    it would need a ``phi'`` that varies with ``theta`` — which is why this
+    oracle measures the fallback and only the fallback.
+    """
+    s = np.linspace(0.0, 1.0, ns)
+    half = np.concatenate((s[1:2] / 2.0, 0.5 * (s[:-1] + s[1:])))
+    angles = 2 * np.pi * np.arange(4 * MODES) / (4 * MODES)
+    big = MAJOR + FALLBACK_MINOR * np.sqrt(half)[:, None] * np.cos(angles)[None, :]
+    modes = np.arange(MODES, dtype=float)
+    weight = np.where(modes == 0, 1.0, 2.0) / len(angles)
+    basis = np.cos(modes[None, :] * angles[:, None])
+    minor = FALLBACK_MINOR * np.sqrt(s)
+    return {
+        "nfp": 1, "ns": ns,
+        "xm": jnp.array([0.0, 1.0]), "xn": jnp.zeros(2),
+        "xmn": jnp.asarray(modes), "xnn": jnp.zeros(MODES),
+        "rmnc": jnp.asarray(np.stack((np.full(ns, MAJOR), minor), axis=1)),
+        "zmns": jnp.asarray(np.stack((np.zeros(ns), minor), axis=1)),
+        "rmns": None, "zmnc": None,
+        "bsupu": jnp.zeros((ns, MODES)),
+        "bsupv": jnp.asarray(((FALLBACK_FLUX / big**2) @ basis) * weight),
+        "bsupu_s": None, "bsupv_s": None, "lasym": False, "signgs": -1,
+    }
+
+
+def _toroidal_exact(xyz):
+    """``B = F/R phi_hat`` in Cartesian components."""
+    x, y, z = xyz
+    return FALLBACK_FLUX * jnp.stack(
+        (-y, x, jnp.zeros_like(z))) / (x**2 + y**2)
+
+
+def _errors(field, points, exact, names):
+    """Relative error of each derivative order against a closed-form field."""
+    out = []
+    for order, name in enumerate(names):
+        got = np.asarray(getattr(field, name)(points))
+        derivative = exact
+        for _ in range(order):
+            derivative = jax.jacfwd(derivative)
+        want = np.stack([np.asarray(jax.jit(derivative)(p)) for p in points])
+        out.append(float(np.max(np.abs(got - want)) / np.max(np.abs(want))))
+    return out
+
+
 def _oracle_points():
     minor = _radius_np(SAMPLES)
     return jnp.asarray(np.stack(
@@ -166,24 +254,29 @@ def test_native_form_reaches_the_second_derivative_gate():
 
     The geometry breathes with ``s``, so the radial interpolant is exercised
     rather than being exact by construction, and a non-zero ``chi'`` makes
-    ``div B`` a real test rather than a symmetry.  Measured, native against
-    fitted at the same resolutions: ``gradgradB`` 2.2e-4 against 2.9e-2 at
-    ``ns = 41``, and ``|div B|/|grad B|`` at round-off rather than 1.1e-6.
+    ``div B`` a real test rather than a symmetry.  These are gates, not pins:
+    this PR is what makes them pass, so they assert the target directly.
+
+    Measured, native against fitted at ``ns = 41, 81, 161``:
+
+    =============  ==========================  ==========================
+    quantity       native                      fitted
+    =============  ==========================  ==========================
+    ``gradgradB``  2.2e-4, 2.5e-5, 1.2e-5      2.9e-2, 2.1e-3, 5.2e-5
+    ``d3B``        7.8e-4, 6.0e-4, 6.0e-4      2.1e-1, 2.9e-2, 1.7e-3
+    ``div B/|B'|`` 8.5e-18, 4.5e-18, 8.3e-18   1.1e-6, 2.8e-7, 7.1e-8
+    =============  ==========================  ==========================
+
+    So ``gradgradB`` clears its 1e-3 gate by a factor of five at the coarsest
+    resolution, and ``div B`` is at round-off at every ``ns`` rather than
+    converging towards zero.
     """
     points = _oracle_points()
     names = ("B", "gradB", "gradgradB", "gradgradgradB")
     table, divergence = [], []
     for ns in (41, 81, 161):
         field = ext.VmecInteriorField(_oracle_spectra(ns, native=True))
-        row = []
-        for order, name in enumerate(names):
-            got = np.asarray(getattr(field, name)(points))
-            derivative = _exact_B
-            for _ in range(order):
-                derivative = jax.jacfwd(derivative)
-            want = np.stack([np.asarray(jax.jit(derivative)(p)) for p in points])
-            row.append(float(np.max(np.abs(got - want)) / np.max(np.abs(want))))
-        table.append(row)
+        table.append(_errors(field, points, _exact_B, names))
         gradient = np.asarray(field.gradB(points))
         divergence.append(float(
             np.abs(np.trace(gradient, axis1=1, axis2=2)).max()
@@ -196,3 +289,65 @@ def test_native_form_reaches_the_second_derivative_gate():
     # B and its first derivative converge; the higher two are limited by the
     # inversion tolerance rather than by ns, which is why they flatten.
     assert value[0] > value[-1] and first[0] > first[-1], (value, first)
+
+
+@pytest.mark.full  # nightly: four derivative orders at three resolutions
+def test_fitted_fallback_keeps_its_measured_accuracy():
+    """What callers get without ``lmns``/``phipf``/``chipf`` in their spectra.
+
+    The native form is the accurate path and every equilibrium built by
+    ``_state_field_spectra`` now takes it.  The fitted path remains reachable
+    for spectra assembled by hand or carried over from before this change, so
+    what it achieves is worth stating rather than leaving to be rediscovered.
+    A caller who wants the accurate path supplies the three native fields; on
+    a live equilibrium that is automatic.
+
+    Measured against the exact ``B = F/R phi_hat``:
+
+    =================  ========  ========  ========  ========
+    quantity           ns = 41   ns = 81   ns = 161  ns = 321
+    =================  ========  ========  ========  ========
+    ``B``              2.0e-5    4.9e-6    1.2e-6    3.1e-7
+    ``gradB``          8.8e-4    2.4e-4    6.0e-5    1.5e-5
+    ``gradgradB``      6.8e-1    4.8e-2    1.9e-3    4.6e-4
+    ``gradgradgradB``  1.9e+2    2.6e+1    2.6e-1    1.2e-2
+    =================  ========  ========  ========  ========
+
+    Two things to read off that, and the second is a cost of this PR.  ``B``
+    and its first derivative converge at second order and are what the
+    fallback can be trusted for.  The second and third now *converge*, where
+    before this PR they were flat at 4.5e-2 and 5.8e-1 at every ``ns`` — but
+    they are far worse at coarse resolution, because the C2 interpolant that
+    the native form needs differentiates the half-mesh conversion's error
+    twice, and the fitted path has no native form to protect it.  A caller
+    reading ``gradgradgradB`` off the fallback at ``ns = 41`` gets noise; the
+    honest answer for them is to supply the native fields.
+
+    The assertions are ceilings and convergence rather than bands, so an
+    improved fallback passes them unchanged and only a regression fails.
+    """
+    names = ("B", "gradB", "gradgradB", "gradgradgradB")
+    points = jnp.asarray(np.stack(
+        (MAJOR + FALLBACK_MINOR * np.sqrt(SAMPLES) * np.cos(ANGLE),
+         np.zeros_like(SAMPLES),
+         FALLBACK_MINOR * np.sqrt(SAMPLES) * np.sin(ANGLE)), axis=1))
+    resolutions = (41, 81, 161)
+    table = [_errors(ext.VmecInteriorField(_toroidal_spectra(ns)), points,
+                     _toroidal_exact, names) for ns in resolutions]
+    columns = {name: list(column) for name, column in zip(names, zip(*table))}
+
+    for name, ceiling in FALLBACK_CEILINGS.items():
+        worst = columns[name][-1]
+        assert worst < ceiling, (
+            f"the fitted fallback's {name} error at the finest resolution "
+            f"reached {worst:.2e}, above its measured ceiling {ceiling:.0e}: "
+            f"{[f'{v:.2e}' for v in columns[name]]} at ns = {resolutions}. "
+            "These are ceilings, so they need no editing when the fallback "
+            "improves - only a regression trips them.")
+    for name in names:
+        first, last = columns[name][0], columns[name][-1]
+        assert first > 3.0 * last, (
+            f"the fitted fallback's {name} error stopped converging with ns: "
+            f"{[f'{v:.2e}' for v in columns[name]]}. Before this PR the second "
+            "and third derivatives were flat; losing that again would mean the "
+            "radial interpolant regressed.")
