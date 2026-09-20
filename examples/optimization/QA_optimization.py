@@ -1,8 +1,19 @@
 #!/usr/bin/env python
-"""Quasi-axisymmetric boundary optimization with a magnetic well."""
+"""Optimize a boundary for quasi-axisymmetry with a magnetic well.
 
-from dataclasses import replace
+SciPy nonlinear least squares varies the boundary Fourier coefficients of a
+vacuum equilibrium in stages of increasing mode number. The residual vector
+holds the quasisymmetry ratio, the aspect ratio, a floor on the rotational
+transform and the magnetic well, and VMEX supplies its exact Jacobian.
+
+This is the canonical boundary optimization and keeps the explicit residual
+and Jacobian, so individual residual rows can be inspected and SciPy's
+trust-region model applies. ``QA_optimization_scalar.py`` minimizes the
+identical aggregate cost with one reverse equilibrium adjoint per gradient.
+"""
+
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -12,73 +23,105 @@ from scipy.optimize import least_squares
 import vmex as vj
 from vmex import optimize as opt
 
-nfp = 2  # number of field periods
-SURFACES = np.linspace(0.1, 1.0, 10)
-MAX_MODES, MAX_NFEV = [1, 2, 3], [10, 10, 15]
-MAGNETIC_WELL_TARGET = 0.01
-ASPECT_TARGET = 5.0
-# For a larger design space use:
-# MAX_MODES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-# MAX_NFEV = [10, 10, 15, 20, 25, 40, 50, 60, 60]
-# MAGNETIC_WELL_TARGET = 0.07
-# ASPECT_TARGET = 3.5
-IOTA_FLOOR = 0.42
-PARAMETER_STEP, MAX_PARAMETER_CHANGE = 0.02, 5.0
-ESS_ALPHA = 1.2  # smaller values let high Fourier modes move more
-MINIMUM_MPOL = 5
-VARY_MAJOR_RADIUS = False  # set True to optimize RBC(0,0) instead of fixing it
+# Number of field periods, and the seed deck the boundary is shaped from:
+NFP = 2
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
+
+# Rotating-ellipse amplitude added to the circular seed. The exactly circular
+# torus has zero first-order iota sensitivity; this gives the optimizer a QA basin:
 SEED_PERTURBATION = 0.05
 
+# Flux surfaces the quasisymmetry residual is evaluated on:
+SURFACES = np.linspace(0.1, 1.0, 10)
+
+# Mode ladder: highest boundary mode number varied in each stage, and the
+# residual evaluations each stage may spend:
+MAX_MODES = [1, 2, 3]
+MAX_NFEV = [10, 10, 15]
+
+# Targets:
+ASPECT_TARGET = 5.0
+MAGNETIC_WELL_TARGET = 0.01
+IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
+
+# Alternative settings for a larger design space:
+#   MAX_MODES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+#   MAX_NFEV = [10, 10, 15, 20, 25, 40, 50, 60, 60]
+#   ASPECT_TARGET = 3.5
+#   MAGNETIC_WELL_TARGET = 0.07
+
+# Step control. One scaled variable moves a low-order coefficient by
+# PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
+PARAMETER_STEP = 0.02
+MAX_PARAMETER_CHANGE = 5.0
+ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
+VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
+
+# Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
+# but never below MINIMUM_MPOL:
+MINIMUM_MPOL = 5
+
+# Verification solve of the optimized boundary:
+FINAL_NS = 101
+FINAL_FTOL = 1.0e-14
+FINAL_NITER = 8000
+
+# Every output file name contains this:
+OUTPUT_NAME = "QA_optimized"
+
+# VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAX_MODES, MAX_NFEV = [1], [4]
+    FINAL_NS, FINAL_FTOL = 31, 1.0e-10
 
-DATA = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{nfp}"
-inp = vj.VmecInput.from_file(DATA)
-# The exactly circular torus has zero first-order iota sensitivity. This
-# explicit rotating-ellipse perturbation gives the local optimizer a QA basin.
+###############################################################################
+# End of input parameters.
+###############################################################################
+
+### Set up the equilibrium ####################################################
+
+# VmecInput is frozen, so copy its arrays before shaping the seed boundary.
+inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
 inp = replace(inp, rbc=rbc, zbs=zbs)
 
-# Floor the profile minimum, not its average: a mean target is satisfiable while
-# an interior surface sits near zero transform, which is what a current-carried
-# finite-beta profile does. opt.mean_iota targets the average instead, and
-# opt.soft_min_abs_iota is the smooth-minimum variant.
+### Set up the objective ######################################################
+
 def iota_floor(equilibrium_state, solver_context):
+    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
+
+    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
+    """
     return jnp.maximum(
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
-# Objective function terms
+
+# Each term is (function, target, weight).
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [
-         (qs, 0.0, 1.0),
-         (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-         (iota_floor, 0.0, 10.0),
-         (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
-         ]
+    (qs, 0.0, 1.0),
+    (opt.aspect_ratio, ASPECT_TARGET, 1.0),
+    (iota_floor, 0.0, 10.0),
+    (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
+]
 
 report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
 monitor = opt.OptimizationMonitor(stream=None)
 
-# The canonical example retains nonlinear least squares so users can inspect
-# individual residual rows and use SciPy's trust-region model. The companion
-# QA_optimization_scalar.py minimizes the identical aggregate cost with one
-# reverse equilibrium adjoint per gradient.
+### Run the optimization ######################################################
+
 equilibrium = opt.solve_equilibrium(inp)
-# If a RuntimeWarning reports uncertified Jacobian columns, it is expected
-# once the optimizer leaves the seed and needs no action: the shipped
-# jacobian_adjoint_tol=1e-4 and jacobian_adjoint_maxiter=10 are the measured
-# optimum, since ten times that budget moved the Jacobian by 2e-8 and
-# certified no extra column. Both are from_tuples arguments; pass
-# evaluation_progress=False to drop the per-evaluation timing lines.
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
     inp = replace(inp, delt=0.5).change_resolution(
         mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+    # A RuntimeWarning about uncertified Jacobian columns is expected once the
+    # optimizer leaves the seed and needs no action; see examples/README.md.
     problem = opt.VmecProblem.from_tuples(
         inp, objective_function_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
@@ -97,26 +140,27 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     inp = problem.input_from_x(result.x)
     equilibrium = problem.equilibrium_from_x(result.x)
     report(f"mode {max_mode}", equilibrium)
-    # inp.to_indata(f"input.QA_max_mode_{max_mode:03d}")
 
-# Print results
-final_input = replace(inp,
-    ns_array=np.array([31 if ci_smoke else 101]),
-    ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-14]),
-    niter_array=np.array([8000]))
+### Check the result ##########################################################
+
+# The optimizer's grid is not the certificate: re-solve the optimized boundary
+# on a finer radial grid to a tighter tolerance and quote that.
+final_input = replace(
+    inp, ns_array=np.array([FINAL_NS]), ftol_array=np.array([FINAL_FTOL]),
+    niter_array=np.array([FINAL_NITER]))
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution,
     verbose=not ci_smoke, raise_on_max_iterations=True)
+
+### Print, plot and save ######################################################
+
 final_total = report("final", final_equilibrium)["QS total"]
 print(f"\nQS total {final_total:.3e}")
 
-vacuum_name = "QA_optimized"
-vacuum_input_path = final_input.to_indata(f"input.{vacuum_name}")
-vacuum_wout_path = vj.write_wout(f"wout_{vacuum_name}.nc", final_equilibrium.wout)
-print(f"wrote {vacuum_input_path}\nwrote {vacuum_wout_path}")
-
-# Plot results
-monitor.save("QA_optimization_objectives.csv")
-monitor.plot("QA_optimization_objectives.png")
-for path in vj.plot_wout(vacuum_wout_path, ".").values():
-    print(f"wrote {path}")
+input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
+wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
+print(f"Wrote {input_path}\nWrote {wout_path}")
+print(f"Wrote {monitor.save(f'{OUTPUT_NAME}_objectives.csv')}")
+print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
+for path in vj.plot_wout(wout_path, ".").values():
+    print(f"Wrote {path}")
