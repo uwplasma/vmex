@@ -868,3 +868,94 @@ def test_subproblem_carries_scalar_bounds_and_rejects_a_wrong_length():
     problem.bounds = (np.zeros(2), np.ones(2))
     with pytest.raises(ValueError, match="one entry per decision variable"):
         problem.subproblem(["b"])
+
+
+def test_subproblem_restricts_scipy_bounds_and_rejects_an_unknown_kind():
+    """A ``Bounds`` object is restricted in place, anything else is refused."""
+    from scipy.optimize import Bounds
+
+    def residual_and_jac(x):
+        return np.asarray(x, dtype=float), np.eye(3)
+
+    problem = FunctionProblem(
+        [1.0, 2.0, 3.0], residual_and_jac=residual_and_jac, names=("a", "b", "c"),
+        bounds=Bounds(np.array([-1.0, -2.0, -3.0]), np.array([1.0, 2.0, 3.0])))
+    sub = problem.subproblem(["c", "a"])
+    assert isinstance(sub.bounds, Bounds)
+    np.testing.assert_array_equal(sub.bounds.lb, [-3.0, -1.0])
+    np.testing.assert_array_equal(sub.bounds.ub, [3.0, 1.0])
+
+    problem.bounds = "wide open"
+    with pytest.raises(TypeError, match="lower, upper"):
+        problem.subproblem(["a"])
+
+
+def test_subproblem_restricts_a_separately_supplied_gradient():
+    """``fun`` plus ``grad`` is a lane of its own: the gradient is sliced."""
+    calls = []
+
+    def fun(x):
+        calls.append(np.asarray(x, dtype=float).copy())
+        return float(np.sum(np.asarray(x, dtype=float) ** 2))
+
+    def grad(x):
+        return 2.0 * np.asarray(x, dtype=float)
+
+    problem = FunctionProblem([1.0, 2.0, 3.0], fun=fun, grad=grad,
+                              names=("a", "b", "c"))
+    sub = problem.subproblem(["a", "c"])
+    assert sub.fun([4.0, 5.0]) == pytest.approx(16.0 + 4.0 + 25.0)
+    np.testing.assert_array_equal(calls[-1], [4.0, 2.0, 5.0])
+    np.testing.assert_allclose(sub.grad([4.0, 5.0]), [8.0, 10.0])
+
+
+def test_subproblem_restricts_the_traceable_lanes():
+    """The ``jax_*`` lanes compose with a traceable embedding, so a stage stays
+    differentiable in its own variables and constant in the frozen ones."""
+    jax = pytest.importorskip("jax")
+    jnp = jax.numpy
+    weights = jnp.asarray([1.0, 2.0, 3.0, 4.0])
+
+    def jax_residual(x):
+        return weights * x
+
+    def jax_residual_jac(x):
+        return jnp.diag(weights) * jnp.ones_like(x)
+
+    def jax_value_and_grad(x):
+        return 0.5 * jnp.vdot(weights * x, weights * x), weights ** 2 * x
+
+    problem = FunctionProblem(
+        [1.0, 2.0, 3.0, 4.0],
+        residual_and_jac=lambda x: (np.asarray(weights) * x, np.diag(np.asarray(weights))),
+        jax_residual=jax_residual,
+        jax_residual_jac=jax_residual_jac,
+        jax_value_and_grad=jax_value_and_grad,
+        names=("a", "b", "c", "d"))
+    sub = problem.subproblem(["b", "d"], x=np.array([10.0, 20.0, 30.0, 40.0]))
+
+    rows = np.asarray(sub.jax_residual(jnp.asarray([2.0, 3.0])))
+    np.testing.assert_allclose(rows, np.asarray(weights) * [10.0, 2.0, 30.0, 3.0])
+    columns = np.asarray(sub.jax_residual_jac(jnp.asarray([2.0, 3.0])))
+    assert columns.shape == (4, 2)
+    value, gradient = sub.jax_value_and_grad(jnp.asarray([2.0, 3.0]))
+    full = np.array([10.0, 2.0, 30.0, 3.0])
+    assert float(value) == pytest.approx(
+        0.5 * float(np.sum((np.asarray(weights) * full) ** 2)))
+    np.testing.assert_allclose(np.asarray(gradient),
+                               (np.asarray(weights) ** 2 * full)[[1, 3]])
+    assert float(np.asarray(sub.jax_fun(jnp.asarray([2.0, 3.0])))) == pytest.approx(
+        float(value))
+
+
+def test_vmec_subproblem_needs_a_recorded_deck_for_a_max_mode_stage():
+    """Without the deck and ``max_mode`` in the metadata a stage cannot be cut."""
+    problem = VmecProblem(
+        [1.0, 2.0],
+        residual=lambda x: np.asarray(x, dtype=float),
+        residual_jac=lambda x: np.eye(2),
+        input_from_x=lambda x: x,
+        x_from_input=lambda deck: np.asarray(deck, dtype=float),
+        names=("RBC(0,1)", "ZBS(0,1)"))
+    with pytest.raises(AttributeError, match="does not record the input deck"):
+        problem.subproblem(max_mode=1)
