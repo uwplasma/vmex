@@ -568,14 +568,28 @@ def test_qa_optimization_keeps_explicit_least_squares_lane():
 @pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])
 @pytest.mark.parametrize("finite_beta", [False, True])
 def test_scalar_optimization_examples_expose_one_adjoint_lane(case, finite_beta):
-    """All eight scalar examples share wiring but keep physics visible."""
+    """All eight scalar examples keep the one-adjoint lane visible in the file.
+
+    They used to import ``run_scalar_stage`` from ``_scalar_driver.py``, so the
+    part that did the optimizing lived in a second file.  It is inlined now:
+    each script is readable end to end, and these assertions are what keep the
+    lane explicit rather than drifting back behind a helper.
+    """
     suffix = "_finite_beta_scalar" if finite_beta else "_scalar"
     text = (EXAMPLES / "optimization" / f"{case}_optimization{suffix}.py").read_text()
-    assert "from _scalar_driver import run_scalar_stage" in text
+    assert "_scalar_driver" not in text
     assert "objective_terms" in text
-    assert "run_scalar_stage(" in text
     assert "POLISH_FORCE_BALANCE = False" in text
-    assert f"input.{case}_" in text and f"wout_{case}_" in text
+    # one stem drives input., wout_ and the monitor files
+    assert f'OUTPUT_NAME = "{case}_' in text
+    assert 'to_indata(f"input.{OUTPUT_NAME}")' in text
+    assert 'write_wout(f"wout_{OUTPUT_NAME}.nc"' in text
+    # the scalar lane itself: one aggregate loss, differentiated once per step
+    assert "VmecProblem.from_loss" in text
+    assert "residuals_from_tuples" in text
+    assert "0.5 * jnp.vdot(rows, rows)" in text
+    assert "compile_value_and_gradient" in text
+    assert 'method="L-BFGS-B"' in text
     if finite_beta:
         assert "TARGET_BETA" in text
         assert "opt.volume_average_beta" in text
@@ -583,13 +597,6 @@ def test_scalar_optimization_examples_expose_one_adjoint_lane(case, finite_beta)
         assert "opt.glasser_stability_residual" in text
     else:
         assert "TARGET_BETA" not in text
-
-    helper = (EXAMPLES / "optimization" / "_scalar_driver.py").read_text()
-    assert "VmecProblem.from_loss" in helper
-    assert "residuals_from_tuples" in helper
-    assert "0.5 * jnp.vdot(rows, rows)" in helper
-    assert "compile_value_and_gradient" in helper
-    assert 'method="L-BFGS-B"' in helper
 
 
 @pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])

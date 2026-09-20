@@ -19,8 +19,8 @@ bootstrap-consistent current profile is frozen during this refinement; see
 ``QA_maxJ_continuation.py`` for the self-consistent Redl loop.
 """
 
-from dataclasses import replace
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -32,66 +32,114 @@ from vmex import optimize as opt
 from vmex.core.gammac import GammaC, GammaCSmooth
 from vmex.core.maxj import MaximumJResidual, common_trapped_pitches_state
 
-# ---- user parameters -------------------------------------------------------
-QS_SURFACES = np.linspace(0.1, 0.9, 8)      # epsilon_eff proxy sampling
-GC_SURFACES = (0.35, 0.6, 0.85)             # Gamma_c surfaces (surrogate + hard)
-MAXJ_SURFACES = np.array([0.6, 0.7, 0.8, 0.9])  # outer volume, where pressure helps
-EPS_SURFACES = (0.25, 0.5, 0.75)            # hard NEO_JAX validation surfaces
-MAX_MODE, MAXITER = 2, 20
-W_EPS, W_GC, W_MAXJ = 1.0, 1.0, 1.0         # weights of the seed-normalized terms
-IOTA_MARGIN, MAXJ_TARGET, TRAPPING_DEPTHS = 0.95, -0.01, (0.4, 0.8)
-PARAMETER_STEP, MAX_PARAMETER_CHANGE, ESS_ALPHA = 0.02, 5.0, 1.2
+# The seed deck: the finite-beta Landreman-Buller-Drevlak QA:
+INPUT_FILE = (Path(__file__).resolve().parents[1] / "data"
+              / "input.LandremanPaul2021_QA_beta2p5_bootstrap")
+
+# Flux surfaces each term is evaluated on. The quasisymmetry ratio is the
+# differentiable proxy for effective ripple; Gamma_c is sampled on fewer
+# surfaces because it is expensive; maximum-J is an outer-volume quantity,
+# where pressure can reverse the precession; EPS_SURFACES is the hard NEO_JAX
+# validation, never differentiated:
+QS_SURFACES = np.linspace(0.1, 0.9, 8)
+GC_SURFACES = (0.35, 0.6, 0.85)
+MAXJ_SURFACES = np.array([0.6, 0.7, 0.8, 0.9])
+EPS_SURFACES = (0.25, 0.5, 0.75)
+
+# Highest boundary Fourier mode number varied, and the L-BFGS-B iterations:
+MAX_MODE = 2
+MAXITER = 20
+
+# Weights of the three seed-normalized confinement terms:
+W_EPS = 1.0
+W_GC = 1.0
+W_MAXJ = 1.0
+
+# Constraints. The transform floor guards the seed rather than pushing it: it
+# sits IOTA_MARGIN below the seed minimum, so it activates only on degradation:
+IOTA_MARGIN = 0.95
+MAXJ_TARGET = -0.01
+TRAPPING_DEPTHS = (0.4, 0.8)
+
+# Gamma_c surrogate temperature and quadrature, and the bounce-ACTION plan:
 GC_TEMPERATURE = 0.15
-gc_budget = dict(nalpha=7, num_transit=3, points_per_transit=64,
+GC_BUDGET = dict(nalpha=7, num_transit=3, points_per_transit=64,
                  num_pitch=24, quadrature_order=32)
-action = dict(nalpha=7, points_per_period=32, num_periods=8,
+ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
               max_wells=20, quadrature_order=24)
 ACTION_MBOZ = 10
-# Research resolution: MAX_MODE, MAXITER = 3, 40 with
-# gc_budget = dict(nalpha=9, num_transit=5, points_per_transit=128,
-#                  num_pitch=48, quadrature_order=32) and
-# action = dict(nalpha=9, points_per_period=48, num_periods=10,
-#               max_wells=24, quadrature_order=32); quote the budgets with
-# any number -- the hard Gamma_c carries 10-20% scatter at these resolutions.
 
+# Research resolution. The hard Gamma_c carries 10-20 % scatter at the shipped
+# budgets, so quote the budget with any number taken from this script:
+#   MAX_MODE, MAXITER = 3, 40
+#   GC_BUDGET = dict(nalpha=9, num_transit=5, points_per_transit=128,
+#                    num_pitch=48, quadrature_order=32)
+#   ACTION = dict(nalpha=9, points_per_period=48, num_periods=10,
+#                 max_wells=24, quadrature_order=32)
+
+# NEO_JAX controls for the hard effective-ripple validation:
+NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
+                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
+                       max_rational_field_periods=100000)
+
+# Step control:
+PARAMETER_STEP = 0.02
+MAX_PARAMETER_CHANGE = 5.0
+ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
+STAGE_MAX_ITERATIONS = 3000       # forward solve cap inside an optimizer trial
+
+# Radial grid every optimizer trial is solved on; the deck's own is used at the
+# shipped settings:
+STAGE_OVERRIDES = {}
+
+# Every output file name contains this:
+OUTPUT_NAME = "QA_eps_gammac_maxJ"
+
+# VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAX_MODE, MAXITER = 1, 2
     QS_SURFACES, GC_SURFACES = np.linspace(0.2, 0.8, 4), (0.5,)
     GC_TEMPERATURE = 0.2
-    gc_budget = dict(nalpha=5, num_transit=2, points_per_transit=32,
+    GC_BUDGET = dict(nalpha=5, num_transit=2, points_per_transit=32,
                      num_pitch=12, quadrature_order=16)
-    # the bounce-action trace cannot be shortened further: a coarser plan
-    # loses the matched wells on the outer surfaces and returns NaN slopes
-    action = dict(nalpha=7, points_per_period=32, num_periods=8,
+    # The bounce-ACTION trace cannot be shortened further: a coarser plan loses
+    # the matched wells on the outer surfaces and returns NaN slopes.
+    ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
                   max_wells=20, quadrature_order=16)
+    NEO_CONFIG_ARGS = dict(theta_n=16, phi_n=16, npart=8, multra=1, no_bins=12,
+                           nstep_per=4, nstep_min=20, nstep_max=40, acc_req=0.2,
+                           max_rational_field_periods=100000)
+    STAGE_MAX_ITERATIONS = 100
+    STAGE_OVERRIDES = dict(ns_array=np.array([13]), ftol_array=np.array([1e-9]),
+                           niter_array=np.array([3000]))
 
-# ---- seed equilibrium ------------------------------------------------------
-DATA = (Path(__file__).resolve().parents[1] / "data"
-        / "input.LandremanPaul2021_QA_beta2p5_bootstrap")
-inp = vj.VmecInput.from_file(DATA)
-if ci_smoke:
-    inp = replace(inp, ns_array=np.array([13]), ftol_array=np.array([1e-9]),
-                  niter_array=np.array([3000]))
+###############################################################################
+# End of input parameters.
+###############################################################################
+
+### Set up the equilibrium ####################################################
+
+inp = replace(vj.VmecInput.from_file(INPUT_FILE), **STAGE_OVERRIDES)
 equilibrium = opt.solve_equilibrium(inp)
 state0, rt0 = equilibrium.solution, equilibrium.solver_context
 
-# ---- shared field-line / pitch plan ----------------------------------------
+### Set up the objective ######################################################
+
 # One physical lambda must describe the same trapped particles on every
 # surface and field-line label; select it once at the seed and keep the
 # pitch grid static for the whole stage.
 pitch = np.asarray(common_trapped_pitches_state(
     state0, rt0, MAXJ_SURFACES, TRAPPING_DEPTHS,
-    mboz=ACTION_MBOZ, nboz=ACTION_MBOZ, nalpha=action["nalpha"],
-    points_per_period=action["points_per_period"],
-    num_periods=action["num_periods"]))
+    mboz=ACTION_MBOZ, nboz=ACTION_MBOZ, nalpha=ACTION["nalpha"],
+    points_per_period=ACTION["points_per_period"],
+    num_periods=ACTION["num_periods"]))
 
-# ---- normalized objective terms --------------------------------------------
 qs = opt.QuasisymmetryRatioResidual(QS_SURFACES, helicity_m=1, helicity_n=0)
-gamma_c_smooth = GammaCSmooth(GC_SURFACES, temperature=GC_TEMPERATURE, **gc_budget)
-gamma_c_hard = GammaC(GC_SURFACES, **gc_budget)  # report-only, never differentiated
+gamma_c_smooth = GammaCSmooth(GC_SURFACES, temperature=GC_TEMPERATURE, **GC_BUDGET)
+gamma_c_hard = GammaC(GC_SURFACES, **GC_BUDGET)  # report-only, never differentiated
 maximum_j = MaximumJResidual(MAXJ_SURFACES, pitch, mboz=ACTION_MBOZ,
-                             nboz=ACTION_MBOZ, target=MAXJ_TARGET, **action)
+                             nboz=ACTION_MBOZ, target=MAXJ_TARGET, **ACTION)
 
 SCALES = {"QS": float(qs.total_state(state0, rt0)),
           "GammaCSmooth": float(gamma_c_smooth.total_state(state0, rt0)),
@@ -155,12 +203,7 @@ def hard_confinement(eq):
     try:
         from neo_jax import NeoConfig  # optional: pip install vmex[neoclassical]
 
-        config = NeoConfig(
-            theta_n=16 if ci_smoke else 24, phi_n=16 if ci_smoke else 24,
-            npart=8 if ci_smoke else 12, multra=1,
-            no_bins=12 if ci_smoke else 20, nstep_per=4 if ci_smoke else 6,
-            nstep_min=20 if ci_smoke else 30, nstep_max=40 if ci_smoke else 60,
-            acc_req=0.2 if ci_smoke else 0.1, max_rational_field_periods=100000)
+        config = NeoConfig(**NEO_CONFIG_ARGS)
         row["eps32"] = np.asarray(vj.epsilon_effective_from_wout(
             eq.wout, surfaces=EPS_SURFACES, config=config)[1])
     except ImportError as error:  # state the reason; never report a zero
@@ -179,11 +222,12 @@ report("seed", equilibrium)
 print_terms("seed", equilibrium)
 before = hard_confinement(equilibrium)
 
-# ---- one optimizer call through the scalar adjoint --------------------------
+### Run the optimization ######################################################
+
 problem = opt.VmecProblem.from_loss(
     inp, loss, max_mode=MAX_MODE, use_ess=True, ess_alpha=ESS_ALPHA,
     restart_from=equilibrium,
-    forward_max_iterations=100 if ci_smoke else 3000)
+    forward_max_iterations=STAGE_MAX_ITERATIONS)
 print(f"dof_names = {problem.dof_names}")
 monitor.problem = problem
 problem.compile_value_and_gradient()
@@ -223,7 +267,9 @@ final_equilibrium = problem.equilibrium_from_x(x_final)
 report("final", final_equilibrium)
 print_terms("final", final_equilibrium)
 
-# ---- hard before/after table (same radial and sampling resolution) ---------
+### Check the result ##########################################################
+
+# Hard before/after table, at the same radial and sampling resolution.
 after = hard_confinement(final_equilibrium)
 gc_before, gc_after = before["gamma_c"].mean(), after["gamma_c"].mean()
 print(f"\nhard confinement, before -> after (s = {list(GC_SURFACES)}):")
@@ -237,12 +283,12 @@ print(f"maximum-J residual = {before['maxj_total']:.4e} -> {after['maxj_total']:
       f"maximum-J fraction = {before['maxj_fraction']:.1%} -> {after['maxj_fraction']:.1%}")
 print(f"QS ratio total = {before['qs_total']:.4e} -> {after['qs_total']:.4e}")
 
-# ---- saved outputs ---------------------------------------------------------
-name = "QA_eps_gammac_maxJ"
-input_path = final_input.to_indata(f"input.{name}")
-wout_path = vj.write_wout(f"wout_{name}.nc", final_equilibrium.wout)
-print(f"wrote {input_path}\nwrote {wout_path}")
-monitor.save(f"{name}_objectives.csv")
-monitor.plot(f"{name}_objectives.png")
+### Print, plot and save ######################################################
+
+input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
+wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
+print(f"Wrote {input_path}\nWrote {wout_path}")
+print(f"Wrote {monitor.save(f'{OUTPUT_NAME}_objectives.csv')}")
+print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
 for path in vj.plot_wout(wout_path, ".", j_pitch=float(pitch[0])).values():
-    print(f"wrote {path}")
+    print(f"Wrote {path}")
