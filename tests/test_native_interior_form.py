@@ -41,7 +41,9 @@ moves that by far more than the tolerance.
 :func:`test_native_form_reaches_the_second_derivative_gate` measures what the
 change was for, against a field known in closed form.
 :func:`test_fitted_fallback_keeps_its_measured_accuracy` measures the path
-callers still get when their spectra predate this change.
+callers still get when their spectra predate this change, and pins it to the
+numbers it had before this PR: the C2 interpolant the native form needs is
+tied to that form rather than applied to both, so the fallback is untouched.
 
 The oracles came from PR #382, which committed them on their own, before the
 fix existed, as bands asserting how wrong the code was.  That is a fair thing
@@ -82,11 +84,12 @@ ANGLE = 0.7
 #: ``B = F/R phi_hat``.  Ceilings on what the fitted fallback achieves on it,
 #: measured at ``ns = 41, 81, 161`` (see the test's docstring for the table).
 #: They are upper bounds, not bands: an improved fallback passes unchanged.
+#: This PR leaves that path's numbers exactly as they were.
 FALLBACK_MINOR, FALLBACK_FLUX = 0.1, 2.0
 #: Applied at the FINEST resolution tested; the coarse end is documented in
 #: the test's table rather than asserted, because it is not usable there.
-FALLBACK_CEILINGS = {"B": 3.0e-6, "gradB": 1.0e-4,
-                     "gradgradB": 5.0e-3, "gradgradgradB": 1.0e0}
+FALLBACK_CEILINGS = {"B": 3.0e-5, "gradB": 1.0e-3,
+                     "gradgradB": 1.0e-1, "gradgradgradB": 1.0e0}
 
 
 def _radius(s):
@@ -296,35 +299,32 @@ def test_fitted_fallback_keeps_its_measured_accuracy():
     """What callers get without ``lmns``/``phipf``/``chipf`` in their spectra.
 
     The native form is the accurate path and every equilibrium built by
-    ``_state_field_spectra`` now takes it.  The fitted path remains reachable
-    for spectra assembled by hand or carried over from before this change, so
-    what it achieves is worth stating rather than leaving to be rediscovered.
-    A caller who wants the accurate path supplies the three native fields; on
-    a live equilibrium that is automatic.
+    ``_state_field_spectra`` now takes it.  The fitted path stays reachable for
+    spectra assembled by hand or carried over from before this change, so what
+    it achieves is worth stating rather than leaving to be rediscovered.
 
-    Measured against the exact ``B = F/R phi_hat``:
+    This PR does not change it.  The C2 interpolant the native form needs is
+    tied to that form rather than applied to both, precisely so that this path
+    keeps the numbers it had; an earlier revision gave the spline to both and
+    cost this path up to ``ns = 82`` on the second derivative and ``ns = 147``
+    on the third, which is the range real wouts are written at.  Measured
+    against the exact ``B = F/R phi_hat``, identical to before this PR:
 
     =================  ========  ========  ========  ========
-    quantity           ns = 41   ns = 81   ns = 161  ns = 321
+    quantity           ns = 41   ns = 81   ns = 101  ns = 161
     =================  ========  ========  ========  ========
-    ``B``              2.0e-5    4.9e-6    1.2e-6    3.1e-7
-    ``gradB``          8.8e-4    2.4e-4    6.0e-5    1.5e-5
-    ``gradgradB``      6.8e-1    4.8e-2    1.9e-3    4.6e-4
-    ``gradgradgradB``  1.9e+2    2.6e+1    2.6e-1    1.2e-2
+    ``B``              2.0e-5    4.9e-6    3.1e-6    1.2e-6
+    ``gradB``          8.2e-4    2.1e-4    1.3e-4    4.9e-5
+    ``gradgradB``      5.2e-2    4.6e-2    4.5e-2    4.5e-2
+    ``gradgradgradB``  6.9e-1    5.8e-1    5.8e-1    5.8e-1
     =================  ========  ========  ========  ========
 
-    Two things to read off that, and the second is a cost of this PR.  ``B``
-    and its first derivative converge at second order and are what the
-    fallback can be trusted for.  The second and third now *converge*, where
-    before this PR they were flat at 4.5e-2 and 5.8e-1 at every ``ns`` — but
-    they are far worse at coarse resolution, because the C2 interpolant that
-    the native form needs differentiates the half-mesh conversion's error
-    twice, and the fitted path has no native form to protect it.  A caller
-    reading ``gradgradgradB`` off the fallback at ``ns = 41`` gets noise; the
-    honest answer for them is to supply the native fields.
-
-    The assertions are ceilings and convergence rather than bands, so an
-    improved fallback passes them unchanged and only a regression fails.
+    ``B`` and its first derivative converge at second order and are what this
+    path can be trusted for.  The second and third do not converge at all —
+    that is the defect the native form exists to fix, and it is why asking this
+    path for them warns.  The assertions are ceilings plus convergence where
+    convergence is expected, not bands, so an improved fallback passes them
+    unchanged and only a regression fails.
     """
     names = ("B", "gradB", "gradgradB", "gradgradgradB")
     points = jnp.asarray(np.stack(
@@ -332,22 +332,22 @@ def test_fitted_fallback_keeps_its_measured_accuracy():
          np.zeros_like(SAMPLES),
          FALLBACK_MINOR * np.sqrt(SAMPLES) * np.sin(ANGLE)), axis=1))
     resolutions = (41, 81, 161)
-    table = [_errors(ext.VmecInteriorField(_toroidal_spectra(ns)), points,
-                     _toroidal_exact, names) for ns in resolutions]
+    with pytest.warns(ext.InteriorFieldAccuracyWarning, match="do not converge"):
+        table = [_errors(ext.VmecInteriorField(_toroidal_spectra(ns)), points,
+                         _toroidal_exact, names) for ns in resolutions]
     columns = {name: list(column) for name, column in zip(names, zip(*table))}
 
     for name, ceiling in FALLBACK_CEILINGS.items():
-        worst = columns[name][-1]
+        worst = max(columns[name])
         assert worst < ceiling, (
-            f"the fitted fallback's {name} error at the finest resolution "
-            f"reached {worst:.2e}, above its measured ceiling {ceiling:.0e}: "
+            f"the fitted fallback's {name} error reached {worst:.2e}, above "
+            f"its measured ceiling {ceiling:.0e}: "
             f"{[f'{v:.2e}' for v in columns[name]]} at ns = {resolutions}. "
             "These are ceilings, so they need no editing when the fallback "
             "improves - only a regression trips them.")
-    for name in names:
-        first, last = columns[name][0], columns[name][-1]
-        assert first > 3.0 * last, (
-            f"the fitted fallback's {name} error stopped converging with ns: "
-            f"{[f'{v:.2e}' for v in columns[name]]}. Before this PR the second "
-            "and third derivatives were flat; losing that again would mean the "
-            "radial interpolant regressed.")
+    # The two that converge are the two this path can be trusted for; the other
+    # two are flat, which is the defect the native form exists to fix.
+    for name in ("B", "gradB"):
+        assert columns[name][0] > 10.0 * columns[name][-1], (name, columns[name])
+    for name in ("gradgradB", "gradgradgradB"):
+        assert columns[name][0] < 2.0 * columns[name][-1], (name, columns[name])

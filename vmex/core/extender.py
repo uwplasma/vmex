@@ -10,6 +10,7 @@ explicit-point methods remain JAX-transformable.
 from __future__ import annotations
 
 import math
+import warnings
 from pathlib import Path
 from typing import Any, Callable, Literal, cast
 
@@ -56,6 +57,10 @@ _INSIDE_MARGIN = 0.99
 
 class ExteriorFieldAccuracyWarning(UserWarning):
     """Direct virtual-casing quadrature missed its requested ``digits``."""
+
+
+class InteriorFieldAccuracyWarning(UserWarning):
+    """A second or third derivative was taken on the fitted fallback path."""
 
 
 class ExteriorFieldAccuracyError(RuntimeError):
@@ -462,7 +467,8 @@ def _spline_moments(regular: Array) -> Array:
     return jnp.linalg.solve(jnp.asarray(matrix, dtype=regular.dtype), rhs)
 
 
-def _radial_table(coefficients: Array, modes: Array | None) -> tuple[Array, Array]:
+def _radial_table(coefficients: Array, modes: Array | None,
+                  spline: bool = True) -> tuple[Array, Array]:
     """Axis-regularized coefficients and their spline moments.
 
     A regular scalar Fourier coefficient with poloidal mode ``m`` behaves as
@@ -481,7 +487,8 @@ def _radial_table(coefficients: Array, modes: Array | None) -> tuple[Array, Arra
         scale = s_mesh[:, None] ** powers[None, :]
         regular = coefficients / jnp.where(scale == 0.0, 1.0, scale)
         regular = regular.at[0].set(jnp.where(powers > 0, regular[1], regular[0]))
-    return regular, _spline_moments(regular)
+    # Zero moments reduce the evaluation below to plain linear interpolation.
+    return regular, _spline_moments(regular) if spline else jnp.zeros_like(regular)
 
 
 def _radial_value_and_derivative(
@@ -529,13 +536,22 @@ def _prepared(spectra: dict[str, Array]) -> dict[str, Any]:
     if "_tables" in spectra:
         return spectra
     xm, xmn = spectra["xm"], spectra["xmn"]
+    # The C2 interpolant is a requirement of the native form, whose Jacobian
+    # carries R_s and Z_s; the fitted path neither needs it nor benefits from
+    # it.  Giving it to both differentiated the half-mesh conversion's error
+    # twice on a path with no native form to absorb it, which cost the fitted
+    # second derivative up to ns = 82 and the third up to ns = 147 - the range
+    # real wouts are written at.  So the interpolant follows the form.
+    native = _has_native_form(spectra)
     tables = {
-        "rmnc": _radial_table(spectra["rmnc"], xm),
-        "zmns": _radial_table(spectra["zmns"], xm),
-        "bsupu": _radial_table(_full_mesh_contravariant(spectra["bsupu"], xmn), xmn),
-        "bsupv": _radial_table(_full_mesh_contravariant(spectra["bsupv"], xmn), xmn),
+        "rmnc": _radial_table(spectra["rmnc"], xm, native),
+        "zmns": _radial_table(spectra["zmns"], xm, native),
+        "bsupu": _radial_table(
+            _full_mesh_contravariant(spectra["bsupu"], xmn), xmn, native),
+        "bsupv": _radial_table(
+            _full_mesh_contravariant(spectra["bsupv"], xmn), xmn, native),
     }
-    if _has_native_form(spectra):
+    if native:
         tables["lmns"] = _radial_table(spectra["lmns"], xm)
         for name in ("phipf", "chipf"):
             tables[name] = _radial_table(
@@ -547,10 +563,11 @@ def _flux_coordinates_to_xyz(spectra: dict[str, Array], points: Array) -> Array:
     """Map VMEC ``(s, theta, phi)`` coordinates to Cartesian points."""
     spectra = _prepared(spectra)
     s, theta, phi = _check_points(points, "flux coordinates").T
+    tables = spectra["_tables"]
     radial_r = jax.vmap(lambda value: _radial_value_and_derivative(
-        spectra["rmnc"], value, spectra["xm"])[0])(s)
+        None, value, spectra["xm"], tables["rmnc"])[0])(s)
     radial_z = jax.vmap(lambda value: _radial_value_and_derivative(
-        spectra["zmns"], value, spectra["xm"])[0])(s)
+        None, value, spectra["xm"], tables["zmns"])[0])(s)
     phase = spectra["xm"][None, :] * theta[:, None] - spectra["xn"][None, :] * phi[:, None]
     radius = jnp.sum(radial_r * jnp.cos(phase), axis=1)
     z = jnp.sum(radial_z * jnp.sin(phase), axis=1)
@@ -561,12 +578,14 @@ def _B_contravariant_flux(spectra: dict[str, Array], points: Array) -> Array:
     """Return ``(B^s, B^theta, B^phi)`` at VMEC flux coordinates."""
     spectra = _prepared(spectra)
     s, theta, phi = _check_points(points, "flux coordinates").T
-    bu_full = _full_mesh_contravariant(spectra["bsupu"], spectra["xmn"])
-    bv_full = _full_mesh_contravariant(spectra["bsupv"], spectra["xmn"])
+    # The prepared tables, so every entry point shares one interpolant: these
+    # helpers building their own disagreed with the field by 6e-4 once the
+    # interpolant started following the form.
+    tables = spectra["_tables"]
     bu_coeff = jax.vmap(lambda value: _radial_value_and_derivative(
-        bu_full, value, spectra["xmn"])[0])(s)
+        None, value, spectra["xmn"], tables["bsupu"])[0])(s)
     bv_coeff = jax.vmap(lambda value: _radial_value_and_derivative(
-        bv_full, value, spectra["xmn"])[0])(s)
+        None, value, spectra["xmn"], tables["bsupv"])[0])(s)
     phase = spectra["xmn"][None, :] * theta[:, None] - spectra["xnn"][None, :] * phi[:, None]
     return jnp.stack((jnp.zeros_like(s), jnp.sum(bu_coeff * jnp.cos(phase), axis=1),
                       jnp.sum(bv_coeff * jnp.cos(phase), axis=1)), axis=1)
@@ -993,6 +1012,7 @@ class VmecInteriorField(MagneticField):
         self.newton_iterations = int(newton_iterations)
         self._points_flux: Array | None = None
         self._derivative_fns: dict[tuple[int, int, int], Callable[[Array, Array], Array]] = {}
+        self._warned = False
 
         def B_fn(points):
             return _interior_coordinates_and_B(
@@ -1029,6 +1049,17 @@ class VmecInteriorField(MagneticField):
         """``order``-th Cartesian derivative of ``B``, compiled once per order."""
         xyz, seeds = self._seeds(points)
         spectra, iterations = self.spectra, self.newton_iterations
+        if order >= 2 and not _has_native_form(spectra) and not self._warned:
+            self._warned = True
+            warnings.warn(
+                "this field was built from the fitted B^u/B^v spectra, whose "
+                "second and third radial derivatives do not converge with ns: "
+                "on an exact oracle they stay near 4.5e-2 and 5.8e-1 at every "
+                "resolution. B and its first derivative are unaffected. For "
+                "converged high derivatives, build the field from spectra that "
+                "carry lmns, phipf and chipf, which any live equilibrium "
+                "supplies; those reach 2.2e-4 and 7.8e-4 at ns = 41.",
+                InteriorFieldAccuracyWarning, stacklevel=3)
         key = (order, id(spectra), iterations)  # a reassigned attribute recompiles
         evaluate = self._derivative_fns.get(key)
         if evaluate is None:
@@ -1523,8 +1554,6 @@ class VmecExtender(MagneticField):
             "with_near_surface_continuation().")
         if self._accuracy_check == "raise":
             raise ExteriorFieldAccuracyError(message)
-        import warnings
-
         warnings.warn(message, ExteriorFieldAccuracyWarning, stacklevel=3)
 
     @property
