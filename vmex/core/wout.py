@@ -695,7 +695,7 @@ def wout_from_state(
     additionally populate ``potcos`` and the four sine ``*_sur`` partners.
     """
     from . import nyquist as _nyq
-    from .setup import boundary_from_input, flux_profiles, radial_grids
+    from .setup import run_setup
     from .solver import resolution_from_input
     from .transforms import physical_to_internal_scale
 
@@ -709,21 +709,38 @@ def wout_from_state(
     nnyq_grid = max(nzeta // 2, ntor)
     trig = trig_tables(Resolution(mpol=mnyq_grid + 1, ntor=nnyq_grid, ntheta=ntheta,
                                   nzeta=nzeta, nfp=nfp, lasym=lasym, ns=ns))
-    grids = radial_grids(ns)
-    s = np.asarray(grids.s_full, dtype=float)
     gamma = float(inp.gamma)
     ncurr = int(inp.ncurr)
 
-    # -- profil1d.f profiles / readin.f boundary metadata -------------------
-    boundary = boundary_from_input(inp, modes=modes, trig=trig, lconm1=True)
-    signgs = int(boundary.signgs)
-    prof = flux_profiles(inp, grids, r00=boundary.r00, signgs=signgs,
-                         lflip=boundary.lflip)
+    # -- profil1d.f grids and profiles / readin.f boundary metadata ---------
+    # These are exactly ``run_setup``'s outputs at this rung's resolution, and
+    # asking for them that way is what keeps the export off the eager path:
+    # ``run_setup`` builds its arrays in one compiled lane
+    # (:func:`vmex.core.setup._setup_lane`) that the solve has already
+    # compiled for this very resolution, so the export reuses that executable
+    # instead of dispatching ~90 single-op XLA programs of its own -- which is
+    # what it did while it called ``radial_grids``, ``boundary_from_input``
+    # and ``flux_profiles`` separately.  The arithmetic is unchanged: the lane
+    # calls the same three functions, and it is compiled at XLA optimization
+    # level 0 precisely so that it reproduces the op-at-a-time result bit for
+    # bit (see the comment on ``setup._LANE_COMPILER_OPTIONS``; the WOUT file
+    # is a byte-for-byte contract, so a contracted multiply-add here would be
+    # a visible change).  ``signgs``, ``lflip`` and the ``r00`` that feeds the
+    # profiles are read from the INDATA blocks on the host and do not depend
+    # on which trig table the caller holds, so passing the Nyquist-extended
+    # ``trig`` here, as this function did, never changed them.
+    setup = run_setup(inp, res, lconm1=True, infer_axis_if_missing=False)
+    s = np.asarray(setup.s_full, dtype=float)
+    signgs = int(setup.signgs)
+    prof = {
+        "phips": setup.phips, "phipf": setup.phipf, "chips": setup.chips,
+        "mass": setup.mass, "icurv": setup.icurv, "iotas": setup.iotas,
+    }
 
     # -- geometry + half-mesh field state (totzsps/jacobian/bcovar) ---------
     (geometry, jacobian, metrics, fields, norms, R_cos_p, Z_sin_p, R_sin_p,
      Z_cos_p, trapped_fraction) = jax.device_get(_wout_field_state_lane(
-        state, grids.s_full, prof["phips"], prof["phipf"], prof["chips"],
+        state, setup.s_full, prof["phips"], prof["phipf"], prof["chips"],
         prof["mass"], prof["icurv"],
         res=res, signgs=signgs, gamma=gamma, ncurr=ncurr))
 
@@ -779,7 +796,7 @@ def wout_from_state(
     zaxis_cc = zmnc[0, :n_axis].copy() if lasym else None
 
     # -- eqfor.f / aspectratio.f scalars -------------------------------------
-    sqrts_edge = np.asarray(grids.sqrts, dtype=float)[-1]
+    sqrts_edge = np.asarray(setup.sqrts, dtype=float)[-1]
     r_boundary = np.asarray(geometry.R_even, dtype=float)[-1] + sqrts_edge * np.asarray(
         geometry.R_odd, dtype=float)[-1]
     zu_boundary = np.asarray(geometry.dZ_dtheta_even, dtype=float)[-1] + sqrts_edge * np.asarray(

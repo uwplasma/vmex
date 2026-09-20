@@ -575,3 +575,56 @@ def test_jax_lanes_reuse_host_executables_and_full_jit_reference_agrees():
     assert signatures["jit(_constraint_baselines_lane)"] == [1], report
     assert signatures["jit(predicted_state)"] == [1], report
     assert signatures["jit(_block_lane)"] == [1], report
+
+
+#: XLA programs the WOUT export is allowed to compile after a solve at the
+#: same resolution.  ``wout_from_state`` rebuilds the profil1d.f grids and
+#: profiles it needs; routed through ``setup.run_setup`` those come from the
+#: lane the solve already compiled, so the only new program is the export's
+#: own ``_wout_field_state_lane`` (plus, on a free-boundary run, its field
+#: chain).  Measured 2026-09-20: 1 here, against about 90 while the export
+#: called ``radial_grids``, ``boundary_from_input`` and ``flux_profiles``
+#: separately — 74 of li383's 111 remaining cold-CLI programs.
+_WOUT_EXPORT_NEW_PROGRAM_CEILING = 3
+
+
+def test_wout_export_reuses_the_solve_setup_lane():
+    """The export must not dispatch a second copy of the setup's array build.
+
+    In-process on purpose: the point is that the export reuses what the solve
+    in the same process already compiled.
+    """
+    from jax import monitoring
+
+    from vmex.core import multigrid
+    from vmex.core.wout import wout_from_state
+
+    compiles: list[str] = []
+    monitoring.register_event_duration_secs_listener(
+        lambda event, secs, **kw: compiles.append(str(kw.get("fun_name", "?")))
+        if event == "/jax/core/compile/backend_compile_duration" else None)
+
+    inp = VmecInput.from_file(str(SOLOVEV_DECK))
+    result = multigrid.solve_multigrid(inp, raise_on_max_iterations=False)
+    assert result.converged
+    before = len(compiles)
+    data = wout_from_state(
+        inp=inp, state=result.state, fsqr=float(result.fsqr),
+        fsqz=float(result.fsqz), fsql=float(result.fsql),
+        niter=int(result.iterations), converged=bool(result.converged),
+        input_extension="budget")
+    new = compiles[before:]
+    assert data.rmnc.shape[0] == int(result.state.R_cos.shape[0])
+    assert len(new) <= _WOUT_EXPORT_NEW_PROGRAM_CEILING, (
+        f"the WOUT export compiled {len(new)} new XLA programs ({new}); it is "
+        "dispatching the profil1d.f setup op by op again instead of reusing "
+        "the solve's lane (see wout._wout_profiles)."
+    )
+    # A second export at the same resolution must compile nothing at all.
+    before = len(compiles)
+    wout_from_state(
+        inp=inp, state=result.state, fsqr=float(result.fsqr),
+        fsqz=float(result.fsqz), fsql=float(result.fsql),
+        niter=int(result.iterations), converged=bool(result.converged),
+        input_extension="budget")
+    assert compiles[before:] == [], f"a repeat export compiled {compiles[before:]}"
