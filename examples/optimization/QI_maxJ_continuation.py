@@ -1,8 +1,20 @@
 #!/usr/bin/env python
-"""Constructed-QI and maximum-J boundary optimization."""
+"""Continue a constructed-QI boundary into a maximum-J field.
 
-from dataclasses import replace
+Two ladders. The first optimizes constructed QI alone from a minimal seed,
+because a common physical pitch generally does not exist on a circular
+boundary: evaluating dJ/ds before the QI basin exists would compare different
+trapped-particle populations on adjacent surfaces. The second then adds the
+J-invariance and maximum-J residuals, strengthening their weights and
+tightening the maximum-J target stage by stage.
+
+The trapped pitches are selected once after the weak first maximum-J stage and
+held fixed afterwards, so every later stage differentiates the same particles.
+The script refuses to continue if the QI seed loses usable wells.
+"""
+
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -16,36 +28,83 @@ from vmex.core.maxj import (
 )
 from vmex.core.qi import ConstructedQIResidual
 
-nfp = 3 # number of field periods
+# Number of field periods, and the seed deck the boundary is shaped from:
+NFP = 3
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
+
+# Rotating-ellipse amplitude added to the circular seed:
+SEED_PERTURBATION = 0.08
+
+# Flux surfaces every residual is evaluated on:
 SURFACES = np.array([0.20, 0.35, 0.50, 0.65, 0.80, 0.90])
-QI_SEED_MAX_MODES, QI_SEED_MAX_NFEV = [1, 2, 3, 4], [20, 30, 50, 60]
+
+# QI-only seed ladder: highest boundary mode number per stage, the residual
+# evaluations each may spend, and the ESS damping each uses:
+QI_SEED_MAX_MODES = [1, 2, 3, 4]
+QI_SEED_MAX_NFEV = [20, 30, 50, 60]
 QI_SEED_ESS_ALPHA = [1.2, 1.2, 0.9, 0.7]
-MAX_MODES, MAX_NFEV = [2, 3, 4], [8, 12, 30]
-ASPECT_TARGET, IOTA_FLOOR, MIRROR_LIMIT = 4.0, 1.03, 0.35
-MAGNETIC_WELL_TARGET = 0.01
 QI_SEED_WEIGHT = 1.0e3
+
+# Maximum-J ladder, one entry per stage:
+MAX_MODES = [2, 3, 4]
+MAX_NFEV = [8, 12, 30]
 MAXIMUM_J_TARGETS = [0.0, -0.002, -0.005]
 MAXIMUM_J_WEIGHTS = [500.0, 2.0e3, 5.0e3]
 QI_INVARIANCE_WEIGHTS = [1.0e3, 5.0e3, 1.0e4]
 CONSTRUCTED_QI_WEIGHTS = [1.0e4, 1.0e4, 1.0e4]
 MAGNETIC_WELL_WEIGHTS = [100.0, 1.0e3, 1.0e3]
-TRAPPING_DEPTHS = (0.35, 0.55, 0.75)
-MINIMUM_MPOL = 5
-BOUNDARY_STEP = 0.05  # local trust region: large enough to move, small enough to preserve wells
-QI_SEED_BOUNDARY_STEP = 0.10
-VARY_MAJOR_RADIUS = False  # set True to optimize RBC(0,0) instead of fixing it
-SEED_PERTURBATION = 0.08
-qi_options = dict(nphi=61, nalpha=18, n_bounce=21)
-coarse_action = dict(nalpha=5, points_per_period=24, num_periods=6,
+MAXJ_ESS_ALPHA = 0.7
+
+# Targets and limits:
+ASPECT_TARGET = 4.0
+IOTA_FLOOR = 1.03                 # minimum |iota| over the profile
+MIRROR_LIMIT = 0.35
+MAGNETIC_WELL_TARGET = 0.01
+
+# Boozer resolution of the constructed-QI residual:
+QI_MBOZ = 14
+QI_OPTIONS = dict(nphi=61, nalpha=18, n_bounce=21)
+
+# Bounce-action quadrature. The last stages cover a full poloidal transit and
+# more alpha values, which removes an alias a short coarse trace misses:
+COARSE_ACTION = dict(nalpha=5, points_per_period=24, num_periods=6,
                      max_wells=16, quadrature_order=16)
-# The last stages cover a full poloidal transit and more alpha values. This
-# removes the visually apparent alias that a short, coarse action trace misses.
-resolved_action = dict(nalpha=9, points_per_period=32, num_periods=10,
+RESOLVED_ACTION = dict(nalpha=9, points_per_period=32, num_periods=10,
                        max_wells=24, quadrature_order=24)
 ACTION_MBOZ = [8, 8, 10, 10]
-ACTION_OPTIONS = [coarse_action, coarse_action, resolved_action, resolved_action]
+ACTION_OPTIONS = [COARSE_ACTION, COARSE_ACTION, RESOLVED_ACTION, RESOLVED_ACTION]
 
+# Field strengths that trap the same particles on every sampled line:
+TRAPPING_DEPTHS = (0.35, 0.55, 0.75)
+
+# Step control. Local trust regions: large enough to move, small enough to
+# preserve the trapped wells:
+QI_SEED_BOUNDARY_STEP = 0.10
+BOUNDARY_STEP = 0.05
+QI_SEED_FORWARD_FTOL = 1e-6
+QI_SEED_FORWARD_ITERATIONS = 500
+MAXJ_FORWARD_FTOL = 1e-7
+MAXJ_FORWARD_ITERATIONS = 800
+VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
+
+# Equilibrium resolution: poloidal and toroidal mode numbers grow with the
+# stage but never fall below MINIMUM_MPOL:
+MINIMUM_MPOL = 5
+
+# Verification solve of the optimized boundary:
+FINAL_NS = 101
+FINAL_FTOL = 1e-14
+FINAL_NITER = 8000
+
+# Every output file name contains this:
+OUTPUT_NAME = "QI_maxJ_optimized"
+
+# VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs. It keeps the
+# minimal-seed QI wiring but swaps in a bundled QI state before the maximum-J
+# stages, rather than spending minutes forming matched wells to test one AD step.
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
+SMOKE_INPUT_FILE = (Path(__file__).resolve().parents[1] / "data"
+                    / "input.nfp3_QI_fixed_resolution_final")
 if ci_smoke:
     QI_SEED_MAX_MODES, QI_SEED_MAX_NFEV = [1], [2]
     QI_SEED_ESS_ALPHA = [1.2]
@@ -55,39 +114,54 @@ if ci_smoke:
     CONSTRUCTED_QI_WEIGHTS = [1.0e4]
     MAGNETIC_WELL_WEIGHTS = [100.0]
     SURFACES, TRAPPING_DEPTHS = np.array([0.25, 0.45, 0.65, 0.85]), (0.5,)
-    qi_options = dict(nphi=25, nalpha=5, n_bounce=5)
-    coarse_action = dict(nalpha=5, points_per_period=24, num_periods=6,
-                         max_wells=16, quadrature_order=16)
+    QI_MBOZ = 8
+    QI_OPTIONS = dict(nphi=25, nalpha=5, n_bounce=5)
     ACTION_MBOZ = [8]
-    ACTION_OPTIONS = [coarse_action]
+    ACTION_OPTIONS = [COARSE_ACTION]
+    FINAL_NS, FINAL_FTOL = 31, 1e-10
 
-# Start from the same transparent vacuum seed used by the other optimization
-# examples. A rotating ellipse gives iota; the QI-only first stage then creates
-# the common trapped-well topology required by the physical-pitch J objective.
-DATA = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{nfp}"
-inp = vj.VmecInput.from_file(DATA)
+###############################################################################
+# End of input parameters.
+###############################################################################
+
+### Set up the equilibrium ####################################################
+
+# The same transparent vacuum seed the other optimization examples use. A
+# rotating ellipse gives iota; the QI-only first ladder then creates the common
+# trapped-well topology the physical-pitch J objective needs.
+# VmecInput is frozen, so copy its arrays before shaping the seed boundary.
+inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
 inp = replace(inp, rbc=rbc, zbs=zbs)
-qi = ConstructedQIResidual(SURFACES, mboz=8 if ci_smoke else 14,
-                           nboz=8 if ci_smoke else 14, **qi_options)
+
+### Set up the objective ######################################################
+
+qi = ConstructedQIResidual(SURFACES, mboz=QI_MBOZ, nboz=QI_MBOZ, **QI_OPTIONS)
+
 
 def mirror_excess(equilibrium_state, solver_context):
+    """Hinge on the mirror ratio above its limit; zero while the limit holds."""
     return jnp.maximum(
         opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
 
-# Floor the profile minimum, not its average: a mean target is satisfiable while
-# an interior surface sits near zero transform, which is what a current-carried
-# finite-beta profile does. opt.mean_iota targets the average instead, and
-# opt.soft_min_abs_iota is the smooth-minimum variant.
+
 def iota_floor(equilibrium_state, solver_context):
+    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
+
+    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
+    """
     return jnp.maximum(
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
+
 def magnetic_well_floor(equilibrium_state, solver_context):
+    """Hinge below the magnetic-well target; zero once the well is deep enough."""
     return jnp.maximum(
         MAGNETIC_WELL_TARGET - opt.magnetic_well(equilibrium_state, solver_context), 0.0)
 
+
+# Each term is (function, target, weight).
 shape_terms = [
     (qi, 0.0, QI_SEED_WEIGHT),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
@@ -102,17 +176,13 @@ report = opt.EquilibriumReporter(
     ("magnetic well", opt.magnetic_well, ".3f"))
 monitor = opt.OptimizationMonitor()
 
-# First form a vacuum QI basin from the minimal seed. A common physical pitch
-# generally does not exist on the circular seed, so evaluating dJ/ds earlier
-# would compare different trapped-particle populations on adjacent surfaces.
+### Run the optimization ######################################################
+
+# First form a vacuum QI basin from the minimal seed.  A RuntimeWarning about
+# uncertified Jacobian columns is expected once the optimizer leaves the seed
+# and needs no action; see examples/README.md.
 equilibrium = opt.solve_equilibrium(inp)
 report("seed", equilibrium)
-# If a RuntimeWarning reports uncertified Jacobian columns, it is expected
-# once the optimizer leaves the seed and needs no action: the shipped
-# jacobian_adjoint_tol=1e-4 and jacobian_adjoint_maxiter=10 are the measured
-# optimum, since ten times that budget moved the Jacobian by 2e-8 and
-# certified no extra column. Both are from_tuples arguments; pass
-# evaluation_progress=False to drop the per-evaluation timing lines.
 for max_mode, max_nfev, ess_alpha in zip(
         QI_SEED_MAX_MODES, QI_SEED_MAX_NFEV, QI_SEED_ESS_ALPHA):
     mpol, ntor = max(inp.mpol, max_mode + 2, MINIMUM_MPOL), max(inp.ntor, max_mode + 2)
@@ -121,8 +191,8 @@ for max_mode, max_nfev, ess_alpha in zip(
     print(f"\n===== QI seed stage, max_mode = {max_mode} =====")
     problem = opt.VmecProblem.from_tuples(inp, shape_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ess_alpha,
-        restart_from=equilibrium, forward_ftol=1e-6,
-        forward_max_iterations=500, progress=not ci_smoke)
+        restart_from=equilibrium, forward_ftol=QI_SEED_FORWARD_FTOL,
+        forward_max_iterations=QI_SEED_FORWARD_ITERATIONS, progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:
@@ -135,12 +205,8 @@ for max_mode, max_nfev, ess_alpha in zip(
     report(f"QI seed mode {max_mode}", equilibrium)
 
 if ci_smoke:
-    # The smoke lane already exercised minimal-seed continuation above. Use a
-    # bundled QI state for the separate maximum-J wiring check so nightly CI
-    # does not spend minutes forming matched wells before testing one AD step.
-    inp = vj.VmecInput.from_file(
-        Path(__file__).resolve().parents[1] / "data" / "input.nfp3_QI_fixed_resolution_final")
-    inp = replace(inp, ns_array=np.array([11]), ftol_array=np.array([1e-8]),
+    inp = replace(vj.VmecInput.from_file(SMOKE_INPUT_FILE),
+                  ns_array=np.array([11]), ftol_array=np.array([1e-8]),
                   niter_array=np.array([2000]))
     equilibrium = opt.solve_equilibrium(inp)
 
@@ -184,9 +250,9 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
     inp = replace(inp, delt=0.5).change_resolution(
         mpol=mpol, ntor=ntor, ntheta=2 * mpol + 6, nzeta=2 * ntor + 4)
     problem = opt.VmecProblem.from_tuples(inp, objective_function_terms, max_mode=max_mode,
-        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=0.7,
-        restart_from=equilibrium, forward_ftol=1e-7,
-        forward_max_iterations=800, progress=not ci_smoke)
+        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=MAXJ_ESS_ALPHA,
+        restart_from=equilibrium, forward_ftol=MAXJ_FORWARD_FTOL,
+        forward_max_iterations=MAXJ_FORWARD_ITERATIONS, progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     step = BOUNDARY_STEP * problem.scales
@@ -203,10 +269,16 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
     print(f"actual-field maximum-J fraction = "
           f"{float(stage_maxj['maximum_j_fraction']):.1%}")
 
-final_input = replace(inp, ns_array=np.array([31 if ci_smoke else 101]),
-    ftol_array=np.array([1e-10 if ci_smoke else 1e-14]), niter_array=np.array([8000]))
+### Check the result ##########################################################
+
+# The optimizer's grid is not the certificate: re-solve on a finer radial grid.
+final_input = replace(inp, ns_array=np.array([FINAL_NS]),
+    ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
 final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium.solution,
     verbose=not ci_smoke, raise_on_max_iterations=True)
+
+### Print, plot and save ######################################################
+
 report("final", final_equilibrium)
 # The final report repeats the actual-field J-invariance and matched-well dJ/ds
 # at the most resolved action quadrature used by the continuation.
@@ -220,10 +292,10 @@ print(f"J-invariance = {float(diagnostics['qi']['total']):.4e}, "
       f"maximum-J = {float(diagnostics['maximum_j']['total']):.4e}, "
       f"maximum-J fraction = {float(diagnostics['maximum_j']['maximum_j_fraction']):.1%}, "
       f"target-margin fraction = {float(diagnostics['maximum_j']['target_fraction']):.1%}")
-input_path = final_input.to_indata("input.QI_maxJ_optimized")
-wout_path = vj.write_wout("wout_QI_maxJ_optimized.nc", final_equilibrium.wout)
-print(f"wrote {input_path}\nwrote {wout_path}")
-monitor.save("QI_maxJ_objectives.csv")
-monitor.plot("QI_maxJ_objectives.png")
+input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
+wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
+print(f"Wrote {input_path}\nWrote {wout_path}")
+print(f"Wrote {monitor.save(f'{OUTPUT_NAME}_objectives.csv')}")
+print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
 for path in vj.plot_wout(wout_path, ".", j_pitch=float(pitch[0])).values():
-    print(f"wrote {path}")
+    print(f"Wrote {path}")
