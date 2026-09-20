@@ -397,9 +397,13 @@ def test_traced_pullback_says_it_cannot_run_the_host_schur_lane(monkeypatch):
         adjoint_solver="boundary_schur", adjoint_fail="error")
     saved = (jnp.asarray(0.5), jnp.asarray(0.25), jnp.asarray([2., 3.]),
              None, None, None)
-    with pytest.warns(UserWarning, match="cannot run under jax.jit"):
+    # The warning has to name both consequences: a different solver, and the
+    # slower one, so a user who jits does not silently pay for both.
+    with pytest.warns(RuntimeWarning, match="not available under jax.jit") as caught:
         jax.jit(lambda bar: fbi._solve_bwd_impl(cfg, saved, bar))(
             jnp.asarray([1., -2.]))
+    message = str(caught[0].message)
+    assert "staged" in message and "slower" in message
 
 
 def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):

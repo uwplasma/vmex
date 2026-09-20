@@ -636,10 +636,16 @@ def _solve_bwd_impl(cfg, saved, state_bar):
         # transpose matvec and has a much smaller cold memory peak.
         if cfg.adjoint_solver == "boundary_schur":
             warnings.warn(
-                "adjoint_solver='boundary_schur' is a host lane and cannot run "
-                "under jax.jit; this pullback uses the staged coupled GCROT "
-                "solve instead. Call the objective eagerly to keep the Schur "
-                "adjoint.", stacklevel=2)
+                "adjoint_solver='boundary_schur' is a host lane and is not "
+                "available under jax.jit; this pullback uses the staged "
+                "coupled GCROT solve instead. That is a different solver, so "
+                "the gradient agrees only to the Krylov tolerance, and it is "
+                "the slower of the two -- measured on the free-boundary "
+                "single-stage deck at ns = 25, one value-and-gradient costs "
+                "46.5 s through the Schur lane against 60.9-74.7 s staged, "
+                "and the gap widens as the Schur lane gets faster. Call the "
+                "objective eagerly to keep the solver you asked for.",
+                RuntimeWarning, stacklevel=2)
         _, state_pullback = jax.vjp(
             lambda z: residual(
                 z, params, field_parameters, frozen, rcon0, zcon0), z_star
