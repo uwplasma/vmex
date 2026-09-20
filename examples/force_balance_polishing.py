@@ -1,37 +1,56 @@
 #!/usr/bin/env python
-"""Polish the bundled shaped tokamak and compare the exported WOUT files.
+"""Polish an equilibrium's force balance and compare the exported WOUT files.
 
-VMEX first converges the ordinary VMEC discretization.  The optional polish
-then solves the higher-order strong force-balance residual and certifies the
-result with independent force, radial-refinement, and positive-Jacobian
-checks.  A certified equilibrium is exported by sampling the native state on
-a denser radial mesh, where the WOUT reconstruction can carry the polish
-gain; ``solve_file`` writes that file directly.
+VMEX first converges the ordinary VMEC discretization. The optional polish then
+solves the higher-order strong force-balance residual and certifies the result
+with independent force, radial-refinement and positive-Jacobian checks. A
+certified equilibrium is exported by sampling the native state on a denser
+radial mesh, where the WOUT reconstruction can carry the polish gain;
+``solve_file`` writes that file directly.
+
+The polish is requested by a VMEX-only directive in the deck, so there is no
+Python flag to set here. What this script adds is the evidence: it refuses to
+continue unless the polish certified, prints the independent strong-force
+certificate, and saves and plots the WOUT before and after so the two can be
+compared.
+
+This example has no smoke path: the polish is the demonstration, and the deck
+asks for it.
 """
 
 from pathlib import Path
 
 import vmex as vj
 
-# --------------------------- parameters ------------------------------------
+# Input deck.  Its POLISH_FORCE_BALANCE directive is what requests the polish:
 INPUT_FILE = (
-    Path(__file__).resolve().parent
-    / "data"
-    / "input.shaped_tokamak_pressure_polished"
+    Path(__file__).resolve().parent / "data" / "input.shaped_tokamak_pressure_polished"
 )
-OUT_DIR = Path("output_force_balance_polishing")
 
-# --------------------------- solve -----------------------------------------
-# solve_file reads the VMEX-only directive in the input deck; because the
-# polish certifies, the WOUT it writes samples the native state on the dense
-# export mesh.  VmecInput itself contains physics only, so solve_multigrid
-# requires an explicit Python flag.
+# Directory that receives every output file.  The before and after figures go
+# into subdirectories of it:
+OUTPUT_DIR = Path("output_force_balance_polishing")
+BEFORE_NAME = "shaped_tokamak_before_polish"
+
+###############################################################################
+# End of input parameters.
+###############################################################################
+
+### Set up the equilibrium ####################################################
+
+# solve_file reads the VMEX-only directive in the deck; because the polish
+# certifies, the WOUT it writes samples the native state on the dense export
+# mesh.  VmecInput itself contains physics only, so solve_multigrid would
+# require an explicit Python flag instead.
 inp = vj.VmecInput.from_file(INPUT_FILE)
-result = vj.solve_file(
-    INPUT_FILE, write_wout=True, outdir=OUT_DIR, verbose=True
-)
+
+### Solve and polish ##########################################################
+
+result = vj.solve_file(INPUT_FILE, write_wout=True, outdir=OUTPUT_DIR, verbose=True)
 if result.polished_state is None or result.polish_report is None:
     raise RuntimeError("the input deck did not request force-balance polishing")
+
+### Check the result ##########################################################
 
 report = result.polish_report
 if not report.converged:
@@ -61,11 +80,12 @@ print(
     f"{report.solve_seconds:.2f} s"
 )
 
-# --------------------------- save ------------------------------------------
+### Print, plot and save ######################################################
+
 # solve_file already wrote the certified polished WOUT; export the ordinary
 # VMEC state alongside it for the before/after comparison.
 legacy_path = vj.write_wout(
-    OUT_DIR / "wout_shaped_tokamak_before_polish.nc",
+    OUTPUT_DIR / f"wout_{BEFORE_NAME}.nc",
     vj.wout_from_state(
         inp=inp,
         state=result.state,
@@ -76,14 +96,14 @@ legacy_path = vj.write_wout(
         converged=bool(result.converged),
     ),
 )
-polished_path = OUT_DIR / "wout_shaped_tokamak_pressure_polished.nc"
+case = INPUT_FILE.name.removeprefix("input.")
+polished_path = OUTPUT_DIR / f"wout_{case}.nc"
 print(f"wrote {legacy_path}\nusing {polished_path}")
 
-# --------------------------- plot ------------------------------------------
 # The printed certificate is the polish evidence; the summary's radial
 # force-balance panel shows VMEC's discrete flux-surface-averaged residual
 # (wout equif), which the ordinary solve minimizes by construction.
 for stage, path in (("before", legacy_path), ("after", polished_path)):
-    stage_dir = OUT_DIR / stage
+    stage_dir = OUTPUT_DIR / stage
     for figure_path in vj.plot_wout(path, stage_dir).values():
         print(f"wrote {figure_path}")
