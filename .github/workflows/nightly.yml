@@ -91,6 +91,20 @@ jobs:
         run: |
           pytest -q tests/test_examples.py::test_free_boundary_essos_coils \
             --vmex-report=test-report-coils.json
+      # NEO_JAX is installed above and nowhere else, so this is the only job
+      # that can run the effective-ripple example at all.  The test is marked
+      # ``full``, which the manifest selection above excludes, so it has never
+      # executed anywhere -- ``pip install vmex[neoclassical]`` plus RUN_FULL=1
+      # was the documented on-demand recipe and nothing automated it.  The
+      # example takes about 90 s at its shipped settings; it has no cheaper
+      # smoke path, because coarsening the NEO controls returns a profile that
+      # no longer rises outward, which is the result it exists to show.
+      - name: Run effective-ripple smoke
+        env:
+          RUN_FULL: "1"
+        run: |
+          pytest -q tests/test_examples.py::test_epsilon_effective_example \
+            --vmex-report=test-report-ripple.json
       # The strong-force polish is too slow for the PR example lane (~2 min for
       # the solve, the polish, and both figure sets) but is the only run-level
       # check that the certificate the docs quote is still produced.
