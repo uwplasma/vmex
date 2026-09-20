@@ -1280,7 +1280,14 @@ _PERTURB_SEED: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
 # ``adjoint_certificate_fallbacks`` counts the adjoints that a cheaper
 # operator failed to certify and that were finished on the exact transpose,
 # so a lane silently sliding back to the general Krylov cost is visible in
-# the record rather than only in the wall time.  ``<part>_seconds``
+# the record rather than only in the wall time.  These counters key on the
+# solve, not on the adjoint lane: :func:`_canonical_config` deliberately
+# shares one config per content, and the free-boundary adjoint solver is a
+# property of the caller's configuration rather than of the solve, so a
+# process that runs two lanes over one deck accumulates both into the same
+# entry.  Read the fallback count as "is this solve falling back", and take
+# differences around a lane when comparing lanes in one process.
+# ``<part>_seconds``
 # is host wall time exclusive of nested parts (compilation inside a part
 # included).  Every count is read from a value the host already receives.  An
 # adjoint traced into a compiled program runs an unobservable number of times,
