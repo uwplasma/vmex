@@ -178,7 +178,7 @@
     ],
     "pr-free-boundary-adjoint": [
       "tests/test_freeboundary_implicit.py::test_host_adjoint_best_effort_warns_instead_of_raising",
-      "tests/test_freeboundary_implicit.py::test_free_boundary_host_adjoint_rejects_a_false_solver_success", "tests/test_freeboundary_implicit.py::test_edge_response_models_nestor_and_drives_the_adjoint_lane", "tests/test_freeboundary_implicit.py::test_cheaper_transpose_is_accepted_only_on_the_exact_one", "tests/test_freeboundary_implicit.py::test_free_boundary_config_validates_adjoint_solver"
+      "tests/test_freeboundary_implicit.py::test_free_boundary_host_adjoint_rejects_a_false_solver_success", "tests/test_freeboundary_implicit.py::test_edge_response_models_nestor_and_drives_the_adjoint_lane", "tests/test_freeboundary_implicit.py::test_schur_lanes_are_reusable_and_leak_nothing_per_gradient", "tests/test_freeboundary_implicit.py::test_edge_basis_pairs_the_constrained_m1_columns", "tests/test_freeboundary_implicit.py::test_balanced_dense_solver_survives_a_rank_deficient_edge_system", "tests/test_freeboundary_implicit.py::test_cheaper_transpose_is_accepted_only_on_the_exact_one", "tests/test_freeboundary_implicit.py::test_free_boundary_config_validates_adjoint_solver"
     ],
     "pr-implicit-response-a": [
       "tests/test_input_profiles.py::test_change_resolution_preserves_representable_coefficients",

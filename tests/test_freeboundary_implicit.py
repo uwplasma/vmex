@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import gc
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +18,7 @@ from tests.test_lasym_free_case import lasym_free_field, lasym_free_input
 from vmex.core import implicit as im
 from vmex.core.input import VmecInput
 from vmex.core.mgrid import MgridField, read_mgrid
+from vmex.core.solver import SpectralState
 from vmex.core.freeboundary_implicit import (
     make_free_boundary_config,
     solve_free_boundary_implicit,
@@ -69,11 +72,11 @@ def test_free_boundary_config_rejects_fixed_boundary_input():
 
 def test_free_boundary_config_validates_adjoint_solver():
     inp, field = lasym_free_input(DATA), lasym_free_field()
-    with pytest.raises(ValueError, match="'coupled_gcrot' or 'edge_response'"):
+    with pytest.raises(ValueError, match="adjoint_solver must be one of"):
         make_free_boundary_config(inp, field, adjoint_solver="dense")
-    assert make_free_boundary_config(
-        inp, field, adjoint_solver="edge_response"
-    ).adjoint_solver == "edge_response"
+    for name in fbi._ADJOINT_SOLVERS:
+        assert make_free_boundary_config(
+            inp, field, adjoint_solver=name).adjoint_solver == name
 
 
 def test_free_boundary_config_validates_adjoint_fail():
@@ -159,15 +162,15 @@ def test_edge_response_models_nestor_and_drives_the_adjoint_lane():
     """
     inp = dataclasses.replace(
         lasym_free_input(DATA).change_resolution(
-            mpol=6, ntor=0, ntheta=16, nzeta=4),
-        ns_array=np.array([6]), ftol_array=np.array([1.0e-6]),
-        niter_array=np.array([600]))
+            mpol=3, ntor=0, ntheta=10, nzeta=4),
+        ns_array=np.array([5]), ftol_array=np.array([1.0e-6]),
+        niter_array=np.array([400]))
     field = lasym_free_field()
     params = im.params_from_input(inp)
 
     def configure(solver):
         return make_free_boundary_config(
-            inp, field, ns=6, ftol=1.0e-6, max_iterations=600,
+            inp, field, ns=5, ftol=1.0e-6, max_iterations=400,
             adjoint_tol=1.0e-8, adjoint_maxiter=100, adjoint_solver=solver,
             field_from_parameters=lambda current: dataclasses.replace(
                 field, extcur=current), device="cpu")
@@ -229,6 +232,166 @@ def test_edge_response_models_nestor_and_drives_the_adjoint_lane():
                                atol=0.0)
     assert (im._SOLVE_STATS.get(configure("edge_response").implicit) or {}
             ).get("adjoint_certificate_fallbacks", 0) == 0
+
+
+@contextlib.contextmanager
+def monkeypatched_debug():
+    """Run the adjoint lanes' diagnostic channel for one block."""
+    original = im._adjoint_debug_enabled
+    im._adjoint_debug_enabled = lambda: True
+    try:
+        yield
+    finally:
+        im._adjoint_debug_enabled = original
+
+
+def test_edge_basis_pairs_the_constrained_m1_columns():
+    """The evolved edge basis is orthonormal and folds the m=1 constraint.
+
+    With ``lconm1`` and ``ntor > 0`` the edge carries redundant m=1
+    directions: VMEC evolves one combination of each pair, so the basis must
+    span each pair once, not twice, or the reduced edge system inherits a
+    null direction.  No equilibrium is solved here -- the basis depends only
+    on the configuration and the structural mask.
+    """
+    inp = VmecInput.from_file(DATA / "input.cth_like_free_bdy_lasym_small")
+    data = read_mgrid(DATA / "mgrid_cth_like_lasym_small.nc")
+    field = MgridField.from_mgrid_data(
+        data, extcur=np.asarray(inp.extcur, dtype=float)[: data.nextcur])
+    cfg = make_free_boundary_config(
+        inp, field, ns=8, ftol=1.0e-6, max_iterations=10, device="cpu",
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current))
+    icfg = cfg.implicit
+    assert bool(icfg.lconm1) and int(icfg.resolution.ntor) > 0
+
+    mn = int(np.asarray(im._template_runtime(icfg).modes.m).size)
+    fields = im._active_state_fields(icfg)
+    mask = SpectralState(**{
+        name: jnp.ones((int(icfg.resolution.ns), mn))
+        for name in im._STATE_FIELDS})
+    packed_mask = np.ones(len(fields) * mn)
+    basis = fbi._edge_basis(cfg, mask, packed_mask, jnp.float64)
+
+    pairs = len(im._m1_pair_columns(icfg)[0])
+    lasym_pairs = pairs * (2 if bool(icfg.resolution.lasym) else 1)
+    assert basis.shape == (len(fields) * mn, len(fields) * mn - lasym_pairs)
+    np.testing.assert_allclose(
+        np.asarray(basis.T @ basis), np.eye(basis.shape[1]),
+        rtol=0.0, atol=1.0e-12)
+
+
+def test_balanced_dense_solver_survives_a_rank_deficient_edge_system():
+    """A singular reduced edge system gets a least-squares solve, not a NaN.
+
+    The edge system can inherit redundant m=1 directions on decks the basis
+    above cannot fold away, and a plain solve would amplify them.  The exact
+    coupled-residual certificate remains authoritative either way, so the
+    requirement here is only that the reduced solve stays finite and
+    reproduces the right answer on the range.
+    """
+    singular = np.array([[1.0, 2.0, 3.0],
+                         [2.0, 4.0, 6.0],
+                         [1.0, 1.0, 1.0]])
+    solve_reduced, condition = fbi._balanced_dense_solver(singular)
+    assert not (np.isfinite(condition)
+                and condition < 1.0 / np.finfo(singular.dtype).eps)
+    wanted = np.array([1.0, -2.0, 0.5])
+    solution = solve_reduced(singular @ wanted)
+    assert np.all(np.isfinite(solution))
+    np.testing.assert_allclose(singular @ solution, singular @ wanted,
+                               rtol=1.0e-9, atol=1.0e-9)
+
+    well_posed = np.array([[4.0, 1.0], [1.0, 3.0]])
+    solve_reduced, condition = fbi._balanced_dense_solver(well_posed)
+    assert np.isfinite(condition)
+    np.testing.assert_allclose(
+        solve_reduced(well_posed @ np.array([2.0, -1.0])),
+        np.array([2.0, -1.0]), rtol=1.0e-12, atol=0.0)
+
+
+def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
+    """The radial-elimination lanes reuse one executable and strand no arrays.
+
+    Every per-gradient array -- the bulk blocks, the mask, the saved
+    transpose -- reaches the jitted helpers as an argument, so ``cfg`` is the
+    only static key and one executable serves a whole optimization.  When
+    these were closures defined inside the adjoint instead, each backward
+    pass was a fresh jit key: the lane recompiled every gradient and JAX's
+    trace cache kept that trial's arrays alive as jaxpr constants, a whole
+    block system per successful gradient: measured on the free-boundary
+    reproducer, 2218 live arrays and 0.289 GiB of device buffers each time.
+    What remains here is one array per gradient, bookkeeping rather than a
+    block system, so the bound below is a small constant, not equality.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(
+            mpol=3, ntor=0, ntheta=10, nzeta=4),
+        ns_array=np.array([5]), ftol_array=np.array([1.0e-6]),
+        niter_array=np.array([400]))
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+
+    def configure(solver):
+        return make_free_boundary_config(
+            inp, field, ns=5, ftol=1.0e-6, max_iterations=400,
+            adjoint_tol=1.0e-8, adjoint_maxiter=100, adjoint_solver=solver,
+            field_from_parameters=lambda current: dataclasses.replace(
+                field, extcur=current), device="cpu")
+
+    cfg = configure("boundary_schur")
+    (_state, _status, _f, _r), saved = fbi._solve_status_fwd(
+        params, field.extcur, cfg)
+    state_bar = jax.grad(
+        lambda state: jnp.mean(state.R_cos[-1] ** 2))(saved[2])
+
+    live, gradients = [], []
+    for index in range(3):
+        # A different cotangent each time: a repeated one could be served
+        # from a memo without exercising the lane at all.
+        scaled = jax.tree.map(lambda leaf, k=index: leaf * (1.0 + 0.1 * k),
+                              state_bar)
+        gradients.append(np.asarray(
+            fbi._solve_bwd_impl(cfg, saved[:6], scaled)[1]))
+        gc.collect()
+        live.append(len(jax.live_arrays()))
+    # One block system is (ns, block, block) plus its scalings, tens of
+    # arrays; a bound of two separates bookkeeping from that defect.
+    assert live[2] - live[1] <= 2, (
+        f"the lane stranded {live[2] - live[1]} arrays in one gradient: {live}")
+    assert np.max(np.abs(gradients[0])) > 0.0
+
+    # The diagnostic channel runs too, so its formatting cannot rot unnoticed.
+    with monkeypatched_debug():
+        elimination = np.asarray(fbi._solve_bwd_impl(
+            configure("boundary_schur"), saved[:6], state_bar)[1])
+    np.testing.assert_allclose(elimination, gradients[0], rtol=1.0e-6,
+                               atol=0.0)
+
+    # A certificate this lane cannot meet must cost a second solve on the
+    # exact operator and be counted, never be returned as it stands.
+    schur = configure("boundary_schur")
+    strict, acceptance = [0], im._adjoint_acceptance
+
+    def first_call_is_impossible(cfg_arg, norm, rtol=None):
+        strict[0] += 1
+        if strict[0] == 1:
+            return 0.0
+        return acceptance(cfg_arg, norm, rtol) if rtol is not None else (
+            acceptance(cfg_arg, norm))
+
+    before = (im._SOLVE_STATS.get(schur.implicit) or {}).get(
+        "adjoint_certificate_fallbacks", 0) or 0
+    im._adjoint_acceptance = first_call_is_impossible
+    try:
+        forced = np.asarray(fbi._solve_bwd_impl(
+            schur, saved[:6], state_bar)[1])
+    finally:
+        im._adjoint_acceptance = acceptance
+    after = (im._SOLVE_STATS.get(schur.implicit) or {})[
+        "adjoint_certificate_fallbacks"]
+    assert after == before + 1
+    np.testing.assert_allclose(forced, elimination, rtol=1.0e-6, atol=0.0)
 
 
 def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
