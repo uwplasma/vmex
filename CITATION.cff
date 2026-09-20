@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use VMEX in published work, please cite it as below."
 type: software
 title: "VMEX: a differentiable JAX implementation of VMEC with certified force-balance polishing"
-version: 0.9.1
+version: 0.10.0
 date-released: 2026-09-16
 license: MIT
 repository-code: "https://github.com/uwplasma/vmex"

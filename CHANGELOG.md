@@ -7,6 +7,11 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+## 0.10.0 - 2026-09-20
+
+See the GitHub release for this version in full.
+
+
 ### Fixed
 
 - **The interior field evaluated B at the wrong place.** The geometry table it
