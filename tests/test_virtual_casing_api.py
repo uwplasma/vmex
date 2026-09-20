@@ -27,7 +27,10 @@ def test_exterior_source_grid_is_sized_from_the_boundary():
     requested 1e-6; the rule returns 64 there and 4.3e-07.  A tokamak-like
     aspect ratio stays on the historical floor, so its grid does not move.
     """
+    import jax
+    import jax.numpy as jnp
     import numpy as np
+    import pytest
 
     from vmex.core import extender as ext
 
@@ -50,6 +53,15 @@ def test_exterior_source_grid_is_sized_from_the_boundary():
 
     # A boundary the rule cannot read falls back rather than raising.
     assert ext._source_nphi_for_digits(object(), 6) == ext._DEFAULT_SOURCE_NPHI
+
+    # A traced boundary is not unreadable: falling back there would silently
+    # change the source resolution of a jitted caller.
+    def traced(major):
+        boundary = _Wout(1.2237, 0.0768, 2)
+        boundary.rmnc = jnp.array([[1.0, 0.0768]]) * major
+        return ext._source_nphi_for_digits(boundary, 6)
+    with jax.disable_jit(False), pytest.raises(TypeError, match="traced boundary"):
+        jax.jit(traced)(1.2237)
 
     # from_state feeds it a VmecInput instead of a wout; the same boundary has
     # to give the same answer through either, or a live equilibrium and its

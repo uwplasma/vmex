@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Free-boundary pressure scan: beta from 0 to ~5% at fixed coil currents.
+"""Free-boundary pressure scan: beta from 0 to ~2.6% at fixed coil currents.
 
 A free-boundary plasma responds to pressure both internally (Shafranov shift)
 and at its edge -- the last closed flux surface moves as the plasma pushes

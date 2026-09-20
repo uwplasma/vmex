@@ -22,7 +22,7 @@ inp = replace(inp, phiedge=-0.025, pmass_type="power_series", am=am, pres_scale=
 # its named boundary modes. It solves the same equilibrium as solve_equilibrium;
 # no optimization or quasisymmetry objective is involved here.
 problem = opt.VmecProblem.from_input(inp, max_mode=1, use_ess=True, progress=True)
-final_equilibrium = problem.equilibrium_from_x(problem.x0, newton_iterations=5)
+final_equilibrium = problem.equilibrium_from_x(problem.x0)
 
 # Points can be supplied as VMEC (s, theta, phi) or Cartesian (x, y, z).
 # B and every spatial derivative below use Cartesian components and Cartesian
@@ -55,5 +55,7 @@ print("gradB, gradgradB, gradgradgradB shapes =",
 print("dof_names =", problem.dof_names)
 print("B, gradB, gradgradB, gradgradgradB VJP shapes =",
       dBdx.shape, dgradBdx.shape, d2Bdx.shape, d3Bdx.shape)
+print("largest VJP entries =",
+      [float(jnp.abs(vjp).max()) for vjp in (dBdx, dgradBdx, d2Bdx, d3Bdx)])
 print("Cylindrical B and SIMSOPT-order dB/dX shapes =",
       final_equilibrium.field.B_cyl().shape, final_equilibrium.field.dB_by_dX().shape)

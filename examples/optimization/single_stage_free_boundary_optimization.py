@@ -182,10 +182,8 @@ else:
 
 coils_final = coils_from_u(jnp.asarray(optimized_u))
 print("Solving the optimized free boundary for output...")
-# A capped output solve is reported below as an unmet target, not raised.
 free_result = vj.solve_free_boundary_multigrid(
-    inp, external_field=BiotSavart(coils_final), verbose=not ci_smoke,
-    raise_on_max_iterations=False)
+    inp, external_field=BiotSavart(coils_final), verbose=not ci_smoke)
 wout = vj.wout_from_state(
     inp=inp, state=free_result.state, fsqr=free_result.fsqr,
     fsqz=free_result.fsqz, fsql=free_result.fsql,

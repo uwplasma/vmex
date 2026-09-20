@@ -29,8 +29,8 @@ coefficient, profile coefficient, `phiedge`, `pres_scale`, `curtor`.
 difference through two full re-solves:
 
 ```text
-d(aspect)/d(RBC(0,1))  AD=-1.5182532273e+00  FD=-1.5182532303e+00  rel=2.00e-09
-d(wb)/d(phiedge)       AD=+1.2910254037e-01  FD=+1.2910254037e-01  rel=1.97e-12
+d(aspect)/d(RBC(0,1))  AD=-1.5182532271e+00  FD=-1.5182532280e+00  rel=5.77e-10
+d(wb)/d(phiedge)       AD=+1.2910254037e-01  FD=+1.2910254037e-01  rel=7.02e-12
 ```
 
 The agreement is at the finite-difference noise floor — the adjoint side has

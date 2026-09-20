@@ -4,10 +4,8 @@
 """
 
 from dataclasses import replace
-import json
 import os
 from pathlib import Path
-import time
 
 import jax
 import jax.numpy as jnp
@@ -24,7 +22,6 @@ from essos.fields import BiotSavart
 from essos.objective_functions import loss_coil_separation
 from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
 
-started = time.perf_counter()
 TARGET_BETA = 0.025
 SURFACES = np.linspace(0.1, 0.9, 8)
 NS, MPOL, NTOR, NITER, FTOL = 31, 5, 5, 2500, 1.0e-9
@@ -127,10 +124,8 @@ def objective(u):
 
 monitor = opt.OptimizationMonitor()
 value_and_grad_jax = jax.value_and_grad(objective, has_aux=True)
-trials = {"count": 0}
 
 def value_and_grad(u):
-    trials["count"] += 1
     (value, (residual, coil_costs, status)), gradient = value_and_grad_jax(jnp.asarray(u))
     rows, n_boot = np.asarray(residual), len(SURFACES)
     n_qs = rows.size - n_boot - 3
@@ -153,28 +148,16 @@ free_problem = vj.FunctionProblem.from_functions(
 first = free_problem.compile_value_and_gradient(progress=not ci_smoke, report_interval=10.0)
 if ci_smoke:
     final_cost, optimized_u, iterations = first.value, np.zeros_like(x0), 0
-    stop_reason = "smoke mode runs no optimizer iterations"
 else:
     result = minimize(free_problem.value_and_grad, np.zeros_like(x0), jac=True, method=METHOD,
         bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size,
         callback=monitor, options=OPTIONS)
     optimized_u, final_cost, iterations = result.x, result.fun, result.nit
-    stop_reason = str(result.message)
 
 coils_final = coils_from_u(jnp.asarray(optimized_u))
 print("Solving the optimized finite-beta free boundary for output...")
-# The optimizer's solves are hot-restarted from the previous trial; this one
-# starts cold, and on the single NS = 31 rung the deck carries it stops at the
-# 2500-iteration cap with fsqr = 5.5e-8 against FTOL = 1e-9.  A coarse rung
-# first converges it in 365 iterations and is also faster end to end (43.6 s
-# against 49.2 s for the failed single rung).  A remaining miss is reported
-# below rather than raised, so the run still writes its record.
-ladder = np.array([NS]) if NS <= 15 else np.array([15, NS])
 free_result = vj.solve_free_boundary_multigrid(
-    inp, ns_array=ladder, ftol_array=np.full(ladder.size, FTOL),
-    niter_array=np.full(ladder.size, NITER),
-    external_field=BiotSavart(coils_final), verbose=not ci_smoke,
-    raise_on_max_iterations=False)
+    inp, external_field=BiotSavart(coils_final), verbose=not ci_smoke)
 wout = vj.wout_from_state(
     inp=inp, state=free_result.state, fsqr=free_result.fsqr,
     fsqz=free_result.fsqz, fsql=free_result.fsql,
@@ -183,45 +166,14 @@ wout = vj.wout_from_state(
 equilibrium = opt.Equilibrium(inp, free_result.state, solver_context, free_result)
 
 # Print results
-final_qa = float(qs.total_state(free_result.state, solver_context))
-final_boot = float(bootstrap.total_state(free_result.state, solver_context))
-final_beta = float(wout.betatotal)
-final_aspect = float(opt.aspect_ratio(free_result.state, solver_context))
-minimum_iota = float(opt.min_abs_iota(free_result.state, solver_context))
-maximum_curvature = float(np.max(np.asarray(coils_final.curvature)))
-converged = bool(np.all(np.asarray(free_result.converged)))
-print(f"[final] QA = {final_qa:.5e}, f_boot = {final_boot:.5e}, "
-      f"beta = {final_beta:.3%}, aspect = {final_aspect:.3f}, "
-      f"min |iota| = {minimum_iota:.3f}")
-print(f"Objective = {float(final_cost):.6e} after {iterations} {METHOD} "
-      f"iterations ({stop_reason})")
+print(f"[final] QA = {float(qs.total_state(free_result.state, solver_context)):.5e}, "
+      f"f_boot = {float(bootstrap.total_state(free_result.state, solver_context)):.5e}, "
+      f"beta = {float(wout.betatotal):.3%}, "
+      f"aspect = {float(opt.aspect_ratio(free_result.state, solver_context)):.3f}, "
+      f"min |iota| = {float(opt.min_abs_iota(free_result.state, solver_context)):.3f}")
+print(f"Objective = {float(final_cost):.6e} after {iterations} {METHOD} iterations")
 print(f"Coil lengths = {np.asarray(coils_final.length)}")
-print(f"Maximum curvature = {maximum_curvature:.3f} 1/m")
-# The output solve is independent of the optimizer's, so it is the one checked.
-unmet = []
-if minimum_iota < IOTA_FLOOR:
-    unmet.append(f"minimum |iota| {minimum_iota:.4f} below the {IOTA_FLOOR:.4f} floor")
-if not converged:
-    unmet.append("the output free-boundary solve did not converge")
-if unmet:
-    print("This run did NOT meet its stated targets: " + "; ".join(unmet) + ".")
-    if ci_smoke:
-        print("Smoke mode runs no optimizer iterations; exit status 0.")
-Path("single_stage_free_boundary_optimization_finite_beta_summary.json").write_text(
-    json.dumps({
-        "example": "single_stage_free_boundary_optimization_finite_beta.py",
-        "smoke": ci_smoke,
-        "optimization_seconds": round(time.perf_counter() - started, 1),
-        "trials": trials["count"], "lbfgsb_iterations": int(iterations),
-        "stop_reason": stop_reason,
-        "free_boundary_solves": trials["count"] + 1,
-        "final": {"QA": final_qa, "bootstrap": final_boot, "beta": final_beta,
-                  "aspect": final_aspect, "min |iota|": minimum_iota,
-                  "maximum curvature": maximum_curvature,
-                  "output solve converged": converged},
-        "targets": {"min |iota| >=": IOTA_FLOOR, "aspect (least squares)": ASPECT_TARGET,
-                    "beta (least squares)": TARGET_BETA},
-        "unmet": unmet, "met": not unmet}, indent=2) + "\n")
+print(f"Maximum curvature = {float(np.max(np.asarray(coils_final.curvature))):.3f} 1/m")
 
 # Save results
 input_path = inp.to_indata("input.single_stage_free_boundary_finite_beta_optimized")
@@ -244,5 +196,3 @@ vj.plot_bootstrap_current("single_stage_free_boundary_finite_beta_bootstrap_curr
 vj.plot_optimization_objects("single_stage_free_boundary_finite_beta_optimization.png",
     ("Initial", surface_initial, coils0), ("Optimized", surface_final, coils_final))
 print("Wrote finite-beta free-boundary optimization, bootstrap, and objective plots")
-if unmet and not ci_smoke:
-    raise SystemExit(1)

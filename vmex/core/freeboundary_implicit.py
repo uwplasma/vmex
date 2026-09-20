@@ -29,10 +29,12 @@ from solvax import SpluFactorization
 from . import implicit as im
 from .device import AUTO, resolve_implicit_device
 from .freeboundary import (
+    _edge_fourier_jax,
     _presf_ns_scale,
     _presf_ns_scale_traceable,
     _solve_free_boundary_stage,
     _vacuum_executables,
+    _vacuum_scalars,
     free_boundary_resolution,
 )
 from .errors import VmecError
@@ -94,7 +96,13 @@ def make_free_boundary_config(
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
-    Krylov solve stalls. ``adjoint_fail="best_effort"`` returns the stalled
+    Krylov solve stalls.  ``"edge_response"`` is the coupled Krylov solve
+    with NESTOR's response to the edge built once as a dense matrix instead
+    of re-swept in reverse mode on every iteration: the matvec then costs no
+    NESTOR call, the answer is certified on the exact coupled transpose, and
+    a certificate that misses continues on that exact operator, so the lane
+    is never less accurate than the default -- only cheaper.
+    ``adjoint_fail="best_effort"`` returns the stalled
     Krylov solution with a warning instead of raising, so one bad trial in an
     optimization is a poor search direction the line search rejects rather
     than a dead run; a non-finite adjoint always raises.
@@ -122,9 +130,11 @@ def make_free_boundary_config(
     )
     if cfg.resolution != resolution:
         cfg = dataclasses.replace(cfg, resolution=resolution)
-    if adjoint_solver not in {"boundary_schur", "coupled_gcrot"}:
+    if adjoint_solver not in {"boundary_schur", "coupled_gcrot",
+                              "edge_response"}:
         raise ValueError(
-            "adjoint_solver must be 'boundary_schur' or 'coupled_gcrot'")
+            "adjoint_solver must be 'boundary_schur', 'coupled_gcrot' or "
+            "'edge_response'")
     if adjoint_fail not in {"error", "best_effort"}:
         raise ValueError("adjoint_fail must be 'error' or 'best_effort'")
     if schur_probe_chunk_size < 1:
@@ -160,18 +170,74 @@ def _vacuum_program(cfg: FreeBoundaryImplicitConfig):
     )[1]
 
 
+def _vacuum_inputs(state: SpectralState, rt) -> tuple:
+    """NESTOR's own plasma inputs ``(edge coefficients, ctor, axis R, axis Z)``.
+
+    Everything the plasma sends to the vacuum solver passes through this
+    short tuple, and reaching it from the state costs no NESTOR work.
+    """
+    ctor, _, axis_r, axis_z, _, _ = _vacuum_scalars(state, rt)
+    return (*_edge_fourier_jax(state, rt), ctor, axis_r, axis_z)
+
+
+# Module scope with ``cfg`` the only static key: every per-gradient array is
+# an argument, so one executable serves a whole optimization and no trial's
+# arrays are baked into a cached trace.
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _edge_response(cfg: FreeBoundaryImplicitConfig, params, field_parameters,
+                   frozen, rcon0, zcon0):
+    """Dense NESTOR edge response ``(value, dbsqvac/dh, h)``, built once.
+
+    ``bsqvac`` depends on the plasma only through :func:`_vacuum_inputs`, so
+    one forward-mode column per edge coefficient, one for ``ctor`` and two
+    per toroidal axis point capture NESTOR's whole linearization exactly.
+    The plasma-side ``dh/dz`` that follows is VMEC-only and costs no vacuum
+    solve, so every later coupled matvec becomes a dense multiply instead of
+    a NESTOR reverse sweep.
+    """
+    icfg = cfg.implicit
+    field = cfg.field_from_parameters(field_parameters)
+    rt = dataclasses.replace(
+        im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=int(icfg.resolution.ns),
+        presf_ns_scale=_presf_ns_scale_traceable(
+            params, icfg.inp, int(icfg.resolution.ns)),
+    )
+    flat, unflatten = ravel_pytree(_vacuum_inputs(frozen, rt))
+
+    def kernel(vector):
+        return cfg.vacuum_program.bsq_edge(*unflatten(vector), field)
+
+    value, jacobian = jax.vmap(
+        lambda tangent: jax.jvp(kernel, (flat,), (tangent,)),
+        out_axes=(None, -1),
+    )(jnp.eye(flat.size, dtype=flat.dtype))
+    return jax.lax.stop_gradient((value, jacobian, flat))
+
+
+def _linearized_bsqvac(state, rt, response):
+    """NESTOR's edge pressure through its dense response at the root."""
+    value, jacobian, base = response
+    delta = ravel_pytree(_vacuum_inputs(state, rt))[0] - base
+    return value + jnp.tensordot(jacobian, delta, axes=1)
+
+
 def _projected_residual(
     cfg: FreeBoundaryImplicitConfig,
     dof_mask: SpectralState,
     *,
     formulation: str = "preconditioned",
     fixed_bsqvac: Array | None = None,
+    response: tuple | None = None,
 ) -> Callable:
     """Return a projected coupled root in preconditioned or raw form.
 
     ``fixed_bsqvac`` freezes only NESTOR's edge pressure.  The resulting raw
     Jacobian is exactly block tridiagonal in radius and is the bulk operator
-    used by the boundary-Schur adjoint.
+    used by the boundary-Schur adjoint.  ``response`` instead replaces the
+    NESTOR call by :func:`_edge_response`'s dense model of it, which is exact
+    in value and first derivative at the root the response was built on and
+    is therefore an exact linearization there, at the cost of a multiply.
 
     The returned closure is memoized on ``(cfg, formulation, mask content)``
     (``fixed_bsqvac=None`` only): the host callback hands each backward pass
@@ -188,10 +254,10 @@ def _projected_residual(
     def residual(z, params, field_parameters, frozen, rcon0, zcon0):
         return _projected_residual_lane(
             z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
-            fixed_bsqvac, cfg=cfg, formulation=formulation)
+            fixed_bsqvac, response, cfg=cfg, formulation=formulation)
 
     leaves = jax.tree.leaves(dof_mask)
-    if fixed_bsqvac is not None or any(
+    if fixed_bsqvac is not None or response is not None or any(
             isinstance(leaf, jax.core.Tracer) for leaf in leaves):
         # Under an outer jax.jit the mask is a tracer, so it has no bytes to
         # key on; the whole pullback is staged once anyway, which is what the
@@ -220,7 +286,7 @@ _RESIDUAL_CLOSURE_CACHE_MAX = 8
 # formulations plus the Schur frozen root) before its first adjoint matvec.
 @functools.partial(jax.jit, static_argnames=("cfg", "formulation"))
 def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
-                             zcon0, dof_mask, fixed_bsqvac, *,
+                             zcon0, dof_mask, fixed_bsqvac, response=None, *,
                              cfg: FreeBoundaryImplicitConfig,
                              formulation: str):
     icfg = cfg.implicit
@@ -235,7 +301,9 @@ def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
         presf_ns_scale=_presf_ns_scale_traceable(
             params, icfg.inp, int(icfg.resolution.ns)),
     )
-    if fixed_bsqvac is None:
+    if response is not None:
+        bsqvac = _linearized_bsqvac(state, rt, response)
+    elif fixed_bsqvac is None:
         # The executable/topology was fixed concretely when the config was
         # built; all equilibrium and coil values stay dynamic traced arrays.
         external_field = cfg.field_from_parameters(field_parameters)
@@ -584,6 +652,16 @@ def _solve_bwd_impl(cfg, saved, state_bar):
             mask, rhs, fail=cfg.adjoint_fail,
         )
         residual = _projected_residual(cfg, mask, formulation="raw")
+    elif cfg.adjoint_solver == "edge_response":
+        response = _edge_response(
+            cfg, params, field_parameters, frozen, rcon0, zcon0)
+        lam = _host_adjoint(
+            residual, z_star, params, field_parameters, frozen, rcon0, zcon0,
+            rhs, cfg.implicit, fail=cfg.adjoint_fail,
+            pullback=_prepare_response_transpose(
+                z_star, params, field_parameters, frozen, rcon0, zcon0, mask,
+                response, cfg=cfg),
+            certify=True)
     else:
         lam = _host_adjoint(
             residual, z_star, params, field_parameters, frozen, rcon0, zcon0,
@@ -942,6 +1020,22 @@ def _prepare_transpose(z, p, field, base, rcon, zcon, *, residual):
     )[1]
 
 
+# ``response`` is a per-gradient value, so the response-linearized lane cannot
+# be keyed on a closure the way :func:`_prepare_transpose` is without either
+# recompiling every backward pass or reading a stale linearization. Taking the
+# mask and the response as traced arguments leaves ``cfg`` the only static key,
+# so one compiled transpose serves every gradient in a process.
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _prepare_response_transpose(z, p, field, base, rcon, zcon, dof_mask,
+                                response, *, cfg):
+    """Save the response-linearized transpose of the coupled root."""
+    return jax.vjp(
+        lambda zz: _projected_residual_lane(
+            zz, p, field, base, rcon, zcon, dof_mask, None, response,
+            cfg=cfg, formulation="preconditioned"), z,
+    )[1]
+
+
 @jax.jit
 def _transpose_matvec(value, pullback, template):
     """Apply the saved transpose without repeating the NESTOR/VMEC primal."""
@@ -951,7 +1045,7 @@ def _transpose_matvec(value, pullback, template):
 
 def _host_adjoint(
     residual, z_star, params, field_parameters, frozen, rcon0, zcon0, rhs, cfg,
-    *, x0=None, fail="error",
+    *, x0=None, fail="error", pullback=None, certify=False,
 ):
     """Solve one adjoint while reusing a separately compiled JAX matvec.
 
@@ -961,12 +1055,19 @@ def _host_adjoint(
     host and calls one compiled JAX operator; only vectors cross the boundary.
     Saved primal intermediates stay on the device for this solve and are
     rebuilt at the next linearization point.
+
+    ``pullback`` iterates on a cheaper transpose than ``residual``'s own --
+    today the response-linearized one.  ``certify`` then re-measures the
+    accepted solution on ``residual``'s exact transpose and, if the cheaper
+    operator's answer misses the same acceptance every lane uses, continues
+    from it on that exact operator instead of returning it.
     """
     rhs_flat, unravel = ravel_pytree(rhs)
 
-    pullback = _prepare_transpose(
-        z_star, params, field_parameters, frozen, rcon0, zcon0,
-        residual=residual)
+    if pullback is None:
+        pullback = _prepare_transpose(
+            z_star, params, field_parameters, frozen, rcon0, zcon0,
+            residual=residual)
 
     def matvec(value):
         return _transpose_matvec(value, pullback, z_star)
@@ -989,9 +1090,27 @@ def _host_adjoint(
         k=min(cfg.adjoint_gcrot_k, shape[0]),
         maxiter=cfg.adjoint_maxiter, x0=x0_flat,
     )
-    residual_norm = float(np.linalg.norm(np.asarray(rhs_flat) - apply(solution)))
     tolerance = float(im._adjoint_acceptance(
         cfg, np.linalg.norm(np.asarray(rhs_flat))))
+    if certify:
+        exact = _prepare_transpose(
+            z_star, params, field_parameters, frozen, rcon0, zcon0,
+            residual=residual)
+        residual_norm = float(np.linalg.norm(
+            np.asarray(rhs_flat) - np.asarray(_transpose_matvec(
+                jnp.asarray(solution, dtype=rhs_flat.dtype), exact, z_star))))
+        if np.isfinite(residual_norm) and residual_norm <= tolerance:
+            return unravel(jnp.asarray(solution, dtype=rhs_flat.dtype))
+        # The cheaper operator did not certify here; finish on the exact one
+        # rather than hand back a derivative this lane cannot vouch for, and
+        # count it: a lane that always lands here has silently lost its gain.
+        im._count(cfg, adjoint_certificate_fallbacks=1)
+        warm = (unravel(jnp.asarray(solution, dtype=rhs_flat.dtype))
+                if np.all(np.isfinite(solution)) else None)
+        return _host_adjoint(
+            residual, z_star, params, field_parameters, frozen, rcon0, zcon0,
+            rhs, cfg, x0=warm, fail=fail)
+    residual_norm = float(np.linalg.norm(np.asarray(rhs_flat) - apply(solution)))
     if not np.isfinite(residual_norm) or residual_norm > tolerance:
         if fail != "best_effort" or not np.isfinite(residual_norm):
             im._raise_adjoint_unconverged(

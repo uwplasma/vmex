@@ -1276,7 +1276,11 @@ _PERTURB_SEED: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
 # the fixed-point anchor; ``jacobians``, ``jacobian_columns`` and
 # ``jacobian_krylov_iterations`` the host residual-Jacobian lanes (certifier
 # GMRES iterations summed over columns); ``adjoints`` and
-# ``adjoint_krylov_iterations`` host-eager reverse adjoints.  ``<part>_seconds``
+# ``adjoint_krylov_iterations`` host-eager reverse adjoints;
+# ``adjoint_certificate_fallbacks`` counts the adjoints that a cheaper
+# operator failed to certify and that were finished on the exact transpose,
+# so a lane silently sliding back to the general Krylov cost is visible in
+# the record rather than only in the wall time.  ``<part>_seconds``
 # is host wall time exclusive of nested parts (compilation inside a part
 # included).  Every count is read from a value the host already receives.  An
 # adjoint traced into a compiled program runs an unobservable number of times,
@@ -1289,7 +1293,8 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "refinement_factorizations",
              "refinement_seconds", "jacobians", "jacobian_columns",
              "jacobian_krylov_iterations", "jacobian_seconds", "adjoints",
-             "adjoint_krylov_iterations", "adjoint_seconds")
+             "adjoint_krylov_iterations", "adjoint_seconds",
+             "adjoint_certificate_fallbacks")
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []

@@ -1,5 +1,20 @@
 #!/usr/bin/env python
-"""Quasi-axisymmetric boundary optimization with a magnetic well."""
+"""Screen a vacuum QA candidate with frozen-geometry pressure stability proxies.
+
+The mode ladder optimizes quasisymmetry, aspect ratio, a transform floor and a
+magnetic well on a vacuum equilibrium, adding trial-pressure Mercier and
+resistive-interchange residuals after the first stage: those evaluate the
+stability criteria a small pressure *would* produce on the frozen geometry,
+without solving at finite pressure.
+
+A vacuum DMerc is only the formal zero-pressure limit, so outside the smoke
+pass the script then adds 0.1 % pressure and polishes the actual finite-beta
+DMerc and DR from coarse to resolved radial grids.  That resolved solve, not
+the proxy, is the stability certificate.
+
+Outputs are named ``QA_DMerc_*`` so they do not overwrite the ones
+``QA_optimization.py`` writes with the same working directory.
+"""
 
 from dataclasses import replace
 import os
@@ -152,7 +167,7 @@ if USE_TRIAL_STABILITY:
 # Preserve the optimized vacuum equilibrium separately. When trial-pressure
 # stability is enabled, the primary QA output below is the resolved 0.1%-beta
 # certificate, so its plotted DMerc and DR have their finite-pressure meaning.
-vacuum_name = "QA_optimized_vacuum" if USE_TRIAL_STABILITY and not ci_smoke else "QA_optimized"
+vacuum_name = "QA_DMerc_vacuum"
 vacuum_input_path = final_input.to_indata(f"input.{vacuum_name}")
 vacuum_wout_path = vj.write_wout(f"wout_{vacuum_name}.nc", final_equilibrium.wout)
 print(f"wrote {vacuum_input_path}\nwrote {vacuum_wout_path}")
@@ -210,8 +225,8 @@ if not ci_smoke:
     certificate_input = replace(certificate_input, ftol_array=np.array([1e-14]))
     certificate = opt.solve_equilibrium(certificate_input, initial_state=certificate.solution,
         verbose=True, raise_on_max_iterations=True)
-    certificate_input_path = certificate_input.to_indata("input.QA_optimized")
-    certificate_wout_path = vj.write_wout("wout_QA_optimized.nc", certificate.wout)
+    certificate_input_path = certificate_input.to_indata("input.QA_DMerc_optimized")
+    certificate_wout_path = vj.write_wout("wout_QA_DMerc_optimized.nc", certificate.wout)
     certificate_s = np.linspace(0.0, 1.0, int(certificate.wout.ns))[2:-1]
     keep = certificate_s >= STABILITY_MIN_S
     certificate_dmerc = np.asarray(certificate.wout.DMerc)[2:-1]
@@ -223,8 +238,8 @@ if not ci_smoke:
     print(f"wrote {certificate_input_path}\nwrote {certificate_wout_path}")
 
 # Plot results
-monitor.save("QA_optimization_objectives.csv")
-monitor.plot("QA_optimization_objectives.png")
+monitor.save("QA_DMerc_objectives.csv")
+monitor.plot("QA_DMerc_objectives.png")
 for path in vj.plot_wout(vacuum_wout_path, ".").values():
     print(f"wrote {path}")
 if certificate_wout_path is not None:

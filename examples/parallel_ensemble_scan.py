@@ -17,8 +17,8 @@ Physics: nfp=2 QA stellarator, fixed boundary, single radial grid so the
 compiled structure is shared across the scan.  Runtime a few seconds.
 
 The headline (speedup) is machine-dependent -- it scales with the free cores
-on the box.  See ``docs/parallelization.rst`` for the full mechanism study and
-the multi-GPU design.
+on the box.  See ``docs/howto/parallel-ensembles.md`` for the full mechanism study
+and the multi-GPU design.
 """
 
 import dataclasses

@@ -50,15 +50,15 @@ qi = ConstructedQIResidual(SURFACES, **qi_options)
 
 def iota_floor(equilibrium_state, solver_context):
     return jnp.maximum(
-        0.3 - jnp.abs(opt.mean_iota(equilibrium_state, solver_context)), 0.0)
+        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
 def elongation_excess(equilibrium_state, solver_context):
     return jnp.maximum(
-        opt.max_elongation(equilibrium_state, solver_context) - 8.0, 0.0)
+        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
 
 def mirror_excess(equilibrium_state, solver_context):
     return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context) - 0.25, 0.0)
+        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
 
 objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, 0.005),

@@ -70,8 +70,11 @@ def test_free_boundary_config_rejects_fixed_boundary_input():
 
 def test_free_boundary_config_validates_adjoint_solver():
     inp, field = lasym_free_input(DATA), lasym_free_field()
-    with pytest.raises(ValueError, match="'boundary_schur' or 'coupled_gcrot'"):
+    with pytest.raises(ValueError, match="'coupled_gcrot' or 'edge_response'"):
         make_free_boundary_config(inp, field, adjoint_solver="dense")
+    assert make_free_boundary_config(
+        inp, field, adjoint_solver="edge_response"
+    ).adjoint_solver == "edge_response"
 
 
 def test_free_boundary_config_validates_adjoint_fail():
@@ -103,6 +106,130 @@ def test_host_adjoint_refreshes_saved_pullback_at_each_point():
         solved = fbi._host_adjoint(residual, z, p, None, None, None, None, rhs, cfg)
         jacobian = np.array([[2 * z[0], p], [z[1], z[0] + 2 * z[1]]])
         np.testing.assert_allclose(solved, np.linalg.solve(jacobian.T, rhs), rtol=1e-9)
+
+
+def test_cheaper_transpose_is_accepted_only_on_the_exact_one(monkeypatch):
+    """A response adjoint is certified on the coupled operator or not at all.
+
+    The edge-response lane iterates on a cheaper transpose.  A wrong cheaper
+    operator must cost a second solve on the exact one, never a wrong answer;
+    a right one must be accepted without that second solve.
+    """
+    def residual(z, p, *_args):
+        return jnp.asarray([z[0]**2 + p * z[1], z[0] * z[1] + z[1]**2])
+
+    def mislinearized(z, p, *_args):
+        return residual(z, p) + 0.3 * jnp.asarray([z[1]**2, z[0]])
+
+    class Config(SimpleNamespace):
+        __hash__ = object.__hash__  # the fallback is counted per configuration
+
+    cfg = Config(
+        adjoint_tol=1e-10, adjoint_gcrot_m=2, adjoint_gcrot_k=1,
+        adjoint_maxiter=10,
+    )
+    z, p, rhs = jnp.asarray([2., 3.]), 0.5, jnp.asarray([1., -2.])
+    exact = np.linalg.solve(np.array([[4., 0.5], [3., 8.]]).T, rhs)
+    warm_starts, solver = [], fbi.gcrotmk
+
+    def counted(*args, **kwargs):
+        warm_starts.append(kwargs.get("x0"))
+        return solver(*args, **kwargs)
+
+    monkeypatch.setattr(fbi, "gcrotmk", counted)
+    for lane, solves in ((mislinearized, 2), (residual, 1)):
+        warm_starts.clear()
+        solved = fbi._host_adjoint(
+            residual, z, p, None, None, None, None, rhs, cfg, certify=True,
+            pullback=fbi._prepare_transpose(
+                z, p, None, None, None, None, residual=lane))
+        np.testing.assert_allclose(solved, exact, rtol=1e-9)
+        assert len(warm_starts) == solves
+        assert warm_starts[0] is None and all(
+            start is not None for start in warm_starts[1:])
+    assert im._SOLVE_STATS[cfg]["adjoint_certificate_fallbacks"] == 1
+
+
+def test_edge_response_models_nestor_and_drives_the_adjoint_lane():
+    """The dense edge response, its lane and its gradient, on a small deck.
+
+    The response is an exact linearization wherever it is built, root or not,
+    so this needs no converged equilibrium to certify -- only one saved point
+    used by both lanes.  Kept out of ``full`` on purpose: these are the paths
+    a coverage lane has to execute, and they are cheap at this resolution.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(
+            mpol=6, ntor=0, ntheta=16, nzeta=4),
+        ns_array=np.array([6]), ftol_array=np.array([1.0e-6]),
+        niter_array=np.array([600]))
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+
+    def configure(solver):
+        return make_free_boundary_config(
+            inp, field, ns=6, ftol=1.0e-6, max_iterations=600,
+            adjoint_tol=1.0e-8, adjoint_maxiter=100, adjoint_solver=solver,
+            field_from_parameters=lambda current: dataclasses.replace(
+                field, extcur=current), device="cpu")
+
+    cfg = configure("edge_response")
+    (_state, _status, _fsq, _ratio), saved = fbi._solve_status_fwd(
+        params, field.extcur, cfg)
+    prm, current, solved, mask, rcon0, zcon0, _ = saved
+    frozen = jax.lax.stop_gradient(solved)
+    value, jacobian, inputs = fbi._edge_response(
+        cfg, prm, current, frozen, rcon0, zcon0)
+    assert jacobian.shape == value.shape + inputs.shape
+    assert bool(jnp.all(jnp.isfinite(jacobian)))
+
+    icfg = cfg.implicit
+    runtime = dataclasses.replace(
+        im.runtime_from_params(prm, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=int(icfg.resolution.ns))
+    response = (value, jacobian, inputs)
+    # At the point it was built on, the model reproduces NESTOR exactly.
+    np.testing.assert_allclose(
+        np.asarray(fbi._linearized_bsqvac(frozen, runtime, response)),
+        np.asarray(cfg.vacuum_program.bsq(
+            frozen, runtime, cfg.field_from_parameters(current))),
+        rtol=1.0e-12, atol=0.0)
+
+    project = im._dof_projector(icfg, mask)
+    z_star = project(solved)
+    exact = fbi._projected_residual(cfg, mask)
+    modelled = fbi._projected_residual(cfg, mask, response=response)
+    tangent = project(jax.tree.map(
+        lambda leaf: jnp.asarray(np.random.default_rng(3).standard_normal(
+            leaf.shape)) * 1.0e-3, z_star))
+    call = lambda lane, z: lane(z, prm, current, frozen, rcon0, zcon0)  # noqa: E731
+    products = [jax.jvp(lambda z: call(lane, z), (z_star,), (tangent,))[1]
+                for lane in (exact, modelled)]
+    assert float(im._tree_norm(jax.tree.map(jnp.subtract, *products))) <= (
+        1.0e-10 * float(im._tree_norm(products[0])))
+
+    # The saved response transpose is the transpose of that same lane.
+    pullback = fbi._prepare_response_transpose(
+        z_star, prm, current, frozen, rcon0, zcon0, mask, response, cfg=cfg)
+    cotangent = project(jax.tree.map(
+        lambda leaf: jnp.asarray(np.random.default_rng(4).standard_normal(
+            leaf.shape)), z_star))
+    left = float(_flat(pullback(cotangent)[0]) @ _flat(tangent))
+    right = float(_flat(cotangent) @ _flat(products[1]))
+    np.testing.assert_allclose(left, right, rtol=1.0e-9, atol=0.0)
+
+    # The lane assembles the same gradient as the certified default, and
+    # certifies it on the exact transpose rather than on its own model.
+    state_bar = jax.grad(
+        lambda state: jnp.mean(state.R_cos[-1] ** 2))(solved)
+    gradients = [np.asarray(fbi._solve_bwd_impl(
+        configure(name), saved[:6], state_bar)[1])
+        for name in ("coupled_gcrot", "edge_response")]
+    assert np.max(np.abs(gradients[0])) > 0.0
+    np.testing.assert_allclose(gradients[1], gradients[0], rtol=1.0e-6,
+                               atol=0.0)
+    assert (im._SOLVE_STATS.get(configure("edge_response").implicit) or {}
+            ).get("adjoint_certificate_fallbacks", 0) == 0
 
 
 def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
@@ -615,6 +742,89 @@ def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient():
 
     assert np.all(np.isfinite(coupled)) and np.max(np.abs(coupled)) > 0.0
     np.testing.assert_allclose(schur, coupled, rtol=2.0e-2, atol=1.0e-8)
+
+
+@pytest.mark.full
+def test_edge_response_is_the_exact_linearization_of_nestor():
+    """The dense edge response reproduces NESTOR's derivative and the gradient.
+
+    Three facts on one converged LASYM root, each with its own tolerance: the
+    response columns against a central difference of the vacuum pressure
+    itself (truncation only, 1e-6); the response-linearized coupled lane
+    against the exact coupled Jacobian-vector product (round-off, 1e-10); and
+    the edge-response gradient against the certified default at the same
+    root, where both lanes solve the same operator to the same tolerance.
+    """
+    base = lasym_free_input(DATA).change_resolution(
+        mpol=10, ntor=0, ntheta=30, nzeta=4)
+    inp = dataclasses.replace(
+        base, ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-8]), niter_array=np.array([2500]))
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+
+    def configure(solver):
+        return make_free_boundary_config(
+            inp, field, ns=8, ftol=1.0e-8, max_iterations=2500,
+            adjoint_tol=1.0e-9, adjoint_maxiter=100, adjoint_solver=solver,
+            field_from_parameters=lambda current: dataclasses.replace(
+                field, extcur=current),
+            device="cpu")
+
+    coupled_cfg, response_cfg = configure("coupled_gcrot"), configure("edge_response")
+    (_, status, _, _), saved = fbi._solve_status_fwd(
+        params, field.extcur, response_cfg)
+    assert int(status) == 0
+    prm, current, state, mask, rcon0, zcon0, _ = saved
+    # Both lanes pull the same cotangent back through the same saved root, so
+    # solver history cannot stand in for agreement between the two adjoints.
+    state_bar = jax.grad(
+        lambda s: jnp.mean(s.R_cos[-1] ** 2 + s.Z_sin[-1] ** 2))(state)
+    coupled_gradient, response_gradient = (
+        np.asarray(fbi._solve_bwd(cfg, saved[:6], state_bar)[1])
+        for cfg in (coupled_cfg, response_cfg))
+    assert np.max(np.abs(coupled_gradient)) > 0.0
+    np.testing.assert_allclose(
+        response_gradient, coupled_gradient, rtol=1.0e-6, atol=0.0)
+
+    value, jacobian, inputs = fbi._edge_response(
+        response_cfg, prm, current, state, rcon0, zcon0)
+    assert jacobian.shape == value.shape + inputs.shape
+
+    icfg = response_cfg.implicit
+    rt = dataclasses.replace(
+        im.runtime_from_params(prm, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=int(icfg.resolution.ns))
+    _, unflatten = ravel_pytree(fbi._vacuum_inputs(state, rt))
+    direction = jnp.asarray(
+        np.random.default_rng(0).standard_normal(inputs.size))
+    direction *= jnp.linalg.norm(inputs) / jnp.linalg.norm(direction)
+    step = 1.0e-6
+
+    def pressure(vector):
+        return response_cfg.vacuum_program.bsq_edge(
+            *unflatten(vector), response_cfg.field_from_parameters(current))
+
+    finite = (pressure(inputs + step * direction)
+              - pressure(inputs - step * direction)) / (2.0 * step)
+    np.testing.assert_allclose(
+        jnp.tensordot(jacobian, direction, axes=1), finite,
+        rtol=0.0, atol=1.0e-6 * float(jnp.linalg.norm(finite)))
+
+    project = im._dof_projector(icfg, mask)
+    z_star = project(state)
+    tangent = project(jax.tree.map(
+        lambda leaf: jnp.asarray(np.random.default_rng(1).standard_normal(
+            leaf.shape)) * 1.0e-3, z_star))
+    products = [
+        jax.jvp(lambda z: lane(z, prm, current, state, rcon0, zcon0),
+                (z_star,), (tangent,))[1]
+        for lane in (fbi._projected_residual(response_cfg, mask),
+                     fbi._projected_residual(
+                         response_cfg, mask,
+                         response=(value, jacobian, inputs)))]
+    assert float(im._tree_norm(jax.tree.map(
+        jnp.subtract, *products))) <= 1.0e-10 * float(im._tree_norm(products[0]))
 
 
 @pytest.mark.full

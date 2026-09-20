@@ -5,18 +5,19 @@ vmex ships its plotting and its Boozer transform in the box, so a single
 converged equilibrium gives you the whole diagnostic set with no external
 tooling.  This script walks the two calls that matter:
 
-- ``vj.plot_wout`` writes the five standard figures (flux-surface summary,
-  nested cross-sections, |B| on a surface, the radial profiles, and a 3D
-  render) and returns ``{key: path}``;
+- ``vj.plot_wout`` writes the standard figures (flux-surface summary, nested
+  cross-sections, |B| on a surface, the radial profiles, the stability
+  profiles, and a 3D render) and returns ``{key: path}``;
 - ``vj.run_booz_xform`` + ``vj.plot_boozmn`` transform to straight-field-line
   Boozer coordinates and plot the |B| spectrum on the LCFS -- the view used to
   judge quasisymmetry.
 
 CLI equivalent: ``vmec examples/data/input.li383_low_res --plot --booz``.
 
-Physics: LI383 (NCSX-class, nfp=3), zero pressure.  Expected runtime a few
-seconds warm; the Boozer step needs the optional ``booz_xform_jax`` package and
-is skipped with a message if it is absent.
+Physics: LI383 (NCSX-class, nfp=3) at finite beta -- the deck carries a
+seven-term pressure polynomial and the solve reports betatotal 4.262e-02.
+Expected runtime a few seconds warm; the Boozer step needs the optional
+``booz_xform_jax`` package and is skipped with a message if it is absent.
 """
 
 import dataclasses

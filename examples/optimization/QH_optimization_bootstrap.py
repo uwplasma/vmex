@@ -81,7 +81,6 @@ objective_function_terms = [
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
     (opt.mercier_stability_residual, 0.0, stability_weights),
     (opt.glasser_stability_residual, 0.0, stability_weights),
-    # (opt.mean_iota, IOTA_TARGET, 10.0),
 ]
 def minimum_dmerc(equilibrium_state, solver_context):
     return opt.d_merc_state(equilibrium_state, solver_context)[2:-1].min()
