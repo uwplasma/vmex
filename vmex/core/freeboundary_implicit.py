@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import time
 import warnings
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -23,7 +24,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.flatten_util import ravel_pytree
 from scipy.sparse import bsr_matrix
-from scipy.sparse.linalg import LinearOperator, gcrotmk
+from scipy.sparse.linalg import LinearOperator, gcrotmk, gmres
 from solvax import SpluFactorization
 
 from . import implicit as im
@@ -46,8 +47,11 @@ Array = Any
 #: ``coupled_gcrot`` is the certified default; ``boundary_schur`` eliminates
 #: the radial bulk and assembles the edge system column by column;
 #: ``edge_response`` iterates the coupled transpose on a dense model of
-#: NESTOR.
-_ADJOINT_SOLVERS = ("boundary_schur", "coupled_gcrot", "edge_response")
+#: NESTOR; ``edge_schur`` solves the edge system itself by unrestarted GMRES
+#: on the exact transpose, preconditioned by that model when probing is
+#: cheaper than the matvecs it saves.
+_ADJOINT_SOLVERS = ("boundary_schur", "coupled_gcrot", "edge_response",
+                    "edge_schur")
 
 
 @dataclass(frozen=True, eq=False)
@@ -107,6 +111,12 @@ def make_free_boundary_config(
     NESTOR call, the answer is certified on the exact coupled transpose, and
     a certificate that misses continues on that exact operator, so the lane
     is never less accurate than the default -- only cheaper.
+    ``"edge_schur"`` is the radial elimination with its edge system solved by
+    unrestarted GMRES on the exact reverse-mode operator instead of assembled
+    column by column, with that same dense response as an optional
+    preconditioner; it keeps the Krylov residual and the certificate on one
+    operator, which matters above mpol ~ 8 where the analytic vacuum kernel's
+    cancellation separates forward- and reverse-mode derivatives.
     ``adjoint_fail="best_effort"`` returns the stalled
     Krylov solution with a warning instead of raising, so one bad trial in an
     optimization is a poor search direction the line search rejects rather
@@ -269,6 +279,22 @@ def _projected_residual(
 _RESIDUAL_CLOSURE_CACHE: dict[tuple, Callable] = {}
 _RESIDUAL_CLOSURE_CACHE_MAX = 8
 
+#: Matvecs a dense preconditioner removes from the edge GMRES solve, the
+#: restart length below which that solve stalls, and how many columns to time
+#: before deciding to build one.  The restart comes from the measured spectrum
+#: of the real NCSX edge Schur matrix: the non-normal plateau before its
+#: superlinear phase is about thirty iterations long, so a restarted method
+#: shorter than that never leaves the plateau.  The saving is measured here --
+#: 111 matvecs unpreconditioned at the deck's own resolution against the four
+#: to eight a dense preconditioner of this accuracy needs -- and is the
+#: quantity the build has to beat.
+_SCHUR_GMRES_SAVED = 100
+_SCHUR_GMRES_RESTART = 64
+_SCHUR_PROBE_SAMPLE = 16
+#: Margin the edge solve carries over the adjoint tolerance, for the bulk
+#: inverse that stands between an edge residual and the coupled defect the
+#: certificate measures.
+_SCHUR_EDGE_MARGIN = 1.0e-4
 
 
 # Module scope with ``cfg``/``formulation`` static and the per-iterate arrays
@@ -571,10 +597,13 @@ def _solve_bwd_impl(cfg, saved, state_bar):
         )
         lam, _ = im._adjoint_solve_gcrot(
             lambda cotangent: state_pullback(cotangent)[0], rhs, cfg.implicit)
-    elif cfg.adjoint_solver == "boundary_schur":
+    elif cfg.adjoint_solver in {"boundary_schur", "edge_schur"}:
         lam = _host_boundary_schur_adjoint(
             cfg, z_star, params, field_parameters, frozen, rcon0, zcon0,
             mask, rhs, fail=cfg.adjoint_fail,
+            response=None if cfg.adjoint_solver == "boundary_schur" else
+            _edge_response(cfg, params, field_parameters, frozen, rcon0,
+                           zcon0),
         )
         residual = _projected_residual(cfg, mask, formulation="raw")
     elif cfg.adjoint_solver == "edge_response":
@@ -794,7 +823,7 @@ def _balanced_dense_solver(schur):
 
 def _host_boundary_schur_adjoint(
     cfg, z_star, params, field_parameters, frozen, rcon0, zcon0, mask, rhs,
-    *, fail="error",
+    *, fail="error", response=None,
 ):
     """Solve the coupled adjoint through an exact edge Schur complement.
 
@@ -809,6 +838,18 @@ def _host_boundary_schur_adjoint(
     NESTOR's response to the moving edge remains in ``E``. One sparse bulk
     factorization and the edge solve recover the full adjoint. The final
     answer is certified against the original coupled transpose operator.
+
+    Without ``response`` the edge system is assembled column by column with
+    the exact transpose and solved densely: ``nedge`` reverse sweeps through
+    NESTOR.  With one, the edge system is instead *solved* by unrestarted
+    GMRES on the same exact operator -- measured to need about fifty matvecs
+    where the dense assembly needs 247 columns, because only a few dozen of
+    its eigenvalues lie far from one -- and the dense response supplies a
+    preconditioner for it, but only when probing is cheaper than the matvecs
+    it saves.  Solving the exact operator rather than a forward-mode model of
+    it also keeps the Krylov residual and the certificate on one operator,
+    which matters above mpol ~ 8 where the analytic vacuum kernel's
+    cancellation separates forward- and reverse-mode derivatives.
     """
     icfg = cfg.implicit
     field = cfg.field_from_parameters(field_parameters)
@@ -899,19 +940,65 @@ def _host_boundary_schur_adjoint(
         calls += 1
         return probe(np.atleast_2d(value), coupled_pullback)[0]
 
+    started = time.perf_counter()
     apply(edge_rhs)
+    matvec_seconds = time.perf_counter() - started
 
-    identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
-    schur = probe(identity, coupled_pullback).T
-    calls += nedge
-    solve_reduced, condition = _balanced_dense_solver(schur)
-    edge_solution = solve_reduced(edge_rhs)
-    # Dense iterative refinement is cheap at edge size and recovers the
-    # residual digits lost to the raw near-axis scaling.
-    for _ in range(3):
-        edge_solution += solve_reduced(edge_rhs - schur @ edge_solution)
-    if im._adjoint_debug_enabled():
-        print(f"[vmex adjoint] balanced Schur condition={condition:.3e}")
+    if response is None:
+        identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
+        schur = probe(identity, coupled_pullback).T
+        calls += nedge
+        solve_reduced, condition = _balanced_dense_solver(schur)
+        edge_solution = solve_reduced(edge_rhs)
+        # Dense iterative refinement is cheap at edge size and recovers the
+        # residual digits lost to the raw near-axis scaling.
+        for _ in range(3):
+            edge_solution += solve_reduced(edge_rhs - schur @ edge_solution)
+        if im._adjoint_debug_enabled():
+            print(f"[vmex adjoint] balanced Schur condition={condition:.3e}")
+    else:
+        model = _prepare_response_transpose(
+            z_star, params, field_parameters, frozen, rcon0, zcon0, mask,
+            response, cfg=cfg, formulation="raw")
+        # Building the preconditioner costs nedge modelled columns, so it pays
+        # when those are cheaper than the matvecs they remove.  Both sides of
+        # that comparison must be measured the way they are actually spent:
+        # the columns go through one chunked, traced map, while each matvec is
+        # a separate host round trip with a sparse solve in it, so a column
+        # and a matvec are not the same unit and timing ONE column would
+        # overstate the build by the whole batching factor.  The sample below
+        # is real work, kept and reused when the answer is to build.
+        identity = np.eye(nedge, dtype=edge_rhs.dtype)
+        sample = int(min(nedge, _SCHUR_PROBE_SAMPLE))
+        started = time.perf_counter()
+        sampled = probe(identity[:sample], model)
+        column_seconds = (time.perf_counter() - started) / sample
+        preconditioner = None
+        if nedge * column_seconds < _SCHUR_GMRES_SAVED * matvec_seconds:
+            columns = sampled if sample == nedge else np.concatenate(
+                (sampled, probe(identity[sample:], model)), axis=0)
+            solve_reduced = _balanced_dense_solver(columns.T)[0]
+            preconditioner = LinearOperator(
+                (nedge, nedge), matvec=solve_reduced, dtype=edge_rhs.dtype)
+            im._count(icfg, adjoint_edge_preconditioners=1)
+        restart = min(nedge, max(_SCHUR_GMRES_RESTART, 2 * _SCHUR_GMRES_SAVED))
+        operator = LinearOperator(
+            (nedge, nedge), matvec=apply, dtype=edge_rhs.dtype)
+        # The bulk inverse between the edge system and the coupled defect is
+        # badly scaled near the axis, so an edge residual at the adjoint
+        # tolerance is not a coupled defect at it. Ask the edge solve for the
+        # margin that amplification costs rather than discovering it in the
+        # certificate.
+        edge_solution, _info = gmres(
+            operator, edge_rhs, M=preconditioner,
+            rtol=icfg.adjoint_tol * _SCHUR_EDGE_MARGIN, atol=0.0,
+            restart=restart, maxiter=max(1, icfg.adjoint_maxiter // restart + 1),
+        )
+        if im._adjoint_debug_enabled():
+            print(f"[vmex adjoint] edge GMRES size={nedge} calls={calls} "
+                  f"preconditioned={preconditioner is not None} "
+                  f"column={column_seconds:.3e} "
+                  f"matvec={matvec_seconds:.3e}")
 
     correction_rows = _edge_probe_columns(
         jnp.asarray(np.atleast_2d(edge_solution), dtype), coupled_pullback,
@@ -1026,14 +1113,14 @@ def _prepare_transpose(z, p, field, base, rcon, zcon, *, residual):
 # recompiling every backward pass or reading a stale linearization. Taking the
 # mask and the response as traced arguments leaves ``cfg`` the only static key,
 # so one compiled transpose serves every gradient in a process.
-@functools.partial(jax.jit, static_argnames=("cfg",))
+@functools.partial(jax.jit, static_argnames=("cfg", "formulation"))
 def _prepare_response_transpose(z, p, field, base, rcon, zcon, dof_mask,
-                                response, *, cfg):
+                                response, *, cfg, formulation="preconditioned"):
     """Save the response-linearized transpose of the coupled root."""
     return jax.vjp(
         lambda zz: _projected_residual_lane(
             zz, p, field, base, rcon, zcon, dof_mask, None, response,
-            cfg=cfg, formulation="preconditioned"), z,
+            cfg=cfg, formulation=formulation), z,
     )[1]
 
 

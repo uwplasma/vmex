@@ -361,16 +361,18 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
         f"the lane stranded {live[2] - live[1]} arrays in one gradient: {live}")
     assert np.max(np.abs(gradients[0])) > 0.0
 
-    # The diagnostic channel runs too, so its formatting cannot rot unnoticed.
+    # The edge system solved by GMRES on the exact transpose reaches the same
+    # answer as assembling it column by column with that transpose.  The
+    # diagnostic channel runs too, so its formatting cannot rot unnoticed.
     with monkeypatched_debug():
         elimination = np.asarray(fbi._solve_bwd_impl(
-            configure("boundary_schur"), saved[:6], state_bar)[1])
+            configure("edge_schur"), saved[:6], state_bar)[1])
     np.testing.assert_allclose(elimination, gradients[0], rtol=1.0e-6,
                                atol=0.0)
 
     # A certificate this lane cannot meet must cost a second solve on the
     # exact operator and be counted, never be returned as it stands.
-    schur = configure("boundary_schur")
+    schur = configure("edge_schur")
     strict, acceptance = [0], im._adjoint_acceptance
 
     def first_call_is_impossible(cfg_arg, norm, rtol=None):

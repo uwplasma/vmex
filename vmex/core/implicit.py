@@ -1280,14 +1280,16 @@ _PERTURB_SEED: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
 # ``adjoint_certificate_fallbacks`` counts the adjoints that a cheaper
 # operator failed to certify and that were finished on the exact transpose,
 # so a lane silently sliding back to the general Krylov cost is visible in
-# the record rather than only in the wall time.  These counters key on the
-# solve, not on the adjoint lane: :func:`_canonical_config` deliberately
-# shares one config per content, and the free-boundary adjoint solver is a
-# property of the caller's configuration rather than of the solve, so a
-# process that runs two lanes over one deck accumulates both into the same
-# entry.  Read the fallback count as "is this solve falling back", and take
-# differences around a lane when comparing lanes in one process.
-# ``<part>_seconds``
+# the record rather than only in the wall time; ``adjoint_edge_preconditioners``
+# counts the edge solves that judged a dense preconditioner worth building,
+# so a deck where that judgement goes the wrong way is diagnosable from the
+# record instead of only from a profile.  These counters key on the solve,
+# not on the adjoint lane: :func:`_canonical_config` deliberately shares one
+# config per content, and the free-boundary adjoint solver is a property of
+# the caller's configuration rather than of the solve, so a process that runs
+# two lanes over one deck accumulates both into the same entry.  Read the
+# fallback count as "is this solve falling back", and take differences around
+# a lane when comparing lanes in one process.  ``<part>_seconds``
 # is host wall time exclusive of nested parts (compilation inside a part
 # included).  Every count is read from a value the host already receives.  An
 # adjoint traced into a compiled program runs an unobservable number of times,
@@ -1301,7 +1303,7 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "refinement_seconds", "jacobians", "jacobian_columns",
              "jacobian_krylov_iterations", "jacobian_seconds", "adjoints",
              "adjoint_krylov_iterations", "adjoint_seconds",
-             "adjoint_certificate_fallbacks")
+             "adjoint_certificate_fallbacks", "adjoint_edge_preconditioners")
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []
