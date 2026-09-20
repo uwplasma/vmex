@@ -215,15 +215,16 @@ continuation plan) evaluates the virtual-casing integrals with the periodic
 trapezoid rule on a fixed schedule of source grids. At a target a distance
 :math:`d` from the surface its error behaves as :math:`e^{-2\pi d/h}`, up to a
 weak algebraic factor, where :math:`h` is the largest source spacing of the
-finest schedule level. Schedule levels count points over the **full torus**:
-the default ``levels`` of ``from_wout``, ``from_state`` and ``exterior_field``
-is ``((nphi, ntheta), (2 nphi, 2 ntheta))``, so the finest level has
-``2 nphi`` toroidal points on the whole torus and a toroidal spacing
-:math:`h = 2\pi R/(2\,\mathrm{nphi})` whatever ``nfp`` is (for ``nfp = 2``
-this equals :math:`2\pi R/(\mathrm{nfp}\cdot\mathrm{nphi})`). Keep
-:math:`d \gtrsim 2h`: one spacing gives about three digits, two spacings about
-four. The default ``nphi = ntheta = 32`` on a QA configuration with
-:math:`R \approx 1` m has :math:`h \approx 0.1` m, about 0.6 minor radii.
+finest schedule level. Schedule levels count points over the **full torus**, while the source grid
+holds one field period, so the default ``levels`` of ``from_wout``,
+``from_state`` and ``exterior_field`` carries the ``nfp`` factor:
+``((nfp nphi, ntheta), (2 nfp nphi, 2 ntheta))``. The finest level therefore has
+``2 nfp nphi`` toroidal points on the whole torus and a toroidal spacing
+:math:`h = 2\pi R/(2\,\mathrm{nfp}\,\mathrm{nphi})`, which improves with
+``nfp`` rather than ignoring it. Keep :math:`d \gtrsim 2h`: one spacing gives
+about three digits, two spacings about five. The default
+``nphi = ntheta = 32`` on an ``nfp = 2`` QA configuration with
+:math:`R \approx 1` m has :math:`h \approx 0.05` m, about 0.3 minor radii.
 
 The requested ``digits`` does not bound the returned error. The schedule
 refines, target by target, until the achieved-error estimate below meets the
