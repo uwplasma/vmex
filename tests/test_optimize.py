@@ -1454,3 +1454,110 @@ def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
     assert defaults, "no entry point exposes max_fsq_ratio"
     assert set(defaults.values()) == {1.0e2}, defaults
 
+
+
+def _ladder_input():
+    """A small three-dimensional deck a two-rung max_mode ladder fits on."""
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = inp.change_resolution(mpol=3, ntor=2, ntheta=10, nzeta=8)
+    return dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+
+
+def test_subproblem_stage_matches_a_problem_built_at_that_max_mode():
+    """One problem built at the ladder's largest ``max_mode``, sub-setted per
+    stage, must be indistinguishable from the per-stage rebuild it replaces --
+    same free variables, same scaling, same residual and same Jacobian -- and
+    it must hold every higher harmonic of the actual VMEC boundary fixed."""
+    inp = _ladder_input()
+    terms = [(opt.aspect_ratio, 4.0, 1.0)]
+    built_at_2 = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=2, use_ess=True, ess_alpha=1.2, progress=False)
+    built_at_1 = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=1, use_ess=True, ess_alpha=1.2, progress=False)
+    stage = built_at_2.subproblem(max_mode=1)
+
+    assert tuple(stage.dof_names) == tuple(built_at_1.dof_names)
+    np.testing.assert_array_equal(stage.x0, built_at_1.x0)
+    np.testing.assert_array_equal(stage.scales, built_at_1.scales)
+    # A stage is a contiguous-in-order subset, never a reshuffle.
+    assert np.all(np.diff(stage.free_indices) > 0)
+    assert stage.metadata["max_mode"] == 1
+    assert stage.metadata["holder"] is built_at_2.metadata["holder"]
+
+    probe = built_at_1.x0 + 0.01 * built_at_1.scales
+    residual, jacobian = stage.residual_and_jac(probe)
+    reference_residual, reference_jacobian = built_at_1.residual_and_jac(probe)
+    assert jacobian.shape == reference_jacobian.shape
+    np.testing.assert_allclose(residual, reference_residual, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(jacobian, reference_jacobian, rtol=1e-9, atol=1e-11)
+
+    # The leak test.  Move every free variable, then compare the whole
+    # INDATA boundary -- not the decision vector, which cannot show a leak --
+    # against the deck the parent problem starts from.  Exactly the stage's
+    # own harmonics may differ; a frozen one moving is a design changed
+    # silently, which no convergence check would catch.
+    moved_deck = stage.input_from_x(probe)
+    base_deck = built_at_2.input_from_x(built_at_2.x0)
+    moved = set()
+    for family, new, old in (("RBC", moved_deck.rbc, base_deck.rbc),
+                             ("ZBS", moved_deck.zbs, base_deck.zbs)):
+        for row, column in np.argwhere(np.asarray(new) != np.asarray(old)):
+            moved.add(f"{family}({int(row) - int(inp.ntor)},{int(column)})")
+    assert moved == set(stage.dof_names)
+
+    full = stage.embed(probe)
+    np.testing.assert_array_equal(full[stage.frozen_indices], stage.frozen_values)
+    with pytest.raises(ValueError, match="exceeds"):
+        built_at_2.subproblem(max_mode=3)
+    with pytest.raises(TypeError, match="exactly one"):
+        built_at_2.subproblem([0], max_mode=1)
+
+
+def test_subproblem_ladder_compiles_once():
+    """The point of the sub-problem: a second ladder rung adds no compilation.
+
+    A rebuilt stage is a jit cache miss by construction -- the decision vector
+    changes length -- even though ``MINIMUM_MPOL``-style ladders keep every
+    array shape inside the solve identical from rung to rung.
+    """
+    import logging
+
+    class _Compiles(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.count = 0
+
+        def emit(self, record):
+            self.count += record.getMessage().startswith("Compiling ")
+
+    inp = _ladder_input()
+    terms = [(opt.aspect_ratio, 4.0, 1.0)]
+    problem = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=2, use_ess=True, ess_alpha=1.2, progress=False)
+
+    counter = _Compiles()
+    logger = logging.getLogger("jax")
+    previous_level, previous_flag = logger.level, jax.config.jax_log_compiles
+    jax.config.update("jax_log_compiles", True)
+    logger.addHandler(counter)
+    logger.setLevel(logging.WARNING)
+    try:
+        first = problem.subproblem(max_mode=1)
+        first.residual_and_jac(first.x0)
+        compiles_after_first_rung = counter.count
+        second = problem.subproblem(max_mode=2, x=first.embed(first.x0))
+        second.residual_and_jac(second.x0 + 1.0e-4 * second.scales)
+        compiles_after_second_rung = counter.count
+    finally:
+        logger.removeHandler(counter)
+        logger.setLevel(previous_level)
+        jax.config.update("jax_log_compiles", previous_flag)
+
+    assert compiles_after_second_rung == compiles_after_first_rung, (
+        "the second ladder rung recompiled: "
+        f"{compiles_after_second_rung - compiles_after_first_rung} programs")

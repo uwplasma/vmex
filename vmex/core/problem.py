@@ -332,6 +332,14 @@ class FunctionProblem:
         self._lock = RLock()
         self._vg_cache: tuple[tuple[Any, ...], tuple[float, np.ndarray]] | None = None
         self._rj_cache: tuple[tuple[Any, ...], tuple[np.ndarray, np.ndarray]] | None = None
+        # Filled in by :meth:`subproblem` on the view it returns, and left
+        # ``None``/empty on a problem that is not one.
+        self.parent: "FunctionProblem | None" = None
+        self.embed: Callable[[Array], np.ndarray] | None = None
+        self.free_indices: np.ndarray | None = None
+        self.frozen_indices: np.ndarray | None = None
+        self.frozen_names: tuple[str, ...] = ()
+        self.frozen_values: np.ndarray | None = None
 
     @property
     def dof_names(self) -> tuple[str, ...]:
@@ -632,13 +640,19 @@ class FunctionProblem:
         """
         base, free, frozen, embed = self._embedding(active, x)
         sub = type(self)(base[free], **self._subproblem_kwargs(base, free, embed))
-        sub.embed = embed  # type: ignore[attr-defined]
-        sub.parent = self  # type: ignore[attr-defined]
-        sub.free_indices = free  # type: ignore[attr-defined]
-        sub.frozen_indices = frozen  # type: ignore[attr-defined]
-        sub.frozen_names = tuple(  # type: ignore[attr-defined]
-            self.names[position] for position in frozen)
-        sub.frozen_values = base[frozen].copy()  # type: ignore[attr-defined]
+        return self._as_view(sub, base, free, frozen, embed)
+
+    def _as_view(
+        self, sub: Any, base: np.ndarray, free: np.ndarray, frozen: np.ndarray,
+        embed: Callable[[Array], np.ndarray],
+    ) -> Any:
+        """Record on ``sub`` which variables it frees and which it holds."""
+        sub.embed = embed
+        sub.parent = self
+        sub.free_indices = free
+        sub.frozen_indices = frozen
+        sub.frozen_names = tuple(self.names[position] for position in frozen)
+        sub.frozen_values = base[frozen].copy()
         return sub
 
     def _subproblem_kwargs(
@@ -998,15 +1012,8 @@ class VmecProblem(FunctionProblem):
         if self._boundary_from_x is not None:
             boundary = self._boundary_from_x
             kwargs["boundary_from_x"] = lambda u: boundary(embed(u))
-        sub = VmecProblem(base[free], **kwargs)
-        sub.embed = embed  # type: ignore[attr-defined]
-        sub.parent = self  # type: ignore[attr-defined]
-        sub.free_indices = free  # type: ignore[attr-defined]
-        sub.frozen_indices = frozen  # type: ignore[attr-defined]
-        sub.frozen_names = tuple(  # type: ignore[attr-defined]
-            self.names[position] for position in frozen)
-        sub.frozen_values = base[frozen].copy()  # type: ignore[attr-defined]
-        return sub
+        return self._as_view(
+            VmecProblem(base[free], **kwargs), base, free, frozen, embed)
 
     def stage_dof_names(self, max_mode: int) -> list[str]:
         """Names of the degrees of freedom free at continuation ``max_mode``.
