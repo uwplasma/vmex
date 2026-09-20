@@ -1385,6 +1385,49 @@ def test_least_squares_max_mode_schedule():
     np.testing.assert_array_equal(opt.pack_boundary(res.input, 1), res.x)
 
 
+def test_equilibrium_exterior_field_sizes_its_source_grid(monkeypatch):
+    """The equilibrium factory must use the geometry rule, not a fixed 32 x 32.
+
+    ``VmecExtender.from_wout``/``from_state`` size the virtual-casing source
+    grid from the boundary's aspect ratio and the requested digits; this
+    factory and ``VmecProblem.exterior_field`` are the only other ways to build
+    an exterior field, and both used to hard-code 32 and drop
+    ``accuracy_check``.  Nothing here evaluates a field: the surface data and
+    the extender are stubbed, so the test costs one cached solovev solve.
+    """
+    from vmex.core import extender as ext
+    from vmex.core import virtual_casing as vc
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    problem = opt.VmecProblem.from_input(inp, max_mode=1)
+    equilibrium = problem.equilibrium_from_x(problem.x0)
+
+    recorded: dict = {}
+    monkeypatch.setattr(vc, "surface_field_data_from_state",
+                        lambda *args, **kwargs: recorded.update(kwargs))
+    monkeypatch.setattr(
+        ext.VmecExtender, "from_parameterized_surface_data",
+        classmethod(lambda cls, surface_data, parameters, **kwargs: (
+            surface_data(parameters), kwargs)))
+
+    _, forwarded = equilibrium.exterior_field(digits=4, accuracy_check="raise")
+    chosen = ext._source_nphi_for_digits(inp, 4)
+    assert recorded["nphi"] == recorded["ntheta"] == chosen
+    assert forwarded["accuracy_check"] == "raise"
+
+    # An explicit grid still wins, and a different digits moves the default.
+    equilibrium.exterior_field(digits=4, nphi=16, ntheta=8)
+    assert (recorded["nphi"], recorded["ntheta"]) == (16, 8)
+    equilibrium.exterior_field(digits=12)
+    assert recorded["nphi"] >= chosen
+
+    # The vacuum branch returns before any virtual casing, but still after the
+    # grid is sized, so the rule cannot be skipped by that route either.
+    vacuum = equilibrium.exterior_field(
+        plasma="vacuum", external_field=lambda xyz: xyz)
+    assert vacuum.plasma_field is None and not vacuum.uses_virtual_casing
+
+
 def test_equilibrium_wout_is_cached(solovev_eq):
     """Equilibrium.wout is computed once and reused (cached_property)."""
     assert solovev_eq.wout is solovev_eq.wout
