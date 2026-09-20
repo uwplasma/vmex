@@ -5,6 +5,55 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## Unreleased
+
+### Fixed
+
+- **The interior field evaluated B at the wrong place.** The geometry table it
+  is built from, `_state_field_spectra`, multiplied every odd-`m` coefficient
+  of `rmnc` and `zmns` by an extra `sqrt(s)`. `wout_from_state` builds the same
+  table from the same `R_cos_p` with `mode_scale` alone, and
+  `m1_constrained_to_physical` has already returned physical amplitudes, so
+  the factor was spurious. It is 1 at the boundary, which is why
+  `surface_field_data_from_state` — which reads only `s_index = -1` — and
+  every virtual-casing and exterior path through it were always correct, and 0
+  on axis; in between it pulled each surface in towards the axis. On
+  `li383_low_res` that put R 1.2 cm and Z 5.9 cm off at mid-radius, `|B|`
+  1.0e-2 off relative to the wout's own `bmnc`, and left 28 of 126 adjacent
+  surface pairs crossing each other by up to 6.5% of their spacing. The
+  interior geometry now reproduces the wout table to 6.7e-16 m, `|B|` agrees
+  with `bmnc` to 3.1e-4 — the half-mesh interpolation difference — and all 126
+  pairs nest. `_state_field_spectra` had no test of its own: the only test
+  that referenced it replaced it with a stub, so nothing compared it against
+  the wout it is meant to mirror. One now does, on a one-iteration state,
+  since the identity holds whether or not the solve converged.
+- **A point well outside the plasma raised instead of returning NaN.** The
+  stalled-inversion check added in #379 decided a point was interior from the
+  `s` its own unconverged iteration stopped at. That carries no information:
+  on the decks measured, a large fraction of points several minor radii out
+  still finish at `s <= 1`. Querying the DSHAPE interior field three and eight
+  times the minor radius past the boundary raised `VmecNumericalError` at 12
+  and 14 of 32 points, against a documented quiet NaN; the existing test only
+  probed 1.5 times out, which is the one regime that behaved. A stalled point
+  is now classified against the boundary itself, sampled at the query's
+  toroidal angle and shrunk 1% towards the axis so its finite resolution can
+  only ever suppress a complaint, never invent one.
+- **The inversion did not converge from its first guess.** It was seeded by
+  equating the VMEC poloidal angle with the polar angle about the magnetic
+  axis; on a shaped boundary the two differ enough that the undamped step
+  leaves the basin of the root, pins against the `rho` clip where the
+  determinant guard turns the angle step into noise, and wanders until the
+  iteration cap stops it. It now starts from whichever of three candidates
+  actually lands nearest the query point: the geometric guess, the best node
+  of a coarse sweep of the forward map at the query's toroidal angle, and the
+  map linearized about the axis. Seeded callers skip the sweep.
+- **A query exactly on the magnetic axis returned NaN when its flux
+  coordinates were given.** The chart collapses there, so such a point is
+  displaced to a representative just off axis, but the iteration was still
+  started from the caller's `s = 0` — the one place the Jacobian vanishes and
+  the first step is set by the determinant guard instead of the geometry. It
+  now starts from the representative's own coordinates.
+
 ## 0.9.1 - 2026-09-16
 
 Optimization gradients now compile on a machine that has a GPU, the coil

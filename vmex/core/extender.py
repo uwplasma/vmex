@@ -39,6 +39,19 @@ __all__ = [
 _DEFAULT_SOURCE_NPHI = 32
 _MAX_SOURCE_NPHI = 256
 
+#: Resolution of the ``(rho, theta)`` sweep that seeds the unseeded interior
+#: Newton inversion, and of the boundary polygon its outermost row doubles as.
+#: A purely geometric first guess leaves the iteration outside the basin of
+#: its root for a fifth to a quarter of the interior of a shaped boundary, at
+#: any iteration count; see :func:`_invert_coordinates`.
+_GUESS_NRHO = 16
+_GUESS_NTHETA = 32
+
+#: The boundary polygon is shrunk by this much towards the magnetic axis
+#: before a point is called interior, so that its finite resolution can only
+#: ever suppress a complaint about a stalled point, never invent one.
+_INSIDE_MARGIN = 0.99
+
 
 class ExteriorFieldAccuracyWarning(UserWarning):
     """Direct virtual-casing quadrature missed its requested ``digits``."""
@@ -604,11 +617,18 @@ def _invert_coordinates(
     ``newton_iterations`` steps plus one polishing step.
     """
     points = _check_points(points)
+    # Seeded callers already know which surface each point is on, so they need
+    # neither the sweep that seeds the iteration nor the polygon that decides
+    # whether a failure is worth reporting.  Branching here rather than inside
+    # the traced body keeps their graph, and their results, as they were.
+    seeded = initial_flux is not None
     if initial_flux is None:
         initial_flux = jnp.full_like(points, jnp.nan)
     initial_flux = _check_points(initial_flux, "initial flux coordinates")
     if initial_flux.shape != points.shape:
         raise ValueError("initial_flux and points must have the same shape")
+    rho_nodes = jnp.linspace(1.0 / _GUESS_NRHO, 1.0, _GUESS_NRHO)
+    theta_nodes = jnp.linspace(0.0, 2.0 * jnp.pi, _GUESS_NTHETA + 1)[:-1]
 
     def geometry(s, theta, phi):
         return _geometry(spectra, s, theta, phi)
@@ -635,8 +655,63 @@ def _invert_coordinates(
         edge_distance2 = (edge_R - axis_R) ** 2 + (edge_Z - axis_Z) ** 2
         geometric_rho = jnp.sqrt(((radius - axis_R) ** 2 + (z - axis_Z) ** 2)
                                  / jnp.maximum(edge_distance2, 1.0e-24))
-        rho0 = jnp.where(jnp.isfinite(initial[0]), jnp.sqrt(initial[0]), geometric_rho)
-        theta0 = jnp.where(jnp.isfinite(initial[1]), initial[1], geometric_theta)
+        if seeded:
+            guess_rho, guess_theta = geometric_rho, geometric_theta
+        else:
+            # The geometric guess equates the VMEC poloidal angle with the
+            # polar angle about the axis.  On a shaped boundary the two differ
+            # enough that the undamped step below leaves the basin of the
+            # root, pins against the rho clip where the determinant guard
+            # turns the angle step into noise, and wanders until the iteration
+            # cap stops it.  Sweep the forward map at this toroidal angle and
+            # start from whichever candidate actually lands nearest the query.
+            node_R, node_Z = jax.vmap(lambda r: jax.vmap(
+                lambda t: geometry(r**2, t, phi)[:2])(theta_nodes))(rho_nodes)
+            offsets = (node_R - radius) ** 2 + (node_Z - z) ** 2
+            best = jnp.unravel_index(jnp.argmin(offsets), offsets.shape)
+            # Inside the innermost ring the sweep has nothing to offer, but
+            # there the map is linear: (R, Z) - axis = A (rho cos t, rho sin t)
+            # + O(rho^2), and antisymmetric differences about the axis cancel
+            # every even-m term of A.  That candidate carries the near-axis
+            # points the other two miss.
+            probe = jnp.asarray(1.0e-2, dtype=point.dtype)
+
+            def spoke(angle):
+                ahead = jnp.stack(geometry(probe**2, angle, phi)[:2])
+                behind = jnp.stack(geometry(probe**2, angle + jnp.pi, phi)[:2])
+                return (ahead - behind) / (2.0 * probe)
+
+            linearized = jnp.linalg.solve(
+                jnp.stack((spoke(0.0), spoke(0.5 * jnp.pi)), axis=1),
+                jnp.stack((radius - axis_R, z - axis_Z)))
+            candidates = jnp.stack((
+                jnp.stack((geometric_rho, geometric_theta)),
+                jnp.stack((rho_nodes[best[0]], theta_nodes[best[1]])),
+                jnp.stack((jnp.hypot(linearized[0], linearized[1]),
+                           jnp.arctan2(linearized[1], linearized[0]))),
+            ))
+
+            def missed_by(candidate):
+                R_try, Z_try, *_ = geometry(
+                    jnp.clip(candidate[0], 1.0e-12, 1.0) ** 2, candidate[1], phi)
+                offset = (R_try - radius) ** 2 + (Z_try - z) ** 2
+                # A singular linearization gives a non-finite candidate; rank
+                # it last rather than letting argmin select the NaN.
+                return jnp.where(jnp.isfinite(offset), offset, jnp.inf)
+
+            chosen = candidates[jnp.argmin(jax.vmap(missed_by)(candidates))]
+            # The guess is not differentiated: the root carries the whole
+            # dependence through custom_root below.
+            guess_rho, guess_theta = jax.lax.stop_gradient((chosen[0], chosen[1]))
+        rho0 = jnp.where(jnp.isfinite(initial[0]), jnp.sqrt(initial[0]), guess_rho)
+        theta0 = jnp.where(jnp.isfinite(initial[1]), initial[1], guess_theta)
+        # An on-axis query was displaced above to the representative at
+        # ``axis_rho``; start it from that point's own coordinates.  Any other
+        # start, in particular the ``s = 0`` a caller seeds the axis with, is
+        # the one place where the Jacobian vanishes and the first step is set
+        # by the determinant guard rather than by the geometry.
+        rho0 = jnp.where(on_axis, axis_rho, rho0)
+        theta0 = jnp.where(on_axis, 0.0, theta0)
 
         def residual(coordinates):
             R, Z, *_ = geometry(coordinates[0] ** 2, coordinates[1], phi)
@@ -681,6 +756,39 @@ def _invert_coordinates(
         return jnp.stack((rho, theta, phi)), valid
 
     return jax.vmap(one_point)(points, initial_flux)
+
+
+def _inside_boundary(spectra: dict[str, Array], points: Array) -> Array:
+    """Which Cartesian points lie inside the last closed surface.
+
+    An iteration that did not converge stops wherever it happens to stop, so
+    the ``s`` it reports says nothing about where the query point is: on the
+    decks measured, a large fraction of points several minor radii out still
+    finish at ``s <= 1``.  Deciding whether a stalled point is interior — and
+    so whether its NaN is a defect or the documented answer for an exterior
+    point — has to be done on the point itself.  The boundary is sampled at
+    ``_GUESS_NTHETA`` poloidal nodes at the query's toroidal angle and shrunk
+    by :data:`_INSIDE_MARGIN` towards the magnetic axis, so the polygon's
+    finite resolution can only ever suppress a complaint, never invent one.
+    """
+    theta_nodes = jnp.linspace(0.0, 2.0 * jnp.pi, _GUESS_NTHETA + 1)[:-1]
+
+    def one_point(point):
+        x, y, z = point
+        radius, phi = jnp.hypot(x, y), jnp.arctan2(y, x)
+        axis_R, axis_Z, *_ = _geometry(spectra, 0.0, 0.0, phi)
+        edge = jax.vmap(lambda t: jnp.stack(
+            _geometry(spectra, 1.0, t, phi)[:2]))(theta_nodes)
+        centre = jnp.stack((axis_R, axis_Z))
+        vertices = centre + _INSIDE_MARGIN * (edge - centre)
+        following = jnp.roll(vertices, -1, axis=0)
+        rise = following[:, 1] - vertices[:, 1]
+        straddles = (vertices[:, 1] > z) != (following[:, 1] > z)
+        fraction = (z - vertices[:, 1]) / jnp.where(rise == 0.0, 1.0, rise)
+        crossing = vertices[:, 0] + fraction * (following[:, 0] - vertices[:, 0])
+        return jnp.sum(jnp.where(straddles & (crossing > radius), 1, 0)) % 2 == 1
+
+    return jax.vmap(one_point)(_check_points(points))
 
 
 def _interior_coordinates_and_B(
@@ -811,17 +919,23 @@ class VmecInteriorField(MagneticField):
     def _loud(self, value: Array, xyz: Array, seeds: Array) -> Array:
         """Raise when an eager result is NaN because the inversion stalled.
 
-        A point outside the plasma still returns NaN.  One whose inverted ``s``
-        lies inside ``[0, 1]`` but whose position misses the query point did
-        not converge, and that must not pass for a field value.  Traced calls
-        cannot raise and keep the NaN.
+        A point outside the plasma still returns NaN, however far out it is.
+        One that lies inside the boundary but whose inverted position misses
+        the query point did not converge, and that must not pass for a field
+        value.  Traced calls cannot raise and keep the NaN.
         """
         if isinstance(value, jax.core.Tracer) or not bool(jnp.isnan(value).any()):
             return value
-        coordinates, valid = _invert_coordinates(
+        _, valid = _invert_coordinates(
             self.spectra, xyz, newton_iterations=self.newton_iterations,
             initial_flux=seeds)
-        stalled = ~valid & (coordinates[:, 0] ** 2 <= 1.0 + 1.0e-8)
+        # Seeded callers were told which surface the point is on; everyone
+        # else is classified against the boundary itself, because an
+        # unconverged iterate's own s carries no information about where the
+        # point is (see _inside_boundary).
+        interior = (jnp.asarray(seeds[:, 0]) <= 1.0 + 1.0e-8
+                    if seeds is not None else _inside_boundary(self.spectra, xyz))
+        stalled = ~valid & interior
         if bool(stalled.any()):
             raise VmecNumericalError(
                 f"the Cartesian-to-flux Newton inversion did not converge at "

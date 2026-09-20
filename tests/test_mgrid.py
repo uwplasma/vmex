@@ -511,6 +511,52 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
         parameterized.B_vjp(jnp.ones(weight.shape + (3,)))
 
 
+@pytest.mark.usefixtures("_module_jit_enabled")  # one solve, 200 s interpreted
+def test_interior_geometry_matches_the_wout_table():
+    """The interior field and the wout must describe the same surfaces.
+
+    ``_state_field_spectra`` and ``wout_from_state`` build ``rmnc``/``zmns``
+    from the same state and must agree exactly; the interior field is the only
+    consumer of the former, and it once carried an extra ``sqrt(s)`` on the
+    odd-``m`` rows that pulled every interior surface towards the axis while
+    leaving the boundary — and so every virtual-casing path — untouched.  The
+    identity holds for any state, converged or not, so one iteration is enough.
+    """
+    from dataclasses import replace
+
+    from vmex.core.input import VmecInput
+    from vmex.core.multigrid import solve_multigrid
+    from vmex.core.virtual_casing import _state_field_spectra
+    from vmex.core.wout import wout_from_state
+
+    deck = REPO / "examples" / "data" / "input.DSHAPE"
+    inp = VmecInput.from_file(deck).change_resolution(mpol=4, ntor=0)
+    inp = replace(inp, ns_array=np.array([9]), ftol_array=np.array([1e-20]),
+                  niter_array=np.array([1]))
+    result = solve_multigrid(inp, verbose=False, raise_on_max_iterations=False)
+
+    spectra = _state_field_spectra(inp, result.state)
+    wout = wout_from_state(
+        inp=inp, state=result.state, fsqr=float(result.fsqr),
+        fsqz=float(result.fsqz), fsql=float(result.fsql),
+        niter=int(result.iterations), converged=False)
+
+    xm, xn = np.asarray(spectra["xm"]), np.asarray(spectra["xn"])
+    order = [int(np.where((np.asarray(wout.xm) == m)
+                          & (np.asarray(wout.xn) == n))[0][0])
+             for m, n in zip(xm, xn)]
+    odd = xm % 2 == 1
+    assert odd.any(), "deck has no odd-m modes, so it cannot see the defect"
+    # Interior odd-m amplitudes must be non-trivial, or agreement is vacuous.
+    interior_odd = np.abs(np.asarray(wout.rmnc)[1:-1][:, odd]).max()
+    assert interior_odd > 1e-3, interior_odd
+
+    np.testing.assert_array_equal(
+        np.asarray(spectra["rmnc"]), np.asarray(wout.rmnc)[:, order])
+    np.testing.assert_array_equal(
+        np.asarray(spectra["zmns"]), np.asarray(wout.zmns)[:, order])
+
+
 def test_magnetic_field_cylindrical_points_round_trip():
     field = MagneticField(_linear_vacuum_field)
     points = jnp.array([[1.8, 0.25, -0.1]])

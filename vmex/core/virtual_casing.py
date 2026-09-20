@@ -481,14 +481,17 @@ def _state_field_spectra(inp, state, runtime=None):
     bsupumnc = _wrout_cos_coeffs_jax(fields.bsupu, nyq_modes, trig)
     bsupvmnc = _wrout_cos_coeffs_jax(fields.bsupv, nyq_modes, trig)
 
+    # These are the wout geometry coefficients and must be built exactly as
+    # wout_from_state builds them: m1_constrained_to_physical has already
+    # returned physical amplitudes, so mode_scale is the only factor left.  An
+    # extra sqrt(s) on the odd-m rows here shrank every interior surface
+    # towards the axis, which left adjacent surfaces crossing on a shaped
+    # boundary and put B at the wrong place.
     mode_scale = 1.0 / physical_to_internal_scale(modes, trig)
-    radial_scale = jnp.where(
-        (jnp.asarray(modes.m) % 2)[None, :] == 1,
-        jnp.sqrt(jnp.asarray(grids.s_full))[:, None], 1.0)
-    rmnc = R_cos_p * radial_scale * mode_scale[None, :]
-    zmns = Z_sin_p * radial_scale * mode_scale[None, :]
-    rmns = R_sin_p * radial_scale * mode_scale[None, :] if lasym else None
-    zmnc = Z_cos_p * radial_scale * mode_scale[None, :] if lasym else None
+    rmnc = R_cos_p * mode_scale[None, :]
+    zmns = Z_sin_p * mode_scale[None, :]
+    rmns = R_sin_p * mode_scale[None, :] if lasym else None
+    zmnc = Z_cos_p * mode_scale[None, :] if lasym else None
     xm = jnp.asarray(modes.m, dtype=float)
     xn = jnp.asarray(modes.n, dtype=float) * float(nfp)
 
