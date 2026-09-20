@@ -11,6 +11,7 @@ this module keeps their example wiring explicit.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -101,33 +102,94 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
         assert hasattr(Coils, name), name
 
 
-#: Shipped examples that no test runs, each with the reason it is exempt.
+#: Shipped examples that no test RUNS, each with the reason it is exempt.
 #: The QH, QI and QP entries drive the same code as a tested QA sibling on a
 #: different symmetry class, so the driver is covered and only the deck is not.
 #: Keeping the list explicit is what makes the gap reviewable: a new example
-#: that nothing tests fails the guard below until it is either tested or
-#: listed here on purpose.
+#: that nothing runs fails the guard below until it is either run or listed
+#: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
+#: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
     "examples/mirror/pleiades_mirror_reference.py": "needs an unshipped reference deck",
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py": "mirror hybrid, covered by tests/mirror",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
-    "examples/optimization/QA_optimization_bootstrap.py": "bootstrap driver covered by tests/test_bootstrap.py",
-    "examples/optimization/QH_optimization_bootstrap.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QI_optimization_bootstrap.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_scalar.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_scipy.py": "QA sibling is tested",
+    "examples/optimization/QA_maxJ_continuation.py": "covered by the source test above; a run is the QI sibling's",
+    "examples/optimization/QA_optimization_DMerc_vacuum.py": "covered by the source test above; its certificate lane has no smoke path",
+    "examples/optimization/QA_optimization_global.py": "covered by the source test above; basin hopping has no meaningful smoke budget",
     "examples/optimization/stellarator_asymmetry/QA_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/optimization/stellarator_asymmetry/QP_optimization.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
+}
+
+
+#: Shipped examples that a test in this module actually executes.  This is a
+#: declaration, not a search: ``_run_example`` refuses to run a script that is
+#: not listed, and the guard below requires this set and ``UNTESTED_EXAMPLES``
+#: to partition the shipped examples exactly.
+#:
+#: The previous guard searched the test sources for each example's *basename*,
+#: which silently accepted any example whose name another file shares.  That
+#: masked all four ``optimization/stellarator_asymmetry`` vacuum scripts behind
+#: their symmetric namesakes: none of them had ever run, and
+#: ``QH_optimization.py`` exited non-zero when it finally did.
+EXECUTED_EXAMPLES = {
+    "examples/epsilon_effective.py",
+    "examples/finite_beta_scan.py",
+    "examples/fixed_boundary_run.py",
+    "examples/force_balance_polishing.py",
+    "examples/free_boundary_beta_scan.py",
+    "examples/free_boundary_essos_coils.py",
+    "examples/free_boundary_mgrid.py",
+    "examples/hot_restart_scan.py",
+    "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
+    "examples/mirror/mirror_free_boundary_beta_scan.py",
+    "examples/optimization/QA_optimization.py",
+    "examples/optimization/QA_optimization_ballooning.py",
+    "examples/optimization/QA_optimization_bootstrap.py",
+    "examples/optimization/QA_optimization_finite_beta_scalar.py",
+    "examples/optimization/QA_optimization_scalar.py",
+    "examples/optimization/QA_optimization_scipy.py",
+    "examples/optimization/QH_optimization.py",
+    "examples/optimization/QH_optimization_bootstrap.py",
+    "examples/optimization/QI_maxJ_continuation.py",
+    "examples/optimization/QI_optimization.py",
+    "examples/optimization/QI_optimization_bootstrap.py",
+    "examples/optimization/QI_optimization_jaxopt.py",
+    "examples/optimization/QI_optimization_optax.py",
+    "examples/optimization/QI_optimization_scipy.py",
+    "examples/optimization/QP_optimization.py",
+    "examples/optimization/omnigenity_epsilon_gammac_maxj.py",
+    "examples/optimization/single_stage_free_boundary_optimization.py",
+    "examples/optimization/single_stage_free_boundary_optimization_finite_beta.py",
+    "examples/optimization/single_stage_optimization.py",
+    "examples/optimization/single_stage_optimization_finite_beta.py",
+    "examples/optimization/single_stage_optimization_penalty.py",
+    "examples/optimization/stellarator_asymmetry/QA_optimization.py",
+    "examples/optimization/stellarator_asymmetry/QH_optimization.py",
+    "examples/optimization/stellarator_asymmetry/QI_optimization.py",
+    "examples/optimization/stellarator_asymmetry/QP_optimization.py",
+    "examples/parallel_ensemble_scan.py",
+    "examples/plot_and_boozer.py",
+    "examples/profiles_power_and_spline.py",
+    "examples/run_from_json.py",
+    "examples/take_fixed_boundary_gradients.py",
+    "examples/take_free_boundary_gradients.py",
+    "examples/take_gradients.py",
+    "examples/vmex_essos_workflow.py",
+    "examples/vmex_fieldline_tracing_finite_beta.py",
+    "examples/vmex_fieldline_tracing_vacuum.py",
+    "examples/vmex_fixed_free_boundary_comparison.py",
+    "examples/vmex_get_B_gradB.py",
+    "examples/vmex_get_B_outside_plasma.py",
 }
 
 
@@ -142,8 +204,6 @@ def test_every_example_parses() -> None:
     do -- a removed import guard, a stranded ``except`` -- without running any
     of them.
     """
-    import ast
-
     for script in _shipped_examples():
         try:
             ast.parse(script.read_text(), filename=str(script))
@@ -151,28 +211,113 @@ def test_every_example_parses() -> None:
             raise AssertionError(f"{script.relative_to(REPO)}: {error}") from error
 
 
-def test_every_example_is_tested_or_listed_as_untested() -> None:
-    """No example is uncovered by accident."""
-    # The UNTESTED_EXAMPLES entries above are themselves test source, so drop
-    # those lines before searching or every listed example would look covered.
-    tests_text = "\n".join(
-        line
-        for path in sorted((REPO / "tests").rglob("test_*.py"))
-        for line in path.read_text().splitlines()
-        if not line.lstrip().startswith('"examples/'))
-    uncovered = {
-        str(script.relative_to(REPO))
-        for script in _shipped_examples()
-        if script.name not in tests_text
-    }
-    assert uncovered == set(UNTESTED_EXAMPLES), {
-        "missing a test or an entry": sorted(uncovered - set(UNTESTED_EXAMPLES)),
-        "listed but now tested": sorted(set(UNTESTED_EXAMPLES) - uncovered),
+def _smoke_block_clobbers(tree: ast.Module) -> list[str]:
+    """Values a ``ci_smoke`` block sets that a later statement discards.
+
+    Two shapes count.  ``X = replace(X, kw=...)`` inside the block followed by
+    an unconditional ``X = replace(X, kw=...)`` re-supplying the same keyword,
+    and a smoke-assigned name rebound later by an expression that never reads
+    it.  A later ``replace`` naming *other* keywords carries the smoke value
+    forward and is correct, so it is not reported.
+    """
+    def assigned(node):
+        names = []
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                names.append(target.id)
+            elif isinstance(target, ast.Tuple):
+                names += [e.id for e in target.elts if isinstance(e, ast.Name)]
+        return names
+
+    def replace_keywords(node):
+        value = node.value
+        if not isinstance(value, ast.Call):
+            return set()
+        function = value.func
+        name = (function.attr if isinstance(function, ast.Attribute)
+                else getattr(function, "id", ""))
+        if name != "replace":
+            return set()
+        return {k.arg for k in value.keywords if k.arg}
+
+    smoke_names: dict[str, int] = {}
+    smoke_keywords: dict[tuple[str, str], int] = {}
+    problems: list[str] = []
+    for node in tree.body:
+        if (isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+                and node.test.id in ("ci_smoke", "CI", "ci")):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Assign):
+                    keywords = replace_keywords(inner)
+                    for name in assigned(inner):
+                        smoke_names.setdefault(name, inner.lineno)
+                        for keyword in keywords:
+                            smoke_keywords.setdefault((name, keyword), inner.lineno)
+            continue
+        if not isinstance(node, ast.Assign):
+            continue
+        keywords = replace_keywords(node)
+        for name in assigned(node):
+            for keyword in keywords:
+                if (name, keyword) in smoke_keywords:
+                    problems.append(
+                        f"line {smoke_keywords[(name, keyword)]} sets {name}.{keyword} "
+                        f"under the smoke switch; line {node.lineno} supplies it again")
+            reads = any(isinstance(n, ast.Name) and n.id == name
+                        and isinstance(n.ctx, ast.Load)
+                        for n in ast.walk(node.value))
+            if name in smoke_names and not reads:
+                problems.append(
+                    f"line {smoke_names[name]} sets {name} under the smoke switch; "
+                    f"line {node.lineno} rebuilds it without reading it")
+    return problems
+
+
+def test_smoke_budgets_are_not_silently_discarded() -> None:
+    """A ``ci_smoke`` block must not be undone by a later unconditional line.
+
+    ``stellarator_asymmetry/QA_optimization.py`` and ``QH_optimization.py``
+    both reduced the radial grid under the switch and then overwrote
+    ``ns_array``/``ftol_array``/``niter_array`` three statements later, so the
+    smoke budget never applied.  Every trial hit the iteration cap, its
+    residual came back non-finite, and least squares stopped at iteration 0 on
+    the 1e6 sentinel while reporting ``gtol`` success -- QH then exited 1 in
+    ``monitor.plot``.  The failure is invisible in review and silent at run
+    time, so it is worth a parser.
+    """
+    problems = {}
+    for script in _shipped_examples():
+        found = _smoke_block_clobbers(ast.parse(script.read_text()))
+        if found:
+            problems[str(script.relative_to(REPO))] = found
+    assert not problems, problems
+
+
+def test_every_example_is_run_or_listed_as_untested() -> None:
+    """Every shipped example is either run by a test or listed as exempt.
+
+    The two sets must partition the shipped examples.  Matching on basenames
+    is what let four never-run examples pass as covered, so this compares
+    whole repository-relative paths and requires the sets to be disjoint.
+    """
+    shipped = {str(script.relative_to(REPO)) for script in _shipped_examples()}
+    listed = set(UNTESTED_EXAMPLES)
+    assert not (EXECUTED_EXAMPLES & listed), {
+        "both run and listed as untested": sorted(EXECUTED_EXAMPLES & listed)}
+    assert shipped == EXECUTED_EXAMPLES | listed, {
+        "shipped but neither run nor listed": sorted(shipped - EXECUTED_EXAMPLES - listed),
+        "named but not shipped": sorted((EXECUTED_EXAMPLES | listed) - shipped),
     }
 
 
 def _run_example(script: Path, cwd: Path, timeout: int = 2400,
                  args: tuple[str, ...] = (), **extra_env: str) -> str:
+    if script.is_relative_to(EXAMPLES):
+        # Keeps EXECUTED_EXAMPLES honest from the other side: a new test that
+        # runs an example fails here until the example is declared.
+        assert str(script.relative_to(REPO)) in EXECUTED_EXAMPLES, (
+            f"{script.relative_to(REPO)} is run by a test but is not listed in "
+            "EXECUTED_EXAMPLES")
     env = dict(os.environ, VMEX_EXAMPLES_CI="1", **extra_env)
     env.pop("JAX_DISABLE_JIT", None)
     proc = subprocess.run(
@@ -459,6 +604,31 @@ def test_stellarator_asymmetry_examples_expose_all_boundary_families(case, suffi
     assert "ess_alpha=ESS_ALPHA" in source
     if suffix:
         assert "TARGET_BETA" in source and "opt.volume_average_beta" in source
+
+
+@pytest.mark.full  # nightly: four LASYM stages, twice the dofs of a symmetric one
+@pytest.mark.parametrize("case", ["QA", "QH", "QI", "QP"])
+def test_stellarator_asymmetry_vacuum_examples_run(case, tmp_path):
+    """The four vacuum LASYM examples converge and descend.
+
+    Until the coverage guard was made path-aware these had never run: each was
+    masked by the symmetric example of the same basename.  ``QH`` exited 1 when
+    it first did, because the smoke block's radial grid was overwritten by the
+    unconditional ``replace`` below it, so every trial hit the iteration cap and
+    returned the non-finite-residual sentinel.
+    """
+    if case == "QI":
+        pytest.importorskip("booz_xform_jax")
+    script = (EXAMPLES / "optimization" / "stellarator_asymmetry"
+              / f"{case}_optimization.py")
+    out = _run_example(script, tmp_path, timeout=1800)
+    _assert_cost_decreased(out, f"LASYM {case}")
+    # The point of the LASYM lane: the boundary must leave the symmetric subspace.
+    norm = re.search(r"asymmetric boundary norm = ([0-9.eE+-]+)", out)
+    assert norm is not None and float(norm.group(1)) > 0.0, out[-2000:]
+    assert (tmp_path / f"input.{case}_LASYM_optimized").exists()
+    assert (tmp_path / f"wout_{case}_LASYM_optimized.nc").exists()
+    assert (tmp_path / f"{case}_LASYM_optimization_objectives.png").exists()
 
 
 def test_qa_maxj_example_states_its_physical_scope():

@@ -18,27 +18,29 @@ MAX_MODES, MAX_NFEV = [2, 4], [20, 45]
 ASPECT_TARGET, IOTA_FLOOR, MAGNETIC_WELL_TARGET = 5.0, 0.42, 0.01
 MINIMUM_MPOL, SEED_PERTURBATION, ASYMMETRY_PERTURBATION = 3, 0.05, 0.01
 PARAMETER_STEP, MAX_PARAMETER_CHANGE = 0.01, 3.0
+# Radial grid every optimizer trial is solved on:
+STAGE_NS = 21
+STAGE_FTOL = 1.0e-11
+STAGE_NITER = 3000
 ESS_ALPHA = 1.2  # smaller values let high Fourier modes move more
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     SURFACES, MINIMUM_MPOL = np.array([0.25, 0.6, 0.9]), 3
     MAX_MODES, MAX_NFEV = [1], [2]
+    STAGE_NS, STAGE_FTOL, STAGE_NITER = 11, 1.0e-8, 1500
 
 DATA = Path(__file__).resolve().parents[2] / "data" / f"input.minimal_seed_nfp{nfp}"
 inp = vj.VmecInput.from_file(DATA)
-if ci_smoke:
-    inp = replace(inp, ns_array=np.array([11]), ftol_array=np.array([1e-8]),
-                  niter_array=np.array([1500]))
 rbc, zbs, rbs, zbc = inp.rbc.copy(), inp.zbs.copy(), inp.rbs.copy(), inp.zbc.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
 # LASYM adds independent sine-R and cosine-Z families; this (m,n)=(1,1)
 # perturbation keeps the optimizer away from the symmetric stationary subspace.
 rbs[inp.ntor + 1, 1], zbc[inp.ntor + 1, 1] = ASYMMETRY_PERTURBATION, -ASYMMETRY_PERTURBATION
 inp = replace(inp, lasym=True, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc,
-              niter_array=np.array([3000]),
-              ftol_array=np.array([1.0e-11]),
-              ns_array=np.array([21]))
+              niter_array=np.array([STAGE_NITER]),
+              ftol_array=np.array([STAGE_FTOL]),
+              ns_array=np.array([STAGE_NS]))
 
 # Floor the profile minimum, not its average: a mean target is satisfiable while
 # an interior surface sits near zero transform, which is what a current-carried

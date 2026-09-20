@@ -17,27 +17,29 @@ MAX_MODES, MAX_NFEV = [2, 3], [20, 35]
 ASPECT_TARGET = 6.0
 MINIMUM_MPOL, SEED_PERTURBATION, ASYMMETRY_PERTURBATION = 3, 0.12, 0.01
 PARAMETER_STEP, MAX_PARAMETER_CHANGE = 0.01, 3.0
+# Radial grid every optimizer trial is solved on:
+STAGE_NS = 21
+STAGE_FTOL = 1.0e-11
+STAGE_NITER = 3000
 ESS_ALPHA = 1.2  # smaller values let high Fourier modes move more
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     SURFACES, MINIMUM_MPOL = np.array([0.25, 0.6, 0.9]), 3
     MAX_MODES, MAX_NFEV = [1], [2]
+    STAGE_NS, STAGE_FTOL, STAGE_NITER = 11, 1.0e-8, 1500
 
 DATA = Path(__file__).resolve().parents[2] / "data" / f"input.minimal_seed_nfp{nfp}"
 inp = vj.VmecInput.from_file(DATA)
-if ci_smoke:
-    inp = replace(inp, ns_array=np.array([11]), ftol_array=np.array([1e-8]),
-                  niter_array=np.array([1500]))
 rbc, zbs, rbs, zbc = inp.rbc.copy(), inp.zbs.copy(), inp.rbs.copy(), inp.zbc.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
 # A finite RBS(1,1)/ZBC(1,1) seed lets LASYM explore configurations that are
 # inaccessible to the original stellarator-symmetric optimization.
 rbs[inp.ntor + 1, 1], zbc[inp.ntor + 1, 1] = ASYMMETRY_PERTURBATION, -ASYMMETRY_PERTURBATION
 inp = replace(inp, lasym=True, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc,
-              niter_array=np.array([3000]),
-              ftol_array=np.array([1.0e-11]),
-              ns_array=np.array([21]))
+              niter_array=np.array([STAGE_NITER]),
+              ftol_array=np.array([STAGE_FTOL]),
+              ns_array=np.array([STAGE_NS]))
 
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=-1)
 objective_function_terms = [(qs, 0.0, 1.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0)]

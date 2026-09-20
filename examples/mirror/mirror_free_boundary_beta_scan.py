@@ -89,7 +89,7 @@ try:
     from essos.coils import Coils, Curves
     from essos.fields import BiotSavart
 except ModuleNotFoundError as error:
-    raise ModuleNotFoundError("This example requires ESSOS: pip install -e /path/to/ESSOS") from error
+    raise ModuleNotFoundError("This example requires ESSOS: pip install 'vmex[coils]'") from error
 
 coils = Coils(
     Curves(jnp.asarray(coil_dofs), n_segments=128, nfp=1, stellsym=False),

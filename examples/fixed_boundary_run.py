@@ -2,15 +2,20 @@
 """Fixed-boundary VMEC run: input file -> solve -> wout -> plots -> Boozer.
 
 The three steps every new user needs: read an ``&INDATA`` file, converge the
-equilibrium on the NS_ARRAY multigrid ladder (VMEC2000-style progress
-printing), and write/plot the results.  CLI equivalent of this script:
+equilibrium with VMEC2000-style progress printing, and write/plot the results.
+CLI equivalent of this script:
 ``vmec examples/data/input.li383_low_res --booz``.
 
-Physics: the LI383 (NCSX-class, nfp=3) stellarator boundary at low
-resolution, zero pressure.  Expected runtime: ~1 min on a laptop CPU on the
-first run (XLA compilation, cached persistently), a few seconds afterwards.
-Achieved: converges to FTOL = 1e-13; the wout scalars printed at the end
-(aspect ~ 4.4, volume ~ 2.96 m^3) match VMEC2000 to Appendix-A tolerances.
+Physics: the LI383 (NCSX-class, nfp=3) stellarator boundary at low resolution
+and finite beta.  The deck carries a seven-term pressure polynomial, so this is
+not a vacuum field.  Expected runtime: ~1 min on a laptop CPU on the first run
+(XLA compilation, cached persistently), a few seconds afterwards.
+
+Measured at the shipped settings: the deck gives ``NS_ARRAY = 16``, a single
+grid, so only the first entry of its ``FTOL_ARRAY`` applies and the run
+converges to ``fsqr = 8.8e-07`` in 123 iterations.  The wout scalars printed
+at the end are aspect 4.3550, volume 2.9814 m^3, B0 1.4668 T and betatotal
+4.262e-02.
 """
 
 import dataclasses
