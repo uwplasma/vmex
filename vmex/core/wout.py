@@ -352,6 +352,59 @@ def _put(ds, name: str, dims: tuple[str, ...], data, dtype: str = "f8") -> None:
             var.assignValue(np.float64(data) if dtype == "f8" else np.int32(data))
 
 
+
+def wout_from_result(inp, result, *, state=None, **overrides) -> WoutData:
+    """Build a :class:`WoutData` from an input deck and a solve result.
+
+    The one-call form of :func:`wout_from_state` for the common case: a deck
+    and the result of solving it.  These are the same object::
+
+        result = vj.solve_multigrid(inp)
+        wout = vj.wout_from_result(inp, result)
+
+        wout = vj.wout_from_state(
+            inp=inp, state=result.state,
+            fsqr=float(result.fsqr), fsqz=float(result.fsqz),
+            fsql=float(result.fsql), niter=int(result.iterations),
+            converged=bool(result.converged), vacuum_output=result.vacuum)
+
+    Where each field comes from:
+
+    ``inp``
+        Every physics and metadata field: geometry, profiles, resolution.
+    ``result``
+        The converged state (``result.state``) and the run's own record of
+        it -- the three force residuals ``fsqr``/``fsqz``/``fsql``, the
+        iteration count ``result.iterations``, and ``result.converged``,
+        which becomes the wout ``ier_flag``.
+    ``result.vacuum``
+        The NESTOR tables, passed on as ``vacuum_output``.  It is ``None``
+        for a fixed-boundary solve, which :func:`wout_from_state` accepts,
+        so the same call serves both lanes.
+
+    ``state`` overrides which state is exported.  It defaults to
+    ``result.state``, the ordinary converged state, *not*
+    ``result.polished_state``: a polished run that wants the polished state
+    in its wout passes it explicitly, and
+    :func:`~vmex.core.multigrid.solve_file` writes that file itself.  Any
+    other :func:`wout_from_state` keyword may be passed through
+    ``overrides`` -- free-boundary metadata such as ``extcur`` and
+    ``mgrid_mode``, or ``input_extension`` -- and wins over the value taken
+    from ``result``.
+    """
+    fields = dict(
+        inp=inp,
+        state=result.state if state is None else state,
+        fsqr=float(result.fsqr),
+        fsqz=float(result.fsqz),
+        fsql=float(result.fsql),
+        niter=int(result.iterations),
+        converged=bool(result.converged),
+        vacuum_output=getattr(result, "vacuum", None),
+    )
+    fields.update(overrides)
+    return wout_from_state(**fields)
+
 def write_wout(path: str | Path, data: WoutData, *, overwrite: bool = True) -> Path:
     """Write ``data`` to ``path`` in VMEC2000 ``wout_*.nc`` layout.
 
