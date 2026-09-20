@@ -98,7 +98,7 @@ legacy_path = vj.write_wout(
 )
 case = INPUT_FILE.name.removeprefix("input.")
 polished_path = OUTPUT_DIR / f"wout_{case}.nc"
-print(f"wrote {legacy_path}\nusing {polished_path}")
+print(f"Wrote {legacy_path}\nusing {polished_path}")
 
 # The printed certificate is the polish evidence; the summary's radial
 # force-balance panel shows VMEC's discrete flux-surface-averaged residual
@@ -106,4 +106,4 @@ print(f"wrote {legacy_path}\nusing {polished_path}")
 for stage, path in (("before", legacy_path), ("after", polished_path)):
     stage_dir = OUTPUT_DIR / stage
     for figure_path in vj.plot_wout(path, stage_dir).values():
-        print(f"wrote {figure_path}")
+        print(f"Wrote {figure_path}")

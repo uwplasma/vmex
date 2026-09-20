@@ -13,7 +13,6 @@ anything beyond that trend.
 Needs the optional ``neoclassical`` extra: ``pip install "vmex[neoclassical]"``.
 """
 
-import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -41,16 +40,12 @@ NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
 # Figure written to the working directory:
 FIGURE_PATH = Path("epsilon_effective.png")
 
-# VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs.  The Boozer
-# transform per surface is the cost, so the smoke pass coarsens NEO and samples
-# fewer surfaces:
-ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-# SURFACES is deliberately unchanged: the radial trend is the result, and
-# tests/test_examples.py checks it over all five.
-if ci_smoke:
-    NEO_CONFIG_ARGS = dict(theta_n=12, phi_n=12, npart=6, multra=1, no_bins=10,
-                           nstep_per=3, nstep_min=15, nstep_max=30, acc_req=0.3,
-                           max_rational_field_periods=100000)
+# This example has no VMEX_EXAMPLES_CI smoke path, deliberately.  Coarsening
+# the NEO controls enough to matter destroys the result: at theta_n/phi_n 12,
+# npart 6 and acc_req 0.3 the profile came back about four times too large and
+# no longer rose outward, for a saving of 91 s to 54 s.  Its test is gated on
+# the optional neoclassical extra rather than on runtime, so a cheaper lane
+# would buy nothing and cost the radial trend this example exists to show.
 
 ###############################################################################
 # End of input parameters.

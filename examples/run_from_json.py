@@ -72,5 +72,5 @@ print(f"aspect: INDATA={float(wout_indata.aspect):.6f}  "
 ### Print, plot and save ######################################################
 
 wout_path = vj.write_wout(OUTPUT_DIR / f"wout_{case}.nc", wout_json)
-print(f"wrote {wout_path} from the JSON input "
+print(f"Wrote {wout_path} from the JSON input "
       "(the two input formats describe one equilibrium)")

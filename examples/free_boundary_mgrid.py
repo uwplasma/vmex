@@ -72,8 +72,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 wout_path = vj.write_wout(OUTPUT_DIR / f"wout_{case}.nc", wout)
 print(f"aspect = {float(wout.aspect):.4f}, volume = {float(wout.volume_p):.4f} m^3 "
       "(the boundary was solved for, not prescribed)")
-print(f"wrote {wout_path}")
+print(f"Wrote {wout_path}")
 
 if MAKE_PLOTS:
     for key, path in vj.plot_wout(wout_path, OUTPUT_DIR).items():
-        print(f"wrote {path}")
+        print(f"Wrote {path}")

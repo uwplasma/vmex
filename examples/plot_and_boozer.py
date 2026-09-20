@@ -68,7 +68,7 @@ wout = vj.wout_from_state(
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 wout_path = vj.write_wout(OUTPUT_DIR / f"wout_{case}.nc", wout)
-print(f"converged = {result.converged}; wrote {wout_path}")
+print(f"converged = {result.converged}; Wrote {wout_path}")
 
 # plot_wout accepts a WoutData or a path and returns {key: written_png_path}.
 figures = vj.plot_wout(wout_path, OUTPUT_DIR, which=FIGURES)
@@ -79,7 +79,7 @@ for key, path in figures.items():
 if RUN_BOOZER:
     try:
         boozmn_path = vj.run_booz_xform(wout_path, outdir=OUTPUT_DIR)
-        print(f"wrote {boozmn_path}")
+        print(f"Wrote {boozmn_path}")
         for key, path in vj.plot_boozmn(boozmn_path, OUTPUT_DIR).items():
             print(f"  [booz:{key:9s}] {path}")
     except ImportError as exc:

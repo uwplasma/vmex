@@ -186,4 +186,4 @@ if MAKE_FIGURE:
     fig.suptitle("Free-boundary LP-QA from ESSOS coils (tabulated to an in-memory mgrid)")
     fig.tight_layout()
     fig.savefig(FIGURE_PATH, pil_kwargs={"lossless": True})
-    print(f"wrote {FIGURE_PATH}")
+    print(f"Wrote {FIGURE_PATH}")

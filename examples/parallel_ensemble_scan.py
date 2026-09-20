@@ -128,3 +128,6 @@ for workers in WORKER_COUNTS:
     seconds = min(time_workers(workers) for _ in range(REPEATS))
     print(f"{workers:8d} {seconds:8.2f} {serial_seconds / seconds:7.2f}x "
           f"{100 * serial_seconds / seconds / workers:5.0f}")
+
+print("\nNote: sub-linear scaling is expected -- XLA already multithreads within "
+      "each\nsolve, so ensemble workers and intra-solve threads share the same cores.")
