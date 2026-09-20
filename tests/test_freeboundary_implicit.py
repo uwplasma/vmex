@@ -448,6 +448,67 @@ def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     np.testing.assert_allclose(solved.R_cos, state.R_cos)
 
 
+def test_a_restart_that_misses_ftol_is_solved_cold_instead(monkeypatch):
+    """A trial the reference cannot reach is rebuilt, and the reference stands.
+
+    Replacing the stored reference with the rebuild would make the next call
+    restart from somewhere else, which is exactly the history dependence this
+    lane exists to remove -- so the rebuild serves its own trial only.  An
+    unproductive rebuild spends the per-configuration budget; a productive one
+    does not.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-6]), niter_array=np.array([20]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(inp, field, ns=8, ftol=1.0e-6,
+                                    max_iterations=20)
+    runtime = im._template_runtime(cfg.implicit)
+    state = im._initial_state(runtime.setup)
+    reference = SimpleNamespace(
+        continuation_state=object(), vacuum=None, rcon0=runtime.rcon0,
+        zcon0=runtime.zcon0,
+        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+    monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
+    monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
+                        jax.tree.map(jnp.zeros_like, state))
+    monkeypatch.setitem(fbi._REBUILD_BUDGET, cfg, fbi._REBUILDS)
+
+    def stage(converged, marker):
+        return SimpleNamespace(
+            result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0,
+                                   converged=converged, marker=marker),
+            continuation_state=state, rcon0=runtime.rcon0, zcon0=runtime.zcon0)
+
+    # The restart from the reference never reaches ftol.
+    monkeypatch.setattr(fbi, "_solve_free_boundary_stage",
+                        lambda *_a, **_k: stage(False, "restart"))
+    rebuilds = []
+
+    def rebuild(converged):
+        def cold(*_args):
+            rebuilds.append(converged)
+            return stage(converged, "rebuild")
+        return cold
+
+    monkeypatch.setattr(fbi, "_cold_reference", rebuild(True))
+    fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
+    assert rebuilds == [True]
+    assert fbi._FREE_LAST_RESULT[cfg].marker == "rebuild"
+    assert fbi._FREE_HOT_CACHE[cfg] is reference  # the reference stands
+    assert fbi._REBUILD_BUDGET[cfg] == fbi._REBUILDS  # a useful rebuild is free
+
+    monkeypatch.setattr(fbi, "_cold_reference", rebuild(False))
+    fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
+    assert rebuilds == [True, False]
+    assert fbi._REBUILD_BUDGET[cfg] == fbi._REBUILDS - 1
+
+    monkeypatch.setitem(fbi._REBUILD_BUDGET, cfg, 0)
+    fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
+    assert rebuilds == [True, False]  # spent: the stalled restart is returned
+    assert fbi._FREE_LAST_RESULT[cfg].marker == "restart"
+
+
 def test_free_boundary_host_adjoint_rejects_a_false_solver_success(monkeypatch):
     """The true transpose residual, not SciPy's info flag, certifies a gradient."""
     cfg = SimpleNamespace(adjoint_tol=1.0e-10, adjoint_gcrot_m=3,
