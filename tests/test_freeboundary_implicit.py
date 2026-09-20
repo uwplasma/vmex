@@ -458,20 +458,32 @@ def test_ncsx_free_boundary_current_gradient_matches_resolve_finite_difference()
 def test_free_boundary_pressure_gradient_is_certified_at_one_root():
     """The pressure response, certified without re-solving anything.
 
-    This test used to central-difference two independent re-solves in
-    ``am[0]``.  That measured the solver's stopping point, not a derivative:
-    on this deck every solve halts at its iteration budget with fsq 1.1e-9 to
-    2.1e-9 against ftol 1e-9, each in a slightly different place, and the
-    objective inherits the difference.  Over a +/-1e-3 scan the objective
-    departs from its own best-fit line by 4.8e-6, 155 times the 3.1e-8 that
-    the true derivative contributes across that span, and the re-solve
-    difference returns +7.4e-4, +3.0e-3, -1.8e-4, +5.7e-4 and -2.1e-3 at
-    steps 1e-2, 3e-3, 1e-3, 3e-4 and 1e-4 -- ten to two hundred times the
-    adjoint, with the sign flipping at random.  Making the root a function of
-    the parameters removed the run-to-run spread but not that roughness, and
-    no step size recovers an asymptotic regime, so the re-solve difference is
-    retired here rather than re-tuned.  Do not restore it without first
-    converging this deck about a thousand times below where it stops.
+    The re-solve finite difference this replaced is not noisy on this deck,
+    PROVIDED EVERY LEG POPS ``_FREE_HOT_CACHE`` FIRST, as the retired test
+    did.  That protocol matters more than the step size and generalises to
+    any finite-difference check against this solver: measured on one head
+    with both protocols back to back, independent cold legs give 1.565918e-5,
+    1.520154e-5 and 1.520142e-5 at steps 1e-2, 1e-3 and 1e-4 -- five digits
+    stable, and an eleven-point scan that departs from its own best-fit line
+    by nothing measurable -- while legs that continue warm from each other
+    give -7.78e-5, +6.83e-4 and -1.03e-3 on the same head, with a departure
+    from that line of 75 times the signal.  Write the pop, or measure noise.
+
+    So this test is not retired for noise.  It is retired because of which
+    root its legs converge TO.  Both land on genuinely ftol-converged roots,
+    but not the same one that a different forward solve reaches: this deck
+    stops at J = 0.2752496 in 95 iterations where the previous revision
+    stopped at J = 0.2752520 in 467.  Across that change the difference moves
+    by 8.8 % while the adjoint moves by 0.2 %, so the ratio of the two is
+    1.066 with one forward solve and 0.858 with this one.  The retired test
+    allowed ten per cent, and 0.858 is outside it: the test could not be
+    re-tuned, because a tolerance calibrated to one root cannot separate a
+    wrong adjoint from a different root, and the adjoint here is right.
+    (An intermediate revision that always laddered was worse still: its
+    coarse rung put neighbouring parameter points on visibly different roots,
+    and its finite difference swung four orders of magnitude and changed
+    sign.  That arm is gone, and the sign flip that first raised the alarm
+    went with it.)
 
     What is certified instead, both at one saved root:
 
