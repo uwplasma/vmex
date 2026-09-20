@@ -451,19 +451,34 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
                 method(shaped_points), expected_nested, rtol=1e-10,
                 atol=1e-10 * float(jnp.abs(expected_nested).max()))
 
-        # Too few Newton steps from the geometric guess must not pass for a
-        # field value; a point outside the plasma is still a quiet NaN.
-        # The geometric guess is exact for a circle, so elongate the section.
-        elongated = dict(shaped_spectra, zmns=1.8 * shaped_spectra["zmns"])
-        inside = ext._flux_coordinates_to_xyz(elongated, coordinates)
-        starved = VmecInteriorField(elongated, newton_iterations=1)
+        # Too few Newton steps must not pass for a field value; a point outside
+        # the plasma is still a quiet NaN. The starting guess sweeps the forward
+        # map, so an ellipse it lands on almost exactly; a bean-shaped section,
+        # whose VMEC poloidal angle runs well away from the polar angle, is far
+        # enough from any swept node that one step cannot close the residual.
+        bean = dict(
+            shaped_spectra,
+            xm=jnp.array([0.0, 1.0, 2.0]), xn=jnp.zeros(3),
+            rmnc=jnp.concatenate(
+                (shaped_spectra["rmnc"],
+                 (0.4 * minor_radius * s_mesh)[:, None]), axis=1),
+            zmns=jnp.concatenate(
+                (shaped_spectra["zmns"],
+                 (-0.4 * minor_radius * s_mesh)[:, None]), axis=1))
+        inside = ext._flux_coordinates_to_xyz(bean, coordinates)
+        starved = VmecInteriorField(bean, newton_iterations=1)
         with pytest.raises(VmecNumericalError, match="did not converge at 2 of 2"):
             starved.B(inside)
         with pytest.raises(VmecNumericalError, match="newton_iterations=1"):
             starved.flux_coordinates(inside)
         assert jnp.all(jnp.isnan(jax.jit(starved.B)(inside)))  # traced: cannot raise
+        # Two steps are enough, and the default is exact: the raise above is a
+        # starved budget, not a boundary this code cannot invert.
         np.testing.assert_allclose(
-            VmecInteriorField(elongated).flux_coordinates(inside), coordinates,
+            VmecInteriorField(bean, newton_iterations=2).flux_coordinates(inside),
+            coordinates, rtol=0, atol=1e-9)
+        np.testing.assert_allclose(
+            VmecInteriorField(bean).flux_coordinates(inside), coordinates,
             rtol=0, atol=2e-12)
         outside = jnp.array([[major_radius + 1.5 * minor_radius, 0.0, 0.0]])
         assert jnp.all(jnp.isnan(shaped_field.B(outside)))

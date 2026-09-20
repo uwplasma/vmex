@@ -932,9 +932,14 @@ class VmecInteriorField(MagneticField):
         # Seeded callers were told which surface the point is on; everyone
         # else is classified against the boundary itself, because an
         # unconverged iterate's own s carries no information about where the
-        # point is (see _inside_boundary).
-        interior = (jnp.asarray(seeds[:, 0]) <= 1.0 + 1.0e-8
-                    if seeds is not None else _inside_boundary(self.spectra, xyz))
+        # point is (see _inside_boundary).  The distinction is per point, not
+        # per call: _seeds hands back a NaN row for every unseeded point rather
+        # than None, and NaN <= 1 is False, so testing the array as a whole
+        # silently classified every unseeded point as exterior and suppressed
+        # the complaint this method exists to raise.
+        label = jnp.asarray(seeds[:, 0])
+        interior = jnp.where(jnp.isfinite(label), label <= 1.0 + 1.0e-8,
+                             _inside_boundary(self.spectra, xyz))
         stalled = ~valid & interior
         if bool(stalled.any()):
             raise VmecNumericalError(
