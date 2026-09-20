@@ -116,9 +116,14 @@ tuples = [(qs.residuals_state, 0.0, 1.0),
           (opt.aspect_ratio, ASPECT_TARGET, 1.0),
           (iota_floor, 0.0, IOTA_FLOOR_WEIGHT)]
 
-# The free-boundary pullback assembles its projected residual on the host, so
-# the solve and its adjoint run eagerly and cannot sit under jax.jit.  Every
-# term after the solve is compiled once here and reused by each trial.
+# The objective is deliberately not wrapped in jax.jit.  It can be -- the
+# pullback stages a Krylov loop under a trace -- but jitting it silently gives
+# up the boundary-Schur adjoint this configuration asks for, because that lane
+# runs on the host and cannot be staged, and the staged coupled lane that
+# replaces it is the slower one: measured here at ns = 25, one value-and-
+# gradient costs 46.5 s through the Schur lane against 60.9-74.7 s staged.
+# Every term after the solve is compiled once here and reused by each trial,
+# which is where jit does pay.
 @jax.jit
 def accepted_terms(equilibrium_state, u):
     residual = opt.residuals_from_tuples(equilibrium_state, solver_context, tuples)
