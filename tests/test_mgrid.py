@@ -261,8 +261,10 @@ def test_extender_helper_contracts_and_public_equilibrium_aliases():
     """Radial parity, seeded inversion, and the equilibrium field entry points.
 
     ``_radial_value_and_derivative`` regularizes ``rho**|m|`` spectra before
-    interpolating; without modes it must reduce to plain linear interpolation
-    in ``s``.  The seeded interior inversion requires one flux seed per point,
+    interpolating; without modes it interpolates the table directly, with a C2
+    cubic spline, so it reproduces a quadratic exactly where the piecewise
+    linear interpolant it replaced did not.  The seeded interior inversion
+    requires one flux seed per point,
     and near-surface continuation is only defined when the plasma current is
     represented (virtual casing).
     """
@@ -272,9 +274,12 @@ def test_extender_helper_contracts_and_public_equilibrium_aliases():
         lambda value: ext._radial_value_and_derivative(
             coefficients, value, modes))(s)
     plain, derivative = evaluate(None)
-    mesh = np.linspace(0.0, 1.0, 4)
+    # The table is (3 s)^2 on a four-node mesh, which the spline reproduces to
+    # round-off; np.interp on the same nodes gives 0.75 and 2.5.
     np.testing.assert_allclose(
-        np.asarray(plain)[:, 0], np.interp(np.asarray(s), mesh, [0.0, 1.0, 4.0, 9.0]))
+        np.asarray(plain)[:, 0], (3.0 * np.asarray(s)) ** 2, rtol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(derivative)[:, 0], 18.0 * np.asarray(s), rtol=1e-12)
     assert np.all(np.asarray(derivative) > 0.0)
     # m = 1 coefficients carry the sqrt(s) parity: the same table is no longer
     # linear in s once the radial power is restored.

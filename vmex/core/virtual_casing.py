@@ -495,10 +495,21 @@ def _state_field_spectra(inp, state, runtime=None):
     xm = jnp.asarray(modes.m, dtype=float)
     xn = jnp.asarray(modes.n, dtype=float) * float(nfp)
 
+    # The native field form (extender._contravariant_native) builds B from
+    # these rather than from the fitted B^u/B^v tables: ``lmns`` carries VMEC's
+    # internal ``lamscale`` factor and the same mode scaling as ``rmnc``, and
+    # ``phipf``/``chipf`` are the internal flux derivatives.  ``chips`` lives on
+    # the half mesh, while the extender evaluates the Jacobian continuously in
+    # ``s``, so it is moved to the full mesh here.
+    from .extender import _half_to_full_profile
+
+    lmns = lambda_sin * jnp.asarray(fields.lamscale) * mode_scale[None, :]
     return dict(
         nfp=nfp, ns=ns, xm=xm, xn=xn, xmn=xm_nyq, xnn=xn_nyq,
         rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc,
         bsupu=bsupumnc, bsupv=bsupvmnc, bsupu_s=None, bsupv_s=None,
+        lmns=lmns, phipf=jnp.asarray(prof["phipf"]),
+        chipf=_half_to_full_profile(fields.chips),
         lasym=lasym, signgs=signgs)
 
 
