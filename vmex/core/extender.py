@@ -1302,7 +1302,42 @@ class VmecExtender(MagneticField):
             self._check_accuracy(xyz, plasma)
         return value
 
-    def B_error_estimate(self, points: Array | None = None) -> Array:
+    def _checked_derivative(self, order: int, points: Array | None) -> Array:
+        """One spatial derivative, with the eager accuracy check at ITS order.
+
+        ``B`` has been checked on eager calls since the achieved-error estimate
+        landed; its derivatives never were, and they are the ones that need it.
+        Half a minor radius off a finite-beta boundary the same grid gives
+        ``B`` to 1e-06 and its third derivative to 2e-02, and nothing said so.
+        """
+        value = getattr(MagneticField, ("gradB", "gradgradB", "gradgradgradB")[order - 1])(
+            self, points)
+        if (self._accuracy_check != "off" and self.near_surface_plan is None
+                and self.plasma_field is not None
+                and hasattr(self.plasma_field, "schedule_levels")
+                and not isinstance(value, jax.core.Tracer)):
+            xyz = self._require_points() if points is None else _check_points(points)
+            try:
+                self._check_accuracy(xyz, None, order=order)
+            except NotImplementedError:
+                # an older virtual-casing-jax has no per-order estimate; the
+                # value is unaffected, so do not fail the call over the check
+                pass
+        return value
+
+    def gradB(self, points: Array | None = None) -> Array:
+        """Return ``dB_i/dx_j``; eager calls check accuracy at first order."""
+        return self._checked_derivative(1, points)
+
+    def gradgradB(self, points: Array | None = None) -> Array:
+        """Return ``d2B_i/dx_j dx_k``; eager calls check accuracy at second order."""
+        return self._checked_derivative(2, points)
+
+    def gradgradgradB(self, points: Array | None = None) -> Array:
+        """Return ``d3B_i/dx_j dx_k dx_l``; eager calls check accuracy at third order."""
+        return self._checked_derivative(3, points)
+
+    def B_error_estimate(self, points: Array | None = None, *, order: int = 0) -> Array:
         """Estimated relative error of the plasma field, shape ``(n,)``.
 
         Per point, the difference between the value the virtual-casing
@@ -1318,6 +1353,15 @@ class VmecExtender(MagneticField):
         slightly more than the plasma part of a :meth:`B` call (1.2 to 1.5
         times, warm) and is traceable; ``accuracy_check="off"`` avoids paying
         it on every eager call.
+
+        ``order`` is the highest spatial derivative the caller means to take.
+        It matters: measured against a converged reference half a minor radius
+        off a finite-beta boundary, ``B`` is right to 1e-06 while its third
+        derivative is wrong by 2e-02 on the same grid, because each derivative
+        multiplies the quadrature error by roughly the grid count.  The default
+        ``order=0`` is the a-posteriori estimate described above and is
+        traceable; a higher order uses the a-priori estimate, which is
+        host-side and raises rather than silently failing under a trace.
         """
         if self.plasma_field is None:
             raise RuntimeError("the field has no virtual-casing plasma contribution")
@@ -1325,18 +1369,29 @@ class VmecExtender(MagneticField):
             raise RuntimeError(
                 "the near-surface continuation has no quadrature error estimate")
         xyz = self._require_points() if points is None else _check_points(points)
+        if int(order) > 0:
+            from . import virtual_casing as vc
+
+            return vc.offsurface_error_estimate(self.plasma_field, xyz, order=int(order))
         return self._plasma("estimate")(xyz, None)
 
-    def _check_accuracy(self, xyz: Array, plasma: Array) -> None:
-        estimate = np.asarray(self._plasma("estimate")(xyz, plasma))
+    def _check_accuracy(self, xyz: Array, plasma: Array | None, order: int = 0) -> None:
+        if order:
+            from . import virtual_casing as vc
+
+            estimate = np.asarray(
+                vc.offsurface_error_estimate(self.plasma_field, xyz, order=order))
+        else:
+            estimate = np.asarray(self._plasma("estimate")(xyz, plasma))
         digits = int(self.plasma_field.config.digits)
         missed = ~(estimate <= 10.0 ** (-digits))
         if not np.any(missed):
             return
         worst = float(np.max(np.where(np.isfinite(estimate), estimate, np.inf)))
         nt, npol = self.plasma_field.schedule_levels[-1]
+        quantity = "field" if not order else f"order-{order} derivative"
         message = (
-            f"virtual-casing exterior field: {int(missed.sum())} of {missed.size} "
+            f"virtual-casing exterior {quantity}: {int(missed.sum())} of {missed.size} "
             f"points have estimated quadrature error up to {worst:.1e}, above the "
             f"requested 1e-{digits}. The direct quadrature on the finest source "
             f"grid ({nt} toroidal x {npol} poloidal points over the full torus) "

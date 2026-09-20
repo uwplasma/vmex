@@ -708,7 +708,49 @@ def plasma_field_on_boundary(
 # ---------------------------------------------------------------------------
 
 
-def offsurface_error_estimate(field, xyz, B_plasma=None) -> jax.Array:
+def _apriori_error_estimate(field, xyz, order: int):
+    """Order-aware a-priori estimate, for derivatives the two-level one cannot see.
+
+    Each spatial derivative multiplies the trapezoid error by roughly the grid
+    count, so a grid that gives six digits of ``B`` can give two of its
+    curvature.  The a-posteriori estimate differences two levels of the FIELD
+    and is blind to that; this one carries the order in its exponent.
+
+    Host-side NumPy, like the grid sizing it shares a module with, so it cannot
+    be traced.  A traced caller is told that here rather than meeting it as a
+    tracer error from inside the estimate.
+    """
+    try:
+        from virtual_casing_jax.error_estimate import (
+            boundary_series_from_gamma,
+            density_magnitude_from_surface,
+            kst_error_estimate,
+        )
+    except ImportError as error:  # pragma: no cover - exercised by the floor
+        raise NotImplementedError(
+            "a per-order error estimate needs virtual-casing-jax >= 0.0.7"
+        ) from error
+
+    points = jnp.asarray(xyz)
+    if isinstance(points, jax.core.Tracer):
+        raise NotImplementedError(
+            "B_error_estimate(order > 0) is host-side and cannot be traced. "
+            "Use order=0, which is traceable, or size the grid outside the "
+            "trace with virtual_casing_jax.plan_levels and pin the level."
+        )
+    surface = getattr(field, "surface_data", None)
+    if surface is None:
+        raise RuntimeError("the exterior field carries no surface data to estimate from")
+
+    series = boundary_series_from_gamma(np.asarray(surface.gamma), int(surface.nfp))
+    scale = float(np.sqrt(np.mean(np.sum(np.asarray(surface.B_total) ** 2, axis=0))))
+    absolute = kst_error_estimate(
+        series, np.asarray(points, dtype=float), field.schedule_levels[-1], order,
+        density_magnitude_from_surface(surface))
+    return jnp.asarray(absolute / scale)
+
+
+def offsurface_error_estimate(field, xyz, B_plasma=None, *, order: int = 0) -> jax.Array:
     """Estimated relative error of the direct off-surface plasma field.
 
     Delegates to ``virtual_casing_jax``'s own achieved-error estimate, which
@@ -736,12 +778,24 @@ def offsurface_error_estimate(field, xyz, B_plasma=None) -> jax.Array:
     B_plasma:
         Accepted and ignored.  The estimate now comes back from the same call
         that produces the field, so there is nothing to avoid recomputing.
+    order:
+        Highest spatial derivative the caller intends to take.  ``0``, the
+        default, is the a-posteriori estimate above and is traceable.  A higher
+        order uses the a-priori estimate instead, since each derivative
+        multiplies the quadrature error by roughly the grid count and the
+        two-level difference cannot see that.  The a-priori estimate is
+        host-side planning code and is **not traceable**.
 
     Returns
     -------
     Array of shape ``(n,)``, dimensionless.
     """
     _require_vcj()
+    order = int(order)
+    if order < 0:
+        raise ValueError(f"order must be non-negative, got {order}")
+    if order > 0:
+        return _apriori_error_estimate(field, xyz, order)
     if not bool(getattr(field.config, "use_jit_schedule", True)):
         raise NotImplementedError("the estimate reproduces the jitted schedule only")
     if getattr(field.config, "branch", "internal") != "internal":

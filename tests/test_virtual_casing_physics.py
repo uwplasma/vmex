@@ -495,3 +495,89 @@ def test_projection_is_off_by_default_and_differentiable_when_on():
         fd = float((cost(1.0 + step) - cost(1.0 - step)) / (2.0 * step))
         assert abs(ad - fd) <= 1e-6 * abs(fd), (project, ad, fd)
     assert surface.nfp == 2
+
+
+# ---------------------------------------------------------------------------
+# per-order accuracy: B has been checked since the estimate landed, its
+# derivatives never were, and they are the ones that lose accuracy fastest
+# ---------------------------------------------------------------------------
+
+
+def _per_order_available(field):
+    """Whether the installed virtual-casing-jax carries the a-priori estimate.
+
+    Probed at a realistic stand-off: a target far outside the machine sends the
+    complex root off to where ``exp(|m| |Im t|)`` overflows, which is a real
+    (if benign) roughness in the estimate and not something to trip over here.
+    """
+    probe = _torus_points(3.0 * _finest_spacing(field), count=1)
+    try:
+        field.B_error_estimate(jnp.asarray(probe), order=1)
+    except NotImplementedError:
+        return False
+    return True
+
+
+def test_the_estimate_grows_with_derivative_order():
+    """A grid that gives the field its digits need not give its curvature them."""
+    surface = _synthetic_surface(nphi=16, ntheta=16, nfp=2)
+    field = VmecExtender.from_surface_data(surface, digits=4, accuracy_check="off")
+    if not _per_order_available(field):
+        pytest.skip("per-order estimate needs virtual-casing-jax >= 0.0.7")
+    points = jnp.asarray(_torus_points(2.0 * _finest_spacing(field)))
+
+    by_order = [float(np.max(np.asarray(field.B_error_estimate(points, order=k))))
+                for k in range(4)]
+    assert by_order == sorted(by_order), by_order
+    assert by_order[3] > by_order[0]
+
+
+def test_a_traced_per_order_estimate_says_so_instead_of_failing_obscurely():
+    """The host-side path must name the alternative, not raise from inside NumPy."""
+    surface = _synthetic_surface(nphi=12, ntheta=12, nfp=1)
+    field = VmecExtender.from_surface_data(surface, digits=4, accuracy_check="off")
+    if not _per_order_available(field):
+        pytest.skip("per-order estimate needs virtual-casing-jax >= 0.0.7")
+    points = jnp.asarray(_torus_points(3.0 * _finest_spacing(field)))
+
+    # order 0 stays traceable, as it always was
+    np.testing.assert_allclose(
+        np.asarray(jax.jit(field.B_error_estimate)(points)),
+        np.asarray(field.B_error_estimate(points)), rtol=1e-10, atol=1e-14)
+
+    with pytest.raises(NotImplementedError, match="cannot be traced"):
+        jax.jit(lambda p: field.B_error_estimate(p, order=2))(points)
+
+
+def test_eager_derivatives_check_at_their_own_order():
+    """gradgradgradB warns where B does not, on the same points and grid."""
+    surface = _synthetic_surface(nphi=12, ntheta=12, nfp=1)
+    field = VmecExtender.from_surface_data(surface, digits=4, accuracy_check="off")
+    if not _per_order_available(field):
+        pytest.skip("per-order estimate needs virtual-casing-jax >= 0.0.7")
+    points = jnp.asarray(_torus_points(1.2 * _finest_spacing(field)))
+
+    quiet_B = np.asarray(field.B(points))
+    quiet_third = np.asarray(field.gradgradgradB(points))
+    field.accuracy_check = "warn"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        loud_third = field.gradgradgradB(points)
+    assert any(issubclass(w.category, ExteriorFieldAccuracyWarning) for w in caught)
+    assert any("order-3 derivative" in str(w.message) for w in caught)
+    # the check reports; it does not change the value
+    np.testing.assert_array_equal(np.asarray(loud_third), quiet_third)
+    assert np.all(np.isfinite(quiet_B))
+
+
+def test_the_derivative_check_does_not_fire_far_from_the_surface():
+    """Otherwise it would be noise rather than a signal."""
+    surface = _synthetic_surface(nphi=16, ntheta=16, nfp=1)
+    field = VmecExtender.from_surface_data(surface, digits=3, accuracy_check="warn")
+    if not _per_order_available(field):
+        pytest.skip("per-order estimate needs virtual-casing-jax >= 0.0.7")
+    points = jnp.asarray(_torus_points(6.0 * _finest_spacing(field)))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        field.gradB(points)
+        field.gradgradB(points)
