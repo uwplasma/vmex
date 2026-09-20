@@ -149,6 +149,88 @@ def test_cheaper_transpose_is_accepted_only_on_the_exact_one(monkeypatch):
     assert im._SOLVE_STATS[cfg]["adjoint_certificate_fallbacks"] == 1
 
 
+def test_edge_response_models_nestor_and_drives_the_adjoint_lane():
+    """The dense edge response, its lane and its gradient, on a small deck.
+
+    The response is an exact linearization wherever it is built, root or not,
+    so this needs no converged equilibrium to certify -- only one saved point
+    used by both lanes.  Kept out of ``full`` on purpose: these are the paths
+    a coverage lane has to execute, and they are cheap at this resolution.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(
+            mpol=6, ntor=0, ntheta=16, nzeta=4),
+        ns_array=np.array([6]), ftol_array=np.array([1.0e-6]),
+        niter_array=np.array([600]))
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+
+    def configure(solver):
+        return make_free_boundary_config(
+            inp, field, ns=6, ftol=1.0e-6, max_iterations=600,
+            adjoint_tol=1.0e-8, adjoint_maxiter=100, adjoint_solver=solver,
+            field_from_parameters=lambda current: dataclasses.replace(
+                field, extcur=current), device="cpu")
+
+    cfg = configure("edge_response")
+    (_state, _status, _fsq, _ratio), saved = fbi._solve_status_fwd(
+        params, field.extcur, cfg)
+    prm, current, solved, mask, rcon0, zcon0, _ = saved
+    frozen = jax.lax.stop_gradient(solved)
+    value, jacobian, inputs = fbi._edge_response(
+        cfg, prm, current, frozen, rcon0, zcon0)
+    assert jacobian.shape == value.shape + inputs.shape
+    assert bool(jnp.all(jnp.isfinite(jacobian)))
+
+    icfg = cfg.implicit
+    runtime = dataclasses.replace(
+        im.runtime_from_params(prm, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=int(icfg.resolution.ns))
+    response = (value, jacobian, inputs)
+    # At the point it was built on, the model reproduces NESTOR exactly.
+    np.testing.assert_allclose(
+        np.asarray(fbi._linearized_bsqvac(frozen, runtime, response)),
+        np.asarray(cfg.vacuum_program.bsq(
+            frozen, runtime, cfg.field_from_parameters(current))),
+        rtol=1.0e-12, atol=0.0)
+
+    project = im._dof_projector(icfg, mask)
+    z_star = project(solved)
+    exact = fbi._projected_residual(cfg, mask)
+    modelled = fbi._projected_residual(cfg, mask, response=response)
+    tangent = project(jax.tree.map(
+        lambda leaf: jnp.asarray(np.random.default_rng(3).standard_normal(
+            leaf.shape)) * 1.0e-3, z_star))
+    call = lambda lane, z: lane(z, prm, current, frozen, rcon0, zcon0)  # noqa: E731
+    products = [jax.jvp(lambda z: call(lane, z), (z_star,), (tangent,))[1]
+                for lane in (exact, modelled)]
+    assert float(im._tree_norm(jax.tree.map(jnp.subtract, *products))) <= (
+        1.0e-10 * float(im._tree_norm(products[0])))
+
+    # The saved response transpose is the transpose of that same lane.
+    pullback = fbi._prepare_response_transpose(
+        z_star, prm, current, frozen, rcon0, zcon0, mask, response, cfg=cfg)
+    cotangent = project(jax.tree.map(
+        lambda leaf: jnp.asarray(np.random.default_rng(4).standard_normal(
+            leaf.shape)), z_star))
+    left = float(_flat(pullback(cotangent)[0]) @ _flat(tangent))
+    right = float(_flat(cotangent) @ _flat(products[1]))
+    np.testing.assert_allclose(left, right, rtol=1.0e-9, atol=0.0)
+
+    # The lane assembles the same gradient as the certified default, and
+    # certifies it on the exact transpose rather than on its own model.
+    state_bar = jax.grad(
+        lambda state: jnp.mean(state.R_cos[-1] ** 2))(solved)
+    gradients = [np.asarray(fbi._solve_bwd_impl(
+        configure(name), saved[:6], state_bar)[1])
+        for name in ("coupled_gcrot", "edge_response")]
+    assert np.max(np.abs(gradients[0])) > 0.0
+    np.testing.assert_allclose(gradients[1], gradients[0], rtol=1.0e-6,
+                               atol=0.0)
+    assert (im._SOLVE_STATS.get(configure("edge_response").implicit) or {}
+            ).get("adjoint_certificate_fallbacks", 0) == 0
+
+
 def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
     """Under an outer jax.jit the pullback is taken at the root, then staged GCROT."""
     def residual(z, p, field, *_args):
