@@ -59,14 +59,21 @@ _LANE_STABLEHLO_CEILINGS = {
 #: lowering), not that the lane got cheap.
 _LANE_STABLEHLO_FLOOR = 100_000
 
-#: Total XLA programs compiled by ONE cold python-API ``solve`` of the
-#: solovev deck — the jitted lanes plus every eager single-op dispatch of
-#: the setup/export/printout passes.  Measured 2026-09-01 at 03011303
-#: (jax 0.11.1, CPU, x64, persistent compilation cache disabled): 98
-#: programs, of which 92 are eager single-op programs; stable across
-#: repeat runs.  Ceiling is measured + ~27%.  Re-measure by running
+#: Total XLA programs compiled by ONE cold python-API solve — the jitted
+#: lanes plus every eager single-op dispatch of the setup/export/printout
+#: passes.  Two decks: ``solve`` on the single-grid solovev deck, and the
+#: two-rung ``solve_multigrid`` ladder on circular_tokamak, which is where
+#: per-rung dispatch repeats.  Measured 2026-09-20 at 88410b64 (jax 0.11.1,
+#: CPU, x64, persistent compilation cache disabled), before and after the
+#: setup lane of #S1: solovev 98 -> 7, circular_tokamak ladder 152 -> 37;
+#: stable across repeat runs.  Ceilings are the measured value with room for
+#: one or two new lanes, and the circular_tokamak one additionally holds the
+#: review's own gate for this work (under 60).  Re-measure by running
 #: ``_COMPILE_COUNT_SCRIPT`` below by hand.
-_COLD_SOLVE_PROGRAM_CEILING = 125
+_COLD_SOLVE_PROGRAM_BUDGETS = {
+    ("input.solovev", "solve"): 15,
+    ("input.circular_tokamak", "ladder"): 50,
+}
 
 QA_SEED_DECK = ROOT / "examples" / "data" / "input.minimal_seed_nfp2"
 
@@ -169,39 +176,49 @@ jax_logger.setLevel(logging.INFO)  # compile records log at WARNING
 jax.config.update("jax_log_compiles", True)
 jax.config.update("jax_enable_compilation_cache", False)
 
-result = vj.solve(vj.VmecInput.from_file(sys.argv[1]))
-assert result.converged, "solovev budget solve did not converge"
+inp = vj.VmecInput.from_file(sys.argv[1])
+if sys.argv[2] == "ladder":
+    from vmex.core.multigrid import solve_multigrid
+
+    result = solve_multigrid(inp, raise_on_max_iterations=False)
+else:
+    result = vj.solve(inp)
+assert result.converged, "budget solve did not converge"
 print("COMPILED_PROGRAMS:", counter.count)
 """
 
 
-def test_cold_solve_compiled_program_count_stays_under_budget():
+@pytest.mark.parametrize(
+    ("deck_name", "entry"), sorted(_COLD_SOLVE_PROGRAM_BUDGETS))
+def test_cold_solve_compiled_program_count_stays_under_budget(deck_name, entry):
     """One cold subprocess solve, so suite order cannot pre-warm any cache.
 
-    Unmarked by convention: the whole probe measures ~10 s (interpreter +
-    imports + a ~3 s solovev solve), inside the repo's unmarked-medium
-    band (compare ``tests/test_cli.py``); the ``pr-fast`` manifest lane
-    excludes this module.
+    Unmarked by convention: each probe measures ~10 s (interpreter +
+    imports + the solve), inside the repo's unmarked-medium band (compare
+    ``tests/test_cli.py``); the ``pr-fast`` manifest lane excludes this
+    module.
     """
+    ceiling = _COLD_SOLVE_PROGRAM_BUDGETS[(deck_name, entry)]
+    deck = ROOT / "examples" / "data" / deck_name
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         part for part in (str(ROOT), env.get("PYTHONPATH", "")) if part
     )
     proc = subprocess.run(
-        [sys.executable, "-c", _COMPILE_COUNT_SCRIPT, str(SOLOVEV_DECK)],
-        capture_output=True, text=True, timeout=600, cwd=ROOT, env=env,
+        [sys.executable, "-c", _COMPILE_COUNT_SCRIPT, str(deck), entry],
+        capture_output=True, text=True, timeout=900, cwd=ROOT, env=env,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     match = re.search(r"COMPILED_PROGRAMS: (\d+)", proc.stdout)
     assert match, proc.stdout + proc.stderr
     count = int(match.group(1))
     assert 0 < count, "no compile records — the log-capture pattern broke"
-    assert count <= _COLD_SOLVE_PROGRAM_CEILING, (
-        f"a cold solovev solve compiled {count} XLA programs, over the "
-        f"{_COLD_SOLVE_PROGRAM_CEILING}-program budget. New eager "
-        "single-op dispatch crept into the setup/export/printout passes "
-        "(see #227); jit the new pass, or re-measure and move the "
-        "constant if the growth is deliberate."
+    assert count <= ceiling, (
+        f"a cold {deck_name} {entry} compiled {count} XLA programs, over "
+        f"the {ceiling}-program budget. New eager single-op dispatch crept "
+        "into the setup/export/printout passes (see #227); jit the new "
+        "pass, or re-measure and move the constant if the growth is "
+        "deliberate."
     )
 
 

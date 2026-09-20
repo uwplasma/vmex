@@ -906,12 +906,34 @@ def _field_chain_lane(state: SpectralState, rt: SolverRuntime):
     return geometry, jacobian, metrics, fields, energies
 
 
+#: One jitted whole-tree copy of a loop carry.  ``jax.tree.map(jnp.array, ...)``
+#: dispatches one ``copy`` program per leaf, and on a cold process each
+#: distinct (shape, dtype) pair compiles its own XLA module (33 of them on the
+#: QA ladder); one jitted copy is a single program for the whole tree.  The
+#: lane is not donated, so every output leaf is a freshly allocated buffer,
+#: which is what the donated block/while lanes require of their input.
+_distinct_buffers = jax.jit(lambda tree: jax.tree.map(jnp.array, tree))
+
+
+def _host_zeros(shape, dtype) -> Array:
+    """A zero array built on the host and transferred, not computed by XLA.
+
+    ``jnp.zeros`` dispatches a ``broadcast_in_dim`` program and ``jnp.asarray``
+    a staging one, so on a cold process every distinct (shape, dtype) pair
+    pays a first-dispatch XLA compilation; ``device_put`` of a host buffer
+    compiles nothing.  The constant is identical either way — zero is exactly
+    representable — and the array is uncommitted, exactly as ``jnp.zeros``
+    leaves it, so device placement is unchanged.
+    """
+    return jax.device_put(np.zeros(shape, dtype=dtype))
+
+
 def _zero_cache(rt: SolverRuntime) -> PreconditionerCache:
     """Zero-filled cache (shapes only; iteration 1 always refreshes it)."""
     res = rt.resolution
     ns, mpol, nr = res.ns, res.mpol, res.ntor + 1
     dtype = rt.setup.s_full.dtype
-    z = lambda shape: jnp.zeros(shape, dtype=dtype)  # noqa: E731
+    z = lambda shape: _host_zeros(shape, dtype)  # noqa: E731
     coeffs = RadialPreconditionerCoefficients(
         axm=z((ns - 1, 2)), axd=z((ns, 2)), bxm=z((ns - 1, 2)), bxd=z((ns, 2)),
         cx=z((ns,)),
@@ -1969,11 +1991,11 @@ def _initial_carry(
     dtype = rt.setup.s_full.dtype
     one = jnp.asarray(1.0, dtype=dtype)
     zeros = (
-        jax.tree.map(jnp.zeros_like, state)
+        jax.tree.map(lambda leaf: _host_zeros(leaf.shape, leaf.dtype), state)
         if xcdot is None else xcdot
     )
     delt0 = jnp.asarray(float(time_step0), dtype=dtype)
-    zero, inf = jnp.zeros((), dtype=dtype), jnp.asarray(jnp.inf, dtype=dtype)
+    zero, inf = _host_zeros((), dtype), jnp.asarray(jnp.inf, dtype=dtype)
     # NOTE: scalar counters/flags carry explicit (non-weak) dtypes so that the
     # initial carry has exactly the avals of the carry the jitted lanes
     # return; weak-typed Python scalars here would force a second lane
@@ -1988,15 +2010,21 @@ def _initial_carry(
     return _LoopCarry(
         state=state, xcdot=zeros, xstore=state, cache=_zero_cache(rt),
         time_step=delt0,
-        inv_tau=jnp.full((NDAMP,), DAMPING_CAP, dtype=dtype) / delt0,
+        # Host-side constant: DAMPING_CAP/delt0 is the same double division
+        # either way, and this keeps the cold path from compiling a `full`
+        # and a `divide` program for it (see _host_zeros).
+        inv_tau=jax.device_put(
+            np.full((NDAMP,), DAMPING_CAP, dtype=dtype)
+            / np.asarray(float(time_step0), dtype=dtype)
+        ),
         fsq=one, res0=inf, res1=inf,
         fsqr=fsqr0, fsqz=fsqz0, fsql=fsql0,
         fsqr1=one, fsqz1=one, fsql1=one,
         wb=zero, wp=zero, r00=zero,
         iteration=int_(1), iter1=int_(1),
         ijacob=int_(ijacob),
-        done=jnp.zeros((), dtype=bool), ier=int_(NORM_TERM_FLAG),
-        trajectory=jnp.zeros((rt.max_iterations, _TRAJ_COLS), dtype=dtype),
+        done=_host_zeros((), bool), ier=int_(NORM_TERM_FLAG),
+        trajectory=_host_zeros((rt.max_iterations, _TRAJ_COLS), dtype),
     )
 
 
@@ -2327,7 +2355,7 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         # (xstore=state, shared cache zeros), so copy to distinct buffers —
         # same rationale as the CLI-lane copy below, values bit-for-bit
         # unchanged.
-        carry = jax.tree.map(jnp.array, carry)
+        carry = _distinct_buffers(carry)
         return (_while_lane_fft if use_fft else _while_lane)(carry, rt)
 
     if mode != "cli":
@@ -2342,7 +2370,7 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     # (xstore=state, shared cache zeros).  One copy to distinct buffers here
     # (values bit-for-bit unchanged) makes the per-block donation valid and is
     # amortized over the whole solve.
-    carry = jax.tree.map(jnp.array, carry)
+    carry = _distinct_buffers(carry)
     if verbose and emit_banner:
         # initialize_radial.f prints the total Fourier mode count (mnmax), not mpol.
         emit(stage_banner(rt.resolution.ns, rt.resolution.mnmax, float(rt.ftol), rt.max_iterations), end="")
