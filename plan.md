@@ -12,6 +12,19 @@ evidence behind every new number is in
 `benchmarks/review_20260913_equilibrium.py` and
 `benchmarks/review_20260913_exterior.py`; older numbers cite their records.
 
+**Revised 2026-09-19** by a second step-back review the maintainer ordered on
+the seven areas he named: free boundary and its derivatives (report L-FB), the
+VMEC extender (L-EXT), cold runs and the single solve (L-SOLVE), the
+optimization loops (P-OPT), the repository census (SLIM-A), source and tests
+(SLIM-B), and one example template with its correctness pass (EX). Base: main
+at `f86cd13a`, 0.9.1. It is a planning change: no equilibrium algorithm,
+derivative guarantee or performance claim is promoted here. Every number added
+on 2026-09-19 names the report that measured it; the reports, their scripts and
+their JSON live in the review's evidence set `vmex-review-evidence-20260919`,
+which is not in this repository. Where a measurement disproves a claim this
+plan made, the old claim stays in place and is marked disproved rather than
+deleted.
+
 **Release hold.** No tag, version bump or publication date is scheduled. One
 release follows the gates of §4 and §5.
 
@@ -47,18 +60,26 @@ old plan lacked entirely: an accuracy contract for the exterior field.
 | B | One certified equilibrium solve per trial | the objective at a repeated `x` agrees to 1e-9; a gradient call costs at most half of today's; the joint single-stage phase no longer exits with precision loss |
 | C | Derivatives sized to the problem | one linear solve per degree of freedom or per gradient, never per residual row; batched by default |
 | D | A QI example that converges: near-axis seed, then a smooth objective | the QI example reaches today's final metric in at most a third of the time with zero failed trials |
-| E | An exterior field with a stated error | vacuum identity below 1e-6 at every distance down to 0.005 minor radii on the default grid; tracing outside the plasma in seconds |
+| E | An exterior field with a stated error | the same-data identity is below 1e-6 at every distance down to 0.005 minor radii at the default node count, the source data conserve current, and every derivative order the API exposes carries an estimate; tracing outside the plasma in seconds (restated 2026-09-19: the 1e-6 *vacuum* identity is unreachable from ns = 50 source data, whose floor is 1e-5 near the surface — L-EXT 1.6) |
 | F | A free-boundary gradient that costs at most three forward solves | the free-boundary single-stage example converges to a stated design in under ten CPU minutes |
 | G | The published comparison and the paper-1 package | cross-code table from committed records on named hardware; then §5's E3 and ladder |
+| H | One example template, and a repository that carries no dead weight | every shipped example reads the same way and every one of them is run or exempt with a reason; each module is at or above the 95 % coverage gate; the PR test lanes stop running 1,979 tests 3,055 times |
 
 A → B → C is the order; D, E and F are independent of each other and start
-after A. §5's force-balance line resumes after G. No release before every open
-PR is merged or explicitly deferred and the gates of A–F hold.
+after A. §5's force-balance line resumes after G. H runs beside them: its
+correctness items are prerequisites for trusting any example-derived number,
+its slimming items are not. No release before every open PR is merged or
+explicitly deferred and the gates of A–F hold.
 
 ## 2. Evidence at the baseline
 
 Measured 2026-09-13 on one Apple-silicon laptop (14 cores, shared, load 3–11)
-unless a record is cited; timings are diagnostic samples, not rankings.
+unless a record is cited; timings are diagnostic samples, not rankings. Rows
+tagged **L-FB**, **L-EXT**, **L-SOLVE**, **P-OPT**, **SLIM-A**, **SLIM-B** or
+**EX** were measured on 2026-09-19 at 0.9.1 by that report of
+`vmex-review-evidence-20260919`, on machines other sessions were loading
+(load 10–60, briefly above 100): their wall times are upper bounds, and their
+counts, ratios, identities and error norms are not affected.
 
 **Equilibrium solve against VMEC++** (`input.LandremanPaul2021_QA_lowres`, nfp = 2,
 MPOL = NTOR = 8, ns = 50, FTOL 1e-11, four threads; the shipped 1e-13 is
@@ -83,6 +104,58 @@ per-iteration constant, not the loop; the per-optimization gap is what
 surrounds the solve.** `mode="jit"` and `mode="cli"` cost the same warm (2.5 vs
 2.1 s); the earlier 2× reading was load noise.
 
+**Where a cold run goes at 0.9.1** (L-SOLVE 1.1, every JAX trace, lowering and
+backend-compile event recorded from `jax.monitoring` with its program name):
+
+| deck | cold process | import | trace | lower | XLA compile (programs) | exec + Python | warm-cache process | warm in-process solve |
+|---|---|---|---|---|---|---|---|---|
+| `input.solovev`, ns 11 | 5.42 s | 0.55 | 0.44 | 0.35 | 3.45 (150) | 0.30 | 2.14 | 0.038–0.059 |
+| `input.li383_low_res`, ns 16 | 6.09 | 0.72 | 0.44 | 0.36 | 4.01 (187) | 0.32 | 2.13 | 0.075–0.080 |
+| `QA_lowres`, FTOL 1e-11 ladder | 15.65 | 0.43 | 1.14 | 0.74 | 9.32 (413) | 3.78 | 7.13 | 2.47–3.2 |
+| `input.cth_like_free_bdy`, ns 15 | 17.46 | 0.57 | 1.40 | 1.12 | 11.49 (245) | 2.45 | 7.21 | 1.87 |
+
+A cold run is **60–66 % XLA compile**, 10–12 % tracing and lowering, 2–24 %
+execution, and **40–50 % of the compile seconds are single-op eager programs**,
+not the solver lanes: on the QA ladder 30 named-lane programs cost 5.64 s
+against 383 one-op programs costing 3.68 s. Attribution by source line:
+`setup.py::radial_grids` 9.2 % of compile seconds, `setup.py::flux_profiles`
+9.1 %, `residuals.py::_m1_rotate_threed` 7.1 %, `setup.py::interior_guess`
+4.2 %, `solver.py:2345` 1.9 %, `solver.py:914` 1.2 %. One first eager dispatch
+costs 19.7 ms against 86 ms to compile sixty of the same ops as one program
+(13.8×), and their warm *execution* is 50 ms of a multi-second solve, so this
+is a compile cost and not a run cost. The CLI asks for 413 compilations where
+229 are distinct: 118 of the difference is the inter-rung `jax.clear_caches()`
+that `release_stage_cache=True` triggers between rungs, and about 65 is the
+CLI-only export and summary path. **There is no measurable change in the single
+solve between 0.8.1 and 0.9.1** — the 0.9 work went into the optimization path.
+Against the peers, one process each (L-SOLVE 1.2, load 60–100, upper bounds):
+VMEC++ 0.7.4 runs `input.solovev` in 0.003 s inside a 0.22 s process where VMEX
+takes 0.04 s inside a 4.0–5.4 s process, so **VMEX's own executable beats both
+peers in-process on the small decks and loses by 9–25× per process, all of it
+start-up**; VMEC++'s whole process is shorter than VMEX's import alone
+(0.22–0.29 s against 0.43–0.72 s). On the QA ladder VMEC++ single-threaded is
+2.14 s, so VMEX warm is within 1.2–1.5× of one-thread VMEC++ and 2.5–3× behind
+its four-thread run: that closes open item L1.
+
+**The per-iteration constant** (L-SOLVE 3). Thread scaling on the office Xeon,
+warm QA ladder, `taskset`-pinned, three repeats: 8.63 s (1 core), 6.22 (2),
+5.32 (4), 5.34 (8), 5.49 (18) — **the iteration stops scaling at four cores**,
+and at 18 cores burns 63 % more CPU seconds for the same wall time, while
+VMEC++ gains 2.2× from one thread to four. The HLO census of `_block_lane` at
+ns = 50, mpol = ntor = 8 counts 22,474 lines, **844 fusions**, 20 dots and 14
+`while` loops, of which **570 serial Thomas sweep trips per iteration** are the
+radial preconditioner. Caching that factorisation — the bands refresh on the
+`ns4 = 25` cadence but the forward sweep runs every iteration, twelve times —
+is 2.7× cheaper per apply at ns = 16, 4.6× at ns = 50 and 4.4× at ns = 201,
+with max |difference| 0.0e+00 against today's Thomas: about 8 % of the ns = 50
+iteration and 12 % at ns = 201. The checked wrapper costs 30–60 % of the apply
+in isolation but 1.7 % of the whole iteration (2.423 against 2.382 ms/it, final
+`fsqr` identical to the last digit), so the lever is factor reuse, not the
+checking. **B5's sharding arm is disproved as written**: the 2.4× per-iteration
+gap is not parallelism `shard_map` could recover, because XLA already occupies
+four cores and the machine gives nothing beyond them; the 844 fusions are the
+rest, and nothing measured on 2026-09-19 closes that gap.
+
 **Where an optimization step goes** (committed records):
 
 | item | value | record |
@@ -94,6 +167,20 @@ surrounds the solve.** `mode="jit"` and `mode="cli"` cost the same warm (2.5 vs
 | collaborator full run, CPU | 672 s: stage 1 82 s / 63 nfev; coils only 201 s / 1,845 nfev; joint BFGS 336 s / 188 nfev / 176 njev, exit "precision loss" | #299 record |
 | warm campaign F8 | 5 evaluations in 146.6 s with 102 compiles and 1,890 traces, 11.9 GB | [`baselines/m4/F8_warm.json`](benchmarks/baselines/m4/F8_warm.json) |
 | constructed QI, 8 dof, this laptop, JAX 0.9.2 | build 11.4 s, first derivative 61.0 s, contract check 80.3 s, one solve of 185 iterations; no split between descent, refinement, block assembly, per-column GMRES and compile exists in the record | [`review_20260913.json`](benchmarks/review_20260913.json) |
+
+**The shipped optimization examples, run unmodified at 0.9.1** (P-OPT 1, fresh
+process, empty directory, four threads, compilation cache disabled):
+
+| run | wall | compile | where the warm phase goes |
+|---|---|---|---|
+| `QI_optimization.py`, full | 263.3 s, nfev 20 / njev 11, 0 failed trials, final cost 0.0311670 | 132 s = 50 % (1,421 XLA programs) | warm least squares 71.9 s: descent 33.3 s (17,251 iterations), refinement 16.4 s (19 factorisations), Jacobians 18.0 s; 9 of 20 objective calls were rejected trials costing 28.7 s |
+| `QA_optimization.py`, full | 567.9 s, three stages at 8 / 24 / 48 dof, cost 21.45 → 1.74e-4 | 301 s = 53 % | the stages' first residual-and-Jacobian calls are 99.3 / 113.1 / 82.1 s against a ~5 s warm equivalent: **276 s = 49 % of the run is per-stage recompilation at identical array shapes** (`MINIMUM_MPOL` pins mpol = ntor = 5 for every `max_mode`) |
+| `single_stage_optimization.py`, capped at 600 s | 163 joint trials, 3.3 s median | 46 s = 8 % | per trial: descent 28 %, refinement 36 %, block adjoint and objective 36 %; **the coil side is 1 %** (14 s of 600), so the ESSOS reverse pass cannot move this example |
+| one warm QI point | trial + Jacobian ≈ 4.8 s | — | **≈ 97 % block assembly and factorisation**: objective rows 0.02–0.03 s, one raw block assembly 1.4–1.8 s, Newton finish 1.79 s of which 1.69 s is that factorisation, Jacobian 3.0–3.9 s at the shipped `jacobian_batch_size=1` |
+
+Across QA, QI and single stage, **60–78 % of every trial descent runs between
+FSQ 1e-9 and FTOL 1e-12**, while the shipped block Newton finish crosses that
+gap in three GMRES steps costing 0.10 s.
 
 **Objective replay on public data** (QA terms of `benchmarks/optimization.py`,
 8 dof, warm excursions of 1e-3, 1e-2 and 1e-1 then return to `x0`; loaded
@@ -111,6 +198,23 @@ warm block Jacobians 16–40 s at `jacobian_batch_size=1`, 15–16 s at 16 and
 `"auto"` (which resolves to 16), 28 s at 8; the batched Jacobians differ from
 the serial one by 0.5–2 % relative, which a correct implementation cannot do.
 That difference must be reproduced in isolation before C1 changes the default.
+**Disproved 2026-09-19** (P-OPT 2.4): the isolation was run and there is no
+batch dependence. At one solved and refined QI state the tangents at probe and
+response chunk widths (1,1), (13,1), (13,24), (150,24), (150,1) and (150,150)
+agree with (1,1) to **6.1e-11 … 8.9e-11 relative** with 24 of 24 columns
+certified at every width; two problems built identically at width 1 give
+bit-identical Jacobians; a third built at `None` agrees end to end to 4.1e-12;
+recomputing is bit-identical. A separate 21 % difference that P-OPT's own
+multi-section script reported also failed to reproduce, and its four candidate
+causes (width, problem rebuild, the return-to-a-repeated-`x` path, a preceding
+loose solve left in the caches) were each excluded at 4.6e-12 … 2.2e-10. Warm
+cost at that point is **3.0–3.9 s at width 1, 0.83 s at `"auto"` (13) and
+0.56 s at `None`**, so the shipped default costs 4–7× the widest setting for a
+Jacobian that is the same to 4e-12. **C1's blocker is therefore dissolved.**
+The same run establishes that the objective *and* the Jacobian at a repeated
+`x` are functions of `x` at 0.9.1 — cost, residual, Jacobian and anchor are
+bit-identical after an excursion and reproduce to 7e-12 / 2.2e-10 from a cold
+re-solve — so B1c closed the path dependence of the 2026-09-13 review for both.
 
 **Shipped single-stage example, smoke mode** (`VMEX_EXAMPLES_CI=1`, ESSOS #58):
 224 s wall, 3.9 GB peak, three trials and one BFGS iteration; ends at
@@ -131,6 +235,41 @@ iterations; `_newton_step` (`solver.py:1088`) exists but is reachable only with
 `prec2d` configured, which no optimizer path sets. The #299 record shows the
 same 847-component design vector returning costs that differ by 4 %, and ±1e-4
 probes drifting 1.5 %: the objective is a function of the solve history.
+
+**Four defects in the optimization loops** (P-OPT 4, each with a reproducer,
+none of them a wrong published number):
+
+1. **Refinement runs before the acceptance status is known.**
+   `implicit.py:1813` calls `_refine_fixed_point` before the status decided at
+   `implicit.py:1866–1869`, so a trial that will be rejected as budget-exhausted
+   still pays the full Newton anchor: measured **37.1 s and 6,041 Krylov
+   iterations after a 2.1 s descent**, and its rows were then replaced by the
+   penalty. It does not fire on the shipped examples (no status-2 trials there)
+   and is unbounded on a hard deck.
+2. **Status-2 trials are not counted as failures** (`optimize.py:3204–3229`
+   increments `failed_trials` only on an exception or `_LAST_STATUS_ERROR`), so
+   "0 failed trials" in a committed record does not exclude budget-exhausted
+   trials.
+3. **Two status-free lanes hand out an unconverged equilibrium** — the
+   fixed-boundary analogue of the free-boundary case. `metadata["jax_state_runtime"]`
+   (`optimize.py:3588–3591`, behind `exterior_field`, `interior_field` and
+   `surface_field_values`) calls `solve_implicit`, which carries no status, and
+   `equilibrium_from_x` (`optimize.py:3447–3470`) checks only the params key.
+   At FSQ/FTOL = 1.2e7 against `max_fsq_ratio = 1e2` both returned a state
+   silently (aspect 11.65). The optimizer's own lanes are safe.
+4. **`equilibrium_from_x` returns the pre-refinement state** while its docstring
+   says it returns "the exact accepted state already used by the objective"; it
+   differed from the anchor the objective and gradient were evaluated at by
+   **1.3e-3 max-abs** at the QA seed.
+
+There is **no leak and no per-trial recompilation in the fixed-boundary loops**:
+over 14 perturbed trials the least-squares lane holds 171 → 175 live arrays then
+flat, 1.28 MiB live, RSS flat at 1.88 GiB, zero new XLA compilations after the
+first trial, and the scalar lane the same. The free-boundary Schur adjoint's
+per-trial closure leak has no fixed-boundary counterpart, because
+`_refine_step_core`, `_adjoint_block_core` and `_preconditioned_residual_lane`
+are module-level `jax.jit` with `cfg` static and every per-call array a traced
+argument — which is the property the free-boundary path lacks.
 
 **Exterior field** (vacuum deck, `ctor = −4e-11`, so the exact plasma field
 outside is zero; the direct path equals a full-torus trapezoid rule of the
@@ -157,6 +296,104 @@ the direct default is 12–31 %, and 0.7–2 % at 0.5 a where the direct path is
 better. No test in the repository compares the exterior field with an oracle
 or places a target within a grid spacing.
 
+**The exterior field against a converged reference** (L-EXT; a target-graded
+trapezoid reference, self-consistent between 768×384 at grading 0.985 and
+1024×512 at 0.97 to 6e-13 down to `d = 0.01 a` and 7.5e-10 at 0.005 a, which is
+the first converged finite-β exterior reference this project has had — earlier
+reviews were reference-limited below 0.05 a). The shipped path agrees with an
+independent evaluator to 4.4e-9 at `d = a`, the formula, signs, outward normal,
+`nfp` replication, the on-surface ½ jump and µ0 are all verified, and the
+Ampère loop closes to 7.8e-4. At the default grid the quadrature error against
+that reference is 1.5e-10 median at `d = a`, 1.5e-4 at 0.2 a, 1.2e-2 at 0.1 a
+and 0.33 at 0.02 a; #312's estimate tracks it within 0.6–1.2× at most targets,
+with one 28× under-estimate. Four findings change Phase E:
+
+- **The converged exterior plasma field is not curl-free, and the quadrature
+  cannot see it.** With quadrature error ≤ 1e-12, |curl B| / |grad B| is 5e-3 at
+  `d = a`, 2.8e-2 at 0.5 a, 9e-2 at 0.2 a and 0.14–0.20 below 0.1 a, while
+  div B is 1e-14. Virtual casing of tangential data is the field of the sheet
+  current K = n × B, whose curl vanishes only if `div_s K = 0`, i.e.
+  `∂_θ B_φ − ∂_φ B_θ = µ0 √g J^s = 0` on the LCFS; VMEC's data satisfy that only
+  to discretisation. Projecting the covariant pair onto surface gradients (a
+  current potential, as NESCOIL and REGCOIL build it) takes the curl to
+  **≤ 6e-10** and moves B_plasma by 0.07–1.2 % and grad B_plasma by 0.8–14 % —
+  that difference is the size of the source-data error the shipped field carries
+  today, invisible to any quadrature estimate.
+- **E3 as written is withdrawn.** A quadratic three-point edge extrapolation
+  `(15, −10, 3)/8` in place of `1.5 / −0.5` does *not* remove the curl
+  (5.0e-3 against 5.2e-3 at `d = a`): the non-conservation is VMEC's discrete
+  `J^s`, not the extrapolation order.
+- **The Phase E gate of §1 is unreachable from ns = 50 data.** The vacuum
+  identity (exact answer zero, quadrature converged) sits at 2.4e-6 … 1.3e-5
+  raw, 2.3e-6 … 1.9e-5 projected and 2.0e-6 … 1.7e-5 with the quadratic
+  extrapolation: the floor near the surface is ~1e-5 and neither change moves
+  it, because it is the gradient part of the VMEC edge-field error. Gates are
+  restated in Phase E against a converged quadrature of the *same* data, plus a
+  separate source-data gate.
+- **The level was chosen for B and the same level was then differentiated.**
+  At the shipped default the third derivative was 170 % wrong at 0.5 a and 1.2 %
+  at `d = a` where the finest level gives 8e-9, each derivative multiplying the
+  trapezoid error by about `n`. **Closed 2026-09-19** by virtual_casing_jax #7:
+  VMEX's third derivative at `d = a` went 1.2e-2 → 8.5e-9, a factor 1.4e6. What
+  remains is order-aware grid *sizing*, which is #9's job.
+
+Three methods were measured and ranked. **Closed-form derivative kernels**
+(derivative tensors of 1/r contracted with K before the source sum) give B and
+all three derivatives in one pass at 1.17 ms/point against 23.6 ms/point for
+four nested-`jacfwd` calls through the shipped schedule — **20×**, first call
+0.45 s against 3.1 s, identical to AD at 2.7e-15. The **KST a-priori estimate**
+(af Klinteberg, Sorgentone, Tornberg, [arXiv:2012.06870](https://arxiv.org/abs/2012.06870))
+is conservative by 1.5–3.6× and never below 1× wherever the rule is resolved,
+across eleven orders of magnitude and all four derivative orders with no
+calibration, at the cost of two complex Newton solves on the boundary series per
+target; it replaces the double-layer self-test and the two-level difference, and
+it inverts for the grid. A **target-graded trapezoid rule** (substitute
+`θ = θ* + u − a_p sin u`, `φ = φ* + v − a_t sin v` and apply the same periodic
+rule in (u, v), with `1 − a = d/4h`) reaches **≤ 4e-9 in B and ≤ 3e-6 in grad B
+for every `d ∈ [0.005 a, 0.5 a]` with today's finest default node count**
+(256×128), where the uniform rule gives 1.4e-6, 2.5e-2, 4, 34 and 54 at the same
+distances; 192×96 nodes still give ≤ 1e-6. Its unoptimised prototype costs
+40–90 ms per target, dominated by a non-separable boundary-series evaluation, so
+it is a point-query and table-filling method and never an ODE right-hand side.
+
+**Equivalent sources (E1) are killed by their own rule** (L-EXT 4). On the
+shipped, unprojected data the fit cannot converge at all (residual 2e-3 … 1e-2
+at every depth and mode count, floor set by the curl). On projected data, with
+24 modes and 82k quadrature nodes at `s_src = 0.9`, the inward continuation
+still gives 3.2e-4 at 0.2 a, 2.4e-3 at 0.1 a and 9.8e-2 at 0.02 a against E1's
+gate of 1e-4 at `d = 0.02 a` with at most four times the surface grid's source
+count. It is also not cheaper per target than the direct sum it would replace
+(0.55 ms against 0.30 ms at 256×128), because the source surface needs its own
+fine quadrature.
+
+**The interior branch is wrong in its second and third derivatives** (L-EXT 3).
+Against the exact oracle `wout_purely_toroidal_field.nc` at ns = 101, B is
+1.3e-5 … 1.2e-6 and grad B 5e-5 … 3e-4, but **grad-grad B is 2–17 % wrong and
+the third derivative 10–46 %**, because `_radial_value_and_derivative`
+(`extender.py:401–438`) interpolates every coefficient linearly in `s`, so AD
+returns a zero second radial derivative inside each cell. On a finite-β
+axisymmetric deck |div B| / |grad B| is 1–3 % at ns = 11, 21, 41 and 81 with no
+convergence.
+
+**The plan's "the Taylor plan is broken" claim is corrected** (L-EXT B5): it
+rests on a measurement taken on the vacuum QA wout, where the exact plasma field
+is zero, so the ~1e-5 it returned was its error and the direct value it was
+compared against (4e-6 T at 4h) was the source-data floor, not a certified
+field. The finite-β record is 1.2e-3 … 1.7e-3 of B at 0.1–0.2 a: **approximate,
+not broken**. It is retired on its merits — first order, not solenoidal, 56–416 s
+to build — and not on that diagnosis.
+
+Three smaller defects: `VmecProblem.exterior_field` (`problem.py:896–939`) and
+the `equilibrium_from_x` factory (`optimize.py:3483–3515`) hard-code
+`nphi = ntheta = 32` and drop `accuracy_check`, bypassing the geometry rule of
+`from_wout`/`from_state`; `_has_plasma_sources` (`extender.py:822–832`) uses
+absolute 1e-14 thresholds on dimensional quantities, so the vacuum QA wout
+(ctor 1.5e-10 A) reports plasma sources and `plasma="auto"` runs virtual casing
+on a vacuum equilibrium; and #374's per-order derivative cache keys on the
+config while `B_fn` reads mutable attributes at trace time, so mutating
+`external_field`, `plasma_field`, `near_surface_plan` or `newton_iterations`
+after the first derivative call silently keeps the old graph.
+
 **Free boundary.** In the host GCROT lane every transpose matvec re-runs the
 primal, including NESTOR's full assembly and LU, because `_transpose_matvec`
 builds its VJP inside the jitted matvec (`freeboundary_implicit.py:853–860`,
@@ -166,6 +403,100 @@ gradient costs one forward solve plus `nedge` (≈100) coupled pullbacks or up t
 2e-3 from root non-reproducibility. #299's analytic-term contraction removed a
 20 GiB compile, not this cost. The free-boundary single-stage example solves in
 59 s at FTOL 1e-9 with no predictor and an un-jitted objective.
+
+**NESTOR, measured** (L-FB, a manufactured exterior Neumann problem with
+interior charges on an nfp = 3 rotating ellipse, so the exact potential and a
+zero `bsqvac` are known). **NESTOR is second-order accurate**, and the cause is
+not the singular point: the tan-periodised singular function behaves
+like |δ − π| / (4√a) at the antipodal lines `du = π`, `dv = π`, a C⁰ kink whose
+derivative jump makes the trapezoid rule O(h²) by Euler–Maclaurin, while the
+singular point itself would give O(h³) because its degree-0 remainder is odd and
+cancels on the symmetric grid. A 20-line Euler–Maclaurin line correction in a
+patched copy raises the source term to order **2.9–3.0** and cuts its error 6.4×
+at N = 32 and 11× at N = 64. The same `greenf`/`precal` construction is in
+vmec2000, PARVMEC, VMEC++ and DESC's `nestor.py`, so every NESTOR in use has it
+and no source states NESTOR's order. Malhotra et al. (PPCF 62 (2020) 024004,
+[arXiv:1909.07417](https://arxiv.org/abs/1909.07417)) name NESTOR, state that
+Merkel's subtraction is low order and measure O(h²) for it.
+
+At VMEC-paired grids (`ntheta = 2 mpol + 6`, `nzeta = 2 ntor + 4`) with smooth
+data, so that Galerkin truncation is negligible:
+
+| mpol = ntor | grid/period | potential, rel. max | truncation floor | grad Φ residual rms / max |
+|---|---|---|---|---|
+| 6 | 18×16 | 1.2e-2 | 2.7e-3 | 3.9e-2 / 7.8e-2 |
+| 8 | 22×20 | 8.3e-3 | 6.0e-4 | 2.6e-2 / 5.7e-2 |
+| 10 | 26×24 | 6.3e-3 | 2.0e-4 | 1.9e-2 / 5.0e-2 |
+| 12 | 30×28 | 4.4e-3 | 5.4e-5 | 1.5e-2 / 3.6e-2 |
+| 12, 2× grid | 60×56 | 9.4e-4 | 6.2e-5 | 2.9e-3 / 8.6e-3 |
+
+At mpol = ntor = 12 the quadrature error is **80× the Galerkin truncation
+floor**: the unknowns are wasted, and the surface-field response is wrong by
+1.5 % rms. Doubling only the vacuum grid divides the potential error by 4.7 and
+the grad Φ error by 4–5.
+
+**The cost split disproves what F0 expected to find.** Warm, VMEC-paired grid:
+the kernel scan is **50–55 %** of a NESTOR call and the **LU is 1.5–2 %**, so
+VMEC++'s benchmark-header claim that build and factorisation dominate is not
+true of this port, and **F1a's `custom_linear_solve` is not a speed item** —
+`jnp.linalg.solve` against `lu_factor`/`lu_solve` makes no measurable
+difference. The dense forward response is affordable (0.02 s at mpol 3, 1.40 s
+at 8, 9.0 s at 12) but it is **not low rank**: at mpol = 8 the 240×256 response
+has numerical rank 222, with singular values still at 1e-3 by index 151, which
+rules out a randomized low-rank shortcut.
+
+**What breaks first is precision, not cost.** The contraction `Σ_l cmns[l,m,n]
+T_l` (`vacuum.py:791–801`) is an alternating sum whose cancellation factor grows
+about 30× per +2 in mpol: 2.7e3–6.6e3 at mpol 6, **7.3e4–8.0e4 at 8**, 2.1e6 at
+10, **1.6e8–1.8e8 at 12**. The stability-selected `T_l` recurrence itself is
+correct to 7.4e-12 against 50-digit quadrature. Differentiation amplifies the
+cancellation: the JVP-against-VJP dot-product identity of the whole map is
+3e-13 (mpol 3), 2e-11 (6), **3.5e-8 (8)**, 9e-7 (10), 4.5e-5 (12) and 2.9e-4
+(mpol 12, nfp 5), while the non-singular kernel alone stays at 1e-13…1e-15. The
+acceptance in the code is `10 · adjoint_tol · |rhs|` = 1e-9 relative
+(`implicit.py:2126–2132`). **Prediction, not observation:** a Schur system built
+from forward columns and certified against the reverse-mode operator will miss
+that acceptance somewhere between mpol 7 and 8 and fall into the GCROT fallback
+(`freeboundary_implicit.py:767–775`), silently restoring today's cost. FB-A
+certifies at 2.4e-10 at mpol 7 and is testing mpol 8; the test decides it.
+
+**The real NCSX edge Schur matrix** (`boundary_schur` lane on main, ns = 15, at
+the deck's own resolution mpol = 7, ntor = 6 — not 3): nedge = 247, of which 84
+columns of S − I are exactly zero; |λ| ∈ [0.11, 8.98] with **35 eigenvalues
+further than 1 from unity and 88 further than 0.3**; cond(S) = 8.6e5 although
+the eigenvalues span only 80×, so the matrix is strongly non-normal. S − I is
+*not* low rank to solver accuracy (124 of 163 active singular values exceed
+1e-3), but the clustering makes **unrestarted GMRES converge superlinearly:
+≤ 2e-10 in 50 matvecs for S and Sᵀ**, against 247 probe columns today and 671
+coupled GCROT matvecs — after a 30-iteration plateau that a restart length of 30
+would never leave, so the restart must exceed ~60. **F2 as written is not
+supported**: an inexact dense preconditioner needs ≤ 1e-4 operator error to pay
+(8 iterations); at 1e-2 it gives 44 against 50 for none, and at 3e-2…1e-1 it is
+2.5–4× *worse* (123–189 iterations). Carrying a recycled deflation subspace
+across optimizer iterates (GCRO-DR, which SOLVAX's `gcrot` already implements)
+is the replacement, and is untested.
+
+**F3's frozen derivative is killed by measurement.** The dropped kernel-shape
+term is `|A⁻¹ dA·pot| / |A⁻¹ db|` = **0.10–0.18** over four random low-mode
+boundary perturbations, independent of grid and of quadrature oversampling; the
+option's gate was 1e-2. Separately, the domain derivative was derived in
+Hadamard form (Φ′ solves the same exterior problem with data
+`N·∇Φ′ = ∂_u(ξ_N B^u) + ∂_φ(ξ_N B^φ)`) and agrees with AD of NESTOR to 1.8–3.6 %
+at mpol 6 and 0.7–1.9 % at mpol 8 — the first known-answer check of the response
+that is not a finite difference of the same code. It is 1–3 % inexact, so it is
+a **test**, never the operator and (by the preconditioner numbers above) not a
+preconditioner either.
+
+**A different quadrature removes the cause.** A 170-line second-kind Nyström
+prototype with the O(h³) diagonal zeta correction of Wu & Martinsson
+([arXiv:2007.02512](https://arxiv.org/abs/2007.02512)) is **2–5× more accurate
+than NESTOR at equal grid** (3.7e-3 against 8.3e-3 at 22×20; 1.4e-3 against
+4.4e-3 at 30×28), at observed order 2.85, with no `T_l` recurrences, no `cmns`
+cancellation, no tan tables and condition number 2.88 at every size. Their
+O(h⁵) stencil is the production target. Partition-of-unity and BIEST quadrature
+are **not** better at VMEX's grids: Malhotra's own W7-X table needs ~84 points
+per period for 3e-4, i.e. a 3–5× geometry upsample per direction, and its
+near-surface off-surface evaluation is stated as unsolved.
 
 **The field, checked 2026-09-13.** VMEC++ 0.7.x ships an implicit adjoint whose
 GMRES solve costs 40–50 s against a 2 s forward solve at ns = 25 (their PR 855),
@@ -191,6 +522,86 @@ DESC optimization run against about one hour per VMEC++ run driven by finite
 differences ([arXiv:2506.19583](https://arxiv.org/abs/2506.19583)); no 2025–26
 QI or single-stage paper publishes wall times except Dudt's.
 
+**The repository is already small; the 969 MB was never what a user downloads**
+(SLIM-A). A plain `git clone` of `uwplasma/vmex` is **40 MiB** (37 single-branch,
+8.4 with `--filter=blob:none`, 5.6 at `--depth 1`); the 969 MB figure describes
+the maintainer's long-lived personal checkout, and a `--mirror` clone is 834 MiB
+of which ~94 % is `refs/pull/*`. The largest blob reachable from any branch or
+tag today is 4.5 MB (`examples/data/mgrid_ncsx_c09r00_small.nc`). Every large
+blob the brief named lives only in PR refs (PR #1's two mgrid files, the QS
+sweep panels of PRs #8–#17) except two `gkx.*.nc` files, which exist **nowhere
+on GitHub** and are reachable only from a local branch or worktree. Deleting
+every safely-deletable branch moves the mirror by −14 MiB (−1.7 %); a history
+rewrite of `main` could reclaim **~22.65 MiB** of an already-33.7 MiB pack,
+almost all of it superseded figure generations, while invalidating every fork,
+open PR branch, 36 tags and the PyPI/DOI provenance they carry — **not
+recommended**. Of 102 non-`main` branches, **74 are delete-safe** (68 merged PRs,
+6 closed-unmerged whose heads survive at `refs/pull/N/head`), 15 are keep (5 open
+PRs, the six winding-surface branches, the two HINT-comparison branches,
+`wip/single-stage-split`, two release branches) and 13 need a maintainer answer
+(no PR, unique commits — three of them external-contributor branches). Sixty
+registered local worktrees hold 6.55 GiB, **3.45 GiB of it stale** by git's own
+`prunable` flag or by checking out a delete-safe branch: that is the largest
+low-risk footprint win and it is on the maintainer's disk, not a cloner's. In
+the tracked tree, `tools/` has zero orphans under a four-pass search (literal
+path, basename, date-stripped stem, and bare module name — the pass that would
+have caught the `build_qi_sheet_mgrid.py` incident), `benchmarks/` has none
+beyond the three the repository's own `INDEX.md` already declares uncited, and
+`tests/data` duplicates nothing in `examples/data` by name or by hash. The
+confirmed orphan list is **10 files, 262 KiB** (nine `history.json` files under
+`docs/_static/readme_best_cases/` and `qi_readme_cases/`, plus one derived
+`.panels.h5`), with four input decks and five more flagged as needing an answer
+rather than a grep.
+
+**Coverage, tests and source** (SLIM-B, from the coverage artifacts of a green
+PR run on `b6f2a750`). PR-lane coverage is **94.31 %** (22,880 / 24,260
+statements); **49 of 73 measured modules are at or above 95 % and 24 are
+below**, and 395 of the 564 statements needed to lift every module to 95 % are in
+three free-boundary modules — `core/freeboundary_implicit.py` at **43.2 %**,
+`mirror/free_boundary.py` at 65.9 %, `core/freeboundary.py` at 87.5 %.
+Seventy-seven functions have zero PR coverage (461 statements), led by
+`_host_boundary_schur_adjoint` (115); each is exercised only by `full`-marked
+nightly or weekly tests, so the changed-lines gate cannot see a regression in
+them. The coverage `omit` is a basename glob, so it hides **three** modules and
+not the two it names: `vmex/mirror/turbulence.py` (107 statements, measured 94 %
+locally) is invisible to both the changed-lines gate and the 90 % mirror floor,
+and `core/virtual_casing.py` measures 44 %, its gap being the whole
+wout/state surface-data route. **`tests/conftest.py` sets
+`jax_disable_jit=True` for the entire suite**: 46 modules (661 tests) never
+enable it, and **11 tests whose names claim they check jit-compatibility (29
+nodes) ran with jit disabled**, where `jax.jit` is inert — all 29 pass when jit
+is forced on (47.7 s against 68.7 s eager), so none hides a defect today, but
+each would have stayed green through one. On CI shape: **1,979 unique PR nodes
+are executed 3,055 times**, because five "representative physics" jobs (1,835 s)
+re-run modules that a parity lane already runs in full, and `--dist load` rebuilds
+`scope="module"` fixtures on every xdist worker — about **2,500 s per PR** that
+`--dist loadfile` removes with one flag. The package has almost no dead code
+(4 symbols, 23 lines), but 37 symbols and 586 lines are production code kept
+alive only by tests, and the square-root homotopy lane is unreachable from every
+production root: retiring it is **−1,620 source and −990 test lines** and ≥ 1,560 s
+of one PR lane. Docstrings are **22 %** of the package's 64,850 lines.
+
+**The examples** (EX, all 67 files under `examples/` read against one proposed
+template of twelve rules with eight family variants; six exemplars converted and
+verified byte-for-byte on stdout and artefacts). The correctness findings are
+separable from the formatting, and they are what matters here: the coverage
+guard in `tests/test_examples.py` matched **basenames**, so the eight
+`stellarator_asymmetry/*` examples were considered covered by their symmetric
+namesakes and **never ran**; two of them declare a reduced radial grid under
+`if ci_smoke:` and overwrite it unconditionally three statements later, so the
+smoke budget was inert — `QH_optimization.py` exited 1 in 42 s with the 1e6
+sentinel and zero iterations, and `QA_optimization.py` was solving the full grid
+in the smoke lane. Two examples declare `IOTA_FLOOR`/`MIRROR_LIMIT`/`ELONGATION_LIMIT`
+and then hard-code different numbers in their callbacks, so editing the
+documented constant changes nothing; one carries a commented objective row whose
+constant is defined nowhere (`NameError` if uncommented); two write the same
+three output file names, so running both in one directory silently overwrites;
+and six state something their code or deck contradicts, including two that call
+a deck with `betatotal = 4.262e-02` "zero pressure". Forty-one of 66 examples
+pass a physics- or accuracy-affecting numeric literal to a library call below
+the parameter block, the pinned `nphi = ntheta = 32` virtual-casing grids among
+them.
+
 ## 3. Root causes
 
 | complaint | cause, verified in code or record |
@@ -198,8 +609,9 @@ QI or single-stage paper publishes wall times except Dudt's.
 | slow QI | two nonlinear solves per trial (descent to 1e-12, then a refinement that on the seed deck exhausts 6,000 GCROT iterations and returns the state unchanged, because the raw Jacobian's edge λ modes put its condition number near 6e12); serial Jacobian with a per-dof GMRES corrector; 45–190 s recompile per `max_mode` stage; a non-smooth surrogate residual (`argmin`, `cummax`, `interp`) with 17,712 rows that fails trials; a circular-torus seed where every published QI result used a near-axis one |
 | slow single-stage | path-dependent objective, so BFGS line searches fail; refinement and the full Jacobian on every trial; penalty BFGS instead of least squares; a seed at ι ≈ 0.08 against a 0.42 floor, with B·n weighted 70× the ι term |
 | slow free-boundary single-stage | 59 s solves with no predictor; NESTOR inside every adjoint matvec; un-jitted objective |
-| exterior field | trapezoid rule off-surface with silent non-convergence; O(N_src) per target with 0.42 s latency; no oracle test |
-| "VMEC++ is faster" | cold compile and the 2.6× per-iteration constant; the loop itself is at parity and VMEX's derivative is cheaper than VMEC++'s adjoint |
+| exterior field | trapezoid rule off-surface with silent non-convergence; O(N_src) per target with 0.42 s latency; no oracle test. Added 2026-09-19 (L-EXT): the LCFS source data do not conserve current, so the converged field is not curl-free (5e-3 at `d = a`, 0.2 near the LCFS) whatever the quadrature; the schedule chose its level for B and then differentiated that level; and the interior branch interpolates every coefficient linearly in `s`, so its second radial derivative is identically zero |
+| "VMEC++ is faster" | cold compile and the 2.6× per-iteration constant; the loop itself is at parity and VMEX's derivative is cheaper than VMEC++'s adjoint. Split 2026-09-19 (L-SOLVE): the cold process is 60–66 % XLA compile, 40–50 % of those seconds spent on ~130 single-op eager programs per rung that no solver lane needs; the per-iteration constant is 844 fusions and 570 serial Thomas trips, not missing threads — VMEX already saturates four cores |
+| slow optimization runs that are not the solver | 49 % of the QA run is per-stage recompilation at identical array shapes, because the jit key holds `x0.tobytes()`; 60–78 % of every trial descent runs below FSQ 1e-9, where the block Newton finish crosses in three GMRES steps; a gradient at a new point builds two full block factorisations; the shipped `jacobian_batch_size=1` costs 4–7× the widest setting (P-OPT 1, 2.1–2.4) |
 
 ## 4. Programme
 
@@ -221,6 +633,7 @@ attribution. One heavy local job at a time; the office box takes one.
 | A4 documentation truth | `README.md`, `docs/reference/performance.rst`, `docs/reference/objectives.rst`, `docs/explanation/adjoint-gradients.md`, `docs/howto/run-on-gpu.md`, `docs/howto/parameter-scans.md`, `docs/_static/figures/figures.json` | the 14.5-minute QA, 17.3-minute QI and 33× adjoint prose numbers either gain a record or go; the README qualifies the exterior field and GPU optimization; the orphaned extender figure is cited or removed; prose gate and cited-path test pass |
 | A5 external-corpus robustness | fetch the 23 decks where a VMEC-family peer strictly converged and VMEX did not (`atf*`, `bean14`, `belt20`, `c82vac20`, `qas14`, `w7s20`, `cooper`, `Q2_KINK`, `HSX_QHS`, `WISTELL-A`, W7-X `d23p4_tm`, `qhs46`, ITER hybrid), run them, and classify each failure as an INDATA feature not parsed, a Jacobian reset, an iteration budget or genuine non-convergence; fix only what the classification names | VMEX's strictly-converged count on the 344-case `itpplasma/benchmark_vmec` corpus reaches vmec2000's 179, from 168; no shipped deck regresses |
 | A5 robustness against the external corpus | the 23 named decks, then whatever the classification points at | `itpplasma/benchmark_vmec` runs 344 cases through twelve codes. VMEX is strictly converged on all 168 it reports — third in the VMEC family, ahead of VMEC++ at 157 — but 23 cases converge for a peer and not for VMEX (`atf*`, `bean14`, `belt20`, `c82vac20`, `qas14`, `w7s20`, `cooper`, `Q2_KINK`, `HSX_QHS`, `WISTELL-A`, W7-X `d23p4_tm`, `qhs46`, ITER hybrid). Fetch them, run them, classify each failure (INDATA feature not parsed / Jacobian reset / iteration budget / genuine non-convergence), and fix only what the classification shows. Gate: the strictly-converged count reaches vmec2000's 179, with no case regressing. Independent of B–F; after A1–A4 |
+| A6 the test suite runs with jit disabled | `tests/conftest.py`, the 11 tests named "jittable", one lint test | `jax_disable_jit=True` is set for the whole suite, so `jax.jit` is inert and line coverage cannot tell a traced path from an eager one. This is one defect that has now hidden four separate problems: the blocked jitted free-boundary pullback whose test monkeypatched the function away, a jit wrapper that would have broken NumPy callables, two coverage gates that could not see tracer branches, and 11 tests (29 nodes) named "jittable" that never enabled jit (SLIM-B 3.1). Gate: those 29 nodes run with jit on (verified green, 47.7 s against 68.7 s eager) and a lint test fails when a test body contains `jax.jit` without a jit-enabling fixture; then either the suite default inverts, with the ~15 kernel A/B modules opting out, or one nightly lane reruns the PR selection with jit forced on. Kill neither arm on cost before measuring it: the lane is the cheaper of the two and would have caught all three of this week's defects |
 
 ### Phase B, weeks 1–3: one certified solve per trial
 
@@ -230,15 +643,48 @@ attribution. One heavy local job at a time; the office box takes one.
 | B2 warm starts everywhere | perturbation predictor into the free-boundary cache; rung skipping for `initial_state`; hot restart for CLI and `solve_file` sequences; `mode="jit"` inside the callback | 806 → 212 iterations at a 1e-4 move | iterations per accepted trial ≤ 0.3× cold on the QI example |
 | B3 exact block adjoint (measured on both decks: adjoint residual ≤ 1.2e-10 in one factorization, 300–5,000× cheaper than production with the Jacobian's factor reused, while B1's dense check puts the production Krylov error at 9e-6 (QA) to 3e-5 (QI); the 1.1e-3 QI gap between lanes is the raw-versus-preconditioned formulation at non-root anchors, which B3 aligns on the raw formulation), then Krylov recycling | on the seed deck the QI adjoint's GCROT stalls at 2.6e-5 and takes 13,228 iterations (78 s), while the raw block factorization is exact at the state, so first solve the adjoint by transposing that factorization together with the 1-D preconditioner (one direct solve; B1 is measuring it); keep GCROT as fallback and certifier; then return the adjoint's Krylov iteration count from compiled programs (A1's counters report `None` for every compiled adjoint, which covers scalar `minimize()` gradients); then warm-start λ across trials, reuse the GCROT deflation space across Newton and adjoint solves, and freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5×, measured by the returned count |
 | B4 compile hygiene | `x0` out of the jit key; configs keyed by content; one compile per resolution; persistent cache where jaxlib allows; the JAX value-and-gradient lane must reuse the host lane's executables instead of compiling its own | 102 compiles in a five-evaluation warm campaign; on the A1 rows (#310) the JAX value-and-gradient lane spends 41.6 s (QA) and 71.0 s (QI) compiling after the host derivative has already compiled, and builds take 244–500 XLA compiles  A per-module census of one `input.circular_tokamak` solve (2026-09-16) counts 152 XLA compilations for a 7.6 s cold solve whose warm repeat is 0.16 s: four named lanes (`_block_lane` twice, 2.49 s) and about 130 single eager ops, each compiling its own module — `broadcast_in_dim` 22, `multiply` 19, `copy` 17 — in `setup.py`, `solver.py:2345` (leaf-by-leaf carry copy) and `solver.py:914` (`_zero_cache`). A jitted whole-tree copy plus `device_put` of NumPy zeros takes it to 129. The persistent cache already halves the QA_lowres cold start across processes (20.3 s to 10.5 s) and cuts the single-stage gradient's compile from 49.8 s to 6.0 s, so what is left to attack is the 10 s of Python-side tracing. | cold to first gradient ≤ 20 s CPU on the QI example; zero recompiles across `max_mode` stages; the second lane adds under 5 s of compile |
-| B5 per-iteration constant | one bounded experiment (≤ 1 week), in this order: ms per iteration for VMEX and VMEC++ at 1, 2 and 4 threads; an HLO census of the iteration (ops, loops, loop trips; the CPU tridiagonal solve is two `lax.scan` Thomas sweeps, about 100 serial trips per iteration at ns = 50); a dispatch arm with a batched tridiagonal kernel; and only if the thread scaling shows headroom, `shard_map` with radial slabs and the tridiagonal solve split over modes, as VMEC++'s OpenMP does | 2.4 vs 0.9 ms per iteration; JAX's CPU thunk runtime has documented 2.5–14× regressions on many-small-kernel workloads and host devices share one thread pool | warm ns = 50 QA below 1.5 ms per iteration; the dispatch arm keeps iteration counts identical and the final state within 1e-12 relative; kill sharding below 1.25× on four devices or with collectives above 30 % of the iteration |
+| B5 per-iteration constant | one bounded experiment (≤ 1 week), in this order: ms per iteration for VMEX and VMEC++ at 1, 2 and 4 threads; an HLO census of the iteration (ops, loops, loop trips; the CPU tridiagonal solve is two `lax.scan` Thomas sweeps, about 100 serial trips per iteration at ns = 50); a dispatch arm with a batched tridiagonal kernel; and only if the thread scaling shows headroom, `shard_map` with radial slabs and the tridiagonal solve split over modes, as VMEC++'s OpenMP does | 2.4 vs 0.9 ms per iteration; JAX's CPU thunk runtime has documented 2.5–14× regressions on many-small-kernel workloads and host devices share one thread pool | warm ns = 50 QA below 1.5 ms per iteration; the dispatch arm keeps iteration counts identical and the final state within 1e-12 relative; kill sharding below 1.25× on four devices or with collectives above 30 % of the iteration. **Revised 2026-09-19 (L-SOLVE 3.1): the sharding arm is dropped, not gated** — the iteration stops scaling at four cores on an 18-core Xeon and burns 63 % more CPU there for the same wall time, so there is no parallelism to recover. The dispatch arm keeps its gate and is now sized by the HLO census: 844 fusions and 570 serial Thomas trips per iteration |
+
+**Cold start and the single solve (L-SOLVE S1–S7).** These sit underneath
+Phase B: S1, S2, S4 and S5 attack the 60–66 % of a cold process that is XLA
+compile, S3 and S6 the iteration, S7 the fallback adjoint. Each gate names the
+measurement that justifies it.
+
+| PR | change | evidence | gate and kill rule |
+|---|---|---|---|
+| S1 fold the cold path's eager ops into jitted lanes | jit the array-building *tail* of `setup.py::radial_grids`/`flux_profiles`/`interior_guess`/`blend_m0`, `residuals.py::_m1_rotate_threed`, `solver.py:2345`'s leaf-by-leaf carry copy and `solver.py:914`'s `_zero_cache` — not the head, which reads `VmecInput` as host numbers and raises "Error interpreting argument … as an abstract array" | 383 of 413 QA compile requests are single-op programs costing 3.68 s of 9.32 s; one first eager dispatch costs 19.7 ms against 86 ms for sixty of the same ops fused (13.8×); warm execution of the same code is 50 ms, so there is no run-time regression to trade. Expected 2.5–3.2 s off a 14.7 s cold QA run and 1.3–1.5 s off a 5.2 s li383 run (the residual program count is inferred) | parity suite unchanged, iteration counts identical and final `fsqr` bit-identical on the regression decks, compile requests on a cold `input.circular_tokamak` solve below 60. Jit whole existing functions rather than restructuring their arithmetic; kill the PR if any lane changes float association |
+| S2 narrow the inter-rung `jax.clear_caches()` | release the lane executables (`_release_used_lane_executables`, where the megabytes are) without dropping every jit and lowering cache; `multigrid.py:583–596` and the free-boundary twin at `:974–986`, which `cli.py:812,842` triggers on every CLI run | controlled in-process A/B, same call, one flag changed: **+118 compile requests, +0.75 s compile, +0.95 s wall** on the cold QA ladder with 656 iterations and `fsqr = 9.747403887641546e-12` identical across all four arms. A single-rung deck shows nothing; with the persistent cache on the cost is 0.2–0.3 s | same iterations and bit-identical `fsqr`; **peak RSS not above today's on the W7-X ladder**, which is what the release exists to bound. **Ordering constraint: this must not land before F-hoist** — see Phase F; the cache clearing is what currently hides the free-boundary Schur lane's per-gradient closure leak, and the two changes must not both land |
+| S3 cache the tridiagonal factorisation | store `c'` and `1/denominator` in `PreconditionerCache` beside the bands they are built from; **SOLVAX first** (`tridiagonal_factor` / `tridiagonal_solve_factored` plus a checked variant that validates at factor time), since the block path already has this split and the scalar path does not | micro-benchmark at VMEX's exact shapes inside one jitted `lax.scan` of 200 applications: **2.7× (ns 16), 4.6× (ns 50), 4.4× (ns 201)** per apply, max \|difference\| 0.0e+00; the HLO census shows 570 serial sweep trips per iteration. Expected 8 % of the ns = 50 iteration, ~12 % at ns = 201 (inferred from the micro-benchmark share) | byte-identical trajectories on the regression decks and unchanged parity iteration windows. The factors must be invalidated exactly when the bands are, Jacobian resets included; a missed invalidation does not corrupt the answer but changes iteration counts, so parity is the detector |
+| S4 `vmex --warm`: ahead-of-time lane executables | `jax.experimental.serialize_executable` stores the compiled `_block_lane`; a later process deserializes instead of tracing, lowering, hashing and reading the cache. Keyed like a cache entry, under `_compat._cache_machine_fingerprint` and on (version, lane, treedef, avals, static meta) | prototype, three alternations at load 47–57 so only the ratio is claimed: **3.2–4× on the lane start** (solovev 1.36–1.62 s against 0.28–0.42 s; QA ns 50 1.64–2.04 s against 0.50–0.70 s; payloads 2.2 and 4.3 MB). In quiet seconds that is 1.2–1.8 s of the 6.5–7.1 s warm-cache QA process. Shape-polymorphic `jax.export` does **not** help: JAX documents that exported polymorphic functions are still recompiled per concrete shape, so AOT-per-structure is the only form that works | bit-identical solve from a deserialized executable against the jitted lane on every regression deck; a corrupted payload falls back silently, proven by a test; no change when `--warm` was never run. Payloads never ship in wheels |
+| S5 compile the whole ladder's lanes up front | the `NS_ARRAY` ladder is known at start and XLA compilation releases the GIL; today `--prefetch-compile` overlaps only rung k+1 with rung k, and the coarse rungs iterate for less time (0.4 s) than a lane compiles (1.4 s) | three alternations of the existing flag on a cold QA run: 0–21 % (29.2/29.1/33.1 s against 36.9/34.0/33.3 s, loaded machine). Launching all three at once turns 4.3 s of serial lane compile into about 1.6 s (inferred) | cold ladder wall improved on a ≥ 8-core host with peak RSS within 1.2×, no change to results; stays opt-in, because it raises peak memory and contends with the solve on small CPU sets |
+| S6 opt-in FIRE-style velocity projection | add the `v·F < 0` freeze-and-restart rule to `step.py`'s damped dynamics, as a third mode beside 1-D and 2-D preconditioning | Bitzek et al., Phys. Rev. Lett. 97, 170201 (2006), Table I: 2–5× fewer function calls than CG on four systems with L-BFGS comparable, for an iteration of exactly VMEX's structure. **Not verified for MHD equilibrium** — no source applies FIRE to a VMEC-type problem, so the transfer is inferred and no factor is promised | kill unless it cuts iterations ≥ 1.5× on at least two of the stiff cases of the committed 2-D preconditioner record with `wb` matching to 1e-10; the 1-D default stays byte-identical. It changes the iteration path, so it can never be the parity default |
+| S7 pass a recycle space to GCROT on the fallback adjoint | `solvax.gcrot` implements FIFO recycling and `recycle_strategy="harmonic"` (GCRO-DR); every call in `implicit.py` (lines 1507, 2290, 2994) passes `recycle=None`, so `solution.recycle` is discarded and no deflation space crosses solves | read in the source of both packages. The stalling case it targets is this plan's own record: the QI seed adjoint, 13,228 iterations, stalling at 2.6e-5. After B3a/B3b this is the fallback, not the common path, so the honest expectation is no effect on the shipped decks and a possible rescue on the QI seed | fallback-path matvecs per gradient ≤ 0.5× on the QI seed deck, measured by A1's counters; no certified value changes. Cost is two keyword arguments and a carried field, so a null result closes it cheaply |
 
 ### Phase C, weeks 2–4: derivatives sized to the problem
 
 | PR | change | gate |
 |---|---|---|
-| C1 batched Jacobian | `jacobian_batch_size="auto"` with the measured-memory chunk, after reproducing in isolation the 0.5–2 % batch dependence of §2; the per-column GMRES certifier already takes zero iterations on the A1 rows (#310), so the Jacobian's 27–32 s first-call cost is block assembly, factorization and their compile, which is what to reduce | warm 48-dof Jacobian ≤ 0.4 s CPU; columns identical to 1e-10 across batch sizes |
+| C1 batched Jacobian | `jacobian_batch_size="auto"` with the measured-memory chunk, after reproducing in isolation the 0.5–2 % batch dependence of §2; the per-column GMRES certifier already takes zero iterations on the A1 rows (#310), so the Jacobian's 27–32 s first-call cost is block assembly, factorization and their compile, which is what to reduce. **The isolation ran on 2026-09-19 and found no batch dependence at all** (P-OPT 2.4, §2 above): six probe/response chunk widths agree with (1,1) to 6.1e-11…8.9e-11 with every column certified, a rebuilt problem at `None` agrees end to end to 4.1e-12, and the 21 % difference a review script reported also failed to reproduce with four candidate causes excluded. C1's blocker is dissolved; the default change itself is P4 below and is already in execution | warm 48-dof Jacobian ≤ 0.4 s CPU; columns identical to 1e-10 across batch sizes |
 | C2 `minimize()` | route `objective_terms` through the block Jacobian or a scalar adjoint; docstring true | one linear solve per dof or per gradient, never per row |
-| C3 joint least squares | single stage as TRF/LM on `[r_plasma; r_coil]` with `[J_plasma; J_coil]` (coil block by `jacfwd`); Jacobian only at accepted points; move #311's augmented-Lagrangian wrapper into one small library helper so examples stay short, and improve quasisymmetry while holding its constraints (#311 met them at 0.113 against 0.101 at its seed) | stage 1 needed 63 nfev / 26 njev where joint BFGS needed 188 / 176 → joint phase ≤ 0.4× today; design meets targets; cold re-evaluation matches |
+| C3 joint least squares | single stage as TRF/LM on `[r_plasma; r_coil]` with `[J_plasma; J_coil]` (coil block by `jacfwd`); Jacobian only at accepted points; move #311's augmented-Lagrangian wrapper into one small library helper so examples stay short, and improve quasisymmetry while holding its constraints (#311 met them at 0.113 against 0.101 at its seed) | stage 1 needed 63 nfev / 26 njev where joint BFGS needed 188 / 176 → joint phase ≤ 0.4× today; design meets targets; cold re-evaluation matches. **Note 2026-09-19 (P-OPT 1):** the single-stage budget says a driver change cannot pay for itself — of 541 s of warm trials the plasma program is 535 s and the coil program 5.9 s (14–32 ms per trial, 1 %), so C3 is worth doing for the constraint handling it settles, not for wall time |
+
+**The optimization loop (P-OPT P1–P5).** Measured on the shipped examples run
+unmodified; gains are percentages of that example's wall. P1 and P4 are already
+in execution.
+
+| PR | change | evidence | gate and kill rule |
+|---|---|---|---|
+| P1 compile once at the largest `max_mode` and mask the stages | build one problem at the largest `max_mode` and give each stage a boolean dof mask applied to the tangent stack and the dof projector, instead of a new problem per stage; the jit key at `optimize.py:2628–2644` holds `x0.tobytes()` and the dof layout, so each stage is a cache miss by construction although `MINIMUM_MPOL` keeps every array shape identical | 276 s of the 568 s QA run are stages 2 and 3's first-Jacobian calls (113.1 + 82.1 s against a ~5 s warm equivalent). A masked prototype runs the same three stages with compile *inside* the stages of 0.1 / 0.0 / 0.0 s, total trace+MLIR+XLA 41.6 s against 301 s, and reaches **the same cost to 11 significant figures with identical nfev/njev**. Expected 230–276 s off the QA run (40–49 %); nothing on one-stage examples | per-stage cost identical to 1e-10 and nfev/njev unchanged on QA and QH; XLA compile requests after the first stage below 10; the masked components of `x` provably unchanged each stage — a leak there would change the design silently, so assert it rather than inspect it |
+| P2 one block factorisation per point, shared by the Newton finish and the Jacobian/adjoint | today a gradient at a new point builds two full raw block systems, one in `_refine_block_factors` at the descent iterate and one in `_raw_block_system` at the refined anchor; use the refinement's factors for the tangent and adjoint solves and let the existing certifier absorb the difference | defect correction driven by the refinement's factors takes the tangent system at the refined anchor from 1.0 to **8.8e-10…1.4e-8 relative in 3–4 passes** on all five QI trial pairs — four to six orders inside `jacobian_adjoint_tol = 1e-4`; one factorisation is 1.4–1.8 s of a 4.8 s warm QI trial-plus-Jacobian. Expected ~1.5 s per accepted point: ~16 s of the QI run's 72 s least-squares phase and ~90 s of the single-stage run's 600 s | Jacobian within 1e-9 relative of today's and adjoint residual within its existing acceptance on the QA and QI seed decks; the counters show one factorisation per accepted point. The certificate must be measured on the raw operator at the **anchor**, not at the factorisation point — `_implicit_evolved_tangent_multi_rhs` already does exactly that check |
+| P3 stop trial descents at FTOL 1e-10 and let the block Newton finish close the gap | move the hand-over point (`forward_ftol` for trials) and leave `refine_tol` and the final solve unchanged | on four recorded QI optimizer steps, each seeded by the same perturbation predictor: **1.8–2.9× fewer descent iterations at 1e-10** with the finish certifying on all four and the objective within 8e-9 relative; 2.6–4.7× at 1e-9 within 4.1e-8; at 1e-8 the finish fails on two of four large steps, which is the kill line. Expected: QI descent 33.3 → 12–17 s, single-stage descent 149 → 55–80 s (12–15 % of that run), QA descent 82.9 → 30–45 s | every accepted trial reaches `refine_tol`; objective replay at a repeated `x` within 1e-9; the QI and single-stage designs unchanged within their stated target margins; a per-run counter of finishes that did not certify. `_REFINE_BLOCK_STALL` already returns the unrefined state, so the failure mode is a lost anchor, not a wrong one |
+| P4 make `jacobian_batch_size="auto"` the default | the width bounds the `chunk_map` over the block system's 150-row probe basis; at 1 it is a serial `lax.map`, which is why the gain is in the probe assembly and not in the columns | widths agree to 6e-11 at a fixed state and 4.1e-12 end to end (C1 above); warm cost 3.0–3.9 s at width 1 against 0.83 s at `"auto"` and 0.56 s at `None`. Expected: QI Jacobians 18.0 → 4–9 s, QA Jacobians 77.6 → 18–25 s | Jacobian identical to 1e-9 across widths on QA, QI and a LASYM deck; peak RSS within 1.2× of today's on the largest shipped deck; first-call compile not above today's. `"auto"` and not `None`, because it is the memory-aware setting |
+| P5 reuse the previous accepted point's factors as the finish's preconditioner | keep the last accepted point's `_RawBlockSystem` for the next trial's GMRES and refactor on a stall | on five consecutive QI trial pairs, for every scaled step ≤ 0.71 the stale factors carry the finish to `refine_tol` and it costs **0.35–0.84 s instead of 1.56–1.96 s (1.9–4.8×)**; at the outlier step 2.85 it fails and must refactor. **Verified negative in the same table:** the same factors used as a *solver* for the tangent system diverge by up to 11 orders (2.7e+11 at that step), so "reuse the Jacobian across nearby trials" is dead and this is a preconditioner-only result. Expected: QI refinement 16.4 → ~6 s, single-stage refinement 194 → ~70 s | iterations to `refine_tol` and the final anchor unchanged within the certificate on QA and QI; a counter reports the refactor rate; no trial is left uncertified that certifies today |
+
+Two cheap items outside the optimizer, from the same budget: three
+`EquilibriumReporter` calls cost 12.0 s on the QI run (about 10 s of it
+compiling the constructed-QI total a second time, eagerly) and the two plot
+calls cost 29.1 s — together 16 % of a 263 s run, spent after the design is
+final. Report from the compiled residual, or from the last residual vector.
 
 ### Phase D, weeks 3–6: the QI objective
 
@@ -251,23 +697,70 @@ attribution. One heavy local job at a time; the office box takes one.
 
 ### Phase E, weeks 3–6: the exterior field
 
-| PR | change | gate |
-|---|---|---|
-| E0 level choice and per-period schedule | select schedule levels by #312's calibrated estimate instead of the double-layer self-test (which passes errors up to 0.30 at a 1e-4 tolerance), and scale the default levels by nfp (today the finest default level counts `2·nphi` toroidal points over the whole torus, so nfp = 5 with nphi = 32 gets 13 points per period); upstream in virtual_casing_jax, then VMEX's defaults | vacuum and interior identities on nfp = 2, 3 and 5 decks at the default grid meet the requested digits wherever `d ≥ 2h`; returned fields change only where the old level was under-resolved; cost per target recorded |
-| E1 equivalent-source exterior field | replace near-surface quadrature by a fit: point sources on a deflated interior surface (or the LCFS offset inward by ~0.25 a) plus the analytic net-current filament, fitted by least squares to the accurate on-surface partition-of-unity field on an upsampled grid (Stein–Barnett quadrature by fundamental solutions, [arXiv:2109.08802](https://arxiv.org/abs/2109.08802)); the field is then a smooth sum everywhere outside, uniform in `d`, spectral in the source count, differentiable through the on-surface data and the least-squares solve; the trapezoid rule stays beyond ~0.5 a; the fallback if the fit residual stalls is hedgehog extrapolation (p ≈ 8 trapezoid evaluations at ≥ 3h along the normal, [arXiv:2002.04143](https://arxiv.org/abs/2002.04143)) | vacuum identity ≤ 1e-5 for all `d ≥ 0.005 a` on the default grid (bounded by today's 2e-4 on-surface error until its parameters are raised); on-surface limit agrees with the partition-of-unity path; cost per target ≤ the source count in kernel evaluations, no fixed latency above 10 ms per call |
-| E2 tabulated field | (R,φ,Z) table through `MgridField.from_parameterized_cartesian_field`, divergence-cleaned interpolation, half-period symmetry; the Taylor plan retained below 0.2 a and the direct path above 0.5 a until E1 lands | field-line tracing outside the LCFS in seconds with a stated error; the `d ≳ 2h` rule enforced on the direct path. The Taylor plan is **broken**, not merely approximate: measured 2026-09-16 at the default grid (finest 256x128, `h_tor` 0.030 m, `a` 0.077 m) it takes 416 s to prepare and returns ~1e-5 in magnitude at every distance while the direct field falls from 0.52 T at `d = 0.25h` to 4e-6 T at `4h`; at `3h` and `4h`, where the direct estimate is certified at 3.7e-08 and 1.7e-10, the two disagree by factors of 4 and 7, so the error is the continuation's. It carries no estimate of its own (`B_error_estimate` raises on it) and now warns in its docstring. Fix or withdraw it before E2 depends on it. |
-| E3 source data | LCFS covariant field from the NESTOR channel or the high-order state instead of the `1.5x[−1] − 0.5x[−2]` half-mesh extrapolation, once E1 exposes it | finite-β interior identity ≤ 1e-4 |
+Revised 2026-09-19 from L-EXT. Two gates replace the single gate of §1, because
+the measurements separate two errors that the old gate conflated:
+the **quadrature** error of the rule, and the **source-data** error of the LCFS
+field VMEC hands it. The vacuum identity at ns = 50 floors at ~1e-5 near the
+surface and neither a better extrapolation nor the projection moves it, so
+"vacuum identity ≤ 1e-6 down to 0.005 a" is unreachable from these data by any
+quadrature or fit and is retired as a gate:
+
+- **Quadrature gate.** Against a converged quadrature of the *same* source data
+  (the graded reference of L-EXT 0, self-consistent to 6e-13 down to 0.01 a),
+  the shipped path is within 1e-6 in B for every `d ≥ 0.005 a` at the default
+  node count, and every derivative order the API exposes carries an estimate
+  that is never below 1× and never above 5× the true error where the rule is
+  resolved.
+- **Source-data gate.** On the finite-β QA deck with a converged quadrature,
+  \|curl B\| / \|grad B\| ≤ 1e-8 at `d ≥ 0.2 a` and the Ampère loop unchanged; the
+  vacuum-identity floor is reported as a function of `ns` rather than asserted
+  to be small (measured 1e-5 at ns = 50, unchanged by extrapolation order or by
+  the projection).
+
+| PR | change | evidence | gate and kill rule |
+|---|---|---|---|
+| E0 level choice and per-period schedule (**landed upstream**) | select schedule levels by #312's calibrated estimate instead of the double-layer self-test, which passed errors up to 0.30 at a 1e-4 tolerance, and scale the default levels by nfp | merged as virtual_casing_jax #7 together with a field-interpolation fix: the exterior identity went from ~1e-4 to 5–9e-6 and the path is 36 % faster. The same PR closes L-EXT's B2 for VMEX: the third derivative at `d = a` went **1.2e-2 → 8.5e-9**, a factor 1.4e6 | vacuum and interior identities on nfp = 2, 3 and 5 decks meet the requested digits wherever `d ≥ 2h`; returned fields change only where the old level was under-resolved. VMEX side is #376, blocked on the 0.0.6 publish |
+| E1 equivalent-source exterior field | **dropped 2026-09-19, killed by its own kill rule** (L-EXT 4). The rule was 1e-4 at `d = 0.02 a` with at most four times the surface grid's source count; the best fit measured (projected data, `s_src = 0.9`, 24 modes, 82k quadrature nodes) gives 3.2e-4 at 0.2 a, 2.4e-3 at 0.1 a and 9.8e-2 at 0.02 a. On the shipped, unprojected data it cannot fit at all — residual 2e-3…1e-2 at every depth and mode count, floored by the curl of E4. It is also not cheaper per target than the direct sum (0.55 ms against 0.30 ms at 256×128) | — | the row stays as the record of a closed negative result; E7 delivers what E1 was for |
+| E2 tabulated field | an (R, φ, Z) table through `MgridField.from_parameterized_cartesian_field` with half-period symmetry, filled by E5 far from the surface and E7 near it. **Revised:** tabulate the vector potential A of E4's divergence-free sheet current and take the curl analytically, so the table is exactly solenoidal instead of divergence-cleaned after the fact. The first-order Taylor plan is retired on its merits — first order, not solenoidal, 56–416 s to build — and **the plan's "the Taylor plan is broken" verdict is withdrawn**: it came from a vacuum deck whose exact plasma field is zero, so the ~1e-5 it returned was its own error and the direct value it was compared with was the source-data floor, not a certified field; the finite-β record is 1.2e-3…1.7e-3 of B at 0.1–0.2 a, approximate and not broken | fill cost ~1e5 points × 0.3–5 ms = 0.5–8 min once, then ~1e-6 s per stage instead of an O(N) sum (inferred, not prototyped). Tracing needs this: an ESSOS `trace_field_lines` run is ~1e5 right-hand sides, each a single-point O(N) sum, and under `vmap` the schedule's `lax.cond` becomes a `select`, so every stage pays both levels and the self-test | Poincaré section invariant under table refinement; \|div B\| ≤ 1e-12 by construction; field-line tracing outside the LCFS in seconds with a stated error taken from the fill's own estimate |
+| E3 source data | **withdrawn as written** (L-EXT 1.6): the LCFS covariant field from a better extrapolation does not remove the curl — a quadratic three-point `(15, −10, 3)/8` measures 5.0e-3 against 5.2e-3 at `d = a`, because the non-conservation is VMEC's discrete `J^s` and not the extrapolation order. Replaced by E4 | — | the finite-β interior identity target moves to E4's gate |
+| E4 conserve current in the source data | build K from the surface-gradient part of the covariant pair, `ν_k = −i (k_t b_t + k_p b_p)/(k_t² + k_p²)`, keeping the means (they are µ0 I_tor/2π and µ0 I_pol/2π): a current potential, as NESCOIL and REGCOIL build it. Two FFTs, ~60 lines | measured: \|curl B\| / \|grad B\| from 5e-3 (`d = a`), 2.8e-2 (0.5 a), 9.2e-2 (0.2 a) to **≤ 6e-10**; B_plasma moves 0.07–1.2 % and grad B_plasma 0.8–14 %, which is the size of the source-data error the shipped field carries today. Because the true pair is a surface gradient (`J^s = 0`), an orthogonal projection cannot increase the data error in its norm | the source-data gate above. **Open as #381 with the projection off by default; flipping the default is the maintainer's call**, since it moves published exterior fields by up to 1.2 % and their gradients by up to 14 % |
+| E5 closed-form derivative kernels | derivative tensors of 1/r contracted with K before the source sum (~60 moment sums), one pass giving B through grad³B; exposed as `gradgradB_fn`/`gradgradgradB_fn`, ~150 lines upstream | measured on the same finest grid, 48 targets, warm: **1.17 ms/point for all four orders against 23.6 ms/point in four nested-`jacfwd` calls (20×)**, 11× for the third derivative alone, first call 0.45 s against 3.1 s; identical to AD at 2.7e-15. The nested path pays both schedule levels plus the self-test on every call because `lax.cond` becomes `select` under `vmap` | equality with nested `jacfwd` to 1e-12 on the two-source torus; ≥ 10× on the grad B example; parameter VJPs keep working |
+| E6 KST estimate as the level selector, per derivative order | af Klinteberg–Sorgentone–Tornberg error estimate 4: the complex root `t0` of `R²(t)` nearest the real axis, the 1-D estimate integrated over the other parameter with the combined linear root model, directions swapped and added; kernel order `k` has `p = 3/2 + k`. Two complex Newton solves on the boundary series per target, O(mnmax) and not O(N_sources), and invertible for the grid | measured against the true error of single-level uniform sums on the finite-β QA deck, 12 verified targets per distance: estimate/true median **1.6–2.1 across eleven orders of magnitude and all four derivative orders**, minimum 1.5, maximum 3.6, with no calibration constant; it drops below 1× only where the true error is already O(1) (`d < h`). Upstream as #9 (0.0.7 candidate) | never below 1× and never above 5× the true error on nfp = 2, 3 and 5 decks for orders 0–3 where the rule is resolved; the third derivative at 0.5 a meets the requested digits or is refused. It replaces the double-layer self-test and the two-level difference |
+| E7 target-graded trapezoid for `d < 2h` | substitute `θ = θ* + u − a_p sin u`, `φ = φ* + v − a_t sin v` (entire, periodic, monotone for `a < 1`) and apply the same periodic rule in (u, v), with `1 − a = d/4h` per direction clipped at 0.995, so one fixed node count serves every distance | measured, max relative error over six verified targets against the converged reference: with **256×128 nodes — today's finest default count — ≤ 4e-9 in B and ≤ 3e-6 in grad B for every `d ∈ [0.005 a, 0.5 a]`**, where the uniform rule at the same count gives 1.4e-6, 2.5e-2, 4, 34 and 54; 192×96 nodes give ≤ 1e-6. The unoptimised prototype costs 40–90 ms per target, dominated by a non-separable boundary-series evaluation that is separable in principle (O((n_t + n_p)·mnmax) trig plus small matmuls). No published reference was found for this exact grading of a global toroidal rule; treat it as own construction, validated numerically | the quadrature gate above on nfp = 2, 3 and 5 at the default node count, with the KST estimate in the graded variable within 5×. It is a per-target method: right for point queries, surface-adjacent objectives and filling E2's table, wrong inside an ODE right-hand side — kill it for tracing rather than optimise it there |
+| E8 interior field from the native VMEC form | evaluate B from `B^u = (χ′ − Φ′ λ_φ)/√g`, `B^v = Φ′(1 + λ_θ)/√g` with `√g` from the same R, Z, and a C² radial interpolant (cubic in ρ of the regularized coefficients); keep W2's implicit inverse map | measured against the exact oracle `wout_purely_toroidal_field.nc` at ns = 101: grad-grad B is 6 %, 2 %, 4 %, 17 % wrong and grad³B 33 %, 10 %, 15 %, 46 % at s = 0.3, 0.55, 0.8, 0.95, because `_radial_value_and_derivative` (`extender.py:401–438`) interpolates linearly in `s` and AD then returns a zero second radial derivative inside each cell; \|div B\| / \|grad B\| is 1–3 % at ns = 11, 21, 41 and 81 with no convergence | oracle grad-grad B ≤ 1e-3 and grad³B ≤ 1e-2 at ns = 101; \|div B\| / \|grad B\| converging at second order in ns. The two-step differentiable Newton inversion reproduces the ten-step unrolled result to 4e-15 for orders 0–3 and is the cheap regression oracle for W2 |
+| E9 the three small defects | the `exterior_field` facade (`problem.py:896–939`) and the `equilibrium_from_x` factory (`optimize.py:3483–3515`) call `_source_nphi_for_digits` and forward `accuracy_check` instead of hard-coding `nphi = ntheta = 32`; `_has_plasma_sources` (`extender.py:822–832`) uses relative thresholds on `ctor` and β instead of absolute 1e-14 on dimensional quantities; #374's per-order derivative cache keys on the bound fields, or documents them as immutable | each has a reproducer: the facades bypass the geometry rule that #312 established; the vacuum QA wout (ctor 1.5e-10 A, `currumnc` up to 9.9e4 A/m² of axis noise) reports plasma sources, so `plasma="auto"` returns quadrature noise instead of zero; mutating `external_field`, `plasma_field`, `near_surface_plan` or `newton_iterations` after the first derivative call silently keeps the old graph | a facade-built field matches a `from_wout` field to 1e-12 on the QA deck; `plasma="auto"` returns exactly zero plasma field on the vacuum wout; a mutated extender either rebuilds or raises |
 
 ### Phase F, weeks 5–8: the free-boundary derivative
 
-| PR | change | gate |
-|---|---|---|
-| F-pre jit the free-boundary pullback | the free-boundary implicit pullback converts traced arrays to NumPy (`_solve_bwd_impl` → `_projected_residual` in `freeboundary_implicit.py`), so no free-boundary objective can be wrapped in `jax.jit` (found by A3, #311) | a jitted free-boundary objective's value and gradient match the eager path to 1e-12 relative on the CTH case |
-| F0 measure | warm split of one NESTOR call into Green's-function transform, kernel, mode-matrix assembly and LU on NCSX ns = 15 (flop counts put the LU near 5 %; VMEC++'s benchmark header says assembly and factorization dominate) | the measured split decides how much F1a can save before F1b. Baseline to beat, measured 2026-09-16 at ns = 15, mpol = ntor = 3: a free-boundary value-and-gradient costs 7.213 s against 0.174 s for the value alone, 41.5x, with 70.6 s of adjoint compile the first time in a process; the fixed-boundary equivalents are 1.91x (vacuum) and 5.87x (finite beta). F1b's 3x gate is 14x away. |
-| F1a linearize once | hoist the coupled linearization out of the host GCROT lane; land #299's saved-pullback commit as its own PR; replace `lu_factor`/`lu_solve` in the vacuum pressure with a `custom_linear_solve` (the cached-LU tangent `dpot = A⁻¹(db − dA·pot)` is exact) | transpose identity at 1e-11 and the NCSX adjoint value unchanged to 1e-10 relative; cold compile peak not above today's |
-| F1b edge response matrix | a linearized NESTOR matvec cannot reach 0.1× a forward call (reverse sweeps cost 1–3× the forward kernel), so build NESTOR's dense response to the edge rows, the axis and `ctor` once per gradient with forward-mode columns (about 100 edge columns plus a rank-1 `ctor` term); every coupled matvec and the whole edge Schur matrix then cost a dense multiply plus the existing batched sparse solve | response build ≤ 300 NESTOR-call equivalents; matvec ≤ 0.1× one NESTOR call; JVP against finite differences of the vacuum pressure at 1e-6; coupled-residual acceptance unchanged |
-| F2 Schur Krylov, fallback | only for `nedge > 512` or if F1b fails: GCROT on the edge Schur complement preconditioned by the previous optimizer iterate's Schur LU, with a persistent recycle space (`gcrotmk`'s `CU`, not passed today at `freeboundary_implicit.py:751, 894`) and a warm λ | mean preconditioned iterations ≤ `nedge`/5 on a recorded ten-iterate trajectory; with F1b, gradient ≤ 3× a forward solve at ns = 25 |
-| F3 inexact tolerance, not a frozen derivative | a frozen matrix derivative drops `A⁻¹ dA·pot`, the kernel's shape sensitivity and an order-one term (a lagged value, as in `nvacskip`, is harmless at the root; a frozen derivative is not); measure that term on CTH and NCSX, and offer cheap gradients as a looser Krylov tolerance certified by the exact adjoint residual | frozen-derivative gradient error reported and the option killed above 1e-2; free-boundary single-stage example ≤ 10 CPU minutes |
+Revised 2026-09-19 from L-FB. Three of this phase's rows rested on expectations
+that the measurements contradict, and they are corrected in place rather than
+removed. **F1b's "matvec ≤ 0.1× one NESTOR call" is unreachable for a coupled
+matvec, and the reason is arithmetic:** at the NCSX deck (ns = 15,
+mpol = ntor = 3) a free-boundary value-and-gradient costs 7.213 s against
+0.174 s for the value, over about 671 coupled GCROT matvecs, i.e. ~10 ms per
+matvec, while a whole NESTOR call at that resolution is 1.1 ms. A coupled
+matvec is one bulk block solve plus the edge coupling, and a dense edge
+response makes only the edge part free, so even a zero-cost edge multiply
+leaves the matvec near 10× a NESTOR call — a factor 100 from the gate (the
+split is measured, the per-matvec division is inferred). The two metrics that
+replace it are **matvecs per gradient** (247 probe columns and ~671 coupled
+matvecs today; ≤ 50 unrestarted on the real NCSX edge Schur operator, measured)
+and the phase's own **value-and-gradient ≤ 3× the value** at the deck's
+resolution, not at mpol = ntor = 3.
+
+| PR | change | evidence | gate and kill rule |
+|---|---|---|---|
+| F-pre jit the free-boundary pullback (**merged**) | the implicit pullback converted traced arrays to NumPy (`_solve_bwd_impl` → `_projected_residual`), so no free-boundary objective could be wrapped in `jax.jit` | merged 2026-09-19 as #375. Its test had been monkeypatching the function away, which is why the suite never saw it — one of the four problems A6's jit-disabled default hid | a jitted free-boundary objective's value and gradient match the eager path to 1e-12 relative on the CTH case |
+| F0 measure (**answered**) | the warm split of one NESTOR call | measured (L-FB, §2): the kernel scan is **50–55 %** and the **LU 1.5–2 %**, so VMEC++'s benchmark-header claim that build and factorisation dominate does not hold for this port, and the flop estimate that put the LU near 5 % was the right order for the wrong reason. Baselines stand: value-and-gradient 41.5× the value at ns = 15, mpol = ntor = 3, with 70.6 s of adjoint compile the first time in a process; fixed-boundary equivalents 1.91× (vacuum) and 5.87× (finite β) | closed; its output is the split above, which re-ranks F1a and F1b |
+| F1a linearize once | hoist the coupled linearization out of the host GCROT lane, where `_transpose_matvec` builds its VJP inside the jitted matvec so every transpose matvec re-runs NESTOR's full assembly and LU | the hoist keeps its evidence. **The `custom_linear_solve` half is not a speed item**: `jnp.linalg.solve` against `lu_factor`/`lu_solve` makes no measurable difference at these sizes because the LU is ≤ 5 % of a call. Keep it only if it simplifies the tangent (`dpot = A⁻¹(db − dA·pot)` is exact), and claim nothing for it | transpose identity at 1e-11 and the NCSX adjoint value unchanged to 1e-10 relative; cold compile peak not above today's |
+| F1b edge response matrix (**superseded**) | as written, build NESTOR's dense response once per gradient and use it as the solve. **Superseded:** the dense edge response ships as a Krylov **preconditioner** and response lane rather than as the solve (#380, measured **4.8×** at the real deck resolution), and the endpoint is unrestarted GMRES on the exact reverse-mode edge Schur operator | the response is affordable (0.02 s at mpol 3, 1.40 s at 8, 9.0 s at 12 per gradient) but **not low rank** — rank 222 of 240×256 at mpol 8, singular values still 1e-3 at index 151 — so no randomized shortcut exists; and a forward-built Schur certified against the reverse-mode operator is expected to miss its 1e-9 acceptance between mpol 7 and 8 (the precision cliff below) | response build ≤ 300 NESTOR-call equivalents at mpol ≤ 10 (measured 195 at 8, 273 at 10, 340–645 at 12, so the bound holds only to mpol ~10); JVP against finite differences of the vacuum pressure at 1e-6; coupled-residual acceptance unchanged. **The old matvec gate is retired**, replaced by the two metrics above |
+| F2 Schur Krylov (**promoted from fallback to endpoint**) | unrestarted GMRES on the edge Schur system with the exact reverse-mode operator, with F1b's dense Schur LU as its **right preconditioner** when it has been built; restart length ≥ 64 | measured on the captured NCSX matrix, S and Sᵀ, three right-hand sides: residual 1e-1 at 30 matvecs, 1e-4 at 40, **≤ 2e-10 at 50**, superlinear once the ~35–40 outlying eigenvalues are captured, after a 30-iteration plateau (residual 0.97 at 10, 0.4–0.8 at 20) that a restarted method with m = 30 would never leave. With a preconditioner at 1e-6 operator error it takes 4 iterations and at 1e-4 it takes 8. **The previous-iterate Schur LU written into this row is not supported**: at 1e-2 operator error it gives 44 iterations against 50 for none, and at 3e-2…1e-1 it is 2.5–4× worse (123–189). The lane's two-sided balancing belongs to the dense solve, not to the Krylov solve (plain row scaling made it 484 iterations) | NCSX ns = 15 value-and-gradient ≤ 3× the value at the deck resolution; **zero certificate fallbacks on an mpol = ntor = 8 deck**; restart ≥ 64. Risk: the outlier count is unmeasured above mpol 7. Carry a recycled deflation subspace across optimizer iterates (GCRO-DR, `gcrot(recycle=(C,U))`, shared with S7) — untested, so it is an arm and not a claim |
+| F3 inexact tolerance, not a frozen derivative (**frozen arm killed**) | keep the cheap-gradient option as a looser Krylov tolerance certified by the exact adjoint residual | the frozen matrix derivative drops `A⁻¹ dA·pot`; that term measures **0.10–0.18** over four random low-mode boundary perturbations, independent of grid and of quadrature oversampling, against the option's 1e-2 gate. **Killed on the measurement**, not deferred | the looser-tolerance arm keeps its gate: the free-boundary single-stage example ≤ 10 CPU minutes with the adjoint residual reported at every trial |
+| F4 make the adjoint tolerance mpol-aware, and test its floor | state and enforce the achievable adjoint tolerance as a function of mpol instead of one constant, and add a dot-product test that pins the measured floor | the `cmns` contraction's cancellation grows ~30× per +2 in mpol (7.3e4 at 8, 1.6e8 at 12) and differentiation amplifies it: the JVP-vs-VJP identity of the whole map is 2e-11 (mpol 6), 3.5e-8 (8), 9e-7 (10), 4.5e-5 (12), 2.9e-4 (12, nfp 5), while the non-singular kernel alone holds 1e-13…1e-15. The tests already do this informally (`tests/test_freeboundary_implicit.py:376–377` uses `adjoint_tol = 1e-5` at mpol 10) | the stated floor (1e-10 to mpol 6, 1e-7 at 8, 1e-5 at 10, 1e-3 at 12) is asserted by a parametrized dot-product test, so a regression *or* an improvement is visible; **no silent GCROT fallback**: A1's counters report every one |
+| F5 five known-answer tests for the vacuum solve and its derivative | T1 interior-source manufactured solution (assert `potvac` against exact coefficients and `bsqvac ≈ 0`, pinning today's mpol 8, 22×20 numbers — potential 8.3e-3, grad Φ rms 2.6e-2 — as upper bounds); T2 convergence order (≥ 1.9 today, ≥ 2.8 after the kink fix, ≥ 4.5 after an O(h⁵) rule); T3 null shape-gradient (in T1 `bsqvac = 0` for every surface enclosing the sources, so the JVP along any boundary direction is O(discretisation) — this certifies a dense response against an answer that is not a finite difference of the same code); T4 Hadamard cross-check within 5 % at mpol 6 and 2.5 % at 8; T5 the dot-product floor of F4 | none of the existing vacuum tests has a known answer: all are parity, A/B or recurrence checks. Every number above is already measured. Dommaschk potentials are **not** usable here (singular on R = 0, which lies in the exterior domain), and an interior current loop gives a multivalued potential unless it is contractible inside the plasma, where it reduces to the charge sources used | each test asset-free and under 10 s except the full-lane coupled one; T1–T5 land before any quadrature change, so that change has to improve them |
+| F6 NESTOR's quadrature | three steps, in order: (i) a 20-line Euler–Maclaurin correction of the antipodal kink in `_nonsingular_terms`, opt-in and parity-breaking; (ii) decouple the vacuum quadrature grid from the plasma grid (an oversampling factor, with `bsqvac` synthesised back on the plasma grid from `potvac`); (iii) replace the analytic subtraction and the `T_l` recurrences by the zeta-corrected trapezoidal rule, O(h³) first and O(h⁵) as the target | (i) measured in a patched copy: source-term order 2.9–3.0, error ÷6.4 at N = 32 and ÷11 at N = 64, potential error ÷1.3–2.4, at zero cost. (ii) measured: doubling the vacuum grid divides the potential error by 4.7 and the grad Φ error by 4–5, at 4× cost on full updates only (26 → ~100 ms at mpol 12). (iii) prototype measured 2–5× more accurate than NESTOR at equal grid at observed order 2.85, condition number 2.88, with no `T_l`, no tan tables and **no `cmns` cancellation — which is what removes F4's derivative-precision floor at its root** | (i) T2 order ≥ 2.8 for the source term, with the VMEC2000 parity lanes keeping the legacy path. (ii) T1 improves with the oversampling factor at unchanged plasma results. (iii) T1 at mpol 12, 30×28: potential ≤ 1e-4 and dot test ≤ 1e-10. **Kill (iii) if the O(h⁵) rule is not ≥ 10× NESTOR at 30×28 on the li383 and a W7-X-like boundary**; its weights need third derivatives of the surface and are unmeasured on stellarator shapes |
+| F7 hoist the per-gradient closures | make `cfg` the only static key of the free-boundary Schur lane and pass every per-trial array as an argument, as the fixed-boundary lanes already do | this is the structural fix for two symptoms at once: the Schur lane's **0.29 GiB per-gradient leak** and its retrace cost. The fixed-boundary loops have neither, and the reason is exactly this property (`_refine_step_core`, `_adjoint_block_core` and `_preconditioned_residual_lane` are module-level `jax.jit` with `cfg` static). **This conflicts directly with S2**: the inter-rung `jax.clear_caches()` is the workaround that hides the leak today. They must not both land — F7 is the fix, S2's narrowing is the workaround, and the call is retired once F7 is in | live arrays and live bytes flat across 14 perturbed free-boundary trials, as the fixed-boundary lanes measure today; zero new XLA compilations after the first trial; the NCSX adjoint value unchanged to 1e-10 relative. S2 lands only after this |
+| F8 free-boundary Newton finish (arm, inferred) | the factorisation the adjoint uses, `J = A + U Wᵀ` with the bulk LU and the edge Schur solve, is also an exact Newton step for the forward coupled root; B1c's block-preconditioned finish is fixed-boundary only, and adding the Woodbury edge correction gives the free-boundary analogue | inferred from the adjoint structure, not measured. It attacks the 59 s FTOL 1e-9 free-boundary solves of §2. A movement-based `nvacskip` cadence (refactor when the edge has moved by a set fraction, instead of the fsq rule capped at 10) would cut the vacuum share ~1.7× late in a solve: parity-breaking, modest, low priority | gate it like B1c: the same iterations to the switch, the final state within the certificate tolerance, wall ≤ 0.5× on CTH and NCSX |
 
 ### Phase G, weeks 7–9: the comparison and the package
 
@@ -296,19 +789,81 @@ shipped budget (`NITER_ARRAY = 600 1000 1000` against `FTOL 1e-13`) no
 VMEC-family code converges, VMEX included — so that deck measures the budget,
 not the code. Then §5 resumes.
 
+### Phase H: one example template, and a repository that carries no dead weight
+
+Added 2026-09-19 from EX, SLIM-A and SLIM-B. The rule for this phase is that
+**correctness is separated from formatting**, and **"safe now" is separated
+from "needs a maintainer decision"**: a row in the second group is not started
+until the decision is recorded here.
+
+| PR | change | evidence | gate |
+|---|---|---|---|
+| H1 examples, correctness only | rewrite the coverage guard in `tests/test_examples.py` as an explicit `EXECUTED_EXAMPLES` set that must partition the shipped examples with `UNTESTED_EXAMPLES`, plus an assertion inside `_run_example`, so an undeclared example fails instead of passing; run the four LASYM optimization examples; delete the unconditional re-assignment that made the `ci_smoke` budget inert in two of them; wire the dead `IOTA_FLOOR`/`MIRROR_LIMIT`/`ELONGATION_LIMIT` constants into their callbacks; remove the commented objective row whose constant does not exist; give `QA_optimization_DMerc_vacuum.py` its own output stem; correct six docstrings to measured values | the old guard matched **basenames**, so eight `stellarator_asymmetry/*` examples were masked by their symmetric namesakes and never ran; `QH_optimization.py` then exited 1 in 42 s with cost 5.0000e+11 and zero iterations (fixed: rc 0 in 62 s, cost 0.570 → 0.344) and `QA_optimization.py` was solving the full grid in the smoke lane (fixed: rc 0 in 49 s). 66 shipped examples = 47 executed + 19 exempt, each exemption carrying a reason | a parser test forbids re-assigning a constant the `ci_smoke` block set; every shipped example is executed or exempt with a stated reason; `tests/test_cited_paths.py`, `tools/check_docs_prose.py` and `ruff check examples/` pass. Three examples stay exempt (`QA_maxJ_continuation.py`, `QA_optimization_DMerc_vacuum.py`, `QA_optimization_global.py`) and say so |
+| H2 one template, family by family | the twelve rules and eight family variants of the EX proposal: shebang and imperative docstring whose every number is measured or dropped; one import block; one `UPPER_CASE` parameter block with a comment per group and no packed tuples; alternatives as a commented block introduced by what they buy; one `ci_smoke` switch, read once, last in the block; the verbatim `End of input parameters.` banner; five section banners in a fixed order; straight-line code below the banner; no commented-out code; physics- and accuracy-affecting numbers as named constants, and grids the library can size left unset; one `OUTPUT_NAME` stem per file; `print(f"Wrote {path}")` | six exemplars converted and verified: stdout identical (byte-identical for three) and every artefact identical in name and byte size, the three intentional deltas being `wrote` → `Wrote`, the monitor files following `OUTPUT_NAME`, and two files announcing monitor files they always wrote silently. Conversion is close to line-neutral except the scalar family, which grows by inlining its driver. 41 of 66 examples pass a physics- or accuracy-affecting literal below the parameter block; #384 is the precedent for deleting a pinned facade grid the library sizes better | per PR: a before/after run at `VMEX_EXAMPLES_CI=1` in a clean directory, compared by stdout and by artefact name and size; the family's example tests, `tests/test_cited_paths.py`, `tests/test_test_manifest.py`, `tools/check_docs_prose.py` and `ruff check examples/`. Order: E (25 files), F (13), A+B (12), C (3), H mirror (5), then D (6) and G (5) rebased last, after their owners land |
+| H3 tests and coverage, safe now | `--dist loadfile` in the xdist PR lanes; the jit fixture of A6; path-anchor the coverage omit so `mirror/turbulence.py` is gated; replace `importorskip` on hard dependencies (82 sites in 49 modules) with plain imports; delete the two `essos.mgrid` tests for an API that release does not have; fix the two stale docstrings (`core/__init__.py`'s "legacy modules" and `implicit.py:36–44`'s claim that the raw formulation is kept for tests); remove `ModeTable.m_is_even/m_is_zero/m_is_one`, the `_iotas_half` re-export and the never-passed private kwargs; consolidate duplicated test scaffolding; add the cheap PR tests that lift 22 of the 24 sub-95 % modules over the line | `--dist loadfile` alone removes ~2,500 s per PR of module fixtures rebuilt per worker (one fixture was built three times at 394 + 367 + 365 s) and also removes the cross-module jit-state leak; the `importorskip` sites can never skip legitimately and would turn a broken install into a green run of skips; the new tests are +400…+450 lines against −800…−900 removed | every module at or above 95 % except `core/freeboundary_implicit.py`, whose 205 statements belong to the agent editing it (one non-`full` host-Schur adjoint test on a minimal vacuum free-boundary case); no test lane loses a selector it uniquely owns |
+| H4 repository slimming, safe now | point cloners at `--filter=blob:none` or `--depth 1` in `README.md`/`CONTRIBUTING.md`; add a CI guard rejecting a new tracked blob over ~500 KB–1 MB unless allow-listed; delete the 10 confirmed orphan files (262 KiB); prune the stale local worktrees | a default clone is 40 MiB and `--depth 1` is 5.6 MiB, so the doc line is the whole user-facing win. The blob guard is the **only** lever that controls the 834 MiB mirror figure going forward, because `refs/pull/*` is GitHub's to keep and no rewrite or branch deletion touches it. The 10 orphans survived four search passes and nothing, not even an "uncited but kept" list, names them. 3.45 GiB of the 6.55 GiB of local worktrees is stale by git's own `prunable` flag or by checking out a delete-safe branch | the guard fails on a new 2 MB fixture and passes the tree as it stands; the orphan deletion leaves `tests/test_figure_provenance.py`, `tools/pack_reference_assets.py` and the docs build unchanged; worktree pruning has no upstream effect at all |
+| H5 **needs a maintainer decision** — record the answer here before starting | (a) delete the 74 delete-safe branches; (b) the 13 ASK branches, three of them external-contributor work with no PR ever opened, which means "not submitted yet" at least as often as "abandoned" — ping before deleting; (c) rewrite `main`'s history; (d) move `examples/data/mgrid_ncsx_c09r00_small.nc` to the release-asset mechanism; (e) the four input decks with zero hits and the five with a manifest entry but no loader; (f) retire the square-root homotopy lane; (g) drop the five duplicate "representative physics" PR lanes; (h) default jit ON in tests, or one nightly jit-on rerun; (i) move the NumPy reference twins out of `freeboundary.py` (public names); (j) wire `_solve_stage_traced`/`_guess_axis_traced` into B4 or remove them; (k) the docstring policy for 14,540 docstring lines; (l) the six EX decisions — the monitor-file rename, deleting `_scalar_driver.py`, a `vj.wout_from_result` helper, promoting `_sample_closed_polyline`, moving two non-examples to `tools/`, and a smoke path for `epsilon_effective.py` | (c) is **not recommended and needs no decision unless the maintainer disagrees**: it reclaims ~22.65 MiB of an already-33.7 MiB pack while invalidating every fork, open PR branch, 36 tags and the PyPI and DOI provenance that points into the history, and it cannot touch the PR refs that are 94 % of the mirror. (f) is −1,620 source and −990 test lines, one nightly row and ≥ 1,560 s of a PR lane, keeping a 40-line rank gate for the one structural check worth preserving. (g) is −1,835 s per PR: all 107 selectors of those five jobs belong to modules a parity lane runs in full in the same workflow, same Python, same extras, same marker filter | each answer is written into this row with its date; nothing in H5 starts before its answer is here |
+
+**Open item, observation and not assertion.** The DMerc vacuum example's stage
+failure was not reproduced in this review. The place to look first is the
+stability weight escalating as `10**(stage-1)` against a `stability_scale`
+computed once at the seed; until someone reproduces it, that is a hypothesis
+and not a defect.
+
 ### Kill rules and things not to repeat
 
 - B1 is killed if Newton-finished states differ from descent-plus-refinement
   states by more than the certificate tolerance on the P1 matrix, or if
   Jacobian resets become more frequent on the shipped decks.
-- B5 is killed by its own gate; do not extend it to multi-host sharding.
+- B5 is killed by its own gate; do not extend it to multi-host sharding. Its
+  sharding arm is **dropped outright** as of 2026-09-19: the iteration stops
+  scaling at four cores and burns 63 % more CPU at eighteen for the same wall.
 - F1b is killed if building the response matrix costs more wall time or
   compile memory than today's GCROT lane on NCSX ns = 15; F2 is then the route.
+  **Superseded 2026-09-19**: the response ships as a preconditioner and F2 is
+  the endpoint, so the surviving kill rule is F2's — zero certificate fallbacks
+  on an mpol = ntor = 8 deck and value-and-gradient ≤ 3× the value.
 - D2 is killed if it cannot reach the current surrogate's final QI metric on
   the shipped cases.
 - E1 is killed if the fit cannot reach 1e-4 at `d = 0.02 a` on the vacuum
   identity with at most four times the on-surface grid's source count, and the
   hedgehog fallback cannot either; E2 with the distance rule is then the product.
+  **Executed 2026-09-19: E1 is killed by this rule** (best measured 9.8e-2 at
+  0.02 a), and E7's graded rule delivers what E1 was for.
+- Closed as negative results on 2026-09-19, each with the measurement that
+  closes it, none to be re-proposed without new evidence: **CPU sharding of the
+  iteration** (no scaling past four cores); **pad-and-mask one compile for the
+  whole ladder** (+27 % execution against 2.9 s of cold compile, a pure loss
+  in-process); **XLA flag tuning and tiered compilation on CPU** (best flag set
+  saves ~1 s of a 12–15 s cold run; O0 saves 28 % of compile and loses 2.5× on
+  execution; the cheap tier compiles in 70–85 % of the optimized tier's time, so
+  there is nothing to overlap); **XLA CPU scheduler flags** (both concurrency
+  settings double warm wall time); **Anderson, NGMRES, nonlinear CG and L-BFGS
+  as descent accelerators** (theory plus VMEX's own arm at 0.935× and 2.4×
+  worse; FIRE's table says damped dynamics already beats CG by 2–5×);
+  **learned warm starts** (the one hard number is 28× slower than VMEC, and
+  neither source feeds a prediction to VMEC at all); **mixed precision in the
+  block factorization, for now** (Carson–Higham needs `κ·u_low < 1` against a
+  measured conditioning near 6e12 — estimate the condition number first, do not
+  run a trial); **cyclic reduction, PCR and banded LU** (no CPU parallel
+  headroom, and the GPU sweep found no win); **Broyden and other secant
+  Jacobian updates** (0.83 of the exact step's predicted progress at 48 dof and
+  negative on 3 of 25 pairs, against at most 9 s saved on the QI run);
+  **`vmap`-batched trial points** (structurally impossible behind single-slot
+  host state, and bounded by 6–11 % of a run even if free); **multi-fidelity
+  `ns` ladders** (both shipped examples already run every trial at the coarsest
+  rung); **choosing forward tangents against adjoint rows by problem shape**
+  (the block lane's cost is dof-independent: 3.1 / 3.5 / 2.3 s at 8 / 24 / 48
+  dof); **the coil-side reverse pass in single stage** (1 % of the run);
+  **reusing a neighbouring trial's factorization as a solver** (diverges by up
+  to 11 orders); **randomized or low-rank NESTOR response** (rank 222 of 256);
+  **the frozen-matrix free-boundary derivative** (10–18 % error against a 1e-2
+  gate); **the Hadamard response as operator or preconditioner** (1–3 % inexact,
+  and the preconditioner numbers put that class at no gain); **partition-of-unity
+  and BIEST quadrature inside the equilibrium loop** (~84 points per period for
+  3e-4 on W7-X, a 3–5× geometry upsample); **equivalent sources near the
+  surface** (E1 above); and **a history rewrite of `main`** (~23 MiB off an
+  already-34 MiB pack, against every fork, tag and provenance link).
 - Do not repeat: rcon/zcon fusion (`c595c257`), the separable-versus-dense
   synthesis switch, W7-X polish runs, winding-surface work (#301/#303/#304),
   per-row kernel tuning before the anchor is fixed, and comparisons against
@@ -378,6 +933,26 @@ booz_xform_jax 0.3.0 and essos 0.17 were still untagged at the tag, so the
 magnetic-only Boozer projection and the twelve ESSOS examples need a git
 install; SOLVAX 0.22.0 is on PyPI. It does not fix cold compile (B4's
 remainder, B5) or block-Jacobian assembly (C1), and the 0.9.0 notes say so.
+
+**State on 2026-09-19.** Merged in VMEX since the last update: **#369** and
+**#370** (the two weekly-lane failures), **#372**, **#373** (weekly sharding,
+with per-shard measured durations), **#374** (compile the nested field
+derivatives once per order) and **#375** (a jitted free-boundary pullback builds
+its projected residual — Phase F's `F-pre`). Merged upstream in
+virtual_casing_jax: **#7** (level by calibrated estimate plus a
+field-interpolation fix; the exterior identity goes from ~1e-4 to 5–9e-6 and the
+path is 36 % faster; this is what closes L-EXT's B2 for VMEX) and **#9** (the
+KST a-priori estimate, the 0.0.7 candidate). 0.0.6 is bumped on `main` and
+awaiting publish. Open at the time of writing: **#376**, the VMEX side of E0,
+blocked on that publish; **#377**; **#379** (the two field-query examples);
+**#380** (the dense edge response as a Krylov preconditioner and response lane,
+measured 4.8× at the real deck resolution — Phase F's F1b/F2); **#381** (the
+curl-free source-data projection of E4, **default off**: flipping the default
+moves published exterior fields by up to 1.2 % and their gradients by up to
+14 %, so it is the maintainer's call); **#382**; **#383**; **#384** (deletes a
+pinned `nphi = ntheta = 32` the facade sizes better — the precedent H2's rule
+T10 follows); **#385**; **#386**. The winding-surface PRs (#301, #303, #304) and
+the HINT-comparison stack stay parked and are out of this review's scope.
 
 ## 7. Environment and runbook
 
@@ -1692,3 +2267,86 @@ error estimates and ratios are not affected.
   seed solve is known to converge on. A joint least-squares driver (plan C3)
   would change the optimizer, not the constraint handling: its residuals are
   still weighted, so it would inherit the penalized form's threshold offset.
+
+**2026-09-19, the step-back review.** On the maintainer's instruction the work
+stopped and seven read-only reviews ran on the areas he named: free boundary
+and its derivatives (L-FB), the VMEC extender (L-EXT), cold runs and the single
+solve (L-SOLVE), the optimization loops (P-OPT), the repository census
+(SLIM-A), source and tests (SLIM-B), and one example template with a separate
+correctness pass (EX). Base `305e9b23`, re-checked at `f86cd13a`. Every report,
+script and JSON is in `vmex-review-evidence-20260919`, outside this repository;
+§2 and §4 are revised from it and each new number names its report.
+
+- **Merged while the review ran.** VMEX #369, #370, #372, #373, #374, #375;
+  upstream virtual_casing_jax #7 and #9, with 0.0.6 bumped on `main` and
+  awaiting publish. #375 is Phase F's `F-pre`. Ten PRs are open (§6).
+- **Measured, and it changes the plan.** A cold run is 60–66 % XLA compile and
+  40–50 % of those seconds are ~130 single-op eager programs per rung that no
+  solver lane needs; the iteration stops scaling at four cores, so B5's
+  sharding arm is dropped rather than gated, and its dispatch arm is now sized
+  by an HLO census (844 fusions, 570 serial Thomas trips). 49 % of the QA
+  optimization run is per-stage recompilation at identical array shapes. A warm
+  QI trial plus Jacobian is ~97 % block assembly and factorisation. NESTOR is
+  second-order accurate and the cause is an antipodal kink, not the singular
+  point; its LU is 1.5–2 % of a call and its kernel scan 50–55 %, so F1a's
+  `custom_linear_solve` is not a speed item and VMEC++'s header claim does not
+  hold for this port. The real NCSX edge Schur matrix has cond 8.6e5, ~35–40
+  outlying eigenvalues and unrestarted GMRES reaching 2e-10 in 50 matvecs
+  against 247 probe columns and ~671 coupled matvecs today. The converged
+  exterior plasma field is not curl-free (5e-3 at `d = a`, 0.2 near the LCFS)
+  because the LCFS data do not conserve current, and a target-graded trapezoid
+  rule reaches ≤ 4e-9 in B for every `d ≥ 0.005 a` at today's default node
+  count. PR-lane coverage is 94.31 % with 24 modules below 95 %, the coverage
+  omit hides three modules and not two, and 1,979 unique tests execute 3,055
+  times per PR.
+- **Decisions recorded.** L-EXT's B2 is closed by upstream #7 (VMEX's third
+  derivative at `d = a` 1.2e-2 → 8.5e-9). E1 is dropped, killed by its own kill
+  rule. E3 as written is withdrawn — a better extrapolation does not remove the
+  curl — and the curl-free projection (#381, default off) replaces it; flipping
+  that default is the maintainer's call. Phase E's §1 gate is restated as
+  a quadrature gate against a converged quadrature of the same data plus a
+  separate source-data gate, because 1e-6 is unreachable from ns = 50 data
+  whose floor is 1e-5. F1b is superseded: the dense response ships as a Krylov
+  preconditioner (#380, 4.8× measured at the real deck resolution) and the
+  endpoint is unrestarted GMRES on the exact reverse-mode edge Schur operator;
+  the "matvec ≤ 0.1× one NESTOR call" gate is retired with its arithmetic
+  reason, and two measurable metrics replace it. P1 and P4 are already in
+  execution, C1's blocker having dissolved when the batch dependence failed to
+  reproduce. Branch deletion, a history rewrite and the projection default are
+  maintainer decisions and are listed as such in H5, not actioned.
+- **One conflict to hold.** FB-A's per-gradient closure hoisting (F7) and
+  L-SOLVE's S2 (narrowing the inter-rung `jax.clear_caches()`) act on the same
+  symptom from opposite ends: the hoisting is the structural fix for the Schur
+  lane's 0.29 GiB-per-gradient leak and its retrace cost, and the cache
+  clearing is the workaround that hides it. They must not both land — F7 first,
+  then the call is removed rather than narrowed.
+- **Closed as negative results**, each with its measurement, in the kill-rule
+  list of §4: CPU sharding, pad-and-mask, XLA flag and scheduler tuning, tiered
+  compilation, Anderson/NGMRES/CG/L-BFGS as descent accelerators, learned warm
+  starts, mixed precision for now, PCR and banded LU, Broyden updates,
+  `vmap`-batched trials, multi-fidelity ladders, forward-versus-adjoint
+  selection by problem shape, the coil-side reverse pass, reusing a
+  neighbouring trial's factorization as a solver, low-rank NESTOR responses,
+  the frozen-matrix derivative, the Hadamard response as an operator,
+  partition-of-unity quadrature inside the loop, equivalent sources, and a
+  history rewrite of `main`.
+- **Still a prediction, not an observation.** The `cmns` cancellation predicts
+  that a forward-built Schur certified at 1e-9 against the reverse-mode
+  operator falls back somewhere between mpol 7 and 8; FB-A certifies at 2.4e-10
+  at mpol 7 and is testing mpol 8. The DMerc vacuum example's stage failure was
+  not reproduced; the stability weight escalating as `10**(stage-1)` against a
+  `stability_scale` computed once at the seed is where to look first. E2's
+  tabulated field and F8's free-boundary Newton finish are inferred from
+  structure and were not prototyped.
+- **Limitations.** Every wall time in the seven reports is an upper bound: both
+  machines carried other sessions all day (load 10–60, briefly above 100), and
+  only the rows that say so are A/B. L-FB's sections 2–7 use one synthetic
+  surface and one real Schur matrix; L-EXT ran only the nfp = 2 QA family and
+  did not execute the tracing examples; P-OPT's single-stage run was capped at
+  600 s and covers 163 of ~300 trials; SLIM-B's coverage is from PR lanes only,
+  which carry no per-test contexts. Several literature sub-reviews were lost to
+  a usage limit and nothing from them is cited.
+- **Next action.** Land the ten open PRs in §6, then, in this order: A6 and H1
+  (the jit-disabled suite and the examples correctness pass, because they gate
+  the trust of every other number), F7 before S2, then S1–S3 and P2–P3–P5, then
+  Phase E's E4–E7 behind the restated gates.
