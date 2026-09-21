@@ -30,6 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def build_problem(case: str, *, response_rtol=None):
     """Build a shipped, deterministic optimization problem."""
+    qi_term = None
     if case == "qi":
         from vmex.core.qi import ConstructedQIResidual
 
@@ -39,7 +40,7 @@ def build_problem(case: str, *, response_rtol=None):
             ftol_array=np.asarray([1.0e-12]),
             niter_array=np.asarray([5500]),
         )
-        qi = ConstructedQIResidual(
+        qi_term = ConstructedQIResidual(
             np.linspace(0.1, 1.0, 6), mboz=12, nboz=12, nphi=61,
             nalpha=18, n_bounce=21,
         )
@@ -54,7 +55,7 @@ def build_problem(case: str, *, response_rtol=None):
             return jnp.maximum(opt.max_elongation(state, runtime) - 8.0, 0.0)
 
         terms = [
-            (qi, 0.0, 10.0),
+            (qi_term, 0.0, 10.0),
             (opt.aspect_ratio, 5.0, 0.005),
             (iota_floor, 0.0, 10.0),
             (mirror_excess, 0.0, 1000.0),
@@ -76,11 +77,13 @@ def build_problem(case: str, *, response_rtol=None):
     inp = replace(inp, delt=0.5).change_resolution(
         mpol=5, ntor=5, ntheta=16, nzeta=14,
     )
-    return opt.VmecProblem.from_tuples(
+    problem = opt.VmecProblem.from_tuples(
         inp, terms, max_mode=max_mode, use_ess=True,
         forward_max_iterations=5500, jacobian_batch_size=1,
         jacobian_adjoint_tol=response_rtol,
     )
+    problem.metadata["benchmark_qi"] = qi_term
+    return problem
 
 
 
@@ -173,6 +176,33 @@ def seed_gate(term_rows, aspect_tol, iota_tol):
         "thresholds": {"aspect_error": aspect_tol, "iota_violation": iota_tol},
         "observed": {"aspect_error": aspect, "iota_violation": iota},
         "passed": bool(aspect <= aspect_tol and iota <= iota_tol),
+    }
+
+
+def qi_gate(term_rows):
+    """Predeclared current-grid gates for the shipped QI example."""
+    qi_total = (term_rows[0]["norm"] / np.sqrt(10.0)) ** 2
+    aspect_error = term_rows[1]["max_abs"] / np.sqrt(0.005)
+    iota_violation = term_rows[2]["max_abs"] / np.sqrt(10.0)
+    mirror_hinge = term_rows[3]["max_abs"] / np.sqrt(1000.0)
+    mirror_violation = max(0.0, mirror_hinge - (0.21 - 0.2079))
+    elongation_violation = term_rows[4]["max_abs"] / np.sqrt(10.0)
+    observed = {
+        "constructed_qi_total": qi_total, "aspect_error": aspect_error,
+        "iota_violation": iota_violation,
+        "mirror_limit_violation": mirror_violation,
+        "elongation_violation": elongation_violation,
+    }
+    thresholds = {
+        "constructed_qi_total": 0.01, "aspect_error": 3.0,
+        "iota_violation": 1e-6, "mirror_limit_violation": 1e-6,
+        "elongation_violation": 1e-6,
+    }
+    return {
+        "scope": "prospective current-grid gates for the shipped QI example",
+        "thresholds": thresholds, "observed": observed,
+        "passed": all(observed[key] <= value
+                      for key, value in thresholds.items()),
     }
 
 
@@ -287,7 +317,7 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
             singular_values=np.linalg.svd(final_jacobian, compute_uv=False),
             gradient=final_jacobian.T @ result.fun,
         )
-    state, _, state_status = jax.device_get(
+    state, runtime, state_status = jax.device_get(
         problem.metadata["jax_state_runtime_status"](jnp.asarray(result.x)))
     params = imp.params_from_input(problem.input_from_x(result.x))
     checkpoint["state_status"] = np.asarray(state_status)
@@ -299,6 +329,12 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
         f"input_{name}": np.asarray(getattr(params, name))
         for name in params.__dataclass_fields__
     })
+    qi_term = problem.metadata["benchmark_qi"]
+    if qi_term is not None:
+        diagnostics = jax.device_get(qi_term.compute_state(state, runtime))
+        for name in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b", "G_b", "I_b"):
+            if name in diagnostics:
+                checkpoint[f"boozer_{name}"] = np.asarray(diagnostics[name])
     return {
         "arm": arm, "rtol": rtol, "max_nfev": max_nfev,
         "seconds": time.perf_counter() - started,
@@ -327,6 +363,7 @@ def main():
     parser.add_argument("--state-output", type=Path)
     parser.add_argument("--aspect-error-tol", type=float)
     parser.add_argument("--iota-violation-tol", type=float)
+    parser.add_argument("--qi-gates", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     paired_gate = ((args.aspect_error_tol is None)
@@ -337,7 +374,8 @@ def main():
             or (args.aspect_error_tol is not None
                 and (args.case != "seed"
                      or not all(np.isfinite(value) and value >= 0
-                                for value in thresholds)))):
+                                for value in thresholds)))
+            or (args.qi_gates and args.case != "qi")):
         parser.error("positive run controls and paired seed thresholds are required")
     assert_repo_vmex(vmex.__file__, REPO)
     initial_x = None
@@ -352,6 +390,8 @@ def main():
         arm["accuracy_gate"] = seed_gate(
             arm["result"]["terms"], args.aspect_error_tol,
             args.iota_violation_tol)
+    if args.qi_gates:
+        arm["accuracy_gate"] = qi_gate(arm["result"]["terms"])
     command = " ".join(filter(None, (
         "OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1",
         "VMEX_COMPILATION_CACHE=disabled PYTHONPATH=. python",
@@ -363,6 +403,7 @@ def main():
         (f"--aspect-error-tol {args.aspect_error_tol} "
          f"--iota-violation-tol {args.iota_violation_tol}"
          if args.aspect_error_tol is not None else ""),
+        "--qi-gates" if args.qi_gates else "",
         "--output <output.json>",
     )))
     report = {
