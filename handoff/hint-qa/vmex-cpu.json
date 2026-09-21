@@ -2838,6 +2838,274 @@
         "Same remote CPU runtime as baseline; no timing speedup claim.",
         "Supplemental raw arrays retained outside Git and not publicly downloadable."
       ]
+    },
+    "mpol8_measurement32_to48": {
+      "scope": "M8/N6 same exact native state, measurement32 versus48. Force-L2 gates pass; complete normalized-metric gate fails. No Fourier continuation performed.",
+      "source": {
+        "driver_sha256": "ee09d06869a05480f60a1e8f479cf893250ec7281d229e97724ee7561e6a0e56",
+        "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+        "input_sha256": "0909431b7d91e755035d028b2a3200c74e50264ff4c28444dfcc7514d6078a13",
+        "native_state_sha256": "e8e01ae295adba35f2f2437bf3cf09c4f970c884f03835767ea749580b97052d",
+        "state_checkpoint_sha256": "0e9d1fbc9c611b4ee815c107788d9e22aa4a9f819697261f69f07b0236d8f777",
+        "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+      },
+      "solve": {
+        "converged": true,
+        "iterations": 1357,
+        "mpol": 8,
+        "nfp": 2,
+        "ns": 121,
+        "ntheta": 40,
+        "ntor": 6,
+        "nzeta": 40,
+        "root_fsq": {
+          "fsql": 3.764038233087839e-12,
+          "fsqr": 9.958749608863231e-12,
+          "fsqz": 1.3316766918235775e-12,
+          "max": 9.958749608863231e-12,
+          "sum": 1.5054464533774648e-11
+        }
+      },
+      "physical": {
+        "full_mesh_wout": {
+          "phi_edge_Wb": 0.5186826591273505,
+          "pressure_axis_Pa": 144195.89708145702,
+          "pressure_edge_Pa": -36.31615609434085,
+          "toroidal_current_A": -95678.4386549754,
+          "volume_m3": 0.5864764923756425
+        },
+        "prescribed_input": {
+          "constraint": "prescribed_current",
+          "curtor_A": -95673.86795711746,
+          "ncurr": 1,
+          "phiedge_Wb": 0.5186826591273498,
+          "pressure_axis_Pa": 144195.89706000002,
+          "pressure_edge_Pa": -5.820766091346741e-11
+        }
+      },
+      "stage1": {
+        "B_rms_T": 5.861901998957474,
+        "absolute_l2_N_m3": 424642.19410853466,
+        "divB_max_abs_T_m": 1.2443379659998755e-12,
+        "divB_rms_T_m": 2.1349891761131544e-13,
+        "magnetic_normalized_l2": 0.015818156465927817,
+        "mean_force_over_mean_grad_p": 0.18728570543111103,
+        "mean_force_over_mean_magnetic_pressure_gradient": 0.01104490963981012,
+        "minimum_signed_coordinate_jacobian_m3": 0.009303818350887824,
+        "nestedness_margin": 0.6107360160867812,
+        "pointwise_normalized_l2": 0.3125623023642164,
+        "sampled_window_full_torus_volume_m3": 0.4691185998056549,
+        "volume_average_force_N_m3": 296503.2412773251
+      },
+      "radial_bins": [
+        {
+          "B_rms_T": 5.837273567554951,
+          "absolute_l2_N_m3": 229646.42152720244,
+          "divB_max_abs_T_m": 4.445332990599127e-13,
+          "divB_rms_T_m": 1.1348141031532474e-13,
+          "full_torus_dV_ds_m3": 0.5901292793748141,
+          "full_torus_window_volume_contribution_m3": 0.055926996777091356,
+          "magnetic_normalized_l2": 0.00870269618512955,
+          "mean_force_over_mean_grad_p": 0.24150443440361377,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.0072639529943621045,
+          "minimum_signed_coordinate_jacobian_m3": 0.011493486963869067,
+          "nestedness_margin": 0.7585592966139404,
+          "pointwise_normalized_l2": 0.3251548930564227,
+          "radial_index": 0,
+          "s": 0.1375280616245344,
+          "volume_average_force_N_m3": 191680.92000585358
+        },
+        {
+          "B_rms_T": 5.846949960142107,
+          "absolute_l2_N_m3": 264337.51094935875,
+          "divB_max_abs_T_m": 8.220091274324659e-13,
+          "divB_rms_T_m": 2.0734424145953633e-13,
+          "full_torus_dV_ds_m3": 0.5886483271759039,
+          "full_torus_window_volume_contribution_m3": 0.11269758649115157,
+          "magnetic_normalized_l2": 0.009948706262352051,
+          "mean_force_over_mean_grad_p": 0.18204894205884012,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.007979530660179965,
+          "minimum_signed_coordinate_jacobian_m3": 0.010845629254890675,
+          "nestedness_margin": 0.7136712048479872,
+          "pointwise_normalized_l2": 0.2854436929541471,
+          "radial_index": 1,
+          "s": 0.28461227595772676,
+          "volume_average_force_N_m3": 212016.4388849281
+        },
+        {
+          "B_rms_T": 5.86122602271594,
+          "absolute_l2_N_m3": 350885.0808648742,
+          "divB_max_abs_T_m": 8.504308368628699e-13,
+          "divB_rms_T_m": 2.2371685379186379e-13,
+          "full_torus_dV_ds_m3": 0.5865079036864473,
+          "full_torus_window_volume_contribution_m3": 0.13346313186109376,
+          "magnetic_normalized_l2": 0.01307448400993601,
+          "mean_force_over_mean_grad_p": 0.15106629611043976,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.009578955811444531,
+          "minimum_signed_coordinate_jacobian_m3": 0.010182412113582564,
+          "nestedness_margin": 0.6679176272387541,
+          "pointwise_normalized_l2": 0.2749279343026549,
+          "radial_index": 2,
+          "s": 0.5,
+          "volume_average_force_N_m3": 257074.21279076705
+        },
+        {
+          "B_rms_T": 5.877449501239706,
+          "absolute_l2_N_m3": 492075.22117454174,
+          "divB_max_abs_T_m": 1.1004530620084552e-12,
+          "divB_rms_T_m": 2.1962488101697576e-13,
+          "full_torus_dV_ds_m3": 0.5840605978740124,
+          "full_torus_window_volume_contribution_m3": 0.11181925898060144,
+          "magnetic_normalized_l2": 0.01814395408643289,
+          "mean_force_over_mean_grad_p": 0.1661277990210904,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.013170868783125211,
+          "minimum_signed_coordinate_jacobian_m3": 0.009681823664926283,
+          "nestedness_margin": 0.6339269870807632,
+          "pointwise_normalized_l2": 0.286285613113126,
+          "radial_index": 3,
+          "s": 0.7153877240422732,
+          "volume_average_force_N_m3": 357202.0816765297
+        },
+        {
+          "B_rms_T": 5.887327133474514,
+          "absolute_l2_N_m3": 740320.6745549423,
+          "divB_max_abs_T_m": 1.2443379659998755e-12,
+          "divB_rms_T_m": 2.6042934385549027e-13,
+          "full_torus_dV_ds_m3": 0.5825808422144967,
+          "full_torus_window_volume_contribution_m3": 0.0552116256957168,
+          "magnetic_normalized_l2": 0.027086794564834944,
+          "mean_force_over_mean_grad_p": 0.3038008943989684,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.02003250951108539,
+          "minimum_signed_coordinate_jacobian_m3": 0.009303818350887824,
+          "nestedness_margin": 0.608652158031074,
+          "pointwise_normalized_l2": 0.45604638256059987,
+          "radial_index": 4,
+          "s": 0.8624719383754655,
+          "volume_average_force_N_m3": 547517.0167801435
+        }
+      ],
+      "timing_seconds": {
+        "solve": 102.46269448520616,
+        "total": 157.09676471399143
+      },
+      "resources": {
+        "jax_platform": "cpu",
+        "max_rss_bytes": 2569367552,
+        "visible_device_count": 1
+      },
+      "versions": {
+        "jax": "0.9.2",
+        "jaxlib": "0.9.2",
+        "numpy": "2.4.6",
+        "python": "3.11.15",
+        "vmex": "0.10.0"
+      },
+      "artifact_hashes": {
+        "result": "7e9def0c900388b7a44549c997dd90c1b6ddc3b9dcbd63c963014d3b361f1b27",
+        "samples": "3991072adbfeae1d5bc93393071f0e113e39079dc06c786b8bb3effaa2c65781",
+        "native_state": "0e9d1fbc9c611b4ee815c107788d9e22aa4a9f819697261f69f07b0236d8f777"
+      },
+      "force_l2_percent_change": 0.009212267969727073,
+      "acceptance": {
+        "global_force_l2_limit_percent": 0.1,
+        "radial_force_l2_limit_percent": 0.5,
+        "means_and_ratios_limit_percent": 1.0,
+        "force_l2_pass": true,
+        "complete_measurement_pass": false
+      },
+      "independent_checks": [
+        "Root recomputed volume-weighted force L2 from retained arrays.",
+        "Checkpoint loaded without pickle and six-array native hash independently recomputed."
+      ],
+      "limitations": [
+        "No continuum-equilibrium or Fourier-convergence certificate.",
+        "Normalized-metric measurement sensitivity remains above its prospective limit.",
+        "Full-mesh WOUT edge pressure is extrapolated; it is not the prescribed edge-pressure value.",
+        "Paired WOUT plus exact arrays supports public template replay; complete force-diagnostic replay remains unqualified."
+      ],
+      "percent_changes": {
+        "global": {
+          "absolute_l2_N_m3": 0.009212267969727073,
+          "volume_average_force_N_m3": -0.21064577661404904,
+          "mean_force_over_mean_grad_p": -0.21063714983539095,
+          "mean_force_over_mean_magnetic_pressure_gradient": -0.2106456055419037,
+          "pointwise_normalized_l2": -0.06450474418552288,
+          "magnetic_normalized_l2": 0.00921243941880423
+        },
+        "radial_bins": [
+          {
+            "s": 0.1375280616245344,
+            "absolute_l2_N_m3": 0.0005808788038130785,
+            "volume_average_force_N_m3": 0.8192729994307424,
+            "mean_force_over_mean_grad_p": 0.819272821606476,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.8192729890007522,
+            "pointwise_normalized_l2": 0.5467439310635314,
+            "magnetic_normalized_l2": 0.0005808684585328905
+          },
+          {
+            "s": 0.28461227595772676,
+            "absolute_l2_N_m3": -0.0006528912893211114,
+            "volume_average_force_N_m3": -1.3697796335799706,
+            "mean_force_over_mean_grad_p": -1.3697826439210137,
+            "mean_force_over_mean_magnetic_pressure_gradient": -1.369779668194815,
+            "pointwise_normalized_l2": -0.9686941553305739,
+            "magnetic_normalized_l2": -0.0006529263846699607
+          },
+          {
+            "s": 0.5,
+            "absolute_l2_N_m3": -0.005498504011081096,
+            "volume_average_force_N_m3": -0.5102814723968896,
+            "mean_force_over_mean_grad_p": -0.5102774088251993,
+            "mean_force_over_mean_magnetic_pressure_gradient": -0.5102814382281773,
+            "pointwise_normalized_l2": -0.7448692842617399,
+            "magnetic_normalized_l2": -0.005498469669007466
+          },
+          {
+            "s": 0.7153877240422732,
+            "absolute_l2_N_m3": 0.0028649606252706405,
+            "volume_average_force_N_m3": 0.10284312118775674,
+            "mean_force_over_mean_grad_p": 0.10286058776047824,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.10284326381839737,
+            "pointwise_normalized_l2": -0.10643587000834787,
+            "magnetic_normalized_l2": 0.002865103113469658
+          },
+          {
+            "s": 0.8624719383754655,
+            "absolute_l2_N_m3": 0.026295662824415977,
+            "volume_average_force_N_m3": 0.28545892328377676,
+            "mean_force_over_mean_grad_p": 0.285476118840311,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.2854600691521547,
+            "pointwise_normalized_l2": 1.0110619193266501,
+            "magnetic_normalized_l2": 0.026296805731562678
+          }
+        ]
+      },
+      "paired_public_replay": {
+        "wout_sha256": "c4f117ce02de44a25c03d8b586457474d1933588b5a34be20bad4f8f364ada6f",
+        "scope": "No-solve WOUT generation and public template replay restore all six native arrays and the exact state digest; one native-field probe is finite. Full diagnostic replay not yet qualified.",
+        "apis": [
+          "read_wout",
+          "state_from_wout",
+          "wout_from_state",
+          "write_wout",
+          "VmecInteriorField.from_state"
+        ],
+        "native_state_sha256": "e8e01ae295adba35f2f2437bf3cf09c4f970c884f03835767ea749580b97052d",
+        "probe": {
+          "native_state_sha256": "e8e01ae295adba35f2f2437bf3cf09c4f970c884f03835767ea749580b97052d",
+          "xyz_m": [
+            1.144982385669707,
+            0.35418455705214635,
+            0.09126909293214358
+          ],
+          "B_T": [
+            -2.3861392171577234,
+            4.857632773279315,
+            0.8516206312872004
+          ]
+        },
+        "artifacts_publicly_hosted": false
+      }
     }
   },
   "gpu_automatic_placement_attempt": {

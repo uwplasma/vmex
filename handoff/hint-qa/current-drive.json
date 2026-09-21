@@ -1299,5 +1299,60 @@
       "No independent endpoint sampling, force, support or topology audit yet.",
       "Raw endpoint requires public hosting for independent reproduction."
     ]
+  },
+  "endpoint_control_field_audit": {
+    "driven": {
+      "restart_sha256": "30c04bf36ed4a3c3bb325a9e74fcbc21ab863f91aa4aab286e3e11a085454c16",
+      "snapshot_sha256": "bdeb79b205adf39ffd603b9a848c706c6ede061ff34b87e45ef7df442737cabf",
+      "code_time": 1.1800000000000204,
+      "input_sha256": "78fcb9e961bffa01631ee2d2dda35fa5ad3405c6bc3d80196f0d95cca80cdb68",
+      "sample_total_sha256": "d7ac0285e28f932620460bf88ac1051725825cdc9b09586cb152dfe5e04a74ea",
+      "sample_response_sha256": "0314f2ed1b60f6935cf392e98bbdc49e6e56d6940b83e312d4ed62b204a166ec",
+      "response_rms_T": 0.012917729789766304
+    },
+    "drive_off": {
+      "restart_sha256": "9760ebbe49e8d4e1c481a0c45c951b133d72e7adafe9bd281d0aeffafad7dde7",
+      "snapshot_sha256": "5857d94b17f4c4cfe8f8578fcdfbfb39d3dacab16eeb760dba21a60b5fa3bf67",
+      "code_time": 1.1800000000000204,
+      "input_sha256": "de83afa1c1f368817a1c9716f6c3396e2e53c04ede2032da9cc516f7757b52da",
+      "sample_total_sha256": "ccb3282da45d64a989b2ce08b9b63da86b853413869785f6c8937b910a50d40b",
+      "sample_response_sha256": "a7f961d7974a8fb01a8041ebbc1da46c117de4d710794b81ec289bc95b844dd0",
+      "response_rms_T": 0.011198311273359648
+    },
+    "vacuum_sha256": "392689512f2a9803fbf8a69e9812c8dd9af865a35426197593a72a4c7abab5c2",
+    "control_field_difference": {
+      "rms_vector_delta_T": 0.00202590723013511,
+      "max_vector_delta_T": 0.005135946575356406
+    },
+    "source": {
+      "sampler_sha256": "9d6b0b1f6458bece73f4619a59356473eb1e792d601dcab3b6b65e409fc52d9d",
+      "sampling_helper_sha256": "f615b2407d82953ddcff6cfd6368a558c5ebc66aca0b885bdd9514d3edbfa0f0",
+      "targets_sha256": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5",
+      "extractor_sha256": "8ea0a15c640ff4d9b1e2395e3f80fd826fff6c91b5dda5116f340ffab04b447b",
+      "audit_driver_sha256": "b4934f9db99600a7c207d5721819828405a34bf42d22a9e44455d2f2c857f8b3",
+      "native_writer_sha256": "ece2e96d9cd1b2158a2d2466111f4340a0ab74c1a9a642fab0730b051427da31"
+    },
+    "scope": "Matched code-time1.18 driven/drive-off controls on one grid; native cylindrical component samples at identical Cartesian targets. Not an inter-code comparison or equilibrium certificate.",
+    "limitations": [
+      "Exteriority to relaxed plasma-current support is not certified.",
+      "No field/interpolation/grid convergence or topology qualification.",
+      "All-domain extrema near coils cannot be interpreted as plasma-region fields."
+    ],
+    "samples_sha256": "56eb9f4bdea84a792449477ffa301934130ddc3326190cff1d2040d21c4c20fe",
+    "samples": "data/endpoint-controls.npz",
+    "target_count": 192,
+    "component_order": [
+      "B_R",
+      "B_phi",
+      "B_Z"
+    ],
+    "extraction": "Final native time slice: B_cyl=stack(B_R,B_phi,B_Z); P_mu0_Pa=P; R,phi,Z from the hash-matched vacuum grid after bounds/mtor validation.",
+    "units": "Native writer multiplies code magnetic field by b0 before storage (tesla), pressure by b0 squared (mu0 Pa). No additional field rescaling during extraction.",
+    "independent_checks": {
+      "target_coordinates_identical_to_startup_archive": true,
+      "vacuum_max_abs_difference_from_startup_T": 3.9968028886505635e-15,
+      "cartesian_rotated_rms_delta_T": 0.0020259072301351106,
+      "response_difference_max_roundoff_T": 1.6940658945086007e-21
+    }
   }
 }

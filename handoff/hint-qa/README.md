@@ -563,6 +563,30 @@ hashes and resource measurements. This resolves the write failure, not the
 physical current/force or topology gates. Native field extrema are recorded
 without interpreting all-domain values as plasma-region measurements.
 
+Native MAGVAL sampling now compares the driven and drive-off endpoints at
+code time 1.18 on the same 64x64x32 grid and 192 retained physical targets.
+The vector difference is **2.02591 mT RMS and 5.13595 mT maximum**. Plasma-response
+RMS magnitudes are 12.91773 mT driven and 11.19831 mT drive-off. This is a
+control sensitivity, not HINT–VMEX error or an equilibrium comparison. Both
+controls use the same vacuum sample; subtracting it preserves their vector
+difference. The [compact arrays](data/endpoint-controls.npz) and
+[hashes/provenance](current-drive.json) retain this audit. Fields use native
+cylindrical components at the same targets, so vector-difference norms are
+rotation invariant. Target exteriority to relaxed current support, masks and
+interpolation/grid convergence remain open.
+
+Recompute the endpoint difference without a native build:
+
+```sh
+python - <<'PYCODE'
+import numpy as np
+with np.load('handoff/hint-qa/data/endpoint-controls.npz', allow_pickle=False) as a:
+    delta = a['drive_off_total_cyl_T'] - a['driven_total_cyl_T']
+    lengths = np.linalg.norm(delta, axis=1)
+    print('RMS and maximum [T]:', np.sqrt(np.mean(lengths**2)), lengths.max())
+PYCODE
+```
+
 ## Execution order and research acceptance
 
 1. **Freeze a working baseline.** Use main `45f3a7aea`, which includes #409,
@@ -688,8 +712,18 @@ The current virtual-casing-jax floor is 0.0.7. Its
 [`B_and_derivatives_xyz` path](https://github.com/uwplasma/virtual_casing_jax/pull/12)
 is not yet wired into VMEX's nested spatial differentiation. This is a bounded
 performance candidate after parity tests; the upstream speedup is not a VMEX
-measurement. SOLVAX 0.22–0.24 add APIs unused by current VMEX, so no upgrade is
-required merely because those releases exist. Boozer magnetic-only evaluation
+measurement. A small guarded extender override could combine fast plasma
+spatial derivatives with the existing external-field derivatives, preserving
+near-surface and unavailable-API fallbacks. First obtain the #14 tracer-cache
+fix in a distinct released version, then test field composition, source
+pullbacks and eager/JIT lifecycle. Do not change parameter derivatives or
+infer a workflow speedup from pure-kernel timings. SOLVAX 0.22–0.24 add APIs
+unused by current VMEX, so no upgrade is
+required merely because those releases exist. Proposed SOLVAX #119 exposes
+inner-linear convergence diagnostics; after release, retaining these in polish
+reports is a narrow useful integration. Keep strict rejection opt-in: the
+current plan records unsuccessful strict-policy experiments. Boozer magnetic-only
+evaluation
 is a performance benefit covered by #410. ESSOS 0.17 supplies the used coil
 and tracing contracts; experimental ESSOS PRs require manual review.
 
@@ -842,25 +876,36 @@ pressure/current inputs. Matching beta labels would not match the experiment.
 
 ### Immediate bounded experiments
 
-Restart preflight and persisted drive-off readback now pass. Next extract and
-independently sample the endpoint, retaining pressure/source/wall masks and
-comparing the driven endpoint at the same code time and cadence. Persistence
+Restart preflight, persisted readback and matched-time native field sampling
+now pass. Next classify targets against pressure/source/wall support and resolve
+the physical current/force evolution before extending relaxation. Persistence
 and finite arrays alone do not establish field accuracy or equilibrium.
 
-For the VMEX M8/N6, NS121, solver-grid40 state, first repeat measurement at
-48x48 against the retained 32x32 result, requiring the exact native-state hash
-before comparing quadrature. Prospective measurement targets are at most 0.1%
-global force-L2 change, 0.5% in each radial bin and 1% in mean/ratio metrics;
-retain absolute differences as well. These are measurement targets, not physical
-force acceptance thresholds. Use `--state-output results/state.npz` to retain all six exact native
-coefficient matrices with input/source/state hashes, resolution and solve
-metadata. The archive loads with `allow_pickle=False`; existing output files
-are refused. Checkpoint writing has roundtrip/hash validation, but a public-API
-replay path and an end-to-end solve using this new option remain to be qualified.
-If this gate passes, compare M9/N6 and M8/N7 separately with the M8/N6 baseline.
-Do not combine both mode changes in one solve or call one sensitivity rung
-Fourier convergence. Record NCURR with current: CURTOR is a prescribed-current
-constraint for NCURR=1, not for an iota-constrained NCURR=0 solve.
+The M8/N6, NS121, solver-grid40 measurement32-to48 run reproduced the exact
+native-state hash and converged in the same 1,357 iterations. Force L2 changed
+by +0.00921% globally and at most 0.02630% in a radial bin, passing the
+prospective 0.1%/0.5% measurement limits. The complete gate **fails**: the
+s=0.284612 mean-force ratios change by -1.36978%, and the outer-bin
+pointwise-normalized L2 changes by +1.01106%, exceeding the 1% limit.
+These remain measurement sensitivities, not physical acceptance thresholds.
+The run took 157.10 s, including 102.46 s solve, with 2.57 GB peak RSS on
+one CPU core. All three native FSQ channels are below 1e-11; their sum is
+1.50545e-11. NCURR=1 prescribes current: input -95673.86796 A versus exported
+-95678.43865 A. The negative exported edge pressure (-36.316 Pa) is a WOUT
+full-mesh extrapolation, distinct from the nearly zero prescribed edge value.
+
+`--state-output results/state.npz` now completed end-to-end, retaining all six
+native coefficient matrices with source/input/state hashes, resolution and solve
+metadata. Independent non-pickle loading reproduces the exact state digest.
+A paired WOUT was generated without a solve using public APIs. Re-reading it
+with `read_wout`/`state_from_wout`, then replacing all six arrays from the NPZ,
+restores the exact state hash and yields a finite native-field probe. WOUT alone
+is not a bitwise native checkpoint. The pair is retained but not publicly
+hosted. Next qualify the complete diagnostic replay, then refine measurement
+on the saved coefficients without another equilibrium solve. Defer the M9/N6 and M8/N7 one-control solves until the
+remaining mean/ratio measurement gate passes; one rung still cannot establish
+Fourier convergence. Historical M8 executions retain their original metadata
+limitations; the repeated exact-state run supplies new evidence separately.
 
 Keep broader QI objective, factor-reuse and 3-D polishing development off this
 study's critical path. The latest #413/#419 evidence includes failed independent

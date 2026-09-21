@@ -63,15 +63,20 @@ Execute three independent bounded lanes now:
    The writable-copy repetition now exits zero with a readable time-1.18
    endpoint, 20 snapshots, finite fields and unchanged retained input. Its
    history and non-timing diagnostics exactly reproduce the partial run.
-   Independently audit the saved endpoint next; persistence is not equilibrium.
+   Native endpoint sampling at 192 common targets now measures driven/off
+   differences of 2.02591 mT RMS and 5.13595 mT maximum. Classify targets
+   against relaxed support next; this control sensitivity is not inter-code error.
 3. Complete the reproducible preprocessing and raw-data package. The published
    compact native samples reproduce all six field metrics, but do not recreate
    an equilibrium without the missing prepared fields and restart assets.
 
-The next VMEX measurement is M8/N6 at 48x48, guarded by its retained exact
-state hash. Save native coefficients for replay, then separate M9/N6 and M8/N7
-sensitivity before further radial refinement. #422 now contributes only tests
-on #421; consolidate those tests without restoring the retired implementation.
+M8/N6 measurement32-to48 now reproduces the exact state and passes global/per-bin
+force-L2 limits (+0.00921% globally, at most 0.02630% per bin). The full gate
+fails: one mean-force ratio changes 1.36978%, and the outer pointwise-normalized
+metric changes 1.01106%, exceeding 1%. Exact native coefficients were saved and
+hash-verified. Qualify their public replay and refine measurement before M9/N6
+and M8/N7 sensitivity; do not relax the prospective gate. #422 contributes
+only tests on #421, and #421's handoff now reflects that reconciliation.
 The latest #413 plan records failed independent-root/fine-grid QI gates and an
 unqualified finite-beta optimization derivative. These remain separate product
 research, not prerequisites to the forward HINT field comparison.
