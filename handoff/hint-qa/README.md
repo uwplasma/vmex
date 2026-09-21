@@ -205,7 +205,7 @@ trajectory. Enabling the diagnostic left the one-rank history and native
 field file byte-identical to the disabled run. Two-rank diagnostic values
 matched apart from timing; history differences were at most 1e-22. A final
 zero-drive guard check emitted four finite, zero-source records without
-reading uninitialized normalization volumes. The tested final source hash is
+reading uninitialized normalization volumes. The historical accounting-only source hash is
 `bc4913186bd6de2a0118ba9f1e65a252160420cc47d62733abd0fc398c2e8fc2`.
 
 A subsequent [later-time diagnostic](current-drive.json) restarted the retained
@@ -220,9 +220,40 @@ matched native history. Thus differing masks alone do not explain the deficit.
 Source normalization is working at this measured state; the dynamical cause
 remains unresolved. Curl-derived response current also includes perpendicular current,
 so equality to the imposed parallel-current source is not itself a valid
-zero-residual condition. Next measure the evolution/current balance and its
-resistive timescale before another broad relaxation or resistivity scan. Raw
-restart assets remain necessary for independent reproduction.
+zero-residual condition. Raw restart assets remain necessary for independent
+reproduction.
+
+The optional patch now also decomposes the instantaneous current-rate RHS
+using the production Faraday and boundary stencils, then the production
+fourth-order toroidal curl, on a frozen source mask. Repeating the same
+100-update sample with the extended diagnostic gives these cut-mean rates:
+
+| Contribution | Current rate (kA per code-time) |
+|---|---:|
+| Ideal | +2.765848 |
+| Resistive response | +23.121079 |
+| Imposed drive | -35.437527 |
+| Divergence cleaning | approximately zero |
+| Total | -9.550599 |
+
+The term sum agrees with a separate total-RHS evaluation within
+`6.73e-11 A/code-time` (relative `5.75e-15`). The imposed term is active in
+the target direction; response and ideal terms oppose it. This supports slow
+relaxation/current redistribution at this state, without determining a
+long-time rate or physical-second timescale. The next controlled measurement
+is a full original-length block from the retained restart, with unchanged
+resistivity and cadence, tracking force and current together.
+
+The tested extended source SHA-256 is
+`21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488`.
+On a two-update mature-restart fixture, the previous binary with diagnostics
+off, the new binary off, and the new binary on produce byte-identical field
+and history files. One-rank and four-rank diagnostic values also agree
+byte-for-byte apart from timing. The repeated 100-update output/history match
+the prior accounting-only run exactly. The compact [record](current-drive.json)
+keeps both source versions and validation hashes. These checks used the
+standard Ohm-law build; the alternative `BDIFF2ND` build is not numerically
+qualified here.
 
 New native postprocessing at the same 192 targets separates the cross-grid
 field differences: total RMS/max **0.243516/1.701148 mT**, vacuum
@@ -274,8 +305,10 @@ archive must not be published as an accidental package release.
    Repeat a small matched CPU/GPU case before expensive runs. Check live
    parameter derivatives rather than differentiating cached field snapshots.
    Do not impose the removed historical universal certificate on new solvers.
-3. **Resolve HINT current closure before extending runtime.** Use the measured later-time source/support accounting above as the
-   baseline; next resolve current evolution and Ohm/Faraday balance. Save the
+3. **Resolve HINT current closure before a long campaign.** The bounded
+   source/support and term-rate measurements above establish an active drive
+   opposed by response and ideal terms. Next track evolution over an original-
+   length block with unchanged cadence, current, force and pressure recorded. Save the
    actual flux label, imposed current and traced axis pressure at native updates. A snapshot reconstruction using maximum pressure as axis pressure
    is insufficient. Integrate current on multiple cuts and separately inside
    pressure support, return-current shells and wall. Near-zero all-domain
@@ -470,7 +503,12 @@ is `mu0*p/B0^2`, the Bphi extrema are normalized by B0, and `timeb` is code
 time. The cancellation record contains the cut-zero integral of absolute
 source current and its signed/absolute ratio (both zero for zero source).
 The timing is the largest per-rank wall time for the native source update,
-not an end-to-end benchmark. The patch does not correct or reinterpret the
+not an end-to-end benchmark. Additional `CURRENT_DRIVE_RATE` records give
+ideal, resistive-response, imposed-drive, cleaning, sum and total current rates
+in A per code-time on the frozen source mask. The diagnostic saves/restores
+all magnetic and velocity increments; it does not reuse a last-stage increment
+as the instantaneous RHS. Its separate timing includes the repeated term
+computations and reductions. The patch does not correct or reinterpret the
 underlying current-drive model; use its output to choose the next controlled
 experiment. Sequential application of both patches to the pinned upstream
 source was verified to reproduce the tested source exactly.

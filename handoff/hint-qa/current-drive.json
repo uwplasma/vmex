@@ -137,5 +137,123 @@
     },
     "warning": "The shortened 100-step block matches the first 100 magnetic updates of the retained settings. Its endpoint is not cadence-identical beyond that block and must not be reused as production state without deliberation."
   },
-  "reproduction_limit": "Hash-identified raw restart and prepared native inputs are not yet in a downloadable public dataset. This record is evidence of the bounded run, not an independently reproduced equilibrium."
+  "reproduction_limit": "Hash-identified raw restart and prepared native inputs are not yet in a downloadable public dataset. This record is evidence of the bounded run, not an independently reproduced equilibrium.",
+  "current_rate_followup": {
+    "observation": {
+      "status": "completed",
+      "diagnostic_semantics": "instantaneous post-RKG magnetic current-rate RHS at the existing cal_energy sample after cal_j, integrated on the frozen ss<jcuts source mask",
+      "units": "A per code time",
+      "cut_statistics_order": [
+        "cut0 (global toroidal index 1)",
+        "minimum signed integral over 32 toroidal cuts",
+        "mean signed integral over 32 toroidal cuts",
+        "maximum signed integral over 32 toroidal cuts"
+      ],
+      "terms_A_per_code_time": {
+        "ideal_curl_v_cross_B": [
+          3710.210542249218,
+          959.198453445766,
+          2765.84845806922,
+          4312.333208646012
+        ],
+        "resistive_response_minus_curl_eta_Jresponse": [
+          38466.71611181377,
+          9661.22073614133,
+          23121.07949006002,
+          38898.20001231909
+        ],
+        "imposed_drive_plus_curl_eta_Jimposed": [
+          -52483.9567673131,
+          -52718.87334268884,
+          -35437.52738240956,
+          -19597.79043409096
+        ],
+        "divergence_cleaning_kappa_grad_divB": [
+          -1.347552418898007e-27,
+          -5.082799280030924e-27,
+          -9.39996770330904e-29,
+          6.64848674673804e-27
+        ],
+        "term_sum": [
+          -10307.03011325011,
+          -11705.17200787588,
+          -9550.599434280322,
+          -8349.956044800972
+        ],
+        "independent_total_RHS": [
+          -10307.03011325016,
+          -11705.1720078759,
+          -9550.599434280322,
+          -8349.956044800992
+        ]
+      },
+      "closure": {
+        "max_absolute_A_per_code_time": 6.730260793119669e-11,
+        "max_relative_to_total": 5.749817933979247e-15
+      },
+      "mpi_max_seconds": 0.0131599519999952,
+      "field_definitions": {
+        "state": "new non-mutating Faraday evaluation from the post-RKG current state; no last-RK-stage increment is reinterpreted as an instantaneous RHS",
+        "terms": "each term and the independently evaluated total use the production Faraday curl, divergence and magnetic boundary stencils",
+        "current_rate": "the production fourth-order toroidal curl is applied to each magnetic increment, integrated with rmaj0*b0*dr*dz/mu0, and divided by dt_b",
+        "mask": "the same ss<jcuts cells are used for every term and remain unchanged throughout the diagnostic"
+      },
+      "interpretation": "At this sample the imposed term drives toroidal response current in the requested negative direction, while resistive-response and ideal terms oppose it; the net mean rate remains negative. This supports active relaxation and current redistribution rather than absent imposed support at this state.",
+      "limitation": "This is one instantaneous frozen-mask RHS sample. It does not establish a constant long-time relaxation rate, physical-second timescale, convergence, or a production endpoint."
+    },
+    "provenance": {
+      "source": {
+        "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+        "portability_patch_sha256": "d83abd6596ae500538dab6b88ec30815cb4688b925db0f281fbc9cfa6c07d580",
+        "diagnostics_patch_sha256": "a1fbb4061c9254e1d2113ed08296812e016b6e84e6ca53e34b0a255a339bfe67",
+        "resulting_stepb_mod_sha256": "21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488",
+        "clean_apply_verified": true
+      },
+      "build": {
+        "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
+        "compiler": "conda-forge GNU Fortran 13.4.0 via Open MPI wrapper",
+        "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2"
+      },
+      "mature_sample": {
+        "restart_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+        "input_sha256": "847189783892763b5cf62c5a606117ba1f07c6d82252dd89a916f76b350095cc",
+        "output_sha256": "7aa9a5d37e0233165cc319c73bdaf1455c823dd75f7347c94cecfc5a2d1b4449",
+        "history_sha256": "44780551dfefde1e83b678e1f26fdde20e5db232e8d677c6d6c53a743d601abb",
+        "run_log_sha256": "3465ad169276d7e00c11d4697035739c2a649d77a882cf29a7ef3f17d30cdc9d",
+        "resource_log_sha256": "7f554292151ee21a39df14ce6eb86f8d5a6268663be8a216d6914159b6641db1",
+        "mpi_ranks": 4,
+        "omp_threads": 1,
+        "exit_code": 0,
+        "elapsed_wall_seconds": 32.47,
+        "max_rss_kib": 113392,
+        "swaps": 0,
+        "timeb_code": 0.01,
+        "global_time_code": 1.0900000000000185
+      },
+      "validation": {
+        "two_update_fixture": {
+          "restart_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+          "previous_binary_off_input_sha256": "c36fd48dc0e69f74a6227203ad8badeeee0370f1d56ef6e7d2703e564efca5f5",
+          "new_binary_off_input_sha256": "c36fd48dc0e69f74a6227203ad8badeeee0370f1d56ef6e7d2703e564efca5f5",
+          "new_binary_on_input_sha256": "009b96d0812ef425637b0cd685fd685bf98bbe5b719d1eb265e1f31aece65aa3",
+          "field_sha256_all_three": "8517b5aa2d1b08ff5f2da2685459500696b085e518745c32a8bd3d42ae4ff419",
+          "history_sha256_all_three": "679d6b7d5bfd2bbeac2aaf247342ce8960cc7986ac8b564b2b36c4bb775ca676",
+          "previous_off_equals_new_off_byte_for_byte": true,
+          "new_off_equals_new_on_byte_for_byte": true,
+          "instantaneous_closure_relative_samples": [
+            5.419176891006536e-15,
+            8.208104696609022e-15
+          ]
+        },
+        "mpi_ownership": {
+          "one_rank_input_sha256": "1e9e0e7cf0360f6ede071e3ac863b512321b9df8142c814fcc9a03ecbd706364",
+          "four_rank_input_sha256": "009b96d0812ef425637b0cd685fd685bf98bbe5b719d1eb265e1f31aece65aa3",
+          "rate_output_without_timing_sha256_both": "30101b073860999ae7a6c64a500fce64f4453549165948ed8f122bcc6ccb874c",
+          "one_rank_four_rank_rate_output_without_timing_byte_identical": true,
+          "field_and_history_byte_identical": true
+        }
+      },
+      "warning": "The 100-step block matches the first 100 magnetic updates of the retained settings. Its endpoint is not cadence-identical beyond that block and must not be reused as production state without deliberation."
+    }
+  }
 }
