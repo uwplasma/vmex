@@ -1,5 +1,626 @@
 # VMEX research plan
 
+This file is the complete handoff for the VMEX research programme: a
+collaborator should be able to resume from it alone. It has two parts.
+
+- **Part I, current state and acceptance gates (2026-09-21).** The
+  authoritative operational plan: status, open pull requests, the maintainer's
+  example scope, CI capacity, the six research lanes (A–F) with their
+  acceptance gates, dependencies, and the continuation logbook. Checkpoint:
+  main `9f16a0fe`, checked 2026-09-21 UTC. VMEX 0.10.0 is released; native
+  interior fields (#403), their surface-call correction (#409), #408, #412,
+  #414 and #420 are newer. Recheck remote heads before use.
+- **Part II, historical plan and logbook (2026-09-13 to 2026-09-20).** The
+  previous plan kept in full: baseline evidence, root causes, the phased
+  programme with its measurements and kill rules, force-balance decisions,
+  former PR dispositions, the runbook, agent briefs and the execution logbook.
+  Superseded sections are marked with what superseded them; disproved claims
+  stay in place, marked disproved.
+
+To resume: read Part I top to bottom, check the open-PR table against GitHub,
+then continue at the first unmet gate of the lane you own. Consult Part II for
+why a gate exists, what was already measured and what must not be repeated.
+Older revisions (for example the 2026-09-06 plan at `f09288b3`) remain
+readable through git history.
+
+# Part I. Current state and acceptance gates (2026-09-21)
+
+## Current status
+
+| Area | Status | Public evidence / source | Next action and completion gate |
+|---|---|---|---|
+| Counters and controlled profiling | Delivered; warm measurement correction merged (#420, `17bd8469`) | #310, #393, #420; `benchmarks/optimization.py`, `benchmarks/profile_workflows.py` | Remeasure warm aggregates with schema 2, then complete a JIT-enabled checkpoint separating cold, cache reload and warm runs. |
+| Newton refinement and block responses | Delivered; anchor contract active | #330, #335, #338; `vmex/core/implicit.py` | Complete lane A below before claiming all returned gradients differentiate a resolved equilibrium. |
+| Stage compilation and Jacobian batching | Delivered | #390 (`39db0388`), #392 (`a18bc448`) | Preserve frozen stage variables, final designs and memory bounds on current integrated sources. |
+| Cold setup and WOUT export | Delivered | #396 (`ddf7d3ee`), #400 | Measure remaining startup costs after these changes, not against the superseded eager setup. |
+| Free-boundary root and Schur reuse | Delivered; scientific workflow needs validation | #383 (`92e6e0bf`), #385, #397 (`3c965913`) | Lane B: repeatability through failures, resolved parameter dependence and feasible full designs. |
+| Native interior field and exterior accuracy | Delivered; workflow qualification needed | #378, #399, #403; #409 (`45f3a7ae`) | The surface-call correction is merged. Validate the combined optional-dependency and example workflows; preserve per-order accuracy and source-data qualifications. |
+| Fixed-boundary single stage | Recorded feasible designs; new driver needs validation | #368, open #371 | Full-budget comparison of the least-squares variant with identical constraints; smoke completion is not design acceptance. |
+| Finite-beta free-boundary example | Completed run; infeasible design | open #377 (`e53e3b57`) | Diagnose abnormal optimizer stop and unmet transform floor; retain the validated output ladder. |
+| QI objective | Bounded candidate rejected; nonsmoothness remains | `vmex/core/optimize.py`, `413d7fd2` | Lane D: retain current objective and the measured limitation; no width sweep or production surrogate promotion. |
+| Strong-force polishing | Active research; general 3-D promotion unmet; unresolved-lift rejection merged (#414, `311e7ddd`); same-mesh comparison merged (#412, `07d43327`) | `docs/explanation/validation.md`, existing E1/E2 records | Lane E: resolve lift/axis accuracy, then certify an affordable 3-D correction and its derivative. |
+| Plan, evidence and repository footprint | Active | This plan; `benchmarks/INDEX.md` | Lane F: compact public reproduction, no dead artifacts, no deletion of sole scientific evidence. |
+| Winding surfaces and broad new physics | Deferred | #301/#303/#304 and independent contributor PRs | Do not restart winding work or alter contributor branches as part of this campaign. |
+
+The latest open-PR list supersedes numbers in historical entries; the table
+under "Open pull requests" below is the state at this checkpoint. Coordinate
+with these contributors instead of duplicating their work. #302/#306 are design references: port only
+needed contracts onto current main, not their old implementation/evidence trees.
+
+## Open pull requests at this checkpoint
+
+State on 2026-09-21 after main `9f16a0fe`. "Head" is the commit reviewed here;
+recheck before acting. No merge is authorized without maintainer approval.
+
+| PR | State | Owns | Where recorded |
+|---|---|---|---|
+| #407 | open, handoff | CI capacity: split c1/c2 parity lanes | "CI capacity" below |
+| #408, #409, #412, #414, #420 | merged 2026-09-21 | Schur warning timings; surface-call spectra; same-mesh polishing comparison; unresolved-lift rejection; complete warm profiling | status table, lanes E and "Dependencies" |
+| #410 | draft, `38f1a3d0` | released integration floors (Boozer 0.4.0, SOLVAX, GKX 1.8.0) | lane D |
+| #411, #371 | draft / open | single-stage example split and least-squares form | lane B, "Example scope" |
+| #413 | this plan and documentation corrections | plan, README, doc qualifications | lane F |
+| #415 | draft | remove duplicated benchmark narratives | logbook |
+| #416 | draft, `85517771` | deterministic free-boundary cold recovery | lane B |
+| #417 → #418 → #421 (+#422 merged into it) → #423 → #424 | stacked drafts, heads `1459f9df`, `9e0baa28`, `e94e46c6`, `02bf33d9`, `7de9f45d` | refined-state anchor contract, direct primal validity, callback device placement, exact supplied-state measurement, certification of freshly materialized equilibria | lane A |
+| #419 | draft, `709a35ea` | guarded radial-factor reuse (not promotable) | lane C |
+| #377 | open, `e53e3b57` | finite-beta free-boundary example record | lane B |
+
+The free-boundary derivative stack (#416–#424) is the critical path for lane A
+and lane B. Its CI is not green at the heads above; each PR body carries its
+own commands and remaining gates.
+
+## Example scope decided by the maintainer
+
+The standard single-stage examples are one matched fixed/free-boundary pair
+using the proven fixed-boundary vacuum case's seed geometry, NFP, physical
+limits, objective definitions and coil parameterization, plus one finite-beta
+pair at 0.5 percent beta with a simple pressure profile and zero plasma
+current. Bootstrap current is deferred to
+`single_stage_fixed_boundary_finite_beta_bootstrap.py` and
+`single_stage_free_boundary_finite_beta_bootstrap.py`, to be added only when
+those workflows are ready. The detailed acceptance rules are in lane B.
+
+## CI capacity (c1/c2 parity lanes)
+
+`Manifest parity lane (c2)` intermittently hits its 25-minute cap and is
+cancelled; `PR gate` then turns red although no test failed. A cancelled c2 on
+a documentation PR is a capacity issue, not a defect: rerun the lane. The
+measured cause and the proposed split (move the five solve-heavy modules to a
+new `pr-parity-c5` lane) are in #407; the split is not implemented. c2 owns
+`plan.md` (`tests/test_test_manifest.py` asserts it), so every plan edit runs
+c2. `Manifest parity lane (c1)` is closer to its cap: successful jobs took
+1245–1470 s against 1500 s, and it needs the same treatment next.
+
+## Execution and acceptance
+
+First qualify the integrated certification, recovery, dependency and profiler
+changes. Then establish consistent equilibrium families and close the controlled
+collaborator comparison on one QI and one QA workflow before expanding the
+matrix. Factor reuse depends on those accuracy gates. Free-boundary checks can
+proceed independently; QI surrogate sweeps and broad polishing rewrites remain
+stopped. Coordinate shared source edits, use isolated worktrees and exact pins,
+and inspect compute occupancy before bounded runs. Do not stop others' jobs.
+
+Every implementation PR must include the problem, exact tested revisions,
+before/after evidence, accuracy and memory limits, runnable public commands,
+and remaining gates. Preserve at least 95% changed executable coverage with
+meaningful physics/numerics tests; coverage alone does not certify a method.
+Exercise JIT explicitly for staged behavior, since ordinary unit tests disable
+it. Review CPU and GPU placement rather than inferring it from available hardware.
+
+Obtain explicit maintainer approval before any merge; earlier blanket merge
+authorization is superseded. ESSOS also requires manual release review. Require
+the intended scientific gates and current checks; never bypass failed numerical
+checks. Defer the next release until the agreed integration and research gates
+pass, with verified capabilities and named limitations.
+
+Commit authorship is the maintainer's, with no agent attribution. Inspect the
+exact outgoing diff and text before publication: no private filesystem paths,
+home usernames, host aliases, checkout/environment names, or private artifact
+and script names. Store machine-specific recovery details privately.
+
+## A. Derivative and equilibrium consistency
+
+Source: `vmex/core/implicit.py`, `vmex/core/optimize.py`; baseline `f719c4ff`.
+Native FSQ, the refined nonlinear residual, the linear-response residual and
+observable accuracy are distinct quantities. Current refinement may return an
+improved state without reaching its target; host admission uses native FSQ,
+and Jacobian reuse keys do not explicitly identify the refined state.
+
+Implement the smallest state/provenance contract that ensures a residual and
+its derivative use the same coefficients, parameters, mask and residual
+operator. Refresh stale evidence, reject invalid responses without caching
+them, and preserve unrelated programming errors. Do not introduce a universal
+1e-10 primal cutoff: near-null modes impose measured attainable floors.
+Expose qualification when the observable's requested accuracy is not justified.
+Draft #417 (`1459f9df`) is rebased onto `45f3a7ae`; its 21-test suite passes
+with 98 percent changed executable coverage (319/325). Remaining uncovered
+lines are direct multi-RHS guards. Contributor-owned #418 is now restacked at
+`9e0baa28` and reports 18 passing focused tests on that exact stack. Review the
+pair together: direct calls must retain finite-state, geometry and FSQ admission
+when no absolute tolerance is supplied. Full optimization and GPU gates remain open.
+Callback placement #421 (`95aed755`) now includes #418 and fresh certificate
+alignment. PR #422 (`e25aa1fd`) merged into the #421 feature branch at `e94e46c6`,
+with only complementary tests; it has not delivered that stack to main.
+Eleven forced-two-CPU cases pass,
+covering caller/runtime mismatch, explicit-device precedence and exact returned
+coefficients. Instrumented measurement hooks do not certify a physical root.
+The earlier GPU-facing check used a CPU host root; accelerator-resident root
+and complete optimization qualification remain open on the combined stack.
+Draft #423 (`c5fa14d8`) fixes a further certificate mismatch: measure the
+supplied state directly and reject inconsistent fixed edges separately from
+geometry, rather than silently assembling a different edge. The regression
+fails on its parent; 55 focused tests and 11 forced-two-CPU cases pass, with
+12/12 changed executable source lines covered. A real small JIT-enabled root
+passes. Follow-up `02bf33d9` admits transform roundoff and aligns all public
+measurement inputs before either check, preserving the supplied coefficients.
+Eight focused cases cover ulp/material changes, geometric scaling, staged
+asymmetric setup and cross-device measurement; all nine added executable source
+statements are covered. The combined penalty/device suite passes all 71 tests
+on JAX 0.10.1/SOLVAX 0.21.0 with two CPU devices. A subsequent
+[explicit CPU/CUDA callback check](https://github.com/uwplasma/vmex/pull/423#issuecomment-5757198007)
+on NS5/MPOL3 Solovev passed on JAX 0.11.1/SOLVAX 0.22.0, with coefficients
+agreeing within 3.2e-15 and repeated certificates identical. Template placement
+was verified; native result placement was not independently recorded before
+host conversion. Asymmetric accelerator and complete optimization gates remain.
+Draft #424 (`7de9f45d`, based on #423) addresses a newly reproduced public-API
+regression: factory preflight caches a native-only solve, so immediate
+`equilibrium_from_x(x0)` skipped certification and then failed. The draft
+refreshes missing/stale evidence through the status callback and reuses valid
+certificates. It also removes cache-hit-count dependence from penalty fault
+injection. The original materialization failure is reproduced independently;
+the candidate's numerical suite and coverage remain unverified. Its PR includes
+commands and evidence for continuation. Work is handed off without further
+runs or subagents at the maintainer's request; no merges are authorized.
+
+Gate on repeated points after accepted/rejected trials, independent problem
+instances, direct Jacobian calls, changed/missing anchors, and host/staged lanes.
+Report raw/projected nonlinear and linear residuals. Verify forward/reverse
+agreement and two-sided Taylor convergence; use independently reconverged
+perturbations wherever their noise floor permits. A same-root linear identity
+is not proof of accurate nonlinear parameter dependence. Public fixtures must
+replace reliance on unavailable collaborator states. Preserve the baseline
+counters in `benchmarks/optimization_counters_20260913.json`.
+
+## B. Free-boundary scientific workflow
+
+Source: `vmex/core/freeboundary_implicit.py`, existing single-stage examples;
+baseline #383/#397. The fixed reference and bounded cold-rebuild mechanism
+already exist. Test them rather than implementing a second policy.
+
+Draft #416 removes the exhausted global rebuild budget and passes controlled
+and physical repeated-point checks. The [independent pressure study](https://github.com/uwplasma/vmex/pull/416#issuecomment-5755622514)
+on #416 plus #417 now resolves one discrepancy: tightening native `ftol` from
+1e-9 to 1e-10 to 1e-12 reduces the adjoint/re-solve gap from 14.24 percent to
+8.54 percent to 0.0167 percent. At the tightest level, independent differences
+at relative steps 1e-3 and 1e-4 agree within 1.1e-5 relative; every repeated
+state coefficient agrees exactly. This qualifies the tested pressure observable
+on one coarse asymmetric deck, not every free-boundary derivative. Preserve
+it as a physical regression. The [actual finite-beta objective study](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756092179)
+now finds no finite-difference agreement window at `ftol=1e-9`, despite exact
+repeated states and unchanged active sets. At the saved endpoint, AD is +1.189
+but centered differences are -2.034 and -9.736 at steps 1e-3 and 1e-4.
+The [exact-reference tighter study](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756328738)
+preserved that full production stage at `ftol=1e-12`. The admitted base's raw
+norm improved from 1.64e-3 to 7.98e-5 and its coefficients repeated exactly.
+However, the minus perturbation at h=1e-3 failed admission after cold recovery
+(FSQ/ftol=711.87), while the plus side passed. The smaller-step sweep stopped;
+this pair cannot assess derivative accuracy. The 8,000-step `[15, 31]` trial
+ladder also missed convergence (FSQ/ftol=1413.12), but its saved state has
+[valid direct geometry](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756768575).
+The initial contrary diagnosis used a fixed-boundary accessor that replaced
+the evolved edge; it did not measure the supplied free-boundary state.
+The [same-state recovery A/B](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756840863)
+rejects restoring the full production continuation payload as the fix: both
+arms failed, and restoring it worsened FSQ by 273x. Completed tight pairs at
+[h=1e-4](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756902103)
+and [h=5e-5](https://github.com/uwplasma/vmex/pull/377#issuecomment-5757012060)
+preserved the same saved base, adjoint and production reference. Both pairs
+passed native/geometry admission without cold recovery; the directional gap
+fell from 2.1746 percent to 0.08114 percent. This improves local agreement but
+does not establish an asymptotic window or quantify nonlinear root error.
+The [new complete base capture](https://github.com/uwplasma/vmex/pull/377#issuecomment-5757443492)
+on composite `c7807705` saved state, parameters, mask and `rcon0/zcon0`
+before differentiation. It reproduced the old base exactly; the adjoint
+repeated within 5.54e-9 with true relative transpose residual 2.87e-11.
+The saved h=5e-5 state chord nevertheless has a 2.31 percent tangent defect
+relative to the field term, using the base frozen complement and constraints.
+Its nonzero frozen m=1 component also enters the full objective chord but not
+the projected residual chord. Do not attribute that discrepancy solely to
+finite-step curvature or root noise before separating the complement term.
+Next replay the existing endpoints against the same base operator and resolve
+the adjoint-weighted tangent/complement identity; no new endpoint solves are
+needed for that discrimination. The public record includes controls and
+checksums but lacks downloadable tapes and a standalone generator: publish
+those or qualify newly generated public inputs before claiming reproducibility.
+Do not substitute zero constraints or repeat the completed base capture.
+Qualification on the proposed minimum stack remains separate from this
+SOLVAX 0.20.0 study, as do other directions and final design feasibility.
+Native stopping, measured coupled residuals and observable agreement remain
+separate gates; #385's same-root identity alone was insufficient.
+
+The standard single-stage examples now target a simpler matched comparison:
+use the proven fixed-boundary vacuum case's seed geometry, NFP, physical
+limits, objective definitions and coil parameterization for the fixed/free
+pair. First recheck its recorded feasible result on the integrated source;
+then select the shortest measured budget that still passes independent final
+checks. An iteration cap alone is not a runtime bound: count evaluations,
+line-search trials, equilibrium solves, compilation and output costs.
+Free boundary evolves the plasma surface from the coil field, so do not copy
+independent boundary DOFs or assume the circular coil seed carries the fixed
+seed's transform. Reuse the fixed-boundary coil-fit initialization and verify
+its free-boundary root before optimization. Report physical limits on the same
+fine grids; include coil-surface clearance in both formulations.
+
+For the standard finite-beta pair, set the target to 0.5 percent (`0.005`),
+use a simple pressure shape such as `p(s)=p0*(1-s)`, and prescribe zero plasma
+current (`ncurr=1`, zero current profile and `curtor=0`). Calibrate seed pressure
+and report final beta; keep the same beta convention and acceptance in both
+scripts. Remove bootstrap mismatch, kinetic-profile preparation, bootstrap
+Picard iterations and plasma-current DOFs from these introductory examples.
+Coil currents are separate external-field parameters. Self-consistent bootstrap
+and plasma-current optimization are deferred to later
+`single_stage_fixed_boundary_finite_beta_bootstrap.py` and
+`single_stage_free_boundary_finite_beta_bootstrap.py`; do not add duplicate
+scripts before those workflows are ready. Keep the existing 2.5-percent case
+as derivative evidence, not the default example or a task to rerun unchanged.
+Simpler optimization does not qualify a gradient: retain the same-root and
+independent-perturbation checks before claiming convergence or speedup.
+
+With #409 merged, integrate example reporting fixes and qualify these simpler
+vacuum and finite-beta workflows on the memory-fixed source. Measure retained
+arrays, RSS/device memory slope, fallback counts, accepted progress and final
+fine-grid verification. The updated #377 vacuum record at `cf9811bf` reports
+1164.1 s and 4.09 GiB,
+with its stated targets met, replacing 3304.1 s and 18.89 GiB. The recovered
+finite-beta run at the same source completed in 1776.2 s and 5.26 GiB: its
+output solve converged, but L-BFGS-B stopped abnormally and minimum absolute
+iota was 0.258577 against 0.42. The committed record is updated in #377
+(`e53e3b57`); these shared-CPU timings predate #416 and are not a controlled
+speedup comparison. The [optimized-coil verification](https://github.com/uwplasma/vmex/pull/377#issuecomment-5755533991)
+now supports `[15, 31]`: it converged where single-grid budgets through 20,000
+iterations failed. The extra 9-surface rung also converged but is not required
+by this case. Reproduce the optimizer failure after recovery fixes, not an
+already completed measurement.
+Determine whether root accuracy, the optimizer or the seed limits progress
+before adjusting weights. Require all stated constraints, not merely a lower
+weighted objective. Preserve the documented experimental free-boundary AD scope
+until CPU/GPU and independent derivative gates actually pass.
+
+## C. Reuse numerical work without changing the certified operator
+
+SOLVAX #117 merged at `1d02a140`, providing reusable scalar tridiagonal
+factorization and checked factored solves; it is not in the current 0.24.0
+release. Keep released-package qualification separate from VMEX adoption.
+The VMEX scalar-cache experiment is rejected: complete solves did not improve
+and the 151-surface carried cache grew from 277,568 to 491,264 bytes, despite
+bit-identical trajectories. Do not integrate it on kernel timings alone. VMEX
+retains ownership of physical bands and invalidation on updates and recovery.
+
+Draft #419 now includes the [bounded QI optimizer result](https://github.com/uwplasma/vmex/pull/419#issuecomment-5756488807):
+312/312 reused response columns passed exact-current checks at 1e-11 tolerance,
+but both arms exhausted their budgets. Independent reconvergence changed the
+frozen m=1 Z-sine complement: each state's projected residual was about 1e-13,
+while cross-family residuals were 0.066 and 0.092. Fine angular sampling also
+raised mirror ratios to 0.21056 and 0.21114, above the hard 0.21 limit.
+Do not promote reuse or redefine these failed gates around a saved state.
+First establish a consistent residual family and the physical/parameter
+dependence of the released components; distinguish coordinate gauge and
+sampling sensitivity from physical equilibrium changes. Then repeat the
+independent-root and fine-grid checks before timing a complete optimizer.
+An explicit precedent is [VMEC++ #849](https://github.com/proximafusion/vmecpp/pull/849)
+(`cec07e9e`, open): it pins the m=1 gauge to a boundary-derived radial profile
+and differentiates that profile. Test this as an opt-in VMEX experiment on the
+two saved states, with identical assembly in the root, objective and derivative.
+The native high-force phase can evolve these components, so the pinned profile
+defines a new discrete family rather than reproducing native cold-start history.
+Require same-family reconvergence, parameter-direction checks including the
+profile derivative, and independent physical/resolution checks before adoption;
+retain existing restart semantics until explicitly qualified. The
+[bounded post-solve projection](https://github.com/uwplasma/vmex/pull/419#issuecomment-5756859333)
+failed both root gates. An A-only trace found an accurate first raw linear
+solve (relative defect 1.17e-12), followed by a full step that increased the
+projected nonlinear residual from 0.0603 to 2.29e9. The
+[bounded globalized follow-up](https://github.com/uwplasma/vmex/pull/419#issuecomment-5757238643)
+accepted eight finite, geometry-valid steps with independently accurate linear
+directions. Raw residual fell from 8626 to 6837, but projected residual remained
+0.0357 and derivative admission failed. Stop extending post-solve recovery;
+inspect pinning from initialization and through multigrid transfers next.
+This does not qualify the gauge policy or reject initialization-time pinning.
+Reuse accepted-point factors for nearby refinement only with measured progress
+and bounded refactor fallback.
+Stale factors used as an exact solver already failed: do not revive that idea.
+Report factorization counts, correction iterations, refactor rate, final state
+and observable differences, compile cost and memory.
+
+Use numerical tolerances for same-point derivatives and final physical quality,
+not bitwise optimizer trajectory identity. Tiny linear-algebra differences can
+alter trust-region steps; investigate conditioning and feasibility before
+attributing different trajectories to inaccurate derivatives or claiming speedup.
+
+Revisit broad inter-rung cache clearing after checking #397's memory behavior
+at high resolution. Preserve the memory bound that motivated cache release.
+Earlier descent-to-Newton handover follows lane A; if a finish fails, recover
+with the original solve policy. No accepted trial may lose its accuracy contract.
+
+## D. QI smoothness and the Boozer dependency
+
+Inspect existing `d1/smooth-qi-well` work before implementing anything new.
+Map two-sided Taylor behavior and well-topology changes on public frozen
+spectra and real solved states. Separate interpolation/well selection error
+from equilibrium noise. Compare one justified smooth alternative with the
+current objective; do not start a second omnigenity formulation concurrently.
+
+Use the same seed, constraints and budgets. Check final QI on an independent
+fine Boozer grid, accepted progress, failed trials, full runtime and memory;
+include a transport-related diagnostic when available. An improved surrogate
+must preserve the physical design quality. Do not freeze well minima in
+production to make a derivative test pass.
+
+The [paired design record](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755523238)
+shows candidate `413d7fd2` failed the same-budget solved-design gate
+against `f719c4ff`: fine-grid QI increased from 0.002767 to 0.004558 (65 percent),
+although both designs met the stated constraints. It remains experimental.
+The [saved-boundary cross-evaluation](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755580667)
+now separates score changes from design quality. At identical frozen spectra,
+the definitions differ by at most 0.51 percent; the candidate boundary remains
+61 percent worse on the fine grid under the current definition. All four
+residual families worsen, especially branch width. This supports an inferior
+optimization trajectory, not a mere change of metric. Keep the candidate out
+of production and stop this surrogate experiment without a width sweep.
+The hard-well differentiability limitation remains documented; a new attempt
+requires evidence of a better trajectory, not another local Taylor test alone. Both arms used
+JAX 0.11.1, Boozer 0.4.0 and SOLVAX 0.24.0. Different shared load and compilation
+state prevent a runtime claim from the 295 s versus 205 s measurements.
+
+The PyPI booz_xform_jax 0.4.0 wheel passed four symmetric/asymmetric dense-
+reference projection tests, including magnetic-only values and bmnc JVP/VJP
+([evidence](https://github.com/uwplasma/vmex/pull/410#issuecomment-5755351706)).
+At the proposed Boozer 0.4.0/SOLVAX 0.21.0 floors with JAX 0.9.2,
+[VMEX integration](https://github.com/uwplasma/vmex/pull/410#issuecomment-5755560071)
+passed all 21 Boozer-table, nine plotting and eight omnigenity tests, with JIT
+and full-marked tests enabled. The clean all-extras minimum-version stack uses
+JAX 0.10.1. Its numerical checks exposed missing `tprim`/`fprim` drive fields
+in GKX 1.7.1; the 1.8.0 floor
+correction is now in rebased #410 (`38f1a3d0`). Eleven packaging, four GKX,
+one NEO and three NESTOR/adjoint checks pass. The new minimum-version nightly
+selection passes all seven tests together; explicit optional-package imports
+prevent missing integrations from silently skipping the gate. Static preflight, warning-free
+Sphinx build and all six source/HTML navigation checks pass. CI and review remain open.
+
+## E. Strong-force polishing
+
+Keep the current axis-regular `rho^|m| q(s)` representation with splines in
+`s`; the recorded knot/coordinate changes do not justify a replacement.
+E1's complete virtual-work identity passes. E2 succeeds on the shaped tokamak
+but misses the 3-D force-reduction gate. Existing resolution scans implicate
+axis source data and the lift; increasing the spline basis can worsen the fit.
+
+First audit `lift_high_order_state` for unsupported spans, rank and axis
+regularity. Refuse an underdetermined lift rather than filling it silently.
+Use manufactured/analytic fields and independent off-grid quadrature to
+separate representation error from nonlinear-solver error. Then resume the
+bounded E3 correction and radial/angular resolution ladder, using the existing
+`benchmarks/e1_functional_consistency.py`, `benchmarks/e2_dense_reference.py`,
+`benchmarks/residual_vs_resolution.py` and `benchmarks/knot_grading.py`.
+
+Promotion requires a non-axisymmetric finite-beta case with positive geometry,
+preserved boundary/flux/profile constraints, independently reduced strong force,
+nonlinear stationarity and derivative verification. Report dimensional force,
+volume-normalized force and near-axis/bulk/edge contributions. The bounded
+legacy `eps_F` is insufficient. Separate native-state comparison from WOUT
+export/refitting error. Stop a failed bounded attempt and record its cause;
+do not repeat multi-hour W7-X attempts without new evidence of progress.
+
+The closed-hybrid force plateau in issue #211 remains an explicit admission
+question, not permission to relax a threshold. Broader mirror/anisotropy and
+coordinate rewrites remain deferred. The [resolved analytic recovery study](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755801536)
+reduces independent force strongly but still misses stationarity after 40 steps.
+It consumes 7,927 of 8,000 possible PCG iterations. A
+[fixed-endpoint dense comparison](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755874974)
+now identifies inner PCG starvation in this case: the dense step reaches
+independent `eps_F=6.62e-8`, while PCG has linear residual 0.230 and barely
+improves force. The [bounded follow-up](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756143841)
+rejects strict inner convergence as a recovery policy (12 rejected trials)
+and rank-64 Nyström as the fix (linear tolerance missed; off-grid J worsened).
+[SOLVAX #119](https://github.com/uwplasma/SOLVAX/pull/119) exposes inner diagnostics
+while preserving useful inexact steps; 15 focused tests pass. These are PCG's
+recursive residuals, not independent certificates. The
+[saved-matrix LSQR/LSMR comparison](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756201847)
+produced no useful physical step at 200 iterations. Even
+[2,000 LSMR iterations](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756210776)
+missed the 1e-3 true-normal-residual gate (2.416e-3), with direction error
+0.987 relative to the dense reference. Stop this solver sweep.
+The [bounded production-chart QA diagnostic](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756509703)
+now supplies the exact experimental patch and reproduction controls. Its
+18,018-by-1,336 augmented solve passed GELSD/GELSY checks below 1e-14;
+stored-matrix PCG also converged in 324/600 iterations. One admissible dense
+step reduced independent dimensional force L2 by 25 percent, not the required
+10x, and did not establish nonlinear stationarity. Total cost was 604 seconds
+and 11.13 GiB peak RSS; setup and Jacobian assembly dominated factorization.
+Do not integrate a dense production path on this evidence or extend the sweep.
+Stored-matrix PCG is not a matrix-free parity check; one step does not identify
+a representation limit. A further correction experiment requires a specific
+failing production endpoint and a measured cause, with independent physics
+gates retained. General 3-D polishing remains unqualified.
+
+## F. Public evidence, documentation and repository maintenance
+
+Use `benchmarks/INDEX.md` to preserve the connection between claims, inputs,
+generators and records. For September 19 conclusions held outside the repo,
+recover and sanitize the minimal executable reproduction and compact numerical
+record in existing benchmark infrastructure. Inspect every field and string;
+never copy private reports wholesale. If evidence is unavailable, mark the
+claim unverified and schedule only the experiment needed to decide it.
+
+Retain one canonical record per scientific claim. Delete redundant narrative
+summaries and obsolete uncited records only after checking code, tests, docs,
+figure provenance and generators. Regenerate the index. Large raw profiles and
+arrays belong in a versioned research artifact with public provenance, not the
+source tree. Preserve historical results through immutable commits. Do not
+rewrite repository history to save a small archive.
+
+Delete merged branches only when their remote head still equals the recorded
+merged PR head, no open PR depends on them, and no active worktree uses them.
+Use expected-head protection against concurrent pushes. Preserve unsubmitted
+contributor branches; an old timestamp does not prove abandonment.
+
+Keep tutorials/how-to/reference/explanation organization. Shorten the README
+without losing runnable simple and advanced entry points, accuracy scopes and
+high-impact results. Use the current public helpers. Synchronize release and
+capability statements, and close documented issues only after checking the fix.
+#413 removes the unqualified exterior field-line showcase from the README
+while retaining its artifact and figure record (now cited by no page). The field explanation and
+example docstring match the implementation's near-surface-continuation warning;
+source sampling is described as geometry-dependent. No numerical behavior
+changed. Independent qualification of the supplied-surface-field variant is
+still required before restoring a physical-topology claim.
+
+## Dependencies and publication
+
+#420 (merged `17bd8469`) corrects aggregate warm profiling: schema 1 repeated
+only the first stage, omitting transforms or derivatives from multi-stage
+workflows. Schema 2 repeats every stage in order. Nine focused JIT-enabled
+tests pass, covering all 21 changed executable lines. Remeasure affected warm
+aggregates before citing them; separately recorded first-call stages remain valid.
+
+Verified release inventory at this checkpoint: VMEX 0.10.0, SOLVAX 0.24.0,
+booz_xform_jax 0.4.0, virtual-casing-jax 0.0.7, ESSOS 0.17. Review current
+source and installed-package interoperability before proposing upgrades.
+Keep generic linear algebra in SOLVAX, Boozer transforms in booz_xform_jax,
+quadrature/error estimates in virtual-casing-jax, and coil physics in ESSOS.
+Open focused upstream PRs for measured defects; ESSOS merges/releases require
+manual review. No release solely to refresh a version number.
+
+First close the collaborator case and representative QA/QI comparisons, then
+expand the publication matrix to cold/cache-reload/warm CLI and Python runs,
+QA/QH/QI/QP across declared NFP/resolution choices, fixed/free-boundary single
+stage, CPU/GPU, and final physical accuracy. Use quiet paired runs and actual
+device placement; never compare profiled and unprofiled times as a speedup.
+The collaborator's 0.3/modified-0.7 report remains unresolved by a controlled
+complete comparison. Pin available historical sources; label unavailable modifications
+unreproducible rather than inventing equivalence.
+
+Paper 1 can cover validated equilibrium/AD/optimization performance, with
+public inputs, commands, dependencies, hardware and compact outputs. General
+3-D strong-force improvement is a separate claim requiring lane E. Complete a
+JIT-enabled CPU/GPU and optional-dependency checkpoint before either promotion;
+per-PR green tests and line coverage alone are insufficient. Keep real public-API
+smokes in required CI: #409 escaped fast tests that mocked the broken call.
+Investigate the cross-module test-order failure recorded in #390.
+
+Extend #390 stage reuse only to compatible unconverted ladders, checking frozen
+variables and final designs. Profile plotting separately from equilibrium work;
+measure Boozer/confinement diagnostics and cache-release costs before changing
+policy. The GPU guide now labels automatic placement as a historical workload
+heuristic; device defaults still need current workload evidence. Issue #157 is
+closed after verifying the published correction and executing its resolution
+example on the bundled circular tokamak (work 1632, recommendation CPU).
+
+## Continuation logbook
+
+Entries below record observations at the time, not pending instructions.
+The current status table and lanes above supersede their earlier checkpoints.
+
+### 2026-09-21: restart from the current repository
+
+Reviewed main `f719c4ff`, current open PRs and sibling releases. Replaced the
+obsolete operational queue while retaining historical reasoning by immutable
+link. (Superseded the same day by the maintainer: the historical plan is kept
+in this file as Part II, see the rework entry below.) Identified #409 as the immediate public-call integration correction;
+do not duplicate it. Started isolated derivative-contract, factor-reuse and
+QI investigations. Free-boundary qualification and polishing remain required,
+not silently deferred by the performance work. All six lane gates above remain
+open unless a later entry links the final implementation and evidence.
+
+Removed 58 unchanged, merged branches after checking
+open PR dependencies and worktree use, with expected-head leases. Tags and
+commit history were retained. Another 37 candidates were already absent on recheck; no removal is attributed
+to this work. Unsubmitted and active contributor branches remain protected.
+
+Open #410 now owns dependency-floor updates, #411 the revised single-stage
+example split, and #412 the same-mesh polishing comparison. Do not duplicate
+them. At this checkpoint the Boozer package index still listed 0.3.0;
+the later released-wheel qualification is recorded in lane D. Draft #414 (`edf779ca`) rejects unresolved radial lifts using the rank of the
+existing least-squares factorization. Four analytic tests and two existing
+lift/certificate integration tests pass. A Linux CPU run at the exact PR head
+then passed the four analytic tests under coverage.py: all four changed
+executable statements covered, none missing. This is changed-statement
+coverage, not full-module or branch coverage; repository CI remains pending.
+This does not close the 3-D polishing gate. #414 later merged as `311e7ddd`.
+
+### 2026-09-21: scientific contract review
+
+A focused controlled recovery test reproduced a remaining free-boundary
+history dependence: unrelated failed rebuilds exhaust the configuration-wide
+budget and change the answer at a previously successful point. The candidate
+allows one cold retry per stalled call; physical validation and final
+status-aware checks remain required before promotion. Derivative/state-identity
+work was then unpublished; its subsequent implementation and coverage are
+recorded under #417/#418 in lane A.
+
+[SOLVAX #117](https://github.com/uwplasma/solvax/pull/117) at `a217447` retains
+original coefficient bands for checked factored solves; reconstructing them
+from factors would lose information through cancellation. The focused suite
+reports 127 passing tests. VMEX integration and end-to-end gains remain open.
+
+The bounded QI experiment found a well-selection transition with a one-sided
+Taylor remainder floor. One subcell alternative removed that local floor,
+but changed the fixture objective by 0.535 percent. No production change or
+optimized-design/transport qualification follows from that experiment alone.
+The [public frozen-spectrum probe and measured Taylor table](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755290878)
+reproduce the baseline switch without a new repository file. Historical
+environment details were not captured; recheck the transition on the installed
+stack. The September 19 factor-reuse reproductions required by lane F remain
+outstanding.
+
+Draft #415 removes two duplicated benchmark narratives, retaining the JSON
+measurements and validation documentation. Citation and performance-documentation
+guards pass (38 tests); no unique measurement or numerical code is removed.
+
+### 2026-09-21: recovery candidate and released-wheel validation
+
+Draft #416 (`85517771`) removes history-dependent rebuild suppression, with
+one cold retry per stalled call. The eight-failure controlled regression and
+a real asymmetric repeated-point test after a rejected doubled-current trial
+pass. The agent reports 20 non-full module tests, 100 percent changed-line
+coverage and passing preflight; required repository CI and parent final review
+remain promotion gates. This restores repeatability, not free-boundary
+pressure-gradient accuracy or finite-beta design feasibility.
+
+Boozer 0.4.0 is now published on PyPI. The isolated released-wheel checks above
+passed on CPU with Python 3.11.14 and JAX 0.9.2/x64; both fixtures match the
+release tag. SOLVAX #117 now reports 128 passing focused tests at `9c6f1a17`.
+The revised VMEX scalar-factor cache still failed: two 151-surface pairs
+regressed by 0.6–1.2 percent and increased carried cache storage by 77 percent.
+The implementation was withdrawn; exact-state parity does not justify a slower,
+larger cache. Shared-load timings are diagnostic, not portable speed estimates.
+
+### 2026-09-21: plan rework keeps the full history in this file
+
+The maintainer rejected replacing the historical plan with links to older
+revisions: the code stays slim, but the plan must carry enough context for a
+complete handoff. The historical plan therefore returns in full as Part II,
+with superseded sections marked; the current material above is Part I. The
+only text removed from the historical plan is a host alias and private lock
+paths (§7 and §9), which must not be published. #413's documentation changes
+were reduced to factual corrections checked against the code: the adjoint
+equations and the default block-transpose adjoint with its Krylov fallback,
+preconditioner recomputation, the column certificate on the raw operator,
+the unqualified near-surface continuation, geometry-dependent default source
+sampling, the automatic GPU placement as a workload heuristic, and the scope of
+the implicit and free-boundary derivative claims.
+
+# Part II. Historical plan and logbook (2026-09-13 to 2026-09-20)
+
+> **Status of Part II.** This is the plan as it stood on main at `f719c4ff`,
+> kept in full so that its reasoning, measurements, disproved hypotheses and
+> decisions remain readable here. Where Part I disagrees, Part I is current.
+> Superseded sections carry a note naming what superseded them; everything
+> else (evidence, root causes, kill rules, force-balance decisions, logbook)
+> remains the record. Text is unchanged except for those notes and the removal
+> of private host aliases and lock paths from §7 and §9.
+
 Authoritative plan, revised **2026-09-13** by an independent review of the
 2026-09-06 plan (merged as [#283](https://github.com/uwplasma/vmex/pull/283),
 readable with its full logbook at
@@ -28,7 +649,13 @@ deleted.
 **Release hold.** No tag, version bump or publication date is scheduled. One
 release follows the gates of §4 and §5.
 
+> **Superseded 2026-09-21.** VMEX 0.9.0, 0.9.1 and 0.10.0 have since been
+> released. The next release waits for the integration and research gates in
+> Part I ("Execution and acceptance").
+
 ## 0. How to use this plan
+
+> **Superseded 2026-09-21.** Resume from the Part I preamble instead. §3, the kill rules of §4, §5 and §9 remain evidence; §6 and §8 are historical.
 
 An agent resuming this work reads §1, §3, §4 (phases and PR list), §6
 (dispositions and release candidate), §7 (environment), §8 (the coordination rules and the brief it
@@ -42,6 +669,8 @@ inventories, and does not launch a multi-hour run before the counters of
 Phase A exist.
 
 ## 1. Decision: fix what users measure
+
+> **Superseded 2026-09-21.** The four complaints remain the motivation. The A–H priority table is replaced by Part I lanes A–F: A (counters) and C (derivative sizing, #390/#392) are delivered; B maps to Part I lanes A and C; D to lane D; E to the native interior field and exterior-accuracy rows of the status table; F to lane B; G to "Dependencies and publication"; H to lane F and "Example scope".
 
 Users report four things: quasi-isodynamic optimization is slow; single-stage
 and free-boundary single-stage optimization are slow and end without a valid
@@ -658,6 +1287,8 @@ them.
 
 ## 4. Programme
 
+> **Superseded 2026-09-21.** The phase tables are replaced by Part I lanes A–F as the work queue. Their measurements, gates and kill rules remain evidence; "Kill rules and things not to repeat" stays in force unless Part I records new evidence against a rule.
+
 Principles: one nonlinear solve per trial; the objective is a function of `x`;
 a derivative is sized to its number of outputs; every accuracy claim has a
 known-answer oracle; every performance claim is a before/after row in
@@ -941,6 +1572,8 @@ These verdicts stand and are not reopened by this revision.
 
 ## 6. Open pull requests and the release candidate
 
+> **Superseded 2026-09-21.** The PR dispositions below are historical. Current PR state is the Part I table "Open pull requests at this checkpoint".
+
 State on 2026-09-13, evening. "Merge" always means after explicit maintainer
 approval with every real CI lane green; the unsigned-commit PR gate is the only
 check that may be red.
@@ -1007,18 +1640,18 @@ the HINT-comparison stack stay parked and are out of this review's scope.
 ## 7. Environment and runbook
 
 - **Machines.** Apple-silicon laptops and a 36-core workstation with two RTX
-  A4000 GPUs (`ssh office`). Numerical comparisons use isolated environments:
+  A4000 GPUs (the office workstation). Numerical comparisons use isolated environments:
   Python 3.12 with JAX 0.11.1 and VMEC++ 0.7.4 for the head, Python 3.11 with
   JAX 0.9.2 for the floor. VMEC++ wheels older than 0.7 are not references.
-- **Heavy-job locks and load.** Laptop `~/local/.vmex-heavy.lock`, office
-  `~/vmex-agents/.heavy.lock`; take a lock with `mkdir` and set the release trap
+- **Heavy-job locks and load.** One heavy-job lock directory per machine
+  (locations kept in private notes); take a lock with `mkdir` and set the release trap
   only after acquiring it. Other sessions share both machines, so a timing or
   peak-memory row counts only when the 1-minute load at its start and end is at
   most 20 on the laptop (14 cores) or 24 on the office workstation (36 cores);
   counts, identities and targets count at any load.
-  On the office workstation only A/B timing rows take `.heavy.lock`.
+  On the office workstation only A/B timing rows take the heavy-job lock.
   Whole-example runs longer than twenty minutes take one of two slots,
-  `~/vmex-agents/.long.lock` or `.long2.lock`, with four threads, and report
+  two long-job lock directories, with four threads, and report
   wall time to the minute. Untimed work (seed evaluations, counts,
   identities, focused tests) takes no lock while the load is at most 24 and
   at least 16 GB is free.
@@ -1044,6 +1677,8 @@ python tools/preflight.py --static
   retargets within the same minute start two CI runs; wait on the survivor.
 
 ## 8. Agent briefs
+
+> **Superseded 2026-09-21.** The briefs below are completed or replaced by Part I lanes; they remain as the record of what each PR was asked to do and why. The coordination rules are replaced by Part I "Execution and acceptance": in particular, earlier blanket merge authorization is superseded, and every merge needs explicit maintainer approval.
 
 Each brief is self-contained: an agent reads §0–§1, its phase table in §4,
 the coordination rules below and its own brief, and starts. Line numbers are
@@ -1648,6 +2283,8 @@ Branch `ferr/force-balance-diagnostic`.
 
 ## 9. Execution logbook
 
+> **Superseded 2026-09-21.** Historical. New entries go in the Part I continuation logbook.
+
 Format: date, PR (base and head), gate, command and environment, result with
 units, limitation, next action. The 2026-09-05 to 2026-09-08 entries (Phase 1
 and Phase 2 of the previous plan: #284–#298) remain at `f09288b3`.
@@ -1865,7 +2502,7 @@ lock and CI capacity remain the pacing constraints.
 
 **2026-09-14, paused again.** Stopped on maintainer request; no agent, watch
 or heavy job runs on the laptop or the office workstation, and both heavy-job
-locks are released. The office worktrees under `~/vmex-agents` remain for
+locks are released. The office worktrees remain for
 reuse. State to resume from:
 
 - Awaiting CI, then admin-merge when every real lane is green: #300 (its
@@ -2000,7 +2637,7 @@ A session limit stopped three agents mid-task; their office jobs had finished.
   is about 1,700 GCROT iterations and 96 % of each value-only trial on both
   libraries. B1c is therefore the next lever for single stage and QI (88 % of
   #333's least-squares phase), and least squares gets one more proxy after it.
-- **Office runbook:** only A/B timing rows take `.heavy.lock`; whole-example runs
+- **Office runbook:** only A/B timing rows take the heavy-job lock; whole-example runs
   take one of two long slots; untimed work runs lock-free at load ≤ 24.
 - **Force-balance panel:** users report errors near 100 %; brief F-err (§8)
   investigates the saturating `equif` normalization against DESC and VMEC2000.
