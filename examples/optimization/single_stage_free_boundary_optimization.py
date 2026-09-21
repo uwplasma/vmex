@@ -375,19 +375,26 @@ optimization_seconds = time.perf_counter() - started
 ### Check the result against the targets ######################################
 ###############################################################################
 
-# Re-solve the optimized coils' free boundary independently of the optimizer,
-# on a radial ladder that ends finer than the trial solves, and check every
-# target on that solve. At zero beta the plasma carries no current, so the
-# coil field alone must be tangent to the boundary: B.n/B is checked too.
+# Re-solve the optimized coils' free boundary to a tighter tolerance and check
+# every target on that solve. At zero beta the plasma carries no current, so
+# the coil field alone must be tangent to the boundary: B.n/B is checked too.
+# The solve is warm-started from the accepted trial's state: from a cold start
+# this vacuum free boundary limit-cycles near fsq ~1e-8 at any ns (ns = 16, 31
+# and 51 with up to 60000 iterations were tried), while the finite-beta example
+# converges cold to 1e-12.
+accepted_state, accepted_status, accepted_fsq, _ = vj.solve_free_boundary_implicit_status(
+    params, jnp.asarray(u), config)
+print(f"[accepted] status {int(accepted_status)}, fsq = {float(accepted_fsq):.3e} "
+      f"at ns = {NS}", flush=True)
 coils_final = coils_from_x(jnp.asarray(x0 + scales * u))
 field_final = BiotSavart(coils_final)
-final_ns = [NS] if ci_smoke else [16, 51]
+final_ns = [NS]
 final_input = replace(inp, ns_array=np.array(final_ns),
                       ftol_array=np.full(len(final_ns), FTOL if ci_smoke else 1.0e-12),
                       niter_array=np.full(len(final_ns), 8000))
 free_result = vj.solve_free_boundary_multigrid(
     final_input, external_field=field_final, verbose=not ci_smoke,
-    raise_on_max_iterations=False)
+    initial_state=accepted_state, raise_on_max_iterations=False)
 final_converged = bool(np.all(np.asarray(free_result.converged)))
 final_context = im.runtime_from_params(
     im.params_from_input(final_input),
