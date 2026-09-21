@@ -7,7 +7,9 @@ revision.  It measures two deliberately separate contexts:
 
 * ``standalone`` evaluates the entropy/PCA scalar, its gradient, and an HVP on
   fixed winding and plasma surfaces.  The unsplit full-matrix SVD is the fidelity
-  reference.
+  reference.  ``standalone_pairwise`` repeats the same protocol for the sum of
+  plasma clearance and winding self-approach, retaining the unreduced full pair
+  set as its fidelity reference.
 * ``optimization_context`` differentiates outer entropy, inverse-distance, and
   mixed observables through the inner L-BFGS-B winding-surface solve.  A patched
   copy of the original full-SVD implementation with ``maxiter=100`` is the
@@ -305,17 +307,24 @@ def _variant_objectives(namespace: dict, winding, plasma, weights, winding_rc):
     return _full_objectives(namespace, winding, plasma, weights, winding_rc)
 
 
-def _standalone_function(namespace: dict, winding, plasma):
+def _standalone_function(
+    namespace: dict, winding, plasma, objective: str = "spectral_entropy"
+):
     winding_rc = namespace["surface_coefficients_from_dofs"](winding, 2, 2)[0]
     weights = namespace["mode_weights_from_coefficients"](winding_rc)
 
-    def pca(value):
+    def scalar(value):
         winding_value, plasma_value = jnp.split(value, 2)
-        return _variant_objectives(
+        objectives = _variant_objectives(
             namespace, winding_value, plasma_value, weights, winding_rc
-        )[0]
+        )
+        if objective == "spectral_entropy":
+            return objectives[0]
+        if objective == "pairwise_geometry":
+            return objectives[3] + objectives[6]
+        raise ValueError(f"unknown standalone objective {objective!r}")
 
-    return pca
+    return scalar
 
 
 def _standalone_row(
@@ -324,17 +333,18 @@ def _standalone_row(
     case: GeometryCase,
     resolution: int,
     repeats: int,
+    objective_name: str = "spectral_entropy",
 ) -> tuple[dict[str, object], dict[str, np.ndarray]]:
     winding, plasma = _dofs(case)
     value = jnp.concatenate((winding, plasma))
     rng = np.random.default_rng(case.seed + 10_000 + resolution)
     direction = jnp.asarray(rng.normal(size=value.shape))
     direction /= jnp.linalg.norm(direction)
-    pca = _standalone_function(namespace, winding, plasma)
-    gradient = jax.grad(pca)
+    scalar = _standalone_function(namespace, winding, plasma, objective_name)
+    gradient = jax.grad(scalar)
 
-    value_timing, objective = _measure(
-        lambda: (jax.jit(pca), (value,)), repeats
+    value_timing, objective_value = _measure(
+        lambda: (jax.jit(scalar), (value,)), repeats
     )
     gradient_timing, derivative = _measure(
         lambda: (jax.jit(gradient), (value,)), repeats
@@ -347,7 +357,7 @@ def _standalone_row(
         repeats,
     )
     outputs = {
-        "value": np.asarray(objective),
+        "value": np.asarray(objective_value),
         "gradient": np.asarray(derivative),
         "hvp": np.asarray(hvp),
     }
@@ -356,13 +366,14 @@ def _standalone_row(
         "resolution": resolution,
         "matrix_order": resolution * resolution,
         "variant": label,
+        "objective": objective_name,
         "timing": {
             "value": value_timing,
             "gradient": gradient_timing,
             "hvp": hvp_timing,
         },
         "outputs": {
-            "value": float(objective),
+            "value": float(objective_value),
             "gradient_l2": float(jnp.linalg.norm(derivative)),
             "hvp_l2": float(jnp.linalg.norm(hvp)),
         },
@@ -599,6 +610,33 @@ def run(args: argparse.Namespace) -> dict:
                 for label in variants
             )
 
+    standalone_pairwise = []
+    for case_name in args.cases:
+        case = CASES[case_name]
+        for resolution in args.resolutions:
+            rows = {}
+            outputs = {}
+            for label, source in sources.items():
+                print(
+                    f"standalone-pairwise case={case.name} "
+                    f"resolution={resolution} variant={label}",
+                    flush=True,
+                )
+                namespace = _namespace(source, resolution=resolution)
+                rows[label], outputs[label] = _standalone_row(
+                    label,
+                    namespace,
+                    case,
+                    resolution,
+                    args.repeats,
+                    objective_name="pairwise_geometry",
+                )
+            reference = outputs[args.standalone_reference]
+            standalone_pairwise.extend(
+                _with_fidelity(rows[label], outputs[label], reference)
+                for label in variants
+            )
+
     context = []
     for case_name in args.context_cases:
         case = CASES[case_name]
@@ -674,6 +712,9 @@ def run(args: argparse.Namespace) -> dict:
             "timing_protocol": "isolated compile; one untimed warmup; all warm samples retained",
             "fidelity_protocol": {
                 "standalone": "original unsplit full SVD at identical inputs",
+                "standalone_pairwise": (
+                    "original full pair sets at identical inputs"
+                ),
                 "optimization_context": (
                     "original full SVD patched only from maxiter=4 to maxiter=100; "
                     "25x25 optimality Jacobian solved directly in float64"
@@ -681,6 +722,7 @@ def run(args: argparse.Namespace) -> dict:
             },
         },
         "standalone": standalone,
+        "standalone_pairwise": standalone_pairwise,
         "optimization_context": context,
     }
 
@@ -838,6 +880,87 @@ def plot_fidelity(record: dict, path: Path) -> None:
     plt.close(fig)
 
 
+def plot_pairwise(record: dict, path: Path) -> None:
+    """Plot isolated pairwise runtime and fidelity at every resolution."""
+    labels = _labels(record)
+    rows = record["standalone_pairwise"]
+    fig, axes = plt.subplots(2, 3, figsize=(13.5, 7.4))
+    timing_panels = (
+        (axes[0, 0], "Value", lambda row: row["timing"]["value"]["median_ms"]),
+        (
+            axes[0, 1],
+            "Gradient",
+            lambda row: row["timing"]["gradient"]["median_ms"],
+        ),
+        (axes[0, 2], "HVP", lambda row: row["timing"]["hvp"]["median_ms"]),
+    )
+    fidelity_panels = (
+        (
+            axes[1, 0],
+            "Value error",
+            lambda row: row["fidelity"]["value"]["absolute_max"],
+        ),
+        (
+            axes[1, 1],
+            "Gradient error",
+            lambda row: row["fidelity"]["gradient"]["relative_l2"],
+        ),
+        (
+            axes[1, 2],
+            "HVP error",
+            lambda row: row["fidelity"]["hvp"]["relative_l2"],
+        ),
+    )
+    for axis, title, metric in timing_panels:
+        grouped = _aggregate(rows, metric)
+        for label in labels:
+            x = sorted({resolution for variant, resolution in grouped if variant == label})
+            values = [grouped[label, resolution] for resolution in x]
+            color = COLORS.get(label)
+            axis.plot(
+                x, [statistics.median(item) for item in values], "o-",
+                label=label, color=color,
+            )
+            axis.fill_between(
+                x, [min(item) for item in values], [max(item) for item in values],
+                alpha=0.13, color=color,
+            )
+        axis.set_title(title)
+        axis.set_xlabel("toroidal = poloidal resolution")
+        axis.set_ylabel("warm median (ms)")
+        axis.set_yscale("log")
+        axis.grid(alpha=0.25)
+
+    floor = np.finfo(float).eps
+    for axis, title, metric in fidelity_panels:
+        grouped = _aggregate(rows, lambda row: max(metric(row), floor))
+        for label in labels:
+            x = sorted({resolution for variant, resolution in grouped if variant == label})
+            values = [grouped[label, resolution] for resolution in x]
+            color = COLORS.get(label)
+            axis.plot(
+                x, [statistics.median(item) for item in values], "o-",
+                label=label, color=color,
+            )
+            axis.fill_between(
+                x, [min(item) for item in values], [max(item) for item in values],
+                alpha=0.13, color=color,
+            )
+        axis.set_title(title)
+        axis.set_xlabel("toroidal = poloidal resolution")
+        axis.set_ylabel("absolute error" if "Value" in title else "relative L2 error")
+        axis.set_yscale("log")
+        axis.grid(alpha=0.25)
+    _finish_figure(
+        fig,
+        axes,
+        labels,
+        "Pairwise geometry runtime and full-pair fidelity (median and case range)",
+    )
+    fig.savefig(path, format="svg", bbox_inches="tight")
+    plt.close(fig)
+
+
 def _geomean(values: list[float]) -> float:
     return float(np.exp(np.mean(np.log(np.asarray(values)))))
 
@@ -925,6 +1048,7 @@ def main() -> None:
         plot_runtime(record, args.figure_prefix.with_name(args.figure_prefix.name + "_runtime.svg"))
         plot_fidelity(record, args.figure_prefix.with_name(args.figure_prefix.name + "_fidelity.svg"))
         plot_speedup(record, args.figure_prefix.with_name(args.figure_prefix.name + "_speedup.svg"))
+        plot_pairwise(record, args.figure_prefix.with_name(args.figure_prefix.name + "_pairwise.svg"))
 
 
 if __name__ == "__main__":

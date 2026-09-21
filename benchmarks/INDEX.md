@@ -6,8 +6,8 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-94 committed artifacts: 40 standalone records and 1 grouped directory holding
-54 files. 38 of the 41 entries below are cited by a page, a test or another
+95 committed artifacts: 41 standalone records and 1 grouped directory holding
+54 files. 39 of the 42 entries below are cited by a page, a test or another
 script; 3 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -59,6 +59,7 @@ hand rather than by a script in this tree.
 | `benchmarks/strong_root_m4.json` | `benchmarks/strong_root.py` | `0d98b9d8` |  | `docs/explanation/high-order-force-balance.rst` |
 | `benchmarks/winding_surface_before_next_20260918.json` | `benchmarks/winding_surface_optimization.py` | `3b5058fa` | 2026-09-18 | `benchmarks/winding_surface_optimization.md` |
 | `benchmarks/winding_surface_optimization.md` |  |  |  | `examples/optimization/QA_winding_optimization.py` |
+| `benchmarks/winding_surface_three_way_20260918.json` | `benchmarks/winding_surface_optimization.py` | `ebbae340` | 2026-09-18 | `benchmarks/winding_surface_optimization.md` |
 
 ## Grouped directories
 
