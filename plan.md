@@ -26,7 +26,9 @@ Execute three independent bounded lanes now:
    reconstruction error before using its force norm to admit the native root.
    A native-form diagnostic agrees with independent Cartesian derivatives to
    4.16e-9 relative but still has large force residuals; qualify common-target
-   radial/angular convergence before accepting the equilibrium.
+   radial/angular convergence before accepting the equilibrium. A fixed-state
+   16x16 to 32x32 quadrature check changes global force L2 by only 0.0875%
+   but an outer radial band by 9.87%; check 48x48 before an NS ladder.
 2. Resolve HINT current evolution and Ohm/Faraday balance before extending
    relaxation or changing resistivity. The bounded later-time diagnostic now
    confirms source normalization, while attained response current on the same

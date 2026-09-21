@@ -21,6 +21,7 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #418](https://github.com/uwplasma/vmex/pull/418) | Draft follow-up to #417: applies unconditional validity checks to direct derivative paths even with no absolute primal cutoff; restacked on #417 head `1459f9df`, with 18 focused module tests passing at #418 head `9e0baa28`. Integrated QA/GPU qualification remains open. |
 | [virtual_casing_jax #14](https://github.com/uwplasma/virtual_casing_jax/pull/14) | Open focused fix: prevents outer-JIT source construction from caching tracers while preserving source-field gradients. Seventeen derivative/lifecycle tests and two leak-check tests pass on CPU; no GPU or whole-workflow performance claim. |
 | [ESSOS #71](https://github.com/uwplasma/ESSOS/pull/71) | Draft for manual review: an analytic circular-loop oracle checks complete on-axis Cartesian tensors through order three and two selected field-value current/radius JVPs. All six field tests pass; this finds no defect in that scope and does not qualify off-axis fields or all parameter derivatives. |
+| [VMEX #419](https://github.com/uwplasma/vmex/pull/419) | Draft guarded block-factor reuse benchmark: exact-current residual checks and fallback are demonstrated on its QI case; a full-optimizer accuracy, memory and runtime comparison remains required. This is distinct from the rejected scalar-factor cache. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
 
 Current main has raw block Newton/adjoint solves, deterministic free-boundary
@@ -185,6 +186,16 @@ common-target radial and angular refinement are the next scientific gates. The l
 the five sampled radial-band force norms occurs at `s=0.137528`
 (`2.6527344e7 N/m^3`); retain these per-radius metrics under refinement
 rather than relying on the aggregate norm alone.
+
+A fixed-state angular check at 16x16 and 32x32 preserved the exact native-state
+hash. Global force L2 changed by -0.0875%, and mean force by -0.5044%, but the
+outer sampled radial band changed by +9.87% in force L2. The dominant inner
+band remained about `2.65e7 N/m^3`. Thus the aggregate is comparatively stable,
+while per-radius quadrature convergence remains uneven. The compact record
+retains both grids and independently checked weighted reductions; its raw
+sample archive is retained separately and is not publicly downloadable.
+Check 32x32 against 48x48 before interpreting an equilibrium NS ladder.
+This refines the diagnostic, not the equilibrium or its physical accuracy.
 
 To reproduce the force screen, set `VMEX_SOURCE` to a clean checkout of the
 pinned main revision, create `results`, and run from the HINT handoff branch:

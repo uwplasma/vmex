@@ -808,6 +808,370 @@
         "remove meaningless relative divB against roundoff"
       ],
       "guard_checks": "passed without solving; published corrected hash not yet numerically rerun"
+    },
+    "angular_quadrature_16_32": {
+      "coordinates": {
+        "phi_shift_cells": 0.375,
+        "q_order": [
+          "normalized_toroidal_flux_s",
+          "poloidal_theta_rad",
+          "physical_geometric_phi_rad"
+        ],
+        "s_interval": [
+          0.1,
+          0.9
+        ],
+        "s_nodes": [
+          0.1375280616245344,
+          0.28461227595772676,
+          0.5,
+          0.7153877240422732,
+          0.8624719383754655
+        ],
+        "s_weights": [
+          0.09477075402247571,
+          0.19145146819974654,
+          0.22755555555555548,
+          0.19145146819974654,
+          0.09477075402247571
+        ],
+        "theta_shift_cells": 0.5
+      },
+      "limitations": [
+        "both quadratures evaluate one identical finite-NS native-form interpolation",
+        "this comparison tests diagnostic angular integration, not NS, MPOL, or NTOR convergence"
+      ],
+      "quadratures": {
+        "16": {
+          "angular_count_phi": 16,
+          "angular_count_theta": 16,
+          "global": {
+            "B_rms_T": 5.861871466275036,
+            "absolute_l2_N_m3": 9290990.240559489,
+            "divB_max_abs_T_m": 1.8829382497642655e-13,
+            "divB_rms_T_m": 4.929194251310207e-14,
+            "magnetic_normalized_l2": 0.3341020658016356,
+            "mean_force_over_mean_grad_p": 2.2637274367153473,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.12874097782758276,
+            "minimum_signed_coordinate_jacobian_m3": 0.009398668645169375,
+            "nestedness_margin": 0.6174529803126465,
+            "pointwise_normalized_l2": 1.0405966972693055,
+            "sampled_window_full_torus_volume_m3": 0.46912051330719856,
+            "volume_average_force_N_m3": 3580137.003002935
+          },
+          "point_count": 1280,
+          "radial_bins": [
+            {
+              "B_rms_T": 5.836744688198727,
+              "divB_max_abs_T_m": 8.615330671091215e-14,
+              "divB_rms_T_m": 2.4574848606910975e-14,
+              "force_l2_N_m3": 26527344.143158365,
+              "full_torus_dV_ds_m3": 0.5902070356896328,
+              "full_torus_window_volume_contribution_m3": 0.05593436580167674,
+              "magnetic_normalized_l2": 0.8145563353197529,
+              "mean_force_over_mean_grad_p": 27.193076804582173,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.659787389402026,
+              "minimum_signed_coordinate_jacobian_m3": 0.011589353757624871,
+              "nestedness_margin": 0.7654279093367681,
+              "pointwise_normalized_l2": 1.8855018145960054,
+              "radial_index": 0,
+              "s": 0.1375280616245344,
+              "volume_average_force_N_m3": 21487043.16824574,
+              "absolute_l2_N_m3": 26527344.143158365
+            },
+            {
+              "B_rms_T": 5.846953320688279,
+              "divB_max_abs_T_m": 1.8207657603852567e-13,
+              "divB_rms_T_m": 5.298497710904162e-14,
+              "force_l2_N_m3": 1796387.3429459448,
+              "full_torus_dV_ds_m3": 0.5886475349995595,
+              "full_torus_window_volume_contribution_m3": 0.11269743482782735,
+              "magnetic_normalized_l2": 0.06845623065905779,
+              "mean_force_over_mean_grad_p": 1.1839020938941123,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.05242418043545736,
+              "minimum_signed_coordinate_jacobian_m3": 0.010918641345199672,
+              "nestedness_margin": 0.719450582218908,
+              "pointwise_normalized_l2": 1.1405455514782503,
+              "radial_index": 1,
+              "s": 0.28461227595772676,
+              "volume_average_force_N_m3": 1375683.897461412,
+              "absolute_l2_N_m3": 1796387.3429459445
+            },
+            {
+              "B_rms_T": 5.861430736853934,
+              "divB_max_abs_T_m": 1.5765166949677223e-13,
+              "divB_rms_T_m": 4.9808914931865046e-14,
+              "force_l2_N_m3": 583365.2603092699,
+              "full_torus_dV_ds_m3": 0.5864665265272657,
+              "full_torus_window_volume_contribution_m3": 0.13345371625864888,
+              "magnetic_normalized_l2": 0.021767091751871148,
+              "mean_force_over_mean_grad_p": 0.2715957641699961,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.01723116452978886,
+              "minimum_signed_coordinate_jacobian_m3": 0.010264742858985702,
+              "nestedness_margin": 0.6738914572152804,
+              "pointwise_normalized_l2": 0.4209061247101224,
+              "radial_index": 2,
+              "s": 0.5,
+              "volume_average_force_N_m3": 461800.9101049541,
+              "absolute_l2_N_m3": 583365.2603092699
+            },
+            {
+              "B_rms_T": 5.877443344197344,
+              "divB_max_abs_T_m": 1.851852005074761e-13,
+              "divB_rms_T_m": 4.7933810153562087e-14,
+              "force_l2_N_m3": 2252911.1935467934,
+              "full_torus_dV_ds_m3": 0.5840612257673354,
+              "full_torus_window_volume_contribution_m3": 0.1118193791917,
+              "magnetic_normalized_l2": 0.08000879301275494,
+              "mean_force_over_mean_grad_p": 0.7843137103415346,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.05987224344815993,
+              "minimum_signed_coordinate_jacobian_m3": 0.009778533670732314,
+              "nestedness_margin": 0.640580718092529,
+              "pointwise_normalized_l2": 0.9386232849813916,
+              "radial_index": 3,
+              "s": 0.7153877240422732,
+              "volume_average_force_N_m3": 1685900.2913044146,
+              "absolute_l2_N_m3": 2252911.193546794
+            },
+            {
+              "B_rms_T": 5.8871143032741005,
+              "divB_max_abs_T_m": 1.8829382497642655e-13,
+              "divB_rms_T_m": 6.043088323746914e-14,
+              "force_l2_N_m3": 1691597.6945632668,
+              "full_torus_dV_ds_m3": 0.582622959971921,
+              "full_torus_window_volume_contribution_m3": 0.055215617227345644,
+              "magnetic_normalized_l2": 0.06059131939302512,
+              "mean_force_over_mean_grad_p": 0.728335360995274,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.04701220291408879,
+              "minimum_signed_coordinate_jacobian_m3": 0.009398668645169375,
+              "nestedness_margin": 0.6149808722992915,
+              "pointwise_normalized_l2": 0.8550721599086444,
+              "radial_index": 4,
+              "s": 0.8624719383754655,
+              "volume_average_force_N_m3": 1312493.8499848475,
+              "absolute_l2_N_m3": 1691597.694563267
+            }
+          ]
+        },
+        "32": {
+          "angular_count_phi": 32,
+          "angular_count_theta": 32,
+          "global": {
+            "B_rms_T": 5.861871463708039,
+            "absolute_l2_N_m3": 9282864.159259174,
+            "divB_max_abs_T_m": 2.4069635173873394e-13,
+            "divB_rms_T_m": 5.131193134579115e-14,
+            "magnetic_normalized_l2": 0.3335352129665844,
+            "mean_force_over_mean_grad_p": 2.252405239870245,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.12798620863730664,
+            "minimum_signed_coordinate_jacobian_m3": 0.00932466912852311,
+            "nestedness_margin": 0.6125914655159482,
+            "pointwise_normalized_l2": 1.0407974525879697,
+            "sampled_window_full_torus_volume_m3": 0.46912051428034324,
+            "volume_average_force_N_m3": 3562078.4338526493
+          },
+          "point_count": 5120,
+          "radial_bins": [
+            {
+              "B_rms_T": 5.836744639924215,
+              "divB_max_abs_T_m": 1.0791367799356522e-13,
+              "divB_rms_T_m": 2.3582056281520745e-14,
+              "force_l2_N_m3": 26483072.44115383,
+              "full_torus_dV_ds_m3": 0.5902070354883706,
+              "full_torus_window_volume_contribution_m3": 0.05593436578260297,
+              "magnetic_normalized_l2": 0.8085790681477035,
+              "mean_force_over_mean_grad_p": 27.022245878138452,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.6519140075057936,
+              "minimum_signed_coordinate_jacobian_m3": 0.011566861568006195,
+              "nestedness_margin": 0.7639424639985416,
+              "pointwise_normalized_l2": 1.8920978608353627,
+              "radial_index": 0,
+              "s": 0.1375280616245344,
+              "volume_average_force_N_m3": 21351883.280541573,
+              "absolute_l2_N_m3": 26483072.44115384
+            },
+            {
+              "B_rms_T": 5.84695333530664,
+              "divB_max_abs_T_m": 2.327027459614328e-13,
+              "divB_rms_T_m": 5.700956323938051e-14,
+              "force_l2_N_m3": 1799044.5442040458,
+              "full_torus_dV_ds_m3": 0.5886475349001431,
+              "full_torus_window_volume_contribution_m3": 0.11269743480879393,
+              "magnetic_normalized_l2": 0.06855724682982783,
+              "mean_force_over_mean_grad_p": 1.1282448614168965,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.04995867296597522,
+              "minimum_signed_coordinate_jacobian_m3": 0.010905470050294153,
+              "nestedness_margin": 0.7185827367121591,
+              "pointwise_normalized_l2": 1.109425638385832,
+              "radial_index": 1,
+              "s": 0.28461227595772676,
+              "volume_average_force_N_m3": 1310990.1898220317,
+              "absolute_l2_N_m3": 1799044.5442040465
+            },
+            {
+              "B_rms_T": 5.861430764351817,
+              "divB_max_abs_T_m": 1.8918200339612667e-13,
+              "divB_rms_T_m": 5.0350246679172606e-14,
+              "force_l2_N_m3": 608386.2648680739,
+              "full_torus_dV_ds_m3": 0.5864665265449254,
+              "full_torus_window_volume_contribution_m3": 0.13345371626266742,
+              "magnetic_normalized_l2": 0.022700685046058537,
+              "mean_force_over_mean_grad_p": 0.2702272868710734,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.017143683764696518,
+              "minimum_signed_coordinate_jacobian_m3": 0.010233395866354508,
+              "nestedness_margin": 0.6718334787659356,
+              "pointwise_normalized_l2": 0.42101189655255217,
+              "radial_index": 2,
+              "s": 0.5,
+              "volume_average_force_N_m3": 459456.6952724665,
+              "absolute_l2_N_m3": 608386.2648680739
+            },
+            {
+              "B_rms_T": 5.8774433478381845,
+              "divB_max_abs_T_m": 2.1582735598713043e-13,
+              "divB_rms_T_m": 5.3093334463304153e-14,
+              "force_l2_N_m3": 2297504.1767617804,
+              "full_torus_dV_ds_m3": 0.5840612277944494,
+              "full_torus_window_volume_contribution_m3": 0.11181937957979395,
+              "magnetic_normalized_l2": 0.08158923954129774,
+              "mean_force_over_mean_grad_p": 0.7898849449346664,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.060291642811651586,
+              "minimum_signed_coordinate_jacobian_m3": 0.009709931279592202,
+              "nestedness_margin": 0.6360864973512049,
+              "pointwise_normalized_l2": 0.9590264836121931,
+              "radial_index": 3,
+              "s": 0.7153877240422732,
+              "volume_average_force_N_m3": 1697776.5936093149,
+              "absolute_l2_N_m3": 2297504.1767617813
+            },
+            {
+              "B_rms_T": 5.887114226471747,
+              "divB_max_abs_T_m": 2.4069635173873394e-13,
+              "divB_rms_T_m": 5.776429234242297e-14,
+              "force_l2_N_m3": 1858510.8939090702,
+              "full_torus_dV_ds_m3": 0.5826229665049419,
+              "full_torus_window_volume_contribution_m3": 0.05521561784648496,
+              "magnetic_normalized_l2": 0.06656124663460693,
+              "mean_force_over_mean_grad_p": 0.7822978792267766,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.05048532820238044,
+              "minimum_signed_coordinate_jacobian_m3": 0.00932466912852311,
+              "nestedness_margin": 0.610138605811232,
+              "pointwise_normalized_l2": 0.8796270053214263,
+              "radial_index": 4,
+              "s": 0.8624719383754655,
+              "volume_average_force_N_m3": 1409642.0543589322,
+              "absolute_l2_N_m3": 1858510.8939090692
+            }
+          ]
+        }
+      },
+      "radial_bin_relative_change_32_vs_16": [
+        {
+          "B_rms_T": -8.270793752031605e-09,
+          "magnetic_normalized_l2": -0.007338064800273164,
+          "mean_force_over_mean_grad_p": -0.006282147756628061,
+          "mean_force_over_mean_magnetic_pressure_gradient": -0.011933210641337164,
+          "minimum_signed_coordinate_jacobian_m3": -0.001940763056255622,
+          "nestedness_margin": -0.001940673079864037,
+          "pointwise_normalized_l2": 0.0034982974761923373,
+          "s": 0.1375280616245344,
+          "volume_average_force_N_m3": -0.006290297210549251,
+          "absolute_l2_N_m3": -0.0016689081939604833
+        },
+        {
+          "B_rms_T": 2.5001673231385823e-09,
+          "magnetic_normalized_l2": 0.0014756315064022643,
+          "mean_force_over_mean_grad_p": -0.04701168514209396,
+          "mean_force_over_mean_magnetic_pressure_gradient": -0.04702996687792912,
+          "minimum_signed_coordinate_jacobian_m3": -0.0012063126252709235,
+          "nestedness_margin": -0.0012062614558908489,
+          "pointwise_normalized_l2": -0.02728511198179153,
+          "s": 0.28461227595772676,
+          "volume_average_force_N_m3": -0.04702657911367682,
+          "absolute_l2_N_m3": 0.0014791917058067927
+        },
+        {
+          "B_rms_T": 4.691326114076035e-09,
+          "magnetic_normalized_l2": 0.04289012537042924,
+          "mean_force_over_mean_grad_p": -0.005038654793106962,
+          "mean_force_over_mean_magnetic_pressure_gradient": -0.0050768922170701955,
+          "minimum_signed_coordinate_jacobian_m3": -0.003053850745394276,
+          "nestedness_margin": -0.0030538722925039486,
+          "pointwise_normalized_l2": 0.0002512955650208566,
+          "s": 0.5,
+          "volume_average_force_N_m3": -0.005076245588071278,
+          "absolute_l2_N_m3": 0.042890803174565395
+        },
+        {
+          "B_rms_T": 6.194599087976746e-10,
+          "magnetic_normalized_l2": 0.019753410456908635,
+          "mean_force_over_mean_grad_p": 0.007103324243440511,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.0070049047661758165,
+          "minimum_signed_coordinate_jacobian_m3": -0.00701561128182677,
+          "nestedness_margin": -0.007015853918779579,
+          "pointwise_normalized_l2": 0.021737366798018475,
+          "s": 0.7153877240422732,
+          "volume_average_force_N_m3": 0.00704448677431055,
+          "absolute_l2_N_m3": 0.019793493566332643
+        },
+        {
+          "B_rms_T": -1.304584043277542e-08,
+          "magnetic_normalized_l2": 0.09852776439572018,
+          "mean_force_over_mean_grad_p": 0.07409020778252838,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.07387710153975398,
+          "minimum_signed_coordinate_jacobian_m3": -0.007873404142649407,
+          "nestedness_margin": -0.007873848937699879,
+          "pointwise_normalized_l2": 0.028716693823133476,
+          "s": 0.8624719383754655,
+          "volume_average_force_N_m3": 0.07401802635129016,
+          "absolute_l2_N_m3": 0.0986719241118943
+        }
+      ],
+      "relative_change_32_vs_16": {
+        "B_rms_T": -4.379142900308188e-10,
+        "absolute_l2_N_m3": -0.0008746195066313164,
+        "magnetic_normalized_l2": -0.001696645705231154,
+        "mean_force_over_mean_grad_p": -0.005001572477970537,
+        "mean_force_over_mean_magnetic_pressure_gradient": -0.0058626958021629014,
+        "minimum_signed_coordinate_jacobian_m3": -0.007873404142649407,
+        "nestedness_margin": -0.007873497985606374,
+        "pointwise_normalized_l2": 0.0001929232710338915,
+        "sampled_window_full_torus_volume_m3": 2.0744023088921177e-09,
+        "volume_average_force_N_m3": -0.005044100026099194
+      },
+      "resources": {
+        "jax_platform": "cpu",
+        "max_rss_bytes": 1939570688,
+        "visible_device_count": 1
+      },
+      "samples_sha256": "da3bbb4e86d6dcd7a6340620fee33d7c1d680cc217a5347f124422bfbaea8ff6",
+      "scope": "fixed-state angular diagnostic quadrature comparison; not solver refinement or continuum certification",
+      "solve": {
+        "converged": true,
+        "iterations": 700,
+        "mpol": 7,
+        "nfp": 2,
+        "ns": 31,
+        "ntor": 6
+      },
+      "source": {
+        "driver_sha256": "eece5f3fc58511138add3bf2716154d88beb375df8f5721b223f42a4403b136a",
+        "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+        "input_sha256": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
+        "native_state_sha256": "83e07bcb9b8abcd70a57eaeef2879919c7dfb46090b944e016d012925861c552",
+        "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+      },
+      "timing_seconds": {
+        "solve": 20.008129452355206,
+        "total": 64.47312993416563
+      },
+      "validation": {
+        "independently_recomputed_weighted_reductions_relative_difference_max": 6.7e-16,
+        "all_arrays_finite": true,
+        "native_state_hash_matches_retained_screen": true,
+        "raw_sample_archive_public": false,
+        "interpretation": "Global metrics are more stable than individual radial bins. Refine angular quadrature before interpreting a solver-resolution ladder. Absolute divergence is retained; relative roundoff changes are not meaningful."
+      }
     }
   },
   "gpu_automatic_placement_attempt": {
