@@ -29,8 +29,9 @@ Execute three independent bounded lanes now:
    confirms source normalization, while attained response current on the same
    support averages only 19.903% of the target at code time 1.09. The new
    term-rate diagnostic shows active imposed drive opposed by response and
-   ideal terms, with net -9.55 kA/code-time. Measure its evolution over one
-   original-length block with unchanged cadence before a long campaign.
+   ideal terms, with net -9.55 kA/code-time. The original-length block to
+   time 1.18 confirms continuing current relaxation; force improves overall
+   but rebounds after 1.16. Resolve that behavior before a long campaign.
 3. Complete the reproducible preprocessing and raw-data package. The published
    compact native samples reproduce all six field metrics, but do not recreate
    an equilibrium without the missing prepared fields and restart assets.

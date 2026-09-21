@@ -255,5 +255,266 @@
       },
       "warning": "The 100-step block matches the first 100 magnetic updates of the retained settings. Its endpoint is not cadence-identical beyond that block and must not be reused as production state without deliberation."
     }
+  },
+  "original_length_block": {
+    "observation": {
+      "diagnostic_semantics": "ten instantaneous post-RKG magnetic current-rate RHS samples at the original nenergyb=100 cadence during one original-length nstepb=1000 block; every rate uses that sample frozen ss<jcuts mask",
+      "field_definitions": {
+        "current_rate": "production fourth-order toroidal curl applied to each production-Faraday magnetic increment, integrated with rmaj0*b0*dr*dz/mu0 and divided by dt_b.",
+        "history_force_relative": "native <F>_r = <F>_a / (<|grad(p_norm)|^2> + <|J_response_norm cross B_total_norm|^2>), dimensionless.",
+        "history_force_residual_mean_square_code": "native <F>_a = volume average of | -grad(p_norm) + J_response_norm cross B_total_norm |^2 over p1b>0; p_norm=mu0*P/B0^2, lengths are normalized by rmaj0, B is normalized by B0, and J_response_norm is the code-space curl of the response field. This is a squared normalized code residual, with no SI force-density conversion.",
+        "means": "signed arithmetic mean of the 32 per-cut integrals; raw per-cut arrays were not retained."
+      },
+      "interpretation": "The imposed term remains active in the requested negative-current direction at every sample. Ideal and resistive-response terms oppose it, but the net rate remains negative and native current becomes monotonically more negative. The normalized squared force residual improves overall, reaches its minimum at global time 1.16, then rises slightly through 1.18; this is a nonmonotonic late trend, not evidence of steady convergence.",
+      "limitations": [
+        "Instantaneous rates use each sample frozen source mask; masks can change between samples.",
+        "Interval current changes are trend checks, not equality tests against the instantaneous same-mask RHS.",
+        "No raw per-cut arrays were retained; the series reports cut means only.",
+        "No physical-second conversion, convergence claim, or production-endpoint claim is made."
+      ],
+      "retained_start_at_global_time_1p08": {
+        "history_force_relative": 0.014006101045,
+        "history_force_residual_mean_square_code": 1.0750226237e-05,
+        "history_positive_pressure_current_A": -17692.417269
+      },
+      "series": {
+        "attained_positive_pressure_mean_A": [
+          -17783.72271393783,
+          -17878.48160552436,
+          -17973.62771851875,
+          -18069.13611239739,
+          -18164.97286903589,
+          -18261.0946979277,
+          -18357.4488140534,
+          -18453.97308273059,
+          -18550.59640685078,
+          -18647.2393187083
+        ],
+        "attained_same_mask_mean_A": [
+          -19062.80777448137,
+          -19158.42568584909,
+          -19254.40954432086,
+          -19350.7330630627,
+          -19447.3604205923,
+          -19544.24606720454,
+          -19641.33478002089,
+          -19738.5619594355,
+          -19835.85414291911,
+          -19933.12970055666
+        ],
+        "closure_max_relative": [
+          5.749817933979247e-15,
+          4.373833546253341e-15,
+          5.503330858025491e-15,
+          6.337579474965737e-15,
+          6.629826925397364e-15,
+          6.328205153354642e-15,
+          6.209717923719787e-15,
+          4.661533563522486e-15,
+          4.034909072924028e-15,
+          3.721059222257862e-15
+        ],
+        "global_time_code": [
+          1.09,
+          1.1,
+          1.11,
+          1.12,
+          1.13,
+          1.14,
+          1.15,
+          1.16,
+          1.17,
+          1.18
+        ],
+        "history_force_relative": [
+          0.013902991484,
+          0.01373889906,
+          0.013543822066,
+          0.013339952299,
+          0.013149233607,
+          0.012991117665,
+          0.012880646264,
+          0.012827040251,
+          0.012832922359,
+          0.012894234319
+        ],
+        "history_force_residual_mean_square_code": [
+          1.0678592355e-05,
+          1.0578705408e-05,
+          1.0455153145e-05,
+          1.0324774335e-05,
+          1.0204344021e-05,
+          1.0108829076e-05,
+          1.0049868093e-05,
+          1.0034619455e-05,
+          1.0065086192e-05,
+          1.0137979282e-05
+        ],
+        "history_positive_pressure_current_A": [
+          -17783.722714,
+          -17878.481606,
+          -17973.627719,
+          -18069.136112,
+          -18164.972869,
+          -18261.094698,
+          -18357.448814,
+          -18453.973083,
+          -18550.596407,
+          -18647.239319
+        ],
+        "rate_mean_A_per_code_time": {
+          "divergence_cleaning_kappa_grad_divB": [
+            -9.39996770330904e-29,
+            2.357953539239698e-28,
+            -4.641686417907272e-28,
+            3.203661119322515e-28,
+            8.017147310947694e-28,
+            6.588794385682175e-28,
+            2.172007097061686e-28,
+            -2.962904561668809e-28,
+            2.100352576349767e-28,
+            2.085745318683976e-28
+          ],
+          "ideal_curl_v_cross_B": [
+            2765.84845806922,
+            2684.266829490088,
+            2606.503098710296,
+            2533.294878087108,
+            2465.377334094158,
+            2403.47105517586,
+            2348.26964577501,
+            2300.428410535573,
+            2260.555114447429,
+            2229.203334699692
+          ],
+          "imposed_drive_plus_curl_eta_Jimposed": [
+            -35437.52738240956,
+            -35438.76267288984,
+            -35440.03782586021,
+            -35441.3403645654,
+            -35442.65678581929,
+            -35443.97279845422,
+            -35445.27358454631,
+            -35446.54407635186,
+            -35447.76924153201,
+            -35448.93436904676
+          ],
+          "independent_total_RHS": [
+            -9550.599434280322,
+            -9587.609835672905,
+            -9622.077817017807,
+            -9653.121013281116,
+            -9679.836081590198,
+            -9701.319962235602,
+            -9716.691336553311,
+            -9725.110544112327,
+            -9725.7966614908,
+            -9718.040984677957
+          ],
+          "resistive_response_minus_curl_eta_Jresponse": [
+            23121.07949006002,
+            23166.88600772686,
+            23211.45691013211,
+            23254.92447319718,
+            23297.44337013494,
+            23339.18178104274,
+            23380.312602218,
+            23421.00512170397,
+            23461.41746559378,
+            23501.69004966912
+          ]
+        },
+        "source_current_mean_A": [
+          -95672.99150774673,
+          -95676.14722399379,
+          -95679.43617327794,
+          -95682.82498622888,
+          -95686.27752600366,
+          -95689.75551021216,
+          -95693.21917182827,
+          -95696.62794485423,
+          -95699.94116013862,
+          -95703.11873655302
+        ],
+        "timeb_code": [
+          0.01,
+          0.02,
+          0.03,
+          0.04,
+          0.05,
+          0.06,
+          0.07,
+          0.08,
+          0.09,
+          0.1
+        ]
+      },
+      "status": "completed"
+    },
+    "provenance": {
+      "build": {
+        "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
+        "compiler": "conda-forge GNU Fortran 13.4.0 via Open MPI wrapper",
+        "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2"
+      },
+      "execution": {
+        "elapsed_wall_seconds": 60.5,
+        "exit_code": 0,
+        "gpu_used": false,
+        "max_rss_kib": 112928,
+        "mpi_ranks": 4,
+        "omp_threads": 1,
+        "stepb_seconds": 28.1953,
+        "swaps": 0,
+        "timeout_cleanup_seconds": 30,
+        "timeout_seconds": 300
+      },
+      "input": {
+        "baseline_sha256": "1da9cc2877c6c22ad2028d1b91155e38c8c0199a7ce3bc4a052d586d766a731e",
+        "changes": [
+          "nstep 2 -> 1 (one outer-block cap)",
+          "lcurrent_drive_diag false/default -> true"
+        ],
+        "run_sha256": "78fcb9e961bffa01631ee2d2dda35fa5ad3405c6bc3d80196f0d95cca80cdb68",
+        "unchanged": {
+          "dt_b": 0.0001,
+          "eta0": 0.001,
+          "eta1": 0.0,
+          "eta_diff": 1.0,
+          "history": true,
+          "kappa_divb": 0.0001,
+          "mpi": "1x1x4",
+          "nenergyb": 100,
+          "nrefb": 100,
+          "nsmoothb": 1,
+          "nstepb": 1000
+        }
+      },
+      "output": {
+        "diagnostic_groups": 10,
+        "field_sha256": "30c04bf36ed4a3c3bb325a9e74fcbc21ab863f91aa4aab286e3e11a085454c16",
+        "history_sha256": "427d2d9e2d5b36e89dd378ff528891d7a0665be0a82a98201429135840399c1e",
+        "input_diff_sha256": "55876dc6a0429e4423e8fef898aa901d74c75190f50195f4364e0d9b9ab972cf",
+        "last_fields_all_finite": true,
+        "last_time_code": 1.1800000000000204,
+        "resource_log_sha256": "0bccac2b58a72bb9d3b0ec38965b09a38b3a954bf4bf523fc1c08e6c2ec68162",
+        "run_log_sha256": "b068bfe6a244d2ddd0846ac3087985db09bc8f9af66e5291c3154f2023b8513a",
+        "snapshots": 20
+      },
+      "published_record_commit": "39c07fd4730b8331517b9d1ab1adfcebe5307bd0",
+      "restart": {
+        "last_time_code": 1.0800000000000185,
+        "sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+        "snapshots": 19,
+        "used_directly_in_new_isolated_run": true
+      },
+      "source": {
+        "diagnostics_patch_sha256": "a1fbb4061c9254e1d2113ed08296812e016b6e84e6ca53e34b0a255a339bfe67",
+        "portability_patch_sha256": "d83abd6596ae500538dab6b88ec30815cb4688b925db0f281fbc9cfa6c07d580",
+        "stepb_mod_sha256": "21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488",
+        "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f"
+      },
+      "warning": "The t=1.18 endpoint is an observation artifact only and must not be reused as a production restart without separate deliberation."
+    }
   }
 }

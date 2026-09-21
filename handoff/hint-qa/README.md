@@ -241,9 +241,26 @@ The term sum agrees with a separate total-RHS evaluation within
 `6.73e-11 A/code-time` (relative `5.75e-15`). The imposed term is active in
 the target direction; response and ideal terms oppose it. This supports slow
 relaxation/current redistribution at this state, without determining a
-long-time rate or physical-second timescale. The next controlled measurement
-is a full original-length block from the retained restart, with unchanged
-resistivity and cadence, tracking force and current together.
+long-time rate or physical-second timescale. The original-length follow-up below tests this rate over a bounded interval
+with unchanged physical settings and magnetic cadence.
+
+The subsequent original-length block also completed: 1,000 updates from the
+same retained time-1.08 restart to 1.18, preserving `dt_b`, resistivity,
+`nenergyb=100`, `nrefb=100` and smoothing cadence. Only the one-outer-block cap
+and diagnostic flag changed. Ten complete samples took 60.5 s on four MPI
+ranks. The imposed mean rate remained about `-35.44 kA/code-time`; the net
+mean rate remained negative (`-9.55` to `-9.72 kA/code-time`). Pressure-supported
+current moved monotonically from `-17.692417` to `-18.647239 kA`; same-source-
+mask attained current reached `-19.933130 kA` at the final sample.
+
+Native history force ratio improved overall from `0.0140061` to `0.0128942`,
+but reached its minimum `0.0128270` at time 1.16 and then increased. This is
+nonmonotonic late behavior, not steady convergence. The native absolute
+force record is a mean **squared normalized code residual**, not an SI force
+density; [the record](current-drive.json) defines both force normalizations
+and retains the full ten-sample means and provenance. Term closure remained
+below `6.63e-15` relative. No physical-time extrapolation or equilibrium
+acceptance follows from this one block. Its endpoint has not been reused.
 
 The tested extended source SHA-256 is
 `21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488`.
@@ -308,8 +325,9 @@ archive must not be published as an accidental package release.
    Do not impose the removed historical universal certificate on new solvers.
 3. **Resolve HINT current closure before a long campaign.** The bounded
    source/support and term-rate measurements above establish an active drive
-   opposed by response and ideal terms. Next track evolution over an original-
-   length block with unchanged cadence, current, force and pressure recorded. Save the
+   opposed by response and ideal terms. The original-length block confirms
+   continuing current relaxation with a late force rebound. Resolve this
+   nonmonotonic behavior before declaring a mature equilibrium. Save the
    actual flux label, imposed current and traced axis pressure at native updates. A snapshot reconstruction using maximum pressure as axis pressure
    is insufficient. Integrate current on multiple cuts and separately inside
    pressure support, return-current shells and wall. Near-zero all-domain
