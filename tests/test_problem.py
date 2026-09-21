@@ -333,6 +333,31 @@ def test_vmec_problem_reports_under_converged_fsq():
     assert not evaluation.diagnostics["derivative_admitted"]
 
 
+def test_vmec_problem_reports_rejected_exact_state_certificate():
+    class Config:
+        ftol = 1.0e-10
+        max_fsq_ratio = 10.0
+
+    equilibrium = SimpleNamespace(result=SimpleNamespace(
+        converged=True, fsqr=0.0, fsqz=0.0, fsql=0.0))
+    certificate = {
+        "derivative_admitted": False,
+        "strict_root_certified": False,
+        "primal_geometry_valid": False,
+    }
+    problem = VmecProblem(
+        [1.0], fun=np.sum, input_from_x=lambda x: x,
+        x_from_input=lambda inp: inp, equilibrium_from_x=lambda x: equilibrium,
+        metadata={
+            "config": Config(),
+            "primal_certificate": lambda x: certificate,
+        },
+    )
+    evaluation = problem.evaluate(problem.x0, derivatives=False)
+    assert evaluation.status == "under_converged"
+    assert evaluation.diagnostics["primal_geometry_valid"] is False
+
+
 def test_evaluation_contains_consistent_scalar_and_residual_forms():
     evaluation = _quadratic_problem().evaluate([3.0, 1.0])
     assert isinstance(evaluation, Evaluation) and evaluation.success

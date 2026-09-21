@@ -167,12 +167,22 @@ def test_direct_derivative_strict_gate_is_opt_in(monkeypatch):
     assert caught.value.residual_norm == 2.0e-6
     assert caught.value.tolerance == 1.0e-6
 
+    loose = dataclasses.replace(cfg, primal_tol=4.0e-6)
+    assert bool(im._require_strict_primal(loose, params, state, mask))
+
     disabled = dataclasses.replace(cfg, refine_tol=np.inf)
     evidence = im.measure_primal_state(params, state, mask, disabled)
     assert not evidence["refinement_enabled"]
     assert evidence["refine_tolerance"] is None
     assert evidence["refine_tolerance_met"] is None
     json.dumps(evidence, allow_nan=False)
+
+
+@pytest.mark.parametrize("primal_tol", [0.0, -1.0, np.inf, np.nan])
+def test_config_rejects_invalid_primal_tolerance(primal_tol):
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    with pytest.raises(ValueError, match="primal_tol"):
+        im.make_config(inp, primal_tol=primal_tol)
 
 
 def test_fd_lane_penalty_path(monkeypatch, capsys):

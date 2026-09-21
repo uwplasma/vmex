@@ -899,6 +899,27 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
                 error_type, match="unrelated reverse programming error"
             ):
                 reverse_problem.value_and_grad(reverse_problem.x0)
+
+    failed_once = False
+
+    def reject_one_numerical_reverse(value):
+        nonlocal failed_once
+        host = real_device_get(value)
+        if np.shape(host) == reverse_problem.x0.shape and not failed_once:
+            failed_once = True
+            raise FloatingPointError("synthetic numerical reverse failure")
+        return host
+
+    with monkeypatch.context() as patch:
+        patch.setattr(opt.jax, "device_get", reject_one_numerical_reverse)
+        reverse_problem._vg_cache = None
+        retry_value, retry_gradient = reverse_problem.value_and_grad(
+            reverse_problem.x0
+        )
+    assert failed_once
+    np.testing.assert_allclose(retry_value, reverse_value)
+    np.testing.assert_allclose(reverse_gradient, retry_gradient, rtol=1.0e-6)
+
     np.testing.assert_allclose(problem.grad(problem.x0),
                                weighted_jac.T @ residual, rtol=1e-6)
     jax_value, jax_gradient = problem.jax_value_and_grad(jax.numpy.asarray(problem.x0))
@@ -971,6 +992,36 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     from vmex.core import implicit as implicit_module
 
     config = problem.metadata["config"]
+    reverse_config = reverse_problem.metadata["config"]
+    saved_certificate = implicit_module._LAST_PRIMAL_CERTIFICATE[reverse_config]
+
+    def invalidate_reverse_anchor(value):
+        host = real_device_get(value)
+        if np.shape(host) == reverse_problem.x0.shape:
+            current = implicit_module._LAST_PRIMAL_CERTIFICATE[reverse_config]
+            implicit_module._LAST_PRIMAL_CERTIFICATE[reverse_config] = (
+                current[0], b"changed-during-scalar-reverse", current[2]
+            )
+        return host
+
+    with monkeypatch.context() as patch:
+        patch.setattr(opt.jax, "device_get", invalidate_reverse_anchor)
+        reverse_problem._vg_cache = None
+        rejected_value, rejected_gradient = reverse_problem.value_and_grad(
+            reverse_problem.x0
+        )
+    assert rejected_value > reverse_value
+    assert np.all(np.isfinite(rejected_gradient))
+    implicit_module._LAST_PRIMAL_CERTIFICATE[reverse_config] = saved_certificate
+
+    saved_certificate = implicit_module._LAST_PRIMAL_CERTIFICATE[config]
+    implicit_module._LAST_PRIMAL_CERTIFICATE[config] = (
+        saved_certificate[0], b"not-the-refined-state", saved_certificate[2]
+    )
+    with pytest.raises(RuntimeError, match="certified VMEC equilibrium"):
+        problem.equilibrium_from_x(problem.x0)
+    implicit_module._LAST_PRIMAL_CERTIFICATE[config] = saved_certificate
+
     # Cold trial/retry kernels must compile on the optimizer's host thread,
     # outside a running GPU callback. Cached derivative callbacks are fine.
     import threading
