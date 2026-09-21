@@ -9,7 +9,7 @@ Timing regimes are process-level where they must be:
 
 - ``cold``            new process, empty persistent compilation cache;
 - ``cache_reload``    new process, populated persistent cache;
-- ``warm``            same process, same shapes and static arguments;
+- ``warm``            all stages in order, same shapes and static arguments;
 - ``warm_newparams``  same process, changed physical parameters, same shapes;
 - ``reshape``         same process, changed resolution/shape.
 
@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # this repo's commit.
 sys.path.insert(0, str(ROOT))
 DATA = ROOT / "examples" / "data"
-SCHEMA = 1
+SCHEMA = 2  # Warm timings now repeat every stage, not just the first.
 
 _COLD_REGIMES = ("cold", "cache_reload")
 _WARM_REGIMES = ("warm", "warm_newparams", "reshape")
@@ -851,13 +851,15 @@ def _run_in_process(ident: str, regime: str,
             raise ValueError(
                 f"workflow {ident} defines no {regime} variant; a plain "
                 "warm repeat must not be reported under that label")
-        repeat = variants.get(regime) or next(iter(stages.values()))
+        repeat_stages = ((variants[regime],) if regime in variants
+                         else tuple(stages.values()))
         counter.reset()
         samples = []
         repeats = 3 if regime == "warm" else 1
         for _ in range(repeats):
             started = time.perf_counter()
-            repeat()
+            for stage in repeat_stages:
+                stage()
             samples.append(time.perf_counter() - started)
         timings[regime] = sorted(samples)[len(samples) // 2]
         counters[regime] = counter.snapshot()
