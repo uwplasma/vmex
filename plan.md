@@ -88,8 +88,10 @@ failed refinement. Proceed to separate M9/N6 and M8/N7 sensitivities with saved
 states; measurement sufficiency does not certify Fourier/radial convergence.
 The pair now completes: M9/N6 force L2 rises 10.18% globally and 50.84% in
 the innermost sampled bin; M8/N7 changes -0.422% globally. Physical boundary
-coefficients remain identical. Replay finer measurement on each retained state
-next, then investigate the nonmonotonic poloidal response before more solves.
+coefficients remain identical. Both angular64-to80 replays now pass the
+unchanged gates (maximum mean/ratio/pointwise changes 0.104% and 0.182%).
+Investigate the nonmonotonic poloidal response and residual-family provenance
+before more solves; measurement sufficiency is not physical convergence.
 Small explicit native CPU/GPU solves at #423 also pass placement checks,
 including a converged asymmetric case; implicit callbacks, certificates and
 the exact QA case still require integrated GPU qualification.

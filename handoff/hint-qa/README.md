@@ -1012,6 +1012,10 @@ poloidal sequence is nonmonotonic. Parsed boundary coefficients are unchanged:
 newly admitted boundary modes are zero. Common flux-coordinate points map to
 different physical positions, so these are directional resolution sensitivities,
 not fixed-position field errors or a convergence certificate. All six state
-arrays and paired WOUT templates are retained. Next replay each state with
-finer measurement sampling before another solve; then prioritize poloidal
-resolution and root-family checks over a broad toroidal sweep.
+arrays and paired WOUT templates are retained. Their angular64-to80 replays
+now pass all unchanged measurement gates without solving again: maximum
+mean/ratio/pointwise changes are 0.104% for M9/N6 and 0.182% for M8/N7;
+global and per-bin force L2 change below 1e-9%. Thus angular64 sampling does
+not explain the large poloidal force change on this window. Prioritize
+poloidal resolution and root-family checks over a broad toroidal sweep;
+five-surface sampling still does not certify the full volume.

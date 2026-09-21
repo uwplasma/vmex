@@ -3630,6 +3630,92 @@
         "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
         "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
       }
+    },
+    "directional_fourier_measurement64_to80": {
+      "scope": "fixed-state angular64 to angular80 measurement; no new solve",
+      "gates_percent": {
+        "global_force_l2": 0.1,
+        "per_bin_force_l2": 0.5,
+        "global_and_bin_means_ratios_pointwise_norm": 1.0
+      },
+      "cases": {
+        "m9n6": {
+          "result_sha256": "78b04c83602bbe29c191bdb0b540657b11f133d4805732b65c0e96d0d7a4eab7",
+          "samples_sha256": "f1a1a851559753a9b870e50d819e62a6b4d31709d79fd715b70b365be599d9a1",
+          "native_state_sha256": "dc81155d82e12a77aab78880f8661567134fa89e262d211757605318ce020ad3",
+          "driver_sha256": "5c942c2a4869eed90ef1c12a863f47cf142e151e96e5391f04d7e5d0e535a624",
+          "root_fsq_provenance": "retained_from_state_checkpoint",
+          "solve_seconds": 0.0,
+          "total_seconds": 55.91156711336225,
+          "resources": {
+            "jax_platform": "cpu",
+            "max_rss_bytes": 2271166464,
+            "visible_device_count": 1
+          },
+          "force_l2_N_m3": 467862.161146747,
+          "global_percent_change": {
+            "absolute_l2_N_m3": 2.842837076855176e-10,
+            "magnetic_normalized_l2": 2.850608638027552e-10,
+            "volume_average_force_N_m3": 0.02388020706380889,
+            "mean_force_over_mean_grad_p": 0.023880206632154177,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.02388020706456384,
+            "pointwise_normalized_l2": 0.01963747720774567
+          },
+          "maximum_absolute_bin_percent_change": {
+            "absolute_l2_N_m3": 7.217337838483218e-10,
+            "magnetic_normalized_l2": 7.203126983768016e-10,
+            "volume_average_force_N_m3": 0.0549812190621779,
+            "mean_force_over_mean_grad_p": 0.054981219300009876,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.05498121906306608,
+            "pointwise_normalized_l2": 0.10391922901171746
+          },
+          "all_gates_pass": true
+        },
+        "m8n7": {
+          "result_sha256": "9c2f09dc1a97625f438b0fb21dce0d04ebce323a7847639f165c5adc91a778b7",
+          "samples_sha256": "a41fa0c84c36a95be5ee2324d0ae7ce5aa3e3cc1c9d7124c4627773bd26a47b5",
+          "native_state_sha256": "d35cc5cbc74b889e1b0fe591607256067ded0adf87e7ff4e7a0c39c5fd383de1",
+          "driver_sha256": "5c942c2a4869eed90ef1c12a863f47cf142e151e96e5391f04d7e5d0e535a624",
+          "root_fsq_provenance": "retained_from_state_checkpoint",
+          "solve_seconds": 0.0,
+          "total_seconds": 55.573197609279305,
+          "resources": {
+            "jax_platform": "cpu",
+            "max_rss_bytes": 2275397632,
+            "visible_device_count": 1
+          },
+          "force_l2_N_m3": 422851.65474358876,
+          "global_percent_change": {
+            "absolute_l2_N_m3": -2.9616309404900676e-10,
+            "magnetic_normalized_l2": -2.963185252724543e-10,
+            "volume_average_force_N_m3": 0.04558693195211294,
+            "mean_force_over_mean_grad_p": 0.045586931948493614,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.045586931951935306,
+            "pointwise_normalized_l2": 0.0027562123009250428
+          },
+          "maximum_absolute_bin_percent_change": {
+            "absolute_l2_N_m3": 9.110601162376497e-10,
+            "magnetic_normalized_l2": 9.117706589734098e-10,
+            "volume_average_force_N_m3": 0.1818627842889553,
+            "mean_force_over_mean_grad_p": 0.18186278431322478,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.18186278428922176,
+            "pointwise_normalized_l2": 0.033444530412485296
+          },
+          "all_gates_pass": true
+        }
+      },
+      "independent_checks": [
+        "sample hashes",
+        "retained native-state identity",
+        "zero solve time",
+        "volume-weighted force L2 independently reduced",
+        "unchanged prospective thresholds"
+      ],
+      "limitations": [
+        "five flux-coordinate surfaces and these two states only",
+        "not radial or Fourier convergence",
+        "does not bound root-family or continuum error"
+      ]
     }
   },
   "gpu_automatic_placement_attempt": {
