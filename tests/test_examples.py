@@ -40,7 +40,8 @@ ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "vmex_fieldline_tracing_vacuum.py",
     EXAMPLES / "vmex_fieldline_tracing_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_optimization.py",
-    EXAMPLES / "optimization" / "single_stage_optimization_penalty.py",
+    EXAMPLES / "optimization" / "single_stage_optimization_augmented_lagrangian.py",
+    EXAMPLES / "optimization" / "single_stage_optimization_least_squares.py",
     EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
@@ -171,8 +172,9 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/single_stage_free_boundary_optimization.py",
     "examples/optimization/single_stage_free_boundary_optimization_finite_beta.py",
     "examples/optimization/single_stage_optimization.py",
+    "examples/optimization/single_stage_optimization_augmented_lagrangian.py",
     "examples/optimization/single_stage_optimization_finite_beta.py",
-    "examples/optimization/single_stage_optimization_penalty.py",
+    "examples/optimization/single_stage_optimization_least_squares.py",
     "examples/optimization/stellarator_asymmetry/QA_optimization.py",
     "examples/optimization/stellarator_asymmetry/QH_optimization.py",
     "examples/optimization/stellarator_asymmetry/QI_optimization.py",
@@ -1030,34 +1032,52 @@ def test_scalar_optimizer_examples(script_name, dependency, output, tmp_path):
     assert (tmp_path / output).exists()
 
 
-@pytest.mark.full  # nightly: the penalized companion, one L-BFGS-B solve
-def test_fixed_boundary_single_stage_penalty(tmp_path):
-    """The simple companion runs the same physics with plain penalties.
+@pytest.mark.full  # nightly: the same physics with the limits as constraints
+def test_fixed_boundary_single_stage_augmented_lagrangian(tmp_path):
+    """The companion carries the three limits on multipliers, over a stage loop.
 
-    It must fall and produce the same diagnostics as the augmented-Lagrangian
-    example; which of the two reaches the targets at full budget is recorded in
-    the examples README, not asserted here, because smoke mode reaches neither.
+    Which of the three reaches the targets at full budget is recorded in the
+    examples README, not asserted here, because smoke mode reaches none of them.
     """
     pytest.importorskip("essos")
     out = _run_example(
-        EXAMPLES / "optimization" / "single_stage_optimization_penalty.py",
+        EXAMPLES / "optimization" / "single_stage_optimization_augmented_lagrangian.py",
         tmp_path, timeout=1800)
     match = re.search(r"Objective: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
     assert match is not None and float(match.group(2)) < float(match.group(1))
-    # One solve, no stage loop: the line that proves the machinery is gone.
-    assert re.search(r"\[solve\] \d+ L-BFGS-B iterations, \d+ trials, status ", out)
-    assert "[stage 1]" not in out
+    # The stage loop is the machinery this file exists to show.
+    assert re.search(r"\[stage 1\] \d+ L-BFGS-B iterations, \d+ trials, violation = ", out)
     for diagnostic in ("B.n/B: area-weighted RMS", "Minimum coil-surface distance",
                        "Minimum coil-coil distance", "Maximum curvature", "Coil lengths",
                        "Minimum |iota| = ", "Aspect ratio = "):
         assert diagnostic in out
-    summary = json.loads((tmp_path / "single_stage_penalty_summary.json").read_text())
-    assert summary["smoke"] and summary["trials"] >= 1
+    summary = json.loads(
+        (tmp_path / "single_stage_augmented_lagrangian_summary.json").read_text())
+    assert summary["smoke"] and summary["trials"] >= 1 and "stages" in summary
     assert summary["met"] == (not summary["unmet"])
-    assert "stages" not in summary
-    for name in ("wout_single_stage_penalty_optimized.nc",
-                 "single_stage_penalty_objectives.png",
-                 "coils_single_stage_penalty_optimized.vtu"):
+    for name in ("wout_single_stage_augmented_lagrangian_optimized.nc",
+                 "single_stage_augmented_lagrangian_objectives.png",
+                 "coils_single_stage_augmented_lagrangian_optimized.vtu"):
+        assert (tmp_path / name).exists()
+
+
+@pytest.mark.full  # nightly: the joint Gauss-Newton form of the same problem
+def test_fixed_boundary_single_stage_least_squares(tmp_path):
+    """Residual vector and Jacobian rather than a scalar and a gradient."""
+    pytest.importorskip("essos")
+    out = _run_example(
+        EXAMPLES / "optimization" / "single_stage_optimization_least_squares.py",
+        tmp_path, timeout=2400)
+    match = re.search(r"Objective: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    assert match is not None and float(match.group(2)) < float(match.group(1))
+    assert re.search(r"\[solve\] \d+ residual evaluations, \d+ trials, status ", out)
+    summary = json.loads(
+        (tmp_path / "single_stage_least_squares_summary.json").read_text())
+    assert summary["smoke"] and summary["residual_evaluations"] >= 1
+    assert summary["met"] == (not summary["unmet"])
+    for name in ("wout_single_stage_least_squares_optimized.nc",
+                 "single_stage_least_squares_objectives.png",
+                 "coils_single_stage_least_squares_optimized.vtu"):
         assert (tmp_path / name).exists()
 
 
@@ -1066,10 +1086,12 @@ def test_fixed_boundary_single_stage_optimization(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization.py", tmp_path, timeout=1800)
-    # Smoke mode is one stage at fixed multipliers, so its objective must fall.
+    # Smoke mode caps the budget, so only the fall of the objective is asserted.
     match = re.search(r"Objective: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
     assert match is not None and float(match.group(2)) < float(match.group(1))
-    assert re.search(r"\[stage 1\] \d+ L-BFGS-B iterations, \d+ trials, violation = ", out)
+    # One bounded solve and no stage loop: the simplicity this file is named for.
+    assert re.search(r"\[solve\] \d+ L-BFGS-B iterations, \d+ trials, status ", out)
+    assert "[stage 1]" not in out
     for diagnostic in ("B.n/B: area-weighted RMS", "Minimum coil-surface distance",
                        "Minimum coil-coil distance", "Maximum curvature", "Coil lengths",
                        "Minimum |iota| = ", "Aspect ratio = "):
@@ -1177,17 +1199,25 @@ def test_single_stage_examples_use_general_surface_output_and_movie_colors() -> 
 def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
     """Targets are constraints checked at the end; a missed one is a non-zero exit."""
     fixed = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
+    auglag = (EXAMPLES / "optimization"
+              / "single_stage_optimization_augmented_lagrangian.py").read_text()
+    squares = (EXAMPLES / "optimization"
+               / "single_stage_optimization_least_squares.py").read_text()
     free = (EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py").read_text()
-    assert "def augmented_lagrangian(" in fixed and 'method="L-BFGS-B"' in fixed
+    assert "def hinge(" in fixed and 'method="L-BFGS-B"' in fixed
+    assert "def augmented_lagrangian(" in auglag and 'method="L-BFGS-B"' in auglag
     for constraint in ("IOTA_CONSTRAINT", "ASPECT_CONSTRAINT", "NORMAL_FIELD_CONSTRAINT"):
-        assert constraint in fixed
-    # One equilibrium solve and one scalar adjoint per trial: no residual
-    # Jacobian lane and no second residual callback.
-    assert "jax_objective_from_state" in fixed
-    assert "jax_value_and_grad" not in fixed and "jax_residual" not in fixed
+        assert constraint in fixed and constraint in auglag and constraint in squares
+    # One equilibrium solve and one scalar adjoint per trial in the two scalar
+    # lanes: no residual Jacobian and no second residual callback.
+    for source in (fixed, auglag):
+        assert "jax_objective_from_state" in source
+        assert "jax_value_and_grad" not in source and "jax_residual" not in source
+    # The least-squares lane is the one that does ask for a Jacobian.
+    assert "residual_and_jac" in squares and "least_squares(" in squares
     # The free-boundary pullback is host-eager; everything after the solve is jitted.
     assert "@jax.jit\ndef accepted_terms(" in free
-    for source in (fixed, free):
+    for source in (fixed, auglag, squares, free):
         assert "did NOT meet its stated targets" in source
         assert "if unmet and not ci_smoke:\n    raise SystemExit(1)" in source
         assert "_summary.json" in source

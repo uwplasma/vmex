@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-r"""Single-stage fixed-boundary plasma and coil optimization with VMEX + ESSOS.
+r"""Single-stage fixed-boundary optimization as one joint least-squares problem.
 
 The plasma boundary and the coils are optimized together, as one vector of
 Fourier coefficients. VMEX solves the fixed-boundary equilibrium on every trial
@@ -7,26 +7,25 @@ and returns the exact derivative of the converged state through the implicit
 function theorem; ESSOS supplies the coils and their Biot-Savart field, which
 JAX differentiates. The two gradients add, so any SciPy optimizer can drive it.
 
-The objective is
+``single_stage_optimization.py`` sums its terms into a scalar and hands
+SciPy a gradient. This one keeps them as a residual vector r and hands SciPy a
+Jacobian, so a Gauss-Newton step uses the curvature that (1/2) r.T r implies
+instead of rebuilding it from gradients.
 
-    J = (1/2) |r_QS|^2                          quasisymmetry
-      + (1/2) LENGTH_WEIGHT     |L - L_target|^2
-      + (1/2) CURVATURE_WEIGHT  |max(kappa - kappa_max, 0)|^2
-      + COIL_DISTANCE_WEIGHT         * separation penalty
-      + COIL_SURFACE_DISTANCE_WEIGHT * clearance penalty
-      + (1/2) CONSTRAINT_WEIGHT * sum max(-c, 0)^2   for c >= 0
+The joint Jacobian is cheaper than it looks. The plasma residuals depend only
+on the boundary coefficients and the coil residuals are pure JAX, so the block
+coupling plasma rows to coil dofs is identically zero and only the boundary
+columns need the implicit equilibrium Jacobian:
 
-where the last line holds the transform floor, the aspect limit and the coil
-normal-field limit. Each is a one-sided quadratic penalty: it pulls only while
-the target is missed. A penalty settles just INSIDE whatever threshold it is
-given, because its pull vanishes with the violation, so the optimizer is handed
-tightened values and the check at the end uses the real limits.
+    r = [ r_plasma(b)  ]      J = [ J_plasma   0       ]
+        [ r_coil(b, c) ]          [ dr_c/db    dr_c/dc ]
 
-Two companions solve the same problem differently:
-``single_stage_optimization_augmented_lagrangian.py`` puts the three limits in an augmented
-Lagrangian, and ``single_stage_optimization_least_squares.py`` keeps the terms
-as a residual vector for Gauss-Newton. Each is self-contained; read whichever
-you intend to modify.
+Constraint handling is the same as the penalized file, and for a structural
+reason: least squares minimizes a sum of squares, and a one-sided residual
+squared IS a quadratic penalty. So this file inherits that behaviour and needs
+the same tightened thresholds. What differs is the step, not the formulation.
+``single_stage_optimization_augmented_lagrangian.py`` is the form that does
+change it. Each is self-contained; read whichever you intend to modify.
 
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
@@ -41,7 +40,7 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import least_squares, minimize
 
 import vmex as vj
 from vmex import optimize as opt
@@ -112,8 +111,9 @@ CONSTRAINT_WEIGHT = 1.0e3
 # BFGS for that reason -- BFGS cannot represent a bound.
 PARAMETER_BOUND = 3.0
 
-# Budgets. One trial is one equilibrium solve plus one adjoint.
-MAXITER = 200
+# Budgets. One trial is one equilibrium solve plus one Jacobian; the Jacobian
+# costs one implicit solve per boundary column, where the scalar lane pays a
+# single adjoint, so a trial here is dearer but a step should go further.
 MAX_TRIALS = 300
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
@@ -128,7 +128,7 @@ MOVIE_SURFACE_COLOR = "absB"
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 2, 4, 2
+    MAX_TRIALS, COIL_FIT_MAXITER = 4, 2
     N_SEGMENTS, COIL_ORDER, NPHI, NTHETA = 24, 2, 8, 8
 
 ###############################################################################
@@ -152,10 +152,24 @@ inp = replace(inp, rbc=rbc, zbs=zbs, delt=0.5).change_resolution(
 
 # A VmecProblem owns the boundary-mode convention, the dof scaling and the
 # equilibrium solve. Quasisymmetry is its objective; the limits are added below.
+def iota_shortfall(state, ctx):
+    """How far the transform floor is missed; zero once it is met."""
+    return jnp.maximum(IOTA_CONSTRAINT - opt.min_abs_iota(state, ctx), 0.0)
+
+
+def aspect_excess(state, ctx):
+    return jnp.maximum(opt.aspect_ratio(state, ctx) - ASPECT_CONSTRAINT, 0.0)
+
+
+# One-sided rows, so a satisfied target contributes nothing rather than being
+# pulled back to the limit the way an equality residual would be.
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 plasma_problem = opt.VmecProblem.from_tuples(
-    inp, [(qs.residuals_state, 0.0, 1.0)], max_mode=MAX_MODE,
-    use_ess=True, progress=not ci_smoke)
+    inp,
+    [(qs.residuals_state, 0.0, 1.0),
+     (iota_shortfall, 0.0, CONSTRAINT_WEIGHT),
+     (aspect_excess, 0.0, CONSTRAINT_WEIGHT)],
+    max_mode=MAX_MODE, use_ess=True, progress=not ci_smoke)
 
 ###############################################################################
 ### Set up the coils ##########################################################
@@ -210,81 +224,88 @@ def coil_field(coils):
     return lambda points: jax.vmap(field.B)(points.reshape(-1, 3)).reshape(points.shape)
 
 
-def hinge(constraints):
-    """Quadratic penalty for constraints written as c >= 0, normalized by their limits."""
-    return 0.5 * CONSTRAINT_WEIGHT * jnp.sum(jnp.maximum(-constraints, 0.0)**2)
+def safe_sqrt(x):
+    """sqrt with a zero derivative at zero instead of an infinite one.
 
-
-def plasma_objective(u):
-    """Quasisymmetry, the transform floor and the aspect limit.
-
-    One equilibrium solve and one adjoint. Floor the profile minimum rather
-    than its average: a mean target is satisfiable while an interior surface
-    sits near zero transform.
+    The two clearance terms are aggregate hinge losses, so a residual row is
+    their square root -- and that row is exactly zero once the clearance is met,
+    which is where the plain derivative of sqrt is infinite and the very first
+    Jacobian comes back NaN. The doubled where keeps the bad branch out of both
+    the value and the derivative.
     """
-    x = jnp.asarray(x0) + jnp.asarray(scales) * u
-    return plasma_problem.jax_objective_from_state(
-        x[:n_boundary],
-        lambda state, ctx: hinge(jnp.stack([
-            opt.min_abs_iota(state, ctx) / IOTA_CONSTRAINT - 1.0,
-            1.0 - opt.aspect_ratio(state, ctx) / ASPECT_CONSTRAINT])),
-        n_extra_terms=1)
+    positive = x > 0.0
+    return jnp.where(positive, jnp.sqrt(jnp.where(positive, x, 1.0)), 0.0)
 
 
-def coil_objective(u):
-    """Coil regularization and the normal-field limit. Pure JAX, no solve."""
+def coil_residuals(u):
+    """Coil rows: length, curvature, the two clearances, and the normal field."""
     surface, coils = objects_from_x(jnp.asarray(x0) + jnp.asarray(scales) * u)
-    length = jnp.sqrt(LENGTH_WEIGHT) * (coils.length[:N_COILS] - LENGTH_TARGET)
-    curvature = jnp.sqrt(CURVATURE_WEIGHT) * jnp.maximum(
-        coils.curvature[:N_COILS] - CURVATURE_OBJECTIVE_LIMIT, 0.0)
-    costs = jnp.asarray([
-        0.5 * jnp.vdot(length, length),
-        0.5 * jnp.vdot(curvature, curvature),
-        0.5 * COIL_DISTANCE_WEIGHT * loss_coil_separation(
-            coils, COIL_DISTANCE_CONSTRAINT, block_size=32),
-        0.5 * COIL_SURFACE_DISTANCE_WEIGHT * loss_coil_surface_distance(
-            coils, surface, COIL_SURFACE_DISTANCE_CONSTRAINT, block_size=32),
+    normal_field = normal_field_rms(coils, surface) / NORMAL_FIELD_CONSTRAINT
+    return jnp.concatenate([
+        jnp.sqrt(LENGTH_WEIGHT) * (coils.length[:N_COILS] - LENGTH_TARGET),
+        # curvature is per segment, so this block is N_COILS * N_SEGMENTS rows
+        jnp.sqrt(CURVATURE_WEIGHT) * jnp.maximum(
+            coils.curvature[:N_COILS] - CURVATURE_OBJECTIVE_LIMIT, 0.0).ravel(),
+        safe_sqrt(COIL_DISTANCE_WEIGHT * loss_coil_separation(
+            coils, COIL_DISTANCE_CONSTRAINT, block_size=32))[None],
+        safe_sqrt(COIL_SURFACE_DISTANCE_WEIGHT * loss_coil_surface_distance(
+            coils, surface, COIL_SURFACE_DISTANCE_CONSTRAINT, block_size=32))[None],
+        jnp.sqrt(CONSTRAINT_WEIGHT) * jnp.maximum(normal_field - 1.0, 0.0)[None],
     ])
-    normal_field = 1.0 - normal_field_rms(coils, surface) / NORMAL_FIELD_CONSTRAINT
-    return jnp.sum(costs) + hinge(normal_field[None]), costs
 
 
-plasma_value_and_grad = jax.jit(jax.value_and_grad(plasma_objective, has_aux=True))
-coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective, has_aux=True))
+coil_residuals_jit = jax.jit(coil_residuals)
+coil_jacobian_jit = jax.jit(jax.jacfwd(coil_residuals))
 
-# The monitor prints one row per evaluation and records the history for the
-# plot and the movie at the end.
+# The monitor prints one row per evaluation and, through the TRF callback,
+# records each accepted step for the plot and the movie at the end.
 monitor = opt.OptimizationMonitor(plasma_problem)
 counts, cached = {"trials": 0}, {}
-COIL_TERMS = ("coil length", "coil curvature", "coil separation", "coil-surface separation")
+COIL_BLOCKS = ("coil length", "coil curvature", "coil separation",
+               "coil-surface separation", "normal field")
 
 
-def value_and_grad(u):
-    """What SciPy calls: the two halves evaluated once and added."""
+def terms_from_rows(plasma_rows, coil_rows):
+    """(1/2)|r|^2 of each block, so the history plot reads like the scalar files'."""
+    sizes = np.cumsum([N_COILS, coil_rows.size - N_COILS - 3, 1, 1])
+    blocks = [plasma_rows[:-2], plasma_rows[-2:], *np.split(coil_rows, sizes)]
+    names = ("quasisymmetry", "iota and aspect penalty", *COIL_BLOCKS)
+    return {name: 0.5 * float(block @ block) for name, block in zip(names, blocks)}
+
+
+def residual_and_jacobian(u):
+    """Stack the two blocks. SciPy asks for r and J separately at the same
+    point and the equilibrium solve behind them is the expensive part, so the
+    pair is computed once and handed out twice.
+    """
     u = np.asarray(u, dtype=float)
-    if cached.get("key") == u.tobytes():          # SciPy re-asks at the same point
-        return cached["value"], cached["gradient"].copy()
+    if cached.get("key") == u.tobytes():
+        return cached["residual"], cached["jacobian"]
     counts["trials"] += 1
-    (plasma_value, (qs_rows, plasma_penalty)), plasma_gradient = \
-        plasma_value_and_grad(jnp.asarray(u))
-    (coil_value, coil_costs), coil_gradient = coil_value_and_grad(jnp.asarray(u))
-    qs_rows = np.asarray(qs_rows)
-    terms = {"quasisymmetry": 0.5 * float(qs_rows @ qs_rows),
-             "iota and aspect penalty": float(np.asarray(plasma_penalty)[0])}
-    terms.update(zip(COIL_TERMS, map(float, np.asarray(coil_costs))))
-    value, gradient = monitor.cache_evaluation(
-        u, plasma_value + coil_value, plasma_gradient + coil_gradient, terms)
-    cached.update(key=u.tobytes(), value=value, gradient=gradient)
-    return value, gradient.copy()
+    x = x0 + scales * u
+    plasma_rows, plasma_jac = plasma_problem.residual_and_jac(x[:n_boundary])
+    coil_rows = np.asarray(coil_residuals_jit(jnp.asarray(u)))
+    coil_jac = np.asarray(coil_jacobian_jit(jnp.asarray(u)))
+    # plasma_jac is in x; the optimizer works in u, so scale its columns.
+    plasma_jac = np.asarray(plasma_jac) * scales[None, :n_boundary]
+    top = np.hstack([plasma_jac, np.zeros((plasma_jac.shape[0], x_coils0.size))])
+    plasma_rows = np.asarray(plasma_rows)
+    residual = np.concatenate([plasma_rows, coil_rows])
+    jacobian = np.vstack([top, coil_jac])
+    # J.T r is the gradient of (1/2)|r|^2; the monitor reports its norm.
+    monitor.cache_evaluation(u, 0.5 * float(residual @ residual), jacobian.T @ residual,
+                             terms_from_rows(plasma_rows, coil_rows))
+    cached.update(key=u.tobytes(), residual=residual, jacobian=jacobian)
+    return residual, jacobian
 
 
 ###############################################################################
 ### Run the optimization ######################################################
 ###############################################################################
 
-print("Running single_stage_optimization.py")
+print("Running single_stage_optimization_least_squares.py")
 print(f"Fixed-boundary VMEX + ESSOS: {n_boundary} boundary and {x_coils0.size} coil "
-      f"variables, exact reverse-mode derivatives")
+      f"variables, exact Jacobian with a structurally zero plasma-coil block")
 report = opt.EquilibriumReporter(
     ("QA total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("min |iota|", opt.min_abs_iota, ".4f"))
@@ -292,8 +313,9 @@ seed_values = report("seed", plasma_problem.equilibrium_from_x(x_boundary0))
 
 
 def coil_fit_value_and_grad(u):
-    (value, _), gradient = coil_value_and_grad(jnp.asarray(u))
-    return float(value), np.asarray(gradient)
+    rows = coil_residuals_jit(jnp.asarray(u))
+    jac = np.asarray(coil_jacobian_jit(jnp.asarray(u)))
+    return 0.5 * float(jnp.vdot(rows, rows)), jac.T @ np.asarray(rows)
 
 
 # Fit the coils to the frozen seed boundary first, with the boundary pinned by
@@ -310,15 +332,17 @@ print(f"[coil fit] {coil_fit.nit} L-BFGS-B iterations, no equilibrium solves: B.
       f"= {100 * float(normal_field_rms(coils_fit, surface_seed)):.3f}% on the seed")
 
 u = coil_fit.x
-vj.FunctionProblem.from_functions(u, value_and_grad=value_and_grad).compile_value_and_gradient(
-    report_interval=10.0)
-initial_value = monitor.records[0].cost
-result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", callback=monitor,
-                  bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size,
-                  options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
-                           "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
-u, final_value = result.x, float(result.fun)
-print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials, "
+initial_residual, _ = residual_and_jacobian(u)
+initial_value = 0.5 * float(initial_residual @ initial_residual)
+# TRF because it takes the same bounds L-BFGS-B does, and they are active here.
+result = least_squares(
+    lambda v: residual_and_jacobian(v)[0], u,
+    jac=lambda v: residual_and_jacobian(v)[1], method="trf", callback=monitor,
+    bounds=(-PARAMETER_BOUND * np.ones_like(x0), PARAMETER_BOUND * np.ones_like(x0)),
+    max_nfev=MAX_TRIALS, xtol=1e-12, ftol=1e-12, gtol=1e-8,
+    verbose=0)
+u, final_value = result.x, 0.5 * float(result.fun @ result.fun)
+print(f"[solve] {result.nfev} residual evaluations, {counts['trials']} trials, "
       f"status {result.status}: {result.message}", flush=True)
 optimization_seconds = time.perf_counter() - started
 
@@ -366,7 +390,7 @@ final_converged = bool(np.all(np.asarray(final_equilibrium.result.converged)))
 
 final_values = report("final", final_equilibrium)
 print(f"\nObjective: {initial_value:.6e} -> {final_value:.6e} after "
-      f"{result.nit} L-BFGS-B iterations and {counts['trials']} trials")
+      f"{result.nfev} residual evaluations and {counts['trials']} trials")
 print(f"Coil lengths = {np.asarray(coils_final.length[:N_COILS])}")
 print(f"B.n/B: area-weighted RMS = {100 * normal_field_rms_final:.3f}%, "
       f"max = {100 * normal_field_max:.3f}% (target RMS <= "
@@ -401,10 +425,10 @@ else:
     print("\nAll stated targets met.")
 
 summary = {
-    "example": "single_stage_optimization.py", "smoke": ci_smoke,
+    "example": "single_stage_optimization_least_squares.py", "smoke": ci_smoke,
     "optimization_seconds": round(optimization_seconds, 1),
     "coil_fit_iterations": int(coil_fit.nit), "trials": counts["trials"],
-    "lbfgsb_iterations": int(result.nit),
+    "residual_evaluations": int(result.nfev),
     "equilibrium_solves": monitor.records[-1].equilibrium_solves,
     "seed": seed_values,
     "final": {**final_values, "min |iota|": minimum_iota, "aspect": final_aspect,
@@ -420,33 +444,33 @@ summary = {
                 "maximum curvature <=": CURVATURE_LIMIT},
     "unmet": unmet, "met": not unmet,
 }
-Path("single_stage_optimization_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+Path("single_stage_least_squares_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
-input_path = final_input.to_indata("input.single_stage_optimized")
-wout_path = vj.write_wout("wout_single_stage_optimized.nc", final_equilibrium.wout)
-coils_final.to_json("coils_single_stage_optimized.json")
+input_path = final_input.to_indata("input.single_stage_least_squares_optimized")
+wout_path = vj.write_wout("wout_single_stage_least_squares_optimized.nc", final_equilibrium.wout)
+coils_final.to_json("coils_single_stage_least_squares_optimized.json")
 # ESSOS writes |B| and B.n/B on the surface and the filaments for ParaView.
 surface_initial = surfacerzfourier_from_boundary(rbc0, zbs0, NFP, nphi=60, ntheta=60)
-surface_initial.to_vtk("surface_single_stage_initial", field=BiotSavart(coils0))
-coils0.to_vtk("coils_single_stage_initial")
-surface_final.to_vtk("surface_single_stage_optimized", field=BiotSavart(coils_final))
-coils_final.to_vtk("coils_single_stage_optimized")
+surface_initial.to_vtk("surface_single_stage_least_squares_initial", field=BiotSavart(coils0))
+coils0.to_vtk("coils_single_stage_least_squares_initial")
+surface_final.to_vtk("surface_single_stage_least_squares_optimized", field=BiotSavart(coils_final))
+coils_final.to_vtk("coils_single_stage_least_squares_optimized")
 print(f"Wrote {input_path}\nWrote {wout_path}")
-print("Wrote coils_single_stage_optimized.json and single_stage_optimization_summary.json")
+print("Wrote coils_single_stage_least_squares_optimized.json and single_stage_least_squares_summary.json")
 print("Wrote initial and optimized surface/coils VTK files")
 
 print("Plotting results...")
-vj.plot_optimization_objects("single_stage_optimization.png",
+vj.plot_optimization_objects("single_stage_least_squares_optimization.png",
                              ("Initial", surface_initial, coils0),
                              ("Optimized", surface_final, coils_final))
-monitor.save("single_stage_objectives.csv")
-monitor.plot("single_stage_objectives.png", title="Single-stage objective terms")
-print("Wrote single_stage_optimization.png")
-print("Wrote single_stage_objectives.csv and single_stage_objectives.png")
+monitor.save("single_stage_least_squares_objectives.csv")
+monitor.plot("single_stage_least_squares_objectives.png", title="Single-stage least-squares objective terms")
+print("Wrote single_stage_least_squares_optimization.png")
+print("Wrote single_stage_least_squares_objectives.csv and single_stage_least_squares_objectives.png")
 if MAKE_MOVIE:
     print("Making movie of accepted iterates...")
     monitor.movie_surface_coils(
-        "single_stage_optimization.gif", objects_from_x, x0=x0, scales=scales,
+        "single_stage_least_squares_optimization.gif", objects_from_x, x0=x0, scales=scales,
         surface_color=MOVIE_SURFACE_COLOR, plasma_problem=plasma_problem,
         external_field=lambda objects: coil_field(objects[1]), nphi=NPHI, ntheta=NTHETA,
         cmap="jet")

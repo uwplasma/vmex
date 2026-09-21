@@ -87,17 +87,16 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   The scalar lane trades objective progress per evaluation (roughly 3x higher
   objective at a matched budget on the QA workflow) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
-  `single_stage_optimization_penalty.py` *(preview)* is the simplest joint
+  `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
   constraint is a quadratic penalty and the optimizer is one bounded L-BFGS-B
-  solve. `single_stage_optimization.py` *(preview)* is the same problem with
-  the constraints in a Powell-Hestenes-Rockafellar augmented Lagrangian. Both
-  vary a prescribed boundary and coil Fourier coefficients, neither calls a
-  free-boundary solve, and both reach every target at the full budget; the
-  augmented Lagrangian gets there with the limits stated as they are and a 1.4x
-  lower objective, while the penalized file needs tightened thresholds and
-  tuned weights because a quadratic penalty settles just inside whatever
-  threshold it is given. Each docstring carries the measured comparison.
+  solve. `single_stage_optimization_augmented_lagrangian.py` *(preview)* is the
+  same problem with the three limits in a Powell-Hestenes-Rockafellar augmented
+  Lagrangian, and `single_stage_optimization_least_squares.py` *(preview)*
+  keeps the terms as a residual vector for a bounded Gauss-Newton (TRF) solve.
+  All three vary a prescribed boundary and coil Fourier coefficients and none
+  calls a free-boundary solve. Each is self-contained, so one file can be read
+  and modified without opening another.
   `QA_optimization_bootstrap.py`, `QH_optimization_bootstrap.py` and
   `QI_optimization_bootstrap.py` also vary
   a stage-refined current spline against self-consistent Redl, DMerc, and DR
