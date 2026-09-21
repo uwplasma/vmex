@@ -605,8 +605,11 @@ def test_host_callback_refinement_follows_solved_cpu_device(
     leaf = jax.device_put(np.ones((2, 2)), root_device)
     state = im.SpectralState(*(leaf,) * 6)
     host_mask = jax.tree.map(lambda value: np.ones_like(value), state)
-    template = SimpleNamespace(setup=SimpleNamespace(
-        grids=(jax.device_put(np.ones(1), template_device),)))
+    original_template_runtime = im._template_runtime
+    original_template_runtime.cache_clear()
+    with jax.default_device(template_device):
+        template = im._put_numeric_leaves(
+            original_template_runtime(cfg), template_device)
 
     monkeypatch.setattr(
         im, "_host_solve", lambda *_: SimpleNamespace(state=state))

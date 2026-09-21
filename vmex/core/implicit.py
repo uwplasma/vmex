@@ -1849,7 +1849,7 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
         _boundary_pack_tables(cfg)
     refinement_device = (
         cfg.device if cfg.device is not None
-        else _params_committed_device(template.setup.grids) or root_device
+        else _params_committed_device((template.setup.s_full,)) or root_device
     )
     params = _put_numeric_leaves(params, refinement_device)
     state = _put_numeric_leaves(result.state, refinement_device)
