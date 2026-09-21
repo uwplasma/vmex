@@ -162,6 +162,49 @@ def test_periodic_entropy_value_gradient_and_hvp_match_full(
         np.testing.assert_allclose(actual, expected, rtol=3e-8, atol=3e-10)
 
 
+def test_periodic_pairwise_value_jacobian_and_hvp_match_full(
+        winding_helpers, monkeypatch):
+    """One source period preserves both geometric pairwise reductions."""
+    helpers = winding_helpers
+    monkeypatch.setitem(helpers, "nfp", 2)
+    monkeypatch.setitem(helpers, "WINDING_NPHI", 8)
+    monkeypatch.setitem(helpers, "WINDING_NTHETA", 6)
+    winding, rc = _torus_dofs(82, minor=0.9)
+    plasma, _ = _torus_dofs(93, minor=0.65)
+    values = jnp.concatenate((winding, plasma))
+    direction = jnp.asarray(np.random.default_rng(19).normal(size=values.shape))
+    direction /= jnp.linalg.norm(direction)
+    mode_weights = jnp.ones_like(winding)
+
+    def pairwise(value, periodic):
+        winding_dofs, plasma_dofs = jnp.split(value, 2)
+        if periodic:
+            objectives = helpers["_periodic_objectives"](
+                winding_dofs, plasma_dofs, mode_weights, rc)
+        else:
+            points = helpers["points_normals_normal_lengths"]
+            pp, pn, pj, _ = points(plasma_dofs, 2, 2, 2, 8, 6)
+            pw = helpers["surface_quadrature_weights"](pj, 8, 6)
+            objectives = helpers["calc_objectives"](
+                winding_dofs, pp.reshape(-1, 3), pn.reshape(-1, 3),
+                mode_weights, rc, pw)
+        return jnp.stack((objectives[3], objectives[6]))
+
+    def evaluate(periodic):
+        def fun(value):
+            return pairwise(value, periodic)
+
+        jacobian = jax.jacrev(fun)
+        return jax.jit(lambda value: (
+            fun(value), jacobian(value),
+            jax.jvp(jacobian, (value,), (direction,))[1]))(values)
+
+    full, reduced = evaluate(False), evaluate(True)
+    for expected, actual in zip(full, reduced):
+        assert np.all(np.isfinite(actual))
+        np.testing.assert_allclose(actual, expected, rtol=3e-8, atol=3e-10)
+
+
 @pytest.mark.parametrize("matrix", [
     [[3.0, 1.0], [1.0, -2.0]],
     [[3.0, 2.0], [-1.0, 4.0]],
