@@ -127,7 +127,7 @@ def _require_vcj() -> None:
             "vmex.core.virtual_casing requires the optional dependency "
             "'virtual_casing_jax' (canonical repository "
             "https://github.com/uwplasma/virtual_casing_jax). Install it "
-            "with `pip install vmex[freeb]` (virtual-casing-jax>=0.0.5)."
+            "with `pip install vmex[freeb]` (virtual-casing-jax>=0.0.7)."
         ) from _IMPORT_ERROR
 
 
