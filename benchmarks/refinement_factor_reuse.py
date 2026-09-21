@@ -21,6 +21,7 @@ import scipy.optimize
 import vmex
 from vmex import optimize as opt
 from vmex.core import implicit as imp
+from vmex.core import optimize as core_opt
 from vmex.core.input import VmecInput
 
 from _provenance import assert_repo_vmex, file_sha256, git_state
@@ -311,7 +312,7 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
         term_rows.append({"name": name, "norm": float(np.linalg.norm(values)),
                           "max_abs": float(np.max(np.abs(values)))})
     final_jacobian = jacobians.get(digest(result.x))
-    checkpoint = {"x": np.asarray(result.x), "residual": np.asarray(result.fun)}
+    checkpoint = {"x": np.asarray(result.x)}
     if final_jacobian is not None:
         checkpoint.update(
             singular_values=np.linalg.svd(final_jacobian, compute_uv=False),
@@ -320,6 +321,10 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
     state, runtime, state_status = jax.device_get(
         problem.metadata["jax_state_runtime_status"](jnp.asarray(result.x)))
     params = imp.params_from_input(problem.input_from_x(result.x))
+    state_rows = np.asarray(
+        problem.metadata["jax_residual_from_state"](state, runtime))
+    certificate = imp.measure_primal_state(params, state, mask, cfg)
+    checkpoint["residual"] = state_rows
     checkpoint["state_status"] = np.asarray(state_status)
     checkpoint.update({
         f"state_{name}": np.asarray(getattr(state, name))
@@ -329,6 +334,14 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
         f"input_{name}": np.asarray(getattr(params, name))
         for name in params.__dataclass_fields__
     })
+    _, _, _, fields, _ = core_opt._field_chain(state, runtime)
+    bsq = np.asarray(fields.total_pressure - fields.pressure[:, None, None])
+    bmag = np.sqrt(np.maximum(2.0 * bsq[-1], np.finfo(bsq.dtype).tiny))
+    checkpoint.update(
+        native_bmag=bmag,
+        native_bmin_flat_index=np.asarray(np.argmin(bmag)),
+        native_bmax_flat_index=np.asarray(np.argmax(bmag)),
+    )
     qi_term = problem.metadata["benchmark_qi"]
     if qi_term is not None:
         diagnostics = jax.device_get(qi_term.compute_state(state, runtime))
@@ -347,6 +360,11 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
             "njev": int(result.njev), "cost": float(result.cost),
             "optimality": float(result.optimality), "x": digest(result.x),
             "residual": digest(result.fun), "terms": term_rows,
+            "saved_state_status": int(state_status),
+            "saved_state_primal_certificate": certificate,
+            "saved_state_residual": digest(state_rows),
+            "saved_state_residual_max_difference": float(
+                np.max(np.abs(state_rows - result.fun))),
         },
         "history": history,
     }, checkpoint
@@ -398,13 +416,13 @@ def main():
         "benchmarks/refinement_factor_reuse.py", f"--case {args.case}",
         f"--arm {args.arm} --max-nfev {args.max_nfev} --rtol {args.rtol}",
         "--audit-fresh" if args.audit_fresh else "",
-        "--state-input <state.npz>" if args.state_input else "",
-        "--state-output <state.npz>" if args.state_output else "",
+        "--state-input state.npz" if args.state_input else "",
+        "--state-output state.npz" if args.state_output else "",
         (f"--aspect-error-tol {args.aspect_error_tol} "
          f"--iota-violation-tol {args.iota_violation_tol}"
          if args.aspect_error_tol is not None else ""),
         "--qi-gates" if args.qi_gates else "",
-        "--output <output.json>",
+        "--output output.json",
     )))
     report = {
         "schema": 1, "case": args.case,
