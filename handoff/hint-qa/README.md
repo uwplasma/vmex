@@ -255,7 +255,11 @@ B difference is 0.0882%. This makes Fourier truncation a material confounder
 of radial attribution. Qualify measurement on the new state and separate the
 next poloidal/toroidal truncation check before extending the radial ladder.
 The runner retained convergence and iteration count, but not final FSQ channels
-or output current/flux/pressure scalars; those cannot be claimed from this run.
+or output current/flux/pressure scalars; those cannot be claimed from this run. Future
+runs now record these fields explicitly; the metadata extension passed a small
+Solovev full-pipeline check. `CURTOR` is an input constraint only in the
+current-constrained mode (`NCURR=1`); full-mesh WOUT edge pressure is an
+extrapolated output, distinct from the prescribed boundary pressure.
 
 To reproduce the force screen, set `VMEX_SOURCE` to a clean checkout of the
 pinned main revision, create `results`, and run from the HINT handoff branch:
@@ -397,6 +401,23 @@ and retains the full ten-sample means and provenance. Term closure remained
 below `6.63e-15` relative. No physical-time extrapolation or equilibrium
 acceptance follows from this one block. Its endpoint has not been reused.
 
+A drive-off control from the identical time-1.08 restart changed only `inet0`
+to zero (`inet1` was already zero). The first attempt failed before evolution
+because field inputs were missing. The corrected attempt completed 1,000
+updates and ten finite logged samples, then failed writing a read-only restart
+copy. Its checkpoint remains at time 1.08: there is no saved endpoint or
+independent endpoint-field audit. The [record](current-drive.json) preserves
+both failures and explicitly labels the series partial observational evidence.
+Within that in-memory block, imposed current/rate terms are exactly zero,
+term closure is below `2e-15` relative, and pressure-mask current changes from
+`-17.6924` to `-16.0019 kA`; the driven control ends at `-18.6472 kA`.
+Both force normalizations decrease monotonically, with final relative residual
+`0.00936965` versus the driven `0.0128942`. This supports investigating the
+competition between imposed drive and the opposing response; it does not
+justify changing the physical target or certify a steady equilibrium. No
+third run was made. A future controlled endpoint requires writable-copy
+preflight and successful checkpoint output before any exterior-field audit.
+
 The tested extended source SHA-256 is
 `21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488`.
 On a two-update mature-restart fixture, the previous binary with diagnostics
@@ -503,6 +524,13 @@ The 0.5% deck remains byte-identical to `coarse.in`, and both current tables
 match the historical published tables. The final metadata-capable runner was rerun through both native tools; all
 NetCDF variables and both decks match the pinned run exactly. Fine-grid numerical
 preparation and complete equilibrium reproduction remain unqualified.
+
+Before a restart control, inventory every read-side file named by the deck
+and verify its reference hash, readability and dimensions. HINT follow mode
+reads and later updates `hint.nc`; use a regular private copy with owner write
+permission and verify that permission before MPI launch. Keep the retained
+checkpoint immutable. Field-input existence alone is insufficient: a copied
+read-only restart can evolve successfully and fail only at final NetCDF output.
 
 ## Execution order and research acceptance
 

@@ -54,7 +54,12 @@ Execute three independent bounded lanes now:
    term-rate diagnostic shows active imposed drive opposed by response and
    ideal terms, with net -9.55 kA/code-time. The original-length block to
    time 1.18 confirms continuing current relaxation; force improves overall
-   but rebounds after 1.16. Resolve that behavior before a long campaign.
+   but rebounds after 1.16. A drive-off control reverses the current trend
+   and improves both force normalizations over the same block; its final
+   checkpoint write failed due a read-only restart copy. Preserve the complete
+   logged series as partial evidence, plus the earlier missing-input failure.
+   Repair preflight/output handling before requesting an auditable endpoint;
+   neither the drive-off trajectory nor the driven block is an equilibrium.
 3. Complete the reproducible preprocessing and raw-data package. The published
    compact native samples reproduce all six field metrics, but do not recreate
    an equilibrium without the missing prepared fields and restart assets.

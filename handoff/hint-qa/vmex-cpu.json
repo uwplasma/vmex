@@ -797,7 +797,7 @@
     },
     "portable_runner_validation": {
       "script": "diagnose-force.py",
-      "published_script_sha256": "0f1929465098780672bc8c13747b97d5fcd41ee49243a15294d302fca913b1c1",
+      "published_script_sha256": "545b628866b3b968187227bb5cc8b731b9ca7e25fd3609967e7b584b087a27c4",
       "checks": [
         "syntax",
         "help",
@@ -824,7 +824,22 @@
           "samples_sha256": "9cdf9384a388e01627e0517c506b317dbf1c958b62c6d36794fcdf09e041bf57"
         }
       ],
-      "scope": "Existing numeric JSON metrics unchanged apart from resource/timing fields; five radial-bin metrics added. No continuum or GPU certificate."
+      "scope": "Existing numeric JSON metrics unchanged apart from resource/timing fields; five radial-bin metrics added. No continuum or GPU certificate.",
+      "numerically_executed_qa_script_sha256": "0f1929465098780672bc8c13747b97d5fcd41ee49243a15294d302fca913b1c1",
+      "metadata_extension_validation": {
+        "script_sha256": "545b628866b3b968187227bb5cc8b731b9ca7e25fd3609967e7b584b087a27c4",
+        "case": "small Solovev",
+        "source_head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+        "iterations": 215,
+        "elapsed_seconds": 60.93,
+        "arrays_finite": 17,
+        "fields_added": [
+          "final native FSQ channels, sum and max",
+          "prescribed input flux/current/pressure",
+          "full-mesh WOUT flux/current/pressure/volume"
+        ],
+        "scope": "Full diagnostic pipeline passed on the small case; QA numerical evaluation code unchanged and not rerun for this metadata-only extension."
+      }
     },
     "angular_quadrature_study": {
       "coordinates": {
