@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "observation": {
+    "status": "completed",
+    "exit_code": 0,
+    "diagnostic_semantics": "first cal_energy sample after 100 magnetic updates from retained restart; diagnostic-only block cap",
+    "context": {
+      "j_type": "linear",
+      "iab": 1,
+      "istepb": 100,
+      "timeb": 0.009999999999999995,
+      "global_time": 1.0900000000000185,
+      "step_start_paxis_mu0_Pa_over_B0_squared": 0.00242711332551286,
+      "target_current_A": -95778.34986522896,
+      "jcuts": 1.0,
+      "volume0_code": -0.0629358114899968,
+      "volume1_code": 0.0,
+      "netj0_code": 0.2317194794277555,
+      "netj1_code": 0.0
+    },
+    "source_mask": {
+      "active_cell_count": 14893,
+      "ss_min": 0.0,
+      "ss_max": 0.9999563660074586,
+      "Bphi_over_B0_min": 0.6301890578766978,
+      "Bphi_over_B0_max": 0.7722704039649262
+    },
+    "source_current_A": {
+      "cut0": -95778.34986522917,
+      "min": -95880.88701670032,
+      "mean": -95672.99150774673,
+      "max": -95518.54363729444,
+      "mean_fraction_of_target": 0.9988999773160586,
+      "peak_to_peak_A": 362.3433794058801
+    },
+    "source_cancellation": {
+      "cut0_absolute_integral_A": 95778.34986522917,
+      "cut0_signed_over_absolute": -1.0
+    },
+    "attained_same_mask_A": {
+      "cut0": -24047.46372565527,
+      "min": -24047.46372565527,
+      "mean": -19062.80777448137,
+      "max": -14514.74575787456,
+      "mean_fraction_of_target": 0.19903044687348354
+    },
+    "attained_positive_pressure_A": {
+      "cut0": -23092.24109393784,
+      "min": -23092.24109393784,
+      "mean": -17783.72271393783,
+      "max": -13107.08755650267,
+      "mean_fraction_of_target": 0.18567581023228688
+    },
+    "mpi_max_seconds": 0.0004694860000000745,
+    "history_pressure_current_A": -17783.722714,
+    "finite_output": true,
+    "limitation": "One 100-step diagnostic block only. This tests native source/attained accounting near the retained state; it is not a relaxation, convergence, or production endpoint.",
+    "field_definitions": {
+      "current_scale_A": "rmaj0*b0*dr*dz/mu0 per interior R-Z cell",
+      "cut_statistics_order": [
+        "cut0 (global toroidal index 1)",
+        "minimum signed integral over 32 toroidal cuts",
+        "mean signed integral over 32 toroidal cuts",
+        "maximum signed integral over 32 toroidal cuts"
+      ],
+      "source_current_A": "sum(current_scale_A*jphin) over unique owned derivative-interior cells satisfying ss<jcuts; jphin is the imposed parallel-source toroidal component formed by cal_netj from the total Bphi and normalized profile",
+      "attained_same_mask_A": "sum(current_scale_A*jphi1) over the identical ss<jcuts cells; jphi1 is the toroidal component of curl(response field) computed by cal_j before cal_netj, not total or parallel current",
+      "attained_positive_pressure_A": "sum(current_scale_A*jphi1) over p1b>0, exactly the support and quantity used by native history current",
+      "source_mask_active_cell_count": "sum of unique interior source-mask cells across every toroidal cut (not a per-cut count)",
+      "source_mask_ss_and_Bphi_extrema": "global extrema on ss<jcuts; ss is the step-start traced flux label and Bphi is normalized by B0",
+      "source_cancellation": "cut0 sum(abs(cellwise source current)) and signed_source/absolute_source",
+      "step_start_paxis": "axis pressure traced before the step-B substep loop, in mu0*Pa/B0^2; not retraced at diagnostic time",
+      "mpi_max_seconds": "maximum rank elapsed wall time around cal_volume, source formation, source halo exchange and its barrier; excludes subsequent diagnostic reductions/output"
+    },
+    "interpretation": "The imposed source is supported and normalized as intended, while curl(response) is much smaller at this one mature-state sample. This does not by itself prove a drive implementation defect: the measured attained toroidal response includes perpendicular-current effects and may reflect relaxation/Faraday/resistive timescales. A controlled next measurement should resolve rate-of-change and Ohm/Faraday contributions before another eta variation."
+  },
+  "provenance": {
+    "restart": {
+      "sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+      "snapshots": 19,
+      "last_time": 1.0800000000000185,
+      "parent_sha256": "b801cd321fce9473efd668143409f06efdc7166003fcd1a47e7b8ebb3a38ff62",
+      "parent_last_time": 0.8800000000000148
+    },
+    "input": {
+      "sha256": "847189783892763b5cf62c5a606117ba1f07c6d82252dd89a916f76b350095cc",
+      "baseline_input_sha256": "1da9cc2877c6c22ad2028d1b91155e38c8c0199a7ce3bc4a052d586d766a731e",
+      "changes": [
+        "nstep 2 -> 1 (outer cap)",
+        "nstepb 1000 -> 100 (diagnostic-only block cap)",
+        "lcurrent_drive_diag false/default -> true"
+      ],
+      "unchanged_key_settings": {
+        "mpi": "1x1x4",
+        "dt_b": 0.0001,
+        "nenergyb": 100,
+        "nrefb": 100,
+        "nsmoothb": 1,
+        "eta0": 0.001,
+        "eta1": 0.0,
+        "eta_diff": 1.0,
+        "kappa_divb": 0.0001,
+        "j_type": "linear",
+        "jcuts": 1.0,
+        "inet0_A": -95778.34986522896,
+        "pressure_reset": false
+      }
+    },
+    "source": {
+      "stepb_mod_sha256": "bc4913186bd6de2a0118ba9f1e65a252160420cc47d62733abd0fc398c2e8fc2",
+      "source_manifest_sha256": "f96ee2dedaf55f6a374a8d71b24a112b49bae8ab484aeb38b3fbde0fd0f391a7",
+      "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+      "patches": [
+        "hint-portability.patch",
+        "hint-diagnostics.patch"
+      ]
+    },
+    "build": {
+      "binary_sha256": "5d66d706823a9e517cd6c0a391d21e92abee88ba6413d1c7363991b73302f2a6",
+      "compiler": "conda-forge GNU Fortran 13.4.0 via Open MPI wrapper",
+      "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2"
+    },
+    "execution": {
+      "mpi_ranks": 4,
+      "omp_threads": 1,
+      "exit_code": 0,
+      "elapsed_wall_seconds": 51.2,
+      "swaps": 0
+    },
+    "output": {
+      "sha256": "7aa9a5d37e0233165cc319c73bdaf1455c823dd75f7347c94cecfc5a2d1b4449",
+      "snapshots": 20,
+      "last_time": 1.0900000000000185,
+      "all_last_fields_finite": true
+    },
+    "warning": "The shortened 100-step block matches the first 100 magnetic updates of the retained settings. Its endpoint is not cadence-identical beyond that block and must not be reused as production state without deliberation."
+  },
+  "reproduction_limit": "Hash-identified raw restart and prepared native inputs are not yet in a downloadable public dataset. This record is evidence of the bounded run, not an independently reproduced equilibrium."
+}

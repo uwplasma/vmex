@@ -157,6 +157,22 @@ zero-drive guard check emitted four finite, zero-source records without
 reading uninitialized normalization volumes. The tested final source hash is
 `bc4913186bd6de2a0118ba9f1e65a252160420cc47d62733abd0fc398c2e8fc2`.
 
+A subsequent [later-time diagnostic](current-drive.json) restarted the retained
+state at code time 1.08 and completed one outer block of 100 magnetic updates
+at `dt_b=1e-4`, reaching 1.09. The shortened block is diagnostic-only; it does
+not preserve the production cadence beyond those updates. Four MPI ranks and
+one OpenMP thread completed in 51.2 s. The imposed source cut-zero current was
+-95.778350 kA and its cut mean -95.672992 kA, with no sign cancellation.
+Attained current on the same `ss<1` support averaged **-19.062808 kA (19.903%
+of target)**; the positive-pressure comparator averaged -17.783723 kA and
+matched native history. Thus differing masks alone do not explain the deficit.
+Source normalization is working at this measured state; the dynamical cause
+remains unresolved. Curl-derived response current also includes perpendicular current,
+so equality to the imposed parallel-current source is not itself a valid
+zero-residual condition. Next measure the evolution/current balance and its
+resistive timescale before another broad relaxation or resistivity scan. Raw
+restart assets remain necessary for independent reproduction.
+
 New native postprocessing at the same 192 targets separates the cross-grid
 field differences: total RMS/max **0.243516/1.701148 mT**, vacuum
 **0.232940/1.697470 mT**, plasma response **0.074009/0.321955 mT**.
@@ -200,9 +216,9 @@ reproduced equilibrium result.
    Repeat a small matched CPU/GPU case before expensive runs. Check live
    parameter derivatives rather than differentiating cached field snapshots.
    Do not impose the removed historical universal certificate on new solvers.
-3. **Resolve HINT current closure before extending runtime.** Save the actual
-   flux label, imposed current and traced axis pressure at a native drive
-   update. A snapshot reconstruction using maximum pressure as axis pressure
+3. **Resolve HINT current closure before extending runtime.** Use the measured later-time source/support accounting above as the
+   baseline; next resolve current evolution and Ohm/Faraday balance. Save the
+   actual flux label, imposed current and traced axis pressure at native updates. A snapshot reconstruction using maximum pressure as axis pressure
    is insufficient. Integrate current on multiple cuts and separately inside
    pressure support, return-current shells and wall. Near-zero all-domain
    current is not automatically a bug or a failed plasma-current target.

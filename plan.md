@@ -21,9 +21,10 @@ Execute three independent bounded lanes now:
 1. Qualify the integrated VMEX 0.5% root, physical diagnostics and captured
    CPU/GPU field/response arrays. Follow with exact-case FD/Taylor/duality and
    free-boundary repeatability; a finite example output is not a gradient oracle.
-2. Apply the tested native current diagnostic to a retained later-time HINT
-   continuation. Compare imposed and attained currents on the same support and
-   cuts before extending relaxation or changing resistivity.
+2. Resolve HINT current evolution and Ohm/Faraday balance before extending
+   relaxation or changing resistivity. The bounded later-time diagnostic now
+   confirms source normalization, while attained response current on the same
+   support averages only 19.903% of the target at code time 1.09.
 3. Complete the reproducible preprocessing and raw-data package. The published
    compact native samples reproduce all six field metrics, but do not recreate
    an equilibrium without the missing prepared fields and restart assets.
@@ -35,8 +36,8 @@ free-boundary equilibrium, and preserve the known 2.5% coil/WOUT mismatch.
 The fresh-grid response RMS/max differences of 0.074009/0.321955 mT are startup
 diagnostics, not inter-code error or equilibrium convergence. Current CPU root
 and #409 exterior-example checks pass; native diagnostics pass short serial/MPI,
-off/on and zero-source controls. Later-time current closure, integrated GPU
-parity and research acceptance remain open. See the protocol for exact sources,
+off/on and zero-source controls. The later-time accounting measurement passes; current closure, integrated
+GPU parity and research acceptance remain open. See the protocol for exact sources,
 commands, metrics, test scope and publication gates.
 
 Authoritative plan, revised **2026-09-13** by an independent review of the
