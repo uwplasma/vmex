@@ -74,6 +74,7 @@ jobs:
             booz_xform_jax==0.4.0 virtual-casing-jax==0.0.7 \
             essos==0.17 neo-jax==1.0.2 gkx==1.8.0
           python -m pip check
+          python -c "import essos, gkx, virtual_casing_jax, neo_jax"
       - name: Check real integration calls and derivatives
         run: |
           pytest -q -o addopts= -o usefixtures=_module_jit_enabled \
