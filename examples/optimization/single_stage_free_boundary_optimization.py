@@ -120,10 +120,11 @@ tuples = [(qs.residuals_state, 0.0, 1.0),
 # pullback stages a Krylov loop under a trace -- but jitting it silently gives
 # up the boundary-Schur adjoint this configuration asks for, because that lane
 # runs on the host and cannot be staged, and the staged coupled lane that
-# replaces it is the slower one: measured here at ns = 25, one value-and-
-# gradient costs 46.5 s through the Schur lane against 60.9-74.7 s staged.
-# Every term after the solve is compiled once here and reused by each trial,
-# which is where jit does pay.
+# replaces it is the slower one: measured here at ns = 25, one warm value-and-
+# gradient costs 5.1 s through the Schur lane against 38.6 s staged, and the
+# two gradients agree only to 0.1%, the Krylov tolerance.  Every term after the
+# solve is compiled once here and reused by each trial, which is where jit does
+# pay.
 @jax.jit
 def accepted_terms(equilibrium_state, u):
     residual = opt.residuals_from_tuples(equilibrium_state, solver_context, tuples)

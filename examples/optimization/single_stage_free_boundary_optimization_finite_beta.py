@@ -168,8 +168,8 @@ print("Solving the optimized finite-beta free boundary for output...")
 # The optimizer's solves are hot-restarted from the previous trial; this one
 # starts cold, and on the single NS = 31 rung the deck carries it stops at the
 # 2500-iteration cap with fsqr = 5.5e-8 against FTOL = 1e-9.  A coarse rung
-# first converges it in 365 iterations and is also faster end to end (43.6 s
-# against 49.2 s for the failed single rung).  A remaining miss is reported
+# first converges it in 365 iterations and is also faster end to end (30.2 s
+# against 32.4 s for the failed single rung).  A remaining miss is reported
 # below rather than raised, so the run still writes its record.
 ladder = np.array([NS]) if NS <= 15 else np.array([15, NS])
 free_result = vj.solve_free_boundary_multigrid(
@@ -216,7 +216,7 @@ Path("single_stage_free_boundary_optimization_finite_beta_summary.json").write_t
         "optimization_seconds": round(time.perf_counter() - started, 1),
         "trials": trials["count"], "lbfgsb_iterations": int(iterations),
         "stop_reason": stop_reason,
-        "free_boundary_solves": trials["count"] + 1,
+        "free_boundary_solves": trials["count"] + int(ladder.size),
         "final": {"QA": final_qa, "bootstrap": final_boot, "beta": final_beta,
                   "aspect": final_aspect, "min |iota|": minimum_iota,
                   "maximum curvature": maximum_curvature,

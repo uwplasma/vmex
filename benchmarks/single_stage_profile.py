@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Profile the two single-stage optimization examples end to end.
+"""Profile the three single-stage optimization examples end to end.
 
 Each example runs in a fresh process inside an empty temporary directory, so
 compilation, the optimization, the verification solve and every output file
