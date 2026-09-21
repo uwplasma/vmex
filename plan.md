@@ -1,53 +1,43 @@
 # VMEX research plan
 
-**HINT comparison review, 2026-09-21.** The dedicated
-[finite-beta QA protocol](handoff/hint-qa/README.md) now distinguishes historical
-measurements from qualification of main at `f719c4ff`. This does not replace
-the product phases below or mark Phase G complete. PR #302 retires its old
-universal primal gate and refinement/cache implementation in favor of current
-main's solver paths. Its proposed per-span radial sampling rejection is also
-retired: review found it unnecessarily rejects valid custom spline grids;
-future admission must assess the effective constrained fit's rank/conditioning.
-Historical CPU/GPU root and directional-gradient results require fresh
-validation. Open #409 fixes a surface-field regression after #403; draft #410
-owns dependency-floor validation. Check their live state before freezing a
-new comparison baseline.
+**HINT comparison checkpoint, 2026-09-21.** Main remains `f719c4ff`; the
+HINT branch already contains it. The compact [QA protocol](handoff/hint-qa/README.md)
+is the canonical study plan and evidence record. The proposed replacement
+product plan [#413](https://github.com/uwplasma/vmex/pull/413) remains open;
+reconcile its six research lanes after integration rather than retaining two
+operational queues. The historical product plan below is unchanged here.
 
-The next HINT work is ordered by evidence: (1) validate the integrated VMEX
-baseline, (2) capture HINT's actual imposed-current update and diagnose the
-large attained-current deficit, (3) establish matched-time/grid/wall/trace
-convergence at 0.5%, (4) compare total and response fields with separate error
-budgets, (5) qualify 2.5% and common-tracer topology. Current-source derivative
-and optimization validation can proceed independently after a qualified root;
-it does not waive these equilibrium gates. The fresh two-grid startup pair
-has response-field RMS/max differences 0.074009/0.321955 mT at 192 fixed
-targets after native vacuum subtraction. This is diagnostic evidence, not
-an accepted equilibrium or a HINT–VMEX discrepancy. The protocol records
-remaining reproducibility and foundational-paper access gaps explicitly.
+The HINT branch retires its obsolete solver/cache/refinement implementation;
+it adds no VMEX solver changes. Historical CPU/GPU and derivative evidence
+must be requalified. Open #409 fixes live surface assembly, #410 owns dependency
+floor validation, #416 fixes history-dependent free-boundary recovery, and
+#417 ties derivative admission/reuse to measured refined states. Require review
+and current checks, then test the integrated revision on the exact QA cases.
+The rank-based lift candidate #414 supersedes the rejected per-span sampling
+rule; neither it nor #412's force-reporting work certifies general 3-D polishing.
 
-Follow-through: the public sampler and compact 192-point sample arrays now
-reproduce every reported total/vacuum/response metric and array hash; portable
-fresh-start decks retain the measured numerical controls and current tables.
-A clean sampler build passes a constant-field test. Large raw fields and
-preprocessing assets still need a publication dataset. A current-main CPU
-root screen retains the full 0.5% deck resolution and converges with finite
-state, but its host FSQ is not an independent physical-force certificate.
-The focused #409 surface-assembly regression and exact 0.5% outside-field
-example also pass in an isolated checkout at `aabedb8f`, with SOLVAX 0.21,
-Boozer 0.4, virtual-casing 0.0.7 and ESSOS 0.17. The latter checks finite/nonzero
-field and VJP outputs through third spatial order; it is not FD/duality or
-physical-force certification. Required GitHub review/CI and matched GPU
-validation remain separate gates. Native drive diagnostics must compare source and attained
-currents on the same support and cuts, because the existing HINT history
-uses a different mask and toroidal average from the imposed-current target.
-The opt-in native diagnostic is now implemented as a separate patch and
-tested on a short 64x64x32 fixture: the imposed cut-zero current matches
--95.778 kA while attained same-support and pressure-support currents differ.
-One-rank diagnostic off/on field and history files are byte-identical;
-two-rank records agree except for timing; the zero-source control is finite.
-This validates the measurement path, not a mature equilibrium. Next apply it
-to a bounded later-time continuation and inspect cut variation and source
-support before extending the relaxation campaign.
+Execute three independent bounded lanes now:
+
+1. Qualify the integrated VMEX 0.5% root, physical diagnostics and captured
+   CPU/GPU field/response arrays. Follow with exact-case FD/Taylor/duality and
+   free-boundary repeatability; a finite example output is not a gradient oracle.
+2. Apply the tested native current diagnostic to a retained later-time HINT
+   continuation. Compare imposed and attained currents on the same support and
+   cuts before extending relaxation or changing resistivity.
+3. Complete the reproducible preprocessing and raw-data package. The published
+   compact native samples reproduce all six field metrics, but do not recreate
+   an equilibrium without the missing prepared fields and restart assets.
+
+Then establish matched time/grid/wall/trace convergence at 0.5%, compare total
+and response fields with separate error budgets, and qualify 2.5% and common-
+tracer topology. Keep prescribed-boundary reconstruction separate from matched
+free-boundary equilibrium, and preserve the known 2.5% coil/WOUT mismatch.
+The fresh-grid response RMS/max differences of 0.074009/0.321955 mT are startup
+diagnostics, not inter-code error or equilibrium convergence. Current CPU root
+and #409 exterior-example checks pass; native diagnostics pass short serial/MPI,
+off/on and zero-source controls. Later-time current closure, integrated GPU
+parity and research acceptance remain open. See the protocol for exact sources,
+commands, metrics, test scope and publication gates.
 
 Authoritative plan, revised **2026-09-13** by an independent review of the
 2026-09-06 plan (merged as [#283](https://github.com/uwplasma/vmex/pull/283),

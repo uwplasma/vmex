@@ -16,6 +16,9 @@ outside the given boundary, then a separately matched free-boundary study.
 | [SOLVAX #104](https://github.com/uwplasma/SOLVAX/pull/104) | Tested head `e4b507185464851ac5e8de22041f2f8e384554e9`, merged as `66f97a6e0eb758af8d7f46939ffdd8ec733efbef`; released in 0.21.0. Use at least 0.21.0 for its rejection of nonfinite nonlinear roots. |
 | [VMEX #409](https://github.com/uwplasma/vmex/pull/409) | Open at review: fixes the surface-field assembly regression introduced by #403. Include its reviewed fix before current-source field qualification. |
 | [VMEX #410](https://github.com/uwplasma/vmex/pull/410) | Open draft at review: owns dependency-floor changes. Complete exact-floor validation there rather than duplicate it here. |
+| [VMEX #416](https://github.com/uwplasma/vmex/pull/416) | Open candidate: removes history-dependent suppression of free-boundary cold recovery. Qualify repeated accepted points after rejected trials on the integrated source. |
+| [VMEX #417](https://github.com/uwplasma/vmex/pull/417) | Open candidate: anchors derivative admission and reuse to measured refined coefficients. Exact-case QA and GPU evidence remain necessary. |
+| [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
 
 Current main has raw block Newton/adjoint solves, deterministic free-boundary
 reference selection (#383), structured factor reuse (#395), a retained-array
@@ -184,7 +187,10 @@ reproduced equilibrium result.
 ## Execution order and research acceptance
 
 1. **Freeze a working baseline.** Incorporate the reviewed #409 fix and
-   validate #410's floors. Pin all source commits, dirty patches, input hashes,
+   validate #410's floors. Include accepted #416 recovery changes before
+   free-boundary qualification and #417 state/derivative changes before
+   sensitivity claims; candidate evidence is not integrated-main evidence.
+   Pin all source commits, dirty patches, input hashes,
    Python/JAX/compiler/MPI versions and device placement. Use `current` for
    HINT. Keep source-data and quadrature error distinct; `project_current`
    is an opt-in model change, not an invisible accuracy switch.
@@ -207,7 +213,12 @@ reproduced equilibrium result.
    divergence, force balance and parallel pressure variation. Retain at least
    three levels where a convergence order is claimed. Progress to 2.5% only
    after the procedure passes, preserving its original mismatch.
-5. **Compare fields before topology.** Establish coil-only agreement with
+5. **Compare fields before topology.** Keep prescribed-boundary exterior
+   reconstruction and matched free-boundary equilibrium comparisons separate.
+   The former does not certify free-boundary force balance; the latter must
+   match external coils, flux and pressure/current constraints. VMEX's nested
+   surfaces and HINT's possible non-nested structure are distinct model scopes.
+   Establish coil-only agreement with
    direct Biot–Savart; compare total, vacuum and plasma-response vectors at
    fixed targets in tesla and relative to the response. Include distance
    bins, maximum errors and target classification against WOUT, relaxed
@@ -255,6 +266,17 @@ their inputs explicitly. Their successful execution is a software check, not
 a HINT acceptance gate. Fix #409 before their surface-field paths are used.
 Do not carry a second implicit solver or a duplicated historical helper suite
 in this branch.
+
+Reuse these examples as API references, preserving the benchmark physics.
+`vmex_fixed_free_boundary_comparison.py` restricts a parent plasma and refits
+coil currents; its result is not the unchanged QA comparison.
+`vmex_fieldline_tracing_finite_beta.py` uses first-order near-surface
+continuation and a distance cutoff. Quantitative island widths require an
+independent continuation/field-accuracy study, not only tighter tracer tolerance.
+The optional strong-force work in #412/#414 is supporting research, not a
+prerequisite to every field comparison or proof of general 3-D convergence.
+Use a common mesh and independent force oracle; separate native-state error
+from WOUT export/refitting error.
 
 Existing CPU qualification entry points, with dependencies installed from the
 chosen pinned baseline, include:
