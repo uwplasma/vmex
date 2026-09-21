@@ -311,7 +311,7 @@ def render() -> str:
             f"and {len(grouped)} grouped {'directory' if len(grouped) == 1 else 'directories'} "
             f"holding {len(records) - len(singles)} files. {total_cited} of the "
             f"{len(cited)} entries below are cited by a page, a test or another "
-            f"script; {len(uncited)} are cited by nothing.",
+            f"script; uncited entries: {len(uncited)}.",
             width=78,
         ),
         "",

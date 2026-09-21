@@ -6,9 +6,9 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-92 committed artifacts: 38 standalone records and 1 grouped directory holding
-54 files. 36 of the 39 entries below are cited by a page, a test or another
-script; 3 are cited by nothing.
+90 committed artifacts: 36 standalone records and 1 grouped directory holding
+54 files. 36 of the 37 entries below are cited by a page, a test or another
+script; uncited entries: 1.
 
 `commit` is the revision recorded inside the artifact (short form) and
 `date` its recorded measurement date; both are blank where the schema of
@@ -28,7 +28,6 @@ hand rather than by a script in this tree.
 | `benchmarks/device_cache_reload_m4.json` | `benchmarks/device_cache_reload.py` | `a9a11a3b` | 2026-08-29 | `docs/howto/run-on-gpu.md` |
 | `benchmarks/freeboundary_multigrid.json` | `benchmarks/run_freeboundary_multigrid.py` | `b0cc789e` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json` |  | `8ef81c44` | 2026-09-02 | `docs/explanation/validation.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
-| `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md` |  |  |  | *nothing* |
 | `benchmarks/gpu_a4000_2026-09-16.json` | `benchmarks/run_gpu_matrix.py` | `5ee94c93` | 2026-09-16 | `CHANGELOG.md`, `docs/howto/run-on-gpu.md`, `plan.md` |
 | `benchmarks/gpu_baseline.json` | `benchmarks/run_gpu_matrix.py` | `a324f503` | 2026-07-09 | `benchmarks/gpu_a4000_2026-09-16.json`, `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/architecture.rst`, `docs/explanation/validation.md`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py`, `vmex/core/__init__.py`, `vmex/core/device.py` |
 | `benchmarks/high_mode_fft.json` | `benchmarks/run_high_mode_fft.py` | `ecfbe31d` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
@@ -40,9 +39,8 @@ hand rather than by a script in this tree.
 | `benchmarks/optimization_counters_20260913.json` | `benchmarks/optimization.py` | `142d6c92` | 2026-09-13 | `plan.md` |
 | `benchmarks/polish3d_tuning.md` |  |  |  | `docs/explanation/validation.md`, `docs/reference/api/advanced.rst`, `vmex/core/polish_driver.py` |
 | `benchmarks/polish_cost_office.json` | `benchmarks/polish_cost.py` | `529f1789` |  | `docs/reference/performance.rst` |
-| `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
-| `benchmarks/polish_force_error_2026-09-03.md` |  |  |  | *nothing* |
-| `benchmarks/polish_force_error_solovev_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
+| `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
+| `benchmarks/polish_force_error_solovev_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_implicit_m4.json` | `benchmarks/polish_implicit.py` | `e176b1ac` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_memory_w7x.json` | `benchmarks/polish_memory.py` | `529f1789` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/polish_preconditioner_m4.json` | `benchmarks/polish_preconditioner.py` | `7bb306e0` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
@@ -71,6 +69,4 @@ Workflows in `benchmarks/baselines/m4/`: B1, B2, C1, C2, F1, F2, F3, F4, F5, F6,
 These records are committed evidence that no page, test or script
 reads. They are kept, not deleted; the list exists so that stays visible.
 
-- `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md`
-- `benchmarks/polish_force_error_2026-09-03.md`
 - `benchmarks/qa_optimization_startup_main_m4.json`
