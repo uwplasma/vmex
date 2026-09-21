@@ -329,6 +329,9 @@ def objective(u):
 value_and_grad_jax = jax.value_and_grad(objective, has_aux=True)
 monitor = opt.OptimizationMonitor()
 counts = {"trials": 0, "rejected": 0}
+# SciPy returns its last point, which can be a rejected trial carrying the
+# wall value; the result is the best trial whose free boundary converged.
+best = {"value": np.inf, "u": None}
 
 
 def value_and_grad(u):
@@ -339,6 +342,8 @@ def value_and_grad(u):
              "iota and aspect penalty": float(penalty)}
     terms.update(zip(COIL_TERMS, map(float, np.asarray(costs))))
     counts["rejected"] += int(status) != 0
+    if int(status) == 0 and float(value) < best["value"]:
+        best.update(value=float(value), u=np.array(u, dtype=float))
     terms["rejected trial"] = float(value) if int(status) else 0.0
     return monitor.cache_evaluation(u, value, gradient, terms)
 
@@ -358,7 +363,9 @@ result = minimize(free_problem.value_and_grad, np.zeros_like(x0), jac=True,
                   bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size,
                   options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
                            "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
-u, final_value = result.x, float(result.fun)
+u, final_value = best["u"], best["value"]
+if u is None:
+    raise RuntimeError("no trial converged a free boundary; see the trial log")
 print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials "
       f"({counts['rejected']} rejected), status {result.status}: {result.message}",
       flush=True)
