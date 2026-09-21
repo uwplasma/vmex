@@ -71,7 +71,7 @@ SEED_ELLIPSE = 0.15
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 ASPECT_LIMIT = 4.0                # maximum aspect ratio
 NORMAL_FIELD_LIMIT = 0.01         # area-weighted RMS of B.n/|B| on the boundary
-COIL_SURFACE_DISTANCE_LIMIT = 0.20
+COIL_SURFACE_DISTANCE_LIMIT = 0.15
 COIL_DISTANCE_LIMIT = 0.17
 CURVATURE_LIMIT = 7.0
 
@@ -84,11 +84,11 @@ ASPECT_CONSTRAINT = 3.98
 NORMAL_FIELD_CONSTRAINT = 0.008
 CURVATURE_OBJECTIVE_LIMIT = 6.9
 COIL_DISTANCE_CONSTRAINT = 0.19
-COIL_SURFACE_DISTANCE_CONSTRAINT = 0.21
+COIL_SURFACE_DISTANCE_CONSTRAINT = 0.16
 
 # Coils: number of unique shapes, Fourier order, and the circle they start on.
 N_COILS = 3
-COIL_ORDER = 5
+COIL_ORDER = 3
 COIL_MAJOR_RADIUS = 1.0
 COIL_MINOR_RADIUS = 0.65
 COIL_CURRENT = 2.7e5
@@ -113,8 +113,8 @@ FTOL = 1.0e-10
 NITER = 4000
 
 # Budgets. One trial is one free-boundary solve plus one adjoint.
-MAXITER = 20
-MAX_TRIALS = 30
+MAXITER = 50
+MAX_TRIALS = 100
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil terms use:

@@ -71,7 +71,7 @@ SEED_ELLIPSE = 0.15
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 ASPECT_LIMIT = 4.0                # maximum aspect ratio
 NORMAL_FIELD_LIMIT = 0.01         # area-weighted RMS of B.n/|B| on the boundary
-COIL_SURFACE_DISTANCE_LIMIT = 0.20
+COIL_SURFACE_DISTANCE_LIMIT = 0.15
 COIL_DISTANCE_LIMIT = 0.17
 CURVATURE_LIMIT = 7.0
 
@@ -86,10 +86,10 @@ CURVATURE_OBJECTIVE_LIMIT = 6.9
 
 # Coils: number of unique shapes, Fourier order, and the circle they start on.
 # Clearance, not taste: the optimized cross-section of single_stage_optimization.py
-# reaches 0.47 m from the circle R = 1, so radius 0.5 could not hold 0.20 m of
+# reaches 0.47 m from the circle R = 1, so radius 0.5 could not hold 0.15 m of
 # clearance.
 N_COILS = 3
-COIL_ORDER = 5
+COIL_ORDER = 3
 COIL_MAJOR_RADIUS = 1.0
 COIL_MINOR_RADIUS = 0.65
 COIL_CURRENT = 2.7e5
