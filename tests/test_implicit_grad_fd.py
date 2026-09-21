@@ -53,6 +53,27 @@ def test_li383_boundary_gradient_vs_fd():
     assert rel <= 2e-4
 
 
+def test_solovev_directional_taylor_with_independent_resolves(solovev):
+    """A physical observable has a second-order one-sided Taylor remainder."""
+    name, inp, cfg, p0, _, _, _ = solovev
+    ntor = int(inp.ntor)
+    gradient = jax.grad(
+        lambda p: im.run(
+            inp, p, ftol=cfg.ftol, max_iterations=cfg.max_iterations
+        ).wb
+    )(p0)
+    directional = float(np.asarray(gradient.rbc)[ntor, 1])
+    base = _base._outputs(name, inp, cfg, p0)["wb"]
+    remainders = []
+    for step in (1.2e-4, 6.0e-5, 3.0e-5):
+        perturbed = _base._perturb(p0, "rbc", (ntor, 1), step)
+        value = _base._outputs(name, inp, cfg, perturbed)["wb"]
+        remainders.append(abs(value - base - step * directional))
+    orders = np.log2(np.asarray(remainders[:-1]) / remainders[1:])
+    assert np.all(np.isfinite(remainders))
+    assert np.min(orders) > 1.7
+
+
 # ---------------------------------------------------------------------------
 # 6. iteration-policy independence + memory sanity (informational)
 # ---------------------------------------------------------------------------

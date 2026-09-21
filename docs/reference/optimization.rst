@@ -258,12 +258,14 @@ accepts the same two names for one-off forward solves:
        max_fsq_ratio=1e2,
    )
 
-VMEC reports ``FSQ = fsqr + fsqz + fsql``. A converged trial is always
-derivative-certified. If a trial exhausts its iteration budget, VMEX only
-differentiates it when ``FSQ / forward_ftol <= max_fsq_ratio``; otherwise all
-scalar interfaces return the same smooth rejection wall. The default
-``1e6`` is deliberately tolerant of nearly converged optimization trials.
-Reduce it for stricter studies after profiling the intended configurations.
+Native convergence alone does not admit a derivative. VMEX evaluates fresh
+projected and raw residuals, coefficient finiteness, and geometry on the exact
+refined coefficients. ``max_fsq_ratio`` bounds the fresh raw
+``FSQ / forward_ftol``. Set ``primal_tol`` only when the observable and
+discretization justify an absolute projected-residual requirement; its default
+``None`` avoids a universal scale. In that mode diagnostics distinguish
+derivative admission from a strict root certificate and report whether the
+configured ``refine_tol`` was reached.
 
 Inspect the policy instead of guessing:
 
@@ -272,11 +274,24 @@ Inspect the policy instead of guessing:
    evaluation = problem.evaluate(x)
    print(evaluation.status, evaluation.diagnostics)
 
-Diagnostics include ``fsq``, ``fsq_ratio``, ``max_fsq_ratio``,
-``derivative_certified``, solve/iteration totals, rejected trials, and
-derivative fallbacks. ``benchmarks/optimization.py`` profiles the QI, QA, QH,
+Diagnostics include historical host ``fsq``/``fsq_ratio``, fresh exact-state
+``primal_residual_norm``/``primal_raw_residual_norm`` and the square root of
+normalized stopping FSQ as ``primal_normalized_stopping_norm``,
+``derivative_admitted``, ``strict_root_certified``, solve/iteration totals,
+rejected trials, and derivative fallbacks. ``benchmarks/optimization.py`` profiles the QI, QA, QH,
 QP, and scalar contracts over NFP 1--5 and accepts ``--max-fsq-ratio`` without
 turning machine-specific results into a package default.
+
+Direct implicit workflows can measure the same exact-state evidence without
+an optimizer::
+
+   state, mask = implicit.solve_implicit_with_aux(params, config)
+   evidence = implicit.measure_primal_state(params, state, mask, config)
+
+This accessor evaluates the supplied coefficients. It does not infer or
+report the native solver's convergence status. In particular, its default
+``strict_root_certified=False`` distinguishes a finite, admitted state from
+one checked against an observable-specific absolute ``primal_tol``.
 
 SciPy
 -----

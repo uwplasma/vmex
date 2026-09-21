@@ -10,6 +10,8 @@ traceback.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -86,6 +88,91 @@ def test_status_callback_exposes_under_converged_fsq(monkeypatch):
     assert int(status) == 2
     assert np.isfinite(fsq) and fsq > 0.0
     np.testing.assert_allclose(fsq_ratio, fsq / cfg.ftol)
+
+
+@pytest.mark.parametrize(
+    ("primal_tol", "expected_status", "strict"),
+    [(None, 0, False), (2.0e-5, 0, True), (5.0e-6, 2, False)],
+)
+def test_status_callback_uses_configured_actual_state_tolerance(
+    monkeypatch, primal_tol, expected_status, strict
+):
+    """Admission measures the returned state without a universal norm gate."""
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    cfg = im.make_config(
+        inp, ftol=1.0e-12, max_iterations=1, refine_tol=1.0e-8,
+        primal_tol=primal_tol,
+    )
+    params = im.params_from_input(inp)
+    runtime = im.runtime_from_params(params, cfg)
+    state = im._initial_state(runtime.setup)
+    mask = jax.tree.map(jax.numpy.zeros_like, state)
+    result = SimpleNamespace(
+        state=state, converged=True, fsqr=1.0e-14, fsqz=0.0, fsql=0.0,
+    )
+
+    def returned_state(config, params_np):
+        key = im._params_key(params_np)
+        im._LAST_SOLVE[config] = (key, result)
+        im._LAST_REFINED[config] = (key, state)
+        return jax.tree.map(np.asarray, state), jax.tree.map(np.asarray, mask)
+
+    monkeypatch.setattr(im, "_host_solve_and_mask_impl", returned_state)
+    monkeypatch.setattr(
+        im, "_primal_measurements",
+        lambda *_args, **_kwargs: (jax.numpy.asarray(1.0e-5),
+                                   jax.numpy.asarray(2.0e-5),
+                                   jax.numpy.asarray(1.0e-14),
+                                   jax.numpy.asarray(True)),
+    )
+    _, _, status, _, _ = im._host_solve_and_mask_status(
+        cfg, jax.tree.map(np.asarray, params)
+    )
+    certificate = im._LAST_PRIMAL_CERTIFICATE[cfg]
+    assert int(status) == expected_status
+    assert certificate[0] == im._params_key(params)
+    assert certificate[1] == im._primal_state_key(state)
+    assert certificate[2]["strict_root_certified"] is strict
+    assert not certificate[2]["refine_tolerance_met"]
+    assert certificate[2]["primal_residual_norm"] == 1.0e-5
+    json.dumps(certificate[2], allow_nan=False)
+
+
+def test_direct_derivative_strict_gate_is_opt_in(monkeypatch):
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    params = im.params_from_input(inp)
+    cfg = im.make_config(inp)
+    runtime = im.runtime_from_params(params, cfg)
+    state = im._initial_state(runtime.setup)
+    mask = jax.tree.map(jax.numpy.zeros_like, state)
+
+    monkeypatch.setattr(
+        im, "_primal_measurements",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("default admission must add no derivative work")
+        ),
+    )
+    assert bool(im._require_strict_primal(cfg, params, state, mask))
+
+    strict = dataclasses.replace(cfg, primal_tol=1.0e-6)
+    monkeypatch.setattr(
+        im, "_primal_measurements",
+        lambda *_args, **_kwargs: (jax.numpy.asarray(2.0e-6),
+                                   jax.numpy.asarray(3.0e-6),
+                                   jax.numpy.asarray(1.0e-14),
+                                   jax.numpy.asarray(True)),
+    )
+    with pytest.raises(opt.AdjointSolveError, match="admitted primal") as caught:
+        im._require_strict_primal(strict, params, state, mask)
+    assert caught.value.residual_norm == 2.0e-6
+    assert caught.value.tolerance == 1.0e-6
+
+    disabled = dataclasses.replace(cfg, refine_tol=np.inf)
+    evidence = im.measure_primal_state(params, state, mask, disabled)
+    assert not evidence["refinement_enabled"]
+    assert evidence["refine_tolerance"] is None
+    assert evidence["refine_tolerance_met"] is None
+    json.dumps(evidence, allow_nan=False)
 
 
 def test_fd_lane_penalty_path(monkeypatch, capsys):

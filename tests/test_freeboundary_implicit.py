@@ -919,6 +919,76 @@ def test_free_boundary_pressure_gradient_is_certified_at_one_root():
 
 
 @pytest.mark.full
+def test_free_boundary_pressure_gradient_matches_tight_independent_resolves():
+    """A tightly resolved pressure response has an independent FD window.
+
+    This is a case-specific physical certificate, not a package-wide primal
+    tolerance.  At looser nonlinear tolerances this deck's independently
+    re-solved derivative is stable but differs from the one-root adjoint; the
+    exact projected and raw residual gates below ensure this comparison uses
+    the measured asymptotic regime.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-12]), niter_array=np.array([8000]))
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+    cfg = make_free_boundary_config(
+        inp, field, ns=8, ftol=1.0e-12, max_iterations=8000,
+        adjoint_tol=1.0e-7, adjoint_maxiter=150,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current), device="cpu")
+
+    def objective(state):
+        return jnp.mean(state.R_cos[-1] ** 2 + state.Z_sin[-1] ** 2)
+
+    def cold(parameters):
+        fbi._FREE_HOT_CACHE.pop(cfg, None)
+        (state, status, fsq, ratio), saved = fbi._solve_status_fwd(
+            parameters, field.extcur, cfg)
+        prm, current, solved, mask, rcon0, zcon0, _ = saved
+        project = im._dof_projector(cfg.implicit, mask)
+        frozen, z_star = jax.lax.stop_gradient(solved), project(solved)
+        norms = []
+        for formulation in ("preconditioned", "raw"):
+            residual = fbi._projected_residual(
+                cfg, mask, formulation=formulation)
+            norms.append(float(im._tree_norm(residual(
+                z_star, prm, current, frozen, rcon0, zcon0))))
+        assert int(status) == 0
+        assert float(fsq) <= 2.0e-12
+        assert float(ratio) <= 2.0
+        assert norms[0] <= 2.5e-7
+        assert norms[1] <= 2.0e-5
+        return float(objective(state)), saved
+
+    base, saved = cold(params)
+    prm, current, solved, mask, rcon0, zcon0, _ = saved
+    direction = dataclasses.replace(
+        jax.tree.map(jnp.zeros_like, prm),
+        am=jnp.zeros_like(prm.am).at[0].set(prm.am[0]))
+    state_bar = jax.grad(objective)(solved)
+    params_bar, _ = fbi._solve_bwd_impl(
+        cfg, (prm, current, solved, mask, rcon0, zcon0), state_bar)
+    adjoint = float(sum(
+        jnp.vdot(left, right) for left, right in zip(
+            jax.tree.leaves(params_bar), jax.tree.leaves(direction))))
+
+    differences = []
+    for step in (1.0e-3, 1.0e-4):
+        values = []
+        for sign in (-1.0, 1.0):
+            shifted = jax.tree.map(
+                lambda value, delta: value + sign * step * delta,
+                params, direction)
+            values.append(cold(shifted)[0])
+        differences.append((values[1] - values[0]) / (2.0 * step))
+    assert np.isfinite(base)
+    np.testing.assert_allclose(differences[0], differences[1], rtol=2.0e-5)
+    np.testing.assert_allclose(differences, adjoint, rtol=3.0e-4, atol=0.0)
+
+
+@pytest.mark.full
 def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient():
     """Both adjoint solvers invert the same converged plasma-vacuum Jacobian.
 

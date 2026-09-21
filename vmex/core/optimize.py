@@ -1811,6 +1811,7 @@ def make_problem(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    primal_tol: float | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -1894,9 +1895,12 @@ def make_problem(
     ``adjoint_tol`` is a relative Krylov tolerance with a certified true
     residual check; ``adjoint_maxiter`` is the restart budget.
 
-    ``refine_tol`` is the frozen fixed-point residual required before
-    implicit differentiation. The default preserves strict gradients;
-    ``numpy.inf`` explicitly disables refinement for legacy comparisons.
+    ``refine_tol`` controls Newton refinement. ``primal_tol`` optionally
+    requires an absolute projected residual before differentiation; its scale
+    must be chosen for the observable and discretization. With the default
+    ``None``, VMEX records whether refinement met its target and admits finite,
+    geometry-valid states through the fresh raw-FSQ policy without claiming a
+    strict root certificate.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
@@ -1987,6 +1991,7 @@ def make_problem(
             adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio,
             refine_tol=refine_tol,
+            primal_tol=primal_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
@@ -2019,6 +2024,7 @@ def make_problem(
     problem.metadata["forward_max_iterations"] = int(np.asarray(inp.niter_array).ravel()[-1])
     problem.metadata["max_fsq_ratio"] = float(max_fsq_ratio)
     problem.metadata["refine_tol"] = float(refine_tol)
+    problem.metadata["primal_tol"] = primal_tol
     return problem
 
 
@@ -2039,6 +2045,7 @@ def least_squares(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    primal_tol: float | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2181,6 +2188,7 @@ def least_squares(
                 jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
                 adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
                 max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+                primal_tol=primal_tol,
                 hot_restart=hot_restart,
                 warm_start=warm_start, use_ess=use_ess,
                 ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
@@ -2210,6 +2218,7 @@ def least_squares(
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+            primal_tol=primal_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             device=device, verbose=verbose, **scipy_kwargs)
@@ -2290,6 +2299,7 @@ def minimize(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    primal_tol: float | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     **scipy_kwargs,
@@ -2333,7 +2343,7 @@ def minimize(
                 device=device, solve_kwargs=solve_kwargs, verbose=verbose,
                 method=method, adjoint_tol=adjoint_tol,
                 adjoint_maxiter=adjoint_maxiter, max_fsq_ratio=max_fsq_ratio,
-                refine_tol=refine_tol,
+                refine_tol=refine_tol, primal_tol=primal_tol,
                 **scipy_kwargs)
             stage_results.append(result)
             current = result.input
@@ -2346,6 +2356,7 @@ def minimize(
         warm_start=("state" if hot_restart else None),
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
         max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+        primal_tol=primal_tol,
         solve_kwargs=dict(solve_kwargs or {}), device=device, verbose=verbose,
         minimize_method=method, **scipy_kwargs)
 
@@ -2503,6 +2514,7 @@ def _least_squares_implicit(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    primal_tol: float | None = None,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
@@ -2619,6 +2631,7 @@ def _least_squares_implicit(
         adjoint_maxiter=adjoint_maxiter,
         max_fsq_ratio=max_fsq_ratio,
         refine_tol=refine_tol,
+        primal_tol=primal_tol,
     )
     # Pin the residual/Jacobian graphs to the fastest device for this
     # launch-bound path (CPU by default; explicit device= honored; None
@@ -2812,13 +2825,8 @@ def _least_squares_implicit(
         )
         return scalar_wall_base * growth ** 2, gradient
 
-    def certified_trial(x: np.ndarray) -> bool:
-        """Whether the memoized solve at ``x`` is a usable fixed point.
-
-        True when the last host solve belongs to this ``x`` and converged, or
-        its final ``FSQ / ftol`` is at most ``cfg.max_fsq_ratio``.  Call only
-        after evaluating the trial so the memo describes the same point.
-        """
+    def certified_trial(x: np.ndarray, *, require_eligible: bool = True) -> bool:
+        """Check exact refined-state evidence for this decision vector."""
         x = np.asarray(x, dtype=float)
         if x.shape != x0.shape:  # malformed input stays on the penalty path
             return False
@@ -2832,11 +2840,24 @@ def _least_squares_implicit(
         )
         if hit[0] != imp._params_key(params_np):
             return False
-        result = hit[1]
-        if bool(result.converged):
-            return True
-        fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
-        return bool(np.isfinite(fsq) and fsq <= cfg.max_fsq_ratio * cfg.ftol)
+        certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+        refined = imp._LAST_REFINED.get(cfg)
+        return bool(
+            certificate is not None
+            and refined is not None
+            and certificate[0] == hit[0] == refined[0]
+            and certificate[1] == imp._primal_state_key(refined[1])
+            and (
+                not require_eligible
+                or certificate[2]["derivative_admitted"]
+            )
+        )
+
+    def primal_certificate(x: np.ndarray) -> dict[str, Any] | None:
+        """Return evidence only when it belongs to this exact refined state."""
+        if not certified_trial(x, require_eligible=False):
+            return None
+        return dict(imp._LAST_PRIMAL_CERTIFICATE[cfg][2])
 
     def rows_at_state(x, state, status):
         params = params_of(x)
@@ -3140,7 +3161,7 @@ def _least_squares_implicit(
         problem_jit_key, "jac_reverse", lambda: jax.jit(jacobian_rows_reverse))
 
     def reverse_gradient(x: jnp.ndarray, rows: jnp.ndarray) -> jnp.ndarray:
-        """``J^T rows`` from one pullback: the reverse lane's scalar gradient."""
+        """``J^T rows`` from one pullback: the scalar least-squares fast path."""
         state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
         return reverse_pullback(x, state, status, lambda _: rows, 1)[0]
 
@@ -3194,8 +3215,15 @@ def _least_squares_implicit(
         hit = imp._LAST_SOLVE.get(cfg)
         params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64),
                                  params_of(_place(x)))
-        if hit is not None and hit[0] == imp._params_key(params_np):
-            holder["lin"] = (np.array(x, dtype=float), hit[1].state, dz_cols)
+        refined = imp._LAST_REFINED.get(cfg)
+        if (
+            hit is not None
+            and refined is not None
+            and hit[0] == imp._params_key(params_np) == refined[0]
+            and certified_trial(x)
+        ):
+            holder["lin"] = (
+                np.array(x, dtype=float), refined[1], dz_cols)
         else:  # unexpected call pattern: better no seed than a wrong one
             holder["lin"] = None
 
@@ -3245,15 +3273,7 @@ def _least_squares_implicit(
         # unless the exact-key solve memo already proves it usable.
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
-        params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x))
-        )
-        hit = imp._LAST_SOLVE.get(cfg)
-        if (
-            hit is None
-            or hit[0] != imp._params_key(params_np)
-            or imp._LAST_STATUS_ERROR.get(cfg) is not None
-        ):
+        if not certified_trial(x, require_eligible=False):
             # A cached converged point can be revisited after a different trial
             # failed. Refresh the host solve in that rare case so the old
             # error cannot turn this point's exact Jacobian into a penalty row.
@@ -3261,6 +3281,26 @@ def _least_squares_implicit(
         if not certified_trial(x):
             holder["lin"] = None
             return failure_jacobian(x)
+        primal_key = imp._LAST_PRIMAL_CERTIFICATE[cfg][1]
+        x_key = (x_key, primal_key)
+
+        def require_response_anchor() -> None:
+            certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+            if (
+                not certified_trial(x)
+                or certificate is None
+                or certificate[1] != primal_key
+            ):
+                raise AdjointSolveError(
+                    message=(
+                        "implicit response primal changed during derivative "
+                        "evaluation"
+                    ),
+                    hint=(
+                        "re-evaluate the objective before requesting its "
+                        "derivative"
+                    ),
+                )
 
         def reverse_candidate() -> np.ndarray:
             candidate = np.asarray(
@@ -3271,6 +3311,7 @@ def _least_squares_implicit(
                     message="certified reverse Jacobian fallback failed",
                     hint="increase the reverse-adjoint Krylov budget",
                 )
+            require_response_anchor()
             holder["lin"] = None
             return candidate
 
@@ -3290,6 +3331,7 @@ def _least_squares_implicit(
                     jac, summary, jac_solver=jac_solver,
                     reverse_candidate=reverse_candidate,
                 )
+                require_response_anchor()
                 if used_reverse:
                     holder["derivative_fallbacks"] += 1
                 elif warm_start == "perturbation":
@@ -3299,6 +3341,14 @@ def _least_squares_implicit(
                 raise
             primary_error = exc
             jac = None
+
+        # A response callback can invalidate the primal while attempting the
+        # derivative.  That trial belongs on the existing penalty path; do not
+        # launch another linear solve against a state that no longer exists.
+        if not certified_trial(x):
+            holder["lin"] = None
+            holder["failed_trials"] += 1
+            return failure_jacobian(x)
 
         # The amortized block factorization is fastest, but a difficult new
         # accepted point can occasionally make its warm corrector non-finite.
@@ -3314,6 +3364,7 @@ def _least_squares_implicit(
                         candidate, summary, jac_solver=jac_solver,
                         reverse_candidate=reverse_candidate,
                     )
+                    require_response_anchor()
                     if np.all(np.isfinite(candidate)):
                         holder["derivative_fallbacks"] += 1
                         if warm_start == "perturbation" and not used_reverse:
@@ -3337,6 +3388,7 @@ def _least_squares_implicit(
                 raise primary_error
             raise FloatingPointError("non-finite initial residual Jacobian")
         if np.all(np.isfinite(jac)):
+            require_response_anchor()
             holder["last_jac"] = jac
             holder["last_jac_key"] = x_key
         return jac
@@ -3361,22 +3413,45 @@ def _least_squares_implicit(
         if traceable_scalar is None:
             residual = fun(xh)
             if certified_trial(xh):
+                primal_key = imp._LAST_PRIMAL_CERTIFICATE[cfg][1]
+                cache_key = (FunctionProblem._key(xh), primal_key)
                 value = 0.5 * float(residual @ residual)
                 if jac_solver == "reverse":
-                    # The reverse lane needs J^T r, not J: one pullback of r.
-                    # A one-row problem's Jacobian already costs one pullback,
-                    # so the automatic lane keeps its memoized Jacobian.  A
-                    # non-finite result goes through the Jacobian lane below,
-                    # which owns the retries and the typed errors.
-                    gradient = np.asarray(jax.device_get(reverse_gradient_jit(
-                        _place(xh), _place(residual))), dtype=float)
-                    if np.isfinite(value) and np.all(np.isfinite(gradient)):
+                    try:
+                        gradient = np.asarray(jax.device_get(
+                            reverse_gradient_jit(
+                                _place(xh), _place(residual)
+                            )), dtype=float)
+                    except (
+                        AdjointSolveError,
+                        FloatingPointError,
+                    ):
+                        gradient = None
+                    certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+                    if (
+                        certified_trial(xh)
+                        and certificate is not None
+                        and certificate[1] == primal_key
+                        and gradient is not None
+                        and np.isfinite(value)
+                        and np.all(np.isfinite(gradient))
+                    ):
                         holder["lin"] = None
                         holder["scalar_certified"] = True
                         return value, gradient
+                    if (
+                        certificate is None
+                        or not certified_trial(xh)
+                        or certificate[1] != primal_key
+                    ):
+                        holder["lin"] = None
+                        holder["failed_trials"] += 1
+                        return failure_value_and_gradient(xh)
                 gradient = jac_fn(xh).T @ residual
                 if (
-                    holder.get("last_jac_key") == FunctionProblem._key(xh)
+                    certified_trial(xh)
+                    and imp._LAST_PRIMAL_CERTIFICATE[cfg][1] == primal_key
+                    and holder.get("last_jac_key") == cache_key
                     and np.isfinite(value)
                     and np.all(np.isfinite(gradient))
                 ):
@@ -3389,6 +3464,7 @@ def _least_squares_implicit(
         if not certified_trial(xh):
             holder["failed_trials"] += 1
             return failure_value_and_gradient(xh)
+        primal_key = imp._LAST_PRIMAL_CERTIFICATE[cfg][1]
         try:
             value, grad = value_grad_jit(_place(xh))
             value = float(jax.device_get(value))
@@ -3398,7 +3474,14 @@ def _least_squares_implicit(
                 raise
             holder["failed_trials"] += 1
             return failure_value_and_gradient(xh)
-        if np.isfinite(value) and np.all(np.isfinite(grad)):
+        certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+        if (
+            certified_trial(xh)
+            and certificate is not None
+            and certificate[1] == primal_key
+            and np.isfinite(value)
+            and np.all(np.isfinite(grad))
+        ):
             holder["scalar_certified"] = True
             return value, grad
         if not holder.get("scalar_certified"):
@@ -3480,8 +3563,21 @@ def _least_squares_implicit(
             raise RuntimeError(
                 "decision vector did not produce a usable VMEC equilibrium"
             )
+        refined = imp._LAST_REFINED.get(cfg)
+        certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+        if (
+            refined is None
+            or certificate is None
+            or refined[0] != hit[0]
+            or certificate[0] != hit[0]
+            or certificate[1] != imp._primal_state_key(refined[1])
+            or not certificate[2]["derivative_admitted"]
+        ):
+            raise RuntimeError(
+                "decision vector did not produce a certified VMEC equilibrium"
+            )
         result_input = input_from_x(x)
-        result = hit[1]
+        result = dataclasses.replace(hit[1], state=refined[1])
         ns = int(np.shape(result.state.R_cos)[0])
         runtime = prepare_runtime(
             result_input,
@@ -3684,6 +3780,7 @@ def _least_squares_implicit(
                 "config": cfg,
                 "holder": holder,
                 "input": inp,
+                "primal_certificate": primal_certificate,
                 "jax_state_runtime": jax_state_runtime,
                 "jax_state_runtime_status": jax_state_runtime_status,
                 "jax_residual_from_state": term_rows,

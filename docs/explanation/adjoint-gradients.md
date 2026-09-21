@@ -88,8 +88,10 @@ Nearby optimization trials reuse the previous Newton displacement as a guess.
 VMEX evaluates the new frozen residual before accepting that guess; if it does
 not reach `refine_tol`, VMEX discards it and replays the original refinement.
 This changes work, not the accepted numerical path. Public optimization
-factories expose the same `refine_tol`; keep 1e-10 for production gradients
-and use `numpy.inf` only for an explicit legacy comparison.
+factories expose the same `refine_tol`; use `numpy.inf` only for an explicit
+legacy comparison. Set `primal_tol` when an observable-specific absolute
+admission bound is justified. Its default records the achieved residual
+without imposing a universal threshold.
 
 ## The six SOLVAX solve classes
 

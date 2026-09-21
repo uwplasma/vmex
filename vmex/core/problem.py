@@ -158,9 +158,9 @@ class Evaluation:
         cumulative ``failed_trials`` and ``derivative_fallbacks`` counters,
         a ``solve_stats`` mapping when the implicit lane recorded one, and
         — when the equilibrium at ``x`` could be materialised — the summed
-        force residual ``fsq``, its ``fsq_ratio`` to the solve tolerance,
-        the configured ``max_fsq_ratio``, and the boolean
-        ``derivative_certified``.  A failed solve also carries
+        historical host force residual ``fsq``, its ``fsq_ratio`` to the
+        solve tolerance, and the exact refined-state primal certificate.
+        A failed solve also carries
         ``exception_type``.
     """
 
@@ -1342,6 +1342,20 @@ class VmecProblem(FunctionProblem):
         diagnostics["derivative_fallbacks"] = int(
             holder.get("derivative_fallbacks", 0)
         )
+        certificate_getter = self.metadata.get("primal_certificate")
+        certificate = (
+            certificate_getter(evaluation.x)
+            if certificate_getter is not None else None
+        )
+        if certificate is not None:
+            diagnostics.update(certificate)
+            if not certificate["derivative_admitted"]:
+                return replace(
+                    evaluation,
+                    status="under_converged",
+                    message="the refined state missed implicit-derivative admission",
+                    diagnostics=diagnostics,
+                )
         if equilibrium is not None:
             result = equilibrium.result
             fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
@@ -1350,15 +1364,22 @@ class VmecProblem(FunctionProblem):
                 fsq=fsq,
                 fsq_ratio=ratio,
                 max_fsq_ratio=float(cfg.max_fsq_ratio),
-                derivative_certified=bool(result.converged or ratio <= cfg.max_fsq_ratio),
             )
-            if not diagnostics["derivative_certified"]:
-                return replace(
-                    evaluation,
-                    status="under_converged",
-                    message="FSQ exceeds the implicit-derivative threshold",
-                    diagnostics=diagnostics,
+            if certificate_getter is None:
+                # Compatibility for manually constructed VmecProblem objects
+                # without the implicit lane's exact-state certificate hook.
+                admitted = bool(
+                    result.converged or ratio <= cfg.max_fsq_ratio
                 )
+                diagnostics["derivative_admitted"] = admitted
+                diagnostics["derivative_certified"] = admitted
+                if not admitted:
+                    return replace(
+                        evaluation,
+                        status="under_converged",
+                        message="FSQ exceeds the legacy derivative threshold",
+                        diagnostics=diagnostics,
+                    )
         error = imp._LAST_STATUS_ERROR.get(cfg)
         if error is None:
             return replace(evaluation, diagnostics=diagnostics)

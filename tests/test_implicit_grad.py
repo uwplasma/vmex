@@ -1228,7 +1228,7 @@ def test_lasym_3d_state_is_anchored_at_the_frozen_root(lasym_3d):
     unanchored = im.make_config(inp, ftol=cfg.ftol, refine_tol=np.inf,
                                 max_iterations=cfg.max_iterations)
     host, mask = im.solve_implicit_with_aux(p0, unanchored)
-    anchored, _ = im.solve_implicit_with_aux(p0, cfg)
+    anchored, anchored_mask = im.solve_implicit_with_aux(p0, cfg)
     P = im._dof_projector(cfg, mask)
     F = im.residual_fn(cfg, jax.lax.stop_gradient(host), mask)
     r_host, r_anchored = _tnorm(F(P(host), p0)), _tnorm(F(P(anchored), p0))
@@ -1238,6 +1238,25 @@ def test_lasym_3d_state_is_anchored_at_the_frozen_root(lasym_3d):
           f"|x| = {_tnorm(host):.2e})")
     assert r_host > 1.0e-8, "the host stopping point already sits at the root"
     assert r_anchored <= cfg.refine_tol
+
+    certificate = im.measure_primal_state(p0, anchored, anchored_mask, cfg)
+    assert certificate["derivative_admitted"]
+    assert certificate["primal_geometry_valid"]
+    assert certificate["primal_raw_residual_norm"] >= 0.0
+    assert not certificate["strict_root_certified"]
+    assert "native_converged" not in certificate
+    tight = dataclasses.replace(cfg, primal_tol=max(r_anchored / 2.0, 1.0e-30))
+    loose = dataclasses.replace(cfg, primal_tol=max(r_anchored * 2.0, 1.0e-29))
+    assert not bool(im._primal_is_eligible(
+        certificate["primal_residual_norm"],
+        certificate["primal_raw_residual_norm"], certificate["primal_fsq"],
+        certificate["primal_geometry_valid"], tight,
+    ))
+    assert bool(im._primal_is_eligible(
+        certificate["primal_residual_norm"],
+        certificate["primal_raw_residual_norm"], certificate["primal_fsq"],
+        certificate["primal_geometry_valid"], loose,
+    ))
 
 
 def test_nearby_refinement_seed_is_guarded_and_conservative(monkeypatch):

@@ -128,6 +128,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import os
 import sys
 import time
@@ -188,6 +189,7 @@ __all__ = [
     "params_from_input", "input_with_params", "runtime_from_params",
     "make_config", "solve_implicit", "solve_implicit_status",
     "solve_implicit_with_aux",
+    "measure_primal_state",
     "implicit_state_tangent_multi_rhs", "implicit_state_pullback_multi_rhs", "run",
     "measured_chunk_size",
     "mhd_energy", "plasma_volume", "aspect_ratio", "iota_profile",
@@ -334,6 +336,10 @@ class ImplicitConfig:
     #: 5e-07 against the frozen-path FD, for 14-26% of a forward solve and
     #: 9-14% of a value-and-gradient across the gradient decks.
     refine_tol: float = 1.0e-10
+    #: Optional absolute admission bound for the returned state's projected
+    #: residual.  ``None`` records the residual without imposing a universal
+    #: scale; callers can set an observable-specific requirement.
+    primal_tol: float | None = None
     #: Largest ``(fsqr + fsqz + fsql) / ftol`` accepted for implicit
     #: differentiation when a trial exhausts its iteration budget.
     max_fsq_ratio: float = 1.0e6
@@ -371,6 +377,7 @@ def make_config(
     adjoint_gcrot_m: int = 100,
     adjoint_gcrot_k: int = 20,
     refine_tol: float = 1.0e-10,
+    primal_tol: float | None = None,
     max_fsq_ratio: float = 1.0e6,
     hot_restart: bool = False,
     device: Any = None,
@@ -390,6 +397,10 @@ def make_config(
         max_iterations = int(np.asarray(inp.niter_array).ravel()[-1])
     if not np.isfinite(max_fsq_ratio) or max_fsq_ratio <= 0.0:
         raise ValueError("max_fsq_ratio must be finite and positive")
+    if primal_tol is not None and (
+        not np.isfinite(primal_tol) or primal_tol <= 0.0
+    ):
+        raise ValueError("primal_tol must be None or finite and positive")
     refine_tol = float(refine_tol)
     if not refine_tol > 0.0:
         raise ValueError("refine_tol must be positive or numpy.inf")
@@ -404,6 +415,7 @@ def make_config(
         adjoint_maxiter=int(adjoint_maxiter),
         adjoint_gcrot_m=int(adjoint_gcrot_m), adjoint_gcrot_k=int(adjoint_gcrot_k),
         refine_tol=refine_tol,
+        primal_tol=None if primal_tol is None else float(primal_tol),
         max_fsq_ratio=float(max_fsq_ratio),
         hot_restart=bool(hot_restart), device=device,
     ))
@@ -1360,10 +1372,27 @@ _LAST_REFINED: weakref.WeakKeyDictionary[
 _LAST_REFINEMENT_CORRECTION: weakref.WeakKeyDictionary[
     ImplicitConfig, SpectralState] = weakref.WeakKeyDictionary()
 
+# Exact-parameter evidence for the refined coefficients returned by the status
+# callback.  Native stopping fields describe the pre-refinement solve and
+# cannot establish that this state is the root being differentiated.
+_LAST_PRIMAL_CERTIFICATE: weakref.WeakKeyDictionary[
+    ImplicitConfig, tuple[bytes, bytes, dict[str, Any]]
+] = weakref.WeakKeyDictionary()
+
 
 def _params_key(params: ImplicitParams) -> bytes:
     return b"".join(np.asarray(leaf, dtype=np.float64).tobytes()
                     for leaf in jax.tree.leaves(params))
+
+
+def _primal_state_key(state: SpectralState) -> bytes:
+    """Content identity for one concrete spectral state."""
+    digest = hashlib.sha256()
+    for leaf in jax.tree.leaves(state):
+        array = np.ascontiguousarray(leaf, dtype=np.float64)
+        digest.update(str(array.shape).encode())
+        digest.update(array.data)
+    return digest.digest()
 
 
 def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
@@ -1825,18 +1854,115 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     return as_np(state), mask
 
 
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _primal_measurements(state, params, mask, cfg):
+    """Measure both residual forms and geometry on the returned state."""
+    project = _dof_projector(cfg, mask)
+    runtime = runtime_from_params(params, cfg)
+    assembled = _assemble(
+        project(state), runtime, state, project, _edge_mask(cfg))
+    force, raw, diagnostics = evaluate_forces(assembled, runtime)
+    residual_norm = _tree_norm(project(force))
+    raw_residual_norm = _tree_norm(project(_raw_force_state(assembled, runtime)))
+    fsq = raw.fsqr + raw.fsqz + raw.fsql
+    finite = jnp.all(jnp.stack([
+        jnp.all(jnp.isfinite(leaf)) for leaf in jax.tree.leaves(assembled)
+    ]))
+    geometry_valid = finite & ~diagnostics.jacobian_sign_changed
+    return residual_norm, raw_residual_norm, fsq, geometry_valid
+
+
+def _primal_is_eligible(residual_norm, raw_residual_norm, fsq,
+                        geometry_valid, cfg):
+    """Apply fresh force checks and an optional observable-specific bound."""
+    ratio = fsq / cfg.ftol
+    residual_ok = (
+        jnp.isfinite(residual_norm) if cfg.primal_tol is None
+        else residual_norm <= float(cfg.primal_tol)
+    )
+    return (geometry_valid & jnp.isfinite(residual_norm)
+            & jnp.isfinite(raw_residual_norm) & jnp.isfinite(ratio)
+            & residual_ok & (ratio >= 0.0) & (ratio <= cfg.max_fsq_ratio))
+
+
+def measure_primal_state(
+    params: ImplicitParams,
+    state: SpectralState,
+    mask: SpectralState,
+    cfg: ImplicitConfig,
+) -> dict[str, Any]:
+    """Measure derivative admission evidence on exactly ``state``.
+
+    This performs fresh projected and raw force evaluations and synchronizes
+    their scalar results to the host. It describes the supplied coefficients;
+    it does not report whether a native solve converged or produced them.
+    ``strict_root_certified`` is therefore true only when the caller selected
+    a finite, observable-specific ``primal_tol`` and the state meets it.
+    """
+    residual_norm, raw_residual_norm, fsq, geometry_valid = _primal_measurements(
+        _device_pin(cfg, state), params, _device_pin(cfg, mask), cfg)
+    admitted = _primal_is_eligible(
+        residual_norm, raw_residual_norm, fsq, geometry_valid, cfg)
+    residual_norm = float(residual_norm)
+    raw_residual_norm, fsq = float(raw_residual_norm), float(fsq)
+    refine_tol = float(cfg.refine_tol)
+    refinement_enabled = bool(np.isfinite(refine_tol))
+    return {
+        "primal_residual_norm": residual_norm,
+        "primal_tolerance": (
+            None if cfg.primal_tol is None else float(cfg.primal_tol)
+        ),
+        "refine_tolerance": refine_tol if refinement_enabled else None,
+        "refinement_enabled": refinement_enabled,
+        "refine_tolerance_met": (
+            bool(residual_norm <= refine_tol) if refinement_enabled else None
+        ),
+        "strict_root_certified": bool(
+            admitted and cfg.primal_tol is not None
+        ),
+        "primal_fsq": fsq,
+        "primal_normalized_stopping_norm": float(np.sqrt(max(fsq, 0.0))),
+        "primal_raw_residual_norm": raw_residual_norm,
+        "primal_fsq_ratio": fsq / cfg.ftol,
+        "primal_geometry_valid": bool(geometry_valid),
+        "derivative_admitted": bool(admitted),
+    }
+
+
+def _require_strict_primal(cfg, params, state, mask):
+    """Enforce an explicitly requested root bound on direct derivative APIs."""
+    if cfg.primal_tol is None:
+        return jnp.asarray(True)
+    residual_norm, raw_residual_norm, fsq, geometry_valid = _primal_measurements(
+        state, params, mask, cfg)
+    eligible = _primal_is_eligible(
+        residual_norm, raw_residual_norm, fsq, geometry_valid, cfg)
+    if not isinstance(eligible, jax.core.Tracer) and not bool(eligible):
+        raise AdjointSolveError(
+            message="implicit derivative requires an admitted primal state",
+            hint="loosen primal_tol only if the observable permits it",
+            residual_norm=float(residual_norm),
+            tolerance=float(cfg.primal_tol),
+        )
+    return eligible
+
+
+def _primal_checked_tree(tree, eligible):
+    return jax.tree.map(lambda value: jnp.where(eligible, value, jnp.nan), tree)
+
+
 def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
     """Status-returning host callback for optimization trial points.
 
-    Status is 0 for a derivative-certified state, 1 for a failed solve, and 2
-    when the iteration budget was exhausted above ``cfg.max_fsq_ratio``.
-    The final force residual and its ratio to ``ftol`` accompany the state so
-    every optimizer interface applies the same acceptance policy.  That
-    residual is the host solver's own, from before the fixed-point refinement
-    (which only lowers it), so the acceptance stays conservative.
+    Status is 0 for an admitted refined state, 1 for a failed solve, and 2
+    for a state that misses fresh force, geometry, or optional ``primal_tol``
+    checks. Historical host FSQ remains in the callback payload for API
+    compatibility; :data:`_LAST_PRIMAL_CERTIFICATE` records fresh projected
+    and raw residual evidence on the exact returned coefficients.
     """
     with _device_context(cfg):
         _HOST_ERROR.clear()
+        _LAST_PRIMAL_CERTIFICATE.pop(cfg, None)
         error = None
         try:
             state, mask = _host_solve_and_mask_impl(cfg, params_np)
@@ -1878,7 +2004,10 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         result = hit[1]
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         ratio = fsq / cfg.ftol
-        status = 0 if bool(result.converged) or ratio <= cfg.max_fsq_ratio else 2
+        certificate = measure_primal_state(params, state, mask, cfg)
+        _LAST_PRIMAL_CERTIFICATE[cfg] = (
+            _params_key(params), _primal_state_key(state), certificate)
+        status = 0 if certificate["derivative_admitted"] else 2
         if status != 0:
             _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
         return state, mask, np.int32(status), np.float64(fsq), np.float64(ratio)
@@ -2014,9 +2143,10 @@ def solve_implicit_status(
 ) -> tuple[SpectralState, Array, Array, Array]:
     """Differentiable equilibrium with an exception-free trial status.
 
-    Status is 0 for a derivative-certified state, 1 for a failed solve, and 2
-    for an under-converged state.  ``fsq`` and ``fsq_ratio`` expose the force
-    residual used for that decision.  Only status 0 has an implicit pullback.
+    Status is 0 for an admitted refined state, 1 for a failed solve, and 2
+    for a rejected state. ``fsq`` and ``fsq_ratio`` retain the native solver's
+    stopping diagnostics; fresh refined-state evidence controls admission.
+    Only status 0 has an implicit pullback.
     """
     state, _, status, fsq, fsq_ratio = _callback_solve_status(params, cfg)
     return state, status, fsq, fsq_ratio
@@ -2879,6 +3009,7 @@ def implicit_state_tangent_multi_rhs(
         params, x_star, dof_mask, tangent_batch = _device_pin(
             cfg, (params, x_star, dof_mask, tangent_batch)
         )
+        eligible = _require_strict_primal(cfg, params, x_star, dof_mask)
         dz_batch, report = _implicit_evolved_tangent_multi_rhs(
             params, cfg, x_star, dof_mask, tangent_batch,
             active_fields=active_fields,
@@ -2900,6 +3031,8 @@ def implicit_state_tangent_multi_rhs(
             )[1]
 
         state_batch = jax.vmap(assemble_tangent)(dz_batch, tangent_batch)
+        state_batch = _primal_checked_tree(state_batch, eligible)
+        report = report._replace(converged=report.converged & eligible)
         return _device_pin(cfg, (state_batch, report))
 
 
@@ -3050,6 +3183,7 @@ def _solve_implicit_bwd(cfg, res, gbar):
 
 def _solve_implicit_bwd_impl(cfg, res, gbar):
     params, x_star, dof_mask = res
+    eligible = _require_strict_primal(cfg, params, x_star, dof_mask)
     frozen = jax.lax.stop_gradient(x_star)
     edge_mask = _edge_mask(cfg)
     P = _dof_projector(cfg, dof_mask)
@@ -3105,7 +3239,7 @@ def _solve_implicit_bwd_impl(cfg, res, gbar):
     g2 = vjp_p2(gbar)[0]
     if debug:
         _debug_stage("direct parameter contribution", g2)
-    return (jax.tree.map(jnp.add, g1, g2),)
+    return (_primal_checked_tree(jax.tree.map(jnp.add, g1, g2), eligible),)
 
 
 solve_implicit.defvjp(_solve_implicit_fwd, _solve_implicit_bwd)
@@ -3176,11 +3310,13 @@ def implicit_state_pullback_multi_rhs(
         x_star = _device_pin(cfg, x_star)
         dof_mask = _device_pin(cfg, dof_mask)
         gbar_batch = _device_pin(cfg, gbar_batch)
-        return _device_pin(cfg, _implicit_state_pullback_multi_rhs_impl(
+        eligible = _require_strict_primal(cfg, params, x_star, dof_mask)
+        gradient = _implicit_state_pullback_multi_rhs_impl(
             params, cfg, x_star, dof_mask, gbar_batch,
             solver=solver, active_fields=active_fields,
             probe_chunk_size=probe_chunk_size,
-            response_chunk_size=response_chunk_size))
+            response_chunk_size=response_chunk_size)
+        return _device_pin(cfg, _primal_checked_tree(gradient, eligible))
 
 
 def _block_state_pullback(
@@ -3495,6 +3631,7 @@ def run(
     adjoint_gcrot_m: int = 100,
     adjoint_gcrot_k: int = 20,
     refine_tol: float = 1.0e-10,
+    primal_tol: float | None = None,
     device: Any = None,
 ) -> ImplicitSolution:
     """Differentiable fixed-boundary equilibrium: input -> outputs pytree.
@@ -3549,7 +3686,7 @@ def run(
         multigrid=multigrid, lconm1=lconm1, adjoint_tol=adjoint_tol,
         adjoint_restart=adjoint_restart, adjoint_maxiter=adjoint_maxiter,
         adjoint_gcrot_m=adjoint_gcrot_m, adjoint_gcrot_k=adjoint_gcrot_k,
-        refine_tol=refine_tol,
+        refine_tol=refine_tol, primal_tol=primal_tol,
     )
     dev = None
     inferred_home = False

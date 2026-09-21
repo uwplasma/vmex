@@ -664,7 +664,7 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
         problem._rj_cache = None
         jacobian = problem.residual_jac(problem.x0)
         assert np.all(np.isfinite(jacobian))
-        assert holder["last_jac_key"] == FunctionProblem._key(problem.x0)
+        assert holder["last_jac_key"][0] == FunctionProblem._key(problem.x0)
 
     with monkeypatch.context() as m:
         nonce = itertools.count()
@@ -877,6 +877,28 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     assert residual[1] == 0.0
     assert np.all(np.isfinite(weighted_jac[1]))
     np.testing.assert_allclose(reverse.jac, ref.jac, rtol=1e-6, atol=1e-8)
+    reverse_value, reverse_gradient = reverse_problem.value_and_grad(
+        reverse_problem.x0
+    )
+    assert np.isfinite(reverse_value)
+    assert np.all(np.isfinite(reverse_gradient))
+
+    real_device_get = opt.jax.device_get
+
+    for error_type in (ValueError, TypeError, jax.errors.JaxRuntimeError):
+        def reject_unrelated_reverse_bug(value):
+            host = real_device_get(value)
+            if np.shape(host) == reverse_problem.x0.shape:
+                raise error_type("unrelated reverse programming error")
+            return host
+
+        with monkeypatch.context() as patch:
+            patch.setattr(opt.jax, "device_get", reject_unrelated_reverse_bug)
+            reverse_problem._vg_cache = None
+            with pytest.raises(
+                error_type, match="unrelated reverse programming error"
+            ):
+                reverse_problem.value_and_grad(reverse_problem.x0)
     np.testing.assert_allclose(problem.grad(problem.x0),
                                weighted_jac.T @ residual, rtol=1e-6)
     jax_value, jax_gradient = problem.jax_value_and_grad(jax.numpy.asarray(problem.x0))
@@ -991,6 +1013,50 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     assert np.linalg.norm(rejected_jacobian) > 0.0
     implicit_module._LAST_STATUS_ERROR.pop(config, None)
 
+    # Returning to an earlier point after an unrelated rejected trial must
+    # refresh its exact state certificate before reusing the Jacobian.
+    problem._rj_cache = None
+    repeated_residual, repeated_jacobian = problem.residual_and_jac(problem.x0)
+    np.testing.assert_allclose(repeated_residual, residual, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(repeated_jacobian, weighted_jac, rtol=1e-8, atol=1e-10)
+    certificate = implicit_module._LAST_PRIMAL_CERTIFICATE[config]
+    assert certificate[0] == implicit_module._LAST_REFINED[config][0]
+    assert certificate[1] == implicit_module._primal_state_key(
+        implicit_module._LAST_REFINED[config][1]
+    )
+    evaluation = problem.evaluate(problem.x0)
+    assert evaluation.status == "success"
+    assert evaluation.diagnostics["derivative_admitted"]
+    assert evaluation.diagnostics["primal_residual_norm"] >= 0.0
+    assert evaluation.diagnostics["primal_raw_residual_norm"] >= 0.0
+    assert "refine_tolerance_met" in evaluation.diagnostics
+
+    # A response that changes the certificate's state identity cannot update
+    # either the same-point Jacobian cache or the perturbation predictor.
+    last_jac = problem.metadata["holder"]["last_jac"]
+    last_key = problem.metadata["holder"]["last_jac_key"]
+    last_lin = problem.metadata["holder"]["lin"]
+    real_select = opt._select_host_jacobian
+
+    def drift_after_response(candidate, summary, **kwargs):
+        selected = real_select(candidate, summary, **kwargs)
+        current = implicit_module._LAST_PRIMAL_CERTIFICATE[config]
+        implicit_module._LAST_PRIMAL_CERTIFICATE[config] = (
+            current[0], b"different-refined-state", current[2]
+        )
+        return selected
+
+    with monkeypatch.context() as patch:
+        patch.setattr(opt, "_select_host_jacobian", drift_after_response)
+        problem._rj_cache = None
+        with pytest.raises(AdjointSolveError, match="primal changed"):
+            problem.residual_jac(problem.x0)
+    assert problem.metadata["holder"]["last_jac"] is last_jac
+    assert problem.metadata["holder"]["last_jac_key"] == last_key
+    assert problem.metadata["holder"]["lin"] is last_lin
+    problem._rj_cache = None
+    np.testing.assert_allclose(problem.residual_jac(problem.x0), weighted_jac)
+
     # Reverse failure is typed and fail-closed. The automatic-fallback flag is
     # recorded when the policy helper selects a certified reverse candidate.
     def nonfinite_reverse(value):
@@ -1071,7 +1137,10 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     problem._vg_cache = None
     with pytest.raises(RuntimeError, match="synthetic derivative failure"):
         problem.value_and_grad(trial)
-    assert problem.metadata["holder"]["last_jac_key"] != FunctionProblem._key(trial)
+    assert (
+        problem.metadata["holder"]["last_jac_key"][0]
+        != FunctionProblem._key(trial)
+    )
     problem._rj_cache = None
     with pytest.raises(RuntimeError, match="synthetic derivative failure"):
         problem.residual_jac(trial)

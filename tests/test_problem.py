@@ -330,7 +330,7 @@ def test_vmec_problem_reports_under_converged_fsq():
     evaluation = problem.evaluate(problem.x0, derivatives=False)
     assert evaluation.status == "under_converged"
     assert evaluation.diagnostics["fsq_ratio"] == pytest.approx(500.0)
-    assert not evaluation.diagnostics["derivative_certified"]
+    assert not evaluation.diagnostics["derivative_admitted"]
 
 
 def test_evaluation_contains_consistent_scalar_and_residual_forms():
