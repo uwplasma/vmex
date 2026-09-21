@@ -269,7 +269,10 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
     finally:
         imp._refine_block_factors = original
     stats_after = dict(imp._SOLVE_STATS.get(cfg) or {})
-    counts["fresh_response_factorizations_including_audit"] = (
+    # This production counter records completed block-response summaries. On
+    # the pinned block lane each evaluation builds one raw block system, but
+    # it is not generic factor-kernel instrumentation.
+    counts["fresh_response_evaluations_including_audit"] = (
         stats_after.get("jacobians", 0) - stats_before.get("jacobians", 0))
     counts["fresh_jacobian_requests"] = fresh_requests
     term_rows = []
