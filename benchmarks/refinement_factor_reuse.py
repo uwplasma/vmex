@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import functools
 import json
 import os
 import platform
@@ -164,9 +165,189 @@ def finish(cfg, params, state, mask, factors, *, steps: int, z=None):
         "start": start,
         "steps": rows,
         "best": best,
+        "last": rows[-1]["nonlinear_residual"] if rows else start,
         "reached_refine_tol": bool(best <= float(cfg.refine_tol)),
         "seconds": sum(row["seconds"] for row in rows),
     }, z
+
+
+def parameter_tangent(problem, x):
+    """First optimization-dof tangent in the public parameter pytree."""
+    direction = np.zeros_like(x)
+    direction[0] = 1.0
+    base = imp.params_from_input(problem.input_from_x(x))
+    shifted = imp.params_from_input(problem.input_from_x(x + direction))
+    return jax.tree.map(jnp.subtract, shifted, base)
+
+
+@functools.partial(jax.jit, static_argnames=("cfg", "rtol"))
+def response_with_refinement_factors(
+    params, state, mask, z_star, factors, tangent, *, cfg, rtol,
+):
+    """Solve one final-anchor response through refinement factors."""
+    project = imp._dof_projector(cfg, mask)
+    raw = imp.residual_fn(cfg, state, mask, formulation="raw")
+    rhs = jax.tree.map(
+        jnp.negative,
+        jax.jvp(lambda prm: raw(z_star, prm), (params,), (tangent,))[1],
+    )
+    block_factors, row_scale, column_scale = factors
+
+    def precondition(value):
+        return imp._block_inverse_apply(
+            block_factors, lambda tree: imp._pack_active(cfg, tree),
+            lambda matrix: imp._unpack_active(cfg, matrix), project,
+            row_scale, column_scale, value,
+        )
+
+    solution, krylov = imp._adjoint_solve_gcrot(
+        lambda value: jax.jvp(
+            lambda z: raw(z, params), (z_star,), (value,),
+        )[1],
+        rhs, cfg, precond=precondition, rtol=rtol,
+        max_restarts=cfg.jacobian_adjoint_maxiter, enforce=False,
+    )
+    return solution, krylov.iterations
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def response_certificate(params, state, mask, z_star, tangent, solution, *, cfg):
+    """True raw-operator response defect at the final anchor."""
+    raw = imp.residual_fn(cfg, state, mask, formulation="raw")
+    rhs = jax.tree.map(
+        jnp.negative,
+        jax.jvp(lambda prm: raw(z_star, prm), (params,), (tangent,))[1],
+    )
+    applied = jax.jvp(
+        lambda z: raw(z, params), (z_star,), (solution,),
+    )[1]
+    return imp._tree_norm(jax.tree.map(jnp.subtract, rhs, applied)), \
+        imp._tree_norm(rhs)
+
+
+def objective_direction(problem, cfg, params, state, mask, z_star, tangent,
+                        response):
+    """Objective-residual and least-squares directional derivatives."""
+    rows_from_state = problem.metadata["jax_residual_from_state"]
+    project = imp._dof_projector(cfg, mask)
+    edge = imp._edge_mask(cfg)
+
+    def rows(z, prm):
+        runtime = imp.runtime_from_params(prm, cfg)
+        physical = imp._assemble(z, runtime, state, project, edge)
+        return rows_from_state(physical, runtime)
+
+    value, column = jax.jvp(
+        rows, (z_star, params), (project(response), tangent),
+    )
+    return column, jnp.vdot(value, column).real
+
+
+def final_anchor_response(problem, cfg, params, frozen, mask, z_star, factors, x,
+                          response_rtol):
+    """Compare reused refinement factors with the fresh response path."""
+    project = imp._dof_projector(cfg, mask)
+    correction = project(jax.tree.map(
+        jnp.subtract, z_star, project(frozen),
+    ))
+    state = jax.tree.map(jnp.add, frozen, correction)
+    z_star = project(state)
+    tangent = parameter_tangent(problem, x)
+
+    # Compile each response before timing its warm execution.
+    warm_reused, _ = response_with_refinement_factors(
+        params, state, mask, z_star, factors, tangent, cfg=cfg,
+        rtol=response_rtol,
+    )
+    jax.block_until_ready(warm_reused)
+    begun = time.perf_counter()
+    reused, reused_iterations = response_with_refinement_factors(
+        params, state, mask, z_star, factors, tangent, cfg=cfg,
+        rtol=response_rtol,
+    )
+    jax.block_until_ready(reused)
+    reused_seconds = time.perf_counter() - begun
+
+    tangent_batch = jax.tree.map(lambda value: value[None], tangent)
+    fields = imp._active_state_fields(cfg)
+    probe = int(np.ceil(np.sqrt(len(fields) * int(mask.R_cos.shape[1]))))
+    fresh_response = jax.jit(lambda prm, anchor, dof_mask, tangents:
+        imp._implicit_evolved_tangent_multi_rhs(
+            prm, cfg, anchor, dof_mask, tangents, active_fields=fields,
+            probe_chunk_size=probe, response_chunk_size=1,
+            certify_rtol=response_rtol,
+            certify_maxiter=cfg.jacobian_adjoint_maxiter,
+        ))
+    warm_fresh, _ = fresh_response(params, state, mask, tangent_batch)
+    jax.block_until_ready(warm_fresh)
+    begun = time.perf_counter()
+    fresh, fresh_report = fresh_response(params, state, mask, tangent_batch)
+    jax.block_until_ready(fresh)
+    fresh_seconds = time.perf_counter() - begun
+    fresh_single = jax.tree.map(lambda value: value[0], fresh)
+    reused_defect, rhs_norm = response_certificate(
+        params, state, mask, z_star, tangent, reused, cfg=cfg,
+    )
+    fresh_defect, _ = response_certificate(
+        params, state, mask, z_star, tangent, fresh_single, cfg=cfg,
+    )
+    tolerance = float(imp._adjoint_acceptance(cfg, rhs_norm, response_rtol))
+    agreement = float(imp._tree_norm(jax.tree.map(
+        lambda old, new: old - new[0], reused, fresh,
+    )))
+    fresh_norm = float(imp._tree_norm(fresh_single))
+    reused_column, reused_objective = objective_direction(
+        problem, cfg, params, state, mask, z_star, tangent, reused,
+    )
+    fresh_column, fresh_objective = objective_direction(
+        problem, cfg, params, state, mask, z_star, tangent, fresh_single,
+    )
+    column_difference = float(jnp.linalg.norm(reused_column - fresh_column))
+    column_norm = float(jnp.linalg.norm(fresh_column))
+    objective_difference = abs(float(reused_objective - fresh_objective))
+    objective_scale = abs(float(fresh_objective))
+    tiny = np.finfo(float).tiny
+    raw = imp.residual_fn(cfg, state, mask, formulation="raw")
+    return {
+        "final_raw_residual": float(imp._tree_norm(raw(z_star, params))),
+        "configured_jacobian_rtol": float(cfg.jacobian_adjoint_tol),
+        "configured_scalar_adjoint_rtol": float(cfg.adjoint_tol),
+        "requested_response_rtol": response_rtol,
+        "acceptance_slack": float(imp._ADJOINT_RESIDUAL_SLACK),
+        "rhs_norm": float(rhs_norm),
+        "comparison": (
+            "both paths use the requested response tolerance and are "
+            "certified on the identical exact final raw operator"
+        ),
+        "reused": {
+            "residual_norm": float(reused_defect),
+            "relative_residual": float(reused_defect) / max(float(rhs_norm), tiny),
+            "tolerance": tolerance,
+            "converged": bool(float(reused_defect) <= tolerance),
+            "iterations": int(reused_iterations),
+            "seconds": reused_seconds,
+        },
+        "fresh": {
+            "residual_norm": float(fresh_defect),
+            "relative_residual": float(fresh_defect) / max(float(rhs_norm), tiny),
+            "tolerance": tolerance,
+            "converged": bool(float(fresh_defect) <= tolerance),
+            "iterations": int(fresh_report.iterations[0]),
+            "seconds": fresh_seconds,
+        },
+        "solution_difference_norm": agreement,
+        "solution_difference_relative": agreement / fresh_norm,
+        "objective_residual_direction_difference_norm": column_difference,
+        "objective_residual_direction_difference_relative": (
+            column_difference / max(column_norm, tiny)
+        ),
+        "least_squares_directional_derivative": {
+            "reused": float(reused_objective),
+            "fresh": float(fresh_objective),
+            "difference": objective_difference,
+            "difference_relative": objective_difference / max(objective_scale, tiny),
+        },
+    }
 
 
 def join_finishes(first, second):
@@ -177,6 +358,7 @@ def join_finishes(first, second):
         "start": first["start"],
         "steps": rows,
         "best": best,
+        "last": rows[-1]["nonlinear_residual"] if rows else first["start"],
         "reached_refine_tol": first["reached_refine_tol"] or second[
             "reached_refine_tol"
         ],
@@ -190,10 +372,17 @@ def main() -> None:
     parser.add_argument("--max-nfev", type=int, default=2)
     parser.add_argument("--pairs", type=int, default=1)
     parser.add_argument("--steps", type=int, default=6)
+    parser.add_argument("--response", action="store_true")
+    parser.add_argument("--response-rtol", type=float)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    if args.max_nfev < 2 or args.pairs < 1 or args.steps < 1:
-        parser.error("max-nfev >= 2, pairs >= 1, and steps >= 1 are required")
+    if (args.max_nfev < 2 or args.pairs < 1 or args.steps < 1
+            or (args.response_rtol is not None and args.response_rtol <= 0.0)
+            or (args.response_rtol is not None and not args.response)):
+        parser.error(
+            "max-nfev >= 2, pairs >= 1, steps >= 1, and a positive optional "
+            "response-rtol used with --response are required"
+        )
 
     assert_repo_vmex(vmex.__file__, REPO)
     report = {
@@ -204,7 +393,10 @@ def main() -> None:
             "VMEX_COMPILATION_CACHE=disabled PYTHONPATH=. python "
             f"benchmarks/refinement_factor_reuse.py --case {args.case} "
             f"--max-nfev {args.max_nfev} --pairs {args.pairs} "
-            f"--steps {args.steps} --output <output.json>"
+            f"--steps {args.steps}"
+            f"{' --response' if args.response else ''} "
+            f"{'--response-rtol ' + str(args.response_rtol) + ' ' if args.response_rtol is not None else ''}"
+            "--output <output.json>"
         ),
         "platform": platform.platform(),
         "jax": jax.__version__,
@@ -245,7 +437,7 @@ def main() -> None:
         fresh = factors_at(cfg, trial_params, trial_state, mask)
         jax.block_until_ready(fresh)
         factor_seconds = time.perf_counter() - begun
-        fresh_finish, _ = finish(
+        fresh_finish, fresh_z = finish(
             cfg, trial_params, trial_state, mask, fresh, steps=args.steps,
         )
         stale_finish, _ = finish(
@@ -278,7 +470,7 @@ def main() -> None:
                 steps=args.steps,
             )
         guarded["seconds"] = time.perf_counter() - guarded_started
-        rows.append({
+        row = {
             "scaled_step": float(
                 np.linalg.norm((trial_x - accepted_x) / problem.scales)
             ),
@@ -291,7 +483,15 @@ def main() -> None:
             "guard_probe": probe,
             "fallback_factor_seconds": fallback_factor_seconds,
             "guarded": guarded,
-        })
+        }
+        if (args.response and fresh_finish["reached_refine_tol"]
+                and fresh_finish["last"] == fresh_finish["best"]):
+            row["final_anchor_response"] = final_anchor_response(
+                problem, cfg, trial_params, trial_state, mask, fresh_z, fresh,
+                trial_x, (float(cfg.adjoint_tol) if args.response_rtol is None
+                          else args.response_rtol),
+            )
+        rows.append(row)
 
     report.update(
         forcing_tolerance=imp._REFINE_FORCING,
