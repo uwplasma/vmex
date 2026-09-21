@@ -588,20 +588,27 @@ def test_host_callback_is_not_pinned_across_platforms():
     assert isinstance(same, jax.sharding.SingleDeviceSharding)
 
 
-@pytest.mark.parametrize("root_index, template_index", [(0, 0), (1, 1), (1, 0)])
+@pytest.mark.parametrize("root_index, template_index, explicit_index", [
+    (0, 0, None), (1, 1, None), (1, 0, None), (0, 1, None),
+    (0, 1, 0), (1, 0, 1),
+])
 def test_host_callback_refinement_follows_solved_cpu_device(
-        monkeypatch, root_index, template_index):
+        monkeypatch, root_index, template_index, explicit_index):
     """Callback inputs meet on the root or already-cached template device."""
     from vmex.core import implicit as im
 
     cfg = im.make_config(VmecInput.from_file(DATA / "input.solovev"))
-    params = im.params_from_input(cfg.inp)
-    params_np = jax.tree.map(np.asarray, params)
     devices = jax.devices("cpu")
     if len(devices) <= max(root_index, template_index):
         pytest.skip("requires two forced host devices")
     root_device = devices[root_index]
     template_device = devices[template_index]
+    expected_device = (devices[explicit_index] if explicit_index is not None
+                       else template_device)
+    cfg = replace(cfg, device=(devices[explicit_index]
+                              if explicit_index is not None else None))
+    params = im.params_from_input(cfg.inp)
+    params_np = jax.tree.map(np.asarray, params)
     leaf = jax.device_put(np.ones((2, 2)), root_device)
     state = im.SpectralState(*(leaf,) * 6)
     host_mask = jax.tree.map(lambda value: np.ones_like(value), state)
@@ -623,7 +630,7 @@ def test_host_callback_refinement_follows_solved_cpu_device(
     def refine(_cfg, aligned_params, solved, aligned_mask):
         for tree in (aligned_params, solved, aligned_mask):
             assert all(
-                value.devices() == {template_device}
+                value.devices() == {expected_device}
                 for value in jax.tree.leaves(tree)
             )
         return solved
@@ -631,27 +638,32 @@ def test_host_callback_refinement_follows_solved_cpu_device(
     monkeypatch.setattr(im, "_refine_fixed_point", refine)
     returned, returned_mask = im._host_solve_and_mask(cfg, params_np)
 
-    assert cfg.device is None
+    assert cfg.device == (None if explicit_index is None else expected_device)
     assert all(isinstance(value, np.ndarray)
                for value in jax.tree.leaves(returned))
     assert all(isinstance(value, np.ndarray)
                for value in jax.tree.leaves(returned_mask))
 
 
-@pytest.mark.parametrize("device_index", [0, 1])
+@pytest.mark.parametrize("caller_index, device_index, explicit_index", [
+    (0, 0, None), (0, 1, None), (1, 0, None), (0, 1, 0), (1, 0, 1),
+])
 def test_status_certificate_preserves_returned_state_on_runtime_device(
-        monkeypatch, device_index):
+        monkeypatch, caller_index, device_index, explicit_index):
     """Host conversion preserves coefficients and the runtime's placement."""
     from vmex.core import implicit as im
 
     devices = jax.devices("cpu")
-    if len(devices) <= device_index:
+    if len(devices) <= max(caller_index, device_index):
         pytest.skip("requires two forced host devices")
     device = devices[device_index]
+    expected_device = (devices[explicit_index] if explicit_index is not None
+                       else device)
     inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
         mpol=2, ntor=0, ntheta=8, nzeta=4)
     inp = replace(inp, ns_array=np.asarray([3]))
-    cfg = im.make_config(inp, device=None)
+    cfg = im.make_config(inp, device=(devices[explicit_index]
+                                     if explicit_index is not None else None))
     params = im.params_from_input(inp)
     template = im._put_numeric_leaves(im._template_runtime(cfg), device)
     monkeypatch.setattr(im, "_template_runtime", lambda _: template)
@@ -673,7 +685,7 @@ def test_status_certificate_preserves_returned_state_on_runtime_device(
         state, aligned_params, mask = jax.tree.map(
             jax.numpy.asarray, (state, aligned_params, mask))
         for tree in (state, aligned_params, mask):
-            assert all(isinstance(x, jax.Array) and x.devices() == {device}
+            assert all(isinstance(x, jax.Array) and x.devices() == {expected_device}
                        for x in jax.tree.leaves(tree))
         for actual, expected in zip(jax.tree.leaves(state),
                                     jax.tree.leaves(returned_np)):
@@ -681,8 +693,9 @@ def test_status_certificate_preserves_returned_state_on_runtime_device(
         return 1e-8, 1e-8, 1e-14, True
 
     monkeypatch.setattr(im, "_primal_measurements", measurements)
-    _, _, status, _, _ = im._host_solve_and_mask_status(
-        cfg, jax.tree.map(np.asarray, params))
+    with jax.default_device(devices[caller_index]):
+        _, _, status, _, _ = im._host_solve_and_mask_status(
+            cfg, jax.tree.map(np.asarray, params))
     assert status == 0
-    assert cfg.device is None
+    assert cfg.device == (None if explicit_index is None else expected_device)
     assert im._LAST_PRIMAL_CERTIFICATE[cfg][1] == im._primal_state_key(returned_np)
