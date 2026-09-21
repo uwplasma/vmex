@@ -1,7 +1,6 @@
 {
   "schema_version": 1,
   "created_utc": "2026-09-21T03:10:21+00:00",
-  "status": "PARTIAL: only the free:full run below has completed. The free_beta:full run of the same command was still running at commit time; its row must be appended from that run's output before this record is cited for the finite-beta example.",
   "_provenance": {
     "measurement_commit": "cf9811bf71518a08b1ff315dd4c75f92249e3308",
     "measurement_dirty": false,
@@ -70,6 +69,56 @@
         },
         "unmet": [],
         "met": true
+      },
+      "stage_lines": []
+    },
+    {
+      "example": "examples/optimization/single_stage_free_boundary_optimization_finite_beta.py",
+      "source": "working tree",
+      "mode": "full",
+      "wall_seconds": 1776.2,
+      "peak_rss_gib": 5.26,
+      "exit_code": 1,
+      "capped_at_timeout": false,
+      "load_average_before": [
+        8.81,
+        6.15,
+        4.92
+      ],
+      "load_average_after": [
+        6.87,
+        6.41,
+        6.35
+      ],
+      "reported": {
+        "free-boundary final line": "[final] QA = 1.46479e-01, f_boot = 1.52869e-01, beta = 3.381%, aspect = 6.983, min |iota| = 0.259"
+      },
+      "summary": {
+        "example": "single_stage_free_boundary_optimization_finite_beta.py",
+        "smoke": false,
+        "optimization_seconds": 1765.4,
+        "trials": 26,
+        "lbfgsb_iterations": 6,
+        "stop_reason": "ABNORMAL: ",
+        "free_boundary_solves": 28,
+        "final": {
+          "QA": 0.1464793396048284,
+          "bootstrap": 0.15286913633231872,
+          "beta": 0.033807280069607405,
+          "aspect": 6.983424661948212,
+          "min |iota|": 0.25857702499725066,
+          "maximum curvature": 5.340599752380145,
+          "output solve converged": true
+        },
+        "targets": {
+          "min |iota| >=": 0.42,
+          "aspect (least squares)": 6.0,
+          "beta (least squares)": 0.025
+        },
+        "unmet": [
+          "minimum |iota| 0.2586 below the 0.4200 floor"
+        ],
+        "met": false
       },
       "stage_lines": []
     }
