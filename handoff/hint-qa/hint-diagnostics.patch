@@ -1,0 +1,268 @@
+diff --git a/src/HINT/stepb_mod.f90 b/src/HINT/stepb_mod.f90
+--- a/src/HINT/stepb_mod.f90
++++ b/src/HINT/stepb_mod.f90
+@@ -151,7 +151,9 @@
+ 
+   PRIVATE
+ 
+-  LOGICAL :: lhistoryb =  .true.
++  LOGICAL :: lhistoryb             =  .true., &
++    &        lcurrent_drive_diag   = .false., &
++    &        current_drive_diag_now = .false.
+   INTEGER :: nstepb    =  1000, &
+     &        nrefb     =  1000, &
+     &        nsmoothb  =     1, &
+@@ -170,7 +172,10 @@
+     &         vvec0max,                 &
+ 
+     &         volume0,                  &
+-    &         volume1
++    &         volume1,                  &
++    &         current_drive_diag_timeb
++  INTEGER :: current_drive_diag_iab    = 0, &
++    &        current_drive_diag_istepb = 0
+   REAL(DP), ALLOCATABLE ::                    &
+ 
+     &                      rgb(:),            &
+@@ -257,7 +262,8 @@
+   CHARACTER(LEN=200) :: historyb_file =  'history_b.txt'
+ 
+ 
+-  NAMELIST /stepb_inp1/  lhistoryb,    &
++  NAMELIST /stepb_inp1/  lhistoryb,          &
++    &                    lcurrent_drive_diag, &
+     &                    nstepb,       &
+     &                    nrefb,        &
+     &                    nsmoothb,     &
+@@ -309,6 +315,8 @@
+ 
+ 
+     time1 =  MPI_WTIME()
++
++    current_drive_diag_iab =  iab
+ 
+     IF(myrank == 0)THEN
+       PRINT *
+@@ -561,11 +569,11 @@
+     PRINT *
+     PRINT *,  '  CONTROL PARAMETERS IN STEPB '
+     PRINT *,  '  ----------------------------'
+-    PRINT *,  '   lhistoryb'
+-
+-    fmt = '(7X, L5)'
+-
+-    PRINT fmt, lhistoryb
++    PRINT *,  '   lhistoryb  lcurrent_drive_diag'
++
++    fmt = '(7X, 2L10)'
++
++    PRINT fmt, lhistoryb, lcurrent_drive_diag
+ 
+     PRINT *,  '  -------------------------------------'
+     PRINT *,  '   nstepb   nrefb  nsmoothb  nenergyb'
+@@ -615,6 +623,7 @@
+     CALL MPI_BARRIER(MPI_COMM_WORLD, ierr)
+ 
+     CALL MPI_BCAST(lhistoryb,  1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_BCAST(lcurrent_drive_diag, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
+ 
+     CALL MPI_BCAST(nstepb,     1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+     CALL MPI_BCAST(nrefb,      1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+@@ -2277,7 +2286,11 @@
+     INTEGER :: ierr
+ 
+ 
++    current_drive_diag_istepb =  istepb
++    current_drive_diag_timeb  =  timeb
++    current_drive_diag_now    =  lcurrent_drive_diag
+     CALL cal_j
++    current_drive_diag_now    =  .false.
+     CALL cal_viscos
+ 
+     CALL MPI_BARRIER(MPI_COMM_WORLD, ierr)
+@@ -2700,12 +2713,14 @@
+       &        i,  &
+       &        j,  &
+       &        k
+-    REAL(DP) :: s,       &
+-      &         ds,      &
+-      &         netj0,   &
+-      &         netj1,   &
+-      &         valuej0, &
+-      &         valuej1
++    REAL(DP) :: s,               &
++      &         ds,              &
++      &         netj0,           &
++      &         netj1,           &
++      &         valuej0,         &
++      &         valuej1,         &
++      &         diag_time_start, &
++      &         diag_elapsed
+ !For MPI
+     INTEGER :: ierr
+ 
+@@ -2714,7 +2729,18 @@
+     jphin(-1:ilen+2,-1:jlen+2,-1:klen+2) =  0.0_DP
+     jzn(-1:ilen+2,-1:jlen+2,-1:klen+2)   =  0.0_DP
+ 
+-    IF(jvecnmax == 0.0_DP) RETURN
++    netj0 =  0.0_DP
++    netj1 =  0.0_DP
++
++    IF(current_drive_diag_now) diag_time_start =  MPI_WTIME()
++
++    IF(jvecnmax == 0.0_DP)THEN
++      IF(current_drive_diag_now)THEN
++        diag_elapsed =  MPI_WTIME() - diag_time_start
++        CALL diagnose_current_drive(netj0, netj1, diag_elapsed)
++      END IF
++      RETURN
++    END IF
+ 
+     CALL cal_volume
+ 
+@@ -2793,8 +2819,144 @@
+ 
+     CALL MPI_BARRIER(MPI_COMM_WORLD, ierr)
+ 
++    IF(current_drive_diag_now)THEN
++      diag_elapsed =  MPI_WTIME() - diag_time_start
++      CALL diagnose_current_drive(netj0, netj1, diag_elapsed)
++    END IF
++
+ 
+   END SUBROUTINE cal_netj
++
++  SUBROUTINE diagnose_current_drive (netj0, netj1, diag_elapsed)
++
++    IMPLICIT NONE
++
++    REAL(DP), INTENT(IN) :: netj0,        &
++      &                    netj1,        &
++      &                    diag_elapsed
++    INTEGER :: i,              &
++      &        j,              &
++      &        k,              &
++      &        kg,             &
++      &        active_cells_l, &
++      &        active_cells,   &
++      &        ierr
++    REAL(DP) :: current_scale, &
++      &         target_current, &
++      &         ss_min_l,       &
++      &         ss_max_l,       &
++      &         ss_min,         &
++      &         ss_max,         &
++      &         bphi_min_l,     &
++      &         bphi_max_l,     &
++      &         bphi_min,       &
++      &         bphi_max,       &
++      &         bphi,           &
++      &         volume0_diag,   &
++      &         volume1_diag,   &
++      &         diag_elapsed_max
++    REAL(DP) :: source_cut_l(ntor),            &
++      &         source_abs_cut_l(ntor),        &
++      &         attained_same_cut_l(ntor),     &
++      &         attained_pressure_cut_l(ntor), &
++      &         source_cut(ntor),              &
++      &         source_abs_cut(ntor),          &
++      &         attained_same_cut(ntor),       &
++      &         attained_pressure_cut(ntor)
++
++
++    source_cut_l(:)            =  0.0_DP
++    source_abs_cut_l(:)        =  0.0_DP
++    attained_same_cut_l(:)     =  0.0_DP
++    attained_pressure_cut_l(:) =  0.0_DP
++    ss_min_l                   =  HUGE(1.0_DP)
++    ss_max_l                   = -HUGE(1.0_DP)
++    bphi_min_l                 =  HUGE(1.0_DP)
++    bphi_max_l                 = -HUGE(1.0_DP)
++    active_cells_l             =  0
++
++    current_scale =  rmaj0 * b0 * dr * dz / mu0
++
++    DO k=ksta2,kend2
++      kg =  ksta + k - 1
++      DO j=jsta2,jend2
++        DO i=ista2,iend2
++          IF(ss(i,j,k) < jcuts)THEN
++            ss_min_l =  MIN(ss_min_l, ss(i,j,k))
++            ss_max_l =  MAX(ss_max_l, ss(i,j,k))
++            bphi =  bphi0(i,j,k) + bphi1(i,j,k)
++            bphi_min_l =  MIN(bphi_min_l, bphi)
++            bphi_max_l =  MAX(bphi_max_l, bphi)
++            active_cells_l =  active_cells_l + 1
++            source_cut_l(kg) =  source_cut_l(kg) + current_scale * jphin(i,j,k)
++            source_abs_cut_l(kg) =  source_abs_cut_l(kg) + ABS(current_scale * jphin(i,j,k))
++            attained_same_cut_l(kg) =  attained_same_cut_l(kg) + current_scale * jphi1(i,j,k)
++          END IF
++          IF(p1b(i,j,k) > 0.0_DP)THEN
++            attained_pressure_cut_l(kg) =  attained_pressure_cut_l(kg) + current_scale * jphi1(i,j,k)
++          END IF
++        END DO
++      END DO
++    END DO
++
++    CALL MPI_REDUCE(source_cut_l, source_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(source_abs_cut_l, source_abs_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(attained_same_cut_l, attained_same_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(attained_pressure_cut_l, attained_pressure_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(ss_min_l, ss_min, 1, MPI_REAL8, MPI_MIN, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(ss_max_l, ss_max, 1, MPI_REAL8, MPI_MAX, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(bphi_min_l, bphi_min, 1, MPI_REAL8, MPI_MIN, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(bphi_max_l, bphi_max, 1, MPI_REAL8, MPI_MAX, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(active_cells_l, active_cells, 1, MPI_INTEGER, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(diag_elapsed, diag_elapsed_max, 1, MPI_REAL8, MPI_MAX, 0, MPI_COMM_WORLD, ierr)
++
++    IF(myrank == 0)THEN
++      SELECT CASE(TRIM(j_type))
++        CASE('power_series')
++          target_current =  inet0 + inet1
++        CASE DEFAULT
++          target_current =  inet0
++      END SELECT
++
++      IF(jvecnmax == 0.0_DP)THEN
++        volume0_diag =  0.0_DP
++        volume1_diag =  0.0_DP
++      ELSE
++        volume0_diag =  volume0
++        volume1_diag =  volume1
++      END IF
++
++      IF(active_cells == 0)THEN
++        ss_min =  0.0_DP
++        ss_max =  0.0_DP
++        bphi_min =  0.0_DP
++        bphi_max =  0.0_DP
++      END IF
++
++      WRITE(*,'(A)') 'CURRENT_DRIVE_DIAG_UNITS currents=A step_start_paxis=mu0_Pa_over_B0_squared '// &
++        & 'bphi=Bphi_over_B0 volumes=code_profile_integrals timeb=code_time mpi=wall_seconds'
++      WRITE(*,'(A,1X,A,2I8,8ES24.15)') 'CURRENT_DRIVE_DIAG_CONTEXT', TRIM(j_type), &
++        & current_drive_diag_iab, current_drive_diag_istepb, current_drive_diag_timeb, paxis, &
++        & target_current, jcuts, volume0_diag, volume1_diag, netj0, netj1
++      WRITE(*,'(A,I12,4ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE_MASK', active_cells, &
++        & ss_min, ss_max, bphi_min, bphi_max
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE', source_cut(1), MINVAL(source_cut), &
++        & SUM(source_cut) / ntor, MAXVAL(source_cut)
++      IF(source_abs_cut(1) > 0.0_DP)THEN
++        WRITE(*,'(A,2ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE_CANCELLATION', source_abs_cut(1), &
++          & source_cut(1) / source_abs_cut(1)
++      ELSE
++        WRITE(*,'(A,2ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE_CANCELLATION', source_abs_cut(1), 0.0_DP
++      END IF
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_DIAG_ATTAINED_SAME', attained_same_cut(1), MINVAL(attained_same_cut), &
++        & SUM(attained_same_cut) / ntor, MAXVAL(attained_same_cut)
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_DIAG_ATTAINED_PRESSURE', attained_pressure_cut(1), &
++        & MINVAL(attained_pressure_cut), SUM(attained_pressure_cut) / ntor, MAXVAL(attained_pressure_cut)
++      WRITE(*,'(A,ES24.15)') 'CURRENT_DRIVE_DIAG_MPI_MAX_SECONDS', diag_elapsed_max
++    END IF
++
++
++  END SUBROUTINE diagnose_current_drive
+ 
+   SUBROUTINE cal_eta
+ 

@@ -5,5 +5,8 @@
   "../../../examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
   "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json": "09485e34e6e4f90b0ac765ee068d1b6f5ca1e58e4c7bd47a8b9df25b0ddf3a73",
   "../../../examples/data/input.LandremanPaul2021_QA_beta2p5_bootstrap": "f1c5ab0704f8097f680e1caed519c899fdecd0f4b9b73d4e4a33d798c26a9bd5",
-  "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta2p5_bootstrap.json": "3888630f63d2c8662145b5d6a5a1ff18de893d265bb52105f931093d10263c1d"
+  "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta2p5_bootstrap.json": "3888630f63d2c8662145b5d6a5a1ff18de893d265bb52105f931093d10263c1d",
+  "coarse.in": "687e97042b49fc69edb3744e4598b899687fe63e89e0a41af8bca44996b28bb2",
+  "fine.in": "0b7f3eac8144bcbf0da1af1d48a60a2de5a1b77cb65911b7ada42ecc25ebf1bb",
+  "native-samples.npz": "3fee6693d8643419441fd934eb584a92b475a8bfc3daa80e5877818a976694d6"
 }

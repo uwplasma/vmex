@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build the native suite with upstream object ordering in isolated directories."""
-import argparse, os, pathlib, subprocess, json, platform
+import argparse, os, pathlib, subprocess, json, platform, shlex
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--mode',choices=['Debug','Release'],default='Debug')
 p.add_argument('--only',nargs='+',choices=['HINT','MKVAC','MKFLX','MKLIM','HMAG','GPRTS','MAGVAL'])
@@ -36,5 +36,13 @@ for name in a.only or makefiles:
   result=subprocess.run(cmd,cwd=dest,stdout=log,stderr=subprocess.STDOUT)
  if result.returncode:
   print((dest/'build.log').read_text()[-7000:]);raise SystemExit(result.returncode)
+ if name=='MAGVAL':
+  driver=pathlib.Path(__file__).resolve().with_name('sample-points.f90')
+  objects=[str(dest/name) for name in ('module.o','spline_mod.o','free_mem.o','magout.o','magset.o','make_mem.o','mgcpu.o','mgval1.o','mgval2.o','mgval3.o','polint.o','read_eq_field.o','vsetup.o')]
+  cmd=shlex.split(fc)+shlex.split(flags)+shlex.split(inc)+[f'-I{dest}',str(driver)]+objects+shlex.split(libs)+['-o',str(dest/'sample-points.exe')]
+  with (dest/'build.log').open('a') as log:
+   result=subprocess.run(cmd,cwd=dest,stdout=log,stderr=subprocess.STDOUT)
+  if result.returncode:
+   print((dest/'build.log').read_text()[-7000:]);raise SystemExit(result.returncode)
 commit = subprocess.check_output(['git','rev-parse','HEAD'],cwd=r,text=True).strip() if (r/'.git').exists() else ((r/'SOURCE_COMMIT').read_text().strip() if (r/'SOURCE_COMMIT').exists() else None)
 (b/'build_config.json').write_text(json.dumps(dict(mode=a.mode,compiler=fc,flags=flags,includes=inc,libraries=libs,platform=platform.platform(),commit=commit),indent=2)+'\n')

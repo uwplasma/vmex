@@ -70,5 +70,31 @@
     "The targets are exterior to the initial fixed boundary; exteriority to the relaxed current support is not certified.",
     "The total-field difference includes grid-dependent vacuum interpolation.",
     "No new equilibrium, relaxation, or GPU calculation was performed."
-  ]
+  ],
+  "prepared_inputs": {
+    "coarse": {
+      "portable_deck": "data/coarse.in",
+      "measured_deck_sha256": "ccf3dae79f3a858966036f599f339174750d0bdd65bac139a6ac91552aa5903d",
+      "normalization": "Only the header comment and limiter/history basenames were changed; numerical namelists are preserved.",
+      "vacuum_sha256": "392689512f2a9803fbf8a69e9812c8dd9af865a35426197593a72a4c7abab5c2",
+      "flux_sha256": "5db733f99b4a518f4d462a4f7b6b6b3161f2280bc23271cf5d42079c0f09a778",
+      "limiter_sha256": "0f4d81fc679eb674d76619b55bffdd73843d39e283a6d9d7aaf388e7d3a5c8d1"
+    },
+    "fine": {
+      "portable_deck": "data/fine.in",
+      "measured_deck_sha256": "5b6cca19f2adc8d91e4d084e9b84e8a7bb861626bf136d34eb90ead5fb2ba63f",
+      "normalization": "Only the header comment and limiter/history basenames were changed; numerical namelists are preserved.",
+      "vacuum_sha256": "559f6be766900ad3c947b650114d033dd3384bf2716a880b84a7ef8f74e3305b",
+      "flux_sha256": "b84b1ad337cc8ec12e94f73fd2a62cddcff137551e37f95ee5f1f707480968c3",
+      "limiter_sha256": "8ec31cdda817d21965db6f9cf65c76fe0e3838138dbf373b88bae467ffe5b13f"
+    }
+  },
+  "validated_reproduction": {
+    "postprocessor_source_sha256": "f615b2407d82953ddcff6cfd6368a558c5ebc66aca0b885bdd9514d3edbfa0f0",
+    "native_driver_source_sha256": "952a88220a5af81e73f3294d08116f82efb663808591db9c59479a2975cf3946",
+    "native_sampler_binary_sha256": "ee9d8d4e81dea4277faa1f65907e845e11a591fd822ea7867f4e74244ef24bb9",
+    "array_and_metric_parity": "All sampled total/vacuum/response array hashes and all six metrics match exactly.",
+    "build_scope": "Real-data parity reused retained native objects with the public driver. A separate clean native build passed a one-target constant-field check; it was not rerun on the large raw fields.",
+    "samples": "data/native-samples.npz"
+  }
 }

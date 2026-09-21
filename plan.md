@@ -25,6 +25,30 @@ targets after native vacuum subtraction. This is diagnostic evidence, not
 an accepted equilibrium or a HINT–VMEX discrepancy. The protocol records
 remaining reproducibility and foundational-paper access gaps explicitly.
 
+Follow-through: the public sampler and compact 192-point sample arrays now
+reproduce every reported total/vacuum/response metric and array hash; portable
+fresh-start decks retain the measured numerical controls and current tables.
+A clean sampler build passes a constant-field test. Large raw fields and
+preprocessing assets still need a publication dataset. A current-main CPU
+root screen retains the full 0.5% deck resolution and converges with finite
+state, but its host FSQ is not an independent physical-force certificate.
+The focused #409 surface-assembly regression and exact 0.5% outside-field
+example also pass in an isolated checkout at `aabedb8f`, with SOLVAX 0.21,
+Boozer 0.4, virtual-casing 0.0.7 and ESSOS 0.17. The latter checks finite/nonzero
+field and VJP outputs through third spatial order; it is not FD/duality or
+physical-force certification. Required GitHub review/CI and matched GPU
+validation remain separate gates. Native drive diagnostics must compare source and attained
+currents on the same support and cuts, because the existing HINT history
+uses a different mask and toroidal average from the imposed-current target.
+The opt-in native diagnostic is now implemented as a separate patch and
+tested on a short 64x64x32 fixture: the imposed cut-zero current matches
+-95.778 kA while attained same-support and pressure-support currents differ.
+One-rank diagnostic off/on field and history files are byte-identical;
+two-rank records agree except for timing; the zero-source control is finite.
+This validates the measurement path, not a mature equilibrium. Next apply it
+to a bounded later-time continuation and inspect cut variation and source
+support before extending the relaxation campaign.
+
 Authoritative plan, revised **2026-09-13** by an independent review of the
 2026-09-06 plan (merged as [#283](https://github.com/uwplasma/vmex/pull/283),
 readable with its full logbook at

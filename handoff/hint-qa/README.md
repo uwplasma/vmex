@@ -12,7 +12,7 @@ outside the given boundary, then a separately matched free-boundary study.
 | Source | Required interpretation |
 |---|---|
 | [HINT3D `current`](https://github.com/yasuhiro-suzuki/HINT3D/tree/current) | The creator maintains this branch; do not substitute `master`. The measured source is `bf31fc39f7179bdd91d84319c51c68e2f6fff25f` plus [the eight-file patch](hint-portability.patch). The patch is not upstream or proof of a bug-free solver. |
-| [VMEX PR #302](https://github.com/uwplasma/vmex/pull/302) | Branch `fix/hint-comparison-derivative-contract` is being reconciled with current main. Its old numerical source `14360d179af4534aa9bb638b172c8724ee289d9b` is historical evidence, not certification of this branch. |
+| [VMEX PR #302](https://github.com/uwplasma/vmex/pull/302) | Branch `fix/hint-comparison-derivative-contract` is reconciled with the pinned current-main baseline. Its old numerical source `14360d179af4534aa9bb638b172c8724ee289d9b` is historical evidence, not certification of this branch. |
 | [SOLVAX #104](https://github.com/uwplasma/SOLVAX/pull/104) | Tested head `e4b507185464851ac5e8de22041f2f8e384554e9`, merged as `66f97a6e0eb758af8d7f46939ffdd8ec733efbef`; released in 0.21.0. Use at least 0.21.0 for its rejection of nonfinite nonlinear roots. |
 | [VMEX #409](https://github.com/uwplasma/vmex/pull/409) | Open at review: fixes the surface-field assembly regression introduced by #403. Include its reviewed fix before current-source field qualification. |
 | [VMEX #410](https://github.com/uwplasma/vmex/pull/410) | Open draft at review: owns dependency-floor changes. Complete exact-floor validation there rather than duplicate it here. |
@@ -93,6 +93,67 @@ grid-changing restarts; do not relabel a remapped state as a native restart.
 The later-time and fresh-start trajectories have different histories and
 cannot be combined into one convergence sequence.
 
+A current-source CPU screen of the exact 0.5% deck subsequently completed
+700 iterations with finite state and reported `fsqr=9.93997e-12`,
+`fsqz=1.35863e-12`, `fsql=3.95010e-12`. This verifies root execution on
+`f719c4ff`, not a fresh physical-force certificate or an exterior/VJP result.
+The exterior path on unchanged main still needs #409. In a fresh environment,
+the exact 0.5% outside-field test subsequently passed at reviewed #409 head
+`aabedb8f2212747ed2651fb13ba81468cc5f7039`: **1 passed, 1 deselected in
+132.23 s**, CPU-only, within a 240 s process-group cap. It actually exercised
+the live-state surface assembly, exterior field, spatial derivatives through
+third order and all four VJP outputs, with `accuracy_check='raise'`. Assertions
+check finite/nonzero B and |B| and finite VJP maxima with at least one nonzero
+maximum; they do not inspect every derivative or VJP component. This is not an import skip, FD/duality comparison,
+GPU result, or independent physical-force certificate. The focused live-state
+surface regression also passed separately. Required GitHub review and CI
+remain prerequisites to merging #409.
+
+The isolated test environment passed `pip check` and source-placement checks:
+Python 3.11.14, JAX/jaxlib 0.9.2, SOLVAX 0.21.0, booz_xform_jax 0.4.0,
+virtual-casing-jax 0.0.7, ESSOS 0.17, NumPy 2.4.6, SciPy 1.17.1,
+netCDF4 1.7.4, h5py 3.16.0 and pytest 9.1.1. This lists the measured core
+versions rather than claiming a complete transitive environment lock.
+An isolated matching-core GPU environment is prepared with the JAX 0.9.2
+CUDA-12 runtime packages; dependency, source-placement and CPU callback checks
+pass. Both devices were occupied at the readiness check, so no GPU run was
+started. A future run must select CUDA first while retaining the CPU backend
+for host callbacks, disable preallocation, enforce time/memory bounds, and
+retain numerical outputs for comparison rather than report a test pass alone.
+
+Source review of HINT's linear drive finds no normalization defect explaining
+the observed deficit: its cut-zero imposed-current integral is constructed
+to match `inet0`. That source enters the resistive evolution; it does not
+directly assign the attained curl-derived current. The existing history
+instead reports attained current inside positive pressure, averaged over
+toroidal cuts. Comparing it with a cut-zero target supported on `ss<jcuts`
+mixes both masks and cuts. Further, `ss` is frozen during each magnetic
+substep sequence while the field and current normalization evolve.
+The optional [current-drive diagnostic patch](hint-diagnostics.patch) reports
+source and attained currents at a native history update on the same
+`ss` support for cut zero and min/mean/max across cuts, alongside the original
+pressure-mask current, step-start traced axis pressure and a source
+cancellation ratio. This can distinguish source normalization, cut variation and physical
+relaxation without large diagnostic arrays or changes to the dynamics.
+Serial/two-rank agreement, default/off behavior and a zero-source control
+have been checked; sign-changing cancellation and broader decomposition
+fixtures remain. The linear branch also ignores `inet1`; the present QA deck
+uses zero, so that conditional limitation does not explain this run.
+
+On a short 64x64x32 diagnostic fixture (two outer cycles, two magnetic steps,
+`dt_b=1e-4`, `eta0=1e-3`, `lc_in=0.2`, energy output every step),
+the first source cut carried **-95778.349865 A**, matching its target to
+summation precision; attained current was **-5.389768 A on the same support**
+and **-4.592082 A inside positive pressure**. Source cut min/mean/max were
+-96700.575679/-95709.272272/-94625.010911 A. This directly demonstrates cut
+variation and distinct attained-current masks, not convergence of the later
+trajectory. Enabling the diagnostic left the one-rank history and native
+field file byte-identical to the disabled run. Two-rank diagnostic values
+matched apart from timing; history differences were at most 1e-22. A final
+zero-drive guard check emitted four finite, zero-source records without
+reading uninitialized normalization volumes. The tested final source hash is
+`bc4913186bd6de2a0118ba9f1e65a252160420cc47d62733abd0fc398c2e8fc2`.
+
 New native postprocessing at the same 192 targets separates the cross-grid
 field differences: total RMS/max **0.243516/1.701148 mT**, vacuum
 **0.232940/1.697470 mT**, plasma response **0.074009/0.321955 mT**.
@@ -103,14 +164,22 @@ grids do not establish a response convergence order. A point exterior to
 WOUT is not necessarily exterior to the relaxed current support.
 The [compact field record](field-summary.json) retains exact metrics and
 postprocessor, target, native **sampler** binary and field hashes. The sampler
-hash is not the HINT solver executable hash. Raw snapshot/sample arrays and
-the custom sampling driver/postprocessor sources are not bundled, so these
-numbers are retained diagnostic evidence, not independently reproducible from
-this compact bundle. The exact prepared HINT decks, current table and
-wall/limiter/flux/vacuum preparation inputs are also absent. The public source
-decks/coils and reference WOUTs alone cannot recreate the measured fresh pair.
-Package these missing materials with generic names and explicit hashes before
-promoting the record to reproducible research evidence.
+hash is not the HINT solver executable hash. The compact
+[sample archive](data/native-samples.npz) contains all 192 target vectors for
+both total and vacuum fields on both grids. Independently recomputing the six
+metrics and sampled-array hashes reproduces the record exactly. The public
+[native driver](sample-points.f90) and [postprocessor](sample_fields.py) also
+reproduce the original sampled-array hashes when run with the retained raw
+inputs and native objects. A separate clean build passed a constant-field
+check; that clean build has not been tested on the large raw fields. The
+portable [coarse](data/coarse.in) and [fine](data/fine.in) native decks retain
+all measured numerical namelists, including the current-profile table; only
+their header comments and limiter/history filenames changed. Original deck
+and prepared vacuum/flux/limiter hashes are recorded separately. Those large
+prepared fields and the wall-generation inputs are not bundled, so the
+source decks/coils and WOUTs alone cannot recreate the measured fresh pair.
+Package the remaining materials before promoting this to an independently
+reproduced equilibrium result.
 
 ## Execution order and research acceptance
 
@@ -197,11 +266,13 @@ JAX_ENABLE_X64=1 JAX_PLATFORMS=cpu VMEX_COMPILATION_CACHE=disabled RUN_FULL=1 \
   python -m pytest -q tests/test_examples.py::test_take_fixed_boundary_gradients
 ```
 
-These are next-run commands, not results of this review. The first exercises
-the exact 0.5% QA deck and finite field/VJP outputs; the second checks a
-QA-family deck against central finite differences. Neither supplies an exact
-0.5% gradient-correctness certificate; add a small exact-deck FD/duality case
-to the existing test infrastructure before claiming one.
+The first command passed at the exact #409 head and core versions recorded
+above; cap BLAS/OpenMP/XLA thread pools when using a shared CPU host. It
+exercises the exact 0.5% QA deck and finite field/VJP outputs. The second
+remains a next-run command and checks a QA-family deck against central finite
+differences. Neither supplies an exact 0.5% gradient-correctness certificate;
+add a small exact-deck FD/duality case to the existing test infrastructure
+before claiming one.
 
 The current virtual-casing-jax floor is 0.0.7. Its
 [`B_and_derivatives_xyz` path](https://github.com/uwplasma/virtual_casing_jax/pull/12)
@@ -233,10 +304,90 @@ python handoff/hint-qa/build.py --hint-root HINT3D --mode Debug --hdf5-prefix "$
 python handoff/hint-qa/build.py --hint-root HINT3D --mode Release --hdf5-prefix "$HDF5_PREFIX"
 ```
 
-These commands build the upstream native suite with the source patch; they
-do not build the custom sampler used for the retained field record. The build
-helper is retained for portability; rebuild and validate the toolchain on the
-target machine. The patch fixes pressure-table weights, uninitialized
+These commands build the upstream native suite with the source patch and
+`build-release/MAGVAL/sample-points.exe` from the public driver. The sampler
+uses the same compiled MAGVAL routines while replacing the upstream program
+entry point. A new build is not expected to have the historical executable
+hash. Rebuild and validate the toolchain on the target machine.
+
+Recompute the published metrics without a native build or large raw fields:
+
+```sh
+python - <<'PY'
+import json
+from pathlib import Path
+import numpy as np
+root = Path('handoff/hint-qa')
+samples = np.load(root / 'data/native-samples.npz', allow_pickle=False)
+expected = json.loads((root / 'field-summary.json').read_text())
+for label, kind in [('total_field', 'total'), ('vacuum_field', 'vacuum'),
+                    ('plasma_response', 'response')]:
+    def field(grid):
+        if kind == 'response':
+            return samples[f'{grid}_total'] - samples[f'{grid}_vacuum']
+        return samples[f'{grid}_{kind}']
+    delta = np.linalg.norm(field('fine') - field('coarse'), axis=1)
+    measured = [np.sqrt(np.mean(delta**2)), delta.max()]
+    record = expected['coarse_to_fine_metrics'][label]
+    np.testing.assert_allclose(measured, [record['rms_vector_delta_T'],
+                                       record['max_vector_delta_T']], rtol=1e-13)
+    print(label, measured, 'T')
+PY
+```
+
+To repeat native interpolation, first obtain the hash-matched raw snapshot
+and vacuum files identified in `field-summary.json`, then run:
+
+```sh
+python handoff/hint-qa/sample_fields.py \
+  --sampler HINT3D/build-release/MAGVAL/sample-points.exe \
+  --targets handoff/hint-qa/data/targets.npz \
+  --coarse-snapshot dataset/coarse.npz --coarse-vacuum dataset/coarse.nc \
+  --fine-snapshot dataset/fine.npz --fine-vacuum dataset/fine.nc \
+  --hint-commit bf31fc39f7179bdd91d84319c51c68e2f6fff25f \
+  --output resampling.json --samples-output resampling.npz
+```
+
+The generic `dataset` names above are placeholders for the hash-matched
+inputs, not a download location. Snapshot NPZs need `B_cyl`, `P_mu0_Pa`, `R`,
+`phi`, `Z`; vacuum NetCDFs need the three `Bvac_*` components and native grid
+metadata. The CLI rejects unequal snapshot/vacuum coordinates, uses native
+cylindrical components in tesla and records canonical little-endian float64
+array hashes. Install NumPy and netCDF4 in the postprocessing environment.
+
+For current-drive diagnosis, apply the optional patch **after** the baseline
+portability patch, rebuild HINT, and set `lcurrent_drive_diag=.true.` in the
+existing `stepb_inp1` namelist:
+
+```sh
+git -C HINT3D apply ../handoff/hint-qa/hint-diagnostics.patch
+python handoff/hint-qa/build.py --hint-root HINT3D --mode Release \
+  --only HINT --hdf5-prefix "$HDF5_PREFIX"
+```
+
+It defaults to false and does no diagnostic reductions during the four
+Runge–Kutta field evaluations. At energy/history updates its `CURRENT_DRIVE_DIAG`
+records report context, source-support extrema, then cut-zero/min/mean/max
+currents for the imposed source, attained curl(response) on that support, and
+the attained pressure-mask comparator. Currents are amperes; `step_start_paxis`
+is `mu0*p/B0^2`, the Bphi extrema are normalized by B0, and `timeb` is code
+time. The cancellation record contains the cut-zero integral of absolute
+source current and its signed/absolute ratio (both zero for zero source).
+The timing is the largest per-rank wall time for the native source update,
+not an end-to-end benchmark. The patch does not correct or reinterpret the
+underlying current-drive model; use its output to choose the next controlled
+experiment. Sequential application of both patches to the pinned upstream
+source was verified to reproduce the tested source exactly.
+
+To recreate the short diagnostic fixture, start from `data/coarse.in` and
+the same hash-matched native inputs. Change `nstep=2`, `nstepb=2`,
+`nenergyb=1`, `dt_b=1e-4`, `lc_in=0.2`, and `kprocs=1` (or 2 for the toroidal
+decomposition check), retaining `iprocs=jprocs=1` and `OMP_NUM_THREADS=1`.
+Toggle only `lcurrent_drive_diag` for the off/on comparison. Set both
+`inet0=inet1=0` for the separate zero-source control. These deliberately short
+traces and runs validate diagnostics only; they are not production settings.
+
+The patch fixes pressure-table weights, uninitialized
 values, sub-64-grid loop strides, periodic interpolation bounds, an external
 callback declaration, read-only field access and a toroidal viscosity stencil.
 The QA baseline's zero viscosity means the last fix does not explain its
