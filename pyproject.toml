@@ -40,15 +40,10 @@ dependencies = [
   "packaging",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
-  # 0.3.0 is the first release whose jittable kernel booz_xform_jax_impl takes
-  # magnetic_only=True, which skips the R/Z/nu/sqrt(g) projections and returns
-  # only the |B| spectra the omnigenity/QI objectives read
-  # (vmex/core/omnigenity.py passes it). 0.1.1/0.2.0 lack the keyword, so those
-  # objectives fell back to the full transform. 0.3.0 also carries everything
-  # older floors needed: the asymmetric families (rmns/zmnc/lmnc/bmns/
-  # bsubumns/bsubvmns) for lasym states and guarded zero-mode denominators for
-  # finite jvp/grad tangents (both since 0.1.1).
-  "booz_xform_jax>=0.3.0",
+  # 0.4.0 fixes registered-surface selection and rebuilding cached mode grids.
+  # It retains 0.3.0's magnetic_only JAX projection for QI and the asymmetric
+  # spectra/guarded zero-mode derivatives required by the field objectives.
+  "booz_xform_jax>=0.4.0",
   # 0.21.0 is the first release whose tridiagonal_solve/tridiagonal_solve_checked
   # (the radial preconditioner's solves) run their Thomas sweeps through the
   # accelerator-batched scan (unroll=2 off CPU; the CPU sweep is unchanged).
