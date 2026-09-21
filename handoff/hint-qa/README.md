@@ -21,9 +21,15 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #418](https://github.com/uwplasma/vmex/pull/418) | Draft follow-up to #417: applies unconditional validity checks to direct derivative paths even with no absolute primal cutoff; restacked on #417 head `1459f9df`, with 18 focused module tests passing at #418 head `9e0baa28`. Integrated QA/GPU qualification remains open. |
 | [virtual_casing_jax #14](https://github.com/uwplasma/virtual_casing_jax/pull/14) | Open focused fix: prevents outer-JIT source construction from caching tracers while preserving source-field gradients. Seventeen derivative/lifecycle tests and two leak-check tests pass on CPU; no GPU or whole-workflow performance claim. |
 | [ESSOS #71](https://github.com/uwplasma/ESSOS/pull/71) | Draft for manual review: an analytic circular-loop oracle checks complete on-axis Cartesian tensors through order three and two selected field-value current/radius JVPs. All six field tests pass; this finds no defect in that scope and does not qualify off-axis fields or all parameter derivatives. |
-| [VMEX #421](https://github.com/uwplasma/vmex/pull/421) | Draft callback-local device alignment: the two-device regression fails on main and passes after correction, including an already-cached template. Numerical CPU/GPU qualification and coordination with #417 certification remain open. |
+| [VMEX #421](https://github.com/uwplasma/vmex/pull/421) | Draft at `95aed755`, stacked on #418: callback refinement and certification use the runtime device and exact returned coefficients. Integrated CPU modules pass 52 tests, five focused two-device tests pass, and a real small CPU callback/certificate succeeds. The GPU-facing smoke used a CPU root; accelerator-resident root qualification remains open. |
 | [VMEX #419](https://github.com/uwplasma/vmex/pull/419) | Draft guarded block-factor reuse benchmark: exact-current residual checks and fallback are demonstrated on its QI case; a full-optimizer accuracy, memory and runtime comparison remains required. This is distinct from the rejected scalar-factor cache. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
+
+Concurrent [#422](https://github.com/uwplasma/vmex/pull/422) also integrates
+#421's earlier device work with #417 certification. It overlaps the updated
+#421 stack, which already includes #418. Reconcile the implementations and
+retain complementary placement regressions before merging; do not apply both
+stacks independently or infer GPU qualification from either CPU suite.
 
 Current main has raw block Newton/adjoint solves, deterministic free-boundary
 reference selection (#383), structured factor reuse (#395), a retained-array
@@ -440,11 +446,42 @@ HINT deck and verify matching coordinates, field-period count, finite fields,
 limiter values, containment and current-cut integrals. Read field-period count
 from the source instead of assuming two. Native flux/limiter preprocessing
 should remain native; a Python reconstruction is an independent check.
+Native `build_config.json` records the requested commit and options, but older
+builds do not record the applied source patch, and incremental make can reuse
+objects after compiler/flag changes. Binary hashes identify the measured
+executables; the config alone does not prove source/flags provenance. A clean
+rebuild with build-time source fingerprints remains a reproducibility gate.
 Wall generation must pin Shapely/GEOS and the buffer/resampling settings.
 Use explicit inputs, refuse conflicting outputs, and preserve the measured
 current-table/deck contract. Snapshot extraction and deterministic data
-packaging follow simulation as separate steps. This runner is still missing;
-the existing build and sampling commands do not perform these stages.
+packaging follow simulation as separate steps.
+
+The [preparation runner](prepare.py) now performs this sequence with native
+MKFLX/MKLIM and public manifest-verified inputs. It enables x64 after imports,
+checks shared boundary coefficients, and refuses an existing output directory.
+The [preparation record](prepare.json) retains exact environment requirements,
+source/driver/binary hashes and numerical comparisons. In a VMEX environment,
+install the additional preparation packages and select the separately built
+native tools with `HINT_ROOT`:
+
+```sh
+python -m pip install essos==0.17 f90nml==1.4.4 shapely==2.0.7
+JAX_ENABLE_X64=1 JAX_PLATFORMS=cpu OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  python handoff/hint-qa/prepare.py --inputs handoff/hint-qa/data \
+  --output results/prepared --native-bin "$HINT_ROOT/build-release" \
+  --source-commit bf31fc39f7179bdd91d84319c51c68e2f6fff25f --device cpu
+```
+
+The default prepares both cases at 64x64x32; `--grid 128,128,64` selects the
+published fine protocol. `--prepare-only` still computes wall, vacuum and
+current inputs but skips executing native flux/limiter tools. It does not run
+HINT. The pinned CPU/x64 coarse run completed both preprocessors for both
+cases. Limiter arrays equal the retained fields exactly; maximum vacuum and
+flux differences are below `9.401e-12 T` and `3.376e-14`, respectively.
+The 0.5% deck remains byte-identical to `coarse.in`, and both current tables
+match the historical published tables. The final metadata-capable runner was rerun through both native tools; all
+NetCDF variables and both decks match the pinned run exactly. Fine-grid numerical
+preparation and complete equilibrium reproduction remain unqualified.
 
 ## Execution order and research acceptance
 

@@ -1,0 +1,185 @@
+{
+  "scope": "Native input preparation only; no HINT equilibrium or topology qualification",
+  "source_commit": "602b41bc79abaddffa6237f007a1011a72fecc71",
+  "published_runner_sha256": "a607b329304a61a9137a14e02e9e7e5b17f945920c71ca8a6772d79cc1179bc2",
+  "executed_runner_sha256": "3e68462770d7637d9e94930f7bd5eabe33797c563e871152504048750d2ed3f1",
+  "post_run_changes": "Final metadata-capable runner rerun through both native preprocessors; every NetCDF variable and both case decks match the prior pinned run exactly.",
+  "provenance_sha256": "9b1ec70fdb9a02795f54a0f5487d8a1f2b4a1a5855e44136f1a2c470c1886945",
+  "comparison_sha256": "78b2e2c73ff1e458770e53e3115614ffe02e40b8029fd650c8aac357b099949b",
+  "runtime": {
+    "jax_backend": "cpu",
+    "jax_device_kind": "cpu",
+    "platform": "macOS-14.4.1-arm64-arm-64bit",
+    "python": "3.11.14"
+  },
+  "elapsed_seconds": 5.440611875033937,
+  "grid": [
+    64,
+    64,
+    32
+  ],
+  "jax_enable_x64": true,
+  "native_binaries": {
+    "mkflx": {
+      "name": "mkflx.exe",
+      "sha256": "a36ec8405eace9792e8c8d3a0ea8ac6f05804dc0d8a47b2b46d908df5506d18e"
+    },
+    "mklim": {
+      "name": "mklim.exe",
+      "sha256": "52da9e97d020124bd3e5677dd2b32b4669c455d7eeee960331faff45379043f6"
+    }
+  },
+  "native_build": {
+    "build_config_sha256": "24f5ba786e2033abfd003b322901d45d3921d57de89894ea3529630d501778b9",
+    "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2",
+    "mode": "Release"
+  },
+  "linked_native_source_certified": false,
+  "environment_requirements": [
+    "absl-py==2.5.0",
+    "booz_xform_jax==0.4.0",
+    "certifi==2026.7.22",
+    "cftime==1.6.5",
+    "contourpy==1.3.3",
+    "cycler==0.12.1",
+    "diffrax==0.7.2",
+    "equinox==0.13.8",
+    "essos==0.17",
+    "f90nml==1.4.4",
+    "filelock==4.0.1",
+    "fonttools==4.65.0",
+    "h5py==3.16.0",
+    "jax==0.9.2",
+    "jaxkd==0.1.2",
+    "jaxlib==0.9.2",
+    "jaxopt==0.8.5",
+    "jaxtyping==0.3.11",
+    "kiwisolver==1.5.1",
+    "lineax==0.1.0",
+    "matplotlib==3.11.2",
+    "ml_dtypes==0.6.0",
+    "narwhals==2.26.0",
+    "netCDF4==1.7.4",
+    "numpy==2.4.6",
+    "opt_einsum==3.4.0",
+    "optax==0.2.8",
+    "optimistix==0.1.0",
+    "packaging==26.3",
+    "pillow==12.3.0",
+    "plotly==7.1.0",
+    "pyevtk==1.7.0",
+    "pyparsing==3.3.3",
+    "python-dateutil==2.9.0.post0",
+    "scipy==1.17.1",
+    "shapely==2.0.7",
+    "six==1.17.0",
+    "solvax==0.21.0",
+    "tqdm==4.70.1",
+    "typing_extensions==4.16.0",
+    "vmex @ git+https://github.com/uwplasma/vmex@602b41bc79abaddffa6237f007a1011a72fecc71",
+    "wadler_lindig==0.1.7"
+  ],
+  "cases": {
+    "beta0p5": {
+      "current_mapping_sha256": "4faf985eb768e14cd02f969a17b2404f3a696eb49310eb59b7581cba166e6621",
+      "hint_input_sha256": "687e97042b49fc69edb3744e4598b899687fe63e89e0a41af8bca44996b28bb2",
+      "retained_comparison": {
+        "flux.nc": {
+          "norm_s": {
+            "exact": false,
+            "max_abs": 1.5987211554602254e-14,
+            "rms": 2.970434513654389e-16
+          }
+        },
+        "limiter.nc": {
+          "limiter": {
+            "exact": true,
+            "max_abs": 0.0,
+            "rms": 0.0
+          }
+        },
+        "vacuum.nc": {
+          "Bvac_R": {
+            "exact": false,
+            "max_abs": 7.545963853772264e-12,
+            "rms": 4.574338775682013e-14
+          },
+          "Bvac_Z": {
+            "exact": false,
+            "max_abs": 5.243805389909539e-12,
+            "rms": 2.3857992609713046e-14
+          },
+          "Bvac_phi": {
+            "exact": false,
+            "max_abs": 9.400480394106125e-12,
+            "rms": 4.0892905962077623e-14
+          }
+        }
+      },
+      "explicit_x64_development_essos_array_parity": true
+    },
+    "beta2p5": {
+      "current_mapping_sha256": "b9edce598573e0117ec6cffd38fe29713acec511a0a7e4557ba47aa1e453ca8e",
+      "hint_input_sha256": "2adb1a9bff3b49d47b980189fe4c952e6695692db199c50306e1fa753d67f75c",
+      "retained_comparison": {
+        "flux.nc": {
+          "norm_s": {
+            "exact": false,
+            "max_abs": 3.375077994860476e-14,
+            "rms": 3.205857077889108e-16
+          }
+        },
+        "limiter.nc": {
+          "limiter": {
+            "exact": true,
+            "max_abs": 0.0,
+            "rms": 0.0
+          }
+        },
+        "vacuum.nc": {
+          "Bvac_R": {
+            "exact": false,
+            "max_abs": 6.0254023992456496e-12,
+            "rms": 4.3066975102249274e-14
+          },
+          "Bvac_Z": {
+            "exact": false,
+            "max_abs": 3.296918293926865e-12,
+            "rms": 2.4236272589245155e-14
+          },
+          "Bvac_phi": {
+            "exact": false,
+            "max_abs": 4.774847184307873e-12,
+            "rms": 2.7249210582792477e-14
+          }
+        }
+      },
+      "explicit_x64_development_essos_array_parity": true
+    }
+  },
+  "limitations": [
+    "Legacy native build config does not identify patched linked sources or exclude stale objects.",
+    "Current table normalization is a prescribed HINT current protocol, not proof of attained current or self-consistent bootstrap current.",
+    "Retained fields differ slightly; no backend cause is inferred.",
+    "Only coarse native preprocessing was executed; fine decks were rendered and checked but fine fields were not regenerated.",
+    "Wall-coil continuous clearance, simulation snapshots and hosted raw data remain separate gates."
+  ],
+  "final_runner_validation": {
+    "status": "complete",
+    "all_output_variables_and_decks_equal_pinned_run": true,
+    "elapsed_seconds": 5.789904417004436,
+    "provenance_sha256": "1a59abaa7b29bfd4d1c48d0e11891a216e2fb35ea0fbe3f01e2de61ecc4e6ace",
+    "driver": {
+      "name": "prepare.py",
+      "sha256": "a607b329304a61a9137a14e02e9e7e5b17f945920c71ca8a6772d79cc1179bc2"
+    },
+    "vmex_source": {
+      "checkout_clean": false,
+      "commit": "602b41bc79abaddffa6237f007a1011a72fecc71",
+      "module": "vmex/__init__.py",
+      "module_sha256": "72d38d7a1cc348d241e442bde79af0779ec02203d17ceca39b821c444efc7c52",
+      "package_clean": true,
+      "tree": "462aabba0b4a97e5af9d642bcedb3d504e5a1370"
+    }
+  }
+}

@@ -38,9 +38,12 @@ Execute three independent bounded lanes now:
    truncation and radial reconstruction next; no radial or physical certificate
    follows from the three-level ladder.
    GPU AUTO exposed mixed callback devices; explicit placement timed out at
-   660 s without arrays. Draft #421 has a failing-parent device regression;
-   qualify the small numerical callback path before retrying
-   the complete GPU capture; neither attempt qualifies parity.
+   660 s without arrays. Draft #421 at `95aed755` now follows #418 and
+   certifies the exact returned coefficients on the runtime device. Its integrated CPU modules pass 52 tests,
+   with five focused two-device tests and a real small CPU solve. A GPU-facing
+   check used a CPU root; an accelerator-root attempt stopped during priming
+   at 120 s before callback entry. Qualify that path before retrying the complete
+   GPU capture; no CPU/GPU parity or specific timeout cause is established.
 2. Resolve HINT current evolution and Ohm/Faraday balance before extending
    relaxation or changing resistivity. The bounded later-time diagnostic now
    confirms source normalization, while attained response current on the same
