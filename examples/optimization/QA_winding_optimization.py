@@ -562,14 +562,19 @@ def spectral_width(dofs, mode_weights):
     return jnp.sum(mode_weights * dofs ** 2)
 
 
-def smooth_minimum_distance(winding_points, plasma_points, sharpness):
+def smooth_minimum_distance(
+        winding_points, plasma_points, sharpness, *, source_count=None):
+    if source_count is not None:
+        winding_points = winding_points[:source_count]
     distance = jnp.linalg.norm(
         winding_points[:, None, :] - plasma_points[None, :, :], axis=2)
     weights = jax.nn.softmax(-sharpness * distance.reshape(-1))
     return jnp.sum(weights * distance.reshape(-1))
 
 
-def smooth_minimum_tangent_radius(points, normals, nphi, ntheta, sharpness, neighbor_radius):
+def smooth_minimum_tangent_radius(
+        points, normals, nphi, ntheta, sharpness, neighbor_radius,
+        *, source_phi_count=None):
     """Nonlocal surface thickness; nearby parameter-grid points are excluded.
 
     A smooth-min "tangent radius" between all pairs of winding-surface grid
@@ -577,14 +582,20 @@ def smooth_minimum_tangent_radius(points, normals, nphi, ntheta, sharpness, neig
     the surface folding back close to itself at a distance, distinct from
     the local degenerate-normal/area-element guard below.
     """
-    difference = points[None, :, :] - points[:, None, :]
+    if source_phi_count is None:
+        source_phi_count = nphi
+    source_count = source_phi_count * ntheta
+    difference = points[None, :, :] - points[:source_count, None, :]
     distance_squared = jnp.sum(difference ** 2, axis=2)
     tangent_radius = distance_squared / (
-        2 * jnp.abs(jnp.einsum("ijk,ik->ij", difference, normals)) + 1e-14)
+        2 * jnp.abs(jnp.einsum(
+            "ijk,ik->ij", difference, normals[:source_count])) + 1e-14)
 
     iphi, itheta = jnp.meshgrid(jnp.arange(nphi), jnp.arange(ntheta), indexing="ij")
-    dphi = jnp.abs(iphi.reshape(-1, 1) - iphi.reshape(1, -1))
-    dtheta = jnp.abs(itheta.reshape(-1, 1) - itheta.reshape(1, -1))
+    dphi = jnp.abs(
+        iphi.reshape(-1, 1)[:source_count] - iphi.reshape(1, -1))
+    dtheta = jnp.abs(
+        itheta.reshape(-1, 1)[:source_count] - itheta.reshape(1, -1))
     dphi = jnp.minimum(dphi, nphi - dphi)
     dtheta = jnp.minimum(dtheta, ntheta - dtheta)
     nonlocal_pair = (dphi > neighbor_radius) | (dtheta > neighbor_radius)
@@ -622,11 +633,23 @@ def _calc_objectives(dofs, plasma_points, plasma_normals, weights,
 
     pca = 1 / jnp.maximum(singular_entropy, DENOMINATOR_EPS)
     singular_strength = jnp.sum(singular_values)
+    periodic_source_phi_count = None
+    periodic_source_count = None
+    if periodic and nfp > 1 and tor_num % nfp == 0:
+        # Pairwise scalar reductions contain ``nfp`` symmetry-equivalent
+        # source periods.  Retaining one source period preserves their exact
+        # weighted mean while reducing both pairwise tensors by ``nfp``.
+        periodic_source_phi_count = tor_num // nfp
+        periodic_source_count = periodic_source_phi_count * pol_num
     volume = enclosed_volume(winding_points, raw_normals, tor_num, pol_num)
     spectral = spectral_width(dofs, weights)
-    distance = smooth_minimum_distance(flat_points, plasma_points, SHARPNESS)
+    distance = smooth_minimum_distance(
+        flat_points, plasma_points, SHARPNESS,
+        source_count=periodic_source_count)
     self_radius = smooth_minimum_tangent_radius(
-        flat_points, flat_unitnormals, tor_num, pol_num, SHARPNESS, SELF_NEIGHBOR_RADIUS)
+        flat_points, flat_unitnormals, tor_num, pol_num, SHARPNESS,
+        SELF_NEIGHBOR_RADIUS,
+        source_phi_count=periodic_source_phi_count)
     minimum_normal_length = jnp.min(normal_lengths)
     return (pca, volume, spectral, distance, minimum_normal_length,
             singular_strength, self_radius)
