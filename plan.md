@@ -93,8 +93,11 @@ unchanged gates (maximum mean/ratio/pointwise changes 0.104% and 0.182%).
 Investigate the nonmonotonic poloidal response and residual-family provenance
 before more solves; measurement sufficiency is not physical convergence.
 Small explicit native CPU/GPU solves at #423 also pass placement checks,
-including a converged asymmetric case; implicit callbacks, certificates and
-the exact QA case still require integrated GPU qualification.
+including a converged asymmetric case. A separate combined check now follows
+that native result through the callback and certificate, preserving exact
+coefficients on each platform; CPU/GPU maximum difference is 2.74e-12.
+Refinement was disabled and no observable-specific primal tolerance selected:
+the refined exact QA case still requires integrated GPU qualification.
 #422 is merged into #421 as e94e46c6 after independent review and 11 explicitly
 JIT-enabled two-CPU cases. The parent remains open; no main promotion follows.
 Preserve the merged #422 branch while the new exact-state certificate candidate

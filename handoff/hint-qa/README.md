@@ -1019,3 +1019,15 @@ global and per-bin force L2 change below 1e-9%. Thus angular64 sampling does
 not explain the large poloidal force change on this window. Prioritize
 poloidal resolution and root-family checks over a broad toroidal sweep;
 five-surface sampling still does not certify the full volume.
+
+
+A separate combined #423 test now instruments the native solve before host
+conversion and follows the same small asymmetric state through the status
+callback and certificate. CPU/GPU both converge in 222 iterations; native
+coefficients and callback returns match exactly within each run. All six
+coefficient arrays are retained and independently compared: maximum CPU/GPU
+difference is 2.74e-12, or 8.11e-11 relative to the corresponding coefficient
+family scale. Certificate state/parameter identities and repeated measurement
+match. This uses refinement disabled and `primal_tol=None`: configured
+admission passes, while `strict_root_certified` is false. It does not close
+the refined exact-QA, derivative, optimization or free-boundary GPU gates.

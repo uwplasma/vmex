@@ -3911,5 +3911,153 @@
       }
     },
     "interpretation": "This qualifies explicit native CPU/GPU solve placement for two small fixed-boundary cases. It complements, but does not replace, the separate implicit callback and primal-certificate evidence. It does not qualify full HINT cases, free-boundary solves, gradients, optimization, or accelerator performance."
+  },
+  "pr423_callback_native_device_qualification": {
+    "schema": "vmex.pr423-callback-native-cpu-gpu/1",
+    "source": {
+      "head": "02bf33d9141429f19e92a67db28e6a9b2dd4b7df",
+      "tree": "014e866f711b0cd38c1777ef3dde2bd7a1a8b927"
+    },
+    "probe": {
+      "sha256": "42673e435e29a0ec0c195b7a2841b07f6b1029a5fa68b1cd6531bd5f92fc1550",
+      "timeout_seconds_per_process": 180,
+      "memory_limit_bytes_per_process": 8589934592
+    },
+    "runtime": {
+      "python": "3.12.13",
+      "jax": "0.11.1",
+      "jaxlib": "0.11.1",
+      "numpy": "2.5.3",
+      "scipy": "1.18.1",
+      "solvax": "0.22.0",
+      "booz_xform_jax": "0.3.0",
+      "jax_enable_x64": true,
+      "jax_disable_jit": false,
+      "gpu_model": "NVIDIA RTX A4000",
+      "gpu_selection": "one explicitly selected accelerator"
+    },
+    "case": {
+      "input": "examples/data/input.up_down_asymmetric_tokamak",
+      "input_sha256": "9d1e58f23aea74f5ea8a29f0b75bb9c42f426dbb29e662943e6ac8a053a9950c",
+      "construction": "truncate MPOL to 3, use NS=5, and negate all ZBS coefficients",
+      "lasym": true,
+      "lflip_case": true,
+      "ftol": 1e-08,
+      "maximum_iterations": 400,
+      "refinement": "disabled with refine_tol=infinity so the callback returns the native solver coefficients unchanged",
+      "primal_tol": null
+    },
+    "cpu": {
+      "result_sha256": "645450b9562dcbb03120614a7c2f6219bf08f87e7ba6bc6e4d15187bad4a5c8b",
+      "native_state_archive_sha256": "39e26a9b37981be0fc9a2a44131c56ed00924696184f4542a175080a3c5a5d21",
+      "callback_state_archive_sha256": "39e26a9b37981be0fc9a2a44131c56ed00924696184f4542a175080a3c5a5d21",
+      "external_wall_seconds": 9.46,
+      "maximum_rss_kib": 1119128,
+      "native_state_device": "cpu",
+      "native_state_key_sha256": "15c1e0f1d537ec9d5b74425f33162d80d4b1dc077b4df9742c97a1c2d96433fc"
+    },
+    "gpu": {
+      "result_sha256": "b7692e1d6f4f3b0563913d4a3cc6c83df5b94a66277f755c888b0063ae44c326",
+      "native_state_archive_sha256": "786ed942d7a9cb1fab0e25c774cee74977ee39963abfd6d151e629048f697c82",
+      "callback_state_archive_sha256": "786ed942d7a9cb1fab0e25c774cee74977ee39963abfd6d151e629048f697c82",
+      "external_wall_seconds": 15.92,
+      "maximum_rss_kib": 1300640,
+      "native_state_device": "gpu",
+      "native_state_key_sha256": "ebb71e69d126ec537b2f0c71a4a74990480d711a9ce1f5920efff7d6cc95065a"
+    },
+    "common_outcome": {
+      "callback_status": 0,
+      "native_converged": true,
+      "native_iterations": 222,
+      "native_ier_flag": 11,
+      "native_jacobian_resets": 1,
+      "all_six_native_state_leaves_committed_to_selected_device": true,
+      "template_on_selected_device": true,
+      "native_state_identical_to_callback_return_within_each_run": true,
+      "native_to_callback_max_absolute_difference": 0.0,
+      "certificate_parameter_identity_matches": true,
+      "certificate_state_identity_matches_callback_return": true,
+      "repeated_measurement_matches_certificate": true,
+      "cached_native_result_is_instrumented_result": true,
+      "derivative_admitted": true,
+      "geometry_valid": true,
+      "boundary_consistent": true,
+      "strict_root_certified": false
+    },
+    "cpu_gpu_callback_state_difference": {
+      "R_cos": {
+        "shape": [
+          5,
+          3
+        ],
+        "max_abs": 1.6857626405908377e-12,
+        "rms": 6.15889474179965e-13,
+        "max_rel_to_family_scale": 2.7775685611767743e-13
+      },
+      "R_sin": {
+        "shape": [
+          5,
+          3
+        ],
+        "max_abs": 4.868327962981311e-13,
+        "rms": 1.8888684107540207e-13,
+        "max_rel_to_family_scale": 2.5658341266181395e-12
+      },
+      "Z_cos": {
+        "shape": [
+          5,
+          3
+        ],
+        "max_abs": 5.937889069329572e-13,
+        "rms": 1.8077832192646362e-13,
+        "max_rel_to_family_scale": 6.364823344684192e-12
+      },
+      "Z_sin": {
+        "shape": [
+          5,
+          3
+        ],
+        "max_abs": 3.2557290197132716e-14,
+        "rms": 1.656846155001302e-14,
+        "max_rel_to_family_scale": 8.579599288834314e-14
+      },
+      "L_cos": {
+        "shape": [
+          5,
+          3
+        ],
+        "max_abs": 2.7356172882520013e-12,
+        "rms": 9.386601295159613e-13,
+        "max_rel_to_family_scale": 8.102429203347246e-11
+      },
+      "L_sin": {
+        "shape": [
+          5,
+          3
+        ],
+        "max_abs": 2.147615418834903e-12,
+        "rms": 1.063458848729303e-12,
+        "max_rel_to_family_scale": 4.08167056519795e-11
+      },
+      "global_max_abs": 2.7356172882520013e-12,
+      "global_max_family_scaled_relative": 8.102429203347246e-11
+    },
+    "certificate_parity": {
+      "cpu_projected_residual": 2.1215904514770463e-05,
+      "gpu_projected_residual": 2.1215904516299025e-05,
+      "projected_residual_relative_difference": 7.204795023961279e-11,
+      "cpu_raw_residual": 0.01784348123824598,
+      "gpu_raw_residual": 0.017843481240687797,
+      "raw_residual_relative_difference": 1.3684647903228007e-10,
+      "cpu_boundary_error": 3.852809212957893e-17,
+      "gpu_boundary_error": 4.163336342344337e-17,
+      "boundary_allowance": 4.263256414560601e-14
+    },
+    "interpretation": "This joins the exact status-callback path, the native solver result before host conversion, template placement, returned-state identity, and primal certificate in one bounded CPU/GPU check. Because primal_tol is unset and refinement is disabled, it proves derivative admission under the configured policy but does not claim a strict observable-specific root certificate, full HINT-case qualification, optimization qualification, or a performance comparison.",
+    "parent_independent_checks": [
+      "all four state archive hashes",
+      "native/callback archive byte identity on each platform",
+      "all six CPU/GPU maximum coefficient differences"
+    ]
   }
 }
