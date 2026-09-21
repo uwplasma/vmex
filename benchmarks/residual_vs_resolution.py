@@ -82,7 +82,7 @@ def _certificate(state, *, angular_multiplier, radial_increment):
 
 
 def _solved(deck, ns, mpol, ntor):
-    """One converged VMEC-lane solve at this radial mesh."""
+    """Return an implicit state and its measured residuals, not a native-status claim."""
     from vmex.core import implicit
     from vmex.core.input import VmecInput
 
@@ -97,7 +97,8 @@ def _solved(deck, ns, mpol, ntor):
     started = time.perf_counter()
     state, mask = implicit.solve_implicit_with_aux(params, config)
     seconds = time.perf_counter() - started
-    return state, mask, implicit.runtime_from_params(params, config), seconds
+    measurement = implicit.measure_primal_state(params, state, mask, config)
+    return state, implicit.runtime_from_params(params, config), seconds, measurement
 
 
 def radial_scan(deck, mesh, span_counts, degree, mpol, ntor, angular, radial_increment):
@@ -111,7 +112,7 @@ def radial_scan(deck, mesh, span_counts, degree, mpol, ntor, angular, radial_inc
     """
     rows = []
     for ns in mesh:
-        state, _, runtime, seconds = _solved(deck, ns, mpol, ntor)
+        state, runtime, seconds, measurement = _solved(deck, ns, mpol, ntor)
         lifts = {}
         for spans in span_counts:
             basis = BSplineBasis.clamped(np.linspace(0, 1, spans + 1), degree=degree)
@@ -121,7 +122,8 @@ def radial_scan(deck, mesh, span_counts, degree, mpol, ntor, angular, radial_inc
         coarse, fine = (lifts[str(v)] for v in (min(span_counts), max(span_counts)))
         drift = abs(fine["absolute_l2"] - coarse["absolute_l2"]) / max(
             fine["absolute_l2"], 1.0e-300)
-        row = {"ns": int(ns), "solve_seconds": seconds, "lift_degree": degree,
+        row = {"ns": int(ns), "solve_seconds": seconds, "seed_measurement": measurement,
+               "lift_degree": degree,
                "lifts": lifts, "finest_spans": max(span_counts),
                "lift_convergence_difference": drift,
                "lift_limited": bool(drift > 0.1),
@@ -134,13 +136,14 @@ def radial_scan(deck, mesh, span_counts, degree, mpol, ntor, angular, radial_inc
 
 
 def spline_scan(deck, ns, span_counts, degree, mpol, ntor, angular, radial_increment):
-    """Certificate against the continuous representation, at one converged solve."""
-    state, _, runtime, seconds = _solved(deck, ns, mpol, ntor)
+    """Certificate against the continuous representation, at one measured implicit state."""
+    state, runtime, seconds, measurement = _solved(deck, ns, mpol, ntor)
     rows = []
     for spans in span_counts:
         basis = BSplineBasis.clamped(np.linspace(0, 1, spans + 1), degree=degree)
         native = lift_high_order_state(state, runtime, radial_basis=basis)
-        row = {"ns": int(ns), "solve_seconds": seconds, "lift_spans": int(spans),
+        row = {"ns": int(ns), "solve_seconds": seconds, "seed_measurement": measurement,
+               "lift_spans": int(spans),
                "lift_degree": degree,
                "coefficients": int(np.asarray(native.R_cos).size)}
         row.update(_certificate(native, angular_multiplier=angular,

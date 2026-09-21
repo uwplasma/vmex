@@ -38,7 +38,6 @@ output, not a claim about any other code or resolution.
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -56,6 +55,7 @@ import numpy as np
 
 import vmex
 from benchmarks._provenance import assert_repo_vmex, git_state
+from benchmarks.residual_vs_resolution import _solved
 from vmex.core.radial_basis import BSplineBasis
 from vmex.core.strong_force import certify_strong_force, lift_high_order_state
 
@@ -131,25 +131,6 @@ def _certificate(state, *, angular_multiplier, radial_increment):
     }
 
 
-def _solved(deck, ns, mpol, ntor):
-    """One converged VMEC-lane solve at this radial mesh, reused by every basis."""
-    from vmex.core import implicit
-    from vmex.core.input import VmecInput
-
-    inp = VmecInput.from_file(ROOT / "examples/data" / deck)
-    if mpol is not None:
-        inp = inp.change_resolution(mpol=mpol, ntor=ntor, ntheta=2 * mpol + 6,
-                                    nzeta=max(4, 2 * ntor + 2))
-    inp = replace(inp, ns_array=np.asarray([ns]), ftol_array=np.asarray([1.0e-12]),
-                  niter_array=np.asarray([8000]))
-    config = implicit.make_config(inp, ftol=1.0e-12, max_iterations=8000)
-    params = implicit.params_from_input(inp)
-    started = time.perf_counter()
-    state, _mask = implicit.solve_implicit_with_aux(params, config)
-    seconds = time.perf_counter() - started
-    return state, implicit.runtime_from_params(params, config), seconds
-
-
 REGIONS = ("absolute_l2", "near_axis_l2", "bulk_l2", "edge_l2")
 
 
@@ -187,7 +168,7 @@ def _source_support(basis, s_full):
 
 def grading_scan(deck, ns, span_counts, degree, mpol, ntor, quadratures, exponent):
     """Certify both gradings at every span count and every quadrature setting."""
-    state, runtime, seconds = _solved(deck, ns, mpol, ntor)
+    state, runtime, seconds, measurement = _solved(deck, ns, mpol, ntor)
     s_full = np.asarray(runtime.setup.s_full, dtype=float)
     rows = []
     for spans in span_counts:
@@ -229,7 +210,8 @@ def grading_scan(deck, ns, span_counts, degree, mpol, ntor, quadratures, exponen
             "graded_over_uniform": {
                 key: graded[key] / max(uniform[key], 1.0e-300) for key in REGIONS},
         })
-    return {"ns": int(ns), "solve_seconds": seconds, "rows": rows}
+    return {"ns": int(ns), "solve_seconds": seconds,
+            "seed_measurement": measurement, "rows": rows}
 
 
 def main():
