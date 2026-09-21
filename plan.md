@@ -29,10 +29,15 @@ Execute three independent bounded lanes now:
    radial/angular convergence before accepting the equilibrium. A fixed-state
    16x16 to 32x32 quadrature check changes global force L2 by only 0.0875%
    but an outer radial band by 9.87%. The 32x32 to 48x48 follow-up contracts
-   that band change to 0.0155%; proceed to a controlled NS61 check, retaining
-   physical constraints and angular resolution before expanding the ladder.
+   that band change to 0.0155%. Changing only NS31 to NS61 reduces native
+   force L2 by 88.2%, but mean force/mean pressure gradient remains 0.451.
+   NS121 converges but changes force L2 by another 24.47%, with mixed
+   per-radius trends. Check refined-state measurement angular sensitivity,
+   then solver angular resolution and Fourier truncation; no radial or
+   physical certificate follows from the three-level ladder.
    GPU AUTO exposed mixed callback devices; explicit placement timed out at
-   660 s without arrays. Fix and test the small callback path before retrying
+   660 s without arrays. Draft #421 has a failing-parent device regression;
+   qualify the small numerical callback path before retrying
    the complete GPU capture; neither attempt qualifies parity.
 2. Resolve HINT current evolution and Ohm/Faraday balance before extending
    relaxation or changing resistivity. The bounded later-time diagnostic now

@@ -1366,6 +1366,619 @@
           "samples_npz_sha256": "1ee9546348634591cd6c8c663286ef96f2572555a12484a29dfd6f734c65651d"
         }
       }
+    },
+    "radial_refinement_ns61": {
+      "evidence": {
+        "driver_sha256": "a5bd690741399ac23bf17650df033f5ff08ba1342b3ecdbdf227e4c75e7ff3d0",
+        "result_json_sha256": "aa5aa30980b802bb37f3b5b91566fed84ff4dba30f44c23ff93ac269beeb0ee6",
+        "samples_npz_sha256": "f3bb643d33fc3f0a44fee8698998d5252c59b9c415ff61cf071d7114463d5b7c"
+      },
+      "input_change": {
+        "base_sha256": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
+        "ns61_sha256": "1a2da1054c263aabb312840c830455985588ef4235b6eb8e552243702c1be51b",
+        "only_change": {
+          "NS_ARRAY": {
+            "from": 31,
+            "to": 61
+          }
+        },
+        "sanitized_diff_sha256": "881f522f4ac6847d6cfaf67779cae8673fd49a4b2d8a4ab0e4a078e6c079b3d7",
+        "unchanged": {
+          "CURTOR_A": -95673.86795711746,
+          "FTOL_ARRAY": 1e-11,
+          "GAMMA": 0.0,
+          "MPOL": 7,
+          "NITER_ARRAY": 5000,
+          "NTHETA": 20,
+          "NTOR": 6,
+          "NZETA": 20,
+          "PHIEDGE_Wb": 0.5186826591273498
+        }
+      },
+      "limitations": [
+        "This record compares NS61 with NS31 at fixed MPOL/NTOR and solver angular grid; the subsequent NS121 record is separate.",
+        "force is evaluated through the native finite-NS C2 radial interpolation at seeded mapped points",
+        "The 32x32 measurement quadrature was qualified on NS31 separately; adequacy must also be checked on refined states before continuum claims.",
+        "WOUT full-mesh edge pressure is a reconstructed output and is not the prescribed analytic p(s=1) value",
+        "relative divB changes are omitted because both values are at numerical roundoff scale"
+      ],
+      "measurement": {
+        "angular_count_phi_per_field_period": 32,
+        "angular_count_theta": 32,
+        "global_comparison": {
+          "B_rms_T": {
+            "ns31": 5.861871463708039,
+            "ns61": 5.861891416341555,
+            "relative_change": 3.4037992200261022e-06
+          },
+          "absolute_l2_N_m3": {
+            "ns31": 9282864.159259174,
+            "ns61": 1094951.3901753114,
+            "relative_change": -0.8820459535559234
+          },
+          "magnetic_normalized_l2": {
+            "ns31": 0.3335352129665844,
+            "ns61": 0.040745859552845584,
+            "relative_change": -0.8778364083646911
+          },
+          "mean_force_over_mean_grad_p": {
+            "ns31": 2.252405239870245,
+            "ns61": 0.4507946387575257,
+            "relative_change": -0.7998607751491935
+          },
+          "mean_force_over_mean_magnetic_pressure_gradient": {
+            "ns31": 0.12798620863730664,
+            "ns61": 0.026547898107046008,
+            "relative_change": -0.7925721967256746
+          },
+          "pointwise_normalized_l2": {
+            "ns31": 1.0407974525879697,
+            "ns61": 0.6715368937780943,
+            "relative_change": -0.35478618619953334
+          },
+          "sampled_window_full_torus_volume_m3": {
+            "ns31": 0.46912051428034324,
+            "ns61": 0.4691201903537498,
+            "relative_change": -6.904976089871192e-07
+          },
+          "volume_average_force_N_m3": {
+            "ns31": 3562078.4338526493,
+            "ns61": 713413.7862729776,
+            "relative_change": -0.799719798561154
+          }
+        },
+        "ns61_divB_absolute": {
+          "max_abs_T_m": 5.924150059399835e-13,
+          "rms_T_m": 9.957553438454466e-14
+        },
+        "radial_bins": [
+          {
+            "absolute_l2_N_m3": {
+              "ns31": 26483072.44115383,
+              "ns61": 2097568.5260519236,
+              "relative_change": -0.9207958770375763
+            },
+            "mean_force_over_mean_grad_p": {
+              "ns31": 27.022245878138452,
+              "ns61": 2.0207047042239754,
+              "relative_change": -0.9252206972974527
+            },
+            "s": 0.1375280616245344,
+            "volume_average_force_N_m3": {
+              "ns31": 21351883.280541573,
+              "ns61": 1600003.2716675003,
+              "relative_change": -0.9250650047752174
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "ns31": 1799044.5442040458,
+              "ns61": 378787.5307012231,
+              "relative_change": -0.7894507215390764
+            },
+            "mean_force_over_mean_grad_p": {
+              "ns31": 1.1282448614168965,
+              "ns61": 0.25703357585647163,
+              "relative_change": -0.7721828083190396
+            },
+            "s": 0.28461227595772676,
+            "volume_average_force_N_m3": {
+              "ns31": 1310990.1898220317,
+              "ns61": 299087.92956747534,
+              "relative_change": -0.7718610467954174
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "ns31": 608386.2648680739,
+              "ns61": 604553.2351165046,
+              "relative_change": -0.006300322628750408
+            },
+            "mean_force_over_mean_grad_p": {
+              "ns31": 0.2702272868710734,
+              "ns61": 0.26706423822712955,
+              "relative_change": -0.011705141551648516
+            },
+            "s": 0.5,
+            "volume_average_force_N_m3": {
+              "ns31": 459456.6952724665,
+              "ns61": 454374.88306321384,
+              "relative_change": -0.011060481350128253
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "ns31": 2297504.1767617804,
+              "ns61": 1014988.0761649484,
+              "relative_change": -0.5582214446306146
+            },
+            "mean_force_over_mean_grad_p": {
+              "ns31": 0.7898849449346664,
+              "ns61": 0.3560096447160876,
+              "relative_change": -0.5492892388960089
+            },
+            "s": 0.7153877240422732,
+            "volume_average_force_N_m3": {
+              "ns31": 1697776.5936093149,
+              "ns61": 765453.4252298642,
+              "relative_change": -0.549143610466097
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "ns31": 1858510.8939090702,
+              "ns61": 1570691.2035190428,
+              "relative_change": -0.15486575372428743
+            },
+            "mean_force_over_mean_grad_p": {
+              "ns31": 0.7822978792267766,
+              "ns61": 0.6557284180891192,
+              "relative_change": -0.16179190113970232
+            },
+            "s": 0.8624719383754655,
+            "volume_average_force_N_m3": {
+              "ns31": 1409642.0543589322,
+              "ns61": 1181775.635001768,
+              "relative_change": -0.1616484260330839
+            }
+          }
+        ],
+        "radial_nodes": [
+          0.1375280616245344,
+          0.28461227595772676,
+          0.5,
+          0.7153877240422732,
+          0.8624719383754655
+        ],
+        "coordinate_comparison": "Identical normalized flux and angle coordinates, mapped through each equilibrium; these are not identical Cartesian positions."
+      },
+      "physical": {
+        "input": {
+          "curtor_A": -95673.86795711746,
+          "phiedge_Wb": 0.5186826591273498,
+          "pressure_axis_Pa": 144195.89706000002,
+          "pressure_edge_Pa": -5.820766091346741e-11
+        },
+        "output": {
+          "phi_edge_Wb": 0.5186826591273498,
+          "pressure_axis_Pa": 144195.8977378596,
+          "pressure_edge_Pa": -140.4581978328351,
+          "toroidal_current_A": -95694.78734673258,
+          "volume_m3": 0.5864764923756421
+        }
+      },
+      "resources": {
+        "jax_platform": "cpu",
+        "max_rss_bytes": 2444288000,
+        "visible_device_count": 1
+      },
+      "scope": "one NS=31 to NS=61 native-equilibrium radial-resolution comparison with unchanged physical and solver controls; observational, not continuum certification",
+      "solve": {
+        "converged": true,
+        "iterations": 891,
+        "mpol": 7,
+        "nfp": 2,
+        "ns": 61,
+        "ntor": 6,
+        "root_fsq": {
+          "fsql": 1.7541041570443633e-12,
+          "fsqr": 9.94769349156824e-12,
+          "fsqz": 1.3787734236696898e-12,
+          "max": 9.94769349156824e-12,
+          "sum": 1.3080571072282293e-11
+        }
+      },
+      "source": {
+        "driver_sha256": "a5bd690741399ac23bf17650df033f5ff08ba1342b3ecdbdf227e4c75e7ff3d0",
+        "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+        "input_sha256": "1a2da1054c263aabb312840c830455985588ef4235b6eb8e552243702c1be51b",
+        "native_state_sha256": "67584d975f3ac04085f6de537697ec0a532d78e5abaa4e16b7f4e493f2e11f5c",
+        "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+      },
+      "timing_seconds": {
+        "solve": 22.73720163712278,
+        "total": 76.85740729002282
+      },
+      "validation": {
+        "independent_weighted_reduction_relative_difference_max": 3.4e-16,
+        "all_arrays_finite": true,
+        "raw_sample_archive_public": false
+      }
+    },
+    "radial_refinement_ns121": {
+      "evidence": {
+        "driver_sha256": "b8a5b66e87bec26db30916b42c42a14edce99ff98807184edf45d3334db92f8a",
+        "result_json_sha256": "077033c57327f923e653aca8a08d3c4b6c6d30196c45f753ce52b0c6b04a7209",
+        "samples_npz_sha256": "9cdf9384a388e01627e0517c506b317dbf1c958b62c6d36794fcdf09e041bf57"
+      },
+      "inputs": {
+        "base_ns31_sha256": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
+        "ns121_sanitized_diff_sha256": "b444ef253f810697b598c68ee69c8c9336cc1ac25e9c271528767d410a2b9591",
+        "ns121_sha256": "d0817092262cb3d65decfd2879a86959491c6000b2411eb46ba7f040cbb8114d",
+        "ns61_sha256": "1a2da1054c263aabb312840c830455985588ef4235b6eb8e552243702c1be51b",
+        "only_changes_from_base": {
+          "NS_ARRAY": [
+            31,
+            61,
+            121
+          ]
+        },
+        "unchanged": {
+          "CURTOR_A": -95673.86795711746,
+          "FTOL_ARRAY": 1e-11,
+          "GAMMA": 0.0,
+          "MPOL": 7,
+          "NITER_ARRAY": 5000,
+          "NTHETA": 20,
+          "NTOR": 6,
+          "NZETA": 20,
+          "PHIEDGE_Wb": 0.5186826591273498
+        }
+      },
+      "limitations": [
+        "32x32 angular adequacy was demonstrated on the NS=31 state only; it was not independently re-qualified on NS=61 or NS=121",
+        "the same five flux-coordinate nodes are used at every NS, but independently solved states map them to different Cartesian positions",
+        "the native interior field uses a continuous C2 radial interpolation of each finite-NS state at seeded mapped points",
+        "NS=61 to NS=121 changes remain substantial, so radial convergence is not established",
+        "MPOL, NTOR, and solver angular resolution were not refined",
+        "WOUT full-mesh edge pressure is a reconstructed output and is not the prescribed analytic p(s=1) value",
+        "relative divB changes are omitted because values are at numerical roundoff scale"
+      ],
+      "measurement": {
+        "angular_count_phi_per_field_period": 32,
+        "angular_count_theta": 32,
+        "common_flux_coordinate_nodes": [
+          0.1375280616245344,
+          0.28461227595772676,
+          0.5,
+          0.7153877240422732,
+          0.8624719383754655
+        ],
+        "ns121_divB_absolute": {
+          "max_abs_T_m": 1.0622613899613498e-12,
+          "rms_T_m": 2.0233054013711767e-13
+        },
+        "ns31_to_ns121_global": {
+          "B_rms_T": {
+            "from": 5.861871463708039,
+            "relative_change": 2.123741694998153e-06,
+            "to": 5.861883912808877
+          },
+          "absolute_l2_N_m3": {
+            "from": 9282864.159259174,
+            "relative_change": -0.9109080526480927,
+            "to": 827028.444951626
+          },
+          "magnetic_normalized_l2": {
+            "from": 0.3335352129665844,
+            "relative_change": -0.9076471519840243,
+            "to": 0.030802926831079047
+          },
+          "mean_force_over_mean_grad_p": {
+            "from": 2.252405239870245,
+            "relative_change": -0.8396062825406986,
+            "to": 0.36127164964759806
+          },
+          "mean_force_over_mean_magnetic_pressure_gradient": {
+            "from": 0.12798620863730664,
+            "relative_change": -0.8335286343802484,
+            "to": 0.021306038932346897
+          },
+          "pointwise_normalized_l2": {
+            "from": 1.0407974525879697,
+            "relative_change": -0.51264130466319,
+            "to": 0.5072416886031482
+          },
+          "sampled_window_full_torus_volume_m3": {
+            "from": 0.46912051428034324,
+            "relative_change": 2.254720869192625e-06,
+            "to": 0.46912157201615695
+          },
+          "volume_average_force_N_m3": {
+            "from": 3562078.4338526493,
+            "relative_change": -0.8394065969808593,
+            "to": 572046.2975134883
+          }
+        },
+        "ns31_to_ns121_radial_bins": [
+          {
+            "absolute_l2_N_m3": {
+              "from": 26483072.44115383,
+              "relative_change": -0.9868590056194971,
+              "to": 348013.9061276552
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 27.022245878138452,
+              "relative_change": -0.9862485091263481,
+              "to": 0.3715961675787975
+            },
+            "s": 0.1375280616245344,
+            "volume_average_force_N_m3": {
+              "from": 21351883.280541573,
+              "relative_change": -0.9861885966709278,
+              "to": 294899.47182283254
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 1799044.5442040458,
+              "relative_change": -0.7682526924735733,
+              "to": 416923.72923939506
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 1.1282448614168965,
+              "relative_change": -0.7407288549175347,
+              "to": 0.29252133715296613
+            },
+            "s": 0.28461227595772676,
+            "volume_average_force_N_m3": {
+              "from": 1310990.1898220317,
+              "relative_change": -0.7400708666894421,
+              "to": 340764.5438190844
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 608386.2648680739,
+              "relative_change": 0.047700808947298806,
+              "to": 637406.7818547066
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 0.2702272868710734,
+              "relative_change": 0.06197985750114189,
+              "to": 0.2869759356042627
+            },
+            "s": 0.5,
+            "volume_average_force_N_m3": {
+              "from": 459456.6952724665,
+              "relative_change": 0.06316560983232582,
+              "to": 488478.55762089696
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 2297504.1767617804,
+              "relative_change": -0.5499076246988681,
+              "to": 1034089.1121829815
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 0.7898849449346664,
+              "relative_change": -0.5353119642750028,
+              "to": 0.3670500835104377
+            },
+            "s": 0.7153877240422732,
+            "volume_average_force_N_m3": {
+              "from": 1697776.5936093149,
+              "relative_change": -0.53507940437409,
+              "to": 789331.3051405713
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 1858510.8939090702,
+              "relative_change": -0.2044095988201169,
+              "to": 1478613.4276823003
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 0.7822978792267766,
+              "relative_change": -0.229165981210854,
+              "to": 0.6030218181346022
+            },
+            "s": 0.8624719383754655,
+            "volume_average_force_N_m3": {
+              "from": 1409642.0543589322,
+              "relative_change": -0.22898887166595366,
+              "to": 1086849.7108784034
+            }
+          }
+        ],
+        "ns61_to_ns121_global": {
+          "B_rms_T": {
+            "from": 5.861891416341555,
+            "relative_change": -1.2800531679839748e-06,
+            "to": 5.861883912808877
+          },
+          "absolute_l2_N_m3": {
+            "from": 1094951.3901753114,
+            "relative_change": -0.24468935116908572,
+            "to": 827028.444951626
+          },
+          "magnetic_normalized_l2": {
+            "from": 0.040745859552845584,
+            "relative_change": -0.24402314323179244,
+            "to": 0.030802926831079047
+          },
+          "mean_force_over_mean_grad_p": {
+            "from": 0.4507946387575257,
+            "relative_change": -0.1985892941332881,
+            "to": 0.36127164964759806
+          },
+          "mean_force_over_mean_magnetic_pressure_gradient": {
+            "from": 0.026547898107046008,
+            "relative_change": -0.19744912209482537,
+            "to": 0.021306038932346897
+          },
+          "pointwise_normalized_l2": {
+            "from": 0.6715368937780943,
+            "relative_change": -0.2446555158728726,
+            "to": 0.5072416886031482
+          },
+          "sampled_window_full_torus_volume_m3": {
+            "from": 0.4691201903537498,
+            "relative_change": 2.9452205118474655e-06,
+            "to": 0.46912157201615695
+          },
+          "volume_average_force_N_m3": {
+            "from": 713413.7862729776,
+            "relative_change": -0.1981563735935389,
+            "to": 572046.2975134883
+          }
+        },
+        "ns61_to_ns121_radial_bins": [
+          {
+            "absolute_l2_N_m3": {
+              "from": 2097568.5260519236,
+              "relative_change": -0.8340869908156505,
+              "to": 348013.9061276552
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 2.0207047042239754,
+              "relative_change": -0.8161056552191756,
+              "to": 0.3715961675787975
+            },
+            "s": 0.1375280616245344,
+            "volume_average_force_N_m3": {
+              "from": 1600003.2716675003,
+              "relative_change": -0.8156882069900442,
+              "to": 294899.47182283254
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 378787.5307012231,
+              "relative_change": 0.10067965666022068,
+              "to": 416923.72923939506
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 0.25703357585647163,
+              "relative_change": 0.13806663654055445,
+              "to": 0.29252133715296613
+            },
+            "s": 0.28461227595772676,
+            "volume_average_force_N_m3": {
+              "from": 299087.92956747534,
+              "relative_change": 0.13934569112126832,
+              "to": 340764.5438190844
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 604553.2351165046,
+              "relative_change": 0.05434351324225519,
+              "to": 637406.7818547066
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 0.26706423822712955,
+              "relative_change": 0.07455770757370707,
+              "to": 0.2869759356042627
+            },
+            "s": 0.5,
+            "volume_average_force_N_m3": {
+              "from": 454374.88306321384,
+              "relative_change": 0.0750562494294794,
+              "to": 488478.55762089696
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 1014988.0761649484,
+              "relative_change": 0.018818975775759642,
+              "to": 1034089.1121829815
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 0.3560096447160876,
+              "relative_change": 0.031011628359548273,
+              "to": 0.3670500835104377
+            },
+            "s": 0.7153877240422732,
+            "volume_average_force_N_m3": {
+              "from": 765453.4252298642,
+              "relative_change": 0.031194425583158953,
+              "to": 789331.3051405713
+            }
+          },
+          {
+            "absolute_l2_N_m3": {
+              "from": 1570691.2035190428,
+              "relative_change": -0.05862245591650832,
+              "to": 1478613.4276823003
+            },
+            "mean_force_over_mean_grad_p": {
+              "from": 0.6557284180891192,
+              "relative_change": -0.08037870328711863,
+              "to": 0.6030218181346022
+            },
+            "s": 0.8624719383754655,
+            "volume_average_force_N_m3": {
+              "from": 1181775.635001768,
+              "relative_change": -0.08032482758304836,
+              "to": 1086849.7108784034
+            }
+          }
+        ]
+      },
+      "ns121_solve": {
+        "converged": true,
+        "iterations": 1800,
+        "mpol": 7,
+        "nfp": 2,
+        "ns": 121,
+        "ntor": 6,
+        "root_fsq": {
+          "fsql": 1.7769252945439675e-12,
+          "fsqr": 9.967913823478531e-12,
+          "fsqz": 1.4408401430820622e-12,
+          "max": 9.967913823478531e-12,
+          "sum": 1.3185679261104561e-11
+        }
+      },
+      "physical": {
+        "input": {
+          "curtor_A": -95673.86795711746,
+          "phiedge_Wb": 0.5186826591273498,
+          "pressure_axis_Pa": 144195.89706000002,
+          "pressure_edge_Pa": -5.820766091346741e-11
+        },
+        "output": {
+          "phi_edge_Wb": 0.5186826591273505,
+          "pressure_axis_Pa": 144195.89708145702,
+          "pressure_edge_Pa": -36.31615609434085,
+          "toroidal_current_A": -95678.43865497601,
+          "volume_m3": 0.5864764923756421
+        }
+      },
+      "resources": {
+        "jax_platform": "cpu",
+        "max_rss_bytes": 2472488960,
+        "visible_device_count": 1
+      },
+      "scope": "NS=31,61,121 native-equilibrium radial-resolution ladder at fixed physical and solver controls; observational, not continuum certification",
+      "source": {
+        "driver_sha256": "b8a5b66e87bec26db30916b42c42a14edce99ff98807184edf45d3334db92f8a",
+        "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+        "input_sha256": "d0817092262cb3d65decfd2879a86959491c6000b2411eb46ba7f040cbb8114d",
+        "native_state_sha256": "3d5c9d75b14bf34a4b180d309dad0d012674203573be6ff509c2cc2e25a0bd24",
+        "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+      },
+      "timing_seconds": {
+        "solve": 44.69182190159336,
+        "total": 97.67892840364948
+      },
+      "validation": {
+        "independent_weighted_reduction_relative_difference_max": 4.5e-16,
+        "all_arrays_finite": true,
+        "raw_sample_archive_public": false
+      }
     }
   },
   "gpu_automatic_placement_attempt": {

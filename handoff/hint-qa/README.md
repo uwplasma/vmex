@@ -21,6 +21,7 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #418](https://github.com/uwplasma/vmex/pull/418) | Draft follow-up to #417: applies unconditional validity checks to direct derivative paths even with no absolute primal cutoff; restacked on #417 head `1459f9df`, with 18 focused module tests passing at #418 head `9e0baa28`. Integrated QA/GPU qualification remains open. |
 | [virtual_casing_jax #14](https://github.com/uwplasma/virtual_casing_jax/pull/14) | Open focused fix: prevents outer-JIT source construction from caching tracers while preserving source-field gradients. Seventeen derivative/lifecycle tests and two leak-check tests pass on CPU; no GPU or whole-workflow performance claim. |
 | [ESSOS #71](https://github.com/uwplasma/ESSOS/pull/71) | Draft for manual review: an analytic circular-loop oracle checks complete on-axis Cartesian tensors through order three and two selected field-value current/radius JVPs. All six field tests pass; this finds no defect in that scope and does not qualify off-axis fields or all parameter derivatives. |
+| [VMEX #421](https://github.com/uwplasma/vmex/pull/421) | Draft callback-local device alignment: the two-device regression fails on main and passes after correction, including an already-cached template. Numerical CPU/GPU qualification and coordination with #417 certification remain open. |
 | [VMEX #419](https://github.com/uwplasma/vmex/pull/419) | Draft guarded block-factor reuse benchmark: exact-current residual checks and fallback are demonstrated on its QI case; a full-optimizer accuracy, memory and runtime comparison remains required. This is distinct from the rejected scalar-factor cache. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
 
@@ -198,9 +199,27 @@ The follow-up at 48x48 reproduced the shared 32-grid arrays exactly. Global
 force L2 changed by only +0.0000689%, and the outer-band change contracted to
 +0.0155%; all other band L2 changes were below 0.00061%. Per-band mean-force
 and ratio changes were below 0.391%. The 32-grid measurement is adequate for
-this fixed-state force-L2 screen. Proceed to a controlled radial equilibrium
-resolution check at unchanged physical constraints and angular resolution.
+this fixed-state force-L2 screen. This justified the controlled radial
+resolution checks below at unchanged physical and angular settings.
 This refines the diagnostic, not the equilibrium or its physical accuracy.
+
+Changing only `NS_ARRAY=31` to `61` converged in 891 iterations with all three
+FSQ channels below the unchanged `1e-11` tolerance. At the same flux/angle
+coordinates and 32x32 measurement, force L2 fell from `9.282864e6` to
+`1.094951e6 N/m^3` (88.2%); mean force over mean pressure-gradient magnitude
+fell from `2.252405` to `0.450795`. The inner-band force L2 fell 92.1%, while
+the middle band changed only 0.63%. This is substantial resolution dependence
+of the native solve/reconstruction, not a force-balance certificate. Flux
+remained exact; the output/input current difference decreased to 20.9194 A.
+The two states map common flux coordinates to slightly different Cartesian
+points. The NS121 rung also converged (1,800 iterations) with all other
+settings retained. Its force L2 was `8.270284e5 N/m^3`, another 24.47% reduction,
+and mean force/mean pressure gradient was `0.361272`. Per-band force changes
+from NS61 ranged from -83.4% to +10.1%, so radial convergence is not established.
+The input/output current difference decreased to 4.57070 A, with edge flux
+preserved to roundoff. Qualify measurement angular sensitivity on NS121, then
+separate solver angular resolution and Fourier truncation effects before
+extending the radial ladder. The 32-grid qualification above applies to NS31.
 
 To reproduce the force screen, set `VMEX_SOURCE` to a clean checkout of the
 pinned main revision, create `results`, and run from the HINT handoff branch:
@@ -247,8 +266,10 @@ then hit its 660-second guard (661.647 s elapsed), with peak GPU process
 allocation 486 MiB and host RSS 1,791,552 KiB. Both reserved output files
 remained empty: zero of 15 arrays were captured. Cleanup completed. This
 establishes a bounded timeout, not a deadlock or CPU/GPU parity. The automatic
-callback placement defect remains a separate source-review item; use a small
-callback regression before another full capture.
+callback placement correction is proposed in #421; its forced-two-CPU
+regression fails on the parent and passes after correction. Qualify a small
+real numerical callback before another full capture. This patch has not
+been shown to resolve the explicit-device timeout.
 
 Source review of HINT's linear drive finds no normalization defect explaining
 the observed deficit: its cut-zero imposed-current integral is constructed
@@ -380,6 +401,28 @@ downloadable. Publish it through a suitable research-data channel, and complete
 preprocessing and independent equilibrium reproduction before promotion.
 VMEX's release-published workflow is for PyPI packages; a diagnostic-data
 archive must not be published as an accidental package release.
+
+The archive contains only the nominal 0.5% case at two grids, not both beta
+cases. Its member checksums verify bytes but do not yet capture the complete
+preparation provenance. The preparation runner must connect each output to
+its source hashes, generator revision, exact command, package/compiler/MPI
+versions and native executable hash. Record numerical array hashes separately
+from NetCDF container hashes, which can change across library versions.
+
+The minimal reproducible preparation sequence is: validate the named WOUT,
+input deck and coil JSON; derive pressure/current metadata and the profile
+using documented quadrature; verify the two boundaries are identical before
+sharing a wall; generate the numerical poloidal-buffer wall and direct coil
+grid; run native MKFLX and MKLIM for flux and limiter fields; then render the
+HINT deck and verify matching coordinates, field-period count, finite fields,
+limiter values, containment and current-cut integrals. Read field-period count
+from the source instead of assuming two. Native flux/limiter preprocessing
+should remain native; a Python reconstruction is an independent check.
+Wall generation must pin Shapely/GEOS and the buffer/resampling settings.
+Use explicit inputs, refuse conflicting outputs, and preserve the measured
+current-table/deck contract. Snapshot extraction and deterministic data
+packaging follow simulation as separate steps. This runner is still missing;
+the existing build and sampling commands do not perform these stages.
 
 ## Execution order and research acceptance
 
