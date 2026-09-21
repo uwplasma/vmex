@@ -600,5 +600,165 @@
       "solve": 5.649743249989115,
       "total": 37.380616749986075
     }
+  },
+  "native_form_physical_screen": {
+    "conventions": {
+      "curlB": "(dBz/dy-dBy/dz, dBx/dz-dBz/dx, dBy/dx-dBx/dy)",
+      "current_density": "J = curl(B)/mu0 in A/m^2",
+      "force": "J cross B minus grad(p), N/m^3",
+      "gradB": "gradB[i,j] = d B_i / d x_j in Cartesian coordinates",
+      "pointwise_normalization": "2|F|/(|J cross B|+|grad p|+1e-12 N/m^3)",
+      "pressure_gradient": "dp/ds from prescribed gamma=0 profile times row 0 of inverse dx/d(s,theta,phi)",
+      "weights": "abs(det(dx/d(s,theta,phi))) ds dtheta dphi over one field period; nfp only for reported full-torus volume"
+    },
+    "coordinates": {
+      "common_points_sha256": "e0e7dcfd8d2a59102f6cdf6e4dd810b099eda43eeaa976cabdfa672c7d8a39e6",
+      "evaluation": "Cartesian points mapped from q then inverted with exact q as native-field seeds",
+      "phi_count_per_field_period": 16,
+      "phi_shift_cells": 0.375,
+      "point_count": 1280,
+      "q_order": [
+        "normalized_toroidal_flux_s",
+        "poloidal_theta_rad",
+        "physical_geometric_phi_rad"
+      ],
+      "s_interval": [
+        0.1,
+        0.9
+      ],
+      "s_nodes": [
+        0.1375280616245344,
+        0.28461227595772676,
+        0.5,
+        0.7153877240422732,
+        0.8624719383754655
+      ],
+      "s_quadrature": "5-point Gauss-Legendre",
+      "theta_count": 16,
+      "theta_shift_cells": 0.5
+    },
+    "limitations": [
+      "the native interior field uses a continuous C2 radial interpolation of the finite-NS SpectralState",
+      "the main evaluation performs a seeded Cartesian-to-flux inversion at mapped common points",
+      "the pressure gradient is valid for this gamma=0 prescribed-pressure deck",
+      "the Cartesian stencil checks derivative and inversion consistency on one state, not equilibrium radial convergence",
+      "no NS, MPOL, or NTOR refinement is included",
+      "Relative divB error against an analytic value at roundoff is not informative; only absolute divergence is reported.",
+      "Native-state bytes differ from the earlier local screen across hosts; no cross-host bitwise-state equivalence is claimed."
+    ],
+    "resources": {
+      "configured_threads": 1,
+      "jax_platform": "cpu",
+      "max_rss_bytes": 2357391360,
+      "visible_device_count": 1
+    },
+    "samples_sha256": "e2742af31c22db5ae760ae616716889007169f97845bad153a48369dc34a8344",
+    "scope": "observational native-form interpolation diagnostic; not a continuum certificate",
+    "solve": {
+      "converged": true,
+      "iterations": 700,
+      "mpol": 7,
+      "nfp": 2,
+      "ns": 31,
+      "ntor": 6
+    },
+    "source": {
+      "equivalent_commit": {
+        "commit": "45f3a7aeaeedd50ee7a04d553bc0d281bb8510a4",
+        "commit_object_available_in_checkout": false,
+        "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+      },
+      "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+      "input_sha256": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
+      "native_state_sha256": "83e07bcb9b8abcd70a57eaeef2879919c7dfb46090b944e016d012925861c552",
+      "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+    },
+    "stage1": {
+      "B_rms_T": 5.861871466275035,
+      "absolute_l2_N_m3": 9290990.240559489,
+      "divB_max_abs_T_m": 1.8829382497642655e-13,
+      "divB_rms_T_m": 4.929194251310207e-14,
+      "magnetic_normalized_l2": 0.33410206580163565,
+      "mean_force_over_mean_grad_p": 2.2637274367153477,
+      "mean_force_over_mean_magnetic_pressure_gradient": 0.12874097782758281,
+      "minimum_signed_coordinate_jacobian_m3": 0.009398668645169375,
+      "nestedness_margin": 0.6174529803126465,
+      "pointwise_normalized_l2": 1.0405966972693055,
+      "sampled_full_torus_volume_m3": 0.4691205133071986,
+      "volume_average_force_N_m3": 3580137.0030029356
+    },
+    "stage2": {
+      "levels": [
+        {
+          "curl_relative_l2_vs_analytic": 3.324881604852279e-05,
+          "divB_rms_T_m": 7.12665541445285e-05,
+          "force_relative_l2_vs_analytic": 3.9097944247910136e-05,
+          "h_m": 0.00017044723267954496,
+          "h_over_Aminor": 0.001,
+          "pressure_gradient_relative_l2_vs_analytic": 1.3149998305496768e-09
+        },
+        {
+          "curl_relative_l2_vs_analytic": 4.562236730126822e-08,
+          "divB_rms_T_m": 7.070948393231332e-08,
+          "force_relative_l2_vs_analytic": 6.652135961896822e-08,
+          "force_relative_l2_vs_previous_h": 3.9104325030765734e-05,
+          "h_m": 8.522361633977248e-05,
+          "h_over_Aminor": 0.0005,
+          "pressure_gradient_relative_l2_vs_analytic": 9.721504331858162e-11
+        },
+        {
+          "curl_relative_l2_vs_analytic": 2.855178400653723e-09,
+          "divB_rms_T_m": 4.423381835326505e-09,
+          "force_relative_l2_vs_analytic": 4.164375142927199e-09,
+          "force_relative_l2_vs_previous_h": 6.235760139339519e-08,
+          "h_m": 4.261180816988624e-05,
+          "h_over_Aminor": 0.00025,
+          "pressure_gradient_relative_l2_vs_analytic": 2.0741515679601888e-11
+        }
+      ],
+      "method": "fourth-order centered Cartesian differences using the same native B and reconstructed flux-coordinate pressure profile",
+      "subset_count": 32,
+      "subset_flat_indices": [
+        18,
+        26,
+        82,
+        90,
+        146,
+        154,
+        210,
+        218,
+        274,
+        282,
+        338,
+        346,
+        402,
+        410,
+        466,
+        474,
+        786,
+        794,
+        850,
+        858,
+        914,
+        922,
+        978,
+        986,
+        1042,
+        1050,
+        1106,
+        1114,
+        1170,
+        1178,
+        1234,
+        1242
+      ]
+    },
+    "timing_seconds": {
+      "solve": 18.707853489089757,
+      "total": 71.09275026898831
+    },
+    "measured_driver_sha256": "2acc5c74bc13b7e4e0f57a2cda61c356dc9e937b919c2a7e1fc5b84929252b2a",
+    "samples_repository_path": "data/native-force.npz",
+    "reproduction_status": "Retained numeric arrays permit independent metric reconstruction; a portable source-to-result runner is under review."
   }
 }

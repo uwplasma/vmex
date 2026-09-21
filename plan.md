@@ -24,6 +24,9 @@ Execute three independent bounded lanes now:
    free-boundary repeatability; a finite example output is not a gradient oracle.
    The bounded two-lift screen is strongly representation-sensitive: control
    reconstruction error before using its force norm to admit the native root.
+   A native-form diagnostic agrees with independent Cartesian derivatives to
+   4.16e-9 relative but still has large force residuals; qualify common-target
+   radial/angular convergence before accepting the equilibrium.
 2. Resolve HINT current evolution and Ohm/Faraday balance before extending
    relaxation or changing resistivity. The bounded later-time diagnostic now
    confirms source normalization, while attained response current on the same

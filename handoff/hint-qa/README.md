@@ -158,6 +158,27 @@ prescribed boundary pressure. Flux matches the target exactly. The current
 reconstruction differs from input CURTOR by `104.481908 A` (`0.109206%`), the
 finite-mesh distinction already recorded above.
 
+A subsequent native-form screen avoids the two arbitrary high-order lifts.
+It uses the public interior `B` and `gradB`, the flux-coordinate geometry
+Jacobian and the prescribed pressure profile on 1,280 shifted points with
+`s` in `[0.1, 0.9]`. It still uses the finite-NS C2 radial interpolant and
+seeded Cartesian inversion. Measured force L2 is `9.290990e6 N/m^3`, mean
+`|F|/mean|grad p|` is `2.263727`, and the pointwise normalized L2 is `1.040597`.
+These values do not support force-balance acceptance. The sampling window
+also differs from the two-lift screen, so the norms are not a controlled
+representation comparison.
+
+On a common 32-point subset, fourth-order Cartesian stencils at
+`h/a = 1e-3, 5e-4, 2.5e-4` approach the analytic force with relative L2 errors
+`3.91e-5, 6.65e-8, 4.16e-9`. This checks the derivative and coordinate
+implementation for this interpolant; it does not establish physical force
+convergence. Analytic divergence at roundoff is likewise a representation
+identity. The [record](vmex-cpu.json) and [numeric arrays](data/native-force.npz)
+retain the points, weights, fields, force and stencil results. Their force
+algebra and weighted norm were independently recomputed. The run completed
+in 71.1 s on one CPU core. A source-to-result runner remains under review;
+common-target radial and angular refinement are the next scientific gates.
+
 The portable [capture command](capture-vmex.py) takes explicit paths and records
 source/dependency/input identities. Use the exact tested source revision above
 for reproduction, or record a new baseline for an integrated revision. With
