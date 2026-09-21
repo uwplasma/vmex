@@ -330,14 +330,17 @@ record (Apple M4, ``8e6fdff4``, jax 0.9.2, float64):
      - fixed-boundary multigrid value (``cth_like_fixed_bdy``)
      - 0.262
      - 1045
-   * - F4
-     - implicit scalar value + gradient (``li383_low_res``)
-     - 11.8
-     - 7997
    * - F8
      - least-squares campaign, 5 evaluations (``minimal_seed_nfp2``)
      - 147
      - 11379
+
+The schema-1 records are historical. Their recorded revision is not currently
+retrievable from the public repository. In the reviewed profiler, schema 1
+repeats only the first stage for aggregate ``warm`` timing, so multi-stage
+records cannot establish complete-workflow performance. The former F4
+value-plus-gradient table entry is withdrawn pending reproducible remeasurement;
+the raw record is retained. Schema 2 repeats all stages in dependency order.
 
 ``python benchmarks/profile_workflows.py --list`` prints the full registry;
 ``--all --regimes warm --out benchmarks/baselines/m4/`` regenerates it.
@@ -996,7 +999,8 @@ Five timing regimes are never mixed in one number:
    populated (the record carries the entry counts before and after, so a
    reload claim always has logged evidence);
 ``warm``
-   same process, same shapes and static arguments — the median of repeats;
+   same process, same shapes and static arguments — the median of complete
+   ordered stage repeats (schema 2); an explicit regime callback overrides this;
 ``warm_newparams``
    same process, changed physical parameters at unchanged shapes (the
    no-recompile contract, asserted by the harness's own tests);
