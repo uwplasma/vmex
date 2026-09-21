@@ -1930,9 +1930,12 @@ def measure_primal_state(
 
 
 def _require_strict_primal(cfg, params, state, mask):
-    """Enforce an explicitly requested root bound on direct derivative APIs."""
-    if cfg.primal_tol is None:
-        return jnp.asarray(True)
+    """Enforce primal admission on direct derivative APIs.
+
+    ``primal_tol=None`` disables only the absolute projected-residual bound;
+    finite residuals, valid geometry, and the configured raw-FSQ ratio remain
+    required.
+    """
     residual_norm, raw_residual_norm, fsq, geometry_valid = _primal_measurements(
         state, params, mask, cfg)
     eligible = _primal_is_eligible(
@@ -1940,9 +1943,10 @@ def _require_strict_primal(cfg, params, state, mask):
     if not isinstance(eligible, jax.core.Tracer) and not bool(eligible):
         raise AdjointSolveError(
             message="implicit derivative requires an admitted primal state",
-            hint="loosen primal_tol only if the observable permits it",
+            hint="inspect the primal residual, geometry, and raw-FSQ diagnostics",
             residual_norm=float(residual_norm),
-            tolerance=float(cfg.primal_tol),
+            tolerance=(None if cfg.primal_tol is None
+                       else float(cfg.primal_tol)),
         )
     return eligible
 

@@ -232,7 +232,8 @@ class AdjointSolveError(VmecNumericalError):
         The true residual norm ``||b - A^T lambda||`` the solve reached.
     tolerance:
         The acceptance threshold it failed to meet
-        (``slack * adjoint_tol * ||b||``).
+        (``slack * adjoint_tol * ||b||``), or ``None`` when primal admission
+        failed an unconditional validity check without an absolute norm bound.
 
     Remedies: raise ``adjoint_maxiter``/``adjoint_gcrot_m``/
     ``adjoint_gcrot_k`` (more Krylov budget) or loosen ``adjoint_tol``.
@@ -240,7 +241,7 @@ class AdjointSolveError(VmecNumericalError):
 
     iterations: int = 0
     residual_norm: float = 0.0
-    tolerance: float = 0.0
+    tolerance: float | None = 0.0
 
 
 @dataclass

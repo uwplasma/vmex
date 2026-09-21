@@ -138,7 +138,14 @@ def test_status_callback_uses_configured_actual_state_tolerance(
     json.dumps(certificate[2], allow_nan=False)
 
 
-def test_direct_derivative_strict_gate_is_opt_in(monkeypatch):
+@pytest.mark.parametrize(
+    "invalid_case",
+    ["geometry", "projected_nonfinite", "raw_nonfinite", "negative_fsq",
+     "excess_fsq"],
+)
+def test_direct_derivative_always_checks_primal_validity(
+    monkeypatch, invalid_case
+):
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     params = im.params_from_input(inp)
     cfg = im.make_config(inp)
@@ -146,11 +153,60 @@ def test_direct_derivative_strict_gate_is_opt_in(monkeypatch):
     state = im._initial_state(runtime.setup)
     mask = jax.tree.map(jax.numpy.zeros_like, state)
 
+    measurements = {
+        "geometry": (1.0e-5, 2.0e-5, 1.0e-14, False),
+        "projected_nonfinite": (np.nan, 2.0e-5, 1.0e-14, True),
+        "raw_nonfinite": (1.0e-5, np.inf, 1.0e-14, True),
+        "negative_fsq": (1.0e-5, 2.0e-5, -1.0, True),
+        "excess_fsq": (
+            1.0e-5, 2.0e-5, cfg.ftol * (cfg.max_fsq_ratio + 1.0), True
+        ),
+    }[invalid_case]
+
+    def invalid_measurements(measured_state, *_args, **_kwargs):
+        # Depend on the staged state so the regression exercises a traced
+        # predicate rather than a compile-time constant.
+        marker = jax.numpy.sum(measured_state.R_cos) * 0.0
+        residual, raw_residual, fsq, geometry_valid = measurements
+        return (
+            jax.numpy.asarray(residual) + marker,
+            jax.numpy.asarray(raw_residual) + marker,
+            jax.numpy.asarray(fsq) + marker,
+            jax.numpy.asarray(geometry_valid) & jax.numpy.isfinite(marker),
+        )
+
+    monkeypatch.setattr(
+        im, "_primal_measurements", invalid_measurements,
+    )
+    with pytest.raises(opt.AdjointSolveError, match="admitted primal") as caught:
+        im._require_strict_primal(cfg, params, state, mask)
+    assert caught.value.tolerance is None
+
+    # Staged derivatives cannot raise from a traced eligibility predicate;
+    # they carry False into the existing NaN-poisoning guard instead.
+    assert not jax.config.jax_disable_jit
+    dynamic_state = lambda token: jax.tree.map(  # noqa: E731
+        lambda value: value + token * 0.0, state)
+    eligible = jax.jit(
+        lambda token: im._require_strict_primal(
+            cfg, params, dynamic_state(token), mask)
+    )(jax.numpy.asarray(0.0))
+    assert not bool(eligible)
+    checked = jax.jit(
+        lambda token: im._primal_checked_tree(
+            dynamic_state(token), im._require_strict_primal(
+                cfg, params, dynamic_state(token), mask))
+    )(jax.numpy.asarray(0.0))
+    assert all(np.all(np.isnan(value)) for value in jax.tree.leaves(checked))
+
+    # None still means there is no universal absolute projected-residual
+    # cutoff when every unconditional validity check passes.
     monkeypatch.setattr(
         im, "_primal_measurements",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("default admission must add no derivative work")
-        ),
+        lambda *_args, **_kwargs: (jax.numpy.asarray(1.0e5),
+                                   jax.numpy.asarray(2.0e5),
+                                   jax.numpy.asarray(1.0e-14),
+                                   jax.numpy.asarray(True)),
     )
     assert bool(im._require_strict_primal(cfg, params, state, mask))
 
