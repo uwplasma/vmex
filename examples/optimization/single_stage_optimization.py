@@ -1,34 +1,43 @@
 #!/usr/bin/env python
-"""Single-stage fixed-boundary plasma and ESSOS coil optimization.
+"""Single-stage fixed-boundary plasma and coil optimization, penalized.
 
-The stated targets are constraints, not weighted penalties.  The
-rotational-transform floor, the aspect-ratio limit and the coil normal-field
-limit enter a Powell-Hestenes-Rockafellar augmented Lagrangian around SciPy's
-L-BFGS-B; quasisymmetry and the coil regularization are the objective.
+The simple one.  Read this before ``single_stage_optimization.py``: it is the
+same seed, physics, coils, targets and reporting, but every constraint is a
+one-sided quadratic penalty and the optimizer is a single bounded L-BFGS-B
+solve, with no multipliers and no outer stage loop.  It is the file to copy
+when starting a new single-stage problem.
 
-``single_stage_optimization_penalty.py`` is the same problem with the
-constraints as plain quadratic penalties and one L-BFGS-B solve.  Start there:
-it is shorter, and at the full budget it reaches every target too.  What this
-file buys, measured on this seed at 301 trials each, is a 1.4x lower objective
-(4.49e-02 against 6.48e-02) and the limits stated as they are.  A quadratic
-penalty asymptotes just inside whatever threshold it is given, so the penalized
-file has to be handed tightened thresholds -- coil separation 0.19 against a
-0.17 limit -- and weights raised until the design lands outside; at the plain
-limits its separation settles at 0.1586.  A multiplier per constraint does what
-one scalar weight cannot, and that is the whole of the difference.
+Both reach every target at the full budget.  Measured on this seed, 301 trials
+each:
 
-    aspect 3.9801, min |iota| 0.4272, B.n/B RMS 0.799%, coil-surface 0.2329,
-    coil-coil 0.1805, maximum curvature 6.629; 755 s, 127 L-BFGS-B iterations
-    over 6 stages.
+                                 penalized   augmented Lagrangian   target
+    aspect ratio                    3.9841                 3.9801   <= 4.0
+    minimum |iota|                  0.4275                 0.4272   >= 0.42
+    B.n/B area-weighted RMS          0.800%                 0.799%  <= 1.0%
+    coil-surface distance           0.2217                 0.2329   >= 0.20
+    coil-coil distance              0.1898                 0.1805   >= 0.17
+    maximum curvature               6.903                  6.629    <= 7.0
+    objective                    6.48e-02               4.49e-02
+    wall / iterations             697 s, 149        755 s, 127 (6 stages)
 
-L-BFGS-B rather than BFGS in both files: at the solution 3 of the 99 coil dofs
-sit exactly on the +/-3.0 parameter bound, which BFGS cannot represent.
+So the simple form is not worse at reaching the targets, and it is not slower.
+What it costs is tuning.  A quadratic penalty asymptotes just INSIDE whatever
+threshold it is given, because its pull vanishes as the violation does, so
+every limit here has to be handed to the optimizer tightened -- aspect 3.98
+against a 4.0 limit, coil separation 0.19 against 0.17 -- and the weights have
+to be raised until the design lands outside.  Getting there took three
+measured attempts: at the plain limits the separation settled at 0.1586.  The
+augmented Lagrangian reaches the same targets with the limits stated as they
+are, and a 1.4x lower objective, because a multiplier per constraint does what
+one scalar weight cannot.
+
+Coil length.  The seed coils have circumference ``2*pi*0.65 = 4.08 m`` and the
+optimizer drives them to about 5.3 m whatever the target says, so a target near
+5.3 lets the length term stop competing with the normal-field one.
 
 Every target is checked at the end on an independent, finer solve and surface
 grid.  A run that misses one says which and exits with status 1; smoke mode
 (``VMEX_EXAMPLES_CI=1``) caps the budget, reports, and exits with status 0.
-``benchmarks/single_stage_profile.py`` records the measured cost and the final
-values in ``benchmarks/single_stage_profile_m4.json``.
 
 Use the commented ``Coils.from_simsopt`` line to replace the generated coils
 with a SIMSOPT coil JSON while keeping the objective and derivative code.
@@ -86,6 +95,14 @@ IOTA_CONSTRAINT = 0.43
 ASPECT_CONSTRAINT = 3.98
 NORMAL_FIELD_CONSTRAINT = 0.008
 CURVATURE_OBJECTIVE_LIMIT = 6.9
+# A quadratic penalty asymptotes just INSIDE the threshold it is given, because
+# its pull vanishes as the violation does.  The three constraints above already
+# carry tightened values for that reason; the two coil distances need the same
+# treatment here, where they are penalties rather than the augmented-Lagrangian
+# constraints the companion makes them.  Measured on this seed: at the limit
+# itself and weight 1e3 the separation settles at 0.1586 against a 0.17 limit.
+COIL_DISTANCE_CONSTRAINT = 0.19
+COIL_SURFACE_DISTANCE_CONSTRAINT = 0.21
 
 N_COILS = 3
 COIL_ORDER = 5
@@ -98,25 +115,17 @@ COIL_CURRENT = 2.7e5
 N_SEGMENTS = 64
 STELLSYM = True
 
-# The seed coils have circumference 2*pi*0.65 = 4.08 m, and the optimizer drives
-# them to about 5.3 m whatever the target says, so the former 4.1 m was a
-# constant tug it always paid and never satisfied.  Targeting where they
-# actually land lets the length term stop competing with the normal-field one.
-LENGTH_TARGET = 5.3
+LENGTH_TARGET = 5.3  # see the module docstring on the seed circumference
 LENGTH_WEIGHT = 1.0
 CURVATURE_WEIGHT = 10.0
-COIL_DISTANCE_WEIGHT = 1.0e3
-COIL_SURFACE_DISTANCE_WEIGHT = 1.0e3
+COIL_DISTANCE_WEIGHT = 1.0e4
+COIL_SURFACE_DISTANCE_WEIGHT = 1.0e4
 
-# Augmented Lagrangian: each stage is one bounded L-BFGS-B solve at fixed
-# multipliers; the multipliers then move and the penalty grows only when the
-# violation did not fall by at least a factor of four.
-PENALTY_START = 10.0
-PENALTY_GROWTH = 10.0
-PENALTY_MAX = 1.0e6
-CONSTRAINT_TOLERANCE = 1.0e-3  # relative violation of the tightened constraints
-MAX_STAGES = 8
-STAGE_MAXITER = 25
+# One weight for every constraint, which is why they are normalized by their
+# own limits above.  1e3 puts a 1 % relative violation at 0.05 in the objective,
+# comparable to the quasisymmetry residual this seed starts from.
+CONSTRAINT_WEIGHT = 1.0e3
+MAXITER = 200
 MAX_TRIALS = 300  # objective evaluations: one equilibrium solve and one adjoint each
 PARAMETER_BOUND = 3.0
 # Circular coils leave B.n/B near 11% RMS on this seed.  Fitting the coils to
@@ -131,7 +140,7 @@ NPHI, NTHETA = 37, 32
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAX_STAGES, STAGE_MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 1, 1, 4, 2
+    MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 2, 4, 2
     N_SEGMENTS, NPHI, NTHETA, COIL_ORDER = 24, 8, 8, 2
 
 DATA = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{nfp}"
@@ -164,18 +173,17 @@ def plasma_constraints(equilibrium_state, solver_context):
     ])
 
 
-def augmented_lagrangian(constraints, multipliers, penalty):
-    """Powell-Hestenes-Rockafellar term for constraints ``c >= 0``.
+def hinge_penalty(constraints, weight):
+    """Quadratic penalty for constraints ``c >= 0``: ``w/2 * sum(max(-c, 0)**2)``.
 
-    It equals ``-multiplier * c + penalty * c**2 / 2`` while a constraint is
-    violated or active, and is constant once the constraint holds with slack,
-    so a satisfied target stops pulling on the design.  Its derivative with
-    respect to the multipliers is ``(max(multiplier - penalty * c, 0) -
-    multiplier) / penalty``, so the gradient already computed for SciPy also
-    yields the next multipliers without another evaluation.
+    One number, no multipliers and no outer loop.  Its price is the one an
+    augmented Lagrangian is designed to avoid: the penalty pulls only while a
+    constraint is violated, so the minimizer of the penalized objective sits a
+    little inside the violated side of each active constraint and the offset
+    shrinks only as ``weight`` grows.  Whether that offset matters here is a
+    measurement, recorded in the module docstring, not an assumption.
     """
-    shifted = jnp.maximum(multipliers - penalty * constraints, 0.0)
-    return jnp.sum(shifted**2 - multipliers**2) / (2.0 * penalty)
+    return 0.5 * weight * jnp.sum(jnp.maximum(-constraints, 0.0)**2)
 
 
 curves0 = CreateEquallySpacedCurves(
@@ -242,74 +250,64 @@ def objects_from_x(x):
     return surface, coils
 
 
-def plasma_lagrangian(u, multipliers, penalty):
-    """Quasisymmetry plus the plasma constraint terms: one solve, one adjoint."""
+
+
+def plasma_objective(u):
+    """Quasisymmetry plus the penalized plasma constraints: one solve, one adjoint."""
     x = jnp.asarray(x0) + jnp.asarray(scales) * u
     return plasma_problem.jax_objective_from_state(
         x[:x_boundary0.size],
-        lambda equilibrium_state, solver_context: augmented_lagrangian(
-            plasma_constraints(equilibrium_state, solver_context),
-            multipliers[:2], penalty),
+        lambda equilibrium_state, solver_context: hinge_penalty(
+            plasma_constraints(equilibrium_state, solver_context), CONSTRAINT_WEIGHT),
         n_extra_terms=1)
 
-def coil_lagrangian(u, multipliers, penalty):
-    """Coil regularization plus the normal-field constraint term."""
+
+def coil_objective(u):
+    """Coil regularization plus the penalized normal-field constraint."""
     surface, coils = objects_from_x(jnp.asarray(x0) + jnp.asarray(scales) * u)
     rows = [jnp.sqrt(weight) * (jnp.atleast_1d(function(coils, surface)) - target).ravel()
             for function, target, weight in coil_terms]
     costs = jnp.concatenate([jnp.stack([0.5 * jnp.vdot(row, row) for row in rows]), jnp.asarray([
         0.5 * COIL_DISTANCE_WEIGHT * loss_coil_separation(
-            coils, COIL_DISTANCE_LIMIT, block_size=32),
+            coils, COIL_DISTANCE_CONSTRAINT, block_size=32),
         0.5 * COIL_SURFACE_DISTANCE_WEIGHT * loss_coil_surface_distance(
-            coils, surface, COIL_SURFACE_DISTANCE_LIMIT, block_size=32),
+            coils, surface, COIL_SURFACE_DISTANCE_CONSTRAINT, block_size=32),
     ])])
     normal_field_constraint = 1.0 - normal_field_rms(coils, surface) / NORMAL_FIELD_CONSTRAINT
-    constraint_cost = augmented_lagrangian(
-        normal_field_constraint[None], multipliers[2:], penalty)
+    constraint_cost = hinge_penalty(normal_field_constraint[None], CONSTRAINT_WEIGHT)
     return jnp.sum(costs) + constraint_cost, (costs, constraint_cost)
 
 
-# The multipliers and penalty are arguments, not captured constants, so moving
-# them between stages does not recompile either graph.  The equilibrium graph
-# makes one host solve per trial; the coil graph is pure JAX.
-plasma_value_and_grad = jax.jit(jax.value_and_grad(plasma_lagrangian, argnums=(0, 1), has_aux=True))
-coil_value_and_grad = jax.jit(jax.value_and_grad(coil_lagrangian, argnums=(0, 1), has_aux=True))
+plasma_value_and_grad = jax.jit(jax.value_and_grad(plasma_objective, has_aux=True))
+coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective, has_aux=True))
 
 monitor = opt.OptimizationMonitor(plasma_problem)
-multipliers = np.zeros(3)  # iota floor, aspect limit, normal-field limit
-penalty = PENALTY_START
 counts = {"trials": 0}
 last_evaluation = {}
-next_multipliers = {}
 
 # VMEX supplies the exact equilibrium derivative; JAX differentiates the coil
 # objective. Their values and gradients add directly for any SciPy optimizer.
 def value_and_grad(u):
     u = np.asarray(u, dtype=float)
-    key = (u.tobytes(), multipliers.tobytes(), float(penalty))
-    if last_evaluation.get("key") == key:
+    if last_evaluation.get("key") == u.tobytes():
         return last_evaluation["value"], last_evaluation["gradient"].copy()
     counts["trials"] += 1
-    arguments = (jnp.asarray(u), jnp.asarray(multipliers), jnp.asarray(penalty))
-    (plasma_value, (qs_rows, plasma_constraint_cost)), (plasma_gradient, plasma_dmultipliers) = \
-        plasma_value_and_grad(*arguments)
-    (coil_value, (coil_cost_values, coil_constraint_cost)), (coil_gradient, coil_dmultipliers) = \
-        coil_value_and_grad(*arguments)
+    (plasma_value, (qs_rows, plasma_constraint_cost)), plasma_gradient = \
+        plasma_value_and_grad(jnp.asarray(u))
+    (coil_value, (coil_cost_values, coil_constraint_cost)), coil_gradient = \
+        coil_value_and_grad(jnp.asarray(u))
     qs_rows = np.asarray(qs_rows)
     terms = {"quasisymmetry": 0.5 * float(qs_rows @ qs_rows),
-             "iota and aspect constraints": float(np.asarray(plasma_constraint_cost)[0]),
-             "normal-field constraint": float(coil_constraint_cost)}
+             "iota and aspect penalty": float(np.asarray(plasma_constraint_cost)[0]),
+             "normal-field penalty": float(coil_constraint_cost)}
     terms.update(zip(coil_term_names, map(float, np.asarray(coil_cost_values))))
-    # max(multiplier - penalty * c, 0), read from the multiplier gradient.
-    next_multipliers[u.tobytes()] = np.maximum(
-        multipliers + penalty * (np.asarray(plasma_dmultipliers) + np.asarray(coil_dmultipliers)), 0.0)
     value, gradient = monitor.cache_evaluation(
         u, plasma_value + coil_value, plasma_gradient + coil_gradient, terms)
-    last_evaluation.update(key=key, value=value, gradient=gradient)
+    last_evaluation.update(key=u.tobytes(), value=value, gradient=gradient)
     return value, gradient.copy()
 
 
-print("Running single_stage_optimization.py")
+print("Running single_stage_optimization_penalty.py")
 print(f"Fixed-boundary VMEX + ESSOS: {x_boundary0.size} boundary and "
       f"{x_coils0.size} coil variables, exact reverse-mode derivatives")
 print(f"dof_names = {dof_names}")
@@ -318,14 +316,12 @@ report = opt.EquilibriumReporter(
     ("mean iota", opt.mean_iota, ".4f"), ("min |iota|", opt.min_abs_iota, ".4f"))
 seed_values = report("seed", plasma_problem.equilibrium_from_x(x_boundary0))
 
-# Stage 0: coils only, boundary pinned by equal bounds.  With the normal-field
-# multiplier equal to the penalty, its term is penalty/2 * (RMS/limit)**2 minus a
-# constant: a plain least-squares fit with no slack at the limit.
-fit_multipliers = jnp.asarray([0.0, 0.0, PENALTY_START])
-
+# Stage 0: coils only, boundary pinned by equal bounds.  Circular coils leave
+# B.n/B near 11% RMS on this seed, and fitting them to the frozen seed boundary
+# costs no equilibrium solve.  Shared with the companion so the two differ only
+# in how the constraints are handled.
 def coil_fit_value_and_grad(u):
-    (value, _), (gradient, _) = coil_value_and_grad(
-        jnp.asarray(u), fit_multipliers, jnp.asarray(PENALTY_START))
+    (value, _), gradient = coil_value_and_grad(jnp.asarray(u))
     return float(value), np.asarray(gradient)
 
 coil_fit = minimize(
@@ -341,31 +337,17 @@ vj.FunctionProblem.from_functions(u, value_and_grad=value_and_grad).compile_valu
     report_interval=10.0)
 initial_value = monitor.records[0].cost
 bounds = [(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size
-previous_violation, stages, iterations, final_value = np.inf, 0, 0, initial_value
-for stage in range(MAX_STAGES):
-    if counts["trials"] >= MAX_TRIALS:
-        break
-    result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", bounds=bounds,
-                      callback=monitor, options={
-                          "maxiter": STAGE_MAXITER, "maxfun": MAX_TRIALS - counts["trials"],
-                          "maxcor": 20, "maxls": 20, "ftol": 1.0e-12, "gtol": 1.0e-8})
-    u, final_value = result.x, float(result.fun)
-    stages, iterations = stages + 1, iterations + int(result.nit)
-    if u.tobytes() not in next_multipliers:
-        value_and_grad(u)
-    updated = next_multipliers[u.tobytes()]
-    # max |min(c, multiplier/penalty)|: zero exactly when every constraint
-    # holds and each multiplier is zero wherever its constraint has slack.
-    violation = float(np.max(np.abs(updated - multipliers))) / penalty
-    print(f"[stage {stage + 1}] {result.nit} L-BFGS-B iterations, {counts['trials']} trials, "
-          f"violation = {violation:.3e}, multipliers = {np.array2string(updated, precision=4)}, "
-          f"penalty = {penalty:.1e}", flush=True)
-    multipliers = updated
-    if violation <= CONSTRAINT_TOLERANCE and result.status != 1:
-        break
-    if violation > 0.25 * previous_violation:
-        penalty = min(PENALTY_GROWTH * penalty, PENALTY_MAX)
-    previous_violation = violation
+# One solve.  L-BFGS-B rather than BFGS because the parameter bounds are part of
+# the problem -- they keep a trial boundary inside the range the seed solve
+# converges on -- and BFGS cannot take them.
+result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", bounds=bounds,
+                  callback=monitor, options={
+                      "maxiter": MAXITER, "maxfun": MAX_TRIALS,
+                      "maxcor": 20, "maxls": 20, "ftol": 1.0e-12, "gtol": 1.0e-8})
+u, final_value = result.x, float(result.fun)
+iterations = int(result.nit)
+print(f"[solve] {iterations} L-BFGS-B iterations, {counts['trials']} trials, "
+      f"status {result.status}: {result.message}", flush=True)
 optimization_seconds = time.perf_counter() - started
 
 x_final = x0 + scales * u
@@ -401,8 +383,8 @@ final_converged = bool(np.all(np.asarray(final_equilibrium.result.converged)))
 
 # Print results
 final_values = report("final", final_equilibrium)
-print(f"\nObjective: {initial_value:.6e} -> {final_value:.6e} after {stages} augmented-Lagrangian "
-      f"stages, {iterations} L-BFGS-B iterations and {counts['trials']} trials")
+print(f"\nObjective: {initial_value:.6e} -> {final_value:.6e} after "
+      f"{iterations} L-BFGS-B iterations and {counts['trials']} trials")
 print(f"Coil lengths = {np.asarray(coils_final.length[:N_COILS])}")
 print(f"B.n/B: area-weighted RMS = {100 * normal_field_rms_final:.3f}%, max = {100 * normal_field_max:.3f}% "
       f"(target RMS <= {100 * NORMAL_FIELD_LIMIT:.1f}%; the maximum is reported, not optimized)")
@@ -435,10 +417,10 @@ else:
     print("\nAll stated targets met.")
 
 summary = {
-    "example": "single_stage_optimization.py", "smoke": ci_smoke,
+    "example": "single_stage_optimization_penalty.py", "smoke": ci_smoke,
     "optimization_seconds": round(optimization_seconds, 1),
     "coil_fit_iterations": int(coil_fit.nit),
-    "trials": counts["trials"], "stages": stages, "lbfgsb_iterations": iterations,
+    "trials": counts["trials"], "lbfgsb_iterations": iterations,
     "equilibrium_solves": monitor.records[-1].equilibrium_solves,
     "seed": seed_values, "final": {
         **final_values, "min |iota|": minimum_iota, "aspect": final_aspect,
@@ -451,35 +433,35 @@ summary = {
                 "coil-coil distance >=": COIL_DISTANCE_LIMIT, "maximum curvature <=": CURVATURE_LIMIT},
     "unmet": unmet, "met": not unmet,
 }
-Path("single_stage_optimization_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+Path("single_stage_penalty_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
 # Save results
-input_path = final_input.to_indata("input.single_stage_optimized")
-wout_path = vj.write_wout("wout_single_stage_optimized.nc", final_equilibrium.wout)
-coils_final.to_json("coils_single_stage_optimized.json")
+input_path = final_input.to_indata("input.single_stage_penalty_optimized")
+wout_path = vj.write_wout("wout_single_stage_penalty_optimized.nc", final_equilibrium.wout)
+coils_final.to_json("coils_single_stage_penalty_optimized.json")
 # ESSOS writes |B| and B.n/B on the surface and the coil filaments for ParaView.
 surface_initial = surfacerzfourier_from_boundary(
     rbc0, zbs0, inp.nfp, nphi=60, ntheta=60)
-surface_initial.to_vtk("surface_single_stage_initial", field=BiotSavart(coils0))
-coils0.to_vtk("coils_single_stage_initial")
+surface_initial.to_vtk("surface_single_stage_penalty_initial", field=BiotSavart(coils0))
+coils0.to_vtk("coils_single_stage_penalty_initial")
 field_final = BiotSavart(coils_final)
-surface_final.to_vtk("surface_single_stage_optimized", field=field_final)
-coils_final.to_vtk("coils_single_stage_optimized")
+surface_final.to_vtk("surface_single_stage_penalty_optimized", field=field_final)
+coils_final.to_vtk("coils_single_stage_penalty_optimized")
 print(f"Wrote {input_path}\nWrote {wout_path}")
-print("Wrote coils_single_stage_optimized.json and single_stage_optimization_summary.json")
+print("Wrote coils_single_stage_penalty_optimized.json and single_stage_penalty_summary.json")
 print("Wrote initial and optimized surface/coils VTK files")
 
 # Plot results
 print("Plotting results...")
-vj.plot_optimization_objects("single_stage_optimization.png",
+vj.plot_optimization_objects("single_stage_penalty.png",
     ("Initial", surface_initial, coils0), ("Optimized", surface_final, coils_final))
-monitor.save("single_stage_objectives.csv")
-monitor.plot("single_stage_objectives.png", title="Single-stage objective terms")
-print("Wrote single_stage_optimization.png")
-print("Wrote single_stage_objectives.csv and single_stage_objectives.png")
+monitor.save("single_stage_penalty_objectives.csv")
+monitor.plot("single_stage_penalty_objectives.png", title="Single-stage penalty objective terms")
+print("Wrote single_stage_penalty.png")
+print("Wrote single_stage_penalty_objectives.csv and single_stage_penalty_objectives.png")
 if MAKE_MOVIE:
     print("Making movie of accepted iterates...")
-    monitor.movie_surface_coils("single_stage_optimization.gif", objects_from_x,
+    monitor.movie_surface_coils("single_stage_penalty.gif", objects_from_x,
         x0=x0, scales=scales, surface_color=MOVIE_SURFACE_COLOR, plasma_problem=plasma_problem,
         external_field=lambda objects: coil_field(objects[1]), nphi=NPHI, ntheta=NTHETA, cmap="jet")
 for path in vj.plot_wout(wout_path, ".").values():
