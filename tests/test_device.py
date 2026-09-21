@@ -699,3 +699,33 @@ def test_status_certificate_preserves_returned_state_on_runtime_device(
     assert status == 0
     assert cfg.device == (None if explicit_index is None else expected_device)
     assert im._LAST_PRIMAL_CERTIFICATE[cfg][1] == im._primal_state_key(returned_np)
+
+
+def test_measure_primal_state_rehomes_supplied_state_to_config_device():
+    """The public exact-state measurement follows an explicit device."""
+    from vmex.core import implicit as im
+
+    devices = jax.devices("cpu")
+    if len(devices) < 2:
+        pytest.skip("requires two forced host devices")
+    source = VmecInput.from_file(DATA / "input.solovev")
+    inp = replace(
+        source, mpol=3, ns_array=np.asarray([5]),
+        rbc=source.rbc[:, :3], rbs=source.rbs[:, :3],
+        zbc=source.zbc[:, :3], zbs=source.zbs[:, :3],
+    )
+    cfg = im.make_config(inp, device=devices[1])
+    params = im.params_from_input(inp, device=devices[1])
+    state = im._initial_state(im.runtime_from_params(params, cfg).setup)
+    mask = jax.tree.map(jax.numpy.zeros_like, state)
+    params, state, mask = jax.tree.map(
+        lambda value: jax.device_put(value, devices[0]),
+        (params, state, mask),
+    )
+
+    with jax.default_device(devices[0]), jax.disable_jit(False):
+        evidence = im.measure_primal_state(params, state, mask, cfg)
+
+    assert evidence["primal_boundary_consistent"]
+    assert evidence["primal_boundary_error"] == 0.0
+    assert evidence["primal_boundary_tolerance"] > 0.0

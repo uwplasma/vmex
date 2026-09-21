@@ -1888,16 +1888,22 @@ def _primal_measurements(state, params, mask, cfg):
 
 @functools.partial(jax.jit, static_argnames=("cfg",))
 def _primal_boundary_error(state, params, cfg):
-    """Check the fixed edge without replacing the measured coefficients."""
+    """Return edge error and a coefficient-transform roundoff allowance."""
     if cfg.inp.lfreeb:
         raise ValueError("fixed-boundary primal certificates cannot measure a coupled free-boundary root")
     boundary = _boundary_from_params(params, cfg)[:4]
-    return jnp.max(jnp.stack([
+    error = jnp.max(jnp.stack([
         jnp.max(jnp.abs(getattr(state, name)[-1]
                         - expected))
         for name, expected in zip(
             ("R_cos", "R_sin", "Z_cos", "Z_sin"), boundary)
     ]))
+    # Native NumPy packing and staged JAX rotations can round differently.
+    # Scale by the whole R/Z edge, including when an individual mode is zero;
+    # this allowance is unrelated to equilibrium or response tolerances.
+    scale = jnp.max(jnp.stack([jnp.max(jnp.abs(x)) for x in boundary]))
+    precision = jnp.finfo(error.dtype)
+    return error, 32 * precision.eps * jnp.maximum(scale, precision.tiny)
 
 
 def _primal_is_eligible(residual_norm, raw_residual_norm, fsq,
@@ -1926,16 +1932,18 @@ def measure_primal_state(
     it does not report whether a native solve converged or produced them.
     ``strict_root_certified`` is therefore true only when the caller selected
     a finite, observable-specific ``primal_tol`` and the state meets it.
-    Fixed R/Z edges must match the supplied parameters; a mismatch is reported
-    separately from geometry and never repaired before measurement. Coupled
+    Fixed R/Z edges must match the parameters within transform roundoff;
+    mismatches are reported separately and never repaired before measurement. Coupled
     free-boundary roots require their own field and constraint data.
     """
-    boundary_error = _primal_boundary_error(state, params, cfg)
+    params, state, mask = _device_pin(cfg, (params, state, mask))
+    boundary_error, boundary_tolerance = _primal_boundary_error(state, params, cfg)
+    boundary_consistent = jnp.isfinite(boundary_error) & (boundary_error <= boundary_tolerance)
     residual_norm, raw_residual_norm, fsq, geometry_valid = _primal_measurements(
-        _device_pin(cfg, state), params, _device_pin(cfg, mask), cfg)
+        state, params, mask, cfg)
     admitted = _primal_is_eligible(
         residual_norm, raw_residual_norm, fsq, geometry_valid, cfg,
-        boundary_error == 0)
+        boundary_consistent)
     residual_norm = float(residual_norm)
     raw_residual_norm, fsq = float(raw_residual_norm), float(fsq)
     refine_tol = float(cfg.refine_tol)
@@ -1959,7 +1967,8 @@ def measure_primal_state(
         "primal_fsq_ratio": fsq / cfg.ftol,
         "primal_geometry_valid": bool(geometry_valid),
         "primal_boundary_error": float(boundary_error),
-        "primal_boundary_consistent": bool(boundary_error == 0),
+        "primal_boundary_tolerance": float(boundary_tolerance),
+        "primal_boundary_consistent": bool(boundary_consistent),
         "derivative_admitted": bool(admitted),
     }
 
@@ -1971,12 +1980,13 @@ def _require_strict_primal(cfg, params, state, mask):
     finite residuals, valid geometry, matching fixed edges, and the configured
     raw-FSQ ratio remain required.
     """
-    boundary_error = _primal_boundary_error(state, params, cfg)
+    boundary_error, boundary_tolerance = _primal_boundary_error(state, params, cfg)
+    boundary_consistent = jnp.isfinite(boundary_error) & (boundary_error <= boundary_tolerance)
     residual_norm, raw_residual_norm, fsq, geometry_valid = _primal_measurements(
         state, params, mask, cfg)
     eligible = _primal_is_eligible(
         residual_norm, raw_residual_norm, fsq, geometry_valid, cfg,
-        boundary_error == 0)
+        boundary_consistent)
     if not isinstance(eligible, jax.core.Tracer) and not bool(eligible):
         raise AdjointSolveError(
             message="implicit derivative requires an admitted primal state",

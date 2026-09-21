@@ -153,12 +153,18 @@ def test_status_callback_uses_configured_actual_state_tolerance(
     json.dumps(certificate[2], allow_nan=False)
 
 
-def test_primal_measurements_use_the_supplied_edge(monkeypatch):
-    """Fresh force measurements must not repair a bad supplied edge."""
+@pytest.mark.parametrize("edge_change", ["roundoff", "material"])
+def test_primal_measurements_use_the_supplied_edge(monkeypatch, edge_change):
+    """Fresh force measurements must not repair the supplied edge."""
     _, cfg, params, state, _ = _small_primal_case()
-    delta = 0.125
+    shifted = (
+        jax.numpy.nextafter(
+            state.R_cos[-1, 0], jax.numpy.asarray(jax.numpy.inf))
+        if edge_change == "roundoff" else state.R_cos[-1, 0] + 0.125
+    )
     supplied = dataclasses.replace(
-        state, R_cos=state.R_cos.at[-1, 0].add(delta))
+        state, R_cos=state.R_cos.at[-1, 0].set(shifted))
+    assert float(shifted) != float(state.R_cos[-1, 0])
     mask = jax.tree.map(jax.numpy.ones_like, state)
     measured = []
 
@@ -204,10 +210,29 @@ def test_primal_boundary_gate_rejects_a_perturbed_supplied_edge(monkeypatch):
         ),
     )
 
-    assert float(im._primal_boundary_error(state, params, cfg)) == 0.0
+    boundary_error, boundary_tol = im._primal_boundary_error(
+        state, params, cfg)
+    assert float(boundary_error) == 0.0
+    assert float(boundary_tol) > 0.0
     assert bool(im._require_strict_primal(cfg, params, state, mask))
+    roundoff = dataclasses.replace(
+        state, R_cos=state.R_cos.at[-1, 0].set(jax.numpy.nextafter(
+            state.R_cos[-1, 0], jax.numpy.asarray(jax.numpy.inf))))
+    roundoff_error, roundoff_tol = im._primal_boundary_error(
+        roundoff, params, cfg)
+    assert 0.0 < float(roundoff_error) <= float(roundoff_tol)
+    assert bool(im._require_strict_primal(cfg, params, roundoff, mask))
+    with jax.disable_jit(False):
+        assert bool(jax.jit(
+            lambda candidate: im._require_strict_primal(
+                cfg, params, candidate, mask)
+        )(roundoff))
+
+    boundary_error, boundary_tol = im._primal_boundary_error(
+        perturbed, params, cfg)
     np.testing.assert_equal(
-        float(im._primal_boundary_error(perturbed, params, cfg)), delta)
+        float(boundary_error), delta)
+    assert float(boundary_error) > float(boundary_tol)
     with pytest.raises(opt.AdjointSolveError, match="admitted primal"):
         im._require_strict_primal(cfg, params, perturbed, mask)
 
@@ -218,11 +243,47 @@ def test_primal_boundary_gate_rejects_a_perturbed_supplied_edge(monkeypatch):
 
     # A traced direct derivative cannot raise from its dynamic predicate; it
     # must carry False into the existing non-finite-sensitivity guard.
-    eligible = jax.jit(
-        lambda candidate: im._require_strict_primal(
-            cfg, params, candidate, mask)
-    )(perturbed)
+    with jax.disable_jit(False):
+        eligible = jax.jit(
+            lambda candidate: im._require_strict_primal(
+                cfg, params, candidate, mask)
+        )(perturbed)
     assert not bool(eligible)
+
+
+@pytest.mark.parametrize("scale", [1.0e-6, 1.0e6])
+def test_primal_boundary_tolerance_scales_with_the_fixed_edge(scale):
+    _, cfg, params, _, _ = _small_primal_case()
+    params = dataclasses.replace(
+        params,
+        rbc=params.rbc * scale, rbs=params.rbs * scale,
+        zbc=params.zbc * scale, zbs=params.zbs * scale,
+    )
+    state = im._initial_state(im.runtime_from_params(params, cfg).setup)
+    shifted = dataclasses.replace(
+        state, R_cos=state.R_cos.at[-1, 0].set(jax.numpy.nextafter(
+            state.R_cos[-1, 0], jax.numpy.asarray(jax.numpy.inf))))
+    corrupted = dataclasses.replace(
+        state, R_cos=state.R_cos.at[-1, 0].add(0.125 * scale))
+
+    error, tolerance = im._primal_boundary_error(shifted, params, cfg)
+    assert float(error) > 0.0
+    assert float(error) <= float(tolerance)
+    material_error, material_tolerance = im._primal_boundary_error(
+        corrupted, params, cfg)
+    assert float(material_error) > float(material_tolerance)
+
+
+def test_lasym_native_setup_edge_meets_transform_tolerance():
+    source = VmecInput.from_file(DATA_DIR / "input.basic_non_stellsym_pressure")
+    inp = dataclasses.replace(source, ns_array=np.asarray([5]))
+    cfg = im.make_config(inp)
+    params = im.params_from_input(inp)
+    native = im._initial_state(im._template_runtime(cfg).setup)
+
+    with jax.disable_jit(False):
+        error, tolerance = im._primal_boundary_error(native, params, cfg)
+    assert float(error) <= float(tolerance)
 
 
 def test_fixed_boundary_primal_certificate_rejects_free_boundary_input():
