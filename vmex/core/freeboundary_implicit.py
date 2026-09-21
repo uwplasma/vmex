@@ -647,10 +647,9 @@ def _solve_bwd_impl(cfg, saved, state_bar):
                 "coupled GCROT solve instead. That is a different solver, so "
                 "the gradient agrees only to the Krylov tolerance, and it is "
                 "the slower of the two -- measured on the free-boundary "
-                "single-stage deck at ns = 25, one value-and-gradient costs "
-                "46.5 s through the Schur lane against 60.9-74.7 s staged, "
-                "and the gap widens as the Schur lane gets faster. Call the "
-                "objective eagerly to keep the solver you asked for.",
+                "single-stage deck at ns = 25, one warm value-and-gradient "
+                "costs 5.1 s through the Schur lane against 38.6 s staged. "
+                "Call the objective eagerly to keep the solver you asked for.",
                 RuntimeWarning, stacklevel=2)
         _, state_pullback = jax.vjp(
             lambda z: residual(
