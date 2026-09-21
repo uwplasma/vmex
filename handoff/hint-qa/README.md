@@ -20,6 +20,7 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #417](https://github.com/uwplasma/vmex/pull/417) | Open candidate: anchors derivative admission and reuse to measured refined coefficients. Exact-case QA and GPU evidence remain necessary. |
 | [VMEX #418](https://github.com/uwplasma/vmex/pull/418) | Draft follow-up to #417: applies unconditional validity checks to direct derivative paths even with no absolute primal cutoff; restacked on #417 head `3f4542c9`, with 14 focused module tests passing at #418 head `7b715692`. Integrated QA/GPU qualification remains open. |
 | [virtual_casing_jax #14](https://github.com/uwplasma/virtual_casing_jax/pull/14) | Open focused fix: prevents outer-JIT source construction from caching tracers while preserving source-field gradients. Seventeen derivative/lifecycle tests and two leak-check tests pass on CPU; no GPU or whole-workflow performance claim. |
+| [ESSOS #71](https://github.com/uwplasma/ESSOS/pull/71) | Draft for manual review: an analytic circular-loop oracle checks complete on-axis Cartesian tensors through order three and two selected field-value current/radius JVPs. All six field tests pass; this finds no defect in that scope and does not qualify off-axis fields or all parameter derivatives. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
 
 Current main has raw block Newton/adjoint solves, deterministic free-boundary
