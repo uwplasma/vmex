@@ -4,7 +4,10 @@
 The commented ``Coils.from_simsopt`` line accepts a SIMSOPT coil JSON without
 changing the VMEX virtual-casing or ESSOS tracing workflow.
 
-Outside the CI smoke run, the phi=0 Poincare panel pair the README embeds is
+This preview uses unqualified near-surface continuation; its exterior panels
+do not establish physical magnetic topology. See VmecExtender's method warning.
+
+Outside the CI smoke run, the phi=0 Poincare panel pair is
 also written straight into ``docs/_static/figures`` as lossless WebP, so
 re-running this script reproduces the committed bytes.
 """

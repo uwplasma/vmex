@@ -14,7 +14,7 @@ vmex input.circular_tokamak        # run any VMEC input deck
 vmex --plot wout_circular_tokamak.nc
 ```
 
-The same solve from Python, with an exact gradient at the end:
+The same solve from Python, followed by an implicit derivative:
 
 ```python
 import jax
@@ -27,6 +27,10 @@ result = vj.solve_multigrid(inp)               # converged equilibrium
 p0 = implicit.params_from_input(inp)           # differentiable parameters
 grad = jax.grad(lambda p: implicit.run(inp, p).wb)(p0)
 ```
+
+This derivative describes the discrete equilibrium equations. Check equilibrium
+and response convergence, then verify the observable under resolution refinement
+and independently reconverged perturbations; see {doc}`tutorials/first-gradient`.
 
 New here? {doc}`all-of-vmex` is the whole mental model on one page;
 {doc}`installation` covers CPU/GPU installs and `vmex --doctor`.

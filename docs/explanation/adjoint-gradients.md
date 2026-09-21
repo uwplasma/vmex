@@ -10,75 +10,78 @@ SOLVAX solve classes exactly as the code uses them.
 
 ## The implicit function theorem on the fixed point
 
-The equilibrium is the root of the force residual $F(x, p) = 0$ with $x$ the
-spectral state and $p$ the parameters
+Write the equilibrium as $F(z, p) = 0$, where $z$ contains independent evolved
+coordinates and the assembled spectral state $x(z,p)$ includes the prescribed
+boundary and frozen components. The parameters $p$ are
 ({class}`~vmex.core.implicit.ImplicitParams`: boundary coefficients,
-profiles, `phiedge`, `pres_scale`, `curtor`). If $\partial F/\partial x$ is
-invertible at the root, the solution map $p \mapsto x^\star(p)$ is
+profiles, `phiedge`, `pres_scale`, `curtor`). If $\partial F/\partial z$ is
+invertible at the root, the solution map $p \mapsto z^\star(p)$ is
 differentiable with
 
 $$
-\frac{dx^\star}{dp}
-= -\left(\frac{\partial F}{\partial x}\right)^{-1}
+\frac{dz^\star}{dp}
+= -\left(\frac{\partial F}{\partial z}\right)^{-1}
   \frac{\partial F}{\partial p},
 $$
 
-and for a scalar objective $\mathcal{J}(x^\star(p))$ with cotangent
-$\bar{g} = \partial\mathcal{J}/\partial x$, the reverse-mode (adjoint) form
-needs **one** linear solve regardless of the number of parameters:
+For the assembled scalar objective $J(z,p)=\mathcal{J}(x(z,p),p)$, the
+reverse-mode (adjoint) form needs **one** linear solve regardless of the
+number of parameters:
 
 $$
-\left(\frac{\partial F}{\partial x}\right)^{\!\top} \lambda = \bar{g},
+\left(\frac{\partial F}{\partial z}\right)^{\!\top} \lambda
+= \frac{\partial J}{\partial z},
 \qquad
-\frac{d\mathcal{J}}{dp}
-= -\lambda^{\!\top}\,\frac{\partial F}{\partial p}.
+\frac{dJ}{dp}
+= \frac{\partial J}{\partial p}
+- \lambda^{\!\top}\,\frac{\partial F}{\partial p}.
 $$
 
-{func}`~vmex.core.implicit.solve_implicit` wraps this in `jax.custom_vjp`:
-the forward pass runs the fast CLI-lane host solver (`jax.pure_callback` —
-multigrid staging, restarts, and adaptive time-step control stay invisible to
-autodiff; only the fixed point defines the derivative); the backward pass
-solves the adjoint system matrix-free
-({func}`~vmex.core.implicit.adjoint_matvec`): one `jax.vjp` linearization of
-the residual function ({func}`~vmex.core.implicit.residual_fn`) is reused as
-the transposed operator, and one more VJP contracts $\lambda$ against
-$\partial F/\partial p$.
+{func}`~vmex.core.implicit.solve_implicit` wraps this in `jax.custom_vjp`.
+The forward pass runs the host solver through `jax.pure_callback`. The
+backward pass first uses the raw-force block transpose and checks its linear
+residual; a failed host-eager certificate falls back to preconditioned Krylov.
+A failed staged scalar adjoint returns non-finite sensitivities. VJPs of
+{func}`~vmex.core.implicit.residual_fn` and the state assembly supply the
+implicit and direct parameter terms. The derivative describes the selected
+root family, not the host iteration history.
 
-The residual is the **self-consistently 1D-preconditioned force** `gc` of a
+The matrix-free lane uses the **self-consistently 1D-preconditioned force** `gc` of a
 single fresh {func}`~vmex.core.solver.evaluate_forces` pass:
-$F = M(x,p)\,f(x,p)$ with $f$ the raw spectral force and $M$ the invertible
-1D-preconditioner map. At the root $dF = M\,df + dM\,f = M\,df$ up to
-$O(\mathrm{ftol})$, so the implicit gradients equal those of the raw force to
-solver accuracy — while the adjoint Krylov solve inherits VMEC's own
-preconditioning for free: near equilibrium $\partial F/\partial x$ is close
-to the identity, so it converges in a handful of iterations.
+$F = M f$ on the evolved subspace, with $f$ the raw spectral force.
+For nonsingular $M$, raw and preconditioned implicit derivatives agree at an
+exact root: $dF=M\,df+(dM)f=M\,df$. At an approximate root the $(dM)f$ term
+remains; its effect depends on the residual and conditioning, not on `ftol`
+alone. Preconditioning can reduce Krylov work but does not guarantee a
+near-identity operator or a fixed iteration count.
 
-Why the gradient is cheap: reverse-mode through an *unrolled* iteration would
-store every iterate (memory linear in the iteration count) and backpropagate
-through thousands of steps. The implicit adjoint touches only the converged
-state: its cost is a fixed handful of residual evaluations (one linearization
-plus the Krylov matvecs) and its memory is O(1) in the iteration count —
-independent of how many Richardson steps, restarts, or multigrid stages the
-forward solve needed. Multigrid stages act purely as an initializer and are
-stop-gradient by construction.
+Implicit differentiation avoids storing the forward iteration history. Its
+memory still depends on resolution, linearization, factors and Krylov workspace;
+runtime includes root refinement and the measured linear-solve work. Host
+multigrid and restart decisions are outside the AD tape. They can nevertheless
+select different roots or frozen components, so their effect must be checked
+by independent reconvergence rather than assumed absent.
 
 ## Where the derivative is taken
 
-The theorem holds at a *root* of $F$, and the host solver does not stop at
-one: `ftol` gates the sum of squares of the force, so a solve it reports
-converged still returns with $|F| \sim \sqrt{\mathrm{ftol}}$ — 2.7e-07 at
-`ftol = 1e-12` on the non-stellarator-symmetric `basic_non_stellsym_simsopt`
-deck. Where $\partial F/\partial x$ carries a small singular value (the lasym
-$m = 1$ families: 1.5e-04) that residual is a 1.8e-03 displacement of the
-state — enough to move a solver-sensitive metric by more than the derivative
-being measured.
+The theorem holds at a *root* of $F$. The host solver instead stops on native
+normalized squared-force measures. These do not directly bound the residual
+norm used by every derivative formulation, state error or observable error.
+Near a root, state error depends on $(\partial F/\partial z)^{-1}F$; small
+singular values can amplify an apparently small residual. For example, a
+solve reported converged at `ftol = 1e-12` on the non-stellarator-symmetric
+`basic_non_stellsym_simsopt` deck returned with a residual of 2.7e-07; where
+$\partial F/\partial z$ carries a small singular value (the lasym $m = 1$
+families: 1.5e-04) that residual is a 1.8e-03 displacement of the state —
+enough to move a solver-sensitive metric by more than the derivative being
+measured.
 
-VMEX therefore Newton-refines the state onto the root inside the host
-callback, before any lane reads it (`ImplicitConfig.refine_tol`, default
+VMEX therefore attempts Newton refinement inside the host callback before
+derivative evaluation (`ImplicitConfig.refine_tol`, default
 1e-10; `inf` disables it, and a refinement that fails to improve the residual
-leaves the host state in place). Value, cotangent and linearization then all
-sit at the same point — which is also where the frozen-path finite-difference
-reference measures, its own Newton endpoints being roots as well. Both have
+leaves the host state in place). When refinement succeeds, value, cotangent
+and linearization use the refined root, as does a successfully reconverged
+frozen-path finite-difference reference. Both have
 to move together: on $d(\sum D_\mathrm{Merc})/d(\mathrm{RBS}(1,1))$ the
 gradient agrees with that reference to rel 5.4e-07 when they do, against
 4.2e-03 at the host stopping point and 5.7e-03 with the linearization alone
@@ -87,28 +90,28 @@ refined.
 Nearby optimization trials reuse the previous Newton displacement as a guess.
 VMEX evaluates the new frozen residual before accepting that guess; if it does
 not reach `refine_tol`, VMEX discards it and replays the original refinement.
-This changes work, not the accepted numerical path. Public optimization
-factories expose the same `refine_tol`; keep 1e-10 for production gradients
-and use `numpy.inf` only for an explicit legacy comparison.
+Public optimization factories expose the same `refine_tol`. Its default is
+a refinement target, not a universal observable-accuracy certificate. Qualify
+any change against nonlinear residuals and independently reconverged observable
+derivatives; disabling refinement with `numpy.inf` is a legacy comparison.
 
 ## The six SOLVAX solve classes
 
 Every linear solve in the gradient stack goes through SOLVAX. The complete
 inventory, with the call site each class serves:
 
-1. `solvax.gmres` / `solvax.gcrot` solve the implicit-function-theorem
-   systems in `vmex/core/implicit.py`: adjoint $(dF/dz)^T \lambda = b$
-   (warm-started GMRES; GCROT(m,k) with subspace recycling) and tangent
-   $(dF/dz)\, dz = -(dF/dp)\, t$ via the multi-RHS drivers
+1. `solvax.gmres` / `solvax.gcrot` provide tangent solves, response corrections
+   and the host-eager scalar-adjoint fallback in `vmex/core/implicit.py`.
+   Tangents solve $(dF/dz)\, dz = -(dF/dp)\, t$ via the multi-RHS drivers
    {func}`~vmex.core.implicit.implicit_state_tangent_multi_rhs` /
    {func}`~vmex.core.implicit.implicit_state_pullback_multi_rhs`;
    every solve returns a {class}`~vmex.core.implicit.LinearResponseReport`
    (residual_norm, tolerance, iterations, converged).
-2. `solvax.block_thomas_factor/solve` power the amortized Jacobian path in
-   `vmex/core/optimize.py`: the raw scalxc-scaled residual Jacobian is
-   block-tridiagonal in radius; assembled with 3-colored jvp probes,
-   factored once, backsolved per boundary dof, then one warm-started GMRES
-   pass per column certifies `cfg.adjoint_tol`.
+2. `solvax.block_thomas_factor/solve` provide the default scalar reverse
+   response and the amortized optimizer Jacobian. The raw-force radial blocks
+   are assembled with 3-colored JVP probes and factored once. Transpose or
+   per-parameter solves use these factors, with refinement/correction and
+   certificates against the exact operator.
 3. `solvax.tridiagonal_solve(_checked)` performs the per-mode radial 1D
    preconditioner solves (`vmex/core/preconditioner.py`; the `precondn.f` /
    `scalfor.f` analogue — see {doc}`preconditioners`).
@@ -137,36 +140,36 @@ the exact linearized operator.
 - The JAX API selects the reverse branch inside the compiled graph, where a
   Python exception is unavailable.
 
-## Validating the gradients: the frozen path
+## Validating the gradients
 
-The adjoint returns the derivative of the fixed point of the **frozen**
-residual $F$: the preconditioner, the `tcon` constraint strength, the
-converged m=1 Z-force branch, and the dof mask are captured once at the base
-parameters and held fixed. Validation must respect that. Equilibrium outputs
-fall into two classes:
+The implicit derivative describes the root of the selected discrete residual
+$F$. Its evolved-dof projector and converged m=1 force branch are fixed;
+non-evolved state components remain at their anchor values. The residual's
+preconditioner is evaluated from the current state and parameters. A small
+linear-response defect certifies that linear equation, not the accuracy of
+the nonlinear root or the observable.
 
-- **Smooth bulk integrals** — the magnetic energy `wb`, the aspect ratio,
-  the volume. A naive central finite difference through the full host solver
-  (re-converging independently at $p\pm h$) matches `jax.grad` to
-  rtol <= 1e-6; the solver's internal path averages out of a bulk integral.
-- **Solver-sensitive metrics** — `iota` (built from the current-constrained
-  `chips` at `ncurr = 1`), the mirror ratio, the magnetic well, the
-  Boozer/QI residual: these read the converged state directly and locally.
-  A naive re-solve at $p\pm h$ lets the convergence logic re-form slightly
-  differently on each side — an $O(1)$ perturbation of the discrete *path*,
-  not of the *fixed point* — and it can swamp, even sign-flip, the finite
-  difference. On `li383_low_res`,
-  $d(\iota_{\mathrm{edge}})/d(\mathrm{RBC}(-1,1))$ is $-0.773$ from the
-  adjoint but $+0.045$ from a naive central FD.
+Use two complementary checks:
 
-The naive FD is therefore not a valid reference for solver-sensitive metrics —
-the disagreement is a property of the finite-difference probe, not an error
-in the adjoint. The correct check reuses the *same* frozen residual the
-adjoint differentiates: {func}`~vmex.core.implicit.frozen_path_directional_fd`
-takes a directional step $p\pm h$, Newton-solves the frozen $F$ to its
-perturbed root, and finite-differences that. It reproduces the adjoint to
-solver accuracy for `iota`, mirror, well, and QI alike, and it is the
-reference used in `tests/test_implicit_grad.py`.
+- {func}`~vmex.core.implicit.frozen_path_directional_fd` Newton-solves the
+  same frozen residual at perturbed parameters. Agreement checks the implicit
+  linearization; `tests/test_implicit_grad.py` exercises this contract.
+- Independently reconverge perturbed equilibria over several step sizes and
+  measure the same observable. Require admitted roots, consistent physical
+  constraints and reference data, and a finite-difference agreement window.
+  Also check repeated parameters after unrelated trials and in a new problem
+  instance. This tests the parameter dependence used by an optimizer.
+
+Mirror ratio, iota and Boozer/QI diagnostics can amplify root, sampling or
+branch-selection differences. On `li383_low_res`,
+$d(\iota_{\mathrm{edge}})/d(\mathrm{RBC}(-1,1))$ is $-0.773$ from the adjoint
+but $+0.045$ from a naive central difference through the full host solver. If independent differences disagree or change
+sign, inspect those causes rather than dismissing the check or assuming the
+adjoint is wrong. Compare raw/projected residuals, frozen state components and
+independently refined diagnostics. If no agreement window is resolved, report
+that observable's derivative as unqualified; frozen-path agreement alone does
+not close the gap. See the [validation record](validation.md) and current
+[research plan](https://github.com/uwplasma/vmex/blob/main/plan.md) for the measured scope.
 
 ## Forward mode for least-squares Jacobians
 
@@ -185,17 +188,18 @@ vector-residual path (`jac_solver="block"`, SOLVAX class 2 above) exploits a
 structural fact: in the **raw** force formulation the radial coupling of
 $\partial F/\partial z$ is exactly nearest-neighbor, so the operator is
 *exactly* block-tridiagonal — `ns` dense $(3\,mn \times 3\,mn)$ blocks.
-(The preconditioned formulation used by the adjoint is dense in radius,
+(The preconditioned scalar fallback is dense in radius,
 because the 1D preconditioner's inverse is.) The block path factors those
-blocks once, back-solves every dof right-hand side, and certifies each column
-with a warm-started GMRES pass on the preconditioned system; columns already
-at tolerance cost one matvec. No committed record measures its cost against
+blocks once, back-solves every dof right-hand side, and checks each column
+against the exact raw operator, applying correction when necessary.
+No committed record measures its cost against
 the per-column GMRES fallback (`jac_solver="gmres"`), so this page quotes no
 speedup. The same per-dof responses $dz_j$ double as a first-order
 perturbation warm start for the optimizer's next trial solves — the
 DESC-style `eq.perturb` pattern, and the default
-`warm_start="perturbation"` — which changes only the inner iteration count,
-not the fixed point; its saving has no committed record either. How these
+`warm_start="perturbation"`. This supplies an initial guess; verify that
+restarts preserve the selected root family and final observables. Its saving
+has no committed record either. How these
 plug into an optimization campaign is {doc}`/howto/optimize-a-boundary`.
 
 ## Free-boundary root
