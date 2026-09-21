@@ -194,7 +194,12 @@ band remained about `2.65e7 N/m^3`. Thus the aggregate is comparatively stable,
 while per-radius quadrature convergence remains uneven. The compact record
 retains both grids and independently checked weighted reductions; its raw
 sample archive is retained separately and is not publicly downloadable.
-Check 32x32 against 48x48 before interpreting an equilibrium NS ladder.
+The follow-up at 48x48 reproduced the shared 32-grid arrays exactly. Global
+force L2 changed by only +0.0000689%, and the outer-band change contracted to
++0.0155%; all other band L2 changes were below 0.00061%. Per-band mean-force
+and ratio changes were below 0.391%. The 32-grid measurement is adequate for
+this fixed-state force-L2 screen. Proceed to a controlled radial equilibrium
+resolution check at unchanged physical constraints and angular resolution.
 This refines the diagnostic, not the equilibrium or its physical accuracy.
 
 To reproduce the force screen, set `VMEX_SOURCE` to a clean checkout of the
@@ -237,8 +242,13 @@ refinement combined a GPU state with CPU parameters. No numerical archive
 was written. This is a software placement failure, not failed physics or a
 CPU/GPU parity result. The capture command now accepts `--device gpu` for
 VMEX's supported explicit placement; omitting it preserves the measured CPU
-workflow. A guarded explicit-device retry is pending. The automatic callback
-placement defect remains a separate source-review item.
+workflow. The explicit-device retry reached problem construction in 25.8 s,
+then hit its 660-second guard (661.647 s elapsed), with peak GPU process
+allocation 486 MiB and host RSS 1,791,552 KiB. Both reserved output files
+remained empty: zero of 15 arrays were captured. Cleanup completed. This
+establishes a bounded timeout, not a deadlock or CPU/GPU parity. The automatic
+callback placement defect remains a separate source-review item; use a small
+callback regression before another full capture.
 
 Source review of HINT's linear drive finds no normalization defect explaining
 the observed deficit: its cut-zero imposed-current integral is constructed
