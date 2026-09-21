@@ -759,6 +759,69 @@
     },
     "measured_driver_sha256": "2acc5c74bc13b7e4e0f57a2cda61c356dc9e937b919c2a7e1fc5b84929252b2a",
     "samples_repository_path": "data/native-force.npz",
-    "reproduction_status": "Retained numeric arrays permit independent metric reconstruction; a portable source-to-result runner is under review."
+    "reproduction_status": "The portable diagnostic numeric body reproduced all 17 arrays bitwise; subsequent guard-only changes passed targeted preflight checks.",
+    "radial_sample_bands": {
+      "scope": "The five sampled flux surfaces only; this does not locate the continuous-domain force maximum.",
+      "rows": [
+        {
+          "s": 0.1375280616245344,
+          "point_count": 256,
+          "force_l2_N_m3": 26527344.143158365,
+          "mean_force_over_mean_grad_p": 27.193076804582176
+        },
+        {
+          "s": 0.28461227595772676,
+          "point_count": 256,
+          "force_l2_N_m3": 1796387.3429459445,
+          "mean_force_over_mean_grad_p": 1.1839020938941125
+        },
+        {
+          "s": 0.5,
+          "point_count": 256,
+          "force_l2_N_m3": 583365.2603092699,
+          "mean_force_over_mean_grad_p": 0.2715957641699962
+        },
+        {
+          "s": 0.7153877240422732,
+          "point_count": 256,
+          "force_l2_N_m3": 2252911.1935467934,
+          "mean_force_over_mean_grad_p": 0.7843137103415346
+        },
+        {
+          "s": 0.8624719383754655,
+          "point_count": 256,
+          "force_l2_N_m3": 1691597.694563267,
+          "mean_force_over_mean_grad_p": 0.7283353609952742
+        }
+      ]
+    },
+    "portable_runner_validation": {
+      "script": "diagnose-force.py",
+      "published_script_sha256": "a8f82d6cc76e5c2b41a6d8e2d5cc3996607748c21867e3a04c71e27fb770d139",
+      "numerically_executed_pre_guard_script_sha256": "80d6198dbd2e541bf18410538ab95bf9a7766074734128c57e6a95a4b5227fa1",
+      "elapsed_seconds": 65.73,
+      "arrays_bitwise_equal": 17,
+      "guard_only_changes": [
+        "source import placement",
+        "distinct output paths and existing parents",
+        "finite metrics/arrays before writes",
+        "remove meaningless relative divB against roundoff"
+      ],
+      "guard_checks": "passed without solving; published corrected hash not yet numerically rerun"
+    }
+  },
+  "gpu_automatic_placement_attempt": {
+    "source_git_head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+    "driver_sha256": "32443a2584dd28cf1122ea64a4954ea4267586c3feb128167ed7aea381870906",
+    "exit_code": 1,
+    "elapsed_seconds": 36.875,
+    "peak_gpu_MiB": 486,
+    "peak_process_group_RSS_GiB": 1.93,
+    "actual_cuda_process_observed": true,
+    "stage": "first target materialization, callback primal refinement",
+    "failure": "incompatible devices: GPU state R_cos and CPU params rbc",
+    "numerical_archive_written": false,
+    "resource_cap_triggered": false,
+    "interpretation": "placement failure, no paired numerical result"
   }
 }

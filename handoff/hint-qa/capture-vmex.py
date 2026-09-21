@@ -24,6 +24,10 @@ def _arguments() -> argparse.Namespace:
         help="write PREFIX.npz and PREFIX.json; existing files are refused",
     )
     parser.add_argument(
+        "--device", choices=("cpu", "gpu"),
+        help="explicit VMEX solve/response placement; omitted preserves its default",
+    )
+    parser.add_argument(
         "--preflight-only", action="store_true",
         help="verify source placement, Git identity, x64, and dependencies without computing",
     )
@@ -106,6 +110,7 @@ for package in packages:
     except importlib.metadata.PackageNotFoundError:
         versions[package] = None
 preflight = {
+    "requested_device": args.device,
     "source_git_head": head,
     "source_git_tree": tree,
     "source_clean": True,
@@ -179,7 +184,10 @@ try:
     total_start = time.monotonic()
     inp = vj.VmecInput.from_file(input_path)
     start = time.monotonic()
-    problem = opt.VmecProblem.from_input(inp, max_mode=1, use_ess=True, progress=True)
+    placement = {} if args.device is None else {"device": args.device}
+    problem = opt.VmecProblem.from_input(
+        inp, max_mode=1, use_ess=True, progress=True, **placement,
+    )
     metadata["timings_seconds"]["problem"] = time.monotonic() - start
     start = time.monotonic()
     equilibrium = problem.equilibrium_from_x(problem.x0)

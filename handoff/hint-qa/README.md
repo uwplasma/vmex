@@ -18,7 +18,7 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #410](https://github.com/uwplasma/vmex/pull/410) | Open draft at review: owns dependency-floor changes. Complete exact-floor validation there rather than duplicate it here. |
 | [VMEX #416](https://github.com/uwplasma/vmex/pull/416) | Open candidate: removes history-dependent suppression of free-boundary cold recovery. Qualify repeated accepted points after rejected trials on the integrated source. |
 | [VMEX #417](https://github.com/uwplasma/vmex/pull/417) | Open candidate: anchors derivative admission and reuse to measured refined coefficients. Exact-case QA and GPU evidence remain necessary. |
-| [VMEX #418](https://github.com/uwplasma/vmex/pull/418) | Draft follow-up to #417: applies unconditional validity checks to direct derivative paths even with no absolute primal cutoff; restacked on #417 head `3f4542c9`, with 14 focused module tests passing at #418 head `7b715692`. Integrated QA/GPU qualification remains open. |
+| [VMEX #418](https://github.com/uwplasma/vmex/pull/418) | Draft follow-up to #417: applies unconditional validity checks to direct derivative paths even with no absolute primal cutoff; restacked on #417 head `1459f9df`, with 18 focused module tests passing at #418 head `9e0baa28`. Integrated QA/GPU qualification remains open. |
 | [virtual_casing_jax #14](https://github.com/uwplasma/virtual_casing_jax/pull/14) | Open focused fix: prevents outer-JIT source construction from caching tracers while preserving source-field gradients. Seventeen derivative/lifecycle tests and two leak-check tests pass on CPU; no GPU or whole-workflow performance claim. |
 | [ESSOS #71](https://github.com/uwplasma/ESSOS/pull/71) | Draft for manual review: an analytic circular-loop oracle checks complete on-axis Cartesian tensors through order three and two selected field-value current/radius JVPs. All six field tests pass; this finds no defect in that scope and does not qualify off-axis fields or all parameter derivatives. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
@@ -177,8 +177,30 @@ convergence. Analytic divergence at roundoff is likewise a representation
 identity. The [record](vmex-cpu.json) and [numeric arrays](data/native-force.npz)
 retain the points, weights, fields, force and stencil results. Their force
 algebra and weighted norm were independently recomputed. The run completed
-in 71.1 s on one CPU core. A source-to-result runner remains under review;
-common-target radial and angular refinement are the next scientific gates.
+in 71.1 s on one CPU core. The portable [force diagnostic](diagnose-force.py)
+reproduced all 17 arrays bitwise in 65.73 s before final guard-only edits;
+those added checks passed separately without another solve. Its record
+distinguishes the executed and published script hashes;
+common-target radial and angular refinement are the next scientific gates. The largest of
+the five sampled radial-band force norms occurs at `s=0.137528`
+(`2.6527344e7 N/m^3`); retain these per-radius metrics under refinement
+rather than relying on the aggregate norm alone.
+
+To reproduce the force screen, set `VMEX_SOURCE` to a clean checkout of the
+pinned main revision, create `results`, and run from the HINT handoff branch:
+
+```sh
+JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  MKL_NUM_THREADS=1 python handoff/hint-qa/diagnose-force.py \
+  --source-root "$VMEX_SOURCE" \
+  --input examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap \
+  --expected-head 45f3a7aeaeedd50ee7a04d553bc0d281bb8510a4 \
+  --expected-tree d070d6401240f993c72612103d7bd6b4acd03226 \
+  --output results/native-force.json --samples-output results/native-force.npz
+```
+
+The command requires `GAMMA=0`, enables x64, checks source placement and refuses
+existing outputs. Apply external time/memory limits on shared machines.
 
 The portable [capture command](capture-vmex.py) takes explicit paths and records
 source/dependency/input identities. Use the exact tested source revision above
@@ -197,6 +219,15 @@ Use a process-group time/memory limit on shared machines. A paired GPU run must
 retain the CPU backend for callbacks and record actual placement; neither a
 GPU environment nor a CPU pass establishes GPU parity. All backend tolerances
 are separate from the physical accuracy and finite-difference gates.
+
+The first actual CUDA capture used the original public driver and reached a
+GPU process, but exited at the first target materialization: callback
+refinement combined a GPU state with CPU parameters. No numerical archive
+was written. This is a software placement failure, not failed physics or a
+CPU/GPU parity result. The capture command now accepts `--device gpu` for
+VMEX's supported explicit placement; omitting it preserves the measured CPU
+workflow. A guarded explicit-device retry is pending. The automatic callback
+placement defect remains a separate source-review item.
 
 Source review of HINT's linear drive finds no normalization defect explaining
 the observed deficit: its cut-zero imposed-current integral is constructed
