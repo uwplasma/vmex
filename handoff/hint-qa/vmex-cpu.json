@@ -797,7 +797,7 @@
     },
     "portable_runner_validation": {
       "script": "diagnose-force.py",
-      "published_script_sha256": "ee09d06869a05480f60a1e8f479cf893250ec7281d229e97724ee7561e6a0e56",
+      "published_script_sha256": "5c942c2a4869eed90ef1c12a863f47cf142e151e96e5391f04d7e5d0e535a624",
       "checks": [
         "syntax",
         "help",
@@ -3106,6 +3106,211 @@
         },
         "artifacts_publicly_hosted": false
       }
+    },
+    "mpol8_public_replay48_to64": {
+      "angular_48_to_64_percent_change": {
+        "global": {
+          "absolute_l2_N_m3": 1.0907086567257807e-06,
+          "magnetic_normalized_l2": 1.0914479986467995e-06,
+          "mean_force_over_mean_grad_p": -0.042696491242733,
+          "mean_force_over_mean_magnetic_pressure_gradient": -0.04269652111581479,
+          "pointwise_normalized_l2": -0.057406653148195375,
+          "volume_average_force_N_m3": -0.04269652185485695
+        },
+        "per_s": {
+          "absolute_l2_N_m3": [
+            -3.501532397365281e-10,
+            -2.6462165791940606e-10,
+            -1.4430702188761302e-07,
+            1.200538357615244e-06,
+            2.053335124152511e-06
+          ],
+          "magnetic_normalized_l2": [
+            -3.4693359296511517e-10,
+            -2.4449331448295197e-10,
+            -1.4430330264048052e-07,
+            1.2009347294394956e-06,
+            2.058656800585368e-06
+          ],
+          "mean_force_over_mean_grad_p": [
+            -0.24418625171420683,
+            -0.03261765100610603,
+            0.10070479053227999,
+            -0.17535522133745873,
+            0.03331428973745165
+          ],
+          "mean_force_over_mean_magnetic_pressure_gradient": [
+            -0.2441862535201511,
+            -0.032617647185351206,
+            0.10070478859633969,
+            -0.17535531580747943,
+            0.03331429631967531
+          ],
+          "pointwise_normalized_l2": [
+            0.03651267991089391,
+            -0.2822323847240682,
+            -0.04263978690308701,
+            0.15050717572244743,
+            -0.10530702960882543
+          ],
+          "volume_average_force_N_m3": [
+            -0.24418625352338186,
+            -0.032617647205457345,
+            0.10070478859263154,
+            -0.17535531620316291,
+            0.03331429099620031
+          ]
+        }
+      },
+      "final_driver_delta": "default solve timing boundary only; replay numerical path unchanged",
+      "limitations": [
+        "angular sufficiency is assessed only for this retained native state and five flux-coordinate surfaces",
+        "the 32-to-48 comparison failed the same full gate and remains failed",
+        "root FSQ values and iteration count are retained checkpoint metadata, not freshly evaluated residuals",
+        "the paired WOUT supplies the public state type; physical WOUT diagnostics are rebuilt from the exact input and six-array state"
+      ],
+      "prospective_gates": {
+        "all_bin_force_l2_le_0p5_percent": true,
+        "all_global_and_bin_means_ratios_le_1_percent": true,
+        "global_force_l2_le_0p1_percent": true
+      },
+      "replay_48": {
+        "all_arrays_bitwise_equal_to_solve": true,
+        "array_count": 17,
+        "max_array_abs_difference": 0.0,
+        "max_rss_bytes": 2244734976,
+        "root_fsq_provenance": "retained_from_state_checkpoint",
+        "samples_sha256": "3991072adbfeae1d5bc93393071f0e113e39079dc06c786b8bb3effaa2c65781",
+        "total_seconds": 51.776512204669416
+      },
+      "replay_64": {
+        "all_arrays_bitwise_equal_to_prototype_replay": true,
+        "array_count": 17,
+        "max_array_abs_difference": 0.0,
+        "max_rss_bytes": 2246258688,
+        "root_fsq_provenance": "retained_from_state_checkpoint",
+        "samples_sha256": "846189f1f4b409e2ad56c9cdf0634f8e551d79e14a9fab9eb8ddaef856f485f2",
+        "total_seconds": 54.6520137200132
+      },
+      "scope": "fixed-native-state angular measurement replay; observational, not an equilibrium or continuum certificate",
+      "source": {
+        "executed_driver_sha256": "8a530b2e7d9e6e852e63cdf1a5bd445052ceb567e6bd316752bbac4a9e2ff3a2",
+        "final_driver_sha256": "5c942c2a4869eed90ef1c12a863f47cf142e151e96e5391f04d7e5d0e535a624",
+        "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+        "input_sha256": "0909431b7d91e755035d028b2a3200c74e50264ff4c28444dfcc7514d6078a13",
+        "native_state_sha256": "e8e01ae295adba35f2f2437bf3cf09c4f970c884f03835767ea749580b97052d",
+        "state_archive_sha256": "0e9d1fbc9c611b4ee815c107788d9e22aa4a9f819697261f69f07b0236d8f777",
+        "template_wout_sha256": "c4f117ce02de44a25c03d8b586457474d1933588b5a34be20bad4f8f364ada6f",
+        "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+      },
+      "stage1_64": {
+        "B_rms_T": 5.861901998957474,
+        "absolute_l2_N_m3": 424642.1987401438,
+        "divB_max_abs_T_m": 1.1466383398328617e-12,
+        "divB_rms_T_m": 2.1023025365155887e-13,
+        "magnetic_normalized_l2": 0.01581815663857477,
+        "mean_force_over_mean_grad_p": 0.18720574100629275,
+        "mean_force_over_mean_magnetic_pressure_gradient": 0.011040193847633537,
+        "minimum_signed_coordinate_jacobian_m3": 0.009298808974589004,
+        "nestedness_margin": 0.610407182654266,
+        "pointwise_normalized_l2": 0.31238287080742616,
+        "sampled_window_full_torus_volume_m3": 0.46911859980565496,
+        "volume_average_force_N_m3": 296376.64470611274
+      },
+      "radial_bins_64": [
+        {
+          "B_rms_T": 5.837273567554951,
+          "absolute_l2_N_m3": 229646.42152639834,
+          "divB_max_abs_T_m": 4.445332990599127e-13,
+          "divB_rms_T_m": 1.1422272190329577e-13,
+          "full_torus_dV_ds_m3": 0.5901292793748142,
+          "full_torus_window_volume_contribution_m3": 0.05592699677709136,
+          "magnetic_normalized_l2": 0.008702696185099357,
+          "mean_force_over_mean_grad_p": 0.24091471377752,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.007246215419687707,
+          "minimum_signed_coordinate_jacobian_m3": 0.01149142035090327,
+          "nestedness_margin": 0.7584229021078487,
+          "pointwise_normalized_l2": 0.325273615821739,
+          "radial_index": 0,
+          "s": 0.1375280616245344,
+          "volume_average_force_N_m3": 191212.86154857214
+        },
+        {
+          "B_rms_T": 5.846949960142107,
+          "absolute_l2_N_m3": 264337.51094865927,
+          "divB_max_abs_T_m": 8.784084570834239e-13,
+          "divB_rms_T_m": 2.0818436763233606e-13,
+          "full_torus_dV_ds_m3": 0.588648327175904,
+          "full_torus_window_volume_contribution_m3": 0.11269758649115158,
+          "magnetic_normalized_l2": 0.009948706262327727,
+          "mean_force_over_mean_grad_p": 0.18198956197025906,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.00797692792502218,
+          "minimum_signed_coordinate_jacobian_m3": 0.010846911844758483,
+          "nestedness_margin": 0.7137556026671246,
+          "pointwise_normalized_l2": 0.2846380784124782,
+          "radial_index": 1,
+          "s": 0.28461227595772676,
+          "volume_average_force_N_m3": 211947.28411087504
+        },
+        {
+          "B_rms_T": 5.8612260227159405,
+          "absolute_l2_N_m3": 350885.08035852236,
+          "divB_max_abs_T_m": 8.917311333789257e-13,
+          "divB_rms_T_m": 2.1950239608989384e-13,
+          "full_torus_dV_ds_m3": 0.5865079036864473,
+          "full_torus_window_volume_contribution_m3": 0.13346313186109376,
+          "magnetic_normalized_l2": 0.013074483991069098,
+          "mean_force_over_mean_grad_p": 0.15121842710750266,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.009588602278644184,
+          "minimum_signed_coordinate_jacobian_m3": 0.01018529955408398,
+          "nestedness_margin": 0.6681070295519769,
+          "pointwise_normalized_l2": 0.2748107056173312,
+          "radial_index": 2,
+          "s": 0.5,
+          "volume_average_force_N_m3": 257333.09883328414
+        },
+        {
+          "B_rms_T": 5.877449501239706,
+          "absolute_l2_N_m3": 492075.2270820935,
+          "divB_max_abs_T_m": 9.769962616701378e-13,
+          "divB_rms_T_m": 2.1444454449533834e-13,
+          "full_torus_dV_ds_m3": 0.5840605978740124,
+          "full_torus_window_volume_contribution_m3": 0.11181925898060144,
+          "magnetic_normalized_l2": 0.018143954304329933,
+          "mean_force_over_mean_grad_p": 0.16583648525141392,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.013147772964575973,
+          "minimum_signed_coordinate_jacobian_m3": 0.009681418118107342,
+          "nestedness_margin": 0.6339004335014017,
+          "pointwise_normalized_l2": 0.28671649350392225,
+          "radial_index": 3,
+          "s": 0.7153877240422732,
+          "volume_average_force_N_m3": 356575.70883672155
+        },
+        {
+          "B_rms_T": 5.887327133474514,
+          "absolute_l2_N_m3": 740320.6897562067,
+          "divB_max_abs_T_m": 1.1466383398328617e-12,
+          "divB_rms_T_m": 2.534583149128588e-13,
+          "full_torus_dV_ds_m3": 0.5825808422144968,
+          "full_torus_window_volume_contribution_m3": 0.05521162569571681,
+          "magnetic_normalized_l2": 0.027086795122459085,
+          "mean_force_over_mean_grad_p": 0.3039021035091534,
+          "mean_force_over_mean_magnetic_pressure_gradient": 0.02003918320066418,
+          "minimum_signed_coordinate_jacobian_m3": 0.009298808974589004,
+          "nestedness_margin": 0.6083244465926434,
+          "pointwise_normalized_l2": 0.4555661336614868,
+          "radial_index": 4,
+          "s": 0.8624719383754655,
+          "volume_average_force_N_m3": 547699.4181923673
+        }
+      ],
+      "negative_checks": [
+        "wrong input hash rejected",
+        "wrong state hash rejected",
+        "nonfinite coefficients rejected",
+        "invalid array rank rejected",
+        "altered same-resolution template scalars do not affect rebuilt diagnostics"
+      ]
     }
   },
   "gpu_automatic_placement_attempt": {

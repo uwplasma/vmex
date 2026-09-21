@@ -1354,5 +1354,87 @@
       "cartesian_rotated_rms_delta_T": 0.0020259072301351106,
       "response_difference_max_roundoff_T": 1.6940658945086007e-21
     }
+  },
+  "endpoint_support_audit": {
+    "scope": "Read-only target pressure/wall support audit; no simulation.",
+    "inputs": {
+      "driven_snapshot": "bdeb79b205adf39ffd603b9a848c706c6ede061ff34b87e45ef7df442737cabf",
+      "drive_off_snapshot": "5857d94b17f4c4cfe8f8578fcdfbfb39d3dacab16eeb760dba21a60b5fa3bf67",
+      "native_samples": "56eb9f4bdea84a792449477ffa301934130ddc3326190cff1d2040d21c4c20fe",
+      "limiter": "0f4d81fc679eb674d76619b55bffdd73843d39e283a6d9d7aaf388e7d3a5c8d1",
+      "targets": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5"
+    },
+    "native_conventions": {
+      "interpolator": "MAGVAL spline_mod:spl3df fourth-order 8x8x8 tensor formula",
+      "stencil_indices": "For each dimension, base=int((x-min)/h), then base-2 through base+5; upper-end base clamp follows spl3df.",
+      "phi": "mgval1 folding into [0,2*pi/mtor), followed by MAGVAL periodic ghost-plane mapping",
+      "pressure_positive": "stored native pressure > 0.0, matching HINT pressure-mask comparisons",
+      "limiter_inside": "stored limiter > 0.0, matching HINT read_limiter",
+      "active_weight": "abs(tensor coefficient) > 1.0e-12",
+      "rz_ghost_planes_used": false
+    },
+    "validation": {
+      "reconstructed_native_field_max_vector_error_T": 1.5263043145882805e-14,
+      "reconstructed_native_field_rms_vector_error_T": 4.5102814928569735e-15,
+      "pressure_arrays_driven_drive_off_bitwise_equal": true,
+      "minimum_positive_pressure": 0.000209491782787658,
+      "maximum_pressure": 0.17040731583375143,
+      "limiter_unique_values": [
+        0.0,
+        1.0
+      ]
+    },
+    "all_targets": {
+      "count": 192,
+      "pressure_zero_full_stencil_targets": 5,
+      "pressure_zero_active_stencil_targets": 7,
+      "wall_full_stencil_inside_targets": 14,
+      "wall_full_active_stencil_inside_targets": 24,
+      "negative_interpolated_pressure_targets": 53,
+      "nearest_limiter_node_inside_targets": 192,
+      "enclosing_eight_corner_cell_inside_targets": 188
+    },
+    "offset_blocks": [
+      {
+        "offset_block": 0,
+        "offset_over_Aminor": 0.05,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 0,
+        "pressure_zero_active_stencil_targets": 0,
+        "wall_full_stencil_inside_targets": 7,
+        "wall_full_active_stencil_inside_targets": 14
+      },
+      {
+        "offset_block": 1,
+        "offset_over_Aminor": 0.15,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 0,
+        "pressure_zero_active_stencil_targets": 0,
+        "wall_full_stencil_inside_targets": 5,
+        "wall_full_active_stencil_inside_targets": 6
+      },
+      {
+        "offset_block": 2,
+        "offset_over_Aminor": 0.3,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 1,
+        "pressure_zero_active_stencil_targets": 2,
+        "wall_full_stencil_inside_targets": 2,
+        "wall_full_active_stencil_inside_targets": 4
+      },
+      {
+        "offset_block": 3,
+        "offset_over_Aminor": 0.5,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 4,
+        "pressure_zero_active_stencil_targets": 5,
+        "wall_full_stencil_inside_targets": 0,
+        "wall_full_active_stencil_inside_targets": 0
+      }
+    ],
+    "limitation": "Pressure support is not relaxed current support. The source-current ss mask was not retained; vacuum flux is an initial map and is not a substitute.",
+    "samples": "data/endpoint-support.npz",
+    "samples_sha256": "2ba0fa630b595f67e788b3d24cd4cd5823bf4c6090346214eec54a9f099a30e3",
+    "interpretation": "Stencil occupancy is not pointwise plasma membership. Positive pressure is not the imposed-current or attained-current support. Negative interpolated pressure can be high-order ringing."
   }
 }

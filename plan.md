@@ -66,6 +66,10 @@ Execute three independent bounded lanes now:
    Native endpoint sampling at 192 common targets now measures driven/off
    differences of 2.02591 mT RMS and 5.13595 mT maximum. Classify targets
    against relaxed support next; this control sensitivity is not inter-code error.
+   The native 8x8x8 stencil audit now finds only 5/192 pressure-clear stencils
+   and 14/192 wholly inside the limiter. This is not pointwise membership.
+   Retain the actual ss<jcuts mask at a native endpoint before admitting targets
+   as exterior to source-current support; vacuum flux is not a substitute.
 3. Complete the reproducible preprocessing and raw-data package. The published
    compact native samples reproduce all six field metrics, but do not recreate
    an equilibrium without the missing prepared fields and restart assets.
@@ -74,9 +78,19 @@ M8/N6 measurement32-to48 now reproduces the exact state and passes global/per-bi
 force-L2 limits (+0.00921% globally, at most 0.02630% per bin). The full gate
 fails: one mean-force ratio changes 1.36978%, and the outer pointwise-normalized
 metric changes 1.01106%, exceeding 1%. Exact native coefficients were saved and
-hash-verified. Qualify their public replay and refine measurement before M9/N6
-and M8/N7 sensitivity; do not relax the prospective gate. #422 contributes
-only tests on #421, and #421's handoff now reflects that reconciliation.
+hash-verified. Full public replay now reproduces all 17 angular48 arrays exactly.
+The angular48-to64 follow-up passes all prospective gates (largest bin mean/
+ratio change 0.2442%, pointwise-normalized change 0.2823%). Retain the earlier
+failed refinement. Proceed to separate M9/N6 and M8/N7 sensitivities with saved
+states; measurement sufficiency does not certify Fourier/radial convergence.
+#422 is merged into #421 as e94e46c6 after independent review and 11 explicitly
+JIT-enabled two-CPU cases. The parent remains open; no main promotion follows.
+Preserve the merged #422 branch while the new exact-state certificate candidate
+#423 depends on it. Follow-up 02bf33d9 already handles boundary-transform
+roundoff and public-measurement device placement; retire the duplicate local
+correction and qualify the integrated stack instead. Main 45f3a7ae is already
+an ancestor of this branch; no rebase or history rewrite is needed at this
+checkpoint. Latest main CI runs were cancelled, not an integrated green gate.
 The latest #413 plan records failed independent-root/fine-grid QI gates and an
 unqualified finite-beta optimization derivative. These remain separate product
 research, not prerequisites to the forward HINT field comparison.

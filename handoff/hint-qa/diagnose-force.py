@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import importlib.metadata
 import json
@@ -32,6 +33,8 @@ def arguments():
     p.add_argument("--expected-state", type=sha256_value)
     p.add_argument("--angular-count", type=angular_count, default=16)
     p.add_argument("--state-output", type=Path)
+    p.add_argument("--state-input", type=Path)
+    p.add_argument("--template-wout", type=Path)
     return p.parse_args()
 
 
@@ -64,6 +67,82 @@ def write_state_checkpoint(path, state, metadata):
     return sha(path)
 
 
+def state_digest(state, jax):
+    digest = hashlib.sha256()
+    for leaf in jax.tree.leaves(state):
+        digest.update(np.ascontiguousarray(leaf, dtype=np.float64).tobytes())
+    return digest.hexdigest()
+
+
+def read_state_checkpoint(path, template_path, *, inp, input_sha256,
+                          head, tree, vj, jax):
+    with np.load(path, allow_pickle=False) as archive:
+        required = set(STATE_FIELDS) | {"metadata_json"}
+        if not required.issubset(archive.files):
+            raise ValueError("state checkpoint is missing required fields")
+        metadata_value = archive["metadata_json"]
+        if metadata_value.shape != ():
+            raise ValueError("state checkpoint metadata is not scalar")
+        metadata = json.loads(metadata_value.item())
+        if metadata.get("format_version") != 1:
+            raise ValueError("unsupported state checkpoint format")
+        if metadata.get("field_order") != list(STATE_FIELDS):
+            raise ValueError("state checkpoint field order does not match")
+        source = metadata.get("source", {})
+        if (source.get("head"), source.get("tree")) != (head, tree):
+            raise RuntimeError("state checkpoint source identity does not match")
+        if source.get("input_sha256") != input_sha256:
+            raise RuntimeError("state checkpoint input identity does not match")
+        arrays = {name:np.asarray(archive[name], dtype=np.float64)
+                  for name in STATE_FIELDS}
+    if any(value.ndim != 2 or not np.isfinite(value).all()
+           for value in arrays.values()):
+        raise ValueError("native state arrays must be finite matrices")
+
+    template_wout = vj.read_wout(template_path)
+    resolution = metadata.get("resolution", {})
+    expected_resolution = {
+        "ns":int(template_wout.ns), "mpol":int(template_wout.mpol),
+        "ntor":int(template_wout.ntor), "nfp":int(template_wout.nfp),
+        "ntheta":int(inp.ntheta), "nzeta":int(inp.nzeta)}
+    input_resolution = (int(inp.mpol), int(inp.ntor), int(inp.nfp), bool(inp.lasym))
+    template_resolution = (int(template_wout.mpol), int(template_wout.ntor),
+                           int(template_wout.nfp), bool(template_wout.lasym))
+    if (resolution != expected_resolution
+            or template_resolution != input_resolution):
+        raise RuntimeError("checkpoint and template resolution do not match the input")
+    constraint = metadata.get("constraint", {})
+    mode = "prescribed_current" if int(inp.ncurr) == 1 else "prescribed_iota"
+    if constraint != {"ncurr":int(inp.ncurr), "mode":mode}:
+        raise RuntimeError("checkpoint constraint metadata does not match the input")
+    template = vj.state_from_wout(template_wout, inp=inp, ns=resolution["ns"])
+    if any(np.shape(getattr(template, name)) != arrays[name].shape
+           for name in STATE_FIELDS):
+        raise RuntimeError("checkpoint arrays do not match the template shape")
+    state = replace(template, **arrays)
+    recorded_digest = metadata.get("native_state_sha256")
+    if not isinstance(recorded_digest, str) or state_digest(state, jax) != recorded_digest:
+        raise RuntimeError("checkpoint native state hash does not match")
+    solve = metadata.get("solve", {})
+    if not isinstance(solve, dict) or type(solve.get("converged")) is not bool:
+        raise ValueError("state checkpoint solve metadata is invalid")
+    try:
+        fsqr, fsqz, fsql = (float(solve[name])
+                            for name in ("fsqr", "fsqz", "fsql"))
+        iterations = int(solve["iterations"])
+        converged = solve["converged"]
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("state checkpoint solve metadata is invalid") from error
+    if not np.isfinite((fsqr, fsqz, fsql)).all() or iterations < 0:
+        raise ValueError("state checkpoint solve metadata is invalid")
+    # Rebuild every diagnostic quantity from the retained deck and native
+    # state.  The paired WOUT supplies only the public SpectralState type.
+    wout = vj.wout_from_state(
+        inp=inp, state=state, fsqr=fsqr, fsqz=fsqz, fsql=fsql,
+        niter=iterations, converged=converged)
+    return state, wout, metadata
+
+
 def git(root, *args):
     return subprocess.check_output(
         ["git", "-C", str(root), *args], text=True,
@@ -88,6 +167,8 @@ def require_finite(value, label="result"):
 
 def main():
     a = arguments()
+    if (a.state_input is None) != (a.template_wout is None):
+        raise ValueError("--state-input and --template-wout must be provided together")
     root = a.source_root.resolve()
     inp_path = a.input if a.input.is_absolute() else root / a.input
     outputs = (a.output.resolve(), a.samples_output.resolve())
@@ -99,6 +180,9 @@ def main():
         raise FileNotFoundError("output parent directory does not exist")
     if any(p.exists() for p in outputs):
         raise FileExistsError("output already exists")
+    if a.state_input is not None:
+        if not a.state_input.is_file() or not a.template_wout.is_file():
+            raise FileNotFoundError("state checkpoint and template WOUT are required")
     if git(root, "status", "--porcelain"):
         raise RuntimeError("source checkout is not clean")
     head, tree = git(root, "rev-parse", "HEAD"), git(root, "rev-parse", "HEAD^{tree}")
@@ -129,16 +213,46 @@ def main():
     if ncurr not in (0, 1):
         raise ValueError("NCURR must be 0 (prescribed iota) or 1 (prescribed current)")
     constraint_mode = "prescribed_current" if ncurr == 1 else "prescribed_iota"
-    eq = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
-    jax.block_until_ready(eq.solution.R_cos)
-    solve_seconds = time.monotonic()-started
+    replay = a.state_input is not None
+    if replay:
+        solution, wout, state_metadata = read_state_checkpoint(
+            a.state_input, a.template_wout, inp=inp,
+            input_sha256=input_sha256, head=head, tree=tree, vj=vj, jax=jax)
+        field = vj.VmecInteriorField.from_state(inp, solution)
+        flux = field.field_in_flux_coordinates()
+        set_points_flux = field.set_points_flux
+        solve_seconds = 0.0
+        solve_metadata = state_metadata["solve"]
+        solve_record = {"converged":bool(solve_metadata["converged"]),
+                        "iterations":int(solve_metadata["iterations"]),
+                        "root_fsq_provenance":"retained_from_state_checkpoint",
+                        "root_fsq":{"fsqr":float(solve_metadata["fsqr"]),
+                                    "fsqz":float(solve_metadata["fsqz"]),
+                                    "fsql":float(solve_metadata["fsql"])}}
+        replay_record = {"state_archive_sha256":sha(a.state_input),
+                         "template_wout_sha256":sha(a.template_wout)}
+    else:
+        eq = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
+        solution = eq.solution
+        jax.block_until_ready(solution.R_cos)
+        solve_seconds = time.monotonic()-started
+        wout = eq.wout
+        field, flux = eq.field, eq.field_in_flux_coordinates()
+        set_points_flux = eq.set_points_flux
+        solve_record = {"converged":bool(eq.result.converged),
+                        "iterations":int(eq.result.iterations),
+                        "root_fsq_provenance":"evaluated_by_solve",
+                        "root_fsq":{"fsqr":float(eq.result.fsqr),
+                                    "fsqz":float(eq.result.fsqz),
+                                    "fsql":float(eq.result.fsql)}}
+        replay_record = None
+    solve_record["root_fsq"].update(
+        sum=sum(solve_record["root_fsq"].values()),
+        max=max(solve_record["root_fsq"].values()))
 
-    state_digest = hashlib.sha256()
-    for leaf in jax.tree.leaves(eq.solution):
-        state_digest.update(np.ascontiguousarray(leaf,dtype=np.float64).tobytes())
-    state_sha256 = state_digest.hexdigest()
+    state_sha256 = state_digest(solution, jax)
     if a.expected_state is not None and state_sha256 != a.expected_state:
-        raise RuntimeError("solved state does not match --expected-state")
+        raise RuntimeError("native state does not match --expected-state")
 
     # q=(s,theta,phi), with physical geometric phi over one field period.
     x, wx = np.polynomial.legendre.leggauss(5)
@@ -146,10 +260,9 @@ def main():
     ws = .4*wx
     n = a.angular_count
     theta = (np.arange(n)+.5)*2*np.pi/n
-    nfp = int(eq.solver_context.resolution.nfp)
+    nfp = int(wout.nfp)
     phi = (np.arange(n)+.375)*2*np.pi/(nfp*n)
 
-    field, flux = eq.field, eq.field_in_flux_coordinates()
     def p_of_s(value):
         return pressure(inp.pmass_type, inp.am, inp.am_aux_s, inp.am_aux_f,
                         value, pres_scale=inp.pres_scale, bloat=inp.bloat,
@@ -165,7 +278,7 @@ def main():
         q_surface = np.stack((np.full_like(tt,sv),tt,pp),axis=-1).reshape(-1,3)
         qj = jnp.asarray(q_surface)
         xyz_surface = map_xyz(qj)
-        eq.set_points_flux(qj)
+        set_points_flux(qj)
         B_surface, gradB_surface = field.B(), field.gradB()
         dx_dq = map_jacobian(qj)
         grad_s = jnp.linalg.inv(dx_dq)[:,0,:]
@@ -257,7 +370,7 @@ def main():
     steps = (1e-3, 5e-4, 2.5e-4)
     levels, saved = [], {}
     for level, ratio in enumerate(steps):
-        h = ratio*float(eq.wout.Aminor_p)
+        h = ratio*float(wout.Aminor_p)
         eye = np.eye(3)
         stencil = np.stack([xs+k*h*eye[j] for j in range(3)
                             for k in (-2.,-1.,1.,2.)], axis=1)
@@ -297,15 +410,9 @@ def main():
                 "native_state_sha256":state_sha256,
                 "driver_sha256":sha(Path(__file__).resolve())},
       "versions":versions,
-      "solve":{"converged":bool(eq.result.converged),
-               "iterations":int(eq.result.iterations),"ns":int(eq.wout.ns),
-               "mpol":int(eq.wout.mpol),"ntor":int(eq.wout.ntor),"nfp":nfp,
-               "ntheta":int(inp.ntheta),"nzeta":int(inp.nzeta),
-               "root_fsq":{"fsqr":float(eq.result.fsqr),
-                           "fsqz":float(eq.result.fsqz),
-                           "fsql":float(eq.result.fsql),
-                           "sum":float(eq.result.fsqr+eq.result.fsqz+eq.result.fsql),
-                           "max":float(max(eq.result.fsqr,eq.result.fsqz,eq.result.fsql))}},
+      "solve":{**solve_record,"ns":int(wout.ns),"mpol":int(wout.mpol),
+               "ntor":int(wout.ntor),"nfp":nfp,
+               "ntheta":int(inp.ntheta),"nzeta":int(inp.nzeta)},
       "coordinates":{"q_order":["normalized_toroidal_flux_s","poloidal_theta_rad","physical_geometric_phi_rad"],
         "s_interval":[.1,.9],"s_nodes":s.tolist(),"s_quadrature":"5-point Gauss-Legendre",
         "theta_count":n,"theta_shift_cells":.5,"phi_count_per_field_period":n,
@@ -325,11 +432,11 @@ def main():
                                          "curtor_A":float(inp.curtor),
                                          "pressure_axis_Pa":float(p_of_s(jnp.asarray(0.0))),
                                          "pressure_edge_Pa":float(p_of_s(jnp.asarray(1.0)))},
-                  "full_mesh_wout":{"phi_edge_Wb":float(eq.wout.phi[-1]),
-                                     "toroidal_current_A":float(eq.wout.ctor),
-                                     "pressure_axis_Pa":float(eq.wout.presf[0]),
-                                     "pressure_edge_Pa":float(eq.wout.presf[-1]),
-                                     "volume_m3":float(eq.wout.volume_p)}},
+                  "full_mesh_wout":{"phi_edge_Wb":float(wout.phi[-1]),
+                                     "toroidal_current_A":float(wout.ctor),
+                                     "pressure_axis_Pa":float(wout.presf[0]),
+                                     "pressure_edge_Pa":float(wout.presf[-1]),
+                                     "volume_m3":float(wout.volume_p)}},
       "stage2":{"method":"fourth-order centered Cartesian differences using the same native B and reconstructed flux-coordinate pressure profile",
                 "subset_count":len(subset),"subset_flat_indices":subset.tolist(),"levels":levels},
       "timing_seconds":{"solve":solve_seconds,"total":time.monotonic()-started},
@@ -346,22 +453,25 @@ def main():
         if np.issubdtype(value.dtype, np.number) and not np.isfinite(value).all():
             raise ValueError(f"sample array {name} contains non-finite values")
     require_finite(result)
+    if replay_record is not None:
+        result["replay"] = replay_record
     if a.state_output is not None:
         state_metadata = {
             "format_version":1,"field_order":list(STATE_FIELDS),
             "source":{"head":head,"tree":tree,"input_sha256":input_sha256,
                       "driver_sha256":sha(Path(__file__).resolve())},
             "native_state_sha256":state_sha256,
-            "resolution":{"ns":int(eq.wout.ns),"mpol":int(eq.wout.mpol),
-                          "ntor":int(eq.wout.ntor),"nfp":nfp,
+            "resolution":{"ns":int(wout.ns),"mpol":int(wout.mpol),
+                          "ntor":int(wout.ntor),"nfp":nfp,
                           "ntheta":int(inp.ntheta),"nzeta":int(inp.nzeta)},
             "constraint":{"ncurr":ncurr,"mode":constraint_mode},
-            "solve":{"converged":bool(eq.result.converged),
-                     "iterations":int(eq.result.iterations),
-                     "fsqr":float(eq.result.fsqr),"fsqz":float(eq.result.fsqz),
-                     "fsql":float(eq.result.fsql)}}
+            "solve":{"converged":solve_record["converged"],
+                     "iterations":solve_record["iterations"],
+                     "fsqr":solve_record["root_fsq"]["fsqr"],
+                     "fsqz":solve_record["root_fsq"]["fsqz"],
+                     "fsql":solve_record["root_fsq"]["fsql"]}}
         result["source"]["state_checkpoint_sha256"] = write_state_checkpoint(
-            outputs[2], eq.solution, state_metadata)
+            outputs[2], solution, state_metadata)
     with outputs[1].open("xb") as stream:
         np.savez_compressed(stream, **arrays)
     result["samples_sha256"] = sha(outputs[1])

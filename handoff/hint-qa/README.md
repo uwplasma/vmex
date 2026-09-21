@@ -25,12 +25,18 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #419](https://github.com/uwplasma/vmex/pull/419) | Draft guarded block-factor reuse benchmark: exact-current residual checks and fallback are demonstrated on its QI case; a full-optimizer accuracy, memory and runtime comparison remains required. This is distinct from the rejected scalar-factor cache. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
 
-Draft [#422](https://github.com/uwplasma/vmex/pull/422), at `e25aa1fd`,
-now contains only complementary placement tests stacked on #421. Retain that
-single test delta in #421 before integration; its earlier duplicate production
-implementation is retired. CPU placement tests do not establish GPU-root
-qualification. Review and refresh required checks in dependency order:
-#416, #417, #418, then the consolidated #421. Forward field diagnostics can
+[#422](https://github.com/uwplasma/vmex/pull/422) is merged into #421 as
+`e94e46c6`, retaining only complementary placement tests. Independent review
+found no blocker; all 11 cases passed on two forced CPU devices, including
+an explicitly JIT-enabled run. The default pytest configuration disables JIT,
+so that older command alone is not JIT evidence. No duplicate production
+implementation remains. The consolidated #421 still needs its integration
+checks/review and GPU-root qualification before main promotion. Review in
+dependency order: #416, #417, #418, then #421/#423. The #423 follow-up
+`02bf33d9` already admits boundary-transform roundoff and aligns public
+measurement inputs; do not duplicate the earlier local correction. Its reported
+71-test CPU suite does not qualify an accelerator root or full optimizer.
+Forward field diagnostics can
 continue on the pinned main independently of derivative-stack promotion.
 
 Current main has raw block Newton/adjoint solves, deterministic free-boundary
@@ -493,8 +499,13 @@ metadata before rebuilding and rejects output directories inside the source
 tree. MKFLX/MKLIM were rebuilt twice in one isolated directory; both produced
 identical binaries and the regenerated preparation arrays/decks stayed exact.
 The preparation runner checks selected-tool coverage, source-set checksums and
-actual binary hashes. This qualifies those preprocessors' recorded source sets;
-the full HINT solver and external library/toolchain identities remain separate.
+actual binary hashes. This qualifies those preprocessors' recorded source sets. A subsequent full
+HINT Release build fingerprints 30 source inputs and passes the four-update
+serial zero-drive fixture in 3.07 s. Magnetic arrays match the earlier fixture
+exactly; maximum pressure/velocity differences are 4.65e-16/1.90e-19 in native
+stored units. The build and smoke hashes are retained in `prepare.json`.
+External library/toolchain closure and production-equilibrium validation remain
+separate.
 Wall generation must pin Shapely/GEOS and the buffer/resampling settings.
 Use explicit inputs, refuse conflicting outputs, and preserve the measured
 current-table/deck contract. Snapshot extraction and deterministic data
@@ -574,6 +585,25 @@ difference. The [compact arrays](data/endpoint-controls.npz) and
 cylindrical components at the same targets, so vector-difference norms are
 rotation invariant. Target exteriority to relaxed current support, masks and
 interpolation/grid convergence remain open.
+
+A code-faithful stencil audit changes the interpretation of those targets.
+MAGVAL uses an 8x8x8 tensor stencil; a literal reconstruction agrees with its
+native field samples within 1.53e-14 T. Only 5/192 stencils have no positive
+pressure nodes, and only 14/192 lie wholly inside the limiter. Every target's
+nearest limiter node is inside, showing why nearest-cell classification would
+miss this overlap. These are stencil properties, not proof that the target
+points themselves lie inside the plasma. Interpolated pressure is negative at
+53 targets because of high-order ringing, so its sign is not a support test.
+The [per-target support counts](data/endpoint-support.npz) use native `P>0`
+and `limiter>0` conventions; the separate 1e-12 weight screen is only a
+sensitivity check. Driven/off pressure arrays match exactly.
+
+No target is certified exterior to imposed-current support: the saved field
+contains neither native `ss` nor `ss<jcuts`. Retain that byte mask, its time,
+threshold and grid identity alongside the next native endpoint before using
+this classification to admit an exterior-field comparison. Do not substitute
+the initial vacuum flux map. Mesh, wall clearance and interpolation order must
+be varied separately; moving targets alone cannot establish convergence.
 
 Recompute the endpoint difference without a native build:
 
@@ -901,11 +931,35 @@ A paired WOUT was generated without a solve using public APIs. Re-reading it
 with `read_wout`/`state_from_wout`, then replacing all six arrays from the NPZ,
 restores the exact state hash and yields a finite native-field probe. WOUT alone
 is not a bitwise native checkpoint. The pair is retained but not publicly
-hosted. Next qualify the complete diagnostic replay, then refine measurement
-on the saved coefficients without another equilibrium solve. Defer the M9/N6 and M8/N7 one-control solves until the
-remaining mean/ratio measurement gate passes; one rung still cannot establish
-Fourier convergence. Historical M8 executions retain their original metadata
-limitations; the repeated exact-state run supplies new evidence separately.
+hosted. The full public replay now passes: at angular48 all 17 diagnostic
+arrays are bitwise identical to the solve-produced archive. It rebuilds WOUT
+scalars from the exact input/state, so unrelated same-resolution template
+physics cannot alter normalization or finite-difference step sizes. Retained
+FSQ/iteration metadata is labeled explicitly; replay does not re-solve or
+freshly certify the nonlinear residual.
+
+The subsequent angular48-to64 check passes all prospective measurement gates:
+global force-L2 change 1.09e-6%, maximum radial-bin force-L2 change 2.06e-6%,
+maximum mean/ratio change 0.2442%, and maximum pointwise-normalized change
+0.2823%. The angular64 force L2 is 424642.199 N/m3. Hardened replays use about
+2.25 GB peak RSS; the exact runtime/source records are in `vmex-cpu.json`.
+The earlier angular32-to48 failure remains part of the record. This qualifies
+measurement at the tested refinements on this state and five radial surfaces,
+not radial/Fourier resolution or continuum equilibrium. Next compare M9/N6 and
+M8/N7 separately, preserving NS121/grid40 and using the qualified measurement
+settings. Save each state and check its own measurement sensitivity if needed.
+
+To replay with the same source/input pins and output arguments as a fresh
+force diagnostic, additionally pass:
+
+```sh
+--state-input dataset/state.npz --template-wout dataset/state.wout.nc \
+  --expected-state NATIVE_STATE_SHA256 --angular-count 64
+```
+
+The `dataset` paths are placeholders for the hash-matched retained pair, not
+download locations. The runner rejects source/input/state identity mismatches,
+wrong shapes and nonfinite arrays, and refuses existing output files.
 
 Keep broader QI objective, factor-reuse and 3-D polishing development off this
 study's critical path. The latest #413/#419 evidence includes failed independent
