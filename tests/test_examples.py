@@ -531,17 +531,34 @@ def test_fixed_free_boundary_comparison(tmp_path):
 
 
 def test_free_boundary_single_stage_examples_show_explicit_optimizer_contract():
-    """The examples expose tuples, scalarization, AD, and SciPy directly."""
+    """The examples expose the solve, AD, and SciPy directly, from a checked seed."""
+    fixed = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
     for name in ("single_stage_free_boundary_optimization.py",
                  "single_stage_free_boundary_optimization_finite_beta.py"):
         text = (EXAMPLES / "optimization" / name).read_text()
-        assert "solve_free_boundary_implicit" in text
-        assert "residuals_from_tuples" in text
+        assert "solve_free_boundary_implicit_status" in text
         assert "jax.value_and_grad" in text
         assert "FunctionProblem.from_functions" in text
         assert "minimize(free_problem.value_and_grad" in text
         assert "pack_boundary" not in text
         assert "mgrid file" in text
+        # Coils fitted to the fixed-boundary seed, then checked by a free solve,
+        # rather than assumed to confine it.
+        assert "coil_fit = minimize(" in text and "toroidal_flux" in text
+        assert "do not hold a converged free boundary" in text
+        # The same problem as the fixed-boundary example, value for value.
+        for name_ in ("NFP", "SEED_MINOR_RADIUS", "SEED_ELLIPSE", "IOTA_FLOOR", "ASPECT_LIMIT",
+                      "COIL_SURFACE_DISTANCE_LIMIT", "COIL_DISTANCE_LIMIT", "CURVATURE_LIMIT",
+                      "IOTA_CONSTRAINT", "ASPECT_CONSTRAINT", "NORMAL_FIELD_CONSTRAINT",
+                      "CURVATURE_OBJECTIVE_LIMIT", "COIL_DISTANCE_CONSTRAINT",
+                      "COIL_SURFACE_DISTANCE_CONSTRAINT", "N_COILS", "COIL_ORDER",
+                      "COIL_MAJOR_RADIUS", "COIL_MINOR_RADIUS", "COIL_CURRENT", "N_SEGMENTS",
+                      "LENGTH_TARGET", "LENGTH_WEIGHT", "CURVATURE_WEIGHT",
+                      "COIL_DISTANCE_WEIGHT", "COIL_SURFACE_DISTANCE_WEIGHT",
+                      "CONSTRAINT_WEIGHT", "PARAMETER_BOUND", "COIL_FIT_MAXITER"):
+            line = re.search(rf"^{name_} = .*$", fixed, re.M)
+            assert line is not None and re.search(
+                rf"^{re.escape(line.group(0))}", text, re.M), (name, name_)
 
 
 def test_global_optimization_example_exposes_optimizer_contract():
@@ -660,8 +677,9 @@ def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
         tmp_path, timeout=600)
-    assert "no boundary dofs or mgrid file" in out
-    assert re.search(r"\[final\] QA = ([0-9.eE+-]+)", out)
+    assert "no boundary variables and no mgrid file" in out
+    assert re.search(r"\[seed\] QA total = [0-9.eE+-]+, .*free boundary within", out)
+    assert re.search(r"\[final\] QA total = ([0-9.eE+-]+)", out)
     # Smoke mode exits 0 even when a target is missed, so the report must say so.
     assert re.search(r"Minimum \|iota\| = [0-9.]+ \(target >= [0-9.]+\)", out)
     summary = json.loads(
@@ -675,18 +693,23 @@ def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
 
 
 @pytest.mark.full
-@pytest.mark.weekly  # same derivative plus finite-beta/Redl graph (~2.5 min cold)
+@pytest.mark.weekly  # the same derivative at 0.5% beta
 def test_finite_beta_free_boundary_single_stage_optimization(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(
         EXAMPLES / "optimization" /
         "single_stage_free_boundary_optimization_finite_beta.py",
         tmp_path, timeout=900)
-    assert "True finite-beta NESTOR + ESSOS" in out
-    assert re.search(r"f_boot = ([0-9.eE+-]+), beta = ([0-9.]+)%", out)
+    assert "True NESTOR free boundary + ESSOS at beta 0.50%" in out
+    assert re.search(r"\[final\] QA total = [0-9.eE+-]+, beta = ([0-9.eE+-]+)", out)
+    assert re.search(r"Volume-average beta = [0-9.]+% \(target 0.50%", out)
+    summary = json.loads((tmp_path / (
+        "single_stage_free_boundary_optimization_finite_beta_summary.json")).read_text())
+    assert summary["met"] == (not summary["unmet"])
+    assert summary["met"] or "did NOT meet its stated targets" in out
     for name in ("wout_single_stage_free_boundary_finite_beta_optimized.nc",
                  "single_stage_free_boundary_finite_beta_optimization.png",
-                 "single_stage_free_boundary_finite_beta_bootstrap_current.png"):
+                 "single_stage_free_boundary_finite_beta_objectives.png"):
         assert (tmp_path / name).stat().st_size > 0
 
 
@@ -1112,7 +1135,7 @@ def test_fixed_boundary_single_stage_optimization(tmp_path):
     assert b'Name="B_dot_n_over_B"' in surface_vtk
 
 
-@pytest.mark.full  # nightly: one finite-beta VMEX + VCJ + ESSOS graph (~1 min)
+@pytest.mark.full  # nightly: one finite-beta VMEX + VCJ + ESSOS graph
 def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch):
     pytest.importorskip("essos")
     pytest.importorskip("virtual_casing_jax")
@@ -1121,12 +1144,16 @@ def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch):
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
         tmp_path, timeout=1800)
-    for diagnostic in ("[final] QA", "B.n/B RMS", "Normalized total-pressure jump RMS",
-                       "Coil lengths", "Maximum curvature"):
+    for diagnostic in ("[final] QA total", "(B_coils + B_plasma).n/B: area-weighted RMS",
+                       "Volume-average beta = ", "Coil lengths", "Maximum curvature",
+                       "Minimum |iota| = ", "Aspect ratio = "):
         assert diagnostic in out
+    summary = json.loads(
+        (tmp_path / "single_stage_optimization_finite_beta_summary.json").read_text())
+    assert summary["met"] == (not summary["unmet"])
+    assert summary["met"] or "did NOT meet its stated targets" in out
     for name in ("wout_single_stage_finite_beta_optimized.nc",
                  "single_stage_finite_beta_objectives.png",
-                 "single_stage_finite_beta_bootstrap_current.png",
                  "surface_single_stage_finite_beta_initial.vts",
                  "coils_single_stage_finite_beta_initial.vtu",
                  "surface_single_stage_finite_beta_optimized.vts",
@@ -1191,7 +1218,7 @@ def test_single_stage_examples_use_general_surface_output_and_movie_colors() -> 
     vacuum = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
     finite = (EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py").read_text()
     assert "from pyevtk" not in finite
-    assert "surface_initial.to_vtk" in finite and "extra_data=" in finite
+    assert "surface_initial.to_vtk" in finite
     for source in (vacuum, finite):
         assert "MOVIE_SURFACE_COLOR" in source and "surface_color=" in source
 
@@ -1204,6 +1231,9 @@ def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
     squares = (EXAMPLES / "optimization"
                / "single_stage_optimization_least_squares.py").read_text()
     free = (EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py").read_text()
+    finite = (EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py").read_text()
+    free_finite = (EXAMPLES / "optimization"
+                   / "single_stage_free_boundary_optimization_finite_beta.py").read_text()
     assert "def hinge(" in fixed and 'method="L-BFGS-B"' in fixed
     assert "def augmented_lagrangian(" in auglag and 'method="L-BFGS-B"' in auglag
     for constraint in ("IOTA_CONSTRAINT", "ASPECT_CONSTRAINT", "NORMAL_FIELD_CONSTRAINT"):
@@ -1217,7 +1247,13 @@ def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
     assert "residual_and_jac" in squares and "least_squares(" in squares
     # The free-boundary pullback is host-eager; everything after the solve is jitted.
     assert "@jax.jit\ndef accepted_terms(" in free
-    for source in (fixed, auglag, squares, free):
+    # Finite beta at 0.5% with a simple pressure and no current; no bootstrap.
+    for source in (finite, free_finite):
+        assert "TARGET_BETA = 0.005" in source and "PRESSURE_PROFILE = [1.0, -1.0]" in source
+        assert "ncurr=1, curtor=0.0, ac=np.zeros(21)" in source
+        for bootstrap in ("vmex.core.bootstrap", "RedlBootstrapMismatch", "KineticProfiles"):
+            assert bootstrap not in source
+    for source in (fixed, auglag, squares, free, finite, free_finite):
         assert "did NOT meet its stated targets" in source
         assert "if unmet and not ci_smoke:\n    raise SystemExit(1)" in source
         assert "_summary.json" in source

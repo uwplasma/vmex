@@ -85,8 +85,9 @@ COIL_DISTANCE_CONSTRAINT = 0.19
 COIL_SURFACE_DISTANCE_CONSTRAINT = 0.21
 
 # Coils: number of unique shapes, Fourier order, and the circle they start on.
-# Clearance, not taste: at aspect 4 with iota 0.43 the cross-section reaches
-# about 0.44 m from the axis, so radius 0.5 could not hold 0.20 m of clearance.
+# Clearance, not taste: the optimized cross-section of single_stage_optimization.py
+# reaches 0.47 m from the circle R = 1, so radius 0.5 could not hold 0.20 m of
+# clearance.
 N_COILS = 3
 COIL_ORDER = 5
 COIL_MAJOR_RADIUS = 1.0
@@ -106,15 +107,16 @@ COIL_DISTANCE_WEIGHT = 1.0e4
 COIL_SURFACE_DISTANCE_WEIGHT = 1.0e4
 CONSTRAINT_WEIGHT = 1.0e3
 
-# Bound on each scaled variable. These are part of the problem: they keep a
-# trial boundary inside the range the seed solve converges on, and at the
-# solution 3 of the 99 coil dofs sit exactly on them. L-BFGS-B rather than
-# BFGS for that reason -- BFGS cannot represent a bound.
+# Bound on each scaled variable. They keep a trial boundary inside the range
+# the seed solve converges on; L-BFGS-B rather than BFGS because BFGS cannot
+# represent a bound.
 PARAMETER_BOUND = 3.0
 
-# Budgets. One trial is one equilibrium solve plus one adjoint.
-MAXITER = 200
-MAX_TRIALS = 300
+# Budgets. One trial is one equilibrium solve plus one adjoint. Every target
+# is met from iteration 32 on (63 trials); 40 iterations leave a margin, and
+# the trial cap is there only to stop a run whose line searches go astray.
+MAXITER = 40
+MAX_TRIALS = 100
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil objective uses. A toroidal count commensurate with the
@@ -297,7 +299,7 @@ def coil_fit_value_and_grad(u):
 
 
 # Fit the coils to the frozen seed boundary first, with the boundary pinned by
-# equal bounds. Circular coils leave B.n/B near 11% RMS; this costs no
+# equal bounds. Circular coils leave B.n/B near 20% RMS; this costs no
 # equilibrium solve and keeps the normal-field term from dominating the joint
 # solve that follows.
 coil_fit = minimize(
