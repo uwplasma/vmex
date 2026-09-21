@@ -461,6 +461,14 @@ def test_force_balance_polishing_example(tmp_path):
     for stage, stem in (("before", "shaped_tokamak_before_polish"),
                         ("after", "shaped_tokamak_pressure_polished")):
         assert (outdir / stage / f"{stem}_summary.png").stat().st_size > 10_000
+    # the fair comparison: both files on one mesh, certified the same way; the
+    # near-axis error is where the polish gain lives
+    assert "both WOUT files on ns = 129, read back and certified the same way" in out
+    near_axis = re.search(r"rho < 0\.2\s+\[N m\^-3\]\s+([0-9.eE+-]+) => ([0-9.eE+-]+)", out)
+    assert near_axis is not None, out
+    initial, final = (float(g) for g in near_axis.groups())
+    assert final < 0.1 * initial, out
+    assert (outdir / "polish_before_after.webp").stat().st_size > 10_000
 
 
 def test_hot_restart_scan(tmp_path):

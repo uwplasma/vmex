@@ -15,7 +15,7 @@
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [],
-      "note": "Closed-form plot of the exponential spectral scaling exp(-alpha*max(|m|,|n|)); it solves nothing and reads nothing, so there is no hardware to record. No docs page currently embeds it \u2014 it is kept as a generated asset for the objectives pages, and the empty used_in below records that honestly."
+      "note": "Closed-form plot of the exponential spectral scaling exp(-alpha*max(|m|,|n|)); it solves nothing and reads nothing, so there is no hardware to record. No docs page currently embeds it — it is kept as a generated asset for the objectives pages, and the empty used_in below records that honestly."
     },
     {
       "path": "docs/_static/figures/mirror_fixed_boundary_3d.webp",
@@ -207,6 +207,23 @@
         "README.md"
       ],
       "note": "Reads input.QA_optimized / input.QH_optimized / input.QP_optimized from the working directory. Those decks are the output of examples/optimization/{QA,QH,QP}_optimization.py and are not committed, so the figure cannot be regenerated from a clean checkout alone."
+    },
+    {
+      "path": "docs/_static/figures/readme_polish_before_after.webp",
+      "sha256": "",
+      "bytes": 0,
+      "generator": "examples/force_balance_polishing.py",
+      "command": "python examples/force_balance_polishing.py",
+      "inputs": [
+        "examples/data/input.shaped_tokamak_pressure_polished"
+      ],
+      "record": null,
+      "generated": "2026-09-20",
+      "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [],
+      "note": "The example solves and polishes the deck, writes the unpolished state through the same export as the polished one (both WOUT files on 129 surfaces), reads each file back and certifies it with the same independent oracle, and plots the two certificates. It writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to its output directory. Rendered on 2026-09-20 and re-derived by a second run that reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/readme_polish_summary.webp",
