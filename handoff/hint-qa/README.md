@@ -599,9 +599,12 @@ and `limiter>0` conventions; the separate 1e-12 weight screen is only a
 sensitivity check. Driven/off pressure arrays match exactly.
 
 No target is certified exterior to imposed-current support: the saved field
-contains neither native `ss` nor `ss<jcuts`. Retain that byte mask, its time,
+contains neither native `ss` nor `ss<jcuts`. Retain that byte eligibility mask, its trace time,
 threshold and grid identity alongside the next native endpoint before using
-this classification to admit an exterior-field comparison. Do not substitute
+this classification to admit an exterior-field comparison. The mask is a
+conservative source-eligibility region, independent of drive amplitude; it
+does not assert nonzero current, and excludes native R/Z boundary layers.
+Attained response currents can extend outside it. Do not substitute
 the initial vacuum flux map. Mesh, wall clearance and interpolation order must
 be varied separately; moving targets alone cannot establish convergence.
 
@@ -749,8 +752,9 @@ fix in a distinct released version, then test field composition, source
 pullbacks and eager/JIT lifecycle. Do not change parameter derivatives or
 infer a workflow speedup from pure-kernel timings. SOLVAX 0.22–0.24 add APIs
 unused by current VMEX, so no upgrade is
-required merely because those releases exist. Proposed SOLVAX #119 exposes
-inner-linear convergence diagnostics; after release, retaining these in polish
+required merely because those releases exist. SOLVAX #119 merged as
+`2d96aa89`, after the current 0.24.0 release, and exposes inner-linear
+convergence diagnostics; after a release, retaining these in polish
 reports is a narrow useful integration. Keep strict rejection opt-in: the
 current plan records unsuccessful strict-policy experiments. Boozer magnetic-only
 evaluation

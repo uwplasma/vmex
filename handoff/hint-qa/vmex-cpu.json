@@ -3310,7 +3310,20 @@
         "nonfinite coefficients rejected",
         "invalid array rank rejected",
         "altered same-resolution template scalars do not affect rebuilt diagnostics"
-      ]
+      ],
+      "independent_array_reduction": {
+        "checks": [
+          "sample archive SHA-256",
+          "all arrays finite",
+          "curl(B) cross B / mu0 minus grad(p)",
+          "volume-weighted force L2",
+          "mean force over mean pressure gradient"
+        ],
+        "absolute_l2_N_m3": 424642.19874014385,
+        "mean_force_over_mean_grad_p": 0.18720574100629267,
+        "relative_agreement_tolerance": 1e-13,
+        "scope": "read-only reductions of retained angular64 samples; not a new solve"
+      }
     }
   },
   "gpu_automatic_placement_attempt": {

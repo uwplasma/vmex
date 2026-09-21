@@ -68,8 +68,11 @@ Execute three independent bounded lanes now:
    against relaxed support next; this control sensitivity is not inter-code error.
    The native 8x8x8 stencil audit now finds only 5/192 pressure-clear stencils
    and 14/192 wholly inside the limiter. This is not pointwise membership.
-   Retain the actual ss<jcuts mask at a native endpoint before admitting targets
-   as exterior to source-current support; vacuum flux is not a substitute.
+   Retain the native ss<jcuts eligibility mask, excluding inactive boundary
+   layers, with its frozen trace time and threshold. It is an amplitude-
+   independent conservative source region, not evidence of nonzero current;
+   attained response currents can extend beyond it. Vacuum flux is not a
+   substitute for this native diagnostic.
 3. Complete the reproducible preprocessing and raw-data package. The published
    compact native samples reproduce all six field metrics, but do not recreate
    an equilibrium without the missing prepared fields and restart assets.
