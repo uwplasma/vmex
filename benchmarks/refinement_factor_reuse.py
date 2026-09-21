@@ -97,6 +97,95 @@ def peak_rss_bytes():
     return int(value if platform.system() == "Darwin" else 1024 * value)
 
 
+def load_checkpoint(path):
+    with np.load(path) as saved:
+        state = imp.SpectralState(**{
+            name: jnp.asarray(saved[f"state_{name}"]) for name in imp._STATE_FIELDS
+        })
+        params = imp.ImplicitParams(**{
+            name: jnp.asarray(saved[f"input_{name}"])
+            for name in imp.ImplicitParams.__dataclass_fields__
+        })
+    return state, params
+
+
+def magnetic_field(state, runtime):
+    _, _, _, fields, _ = core_opt._field_chain(state, runtime)
+    bsq = np.asarray(fields.total_pressure - fields.pressure[:, None, None])
+    return np.sqrt(np.maximum(2.0 * bsq[-1], np.finfo(bsq.dtype).tiny))
+
+
+def mirror_summary(values):
+    minimum = float(np.min(values)); maximum = float(np.max(values))
+    return {
+        "minimum": minimum, "maximum": maximum,
+        "ratio": (maximum - minimum) / (maximum + minimum),
+    }
+
+
+def compare_checkpoints(case, paths, rtol):
+    """Compare two independently solved endpoints and their residual families."""
+    (state_a, params_a), (state_b, params_b) = (
+        load_checkpoint(path) for path in paths
+    )
+    inputs_equal = all(np.array_equal(np.asarray(a), np.asarray(b)) for a, b in
+                       zip(jax.tree.leaves(params_a), jax.tree.leaves(params_b)))
+    if not inputs_equal:
+        raise ValueError("checkpoints do not contain identical input parameters")
+
+    problem = build_problem(case, response_rtol=rtol)
+    cfg = problem.metadata["config"]
+    mask = imp._fixed_boundary_dof_mask(cfg)
+    project = imp._dof_projector(cfg, mask)
+    active_a, active_b = project(state_a), project(state_b)
+    complement_a = jax.tree.map(jnp.subtract, state_a, active_a)
+    complement_b = jax.tree.map(jnp.subtract, state_b, active_b)
+
+    def residuals(frozen, active):
+        return {
+            formulation: float(imp._tree_norm(imp.residual_fn(
+                cfg, frozen, mask, formulation=formulation
+            )(active, params_a)))
+            for formulation in ("preconditioned", "raw")
+        }
+
+    def field_maxima(first, second):
+        return {name: float(np.max(np.abs(np.asarray(
+            getattr(second, name) - getattr(first, name)))))
+            for name in imp._STATE_FIELDS}
+
+    fine_resolution = replace(
+        cfg.resolution, ntheta=64, nzeta=56)
+    fine_cfg = replace(
+        cfg, resolution=fine_resolution,
+        inp=imp.input_with_params(cfg.inp, params_a).change_resolution(
+            mpol=fine_resolution.mpol, ntor=fine_resolution.ntor,
+            ntheta=64, nzeta=56),
+    )
+    fine_runtime = imp.runtime_from_params(params_a, fine_cfg)
+    norm = lambda tree: float(imp._tree_norm(tree))  # noqa: E731
+    return {
+        "checkpoint_sha256": [file_sha256(path) for path in paths],
+        "state_difference_norm": norm(jax.tree.map(jnp.subtract, state_b, state_a)),
+        "complement_difference_norm": norm(jax.tree.map(
+            jnp.subtract, complement_b, complement_a)),
+        "field_maximum_absolute_difference": field_maxima(state_a, state_b),
+        "complement_maximum_absolute_difference": field_maxima(
+            complement_a, complement_b),
+        "residual_families": {
+            "a_on_a": residuals(state_a, active_a),
+            "b_on_b": residuals(state_b, active_b),
+            "a_active_on_b": residuals(state_b, active_a),
+            "b_active_on_a": residuals(state_a, active_b),
+        },
+        "fine_native_field": {
+            "ntheta": 64, "nzeta": 56,
+            "a": mirror_summary(magnetic_field(state_a, fine_runtime)),
+            "b": mirror_summary(magnetic_field(state_b, fine_runtime)),
+        },
+    }
+
+
 def tangents(problem, x):
     base = imp.params_from_input(problem.input_from_x(x))
     rows = []
@@ -334,9 +423,7 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
         f"input_{name}": np.asarray(getattr(params, name))
         for name in params.__dataclass_fields__
     })
-    _, _, _, fields, _ = core_opt._field_chain(state, runtime)
-    bsq = np.asarray(fields.total_pressure - fields.pressure[:, None, None])
-    bmag = np.sqrt(np.maximum(2.0 * bsq[-1], np.finfo(bsq.dtype).tiny))
+    bmag = magnetic_field(state, runtime)
     checkpoint.update(
         native_bmag=bmag,
         native_bmin_flat_index=np.asarray(np.argmin(bmag)),
@@ -373,9 +460,11 @@ def run_arm(case, arm, max_nfev, rtol, audit, initial_x):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--case", choices=("seed", "qi"), default="seed")
-    parser.add_argument("--arm", choices=("fresh", "reuse"), required=True)
-    parser.add_argument("--max-nfev", type=int, required=True)
+    parser.add_argument("--arm", choices=("fresh", "reuse"))
+    parser.add_argument("--max-nfev", type=int)
     parser.add_argument("--rtol", type=float, required=True)
+    parser.add_argument("--compare-states", type=Path, nargs=2,
+                        metavar=("FIRST_STATE", "SECOND_STATE"))
     parser.add_argument("--audit-fresh", action="store_true")
     parser.add_argument("--state-input", type=Path)
     parser.add_argument("--state-output", type=Path)
@@ -384,10 +473,32 @@ def main():
     parser.add_argument("--qi-gates", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    assert_repo_vmex(vmex.__file__, REPO)
+    if args.compare_states:
+        if (args.arm is not None or args.max_nfev is not None or args.audit_fresh
+                or args.state_input or args.state_output
+                or args.aspect_error_tol is not None or args.qi_gates
+                or not np.isfinite(args.rtol) or args.rtol <= 0):
+            parser.error("state comparison only accepts case, rtol, and output")
+        command = (
+            "PYTHONPATH=. python benchmarks/refinement_factor_reuse.py "
+            f"--case {args.case} --rtol {args.rtol} "
+            "--compare-states first-state.npz second-state.npz "
+            "--output comparison.json"
+        )
+        report = {
+            "schema": 1, "case": args.case, "command": command,
+            **git_state(REPO), "comparison": compare_checkpoints(
+                args.case, args.compare_states, args.rtol),
+        }
+        text = json.dumps(report, indent=2) + "\n"
+        print(text, end="") if args.output is None else args.output.write_text(text)
+        return
     paired_gate = ((args.aspect_error_tol is None)
                    == (args.iota_violation_tol is None))
     thresholds = (args.aspect_error_tol, args.iota_violation_tol)
-    if (args.max_nfev < 1 or not np.isfinite(args.rtol) or args.rtol <= 0
+    if (args.arm is None or args.max_nfev is None or args.max_nfev < 1
+            or not np.isfinite(args.rtol) or args.rtol <= 0
             or not paired_gate
             or (args.aspect_error_tol is not None
                 and (args.case != "seed"
@@ -395,7 +506,6 @@ def main():
                                 for value in thresholds)))
             or (args.qi_gates and args.case != "qi")):
         parser.error("positive run controls and paired seed thresholds are required")
-    assert_repo_vmex(vmex.__file__, REPO)
     initial_x = None
     if args.state_input:
         with np.load(args.state_input) as checkpoint:
