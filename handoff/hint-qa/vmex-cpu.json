@@ -797,7 +797,7 @@
     },
     "portable_runner_validation": {
       "script": "diagnose-force.py",
-      "published_script_sha256": "545b628866b3b968187227bb5cc8b731b9ca7e25fd3609967e7b584b087a27c4",
+      "published_script_sha256": "ee09d06869a05480f60a1e8f479cf893250ec7281d229e97724ee7561e6a0e56",
       "checks": [
         "syntax",
         "help",
@@ -839,6 +839,19 @@
           "full-mesh WOUT flux/current/pressure/volume"
         ],
         "scope": "Full diagnostic pipeline passed on the small case; QA numerical evaluation code unchanged and not rerun for this metadata-only extension."
+      },
+      "checkpoint_extension_validation": {
+        "script_sha256": "ee09d06869a05480f60a1e8f479cf893250ec7281d229e97724ee7561e6a0e56",
+        "checks": [
+          "non-pickle six-array roundtrip",
+          "archive checksum",
+          "overwrite refusal",
+          "nonfinite array refusal",
+          "native PyTree field-order and state-digest agreement",
+          "invalid NCURR rejected before solve"
+        ],
+        "scope": "Checkpoint helper and argument validation only; no new equilibrium or full diagnostic execution. Historical runs keep their original driver identities.",
+        "replay_supported": false
       }
     },
     "angular_quadrature_study": {

@@ -25,11 +25,13 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #419](https://github.com/uwplasma/vmex/pull/419) | Draft guarded block-factor reuse benchmark: exact-current residual checks and fallback are demonstrated on its QI case; a full-optimizer accuracy, memory and runtime comparison remains required. This is distinct from the rejected scalar-factor cache. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
 
-Concurrent [#422](https://github.com/uwplasma/vmex/pull/422) also integrates
-#421's earlier device work with #417 certification. It overlaps the updated
-#421 stack, which already includes #418. Reconcile the implementations and
-retain complementary placement regressions before merging; do not apply both
-stacks independently or infer GPU qualification from either CPU suite.
+Draft [#422](https://github.com/uwplasma/vmex/pull/422), at `e25aa1fd`,
+now contains only complementary placement tests stacked on #421. Retain that
+single test delta in #421 before integration; its earlier duplicate production
+implementation is retired. CPU placement tests do not establish GPU-root
+qualification. Review and refresh required checks in dependency order:
+#416, #417, #418, then the consolidated #421. Forward field diagnostics can
+continue on the pinned main independently of derivative-stack promotion.
 
 Current main has raw block Newton/adjoint solves, deterministic free-boundary
 reference selection (#383), structured factor reuse (#395), a retained-array
@@ -532,6 +534,35 @@ permission and verify that permission before MPI launch. Keep the retained
 checkpoint immutable. Field-input existence alone is insufficient: a copied
 read-only restart can evolve successfully and fail only at final NetCDF output.
 
+The small [restart preflight](prepare-restart.py) stages this file set without
+launching HINT. Its checksum manifest has a `files` object containing exactly
+the deck basename and the four `FOPEN` basenames; each value contains `sha256`
+and may also contain `bytes`. The output directory must not already exist:
+
+```sh
+python handoff/hint-qa/prepare-restart.py --deck control.input \
+  --source-dir retained-assets --sha256-manifest restart-sha256.json \
+  --output staged-control
+```
+
+The utility supports the qualified `run_mode='follow'`, `flx_type='file'`
+path. It verifies and stages every named field, creates the restart as a fresh
+owner-readable/writable regular file, confirms a no-write `r+b` open, and
+rechecks that retained source hashes and modes did not change. The generated
+`restart-preflight.json` records basenames, checksums and staging checks.
+Successful staging does not establish that HINT can write its final checkpoint.
+
+A subsequent identical bounded control passed this preflight and completed
+with exit status zero in 61.10 s (four MPI ranks, one OpenMP thread).
+The output reopened successfully with 20 snapshots instead of 19, advancing
+code time from 1.08 to 1.18. All seven endpoint field arrays are finite; the
+retained input checkpoint hash and mode are unchanged. The history file and
+160 non-timing diagnostic lines are identical to the earlier partial run.
+[The persistence record](current-drive.json) preserves endpoint/input/binary
+hashes and resource measurements. This resolves the write failure, not the
+physical current/force or topology gates. Native field extrema are recorded
+without interpreting all-domain values as plasma-region measurements.
+
 ## Execution order and research acceptance
 
 1. **Freeze a working baseline.** Use main `45f3a7aea`, which includes #409,
@@ -775,8 +806,10 @@ The patch fixes pressure-table weights, uninitialized
 values, sub-64-grid loop strides, periodic interpolation bounds, an external
 callback declaration, read-only field access and a toroidal viscosity stencil.
 The QA baseline's zero viscosity means the last fix does not explain its
-current deficit. Native input preparation and current-drive diagnostics still
-need a compact public runner before an independent end-to-end rerun.
+current deficit. Native input preparation now has a public runner. Independent
+end-to-end
+reproduction still requires downloadable hash-matched restart assets, successful
+endpoint persistence and a reviewed simulation/postprocessing sequence.
 
 The [Geiger manuscript](https://conferences.iaea.org/event/214/contributions/17520/attachments/10058/15492/IAEA2020_JGeiger_Manuscript_8p_finalversion.pdf)
 and supplied W7-X poster motivate this study: qualitative field agreement did
@@ -796,3 +829,40 @@ to these QA cases. Its printed local-field denominator and the maintained
 code's surface-profile current drive must not be silently equated. Read the
 version-specific implementation before changing a current formula. Full-text
 review of the 1989, 2006 and 2017 foundational HINT papers remains incomplete.
+
+The June 2026 [systematic VMEC–HINT LHD comparison](https://arxiv.org/abs/2606.10490v2)
+compares magnetic-axis position, on-axis transform and last-closed-surface
+volume across three configurations. Its configuration-dependent edge
+stochasticity supports measuring these observables alongside exterior fields;
+it does not predict the QA outcome. The paper scans **axis beta**, while these
+QA case labels denote **volume beta**. Do not transfer its transition thresholds
+or interpret nested-surface failure as a numerical discrepancy alone. Its linear
+initial pressure profile and zero-net-current context also differ from the QA
+pressure/current inputs. Matching beta labels would not match the experiment.
+
+### Immediate bounded experiments
+
+Restart preflight and persisted drive-off readback now pass. Next extract and
+independently sample the endpoint, retaining pressure/source/wall masks and
+comparing the driven endpoint at the same code time and cadence. Persistence
+and finite arrays alone do not establish field accuracy or equilibrium.
+
+For the VMEX M8/N6, NS121, solver-grid40 state, first repeat measurement at
+48x48 against the retained 32x32 result, requiring the exact native-state hash
+before comparing quadrature. Prospective measurement targets are at most 0.1%
+global force-L2 change, 0.5% in each radial bin and 1% in mean/ratio metrics;
+retain absolute differences as well. These are measurement targets, not physical
+force acceptance thresholds. Use `--state-output results/state.npz` to retain all six exact native
+coefficient matrices with input/source/state hashes, resolution and solve
+metadata. The archive loads with `allow_pickle=False`; existing output files
+are refused. Checkpoint writing has roundtrip/hash validation, but a public-API
+replay path and an end-to-end solve using this new option remain to be qualified.
+If this gate passes, compare M9/N6 and M8/N7 separately with the M8/N6 baseline.
+Do not combine both mode changes in one solve or call one sensitivity rung
+Fourier convergence. Record NCURR with current: CURTOR is a prescribed-current
+constraint for NCURR=1, not for an iota-constrained NCURR=0 solve.
+
+Keep broader QI objective, factor-reuse and 3-D polishing development off this
+study's critical path. The latest #413/#419 evidence includes failed independent
+root and fine-grid gates despite accurate linear responses. Optimize complete
+accepted-work cost only after the underlying root and observable are qualified.

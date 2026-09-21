@@ -18,6 +18,9 @@ import time
 import numpy as np
 
 
+STATE_FIELDS = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--source-root", required=True, type=Path)
@@ -28,6 +31,7 @@ def arguments():
     p.add_argument("--expected-tree", required=True)
     p.add_argument("--expected-state", type=sha256_value)
     p.add_argument("--angular-count", type=angular_count, default=16)
+    p.add_argument("--state-output", type=Path)
     return p.parse_args()
 
 
@@ -46,6 +50,18 @@ def angular_count(value):
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def write_state_checkpoint(path, state, metadata):
+    arrays = {name:np.asarray(getattr(state, name), dtype=np.float64)
+              for name in STATE_FIELDS}
+    if any(value.ndim != 2 or not np.isfinite(value).all()
+           for value in arrays.values()):
+        raise ValueError("native state arrays must be finite matrices")
+    metadata_json = json.dumps(metadata, sort_keys=True, allow_nan=False)
+    with Path(path).open("xb") as stream:
+        np.savez_compressed(stream, metadata_json=np.asarray(metadata_json), **arrays)
+    return sha(path)
 
 
 def git(root, *args):
@@ -75,8 +91,10 @@ def main():
     root = a.source_root.resolve()
     inp_path = a.input if a.input.is_absolute() else root / a.input
     outputs = (a.output.resolve(), a.samples_output.resolve())
-    if outputs[0] == outputs[1]:
-        raise ValueError("JSON and sample outputs must be distinct")
+    if a.state_output is not None:
+        outputs += (a.state_output.resolve(),)
+    if len(set(outputs)) != len(outputs):
+        raise ValueError("output paths must be distinct")
     if any(not p.parent.is_dir() for p in outputs):
         raise FileNotFoundError("output parent directory does not exist")
     if any(p.exists() for p in outputs):
@@ -104,8 +122,13 @@ def main():
 
     started = time.monotonic()
     inp = vj.VmecInput.from_file(inp_path)
+    input_sha256 = sha(inp_path)
     if float(inp.gamma) != 0.0:
         raise ValueError("this pressure-gradient diagnostic requires GAMMA=0")
+    ncurr = int(inp.ncurr)
+    if ncurr not in (0, 1):
+        raise ValueError("NCURR must be 0 (prescribed iota) or 1 (prescribed current)")
+    constraint_mode = "prescribed_current" if ncurr == 1 else "prescribed_iota"
     eq = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
     jax.block_until_ready(eq.solution.R_cos)
     solve_seconds = time.monotonic()-started
@@ -270,7 +293,7 @@ def main():
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     result = {
       "scope":"observational native-form interpolation diagnostic; not a continuum certificate",
-      "source":{"head":head,"tree":tree,"input_sha256":sha(inp_path),
+      "source":{"head":head,"tree":tree,"input_sha256":input_sha256,
                 "native_state_sha256":state_sha256,
                 "driver_sha256":sha(Path(__file__).resolve())},
       "versions":versions,
@@ -296,7 +319,9 @@ def main():
         "weights":"abs(det(dx/dq)) ds dtheta dphi; nfp is used only for the full-torus window volume",
         "pointwise_normalization":"2|F|/(|J cross B|+|grad p|+1e-12 N/m^3)"},
       "stage1":stage1,"radial_bins":radial_bins,
-      "physical":{"prescribed_input":{"phiedge_Wb":float(inp.phiedge),
+      "physical":{"prescribed_input":{"ncurr":ncurr,
+                                         "constraint":constraint_mode,
+                                         "phiedge_Wb":float(inp.phiedge),
                                          "curtor_A":float(inp.curtor),
                                          "pressure_axis_Pa":float(p_of_s(jnp.asarray(0.0))),
                                          "pressure_edge_Pa":float(p_of_s(jnp.asarray(1.0)))},
@@ -321,6 +346,22 @@ def main():
         if np.issubdtype(value.dtype, np.number) and not np.isfinite(value).all():
             raise ValueError(f"sample array {name} contains non-finite values")
     require_finite(result)
+    if a.state_output is not None:
+        state_metadata = {
+            "format_version":1,"field_order":list(STATE_FIELDS),
+            "source":{"head":head,"tree":tree,"input_sha256":input_sha256,
+                      "driver_sha256":sha(Path(__file__).resolve())},
+            "native_state_sha256":state_sha256,
+            "resolution":{"ns":int(eq.wout.ns),"mpol":int(eq.wout.mpol),
+                          "ntor":int(eq.wout.ntor),"nfp":nfp,
+                          "ntheta":int(inp.ntheta),"nzeta":int(inp.nzeta)},
+            "constraint":{"ncurr":ncurr,"mode":constraint_mode},
+            "solve":{"converged":bool(eq.result.converged),
+                     "iterations":int(eq.result.iterations),
+                     "fsqr":float(eq.result.fsqr),"fsqz":float(eq.result.fsqz),
+                     "fsql":float(eq.result.fsql)}}
+        result["source"]["state_checkpoint_sha256"] = write_state_checkpoint(
+            outputs[2], eq.solution, state_metadata)
     with outputs[1].open("xb") as stream:
         np.savez_compressed(stream, **arrays)
     result["samples_sha256"] = sha(outputs[1])

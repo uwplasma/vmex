@@ -1205,5 +1205,99 @@
       "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
       "stepb_mod_sha256": "21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488"
     }
+  },
+  "drive_off_persisted_control": {
+    "status": "completed_with_readable_endpoint",
+    "exit_code": 0,
+    "initial_snapshot_count": 19,
+    "final_snapshot_count": 20,
+    "initial_code_time": 1.0800000000000185,
+    "final_code_time": 1.1800000000000204,
+    "all_endpoint_fields_finite": true,
+    "endpoint_fields": {
+      "B_R": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -250.4183404950359,
+        "max": 250.4183381454328
+      },
+      "B_phi": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -160.71201552147318,
+        "max": 128.77673461653106
+      },
+      "B_Z": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -100.46793070659021,
+        "max": 267.32165172918826
+      },
+      "P": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": 0.0,
+        "max": 0.17040731583375143
+      },
+      "v_R": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -0.008164333170400708,
+        "max": 0.013134080721843034
+      },
+      "v_phi": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -0.0040717608548509095,
+        "max": 0.004070173613516807
+      },
+      "v_Z": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -0.009520577585884114,
+        "max": 0.009510899912699372
+      }
+    },
+    "source_restart_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+    "endpoint_sha256": "9760ebbe49e8d4e1c481a0c45c951b133d72e7adafe9bd281d0aeffafad7dde7",
+    "input_sha256": "de83afa1c1f368817a1c9716f6c3396e2e53c04ede2032da9cc516f7757b52da",
+    "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
+    "log_sha256": "aeb2c43196c1c9ea8c8dd8c1a01d32414c04135ee26d45b1955644826ea5b559",
+    "history_sha256": "47818d2432023211234517a7e9e784d522e1ffbf896874286a2f5aa6ece8e8a1",
+    "preflight_sha256": "3c833512933dd1124e8796532b061846d734724bdc8c8f00f121165a56c56639",
+    "source_restart_mode": "0o400",
+    "diagnostic_samples": 10,
+    "endpoint_field_units": "native stored values; no conversion or plasma-region classification in this readback",
+    "wall_seconds": 61.1,
+    "max_rss_kib": 113396,
+    "non_timing_diagnostic_lines_identical_to_partial_run": 160,
+    "history_byte_identical_to_partial_run": true,
+    "preflight_script_sha256": "eeb9bd1b23b3dbdc39f4e1bc306bb80ad428a557e050e849d46a716d267a96f1",
+    "limitations": [
+      "Persistence/readback qualification only; no equilibrium certificate.",
+      "No independent endpoint sampling, force, support or topology audit yet.",
+      "Raw endpoint requires public hosting for independent reproduction."
+    ]
   }
 }

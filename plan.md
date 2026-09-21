@@ -60,9 +60,21 @@ Execute three independent bounded lanes now:
    logged series as partial evidence, plus the earlier missing-input failure.
    Repair preflight/output handling before requesting an auditable endpoint;
    neither the drive-off trajectory nor the driven block is an equilibrium.
+   The writable-copy repetition now exits zero with a readable time-1.18
+   endpoint, 20 snapshots, finite fields and unchanged retained input. Its
+   history and non-timing diagnostics exactly reproduce the partial run.
+   Independently audit the saved endpoint next; persistence is not equilibrium.
 3. Complete the reproducible preprocessing and raw-data package. The published
    compact native samples reproduce all six field metrics, but do not recreate
    an equilibrium without the missing prepared fields and restart assets.
+
+The next VMEX measurement is M8/N6 at 48x48, guarded by its retained exact
+state hash. Save native coefficients for replay, then separate M9/N6 and M8/N7
+sensitivity before further radial refinement. #422 now contributes only tests
+on #421; consolidate those tests without restoring the retired implementation.
+The latest #413 plan records failed independent-root/fine-grid QI gates and an
+unqualified finite-beta optimization derivative. These remain separate product
+research, not prerequisites to the forward HINT field comparison.
 
 Then establish matched time/grid/wall/trace convergence at 0.5%, compare total
 and response fields with separate error budgets, and qualify 2.5% and common-
