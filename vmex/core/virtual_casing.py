@@ -532,7 +532,10 @@ def surface_field_data_from_state(
     pressure parameters remain in the graph.  Stellarator symmetry is the
     currently validated live-state path.
     """
-    spectra = _state_field_spectra(inp, state, runtime)
+    # The live-state spectra also carry lambda and the flux derivatives, which
+    # the interior field's native form needs and the surface assembly does not.
+    spectra = {key: value for key, value in _state_field_spectra(inp, state, runtime).items()
+               if key not in ("lmns", "phipf", "chipf")}
     return _assemble_surface_field_data(
         **spectra, j=int(s_index % spectra["ns"]), use_stellsym=use_stellsym,
         nphi=nphi, ntheta=ntheta, source_convention="vmex_state",
