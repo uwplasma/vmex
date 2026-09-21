@@ -1018,9 +1018,10 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     implicit_module._LAST_PRIMAL_CERTIFICATE[config] = (
         saved_certificate[0], b"not-the-refined-state", saved_certificate[2]
     )
-    with pytest.raises(RuntimeError, match="certified VMEC equilibrium"):
-        problem.equilibrium_from_x(problem.x0)
-    implicit_module._LAST_PRIMAL_CERTIFICATE[config] = saved_certificate
+    refreshed = problem.equilibrium_from_x(problem.x0)
+    current_certificate = implicit_module._LAST_PRIMAL_CERTIFICATE[config]
+    assert current_certificate[1] == implicit_module._primal_state_key(refreshed.state)
+    assert current_certificate[2]["derivative_admitted"]
 
     # Cold trial/retry kernels must compile on the optimizer's host thread,
     # outside a running GPU callback. Cached derivative callbacks are fine.
@@ -1520,7 +1521,31 @@ def test_equilibrium_exterior_field_sizes_its_source_grid(monkeypatch):
 
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     problem = opt.VmecProblem.from_input(inp, max_mode=1)
+    from vmex.core import implicit as im
+
+    cfg = problem.metadata["config"]
+    assert cfg in im._LAST_SOLVE and cfg not in im._LAST_PRIMAL_CERTIFICATE
+    callback = im._host_solve_and_mask_status
+    refreshed = []
+
+    def measure(config, params):
+        refreshed.append(config)
+        return callback(config, params)
+
+    monkeypatch.setattr(im, "_host_solve_and_mask_status", measure)
     equilibrium = problem.equilibrium_from_x(problem.x0)
+    repeated = problem.equilibrium_from_x(problem.x0)
+    assert refreshed == [cfg]
+    assert im._primal_state_key(equilibrium.state) == im._primal_state_key(repeated.state)
+    certificate = im._LAST_PRIMAL_CERTIFICATE[cfg]
+    assert certificate[1] == im._primal_state_key(equilibrium.state)
+    with monkeypatch.context() as patch:
+        patch.setitem(im._LAST_PRIMAL_CERTIFICATE, cfg, (
+            certificate[0], certificate[1],
+            {**certificate[2], "derivative_admitted": False}))
+        with pytest.raises(RuntimeError, match="certified VMEC equilibrium"):
+            problem.equilibrium_from_x(problem.x0)
+    assert refreshed == [cfg]  # Ineligible measured states must not be returned.
 
     recorded: dict = {}
     monkeypatch.setattr(vc, "surface_field_data_from_state",

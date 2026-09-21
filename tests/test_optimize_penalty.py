@@ -495,24 +495,23 @@ def test_implicit_lane_status_penalty_and_diagnostic_resolve(monkeypatch, capsys
     """Failed differentiated trials use a penalty; diagnostics re-solve cold.
 
     The scipy driver evaluates ``jac`` at exactly the accepted iterate
-    ``fun`` just solved (a memo-hit host solve), so poisoning memo-hit
-    solves after the first ``jac(x0)`` fails later differentiated trials,
-    which follow the status-safe penalty branch. ``solve_equilibrium`` fails
-    whenever hot-seeded, forcing the final diagnostic's cold-solve fallback.
+    ``fun`` just solved (a memo-hit host solve). Poisoning a memo hit whose
+    parameter key differs from the seed therefore fails a differentiated
+    accepted trial without relying on how many seed-key cache hits preceded
+    it. ``solve_equilibrium`` fails whenever hot-seeded, forcing the final
+    diagnostic's cold-solve fallback.
     """
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     real = im._host_solve
-    calls = {"repeat": 0, "poisoned": 0}
+    seed_key = im._params_key(im.params_from_input(inp))
+    calls = {"poisoned": 0}
 
     def flaky(cfg, params):
+        key = im._params_key(params)
         hit = im._LAST_SOLVE.get(cfg)
-        if hit is not None and hit[0] == im._params_key(params):
-            calls["repeat"] += 1
-            # repeats 1-2: fun(x0), jac(x0); later repeats are the
-            # differentiated evaluations of accepted steps -> fail those.
-            if calls["repeat"] >= 3:
-                calls["poisoned"] += 1
-                raise _boom()
+        if hit is not None and hit[0] == key and key != seed_key:
+            calls["poisoned"] += 1
+            raise _boom()
         return real(cfg, params)
 
     real_solve_eq = opt.solve_equilibrium

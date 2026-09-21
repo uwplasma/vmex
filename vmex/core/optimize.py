@@ -3545,37 +3545,21 @@ def _least_squares_implicit(
         params_np = jax.tree.map(
             lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x))
         )
+        if not certified_trial(x, require_eligible=False):
+            # Factory preflight caches an unrefined native solve. Materializing
+            # it needs the same measured state as an objective evaluation, but
+            # no objective graph or derivative compilation.
+            imp._host_solve_and_mask_status(cfg, params_np)
         hit = imp._LAST_SOLVE.get(cfg)
-        if (
-            hit is None
-            or hit[0] != imp._params_key(params_np)
-            or imp._LAST_STATUS_ERROR.get(cfg) is not None
-        ):
-            # Problem construction and accepted optimizer evaluations already
-            # leave this exact equilibrium in the host cache.  Avoid compiling
-            # a second scalar graph merely to materialize that cached state.
-            if traceable_scalar is None:
-                fun(x)
-            else:
-                scalar_fun_host(x)
-            hit = imp._LAST_SOLVE.get(cfg)
         if hit is None or hit[0] != imp._params_key(params_np):
             raise RuntimeError(
                 "decision vector did not produce a usable VMEC equilibrium"
             )
-        refined = imp._LAST_REFINED.get(cfg)
-        certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
-        if (
-            refined is None
-            or certificate is None
-            or refined[0] != hit[0]
-            or certificate[0] != hit[0]
-            or certificate[1] != imp._primal_state_key(refined[1])
-            or not certificate[2]["derivative_admitted"]
-        ):
+        if not certified_trial(x):
             raise RuntimeError(
                 "decision vector did not produce a certified VMEC equilibrium"
             )
+        refined = imp._LAST_REFINED[cfg]
         result_input = input_from_x(x)
         result = dataclasses.replace(hit[1], state=refined[1])
         ns = int(np.shape(result.state.R_cos)[0])
