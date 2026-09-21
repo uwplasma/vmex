@@ -254,7 +254,7 @@ is real but not uniform; an accurate, affordable 3-D polished solve is still an 
 
 ![Force error of a shaped finite-pressure tokamak before and after polishing](docs/_static/figures/readme_polish_before_after.webp)
 
-`python examples/force_balance_polishing.py` (about 3 minutes on one CPU) writes both WOUT files on
+`python examples/force_balance_polishing.py` (3 to 5 minutes on one CPU) writes both WOUT files on
 the same 129-surface mesh and certifies each with the same independent oracle, so they differ only
 in the polish. The near-axis error (`ρ < 0.2`) falls from 2.9e3 to 61 N m⁻³ and the edge error
 2.5-fold, but the polished state is slightly worse for `0.6 ≲ ρ ≲ 0.8`, and the volume-averaged
