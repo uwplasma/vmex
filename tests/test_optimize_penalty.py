@@ -38,6 +38,21 @@ def _boom() -> VmecJacobianError:
         hint="deterministic stand-in for a self-intersecting trial boundary")
 
 
+def _small_primal_case(*, primal_tol=None):
+    """NS=5, mpol=3 fixed-boundary state for certificate-only tests."""
+    source = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(
+        source, mpol=3, ns_array=np.asarray([5]),
+        rbc=source.rbc[:, :3], rbs=source.rbs[:, :3],
+        zbc=source.zbc[:, :3], zbs=source.zbs[:, :3],
+    )
+    cfg = im.make_config(inp, primal_tol=primal_tol)
+    params = im.params_from_input(inp)
+    state = im._initial_state(im.runtime_from_params(params, cfg).setup)
+    mask = jax.tree.map(jax.numpy.zeros_like, state)
+    return inp, cfg, params, state, mask
+
+
 def test_status_callback_builds_safe_mask_before_seed_cache(monkeypatch):
     """Even an unprimed failed trial returns a shape-safe zero mask."""
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
@@ -138,6 +153,89 @@ def test_status_callback_uses_configured_actual_state_tolerance(
     json.dumps(certificate[2], allow_nan=False)
 
 
+def test_primal_measurements_use_the_supplied_edge(monkeypatch):
+    """Fresh force measurements must not repair a bad supplied edge."""
+    _, cfg, params, state, _ = _small_primal_case()
+    delta = 0.125
+    supplied = dataclasses.replace(
+        state, R_cos=state.R_cos.at[-1, 0].add(delta))
+    mask = jax.tree.map(jax.numpy.ones_like, state)
+    measured = []
+
+    def fake_evaluate(measured_state, _runtime):
+        measured.append(measured_state)
+        zeros = jax.tree.map(jax.numpy.zeros_like, measured_state)
+        raw = SimpleNamespace(
+            fsqr=jax.numpy.asarray(0.0),
+            fsqz=jax.numpy.asarray(0.0),
+            fsql=jax.numpy.asarray(0.0),
+        )
+        diagnostics = SimpleNamespace(
+            jacobian_sign_changed=jax.numpy.asarray(False))
+        return zeros, raw, diagnostics
+
+    def fake_raw_force(measured_state, _runtime):
+        measured.append(measured_state)
+        return jax.tree.map(jax.numpy.zeros_like, measured_state)
+
+    monkeypatch.setattr(im, "evaluate_forces", fake_evaluate)
+    monkeypatch.setattr(im, "_raw_force_state", fake_raw_force)
+    # Disable the wrapper jit so the mocks can capture the concrete argument;
+    # the boundary checker itself is exercised staged in the next test.
+    with jax.disable_jit():
+        im._primal_measurements(supplied, params, mask, cfg)
+
+    assert len(measured) == 2
+    for measured_state in measured:
+        np.testing.assert_array_equal(measured_state.R_cos, supplied.R_cos)
+
+
+def test_primal_boundary_gate_rejects_a_perturbed_supplied_edge(monkeypatch):
+    _, cfg, params, state, mask = _small_primal_case(primal_tol=None)
+    delta = 0.125
+    perturbed = dataclasses.replace(
+        state, Z_sin=state.Z_sin.at[-1, 0].add(delta))
+
+    monkeypatch.setattr(
+        im, "_primal_measurements",
+        lambda *_args, **_kwargs: (
+            jax.numpy.asarray(1.0e5), jax.numpy.asarray(2.0e5),
+            jax.numpy.asarray(1.0e-14), jax.numpy.asarray(True),
+        ),
+    )
+
+    assert float(im._primal_boundary_error(state, params, cfg)) == 0.0
+    assert bool(im._require_strict_primal(cfg, params, state, mask))
+    np.testing.assert_equal(
+        float(im._primal_boundary_error(perturbed, params, cfg)), delta)
+    with pytest.raises(opt.AdjointSolveError, match="admitted primal"):
+        im._require_strict_primal(cfg, params, perturbed, mask)
+
+    evidence = im.measure_primal_state(params, perturbed, mask, cfg)
+    assert evidence["primal_boundary_error"] == delta
+    assert not evidence["primal_boundary_consistent"]
+    assert not evidence["derivative_admitted"]
+
+    # A traced direct derivative cannot raise from its dynamic predicate; it
+    # must carry False into the existing non-finite-sensitivity guard.
+    eligible = jax.jit(
+        lambda candidate: im._require_strict_primal(
+            cfg, params, candidate, mask)
+    )(perturbed)
+    assert not bool(eligible)
+
+
+def test_fixed_boundary_primal_certificate_rejects_free_boundary_input():
+    inp, _, params, state, mask = _small_primal_case()
+    free_cfg = im.make_config(dataclasses.replace(
+        inp, lfreeb=True, mgrid_file="unused.nc"))
+
+    with pytest.raises(
+        ValueError, match="cannot measure a coupled free-boundary root"
+    ):
+        im.measure_primal_state(params, state, mask, free_cfg)
+
+
 @pytest.mark.parametrize(
     "invalid_case",
     ["geometry", "projected_nonfinite", "raw_nonfinite", "negative_fsq",
@@ -211,6 +309,9 @@ def test_direct_derivative_always_checks_primal_validity(
     assert bool(im._require_strict_primal(cfg, params, state, mask))
 
     strict = dataclasses.replace(cfg, primal_tol=1.0e-6)
+    # Config copies are normally materialized by the solve/factory path before
+    # a staged derivative. Prime its frozen boundary/setup tables explicitly.
+    im.runtime_from_params(params, strict)
     monkeypatch.setattr(
         im, "_primal_measurements",
         lambda *_args, **_kwargs: (jax.numpy.asarray(2.0e-6),
@@ -224,9 +325,11 @@ def test_direct_derivative_always_checks_primal_validity(
     assert caught.value.tolerance == 1.0e-6
 
     loose = dataclasses.replace(cfg, primal_tol=4.0e-6)
+    im.runtime_from_params(params, loose)
     assert bool(im._require_strict_primal(loose, params, state, mask))
 
     disabled = dataclasses.replace(cfg, refine_tol=np.inf)
+    im.runtime_from_params(params, disabled)
     evidence = im.measure_primal_state(params, state, mask, disabled)
     assert not evidence["refinement_enabled"]
     assert evidence["refine_tolerance"] is None

@@ -1875,28 +1875,40 @@ def _primal_measurements(state, params, mask, cfg):
     """Measure both residual forms and geometry on the returned state."""
     project = _dof_projector(cfg, mask)
     runtime = runtime_from_params(params, cfg)
-    assembled = _assemble(
-        project(state), runtime, state, project, _edge_mask(cfg))
-    force, raw, diagnostics = evaluate_forces(assembled, runtime)
+    force, raw, diagnostics = evaluate_forces(state, runtime)
     residual_norm = _tree_norm(project(force))
-    raw_residual_norm = _tree_norm(project(_raw_force_state(assembled, runtime)))
+    raw_residual_norm = _tree_norm(project(_raw_force_state(state, runtime)))
     fsq = raw.fsqr + raw.fsqz + raw.fsql
     finite = jnp.all(jnp.stack([
-        jnp.all(jnp.isfinite(leaf)) for leaf in jax.tree.leaves(assembled)
+        jnp.all(jnp.isfinite(leaf)) for leaf in jax.tree.leaves(state)
     ]))
     geometry_valid = finite & ~diagnostics.jacobian_sign_changed
     return residual_norm, raw_residual_norm, fsq, geometry_valid
 
 
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _primal_boundary_error(state, params, cfg):
+    """Check the fixed edge without replacing the measured coefficients."""
+    if cfg.inp.lfreeb:
+        raise ValueError("fixed-boundary primal certificates cannot measure a coupled free-boundary root")
+    boundary = _boundary_from_params(params, cfg)[:4]
+    return jnp.max(jnp.stack([
+        jnp.max(jnp.abs(getattr(state, name)[-1]
+                        - expected))
+        for name, expected in zip(
+            ("R_cos", "R_sin", "Z_cos", "Z_sin"), boundary)
+    ]))
+
+
 def _primal_is_eligible(residual_norm, raw_residual_norm, fsq,
-                        geometry_valid, cfg):
+                        geometry_valid, cfg, boundary_consistent=True):
     """Apply fresh force checks and an optional observable-specific bound."""
     ratio = fsq / cfg.ftol
     residual_ok = (
         jnp.isfinite(residual_norm) if cfg.primal_tol is None
         else residual_norm <= float(cfg.primal_tol)
     )
-    return (geometry_valid & jnp.isfinite(residual_norm)
+    return (boundary_consistent & geometry_valid & jnp.isfinite(residual_norm)
             & jnp.isfinite(raw_residual_norm) & jnp.isfinite(ratio)
             & residual_ok & (ratio >= 0.0) & (ratio <= cfg.max_fsq_ratio))
 
@@ -1914,11 +1926,16 @@ def measure_primal_state(
     it does not report whether a native solve converged or produced them.
     ``strict_root_certified`` is therefore true only when the caller selected
     a finite, observable-specific ``primal_tol`` and the state meets it.
+    Fixed R/Z edges must match the supplied parameters; a mismatch is reported
+    separately from geometry and never repaired before measurement. Coupled
+    free-boundary roots require their own field and constraint data.
     """
+    boundary_error = _primal_boundary_error(state, params, cfg)
     residual_norm, raw_residual_norm, fsq, geometry_valid = _primal_measurements(
         _device_pin(cfg, state), params, _device_pin(cfg, mask), cfg)
     admitted = _primal_is_eligible(
-        residual_norm, raw_residual_norm, fsq, geometry_valid, cfg)
+        residual_norm, raw_residual_norm, fsq, geometry_valid, cfg,
+        boundary_error == 0)
     residual_norm = float(residual_norm)
     raw_residual_norm, fsq = float(raw_residual_norm), float(fsq)
     refine_tol = float(cfg.refine_tol)
@@ -1941,6 +1958,8 @@ def measure_primal_state(
         "primal_raw_residual_norm": raw_residual_norm,
         "primal_fsq_ratio": fsq / cfg.ftol,
         "primal_geometry_valid": bool(geometry_valid),
+        "primal_boundary_error": float(boundary_error),
+        "primal_boundary_consistent": bool(boundary_error == 0),
         "derivative_admitted": bool(admitted),
     }
 
@@ -1949,17 +1968,19 @@ def _require_strict_primal(cfg, params, state, mask):
     """Enforce primal admission on direct derivative APIs.
 
     ``primal_tol=None`` disables only the absolute projected-residual bound;
-    finite residuals, valid geometry, and the configured raw-FSQ ratio remain
-    required.
+    finite residuals, valid geometry, matching fixed edges, and the configured
+    raw-FSQ ratio remain required.
     """
+    boundary_error = _primal_boundary_error(state, params, cfg)
     residual_norm, raw_residual_norm, fsq, geometry_valid = _primal_measurements(
         state, params, mask, cfg)
     eligible = _primal_is_eligible(
-        residual_norm, raw_residual_norm, fsq, geometry_valid, cfg)
+        residual_norm, raw_residual_norm, fsq, geometry_valid, cfg,
+        boundary_error == 0)
     if not isinstance(eligible, jax.core.Tracer) and not bool(eligible):
         raise AdjointSolveError(
             message="implicit derivative requires an admitted primal state",
-            hint="inspect the primal residual, geometry, and raw-FSQ diagnostics",
+            hint="inspect the primal residual, fixed edge, geometry, and raw-FSQ diagnostics",
             residual_norm=float(residual_norm),
             tolerance=(None if cfg.primal_tol is None
                        else float(cfg.primal_tol)),
@@ -2032,9 +2053,10 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
                      if measurement_device is not None
                      else contextlib.nullcontext())
         with placement:
+            cert_params, cert_state, cert_mask = _put_numeric_leaves(
+                (params, state, mask), measurement_device)
             certificate = measure_primal_state(
-                *_put_numeric_leaves((params, state, mask), measurement_device),
-                cfg)
+                cert_params, cert_state, cert_mask, cfg)
         _LAST_PRIMAL_CERTIFICATE[cfg] = (
             _params_key(params), _primal_state_key(state), certificate)
         status = 0 if certificate["derivative_admitted"] else 2
