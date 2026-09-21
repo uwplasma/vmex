@@ -1,0 +1,485 @@
+{
+  "all_arrays_finite": true,
+  "arrays": {
+    "B": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 4.148843469537948,
+      "max": 4.100835026940128,
+      "min": 1.1065098098568845e-16,
+      "sha256": "2749858f99ad3fe142e9a0f70d97459b9869c4c328885397edbe0dfe63d8d884",
+      "shape": [
+        1,
+        3
+      ]
+    },
+    "B_cotangent": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 1.7320508075688772,
+      "max": 1.0,
+      "min": 1.0,
+      "sha256": "cc143326a2646c605ea66139d7b440df7cbde18c050f1f8cf4dd30f42cfe7123",
+      "shape": [
+        1,
+        3
+      ]
+    },
+    "B_error_estimate": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 5.204170427930421e-17,
+      "max": 5.204170427930421e-17,
+      "min": 5.204170427930421e-17,
+      "sha256": "04f1927dcc304aaa4219989c4e261c93c0b67f67a7c62373d1599dca69b6782c",
+      "shape": [
+        1
+      ]
+    },
+    "B_vjp": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 9.114952469017625,
+      "max": 1.8784014374192413,
+      "min": -4.941903888288469,
+      "sha256": "4828d5443817f92321453aa978bc08a63fb84d74cefc316f746dc510b14212fe",
+      "shape": [
+        144
+      ]
+    },
+    "absB": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 4.148843469537948,
+      "max": 4.148843469537948,
+      "min": 4.148843469537948,
+      "sha256": "5e7b21b30c2e09423c35a5f784b3cd9cda59da12632241ed0d8e27a46c758a5d",
+      "shape": [
+        1
+      ]
+    },
+    "gradB": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 5.833428178934463,
+      "max": 8.093301430584448e-16,
+      "min": -3.9540178135583237,
+      "sha256": "13934f9fb7e8ed61f0cc1c527b6549de27233fa7571878e6e65155af278fbd05",
+      "shape": [
+        1,
+        3,
+        3
+      ]
+    },
+    "gradB_cotangent": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 3.0,
+      "max": 1.0,
+      "min": 1.0,
+      "sha256": "19088d37e44fec2ac250d3cc3ba2102f084acde81a46ade67312433a0a6af3e2",
+      "shape": [
+        1,
+        3,
+        3
+      ]
+    },
+    "gradB_vjp": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 62.40766059640585,
+      "max": 24.116764524202974,
+      "min": -23.69688111177422,
+      "sha256": "125976ef6f19b7750a7034b993f4271911ad36a22b151e63b2944d46aacdd1ab",
+      "shape": [
+        144
+      ]
+    },
+    "gradgradB": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 8.244953655205697,
+      "max": 3.4089303119456473,
+      "min": -4.486299619626078,
+      "sha256": "afd1a2ce9fca844369e315a2a990b7cea12082d7e64a6ecde68ab46bfefed1f2",
+      "shape": [
+        1,
+        3,
+        3,
+        3
+      ]
+    },
+    "gradgradB_cotangent": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 5.196152422706632,
+      "max": 1.0,
+      "min": 1.0,
+      "sha256": "ea1fad13fb695e103e49625a8a6016d18f70f8e894b7616f0594cba43b4eb27c",
+      "shape": [
+        1,
+        3,
+        3,
+        3
+      ]
+    },
+    "gradgradB_vjp": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 303.9198374962271,
+      "max": 137.29904619647078,
+      "min": -99.97233196218637,
+      "sha256": "c3c1806cba7c632621cdafb5a5ded7d992c8f756c854b409b37442f9026008e6",
+      "shape": [
+        144
+      ]
+    },
+    "gradgradgradB": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 225.37293026390796,
+      "max": 65.94920871867387,
+      "min": -73.04740102000765,
+      "sha256": "48a645f1b745da208eb49b87c6939a5420be87f4d3aae7bbdd2cc6d0a0628110",
+      "shape": [
+        1,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    "gradgradgradB_cotangent": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 9.0,
+      "max": 1.0,
+      "min": 1.0,
+      "sha256": "a8387df1c623c82f1aa917558fb8a41aecf92f5dd3292e99d87d670ed926614c",
+      "shape": [
+        1,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    "gradgradgradB_vjp": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 5731.443270165437,
+      "max": 1481.6408850637922,
+      "min": -2425.5268372801297,
+      "sha256": "482dfff01158bfb4b3f1afb93d4c793a597cba8ecf973a1ee41e87f64f5fa918",
+      "shape": [
+        144
+      ]
+    },
+    "xyz": {
+      "devices": [
+        "TFRT_CPU_0"
+      ],
+      "dtype": "float64",
+      "finite": true,
+      "l2": 1.503267406518306,
+      "max": 1.503267406518306,
+      "min": 0.0,
+      "sha256": "c456ff58b56a25ce54b71cbb39e1bfcbfd491f621353e82a6b7aa294e0476100",
+      "shape": [
+        3
+      ]
+    }
+  },
+  "coil_repository_path": "examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json",
+  "coil_sha256": "09485e34e6e4f90b0ac765ee068d1b6f5ca1e58e4c7bd47a8b9df25b0ddf3a73",
+  "cpu_devices": [
+    "TFRT_CPU_0"
+  ],
+  "default_backend": "cpu",
+  "default_devices": [
+    "TFRT_CPU_0"
+  ],
+  "dof_names": [
+    "RBC(1,0)",
+    "RBC(-1,1)",
+    "RBC(0,1)",
+    "RBC(1,1)",
+    "ZBS(1,0)",
+    "ZBS(-1,1)",
+    "ZBS(0,1)",
+    "ZBS(1,1)",
+    "coil[0].x0",
+    "coil[0].xs(1)",
+    "coil[0].xc(1)",
+    "coil[0].xs(2)",
+    "coil[0].xc(2)",
+    "coil[0].xs(3)",
+    "coil[0].xc(3)",
+    "coil[0].xs(4)",
+    "coil[0].xc(4)",
+    "coil[0].xs(5)",
+    "coil[0].xc(5)",
+    "coil[0].y0",
+    "coil[0].ys(1)",
+    "coil[0].yc(1)",
+    "coil[0].ys(2)",
+    "coil[0].yc(2)",
+    "coil[0].ys(3)",
+    "coil[0].yc(3)",
+    "coil[0].ys(4)",
+    "coil[0].yc(4)",
+    "coil[0].ys(5)",
+    "coil[0].yc(5)",
+    "coil[0].z0",
+    "coil[0].zs(1)",
+    "coil[0].zc(1)",
+    "coil[0].zs(2)",
+    "coil[0].zc(2)",
+    "coil[0].zs(3)",
+    "coil[0].zc(3)",
+    "coil[0].zs(4)",
+    "coil[0].zc(4)",
+    "coil[0].zs(5)",
+    "coil[0].zc(5)",
+    "coil[1].x0",
+    "coil[1].xs(1)",
+    "coil[1].xc(1)",
+    "coil[1].xs(2)",
+    "coil[1].xc(2)",
+    "coil[1].xs(3)",
+    "coil[1].xc(3)",
+    "coil[1].xs(4)",
+    "coil[1].xc(4)",
+    "coil[1].xs(5)",
+    "coil[1].xc(5)",
+    "coil[1].y0",
+    "coil[1].ys(1)",
+    "coil[1].yc(1)",
+    "coil[1].ys(2)",
+    "coil[1].yc(2)",
+    "coil[1].ys(3)",
+    "coil[1].yc(3)",
+    "coil[1].ys(4)",
+    "coil[1].yc(4)",
+    "coil[1].ys(5)",
+    "coil[1].yc(5)",
+    "coil[1].z0",
+    "coil[1].zs(1)",
+    "coil[1].zc(1)",
+    "coil[1].zs(2)",
+    "coil[1].zc(2)",
+    "coil[1].zs(3)",
+    "coil[1].zc(3)",
+    "coil[1].zs(4)",
+    "coil[1].zc(4)",
+    "coil[1].zs(5)",
+    "coil[1].zc(5)",
+    "coil[2].x0",
+    "coil[2].xs(1)",
+    "coil[2].xc(1)",
+    "coil[2].xs(2)",
+    "coil[2].xc(2)",
+    "coil[2].xs(3)",
+    "coil[2].xc(3)",
+    "coil[2].xs(4)",
+    "coil[2].xc(4)",
+    "coil[2].xs(5)",
+    "coil[2].xc(5)",
+    "coil[2].y0",
+    "coil[2].ys(1)",
+    "coil[2].yc(1)",
+    "coil[2].ys(2)",
+    "coil[2].yc(2)",
+    "coil[2].ys(3)",
+    "coil[2].yc(3)",
+    "coil[2].ys(4)",
+    "coil[2].yc(4)",
+    "coil[2].ys(5)",
+    "coil[2].yc(5)",
+    "coil[2].z0",
+    "coil[2].zs(1)",
+    "coil[2].zc(1)",
+    "coil[2].zs(2)",
+    "coil[2].zc(2)",
+    "coil[2].zs(3)",
+    "coil[2].zc(3)",
+    "coil[2].zs(4)",
+    "coil[2].zc(4)",
+    "coil[2].zs(5)",
+    "coil[2].zc(5)",
+    "coil[3].x0",
+    "coil[3].xs(1)",
+    "coil[3].xc(1)",
+    "coil[3].xs(2)",
+    "coil[3].xc(2)",
+    "coil[3].xs(3)",
+    "coil[3].xc(3)",
+    "coil[3].xs(4)",
+    "coil[3].xc(4)",
+    "coil[3].xs(5)",
+    "coil[3].xc(5)",
+    "coil[3].y0",
+    "coil[3].ys(1)",
+    "coil[3].yc(1)",
+    "coil[3].ys(2)",
+    "coil[3].yc(2)",
+    "coil[3].ys(3)",
+    "coil[3].yc(3)",
+    "coil[3].ys(4)",
+    "coil[3].yc(4)",
+    "coil[3].ys(5)",
+    "coil[3].yc(5)",
+    "coil[3].z0",
+    "coil[3].zs(1)",
+    "coil[3].zc(1)",
+    "coil[3].zs(2)",
+    "coil[3].zc(2)",
+    "coil[3].zs(3)",
+    "coil[3].zc(3)",
+    "coil[3].zs(4)",
+    "coil[3].zc(4)",
+    "coil[3].zs(5)",
+    "coil[3].zc(5)",
+    "coil[0].current",
+    "coil[1].current",
+    "coil[2].current",
+    "coil[3].current"
+  ],
+  "driver_sha256": "32443a2584dd28cf1122ea64a4954ea4267586c3feb128167ed7aea381870906",
+  "estimate_semantics": {
+    "dimensionless": true,
+    "domain": "one exterior Cartesian target 0.25 m beyond the LCFS along the axis-edge ray at theta=phi=0",
+    "exclusions": [
+      "not an absolute error in tesla",
+      "not the error of the combined coil-plus-plasma total field",
+      "not a spatial-derivative accuracy estimate"
+    ],
+    "normalization": "RMS magnitude of total B on the source surface",
+    "quantity": "order-0 virtual-casing plasma-field quadrature estimate"
+  },
+  "gpu_devices": [],
+  "input_repository_path": "examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap",
+  "input_sha256": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
+  "jax_platforms": "cpu",
+  "numerical_assertions": {
+    "B_nonzero": true,
+    "absB_nonzero": true,
+    "all_vjps_nonzero": true,
+    "order0_plasma_quadrature_estimate_within_requested_digits": true
+  },
+  "package_versions": {
+    "booz-xform-jax": "0.4.0",
+    "essos": "0.17",
+    "h5py": "3.16.0",
+    "jax": "0.9.2",
+    "jax-cuda12-pjrt": "0.9.2",
+    "jax-cuda12-plugin": "0.9.2",
+    "jaxlib": "0.9.2",
+    "netCDF4": "1.7.4",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "solvax": "0.21.0",
+    "virtual-casing-jax": "0.0.7",
+    "vmex": "0.10.0"
+  },
+  "python_version": "3.11.15",
+  "root": {
+    "converged": true,
+    "fsql": 3.950095527693434e-12,
+    "fsqr": 9.939971221745235e-12,
+    "fsqz": 1.3586313768835218e-12,
+    "iterations": 700
+  },
+  "source_clean": true,
+  "source_git_head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+  "source_git_tree": "d070d6401240f993c72612103d7bd6b4acd03226",
+  "timings_seconds": {
+    "B": 3.1697656670585275,
+    "B_error_estimate": 1.2437942088581622,
+    "B_vjp": 47.92275893688202,
+    "absB": 0.04902584198862314,
+    "equilibrium": 0.009166659321635962,
+    "exterior_constructor": 2.370399871841073,
+    "gradB": 1.8903175322338939,
+    "gradB_vjp": 11.119747709017247,
+    "gradgradB": 2.7232465967535973,
+    "gradgradB_vjp": 14.673410291783512,
+    "gradgradgradB": 3.864366835914552,
+    "gradgradgradB_vjp": 20.900417743250728,
+    "problem": 14.962570471689105,
+    "total": 180.25543106766418
+  },
+  "uses_virtual_casing": true,
+  "vjp_contract": {
+    "B_vjp": {
+      "cotangent": "B_cotangent",
+      "output": "B"
+    },
+    "gradB_vjp": {
+      "cotangent": "gradB_cotangent",
+      "output": "gradB"
+    },
+    "gradgradB_vjp": {
+      "cotangent": "gradgradB_cotangent",
+      "output": "gradgradB"
+    },
+    "gradgradgradB_vjp": {
+      "cotangent": "gradgradgradB_cotangent",
+      "output": "gradgradgradB"
+    },
+    "parameter_count": 144,
+    "parameter_order_key": "dof_names"
+  },
+  "x64_enabled": true,
+  "independent_cpu_capture_repeat": {
+    "array_count": 15,
+    "all_raw_array_hashes_identical": true,
+    "original_driver_sha256": "055d99f04b9b0ee8721e6210c2fee81a86e93d77b137cc6f4bb80a137f87fd44",
+    "original_container_sha256": "e2d58fefc70519fd54e44ee16ffc22c20417a1f14b336f993d69c51878041e5d",
+    "scope": "Separate CPU processes on the same pinned candidate and dependency environment. Not GPU parity or an independent physical oracle."
+  },
+  "elapsed_supervisor_wall_seconds": 184.182,
+  "limits": "One exterior target, candidate PR409 source, CPU only. Finiteness/nonzero output and quadrature acceptance do not establish FD/duality correctness, physical equilibrium accuracy or GPU parity."
+}

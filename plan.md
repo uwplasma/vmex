@@ -11,7 +11,8 @@ The HINT branch retires its obsolete solver/cache/refinement implementation;
 it adds no VMEX solver changes. Historical CPU/GPU and derivative evidence
 must be requalified. Open #409 fixes live surface assembly, #410 owns dependency
 floor validation, #416 fixes history-dependent free-boundary recovery, and
-#417 ties derivative admission/reuse to measured refined states. Require review
+#417 ties derivative admission/reuse to measured refined states; draft #418
+closes its direct-API validity-check bypass. Require review
 and current checks, then test the integrated revision on the exact QA cases.
 The rank-based lift candidate #414 supersedes the rejected per-span sampling
 rule; neither it nor #412's force-reporting work certifies general 3-D polishing.
@@ -35,7 +36,8 @@ tracer topology. Keep prescribed-boundary reconstruction separate from matched
 free-boundary equilibrium, and preserve the known 2.5% coil/WOUT mismatch.
 The fresh-grid response RMS/max differences of 0.074009/0.321955 mT are startup
 diagnostics, not inter-code error or equilibrium convergence. Current CPU root
-and #409 exterior-example checks pass; native diagnostics pass short serial/MPI,
+and #409 exterior-example checks pass; the portable capture command reproduces
+all 15 field/derivative/VJP arrays byte-for-byte across two CPU processes; native diagnostics pass short serial/MPI,
 off/on and zero-source controls. The later-time accounting measurement passes; current closure, integrated
 GPU parity and research acceptance remain open. See the protocol for exact sources,
 commands, metrics, test scope and publication gates.

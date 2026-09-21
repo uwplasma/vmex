@@ -18,6 +18,7 @@ outside the given boundary, then a separately matched free-boundary study.
 | [VMEX #410](https://github.com/uwplasma/vmex/pull/410) | Open draft at review: owns dependency-floor changes. Complete exact-floor validation there rather than duplicate it here. |
 | [VMEX #416](https://github.com/uwplasma/vmex/pull/416) | Open candidate: removes history-dependent suppression of free-boundary cold recovery. Qualify repeated accepted points after rejected trials on the integrated source. |
 | [VMEX #417](https://github.com/uwplasma/vmex/pull/417) | Open candidate: anchors derivative admission and reuse to measured refined coefficients. Exact-case QA and GPU evidence remain necessary. |
+| [VMEX #418](https://github.com/uwplasma/vmex/pull/418) | Draft follow-up to #417: applies unconditional validity checks to direct derivative paths even with no absolute primal cutoff; eight focused tests pass. Integrated QA/GPU qualification remains open. |
 | [VMEX #413](https://github.com/uwplasma/vmex/pull/413) | Proposed replacement product plan. Reconcile after integration; its six research lanes do not replace this study's physical comparison gates. |
 
 Current main has raw block Newton/adjoint solves, deterministic free-boundary
@@ -124,6 +125,35 @@ started. A future run must select CUDA first while retaining the CPU backend
 for host callbacks, disable preallocation, enforce time/memory bounds, and
 retain numerical outputs for comparison rather than report a test pass alone.
 
+A captured-output CPU run on the same #409 candidate completed with all 15
+arrays finite, nonzero field, and all four VJP vectors nonzero. The portable
+runner subsequently reproduced every array byte-for-byte in a separate process
+(184.2 s wall time); container ZIP hashes differ, numerical member hashes agree. The [record](vmex-cpu.json) and [numeric archive](data/vmex-cpu.npz)
+retain the single exterior target, spatial derivatives through order three,
+four 144-entry VJPs, all-ones cotangents and exact parameter ordering. This is
+candidate-source execution evidence, not a finite-difference certificate.
+The saved `B_error_estimate` is dimensionless, order-zero virtual-casing plasma
+quadrature error normalized by RMS total field on the source surface. It does
+not estimate combined coil-plus-plasma field error or derivative accuracy.
+
+The portable [capture command](capture-vmex.py) takes explicit paths and records
+source/dependency/input identities. Use the exact tested source revision above
+for reproduction, or record a new baseline for an integrated revision. With
+that checkout selected as `VMEX_SOURCE` and an existing output directory:
+
+```sh
+JAX_ENABLE_X64=1 JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES= \
+  VMEX_COMPILATION_CACHE=disabled OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+  python handoff/hint-qa/capture-vmex.py --source-root "$VMEX_SOURCE" \
+  --output-prefix results/vmex-cpu
+```
+
+Use a process-group time/memory limit on shared machines. A paired GPU run must
+retain the CPU backend for callbacks and record actual placement; neither a
+GPU environment nor a CPU pass establishes GPU parity. All backend tolerances
+are separate from the physical accuracy and finite-difference gates.
+
 Source review of HINT's linear drive finds no normalization defect explaining
 the observed deficit: its cut-zero imposed-current integral is constructed
 to match `inet0`. That source enters the resistive evolution; it does not
@@ -204,7 +234,7 @@ reproduced equilibrium result.
 
 1. **Freeze a working baseline.** Incorporate the reviewed #409 fix and
    validate #410's floors. Include accepted #416 recovery changes before
-   free-boundary qualification and #417 state/derivative changes before
+   free-boundary qualification and #417/#418 state/derivative changes before
    sensitivity claims; candidate evidence is not integrated-main evidence.
    Pin all source commits, dirty patches, input hashes,
    Python/JAX/compiler/MPI versions and device placement. Use `current` for

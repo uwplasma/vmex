@@ -8,5 +8,6 @@
   "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta2p5_bootstrap.json": "3888630f63d2c8662145b5d6a5a1ff18de893d265bb52105f931093d10263c1d",
   "coarse.in": "687e97042b49fc69edb3744e4598b899687fe63e89e0a41af8bca44996b28bb2",
   "fine.in": "0b7f3eac8144bcbf0da1af1d48a60a2de5a1b77cb65911b7ada42ecc25ebf1bb",
-  "native-samples.npz": "3fee6693d8643419441fd934eb584a92b475a8bfc3daa80e5877818a976694d6"
+  "native-samples.npz": "3fee6693d8643419441fd934eb584a92b475a8bfc3daa80e5877818a976694d6",
+  "vmex-cpu.npz": "4f0a87511b74010e636430d4990c58d6558d2c03584a70f892865c49221189b5"
 }
