@@ -1,0 +1,9 @@
+{
+  "beta0p5.nc": "bc676e94d047ad5133a0af1bc721415a6c178bf89b8d86caa4eadf288ba7b9a2",
+  "beta2p5.nc": "3866ec46424c394bad1656366643be0ab137fbaf40b49852841b5a6461482938",
+  "targets.npz": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5",
+  "../../../examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
+  "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json": "09485e34e6e4f90b0ac765ee068d1b6f5ca1e58e4c7bd47a8b9df25b0ddf3a73",
+  "../../../examples/data/input.LandremanPaul2021_QA_beta2p5_bootstrap": "f1c5ab0704f8097f680e1caed519c899fdecd0f4b9b73d4e4a33d798c26a9bd5",
+  "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta2p5_bootstrap.json": "3888630f63d2c8662145b5d6a5a1ff18de893d265bb52105f931093d10263c1d"
+}

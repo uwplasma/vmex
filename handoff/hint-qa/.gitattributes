@@ -1,0 +1,2 @@
+*.patch -whitespace
+data/*.nc linguist-generated

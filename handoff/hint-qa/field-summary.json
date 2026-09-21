@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "target_count": 192,
+    "coarse_grid": [
+      64,
+      64,
+      32
+    ],
+    "fine_grid": [
+      128,
+      128,
+      64
+    ],
+    "coordinate_units": {
+      "cartesian_targets": "m",
+      "native_cylindrical_targets": [
+        "m",
+        "rad",
+        "m"
+      ]
+    },
+    "field_unit": "T"
+  },
+  "source": {
+    "hint_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+    "postprocessor_source_sha256": "e5d2446a38fa9d53190fb872a967e15a2c97f0f944a3e41d059d9cb3ebdf1549"
+  },
+  "shared_hashes": {
+    "target_container_sha256": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5",
+    "target_cartesian_array_sha256": "be56a250f35f0e84738c28bda562dd5205ce8ffee8696c2272f109fdbe246c3c",
+    "target_native_cylindrical_array_sha256": "4c3e73eb7ec42b8af7ee3f18c72ff1369ebecfa4b83d8d05d473c3798d2ebca7",
+    "native_sampler_binary_sha256": "a70b83f3fb1a7ed15bd4e14e9fddc7004f4f8159c20388e801bee42afad9b252"
+  },
+  "coarse_hashes": {
+    "snapshot_container_sha256": "e76a0a235a60ba0bd51dd0bf4eaaac00f106c1af8a02ba4c4e206fcc4920e3df",
+    "vacuum_container_sha256": "392689512f2a9803fbf8a69e9812c8dd9af865a35426197593a72a4c7abab5c2",
+    "total_raw_array_sha256": "f38325121503127ffec488b56d7c717618cea99d01edef7ed8fab7aee2892b84",
+    "vacuum_raw_array_sha256": "aa58985d314921c08ee6dcd35f740a76e4f8130159825c5dd37682aae5b576ea",
+    "total_target_array_sha256": "af7bd24308034008b6816234aae9b2b880107af1ce878910581bf84d8ac2cd57",
+    "vacuum_target_array_sha256": "6c18a43738f57fe509a41ac8bd197e675d6372e0ca8e3ab5a83e40a6dc1135af",
+    "response_target_array_sha256": "f4bdc9de1fa8ca9e9defd8fde2232308a49ef41d7743b430d6e200f63c89764d"
+  },
+  "fine_hashes": {
+    "snapshot_container_sha256": "e97ba3894af3c05bc6da30e2106e43391e709d9f3bfb166510197796406fe2b9",
+    "vacuum_container_sha256": "559f6be766900ad3c947b650114d033dd3384bf2716a880b84a7ef8f74e3305b",
+    "total_raw_array_sha256": "cc40a351b4849efa3df9b1efbb08b85fe30a1f22bbc2f2c8b1aea3b1c1e92e56",
+    "vacuum_raw_array_sha256": "60ea6193877cb6f76874683c578c1a88047910abad01edd94323d1a034185efb",
+    "total_target_array_sha256": "cc4f85ed6ea45035ac19cc4a083b1cebc139f69b457f9b1019569397a98faf74",
+    "vacuum_target_array_sha256": "5771912825abfc6a8f0abd2ab4ffb1e71b5f69c6350f1a0d654a6074af143ec5",
+    "response_target_array_sha256": "4451b4e19e6e606065d9e9774a81f0ff0856e2ec2a476ef890d59c67d733696a"
+  },
+  "coarse_to_fine_metrics": {
+    "total_field": {
+      "rms_vector_delta_T": 0.0002435156582405511,
+      "max_vector_delta_T": 0.0017011476700459411
+    },
+    "vacuum_field": {
+      "rms_vector_delta_T": 0.0002329399659066123,
+      "max_vector_delta_T": 0.0016974704205048377
+    },
+    "plasma_response": {
+      "rms_vector_delta_T": 7.40090926007143e-05,
+      "max_vector_delta_T": 0.00032195484079652263
+    }
+  },
+  "response_definition": "At each target and on each grid, subtract the native vacuum-field sample from the native total-field sample, then form the coarse-to-fine vector difference.",
+  "limitations": [
+    "This is a diagnostic comparison at fixed physical targets, not an equilibrium or convergence certificate.",
+    "The targets are exterior to the initial fixed boundary; exteriority to the relaxed current support is not certified.",
+    "The total-field difference includes grid-dependent vacuum interpolation.",
+    "No new equilibrium, relaxation, or GPU calculation was performed."
+  ]
+}

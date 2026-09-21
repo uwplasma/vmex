@@ -1,5 +1,30 @@
 # VMEX research plan
 
+**HINT comparison review, 2026-09-21.** The dedicated
+[finite-beta QA protocol](handoff/hint-qa/README.md) now distinguishes historical
+measurements from qualification of main at `f719c4ff`. This does not replace
+the product phases below or mark Phase G complete. PR #302 retires its old
+universal primal gate and refinement/cache implementation in favor of current
+main's solver paths. Its proposed per-span radial sampling rejection is also
+retired: review found it unnecessarily rejects valid custom spline grids;
+future admission must assess the effective constrained fit's rank/conditioning.
+Historical CPU/GPU root and directional-gradient results require fresh
+validation. Open #409 fixes a surface-field regression after #403; draft #410
+owns dependency-floor validation. Check their live state before freezing a
+new comparison baseline.
+
+The next HINT work is ordered by evidence: (1) validate the integrated VMEX
+baseline, (2) capture HINT's actual imposed-current update and diagnose the
+large attained-current deficit, (3) establish matched-time/grid/wall/trace
+convergence at 0.5%, (4) compare total and response fields with separate error
+budgets, (5) qualify 2.5% and common-tracer topology. Current-source derivative
+and optimization validation can proceed independently after a qualified root;
+it does not waive these equilibrium gates. The fresh two-grid startup pair
+has response-field RMS/max differences 0.074009/0.321955 mT at 192 fixed
+targets after native vacuum subtraction. This is diagnostic evidence, not
+an accepted equilibrium or a HINT–VMEX discrepancy. The protocol records
+remaining reproducibility and foundational-paper access gaps explicitly.
+
 Authoritative plan, revised **2026-09-13** by an independent review of the
 2026-09-06 plan (merged as [#283](https://github.com/uwplasma/vmex/pull/283),
 readable with its full logbook at
@@ -955,7 +980,7 @@ check that may be red.
 | vmex #311 (A3, merged `0c083539`) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
 | vmex #313 and #314 (merged `373f1e83`, `746215d3`), #315, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; #316's CTH free-boundary gradient check passes locally; #318 needs its counter rows before merge; #314's c3d failure was a test defect already on `main`: `test_qi_regression_pin_and_jit` pins the QI total on the axisymmetric Solov'ev deck, whose toroidal Boozer coefficients are about 1e-16, so the well argmin ties and 1e-15 noise flips the total between 0.13626 and 0.13500; #323 (merged `b0646713`) moves the pin to the golden `wout_li383_low_res`, whose minimum is unique; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
-| vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck: at the reachable |P(gc)| ≈ 1.88e-7 every trial would fail `primal_tol` and return value-only, so the optimizer would never receive an implicit gradient (B1); no finish certifies better than 6.6e-9 on that deck, and the floor comes from non-gauge soft λ modes | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
+| vmex #302 | revised 2026-09-21: historical 57,000-line archive preserved separately; compact HINT protocol, exact reference WOUTs/targets, native patch/build support and field summary retained. Old universal primal/cache/refinement changes retired; per-span lift rejection withdrawn after independent review | review the reconciled documentation/data PR on current main; no new solver or QA certification claim. Qualify the integrated #409/#410 baseline under the HINT protocol before new numerical claims |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
 | vmex #319 (B4a, merged `c5ee2e0d`; total compile seconds 53.1 → 48.8 on QA and 50.2 → 36.5 on QI; its extra build programs are second copies caused by the committed final carry, with build compile time 4.66 → 4.64 s on QA and 8.09 → 8.86 s on QI, not removable without restoring the across-trial duplicates it removes) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
 | vmex #320 (B1a, retargeted to `main`; B1's QA_lowres run shows the plain rule would discard a certification, so it gains a linear-progress guard: stop only when the unconverged inner solve gained fewer than three digits and the step made no progress) | refinement stops after an unconverged step that does not lower |F| (+14/−9 in `implicit.py`, jit-exercised test on both JAX versions); stacked on #319 as `9b77a10e`, calling the shared commitment helper at both refinement call sites with one compile per lane pinned; QI first derivative 58.9 → 40.2 s with value, gradient, residual, Jacobian and refined state bit-identical | merge after #319, when its benchmark rows show 6,000 → 2,000 GCROT iterations with bit-identical outputs and CI is green |
