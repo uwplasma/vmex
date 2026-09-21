@@ -1,6 +1,6 @@
 # VMEX research plan
 
-**HINT comparison checkpoint, 2026-09-21.** Main remains `f719c4ff`; the
+**HINT comparison checkpoint, 2026-09-21.** Main is now `45f3a7aea` with #409 merged; the
 HINT branch already contains it. The compact [QA protocol](handoff/hint-qa/README.md)
 is the canonical study plan and evidence record. The proposed replacement
 product plan [#413](https://github.com/uwplasma/vmex/pull/413) remains open;
@@ -9,7 +9,7 @@ operational queues. The historical product plan below is unchanged here.
 
 The HINT branch retires its obsolete solver/cache/refinement implementation;
 it adds no VMEX solver changes. Historical CPU/GPU and derivative evidence
-must be requalified. Open #409 fixes live surface assembly, #410 owns dependency
+must be requalified. Merged #409 fixes live surface assembly; #410 owns dependency
 floor validation, #416 fixes history-dependent free-boundary recovery, and
 #417 ties derivative admission/reuse to measured refined states; draft #418
 closes its direct-API validity-check bypass. Require review
@@ -22,6 +22,8 @@ Execute three independent bounded lanes now:
 1. Qualify the integrated VMEX 0.5% root, physical diagnostics and captured
    CPU/GPU field/response arrays. Follow with exact-case FD/Taylor/duality and
    free-boundary repeatability; a finite example output is not a gradient oracle.
+   The bounded two-lift screen is strongly representation-sensitive: control
+   reconstruction error before using its force norm to admit the native root.
 2. Resolve HINT current evolution and Ohm/Faraday balance before extending
    relaxation or changing resistivity. The bounded later-time diagnostic now
    confirms source normalization, while attained response current on the same

@@ -481,5 +481,124 @@
     "scope": "Separate CPU processes on the same pinned candidate and dependency environment. Not GPU parity or an independent physical oracle."
   },
   "elapsed_supervisor_wall_seconds": 184.182,
-  "limits": "One exterior target, candidate PR409 source, CPU only. Finiteness/nonzero output and quadrature acceptance do not establish FD/duality correctness, physical equilibrium accuracy or GPU parity."
+  "limits": "One exterior target, candidate PR409 source, CPU only. Finiteness/nonzero output and quadrature acceptance do not establish FD/duality correctness, physical equilibrium accuracy or GPU parity.",
+  "supplemental_physical_screen": {
+    "coarse_lift": {
+      "degree": 5,
+      "divB": {
+        "max_abs_T_m": 1.5543338270287012e-15,
+        "normalized_rms_by_Brms_over_Aminor": 1.6343774877227968e-17,
+        "probe_count": 8,
+        "rms_T_m": 5.624198051513992e-16
+      },
+      "force": {
+        "B_rms_T": 5.86540747852518,
+        "absolute_l2_N_m3": 322582926.2791862,
+        "mean_force_over_mean_grad_p": 76.55139288219313,
+        "minimum_signed_jacobian_over_rho_m3_rad2": 0.009141936197702254,
+        "nestedness_margin": 0.6152172504135578,
+        "normalized_l2_dimensionless": 1.8338403778451442,
+        "volume_average_force_N_m3": 115563952.53636517,
+        "weight_denominator_m3_rad2": 0.26074336368890194
+      },
+      "spans": 8
+    },
+    "current": {
+      "absolute_error": -104.48190811183304,
+      "relative_error": 0.0010920631761084801,
+      "returned_ctor": -95778.34986522929,
+      "target_curtor": -95673.86795711746,
+      "units": "A"
+    },
+    "default_lift": {
+      "degree": 5,
+      "divB": {
+        "max_abs_T_m": 7.771272078670867e-16,
+        "normalized_rms_by_Brms_over_Aminor": 8.692538075145887e-18,
+        "probe_count": 8,
+        "rms_T_m": 2.990885747615347e-16
+      },
+      "force": {
+        "B_rms_T": 5.864664549463845,
+        "absolute_l2_N_m3": 2390844.1871928917,
+        "mean_force_over_mean_grad_p": 1.1045824158774187,
+        "minimum_signed_jacobian_over_rho_m3_rad2": 0.009146083748390694,
+        "nestedness_margin": 0.6154623522974916,
+        "normalized_l2_dimensionless": 1.0836805762426704,
+        "volume_average_force_N_m3": 1670968.5437153017,
+        "weight_denominator_m3_rad2": 0.2607646146348461
+      },
+      "spans": 13
+    },
+    "flux": {
+      "absolute_error": 0.0,
+      "returned_phi_edge": 0.5186826591273498,
+      "target_phiedge": 0.5186826591273498,
+      "units": "Wb"
+    },
+    "geometry": {
+      "Aminor_p": 0.17044723267954495,
+      "Rmajor_p": 1.0226828165731394,
+      "aspect": 5.9999966000965745,
+      "rmax_surf": 1.2532674065183071,
+      "rmin_surf": 0.7161629780308136,
+      "volume_p": 0.5864764923756421,
+      "zmax_surf": 0.3805123822289321
+    },
+    "grid": {
+      "mask": "all shifted tensor-product nodes; axis and edge excluded",
+      "normalization_denominator": "pointwise (|JxB|+|grad p|+1e-12 N/m^3)/2; volume metrics weighted by |sqrt(g)| d(rho)d(theta)d(zeta)",
+      "point_count": 1280,
+      "rho_nodes": 5,
+      "s_window": [
+        0.1,
+        0.99
+      ],
+      "theta_nodes": 16,
+      "zeta_nodes": 16
+    },
+    "lift_sensitivity": {
+      "B_relative_l2": 0.00731069314278813,
+      "absolute_l2_relative_difference": 133.92427821401998,
+      "force_relative_l2": 150.8595280433614
+    },
+    "limitations": [
+      "force and divB use spline lifts of the returned native state, not the native radial representation",
+      "two-lift disagreement is sensitivity, not a rigorous representation-error bound",
+      "divB is an analytic identity check of each fitted flux-coordinate field, not an independent native-state Maxwell certificate",
+      "grid is a bounded screen, not certify_strong_force overintegration/refinement",
+      "native host FSQ is intentionally omitted as continuum evidence",
+      "WOUT scalar/profile reconstruction is used only for global constraints and geometry",
+      "full-mesh pressure edge is a half-mesh extrapolation and is not the prescribed boundary value"
+    ],
+    "native_root": {
+      "converged": true,
+      "iterations": 700,
+      "mpol": 7,
+      "ns": 31,
+      "ntor": 6,
+      "state_sha256": "42d6abfee5a9d9dde65b20fb14d5572bd8fe9efd0373a9379d5e5423202ca9ff"
+    },
+    "pressure": {
+      "betatotal": 0.005038845418346818,
+      "comparison": "prescribed pressure evaluated on native half mesh; first sentinel set to zero per WOUT convention",
+      "full_mesh_axis": 144195.91819055873,
+      "full_mesh_edge_extrapolated": -524.936494062058,
+      "half_mesh_last": 193.7066814462887,
+      "maximum_full_mesh": 144195.91819055873,
+      "prescribed_half_mesh_max_abs_error": 1.4551915228366852e-11,
+      "prescribed_half_mesh_relative_linf": 1.0262814809654048e-16,
+      "units": "Pa"
+    },
+    "source": {
+      "git_head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+      "git_tree": "d070d6401240f993c72612103d7bd6b4acd03226",
+      "input_sha256": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79"
+    },
+    "timing_seconds": {
+      "lifts": 10.477984124969225,
+      "solve": 5.649743249989115,
+      "total": 37.380616749986075
+    }
+  }
 }

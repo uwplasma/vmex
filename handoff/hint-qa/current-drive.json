@@ -113,7 +113,9 @@
       "patches": [
         "hint-portability.patch",
         "hint-diagnostics.patch"
-      ]
+      ],
+      "diagnostic_patch_sha256": "3d763783f847211ece51b043bef9747408655de52b4db2bbdff34e7a7a978ea4",
+      "diagnostic_patch_url": "https://github.com/uwplasma/vmex/blob/cacb37bab2e4837745132865d42accd13990ba6a/handoff/hint-qa/hint-diagnostics.patch"
     },
     "build": {
       "binary_sha256": "5d66d706823a9e517cd6c0a391d21e92abee88ba6413d1c7363991b73302f2a6",

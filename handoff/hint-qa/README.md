@@ -1,7 +1,7 @@
 # HINT–VMEX finite-beta QA comparison
 
 Reviewed 2026-09-21 against VMEX main
-[`f719c4ff503c526368254aebf3ba9a9119c17f87`](https://github.com/uwplasma/vmex/commit/f719c4ff503c526368254aebf3ba9a9119c17f87).
+[`45f3a7aeaeedd50ee7a04d553bc0d281bb8510a4`](https://github.com/uwplasma/vmex/commit/45f3a7aeaeedd50ee7a04d553bc0d281bb8510a4).
 This is a research protocol and historical baseline, **not a qualified
 HINT–VMEX equilibrium comparison**. The two supplied finite-beta QA cases
 remain the goal: nominal volume beta 0.5% and 2.5%, first comparing fields
@@ -14,7 +14,7 @@ outside the given boundary, then a separately matched free-boundary study.
 | [HINT3D `current`](https://github.com/yasuhiro-suzuki/HINT3D/tree/current) | The creator maintains this branch; do not substitute `master`. The measured source is `bf31fc39f7179bdd91d84319c51c68e2f6fff25f` plus [the eight-file patch](hint-portability.patch). The patch is not upstream or proof of a bug-free solver. |
 | [VMEX PR #302](https://github.com/uwplasma/vmex/pull/302) | Branch `fix/hint-comparison-derivative-contract` is reconciled with the pinned current-main baseline. Its old numerical source `14360d179af4534aa9bb638b172c8724ee289d9b` is historical evidence, not certification of this branch. |
 | [SOLVAX #104](https://github.com/uwplasma/SOLVAX/pull/104) | Tested head `e4b507185464851ac5e8de22041f2f8e384554e9`, merged as `66f97a6e0eb758af8d7f46939ffdd8ec733efbef`; released in 0.21.0. Use at least 0.21.0 for its rejection of nonfinite nonlinear roots. |
-| [VMEX #409](https://github.com/uwplasma/vmex/pull/409) | Open at review: fixes the surface-field assembly regression introduced by #403. Include its reviewed fix before current-source field qualification. |
+| [VMEX #409](https://github.com/uwplasma/vmex/pull/409) | Merged as `45f3a7aea`: fixes the surface-field assembly regression introduced by #403. Its complete Git tree equals the tested candidate `aabedb8f`; execution evidence below retains its original commit identity. |
 | [VMEX #410](https://github.com/uwplasma/vmex/pull/410) | Open draft at review: owns dependency-floor changes. Complete exact-floor validation there rather than duplicate it here. |
 | [VMEX #416](https://github.com/uwplasma/vmex/pull/416) | Open candidate: removes history-dependent suppression of free-boundary cold recovery. Qualify repeated accepted points after rejected trials on the integrated source. |
 | [VMEX #417](https://github.com/uwplasma/vmex/pull/417) | Open candidate: anchors derivative admission and reuse to measured refined coefficients. Exact-case QA and GPU evidence remain necessary. |
@@ -101,7 +101,7 @@ A current-source CPU screen of the exact 0.5% deck subsequently completed
 700 iterations with finite state and reported `fsqr=9.93997e-12`,
 `fsqz=1.35863e-12`, `fsql=3.95010e-12`. This verifies root execution on
 `f719c4ff`, not a fresh physical-force certificate or an exterior/VJP result.
-The exterior path on unchanged main still needs #409. In a fresh environment,
+That historical main lacked #409; current main includes the fix. In a fresh environment,
 the exact 0.5% outside-field test subsequently passed at reviewed #409 head
 `aabedb8f2212747ed2651fb13ba81468cc5f7039`: **1 passed, 1 deselected in
 132.23 s**, CPU-only, within a 240 s process-group cap. It actually exercised
@@ -110,8 +110,9 @@ third order and all four VJP outputs, with `accuracy_check='raise'`. Assertions
 check finite/nonzero B and |B| and finite VJP maxima with at least one nonzero
 maximum; they do not inspect every derivative or VJP component. This is not an import skip, FD/duality comparison,
 GPU result, or independent physical-force certificate. The focused live-state
-surface regression also passed separately. Required GitHub review and CI
-remain prerequisites to merging #409.
+surface regression also passed separately. The candidate subsequently merged as `45f3a7aea`, with the identical complete
+Git tree `d070d6401240f993c72612103d7bd6b4acd03226`. No new numerical run is
+implied by that tree-identity check.
 
 The isolated test environment passed `pip check` and source-placement checks:
 Python 3.11.14, JAX/jaxlib 0.9.2, SOLVAX 0.21.0, booz_xform_jax 0.4.0,
@@ -135,6 +136,26 @@ candidate-source execution evidence, not a finite-difference certificate.
 The saved `B_error_estimate` is dimensionless, order-zero virtual-casing plasma
 quadrature error normalized by RMS total field on the source surface. It does
 not estimate combined coil-plus-plasma field error or derivative accuracy.
+
+A subsequent bounded physical screen at the same tested source exposed a
+qualification gap. The public strong-force evaluator requires a continuous
+spline lift of the native state. On the same 1,280 shifted points with
+`s` in `[0.1, 0.99]`, degree-five lifts with 13 and 8 spans gave dimensional
+volume-weighted force L2 norms of `2.390844e6` and `3.225829e8 N/m^3`.
+Their magnetic fields differed by relative L2 `0.00731069`, while their force
+arrays differed by `150.8595`. This two-fit sensitivity is not a rigorous error
+bound and cannot accept or reject the native equilibrium. Roundoff divergence
+of either fitted flux-coordinate field is a representation identity, not an
+independent native-state certificate. The next qualification step must control
+reconstruction error before interpreting this diagnostic. The compact
+[CPU record](vmex-cpu.json) retains the screen, normalization and limitations;
+a portable reproduction command for this supplemental screen remains open.
+
+Pressure agrees with the prescribed profile on the correct native half mesh
+to `1.46e-11 Pa`; the negative full-mesh WOUT edge extrapolate is not the
+prescribed boundary pressure. Flux matches the target exactly. The current
+reconstruction differs from input CURTOR by `104.481908 A` (`0.109206%`), the
+finite-mesh distinction already recorded above.
 
 The portable [capture command](capture-vmex.py) takes explicit paths and records
 source/dependency/input identities. Use the exact tested source revision above
@@ -239,8 +260,8 @@ archive must not be published as an accidental package release.
 
 ## Execution order and research acceptance
 
-1. **Freeze a working baseline.** Incorporate the reviewed #409 fix and
-   validate #410's floors. Include accepted #416 recovery changes before
+1. **Freeze a working baseline.** Use main `45f3a7aea`, which includes #409,
+   and validate #410's floors. Include accepted #416 recovery changes before
    free-boundary qualification and #417/#418 state/derivative changes before
    sensitivity claims; candidate evidence is not integrated-main evidence.
    Pin all source commits, dirty patches, input hashes,
@@ -316,7 +337,7 @@ prerequisites even if two codes agree numerically.
 Reuse VMEX's shipped `vmex_fieldline_tracing_finite_beta.py`,
 `vmex_fixed_free_boundary_comparison.py`, and optimization examples, adapting
 their inputs explicitly. Their successful execution is a software check, not
-a HINT acceptance gate. Fix #409 before their surface-field paths are used.
+a HINT acceptance gate. Use the merged #409 surface-field fix.
 Do not carry a second implicit solver or a duplicated historical helper suite
 in this branch.
 
