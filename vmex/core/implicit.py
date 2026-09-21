@@ -2024,7 +2024,17 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         result = hit[1]
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         ratio = fsq / cfg.ftol
-        certificate = measure_primal_state(params, state, mask, cfg)
+        # The callback returns host arrays; certify those exact coefficients
+        # on the runtime's device, without substituting a cached state.
+        measurement_device = cfg.device or _params_committed_device(
+            (_template_runtime(cfg).setup.s_full,))
+        placement = (jax.default_device(measurement_device)
+                     if measurement_device is not None
+                     else contextlib.nullcontext())
+        with placement:
+            certificate = measure_primal_state(
+                *_put_numeric_leaves((params, state, mask), measurement_device),
+                cfg)
         _LAST_PRIMAL_CERTIFICATE[cfg] = (
             _params_key(params), _primal_state_key(state), certificate)
         status = 0 if certificate["derivative_admitted"] else 2

@@ -636,3 +636,53 @@ def test_host_callback_refinement_follows_solved_cpu_device(
                for value in jax.tree.leaves(returned))
     assert all(isinstance(value, np.ndarray)
                for value in jax.tree.leaves(returned_mask))
+
+
+@pytest.mark.parametrize("device_index", [0, 1])
+def test_status_certificate_preserves_returned_state_on_runtime_device(
+        monkeypatch, device_index):
+    """Host conversion preserves coefficients and the runtime's placement."""
+    from vmex.core import implicit as im
+
+    devices = jax.devices("cpu")
+    if len(devices) <= device_index:
+        pytest.skip("requires two forced host devices")
+    device = devices[device_index]
+    inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
+        mpol=2, ntor=0, ntheta=8, nzeta=4)
+    inp = replace(inp, ns_array=np.asarray([3]))
+    cfg = im.make_config(inp, device=None)
+    params = im.params_from_input(inp)
+    template = im._put_numeric_leaves(im._template_runtime(cfg), device)
+    monkeypatch.setattr(im, "_template_runtime", lambda _: template)
+    returned = im._initial_state(template.setup)
+    returned_np = jax.tree.map(np.asarray, returned)
+    mask_np = jax.tree.map(np.ones_like, returned_np)
+    key = im._params_key(params)
+    result = SimpleNamespace(fsqr=1e-14, fsqz=0.0, fsql=0.0)
+    monkeypatch.setitem(im._LAST_SOLVE, cfg, (key, result))
+    # A memo's coefficients must never replace the actual callback output.
+    different = jax.tree.map(lambda x: x + 1.0, returned)
+    monkeypatch.setitem(im._LAST_REFINED, cfg, (key, different))
+    monkeypatch.setattr(im, "_host_solve_and_mask_impl",
+                        lambda *_: (returned_np, mask_np))
+
+    def measurements(state, aligned_params, mask, config):
+        assert config is cfg
+        # Materialize host values as the compiled measurement would.
+        state, aligned_params, mask = jax.tree.map(
+            jax.numpy.asarray, (state, aligned_params, mask))
+        for tree in (state, aligned_params, mask):
+            assert all(isinstance(x, jax.Array) and x.devices() == {device}
+                       for x in jax.tree.leaves(tree))
+        for actual, expected in zip(jax.tree.leaves(state),
+                                    jax.tree.leaves(returned_np)):
+            np.testing.assert_array_equal(actual, expected)
+        return 1e-8, 1e-8, 1e-14, True
+
+    monkeypatch.setattr(im, "_primal_measurements", measurements)
+    _, _, status, _, _ = im._host_solve_and_mask_status(
+        cfg, jax.tree.map(np.asarray, params))
+    assert status == 0
+    assert cfg.device is None
+    assert im._LAST_PRIMAL_CERTIFICATE[cfg][1] == im._primal_state_key(returned_np)
