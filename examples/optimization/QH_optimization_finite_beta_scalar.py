@@ -99,7 +99,7 @@ report = opt.EquilibriumReporter(
     ("QS", qs.total, ".4e"), ("beta", opt.volume_average_beta, ".3%"),
     ("aspect", opt.aspect_ratio, ".3f"),
     ("mean iota", opt.mean_iota, ".3f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 

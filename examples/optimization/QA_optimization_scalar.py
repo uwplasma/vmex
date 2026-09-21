@@ -37,11 +37,11 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # L-BFGS-B iterations each stage may spend:
-MAX_MODES = [1, 2, 3]
-MAXITER = [10, 10, 15]
+MAX_MODES = [1,   3,  5]#,  7,  9]
+MAXITER   = [15, 25, 30]#, 40, 50]
 
 # Targets:
-ASPECT_TARGET = 5.0
+ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 
@@ -57,7 +57,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
@@ -109,7 +109,7 @@ def loss(state, runtime):
 report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 

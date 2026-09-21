@@ -1,16 +1,10 @@
 #!/usr/bin/env python
-"""Optimize a boundary for quasi-axisymmetry at finite beta with one adjoint per gradient.
+"""Optimize a boundary for quasi-axisymmetry at finite beta.
 
-This minimizes the same weighted sum of squared residuals as the least-squares
-example of the same family. The difference is algorithmic: the residual rows
-are summed into one scalar before implicit differentiation, so SciPy L-BFGS-B
-receives a value and a gradient from one reverse equilibrium adjoint instead of
-a residual vector and its full Jacobian.
-
-The scalar form trades objective progress per evaluation for a cheaper cold
-start and lower peak memory: at a matched evaluation budget the least-squares
-driver reached roughly a 3x lower objective on the same problem, so it remains
-the default for objective progress.
+This is the vector-residual counterpart to
+``QA_optimization_finite_beta_scalar.py``. SciPy least squares receives the
+full residual vector and its exact Jacobian, while VMEX supplies the implicit
+equilibrium derivatives.
 
 The pressure is a prescribed p(s) = PRES_SCALE (1 - s); one calibration solve
 rescales its amplitude to TARGET_BETA before the ladder starts.
@@ -22,17 +16,23 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import least_squares
 
 import vmex as vj
+from vmex.core.errors import VmecError
 from vmex import optimize as opt
 
 NFP = 2
 TARGET_BETA = 0.01
+PHIEDGE = 1.0                    # fixed toroidal-flux normalization [Wb]
+CALIBRATION_PRES_SCALE = 100.0
+CALIBRATION_TOL = 1.0e-4
+CALIBRATION_ATTEMPTS = 32
+CALIBRATION_MAX_RATIO = 1.5
 SURFACES = np.linspace(0.1, 0.9, 8)
-MAX_MODES = [1, 2]
-MAXITER = [20, 45]
-ASPECT_TARGET = 5.0
+MAX_MODES = [ 1,  1,  1,  2,  2]
+MAX_NFEV  = [10, 10, 20, 20, 20]
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 MAGNETIC_WELL_TARGET = 0.01
 STABILITY_MIN_S = 0.2
@@ -47,18 +47,18 @@ SEED_PERTURBATION = 0.05
 POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 71
+FINAL_NS = 35
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 
 # Every output file name contains this:
-OUTPUT_NAME = "QA_finite_beta_scalar_optimized"
+OUTPUT_NAME = "QA_finite_beta_optimized"
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     SURFACES = np.array([0.25, 0.6, 0.9])
-    MAX_MODES, MAXITER, MINIMUM_MPOL = [1], [2], 3
+    MAX_MODES, MAX_NFEV, MINIMUM_MPOL = [1], [2], 3
     FINAL_NS, FINAL_FTOL = 31, 1e-10
 
 ###############################################################################
@@ -74,11 +74,38 @@ rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATI
 am = np.zeros(21)
 am[:2] = [1.0, -1.0]  # p(s) = PRES_SCALE * (1-s)
 inp = replace(inp, rbc=rbc, zbs=zbs, pmass_type="power_series", am=am,
-              pres_scale=100.0)
-calibration = opt.solve_equilibrium(inp)
-inp = replace(
-    inp, pres_scale=inp.pres_scale * TARGET_BETA / float(calibration.wout.betatotal))
-equilibrium = opt.solve_equilibrium(inp, initial_state=calibration.solution)
+              phiedge=PHIEDGE, pres_scale=CALIBRATION_PRES_SCALE)
+
+
+def calibrate_pressure(input_data, initial_state=None):
+    """Continuation-rescale pressure until this boundary reaches TARGET_BETA."""
+    pressure_scale = float(input_data.pres_scale)
+    state = initial_state
+    for _attempt in range(CALIBRATION_ATTEMPTS):
+        candidate = replace(input_data, phiedge=PHIEDGE, pres_scale=pressure_scale)
+        restart = None if state is None else getattr(state, "solution", state)
+        try:
+            solved = opt.solve_equilibrium(candidate, initial_state=restart)
+        except VmecError:
+            if restart is None:
+                raise
+            # A changed boundary can invalidate a hot restart. Retry this
+            # pressure point from VMEC's own seed before changing pressure.
+            solved = opt.solve_equilibrium(candidate)
+        state = solved
+        beta = float(state.wout.betatotal)
+        if abs(beta - TARGET_BETA) <= CALIBRATION_TOL:
+            return candidate, state
+        ratio = TARGET_BETA / max(beta, 1.0e-12)
+        ratio = np.clip(ratio, 1.0 / CALIBRATION_MAX_RATIO, CALIBRATION_MAX_RATIO)
+        pressure_scale *= float(ratio)
+    raise RuntimeError(
+        f"Could not calibrate beta at aspect {float(state.wout.aspect):.6f}: "
+        f"target={TARGET_BETA:.6e}, achieved={beta:.6e}, "
+        f"phiedge={PHIEDGE:.6e}")
+
+
+inp, equilibrium = calibrate_pressure(inp)
 
 stability_s = np.linspace(0.0, 1.0, int(inp.ns_array[-1]))[2:-1]
 stability_weights = np.where(
@@ -94,8 +121,9 @@ def iota_floor(state, runtime):
 
 
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
-objective_terms = [
-    (qs, 0.0, 1.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
+objective_function_terms = [
+    (qs, 0.0, 1.0),
+    (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (iota_floor, 0.0, 10.0),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
     (opt.volume_average_beta, TARGET_BETA, 1.0 / TARGET_BETA**2),
@@ -107,55 +135,47 @@ report = opt.EquilibriumReporter(
     ("QS", qs.total, ".4e"), ("beta", opt.volume_average_beta, ".3%"),
     ("aspect", opt.aspect_ratio, ".3f"),
     ("min |iota|", opt.min_abs_iota, ".3f"))
-monitor = opt.OptimizationMonitor()
+monitor = opt.OptimizationMonitor(stream=None)
 
 ### Run the optimization ######################################################
 
-for max_mode, maxiter in zip(MAX_MODES, MAXITER):
-    print(f"\n===== scalar finite-beta QA stage, max_mode = {max_mode} =====")
+previous_mpol = None
+for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
+    print(f"\n===== finite-beta QA stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
     inp = replace(inp, delt=0.5).change_resolution(
         mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-
-    def loss(state, runtime, terms=objective_terms):
-        """The scalar that is differentiated: 0.5 * r.T @ r over all residual rows."""
-        rows = opt.residuals_from_tuples(state, runtime, terms)
-        return 0.5 * jnp.vdot(rows, rows)
-
-    problem = opt.VmecProblem.from_loss(
-        inp, loss, max_mode=max_mode, vary_major_radius=VARY_MAJOR_RADIUS,
-        use_ess=True, ess_alpha=ESS_ALPHA, restart_from=equilibrium,
-        progress=False, evaluation_progress=False)
+    if previous_mpol != mpol:
+        inp, equilibrium = calibrate_pressure(inp)
+    else:
+        print("reusing beta-calibrated state at unchanged resolution")
+    previous_mpol = mpol
+    print(f"calibrated: aspect={float(equilibrium.wout.aspect):.6f}, "
+          f"phiedge={PHIEDGE:.6e}, pres_scale={inp.pres_scale:.6e}, "
+          f"beta={float(equilibrium.wout.betatotal):.6e}")
+    problem = opt.VmecProblem.from_tuples(
+        inp, objective_function_terms, max_mode=max_mode,
+        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
+        ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+        progress=not ci_smoke, evaluation_progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:
-        problem.compile_value_and_gradient()
+        problem.compile_residual_and_jacobian()
 
-    # SciPy works in dimensionless increments y, with x = x0 + step * y, so
-    # every coefficient moves on a similar scale.
-    x0 = problem.x0
     step = PARAMETER_STEP * problem.scales
-
-    def value_and_gradient(y):
-        """What SciPy calls.  The monitor caches it, so its callback never re-solves."""
-        value, gradient = problem.value_and_grad(x0 + step * y)
-        return monitor.cache_evaluation(x0 + step * y, value, step * gradient)
-
-    def record(intermediate_result):
-        """SciPy callback: one monitor row per accepted iterate."""
-        monitor({"x": x0 + step * intermediate_result.x, "fun": intermediate_result.fun})
-
-    initial_value = float(value_and_gradient(np.zeros_like(x0))[0])
-    result = minimize(
-        value_and_gradient, np.zeros_like(x0), jac=True, method="L-BFGS-B",
-        bounds=[(-MAX_PARAMETER_CHANGE, MAX_PARAMETER_CHANGE)] * x0.size,
-        callback=record,
-        options={"maxiter": maxiter, "gtol": 1e-6, "ftol": 1e-12,
-                 "maxls": 20, "maxcor": 20})
-    print(f"scalar cost: {initial_value:.12e} -> {float(result.fun):.12e}")
-    x = x0 + step * result.x
-    inp = problem.input_from_x(x)
-    equilibrium = problem.equilibrium_from_x(x)
+    result = least_squares(
+        problem.residual, problem.x0, jac=problem.residual_jac,
+        x_scale=step, max_nfev=max_nfev,
+        bounds=(problem.x0 - MAX_PARAMETER_CHANGE * step,
+                problem.x0 + MAX_PARAMETER_CHANGE * step),
+        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
+    inp = problem.input_from_x(result.x)
+    equilibrium = problem.equilibrium_from_x(result.x)
+    inp, equilibrium = calibrate_pressure(inp, equilibrium.solution)
+    print(f"consistent: aspect={float(equilibrium.wout.aspect):.6f}, "
+          f"phiedge={PHIEDGE:.6e}, pres_scale={inp.pres_scale:.6e}, "
+          f"beta={float(equilibrium.wout.betatotal):.6e}")
     report(f"mode {max_mode}", equilibrium)
 
 ### Check the result ##########################################################

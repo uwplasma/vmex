@@ -123,7 +123,7 @@ report = opt.EquilibriumReporter(
     ("aspect", opt.aspect_ratio, ".3f"),
     ("min |iota|", opt.min_abs_iota, ".3f"),
     ("mirror", opt.mirror_ratio, ".3f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 

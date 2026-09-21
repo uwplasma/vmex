@@ -100,7 +100,7 @@ report = opt.EquilibriumReporter(
     ("mean iota", opt.mean_iota, ".4f"),
     ("mirror", opt.mirror_ratio, ".4f"),
     ("elongation", opt.max_elongation, ".4f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 equilibrium = opt.solve_equilibrium(inp)
 
 ### Run the optimization ######################################################

@@ -28,18 +28,18 @@ NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 SURFACES = np.linspace(0.1, 1.0, 10)
 MAX_MODE = 3
-MAXITER = 200
+MAXITER = 70
 METHOD = "L-BFGS-B"         # or "BFGS"
 PARAMETER_BOUND = 1.0
-BOUNDARY_STEP = 0.1               # metres represented by one scaled variable
-ASPECT_TARGET = 5.0
+BOUNDARY_STEP = 0.2               # metres represented by one scaled variable
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 MINIMUM_MPOL = 5
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 SEED_PERTURBATION = 0.05
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1.0e-14
 FINAL_NITER = 8000
 

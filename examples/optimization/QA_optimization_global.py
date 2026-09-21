@@ -37,7 +37,7 @@ MAX_MODE = 3
 
 # Global phase: hops, and the L-BFGS-B iterations each hop may spend:
 N_BASINS = 10
-LOCAL_MAXITER = 15
+LOCAL_MAXITER = 6
 
 # Basin-hopping acceptance temperature, perturbation size, and the random
 # seed that makes the walk reproducible:
@@ -46,11 +46,11 @@ BASIN_STEPSIZE = 0.25
 BASIN_SEED = 7
 
 # Local finish: residual evaluations the polishing least squares may spend:
-POLISH_NFEV = 30
+POLISH_NFEV = 15
 
 # Targets:
-ASPECT_TARGET = 5.0
-IOTA_FLOOR = 0.37                 # minimum |iota| over the profile
+ASPECT_TARGET = 6.0
+IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 
 # Step control. One scaled variable moves a low-order coefficient by
 # BOUNDARY_STEP metres, and the walk is bounded at PARAMETER_BOUND of them:
@@ -63,10 +63,10 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 
 # Equilibrium resolution: poloidal and toroidal mode numbers are MAX_MODE + 2,
 # but never below MINIMUM_MPOL:
-MINIMUM_MPOL = 5
+MINIMUM_MPOL = 3
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 
@@ -129,12 +129,18 @@ def x_from_y(y):
 
 
 def value_and_gradient(y):
+    global evaluation_count
     value, gradient = problem.value_and_grad(x_from_y(y))
-    return value, scales * gradient
+    gradient = scales * gradient
+    evaluation_count += 1
+    print(f"evaluation {evaluation_count:4d}: cost = {float(value):.6e}, "
+          f"gradient = {np.linalg.norm(gradient):.6e}", flush=True)
+    return value, gradient
 
 
-monitor = opt.OptimizationMonitor(problem, stream=None)
+monitor = opt.OptimizationMonitor(problem)
 best = {"y": np.zeros_like(x0), "value": np.inf}
+evaluation_count = 0
 
 
 def basin_report(y, value, accepted):
