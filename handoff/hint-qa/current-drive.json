@@ -1436,5 +1436,224 @@
     "samples": "data/endpoint-support.npz",
     "samples_sha256": "2ba0fa630b595f67e788b3d24cd4cd5823bf4c6090346214eec54a9f099a30e3",
     "interpretation": "Stencil occupancy is not pointwise plasma membership. Positive pressure is not the imposed-current or attained-current support. Negative interpolated pressure can be high-order ringing."
+  },
+  "source_eligibility_diagnostic": {
+    "schema": 1,
+    "interpretation": "Bounded native HINT validation of an optional amplitude-independent imposed-current eligibility diagnostic. The mask is a safe eligibility superset and does not imply nonzero imposed or attained current.",
+    "source": {
+      "upstream_branch": "current",
+      "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+      "upstream_tree": "cb149a9064330584728322be3df1e9e26bf9c3eb",
+      "combined_diagnostics_patch_sha256": "27bfa9805b5eca781cb9ec451f3f69a45fbc21a7d6629e62c9cd6d7604e2d34f",
+      "incremental_review_patch_sha256": "79e53022de69e769e808db02603220d12c0abaa648152c6a834d6f824ae97d50",
+      "final_source_sha256": {
+        "src/HINT/stepb_mod.f90": "4f383616ff56d85255e378837b1511b637d854d985bed6159c3396eace33c631",
+        "src/HINT/write_eq_field.f90": "2145caac9e00296906cb71427f6ae2a23a4d35e7a09858f15a1ed2d41db271d9"
+      },
+      "source_set_sha256": "84ba79f1474702118d50e74d27e79db4309563785aac27d18a2e392d1cbeb79e"
+    },
+    "build": {
+      "mode": "Release",
+      "forced_rebuild": true,
+      "serial_build": true,
+      "binary_sha256": "2cce6c0affbab718a3178efa1c636f72af495dfa1eecafe70d34a98f7976dddf",
+      "binary_bytes": 394776,
+      "build_log_sha256": "a884fc92a04a8026d282a7878336114aa4dde9e632a11f72805ec6cf18b95351",
+      "build_config_sha256": "6736028cebced29ab13bf1798e1bd02c5e2b0b6b1bffa7d79bea2a5d8591ce9a",
+      "build_helper_sha256": "e19b882e43fa1c7467e0a2b14864740ae064a40ad6e63d45008f3150064f7357",
+      "compiler": "GNU Fortran 13.4.0",
+      "compiler_driver_sha256": "2b8d777cefc393e256dfb4dfe4f29100dba6c421f1d4e5cc3fd30bf3cea66431"
+    },
+    "final_executions": {
+      "default_off_serial": {
+        "mpi_ranks": 1,
+        "omp_threads": 1,
+        "exit_code": 0,
+        "wall_seconds": 2.447405541,
+        "input_sha256": "3e8d2a236d4a92faad860b75e6aadd45eff8028737ec22bcb086fefb69148026",
+        "log_sha256": "24bcfea989a087f0223e354f4e47d4035bff7a9532e2b54be7031304462945dc",
+        "output_sha256": "d2335d3ff36bca923f01d0d6e8c68e122d62c50cc60e0a5be6d493c0f4c76253",
+        "source_support_schema_present": false
+      },
+      "enabled_serial": {
+        "mpi_ranks": 1,
+        "mpi_decomposition": [
+          1,
+          1,
+          1
+        ],
+        "omp_threads": 1,
+        "exit_code": 0,
+        "wall_seconds": 2.442893792,
+        "input_sha256": "23011cfcbf91788addcb0a3fe550c382c1e5cb0071aa3637b39576e5c12f78b1",
+        "log_sha256": "3de8bb13f1de678d7e3a2a98e5c0749ea4daf5005ab0774ef7dc6c804878ac98",
+        "output_sha256": "611ab65af176f7dfd19729de82cafda4d8e64492a83cd2f4861a7121f4493cdb"
+      },
+      "enabled_four_rank_toroidal": {
+        "mpi_ranks": 4,
+        "mpi_decomposition": [
+          1,
+          1,
+          4
+        ],
+        "omp_threads": 1,
+        "exit_code": 0,
+        "wall_seconds": 1.010833458,
+        "input_sha256": "46cbd2ea43e1c4ff5ac3992ec2db44eaf8192ab57a9956c2db2d08d664b5eb95",
+        "log_sha256": "c4db05c7f109cd90c8fdaaa488e21597c400528614a34b7578691f8ca6235b4e",
+        "output_sha256": "611ab65af176f7dfd19729de82cafda4d8e64492a83cd2f4861a7121f4493cdb"
+      }
+    },
+    "validation": {
+      "default_off_vs_enabled_serial": {
+        "bitwise_equal_variables": [
+          "t_snap",
+          "B_R",
+          "B_phi",
+          "B_Z",
+          "v_R",
+          "v_phi",
+          "v_Z",
+          "P"
+        ],
+        "maximum_absolute_difference": 0.0
+      },
+      "enabled_serial_vs_four_rank": {
+        "files_byte_identical": true,
+        "bitwise_equal_variables": [
+          "t_snap",
+          "B_R",
+          "B_phi",
+          "B_Z",
+          "v_R",
+          "v_phi",
+          "v_Z",
+          "P",
+          "source_support",
+          "source_support_jcuts",
+          "source_support_trace_time"
+        ],
+        "maximum_absolute_difference": 0.0,
+        "current_drive_source_mask_counts_serial": [
+          11226,
+          11226,
+          11576,
+          11576
+        ],
+        "current_drive_source_mask_counts_four_rank": [
+          11226,
+          11226,
+          11576,
+          11576
+        ]
+      },
+      "netcdf_schema": {
+        "source_support_dtype": "int8",
+        "source_support_python_dimensions": [
+          "time",
+          "phi",
+          "Z",
+          "R"
+        ],
+        "source_support_shape": [
+          3,
+          32,
+          64,
+          64
+        ],
+        "source_support_fill_value": -127,
+        "initial_record_entirely_fill": true,
+        "subsequent_record_values": [
+          0,
+          1
+        ],
+        "eligible_ones_by_written_record": [
+          11226,
+          11576
+        ],
+        "ineligible_zeros_by_written_record": [
+          119846,
+          119496
+        ],
+        "two_cell_R_Z_boundary_nonzero_count": 0,
+        "jcuts_by_record": [
+          null,
+          1.0,
+          1.0
+        ],
+        "trace_time_by_record": [
+          null,
+          0.0,
+          0.0002
+        ],
+        "endpoint_time_by_record": [
+          0.0,
+          0.0002,
+          0.0004
+        ],
+        "definition_attribute": "1 where R index=3:nr-2, Z index=3:nz-2, all phi, and frozen flux is less than source_support_jcuts; 0 otherwise",
+        "indexing": "Fortran one-based",
+        "threshold_comparison": "strict less-than",
+        "scope": "safe eligibility superset; does not imply nonzero imposed current"
+      },
+      "legacy_default_off_to_enabled_follow": {
+        "exit_code": 0,
+        "wall_seconds": 1.422575083,
+        "input_sha256": "4d088aca4bb0517889bee5342f4b138593bd99763f7b03b1ce68cf04e4712c7c",
+        "log_sha256": "ae511f7ac7601da3bbccf4c0eafff7e2b86dfe51a72445c5e662d45e893b936b",
+        "output_sha256": "502e6d1d346c75e0b30d6aedbac44a185effbd9cd00b86b2cf16895fbf0291b6",
+        "old_records_entirely_fill": 3,
+        "new_record_eligible_ones": 11868,
+        "new_record_ineligible_zeros": 119204,
+        "new_record_trace_time": 0.0004,
+        "new_record_endpoint_time": 0.0006000000000000001,
+        "native_follow_read_succeeded": true
+      },
+      "enabled_to_disabled_follow": {
+        "exit_code": 0,
+        "wall_seconds": 1.364736,
+        "input_sha256": "6fdfb9e08eafa75ce801555da2003b9f6ce87bac40e2e9f0bad5635c585c3db0",
+        "log_sha256": "4a451353843be8b2562298c4a32ea556cdb05e871ef7e887edd8cab72a7b850c",
+        "output_sha256": "51ba6b3db9ff71409c4eebec01991524b9905b3dc23a1040a1eace2dc221cedb",
+        "new_mask_record_entirely_fill": true,
+        "new_jcuts_record_fill": true,
+        "new_trace_time_record_fill": true,
+        "stale_values_reused": false
+      },
+      "partial_schema_rejection": {
+        "exit_code": 1,
+        "wall_seconds": 1.348445208,
+        "log_sha256": "92e3d8366a2d13b1fd9baf02c038c146458d3eb70a4b7c39229a72ef39aeb879",
+        "message": "write_eq_field: partial source-support schema"
+      },
+      "wrong_type_schema_rejection": {
+        "exit_code": 1,
+        "wall_seconds": 1.415578917,
+        "log_sha256": "00dea1c766534bb7d1adedf324963963ab1659c633033696b9c4dba05d1bbc36",
+        "message": "write_eq_field: incompatible source_support type or rank"
+      }
+    },
+    "excluded_pre_metadata_executions": {
+      "reason": "These runs used the earlier binary before the exact one-based eligibility-bound attribute was added. Their numerical path is unchanged, but their binary and output hashes are retained only as prototype provenance and are not final validation evidence.",
+      "binary_sha256": "bbc4d5021be38c3c7bd00fa366637e968a0eb2c16f6dce2589797e59233e8b56",
+      "source_set_sha256": "d77262de0bcacd44fb7cc177f2c1f4169cab7e45bc28d2fabe2846d794553259",
+      "default_off_output_sha256": "d2335d3ff36bca923f01d0d6e8c68e122d62c50cc60e0a5be6d493c0f4c76253",
+      "enabled_output_sha256": "0fc47d72716d0b9e5a949985a1367917b1ac3614e163223ea11345b7aacc7441"
+    },
+    "limitations": [
+      "This validates diagnostic semantics, output compatibility, and MPI decomposition invariance on a short zero-drive fixture; it is not an equilibrium or exterior-field certificate.",
+      "The mask records eligibility under the frozen flux threshold, not actual nonzero imposed current and not attained response-current support.",
+      "HDF5, binary output, and standalone snapshot files are outside this diagnostic implementation."
+    ],
+    "parent_review": {
+      "combined_patch_reproduces_tested_sources": true,
+      "independent_checks": [
+        "off/on physical-array bitwise parity",
+        "serial/four-rank whole-file byte parity",
+        "initial fill and valid 0/1 mask values",
+        "two-cell R/Z boundary exclusions",
+        "mask counts and trace times"
+      ]
+    }
   }
 }

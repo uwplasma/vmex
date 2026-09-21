@@ -3324,6 +3324,312 @@
         "relative_agreement_tolerance": 1e-13,
         "scope": "read-only reductions of retained angular64 samples; not a new solve"
       }
+    },
+    "directional_fourier_sensitivity": {
+      "boundary_invariant": {
+        "boundary_arrays": [
+          "rbc",
+          "rbs",
+          "zbc",
+          "zbs"
+        ],
+        "declared_max_abs_n": 6,
+        "declared_max_m": 6,
+        "declared_nonzero_coefficients": 169,
+        "m8n7_new_zero_modes_per_boundary_array": 16,
+        "m9n6_new_zero_modes_per_boundary_array": 13,
+        "parsed_common_modes_bitwise_equal": true
+      },
+      "cases": {
+        "m8n6": {
+          "force_reconstruction": {
+            "maximum_absolute_N_m3": 9.313225746154785e-10,
+            "relative_l2": 3.7167803590262443e-16
+          },
+          "input_sha256": "0909431b7d91e755035d028b2a3200c74e50264ff4c28444dfcc7514d6078a13",
+          "native_state_sha256": "e8e01ae295adba35f2f2437bf3cf09c4f970c884f03835767ea749580b97052d",
+          "resolution": {
+            "mpol": 8,
+            "nfp": 2,
+            "ns": 121,
+            "ntheta": 40,
+            "ntor": 6,
+            "nzeta": 40
+          },
+          "samples_sha256": "846189f1f4b409e2ad56c9cdf0634f8e551d79e14a9fab9eb8ddaef856f485f2",
+          "solve": {
+            "converged": true,
+            "iterations": 1357,
+            "max_rss_bytes": 2246258688,
+            "root_fsq": {
+              "fsql": 3.764038233087839e-12,
+              "fsqr": 9.958749608863231e-12,
+              "fsqz": 1.3316766918235775e-12,
+              "max": 9.958749608863231e-12,
+              "sum": 1.5054464533774648e-11
+            },
+            "solve_seconds": 0.0,
+            "total_seconds": 54.6520137200132,
+            "provenance": "retained solve metadata; time and memory describe replay only"
+          },
+          "stage1": {
+            "absolute_l2_N_m3": 424642.1987401438,
+            "magnetic_normalized_l2": 0.01581815663857477,
+            "mean_force_over_mean_grad_p": 0.18720574100629275,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.011040193847633537,
+            "pointwise_normalized_l2": 0.31238287080742616,
+            "volume_average_force_N_m3": 296376.64470611274
+          },
+          "state_checkpoint_sha256": "0e9d1fbc9c611b4ee815c107788d9e22aa4a9f819697261f69f07b0236d8f777"
+        },
+        "m8n7": {
+          "force_reconstruction": {
+            "maximum_absolute_N_m3": 9.313225746154785e-10,
+            "relative_l2": 3.7718647925688643e-16
+          },
+          "input_sha256": "54f4e47823a312b2677698290c50dd09d10be20af3ea668d27f7f064833bb9f3",
+          "native_state_sha256": "d35cc5cbc74b889e1b0fe591607256067ded0adf87e7ff4e7a0c39c5fd383de1",
+          "resolution": {
+            "mpol": 8,
+            "nfp": 2,
+            "ns": 121,
+            "ntheta": 40,
+            "ntor": 7,
+            "nzeta": 40
+          },
+          "samples_sha256": "30e6527b2c3b46a2320fa7a555e76763ed24afe1b58c21185591b601fb062b0b",
+          "solve": {
+            "converged": true,
+            "iterations": 1358,
+            "max_rss_bytes": 2590445568,
+            "root_fsq": {
+              "fsql": 3.983667371908482e-12,
+              "fsqr": 9.91190954330947e-12,
+              "fsqz": 1.3361241448574754e-12,
+              "max": 9.91190954330947e-12,
+              "sum": 1.5231701060075428e-11
+            },
+            "solve_seconds": 110.69890864519402,
+            "total_seconds": 166.89619095716625
+          },
+          "stage1": {
+            "absolute_l2_N_m3": 422851.6547448411,
+            "magnetic_normalized_l2": 0.01575159268801268,
+            "mean_force_over_mean_grad_p": 0.18638694358963617,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.010991978082265137,
+            "pointwise_normalized_l2": 0.3115226269341824,
+            "volume_average_force_N_m3": 295079.7556200176
+          },
+          "state_checkpoint_sha256": "6f42996348e3560072b2f4ebb9cf2e8efa00490ab2535e883f92e4799c5a6ef7",
+          "versions": {
+            "jax": "0.9.2",
+            "jaxlib": "0.9.2",
+            "numpy": "2.4.6",
+            "python": "3.11.15",
+            "vmex": "0.10.0"
+          },
+          "result_sha256": "c96182d2e55bd9f003885434bae45d7403aa9b8da03b2c389efdc3d08ae1a98a",
+          "template_wout_sha256": "82029b87f6242d9713c48e5328c93b7218110914c38be54ab16e4c7f69742ba3"
+        },
+        "m9n6": {
+          "force_reconstruction": {
+            "maximum_absolute_N_m3": 9.313225746154785e-10,
+            "relative_l2": 3.5589271556594075e-16
+          },
+          "input_sha256": "14db32bbda00cea7c74a95789162e9f4d7bd856836ba1969fa5263a3423fd33e",
+          "native_state_sha256": "dc81155d82e12a77aab78880f8661567134fa89e262d211757605318ce020ad3",
+          "resolution": {
+            "mpol": 9,
+            "nfp": 2,
+            "ns": 121,
+            "ntheta": 40,
+            "ntor": 6,
+            "nzeta": 40
+          },
+          "samples_sha256": "7bfe845205fd76a74fa90f62bf958058acc01bfff6a14fb6aada7625ab9383e4",
+          "solve": {
+            "converged": true,
+            "iterations": 2006,
+            "max_rss_bytes": 2604077056,
+            "root_fsq": {
+              "fsql": 2.231305274212793e-12,
+              "fsqr": 9.984234393739867e-12,
+              "fsqz": 9.432191261849195e-13,
+              "max": 9.984234393739867e-12,
+              "sum": 1.3158758794137581e-11
+            },
+            "solve_seconds": 150.29340318916366,
+            "total_seconds": 203.7244480131194
+          },
+          "stage1": {
+            "absolute_l2_N_m3": 467862.1611454169,
+            "magnetic_normalized_l2": 0.017418370826570037,
+            "mean_force_over_mean_grad_p": 0.22603444291616073,
+            "mean_force_over_mean_magnetic_pressure_gradient": 0.013321235969472428,
+            "pointwise_normalized_l2": 0.3390771503884173,
+            "volume_average_force_N_m3": 357812.00847431464
+          },
+          "state_checkpoint_sha256": "9ce79ecc1f9e64756c413264a864e46aa8982e4ce7c2399ac86cd3f6779cb58e",
+          "versions": {
+            "jax": "0.9.2",
+            "jaxlib": "0.9.2",
+            "numpy": "2.4.6",
+            "python": "3.11.15",
+            "vmex": "0.10.0"
+          },
+          "result_sha256": "04396048343483524b98fbac3f17c5768ebcae831e09665379fba186aa030542",
+          "template_wout_sha256": "608ec33786123d791d8f2fe8ac26184e574d95307869710eed4b7ca65ef51c2d"
+        }
+      },
+      "comparisons": {
+        "m8n7": {
+          "common_q_geometry": {
+            "maximum_cartesian_displacement_m": 2.961310412017941e-05,
+            "rms_cartesian_displacement_m": 8.154314441886315e-06,
+            "unweighted_B_relative_l2": 2.571804630719233e-05
+          },
+          "global_percent_change_from_m8n6": {
+            "absolute_l2_N_m3": -0.42165945838991137,
+            "magnetic_normalized_l2": -0.42080725386018925,
+            "mean_force_over_mean_grad_p": -0.43737836898338767,
+            "mean_force_over_mean_magnetic_pressure_gradient": -0.43672933676554004,
+            "pointwise_normalized_l2": -0.27538125602734054,
+            "volume_average_force_N_m3": -0.43758140503316056
+          },
+          "radial_percent_change_from_m8n6": [
+            {
+              "absolute_l2_N_m3": -0.20979187135524713,
+              "magnetic_normalized_l2": -0.2085979844954955,
+              "mean_force_over_mean_grad_p": 0.005236786949835981,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.004583507219102501,
+              "pointwise_normalized_l2": -0.3836807028853584,
+              "s": 0.1375280616245344,
+              "volume_average_force_N_m3": 0.0033870698933347043
+            },
+            {
+              "absolute_l2_N_m3": -0.10570392229996006,
+              "magnetic_normalized_l2": -0.10621495084076615,
+              "mean_force_over_mean_grad_p": 0.33072421667421636,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.32942879197248587,
+              "pointwise_normalized_l2": -0.10950027056962908,
+              "s": 0.28461227595772676,
+              "volume_average_force_N_m3": 0.3299420491442939
+            },
+            {
+              "absolute_l2_N_m3": 0.0197044461988094,
+              "magnetic_normalized_l2": 0.019446938402967184,
+              "mean_force_over_mean_grad_p": 0.06773724620126043,
+              "mean_force_over_mean_magnetic_pressure_gradient": 0.06722302319372986,
+              "pointwise_normalized_l2": 0.07317166534384079,
+              "s": 0.5,
+              "volume_average_force_N_m3": 0.0674806539927797
+            },
+            {
+              "absolute_l2_N_m3": -0.2885776054225797,
+              "magnetic_normalized_l2": -0.28694693401408733,
+              "mean_force_over_mean_grad_p": -0.4633964116796063,
+              "mean_force_over_mean_magnetic_pressure_gradient": -0.46149471404447473,
+              "pointwise_normalized_l2": -0.23592553217846035,
+              "s": 0.7153877240422732,
+              "volume_average_force_N_m3": -0.46312253096134626
+            },
+            {
+              "absolute_l2_N_m3": -0.8850922568856445,
+              "magnetic_normalized_l2": -0.8808202333196236,
+              "mean_force_over_mean_grad_p": -1.7399691865315758,
+              "mean_force_over_mean_magnetic_pressure_gradient": -1.7354583911849741,
+              "pointwise_normalized_l2": -0.6914129109567568,
+              "s": 0.8624719383754655,
+              "volume_average_force_N_m3": -1.7396935799591895
+            }
+          ]
+        },
+        "m9n6": {
+          "common_q_geometry": {
+            "maximum_cartesian_displacement_m": 0.005593238307708845,
+            "rms_cartesian_displacement_m": 0.001312146171068429,
+            "unweighted_B_relative_l2": 0.0011018458693602682
+          },
+          "global_percent_change_from_m8n6": {
+            "absolute_l2_N_m3": 10.177971603740964,
+            "magnetic_normalized_l2": 10.116312694065277,
+            "mean_force_over_mean_grad_p": 20.74119185723198,
+            "mean_force_over_mean_magnetic_pressure_gradient": 20.661250638527818,
+            "pointwise_normalized_l2": 8.54537238613422,
+            "volume_average_force_N_m3": 20.728814117293638
+          },
+          "radial_percent_change_from_m8n6": [
+            {
+              "absolute_l2_N_m3": 50.84234204435833,
+              "magnetic_normalized_l2": 50.90558341297229,
+              "mean_force_over_mean_grad_p": 44.82689675321512,
+              "mean_force_over_mean_magnetic_pressure_gradient": 44.999355673392415,
+              "pointwise_normalized_l2": 50.92354424401866,
+              "s": 0.1375280616245344,
+              "volume_average_force_N_m3": 44.938589481091704
+            },
+            {
+              "absolute_l2_N_m3": 28.34965915425569,
+              "magnetic_normalized_l2": 28.431165788375633,
+              "mean_force_over_mean_grad_p": 30.601331967894186,
+              "mean_force_over_mean_magnetic_pressure_gradient": 30.709186448879343,
+              "pointwise_normalized_l2": 16.594285369194118,
+              "s": 0.28461227595772676,
+              "volume_average_force_N_m3": 30.626234108062313
+            },
+            {
+              "absolute_l2_N_m3": 1.1571876190112462,
+              "magnetic_normalized_l2": 1.1554830671957061,
+              "mean_force_over_mean_grad_p": 16.898082286644712,
+              "mean_force_over_mean_magnetic_pressure_gradient": 16.873774093379602,
+              "pointwise_normalized_l2": 0.9278008723090148,
+              "s": 0.5,
+              "volume_average_force_N_m3": 16.875743511129173
+            },
+            {
+              "absolute_l2_N_m3": 11.127441099189262,
+              "magnetic_normalized_l2": 10.963960881790014,
+              "mean_force_over_mean_grad_p": 23.050860876729097,
+              "mean_force_over_mean_magnetic_pressure_gradient": 22.8354568989539,
+              "pointwise_normalized_l2": -1.407984749591773,
+              "s": 0.7153877240422732,
+              "volume_average_force_N_m3": 23.016427071959633
+            },
+            {
+              "absolute_l2_N_m3": 4.039213131013697,
+              "magnetic_normalized_l2": 3.6925009879696047,
+              "mean_force_over_mean_grad_p": 5.732055613862297,
+              "mean_force_over_mean_magnetic_pressure_gradient": 5.359283479782584,
+              "pointwise_normalized_l2": -12.153119557671799,
+              "s": 0.8624719383754655,
+              "volume_average_force_N_m3": 5.711568771552189
+            }
+          ]
+        }
+      },
+      "independent_checks": [
+        "all sample checksums match their JSON records",
+        "all numeric sample arrays are finite",
+        "global and five-bin force L2, mean force, pressure ratio, and pointwise normalization reproduce from raw arrays",
+        "stored force agrees with curl(B)/mu0 cross B minus grad(p)",
+        "all three runs use bitwise-identical flux-coordinate sample points",
+        "six-array native checkpoints were retained for both new states",
+        "paired public WOUT templates reconstruct each new native-state digest",
+        "parent independently verified zero exit status, sample hashes, reconstructed force and global/bin weighted L2"
+      ],
+      "limitations": [
+        "the M9/N6 and M8/N7 states have one angular64 measurement each; measurement sensitivity on each new state has not been independently refined",
+        "one increment in each Fourier direction cannot establish a trend or observed order",
+        "the poloidal response is nonmonotonic relative to the prior M7-to-M8 result",
+        "common flux coordinates map to different Cartesian positions",
+        "these historical source pins isolate numerical resolution; a selected state must later be repeated on the integrated current baseline"
+      ],
+      "scope": "one-control directional Fourier sensitivity at fixed NS121, NTHETA=NZETA=40, and angular64 measurement; not a convergence certificate",
+      "source": {
+        "driver_sha256": "5c942c2a4869eed90ef1c12a863f47cf142e151e96e5391f04d7e5d0e535a624",
+        "head": "aabedb8f2212747ed2651fb13ba81468cc5f7039",
+        "tree": "d070d6401240f993c72612103d7bd6b4acd03226"
+      }
     }
   },
   "gpu_automatic_placement_attempt": {
@@ -3400,5 +3706,124 @@
     },
     "driver_repository_commit": "25b73b2375db762cabb133cf8dea5ca2fa792f2c",
     "preceding_attempt_record": "gpu_automatic_placement_attempt"
+  },
+  "pr423_native_device_qualification": {
+    "schema": "vmex.pr423-native-device-qualification/1",
+    "source": {
+      "head": "02bf33d9141429f19e92a67db28e6a9b2dd4b7df",
+      "tree": "014e866f711b0cd38c1777ef3dde2bd7a1a8b927"
+    },
+    "probe": {
+      "sha256": "4b7711bf3adf722fb3c7ce51f687e0e240cdc524f7d348cb169f5fc98045f8a8",
+      "timeout_seconds_per_process": 180,
+      "memory_limit_bytes_per_process": 8589934592
+    },
+    "runtime": {
+      "python": "3.12.13",
+      "jax": "0.11.1",
+      "jaxlib": "0.11.1",
+      "numpy": "2.5.3",
+      "scipy": "1.18.1",
+      "solvax": "0.22.0",
+      "booz_xform_jax": "0.3.0",
+      "jax_enable_x64": true,
+      "jax_disable_jit": false,
+      "gpu_model": "NVIDIA RTX A4000",
+      "gpu_selection": "one explicitly selected accelerator"
+    },
+    "scope": {
+      "entry_point": "vmex.core.multigrid.solve_multigrid",
+      "explicit_device_argument": true,
+      "native_returned_state_placement_checked": true,
+      "implicit_host_callback_exercised": false,
+      "primal_certificate_exercised": false,
+      "gradient_or_optimization_exercised": false,
+      "performance_claim": false
+    },
+    "cases": {
+      "solovev_placement": {
+        "input": "examples/data/input.solovev",
+        "input_sha256": "32616208daadc05725160fe5e217d4bf25a09c9ab3e965f78d7d25ca58452f6c",
+        "ns_array": [
+          3,
+          5
+        ],
+        "niter_array": [
+          2,
+          2
+        ],
+        "ftol_array": [
+          1.0,
+          1.0
+        ],
+        "cpu": {
+          "result_sha256": "5c8749a0718e3eaf6d43df2e997b00fbfca961ad05e3272d160222df779d1669",
+          "wall_seconds": 8.36,
+          "max_rss_kib": 1004804,
+          "iterations": 1,
+          "ier_flag": 11,
+          "converged": true,
+          "state_platform": "cpu"
+        },
+        "gpu": {
+          "result_sha256": "3bd20558bcaf80acae88db185773d2aed119e69a7def25086a5757bef6bb566c",
+          "wall_seconds": 12.66,
+          "max_rss_kib": 1160812,
+          "iterations": 1,
+          "ier_flag": 11,
+          "converged": true,
+          "state_platform": "gpu"
+        },
+        "placement": "all six native state leaves were committed to the selected device",
+        "packed_state_sha256_equal": true,
+        "packed_state_sha256": "081f7685fff885be4f78eaded747f4f9604b584634714a30182b704a5f11c374",
+        "maximum_scalar_absolute_difference": 6.938893903907228e-17,
+        "limitation": "The intentionally loose tolerance makes this a placement probe, not an equilibrium-accuracy result."
+      },
+      "asymmetric_converged": {
+        "input": "examples/data/input.up_down_asymmetric_tokamak",
+        "input_sha256": "9d1e58f23aea74f5ea8a29f0b75bb9c42f426dbb29e662943e6ac8a053a9950c",
+        "construction": "truncate MPOL to 3, use NS=5, and negate all ZBS coefficients",
+        "lasym": true,
+        "lflip_case": true,
+        "ftol": 1e-08,
+        "maximum_iterations": 400,
+        "cpu": {
+          "result_sha256": "7cc6bd64dcbc07c6d93960942318829c4e360f72af9377d210e7942e168856d9",
+          "wall_seconds": 15.55,
+          "max_rss_kib": 1057160,
+          "iterations": 222,
+          "ier_flag": 11,
+          "converged": true,
+          "jacobian_resets": 1,
+          "state_platform": "cpu"
+        },
+        "gpu": {
+          "result_sha256": "4a1a047bcfc905fd9e09031816f3551c0a477f3966a564c654c5f4149be0965f",
+          "wall_seconds": 21.0,
+          "max_rss_kib": 1207668,
+          "iterations": 222,
+          "ier_flag": 11,
+          "converged": true,
+          "jacobian_resets": 1,
+          "state_platform": "gpu"
+        },
+        "placement": "all six native state leaves were committed to the selected device",
+        "absolute_differences": {
+          "fsqr": 3.285233829538055e-18,
+          "fsqz": 9.91814783459763e-19,
+          "fsql": 2.41418452037889e-19,
+          "wb": 8.881784197001252e-15,
+          "wmhd": 3.410605131648481e-13,
+          "r00": 1.685762640590838e-12,
+          "state_l2_norm": 1.849187469815661e-12
+        },
+        "maximum_force_norm_relative_difference": 1.1756615109266753e-09,
+        "r00_relative_difference": 2.7775685611767743e-13,
+        "state_l2_norm_relative_difference": 1.3653109784774148e-13,
+        "limitation": "The aggregate state norm and physical scalars were retained, but no arraywise asymmetric coefficient-difference bound was retained."
+      }
+    },
+    "interpretation": "This qualifies explicit native CPU/GPU solve placement for two small fixed-boundary cases. It complements, but does not replace, the separate implicit callback and primal-certificate evidence. It does not qualify full HINT cases, free-boundary solves, gradients, optimization, or accelerator performance."
   }
 }

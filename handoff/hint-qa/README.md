@@ -608,6 +608,20 @@ Attained response currents can extend outside it. Do not substitute
 the initial vacuum flux map. Mesh, wall clearance and interpolation order must
 be varied separately; moving targets alone cannot establish convergence.
 
+The optional diagnostic patch now implements this output for the primary
+NetCDF file. Set `lsource_support_diag=.true.` in `stepb_inp1`; it defaults
+off. Variables `source_support`, `source_support_jcuts` and
+`source_support_trace_time` describe the last frozen step-B eligibility,
+while `t_snap` remains the endpoint time. Missing diagnostic records are fill,
+not zero. HDF5, binary output and separate snapshot files are outside scope.
+The fresh Release build passes off/on physical-array parity, byte-identical
+one/four-rank toroidal output, legacy follow, disabled follow without stale
+values, and explicit rejection of partial/wrong-type schemas. The short
+zero-drive fixture validates output semantics, not mature QA support. Next
+rebuild with the same patch on the production platform and save eligibility
+during one bounded continuation of the retained endpoint before classifying
+the comparison targets. Historical runs retain their original patch hashes.
+
 Recompute the endpoint difference without a native build:
 
 ```sh
@@ -890,6 +904,13 @@ different implementation from modern VMEX.
 [Landreman–Buller–Drevlak](https://doi.org/10.1063/5.0098166) supplies the
 finite-beta QA context, including equilibrium/bootstrap-current consistency.
 Prescribed-current agreement is not a new bootstrap-consistency result.
+[Kanno et al. (1999)](https://doi.org/10.1017/S0022377898007405)
+is a directly relevant current-carrying HINT precedent: the publisher abstract
+reports adding net toroidal current and applying the revised code to LHD-like
+nested equilibria. Only the abstract was accessible in this review. Its full
+current prescription and normalization must be checked against maintained
+`cal_netj` before treating it as a formula-level validation of the QA setup;
+it does not explain or excuse the present attained-current deficit.
 [Infinity Two, Appendices B–D](https://www.cambridge.org/core/journals/journal-of-plasma-physics/article/magnetohydrodynamic-equilibrium-and-stability-properties-of-the-infinity-two-fusion-pilot-plant/6348ED5B1CA97BFF845C75F6284D5415)
 provides accessible HINT–VMEC context with mesh, pressure-control and boundary
 matching limitations; its configuration-specific thresholds do not transfer
@@ -969,3 +990,28 @@ Keep broader QI objective, factor-reuse and 3-D polishing development off this
 study's critical path. The latest #413/#419 evidence includes failed independent
 root and fine-grid gates despite accurate linear responses. Optimize complete
 accepted-work cost only after the underlying root and observable are qualified.
+
+
+A subsequent bounded native-device check at #423 head `02bf33d9` uses JAX
+0.11.1/SOLVAX 0.22.0 with x64 and JIT enabled. All six returned state arrays
+reside on the explicitly selected CPU or GPU. A loose Solovev placement probe
+has identical packed state hashes. A stronger LASYM/theta-flipped case
+(MPOL3, NS5, FTOL1e-8) converges in 222 iterations on each device; scalar state
+norms agree within 2.8e-13 relative. Full asymmetric coefficient differences
+were not retained. These are native-solve placement results, not tests of the
+implicit callback, certificate, derivatives, exact QA deck or free boundary.
+The exact environment and limits are in `vmex-cpu.json`; cold timings do not
+establish performance.
+
+
+The separate M9/N6 and M8/N7 controls now complete with NS121, solver grid40
+and angular64 measurement. Both meet the three native FSQ limits. M9/N6
+raises force L2 by 10.18% globally and 50.84% in the innermost sampled bin;
+M8/N7 changes it by -0.422% globally and at most 0.885% across bins. The
+poloidal sequence is nonmonotonic. Parsed boundary coefficients are unchanged:
+newly admitted boundary modes are zero. Common flux-coordinate points map to
+different physical positions, so these are directional resolution sensitivities,
+not fixed-position field errors or a convergence certificate. All six state
+arrays and paired WOUT templates are retained. Next replay each state with
+finer measurement sampling before another solve; then prioritize poloidal
+resolution and root-family checks over a broad toroidal sweep.

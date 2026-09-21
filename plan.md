@@ -86,6 +86,13 @@ The angular48-to64 follow-up passes all prospective gates (largest bin mean/
 ratio change 0.2442%, pointwise-normalized change 0.2823%). Retain the earlier
 failed refinement. Proceed to separate M9/N6 and M8/N7 sensitivities with saved
 states; measurement sufficiency does not certify Fourier/radial convergence.
+The pair now completes: M9/N6 force L2 rises 10.18% globally and 50.84% in
+the innermost sampled bin; M8/N7 changes -0.422% globally. Physical boundary
+coefficients remain identical. Replay finer measurement on each retained state
+next, then investigate the nonmonotonic poloidal response before more solves.
+Small explicit native CPU/GPU solves at #423 also pass placement checks,
+including a converged asymmetric case; implicit callbacks, certificates and
+the exact QA case still require integrated GPU qualification.
 #422 is merged into #421 as e94e46c6 after independent review and 11 explicitly
 JIT-enabled two-CPU cases. The parent remains open; no main promotion follows.
 Preserve the merged #422 branch while the new exact-state certificate candidate
