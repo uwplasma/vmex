@@ -10,7 +10,7 @@ JAX differentiates. The two gradients add, so any SciPy optimizer can drive it.
 The objective is
 
     J = (1/2) |r_QS|^2                          quasisymmetry
-      + (1/2) LENGTH_WEIGHT     |L - L_target|^2
+      + (1/2) LENGTH_WEIGHT     |max(L - L_target, 0)|^2
       + (1/2) CURVATURE_WEIGHT  |max(kappa - kappa_max, 0)|^2
       + COIL_DISTANCE_WEIGHT         * separation penalty
       + COIL_SURFACE_DISTANCE_WEIGHT * clearance penalty
@@ -62,14 +62,14 @@ MAX_MODE = 2
 # Flux surfaces the quasisymmetry residual is evaluated on:
 SURFACES = np.linspace(0.05, 1.0, 6)
 
-# Seed boundary: a rotating ellipse just outside the constraints. RBC(1,1) and
+# Seed boundary: a rotating ellipse of aspect ratio about 5.97. RBC(1,1) and
 # ZBS(1,1) carry opposite signs; equal signs give a circle and no transform.
-SEED_MINOR_RADIUS = 0.29
-SEED_ELLIPSE = 0.15
+SEED_MINOR_RADIUS = 0.195
+SEED_ELLIPSE = 0.10
 
 # Targets the finished design is checked against:
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
-ASPECT_LIMIT = 4.0                # maximum aspect ratio
+ASPECT_LIMIT = 6.0                # maximum aspect ratio
 NORMAL_FIELD_LIMIT = 0.01         # area-weighted RMS of B.n/|B| on the boundary
 COIL_SURFACE_DISTANCE_LIMIT = 0.15
 COIL_DISTANCE_LIMIT = 0.17
@@ -80,28 +80,26 @@ CURVATURE_LIMIT = 7.0
 # need no extra margin: a multiplier drives an active constraint onto its
 # boundary rather than settling inside it.
 IOTA_CONSTRAINT = 0.43
-ASPECT_CONSTRAINT = 3.98
+ASPECT_CONSTRAINT = 5.97
 NORMAL_FIELD_CONSTRAINT = 0.008
 CURVATURE_OBJECTIVE_LIMIT = 6.9
 
 # Coils: number of unique shapes, Fourier order, and the circle they start on.
-# Clearance, not taste: the optimized cross-section of single_stage_optimization.py
-# reaches 0.47 m from the circle R = 1, so radius 0.5 could not hold 0.15 m of
-# clearance.
+# The aspect-6 seed reaches about 0.3 m from the circle R = 1, so radius 0.5
+# starts the coils about 0.2 m out, above the 0.15 m clearance limit.
 N_COILS = 3
-COIL_ORDER = 3
+COIL_ORDER = 4
 COIL_MAJOR_RADIUS = 1.0
-COIL_MINOR_RADIUS = 0.65
+COIL_MINOR_RADIUS = 0.5
 COIL_CURRENT = 2.7e5
 N_SEGMENTS = 64
 STELLSYM = True
 
-# Weights, and the coil length the optimizer aims for. The seed coils are
-# 2*pi*0.65 = 4.08 m around but the optimizer drives them to about 5.3 m
-# whatever the target says, so aiming there stops the length term competing
-# with the normal-field term.
-LENGTH_TARGET = 5.3
-LENGTH_WEIGHT = 1.0
+# Weights, and the longest coil the optimizer may build. The length term is
+# one-sided: coils shorter than LENGTH_TARGET cost nothing, so it never pulls
+# against quasisymmetry or the normal field.
+LENGTH_TARGET = 5.5
+LENGTH_WEIGHT = 0.5
 CURVATURE_WEIGHT = 10.0
 COIL_DISTANCE_WEIGHT = 1.0e3
 COIL_SURFACE_DISTANCE_WEIGHT = 1.0e3
@@ -250,7 +248,7 @@ def plasma_objective(u, multipliers, penalty):
 def coil_objective(u, multipliers, penalty):
     """Coil regularization and the normal-field limit. Pure JAX, no solve."""
     surface, coils = objects_from_x(jnp.asarray(x0) + jnp.asarray(scales) * u)
-    length = jnp.sqrt(LENGTH_WEIGHT) * (coils.length[:N_COILS] - LENGTH_TARGET)
+    length = jnp.sqrt(LENGTH_WEIGHT) * jnp.maximum(coils.length[:N_COILS] - LENGTH_TARGET, 0.0)
     curvature = jnp.sqrt(CURVATURE_WEIGHT) * jnp.maximum(
         coils.curvature[:N_COILS] - CURVATURE_OBJECTIVE_LIMIT, 0.0)
     costs = jnp.asarray([
