@@ -1821,15 +1821,6 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
             "(re-raised typed at the pure_callback call site)") from None
     as_np = lambda t: jax.tree.map(  # noqa: E731
         lambda a: np.asarray(a, dtype=np.float64), t)
-    # Prime the per-cfg-identity template *concretely* here (this host
-    # callback runs outside any trace): the jitted residual ``F`` later calls
-    # ``runtime_from_params`` -> ``_template_runtime(cfg)`` under a jax.jit
-    # trace, where the host-side ``run_setup`` cannot run, so the lru_cache
-    # must be filled by a concrete call first.  Prime the structural boundary
-    # tables for the same reason: letting the first residual trace populate
-    # their ordinary Python cache would leak tracers into later calls.
-    _template_runtime(cfg)
-    _boundary_pack_tables(cfg)
     # Structural dof mask, shared across parameter values and config objects
     # at one resolution — see _MASK_CACHE.  Fixed-boundary support is an exact
     # mode-table invariant, so do not pay for force evaluations and VJPs to
@@ -1839,18 +1830,43 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     if mask is None:
         mask = as_np(_fixed_boundary_dof_mask(cfg))
         _MASK_CACHE[cache_key] = mask
-    # Anchor the state at the root of the residual the adjoint linearizes, so
-    # every consumer — value, cotangent and linearization — reads the same
-    # point (see _refined_state).  ``refine=False`` is the problem-factory
-    # seed preflight, which only validates shape/finiteness and never
-    # differentiates: it skips the (expensive) anchor so the first user
-    # output is not held behind it, and the first derivative evaluation —
-    # which memo-hits this solve — computes the identical refinement then.
-    if not refine:
-        return as_np(result.state), mask
-    state = _refine_fixed_point(
-        cfg, params, result.state,
-        _device_pin(cfg, jax.tree.map(jnp.asarray, mask)))
+    # A pure_callback payload is local-CPU committed, while the forward
+    # solver's independent AUTO policy may return an accelerator state. First
+    # construction follows that root; an existing cfg.device=None template
+    # remains authoritative when a caller primed it under another supported
+    # device context. Keep this alignment local: it must not constrain the
+    # surrounding VJP.
+    root_device = (
+        cfg.device if cfg.device is not None
+        else _params_committed_device(result.state)
+    )
+    root_placement = (
+        jax.default_device(root_device)
+        if root_device is not None else contextlib.nullcontext()
+    )
+    with root_placement:
+        template = _template_runtime(cfg)
+        _boundary_pack_tables(cfg)
+    refinement_device = (
+        cfg.device if cfg.device is not None
+        else _params_committed_device(template.setup.grids) or root_device
+    )
+    params = _put_numeric_leaves(params, refinement_device)
+    state = _put_numeric_leaves(result.state, refinement_device)
+    refinement_mask = _put_numeric_leaves(mask, refinement_device)
+    placement = (
+        jax.default_device(refinement_device)
+        if refinement_device is not None else contextlib.nullcontext()
+    )
+    with placement:
+        # Anchor the state at the root of the residual the adjoint linearizes,
+        # so every consumer reads the same point. ``refine=False`` is the
+        # problem-factory seed preflight; it primes the caches above but skips
+        # the expensive anchor.
+        if not refine:
+            return as_np(state), mask
+        state = _refine_fixed_point(
+            cfg, params, state, refinement_mask)
     return as_np(state), mask
 
 

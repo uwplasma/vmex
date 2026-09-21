@@ -586,3 +586,50 @@ def test_host_callback_is_not_pinned_across_platforms():
     same = im._callback_sharding(
         dataclasses.replace(cfg, device=jax.devices(here)[0]))
     assert isinstance(same, jax.sharding.SingleDeviceSharding)
+
+
+@pytest.mark.parametrize("root_index, template_index", [(0, 0), (1, 1), (1, 0)])
+def test_host_callback_refinement_follows_solved_cpu_device(
+        monkeypatch, root_index, template_index):
+    """Callback inputs meet on the root or already-cached template device."""
+    from vmex.core import implicit as im
+
+    cfg = im.make_config(VmecInput.from_file(DATA / "input.solovev"))
+    params = im.params_from_input(cfg.inp)
+    params_np = jax.tree.map(np.asarray, params)
+    devices = jax.devices("cpu")
+    if len(devices) <= max(root_index, template_index):
+        pytest.skip("requires two forced host devices")
+    root_device = devices[root_index]
+    template_device = devices[template_index]
+    leaf = jax.device_put(np.ones((2, 2)), root_device)
+    state = im.SpectralState(*(leaf,) * 6)
+    host_mask = jax.tree.map(lambda value: np.ones_like(value), state)
+    template = SimpleNamespace(setup=SimpleNamespace(
+        grids=(jax.device_put(np.ones(1), template_device),)))
+
+    monkeypatch.setattr(
+        im, "_host_solve", lambda *_: SimpleNamespace(state=state))
+    monkeypatch.setattr(im, "_template_runtime", lambda *_: template)
+    monkeypatch.setattr(im, "_boundary_pack_tables", lambda *_: None)
+    key = ("callback-alignment-test",)
+    monkeypatch.setattr(
+        im, "_mask_cache_key", lambda *_: key)
+    monkeypatch.setitem(im._MASK_CACHE, key, host_mask)
+
+    def refine(_cfg, aligned_params, solved, aligned_mask):
+        for tree in (aligned_params, solved, aligned_mask):
+            assert all(
+                value.devices() == {template_device}
+                for value in jax.tree.leaves(tree)
+            )
+        return solved
+
+    monkeypatch.setattr(im, "_refine_fixed_point", refine)
+    returned, returned_mask = im._host_solve_and_mask(cfg, params_np)
+
+    assert cfg.device is None
+    assert all(isinstance(value, np.ndarray)
+               for value in jax.tree.leaves(returned))
+    assert all(isinstance(value, np.ndarray)
+               for value in jax.tree.leaves(returned_mask))
