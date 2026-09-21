@@ -129,7 +129,7 @@ enclosed plasma currents is the internal branch
 :math:`-\nabla G[\sigma]-\mathrm{BiotSavart}[\mathbf{J}]`, evaluated with an
 accurate singular quadrature (reused from the optional
 ``virtual_casing_jax`` package,
-required as ``virtual-casing-jax >= 0.0.5`` from the canonical
+required as ``virtual-casing-jax >= 0.0.7`` from the canonical
 ``uwplasma/virtual_casing_jax`` repository;
 :func:`~vmex.core.virtual_casing.surface_field_data_from_wout`
 adapts a converged boundary + field, and

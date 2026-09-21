@@ -40,9 +40,12 @@ dependencies = [
   "packaging",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
-  # 0.4.0 fixes registered-surface selection and rebuilding cached mode grids.
-  # It retains 0.3.0's magnetic_only JAX projection for QI and the asymmetric
-  # spectra/guarded zero-mode derivatives required by the field objectives.
+  # 0.4.0 fixes the host Booz_xform class (run_booz_xform, the Boozer plots
+  # and the Boozer-spectrum objective use it): cached mode lists/grids are
+  # rebuilt when mboz/nboz/nfp/asym change, register_surfaces actually
+  # selects, and __version__ is correct (0.1.1-0.3.0 report "0.1.0"). The
+  # jittable jax_api kernel is byte-identical to 0.3.0 (magnetic_only for QI,
+  # asymmetric spectra, guarded zero-mode derivatives).
   "booz_xform_jax>=0.4.0",
   # 0.21.0 is the first release whose tridiagonal_solve/tridiagonal_solve_checked
   # (the radial preconditioner's solves) run their Thomas sweeps through the
