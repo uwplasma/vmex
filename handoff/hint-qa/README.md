@@ -219,16 +219,23 @@ both total and vacuum fields on both grids. Independently recomputing the six
 metrics and sampled-array hashes reproduces the record exactly. The public
 [native driver](sample-points.f90) and [postprocessor](sample_fields.py) also
 reproduce the original sampled-array hashes when run with the retained raw
-inputs and native objects. A separate clean build passed a constant-field
-check; that clean build has not been tested on the large raw fields. The
+inputs and native objects. A separate clean macOS build passed a constant-field check and now samples
+all 192 real-data targets within 6.218e-15 T of the retained Linux results.
+This is cross-toolchain roundoff agreement, not bitwise equality; exact
+metrics and binary provenance are in the field record. The
 portable [coarse](data/coarse.in) and [fine](data/fine.in) native decks retain
 all measured numerical namelists, including the current-profile table; only
 their header comments and limiter/history filenames changed. Original deck
 and prepared vacuum/flux/limiter hashes are recorded separately. Those large
 prepared fields and the wall-generation inputs are not bundled, so the
 source decks/coils and WOUTs alone cannot recreate the measured fresh pair.
-Package the remaining materials before promoting this to an independently
-reproduced equilibrium result.
+A 56,131,731-byte archive of both original snapshots, the six prepared
+fields, portable decks and a checksum manifest is now assembled and inspected
+for private metadata. It remains outside Git history and is not yet publicly
+downloadable. Publish it through a suitable research-data channel, and complete
+preprocessing and independent equilibrium reproduction before promotion.
+VMEX's release-published workflow is for PyPI packages; a diagnostic-data
+archive must not be published as an accidental package release.
 
 ## Execution order and research acceptance
 

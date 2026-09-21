@@ -94,7 +94,68 @@
     "native_driver_source_sha256": "952a88220a5af81e73f3294d08116f82efb663808591db9c59479a2975cf3946",
     "native_sampler_binary_sha256": "ee9d8d4e81dea4277faa1f65907e845e11a591fd822ea7867f4e74244ef24bb9",
     "array_and_metric_parity": "All sampled total/vacuum/response array hashes and all six metrics match exactly.",
-    "build_scope": "Real-data parity reused retained native objects with the public driver. A separate clean native build passed a one-target constant-field check; it was not rerun on the large raw fields.",
+    "build_scope": "Real-data bitwise parity reused retained Linux native objects with the public driver. A separate clean macOS native build now passes both the constant-field check and all real-data target comparisons to roundoff; see clean_build_reproduction.",
     "samples": "data/native-samples.npz"
+  },
+  "clean_build_reproduction": {
+    "scope": "Clean isolated local MAGVAL/sampler build evaluated all 192 targets using the hash-matched original snapshots and prepared vacuum fields. Separate from retained-object Linux reproduction.",
+    "platform": "macOS arm64",
+    "sampler_sha256": "9d6b0b1f6458bece73f4619a59356473eb1e792d601dcab3b6b65e409fc52d9d",
+    "source_sha256": "f615b2407d82953ddcff6cfd6368a558c5ebc66aca0b885bdd9514d3edbfa0f0",
+    "sample_array_comparison": {
+      "xyz": {
+        "max_absolute_delta": 0.0,
+        "relative_l2_delta": 0.0,
+        "bitwise_equal": true
+      },
+      "coarse_total": {
+        "max_absolute_delta": 4.218847493575595e-15,
+        "relative_l2_delta": 2.0368215681822516e-16,
+        "bitwise_equal": false
+      },
+      "coarse_vacuum": {
+        "max_absolute_delta": 3.9968028886505635e-15,
+        "relative_l2_delta": 1.910570060054847e-16,
+        "bitwise_equal": false
+      },
+      "fine_total": {
+        "max_absolute_delta": 6.217248937900877e-15,
+        "relative_l2_delta": 1.9639078367841295e-16,
+        "bitwise_equal": false
+      },
+      "fine_vacuum": {
+        "max_absolute_delta": 5.329070518200751e-15,
+        "relative_l2_delta": 1.9888493342750381e-16,
+        "bitwise_equal": false
+      }
+    },
+    "coarse_to_fine_metrics": {
+      "total": {
+        "rms_vector_delta_T": 0.0002435156582406185,
+        "max_vector_delta_T": 0.0017011476700464177
+      },
+      "vacuum": {
+        "rms_vector_delta_T": 0.0002329399659066426,
+        "max_vector_delta_T": 0.0016974704205039428
+      },
+      "response": {
+        "rms_vector_delta_T": 7.400909260067331e-05,
+        "max_vector_delta_T": 0.00032195484079763285
+      }
+    },
+    "result": "All field components agree within 6.218e-15 T of the historical Linux samples; not bitwise identical across toolchains. No equilibrium calculation performed.",
+    "compiler": "GNU Fortran 13.4.0 via MPI wrapper",
+    "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2",
+    "sample_array_comparison_units": {
+      "xyz": "m",
+      "field_arrays": "T"
+    }
+  },
+  "prepared_data_archive": {
+    "sha256": "4a5ed46bb45dfb12b20ebb3fecbda8136e027d7ff74ed74414979b8fadac90e0",
+    "bytes": 56131731,
+    "members": 12,
+    "contents": "Both original final snapshots and prepared vacuum/flux/limiter fields; portable input decks; README and SHA256 manifest. Numeric payload hashes match this record.",
+    "status": "Prepared and privacy-inspected; not yet publicly downloadable. No equilibrium rerun or raw later-time restart is included."
   }
 }
