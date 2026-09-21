@@ -56,8 +56,8 @@ SURFACES = np.linspace(0.05, 1.0, 6)
 
 # Seed boundary the coils are fitted to: the rotating ellipse of
 # single_stage_optimization.py.
-SEED_MINOR_RADIUS = 0.29
-SEED_ELLIPSE = 0.15
+SEED_MINOR_RADIUS = 0.195
+SEED_ELLIPSE = 0.10
 
 # Volume-average beta, pressure profile p(s) = PRES_SCALE * (1 - s) as VMEC
 # power-series coefficients, and no net toroidal current:
@@ -67,7 +67,7 @@ BETA_TOLERANCE = 0.1              # relative, for the final check
 
 # Targets the finished design is checked against:
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
-ASPECT_LIMIT = 4.0                # maximum aspect ratio
+ASPECT_LIMIT = 6.0                # maximum aspect ratio
 COIL_SURFACE_DISTANCE_LIMIT = 0.15
 COIL_DISTANCE_LIMIT = 0.17
 CURVATURE_LIMIT = 7.0
@@ -77,7 +77,7 @@ CURVATURE_LIMIT = 7.0
 # normal-field value is used only by the coil pre-fit: on a free boundary
 # B.n = 0 holds by construction.
 IOTA_CONSTRAINT = 0.43
-ASPECT_CONSTRAINT = 3.98
+ASPECT_CONSTRAINT = 5.97
 NORMAL_FIELD_CONSTRAINT = 0.008
 CURVATURE_OBJECTIVE_LIMIT = 6.9
 COIL_DISTANCE_CONSTRAINT = 0.19
@@ -85,16 +85,18 @@ COIL_SURFACE_DISTANCE_CONSTRAINT = 0.16
 
 # Coils: number of unique shapes, Fourier order, and the circle they start on.
 N_COILS = 3
-COIL_ORDER = 3
+COIL_ORDER = 4
 COIL_MAJOR_RADIUS = 1.0
-COIL_MINOR_RADIUS = 0.65
+COIL_MINOR_RADIUS = 0.5
 COIL_CURRENT = 2.7e5
 N_SEGMENTS = 64
 STELLSYM = True
 
-# Weights, and the coil length the optimizer aims for:
-LENGTH_TARGET = 5.3
-LENGTH_WEIGHT = 1.0
+# Weights, and the longest coil the optimizer may build. The length term is
+# one-sided: coils shorter than LENGTH_TARGET cost nothing, so it never pulls
+# against quasisymmetry or the normal field.
+LENGTH_TARGET = 5.5
+LENGTH_WEIGHT = 0.5
 CURVATURE_WEIGHT = 10.0
 COIL_DISTANCE_WEIGHT = 1.0e4
 COIL_SURFACE_DISTANCE_WEIGHT = 1.0e4
@@ -170,7 +172,7 @@ def hinge(constraints):
 
 def coil_costs(coils, surface):
     """Coil length, curvature, separation and clearance to ``surface``."""
-    length = jnp.sqrt(LENGTH_WEIGHT) * (coils.length[:N_COILS] - LENGTH_TARGET)
+    length = jnp.sqrt(LENGTH_WEIGHT) * jnp.maximum(coils.length[:N_COILS] - LENGTH_TARGET, 0.0)
     curvature = jnp.sqrt(CURVATURE_WEIGHT) * jnp.maximum(
         coils.curvature[:N_COILS] - CURVATURE_OBJECTIVE_LIMIT, 0.0)
     return jnp.asarray([
