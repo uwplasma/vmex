@@ -1,7 +1,7 @@
 {
   "scope": "Native input preparation only; no HINT equilibrium or topology qualification",
   "source_commit": "602b41bc79abaddffa6237f007a1011a72fecc71",
-  "published_runner_sha256": "a607b329304a61a9137a14e02e9e7e5b17f945920c71ca8a6772d79cc1179bc2",
+  "published_runner_sha256": "d1de13da5a9169724afc52d355455daed8e96f01c390b377cbe45ed51fb85bf9",
   "executed_runner_sha256": "3e68462770d7637d9e94930f7bd5eabe33797c563e871152504048750d2ed3f1",
   "post_run_changes": "Final metadata-capable runner rerun through both native preprocessors; every NetCDF variable and both case decks match the prior pinned run exactly.",
   "provenance_sha256": "9b1ec70fdb9a02795f54a0f5487d8a1f2b4a1a5855e44136f1a2c470c1886945",
@@ -158,7 +158,7 @@
     }
   },
   "limitations": [
-    "Legacy native build config does not identify patched linked sources or exclude stale objects.",
+    "Legacy binaries remain identifiable only by hash; new selected-tool builds fingerprint staged sources, helper and compiler wrapper, but not all external libraries or underlying compiler binaries.",
     "Current table normalization is a prescribed HINT current protocol, not proof of attained current or self-consistent bootstrap current.",
     "Retained fields differ slightly; no backend cause is inferred.",
     "Only coarse native preprocessing was executed; fine decks were rendered and checked but fine fields were not regenerated.",
@@ -181,5 +181,47 @@
       "package_clean": true,
       "tree": "462aabba0b4a97e5af9d642bcedb3d504e5a1370"
     }
+  },
+  "source_manifest_build_validation": {
+    "build_helper_sha256": "e19b882e43fa1c7467e0a2b14864740ae064a40ad6e63d45008f3150064f7357",
+    "native_build": {
+      "build_config_sha256": "9d2d1eed42fd4bf0661d849253a7e53bf6930b14e71cbffa901993c19e8baf9c",
+      "build_helper_sha256": "e19b882e43fa1c7467e0a2b14864740ae064a40ad6e63d45008f3150064f7357",
+      "compiler_basename": "mpif90",
+      "compiler_wrapper_sha256": "2b8d777cefc393e256dfb4dfe4f29100dba6c421f1d4e5cc3fd30bf3cea66431",
+      "declared_source_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+      "flags": [
+        "-cpp",
+        "-DNETCDF",
+        "-ffree-line-length-none",
+        "-fopenmp",
+        "-O2"
+      ],
+      "limitation": "Checks selected binary identities against build-time staged-source fingerprints; external libraries and the underlying compiler are not fully fingerprinted.",
+      "mode": "Release",
+      "platform": "macOS-14.4.1-arm64-arm-64bit",
+      "source_manifest_verified": true,
+      "tools": {
+        "mkflx": {
+          "binary_sha256": "a36ec8405eace9792e8c8d3a0ea8ac6f05804dc0d8a47b2b46d908df5506d18e",
+          "source_set_sha256": "6b42031fe82a724af54174ae2a20cdf5522869940fb5475fa2d2c12059073a02"
+        },
+        "mklim": {
+          "binary_sha256": "52da9e97d020124bd3e5677dd2b32b4669c455d7eeee960331faff45379043f6",
+          "source_set_sha256": "6a1d039911fd8e73a5314231ae3bc78504fca31cfe42b9221d26eb61d5bd18be"
+        }
+      }
+    },
+    "preparation_provenance_sha256": "294817002e9ea73277d6742b9768e1bdfbc3d98d70e2694e6badee3cb13239b4",
+    "elapsed_seconds": 6.123407832987141,
+    "all_arrays_and_decks_equal_prior_run": true,
+    "checks": [
+      "forced recompilation in reused build directory",
+      "stale manifest invalidated on failed invocation",
+      "source-root output rejected before mutation",
+      "source revision and bytes unchanged during build",
+      "binary/source/selected-tool manifest mismatches rejected"
+    ],
+    "scope": "MKFLX and MKLIM only; full HINT solver not rebuilt in this validation"
   }
 }

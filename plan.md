@@ -36,7 +36,10 @@ Execute three independent bounded lanes now:
    0.0104% globally and less than 0.028% per band. Solver angular20-to-40 changes
    force L2 by 1.92% at NS121. Qualify its measurement and isolate Fourier
    truncation and radial reconstruction next; no radial or physical certificate
-   follows from the three-level ladder.
+   follows from the three-level ladder. At NS121/angular40, MPOL7-to-8
+   reduces force L2 by 47.65% and every radial band by 32.1–51.9%; Fourier
+   truncation is material. Qualify measurement on that state and separate
+   poloidal/toroidal truncation before attributing the remaining radial error.
    GPU AUTO exposed mixed callback devices; explicit placement timed out at
    660 s without arrays. Draft #421 at `95aed755` now follows #418 and
    certifies the exact returned coefficients on the runtime device. Its integrated CPU modules pass 52 tests,

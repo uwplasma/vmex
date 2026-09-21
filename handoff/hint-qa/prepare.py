@@ -312,6 +312,34 @@ def imported_source_identity() -> dict[str, object]:
     return identity
 
 
+def native_source_evidence(config: dict, executables: dict[str, Path]) -> dict:
+    if config.get("schema") != 2:
+        return {"source_manifest_verified": False,
+                "limitation": "Legacy config does not fingerprint staged sources or exclude stale objects."}
+    selected = set(config["selected_tools"])
+    records = {}
+    for name, executable in executables.items():
+        if name.upper() not in selected:
+            raise ValueError(f"native manifest does not cover {name}")
+        record = config["tools"][name.upper()]
+        source_digest = hashlib.sha256()
+        if not record["source_files"]:
+            raise ValueError(f"native source manifest is empty: {name}")
+        for source_name, source in sorted(record["source_files"].items()):
+            source_digest.update(source_name.encode() + b"\0" + bytes.fromhex(source["sha256"]))
+        if source_digest.hexdigest() != record["source_set_sha256"]:
+            raise ValueError(f"native source manifest checksum mismatch: {name}")
+        binary = record["binaries"][executable.name]
+        if binary["sha256"] != sha256(executable) or binary["bytes"] != executable.stat().st_size:
+            raise ValueError(f"native executable no longer matches its build manifest: {name}")
+        records[name] = {"source_set_sha256": record["source_set_sha256"],
+                         "binary_sha256": binary["sha256"]}
+    return {"source_manifest_verified": True, "tools": records,
+            "build_helper_sha256": config["build_helper"]["sha256"],
+            "compiler_wrapper_sha256": config["compiler_identity"]["resolved_executable_sha256"],
+            "limitation": "Checks selected binary identities against build-time staged-source fingerprints; external libraries and the underlying compiler are not fully fingerprinted."}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", type=Path, required=True, help="public handoff data directory containing SHA256.json")
@@ -362,6 +390,7 @@ def main() -> None:
     unsupported_flags = sorted(set(build_flags) - SAFE_BUILD_FLAGS)
     if unsupported_flags:
         parser.error("native build_config.json contains unsupported or path-bearing compiler flags")
+    source_evidence = native_source_evidence(build_config, executables)
     manifest_path = inputs / "SHA256.json"
     if not manifest_path.is_file():
         parser.error("--inputs must contain the public handoff data/SHA256.json")
@@ -438,8 +467,7 @@ def main() -> None:
                 "compiler_basename": Path(str(build_config.get("compiler", "unknown"))).name,
                 "flags": build_flags,
                 "platform": build_config.get("platform"),
-                "linked_source_certified": False,
-                "limitation": "The legacy build config may describe stale objects and does not hash patched sources; executable hashes are authoritative artifacts, not source-build proof.",
+                **source_evidence,
             },
             "native_binaries": {name: {"sha256": sha256(path), "name": f"{name}.exe"} for name, path in executables.items()},
             "packages": {name: package_version(name) for name in ("jax", "jaxlib", "numpy", "scipy", "netCDF4", "h5py", "shapely", "vmex", "essos", "f90nml")},

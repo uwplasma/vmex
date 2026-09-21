@@ -245,6 +245,18 @@ interpreting smaller effects. Next isolate Fourier truncation and radial
 reconstruction. The compact record retains hashes and metrics; supplemental
 raw archives still need public hosting.
 
+A subsequent one-control poloidal Fourier check at NS121 and solver angular40
+changes only `MPOL=7` to `8`. The solve reports convergence in 1,357 iterations.
+Force L2 falls from `811135.553` to `424603.079 N/m^3` (-47.65%); all five
+radial bands fall by 32.1–51.9%. Mean force/mean pressure gradient is still
+`0.187681`, so this is sensitivity evidence, not force-balance acceptance.
+The common flux nodes move by up to 4.54 mm in Cartesian space; the unweighted
+B difference is 0.0882%. This makes Fourier truncation a material confounder
+of radial attribution. Qualify measurement on the new state and separate the
+next poloidal/toroidal truncation check before extending the radial ladder.
+The runner retained convergence and iteration count, but not final FSQ channels
+or output current/flux/pressure scalars; those cannot be claimed from this run.
+
 To reproduce the force screen, set `VMEX_SOURCE` to a clean checkout of the
 pinned main revision, create `results`, and run from the HINT handoff branch:
 
@@ -450,7 +462,16 @@ Native `build_config.json` records the requested commit and options, but older
 builds do not record the applied source patch, and incremental make can reuse
 objects after compiler/flag changes. Binary hashes identify the measured
 executables; the config alone does not prove source/flags provenance. A clean
-rebuild with build-time source fingerprints remains a reproducibility gate.
+rebuild with build-time source fingerprints is required for each promoted executable.
+The updated [build helper](build.py) now forces recompilation and writes a
+schema-2 manifest for only the selected tools, guarding source changes and
+recording source/helper/compiler-wrapper/binary hashes. It invalidates stale
+metadata before rebuilding and rejects output directories inside the source
+tree. MKFLX/MKLIM were rebuilt twice in one isolated directory; both produced
+identical binaries and the regenerated preparation arrays/decks stayed exact.
+The preparation runner checks selected-tool coverage, source-set checksums and
+actual binary hashes. This qualifies those preprocessors' recorded source sets;
+the full HINT solver and external library/toolchain identities remain separate.
 Wall generation must pin Shapely/GEOS and the buffer/resampling settings.
 Use explicit inputs, refuse conflicting outputs, and preserve the measured
 current-table/deck contract. Snapshot extraction and deterministic data
