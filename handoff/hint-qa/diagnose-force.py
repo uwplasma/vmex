@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import resource
+import re
 import subprocess
 import sys
 import time
@@ -25,7 +26,22 @@ def arguments():
     p.add_argument("--samples-output", required=True, type=Path)
     p.add_argument("--expected-head", required=True)
     p.add_argument("--expected-tree", required=True)
+    p.add_argument("--expected-state", type=sha256_value)
+    p.add_argument("--angular-count", type=angular_count, default=16)
     return p.parse_args()
+
+
+def sha256_value(value):
+    if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise argparse.ArgumentTypeError("expected a lowercase 64-hex SHA-256")
+    return value
+
+
+def angular_count(value):
+    count = int(value)
+    if count < 4:
+        raise argparse.ArgumentTypeError("angular count must be at least 4")
+    return count
 
 
 def sha(path):
@@ -94,44 +110,67 @@ def main():
     jax.block_until_ready(eq.solution.R_cos)
     solve_seconds = time.monotonic()-started
 
+    state_digest = hashlib.sha256()
+    for leaf in jax.tree.leaves(eq.solution):
+        state_digest.update(np.ascontiguousarray(leaf,dtype=np.float64).tobytes())
+    state_sha256 = state_digest.hexdigest()
+    if a.expected_state is not None and state_sha256 != a.expected_state:
+        raise RuntimeError("solved state does not match --expected-state")
+
     # q=(s,theta,phi), with physical geometric phi over one field period.
     x, wx = np.polynomial.legendre.leggauss(5)
     s = .4*x+.5
     ws = .4*wx
-    theta = (np.arange(16)+.5)*2*np.pi/16
+    n = a.angular_count
+    theta = (np.arange(n)+.5)*2*np.pi/n
     nfp = int(eq.solver_context.resolution.nfp)
-    phi = (np.arange(16)+.375)*2*np.pi/(nfp*16)
-    ss, tt, pp = np.meshgrid(s, theta, phi, indexing="ij")
-    q = np.stack((ss, tt, pp), axis=-1).reshape(-1, 3)
-    quadrature = (np.broadcast_to(ws[:, None, None], (5,16,16)).reshape(-1)
-                  * (2*np.pi/16)*(2*np.pi/(nfp*16)))
+    phi = (np.arange(n)+.375)*2*np.pi/(nfp*n)
 
     field, flux = eq.field, eq.field_in_flux_coordinates()
-    qj = jnp.asarray(q)
-    xyz = jax.jit(flux.to_xyz_batch)(qj)
-    eq.set_points_flux(qj)
-    B, gradB = field.B(), field.gradB()       # gradB[i,j] = dB_i/dx_j
-    dx_dq = jax.jit(jax.vmap(jax.jacfwd(flux.to_xyz)))(qj)
-    grad_s = jnp.linalg.inv(dx_dq)[:, 0, :]
-    det = jnp.linalg.det(dx_dq)
-
     def p_of_s(value):
         return pressure(inp.pmass_type, inp.am, inp.am_aux_s, inp.am_aux_f,
                         value, pres_scale=inp.pres_scale, bloat=inp.bloat,
                         spres_ped=inp.spres_ped)
 
-    gradp = jax.jit(jax.vmap(jax.grad(p_of_s)))(qj[:,0])[:,None]*grad_s
+    map_xyz = jax.jit(flux.to_xyz_batch)
+    map_jacobian = jax.jit(jax.vmap(jax.jacfwd(flux.to_xyz)))
+    profile_gradient = jax.jit(jax.vmap(jax.grad(p_of_s)))
+    chunks = {name: [] for name in
+              ("q", "xyz", "weights", "B", "gradB", "gradp", "det")}
+    for sv, radial_weight in zip(s, ws, strict=True):
+        tt, pp = np.meshgrid(theta, phi, indexing="ij")
+        q_surface = np.stack((np.full_like(tt,sv),tt,pp),axis=-1).reshape(-1,3)
+        qj = jnp.asarray(q_surface)
+        xyz_surface = map_xyz(qj)
+        eq.set_points_flux(qj)
+        B_surface, gradB_surface = field.B(), field.gradB()
+        dx_dq = map_jacobian(qj)
+        grad_s = jnp.linalg.inv(dx_dq)[:,0,:]
+        det_surface = jnp.linalg.det(dx_dq)
+        gradp_surface = profile_gradient(qj[:,0])[:,None]*grad_s
+        quadrature_surface = (np.full(n*n,radial_weight)*(2*np.pi/n)
+                              *(2*np.pi/(nfp*n)))
+        weights_surface = jnp.asarray(quadrature_surface)*jnp.abs(det_surface)
+        jax.block_until_ready(gradp_surface)
+        for name,value in (("q",q_surface),("xyz",xyz_surface),
+                           ("weights",weights_surface),("B",B_surface),
+                           ("gradB",gradB_surface),("gradp",gradp_surface),
+                           ("det",det_surface)):
+            chunks[name].append(value)
+    q = np.concatenate(chunks["q"],axis=0)
+    xyz = jnp.concatenate(chunks["xyz"],axis=0)
+    weights = jnp.concatenate(chunks["weights"],axis=0)
+    B = jnp.concatenate(chunks["B"],axis=0)
+    gradB = jnp.concatenate(chunks["gradB"],axis=0)
+    gradp = jnp.concatenate(chunks["gradp"],axis=0)
+    det = jnp.concatenate(chunks["det"],axis=0)
     curl = jnp.stack((gradB[:,2,1]-gradB[:,1,2],
                       gradB[:,0,2]-gradB[:,2,0],
                       gradB[:,1,0]-gradB[:,0,1]), axis=-1)
     J = curl/MU0
     lorentz = jnp.cross(J, B)
     force = lorentz-gradp
-    weights = jnp.asarray(quadrature)*jnp.abs(det)
     jax.block_until_ready(force)
-
-    def avg(value):
-        return jnp.sum(weights*value)/jnp.sum(weights)
 
     F = jnp.linalg.norm(force, axis=-1)
     Gp = jnp.linalg.norm(gradp, axis=-1)
@@ -139,27 +178,56 @@ def main():
     Gm = jnp.linalg.norm(jnp.einsum("ni,nij->nj", B, gradB)/MU0, axis=-1)
     divB = jnp.trace(gradB, axis1=1, axis2=2)
     signed_det = float(field.spectra["signgs"])*det
-    force_l2 = jnp.sqrt(avg(F**2))
-    stage1 = {
-        "absolute_l2_N_m3": float(force_l2),
-        "volume_average_force_N_m3": float(avg(F)),
-        "pointwise_normalized_l2": float(jnp.sqrt(avg(
-            (2*F/(L+Gp+1e-12))**2))),
-        "mean_force_over_mean_grad_p": float(avg(F)/avg(Gp)),
-        "mean_force_over_mean_magnetic_pressure_gradient": float(avg(F)/avg(Gm)),
-        "magnetic_normalized_l2": float(force_l2/avg(Gm)),
-        "B_rms_T": float(jnp.sqrt(avg(jnp.sum(B**2, axis=-1)))),
-        "divB_rms_T_m": float(jnp.sqrt(avg(divB**2))),
-        "divB_max_abs_T_m": float(jnp.max(jnp.abs(divB))),
-        "minimum_signed_coordinate_jacobian_m3": float(jnp.min(signed_det)),
-        "nestedness_margin": float(jnp.min(signed_det)/avg(jnp.abs(signed_det))),
-        "sampled_window_full_torus_volume_m3": float(nfp*jnp.sum(weights)),
-    }
 
-    # Exact 4x4x2 subset of the common tensor points.
-    subset = np.array([np.ravel_multi_index((ir,it,ip),(5,16,16))
-                       for ir in (0,1,3,4) for it in (1,5,9,13)
-                       for ip in (2,10)], dtype=np.int64)
+    def weighted_metrics(section):
+        w = weights[section]
+        def avg(value):
+            return jnp.sum(w*value)/jnp.sum(w)
+        f, gp = F[section], Gp[section]
+        force_l2 = jnp.sqrt(avg(f**2))
+        return {
+            "absolute_l2_N_m3":float(force_l2),
+            "volume_average_force_N_m3":float(avg(f)),
+            "pointwise_normalized_l2":float(jnp.sqrt(avg(
+                (2*f/(L[section]+gp+1e-12))**2))),
+            "mean_force_over_mean_grad_p":float(avg(f)/avg(gp)),
+            "mean_force_over_mean_magnetic_pressure_gradient":float(
+                avg(f)/avg(Gm[section])),
+            "magnetic_normalized_l2":float(force_l2/avg(Gm[section])),
+            "B_rms_T":float(jnp.sqrt(avg(jnp.sum(B[section]**2,axis=-1)))),
+            "divB_rms_T_m":float(jnp.sqrt(avg(divB[section]**2))),
+            "divB_max_abs_T_m":float(jnp.max(jnp.abs(divB[section]))),
+            "minimum_signed_coordinate_jacobian_m3":float(
+                jnp.min(signed_det[section])),
+            "nestedness_margin":float(jnp.min(signed_det[section])
+                /avg(jnp.abs(signed_det[section]))),
+        }
+
+    stage1 = weighted_metrics(slice(None))
+    stage1["sampled_window_full_torus_volume_m3"] = float(
+        nfp*jnp.sum(weights))
+
+    radial_bins = []
+    block = n*n
+    for radial_index, sv in enumerate(s):
+        section = slice(radial_index*block,(radial_index+1)*block)
+        row = weighted_metrics(section)
+        row.update({"radial_index":radial_index,"s":float(sv),
+            "full_torus_dV_ds_m3":float(
+                nfp*jnp.sum(weights[section])/ws[radial_index]),
+            "full_torus_window_volume_contribution_m3":float(
+                nfp*jnp.sum(weights[section]))})
+        radial_bins.append(row)
+
+    # Keep the default subset exact and select the nearest cell centers on
+    # other angular grids.
+    theta_fraction = np.array((3,11,19,27))/32
+    phi_fraction = (np.array((2,10))+.375)/16
+    theta_subset = np.rint(theta_fraction*n-.5).astype(int) % n
+    phi_subset = np.rint(phi_fraction*n-.375).astype(int) % n
+    subset = np.array([np.ravel_multi_index((ir,it,ip),(5,n,n))
+                       for ir in (0,1,3,4) for it in theta_subset
+                       for ip in phi_subset], dtype=np.int64)
     xs, Bs = np.asarray(xyz)[subset], np.asarray(B)[subset]
     curl0, gp0, force0 = map(lambda value: np.asarray(value)[subset],
                              (curl, gradp, force))
@@ -196,9 +264,6 @@ def main():
                       f"fd_grad_p_level_{level}":gp,
                       f"fd_force_level_{level}":ff})
 
-    state_digest = hashlib.sha256()
-    for leaf in jax.tree.leaves(eq.solution):
-        state_digest.update(np.ascontiguousarray(leaf,dtype=np.float64).tobytes())
     versions = {name:importlib.metadata.version(name)
                 for name in ("jax","jaxlib","numpy","vmex")}
     versions["python"] = sys.version.split()[0]
@@ -206,15 +271,16 @@ def main():
     result = {
       "scope":"observational native-form interpolation diagnostic; not a continuum certificate",
       "source":{"head":head,"tree":tree,"input_sha256":sha(inp_path),
-                "native_state_sha256":state_digest.hexdigest(),
+                "native_state_sha256":state_sha256,
                 "driver_sha256":sha(Path(__file__).resolve())},
       "versions":versions,
       "solve":{"converged":bool(eq.result.converged),
                "iterations":int(eq.result.iterations),"ns":int(eq.wout.ns),
-               "mpol":int(eq.wout.mpol),"ntor":int(eq.wout.ntor),"nfp":nfp},
+               "mpol":int(eq.wout.mpol),"ntor":int(eq.wout.ntor),"nfp":nfp,
+               "ntheta":int(inp.ntheta),"nzeta":int(inp.nzeta)},
       "coordinates":{"q_order":["normalized_toroidal_flux_s","poloidal_theta_rad","physical_geometric_phi_rad"],
         "s_interval":[.1,.9],"s_nodes":s.tolist(),"s_quadrature":"5-point Gauss-Legendre",
-        "theta_count":16,"theta_shift_cells":.5,"phi_count_per_field_period":16,
+        "theta_count":n,"theta_shift_cells":.5,"phi_count_per_field_period":n,
         "phi_shift_cells":.375,"point_count":len(q),
         "common_points_sha256":hashlib.sha256(np.ascontiguousarray(q).tobytes()).hexdigest(),
         "evaluation":"mapped Cartesian points are inverted with exact q as native-field seeds"},
@@ -224,7 +290,7 @@ def main():
         "pressure_gradient":"dp/ds from the prescribed gamma=0 profile times row 0 of inverse dx/d(s,theta,phi)",
         "weights":"abs(det(dx/dq)) ds dtheta dphi; nfp is used only for the full-torus window volume",
         "pointwise_normalization":"2|F|/(|J cross B|+|grad p|+1e-12 N/m^3)"},
-      "stage1":stage1,
+      "stage1":stage1,"radial_bins":radial_bins,
       "stage2":{"method":"fourth-order centered Cartesian differences using the same native B and reconstructed flux-coordinate pressure profile",
                 "subset_count":len(subset),"subset_flat_indices":subset.tolist(),"levels":levels},
       "timing_seconds":{"solve":solve_seconds,"total":time.monotonic()-started},

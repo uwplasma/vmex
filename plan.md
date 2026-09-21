@@ -32,9 +32,11 @@ Execute three independent bounded lanes now:
    that band change to 0.0155%. Changing only NS31 to NS61 reduces native
    force L2 by 88.2%, but mean force/mean pressure gradient remains 0.451.
    NS121 converges but changes force L2 by another 24.47%, with mixed
-   per-radius trends. Check refined-state measurement angular sensitivity,
-   then solver angular resolution and Fourier truncation; no radial or
-   physical certificate follows from the three-level ladder.
+   per-radius trends. NS121 measurement refinement changes force L2 only
+   0.0104% globally and less than 0.028% per band. Solver angular20-to-40 changes
+   force L2 by 1.92% at NS121. Qualify its measurement and isolate Fourier
+   truncation and radial reconstruction next; no radial or physical certificate
+   follows from the three-level ladder.
    GPU AUTO exposed mixed callback devices; explicit placement timed out at
    660 s without arrays. Draft #421 has a failing-parent device regression;
    qualify the small numerical callback path before retrying

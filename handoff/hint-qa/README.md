@@ -180,10 +180,11 @@ identity. The [record](vmex-cpu.json) and [numeric arrays](data/native-force.npz
 retain the points, weights, fields, force and stencil results. Their force
 algebra and weighted norm were independently recomputed. The run completed
 in 71.1 s on one CPU core. The portable [force diagnostic](diagnose-force.py)
-reproduced all 17 arrays bitwise in 65.73 s before final guard-only edits;
-those added checks passed separately without another solve. Its record
-distinguishes the executed and published script hashes;
-common-target radial and angular refinement are the next scientific gates. The largest of
+now reproduces all 17 arrays and the compressed archive bitwise at default
+NS31/angular16 and at NS121/angular32. Both runs passed exact-state guards;
+existing numeric JSON fields are unchanged apart from timing and memory.
+The runner adds per-radius metrics and configurable measurement angular counts,
+with per-surface evaluation to bound batch memory. The largest of
 the five sampled radial-band force norms occurs at `s=0.137528`
 (`2.6527344e7 N/m^3`); retain these per-radius metrics under refinement
 rather than relying on the aggregate norm alone.
@@ -217,9 +218,26 @@ settings retained. Its force L2 was `8.270284e5 N/m^3`, another 24.47% reduction
 and mean force/mean pressure gradient was `0.361272`. Per-band force changes
 from NS61 ranged from -83.4% to +10.1%, so radial convergence is not established.
 The input/output current difference decreased to 4.57070 A, with edge flux
-preserved to roundoff. Qualify measurement angular sensitivity on NS121, then
-separate solver angular resolution and Fourier truncation effects before
-extending the radial ladder. The 32-grid qualification above applies to NS31.
+preserved to roundoff. A separate fixed-state NS121 measurement check now
+finds 32x32 to 48x48 changes of 0.0104% in global force L2 and less than
+0.028% in each radial-band L2. Mean-force and pressure-ratio changes remain
+below 0.79% per band; the global pointwise-normalized metric changes 1.06%,
+so that metric has a weaker qualification. Shared 32-grid B/curl/coordinates
+match exactly; weight, pressure-gradient and force differences are only
+operation-order roundoff. Force-L2 measurement error does not explain the
+24.47% radial change. Separate solver angular resolution and Fourier
+truncation effects before extending the radial ladder.
+
+At NS121, changing only solver `NTHETA`/`NZETA` from 20 to 40 changes
+force L2 from `827028.445` to `811135.553 N/m^3` (-1.92%); per-band changes
+range from -1.03% to -4.05%. All native FSQ channels remain below `1e-11`.
+This is distinct from measurement quadrature: Fourier truncation is unchanged,
+and common flux coordinates map to slightly different Cartesian positions.
+Two solver grids do not establish angular convergence. The 32-point diagnostic
+qualification applies to the grid-20 state; qualify it again on grid 40 before
+interpreting smaller effects. Next isolate Fourier truncation and radial
+reconstruction. The compact record retains hashes and metrics; supplemental
+raw archives still need public hosting.
 
 To reproduce the force screen, set `VMEX_SOURCE` to a clean checkout of the
 pinned main revision, create `results`, and run from the HINT handoff branch:
@@ -235,7 +253,11 @@ JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 ```
 
 The command requires `GAMMA=0`, enables x64, checks source placement and refuses
-existing outputs. Apply external time/memory limits on shared machines.
+existing outputs. `--angular-count 32` changes only measurement sampling;
+change `NS_ARRAY`, `NTHETA`/`NZETA`, or Fourier resolution in a separately
+identified input to change the solve. `--expected-state` accepts a recorded
+SHA-256 and fails before field measurement if the solved coefficients differ.
+Apply external time/memory limits on shared machines.
 
 The portable [capture command](capture-vmex.py) takes explicit paths and records
 source/dependency/input identities. Use the exact tested source revision above
@@ -502,6 +524,12 @@ establishes equilibrium. Exact constraint matching and physical residuals are
 prerequisites even if two codes agree numerically.
 
 ## Reuse and performance
+
+The proposed profiler correction [#420](https://github.com/uwplasma/vmex/pull/420)
+repeats every stage of multi-stage warm workflows. Historical schema-1 warm
+aggregates could omit diagnostics or derivatives; remeasure those complete
+workflows before making performance claims. Its schema-2 contract is separate
+from the source-specific bounded timings retained here.
 
 Reuse VMEX's shipped `vmex_fieldline_tracing_finite_beta.py`,
 `vmex_fixed_free_boundary_comparison.py`, and optimization examples, adapting
