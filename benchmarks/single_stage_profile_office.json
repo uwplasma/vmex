@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
-  "created_utc": "2026-09-20T01:48:43+00:00",
+  "created_utc": "2026-09-21T03:10:21+00:00",
+  "status": "PARTIAL: only the free:full run below has completed. The free_beta:full run of the same command was still running at commit time; its row must be appended from that run's output before this record is cited for the finite-beta example.",
   "_provenance": {
-    "measurement_commit": "440d2266c88dd3f76c27d4c18ea61b324dcc2d84",
+    "measurement_commit": "cf9811bf71518a08b1ff315dd4c75f92249e3308",
     "measurement_dirty": false,
     "input_data_embedded": false,
-    "baseline_commit": "010e5ba029d549b910424d479b1c241219489b61",
-    "command": "python benchmarks/single_stage_profile.py --runs free:full free_beta:full --baseline-ref 010e5ba0 --timeout 7200"
+    "baseline_commit": "f719c4ff503c526368254aebf3ba9a9119c17f87",
+    "command": "python benchmarks/single_stage_profile.py --runs free:full free_beta:full --baseline-ref f719c4ff --timeout 7200"
   },
   "timing_note": "Wall times are diagnostic samples on a shared machine, each with its load average; compare only adjacent baseline and candidate runs of this record.",
   "environment": {
@@ -17,7 +18,7 @@
     "OMP_NUM_THREADS": "4",
     "VMEX_COMPILATION_CACHE": "disabled",
     "versions": {
-      "vmex": "0.9.1",
+      "vmex": "0.10.0",
       "jax": "0.11.1",
       "jaxlib": "0.11.1",
       "numpy": "2.5.2",
@@ -31,19 +32,19 @@
       "example": "examples/optimization/single_stage_free_boundary_optimization.py",
       "source": "working tree",
       "mode": "full",
-      "wall_seconds": 3304.1,
-      "peak_rss_gib": 18.89,
+      "wall_seconds": 1164.1,
+      "peak_rss_gib": 4.09,
       "exit_code": 0,
       "capped_at_timeout": false,
       "load_average_before": [
-        7.43,
-        10.43,
-        12.89
+        3.03,
+        3.86,
+        2.84
       ],
       "load_average_after": [
-        3.48,
-        4.82,
-        6.83
+        8.81,
+        6.15,
+        4.92
       ],
       "reported": {
         "min |iota|": 0.4268,
@@ -52,15 +53,15 @@
       "summary": {
         "example": "single_stage_free_boundary_optimization.py",
         "smoke": false,
-        "optimization_seconds": 3284.5,
-        "trials": 62,
-        "lbfgsb_iterations": 9,
-        "free_boundary_solves": 63,
+        "optimization_seconds": 1155.7,
+        "trials": 33,
+        "lbfgsb_iterations": 7,
+        "free_boundary_solves": 34,
         "final": {
-          "QA": 0.040598868119498754,
-          "aspect": 6.012997596624512,
-          "min |iota|": 0.42679814144456424,
-          "maximum curvature": 5.279051941403475,
+          "QA": 0.04059886810328575,
+          "aspect": 6.012997597998404,
+          "min |iota|": 0.42679814142620615,
+          "maximum curvature": 5.279051941403477,
           "output solve converged": true
         },
         "targets": {
@@ -69,56 +70,6 @@
         },
         "unmet": [],
         "met": true
-      },
-      "stage_lines": []
-    },
-    {
-      "example": "examples/optimization/single_stage_free_boundary_optimization_finite_beta.py",
-      "source": "working tree",
-      "mode": "full",
-      "wall_seconds": 4638.9,
-      "peak_rss_gib": 24.9,
-      "exit_code": 1,
-      "capped_at_timeout": false,
-      "load_average_before": [
-        3.48,
-        4.82,
-        6.83
-      ],
-      "load_average_after": [
-        3.66,
-        3.86,
-        3.68
-      ],
-      "reported": {
-        "free-boundary final line": "[final] QA = 1.48098e-01, f_boot = 1.54006e-01, beta = 3.406%, aspect = 6.976, min |iota| = 0.257"
-      },
-      "summary": {
-        "example": "single_stage_free_boundary_optimization_finite_beta.py",
-        "smoke": false,
-        "optimization_seconds": 4612.2,
-        "trials": 65,
-        "lbfgsb_iterations": 11,
-        "stop_reason": "ABNORMAL: ",
-        "free_boundary_solves": 66,
-        "final": {
-          "QA": 0.1480978809681382,
-          "bootstrap": 0.15400602424919477,
-          "beta": 0.03405700963743089,
-          "aspect": 6.97588601359451,
-          "min |iota|": 0.25664034460716934,
-          "maximum curvature": 5.340599868245763,
-          "output solve converged": true
-        },
-        "targets": {
-          "min |iota| >=": 0.42,
-          "aspect (least squares)": 6.0,
-          "beta (least squares)": 0.025
-        },
-        "unmet": [
-          "minimum |iota| 0.2566 below the 0.4200 floor"
-        ],
-        "met": false
       },
       "stage_lines": []
     }

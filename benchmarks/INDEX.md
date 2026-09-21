@@ -53,7 +53,7 @@ hand rather than by a script in this tree.
 | `benchmarks/qi_optimization_profile_office.json` | `benchmarks/qi_optimization_profile.py` | `3ee6ca58` | 2026-09-14 | `docs/reference/objectives.rst`, `examples/optimization/QI_optimization.py` |
 | `benchmarks/review_20260913.json` |  | `f09288b3` | 2026-09-13 | `benchmarks/review_20260913_equilibrium.py`, `benchmarks/review_20260913_exterior.py`, `plan.md` |
 | `benchmarks/single_stage_profile_m4.json` | `benchmarks/single_stage_profile.py` | `50814b65` | 2026-09-13 | `examples/optimization/single_stage_optimization.py`, `plan.md` |
-| `benchmarks/single_stage_profile_office.json` | `benchmarks/single_stage_profile.py` | `440d2266` | 2026-09-20 | `examples/optimization/single_stage_free_boundary_optimization_finite_beta.py` |
+| `benchmarks/single_stage_profile_office.json` | `benchmarks/single_stage_profile.py` | `cf9811bf` | 2026-09-21 | `examples/optimization/single_stage_free_boundary_optimization_finite_beta.py` |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json`, `docs/explanation/high-order-force-balance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_m4.json` | `benchmarks/strong_force.py` | `9481f64a` |  | `docs/reference/performance.rst` |
