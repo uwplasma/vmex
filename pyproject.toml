@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.10.0"
+version = "0.11.0"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,16 +40,21 @@ dependencies = [
   "packaging",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
-  # 0.1.1 is the first release whose jittable kernel accepts the asymmetric
-  # families (rmns/zmnc/lmnc/bmns/bsubumns/bsubvmns) that the in-memory
-  # bridge passes for lasym states, and the first with guarded zero-mode
-  # denominators so the transform has finite tangents under jvp/grad.
-  # 0.1.0 raises TypeError on rmns/zmnc/lmnc.  (The BoozerConfig/
-  # BoozerPlan API on booz_xform_jax main is unreleased and NOT required.)
-  "booz_xform_jax>=0.1.1",
-  # 0.20.0 adds the matrix-free least-squares APIs used by strong-force
-  # polishing. 0.19.0 contains continuation but predates the least-squares PR.
-  "solvax>=0.20.0",
+  # 0.4.0 fixes the host Booz_xform class (run_booz_xform, the Boozer plots
+  # and the Boozer-spectrum objective use it): cached mode lists/grids are
+  # rebuilt when mboz/nboz/nfp/asym change, register_surfaces actually
+  # selects, and __version__ is correct (0.1.1-0.3.0 report "0.1.0"). The
+  # jittable jax_api kernel is byte-identical to 0.3.0 (magnetic_only for QI,
+  # asymmetric spectra, guarded zero-mode derivatives).
+  "booz_xform_jax>=0.4.0",
+  # 0.21.0 is the first release whose tridiagonal_solve/tridiagonal_solve_checked
+  # (the radial preconditioner's solves) run their Thomas sweeps through the
+  # accelerator-batched scan (unroll=2 off CPU; the CPU sweep is unchanged).
+  # Every other solvax API vmex calls (least-squares polishing, continuation,
+  # GMRES/GCROT, block Thomas, SpluFactorization, chunk_map) has the same
+  # signature from 0.20.0 through 0.24.0; 0.22-0.24 add only APIs vmex does
+  # not call, so the floor stops at 0.21.0.
+  "solvax>=0.21.0",
 ]
 
 [project.scripts]
@@ -74,8 +79,11 @@ neoclassical = [
   "neo-jax>=1.0.2",
 ]
 # Differentiable virtual casing on a specified boundary; this is not a NESTOR
-# equilibrium adjoint. Version 0.0.5 provides the reusable surface-precision
-# and near-surface plans used by exterior tracing.
+# equilibrium adjoint. 0.0.7 is the newest release. The APIs vmex calls
+# (ExteriorFieldConfig, VirtualCasingExteriorField with its surface-precision
+# and near-surface plans, VmecSurfaceFieldData, and error_estimate's
+# kst_error_estimate/boundary_series_from_gamma/density_magnitude_from_surface)
+# are all present in 0.0.6 and 0.0.7 alike.
 freeb = [
     "virtual-casing-jax>=0.0.7",
 ]
@@ -83,9 +91,9 @@ freeb = [
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
 # uwplasma's JAX-native Hermite-Laguerre flux-tube gyrokinetic solver
 # (https://github.com/uwplasma/GKX; PyPI name ``gkx`` — the package formerly
-# published as ``spectraxgk``; vmex requires the post-rename >= 1.7.1 API).
+# published as ``spectraxgk``; 1.8.0 adds the tprim/fprim drive fields).
 turbulence = [
-  "gkx>=1.7.1",
+  "gkx>=1.8.0",
   # gkx opts into reverse-mode eigenvector derivatives through
   # lax_linalg.eig(enable_eigvec_derivs=...), which first exists in
   # jax 0.10.1.  Below that the proxies raise TypeError at call time,

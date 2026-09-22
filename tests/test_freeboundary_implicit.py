@@ -615,15 +615,8 @@ def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     np.testing.assert_allclose(solved.R_cos, state.R_cos)
 
 
-def test_a_restart_that_misses_ftol_is_solved_cold_instead(monkeypatch):
-    """A trial the reference cannot reach is rebuilt, and the reference stands.
-
-    Replacing the stored reference with the rebuild would make the next call
-    restart from somewhere else, which is exactly the history dependence this
-    lane exists to remove -- so the rebuild serves its own trial only.  An
-    unproductive rebuild spends the per-configuration budget; a productive one
-    does not.
-    """
+def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
+    """A cold-rebuilt point stays identical after unrelated failed trials."""
     inp = dataclasses.replace(
         lasym_free_input(DATA), ns_array=np.array([8]),
         ftol_array=np.array([1.0e-6]), niter_array=np.array([20]))
@@ -639,41 +632,51 @@ def test_a_restart_that_misses_ftol_is_solved_cold_instead(monkeypatch):
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
-    monkeypatch.setitem(fbi._REBUILD_BUDGET, cfg, fbi._REBUILDS)
+    rebuilt_state = dataclasses.replace(state, R_cos=state.R_cos + 1.0)
 
-    def stage(converged, marker):
+    def stage(converged, marker, result_state=state):
+        fsq = 0.0 if converged else 1.0e-3
         return SimpleNamespace(
-            result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0,
-                                   converged=converged, marker=marker),
-            continuation_state=state, rcon0=runtime.rcon0, zcon0=runtime.zcon0)
+            result=SimpleNamespace(
+                state=result_state, fsqr=fsq, fsqz=0.0, fsql=0.0,
+                converged=converged, marker=marker),
+            continuation_state=result_state, rcon0=runtime.rcon0,
+            zcon0=runtime.zcon0)
 
     # The restart from the reference never reaches ftol.
     monkeypatch.setattr(fbi, "_solve_free_boundary_stage",
                         lambda *_a, **_k: stage(False, "restart"))
+    current = jnp.asarray(field.extcur)
+    failed_current = current.at[0].add(1.0)
     rebuilds = []
 
-    def rebuild(converged):
-        def cold(*_args):
-            rebuilds.append(converged)
-            return stage(converged, "rebuild")
-        return cold
+    def rebuild(_solve, _icfg, _inp, trial_field):
+        productive = np.array_equal(np.asarray(trial_field), np.asarray(current))
+        rebuilds.append(productive)
+        return stage(productive, "rebuild" if productive else "failed-rebuild",
+                     rebuilt_state if productive else state)
 
-    monkeypatch.setattr(fbi, "_cold_reference", rebuild(True))
-    fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
+    monkeypatch.setattr(fbi, "_cold_reference", rebuild)
+    first, *_rest, first_status, _fsq, _ratio = fbi._host_solve_and_mask_status(
+        cfg, im.params_from_input(inp), current)
+    assert int(first_status) == 0
     assert rebuilds == [True]
     assert fbi._FREE_LAST_RESULT[cfg].marker == "rebuild"
     assert fbi._FREE_HOT_CACHE[cfg] is reference  # the reference stands
-    assert fbi._REBUILD_BUDGET[cfg] == fbi._REBUILDS  # a useful rebuild is free
 
-    monkeypatch.setattr(fbi, "_cold_reference", rebuild(False))
-    fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
-    assert rebuilds == [True, False]
-    assert fbi._REBUILD_BUDGET[cfg] == fbi._REBUILDS - 1
+    failed_trials = 8  # the former global budget was exhausted at this point
+    for _ in range(failed_trials):
+        *_ignored, status, _fsq, _ratio = fbi._host_solve_and_mask_status(
+            cfg, im.params_from_input(inp), failed_current)
+        assert int(status) == 2
+    assert rebuilds == [True] + [False] * failed_trials
 
-    monkeypatch.setitem(fbi._REBUILD_BUDGET, cfg, 0)
-    fbi._host_solve_and_mask(cfg, im.params_from_input(inp), field)
-    assert rebuilds == [True, False]  # spent: the stalled restart is returned
-    assert fbi._FREE_LAST_RESULT[cfg].marker == "restart"
+    repeated, *_rest, repeated_status, _fsq, _ratio = (
+        fbi._host_solve_and_mask_status(
+            cfg, im.params_from_input(inp), current))
+    assert int(repeated_status) == 0
+    np.testing.assert_array_equal(repeated.R_cos, first.R_cos)
+    assert fbi._FREE_LAST_RESULT[cfg].marker == "rebuild"
 
 
 def test_free_boundary_host_adjoint_rejects_a_false_solver_success(monkeypatch):
@@ -1307,7 +1310,17 @@ def test_free_boundary_root_is_a_function_of_the_parameters():
     )
     current = jnp.asarray(field.extcur)
 
-    first, *_ = solve_free_boundary_implicit_status(params, current, cfg)
+    first, first_status, *_ = solve_free_boundary_implicit_status(
+        params, current, cfg)
+    assert int(first_status) == 0
+
+    # A distant current trial misses the nonlinear acceptance gate after its
+    # deterministic cold retry. It must not change the root returned when the
+    # accepted point is evaluated again.
+    _, failed_status, *_ = solve_free_boundary_implicit_status(
+        params, 2.0 * current, cfg)
+    assert int(failed_status) == 2
+
     repeat, *_ = solve_free_boundary_implicit_status(params, current, cfg)
     host_root, *_ = fbi._host_solve_and_mask(cfg, params, current)
     host_root = jax.tree.map(jnp.asarray, host_root)

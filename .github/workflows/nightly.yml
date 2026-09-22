@@ -56,6 +56,34 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  minimum-integrations:
+    name: Minimum integration versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      # Latest-version jobs cannot detect missing APIs at the declared floors.
+      - name: Install minimum integration versions
+        run: |
+          python -m pip install ".[coils,turbulence,freeb,neoclassical]" pytest pytest-cov \
+            jax==0.10.1 jaxlib==0.10.1 scipy==1.16.0 solvax==0.21.0 \
+            booz_xform_jax==0.4.0 virtual-casing-jax==0.0.7 \
+            essos==0.17 neo-jax==1.0.2 gkx==1.8.0
+          python -m pip check
+          python -c "import essos, gkx, virtual_casing_jax, neo_jax"
+      - name: Check real integration calls and derivatives
+        run: |
+          pytest -q -o addopts= -o usefixtures=_module_jit_enabled \
+            tests/test_virtual_casing_api.py \
+            tests/test_virtual_casing_physics.py::test_synthetic_surface_gradient_fd_validates \
+            tests/test_neoclassical.py::test_diagnostic_config_matches_converged_neo_on_the_qi_deck \
+            tests/test_turbulence.py::test_drive_gradients_reach_gkx_as_a_over_l \
+            tests/test_turbulence.py::test_growth_rate_gradient_matches_finite_differences
+
   optional-integrations:
     name: Optional integrations
     runs-on: ubuntu-latest

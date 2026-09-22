@@ -88,6 +88,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_equilibrium_showcase.webp",
     "figures/readme_essos_beta_scan.webp",
     "figures/readme_optimization.webp",
+    "figures/readme_polish_before_after.webp",
     "figures/readme_precond.webp",
     "figures/readme_runtime_compare.webp",
     "figures/readme_qi.webp",

@@ -325,11 +325,6 @@ def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
 
 
 _FREE_MASK_CACHE: dict[tuple, SpectralState] = {}
-#: Cold rebuilds allowed per configuration after a restart misses ``ftol``.
-#: Only unproductive rebuilds are counted, so a deck that a rebuild does fix
-#: keeps its rebuilds indefinitely and a deck it never fixes stops paying.
-_REBUILDS = 8
-_REBUILD_BUDGET: dict[FreeBoundaryImplicitConfig, int] = {}
 
 #: One reference stage per configuration; every solve restarts from it.  It is
 #: kept whether or not it converged: a configuration with no reachable root
@@ -422,19 +417,16 @@ def _host_solve_and_mask_impl(
     except VmecError:
         # The reference may be too far from this trial; start over cold.
         stage = _cold_reference(solve, icfg, inp, field)
-    if not bool(stage.result.converged) and _REBUILD_BUDGET.get(cfg, _REBUILDS) > 0:
-        # A restart carries the reference's state, and far enough from it that
-        # state is a worse start than none: measured, a 2 % change in every
-        # coil current stalls at the iteration cap and lands 9.2e-3 away from
-        # the cold answer, which converges in 76.  Solve this trial cold
-        # instead.  The stored reference is deliberately NOT replaced: every
-        # call stays a function of its own parameters and the one reference,
-        # which is what makes repeated calls bit-identical.
-        rebuilt = _cold_reference(solve, icfg, inp, field)
-        if not bool(rebuilt.result.converged):
-            # Bound the wasted work on a deck where rebuilding never helps.
-            _REBUILD_BUDGET[cfg] = _REBUILD_BUDGET.get(cfg, _REBUILDS) - 1
-        stage = rebuilt
+    else:
+        if not bool(stage.result.converged):
+            # A restart carries the reference's state, and far enough from it
+            # that state is a worse start than none: measured, a 2 % change in
+            # every coil current stalls at the iteration cap and lands 9.2e-3
+            # away from the cold answer, which converges in 76. Solve this
+            # trial cold instead. The stored reference is deliberately NOT
+            # replaced, so every call stays a function of its own parameters
+            # and the one reference, making repeated calls bit-identical.
+            stage = _cold_reference(solve, icfg, inp, field)
     _FREE_LAST_RESULT[cfg] = stage.result
     state = stage.result.state
     rcon0, zcon0 = stage.rcon0, stage.zcon0
@@ -647,10 +639,9 @@ def _solve_bwd_impl(cfg, saved, state_bar):
                 "coupled GCROT solve instead. That is a different solver, so "
                 "the gradient agrees only to the Krylov tolerance, and it is "
                 "the slower of the two -- measured on the free-boundary "
-                "single-stage deck at ns = 25, one value-and-gradient costs "
-                "46.5 s through the Schur lane against 60.9-74.7 s staged, "
-                "and the gap widens as the Schur lane gets faster. Call the "
-                "objective eagerly to keep the solver you asked for.",
+                "single-stage deck at ns = 25, one warm value-and-gradient "
+                "costs 5.1 s through the Schur lane against 38.6 s staged. "
+                "Call the objective eagerly to keep the solver you asked for.",
                 RuntimeWarning, stacklevel=2)
         _, state_pullback = jax.vjp(
             lambda z: residual(

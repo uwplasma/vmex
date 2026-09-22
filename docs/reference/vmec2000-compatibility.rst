@@ -492,7 +492,7 @@ difference; it does not mean the method itself uses FD.
      - Traceable state-to-surface data is vmex-native and needs no optional
        dependency; ``LASYM=T`` is rejected as unvalidated.  The virtual-casing
        solver paths built on it require the optional ``virtual_casing_jax``
-       package, required as ``virtual-casing-jax >= 0.0.4`` from the canonical
+       package, required as ``virtual-casing-jax >= 0.0.7`` from the canonical
        ``uwplasma/virtual_casing_jax`` repository.
    * - Mgrid tabulation
      - partial derivative contract

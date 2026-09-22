@@ -517,21 +517,50 @@ def test_legacy_lift_is_overdetermined_for_stable_second_derivatives():
     lifted = lift_high_order_state(
         _initial_state(runtime.setup), runtime, degree=5
     )
-    interpolating = lift_high_order_state(
-        _initial_state(runtime.setup),
-        runtime,
-        radial_basis=BSplineBasis.clamped(np.linspace(0.0, 1.0, 7), degree=5),
-        degree=5,
-    )
+    with pytest.raises(ValueError, match="radial lift is underdetermined"):
+        lift_high_order_state(
+            _initial_state(runtime.setup), runtime,
+            radial_basis=BSplineBasis.clamped(np.linspace(0.0, 1.0, 7), degree=5),
+            degree=5,
+        )
     stable = certify_strong_force(lifted)
-    unstable = certify_strong_force(interpolating)
     assert lifted.radial_basis.size == 8
     assert lifted.radial_basis.size < resolution.ns
-    assert float(stable.absolute_l2) < 1.0e-2 * float(unstable.absolute_l2)
     assert float(stable.radial_refinement_difference) < 1.0e-8
-    assert float(stable.minimum_signed_jacobian) > 10.0 * float(
-        unstable.minimum_signed_jacobian
+    assert float(stable.minimum_signed_jacobian) > 0.0
+
+
+@pytest.mark.parametrize("mode_m", [0, 1, 3])
+def test_radial_lift_recovers_regular_polynomial_and_curvature(mode_m):
+    """An independent regular mode fixes off-grid values and curvature."""
+    basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, 5), degree=3)
+    s = np.linspace(0.0, 1.0, 21)
+    samples = s ** (mode_m / 2) * (2.0 + 3.0 * s + s ** 2)
+    coefficients = strong_force._constrained_spline_fit(
+        basis, samples, s, mode_m=mode_m,
+        fix_axis=mode_m == 0, fix_edge=True,
     )
+    points = np.linspace(0.013, 0.987, 23)
+    np.testing.assert_allclose(
+        basis.evaluate(coefficients, points), 2 + 3 * points + points ** 2,
+        rtol=1e-12, atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        basis.evaluate(coefficients, points, derivative=2), 2.0,
+        rtol=1e-10, atol=1e-10,
+    )
+    assert float(basis.evaluate(coefficients, 1.0)) == samples[-1]
+
+
+def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():
+    """Sample count alone cannot detect unsupported interior coefficients."""
+    basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, 9), degree=3)
+    s = np.r_[np.linspace(0.0, 0.1, 16), np.linspace(0.9, 1.0, 16)]
+    assert s.size > basis.size
+    with pytest.raises(ValueError, match="reduce spline spans/degree"):
+        strong_force._constrained_spline_fit(
+            basis, 2 + s, s, fix_axis=True, fix_edge=True,
+        )
 
 
 @pytest.mark.parametrize("name", ["R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"])

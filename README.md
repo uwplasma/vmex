@@ -247,27 +247,27 @@ validation. See the [mirror guide](https://vmex.readthedocs.io/en/latest/howto/m
 
 ## Accuracy and optional polishing
 
-A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged. It does not
-by itself bound the continuous force error `J × B − ∇p`. Optional spline-based
-polishing is disabled by default and remains a research feature: recorded
-certified cases are axisymmetric; a generally accurate, affordable 3-D polished
-solve is still an open goal.
+A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged; it does not bound the continuous
+force error `J × B − ∇p`. Optional spline-based polishing is off by default and remains a research
+feature. It certifies on the bundled axisymmetric shaped, finite-pressure tokamak, where the gain
+is real but not uniform; an accurate, affordable 3-D polished solve is still an open goal.
 
-```console
-vmex examples/data/input.shaped_tokamak_pressure_polished --polish auto --plot
-```
+![Force error of a shaped finite-pressure tokamak before and after polishing](docs/_static/figures/readme_polish_before_after.webp)
 
-`AUTO` estimates the Gauss–Newton work against `--polish-budget`; this is an
-admission estimate, not an enforced end-to-end timeout. Inspect
-`result.polish_report` when using Python. The legacy pointwise `eps_F` metric
-is bounded above by 2 by construction and can saturate in vacuum; read the
-dimensional and volume-normalized metrics with it.
+`python examples/force_balance_polishing.py` (3 to 5 minutes on one CPU) writes both WOUT files on
+the same 129-surface mesh and certifies each with the same independent oracle, so they differ only
+in the polish. The near-axis error (`ρ < 0.2`) falls from 2.9e3 to 61 N m⁻³ and the edge error
+2.5-fold, but the polished state is slightly worse for `0.6 ≲ ρ ≲ 0.8`, and the volume-averaged
+`⟨|F|⟩/⟨|∇(B²/2μ₀)|⟩` falls only from 2.3e-3 to 1.9e-3. The written file keeps the native
+certificate (`eps_F` 1.80e-3 native, 1.90e-3 read back). The `--plot` summary's force panel, a
+finite-difference rebuild from the WOUT, reads about 5.8e-3 on both files and cannot show this.
 
-The [validation record](docs/explanation/validation.md) explains the measured
-near-axis improvement, failed 3-D attempts, native DESC comparison and export
-errors. The [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
-defines the method and certificate. Exported-and-refitted WOUT comparisons
-measure reconstruction error as well as solver error.
+From the command line, `vmex examples/data/input.shaped_tokamak_pressure_polished --polish auto`
+runs the same polish; `AUTO` checks the estimated Gauss–Newton work against `--polish-budget` (an
+admission estimate, not a timeout). `eps_F` is bounded above by 2 by construction and saturates in
+vacuum; read the dimensional metrics with it. See the [validation record](docs/explanation/validation.md) for
+the failed 3-D attempts and the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
+for the method and certificate.
 
 ## Performance and parallel execution
 

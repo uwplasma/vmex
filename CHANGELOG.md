@@ -7,6 +7,42 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+## 0.11.0 - 2026-09-21
+
+See the GitHub release for this version in full.
+
+### Changed
+
+- **The interior field is built from the native VMEC form** (#403).
+  `B^theta = (chi' - lambda_zeta)/sqrt(g)` and `B^zeta = (phi' + lambda_theta)/sqrt(g)`
+  with `sqrt(g)` from the same `R`, `Z` series as the position, and a C2
+  radial interpolant. On the breathing-circle oracle at ns = 41 the second
+  derivative of B improves from 2.9e-2 to 2.2e-4 relative error and
+  `|div B|/|grad B|` is at round-off (8.5e-18). Spectra without `lmns`,
+  `phipf` and `chipf` keep the previous fitted path.
+- **Minimum versions** (#410): `booz_xform_jax>=0.4.0` (its `Booz_xform`
+  class rebuilds cached grids when the resolution changes and reports a
+  correct `__version__`; the JAX kernel is unchanged from 0.3.0),
+  `solvax>=0.21.0`, and `gkx>=1.8.0` for the turbulence extra.
+- **Force-balance polishing is compared on one mesh** (#412). The example and
+  README now state that the gain is concentrated near the axis (RMS force
+  2.9e3 -> 61 N/m^3 for rho < 0.2) with a small volume-average change
+  (2.27e-3 -> 1.91e-3), and that the summary plot's force panel cannot
+  resolve it.
+
+### Fixed
+
+- **`surface_field_data_from_state` raised `TypeError`** for every caller
+  after #403 added three keys to the live-state spectra (#409).
+- **Free-boundary recovery depended on trial history** (#416). A shared
+  cold-rebuild budget meant that, after unrelated rejected trials, a
+  recoverable point returned the stalled restart instead of its converged
+  root. Each stalled restart now gets exactly one deterministic cold retry.
+- **Radial lifts accepted under-determined spline fits** (#414), inventing
+  curvature in unsampled spans; they now raise.
+- **Warm workflow profiles timed only the first stage** (#420); schema 2
+  repeats every stage.
+
 ## 0.10.0 - 2026-09-20
 
 See the GitHub release for this version in full.

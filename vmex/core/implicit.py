@@ -87,6 +87,22 @@ naive re-solve FD is *not* a valid reference — it can sign-flip; use
 :func:`frozen_path_directional_fd`, which reproduces the adjoint to solver
 accuracy (full rationale on that function; ``tests/test_implicit_grad.py``).
 
+At a tight ``ftol``, with the state anchored as above, the difference that
+remains between the adjoint and a cold re-solve FD is the released m=1
+``Z_sin`` pair combination alone.  The linearization holds it at its
+converged value.  Each cold solve instead freezes it wherever its own path
+left it, which moves it by about 0.5 per unit boundary change on
+``li383_low_res``.  In the continuum this coordinate is an angle gauge, so
+iota depends on it only through discretization error.  On
+``li383_low_res``, ``d(mean iota)/d(RBC(1,1))`` is -2.5515 from the adjoint
+and -2.5261 from the re-solves (1.0%).  Adding the iota response to that
+drift alone closes the gap to 2e-6
+(``test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family``).
+The gap does not fall monotonically as ``mpol``/``ntor``/``ns`` are refined.
+Over ``mpol`` 4-8 and ``ns`` 16-64 it spans 0.06-1.0% on ``RBC(1,1)`` and
+0.1-2.8% on ``ZBS(-1,1)``.  The finest case tested, ``mpol = 8`` and
+``ns = 32``, gives 0.27% and 0.87%.
+
 Strict and optimization-safe callback lanes
 ---------------------------------------------
 ``jax.pure_callback`` converts any host exception into an opaque
