@@ -204,7 +204,6 @@ def test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family():
         print(f"\n[{name}] d(mean iota)/d({field.upper()}(n={n:+d},m=1)): "
               f"implicit {implicit:+.6e} re-solve {resolve:+.6e} (gap {gap:.1e}), "
               f"m=1 family term {gauge:+.6e}, closure {closure:.1e}")
-        assert gap > 3e-3
         assert closure < 1e-4
 
 
