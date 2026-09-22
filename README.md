@@ -153,13 +153,14 @@ limits [below](#fields-coils-and-free-boundary).
 
 ### Single-stage plasma and coil design
 
-`examples/optimization/single_stage_optimization.py` adjusts the plasma
-boundary and the coils against one weighted objective, solving the equilibrium
-implicitly at every step; `single_stage_free_boundary_optimization.py` couples
-them through a true free-boundary solve. Both print final plasma and coil
-metrics; `single_stage_optimization.py` also states whether it met its
-rotational-transform and normal-field targets. A lower weighted penalty with
-unmet targets is not a design.
+`examples/optimization/single_stage_optimization.py` adjusts the plasma boundary and the coils
+against one weighted objective, solving the equilibrium implicitly at every step;
+`single_stage_free_boundary_optimization.py` couples them through a true free-boundary solve. Both
+print final plasma and coil metrics; `single_stage_optimization.py` also states whether it met its
+rotational-transform and normal-field targets. A lower penalty with unmet targets is not a design. The free-boundary gradient is exact at the root of the coupled residual, but the
+free-boundary state is not yet Newton-refined onto it. A zero-beta free boundary also needs a nested
+coil-field surface enclosing PHIEDGE; at an island chain VMEX, VMEC2000 and VMEC++ all fail to
+converge ([not validated](docs/explanation/validation.md#what-is-not-validated)).
 
 ### Open mirrors and stellarator-mirror hybrids
 

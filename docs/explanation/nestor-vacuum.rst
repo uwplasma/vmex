@@ -341,6 +341,20 @@ direction against independent re-solves. The free-boundary single-stage
 previews pass the same scalar pair to SciPy. These examples need ESSOS
 (``pip install "vmex[coils]"``).
 
+Accuracy scope. Against finite differences of re-solves anchored by Newton
+steps on the same projected coupled residual, the adjoint agreed to
+1e-9--6e-7 on the 0.5 % beta single-stage objective. The forward solve does
+not apply that anchoring. A status-0 solve at ``ftol = 1e-12`` sat about 1.2e-2
+from the root in coefficient norm, and restarts from different references
+returned values differing by up to 12 %. The gradient is exact for the root;
+the value belongs to a nearby unanchored state. A zero-beta, zero-current
+free boundary exists only when a nested flux surface of the coil field
+encloses PHIEDGE. When an island chain or stochastic layer sits at that flux
+(a 4/9 chain in one optimized coil set, confirmed by field-line tracing),
+VMEX, VMEC2000 and VMEC++ limit-cycle instead of converging. Small beta does
+not regularize it. Keep the transform away from the resonance, or reduce
+PHIEDGE inside the good surfaces.
+
 This path is currently limited to reverse mode. Its low-memory host Krylov
 lane peaks near 3--5 GB on the bundled coarse examples, but the first coupled
 transpose still takes about one to two minutes to compile on the reference

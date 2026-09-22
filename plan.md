@@ -3,13 +3,14 @@
 This file is the complete handoff for the VMEX research programme: a
 collaborator should be able to resume from it alone. It has two parts.
 
-- **Part I, current state and acceptance gates (2026-09-21).** The
+- **Part I, current state and acceptance gates (2026-09-22).** The
   authoritative operational plan: status, open pull requests, the maintainer's
-  example scope, CI capacity, the six research lanes (A–F) with their
+  decisions, CI capacity, the six research lanes (A–F) with their
   acceptance gates, dependencies, and the continuation logbook. Checkpoint:
-  main `9f16a0fe`, checked 2026-09-21 UTC. VMEX 0.10.0 is released; native
-  interior fields (#403), their surface-call correction (#409), #408, #412,
-  #414 and #420 are newer. Recheck remote heads before use.
+  main is VMEX 0.11.0 (#425, `780eb86e`) plus #427 (`equilibrium_from_x`
+  returns the refined state the objective read, `084f6c0e`) and #428 (m=1
+  family closure test for the mean-iota re-solve gap, `604e6a76`), checked
+  2026-09-22 UTC. Recheck remote heads before use.
 - **Part II, historical plan and logbook (2026-09-13 to 2026-09-20).** The
   previous plan kept in full: baseline evidence, root causes, the phased
   programme with its measurements and kill rules, force-balance decisions,
@@ -23,22 +24,23 @@ why a gate exists, what was already measured and what must not be repeated.
 Older revisions (for example the 2026-09-06 plan at `f09288b3`) remain
 readable through git history.
 
-# Part I. Current state and acceptance gates (2026-09-21)
+# Part I. Current state and acceptance gates (2026-09-22)
 
 ## Current status
 
 | Area | Status | Public evidence / source | Next action and completion gate |
 |---|---|---|---|
 | Counters and controlled profiling | Delivered; warm measurement correction merged (#420, `17bd8469`) | #310, #393, #420; `benchmarks/optimization.py`, `benchmarks/profile_workflows.py` | Remeasure warm aggregates with schema 2, then complete a JIT-enabled checkpoint separating cold, cache reload and warm runs. |
-| Newton refinement and block responses | Delivered; anchor contract active | #330, #335, #338; `vmex/core/implicit.py` | Complete lane A below before claiming all returned gradients differentiate a resolved equilibrium. |
+| Newton refinement and block responses | Delivered; anchor contract active; `equilibrium_from_x` now returns the refined state (#427); mean-iota re-solve gap explained as the m=1 gauge family (#428) | #330, #335, #338, #427 (`084f6c0e`), #428 (`604e6a76`); `vmex/core/implicit.py` | Lane A: anchor the free-boundary state at its root and bound the reference restart (new PR to follow). |
 | Stage compilation and Jacobian batching | Delivered | #390 (`39db0388`), #392 (`a18bc448`) | Preserve frozen stage variables, final designs and memory bounds on current integrated sources. |
 | Cold setup and WOUT export | Delivered | #396 (`ddf7d3ee`), #400 | Measure remaining startup costs after these changes, not against the superseded eager setup. |
-| Free-boundary root and Schur reuse | Delivered; scientific workflow needs validation | #383 (`92e6e0bf`), #385, #397 (`3c965913`) | Lane B: repeatability through failures, resolved parameter dependence and feasible full designs. |
+| Free-boundary root and Schur reuse | Delivered; deterministic cold recovery merged (#416, `6f1df723`); adjoint exact at the root but the returned state is off it (lane A) | #383 (`92e6e0bf`), #385, #397 (`3c965913`), #416 | Lane A (off-root state, restart cap) and lane B (vacuum islands, feasible full designs). |
 | Native interior field and exterior accuracy | Delivered; workflow qualification needed | #378, #399, #403; #409 (`45f3a7ae`) | The surface-call correction is merged. Validate the combined optional-dependency and example workflows; preserve per-order accuracy and source-data qualifications. |
-| Fixed-boundary single stage | Recorded feasible designs; new driver needs validation | #368, open #371 | Full-budget comparison of the least-squares variant with identical constraints; smoke completion is not design acceptance. |
-| Finite-beta free-boundary example | Completed run; infeasible design | open #377 (`e53e3b57`) | Diagnose abnormal optimizer stop and unmet transform floor; retain the validated output ladder. |
+| Fixed-boundary single stage | Both fixed-boundary examples (zero and 0.5 % beta) meet every target in #411's runs at `952c3160` | #368; draft #411 (`35024f37`), which supersedes #371 | Refresh the four scripts' docstring numbers from #411's run table, requalify the shipped budgets, then merge #411. |
+| Free-boundary single stage (zero and 0.5 % beta) | 0.5 % beta meets every target; zero beta meets every target once an iota ceiling (max\|iota\| <= 0.44) keeps the 4/9 island chain out of the plasma | draft #411 ([run table](https://github.com/uwplasma/vmex/pull/411#issuecomment-5784049398)); #411 supersedes #377 | Lane B: land the iota ceiling and cold 16 -> 51 verification in #411; per-trial cost (lane A restart cap) is the remaining usability gap. |
 | QI objective | Bounded candidate rejected; nonsmoothness remains | `vmex/core/optimize.py`, `413d7fd2` | Lane D: retain current objective and the measured limitation; no width sweep or production surrogate promotion. |
 | Strong-force polishing | Active research; general 3-D promotion unmet; unresolved-lift rejection merged (#414, `311e7ddd`); same-mesh comparison merged (#412, `07d43327`) | `docs/explanation/validation.md`, existing E1/E2 records | Lane E: resolve lift/axis accuracy, then certify an affordable 3-D correction and its derivative. |
+| Optimization example defaults | Owner decision: bake #426's defaults into main | draft #426 (`52d27ee5`) | Finite-beta examples set beta through PHIEDGE normalization, not a pressure-calibration loop (in progress); fix the final `INITIAL JACOBIAN CHANGED SIGN!` refinement failure #426 reports. |
 | Plan, evidence and repository footprint | Active | This plan; `benchmarks/INDEX.md` | Lane F: compact public reproduction, no dead artifacts, no deletion of sole scientific evidence. |
 | Winding surfaces and broad new physics | Deferred | #301/#303/#304 and independent contributor PRs | Do not restart winding work or alter contributor branches as part of this campaign. |
 
@@ -49,47 +51,74 @@ needed contracts onto current main, not their old implementation/evidence trees.
 
 ## Open pull requests at this checkpoint
 
-State on 2026-09-21 after main `9f16a0fe`. "Head" is the commit reviewed here;
-recheck before acting. No merge is authorized without maintainer approval.
+State on 2026-09-22 after main `604e6a76` (0.11.0 + #427 + #428). "Head" is
+the commit reviewed here; recheck before acting. No merge is authorized
+without maintainer approval.
 
-| PR | State | Owns | Where recorded |
+| PR | State | Owns | Disposition |
 |---|---|---|---|
-| #407 | open, handoff | CI capacity: split c1/c2 parity lanes | "CI capacity" below |
-| #408, #409, #412, #414, #420 | merged 2026-09-21 | Schur warning timings; surface-call spectra; same-mesh polishing comparison; unresolved-lift rejection; complete warm profiling | status table, lanes E and "Dependencies" |
-| #410 | draft, `38f1a3d0` | released integration floors (Boozer 0.4.0, SOLVAX, GKX 1.8.0) | lane D |
-| #411, #371 | draft / open | single-stage example split and least-squares form | lane B, "Example scope" |
+| #407, #410, #416 | merged, released in 0.11.0 (#425) | c1/c2 lane split; released integration floors; deterministic free-boundary cold recovery | done; "CI capacity", "Dependencies", lane B |
+| #408, #409, #412, #414, #420 | merged, released in 0.11.0 | Schur warning timings; surface-call spectra; same-mesh polishing comparison; unresolved-lift rejection; complete warm profiling | done |
+| #427, #428 | merged after 0.11.0 | `equilibrium_from_x` returns the refined state; m=1 family closure test for the mean-iota gap | done; lane A |
+| #411 | draft, `35024f37` | the four single-stage examples (renames, least-squares form, matched fixed/free and finite-beta pairs, iota ceiling) | finish and merge; supersedes #371 and #377 (lane B) |
+| #371, #377 | open, `9b427fb0` / `e53e3b57` | earlier single-stage split; earlier finite-beta free-boundary record | close as superseded by #411 when it merges |
 | #413 | this plan and documentation corrections | plan, README, doc qualifications | lane F |
-| #415 | draft | remove duplicated benchmark narratives | logbook |
-| #416 | draft, `85517771` | deterministic free-boundary cold recovery | lane B |
-| #417 → #418 → #421 (+#422 merged into it) → #423 → #424 | stacked drafts, heads `1459f9df`, `9e0baa28`, `e94e46c6`, `02bf33d9`, `7de9f45d` | refined-state anchor contract, direct primal validity, callback device placement, exact supplied-state measurement, certification of freshly materialized equilibria | lane A |
-| #419 | draft, `709a35ea` | guarded radial-factor reuse (not promotable) | lane C |
-| #377 | open, `e53e3b57` | finite-beta free-boundary example record | lane B |
+| #415 | draft, `9f754112` | remove duplicated benchmark narratives | merge after a rebase on main |
+| #417 → #418 → #421 → #423 → #424 | stacked drafts, heads `1459f9df`, `9e0baa28`, `e94e46c6`, `02bf33d9`, `7de9f45d` | refined-state anchor contract, direct primal validity, callback device placement, exact supplied-state measurement, certification of freshly materialized equilibria | close: the premise did not reproduce on main; the one real defect landed as #427 ([review](https://github.com/uwplasma/vmex/pull/417#issuecomment-5766740229)) |
+| #419 | draft, `709a35ea` | guarded radial-factor reuse | close: the direction failed its gates; its finding is kept in lane C |
+| #426 | draft, `52d27ee5` | optimization example defaults (QA/QH/QI/QP mode ladders, budgets, aspect targets, live monitoring, vector-residual finite-beta QA) | owner: bake the defaults into main; replace its finite-beta pressure calibration with PHIEDGE normalization ("Maintainer decisions") |
 
-The free-boundary derivative stack (#416–#424) is the critical path for lane A
-and lane B. Its CI is not green at the heads above; each PR body carries its
-own commands and remaining gates.
+The #417 stack never touches the free-boundary derivative path
+(`freeboundary_implicit` calls none of its admission code), so it is not on
+the critical path of lane B. The critical path for the free-boundary workflow
+is now lane A's off-root state and restart budget, then #411.
 
-## Example scope decided by the maintainer
+## Maintainer decisions
 
-The standard single-stage examples are one matched fixed/free-boundary pair
-using the proven fixed-boundary vacuum case's seed geometry, NFP, physical
-limits, objective definitions and coil parameterization, plus one finite-beta
-pair at 0.5 percent beta with a simple pressure profile and zero plasma
-current. Bootstrap current is deferred to
-`single_stage_fixed_boundary_finite_beta_bootstrap.py` and
+**Single-stage example scope.** The standard single-stage examples are one
+matched fixed/free-boundary pair using the proven fixed-boundary vacuum case's
+seed geometry, NFP, physical limits, objective definitions and coil
+parameterization, plus one finite-beta pair at 0.5 percent beta with a simple
+pressure profile and zero plasma current. #411 implements this. The detailed
+acceptance rules are in lane B.
+
+**Bootstrap examples are deferred.** Bootstrap current and plasma-current
+optimization go to `single_stage_fixed_boundary_finite_beta_bootstrap.py` and
 `single_stage_free_boundary_finite_beta_bootstrap.py`, to be added only when
-those workflows are ready. The detailed acceptance rules are in lane B.
+those workflows are ready. Do not add them, or duplicates of them, before then.
+
+**Optimization example defaults (#426).** The improved mode ladders,
+iteration budgets, aspect-ratio targets, boundary steps, verification
+resolutions and live progress output in #426 are to be baked into main as the
+defaults of the QA/QH/QI/QP examples.
+
+**Finite beta through PHIEDGE, not a pressure loop.** At zero net current,
+volume-average beta depends on the pressure and field only through
+`PRES_SCALE/PHIEDGE^2`. Finite-beta fixed-boundary examples therefore set beta
+by normalizing PHIEDGE for the requested beta, instead of #426's
+pressure-calibration/continuation loop at fixed PHIEDGE. Work in progress; it
+replaces the calibration in #426 and in #411's fixed-boundary finite-beta
+script (`PRES_SCALE` from one seed solve) once measured.
+
+**Vacuum free boundary is fixed in the example, not the solver.** The
+zero-beta free-boundary limit cycle is a missing equilibrium (a 4/9 island
+chain at the requested flux), not a solver defect; see lane B. The example
+keeps the transform below the resonance. Tiny-beta regularization is rejected.
 
 ## CI capacity (c1/c2 parity lanes)
 
-`Manifest parity lane (c2)` intermittently hits its 25-minute cap and is
-cancelled; `PR gate` then turns red although no test failed. A cancelled c2 on
-a documentation PR is a capacity issue, not a defect: rerun the lane. The
-measured cause and the proposed split (move the five solve-heavy modules to a
-new `pr-parity-c5` lane) are in #407; the split is not implemented. c2 owns
-`plan.md` (`tests/test_test_manifest.py` asserts it), so every plan edit runs
-c2. `Manifest parity lane (c1)` is closer to its cap: successful jobs took
-1245–1470 s against 1500 s, and it needs the same treatment next.
+The split is implemented (#407, `be805b73`, released in 0.11.0). Five
+solve-heavy modules moved from c2 to the new lane `pr-parity-c5`
+(`test_wout_from_result.py`, `test_refine_staging.py`, `test_scaling.py`,
+`test_solver_axis_initialization.py`, `test_vacuum_analytic_recurrence.py`);
+`test_strong_force.py` and `test_mgrid.py` moved from c1 to `pr-parity-c6`;
+`test_strong_force_solovev.py` and `test_force_oracle.py` moved from c1 to
+`pr-parity-c7`. c1 fell from 1216–1458 s to 415 s of job wall time. `PR gate`
+needs the whole parity matrix, so the new lanes are gated without a change to
+the required checks. c2 still owns `plan.md` (`tests/test_test_manifest.py`
+asserts it), so every plan edit runs c2. A cancelled lane at its cap on a
+documentation PR is still a capacity issue, not a defect: rerun it and record
+the job time.
 
 ## Execution and acceptance
 
@@ -111,8 +140,12 @@ it. Review CPU and GPU placement rather than inferring it from available hardwar
 Obtain explicit maintainer approval before any merge; earlier blanket merge
 authorization is superseded. ESSOS also requires manual release review. Require
 the intended scientific gates and current checks; never bypass failed numerical
-checks. Defer the next release until the agreed integration and research gates
-pass, with verified capabilities and named limitations.
+checks. (The earlier deferral of every release until all research gates
+passed was superseded by 0.11.0, which shipped the integration fixes with
+their limitations named.) VMEX 0.12 follows when #411 and #426's defaults are
+on main and lane A's free-boundary anchoring has landed or is explicitly named
+as a limitation; the release notes must carry the qualifications of lanes A
+and B.
 
 Commit authorship is the maintainer's, with no agent attribution. Inspect the
 exact outgoing diff and text before publication: no private filesystem paths,
@@ -121,7 +154,9 @@ and script names. Store machine-specific recovery details privately.
 
 ## A. Derivative and equilibrium consistency
 
-Source: `vmex/core/implicit.py`, `vmex/core/optimize.py`; baseline `f719c4ff`.
+Source: `vmex/core/implicit.py`, `vmex/core/optimize.py`,
+`vmex/core/freeboundary_implicit.py`; baseline `f719c4ff`, re-audited at
+`780eb86e`.
 Native FSQ, the refined nonlinear residual, the linear-response residual and
 observable accuracy are distinct quantities. Current refinement may return an
 improved state without reaching its target; host admission uses native FSQ,
@@ -133,45 +168,69 @@ operator. Refresh stale evidence, reject invalid responses without caching
 them, and preserve unrelated programming errors. Do not introduce a universal
 1e-10 primal cutoff: near-null modes impose measured attainable floors.
 Expose qualification when the observable's requested accuracy is not justified.
-Draft #417 (`1459f9df`) is rebased onto `45f3a7ae`; its 21-test suite passes
-with 98 percent changed executable coverage (319/325). Remaining uncovered
-lines are direct multi-RHS guards. Contributor-owned #418 is now restacked at
-`9e0baa28` and reports 18 passing focused tests on that exact stack. Review the
-pair together: direct calls must retain finite-state, geometry and FSQ admission
-when no absolute tolerance is supplied. Full optimization and GPU gates remain open.
-Callback placement #421 (`95aed755`) now includes #418 and fresh certificate
-alignment. PR #422 (`e25aa1fd`) merged into the #421 feature branch at `e94e46c6`,
-with only complementary tests; it has not delivered that stack to main.
-Eleven forced-two-CPU cases pass,
-covering caller/runtime mismatch, explicit-device precedence and exact returned
-coefficients. Instrumented measurement hooks do not certify a physical root.
-The earlier GPU-facing check used a CPU host root; accelerator-resident root
-and complete optimization qualification remain open on the combined stack.
-Draft #423 (`c5fa14d8`) fixes a further certificate mismatch: measure the
-supplied state directly and reject inconsistent fixed edges separately from
-geometry, rather than silently assembling a different edge. The regression
-fails on its parent; 55 focused tests and 11 forced-two-CPU cases pass, with
-12/12 changed executable source lines covered. A real small JIT-enabled root
-passes. Follow-up `02bf33d9` admits transform roundoff and aligns all public
-measurement inputs before either check, preserving the supplied coefficients.
-Eight focused cases cover ulp/material changes, geometric scaling, staged
-asymmetric setup and cross-device measurement; all nine added executable source
-statements are covered. The combined penalty/device suite passes all 71 tests
-on JAX 0.10.1/SOLVAX 0.21.0 with two CPU devices. A subsequent
-[explicit CPU/CUDA callback check](https://github.com/uwplasma/vmex/pull/423#issuecomment-5757198007)
-on NS5/MPOL3 Solovev passed on JAX 0.11.1/SOLVAX 0.22.0, with coefficients
-agreeing within 3.2e-15 and repeated certificates identical. Template placement
-was verified; native result placement was not independently recorded before
-host conversion. Asymmetric accelerator and complete optimization gates remain.
-Draft #424 (`7de9f45d`, based on #423) addresses a newly reproduced public-API
-regression: factory preflight caches a native-only solve, so immediate
-`equilibrium_from_x(x0)` skipped certification and then failed. The draft
-refreshes missing/stale evidence through the status callback and reuses valid
-certificates. It also removes cache-hit-count dependence from penalty fault
-injection. The original materialization failure is reproduced independently;
-the candidate's numerical suite and coverage remain unverified. Its PR includes
-commands and evidence for continuation. Work is handed off without further
-runs or subagents at the maintainer's request; no merges are authorized.
+(Superseded in part 2026-09-22: on main the fixed-boundary residual and
+derivative already use the same refined state and repeat across histories;
+the contract work that remains is free boundary, below.)
+
+**Independent audit verdict (2026-09-22,
+[#417 comment](https://github.com/uwplasma/vmex/pull/417#issuecomment-5784815035)).**
+Measured on main `780eb86e` (0.11.0) with #411's finite-beta free-boundary
+single stage (0.5 % beta, ns 31, mpol = ntor = 5, 81 coil dofs), laptop under
+load; timings are labelled accordingly.
+
+- **The free-boundary adjoint is exact at the root.** Against central FD of
+  Newton-anchored roots with the same frozen complement it agrees to
+  1e-9–6e-7 (6.0e-8 objective, 8.2e-9 beta, 1.8e-8 mean iota, 1.0e-7 aspect at the seed;
+  1.3e-9–6.4e-7 for every term at the optimum).
+- **It is fast.** A gradient adds 5.5–9 s to a value, almost independent of the
+  number of coil dofs (45/81/117), 4–13x faster than forward FD near the seed
+  and 68x mid-optimization (35.3 s against 2415 s at 81 dofs). Live JAX arrays
+  stay at 210 (1.2 MiB) over 20 consecutive gradients: no leak. Peak RSS
+  2.4–3.2 GiB for the trial loop, 4.5 GiB fixed boundary.
+- **(i) The returned free-boundary state is not at that root.** A status-0
+  solve at ftol 1e-12 sits 1.15e-2 (seed) and 1.26e-2 (optimum) from the root
+  in coefficient norm; four Newton steps on the projected coupled residual take
+  |F| from 3e-7 to 5e-14. Fixed boundary anchors this with `_refined_state`;
+  free boundary has no anchor. Warm FD therefore reads dJ/h = 15.6 where cold
+  solves and the adjoint give 30.0 and 29.7: the restart meets ftol along a
+  soft mode before reaching the root. The gradient is right; the values the
+  optimizer compares it with are not at the same point.
+- **(ii) Wasted restart work.** Near the optimum about 80 % of each trial
+  (about 20 s of 25 s) is a seed-reference restart that runs to its
+  4000-iteration cap without converging before the cold fallback converges in
+  823–1425 iterations. A stall test or budget before the fallback would cut the
+  trial cost about 4x.
+- **(iii) The value map depends on the start at finite beta.** From the seed
+  reference, a mid-path reference and a cold start, J differs by up to 12 %
+  (t = 0.25: 1.1598, 1.3257, 1.2959); every evaluation returned status 0, so no
+  status flip was seen at finite beta, but the map is not a function of the
+  coils alone, and it jumps where the production path switches from restart to
+  fallback.
+- **The ~1 % mean-iota gap is not a missing term.** It is the released m=1
+  `Z_sin` gauge family: the linearization holds it at its converged value,
+  each cold re-solve freezes it where its own path left it (about 0.5 per unit
+  boundary change). On `li383_low_res` (ftol 1e-13, h = 5e-4) the gap is 1.0 %
+  (RBC(1,1)) and 2.8 % (ZBS(-1,1)); adding the iota response to that drift
+  closes it to 2.3e-6 and 1.6e-5. Over mpol 4–8 and ns 16–64 the gap spans
+  0.06–2.8 % and does not fall monotonically. #428 pins the closure as a test
+  (`tests/test_implicit_grad_fd.py::test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family`).
+  Pinning the family to a canonical, parameter-differentiable value is the
+  option if sub-percent agreement with re-solves is wanted (VMEC++ #849 is the
+  precedent; see lane C).
+
+Work on (i) and (ii) is in progress; a new PR will follow. Its gates: the
+anchored free-boundary state repeats from different references, the value
+and gradient refer to the same state (warm and cold FD agree with the adjoint
+at the audit's precision), and trial cost at the optimum falls without a new
+failure mode.
+
+The #417 → #424 stack (hardening of the fixed-boundary anchor contract) is to
+be closed: its premise did not reproduce on main (Jacobians bit-identical to
+#424, history-independent residuals and Jacobians) and it never touches
+`freeboundary_implicit.py`. Its one real defect, `equilibrium_from_x` returning
+the unrefined state (objective mean iota 0.553590 against WOUT 0.554491),
+landed as #427. The stack's record, as it stood on 2026-09-21, is kept in the
+continuation logbook below.
 
 Gate on repeated points after accepted/rejected trials, independent problem
 instances, direct Jacobian calls, changed/missing anchors, and host/staged lanes.
@@ -187,6 +246,72 @@ counters in `benchmarks/optimization_counters_20260913.json`.
 Source: `vmex/core/freeboundary_implicit.py`, existing single-stage examples;
 baseline #383/#397. The fixed reference and bounded cold-rebuild mechanism
 already exist. Test them rather than implementing a second policy.
+
+**Current state (2026-09-22).** #416 is merged. The four single-stage examples
+live in draft #411, which supersedes #371 and #377. Its latest runs (clearance
+limit 0.15 m, aspect limit 6.0 with an aspect-5.97 seed, order-4 coils on a
+0.5 m circle, one-sided coil length <= 5.5 m, 50 iterations / 100 trials; four
+runs concurrent on one laptop, so wall times are pessimistic):
+
+| example | targets | wall | peak RSS | iterations / trials |
+|---|---|---|---|---|
+| fixed, zero beta (`952c3160`) | all met (min iota 0.4289, aspect 5.969, B.n/B RMS 0.800 %, clearance 0.261 m) | 335 s | 3.8 GB | 50 / 86 |
+| fixed, 0.5 % beta (`952c3160`) | all met (beta 0.5011 %, min iota 0.4295, aspect 5.971, B.n/B RMS 0.800 %) | 566 s | 9.1 GB | 50 / 65 |
+| free, 0.5 % beta (`952c3160`) | all met (beta 0.4833 %, min iota 0.4309, aspect 5.930, clearance 0.246 m) | 2399 s | 14.3 GB | 27 / 109 (trial cap) |
+| free, zero beta, before the iota ceiling (`952c3160`; `08d97509` warm-verified) | misses B.n/B RMS (1.18–1.48 % vs 1 %); verification solve limit-cycles | 1536 s | 7.7 GB | 27 / 95 (9 rejected) |
+| free, zero beta, with max\|iota\| <= 0.44 (`35024f37`) | all met (min iota 0.431, max iota 0.436, aspect 5.93, B.n/B RMS 0.617 %, coil-surface 0.244 m, coil-coil 0.191 m, max curvature 6.90); cold 16 -> 51 verification converges to 1e-12 | 1898 s | not recorded | 30 / 101 (2 rejected) |
+
+Earlier #411 runs at `e0fa2174` (aspect-4 seed, order-3 coils) missed targets
+in three of four examples; that table is on #411 and is superseded by the one
+above. Coil terms are inactive at the end of every run (coils 4.5–4.8 m);
+quasisymmetry is traded against the iota floor (seed min iota 0.404 below the
+0.43 floor), not against the coils. Free-boundary wall time (26–40 min) is
+still too long for a user-facing example: per-trial cost is 16–22 s against
+4–9 s fixed boundary, and lane A (ii) accounts for most of it near the
+optimum. The scripts' docstring numbers predate these runs and must be
+refreshed from this table before #411 merges.
+
+**The zero-beta free-boundary limit cycle is a missing equilibrium, not a
+solver defect**
+([#411 diagnosis](https://github.com/uwplasma/vmex/pull/411#issuecomment-5784049398)).
+Field-line tracing of the optimized coils (64 lines, 1000 transits) finds
+nested surfaces with iota 0.459 -> 0.449 out to 0.79 of PHIEDGE, then a
+separatrix, a 9-island chain locked at 4/9 = 0.4444, and a stochastic layer
+outside. The PHIEDGE boundary cuts through the islands: no nested flux surface
+encloses the requested flux, so no zero-beta, zero-current nested-surface
+equilibrium exists for that deck. VMEC2000 (fsq floors at 3.6e-8, bursts to
+3.8e-4, DELT collapses to 7.4e-3) and VMEC++ (bursts to 4e-5, then
+`JACOBIAN_75_TIMES_BAD` at 9022 iterations) fail on the same mgrid deck the
+same way; VMEX floors near 4e-9 with bursts to 1e-4. Controls: the
+Landreman-Paul QA coils converge cold at zero beta (ns 31 to 1e-11 in 1832
+iterations; 16 -> 51 in 627 at ns 51), so zero beta alone is not degenerate.
+Ruled out: tiny-beta regularization (<beta> 1e-6 to 5.4e-3, none converged in
+20000 iterations; do not build it into VMEX), NESTOR cadence and DELT
+(NVACSKIP 6/15, DELT 0.3), higher resolution, and any zero-pressure code path.
+Inside the good surfaces a vacuum solution exists (PHIEDGE x 0.70 converges
+with the 16 -> 51 ladder). While unconverged, VMEX's iota read below the
+field-line iota, so the `min |iota| >= 0.43` floor pushed the real profile up
+through 4/9.
+
+Fix, in the example: add `max |iota| <= 0.44` (penalty from 0.437) next to the
+floor, restore the cold 16 -> 51 verification at ftol 1e-12 (revert the
+warm-started verification of `08d97509`, keeping the `[accepted]` diagnostic
+line), and report max |iota|. The window [0.42, 0.44] excludes 2/5 and 4/9;
+the rationals left with n a multiple of NFP are high order (3/7, 5/12).
+Independent cold solves of the new coils at ns 16, 31 and 51 converge and give
+B.n/B 0.617–0.618 %; field-line tracing shows no locked chain and nested
+surfaces to about 1.11 times the boundary distance on the outboard midplane
+(thin margin at phi = pi/4). Suggested solver follow-up (optional, not a fix):
+for a zero-beta, zero-current free boundary, report the coil-field B.n/B RMS
+on the boundary or DEL-BSQ and warn when it does not fall with resolution;
+that catches a missing flux surface directly instead of as a limit cycle. The
+history-dependent trial status seen before (status 0 during the optimization,
+status 2 with fsq 1.374e-8 on re-solve) is a symptom of the missing fixed
+point at the old coils.
+
+**Record of the #416/#377 derivative studies (2026-09-21).** Superseded as the
+current account by lane A's audit (exact adjoint at the root; values off the
+root; m=1 gauge family). Kept for its measurements.
 
 Draft #416 removes the exhausted global rebuild budget and passes controlled
 and physical repeated-point checks. The [independent pressure study](https://github.com/uwplasma/vmex/pull/416#issuecomment-5755622514)
@@ -256,7 +381,9 @@ For the standard finite-beta pair, set the target to 0.5 percent (`0.005`),
 use a simple pressure shape such as `p(s)=p0*(1-s)`, and prescribe zero plasma
 current (`ncurr=1`, zero current profile and `curtor=0`). Calibrate seed pressure
 and report final beta; keep the same beta convention and acceptance in both
-scripts. Remove bootstrap mismatch, kinetic-profile preparation, bootstrap
+scripts. (Maintainer decision 2026-09-22: set beta through PHIEDGE
+normalization rather than a pressure-calibration loop; see "Maintainer
+decisions".) Remove bootstrap mismatch, kinetic-profile preparation, bootstrap
 Picard iterations and plasma-current DOFs from these introductory examples.
 Coil currents are separate external-field parameters. Self-consistent bootstrap
 and plasma-current optimization are deferred to later
@@ -267,7 +394,8 @@ as derivative evidence, not the default example or a task to rerun unchanged.
 Simpler optimization does not qualify a gradient: retain the same-root and
 independent-perturbation checks before claiming convergence or speedup.
 
-With #409 merged, integrate example reporting fixes and qualify these simpler
+The next paragraph is the pre-#411 record; #411's table above supersedes its
+design results. With #409 merged, integrate example reporting fixes and qualify these simpler
 vacuum and finite-beta workflows on the memory-fixed source. Measure retained
 arrays, RSS/device memory slope, fallback counts, accepted progress and final
 fine-grid verification. The updated #377 vacuum record at `cf9811bf` reports
@@ -297,7 +425,14 @@ and the 151-surface carried cache grew from 277,568 to 491,264 bytes, despite
 bit-identical trajectories. Do not integrate it on kernel timings alone. VMEX
 retains ownership of physical bands and invalidation on updates and recovery.
 
-Draft #419 now includes the [bounded QI optimizer result](https://github.com/uwplasma/vmex/pull/419#issuecomment-5756488807):
+**#419 is to be closed (2026-09-22): the guarded-reuse direction failed its
+gates.** Its finding is kept here: independent reconvergence moves the frozen
+m=1 `Z_sin` complement between families (cross-family projected residuals
+0.066 and 0.092 against 1e-13 within a family), which is the same gauge family
+that lane A identified as the whole mean-iota re-solve gap (#428). Any reuse
+or pinning experiment must first fix that family; the record follows.
+
+Draft #419 included the [bounded QI optimizer result](https://github.com/uwplasma/vmex/pull/419#issuecomment-5756488807):
 312/312 reused response columns passed exact-current checks at 1e-11 tolerance,
 but both arms exhausted their budgets. Independent reconvergence changed the
 frozen m=1 Z-sine complement: each state's projected residual was about 1e-13,
@@ -382,11 +517,12 @@ passed all 21 Boozer-table, nine plotting and eight omnigenity tests, with JIT
 and full-marked tests enabled. The clean all-extras minimum-version stack uses
 JAX 0.10.1. Its numerical checks exposed missing `tprim`/`fprim` drive fields
 in GKX 1.7.1; the 1.8.0 floor
-correction is now in rebased #410 (`38f1a3d0`). Eleven packaging, four GKX,
+correction was added to #410, which merged (`e76930af`) and shipped in 0.11.0. Eleven packaging, four GKX,
 one NEO and three NESTOR/adjoint checks pass. The new minimum-version nightly
 selection passes all seven tests together; explicit optional-package imports
 prevent missing integrations from silently skipping the gate. Static preflight, warning-free
-Sphinx build and all six source/HTML navigation checks pass. CI and review remain open.
+Sphinx build and all six source/HTML navigation checks pass. The dependency
+gate of this lane is closed; the QI smoothness gate above is not.
 
 ## E. Strong-force polishing
 
@@ -476,6 +612,39 @@ source sampling is described as geometry-dependent. No numerical behavior
 changed. Independent qualification of the supplied-surface-field variant is
 still required before restoring a physical-topology claim.
 
+Documentation claims corrected in #413 on 2026-09-22, each checked against
+the code or a measurement first:
+
+- `docs/explanation/adjoint-gradients.md` (validating the gradients): quotes
+  the measured m=1 gauge gap (1.0 % / 2.8 % on `li383_low_res`, closure 2e-6,
+  test from #428) instead of main's "naive FD matches `jax.grad` to
+  rtol <= 1e-6" for bulk integrals, and says free-boundary checks need
+  Newton-anchored re-solves.
+- `docs/reference/objectives.rst` (Mercier/Glasser rows): the tests use
+  frozen-path FD (`frozen_path_directional_fd`), not independently
+  reconverged equilibria.
+- `README.md` (single stage), `docs/explanation/nestor-vacuum.rst` (coupled
+  adjoint) and `docs/explanation/validation.md` ("What is NOT validated"): the
+  free-boundary off-root state and the zero-beta island-chain finding.
+- `docs/explanation/validation.md` (tokamak polish): explains why the README's
+  read-back WOUT numbers (2.9e3 -> 61 N m^-3 near axis) differ from the
+  native-state table (9.8e2 -> 6.7e1).
+- `examples/hot_restart_scan.py` docstring, `docs/howto/restart-from-previous-run.md`
+  and `docs/howto/parameter-scans.md`: "a handful of iterations" and "many
+  iterations, not one" replaced by measurements. The example's PHIEDGE scan at
+  zero pressure with a prescribed transform takes one warm iteration per point
+  (about 300 cold; rerun 2026-09-22). Boundary moves of 1e-4 to 1e-2 on the
+  low-resolution QA deck took 212–391 against 806 (Part II §2).
+
+Left to a code PR, because they are docstrings in `vmex/core`:
+`vmex/core/implicit.py::frozen_path_directional_fd` still says a naive
+re-solve FD of `wb`/aspect matches `jax.grad` to `rtol <= 1e-6`. Its
+`li383_low_res` example (adjoint -0.773 against naive FD +0.045 for
+`d(iota_edge)/d(RBC(-1,1))`) should be re-measured now that the refined-state
+anchor and the m=1 family account are in place. The `freeboundary_implicit`
+module docstrings should state the off-root scope once lane A's anchoring
+lands.
+
 ## Dependencies and publication
 
 #420 (merged `17bd8469`) corrects aggregate warm profiling: schema 1 repeated
@@ -484,8 +653,11 @@ workflows. Schema 2 repeats every stage in order. Nine focused JIT-enabled
 tests pass, covering all 21 changed executable lines. Remeasure affected warm
 aggregates before citing them; separately recorded first-call stages remain valid.
 
-Verified release inventory at this checkpoint: VMEX 0.10.0, SOLVAX 0.24.0,
-booz_xform_jax 0.4.0, virtual-casing-jax 0.0.7, ESSOS 0.17. Review current
+Verified release inventory at this checkpoint: VMEX 0.11.0 (#425), whose
+floors are `booz_xform_jax>=0.4.0`, `solvax>=0.21.0`, `gkx>=1.8.0` (turbulence
+extra) and `virtual-casing-jax>=0.0.7` (#410); latest sibling releases checked
+2026-09-21 were SOLVAX 0.24.0, booz_xform_jax 0.4.0, virtual-casing-jax 0.0.7
+and ESSOS 0.17. Review current
 source and installed-package interoperability before proposing upgrades.
 Keep generic linear algebra in SOLVAX, Boozer transforms in booz_xform_jax,
 quadrature/error estimates in virtual-casing-jax, and coil physics in ESSOS.
@@ -610,6 +782,82 @@ preconditioner recomputation, the column certificate on the raw operator,
 the unqualified near-surface continuation, geometry-dependent default source
 sampling, the automatic GPU placement as a workload heuristic, and the scope of
 the implicit and free-boundary derivative claims.
+
+### 2026-09-21: derivative stack record (superseded 2026-09-22)
+
+> **Superseded 2026-09-22.** The independent review found the stack's premise
+> not reproduced on main; its one real defect landed as #427 and the stack is
+> to be closed. Lane A carries the current verdict. Kept as the record of what
+> the stack implemented and measured.
+
+Draft #417 (`1459f9df`) is rebased onto `45f3a7ae`; its 21-test suite passes
+with 98 percent changed executable coverage (319/325). Remaining uncovered
+lines are direct multi-RHS guards. Contributor-owned #418 is now restacked at
+`9e0baa28` and reports 18 passing focused tests on that exact stack. Review the
+pair together: direct calls must retain finite-state, geometry and FSQ admission
+when no absolute tolerance is supplied. Full optimization and GPU gates remain open.
+Callback placement #421 (`95aed755`) now includes #418 and fresh certificate
+alignment. PR #422 (`e25aa1fd`) merged into the #421 feature branch at `e94e46c6`,
+with only complementary tests; it has not delivered that stack to main.
+Eleven forced-two-CPU cases pass,
+covering caller/runtime mismatch, explicit-device precedence and exact returned
+coefficients. Instrumented measurement hooks do not certify a physical root.
+The earlier GPU-facing check used a CPU host root; accelerator-resident root
+and complete optimization qualification remain open on the combined stack.
+Draft #423 (`c5fa14d8`) fixes a further certificate mismatch: measure the
+supplied state directly and reject inconsistent fixed edges separately from
+geometry, rather than silently assembling a different edge. The regression
+fails on its parent; 55 focused tests and 11 forced-two-CPU cases pass, with
+12/12 changed executable source lines covered. A real small JIT-enabled root
+passes. Follow-up `02bf33d9` admits transform roundoff and aligns all public
+measurement inputs before either check, preserving the supplied coefficients.
+Eight focused cases cover ulp/material changes, geometric scaling, staged
+asymmetric setup and cross-device measurement; all nine added executable source
+statements are covered. The combined penalty/device suite passes all 71 tests
+on JAX 0.10.1/SOLVAX 0.21.0 with two CPU devices. A subsequent
+[explicit CPU/CUDA callback check](https://github.com/uwplasma/vmex/pull/423#issuecomment-5757198007)
+on NS5/MPOL3 Solovev passed on JAX 0.11.1/SOLVAX 0.22.0, with coefficients
+agreeing within 3.2e-15 and repeated certificates identical. Template placement
+was verified; native result placement was not independently recorded before
+host conversion. Asymmetric accelerator and complete optimization gates remain.
+Draft #424 (`7de9f45d`, based on #423) addresses a newly reproduced public-API
+regression: factory preflight caches a native-only solve, so immediate
+`equilibrium_from_x(x0)` skipped certification and then failed. The draft
+refreshes missing/stale evidence through the status callback and reuses valid
+certificates. It also removes cache-hit-count dependence from penalty fault
+injection. The original materialization failure is reproduced independently;
+the candidate's numerical suite and coverage remain unverified. Its PR includes
+commands and evidence for continuation. Work is handed off without further
+runs or subagents at the maintainer's request; no merges are authorized.
+
+### 2026-09-22: VMEX 0.11.0, the free-boundary audit and the vacuum finding
+
+VMEX 0.11.0 was released (#425, `780eb86e`), carrying #403, #407, #408, #409,
+#410, #412, #414, #416 and #420. #427 (`equilibrium_from_x` returns the
+refined state; objective and WOUT mean iota now agree to 1e-12, where main
+differed by 1.6e-3) and #428 (closure test for the mean-iota gap) merged after
+it.
+
+The independent review of the #417 stack did not reproduce its premise on
+main; the stack and #419 are to be closed and #371/#377 are superseded by
+#411. The follow-up audit of the free-boundary adjoint (lane A) found it
+exact at the root and 4–68x faster than finite differences, and located the
+remaining problems in the forward state: no Newton anchoring (about 1.2e-2 off
+the root), a seed-reference restart that burns about 80 % of each late trial,
+and start-dependent values at finite beta. The mean-iota gap is the m=1 gauge
+family, not a missing term. Anchoring and a restart budget are in progress.
+
+The zero-beta free-boundary limit cycle in #411 was traced to a 4/9 island
+chain at the boundary of the optimized coils (lane B), reproduced by VMEC2000
+and VMEC++; an iota ceiling at 0.44 in the example removes it, and all four
+single-stage examples now meet their targets. Tiny-beta regularization was
+tested and rejected.
+
+The maintainer decided: bake #426's optimization defaults into main; set
+finite-beta beta through PHIEDGE normalization instead of a pressure loop
+(in progress); defer the bootstrap single-stage scripts. The release deferral
+stated in "Execution and acceptance" was superseded by 0.11.0 and restated for
+0.12. This entry also corrected stale documentation claims listed in lane F.
 
 # Part II. Historical plan and logbook (2026-09-13 to 2026-09-20)
 
