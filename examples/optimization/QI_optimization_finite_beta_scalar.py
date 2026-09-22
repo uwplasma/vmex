@@ -21,11 +21,11 @@ depends on PRES_SCALE / PHIEDGE**2 alone, and B0 = PHIEDGE / (pi a**2) with
     PHIEDGE = pi a**2 sqrt(mu0 PRES_SCALE / TARGET_BETA),   a = R0 / ASPECT_TARGET.
 
 The seed is scaled to the target aspect ratio and one solve corrects the
-estimate.  Beta and the aspect ratio then agree at the targets, so the beta
-row only absorbs what reshaping does to <B**2> at fixed aspect ratio (about
-ten per cent) and no per-stage pressure recalibration is needed.  Holding
-PHIEDGE while calibrating PRES_SCALE on the seed instead makes the two rows
-disagree: at fixed flux beta scales as ASPECT**-4, so the targets are
+estimate. Beta and the aspect ratio then agree at the targets, so the beta row
+only absorbs what reshaping does to <B**2> at fixed aspect ratio (10 to 20 per
+cent without the row) and no per-stage pressure recalibration is needed.
+Holding PHIEDGE while calibrating PRES_SCALE on the seed instead makes the two
+rows disagree: at fixed flux beta scales as ASPECT**-4, so the targets are
 consistent only at the seed's aspect ratio.
 """
 
