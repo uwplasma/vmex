@@ -607,6 +607,17 @@ def test_equilibrium_from_x_is_the_state_the_objective_read():
         np.testing.assert_allclose(
             float(np.mean(np.asarray(eq.wout.iotas)[1:])), objective, rtol=1e-12)
 
+    # Without a refined state for this decision vector there is nothing
+    # certified to return, never the host solve in its place.
+    from vmex.core import implicit as im
+
+    cfg = problem.metadata["config"]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delitem(im._LAST_REFINED, cfg)
+        patch.setattr(im, "_host_solve_and_mask_status", lambda *args: None)
+        with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+            problem.equilibrium_from_x(problem.x0)
+
 
 def test_from_loss_honors_bound_scalar_method_literally():
     """The ``loss=`` lane uses a bound scalar objective method exactly as passed.
