@@ -93,8 +93,9 @@ CPU and GPU cell (434, 2829, 125, 189), so the two ran the same physics. Peak
 device memory across every GPU cell was 4.8 to 113.5 MB.
 
 So treat `recommended_device` as a starting guess and time the deck you actually
-run: `python benchmarks/run_gpu_matrix.py --skip-tridiag` reproduces the table
-above on your own hardware. The implicit-gradient path is the exception that
+run: `python benchmarks/run_gpu_matrix.py --skip-tridiag --out my_gpu_matrix.json`
+reproduces the table above on your own hardware (without `--out` it overwrites
+the committed `benchmarks/gpu_baseline.json`). The implicit-gradient path is the exception that
 does pay off — the single-stage finite-beta value-and-gradient is 1.3–1.6 s warm
 on the GPU against 2.15 s on that machine's CPU.
 ```

@@ -78,7 +78,7 @@ for max_mode, max_nfev in zip([1, 3, 5], [20, 30, 50]):
     inp.to_indata(f"input.QI_max_mode_{max_mode:03d}")
 ```
 
-A short QP stage can select a poloidally closed-|B| basin before a constructed-QI stage; `QI_optimization.py` shows that workflow. Treat it as a basin strategy, not a universal guarantee.
+`QIResidual` above is the lightweight smooth QI surrogate from `vmex.core.omnigenity`. The shipped QI examples (`examples/optimization/QI_optimization.py` and its variants) use the full constructed-QI residual `vmex.core.qi.ConstructedQIResidual` with explicit options and a separate validation residual; start from them for a QI design ({doc}`/reference/objectives`).
 
 ## Control convergence explicitly
 

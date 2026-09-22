@@ -1,4 +1,4 @@
-# Use ESSOS fields and coils
+# Use ESSOS fields, coils and alpha tracing
 
 VMEX and [ESSOS](https://github.com/uwplasma/ESSOS) meet at two Python seams,
 and each one runs in a single direction. Neither package imports the other:
@@ -40,17 +40,12 @@ Three consequences worth knowing before you build on this:
   tables, so an `lasym` equilibrium is rejected rather than silently
   half-transferred.
 - **Radial resolution is yours to choose.** ESSOS interpolates the half-mesh
-  tables linearly in `s`. On the bundled precise-QA case the two independent
-  `|B|` channels — `AbsB` from `bmnc`, and `norm(B)` built from `bsub*`,
-  `gmnc` and the geometry — differ by 5.9% at `ns = 16` and 1.7% at
-  `ns = 51`. Solve on the grid your diagnostic needs.
+  tables linearly in `s`, so its two independent `|B|` channels (`AbsB` from
+  `bmnc`, and `norm(B)` built from `bsub*`, `gmnc` and the geometry) agree
+  better on finer radial grids. Solve on the grid your diagnostic needs.
 
-The tables themselves cross exactly: rebuilding the last closed surface from
-ESSOS' `to_xyz` reproduces VMEX's own Fourier sum to 2.2e-16 m.
-
-For fusion alphas specifically, {func}`~vmex.core.tracing.trace_alphas` and
-`vmex --trace` wrap this seam with the ensemble, the loss-fraction
-diagnostics and the figures ({doc}`trace-alpha-particles`).
+The tables themselves cross unchanged: `tests/test_tracing.py` requires the
+file and in-memory routes to give identical fields.
 
 ## Bring an ESSOS coil field back
 
@@ -66,25 +61,19 @@ res = vj.solve_free_boundary(inp, external_field=coil_field)
 ```
 
 Unset bounds default to the coil bounding box grown by 10%, and `nfp`
-defaults to the coil set's own period count. Pass `rmin`/`rmax`/`zmin`/`zmax`
+defaults to the coil set's own period count; the CLI equivalent is
+`vmex input.case --coils coils.json` ({doc}`free-boundary`). Pass `rmin`/`rmax`/`zmin`/`zmax`
 to bracket the plasma more tightly than the coils do, and `ir`/`jz`/`kp` to
 set the grid (96, 96, 32 by default). The result is the same in-memory
 {class}`~vmex.core.mgrid.MgridField` the mgrid-file lane produces — no
 temporary file — and it is reused across every radial stage and hot restart.
 `NZETA` must divide `kp`, which is VMEC2000's `mgrid_mod` pairing rule.
 
-Judge the grid where NESTOR uses it, on the plasma boundary. On the bundled
-Landreman-Paul QA coil set at the default resolution, the interpolated field
-matches direct Biot-Savart on the converged boundary to 2.7e-5 median and
-1.1e-4 maximum relative error. Trilinear interpolation degrades within a few
-centimetres of a filament, so a bounding box taken from the coils is a
-sampling region, not an accuracy claim.
-
-The same route backs the CLI, where the coils come from a file:
-
-```console
-vmex input.case --coils coils.json
-```
+Judge the grid where NESTOR uses it, on the plasma boundary:
+`examples/vmex_essos_workflow.py` prints the tabulated field's median and
+maximum relative error against direct Biot-Savart there. Trilinear
+interpolation degrades close to a filament, so a bounding box taken from the
+coils is a sampling region, not an accuracy claim.
 
 Tabulation is host-side and keeps no derivative with respect to coil shape.
 For coil-shape gradients use
@@ -97,12 +86,73 @@ here.
 ## Walk both seams
 
 `examples/vmex_essos_workflow.py` runs the round trip end to end: solve a
-fixed boundary, hand it to ESSOS, measure the rotational transform from an
-ESSOS field-line trace (`0.419167` traced against `0.419155` in the wout, a
-relative 2.9e-5), tabulate the ESSOS coil set, solve a vacuum free boundary
-with it, and hand that equilibrium back across the same seam. It takes two to
-four minutes, or one to two under `VMEX_EXAMPLES_CI=1`.
+fixed boundary, hand it to ESSOS, compare the rotational transform from an
+ESSOS field-line trace with the wout's `iotaf`, tabulate the ESSOS coil set,
+solve a vacuum free boundary with it, and hand that equilibrium back across
+the same seam.
 
 `examples/free_boundary_essos_coils.py` is the dedicated pressure scan on
 the coil-held plasma, and `examples/vmex_get_B_outside_plasma.py` queries the
 exterior field with coils and virtual casing.
+
+## Trace alpha particles
+
+`vmex --trace` follows an ensemble of fusion-born alpha particles
+(guiding-centre model, ESSOS tracer) through a converged equilibrium and
+reports the exact loss fraction; the same trace is one call away in Python
+via {func}`~vmex.core.tracing.trace_alphas`. It is built on the first seam
+above.
+
+### From the CLI
+
+```console
+vmex --trace wout_case.nc                  # trace, print, four figures
+vmex input.case --trace                    # solve first, then trace
+vmex --trace wout_case.nc --outdir figs/ \
+     --trace-particles 400 --trace-tmax 1e-3 --trace-s 0.3
+```
+
+The console output gives the loss fraction, the lost / axis-termination /
+solver-failure counts, and the tracing wall time. Four figures are written
+next to the input (or into `--outdir`): `*_trace_trajectories.png` (sampled
+orbits in 3-D over a translucent LCFS), `*_trace_vparallel.png`
+(normalized parallel velocity), `*_trace_loss_fraction.png` (cumulative
+loss fraction against time), and `*_trace_energy_error.png` (relative
+energy error of the integrator).
+
+Particles start on one flux surface `s` (uniform in poloidal angle, one
+field period in toroidal angle, uniform pitch), at the fusion-alpha birth
+energy of 3.52 MeV. An orbit counts as lost when it reaches `s >= 0.99`.
+Loss fractions are physically meaningful at reactor scale — run
+`vmex --scale wout_case.nc` first to put the equilibrium at ARIES-CS field
+and size.
+
+### From Python
+
+```python
+import vmex as vj
+
+result = vj.trace_alphas("wout_case.nc", nparticles=400, tmax=1e-3)
+print(result.loss_fraction, result.particles_lost)
+vj.plot_tracing("wout_case.nc", result, outdir="figs")
+```
+
+`trace_alphas` accepts a path or an in-memory
+{class}`~vmex.core.wout.WoutData` (written through a temporary wout file —
+the route released ESSOS reads) and returns an
+{class}`~vmex.core.tracing.AlphaTracingResult` with the loss-fraction time
+series, per-particle loss times, trajectories in flux and Cartesian
+coordinates, energies, and the counts.
+
+For anything else ESSOS does with an equilibrium (field lines, surfaces,
+`|B|` queries), use the bare `essos.fields.Vmec` from
+{func}`~vmex.core.tracing.essos_vmec_field` above.
+
+### Scope
+
+This is the exact loss-fraction *diagnostic*. The differentiable alpha-loss
+*objective* (a smooth surrogate a boundary optimization can descend) is a
+separate feature that waits on the ESSOS array-based field constructor
+(uwplasma/ESSOS#61) and vmex's traceable field tables. The exact loss
+fraction is piecewise constant in the boundary — use it to certify, not to
+optimize.

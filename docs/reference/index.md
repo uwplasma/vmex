@@ -1,11 +1,10 @@
 # Reference
 
-Lookup pages: austere, complete, structured like the code. The three
-contracts — {doc}`vmec2000-compatibility` (input-flag disposition),
-{doc}`capabilities` (validated support matrix, generated from
-`benchmarks/capabilities.json`), and {doc}`performance` (measured timings,
-generated from `benchmarks/baseline.json`) — are the normative statements of
-what VMEX does.
+Lookup pages, structured like the code. Three of them state what VMEX does
+and how well: {doc}`vmec2000-compatibility` (every input key and its VMEC2000
+disposition), {doc}`capabilities` (the validated support matrix, generated
+from `benchmarks/capabilities.json`), and {doc}`performance` (measured
+timings, each dated and tied to a committed record).
 
 ## Files and interfaces
 
@@ -13,9 +12,8 @@ what VMEX does.
 :maxdepth: 1
 
 cli
-input-file
+vmec2000-compatibility
 wout-file
-mout-file
 ```
 
 ## Contracts
@@ -23,7 +21,6 @@ mout-file
 ```{toctree}
 :maxdepth: 1
 
-vmec2000-compatibility
 capabilities
 performance
 ```

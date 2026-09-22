@@ -11,7 +11,7 @@ import jax
 from vmex.core import implicit
 from vmex.core.input import VmecInput
 
-inp = VmecInput.from_file("input.solovev")
+inp = VmecInput.from_file("examples/data/input.solovev")
 p0 = implicit.params_from_input(inp)          # differentiable parameters
 grad = jax.grad(lambda p: implicit.run(inp, p).aspect)(p0)
 ```
@@ -29,12 +29,14 @@ coefficient, profile coefficient, `phiedge`, `pres_scale`, `curtor`.
 difference through two full re-solves:
 
 ```text
-d(aspect)/d(RBC(0,1))  AD=-1.5182532271e+00  FD=-1.5182532280e+00  rel=5.77e-10
-d(wb)/d(phiedge)       AD=+1.2910254037e-01  FD=+1.2910254037e-01  rel=7.02e-12
+d(aspect)/d(RBC(0,1))  AD=-1.5182532271e+00  FD=-1.5182532279e+00  rel=5.58e-10
+d(wb)/d(phiedge)       AD=+1.2910254037e-01  FD=+1.2910254037e-01  rel=1.64e-12
 ```
 
-The agreement is at the finite-difference noise floor — the adjoint side has
-no step size at all.
+That is one run of the script on VMEX 0.11.0; the last digits of the finite
+difference move between machines, and `tests/test_examples.py` fails the
+example only above `1e-4`. The agreement is at the finite-difference noise
+floor, and the adjoint side has no step size at all.
 
 ```{literalinclude} ../../examples/take_gradients.py
 :language: python

@@ -1,31 +1,32 @@
 # VMEX
 
 [![PyPI version](https://img.shields.io/pypi/v/vmex.svg)](https://pypi.org/project/vmex/)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/github/license/uwplasma/vmex)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/uwplasma/vmex/ci.yml?branch=main&label=ci)](https://github.com/uwplasma/vmex/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
 [![Docs](https://img.shields.io/readthedocs/vmex/latest?label=docs)](https://vmex.readthedocs.io/en/latest/)
 
-VMEX computes stellarator and tokamak ideal-MHD equilibria in JAX. It reads
-VMEC input files, solves fixed- and free-boundary problems, and writes standard
-`wout_*.nc` files. Implicit derivatives connect equilibria to boundary, profile,
-and coil optimization.
+VMEX is a JAX reimplementation of VMEC2000, the standard code for
+three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads
+VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum
+field driven by an MGRID table or coils), reproduces VMEC2000's iteration
+and writes standard `wout_*.nc` files. Because the solver is written in JAX,
+VMEX also differentiates the converged equilibrium through the implicit
+function theorem, so boundary, profile and coil parameters can be optimized
+with derivatives of the discrete equilibrium equations.
 
-- **Use existing workflows:** VMEC input/output, multigrid continuation and hot restart.
-- **Design with gradients:** SciPy or JAX optimizers, scalar adjoints and residual Jacobians.
-- **Inspect the physics:** Boozer transforms, magnetic fields and spatial derivatives,
-  quasisymmetry, quasi-isodynamicity and stability diagnostics.
-- **Choose the hardware:** CPU or GPU equilibrium solves (optimization gradients default to CPU),
-  reusable compilation and independent-case ensembles.
-- **Connect coils:** ESSOS fields, NESTOR free boundary and finite-beta exterior fields.
+The goal is fast, differentiable and VMEC2000-compatible equilibria for
+stellarator optimization, including single-stage design, in which the plasma
+boundary and the coils are optimized together. VMEX also computes Boozer
+transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
+and stability diagnostics, and has a separate lane for open mirrors.
 
 ![VMEX equilibria and diagnostics](docs/_static/figures/readme_equilibrium_showcase.webp)
 
 The [capability reference](https://vmex.readthedocs.io/en/latest/reference/capabilities.html)
-defines supported models and validation limits. VMEX's toroidal equilibrium
-model assumes nested flux surfaces; mirror and high-order polishing features
-have narrower validation scopes.
+defines supported models and validation limits. The toroidal model assumes nested flux surfaces;
+mirror and high-order polishing features have narrower validation scopes.
 
 ## Install
 
@@ -35,12 +36,10 @@ vmex --doctor
 vmex --test
 ```
 
-Python 3.11–3.12 is tested. CPU JAX is included; for GPUs follow the
-[JAX installation guide](https://docs.jax.dev/en/latest/installation.html) and
-[VMEX GPU guide](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html).
-Optional extras include `vmex[coils]` (ESSOS), `vmex[freeb]` (virtual casing),
-`vmex[neoclassical]` (effective ripple), and `vmex[optimizers]` (JAXopt/Optax).
-See [installation](https://vmex.readthedocs.io/en/latest/installation.html) for dependencies.
+Python 3.11–3.13 is tested, and CPU JAX is included. Extras: `vmex[coils]` (ESSOS), `vmex[freeb]`
+(virtual casing), `vmex[neoclassical]` (effective ripple), `vmex[optimizers]` (JAXopt/Optax),
+`vmex[turbulence]` (GKX) and `vmex[all]`. See [installation](https://vmex.readthedocs.io/en/latest/installation.html)
+for GPUs and dependency versions.
 
 ## Solve, plot and restart
 
@@ -69,16 +68,13 @@ import vmex as vj
 inp = vj.VmecInput.from_file("input.my_case")
 result = vj.solve_multigrid(inp, verbose=True)
 print(result.converged, result.fsqr, result.fsqz, result.fsql)
-wout = vj.wout_from_state(
-    inp=inp, state=result.state, fsqr=result.fsqr, fsqz=result.fsqz,
-    fsql=result.fsql, niter=result.iterations, converged=result.converged)
-vj.write_wout("wout_my_case.nc", wout)
+vj.write_wout("wout_my_case.nc", vj.wout_from_result(inp, result))
 ```
 
-Pass `initial_state=result.state` for a nearby Python solve, or `restart_from=`
-for a saved WOUT. [Restart](https://vmex.readthedocs.io/en/latest/howto/restart-from-previous-run.html)
-and [CLI](https://vmex.readthedocs.io/en/latest/reference/cli.html) guides cover
-resolution changes, devices, profiles and output controls.
+Pass `initial_state=result.state` for a nearby solve, or `restart_from=` for a saved WOUT. The
+[restart](https://vmex.readthedocs.io/en/latest/howto/restart-from-previous-run.html) and
+[CLI](https://vmex.readthedocs.io/en/latest/reference/cli.html) guides cover resolution changes,
+devices, profiles and output controls.
 
 `vmex equilibrium.h5` reads DESC text inputs and HDF5/pickle outputs without installing DESC, using the final stage or equilibrium; it writes `input.equilibrium` and solves it to write `wout_equilibrium.nc`.
 `--desc-tol 0` retains all boundary modes. The default 1% boundary tolerance does not guarantee magnetic-field accuracy. WOUT iota has the opposite sign to DESC.
@@ -112,14 +108,63 @@ equilibrium = problem.equilibrium_from_x(fit.x)
 vj.write_wout("wout_optimized.nc", equilibrium.wout)
 ```
 
-`problem.value_and_grad` supplies scalar objectives to BFGS/L-BFGS-B;
-`problem.jax_value_and_grad` supports JAX optimizers. `problem.evaluate(x)`
-reports solve effort and derivative status. Implicit derivatives describe the
-chosen discrete equilibrium equations: small linear residuals alone do not
-establish continuum accuracy. See the
-[gradient tutorial](https://vmex.readthedocs.io/en/latest/tutorials/first-gradient.html)
-and [optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html)
-for convergence checks, constraints, scaling and finite-difference verification.
+`problem.value_and_grad` supplies scalar objectives to BFGS/L-BFGS-B, `problem.jax_value_and_grad`
+to JAX optimizers, and `problem.evaluate(x)` reports solve effort and derivative status. The
+[gradient tutorial](https://vmex.readthedocs.io/en/latest/tutorials/first-gradient.html) and
+[optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html) cover
+convergence checks, constraints, scaling and finite-difference verification.
+
+## How VMEX works
+
+1. **Energy principle.** VMEX finds a stationary point of `W = ∫ (B²/2μ₀ + p/(γ−1)) dV` over
+   nested flux surfaces, where `J × B = ∇p`. As in VMEC, the unknowns are the surface shapes `R`, `Z`
+   and the angle function `λ`: Fourier series in both angles, finite differences in radius.
+2. **Spectral force iteration.** Each iteration evaluates the Fourier-projected forces and takes a
+   damped second-order Richardson step with VMEC2000's time-step control and restarts, in its
+   order. A radial tridiagonal preconditioner per Fourier mode makes the step effective (a 2-D block
+   preconditioner is opt-in), and `NS_ARRAY` runs a coarse-to-fine radial multigrid ladder. The
+   solve has converged when `FSQR`, `FSQZ` and `FSQL` fall below `FTOL`.
+3. **Free boundary.** NESTOR solves the exterior Neumann problem for the vacuum potential with
+   Merkel's Green's-function method, driven by an MGRID table or a coil field; pressure balance
+   across the boundary moves the plasma surface.
+4. **Implicit derivatives.** At a root `F(x, p) = 0` of the force residual, `dx/dp = −(∂F/∂x)⁻¹ ∂F/∂p`.
+   A scalar objective needs one adjoint linear solve for all parameters, and least-squares
+   Jacobians factor the block-tridiagonal radial operator once. The forward iterations are not
+   recorded, so memory does not grow with their number. The derivative assumes that the state is a
+   root (on a fixed boundary VMEX first Newton-refines it to `refine_tol = 1e-10`), that `∂F/∂x` is
+   invertible there, and that perturbed solves stay on the same branch. It is the derivative of the
+   discrete equations, not of the continuum problem.
+5. **Virtual casing.** `VmecExtender` adds the plasma currents' field, a surface integral over
+   the boundary field, to the coil field outside the plasma; its error grows near the surface.
+
+The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.html) derive each step.
+
+## Results
+
+- **VMEC2000 parity.** CI solves six decks against stored VMEC2000 output and requires `wb` within
+  `1e-7` relative, `iota` and `R`, `Z` harmonics on three surfaces within `1e-5`, and iteration
+  counts within ±25%. On six decks never run before (ITER, W7-X, HSX, ARIES-CS, ESTELL,
+  Nührenberg–Zille), the worst relative difference from VMEC2000 was `2.5e-10`, and the iteration
+  counts were identical on five and one apart on the sixth
+  ([record](benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md), VMEX 0.8.1).
+- **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
+  wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
+  mostly XLA compilation, which a repeated solve in one process skips. In the older
+  [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
+  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
+  shipped deck or problem size ran faster than on the CPU.
+- **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
+  gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
+  value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
+  ([record](benchmarks/qa_optimization_startup_least_squares_m4.json), VMEX 0.7.0).
+- **Not validated.** Free-boundary derivatives are experimental (CPU by default), 3-D force-balance
+  polishing has not certified, and mirror beta above 10% is extended validation. The
+  [validation record](docs/explanation/validation.md) lists every gate, tolerance and record.
+
+![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
+
+The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
+(`python benchmarks/make_readme_figures.py --only convergence`).
 
 ## What you can build
 
@@ -135,21 +180,17 @@ field-period count, from `examples/optimization/QA_optimization.py` and its QH a
 
 ![QI at nfp 1, 2, 3 and 4](docs/_static/figures/readme_qi.webp)
 
-Quasi-isodynamic designs across four field-period counts, showing how the
-`|B|` contours close poloidally as `nfp` rises. The QI scripts in
-`examples/optimization/` cover vacuum, finite beta, bootstrap-consistent and
-maximum-`J` continuation variants, and the same families have scalar-adjoint,
-SciPy, JAXopt and Optax drivers.
+Quasi-isodynamic designs at four field-period counts: the `|B|` contours close poloidally as `nfp`
+rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
+maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
 ### Free boundary with coils
 
 ![Free-boundary beta ramp and Shafranov shift](docs/_static/figures/readme_essos_beta_scan.webp)
 
-NESTOR free boundary driven by ESSOS coils, ramping beta and tracking the
-Shafranov shift: `python examples/free_boundary_essos_coils.py`. Free-boundary
-runs also accept an MGRID table, and `VmecExtender` evaluates the exterior
-field with the plasma's own virtual-casing contribution, within the distance
-limits [below](#fields-coils-and-free-boundary).
+NESTOR free boundary driven by ESSOS coils (or an MGRID table), ramping beta and tracking the
+Shafranov shift: `python examples/free_boundary_essos_coils.py`. The exterior field is described
+[below](#fields-coils-and-free-boundary).
 
 ### Single-stage plasma and coil design
 
@@ -164,40 +205,19 @@ converge ([not validated](docs/explanation/validation.md#what-is-not-validated))
 
 ### Open mirrors and stellarator-mirror hybrids
 
-![Fixed-boundary non-axisymmetric mirror](docs/_static/figures/mirror_fixed_boundary_3d.webp)
-
-Fixed-boundary open mirrors, from `examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py`.
-
-![Free-boundary mirror beta scan](docs/_static/figures/mirror_free_boundary_beta_scan.webp)
-
-The free-boundary mirror beta scan, `examples/mirror/mirror_free_boundary_beta_scan.py`,
-over the validated 0 to 10 percent beta range.
-
 ![Stellarator-mirror hybrid](docs/_static/figures/stellarator_mirror_hybrid.webp)
 
-Periodic stellarator-mirror hybrids,
-`examples/mirror/stellarator_mirror_hybrid.py`, with a quasi-isodynamic variant
-in `qi_mirror_hybrid_fourier_vs_bspline.py`. Hybrids and anisotropy are
-research scopes: see the
-[mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html)
-for what is validated.
-
-### Agreement with VMEC2000 and VMEC++
-
-![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
-
-The same deck through all three codes, `python benchmarks/make_readme_figures.py --only convergence`.
-Cross-code agreement, its norms and its limits are in the [validation record](docs/explanation/validation.md).
+Fixed-boundary open mirrors (`examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py`), a
+free-boundary mirror beta scan over the validated 0 to 10 percent range
+(`mirror_free_boundary_beta_scan.py`) and periodic stellarator-mirror hybrids
+(`stellarator_mirror_hybrid.py`, above, and the quasi-isodynamic
+`qi_mirror_hybrid_fourier_vs_bspline.py`). Hybrids and anisotropy are research scopes: see the
+[mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html) for what is validated.
 
 ### Running the examples
 
-```console
-git clone https://github.com/uwplasma/vmex
-cd vmex
-pip install -e .
-vmex examples/data/input.circular_tokamak --plot
-python examples/take_gradients.py
-```
+From a clone (`git clone https://github.com/uwplasma/vmex && pip install -e vmex`), run
+`vmex examples/data/input.circular_tokamak --plot` or `python examples/take_gradients.py`:
 
 | Application | Runnable starting point |
 |---|---|
@@ -268,32 +288,12 @@ vacuum; read the dimensional metrics with it. See the [validation record](docs/e
 the failed 3-D attempts and the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 for the method and certificate.
 
-## Performance and parallel execution
-
-JAX compilation is reused for matching array structures. Measure first-call,
-cache-reload and warm costs separately, including refinement and gradients for
-optimization. CPU/GPU performance depends on resolution and workload; see
-[benchmark evidence](https://vmex.readthedocs.io/en/latest/explanation/validation.html)
-and [profiling tools](benchmarks/).
-
-`vj.parallel.solve_ensemble(inputs, workers=None)` distributes independent
-cases; `workers=1` provides a serial baseline. Set worker and device budgets
-using the [ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html).
-Multi-device kernel/AD tests do not yet establish a scalable distributed
-nonlinear equilibrium solve.
-
 ## Documentation, development and citation
 
 Start with [your first equilibrium](https://vmex.readthedocs.io/en/latest/tutorials/first-equilibrium.html),
-then [your first optimization](https://vmex.readthedocs.io/en/latest/tutorials/first-optimization.html).
-The [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
-[VMEC compatibility](https://vmex.readthedocs.io/en/latest/reference/vmec2000-compatibility.html)
-and [troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html)
-pages cover research use.
-
-For development, install `pip install -e ".[dev]"` and run
-`python tools/preflight.py --static`; the [test manifest](tests/manifest.json)
-defines numerical suites. Report issues with the input deck and `vmex --doctor`
-output. See [contributing](CONTRIBUTING.md), [citation metadata](CITATION.cff),
-[license](LICENSE) and the [plan/logbook](plan.md). A new release will follow
-integration and validation of the agreed priorities.
+then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
+[VMEC compatibility](https://vmex.readthedocs.io/en/latest/reference/vmec2000-compatibility.html) and
+[troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html) pages. For development,
+`pip install -e ".[dev]"` and `python tools/preflight.py --static`. Report issues with the input deck
+and `vmex --doctor` output. See [contributing](CONTRIBUTING.md), [citation](CITATION.cff),
+[license](LICENSE) and the [plan](plan.md).

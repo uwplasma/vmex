@@ -17,23 +17,25 @@ Background and canonical references for VMEC and related equilibrium methods:
 4. VMEC2000 reference documentation and ``wout`` file format notes (VMEC/LIBSTELL
    distribution and Princeton VMEC resources).
 
-5. VMEC++ numerics notes (local copy):
-   ``vmecpp/docs/the_numerics_of_vmecpp.pdf``.
+5. VMEC++ numerics notes, ``docs/the_numerics_of_vmecpp.pdf`` in the VMEC++
+   repository, https://github.com/proximafusion/vmecpp (published as
+   reference 16).
 
-6. VMEC++ Fourier basis implementation note (local copy):
-   ``vmecpp/docs/fourier_basis_implementation.md``.
+6. VMEC++ Fourier basis implementation note,
+   ``docs/fourier_basis_implementation.md`` in the VMEC++ repository.
 
 7. VMEC2000 solver core (residuals, bcovar, preconditioner):
-   ``STELLOPT/VMEC2000/Sources/General/funct3d.f`` and
-   ``STELLOPT/VMEC2000/Sources/General/bcovar.f``.
+   ``VMEC2000/Sources/General/funct3d.f`` and
+   ``VMEC2000/Sources/General/bcovar.f`` in the STELLOPT repository,
+   https://github.com/PrincetonUniversity/STELLOPT.
 
 8. VMEC2000 time-step control and restart logic:
-   ``STELLOPT/VMEC2000/Sources/TimeStep/evolve.f`` and
-   ``STELLOPT/VMEC2000/Sources/TimeStep/restart.f``.
+   ``VMEC2000/Sources/TimeStep/evolve.f`` and
+   ``VMEC2000/Sources/TimeStep/restart.f`` (STELLOPT).
 
 9. VMEC2000 diagnostic scalars and Mercier stability:
-   ``STELLOPT/VMEC2000/Sources/Input_Output/eqfor.f`` and
-   ``STELLOPT/VMEC2000/Sources/Input_Output/mercier.f``.
+   ``VMEC2000/Sources/Input_Output/eqfor.f`` and
+   ``VMEC2000/Sources/Input_Output/mercier.f`` (STELLOPT).
 
 10. A. H. Glasser, J. M. Greene, and J. L. Johnson, “Resistive instabilities
     in general toroidal plasma configurations,” *Physics of Fluids* 18(7),
@@ -44,10 +46,11 @@ Background and canonical references for VMEC and related equilibrium methods:
     905860510 (2020), arXiv:2006.14881.
 
 12. VMEC++ solver/restart structure and parity-relevant control flow:
-    ``vmecpp/src/vmecpp/cpp/vmecpp/vmec/vmec/vmec.cc``.
+    ``src/vmecpp/cpp/vmecpp/vmec/vmec/vmec.cc`` in the VMEC++ repository.
 
 13. VMEC++ output-quantity and near-axis extrapolation notes:
-    ``vmecpp/src/vmecpp/cpp/vmecpp/vmec/output_quantities/output_quantities.cc``.
+    ``src/vmecpp/cpp/vmecpp/vmec/output_quantities/output_quantities.cc`` in
+    the VMEC++ repository.
 
 14. P. Kim, R. Jorge, and W. Dorland, “The On-Axis Magnetic Well and
     Mercier's Criterion for Arbitrary Stellarator Geometries,” *Journal of

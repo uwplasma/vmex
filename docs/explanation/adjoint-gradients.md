@@ -114,7 +114,7 @@ inventory, with the call site each class serves:
    certificates against the exact operator.
 3. `solvax.tridiagonal_solve(_checked)` performs the per-mode radial 1D
    preconditioner solves (`vmex/core/preconditioner.py`; the `precondn.f` /
-   `scalfor.f` analogue — see {doc}`preconditioners`).
+   `scalfor.f` analogue — see {doc}`iteration`).
 4. `solvax.gmres` solves the matrix-free 2D block-preconditioner Newton
    direction (`vmex/core/preconditioner_2d.py`; matvec
    `v -> jvp(g, state, v)`; the `precon2d.f` analogue).

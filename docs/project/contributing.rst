@@ -22,9 +22,10 @@ Workflow
 Development install and checks::
 
   pip install -e .[dev]
-  ruff check .
+  python tools/preflight.py --static   # lint, types, docs prose, guard tests
+  python tools/preflight.py            # also the suites the diff affects
+  python tools/preflight.py --docs     # also a warning-free Sphinx build
   python tools/test_manifest.py check
-  pytest -q
 
 The workflows obtain their selectors from the manifest:
 

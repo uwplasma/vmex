@@ -26,7 +26,9 @@ metadata (`nextcur`/`extcur`/`curlabel`/`mgrid_mode`) plus the NESTOR
 potential and surface fields (`potsin`/`xmpot`/`xnpot`/`*_sur`). A missing
 mgrid file falls back to a fixed-boundary solve with a warning — retained
 VMEC2000 behavior, so check the banner if a "free-boundary" run looks
-suspiciously fixed. End to end:
+suspiciously fixed. The end-to-end example below reads the CTH-like
+`mgrid_cth_like.nc`, which is not stored in git; from a source checkout,
+fetch it first with `python tools/fetch_assets.py --bundle reference-nc`:
 
 ```{literalinclude} ../../examples/free_boundary_mgrid.py
 :language: python
@@ -74,7 +76,7 @@ The vacuum solve activates only once `fsqr + fsqz <= 1e-3`, so early
 iterations run effectively fixed-boundary; expect the residual trace to
 change character at the `VACUUM PRESSURE TURNED ON` banner. Free-boundary
 ladders carry the active-vacuum state and adaptive `NVACSKIP` across
-`NS_ARRAY` stages ({doc}`/explanation/multigrid`). On GPUs, the dense NESTOR
+`NS_ARRAY` stages ({doc}`/explanation/iteration`). On GPUs, the dense NESTOR
 factor runs on CPU by design ({doc}`run-on-gpu`).
 
 ## Differentiability scope
@@ -83,7 +85,8 @@ Coil/`extcur` gradients on a specified boundary use the virtual-casing
 residual. The coupled NESTOR fixed point is differentiated by
 {func}`vmex.core.freeboundary_implicit.solve_free_boundary_implicit`, which
 reverse-differentiates the reconverged plasma--vacuum root against plasma
-profiles and direct coil variables. This path is experimental and CPU-only.
+profiles and direct coil variables. This path is experimental; with the
+default `device="auto"` it runs on the CPU even on a GPU host.
 Its coil examples need ESSOS (`pip install "vmex[coils]"`). Scope is in
 {doc}`/reference/capabilities` and the mechanism in
 {doc}`/explanation/nestor-vacuum`.
