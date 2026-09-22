@@ -205,6 +205,29 @@ def test_periodic_pairwise_value_jacobian_and_hvp_match_full(
         np.testing.assert_allclose(actual, expected, rtol=3e-8, atol=3e-10)
 
 
+def test_normalization_scales_remain_in_total_derivative(winding_helpers):
+    """The recomputed normalization reference must not be stop-gradient'd."""
+    helpers = winding_helpers
+    objectives = tuple(jnp.asarray(value) for value in (
+        2.0, 3.0, 5.0, 0.2, 1.0, 7.0, 0.2,
+    ))
+    scales = jnp.asarray((4.0, 6.0, 10.0, 1.0, 1.0, 14.0, 1.0))
+
+    actual = jax.grad(
+        lambda reference: helpers["_combine_winding_objectives"](
+            objectives, reference
+        )
+    )(scales)
+    expected = jnp.zeros_like(scales).at[0].set(
+        -helpers["PCA_WEIGHT"] * objectives[0] / scales[0] ** 2
+    ).at[1].set(
+        helpers["VOLUME_WEIGHT"] * objectives[1] / scales[1] ** 2
+    ).at[2].set(
+        -helpers["SPECTRAL_WEIGHT"] * objectives[2] / scales[2] ** 2
+    )
+    np.testing.assert_allclose(actual, expected, rtol=2e-13, atol=2e-15)
+
+
 @pytest.mark.parametrize("matrix", [
     [[3.0, 1.0], [1.0, -2.0]],
     [[3.0, 2.0], [-1.0, 4.0]],
