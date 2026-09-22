@@ -1317,7 +1317,9 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "refinement_seconds", "jacobians", "jacobian_columns",
              "jacobian_krylov_iterations", "jacobian_seconds", "adjoints",
              "adjoint_krylov_iterations", "adjoint_seconds",
-             "adjoint_certificate_fallbacks")
+             "adjoint_certificate_fallbacks", "anchors", "anchor_steps",
+             "anchor_krylov_iterations", "anchor_factorizations",
+             "anchor_seconds")
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []

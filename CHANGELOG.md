@@ -7,6 +7,19 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+### Fixed
+
+- **Free-boundary values and gradients referred to different points.** VMEC's
+  `ftol` does not place a free-boundary solve on the coupled plasma--vacuum
+  root the adjoint differentiates; along weakly damped directions the
+  converged state, and the objective read there, can sit far from it. Every
+  certifiable solve is now Newton-anchored on that root (`refine_tol`,
+  damped on Deuflhard's natural monotonicity test); one that cannot be
+  anchored is the new status 3, never a silent pass.
+- **Stalled free-boundary restarts ran to `max_iterations`.** A restart from
+  the configuration's reference now gets the iterations the cold reference
+  needed before the deterministic cold retry of #416.
+
 ## 0.11.0 - 2026-09-21
 
 See the GitHub release for this version in full.

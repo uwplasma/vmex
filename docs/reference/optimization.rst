@@ -423,7 +423,12 @@ keeps the construction visible in the driver::
 NESTOR moves the LCFS and only the coil vector is optimized. The vacuum example
 adds coil geometry terms; the finite-beta example adds beta and Redl bootstrap
 terms. This path is reverse-mode only. Status 0 enters the adjoint; status 1
-means a failed solve and status 2 means an under-converged solve.
+means a failed solve, status 2 an under-converged solve, and status 3 a solve
+that met ``ftol`` but could not be Newton-anchored on the coupled
+plasma--vacuum root. Every status-0 state is anchored there (to
+``refine_tol``, 1e-10 by default), so its value and its adjoint refer to the
+same point; VMEC's ``ftol`` alone leaves the state off that root along weakly
+damped directions.
 The certified whole-state GCROT transpose remains the default.
 ``adjoint_solver="boundary_schur"`` selects the advanced boundary-Schur lane, which
 eliminates the block-tridiagonal radial bulk and solves only the evolved-edge
