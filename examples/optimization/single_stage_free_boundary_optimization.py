@@ -69,6 +69,8 @@ SEED_ELLIPSE = 0.10
 
 # Targets the finished design is checked against:
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
+IOTA_CEILING = 0.44               # maximum |iota|: stay below the 4/9 resonance,
+                                  # whose islands leave no edge surface (NFP = 2)
 ASPECT_LIMIT = 6.0                # maximum aspect ratio
 NORMAL_FIELD_LIMIT = 0.01         # area-weighted RMS of B.n/|B| on the boundary
 COIL_SURFACE_DISTANCE_LIMIT = 0.15
@@ -80,6 +82,7 @@ CURVATURE_LIMIT = 7.0
 # normal-field value is used only by the coil pre-fit: on a free boundary
 # B.n = 0 holds by construction.
 IOTA_CONSTRAINT = 0.43
+IOTA_CEILING_CONSTRAINT = 0.437
 ASPECT_CONSTRAINT = 5.97
 NORMAL_FIELD_CONSTRAINT = 0.008
 CURVATURE_OBJECTIVE_LIMIT = 6.9
@@ -269,11 +272,16 @@ def boundary_surface(equilibrium_state, nphi=NPHI, ntheta=NTHETA):
     return surfacerzfourier_from_boundary(rbc, zbs, NFP, nphi=nphi, ntheta=ntheta)
 
 
+def max_abs_iota(equilibrium_state, context):
+    return jnp.max(jnp.abs(im.iota_profile(equilibrium_state, context)[1:]))
+
+
 def plasma_values(equilibrium_state):
     return {"QA total": float(qs.total_state(equilibrium_state, solver_context)),
             "aspect": float(opt.aspect_ratio(equilibrium_state, solver_context)),
             "mean iota": float(opt.mean_iota(equilibrium_state, solver_context)),
-            "min |iota|": float(opt.min_abs_iota(equilibrium_state, solver_context))}
+            "min |iota|": float(opt.min_abs_iota(equilibrium_state, solver_context)),
+            "max |iota|": float(max_abs_iota(equilibrium_state, solver_context))}
 
 
 state0, status0, _, _ = vj.solve_free_boundary_implicit_status(
@@ -300,6 +308,7 @@ def accepted_terms(equilibrium_state, u):
     qs_rows = qs.residuals_state(equilibrium_state, solver_context)
     penalty = hinge(jnp.stack([
         opt.min_abs_iota(equilibrium_state, solver_context) / IOTA_CONSTRAINT - 1.0,
+        1.0 - max_abs_iota(equilibrium_state, solver_context) / IOTA_CEILING_CONSTRAINT,
         1.0 - opt.aspect_ratio(equilibrium_state, solver_context) / ASPECT_CONSTRAINT]))
     coils = coils_from_x(jnp.asarray(x0) + jnp.asarray(scales) * u)
     costs = coil_costs(coils, boundary_surface(equilibrium_state))
@@ -375,26 +384,28 @@ optimization_seconds = time.perf_counter() - started
 ### Check the result against the targets ######################################
 ###############################################################################
 
-# Re-solve the optimized coils' free boundary to a tighter tolerance and check
+# Re-solve the optimized coils' free boundary independently of the optimizer,
+# cold, on a radial ladder that ends finer than the trial solves, and check
 # every target on that solve. At zero beta the plasma carries no current, so
 # the coil field alone must be tangent to the boundary: B.n/B is checked too.
-# The solve is warm-started from the accepted trial's state: from a cold start
-# this vacuum free boundary limit-cycles near fsq ~1e-8 at any ns (ns = 16, 31
-# and 51 with up to 60000 iterations were tried), while the finite-beta example
-# converges cold to 1e-12.
+# A vacuum free boundary exists only where the coil field has a nested flux
+# surface enclosing PHIEDGE. Without IOTA_CEILING the optimizer pushed the edge
+# onto the 4/9 island chain; there the solve limit-cycles near fsq ~1e-8 at any
+# ns, in VMEX, VMEC2000 and VMEC++ alike. The re-solve of the accepted trial
+# below reports whether the optimizer's own point was reproducibly converged.
 accepted_state, accepted_status, accepted_fsq, _ = vj.solve_free_boundary_implicit_status(
     params, jnp.asarray(u), config)
 print(f"[accepted] status {int(accepted_status)}, fsq = {float(accepted_fsq):.3e} "
       f"at ns = {NS}", flush=True)
 coils_final = coils_from_x(jnp.asarray(x0 + scales * u))
 field_final = BiotSavart(coils_final)
-final_ns = [NS]
+final_ns = [NS] if ci_smoke else [16, 51]
 final_input = replace(inp, ns_array=np.array(final_ns),
                       ftol_array=np.full(len(final_ns), FTOL if ci_smoke else 1.0e-12),
                       niter_array=np.full(len(final_ns), 8000))
 free_result = vj.solve_free_boundary_multigrid(
     final_input, external_field=field_final, verbose=not ci_smoke,
-    initial_state=accepted_state, raise_on_max_iterations=False)
+    raise_on_max_iterations=False)
 final_converged = bool(np.all(np.asarray(free_result.converged)))
 final_context = im.runtime_from_params(
     im.params_from_input(final_input),
@@ -403,7 +414,8 @@ final_values = {
     "QA total": float(qs.total_state(free_result.state, final_context)),
     "aspect": float(opt.aspect_ratio(free_result.state, final_context)),
     "mean iota": float(opt.mean_iota(free_result.state, final_context)),
-    "min |iota|": float(opt.min_abs_iota(free_result.state, final_context))}
+    "min |iota|": float(opt.min_abs_iota(free_result.state, final_context)),
+    "max |iota|": float(max_abs_iota(free_result.state, final_context))}
 wout = vj.wout_from_state(
     inp=final_input, state=free_result.state, fsqr=free_result.fsqr,
     fsqz=free_result.fsqz, fsql=free_result.fsql, niter=free_result.iterations,
@@ -444,6 +456,7 @@ print(f"Aspect ratio = {final_aspect:.4f} (target <= {ASPECT_LIMIT:.4f})")
 
 checks = (
     ("minimum |iota|", minimum_iota, IOTA_FLOOR, "below"),
+    ("maximum |iota|", final_values["max |iota|"], IOTA_CEILING, "above"),
     ("aspect ratio", final_aspect, ASPECT_LIMIT, "above"),
     ("B.n/B RMS", normal_field_rms_final, NORMAL_FIELD_LIMIT, "above"),
     ("minimum coil-surface distance", coil_surface_distance, COIL_SURFACE_DISTANCE_LIMIT, "below"),
