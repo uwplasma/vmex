@@ -12,8 +12,21 @@ start and lower peak memory: at a matched evaluation budget the least-squares
 driver reached roughly a 3x lower objective on the same problem, so it remains
 the default for objective progress.
 
-The pressure is a prescribed p(s) = PRES_SCALE (1 - s); one calibration solve
-rescales its amplitude to TARGET_BETA before the ladder starts.
+The pressure is prescribed, p(s) = PRES_SCALE (1 - s), and the toroidal flux
+sets beta.  At zero net current ideal MHD is unchanged by p -> lambda**2 p,
+PHIEDGE -> lambda PHIEDGE (the field scales, the geometry does not), so beta
+depends on PRES_SCALE / PHIEDGE**2 alone, and B0 = PHIEDGE / (pi a**2) with
+<p> = PRES_SCALE / 2 gives
+
+    PHIEDGE = pi a**2 sqrt(mu0 PRES_SCALE / TARGET_BETA),   a = R0 / ASPECT_TARGET.
+
+The seed is scaled to the target aspect ratio and one solve corrects the
+estimate.  Beta and the aspect ratio then agree at the targets, so the beta
+row only absorbs what reshaping does to <B**2> at fixed aspect ratio (about
+ten per cent) and no per-stage pressure recalibration is needed.  Holding
+PHIEDGE while calibrating PRES_SCALE on the seed instead makes the two rows
+disagree: at fixed flux beta scales as ASPECT**-4, so the targets are
+consistent only at the seed's aspect ratio.
 """
 
 import os
@@ -26,9 +39,15 @@ from scipy.optimize import minimize
 
 import vmex as vj
 from vmex import optimize as opt
+from vmex.core.scaling import input_minor_radius
 
 NFP = 2
 TARGET_BETA = 0.01
+# Pressure p(s) = PRES_SCALE (1 - s), in pascal.  With TARGET_BETA it sets the
+# field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA); this value keeps PHIEDGE near
+# the seed deck's, where the Mercier and resistive-interchange weights were
+# tuned (DMerc scales as PHIEDGE**-2):
+PRES_SCALE = 2.0e3
 SURFACES = np.array([0.5, 0.7, 0.9])
 MAX_MODES = [2, 4]
 MAXITER = [20, 45]
@@ -71,14 +90,27 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
+# Start at the target aspect ratio: scale the cross-section (every m >= 1
+# harmonic) about the circular seed axis, which keeps the major radius.
+minor_radius = float(inp.rbc[inp.ntor, 0]) / ASPECT_TARGET
+scale = minor_radius / input_minor_radius(replace(inp, rbc=rbc, zbs=zbs))
+rbc[:, 1:] *= scale
+zbs[:, 1:] *= scale
+
+# Beta from the toroidal flux: the closed form, then one correction solve.
+mu0 = 4.0e-7 * np.pi
+closed_form_phiedge = np.pi * minor_radius**2 * np.sqrt(mu0 * PRES_SCALE / TARGET_BETA)
 am = np.zeros(21)
-am[:2] = [1.0, -1.0]
+am[:2] = [1.0, -1.0]  # p(s) = PRES_SCALE * (1 - s)
 inp = replace(inp, rbc=rbc, zbs=zbs, pmass_type="power_series", am=am,
-              pres_scale=100.0)
-calibration = opt.solve_equilibrium(inp)
-inp = replace(
-    inp, pres_scale=inp.pres_scale * TARGET_BETA / float(calibration.wout.betatotal))
-equilibrium = opt.solve_equilibrium(inp, initial_state=calibration.solution)
+              pres_scale=PRES_SCALE, phiedge=closed_form_phiedge)
+equilibrium = opt.solve_equilibrium(inp)
+closed_form_beta = float(equilibrium.wout.betatotal)
+inp = replace(inp, phiedge=closed_form_phiedge * np.sqrt(closed_form_beta / TARGET_BETA))
+equilibrium = opt.solve_equilibrium(inp, initial_state=equilibrium.solution)
+print(f"PHIEDGE: closed form {closed_form_phiedge:.6f} Wb gives beta "
+      f"{closed_form_beta:.4%}; corrected {inp.phiedge:.6f} Wb gives beta "
+      f"{float(equilibrium.wout.betatotal):.4%}")
 
 stability_s = np.linspace(0.0, 1.0, int(inp.ns_array[-1]))[2:-1]
 stability_weights = np.where(

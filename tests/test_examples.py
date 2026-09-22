@@ -155,6 +155,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QA_optimization.py",
     "examples/optimization/QA_optimization_ballooning.py",
     "examples/optimization/QA_optimization_bootstrap.py",
+    "examples/optimization/QA_optimization_finite_beta.py",
     "examples/optimization/QA_optimization_finite_beta_scalar.py",
     "examples/optimization/QA_optimization_scalar.py",
     "examples/optimization/QA_optimization_scipy.py",
@@ -599,12 +600,38 @@ def test_scalar_optimization_examples_expose_one_adjoint_lane(case, finite_beta)
     assert "compile_value_and_gradient" in text
     assert 'method="L-BFGS-B"' in text
     if finite_beta:
-        assert "TARGET_BETA" in text
-        assert "opt.volume_average_beta" in text
+        _assert_beta_from_toroidal_flux(text)
         assert "opt.mercier_stability_residual" in text
         assert "opt.glasser_stability_residual" in text
     else:
         assert "TARGET_BETA" not in text
+
+
+def _assert_beta_from_toroidal_flux(text: str) -> None:
+    """Beta is set once through PHIEDGE, never by recalibrating the pressure.
+
+    A pressure calibrated at the seed's own aspect ratio contradicts the
+    aspect-ratio target (at fixed flux beta scales as the aspect ratio to the
+    power -4), and a per-stage recalibration loop hides that by moving the
+    pressure under the optimizer.
+    """
+    assert "TARGET_BETA" in text
+    assert "PRES_SCALE = " in text
+    assert "closed_form_phiedge = np.pi * minor_radius**2" in text
+    assert "phiedge=closed_form_phiedge * np.sqrt(" in text
+    assert "input_minor_radius(" in text
+    assert "pres_scale=inp.pres_scale" not in text  # no pressure rescaling
+    assert "calibration =" not in text and "def calibrate" not in text
+    assert "(opt.volume_average_beta, TARGET_BETA, " in text
+
+
+def test_qa_finite_beta_least_squares_example_sets_beta_through_phiedge():
+    text = (EXAMPLES / "optimization" / "QA_optimization_finite_beta.py").read_text()
+    _assert_beta_from_toroidal_flux(text)
+    assert "opt.mercier_stability_residual" in text
+    assert "opt.glasser_stability_residual" in text
+    assert "VmecProblem.from_tuples" in text
+    assert "least_squares(" in text
 
 
 @pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])
@@ -618,7 +645,7 @@ def test_stellarator_asymmetry_examples_expose_all_boundary_families(case, suffi
     assert "asymmetric boundary norm" in source
     assert "ess_alpha=ESS_ALPHA" in source
     if suffix:
-        assert "TARGET_BETA" in source and "opt.volume_average_beta" in source
+        _assert_beta_from_toroidal_flux(source)
 
 
 @pytest.mark.full  # nightly: four LASYM stages, twice the dofs of a symmetric one
@@ -859,6 +886,21 @@ def test_qa_finite_beta_scalar_optimization_example(tmp_path):
     assert (tmp_path / "input.QA_finite_beta_scalar_optimized").exists()
     assert (tmp_path / "wout_QA_finite_beta_scalar_optimized.nc").exists()
     assert (tmp_path / "QA_finite_beta_scalar_optimized_summary.png").exists()
+
+
+@pytest.mark.full
+def test_qa_finite_beta_optimization_example(tmp_path):
+    """The finite-beta least-squares driver starts at the target beta."""
+    script = EXAMPLES / "optimization" / "QA_optimization_finite_beta.py"
+    out = _run_example(script, tmp_path)
+    _assert_cost_decreased(out, "QA finite beta")
+    corrected = re.search(r"corrected [0-9.]+ Wb gives beta ([0-9.]+)%", out)
+    assert corrected is not None and abs(float(corrected.group(1)) - 1.0) < 0.01
+    beta = re.search(r"\[final\].*beta = ([0-9.]+)%", out)
+    assert beta is not None and 0.5 < float(beta.group(1)) < 2.0
+    assert (tmp_path / "input.QA_finite_beta_optimized").exists()
+    assert (tmp_path / "wout_QA_finite_beta_optimized.nc").exists()
+    assert (tmp_path / "QA_finite_beta_optimized_summary.png").exists()
 
 
 @pytest.mark.full  # nightly: shared Boozer + bounce-action Jacobian is cold-compile heavy

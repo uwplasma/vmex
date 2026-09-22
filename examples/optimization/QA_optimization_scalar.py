@@ -37,8 +37,8 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # L-BFGS-B iterations each stage may spend:
-MAX_MODES = [1,   3,  5]#,  7,  9]
-MAXITER   = [15, 25, 30]#, 40, 50]
+MAX_MODES = [1, 3, 5]
+MAXITER = [15, 25, 30]
 
 # Targets:
 ASPECT_TARGET = 6.0

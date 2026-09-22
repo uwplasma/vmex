@@ -1,5 +1,12 @@
 #!/usr/bin/env python
-"""LASYM finite-beta constructed-QI boundary optimization."""
+"""LASYM finite-beta constructed-QI boundary optimization.
+
+The pressure is prescribed, p(s) = PRES_SCALE (1 - s), and the toroidal flux
+sets beta: at zero net current beta depends on PRES_SCALE / PHIEDGE**2 alone,
+so PHIEDGE = pi a**2 sqrt(mu0 PRES_SCALE / TARGET_BETA) with
+a = R0 / ASPECT_TARGET.  The seed is scaled to the target aspect ratio and
+one solve corrects the estimate, so the beta and aspect-ratio targets agree.
+"""
 
 import os
 from dataclasses import replace
@@ -11,6 +18,7 @@ from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
+from vmex.core.scaling import input_minor_radius
 from vmex.core.qi import ConstructedQIResidual
 
 # Number of field periods, and the seed deck the boundary is shaped from:
@@ -55,8 +63,11 @@ STAGE_MAX_ITERATIONS = 3000
 # but never below MINIMUM_MPOL:
 MINIMUM_MPOL = 5
 
-# One calibration solve rescales this to TARGET_BETA:
-CALIBRATION_PRES_SCALE = 100.0
+# Pressure p(s) = PRES_SCALE (1 - s), in pascal.  With TARGET_BETA it sets the
+# field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA); this value keeps PHIEDGE near
+# the seed deck's, where the Mercier and resistive-interchange weights were
+# tuned (DMerc scales as PHIEDGE**-2):
+PRES_SCALE = 5.0e2
 
 # Verification solve of the optimized boundary:
 FINAL_NS = 101
@@ -94,15 +105,29 @@ rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATI
 # Nonzero RBS(1,1)/ZBC(1,1) prevents the local solve from remaining in the
 # original stellarator-symmetric subspace.
 rbs[inp.ntor + 1, 1], zbc[inp.ntor + 1, 1] = ASYMMETRY_PERTURBATION, -ASYMMETRY_PERTURBATION
+# Start at the target aspect ratio: scale the cross-section (every m >= 1
+# harmonic) about the circular seed axis, which keeps the major radius.
+minor_radius = float(inp.rbc[inp.ntor, 0]) / ASPECT_TARGET
+scale = minor_radius / input_minor_radius(
+    replace(inp, lasym=True, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc))
+for coefficients in (rbc, zbs, rbs, zbc):
+    coefficients[:, 1:] *= scale
+
+# Beta from the toroidal flux: the closed form, then one correction solve.
+mu0 = 4.0e-7 * np.pi
+closed_form_phiedge = np.pi * minor_radius**2 * np.sqrt(mu0 * PRES_SCALE / TARGET_BETA)
 am = np.zeros(21)
 am[:2] = [1.0, -1.0]  # p(s) = PRES_SCALE * (1 - s)
 inp = replace(inp, lasym=True, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc,
-    pmass_type="power_series", am=am, pres_scale=CALIBRATION_PRES_SCALE)
-
-# One solve calibrates the pressure amplitude to the requested beta.
-calibration = opt.solve_equilibrium(inp)
-inp = replace(inp, pres_scale=inp.pres_scale * TARGET_BETA / float(calibration.wout.betatotal))
-equilibrium = opt.solve_equilibrium(inp, initial_state=calibration.solution)
+    pmass_type="power_series", am=am, pres_scale=PRES_SCALE,
+    phiedge=closed_form_phiedge)
+equilibrium = opt.solve_equilibrium(inp)
+closed_form_beta = float(equilibrium.wout.betatotal)
+inp = replace(inp, phiedge=closed_form_phiedge * np.sqrt(closed_form_beta / TARGET_BETA))
+equilibrium = opt.solve_equilibrium(inp, initial_state=equilibrium.solution)
+print(f"PHIEDGE: closed form {closed_form_phiedge:.6f} Wb gives beta "
+      f"{closed_form_beta:.4%}; corrected {inp.phiedge:.6f} Wb gives beta "
+      f"{float(equilibrium.wout.betatotal):.4%}")
 
 ### Set up the objective ######################################################
 
@@ -126,7 +151,9 @@ def elongation_excess(equilibrium_state, solver_context):
 objective_function_terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.005),
     (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),
-    (opt.volume_average_beta, TARGET_BETA, 1.0 / TARGET_BETA**2)]
+    # The aspect-ratio row is deliberately light, so this row is what holds beta
+    # (at fixed flux beta scales as ASPECT**-4); it carries the QI row's weight.
+    (opt.volume_average_beta, TARGET_BETA, 10.0 / TARGET_BETA**2)]
 report = opt.EquilibriumReporter(
     ("constructed QI", qi.total, ".4e"), ("beta", opt.volume_average_beta, ".3%"),
     ("aspect", opt.aspect_ratio, ".3f"), ("iota", opt.mean_iota, ".3f"))
