@@ -3480,8 +3480,19 @@ def _least_squares_implicit(
             raise RuntimeError(
                 "decision vector did not produce a usable VMEC equilibrium"
             )
+        # The objective reads the fixed-point-refined state, not the host
+        # solve.  The factory preflight caches only the host solve, so refine
+        # it here (a memo hit: no new equilibrium solve, no objective graph).
+        refined = imp._LAST_REFINED.get(cfg)
+        if refined is None or refined[0] != hit[0]:
+            imp._host_solve_and_mask_status(cfg, params_np)
+            refined = imp._LAST_REFINED.get(cfg)
+        if refined is None or refined[0] != hit[0]:
+            raise RuntimeError(
+                "decision vector did not produce a usable VMEC equilibrium"
+            )
         result_input = input_from_x(x)
-        result = hit[1]
+        result = dataclasses.replace(hit[1], state=refined[1])
         ns = int(np.shape(result.state.R_cos)[0])
         runtime = prepare_runtime(
             result_input,

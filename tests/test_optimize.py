@@ -584,6 +584,30 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     np.testing.assert_array_equal(bad_gradient, np.zeros_like(problem.x0))
 
 
+def test_equilibrium_from_x_is_the_state_the_objective_read():
+    """``equilibrium_from_x`` returns the refined state, not the host solve.
+
+    The objective reads the fixed-point-refined state.  On ``li383_low_res``
+    that state is 1.4e-2 from the host solve in one coefficient, and the
+    materialized equilibrium used to report a mean iota of 0.55449 against
+    the objective's 0.55359.  Materializing straight after construction,
+    before any objective evaluation, must give the same state too.
+    """
+    from vmex.core.statephysics import mean_iota
+
+    inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
+    problem = opt.make_problem(
+        inp, objective_terms=[(opt.mean_iota, 0.0, 1.0)], max_mode=1)
+    before = problem.equilibrium_from_x(problem.x0)
+    objective = float(np.asarray(problem.residual(problem.x0))[0])
+    after = problem.equilibrium_from_x(problem.x0)
+    for eq in (before, after):
+        np.testing.assert_allclose(
+            float(mean_iota(eq.state, eq.runtime)), objective, rtol=1e-12)
+        np.testing.assert_allclose(
+            float(np.mean(np.asarray(eq.wout.iotas)[1:])), objective, rtol=1e-12)
+
+
 def test_from_loss_honors_bound_scalar_method_literally():
     """The ``loss=`` lane uses a bound scalar objective method exactly as passed.
 
@@ -603,10 +627,9 @@ def test_from_loss_honors_bound_scalar_method_literally():
     assert np.isfinite(value)
     eq = problem.equilibrium_from_x(problem.x0)
     expected = float(jax.device_get(qs.total_state(eq.state, eq.runtime)))
-    # The problem evaluates the guarded-refinement fixed point; the
-    # materialized equilibrium is the host solve, so agreement is at the
-    # solver-refinement level, not machine precision.
-    np.testing.assert_allclose(value, expected, rtol=1e-5, atol=1e-10)
+    # The materialized equilibrium is the refined fixed point the problem
+    # evaluated, so the two agree to roundoff.
+    np.testing.assert_allclose(value, expected, rtol=1e-12, atol=1e-14)
 
     with pytest.raises(ValueError, match="must return a scalar"):
         opt.VmecProblem.from_loss(inp, qs.residuals_state, max_mode=1)
