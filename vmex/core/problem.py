@@ -1288,13 +1288,17 @@ class VmecProblem(FunctionProblem):
         ``B.n/B`` is evaluated on the exterior side using the supplied coil or
         MGRID field plus the plasma-current virtual-casing field. This helper
         keeps optional movie coloring out of optimization driver code; it is
-        not used by the objective or optimizer.
+        not used by the objective or optimizer, so it reads a plain forward
+        solve when the problem offers one (``host_state_runtime``): the
+        derivative anchor of the differentiable lane changes nothing a figure
+        can show and cost 83% of each single-stage movie frame.
         """
         import jax.numpy as jnp
 
         if quantity not in ("absB", "B.n/B"):
             raise ValueError('quantity must be "absB" or "B.n/B"')
-        state_runtime = self.metadata.get("jax_state_runtime")
+        state_runtime = (self.metadata.get("host_state_runtime")
+                         or self.metadata.get("jax_state_runtime"))
         inp = self.metadata.get("input")
         if state_runtime is None or inp is None:
             raise AttributeError("surface fields require an implicit VMEC problem")

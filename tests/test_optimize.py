@@ -1602,3 +1602,29 @@ def test_subproblem_ladder_compiles_once():
     assert compiles_after_second_rung == compiles_after_first_rung, (
         "the second ladder rung recompiled: "
         f"{compiles_after_second_rung - compiles_after_first_rung} programs")
+
+
+def test_host_state_runtime_is_the_unanchored_forward_solve(monkeypatch):
+    """Figures read a plain forward solve; only the adjoint lane anchors it."""
+    from vmex.core import implicit as imp
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(
+        inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4),
+        ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]))
+    problem = opt.VmecProblem.from_tuples(
+        inp, [(opt.aspect_ratio, 4.0, 1.0)], max_mode=1, use_ess=False)
+    reference = opt.solve_equilibrium(problem.input_from_x(problem.x0)).solution
+
+    def no_anchor(*args, **kwargs):
+        raise AssertionError("a figure must not pay for the derivative anchor")
+
+    monkeypatch.setattr(imp, "_refine_fixed_point", no_anchor)
+    imp._LAST_SOLVE.clear()
+    state, runtime = problem.metadata["host_state_runtime"](problem.x0)
+    assert type(runtime).__name__ == "SolverRuntime"
+    for field in ("R_cos", "Z_sin", "L_sin"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(state, field)), np.asarray(getattr(reference, field)),
+            rtol=0.0, atol=1.0e-9)

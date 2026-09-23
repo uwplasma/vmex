@@ -7,6 +7,14 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+### Changed
+
+- **Optimization movies colour each frame from a plain forward solve.**
+  `VmecProblem.surface_field_values` (the `"absB"` and `"B.n/B"` colours of
+  `OptimizationMonitor.movie_surface_coils`) no longer runs the derivative
+  anchor that only an adjoint needs. The colours are unchanged at plotting
+  precision, and the single-stage movie is several times faster.
+
 ### Fixed
 
 - **Free-boundary values and gradients referred to different points.** VMEC's

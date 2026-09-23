@@ -3616,6 +3616,18 @@ def _least_squares_implicit(
         params = params_of(x)
         return imp.solve_implicit(params, cfg), imp.runtime_from_params(params, cfg)
 
+    def host_state_runtime(x):
+        """Forward-solved state/runtime pair for plots, without the anchor.
+
+        The derivative anchor (``implicit._refine_fixed_point``) is what makes
+        a state fit for an adjoint; a figure only reads fields off it, and on
+        the single-stage movie the anchor was 83% of each frame's cost.
+        """
+        params = imp._device_pin(cfg, jax.tree.map(
+            jnp.asarray, params_of(jnp.asarray(x, dtype=float))))
+        return (imp._host_solve(cfg, params).state,
+                imp.runtime_from_params(params, cfg))
+
     def jax_state_runtime_status(x: jnp.ndarray):
         """Exception-free state/runtime/status triple for composite objectives."""
         params = params_of(x)
@@ -3697,6 +3709,7 @@ def _least_squares_implicit(
                 "input": inp,
                 "jax_state_runtime": jax_state_runtime,
                 "jax_state_runtime_status": jax_state_runtime_status,
+                "host_state_runtime": host_state_runtime,
                 "jax_residual_from_state": term_rows,
                 "jax_failure_value": lambda x: failure_value_and_gradient_jax(x)[0],
                 "residual_size": residual_size,

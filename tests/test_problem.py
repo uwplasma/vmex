@@ -314,6 +314,14 @@ def test_vmec_problem_field_facades_validate_and_route(monkeypatch):
     with pytest.raises(ValueError, match="quantity"):
         problem.surface_field_values(problem.x0, "bootstrap")
 
+    # A plain forward solve, when the problem offers one, is what a figure
+    # reads: the differentiable (anchored) lane is not called.
+    calls = []
+    problem.metadata["host_state_runtime"] = lambda x: calls.append("host") or ("s", "r")
+    problem.metadata["jax_state_runtime"] = lambda x: calls.append("jax") or ("s", "r")
+    problem.surface_field_values(problem.x0, "absB", nphi=2, ntheta=3)
+    assert calls == ["host"]
+
 
 def test_vmec_problem_reports_under_converged_fsq():
     class Config:
