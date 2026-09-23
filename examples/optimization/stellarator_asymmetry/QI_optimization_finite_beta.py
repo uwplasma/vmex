@@ -33,8 +33,8 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [3, 5]
-MAX_NFEV = [80, 100]
+MAX_MODES = [3]
+MAX_NFEV = [15]
 
 # Boozer resolution the constructed-QI residual is evaluated on:
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
@@ -70,7 +70,7 @@ MINIMUM_MPOL = 5
 PRES_SCALE = 5.0e2
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 

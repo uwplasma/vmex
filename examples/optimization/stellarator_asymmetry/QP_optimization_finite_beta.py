@@ -32,8 +32,8 @@ SURFACES = np.array([0.5, 0.7, 0.9])
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [3, 5]
-MAX_NFEV = [25, 45]
+MAX_MODES = [3]
+MAX_NFEV = [15]
 
 # Targets and limits.  This lane carries the beta residual but no Mercier or
 # resistive-interchange rows:
@@ -65,7 +65,7 @@ MINIMUM_MPOL = 5
 PRES_SCALE = 2.0e3
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 

@@ -37,7 +37,7 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 3, 5]
-MAX_NFEV = [15, 25, 30]
+MAX_NFEV = [10, 15, 20]
 
 # Targets:
 ASPECT_TARGET = 6.0

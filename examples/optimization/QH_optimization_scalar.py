@@ -94,7 +94,7 @@ report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"),
     ("magnetic well", opt.magnetic_well, ".4f"))
-monitor = opt.OptimizationMonitor()
+monitor = opt.OptimizationMonitor(stream=None)
 equilibrium = opt.solve_equilibrium(inp)
 
 ### Run the optimization ######################################################
