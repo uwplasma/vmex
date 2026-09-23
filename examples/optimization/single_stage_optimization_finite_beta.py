@@ -120,7 +120,7 @@ PARAMETER_BOUND = 3.0
 
 # Budgets. One trial is one equilibrium solve, one virtual-casing evaluation
 # and one adjoint. The script's own end-of-run check passes at iterations 12,
-# 14, 16 and 20 and fails at 10 (aspect 6.002), measured; 14 iterations took 18
+# 14, 16 and 20 and fails at 10 (aspect 6.002), measured; 14 iterations took 19
 # trials. Raise MAXITER to go further.
 MAXITER = 14
 MAX_TRIALS = 35
