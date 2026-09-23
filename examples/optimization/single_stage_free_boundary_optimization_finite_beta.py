@@ -127,9 +127,9 @@ NPHI, NTHETA = 37, 32
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 1, 2, 2
-    N_SEGMENTS, COIL_ORDER, NPHI, NTHETA = 24, 2, 8, 8
-    NS, FTOL = 12, 1.0e-8
+    # Only the optimizer budget shrinks: two coil-fit iterations on a coarser
+    # grid do not give coils that hold a converged free boundary.
+    MAXITER, MAX_TRIALS = 1, 2
 
 ###############################################################################
 # End of input parameters.
