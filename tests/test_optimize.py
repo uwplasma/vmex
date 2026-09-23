@@ -1661,7 +1661,10 @@ def test_host_state_runtime_is_the_unanchored_forward_solve(monkeypatch):
         raise AssertionError("a figure must not pay for the derivative anchor")
 
     monkeypatch.setattr(imp, "_refine_fixed_point", no_anchor)
-    imp._LAST_SOLVE.clear()
+    # A cold forward solve: an earlier test on an equal config leaves a hot
+    # restart that converges to a different point within ftol.
+    for cache in (imp._LAST_SOLVE, imp._HOT_CACHE, imp._PERTURB_SEED):
+        cache.clear()
     state, runtime = problem.metadata["host_state_runtime"](problem.x0)
     assert type(runtime).__name__ == "SolverRuntime"
     for field in ("R_cos", "Z_sin", "L_sin"):
