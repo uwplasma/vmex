@@ -22,13 +22,24 @@ boundary and the coils are optimized together. VMEX also computes Boozer
 transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
 and stability diagnostics, and has a separate lane for open mirrors.
 
+- **Use existing workflows:** VMEC input decks and `wout_*.nc` output, `NS_ARRAY` multigrid
+  continuation, hot restart from a saved WOUT, and DESC inputs and outputs read without DESC.
+- **Design with gradients:** implicit scalar adjoints and residual Jacobians for SciPy, JAXopt or
+  Optax, with quasisymmetry, quasi-isodynamic, Mercier, ballooning, bootstrap and maximum-`J` objectives.
+- **Inspect the physics:** Boozer transforms, the magnetic field and its first three spatial
+  derivatives, effective ripple, and the `--plot` diagnostic summary.
+- **Choose the hardware:** CPU or GPU equilibrium solves (optimization gradients default to CPU),
+  reusable compilation and independent-case ensembles.
+- **Connect coils:** ESSOS coil fields, NESTOR free boundary from an MGRID table or coils, and the
+  virtual-casing exterior field of a finite-beta plasma.
+
 ![VMEX equilibria and diagnostics](docs/_static/figures/readme_equilibrium_showcase.webp)
 
 The [capability reference](https://vmex.readthedocs.io/en/latest/reference/capabilities.html)
 defines supported models and validation limits. The toroidal model assumes nested flux surfaces;
 mirror and high-order polishing features have narrower validation scopes.
 
-## Install
+## Installation
 
 ```console
 pip install vmex
@@ -36,10 +47,69 @@ vmex --doctor
 vmex --test
 ```
 
-Python 3.11–3.13 is tested, and CPU JAX is included. Extras: `vmex[coils]` (ESSOS), `vmex[freeb]`
-(virtual casing), `vmex[neoclassical]` (effective ripple), `vmex[optimizers]` (JAXopt/Optax),
-`vmex[turbulence]` (GKX) and `vmex[all]`. See [installation](https://vmex.readthedocs.io/en/latest/installation.html)
-for GPUs and dependency versions.
+`pip install vmex` is enough to solve, plot, restart, compute Boozer spectra and optimize with SciPy.
+Its required dependencies include JAX (CPU), SciPy, netCDF4 and h5py, and two uwplasma packages that
+the solver itself calls: [`solvax`](https://pypi.org/project/solvax/) for the linear solvers (the
+radial preconditioner, polishing least squares, GMRES) and
+[`booz_xform_jax`](https://pypi.org/project/booz_xform_jax/) for the Boozer transform. `vmex --doctor`
+prints the interpreter, package versions and JAX devices; `vmex --test` solves a bundled QH deck
+end to end and writes its figures to `./vmex_test/`.
+
+Python 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, so a 3.11 environment
+resolves an older JAX; 3.12 or newer is recommended.
+
+### Optional packages for the full capabilities
+
+Each extra installs one more package from PyPI and turns on the features that need it. Install all
+of them with
+
+```console
+pip install "vmex[all]"
+```
+
+or pick what you need:
+
+| Install | Adds | Enables |
+|---|---|---|
+| `pip install "vmex[coils]"` | `essos>=0.17` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.7` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.2` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
+| `pip install "vmex[turbulence]"` | `gkx>=1.8.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) |
+| `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
+| `pip install "vmex[all]"` | all of the above | every example and documented workflow |
+
+The same packages can be installed by name; the floors are the ones in `pyproject.toml`:
+
+| Package | Minimum | Installed by | Command |
+|---|---|---|---|
+| `solvax` | 0.21.0 | `pip install vmex` | `pip install "solvax>=0.21.0"` |
+| `booz_xform_jax` | 0.4.0 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.0"` |
+| `essos` | 0.17 | `vmex[coils]` | `pip install "essos>=0.17"` |
+| `virtual-casing-jax` | 0.0.7 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.7"` |
+| `neo-jax` | 1.0.2 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.2"` |
+| `gkx` | 1.8.0 | `vmex[turbulence]` | `pip install "gkx>=1.8.0"` |
+| `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
+
+NESTOR free boundary from an MGRID table needs no extra. A feature whose package is missing raises
+an `ImportError` that names the package to install; the core solver never imports them.
+
+### GPU, conda-forge and source installs
+
+VMEX does not force a GPU build of JAX, because the right wheel depends on the platform and the
+CUDA or ROCm version. Install VMEX, then JAX for the accelerator following the
+[JAX installation guide](https://docs.jax.dev/en/latest/installation.html) (for example
+`pip install -U "jax[cuda13]"`), and read the [VMEX GPU guide](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html)
+before choosing a device. `conda install --channel conda-forge vmex` installs the core package; its
+feedstock may lag PyPI, and the extras above come from pip. For development:
+
+```console
+git clone https://github.com/uwplasma/vmex
+cd vmex
+pip install -e ".[all,dev]"
+```
+
+The [installation guide](https://vmex.readthedocs.io/en/latest/installation.html) covers float64,
+WSL2 and dependency details.
 
 ## Solve, plot and restart
 
@@ -205,32 +275,49 @@ converge ([not validated](docs/explanation/validation.md#what-is-not-validated))
 
 ### Open mirrors and stellarator-mirror hybrids
 
+![Fixed-boundary non-axisymmetric mirror](docs/_static/figures/mirror_fixed_boundary_3d.webp)
+
+Fixed-boundary open mirrors, from `examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py`.
+
+![Free-boundary mirror beta scan](docs/_static/figures/mirror_free_boundary_beta_scan.webp)
+
+The free-boundary mirror beta scan over the validated 0 to 10 percent range,
+`examples/mirror/mirror_free_boundary_beta_scan.py` (needs `vmex[coils]`).
+
 ![Stellarator-mirror hybrid](docs/_static/figures/stellarator_mirror_hybrid.webp)
 
-Fixed-boundary open mirrors (`examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py`), a
-free-boundary mirror beta scan over the validated 0 to 10 percent range
-(`mirror_free_boundary_beta_scan.py`) and periodic stellarator-mirror hybrids
-(`stellarator_mirror_hybrid.py`, above, and the quasi-isodynamic
-`qi_mirror_hybrid_fourier_vs_bspline.py`). Hybrids and anisotropy are research scopes: see the
+Periodic stellarator-mirror hybrids, `examples/mirror/stellarator_mirror_hybrid.py`, with a
+quasi-isodynamic variant in `qi_mirror_hybrid_fourier_vs_bspline.py`. Hybrids and anisotropy are research scopes: see the
 [mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html) for what is validated.
 
 ### Running the examples
 
-From a clone (`git clone https://github.com/uwplasma/vmex && pip install -e vmex`), run
-`vmex examples/data/input.circular_tokamak --plot` or `python examples/take_gradients.py`:
+The examples live in the repository, not in the wheel. From a clone:
 
-| Application | Runnable starting point |
-|---|---|
-| Tokamak or stellarator equilibrium | `vmex examples/data/input.circular_tokamak --plot`; other decks in [examples/data](examples/data/) |
-| QA, QH, QP or QI boundary design | [examples/optimization](examples/optimization/), including bootstrap, ballooning, Mercier and maximum-`J` variants |
-| Asymmetric boundary design | [stellarator_asymmetry](examples/optimization/stellarator_asymmetry/) vacuum and finite-beta scripts |
-| Single-stage plasma and coils | `single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` |
-| Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` |
-| ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` |
-| Experimental exterior tracing (unqualified topology) | `python examples/vmex_fieldline_tracing_finite_beta.py` |
-| Effective ripple | `python examples/epsilon_effective.py` |
-| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` |
-| Research force-balance polishing | `python examples/force_balance_polishing.py` |
+```console
+git clone https://github.com/uwplasma/vmex
+cd vmex
+pip install -e ".[all]"
+vmex examples/data/input.circular_tokamak --plot
+python examples/take_gradients.py
+```
+
+| Application | Runnable starting point | Needs |
+|---|---|---|
+| Tokamak or stellarator equilibrium | `vmex examples/data/input.circular_tokamak --plot`; other decks in [examples/data](examples/data/) | core |
+| QA, QH, QP or QI boundary design | [examples/optimization](examples/optimization/), including bootstrap, ballooning, Mercier and maximum-`J` variants | core |
+| JAXopt and Optax drivers | `QI_optimization_jaxopt.py`, `QI_optimization_optax.py` | `vmex[optimizers]` |
+| Asymmetric boundary design | [stellarator_asymmetry](examples/optimization/stellarator_asymmetry/) vacuum and finite-beta scripts | core |
+| Single-stage plasma and coils | `single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` | `vmex[coils]` |
+| Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` | core |
+| Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
+| ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
+| Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
+| Experimental exterior tracing (unqualified topology) | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
+| Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
+| Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
+| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
+| Research force-balance polishing | `python examples/force_balance_polishing.py` | core |
 
 The optimization scripts expose resolutions, objective weights and iteration budgets near the top.
 Inspect those settings before a research run; advanced coil examples need the optional dependencies
@@ -288,9 +375,24 @@ vacuum; read the dimensional metrics with it. See the [validation record](docs/e
 the failed 3-D attempts and the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 for the method and certificate.
 
+## Performance and parallel execution
+
+JAX compiles each solve once per array structure and reuses the executable for matching shapes, so
+measure first-call, cache-reload and warm costs separately, including refinement and gradients for
+optimization. CPU and GPU performance depend on resolution and workload; the dated measurements are
+in the [performance reference](https://vmex.readthedocs.io/en/latest/reference/performance.html)
+and the [benchmark records](benchmarks/INDEX.md).
+
+`vj.parallel.solve_ensemble(inputs, workers=None)` solves independent cases concurrently and returns
+results in input order, each identical to solving that input alone; `workers=1` is the serial
+baseline. Set worker and device budgets with the
+[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
+kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
+
 ## Documentation, development and citation
 
-Start with [your first equilibrium](https://vmex.readthedocs.io/en/latest/tutorials/first-equilibrium.html),
+Start with [your first equilibrium](https://vmex.readthedocs.io/en/latest/tutorials/first-equilibrium.html)
+and [your first optimization](https://vmex.readthedocs.io/en/latest/tutorials/first-optimization.html),
 then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
 [VMEC compatibility](https://vmex.readthedocs.io/en/latest/reference/vmec2000-compatibility.html) and
 [troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html) pages. For development,
