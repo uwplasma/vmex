@@ -110,18 +110,23 @@ CONSTRAINT_WEIGHT = 1.0e3
 # represent a bound.
 PARAMETER_BOUND = 3.0
 
-# Budgets. One trial is one equilibrium solve plus one adjoint. 50 iterations
-# show the method working in minutes; raise MAXITER to go further. The trial
-# cap only stops a run whose line searches go astray.
-MAXITER = 50
-MAX_TRIALS = 100
+# Budgets. One trial is one equilibrium solve plus one adjoint. The script's
+# own end-of-run check passes at iterations 6, 8, 10, 12, 15 and 20 (measured),
+# and 12 iterations took 21 trials. Past that point the run only trades a little
+# quasisymmetry, so raise MAXITER to go further. The trial cap only stops a run
+# whose line searches go astray.
+MAXITER = 12
+MAX_TRIALS = 30
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil objective uses. A toroidal count commensurate with the
 # coil number aliases narrow B.n/B structure, so 37 rather than 36.
 NPHI, NTHETA = 37, 32
 
-MAKE_MOVIE = True                 # a compact GIF of the accepted iterates
+# A compact GIF of the accepted iterates. Off by default: with "absB" colour
+# every frame re-solves its equilibrium, which took longer than the whole
+# 12-iteration optimization (measured).
+MAKE_MOVIE = False
 # Surface colour in that GIF: None, "absB", "B.n/B", or a callable
 # ``(x, objects) -> values``.
 MOVIE_SURFACE_COLOR = "absB"

@@ -2,7 +2,7 @@
 r"""Single-stage fixed-boundary optimization at finite beta with VMEX + ESSOS.
 
 ``single_stage_optimization.py`` at volume-average beta 0.5%: the same seed,
-targets, weights, coils and budget, with a pressure profile p ~ (1 - s) and
+targets, weights and coils, with a pressure profile p ~ (1 - s) and
 no net toroidal current (NCURR = 1, CURTOR = 0, AC = 0). The plasma boundary
 and the coils are optimized together; VMEX solves the fixed-boundary
 equilibrium on every trial and differentiates it implicitly.
@@ -119,9 +119,11 @@ CONSTRAINT_WEIGHT = 1.0e3
 PARAMETER_BOUND = 3.0
 
 # Budgets. One trial is one equilibrium solve, one virtual-casing evaluation
-# and one adjoint.
-MAXITER = 50
-MAX_TRIALS = 100
+# and one adjoint. The script's own end-of-run check passes at iterations 12,
+# 14, 16 and 20 and fails at 10 (aspect 6.002), measured; 14 iterations took 18
+# trials. Raise MAXITER to go further.
+MAXITER = 14
+MAX_TRIALS = 35
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil objective uses. A toroidal count commensurate with the
@@ -130,7 +132,10 @@ NPHI, NTHETA = 37, 32
 # Significant digits of the virtual-casing plasma field:
 VC_DIGITS = 4
 
-MAKE_MOVIE = True                 # a compact GIF of the accepted iterates
+# A compact GIF of the accepted iterates. Off by default: with "absB" colour
+# every frame re-solves its equilibrium, which took longer than the whole
+# 14-iteration optimization (measured).
+MAKE_MOVIE = False
 # Surface colour in that GIF: None, "absB", "B.n/B", or a callable
 # ``(x, objects) -> values``.
 MOVIE_SURFACE_COLOR = "absB"
