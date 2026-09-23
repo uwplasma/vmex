@@ -8,14 +8,13 @@ The index answers three questions that the tree alone cannot:
 2.  Which revision and date it was measured at, read out of whatever
     provenance block the artifact carries -- the schemas differ by age, so the
     keys are searched rather than assumed.
-3.  Which pages, tests or scripts cite it.  An artifact nothing cites is
-    listed as such instead of being quietly deleted: an uncited record may
-    still be evidence, but the reader is entitled to know it stands alone.
+3.  Which pages, tests or scripts cite it.  Only records cited by the docs
+    or tests are kept in the tree; an uncited record is listed so it can be
+    cited or removed, and removed records stay reachable through git history.
 
-The 54 committed workflow baselines under ``benchmarks/baselines/m4/`` are one
-grouped row -- one line per file would bury the 33 records that pages cite --
-but the group still carries its file count, so a file added or removed there
-changes the index.
+The committed workflow baselines under ``benchmarks/baselines/m4/`` are one
+grouped row, but the group still carries its file count, so a file added or
+removed there changes the index.
 
 Usage::
 
@@ -60,7 +59,6 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/convergence_nfp4_ns51.json", "benchmarks/make_readme_figures.py"),
     ("benchmarks/preconditioner_2d_stiff_cases.json", "benchmarks/preconditioner_2d_stiff.py"),
     ("benchmarks/capabilities.json", "tools/render_capabilities.py"),
-    ("benchmarks/profile.json", "benchmarks/profile_production.py"),
     ("benchmarks/device_cache_reload_m4.json", "benchmarks/device_cache_reload.py"),
     ("benchmarks/polish_cost_*.json", "benchmarks/polish_cost.py"),
     ("benchmarks/polish_memory_*.json", "benchmarks/polish_memory.py"),
@@ -70,9 +68,6 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/qa_optimization_startup_*.json", "benchmarks/qa_optimization_startup.py"),
     ("benchmarks/single_stage_profile_*.json", "benchmarks/single_stage_profile.py"),
     ("benchmarks/qi_optimization_profile_*.json", "benchmarks/qi_optimization_profile.py"),
-    ("benchmarks/optimization_counters_*.json", "benchmarks/optimization.py"),
-    ("benchmarks/adjoint_formulation_*.json", "benchmarks/adjoint_formulation.py"),
-    ("benchmarks/newton_finish_arms_*.json", "benchmarks/newton_finish_arms.py"),
     ("benchmarks/strong_force_m4.json", "benchmarks/strong_force.py"),
     ("benchmarks/strong_force_cases_m4.json", "benchmarks/make_strong_force_comparison.py"),
     ("benchmarks/strong_force_comparison_m4.json", "benchmarks/make_strong_force_comparison.py"),
@@ -306,6 +301,12 @@ def render() -> str:
         "missing from this file, when a path named here does not exist, and when a",
         "grouped directory holds a different number of files than the count below.",
         "",
+        "Only records cited by the docs or tests, and the scripts that regenerate",
+        "them or that CI and the tests run, are kept in the tree. Older and",
+        "uncited records are reachable through git history: link them with a",
+        "permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)",
+        "rather than keeping the file.",
+        "",
         *textwrap.wrap(
             f"{len(records)} committed artifacts: {len(singles)} standalone records "
             f"and {len(grouped)} grouped {'directory' if len(grouped) == 1 else 'directories'} "
@@ -375,8 +376,8 @@ def render() -> str:
 
     lines += ["", "## Cited by nothing", ""]
     if uncited:
-        lines.append("These records are committed evidence that no page, test or script")
-        lines.append("reads. They are kept, not deleted; the list exists so that stays visible.")
+        lines.append("No page, test or script reads these records. Cite them or remove them;")
+        lines.append("a removed record stays reachable through git history.")
         lines.append("")
         for key in uncited:
             lines.append(f"- `{key}`")

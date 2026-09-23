@@ -278,8 +278,8 @@ Report raw/projected nonlinear and linear residuals. Verify forward/reverse
 agreement and two-sided Taylor convergence; use independently reconverged
 perturbations wherever their noise floor permits. A same-root linear identity
 is not proof of accurate nonlinear parameter dependence. Public fixtures must
-replace reliance on unavailable collaborator states. Preserve the baseline
-counters in `benchmarks/optimization_counters_20260913.json`.
+replace reliance on unavailable collaborator states. The baseline counters
+are in [`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json).
 
 ## B. Free-boundary scientific workflow
 
@@ -576,9 +576,10 @@ First audit `lift_high_order_state` for unsupported spans, rank and axis
 regularity. Refuse an underdetermined lift rather than filling it silently.
 Use manufactured/analytic fields and independent off-grid quadrature to
 separate representation error from nonlinear-solver error. Then resume the
-bounded E3 correction and radial/angular resolution ladder, using the existing
-`benchmarks/e1_functional_consistency.py`, `benchmarks/e2_dense_reference.py`,
-`benchmarks/residual_vs_resolution.py` and `benchmarks/knot_grading.py`.
+bounded E3 correction and radial/angular resolution ladder, using
+[`benchmarks/e1_functional_consistency.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e1_functional_consistency.py), [`benchmarks/e2_dense_reference.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e2_dense_reference.py),
+[`benchmarks/residual_vs_resolution.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/residual_vs_resolution.py) and [`benchmarks/knot_grading.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/knot_grading.py)
+(removed from the tree; restore them from that revision).
 
 Promotion requires a non-axisymmetric finite-beta case with positive geometry,
 preserved boundary/flux/profile constraints, independently reduced strong force,
@@ -927,8 +928,8 @@ stated in "Execution and acceptance" was superseded by 0.11.0 and restated for
   target; free zero beta with the iota ceiling meets every target (~1900 s).
   All exceed the new five-minute limit; bottleneck analysis and speedups are
   in the #411 handoff comment.
-- `benchmarks/`/`tools/` audit: neither ships in the wheel; `benchmarks/` can
-  go from 132 to 65 files (#431); `tools/` keeps 17 of 18 (CI lane selection,
+- `benchmarks/`/`tools/` audit: neither ships in the wheel; `benchmarks/`
+  goes from 132 to 70 files (#431); `tools/` keeps 17 of 18 (CI lane selection,
   doc guards, asset fetch). Deleting files does not shrink clones (history is
   36.6 MiB; `--depth 1` is 4.7 MiB; `docs/_static` is 43 % of history).
 
@@ -1871,17 +1872,17 @@ and not a defect.
 These verdicts stand and are not reopened by this revision.
 
 - **E1 passes.** The energy gradient equals complete virtual work to 7.9e-14;
-  omitting lambda leaves 3.1 % (`benchmarks/e1_functional_consistency.py`).
+  omitting lambda leaves 3.1 % ([`benchmarks/e1_functional_consistency.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e1_functional_consistency.py)).
 - **E2 passes the shaped tokamak and fails 3-D.** Full R/Z reference 188.5 vs
   the structured chart's 335.3 N m⁻³; on the finite-β QA deck the best step
   reaches 2.31× against a 10× gate and the chart advantage is 1.1–1.2×
-  (`benchmarks/e2_dense_reference.py`). Six toroidal planes under-resolve the
+  ([`benchmarks/e2_dense_reference.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e2_dense_reference.py)). Six toroidal planes under-resolve the
   nfp = 2 deck; use twelve.
 - **The axis source data and fit are the 3-D limiter.** Three independent
   lines converge on it: E2, the residual-versus-resolution scan
-  (`benchmarks/residual_vs_resolution.py`, near-axis residual rises with spline
+  ([`benchmarks/residual_vs_resolution.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/residual_vs_resolution.py), near-axis residual rises with spline
   refinement) and the refuted knot-grading hypothesis
-  (`benchmarks/knot_grading.py`). `lift_high_order_state` must reject bases
+  ([`benchmarks/knot_grading.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/knot_grading.py)). `lift_high_order_state` must reject bases
   with unfed spans instead of returning a minimum-norm fill.
 - **Coordinates.** Keep `ρ^|m| q(s)` with B-splines in `s`; no chart
   replacement, no generalized toroidal angle, no ρ-uniform mesh.
@@ -1905,7 +1906,7 @@ check that may be red.
 | vmex #300 | DESC input bridge; lanes green except a cancelled Python 3.12 fast lane, re-run | merge when that lane is green |
 | vmex #309 (A4) | documentation matched to records | merged `1aa5465e` |
 | vmex #312 (A2, merged `68a119e9`) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
-| vmex #310 (A1) | optimization counters and their record `benchmarks/optimization_counters_20260913.json` | merged `2b9d3a3e`; next #319 → #320 → B4b |
+| vmex #310 (A1) | optimization counters and their record [`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json) | merged `2b9d3a3e`; next #319 → #320 → B4b |
 | vmex #311 (A3, merged `0c083539`) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
 | vmex #313 and #314 (merged `373f1e83`, `746215d3`), #315, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; #316's CTH free-boundary gradient check passes locally; #318 needs its counter rows before merge; #314's c3d failure was a test defect already on `main`: `test_qi_regression_pin_and_jit` pins the QI total on the axisymmetric Solov'ev deck, whose toroidal Boozer coefficients are about 1e-16, so the well argmin ties and 1e-15 noise flips the total between 0.13626 and 0.13500; #323 (merged `b0646713`) moves the pin to the golden `wout_li383_low_res`, whose minimum is unique; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
@@ -2223,7 +2224,7 @@ changes the return drift from 1e-7 to 2e-7 (§2). #302 and #306 carry the
 contract to keep: derivatives only at a state with a fresh projected residual,
 raw FSQ and admissible geometry, and caches keyed by state identity.
 
-**Measured (A1 counters, `benchmarks/optimization_counters_20260913.json`; shared laptop under other sessions' load, so seconds are diagnostic).** On the 8-dof QA and QI rows of
+**Measured (A1 counters, [`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json); shared laptop under other sessions' load, so seconds are diagnostic).** On the 8-dof QA and QI rows of
 `benchmarks/optimization.py`, one evaluation's first derivative spends 29.4 s
 (QA) and 40.0 s (QI) in refinement, against 2.8–3.2 s for the 185-iteration
 solve: all three refinement steps exhaust their GCROT budget (`m = 100` ×
@@ -2333,7 +2334,7 @@ If both Newton arms die, test refining only where a derivative is requested.
 
 ### B4. One compiled path: full jit without recompilation
 
-**Facts.** On A1's rows (`benchmarks/optimization_counters_20260913.json`) the JAX value-and-gradient lane spends 41.6 s
+**Facts.** On A1's rows ([`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json)) the JAX value-and-gradient lane spends 41.6 s
 (QA) and 71.0 s (QI) compiling after the host derivative has already
 compiled, and builds take 244–500 XLA compiles; a five-evaluation warm
 campaign recorded 102 compiles (`benchmarks/baselines/m4/F8_warm.json`). The
@@ -2471,7 +2472,7 @@ factorization per point, with seconds, adjoint iterations and peak RSS on seed
 QA. After B3a merges, B4c's QI gate re-runs at 1e-10.
 
 **Owns.** B3a: the backward rule in `vmex/core/implicit.py` and
-`benchmarks/adjoint_formulation.py`. B3b: the reverse lanes in
+[`benchmarks/adjoint_formulation.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/adjoint_formulation.py). B3b: the reverse lanes in
 `vmex/core/optimize.py`.
 
 ### D0. A QI example that starts near QI
@@ -2805,7 +2806,7 @@ heavy job is running and the heavy-job lock is released. State to resume from:
 - B1: the MPOL = NTOR = 8 QA deck run was stopped before it finished and has
   no record; the adjoint-through-block-factorization arm (f) and the
   refinement stagnation-abort arm (g) were not run. The seed-deck results
-  above are interim until `benchmarks/newton_finish_arms_20260913.json` is
+  above are interim until [`benchmarks/newton_finish_arms_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/newton_finish_arms_20260913.json) is
   committed from branch `b1/newton-finish`.
 - Five other tests in `tests/test_optimize.py` still read the shared `/tmp`
   Solov'ev state (a test-isolation follow-up). No package was tagged.
@@ -3220,9 +3221,10 @@ error estimates and ratios are not affected.
   `fetch_assets.py` 23 times and in three workflows, `test_manifest.py` in four
   -- and `assets/manifest.json` is read by eight places including `MANIFEST.in`,
   so the one-file directory stays.
-- **`benchmarks/baselines/m4/` should NOT be consolidated.** It is 54 files,
-  8.7 % of the tree, and nothing reads them programmatically -- so merging them
-  into one keyed record looks like the biggest available win. It is not:
+- **`benchmarks/baselines/m4/` should NOT be consolidated.** It held 54 files,
+  8.7 % of the tree; since 2026-09-22 only the records the docs or tests cite
+  stay there (the rest are in git history). Merging them
+  into one keyed record looks like a win. It is not:
   `profile_workflows.py` writes `{workflow}_{regime}.json` one cell at a time
   and re-executes itself in a subprocess for the cold regimes, so one file per
   cell is what lets a partial run on a shared machine keep its completed cells.

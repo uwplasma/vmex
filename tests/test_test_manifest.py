@@ -38,13 +38,13 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     assert ci_scope.needed_lanes(["tests/test_gammac.py"]) == lanes
 
     # Benchmarks and examples are attributed through the tests that name them.
-    assert ci_scope.needed_lanes(["benchmarks/e2_dense_reference.py"])
+    assert ci_scope.needed_lanes(["benchmarks/run_freeboundary_multigrid.py"])
     assert ci_scope.needed_lanes(["examples/optimization/QA_optimization.py"])
 
     # A new benchmark nothing names still inherits the lanes of every test that
     # imports the package, which is the safe direction to err in.
     assert ci_scope.needed_lanes(["benchmarks/_brand_new_probe.py"]) == ci_scope.needed_lanes(
-        ["benchmarks/e2_dense_reference.py"]
+        ["benchmarks/run_freeboundary_multigrid.py"]
     )
     # A module the manifest does not own gives no ownership to narrow by.
     assert ci_scope.needed_lanes(["tests/test_not_in_the_manifest.py"]) is None

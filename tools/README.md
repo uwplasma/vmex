@@ -47,11 +47,6 @@ This directory contains developer-facing tools, not end-user examples.
   python tools/build_qi_sheet_mgrid.py --outdir DIR
   ```
 
-- `profile_hotpaths.py`: cold-vs-warm wall-time + peak-RSS profile of the
-  production hot paths (fixed-boundary solve and the differentiable
-  `value_and_grad` adjoint). Backend-agnostic — the same script produces the
-  CPU and GPU numbers with `--device cpu` / `--device gpu`.
-
 Hardware parity across forward solves and boundary gradients is audited by
 `benchmarks/device_parity.py`; use `--quick` for its reduced-grid smoke mode.
 

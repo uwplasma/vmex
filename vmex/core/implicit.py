@@ -1453,7 +1453,7 @@ _REFINE_MAX_RESTARTS = 20
 #: such a correction is not an inexact Newton direction, and later steps
 #: from it only wander.  A solve with three digits whose ``|F|`` rises is a
 #: Newton step outside its quadratic region and is continued.  Two measured
-#: decks (``benchmarks/newton_finish_arms_20260913.json``): the benchmark seed
+#: decks (`newton_finish_arms_20260913.json <https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/newton_finish_arms_20260913.json>`_): the benchmark seed
 #: deck (mpol = ntor = 5) stalls at 4.2e-3 and is stopped; QA_lowres
 #: (mpol = ntor = 8) reaches 5.2e-5, raises ``|F|`` and certifies two steps later.
 _REFINE_MIN_PROGRESS = 1.0e-3
