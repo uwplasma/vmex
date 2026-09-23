@@ -122,8 +122,8 @@ vmex --booz wout_my_case.nc
 vmex input.nearby --restart wout_my_case.nc
 ```
 
-`--plot` writes six PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
-`|B|` in VMEC angles, radial profiles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
+`--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
+`|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
 `D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
 `vmex examples/data/input.nfp2_QA_finite_beta --plot` and `vmex examples/data/input.nfp4_QI_finite_beta --plot`.
 
@@ -263,6 +263,12 @@ Shafranov shift: `python examples/free_boundary_essos_coils.py`. The exterior fi
 [below](#fields-coils-and-free-boundary).
 
 ### Single-stage plasma and coil design
+
+![Fixed-boundary vacuum single-stage optimization: boundary and coils at each accepted iterate](docs/_static/figures/readme_single_stage_fixed_boundary.webp)
+![Free-boundary finite-beta single-stage optimization: free boundary and coils at each accepted iterate](docs/_static/figures/readme_single_stage_free_boundary.webp)
+
+Accepted iterates of `single_stage_optimization.py` (left, fixed boundary in vacuum) and
+`single_stage_free_boundary_optimization_finite_beta.py` (right, free boundary at 0.5% beta).
 
 `examples/optimization/single_stage_optimization.py` adjusts the plasma boundary and the coils
 against one weighted objective, solving the equilibrium implicitly at every step;

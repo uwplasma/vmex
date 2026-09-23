@@ -10,7 +10,7 @@ other VMEC-ecosystem tools read them unchanged.
 ## From the CLI
 
 ```console
-vmex --plot wout_case.nc               # six wout figures
+vmex --plot wout_case.nc               # five wout figures
 vmex input.case --plot                 # solve, then plot
 vmex --plot boozmn_case.nc             # Boozer contours + spectra
 vmex --plot mout_case.nc               # straight-axis mirror figures
@@ -19,8 +19,7 @@ vmex --plot wout_case.nc --outdir figs/
 
 The wout set always includes `*_surfaces.png` (cross-sections at several
 zeta over one field period, axis marked), `*_modB.png` (`|B|` contours at
-mid radius and boundary), `*_profiles.png` (iota/pressure/current plus the
-`fsqt` force-residual trace), `*_boundary3d.png` (3-D boundary colored by
+mid radius and boundary), `*_boundary3d.png` (3-D boundary colored by
 `|B|`), `*_stability.png` (Mercier terms and a pressure scan), and
 `*_summary.png`. Both symmetric and `lasym` equilibria are supported — the
 sine/cosine partner tables are included whenever present. All figures use
@@ -33,12 +32,12 @@ import vmex as vj
 
 paths = vj.plot_wout("wout_case.nc", outdir="figs")        # dict[str, Path]
 paths = vj.plot_wout(wout_data, outdir="figs",
-                     which=("summary", "profiles"))        # select figures
+                     which=("summary", "modB"))            # select figures
 ```
 
 `plot_wout` accepts a path or an in-memory
 {class}`~vmex.core.wout.WoutData`, and `which=` selects a subset of
-`("summary", "surfaces", "modB", "profiles", "stability", "3d")`.
+`("summary", "surfaces", "modB", "stability", "3d")`.
 Per-figure helpers
 ({func}`~vmex.core.plotting.plot_summary`,
 {func}`~vmex.core.plotting.plot_stability`, ...) return single figures for
