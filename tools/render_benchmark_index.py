@@ -51,6 +51,7 @@ GROUPS = ("benchmarks/baselines/m4",)
 #: First match wins, so the specific patterns come before the general ones.
 GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/baselines/m4/*.json", "benchmarks/profile_workflows.py"),
+    ("benchmarks/extender_ab_*.json", "benchmarks/extender_ab.py"),
     ("benchmarks/baseline.json", "benchmarks/run_baseline.py"),
     ("benchmarks/gpu_baseline.json", "benchmarks/run_gpu_matrix.py"),
     ("benchmarks/gpu_a4000_*.json", "benchmarks/run_gpu_matrix.py"),

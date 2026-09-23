@@ -12,8 +12,8 @@ uncited records are reachable through git history: link them with a
 permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
-38 committed artifacts: 33 standalone records and 1 grouped directory holding
-5 files. 34 of the 34 entries below are cited by a page, a test or another
+39 committed artifacts: 34 standalone records and 1 grouped directory holding
+5 files. 35 of the 35 entries below are cited by a page, a test or another
 script; 0 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -31,6 +31,7 @@ hand rather than by a script in this tree.
 | `benchmarks/convergence_nfp4_ns51.json` | `benchmarks/make_readme_figures.py` | `40e7899f` | 2026-07-29 | `docs/_static/figures/figures.json`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/desc_native_vs_lifted_2026-09-03.json` |  | `82a424da` | 2026-09-03 | `docs/explanation/validation.md`, `tests/test_profile_workflows.py` |
 | `benchmarks/device_cache_reload_m4.json` | `benchmarks/device_cache_reload.py` | `a9a11a3b` | 2026-08-29 | `docs/howto/run-on-gpu.md` |
+| `benchmarks/extender_ab_20260923.json` | `benchmarks/extender_ab.py` |  | 2026-09-23 | `CHANGELOG.md`, `docs/explanation/nestor-vacuum.rst`, `plan.md` |
 | `benchmarks/freeboundary_multigrid.json` | `benchmarks/run_freeboundary_multigrid.py` | `b0cc789e` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json` |  | `8ef81c44` | 2026-09-02 | `docs/explanation/validation.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md` |  |  |  | `README.md` |

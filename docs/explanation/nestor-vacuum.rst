@@ -331,6 +331,17 @@ graded rule everywhere, including under ``jit``, where the per-point switch is
 not available. The graded rule is our own construction for this global
 toroidal rule, validated numerically, not taken from a reference.
 
+Spatial derivatives of the direct path come from the same closed-form
+kernels on the finest schedule level, where nested ``jacfwd`` through the
+schedule used to differentiate the quadrature: the values agree to 1e-12. On
+the office workstation (A/B/A/B, ``benchmarks/extender_ab_20260923.json``,
+generator ``benchmarks/extender_ab.py``) the first ``B`` to ``gradgradgradB``
+calls at 16 targets took 2.9 s against 6.0 s, and a warm ``gradgradgradB``
+took 0.09 s against 0.50 s at 16 targets and 0.47 s against 1.98 s at 128.
+At 16 targets 0.05 minor radii out the default settings now cost 0.42 s warm
+(3.4 s first) where the direct path took 0.04 s, and returned a field 25
+times too large.
+
 The first-order near-surface continuation that preceded it has been removed:
 with a 32 x 32 grid it was off by 1.6--2.4 % of the plasma field (about 1e-3
 of :math:`|B|`) at every distance from 0.01 a to 0.1 a, a floor set by its

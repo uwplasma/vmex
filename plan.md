@@ -59,7 +59,7 @@ runtimes.
 | Stage compilation and Jacobian batching | Delivered | #390 (`39db0388`), #392 (`a18bc448`) | Preserve frozen stage variables, final designs and memory bounds on current integrated sources. |
 | Cold setup and WOUT export | Delivered | #396 (`ddf7d3ee`), #400 | Measure remaining startup costs after these changes, not against the superseded eager setup. |
 | Free-boundary root and Schur reuse | Delivered; deterministic cold recovery merged (#416, `6f1df723`); adjoint exact at the root but the returned state is off it (lane A) | #383 (`92e6e0bf`), #385, #397 (`3c965913`), #416 | Lane A (off-root state, restart cap) and lane B (vacuum islands, feasible full designs). |
-| Native interior field and exterior accuracy | Validated against independent oracles (volume Biot–Savart, free-boundary coil field, frozen-path FD); two defects fixed in #430 (one upstream, virtual-casing-jax 0.0.8) | #378, #399, #403, #409; #430; logbook 2026-09-22 | Near-surface point queries need E7's graded rule in the library; then retire the continuation. Keep the curl-free projection opt-in. |
+| Native interior field and exterior accuracy | Validated against independent oracles (#430); near-surface graded rule and closed-form derivative kernels in the library, continuation removed (logbook 2026-09-23) | #378, #399, #403, #409, #430; `benchmarks/extender_ab_20260923.json` | Keep the curl-free projection opt-in. E2's table for long exterior traces; a traced per-point switch; grid sizing below d = a. |
 | Fixed-boundary single stage | Both fixed-boundary examples (zero and 0.5 % beta) meet every target in #411's runs at `952c3160` | #368; draft #411 (`35024f37`), which supersedes #371 | Refresh the four scripts' docstring numbers from #411's run table, requalify the shipped budgets, then merge #411. |
 | Free-boundary single stage (zero and 0.5 % beta) | 0.5 % beta meets every target; zero beta meets every target once an iota ceiling (max\|iota\| <= 0.44) keeps the 4/9 island chain out of the plasma | draft #411 ([run table](https://github.com/uwplasma/vmex/pull/411#issuecomment-5784049398)); #411 supersedes #377 | Lane B: land the iota ceiling and cold 16 -> 51 verification in #411; per-trial cost (lane A restart cap) is the remaining usability gap. |
 | QI objective | Bounded candidate rejected; nonsmoothness remains | `vmex/core/optimize.py`, `413d7fd2` | Lane D: retain current objective and the measured limitation; no width sweep or production surrogate promotion. |
@@ -1016,6 +1016,39 @@ taken with other jobs on the laptop (load 4–90) and are upper bounds.
   the breathing circle (cubic splines have no fourth radial derivative); a
   quintic interpolant would restore convergence, below the E8 gate today.
   The order-0 estimate can sit 1.3× under the true error.
+
+### 2026-09-23: the graded near-surface rule replaces the continuation
+
+E7 is in the library as `virtual_casing.graded_plasma_field` and as
+`VmecExtender`'s `near_surface` mode ("auto" by default: eager calls switch
+each point whose direct estimate misses `10**-digits` to the graded rule;
+"graded"/`with_graded_quadrature()` everywhere, traceable; "direct" as
+before). The rule interpolates the one-period surface samples spectrally,
+grades about the target's nearest surface point with local spacing d/8, and
+takes B and its derivatives from virtual-casing-jax's closed-form layer
+kernels. Measured at 128 × 512 nodes on the 2.5 % β QA deck: 1e-12 in B and
+1e-10 in grad B from d = a down to 0.01 a (3e-8 at 0.003 a) against the
+converged reference; on the two-source torus oracle 6e-10 of the field scale
+1 mm from a 0.3 m surface, inside and outside. `with_near_surface_continuation`
+and `near_surface_plan` are removed; the tracing example traces through the
+graded field at 64 × 256 nodes (about 4 ms per point).
+
+E5 is wired: direct-path derivatives use the closed-form kernels on the finest
+level (same values to 1e-12). The 17 s first call was `level_sources`
+dispatching eagerly; VMEX now compiles it ahead of time (0.5 s). One trap:
+`jax.ensure_compile_time_eval` also dispatches eagerly (26 s), so cached data
+are built with `jax.jit(...).lower().compile()()`, which runs outside any
+caller's trace. A/B/A/B on the office workstation
+(`benchmarks/extender_ab_20260923.json`): first `B`…`gradgradgradB` calls at
+16 targets 6.0 s → 2.9 s; warm `gradgradgradB` 0.50 → 0.09 s (16 targets) and
+1.98 → 0.47 s (128); near-surface `B` at 16 targets 0.05 a out costs 0.42 s
+warm instead of 0.04 s, and is right where the direct value was 25× too large.
+
+Still open: traced calls under "auto" use the direct path (a per-point switch
+under a trace would pay for both); the per-order switch uses the a-priori
+estimate, 3–14× conservative, so some resolved points take the slower rule;
+E2's table for long exterior traces; the default source grid is still sized
+for d = a only.
 
 # Part II. Historical plan and logbook (2026-09-13 to 2026-09-20)
 
