@@ -338,9 +338,10 @@ periods and requested digits. Its error grows rapidly near that surface:
 evaluate only where its error estimate meets your target. Targets must also stay away from
 coil filaments, and an MGRID field has a finite tabulated domain.
 
-`with_near_surface_continuation` is unqualified for physics: the implementation
-records that it does not reproduce direct quadrature. The exterior field-line
-example uses that experimental path and does not validate magnetic topology.
+`with_near_surface_continuation` is unqualified for physics: it is off by about
+1e-3 of |B| next to a 2.5 % beta boundary, costs minutes and tens of GB to
+prepare, and has no error estimate. The exterior field-line example uses that
+experimental path and does not validate magnetic topology.
 See the [exterior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/nestor-vacuum.html)
 and [field and coil usage](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 

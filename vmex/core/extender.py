@@ -1259,8 +1259,19 @@ def _mgrid_from_wout(wout: Any, base_dir: Path | None) -> MgridField | None:
     path = Path(path_text).expanduser()
     if not path.is_absolute() and base_dir is not None:
         path = base_dir / path
-    data = read_mgrid(path)
     extcur = np.asarray(getattr(wout, "extcur", ()), dtype=float).reshape(-1)
+    if not np.any(np.isfinite(extcur) & (extcur != 0.0)):
+        # Filling the missing currents with zeros built a coil field that is
+        # identically zero, so a free-boundary wout without its currents
+        # extended as if there were no coils.  VMEX's own solve_file writes
+        # such a wout (nextcur = 0) for a free-boundary deck.
+        raise ValueError(
+            f"the wout names MGRID_FILE {path_text!r} but carries no coil "
+            "currents (nextcur = 0 or every EXTCUR zero), so the coil field "
+            "cannot be built from it; pass external_field (an MgridField built "
+            "with the deck's EXTCUR, or a coil callable), or build the field "
+            "with VmecExtender.from_equilibrium from the solved deck")
+    data = read_mgrid(path)
     scaled = np.zeros((data.nextcur,), dtype=float)
     scaled[: min(extcur.size, data.nextcur)] = extcur[: data.nextcur]
     if str(data.mgrid_mode).upper().startswith(("R", "N")):
@@ -1494,19 +1505,21 @@ class VmecExtender(MagneticField):
     def B_error_estimate(self, points: Array | None = None, *, order: int = 0) -> Array:
         """Estimated relative error of the plasma field, shape ``(n,)``.
 
-        Per point, the difference between the value the virtual-casing
-        schedule returned and its finest source grid, or, for points already
-        on the finest grid, that grid's double-layer quadrature error
-        (:func:`~vmex.core.virtual_casing.offsurface_error_estimate`).  It is
-        relative to the RMS surface ``|B|``, compares with ``10**-digits``,
-        and ``-log10`` of it is the achieved digits.  The error decays as
-        ``exp(-2 pi d / h)`` with ``d`` the distance to the surface and ``h``
-        the largest spacing of the finest level, whose toroidal part is
-        ``2 pi R / n_toroidal`` over the full torus.  Points must lie outside
-        the surface.  Derivatives lose accuracy faster than ``B``.  Costs
-        slightly more than the plasma part of a :meth:`B` call (1.2 to 1.5
-        times, warm) and is traceable; ``accuracy_check="off"`` avoids paying
-        it on every eager call.
+        Per point, the larger of the finest level's double-layer quadrature
+        error and the squared relative change between the last two schedule
+        levels (:func:`~vmex.core.virtual_casing.offsurface_error_estimate`).
+        It is relative to the RMS surface ``|B|``, compares with
+        ``10**-digits``, and ``-log10`` of it is the achieved digits.  The
+        error decays as ``exp(-2 pi d / h)`` with ``d`` the distance to the
+        surface and ``h`` the largest spacing of the finest level, whose
+        toroidal part is ``2 pi R / n_toroidal`` over the full torus.  Points
+        must lie outside the surface.  Measured against a converged
+        target-graded quadrature of the same data on the 2.5 % beta QA deck,
+        it is 0.76 to 1.09 times the true error wherever that error is above
+        round-off, so it tracks the error rather than bounding it.  It comes
+        back from the same schedule call that produces the field and is
+        traceable; ``accuracy_check="off"`` avoids paying for a second call on
+        every eager :meth:`B`.
 
         ``order`` is the highest spatial derivative the caller means to take.
         It matters: measured against a converged reference half a minor radius
@@ -1515,7 +1528,10 @@ class VmecExtender(MagneticField):
         multiplies the quadrature error by roughly the grid count.  The default
         ``order=0`` is the a-posteriori estimate described above and is
         traceable; a higher order uses the a-priori estimate, which is
-        host-side and raises rather than silently failing under a trace.
+        host-side and raises rather than silently failing under a trace.  On
+        the same deck the a-priori estimate was never below the true error of
+        orders 1 to 3, and above it by 3 to 6 times for the first derivative
+        and up to 14 times for the third.
         """
         if self.plasma_field is None:
             raise RuntimeError("the field has no virtual-casing plasma contribution")
@@ -1574,17 +1590,23 @@ class VmecExtender(MagneticField):
 
         .. warning::
 
-           **This path does not currently reproduce the direct quadrature and
-           should not be used for physics.** Measured 2026-09-16 on the shipped
-           QA wout at the default grid (finest 256 x 128, ``h_tor`` 0.030 m,
-           ``a`` 0.077 m): preparing it took 416 s, and the field it returns is
-           ~1e-5 in magnitude at every distance while the direct field falls
-           from 0.52 T at ``d = 0.25 h`` to 4e-6 T at ``4 h``. Where the direct
-           quadrature carries a certified estimate of 3.7e-08 (``d = 3 h``) and
-           1.7e-10 (``4 h``) the two disagree by factors of 4 and 7, so the
-           disagreement is the continuation's, not the reference's. It also has
-           no error estimate of its own -- :meth:`B_error_estimate` raises on
-           it. Use the direct path, at a distance its estimate certifies.
+           **Approximate, expensive, and without an error estimate of its
+           own** (:meth:`B_error_estimate` raises on it). Measured 2026-09-22
+           on the 2.5 % beta QA deck (ns = 51) against a converged
+           target-graded quadrature of the same surface data, with 32 x 32
+           source points per period: the continued plasma field is off by
+           1.6-2.4 % (about 1e-3 of ``|B|``) at every distance from 0.01 a to
+           0.1 a -- a floor set by the bilinear on-surface table, not by the
+           distance -- by 3.9-6.6 % at 0.2 a, and by 18-32 % at 0.5 a, where
+           the direct path is far better. Preparing it took 196-397 s and
+           peaked at 18.5 GB resident on a loaded laptop; at the 64 x 64
+           per-period grid :meth:`from_wout` and :meth:`from_state` choose for
+           that deck, the process was killed for memory on a 36 GB machine.
+           An earlier record on the shipped QA wout compared two errors: that
+           deck is current-free, so its exact plasma field is zero and neither
+           the continuation's ~1e-5 T nor the direct path's 4e-6 T there was
+           a reference. Use the direct path at a distance its estimate
+           certifies.
 
         The Taylor field is intended for nearby point queries. Long field-line
         traces must use a distance stopping criterion or a separately validated
@@ -1749,6 +1771,7 @@ class VmecExtender(MagneticField):
         target_chunk_size: int | str = "auto",
         base_dir: str | Path | None = None,
         accuracy_check: AccuracyCheck = "warn",
+        project_current: bool = False,
     ) -> "VmecExtender":
         """Construct an exterior field from a wout-like object.
 
@@ -1760,6 +1783,12 @@ class VmecExtender(MagneticField):
         4.3e-07 at (64, 64) -- and (64, 64) is also the cheapest of the three
         per call, so the poloidal count follows the toroidal one.  Pass either
         explicitly to override.
+
+        ``project_current`` keeps only the surface-gradient part of the LCFS
+        field before virtual casing
+        (:func:`~vmex.core.virtual_casing.surface_field_data_from_wout`), so
+        the sheet current is conserved and the exterior plasma field is
+        curl-free; it is off by default.
         """
         if plasma not in ("auto", "include", "vacuum"):
             raise ValueError("plasma must be 'auto', 'include', or 'vacuum'")
@@ -1780,6 +1809,7 @@ class VmecExtender(MagneticField):
                 wout,
                 nphi=chosen if nphi is None else nphi,
                 ntheta=chosen if ntheta is None else ntheta,
+                project_current=project_current,
             )
             return cls.from_surface_data(
                 surface,
@@ -1819,11 +1849,12 @@ class VmecExtender(MagneticField):
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
         accuracy_check: AccuracyCheck = "warn",
+        project_current: bool = False,
     ) -> "VmecExtender":
         """Construct the differentiable finite-beta path from a live VMEX state.
 
-        ``nphi`` and ``ntheta`` default from the boundary exactly as in
-        :meth:`from_wout`; pass either explicitly to override.
+        ``nphi``, ``ntheta`` and ``project_current`` behave exactly as in
+        :meth:`from_wout`; pass the grid explicitly to override its default.
         """
         from . import virtual_casing as vc
 
@@ -1832,6 +1863,7 @@ class VmecExtender(MagneticField):
             inp, state,
             nphi=chosen if nphi is None else nphi,
             ntheta=chosen if ntheta is None else ntheta,
+            project_current=project_current,
         )
         return cls.from_surface_data(
             surface,

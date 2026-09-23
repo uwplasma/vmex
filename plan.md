@@ -59,7 +59,7 @@ runtimes.
 | Stage compilation and Jacobian batching | Delivered | #390 (`39db0388`), #392 (`a18bc448`) | Preserve frozen stage variables, final designs and memory bounds on current integrated sources. |
 | Cold setup and WOUT export | Delivered | #396 (`ddf7d3ee`), #400 | Measure remaining startup costs after these changes, not against the superseded eager setup. |
 | Free-boundary root and Schur reuse | Delivered; deterministic cold recovery merged (#416, `6f1df723`); adjoint exact at the root but the returned state is off it (lane A) | #383 (`92e6e0bf`), #385, #397 (`3c965913`), #416 | Lane A (off-root state, restart cap) and lane B (vacuum islands, feasible full designs). |
-| Native interior field and exterior accuracy | Delivered; workflow qualification needed | #378, #399, #403; #409 (`45f3a7ae`) | The surface-call correction is merged. Validate the combined optional-dependency and example workflows; preserve per-order accuracy and source-data qualifications. |
+| Native interior field and exterior accuracy | Validated against independent oracles (volume Biot–Savart, free-boundary coil field, frozen-path FD); two defects fixed in #430, one upstream (virtual_casing_jax #15) | #378, #399, #403, #409; #430; logbook 2026-09-22 | Near-surface point queries need E7's graded rule in the library; then retire the continuation. Keep the curl-free projection opt-in. Release virtual-casing-jax 0.0.8 after #15 and drop VMEX's far-target shim. |
 | Fixed-boundary single stage | Both fixed-boundary examples (zero and 0.5 % beta) meet every target in #411's runs at `952c3160` | #368; draft #411 (`35024f37`), which supersedes #371 | Refresh the four scripts' docstring numbers from #411's run table, requalify the shipped budgets, then merge #411. |
 | Free-boundary single stage (zero and 0.5 % beta) | 0.5 % beta meets every target; zero beta meets every target once an iota ceiling (max\|iota\| <= 0.44) keeps the 4/9 island chain out of the plasma | draft #411 ([run table](https://github.com/uwplasma/vmex/pull/411#issuecomment-5784049398)); #411 supersedes #377 | Lane B: land the iota ceiling and cold 16 -> 51 verification in #411; per-trial cost (lane A restart cap) is the remaining usability gap. |
 | QI objective | Bounded candidate rejected; nonsmoothness remains | `vmex/core/optimize.py`, `413d7fd2` | Lane D: retain current objective and the measured limitation; no width sweep or production surrogate promotion. |
@@ -932,6 +932,92 @@ stated in "Execution and acceptance" was superseded by 0.11.0 and restated for
   goes from 132 to 70 files (#431); `tools/` keeps 17 of 18 (CI lane selection,
   doc guards, asset fetch). Deleting files does not shrink clones (history is
   36.6 MiB; `--depth 1` is 4.7 MiB; `docs/_static` is 43 % of history).
+
+### 2026-09-22: the exterior and interior fields against independent oracles
+
+A validation pass over virtual casing (VC), its derivatives and the extender
+at `604e6a76`, with virtual-casing-jax 0.0.7 from PyPI (#430). The references are
+independent of the code under test: an own surface-integral evaluator on a
+target-graded periodic trapezoid rule (E7's substitution, two refinements
+agreeing to 2e-9 in B and 2e-6 in grad B down to `d = 0.01 a`), a volume
+Biot–Savart integral of `curl B` of the interior field, the coil field of
+free-boundary equilibria, and `frozen_path_directional_fd`. Timings were
+taken with other jobs on the laptop (load 4–90) and are upper bounds.
+
+- **Validated.** Virtual casing of the native-form LCFS field equals the
+  volume Biot–Savart field of the interior current to 3e-12 on the 2.5 % β QA
+  deck (six Gauss points per radial spline cell; three leave a 1e-6 floor),
+  which ties the exterior path's formula, signs, normal and nfp replication to
+  the interior field; the asset-free version is now a PR test. The shipped path
+  equals the own evaluator to 1e-14. At the grid `from_state` picks for that
+  deck (64 × 64 per period) the plasma field is right to 1e-13 at `d = a`,
+  1e-6 at 0.5 a, 2.4e-2 at 0.2 a and O(1) from 0.1 a in; the order-0 estimate
+  is 0.76–1.09 × the true error, so it tracks rather than bounds it, and it
+  flags every unresolved point. Nested-AD derivatives equal the closed-form
+  kernels to 3e-12; the a-priori per-order estimate is never below the true
+  error of orders 1–3 and 3–6 × (order 1) to 14 × (order 3) above it.
+  Surface-data → field derivatives match central FD to 1e-9 (geometry) and
+  1e-11 (field); state → exterior and interior field to 6e-8 and 2e-6;
+  on-surface VC to 2e-8; the linearized-VC JVP columns of the functional API
+  to 5e-9. On free-boundary CTH-like equilibria VC at interior points equals
+  minus the MGRID coil field to 3–5e-4 (vacuum) and 4–7e-4 (β = 0.19 %), the
+  interior field equals the coil field to 2e-4–3e-3 in vacuum, and coil plus
+  VC just outside matches the interior field at the LCFS to 4e-4–1e-3 (vacuum)
+  and 3–6e-3 (finite β) — floors set by MGRID interpolation and ns = 31, not by
+  VC. Interior field on the breathing circle: B 2.5e-8 → 5e-14, grad B
+  2.8e-6 → 3e-8, grad-grad B 2.2e-4 → 1.2e-5 over ns = 41 → 161, div B at
+  round-off, curl B within 5e-8 of the exact current.
+- **Derivatives in problem parameters are exact for the frozen map, and the
+  re-solve map differs.** On `li383_low_res` the implicit reverse pass through
+  equilibrium, live-state surface data and VC matches the frozen-path FD to
+  4e-7–1e-6 on three boundary directions and 3e-10 on the current (interior
+  field: 1e-5–3e-4 and 2e-10). Independent re-solves differ by 2–4× on the
+  boundary directions (interior 6 %–110 %) and by 3e-3 on the current; on the
+  QA deck by up to 10×. That is #428's m = 1 gauge drift, which the exterior
+  field feels far more than iota does; the re-solve states themselves move
+  with warm-start history (λ by 5e-3, R by 3e-5 at one point). A new weekly
+  test pins the frozen-path agreement. Consequence for lane A: an optimizer
+  that line-searches the production map on an exterior-field objective is
+  not following the derivative it is given.
+- **Fixed** (#430). `_mgrid_from_wout` built an identically zero
+  coil field from a wout that names an MGRID but carries no currents, which
+  is what `solve_file` writes for a free-boundary deck (`multigrid.py` does not
+  pass the free-boundary metadata that the CLI passes; left to that file's
+  owner); it now raises. The per-order estimate returned NaN with hundreds of
+  RuntimeWarnings for targets tens of minor radii out, and the eager
+  derivative check then warned "error up to inf" where the field is exact;
+  VMEX now takes a non-finite estimate as zero beyond ten finest-level
+  spacings and as a miss inside, and the upstream fix (virtual_casing_jax
+  #15, asinh Newton start, clamped root, log-space assembly) makes it finite
+  and quiet; 0.0.8 is needed to drop the VMEX shim. `project_current` is
+  reachable from `from_wout`/`from_state` (default off). The continuation's
+  docstring blamed it for disagreeing with a direct value on a current-free
+  deck, where both numbers were errors; it now carries a finite-β record.
+- **The near-surface continuation** (E2's retired Taylor plan) is approximate
+  and not affordable: 1.6–2.4 % of the plasma field (about 1e-3 of |B|) at
+  every distance from 0.01 a to 0.1 a — a floor from its bilinear table —
+  3.9–6.6 % at 0.2 a and 18–32 % at 0.5 a, with 196–397 s and 18.5 GB to
+  prepare at 32 × 32; at the 64 × 64 default the process was killed for memory
+  on a 36 GB machine. It is not needed above 0.5 a. E7's graded rule is the
+  replacement: the reference above is that rule, 0.2–0.4 s per target in
+  unoptimised NumPy; remove the continuation once E7 lands.
+- **The curl-free projection default (#381) should stay off.** The removed
+  part of the covariant pair sits just above the resolved modes (m = 8, 9 at
+  mpol = 7) and does not shrink with ns (QA, 6e-3 of the gradient part at
+  ns = 31–201). Against a joint (mpol, ns) = (12, 128) reference on li383,
+  projecting leaves the plasma field's error unchanged or raises it by up to
+  1.6×, and raises grad B's by up to 1.9× (mpol 6–10, d = 0.2–1 a); only on an axisymmetric deck, where the curl
+  is a radial discretisation error (3.6e-4 at ns = 51 → 7.8e-5 at 401), does it
+  help, by about 5× at ns = 51–101. It makes the exterior field curl-free, which is
+  a physical requirement, but it does not make it closer to the equilibrium's
+  field at practical resolution; keep it opt-in.
+- **Open.** E7 in the library (point queries and E2's table). E5's wiring:
+  the closed-form kernels are 5–15× faster warm for all four orders, but their
+  first call costs 17 s because `level_sources` builds the densities eagerly;
+  fix that upstream first. The interior third derivative stalls at 6e-4 on
+  the breathing circle (cubic splines have no fourth radial derivative); a
+  quintic interpolant would restore convergence, below the E8 gate today.
+  The order-0 estimate can sit 1.3× under the true error.
 
 # Part II. Historical plan and logbook (2026-09-13 to 2026-09-20)
 

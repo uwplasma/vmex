@@ -19,6 +19,22 @@ revision it was measured at, and the pages that cite it.
 - **Stalled free-boundary restarts ran to `max_iterations`.** A restart from
   the configuration's reference now gets the iterations the cold reference
   needed before the deterministic cold retry of #416.
+- **An exterior field built from a free-boundary wout without coil currents
+  had no coils.** `VmecExtender.from_wout` filled missing `EXTCUR` with
+  zeros, so a wout that names an MGRID but records `nextcur = 0` (as
+  `solve_file` writes one) extended with an identically zero coil field. It
+  now raises and says how to supply the coil field.
+- **The eager derivative accuracy check warned far from the surface.** The
+  per-order error estimate of virtual-casing-jax 0.0.7 returns NaN, with
+  hundreds of NumPy warnings, for targets tens of minor radii away, and
+  `gradB`/`gradgradB`/`gradgradgradB` reported an error "up to inf" there.
+  A non-finite estimate now counts as zero beyond ten finest-level spacings
+  and as a miss closer in.
+
+### Added
+
+- `VmecExtender.from_wout` and `from_state` accept `project_current`
+  (default off), the curl-free source projection of #381.
 
 ## 0.11.0 - 2026-09-21
 

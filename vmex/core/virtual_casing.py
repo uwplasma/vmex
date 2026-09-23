@@ -756,12 +756,56 @@ def _apriori_error_estimate(field, xyz, order: int):
     if surface is None:
         raise RuntimeError("the exterior field carries no surface data to estimate from")
 
-    series = boundary_series_from_gamma(np.asarray(surface.gamma), int(surface.nfp))
+    gamma = np.asarray(surface.gamma)
+    series = boundary_series_from_gamma(gamma, int(surface.nfp))
     scale = float(np.sqrt(np.mean(np.sum(np.asarray(surface.B_total) ** 2, axis=0))))
-    absolute = kst_error_estimate(
-        series, np.asarray(points, dtype=float), field.schedule_levels[-1], order,
-        density_magnitude_from_surface(surface))
+    targets = np.asarray(points, dtype=float)
+    level = field.schedule_levels[-1]
+    # virtual-casing-jax 0.0.7 starts its complex Newton so far out for a
+    # target many surface sizes away that the boundary series overflows: each
+    # call printed hundreds of RuntimeWarnings and returned NaN, which the
+    # eager derivative check reported as a missed tolerance at points where
+    # the field is resolved to rounding.
+    with np.errstate(all="ignore"):
+        absolute = np.asarray(kst_error_estimate(
+            series, targets, level, order, density_magnitude_from_surface(surface)),
+            dtype=float)
+    if not np.all(np.isfinite(absolute)):
+        absolute = np.where(np.isfinite(absolute), absolute, np.where(
+            _far_from_source(gamma, int(surface.nfp), level, targets), 0.0, np.inf))
     return jnp.asarray(absolute / scale)
+
+
+#: Node spacings beyond which the periodic trapezoid error, ``exp(-2 pi d/h)``,
+#: is below 1e-27 of the field, so an estimate that cannot be formed there is
+#: taken as zero rather than as a miss.
+_FAR_SPACINGS = 10.0
+
+
+def _far_from_source(gamma, nfp: int, level, targets):
+    """Whether each target lies ``_FAR_SPACINGS`` finest-level spacings off the surface.
+
+    ``gamma`` holds one field period, ``(3, nphi, ntheta)``; the spacing is the
+    larger of the toroidal and poloidal node spacings of the full-torus
+    ``level``, measured on the widest cross-section, and the distance is to
+    the nearest surface sample of the whole torus, which can only understate
+    how far a target is by half a sample spacing.
+    """
+    points = np.moveaxis(np.asarray(gamma, dtype=float), 0, -1)  # (nphi, ntheta, 3)
+    radius = np.hypot(points[..., 0], points[..., 1])
+    poloidal = np.linalg.norm(np.roll(points, -1, axis=1) - points, axis=-1).sum(axis=1)
+    spacing = max(2.0 * np.pi * float(radius.max()) / int(level[0]),
+                  float(poloidal.max()) / int(level[1]))
+    angle = 2.0 * np.pi * np.arange(max(int(nfp), 1)) / max(int(nfp), 1)
+    x, y, z = points[..., 0].ravel(), points[..., 1].ravel(), points[..., 2].ravel()
+    torus = np.concatenate([np.stack((np.cos(a) * x - np.sin(a) * y,
+                                      np.sin(a) * x + np.cos(a) * y, z), axis=1)
+                            for a in angle])
+    # the toroidal neighbour of the last row lies in the next period, so no wrap
+    sample = max(float(np.max(np.linalg.norm(np.diff(points, axis=0), axis=-1), initial=0.0)),
+                 float(np.max(np.linalg.norm(np.roll(points, -1, axis=1) - points, axis=-1))))
+    nearest = np.array([np.min(np.linalg.norm(torus - target, axis=1)) for target in targets])
+    return nearest - 0.5 * sample >= _FAR_SPACINGS * spacing
 
 
 def offsurface_error_estimate(field, xyz, B_plasma=None, *, order: int = 0) -> jax.Array:

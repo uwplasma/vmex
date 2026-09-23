@@ -11,6 +11,7 @@ vs central FD; and the real cth-like ``extcur``/coil-dof gradients vs FD
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 from dataclasses import replace
 from pathlib import Path
@@ -324,6 +325,121 @@ def test_two_source_torus_exterior_interior_and_on_surface_identities():
     assert error.max() <= 10.0 ** -digits, error.max()
 
 
+def _native_helical_spectra(ns=11, nfp=2, major=1.0, minor=0.3, helical=0.05):
+    """Native-form spectra of a divergence-free field on a helically shaped torus.
+
+    ``lambda = 0`` with ``phi'`` constant and ``chi'`` varying in ``s``, so
+    :class:`~vmex.core.extender.VmecInteriorField` evaluates it exactly in
+    its native form: tangent to every surface and divergence-free by
+    construction, carrying a volume current and no force balance.
+    """
+    s = np.linspace(0.0, 1.0, ns)
+    rho = np.sqrt(s)
+    shape = np.stack([np.full(ns, major), minor * rho * (1.0 + 0.2 * s), helical * rho], axis=1)
+    return {
+        "nfp": nfp, "ns": ns,
+        "xm": jnp.array([0.0, 1.0, 1.0]), "xn": jnp.array([0.0, 0.0, 2.0]),
+        "xmn": jnp.zeros(1), "xnn": jnp.zeros(1),
+        "rmnc": jnp.asarray(shape), "zmns": jnp.asarray(np.c_[np.zeros(ns), shape[:, 1:]]),
+        "rmns": None, "zmnc": None,
+        "bsupu": jnp.zeros((ns, 1)), "bsupv": jnp.zeros((ns, 1)),
+        "bsupu_s": None, "bsupv_s": None, "lasym": False, "signgs": -1,
+        "lmns": jnp.zeros((ns, 3)), "phipf": jnp.full(ns, 0.4),
+        "chipf": jnp.asarray(0.25 * s * (1.0 - 0.3 * s)),
+    }
+
+
+def test_exterior_field_is_the_biot_savart_field_of_the_interior_current():
+    """Virtual casing of the LCFS field equals the volume Biot-Savart of ``curl B``.
+
+    An oracle independent of any surface quadrature.  For a divergence-free
+    field ``B`` tangent to the boundary, the internal-branch virtual-casing
+    integral outside the surface is exactly the Biot-Savart field of the
+    volume current ``curl B / mu0`` inside it.  The field here is the
+    interior field's native form on a helically shaped nfp = 2 torus; the
+    surface data are that same field on ``rho = 1``, and the volume integral
+    takes ``curl B`` from the covariant components in flux coordinates
+    (``sqrt(g) J^i = eps^ijk d_j B_k``, so the Jacobian cancels) with six
+    Gauss points per radial spline cell, where the interpolant is smooth.
+    Agreement to 1e-9 on the outboard and far targets ties the exterior path
+    (virtual_casing_jax, its sign, normal and nfp conventions) to the
+    interior one without either side reusing the other's quadrature.  B and
+    grad B are both checked.
+    """
+    from vmex.core import extender as ext
+
+    ns, nfp = 11, 2
+    spectra = ext._prepared(_native_helical_spectra(ns, nfp))
+    position = lambda w: ext._position_and_field(spectra, w)[0]  # noqa: E731
+
+    nphi = ntheta = 24
+    theta = jnp.linspace(0.0, 2.0 * jnp.pi, ntheta, endpoint=False)
+    phi = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, nphi, endpoint=False)
+    grid_phi, grid_theta = jnp.meshgrid(phi, theta, indexing="ij")
+    edge = jnp.stack([jnp.ones(grid_phi.size), grid_theta.ravel(), grid_phi.ravel()], axis=1)
+
+    def edge_point(w):
+        x, B = ext._position_and_field(spectra, w)
+        tangents = jax.jacfwd(position)(w)
+        return x, B, jnp.cross(tangents[:, 1], tangents[:, 2]), tangents[:, 0]
+
+    x, B, area, radial = jax.vmap(edge_point)(edge)
+    area = area * jnp.sign(jnp.mean(jnp.sum(area * radial, axis=1)))  # outward
+    soa = lambda v: jnp.moveaxis(v.reshape(nphi, ntheta, 3), -1, 0)  # noqa: E731
+    surface = VmecSurfaceFieldData(
+        gamma=soa(x), B_total=soa(B),
+        normal=soa(area / jnp.linalg.norm(area, axis=1, keepdims=True)),
+        area_vector=soa(area), theta=theta, phi=phi, nfp=nfp, stellsym=False,
+        signgs=-1, source_convention="synthetic")
+    assert float(jnp.max(jnp.abs(jnp.sum(B * area, axis=1)))) < 1e-12  # tangent
+
+    nodes, weights = np.polynomial.legendre.leggauss(6)
+    cells = np.linspace(0.0, 1.0, ns)
+    s = np.concatenate([a + (b - a) * (nodes + 1.0) / 2.0 for a, b in zip(cells[:-1], cells[1:])])
+    ds = np.concatenate([(b - a) / 2.0 * weights for a, b in zip(cells[:-1], cells[1:])])
+    n_theta, n_phi = 48, 144
+    rho, grid_t, grid_p = np.meshgrid(
+        np.sqrt(s), 2.0 * np.pi * np.arange(n_theta) / n_theta,
+        2.0 * np.pi * np.arange(n_phi) / n_phi, indexing="ij")
+    volume = jnp.stack([rho.ravel(), grid_t.ravel(), grid_p.ravel()], axis=1)
+
+    def covariant(w):
+        x, B = ext._position_and_field(spectra, w)
+        return jax.jacfwd(position)(w).T @ B
+
+    def current_element(w):
+        tangents = jax.jacfwd(position)(w)
+        d = jax.jacfwd(covariant)(w)  # d[k, j] = d_j B_k
+        curl = jnp.array([d[2, 1] - d[1, 2], d[0, 2] - d[2, 0], d[1, 0] - d[0, 1]])
+        return position(w), jnp.sign(jnp.linalg.det(tangents)) * (tangents @ curl)
+
+    sources, current = jax.jit(jax.vmap(current_element))(volume)
+    # d(rho) = ds / (2 rho); angles by the periodic trapezoid rule
+    weight = np.repeat(ds / (2.0 * np.sqrt(s)), n_theta * n_phi) * (
+        2.0 * np.pi / n_theta) * (2.0 * np.pi / n_phi)
+    current = current * jnp.asarray(weight)[:, None]
+
+    def biot_savart(point):
+        r = point[None, :] - sources
+        return jnp.sum(jnp.cross(current, r) / (4.0 * jnp.pi * jnp.linalg.norm(
+            r, axis=1, keepdims=True) ** 3), axis=0)
+
+    outer = float(np.asarray(spectra["rmnc"])[-1].sum())
+    points = jnp.asarray([[outer + 0.3, 0.0, 0.0],
+                          [0.0, outer + 0.2, 0.05],
+                          [0.3, -1.2, 0.55]])
+    field = VmecExtender.from_surface_data(
+        surface, digits=12, levels=((96, 48), (192, 96)), accuracy_check="off")
+    B_vc, gradB_vc = np.asarray(field.B(points)), np.asarray(field.gradB(points))
+    B_bs = np.asarray(jax.vmap(biot_savart)(points))
+    gradB_bs = np.asarray(jax.vmap(jax.jacfwd(biot_savart))(points))
+    error = np.linalg.norm(B_vc - B_bs, axis=1) / np.linalg.norm(B_bs, axis=1)
+    assert error.max() <= 1e-9, error
+    error = (np.linalg.norm((gradB_vc - gradB_bs).reshape(3, -1), axis=1)
+             / np.linalg.norm(gradB_bs.reshape(3, -1), axis=1))
+    assert error.max() <= 1e-9, error
+
+
 def test_exterior_error_estimate_flags_unresolved_targets_and_fails_loudly():
     """Targets inside one grid spacing are flagged, warned about or refused; values unchanged."""
     digits = 4
@@ -506,9 +622,8 @@ def test_projection_is_off_by_default_and_differentiable_when_on():
 def _per_order_available(field):
     """Whether the installed virtual-casing-jax carries the a-priori estimate.
 
-    Probed at a realistic stand-off: a target far outside the machine sends the
-    complex root off to where ``exp(|m| |Im t|)`` overflows, which is a real
-    (if benign) roughness in the estimate and not something to trip over here.
+    Probed at a realistic stand-off.  Far targets are covered by
+    :func:`test_the_derivative_check_stays_quiet_many_surface_sizes_away`.
     """
     probe = _torus_points(3.0 * _finest_spacing(field), count=1)
     try:
@@ -581,3 +696,78 @@ def test_the_derivative_check_does_not_fire_far_from_the_surface():
         warnings.simplefilter("error")
         field.gradB(points)
         field.gradgradB(points)
+
+
+def test_the_derivative_check_stays_quiet_many_surface_sizes_away():
+    """Ten and a hundred minor radii out, the a-priori estimate is zero, not NaN.
+
+    virtual-casing-jax 0.0.7 starts its complex Newton so far off the real axis
+    for such a target that the boundary series overflows: hundreds of NumPy
+    RuntimeWarnings per call and a NaN estimate, which the eager derivative
+    check read as a missed tolerance and reported as an error "up to inf" at
+    points where the field is exact to rounding.
+    """
+    surface = _synthetic_surface(nphi=16, ntheta=16, nfp=1)
+    field = VmecExtender.from_surface_data(surface, digits=3, accuracy_check="warn")
+    if not _per_order_available(field):
+        pytest.skip("per-order estimate needs virtual-casing-jax >= 0.0.7")
+    points = jnp.asarray(np.concatenate([_torus_points(3.0, count=2),
+                                         _torus_points(30.0, count=2)]))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        for order in (1, 2, 3):
+            estimate = np.asarray(field.B_error_estimate(points, order=order))
+            assert np.all(np.isfinite(estimate)) and estimate.max() <= 1e-20, estimate
+        field.gradgradgradB(points)
+
+
+@pytest.mark.full  # weekly: one reverse pass through the implicit li383 equilibrium
+def test_exterior_field_parameter_derivative_is_exact_on_the_frozen_path():
+    """The exterior field's derivative in boundary and current parameters is exact.
+
+    Measured against :func:`~vmex.core.implicit.frozen_path_directional_fd`,
+    which re-roots the frozen residual at the perturbed parameters: the
+    implicit reverse pass through the equilibrium, the live-state surface data
+    and virtual casing agree with it to about 1e-6 on ``RBC(-1,1)`` and to
+    about 1e-10 on the net current.  An independent re-solve differs by a
+    factor of four on the boundary direction and by 3e-3 on the current: each
+    re-solve freezes the released m = 1 ``Z_sin`` family wherever its own path
+    left it (#428), and the exterior field feels that gauge drift through the
+    edge data far more than iota does.  That is a property of the discrete
+    re-solve map, recorded here so that nobody reads the re-solve difference
+    as a defect of the derivative.
+    """
+    from vmex.core import implicit as im
+    from vmex.core.input import VmecInput
+
+    inp = VmecInput.from_file(str(REPO / "examples" / "data" / "input.li383_low_res"))
+    config = im.make_config(inp, ftol=1e-13, max_iterations=6000)
+    base = im.params_from_input(inp)
+    state = im.solve_implicit(base, config)
+    runtime = im.runtime_from_params(base, config)
+    surface = VC.surface_field_data_from_state(inp, state, runtime=runtime, nphi=32, ntheta=32)
+    gamma = np.asarray(surface.gamma).reshape(3, -1).T
+    normal = np.asarray(surface.normal).reshape(3, -1).T
+    minor = 0.5 * float(np.ptp(np.hypot(gamma[:32, 0], gamma[:32, 1])))
+    chosen = np.random.default_rng(1).choice(len(gamma), size=4, replace=False)
+    points = jnp.asarray(gamma[chosen] + minor * np.array([1.0, 1.0, 0.6, 0.6])[:, None]
+                         * normal[chosen])
+    weight = jnp.asarray(np.random.default_rng(2).normal(size=(4, 3)))
+
+    def exterior(state, runtime):
+        data = VC.surface_field_data_from_state(inp, state, runtime=runtime, nphi=32, ntheta=32)
+        field = VmecExtender.from_surface_data(data, accuracy_check="off")
+        return jnp.vdot(field.B(points), weight)
+
+    gradient = jax.grad(lambda p: exterior(
+        im.solve_implicit(p, config), im.runtime_from_params(p, config)))(base)
+    zero = jax.tree.map(jnp.zeros_like, base)
+    ntor = int(inp.ntor)
+    for tangent, step, tolerance in (
+            (dataclasses.replace(zero, rbc=zero.rbc.at[ntor - 1, 1].set(1.0)), 1e-4, 1e-5),
+            (dataclasses.replace(zero, curtor=jnp.asarray(1.0e4)), 1e-3, 1e-8)):
+        implicit = float(sum(jnp.vdot(g, t) for g, t in zip(
+            jax.tree.leaves(gradient), jax.tree.leaves(tangent))))
+        frozen, info = im.frozen_path_directional_fd(base, config, exterior, tangent, h=step)
+        assert max(info["newton_res"]) < 1e-10
+        assert abs(implicit - frozen) <= tolerance * abs(frozen), (implicit, frozen)

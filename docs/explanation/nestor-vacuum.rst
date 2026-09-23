@@ -189,11 +189,11 @@ The experimental
 prepares the singular on-surface plasma field and gradient once, then uses the
 first-order continuation
 :math:`\mathbf B(\mathbf x_\Gamma+\delta\mathbf x)=\mathbf B_\Gamma+
-\nabla\mathbf B_\Gamma\delta\mathbf x+O(|\delta\mathbf x|^2)`. It is not qualified for
-physics: the implementation records disagreement with direct quadrature even
-where the direct estimate passes. Use direct quadrature within its measured
-accuracy range; a finite field-line trace does not validate the extrapolated
-field or its topology.
+\nabla\mathbf B_\Gamma\delta\mathbf x+O(|\delta\mathbf x|^2)`. It is
+approximate, carries no error estimate, and is not qualified for physics
+(measured below). Use direct quadrature within its measured accuracy range; a
+finite field-line trace does not validate the extrapolated field or its
+topology.
 
 Virtual casing reconstructs the field produced by currents inside the plasma
 surface. It does not determine the external coil field: supply an ESSOS coil
@@ -290,8 +290,8 @@ factor). Errors are relative to the RMS of :math:`|B|` on the surface. When any 
 :class:`~vmex.core.extender.ExteriorFieldAccuracyError` with
 ``accuracy_check="raise"``; ``accuracy_check="off"`` skips the estimate. The
 returned field is identical in every mode. Traced calls (``jit``, ``grad``,
-field-line integration) never check and can call the estimate directly. It
-costs 1.2 to 1.5 times the plasma-field evaluation it checks.
+field-line integration) never check and can call the estimate directly. The
+eager check evaluates the schedule a second time to obtain it.
 
 On 816 targets at ``digits = 4`` (the vacuum deck above at N = 32 and 64 over
 six distances, and the torus oracle on two schedules from 0.25 to 4 finest
@@ -305,19 +305,35 @@ the estimate now chooses the level. The estimate does not see truncation of the 
 grid itself: at d = a with N = 64 the error reached 26 times the estimate for
 one target in ten, while staying below :math:`3\times10^{-4}`.
 
-The earlier single-deck measurement of near-surface continuation on
-2026-09-13 is superseded by the implementation's 2026-09-16 failure record.
-On the shipped QA WOUT, preparation took 416 seconds and continuation disagreed
-with direct quadrature by factors of four and seven at distances where the
-direct error estimates were 3.7e-8 and 1.7e-10. Continuation has no error estimate
-of its own. These measurements do not qualify every supplied-surface-field
-variant; those variants also need independent checks before physics use.
-The exterior tracing example and its saved illustration remain experimental.
+Use the direct path above about 0.5 a with ``N >= 64``. Against a converged
+target-graded quadrature of the same surface data on the 2.5 % beta QA deck
+(ns = 51, remeasured 2026-09-22), the grid that
+:meth:`~vmex.core.extender.VmecExtender.from_state` chooses there
+(64 x 64 per period) returns the plasma field to 1e-13 at d = a and at worst
+1e-6 at 0.5 a, but 2.4 % at 0.2 a and order one at 0.1 a and closer; the
+estimate tracks the error (0.76 to 1.09 times it) and flags every such point.
+:meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation` is the
+only closer option and is approximate: with a 32 x 32 grid it is off by
+1.6--2.4 % of the plasma field (about 1e-3 of :math:`|B|`) at every distance
+from 0.01 a to 0.1 a, a floor set by its bilinear on-surface table rather than
+by the distance, by 3.9--6.6 % at 0.2 a, and by 18--32 % at 0.5 a. Preparing
+it took 196--397 s and 18.5 GB of memory on a loaded laptop, and at the
+64 x 64 grid the process was killed for memory on a 36 GB machine. It has no
+error estimate. A target-graded periodic trapezoid rule (substitute
+:math:`\theta=\theta^*+u-a\sin u` about the target's nearest surface point, and
+likewise in :math:`\phi`) is the reference used above: its 256 x 1024 and
+384 x 1536 node versions agree to 2e-9 in the field and 2e-6 in its gradient
+at every distance down to 0.01 a. It is the candidate replacement (plan item
+E7), not yet part of the library.
 
-The direct path remains the measured recommendation above about 0.5 a with
-``N >= 64``. Use it only where its estimate meets the requested accuracy, and
-refine the source data separately: the estimate does not bound source-data
-truncation. JIT-traced evaluations require an explicit estimate check.
+Use the direct path only where its estimate meets the requested accuracy,
+and refine the source data separately: the estimate does not bound
+source-data truncation. JIT-traced evaluations require an explicit estimate
+check. The exterior tracing example and its saved illustration use the
+continuation and remain experimental. An earlier record of the continuation
+(2026-09-16, the shipped QA wout) compared it with the direct path on a
+current-free deck, whose exact plasma field is zero, so both of its numbers
+were errors; it is withdrawn in favour of the finite-beta measurement above.
 
 Coupled free-boundary adjoint
 -----------------------------
