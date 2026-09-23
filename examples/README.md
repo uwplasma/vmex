@@ -79,11 +79,18 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
-  The finite-beta examples calibrate a prescribed linear pressure profile and
-  include radially weighted Mercier and resistive-interchange terms. Each of the
-  eight is self-contained: the scalarized loss, the L-BFGS-B call and the
-  monitor wiring are in the file beside its physical targets, resolution and
-  save names, so a reader never has to open a second file to follow one run.
+  The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
+  through the toroidal flux: at zero net current beta depends on PRES_SCALE /
+  PHIEDGE^2 alone, so `PHIEDGE = pi a^2 sqrt(mu0 PRES_SCALE / TARGET_BETA)` with
+  `a = R0 / ASPECT_TARGET`, and one correction solve on the seed, scaled to the
+  target aspect ratio, brings beta to within 0.05 % (relative) of the target.
+  The beta and aspect-ratio targets then agree, which a pressure calibrated at
+  the seed's own aspect ratio does not. They include radially weighted Mercier
+  and resistive-interchange terms, and `QA_optimization_finite_beta.py` is the
+  least-squares counterpart of the QA one. Each of the eight scalar scripts is
+  self-contained: the scalarized loss, the L-BFGS-B call and the monitor wiring
+  are in the file beside its physical targets, resolution and save names, so a
+  reader never has to open a second file to follow one run.
   The scalar lane trades objective progress per evaluation (roughly 3x higher
   objective at a matched budget on the QA workflow) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.

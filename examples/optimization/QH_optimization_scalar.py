@@ -26,8 +26,8 @@ from vmex import optimize as opt
 
 NFP = 4
 SURFACES = np.linspace(0.1, 1.0, 10)
-MAX_MODES = [2, 3]
-MAXITER = [15, 15]
+MAX_MODES = [1, 2]
+MAXITER = [10, 15]
 ASPECT_TARGET = 6.0
 USE_TRIAL_STABILITY = False
 TRIAL_BETA = 0.025
@@ -44,7 +44,7 @@ SEED_PERTURBATION = 0.12
 POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 
@@ -94,7 +94,7 @@ report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"),
     ("magnetic well", opt.magnetic_well, ".4f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 equilibrium = opt.solve_equilibrium(inp)
 
 ### Run the optimization ######################################################

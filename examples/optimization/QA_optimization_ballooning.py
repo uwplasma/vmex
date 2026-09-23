@@ -33,7 +33,7 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [12, 20]
+MAX_NFEV = [8, 12]
 
 # Ballooning field lines. lambda is least stable at a configuration-dependent
 # zeta0 (Gaur et al., J. Plasma Phys. 89 (2023), footnote 2): on this seed the
@@ -48,7 +48,7 @@ BALLOONING_TARGET = 0.0
 BALLOONING_WEIGHT = 200.0
 
 # Targets:
-ASPECT_TARGET = 5.0
+ASPECT_TARGET = 6.0
 
 # Radial grid the optimizer trials are solved on, and the finer one the
 # certificate is solved on. The difference is not small: a full run reaches
@@ -57,7 +57,7 @@ ASPECT_TARGET = 5.0
 STAGE_NS = 25
 STAGE_FTOL = 1.0e-11
 STAGE_NITER = 4000
-FINAL_NS = 45
+FINAL_NS = 71
 
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:

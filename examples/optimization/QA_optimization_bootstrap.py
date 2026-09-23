@@ -44,9 +44,9 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
-MAX_MODES = [2, 3, 4]
-MAX_NFEV = [20, 15, 30]
-N_CURRENT_SPLINE = [6, 8, 10]
+MAX_MODES = [1, 2]
+MAX_NFEV = [6, 10]
+N_CURRENT_SPLINE = [6, 8]
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -76,7 +76,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 

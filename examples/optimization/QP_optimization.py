@@ -40,15 +40,15 @@ SURFACES = np.array([0.5, 0.7, 0.9])
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [3, 4, 5]
-MAX_NFEV = [15, 15, 30]
+MAX_MODES = [1, 3]
+MAX_NFEV = [6, 8]
 
 # A gentler ladder that starts from lower modes:
 #   MAX_MODES = [1, 2, 3]
 #   MAX_NFEV = [20, 20, 20]
 
 # Targets and limits:
-ASPECT_TARGET = 7.0
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 ELONGATION_LIMIT = 12.0
@@ -62,7 +62,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1.0e-14
 FINAL_NITER = 35000
 
