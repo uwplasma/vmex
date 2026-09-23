@@ -323,22 +323,21 @@ def accepted_terms(equilibrium_state, u):
 
 
 def objective(u):
-    """One free-boundary solve and its adjoint; the solve runs on the host."""
+    """One free-boundary solve and its adjoint; the solve runs on the host.
+
+    The branch on the solve status is plain Python: outside jit, value_and_grad
+    sees the concrete status. A jax.lax.cond here would be compiled afresh on
+    every trial, because each trial's state enters it as a new constant
+    (measured: 20-40 s of XLA compilation per trial).
+    """
     equilibrium_state, status, _, _ = vj.solve_free_boundary_implicit_status(params, u, config)
-
-    def accepted(_):
-        value, aux = accepted_terms(equilibrium_state, u)
+    value, aux = accepted_terms(equilibrium_state, u)
+    if int(status) == 0:
         return value, (*aux, status)
-
-    def rejected(_):
-        # A smooth, finite wall lets SciPy backtrack after a failed trial. Its
-        # derivative is explicit here; the failed equilibrium contributes zero.
-        qs_rows, penalty, costs = accepted_terms(equilibrium_state, u)[1]
-        wall = 1.0e3 * (1.0 + jnp.sqrt(1.0e-12 + jnp.vdot(u, u)))**2
-        return wall, (jnp.zeros_like(qs_rows), jnp.zeros_like(penalty),
-                      jnp.zeros_like(costs), status)
-
-    return jax.lax.cond(status == 0, accepted, rejected, operand=None)
+    # A smooth, finite wall lets SciPy backtrack after a failed trial. Its
+    # derivative is explicit here; the failed equilibrium contributes zero.
+    wall = 1.0e3 * (1.0 + jnp.sqrt(1.0e-12 + jnp.vdot(u, u)))**2
+    return wall, (*map(jnp.zeros_like, aux), status)
 
 
 value_and_grad_jax = jax.value_and_grad(objective, has_aux=True)
