@@ -33,7 +33,7 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [12, 20]
+MAX_NFEV = [8, 12]
 
 # Ballooning field lines. lambda is least stable at a configuration-dependent
 # zeta0 (Gaur et al., J. Plasma Phys. 89 (2023), footnote 2): on this seed the

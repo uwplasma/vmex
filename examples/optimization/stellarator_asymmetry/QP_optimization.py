@@ -38,11 +38,11 @@ SURFACES = np.array([0.5, 0.7, 0.9])
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 3]
-MAX_NFEV = [10, 15]
+MAX_MODES = [3, 5]
+MAX_NFEV = [25, 45]
 
 # Targets and limits:
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 7.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 ELONGATION_LIMIT = 12.0
@@ -64,7 +64,7 @@ ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move m
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 71
+FINAL_NS = 101
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 

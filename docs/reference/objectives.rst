@@ -491,7 +491,7 @@ singular, and grow smoothly toward the edge, where stability is usually
 hardest. The script prints this radial choice whenever it is active. A small
 positive ``STABILITY_MARGIN`` avoids accepting a roundoff-level sign change.
 The example then adds 0.1% pressure and polishes the *actual* finite-beta
-``DMerc`` and ``DR`` on radial grids ending at ``NS=71``.  Only this resolved
+``DMerc`` and ``DR`` on radial grids ending at ``NS=101``.  Only this resolved
 finite-pressure equilibrium is reported as the physical stability certificate;
 the vacuum and frozen-geometry curves remain useful screening diagnostics.
 

@@ -41,7 +41,7 @@ SURFACES = np.array([0.5, 0.7, 0.9])
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 3]
-MAX_NFEV = [8, 10]
+MAX_NFEV = [6, 8]
 
 # A gentler ladder that starts from lower modes:
 #   MAX_MODES = [1, 2, 3]

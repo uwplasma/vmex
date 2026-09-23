@@ -33,7 +33,7 @@ MAX_MODE = 3
 
 # JAXopt solver, and the iterations it may spend:
 METHOD = "LM"                     # LBFGS's line search stalls on this problem
-BUDGET = 6
+BUDGET = 3
 LINE_SEARCH_STEPS = 10
 INITIAL_STEP = 0.0                # LBFGS picks its own step when this is zero
 
