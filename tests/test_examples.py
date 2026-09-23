@@ -183,7 +183,6 @@ EXECUTED_EXAMPLES = {
     "examples/run_from_json.py",
     "examples/take_fixed_boundary_gradients.py",
     "examples/take_free_boundary_gradients.py",
-    "examples/take_gradients.py",
     "examples/vmex_essos_workflow.py",
     "examples/vmex_fieldline_tracing_finite_beta.py",
     "examples/vmex_fieldline_tracing_vacuum.py",
@@ -371,15 +370,6 @@ def test_profiles_power_and_spline(tmp_path):
     assert match is not None and float(match.group(1)) < 1e-3
 
 
-@pytest.mark.full  # nightly: ~1 min (2 adjoint grads + 4 FD solves, subprocess cold-start)
-def test_take_gradients(tmp_path):
-    out = _run_example(EXAMPLES / "take_gradients.py", tmp_path, timeout=900)
-    # both implicit-adjoint gradients agree with central finite differences
-    rels = [float(m) for m in re.findall(r"rel=([0-9.eE+-]+)", out)]
-    assert len(rels) == 2, f"expected two AD-vs-FD checks, got {rels}"
-    assert max(rels) < 1e-4, f"adjoint gradient disagrees with FD: rel={rels}"
-
-
 def test_run_from_json(tmp_path):
     out = _run_example(EXAMPLES / "run_from_json.py", tmp_path, timeout=900)
     match = re.search(r"\|diff\|=([0-9.eE+-]+)", out)
@@ -495,20 +485,19 @@ def test_free_boundary_mgrid(tmp_path):
     assert (tmp_path / "output_free_boundary_mgrid" / "wout_cth_like_free_bdy.nc").exists()
 
 
-@pytest.mark.full  # one fixed solve, its adjoint, and two re-solves for the FD
+@pytest.mark.full  # nightly: ~1 min (2 adjoint grads + 4 FD solves, subprocess cold-start)
 def test_take_fixed_boundary_gradients(tmp_path):
-    """The fixed-boundary counterpart certifies against a difference quotient.
+    """Both implicit-adjoint gradients agree with central finite differences.
 
     Unlike the free boundary, a fixed-boundary re-solve follows the same path,
-    so the quotient is usable: at the shipped settings the example reports
-    1.1e-07, and the smoke settings (ns 11, mpol 3, ftol 1e-9) stay well inside
-    the bound below.
+    so the difference quotient is a usable reference for the boundary
+    coefficient and for phiedge alike.
     """
     out = _run_example(EXAMPLES / "take_fixed_boundary_gradients.py", tmp_path,
                        timeout=900)
-    match = re.search(r"relative error = ([0-9.eE+-]+)", out)
-    assert match is not None, out[-2000:]
-    assert float(match.group(1)) < 1.0e-3, out[-2000:]
+    rels = [float(m) for m in re.findall(r"rel=([0-9.eE+-]+)", out)]
+    assert len(rels) == 2, f"expected two AD-vs-FD checks, got {rels}"
+    assert max(rels) < 1e-4, f"adjoint gradient disagrees with FD: rel={rels}"
 
 
 @pytest.mark.full  # one free solve and both adjoint solvers

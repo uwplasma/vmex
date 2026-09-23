@@ -1478,6 +1478,7 @@ def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
     """
     import inspect
 
+    from vmex.core import implicit as im
     from vmex.core import optimize as optimize_module
 
     defaults = {
@@ -1486,6 +1487,12 @@ def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
         if "max_fsq_ratio" in inspect.signature(fn).parameters
     }
     assert defaults, "no entry point exposes max_fsq_ratio"
+    # The implicit config builder and the dataclass it returns carry the same
+    # bar, so a status solve on a default config certifies nothing looser.
+    defaults["implicit.make_config"] = inspect.signature(
+        im.make_config).parameters["max_fsq_ratio"].default
+    defaults["implicit.ImplicitConfig"] = im.ImplicitConfig.__dataclass_fields__[
+        "max_fsq_ratio"].default
     assert set(defaults.values()) == {1.0e2}, defaults
 
 

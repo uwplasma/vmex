@@ -297,7 +297,7 @@ an asymmetric DIII-D deck and on NCSX are also compared with central differences
 independent free-boundary re-solves, at `rtol=2e-2`; that gate is set by
 where the solver stops, not by the adjoint.
 
-**End to end** (`tests/test_examples.py::test_take_gradients`). The bundled
+**End to end** (`tests/test_examples.py::test_take_fixed_boundary_gradients`). The bundled
 example prints its adjoint-versus-finite-difference agreement and the test
 fails above `1e-4`. Documentation quotes that gate rather than a particular
 run's number.

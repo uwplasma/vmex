@@ -351,8 +351,11 @@ class ImplicitConfig:
     #: 9-14% of a value-and-gradient across the gradient decks.
     refine_tol: float = 1.0e-10
     #: Largest ``(fsqr + fsqz + fsql) / ftol`` accepted for implicit
-    #: differentiation when a trial exhausts its iteration budget.
-    max_fsq_ratio: float = 1.0e6
+    #: differentiation when a trial exhausts its iteration budget.  The
+    #: adjoint assumes ``F = 0``, so this is the same strict ``1e2`` bar as
+    #: every :mod:`vmex.core.optimize` entry point; the free-boundary config
+    #: tightens it to ``1.0``.
+    max_fsq_ratio: float = 1.0e2
     #: seed repeated host solves from the last converged state of this config
     #: (optimization trials; the fixed point — hence the gradient — is
     #: unchanged, only the iteration count drops).  Makes the callback
@@ -387,11 +390,16 @@ def make_config(
     adjoint_gcrot_m: int = 100,
     adjoint_gcrot_k: int = 20,
     refine_tol: float = 1.0e-10,
-    max_fsq_ratio: float = 1.0e6,
+    max_fsq_ratio: float = 1.0e2,
     hot_restart: bool = False,
     device: Any = None,
 ) -> ImplicitConfig:
     """Build the static config; ``resolution`` is the (final-stage) grid.
+
+    ``max_fsq_ratio`` is the largest ``(fsqr + fsqz + fsql) / ftol`` at which
+    an iteration-limited solve still counts as derivative-certified (status 0
+    of :func:`solve_implicit_status`); a converged solve always does.  The
+    default ``1e2`` matches :func:`vmex.core.optimize.make_problem`.
 
     ``device`` is the already-RESOLVED placement device (pass the result of
     :func:`vmex.core.device.resolve_implicit_device`, not a policy string) —

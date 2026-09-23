@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Solve one equilibrium and produce every built-in diagnostic figure.
 
-VMEX ships its plotting and its Boozer transform in the box, so a single
-converged equilibrium gives the whole diagnostic set with no external tooling.
-Two calls do the work:
+VMEX ships its own plotting and a Boozer-transform wrapper, so a single
+converged equilibrium gives the whole diagnostic set without a separate
+post-processing chain. Two steps do the work:
 
 - ``vj.plot_wout`` writes the figures named in FIGURES and returns
   ``{key: path}``;
@@ -51,18 +51,13 @@ if ci_smoke:
 
 ### Set up the equilibrium ####################################################
 
-# --------------------------- solve a small equilibrium ---------------------
 inp = replace(vj.VmecInput.from_file(INPUT_FILE), **INPUT_OVERRIDES)
 case = INPUT_FILE.name.removeprefix("input.")
 
 ### Solve the equilibrium #####################################################
 
 result = vj.solve_multigrid(inp, verbose=not ci_smoke)
-wout = vj.wout_from_state(
-    inp=inp, state=result.state,
-    fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
-    niter=int(result.iterations), converged=bool(result.converged),
-)
+wout = vj.wout_from_result(inp, result)
 
 ### Print, plot and save ######################################################
 
@@ -75,7 +70,8 @@ figures = vj.plot_wout(wout_path, OUTPUT_DIR, which=FIGURES)
 for key, path in figures.items():
     print(f"  [{key:9s}] {path}")
 
-# booz_xform_jax is optional; guard the import so the core workflow always runs.
+# run_booz_xform raises ImportError without the optional booz_xform_jax
+# package; the figures above are already written, so skip with a message.
 if RUN_BOOZER:
     try:
         boozmn_path = vj.run_booz_xform(wout_path, outdir=OUTPUT_DIR)

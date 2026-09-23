@@ -30,9 +30,10 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   - `parallel_ensemble_scan.py` — solve an ensemble of independent equilibria
     concurrently on CPU (`vmex.parallel.solve_ensemble`); prints the measured
     strong-scaling curve and checks the results are bit-identical to serial.
-  - `take_gradients.py` — exact fixed-boundary gradients of wout scalars
-    (aspect, magnetic energy, ...) by implicit differentiation, checked against
-    finite differences; O(1) memory, no step size to tune.
+  - `take_fixed_boundary_gradients.py` — exact fixed-boundary gradients of
+    wout scalars (aspect, magnetic energy, ...) by implicit differentiation,
+    checked against central finite differences; no step size to tune. The
+    fixed-boundary companion to `take_free_boundary_gradients.py`.
   - `free_boundary_mgrid.py` — free-boundary equilibrium from coil currents and
     an mgrid vacuum field (NESTOR); the LCFS is solved for, not prescribed.
   - `free_boundary_beta_scan.py` — ramp the pressure of the free-boundary case

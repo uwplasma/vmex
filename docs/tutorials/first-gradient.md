@@ -24,7 +24,7 @@ coefficient, profile coefficient, `phiedge`, `pres_scale`, `curtor`.
 
 ## Check it
 
-`examples/take_gradients.py` runs the check on the bundled Solovev deck
+`examples/take_fixed_boundary_gradients.py` runs the check on the bundled Solovev deck
 (ns=11, ftol=1e-12), comparing the adjoint gradient against a central finite
 difference through two full re-solves:
 
@@ -38,7 +38,7 @@ difference move between machines, and `tests/test_examples.py` fails the
 example only above `1e-4`. The agreement is at the finite-difference noise
 floor, and the adjoint side has no step size at all.
 
-```{literalinclude} ../../examples/take_gradients.py
+```{literalinclude} ../../examples/take_fixed_boundary_gradients.py
 :language: python
 ```
 

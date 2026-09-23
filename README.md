@@ -299,7 +299,7 @@ git clone https://github.com/uwplasma/vmex
 cd vmex
 pip install -e ".[all]"
 vmex examples/data/input.circular_tokamak --plot
-python examples/take_gradients.py
+python examples/take_fixed_boundary_gradients.py
 ```
 
 | Application | Runnable starting point | Needs |
