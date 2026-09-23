@@ -23,6 +23,13 @@ the target beta. One free-boundary solve then checks that the fitted coils
 confine that plasma before any optimization starts. Self-consistent bootstrap
 current and current-profile optimization are not part of this example.
 
+Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
+JAX cache and a load average near 10: 275 s, of which 102 s is JAX compilation.
+It takes 8 L-BFGS-B iterations and 17 trials, and every target is met. The
+minimum |iota| rises from 0.402 to 0.433, the aspect ratio falls from 6.044 to
+5.947, and beta ends at 0.488%. The coils move by up to 14 mm after the
+pre-fit, and the free boundary ends up to 0.07 m from the prescribed seed.
+
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """

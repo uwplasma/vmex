@@ -31,6 +31,14 @@ the fixed-boundary seed with no equilibrium solve (exactly the pre-fit of
 fitted field, and one free-boundary solve checks that the fitted coils really
 do confine the seed before any optimization starts.
 
+Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
+JAX cache and a load average near 10: 265 s, of which 102 s is JAX compilation.
+It takes 8 L-BFGS-B iterations and 16 trials, and every target is met,
+including the [16, 51] verification solve. The minimum |iota| rises from 0.402
+to 0.434, and the coils move by up to 14 mm after the pre-fit. The free boundary
+ends up to 0.07 m from the prescribed seed; the seed's own free boundary was
+within 0.02 m of it.
+
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """

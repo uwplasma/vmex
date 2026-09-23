@@ -29,6 +29,12 @@ with the normal-field limit applied to the total field. Self-consistent
 bootstrap current and current-profile optimization are not part of this
 example.
 
+Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
+JAX cache and a load average near 10: 199 s, of which 80 s is JAX compilation.
+It takes 14 L-BFGS-B iterations and 19 trials, and every target is met. The
+minimum |iota| rises from 0.407 to 0.430 and beta ends at 0.502%. The
+optimization moves the boundary by up to 8 mm and the coils by up to 11 mm.
+
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """
