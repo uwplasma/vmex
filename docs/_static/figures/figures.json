@@ -186,9 +186,7 @@
       "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
       "reproducible": "command",
       "bytes_verified": true,
-      "used_in": [
-        "README.md"
-      ],
+      "used_in": [],
       "note": "The example writes its three-panel vmex_fieldline_tracing_finite_beta.png to the working directory and, outside the CI smoke run, crops the phi=0 Poincare panel pair from the same render into this file as lossless WebP, so the crop is no longer done by hand. Needs ESSOS >= 0.17 (uwplasma/ESSOS#58; run here at that PR's merge commit 1b3210c, before the release carried it). Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
     },
     {

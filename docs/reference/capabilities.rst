@@ -35,7 +35,7 @@ stated in the row is validated; ``—`` means no public path.
      - validated
      - validated
      - supported
-     - Converged implicit derivatives. Evidence: `test_solver_end_to_end.py <https://github.com/uwplasma/vmex/blob/main/tests/test_solver_end_to_end.py>`__, `test_implicit_grad.py <https://github.com/uwplasma/vmex/blob/main/tests/test_implicit_grad.py>`__, `test_gpu_ci.py <https://github.com/uwplasma/vmex/blob/main/tests/test_gpu_ci.py>`__.
+     - Implicit derivatives of the discrete fixed-boundary equations; observable accuracy requires independent reconvergence and resolution checks. Evidence: `test_solver_end_to_end.py <https://github.com/uwplasma/vmex/blob/main/tests/test_solver_end_to_end.py>`__, `test_implicit_grad.py <https://github.com/uwplasma/vmex/blob/main/tests/test_implicit_grad.py>`__, `test_gpu_ci.py <https://github.com/uwplasma/vmex/blob/main/tests/test_gpu_ci.py>`__.
    * - toroidal
      - stellarator / tokamak
      - fixed
@@ -48,7 +48,7 @@ stated in the row is validated; ``—`` means no public path.
      - validated
      - validated
      - supported
-     - Converged implicit derivatives; some diagnostics retain independent LASYM guards. Evidence: `test_parity_breadth.py <https://github.com/uwplasma/vmex/blob/main/tests/test_parity_breadth.py>`__, `test_implicit_grad.py <https://github.com/uwplasma/vmex/blob/main/tests/test_implicit_grad.py>`__, `test_gpu_ci.py <https://github.com/uwplasma/vmex/blob/main/tests/test_gpu_ci.py>`__.
+     - Implicit derivatives of the discrete fixed-boundary equations; observable accuracy requires independent reconvergence and resolution checks. Some diagnostics retain LASYM guards. Evidence: `test_parity_breadth.py <https://github.com/uwplasma/vmex/blob/main/tests/test_parity_breadth.py>`__, `test_implicit_grad.py <https://github.com/uwplasma/vmex/blob/main/tests/test_implicit_grad.py>`__, `test_gpu_ci.py <https://github.com/uwplasma/vmex/blob/main/tests/test_gpu_ci.py>`__.
    * - toroidal
      - stellarator / tokamak
      - free
@@ -74,7 +74,7 @@ stated in the row is validated; ``—`` means no public path.
      - limited
      - limited
      - supported
-     - Forward solve and NESTOR WOUT fields are supported; the experimental CPU current/field VJP is reconverged-FD certified, with the same performance limitations as the symmetric path. Evidence: `test_lasym_free_convergence.py <https://github.com/uwplasma/vmex/blob/main/tests/test_lasym_free_convergence.py>`__, `test_freeboundary_implicit.py <https://github.com/uwplasma/vmex/blob/main/tests/test_freeboundary_implicit.py>`__, `test_gpu_ci.py <https://github.com/uwplasma/vmex/blob/main/tests/test_gpu_ci.py>`__.
+     - Forward solve and NESTOR WOUT fields are supported; the experimental CPU current/field VJP has independent re-solve checks for selected observables, with the same workflow limitations as the symmetric path. Evidence: `test_lasym_free_convergence.py <https://github.com/uwplasma/vmex/blob/main/tests/test_lasym_free_convergence.py>`__, `test_freeboundary_implicit.py <https://github.com/uwplasma/vmex/blob/main/tests/test_freeboundary_implicit.py>`__, `test_gpu_ci.py <https://github.com/uwplasma/vmex/blob/main/tests/test_gpu_ci.py>`__.
    * - open mirror
      - axisymmetric
      - fixed
@@ -185,10 +185,10 @@ Free-boundary differentiation
 
 A supported forward free-boundary solve does not imply that every derivative
 mode is ready for routine use. VMEX exposes an experimental reverse derivative
-of the reconverged plasma-vacuum root on CPU, certified against independent
-free-boundary re-solves. Forward JVPs, low-memory GPU compilation, and reliable
-failed-trial walls remain open promotion gates. The prescribed-boundary
-virtual-casing derivative is the mature path for fixed-LCFS coil objectives.
+of the discrete plasma-vacuum root on CPU. Independent re-solve checks cover
+selected observables. Full design feasibility, forward JVPs, low-memory GPU
+compilation and reliable failed-trial recovery remain open promotion gates.
+The prescribed-boundary virtual-casing derivative supports fixed-LCFS coil objectives.
 
 Mirror beta labels
 ------------------

@@ -1,17 +1,16 @@
 # Run on GPU
 
 Pass `--device gpu` (CLI) or `device="gpu"` (Python) to place a solve on an
-accelerator; the default `auto` applies a measured policy that picks the GPU
-only where it wins — per-iteration work `ns*mnmax*nznt >= 100_000` and at
-most 512 active Fourier modes, where the measured advantage is 2-3x wall
-(`benchmarks/gpu_baseline.json`).
+accelerator. The default `auto` uses a workload heuristic from an earlier
+benchmark campaign; it does not measure your hardware or guarantee a speedup.
+Compare CPU and GPU on your workload before choosing a device.
 
 ## Select the device
 
 ```console
 vmex input.case --device gpu     # explicit: always wins
 vmex input.case --device cpu
-vmex input.case --device auto    # default: measured policy
+vmex input.case --device auto    # default: workload heuristic
 vmex input.case --device none    # leave placement to JAX
 ```
 
@@ -28,9 +27,10 @@ placement. Install notes for GPU wheels: {doc}`/installation`.
 
 ## When the GPU pays off
 
-The policy in {mod}`vmex.core.device` is measured, not guessed
-(`benchmarks/gpu_baseline.json`; regenerate with
-`benchmarks/device_parity.py` and the benchmark scripts):
+The policy in {mod}`vmex.core.device` uses the historical measurements in
+`benchmarks/gpu_baseline.json` (regenerate with `benchmarks/device_parity.py`
+and the benchmark scripts). These motivated the thresholds below; the later
+A4000 results show why they are not a portable performance guarantee:
 
 - Per-iteration throughput favors the GPU — up to 3x wall on
   NuhrenbergZille-class decks — but the GPU pays fixed per-solve overheads
@@ -99,7 +99,7 @@ does pay off — the single-stage finite-beta value-and-gradient is 1.3–1.6 s 
 on the GPU against 2.15 s on that machine's CPU.
 ```
 
-## What stays on CPU regardless
+## CPU placement and optimization defaults
 
 - **Ensembles.** Multi-solve ensembles are CPU-threaded
   ({doc}`parallel-ensembles`): the host solver's `pure_callback` cannot run

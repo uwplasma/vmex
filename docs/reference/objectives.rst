@@ -468,8 +468,11 @@ The QA/QH examples also include
 and :func:`~vmex.core.stability.glasser_stability_residual` (stable ``DR <= 0``
 where shear is nonzero). These dimensional VMEC values are much larger than
 QS or beta residuals, so their weights must be calibrated explicitly. Their
-live-state derivatives are checked against independently reconverged finite
-differences in ``tests/test_implicit_grad.py``.
+live-state derivatives are checked in ``tests/test_implicit_grad.py`` against
+frozen-path finite differences
+(:func:`~vmex.core.implicit.frozen_path_directional_fd`), which Newton-solve
+the same frozen residual at the perturbed parameters. That verifies the
+linearization, not agreement with independently reconverged equilibria.
 
 For a vacuum design, :func:`~vmex.core.stability.trial_pressure_d_merc_state`
 and :func:`~vmex.core.stability.trial_pressure_glasser_d_r_state` replace the

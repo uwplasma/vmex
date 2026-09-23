@@ -2,8 +2,13 @@
 """Scan a parameter with hot restarts, and count what that saves.
 
 A parameter scan solves a sequence of nearby equilibria. Starting each one from
-the previous converged state -- a hot restart -- means the solver begins a hair
-from the answer and converges in a handful of iterations instead of hundreds.
+the previous converged state -- a hot restart -- saves iterations in proportion
+to how little the answer moves. This deck is a limiting case: at zero pressure
+with a prescribed transform, scaling PHIEDGE rescales the field without moving
+the geometry, so each warm point converges in one iteration against about 300
+cold. A scan that moves the boundary saves less: on the low-resolution QA deck
+(ns = 50), boundary moves of 1e-4 to 1e-2 took 212 to 391 warm iterations
+against 806 cold.
 Because VMEX caches one compiled executable per solver structure, every scan
 point at fixed resolution reuses it and nothing recompiles.
 

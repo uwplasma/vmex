@@ -153,13 +153,14 @@ limits [below](#fields-coils-and-free-boundary).
 
 ### Single-stage plasma and coil design
 
-`examples/optimization/single_stage_optimization.py` adjusts the plasma
-boundary and the coils against one weighted objective, solving the equilibrium
-implicitly at every step; `single_stage_free_boundary_optimization.py` couples
-them through a true free-boundary solve. Both print final plasma and coil
-metrics; `single_stage_optimization.py` also states whether it met its
-rotational-transform and normal-field targets. A lower weighted penalty with
-unmet targets is not a design.
+`examples/optimization/single_stage_optimization.py` adjusts the plasma boundary and the coils
+against one weighted objective, solving the equilibrium implicitly at every step;
+`single_stage_free_boundary_optimization.py` couples them through a true free-boundary solve. Both
+print final plasma and coil metrics; `single_stage_optimization.py` also states whether it met its
+rotational-transform and normal-field targets. A lower penalty with unmet targets is not a design. The free-boundary gradient is exact at the root of the coupled residual, but the
+free-boundary state is not yet Newton-refined onto it. A zero-beta free boundary also needs a nested
+coil-field surface enclosing PHIEDGE; at an island chain VMEX, VMEC2000 and VMEC++ all fail to
+converge ([not validated](docs/explanation/validation.md#what-is-not-validated)).
 
 ### Open mirrors and stellarator-mirror hybrids
 
@@ -206,7 +207,7 @@ python examples/take_gradients.py
 | Single-stage plasma and coils | `single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` |
 | Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` |
 | ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` |
-| Finite-beta exterior field lines | `python examples/vmex_fieldline_tracing_finite_beta.py` |
+| Experimental exterior tracing (unqualified topology) | `python examples/vmex_fieldline_tracing_finite_beta.py` |
 | Effective ripple | `python examples/epsilon_effective.py` |
 | Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` |
 | Research force-balance polishing | `python examples/force_balance_polishing.py` |
@@ -225,22 +226,20 @@ interior evaluation points.
 For an exterior field, `vj.VmecExtender.from_file("wout_my_case.nc",
 external_field=coils.B)` combines the plasma's virtual-casing contribution with
 the supplied coil field. The plasma part is a quadrature over a source grid on
-the plasma surface (32 points per field period in each angle by default) whose
-error grows rapidly near that surface: evaluate at distances of at least about
-twice the toroidal source-grid spacing from the plasma surface. Closer in,
-`with_near_surface_continuation` uses a first-order continuation of the
-on-surface field. Targets must also stay away from coil filaments, and an MGRID
-field has a finite tabulated domain. See the [exterior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/nestor-vacuum.html)
+the plasma surface, sampled by default from the boundary's aspect ratio, field
+periods and requested digits. Its error grows rapidly near that surface:
+evaluate only where its error estimate meets your target. Targets must also stay away from
+coil filaments, and an MGRID field has a finite tabulated domain.
+
+`with_near_surface_continuation` is unqualified for physics: the implementation
+records that it does not reproduce direct quadrature. The exterior field-line
+example uses that experimental path and does not validate magnetic topology.
+See the [exterior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/nestor-vacuum.html)
 and [field and coil usage](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
-![Exterior field lines of a finite-beta QA with coils only and with coils plus plasma](docs/_static/figures/readme_extender_exterior_islands.webp)
-
-Field lines seeded within 5 mm outside a finite-beta QA boundary, in the coil
-field alone and with the plasma's field added, stopped 55 mm out where the
-continuation ends: `python examples/vmex_fieldline_tracing_finite_beta.py` (needs ESSOS).
-
 Joint boundary/coil optimization and the boundary-Schur adjoint remain advanced
-workflows with substantial solve costs. Open mirrors support defined isotropic
+workflows with substantial solve costs; they require independent derivative and
+final-constraint checks. Open mirrors support defined isotropic
 fixed/free-boundary cases; the shipped free-boundary 0–10% beta range is the
 supported range, while higher beta, anisotropy and periodic hybrids need further
 validation. See the [mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html).

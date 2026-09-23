@@ -184,14 +184,16 @@ boundary/current DOFs. The virtual-casing path applies outside the LCFS;
 :class:`~vmex.core.extender.VmecInteriorField` evaluates the live VMEC
 spectral field inside. Direct off-surface quadrature must stay away from the
 source surface and all targets must stay away from external coil filaments.
-For near-LCFS field-line tracing,
+The experimental
 :meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation`
 prepares the singular on-surface plasma field and gradient once, then uses the
 first-order continuation
 :math:`\mathbf B(\mathbf x_\Gamma+\delta\mathbf x)=\mathbf B_\Gamma+
-\nabla\mathbf B_\Gamma\delta\mathbf x+O(|\delta\mathbf x|^2)`. This removes
-the otherwise prohibitive source-grid refinement from every ODE step; direct
-quadrature remains the validation path farther from the LCFS.
+\nabla\mathbf B_\Gamma\delta\mathbf x+O(|\delta\mathbf x|^2)`. It is not qualified for
+physics: the implementation records disagreement with direct quadrature even
+where the direct estimate passes. Use direct quadrature within its measured
+accuracy range; a finite field-line trace does not validate the extrapolated
+field or its topology.
 
 Virtual casing reconstructs the field produced by currents inside the plasma
 surface. It does not determine the external coil field: supply an ESSOS coil
@@ -297,15 +299,19 @@ the estimate now chooses the level. The estimate does not see truncation of the 
 grid itself: at d = a with N = 64 the error reached 26 times the estimate for
 one target in ten, while staying below :math:`3\times10^{-4}`.
 
-Use the direct path above about 0.5 a with ``N >= 64``. Below about 0.2 a use
-:meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation`: on
-the 2.5 % beta QA deck with a 32 x 32 grid it was within 0.1--0.2 % of
-:math:`|B|` at 0.1--0.2 a against a 256 x 256 direct reference, where the
-direct default was 12--31 % off, but its first-order continuation is worse
-than the direct path at 0.5 a (0.7--2 %) and the plan took about one to one
-and a half minutes to build on one laptop CPU. Between the two, check the
-estimate. These timings and errors are from a single review measurement on
-2026-09-13, not a committed benchmark record.
+The earlier single-deck measurement of near-surface continuation on
+2026-09-13 is superseded by the implementation's 2026-09-16 failure record.
+On the shipped QA WOUT, preparation took 416 seconds and continuation disagreed
+with direct quadrature by factors of four and seven at distances where the
+direct error estimates were 3.7e-8 and 1.7e-10. Continuation has no error estimate
+of its own. These measurements do not qualify every supplied-surface-field
+variant; those variants also need independent checks before physics use.
+The exterior tracing example and its saved illustration remain experimental.
+
+The direct path remains the measured recommendation above about 0.5 a with
+``N >= 64``. Use it only where its estimate meets the requested accuracy, and
+refine the source data separately: the estimate does not bound source-data
+truncation. JIT-traced evaluations require an explicit estimate check.
 
 Coupled free-boundary adjoint
 -----------------------------
@@ -334,6 +340,20 @@ apply ``jax.value_and_grad``. ``take_free_boundary_gradients.py`` checks one
 direction against independent re-solves. The free-boundary single-stage
 previews pass the same scalar pair to SciPy. These examples need ESSOS
 (``pip install "vmex[coils]"``).
+
+Accuracy scope. Against finite differences of re-solves anchored by Newton
+steps on the same projected coupled residual, the adjoint agreed to
+1e-9--6e-7 on the 0.5 % beta single-stage objective. The forward solve does
+not apply that anchoring. A status-0 solve at ``ftol = 1e-12`` sat about 1.2e-2
+from the root in coefficient norm, and restarts from different references
+returned values differing by up to 12 %. The gradient is exact for the root;
+the value belongs to a nearby unanchored state. A zero-beta, zero-current
+free boundary exists only when a nested flux surface of the coil field
+encloses PHIEDGE. When an island chain or stochastic layer sits at that flux
+(a 4/9 chain in one optimized coil set, confirmed by field-line tracing),
+VMEX, VMEC2000 and VMEC++ limit-cycle instead of converging. Small beta does
+not regularize it. Keep the transform away from the resonance, or reduce
+PHIEDGE inside the good surfaces.
 
 This path is currently limited to reverse mode. Its low-memory host Krylov
 lane peaks near 3--5 GB on the bundled coarse examples, but the first coupled

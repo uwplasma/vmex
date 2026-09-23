@@ -220,6 +220,19 @@ The correction is strongest near the axis. The dimensional volume L2 improves
 1.06x in the stated bulk window. These are different scientific questions;
 the 7.1x pointwise-ratio improvement must never be quoted on its own.
 
+The README quotes different numbers for the same polish (near-axis error
+2.9e3 -> 61 N m<sup>-3</sup>, `<|F|>/<|grad(B^2/2mu0)|>` 2.3e-3 -> 1.9e-3).
+Those come from `examples/force_balance_polishing.py`, which exports both
+states to WOUT files on the same 129-surface mesh, reads them back and
+certifies the read-back files. The table above evaluates the native spline
+states directly. The export and read-back add reconstruction error, most of
+it near the axis of the unpolished state: its near-axis error is 9.8e2 N
+m<sup>-3</sup> native but 2.9e3 read back. The polished state survives the
+round trip closely (6.7e1 native, 61 read back; `eps_F` 1.80e-3 native, 1.90e-3
+read back). Both comparisons hold one mesh and one oracle fixed. The native
+table measures the polish alone. The README pair measures what a user
+reading the WOUT files gets.
+
 Earlier versions of this section quoted a 26-fold gain from WOUTs exported at
 31 and 129 radial surfaces. That mixed correction and reconstruction effects;
 it is withdrawn. The following historical summary contains those export views:
@@ -393,6 +406,22 @@ a claim exists elsewhere.
   explicitly experimental, CPU only. Low-memory GPU compilation and failed-trial
   handling are open promotion gates. `tests/test_capability_docs.py`
   asserts these statuses, so the claim cannot quietly widen.
+- **Free-boundary states are not anchored at their root.** A converged
+  free-boundary solve at `ftol = 1e-12` sat about 1.2e-2 from the root of its
+  projected coupled residual in coefficient norm, on the 0.5 % beta
+  single-stage deck. Fixed boundary refines its state by Newton steps;
+  free boundary does not yet. The adjoint is exact at that root (1e-9–6e-7
+  against finite differences of anchored roots), but the values an optimizer
+  receives come from the unanchored state, and warm restarts from different
+  references gave values differing by up to 12 %.
+- **Zero-beta free boundaries that meet an island chain.** VMEC's model needs
+  a nested flux surface that encloses PHIEDGE. When the coil field has an
+  island chain or stochastic layer at that flux, no such equilibrium exists.
+  VMEX, VMEC2000 and VMEC++ then limit-cycle instead of converging. One
+  optimized single-stage coil set had a 4/9 chain at the boundary, confirmed
+  by field-line tracing. Nothing in VMEX detects this yet. Check it by
+  field-line tracing, or by whether the coil-field B.n/B on the boundary falls
+  with resolution.
 - **Mirror beta above 10%.** The axisymmetric open-mirror free-boundary lane
   is supported to 10% requested beta. The 25%, 50% and 80% cases converge
   variationally and the 80% case passes its force gate, but refined-grid

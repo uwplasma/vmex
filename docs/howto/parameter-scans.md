@@ -3,7 +3,10 @@
 Solve the first point cold, then seed every successive point from the
 previous converged state. A warm restart takes fewer iterations than a cold
 solve of the same point, by a margin that shrinks as the step between points
-grows; it still takes many iterations, not one. Because VMEX caches one
+grows. Boundary moves of 1e-4 to 1e-2 on the low-resolution QA deck took
+212–391 warm iterations against 806 cold. The example below needs only one
+per point, because at zero pressure with a prescribed transform a PHIEDGE
+scan does not move the geometry. Because VMEX caches one
 compiled executable per solver structure, points after the first compile
 nothing at fixed resolution: the new-parameter warm run in
 `benchmarks/baselines/m4/F1_warm_newparams.json` records zero compiles.

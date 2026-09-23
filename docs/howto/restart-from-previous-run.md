@@ -74,7 +74,9 @@ resolutions explicitly when you need control over the transfer.
 ## When each pays off
 
 - **`initial_state=`** — parameter scans in one process: no I/O, and
-  successive points converge in a handful of iterations
+  successive points take fewer iterations than a cold solve. How many
+  depends on how far the equilibrium moves: 212–391 against 806 cold for
+  boundary moves of 1e-4 to 1e-2 on the low-resolution QA deck
   ({doc}`parameter-scans`).
 - **`restart_from=` / `--restart`** — resume across processes or machines,
   refine a converged run at higher resolution, or seed from a VMEC2000
