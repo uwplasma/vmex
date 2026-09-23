@@ -35,6 +35,28 @@ revision it was measured at, and the pages that cite it.
 
 - `VmecExtender.from_wout` and `from_state` accept `project_current`
   (default off), the curl-free source projection of #381.
+- **The exterior field is accurate next to the plasma surface.** At every
+  point where the direct quadrature's estimate misses the requested digits,
+  eager `VmecExtender.B` and its derivatives now use a target-graded
+  periodic trapezoid rule (`near_surface="auto"`, the default;
+  `virtual_casing.graded_plasma_field`). On the 2.5 % beta QA deck it
+  matches a converged reference to 1e-12 in B and 1e-10 in grad B from one
+  minor radius down to 0.01 a, where the default grid was off by order one.
+  `with_graded_quadrature()` (or `near_surface="graded"`) uses it everywhere,
+  including under `jit`; `near_surface="direct"` restores the old behaviour.
+
+### Changed
+
+- **Spatial derivatives of the direct path use the closed-form layer
+  kernels** of virtual-casing-jax instead of nested `jacfwd` through the
+  quadrature schedule: the same values to 1e-12 on the finest level.
+
+### Removed
+
+- **`VmecExtender.with_near_surface_continuation`** and the
+  `near_surface_plan` constructor argument. The first-order continuation had
+  a 1.6-2.4 % error floor next to the surface and took minutes and 18.5 GB to
+  prepare at a 32 x 32 grid; `with_graded_quadrature()` replaces it.
 
 ## 0.11.0 - 2026-09-21
 

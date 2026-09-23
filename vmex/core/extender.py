@@ -1340,14 +1340,16 @@ def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
 
 
 def _concrete(function: Callable[..., Any], *args: Any) -> Any:
-    """Evaluate now, even when called while tracing, so the result can be cached.
+    """Evaluate ``function(*args)`` to concrete arrays, even while tracing.
 
     Cached quadrature data built inside a caller's ``jit`` would otherwise be
-    that trace's tracers and leak into every later call.
+    that trace's tracers and leak into every later call.  Compiling ahead of
+    time and calling the executable runs it outside any trace; the arguments
+    are concrete, so it is the same computation.  (``ensure_compile_time_eval``
+    would also work, but dispatches every primitive eagerly: 26 s against
+    0.5 s for the source densities.)
     """
-    with jax.ensure_compile_time_eval():
-        return jax.tree.map(lambda leaf: leaf.block_until_ready()
-                            if hasattr(leaf, "block_until_ready") else leaf, function(*args))
+    return jax.jit(lambda: function(*args)).lower().compile()()
 
 
 class VmecExtender(MagneticField):
@@ -1544,7 +1546,7 @@ class VmecExtender(MagneticField):
 
         if isinstance(field.B_total, jax.core.Tracer):
             return sources(field.B_total)
-        return self._kernel(("sources",), lambda: _concrete(jax.jit(sources), field.B_total))
+        return self._kernel(("sources",), lambda: _concrete(sources, field.B_total))
 
     def _direct(self, order: int, xyz: Array) -> Array:
         """The direct path: the schedule for ``B``, closed-form kernels beyond."""
