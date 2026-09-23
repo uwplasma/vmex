@@ -956,8 +956,13 @@ def _host_boundary_schur_adjoint(
     where ``U`` injects the evolved edge row. Direct three-surface assembly
     already retains every terminal VMEC stencil coupling in ``A``; only
     NESTOR's response to the moving edge remains in ``E``. One sparse bulk
-    factorization and the edge solve recover the full adjoint. The final
-    answer is certified against the original coupled transpose operator.
+    factorization and the edge solve recover the full adjoint. ``E``'s
+    columns come from NESTOR's dense edge response (:func:`_edge_response`),
+    its exact linearization at this root, so each costs a VMEC transpose
+    instead of a NESTOR reverse sweep: on the finite-beta single-stage deck
+    the warm adjoint falls from 3.1 s to 1.6-1.9 s and its compile from 40 s
+    to 31 s. The final answer is certified against the original coupled
+    transpose operator.
     """
     icfg = cfg.implicit
     field = cfg.field_from_parameters(field_parameters)
@@ -970,11 +975,20 @@ def _host_boundary_schur_adjoint(
     bsqvac = jax.lax.stop_gradient(cfg.vacuum_program.bsq(frozen, rt, field))
     lower_blocks, diagonal, upper_blocks, row_scale, column_scale = (
         _frozen_bulk_blocks(params, field_parameters, frozen, rcon0, zcon0,
-                            mask, z_star, bsqvac, cfg=cfg))
+                            mask, z_star, bsqvac, cfg=cfg,
+                            probe_chunk_size=_bulk_probe_chunk(cfg, mask)))
     coupled_residual = _projected_residual(cfg, mask, formulation="raw")
     coupled_pullback = _prepare_transpose(
         z_star, params, field_parameters, frozen, rcon0, zcon0,
         residual=coupled_residual)
+    # The Schur columns come from NESTOR's dense edge response, which is its
+    # exact linearization at this root: a VMEC transpose per column instead
+    # of a NESTOR reverse sweep.  The answer is still certified on the exact
+    # coupled transpose below.
+    edge_pullback = _prepare_response_transpose(
+        z_star, params, field_parameters, frozen, rcon0, zcon0, mask,
+        _edge_response(cfg, params, field_parameters, frozen, rcon0, zcon0),
+        cfg=cfg, formulation="raw")
 
     dtype = rhs.R_cos.dtype
     packed_mask = np.asarray(_pack_state(mask, mask, cfg=cfg)[-1])
@@ -1046,12 +1060,12 @@ def _host_boundary_schur_adjoint(
     def apply(value):
         nonlocal calls
         calls += 1
-        return probe(np.atleast_2d(value), coupled_pullback)[0]
+        return probe(np.atleast_2d(value), edge_pullback)[0]
 
     apply(edge_rhs)
 
     identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
-    schur = probe(identity, coupled_pullback).T
+    schur = probe(identity, edge_pullback).T
     calls += nedge
     solve_reduced, condition = _balanced_dense_solver(schur)
     edge_solution = solve_reduced(edge_rhs)
@@ -1063,7 +1077,7 @@ def _host_boundary_schur_adjoint(
         print(f"[vmex adjoint] balanced Schur condition={condition:.3e}")
 
     correction_rows = _edge_probe_columns(
-        jnp.asarray(np.atleast_2d(edge_solution), dtype), coupled_pullback,
+        jnp.asarray(np.atleast_2d(edge_solution), dtype), edge_pullback,
         lower_blocks, diagonal, upper_blocks, mask, edge_basis, cfg=cfg,
         chunk=chunk)[0]
     correction = _unpack_projected(
@@ -1348,7 +1362,7 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
         im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
         lfreeb=True, jmax=ns,
         presf_ns_scale=_presf_ns_scale_traceable(params, icfg.inp, ns))
-    chunk = _anchor_probe_chunk(cfg, mask)
+    chunk = _bulk_probe_chunk(cfg, mask)
     debug = im._adjoint_debug_enabled()
 
     def iterate_state(z_at):
@@ -1474,8 +1488,8 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
         float(im._tree_norm(correction)), attempts)
 
 
-def _anchor_probe_chunk(cfg, mask) -> int:
-    """Bulk-block probe chunk of the anchor: the whole block at once.
+def _bulk_probe_chunk(cfg, mask) -> int:
+    """Bulk-block probe chunk of the anchor and the Schur adjoint: one block.
 
     Each probe differentiates a three-surface kernel, so a full block of
     cotangents is small; on the single-stage deck (block 150) the blocks
@@ -1575,14 +1589,14 @@ def _prepare_transpose(z, p, field, base, rcon, zcon, *, residual):
 # recompiling every backward pass or reading a stale linearization. Taking the
 # mask and the response as traced arguments leaves ``cfg`` the only static key,
 # so one compiled transpose serves every gradient in a process.
-@functools.partial(jax.jit, static_argnames=("cfg",))
+@functools.partial(jax.jit, static_argnames=("cfg", "formulation"))
 def _prepare_response_transpose(z, p, field, base, rcon, zcon, dof_mask,
-                                response, *, cfg):
+                                response, *, cfg, formulation="preconditioned"):
     """Save the response-linearized transpose of the coupled root."""
     return jax.vjp(
         lambda zz: _projected_residual_lane(
             zz, p, field, base, rcon, zcon, dof_mask, None, response,
-            cfg=cfg, formulation="preconditioned"), z,
+            cfg=cfg, formulation=formulation), z,
     )[1]
 
 

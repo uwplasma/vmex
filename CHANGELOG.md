@@ -7,6 +7,15 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+### Changed
+
+- **Cheaper free-boundary anchor and boundary-Schur adjoint.** The Newton
+  anchor's preconditioner now includes NESTOR's low-rank edge coupling
+  (Woodbury identity through the dense edge response), so it is the exact
+  Jacobian where it is built. The `boundary_schur` adjoint takes its edge
+  columns from the same response and assembles its bulk blocks a block at a
+  time; its answer is still certified on the exact coupled transpose.
+
 ### Fixed
 
 - **Free-boundary values and gradients referred to different points.** VMEC's
