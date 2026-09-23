@@ -33,7 +33,9 @@ SEED_PERTURBATION = 0.05
 SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Highest boundary Fourier mode number that is varied:
-MAX_MODE = 2  # Global phase: hops, and the L-BFGS-B iterations each hop may spend:
+MAX_MODE = 2
+
+# Global phase: hops, and the L-BFGS-B iterations each hop may spend:
 N_BASINS = 2
 LOCAL_MAXITER = 8
 

@@ -29,7 +29,9 @@ from vmex.core.qi import ConstructedQIResidual
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
 
 # Highest boundary Fourier mode number that is varied:
-MAX_MODE = 2  # JAXopt solver, and the iterations it may spend:
+MAX_MODE = 2
+
+# JAXopt solver, and the iterations it may spend:
 METHOD = "LBFGS"                  # or "LM"
 BUDGET = 20
 LINE_SEARCH_STEPS = 10

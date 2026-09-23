@@ -48,14 +48,18 @@ BALLOONING_TARGET = 0.0
 BALLOONING_WEIGHT = 200.0
 
 # Targets:
-ASPECT_TARGET = 6.0  # Radial grid the optimizer trials are solved on, and the finer one the
+ASPECT_TARGET = 6.0
+
+# Radial grid the optimizer trials are solved on, and the finer one the
 # certificate is solved on. The difference is not small: a full run reaches
 # max lambda 2.2e-4 on the stage grid and 9.1e-4 when the same boundary is
 # re-solved at FINAL_NS, so quote the resolved number:
 STAGE_NS = 25
 STAGE_FTOL = 1.0e-11
 STAGE_NITER = 4000
-FINAL_NS = 71  # Step control. One scaled variable moves a low-order coefficient by
+FINAL_NS = 71
+
+# Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
 PARAMETER_STEP = 0.02
 MAX_PARAMETER_CHANGE = 4.0

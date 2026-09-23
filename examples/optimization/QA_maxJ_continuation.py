@@ -45,7 +45,9 @@ SURFACES = np.array([0.6, 0.7, 0.8, 0.9])
 QA_MAX_MODES = [1, 2]
 QA_MAX_NFEV = [10, 15]
 MAXJ_MAX_MODES = [2]
-MAXJ_MAX_NFEV = [10]  # Targets:
+MAXJ_MAX_NFEV = [10]
+
+# Targets:
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 MAGNETIC_WELL_TARGET = 0.01

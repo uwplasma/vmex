@@ -33,7 +33,9 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]  # Targets:
+MAX_NFEV = [10, 15]
+
+# Targets:
 TARGET_BETA = 0.01
 ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
@@ -65,7 +67,9 @@ MINIMUM_MPOL = 5
 # field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA); this value keeps PHIEDGE near
 # the seed deck's, where the Mercier and resistive-interchange weights were
 # tuned (DMerc scales as PHIEDGE**-2):
-PRES_SCALE = 1.0e3  # Verification solve of the optimized boundary:
+PRES_SCALE = 1.0e3
+
+# Verification solve of the optimized boundary:
 FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000

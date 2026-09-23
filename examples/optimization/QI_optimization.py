@@ -42,7 +42,9 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # residual evaluations each stage may spend. A max_mode = 3 stage lowered the
 # cost by 1 % for 45 % of the run, so it is not shipped:
 MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]  # Boozer resolution the QI residual is optimized on, and the finer one the
+MAX_NFEV = [10, 15]
+
+# Boozer resolution the QI residual is optimized on, and the finer one the
 # finished boundary is re-scored with:
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)

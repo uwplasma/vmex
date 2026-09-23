@@ -46,7 +46,9 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
 MAX_MODES = [1, 2]
 MAX_NFEV = [10, 15]
-N_CURRENT_SPLINE = [6, 8]  # Targets:
+N_CURRENT_SPLINE = [6, 8]
+
+# Targets:
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 

@@ -38,7 +38,9 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # L-BFGS-B iterations each stage may spend:
 MAX_MODES = [1, 2]
-MAXITER = [10, 15]  # Targets:
+MAXITER = [10, 15]
+
+# Targets:
 ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
