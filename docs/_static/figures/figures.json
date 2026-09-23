@@ -37,13 +37,13 @@
     },
     {
       "path": "docs/_static/figures/mirror_free_boundary_beta_scan.webp",
-      "sha256": "1273a209461b68ce2369e3fb01476a9ccf2f450cab0708fdd28713f3bab4297a",
-      "bytes": 169854,
+      "sha256": "725233ae2353863432dd214eee4d6ce62bef7d7201e0fd3269c30ddcbaeef90e",
+      "bytes": 163152,
       "generator": "examples/mirror/mirror_free_boundary_beta_scan.py",
       "command": "python examples/mirror/mirror_free_boundary_beta_scan.py",
       "inputs": [],
       "record": "benchmarks/mirror_free_boundary_axisymmetric.json",
-      "generated": "2026-09-05",
+      "generated": "2026-09-23",
       "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
       "reproducible": "command",
       "bytes_verified": true,
@@ -51,7 +51,7 @@
         "README.md",
         "docs/explanation/mirror-geometry.rst"
       ],
-      "note": "ESSOS two-loop coil set built from constants inside the example. The example calls vmex.mirror.output.plot_axisymmetric_beta_scan_summary with image_format=\"webp\", which writes this composite as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Needs the ESSOS optional dependency. Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
+      "note": "ESSOS two-loop coil set built from constants inside the example. The example calls vmex.mirror.output.plot_axisymmetric_beta_scan_summary with image_format=\"webp\", which writes this composite as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Needs the ESSOS optional dependency. Re-rendered on 2026-09-23 for the four-point scan (0, 10, 50 and 80 percent) that keeps the example under five minutes, and re-derived by a second run that reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/qi_mirror_hybrid.webp",

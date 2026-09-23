@@ -3,13 +3,14 @@
 
 Two circular ESSOS coils make an axisymmetric vacuum mirror. The script
 continues the coupled plasma-boundary-vacuum equilibrium through the beta
-points in ``BETAS`` (0, 1, 3, 10, 25, 50 and 80 %), each solved to the
-residual tolerance ``FTOL``; no prescribed finite-beta boundary is plotted.
-The points through 10 % are the supported lane and must pass the strong-force
-gate; 25, 50 and 80 % are extended validation outside the supported model
-range. It writes one MOUT and restart file per point, a JSON summary, the
-mirror ratios, per-state figures for three points, and the beta-scan
-composite.
+points in ``BETAS`` (0, 10, 50 and 80 %), each solved to the residual
+tolerance ``FTOL``; no prescribed finite-beta boundary is plotted. The points
+through 10 % are the supported lane and must pass the strong-force gate; 50
+and 80 % are extended validation outside the supported model range. Each
+point costs about a minute on a laptop CPU, so add intermediate points (1, 3,
+25 %, ...) only when the extra minutes are wanted. It writes one MOUT and
+restart file per point, a JSON summary, the mirror ratios, per-state figures
+for three points, and the beta-scan composite.
 
 The composite the docs embed is written straight into
 ``docs/_static/figures`` as lossless WebP, so re-running this script
@@ -52,7 +53,7 @@ except ModuleNotFoundError:
     raise SystemExit("This example needs ESSOS: pip install 'vmex[coils]'") from None
 
 # Requested central beta of each point; the scan continues from vacuum:
-BETAS = np.asarray([0.0, 0.01, 0.03, 0.10, 0.25, 0.50, 0.80])
+BETAS = np.asarray([0.0, 0.10, 0.50, 0.80])
 
 # Largest beta of the supported lane, and its strong-force gate:
 SUPPORTED_BETA_MAX = 0.10
@@ -88,7 +89,7 @@ CENTER_RADIUS = 0.25
 OUTPUT_DIR = Path("results/mirror_free_boundary_beta_scan")
 
 # Write one hot-start .npz per beta point; to resume, set RESTART_FROM to one
-# of them (e.g. OUTPUT_DIR / "beta_003p0pct.npz") and trim BETAS to the rest:
+# of them (e.g. OUTPUT_DIR / "beta_010p0pct.npz") and trim BETAS to the rest:
 SAVE_RESTARTS = True
 RESTART_FROM = None
 

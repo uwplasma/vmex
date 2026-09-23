@@ -74,14 +74,16 @@ cross-section, and residual figures.
 python examples/mirror/mirror_free_boundary_beta_scan.py
 ```
 
-The script solves the beta points 0, 1, 3, 10, 25, 50, and 80% (`BETAS` at
-its top) and writes one MOUT per state, a compact JSON summary, restart files, and per-state figures under
+The script solves the beta points 0, 10, 50, and 80% (`BETAS` at its top;
+each point takes about a minute on a laptop CPU, so intermediate points are
+left out by default) and writes one MOUT per state, a compact JSON summary,
+restart files, and per-state figures under
 `results/mirror_free_boundary_beta_scan/`, and the beta-scan composite under
 `docs/_static/figures/`. The example's two ESSOS loops are
 sized to the plasma: radius 0.5 m at z = +/-1.0 m carrying 3.72e5 A each,
 which keeps the central vacuum field of the recorded benchmark geometry
-(about 0.0836 T) with a deeper mirror well. Only the first four points (0--10%)
-are in the supported lane; 25, 50, and 80% are extended validation
+(about 0.0836 T) with a deeper mirror well. Only the 0 and 10% points are in
+the supported lane; 50 and 80% are extended validation
 ({doc}`/reference/capabilities`).
 
 External fields enter as an ESSOS/SIMSOPT Biot-Savart object, any
