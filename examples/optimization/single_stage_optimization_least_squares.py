@@ -111,15 +111,19 @@ PARAMETER_BOUND = 3.0
 
 # Budgets. One trial is one equilibrium solve plus one Jacobian; the Jacobian
 # costs one implicit solve per boundary column, where the scalar lane pays a
-# single adjoint, so a trial here is dearer but a step should go further.
-MAX_TRIALS = 300
+# single adjoint, so a trial here is dearer but a step should go further. The
+# end check, run on the saved iterates of a 40-trial run, passes at every
+# iterate checked from the 8th on (13 trials) and fails at none.
+MAX_TRIALS = 20
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil objective uses. A toroidal count commensurate with the
 # coil number aliases narrow B.n/B structure, so 37 rather than 36.
 NPHI, NTHETA = 37, 32
 
-MAKE_MOVIE = True                 # a compact GIF of the accepted iterates
+# A compact GIF of the accepted iterates. Off by default: every frame re-solves
+# its equilibrium for the surface colour.
+MAKE_MOVIE = False
 # Surface colour in that GIF: None, "absB", "B.n/B", or a callable
 # ``(x, objects) -> values``.
 MOVIE_SURFACE_COLOR = "absB"
