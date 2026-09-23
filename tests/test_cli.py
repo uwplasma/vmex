@@ -237,8 +237,8 @@ def test_bundled_test_smoke(tmp_path):
     wout = read_wout(tmp_path / "wout_nfp4_QH_warm_start.nc")
     assert int(wout.ns) == 35
     figures = sorted(p.name for p in (tmp_path / "figures").glob("*.png"))
-    # boundary3d, modB, profiles, stability, summary, surfaces
-    assert len(figures) == 6, figures
+    # boundary3d, modB, stability, summary, surfaces
+    assert len(figures) == 5, figures
     assert any("stability" in f for f in figures), figures
 
 

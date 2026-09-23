@@ -70,7 +70,7 @@ print(f"\nwout scalars: aspect = {float(wout.aspect):.4f}, "
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 wout_path = vj.write_wout(OUTPUT_DIR / f"wout_{case}.nc", wout)
 print(f"Wrote {wout_path}")
-# plot_wout writes the summary, surfaces, |B|, profiles, stability and 3-D figures.
+# plot_wout writes the summary, surfaces, |B|, stability and 3-D figures.
 for path in vj.plot_wout(wout_path, OUTPUT_DIR).values():
     print(f"Wrote {path}")
 
