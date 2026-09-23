@@ -59,8 +59,8 @@ STABILITY_MARGIN = 1.0e-3
 # The finite-pressure certificate that follows the vacuum ladder: radial grids
 # it is polished on, and the residual evaluations each may spend. Skipped in
 # the smoke pass:
-CERTIFICATE_RESOLUTIONS = [31, 51, 101]
-CERTIFICATE_MAX_NFEV = [30, 35, 80]
+CERTIFICATE_RESOLUTIONS = [31, 71]
+CERTIFICATE_MAX_NFEV = [10, 10]
 CERTIFICATE_MARGIN = 5e-4
 CERTIFICATE_SMOOTHING = 1e-5
 CERTIFICATE_WEIGHT = 5.0

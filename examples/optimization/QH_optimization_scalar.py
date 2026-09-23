@@ -27,7 +27,7 @@ from vmex import optimize as opt
 NFP = 4
 SURFACES = np.linspace(0.1, 1.0, 10)
 MAX_MODES = [1, 2]
-MAXITER = [15, 25]
+MAXITER = [10, 15]
 ASPECT_TARGET = 6.0
 USE_TRIAL_STABILITY = False
 TRIAL_BETA = 0.025
