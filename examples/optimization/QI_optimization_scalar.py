@@ -28,7 +28,7 @@ from vmex.core.qi import ConstructedQIResidual
 NFP = 2
 SURFACES = np.linspace(0.1, 1.0, 6)
 MAX_MODES = [1, 2]
-MAXITER = [20, 40]
+MAXITER = [10, 15]
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21

@@ -27,7 +27,7 @@ from vmex import optimize as opt
 NFP = 2
 SURFACES = np.array([0.5, 0.7, 0.9])
 MAX_MODES = [1, 2]
-MAXITER = [10, 15]
+MAXITER = [8, 10]
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
