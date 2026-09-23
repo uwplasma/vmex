@@ -17,6 +17,9 @@ env:
 jobs:
   build:
     name: Build release distributions
+    # Reference-asset bundles (``assets-*``, ``golden-v1``) are published as
+    # GitHub releases too; only ``v*`` tags are package releases.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

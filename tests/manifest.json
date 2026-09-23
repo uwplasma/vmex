@@ -50,7 +50,7 @@
     ["tests/test_geometry_fields.py", "equilibrium", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "full-core-g-h"]],
     ["tests/test_gammac.py", "diagnostics", "ad", "slow", "cpu-gpu", "none", "fd", ["pr-parity-c4", "full-core-g-h"]],
     ["tests/test_golden_digests.py", "equilibrium", "oracle", "slow", "cpu", "golden", "vmec2000", ["pr-parity-b", "full-core-g-h"]],
-    ["tests/test_gpu_ci.py", "infrastructure", "gpu", "slow", "cpu-gpu", "generated", "fd", ["pr-parity-c1", "device-rig", "gpu-smoke", "full-core-g-h"]],
+    ["tests/test_gpu_ci.py", "infrastructure", "gpu", "slow", "cpu-gpu", "generated", "fd", ["pr-parity-c1", "gpu-smoke", "full-core-g-h"]],
     ["tests/test_high_mode_free_boundary_parity.py", "free-boundary", "campaign", "campaign", "cpu-gpu", "generated", "vmec2000", ["pr-parity-a1"]],
     ["tests/test_implicit_device.py", "ad", "ad", "medium", "cpu-gpu", "none", "fd", ["pr-parity-c3", "gpu-smoke", "full-core-i"]],
     ["tests/test_implicit_grad.py", "ad", "ad", "campaign", "cpu-gpu", "golden", "fd", ["pr-gradient", "full-core-i-grad"]],
@@ -66,7 +66,7 @@
     ["tests/test_mgrid.py", "free-boundary", "unit", "fast", "cpu", "generated", "analytic", ["pr-parity-c6", "full-core-j-m"]],
     ["tests/test_native_interior_form.py", "equilibrium", "oracle", "medium", "cpu", "none", "analytic", ["pr-parity-c1", "full-core-g-h"]],
     ["tests/test_near_surface_quadrature.py", "virtual-casing", "oracle", "medium", "cpu", "none", "analytic", ["pr-parity-c7", "optional", "full-core-n-s"]],
-    ["tests/test_monitoring.py", "optimization", "unit", "fast", "cpu", "none", "analytic", ["pr-parity-d", "pr-fast", "pr-implicit-response", "full-core-n-s"]],
+    ["tests/test_monitoring.py", "optimization", "unit", "fast", "cpu", "none", "analytic", ["pr-parity-d", "pr-fast", "full-core-n-s"]],
     ["tests/test_multigrid_interp.py", "equilibrium", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "full-core-j-m"]],
     ["tests/test_multigrid_ladder.py", "equilibrium", "oracle", "slow", "cpu-gpu", "golden", "vmec2000", ["pr-parity-a2", "full-core-j-m"]],
     ["tests/test_ncsx_free_boundary_parity.py", "free-boundary", "oracle", "slow", "cpu-gpu", "none", "vmec2000", ["pr-parity-a1", "full-core-fb-b"]],
@@ -76,7 +76,7 @@
     ["tests/test_omnigenity.py", "diagnostics", "ad", "slow", "cpu-gpu", "golden", "fd", ["pr-parity-c4", "full-core-n-s"]],
     ["tests/test_optimization_convergence.py", "optimization", "campaign", "campaign", "cpu-gpu", "golden", "external", ["pr-parity-c2"]],
     ["tests/test_optimize.py", "optimization", "integration", "slow", "cpu-gpu", "none", "fd", ["pr-parity-d", "full-core-n-s"]],
-    ["tests/test_problem.py", "optimization", "unit", "fast", "cpu", "none", "analytic", ["pr-parity-d", "pr-fast", "pr-implicit-response", "full-core-n-s"]],
+    ["tests/test_problem.py", "optimization", "unit", "fast", "cpu", "none", "analytic", ["pr-parity-d", "pr-fast", "full-core-n-s"]],
     ["tests/test_optimize_penalty.py", "optimization", "integration", "slow", "cpu-gpu", "none", "fd", ["pr-parity-c2", "full-core-n-s"]],
     ["tests/test_optimize_traceable_qs.py", "optimization", "integration", "slow", "cpu-gpu", "golden", "fd", ["pr-parity-a2", "full-core-n-s"]],
     ["tests/test_package_api.py", "interface", "integration", "medium", "cpu", "reference-nc", "external", ["pr-parity-c2", "optional", "full-core-n-s"]],
@@ -129,6 +129,12 @@
   "excluded": {
     "tests/test_lasym_free_case.py": "fixture helper; no collected tests",
     "tests/test_qi_free_boundary_case.py": "fixture helper; no collected tests"
+  },
+  "local_only": {
+    "gpu-smoke": {
+      "reason": "needs an NVIDIA GPU; hosted CI has none and no self-hosted runner is registered, so the former manual GPU workflow was retired",
+      "command": "pytest -q $(python tools/test_manifest.py select gpu-smoke)"
+    }
   },
   "selectors": {
     "pr-physics-core": [
@@ -236,12 +242,6 @@
       "tests/test_optimize.py::test_boundary_pack_roundtrip[li383_low_res]",
       "tests/test_optimize.py::test_ess_scale"
     ],
-    "pr-physics-mirror-spline": [
-      "tests/mirror/test_analytic.py",
-      "tests/mirror/test_qi_hybrid.py",
-      "tests/mirror/test_splines.py"
-    ],
-    "pr-physics-mirror-output": ["tests/mirror/test_output.py"],
     "pr-device": [
       "tests/test_device.py::test_fixed_boundary_builds_runtime_in_device_context",
       "tests/test_device.py::test_multigrid_moves_residual_continuation_with_the_state",

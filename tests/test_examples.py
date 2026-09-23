@@ -642,7 +642,7 @@ def test_stellarator_asymmetry_vacuum_examples_run(case, tmp_path):
     assert norm is not None and float(norm.group(1)) > 0.0, out[-2000:]
     assert (tmp_path / f"input.{case}_LASYM_optimized").exists()
     assert (tmp_path / f"wout_{case}_LASYM_optimized.nc").exists()
-    assert (tmp_path / f"{case}_LASYM_optimization_objectives.png").exists()
+    assert (tmp_path / f"{case}_LASYM_optimized_objectives.png").exists()
 
 
 def test_qa_maxj_example_states_its_physical_scope():
@@ -864,7 +864,9 @@ def test_qa_finite_beta_scalar_optimization_example(tmp_path):
 def test_qi_maxj_continuation_example(tmp_path):
     """Reduced-budget QI+maximum-J continuation smoke test."""
     script = EXAMPLES / "optimization" / "QI_maxJ_continuation.py"
-    out = _run_example(script, tmp_path, timeout=900)
+    # 814-832 s on a hosted runner sharing its cores with a second worker
+    # (weekly examples lane, 2026-09-19), so 900 s timed out on 2026-09-23.
+    out = _run_example(script, tmp_path, timeout=1800)
     _assert_cost_decreased(out, "QI-maxJ")
     seed = re.search(r"\[seed\] QI = ([0-9.eE+-]+)", out)
     final = re.search(r"\[final\] QI = ([0-9.eE+-]+)", out)

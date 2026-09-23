@@ -160,6 +160,25 @@ asserts it), so every plan edit runs c2. A cancelled lane at its cap on a
 documentation PR is still a capacity issue, not a defect: rerun it and record
 the job time.
 
+**Lane audit (2026-09-23).** Every workflow job's last 30 runs (41 for `CI`)
+were read, plus a fresh `Weekly high resolution` dispatch on `2feba0d1c`. All
+`CI` jobs passed every run that was not cancelled; each `PR gate` failure was a
+cancelled or superseded run, or a failure in that PR's own code. Nightly is green
+(opt-qh failed 2026-09-16 to 09-22 and recovered after #427). Retired: `Trusted GPU physics`
+(`gpu.yml`), which needs a self-hosted runner that is registered by hand and is
+not registered now; its last success was 2026-07-31. Its `gpu-smoke` tests are
+declared `local_only` in `tests/manifest.json`, with the command in
+`docs/project/contributing.rst`. Fixed: the weekly examples shards (a stale
+LASYM objectives filename since #398, and the QI maximum-J example's 900 s
+timeout against 814–832 s runs), weekly core-1's 15-minute cap (cancelled at
+it), and `Publish to PyPI` failing on every asset-bundle release. Removed the
+manifest lane labels that no workflow selects (`device-rig`,
+`pr-implicit-response`, `pr-physics-mirror-spline`,
+`pr-physics-mirror-output`). A guard test now fails on any lane no workflow
+selects unless it is declared `local_only`. Weekly hmfb failed today only at
+`pip install` (PyPI briefly returned no `equinox` distribution), so it was
+rerun rather than changed.
+
 ## Execution and acceptance
 
 First qualify the integrated certification, recovery, dependency and profiler

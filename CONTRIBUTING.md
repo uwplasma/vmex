@@ -3,7 +3,7 @@
 The contributor guide is `docs/project/contributing.rst`, rendered at
 https://vmex.readthedocs.io/en/latest/project/contributing.html. It covers
 the development install, the test manifest, reference assets, the CI lanes,
-GPU CI, and the release procedure. Three rules apply to every change:
+the local-only GPU checks, and the release procedure. Three rules apply to every change:
 
 1. Run `python tools/preflight.py` before pushing. It runs the static gates,
    the guard tests, and the tests affected by your diff; a failure caught
