@@ -5,60 +5,83 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
-## Unreleased
+## 0.11.1 - 2026-09-23
 
-### Changed
-
-- **Cheaper free-boundary anchor and boundary-Schur adjoint.** The Newton
-  anchor's preconditioner now includes NESTOR's low-rank edge coupling
-  (Woodbury identity through the dense edge response), so it is the exact
-  Jacobian where it is built. The `boundary_schur` adjoint takes its edge
-  columns from the same response and assembles its bulk blocks a block at a
-  time; its answer is still certified on the exact coupled transpose.
+Free-boundary trials are anchored on the coupled root their gradients
+differentiate, the exterior field is accurate next to the plasma surface,
+optimization results are the states the objective scored, and the
+optimization examples were re-tuned against a five-minute budget. See the
+GitHub release for the full notes.
 
 ### Fixed
 
-- **Free-boundary values and gradients referred to different points.** VMEC's
-  `ftol` does not place a free-boundary solve on the coupled plasma--vacuum
-  root the adjoint differentiates; along weakly damped directions the
-  converged state, and the objective read there, can sit far from it. Every
-  certifiable solve is now Newton-anchored on that root (`refine_tol`,
-  damped on Deuflhard's natural monotonicity test); one that cannot be
-  anchored is the new status 3, never a silent pass.
-- **Stalled free-boundary restarts ran to `max_iterations`.** A restart from
-  the configuration's reference now gets the iterations the cold reference
-  needed before the deterministic cold retry of #416.
-- `VmecExtender.from_wout` raises on a wout that names an MGRID but records
-  no coil currents, instead of extending with a zero coil field.
-- The eager derivative accuracy check no longer warns "up to inf" far from
-  the surface (virtual-casing-jax 0.0.8, now the `freeb` floor).
-- **Un-jitted gradients of state objectives no longer recompile on every call.**
-  `VmecProblem.jax_objective_from_state`, `jax_extra_costs_from_state` and the
-  reverse rule of `solve_implicit_status` chose between the accepted and the
-  rejected trial with `jax.lax.cond`. Under an eager `jax.value_and_grad`, that
-  cond was traced and compiled again on every call, because each call's state
-  entered it as new constants. A concrete status now takes its branch in Python.
-  Under `jit` or `vmap`, the status is abstract and the cond is unchanged.
+- **Free-boundary values and gradients referred to different points** (#432).
+  VMEC's `ftol` does not place a free-boundary solve on the coupled
+  plasma--vacuum root the adjoint differentiates. Every certifiable solve is
+  now Newton-anchored on that root (`refine_tol`); one that cannot be
+  anchored is the new status 3, never a silent pass. A stalled restart from
+  the reference gets the iterations the cold reference needed before the
+  cold retry of #416.
+- **`equilibrium_from_x` returned the host solve, not the refined state the
+  objective read** (#427). On `li383_low_res` the mean iota differed by
+  1.6e-3 relative; it now matches the objective, and so does the WOUT
+  written from it.
+- **Un-jitted gradients of state objectives recompiled on every call** (#438).
+  A concrete solve status now takes its branch in Python instead of a
+  `lax.cond`: an eager repeat of `value_and_grad` on a Solov'ev deck takes
+  0.9-1.7 s with nothing compiled, against 12-15 s and three programs.
+- **The exterior field from a free-boundary wout without coil currents had no
+  coils** (#430): `VmecExtender.from_wout` now raises. The eager derivative
+  check no longer warns "up to inf" far from the surface
+  (`virtual-casing-jax>=0.0.8`, the new `freeb` floor).
+- **The QI mirror hybrid example crashed** on a private import; the mirror
+  and gradient examples follow the example template (#434).
 
 ### Added
 
-- `from_wout`/`from_state` accept `project_current` (off by default, #381).
-- **The exterior field is accurate next to the plasma surface.** Eager
-  `VmecExtender` calls switch each point the direct quadrature cannot resolve
-  to a target-graded rule (`near_surface="auto"`, default): 1e-12 in B down to
-  0.01 minor radii on the 2.5 % beta QA deck, where the default grid was off
-  by order one. `with_graded_quadrature()` uses it everywhere, under `jit` too.
+- **The exterior field is accurate next to the plasma surface** (#441).
+  Eager `VmecExtender` calls switch each point the direct quadrature cannot
+  resolve to a target-graded rule (`near_surface="auto"`, default): 1e-12 in
+  B down to 0.01 minor radii on the 2.5 % beta QA deck, where the default
+  grid was off by order one. `with_graded_quadrature()` uses it everywhere,
+  under `jit` too. `from_wout`/`from_state` accept `project_current` (off by
+  default, #381).
+- **Six single-stage examples** (#411): penalty, augmented Lagrangian, least
+  squares, 0.5 % beta, and free boundary at zero and 0.5 % beta. Each meets
+  every target it states in 129-275 s on the reference laptop.
 
 ### Changed
 
-- **Optimization movies colour each frame from a plain forward solve.**
-  `VmecProblem.surface_field_values` (the `"absB"` and `"B.n/B"` colours of
-  `OptimizationMonitor.movie_surface_coils`) no longer runs the derivative
-  anchor that only an adjoint needs. The colours are unchanged at plotting
-  precision, and the single-stage movie is several times faster.
-- Direct-path derivatives use the closed-form layer kernels (same values to
-  1e-12): first `B`..`gradgradgradB` calls 6.0 s -> 2.9 s, warm
-  `gradgradgradB` 4-6x faster (`benchmarks/extender_ab_20260923.json`).
+- **Cheaper free-boundary anchor and boundary-Schur adjoint** (#439). The
+  anchor's preconditioner includes NESTOR's edge coupling through a Woodbury
+  update, cutting its Krylov iterations 4-6x (1483 -> 310 at the optimized
+  coils of the finite-beta single stage) with the anchored values unchanged
+  to 10 digits.
+- **Optimization example defaults** (#426): QA uses helicity [1, 2]; QI and
+  QP use [1, 3], with QI at aspect 8 and an aspect weight of at least 0.01;
+  finite beta is set through PHIEDGE. 18 scripts were timed under five
+  minutes with a converged NS = 71 check; scripts over budget keep their
+  previous defaults, and timing the remaining scripts is a follow-up.
+- The implicit `max_fsq_ratio` default is `1e2`, matching every optimize
+  entry point (#434); `take_gradients.py` is merged into
+  `take_fixed_boundary_gradients.py`.
+- Optimization movies colour each frame from a plain forward solve (#436):
+  the single-stage movie takes 12.6-21.9 s cold against 57.0 s.
+- Direct-path exterior-field derivatives use closed-form layer kernels
+  (#441, same values to 1e-12): first `B`..`gradgradgradB` calls 6.0 s ->
+  2.9 s, warm `gradgradgradB` 4-6x faster
+  (`benchmarks/extender_ab_20260923.json`).
+- The summary figure plots bootstrap `<J.B>` on the force-balance panel,
+  computes the effective ripple on 7 surfaces, and no longer writes
+  `_profiles.png`; the README shows two single-stage movies (#442).
+- The mean-iota implicit derivative's 1-3 % gap to re-solve finite
+  differences is the m = 1 angle-gauge drift of the solver's path, not a
+  missing term (#428).
+- CI: the GPU workflow is retired, the weekly and publish lanes are fixed,
+  every manifest lane must run in a workflow or be local-only (#437), and
+  parity lane c3d is split into c3 and d (#438). Uncited benchmark records
+  are removed (#431); the docs, plan and README are consolidated (#413, #429,
+  #433, #435, #440).
 
 ### Removed
 
@@ -103,55 +126,13 @@ See the GitHub release for this version in full.
 
 ## 0.10.0 - 2026-09-20
 
-See the GitHub release for this version in full.
-
-
-### Fixed
-
-- **The interior field evaluated B at the wrong place.** The geometry table it
-  is built from, `_state_field_spectra`, multiplied every odd-`m` coefficient
-  of `rmnc` and `zmns` by an extra `sqrt(s)`. `wout_from_state` builds the same
-  table from the same `R_cos_p` with `mode_scale` alone, and
-  `m1_constrained_to_physical` has already returned physical amplitudes, so
-  the factor was spurious. It is 1 at the boundary, which is why
-  `surface_field_data_from_state` — which reads only `s_index = -1` — and
-  every virtual-casing and exterior path through it were always correct, and 0
-  on axis; in between it pulled each surface in towards the axis. On
-  `li383_low_res` that put R 1.2 cm and Z 5.9 cm off at mid-radius, `|B|`
-  1.0e-2 off relative to the wout's own `bmnc`, and left 28 of 126 adjacent
-  surface pairs crossing each other by up to 6.5% of their spacing. The
-  interior geometry now reproduces the wout table to 6.7e-16 m, `|B|` agrees
-  with `bmnc` to 3.1e-4 — the half-mesh interpolation difference — and all 126
-  pairs nest. `_state_field_spectra` had no test of its own: the only test
-  that referenced it replaced it with a stub, so nothing compared it against
-  the wout it is meant to mirror. One now does, on a one-iteration state,
-  since the identity holds whether or not the solve converged.
-- **A point well outside the plasma raised instead of returning NaN.** The
-  stalled-inversion check added in #379 decided a point was interior from the
-  `s` its own unconverged iteration stopped at. That carries no information:
-  on the decks measured, a large fraction of points several minor radii out
-  still finish at `s <= 1`. Querying the DSHAPE interior field three and eight
-  times the minor radius past the boundary raised `VmecNumericalError` at 12
-  and 14 of 32 points, against a documented quiet NaN; the existing test only
-  probed 1.5 times out, which is the one regime that behaved. A stalled point
-  is now classified against the boundary itself, sampled at the query's
-  toroidal angle and shrunk 1% towards the axis so its finite resolution can
-  only ever suppress a complaint, never invent one.
-- **The inversion did not converge from its first guess.** It was seeded by
-  equating the VMEC poloidal angle with the polar angle about the magnetic
-  axis; on a shaped boundary the two differ enough that the undamped step
-  leaves the basin of the root, pins against the `rho` clip where the
-  determinant guard turns the angle step into noise, and wanders until the
-  iteration cap stops it. It now starts from whichever of three candidates
-  actually lands nearest the query point: the geometric guess, the best node
-  of a coarse sweep of the forward map at the query's toroidal angle, and the
-  map linearized about the axis. Seeded callers skip the sweep.
-- **A query exactly on the magnetic axis returned NaN when its flux
-  coordinates were given.** The chart collapses there, so such a point is
-  displaced to a representative just off axis, but the iteration was still
-  started from the caller's `s = 0` — the one place the Jacobian vanishes and
-  the first step is set by the determinant guard instead of the geometry. It
-  now starts from the representative's own coordinates.
+The interior field's geometry table carried a spurious `sqrt(s)` on every
+odd-`m` coefficient, which put `li383_low_res` surfaces 1.2 cm (R) and 5.9 cm
+(Z) off at mid-radius; it now reproduces the wout table to 6.7e-16 m and all
+126 adjacent surface pairs nest. Points well outside the plasma return NaN
+instead of raising, the inversion starts from the best of three seeds, and a
+query on the magnetic axis no longer returns NaN. Full notes in the GitHub
+release.
 
 ## 0.9.1 - 2026-09-16
 
