@@ -52,12 +52,10 @@ main's after the merges.
    timed under five minutes with a converged NS = 71 check; scripts over
    budget kept their previous defaults. The untimed scripts are listed in
    #426's body.
-3. **`vmex --trace`.** A CLI flag like `--plot`/`--booz` that scales the
-   equilibrium to ARIES-CS size with the existing `--scale`, then uses ESSOS
-   to trace 1000 (or 5000) 3.5 MeV alpha particles for 1e-2 s and plots the
-   loss fraction against time. It must be fast: merge the relevant ESSOS PRs
-   (for example axis handling) and use a symplectic integrator like SIMPLE's
-   if needed. Also highlight `--scale` in the README next to `--plot`.
+3. **`vmex --trace`: fast reactor-scale alpha losses.** The flag already exists
+   (0.10.0); the work is new defaults (1000 particles, 1e-2 s), scaling on by
+   default with the scaling target fixed, a converged step, and speed. Full
+   scope, ESSOS PR order, phases and acceptance gates: section T below.
 4. **Mirrors:**
    - Verify accuracy (analytic and independent references, the Pleiades
      reference where available) and solve speed of the fixed- and
@@ -91,6 +89,251 @@ cap and examples fixes.
 Measurement caveat: most timings in these PRs were taken on a shared laptop
 or office machine under load; ratios come from interleaved A/B runs, and
 absolute wall times are upper bounds.
+
+## T. Fast reactor-scale alpha losses: `vmex --trace`
+
+**Priority:** after the CI-speed work and the 0.11.1 follow-ups (#443), before
+the mirror work. Scoped 2026-09-23 against `origin/main` `b5f5267ef` and ESSOS
+`main` `c9b41222e` (= ESSOS 0.17). Research only; nothing below has been
+implemented yet.
+
+### T.0 What already exists (do not rebuild it)
+
+`vmex --trace` shipped in 0.10.0 (`958ffde1a`). It is wired like `--plot` and
+`--booz`: it runs on a `wout_*.nc` or after a solve, and
+`--scale` refuses to combine with it. The code is `vmex/core/tracing.py`
+(`essos_vmec_field` and `trace_alphas`, which return `AlphaTracingResult`),
+`_run_trace` in `vmex/core/cli.py`, and `plotting.plot_tracing`. It writes four
+figures: `*_trace_trajectories.png`, `*_trace_vparallel.png`,
+`*_trace_loss_fraction.png` and `*_trace_energy_error.png`. The tracer is
+`essos.dynamics.Tracing(model="GuidingCenter")`: fixed-step Dopri8 in VMEC
+`(s, θ, φ)`, `vmap` over particles, and sharding over `jax.devices()`.
+Particles start on s = 0.25 with uniform θ, φ over one field period, uniform
+pitch in [-1, 1) and 3.52 MeV. A particle counts as lost when a sampled s is
+at least 0.99. The defaults are 200 particles, `tmax = 3e-4` s and
+`dt = 5e-7` s. It does not scale the equilibrium; the docs tell users to run
+`vmex --scale` first. The feature is therefore a change of defaults plus
+built-in scaling, a fix to the scaling target, and a speed programme. It is not
+a new command.
+
+### T.1 Measured baseline: too slow and not converged at the default step
+
+The runs used the ESSOS 0.17 wheel, JAX 0.10.2 and diffrax 0.7.2 on an Apple
+M3 Max (10P+4E cores). The script is `scratchpad/trace-plan/bench.py`.
+Particles were launched on s = 0.25 with the vmex sampling, and each wall time
+includes the per-call JIT.
+
+| wout (Nyquist modes) | particles × t | dt / tolerance | devices | wall | loss |
+|---|---|---|---|---|---|
+| LP QA reactorScale (128) | 20 × 1e-3 s | 5e-7 fixed | 1 | 7.7 s | 0 |
+| LP QA reactorScale (128) | 100 × 1e-3 s | 5e-7 fixed | 1 | 31.3 s | 0 |
+| LP QA reactorScale (128) | 100 × 1e-3 s | 5e-7 fixed | 10 | 6.8 s | 0 |
+| LP QA reactorScale (128) | 200 × 1e-3 s | 5e-7 fixed | 10 | 11.6 s | 0 (3 axis) |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | 1e-6 fixed | 10 | 23.9 s | **8.0 %** |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | 5e-7 fixed (vmex default) | 10 | 47.6 s | **3.5 %** |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | 2.5e-7 fixed | 10 | 83.2 s | **2.5 %** |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | adaptive Dopri8, rtol = atol = 1e-7 | 10 | 465.7 s | **2.5 %** |
+
+The first four rows ran at load average ~4–5 and the ARIES-CS rows at ~7–13,
+with other sessions active. Treat the times as upper bounds; the ratios are
+reliable.
+
+Findings:
+
+1. **The default step overestimates losses.** At `dt = 5e-7` a 3.5 MeV alpha
+   (~1.3e7 m/s) moves ~6.5 m per step, which is 40 % of an ARIES-CS field
+   period. The loss fraction converges to 2.5 % only at `dt <= 2.5e-7`, where
+   the fixed and adaptive runs agree. ESSOS's VMEC field interpolates linearly
+   in s, so ∂/∂s is piecewise constant. That caps the effective order of
+   Dopri8.
+2. **Cost is set by the right-hand side.** One GC right-hand side takes about
+   8–10 µs per particle. Each evaluation performs about ten Fourier syntheses
+   over all Nyquist modes plus `jacfwd`/`grad` passes, and Dopri8 uses 13
+   stages per step. Scaling is linear in particles × time. The adaptive runs are
+   5.6× slower than fixed steps because the `vmap`'d `while_loop` runs all
+   particles in lockstep.
+3. **Extrapolated cost of 1000 × 1e-2 s at the converged `dt = 2.5e-7`:**
+   ~19 min for QA and ~35 min for ARIES-CS on 10 host devices. On the
+   single-device default this becomes ~3–6 h. The 5-minute target needs
+   **≥ 7×** for 1000 particles and **≥ 35×** for 5000.
+4. **Multi-device sharding on CPU is almost free.** Setting
+   `--xla_force_host_platform_device_count=10` gave 4.6× on the same run
+   (31.3 → 6.8 s). vmex does not set it today.
+5. **Axis handling.** ESSOS#47, merged in 0.17, already stops VMEC GC orbits at
+   `s <= 1e-6` and counts them as `total_particles_unresolved`. Axis crossings
+   are still not continued: 3–7 of 200 orbits within 2 ms. Over 1e-2 s they
+   bias the confined count and discard statistics.
+
+### T.2 Scaling target: fix it before tracing through it
+
+`aries_cs_scales` (`vmex/core/scaling.py`) returns
+`(5.7/|wout.b0|, 1.7/Aminor_p)`. The wout `b0` is the toroidal field at the
+axis in one plane. It is neither of the literature normalisations:
+
+| source | length | field |
+|---|---|---|
+| ARIES-CS design (Najmabadi et al., FST 54, 655, 2008) | R = 7.75 m, A = 4.5 | 5.7 T average on axis |
+| Landreman & Paul, PRL 128, 035001 (2022), arXiv:2108.03711 | a = 1.7 m | B₀₀(s=0) = 5.7 T (Boozer (0,0) on axis) |
+| Landreman, Buller & Drevlak, PoP 29, 082501 (2022), arXiv:2205.02914 | a = 1.70 m | ⟨B⟩ = 5.86 T (volume average) |
+| Bader et al., NF 61, 116060 (2021); Paul et al., NF 62, 126054 (2022), arXiv:2208.02351 | V = 444 m³ | ⟨B⟩ = 5.86 T |
+| reference wouts in ESSOS/SIMSOPT: `wout_n3are_R7.75B5.7.nc`, `wout_LandremanPaul2021_QA_reactorScale_lowres.nc` | `Aminor_p` = 1.7044 m | `volavgB` = 5.8646 T (b0 = 5.33 and 5.18 T) |
+
+The current rule rescales the ARIES-CS wout itself by **1.070** in B, and the
+reactor-scale LP QA wout by **1.101**, which gives ⟨B⟩ = 6.46 T. A 7–10 % field
+error shrinks orbit widths and understates losses.
+
+**Decision.** Default to `Aminor_p = 1.7044 m` and `volavgB = 5.8646 T`, the
+ARIES-CS wout's own values and the de facto target of the shipped reactor-scale
+files. Under that rule both reference wouts map to factors of 1.000. Keep the
+LP-PRL convention (B₀₀(s=0) = 5.7 T, a = 1.7 m) as a named option, computed
+from `bmnc(m=0, n=0)` extrapolated to the axis. `ScaleProbe` gains `volavgB` so
+`aries_cs_input_scales` follows the same rule. Update the `--scale` help, the
+docstrings and the howto.
+
+### T.3 CLI contract
+
+```console
+vmex wout_case.nc --trace                       # 1000 alphas, 1e-2 s, scaled to ARIES-CS in memory
+vmex input.case --trace                         # solve, then the same
+vmex wout_case.nc --trace --trace-particles 5000 --trace-tmax 1e-2
+vmex wout_case.nc --trace --trace-no-scale      # trace the equilibrium as given
+```
+
+- **Flag names.** Keep the released names (`--trace-particles`,
+  `--trace-tmax`, `--trace-s`, `--trace-seed`, `--trace-timestep`,
+  `--trace-times`), which shipped in 0.10.0 and 0.11.0. Do not add bare
+  `--particles`/`--time`, which would collide with future flags. Change the
+  defaults to `--trace-particles 1000`, `--trace-tmax 1e-2` and
+  `--trace-times 1000` (a loss-time resolution of 1e-5 s). Set
+  `--trace-timestep` to the converged value from T.1 until P2 replaces the
+  integrator.
+- **Built-in scaling.** `--trace` scales in memory with
+  `scale_wout(wout, *aries_cs_scales(wout))` and prints both factors and the
+  resulting `Aminor_p`/`volavgB`. `--trace-no-scale` opts out. Keep `--scale`
+  itself mutually exclusive with `--trace`, because it writes a file.
+- **Parallelism.** When `--trace` is present, set
+  `XLA_FLAGS=--xla_force_host_platform_device_count=<performance cores>` before
+  JAX is imported, unless the user already set `XLA_FLAGS`. Verify that this
+  does not slow the preceding solve.
+- **Outputs,** beside the input or in `--outdir`:
+  - `<case>_trace_loss_fraction.png` is the primary figure: cumulative loss
+    fraction against time on a log time axis. Its title carries the
+    configuration, N, s₀, scaling and wall time, with a binomial 1σ band.
+  - `<case>_trace.json` holds the counts, factors, versions, device count, wall
+    time and `dt`.
+  - `<case>_trace.npz` holds `times`, `loss_fractions`, `lost_times` and the
+    initial conditions, so a run can be replotted and compared.
+  - The other three figures stay. The trajectory panels plot at most 8 orbits.
+- **Console.** Print loss fraction ± binomial σ, lost / axis-unresolved /
+  failed counts, wall time split into compile and run, and the scaling factors.
+
+### T.4 Dependencies (ESSOS, in order; each merge needs maintainer approval, and an ESSOS release needs manual review)
+
+| ESSOS PR | what it does | state | action |
+|---|---|---|---|
+| #47 VMEC axis events | stops GC orbits at the axis or LCFS and reports axis hits separately | merged; in 0.17 | none |
+| #52 one loss surface | `boundary_threshold` (default 1.0) drives both the event and the loss count, removing the s = 1 event / s = 0.99 sample mismatch | draft, **conflicting** | rebase on main, then merge (1st) |
+| #53 termination metadata | per-particle `termination_times`/`termination_states` | draft, stacked on #52 | merge (2nd) |
+| #54 event-based losses | counts losses from the boundary mask and termination time instead of sampled `inf` values; separates axis, custom and failure outcomes | draft, stacked | merge (3rd); vmex then reads exact loss times |
+| #55 refined events | Newton-refined axis and LCFS event times; rejects out-of-range starts; +11 % cold time | draft, stacked | merge (4th) |
+| #56 fill event tails | post-event samples become the last finite state | draft, stacked | merge (5th); vmex drops its non-finite bookkeeping |
+| #57 batched progress | progress reported per particle batch; `particle_batch_size`; +17 % time | draft, stacked | merge only with progress off by default |
+| #48 solver controls | `max_steps`/progress controls | draft, conflicting | close as superseded; 0.17 already has `max_steps = 1_000_000` and the progress meter |
+| #61 `Vmec.from_arrays` + soft loss | builds the field from arrays, removing the temp-wout hop; differentiable surrogate | open, conflicting | not needed for `--trace`; rebase later for the optimisation objective |
+| #25 interpolated fields | SIMSOPT-style interpolated field (coil-oriented, VMEC example) | open since 2025-10, conflicting | reuse its interpolation machinery in P2b; do not merge as-is |
+| #49 near-axis convergence + fixed-step note | examples only; based on `eg/analysis` | open | none (informational) |
+
+After #52–#56 land, release **ESSOS 0.18** and raise the vmex `coils` extra
+floor to `essos>=0.18`. The fallback is to feature-detect
+`termination_times` and keep the 0.17 path. The P2 items add ESSOS 0.19 or
+later.
+
+### T.5 Phases
+
+**P1: contract and correctness (vmex only, ESSOS 0.17/0.18).**
+T.2 scaling fix; T.3 defaults, in-memory scaling, JSON/NPZ output, primary
+figure; CPU device sharding; converged default step. README (T.7). Tests:
+the tiny-budget smoke test (8 particles) stays; add a CLI contract test for
+the files, the JSON keys and the printed scaling factors; add a unit test that
+the n3are and LP-QA reactor-scale wouts give factors 1 ± 1e-3.
+Expected wall: ~20–35 min for 1000 × 1e-2 s on the laptop. Ship it as correct
+but not fast, with the time stated in the help text.
+
+**P2: speed (ESSOS).**
+- (a) Land the #52–#56 stack.
+- (b) Add a Boozer-coordinate GC field built from vmex's `booz_xform_jax`
+  output. Tabulate |B|, I(s), G(s), ι(s) (and the K/B_s term at finite β) on a
+  regular grid in (√s, θ_B, ζ_B) and evaluate with periodic cubic splines, as
+  in SIMSOPT `InterpolatedBoozerField` / FIRM3D #73, using the #25 machinery.
+  Use the GC equations in Boozer coordinates (SIMSOPT `tracing` Boozer model).
+  The target is a right-hand side of ≤ 1 µs per particle, ≥ 10× cheaper.
+- (c) Add a regular chart near the axis: pseudo-Cartesian (√s cos θ, √s sin θ)
+  below s ≈ 0.01, as in DESC and FIRM3D #79. The target is zero axis-unresolved
+  orbits.
+- (d) Choose the integrator by measurement at matched loss convergence
+  (Dopri5, Tsit5 or Dopri8, fixed or adaptive), and keep fixed steps under
+  `vmap`.
+
+Gate: 1000 × 1e-2 s in ≤ 5 min on the laptop.
+
+**P3: symplectic GC integrator, only if P2 misses the gate, or for 5000
+particles and 0.2 s.**
+Use Albert–Kasilov–Kernbichler explicit–implicit Euler in canonicalised flux
+coordinates: JCP 403, 109065 (2020), arXiv:1903.06885. It is more than 3×
+faster than RK45 at equal statistical accuracy, and SIMPLE uses it. The
+closest ports are FIRM3D `ODE_solver="symplectic"` (#30 merged; #79 axis fix
+open) and SIMSOPT branch `symplectic` (`1ecf27f26`: 5 commits, unmerged, 2733
+behind master, with no PR). Implement it in ESSOS over the P2b Boozer field,
+with a fixed step per field period, a Newton implicit stage and `vmap`.
+Orbit classification (Albert et al., JPP 86, 815860201, 2020: a further
+2–5×) applies to 0.2–1 s runs, not 1e-2 s. Leave it out.
+
+### T.6 Acceptance gates
+
+- **G1 scaling.** The reference wouts map to factors 1 ± 1e-3. Scaling a wout
+  and scaling-then-solving its deck commute (the existing `scale_wout`
+  contract).
+- **G2 cross-code.** Use the same scaled wout and identical initial conditions
+  (N = 1000, s = 0.25, 1e-2 s), with SIMSOPT `trace_particles_boozer` or SIMPLE
+  as the reference. The loss fraction must agree within 2 binomial σ, and
+  per-particle lost/confined labels must agree at ≥ 95 %. Run it on the
+  ARIES-CS `n3are` wout (lossy) and the LP QA reactor-scale wout (near zero).
+- **G3 published number (manual or weekly lane, not per PR).** ARIES-CS
+  `n3are` at ⟨B⟩ = 5.86 T and V = 444 m³ (the file's own scale), s = 0.3,
+  0.2 s, N ≥ 1000. The reference is 2470 of 10⁴ lost (Paul et al. 2022,
+  Table 2), and the result must match within 2σ (σ ≈ 1.4 % at N = 1000). The
+  LP precise QA at the PRL's Protocol A loses only "a few" of 5000.
+- **G4 convergence.** Halving the step changes the loss fraction by < 1σ. There
+  are no failed orbits, and after P2c there are no axis-unresolved orbits.
+- **G5 wall time.** 1000 × 1e-2 s in ≤ 5 min on the M3 Max laptop (10 devices,
+  load < 4, compile included), and 5000 ≤ 25 min. Record it in a cited
+  `benchmarks/` JSON and time it A/B/A/B on a pinned SHA.
+
+### T.7 README
+
+In the first "Inspect the physics" bullet and in "Solve, plot and restart",
+add `vmex --scale wout_my_case.nc` beside the `--plot`/`--booz` lines, plus
+one sentence: "`--scale` writes `*_scaled` at ARIES-CS size (a = 1.70 m,
+⟨B⟩ = 5.86 T); two factors `B R` scale by hand." Add
+`vmex wout_my_case.nc --trace` with its one-line output and the loss-fraction
+figure once G2 passes. Stay within the README line cap.
+
+### T.8 Risks
+
+- **Convention spread.** B₀₀(axis) = 5.7 T and ⟨B⟩ = 5.86 T differ by up to
+  ~10 % on real configurations. State the convention in every output and
+  figure.
+- **1e-2 s only captures prompt losses.** Published losses are at 0.2 s. Keep
+  G3 on a slow lane and never compare 1e-2 s numbers against 0.2 s tables.
+- **Merges and releases are gated.** Every ESSOS merge needs maintainer
+  approval and every release needs manual review. P1 must work on 0.17.
+- **`vmap` lockstep.** One slow orbit sets the wall time. Adaptive stepping
+  under `vmap` is 5.6× slower; P2d must measure it and must not assume it.
+- **Scope limits.** `lasym` wouts stay rejected, since ESSOS reads symmetric
+  tables only. A finite-β Boozer field needs the B_s/K term, or P2b is
+  vacuum-only.
+- **Device count.** Forcing host devices is process-global. Check solve+trace
+  in one process and GPU hosts, which must not get a forced CPU device count.
 
 ## Current status
 
