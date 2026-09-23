@@ -3149,12 +3149,15 @@ def _solve_implicit_status_bwd(cfg, res, gbar):
             cfg, (prm, solved, dof_mask), cotangent
         )[0]
 
-    gradient = jax.lax.cond(
-        status == 0,
-        success,
-        lambda _: zeros,
-        (params, state, mask, state_bar),
-    )
+    operands = (params, state, mask, state_bar)
+    if not isinstance(status, jax.core.Tracer):
+        # An un-jitted gradient runs this rule host-eagerly with a concrete
+        # status. A lax.cond here would be traced and compiled again on every
+        # call (the success branch captures per-call linearization data as
+        # constants); the free-boundary rule branches the same way.
+        gradient = success(operands) if int(status) == 0 else zeros
+    else:
+        gradient = jax.lax.cond(status == 0, success, lambda _: zeros, operands)
     return (_device_pin(cfg, gradient),)
 
 

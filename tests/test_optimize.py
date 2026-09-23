@@ -1604,6 +1604,46 @@ def test_subproblem_ladder_compiles_once():
         f"{compiles_after_second_rung - compiles_after_first_rung} programs")
 
 
+def test_eager_state_objective_gradient_compiles_once():
+    """An un-jitted value_and_grad over a state objective reuses its programs.
+
+    With the status branch as a ``lax.cond``, every eager call traced and
+    compiled the branch again, because each call's state and linearization
+    data entered it as new constants (7-15 s of XLA per call on this 5-surface
+    deck). A concrete status now takes its branch in Python, and the jitted
+    gradient, where the status is abstract, is unchanged.
+    """
+    import jax.monitoring
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(
+        inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4),
+        ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]))
+    problem = opt.VmecProblem.from_tuples(
+        inp, [(opt.aspect_ratio, 4.0, 1.0)], max_mode=1, use_ess=False)
+
+    def objective(x):
+        return problem.jax_objective_from_state(
+            x, lambda state, runtime: jnp.atleast_1d(opt.aspect_ratio(state, runtime)),
+            n_extra_terms=1)
+
+    eager = jax.value_and_grad(objective, has_aux=True)
+    points = [jnp.asarray(problem.x0) * (1.0 + 1.0e-3 * k) for k in range(3)]
+    eager(points[0])
+    eager(points[1])
+    compiles = []
+    jax.monitoring.register_event_duration_secs_listener(
+        lambda name, duration, **_: compiles.append(name)
+        if name.endswith("backend_compile_duration") else None)
+    (value, _), gradient = eager(points[2])
+    assert compiles == [], f"an eager repeat compiled {len(compiles)} programs"
+    (value_jit, _), gradient_jit = jax.jit(eager)(points[2])
+    np.testing.assert_allclose(float(value), float(value_jit), rtol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(gradient), np.asarray(gradient_jit),
+                               rtol=1.0e-8, atol=1.0e-12)
+
+
 def test_host_state_runtime_is_the_unanchored_forward_solve(monkeypatch):
     """Figures read a plain forward solve; only the adjoint lane anchors it."""
     from vmex.core import implicit as imp
