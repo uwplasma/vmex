@@ -1,0 +1,24 @@
+diff --git a/benchmarks/winding_surface_optimization.py b/benchmarks/winding_surface_optimization.py
+index 41d5eeb6e0c958672ac8295c9f9824f6fc935ca7..f59fe6a07bc3ccc5498860532095e85e6c944934 100644
+--- a/benchmarks/winding_surface_optimization.py
++++ b/benchmarks/winding_surface_optimization.py
+@@ -1176,17 +1176,11 @@ def plot_directional_fidelity(record: dict, path: Path) -> None:
+         axis.set_yscale("log")
+         axis.grid(alpha=0.25)
+     handles, legend_labels = axes[0].get_legend_handles_labels()
+-    fig.legend(
+-        handles,
+-        legend_labels,
+-        loc="upper center",
+-        bbox_to_anchor=(0.5, 1.055),
+-        ncol=len(labels),
+-    )
++    fig.legend(handles, legend_labels, loc="upper center", ncol=len(labels))
+     fig.suptitle(
+         f"Outer-gradient fidelity against five-point finite differences "
+         f"(step={step:g})",
+-        y=1.12,
++        y=1.03,
+     )
+     fig.savefig(path, format="svg", bbox_inches="tight")
+     plt.close(fig)

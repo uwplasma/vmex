@@ -1,0 +1,72 @@
+diff --git a/benchmarks/winding_surface_optimization.py b/benchmarks/winding_surface_optimization.py
+index 41d5eeb6e0c958672ac8295c9f9824f6fc935ca7..8f82e34b8c3f3980364c84c7531fcee8cdaa0221 100644
+--- a/benchmarks/winding_surface_optimization.py
++++ b/benchmarks/winding_surface_optimization.py
+@@ -749,14 +749,6 @@ def run(args: argparse.Namespace) -> dict:
+                 for label in variants
+             )
+
+-    context_labels = args.context_variants or list(sources)
+-    unknown_context_labels = sorted(set(context_labels) - set(sources))
+-    if unknown_context_labels:
+-        raise ValueError(
+-            "unknown --context-variants labels: "
+-            + ", ".join(unknown_context_labels)
+-        )
+-
+     context = []
+     for case_name in args.context_cases:
+         case = CASES[case_name]
+@@ -802,8 +794,7 @@ def run(args: argparse.Namespace) -> dict:
+                     reference_outputs,
+                     args.context_reference_scale,
+                 ))
+-            for label in context_labels:
+-                source = sources[label]
++            for label, source in sources.items():
+                 print(
+                     f"context case={case.name} resolution={resolution} variant={label}",
+                     flush=True,
+@@ -860,7 +851,6 @@ def run(args: argparse.Namespace) -> dict:
+             "resolutions": args.resolutions,
+             "context_cases": args.context_cases,
+             "context_resolutions": args.context_resolutions,
+-            "context_variants": context_labels,
+             "field_periods": 2,
+             "active_dofs": 25,
+             "timing_protocol": "isolated compile; one untimed warmup; all warm samples retained",
+@@ -1176,17 +1166,11 @@ def plot_directional_fidelity(record: dict, path: Path) -> None:
+         axis.set_yscale("log")
+         axis.grid(alpha=0.25)
+     handles, legend_labels = axes[0].get_legend_handles_labels()
+-    fig.legend(
+-        handles,
+-        legend_labels,
+-        loc="upper center",
+-        bbox_to_anchor=(0.5, 1.055),
+-        ncol=len(labels),
+-    )
++    fig.legend(handles, legend_labels, loc="upper center", ncol=len(labels))
+     fig.suptitle(
+         f"Outer-gradient fidelity against five-point finite differences "
+         f"(step={step:g})",
+-        y=1.12,
++        y=1.03,
+     )
+     fig.savefig(path, format="svg", bbox_inches="tight")
+     plt.close(fig)
+@@ -1263,14 +1247,6 @@ def main() -> None:
+     parser.add_argument(
+         "--context-resolutions", nargs="+", type=int, default=[12, 16]
+     )
+-    parser.add_argument(
+-        "--context-variants",
+-        nargs="+",
+-        help=(
+-            "variant labels to measure through the inner solve; defaults to "
+-            "every --variant label"
+-        ),
+-    )
+     parser.add_argument("--repeats", type=int, default=9)
+     parser.add_argument("--context-repeats", type=int, default=3)
+     parser.add_argument(

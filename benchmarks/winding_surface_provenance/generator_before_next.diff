@@ -1,0 +1,739 @@
+diff --git a/benchmarks/winding_surface_optimization.py b/benchmarks/winding_surface_optimization.py
+index 41d5eeb6e0c958672ac8295c9f9824f6fc935ca7..a404a4b6bc6ec0a14afdee5e4c11a9d206eca4ae 100644
+--- a/benchmarks/winding_surface_optimization.py
++++ b/benchmarks/winding_surface_optimization.py
+@@ -7,15 +7,12 @@ revision.  It measures two deliberately separate contexts:
+
+ * ``standalone`` evaluates the entropy/PCA scalar, its gradient, and an HVP on
+   fixed winding and plasma surfaces.  The unsplit full-matrix SVD is the fidelity
+-  reference.  ``standalone_pairwise`` repeats the same protocol for the sum of
+-  plasma clearance and winding self-approach, retaining the unreduced full pair
+-  set as its fidelity reference.
++  reference.
+ * ``optimization_context`` differentiates outer entropy, inverse-distance, and
+-  mixed observables through the inner L-BFGS-B winding-surface solve.  Patched
+-  copies of the original full-SVD implementation with ``maxiter=100`` provide
+-  independent dense references with both frozen and live normalization scales;
+-  optional five-point finite differences check the total outer derivative.
+-  The historical implementation itself remains unmodified at four iterations.
++  mixed observables through the inner L-BFGS-B winding-surface solve.  A patched
++  copy of the original full-SVD implementation with ``maxiter=100`` is the
++  fidelity reference; the historical implementation itself remains unmodified
++  at four iterations.
+
+ Every timed executable is compiled in isolation, warmed once, and sampled with
+ the same deterministic cases and directions.  Compilation and warm execution
+@@ -45,7 +42,6 @@ import jax
+ import jax.numpy as jnp
+ from jaxopt import LBFGSB
+ from jaxopt.implicit_diff import root_jvp
+-from jaxopt.linear_solve import solve_lu
+ import matplotlib
+
+ matplotlib.use("Agg")
+@@ -96,7 +92,6 @@ FUNCTIONS = {
+     "_active_dof_bounds",
+     "_solve_winding_surface",
+     "_winding_linear_solve",
+-    "_winding_native_gcrot_solve",
+     "_solve_winding_surface_jvp",
+ }
+
+@@ -139,18 +134,7 @@ def _source_at(ref: str) -> tuple[str, str]:
+     return commit, source
+
+
+-def _namespace(
+-    source: str,
+-    *,
+-    resolution: int,
+-    reference: bool = False,
+-    live_scales: bool = False,
+-) -> dict:
+-    if live_scales:
+-        marker = "scales = jax.lax.stop_gradient(scales)"
+-        if marker not in source:
+-            raise ValueError("live-scale reference patch target was not found")
+-        source = source.replace(marker, "scales = scales", 1)
++def _namespace(source: str, *, resolution: int, reference: bool = False) -> dict:
+     if reference:
+         source = source.replace(
+             "maxiter=4, tol=1e-6",
+@@ -169,7 +153,6 @@ def _namespace(
+         "jnp": jnp,
+         "LBFGSB": LBFGSB,
+         "root_jvp": root_jvp,
+-        "solve_lu": solve_lu,
+         "gcrot": gcrot,
+         "MU0": 4 * np.pi * 1e-7,
+         "nfp": 2,
+@@ -212,16 +195,7 @@ def _namespace(
+
+         namespace["root_jvp"] = dense_root_jvp
+     namespace["_benchmark_maxiter"] = (
+-        100
+-        if reference or "maxiter=WINDING_MAXITER" in source
+-        else 200
+-        if "maxiter=200" in source
+-        else 4
+-    )
+-    namespace["_benchmark_reverse"] = (
+-        "_winding_linear_solve" in namespace
+-        or "implicit_diff_solve=solve_lu" in source
+-        or "implicit_diff_solve=_winding_native_gcrot_solve" in source
++        100 if reference or "maxiter=WINDING_MAXITER" in source else 4
+     )
+     return namespace
+
+@@ -331,24 +305,17 @@ def _variant_objectives(namespace: dict, winding, plasma, weights, winding_rc):
+     return _full_objectives(namespace, winding, plasma, weights, winding_rc)
+
+
+-def _standalone_function(
+-    namespace: dict, winding, plasma, objective: str = "spectral_entropy"
+-):
++def _standalone_function(namespace: dict, winding, plasma):
+     winding_rc = namespace["surface_coefficients_from_dofs"](winding, 2, 2)[0]
+     weights = namespace["mode_weights_from_coefficients"](winding_rc)
+
+-    def scalar(value):
++    def pca(value):
+         winding_value, plasma_value = jnp.split(value, 2)
+-        objectives = _variant_objectives(
++        return _variant_objectives(
+             namespace, winding_value, plasma_value, weights, winding_rc
+-        )
+-        if objective == "spectral_entropy":
+-            return objectives[0]
+-        if objective == "pairwise_geometry":
+-            return objectives[3] + objectives[6]
+-        raise ValueError(f"unknown standalone objective {objective!r}")
++        )[0]
+
+-    return scalar
++    return pca
+
+
+ def _standalone_row(
+@@ -357,18 +324,17 @@ def _standalone_row(
+     case: GeometryCase,
+     resolution: int,
+     repeats: int,
+-    objective_name: str = "spectral_entropy",
+ ) -> tuple[dict[str, object], dict[str, np.ndarray]]:
+     winding, plasma = _dofs(case)
+     value = jnp.concatenate((winding, plasma))
+     rng = np.random.default_rng(case.seed + 10_000 + resolution)
+     direction = jnp.asarray(rng.normal(size=value.shape))
+     direction /= jnp.linalg.norm(direction)
+-    scalar = _standalone_function(namespace, winding, plasma, objective_name)
+-    gradient = jax.grad(scalar)
++    pca = _standalone_function(namespace, winding, plasma)
++    gradient = jax.grad(pca)
+
+-    value_timing, objective_value = _measure(
+-        lambda: (jax.jit(scalar), (value,)), repeats
++    value_timing, objective = _measure(
++        lambda: (jax.jit(pca), (value,)), repeats
+     )
+     gradient_timing, derivative = _measure(
+         lambda: (jax.jit(gradient), (value,)), repeats
+@@ -381,7 +347,7 @@ def _standalone_row(
+         repeats,
+     )
+     outputs = {
+-        "value": np.asarray(objective_value),
++        "value": np.asarray(objective),
+         "gradient": np.asarray(derivative),
+         "hvp": np.asarray(hvp),
+     }
+@@ -390,14 +356,13 @@ def _standalone_row(
+         "resolution": resolution,
+         "matrix_order": resolution * resolution,
+         "variant": label,
+-        "objective": objective_name,
+         "timing": {
+             "value": value_timing,
+             "gradient": gradient_timing,
+             "hvp": hvp_timing,
+         },
+         "outputs": {
+-            "value": float(objective_value),
++            "value": float(objective),
+             "gradient_l2": float(jnp.linalg.norm(derivative)),
+             "hvp_l2": float(jnp.linalg.norm(hvp)),
+         },
+@@ -409,22 +374,6 @@ def _context_functions(namespace: dict, case: GeometryCase):
+     base_winding, base_plasma = _dofs(case)
+     active_indices = tuple(range(base_winding.size))
+     active_array = jnp.asarray(active_indices)
+-    normalization_winding_rc = namespace["surface_coefficients_from_dofs"](
+-        base_winding, 2, 2
+-    )[0]
+-    normalization_weights = namespace["mode_weights_from_coefficients"](
+-        normalization_winding_rc
+-    )
+-    normalization_scales = jax.tree.map(
+-        jax.lax.stop_gradient,
+-        _variant_objectives(
+-            namespace,
+-            base_winding,
+-            base_plasma,
+-            normalization_weights,
+-            normalization_winding_rc,
+-        ),
+-    )
+
+     def geometry(delta):
+         plasma = base_plasma + delta
+@@ -473,13 +422,10 @@ def _context_functions(namespace: dict, case: GeometryCase):
+         objectives = _variant_objectives(
+             namespace, optimized, plasma, weights, winding_rc
+         )
+-        # Fixed base-point factors put entropy and inverse distance on similar
+-        # scales without changing the mathematical derivative of the sampled
+-        # outer map.  Recomputing these factors at every ``delta`` and then
+-        # applying stop_gradient would make AD inconsistent with finite
+-        # differences of the values returned by this benchmark.
+-        entropy_normalized = objectives[0] / normalization_scales[0]
+-        inverse_distance_normalized = normalization_scales[3] / objectives[3]
++        entropy_normalized = objectives[0] / jax.lax.stop_gradient(scales[0])
++        inverse_distance_normalized = (
++            jax.lax.stop_gradient(scales[3]) / objectives[3]
++        )
+         return jnp.stack((entropy_normalized, inverse_distance_normalized))
+
+     def stationarity(delta, solution):
+@@ -530,8 +476,6 @@ def _context_row(
+     case: GeometryCase,
+     resolution: int,
+     repeats: int,
+-    directional_steps: tuple[float, ...] = (),
+-    directional_directions: int = 0,
+ ) -> tuple[dict[str, object], dict[str, np.ndarray]]:
+     solve, observables, stationarity = _context_functions(namespace, case)
+     delta = jnp.zeros(25)
+@@ -544,7 +488,7 @@ def _context_row(
+     # The current implementation's certified custom linear solve is
+     # transposable, so it takes the one-row reverse/adjoint path selected by
+     # ``implicit_jacobian_method='auto'`` in the real optimization.
+-    if namespace.get("_benchmark_reverse", False):
++    if "_winding_linear_solve" in namespace:
+         gradient = jax.grad(scalar_observable, argnums=0)
+         differentiation_mode = "reverse"
+     else:
+@@ -574,8 +518,7 @@ def _context_row(
+         gradient_timings[name] = _timing_summary(samples)
+         gradient_timings[name]["compile_and_first_ms"] = compile_ms
+         gradients[name] = np.asarray(output)
+-    compiled_observables = jax.jit(observables)
+-    observable_values = np.asarray(_tree_block(compiled_observables(delta)))
++    observable_values = np.asarray(_tree_block(jax.jit(observables)(delta)))
+     optimality = float(_tree_block(jax.jit(stationarity)(delta, solution)))
+     outputs = {
+         "observables": observable_values,
+@@ -601,54 +544,6 @@ def _context_row(
+         },
+         "differentiation_mode": differentiation_mode,
+     }
+-    directional_fidelity = []
+-    rng = np.random.default_rng(case.seed + 20_000 + resolution)
+-    for direction_index in range(directional_directions):
+-        direction = rng.normal(size=delta.shape)
+-        direction /= np.linalg.norm(direction)
+-        direction_array = jnp.asarray(direction)
+-        ad_directional = {
+-            name: float(np.vdot(gradient_value, direction))
+-            for name, gradient_value in gradients.items()
+-        }
+-        for step in directional_steps:
+-            plus_two = np.asarray(_tree_block(compiled_observables(
+-                2 * step * direction_array
+-            )))
+-            plus_one = np.asarray(_tree_block(compiled_observables(
+-                step * direction_array
+-            )))
+-            minus_one = np.asarray(_tree_block(compiled_observables(
+-                -step * direction_array
+-            )))
+-            minus_two = np.asarray(_tree_block(compiled_observables(
+-                -2 * step * direction_array
+-            )))
+-            fd_observables = (
+-                -plus_two + 8 * plus_one - 8 * minus_one + minus_two
+-            ) / (12 * step)
+-            fd_directional = {
+-                "entropy": float(fd_observables[0]),
+-                "inverse_distance": float(fd_observables[1]),
+-                "mixed": float(np.vdot(
+-                    np.asarray(OBJECTIVE_WEIGHTS["mixed"]), fd_observables
+-                )),
+-            }
+-            directional_fidelity.append({
+-                "direction": direction_index,
+-                "step": step,
+-                "ad": ad_directional,
+-                "finite_difference": fd_directional,
+-                "error": {
+-                    name: {
+-                        "absolute": abs(ad_directional[name] - value),
+-                        "relative": abs(ad_directional[name] - value)
+-                        / max(abs(value), 1e-300),
+-                    }
+-                    for name, value in fd_directional.items()
+-                },
+-            })
+-    row["directional_fidelity"] = directional_fidelity
+     return row, outputs
+
+
+@@ -660,24 +555,6 @@ def _with_fidelity(row: dict, outputs: dict, reference: dict) -> dict:
+     return row
+
+
+-def _with_reference_fidelities(
+-    row: dict,
+-    outputs: dict,
+-    references: dict[str, dict[str, np.ndarray]],
+-    primary: str,
+-) -> dict:
+-    """Attach a primary fidelity result and every named reference result."""
+-    row = _with_fidelity(row, outputs, references[primary])
+-    row["fidelity_by_reference"] = {
+-        name: {
+-            quantity: _error(value, reference[quantity])
+-            for quantity, value in outputs.items()
+-        }
+-        for name, reference in references.items()
+-    }
+-    return row
+-
+-
+ def _parse_variants(values: list[str]) -> dict[str, str]:
+     variants = {}
+     for value in values:
+@@ -722,108 +599,40 @@ def run(args: argparse.Namespace) -> dict:
+                 for label in variants
+             )
+
+-    standalone_pairwise = []
+-    for case_name in args.cases:
+-        case = CASES[case_name]
+-        for resolution in args.resolutions:
+-            rows = {}
+-            outputs = {}
+-            for label, source in sources.items():
+-                print(
+-                    f"standalone-pairwise case={case.name} "
+-                    f"resolution={resolution} variant={label}",
+-                    flush=True,
+-                )
+-                namespace = _namespace(source, resolution=resolution)
+-                rows[label], outputs[label] = _standalone_row(
+-                    label,
+-                    namespace,
+-                    case,
+-                    resolution,
+-                    args.repeats,
+-                    objective_name="pairwise_geometry",
+-                )
+-            reference = outputs[args.standalone_reference]
+-            standalone_pairwise.extend(
+-                _with_fidelity(rows[label], outputs[label], reference)
+-                for label in variants
+-            )
+-
+-    context_labels = args.context_variants or list(sources)
+-    unknown_context_labels = sorted(set(context_labels) - set(sources))
+-    if unknown_context_labels:
+-        raise ValueError(
+-            "unknown --context-variants labels: "
+-            + ", ".join(unknown_context_labels)
+-        )
+-
+     context = []
+     for case_name in args.context_cases:
+         case = CASES[case_name]
+         for resolution in args.context_resolutions:
+-            reference_rows = {}
+-            reference_outputs = {}
+-            reference_modes = (
+-                ("frozen_scale", False),
+-                ("live_scale", True),
+-            ) if args.dual_scale_reference else (
+-                (args.context_reference_scale,
+-                 args.context_reference_scale == "live_scale"),
++            print(
++                f"context case={case.name} resolution={resolution} "
++                "variant=full_svd_100_reference",
++                flush=True,
+             )
+-            for reference_name, live_scales in reference_modes:
+-                print(
+-                    f"context case={case.name} resolution={resolution} "
+-                    f"variant=full_svd_100_{reference_name}_reference",
+-                    flush=True,
+-                )
+-                reference_namespace = _namespace(
+-                    baseline_source,
+-                    resolution=resolution,
+-                    reference=True,
+-                    live_scales=live_scales,
+-                )
+-                reference_namespace["_benchmark_reference"] = True
+-                label = f"full_svd_100_{reference_name}_reference"
+-                reference_rows[reference_name], reference_outputs[reference_name] = (
+-                    _context_row(
+-                        label,
+-                        reference_namespace,
+-                        case,
+-                        resolution,
+-                        args.context_repeats,
+-                        tuple(args.directional_steps),
+-                        args.directional_directions,
+-                    )
+-                )
+-            for reference_name, row in reference_rows.items():
+-                context.append(_with_reference_fidelities(
+-                    row,
+-                    reference_outputs[reference_name],
+-                    reference_outputs,
+-                    args.context_reference_scale,
+-                ))
+-            for label in context_labels:
+-                source = sources[label]
++            reference_namespace = _namespace(
++                baseline_source, resolution=resolution, reference=True
++            )
++            reference_namespace["_benchmark_reference"] = True
++            reference_row, reference_outputs = _context_row(
++                "full_svd_100_reference",
++                reference_namespace,
++                case,
++                resolution,
++                args.context_repeats,
++            )
++            reference_row = _with_fidelity(
++                reference_row, reference_outputs, reference_outputs
++            )
++            context.append(reference_row)
++            for label, source in sources.items():
+                 print(
+                     f"context case={case.name} resolution={resolution} variant={label}",
+                     flush=True,
+                 )
+                 namespace = _namespace(source, resolution=resolution)
+                 row, outputs = _context_row(
+-                    label,
+-                    namespace,
+-                    case,
+-                    resolution,
+-                    args.context_repeats,
+-                    tuple(args.directional_steps),
+-                    args.directional_directions,
++                    label, namespace, case, resolution, args.context_repeats
+                 )
+-                context.append(_with_reference_fidelities(
+-                    row,
+-                    outputs,
+-                    reference_outputs,
+-                    args.context_reference_scale,
+-                ))
++                context.append(_with_fidelity(row, outputs, reference_outputs))
+
+     return {
+         "_provenance": {
+@@ -860,29 +669,18 @@ def run(args: argparse.Namespace) -> dict:
+             "resolutions": args.resolutions,
+             "context_cases": args.context_cases,
+             "context_resolutions": args.context_resolutions,
+-            "context_variants": context_labels,
+             "field_periods": 2,
+             "active_dofs": 25,
+             "timing_protocol": "isolated compile; one untimed warmup; all warm samples retained",
+             "fidelity_protocol": {
+                 "standalone": "original unsplit full SVD at identical inputs",
+-                "standalone_pairwise": (
+-                    "original full pair sets at identical inputs"
+-                ),
+                 "optimization_context": (
+-                    "original full SVD patched from maxiter=4 to maxiter=100; "
+-                    "25x25 optimality Jacobian solved directly in float64; "
+-                    f"primary normalization-scale derivative mode is "
+-                    f"{args.context_reference_scale}"
++                    "original full SVD patched only from maxiter=4 to maxiter=100; "
++                    "25x25 optimality Jacobian solved directly in float64"
+                 ),
+             },
+-            "context_reference_scale": args.context_reference_scale,
+-            "dual_scale_reference": args.dual_scale_reference,
+-            "directional_steps": args.directional_steps,
+-            "directional_directions": args.directional_directions,
+         },
+         "standalone": standalone,
+-        "standalone_pairwise": standalone_pairwise,
+         "optimization_context": context,
+     }
+
+@@ -891,12 +689,6 @@ COLORS = {
+     "original": "#6b7280",
+     "current": "#2563eb",
+     "new": "#059669",
+-    "pr366": "#2563eb",
+-    "pr367": "#d97706",
+-    "combined": "#059669",
+-    "live_gcrot": "#059669",
+-    "native_lu": "#7c3aed",
+-    "native_gcrot": "#dc2626",
+     "full_svd_100_reference": "#111827",
+ }
+
+@@ -916,22 +708,9 @@ def _aggregate(rows: list[dict], metric: Callable[[dict], float]):
+     return grouped
+
+
+-def _finish_figure(fig, axes, labels: list[str], title: str) -> None:
+-    handles, legend_labels = axes[0, 0].get_legend_handles_labels()
+-    fig.legend(
+-        handles,
+-        legend_labels,
+-        loc="upper center",
+-        bbox_to_anchor=(0.5, 0.955),
+-        ncol=max(1, len(labels)),
+-    )
+-    fig.suptitle(title, y=0.995)
+-    fig.subplots_adjust(top=0.86, bottom=0.09, hspace=0.38, wspace=0.28)
+-
+-
+ def plot_runtime(record: dict, path: Path) -> None:
+     labels = _labels(record)
+-    fig, axes = plt.subplots(2, 2, figsize=(10.5, 7.4))
++    fig, axes = plt.subplots(2, 2, figsize=(10.5, 7.4), constrained_layout=True)
+     panels = (
+         (axes[0, 0], "Value", lambda row: row["timing"]["value"]["median_ms"]),
+         (axes[0, 1], "Gradient", lambda row: row["timing"]["gradient"]["median_ms"]),
+@@ -976,19 +755,16 @@ def plot_runtime(record: dict, path: Path) -> None:
+     axis.set_ylabel("warm median (ms)")
+     axis.set_yscale("log")
+     axis.grid(alpha=0.25)
+-    _finish_figure(
+-        fig,
+-        axes,
+-        labels,
+-        "Winding objective runtime scaling (median and case range)",
+-    )
++    handles, legend_labels = axes[0, 0].get_legend_handles_labels()
++    fig.legend(handles, legend_labels, loc="outside upper center", ncol=max(1, len(labels)))
++    fig.suptitle("Winding objective runtime scaling (median and case range)", y=1.04)
+     fig.savefig(path, format="svg", bbox_inches="tight")
+     plt.close(fig)
+
+
+ def plot_fidelity(record: dict, path: Path) -> None:
+     labels = _labels(record)
+-    fig, axes = plt.subplots(2, 2, figsize=(10.5, 7.4))
++    fig, axes = plt.subplots(2, 2, figsize=(10.5, 7.4), constrained_layout=True)
+     panels = (
+         (
+             axes[0, 0],
+@@ -1036,158 +812,9 @@ def plot_fidelity(record: dict, path: Path) -> None:
+         axis.set_ylabel("absolute error" if "objective" in title else "relative L2 error")
+         axis.set_yscale("log")
+         axis.grid(alpha=0.25)
+-    _finish_figure(
+-        fig,
+-        axes,
+-        labels,
+-        "Fidelity against full-SVD references (median and case range)",
+-    )
+-    fig.savefig(path, format="svg", bbox_inches="tight")
+-    plt.close(fig)
+-
+-
+-def plot_pairwise(record: dict, path: Path) -> None:
+-    """Plot isolated pairwise runtime and fidelity at every resolution."""
+-    labels = _labels(record)
+-    rows = record["standalone_pairwise"]
+-    fig, axes = plt.subplots(2, 3, figsize=(13.5, 7.4))
+-    timing_panels = (
+-        (axes[0, 0], "Value", lambda row: row["timing"]["value"]["median_ms"]),
+-        (
+-            axes[0, 1],
+-            "Gradient",
+-            lambda row: row["timing"]["gradient"]["median_ms"],
+-        ),
+-        (axes[0, 2], "HVP", lambda row: row["timing"]["hvp"]["median_ms"]),
+-    )
+-    fidelity_panels = (
+-        (
+-            axes[1, 0],
+-            "Value error",
+-            lambda row: row["fidelity"]["value"]["absolute_max"],
+-        ),
+-        (
+-            axes[1, 1],
+-            "Gradient error",
+-            lambda row: row["fidelity"]["gradient"]["relative_l2"],
+-        ),
+-        (
+-            axes[1, 2],
+-            "HVP error",
+-            lambda row: row["fidelity"]["hvp"]["relative_l2"],
+-        ),
+-    )
+-    for axis, title, metric in timing_panels:
+-        grouped = _aggregate(rows, metric)
+-        for label in labels:
+-            x = sorted({resolution for variant, resolution in grouped if variant == label})
+-            values = [grouped[label, resolution] for resolution in x]
+-            color = COLORS.get(label)
+-            axis.plot(
+-                x, [statistics.median(item) for item in values], "o-",
+-                label=label, color=color,
+-            )
+-            axis.fill_between(
+-                x, [min(item) for item in values], [max(item) for item in values],
+-                alpha=0.13, color=color,
+-            )
+-        axis.set_title(title)
+-        axis.set_xlabel("toroidal = poloidal resolution")
+-        axis.set_ylabel("warm median (ms)")
+-        axis.set_yscale("log")
+-        axis.grid(alpha=0.25)
+-
+-    floor = np.finfo(float).eps
+-    for axis, title, metric in fidelity_panels:
+-        grouped = _aggregate(rows, lambda row: max(metric(row), floor))
+-        for label in labels:
+-            x = sorted({resolution for variant, resolution in grouped if variant == label})
+-            values = [grouped[label, resolution] for resolution in x]
+-            color = COLORS.get(label)
+-            axis.plot(
+-                x, [statistics.median(item) for item in values], "o-",
+-                label=label, color=color,
+-            )
+-            axis.fill_between(
+-                x, [min(item) for item in values], [max(item) for item in values],
+-                alpha=0.13, color=color,
+-            )
+-        axis.set_title(title)
+-        axis.set_xlabel("toroidal = poloidal resolution")
+-        axis.set_ylabel("absolute error" if "Value" in title else "relative L2 error")
+-        axis.set_yscale("log")
+-        axis.grid(alpha=0.25)
+-    _finish_figure(
+-        fig,
+-        axes,
+-        labels,
+-        "Pairwise geometry runtime and full-pair fidelity (median and case range)",
+-    )
+-    fig.savefig(path, format="svg", bbox_inches="tight")
+-    plt.close(fig)
+-
+-
+-def plot_directional_fidelity(record: dict, path: Path) -> None:
+-    """Plot AD agreement with five-point finite differences."""
+-    labels = _labels(record)
+-    rows = [
+-        row for row in record["optimization_context"]
+-        if row["variant"] in labels and row["directional_fidelity"]
+-    ]
+-    if not rows:
+-        return
+-    step = record["configuration"]["directional_steps"][0]
+-    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.4), constrained_layout=True)
+-    for axis, objective in zip(axes, OBJECTIVE_WEIGHTS):
+-        grouped = {}
+-        for row in rows:
+-            values = [
+-                item["error"][objective]["relative"]
+-                for item in row["directional_fidelity"]
+-                if item["step"] == step
+-            ]
+-            grouped.setdefault(
+-                (row["variant"], row["resolution"]), []
+-            ).extend(values)
+-        for label in labels:
+-            resolutions = sorted(
+-                resolution for variant, resolution in grouped
+-                if variant == label
+-            )
+-            samples = [grouped[label, resolution] for resolution in resolutions]
+-            color = COLORS.get(label)
+-            axis.plot(
+-                resolutions,
+-                [statistics.median(values) for values in samples],
+-                "o-",
+-                label=label,
+-                color=color,
+-            )
+-            axis.fill_between(
+-                resolutions,
+-                [min(values) for values in samples],
+-                [max(values) for values in samples],
+-                alpha=0.13,
+-                color=color,
+-            )
+-        axis.set_title(objective.replace("_", " ").title())
+-        axis.set_xlabel("toroidal = poloidal resolution")
+-        axis.set_ylabel("relative directional error")
+-        axis.set_yscale("log")
+-        axis.grid(alpha=0.25)
+-    handles, legend_labels = axes[0].get_legend_handles_labels()
+-    fig.legend(
+-        handles,
+-        legend_labels,
+-        loc="upper center",
+-        bbox_to_anchor=(0.5, 1.055),
+-        ncol=len(labels),
+-    )
+-    fig.suptitle(
+-        f"Outer-gradient fidelity against five-point finite differences "
+-        f"(step={step:g})",
+-        y=1.12,
+-    )
++    handles, legend_labels = axes[0, 0].get_legend_handles_labels()
++    fig.legend(handles, legend_labels, loc="outside upper center", ncol=max(1, len(labels)))
++    fig.suptitle("Fidelity against full-SVD references (median and case range)", y=1.04)
+     fig.savefig(path, format="svg", bbox_inches="tight")
+     plt.close(fig)
+
+@@ -1263,24 +890,8 @@ def main() -> None:
+     parser.add_argument(
+         "--context-resolutions", nargs="+", type=int, default=[12, 16]
+     )
+-    parser.add_argument(
+-        "--context-variants",
+-        nargs="+",
+-        help=(
+-            "variant labels to measure through the inner solve; defaults to "
+-            "every --variant label"
+-        ),
+-    )
+     parser.add_argument("--repeats", type=int, default=9)
+     parser.add_argument("--context-repeats", type=int, default=3)
+-    parser.add_argument(
+-        "--context-reference-scale",
+-        choices=("frozen_scale", "live_scale"),
+-        default="frozen_scale",
+-    )
+-    parser.add_argument("--dual-scale-reference", action="store_true")
+-    parser.add_argument("--directional-steps", nargs="*", type=float, default=[])
+-    parser.add_argument("--directional-directions", type=int, default=0)
+     parser.add_argument("--output", type=Path, required=True)
+     parser.add_argument("--figure-prefix", type=Path)
+     args = parser.parse_args()
+@@ -1295,13 +906,6 @@ def main() -> None:
+         plot_runtime(record, args.figure_prefix.with_name(args.figure_prefix.name + "_runtime.svg"))
+         plot_fidelity(record, args.figure_prefix.with_name(args.figure_prefix.name + "_fidelity.svg"))
+         plot_speedup(record, args.figure_prefix.with_name(args.figure_prefix.name + "_speedup.svg"))
+-        plot_pairwise(record, args.figure_prefix.with_name(args.figure_prefix.name + "_pairwise.svg"))
+-        plot_directional_fidelity(
+-            record,
+-            args.figure_prefix.with_name(
+-                args.figure_prefix.name + "_directional.svg"
+-            ),
+-        )
+
+
+ if __name__ == "__main__":
