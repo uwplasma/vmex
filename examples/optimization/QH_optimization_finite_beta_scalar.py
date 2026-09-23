@@ -49,8 +49,8 @@ TARGET_BETA = 0.01
 # tuned (DMerc scales as PHIEDGE**-2):
 PRES_SCALE = 8.0e3
 SURFACES = np.linspace(0.1, 0.9, 8)
-MAX_MODES = [2]
-MAXITER = [20]
+MAX_MODES = [1, 2]
+MAXITER = [15, 25]
 ASPECT_TARGET = 6.0
 IOTA_TARGET = -1.1
 STABILITY_MIN_S = 0.2
@@ -65,7 +65,7 @@ SEED_PERTURBATION = 0.12
 POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 

@@ -27,7 +27,7 @@ from vmex import optimize as opt
 NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 SURFACES = np.linspace(0.1, 1.0, 10)
-MAX_MODE = 3
+MAX_MODE = 2
 MAXITER = 40
 METHOD = "L-BFGS-B"         # or "BFGS"
 PARAMETER_BOUND = 1.0

@@ -27,9 +27,9 @@ from vmex.core.qi import ConstructedQIResidual
 
 NFP = 2
 SURFACES = np.linspace(0.1, 1.0, 6)
-MAX_MODES = [3]
-MAXITER = [250]
-ASPECT_TARGET = 5.0
+MAX_MODES = [1, 2]
+MAXITER = [20, 40]
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
@@ -42,7 +42,7 @@ SEED_PERTURBATION = 0.05
 POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 
@@ -100,7 +100,7 @@ report = opt.EquilibriumReporter(
     ("mean iota", opt.mean_iota, ".4f"),
     ("mirror", opt.mirror_ratio, ".4f"),
     ("elongation", opt.max_elongation, ".4f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 equilibrium = opt.solve_equilibrium(inp)
 
 ### Run the optimization ######################################################

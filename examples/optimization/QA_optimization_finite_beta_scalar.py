@@ -49,7 +49,7 @@ TARGET_BETA = 0.01
 # tuned (DMerc scales as PHIEDGE**-2):
 PRES_SCALE = 1.0e3
 SURFACES = np.linspace(0.1, 0.9, 8)
-MAX_MODES = [2, 4]
+MAX_MODES = [1, 2]
 MAXITER = [15, 25]
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile

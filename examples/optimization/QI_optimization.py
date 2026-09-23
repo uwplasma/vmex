@@ -41,16 +41,14 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend. A max_mode = 3 stage lowered the
 # cost by 1 % for 45 % of the run, so it is not shipped:
-MAX_MODES = [2]
-MAX_NFEV = [20]
-
-# Boozer resolution the QI residual is optimized on, and the finer one the
+MAX_MODES = [1, 2]
+MAX_NFEV = [10, 15]  # Boozer resolution the QI residual is optimized on, and the finer one the
 # finished boundary is re-scored with:
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
 
 # Targets and limits:
-ASPECT_TARGET = 5.0
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
@@ -69,7 +67,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1.0e-14
 FINAL_NITER = 8000
 

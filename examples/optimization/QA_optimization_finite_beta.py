@@ -58,10 +58,8 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 3]
-MAX_NFEV = [15, 25]
-
-# Targets:
+MAX_MODES = [1, 2]
+MAX_NFEV = [10, 15]  # Targets:
 ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile

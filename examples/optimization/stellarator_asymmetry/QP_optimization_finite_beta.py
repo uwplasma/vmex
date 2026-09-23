@@ -32,13 +32,11 @@ SURFACES = np.array([0.5, 0.7, 0.9])
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [3]
-MAX_NFEV = [15]
-
-# Targets and limits.  This lane carries the beta residual but no Mercier or
+MAX_MODES = [1, 2]
+MAX_NFEV = [10, 15]  # Targets and limits.  This lane carries the beta residual but no Mercier or
 # resistive-interchange rows:
 TARGET_BETA = 0.01
-ASPECT_TARGET = 7.0
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 
@@ -62,9 +60,7 @@ MINIMUM_MPOL = 5
 # field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA); this value keeps PHIEDGE near
 # the seed deck's, where the Mercier and resistive-interchange weights were
 # tuned (DMerc scales as PHIEDGE**-2):
-PRES_SCALE = 2.0e3
-
-# Verification solve of the optimized boundary:
+PRES_SCALE = 1.0e3  # Verification solve of the optimized boundary:
 FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000

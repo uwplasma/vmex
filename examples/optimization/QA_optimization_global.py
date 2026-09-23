@@ -33,9 +33,7 @@ SEED_PERTURBATION = 0.05
 SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Highest boundary Fourier mode number that is varied:
-MAX_MODE = 3
-
-# Global phase: hops, and the L-BFGS-B iterations each hop may spend:
+MAX_MODE = 2  # Global phase: hops, and the L-BFGS-B iterations each hop may spend:
 N_BASINS = 2
 LOCAL_MAXITER = 8
 
@@ -49,7 +47,7 @@ BASIN_SEED = 7
 POLISH_NFEV = 15
 
 # Targets:
-ASPECT_TARGET = 5.0
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.37                 # minimum |iota| over the profile
 
 # Step control. One scaled variable moves a low-order coefficient by

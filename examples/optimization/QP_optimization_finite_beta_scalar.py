@@ -47,11 +47,11 @@ TARGET_BETA = 0.01
 # field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA); this value keeps PHIEDGE near
 # the seed deck's, where the Mercier and resistive-interchange weights were
 # tuned (DMerc scales as PHIEDGE**-2):
-PRES_SCALE = 2.0e3
+PRES_SCALE = 1.0e3
 SURFACES = np.array([0.5, 0.7, 0.9])
-MAX_MODES = [2, 4]
-MAXITER = [20, 20]
-ASPECT_TARGET = 7.0
+MAX_MODES = [1, 2]
+MAXITER = [15, 25]
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 ELONGATION_LIMIT = 12.0
@@ -67,7 +67,7 @@ SEED_PERTURBATION = 0.05
 POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 

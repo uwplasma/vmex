@@ -40,14 +40,14 @@ SURFACES = np.array([0.20, 0.35, 0.50, 0.65, 0.80, 0.90])
 
 # QI-only seed ladder: highest boundary mode number per stage, the residual
 # evaluations each may spend, and the ESS damping each uses:
-QI_SEED_MAX_MODES = [1, 2, 3, 4]
-QI_SEED_MAX_NFEV = [20, 30, 50, 60]
-QI_SEED_ESS_ALPHA = [1.2, 1.2, 0.9, 0.7]
+QI_SEED_MAX_MODES = [1, 2]
+QI_SEED_MAX_NFEV = [10, 15]
+QI_SEED_ESS_ALPHA = [1.2, 1.2]
 QI_SEED_WEIGHT = 1.0e3
 
 # Maximum-J ladder, one entry per stage:
-MAX_MODES = [2, 3, 4]
-MAX_NFEV = [8, 12, 30]
+MAX_MODES = [2, 2, 2]
+MAX_NFEV = [4, 4, 8]
 MAXIMUM_J_TARGETS = [0.0, -0.002, -0.005]
 MAXIMUM_J_WEIGHTS = [500.0, 2.0e3, 5.0e3]
 QI_INVARIANCE_WEIGHTS = [1.0e3, 5.0e3, 1.0e4]
@@ -56,7 +56,7 @@ MAGNETIC_WELL_WEIGHTS = [100.0, 1.0e3, 1.0e3]
 MAXJ_ESS_ALPHA = 0.7
 
 # Targets and limits:
-ASPECT_TARGET = 4.0
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 1.03                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 MAGNETIC_WELL_TARGET = 0.01
@@ -71,8 +71,8 @@ COARSE_ACTION = dict(nalpha=5, points_per_period=24, num_periods=6,
                      max_wells=16, quadrature_order=16)
 RESOLVED_ACTION = dict(nalpha=9, points_per_period=32, num_periods=10,
                        max_wells=24, quadrature_order=24)
-ACTION_MBOZ = [8, 8, 10, 10]
-ACTION_OPTIONS = [COARSE_ACTION, COARSE_ACTION, RESOLVED_ACTION, RESOLVED_ACTION]
+ACTION_MBOZ = [8, 8, 10]
+ACTION_OPTIONS = [COARSE_ACTION, COARSE_ACTION, RESOLVED_ACTION]
 
 # Field strengths that trap the same particles on every sampled line:
 TRAPPING_DEPTHS = (0.35, 0.55, 0.75)
@@ -92,7 +92,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 

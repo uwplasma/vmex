@@ -42,13 +42,11 @@ SURFACES = np.array([0.6, 0.7, 0.8, 0.9])
 
 # Vacuum QA ladder, then the maximum-J ladder: highest boundary mode number
 # varied in each stage, and the residual evaluations each stage may spend:
-QA_MAX_MODES = [2, 3, 4]
-QA_MAX_NFEV = [25, 40, 50]
-MAXJ_MAX_MODES = [3, 4]
-MAXJ_MAX_NFEV = [40, 60]
-
-# Targets:
-ASPECT_TARGET = 5.0
+QA_MAX_MODES = [1, 2]
+QA_MAX_NFEV = [10, 15]
+MAXJ_MAX_MODES = [2]
+MAXJ_MAX_NFEV = [10]  # Targets:
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 MAGNETIC_WELL_TARGET = 0.01
 TARGET_BETA = 0.025
@@ -89,7 +87,7 @@ STAGE_MAX_ITERATIONS = 3000       # forward solve cap inside an optimizer trial
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 
