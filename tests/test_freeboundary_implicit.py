@@ -348,6 +348,8 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
         lambda state: jnp.mean(state.R_cos[-1] ** 2))(saved[2])
 
     live, gradients = [], []
+    fallbacks = (im._SOLVE_STATS.get(cfg.implicit) or {}).get(
+        "adjoint_certificate_fallbacks", 0) or 0
     for index in range(3):
         # A different cotangent each time: a repeated one could be served
         # from a memo without exercising the lane at all.
@@ -362,6 +364,11 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
     assert live[2] - live[1] <= 2, (
         f"the lane stranded {live[2] - live[1]} arrays in one gradient: {live}")
     assert np.max(np.abs(gradients[0])) > 0.0
+    # The Schur columns come from NESTOR's dense response, its exact
+    # linearization at the root, so every answer certifies on the exact
+    # coupled transpose without a fallback solve.
+    assert ((im._SOLVE_STATS.get(cfg.implicit) or {}).get(
+        "adjoint_certificate_fallbacks", 0) or 0) == fallbacks
 
     # The diagnostic channel runs too, so its formatting cannot rot unnoticed.
     with monkeypatched_debug():
@@ -834,7 +841,7 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
     bsqvac = cfg.vacuum_program.bsq(state, rt, cfg.field_from_parameters(current))
     lower, diagonal, upper, row_scale, column_scale = fbi._frozen_bulk_blocks(
         *lane[:5], mask, z, bsqvac, cfg=cfg,
-        probe_chunk_size=fbi._anchor_probe_chunk(cfg, mask))
+        probe_chunk_size=fbi._bulk_probe_chunk(cfg, mask))
     factors = fbi._anchor_factor(lower, diagonal, upper, row_scale,
                                  column_scale)
     response = fbi._edge_response(cfg, params, current, state, rcon0, zcon0)
