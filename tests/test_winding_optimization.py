@@ -2,7 +2,11 @@
 
 import ast
 import functools
+import hashlib
+import json
 from pathlib import Path
+import subprocess
+import xml.etree.ElementTree as ET
 
 import jax
 import jax.numpy as jnp
@@ -11,6 +15,9 @@ import pytest
 from jaxopt import LBFGSB
 from jaxopt.implicit_diff import root_jvp
 from solvax import gcrot
+
+
+REPO = Path(__file__).parents[1]
 
 
 @pytest.fixture(scope="module")
@@ -226,6 +233,81 @@ def test_normalization_scales_remain_in_total_derivative(winding_helpers):
         -helpers["SPECTRAL_WEIGHT"] * objectives[2] / scales[2] ** 2
     )
     np.testing.assert_allclose(actual, expected, rtol=2e-13, atol=2e-15)
+
+
+def _git_blob(data):
+    return subprocess.run(
+        ["git", "hash-object", "--stdin"], cwd=REPO, input=data,
+        capture_output=True, check=True,
+    ).stdout.decode().strip()
+
+
+def _snapshot_blob(spec):
+    data = (REPO / spec["path"]).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == spec["sha256"]
+    assert _git_blob(data) == spec["git_blob"]
+    return spec["git_blob"]
+
+
+def _recovered_patch_blob(spec, snapshots, worktree):
+    snapshot = snapshots[spec["base_snapshot"]]
+    target = worktree / snapshot["target_path"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes((REPO / snapshot["path"]).read_bytes())
+    subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "apply", "--whitespace=nowarn", REPO / spec["patch"]],
+        cwd=worktree, check=True,
+    )
+    return _git_blob(target.read_bytes())
+
+
+def test_winding_benchmark_provenance_is_reconstructible(tmp_path):
+    manifest = json.loads(
+        (REPO / "benchmarks" / "winding_surface_provenance.json").read_text()
+    )
+    snapshots = manifest["snapshots"]
+    snapshot_blobs = {
+        name: _snapshot_blob(spec) for name, spec in snapshots.items()
+    }
+    recoveries = manifest["recoveries"]
+    for index, (name, spec) in enumerate(recoveries.items()):
+        if spec["recovery"] == "snapshot":
+            actual = snapshot_blobs[spec["snapshot"]]
+        else:
+            patch = REPO / spec["patch"]
+            assert hashlib.sha256(patch.read_bytes()).hexdigest() == spec[
+                "patch_sha256"
+            ]
+            actual = _recovered_patch_blob(
+                spec, snapshots, tmp_path / f"recovery-{index}-{name}"
+            )
+        assert actual == spec["result_blob"]
+
+    used_recoveries = set()
+    for artifact, record in manifest["records"].items():
+        raw = json.loads((REPO / artifact).read_text())
+        provenance = raw["_provenance"]
+        assert provenance["measurement_commit"] == record[
+            "recorded_measurement_commit"
+        ]
+        generator = record["generator_recovery"]
+        assert generator in recoveries
+        used_recoveries.add(generator)
+        source_commits = provenance["source_commits"]
+        assert set(source_commits) == set(record["sources"])
+        for label, source in record["sources"].items():
+            assert source_commits[label] == source["recorded_commit"]
+            assert source["recovery"] in recoveries
+            used_recoveries.add(source["recovery"])
+    assert used_recoveries == set(recoveries)
+
+
+def test_winding_benchmark_svgs_are_valid_xml():
+    paths = sorted((REPO / "benchmarks").glob("winding_surface_*.svg"))
+    assert paths
+    for path in paths:
+        ET.parse(path)
 
 
 @pytest.mark.parametrize("matrix", [
