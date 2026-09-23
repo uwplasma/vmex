@@ -699,13 +699,14 @@ def test_the_derivative_check_does_not_fire_far_from_the_surface():
 
 
 def test_the_derivative_check_stays_quiet_many_surface_sizes_away():
-    """Ten and a hundred minor radii out, the a-priori estimate is zero, not NaN.
+    """Ten and a hundred minor radii out, the a-priori estimate is tiny, not NaN.
 
-    virtual-casing-jax 0.0.7 starts its complex Newton so far off the real axis
-    for such a target that the boundary series overflows: hundreds of NumPy
-    RuntimeWarnings per call and a NaN estimate, which the eager derivative
-    check read as a missed tolerance and reported as an error "up to inf" at
-    points where the field is exact to rounding.
+    virtual-casing-jax 0.0.7 started its complex Newton so far off the real
+    axis for such a target that the boundary series overflowed: hundreds of
+    NumPy RuntimeWarnings per call and a NaN estimate, which the eager
+    derivative check read as a missed tolerance and reported as an error "up
+    to inf" at points where the field is exact to rounding.  0.0.8, the floor,
+    fixes it upstream.
     """
     surface = _synthetic_surface(nphi=16, ntheta=16, nfp=1)
     field = VmecExtender.from_surface_data(surface, digits=3, accuracy_check="warn")

@@ -28,8 +28,8 @@ revision it was measured at, and the pages that cite it.
   per-order error estimate of virtual-casing-jax 0.0.7 returns NaN, with
   hundreds of NumPy warnings, for targets tens of minor radii away, and
   `gradB`/`gradgradB`/`gradgradgradB` reported an error "up to inf" there.
-  A non-finite estimate now counts as zero beyond ten finest-level spacings
-  and as a miss closer in.
+  Fixed upstream (uwplasma/virtual_casing_jax#15); the `freeb` extra now
+  requires `virtual-casing-jax>=0.0.8`.
 
 ### Added
 

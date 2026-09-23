@@ -79,13 +79,15 @@ neoclassical = [
   "neo-jax>=1.0.2",
 ]
 # Differentiable virtual casing on a specified boundary; this is not a NESTOR
-# equilibrium adjoint. 0.0.7 is the newest release. The APIs vmex calls
-# (ExteriorFieldConfig, VirtualCasingExteriorField with its surface-precision
-# and near-surface plans, VmecSurfaceFieldData, and error_estimate's
-# kst_error_estimate/boundary_series_from_gamma/density_magnitude_from_surface)
-# are all present in 0.0.6 and 0.0.7 alike.
+# equilibrium adjoint. 0.0.8 keeps the a-priori (per-derivative-order) error
+# estimate finite for targets far from the surface; 0.0.7 returned NaN there,
+# with hundreds of NumPy warnings, and the eager derivative accuracy check of
+# VmecExtender reported an error "up to inf" where the field is exact. The
+# other APIs vmex calls (ExteriorFieldConfig, VirtualCasingExteriorField,
+# VmecSurfaceFieldData, error_estimate's kst_error_estimate/
+# boundary_series_from_gamma/density_magnitude_from_surface) are unchanged.
 freeb = [
-    "virtual-casing-jax>=0.0.7",
+    "virtual-casing-jax>=0.0.8",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
@@ -156,7 +158,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.7
+# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.8
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is

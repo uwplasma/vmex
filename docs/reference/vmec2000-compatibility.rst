@@ -654,7 +654,7 @@ test compares that derivative with finite differences.
    * - State-to-surface field data for virtual casing
      - partial
      - Traceable and vmex-native; ``LASYM=T`` raises.  The solver paths need
-       the optional ``virtual-casing-jax >= 0.0.7``.
+       the optional ``virtual-casing-jax >= 0.0.8``.
    * - Mgrid tabulation
      - partial
      - Differentiable in table values and current scale, not in the coil
