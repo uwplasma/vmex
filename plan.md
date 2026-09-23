@@ -26,80 +26,71 @@ readable through git history.
 
 # Part I. Current state and acceptance gates (2026-09-22)
 
-## Resume here (paused 2026-09-23)
+## Resume here (after 0.11.1, 2026-09-23)
 
-**Order of work when resuming (maintainer, 2026-09-23).** Use subagents; follow this order.
+**0.11.1 is released** (tag `v0.11.1`, on PyPI). It carries #427, #428, #413,
+#429, #433, #431, #432, #435, #430, #441, #437, #434, #436, #438, #439, #411,
+#442, #440 and #426; the CHANGELOG entry has the measured numbers. The last
+six were landed from one green integration run (#444) whose tree is exactly
+main's after the merges.
 
-1. **Finalize and merge the open PRs**, except winding-surface and HINT PRs
-   (#301-#304, #306, #366, #367, #302 and their branches), which stay open and
-   untouched. Merge each when finalized and its PR gate is green: #430 (then
-   rebase and merge #441), #437, #434, #411, #436, #438, #439, #426 (with the
-   decisions below) and this plan PR. Confirm main CI on the combined
-   #431/#432/#435 merge (`e205f6962`) first.
-2. **#426 decisions.** QA keeps `MAX_MODES = [1, 2]`; the QS cost of the short
-   ladder (1.35e-3 vs ~3.7e-4 on the old ladder) is accepted. QI and QP use
-   `MAX_MODES = [1, 3]` (they need more toroidal modes), aspect target 8 for
-   QI (harder), and an aspect weight of at least 0.01 in the QI and QP
-   scripts. Every example still finishes in <= 5 minutes on the laptop, with
-   the NS = 71 verification converging. Update plan.md's README cap note (now
-   700 lines, #435).
-3. **The four plotting/README fixes below.**
-4. **Cut a release (0.12.0)** with all of the above, verified on PyPI.
-5. **Mirrors, after the release:**
-   - Verify accuracy (against analytic/independent references and the
-     Pleiades reference where available) and solve speed of the mirror
-     fixed- and free-boundary solves; fix what is slow or wrong.
+**Order of work for the next session (maintainer, 2026-09-23):**
+
+1. **Make CI faster without losing tests or coverage.** No self-hosted
+   runners or paid plan for now.
+   - Evidence: the last full main run took 121 min wall for 254 job-minutes,
+     with a 22.5-minute longest job. The wall time is queueing on the free
+     plan's 20 concurrent jobs, shared across uwplasma, so reducing
+     job-minutes is what helps; further sharding would not.
+   - Cache installs across jobs (uv or pip cache keyed on
+     `pyproject.toml`/lock): all 32 jobs reinstall their dependencies.
+   - Reuse JAX compilation across CI runs with a read-mostly persistent
+     compilation cache restored by `actions/cache`: populate it once per key,
+     then open it read-only in test workers, which avoids the eviction-lock
+     hang that got `VMEX_COMPILATION_CACHE` disabled.
+2. **Example timings still open from #426.** 18 optimization scripts were
+   timed under five minutes with a converged NS = 71 check; scripts over
+   budget kept their previous defaults. The untimed scripts are listed in
+   #426's body.
+3. **`vmex --trace`.** A CLI flag like `--plot`/`--booz` that scales the
+   equilibrium to ARIES-CS size with the existing `--scale`, then uses ESSOS
+   to trace 1000 (or 5000) 3.5 MeV alpha particles for 1e-2 s and plots the
+   loss fraction against time. It must be fast: merge the relevant ESSOS PRs
+   (for example axis handling) and use a symplectic integrator like SIMPLE's
+   if needed. Also highlight `--scale` in the README next to `--plot`.
+4. **Mirrors:**
+   - Verify accuracy (analytic and independent references, the Pleiades
+     reference where available) and solve speed of the fixed- and
+     free-boundary mirror solves; fix what is slow or wrong. On the office
+     machine the QI hybrid (389 s) and any finite-beta scan exceed five
+     minutes (#434).
    - Make the mirror examples as concise as the tokamak and stellarator
-     examples: the API does the assembly (no chains like
-     `axisymmetric_grid = axisymmetric_config.build_grid()` in user code),
-     while the user still sees and can change parameters, geometry and
-     resolution. Add a new, simpler `examples/mirror/mirror_fixed_boundary_axisymmetric.py`.
-   - Allow mirror configurations to be solved from input files, like tokamak
-     and stellarator decks: boundary coefficients, surfaces, resolution and
-     profiles in the file, run with `vmex <input>` and `vj.solve_file`.
-6. **Later (not scheduled):** cut compilation cost on free- and
-   fixed-boundary solves (cold compile is 25-60 % of example wall time;
-   ~120 s fixed cost on free boundary, see #439).
+     examples: the API does the assembly, the user still sees parameters,
+     geometry and resolution. Add `examples/mirror/mirror_fixed_boundary_axisymmetric.py`.
+   - Solve mirror configurations from input files (`vmex <input>`,
+     `vj.solve_file`).
+5. **Later (not scheduled):** cut compilation cost on free- and
+   fixed-boundary solves (cold compile is 25-60 % of example wall time; about
+   120 s fixed cost on the free boundary, #439).
 
-**Next fixes requested by the maintainer (2026-09-23, not started):**
+**Open PRs:**
 
-1. Summary plot: move the bootstrap-current `<J.B>` curve from the iota panel
-   to the force-balance panel (top right), overlaid on the force error, and
-   label it `Bootstrap <J.B> [kA T/m^2]`.
-2. Effective-ripple (epsilon effective) plot: evaluate two fewer radii; users
-   report plotting is too slow.
-3. Stop writing the `_profiles.png` figure; it carries little information.
-4. README "Single-stage plasma and coil design": show two movies, one from the
-   fixed-boundary vacuum single stage and one from the free-boundary finite-beta
-   single stage. Compress all images and movies (repository size), and use a
-   format that plays inline on GitHub without downloading: an animated GIF or
-   WebP embedded as an image plays inline; an MP4 plays inline only when
-   uploaded as a GitHub user-attachment URL, not as a relative repo path. Check
-   GitHub's current documentation before choosing, and keep figure provenance
-   (`figures.json`) and the docs media budget passing.
+| PR | State | Next step |
+|---|---|---|
+| #301-#304, #306, #366, #367, #302 | winding surface and HINT comparison; untouched by instruction | Keep in their PRs, unmerged. |
+| #417, #418, #421, #423, #424, #419, #371, #377, #415 | superseded or failed directions | Close with pointers (left to the maintainer). |
 
+Other follow-ups recorded in the merged PRs: `multigrid.solve_file` should
+pass the free-boundary metadata to the wout writer (#430); the graded rule
+under a trace needs `near_surface="graded"` and the default source grid is
+sized for d = a only (#441); the exterior-field VJP differs 2-4x from
+independent re-solves on boundary directions because of the m = 1 gauge
+drift (#428, #430). The next weekly run is the first to test #437's core-1
+cap and examples fixes.
 
-Main is `e71202835`: release 0.11.0 plus #427, #428, #413 (this plan) and
-#429 (user docs). Work paused on the maintainer's instruction; every open
-branch below is pushed and its PR body or latest comment is the handoff for
-that item. Read the PR, then continue from its "next steps".
-
-| PR | Item | State at pause | Next step |
-|---|---|---|---|
-| #432 | Free-boundary Newton anchoring on the coupled plasma-vacuum root (Deuflhard NLEQ-ERR damping; new status 3 = could not anchor, no gradient) and a restart budget equal to the cold reference's iteration count (lane A) | open, head `3d37bf109`; 34/34 checks passed, gate pending; behind main | Rebase and rerun CI; finish the two end-to-end single-stage runs and the zero-beta run; interleaved A/B trial timing; merge. Measured: residual at returned state 2-7e-6 -> 3-9e-14; adjoint vs FD of the optimizer's values 0.44-0.74 -> 9e-8 at the seed, 1e-2 -> 9e-4 at the optimum; start-to-start spread 13 % -> <= 1e-3; trial time 18 -> 33 s near the seed (anchor costs ~one cold solve), 91 -> 81 s at the optimum. Next lever: NESTOR coupling in the preconditioner (~40 fewer Krylov iterations per solve). |
-| #430 | Virtual casing and extender validated against independent oracles; two defects fixed (zero coil field from MGRID-named wouts; spurious inf warnings far out, fixed upstream in virtual-casing-jax 0.0.8, now the floor); curl-free projection gets a public switch (keep off: up to 1.9x worse on li383) | merged | Follow-up PR: target-graded quadrature in the library replacing the near-surface continuation; closed-form derivative kernels; speed A/B. Lane A: implicit exterior-field VJP vs independent re-solves differs 2-4x on boundary directions (off-root state). |
-| #431 | Keep only cited benchmark records (policy reversed by the maintainer: uncited records are removed; history keeps them via permalinks); drop `tools/profile_hotpaths.py` | open; rebasing on #429 | Rebase, re-verify cited paths, merge; close #415 (same two deletions). |
-| #426 | Optimization example defaults baked into main; finite beta through PHIEDGE (closed form at the target aspect plus one correction solve; no calibration loop); certificate blocker fixed at its cause | open | Measure every changed example against the 5-minute limit (see decisions) and cut ladders/budgets where needed; merge. |
-| #411 | Single-stage examples (renames, least-squares form, matched fixed/free pair, 0.5 % beta pair, iota ceiling for the vacuum free boundary) | draft | Bring all four under 5 minutes (fewer iterations/dofs allowed, but the optimization must visibly change coils and surface); refresh docstring numbers; merge; close #371 and #377. |
-| #434 | `implicit.make_config` default `max_fsq_ratio` 1e6 -> documented 1e2 (no status flips); `take_gradients.py` folded into `take_fixed_boundary_gradients.py`; `wout_from_result` in `fixed_boundary_run.py`/`plot_and_boozer.py`; mirror examples | draft; only `stellarator_mirror_hybrid.py` run (438 s at load ~75) | Run the other four mirror examples on a quiet machine; bring all five to the example template (drop `main()`/`__main__` and the `sys.path` workaround); fix the beta-scan docstring and the Pleiades skip reason; merge. |
-| #417, #418, #421, #423, #424, #419, #371, #377, #415 | superseded or failed directions (see table below) | open | Close with pointers (not yet done: closing is left to the maintainer). |
-| #301-#304, #306, #366, #367, #302 | Winding surface and HINT comparison | untouched by instruction | Keep in their PRs, unmerged. |
-
-Measurement caveat for all timings in these PRs: the laptop ran at load
-average ~60 and the office machine at ~94 with ~3 GB of 62 GB free, from
-concurrent jobs. Ratios come from interleaved A/B runs; absolute wall times
-are upper bounds. Re-time on a quiet machine before quoting user-facing
-runtimes.
+Measurement caveat: most timings in these PRs were taken on a shared laptop
+or office machine under load; ratios come from interleaved A/B runs, and
+absolute wall times are upper bounds.
 
 ## Current status
 
