@@ -28,6 +28,24 @@ readable through git history.
 
 ## Resume here (paused 2026-09-23)
 
+**Next fixes requested by the maintainer (2026-09-23, not started):**
+
+1. Summary plot: move the bootstrap-current `<J.B>` curve from the iota panel
+   to the force-balance panel (top right), overlaid on the force error, and
+   label it `Bootstrap <J.B> [kA T/m^2]`.
+2. Effective-ripple (epsilon effective) plot: evaluate two fewer radii; users
+   report plotting is too slow.
+3. Stop writing the `_profiles.png` figure; it carries little information.
+4. README "Single-stage plasma and coil design": show two movies, one from the
+   fixed-boundary vacuum single stage and one from the free-boundary finite-beta
+   single stage. Compress all images and movies (repository size), and use a
+   format that plays inline on GitHub without downloading: an animated GIF or
+   WebP embedded as an image plays inline; an MP4 plays inline only when
+   uploaded as a GitHub user-attachment URL, not as a relative repo path. Check
+   GitHub's current documentation before choosing, and keep figure provenance
+   (`figures.json`) and the docs media budget passing.
+
+
 Main is `e71202835`: release 0.11.0 plus #427, #428, #413 (this plan) and
 #429 (user docs). Work paused on the maintainer's instruction; every open
 branch below is pushed and its PR body or latest comment is the handoff for
