@@ -1,10 +1,10 @@
 CLI reference
 =============
 
-The ``vmec`` command is a drop-in equivalent of the ``xvmec2000`` executable:
-it parses the input deck, runs the ``NS_ARRAY`` multigrid ladder with
-VMEC2000-format console output, writes ``wout_<case>.nc``, and prints the
-termination summary.
+The ``vmex`` command (``vmec`` is an alias) is a drop-in equivalent of the
+``xvmec2000`` executable: it parses the input deck, runs the ``NS_ARRAY``
+multigrid ladder with VMEC2000-format console output, writes
+``wout_<case>.nc``, and prints the termination summary.
 
 Usage
 -----
@@ -12,6 +12,7 @@ Usage
 .. code-block:: text
 
    vmex input.X                — solve (INDATA or structured JSON), write wout_X.nc
+   vmex desc_eq.h5             — convert a DESC equilibrium to input.desc_eq, solve it
    vmex --plot wout_*.nc       — diagnostic plots from a WOUT file
    vmex --plot mout_*.nc       — straight-axis mirror diagnostics
    vmex --booz wout_*.nc       — run booz_xform_jax, write boozmn_*.nc
@@ -22,8 +23,10 @@ Usage
    vmex --test                 — run and plot the bundled quick-start case
 
 The positional argument is a VMEC input file (``input.*`` namelist or a
-structured-JSON ``.json`` deck), or a ``wout_*.nc``/``mout_*.nc``/``boozmn_*.nc``
-file for ``--plot``/``--booz``.
+structured-JSON ``.json`` deck), a DESC equilibrium (text deck, ``.h5``/``.hdf5``
+or ``.pkl``/``.pickle``), or a ``wout_*.nc``/``mout_*.nc``/``boozmn_*.nc`` file
+for ``--plot``/``--booz``/``--trace``.  Input keys and DESC conversion are
+described in :doc:`vmec2000-compatibility`.
 
 Options
 -------
@@ -42,6 +45,9 @@ Options
        a ``mout_*.nc`` file, plot horizontal straight-axis mirror diagnostics;
        with a ``boozmn_*.nc`` file, plot Boozer diagnostics; with an input
        file, solve first and plot the resulting WOUT.
+   * - ``--desc-tol X``
+     - DESC boundary truncation bound, from 0 to 0.01 (default 0.01); 0 keeps
+       every nonzero boundary mode.
    * - ``--scale``
      - Write a scaled input or WOUT. Optional positional factors are
        ``B_scale R_scale``; with no factors the targets are
@@ -62,7 +68,7 @@ Options
        figures (3-D orbits, ``v_par/v``, loss fraction vs time, energy
        error). Works on a ``wout_*.nc`` input or after solving an input
        file (requires ESSOS, ``pip install essos``). See
-       :doc:`/howto/trace-alpha-particles`.
+       :doc:`/howto/use-essos-fields-and-coils`.
    * - ``--trace-tmax X`` / ``--trace-timestep X``
      - Tracing horizon / integrator step in seconds (defaults ``3e-4`` /
        ``5e-7``).
@@ -143,50 +149,15 @@ Options
    * - ``--version``
      - Print the package version.
 
-Free-boundary routing
----------------------
+Free boundary and restart
+-------------------------
 
-For ``LFREEB = T`` decks:
-
-- a readable ``MGRID_FILE`` runs the free-boundary solver with the VMEC2000
-  console output (``In VACUUM`` block, ``VACUUM PRESSURE TURNED ON`` banner)
-  and free-boundary wout metadata (``nextcur``/``extcur``/``curlabel``/
-  ``mgrid_mode``);
-- a **missing** mgrid file falls back to a fixed-boundary solve with a
-  warning (retained VMEC2000 behavior);
-- ``MGRID_FILE = 'DIRECT_COILS'`` (or the ``--coils`` flag) builds the external
-  field from an ESSOS coils file (``essos.coils.Coils``): the coils' Biot-Savart
-  field (``essos.fields.BiotSavart``) is tabulated directly into an in-memory
-  :class:`vmex.core.mgrid.MgridField` via
-  :meth:`~vmex.core.mgrid.MgridField.from_cartesian_field` — no temporary
-  mgrid file and no mgrid-export API involved (requires ESSOS,
-  ``pip install essos``).
-
-The free-boundary path runs the complete ``NS_ARRAY`` ladder.  It interpolates
-the preceding stage's final plasma state, carries VMEC2000's active-vacuum and adaptive
-``NVACSKIP`` state, and selects fresh resolution-specific NESTOR programs at
-each new grid.  A user-provided ``initial_state`` is also supported by the
-Python API for hot restarts.
-
-Hot restart (``--restart`` / ``RESTART_WOUT``)
-----------------------------------------------
-
-``vmex input.x --restart wout_y.nc`` seeds the solve (fixed or free
-boundary) from any VMEC2000-compatible wout file; the deck can request the
-same thing with the VMEX extension key ``RESTART_WOUT = 'wout_y.nc'`` inside
-``&INDATA`` (resolved relative to the input file; the CLI flag wins).  The
-full R/Z/lambda state is rebuilt exactly, radial/mode-table differences are
-resampled, and multigrid rungs at or below the restart resolution are
-skipped — see :doc:`/howto/restart-from-previous-run` for the workflow and
-:doc:`/explanation/multigrid` for the mechanism.
-
-The CLI exports the final NESTOR potential and surface fields to the wout
-``potsin``/``xmpot``/``xnpot``/``*_sur`` variables. LASYM runs additionally
-write ``potcos`` and the sine ``*_sur`` partners. An NITER-exhausted
-fixed- or free-boundary run terminates through the normal output path —
-unconverged WOUT, equilibrium summary, and the ``MORE ITERATIONS REQUIRED``
-block (``fileout.f`` semantics) — and exits with the distinct
-``ier_flag = 2``.  Fatal numerical/Jacobian failures never produce a WOUT.
+An ``LFREEB = T`` deck with a readable ``MGRID_FILE`` (or
+``MGRID_FILE = 'DIRECT_COILS'`` with ``--coils``) runs the free-boundary
+ladder; a missing mgrid file falls back to a fixed-boundary solve with a
+warning, as in VMEC2000.  See :doc:`/howto/free-boundary`.  ``--restart`` or
+the deck key ``RESTART_WOUT`` seeds a fixed- or free-boundary solve from a
+wout file (:doc:`/howto/restart-from-previous-run`).
 
 Exit codes (zero-crash policy)
 ------------------------------
@@ -195,3 +166,8 @@ Every failure maps to a typed :class:`vmex.core.errors.VmecError`; the
 CLI prints the VMEC2000 ``werror`` message plus a one-line hint and exits
 with the matching ``ier_flag`` code (0 on success, 2 for "MORE ITERATIONS
 REQUIRED", etc.). There are no raw tracebacks in normal operation.
+
+An NITER-exhausted run still writes the unconverged WOUT, the equilibrium
+summary and the ``MORE ITERATIONS REQUIRED`` block (``fileout.f``
+semantics) before exiting with ``ier_flag = 2``.  Fatal numerical or Jacobian
+failures never write a WOUT.

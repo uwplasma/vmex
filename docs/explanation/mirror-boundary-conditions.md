@@ -252,8 +252,11 @@ promotion work tracked in {doc}`/explanation/mirror-geometry`.
 The mirror lanes orchestrate their nonlinear solves on the host: bounded
 L-BFGS-B globalization, damped Newton-GMRES polish with exact JAX Hessian
 products, the separable tensor preconditioner, and a dense trust-region
-rescue capped at 2048 unknowns (`vmex.mirror.solver`). SOLVAX 0.20.0 was
-compared against this lane condition by condition:
+rescue capped at 2048 unknowns (`vmex.mirror.solver`). `vmex.mirror` does not
+call SOLVAX. The comparison below was made against SOLVAX 0.20.0; the package
+floor is now `solvax>=0.21.0`, whose APIs that VMEX calls keep the 0.20.0
+signatures (`pyproject.toml`), and the lane has not been re-compared since.
+Condition by condition:
 
 - **Same equations and convergence contract** — not met. The mirror
   contract requires box bounds on normalized radius coefficients, an
@@ -263,11 +266,12 @@ compared against this lane condition by condition:
   admissibility predicate but neither bound clipping nor the energy-merit
   globalization, so a migration would change the convergence contract, not
   only the algebra.
-- **Cold and warm cost** — mirror solve compiles already fall below the
-  benchmark harness's minimum-compile floor (M1 in
-  `benchmarks/profile_workflows.py`), and the host Krylov loop is not the
-  measured bottleneck; moving GMRES into JAX would add compilations to the
-  lane least able to amortize them.
+- **Cold and warm cost** — moving GMRES into JAX would add compilations to
+  one-shot solves that cannot amortize them (the mirror workflows are
+  profiled as M1--M3 in `benchmarks/profile_workflows.py`). The recorded
+  backend audit for the closed adjoint reached the same decision
+  (`linear_backend_audit_20260716` in
+  `benchmarks/mirror_hybrid_fixed_boundary.json`).
 - **Dense rescue** — already a bounded small-case diagnostic, not an
   unbounded fallback.
 

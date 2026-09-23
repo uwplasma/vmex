@@ -384,8 +384,7 @@ Bootstrap current (Redl)
 
 :mod:`vmex.core.bootstrap` implements the Redl (2021) analytic
 bootstrap formula, differentiably, plus the machinery to make an
-equilibrium's current profile self-consistent with it (plan R26g,
-reproducing the workflow of Landreman–Buller–Drevlak, arXiv:2205.02914):
+equilibrium's current profile self-consistent with it (reproducing the workflow of Landreman–Buller–Drevlak, arXiv:2205.02914):
 
 - :class:`~vmex.core.bootstrap.KineticProfiles` — prescribed
   ``n_e/T_e/T_i/Z_eff`` polynomials in ``s`` (objective parameters, not
@@ -505,7 +504,7 @@ MHD stability
 -------------
 
 :mod:`vmex.core.stability` provides the infinite-n ideal-ballooning
-objective (plan R26h.h1) — a JAX port of the COBRA eigenproblem in the Gaur
+objective, a JAX port of the COBRA eigenproblem in the Gaur
 *et al.* formulation (*Plasma Phys. Control. Fusion* **67**, 125015 (2025),
 arXiv:2410.04576), with field-line coefficients per simsopt's
 COBRA-validated ``vmec_fieldlines`` conventions and a batched
@@ -567,8 +566,7 @@ Turbulence proxies (GKX)
 :mod:`vmex.core.turbulence` wires the gyrokinetic proxies of
 `GKX <https://github.com/uwplasma/GKX>`_ (uwplasma's
 JAX-native Hermite–Laguerre flux-tube solver, formerly SPECTRAX-GK;
-``pip install gkx``, optional dependency) into the objective protocol
-(plan R26h.h4):
+``pip install gkx``, optional dependency) into the objective protocol:
 
 - :func:`~vmex.core.turbulence.gk_fieldline_geometry` /
   :func:`~vmex.core.turbulence.gk_fieldline_geometry_from_wout` /

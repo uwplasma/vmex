@@ -78,7 +78,7 @@ with the VMEC2000 cadence:
 
 The multigrid form of this coupling — carried vacuum state, per-stage NESTOR
 rebuilds, one activation across the ladder — is described in
-:doc:`multigrid`.
+:doc:`iteration`.
 
 External fields
 ---------------
@@ -224,9 +224,13 @@ holds one field period, so the default ``levels`` of ``from_wout``,
 ``2 nfp nphi`` toroidal points on the whole torus and a toroidal spacing
 :math:`h = 2\pi R/(2\,\mathrm{nfp}\,\mathrm{nphi})`, which improves with
 ``nfp`` rather than ignoring it. Keep :math:`d \gtrsim 2h`: one spacing gives
-about three digits, two spacings about five. The default
-``nphi = ntheta = 32`` on an ``nfp = 2`` QA configuration with
-:math:`R \approx 1` m has :math:`h \approx 0.05` m, about 0.3 minor radii.
+about three digits, two spacings about five. Unless ``nphi``, ``ntheta`` or
+``levels`` is given, the per-period sampling is sized from the boundary so
+that the requested ``digits`` are reached one minor radius out,
+:math:`\mathrm{nphi} \ge \mathrm{digits}\,\ln 10\,R_0/(2\,\mathrm{nfp}\,a)`
+with a floor of 32 (``_source_nphi_for_digits``); on the shipped QA WOUT
+(:math:`R_0/a = 15.9`, ``nfp = 2``) that gives 64, and a tokamak-like aspect
+ratio stays at 32.
 
 The requested ``digits`` does not bound the returned error. The schedule
 refines, target by target, until the achieved-error estimate below meets the
@@ -236,7 +240,9 @@ vacuum deck ``input.LandremanPaul2021_QA_lowres`` (``ctor`` of order
 :math:`10^{-11}` A, so the exact plasma field outside is zero) the returned
 field has these median | maximum errors relative to ``volavgB``, for 40
 targets along the outward normal, ``digits = 4``, versus distance in minor
-radii :math:`a` and per-period source grid ``nphi = ntheta = N``:
+radii :math:`a` and per-period source grid ``nphi = ntheta = N``. The runs
+date from 2026-09-13 (``benchmarks/review_20260913.json`` records the
+``N = 32`` rows), before the grid was sized from the boundary:
 
 .. list-table::
    :header-rows: 1
@@ -248,7 +254,7 @@ radii :math:`a` and per-period source grid ``nphi = ntheta = N``:
      - 0.1 a
      - 0.05 a
      - 0.02 a
-   * - 32 (default)
+   * - 32
      - 3e-5 | 3e-3
      - 6e-3 | 1.3e-2
      - 0.12 | 0.18
@@ -336,8 +342,11 @@ The public construction is explicit: create
 :func:`~vmex.core.freeboundary_implicit.make_free_boundary_config`, map the
 coil vector to a field with ``field_from_parameters``, call the implicit solve,
 stack physics rows with :func:`vmex.core.optimize.residuals_from_tuples`, and
-apply ``jax.value_and_grad``. ``take_free_boundary_gradients.py`` checks one
-direction against independent re-solves. The free-boundary single-stage
+apply ``jax.value_and_grad``. ``take_free_boundary_gradients.py`` certifies
+one direction by comparing the coupled GCROT adjoint with the boundary-Schur
+adjoint, two independent solvers of the same linear system; a central
+difference of re-solves has no usable step on this free boundary. The
+free-boundary single-stage
 previews pass the same scalar pair to SciPy. These examples need ESSOS
 (``pip install "vmex[coils]"``).
 
@@ -361,7 +370,11 @@ transpose still takes about one to two minutes to compile on the reference
 CPU and is not yet a practical GPU path. Its ``device="auto"`` policy therefore
 uses the CPU on an accelerator host unless the process already pins JAX
 placement, while retaining an explicit per-call GPU override.
-``adjoint_solver="boundary_schur"`` enables the boundary-Schur transpose. It
+Three transpose solvers are available through ``adjoint_solver``:
+``"coupled_gcrot"`` (the certified default), ``"edge_response"``, which
+iterates the coupled transpose on a dense model of NESTOR's edge response
+built once per gradient, and ``"boundary_schur"``, the boundary-Schur
+transpose. The boundary-Schur solver
 differentiates one three-surface force row at a time, retains every terminal
 radial stencil coupling in the bulk, isolates the one evolved edge row that
 contains NESTOR's response, and eliminates the radial bulk with a

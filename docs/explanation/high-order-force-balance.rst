@@ -14,7 +14,7 @@ Representation and fixed constraints
 The continuous coordinates are ``(rho, theta, zeta)``, where ``rho=sqrt(s)``
 and ``zeta`` advances from zero to ``2*pi`` over one field period.  Physical
 cylindrical angle is ``phi=zeta/NFP``.  This is a module-local convention: the
-legacy kernel documented in :doc:`spectral-representation` uses the physical
+legacy kernel documented in :doc:`variational-problem` uses the physical
 toroidal angle directly.  Each real Fourier amplitude is
 
 .. math::

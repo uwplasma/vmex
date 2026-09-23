@@ -11,7 +11,6 @@ VMEX? Start with the {doc}`/tutorials/index` instead.
 
 run-an-input-file
 restart-from-previous-run
-parameter-scans
 run-on-gpu
 free-boundary
 use-essos-fields-and-coils
@@ -34,8 +33,6 @@ parallel-ensembles
 :maxdepth: 1
 
 plot-diagnostics
-trace-alpha-particles
-use-wout-downstream
 troubleshoot
 ```
 
