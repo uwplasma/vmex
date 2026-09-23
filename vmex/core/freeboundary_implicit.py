@@ -1237,7 +1237,7 @@ def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
     return solved, rows, jax.scipy.linalg.lu_factor(capacitance)
 
 
-@functools.partial(jax.jit, static_argnames=("cfg", "rtol"))
+@functools.partial(jax.jit, static_argnames=("cfg",))
 def _anchor_linear_solve(force, z, params, field_parameters, frozen, rcon0,
                          zcon0, dof_mask, response, factors, row_scale,
                          column_scale, coupling, *, cfg, rtol):
@@ -1251,8 +1251,9 @@ def _anchor_linear_solve(force, z, params, field_parameters, frozen, rcon0,
     per ``(cfg, rtol)`` runs the whole solve, as the fixed-boundary
     refinement's ``_refine_block_step_core`` does; driving the same Krylov
     loop from the host cost 22 ms per iteration.  Inactive entries get an
-    identity equation.  Returns the packed correction, the iteration count
-    and the final relative residual.
+    identity equation.  ``rtol`` is traced, so the Newton and the damping
+    solves share one executable.  Returns the packed correction, the
+    iteration count and the final relative residual.
     """
     project, pack, unpack = _packers(cfg, dof_mask)
     shape = force.shape
