@@ -28,6 +28,39 @@ readable through git history.
 
 ## Resume here (paused 2026-09-23)
 
+**Order of work when resuming (maintainer, 2026-09-23).** Use subagents; follow this order.
+
+1. **Finalize and merge the open PRs**, except winding-surface and HINT PRs
+   (#301-#304, #306, #366, #367, #302 and their branches), which stay open and
+   untouched. Merge each when finalized and its PR gate is green: #430 (then
+   rebase and merge #441), #437, #434, #411, #436, #438, #439, #426 (with the
+   decisions below) and this plan PR. Confirm main CI on the combined
+   #431/#432/#435 merge (`e205f6962`) first.
+2. **#426 decisions.** QA keeps `MAX_MODES = [1, 2]`; the QS cost of the short
+   ladder (1.35e-3 vs ~3.7e-4 on the old ladder) is accepted. QI and QP use
+   `MAX_MODES = [1, 3]` (they need more toroidal modes), aspect target 8 for
+   QI (harder), and an aspect weight of at least 0.01 in the QI and QP
+   scripts. Every example still finishes in <= 5 minutes on the laptop, with
+   the NS = 71 verification converging. Update plan.md's README cap note (now
+   700 lines, #435).
+3. **The four plotting/README fixes below.**
+4. **Cut a release (0.12.0)** with all of the above, verified on PyPI.
+5. **Mirrors, after the release:**
+   - Verify accuracy (against analytic/independent references and the
+     Pleiades reference where available) and solve speed of the mirror
+     fixed- and free-boundary solves; fix what is slow or wrong.
+   - Make the mirror examples as concise as the tokamak and stellarator
+     examples: the API does the assembly (no chains like
+     `axisymmetric_grid = axisymmetric_config.build_grid()` in user code),
+     while the user still sees and can change parameters, geometry and
+     resolution. Add a new, simpler `examples/mirror/mirror_fixed_boundary_axisymmetric.py`.
+   - Allow mirror configurations to be solved from input files, like tokamak
+     and stellarator decks: boundary coefficients, surfaces, resolution and
+     profiles in the file, run with `vmex <input>` and `vj.solve_file`.
+6. **Later (not scheduled):** cut compilation cost on free- and
+   fixed-boundary solves (cold compile is 25-60 % of example wall time;
+   ~120 s fixed cost on free boundary, see #439).
+
 **Next fixes requested by the maintainer (2026-09-23, not started):**
 
 1. Summary plot: move the bootstrap-current `<J.B>` curve from the iota panel
