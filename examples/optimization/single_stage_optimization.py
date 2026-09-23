@@ -28,6 +28,13 @@ Lagrangian, and ``single_stage_optimization_least_squares.py`` keeps the terms
 as a residual vector for Gauss-Newton. Each is self-contained; read whichever
 you intend to modify.
 
+Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
+JAX cache and a load average near 10: 129 s, of which 65 s is JAX compilation.
+It takes 12 L-BFGS-B iterations and 21 trials, and every target is met. The coil
+pre-fit moves the coils up to 0.46 m from their circles. The joint optimization
+then raises the minimum |iota| from 0.404 to 0.429, and moves the boundary by up
+to 9 mm and the coils by up to 7 mm.
+
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """

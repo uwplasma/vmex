@@ -27,6 +27,12 @@ stated as they are, rather than tightened until a quadratic penalty happens to
 settle outside them. ``single_stage_optimization_least_squares.py`` is the
 third form. Each is self-contained; read whichever you intend to modify.
 
+Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
+JAX cache and a load average near 10: 154 s, of which 54 s is JAX compilation.
+It takes 40 trials, all within the first stage, and every target is met. The
+minimum |iota| rises from 0.404 to 0.426 and the QA total falls from 0.0533 to
+0.0528. The boundary moves by up to 15 mm and the coils by up to 15 mm.
+
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """

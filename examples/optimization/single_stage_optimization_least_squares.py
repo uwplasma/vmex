@@ -27,6 +27,12 @@ the same tightened thresholds. What differs is the step, not the formulation.
 ``single_stage_optimization_augmented_lagrangian.py`` is the form that does
 change it. Each is self-contained; read whichever you intend to modify.
 
+Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
+JAX cache and a load average near 10: 148 s, of which 57 s is JAX compilation.
+It takes 20 trials and 15 accepted steps, and every target is met. The minimum
+|iota| rises from 0.404 to 0.429, and the optimization moves the boundary by
+up to 11 mm and the coils by up to 9 mm.
+
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """
