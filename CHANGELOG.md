@@ -7,14 +7,6 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
-### Changed
-
-- **Optimization movies colour each frame from a plain forward solve.**
-  `VmecProblem.surface_field_values` (the `"absB"` and `"B.n/B"` colours of
-  `OptimizationMonitor.movie_surface_coils`) no longer runs the derivative
-  anchor that only an adjoint needs. The colours are unchanged at plotting
-  precision, and the single-stage movie is several times faster.
-
 ### Fixed
 
 - **Free-boundary values and gradients referred to different points.** VMEC's
@@ -31,6 +23,13 @@ revision it was measured at, and the pages that cite it.
   no coil currents, instead of extending with a zero coil field.
 - The eager derivative accuracy check no longer warns "up to inf" far from
   the surface (virtual-casing-jax 0.0.8, now the `freeb` floor).
+- **Un-jitted gradients of state objectives no longer recompile on every call.**
+  `VmecProblem.jax_objective_from_state`, `jax_extra_costs_from_state` and the
+  reverse rule of `solve_implicit_status` chose between the accepted and the
+  rejected trial with `jax.lax.cond`. Under an eager `jax.value_and_grad`, that
+  cond was traced and compiled again on every call, because each call's state
+  entered it as new constants. A concrete status now takes its branch in Python.
+  Under `jit` or `vmap`, the status is abstract and the cond is unchanged.
 
 ### Added
 
@@ -43,6 +42,11 @@ revision it was measured at, and the pages that cite it.
 
 ### Changed
 
+- **Optimization movies colour each frame from a plain forward solve.**
+  `VmecProblem.surface_field_values` (the `"absB"` and `"B.n/B"` colours of
+  `OptimizationMonitor.movie_surface_coils`) no longer runs the derivative
+  anchor that only an adjoint needs. The colours are unchanged at plotting
+  precision, and the single-stage movie is several times faster.
 - Direct-path derivatives use the closed-form layer kernels (same values to
   1e-12): first `B`..`gradgradgradB` calls 6.0 s -> 2.9 s, warm
   `gradgradgradB` 4-6x faster (`benchmarks/extender_ab_20260923.json`).

@@ -109,6 +109,28 @@ def _run_with_progress(
     return result
 
 
+def _branch_on_status(status: Any, accepted: Callable[[Any], Any],
+                      rejected: Callable[[Any], Any]) -> Any:
+    """``lax.cond(status == 0, ...)``, or a Python branch when status is concrete.
+
+    Outside ``jax.jit`` (an eager ``jax.value_and_grad`` over a state-composed
+    objective) ``lax.cond`` is traced and compiled on every call, because each
+    call's equilibrium state enters both branches as fresh constants: three XLA
+    programs per call even on a 5-surface deck, and 20-40 s per trial on the
+    single-stage free-boundary example. The status is concrete there, so the
+    taken branch alone is evaluated; under ``jit`` or ``vmap`` the status is
+    abstract and ``lax.cond`` runs as before.
+    """
+    import jax
+
+    try:
+        taken = int(status) == 0
+    except (jax.errors.ConcretizationTypeError, jax.errors.TracerIntegerConversionError,
+            TypeError):
+        return jax.lax.cond(status == 0, accepted, rejected, operand=None)
+    return accepted(None) if taken else rejected(None)
+
+
 @dataclass(frozen=True)
 class Evaluation:
     """Values and diagnostics produced at one decision vector.
@@ -1098,7 +1120,6 @@ class VmecProblem(FunctionProblem):
         smooth finite rejection cost as the base problem, so driver scripts do
         not need their own accepted/rejected branches.
         """
-        import jax
         import jax.numpy as jnp
 
         state_runtime_status = self.metadata.get("jax_state_runtime_status")
@@ -1135,7 +1156,7 @@ class VmecProblem(FunctionProblem):
             return (failure_value(x),
                     (jnp.zeros(residual_size), jnp.zeros(n_extra_terms)))
 
-        return jax.lax.cond(status == 0, accepted, rejected, operand=None)
+        return _branch_on_status(status, accepted, rejected)
 
     def jax_extra_costs_from_state(
         self,
@@ -1152,7 +1173,6 @@ class VmecProblem(FunctionProblem):
         rejection wall. Splitting a large virtual-casing or coil graph from
         the VMEC objective substantially lowers peak XLA compilation memory.
         """
-        import jax
         import jax.numpy as jnp
 
         state_runtime_status = self.metadata.get("jax_state_runtime_status")
@@ -1172,10 +1192,9 @@ class VmecProblem(FunctionProblem):
                     f"({n_extra_terms},)")
             return jnp.sum(costs), costs
 
-        return jax.lax.cond(
-            status == 0, accepted,
-            lambda _: (jnp.asarray(0.0), jnp.zeros(n_extra_terms)),
-            operand=None)
+        return _branch_on_status(
+            status, accepted,
+            lambda _: (jnp.asarray(0.0), jnp.zeros(n_extra_terms)))
 
     def jax_quantity_from_state(
         self,
