@@ -1317,7 +1317,9 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "refinement_seconds", "jacobians", "jacobian_columns",
              "jacobian_krylov_iterations", "jacobian_seconds", "adjoints",
              "adjoint_krylov_iterations", "adjoint_seconds",
-             "adjoint_certificate_fallbacks")
+             "adjoint_certificate_fallbacks", "anchors", "anchor_steps",
+             "anchor_krylov_iterations", "anchor_factorizations",
+             "anchor_seconds")
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []
@@ -1453,7 +1455,7 @@ _REFINE_MAX_RESTARTS = 20
 #: such a correction is not an inexact Newton direction, and later steps
 #: from it only wander.  A solve with three digits whose ``|F|`` rises is a
 #: Newton step outside its quadratic region and is continued.  Two measured
-#: decks (``benchmarks/newton_finish_arms_20260913.json``): the benchmark seed
+#: decks (`newton_finish_arms_20260913.json <https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/newton_finish_arms_20260913.json>`_): the benchmark seed
 #: deck (mpol = ntor = 5) stalls at 4.2e-3 and is stopped; QA_lowres
 #: (mpol = ntor = 8) reaches 5.2e-5, raises ``|F|`` and certifies two steps later.
 _REFINE_MIN_PROGRESS = 1.0e-3

@@ -516,13 +516,12 @@ def test_take_fixed_boundary_gradients(tmp_path):
 def test_take_free_boundary_gradients(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(EXAMPLES / "take_free_boundary_gradients.py", tmp_path, timeout=900)
-    # The certificate is the two independent adjoint solvers agreeing, not the
-    # difference quotient: on a free boundary the quotient changes sign as the
-    # step shrinks.  The smoke settings run at ftol 1e-7, where the equilibrium
-    # is not a tight enough root for better than ~2e-2; the shipped settings
-    # give 1.6e-04.
+    # The certificate is the two independent adjoint solvers agreeing.  Both
+    # linearize the Newton-anchored coupled root, so they agree to 1.1e-11 at
+    # the smoke settings and 3.5e-10 at the shipped ones; before the anchor
+    # the smoke settings (ftol 1e-7) left them 1.6e-02 apart.
     match = re.search(r"they differ by ([0-9.eE+-]+)", out)
-    assert match is not None and float(match.group(1)) < 3.0e-2
+    assert match is not None and float(match.group(1)) < 1.0e-8
 
 
 @pytest.mark.full  # independent finite-beta free solve, inner fixed solve, and VC field

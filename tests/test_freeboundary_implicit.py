@@ -26,7 +26,8 @@ from vmex.core.freeboundary_implicit import (
     solve_free_boundary_implicit_status,
 )
 from vmex.core import freeboundary_implicit as fbi
-from vmex.core.errors import AdjointSolveError, VmecJacobianError
+from vmex.core.errors import (
+    AdjointSolveError, VmecConvergenceError, VmecJacobianError)
 
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
@@ -621,8 +622,10 @@ def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
         lasym_free_input(DATA), ns_array=np.array([8]),
         ftol_array=np.array([1.0e-6]), niter_array=np.array([20]))
     field = lasym_free_field()
+    # The stubbed states are not roots of anything; this is about which
+    # stage is returned, so the Newton anchor is off.
     cfg = make_free_boundary_config(inp, field, ns=8, ftol=1.0e-6,
-                                    max_iterations=20)
+                                    max_iterations=20, refine_tol=np.inf)
     runtime = im._template_runtime(cfg.implicit)
     state = im._initial_state(runtime.setup)
     reference = SimpleNamespace(
@@ -677,6 +680,301 @@ def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
     assert int(repeated_status) == 0
     np.testing.assert_array_equal(repeated.R_cos, first.R_cos)
     assert fbi._FREE_LAST_RESULT[cfg].marker == "rebuild"
+
+
+def test_restart_budget_is_the_cold_reference_cost():
+    """A restart gets what the cold reference needed, within [cap/10, cap]."""
+    icfg = SimpleNamespace(max_iterations=4000)
+
+    def reference(iterations):
+        return SimpleNamespace(result=SimpleNamespace(iterations=iterations))
+
+    assert fbi._restart_budget(icfg, reference(943)) == 943
+    assert fbi._restart_budget(icfg, reference(51)) == 400
+    assert fbi._restart_budget(icfg, reference(9000)) == 4000
+    # A reference that carries no count (a stub, or a foreign stage) keeps
+    # the whole budget: the old behaviour, never a smaller one by accident.
+    assert fbi._restart_budget(icfg, SimpleNamespace(result=SimpleNamespace())) == 4000
+
+
+def test_stalled_restart_goes_cold_within_the_budget(monkeypatch):
+    """A restart that cannot converge is cut at the budget, then solved cold.
+
+    Before, it ran to ``max_iterations``: from halfway to the optimum of the
+    finite-beta single-stage deck every trial spent 4000 iterations (19-21 s
+    of a 25 s trial) in a restart that never converged before the cold solve
+    that certified it.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-6]), niter_array=np.array([1000]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(inp, field, ns=8, ftol=1.0e-6,
+                                    max_iterations=1000, refine_tol=np.inf)
+    runtime = im._template_runtime(cfg.implicit)
+    state = im._initial_state(runtime.setup)
+    reference = SimpleNamespace(
+        continuation_state=object(), vacuum=None, rcon0=runtime.rcon0,
+        zcon0=runtime.zcon0,
+        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0, iterations=300))
+    monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
+    monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
+                        jax.tree.map(jnp.zeros_like, state))
+    budgets, colds = [], []
+
+    def stage(converged, marker):
+        fsq = 0.0 if converged else 1.0e-3
+        return SimpleNamespace(
+            result=SimpleNamespace(state=state, fsqr=fsq, fsqz=0.0, fsql=0.0,
+                                   converged=converged, marker=marker),
+            continuation_state=state, rcon0=runtime.rcon0, zcon0=runtime.zcon0)
+
+    def restart(*_args, max_iterations=None, **_kwargs):
+        budgets.append(max_iterations)
+        return stage(False, "restart")
+
+    def cold(_solve, _icfg, _inp, _field):
+        colds.append(True)
+        return stage(True, "cold")
+
+    monkeypatch.setattr(fbi, "_solve_free_boundary_stage", restart)
+    monkeypatch.setattr(fbi, "_cold_reference", cold)
+    *_, status, _fsq, _ratio = fbi._host_solve_and_mask_status(
+        cfg, im.params_from_input(inp), field.extcur)
+    assert budgets == [300]      # the reference's cost, not max_iterations
+    assert colds == [True]
+    assert int(status) == 0
+    assert fbi._FREE_LAST_RESULT[cfg].marker == "cold"
+    assert fbi._FREE_HOT_CACHE[cfg] is reference  # the reference stands
+
+
+def test_an_unanchored_solve_is_never_certified(monkeypatch):
+    """ftol met but no coupled root: status 3 on trials, an error otherwise."""
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-6]), niter_array=np.array([20]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(
+        inp, field, ns=8, ftol=1.0e-6, max_iterations=20,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current))
+    runtime = im._template_runtime(cfg.implicit)
+    state = im._initial_state(runtime.setup)
+    reference = SimpleNamespace(
+        continuation_state=state, vacuum=None, rcon0=runtime.rcon0,
+        zcon0=runtime.zcon0,
+        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+    monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
+    monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
+                        jax.tree.map(jnp.zeros_like, state))
+    monkeypatch.setattr(
+        fbi, "_solve_free_boundary_stage",
+        lambda *_a, **_k: SimpleNamespace(
+            result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0,
+                                   converged=True),
+            continuation_state=state, rcon0=runtime.rcon0,
+            zcon0=runtime.zcon0))
+    anchored = []
+
+    def not_contracting(_cfg, _params, _field, host_state, *_args):
+        anchored.append(True)
+        return host_state, fbi._AnchorReport(
+            certified=False, initial_residual=3.2e-6, residual=4.0e-7,
+            steps=12)
+
+    monkeypatch.setattr(fbi, "_anchor_root", not_contracting)
+    params = im.params_from_input(inp)
+    *_, status, _fsq, _ratio = fbi._host_solve_and_mask_status(
+        cfg, params, field.extcur)
+    assert anchored and int(status) == 3
+    with pytest.raises(VmecConvergenceError, match="did not anchor"):
+        fbi._host_solve_and_mask(cfg, params, field.extcur)
+    # No pullback runs for it: both cotangents are exactly zero.
+    cotangents = fbi._solve_status_bwd(
+        cfg, (params, field.extcur, state, state, runtime.rcon0,
+              runtime.zcon0, np.int32(3)),
+        (jax.tree.map(jnp.ones_like, state), None, None, None))
+    assert all(not np.any(np.asarray(leaf))
+               for leaf in jax.tree.leaves(cotangents))
+
+
+def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
+    """The staged anchor solve inverts the exact coupled Jacobian at ``z``.
+
+    Real lanes on a small deck: bulk block factors and NESTOR's dense edge
+    response built at ``z``, one compiled GMRES solve, then the correction
+    checked against the exact NESTOR tangent of the raw coupled residual.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(
+            mpol=3, ntor=0, ntheta=10, nzeta=4),
+        ns_array=np.array([5]), ftol_array=np.array([1.0e-6]),
+        niter_array=np.array([400]))
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+    cfg = make_free_boundary_config(
+        inp, field, ns=5, ftol=1.0e-6, max_iterations=400,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current), device="cpu")
+    current = jnp.asarray(field.extcur)
+    state, mask, rcon0, zcon0, *_ = fbi._host_solve_and_mask_status(
+        cfg, params, current)
+    state, mask = (jax.tree.map(jnp.asarray, tree) for tree in (state, mask))
+    rcon0, zcon0 = jnp.asarray(rcon0), jnp.asarray(zcon0)
+    icfg = cfg.implicit
+    project = im._dof_projector(icfg, mask)
+    z = project(state)
+    lane = (params, current, state, rcon0, zcon0, mask)
+
+    ns = int(icfg.resolution.ns)
+    rt = dataclasses.replace(
+        im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=ns, presf_ns_scale=fbi._presf_ns_scale_traceable(
+            params, icfg.inp, ns))
+    bsqvac = cfg.vacuum_program.bsq(state, rt, cfg.field_from_parameters(current))
+    lower, diagonal, upper, row_scale, column_scale = fbi._frozen_bulk_blocks(
+        *lane[:5], mask, z, bsqvac, cfg=cfg,
+        probe_chunk_size=fbi._anchor_probe_chunk(cfg, mask))
+    factors = fbi._anchor_factor(lower, diagonal, upper, row_scale,
+                                 column_scale)
+    response = fbi._edge_response(cfg, params, current, state, rcon0, zcon0)
+    force = fbi._anchor_raw_residual(z, *lane, cfg=cfg)
+    step, iterations, linear = fbi._anchor_linear_solve(
+        force, z, *lane[:5], mask, response, factors, row_scale, column_scale,
+        cfg=cfg, rtol=1.0e-9)
+    assert 0 < int(iterations) <= fbi._ANCHOR_KRYLOV and float(linear) <= 1.0e-9
+
+    _, image = jax.jvp(
+        lambda zz: fbi._projected_residual_lane(
+            zz, *lane[:5], mask, None, None, cfg=cfg, formulation="raw"),
+        (z,), (fbi._unpack_projected(step, mask, cfg=cfg),))
+    image = fbi._pack_projected(image, mask, cfg=cfg)
+    error = float(jnp.linalg.norm(image + force) / jnp.linalg.norm(force))
+    assert error < 1.0e-7, error
+    np.testing.assert_allclose(
+        float(fbi._anchor_norm(z, *lane, cfg=cfg)),
+        float(im._tree_norm(fbi._projected_residual(cfg, mask)(z, *lane[:5]))),
+        rtol=1.0e-12)
+
+
+def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
+    """A real free-boundary config whose coupled residual is a toy quadratic.
+
+    ``F(p) = d * (p - p*) + gamma * (w . (p - p*))**2 * u`` in the packed
+    projected coordinates, its linear solves exact: the anchor's loop,
+    damping and bookkeeping run for real against a root whose location is
+    known exactly.  ``jacobian_sign=-1`` hands back ascent directions.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-6]), niter_array=np.array([20]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(
+        inp, field, ns=8, ftol=1.0e-6, max_iterations=20,
+        refine_tol=refine_tol,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current))
+    cfg = dataclasses.replace(
+        cfg, vacuum_program=SimpleNamespace(bsq=lambda *_args: 0.0))
+    runtime = im._template_runtime(cfg.implicit)
+    state = im._initial_state(runtime.setup)
+    mask = jax.tree.map(jnp.ones_like, state)
+    packed = np.asarray(fbi._pack_projected(state, mask, cfg=cfg))
+    rng = np.random.default_rng(3)
+    diagonal = 1.0 + rng.random(packed.shape)
+    root = packed + 1.0e-3 * rng.standard_normal(packed.shape)
+    w, u = rng.standard_normal(packed.shape), rng.standard_normal(packed.shape)
+    w, u = w / np.linalg.norm(w), u / np.linalg.norm(u)
+    gamma = 30.0
+    calls = {"response": 0, "factor": 0}
+
+    def residual(z):
+        offset = np.asarray(fbi._pack_projected(z, mask, cfg=cfg)) - root
+        return diagonal * offset + gamma * np.sum(w * offset) ** 2 * u
+
+    def solve(force, z_at, *_args, rtol, **_kwargs):
+        # Sherman--Morrison on the rank-one Jacobian of the toy residual.
+        offset = np.asarray(fbi._pack_projected(z_at, mask, cfg=cfg)) - root
+        scaled_u = 2.0 * gamma * np.sum(w * offset) * u / diagonal
+        rhs = np.asarray(force) / diagonal
+        solution = rhs - scaled_u * np.sum(w * rhs) / (1.0 + np.sum(w * scaled_u))
+        return jnp.asarray(-jacobian_sign * solution), 3, rtol
+
+    def factor(*_args, **_kwargs):
+        calls["factor"] += 1
+        return (None,) * 5
+
+    def response(*_args, **_kwargs):
+        calls["response"] += 1
+        return "response"
+
+    monkeypatch.setattr(fbi, "_anchor_norm", lambda z, *_a, **_k: float(
+        np.linalg.norm(residual(z))))
+    monkeypatch.setattr(fbi, "_anchor_raw_residual",
+                        lambda z, *_a, **_k: jnp.asarray(residual(z)))
+    monkeypatch.setattr(fbi, "_anchor_linear_solve", solve)
+    monkeypatch.setattr(fbi, "_frozen_bulk_blocks", factor)
+    monkeypatch.setattr(fbi, "_anchor_factor", lambda *_args: "factors")
+    monkeypatch.setattr(fbi, "_edge_response", response)
+
+    def run():
+        return fbi._anchor_root(cfg, im.params_from_input(inp), field.extcur,
+                                state, mask, runtime.rcon0, runtime.zcon0)
+
+    return run, state, mask, cfg, root, calls
+
+
+def test_newton_anchor_lands_on_the_root_and_reports_what_it_did(
+        monkeypatch, capsys):
+    """Damped Newton reaches the known toy root; each exit is reported."""
+    run, state, mask, cfg, root, calls = _toy_anchor(monkeypatch)
+    monkeypatch.setattr(im, "_adjoint_debug_enabled", lambda: True)
+    anchored, report = run()
+    assert report.certified and report.residual <= 1.0e-10
+    assert report.initial_residual > 1.0e-4 and report.steps >= 2
+    assert report.factorizations == 1 and calls["factor"] == 1
+    assert calls["response"] == report.steps  # rebuilt at every iterate
+    np.testing.assert_allclose(
+        np.asarray(fbi._pack_projected(anchored, mask, cfg=cfg)), root,
+        rtol=0.0, atol=1.0e-12)
+    assert report.displacement > 0.0
+    assert "[vmex anchor] step 1" in capsys.readouterr().out
+
+    # A stale factorization is rebuilt before the next step.
+    monkeypatch.setattr(fbi, "_ANCHOR_REFACTOR_KRYLOV", 0)
+    calls.update(response=0, factor=0)
+    _, report = run()
+    assert report.certified and report.factorizations == report.steps
+    assert calls["factor"] == report.steps
+
+
+def test_newton_anchor_never_certifies_what_it_cannot_land(
+        monkeypatch, capsys):
+    """No descent, no budget or no anchor: the host state and the reason."""
+    run, state, *_ = _toy_anchor(monkeypatch, jacobian_sign=-1.0)
+    monkeypatch.setattr(im, "_adjoint_debug_enabled", lambda: True)
+    anchored, report = run()
+    assert "no damped step passes" in capsys.readouterr().out
+    assert not report.certified and report.residual == report.initial_residual
+    assert report.attempts == len(fbi._ANCHOR_FIRST_DAMPING)
+    for returned, host in zip(jax.tree.leaves(anchored), jax.tree.leaves(state)):
+        np.testing.assert_array_equal(returned, host)
+
+    run, state, *_ = _toy_anchor(monkeypatch)
+    monkeypatch.setattr(fbi, "_ANCHOR_MAX_STEPS", 1)
+    _, report = run()
+    # Every attempt restarts from the host state with a smaller first step.
+    assert not report.certified
+    assert report.attempts == len(fbi._ANCHOR_FIRST_DAMPING) == report.steps
+    assert report.residual < report.initial_residual
+
+    run, state, *_ = _toy_anchor(monkeypatch, refine_tol=np.inf)
+    anchored, report = run()
+    assert report.certified and anchored is state and report.steps == 0
+
+    run, state, *_ = _toy_anchor(monkeypatch, refine_tol=1.0)
+    _, report = run()      # already inside the tolerance: no Newton step
+    assert report.certified and report.steps == 0
 
 
 def test_free_boundary_host_adjoint_rejects_a_false_solver_success(monkeypatch):
@@ -1329,3 +1627,58 @@ def test_free_boundary_root_is_a_function_of_the_parameters():
         gap = float(jnp.linalg.norm(_flat(
             jax.tree.map(jnp.subtract, first, other))))
         assert gap / scale == 0.0, (label, gap / scale)
+
+
+@pytest.mark.full
+def test_free_boundary_trial_state_is_anchored_on_the_coupled_root():
+    """Status 0 means a root of the coupled residual, whatever the history.
+
+    VMEC's ``ftol`` bounds a sum of squares and leaves the state along weakly
+    damped directions: on this deck the converged solve carries
+    ``|F| = 7.2e-06`` and sits 1.7e-02 from the root in coefficient norm.
+    The returned state is Newton-anchored to the residual floor instead, and
+    the same current returns the same bits after an unrelated nearby trial
+    and after a distant one that fails.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([16]),
+        ftol_array=np.array([1.0e-7]), niter_array=np.array([2500]),
+    )
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+    cfg = make_free_boundary_config(
+        inp, field, ns=16, ftol=1.0e-7, max_iterations=2500,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current),
+    )
+    current = np.asarray(field.extcur)
+
+    def trial(value):
+        state, mask, rcon0, zcon0, status, _fsq, _ratio = (
+            fbi._host_solve_and_mask_status(cfg, params, value))
+        return (jax.tree.map(jnp.asarray, state), jax.tree.map(jnp.asarray, mask),
+                jnp.asarray(rcon0), jnp.asarray(zcon0), int(status))
+
+    state, mask, rcon0, zcon0, status = trial(current)
+    assert status == 0
+    report = fbi._FREE_LAST_ANCHOR[cfg]
+    assert report.certified and report.steps > 0
+    project = im._dof_projector(cfg.implicit, mask)
+    residual = fbi._projected_residual(cfg, mask)
+
+    def norm(x):
+        return float(im._tree_norm(residual(
+            project(x), params, current, x, rcon0, zcon0)))
+
+    host = fbi._FREE_LAST_RESULT[cfg].state
+    assert norm(host) > 1.0e-7          # where VMEC stopped: off the root
+    assert norm(state) <= cfg.implicit.refine_tol * 1.0e-2
+    assert report.displacement > 1.0e-3
+
+    # Same parameters, three histories, one answer, bit for bit.
+    for other in (1.01 * current, 2.0 * current):
+        trial(other)
+        again, _mask, _rcon0, _zcon0, again_status = trial(current)
+        assert again_status == 0
+        for a, b in zip(jax.tree.leaves(again), jax.tree.leaves(state)):
+            np.testing.assert_array_equal(np.asarray(a), np.asarray(b))

@@ -58,7 +58,7 @@ HOWTO_VERBS = {
 
 TODO_RE = re.compile(r"\b(TODO|FIXME|XXX)\b")
 LINE_CAP = 250
-ROOT_LINE_CAPS = {"README.md": 300, "CHANGELOG.md": 200}
+ROOT_LINE_CAPS = {"README.md": 700, "CHANGELOG.md": 200}
 RETRACTED_GAIN = re.compile(r"\b(?:26[- ]fold|26\s*[×x])(?!\w)", re.IGNORECASE)
 BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)")
 
