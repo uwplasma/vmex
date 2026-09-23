@@ -839,10 +839,21 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
                                  column_scale)
     response = fbi._edge_response(cfg, params, current, state, rcon0, zcon0)
     force = fbi._anchor_raw_residual(z, *lane, cfg=cfg)
-    step, iterations, linear = fbi._anchor_linear_solve(
-        force, z, *lane[:5], mask, response, factors, row_scale, column_scale,
-        cfg=cfg, rtol=1.0e-9)
+    coupling = fbi._anchor_coupling(
+        z, *lane[:5], mask, response, factors, row_scale, column_scale,
+        cfg=cfg)
+
+    def solve(coupling):
+        return fbi._anchor_linear_solve(
+            force, z, *lane[:5], mask, response, factors, row_scale,
+            column_scale, coupling, cfg=cfg, rtol=1.0e-9)
+
+    bulk_only = solve(None)
+    step, iterations, linear = solve(coupling)
     assert 0 < int(iterations) <= fbi._ANCHOR_KRYLOV and float(linear) <= 1.0e-9
+    # With NESTOR's coupling the preconditioner is the exact Jacobian here:
+    # GMRES only mops up rounding, where the bulk factors alone need more.
+    assert int(iterations) <= 3 < int(bulk_only[1]), (iterations, bulk_only[1])
 
     _, image = jax.jvp(
         lambda zz: fbi._projected_residual_lane(
@@ -915,6 +926,7 @@ def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
     monkeypatch.setattr(fbi, "_anchor_linear_solve", solve)
     monkeypatch.setattr(fbi, "_frozen_bulk_blocks", factor)
     monkeypatch.setattr(fbi, "_anchor_factor", lambda *_args: "factors")
+    monkeypatch.setattr(fbi, "_anchor_coupling", lambda *_a, **_k: "coupling")
     monkeypatch.setattr(fbi, "_edge_response", response)
 
     def run():
@@ -956,7 +968,9 @@ def test_newton_anchor_never_certifies_what_it_cannot_land(
     anchored, report = run()
     assert "no damped step passes" in capsys.readouterr().out
     assert not report.certified and report.residual == report.initial_residual
-    assert report.attempts == len(fbi._ANCHOR_FIRST_DAMPING)
+    # A first step that fails at every damping fails the same way from any
+    # smaller start, so the ladder's later attempts are skipped, not rerun.
+    assert report.attempts == 1 and report.steps == 1
     for returned, host in zip(jax.tree.leaves(anchored), jax.tree.leaves(state)):
         np.testing.assert_array_equal(returned, host)
 
