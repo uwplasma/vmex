@@ -110,8 +110,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
-    "examples/mirror/pleiades_mirror_reference.py": "needs an unshipped reference deck",
-    "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py": "mirror hybrid, covered by tests/mirror",
+    "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
@@ -152,6 +151,7 @@ EXECUTED_EXAMPLES = {
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
     "examples/mirror/mirror_free_boundary_beta_scan.py",
+    "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
     "examples/optimization/QA_optimization.py",
     "examples/optimization/QA_optimization_ballooning.py",
     "examples/optimization/QA_optimization_bootstrap.py",
@@ -728,6 +728,25 @@ def test_mirror_fixed_boundary_nonaxisymmetric_example(tmp_path):
     for case in summary:
         for suffix in ("3d", "cross_sections", "modB", "summary"):
             assert (outdir / f"{case}_{suffix}.png").stat().st_size > 10_000
+
+
+@pytest.mark.full
+def test_qi_mirror_hybrid_example(tmp_path):
+    """The QI-mirror hybrid script runs end to end on its smoke budget.
+
+    tests/mirror covers the library calls; this covers the script, which
+    once imported a private helper after it was made public and crashed
+    before its first solve.
+    """
+    import json
+    _run_example(EXAMPLES / "mirror" / "qi_mirror_hybrid_fourier_vs_bspline.py",
+                 tmp_path, timeout=900)
+    outdir = tmp_path / "results" / "qi_mirror_hybrid"
+    summary = json.loads((outdir / "summary.json").read_text())
+    assert len(summary["cut_phi"]) == 4
+    assert summary["splice_closure"] < 1.0e-12
+    assert summary["hybrid_divergence_rms"] < 1.0e-10
+    assert (outdir / "qi_mirror_hybrid.webp").stat().st_size > 10_000
 
 
 @pytest.mark.full

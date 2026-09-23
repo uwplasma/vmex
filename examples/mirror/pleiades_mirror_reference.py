@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """Regenerate the independent Pleiades two-coil mirror reference.
 
 Set ``PLEIADES_ROOT`` below to a checkout of
@@ -20,20 +21,38 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-# Inputs
+# Checkout of github.com/eepeterson/pleiades at the commit named above:
 PLEIADES_ROOT = Path("/path/to/pleiades")
+
+# Pleiades (nr, nz) meshes, the convergence ladder of the reference:
 RESOLUTIONS = ((31, 61), (41, 81), (51, 101))
+
+# Central beta of each reference point:
 BETAS = (0.01, 0.03, 0.10)
+
+# Directory for the CSV and its convergence plot:
 OUTPUT_DIR = Path("results/pleiades_mirror_reference")
 
+###############################################################################
+# End of input parameters.
+###############################################################################
+
+### Load Pleiades #############################################################
+
 if not (PLEIADES_ROOT / "pleiades" / "eq_solve.py").is_file():
-    raise SystemExit("Set PLEIADES_ROOT at the top of this file to a Pleiades checkout")
+    raise SystemExit(
+        "This script needs a Pleiades checkout: set PLEIADES_ROOT at the top "
+        "of this file (VMEX itself does not need it; the committed reference "
+        "is examples/data/pleiades_two_coil_beta_reference.csv)")
+# Pleiades is not an installable package, so its checkout goes on the path.
 sys.path.insert(0, str(PLEIADES_ROOT))
 collections.Iterable = collections.abc.Iterable  # Pleiades 2021 compatibility with Python 3.10+
 
 from pleiades import ArbitraryPoints, RectMesh, compute_equilibrium  # noqa: E402
 from pleiades.analysis import get_gpsi  # noqa: E402
 from pleiades.fields import compute_greens  # noqa: E402
+
+### Solve the two-coil reference ##############################################
 
 MU0 = 4.0e-7 * np.pi
 rows = []
@@ -71,6 +90,8 @@ for nr, nz in RESOLUTIONS:
         plasma_axis_field = float(compute_greens(current_loops, np.asarray([[0.0, 0.0]]))[2][0])
         axis_field = vacuum_axis_field + plasma_axis_field
         rows.append((nr, nz, beta, iterations, iteration_error, vacuum_axis_field, axis_field, axis_field / vacuum_axis_field))
+
+### Save and plot #############################################################
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 data = np.asarray(rows)

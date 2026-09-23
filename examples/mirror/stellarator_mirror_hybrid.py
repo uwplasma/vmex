@@ -1,17 +1,24 @@
-"""Solve and plot a periodic B-spline stellarator-mirror hybrid."""
+#!/usr/bin/env python
+"""Solve and plot a periodic B-spline stellarator-mirror hybrid.
 
-from __future__ import annotations
+The closed racetrack has two exactly straight mirror legs joined by two
+stellarator returns, represented in the spline-native ``vmex.mirror`` basis
+rather than in Fourier modes. A weak axial current and an elliptical section
+that turns continuously around the circuit give the field its rotational
+transform. The script prints the convergence and force diagnostics, the
+transform from a traced field line, and writes ``summary.json``.
+
+The panel figure the docs embed is written straight into
+``docs/_static/figures`` as lossless WebP, so re-running this script
+reproduces the committed bytes; ``VMEX_EXAMPLES_CI=1`` sends it to
+``OUTPUT_DIR`` instead. Run it from a source checkout with VMEX installed.
+"""
 
 import json
 import os
 from pathlib import Path
-import sys
 
 import jax
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from vmex.mirror import (
     MirrorConfig,
@@ -22,36 +29,52 @@ from vmex.mirror import (
     trace_closed_field_line,
 )
 
-# Inputs: edit these values, then run this file directly.
-NS, MPOL = 5, 4
+# Mirror resolution: radial surfaces, largest poloidal mode, axial grid size:
+NS, MPOL, NXI = 5, 4, 4
+
+# B-spline controls along the closed axis and their quadrature order:
 SPLINE_COEFFICIENTS = 32
 SPLINE_QUADRATURE_ORDER = 3
+
+# Racetrack geometry [m]: straight-leg length, return radius, section semi-axes:
 STRAIGHT_LENGTH = 8.0
 RETURN_RADIUS = 2.5
 SEMI_MAJOR = 0.45
 SEMI_MINOR = 0.25
-# Turn the elliptical cross-section continuously around the closed circuit by
-# this many full 2*pi turns (a genuine rotating-ellipse section) on top of the
+
+# Full 2*pi turns of the elliptical section around the circuit, on top of the
 # return-only 90-degree rotation. The legs keep an exactly straight axis; only
-# the ellipse they carry rotates. Two turns lifts the transform from the
-# return-only iota=0.085 to iota=0.141 at s=0.75 here. Set 0 for the legacy
-# return-only rotation.
+# the ellipse they carry rotates. Two turns lift the transform at s = 0.75 from
+# the return-only 0.085 to 0.141; 0 gives the return-only rotation:
 SECTION_TURNS = 2
+
+# Axial flux derivative and a weak axial-current derivative (the transform):
 AXIAL_FLUX_DERIVATIVE = 0.02
 CURRENT_DERIVATIVE = 0.002
+
+# Force tolerance and iteration budget:
 FTOL = 1.0e-12
 MAX_ITERATIONS = 1000
+
+# Directory for summary.json (and the figure under VMEX_EXAMPLES_CI=1):
 OUTPUT_DIR = Path("results/stellarator_mirror_hybrid")
-# The reviewed figure the docs embed is written straight into the documentation
-# tree as lossless WebP, so re-running this script reproduces the committed
-# bytes; VMEX_EXAMPLES_CI=1 redirects it to OUTPUT_DIR instead.
-CI = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-FIGURE_DIR = OUTPUT_DIR if CI else REPO_ROOT / "docs" / "_static" / "figures"
+
+# VMEX_EXAMPLES_CI=1 is the smoke pass the test suite runs; it keeps the
+# committed docs figure untouched:
+ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIGURE_DIR = OUTPUT_DIR if ci_smoke else REPO_ROOT / "docs" / "_static" / "figures"
+
+###############################################################################
+# End of input parameters.
+###############################################################################
 
 jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-resolution = MirrorResolution(ns=NS, mpol=MPOL, nxi=4)
+### Build the hybrid ##########################################################
+
+resolution = MirrorResolution(ns=NS, mpol=MPOL, nxi=NXI)
 config = MirrorConfig(
     resolution=resolution,
     ftol=FTOL,
@@ -68,6 +91,9 @@ setup = build_stellarator_mirror_hybrid(
     axial_flux_derivative=AXIAL_FLUX_DERIVATIVE,
     quadrature_order=SPLINE_QUADRATURE_ORDER,
 )
+
+### Solve the equilibrium #####################################################
+
 result = solve_fixed_boundary(
     setup.initial_state,
     setup.boundary,
@@ -79,6 +105,9 @@ result = solve_fixed_boundary(
     axis=setup.axis,
     require_convergence=True,
 )
+
+### Plot, trace and save ######################################################
+
 figure = plot_stellarator_mirror_hybrid(result, setup, FIGURE_DIR, image_format="webp")
 field_line = trace_closed_field_line(
     result.evaluated.energy.field,
