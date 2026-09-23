@@ -118,8 +118,8 @@ NITER = 1500
 # Budgets. One trial is one free-boundary solve plus one adjoint. The end
 # check, run on the saved iterates of a 15-iteration run, passes at iterations
 # 6, 8 and 10 and fails at 4 (aspect 6.032).
-MAXITER = 10
-MAX_TRIALS = 25
+MAXITER = 8
+MAX_TRIALS = 20
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil terms use:

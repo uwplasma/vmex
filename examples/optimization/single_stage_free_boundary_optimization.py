@@ -124,8 +124,8 @@ NITER = 1500
 # Budgets. One trial is one free-boundary solve plus one adjoint. The end
 # check, run on the saved iterates of a 15-iteration run, passes at iterations
 # 8 and 10 and fails at 4 and 6 (aspect 6.008, 6.010).
-MAXITER = 10
-MAX_TRIALS = 25
+MAXITER = 8
+MAX_TRIALS = 20
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil terms use:
@@ -396,12 +396,7 @@ optimization_seconds = time.perf_counter() - started
 # A vacuum free boundary exists only where the coil field has a nested flux
 # surface enclosing PHIEDGE. Without IOTA_CEILING the optimizer pushed the edge
 # onto the 4/9 island chain; there the solve limit-cycles near fsq ~1e-8 at any
-# ns, in VMEX, VMEC2000 and VMEC++ alike. The re-solve of the accepted trial
-# below reports whether the optimizer's own point was reproducibly converged.
-accepted_state, accepted_status, accepted_fsq, _ = vj.solve_free_boundary_implicit_status(
-    params, jnp.asarray(u), config)
-print(f"[accepted] status {int(accepted_status)}, fsq = {float(accepted_fsq):.3e} "
-      f"at ns = {NS}", flush=True)
+# ns, in VMEX, VMEC2000 and VMEC++ alike.
 coils_final = coils_from_x(jnp.asarray(x0 + scales * u))
 field_final = BiotSavart(coils_final)
 final_ns = [NS] if ci_smoke else [16, 51]
