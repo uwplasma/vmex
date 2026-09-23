@@ -95,14 +95,13 @@ vmex --plot wout_circular_tokamak.nc
 vmex examples/data/input.circular_tokamak --plot     # solve, then plot
 ```
 
-Six PNG files appear next to the file (or in `--outdir`):
+Five PNG files appear next to the file (or in `--outdir`):
 
 | file | contents |
 |------|----------|
 | `*_summary.png` | the diagnostic summary panel |
 | `*_surfaces.png` | flux-surface cross-sections at several toroidal angles |
 | `*_modB.png` | `\|B\|` contours in (zeta, theta) at mid radius and boundary |
-| `*_profiles.png` | iota / pressure / current profiles + the `fsqt` convergence trace |
 | `*_stability.png` | Mercier decomposition + frozen-equilibrium pressure scan |
 | `*_boundary3d.png` | 3-D plasma boundary colored by `\|B\|` |
 

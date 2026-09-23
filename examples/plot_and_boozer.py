@@ -32,7 +32,7 @@ INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.li383_low_res"
 INPUT_OVERRIDES = {}
 
 # Which plot_wout figures to write:
-FIGURES = ("summary", "surfaces", "modB", "profiles", "stability", "3d")
+FIGURES = ("summary", "surfaces", "modB", "stability", "3d")
 
 # Boozer spectrum of the converged equilibrium:
 RUN_BOOZER = True

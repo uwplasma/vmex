@@ -4,11 +4,11 @@ Self-contained matplotlib (Agg) figure set read from a ``wout_*.nc`` file
 (or an in-memory :class:`vmex.core.wout.WoutData`):
 
 - ``summary``   3x3 publication diagnostic set: rotational transform (full
-  mesh) with the parallel (bootstrap) current ``<J.B>`` on its right axis,
-  pressure with the confinement diagnostics ``eps_eff^(3/2)`` (NEO_JAX) and
+  mesh), pressure with the confinement diagnostics ``eps_eff^(3/2)`` (NEO_JAX) and
   ``Gamma_c`` sharing one right axis (bounded-resolution radial trends,
   cached per in-memory WOUT — see :class:`ConfinementSummary`), relative
-  radial force error, Mercier ``DMerc``
+  radial force error with the bootstrap current ``<J.B>`` on its right
+  axis, Mercier ``DMerc``
   and Glasser ``D_R`` with ``V''(s)`` on the right axis, a 3-D LCFS,
   a Velasco-style polar second-adiabatic-invariant map ``J(alpha, s)``, ``|B|``
   in Boozer coordinates at mid radius and on the LCFS (line contours with a
@@ -16,8 +16,6 @@ Self-contained matplotlib (Agg) figure set read from a ``wout_*.nc`` file
 - ``surfaces``  flux-surface cross-sections at several zeta over one field
   period, with the magnetic axis marked;
 - ``modB``      ``|B|`` contours in (zeta, theta) at mid radius and boundary;
-- ``profiles``  iota / pressure / current profiles plus the ``fsqt``
-  force-residual convergence trace;
 - ``stability`` Mercier decomposition and a frozen-equilibrium pressure scan;
 - ``3d``        3-D plasma boundary colored by ``|B|`` (jet colormap).
 
@@ -62,7 +60,6 @@ __all__ = [
     "plot_summary",
     "plot_surfaces",
     "plot_modB",
-    "plot_profiles",
     "plot_stability",
     "plot_boundary_3d",
     "plot_boozmn_modB",
@@ -997,6 +994,25 @@ def _confinement_cache_put(key: tuple, wout, value: ConfinementSummary) -> None:
         _CONFINEMENT_CACHE.popitem(last=False)
 
 
+def _neo_surface_subset(neo_booz: dict[str, Any]) -> dict[str, Any]:
+    """Two fewer, evenly spread Boozer surfaces for the summary's NEO trend.
+
+    NEO is the slowest summary diagnostic, so the effective-ripple trend
+    drops two of the shared transform's surfaces (keeping the innermost and
+    the LCFS); the ``J`` map and ``|B|`` panels keep all of them.
+    """
+    ns_b = int(neo_booz.get("ns_b", 0))
+    if ns_b <= 3:
+        return neo_booz
+    keep = np.unique(np.round(np.linspace(0, ns_b - 1, ns_b - 2)).astype(int))
+    subset = dict(neo_booz, ns_b=int(keep.size))
+    for key in ("iota_b", "buco_b", "bvco_b", "s_b"):
+        subset[key] = np.asarray(neo_booz[key])[keep]
+    for key in ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b"):
+        subset[key] = np.asarray(neo_booz[key])[:, keep]
+    return subset
+
+
 def _epsilon_effective_profile(booz: dict[str, Any] | None, note: str):
     """``(s, eps_eff^{3/2}, note)`` from the shared summary Boozer result."""
     if booz is None:
@@ -1007,7 +1023,7 @@ def _epsilon_effective_profile(booz: dict[str, Any] | None, note: str):
         from .neoclassical import diagnostic_neo_config, epsilon_effective_from_boozer
 
         surfaces, values = epsilon_effective_from_boozer(
-            booz["neo_booz"], config=diagnostic_neo_config())
+            _neo_surface_subset(booz["neo_booz"]), config=diagnostic_neo_config())
     except ImportError:
         return None, None, "effective ripple requires NEO_JAX (vmex[neoclassical])"
     except Exception as exc:  # noqa: BLE001 - summary stays usable without NEO
@@ -1493,7 +1509,8 @@ def _relative_force_error_panel(ax, wout) -> float:
         np.finfo(float).tiny,
     )
     if error.size:
-        ax.semilogy(rho, np.maximum(error, floor), ".-", color=_LINE_COLORS[0])
+        ax.semilogy(rho, np.maximum(error, floor), ".-", color=_LINE_COLORS[0],
+                    label="force error")
         if positive.size and np.min(positive) > np.max(positive) / 10.0:
             from matplotlib.ticker import MaxNLocator, NullLocator, ScalarFormatter
 
@@ -1601,27 +1618,10 @@ def _summary_figure(
             booz = None
             booz_note = f"Boozer transform unavailable:\n{type(exc).__name__}"
 
-        # 1. rotational transform and parallel current share radius.
+        # 1. rotational transform.
         _profile_panel(
             axes[0, 0], s, np.asarray(wout.iotaf, dtype=float),
-            xlabel=_S_LABEL, ylabel=r"$\iota$",
-            title="rotational transform and parallel current",
-        )
-        axes[0, 0].lines[0].set_label(r"$\iota$")
-        current_axis = axes[0, 0].twinx(); meta["current_axis"] = current_axis
-        current_line = current_axis.plot(
-            s, 1.0e-3 * np.asarray(wout.jdotb, dtype=float), "-",
-            color=_LINE_COLORS[2], label=r"$\langle\mathbf{J}\cdot\mathbf{B}\rangle$",
-        )[0]
-        current_axis.set_ylabel(
-            r"$\langle \mathbf{J}\cdot\mathbf{B} \rangle$ [kA T/m$^2$]",
-            color=_LINE_COLORS[2],
-        )
-        current_axis.tick_params(axis="y", colors=_LINE_COLORS[2])
-        axes[0, 0].legend(
-            [axes[0, 0].lines[0], current_line],
-            [axes[0, 0].lines[0].get_label(), current_line.get_label()],
-            loc="best", fontsize=11,
+            xlabel=_S_LABEL, ylabel=r"$\iota$", title="rotational transform",
         )
 
         # 2. pressure (left) with the confinement diagnostics eps_eff^{3/2}
@@ -1642,8 +1642,21 @@ def _summary_figure(
             loc="best", fontsize=11,
         )
 
-        # Force error normalized by the magnetic pressure gradient (DESC).
+        # Force error normalized by the magnetic pressure gradient (DESC),
+        # with the bootstrap <J.B> against the same rho on its right axis.
         meta["force_error"] = _relative_force_error_panel(axes[0, 2], wout)
+        current_axis = axes[0, 2].twinx(); meta["current_axis"] = current_axis
+        current_line = current_axis.plot(
+            np.sqrt(s), 1.0e-3 * np.asarray(wout.jdotb, dtype=float), "-",
+            color=_LINE_COLORS[2], label=r"$\langle\mathbf{J}\cdot\mathbf{B}\rangle$",
+        )[0]
+        current_axis.set_ylabel(
+            r"Bootstrap $\langle \mathbf{J}\cdot\mathbf{B} \rangle$ [kA T/m$^2$]",
+            color=_LINE_COLORS[2],
+        )
+        current_axis.tick_params(axis="y", colors=_LINE_COLORS[2])
+        axes[0, 2].legend(
+            handles=[*axes[0, 2].lines, current_line], loc="best", fontsize=11)
 
         # Stability profiles share one panel; right-axis color identifies W.
         d_r_info = _glasser_d_r_from_wout(wout)
@@ -1721,8 +1734,7 @@ def plot_summary(
     The panels, row by row on a 15.0 by 11.5 inch canvas:
 
     1. rotational transform ``iota`` (full mesh, dimensionless) against
-       ``s = psi/psi_edge``, with the flux-surface-averaged parallel current
-       ``<J.B>`` in kA T m^-2 on a coloured right axis;
+       ``s = psi/psi_edge``;
     2. pressure ``presf`` in kPa, with the dimensionless confinement
        diagnostics ``eps_eff^(3/2)`` and ``Gamma_c`` sharing one right axis
        (see :func:`confinement_summary`; an unavailable diagnostic is named,
@@ -1730,7 +1742,9 @@ def plot_summary(
     3. force error against ``rho = sqrt(s)`` on a log axis: the surface
        average of ``|J x B - grad p|`` over the volume average of
        ``|grad(B^2/2mu0)|`` on ``0.1 <= s <= 0.99`` (DESC's normalization;
-       the scalar card gives the volume average), on interior surfaces;
+       the scalar card gives the volume average), on interior surfaces,
+       with the flux-surface-averaged bootstrap current ``<J.B>`` in
+       kA T m^-2 on a coloured right axis;
     4. Mercier ``DMerc`` and the Glasser-Greene-Johnson ``D_R`` against ``s``,
        with the physical ``d2V/ds2`` on the right axis;
     5. the 3-D last closed flux surface coloured by ``|B|`` in T;
@@ -2035,112 +2049,6 @@ def plot_modB(
     return out_path
 
 
-def plot_profiles(wout, out_path: str | Path) -> Path:
-    """Write the six-panel radial-profile and convergence figure.
-
-    Five panels share ``s = psi/psi_edge`` on the abscissa; each series is
-    drawn on the mesh VMEC actually stores it on, so half-mesh quantities are
-    plotted at ``(j - 0.5)/(ns - 1)`` and their unused row 0 is skipped:
-
-    1. rotational transform ``iotaf`` (full mesh, dimensionless);
-    2. pressure — ``presf`` on the full mesh and ``pres`` on the half mesh,
-       both in Pa;
-    3. ``jcuru`` and ``jcurv``, VMEC's surface-averaged current densities, in
-       A;
-    4. ``buco`` and ``bvco``, the half-mesh covariant field averages
-       ``<B_theta>`` and ``<B_zeta>`` in T m;
-    5. enclosed toroidal ``phi`` and poloidal ``chi`` flux in Wb.
-
-    The sixth panel is the convergence trace rather than a profile: the
-    stored force residual ``fsqt`` (and ``wdot`` where positive) on a log
-    ordinate against the stored-iteration sample index, with a dashed line at
-    the achieved tolerance ``ftolv``.  VMEC keeps at most 100 samples and
-    leaves unused slots at zero, so the trace stops at the last positive
-    ``fsqt`` entry.  A WOUT with no history gets a "no fsqt history" note.
-
-    Parameters
-    ----------
-    wout:
-        Path to a ``wout_*.nc`` or a :class:`~vmex.core.wout.WoutData`.
-    out_path:
-        Destination image file.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`, saved at 200 dpi on
-    the Agg backend and closed.
-    """
-    plt = _import_matplotlib()
-    wout, _ = _as_wout(wout)
-    ns = int(wout.ns)
-    s = np.linspace(0.0, 1.0, ns)
-    s_half = _half_mesh_s(ns)
-
-    with _rc_context():
-        fig, axes = plt.subplots(2, 3, figsize=(13.0, 7.0), layout="constrained")
-
-        ax = axes[0, 0]
-        ax.plot(s, np.asarray(wout.iotaf, dtype=float), ".-")
-        ax.set_ylabel(r"$\iota$")
-        ax.set_title("rotational transform (full mesh)")
-
-        ax = axes[0, 1]
-        ax.plot(s, np.asarray(wout.presf, dtype=float), ".-", label="presf (full)")
-        ax.plot(s_half, np.asarray(wout.pres, dtype=float)[1:], ".", ms=3, label="pres (half)")
-        ax.set_ylabel("pressure [Pa]")
-        ax.legend()
-
-        ax = axes[0, 2]
-        ax.plot(s, np.asarray(wout.jcuru, dtype=float), ".-", label="jcuru")
-        ax.plot(s, np.asarray(wout.jcurv, dtype=float), ".-", label="jcurv")
-        ax.set_ylabel("current density [A]")
-        ax.legend()
-
-        ax = axes[1, 0]
-        ax.plot(s_half, np.asarray(wout.buco, dtype=float)[1:], ".-", label="buco")
-        ax.plot(s_half, np.asarray(wout.bvco, dtype=float)[1:], ".-", label="bvco")
-        ax.set_ylabel(r"$\langle B_u \rangle$, $\langle B_v \rangle$")
-        ax.legend()
-
-        ax = axes[1, 1]
-        phi_flux = np.asarray(wout.phi, dtype=float)
-        chi_flux = np.asarray(wout.chi, dtype=float)
-        ax.plot(s, phi_flux, ".-", label=r"$\phi$ (toroidal)")
-        ax.plot(s, chi_flux, ".-", label=r"$\chi$ (poloidal)")
-        ax.set_ylabel("flux [Wb]")
-        ax.legend()
-
-        for ax in axes.ravel()[:5]:
-            ax.set_xlabel(_S_LABEL)
-
-        # fsqt convergence trace (VMEC stores up to 100 sampled residuals).
-        ax = axes[1, 2]
-        fsqt = np.asarray(getattr(wout, "fsqt", np.zeros(0)), dtype=float).ravel()
-        wdot = np.asarray(getattr(wout, "wdot", np.zeros(0)), dtype=float).ravel()
-        mask = fsqt > 0.0
-        if np.any(mask):
-            last = int(np.max(np.nonzero(mask)[0])) + 1
-            it = np.arange(1, last + 1)
-            ax.semilogy(it, np.maximum(fsqt[:last], 1e-30), ".-", label="fsqt")
-            wmask = wdot[:last] > 0.0
-            if np.any(wmask):
-                ax.semilogy(it[wmask], wdot[:last][wmask], ".-", alpha=0.7, label="wdot")
-            ftolv = float(getattr(wout, "ftolv", 0.0) or 0.0)
-            if ftolv > 0.0:
-                ax.axhline(ftolv, color="k", ls="--", lw=0.8)
-            ax.legend()
-        else:
-            ax.text(0.5, 0.5, "no fsqt history", ha="center", va="center", transform=ax.transAxes)
-        ax.set_xlabel("stored iteration sample")
-        ax.set_ylabel("force residual")
-        ax.set_title("convergence (fsqt)")
-
-        out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
-        plt.close(fig)
-    return out_path
-
-
 def plot_boundary_3d(
     wout,
     out_path: str | Path,
@@ -2204,7 +2112,6 @@ _WOUT_FIGURES = {
     "summary": ("summary", plot_summary),
     "surfaces": ("surfaces", plot_surfaces),
     "modB": ("modB", plot_modB),
-    "profiles": ("profiles", plot_profiles),
     "stability": ("stability", plot_stability),
     "3d": ("boundary3d", plot_boundary_3d),
 }
@@ -2214,7 +2121,7 @@ def plot_wout(
     wout,
     outdir: str | Path,
     which: Sequence[str] = (
-        "summary", "surfaces", "modB", "profiles", "stability", "3d",
+        "summary", "surfaces", "modB", "stability", "3d",
     ),
     *,
     name: str | None = None,
@@ -2229,8 +2136,8 @@ def plot_wout(
     outdir:
         Output directory (created if missing).
     which:
-        Any subset of ``("summary", "surfaces", "modB", "profiles",
-        "stability", "3d")``.
+        Any subset of ``("summary", "surfaces", "modB", "stability",
+        "3d")``.
     name:
         Basename prefix for the figures (default: case name from the path).
     j_pitch:
