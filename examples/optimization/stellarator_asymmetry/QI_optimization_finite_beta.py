@@ -33,7 +33,7 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 2]
+MAX_MODES = [1, 3]
 MAX_NFEV = [10, 15]
 
 # Boozer resolution the constructed-QI residual is evaluated on:
@@ -42,7 +42,7 @@ QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 # Targets and limits.  This lane carries the beta residual but no Mercier or
 # resistive-interchange rows:
 TARGET_BETA = 0.01
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
@@ -67,7 +67,7 @@ MINIMUM_MPOL = 5
 # field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA); this value keeps PHIEDGE near
 # the seed deck's, where the Mercier and resistive-interchange weights were
 # tuned (DMerc scales as PHIEDGE**-2):
-PRES_SCALE = 1.0e3
+PRES_SCALE = 3.0e3
 
 # Verification solve of the optimized boundary:
 FINAL_NS = 71
@@ -148,7 +148,7 @@ def elongation_excess(equilibrium_state, solver_context):
     return jnp.maximum(opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
 
 # Each term is (function, target, weight).
-objective_function_terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+objective_function_terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
     (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),
     # The aspect-ratio row is deliberately light, so this row is what holds beta

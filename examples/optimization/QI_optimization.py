@@ -41,7 +41,7 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend. A max_mode = 3 stage lowered the
 # cost by 1 % for 45 % of the run, so it is not shipped:
-MAX_MODES = [1, 2]
+MAX_MODES = [1, 3]
 MAX_NFEV = [10, 15]
 
 # Boozer resolution the QI residual is optimized on, and the finer one the
@@ -50,7 +50,7 @@ QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
 
 # Targets and limits:
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
@@ -121,7 +121,7 @@ def elongation_excess(equilibrium_state, solver_context):
 # Each term is (function, target, weight).
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_function_terms = [
-    (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+    (opt.aspect_ratio, ASPECT_TARGET, 0.01),
     (iota_floor, 0.0, 10.0),
     (mirror_excess, 0.0, 1000.0),
     (elongation_excess, 0.0, 10.0),

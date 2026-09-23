@@ -50,7 +50,7 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
-MAX_MODES = [1, 2]
+MAX_MODES = [1, 3]
 MAX_NFEV = [10, 15]
 N_CURRENT_SPLINE = [6, 8]
 
@@ -58,7 +58,7 @@ N_CURRENT_SPLINE = [6, 8]
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 
 # Targets and limits:
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
@@ -188,7 +188,7 @@ bootstrap = RedlBootstrapMismatch(profiles, helicity_n=0, surfaces=SURFACES,
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_function_terms = [
     (qi, 0.0, 10.0), (bootstrap, 0.0, 1.0),
-    (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+    (opt.aspect_ratio, ASPECT_TARGET, 0.01),
     (iota_floor, 0.0, 10.0),
     (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),

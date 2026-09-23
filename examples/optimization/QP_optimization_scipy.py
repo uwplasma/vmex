@@ -25,7 +25,7 @@ from vmex import optimize as opt
 NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 SURFACES = np.array([0.5, 0.7, 0.9])
-MAX_MODES = [1, 2]
+MAX_MODES = [1, 3]
 MAXITER = 8
 METHOD = "BFGS"  # or "L-BFGS-B"
 PARAMETER_BOUND = 1.0
@@ -90,7 +90,7 @@ def mirror_excess(equilibrium_state, solver_context):
 
 objective_function_terms = [
     (qs, 0.0, 1.0),
-    (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+    (opt.aspect_ratio, ASPECT_TARGET, 0.01),
     (iota_floor, 0.0, 10.0),
     (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),

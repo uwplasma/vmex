@@ -26,7 +26,7 @@ from vmex.core.qi import ConstructedQIResidual
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
 
 # Highest boundary Fourier mode number that is varied, and the Adam steps:
-MAX_MODE = 2
+MAX_MODE = 3
 STEPS = 20
 
 # Optax transform: gradient clipping, then Adam at this learning rate:
@@ -38,7 +38,7 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 
 # Targets and limits:
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.3                  # floor on |mean iota|
 ELONGATION_LIMIT = 8.0
 
@@ -94,7 +94,7 @@ def elongation_excess(equilibrium_state, solver_context):
 
 
 # Each term is (function, target, weight).
-terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
          (iota_floor, 0.0, 10.0), (elongation_excess, 0.0, 1.0)]
 problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=MAX_MODE,
     vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, progress=True, evaluation_progress=True)

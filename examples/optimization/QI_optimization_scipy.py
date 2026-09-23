@@ -29,12 +29,12 @@ from vmex.core.qi import ConstructedQIResidual
 NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 SURFACES = np.linspace(0.1, 1.0, 6)
-MAX_MODES = [1, 2]
+MAX_MODES = [1, 3]
 MAXITER = 8
 METHOD = "L-BFGS-B"  # or "BFGS"
 PARAMETER_BOUND = 3.0
 BOUNDARY_STEP = 0.05              # metres represented by one scaled variable
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.26                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
@@ -95,7 +95,7 @@ def mirror_excess(equilibrium_state, solver_context):
         opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
 
 objective_function_terms = [
-    (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+    (opt.aspect_ratio, ASPECT_TARGET, 0.01),
     (iota_floor, 0.0, 10.0),
     (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),

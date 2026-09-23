@@ -48,11 +48,11 @@ TARGET_BETA = 0.01
 # field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA); this value keeps PHIEDGE near
 # the seed deck's, where the Mercier and resistive-interchange weights were
 # tuned (DMerc scales as PHIEDGE**-2):
-PRES_SCALE = 1.0e3
+PRES_SCALE = 3.0e3
 SURFACES = np.linspace(0.1, 0.9, 6)
-MAX_MODES = [1, 2]
+MAX_MODES = [1, 3]
 MAXITER = [10, 10]
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
@@ -141,7 +141,7 @@ def elongation_excess(state, runtime):
 
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_terms = [
-    (qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+    (qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
     (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),
     # The aspect-ratio row is deliberately light, so this row is what holds beta

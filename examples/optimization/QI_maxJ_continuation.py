@@ -40,13 +40,13 @@ SURFACES = np.array([0.20, 0.35, 0.50, 0.65, 0.80, 0.90])
 
 # QI-only seed ladder: highest boundary mode number per stage, the residual
 # evaluations each may spend, and the ESS damping each uses:
-QI_SEED_MAX_MODES = [1, 2]
+QI_SEED_MAX_MODES = [1, 3]
 QI_SEED_MAX_NFEV = [10, 15]
 QI_SEED_ESS_ALPHA = [1.2, 1.2]
 QI_SEED_WEIGHT = 1.0e3
 
 # Maximum-J ladder, one entry per stage:
-MAX_MODES = [2, 2, 2]
+MAX_MODES = [3, 3, 3]
 MAX_NFEV = [4, 4, 8]
 MAXIMUM_J_TARGETS = [0.0, -0.002, -0.005]
 MAXIMUM_J_WEIGHTS = [500.0, 2.0e3, 5.0e3]
@@ -56,7 +56,7 @@ MAGNETIC_WELL_WEIGHTS = [100.0, 1.0e3, 1.0e3]
 MAXJ_ESS_ALPHA = 0.7
 
 # Targets and limits:
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 8.0
 IOTA_FLOOR = 1.03                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 MAGNETIC_WELL_TARGET = 0.01
