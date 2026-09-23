@@ -1090,11 +1090,11 @@ def _host_boundary_schur_adjoint(
 # ---------------------------------------------------------------------------
 # Newton anchoring of the coupled root
 # ---------------------------------------------------------------------------
-#: Newton steps the anchor may take.  From solves at ``ftol = 1e-10`` along
-#: the finite-beta single-stage optimization path it lands in 7 to 15; the
-#: budget leaves room for a slower point without letting a non-contracting
-#: one run on.
-_ANCHOR_MAX_STEPS = 20
+#: Newton steps one attempt may take.  From solves at ``ftol = 1e-10`` along
+#: the finite-beta single-stage optimization path it lands in 7 to 15, from
+#: ``ftol = 1e-9`` in 7 to 23; the budget leaves room for a slower point
+#: without letting a non-contracting one run on.
+_ANCHOR_MAX_STEPS = 25
 
 #: Inexact-Newton forcing term of each step's Krylov solve, as in the
 #: fixed-boundary refinement (``implicit._REFINE_FORCING``).  A forcing that
@@ -1103,14 +1103,16 @@ _ANCHOR_MAX_STEPS = 20
 #: points on that path that this fixed one lands.
 _ANCHOR_FORCING = 1.0e-6
 
-#: GMRES iterations per solve (one unrestarted cycle).  The bulk factors
-#: leave NESTOR's low-rank edge coupling and the factorization's staleness to
-#: the Krylov solve: 40-110 iterations on the single-stage deck.
+#: GMRES iterations per solve (one unrestarted cycle).  The preconditioner
+#: is exact where it was built, so the Krylov solve only covers its
+#: staleness: 1-3 iterations there and at most about 70 on the single-stage
+#: deck; the bulk factors alone needed 40-110.
 _ANCHOR_KRYLOV = 150
 
 #: A Newton solve that took more Krylov iterations than this rebuilds the
-#: bulk factorization at the next iterate.
-_ANCHOR_REFACTOR_KRYLOV = 100
+#: preconditioner at the next iterate.  A rebuild costs about 1 s on the
+#: single-stage deck; 20 and 40 cost the same there (Krylov 183 against 310).
+_ANCHOR_REFACTOR_KRYLOV = 40
 
 #: Relative accuracy of the simplified correction behind the damping test;
 #: the test compares two lengths, so two digits suffice.
@@ -1122,6 +1124,10 @@ _ANCHOR_TEST_FORCING = 1.0e-2
 #: monotonicity test and still led where the next Newton corrections grew
 #: from 0.11 to 1.8; a quarter step from the same state lands.
 _ANCHOR_FIRST_DAMPING = (1.0, 0.25, 0.0625)
+
+#: Add NESTOR's coupling to the bulk preconditioner (:func:`_anchor_coupling`);
+#: off, the bulk factors alone precondition (4-8x the Krylov iterations).
+_ANCHOR_WOODBURY = True
 
 #: Smallest Newton damping factor before an attempt gives up.  Steps are
 #: damped on Deuflhard's natural monotonicity test, not on ``|F|`` (see
@@ -1166,10 +1172,61 @@ def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
         row_scale[:, :, None] * upper * column_scale[following][:, None, :])
 
 
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
+                     dof_mask, response, factors, row_scale, column_scale, *,
+                     cfg):
+    """Woodbury terms that add NESTOR's coupling to the bulk factors.
+
+    At frozen edge pressure the raw Jacobian is the block tridiagonal ``A``
+    the factors invert.  NESTOR adds ``E = P Q``: ``Q = dh/dz`` maps the
+    state to NESTOR's own inputs ``h`` (:func:`_vacuum_inputs`: edge
+    coefficients, ``ctor``, the axis) and ``P`` is the edge force's response
+    to them through :func:`_edge_response`.  Its rank is ``h``'s length (129
+    on the single-stage deck), so ``(A + P Q)^-1`` is applied exactly by the
+    Woodbury identity with one small capacitance factorization.  Returns
+    ``(A^-1 P, Q, lu(I + Q A^-1 P))``, packed and flattened.
+    """
+    project, pack, unpack = _packers(cfg, dof_mask)
+    icfg = cfg.implicit
+    value, jacobian, _ = response
+    shape = row_scale.shape
+    rt = dataclasses.replace(
+        im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=int(icfg.resolution.ns),
+        presf_ns_scale=_presf_ns_scale_traceable(
+            params, icfg.inp, int(icfg.resolution.ns)),
+    )
+    _, force_of_pressure = jax.linearize(
+        lambda bsq: pack(_projected_residual_lane(
+            z, params, field_parameters, frozen, rcon0, zcon0, dof_mask, bsq,
+            None, cfg=cfg, formulation="raw")), value)
+    columns = jax.vmap(force_of_pressure, in_axes=-1, out_axes=-1)(jacobian)
+    columns = columns.reshape(-1, columns.shape[-1])
+
+    def inputs(packed):
+        state = jax.tree.map(jnp.add, frozen, project(unpack(packed)))
+        return ravel_pytree(_vacuum_inputs(state, rt))[0]
+
+    _, inputs_t = jax.vjp(inputs, jnp.zeros(shape, row_scale.dtype))
+    rows = jax.vmap(lambda e: inputs_t(e)[0])(
+        jnp.eye(columns.shape[-1], dtype=columns.dtype))
+    rows = rows.reshape(rows.shape[0], -1)
+
+    def bulk_inverse(flat):
+        scaled = flat.reshape(shape) * row_scale
+        solved = block_thomas_solve(factors, scaled[..., None])[..., 0]
+        return (solved * column_scale).ravel()
+
+    solved = jax.vmap(bulk_inverse, in_axes=-1, out_axes=-1)(columns)
+    capacitance = jnp.eye(rows.shape[0], dtype=rows.dtype) + rows @ solved
+    return solved, rows, jax.scipy.linalg.lu_factor(capacitance)
+
+
 @functools.partial(jax.jit, static_argnames=("cfg", "rtol"))
 def _anchor_linear_solve(force, z, params, field_parameters, frozen, rcon0,
                          zcon0, dof_mask, response, factors, row_scale,
-                         column_scale, *, cfg, rtol):
+                         column_scale, coupling, *, cfg, rtol):
     """``-J(z)^-1 force`` for the packed raw coupled residual, staged.
 
     GMRES on the raw linearization at ``z``, preconditioned by the bulk
@@ -1199,7 +1256,11 @@ def _anchor_linear_solve(force, z, params, field_parameters, frozen, rcon0,
     def precondition(flat):
         scaled = flat.reshape(shape) * row_scale
         solved = block_thomas_solve(factors, scaled[..., None])[..., 0]
-        return (solved * column_scale).ravel()
+        solved = (solved * column_scale).ravel()
+        if coupling is None:
+            return solved
+        bulk_p, q, lu = coupling
+        return solved - bulk_p @ jax.scipy.linalg.lu_solve(lu, q @ solved)
 
     rhs = -force.ravel()
     solution = _solvax_gmres(
@@ -1243,11 +1304,13 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
 
     The anchor is the free-boundary counterpart of
     ``implicit._refined_state``: Newton on the projected coupled residual.
-    Each step solves the raw linearization by GMRES, preconditioned with the
-    block factors of the radial block tridiagonal at frozen vacuum pressure
-    (the Schur adjoint's bulk operator) and with NESTOR entering through
-    its dense edge response, rebuilt at every iterate; the factors are
-    rebuilt only when GMRES says they have gone stale.  Steps are damped on
+    Each step solves the raw linearization by GMRES, with NESTOR entering
+    through its dense edge response, rebuilt at every iterate.  The
+    preconditioner is the exact Jacobian where it is built: the block
+    factors of the radial block tridiagonal at frozen vacuum pressure (the
+    Schur adjoint's bulk operator) plus NESTOR's low-rank coupling through
+    the Woodbury identity (:func:`_anchor_coupling`).  It is rebuilt only
+    when GMRES says it has gone stale.  Steps are damped on
     Deuflhard's natural monotonicity test (the NLEQ-ERR strategy): the
     simplified correction ``J^-1 F(z + a dz)`` must be shorter than ``dz``.
     ``|F|`` is no guide here -- the first full step raises it by three
@@ -1292,15 +1355,20 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
         return jax.tree.map(jnp.add, state, jax.tree.map(
             jnp.subtract, z_at, project(state)))
 
-    def factor(z_at):
-        """Bulk block factors at the iterate ``z_at``."""
+    def factor(z_at, response_at):
+        """Preconditioner at the iterate ``z_at``: bulk factors + coupling."""
         at = iterate_state(z_at)
         bsqvac = jax.lax.stop_gradient(cfg.vacuum_program.bsq(at, rt, field))
         lower, diagonal, upper, row_scale, column_scale = _frozen_bulk_blocks(
             params, field_parameters, at, rcon0, zcon0, mask, z_at, bsqvac,
             cfg=cfg, probe_chunk_size=chunk)
-        return (_anchor_factor(lower, diagonal, upper, row_scale,
-                               column_scale), row_scale, column_scale)
+        factors = _anchor_factor(lower, diagonal, upper, row_scale,
+                                 column_scale)
+        coupling = (_anchor_coupling(
+            z_at, params, field_parameters, state, rcon0, zcon0, mask,
+            response_at, factors, row_scale, column_scale, cfg=cfg)
+            if _ANCHOR_WOODBURY else None)
+        return factors, row_scale, column_scale, coupling
 
     def raw(z_at):
         return _anchor_raw_residual(z_at, *lane, cfg=cfg)
@@ -1312,29 +1380,37 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
             response, *bulk, cfg=cfg, rtol=rtol)
         return packed, int(iterations), float(linear)
 
-    initial_bulk = bulk = factor(z)
+    initial_response = _edge_response(
+        cfg, params, field_parameters, state, rcon0, zcon0)
+    initial_bulk = bulk = factor(z, initial_response)
     z0, force0 = z, raw(z)
     best_z, best = z, base
     factorizations = 1
     steps = krylov = attempts = 0
+    # An attempt whose first step would start at or above the factor the
+    # previous attempt's first step accepted retraces that attempt exactly
+    # (the halvings are the same deterministic tests), so it is skipped.
+    first_accepted = np.inf
     for first_damping in _ANCHOR_FIRST_DAMPING:
         if best <= tol:
             break
+        if first_damping >= first_accepted:
+            continue
         # Every attempt starts again from the host state, so the anchored
         # state is still a function of that state alone.
         attempts += 1
         z, force, bulk, previous = z0, force0, initial_bulk, base
         damping = 0.25 * first_damping
         refactor = False
-        for _ in range(_ANCHOR_MAX_STEPS):
-            if refactor:
-                bulk = factor(z)
-                factorizations += 1
-            # NESTOR's dense response is cheap (0.34 s) and exact at ``z``, so it
-            # is rebuilt every step; the bulk factorization is only a
-            # preconditioner and is kept until GMRES says it has gone stale.
-            response = _edge_response(
+        for attempt_step in range(_ANCHOR_MAX_STEPS):
+            # NESTOR's dense response is cheap (0.34 s) and exact at ``z``,
+            # so it is rebuilt every step; the preconditioner is kept until
+            # GMRES says it has gone stale.
+            response = initial_response if z is z0 else _edge_response(
                 cfg, params, field_parameters, iterate_state(z), rcon0, zcon0)
+            if refactor:
+                bulk = factor(z, response)
+                factorizations += 1
             newton, iterations, linear = correction(force, z, _ANCHOR_FORCING)
             krylov += iterations
             refactor = iterations > _ANCHOR_REFACTOR_KRYLOV
@@ -1366,6 +1442,8 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
                 if passed or damping <= _ANCHOR_MIN_DAMPING:
                     break
                 damping = max(_ANCHOR_MIN_DAMPING, 0.5 * damping)
+            if attempt_step == 0:
+                first_accepted = damping if passed else 0.0
             if not passed:
                 if debug:
                     print(f"[vmex anchor] step {steps}: no damped step passes "
