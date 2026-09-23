@@ -106,14 +106,20 @@ CONSTRAINT_WEIGHT = 1.0e3
 PARAMETER_BOUND = 3.0
 
 # Free-boundary solve used on every trial: radial surfaces, force tolerance and
-# iteration cap.
-NS = 31
+# iteration cap. The trials run on a coarse radial grid; the check at the end
+# re-solves on a [16, 51] ladder to 1e-12 and tests every target there. A cold
+# solve at ns = 16 converges well inside NITER, so the cap only bounds the cost
+# of a far line-search trial whose free boundary does not converge (measured:
+# 1500 instead of 4000 saved 80 s over two such trials, same result).
+NS = 16
 FTOL = 1.0e-10
-NITER = 4000
+NITER = 1500
 
-# Budgets. One trial is one free-boundary solve plus one adjoint.
-MAXITER = 50
-MAX_TRIALS = 100
+# Budgets. One trial is one free-boundary solve plus one adjoint. The end
+# check, run on the saved iterates of a 15-iteration run, passes at iterations
+# 6, 8 and 10 and fails at 4 (aspect 6.032).
+MAXITER = 10
+MAX_TRIALS = 25
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil terms use:

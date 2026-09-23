@@ -22,11 +22,9 @@ Powell-Hestenes-Rockafellar augmented Lagrangian: a stage is one bounded
 L-BFGS-B solve at fixed multipliers, then the multipliers move and the penalty
 grows only if the violation did not fall by at least a factor of four.
 
-What that buys over ``single_stage_optimization.py``, measured at 301 trials:
-the limits can be stated as they are, rather than tightened until a quadratic
-penalty happens to settle outside them, and the objective comes out about 1.4x
-lower. The penalized file needed three rounds of threshold and weight tuning to
-reach the same targets. ``single_stage_optimization_least_squares.py`` is the
+What that buys over ``single_stage_optimization.py``: the limits can be
+stated as they are, rather than tightened until a quadratic penalty happens to
+settle outside them. ``single_stage_optimization_least_squares.py`` is the
 third form. Each is self-contained; read whichever you intend to modify.
 
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
@@ -116,17 +114,22 @@ CONSTRAINT_TOLERANCE = 1.0e-3
 # represent a bound.
 PARAMETER_BOUND = 3.0
 
-# Budgets. One trial is one equilibrium solve plus one adjoint.
+# Budgets. One trial is one equilibrium solve plus one adjoint. The end check,
+# run on the saved iterates of a 40-trial run, passes from iteration 12 of the
+# first stage, trial 34 (it fails at 9 on aspect 6.017), so the trial cap ends
+# the run inside that stage.
 MAX_STAGES = 8
 STAGE_MAXITER = 25
-MAX_TRIALS = 300
+MAX_TRIALS = 40
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil objective uses. A toroidal count commensurate with the
 # coil number aliases narrow B.n/B structure, so 37 rather than 36.
 NPHI, NTHETA = 37, 32
 
-MAKE_MOVIE = True                 # a compact GIF of the accepted iterates
+# A compact GIF of the accepted iterates. Off by default: every frame re-solves
+# its equilibrium for the surface colour.
+MAKE_MOVIE = False
 # Surface colour in that GIF: None, "absB", "B.n/B", or a callable
 # ``(x, objects) -> values``.
 MOVIE_SURFACE_COLOR = "absB"
