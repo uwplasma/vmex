@@ -26,6 +26,30 @@ readable through git history.
 
 # Part I. Current state and acceptance gates (2026-09-22)
 
+## Resume here (paused 2026-09-23)
+
+Main is `e71202835`: release 0.11.0 plus #427, #428, #413 (this plan) and
+#429 (user docs). Work paused on the maintainer's instruction; every open
+branch below is pushed and its PR body or latest comment is the handoff for
+that item. Read the PR, then continue from its "next steps".
+
+| PR | Item | State at pause | Next step |
+|---|---|---|---|
+| #432 | Free-boundary Newton anchoring on the coupled plasma-vacuum root, and a bounded seed-reference restart (lane A) | open; CI was running | Finish CI; confirm before/after (distance to root, value vs anchored-root FD, trial time at the optimum, same status from different histories); merge. Then re-time the free-boundary single stages on top of it. |
+| #430 | Virtual casing and extender validated against independent oracles; two defects fixed; curl-free projection gets a public switch (still off) | open; CI was running | Finish CI and merge. Open items in its body: default 64x64 source grid is inaccurate close to the surface (2.4e-2 at 0.2a, O(1) at <= 0.1a; the per-point estimate flags it); implicit exterior-field VJP vs independent re-solves differs 2-4x on boundary directions (off-root state, lane A); curl-free default is a maintainer decision. |
+| #431 | Keep only cited benchmark records (policy reversed by the maintainer: uncited records are removed; history keeps them via permalinks); drop `tools/profile_hotpaths.py` | open; rebasing on #429 | Rebase, re-verify cited paths, merge; close #415 (same two deletions). |
+| #426 | Optimization example defaults baked into main; finite beta through PHIEDGE (closed form at the target aspect plus one correction solve; no calibration loop); certificate blocker fixed at its cause | open | Measure every changed example against the 5-minute limit (see decisions) and cut ladders/budgets where needed; merge. |
+| #411 | Single-stage examples (renames, least-squares form, matched fixed/free pair, 0.5 % beta pair, iota ceiling for the vacuum free boundary) | draft | Bring all four under 5 minutes (fewer iterations/dofs allowed, but the optimization must visibly change coils and surface); refresh docstring numbers; merge; close #371 and #377. |
+| (new) | `implicit.make_config` default `max_fsq_ratio` 1e6 -> documented 1e2; remove duplicate `examples/take_gradients.py`; make the five mirror examples run (<= 5 min); compact WOUT helper in `fixed_boundary_run.py` | PR opened by the follow-up task | Check status flips reported in its body; merge. |
+| #417, #418, #421, #423, #424, #419, #371, #377, #415 | superseded or failed directions (see table below) | open | Close with pointers (not yet done: closing is left to the maintainer). |
+| #301-#304, #306, #366, #367, #302 | Winding surface and HINT comparison | untouched by instruction | Keep in their PRs, unmerged. |
+
+Measurement caveat for all timings in these PRs: the laptop ran at load
+average ~60 and the office machine at ~94 with ~3 GB of 62 GB free, from
+concurrent jobs. Ratios come from interleaved A/B runs; absolute wall times
+are upper bounds. Re-time on a quiet machine before quoting user-facing
+runtimes.
+
 ## Current status
 
 | Area | Status | Public evidence / source | Next action and completion gate |
@@ -104,6 +128,22 @@ script (`PRES_SCALE` from one seed solve) once measured.
 zero-beta free-boundary limit cycle is a missing equilibrium (a 4/9 island
 chain at the requested flux), not a solver defect; see lane B. The example
 keeps the transform below the resonance. Tiny-beta regularization is rejected.
+
+**Examples run in at most five minutes.** Every example, including
+compilation, optimization and its final verification solve, must finish in
+five minutes on a laptop; longer runs scare users away. Reduce iterations and
+degrees of freedom where needed, but an optimization example must still
+visibly change its design (coils and surface, for single stage). The
+preferred route is making VMEX faster (solves and derivatives), not only
+smaller examples.
+
+**Only cited benchmark records stay.** The earlier policy of keeping uncited
+records in `benchmarks/` is reversed (#431): records and scripts not cited by
+the published docs or tests, and not run by CI, are deleted; git history keeps
+them, linked by permalink where the plan or code still names them.
+
+**Documentation explains methods, goals and results** (#429). New numbers in
+the docs must cite a committed record or test.
 
 ## CI capacity (c1/c2 parity lanes)
 
@@ -858,6 +898,39 @@ finite-beta beta through PHIEDGE normalization instead of a pressure loop
 (in progress); defer the bootstrap single-stage scripts. The release deferral
 stated in "Execution and acceptance" was superseded by 0.11.0 and restated for
 0.12. This entry also corrected stale documentation claims listed in lane F.
+
+### 2026-09-22/23: review, fixes, docs, and the pause
+
+- Merged: #427 (`equilibrium_from_x` returns the refined state: iota 0.551556
+  vs 0.552562 on 0.11.0), #428 (m=1 family closure test; the defect-pinning
+  `gap > 3e-3` assertion was dropped), #413 (this plan), #429 (docs: 54 -> 44
+  pages; README/landing explain methods, goals, results).
+- Free-boundary adjoint audit (#417 comment 5784815035): exact at the root
+  (1e-7..1e-9 vs FD of Newton-anchored roots), +5-9 s per gradient, 4-68x
+  faster than FD, no leak. Two practical defects: the returned state is off the
+  root, and ~80 % of trial time near the optimum is a restart run to its cap.
+  #432 found why `ftol` is not a root test here (sum of squares; the edge row
+  enters `getfsq` only for 50 iterations after a restart, as in VMEC2000's
+  `residue.f90`): converged states sat 3.5e-2 to 1.3e-1 from the root, mostly a
+  poloidal-angle relabelling pinned only by the weak spectral-condensation
+  force, and the objective there was 0.2-17 % off.
+- Vacuum free boundary: the limit cycle was a 4/9 island chain at the
+  requested flux (field-line tracing; VMEC2000 and VMEC++ fail the same way;
+  Landreman-Paul coils converge cold at zero beta); fixed in #411 with an iota
+  ceiling. Tiny-beta regularization rejected.
+- PHIEDGE: beta depends only on `PRES_SCALE/PHIEDGE^2` at zero current, so
+  PHIEDGE is set in closed form at the target aspect with one correction solve
+  (#426). For free boundary the coils fix |B| and PHIEDGE sets plasma size, so
+  the analogue is choosing `PRES_SCALE` from the coil field.
+- Single-stage runs (#411, loaded laptop): fixed zero beta 335 s and fixed
+  0.5 % beta 566 s meet every target; free 0.5 % beta 2399 s meets every
+  target; free zero beta with the iota ceiling meets every target (~1900 s).
+  All exceed the new five-minute limit; bottleneck analysis and speedups are
+  in the #411 handoff comment.
+- `benchmarks/`/`tools/` audit: neither ships in the wheel; `benchmarks/` can
+  go from 132 to 65 files (#431); `tools/` keeps 17 of 18 (CI lane selection,
+  doc guards, asset fetch). Deleting files does not shrink clones (history is
+  36.6 MiB; `--depth 1` is 4.7 MiB; `docs/_static` is 43 % of history).
 
 # Part II. Historical plan and logbook (2026-09-13 to 2026-09-20)
 
