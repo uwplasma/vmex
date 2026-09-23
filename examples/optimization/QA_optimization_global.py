@@ -36,8 +36,8 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 MAX_MODE = 2
 
 # Global phase: hops, and the L-BFGS-B iterations each hop may spend:
-N_BASINS = 2
-LOCAL_MAXITER = 8
+N_BASINS = 1
+LOCAL_MAXITER = 6
 
 # Basin-hopping acceptance temperature, perturbation size, and the random
 # seed that makes the walk reproducible:
@@ -46,7 +46,7 @@ BASIN_STEPSIZE = 0.25
 BASIN_SEED = 7
 
 # Local finish: residual evaluations the polishing least squares may spend:
-POLISH_NFEV = 15
+POLISH_NFEV = 10
 
 # Targets:
 ASPECT_TARGET = 6.0

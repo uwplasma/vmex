@@ -1052,7 +1052,7 @@ def test_bootstrap_optimization_examples(case, figure_of_merit, tmp_path):
 @pytest.mark.parametrize(("script_name", "dependency", "output"), [
     ("QA_optimization_scipy.py", None, "wout_QA_scipy_L-BFGS-B.nc"),
     ("QI_optimization_scipy.py", None, "wout_QI_scipy_L-BFGS-B.nc"),
-    ("QI_optimization_jaxopt.py", "jaxopt", "wout_QI_jaxopt_LBFGS.nc"),
+    ("QI_optimization_jaxopt.py", "jaxopt", "wout_QI_jaxopt_LM.nc"),
     ("QI_optimization_optax.py", "optax", "wout_QI_optax_adam.nc"),
 ])
 def test_scalar_optimizer_examples(script_name, dependency, output, tmp_path):

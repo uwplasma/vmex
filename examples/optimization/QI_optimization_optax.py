@@ -27,7 +27,7 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initi
 
 # Highest boundary Fourier mode number that is varied, and the Adam steps:
 MAX_MODE = 2
-STEPS = 100
+STEPS = 20
 
 # Optax transform: gradient clipping, then Adam at this learning rate:
 GRADIENT_CLIP = 1.0

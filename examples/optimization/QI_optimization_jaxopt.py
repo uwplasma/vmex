@@ -32,8 +32,8 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initi
 MAX_MODE = 2
 
 # JAXopt solver, and the iterations it may spend:
-METHOD = "LBFGS"                  # or "LM"
-BUDGET = 20
+METHOD = "LM"                     # LBFGS's line search stalls on this problem
+BUDGET = 6
 LINE_SEARCH_STEPS = 10
 INITIAL_STEP = 0.0                # LBFGS picks its own step when this is zero
 
