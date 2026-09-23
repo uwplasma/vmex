@@ -111,6 +111,8 @@ __all__ = [
     "FreeBoundaryDiffProblem",
     "external_B_cartesian",
     "offsurface_error_estimate",
+    "graded_plasma_field",
+    "GRADED_NODES",
     "have_virtual_casing_jax",
 ]
 
@@ -818,6 +820,195 @@ def offsurface_error_estimate(field, xyz, B_plasma=None, *, order: int = 0) -> j
         raise NotImplementedError(
             "the achieved-error estimate needs virtual-casing-jax >= 0.0.6")
     return field.B_plasma_error_estimate(jnp.asarray(xyz))
+
+
+# ---------------------------------------------------------------------------
+# Near the surface: a target-graded periodic trapezoid rule
+# ---------------------------------------------------------------------------
+
+#: Default ``(poloidal, toroidal)`` node counts of the graded rule over the
+#: full torus.  Measured on the 2.5 % beta QA deck against a converged
+#: reference of the same surface data: 1e-12 in ``B`` and 1e-10 in ``grad B``
+#: at every distance from one minor radius down to 0.01 a, and 3e-8 at
+#: 0.003 a; ``(96, 384)`` keeps ``B`` to 1e-9 down to 0.01 a.
+GRADED_NODES = (128, 512)
+
+#: Local node spacing at the target, as a fraction of its distance.
+_GRADING = 8.0
+#: The substitution ``u - a sin u`` stays monotone for ``a < 1``.
+_MAX_GRADING = 0.995
+
+
+def _graded_series(surface_data) -> dict:
+    """The boundary and its field as Fourier series over one field period.
+
+    Cylindrical components are periodic over a field period, so the one-period
+    samples interpolate spectrally to any angle of the full torus.  The
+    Nyquist rows have no unique real interpolant and are dropped.  Outward is
+    the side of ``e_theta x e_phi`` that encloses a positive volume; the
+    supplied normal is not relied on for it.
+    """
+    gamma = jnp.asarray(surface_data.gamma)
+    field = jnp.asarray(surface_data.B_total)
+    nfp = int(surface_data.nfp)
+    nphi, ntheta = int(gamma.shape[1]), int(gamma.shape[2])
+    phi = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, nphi, endpoint=False)[:, None]
+    cosine, sine = jnp.cos(phi), jnp.sin(phi)
+
+    def cylindrical(v):
+        return jnp.stack((cosine * v[0] + sine * v[1], -sine * v[0] + cosine * v[1], v[2]),
+                         axis=-1)
+
+    values = jnp.concatenate((cylindrical(gamma), cylindrical(field)), axis=-1)
+    coefficients = jnp.fft.fft2(values, axes=(0, 1)) / (nphi * ntheta)
+    toroidal = np.fft.fftfreq(nphi, 1.0 / nphi)
+    poloidal = np.fft.fftfreq(ntheta, 1.0 / ntheta)
+    keep_t, keep_p = np.abs(toroidal) < nphi / 2.0, np.abs(poloidal) < ntheta / 2.0
+    series = dict(coefficients=coefficients[keep_t][:, keep_p],
+                  kp=jnp.asarray(toroidal[keep_t] * nfp), kt=jnp.asarray(poloidal[keep_p]))
+    x, e_theta, e_phi, _ = _graded_evaluate(
+        series, jnp.asarray(phi[:, 0]), jnp.linspace(0.0, 2.0 * jnp.pi, ntheta, endpoint=False))
+    series["orientation"] = jax.lax.stop_gradient(
+        jnp.sign(jnp.sum(x * jnp.cross(e_theta, e_phi))))
+    # a dense cloud of the whole torus seeds the nearest-point search
+    cloud_theta = jnp.linspace(0.0, 2.0 * jnp.pi, 2 * ntheta, endpoint=False)
+    cloud_phi = jnp.linspace(0.0, 2.0 * jnp.pi, 2 * nphi * nfp, endpoint=False)
+    cloud, *_ = _graded_evaluate(series, cloud_phi, cloud_theta)
+    grid_phi, grid_theta = jnp.meshgrid(cloud_phi, cloud_theta, indexing="ij")
+    series["cloud"] = jax.lax.stop_gradient(cloud.reshape(-1, 3))
+    series["cloud_angles"] = jnp.stack((grid_theta.ravel(), grid_phi.ravel()), axis=1)
+    series["cloud_spacing"] = float(2.0 * np.pi / (2 * ntheta))
+    return series
+
+
+def _graded_evaluate(series, phis, thetas):
+    """Position, both tangents and the field on the tensor grid ``phis x thetas``.
+
+    Separable: the toroidal phases contract first, then the poloidal ones, so
+    an ``(n_phi, n_theta)`` grid costs two small matrix products per quantity.
+    """
+    c, kp, kt = series["coefficients"], series["kp"], series["kt"]
+    toroidal = jnp.exp(1j * jnp.outer(phis, kp))
+    poloidal = jnp.exp(1j * jnp.outer(thetas, kt))
+    half = jnp.einsum("pk,klq->plq", toroidal, c)
+    half_phi = jnp.einsum("pk,klq->plq", toroidal * (1j * kp)[None, :], c[..., :3])
+    x = jnp.real(jnp.einsum("plq,tl->ptq", half[..., :3], poloidal))
+    x_theta = jnp.real(jnp.einsum("plq,tl->ptq", half[..., :3], poloidal * (1j * kt)[None, :]))
+    x_phi = jnp.real(jnp.einsum("plq,tl->ptq", half_phi, poloidal))
+    B = jnp.real(jnp.einsum("plq,tl->ptq", half[..., 3:], poloidal))
+    cosine, sine = jnp.cos(phis)[:, None], jnp.sin(phis)[:, None]
+
+    def cartesian(v):
+        return jnp.stack((cosine * v[..., 0] - sine * v[..., 1],
+                          sine * v[..., 0] + cosine * v[..., 1], v[..., 2]), axis=-1)
+
+    turn = jnp.stack((-sine * x[..., 0] - cosine * x[..., 1],
+                      cosine * x[..., 0] - sine * x[..., 1], jnp.zeros_like(x[..., 0])), axis=-1)
+    return cartesian(x), cartesian(x_theta), cartesian(x_phi) + turn, cartesian(B)
+
+
+def _graded_point(series, theta, phi):
+    x, e_theta, e_phi, _ = _graded_evaluate(series, jnp.atleast_1d(phi), jnp.atleast_1d(theta))
+    return x[0, 0], e_theta[0, 0], e_phi[0, 0]
+
+
+def _nearest_surface_point(series, point, steps: int = 6):
+    """``(theta, phi)`` of the surface point nearest ``point`` and its distance.
+
+    The nearest cloud sample, then Newton on the squared distance with steps
+    no longer than two cloud spacings, keeping the best iterate.  Only the
+    grading centre depends on it, and the rule's value does not, so it is
+    never differentiated.
+    """
+    start = series["cloud_angles"][jnp.argmin(jnp.sum((series["cloud"] - point) ** 2, axis=1))]
+    limit = 2.0 * series["cloud_spacing"]
+
+    def distance2(angles):
+        return jnp.sum((_graded_point(series, angles[0], angles[1])[0] - point) ** 2)
+
+    def step(carry, _):
+        angles, best, best_value = carry
+        g, H = jax.grad(distance2)(angles), jax.hessian(distance2)(angles)
+        det = H[0, 0] * H[1, 1] - H[0, 1] * H[1, 0]
+        newton = jnp.array((H[1, 1] * g[0] - H[0, 1] * g[1],
+                            H[0, 0] * g[1] - H[1, 0] * g[0])) / jnp.where(det > 0.0, det, 1.0)
+        move = jnp.where(det > 0.0, newton, g / (jnp.abs(jnp.trace(H)) + 1e-30))
+        move = move * jnp.minimum(1.0, limit / jnp.maximum(jnp.linalg.norm(move), 1e-300))
+        angles = angles - move
+        value = distance2(angles)
+        better = value < best_value
+        return (angles, jnp.where(better, angles, best), jnp.where(better, value, best_value)), None
+
+    (_, best, value), _ = jax.lax.scan(step, (start, start, distance2(start)), None, length=steps)
+    return best, jnp.sqrt(value)
+
+
+def _graded_sources(series, center, distance, nodes):
+    """Quadrature nodes and weighted layer densities graded about ``center``.
+
+    ``theta = theta* + u - a sin u`` (and likewise ``phi``) with ``u`` on a
+    uniform periodic grid is entire and periodic, so the trapezoid rule in
+    ``u`` stays spectrally accurate, while the node spacing at the target
+    shrinks to ``(1 - a) h``; ``1 - a`` is chosen to make it ``distance / 8``.
+    """
+    n_theta, n_phi = int(nodes[0]), int(nodes[1])
+    _, e_theta, e_phi = _graded_point(series, center[0], center[1])
+    h_theta = jnp.linalg.norm(e_theta) * 2.0 * jnp.pi / n_theta
+    h_phi = jnp.linalg.norm(e_phi) * 2.0 * jnp.pi / n_phi
+    a_theta = jnp.clip(1.0 - distance / (_GRADING * h_theta), 0.0, _MAX_GRADING)
+    a_phi = jnp.clip(1.0 - distance / (_GRADING * h_phi), 0.0, _MAX_GRADING)
+    u = 2.0 * jnp.pi * jnp.arange(n_theta) / n_theta
+    v = 2.0 * jnp.pi * jnp.arange(n_phi) / n_phi
+    x, x_theta, x_phi, B = _graded_evaluate(
+        series, center[1] + v - a_phi * jnp.sin(v), center[0] + u - a_theta * jnp.sin(u))
+    weight = (((1.0 - a_phi * jnp.cos(v)) * 2.0 * jnp.pi / n_phi)[:, None]
+              * ((1.0 - a_theta * jnp.cos(u)) * 2.0 * jnp.pi / n_theta)[None, :])
+    area = series["orientation"] * jnp.cross(x_theta, x_phi) * weight[..., None]
+    return (x.reshape(-1, 3), jnp.cross(area, B).reshape(-1, 3),
+            jnp.sum(area * B, axis=-1).reshape(-1))
+
+
+def _graded_field(series, points, order: int, nodes):
+    """Graded-rule ``B`` and its derivatives up to ``order`` at each point."""
+    from virtual_casing_jax.derivative_kernels import layer_derivatives
+
+    def one(point):
+        center, distance = jax.lax.stop_gradient(
+            _nearest_surface_point(series, jax.lax.stop_gradient(point)))
+        sources = _graded_sources(series, center, distance, nodes)
+        return tuple(v[0] for v in layer_derivatives(point[None], *sources, order=int(order)))
+
+    return jax.lax.map(one, jnp.asarray(points))
+
+
+def graded_plasma_field(surface_data, points, *, order: int = 0, nodes=GRADED_NODES):
+    """Internal-branch plasma field near the surface, by a target-graded rule.
+
+    Off the surface the periodic trapezoid rule loses accuracy as
+    ``exp(-2 pi d / h)``, so no affordable uniform grid reaches a target
+    within a few node spacings ``h``.  Here each target gets its own rule:
+    the nodes cluster about its nearest surface point, with local spacing
+    one eighth of its distance, by the entire periodic substitution
+    ``theta = theta* + u - a sin u`` (likewise ``phi``) of a uniform grid in
+    ``u``.  The surface data are interpolated spectrally from their samples,
+    and ``B`` with its derivatives up to ``order`` (<= 3) comes from the
+    closed-form layer kernels of virtual_casing_jax in one pass.
+
+    The rule is the same formula as the direct path, only better resolved,
+    so it applies on either side of the surface and at any distance; far from
+    the surface it costs more than the direct path for no gain.  Measured on
+    the 2.5 % beta QA deck at the default nodes: 1e-12 in ``B`` and 1e-10 in
+    ``grad B`` from one minor radius down to 0.01 a, against a converged
+    reference; on the two-source torus oracle, 6e-10 of the field scale at
+    0.003 a on either side.  It costs about 16 ms per target on a loaded
+    laptop CPU, so it is for point queries, not for ODE right-hand sides.
+
+    Returns a tuple of ``order + 1`` arrays shaped like ``points`` with one
+    more ``3`` axis per order.  Traceable and differentiable in the points and
+    the surface data; the grading centre is held fixed under differentiation.
+    """
+    _require_vcj()
+    return _graded_field(_graded_series(surface_data), points, order, nodes)
 
 
 # ---------------------------------------------------------------------------

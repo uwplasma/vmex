@@ -184,16 +184,10 @@ boundary/current DOFs. The virtual-casing path applies outside the LCFS;
 :class:`~vmex.core.extender.VmecInteriorField` evaluates the live VMEC
 spectral field inside. Direct off-surface quadrature must stay away from the
 source surface and all targets must stay away from external coil filaments.
-The experimental
-:meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation`
-prepares the singular on-surface plasma field and gradient once, then uses the
-first-order continuation
-:math:`\mathbf B(\mathbf x_\Gamma+\delta\mathbf x)=\mathbf B_\Gamma+
-\nabla\mathbf B_\Gamma\delta\mathbf x+O(|\delta\mathbf x|^2)`. It is
-approximate, carries no error estimate, and is not qualified for physics
-(measured below). Use direct quadrature within its measured accuracy range; a
-finite field-line trace does not validate the extrapolated field or its
-topology.
+Near the surface the direct quadrature is replaced, point by point, by a
+target-graded rule (below); :meth:`~vmex.core.extender.VmecExtender.with_graded_quadrature`
+uses that rule everywhere, including under ``jit``. A finite field-line trace
+does not by itself validate magnetic topology.
 
 Virtual casing reconstructs the field produced by currents inside the plasma
 surface. It does not determine the external coil field: supply an ESSOS coil
@@ -312,28 +306,39 @@ target-graded quadrature of the same surface data on the 2.5 % beta QA deck
 (64 x 64 per period) returns the plasma field to 1e-13 at d = a and at worst
 1e-6 at 0.5 a, but 2.4 % at 0.2 a and order one at 0.1 a and closer; the
 estimate tracks the error (0.76 to 1.09 times it) and flags every such point.
-:meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation` is the
-only closer option and is approximate: with a 32 x 32 grid it is off by
-1.6--2.4 % of the plasma field (about 1e-3 of :math:`|B|`) at every distance
-from 0.01 a to 0.1 a, a floor set by its bilinear on-surface table rather than
-by the distance, by 3.9--6.6 % at 0.2 a, and by 18--32 % at 0.5 a. Preparing
-it took 196--397 s and 18.5 GB of memory on a loaded laptop, and at the
-64 x 64 grid the process was killed for memory on a 36 GB machine. It has no
-error estimate. A target-graded periodic trapezoid rule (substitute
-:math:`\theta=\theta^*+u-a\sin u` about the target's nearest surface point, and
-likewise in :math:`\phi`) is the reference used above: its 256 x 1024 and
-384 x 1536 node versions agree to 2e-9 in the field and 2e-6 in its gradient
-at every distance down to 0.01 a. It is the candidate replacement (plan item
-E7), not yet part of the library.
+:meth:`~vmex.core.extender.VmecExtender.B` and its derivatives therefore
+switch, at every point whose estimate misses ``10**-digits``, to a
+target-graded periodic trapezoid rule
+(:func:`~vmex.core.virtual_casing.graded_plasma_field`): about the target's
+nearest surface point the angles are substituted,
+:math:`\theta=\theta^*+u-a\sin u` and likewise :math:`\phi`, and the rule
+is applied on a uniform grid in :math:`u`. The substitution is entire and
+periodic, so the rule stays spectrally accurate, while the node spacing at the
+target shrinks to one eighth of the distance. The surface data are
+interpolated spectrally from their samples, and the closed-form layer kernels
+give ``B`` and its derivatives in one pass. At the default 128 x 512 nodes it
+matches a converged reference of the same data to 1e-12 in the field and 1e-10
+in its gradient from one minor radius down to 0.01 a, and 3e-8 at 0.003 a; on
+the two-source torus it reproduces the filament field outside and minus the
+applied field inside to 6e-10 of the field scale 1 mm from a 0.3 m surface.
+It costs 6--12 ms per point on a loaded laptop CPU (2--5 ms at 32 x 128 to
+64 x 256 nodes, which keep the field to 1e-5 or better down to 0.01 a). Its
+error estimate is the difference from the same rule at three quarters of the
+nodes. ``near_surface="direct"`` restores the direct path everywhere;
+``near_surface="graded"`` or
+:meth:`~vmex.core.extender.VmecExtender.with_graded_quadrature` uses the
+graded rule everywhere, including under ``jit``, where the per-point switch is
+not available. The graded rule is our own construction for this global
+toroidal rule, validated numerically, not taken from a reference.
 
-Use the direct path only where its estimate meets the requested accuracy,
-and refine the source data separately: the estimate does not bound
-source-data truncation. JIT-traced evaluations require an explicit estimate
-check. The exterior tracing example and its saved illustration use the
-continuation and remain experimental. An earlier record of the continuation
-(2026-09-16, the shipped QA wout) compared it with the direct path on a
-current-free deck, whose exact plasma field is zero, so both of its numbers
-were errors; it is withdrawn in favour of the finite-beta measurement above.
+The first-order near-surface continuation that preceded it has been removed:
+with a 32 x 32 grid it was off by 1.6--2.4 % of the plasma field (about 1e-3
+of :math:`|B|`) at every distance from 0.01 a to 0.1 a, a floor set by its
+bilinear on-surface table, and preparing it took 196--397 s and 18.5 GB of
+memory.
+
+Use the direct path's estimate, and refine the source data separately: the
+estimates do not bound source-data truncation.
 
 Coupled free-boundary adjoint
 -----------------------------

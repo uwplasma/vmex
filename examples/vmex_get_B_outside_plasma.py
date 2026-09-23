@@ -39,7 +39,7 @@ def coil_field_from_dofs(dofs):
 # boundary gets 64 x 64, h = 2 pi R / 128, about 0.07 m here, so the point is
 # placed 0.25 m (1.5 minor radii) outboard of the LCFS, still well inside the
 # coils. On a 12 x 12 grid at 0.03 m the plasma field came out near 15 T against
-# about 0.03 T; closer points need with_near_surface_continuation().
+# about 0.03 T; closer points are switched to the graded near-surface rule.
 DISTANCE = 0.25  # metres along the axis-to-edge ray at theta = phi = 0
 DIGITS = 4
 final_equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])

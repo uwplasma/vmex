@@ -334,14 +334,14 @@ For an exterior field, `vj.VmecExtender.from_file("wout_my_case.nc",
 external_field=coils.B)` combines the plasma's virtual-casing contribution with
 the supplied coil field. The plasma part is a quadrature over a source grid on
 the plasma surface, sampled by default from the boundary's aspect ratio, field
-periods and requested digits. Its error grows rapidly near that surface:
-evaluate only where its error estimate meets your target. Targets must also stay away from
-coil filaments, and an MGRID field has a finite tabulated domain.
-
-`with_near_surface_continuation` is unqualified for physics: it is off by about
-1e-3 of |B| next to a 2.5 % beta boundary, costs minutes and tens of GB to
-prepare, and has no error estimate. The exterior field-line example uses that
-experimental path and does not validate magnetic topology.
+periods and requested digits. Its error grows rapidly near that surface, so at
+the points where its error estimate misses the requested digits an eager call
+switches to a target-graded quadrature, accurate to about 1e-12 of the field
+down to 0.01 minor radii at a few milliseconds per point;
+`with_graded_quadrature()` uses it everywhere, including under `jit`. Targets
+must also stay away from coil filaments, and an MGRID field has a finite
+tabulated domain. The exterior field-line example traces through the graded
+field; a finite trace does not by itself establish magnetic topology.
 See the [exterior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/nestor-vacuum.html)
 and [field and coil usage](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 

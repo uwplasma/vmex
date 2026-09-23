@@ -217,6 +217,7 @@ def test_finite_beta_extender_field_and_gradient_outside_lcfs(monkeypatch):
         levels=((13, 13), (26, 26)),
         chunk_size=17,
         target_chunk_size=1,
+        near_surface="direct",  # compare the direct path with AD of itself
     )
     points = jnp.array([[1.8, 0.0, 0.1], [0.0, 1.9, -0.1]])
     assert field.uses_virtual_casing
@@ -248,6 +249,7 @@ def test_finite_beta_extender_field_and_gradient_outside_lcfs(monkeypatch):
         levels=((13, 13), (26, 26)),
     )
     assert live.uses_virtual_casing
+    live.near_surface = "direct"
     np.testing.assert_allclose(live.B(points), field.B(points), rtol=2e-11, atol=2e-11)
 
     if hasattr(field.plasma_field, "plan_surface_precision"):
@@ -444,7 +446,9 @@ def test_exterior_error_estimate_flags_unresolved_targets_and_fails_loudly():
     """Targets inside one grid spacing are flagged, warned about or refused; values unchanged."""
     digits = 4
     surface = _synthetic_surface(nphi=12, ntheta=12, nfp=1)
-    field = VmecExtender.from_surface_data(surface, digits=digits, accuracy_check="off")
+    # the direct path alone: near_surface="auto" would switch these points
+    field = VmecExtender.from_surface_data(
+        surface, digits=digits, accuracy_check="off", near_surface="direct")
     near = jnp.asarray(_torus_points(0.5 * _finest_spacing(field)))
     scale = float(np.sqrt(np.mean(np.sum(np.asarray(surface.B_total) ** 2, axis=0))))
 
@@ -473,8 +477,8 @@ def test_exterior_error_estimate_flags_unresolved_targets_and_fails_loudly():
 
     with pytest.raises(ValueError, match="accuracy_check"):
         field.accuracy_check = "loud"
-    with pytest.raises(RuntimeError, match="near-surface"):
-        VmecExtender(None, field.plasma_field, near_surface_plan=object()).B_error_estimate(near)
+    with pytest.raises(ValueError, match="near_surface"):
+        field.near_surface = "taylor"
     with pytest.raises(RuntimeError, match="no virtual-casing"):
         VmecExtender(lambda xyz: jnp.zeros_like(xyz)).B_error_estimate(near)
 
@@ -636,7 +640,8 @@ def _per_order_available(field):
 def test_the_estimate_grows_with_derivative_order():
     """A grid that gives the field its digits need not give its curvature them."""
     surface = _synthetic_surface(nphi=16, ntheta=16, nfp=2)
-    field = VmecExtender.from_surface_data(surface, digits=4, accuracy_check="off")
+    field = VmecExtender.from_surface_data(
+        surface, digits=4, accuracy_check="off", near_surface="direct")
     if not _per_order_available(field):
         pytest.skip("per-order estimate needs virtual-casing-jax >= 0.0.7")
     points = jnp.asarray(_torus_points(2.0 * _finest_spacing(field)))
@@ -670,6 +675,7 @@ def test_eager_derivatives_check_at_their_own_order():
     field = VmecExtender.from_surface_data(surface, digits=4, accuracy_check="off")
     if not _per_order_available(field):
         pytest.skip("per-order estimate needs virtual-casing-jax >= 0.0.7")
+    field.near_surface = "direct"  # the check of the direct path itself
     points = jnp.asarray(_torus_points(1.2 * _finest_spacing(field)))
 
     quiet_B = np.asarray(field.B(points))
@@ -772,3 +778,4 @@ def test_exterior_field_parameter_derivative_is_exact_on_the_frozen_path():
         frozen, info = im.frozen_path_directional_fd(base, config, exterior, tangent, h=step)
         assert max(info["newton_res"]) < 1e-10
         assert abs(implicit - frozen) <= tolerance * abs(frozen), (implicit, frozen)
+

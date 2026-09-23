@@ -1151,7 +1151,7 @@ def test_fieldline_example_uses_vmex_virtual_casing_and_actual_essos_coils() -> 
                          "poincare_plot", "True boundary B.n/B"):
             assert contract in source
     assert 'plasma="vacuum"' in vacuum and "exterior_field" in vacuum
-    assert "VmecExtender" in finite and "with_near_surface_continuation" in finite
+    assert "VmecExtender" in finite and "with_graded_quadrature" in finite
     assert "ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json" in finite
 
 
