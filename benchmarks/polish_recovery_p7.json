@@ -1,0 +1,45 @@
+{
+  "schema": "vmex.polish-recovery/1",
+  "source": {
+    "vmex_base_sha": "464dee8e",
+    "working_tree_changes": "matrix-free bordered Gauss-Newton action/step added locally",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "reproduction": "JAX_ENABLE_X64=1 .venv/bin/python benchmarks/polish_recovery_p7.py"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "state": {
+    "radial_basis_functions": 43,
+    "curvature_regularization": 0.1,
+    "coordinates": 1439,
+    "gauge_constraints": 462,
+    "damping": 0.01
+  },
+  "krylov": {
+    "restart": 20,
+    "max_restarts": 2,
+    "iteration_upper_bound": 40,
+    "requested_true_relative_residual": 0.0001,
+    "unpreconditioned_true_relative_residual": 0.007359740013951404,
+    "unaccepted_step_norm": 0.00010070121347866493
+  },
+  "hutchinson_diagonal_preconditioner": {
+    "probe_count": 16,
+    "estimated_diagonal_min": -47917.20856567834,
+    "estimated_diagonal_median": 2164.2509115890116,
+    "estimated_diagonal_max": 3522785.7224512957,
+    "true_relative_residual": 0.43708837909549514
+  },
+  "runtime_seconds": 2.568722916999832,
+  "decision": "The matrix-free operator/GMRES seam is usable and its independently recomputed residual catches the failure; 40 iterations do not certify the full tokamak solve. A 16-probe Hutchinson diagonal is indefinite and makes convergence much worse. Reject both steps. Proceed with physically structured mode/radial block preconditioning, not a larger blind iteration budget.",
+  "limitations": [
+    "This test does not apply the returned correction or report a polished equilibrium.",
+    "The force and gauge Jacobians are not materialized in the production operator; only the small-system verification test assembles dense matrices."
+  ]
+}

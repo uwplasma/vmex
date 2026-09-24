@@ -90,6 +90,15 @@ Current checkpoint:
   `benchmarks/polish_recovery_p6.json`.  The linear step itself is fast enough
   for iteration, but the next candidate must use scalable constrained
   least-squares rather than promote projected steepest descent.
+- P7 implements a symmetric bordered Gauss--Newton action and a matrix-free
+  GMRES step, verified against the dense small-system action and true linear
+  residual.  On the 1,439-coordinate/462-gauge P0 lift, 40 unpreconditioned
+  iterations leave relative true residual `7.36e-3` against a `1e-4` request.
+  A 16-probe Hutchinson diagonal is indefinite (minimum `-4.79e4`) and worsens
+  the residual to `0.437`; neither step is accepted.  Full results and a
+  reproduction script are `benchmarks/polish_recovery_p7.json` and `.py`.
+  Next gate: derive and test a physically structured mode/radial block
+  preconditioner before raising the iteration budget.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.

@@ -29,6 +29,8 @@ from vmex.core.polish_variational import (
     make_native_gauge_plan,
     make_variational_plan,
     minimum_signed_jacobian,
+    native_force_gauss_newton_action,
+    native_force_gauss_newton_step,
     native_physical_force_residual,
     native_tangential_gauge_residual,
     native_coordinate_scales,
@@ -1016,6 +1018,103 @@ def test_native_force_residual_uses_fixed_physical_scales():
     np.testing.assert_allclose(
         jnp.vdot(residual, residual), expected_squared_norm, rtol=2e-13, atol=2e-13
     )
+
+
+def test_native_force_gauss_newton_action_matches_dense_reference():
+    """Bordered force GN matvec matches J.T@J and C.T/C without forming them."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=4, ntheta=9, nzeta=3)
+    layout = make_native_correction_layout(state)
+    gauge = make_native_gauge_plan(state, plan)
+    coordinate_scale = native_coordinate_scales(state, layout, plan)
+    force_scale = jnp.asarray([2.0, 3.0, 4.0])
+    volume_scale = 2.0 * np.pi**2 * 10.0
+    damping = 0.03
+
+    def physical(value):
+        return native_physical_force_residual(
+            value,
+            state,
+            layout,
+            gauge,
+            coordinate_scale,
+            force_scale,
+            volume_scale,
+        )
+
+    def constraints(value):
+        return native_tangential_gauge_residual(
+            state, layout.unpack(coordinate_scale * value), gauge
+        )
+
+    size = layout.size + gauge.size
+    variables = jnp.zeros((size,))
+    direction = jnp.linspace(-0.5, 0.75, size)
+    force_jacobian = jax.jacfwd(physical)(variables[: layout.size])
+    constraint_jacobian = jax.jacfwd(constraints)(variables[: layout.size])
+    dx = direction[: layout.size]
+    dlambda = direction[layout.size :]
+    expected = jnp.concatenate(
+        (
+            force_jacobian.T @ force_jacobian @ dx
+            + constraint_jacobian.T @ dlambda
+            + damping * dx,
+            constraint_jacobian @ dx,
+        )
+    )
+    actual = native_force_gauss_newton_action(
+        variables,
+        direction,
+        state,
+        layout,
+        gauge,
+        coordinate_scale,
+        force_scale,
+        volume_scale,
+        damping,
+    )
+    np.testing.assert_allclose(actual, expected, rtol=2e-10, atol=2e-9)
+    damping = 0.03
+    residual = physical(variables[: layout.size])
+    rhs = -jnp.concatenate(
+        (
+            force_jacobian.T @ residual,
+            constraints(variables[: layout.size]),
+        )
+    )
+    dense_operator = jnp.block(
+        [
+            [
+                force_jacobian.T @ force_jacobian
+                + damping * jnp.eye(layout.size),
+                constraint_jacobian.T,
+            ],
+            [
+                constraint_jacobian,
+                jnp.zeros((gauge.size, gauge.size)),
+            ],
+        ]
+    )
+    actual_step, linear_residual = native_force_gauss_newton_step(
+        variables,
+        state,
+        layout,
+        gauge,
+        coordinate_scale,
+        force_scale,
+        volume_scale,
+        damping=damping,
+        tolerance=1e-9,
+        restart=size,
+        max_restarts=2,
+    )
+    assert float(linear_residual) < 1e-8
+    dense_true_residual = dense_operator @ actual_step - rhs
+    relative_dense_residual = jnp.linalg.norm(dense_true_residual) / jnp.linalg.norm(
+        rhs
+    )
+    assert float(relative_dense_residual) < 1e-8
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():

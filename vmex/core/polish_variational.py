@@ -9,7 +9,7 @@ The strong-force oracle remains independent in :mod:`vmex.core.strong_force`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
@@ -758,6 +758,162 @@ def native_force_kkt_residual(
 
 
 @jax.jit
+def native_force_gauss_newton_action(
+    variables: Array,
+    direction: Array,
+    base_state: HighOrderEquilibriumState,
+    layout: NativeCorrectionLayout,
+    gauge: NativeGaugePlan,
+    coordinate_scale: Array,
+    force_scale: Array,
+    volume_scale: Array,
+    damping: Array,
+) -> Array:
+    """Apply the symmetric bordered Gauss--Newton operator matrix-free.
+
+    The variable vector is ``(coordinates, multipliers)``.  The upper block
+    is ``J_force.T @ J_force + damping * I`` plus the gauge adjoint, and the
+    lower block is the native tangent constraint Jacobian.  Neither the force
+    Jacobian nor a gauge nullspace is constructed.
+    """
+
+    variables = jnp.asarray(variables)
+    direction = jnp.asarray(direction)
+    expected = layout.size + gauge.size
+    if variables.shape != (expected,) or direction.shape != (expected,):
+        raise ValueError(
+            f"Gauss-Newton vectors must both have shape {(expected,)}"
+        )
+    coordinates = variables[: layout.size]
+    delta_coordinates = direction[: layout.size]
+    delta_multipliers = direction[layout.size :]
+
+    def physical(value):
+        return native_physical_force_residual(
+            value,
+            base_state,
+            layout,
+            gauge,
+            coordinate_scale,
+            force_scale,
+            volume_scale,
+        )
+
+    def constraints(value):
+        return native_tangential_gauge_residual(
+            base_state,
+            layout.unpack(jnp.asarray(coordinate_scale) * value),
+            gauge,
+        )
+
+    _, force_pullback = jax.vjp(physical, coordinates)
+    _, constraint_pullback = jax.vjp(constraints, coordinates)
+    force_direction = jax.jvp(
+        physical, (coordinates,), (delta_coordinates,)
+    )[1]
+    constraint_direction = jax.jvp(
+        constraints, (coordinates,), (delta_coordinates,)
+    )[1]
+    stationarity_direction = (
+        force_pullback(force_direction)[0]
+        + constraint_pullback(delta_multipliers)[0]
+        + jnp.asarray(damping) * delta_coordinates
+    )
+    return jnp.concatenate((stationarity_direction, constraint_direction))
+
+
+def native_force_gauss_newton_step(
+    variables: Array,
+    base_state: HighOrderEquilibriumState,
+    layout: NativeCorrectionLayout,
+    gauge: NativeGaugePlan,
+    coordinate_scale: Array,
+    force_scale: Array,
+    volume_scale: Array,
+    *,
+    damping: float = 1.0e-4,
+    tolerance: float = 1.0e-6,
+    restart: int = 40,
+    max_restarts: int = 10,
+    preconditioner: Callable[[Array], Array] | None = None,
+) -> tuple[Array, Array]:
+    """Solve one damped bordered Gauss--Newton step using matrix-free GMRES.
+
+    The returned second value is the independently recomputed relative
+    residual of the linear system.  The caller must reject inaccurate steps
+    and still perform a nonlinear line search and force certificate.
+    """
+
+    variables = jnp.asarray(variables)
+    expected = layout.size + gauge.size
+    if variables.shape != (expected,):
+        raise ValueError(
+            f"Gauss-Newton variables have shape {variables.shape}; "
+            f"expected {(expected,)}"
+        )
+    if not np.isfinite(damping) or damping < 0.0:
+        raise ValueError("damping must be finite and nonnegative")
+    if not np.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("tolerance must be finite and positive")
+    if restart < 1 or max_restarts < 1:
+        raise ValueError("restart and max_restarts must be positive")
+
+    coordinates = variables[: layout.size]
+    multipliers = variables[layout.size :]
+
+    def physical(value):
+        return native_physical_force_residual(
+            value,
+            base_state,
+            layout,
+            gauge,
+            coordinate_scale,
+            force_scale,
+            volume_scale,
+        )
+
+    def constraints(value):
+        return native_tangential_gauge_residual(
+            base_state,
+            layout.unpack(jnp.asarray(coordinate_scale) * value),
+            gauge,
+        )
+
+    force, force_pullback = jax.vjp(physical, coordinates)
+    constraint, constraint_pullback = jax.vjp(constraints, coordinates)
+    gradient = force_pullback(force)[0] + constraint_pullback(multipliers)[0]
+    rhs = -jnp.concatenate((gradient, constraint))
+
+    def operator(direction):
+        return native_force_gauss_newton_action(
+            variables,
+            direction,
+            base_state,
+            layout,
+            gauge,
+            coordinate_scale,
+            force_scale,
+            volume_scale,
+            jnp.asarray(damping),
+        )
+
+    solution, _ = jax.scipy.sparse.linalg.gmres(
+        operator,
+        rhs,
+        tol=float(tolerance),
+        atol=0.0,
+        restart=int(restart),
+        maxiter=int(max_restarts),
+        M=preconditioner,
+    )
+    true_residual = operator(solution) - rhs
+    relative_residual = jnp.linalg.norm(true_residual) / jnp.maximum(
+        jnp.linalg.norm(rhs), 1.0e-300
+    )
+    return solution, relative_residual
+
+
+@jax.jit
 def evaluate_tensorized_strong_force(
     state: HighOrderEquilibriumState,
     plan: VariationalPlan,
@@ -1002,6 +1158,8 @@ __all__ = [
     "native_tangential_gauge_residual",
     "native_coordinate_scales",
     "native_force_kkt_residual",
+    "native_force_gauss_newton_action",
+    "native_force_gauss_newton_step",
     "native_physical_force_residual",
     "native_variational_kkt_residual",
 ]
