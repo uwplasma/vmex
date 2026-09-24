@@ -205,11 +205,73 @@ Current checkpoint:
   in its guard. On resumption, first verify dimensions and process memory, then
   prefer a matrix-free feasible/projected operator over blindly restarting the
   dense adaptive-16 run. Do not cite the interrupted attempt as a measurement.
+- R4 implements the scalable continuation requested by the revised handoff.
+  `native_force_jacobian_sparsity` derives the compact radial-support pattern
+  and a collision-free analytic coloring for the native force Jacobian.  The
+  new `polish_recovery_sparse.py` reconstructs the compressed matrix with
+  SOLVAX, verifies independent random `A x` and `A.T y` products, solves the
+  equality-constrained sparse normal KKT system with a true residual and
+  original-row gauge certificate, and keeps nonlinear force descent, positive
+  geometry, and independent certification as separate fail-closed gates.  It
+  refuses unsupported non-axisymmetric or non-fixed-profile checkpoints.  The
+  dense reference paths now perform their memory admission check before QR or
+  duplicate reduced-Jacobian allocation, reuse the already formed reduced
+  Jacobian, report complete linear certificates, and recompute final
+  stationarity at the saved endpoint.  Checkpoint schema 2 records the exact
+  knots, modes, scales, solve grid, gauge reference, and model scope; loaders
+  validate those fields rather than inferring them silently.
+- On the unchanged adaptive-8 state, R4 used 184 colors to recover an
+  8,012,940-entry sparse force Jacobian. Random forward and transpose product
+  errors were `6.83e-16` and `1.60e-15`; the sparse step's true KKT residual
+  was about `1.20e-13`. Compressed assembly took 0.80 s versus 119.39 s for the
+  earlier dense-Jacobian category, and factor/solve took 0.09 s. The step was
+  correctly rejected because it changed the force objective by only
+  `1.4e-10` relative. The independent certificate remained
+  `6.44460965e-5`. The explicit sparse value/index estimate was 96.5 MB, but
+  measured process high-water RSS was 7.19 GB; therefore the recorded 2 GiB
+  guard is an explicit-array admission estimate, not an end-to-end RSS cap.
+  Evidence is `benchmarks/polish_recovery_r4_sparse_current.json`.
+- Exact adaptive continuation then produced independently point-certified
+  values `6.291283e-5` (basis 63), `5.300104e-5` (71), `3.865855e-5` (83),
+  `3.007712e-5` (95), `2.605327e-5` (107), and `2.394948e-5` (119).  A
+  same-state order-6 gauge reanchoring at basis 83 changed epsilon by only
+  `2.1e-11`, so the improvement is not a chart artifact.  Angular enrichment
+  at basis 119 reduced epsilon to `1.891401e-5` at `m_max=17` and
+  `1.840213e-5` at `m_max=19`; the small second gain supports holding
+  `m_max=19` while continuing targeted radial refinement.  Further exact
+  radial batches gave `1.726557e-5` (basis 131), `1.539817e-5` (143), and the
+  latest fully independent result `1.393733e-5` (155).  The last run took
+  349.88 s because its point-oracle certificate alone took 292.33 s, exceeding
+  the five-minute incremental guideline; it is retained as valid evidence,
+  not as an acceptable iteration workflow.  Peak process RSS across this
+  campaign reached roughly 14.1 GB despite smaller explicit-array estimates.
+- To keep subsequent increments bounded, bases 167, 179, and 191 used an
+  explicitly provisional overintegrated tensorized certificate (radial orders
+  6/8) plus independent point-force spot checks.  Their provisional epsilon
+  values were `1.302665e-5`, `1.144273e-5`, and `9.582953e-6`; the last has
+  force RMS `56.6875 N/m^3`, radial disagreement `5.02e-10`, point-force
+  relative error `3.72e-6`, gauge norm `3.18e-13`, and positive geometry.
+  This crosses the numerical target only provisionally.  It is **not** the
+  plan's full independent point-oracle acceptance.  An isolated full
+  certificate attempt ran for about five minutes and ended without producing
+  a result file; its cause was not captured, and no pass is claimed.  The
+  latest fully independent checkpoint is
+  `benchmarks/polish_recovery_r4_adaptive96_state.npz`; the latest provisional
+  restart is `benchmarks/polish_recovery_r4_adaptive132_provisional_state.npz`.
+- On resumption, do not start another refinement batch first. Diagnose and
+  bound the isolated full shifted point-oracle certificate, then independently
+  certify the basis-191 checkpoint. If it does not pass `epsilon_B <= 1e-5`,
+  take a bounded same-chart correction step before any further knot insertion
+  and recertify. Preserve the full evidence hierarchy: tensorized certificates
+  guide iteration, but only the independent point oracle can close the R3
+  force gate. After that gate, the plan's 3-D/LASYM and prescribed-current
+  closure, implicit derivatives, regressions/runtime gates, and public polish
+  integration remain unimplemented and must be completed before promotion.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.
 
-## Current PR handoff (2026-09-24)
+## Current PR handoff (2026-09-24, R4 pause)
 
 The active draft is [PR #448](https://github.com/uwplasma/vmex/pull/448),
 branch `rj/force-balance-recovery`, based on `main` at
@@ -218,35 +280,31 @@ first, then the PR description and the versioned JSON records. The PR body is
 intended to be a self-contained continuation brief; the older lanes below
 remain intact and are not superseded by this recovery experiment.
 
-Environment: `/Users/rogerio/local/VMEX-polish-recovery/.venv`, Python 3.14.6,
-JAX/JAXLIB 0.11.2, SOLVAX 0.26.0, BOOZ_XFORM_JAX 0.4.0,
+Environment: `.venv`, Python 3.14.6, JAX/JAXLIB 0.11.2, SOLVAX 0.26.0, BOOZ_XFORM_JAX 0.4.0,
 VIRTUAL_CASING_JAX 0.0.8; Apple M4 CPU, float64. The required deck and WOUT
 hashes, physical scales, and reproduction commands are recorded in the PR
 body and benchmark JSON. Do not overwrite those baseline artifacts.
 
-Latest verification before this pause: the focused R0 regression selection
-passed 4/4 (53 deselected); the exact-knot and exact-mode transfer tests passed;
-and `tests/test_radial_basis.py` passed 29/29 in 316.33 s. That full module ran
-slightly beyond the five-minute incremental guideline because it was already
-near completion. Ruff and `git diff --check` passed at each pushed checkpoint;
-the current adaptive-script handoff received the same quick static checks.
-The complete repository suite has not been run. P8, P9, and P10 remain bounded
-negative experiments. No process is running and the interrupted second
-adaptive batch produced no result.
+Latest verification before this pause: the new sparse-coloring comparison,
+existing dense Gauss--Newton action comparison, and fail-closed acceptance
+selection passed 3/3 (57 deselected) in 91.88 s. Earlier focused, exact-knot,
+exact-mode, and radial-basis results remain recorded above and in the PR body.
+Ruff, JSON parsing, and `git diff --check` are the final handoff checks. The
+complete repository suite has not been run. No recovery process is running.
 
-Resume from `benchmarks/polish_recovery_r3_adaptive8_state.npz`, not from the
-WOUT. Read the R0, P3-reproduction, exact-refinement, angular, and adaptive-8
-records in chronological order. The immediate technical decision is whether
-to replace explicit feasible Jacobians with a matrix-free projected operator;
-the next dense adaptive batch is estimated at 1.913 GiB for just its two main
-arrays. Keep independent true linear residual, nonlinear force descent, gauge
-tolerance, radial-grid agreement, and positive signed Jacobian as separate
-acceptance gates. Any trial failing one gate is rejected; do not use a
-force-only number as evidence of an accepted equilibrium. After a scalable
-linear method passes, continue radial support convergence and then address
-3-D/current closure, implicit derivatives, regression/runtime gates, and
-public workflow integration. Do not promote or merge until Rogerio reviews
-the complete physical, derivative, runtime, memory, and regression evidence.
+Resume by reading the R4 records in chronological order. Treat
+`polish_recovery_r4_adaptive96_state.npz` as the latest independently
+certified state and `polish_recovery_r4_adaptive132_provisional_state.npz` as
+the later candidate awaiting the required full point-oracle certificate. Do
+not cite its `9.582953e-6` tensorized value as final acceptance. First make the
+isolated full certificate reliable and bounded; only then decide whether a
+same-chart correction or more refinement is justified. Keep the true KKT
+residual, nonlinear force descent, original-row gauge tolerance, radial-grid
+agreement, point-force agreement, and positive signed Jacobian as separate
+gates. The sparse method solves the explicit-Jacobian bottleneck but does not
+yet provide an RSS-bounded production algorithm. Do not promote or merge until
+Rogerio reviews the complete physical, derivative, runtime, memory, and
+regression evidence.
 
 External context already reviewed (design context, not proof that VMEX has
 equivalent behavior): [GVEC theory](https://gvec.readthedocs.io/latest/user/theory.html),
