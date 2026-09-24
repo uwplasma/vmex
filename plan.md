@@ -1,5 +1,28 @@
 # VMEX research plan
 
+## Force-balance recovery lane (started 2026-09-24)
+
+The polishing recovery work now follows the separate reviewed handoff
+"VMEX force-balance recovery: implementation and research handoff".  It does
+not replace the unrelated lanes retained below.  Work is on
+`rj/force-balance-recovery` from `4632dad8` and remains unmerged pending
+Rogerio's review.
+
+Current checkpoint:
+
+- P0 reproduced the exact bundled `input.shaped_tokamak_pressure` (SHA-256
+  `5b2740db...fe5102`) in an isolated current dependency environment.  The
+  ordinary solve converged through NS=51 in 10.79 s cold/cache-populating and
+  1.80 s cache-reload; raw evidence is in
+  `benchmarks/polish_recovery_p0.json`.
+- The first P1 change replaces inverse-power reconstruction with a weighted,
+  column-equilibrated fit of physical amplitudes.  Its tests include noisy
+  high-m near-axis data, rank refusal, curvature, endpoint constraints, and
+  fit diagnostics.
+- Candidate A/B solver selection, independent final force acceptance, 3-D
+  closure, implicit derivatives, and product promotion remain open.  No
+  speedup or recovered polished equilibrium is claimed at this checkpoint.
+
 This file is the complete handoff for the VMEX research programme: a
 collaborator should be able to resume from it alone. It has two parts.
 
