@@ -47,6 +47,7 @@ from vmex.core.solver import _initial_state, prepare_runtime, resolution_from_in
 from vmex.core.strong_force import (
     FORCE_ERROR_MEASURE_LABELS,
     HighOrderEquilibriumState,
+    append_high_order_state_modes,
     certify_strong_force,
     evaluate_high_order_fields,
     evaluate_high_order_surface,
@@ -193,6 +194,34 @@ def test_native_state_knot_insertion_preserves_fields_and_force():
     )
     with pytest.raises(ValueError, match="finite and unique"):
         insert_high_order_state_knots(state, [0.3, 0.3])
+
+
+def test_native_mode_padding_preserves_fields_and_force():
+    """Zero-padded angular enrichment embeds the same physical state exactly."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    enriched = append_high_order_state_modes(state, [2, 3], [0, -1])
+    np.testing.assert_array_equal(enriched.m, [0, 1, 2, 3])
+    np.testing.assert_array_equal(enriched.n, [0, 0, 0, -1])
+    for name in (
+        "R_cos",
+        "R_sin",
+        "Z_cos",
+        "Z_sin",
+        "L_cos",
+        "L_sin",
+    ):
+        np.testing.assert_array_equal(np.asarray(getattr(enriched, name))[-2:], 0.0)
+    rho = jnp.asarray([0.11, 0.53, 0.91])
+    theta = jnp.asarray([0.3, 2.1, 5.4])
+    zeta = jnp.asarray([0.2, 1.7, 4.8])
+    original = evaluate_strong_force(state, rho, theta, zeta)
+    padded = evaluate_strong_force(enriched, rho, theta, zeta)
+    np.testing.assert_allclose(padded.force, original.force, rtol=0.0, atol=0.0)
+    with pytest.raises(ValueError, match="duplicate existing"):
+        append_high_order_state_modes(state, [1], [0])
+    with pytest.raises(ValueError, match="unique"):
+        append_high_order_state_modes(state, [2, 2], [0, 0])
 
 
 def test_axisymmetric_fields_are_invariant_to_field_period_coordinates():

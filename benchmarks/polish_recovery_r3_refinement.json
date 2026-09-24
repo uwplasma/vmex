@@ -10,6 +10,9 @@
         "iteration": 1,
         "linear_constraint_residual_norm": 9.386909116869138e-19,
         "linearized_model_norm": 0.0001668640305544374,
+        "linearized_unreachable_residual_fraction": 0.5905804944184877,
+        "projected_stationarity_norm": 0.03074302063780163,
+        "projected_stationarity_relative": 0.010299358956877707,
         "reduced_coordinates": 1161,
         "reduced_jacobian_rank": 1161,
         "trials": [
@@ -28,6 +31,9 @@
         "iteration": 2,
         "linear_constraint_residual_norm": 4.4851910589328006e-21,
         "linearized_model_norm": 0.00016681260077906312,
+        "linearized_unreachable_residual_fraction": 0.9990302396405388,
+        "projected_stationarity_norm": 0.0001440784172477119,
+        "projected_stationarity_relative": 8.167768702928064e-05,
         "reduced_coordinates": 1161,
         "reduced_jacobian_rank": 1161,
         "trials": [
@@ -46,6 +52,9 @@
         "iteration": 3,
         "linear_constraint_residual_norm": 5.587663170829363e-22,
         "linearized_model_norm": 0.00016681260943118598,
+        "linearized_unreachable_residual_fraction": 0.9999999955405359,
+        "projected_stationarity_norm": 1.1532837208378813e-08,
+        "projected_stationarity_relative": 6.544279793147547e-09,
         "reduced_coordinates": 1161,
         "reduced_jacobian_rank": 1161,
         "trials": [
@@ -64,6 +73,9 @@
         "iteration": 4,
         "linear_constraint_residual_norm": 3.1239459650684314e-23,
         "linearized_model_norm": 0.00016681260947416248,
+        "linearized_unreachable_residual_fraction": 0.99999999998246,
+        "projected_stationarity_norm": 1.0729476779312057e-08,
+        "projected_stationarity_relative": 6.088414840814879e-09,
         "reduced_coordinates": 1161,
         "reduced_jacobian_rank": 1161,
         "trials": [
@@ -96,7 +108,7 @@
   "schema": "vmex.polish-recovery/2",
   "source": {
     "generator": "benchmarks/polish_recovery_refine.py",
-    "generator_sha256": "728b1fe6dcecc1f7da7d3d9053d46e6460fd2692e2fbbcf98fc0a2d0684b120f",
+    "generator_sha256": "8e662236a29fe4d761bb666ff934b9fda51da16110ff652438ffd1da2641b76f",
     "input_native_state": "benchmarks/polish_recovery_r1_p3_state.npz",
     "input_native_state_sha256": "998a0f64eec617b034a2c5b3600e18032799088b4618d9f198463e877b94095a",
     "output_native_state": "benchmarks/polish_recovery_r3_refined_state.npz",
@@ -135,7 +147,7 @@
       0.9791666666666666
     ],
     "method": "Boehm knot insertion through insert_high_order_state_knots",
-    "seconds": 0.7355624169576913,
+    "seconds": 5.582844041055068,
     "spline_value_first_second_derivative_relative_errors": {
       "derivative_0": 2.6326199412655876e-16,
       "derivative_1": 8.142659900635808e-13,
@@ -155,16 +167,16 @@
     "wout_refit": false
   },
   "work": {
-    "certificate_seconds": 3.672728250036016,
-    "constraint_factor_seconds": 0.2943224589107558,
+    "certificate_seconds": 3.7879696249729022,
+    "constraint_factor_seconds": 0.3014564160257578,
     "dense_memory_cap_bytes": 2147483648,
-    "dense_solve_seconds": 4.486543292063288,
+    "dense_solve_seconds": 5.509959708200768,
     "explicit_jacobian_bytes": 386330112,
     "explicit_jacobian_shape": [
       28224,
       1711
     ],
-    "jacobian_seconds": 21.442614916944876,
-    "total_process_seconds": 32.76328895799816
+    "jacobian_seconds": 21.915530917001888,
+    "total_process_seconds": 39.31659533409402
   }
 }

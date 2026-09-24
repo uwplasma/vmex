@@ -1443,6 +1443,67 @@ def insert_high_order_state_knots(
     return refined
 
 
+def append_high_order_state_modes(
+    state: HighOrderEquilibriumState,
+    m: Array,
+    n: Array,
+) -> HighOrderEquilibriumState:
+    """Exactly embed a native state in a larger Fourier mode table.
+
+    New geometry, lambda, and boundary coefficients are identically zero, so
+    this angular enrichment preserves the represented physical state. The new
+    modes must be unique and absent from the existing table.
+    """
+
+    new_m = np.asarray(m, dtype=int).reshape(-1)
+    new_n = np.asarray(n, dtype=int).reshape(-1)
+    if new_m.shape != new_n.shape or new_m.size == 0:
+        raise ValueError("new m and n mode arrays must have the same nonzero length")
+    new_pairs = list(zip(new_m.tolist(), new_n.tolist(), strict=True))
+    if len(set(new_pairs)) != len(new_pairs):
+        raise ValueError("new Fourier modes must be unique")
+    existing = set(
+        zip(
+            np.asarray(state.m, dtype=int).tolist(),
+            np.asarray(state.n, dtype=int).tolist(),
+            strict=True,
+        )
+    )
+    if existing.intersection(new_pairs):
+        raise ValueError("new Fourier modes must not duplicate existing modes")
+    radial_zeros = jnp.zeros(
+        (new_m.size, state.radial_basis.size), dtype=jnp.asarray(state.R_cos).dtype
+    )
+    boundary_zeros = jnp.zeros(
+        (new_m.size,), dtype=jnp.asarray(state.boundary_R_cos).dtype
+    )
+    radial_names = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
+    boundary_names = (
+        "boundary_R_cos",
+        "boundary_R_sin",
+        "boundary_Z_cos",
+        "boundary_Z_sin",
+    )
+    values = {
+        name: jnp.concatenate((jnp.asarray(getattr(state, name)), radial_zeros), axis=0)
+        for name in radial_names
+    }
+    values.update(
+        {
+            name: jnp.concatenate(
+                (jnp.asarray(getattr(state, name)), boundary_zeros), axis=0
+            )
+            for name in boundary_names
+        }
+    )
+    return replace(
+        state,
+        m=np.concatenate((np.asarray(state.m, dtype=int), new_m)),
+        n=np.concatenate((np.asarray(state.n, dtype=int), new_n)),
+        **values,
+    )
+
+
 def _weighted_l2(values: Array, weights: Array) -> Array:
     return jnp.sqrt(jnp.sum(weights * values * values) / jnp.sum(weights))
 
@@ -1941,6 +2002,7 @@ __all__ = [
     "evaluate_strong_force",
     "force_error_measures",
     "force_error_record",
+    "append_high_order_state_modes",
     "high_order_state_from_wout",
     "insert_high_order_state_knots",
     "lift_high_order_state",
