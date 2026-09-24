@@ -16,6 +16,7 @@ from vmex.core.polish_variational import (
     minimum_signed_jacobian,
     native_coordinate_scales,
     native_force_gauss_newton_step,
+    native_polish_trial_is_acceptable,
     native_physical_force_residual,
     native_tangential_gauge_residual,
 )
@@ -60,6 +61,7 @@ def main() -> None:
         )
 
     history = []
+    linear_tolerance = 1.0e-9
     current_norm = float(jnp.linalg.norm(force_residual(variables[: layout.size])))
     for iteration in range(4):
         step, linear_residual = native_force_gauss_newton_step(
@@ -71,7 +73,7 @@ def main() -> None:
             force_scale,
             volume_scale,
             damping=1.0e-2,
-            tolerance=1.0e-9,
+            tolerance=linear_tolerance,
             restart=40,
             max_restarts=40,
         )
@@ -92,12 +94,17 @@ def main() -> None:
                 "force_residual_norm": candidate_norm,
                 "gauge_residual_norm": candidate_gauge,
                 "minimum_signed_jacobian": minimum_j,
+                "true_linear_residual": float(linear_residual),
+                "requested_linear_tolerance": linear_tolerance,
             }
             trials.append(trial)
-            if (
-                candidate_norm < current_norm
-                and candidate_gauge < 1.0e-6
-                and minimum_j > 0.0
+            if native_polish_trial_is_acceptable(
+                force_before=current_norm,
+                force_after=candidate_norm,
+                gauge_residual=candidate_gauge,
+                minimum_signed_jacobian=minimum_j,
+                linear_residual=float(linear_residual),
+                linear_tolerance=linear_tolerance,
             ):
                 accepted = (candidate, trial)
                 break

@@ -1191,8 +1191,10 @@ def lift_high_order_state(
     a minimum-norm fill can invent curvature in unsampled spans.
 
     ``curvature_regularization`` optionally applies a dimensionless,
-    knot-span-scaled integrated curvature penalty to Fourier amplitudes.  It
-    is an experimental smoothing knob; zero is the default and the separate
+    knot-span-scaled integrated curvature penalty to the fitted B-spline
+    factor ``q(s)`` in ``rho**abs(m) * q(s)``.  It does not penalize the
+    second derivative of that complete physical amplitude.  It is an
+    experimental smoothing knob; zero is the default and the separate
     data-rank check remains mandatory.
     """
 
@@ -1290,6 +1292,12 @@ def lift_high_order_state(
         # those functions directly at the native basis nodes instead of
         # sending them through legacy full/half-grid export chains.  The
         # current-constrained chi profile remains an equilibrium unknown.
+        if float(inp.gamma) != 0.0:
+            raise NotImplementedError(
+                "native exact-profile lifting currently supports GAMMA=0 only; "
+                "nonzero GAMMA requires geometry-dependent mass/pressure closure"
+            )
+
         from . import profiles as _profiles
         from .setup import _torflux_functions
 

@@ -913,6 +913,46 @@ def native_force_gauss_newton_step(
     return solution, relative_residual
 
 
+def native_polish_trial_is_acceptable(
+    *,
+    force_before: float,
+    force_after: float,
+    gauge_residual: float,
+    minimum_signed_jacobian: float,
+    linear_residual: float,
+    linear_tolerance: float,
+    gauge_tolerance: float = 1.0e-6,
+) -> bool:
+    """Return whether a native nonlinear trial passes every declared gate.
+
+    This host-side predicate fails closed for nonfinite measurements.  The
+    independently recomputed true linear residual is deliberately separate
+    from force descent, gauge feasibility, and sampled geometry validity.
+    """
+
+    values = np.asarray(
+        (
+            force_before,
+            force_after,
+            gauge_residual,
+            minimum_signed_jacobian,
+            linear_residual,
+            linear_tolerance,
+            gauge_tolerance,
+        ),
+        dtype=float,
+    )
+    return bool(
+        np.all(np.isfinite(values))
+        and linear_tolerance > 0.0
+        and gauge_tolerance > 0.0
+        and 0.0 <= linear_residual <= linear_tolerance
+        and 0.0 <= gauge_residual < gauge_tolerance
+        and minimum_signed_jacobian > 0.0
+        and 0.0 <= force_after < force_before
+    )
+
+
 @jax.jit
 def evaluate_tensorized_strong_force(
     state: HighOrderEquilibriumState,
@@ -1160,6 +1200,7 @@ __all__ = [
     "native_force_kkt_residual",
     "native_force_gauss_newton_action",
     "native_force_gauss_newton_step",
+    "native_polish_trial_is_acceptable",
     "native_physical_force_residual",
     "native_variational_kkt_residual",
 ]

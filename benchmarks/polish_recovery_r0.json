@@ -1,0 +1,89 @@
+{
+  "schema": "vmex.polish-recovery/2",
+  "experiment": "R0-packed-index-and-acceptance-repair",
+  "status": "measured-not-promoted",
+  "source": {
+    "reviewed_vmex_sha": "4153bc256b8242c8eee97436a67739a089324350",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "input_sha256": "5b2740db6dbc91d6a1b43c283b95c959397a608566aeb54da7489203e1fe5102",
+    "ordinary_wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "ordinary_wout_sha256": "b43a3f65001db07ad7b21ac1730128df518ef6ac5058ed8ca308596d9da86992"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "solvax": "0.26.0",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "reviewed_defects": {
+    "p8_p9": {
+      "status": "confirmed and repaired",
+      "packed_coordinates": 1439,
+      "coefficient_table_indices_out_of_packed_bounds": 935,
+      "coefficient_table_indices_different_from_packed_positions": 1397,
+      "interpretation": "The original P8/P9 records are retained as invalid method-selection evidence; they do not rule out correctly indexed mode or Schur preconditioning."
+    },
+    "p10": {
+      "status": "confirmed and repaired",
+      "interpretation": "The original run accepted no state because its gauge also failed, but its predicate did not enforce the recorded true linear residual. The repaired predicate fails closed on every declared gate."
+    }
+  },
+  "corrected_p8": {
+    "reproduction": "JAX_ENABLE_X64=1 .venv/bin/python benchmarks/polish_recovery_p8.py",
+    "coordinates": 1439,
+    "gauge_constraints": 462,
+    "mode_block_sizes": [42, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127],
+    "block_factor_bytes_equivalent": 1433464,
+    "restart": 20,
+    "max_restarts": 2,
+    "iteration_upper_bound": 40,
+    "requested_true_relative_residual": 0.0001,
+    "achieved_true_relative_residual": 0.028987667001263002,
+    "elapsed_seconds": 5.361804749933071,
+    "decision": "Reject this step at the fixed budget. Correct indexing improves the old invalid 0.659 residual by about 22.7x, so the method class was not ruled out by the historical run, but this corrected block Jacobi result still misses tolerance."
+  },
+  "corrected_p9": {
+    "reproduction": "JAX_ENABLE_X64=1 .venv/bin/python benchmarks/polish_recovery_p9.py",
+    "coordinates": 1439,
+    "gauge_constraints": 462,
+    "materialized_constraint_matrix_bytes": 5318544,
+    "dense_schur_condition": 13940129912.94024,
+    "restart": 20,
+    "max_restarts": 2,
+    "iteration_upper_bound": 40,
+    "requested_true_relative_residual": 0.0001,
+    "achieved_true_relative_residual": 0.02220339159547398,
+    "elapsed_seconds": 5.29999874997884,
+    "decision": "Reject this step at the fixed budget. Correct indexing and factored solves improve the old invalid 1.766 residual by about 79.5x, but the Schur system remains ill-conditioned and the true residual misses tolerance."
+  },
+  "repaired_p10": {
+    "reproduction": "JAX_ENABLE_X64=1 .venv/bin/python benchmarks/polish_recovery_p10.py",
+    "requested_true_linear_residual": 1e-9,
+    "achieved_true_linear_residual": 3.0396036507290668e-5,
+    "full_step_force_residual_norm": 0.0003244990943351422,
+    "full_step_gauge_residual_norm": 0.00017112715024719089,
+    "full_step_minimum_signed_jacobian": 1.3504731447638039,
+    "accepted": false,
+    "unchanged_state_force_residual_norm": 0.01243646409992236,
+    "unchanged_state_independent_force_rms_N_per_m3": 73567.25309908722,
+    "elapsed_seconds_including_certificate": 9.338170291972347,
+    "decision": "Reject every trial. The direction misses both its declared linear tolerance and the nonlinear gauge tolerance; the attractive force-only number is not an accepted equilibrium."
+  },
+  "tests": {
+    "focused_command": "JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/test_strong_force.py -q -k 'wout_lift_evaluates_supplied_profiles_analytically or native_packed_mode_groups_partition_solver_coordinates or native_polish_trial_acceptance_fails_closed or native_force_gauss_newton_action_matches_dense_reference'",
+    "passed": 4,
+    "deselected": 53,
+    "seconds": 64.37,
+    "ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "P8/P9 remain diagnostics from the P10 smoothed lift, not continuation from the missing P3 Candidate B endpoint.",
+    "The corrected P8/P9 steps still fail the declared linear tolerance and are not applied.",
+    "The P3 generator and complete native endpoint were not present in the reviewed branch, its history, or tracked artifacts; prospective reproduction remains required."
+  ]
+}

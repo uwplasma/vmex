@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from vmex.core.input import VmecInput
-from vmex.core.polish import make_native_correction_layout
+from vmex.core.polish import make_native_correction_layout, native_packed_mode_groups
 from vmex.core.polish_variational import (
     make_native_gauge_plan,
     make_variational_plan,
@@ -40,9 +40,7 @@ def main() -> None:
     gauge = make_native_gauge_plan(state, plan)
     coordinate_scale = native_coordinate_scales(state, layout, plan)
     zero = jnp.zeros((layout.size,), dtype=jnp.float64)
-    active = np.asarray(layout.active_indices, dtype=int)
-    mode_ids = (active % (layout.mnmax * layout.nbasis)) // layout.nbasis
-    groups = [active[mode_ids == mode] for mode in np.unique(mode_ids)]
+    groups = native_packed_mode_groups(layout)
 
     def local_force(local_coordinates, indices):
         full = zero.at[indices].set(local_coordinates)
@@ -57,7 +55,7 @@ def main() -> None:
         )
 
     local_jacobian = jax.jit(jax.jacfwd(local_force, argnums=0))
-    inverse_blocks = []
+    block_factors = []
     block_sizes = []
     for indices in groups:
         indices_jax = jnp.asarray(indices, dtype=jnp.int32)
@@ -65,15 +63,20 @@ def main() -> None:
             local_jacobian(jnp.zeros((indices.size,), dtype=jnp.float64), indices_jax)
         )
         block = jacobian.T @ jacobian + damping * np.eye(indices.size)
-        inverse_blocks.append(np.linalg.inv(block))
+        block_factors.append(np.linalg.cholesky(block))
         block_sizes.append(int(indices.size))
 
     def mode_block_preconditioner(vector):
         primal = jnp.zeros((layout.size,), dtype=vector.dtype)
-        for indices, inverse in zip(groups, inverse_blocks, strict=True):
+        for indices, factor in zip(groups, block_factors, strict=True):
             indices_jax = jnp.asarray(indices, dtype=jnp.int32)
-            inverse_jax = jnp.asarray(inverse, dtype=vector.dtype)
-            value = inverse_jax @ vector[indices_jax]
+            factor_jax = jnp.asarray(factor, dtype=vector.dtype)
+            value = jax.scipy.linalg.solve_triangular(
+                factor_jax, vector[indices_jax], lower=True
+            )
+            value = jax.scipy.linalg.solve_triangular(
+                factor_jax.T, value, lower=False
+            )
             primal = primal.at[indices_jax].set(value)
         return jnp.concatenate((primal, vector[layout.size :]))
 

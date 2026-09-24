@@ -31,6 +31,7 @@ from vmex.core.polish_variational import (
     minimum_signed_jacobian,
     native_force_gauss_newton_action,
     native_force_gauss_newton_step,
+    native_polish_trial_is_acceptable,
     native_physical_force_residual,
     native_tangential_gauge_residual,
     native_coordinate_scales,
@@ -39,6 +40,7 @@ from vmex.core.polish_variational import (
 from vmex.core.polish import (
     HighOrderCorrection,
     make_native_correction_layout,
+    native_packed_mode_groups,
 )
 from vmex.core.radial_basis import BSplineBasis
 from vmex.core.solver import _initial_state, prepare_runtime, resolution_from_input
@@ -530,8 +532,29 @@ def test_wout_lift_evaluates_supplied_profiles_analytically():
     """Pressure and prescribed iota bypass lossy full/half-grid exports."""
 
     inp = VmecInput.from_file("examples/data/input.shaped_tokamak_pressure")
+    base = resolution_from_input(inp)
+    runtime = prepare_runtime(
+        inp,
+        Resolution(
+            mpol=base.mpol,
+            ntor=base.ntor,
+            ntheta=base.ntheta,
+            nzeta=base.nzeta,
+            nfp=base.nfp,
+            lasym=base.lasym,
+            ns=11,
+        ),
+    )
+    wout = wout_from_state(
+        inp=inp,
+        state=_initial_state(runtime.setup),
+        fsqr=1.0,
+        fsqz=1.0,
+        fsql=1.0,
+        converged=False,
+    )
     state = high_order_state_from_wout(
-        "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+        wout,
         inp=inp,
         degree=3,
     )
@@ -560,6 +583,14 @@ def test_wout_lift_evaluates_supplied_profiles_analytically():
     )
     np.testing.assert_allclose(actual_pressure, expected_pressure, rtol=2e-13, atol=2e-10)
     np.testing.assert_allclose(actual_iota, expected_iota, rtol=2e-13, atol=2e-14)
+
+    with pytest.raises(NotImplementedError, match="GAMMA=0"):
+        lift_high_order_state(
+            _initial_state(runtime.setup),
+            runtime,
+            inp=replace(inp, gamma=5.0 / 3.0),
+            degree=3,
+        )
 
 
 def test_legacy_lift_is_overdetermined_for_stable_second_derivatives():
@@ -757,6 +788,62 @@ def test_native_layout_preserves_both_normal_geometry_directions():
     vertical_displacement = evaluate_fixed_label_displacement(state, vertical, plan)
     assert float(jnp.max(jnp.abs(radial_displacement[:, 0, 0, 0]))) > 0.1
     assert float(jnp.max(jnp.abs(vertical_displacement[:, 1, 0, 2]))) > 0.1
+
+
+def test_native_packed_mode_groups_partition_solver_coordinates():
+    """Mode groups use packed positions for symmetric and asymmetric layouts."""
+
+    base = _constant_toroidal_field_state(degree=3)
+
+    def pad(values):
+        return jnp.pad(values, ((0, 2), (0, 0)))
+
+    state = replace(
+        base,
+        m=np.asarray([0, 1, 1, 2]),
+        n=np.asarray([0, 0, 1, -1]),
+        R_cos=pad(base.R_cos),
+        R_sin=pad(base.R_sin),
+        Z_cos=pad(base.Z_cos),
+        Z_sin=pad(base.Z_sin),
+        L_cos=pad(base.L_cos),
+        L_sin=pad(base.L_sin),
+        boundary_R_cos=jnp.pad(base.boundary_R_cos, (0, 2)),
+        boundary_R_sin=jnp.pad(base.boundary_R_sin, (0, 2)),
+        boundary_Z_cos=jnp.pad(base.boundary_Z_cos, (0, 2)),
+        boundary_Z_sin=jnp.pad(base.boundary_Z_sin, (0, 2)),
+    )
+    for lasym in (False, True):
+        layout = make_native_correction_layout(state, lasym=lasym)
+        groups = native_packed_mode_groups(layout)
+        packed = np.concatenate(groups)
+        np.testing.assert_array_equal(np.sort(packed), np.arange(layout.size))
+        vector = np.arange(layout.size, dtype=float)
+        gathered = np.zeros_like(vector)
+        active = np.asarray(layout.active_indices)
+        mode_ids = (
+            active % (layout.mnmax * layout.nbasis)
+        ) // layout.nbasis
+        for mode, group in zip(np.unique(mode_ids), groups, strict=True):
+            assert np.all(mode_ids[group] == mode)
+            gathered[group] = vector[group]
+        np.testing.assert_array_equal(gathered, vector)
+
+    layout = make_native_correction_layout(state)
+    with pytest.raises(ValueError, match="unique"):
+        native_packed_mode_groups(
+            replace(layout, active_indices=np.r_[layout.active_indices, layout.active_indices[0]])
+        )
+    with pytest.raises(ValueError, match="out of bounds"):
+        native_packed_mode_groups(
+            replace(
+                layout,
+                active_indices=np.r_[
+                    layout.active_indices,
+                    6 * layout.mnmax * layout.nbasis,
+                ],
+            )
+        )
 
 
 def test_native_gauge_generator_has_zero_fixed_label_displacement():
@@ -1053,6 +1140,16 @@ def test_native_force_gauss_newton_action_matches_dense_reference():
     direction = jnp.linspace(-0.5, 0.75, size)
     force_jacobian = jax.jacfwd(physical)(variables[: layout.size])
     constraint_jacobian = jax.jacfwd(constraints)(variables[: layout.size])
+    for group in native_packed_mode_groups(layout):
+        group_jax = jnp.asarray(group)
+        local = jax.jacfwd(
+            lambda value: physical(
+                jnp.zeros((layout.size,)).at[group_jax].set(value)
+            )
+        )(jnp.zeros((group.size,)))
+        np.testing.assert_allclose(
+            local, force_jacobian[:, group], rtol=2e-12, atol=2e-12
+        )
     dx = direction[: layout.size]
     dlambda = direction[layout.size :]
     expected = jnp.concatenate(
@@ -1115,6 +1212,30 @@ def test_native_force_gauss_newton_action_matches_dense_reference():
         rhs
     )
     assert float(relative_dense_residual) < 1e-8
+
+
+def test_native_polish_trial_acceptance_fails_closed():
+    """Linear, gauge, force, geometry, and finite gates are independent."""
+
+    passing = {
+        "force_before": 0.012436,
+        "force_after": 0.0003245,
+        "gauge_residual": 1.0e-12,
+        "minimum_signed_jacobian": 1.35047,
+        "linear_residual": 1.0e-12,
+        "linear_tolerance": 1.0e-9,
+    }
+    assert native_polish_trial_is_acceptable(**passing)
+    for name, value in (
+        ("force_after", passing["force_before"]),
+        ("gauge_residual", 1.0e-6),
+        ("minimum_signed_jacobian", 0.0),
+        ("linear_residual", 3.04e-5),
+        ("linear_residual", np.nan),
+        ("force_after", np.inf),
+    ):
+        failed = passing | {name: value}
+        assert not native_polish_trial_is_acceptable(**failed)
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():

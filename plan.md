@@ -99,17 +99,18 @@ Current checkpoint:
   reproduction script are `benchmarks/polish_recovery_p7.json` and `.py`.
   Next gate: derive and test a physically structured mode/radial block
   preconditioner before raising the iteration budget.
-- P8 tests a diagonal-by-mode primal Jacobi preconditioner (42- and 127-entry
-  blocks) on that 1,439+462 system. With 40 iterations, its independently
-  recomputed true residual is `0.6590` against `1e-4`; reject it. The geometry
-  blocks do not adequately scale the multiplier/gauge coupling. See
-  `benchmarks/polish_recovery_p8.py` and `.json`.
-- P9 adds a dense Schur complement for the 462 gauge multipliers to the P8
-  primal block approximation. The diagnostic constraint matrix is 5.32 MB,
-  estimated Schur condition is `9.48e11`, and the 40-iteration true residual
-  is `1.766`; reject it. This does not justify a production dense gauge
-  matrix. See `benchmarks/polish_recovery_p9.py` and `.json`.
-- P10 tests at most four nonlinear damped GN iterations, with linear request
+- Review found that historical P8/P9 confused full coefficient-table indices
+  with packed solver positions: 935 of 1,439 indices were out of packed bounds
+  and 1,397 positions were mismatched. Their original residuals (`0.6590` and
+  `1.766`) are retained as invalid method-selection evidence, not conclusions
+  about correctly implemented block/Schur methods. R0 repairs the partition,
+  validates it for symmetric/LASYM layouts and against small dense Jacobian
+  blocks, and replaces explicit inverses with Cholesky solves. On the same
+  endpoint and 40-iteration budget, corrected P8/P9 residuals are `0.02899`
+  and `0.02220` against `1e-4`; both steps remain rejected, but improve the
+  invalid historical values by about 22.7x and 79.5x. Evidence is in
+  `benchmarks/polish_recovery_r0.json`.
+- Historical P10 tests at most four nonlinear damped GN iterations, with linear request
   `1e-9` and up to 1,600 Krylov iterations per solve, plus force descent,
   gauge norm `<1e-6`, and positive-J acceptance gates. The first solve's true
   linear residual is `3.04e-5`. Its full step lowers force residual norm
@@ -120,6 +121,15 @@ Current checkpoint:
   the base smoothed lift (`epsilon_B=1.244e-2`, force RMS `7.36e4 N/m^3`).
   Do not report the inadmissible full-step force number as polish progress.
   See `benchmarks/polish_recovery_p10.py` and `.json`.
+- R0 also repairs P10's fail-open predicate: the script had recorded the true
+  linear residual but did not gate acceptance on it. The replay still rejects
+  every trial, now independently because `3.04e-5` misses its requested
+  `1e-9` linear tolerance and the full-step gauge residual misses `1e-6`.
+  The profile test now constructs its WOUT fixture in memory rather than
+  depending on `artifacts/p0/run2`, and direct analytic profile replacement
+  fails explicitly for unsupported nonzero `GAMMA`. The original P3 generator
+  and complete native endpoint are absent from the branch/history/artifacts;
+  reproduce them prospectively rather than inventing missing settings.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.
