@@ -48,15 +48,16 @@ def test_cache_dir_env_precedence(clean_cache_env):
     assert path is not None and "vmex" in path and "jax_cache" in path
 
     # explicit JAX var wins verbatim; 'disabled' turns it off
+    fingerprint = _compat._cache_machine_fingerprint()
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/jaxcache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/jaxcache/{fingerprint}"
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "disabled")
     assert _compat._default_compilation_cache_dir() is None
     mp.delenv("JAX_COMPILATION_CACHE_DIR")
 
     # vmec-specific dir override
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmeccache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/vmeccache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/vmeccache/{fingerprint}"
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "no")
     assert _compat._default_compilation_cache_dir() is None
     mp.delenv("VMEX_COMPILATION_CACHE_DIR")
@@ -90,12 +91,13 @@ def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
     assert _compat._default_compilation_cache_dir() is not None
     mp.delenv("VMEX_COMPILATION_CACHE")
 
+    fingerprint = _compat._cache_machine_fingerprint()
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/jaxcache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/jaxcache/{fingerprint}"
     mp.delenv("JAX_COMPILATION_CACHE_DIR")
 
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmexcache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/vmexcache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/vmexcache/{fingerprint}"
 
 
 @pytest.mark.parametrize("system", ["Linux", "Darwin"])
@@ -546,3 +548,22 @@ def test_configure_compilation_cache_ignores_an_unparseable_entry_bound(tmp_path
     # the bound is skipped, the rest of the configuration still lands
     assert len(list(tmp_path.glob("*-cache"))) == 4
     assert fake.config.updates["jax_compilation_cache_dir"] == str(tmp_path)
+
+
+def test_explicit_cache_dir_is_split_by_machine(clean_cache_env):
+    """A user-chosen cache directory never mixes CPUs.
+
+    On a cluster the same shared path is read by login and compute nodes whose
+    CPU features differ; an executable compiled on one is rejected on the other
+    ("Target machine feature ... is not supported on the host machine") and
+    recompiled.  Two machines with different fingerprints must land in
+    different subdirectories of the same user path.
+    """
+    mp = clean_cache_env
+    mp.setenv("JAX_COMPILATION_CACHE_DIR", "/shared/jax")
+    mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-aaaa")
+    first = _compat._default_compilation_cache_dir()
+    mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-bbbb")
+    second = _compat._default_compilation_cache_dir()
+    assert first == "/shared/jax/linux-x86_64-aaaa"
+    assert second == "/shared/jax/linux-x86_64-bbbb"

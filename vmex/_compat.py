@@ -309,6 +309,13 @@ def _cache_machine_fingerprint() -> str:
     return f"{system}-{machine}-{digest}"
 
 
+def _machine_scoped(directory: str) -> str:
+    """Return ``directory/<machine fingerprint>`` (see _cache_machine_fingerprint)."""
+    import pathlib
+
+    return str(pathlib.Path(directory).expanduser() / _cache_machine_fingerprint())
+
+
 def _default_compilation_cache_dir() -> str | None:
     """Return the configured JAX compilation-cache directory.
 
@@ -323,23 +330,27 @@ def _default_compilation_cache_dir() -> str | None:
     host-feature-mismatch hazard (AOT executables tied to a specific
     instruction set, dangerous on shared home filesystems) is handled by
     :func:`_cache_machine_fingerprint`, so heterogeneous machines never share
-    a cache entry.  Opt out with ``VMEX_COMPILATION_CACHE=disabled`` (or
-    ``VMEX_COMPILATION_CACHE_DIR=disabled``); point it elsewhere with
-    ``JAX_COMPILATION_CACHE_DIR=/path``.
+    a cache entry -- including under a directory the user chose: an explicit
+    ``JAX_COMPILATION_CACHE_DIR`` or ``VMEX_COMPILATION_CACHE_DIR`` is the
+    parent of a per-machine subdirectory, because such paths usually sit on a
+    shared cluster filesystem where login and compute nodes differ in CPU
+    features (XLA then logs "Target machine feature ... is not supported on
+    the host machine" and recompiles).  Opt out with
+    ``VMEX_COMPILATION_CACHE=disabled`` (or ``VMEX_COMPILATION_CACHE_DIR=disabled``).
     """
     # Already set by the user — respect it.
     if "JAX_COMPILATION_CACHE_DIR" in os.environ:
         val = os.environ["JAX_COMPILATION_CACHE_DIR"].strip()
         if val.lower() in ("", "disabled", "0", "false", "no"):
             return None
-        return val
+        return _machine_scoped(val)
 
     # User can opt out via VMEX_COMPILATION_CACHE_DIR=disabled
     vmec_val = _env("COMPILATION_CACHE_DIR").strip()
     if vmec_val.lower() in ("disabled", "0", "false", "no"):
         return None
     if vmec_val:
-        return vmec_val
+        return _machine_scoped(vmec_val)
 
     cache_flag = _env("COMPILATION_CACHE").strip().lower()
     if cache_flag in ("disabled", "0", "false", "no", "off"):
