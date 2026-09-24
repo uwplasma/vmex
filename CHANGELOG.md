@@ -5,6 +5,14 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## 0.11.2 - 2026-09-24
+
+A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
+`VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
+(#449). On clusters, a shared cache path was read by nodes with different CPU
+features; XLA rejected the other node's executables ("Target machine feature
+... is not supported on the host machine") and recompiled on every run.
+
 ## 0.11.1 - 2026-09-23
 
 Free-boundary trials are anchored on the coupled root their gradients
