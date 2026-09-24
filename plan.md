@@ -33,8 +33,10 @@ Current checkpoint:
   under 0.3 s and ran warm in under 1 ms; independent field-oracle agreement
   and raw timings are recorded in `benchmarks/polish_recovery_p2.json`.
 - The off-root virtual-work identity, including lambda, agrees with the
-  independent strong-force oracle.  The remaining P2 work is the tensorized
-  second-derivative/force kernel and derivative checks; a qualified local
+  independent strong-force oracle.  Tensorized analytic second-jet tables now
+  produce all strong-force channels on the same native state; point values,
+  JVPs, and VJPs agree with the independent nested-AD oracle.  On the P0 case
+  the force compiled in 0.28 s and ran warm in 0.65 ms.  A qualified local
   gauge convention and candidate A/B comparison still precede any solver
   promotion.
 - Candidate A/B solver selection, independent final force acceptance, 3-D

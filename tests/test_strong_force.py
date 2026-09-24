@@ -22,6 +22,7 @@ from vmex.core.omnigenity import boozer_spectrum_high_order
 from vmex.core.profiles import MU0
 from vmex.core.polish_variational import (
     evaluate_fixed_label_displacement,
+    evaluate_tensorized_strong_force,
     evaluate_variational_fields,
     fixed_pressure_energy,
     make_variational_plan,
@@ -805,6 +806,78 @@ def test_variational_virtual_work_matches_independent_strong_force():
         * jnp.sum(oracle.force * displacement, axis=-1)
     )
     np.testing.assert_allclose(variation, force_work, rtol=2e-12, atol=2e-7)
+
+
+def test_tensorized_strong_force_matches_finite_pressure_point_oracle():
+    """Analytic second-jet force tables reproduce every physical channel."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    nodes = jnp.asarray(state.radial_basis.collocation_nodes)
+    profile = state.radial_basis.fit(1.0 - nodes)
+    state = replace(
+        state,
+        chipf=0.2 * profile,
+        pressure=1.0e4 * profile,
+        L_sin=state.L_sin.at[1].set(0.03 * profile),
+    )
+    plan = make_variational_plan(state, radial_order=3, ntheta=7, nzeta=3)
+    fast = evaluate_tensorized_strong_force(state, plan)
+    rr, tt, zz = jnp.meshgrid(plan.rho, plan.theta, plan.zeta, indexing="ij")
+    oracle = evaluate_strong_force(state, rr, tt, zz)
+    for name in (
+        "sqrt_g",
+        "B",
+        "J",
+        "force",
+        "force_rho",
+        "force_helical",
+        "radial_force_density",
+        "helical_force_density",
+        "signed_radial_force_density",
+        "signed_helical_force_density",
+        "lorentz_norm",
+        "grad_pressure_norm",
+    ):
+        np.testing.assert_allclose(
+            getattr(fast, name),
+            getattr(oracle, name),
+            rtol=5.0e-11,
+            atol=3.0e-6,
+        )
+
+
+def test_tensorized_force_jvp_and_vjp_match_point_oracle():
+    """Coefficient derivative actions agree with independent nested AD."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=2, ntheta=5, nzeta=1)
+    direction = (
+        jnp.zeros_like(state.R_cos)
+        .at[0, 1]
+        .set(0.1)
+        .at[1, 2]
+        .set(-0.05)
+    )
+
+    def candidate(step):
+        return replace(state, R_cos=state.R_cos + step * direction)
+
+    def fast(step):
+        return evaluate_tensorized_strong_force(candidate(step), plan).force[0, 0, 0]
+
+    def oracle(step):
+        return evaluate_strong_force(
+            candidate(step), plan.rho[0], plan.theta[0], plan.zeta[0]
+        ).force
+
+    fast_value, fast_jvp = jax.jvp(fast, (0.0,), (1.0,))
+    oracle_value, oracle_jvp = jax.jvp(oracle, (0.0,), (1.0,))
+    np.testing.assert_allclose(fast_value, oracle_value, rtol=2e-11, atol=2e-6)
+    np.testing.assert_allclose(fast_jvp, oracle_jvp, rtol=2e-11, atol=2e-5)
+    weight = jnp.asarray([0.3, -0.2, 0.7])
+    fast_vjp = jax.grad(lambda step: jnp.vdot(fast(step), weight))(0.0)
+    oracle_vjp = jax.grad(lambda step: jnp.vdot(oracle(step), weight))(0.0)
+    np.testing.assert_allclose(fast_vjp, oracle_vjp, rtol=2e-11, atol=2e-5)
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():

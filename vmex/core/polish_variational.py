@@ -16,7 +16,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .profiles import MU0
-from .strong_force import HighOrderEquilibriumState
+from .strong_force import HighOrderEquilibriumState, StrongForceSamples
 
 Array = Any
 
@@ -31,13 +31,21 @@ class VariationalPlan:
     zeta: Array
     radial_value: Array
     radial_derivative: Array
+    radial_second_derivative: Array
     profile_basis: Array
+    profile_derivative: Array
     cosine: Array
     sine: Array
     cosine_theta: Array
     sine_theta: Array
     cosine_zeta: Array
     sine_zeta: Array
+    cosine_theta_theta: Array
+    sine_theta_theta: Array
+    cosine_theta_zeta: Array
+    sine_theta_zeta: Array
+    cosine_zeta_zeta: Array
+    sine_zeta_zeta: Array
     quadrature_weights: Array
     nfp: int
     jacobian_sign: int
@@ -53,13 +61,21 @@ class VariationalPlan:
                 "zeta",
                 "radial_value",
                 "radial_derivative",
+                "radial_second_derivative",
                 "profile_basis",
+                "profile_derivative",
                 "cosine",
                 "sine",
                 "cosine_theta",
                 "sine_theta",
                 "cosine_zeta",
                 "sine_zeta",
+                "cosine_theta_theta",
+                "sine_theta_theta",
+                "cosine_theta_zeta",
+                "sine_theta_zeta",
+                "cosine_zeta_zeta",
+                "sine_zeta_zeta",
                 "quadrature_weights",
             )
         )
@@ -133,6 +149,9 @@ def make_variational_plan(
     basis_s = np.asarray(
         state.radial_basis.basis_matrix(s, derivative=1), dtype=float
     )
+    basis_ss = np.asarray(
+        state.radial_basis.basis_matrix(s, derivative=2), dtype=float
+    )
     m = np.abs(np.asarray(state.m, dtype=int))
     powers = rho[None, :, None] ** m[:, None, None]
     radial_value = powers * basis[None]
@@ -145,6 +164,23 @@ def make_variational_plan(
     )
     radial_derivative = leading + (
         2.0 * rho[None, :, None] ** (m[:, None, None] + 1) * basis_s[None]
+    )
+    leading_second = np.zeros_like(radial_value)
+    second_active = m >= 2
+    leading_second[second_active] = (
+        m[second_active, None, None]
+        * (m[second_active, None, None] - 1)
+        * rho[None, :, None] ** (m[second_active, None, None] - 2)
+        * basis[None]
+    )
+    radial_second_derivative = (
+        leading_second
+        + (4 * m[:, None, None] + 2)
+        * rho[None, :, None] ** m[:, None, None]
+        * basis_s[None]
+        + 4.0
+        * rho[None, :, None] ** (m[:, None, None] + 2)
+        * basis_ss[None]
     )
 
     signed_m = np.asarray(state.m, dtype=int)
@@ -165,6 +201,12 @@ def make_variational_plan(
     sine_theta = signed_m[:, None] * cosine
     cosine_zeta = n[:, None] * sine
     sine_zeta = -n[:, None] * cosine
+    cosine_theta_theta = -(signed_m[:, None] ** 2) * cosine
+    sine_theta_theta = -(signed_m[:, None] ** 2) * sine
+    cosine_theta_zeta = signed_m[:, None] * n[:, None] * cosine
+    sine_theta_zeta = signed_m[:, None] * n[:, None] * sine
+    cosine_zeta_zeta = -(n[:, None] ** 2) * cosine
+    sine_zeta_zeta = -(n[:, None] ** 2) * sine
     angular_weight = (2.0 * np.pi / ntheta) * (2.0 * np.pi / nzeta)
     # zeta spans one field period and sqrt_g contains dphi/dzeta=1/nfp;
     # multiplying by nfp integrates the full torus.
@@ -177,13 +219,21 @@ def make_variational_plan(
         zeta=jnp.asarray(zeta),
         radial_value=jnp.asarray(radial_value),
         radial_derivative=jnp.asarray(radial_derivative),
+        radial_second_derivative=jnp.asarray(radial_second_derivative),
         profile_basis=jnp.asarray(basis),
+        profile_derivative=jnp.asarray(2.0 * rho[:, None] * basis_s),
         cosine=jnp.asarray(cosine),
         sine=jnp.asarray(sine),
         cosine_theta=jnp.asarray(cosine_theta),
         sine_theta=jnp.asarray(sine_theta),
         cosine_zeta=jnp.asarray(cosine_zeta),
         sine_zeta=jnp.asarray(sine_zeta),
+        cosine_theta_theta=jnp.asarray(cosine_theta_theta),
+        sine_theta_theta=jnp.asarray(sine_theta_theta),
+        cosine_theta_zeta=jnp.asarray(cosine_theta_zeta),
+        sine_theta_zeta=jnp.asarray(sine_theta_zeta),
+        cosine_zeta_zeta=jnp.asarray(cosine_zeta_zeta),
+        sine_zeta_zeta=jnp.asarray(sine_zeta_zeta),
         quadrature_weights=jnp.asarray(quadrature_weights),
         nfp=int(state.nfp),
         jacobian_sign=int(state.jacobian_sign),
@@ -224,6 +274,59 @@ def _channel(
     dtheta = synthesize(plan.cosine_theta, plan.sine_theta)
     dzeta = synthesize(plan.cosine_zeta, plan.sine_zeta)
     return value, drho, dtheta, dzeta
+
+
+def _channel_second(
+    cosine_coefficients: Array,
+    sine_coefficients: Array,
+    plan: VariationalPlan,
+) -> tuple[Array, ...]:
+    """Synthesize a scalar channel through its coordinate Hessian."""
+
+    value, drho, dtheta, dzeta = _channel(
+        cosine_coefficients, sine_coefficients, plan
+    )
+    cosine_coefficients = jnp.asarray(cosine_coefficients)
+    sine_coefficients = jnp.asarray(sine_coefficients)
+
+    def radial(table: Array) -> tuple[Array, Array]:
+        return (
+            jnp.einsum("mb,mrb->rm", cosine_coefficients, table),
+            jnp.einsum("mb,mrb->rm", sine_coefficients, table),
+        )
+
+    def synthesize(
+        radial_pair: tuple[Array, Array],
+        angular_pair: tuple[Array, Array],
+    ) -> Array:
+        return jnp.einsum("rm,ma->ra", radial_pair[0], angular_pair[0]) + (
+            jnp.einsum("rm,ma->ra", radial_pair[1], angular_pair[1])
+        )
+
+    radial_value = radial(plan.radial_value)
+    radial_first = radial(plan.radial_derivative)
+    radial_second = radial(plan.radial_second_derivative)
+    return (
+        value,
+        drho,
+        dtheta,
+        dzeta,
+        synthesize(radial_second, (plan.cosine, plan.sine)),
+        synthesize(radial_first, (plan.cosine_theta, plan.sine_theta)),
+        synthesize(radial_first, (plan.cosine_zeta, plan.sine_zeta)),
+        synthesize(
+            radial_value,
+            (plan.cosine_theta_theta, plan.sine_theta_theta),
+        ),
+        synthesize(
+            radial_value,
+            (plan.cosine_theta_zeta, plan.sine_theta_zeta),
+        ),
+        synthesize(
+            radial_value,
+            (plan.cosine_zeta_zeta, plan.sine_zeta_zeta),
+        ),
+    )
 
 
 @jax.jit
@@ -317,6 +420,205 @@ def evaluate_fixed_label_displacement(
 
 
 @jax.jit
+def evaluate_tensorized_strong_force(
+    state: HighOrderEquilibriumState,
+    plan: VariationalPlan,
+) -> StrongForceSamples:
+    """Evaluate strong force from analytic coefficient-to-second-jet tables.
+
+    Only a local forward-mode chain rule is used to differentiate the
+    covariant magnetic components.  No spatial coordinate is passed through
+    nested pointwise AD, and the independent point oracle remains unchanged.
+    """
+
+    R = _channel_second(state.R_cos, state.R_sin, plan)
+    Z = _channel_second(state.Z_cos, state.Z_sin, plan)
+    L = _channel_second(state.L_cos, state.L_sin, plan)
+    _, zz = jnp.meshgrid(plan.theta, plan.zeta, indexing="ij")
+    phi = zz.reshape(-1) / float(plan.nfp)
+    cosine_phi = jnp.cos(phi)[None]
+    sine_phi = jnp.sin(phi)[None]
+    inverse_nfp = 1.0 / float(plan.nfp)
+
+    def cylindrical(radial: Array, vertical: Array) -> Array:
+        return jnp.stack(
+            (radial * cosine_phi, radial * sine_phi, vertical), axis=-1
+        )
+
+    def zeta_derivative(radial: Array, radial_zeta: Array, vertical: Array) -> Array:
+        return jnp.stack(
+            (
+                radial_zeta * cosine_phi - radial * sine_phi * inverse_nfp,
+                radial_zeta * sine_phi + radial * cosine_phi * inverse_nfp,
+                vertical,
+            ),
+            axis=-1,
+        )
+
+    e_rho = cylindrical(R[1], Z[1])
+    e_theta = cylindrical(R[2], Z[2])
+    e_zeta = zeta_derivative(R[0], R[3], Z[3])
+    e_rho_rho = cylindrical(R[4], Z[4])
+    e_rho_theta = cylindrical(R[5], Z[5])
+    e_rho_zeta = zeta_derivative(R[1], R[6], Z[6])
+    e_theta_theta = cylindrical(R[7], Z[7])
+    e_theta_zeta = zeta_derivative(R[2], R[8], Z[8])
+    e_zeta_zeta = jnp.stack(
+        (
+            R[9] * cosine_phi
+            - 2.0 * R[3] * sine_phi * inverse_nfp
+            - R[0] * cosine_phi * inverse_nfp**2,
+            R[9] * sine_phi
+            + 2.0 * R[3] * cosine_phi * inverse_nfp
+            - R[0] * sine_phi * inverse_nfp**2,
+            Z[9],
+        ),
+        axis=-1,
+    )
+
+    rho = jnp.broadcast_to(jnp.asarray(plan.rho)[:, None], R[0].shape)
+    phipf = jnp.asarray(plan.profile_basis) @ jnp.asarray(state.phipf)
+    chipf = jnp.asarray(plan.profile_basis) @ jnp.asarray(state.chipf)
+    phipf_rho = jnp.asarray(plan.profile_derivative) @ jnp.asarray(state.phipf)
+    chipf_rho = jnp.asarray(plan.profile_derivative) @ jnp.asarray(state.chipf)
+    pressure_rho = jnp.asarray(plan.profile_derivative) @ jnp.asarray(state.pressure)
+    phipf = jnp.broadcast_to(phipf[:, None], R[0].shape)
+    chipf = jnp.broadcast_to(chipf[:, None], R[0].shape)
+    phipf_rho = jnp.broadcast_to(phipf_rho[:, None], R[0].shape)
+    chipf_rho = jnp.broadcast_to(chipf_rho[:, None], R[0].shape)
+
+    def magnetic_covariant(
+        local_rho,
+        local_e_rho,
+        local_e_theta,
+        local_e_zeta,
+        lambda_theta,
+        lambda_zeta,
+        local_phipf,
+        local_chipf,
+    ):
+        sqrt_g = jnp.sum(
+            local_e_rho * jnp.cross(local_e_theta, local_e_zeta), axis=-1
+        )
+        factor = 2.0 * local_rho / sqrt_g
+        B_theta = factor * (
+            local_chipf * inverse_nfp - local_phipf * lambda_zeta
+        )
+        B_zeta = factor * local_phipf * (1.0 + lambda_theta)
+        B = (
+            B_theta[..., None] * local_e_theta
+            + B_zeta[..., None] * local_e_zeta
+        )
+        covariant = jnp.stack(
+            (
+                jnp.sum(B * local_e_rho, axis=-1),
+                jnp.sum(B * local_e_theta, axis=-1),
+                jnp.sum(B * local_e_zeta, axis=-1),
+            ),
+            axis=-1,
+        )
+        return covariant, B, sqrt_g, B_theta, B_zeta
+
+    primals = (rho, e_rho, e_theta, e_zeta, L[2], L[3], phipf, chipf)
+    values, radial_derivative = jax.jvp(
+        magnetic_covariant,
+        primals,
+        (
+            jnp.ones_like(rho),
+            e_rho_rho,
+            e_rho_theta,
+            e_rho_zeta,
+            L[5],
+            L[6],
+            phipf_rho,
+            chipf_rho,
+        ),
+    )
+    _, theta_derivative = jax.jvp(
+        magnetic_covariant,
+        primals,
+        (
+            jnp.zeros_like(rho),
+            e_rho_theta,
+            e_theta_theta,
+            e_theta_zeta,
+            L[7],
+            L[8],
+            jnp.zeros_like(phipf),
+            jnp.zeros_like(chipf),
+        ),
+    )
+    _, zeta_derivative_values = jax.jvp(
+        magnetic_covariant,
+        primals,
+        (
+            jnp.zeros_like(rho),
+            e_rho_zeta,
+            e_theta_zeta,
+            e_zeta_zeta,
+            L[8],
+            L[9],
+            jnp.zeros_like(phipf),
+            jnp.zeros_like(chipf),
+        ),
+    )
+    B_covariant, B, sqrt_g, B_theta, B_zeta = values
+    del B_covariant
+    dB_rho = radial_derivative[0]
+    dB_theta = theta_derivative[0]
+    dB_zeta = zeta_derivative_values[0]
+    curl_numerator = jnp.stack(
+        (
+            dB_theta[..., 2] - dB_zeta[..., 1],
+            dB_zeta[..., 0] - dB_rho[..., 2],
+            dB_rho[..., 1] - dB_theta[..., 0],
+        ),
+        axis=-1,
+    )
+    J_sup = curl_numerator / (MU0 * sqrt_g[..., None])
+    J = (
+        J_sup[..., 0, None] * e_rho
+        + J_sup[..., 1, None] * e_theta
+        + J_sup[..., 2, None] * e_zeta
+    )
+    grad_rho = jnp.cross(e_theta, e_zeta) / sqrt_g[..., None]
+    grad_theta = jnp.cross(e_zeta, e_rho) / sqrt_g[..., None]
+    grad_zeta = jnp.cross(e_rho, e_theta) / sqrt_g[..., None]
+    grad_pressure = pressure_rho[:, None, None] * grad_rho
+    lorentz = jnp.cross(J, B)
+    force = lorentz - grad_pressure
+    force_rho = jnp.sum(force * e_rho, axis=-1)
+    force_helical = curl_numerator[..., 0] / MU0
+    radial_force = force_rho[..., None] * grad_rho
+    helical_direction = (
+        -B_zeta[..., None] * grad_theta + B_theta[..., None] * grad_zeta
+    )
+    helical_force = force_helical[..., None] * helical_direction
+    shape = plan.shape
+    return StrongForceSamples(
+        rho=jnp.broadcast_to(jnp.asarray(plan.rho)[:, None, None], shape),
+        theta=jnp.broadcast_to(jnp.asarray(plan.theta)[None, :, None], shape),
+        zeta=jnp.broadcast_to(jnp.asarray(plan.zeta)[None, None, :], shape),
+        sqrt_g=sqrt_g.reshape(shape),
+        B=B.reshape(shape + (3,)),
+        J=J.reshape(shape + (3,)),
+        force=force.reshape(shape + (3,)),
+        force_rho=force_rho.reshape(shape),
+        force_helical=force_helical.reshape(shape),
+        radial_force_density=jnp.linalg.norm(radial_force, axis=-1).reshape(shape),
+        helical_force_density=jnp.linalg.norm(helical_force, axis=-1).reshape(shape),
+        signed_radial_force_density=(
+            force_rho * jnp.linalg.norm(grad_rho, axis=-1)
+        ).reshape(shape),
+        signed_helical_force_density=(
+            force_helical * jnp.linalg.norm(helical_direction, axis=-1)
+        ).reshape(shape),
+        lorentz_norm=jnp.linalg.norm(lorentz, axis=-1).reshape(shape),
+        grad_pressure_norm=jnp.linalg.norm(grad_pressure, axis=-1).reshape(shape),
+    )
+
+
+@jax.jit
 def fixed_pressure_energy(
     state: HighOrderEquilibriumState,
     plan: VariationalPlan,
@@ -352,6 +654,7 @@ __all__ = [
     "VariationalFieldSamples",
     "VariationalPlan",
     "evaluate_fixed_label_displacement",
+    "evaluate_tensorized_strong_force",
     "evaluate_variational_fields",
     "fixed_pressure_energy",
     "make_variational_plan",
