@@ -130,6 +130,20 @@ Current checkpoint:
   fails explicitly for unsupported nonzero `GAMMA`. The original P3 generator
   and complete native endpoint are absent from the branch/history/artifacts;
   reproduce them prospectively rather than inventing missing settings.
+- That prospective P3 B reproduction is now complete and checkpointed by
+  `benchmarks/polish_recovery_p3.py`. It reconstructs the reported 895 native
+  coordinates, 286 gauge rows, 609-dimensional feasible subspace, and
+  14,112-by-895 dense reference Jacobian. Four full feasible steps reach
+  solve-grid residual `2.788195e-4`, original-row gauge norm `1.33e-19`, and
+  independent `epsilon_B=2.825111e-4` (`1671.18 N/m^3`). This is within 0.6%
+  of historical P3 B's independent `2.809002e-4`, while making no claim of
+  byte-for-byte identity with the lost generator. The complete initial and
+  accepted native states, knots, profiles, scale, coordinates, and gauge-row
+  construction data are saved in the 39 KB checkpoint
+  `benchmarks/polish_recovery_r1_p3_state.npz`; provenance and phase timings
+  are in `benchmarks/polish_recovery_r1_p3.json`. The independent radial
+  refinement difference is `0.0131`, so this recovered endpoint is a starting
+  point for exact continuation, not a final accepted equilibrium.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.
