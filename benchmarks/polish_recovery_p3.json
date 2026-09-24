@@ -1,0 +1,87 @@
+{
+  "schema": "vmex.polish-recovery/1",
+  "source": {
+    "vmex_base_sha": "4632dad8261ca72756819c1c5fcd2e2ec022aeaa",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "input_sha256": "5b2740db6dbc91d6a1b43c283b95c959397a608566aeb54da7489203e1fe5102",
+    "ordinary_wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "ordinary_wout_sha256": "b43a3f65001db07ad7b21ac1730128df518ef6ac5058ed8ca308596d9da86992",
+    "state_import": "high_order_state_from_wout(degree=3, exact input profiles)",
+    "candidate_initial_state": "same imported state, zero correction",
+    "native_layout": "895 complete symmetry-allowed R/Z/lambda coordinates with fixed R/Z edge and lambda m=n=0 gauge removed",
+    "gauge": "286 frozen normalized full-tangent constraints",
+    "method": "same tensorized force, energy, basis, quadrature, gauge, and physical scales for A/B",
+    "status": "bounded reference comparison; neither candidate is promoted"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "solvax": "0.26.0",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "physical_scales": {
+    "B_star_T": 4.133900220310402,
+    "a_star_m": 2.29891278651453,
+    "V_star_m3": 633.7993467060758,
+    "F_star_N_per_m3": 5915447.712414409,
+    "E_star_J": 8619099671.58835,
+    "selection": "fixed from the baseline WOUT and held constant for both candidates",
+    "force_residual_weighting": "sqrt(dV / V_star); baseline solve-grid volume is 633.7993467060257 m^3, agreeing with V_star to 8e-14 relative"
+  },
+  "independent_force_certificate": {
+    "method": "certify_strong_force shifted overintegrated pointwise nested-AD oracle",
+    "initial_force_rms_N_per_m3": 115236.11270590227,
+    "initial_epsilon_B_rms": 0.019480539480395184
+  },
+  "candidate_A_variational_newton": {
+    "wall_seconds": 2.352049959008582,
+    "accepted_steps": 5,
+    "final_kkt_residual_norm": 3.656069537241987e-07,
+    "independent_force_rms_N_per_m3": 8364.519438071393,
+    "independent_epsilon_B_rms": 0.001414012910724789,
+    "minimum_signed_jacobian_on_solve_grid": 1.2160648630129909,
+    "gmres": {
+      "restart": 80,
+      "max_restarts": 6,
+      "relative_tolerance": 0.0001,
+      "all_linear_solves_converged": false,
+      "iterations_per_step": [480, 480, 480, 480, 480]
+    },
+    "step_residual_norms": [
+      1.1888455399388904e-06,
+      6.165154011310533e-07,
+      4.779287333552802e-07,
+      4.0847577003233704e-07,
+      3.656069537241987e-07
+    ],
+    "target_1e-5_met": false
+  },
+  "candidate_B_physical_force_least_squares": {
+    "wall_seconds": 5.894863166031428,
+    "accepted_steps": 4,
+    "final_force_residual_norm": 0.0002809002318384007,
+    "independent_force_rms_N_per_m3": 1661.6506343855676,
+    "independent_epsilon_B_rms": 0.00028090023192975865,
+    "minimum_signed_jacobian_on_solve_grid": 1.2124294594414753,
+    "explicit_reference_jacobian_shape": [14112, 895],
+    "explicit_reference_jacobian_bytes": 101041920,
+    "constraint_nullity": 609,
+    "jacobian_rank_after_gauge_reduction": [609, 609, 609, 609],
+    "step_force_residual_norms": [
+      0.0002870693850859066,
+      0.0002809327992323395,
+      0.0002809003947144536,
+      0.0002809002318384007
+    ],
+    "reduction_factor": 69.342397,
+    "target_1e-5_met": false
+  },
+  "decision": "B gives the lower independent physical force on the shared native space, but stalls at 2.81e-4, about 28 times above the initial 1e-5 target. A reaches a small KKT residual while its physical force remains five times higher than B, and its inner linear solves fail their convergence test. Continue with radial/support refinement, exact structured linear algebra, and force-refinement checks before any solver promotion.",
+  "limitations": [
+    "Candidate B explicitly formed a 101 MB reference Jacobian and a dense gauge nullspace for this bounded comparison; this is not the planned production linear algebra.",
+    "Only the prescribed-iota, axisymmetric user tokamak was compared. No 3-D, prescribed-current, asymmetric, refinement-solve, or implicit-derivative gate is complete.",
+    "The independent certificate reports force accuracy, but no refined equilibrium was solved to establish the planned 10% refinement gate."
+  ]
+}

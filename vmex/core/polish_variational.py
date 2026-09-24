@@ -661,6 +661,103 @@ def native_variational_kkt_residual(
 
 
 @jax.jit
+def native_physical_force_residual(
+    coordinates: Array,
+    base_state: HighOrderEquilibriumState,
+    layout: NativeCorrectionLayout,
+    gauge: NativeGaugePlan,
+    coordinate_scale: Array,
+    force_scale: Array,
+    volume_scale: Array,
+) -> Array:
+    """Return volume-weighted Cartesian force on the native state.
+
+    Keeping all three Cartesian components preserves the physical force norm
+    without assuming the radial and helical decomposition vectors are
+    orthogonal.
+    """
+
+    coordinates = jnp.asarray(coordinates)
+    coordinate_scale = jnp.asarray(coordinate_scale)
+    if coordinates.shape != (layout.size,):
+        raise ValueError(
+            f"force coordinates have shape {coordinates.shape}; "
+            f"expected {(layout.size,)}"
+        )
+    if coordinate_scale.shape != (layout.size,):
+        raise ValueError(
+            "coordinate_scale has shape "
+            f"{coordinate_scale.shape}; expected {(layout.size,)}"
+        )
+    scale = jnp.broadcast_to(jnp.asarray(force_scale), (3,))
+    state = apply_high_order_correction(
+        base_state, layout.unpack(coordinate_scale * coordinates)
+    )
+    samples = evaluate_tensorized_strong_force(state, gauge.variational)
+    volume_weights = (
+        jnp.broadcast_to(
+            jnp.asarray(gauge.variational.quadrature_weights),
+            gauge.variational.shape,
+        )
+        * float(base_state.jacobian_sign)
+        * samples.sqrt_g
+    )
+    volume_scale = jnp.asarray(volume_scale)
+    normalized_weight = jnp.sqrt(volume_weights / volume_scale)
+    return (
+        normalized_weight[..., None] * samples.force / scale
+    ).reshape(-1)
+
+
+@jax.jit
+def native_force_kkt_residual(
+    variables: Array,
+    base_state: HighOrderEquilibriumState,
+    layout: NativeCorrectionLayout,
+    gauge: NativeGaugePlan,
+    coordinate_scale: Array,
+    force_scale: Array,
+    volume_scale: Array,
+) -> Array:
+    """Return exact constrained least-squares stationarity for candidate B."""
+
+    variables = jnp.asarray(variables)
+    expected = layout.size + gauge.size
+    if variables.shape != (expected,):
+        raise ValueError(
+            f"force KKT variables have shape {variables.shape}; "
+            f"expected {(expected,)}"
+        )
+    coordinates = variables[: layout.size]
+    multipliers = variables[layout.size :]
+
+    def physical(value):
+        return native_physical_force_residual(
+            value,
+            base_state,
+            layout,
+            gauge,
+            coordinate_scale,
+            force_scale,
+            volume_scale,
+        )
+
+    def constraints(value):
+        return native_tangential_gauge_residual(
+            base_state,
+            layout.unpack(jnp.asarray(coordinate_scale) * value),
+            gauge,
+        )
+
+    force, force_pullback = jax.vjp(physical, coordinates)
+    constraint, constraint_pullback = jax.vjp(constraints, coordinates)
+    stationarity = (
+        force_pullback(force)[0] + constraint_pullback(multipliers)[0]
+    )
+    return jnp.concatenate((stationarity, constraint))
+
+
+@jax.jit
 def evaluate_tensorized_strong_force(
     state: HighOrderEquilibriumState,
     plan: VariationalPlan,
@@ -904,5 +1001,7 @@ __all__ = [
     "minimum_signed_jacobian",
     "native_tangential_gauge_residual",
     "native_coordinate_scales",
+    "native_force_kkt_residual",
+    "native_physical_force_residual",
     "native_variational_kkt_residual",
 ]

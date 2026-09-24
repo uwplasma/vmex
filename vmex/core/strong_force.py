@@ -1133,6 +1133,7 @@ def lift_high_order_state(
     state: Any,
     runtime: Any,
     *,
+    inp: Any | None = None,
     radial_basis: BSplineBasis | None = None,
     degree: int = 5,
     max_spans: int = 32,
@@ -1234,6 +1235,52 @@ def lift_high_order_state(
     fit_profile = lambda values: _constrained_spline_fit(  # noqa: E731
         radial_basis, np.asarray(values), s, fix_axis=True, fix_edge=True
     )
+    phipf_coefficients = fit_profile(phipf)
+    chipf_coefficients = fit_profile(chipf)
+    pressure_coefficients = fit_profile(pressure)
+    if inp is not None:
+        # Profiles supplied by the input are continuous functions, so sample
+        # those functions directly at the native basis nodes instead of
+        # sending them through legacy full/half-grid export chains.  The
+        # current-constrained chi profile remains an equilibrium unknown.
+        from . import profiles as _profiles
+        from .setup import _torflux_functions
+
+        nodes = jnp.asarray(radial_basis.collocation_nodes)
+        torflux, torflux_derivative = _torflux_functions(inp.aphi)
+        torflux_at_edge = torflux(jnp.asarray(1.0))
+        flux_edge = runtime.setup.signgs * float(inp.phiedge) / (2.0 * np.pi)
+        flux_edge = jnp.where(
+            torflux_at_edge != 0.0,
+            flux_edge / jnp.where(torflux_at_edge != 0.0, torflux_at_edge, 1.0),
+            flux_edge,
+        )
+        profile_coordinate = jnp.minimum(torflux(nodes), 1.0)
+        phipf_values = flux_edge * torflux_derivative(nodes)
+        pressure_values = _profiles.pressure(
+            inp.pmass_type,
+            inp.am,
+            inp.am_aux_s,
+            inp.am_aux_f,
+            profile_coordinate,
+            pres_scale=inp.pres_scale,
+            bloat=inp.bloat,
+            spres_ped=inp.spres_ped,
+        )
+        phipf_coefficients = radial_basis.fit(phipf_values)
+        pressure_coefficients = radial_basis.fit(pressure_values)
+        if int(inp.ncurr) == 0:
+            iota_values = _profiles.iota(
+                inp.piota_type,
+                inp.ai,
+                inp.ai_aux_s,
+                inp.ai_aux_f,
+                profile_coordinate,
+                bloat=inp.bloat,
+            )
+            if bool(runtime.setup.lflip):
+                iota_values = -iota_values
+            chipf_coefficients = radial_basis.fit(phipf_values * iota_values)
     return HighOrderEquilibriumState(
         radial_basis=radial_basis,
         m=m_values,
@@ -1245,9 +1292,9 @@ def lift_high_order_state(
         Z_sin=jnp.asarray(Z_sin_q),
         L_cos=jnp.asarray(L_cos_q),
         L_sin=jnp.asarray(L_sin_q),
-        phipf=jnp.asarray(fit_profile(phipf)),
-        chipf=jnp.asarray(fit_profile(chipf)),
-        pressure=jnp.asarray(fit_profile(pressure)),
+        phipf=jnp.asarray(phipf_coefficients),
+        chipf=jnp.asarray(chipf_coefficients),
+        pressure=jnp.asarray(pressure_coefficients),
         jacobian_sign=int(setup.signgs),
         source=source,
         boundary_R_cos=jnp.asarray(physical[0][-1]),
@@ -1286,6 +1333,7 @@ def high_order_state_from_wout(
     return lift_high_order_state(
         state,
         runtime,
+        inp=inp,
         radial_basis=radial_basis,
         degree=degree,
         max_spans=max_spans,

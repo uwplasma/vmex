@@ -1527,6 +1527,7 @@ def polish_legacy_solution(
     certified_native = lift_high_order_state(
         refined_state,
         legacy_runtime,
+        inp=source,
         radial_basis=radial_basis,
         degree=config.radial_degree,
     )

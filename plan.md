@@ -43,9 +43,24 @@ Current checkpoint:
   independent strong-force oracle.  Tensorized analytic second-jet tables now
   produce all strong-force channels on the same native state; point values,
   JVPs, and VJPs agree with the independent nested-AD oracle.  On the P0 case
-  the force compiled in 0.28 s and ran warm in 0.65 ms.  A qualified local
-  gauge convention and candidate A/B comparison still precede any solver
-  promotion.
+  the force compiled in 0.28 s and ran warm in 0.65 ms.
+- P3 has a same-state, same-space A/B reference comparison on the user
+  tokamak.  With fixed `F_star = 5.915e6 N/m^3`, Candidate A reached a KKT
+  residual of `3.66e-7` but an independent force certificate of
+  `epsilon_B = 1.41e-3`; all its 480-iteration GMRES solves reported
+  unconverged.  Candidate B reduced the independent certificate from
+  `1.948e-2` to `2.809e-4` in 5.9 s, but remains 28x above the initial `1e-5`
+  gate.  Evidence and limitations are in `benchmarks/polish_recovery_p3.json`.
+  The B prototype explicitly forms a Jacobian and dense gauge nullspace as a
+  bounded reference; it is not eligible for production promotion.
+- P3's force least-squares residual now uses the plan's fixed physical volume
+  scale, `sqrt(dV / V_star)`, rather than renormalizing by each state's own
+  volume.  On the baseline quadrature, integrated volume is
+  `633.7993467060257 m^3` versus `V_star = 633.7993467060758 m^3` (8e-14
+  relative), so this corrects the moving-scale definition without changing the
+  recorded comparison at displayed precision.  Input pressure and prescribed
+  iota are also sampled from their analytic input profiles at spline nodes;
+  current-constrained chi remains an equilibrium unknown.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.

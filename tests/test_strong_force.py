@@ -20,6 +20,7 @@ from vmex.core.boozer_tables import high_order_boozer_input_tables
 from vmex.core.input import VmecInput
 from vmex.core.omnigenity import boozer_spectrum_high_order
 from vmex.core.profiles import MU0
+from vmex.core.profiles import iota as input_iota, pressure as input_pressure
 from vmex.core.polish_variational import (
     evaluate_fixed_label_displacement,
     evaluate_tensorized_strong_force,
@@ -28,6 +29,7 @@ from vmex.core.polish_variational import (
     make_native_gauge_plan,
     make_variational_plan,
     minimum_signed_jacobian,
+    native_physical_force_residual,
     native_tangential_gauge_residual,
     native_coordinate_scales,
     native_variational_kkt_residual,
@@ -522,6 +524,42 @@ def test_legacy_lift_preserves_axis_boundary_and_lambda_gauge():
     np.testing.assert_allclose(imported.boundary_R_cos, high_order.boundary_R_cos, rtol=0.0, atol=2e-13)
 
 
+def test_wout_lift_evaluates_supplied_profiles_analytically():
+    """Pressure and prescribed iota bypass lossy full/half-grid exports."""
+
+    inp = VmecInput.from_file("examples/data/input.shaped_tokamak_pressure")
+    state = high_order_state_from_wout(
+        "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+        inp=inp,
+        degree=3,
+    )
+    nodes = np.linspace(0.013, 0.987, 20)
+    actual_pressure = state.radial_basis.evaluate(state.pressure, nodes)
+    expected_pressure = input_pressure(
+        inp.pmass_type,
+        inp.am,
+        inp.am_aux_s,
+        inp.am_aux_f,
+        nodes,
+        pres_scale=inp.pres_scale,
+        bloat=inp.bloat,
+        spres_ped=inp.spres_ped,
+    )
+    actual_iota = state.radial_basis.evaluate(state.chipf, nodes) / (
+        state.radial_basis.evaluate(state.phipf, nodes)
+    )
+    expected_iota = input_iota(
+        inp.piota_type,
+        inp.ai,
+        inp.ai_aux_s,
+        inp.ai_aux_f,
+        nodes,
+        bloat=inp.bloat,
+    )
+    np.testing.assert_allclose(actual_pressure, expected_pressure, rtol=2e-13, atol=2e-10)
+    np.testing.assert_allclose(actual_iota, expected_iota, rtol=2e-13, atol=2e-14)
+
+
 def test_legacy_lift_is_overdetermined_for_stable_second_derivatives():
     """The default must smooth first-order mesh noise, not interpolate it."""
 
@@ -944,6 +982,40 @@ def test_tensorized_force_jvp_and_vjp_match_point_oracle():
     fast_vjp = jax.grad(lambda step: jnp.vdot(fast(step), weight))(0.0)
     oracle_vjp = jax.grad(lambda step: jnp.vdot(oracle(step), weight))(0.0)
     np.testing.assert_allclose(fast_vjp, oracle_vjp, rtol=2e-11, atol=2e-5)
+
+
+def test_native_force_residual_uses_fixed_physical_scales():
+    """Cartesian residual norm is the declared volume-weighted force norm."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=4, ntheta=9, nzeta=3)
+    layout = make_native_correction_layout(state)
+    gauge = make_native_gauge_plan(state, plan)
+    coordinate_scale = native_coordinate_scales(state, layout, plan)
+    force_scale = jnp.asarray([2.0, 3.0, 4.0])
+    volume_scale = 2.0 * np.pi**2 * 10.0
+    residual = native_physical_force_residual(
+        jnp.zeros((layout.size,)),
+        state,
+        layout,
+        gauge,
+        coordinate_scale,
+        force_scale,
+        volume_scale,
+    )
+    fields = evaluate_tensorized_strong_force(state, plan)
+    volume_weights = (
+        plan.quadrature_weights
+        * state.jacobian_sign
+        * fields.sqrt_g
+    )
+    expected_squared_norm = jnp.sum(
+        volume_weights[..., None]
+        * (fields.force / force_scale) ** 2
+    ) / volume_scale
+    np.testing.assert_allclose(
+        jnp.vdot(residual, residual), expected_squared_norm, rtol=2e-13, atol=2e-13
+    )
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():
