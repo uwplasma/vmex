@@ -19,6 +19,15 @@ Current checkpoint:
   column-equilibrated fit of physical amplitudes.  Its tests include noisy
   high-m near-axis data, rank refusal, curvature, endpoint constraints, and
   fit diagnostics.
+- P2 now has a tensorized native fixed-pressure energy seam.  It contracts
+  coefficients into values and analytic first jets on a precomputed tensor
+  grid, avoiding nested pointwise AD.  On the P0 shaped-tokamak state its
+  energy, full-state gradient, and Hessian-vector product each compiled in
+  under 0.3 s and ran warm in under 1 ms; independent field-oracle agreement
+  and raw timings are recorded in `benchmarks/polish_recovery_p2.json`.
+- This P2 checkpoint is a tested value/first-derivative kernel, not yet a
+  solver: the native correction chart, virtual-work identity, and candidate
+  A/B comparison are the next gates.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.

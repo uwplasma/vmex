@@ -1,0 +1,61 @@
+{
+  "schema": "vmex.polish-recovery/1",
+  "source": {
+    "vmex_base_sha": "4632dad8261ca72756819c1c5fcd2e2ec022aeaa",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "state_import": "high_order_state_from_wout(degree=3)",
+    "method": "tensorized-fixed-pressure-energy"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "problem": {
+    "radial_nodes": 144,
+    "poloidal_nodes": 49,
+    "toroidal_nodes": 1,
+    "fourier_modes": 12,
+    "radial_basis_functions": 27,
+    "energy": 4306334790.962925,
+    "minimum_signed_jacobian": 1.2143594414211196
+  },
+  "setup_seconds": {
+    "high_order_lift": 0.8237171670189127,
+    "variational_plan": 4.470356624922715
+  },
+  "compile_seconds": {
+    "fields": 0.15773016691673547,
+    "energy": 0.16010966594330966,
+    "full_state_gradient": 0.2923713329946622,
+    "full_state_hessian_vector_product": 0.2785639159847051,
+    "minimum_signed_jacobian": 0.12765741697512567
+  },
+  "warm_seconds": {
+    "fields": 0.00029562506824731827,
+    "energy": 0.0002544999588280916,
+    "full_state_gradient": 0.0005217919824644923,
+    "full_state_hessian_vector_product": 0.0008889590390026569,
+    "minimum_signed_jacobian": 0.0001453340519219637
+  },
+  "independent_point_oracle": {
+    "sample_count": 8,
+    "maximum_absolute_difference": {
+      "position": 8.881784197001252e-16,
+      "sqrt_g": 1.7763568394002505e-12,
+      "B": 1.567634910770721e-13,
+      "pressure": 1.8189894035458565e-12
+    },
+    "maximum_relative_difference": {
+      "position": 2.8505909608709993e-16,
+      "sqrt_g": 5.096953056320071e-14,
+      "B": 5.1056650739963977e-14,
+      "pressure": 7.878729054869865e-14
+    }
+  },
+  "status": "p2-kernel-checkpoint",
+  "limitation": "This record validates the native energy kernel and its derivatives; it does not claim a recovered polished equilibrium or solver promotion."
+}

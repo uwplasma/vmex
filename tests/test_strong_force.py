@@ -20,6 +20,12 @@ from vmex.core.boozer_tables import high_order_boozer_input_tables
 from vmex.core.input import VmecInput
 from vmex.core.omnigenity import boozer_spectrum_high_order
 from vmex.core.profiles import MU0
+from vmex.core.polish_variational import (
+    evaluate_variational_fields,
+    fixed_pressure_energy,
+    make_variational_plan,
+    minimum_signed_jacobian,
+)
 from vmex.core.radial_basis import BSplineBasis
 from vmex.core.solver import _initial_state, prepare_runtime, resolution_from_input
 from vmex.core.strong_force import (
@@ -581,6 +587,88 @@ def test_radial_lift_does_not_amplify_absolute_near_axis_noise():
         rtol=2.0e-10,
         atol=2.0e-10,
     )
+
+
+def test_tensorized_variational_fields_match_independent_point_oracle():
+    """The contraction kernel agrees with the pointwise AD implementation."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=4, ntheta=9, nzeta=3)
+    fast = evaluate_variational_fields(state, plan)
+    rr, tt, zz = jnp.meshgrid(plan.rho, plan.theta, plan.zeta, indexing="ij")
+    reference = evaluate_high_order_fields(state, rr, tt, zz)
+    np.testing.assert_allclose(fast.position, reference.position, rtol=2e-13, atol=2e-13)
+    np.testing.assert_allclose(fast.sqrt_g, reference.sqrt_g, rtol=3e-13, atol=3e-13)
+    np.testing.assert_allclose(fast.B, reference.B, rtol=4e-13, atol=4e-13)
+    np.testing.assert_allclose(fast.pressure, reference.pressure, rtol=2e-13, atol=2e-13)
+    assert float(minimum_signed_jacobian(state, plan)) > 0.0
+
+
+def test_fixed_pressure_energy_matches_circular_torus_and_derivative():
+    """The gamma-zero sign, full-torus measure, and AD gradient are correct."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=5, ntheta=17, nzeta=3)
+    volume = 2.0 * np.pi**2 * 10.0
+    np.testing.assert_allclose(
+        fixed_pressure_energy(state, plan),
+        volume / (2.0 * MU0),
+        rtol=2e-13,
+        atol=2e-8,
+    )
+    pressure = 1.25e4
+    finite_pressure = replace(state, pressure=jnp.full_like(state.pressure, pressure))
+    np.testing.assert_allclose(
+        fixed_pressure_energy(finite_pressure, plan),
+        volume * (1.0 / (2.0 * MU0) - pressure),
+        rtol=2e-13,
+        atol=2e-8,
+    )
+    three_periods = replace(state, nfp=3)
+    np.testing.assert_allclose(
+        fixed_pressure_energy(
+            three_periods,
+            make_variational_plan(
+                three_periods, radial_order=5, ntheta=17, nzeta=3
+            ),
+        ),
+        volume / (2.0 * MU0),
+        rtol=2e-13,
+        atol=2e-8,
+    )
+
+    direction = jnp.zeros_like(state.R_cos).at[0, 1].set(1.0)
+
+    def energy(step):
+        return fixed_pressure_energy(
+            replace(state, R_cos=state.R_cos + step * direction), plan
+        )
+
+    derivative = jax.grad(energy)(0.0)
+    step = 1.0e-5
+    finite_difference = (energy(step) - energy(-step)) / (2.0 * step)
+    np.testing.assert_allclose(derivative, finite_difference, rtol=2e-8, atol=2e-5)
+
+
+def test_variational_hessian_action_is_symmetric():
+    """Two AD Hessian actions satisfy the fixed-iota symmetry contract."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=4, ntheta=11, nzeta=3)
+    first = jnp.zeros_like(state.R_cos).at[0, 1].set(0.7).at[1, 2].set(-0.2)
+    second = jnp.zeros_like(state.R_cos).at[0, 2].set(-0.4).at[1, 1].set(0.3)
+
+    def gradient(coefficients):
+        return jax.grad(
+            lambda values: fixed_pressure_energy(
+                replace(state, R_cos=values), plan
+            )
+        )(coefficients)
+
+    _, apply_hessian = jax.linearize(gradient, state.R_cos)
+    lhs = jnp.vdot(first, apply_hessian(second))
+    rhs = jnp.vdot(apply_hessian(first), second)
+    np.testing.assert_allclose(lhs, rhs, rtol=3e-11, atol=3e-6)
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():
