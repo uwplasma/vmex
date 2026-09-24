@@ -21,10 +21,15 @@ from vmex.core.input import VmecInput
 from vmex.core.omnigenity import boozer_spectrum_high_order
 from vmex.core.profiles import MU0
 from vmex.core.polish_variational import (
+    evaluate_fixed_label_displacement,
     evaluate_variational_fields,
     fixed_pressure_energy,
     make_variational_plan,
     minimum_signed_jacobian,
+)
+from vmex.core.polish import (
+    HighOrderCorrection,
+    make_native_correction_layout,
 )
 from vmex.core.radial_basis import BSplineBasis
 from vmex.core.solver import _initial_state, prepare_runtime, resolution_from_input
@@ -669,6 +674,137 @@ def test_variational_hessian_action_is_symmetric():
     lhs = jnp.vdot(first, apply_hessian(second))
     rhs = jnp.vdot(apply_hessian(first), second)
     np.testing.assert_allclose(lhs, rhs, rtol=3e-11, atol=3e-6)
+
+
+def test_native_layout_preserves_both_normal_geometry_directions():
+    """Structural coordinates keep R and Z motion while fixing the edge."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    layout = make_native_correction_layout(state)
+    basis_size = state.radial_basis.size
+    assert layout.size == 4 * basis_size - 3
+    correction = layout.unpack(jnp.ones((layout.size,)))
+    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin"):
+        np.testing.assert_array_equal(np.asarray(getattr(correction, name))[:, -1], 0.0)
+    assert float(correction.L_sin[1, -1]) == 1.0
+    np.testing.assert_array_equal(correction.L_sin[0], 0.0)
+    np.testing.assert_array_equal(layout.pack(correction), 1.0)
+
+    radial_shape = state.radial_basis.fit(
+        1.0 - jnp.asarray(state.radial_basis.collocation_nodes)
+    )
+    zeros = jnp.zeros_like(state.R_cos)
+    radial = HighOrderCorrection(
+        R_cos=zeros.at[1].set(radial_shape),
+        R_sin=zeros,
+        Z_cos=zeros,
+        Z_sin=zeros,
+        L_cos=zeros,
+        L_sin=zeros,
+    )
+    vertical = replace(
+        radial,
+        R_cos=zeros,
+        Z_sin=zeros.at[1].set(radial_shape),
+    )
+    plan = make_variational_plan(state, radial_order=2, ntheta=4, nzeta=1)
+    radial_displacement = evaluate_fixed_label_displacement(state, radial, plan)
+    vertical_displacement = evaluate_fixed_label_displacement(state, vertical, plan)
+    assert float(jnp.max(jnp.abs(radial_displacement[:, 0, 0, 0]))) > 0.1
+    assert float(jnp.max(jnp.abs(vertical_displacement[:, 1, 0, 2]))) > 0.1
+
+
+def test_native_gauge_generator_has_zero_fixed_label_displacement():
+    """A smooth boundary-fixed relabeling is a null physical displacement."""
+
+    base = _constant_toroidal_field_state(degree=3)
+
+    def pad(values):
+        return jnp.pad(values, ((0, 1), (0, 0)))
+
+    state = replace(
+        base,
+        m=np.asarray([0, 1, 2]),
+        n=np.asarray([0, 0, 0]),
+        R_cos=pad(base.R_cos),
+        R_sin=pad(base.R_sin),
+        Z_cos=pad(base.Z_cos),
+        Z_sin=pad(base.Z_sin),
+        L_cos=pad(base.L_cos),
+        L_sin=pad(base.L_sin),
+        boundary_R_cos=jnp.pad(base.boundary_R_cos, (0, 1)),
+        boundary_R_sin=jnp.pad(base.boundary_R_sin, (0, 1)),
+        boundary_Z_cos=jnp.pad(base.boundary_Z_cos, (0, 1)),
+        boundary_Z_sin=jnp.pad(base.boundary_Z_sin, (0, 1)),
+    )
+    nodes = jnp.asarray(state.radial_basis.collocation_nodes)
+    one_minus_s = state.radial_basis.fit(1.0 - nodes)
+    s_one_minus_s = state.radial_basis.fit(nodes * (1.0 - nodes))
+    zeros = jnp.zeros_like(state.R_cos)
+    gauge = HighOrderCorrection(
+        R_cos=zeros.at[0].set(-0.5 * s_one_minus_s).at[2].set(
+            0.5 * one_minus_s
+        ),
+        R_sin=zeros,
+        Z_cos=zeros,
+        Z_sin=zeros.at[2].set(0.5 * one_minus_s),
+        L_cos=zeros,
+        L_sin=zeros.at[1].set(one_minus_s),
+    )
+    plan = make_variational_plan(state, radial_order=4, ntheta=17, nzeta=1)
+    displacement = evaluate_fixed_label_displacement(state, gauge, plan)
+    assert float(jnp.max(jnp.abs(displacement))) < 2.0e-15
+
+    def energy(step):
+        return fixed_pressure_energy(
+            replace(
+                state,
+                R_cos=state.R_cos + step * gauge.R_cos,
+                Z_sin=state.Z_sin + step * gauge.Z_sin,
+                L_sin=state.L_sin + step * gauge.L_sin,
+            ),
+            plan,
+        )
+
+    assert abs(float(jax.grad(energy)(0.0))) < 1.0e-7
+
+
+def test_variational_virtual_work_matches_independent_strong_force():
+    """Off-root energy variation equals force work, including lambda."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=4, ntheta=13, nzeta=3)
+    zeros = jnp.zeros_like(state.R_cos)
+    direction = HighOrderCorrection(
+        R_cos=zeros.at[0, 1].set(0.3),
+        R_sin=zeros,
+        Z_cos=zeros,
+        Z_sin=zeros.at[1, 1].set(-0.2),
+        L_cos=zeros,
+        L_sin=zeros.at[1, 1].set(0.1),
+    )
+
+    def energy(step):
+        return fixed_pressure_energy(
+            replace(
+                state,
+                R_cos=state.R_cos + step * direction.R_cos,
+                Z_sin=state.Z_sin + step * direction.Z_sin,
+                L_sin=state.L_sin + step * direction.L_sin,
+            ),
+            plan,
+        )
+
+    variation = jax.grad(energy)(0.0)
+    rr, tt, zz = jnp.meshgrid(plan.rho, plan.theta, plan.zeta, indexing="ij")
+    oracle = evaluate_strong_force(state, rr, tt, zz)
+    displacement = evaluate_fixed_label_displacement(state, direction, plan)
+    force_work = -jnp.sum(
+        plan.quadrature_weights
+        * (state.jacobian_sign * oracle.sqrt_g)
+        * jnp.sum(oracle.force * displacement, axis=-1)
+    )
+    np.testing.assert_allclose(variation, force_work, rtol=2e-12, atol=2e-7)
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():

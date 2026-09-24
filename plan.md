@@ -19,15 +19,24 @@ Current checkpoint:
   column-equilibrated fit of physical amplitudes.  Its tests include noisy
   high-m near-axis data, rank refusal, curvature, endpoint constraints, and
   fit diagnostics.
+- A direct native correction layout now retains every symmetry-allowed R, Z,
+  and lambda spline coefficient independently of the legacy transfer image.
+  It eliminates fixed R/Z edge coefficients and the angle-independent lambda
+  gauge structurally while leaving lambda free at the edge.  Tests preserve
+  both normal directions at cross-section extrema and verify a smooth,
+  boundary-fixed relabeling has zero fixed-label displacement and energy
+  variation.
 - P2 now has a tensorized native fixed-pressure energy seam.  It contracts
   coefficients into values and analytic first jets on a precomputed tensor
   grid, avoiding nested pointwise AD.  On the P0 shaped-tokamak state its
   energy, full-state gradient, and Hessian-vector product each compiled in
   under 0.3 s and ran warm in under 1 ms; independent field-oracle agreement
   and raw timings are recorded in `benchmarks/polish_recovery_p2.json`.
-- This P2 checkpoint is a tested value/first-derivative kernel, not yet a
-  solver: the native correction chart, virtual-work identity, and candidate
-  A/B comparison are the next gates.
+- The off-root virtual-work identity, including lambda, agrees with the
+  independent strong-force oracle.  The remaining P2 work is the tensorized
+  second-derivative/force kernel and derivative checks; a qualified local
+  gauge convention and candidate A/B comparison still precede any solver
+  promotion.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.

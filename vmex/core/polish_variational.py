@@ -282,6 +282,41 @@ def evaluate_variational_fields(
 
 
 @jax.jit
+def evaluate_fixed_label_displacement(
+    state: HighOrderEquilibriumState,
+    direction: Any,
+    plan: VariationalPlan,
+) -> Array:
+    """Map a native coefficient variation to its physical displacement.
+
+    The straight-field-line label is held fixed, so a lambda variation also
+    induces the tangential subtraction in equation (5) of the recovery plan.
+    ``direction`` must provide the six geometry/lambda coefficient tables of
+    :class:`vmex.core.polish.HighOrderCorrection`.
+    """
+
+    delta_R, _, _, _ = _channel(direction.R_cos, direction.R_sin, plan)
+    delta_Z, _, _, _ = _channel(direction.Z_cos, direction.Z_sin, plan)
+    delta_lambda, _, _, _ = _channel(direction.L_cos, direction.L_sin, plan)
+    _, _, lambda_theta, _ = _channel(state.L_cos, state.L_sin, plan)
+    fields = evaluate_variational_fields(state, plan)
+    _, zz = jnp.meshgrid(plan.theta, plan.zeta, indexing="ij")
+    phi = zz.reshape(-1) / float(plan.nfp)
+    coordinate_variation = jnp.stack(
+        (
+            delta_R * jnp.cos(phi)[None],
+            delta_R * jnp.sin(phi)[None],
+            delta_Z,
+        ),
+        axis=-1,
+    ).reshape(fields.position.shape)
+    relabeling = (delta_lambda / (1.0 + lambda_theta)).reshape(plan.shape)
+    return coordinate_variation - (
+        fields.dposition_dtheta * relabeling[..., None]
+    )
+
+
+@jax.jit
 def fixed_pressure_energy(
     state: HighOrderEquilibriumState,
     plan: VariationalPlan,
@@ -316,6 +351,7 @@ def minimum_signed_jacobian(
 __all__ = [
     "VariationalFieldSamples",
     "VariationalPlan",
+    "evaluate_fixed_label_displacement",
     "evaluate_variational_fields",
     "fixed_pressure_energy",
     "make_variational_plan",
