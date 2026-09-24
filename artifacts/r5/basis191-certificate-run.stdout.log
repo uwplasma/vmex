@@ -1,0 +1,67 @@
+{
+  "certificate": {
+    "angular_spectral_tail": 0.014878153401091916,
+    "boundary_residual": 0.0,
+    "bulk_force_rms_N_per_m3": 51.03199687450372,
+    "complete": true,
+    "completed_coarse_points": 240640,
+    "completed_fine_points": 360960,
+    "edge_force_rms_N_per_m3": 30.40545999157431,
+    "epsilon_B": 9.582953139103131e-06,
+    "expected_coarse_points": 240640,
+    "expected_fine_points": 360960,
+    "force_pass": true,
+    "force_rms_N_per_m3": 56.6874582248821,
+    "force_target": 1e-05,
+    "geometry_pass": true,
+    "lambda_gauge_residual": 0.0,
+    "minimum_signed_jacobian": 23.84271579599406,
+    "near_axis_force_rms_N_per_m3": 179.4141371172422,
+    "nestedness_margin": 0.7352688198383103,
+    "normalized_l2": 0.060005832844822214,
+    "passes_force_target": true,
+    "profile_boundary_pass": true,
+    "quadrature_pass": true,
+    "radial_refinement_difference": 1.800961057433315e-07,
+    "shifted_theta_fraction": 0.5,
+    "shifted_zeta_fraction": 0.375,
+    "target_epsilon_B": 1e-05
+  },
+  "complete": true,
+  "derivative": {
+    "complete": false,
+    "pass": false
+  },
+  "execution": {
+    "outcome": "completed",
+    "phase": "complete"
+  },
+  "limitations": [
+    "This certificate qualifies the axisymmetric fixed-profile native state only.",
+    "It does not qualify stationarity, 3-D, prescribed-current, LASYM, implicit derivatives, or the public polish driver."
+  ],
+  "method": "independent shifted point oracle with bounded point sweeps",
+  "model": {
+    "declared_scope": "axisymmetric fixed-boundary prescribed-pressure/iota",
+    "gamma": 0.0,
+    "lasym": false,
+    "metadata_complete": false,
+    "ncurr": 0
+  },
+  "product_qualified": false,
+  "schema": "vmex.polish-recovery-certificate/2",
+  "source": {
+    "generator": "benchmarks/polish_recovery_certify.py",
+    "generator_sha256": "eaa72f4d79096003a51f1505213f671ad510d35038ef20805fba6a1d87231b68",
+    "native_state": "benchmarks/polish_recovery_r4_adaptive132_provisional_state.npz",
+    "native_state_sha256": "fd2ef2ffe6c2a22a6fa996975a30a9dd6f5316e8333578f17b5e4d3d92f39659"
+  },
+  "stationarity": {
+    "complete": false,
+    "pass": false
+  },
+  "status": "measured-not-product-qualified",
+  "work": {
+    "total_process_seconds": 45.88305391604081
+  }
+}

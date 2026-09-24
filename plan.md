@@ -267,11 +267,80 @@ Current checkpoint:
   force gate. After that gate, the plan's 3-D/LASYM and prescribed-current
   closure, implicit derivatives, regressions/runtime gates, and public polish
   integration remain unimplemented and must be completed before promotion.
-- Candidate A/B solver selection, independent final force acceptance, 3-D
-  closure, implicit derivatives, and product promotion remain open.  No
-  speedup or recovered polished equilibrium is claimed at this checkpoint.
+- R5 reviewed the certification handoff against the live source and reproduced
+  all bundled synthetic checks under the project environment. The three frozen
+  checkpoint hashes matched. The review's concrete allocation findings were
+  confirmed: the old coordinate scaling formed an 8.07 GB logical
+  coordinate-by-grid array at basis 191, the magnetic-pressure-gradient
+  companion still used one all-grid `vmap`, and the sparse generator still
+  differentiated and factorized a dense gauge matrix.
+- The independent force and magnetic-pressure-gradient point evaluators now
+  share the same fixed-working-set `lax.map` policy. Physical coordinate scaling
+  contracts angular moments before radial basis functions, while same-chart
+  replay uses the serialized scale exactly after parity validation. The frozen
+  linear gauge is assembled directly from local radial support into CSR, and
+  final projected stationarity uses a sparse augmented projection instead of a
+  dense thin QR. At basis 59 the sparse gauge agrees with dense `jacfwd` to
+  `2.28e-16` relative and assembles in 0.129 s versus 4.54 s for dense AD. At
+  basis 191, scale validation plus gauge assembly took 13.20 s, produced
+  976,638 nonzeros with no empty rows, and used 0.631 GB process high-water RSS.
+- Certification is now failure-safe: `benchmarks/run_checked.py` records the
+  process-group outcome, signal/timeout, stdout/stderr, expected outputs, and a
+  sampled RSS trace; `polish_recovery_certify.py` writes an atomic incomplete
+  record before the expensive phase and distinguishes force, quadrature,
+  geometry, profile/boundary, stationarity, derivative, and product status.
+  Candidate checkpoints are also saved before certification in the sparse
+  recovery generator. The watchdog's success and deliberate-timeout paths were
+  both exercised. `psutil 7.2.2` was added only to the isolated `.venv` for the
+  benchmark runner; it is not a VMEX runtime dependency.
+- The basis-191 state has now passed the full independent shifted point-oracle
+  force gate. The default certificate completed all 360,960 fine and 240,640
+  coarse real nodes in 46.65 s with sampled peak tree RSS 2.319 GB. It reports
+  `epsilon_B=9.5829531391e-6`, force RMS `56.6874582 N/m^3`, radial-order
+  difference `1.80e-7`, minimum signed Jacobian `23.8427`, and exact stored
+  boundary/lambda-gauge checks. A second shifted phase changes epsilon by only
+  `4.55e-13` relative. Increasing angular overintegration from multiplier 2 to
+  3 covers 812,160 fine nodes in 84.85 s, changes epsilon by `2.78e-14`
+  relative, and peaks at 2.530 GB. These are repository measurements in
+  `artifacts/r5/basis191*-certificate*.json`; the force pass is narrow and
+  applies only to the declared axisymmetric fixed-profile state.
+- Same-chart nonlinear qualification remains open. From the certified state,
+  one ordinary full sparse step passed all gates and improved the independent
+  result to `9.5829507886e-6`; its state is
+  `benchmarks/polish_recovery_r5_basis191_stationary_state.npz` (SHA-256
+  `2794102b...9613`). A following step was rejected solely at the existing
+  `1e-8` relative-descent floor. The saved endpoint's sparse projection has
+  `2.02e-15` true residual, but projected stationarity is `1.14e-7` on the
+  prior Frobenius scale, so the `1e-8` stationarity gate is not passed.
+  A strict non-increase refinement improved this to `6.37e-8` before rejecting
+  the next step; a more permissive numerical-floor experiment worsened it to
+  `1.37e-7` and must not be promoted. The current code restores strict
+  `1e-10` non-increase for the opt-in stationarity phase.
+- An optional projected unsquared LSMR control was added without changing the
+  default normal-KKT path. On the basis-191 endpoint, 80 and 400 iterations
+  stopped at their caps with projected normal residuals `1.56e-5` and
+  `1.75e-6`, respectively; both were fail-closed before nonlinear trials. This
+  does not show a normal-equation accuracy defect—the normal KKT certificate is
+  much tighter—but it records that unpreconditioned unsquared iteration is not
+  yet a practical replacement.
+- The final attempt to regenerate a canonical strict-stationarity record from
+  the committed restart was explicitly interrupted at 35.46 s on request. The
+  watchdog records signal 15, 2.695 GB sampled peak RSS, and missing expected
+  outputs; no scientific result is inferred. No recovery process is running.
+  Resume from `polish_recovery_r5_basis191_stationary_state.npz`, rerun at most
+  two strict same-chart steps with the current generator, and retain the result
+  only if the unchanged force/gauge/geometry and `1e-8` stationarity gates pass.
+  Do not use the permissive floor state. After this, global-A removal/local
+  normal assembly, cold input-to-native timing, compact-degree comparison,
+  3-D/LASYM/current closure, exact implicit derivatives, and public workflow
+  integration remain open phases; the PR is not product-qualified.
+- Candidate B remains the selected recovery architecture and the declared
+  axisymmetric candidate now passes independent force acceptance. Strict
+  nonlinear stationarity, 3-D closure, implicit derivatives, and product
+  promotion remain open. No end-to-end speedup or production-polish claim is
+  made at this checkpoint.
 
-## Current PR handoff (2026-09-24, R4 pause)
+## Current PR handoff (2026-09-24, R5 certification pause)
 
 The active draft is [PR #448](https://github.com/uwplasma/vmex/pull/448),
 branch `rj/force-balance-recovery`, based on `main` at
@@ -285,26 +354,26 @@ VIRTUAL_CASING_JAX 0.0.8; Apple M4 CPU, float64. The required deck and WOUT
 hashes, physical scales, and reproduction commands are recorded in the PR
 body and benchmark JSON. Do not overwrite those baseline artifacts.
 
-Latest verification before this pause: the new sparse-coloring comparison,
-existing dense Gauss--Newton action comparison, and fail-closed acceptance
-selection passed 3/3 (57 deselected) in 91.88 s. Earlier focused, exact-knot,
-exact-mode, and radial-basis results remain recorded above and in the PR body.
-Ruff, JSON parsing, and `git diff --check` are the final handoff checks. The
-complete repository suite has not been run. No recovery process is running.
+Latest verification before this pause: handoff synthetic checks passed under
+NumPy 2.5.3/SciPy 1.18.1; focused companion batching, factored scaling, sparse
+gauge, and compressed-force tests passed 4/4 (59 deselected); sparse projection
+and LSMR controls matched dense small references; runner success/timeout paths
+passed; Ruff and `git diff --check` pass. The full shifted certificate and two
+angular controls completed under watchdogs. The complete repository suite has
+not been run. No recovery process is running.
 
-Resume by reading the R4 records in chronological order. Treat
-`polish_recovery_r4_adaptive96_state.npz` as the latest independently
-certified state and `polish_recovery_r4_adaptive132_provisional_state.npz` as
-the later candidate awaiting the required full point-oracle certificate. Do
-not cite its `9.582953e-6` tensorized value as final acceptance. First make the
-isolated full certificate reliable and bounded; only then decide whether a
-same-chart correction or more refinement is justified. Keep the true KKT
-residual, nonlinear force descent, original-row gauge tolerance, radial-grid
-agreement, point-force agreement, and positive signed Jacobian as separate
-gates. The sparse method solves the explicit-Jacobian bottleneck but does not
-yet provide an RSS-bounded production algorithm. Do not promote or merge until
-Rogerio reviews the complete physical, derivative, runtime, memory, and
-regression evidence.
+Resume from `polish_recovery_r5_basis191_stationary_state.npz`, which is the
+latest state produced by a committed generator and independently force
+certified below target. Re-run at most two strict same-chart stationarity steps
+with the current generator; the interrupted attempt's outcome is in
+`artifacts/r5/basis191-qualified-run.json` and produced no outputs. Do not use
+the permissive floor experiment as a restart. Keep force, true KKT/projected
+normal residual, original-row gauge, radial/angular agreement, and positive
+geometry separate from the still-failing `1e-8` stationarity gate. After that,
+remove global sparse A storage and measure the cold input workflow before the
+compact-space, 3-D/current/LASYM, exact-derivative, and public-integration
+phases. Do not promote or merge until Rogerio reviews the complete physical,
+derivative, runtime, memory, and regression evidence.
 
 External context already reviewed (design context, not proof that VMEX has
 equivalent behavior): [GVEC theory](https://gvec.readthedocs.io/latest/user/theory.html),

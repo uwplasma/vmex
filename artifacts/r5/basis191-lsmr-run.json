@@ -1,0 +1,42 @@
+{
+  "child_signal": null,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/polish_recovery_sparse.py",
+    "--input-state",
+    "benchmarks/polish_recovery_r5_basis191_stationary_refined_state.npz",
+    "--max-steps",
+    "1",
+    "--linear-solver",
+    "lsmr",
+    "--max-linear-iterations",
+    "80",
+    "--certificate",
+    "point",
+    "--output-json",
+    "benchmarks/polish_recovery_r5_basis191_lsmr.json",
+    "--output-state",
+    "benchmarks/polish_recovery_r5_basis191_lsmr_state.npz"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 73.42209958401509,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_lsmr.json",
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_lsmr_state.npz"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_lsmr.json": true,
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_lsmr_state.npz": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r5/basis191-lsmr-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 3438542848,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r5/basis191-lsmr-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r5/basis191-lsmr-run.stdout.log",
+  "timeout_seconds": 300.0
+}

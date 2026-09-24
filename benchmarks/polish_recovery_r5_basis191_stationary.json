@@ -1,0 +1,168 @@
+{
+  "checks": {
+    "final_force_residual_norm": 9.582950854632248e-06,
+    "final_gauge_residual_norm": 2.881183672147813e-16,
+    "final_projected_gradient_frobenius_relative": 1.1367716542658993e-07,
+    "final_projected_gradient_relative_to_full": 0.005281367096000044,
+    "force_certificate": {
+      "epsilon_B": 9.582950788615756e-06,
+      "force_rms_N_per_m3": 56.687444320696926,
+      "method": "independent shifted point oracle",
+      "minimum_signed_jacobian": 23.842715806757244,
+      "point_force_relative_error": 0.0,
+      "radial_refinement_difference": 1.9100894426989333e-07
+    },
+    "history": [
+      {
+        "accepted": true,
+        "compressed_product_relative_error": 7.304788498811001e-16,
+        "compressed_transpose_relative_error": 2.6251370481987296e-15,
+        "constraint_defect_norm": 3.179803335627031e-13,
+        "force_residual_norm": 9.582953169626368e-06,
+        "iteration": 1,
+        "linear_certificate": {
+          "factor_cache": {
+            "entries": 1,
+            "hits": 0,
+            "misses": 1,
+            "size": 2
+          },
+          "factor_solve_seconds": 0.4447838329942897,
+          "kkt_nnz": 6394001,
+          "model_norm": 9.582950771522785e-06,
+          "normal_nnz": 4440725,
+          "original_constraint_norm": 2.8811837408327957e-16,
+          "stationarity_norm": 1.1130089983930006e-14,
+          "stationarity_relative": 8.91849333887272e-11,
+          "true_kkt_relative_residual": 8.92148101363463e-11
+        },
+        "linear_passes": true,
+        "trials": [
+          {
+            "force_residual_norm": 9.582950854632326e-06,
+            "fraction": 1.0,
+            "gauge_residual_norm": 2.881183672147813e-16,
+            "minimum_signed_jacobian": 0.1534837732353725,
+            "relative_force_reduction": 2.4157417875534775e-07
+          }
+        ]
+      },
+      {
+        "accepted": false,
+        "compressed_product_relative_error": 7.404529805103163e-16,
+        "compressed_transpose_relative_error": 2.6462500407993614e-15,
+        "constraint_defect_norm": 2.881183672147813e-16,
+        "force_residual_norm": 9.582950854632326e-06,
+        "iteration": 2,
+        "linear_certificate": {
+          "factor_cache": {
+            "entries": 2,
+            "hits": 0,
+            "misses": 2,
+            "size": 2
+          },
+          "factor_solve_seconds": 0.42822279199026525,
+          "kkt_nnz": 6394001,
+          "model_norm": 9.582950856662014e-06,
+          "normal_nnz": 4440725,
+          "original_constraint_norm": 3.9117160131300625e-18,
+          "stationarity_norm": 1.344721727735125e-16,
+          "stationarity_relative": 1.1230290160357754e-12,
+          "true_kkt_relative_residual": 1.1235040656043383e-12
+        },
+        "linear_passes": true,
+        "trials": [
+          {
+            "force_residual_norm": 9.582950792601967e-06,
+            "fraction": 1.0,
+            "gauge_residual_norm": 3.911709855106719e-18,
+            "minimum_signed_jacobian": 0.15348377335903554,
+            "relative_force_reduction": 6.472991449657741e-09
+          },
+          {
+            "force_residual_norm": 9.582950797196066e-06,
+            "fraction": 0.5,
+            "gauge_residual_norm": 1.4387503815996307e-16,
+            "minimum_signed_jacobian": 0.153483773297203,
+            "relative_force_reduction": 5.9935881421074835e-09
+          },
+          {
+            "force_residual_norm": 9.582950900558048e-06,
+            "fraction": 0.25,
+            "gauge_residual_norm": 2.1599231803944388e-16,
+            "minimum_signed_jacobian": 0.15348377326628784,
+            "relative_force_reduction": -4.792440472151564e-09
+          },
+          {
+            "force_residual_norm": 9.582950777533378e-06,
+            "fraction": 0.125,
+            "gauge_residual_norm": 2.520547286627666e-16,
+            "minimum_signed_jacobian": 0.1534837732508312,
+            "relative_force_reduction": 8.04542871927265e-09
+          }
+        ]
+      }
+    ],
+    "independent_epsilon_B": 9.582950788615756e-06,
+    "independent_force_rms_N_per_m3": 56.687444320696926,
+    "independent_radial_refinement_difference": 1.9100894426989333e-07,
+    "minimum_signed_jacobian": 23.842715806757244,
+    "projection_constraint_norm": 1.169027140048465e-19,
+    "projection_kkt_nnz": 1964315,
+    "projection_true_residual_relative": 2.0187139237016396e-15
+  },
+  "complete": true,
+  "discretization": {
+    "basis_degree": 3,
+    "basis_size": 191,
+    "compressed_colors": 232,
+    "coordinates": 11039,
+    "force_pattern_nnz": 63535266,
+    "force_rows": 274104,
+    "gauge_rows": 3610
+  },
+  "experiment": "R5-compressed-sparse-feasible-force-step",
+  "limitations": [
+    "This is an axisymmetric fixed-profile research generator, not the public polish driver.",
+    "The sparse-direct normal equations require a conditioning-limited comparison before production promotion.",
+    "Peak RSS is process high-water memory and may include earlier JAX compilation allocations."
+  ],
+  "model": {
+    "axisymmetric_only": true,
+    "damping": 0.0,
+    "fixed_profiles": true,
+    "force_scale_N_per_m3": 5915447.712414409,
+    "solve_radial_order": 6,
+    "stage": "saved original frozen gauge",
+    "volume_scale_m3": 633.7993467060758
+  },
+  "product_qualified": false,
+  "refinement": {
+    "inserted_knots": [],
+    "new_maximum_m": 19,
+    "old_maximum_m": 19,
+    "selected_span_indices": [],
+    "span_force_squared_contributions": null
+  },
+  "schema": "vmex.polish-recovery/4",
+  "source": {
+    "generator": "benchmarks/polish_recovery_sparse.py",
+    "generator_sha256": "fc4256dc88a577a8f58ebefd53324898978dd7388ce48f786d066cb4d538b854",
+    "input_native_state": "benchmarks/polish_recovery_r4_adaptive132_provisional_state.npz",
+    "input_native_state_sha256": "fd2ef2ffe6c2a22a6fa996975a30a9dd6f5316e8333578f17b5e4d3d92f39659",
+    "output_native_state": "benchmarks/polish_recovery_r5_basis191_stationary_state.npz",
+    "output_native_state_sha256": "2794102bae08c55b06b8a40f0a97c1fe21a666ec770090f6f914b0b4c2389613"
+  },
+  "status": "measured-not-promoted",
+  "work": {
+    "certificate_seconds": 33.849354583071545,
+    "compressed_force_assembly_seconds": 17.313135376083665,
+    "constraint_assembly_seconds": 12.848304750048555,
+    "final_stationarity_assembly_seconds": 0.0,
+    "memory_cap_bytes": 2147483648,
+    "peak_process_rss_bytes": 5390893056,
+    "sparse_factor_solve_seconds": 0.873006624984555,
+    "sparse_force_value_index_estimate_bytes": 764616032,
+    "total_process_seconds": 95.82047654199414
+  }
+}

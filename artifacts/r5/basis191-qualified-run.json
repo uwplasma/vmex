@@ -1,0 +1,39 @@
+{
+  "child_signal": 15,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/polish_recovery_sparse.py",
+    "--input-state",
+    "benchmarks/polish_recovery_r5_basis191_stationary_state.npz",
+    "--max-steps",
+    "2",
+    "--stationarity-refinement",
+    "--certificate",
+    "point",
+    "--output-json",
+    "benchmarks/polish_recovery_r5_basis191_qualified.json",
+    "--output-state",
+    "benchmarks/polish_recovery_r5_basis191_qualified_state.npz"
+  ],
+  "complete": false,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 35.45580975001212,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_qualified.json",
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_qualified_state.npz"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_qualified.json": false,
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r5_basis191_qualified_state.npz": false
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r5/basis191-qualified-run.resources.jsonl",
+  "returncode": -15,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 2695446528,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "interrupted",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r5/basis191-qualified-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r5/basis191-qualified-run.stdout.log",
+  "timeout_seconds": 300.0
+}
