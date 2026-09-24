@@ -99,9 +99,78 @@ Current checkpoint:
   reproduction script are `benchmarks/polish_recovery_p7.json` and `.py`.
   Next gate: derive and test a physically structured mode/radial block
   preconditioner before raising the iteration budget.
+- P8 tests a diagonal-by-mode primal Jacobi preconditioner (42- and 127-entry
+  blocks) on that 1,439+462 system. With 40 iterations, its independently
+  recomputed true residual is `0.6590` against `1e-4`; reject it. The geometry
+  blocks do not adequately scale the multiplier/gauge coupling. See
+  `benchmarks/polish_recovery_p8.py` and `.json`.
+- P9 adds a dense Schur complement for the 462 gauge multipliers to the P8
+  primal block approximation. The diagnostic constraint matrix is 5.32 MB,
+  estimated Schur condition is `9.48e11`, and the 40-iteration true residual
+  is `1.766`; reject it. This does not justify a production dense gauge
+  matrix. See `benchmarks/polish_recovery_p9.py` and `.json`.
+- P10 tests at most four nonlinear damped GN iterations, with linear request
+  `1e-9` and up to 1,600 Krylov iterations per solve, plus force descent,
+  gauge norm `<1e-6`, and positive-J acceptance gates. The first solve's true
+  linear residual is `3.04e-5`. Its full step lowers force residual norm
+  `0.012436` to `0.0003245` and retains positive minimum signed Jacobian
+  `1.35047`, but gauge residual is `1.711e-4`; the half/quarter/eighth steps
+  improve gauge but give force norms `0.006227/0.009331/0.010884`. No trial
+  satisfies all gates, so the step is rejected and the accepted state remains
+  the base smoothed lift (`epsilon_B=1.244e-2`, force RMS `7.36e4 N/m^3`).
+  Do not report the inadmissible full-step force number as polish progress.
+  See `benchmarks/polish_recovery_p10.py` and `.json`.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.
+
+## Current PR handoff (2026-09-24)
+
+The active draft is [PR #448](https://github.com/uwplasma/vmex/pull/448),
+branch `rj/force-balance-recovery`, based on `main` at
+`4632dad8261ca72756819c1c5fcd2e2ec022aeaa`. Read this force-balance section
+first, then the PR description and the versioned JSON records. The PR body is
+intended to be a self-contained continuation brief; the older lanes below
+remain intact and are not superseded by this recovery experiment.
+
+Environment: `/Users/rogerio/local/VMEX-polish-recovery/.venv`, Python 3.14.6,
+JAX/JAXLIB 0.11.2, SOLVAX 0.26.0, BOOZ_XFORM_JAX 0.4.0,
+VIRTUAL_CASING_JAX 0.0.8; Apple M4 CPU, float64. The required deck and WOUT
+hashes, physical scales, and reproduction commands are recorded in the PR
+body and benchmark JSON. Do not overwrite those baseline artifacts.
+
+Latest verification before handoff: focused profile/regularization/rank,
+physical-scale, tensorized-derivative, native-layout, and gauge tests passed
+9/9 in 240.89 s; the matrix-free GN action/GMRES dense-reference test passed
+in 4.27 s; the broad strong-force module was stopped at 298.13 s after 6
+passes and 1 skip, with no failure reported. That module is not fully verified.
+P8, P9, and P10 are bounded negative experiments; their JSON records preserve
+their outcomes. No scientific runs remain in progress. The dense enriched
+reference was deliberately deferred and not run.
+
+Resume at the solver, not the lift: first inspect P7-P10 code and records,
+then design a physically meaningful preconditioner or constraint elimination
+that controls the coupled force/gauge saddle system. Keep independent true
+linear residual, nonlinear force descent, gauge tolerance, and positive signed
+Jacobian as separate acceptance gates. Any trial failing one gate is rejected;
+do not use a force-only number as evidence of an accepted equilibrium. The
+P3 dense Candidate B remains the best bounded force reference, not a scalable
+solver. Once a linear method passes, compare nonlinear convergence and runtime
+against that reference, then address 3-D/current closure, derivative
+validation, and public workflow integration. Do not promote or merge until
+Rogerio reviews the complete physical, derivative, runtime, memory, and
+regression evidence.
+
+External context already reviewed (design context, not proof that VMEX has
+equivalent behavior): [GVEC theory](https://gvec.readthedocs.io/latest/user/theory.html),
+[GVEC current workflow](https://gvec.readthedocs.io/develop/tutorials/notebooks/040_current.html),
+[DESC Part I](https://arxiv.org/abs/2203.17173),
+[DESC equilibrium implementation](https://github.com/PlasmaControl/DESC/blob/master/desc/objectives/_equilibrium.py),
+[VMEC++ numerics paper](https://arxiv.org/abs/2502.04374),
+[experimental VMEC++ gauge PR #849](https://github.com/proximafusion/vmecpp/pull/849),
+[JAX `custom_linear_solve` documentation](https://docs.jax.dev/en/latest/_autosummary/jax.lax.custom_linear_solve.html),
+[GVEC functional source](https://github.com/gvec-group/gvec/blob/main/src/functionals/mhd3d/mhd3d_evalfunc.F90),
+and [SOLVAX sparse direct solver](https://github.com/uwplasma/SOLVAX/blob/main/src/solvax/sparse_direct.py).
 
 This file is the complete handoff for the VMEX research programme: a
 collaborator should be able to resume from it alone. It has two parts.

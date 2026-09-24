@@ -1,0 +1,42 @@
+{
+  "schema": "vmex.polish-recovery/1",
+  "source": {
+    "vmex_base_sha": "4632dad8261ca72756819c1c5fcd2e2ec022aeaa",
+    "working_tree_changes": "mode-block primal preconditioner plus dense gauge Schur diagnostic",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "reproduction": "JAX_ENABLE_X64=1 .venv/bin/python benchmarks/polish_recovery_p9.py"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "state": {
+    "radial_basis_functions": 43,
+    "curvature_regularization": 0.1,
+    "coordinates": 1439,
+    "gauge_constraints": 462,
+    "damping": 0.01
+  },
+  "preconditioner": {
+    "type": "P8 independent primal mode blocks with dense Schur complement for gauge multipliers",
+    "constraint_matrix_bytes": 5318544,
+    "estimated_schur_condition_number": 948159165791.293
+  },
+  "krylov": {
+    "restart": 20,
+    "max_restarts": 2,
+    "iteration_upper_bound": 40,
+    "requested_true_relative_residual": 0.0001,
+    "true_relative_residual": 1.7661839101
+  },
+  "runtime_seconds": 6.656,
+  "decision": "Reject. The approximate primal inverse induces an extremely ill-conditioned gauge Schur complement and does not yield a usable true-residual solve. This bounded dense diagnostic is not a production preconditioner.",
+  "limitations": [
+    "This is a linear preconditioner diagnostic only; no correction is applied.",
+    "The constraint matrix and Schur complement are materialized only for this bounded experiment."
+  ]
+}

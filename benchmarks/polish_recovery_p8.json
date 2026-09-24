@@ -1,0 +1,42 @@
+{
+  "schema": "vmex.polish-recovery/1",
+  "source": {
+    "vmex_base_sha": "4632dad8261ca72756819c1c5fcd2e2ec022aeaa",
+    "working_tree_changes": "mode-block Jacobi preconditioner probe",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "reproduction": "JAX_ENABLE_X64=1 .venv/bin/python benchmarks/polish_recovery_p8.py"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "state": {
+    "radial_basis_functions": 43,
+    "curvature_regularization": 0.1,
+    "coordinates": 1439,
+    "gauge_constraints": 462,
+    "damping": 0.01
+  },
+  "preconditioner": {
+    "type": "independent primal mode-block Jacobi; identity on gauge multipliers",
+    "mode_block_sizes": [42, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127],
+    "block_hessian_bytes": 1433464
+  },
+  "krylov": {
+    "restart": 20,
+    "max_restarts": 2,
+    "iteration_upper_bound": 40,
+    "requested_true_relative_residual": 0.0001,
+    "true_relative_residual": 0.6590444599
+  },
+  "runtime_seconds": 8.50,
+  "decision": "Reject. Independent mode-block primal solves leave the multiplier/gauge coupling poorly scaled; the true linear residual is far above tolerance. Do not raise the iteration budget blindly.",
+  "limitations": [
+    "This is a linear preconditioner diagnostic only; it does not apply a correction or report a polished equilibrium.",
+    "Mode blocks are assembled locally from force Jacobians; the full coupled Jacobian is not formed."
+  ]
+}
