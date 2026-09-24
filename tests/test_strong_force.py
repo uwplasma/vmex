@@ -25,8 +25,12 @@ from vmex.core.polish_variational import (
     evaluate_tensorized_strong_force,
     evaluate_variational_fields,
     fixed_pressure_energy,
+    make_native_gauge_plan,
     make_variational_plan,
     minimum_signed_jacobian,
+    native_tangential_gauge_residual,
+    native_coordinate_scales,
+    native_variational_kkt_residual,
 )
 from vmex.core.polish import (
     HighOrderCorrection,
@@ -755,6 +759,68 @@ def test_native_gauge_generator_has_zero_fixed_label_displacement():
     plan = make_variational_plan(state, radial_order=4, ntheta=17, nzeta=1)
     displacement = evaluate_fixed_label_displacement(state, gauge, plan)
     assert float(jnp.max(jnp.abs(displacement))) < 2.0e-15
+
+    gauge_plan = make_native_gauge_plan(state, plan)
+    gauge_residual = native_tangential_gauge_residual(state, gauge, gauge_plan)
+    assert float(jnp.linalg.norm(gauge_residual)) > 1.0e-3
+    normal = replace(
+        gauge,
+        R_cos=zeros.at[1].set(one_minus_s),
+        Z_sin=zeros.at[1].set(one_minus_s),
+        L_sin=zeros,
+    )
+    np.testing.assert_allclose(
+        native_tangential_gauge_residual(state, normal, gauge_plan),
+        0.0,
+        rtol=0.0,
+        atol=2.0e-15,
+    )
+    layout = make_native_correction_layout(state)
+    constraint = jax.jacfwd(
+        lambda vector: native_tangential_gauge_residual(
+            state, layout.unpack(vector), gauge_plan
+        )
+    )(jnp.zeros((layout.size,)))
+    assert np.linalg.matrix_rank(np.asarray(constraint), tol=1.0e-11) == gauge_plan.size
+    kkt_size = layout.size + gauge_plan.size
+    coordinate_scale = native_coordinate_scales(state, layout, plan)
+    kkt_jacobian = jax.jacfwd(
+        lambda variables: native_variational_kkt_residual(
+            variables,
+            state,
+            layout,
+            gauge_plan,
+            1.0e8,
+            coordinate_scale,
+        )
+    )(jnp.zeros((kkt_size,)))
+    np.testing.assert_allclose(
+        kkt_jacobian,
+        kkt_jacobian.T,
+        rtol=3.0e-11,
+        atol=3.0e-10,
+    )
+    gauge_weight = jnp.linspace(0.2, 1.0, gauge_plan.size)
+
+    def parameter_dependent_gauge(step):
+        changed = replace(
+            state,
+            R_cos=state.R_cos.at[1, -1].add(0.1 * step),
+        )
+        return jnp.vdot(
+            native_tangential_gauge_residual(changed, normal, gauge_plan),
+            gauge_weight,
+        )
+
+    gauge_jvp = jax.grad(parameter_dependent_gauge)(0.0)
+    step = 1.0e-5
+    gauge_finite_difference = (
+        parameter_dependent_gauge(step) - parameter_dependent_gauge(-step)
+    ) / (2.0 * step)
+    assert abs(float(gauge_jvp)) > 1.0e-5
+    np.testing.assert_allclose(
+        gauge_jvp, gauge_finite_difference, rtol=2.0e-8, atol=2.0e-10
+    )
 
     def energy(step):
         return fixed_pressure_energy(

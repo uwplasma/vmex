@@ -51,6 +51,7 @@ jax.tree_util.register_dataclass(
 )
 
 
+@jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True, eq=False)
 class NativeCorrectionLayout:
     """Direct structural coordinates for native spline corrections.
@@ -66,6 +67,28 @@ class NativeCorrectionLayout:
     nbasis: int
     active_indices: np.ndarray
     lasym: bool
+
+    def tree_flatten(self):
+        """Expose active indices as data and topology as metadata."""
+
+        return (jnp.asarray(self.active_indices),), (
+            int(self.mnmax),
+            int(self.nbasis),
+            bool(self.lasym),
+        )
+
+    @classmethod
+    def tree_unflatten(cls, metadata, children):
+        """Rebuild a native layout from its pytree representation."""
+
+        mnmax, nbasis, lasym = metadata
+        (active_indices,) = children
+        return cls(
+            mnmax=mnmax,
+            nbasis=nbasis,
+            active_indices=active_indices,
+            lasym=lasym,
+        )
 
     @property
     def size(self) -> int:

@@ -77,6 +77,22 @@
     "strong_force_jvp_output": 169344,
     "strong_force_vjp_output": 16584
   },
+  "native_bordered_system": {
+    "coordinates": 895,
+    "normalized_tangent_constraints": 286,
+    "system_size": 1181,
+    "constraint_rank": 286,
+    "raw_constraint_condition": 92787822.8630116,
+    "physical_displacement_scaled_condition": 60.82320541241546,
+    "coordinate_scale_min": 0.14363245611997558,
+    "coordinate_scale_max": 13315398778.998722,
+    "residual_compile_seconds": 0.36700116703286767,
+    "residual_warm_seconds": 0.0008847080171108246,
+    "linearize_setup_seconds": 0.4158607079880312,
+    "matvec_first_seconds": 0.2928695000009611,
+    "matvec_warm_seconds": 0.0009743749396875501,
+    "note": "The full-rank diagnostic materialized a 2.05 MB dense matrix only for measurement; the production residual applies the bordered constraint matrix-free and builds no global nullspace."
+  },
   "status": "p2-kernel-checkpoint",
   "limitation": "This record validates the native energy kernel and its derivatives; it does not claim a recovered polished equilibrium or solver promotion."
 }

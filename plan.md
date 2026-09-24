@@ -26,6 +26,13 @@ Current checkpoint:
   both normal directions at cross-section extrema and verify a smooth,
   boundary-fixed relabeling has zero fixed-label displacement and energy
   variation.
+- The first gauge-qualified variational equation is a bordered system: a
+  mass-normalized full-tangent constraint is applied matrix-free beside all
+  native coordinates, rather than freezing Z or building a global nullspace.
+  On the P0 state its 286 constraint rows have full rank; physical-displacement
+  column scaling reduces their diagnostic condition estimate from 9.3e7 to
+  61.  The 1,181-variable KKT residual and matrix action run warm in about
+  0.9-1.0 ms.  Nonsymmetric/LASYM paired gauge rows remain a P5 item.
 - P2 now has a tensorized native fixed-pressure energy seam.  It contracts
   coefficients into values and analytic first jets on a precomputed tensor
   grid, avoiding nested pointwise AD.  On the P0 shaped-tokamak state its

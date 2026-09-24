@@ -16,6 +16,10 @@ import jax.numpy as jnp
 import numpy as np
 
 from .profiles import MU0
+from .polish import (
+    NativeCorrectionLayout,
+    apply_high_order_correction,
+)
 from .strong_force import HighOrderEquilibriumState, StrongForceSamples
 
 Array = Any
@@ -113,6 +117,51 @@ jax.tree_util.register_dataclass(
     data_fields=[field for field in VariationalFieldSamples.__dataclass_fields__],
     meta_fields=[],
 )
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True, eq=False)
+class NativeGaugePlan:
+    """Rows for a local normalized-tangent coordinate convention.
+
+    The rows are mass-normalized tests in the symmetry-allowed sine space.
+    They define a bordered constraint operator rather than a dense global
+    nullspace, preserving the locality of the native spline coordinates.
+    """
+
+    variational: VariationalPlan
+    row_modes: Array
+    row_basis: Array
+    row_scale: Array
+    tangent_floor: float
+
+    def tree_flatten(self):
+        """Expose numerical rows as data and the floor as metadata."""
+
+        return (
+            (self.variational, self.row_modes, self.row_basis, self.row_scale),
+            (float(self.tangent_floor),),
+        )
+
+    @classmethod
+    def tree_unflatten(cls, metadata, children):
+        """Rebuild a native gauge plan from its pytree representation."""
+
+        (tangent_floor,) = metadata
+        variational, row_modes, row_basis, row_scale = children
+        return cls(
+            variational=variational,
+            row_modes=row_modes,
+            row_basis=row_basis,
+            row_scale=row_scale,
+            tangent_floor=tangent_floor,
+        )
+
+    @property
+    def size(self) -> int:
+        """Number of independent coordinate constraints."""
+
+        return int(self.row_modes.size)
 
 
 def _span_quadrature(breakpoints: np.ndarray, order: int) -> tuple[np.ndarray, np.ndarray]:
@@ -238,6 +287,99 @@ def make_variational_plan(
         nfp=int(state.nfp),
         jacobian_sign=int(state.jacobian_sign),
     )
+
+
+def make_native_gauge_plan(
+    state: HighOrderEquilibriumState,
+    variational: VariationalPlan,
+    *,
+    lasym: bool = False,
+    tangent_floor: float = 1.0e-12,
+) -> NativeGaugePlan:
+    """Build bordered normalized-tangent rows without a global gauge SVD."""
+
+    if lasym:
+        raise NotImplementedError(
+            "the nonsymmetric native gauge requires paired sine/cosine rows"
+        )
+    if tangent_floor <= 0.0:
+        raise ValueError("tangent_floor must be positive")
+    mode_zero = (np.asarray(state.m, dtype=int) == 0) & (
+        np.asarray(state.n, dtype=int) == 0
+    )
+    row_modes, row_basis = np.nonzero(
+        np.broadcast_to((~mode_zero)[:, None], (state.m.size, state.radial_basis.size))
+        & (np.arange(state.radial_basis.size)[None, :] < state.radial_basis.size - 1)
+    )
+    if row_modes.size == 0:
+        raise ValueError("native gauge has no symmetry-allowed tangent rows")
+    radial = np.asarray(variational.radial_value)[row_modes, :, row_basis]
+    angular = np.asarray(variational.sine)[row_modes]
+    weights = np.broadcast_to(
+        np.asarray(variational.quadrature_weights), variational.shape
+    ).reshape((variational.shape[0], -1))
+    mass = np.einsum("ij,ki,kj->k", weights, radial**2, angular**2)
+    if np.any(~np.isfinite(mass)) or np.any(mass <= 0.0):
+        raise ValueError("native gauge contains an unresolved test row")
+    return NativeGaugePlan(
+        variational=variational,
+        row_modes=jnp.asarray(row_modes, dtype=jnp.int32),
+        row_basis=jnp.asarray(row_basis, dtype=jnp.int32),
+        row_scale=jnp.asarray(1.0 / np.sqrt(mass)),
+        tangent_floor=float(tangent_floor),
+    )
+
+
+def native_coordinate_scales(
+    state: HighOrderEquilibriumState,
+    layout: NativeCorrectionLayout,
+    variational: VariationalPlan,
+) -> Array:
+    """Equilibrate native coordinates by physical displacement L2 norms.
+
+    Geometry columns use their cylindrical displacement.  Lambda columns use
+    the fixed-label displacement ``|x_theta delta-lambda/(1+lambda_theta)|``.
+    The volume measure is the signed physical Jacobian on the variational
+    grid.  This is a local-table setup operation and forms no global Jacobian.
+    """
+
+    fields = evaluate_variational_fields(state, variational)
+    _, _, lambda_theta, _ = _channel(state.L_cos, state.L_sin, variational)
+    weights = np.asarray(
+        np.broadcast_to(variational.quadrature_weights, variational.shape)
+        * (state.jacobian_sign * np.asarray(fields.sqrt_g))
+    ).reshape((variational.shape[0], -1))
+    if np.any(weights <= 0.0) or np.any(~np.isfinite(weights)):
+        raise ValueError("native coordinate scaling requires a valid signed Jacobian")
+    tangent_factor = (
+        np.sum(np.asarray(fields.dposition_dtheta) ** 2, axis=-1)
+        / (1.0 + np.asarray(lambda_theta).reshape(variational.shape)) ** 2
+    ).reshape((variational.shape[0], -1))
+    indices = np.asarray(layout.active_indices, dtype=int)
+    block = layout.mnmax * layout.nbasis
+    fields_index = indices // block
+    remainder = indices % block
+    modes = remainder // layout.nbasis
+    basis_indices = remainder % layout.nbasis
+    radial = np.asarray(variational.radial_value)[modes, :, basis_indices]
+    cosine = np.asarray(variational.cosine)[modes]
+    sine = np.asarray(variational.sine)[modes]
+    angular = np.where((fields_index % 2)[:, None] == 0, cosine, sine)
+    scalar_basis = radial[:, :, None] * angular[:, None, :]
+    displacement_factor = np.where(
+        (fields_index >= 4)[:, None, None], tangent_factor[None], 1.0
+    )
+    norms = np.sqrt(
+        np.einsum(
+            "ij,kij,kij->k",
+            weights,
+            scalar_basis**2,
+            displacement_factor,
+        )
+    )
+    if np.any(~np.isfinite(norms)) or np.any(norms <= 0.0):
+        raise ValueError("native coordinate layout contains a zero physical column")
+    return jnp.asarray(1.0 / norms)
 
 
 def _channel(
@@ -417,6 +559,105 @@ def evaluate_fixed_label_displacement(
     return coordinate_variation - (
         fields.dposition_dtheta * relabeling[..., None]
     )
+
+
+@jax.jit
+def native_tangential_gauge_residual(
+    state: HighOrderEquilibriumState,
+    direction: Any,
+    gauge: NativeGaugePlan,
+) -> Array:
+    """Project frozen normalized-tangent geometry motion into gauge rows."""
+
+    plan = gauge.variational
+    delta_R, _, _, _ = _channel(direction.R_cos, direction.R_sin, plan)
+    delta_Z, _, _, _ = _channel(direction.Z_cos, direction.Z_sin, plan)
+    fields = evaluate_variational_fields(state, plan)
+    _, zz = jnp.meshgrid(plan.theta, plan.zeta, indexing="ij")
+    phi = zz.reshape(-1) / float(plan.nfp)
+    delta_position = jnp.stack(
+        (
+            delta_R * jnp.cos(phi)[None],
+            delta_R * jnp.sin(phi)[None],
+            delta_Z,
+        ),
+        axis=-1,
+    ).reshape(fields.position.shape)
+    tangent = fields.dposition_dtheta
+    tangent_norm = jnp.sqrt(
+        jnp.sum(tangent * tangent, axis=-1) + float(gauge.tangent_floor) ** 2
+    )
+    tangential_motion = jnp.sum(delta_position * tangent, axis=-1) / tangent_norm
+    weighted = (
+        jnp.broadcast_to(jnp.asarray(plan.quadrature_weights), plan.shape)
+        * tangential_motion
+    ).reshape((plan.shape[0], -1))
+    projected = jnp.einsum(
+        "ra,mrb,ma->mb",
+        weighted,
+        jnp.asarray(plan.radial_value),
+        jnp.asarray(plan.sine),
+    )
+    return (
+        projected[
+            jnp.asarray(gauge.row_modes),
+            jnp.asarray(gauge.row_basis),
+        ]
+        * jnp.asarray(gauge.row_scale)
+    )
+
+
+@jax.jit
+def native_variational_kkt_residual(
+    variables: Array,
+    base_state: HighOrderEquilibriumState,
+    layout: NativeCorrectionLayout,
+    gauge: NativeGaugePlan,
+    energy_scale: Array,
+    coordinate_scale: Array,
+) -> Array:
+    """Return the bordered fixed-pressure stationarity/gauge equations.
+
+    ``variables`` concatenates every native structural coordinate with one
+    multiplier per normalized-tangent constraint.  This formulation removes
+    the coordinate gauge without freezing Z, adding a penalty to the physical
+    energy, or constructing a dense nullspace basis.
+    """
+
+    variables = jnp.asarray(variables)
+    expected = layout.size + gauge.size
+    if variables.shape != (expected,):
+        raise ValueError(
+            f"KKT variables have shape {variables.shape}; expected {(expected,)}"
+        )
+    coordinates = variables[: layout.size]
+    multipliers = variables[layout.size :]
+    coordinate_scale = jnp.asarray(coordinate_scale)
+    if coordinate_scale.shape != (layout.size,):
+        raise ValueError(
+            "coordinate_scale has shape "
+            f"{coordinate_scale.shape}; expected {(layout.size,)}"
+        )
+
+    def corrected_state(value):
+        return apply_high_order_correction(
+            base_state, layout.unpack(coordinate_scale * value)
+        )
+
+    def energy(value):
+        return fixed_pressure_energy(
+            corrected_state(value), gauge.variational, energy_scale
+        )
+
+    def constraints(value):
+        return native_tangential_gauge_residual(
+            base_state, layout.unpack(coordinate_scale * value), gauge
+        )
+
+    gradient = jax.grad(energy)(coordinates)
+    constraint, pullback = jax.vjp(constraints, coordinates)
+    stationarity = gradient + pullback(multipliers)[0]
+    return jnp.concatenate((stationarity, constraint))
 
 
 @jax.jit
@@ -652,11 +893,16 @@ def minimum_signed_jacobian(
 
 __all__ = [
     "VariationalFieldSamples",
+    "NativeGaugePlan",
     "VariationalPlan",
     "evaluate_fixed_label_displacement",
     "evaluate_tensorized_strong_force",
     "evaluate_variational_fields",
     "fixed_pressure_energy",
     "make_variational_plan",
+    "make_native_gauge_plan",
     "minimum_signed_jacobian",
+    "native_tangential_gauge_residual",
+    "native_coordinate_scales",
+    "native_variational_kkt_residual",
 ]
