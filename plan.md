@@ -48,6 +48,40 @@ main's after the merges.
      compilation cache restored by `actions/cache`: populate it once per key,
      then open it read-only in test workers, which avoids the eviction-lock
      hang that got `VMEX_COMPILATION_CACHE` disabled.
+1b. **Coherent dependency floors across the stack (maintainer, 2026-09-23).**
+   A user should never have to upgrade packages by hand after
+   `pip install "vmex[all]"`. Reported on 0.11.1: `pip install -e .` into an
+   environment with equinox 0.11.11 installed solvax 0.26.0 and jax 0.10.2,
+   and the first `vmex <input> --plot` crashed on import
+   (`solvax -> equinox -> jax.interpreters.batching.NotMapped is deprecated`);
+   upgrading equinox by hand to 0.13.8 fixed it. solvax 0.26.0 declares bare
+   `equinox` and `jax` with no floors, so pip keeps an incompatible old
+   equinox.
+   - solvax: add an `equinox` floor at the first release compatible with the
+     jax versions solvax supports (verify; 0.13.x worked with jax 0.10.2), and
+     a `jax`/`jaxlib` floor; release solvax and raise vmex's solvax floor to
+     it.
+   - vmex: raise floors to versions that are known to work together (jax,
+     jaxlib, solvax, booz_xform_jax, virtual-casing-jax, essos, neo-jax, gkx,
+     equinox if imported), so `vmex[all]` resolves to a coherent, current
+     set; do the same audit in the sibling packages (booz_xform_jax,
+     virtual_casing_jax, ESSOS, neo-jax, gkx), each declaring floors for what
+     it imports.
+   - Guard it: a CI job that installs `vmex[all]` into an environment
+     pre-seeded with old versions of the transitive dependencies (e.g.
+     equinox 0.11.x, jax 0.5) and runs `vmex examples/data/input.solovev
+     --plot`, so a missing floor fails CI instead of a user's first run; plus
+     the existing minimum-versions job at the new floors. Keep the README
+     install table's floors in sync (a test already checks them).
+   - Related, same report: pip warned that other installed packages
+     (desc-opt, interpax, quadax, orthax, jax-finufft) pin jax below 0.10;
+     document in the installation page that DESC interoperability needs a
+     jax that DESC supports, or a separate environment.
+1c. **README: say that polishing is requested from the input file.** A
+   `! VMEX: POLISH_FORCE_BALANCE = .TRUE.` line at the top of an INDATA deck
+   is a comment to VMEC2000 (ignored there) and a directive to VMEX
+   (`examples/data/input.shaped_tokamak_pressure_polished`). The README's
+   polishing section should state this, with the exact line.
 2. **Example timings still open from #426.** 18 optimization scripts were
    timed under five minutes with a converged NS = 71 check; scripts over
    budget kept their previous defaults. The untimed scripts are listed in
