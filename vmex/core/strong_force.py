@@ -29,8 +29,7 @@ from .radial_basis import BSplineBasis
 Array = Any
 
 _NORMALIZATION = (
-    "2*|JxB-grad(p)|/(|JxB|+|grad(p)|+force_floor), evaluated pointwise; "
-    "bounded above by 2 by construction"
+    "2*|JxB-grad(p)|/(|JxB|+|grad(p)|+force_floor), evaluated pointwise; bounded above by 2 by construction"
 )
 
 #: Disclosure carried with every certificate.  ``F = JxB - grad(p)`` gives
@@ -646,8 +645,7 @@ def _basic_fields(state: HighOrderEquilibriumState, x: Array) -> tuple[Array, Ar
     B_sup = jnp.asarray(
         [
             0.0,
-            flux_factor
-            * (chip / float(state.nfp) - phip * lam_gradient[2]),
+            flux_factor * (chip / float(state.nfp) - phip * lam_gradient[2]),
             flux_factor * phip * (1.0 + lam_gradient[1]),
         ]
     )
@@ -710,9 +708,7 @@ def _magnetic_pressure(state: HighOrderEquilibriumState, x: Array) -> Array:
     return jnp.vdot(field, field) / (2.0 * MU0)
 
 
-def _point_magnetic_pressure_gradient(
-    state: HighOrderEquilibriumState, x: Array
-) -> Array:
+def _point_magnetic_pressure_gradient(state: HighOrderEquilibriumState, x: Array) -> Array:
     """Return ``grad(B^2 / 2 mu0)`` as a Cartesian vector at one point."""
 
     basis_vectors = jax.jacfwd(lambda y: _position(state, y))(x)
@@ -720,7 +716,34 @@ def _point_magnetic_pressure_gradient(
     return jnp.linalg.solve(basis_vectors.T, partials)
 
 
-@jax.jit
+_point_magnetic_pressure_gradient_checkpoint = jax.checkpoint(_point_magnetic_pressure_gradient)
+
+
+@functools.partial(jax.jit, static_argnames=("batch_size", "checkpoint"))
+def _evaluate_magnetic_pressure_gradient(
+    state: HighOrderEquilibriumState,
+    rho: Array,
+    theta: Array,
+    zeta: Array,
+    *,
+    batch_size: int,
+    checkpoint: bool,
+) -> Array:
+    rho, theta, zeta = jnp.broadcast_arrays(rho, theta, zeta)
+    shape = rho.shape
+    points = jnp.stack((rho.reshape(-1), theta.reshape(-1), zeta.reshape(-1)), axis=-1)
+    if batch_size <= 0:
+        values = jax.vmap(lambda point: _point_magnetic_pressure_gradient(state, point))(points)
+    else:
+        kernel = _point_magnetic_pressure_gradient_checkpoint if checkpoint else _point_magnetic_pressure_gradient
+        values = jax.lax.map(
+            lambda point: kernel(state, point),
+            points,
+            batch_size=batch_size,
+        )
+    return values.reshape(shape + (3,))
+
+
 def evaluate_magnetic_pressure_gradient(
     state: HighOrderEquilibriumState,
     rho: Array,
@@ -729,28 +752,24 @@ def evaluate_magnetic_pressure_gradient(
 ) -> Array:
     """Evaluate ``grad(B^2 / 2 mu0)`` on broadcast-compatible points.
 
-    This is the vacuum-safe force-balance scale: unlike ``grad(p)`` it does
-    not vanish identically when the pressure is flat, so a normalization
-    built on its volume average stays meaningful in vacuum.  The final
-    dimension of the result is Cartesian and the units are N m^-3.  It is
-    evaluated independently of :func:`evaluate_strong_force` so that the
-    certificate's force values and the polish residual are untouched.
-
-    .. note::
-
-       This sweeps every certificate point in one ``vmap``, exactly as
-       :func:`evaluate_strong_force` does, and so inherits the same peak
-       allocation at production 3-D resolution.  When the force sweep gains
-       a batching policy, this call must be routed through the same one:
-       they run on the same node set, so an unbatched companion would
-       reintroduce the allocation the batched sweep exists to avoid.
+    This independent vacuum-safe diagnostic uses the same fixed-working-set
+    scheduling policy as :func:`evaluate_strong_force`.  Keeping the
+    companion sweep on that policy prevents certificate construction from
+    reintroducing one all-grid ``vmap`` after the force sweep was batched.
+    The node set and point evaluator are unchanged.
     """
 
-    rho, theta, zeta = jnp.broadcast_arrays(rho, theta, zeta)
-    shape = rho.shape
-    points = jnp.stack((rho.reshape(-1), theta.reshape(-1), zeta.reshape(-1)), axis=-1)
-    values = jax.vmap(lambda point: _point_magnetic_pressure_gradient(state, point))(points)
-    return values.reshape(shape + (3,))
+    shape = np.broadcast_shapes(jnp.shape(rho), jnp.shape(theta), jnp.shape(zeta))
+    count = int(np.prod(shape, dtype=np.int64)) if shape else 1
+    batch_size = force_sweep_batch(state, count)
+    return _evaluate_magnetic_pressure_gradient(
+        state,
+        rho,
+        theta,
+        zeta,
+        batch_size=batch_size,
+        checkpoint=bool(_FORCE_SWEEP_POLICY.checkpoint),
+    )
 
 
 @jax.jit
@@ -775,9 +794,7 @@ def evaluate_high_order_fields(
     points = jnp.stack((rho.reshape(-1), theta.reshape(-1), zeta.reshape(-1)), axis=-1)
 
     def sample(point):
-        basis, sqrt_g, contravariant, covariant, field, pressure = _basic_fields(
-            state, point
-        )
+        basis, sqrt_g, contravariant, covariant, field, pressure = _basic_fields(state, point)
         return (
             _position(state, point),
             basis[:, 0],
@@ -1128,25 +1145,15 @@ def _constrained_spline_fit(
             quad_s = np.asarray(basis.quadrature_nodes, dtype=float)
             quad_w = np.asarray(basis.quadrature_weights, dtype=float)
             span_width = float(np.median(np.diff(basis.breakpoints)))
-            curvature = np.asarray(
-                basis.basis_matrix(quad_s, derivative=2), dtype=float
-            )
-            roughness = (
-                np.sqrt(curvature_regularization)
-                * span_width**2
-                * np.sqrt(quad_w)[:, None]
-                * curvature
-            )
+            curvature = np.asarray(basis.basis_matrix(quad_s, derivative=2), dtype=float)
+            roughness = np.sqrt(curvature_regularization) * span_width**2 * np.sqrt(quad_w)[:, None] * curvature
             fixed_indices = list(fixed)
             regularized_rhs = (
-                -roughness[:, fixed_indices]
-                @ np.asarray([fixed[index] for index in fixed_indices], dtype=float)
+                -roughness[:, fixed_indices] @ np.asarray([fixed[index] for index in fixed_indices], dtype=float)
                 if fixed
                 else np.zeros((roughness.shape[0],), dtype=float)
             )
-            augmented_matrix = np.concatenate(
-                (scaled_matrix, roughness[:, free] / column_norms), axis=0
-            )
+            augmented_matrix = np.concatenate((scaled_matrix, roughness[:, free] / column_norms), axis=0)
             augmented_rhs = np.concatenate((weighted_rhs, regularized_rhs))
         else:
             augmented_matrix = scaled_matrix
@@ -1431,9 +1438,7 @@ def insert_high_order_state_knots(
         transferred = {}
         target_basis = None
         for name in coefficient_names:
-            candidate_basis, coefficients = source_basis.insert_knot(
-                getattr(refined, name), float(knot), axis=-1
-            )
+            candidate_basis, coefficients = source_basis.insert_knot(getattr(refined, name), float(knot), axis=-1)
             if target_basis is None:
                 target_basis = candidate_basis
             elif candidate_basis != target_basis:
@@ -1471,12 +1476,8 @@ def append_high_order_state_modes(
     )
     if existing.intersection(new_pairs):
         raise ValueError("new Fourier modes must not duplicate existing modes")
-    radial_zeros = jnp.zeros(
-        (new_m.size, state.radial_basis.size), dtype=jnp.asarray(state.R_cos).dtype
-    )
-    boundary_zeros = jnp.zeros(
-        (new_m.size,), dtype=jnp.asarray(state.boundary_R_cos).dtype
-    )
+    radial_zeros = jnp.zeros((new_m.size, state.radial_basis.size), dtype=jnp.asarray(state.R_cos).dtype)
+    boundary_zeros = jnp.zeros((new_m.size,), dtype=jnp.asarray(state.boundary_R_cos).dtype)
     radial_names = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
     boundary_names = (
         "boundary_R_cos",
@@ -1484,17 +1485,9 @@ def append_high_order_state_modes(
         "boundary_Z_cos",
         "boundary_Z_sin",
     )
-    values = {
-        name: jnp.concatenate((jnp.asarray(getattr(state, name)), radial_zeros), axis=0)
-        for name in radial_names
-    }
+    values = {name: jnp.concatenate((jnp.asarray(getattr(state, name)), radial_zeros), axis=0) for name in radial_names}
     values.update(
-        {
-            name: jnp.concatenate(
-                (jnp.asarray(getattr(state, name)), boundary_zeros), axis=0
-            )
-            for name in boundary_names
-        }
+        {name: jnp.concatenate((jnp.asarray(getattr(state, name)), boundary_zeros), axis=0) for name in boundary_names}
     )
     return replace(
         state,
@@ -1623,7 +1616,7 @@ def certify_strong_force(
         Absolute (N/m^3) and normalised (dimensionless) residual statistics,
         the radial residual profiles on ``radial_nodes``, and the Jacobian,
         boundary and lambda-gauge checks.
-    
+
 
     """
 
@@ -1668,13 +1661,9 @@ def certify_strong_force(
     # The published global normalizations. They share the certificate's
     # nodes and |sqrt(g)| volume weights but never saturate, so they remain
     # informative exactly where eps_F pins at its ceiling.
-    magnetic_pressure_gradient_norm = jnp.linalg.norm(
-        evaluate_magnetic_pressure_gradient(state, rr, tt, zz), axis=-1
-    )
+    magnetic_pressure_gradient_norm = jnp.linalg.norm(evaluate_magnetic_pressure_gradient(state, rr, tt, zz), axis=-1)
 
-    def normalizations(
-        radial_mask: np.ndarray, s_min: float, s_max: float
-    ) -> ForceErrorNormalizations:
+    def normalizations(radial_mask: np.ndarray, s_min: float, s_max: float) -> ForceErrorNormalizations:
         masked_weights = weights * jnp.asarray(radial_mask, dtype=weights.dtype)[:, None, None]
         total = jnp.sum(masked_weights)
         safe_total = jnp.where(total > 0.0, total, 1.0)
@@ -1712,16 +1701,13 @@ def certify_strong_force(
 
     window_min, window_max = float(window[0]), float(window[1])
     window_mask = (s_nodes >= window_min) & (s_nodes <= window_max)
-    global_normalizations = normalizations(
-        np.ones_like(s_nodes, dtype=bool), float(breaks[0]), float(breaks[-1])
-    )
+    global_normalizations = normalizations(np.ones_like(s_nodes, dtype=bool), float(breaks[0]), float(breaks[-1]))
     window_normalizations = normalizations(window_mask, window_min, window_max)
 
     surface_weights = jnp.abs(samples.sqrt_g)
     fsa = jnp.sum(surface_weights * magnitude, axis=(1, 2)) / jnp.sum(surface_weights, axis=(1, 2))
     surface_normalized_l2 = jnp.sqrt(
-        jnp.sum(surface_weights * normalized * normalized, axis=(1, 2))
-        / jnp.sum(surface_weights, axis=(1, 2))
+        jnp.sum(surface_weights * normalized * normalized, axis=(1, 2)) / jnp.sum(surface_weights, axis=(1, 2))
     )
 
     def region_l2(mask: Array) -> Array:
@@ -1862,16 +1848,12 @@ def force_error_record(report: StrongForceReport) -> dict[str, Any]:
     def block(normalizations: ForceErrorNormalizations) -> dict[str, Any]:
         return {
             "volume_average_force": float(normalizations.volume_average_force),
-            "volume_average_grad_pressure": float(
-                normalizations.volume_average_grad_pressure
-            ),
+            "volume_average_grad_pressure": float(normalizations.volume_average_grad_pressure),
             "volume_average_magnetic_pressure_gradient": float(
                 normalizations.volume_average_magnetic_pressure_gradient
             ),
             "relative_force_error": float(normalizations.relative_force_error),
-            "magnetic_relative_force_error": float(
-                normalizations.magnetic_relative_force_error
-            ),
+            "magnetic_relative_force_error": float(normalizations.magnetic_relative_force_error),
             "magnetic_normalized_l2": float(normalizations.magnetic_normalized_l2),
             "magnetic_normalized_linf": float(normalizations.magnetic_normalized_linf),
             "node_count": int(normalizations.node_count),

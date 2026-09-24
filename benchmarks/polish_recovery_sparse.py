@@ -35,6 +35,7 @@ from vmex.core.polish_variational import (
     native_coordinate_scales,
     native_force_jacobian_sparsity,
     native_physical_force_residual,
+    native_tangential_gauge_matrix,
     native_tangential_gauge_residual,
 )
 from vmex.core.strong_force import (
@@ -59,9 +60,7 @@ def _sha256(path: Path) -> str:
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", dir=path.parent, delete=False
-    ) as stream:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
         json.dump(payload, stream, indent=2, sort_keys=True)
         stream.write("\n")
@@ -86,15 +85,24 @@ def _validate_scope(state) -> None:
         raise ValueError("native mode table contains duplicate pairs")
     if np.any(n != 0) or not np.array_equal(m, np.arange(m.size)):
         raise NotImplementedError(
-            "this measured sparse-recovery generator supports only the canonical "
-            "axisymmetric m=0..mmax checkpoint"
+            "this measured sparse-recovery generator supports only the canonical axisymmetric m=0..mmax checkpoint"
         )
     if int(state.nfp) < 1 or int(state.jacobian_sign) not in (-1, 1):
         raise ValueError("checkpoint has invalid NFP or Jacobian orientation")
     for name in (
-        "R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin",
-        "phipf", "chipf", "pressure", "boundary_R_cos", "boundary_R_sin",
-        "boundary_Z_cos", "boundary_Z_sin",
+        "R_cos",
+        "R_sin",
+        "Z_cos",
+        "Z_sin",
+        "L_cos",
+        "L_sin",
+        "phipf",
+        "chipf",
+        "pressure",
+        "boundary_R_cos",
+        "boundary_R_sin",
+        "boundary_Z_cos",
+        "boundary_Z_sin",
     ):
         if not np.all(np.isfinite(np.asarray(getattr(state, name)))):
             raise ValueError(f"checkpoint array {name} contains nonfinite values")
@@ -113,46 +121,45 @@ def _load_original_problem(path: Path):
         saved_basis = np.asarray(data["gauge_row_basis"], dtype=int)
         saved_row_scale = np.asarray(data["gauge_row_scale"], dtype=float)
         radial_order = (
-            int(np.asarray(data["solve_radial_order"]).item())
-            if schema == "vmex.polish-recovery-native-state/2"
-            else 4
+            int(np.asarray(data["solve_radial_order"]).item()) if schema == "vmex.polish-recovery-native-state/2" else 4
         )
         ntheta = (
             int(np.asarray(data["solve_ntheta"]).item())
             if schema == "vmex.polish-recovery-native-state/2"
             else max(4 * int(np.max(np.abs(np.asarray(base.m)))) + 5, 8)
         )
-        nzeta = (
-            int(np.asarray(data["solve_nzeta"]).item())
-            if schema == "vmex.polish-recovery-native-state/2"
-            else 1
-        )
+        nzeta = int(np.asarray(data["solve_nzeta"]).item()) if schema == "vmex.polish-recovery-native-state/2" else 1
         if schema == "vmex.polish-recovery-native-state/2":
             if str(np.asarray(data["gauge_reference"]).item()) != "initial native state":
                 raise ValueError("unsupported checkpoint gauge reference")
-            np.testing.assert_allclose(
-                float(np.asarray(data["force_scale_N_per_m3"]).item()), FORCE_SCALE
-            )
-            np.testing.assert_allclose(
-                float(np.asarray(data["volume_scale_m3"]).item()), VOLUME_SCALE
-            )
-    plan = make_variational_plan(
-        base, radial_order=radial_order, ntheta=ntheta, nzeta=nzeta
-    )
+            np.testing.assert_allclose(float(np.asarray(data["force_scale_N_per_m3"]).item()), FORCE_SCALE)
+            np.testing.assert_allclose(float(np.asarray(data["volume_scale_m3"]).item()), VOLUME_SCALE)
+            if "input_sha256" in data:
+                if str(np.asarray(data["input_sha256"]).item()) != (
+                    "5b2740db6dbc91d6a1b43c283b95c959397a608566aeb54da7489203e1fe5102"
+                ):
+                    raise ValueError("checkpoint input hash is not the required deck")
+                if (
+                    float(np.asarray(data["gamma"]).item()) != 0.0
+                    or int(np.asarray(data["ncurr"]).item()) != 0
+                    or bool(np.asarray(data["lasym"]).item())
+                ):
+                    raise NotImplementedError("sparse recovery supports GAMMA=0, NCURR=0, LASYM=false")
+    plan = make_variational_plan(base, radial_order=radial_order, ntheta=ntheta, nzeta=nzeta)
     layout = make_native_correction_layout(base)
     gauge = make_native_gauge_plan(base, plan)
-    scale = np.asarray(native_coordinate_scales(base, layout, plan))
-    if coordinates.shape != (layout.size,) or saved_scale.shape != scale.shape:
+    recomputed_scale = np.asarray(native_coordinate_scales(base, layout, plan))
+    if coordinates.shape != (layout.size,) or saved_scale.shape != recomputed_scale.shape:
         raise ValueError("checkpoint coordinate vector or scale has the wrong shape")
-    np.testing.assert_allclose(saved_scale, scale, rtol=2.0e-13, atol=2.0e-13)
+    np.testing.assert_allclose(saved_scale, recomputed_scale, rtol=2.0e-13, atol=2.0e-13)
+    # A same-chart replay uses the serialized metric exactly.  Even a
+    # round-off-only contraction reorder can otherwise move large packed
+    # coefficients by ~1e-11 in physical coefficient space.
+    scale = saved_scale
     np.testing.assert_array_equal(saved_modes, np.asarray(gauge.row_modes))
     np.testing.assert_array_equal(saved_basis, np.asarray(gauge.row_basis))
-    np.testing.assert_allclose(
-        saved_row_scale, np.asarray(gauge.row_scale), rtol=2.0e-13, atol=2.0e-13
-    )
-    reconstructed = apply_high_order_correction(
-        base, layout.unpack(jnp.asarray(scale * coordinates))
-    )
+    np.testing.assert_allclose(saved_row_scale, np.asarray(gauge.row_scale), rtol=2.0e-13, atol=2.0e-13)
+    reconstructed = apply_high_order_correction(base, layout.unpack(jnp.asarray(scale * coordinates)))
     for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"):
         np.testing.assert_allclose(
             np.asarray(getattr(reconstructed, name)),
@@ -178,18 +185,9 @@ def _select_refinement(state, count: int, radial_order: int):
     indicator_order = max(int(radial_order) + 2, 6)
     plan = make_variational_plan(state, radial_order=indicator_order)
     samples = evaluate_tensorized_strong_force(state, plan)
-    weighted = (
-        plan.quadrature_weights
-        * state.jacobian_sign
-        * samples.sqrt_g
-        * jnp.sum(samples.force**2, axis=-1)
-    )
+    weighted = plan.quadrature_weights * state.jacobian_sign * samples.sqrt_g * jnp.sum(samples.force**2, axis=-1)
     span_count = state.radial_basis.breakpoints.size - 1
-    scores = (
-        np.asarray(jnp.sum(weighted, axis=(1, 2)))
-        .reshape(span_count, indicator_order)
-        .sum(axis=1)
-    )
+    scores = np.asarray(jnp.sum(weighted, axis=(1, 2))).reshape(span_count, indicator_order).sum(axis=1)
     if count >= span_count:
         raise ValueError("insert count must be smaller than the current span count")
     selected = np.sort(np.argsort(scores)[-count:])
@@ -200,14 +198,10 @@ def _select_refinement(state, count: int, radial_order: int):
 
 def _linear_problem(base, plan, layout, gauge, scale, coordinates):
     def force(value):
-        return native_physical_force_residual(
-            value, base, layout, gauge, scale, FORCE_SCALE, VOLUME_SCALE
-        )
+        return native_physical_force_residual(value, base, layout, gauge, scale, FORCE_SCALE, VOLUME_SCALE)
 
     def constraint(value):
-        return native_tangential_gauge_residual(
-            base, layout.unpack(scale * value), gauge
-        )
+        return native_tangential_gauge_residual(base, layout.unpack(scale * value), gauge)
 
     return force, constraint
 
@@ -221,22 +215,12 @@ def _tensorized_certificate(state) -> dict[str, float | str]:
     nzeta = max(4, 4 * (maximum_n + 1))
 
     def l2(order: int):
-        plan = make_variational_plan(
-            state, radial_order=order, ntheta=ntheta, nzeta=nzeta
-        )
+        plan = make_variational_plan(state, radial_order=order, ntheta=ntheta, nzeta=nzeta)
         samples = evaluate_tensorized_strong_force(state, plan)
-        weights = (
-            plan.quadrature_weights
-            * state.jacobian_sign
-            * samples.sqrt_g
-        )
+        weights = plan.quadrature_weights * state.jacobian_sign * samples.sqrt_g
         magnitude_squared = jnp.sum(samples.force**2, axis=-1)
         value = jnp.sqrt(jnp.sum(weights * magnitude_squared) / jnp.sum(weights))
-        signed_jacobian = (
-            state.jacobian_sign
-            * samples.sqrt_g
-            / jnp.maximum(plan.rho[:, None, None], 1.0e-14)
-        )
+        signed_jacobian = state.jacobian_sign * samples.sqrt_g / jnp.maximum(plan.rho[:, None, None], 1.0e-14)
         return plan, samples, value, jnp.min(signed_jacobian)
 
     coarse_plan, _, coarse, _ = l2(6)
@@ -250,9 +234,7 @@ def _tensorized_certificate(state) -> dict[str, float | str]:
     zeta = fine_plan.zeta[zeta_indices]
     oracle = evaluate_strong_force(state, rho, theta, zeta).force
     tensor = fine_samples.force[radial_indices, theta_indices, zeta_indices]
-    point_error = jnp.linalg.norm(tensor - oracle) / jnp.maximum(
-        jnp.linalg.norm(oracle), 1.0e-300
-    )
+    point_error = jnp.linalg.norm(tensor - oracle) / jnp.maximum(jnp.linalg.norm(oracle), 1.0e-300)
     jax.block_until_ready((fine, radial_difference, minimum_j, point_error))
     return {
         "method": "overintegrated tensorized L2 with independent point-force spot checks",
@@ -292,8 +274,7 @@ def _compressed_jacobian(force, coordinates, structure):
         actual = np.asarray(matrix.T @ weight)
         transpose_error = max(
             transpose_error,
-            float(np.linalg.norm(actual - expected))
-            / max(float(np.linalg.norm(expected)), np.finfo(float).tiny),
+            float(np.linalg.norm(actual - expected)) / max(float(np.linalg.norm(expected)), np.finfo(float).tiny),
         )
     return matrix, seconds, error, transpose_error
 
@@ -302,9 +283,7 @@ def _sparse_feasible_step(matrix, residual, constraint, defect, damping: float):
     normal = (matrix.T @ matrix).tocsr()
     if damping:
         normal = normal + damping * sparse.eye(normal.shape[0], format="csr")
-    kkt = sparse.bmat(
-        [[normal, constraint.T], [constraint, None]], format="csr"
-    )
+    kkt = sparse.bmat([[normal, constraint.T], [constraint, None]], format="csr")
     rhs = -np.concatenate((np.asarray(matrix.T @ residual), defect))
     pattern, values = CsrPattern.from_scipy(kkt, include_diagonal=True)
     # SOLVAX's SuperLU backend does not expose a native memory cap.  Admission
@@ -312,9 +291,7 @@ def _sparse_feasible_step(matrix, residual, constraint, defect, damping: float):
     # memory controls are available only for optional MUMPS builds.
     options = HostFactorOptions(backend="superlu")
     started = time.perf_counter()
-    solution = np.asarray(
-        sparse_solve(pattern, jnp.asarray(values), jnp.asarray(rhs), options=options)
-    )
+    solution = np.asarray(sparse_solve(pattern, jnp.asarray(values), jnp.asarray(rhs), options=options))
     jax.block_until_ready(solution)
     seconds = time.perf_counter() - started
     step = solution[: matrix.shape[1]]
@@ -324,9 +301,7 @@ def _sparse_feasible_step(matrix, residual, constraint, defect, damping: float):
     feasibility = constraint @ step + defect
     kkt_residual = np.concatenate((stationarity, feasibility))
     scale = max(float(np.linalg.norm(rhs)), np.finfo(float).tiny)
-    projected_scale = max(
-        float(np.linalg.norm(matrix.T @ residual)), np.finfo(float).tiny
-    )
+    projected_scale = max(float(np.linalg.norm(matrix.T @ residual)), np.finfo(float).tiny)
     return step, {
         "model_norm": float(np.linalg.norm(model)),
         "original_constraint_norm": float(np.linalg.norm(feasibility)),
@@ -340,10 +315,45 @@ def _sparse_feasible_step(matrix, residual, constraint, defect, damping: float):
     }
 
 
+def _sparse_projected_gradient(gradient, constraint):
+    """Project a gradient through the original sparse gauge rows."""
+
+    coordinates = int(constraint.shape[1])
+    augmented = sparse.bmat(
+        [
+            [sparse.eye(coordinates, format="csr"), constraint.T],
+            [constraint, None],
+        ],
+        format="csr",
+    )
+    rhs = np.concatenate((np.asarray(gradient), np.zeros(constraint.shape[0])))
+    pattern, values = CsrPattern.from_scipy(augmented, include_diagonal=True)
+    solution = np.asarray(
+        sparse_solve(
+            pattern,
+            jnp.asarray(values),
+            jnp.asarray(rhs),
+            options=HostFactorOptions(backend="superlu"),
+        )
+    )
+    projected = solution[:coordinates]
+    multipliers = solution[coordinates:]
+    stationarity = projected + constraint.T @ multipliers - gradient
+    feasibility = constraint @ projected
+    residual = np.concatenate((stationarity, feasibility))
+    return projected, {
+        "projection_true_residual_relative": float(np.linalg.norm(residual))
+        / max(float(np.linalg.norm(rhs)), np.finfo(float).tiny),
+        "projection_constraint_norm": float(np.linalg.norm(feasibility)),
+        "projection_kkt_nnz": int(augmented.nnz),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--input-state", type=Path,
+        "--input-state",
+        type=Path,
         default=Path("benchmarks/polish_recovery_r3_adaptive8_state.npz"),
     )
     parser.add_argument("--insert-count", type=int, default=0)
@@ -357,24 +367,19 @@ def main() -> None:
     parser.add_argument("--damping", type=float, default=0.0)
     parser.add_argument("--max-steps", type=int, default=1)
     parser.add_argument("--memory-gib", type=float, default=2.0)
+    parser.add_argument("--certificate", choices=("point", "tensorized"), default="point")
     parser.add_argument(
-        "--certificate", choices=("point", "tensorized"), default="point"
-    )
-    parser.add_argument(
-        "--output-json", type=Path,
+        "--output-json",
+        type=Path,
         default=Path("benchmarks/polish_recovery_r4_sparse.json"),
     )
     parser.add_argument(
-        "--output-state", type=Path,
+        "--output-state",
+        type=Path,
         default=Path("benchmarks/polish_recovery_r4_sparse_state.npz"),
     )
     args = parser.parse_args()
-    if (
-        args.insert_count < 0
-        or args.max_steps < 0
-        or args.radial_order < 2
-        or args.damping < 0.0
-    ):
+    if args.insert_count < 0 or args.max_steps < 0 or args.radial_order < 2 or args.damping < 0.0:
         parser.error("counts and damping must be nonnegative")
     if args.memory_gib <= 0.0:
         parser.error("--memory-gib must be positive")
@@ -389,20 +394,14 @@ def main() -> None:
         old_scale,
         old_coordinates,
         old_radial_order,
-    ) = (
-        _load_original_problem(args.input_state)
-    )
+    ) = _load_original_problem(args.input_state)
     del old_layout, old_gauge, old_scale
     current_maximum_m = int(np.max(np.asarray(accepted.m)))
-    angular_enrichment = (
-        args.maximum_m is not None and args.maximum_m > current_maximum_m
-    )
+    angular_enrichment = args.maximum_m is not None and args.maximum_m > current_maximum_m
     if args.maximum_m is not None and args.maximum_m < current_maximum_m:
         parser.error("--maximum-m cannot remove checkpoint modes")
     if args.insert_count or args.reanchor or angular_enrichment:
-        base, selected, inserted, scores = _select_refinement(
-            accepted, args.insert_count, args.radial_order
-        )
+        base, selected, inserted, scores = _select_refinement(accepted, args.insert_count, args.radial_order)
         if angular_enrichment:
             new_m = np.arange(current_maximum_m + 1, args.maximum_m + 1, dtype=int)
             base = append_high_order_state_modes(base, new_m, np.zeros_like(new_m))
@@ -424,9 +423,7 @@ def main() -> None:
         scores = None
         stage = "saved original frozen gauge"
 
-    force, constraint_function = _linear_problem(
-        base, plan, layout, gauge, scale, coordinates
-    )
+    force, constraint_function = _linear_problem(base, plan, layout, gauge, scale, coordinates)
     residual = np.asarray(force(coordinates))
     defect = np.asarray(constraint_function(coordinates))
     structure = native_force_jacobian_sparsity(layout, plan)
@@ -437,37 +434,27 @@ def main() -> None:
     limit = int(args.memory_gib * 1024**3)
     if estimated_sparse_bytes > limit:
         raise MemoryError(
-            f"sparse force values/indices need about {estimated_sparse_bytes} bytes; "
-            f"cap is {limit} before derivatives"
+            f"sparse force values/indices need about {estimated_sparse_bytes} bytes; cap is {limit} before derivatives"
         )
     constraint_started = time.perf_counter()
-    constraint = sparse.csr_matrix(
-        np.asarray(jax.jacfwd(constraint_function)(coordinates))
-    )
-    constraint.eliminate_zeros()
+    constraint = native_tangential_gauge_matrix(base, layout, gauge, scale)
     constraint_seconds = time.perf_counter() - constraint_started
-    if np.linalg.matrix_rank(constraint.toarray(), tol=1.0e-11) != gauge.size:
-        raise ValueError("native gauge matrix is not full row rank")
 
     history = []
     assembly_seconds = 0.0
     solve_seconds = 0.0
     last_matrix = None
+    last_linearization_coordinates = None
     for iteration in range(args.max_steps):
         residual = np.asarray(force(coordinates))
         defect = np.asarray(constraint_function(coordinates))
-        matrix, elapsed, product_error, transpose_error = _compressed_jacobian(
-            force, coordinates, structure
-        )
+        matrix, elapsed, product_error, transpose_error = _compressed_jacobian(force, coordinates, structure)
         last_matrix = matrix
+        last_linearization_coordinates = np.asarray(coordinates)
         assembly_seconds += elapsed
         if product_error > 2.0e-9 or transpose_error > 2.0e-9:
-            raise AssertionError(
-                f"compressed derivative mismatch: A={product_error}, AT={transpose_error}"
-            )
-        step, linear = _sparse_feasible_step(
-            matrix, residual, constraint, defect, args.damping
-        )
+            raise AssertionError(f"compressed derivative mismatch: A={product_error}, AT={transpose_error}")
+        step, linear = _sparse_feasible_step(matrix, residual, constraint, defect, args.damping)
         solve_seconds += linear["factor_solve_seconds"]
         linear_passes = (
             linear["original_constraint_norm"] < 1.0e-10
@@ -481,18 +468,15 @@ def main() -> None:
                 candidate = coordinates + fraction * jnp.asarray(step)
                 candidate_force = float(jnp.linalg.norm(force(candidate)))
                 candidate_gauge = float(jnp.linalg.norm(constraint_function(candidate)))
-                candidate_state = apply_high_order_correction(
-                    base, layout.unpack(scale * candidate)
-                )
+                candidate_state = apply_high_order_correction(base, layout.unpack(scale * candidate))
                 minimum_j = float(minimum_signed_jacobian(candidate_state, plan))
                 trial = {
                     "fraction": fraction,
                     "force_residual_norm": candidate_force,
                     "gauge_residual_norm": candidate_gauge,
                     "minimum_signed_jacobian": minimum_j,
-                    "relative_force_reduction": (
-                        float(np.linalg.norm(residual)) - candidate_force
-                    ) / max(float(np.linalg.norm(residual)), np.finfo(float).tiny),
+                    "relative_force_reduction": (float(np.linalg.norm(residual)) - candidate_force)
+                    / max(float(np.linalg.norm(residual)), np.finfo(float).tiny),
                 }
                 trials.append(trial)
                 if (
@@ -521,9 +505,29 @@ def main() -> None:
             break
         coordinates = accepted_coordinates
 
-    final_state = apply_high_order_correction(
-        base, layout.unpack(scale * coordinates)
-    )
+    final_state = apply_high_order_correction(base, layout.unpack(scale * coordinates))
+    arrays = _checkpoint_arrays(final_state, base, coordinates, scale, gauge)
+    _write_npz_atomic(args.output_state, arrays)
+    pending = {
+        "schema": "vmex.polish-recovery/4",
+        "experiment": "R5-compressed-sparse-feasible-force-step",
+        "status": "candidate-saved-certification-pending",
+        "complete": False,
+        "product_qualified": False,
+        "source": {
+            "input_native_state": str(args.input_state),
+            "input_native_state_sha256": _sha256(args.input_state),
+            "generator": str(Path(__file__).resolve().relative_to(Path.cwd())),
+            "generator_sha256": _sha256(Path(__file__)),
+            "output_native_state": str(args.output_state),
+            "output_native_state_sha256": _sha256(args.output_state),
+        },
+        "execution": {"phase": "certificate", "outcome": "running"},
+        "certificate": {"complete": False, "force_pass": False},
+        "stationarity": {"complete": False, "pass": False},
+        "derivative": {"complete": False, "pass": False},
+    }
+    _write_json_atomic(args.output_json, pending)
     certificate_started = time.perf_counter()
     if args.certificate == "point":
         point = certify_strong_force(final_state)
@@ -531,9 +535,7 @@ def main() -> None:
             "method": "independent shifted point oracle",
             "force_rms_N_per_m3": float(point.absolute_l2),
             "epsilon_B": float(point.absolute_l2 / FORCE_SCALE),
-            "radial_refinement_difference": float(
-                point.radial_refinement_difference
-            ),
+            "radial_refinement_difference": float(point.radial_refinement_difference),
             "minimum_signed_jacobian": float(point.minimum_signed_jacobian),
             "point_force_relative_error": 0.0,
         }
@@ -542,27 +544,32 @@ def main() -> None:
     certificate_seconds = time.perf_counter() - certificate_started
     final_residual, pullback = jax.vjp(force, coordinates)
     final_gradient = np.asarray(pullback(final_residual)[0])
-    # Constraint is fixed and linear for this stage.  Project with a thin QR;
-    # no dense nullspace is formed.
-    q_range = np.linalg.qr(constraint.toarray().T, mode="reduced")[0]
-    projected = final_gradient - q_range @ (q_range.T @ final_gradient)
+    projected, projection = _sparse_projected_gradient(final_gradient, constraint)
     final_stationarity = float(np.linalg.norm(projected)) / max(
         float(np.linalg.norm(final_gradient)), np.finfo(float).tiny
     )
     final_stationarity_frobenius = None
+    stationarity_assembly_seconds = 0.0
+    if last_linearization_coordinates is not None and not np.array_equal(
+        last_linearization_coordinates, np.asarray(coordinates)
+    ):
+        last_matrix, stationarity_assembly_seconds, product_error, transpose_error = _compressed_jacobian(
+            force, coordinates, structure
+        )
+        if product_error > 2.0e-9 or transpose_error > 2.0e-9:
+            raise AssertionError("final compressed derivative mismatch")
     if last_matrix is not None:
         final_stationarity_frobenius = float(np.linalg.norm(projected)) / max(
-            float(np.linalg.norm(last_matrix.data))
-            * float(np.linalg.norm(np.asarray(final_residual))),
+            float(np.linalg.norm(last_matrix.data)) * float(np.linalg.norm(np.asarray(final_residual))),
             np.finfo(float).tiny,
         )
 
-    arrays = _checkpoint_arrays(final_state, base, coordinates, scale, gauge)
-    _write_npz_atomic(args.output_state, arrays)
     output = {
-        "schema": "vmex.polish-recovery/3",
-        "experiment": "R4-compressed-sparse-feasible-force-step",
+        "schema": "vmex.polish-recovery/4",
+        "experiment": "R5-compressed-sparse-feasible-force-step",
         "status": "measured-not-promoted",
+        "complete": True,
+        "product_qualified": False,
         "source": {
             "input_native_state": str(args.input_state),
             "input_native_state_sha256": _sha256(args.input_state),
@@ -579,9 +586,7 @@ def main() -> None:
             "fixed_profiles": True,
             "damping": args.damping,
             "solve_radial_order": (
-                args.radial_order
-                if args.insert_count or args.reanchor or angular_enrichment
-                else old_radial_order
+                args.radial_order if args.insert_count or args.reanchor or angular_enrichment else old_radial_order
             ),
         },
         "refinement": {
@@ -605,22 +610,15 @@ def main() -> None:
             "final_force_residual_norm": float(jnp.linalg.norm(final_residual)),
             "final_gauge_residual_norm": float(jnp.linalg.norm(constraint_function(coordinates))),
             "final_projected_gradient_relative_to_full": final_stationarity,
-            "final_projected_gradient_frobenius_relative": (
-                final_stationarity_frobenius
-            ),
+            "final_projected_gradient_frobenius_relative": (final_stationarity_frobenius),
+            **projection,
             "force_certificate": certificate,
             "independent_force_rms_N_per_m3": (
-                certificate["force_rms_N_per_m3"]
-                if args.certificate == "point"
-                else None
+                certificate["force_rms_N_per_m3"] if args.certificate == "point" else None
             ),
-            "independent_epsilon_B": (
-                certificate["epsilon_B"] if args.certificate == "point" else None
-            ),
+            "independent_epsilon_B": (certificate["epsilon_B"] if args.certificate == "point" else None),
             "independent_radial_refinement_difference": (
-                certificate["radial_refinement_difference"]
-                if args.certificate == "point"
-                else None
+                certificate["radial_refinement_difference"] if args.certificate == "point" else None
             ),
             "minimum_signed_jacobian": certificate["minimum_signed_jacobian"],
         },
@@ -630,6 +628,7 @@ def main() -> None:
             "peak_process_rss_bytes": _peak_rss_bytes(),
             "constraint_assembly_seconds": constraint_seconds,
             "compressed_force_assembly_seconds": assembly_seconds,
+            "final_stationarity_assembly_seconds": stationarity_assembly_seconds,
             "sparse_factor_solve_seconds": solve_seconds,
             "certificate_seconds": certificate_seconds,
             "total_process_seconds": time.perf_counter() - started,

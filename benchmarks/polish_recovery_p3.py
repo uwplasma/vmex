@@ -109,11 +109,7 @@ def _feasible_least_squares_step(
         -np.asarray(defect)[pivots],
         lower=True,
     )
-    reduced = (
-        np.asarray(reduced_jacobian)
-        if reduced_jacobian is not None
-        else jacobian @ nullspace
-    )
+    reduced = np.asarray(reduced_jacobian) if reduced_jacobian is not None else jacobian @ nullspace
     if reduced.shape != (jacobian.shape[0], nullspace.shape[1]):
         raise ValueError("reduced Jacobian has the wrong shape")
     reduced_step, _, rank, singular_values = lstsq(
@@ -132,9 +128,7 @@ def _feasible_least_squares_step(
         float(np.linalg.norm(reduced)) * model_norm,
         np.finfo(float).tiny,
     )
-    smallest = (
-        float(singular_values[int(rank) - 1]) if int(rank) else 0.0
-    )
+    smallest = float(singular_values[int(rank) - 1]) if int(rank) else 0.0
     return FeasibleLeastSquaresResult(
         step=step,
         rank=int(rank),
@@ -171,6 +165,10 @@ def _checkpoint_arrays(
     *,
     force_scale: float = 5915447.712414409,
     volume_scale: float = 633.7993467060758,
+    input_sha256: str = "5b2740db6dbc91d6a1b43c283b95c959397a608566aeb54da7489203e1fe5102",
+    gamma: float = 0.0,
+    ncurr: int = 0,
+    lasym: bool = False,
 ):
     spans = int(state.radial_basis.breakpoints.size - 1)
     radial_points, ntheta, nzeta = gauge.variational.shape
@@ -198,6 +196,10 @@ def _checkpoint_arrays(
         "volume_scale_m3": np.asarray(volume_scale),
         "gauge_reference": np.asarray("initial native state"),
         "model_scope": np.asarray("axisymmetric fixed-profile recovery benchmark"),
+        "input_sha256": np.asarray(input_sha256),
+        "gamma": np.asarray(gamma),
+        "ncurr": np.asarray(ncurr),
+        "lasym": np.asarray(lasym),
     }
     for prefix, value in (("initial", initial_state), ("accepted", state)):
         for name in (
@@ -221,9 +223,7 @@ def _checkpoint_arrays(
 
 def _write_npz_atomic(path: Path, arrays: dict[str, np.ndarray]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="wb", suffix=".npz", dir=path.parent, delete=False
-    ) as stream:
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".npz", dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
         np.savez_compressed(stream, **arrays)
     os.replace(temporary, path)
@@ -231,9 +231,7 @@ def _write_npz_atomic(path: Path, arrays: dict[str, np.ndarray]) -> None:
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", dir=path.parent, delete=False
-    ) as stream:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
         json.dump(payload, stream, indent=2, sort_keys=True)
         stream.write("\n")
@@ -242,9 +240,7 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--input", type=Path, default=Path("examples/data/input.shaped_tokamak_pressure")
-    )
+    parser.add_argument("--input", type=Path, default=Path("examples/data/input.shaped_tokamak_pressure"))
     parser.add_argument(
         "--wout",
         type=Path,
@@ -301,8 +297,7 @@ def main() -> None:
     memory_limit = int(args.dense_memory_gib * 1024**3)
     if memory["explicit_array_bytes"] > memory_limit:
         raise MemoryError(
-            "dense force plus one reduced Jacobian need "
-            f"{memory['explicit_array_bytes']} bytes; cap is {memory_limit}"
+            f"dense force plus one reduced Jacobian need {memory['explicit_array_bytes']} bytes; cap is {memory_limit}"
         )
     constraint_started = time.perf_counter()
     constraint = np.asarray(jax.jacfwd(gauge_residual)(coordinates))
@@ -373,9 +368,7 @@ def main() -> None:
                 "projected_normal_residual_norm": solve.projected_normal_norm,
                 "projected_normal_residual_relative": solve.projected_normal_relative,
                 "largest_reduced_singular_value": solve.largest_singular_value,
-                "smallest_retained_reduced_singular_value": (
-                    solve.smallest_retained_singular_value
-                ),
+                "smallest_retained_reduced_singular_value": (solve.smallest_retained_singular_value),
                 "accepted": accepted is not None,
                 "trials": trials,
             }
@@ -391,8 +384,8 @@ def main() -> None:
     certificate_started = time.perf_counter()
     certificate = certify_strong_force(accepted_state)
     certificate_seconds = time.perf_counter() - certificate_started
-    final_projected, final_gradient, final_projected_relative = (
-        _final_projected_gradient(force_residual, coordinates, nullspace)
+    final_projected, final_gradient, final_projected_relative = _final_projected_gradient(
+        force_residual, coordinates, nullspace
     )
     arrays = _checkpoint_arrays(
         accepted_state,
@@ -447,17 +440,13 @@ def main() -> None:
             "final_projected_gradient_relative_to_full": final_projected_relative,
             "independent_force_rms_N_per_m3": float(certificate.absolute_l2),
             "independent_epsilon_B": float(certificate.absolute_l2 / force_scale),
-            "independent_radial_refinement_difference": float(
-                certificate.radial_refinement_difference
-            ),
+            "independent_radial_refinement_difference": float(certificate.radial_refinement_difference),
             "minimum_signed_jacobian": float(certificate.minimum_signed_jacobian),
         },
         "work": {
             "explicit_jacobian_shape": [force_rows, layout.size],
             "explicit_jacobian_bytes": memory["full_jacobian_bytes"],
-            "explicit_reduced_jacobian_bytes": memory[
-                "one_reduced_jacobian_bytes"
-            ],
+            "explicit_reduced_jacobian_bytes": memory["one_reduced_jacobian_bytes"],
             "explicit_array_budget_bytes": memory["explicit_array_bytes"],
             "dense_memory_cap_bytes": memory_limit,
             "constraint_factor_seconds": constraint_seconds,

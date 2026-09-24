@@ -200,33 +200,21 @@ def make_variational_plan(
     order = degree + 3 if radial_order is None else int(radial_order)
     if order < 2:
         raise ValueError("radial_order must be at least two")
-    s, weights_s = _span_quadrature(
-        np.asarray(state.radial_basis.breakpoints, dtype=float), order
-    )
+    s, weights_s = _span_quadrature(np.asarray(state.radial_basis.breakpoints, dtype=float), order)
     rho = np.sqrt(s)
     # The radial quadrature is constructed in s, while sqrt_g is the
     # Jacobian of (rho, theta, zeta): d rho = ds / (2 rho).
     weights_rho = weights_s / (2.0 * rho)
     basis = np.asarray(state.radial_basis.basis_matrix(s), dtype=float)
-    basis_s = np.asarray(
-        state.radial_basis.basis_matrix(s, derivative=1), dtype=float
-    )
-    basis_ss = np.asarray(
-        state.radial_basis.basis_matrix(s, derivative=2), dtype=float
-    )
+    basis_s = np.asarray(state.radial_basis.basis_matrix(s, derivative=1), dtype=float)
+    basis_ss = np.asarray(state.radial_basis.basis_matrix(s, derivative=2), dtype=float)
     m = np.abs(np.asarray(state.m, dtype=int))
     powers = rho[None, :, None] ** m[:, None, None]
     radial_value = powers * basis[None]
     leading = np.zeros_like(radial_value)
     nonzero = m > 0
-    leading[nonzero] = (
-        m[nonzero, None, None]
-        * rho[None, :, None] ** (m[nonzero, None, None] - 1)
-        * basis[None]
-    )
-    radial_derivative = leading + (
-        2.0 * rho[None, :, None] ** (m[:, None, None] + 1) * basis_s[None]
-    )
+    leading[nonzero] = m[nonzero, None, None] * rho[None, :, None] ** (m[nonzero, None, None] - 1) * basis[None]
+    radial_derivative = leading + (2.0 * rho[None, :, None] ** (m[:, None, None] + 1) * basis_s[None])
     leading_second = np.zeros_like(radial_value)
     second_active = m >= 2
     leading_second[second_active] = (
@@ -237,12 +225,8 @@ def make_variational_plan(
     )
     radial_second_derivative = (
         leading_second
-        + (4 * m[:, None, None] + 2)
-        * rho[None, :, None] ** m[:, None, None]
-        * basis_s[None]
-        + 4.0
-        * rho[None, :, None] ** (m[:, None, None] + 2)
-        * basis_ss[None]
+        + (4 * m[:, None, None] + 2) * rho[None, :, None] ** m[:, None, None] * basis_s[None]
+        + 4.0 * rho[None, :, None] ** (m[:, None, None] + 2) * basis_ss[None]
     )
 
     signed_m = np.asarray(state.m, dtype=int)
@@ -272,9 +256,7 @@ def make_variational_plan(
     angular_weight = (2.0 * np.pi / ntheta) * (2.0 * np.pi / nzeta)
     # zeta spans one field period and sqrt_g contains dphi/dzeta=1/nfp;
     # multiplying by nfp integrates the full torus.
-    quadrature_weights = (
-        float(state.nfp) * weights_rho[:, None, None] * angular_weight
-    )
+    quadrature_weights = float(state.nfp) * weights_rho[:, None, None] * angular_weight
     return VariationalPlan(
         rho=jnp.asarray(rho),
         theta=jnp.asarray(theta),
@@ -312,14 +294,10 @@ def make_native_gauge_plan(
     """Build bordered normalized-tangent rows without a global gauge SVD."""
 
     if lasym:
-        raise NotImplementedError(
-            "the nonsymmetric native gauge requires paired sine/cosine rows"
-        )
+        raise NotImplementedError("the nonsymmetric native gauge requires paired sine/cosine rows")
     if tangent_floor <= 0.0:
         raise ValueError("tangent_floor must be positive")
-    mode_zero = (np.asarray(state.m, dtype=int) == 0) & (
-        np.asarray(state.n, dtype=int) == 0
-    )
+    mode_zero = (np.asarray(state.m, dtype=int) == 0) & (np.asarray(state.n, dtype=int) == 0)
     row_modes, row_basis = np.nonzero(
         np.broadcast_to((~mode_zero)[:, None], (state.m.size, state.radial_basis.size))
         & (np.arange(state.radial_basis.size)[None, :] < state.radial_basis.size - 1)
@@ -328,9 +306,9 @@ def make_native_gauge_plan(
         raise ValueError("native gauge has no symmetry-allowed tangent rows")
     radial = np.asarray(variational.radial_value)[row_modes, :, row_basis]
     angular = np.asarray(variational.sine)[row_modes]
-    weights = np.broadcast_to(
-        np.asarray(variational.quadrature_weights), variational.shape
-    ).reshape((variational.shape[0], -1))
+    weights = np.broadcast_to(np.asarray(variational.quadrature_weights), variational.shape).reshape(
+        (variational.shape[0], -1)
+    )
     mass = np.einsum("ij,ki,kj->k", weights, radial**2, angular**2)
     if np.any(~np.isfinite(mass)) or np.any(mass <= 0.0):
         raise ValueError("native gauge contains an unresolved test row")
@@ -374,25 +352,131 @@ def native_coordinate_scales(
     remainder = indices % block
     modes = remainder // layout.nbasis
     basis_indices = remainder % layout.nbasis
-    radial = np.asarray(variational.radial_value)[modes, :, basis_indices]
-    cosine = np.asarray(variational.cosine)[modes]
-    sine = np.asarray(variational.sine)[modes]
-    angular = np.where((fields_index % 2)[:, None] == 0, cosine, sine)
-    scalar_basis = radial[:, :, None] * angular[:, None, :]
-    displacement_factor = np.where(
-        (fields_index >= 4)[:, None, None], tangent_factor[None], 1.0
-    )
-    norms = np.sqrt(
-        np.einsum(
-            "ij,kij,kij->k",
-            weights,
-            scalar_basis**2,
-            displacement_factor,
+    radial = np.asarray(variational.radial_value)
+    cosine_squared = np.asarray(variational.cosine) ** 2
+    sine_squared = np.asarray(variational.sine) ** 2
+
+    # Contract angles before radial basis functions.  This is algebraically
+    # identical to constructing one (coordinate, radius, angle) tensor, but
+    # its largest temporary is (mode, radius, basis).  At the basis-191
+    # checkpoint that removes an 8 GiB logical coordinate-by-grid array.
+    def squared_norms(angular_squared: np.ndarray, factor: np.ndarray) -> np.ndarray:
+        angular_moment = (weights * factor) @ angular_squared.T
+        return np.einsum(
+            "mrk,rm->mk",
+            radial * radial,
+            angular_moment,
+            optimize=True,
         )
-    )
+
+    geometry_cosine = squared_norms(cosine_squared, np.ones_like(weights))
+    geometry_sine = squared_norms(sine_squared, np.ones_like(weights))
+    lambda_cosine = squared_norms(cosine_squared, tangent_factor)
+    lambda_sine = squared_norms(sine_squared, tangent_factor)
+    table = np.stack((geometry_cosine, geometry_sine, lambda_cosine, lambda_sine), axis=0)
+    kind = (fields_index % 2) + 2 * (fields_index >= 4)
+    norms = np.sqrt(table[kind, modes, basis_indices])
     if np.any(~np.isfinite(norms)) or np.any(norms <= 0.0):
         raise ValueError("native coordinate layout contains a zero physical column")
     return jnp.asarray(1.0 / norms)
+
+
+def native_tangential_gauge_matrix(
+    state: HighOrderEquilibriumState,
+    layout: NativeCorrectionLayout,
+    gauge: NativeGaugePlan,
+    coordinate_scale: Array,
+) -> Any:
+    """Assemble the frozen linear gauge directly as a SciPy CSR matrix.
+
+    This is exactly the derivative of :func:`native_tangential_gauge_residual`
+    with respect to the packed, scaled native coordinates.  It contracts the
+    angular tangent projection first and then couples only overlapping radial
+    B-spline supports, avoiding a dense global ``jacfwd`` and dense QR setup.
+    Lambda columns are structurally zero because this gauge measures frozen
+    physical R/Z tangent motion.
+    """
+
+    try:
+        from scipy import sparse
+    except ImportError as error:  # pragma: no cover - SciPy is a VMEX dependency
+        raise ImportError("native sparse gauge assembly requires SciPy") from error
+
+    plan = gauge.variational
+    scale = np.asarray(coordinate_scale, dtype=float)
+    if scale.shape != (layout.size,) or np.any(~np.isfinite(scale)):
+        raise ValueError("native gauge coordinate scale has the wrong shape")
+    active = np.asarray(layout.active_indices, dtype=np.int64)
+    block = int(layout.mnmax) * int(layout.nbasis)
+    full_to_packed = np.full(6 * block, -1, dtype=np.int64)
+    full_to_packed[active] = np.arange(layout.size, dtype=np.int64)
+
+    fields = evaluate_variational_fields(state, plan)
+    tangent = np.asarray(fields.dposition_dtheta).reshape((plan.shape[0], -1, 3))
+    tangent_norm = np.sqrt(np.sum(tangent * tangent, axis=-1) + float(gauge.tangent_floor) ** 2)
+    _, zz = np.meshgrid(np.asarray(plan.theta), np.asarray(plan.zeta), indexing="ij")
+    phi = zz.reshape(-1) / float(plan.nfp)
+    radial_component = (tangent[..., 0] * np.cos(phi)[None] + tangent[..., 1] * np.sin(phi)[None]) / tangent_norm
+    vertical_component = tangent[..., 2] / tangent_norm
+    quadrature = np.broadcast_to(np.asarray(plan.quadrature_weights), plan.shape).reshape((plan.shape[0], -1))
+    radial = np.asarray(plan.radial_value)
+    radial_support = radial != 0.0
+    cosine = np.asarray(plan.cosine)
+    sine = np.asarray(plan.sine)
+    row_modes = np.asarray(gauge.row_modes, dtype=np.int64)
+    row_basis = np.asarray(gauge.row_basis, dtype=np.int64)
+    row_scale = np.asarray(gauge.row_scale, dtype=float)
+
+    rows: list[np.ndarray] = []
+    columns: list[np.ndarray] = []
+    values: list[np.ndarray] = []
+    for test_mode in np.unique(row_modes):
+        row_positions = np.flatnonzero(row_modes == test_mode)
+        test_basis = row_basis[row_positions]
+        test_radial = radial[test_mode]
+        test_support = radial_support[test_mode]
+        test_angular = sine[test_mode]
+        for field, component in (
+            (0, radial_component),
+            (1, radial_component),
+            (2, vertical_component),
+            (3, vertical_component),
+        ):
+            angular_table = cosine if field % 2 == 0 else sine
+            for mode in range(layout.mnmax):
+                packed = full_to_packed[field * block + mode * int(layout.nbasis) + np.arange(layout.nbasis)]
+                active_basis = np.flatnonzero(packed >= 0)
+                if active_basis.size == 0:
+                    continue
+                angular_moment = np.sum(
+                    quadrature * component * test_angular[None] * angular_table[mode][None],
+                    axis=1,
+                )
+                coupled = test_radial.T @ (angular_moment[:, None] * radial[mode])
+                overlap = test_support.T @ radial_support[mode]
+                selected_overlap = overlap[np.ix_(test_basis, active_basis)]
+                local_rows, local_columns = np.nonzero(selected_overlap)
+                if local_rows.size == 0:
+                    continue
+                packed_columns = packed[active_basis[local_columns]]
+                rows.append(row_positions[local_rows])
+                columns.append(packed_columns)
+                values.append(
+                    coupled[test_basis[local_rows], active_basis[local_columns]]
+                    * row_scale[row_positions[local_rows]]
+                    * scale[packed_columns]
+                )
+    if not rows:
+        raise ValueError("native sparse gauge has no structural entries")
+    matrix = sparse.coo_matrix(
+        (np.concatenate(values), (np.concatenate(rows), np.concatenate(columns))),
+        shape=(gauge.size, layout.size),
+    ).tocsr()
+    matrix.sum_duplicates()
+    matrix.eliminate_zeros()
+    if np.any(np.diff(matrix.indptr) == 0) or np.any(~np.isfinite(matrix.data)):
+        raise ValueError("native sparse gauge contains an empty or nonfinite row")
+    return matrix
 
 
 def native_force_jacobian_sparsity(
@@ -420,18 +504,13 @@ def native_force_jacobian_sparsity(
     active = np.asarray(layout.active_indices, dtype=np.int64)
     block = int(layout.mnmax) * int(layout.nbasis)
     full_size = 6 * block
-    if (
-        active.ndim != 1
-        or np.unique(active).size != active.size
-        or np.any(active < 0)
-        or np.any(active >= full_size)
-    ):
+    if active.ndim != 1 or np.unique(active).size != active.size or np.any(active < 0) or np.any(active >= full_size):
         raise ValueError("native active indices are not a valid packed layout")
     radial_index = active % int(layout.nbasis)
     support = (
-        np.asarray(variational.radial_value) != 0.0
-    ) | (np.asarray(variational.radial_derivative) != 0.0) | (
-        np.asarray(variational.radial_second_derivative) != 0.0
+        (np.asarray(variational.radial_value) != 0.0)
+        | (np.asarray(variational.radial_derivative) != 0.0)
+        | (np.asarray(variational.radial_second_derivative) != 0.0)
     )
     # All retained modes use the same knot vector.  Taking the union protects
     # the axis-power special cases without inferring zeros from a state value.
@@ -455,15 +534,11 @@ def native_force_jacobian_sparsity(
     csc = pattern.tocsc()
     for value in np.unique(color):
         columns = np.flatnonzero(color == value).astype(np.int32)
-        touched = np.concatenate(
-            [csc.indices[csc.indptr[j] : csc.indptr[j + 1]] for j in columns]
-        )
+        touched = np.concatenate([csc.indices[csc.indptr[j] : csc.indptr[j + 1]] for j in columns])
         if np.unique(touched).size != touched.size:
             raise ValueError("native analytic force coloring has a row collision")
         groups.append(columns)
-    if not np.array_equal(
-        np.sort(np.concatenate(groups)), np.arange(layout.size)
-    ):
+    if not np.array_equal(np.sort(np.concatenate(groups)), np.arange(layout.size)):
         raise ValueError("native force colors do not partition packed coordinates")
     return NativeForceSparsity(pattern=pattern, column_groups=tuple(groups))
 
@@ -477,28 +552,16 @@ def _channel(
 
     cosine_coefficients = jnp.asarray(cosine_coefficients)
     sine_coefficients = jnp.asarray(sine_coefficients)
-    cosine_radial = jnp.einsum(
-        "mb,mrb->rm", cosine_coefficients, plan.radial_value
-    )
-    sine_radial = jnp.einsum(
-        "mb,mrb->rm", sine_coefficients, plan.radial_value
-    )
-    cosine_drho = jnp.einsum(
-        "mb,mrb->rm", cosine_coefficients, plan.radial_derivative
-    )
-    sine_drho = jnp.einsum(
-        "mb,mrb->rm", sine_coefficients, plan.radial_derivative
-    )
+    cosine_radial = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_value)
+    sine_radial = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_value)
+    cosine_drho = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_derivative)
+    sine_drho = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_derivative)
 
     def synthesize(cosine_table: Array, sine_table: Array) -> Array:
-        return jnp.einsum("rm,ma->ra", cosine_radial, cosine_table) + jnp.einsum(
-            "rm,ma->ra", sine_radial, sine_table
-        )
+        return jnp.einsum("rm,ma->ra", cosine_radial, cosine_table) + jnp.einsum("rm,ma->ra", sine_radial, sine_table)
 
     value = synthesize(plan.cosine, plan.sine)
-    drho = jnp.einsum("rm,ma->ra", cosine_drho, plan.cosine) + jnp.einsum(
-        "rm,ma->ra", sine_drho, plan.sine
-    )
+    drho = jnp.einsum("rm,ma->ra", cosine_drho, plan.cosine) + jnp.einsum("rm,ma->ra", sine_drho, plan.sine)
     dtheta = synthesize(plan.cosine_theta, plan.sine_theta)
     dzeta = synthesize(plan.cosine_zeta, plan.sine_zeta)
     return value, drho, dtheta, dzeta
@@ -511,9 +574,7 @@ def _channel_second(
 ) -> tuple[Array, ...]:
     """Synthesize a scalar channel through its coordinate Hessian."""
 
-    value, drho, dtheta, dzeta = _channel(
-        cosine_coefficients, sine_coefficients, plan
-    )
+    value, drho, dtheta, dzeta = _channel(cosine_coefficients, sine_coefficients, plan)
     cosine_coefficients = jnp.asarray(cosine_coefficients)
     sine_coefficients = jnp.asarray(sine_coefficients)
 
@@ -573,9 +634,7 @@ def evaluate_variational_fields(
     sine_phi = jnp.sin(phi)[None]
 
     def cylindrical(radial: Array, vertical: Array) -> Array:
-        return jnp.stack(
-            (radial * cosine_phi, radial * sine_phi, vertical), axis=-1
-        )
+        return jnp.stack((radial * cosine_phi, radial * sine_phi, vertical), axis=-1)
 
     position = cylindrical(R, Z)
     e_rho = cylindrical(R_rho, Z_rho)
@@ -593,9 +652,7 @@ def evaluate_variational_fields(
     chipf = jnp.asarray(plan.profile_basis) @ jnp.asarray(state.chipf)
     pressure = jnp.asarray(plan.profile_basis) @ jnp.asarray(state.pressure)
     flux_factor = 2.0 * jnp.asarray(plan.rho)[:, None] / sqrt_g
-    B_theta = flux_factor * (
-        chipf[:, None] / float(plan.nfp) - phipf[:, None] * lambda_zeta
-    )
+    B_theta = flux_factor * (chipf[:, None] / float(plan.nfp) - phipf[:, None] * lambda_zeta)
     B_zeta = flux_factor * phipf[:, None] * (1.0 + lambda_theta)
     B = B_theta[..., None] * e_theta + B_zeta[..., None] * e_zeta
     shape = plan.shape
@@ -642,9 +699,7 @@ def evaluate_fixed_label_displacement(
         axis=-1,
     ).reshape(fields.position.shape)
     relabeling = (delta_lambda / (1.0 + lambda_theta)).reshape(plan.shape)
-    return coordinate_variation - (
-        fields.dposition_dtheta * relabeling[..., None]
-    )
+    return coordinate_variation - (fields.dposition_dtheta * relabeling[..., None])
 
 
 @jax.jit
@@ -670,27 +725,21 @@ def native_tangential_gauge_residual(
         axis=-1,
     ).reshape(fields.position.shape)
     tangent = fields.dposition_dtheta
-    tangent_norm = jnp.sqrt(
-        jnp.sum(tangent * tangent, axis=-1) + float(gauge.tangent_floor) ** 2
-    )
+    tangent_norm = jnp.sqrt(jnp.sum(tangent * tangent, axis=-1) + float(gauge.tangent_floor) ** 2)
     tangential_motion = jnp.sum(delta_position * tangent, axis=-1) / tangent_norm
-    weighted = (
-        jnp.broadcast_to(jnp.asarray(plan.quadrature_weights), plan.shape)
-        * tangential_motion
-    ).reshape((plan.shape[0], -1))
+    weighted = (jnp.broadcast_to(jnp.asarray(plan.quadrature_weights), plan.shape) * tangential_motion).reshape(
+        (plan.shape[0], -1)
+    )
     projected = jnp.einsum(
         "ra,mrb,ma->mb",
         weighted,
         jnp.asarray(plan.radial_value),
         jnp.asarray(plan.sine),
     )
-    return (
-        projected[
-            jnp.asarray(gauge.row_modes),
-            jnp.asarray(gauge.row_basis),
-        ]
-        * jnp.asarray(gauge.row_scale)
-    )
+    return projected[
+        jnp.asarray(gauge.row_modes),
+        jnp.asarray(gauge.row_basis),
+    ] * jnp.asarray(gauge.row_scale)
 
 
 @jax.jit
@@ -713,32 +762,21 @@ def native_variational_kkt_residual(
     variables = jnp.asarray(variables)
     expected = layout.size + gauge.size
     if variables.shape != (expected,):
-        raise ValueError(
-            f"KKT variables have shape {variables.shape}; expected {(expected,)}"
-        )
+        raise ValueError(f"KKT variables have shape {variables.shape}; expected {(expected,)}")
     coordinates = variables[: layout.size]
     multipliers = variables[layout.size :]
     coordinate_scale = jnp.asarray(coordinate_scale)
     if coordinate_scale.shape != (layout.size,):
-        raise ValueError(
-            "coordinate_scale has shape "
-            f"{coordinate_scale.shape}; expected {(layout.size,)}"
-        )
+        raise ValueError(f"coordinate_scale has shape {coordinate_scale.shape}; expected {(layout.size,)}")
 
     def corrected_state(value):
-        return apply_high_order_correction(
-            base_state, layout.unpack(coordinate_scale * value)
-        )
+        return apply_high_order_correction(base_state, layout.unpack(coordinate_scale * value))
 
     def energy(value):
-        return fixed_pressure_energy(
-            corrected_state(value), gauge.variational, energy_scale
-        )
+        return fixed_pressure_energy(corrected_state(value), gauge.variational, energy_scale)
 
     def constraints(value):
-        return native_tangential_gauge_residual(
-            base_state, layout.unpack(coordinate_scale * value), gauge
-        )
+        return native_tangential_gauge_residual(base_state, layout.unpack(coordinate_scale * value), gauge)
 
     gradient = jax.grad(energy)(coordinates)
     constraint, pullback = jax.vjp(constraints, coordinates)
@@ -766,19 +804,11 @@ def native_physical_force_residual(
     coordinates = jnp.asarray(coordinates)
     coordinate_scale = jnp.asarray(coordinate_scale)
     if coordinates.shape != (layout.size,):
-        raise ValueError(
-            f"force coordinates have shape {coordinates.shape}; "
-            f"expected {(layout.size,)}"
-        )
+        raise ValueError(f"force coordinates have shape {coordinates.shape}; expected {(layout.size,)}")
     if coordinate_scale.shape != (layout.size,):
-        raise ValueError(
-            "coordinate_scale has shape "
-            f"{coordinate_scale.shape}; expected {(layout.size,)}"
-        )
+        raise ValueError(f"coordinate_scale has shape {coordinate_scale.shape}; expected {(layout.size,)}")
     scale = jnp.broadcast_to(jnp.asarray(force_scale), (3,))
-    state = apply_high_order_correction(
-        base_state, layout.unpack(coordinate_scale * coordinates)
-    )
+    state = apply_high_order_correction(base_state, layout.unpack(coordinate_scale * coordinates))
     samples = evaluate_tensorized_strong_force(state, gauge.variational)
     volume_weights = (
         jnp.broadcast_to(
@@ -790,9 +820,7 @@ def native_physical_force_residual(
     )
     volume_scale = jnp.asarray(volume_scale)
     normalized_weight = jnp.sqrt(volume_weights / volume_scale)
-    return (
-        normalized_weight[..., None] * samples.force / scale
-    ).reshape(-1)
+    return (normalized_weight[..., None] * samples.force / scale).reshape(-1)
 
 
 @jax.jit
@@ -810,10 +838,7 @@ def native_force_kkt_residual(
     variables = jnp.asarray(variables)
     expected = layout.size + gauge.size
     if variables.shape != (expected,):
-        raise ValueError(
-            f"force KKT variables have shape {variables.shape}; "
-            f"expected {(expected,)}"
-        )
+        raise ValueError(f"force KKT variables have shape {variables.shape}; expected {(expected,)}")
     coordinates = variables[: layout.size]
     multipliers = variables[layout.size :]
 
@@ -837,9 +862,7 @@ def native_force_kkt_residual(
 
     force, force_pullback = jax.vjp(physical, coordinates)
     constraint, constraint_pullback = jax.vjp(constraints, coordinates)
-    stationarity = (
-        force_pullback(force)[0] + constraint_pullback(multipliers)[0]
-    )
+    stationarity = force_pullback(force)[0] + constraint_pullback(multipliers)[0]
     return jnp.concatenate((stationarity, constraint))
 
 
@@ -867,9 +890,7 @@ def native_force_gauss_newton_action(
     direction = jnp.asarray(direction)
     expected = layout.size + gauge.size
     if variables.shape != (expected,) or direction.shape != (expected,):
-        raise ValueError(
-            f"Gauss-Newton vectors must both have shape {(expected,)}"
-        )
+        raise ValueError(f"Gauss-Newton vectors must both have shape {(expected,)}")
     coordinates = variables[: layout.size]
     delta_coordinates = direction[: layout.size]
     delta_multipliers = direction[layout.size :]
@@ -894,12 +915,8 @@ def native_force_gauss_newton_action(
 
     _, force_pullback = jax.vjp(physical, coordinates)
     _, constraint_pullback = jax.vjp(constraints, coordinates)
-    force_direction = jax.jvp(
-        physical, (coordinates,), (delta_coordinates,)
-    )[1]
-    constraint_direction = jax.jvp(
-        constraints, (coordinates,), (delta_coordinates,)
-    )[1]
+    force_direction = jax.jvp(physical, (coordinates,), (delta_coordinates,))[1]
+    constraint_direction = jax.jvp(constraints, (coordinates,), (delta_coordinates,))[1]
     stationarity_direction = (
         force_pullback(force_direction)[0]
         + constraint_pullback(delta_multipliers)[0]
@@ -933,10 +950,7 @@ def native_force_gauss_newton_step(
     variables = jnp.asarray(variables)
     expected = layout.size + gauge.size
     if variables.shape != (expected,):
-        raise ValueError(
-            f"Gauss-Newton variables have shape {variables.shape}; "
-            f"expected {(expected,)}"
-        )
+        raise ValueError(f"Gauss-Newton variables have shape {variables.shape}; expected {(expected,)}")
     if not np.isfinite(damping) or damping < 0.0:
         raise ValueError("damping must be finite and nonnegative")
     if not np.isfinite(tolerance) or tolerance <= 0.0:
@@ -993,9 +1007,7 @@ def native_force_gauss_newton_step(
         M=preconditioner,
     )
     true_residual = operator(solution) - rhs
-    relative_residual = jnp.linalg.norm(true_residual) / jnp.maximum(
-        jnp.linalg.norm(rhs), 1.0e-300
-    )
+    relative_residual = jnp.linalg.norm(true_residual) / jnp.maximum(jnp.linalg.norm(rhs), 1.0e-300)
     return solution, relative_residual
 
 
@@ -1061,9 +1073,7 @@ def evaluate_tensorized_strong_force(
     inverse_nfp = 1.0 / float(plan.nfp)
 
     def cylindrical(radial: Array, vertical: Array) -> Array:
-        return jnp.stack(
-            (radial * cosine_phi, radial * sine_phi, vertical), axis=-1
-        )
+        return jnp.stack((radial * cosine_phi, radial * sine_phi, vertical), axis=-1)
 
     def zeta_derivative(radial: Array, radial_zeta: Array, vertical: Array) -> Array:
         return jnp.stack(
@@ -1085,12 +1095,8 @@ def evaluate_tensorized_strong_force(
     e_theta_zeta = zeta_derivative(R[2], R[8], Z[8])
     e_zeta_zeta = jnp.stack(
         (
-            R[9] * cosine_phi
-            - 2.0 * R[3] * sine_phi * inverse_nfp
-            - R[0] * cosine_phi * inverse_nfp**2,
-            R[9] * sine_phi
-            + 2.0 * R[3] * cosine_phi * inverse_nfp
-            - R[0] * sine_phi * inverse_nfp**2,
+            R[9] * cosine_phi - 2.0 * R[3] * sine_phi * inverse_nfp - R[0] * cosine_phi * inverse_nfp**2,
+            R[9] * sine_phi + 2.0 * R[3] * cosine_phi * inverse_nfp - R[0] * sine_phi * inverse_nfp**2,
             Z[9],
         ),
         axis=-1,
@@ -1117,18 +1123,11 @@ def evaluate_tensorized_strong_force(
         local_phipf,
         local_chipf,
     ):
-        sqrt_g = jnp.sum(
-            local_e_rho * jnp.cross(local_e_theta, local_e_zeta), axis=-1
-        )
+        sqrt_g = jnp.sum(local_e_rho * jnp.cross(local_e_theta, local_e_zeta), axis=-1)
         factor = 2.0 * local_rho / sqrt_g
-        B_theta = factor * (
-            local_chipf * inverse_nfp - local_phipf * lambda_zeta
-        )
+        B_theta = factor * (local_chipf * inverse_nfp - local_phipf * lambda_zeta)
         B_zeta = factor * local_phipf * (1.0 + lambda_theta)
-        B = (
-            B_theta[..., None] * local_e_theta
-            + B_zeta[..., None] * local_e_zeta
-        )
+        B = B_theta[..., None] * local_e_theta + B_zeta[..., None] * local_e_zeta
         covariant = jnp.stack(
             (
                 jnp.sum(B * local_e_rho, axis=-1),
@@ -1196,11 +1195,7 @@ def evaluate_tensorized_strong_force(
         axis=-1,
     )
     J_sup = curl_numerator / (MU0 * sqrt_g[..., None])
-    J = (
-        J_sup[..., 0, None] * e_rho
-        + J_sup[..., 1, None] * e_theta
-        + J_sup[..., 2, None] * e_zeta
-    )
+    J = J_sup[..., 0, None] * e_rho + J_sup[..., 1, None] * e_theta + J_sup[..., 2, None] * e_zeta
     grad_rho = jnp.cross(e_theta, e_zeta) / sqrt_g[..., None]
     grad_theta = jnp.cross(e_zeta, e_rho) / sqrt_g[..., None]
     grad_zeta = jnp.cross(e_rho, e_theta) / sqrt_g[..., None]
@@ -1210,9 +1205,7 @@ def evaluate_tensorized_strong_force(
     force_rho = jnp.sum(force * e_rho, axis=-1)
     force_helical = curl_numerator[..., 0] / MU0
     radial_force = force_rho[..., None] * grad_rho
-    helical_direction = (
-        -B_zeta[..., None] * grad_theta + B_theta[..., None] * grad_zeta
-    )
+    helical_direction = -B_zeta[..., None] * grad_theta + B_theta[..., None] * grad_zeta
     helical_force = force_helical[..., None] * helical_direction
     shape = plan.shape
     return StrongForceSamples(
@@ -1227,12 +1220,8 @@ def evaluate_tensorized_strong_force(
         force_helical=force_helical.reshape(shape),
         radial_force_density=jnp.linalg.norm(radial_force, axis=-1).reshape(shape),
         helical_force_density=jnp.linalg.norm(helical_force, axis=-1).reshape(shape),
-        signed_radial_force_density=(
-            force_rho * jnp.linalg.norm(grad_rho, axis=-1)
-        ).reshape(shape),
-        signed_helical_force_density=(
-            force_helical * jnp.linalg.norm(helical_direction, axis=-1)
-        ).reshape(shape),
+        signed_radial_force_density=(force_rho * jnp.linalg.norm(grad_rho, axis=-1)).reshape(shape),
+        signed_helical_force_density=(force_helical * jnp.linalg.norm(helical_direction, axis=-1)).reshape(shape),
         lorentz_norm=jnp.linalg.norm(lorentz, axis=-1).reshape(shape),
         grad_pressure_norm=jnp.linalg.norm(grad_pressure, axis=-1).reshape(shape),
     )
@@ -1254,9 +1243,7 @@ def fixed_pressure_energy(
     fields = evaluate_variational_fields(state, plan)
     signed_jacobian = float(plan.jacobian_sign) * fields.sqrt_g
     density = jnp.sum(fields.B * fields.B, axis=-1) / (2.0 * MU0) - fields.pressure
-    return jnp.sum(
-        jnp.asarray(plan.quadrature_weights) * signed_jacobian * density
-    ) / jnp.asarray(energy_scale)
+    return jnp.sum(jnp.asarray(plan.quadrature_weights) * signed_jacobian * density) / jnp.asarray(energy_scale)
 
 
 @jax.jit
@@ -1288,6 +1275,7 @@ __all__ = [
     "native_force_gauss_newton_action",
     "native_force_gauss_newton_step",
     "native_force_jacobian_sparsity",
+    "native_tangential_gauge_matrix",
     "native_polish_trial_is_acceptable",
     "native_physical_force_residual",
     "native_variational_kkt_residual",
