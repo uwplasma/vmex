@@ -22,6 +22,7 @@ from polish_recovery_p3 import (
 )
 from vmex.core.polish import apply_high_order_correction, make_native_correction_layout
 from vmex.core.polish_variational import (
+    evaluate_tensorized_strong_force,
     make_native_gauge_plan,
     make_variational_plan,
     minimum_signed_jacobian,
@@ -123,17 +124,45 @@ def main() -> None:
         default=Path("benchmarks/polish_recovery_r3_refinement.json"),
     )
     parser.add_argument("--max-steps", type=int, default=1)
+    parser.add_argument(
+        "--adaptive-count",
+        type=int,
+        default=0,
+        help="insert midpoints of this many largest force-contribution spans; 0 bisects all",
+    )
     parser.add_argument("--dense-memory-gib", type=float, default=2.0)
     args = parser.parse_args()
-    if args.max_steps < 0 or args.dense_memory_gib <= 0.0:
-        parser.error("--max-steps must be nonnegative and --dense-memory-gib positive")
+    if args.max_steps < 0 or args.adaptive_count < 0 or args.dense_memory_gib <= 0.0:
+        parser.error("step/count values must be nonnegative and memory cap positive")
 
     started = time.perf_counter()
     force_scale = 5915447.712414409
     volume_scale = 633.7993467060758
     coarse = _load_state(args.input_state)
     old_breakpoints = np.asarray(coarse.radial_basis.breakpoints)
-    inserted_knots = 0.5 * (old_breakpoints[:-1] + old_breakpoints[1:])
+    span_scores = None
+    selected_spans = np.arange(old_breakpoints.size - 1)
+    if args.adaptive_count:
+        span_count = old_breakpoints.size - 1
+        if args.adaptive_count >= span_count:
+            parser.error("--adaptive-count must be smaller than the current span count")
+        indicator_order = 4
+        indicator_plan = make_variational_plan(coarse, radial_order=indicator_order)
+        indicator = evaluate_tensorized_strong_force(coarse, indicator_plan)
+        weighted_force = (
+            indicator_plan.quadrature_weights
+            * coarse.jacobian_sign
+            * indicator.sqrt_g
+            * jnp.sum(indicator.force**2, axis=-1)
+        )
+        radial_score = np.asarray(jnp.sum(weighted_force, axis=(1, 2)))
+        span_scores = radial_score.reshape(span_count, indicator_order).sum(axis=1)
+        selected_spans = np.sort(
+            np.argsort(span_scores)[-args.adaptive_count :]
+        )
+    inserted_knots = 0.5 * (
+        old_breakpoints[selected_spans] + old_breakpoints[selected_spans + 1]
+    )
     transfer_started = time.perf_counter()
     refined = insert_high_order_state_knots(coarse, inserted_knots)
     transfer_seconds = time.perf_counter() - transfer_started
@@ -204,7 +233,8 @@ def main() -> None:
             f"splines={spline_transfer_errors}, fields={transfer_errors}"
         )
 
-    plan = make_variational_plan(refined, radial_order=4, ntheta=49, nzeta=1)
+    ntheta = max(4 * int(np.max(np.abs(np.asarray(refined.m)))) + 5, 8)
+    plan = make_variational_plan(refined, radial_order=4, ntheta=ntheta, nzeta=1)
     layout = make_native_correction_layout(refined)
     gauge = make_native_gauge_plan(refined, plan)
     coordinate_scale = native_coordinate_scales(refined, layout, plan)
@@ -230,16 +260,19 @@ def main() -> None:
 
     initial_force = force_residual(coordinates)
     force_rows = int(initial_force.size)
-    jacobian_bytes = force_rows * layout.size * np.dtype(np.float64).itemsize
-    memory_limit = int(args.dense_memory_gib * 1024**3)
-    if jacobian_bytes > memory_limit:
-        raise MemoryError(
-            f"dense force Jacobian needs {jacobian_bytes} bytes; cap is {memory_limit}"
-        )
     constraint_started = time.perf_counter()
     constraint = np.asarray(jax.jacfwd(gauge_residual)(coordinates))
     q_range, nullspace, triangular, pivots = _constraint_qr(constraint)
     constraint_seconds = time.perf_counter() - constraint_started
+    jacobian_bytes = force_rows * layout.size * np.dtype(np.float64).itemsize
+    reduced_bytes = force_rows * nullspace.shape[1] * np.dtype(np.float64).itemsize
+    explicit_bytes = jacobian_bytes + reduced_bytes
+    memory_limit = int(args.dense_memory_gib * 1024**3)
+    if explicit_bytes > memory_limit:
+        raise MemoryError(
+            f"dense force plus reduced Jacobians need {explicit_bytes} bytes; "
+            f"cap is {memory_limit}"
+        )
     history = []
     jacobian_seconds = 0.0
     dense_solve_seconds = 0.0
@@ -349,6 +382,15 @@ def main() -> None:
             "inserted_knots": inserted_knots.tolist(),
             "fine_spans": int(refined.radial_basis.breakpoints.size - 1),
             "fine_basis_size": int(refined.radial_basis.size),
+            "selection": (
+                "all span midpoints"
+                if args.adaptive_count == 0
+                else "largest volume-weighted force-squared span contributions"
+            ),
+            "selected_span_indices": selected_spans.tolist(),
+            "span_force_squared_contributions": (
+                None if span_scores is None else span_scores.tolist()
+            ),
             "third_grid_relative_errors": transfer_errors,
             "spline_value_first_second_derivative_relative_errors": (
                 spline_transfer_errors
@@ -361,6 +403,7 @@ def main() -> None:
             "gauge_constraints": gauge.size,
             "constraint_nullity": int(nullspace.shape[1]),
             "force_rows": force_rows,
+            "ntheta": ntheta,
         },
         "checks": {
             "initial_force_residual_norm": float(jnp.linalg.norm(initial_force)),
@@ -377,6 +420,8 @@ def main() -> None:
         "work": {
             "explicit_jacobian_shape": [force_rows, layout.size],
             "explicit_jacobian_bytes": jacobian_bytes,
+            "explicit_reduced_jacobian_bytes": reduced_bytes,
+            "explicit_array_budget_bytes": explicit_bytes,
             "dense_memory_cap_bytes": memory_limit,
             "constraint_factor_seconds": constraint_seconds,
             "jacobian_seconds": jacobian_seconds,

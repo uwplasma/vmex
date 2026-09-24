@@ -178,6 +178,33 @@ Current checkpoint:
   15 materially helps, while modes 16--19 are nearly saturated. Continue with
   targeted radial support diagnostics or matrix-free feasible projection,
   not an unbounded dense angular sweep.
+- The first targeted radial-support continuation is complete. Starting from
+  the `m_max=15`, 51-basis checkpoint, the generator ranks the 48 radial spans
+  by their volume-weighted force-squared contribution and exactly inserts
+  midpoints in the eight largest spans (indices 0--4 and 10--12). This grows
+  the basis to 59 functions, with 2,683 coordinates, 870 gauge rows, and a
+  1,813-dimensional feasible space. Four full feasible steps lower the
+  independent certificate from `1.127835e-4` to `6.444610e-5`
+  (`381.23 N/m^3`) while retaining original-row gauge norm `3.26e-20` and
+  positive geometry. The last projected-stationarity measure is `9.82e-9`
+  relative and its unreachable-residual fraction is effectively one, so this
+  space is again converged rather than merely stopped early. Exact-transfer
+  force disagreement is `3.58e-9` relative (`7.92e-6 N/m^3` maximum), and
+  independent radial-grid disagreement is `1.81e-5`. This is the strongest
+  result in the recovery lane, but it remains 6.44x above the `1e-5` gate and
+  is not a recovered equilibrium. Runtime was 150.74 s, dominated by 119.39 s
+  for the explicit Jacobians and 22.59 s for dense solves. The complete record
+  and restart state are `benchmarks/polish_recovery_r3_adaptive8.json` and
+  `benchmarks/polish_recovery_r3_adaptive8_state.npz`.
+- A proposed second adaptive batch was stopped on request after about 30 s,
+  during compilation of the gauge-constraint Jacobian and before any result or
+  output artifact was written. For the anticipated 67-basis system, the full
+  and reduced explicit force Jacobians alone are estimated at 2,054,307,840
+  bytes (1.913 GiB), leaving too little room below the 2 GiB experiment cap for
+  comfortable dense continuation. The generator now accounts for both arrays
+  in its guard. On resumption, first verify dimensions and process memory, then
+  prefer a matrix-free feasible/projected operator over blindly restarting the
+  dense adaptive-16 run. Do not cite the interrupted attempt as a measurement.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.
@@ -197,27 +224,29 @@ VIRTUAL_CASING_JAX 0.0.8; Apple M4 CPU, float64. The required deck and WOUT
 hashes, physical scales, and reproduction commands are recorded in the PR
 body and benchmark JSON. Do not overwrite those baseline artifacts.
 
-Latest verification before handoff: focused profile/regularization/rank,
-physical-scale, tensorized-derivative, native-layout, and gauge tests passed
-9/9 in 240.89 s; the matrix-free GN action/GMRES dense-reference test passed
-in 4.27 s; the broad strong-force module was stopped at 298.13 s after 6
-passes and 1 skip, with no failure reported. That module is not fully verified.
-P8, P9, and P10 are bounded negative experiments; their JSON records preserve
-their outcomes. No scientific runs remain in progress. The dense enriched
-reference was deliberately deferred and not run.
+Latest verification before this pause: the focused R0 regression selection
+passed 4/4 (53 deselected); the exact-knot and exact-mode transfer tests passed;
+and `tests/test_radial_basis.py` passed 29/29 in 316.33 s. That full module ran
+slightly beyond the five-minute incremental guideline because it was already
+near completion. Ruff and `git diff --check` passed at each pushed checkpoint;
+the current adaptive-script handoff received the same quick static checks.
+The complete repository suite has not been run. P8, P9, and P10 remain bounded
+negative experiments. No process is running and the interrupted second
+adaptive batch produced no result.
 
-Resume at the solver, not the lift: first inspect P7-P10 code and records,
-then design a physically meaningful preconditioner or constraint elimination
-that controls the coupled force/gauge saddle system. Keep independent true
-linear residual, nonlinear force descent, gauge tolerance, and positive signed
-Jacobian as separate acceptance gates. Any trial failing one gate is rejected;
-do not use a force-only number as evidence of an accepted equilibrium. The
-P3 dense Candidate B remains the best bounded force reference, not a scalable
-solver. Once a linear method passes, compare nonlinear convergence and runtime
-against that reference, then address 3-D/current closure, derivative
-validation, and public workflow integration. Do not promote or merge until
-Rogerio reviews the complete physical, derivative, runtime, memory, and
-regression evidence.
+Resume from `benchmarks/polish_recovery_r3_adaptive8_state.npz`, not from the
+WOUT. Read the R0, P3-reproduction, exact-refinement, angular, and adaptive-8
+records in chronological order. The immediate technical decision is whether
+to replace explicit feasible Jacobians with a matrix-free projected operator;
+the next dense adaptive batch is estimated at 1.913 GiB for just its two main
+arrays. Keep independent true linear residual, nonlinear force descent, gauge
+tolerance, radial-grid agreement, and positive signed Jacobian as separate
+acceptance gates. Any trial failing one gate is rejected; do not use a
+force-only number as evidence of an accepted equilibrium. After a scalable
+linear method passes, continue radial support convergence and then address
+3-D/current closure, implicit derivatives, regression/runtime gates, and
+public workflow integration. Do not promote or merge until Rogerio reviews
+the complete physical, derivative, runtime, memory, and regression evidence.
 
 External context already reviewed (design context, not proof that VMEX has
 equivalent behavior): [GVEC theory](https://gvec.readthedocs.io/latest/user/theory.html),
