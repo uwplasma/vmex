@@ -1042,22 +1042,51 @@ def _constrained_spline_fit(
     mode_m: int | None = None,
     fix_axis: bool = False,
     fix_edge: bool = False,
+    weights: np.ndarray | None = None,
+    diagnostics: dict[str, float | int] | None = None,
 ) -> np.ndarray:
-    """Host-side least-squares lift with exact clamped endpoint values."""
+    """Fit physical amplitudes with exact clamped endpoint values.
+
+    For a regular Fourier mode the fitted matrix is
+    ``rho**abs(m) * B(s)``.  Fitting this matrix directly is important:
+    dividing the samples by ``rho**abs(m)`` gives tiny, noisy near-axis
+    amplitudes unbounded leverage.  The solve uses radial cell weights and
+    column equilibration, and can return the rank/conditioning diagnostics
+    used by reconstruction tests and benchmark records.
+    """
 
     values = np.asarray(samples, dtype=float)
     s = np.asarray(s, dtype=float)
+    if values.ndim != 1 or s.shape != values.shape or s.size < 2:
+        raise ValueError("radial lift samples and nodes must be matching one-dimensional arrays")
+    if not np.all(np.isfinite(values)) or not np.all(np.isfinite(s)):
+        raise ValueError("radial lift samples and nodes must be finite")
+    if np.any(s < 0.0) or np.any(s > 1.0) or np.any(np.diff(s) <= 0.0):
+        raise ValueError("radial lift nodes must be strictly increasing in [0, 1]")
+
+    radial = np.ones_like(s)
     if mode_m is not None:
-        radial = np.power(np.sqrt(np.maximum(s, 0.0)), abs(int(mode_m)))
-        keep = radial > 1.0e-10
-        values = values[keep] / radial[keep]
-        nodes = s[keep]
+        radial = np.power(np.sqrt(s), abs(int(mode_m)))
+    matrix = radial[:, None] * np.asarray(basis.basis_matrix(s), dtype=float)
+    if weights is None:
+        # Composite cell (Voronoi) weights make the discrete fit insensitive
+        # to local radial oversampling while remaining strictly positive at
+        # both clamped endpoints.
+        spacing = np.diff(s)
+        weights = np.empty_like(s)
+        weights[0] = 0.5 * spacing[0]
+        weights[-1] = 0.5 * spacing[-1]
+        weights[1:-1] = 0.5 * (s[2:] - s[:-2])
     else:
-        nodes = s
-    matrix = np.asarray(basis.basis_matrix(nodes), dtype=float)
+        weights = np.asarray(weights, dtype=float)
+    if weights.shape != s.shape or not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+        raise ValueError("radial lift weights must be finite, positive, and match the samples")
+
     coefficients = np.zeros((basis.size,), dtype=float)
     fixed: dict[int, float] = {}
     if fix_axis:
+        if mode_m not in (None, 0):
+            raise ValueError("only an m=0 physical amplitude can be fixed at the axis")
         fixed[0] = float(samples[0])
     if fix_edge:
         fixed[basis.size - 1] = float(samples[-1])
@@ -1066,14 +1095,37 @@ def _constrained_spline_fit(
     for index, value in fixed.items():
         coefficients[index] = value
         rhs -= matrix[:, index] * value
+    rank = 0
+    condition = 1.0
     if free.size:
-        solution, _, rank, _ = np.linalg.lstsq(matrix[:, free], rhs, rcond=1.0e-12)
+        weighted_matrix = np.sqrt(weights)[:, None] * matrix[:, free]
+        weighted_rhs = np.sqrt(weights) * rhs
+        column_norms = np.linalg.norm(weighted_matrix, axis=0)
+        if np.any(column_norms == 0.0):
+            raise ValueError(
+                "radial lift has an unobserved coefficient; reduce spline "
+                "spans/degree or supply more resolved radial samples"
+            )
+        solution, _, rank, singular = np.linalg.lstsq(
+            weighted_matrix / column_norms,
+            weighted_rhs,
+            rcond=1.0e-12,
+        )
         if rank < free.size:
             raise ValueError(
                 f"radial lift is underdetermined (rank {rank}/{free.size}); "
                 "reduce spline spans/degree or supply more resolved radial samples"
             )
-        coefficients[free] = solution
+        coefficients[free] = solution / column_norms
+        condition = float(singular[0] / singular[-1])
+    if diagnostics is not None:
+        residual = np.sqrt(weights) * (matrix @ coefficients - values)
+        diagnostics.update(
+            rank=int(rank),
+            free_coefficients=int(free.size),
+            scaled_condition=condition,
+            weighted_amplitude_residual=float(np.linalg.norm(residual)),
+        )
     return coefficients
 
 

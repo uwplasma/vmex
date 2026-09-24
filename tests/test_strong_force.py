@@ -536,9 +536,11 @@ def test_radial_lift_recovers_regular_polynomial_and_curvature(mode_m):
     basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, 5), degree=3)
     s = np.linspace(0.0, 1.0, 21)
     samples = s ** (mode_m / 2) * (2.0 + 3.0 * s + s ** 2)
+    diagnostics = {}
     coefficients = strong_force._constrained_spline_fit(
         basis, samples, s, mode_m=mode_m,
         fix_axis=mode_m == 0, fix_edge=True,
+        diagnostics=diagnostics,
     )
     points = np.linspace(0.013, 0.987, 23)
     np.testing.assert_allclose(
@@ -550,6 +552,35 @@ def test_radial_lift_recovers_regular_polynomial_and_curvature(mode_m):
         rtol=1e-10, atol=1e-10,
     )
     assert float(basis.evaluate(coefficients, 1.0)) == samples[-1]
+    assert diagnostics["rank"] == diagnostics["free_coefficients"]
+    assert diagnostics["scaled_condition"] < 20.0
+    assert diagnostics["weighted_amplitude_residual"] < 1.0e-14
+
+
+def test_radial_lift_does_not_amplify_absolute_near_axis_noise():
+    """A noisy high-m inner sample must not dominate the physical fit."""
+
+    basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, 5), degree=3)
+    s = np.r_[1.0e-12, np.linspace(0.01, 1.0, 40)]
+    rho = np.sqrt(s)
+    exact_q = 2.0 + 0.5 * s - 0.25 * s**2
+    samples = rho**3 * exact_q
+    samples[0] += 1.0e-12  # tiny in physical amplitude, O(1e6) after / rho**3
+
+    coefficients = strong_force._constrained_spline_fit(
+        basis,
+        samples,
+        s,
+        mode_m=3,
+        fix_edge=True,
+    )
+    points = np.linspace(0.02, 0.98, 31)
+    np.testing.assert_allclose(
+        basis.evaluate(coefficients, points),
+        2.0 + 0.5 * points - 0.25 * points**2,
+        rtol=2.0e-10,
+        atol=2.0e-10,
+    )
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():
