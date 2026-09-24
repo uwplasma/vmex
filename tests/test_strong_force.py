@@ -31,6 +31,7 @@ from vmex.core.polish_variational import (
     minimum_signed_jacobian,
     native_force_gauss_newton_action,
     native_force_gauss_newton_step,
+    native_force_jacobian_sparsity,
     native_polish_trial_is_acceptable,
     native_physical_force_residual,
     native_tangential_gauge_residual,
@@ -1289,6 +1290,47 @@ def test_native_force_gauss_newton_action_matches_dense_reference():
         rhs
     )
     assert float(relative_dense_residual) < 1e-8
+
+
+def test_native_force_sparse_coloring_recovers_dense_jacobian():
+    """Analytic radial support and colors recover every force derivative."""
+
+    from solvax.compression import matrix_from_products, verify_products
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=3, ntheta=7, nzeta=1)
+    layout = make_native_correction_layout(state)
+    gauge = make_native_gauge_plan(state, plan)
+    coordinate_scale = native_coordinate_scales(state, layout, plan)
+    coordinates = jnp.linspace(-2.0e-4, 3.0e-4, layout.size)
+
+    def residual(value):
+        return native_physical_force_residual(
+            value,
+            state,
+            layout,
+            gauge,
+            coordinate_scale,
+            5.0e6,
+            2.0 * np.pi**2 * 10.0,
+        )
+
+    dense = np.asarray(jax.jacfwd(residual)(coordinates))
+    structure = native_force_jacobian_sparsity(layout, plan)
+    recovered = matrix_from_products(
+        lambda direction: jax.jvp(residual, (coordinates,), (direction,))[1],
+        structure.pattern,
+        groups=structure.column_groups,
+    )
+    outside = structure.pattern.toarray() == 0
+    assert np.max(np.abs(dense[outside]), initial=0.0) < 2.0e-12
+    np.testing.assert_allclose(recovered.toarray(), dense, rtol=3.0e-11, atol=2.0e-11)
+    assert verify_products(
+        recovered,
+        lambda direction: jax.jvp(residual, (coordinates,), (direction,))[1],
+        samples=3,
+        seed=448,
+    ) < 2.0e-11
 
 
 def test_native_polish_trial_acceptance_fails_closed():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -48,6 +49,47 @@ def _constraint_qr(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarr
     return q[:, :rows], q[:, rows:], r[:rows], pivots
 
 
+@dataclass(frozen=True)
+class FeasibleLeastSquaresResult:
+    """One bounded dense reference step and its independent certificates."""
+
+    step: np.ndarray
+    rank: int
+    feasibility_norm: float
+    model_norm: float
+    projected_normal_norm: float
+    projected_normal_relative: float
+    largest_singular_value: float
+    smallest_retained_singular_value: float
+
+
+def _dense_reference_memory(
+    force_rows: int,
+    coordinates: int,
+    gauge_rows: int,
+) -> dict[str, int]:
+    """Estimate concurrently retained full/reduced float64 reference arrays."""
+
+    force_rows = int(force_rows)
+    coordinates = int(coordinates)
+    gauge_rows = int(gauge_rows)
+    nullity = coordinates - gauge_rows
+    if force_rows < 1 or coordinates < 1 or not 0 <= gauge_rows < coordinates:
+        raise ValueError("invalid dense-reference dimensions")
+    itemsize = np.dtype(np.float64).itemsize
+    full = force_rows * coordinates * itemsize
+    reduced = force_rows * nullity * itemsize
+    return {
+        "force_rows": force_rows,
+        "coordinates": coordinates,
+        "gauge_rows": gauge_rows,
+        "expected_nullity": nullity,
+        "full_jacobian_bytes": full,
+        "one_reduced_jacobian_bytes": reduced,
+        "explicit_array_bytes": full + reduced,
+    }
+
+
 def _feasible_least_squares_step(
     jacobian: np.ndarray,
     residual: np.ndarray,
@@ -57,7 +99,9 @@ def _feasible_least_squares_step(
     nullspace: np.ndarray,
     triangular: np.ndarray,
     pivots: np.ndarray,
-) -> tuple[np.ndarray, int, float, float]:
+    *,
+    reduced_jacobian: np.ndarray | None = None,
+) -> FeasibleLeastSquaresResult:
     """Solve one dense equality-constrained force least-squares reference step."""
 
     particular = q_range @ solve_triangular(
@@ -65,8 +109,14 @@ def _feasible_least_squares_step(
         -np.asarray(defect)[pivots],
         lower=True,
     )
-    reduced = jacobian @ nullspace
-    reduced_step, _, rank, _ = lstsq(
+    reduced = (
+        np.asarray(reduced_jacobian)
+        if reduced_jacobian is not None
+        else jacobian @ nullspace
+    )
+    if reduced.shape != (jacobian.shape[0], nullspace.shape[1]):
+        raise ValueError("reduced Jacobian has the wrong shape")
+    reduced_step, _, rank, singular_values = lstsq(
         reduced,
         -np.asarray(residual) - jacobian @ particular,
         cond=1.0e-12,
@@ -76,12 +126,58 @@ def _feasible_least_squares_step(
     feasibility = float(np.linalg.norm(constraint @ step + defect))
     model = residual + jacobian @ step
     model_norm = float(np.linalg.norm(model))
-    return step, int(rank), feasibility, model_norm
+    projected_normal = reduced.T @ model
+    projected_normal_norm = float(np.linalg.norm(projected_normal))
+    projected_normal_relative = projected_normal_norm / max(
+        float(np.linalg.norm(reduced)) * model_norm,
+        np.finfo(float).tiny,
+    )
+    smallest = (
+        float(singular_values[int(rank) - 1]) if int(rank) else 0.0
+    )
+    return FeasibleLeastSquaresResult(
+        step=step,
+        rank=int(rank),
+        feasibility_norm=feasibility,
+        model_norm=model_norm,
+        projected_normal_norm=projected_normal_norm,
+        projected_normal_relative=projected_normal_relative,
+        largest_singular_value=float(singular_values[0]),
+        smallest_retained_singular_value=smallest,
+    )
 
 
-def _checkpoint_arrays(state, initial_state, coordinates, coordinate_scale, gauge):
+def _final_projected_gradient(
+    residual_function,
+    coordinates: jax.Array,
+    nullspace: np.ndarray,
+) -> tuple[float, float, float]:
+    """Evaluate the saved endpoint's gradient with one reverse product."""
+
+    residual, pullback = jax.vjp(residual_function, coordinates)
+    gradient = np.asarray(pullback(residual)[0])
+    projected = np.asarray(nullspace).T @ gradient
+    norm = float(np.linalg.norm(projected))
+    full_norm = float(np.linalg.norm(gradient))
+    return norm, full_norm, norm / max(full_norm, np.finfo(float).tiny)
+
+
+def _checkpoint_arrays(
+    state,
+    initial_state,
+    coordinates,
+    coordinate_scale,
+    gauge,
+    *,
+    force_scale: float = 5915447.712414409,
+    volume_scale: float = 633.7993467060758,
+):
+    spans = int(state.radial_basis.breakpoints.size - 1)
+    radial_points, ntheta, nzeta = gauge.variational.shape
+    if radial_points % spans:
+        raise ValueError("checkpoint quadrature does not contain whole radial spans")
     arrays = {
-        "schema": np.asarray("vmex.polish-recovery-native-state/1"),
+        "schema": np.asarray("vmex.polish-recovery-native-state/2"),
         "m": np.asarray(state.m),
         "n": np.asarray(state.n),
         "nfp": np.asarray(state.nfp),
@@ -95,6 +191,13 @@ def _checkpoint_arrays(state, initial_state, coordinates, coordinate_scale, gaug
         "gauge_row_modes": np.asarray(gauge.row_modes),
         "gauge_row_basis": np.asarray(gauge.row_basis),
         "gauge_row_scale": np.asarray(gauge.row_scale),
+        "solve_radial_order": np.asarray(radial_points // spans),
+        "solve_ntheta": np.asarray(ntheta),
+        "solve_nzeta": np.asarray(nzeta),
+        "force_scale_N_per_m3": np.asarray(force_scale),
+        "volume_scale_m3": np.asarray(volume_scale),
+        "gauge_reference": np.asarray("initial native state"),
+        "model_scope": np.asarray("axisymmetric fixed-profile recovery benchmark"),
     }
     for prefix, value in (("initial", initial_state), ("accepted", state)):
         for name in (
@@ -194,15 +297,18 @@ def main() -> None:
 
     initial_force = force_residual(coordinates)
     force_rows = int(initial_force.size)
-    jacobian_bytes = force_rows * layout.size * np.dtype(np.float64).itemsize
+    memory = _dense_reference_memory(force_rows, layout.size, gauge.size)
     memory_limit = int(args.dense_memory_gib * 1024**3)
-    if jacobian_bytes > memory_limit:
+    if memory["explicit_array_bytes"] > memory_limit:
         raise MemoryError(
-            f"dense force Jacobian needs {jacobian_bytes} bytes; cap is {memory_limit}"
+            "dense force plus one reduced Jacobian need "
+            f"{memory['explicit_array_bytes']} bytes; cap is {memory_limit}"
         )
     constraint_started = time.perf_counter()
     constraint = np.asarray(jax.jacfwd(gauge_residual)(coordinates))
     q_range, nullspace, triangular, pivots = _constraint_qr(constraint)
+    if nullspace.shape[1] != memory["expected_nullity"]:
+        raise AssertionError("gauge nullity differs from the structural preflight")
     constraint_seconds = time.perf_counter() - constraint_started
 
     history = []
@@ -215,7 +321,7 @@ def main() -> None:
         jacobian = np.asarray(jax.jacfwd(force_residual)(coordinates))
         jacobian_seconds += time.perf_counter() - jacobian_started
         solve_started = time.perf_counter()
-        step, rank, feasibility, model_norm = _feasible_least_squares_step(
+        solve = _feasible_least_squares_step(
             jacobian,
             residual,
             constraint,
@@ -229,7 +335,7 @@ def main() -> None:
         trials = []
         accepted = None
         for fraction in (1.0, 0.5, 0.25, 0.125):
-            candidate = coordinates + fraction * jnp.asarray(step)
+            candidate = coordinates + fraction * jnp.asarray(solve.step)
             candidate_norm = float(jnp.linalg.norm(force_residual(candidate)))
             candidate_gauge = float(jnp.linalg.norm(gauge_residual(candidate)))
             corrected = apply_high_order_correction(
@@ -246,6 +352,9 @@ def main() -> None:
             trials.append(trial)
             if (
                 np.all(np.isfinite(tuple(trial.values())))
+                and solve.rank == nullspace.shape[1]
+                and solve.feasibility_norm < 1.0e-10
+                and solve.projected_normal_relative < 1.0e-8
                 and candidate_norm < float(np.linalg.norm(residual))
                 and candidate_gauge < 1.0e-10
                 and minimum_j > 0.0
@@ -257,10 +366,16 @@ def main() -> None:
                 "iteration": iteration + 1,
                 "initial_force_residual_norm": float(np.linalg.norm(residual)),
                 "constraint_defect_norm": float(np.linalg.norm(defect)),
-                "reduced_jacobian_rank": rank,
+                "reduced_jacobian_rank": solve.rank,
                 "reduced_coordinates": int(nullspace.shape[1]),
-                "linear_constraint_residual_norm": feasibility,
-                "linearized_model_norm": model_norm,
+                "linear_constraint_residual_norm": solve.feasibility_norm,
+                "linearized_model_norm": solve.model_norm,
+                "projected_normal_residual_norm": solve.projected_normal_norm,
+                "projected_normal_residual_relative": solve.projected_normal_relative,
+                "largest_reduced_singular_value": solve.largest_singular_value,
+                "smallest_retained_reduced_singular_value": (
+                    solve.smallest_retained_singular_value
+                ),
                 "accepted": accepted is not None,
                 "trials": trials,
             }
@@ -276,6 +391,9 @@ def main() -> None:
     certificate_started = time.perf_counter()
     certificate = certify_strong_force(accepted_state)
     certificate_seconds = time.perf_counter() - certificate_started
+    final_projected, final_gradient, final_projected_relative = (
+        _final_projected_gradient(force_residual, coordinates, nullspace)
+    )
     arrays = _checkpoint_arrays(
         accepted_state,
         initial_state,
@@ -324,6 +442,9 @@ def main() -> None:
             "history": history,
             "final_gauge_residual_norm": float(jnp.linalg.norm(gauge_residual(coordinates))),
             "final_force_residual_norm": float(jnp.linalg.norm(force_residual(coordinates))),
+            "final_projected_gradient_norm": final_projected,
+            "final_full_gradient_norm": final_gradient,
+            "final_projected_gradient_relative_to_full": final_projected_relative,
             "independent_force_rms_N_per_m3": float(certificate.absolute_l2),
             "independent_epsilon_B": float(certificate.absolute_l2 / force_scale),
             "independent_radial_refinement_difference": float(
@@ -333,7 +454,11 @@ def main() -> None:
         },
         "work": {
             "explicit_jacobian_shape": [force_rows, layout.size],
-            "explicit_jacobian_bytes": jacobian_bytes,
+            "explicit_jacobian_bytes": memory["full_jacobian_bytes"],
+            "explicit_reduced_jacobian_bytes": memory[
+                "one_reduced_jacobian_bytes"
+            ],
+            "explicit_array_budget_bytes": memory["explicit_array_bytes"],
             "dense_memory_cap_bytes": memory_limit,
             "constraint_factor_seconds": constraint_seconds,
             "jacobian_seconds": jacobian_seconds,

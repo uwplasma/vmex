@@ -25,6 +25,19 @@ from .strong_force import HighOrderEquilibriumState, StrongForceSamples
 Array = Any
 
 
+@dataclass(frozen=True)
+class NativeForceSparsity:
+    """Host-side sparse support and a collision-free column partition.
+
+    ``pattern`` is a SciPy CSR matrix.  It is deliberately kept outside JAX
+    pytrees: this object describes the fixed spline/mode topology used to
+    recover a linearized force matrix from compressed products.
+    """
+
+    pattern: Any
+    column_groups: tuple[np.ndarray, ...]
+
+
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True, eq=False)
 class VariationalPlan:
@@ -380,6 +393,79 @@ def native_coordinate_scales(
     if np.any(~np.isfinite(norms)) or np.any(norms <= 0.0):
         raise ValueError("native coordinate layout contains a zero physical column")
     return jnp.asarray(1.0 / norms)
+
+
+def native_force_jacobian_sparsity(
+    layout: NativeCorrectionLayout,
+    variational: VariationalPlan,
+) -> NativeForceSparsity:
+    """Return conservative radial support for the native force Jacobian.
+
+    The point-local force algebra can couple every retained field/Fourier mode
+    at a fixed radial point, but values and their first/second derivatives only
+    depend on the compact support of the corresponding radial B-spline.  The
+    residual is flattened in ``(rho, theta, zeta, Cartesian component)`` order.
+
+    Columns are colored by ``(field, mode, basis_index mod (degree + 1))``.
+    B-splines in one such group have disjoint support at the open span
+    quadrature nodes.  The returned partition is checked against the actual
+    structural pattern rather than trusted from the formula alone.
+    """
+
+    try:
+        from scipy import sparse
+    except ImportError as error:  # pragma: no cover - SciPy is a VMEX dependency
+        raise ImportError("native sparse force recovery requires SciPy") from error
+
+    active = np.asarray(layout.active_indices, dtype=np.int64)
+    block = int(layout.mnmax) * int(layout.nbasis)
+    full_size = 6 * block
+    if (
+        active.ndim != 1
+        or np.unique(active).size != active.size
+        or np.any(active < 0)
+        or np.any(active >= full_size)
+    ):
+        raise ValueError("native active indices are not a valid packed layout")
+    radial_index = active % int(layout.nbasis)
+    support = (
+        np.asarray(variational.radial_value) != 0.0
+    ) | (np.asarray(variational.radial_derivative) != 0.0) | (
+        np.asarray(variational.radial_second_derivative) != 0.0
+    )
+    # All retained modes use the same knot vector.  Taking the union protects
+    # the axis-power special cases without inferring zeros from a state value.
+    radial_support = np.any(support, axis=0)[:, radial_index]
+    if np.any(~np.any(radial_support, axis=0)):
+        raise ValueError("native force pattern contains an unsupported coordinate")
+    angular_components = int(variational.theta.size) * int(variational.zeta.size) * 3
+    pattern = sparse.kron(
+        sparse.csr_matrix(radial_support.astype(np.int8)),
+        sparse.csr_matrix(np.ones((angular_components, 1), dtype=np.int8)),
+        format="csr",
+    )
+    field_mode = active // int(layout.nbasis)
+    # The first quadrature point can see fewer functions only for a malformed
+    # plan; infer degree robustly from maximum simultaneous radial support.
+    degree = int(np.max(np.sum(np.any(support, axis=0), axis=1))) - 1
+    if degree < 1:
+        raise ValueError("native force pattern could not infer spline support width")
+    color = field_mode * (degree + 1) + radial_index % (degree + 1)
+    groups: list[np.ndarray] = []
+    csc = pattern.tocsc()
+    for value in np.unique(color):
+        columns = np.flatnonzero(color == value).astype(np.int32)
+        touched = np.concatenate(
+            [csc.indices[csc.indptr[j] : csc.indptr[j + 1]] for j in columns]
+        )
+        if np.unique(touched).size != touched.size:
+            raise ValueError("native analytic force coloring has a row collision")
+        groups.append(columns)
+    if not np.array_equal(
+        np.sort(np.concatenate(groups)), np.arange(layout.size)
+    ):
+        raise ValueError("native force colors do not partition packed coordinates")
+    return NativeForceSparsity(pattern=pattern, column_groups=tuple(groups))
 
 
 def _channel(
@@ -1185,6 +1271,7 @@ def minimum_signed_jacobian(
 
 
 __all__ = [
+    "NativeForceSparsity",
     "VariationalFieldSamples",
     "NativeGaugePlan",
     "VariationalPlan",
@@ -1200,6 +1287,7 @@ __all__ = [
     "native_force_kkt_residual",
     "native_force_gauss_newton_action",
     "native_force_gauss_newton_step",
+    "native_force_jacobian_sparsity",
     "native_polish_trial_is_acceptable",
     "native_physical_force_residual",
     "native_variational_kkt_residual",

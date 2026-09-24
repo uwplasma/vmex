@@ -17,6 +17,8 @@ import numpy as np
 from polish_recovery_p3 import (
     _checkpoint_arrays,
     _constraint_qr,
+    _dense_reference_memory,
+    _final_projected_gradient,
     _feasible_least_squares_step,
     _write_npz_atomic,
 )
@@ -113,20 +115,20 @@ def main() -> None:
         )
 
     initial_force = force_residual(coordinates)
+    force_rows = int(initial_force.size)
+    memory = _dense_reference_memory(force_rows, layout.size, gauge.size)
+    memory_limit = int(args.dense_memory_gib * 1024**3)
+    if memory["explicit_array_bytes"] > memory_limit:
+        raise MemoryError(
+            "dense force plus one reduced Jacobian need "
+            f"{memory['explicit_array_bytes']} bytes; cap is {memory_limit}"
+        )
     constraint_started = time.perf_counter()
     constraint = np.asarray(jax.jacfwd(gauge_residual)(coordinates))
     q_range, nullspace, triangular, pivots = _constraint_qr(constraint)
     constraint_seconds = time.perf_counter() - constraint_started
-    force_rows = int(initial_force.size)
-    jacobian_bytes = force_rows * layout.size * np.dtype(np.float64).itemsize
-    reduced_bytes = force_rows * nullspace.shape[1] * np.dtype(np.float64).itemsize
-    explicit_bytes = jacobian_bytes + reduced_bytes
-    memory_limit = int(args.dense_memory_gib * 1024**3)
-    if explicit_bytes > memory_limit:
-        raise MemoryError(
-            f"dense force plus reduced Jacobians need {explicit_bytes} bytes; "
-            f"cap is {memory_limit}"
-        )
+    if nullspace.shape[1] != memory["expected_nullity"]:
+        raise AssertionError("gauge nullity differs from the structural preflight")
 
     history = []
     jacobian_seconds = 0.0
@@ -142,7 +144,7 @@ def main() -> None:
         projected_gradient = float(
             np.linalg.norm(reduced_jacobian.T @ residual)
         )
-        step, rank, feasibility, model_norm = _feasible_least_squares_step(
+        solve = _feasible_least_squares_step(
             jacobian,
             residual,
             constraint,
@@ -151,12 +153,13 @@ def main() -> None:
             nullspace,
             triangular,
             pivots,
+            reduced_jacobian=reduced_jacobian,
         )
         dense_solve_seconds += time.perf_counter() - solve_started
         trials = []
         accepted = None
         for fraction in (1.0, 0.5, 0.25, 0.125):
-            candidate = coordinates + fraction * jnp.asarray(step)
+            candidate = coordinates + fraction * jnp.asarray(solve.step)
             candidate_norm = float(jnp.linalg.norm(force_residual(candidate)))
             candidate_gauge = float(jnp.linalg.norm(gauge_residual(candidate)))
             candidate_state = apply_high_order_correction(
@@ -172,6 +175,9 @@ def main() -> None:
             trials.append(trial)
             if (
                 np.all(np.isfinite(tuple(trial.values())))
+                and solve.rank == nullspace.shape[1]
+                and solve.feasibility_norm < 1.0e-10
+                and solve.projected_normal_relative < 1.0e-8
                 and candidate_norm < float(np.linalg.norm(residual))
                 and candidate_gauge < 1.0e-10
                 and minimum_j > 0.0
@@ -183,14 +189,20 @@ def main() -> None:
                 "iteration": iteration + 1,
                 "initial_force_residual_norm": float(np.linalg.norm(residual)),
                 "constraint_defect_norm": float(np.linalg.norm(defect)),
-                "reduced_jacobian_rank": rank,
+                "reduced_jacobian_rank": solve.rank,
                 "reduced_coordinates": int(nullspace.shape[1]),
-                "linear_constraint_residual_norm": feasibility,
-                "linearized_model_norm": model_norm,
+                "linear_constraint_residual_norm": solve.feasibility_norm,
+                "linearized_model_norm": solve.model_norm,
                 "linearized_unreachable_residual_fraction": (
-                    model_norm / max(float(np.linalg.norm(residual)), 1.0e-300)
+                    solve.model_norm / max(float(np.linalg.norm(residual)), 1.0e-300)
                 ),
                 "projected_stationarity_norm": projected_gradient,
+                "projected_normal_residual_norm": solve.projected_normal_norm,
+                "projected_normal_residual_relative": solve.projected_normal_relative,
+                "largest_reduced_singular_value": solve.largest_singular_value,
+                "smallest_retained_reduced_singular_value": (
+                    solve.smallest_retained_singular_value
+                ),
                 "accepted": accepted is not None,
                 "trials": trials,
             }
@@ -205,6 +217,9 @@ def main() -> None:
     certificate_started = time.perf_counter()
     certificate = certify_strong_force(accepted_state)
     certificate_seconds = time.perf_counter() - certificate_started
+    final_projected, final_gradient, final_projected_relative = (
+        _final_projected_gradient(force_residual, coordinates, nullspace)
+    )
     arrays = _checkpoint_arrays(
         accepted_state,
         enriched,
@@ -242,6 +257,9 @@ def main() -> None:
             "initial_force_residual_norm": float(jnp.linalg.norm(initial_force)),
             "history": history,
             "final_force_residual_norm": float(jnp.linalg.norm(force_residual(coordinates))),
+            "final_projected_gradient_norm": final_projected,
+            "final_full_gradient_norm": final_gradient,
+            "final_projected_gradient_relative_to_full": final_projected_relative,
             "final_gauge_residual_norm": float(jnp.linalg.norm(gauge_residual(coordinates))),
             "independent_force_rms_N_per_m3": float(certificate.absolute_l2),
             "independent_epsilon_B": float(certificate.absolute_l2 / force_scale),
@@ -252,9 +270,11 @@ def main() -> None:
         },
         "work": {
             "explicit_jacobian_shape": [force_rows, layout.size],
-            "explicit_jacobian_bytes": jacobian_bytes,
-            "explicit_reduced_jacobian_bytes": reduced_bytes,
-            "explicit_array_budget_bytes": explicit_bytes,
+            "explicit_jacobian_bytes": memory["full_jacobian_bytes"],
+            "explicit_reduced_jacobian_bytes": memory[
+                "one_reduced_jacobian_bytes"
+            ],
+            "explicit_array_budget_bytes": memory["explicit_array_bytes"],
             "dense_memory_cap_bytes": memory_limit,
             "constraint_factor_seconds": constraint_seconds,
             "jacobian_seconds": jacobian_seconds,
