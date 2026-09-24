@@ -1557,6 +1557,8 @@ def certify_strong_force(
     radial_order_increment: int = 2,
     force_floor: float = 1.0e-12,
     window: tuple[float, float] = (0.1, 0.99),
+    theta_shift: float = 0.5,
+    zeta_shift: float = 0.375,
 ) -> StrongForceReport:
     """Evaluate a shifted, overintegrated certificate distinct from solve nodes.
 
@@ -1609,6 +1611,9 @@ def certify_strong_force(
     window:
         The ``(s_min, s_max)`` flux window, ``0 <= s_min < s_max <= 1``, over
         which ``window_normalizations`` is averaged.
+    theta_shift, zeta_shift:
+        Fractions of one angular cell used to shift the independent uniform
+        validation grid.  Defaults preserve the historical certificate.
 
     Returns
     -------
@@ -1622,6 +1627,8 @@ def certify_strong_force(
 
     if not 0.0 <= float(window[0]) < float(window[1]) <= 1.0:
         raise ValueError("window must satisfy 0 <= s_min < s_max <= 1")
+    if not 0.0 <= float(theta_shift) < 1.0 or not 0.0 <= float(zeta_shift) < 1.0:
+        raise ValueError("angular shifts must be finite fractions in [0, 1)")
     breaks = state.radial_basis.breakpoints
 
     def radial_quadrature(quadrature_order: int) -> tuple[np.ndarray, np.ndarray]:
@@ -1640,8 +1647,8 @@ def certify_strong_force(
     max_n = int(np.max(np.abs(np.asarray(state.n)), initial=0))
     ntheta = max(8, int(angular_multiplier) * 2 * (max_m + 1))
     nzeta = max(4, int(angular_multiplier) * 2 * (max_n + 1))
-    theta = (np.arange(ntheta) + 0.5) * (2.0 * np.pi / ntheta)
-    zeta = (np.arange(nzeta) + 0.375) * (2.0 * np.pi / nzeta)
+    theta = (np.arange(ntheta) + float(theta_shift)) * (2.0 * np.pi / ntheta)
+    zeta = (np.arange(nzeta) + float(zeta_shift)) * (2.0 * np.pi / nzeta)
     rr, tt, zz = jnp.meshgrid(jnp.asarray(rho_nodes), jnp.asarray(theta), jnp.asarray(zeta), indexing="ij")
     samples = evaluate_strong_force(state, rr, tt, zz)
     magnitude = jnp.linalg.norm(samples.force, axis=-1)

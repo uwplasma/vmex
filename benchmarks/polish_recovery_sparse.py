@@ -21,6 +21,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy import sparse
+from scipy.sparse import linalg as sparse_linalg
 
 from polish_recovery_p3 import _checkpoint_arrays, _write_npz_atomic
 from polish_recovery_refine import _load_state
@@ -315,6 +316,74 @@ def _sparse_feasible_step(matrix, residual, constraint, defect, damping: float):
     }
 
 
+def _sparse_feasible_step_lsmr(
+    matrix,
+    residual,
+    constraint,
+    defect,
+    damping: float,
+    max_iterations: int,
+):
+    """Unsquared constrained least-squares reference with sparse projection."""
+
+    coordinates = int(matrix.shape[1])
+    projector_kkt = sparse.bmat(
+        [
+            [sparse.eye(coordinates, format="csr"), constraint.T],
+            [constraint, None],
+        ],
+        format="csc",
+    )
+    started = time.perf_counter()
+    factor = sparse_linalg.splu(projector_kkt)
+
+    def projected(vector):
+        rhs = np.concatenate((np.asarray(vector), np.zeros(constraint.shape[0], dtype=float)))
+        return factor.solve(rhs)[:coordinates]
+
+    particular = factor.solve(np.concatenate((np.zeros(coordinates), -np.asarray(defect))))[:coordinates]
+    shifted = np.asarray(residual) + matrix @ particular
+    operator = sparse_linalg.LinearOperator(
+        matrix.shape,
+        matvec=lambda value: matrix @ projected(value),
+        rmatvec=lambda value: projected(matrix.T @ value),
+        dtype=np.float64,
+    )
+    result = sparse_linalg.lsmr(
+        operator,
+        -shifted,
+        damp=float(np.sqrt(damping)),
+        atol=1.0e-11,
+        btol=1.0e-11,
+        conlim=1.0e12,
+        maxiter=int(max_iterations),
+    )
+    step = particular + projected(result[0])
+    seconds = time.perf_counter() - started
+    model = np.asarray(residual) + matrix @ step
+    gradient = matrix.T @ model + damping * step
+    projected_gradient = projected(gradient)
+    feasibility = constraint @ step + defect
+    kkt_residual = np.concatenate((projected_gradient, feasibility))
+    rhs_scale = max(float(np.linalg.norm(matrix.T @ residual)), np.finfo(float).tiny)
+    return step, {
+        "solver": "projected_unsquared_lsmr",
+        "model_norm": float(np.linalg.norm(model)),
+        "original_constraint_norm": float(np.linalg.norm(feasibility)),
+        "stationarity_norm": float(np.linalg.norm(projected_gradient)),
+        "stationarity_relative": float(np.linalg.norm(projected_gradient)) / rhs_scale,
+        "true_kkt_relative_residual": float(np.linalg.norm(kkt_residual)) / rhs_scale,
+        "factor_solve_seconds": seconds,
+        "lsmr_stop_code": int(result[1]),
+        "lsmr_iterations": int(result[2]),
+        "lsmr_residual_norm": float(result[3]),
+        "lsmr_normal_residual_norm": float(result[4]),
+        "lsmr_operator_norm_estimate": float(result[5]),
+        "lsmr_condition_estimate": float(result[6]),
+        "projection_kkt_nnz": int(projector_kkt.nnz),
+    }
+
+
 def _sparse_projected_gradient(gradient, constraint):
     """Project a gradient through the original sparse gauge rows."""
 
@@ -365,7 +434,18 @@ def main() -> None:
         help="start a declared new gauge/quadrature chart even without insertion",
     )
     parser.add_argument("--damping", type=float, default=0.0)
+    parser.add_argument("--linear-solver", choices=("normal", "lsmr"), default="normal")
+    parser.add_argument("--max-linear-iterations", type=int, default=80)
     parser.add_argument("--max-steps", type=int, default=1)
+    parser.add_argument(
+        "--stationarity-refinement",
+        action="store_true",
+        help=(
+            "after the force target is met, admit finite full-model steps that "
+            "do not increase force beyond 1e-10 relative even when ordinary "
+            "descent is below the numerical-floor gate"
+        ),
+    )
     parser.add_argument("--memory-gib", type=float, default=2.0)
     parser.add_argument("--certificate", choices=("point", "tensorized"), default="point")
     parser.add_argument(
@@ -379,7 +459,13 @@ def main() -> None:
         default=Path("benchmarks/polish_recovery_r4_sparse_state.npz"),
     )
     args = parser.parse_args()
-    if args.insert_count < 0 or args.max_steps < 0 or args.radial_order < 2 or args.damping < 0.0:
+    if (
+        args.insert_count < 0
+        or args.max_steps < 0
+        or args.radial_order < 2
+        or args.damping < 0.0
+        or args.max_linear_iterations < 1
+    ):
         parser.error("counts and damping must be nonnegative")
     if args.memory_gib <= 0.0:
         parser.error("--memory-gib must be positive")
@@ -454,7 +540,17 @@ def main() -> None:
         assembly_seconds += elapsed
         if product_error > 2.0e-9 or transpose_error > 2.0e-9:
             raise AssertionError(f"compressed derivative mismatch: A={product_error}, AT={transpose_error}")
-        step, linear = _sparse_feasible_step(matrix, residual, constraint, defect, args.damping)
+        if args.linear_solver == "normal":
+            step, linear = _sparse_feasible_step(matrix, residual, constraint, defect, args.damping)
+        else:
+            step, linear = _sparse_feasible_step_lsmr(
+                matrix,
+                residual,
+                constraint,
+                defect,
+                args.damping,
+                args.max_linear_iterations,
+            )
         solve_seconds += linear["factor_solve_seconds"]
         linear_passes = (
             linear["original_constraint_norm"] < 1.0e-10
@@ -463,6 +559,7 @@ def main() -> None:
         )
         trials = []
         accepted_coordinates = None
+        acceptance_reason = None
         if linear_passes:
             for fraction in (1.0, 0.5, 0.25, 0.125):
                 candidate = coordinates + fraction * jnp.asarray(step)
@@ -479,14 +576,22 @@ def main() -> None:
                     / max(float(np.linalg.norm(residual)), np.finfo(float).tiny),
                 }
                 trials.append(trial)
+                ordinary_descent = trial["relative_force_reduction"] > 1.0e-8
+                stationarity_admission = (
+                    args.stationarity_refinement
+                    and float(np.linalg.norm(residual)) <= 1.0e-5
+                    and trial["relative_force_reduction"] >= -1.0e-10
+                )
                 if (
                     np.all(np.isfinite(tuple(trial.values())))
-                    and candidate_force < float(np.linalg.norm(residual))
-                    and trial["relative_force_reduction"] > 1.0e-8
+                    and (ordinary_descent or stationarity_admission)
                     and candidate_gauge < 1.0e-10
                     and minimum_j > 0.0
                 ):
                     accepted_coordinates = candidate
+                    acceptance_reason = (
+                        "ordinary_descent" if ordinary_descent else "force-qualified_stationarity_refinement"
+                    )
                     break
         history.append(
             {
@@ -498,6 +603,7 @@ def main() -> None:
                 "linear_certificate": linear,
                 "linear_passes": linear_passes,
                 "accepted": accepted_coordinates is not None,
+                "acceptance_reason": acceptance_reason,
                 "trials": trials,
             }
         )
@@ -559,10 +665,15 @@ def main() -> None:
         if product_error > 2.0e-9 or transpose_error > 2.0e-9:
             raise AssertionError("final compressed derivative mismatch")
     if last_matrix is not None:
+        operator_frobenius = float(np.linalg.norm(last_matrix.data))
+        stationarity_reference = operator_frobenius * float(np.linalg.norm(np.asarray(final_residual)))
         final_stationarity_frobenius = float(np.linalg.norm(projected)) / max(
-            float(np.linalg.norm(last_matrix.data)) * float(np.linalg.norm(np.asarray(final_residual))),
+            stationarity_reference,
             np.finfo(float).tiny,
         )
+    else:
+        operator_frobenius = None
+        stationarity_reference = None
 
     output = {
         "schema": "vmex.polish-recovery/4",
@@ -585,6 +696,9 @@ def main() -> None:
             "axisymmetric_only": True,
             "fixed_profiles": True,
             "damping": args.damping,
+            "linear_solver": args.linear_solver,
+            "max_linear_iterations": args.max_linear_iterations,
+            "stationarity_refinement": args.stationarity_refinement,
             "solve_radial_order": (
                 args.radial_order if args.insert_count or args.reanchor or angular_enrichment else old_radial_order
             ),
@@ -610,7 +724,13 @@ def main() -> None:
             "final_force_residual_norm": float(jnp.linalg.norm(final_residual)),
             "final_gauge_residual_norm": float(jnp.linalg.norm(constraint_function(coordinates))),
             "final_projected_gradient_relative_to_full": final_stationarity,
+            "final_projected_gradient_norm": float(np.linalg.norm(projected)),
+            "final_full_gradient_norm": float(np.linalg.norm(final_gradient)),
+            "final_operator_frobenius_norm": operator_frobenius,
+            "stationarity_reference_norm": stationarity_reference,
             "final_projected_gradient_frobenius_relative": (final_stationarity_frobenius),
+            "stationarity_tolerance": 1.0e-8,
+            "stationarity_pass": (final_stationarity_frobenius is not None and final_stationarity_frobenius <= 1.0e-8),
             **projection,
             "force_certificate": certificate,
             "independent_force_rms_N_per_m3": (

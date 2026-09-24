@@ -37,7 +37,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_state", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--angular-multiplier", type=int, default=2)
+    parser.add_argument("--radial-order-increment", type=int, default=2)
+    parser.add_argument("--theta-shift", type=float, default=0.5)
+    parser.add_argument("--zeta-shift", type=float, default=0.375)
     args = parser.parse_args()
+    if args.angular_multiplier < 1 or args.radial_order_increment < 0:
+        parser.error("angular multiplier must be positive and radial increment nonnegative")
+    if not 0.0 <= args.theta_shift < 1.0 or not 0.0 <= args.zeta_shift < 1.0:
+        parser.error("angular shifts must lie in [0, 1)")
     started = time.perf_counter()
     payload = {
         "schema": "vmex.polish-recovery-certificate/2",
@@ -79,23 +87,31 @@ def main() -> None:
     try:
         state = _load_state(args.input_state, prefix="accepted")
         spans = int(state.radial_basis.breakpoints.size - 1)
-        order = int(state.radial_basis.degree + 3)
+        order = int(state.radial_basis.degree + args.radial_order_increment + 1)
         coarse_order = max(int(state.radial_basis.degree + 1), order - 2)
         max_m = int(np.max(np.asarray(state.m), initial=0))
         max_n = int(np.max(np.abs(np.asarray(state.n)), initial=0))
-        ntheta = max(8, 4 * (max_m + 1))
-        nzeta = max(4, 4 * (max_n + 1))
+        ntheta = max(8, 2 * args.angular_multiplier * (max_m + 1))
+        nzeta = max(4, 2 * args.angular_multiplier * (max_n + 1))
         payload["certificate"].update(
             expected_fine_points=spans * order * ntheta * nzeta,
             expected_coarse_points=spans * coarse_order * ntheta * nzeta,
             completed_fine_points=0,
             completed_coarse_points=0,
-            shifted_theta_fraction=0.5,
-            shifted_zeta_fraction=0.375,
+            shifted_theta_fraction=args.theta_shift,
+            shifted_zeta_fraction=args.zeta_shift,
+            angular_multiplier=args.angular_multiplier,
+            radial_order_increment=args.radial_order_increment,
         )
         payload["execution"]["phase"] = "independent_certificate"
         _write_json_atomic(args.output, payload)
-        report = certify_strong_force(state)
+        report = certify_strong_force(
+            state,
+            angular_multiplier=args.angular_multiplier,
+            radial_order_increment=args.radial_order_increment,
+            theta_shift=args.theta_shift,
+            zeta_shift=args.zeta_shift,
+        )
         force_pass = float(report.absolute_l2 / 5915447.712414409) <= 1.0e-5
         payload["certificate"].update(
             {
