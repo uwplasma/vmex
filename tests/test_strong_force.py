@@ -1337,6 +1337,48 @@ def test_native_force_sparse_coloring_recovers_dense_jacobian():
     )
 
 
+def test_native_force_local_normal_matches_dense_small_reference():
+    """Span-local assembly preserves the small dense GN matrix and gradient."""
+
+    from benchmarks.polish_recovery_sparse import FORCE_SCALE, VOLUME_SCALE, _local_normal_system
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=3, ntheta=7, nzeta=1)
+    layout = make_native_correction_layout(state)
+    gauge = make_native_gauge_plan(state, plan)
+    coordinate_scale = native_coordinate_scales(state, layout, plan)
+    coordinates = jnp.linspace(-2.0e-4, 3.0e-4, layout.size)
+
+    def residual(value):
+        return native_physical_force_residual(
+            value,
+            state,
+            layout,
+            gauge,
+            coordinate_scale,
+            FORCE_SCALE,
+            VOLUME_SCALE,
+        )
+
+    residual_value = np.asarray(residual(coordinates))
+    dense = np.asarray(jax.jacfwd(residual)(coordinates))
+    normal, gradient, metrics = _local_normal_system(
+        residual,
+        coordinates,
+        residual_value,
+        state,
+        plan,
+        layout,
+        gauge,
+        coordinate_scale,
+    )
+    np.testing.assert_allclose(normal.toarray(), dense.T @ dense, rtol=2.0e-9, atol=2.0e-12)
+    np.testing.assert_allclose(gradient, dense.T @ residual_value, rtol=2.0e-9, atol=2.0e-12)
+    assert metrics["gradient_vjp_relative_error"] < 2.0e-9
+    assert metrics["normal_jvp_relative_error"] < 2.0e-9
+    assert metrics["symmetry_relative_error"] < 2.0e-12
+
+
 def test_native_polish_trial_acceptance_fails_closed():
     """Linear, gauge, force, geometry, and finite gates are independent."""
 

@@ -14,14 +14,24 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from polish_recovery_p3 import (
-    _checkpoint_arrays,
-    _constraint_qr,
-    _dense_reference_memory,
-    _final_projected_gradient,
-    _feasible_least_squares_step,
-    _write_npz_atomic,
-)
+if __package__:
+    from .polish_recovery_p3 import (
+        _checkpoint_arrays,
+        _constraint_qr,
+        _dense_reference_memory,
+        _final_projected_gradient,
+        _feasible_least_squares_step,
+        _write_npz_atomic,
+    )
+else:
+    from polish_recovery_p3 import (
+        _checkpoint_arrays,
+        _constraint_qr,
+        _dense_reference_memory,
+        _final_projected_gradient,
+        _feasible_least_squares_step,
+        _write_npz_atomic,
+    )
 from vmex.core.polish import apply_high_order_correction, make_native_correction_layout
 from vmex.core.polish_variational import (
     evaluate_tensorized_strong_force,
