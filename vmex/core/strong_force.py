@@ -15,7 +15,7 @@ from __future__ import annotations
 import functools
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -1398,6 +1398,51 @@ def high_order_state_from_wout(
     )
 
 
+def insert_high_order_state_knots(
+    state: HighOrderEquilibriumState,
+    knots: Array,
+) -> HighOrderEquilibriumState:
+    """Exactly prolong a native state by open B-spline knot insertion.
+
+    The same Boehm transfer is applied to all six geometry/lambda channels
+    and all three radial profiles. Boundary tables are physical edge values,
+    so they are retained unchanged. No legacy mesh or WOUT refit is involved.
+    """
+
+    requested = np.asarray(knots, dtype=float).reshape(-1)
+    if requested.size == 0:
+        return state
+    if np.any(~np.isfinite(requested)) or np.unique(requested).size != requested.size:
+        raise ValueError("inserted knots must be finite and unique")
+    coefficient_names = (
+        "R_cos",
+        "R_sin",
+        "Z_cos",
+        "Z_sin",
+        "L_cos",
+        "L_sin",
+        "phipf",
+        "chipf",
+        "pressure",
+    )
+    refined = state
+    for knot in np.sort(requested):
+        source_basis = refined.radial_basis
+        transferred = {}
+        target_basis = None
+        for name in coefficient_names:
+            candidate_basis, coefficients = source_basis.insert_knot(
+                getattr(refined, name), float(knot), axis=-1
+            )
+            if target_basis is None:
+                target_basis = candidate_basis
+            elif candidate_basis != target_basis:
+                raise AssertionError("inconsistent native knot insertion basis")
+            transferred[name] = coefficients
+        refined = replace(refined, radial_basis=target_basis, **transferred)
+    return refined
+
+
 def _weighted_l2(values: Array, weights: Array) -> Array:
     return jnp.sqrt(jnp.sum(weights * values * values) / jnp.sum(weights))
 
@@ -1897,6 +1942,7 @@ __all__ = [
     "force_error_measures",
     "force_error_record",
     "high_order_state_from_wout",
+    "insert_high_order_state_knots",
     "lift_high_order_state",
     "plot_strong_force_report",
 ]

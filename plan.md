@@ -144,6 +144,23 @@ Current checkpoint:
   are in `benchmarks/polish_recovery_r1_p3.json`. The independent radial
   refinement difference is `0.0131`, so this recovered endpoint is a starting
   point for exact continuation, not a final accepted equilibrium.
+- R3's first true radial refinement now exactly bisects all 24 old spans by
+  Boehm knot insertion, producing 51 cubic basis functions without consulting
+  the WOUT. On a third grid, native values/first jets agree at roughly
+  `1e-14`; the most cancellation-sensitive spline second-derivative and force
+  comparisons agree to `4.74e-8` and `3.47e-8` relative (`5.09e-4 N/m^3`
+  maximum absolute force difference). Four full, rank-checked feasible dense
+  steps on the 1,711-coordinate/550-gauge system reduce independent
+  `epsilon_B` from `2.825e-4` to `1.669e-4` (`987.18 N/m^3`) while retaining
+  original-row gauge norm `1.24e-19` and positive geometry. Progress occurs
+  almost entirely on the first refined step and then plateaus; the result is
+  still 16.7x above `1e-5`. The 386 MB dense Jacobian is bounded reference
+  algebra only. Generator, complete checkpoint, transfer invariants, timings,
+  and limitations are in `benchmarks/polish_recovery_refine.py`,
+  `benchmarks/polish_recovery_r3_refinement.json`, and
+  `benchmarks/polish_recovery_r3_refined_state.npz`. Next diagnose the
+  feasible residual range and run the separate angular/refinement controls;
+  do not reset to the WOUT or claim the radial result passes R3.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.

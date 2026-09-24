@@ -55,6 +55,7 @@ from vmex.core.strong_force import (
     force_error_measures,
     force_error_record,
     high_order_state_from_wout,
+    insert_high_order_state_knots,
     lift_high_order_state,
     plot_strong_force_report,
 )
@@ -145,6 +146,53 @@ def test_native_field_view_matches_analytic_geometry_and_force_view():
     assert native.dposition_drho.shape == native.position.shape
     assert native.dposition_dtheta.shape == native.position.shape
     assert native.dposition_dphi.shape == native.position.shape
+
+
+def test_native_state_knot_insertion_preserves_fields_and_force():
+    """Exact h-refinement transfers the native state without a WOUT refit."""
+
+    state = _constant_toroidal_field_state(degree=3)
+    nodes = jnp.asarray(state.radial_basis.collocation_nodes)
+    shape = state.radial_basis.fit(1.0 - 0.3 * nodes + 0.1 * nodes**2)
+    state = replace(
+        state,
+        chipf=0.2 * shape,
+        pressure=1.0e4 * shape,
+        L_sin=state.L_sin.at[1].set(0.02 * shape),
+    )
+    midpoints = 0.5 * (
+        state.radial_basis.breakpoints[:-1]
+        + state.radial_basis.breakpoints[1:]
+    )
+    refined = insert_high_order_state_knots(state, midpoints)
+    assert refined.radial_basis.size == state.radial_basis.size + midpoints.size
+    rho = jnp.asarray([0.013, 0.17, 0.49, 0.83, 0.997])
+    theta = jnp.asarray([0.2, 1.1, 2.7, 4.3, 5.8])
+    zeta = jnp.asarray([0.1, 0.4, 1.7, 3.2, 5.4])
+    coarse_fields = evaluate_high_order_fields(state, rho, theta, zeta)
+    fine_fields = evaluate_high_order_fields(refined, rho, theta, zeta)
+    for name in (
+        "position",
+        "dposition_drho",
+        "dposition_dtheta",
+        "dposition_dphi",
+        "sqrt_g",
+        "B",
+        "pressure",
+    ):
+        np.testing.assert_allclose(
+            getattr(fine_fields, name),
+            getattr(coarse_fields, name),
+            rtol=3.0e-12,
+            atol=3.0e-12,
+        )
+    coarse_force = evaluate_strong_force(state, rho, theta, zeta)
+    fine_force = evaluate_strong_force(refined, rho, theta, zeta)
+    np.testing.assert_allclose(
+        fine_force.force, coarse_force.force, rtol=2.0e-10, atol=2.0e-5
+    )
+    with pytest.raises(ValueError, match="finite and unique"):
+        insert_high_order_state_knots(state, [0.3, 0.3])
 
 
 def test_axisymmetric_fields_are_invariant_to_field_period_coordinates():
