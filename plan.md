@@ -61,6 +61,14 @@ Current checkpoint:
   recorded comparison at displayed precision.  Input pressure and prescribed
   iota are also sampled from their analytic input profiles at spline nodes;
   current-constrained chi remains an equilibrium unknown.
+- P4 rejects unregularized radial enrichment on the same ordinary WOUT.  The
+  independent force RMS grows from `1.152e5` to `2.315e5` and `1.005e6`
+  N/m^3 as the cubic basis grows from 27 to 35 and 43 functions; near-axis RMS
+  grows most sharply, despite a modest improvement in the window magnetic
+  relative metric.  A 51-function basis is correctly refused at rank 49/50.
+  Full regional data and the lift-only limitation are in
+  `benchmarks/polish_recovery_p4.json`.  Next: identify a support-aware,
+  regularized lift before enlarging the correction space.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.
