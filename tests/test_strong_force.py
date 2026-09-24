@@ -1027,6 +1027,34 @@ def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():
         strong_force._constrained_spline_fit(
             basis, 2 + s, s, fix_axis=True, fix_edge=True,
         )
+    with pytest.raises(ValueError, match="unobserved coefficient"):
+        strong_force._constrained_spline_fit(
+            basis, 2 + s, s, fix_axis=True, fix_edge=True,
+            curvature_regularization=1.0,
+        )
+
+
+def test_radial_curvature_regularization_damps_mesh_noise():
+    """Optional smoothing improves a noisy regular lift without changing rank."""
+
+    basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, 33), degree=3)
+    s = np.linspace(0.0, 1.0, 51)
+    exact = 2.0 + 0.5 * s - 0.25 * s**2
+    samples = exact + 0.002 * np.random.default_rng(1).normal(size=s.shape)
+    samples[-1] = exact[-1]
+    raw = strong_force._constrained_spline_fit(
+        basis, samples, s, fix_edge=True
+    )
+    smooth = strong_force._constrained_spline_fit(
+        basis, samples, s, fix_edge=True, curvature_regularization=0.1
+    )
+    points = np.linspace(0.01, 0.99, 100)
+    reference = 2.0 + 0.5 * points - 0.25 * points**2
+    raw_error = np.sqrt(np.mean((basis.evaluate(raw, points) - reference) ** 2))
+    smooth_error = np.sqrt(
+        np.mean((basis.evaluate(smooth, points) - reference) ** 2)
+    )
+    assert smooth_error < 0.7 * raw_error
 
 
 @pytest.mark.parametrize("name", ["R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"])

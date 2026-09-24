@@ -1043,6 +1043,7 @@ def _constrained_spline_fit(
     fix_axis: bool = False,
     fix_edge: bool = False,
     weights: np.ndarray | None = None,
+    curvature_regularization: float = 0.0,
     diagnostics: dict[str, float | int] | None = None,
 ) -> np.ndarray:
     """Fit physical amplitudes with exact clamped endpoint values.
@@ -1052,7 +1053,9 @@ def _constrained_spline_fit(
     dividing the samples by ``rho**abs(m)`` gives tiny, noisy near-axis
     amplitudes unbounded leverage.  The solve uses radial cell weights and
     column equilibration, and can return the rank/conditioning diagnostics
-    used by reconstruction tests and benchmark records.
+    used by reconstruction tests and benchmark records.  The optional
+    dimensionless second-derivative penalty is for controlled source-noise
+    experiments; it does not relax the data-rank check and defaults to zero.
     """
 
     values = np.asarray(samples, dtype=float)
@@ -1097,6 +1100,9 @@ def _constrained_spline_fit(
         rhs -= matrix[:, index] * value
     rank = 0
     condition = 1.0
+    curvature_regularization = float(curvature_regularization)
+    if not np.isfinite(curvature_regularization) or curvature_regularization < 0.0:
+        raise ValueError("curvature_regularization must be finite and nonnegative")
     if free.size:
         weighted_matrix = np.sqrt(weights)[:, None] * matrix[:, free]
         weighted_rhs = np.sqrt(weights) * rhs
@@ -1106,18 +1112,52 @@ def _constrained_spline_fit(
                 "radial lift has an unobserved coefficient; reduce spline "
                 "spans/degree or supply more resolved radial samples"
             )
-        solution, _, rank, singular = np.linalg.lstsq(
-            weighted_matrix / column_norms,
-            weighted_rhs,
-            rcond=1.0e-12,
-        )
+        scaled_matrix = weighted_matrix / column_norms
+        singular_data = np.linalg.svd(scaled_matrix, compute_uv=False)
+        rank = int(np.count_nonzero(singular_data > singular_data[0] * 1.0e-12))
         if rank < free.size:
             raise ValueError(
                 f"radial lift is underdetermined (rank {rank}/{free.size}); "
                 "reduce spline spans/degree or supply more resolved radial samples"
             )
+        if curvature_regularization > 0.0:
+            # Dimensionless smoothing strength: scale d²/ds² by a typical
+            # knot-span width squared, then integrate its squared magnitude.
+            # The unscaled fit remains the default; this optional term is an
+            # experimental response to source-mesh noise, not a model change.
+            quad_s = np.asarray(basis.quadrature_nodes, dtype=float)
+            quad_w = np.asarray(basis.quadrature_weights, dtype=float)
+            span_width = float(np.median(np.diff(basis.breakpoints)))
+            curvature = np.asarray(
+                basis.basis_matrix(quad_s, derivative=2), dtype=float
+            )
+            roughness = (
+                np.sqrt(curvature_regularization)
+                * span_width**2
+                * np.sqrt(quad_w)[:, None]
+                * curvature
+            )
+            fixed_indices = list(fixed)
+            regularized_rhs = (
+                -roughness[:, fixed_indices]
+                @ np.asarray([fixed[index] for index in fixed_indices], dtype=float)
+                if fixed
+                else np.zeros((roughness.shape[0],), dtype=float)
+            )
+            augmented_matrix = np.concatenate(
+                (scaled_matrix, roughness[:, free] / column_norms), axis=0
+            )
+            augmented_rhs = np.concatenate((weighted_rhs, regularized_rhs))
+        else:
+            augmented_matrix = scaled_matrix
+            augmented_rhs = weighted_rhs
+        solution, _, _, _ = np.linalg.lstsq(
+            augmented_matrix,
+            augmented_rhs,
+            rcond=1.0e-12,
+        )
         coefficients[free] = solution / column_norms
-        condition = float(singular[0] / singular[-1])
+        condition = float(singular_data[0] / singular_data[-1])
     if diagnostics is not None:
         residual = np.sqrt(weights) * (matrix @ coefficients - values)
         diagnostics.update(
@@ -1137,6 +1177,7 @@ def lift_high_order_state(
     radial_basis: BSplineBasis | None = None,
     degree: int = 5,
     max_spans: int = 32,
+    curvature_regularization: float = 0.0,
     source: str = "VMEX legacy equilibrium",
 ) -> HighOrderEquilibriumState:
     """Lift a converged legacy :class:`SpectralState` into the smooth basis.
@@ -1148,6 +1189,11 @@ def lift_high_order_state(
     ``(m,n)=(0,0)`` gauge mode structurally. A basis whose unconstrained
     coefficients are not determined by the retained radial samples is rejected;
     a minimum-norm fill can invent curvature in unsampled spans.
+
+    ``curvature_regularization`` optionally applies a dimensionless,
+    knot-span-scaled integrated curvature penalty to Fourier amplitudes.  It
+    is an experimental smoothing knob; zero is the default and the separate
+    data-rank check remains mandatory.
     """
 
     from . import postprocess as _pp
@@ -1218,6 +1264,7 @@ def lift_high_order_state(
                     mode_m=int(m_values[column]),
                     fix_axis=int(m_values[column]) == 0,
                     fix_edge=fixed_boundary,
+                    curvature_regularization=curvature_regularization,
                 )
                 for column in range(table.shape[1])
             ],
@@ -1311,6 +1358,7 @@ def high_order_state_from_wout(
     radial_basis: BSplineBasis | None = None,
     degree: int = 5,
     max_spans: int = 32,
+    curvature_regularization: float = 0.0,
 ) -> HighOrderEquilibriumState:
     """Import a VMEX-, VMEC2000-, or VMEC++-compatible wout continuously.
 
@@ -1337,6 +1385,7 @@ def high_order_state_from_wout(
         radial_basis=radial_basis,
         degree=degree,
         max_spans=max_spans,
+        curvature_regularization=curvature_regularization,
         source=str(source_name),
     )
 

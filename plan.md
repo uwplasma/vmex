@@ -69,6 +69,27 @@ Current checkpoint:
   Full regional data and the lift-only limitation are in
   `benchmarks/polish_recovery_p4.json`.  Next: identify a support-aware,
   regularized lift before enlarging the correction space.
+- P5 prototypes optional knot-span-scaled curvature regularization in the
+  lift; zero remains the default, and the observed-data rank check still runs
+  before regularization.  At 43 cubic basis functions, weight `0.1` lowers
+  independent force RMS from `1.005e6` to `7.36e4 N/m^3` and near-axis RMS
+  from `5.13e6` to `3.86e4`, with radial quadrature sensitivity falling to
+  `2.7e-11`.  It moves residual toward the edge, increases the window
+  magnetic-relative metric, and still has `epsilon_B = 1.24e-2`; this is a
+  lift-only result, not a recovered equilibrium.  See
+  `benchmarks/polish_recovery_p5.json`.  Proceed to a bounded same-scale
+  correction-step test before deciding whether the regularizer helps the
+  polish objective.
+- P6 runs that bounded correction-step check.  Five projected-gradient steps
+  reduce fixed-scale `epsilon_B` from `1.244e-2` to `8.891e-3` in 6.8 s
+  including the independent certificate; gauge residuals remain below
+  `3e-22` and the solve-grid signed Jacobian stays positive.  This is only a
+  28.5% improvement and is about 889x above the `1e-5` target; P3's dense
+  Candidate B still outperforms it decisively.  The reproducible diagnostic
+  script and complete numbers are `benchmarks/polish_recovery_p6.py` and
+  `benchmarks/polish_recovery_p6.json`.  The linear step itself is fast enough
+  for iteration, but the next candidate must use scalable constrained
+  least-squares rather than promote projected steepest descent.
 - Candidate A/B solver selection, independent final force acceptance, 3-D
   closure, implicit derivatives, and product promotion remain open.  No
   speedup or recovered polished equilibrium is claimed at this checkpoint.

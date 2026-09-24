@@ -1,0 +1,50 @@
+{
+  "schema": "vmex.polish-recovery/1",
+  "source": {
+    "vmex_base_sha": "01bc1003",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "reproduction": "JAX_ENABLE_X64=1 .venv/bin/python benchmarks/polish_recovery_p6.py"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "method": "Five matrix-free projected-gradient steps on the fixed-volume physical-force residual; gauge Jacobian explicitly materialized to construct the tangent projector; exact linearized step length, full step accepted each time.",
+  "state": {
+    "radial_basis_functions": 43,
+    "curvature_regularization": 0.1,
+    "native_coordinates": 1439,
+    "gauge_constraints": 462,
+    "materialized_gauge_jacobian_bytes": 5318544,
+    "F_star_N_per_m3": 5915447.712414409,
+    "V_star_m3": 633.7993467060758
+  },
+  "initial": {
+    "force_residual_norm": 0.01243646409992236,
+    "independent_force_rms_N_per_m3": 73567.25309908722,
+    "independent_epsilon_B": 0.0124366
+  },
+  "iterations": [
+    {"force_residual_norm": 0.010928796564300803, "minimum_signed_jacobian": 1.3505828253800856, "gauge_residual_norm": 1.0107912646290084e-22},
+    {"force_residual_norm": 0.01013492899425315, "minimum_signed_jacobian": 1.350582824918899, "gauge_residual_norm": 1.2567456218561889e-22},
+    {"force_residual_norm": 0.009586390790222754, "minimum_signed_jacobian": 1.3505828239780162, "gauge_residual_norm": 1.836163799362269e-22},
+    {"force_residual_norm": 0.009193309616361122, "minimum_signed_jacobian": 1.350582823507006, "gauge_residual_norm": 2.199894215591808e-22},
+    {"force_residual_norm": 0.008890959635287013, "minimum_signed_jacobian": 1.350582822532392, "gauge_residual_norm": 2.7488677900531015e-22}
+  ],
+  "final": {
+    "independent_force_rms_N_per_m3": 52594.0068186077,
+    "independent_epsilon_B": 0.008890959632392944,
+    "radial_refinement_difference": 7.035891880014527e-11,
+    "runtime_including_certificate_seconds": 6.756473749992438
+  },
+  "decision": "The bounded projected-gradient reference lowers epsilon_B by 28.5% over five steps, preserves the gauge to roundoff and maintains positive Jacobian, but remains about 889 times above the 1e-5 target. It is not competitive with the P3 dense Candidate-B reference and does not replace the planned scalable constrained least-squares solver.",
+  "limitations": [
+    "Only the shaped axisymmetric prescribed-iota tokamak is tested.",
+    "The gauge Jacobian is a dense 5.3 MB diagnostic matrix; production code must remain structured/matrix-free.",
+    "No corrected state is accepted as a polished equilibrium."
+  ]
+}

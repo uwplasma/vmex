@@ -1,0 +1,83 @@
+{
+  "schema": "vmex.polish-recovery/1",
+  "source": {
+    "vmex_base_sha": "01bc1003",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "wout": "artifacts/p0/run2/wout_shaped_tokamak_pressure.nc",
+    "state": "same ordinary WOUT; direct analytic input pressure/prescribed iota; cubic clamped uniform basis",
+    "purpose": "dimensionless curvature-regularized lift sensitivity; no correction solve"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "device": "Apple M4 CPU",
+    "precision": "float64"
+  },
+  "scales": {
+    "F_star_N_per_m3": 5915447.712414409,
+    "epsilon_B_definition": "independent volume-weighted absolute force RMS divided by fixed F_star"
+  },
+  "results": [
+    {
+      "basis_size": 27,
+      "curvature_regularization": 0.0,
+      "force_rms_N_per_m3": 115236.11270590227,
+      "epsilon_B": 0.019480539480395184,
+      "near_axis_force_rms_N_per_m3": 576545.4993962232,
+      "minimum_signed_jacobian": 23.86263426549583,
+      "radial_refinement_difference": 0.005451155359329798
+    },
+    {
+      "basis_size": 43,
+      "curvature_regularization": 0.0,
+      "force_rms_N_per_m3": 1004518.2403285253,
+      "epsilon_B": 0.169777755658,
+      "near_axis_force_rms_N_per_m3": 5133543.896678597,
+      "minimum_signed_jacobian": 23.858854784664018,
+      "radial_refinement_difference": 0.025569276368584026
+    },
+    {
+      "basis_size": 43,
+      "curvature_regularization": 0.1,
+      "force_rms_N_per_m3": 73567.25309908722,
+      "epsilon_B": 0.0124366,
+      "near_axis_force_rms_N_per_m3": 38590.825151976795,
+      "bulk_force_rms_N_per_m3": 53110.236730359364,
+      "edge_force_rms_N_per_m3": 101340.6169947873,
+      "window_magnetic_relative_force": 0.011928895179996023,
+      "minimum_signed_jacobian": 23.863709577408184,
+      "radial_refinement_difference": 2.6659265423119418e-11
+    },
+    {
+      "basis_size": 43,
+      "curvature_regularization": 1.0,
+      "force_rms_N_per_m3": 89060.34217276049,
+      "epsilon_B": 0.015053,
+      "near_axis_force_rms_N_per_m3": 20686.09733008335,
+      "bulk_force_rms_N_per_m3": 55846.08893887726,
+      "edge_force_rms_N_per_m3": 130297.31134119876,
+      "window_magnetic_relative_force": 0.0175689872249902,
+      "minimum_signed_jacobian": 23.86768484491383,
+      "radial_refinement_difference": 1.0727462067795739e-11
+    },
+    {
+      "basis_size": 43,
+      "curvature_regularization": 10.0,
+      "force_rms_N_per_m3": 112375.95592368812,
+      "epsilon_B": 0.018993,
+      "near_axis_force_rms_N_per_m3": 15173.481561848317,
+      "bulk_force_rms_N_per_m3": 57453.328389521026,
+      "edge_force_rms_N_per_m3": 172995.05804771231,
+      "window_magnetic_relative_force": 0.0250059213433508,
+      "minimum_signed_jacobian": 23.870790745263132,
+      "radial_refinement_difference": 1.9613030762427067e-12
+    }
+  ],
+  "decision": "Curvature smoothing stabilizes the over-rich lift and reduces force RMS by 36% versus the baseline 27-function lift at weight 0.1; it also moves the residual outward, so the window magnetic-relative force is higher. This merits a bounded correction-step test, not a solver promotion. All lift-only epsilon_B results remain above 1e-2.",
+  "limitations": [
+    "This does not include a polishing correction and is not a recovered equilibrium.",
+    "The curvature weight is dimensionless after knot-span scaling, but its useful value is resolution/problem dependent and is not a production default.",
+    "Single-run timings are omitted from the selection record because cache state differs between first and subsequent lifts."
+  ]
+}
