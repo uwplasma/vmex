@@ -10,5 +10,7 @@
   "fine.in": "0b7f3eac8144bcbf0da1af1d48a60a2de5a1b77cb65911b7ada42ecc25ebf1bb",
   "native-samples.npz": "3fee6693d8643419441fd934eb584a92b475a8bfc3daa80e5877818a976694d6",
   "vmex-cpu.npz": "4f0a87511b74010e636430d4990c58d6558d2c03584a70f892865c49221189b5",
-  "native-force.npz": "e2742af31c22db5ae760ae616716889007169f97845bad153a48369dc34a8344"
+  "native-force.npz": "e2742af31c22db5ae760ae616716889007169f97845bad153a48369dc34a8344",
+  "source-eligibility-mask.npz": "4ab65c8168c30ad9cfc4361daa320c234bd01ffda7a6deda39f986fdf47d058d",
+  "source-eligibility-targets.npz": "bc9bb06d301e29e28d016ebfd49207828ffc7abb26bbc8131b3064b8976102db"
 }

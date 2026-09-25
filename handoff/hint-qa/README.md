@@ -1,11 +1,41 @@
 # HINT–VMEX finite-beta QA comparison
 
-Reviewed 2026-09-21 against VMEX main
-[`45f3a7aeaeedd50ee7a04d553bc0d281bb8510a4`](https://github.com/uwplasma/vmex/commit/45f3a7aeaeedd50ee7a04d553bc0d281bb8510a4).
+Reviewed 2026-09-24 against VMEX main
+[`926892ab7131a6bc0c5b61218d1f75e7b77bc401`](https://github.com/uwplasma/vmex/commit/926892ab7131a6bc0c5b61218d1f75e7b77bc401)
+(release 0.11.2). The measured VMEX runs below remain pinned to their earlier
+source; advancing main does not silently requalify them. The source and PR
+status table below records the September 21 audit and is historical where
+later status differs.
 This is a research protocol and historical baseline, **not a qualified
 HINT–VMEX equilibrium comparison**. The two supplied finite-beta QA cases
 remain the goal: nominal volume beta 0.5% and 2.5%, first comparing fields
 outside the given boundary, then a separately matched free-boundary study.
+
+The HINT creator requested the maintained
+[HINT3D `current` branch](https://github.com/yasuhiro-suzuki/HINT3D/tree/current),
+which still resolves to
+[`bf31fc39f7179bdd91d84319c51c68e2f6fff25f`](https://github.com/yasuhiro-suzuki/HINT3D/commit/bf31fc39f7179bdd91d84319c51c68e2f6fff25f)
+at this review. `master` is not the study source. The supplied 30-page LHD
+manual describes MKVAC, MKFLX, MKLIM, HINT, GPRTS and HMAG and provides an
+LHD example; its commands and LHD parameters are illustrative, not instructions
+to substitute that case for the finite-beta QA inputs here. Geiger's 2022
+W7-X poster reports broad HINT versus VMEC/EXTENDER agreement but differences
+around islands and at the edge, including underestimated island size in that
+VMEX approach. Its W7-X configurations and historical EXTENDER implementation
+are not the present QA case or current VMEX code. These author materials set
+the questions and failure modes; they do not provide a quantitative QA answer.
+
+Since the September 21 audit, dependency floors [#410](https://github.com/uwplasma/vmex/pull/410),
+free-boundary recovery [#416](https://github.com/uwplasma/vmex/pull/416),
+the research plan [#413](https://github.com/uwplasma/vmex/pull/413),
+the independent exterior-field oracles [#430](https://github.com/uwplasma/vmex/pull/430),
+and target-graded near-surface quadrature [#441](https://github.com/uwplasma/vmex/pull/441)
+merged to main. The old #417/#418/#421/#423 stack closed; #422 merged only
+into its feature branch. Dependent [#306](https://github.com/uwplasma/vmex/pull/306)
+remains a draft based on this PR. Reassess its derivative guards against the
+current main implementation before promoting that stack. #430/#441 materially
+improve the VMEX prescribed-boundary exterior-field oracle but do not validate
+the HINT run or the inter-code comparison.
 
 ## Sources and scope
 
@@ -598,15 +628,25 @@ The [per-target support counts](data/endpoint-support.npz) use native `P>0`
 and `limiter>0` conventions; the separate 1e-12 weight screen is only a
 sensitivity check. Driven/off pressure arrays match exactly.
 
-No target is certified exterior to imposed-current support: the saved field
-contains neither native `ss` nor `ss<jcuts`. Retain that byte eligibility mask, its trace time,
-threshold and grid identity alongside the next native endpoint before using
-this classification to admit an exterior-field comparison. The mask is a
-conservative source-eligibility region, independent of drive amplitude; it
-does not assert nonzero current, and excludes native R/Z boundary layers.
-Attained response currents can extend outside it. Do not substitute
-the initial vacuum flux map. Mesh, wall clearance and interpolation order must
-be varied separately; moving targets alone cannot establish convergence.
+The time-1.18 endpoint lacks native `ss` or `ss<jcuts`, so its 192 target samples
+cannot be retrospectively classified. A subsequent bounded continuation with
+the optional diagnostic advanced from time 1.18 to 1.28. Its saved
+[eligibility mask](data/source-eligibility-mask.npz) has 14,899 eligible grid
+nodes with `jcuts=1`, trace time 1.18 and endpoint time 1.28. The
+[classification record](source-eligibility.json) and
+[per-target arrays](data/source-eligibility-targets.npz) use the native 8x8x8
+MAGVAL spline stencil: 5/192 targets have no eligible node in the full stencil;
+7/192 have none among nodes with absolute interpolation weight above 1e-12.
+At offsets 0.05 and 0.15 minor radii, every target overlaps eligible nodes;
+at 0.3 and 0.5, the full-stencil zero counts are 1/48 and 4/48.
+These are source-eligibility results for the **new** step-B entry, not labels
+for the old time-1.18 field comparison. The mask is an amplitude-independent
+superset of possible imposed-current source cells, not the attained current
+support; response and return currents can extend beyond it. It excludes native
+R/Z boundary layers. The raw full output and restart are still not publicly
+hosted, so the compact extract does not independently reproduce the run.
+Mesh, wall clearance, time relaxation and interpolation order must be varied
+separately before admitting exterior targets to an inter-code field comparison.
 
 The optional diagnostic patch now implements this output for the primary
 NetCDF file. Set `lsource_support_diag=.true.` in `stepb_inp1`; it defaults
@@ -617,10 +657,12 @@ not zero. HDF5, binary output and separate snapshot files are outside scope.
 The fresh Release build passes off/on physical-array parity, byte-identical
 one/four-rank toroidal output, legacy follow, disabled follow without stale
 values, and explicit rejection of partial/wrong-type schemas. The short
-zero-drive fixture validates output semantics, not mature QA support. Next
-rebuild with the same patch on the production platform and save eligibility
-during one bounded continuation of the retained endpoint before classifying
-the comparison targets. Historical runs retain their original patch hashes.
+zero-drive fixture validates output semantics, not mature QA support. The
+production-platform build and single bounded continuation have completed for
+the 0.5% case; the extract above is their available evidence. A repeated
+independent read of the full raw output and current/force closure is still
+required before interpreting this as a mature equilibrium. Historical runs
+retain their original patch hashes.
 
 Recompute the endpoint difference without a native build:
 
@@ -636,10 +678,12 @@ PYCODE
 
 ## Execution order and research acceptance
 
-1. **Freeze a working baseline.** Use main `45f3a7aea`, which includes #409,
-   and validate #410's floors. Include accepted #416 recovery changes before
-   free-boundary qualification and #417/#418 state/derivative changes before
-   sensitivity claims; candidate evidence is not integrated-main evidence.
+1. **Freeze a working baseline.** The recorded runs use their pinned historical
+   commits. Start a new validation on current main `926892ab7` (release 0.11.2),
+   which includes #410, #416, #430 and #441. Reassess derivative admission on
+   this source: the old #417/#418/#421/#423 stack closed without main promotion,
+   and draft #306 still depends on this branch. Candidate evidence is not
+   integrated-main evidence.
    Pin all source commits, dirty patches, input hashes,
    Python/JAX/compiler/MPI versions and device placement. Use `current` for
    HINT. Keep source-data and quadrature error distinct; `project_current`
@@ -713,7 +757,7 @@ prerequisites even if two codes agree numerically.
 
 ## Reuse and performance
 
-The proposed profiler correction [#420](https://github.com/uwplasma/vmex/pull/420)
+The merged profiler correction [#420](https://github.com/uwplasma/vmex/pull/420)
 repeats every stage of multi-stage warm workflows. Historical schema-1 warm
 aggregates could omit diagnostics or derivatives; remeasure those complete
 workflows before making performance claims. Its schema-2 contract is separate
@@ -1031,3 +1075,37 @@ family scale. Certificate state/parameter identities and repeated measurement
 match. This uses refinement disabled and `primal_tol=None`: configured
 admission passes, while `strict_root_certified` is false. It does not close
 the refined exact-QA, derivative, optimization or free-boundary GPU gates.
+
+## September 24 handoff review
+
+The review covered this branch's source changes, portable inputs, numerical
+records, two HINT patches, the creator's LHD manual, Geiger's W7-X poster,
+current VMEX main, and the live PR graph. This branch changes VMEX only through
+research helpers, compact evidence, documentation and restart-preflight tests;
+it does not replace VMEX equilibrium operators. The HINT portability patch
+and optional diagnostic patch apply to the pinned `current` source, but remain
+local research changes requiring independent upstream review. Short serial/MPI
+regressions and the single bounded 0.5% continuation establish that those
+paths run; they do not show a converged HINT QA equilibrium or certify all HINT
+outputs, boundary conditions or long-term stability.
+
+The most useful next discriminator is a **same-physical-point** field and
+force audit of the saved M8/N6, M9/N6 and M8/N7 VMEX states, with root-family
+and constrained-mode provenance explicit. The observed M9 force increase is
+not explained by the checked angular sampling; a new solve ladder should wait
+for that diagnostic. For HINT, check attained toroidal current and force
+balance through later native continuations on multiple grids and independently
+classify support at each saved time. Then establish a coil-only baseline and
+compare vacuum, plasma-response and total vectors at common targets with
+controlled HINT interpolation and VMEX quadrature. Use #441's graded rule near
+the boundary with its reported estimate. Repeat at 2.5% only after the 0.5%
+method and its coil/WOUT mismatch accounting are stable. Island-width claims
+require a separate common-tracer convergence study.
+
+The PR remains draft because no accepted inter-code field table, converged
+HINT current/force state, common topology result, full raw restart package or
+independent cold reproduction exists. Its earlier CI run passed the fast,
+physics, quality and two-device checks, but the C2 manifest lane and aggregate
+gate failed; that failure must be reevaluated on the current CI definition.
+Do not interpret this branch's older `plan.md` diff as replacing the merged
+[current research plan](https://github.com/uwplasma/vmex/blob/main/plan.md).
