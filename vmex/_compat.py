@@ -310,10 +310,21 @@ def _cache_machine_fingerprint() -> str:
 
 
 def _machine_scoped(directory: str) -> str:
-    """Return ``directory/<machine fingerprint>`` (see _cache_machine_fingerprint)."""
+    """Return ``directory/<machine fingerprint>`` (see _cache_machine_fingerprint).
+
+    Idempotent: a path that already ends in this machine's fingerprint is
+    returned unchanged.  ``_configure_jax_environment`` exports the scoped
+    default as ``JAX_COMPILATION_CACHE_DIR`` and ``vmex/__init__`` resolves it
+    again, which previously nested ``<fp>/<fp>`` and left the directory JAX
+    writes to unpruned.
+    """
     import pathlib
 
-    return str(pathlib.Path(directory).expanduser() / _cache_machine_fingerprint())
+    path = pathlib.Path(directory).expanduser()
+    fingerprint = _cache_machine_fingerprint()
+    if path.name == fingerprint:
+        return str(path)
+    return str(path / fingerprint)
 
 
 def _default_compilation_cache_dir() -> str | None:
