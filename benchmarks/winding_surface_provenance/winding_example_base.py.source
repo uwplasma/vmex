@@ -705,10 +705,10 @@ def _combine_winding_objectives(objectives, scales):
     """Apply normalized weights and guardrails to objective components."""
     (pca, volume, spectral, distance, minimum_normal_length,
      singular_strength, self_radius) = objectives
-    # The reference scales are recomputed once per outer call, so their
-    # sensitivity is part of the total derivative of the executable objective.
-    # Reverse mode evaluates that correction in one cotangent pass rather than
-    # once per boundary degree of freedom.
+    # The reference scales are computed once per outer call.  Their own
+    # sensitivity is a small normalization correction, while differentiating
+    # it would repeat the spectrum and self-intersection work on every pass.
+    scales = jax.lax.stop_gradient(scales)
     wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
     self_intersection_wall = 1 + jnp.tanh(
         (MINIMUM_SELF_RADIUS - self_radius) / SELF_RADIUS_WALL_SCALE) # Penalize nonlocal self-approach
@@ -798,12 +798,10 @@ def _winding_linear_solve(
     def solve(action, value):
         result = gcrot(
             action, value, rtol=rtol, max_restarts=max_restarts)
+        residual = action(result.x) - value
         tolerance = rtol * jnp.linalg.norm(value)
-        # Solvax recomputes the true residual before returning ``gcrot``.
-        # Reuse that certified norm instead of applying this (expensive
-        # Hessian) operator once more solely for the same check.
         certified = result.converged & (
-            result.residual_norm <= tolerance)
+            jnp.linalg.norm(residual) <= tolerance)
         return jnp.where(certified, result.x, jnp.nan)
 
     return jax.lax.custom_linear_solve(

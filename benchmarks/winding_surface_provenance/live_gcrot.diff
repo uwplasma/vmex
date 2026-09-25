@@ -1,0 +1,19 @@
+diff --git a/examples/optimization/QA_winding_optimization.py b/examples/optimization/QA_winding_optimization.py
+index 91634c779346ce0510538cec79dc77a38376b766..048532f01a886bbfe524dbd5ff94ed7a77ad4404 100644
+--- a/examples/optimization/QA_winding_optimization.py
++++ b/examples/optimization/QA_winding_optimization.py
+@@ -705,10 +705,10 @@ def _combine_winding_objectives(objectives, scales):
+     """Apply normalized weights and guardrails to objective components."""
+     (pca, volume, spectral, distance, minimum_normal_length,
+      singular_strength, self_radius) = objectives
+-    # The reference scales are computed once per outer call.  Their own
+-    # sensitivity is a small normalization correction, while differentiating
+-    # it would repeat the spectrum and self-intersection work on every pass.
+-    scales = jax.lax.stop_gradient(scales)
++    # The reference scales are recomputed once per outer call, so their
++    # sensitivity is part of the total derivative of the executable objective.
++    # Reverse mode evaluates that correction in one cotangent pass rather than
++    # once per boundary degree of freedom.
+     wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
+     self_intersection_wall = 1 + jnp.tanh(
+         (MINIMUM_SELF_RADIUS - self_radius) / SELF_RADIUS_WALL_SCALE) # Penalize nonlocal self-approach

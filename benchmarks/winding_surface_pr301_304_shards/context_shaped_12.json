@@ -1,0 +1,1079 @@
+{
+  "_provenance": {
+    "measurement_commit": "6edf6590e414de48553efb111479bfe089d5bca8",
+    "measurement_dirty": false,
+    "measurement_date": "2026-09-23T21:28:15.612427+00:00",
+    "source_commits": {
+      "pre_301": "913377b6c8587ee02d9a34155c5b456a4e289181",
+      "pr301": "38d60046fd94af3c2e981106f1e338c3eb773c3e",
+      "pr303": "8225d40fb2156774e0f659264c23dc752a053d1b",
+      "pr304": "bcdcffdb1b4a4c1bddf2c3ad29dfb8abd9e7aebb",
+      "pr366": "ab09983b8b61b262ac89c0024495ab31ca03c67b",
+      "combined": "6edf6590e414de48553efb111479bfe089d5bca8",
+      "fused_geometry_candidate": "f104fe4a9757db5868619fc582c2fd8a2ececf01"
+    },
+    "generator": "benchmarks/winding_surface_pr301_304.py",
+    "command": "python benchmarks/winding_surface_pr301_304.py --fused-ref f104fe4a9757db5868619fc582c2fd8a2ececf01 --tracks context --cases nominal close shaped --resolutions 8 12 16 24 --context-cases shaped --context-resolutions 12 --repeats 9 --context-repeats 3 --directional-steps 3e-4 1e-4 --directional-directions 2 --output /workspace/scratch/40c6d9253955/pr301_304_shards/context_shaped_12.json",
+    "python": "3.12.14",
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "jax": "0.11.2",
+    "numpy": "2.5.3",
+    "backend": "cpu",
+    "devices": [
+      "cpu:0"
+    ],
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "environment": {
+      "JAX_ENABLE_X64": "True",
+      "OMP_NUM_THREADS": "4",
+      "OPENBLAS_NUM_THREADS": "4",
+      "MKL_NUM_THREADS": "4",
+      "VMEX_COMPILATION_CACHE": "0",
+      "XLA_FLAGS": null
+    }
+  },
+  "review": {
+    "pull_requests": {
+      "pr301": "https://github.com/uwplasma/vmex/pull/301",
+      "pr303": "https://github.com/uwplasma/vmex/pull/303",
+      "pr304": "https://github.com/uwplasma/vmex/pull/304",
+      "pr366": "https://github.com/uwplasma/vmex/pull/366"
+    },
+    "stack_order": [
+      "pr301",
+      "pr303",
+      "pr304"
+    ],
+    "geometry_helper_sha256": {
+      "pre_301": "357e966745cfbacfee323400498e507c0afe23ec40ff72991f8c825d2c6739c6",
+      "pr301": "594ace8dee5ae095c05a2b2f300588ed246fd97edb994ed9eb42396e7514a330",
+      "pr303": "594ace8dee5ae095c05a2b2f300588ed246fd97edb994ed9eb42396e7514a330",
+      "pr304": "594ace8dee5ae095c05a2b2f300588ed246fd97edb994ed9eb42396e7514a330",
+      "pr366": "708443ed1155042795c826e57933ab85dc2d62533795f75397fc48ad8710259e",
+      "fused_geometry_candidate": "4d4b5017930f75f02b45c43a49086632e610285fae07c560ff5ceddc4e756517"
+    },
+    "controlled_port": "Every nested arm uses PR 366's objective, active-mode set, LBFGSB bounds, maxiter=100, and tolerances; only the reviewed geometry, spectrum, and root-linear-solve methods vary.",
+    "method_scope": {
+      "pr301": "vectorized Fourier geometry contractions",
+      "pr303": "cached direct-optimality-Jacobian GCROT solve",
+      "pr304": "NFP=2 full-matrix A+B/A-B sector SVD",
+      "pr366": "PR301-equivalent contractions, certified direct GCROT, and arbitrary-NFP one-block-row sector SVD",
+      "combined": "PR366 methods with Solvax's returned true-residual norm used for the existing GCROT certificate"
+    }
+  },
+  "configuration": {
+    "repeats": 9,
+    "context_repeats": 3,
+    "cases": [
+      {
+        "name": "nominal",
+        "seed": 11,
+        "major_radius": 1.0,
+        "plasma_minor_radius": 0.1,
+        "winding_minor_radius": 0.2,
+        "perturbation": 0.001
+      },
+      {
+        "name": "close",
+        "seed": 17,
+        "major_radius": 1.0,
+        "plasma_minor_radius": 0.1,
+        "winding_minor_radius": 0.16,
+        "perturbation": 0.002
+      },
+      {
+        "name": "shaped",
+        "seed": 23,
+        "major_radius": 1.0,
+        "plasma_minor_radius": 0.1,
+        "winding_minor_radius": 0.2,
+        "perturbation": 0.01
+      }
+    ],
+    "resolutions": [
+      8,
+      12,
+      16,
+      24
+    ],
+    "context_cases": [
+      "shaped"
+    ],
+    "context_resolutions": [
+      12
+    ],
+    "directional_steps": [
+      0.0003,
+      0.0001
+    ],
+    "directional_directions": 2,
+    "tracks": [
+      "context"
+    ],
+    "field_periods": 2,
+    "active_dofs": 25,
+    "timing_protocol": "isolated compile; one untimed warmup; all warm samples retained"
+  },
+  "geometry": [],
+  "spectrum": [],
+  "linear_solve": [],
+  "optimization_context": [
+    {
+      "case": "shaped",
+      "resolution": 12,
+      "matrix_order": 144,
+      "variant": "full_svd_dense_reference",
+      "timing": {
+        "inner_solve": {
+          "samples_ms": [
+            903.7296259998584,
+            876.3833610000802,
+            989.1662199997882
+          ],
+          "median_ms": 903.7296259998584,
+          "minimum_ms": 876.3833610000802,
+          "maximum_ms": 989.1662199997882,
+          "iqr_ms": 56.391429499853984,
+          "mean_ms": 923.093068999909,
+          "stdev_ms": 58.831968475048974,
+          "cv": 0.06373351772512852,
+          "compile_and_first_ms": 9073.144542000136
+        },
+        "outer_gradient": {
+          "entropy": {
+            "samples_ms": [
+              1043.1259160000081,
+              1073.1988489997093,
+              1191.718585000217
+            ],
+            "median_ms": 1073.1988489997093,
+            "minimum_ms": 1043.1259160000081,
+            "maximum_ms": 1191.718585000217,
+            "iqr_ms": 74.29633450010442,
+            "mean_ms": 1102.6811166666448,
+            "stdev_ms": 78.56111251910852,
+            "cv": 0.07124554082924282,
+            "compile_and_first_ms": 16974.73260600009
+          },
+          "inverse_distance": {
+            "samples_ms": [
+              1049.6148209999774,
+              1071.2922879997677,
+              1049.8620680000386
+            ],
+            "median_ms": 1049.8620680000386,
+            "minimum_ms": 1049.6148209999774,
+            "maximum_ms": 1071.2922879997677,
+            "iqr_ms": 10.83873349989517,
+            "mean_ms": 1056.923058999928,
+            "stdev_ms": 12.444731387504447,
+            "cv": 0.01177449132321873,
+            "compile_and_first_ms": 16974.73260600009
+          },
+          "mixed": {
+            "samples_ms": [
+              979.3601910000689,
+              996.4296669995747,
+              1059.7722369998337
+            ],
+            "median_ms": 996.4296669995747,
+            "minimum_ms": 979.3601910000689,
+            "maximum_ms": 1059.7722369998337,
+            "iqr_ms": 40.20602299988241,
+            "mean_ms": 1011.8540316664925,
+            "stdev_ms": 42.366939404453305,
+            "cv": 0.04187060393945979,
+            "compile_and_first_ms": 16974.73260600009
+          }
+        }
+      },
+      "outputs": {
+        "entropy_normalized": 0.9759902457603354,
+        "inverse_distance_normalized": 0.8685727933181815,
+        "stationarity_inf": 6.805062198519257e-07,
+        "entropy_gradient_l2": 0.634684758902138,
+        "inverse_distance_gradient_l2": 0.665888998406824,
+        "mixed_gradient_l2": 0.6161215094159317
+      },
+      "differentiation_mode": "reverse",
+      "directional_fidelity": [
+        {
+          "direction": 0,
+          "step": 0.0003,
+          "ad": {
+            "entropy": 0.05420999024136265,
+            "inverse_distance": 0.12468682918801159,
+            "mixed": 0.08944840971470157
+          },
+          "finite_difference": {
+            "entropy": 0.054211829600106204,
+            "inverse_distance": 0.12463971672627756,
+            "mixed": 0.08942577316319189
+          },
+          "error": {
+            "entropy": {
+              "absolute": 1.839358743552233e-06,
+              "relative": 3.392910287515235e-05
+            },
+            "inverse_distance": {
+              "absolute": 4.7112461734027944e-05,
+              "relative": 0.00037798915924602155
+            },
+            "mixed": {
+              "absolute": 2.2636551509677694e-05,
+              "relative": 0.00025313229854181474
+            }
+          }
+        },
+        {
+          "direction": 0,
+          "step": 0.0001,
+          "ad": {
+            "entropy": 0.05420999024136265,
+            "inverse_distance": 0.12468682918801159,
+            "mixed": 0.08944840971470157
+          },
+          "finite_difference": {
+            "entropy": 0.054246134586766186,
+            "inverse_distance": 0.12417347160916432,
+            "mixed": 0.08920980309796525
+          },
+          "error": {
+            "entropy": {
+              "absolute": 3.6144345403534006e-05,
+              "relative": 0.000666302690115578
+            },
+            "inverse_distance": {
+              "absolute": 0.0005133575788472677,
+              "relative": 0.0041341968795320415
+            },
+            "mixed": {
+              "absolute": 0.0002386066167363171,
+              "relative": 0.002674668124469377
+            }
+          }
+        },
+        {
+          "direction": 1,
+          "step": 0.0003,
+          "ad": {
+            "entropy": -0.18419938563763827,
+            "inverse_distance": -0.18895565312755166,
+            "mixed": -0.1865775193825969
+          },
+          "finite_difference": {
+            "entropy": -0.18420165005944567,
+            "inverse_distance": -0.18891971712472108,
+            "mixed": -0.1865606835920834
+          },
+          "error": {
+            "entropy": {
+              "absolute": 2.2644218073963884e-06,
+              "relative": 1.2293167876974028e-05
+            },
+            "inverse_distance": {
+              "absolute": 3.593600283058329e-05,
+              "relative": 0.00019021838153007105
+            },
+            "mixed": {
+              "absolute": 1.6835790513508586e-05,
+              "relative": 9.024297182744138e-05
+            }
+          }
+        },
+        {
+          "direction": 1,
+          "step": 0.0001,
+          "ad": {
+            "entropy": -0.18419938563763827,
+            "inverse_distance": -0.18895565312755166,
+            "mixed": -0.1865775193825969
+          },
+          "finite_difference": {
+            "entropy": -0.18416161860851374,
+            "inverse_distance": -0.18945023191080376,
+            "mixed": -0.18680592525965875
+          },
+          "error": {
+            "entropy": {
+              "absolute": 3.776702912453023e-05,
+              "relative": 0.00020507546257406899
+            },
+            "inverse_distance": {
+              "absolute": 0.0004945787832520976,
+              "relative": 0.0026106000413076997
+            },
+            "mixed": {
+              "absolute": 0.00022840587706185467,
+              "relative": 0.0012226907510796154
+            }
+          }
+        }
+      ],
+      "fidelity": {
+        "observables": {
+          "absolute_max": 0.0,
+          "absolute_l2": 0.0,
+          "relative_l2": 0.0
+        },
+        "entropy_gradient": {
+          "absolute_max": 0.0,
+          "absolute_l2": 0.0,
+          "relative_l2": 0.0
+        },
+        "inverse_distance_gradient": {
+          "absolute_max": 0.0,
+          "absolute_l2": 0.0,
+          "relative_l2": 0.0
+        },
+        "mixed_gradient": {
+          "absolute_max": 0.0,
+          "absolute_l2": 0.0,
+          "relative_l2": 0.0
+        }
+      }
+    },
+    {
+      "case": "shaped",
+      "resolution": 12,
+      "matrix_order": 144,
+      "variant": "pr301_port",
+      "timing": {
+        "inner_solve": {
+          "samples_ms": [
+            923.8743979999526,
+            761.8272400000023,
+            979.2891199999758
+          ],
+          "median_ms": 923.8743979999526,
+          "minimum_ms": 761.8272400000023,
+          "maximum_ms": 979.2891199999758,
+          "iqr_ms": 108.73093999998673,
+          "mean_ms": 888.3302526666436,
+          "stdev_ms": 113.00423449538191,
+          "cv": 0.12720971075358398,
+          "compile_and_first_ms": 9610.586417999912
+        },
+        "outer_gradient": {
+          "entropy": {
+            "samples_ms": [
+              9753.77923799988,
+              9939.164169999913,
+              14363.666785000078
+            ],
+            "median_ms": 9939.164169999913,
+            "minimum_ms": 9753.77923799988,
+            "maximum_ms": 14363.666785000078,
+            "iqr_ms": 2304.9437735000993,
+            "mean_ms": 11352.203397666623,
+            "stdev_ms": 2609.6504925354616,
+            "cv": 0.22988052637181075,
+            "compile_and_first_ms": 39311.79604299996
+          },
+          "inverse_distance": {
+            "samples_ms": [
+              11717.301595000208,
+              9754.980082000202,
+              9602.789719999691
+            ],
+            "median_ms": 9754.980082000202,
+            "minimum_ms": 9602.789719999691,
+            "maximum_ms": 11717.301595000208,
+            "iqr_ms": 1057.2559375002584,
+            "mean_ms": 10358.357132333367,
+            "stdev_ms": 1179.3379566651424,
+            "cv": 0.11385376480058472,
+            "compile_and_first_ms": 39311.79604299996
+          },
+          "mixed": {
+            "samples_ms": [
+              9549.243641999965,
+              9613.430195000092,
+              14246.095547000095
+            ],
+            "median_ms": 9613.430195000092,
+            "minimum_ms": 9549.243641999965,
+            "maximum_ms": 14246.095547000095,
+            "iqr_ms": 2348.4259525000653,
+            "mean_ms": 11136.256461333383,
+            "stdev_ms": 2693.390861433183,
+            "cv": 0.2418578335354441,
+            "compile_and_first_ms": 39311.79604299996
+          }
+        }
+      },
+      "outputs": {
+        "entropy_normalized": 0.9759902457603354,
+        "inverse_distance_normalized": 0.8685727933181815,
+        "stationarity_inf": 6.805062198519257e-07,
+        "entropy_gradient_l2": 0.6346857056456999,
+        "inverse_distance_gradient_l2": 0.6660245489987685,
+        "mixed_gradient_l2": 0.6161673793815613
+      },
+      "differentiation_mode": "forward",
+      "directional_fidelity": [],
+      "fidelity": {
+        "observables": {
+          "absolute_max": 0.0,
+          "absolute_l2": 0.0,
+          "relative_l2": 0.0
+        },
+        "entropy_gradient": {
+          "absolute_max": 2.5159051549062078e-05,
+          "absolute_l2": 4.0779859585194904e-05,
+          "relative_l2": 6.425214882382695e-05
+        },
+        "inverse_distance_gradient": {
+          "absolute_max": 0.0007752592472172193,
+          "absolute_l2": 0.0010746142889942213,
+          "relative_l2": 0.0016138039396435366
+        },
+        "mixed_gradient": {
+          "absolute_max": 0.00037911180778573556,
+          "absolute_l2": 0.0005324789484183884,
+          "relative_l2": 0.0008642434004993034
+        }
+      }
+    },
+    {
+      "case": "shaped",
+      "resolution": 12,
+      "matrix_order": 144,
+      "variant": "pr303_port",
+      "timing": {
+        "inner_solve": {
+          "samples_ms": [
+            674.1130490004252,
+            720.9658400001899,
+            717.5091940002858
+          ],
+          "median_ms": 717.5091940002858,
+          "minimum_ms": 674.1130490004252,
+          "maximum_ms": 720.9658400001899,
+          "iqr_ms": 23.426395499882346,
+          "mean_ms": 704.196027666967,
+          "stdev_ms": 26.109889017015522,
+          "cv": 0.03707758634129016,
+          "compile_and_first_ms": 11085.562112999924
+        },
+        "outer_gradient": {
+          "entropy": {
+            "samples_ms": [
+              1731.7580989997623,
+              1064.6912659999543,
+              1114.2797860002247
+            ],
+            "median_ms": 1114.2797860002247,
+            "minimum_ms": 1064.6912659999543,
+            "maximum_ms": 1731.7580989997623,
+            "iqr_ms": 333.533416499904,
+            "mean_ms": 1303.5763836666472,
+            "stdev_ms": 371.644240286542,
+            "cv": 0.2850958677551338,
+            "compile_and_first_ms": 26007.441641999776
+          },
+          "inverse_distance": {
+            "samples_ms": [
+              1338.3298780004225,
+              1015.1544729997113,
+              921.6052609999679
+            ],
+            "median_ms": 1015.1544729997113,
+            "minimum_ms": 921.6052609999679,
+            "maximum_ms": 1338.3298780004225,
+            "iqr_ms": 208.3623085002273,
+            "mean_ms": 1091.6965373333671,
+            "stdev_ms": 218.65238922291022,
+            "cv": 0.20028678460133395,
+            "compile_and_first_ms": 26007.441641999776
+          },
+          "mixed": {
+            "samples_ms": [
+              1108.7348579999343,
+              1118.4455019997586,
+              947.4662659999922
+            ],
+            "median_ms": 1108.7348579999343,
+            "minimum_ms": 947.4662659999922,
+            "maximum_ms": 1118.4455019997586,
+            "iqr_ms": 85.4896179998832,
+            "mean_ms": 1058.215541999895,
+            "stdev_ms": 96.03450292785308,
+            "cv": 0.09075136313568016,
+            "compile_and_first_ms": 26007.441641999776
+          }
+        }
+      },
+      "outputs": {
+        "entropy_normalized": 0.9759902457603354,
+        "inverse_distance_normalized": 0.8685727933181815,
+        "stationarity_inf": 6.805062198519257e-07,
+        "entropy_gradient_l2": 0.6346847589021344,
+        "inverse_distance_gradient_l2": 0.6658889984068789,
+        "mixed_gradient_l2": 0.6161215094158936
+      },
+      "differentiation_mode": "reverse",
+      "directional_fidelity": [],
+      "fidelity": {
+        "observables": {
+          "absolute_max": 0.0,
+          "absolute_l2": 0.0,
+          "relative_l2": 0.0
+        },
+        "entropy_gradient": {
+          "absolute_max": 5.218048215738236e-15,
+          "absolute_l2": 7.310771229336438e-15,
+          "relative_l2": 1.1518743954057489e-14
+        },
+        "inverse_distance_gradient": {
+          "absolute_max": 5.206945985491984e-14,
+          "absolute_l2": 8.445295423370733e-14,
+          "relative_l2": 1.2682737578750462e-13
+        },
+        "mixed_gradient": {
+          "absolute_max": 4.263256414560601e-14,
+          "absolute_l2": 6.605009076208992e-14,
+          "relative_l2": 1.0720302692354275e-13
+        }
+      }
+    },
+    {
+      "case": "shaped",
+      "resolution": 12,
+      "matrix_order": 144,
+      "variant": "pr304_port",
+      "timing": {
+        "inner_solve": {
+          "samples_ms": [
+            524.6850080002332,
+            540.3732019999552,
+            544.494289999875
+          ],
+          "median_ms": 540.3732019999552,
+          "minimum_ms": 524.6850080002332,
+          "maximum_ms": 544.494289999875,
+          "iqr_ms": 9.904640999820913,
+          "mean_ms": 536.5175000000212,
+          "stdev_ms": 10.452355799988583,
+          "cv": 0.01948185436633133,
+          "compile_and_first_ms": 11805.57974200019
+        },
+        "outer_gradient": {
+          "entropy": {
+            "samples_ms": [
+              1427.9111079999893,
+              778.5840840001583,
+              751.4785120001761
+            ],
+            "median_ms": 778.5840840001583,
+            "minimum_ms": 751.4785120001761,
+            "maximum_ms": 1427.9111079999893,
+            "iqr_ms": 338.2162979999066,
+            "mean_ms": 985.9912346667746,
+            "stdev_ms": 382.9537293766637,
+            "cv": 0.38839465901143294,
+            "compile_and_first_ms": 23479.879629000152
+          },
+          "inverse_distance": {
+            "samples_ms": [
+              799.0539739998894,
+              794.3098099999588,
+              767.3326559997804
+            ],
+            "median_ms": 794.3098099999588,
+            "minimum_ms": 767.3326559997804,
+            "maximum_ms": 799.0539739998894,
+            "iqr_ms": 15.860659000054511,
+            "mean_ms": 786.8988133332095,
+            "stdev_ms": 17.110016294905645,
+            "cv": 0.021743604139431418,
+            "compile_and_first_ms": 23479.879629000152
+          },
+          "mixed": {
+            "samples_ms": [
+              957.0470000003297,
+              1009.0015840000888,
+              754.9608879999141
+            ],
+            "median_ms": 957.0470000003297,
+            "minimum_ms": 754.9608879999141,
+            "maximum_ms": 1009.0015840000888,
+            "iqr_ms": 127.02034800008732,
+            "mean_ms": 907.0031573334442,
+            "stdev_ms": 134.21050051212194,
+            "cv": 0.1479713708017245,
+            "compile_and_first_ms": 23479.879629000152
+          }
+        }
+      },
+      "outputs": {
+        "entropy_normalized": 0.9759902457602773,
+        "inverse_distance_normalized": 0.8685727933189951,
+        "stationarity_inf": 6.805165285181727e-07,
+        "entropy_gradient_l2": 0.6346847589015507,
+        "inverse_distance_gradient_l2": 0.6658889984066413,
+        "mixed_gradient_l2": 0.6161215094154229
+      },
+      "differentiation_mode": "reverse",
+      "directional_fidelity": [],
+      "fidelity": {
+        "observables": {
+          "absolute_max": 8.135714324453147e-13,
+          "absolute_l2": 8.156487517245065e-13,
+          "relative_l2": 6.242945045392798e-13
+        },
+        "entropy_gradient": {
+          "absolute_max": 7.257527911974648e-13,
+          "absolute_l2": 1.355672019138583e-12,
+          "relative_l2": 2.135976955683623e-12
+        },
+        "inverse_distance_gradient": {
+          "absolute_max": 5.7339341608120264e-12,
+          "absolute_l2": 1.1368297472407096e-11,
+          "relative_l2": 1.7072361158701184e-11
+        },
+        "mixed_gradient": {
+          "absolute_max": 3.032886441989291e-12,
+          "absolute_l2": 5.6843630884107715e-12,
+          "relative_l2": 9.226042268511953e-12
+        }
+      }
+    },
+    {
+      "case": "shaped",
+      "resolution": 12,
+      "matrix_order": 144,
+      "variant": "pr366",
+      "timing": {
+        "inner_solve": {
+          "samples_ms": [
+            407.95772399997077,
+            470.55481000006694,
+            429.849441999977
+          ],
+          "median_ms": 429.849441999977,
+          "minimum_ms": 407.95772399997077,
+          "maximum_ms": 470.55481000006694,
+          "iqr_ms": 31.298543000048085,
+          "mean_ms": 436.12065866667155,
+          "stdev_ms": 31.766254308406108,
+          "cv": 0.07283822418668123,
+          "compile_and_first_ms": 9041.794476000177
+        },
+        "outer_gradient": {
+          "entropy": {
+            "samples_ms": [
+              791.8942470000729,
+              797.2057030001451,
+              1186.1935899996752
+            ],
+            "median_ms": 797.2057030001451,
+            "minimum_ms": 791.8942470000729,
+            "maximum_ms": 1186.1935899996752,
+            "iqr_ms": 197.14967149980112,
+            "mean_ms": 925.0978466666311,
+            "stdev_ms": 226.13114177659455,
+            "cv": 0.24444024228507724,
+            "compile_and_first_ms": 27314.12066499979
+          },
+          "inverse_distance": {
+            "samples_ms": [
+              733.1819920000271,
+              602.9907789998106,
+              564.7662589999527
+            ],
+            "median_ms": 602.9907789998106,
+            "minimum_ms": 564.7662589999527,
+            "maximum_ms": 733.1819920000271,
+            "iqr_ms": 84.2078665000372,
+            "mean_ms": 633.6463433332634,
+            "stdev_ms": 88.29375685143282,
+            "cv": 0.13934232838300326,
+            "compile_and_first_ms": 27314.12066499979
+          },
+          "mixed": {
+            "samples_ms": [
+              653.4222909999698,
+              613.923564000288,
+              618.0400160001227
+            ],
+            "median_ms": 618.0400160001227,
+            "minimum_ms": 613.923564000288,
+            "maximum_ms": 653.4222909999698,
+            "iqr_ms": 19.74936349984091,
+            "mean_ms": 628.4619570001269,
+            "stdev_ms": 21.714050734594043,
+            "cv": 0.03455109810980915,
+            "compile_and_first_ms": 27314.12066499979
+          }
+        }
+      },
+      "outputs": {
+        "entropy_normalized": 0.9759902457603968,
+        "inverse_distance_normalized": 0.8685727933172221,
+        "stationarity_inf": 6.805086667749068e-07,
+        "entropy_gradient_l2": 0.6346847588945258,
+        "inverse_distance_gradient_l2": 0.6658889984183199,
+        "mixed_gradient_l2": 0.6161215094383851
+      },
+      "differentiation_mode": "reverse",
+      "directional_fidelity": [
+        {
+          "direction": 0,
+          "step": 0.0003,
+          "ad": {
+            "entropy": 0.054209990237885856,
+            "inverse_distance": 0.12468682922412427,
+            "mixed": 0.08944840973100221
+          },
+          "finite_difference": {
+            "entropy": 0.05421203823636262,
+            "inverse_distance": 0.12463623619131238,
+            "mixed": 0.0894241372138375
+          },
+          "error": {
+            "entropy": {
+              "absolute": 2.047998476764623e-06,
+              "relative": 3.77775590697295e-05
+            },
+            "inverse_distance": {
+              "absolute": 5.0593032811893646e-05,
+              "relative": 0.0004059255506900502
+            },
+            "mixed": {
+              "absolute": 2.4272517164705687e-05,
+              "relative": 0.0002714313821855891
+            }
+          }
+        },
+        {
+          "direction": 0,
+          "step": 0.0001,
+          "ad": {
+            "entropy": 0.054209990237885856,
+            "inverse_distance": 0.12468682922412427,
+            "mixed": 0.08944840973100221
+          },
+          "finite_difference": {
+            "entropy": 0.054246139702211295,
+            "inverse_distance": 0.12417336557379864,
+            "mixed": 0.08920975263800497
+          },
+          "error": {
+            "entropy": {
+              "absolute": 3.614946432543842e-05,
+              "relative": 0.0006663969920050333
+            },
+            "inverse_distance": {
+              "absolute": 0.0005134636503256323,
+              "relative": 0.004135054630700743
+            },
+            "mixed": {
+              "absolute": 0.00023865709299723814,
+              "relative": 0.002675235452850767
+            }
+          }
+        },
+        {
+          "direction": 1,
+          "step": 0.0003,
+          "ad": {
+            "entropy": -0.18419938563134022,
+            "inverse_distance": -0.18895565321094696,
+            "mixed": -0.18657751942113943
+          },
+          "finite_difference": {
+            "entropy": -0.18420787123027724,
+            "inverse_distance": -0.18878302345136533,
+            "mixed": -0.1864954473408213
+          },
+          "error": {
+            "entropy": {
+              "absolute": 8.485598937013616e-06,
+              "relative": 4.6065343898393005e-05
+            },
+            "inverse_distance": {
+              "absolute": 0.0001726297595816273,
+              "relative": 0.0009144347644485126
+            },
+            "mixed": {
+              "absolute": 8.207208031812963e-05,
+              "relative": 0.0004400755165253043
+            }
+          }
+        },
+        {
+          "direction": 1,
+          "step": 0.0001,
+          "ad": {
+            "entropy": -0.18419938563134022,
+            "inverse_distance": -0.18895565321094696,
+            "mixed": -0.18657751942113943
+          },
+          "finite_difference": {
+            "entropy": -0.18416165610453855,
+            "inverse_distance": -0.18944973850659738,
+            "mixed": -0.18680569730556795
+          },
+          "error": {
+            "entropy": {
+              "absolute": 3.7729526801671964e-05,
+              "relative": 0.00020487178275729106
+            },
+            "inverse_distance": {
+              "absolute": 0.000494085295650426,
+              "relative": 0.002608001993273905
+            },
+            "mixed": {
+              "absolute": 0.0002281778844285265,
+              "relative": 0.0012214717630120448
+            }
+          }
+        }
+      ],
+      "fidelity": {
+        "observables": {
+          "absolute_max": 9.593437155785978e-13,
+          "absolute_l2": 9.613062735499406e-13,
+          "relative_l2": 7.357802270738522e-13
+        },
+        "entropy_gradient": {
+          "absolute_max": 5.964922999979194e-12,
+          "absolute_l2": 1.670169172404905e-11,
+          "relative_l2": 2.6314940590253376e-11
+        },
+        "inverse_distance_gradient": {
+          "absolute_max": 8.576081511613154e-11,
+          "absolute_l2": 2.293123365202642e-10,
+          "relative_l2": 3.4437021345735784e-10
+        },
+        "mixed_gradient": {
+          "absolute_max": 3.9883457647604814e-11,
+          "absolute_l2": 1.0639192654340947e-10,
+          "relative_l2": 1.726801043584186e-10
+        }
+      }
+    },
+    {
+      "case": "shaped",
+      "resolution": 12,
+      "matrix_order": 144,
+      "variant": "combined",
+      "timing": {
+        "inner_solve": {
+          "samples_ms": [
+            417.33477400021,
+            443.90366100014944,
+            530.3056249999827
+          ],
+          "median_ms": 443.90366100014944,
+          "minimum_ms": 417.33477400021,
+          "maximum_ms": 530.3056249999827,
+          "iqr_ms": 56.48542549988633,
+          "mean_ms": 463.84802000011405,
+          "stdev_ms": 59.06721921542279,
+          "cv": 0.12734175132494532,
+          "compile_and_first_ms": 8868.439483999737
+        },
+        "outer_gradient": {
+          "entropy": {
+            "samples_ms": [
+              791.9106029999057,
+              2005.0398889998178,
+              655.6801719998475
+            ],
+            "median_ms": 791.9106029999057,
+            "minimum_ms": 655.6801719998475,
+            "maximum_ms": 2005.0398889998178,
+            "iqr_ms": 674.6798584999851,
+            "mean_ms": 1150.876887999857,
+            "stdev_ms": 742.8563163832961,
+            "cv": 0.6454698361997069,
+            "compile_and_first_ms": 22497.75707200024
+          },
+          "inverse_distance": {
+            "samples_ms": [
+              681.3258029997087,
+              745.1565559999835,
+              583.7942510001994
+            ],
+            "median_ms": 681.3258029997087,
+            "minimum_ms": 583.7942510001994,
+            "maximum_ms": 745.1565559999835,
+            "iqr_ms": 80.68115249989205,
+            "mean_ms": 670.0922033332972,
+            "stdev_ms": 81.26557505985998,
+            "cv": 0.12127521355361792,
+            "compile_and_first_ms": 22497.75707200024
+          },
+          "mixed": {
+            "samples_ms": [
+              587.2543280001992,
+              1263.527343000078,
+              541.3298490002489
+            ],
+            "median_ms": 587.2543280001992,
+            "minimum_ms": 541.3298490002489,
+            "maximum_ms": 1263.527343000078,
+            "iqr_ms": 361.0987469999145,
+            "mean_ms": 797.3705066668421,
+            "stdev_ms": 404.3561690984975,
+            "cv": 0.5071120209710063,
+            "compile_and_first_ms": 22497.75707200024
+          }
+        }
+      },
+      "outputs": {
+        "entropy_normalized": 0.9759902457603968,
+        "inverse_distance_normalized": 0.8685727933172221,
+        "stationarity_inf": 6.805086667749068e-07,
+        "entropy_gradient_l2": 0.6346847588945258,
+        "inverse_distance_gradient_l2": 0.6658889984183199,
+        "mixed_gradient_l2": 0.6161215094383851
+      },
+      "differentiation_mode": "reverse",
+      "directional_fidelity": [
+        {
+          "direction": 0,
+          "step": 0.0003,
+          "ad": {
+            "entropy": 0.054209990237885856,
+            "inverse_distance": 0.12468682922412427,
+            "mixed": 0.08944840973100221
+          },
+          "finite_difference": {
+            "entropy": 0.05421203823636262,
+            "inverse_distance": 0.12463623619131238,
+            "mixed": 0.0894241372138375
+          },
+          "error": {
+            "entropy": {
+              "absolute": 2.047998476764623e-06,
+              "relative": 3.77775590697295e-05
+            },
+            "inverse_distance": {
+              "absolute": 5.0593032811893646e-05,
+              "relative": 0.0004059255506900502
+            },
+            "mixed": {
+              "absolute": 2.4272517164705687e-05,
+              "relative": 0.0002714313821855891
+            }
+          }
+        },
+        {
+          "direction": 0,
+          "step": 0.0001,
+          "ad": {
+            "entropy": 0.054209990237885856,
+            "inverse_distance": 0.12468682922412427,
+            "mixed": 0.08944840973100221
+          },
+          "finite_difference": {
+            "entropy": 0.054246139702211295,
+            "inverse_distance": 0.12417336557379864,
+            "mixed": 0.08920975263800497
+          },
+          "error": {
+            "entropy": {
+              "absolute": 3.614946432543842e-05,
+              "relative": 0.0006663969920050333
+            },
+            "inverse_distance": {
+              "absolute": 0.0005134636503256323,
+              "relative": 0.004135054630700743
+            },
+            "mixed": {
+              "absolute": 0.00023865709299723814,
+              "relative": 0.002675235452850767
+            }
+          }
+        },
+        {
+          "direction": 1,
+          "step": 0.0003,
+          "ad": {
+            "entropy": -0.18419938563134022,
+            "inverse_distance": -0.18895565321094696,
+            "mixed": -0.18657751942113943
+          },
+          "finite_difference": {
+            "entropy": -0.18420787123027724,
+            "inverse_distance": -0.18878302345136533,
+            "mixed": -0.1864954473408213
+          },
+          "error": {
+            "entropy": {
+              "absolute": 8.485598937013616e-06,
+              "relative": 4.6065343898393005e-05
+            },
+            "inverse_distance": {
+              "absolute": 0.0001726297595816273,
+              "relative": 0.0009144347644485126
+            },
+            "mixed": {
+              "absolute": 8.207208031812963e-05,
+              "relative": 0.0004400755165253043
+            }
+          }
+        },
+        {
+          "direction": 1,
+          "step": 0.0001,
+          "ad": {
+            "entropy": -0.18419938563134022,
+            "inverse_distance": -0.18895565321094696,
+            "mixed": -0.18657751942113943
+          },
+          "finite_difference": {
+            "entropy": -0.18416165610453855,
+            "inverse_distance": -0.18944973850659738,
+            "mixed": -0.18680569730556795
+          },
+          "error": {
+            "entropy": {
+              "absolute": 3.7729526801671964e-05,
+              "relative": 0.00020487178275729106
+            },
+            "inverse_distance": {
+              "absolute": 0.000494085295650426,
+              "relative": 0.002608001993273905
+            },
+            "mixed": {
+              "absolute": 0.0002281778844285265,
+              "relative": 0.0012214717630120448
+            }
+          }
+        }
+      ],
+      "fidelity": {
+        "observables": {
+          "absolute_max": 9.593437155785978e-13,
+          "absolute_l2": 9.613062735499406e-13,
+          "relative_l2": 7.357802270738522e-13
+        },
+        "entropy_gradient": {
+          "absolute_max": 5.964922999979194e-12,
+          "absolute_l2": 1.670169172404905e-11,
+          "relative_l2": 2.6314940590253376e-11
+        },
+        "inverse_distance_gradient": {
+          "absolute_max": 8.576081511613154e-11,
+          "absolute_l2": 2.293123365202642e-10,
+          "relative_l2": 3.4437021345735784e-10
+        },
+        "mixed_gradient": {
+          "absolute_max": 3.9883457647604814e-11,
+          "absolute_l2": 1.0639192654340947e-10,
+          "relative_l2": 1.726801043584186e-10
+        }
+      }
+    }
+  ]
+}
