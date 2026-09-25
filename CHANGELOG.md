@@ -5,6 +5,12 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## Unreleased
+
+- `vmex.solve_phiedge` finds the PHIEDGE whose free-boundary LCFS meets a
+  target outboard radius, volume or user metric (bracketed secant over
+  warm-started solves); example `examples/free_boundary_phiedge.py`.
+
 ## 0.11.2 - 2026-09-24
 
 A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
