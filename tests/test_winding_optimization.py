@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
 import jax
@@ -334,6 +335,25 @@ def test_winding_linear_solve_supports_forward_and_reverse(
         tangent, jnp.linalg.solve(matrix, direction), rtol=2e-12)
     np.testing.assert_allclose(
         cotangent, jnp.linalg.solve(matrix.T, direction), rtol=2e-12)
+
+
+def test_winding_linear_solve_checks_reported_true_residual(
+        winding_helpers, monkeypatch):
+    """A converged flag alone cannot bypass the residual certificate."""
+    helpers = winding_helpers
+
+    def inaccurate_gcrot(action, value, **unused):
+        del action
+        return SimpleNamespace(
+            x=jnp.zeros_like(value),
+            converged=jnp.asarray(True),
+            residual_norm=2 * jnp.linalg.norm(value),
+        )
+
+    monkeypatch.setitem(helpers, "gcrot", inaccurate_gcrot)
+    actual = helpers["_winding_linear_solve"](
+        lambda vector: vector, jnp.array([1.0, -2.0]))
+    assert np.all(np.isnan(actual))
 
 
 def test_winding_root_response_is_transposable(winding_helpers, monkeypatch):

@@ -798,10 +798,12 @@ def _winding_linear_solve(
     def solve(action, value):
         result = gcrot(
             action, value, rtol=rtol, max_restarts=max_restarts)
-        residual = action(result.x) - value
         tolerance = rtol * jnp.linalg.norm(value)
+        # Solvax recomputes the true residual before returning ``gcrot``.
+        # Reuse that certified norm instead of applying this (expensive
+        # Hessian) operator once more solely for the same check.
         certified = result.converged & (
-            jnp.linalg.norm(residual) <= tolerance)
+            result.residual_norm <= tolerance)
         return jnp.where(certified, result.x, jnp.nan)
 
     return jax.lax.custom_linear_solve(
