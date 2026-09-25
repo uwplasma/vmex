@@ -1,0 +1,44 @@
+{
+  "child_signal": null,
+  "command": [
+    "/Users/rogerio/local/VMEX-polish-recovery/.venv/bin/python",
+    "benchmarks/polish_recovery_sparse.py",
+    "--input-state",
+    "artifacts/r7/cold-q5-reload/insert16_2_state.npz",
+    "--stable-derivatives",
+    "--linearization",
+    "local-normal",
+    "--linear-solver",
+    "normal",
+    "--stationarity-hessian",
+    "exact",
+    "--stationarity-refinement",
+    "--max-steps",
+    "4",
+    "--certificate",
+    "point",
+    "--output-json",
+    "artifacts/r7/cold-q5-reload/stationary.json",
+    "--output-state",
+    "artifacts/r7/cold-q5-reload/stationary_state.npz"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 57.653816791949794,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-q5-reload/stationary_state.npz"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-q5-reload/stationary_state.npz": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-q5-reload/stationary_certified-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 3050618880,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-q5-reload/stationary_certified-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-q5-reload/stationary_certified-run.stdout.log",
+  "timeout_seconds": 900.0
+}

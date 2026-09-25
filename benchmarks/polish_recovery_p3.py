@@ -257,6 +257,8 @@ def main() -> None:
         default=Path("benchmarks/polish_recovery_r1_p3_state.npz"),
     )
     parser.add_argument("--max-steps", type=int, default=4)
+    parser.add_argument("--degree", type=int, default=3, help="native radial spline degree of the lift")
+    parser.add_argument("--max-spans", type=int, default=32)
     parser.add_argument("--dense-memory-gib", type=float, default=2.0)
     args = parser.parse_args()
     if args.max_steps < 1 or args.dense_memory_gib <= 0.0:
@@ -266,8 +268,8 @@ def main() -> None:
     force_scale = 5915447.712414409
     volume_scale = 633.7993467060758
     inp = VmecInput.from_file(args.input)
-    initial_state = high_order_state_from_wout(args.wout, inp=inp, degree=3)
-    plan = make_variational_plan(initial_state, radial_order=4, ntheta=49, nzeta=1)
+    initial_state = high_order_state_from_wout(args.wout, inp=inp, degree=args.degree, max_spans=args.max_spans)
+    plan = make_variational_plan(initial_state, radial_order=args.degree + 1, ntheta=49, nzeta=1)
     layout = make_native_correction_layout(initial_state)
     gauge = make_native_gauge_plan(initial_state, plan)
     coordinate_scale = native_coordinate_scales(initial_state, layout, plan)

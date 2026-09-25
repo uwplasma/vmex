@@ -1,0 +1,157 @@
+{
+  "checks": {
+    "final_force_residual_norm": 0.00014699981840786457,
+    "final_full_gradient_norm": 6.336152176680696e-05,
+    "final_gauge_residual_norm": 2.1534878906311962e-19,
+    "final_projected_gradient_norm": 6.733523438880803e-06,
+    "final_projected_gradient_relative_to_full": 0.10627149176849911,
+    "history": [
+      {
+        "accepted": true,
+        "constraint_defect_norm": 0.0,
+        "initial_force_residual_norm": 0.033390526450108704,
+        "iteration": 1,
+        "largest_reduced_singular_value": 2942.4065143052258,
+        "linear_constraint_residual_norm": 1.0260093386038343e-18,
+        "linearized_model_norm": 0.00035773176961385937,
+        "projected_normal_residual_norm": 1.3195476999809087e-12,
+        "projected_normal_residual_relative": 6.694157405242478e-13,
+        "reduced_coordinates": 632,
+        "reduced_jacobian_rank": 632,
+        "smallest_retained_reduced_singular_value": 0.0019236032664964008,
+        "trials": [
+          {
+            "force_residual_norm": 0.00020645504382665013,
+            "fraction": 1.0,
+            "gauge_residual_norm": 1.0388508027036726e-18,
+            "minimum_signed_jacobian": 1.2387522502101667
+          }
+        ]
+      },
+      {
+        "accepted": true,
+        "constraint_defect_norm": 1.0388508027036724e-18,
+        "initial_force_residual_norm": 0.00020645504382665013,
+        "iteration": 2,
+        "largest_reduced_singular_value": 2940.8259821542824,
+        "linear_constraint_residual_norm": 8.296767091247855e-19,
+        "linearized_model_norm": 0.00014818663099304093,
+        "projected_normal_residual_norm": 9.423518849316676e-13,
+        "projected_normal_residual_relative": 1.1545141959051166e-12,
+        "reduced_coordinates": 632,
+        "reduced_jacobian_rank": 632,
+        "smallest_retained_reduced_singular_value": 0.0019105881618148182,
+        "trials": [
+          {
+            "force_residual_norm": 0.00014902255620194454,
+            "fraction": 1.0,
+            "gauge_residual_norm": 8.307575174570947e-19,
+            "minimum_signed_jacobian": 1.2406680444937226
+          }
+        ]
+      },
+      {
+        "accepted": true,
+        "constraint_defect_norm": 8.307575174570947e-19,
+        "initial_force_residual_norm": 0.00014902255620194454,
+        "iteration": 3,
+        "largest_reduced_singular_value": 2940.6813317185765,
+        "linear_constraint_residual_norm": 2.820206746358312e-19,
+        "linearized_model_norm": 0.0001469364710708533,
+        "projected_normal_residual_norm": 1.8646117406627959e-13,
+        "projected_normal_residual_relative": 2.3038752532547596e-13,
+        "reduced_coordinates": 632,
+        "reduced_jacobian_rank": 632,
+        "smallest_retained_reduced_singular_value": 0.0019108206483704469,
+        "trials": [
+          {
+            "force_residual_norm": 0.00014704047875101838,
+            "fraction": 1.0,
+            "gauge_residual_norm": 3.227312448261589e-19,
+            "minimum_signed_jacobian": 1.2390027756120134
+          }
+        ]
+      },
+      {
+        "accepted": true,
+        "constraint_defect_norm": 3.2273124482615896e-19,
+        "initial_force_residual_norm": 0.00014704047875101838,
+        "iteration": 4,
+        "largest_reduced_singular_value": 2940.636645219647,
+        "linear_constraint_residual_norm": 1.1363958412205573e-19,
+        "linearized_model_norm": 0.0001469673586360035,
+        "projected_normal_residual_norm": 1.7715648839221147e-13,
+        "projected_normal_residual_relative": 2.1884565524577301e-13,
+        "reduced_coordinates": 632,
+        "reduced_jacobian_rank": 632,
+        "smallest_retained_reduced_singular_value": 0.0019108926154963427,
+        "trials": [
+          {
+            "force_residual_norm": 0.00014699981840786457,
+            "fraction": 1.0,
+            "gauge_residual_norm": 2.1534878906311962e-19,
+            "minimum_signed_jacobian": 1.239902299131146
+          }
+        ]
+      }
+    ],
+    "independent_epsilon_B": 0.0001478273995870644,
+    "independent_force_rms_N_per_m3": 874.4652527194709,
+    "independent_radial_refinement_difference": 0.0055982927412323615,
+    "initial_force_residual_norm": 0.033390526450108704,
+    "minimum_signed_jacobian": 23.868129164813553
+  },
+  "discretization": {
+    "basis_degree": 5,
+    "basis_size": 28,
+    "constraint_nullity": 632,
+    "coordinates": 929,
+    "force_rows": 20286,
+    "gauge_constraints": 297,
+    "radial_spans": 23,
+    "solve_ntheta": 49,
+    "solve_nzeta": 1,
+    "solve_radial_order": 4
+  },
+  "experiment": "R0-prospective-P3-Candidate-B-reproduction",
+  "limitations": [
+    "This prospectively reconstructs the missing generator; it does not assert byte-for-byte identity with the historical untracked P3 script.",
+    "The explicit force Jacobian and full QR nullspace are bounded reference algebra, not production linear algebra.",
+    "Only the prescribed-iota axisymmetric user tokamak is exercised."
+  ],
+  "model": {
+    "coordinate_scaling": "native_coordinate_scales saved in checkpoint",
+    "force_scale_N_per_m3": 5915447.712414409,
+    "gamma": 0.0,
+    "gauge_reference": "initial native state",
+    "ncurr": 0,
+    "volume_scale_m3": 633.7993467060758
+  },
+  "schema": "vmex.polish-recovery/2",
+  "source": {
+    "generator": "benchmarks/polish_recovery_p3.py",
+    "generator_sha256": "f6eedb1ecb678c5f4a28013d9b48e52b76456cb4180d260fe762433c2bf0d0a6",
+    "input": "examples/data/input.shaped_tokamak_pressure",
+    "input_sha256": "5b2740db6dbc91d6a1b43c283b95c959397a608566aeb54da7489203e1fe5102",
+    "native_checkpoint": "artifacts/r7/q5/lift_state.npz",
+    "native_checkpoint_sha256": "0416fcf3ceb0320258a99fb8678840ae80e93f1622531cad9507377d42ad17aa",
+    "ordinary_wout": "artifacts/r7/cold-1/p0/wout_shaped_tokamak_pressure.nc",
+    "ordinary_wout_sha256": "b43a3f65001db07ad7b21ac1730128df518ef6ac5058ed8ca308596d9da86992"
+  },
+  "status": "measured-not-promoted",
+  "work": {
+    "certificate_seconds": 33.76296108402312,
+    "constraint_factor_seconds": 5.2854106249287724,
+    "dense_memory_cap_bytes": 2147483648,
+    "dense_solve_seconds": 1.28323929104954,
+    "explicit_array_budget_bytes": 253331568,
+    "explicit_jacobian_bytes": 150765552,
+    "explicit_jacobian_shape": [
+      20286,
+      929
+    ],
+    "explicit_reduced_jacobian_bytes": 102566016,
+    "jacobian_seconds": 5.10129058198072,
+    "total_process_seconds": 75.5739788749488
+  }
+}

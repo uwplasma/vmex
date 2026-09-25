@@ -49,6 +49,16 @@ SPARSE_SCHEDULE: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
+# Compact quintic schedule (R7.4): lift directly to degree 5, enrich angles,
+# then force-driven insertion.  No dense refine/angular stages.
+QUINTIC_SCHEDULE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("angular19", ("--maximum-m", "19", "--radial-order", "8", "--max-steps", "3")),
+    *(
+        (f"insert16_{index}", ("--insert-count", "16", "--radial-order", "8", "--max-steps", "2"))
+        for index in range(3)
+    ),
+)
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -59,6 +69,7 @@ def main() -> None:
     parser.add_argument("--prefix", type=Path, required=True)
     parser.add_argument("--stage-timeout", type=float, default=900.0)
     parser.add_argument("--rss-gib", type=float, default=12.0)
+    parser.add_argument("--schedule", choices=("cubic", "quintic"), default="cubic")
     parser.add_argument("--stop-after", help="optional stage label to stop after (bounded probes)")
     args = parser.parse_args()
     if _sha256(INPUT) != INPUT_SHA256:
@@ -76,6 +87,7 @@ def main() -> None:
         "source_head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         "source_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()),
         "generator_sha256": _sha256(Path(__file__)),
+        "schedule": args.schedule,
         "compilation_cache": "reload" if cache_existed else "cold (empty dedicated directory)",
         "stages": [],
         "complete": False,
@@ -107,17 +119,19 @@ def main() -> None:
     wout = wout_dir / "wout_shaped_tokamak_pressure.nc"
     run("p0_ordinary", [str(Path(python).with_name("vmex")), str(INPUT), "--outdir", str(wout_dir)], [wout])
     state = prefix / "lift_state.npz"
+    degree = "5" if args.schedule == "quintic" else "3"
     run(
         "lift_p3",
-        [python, "benchmarks/polish_recovery_p3.py", "--wout", str(wout), "--max-steps", "4",
+        [python, "benchmarks/polish_recovery_p3.py", "--wout", str(wout), "--max-steps", "4", "--degree", degree,
          "--output-json", str(prefix / "lift.json"), "--output-state", str(state)],
         [state],
     )
-    for label, script, extra in (
+    dense_stages = (
         ("refine_bisect", "polish_recovery_refine.py", ()),
         ("angular15", "polish_recovery_angular.py", ("--maximum-m", "15")),
         ("refine_adaptive8", "polish_recovery_refine.py", ("--adaptive-count", "8")),
-    ):
+    )
+    for label, script, extra in dense_stages if args.schedule == "cubic" else ():
         output = prefix / f"{label}_state.npz"
         run(
             label,
@@ -127,7 +141,7 @@ def main() -> None:
         )
         state = output
     sparse_common = ("--stable-derivatives", "--linearization", "local-normal", "--linear-solver", "normal")
-    for label, extra in SPARSE_SCHEDULE:
+    for label, extra in SPARSE_SCHEDULE if args.schedule == "cubic" else QUINTIC_SCHEDULE:
         output = prefix / f"{label}_state.npz"
         run(
             label,

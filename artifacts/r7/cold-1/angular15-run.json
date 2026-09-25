@@ -1,0 +1,34 @@
+{
+  "child_signal": null,
+  "command": [
+    "/Users/rogerio/local/VMEX-polish-recovery/.venv/bin/python",
+    "benchmarks/polish_recovery_angular.py",
+    "--input-state",
+    "artifacts/r7/cold-1/refine_bisect_state.npz",
+    "--maximum-m",
+    "15",
+    "--output-json",
+    "artifacts/r7/cold-1/angular15.json",
+    "--output-state",
+    "artifacts/r7/cold-1/angular15_state.npz"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 81.02266508305911,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/angular15_state.npz"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/angular15_state.npz": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/angular15-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 7897645056,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/angular15-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/angular15-run.stdout.log",
+  "timeout_seconds": 900.0
+}

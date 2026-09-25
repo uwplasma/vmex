@@ -1,0 +1,45 @@
+{
+  "child_signal": null,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/polish_recovery_sparse.py",
+    "--input-state",
+    "artifacts/r7/q5/lift_state.npz",
+    "--stable-derivatives",
+    "--linearization",
+    "local-normal",
+    "--linear-solver",
+    "normal",
+    "--certificate",
+    "none",
+    "--output-json",
+    "artifacts/r7/q5/m19.json",
+    "--output-state",
+    "artifacts/r7/q5/m19_state.npz",
+    "--maximum-m",
+    "19",
+    "--radial-order",
+    "8",
+    "--max-steps",
+    "3"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 47.56957612500992,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/q5/m19_state.npz"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/q5/m19_state.npz": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/q5/m19-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 1903919104,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/q5/m19-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/q5/m19-run.stdout.log",
+  "timeout_seconds": 900.0
+}

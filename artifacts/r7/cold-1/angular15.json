@@ -1,0 +1,100 @@
+{
+  "checks": {
+    "final_force_residual_norm": 0.00011268109391842714,
+    "final_full_gradient_norm": 0.00011776844842228718,
+    "final_gauge_residual_norm": 2.548782332794766e-19,
+    "final_projected_gradient_norm": 0.00010809806934951663,
+    "final_projected_gradient_relative_to_full": 0.9178865035387486,
+    "history": [
+      {
+        "accepted": true,
+        "constraint_defect_norm": 0.0,
+        "initial_force_residual_norm": 0.00016697452535137115,
+        "iteration": 1,
+        "largest_reduced_singular_value": 4731.432048179435,
+        "linear_constraint_residual_norm": 2.5344051073708323e-19,
+        "linearized_model_norm": 0.00011267902131814592,
+        "linearized_unreachable_residual_fraction": 0.6748276186503958,
+        "projected_normal_residual_norm": 1.1437768194659614e-12,
+        "projected_normal_residual_relative": 8.228320739967814e-13,
+        "projected_stationarity_norm": 0.0013541892104131756,
+        "reduced_coordinates": 1565,
+        "reduced_jacobian_rank": 1565,
+        "smallest_retained_reduced_singular_value": 0.0019422229657245476,
+        "trials": [
+          {
+            "force_residual_norm": 0.00011268109391842714,
+            "fraction": 1.0,
+            "gauge_residual_norm": 2.548782332794766e-19,
+            "minimum_signed_jacobian": 1.2308110422701923
+          }
+        ]
+      }
+    ],
+    "independent_epsilon_B": 0.00011278440201655768,
+    "independent_force_rms_N_per_m3": 667.1702329048732,
+    "independent_radial_refinement_difference": 0.0009159789629957827,
+    "initial_force_residual_norm": 0.00016697452535137115,
+    "minimum_signed_jacobian": 23.84966029460591
+  },
+  "discretization": {
+    "constraint_nullity": 1565,
+    "coordinates": 2315,
+    "force_rows": 37440,
+    "gauge_constraints": 750
+  },
+  "enrichment": {
+    "new_maximum_m": 15,
+    "new_modes": [
+      [
+        12,
+        0
+      ],
+      [
+        13,
+        0
+      ],
+      [
+        14,
+        0
+      ],
+      [
+        15,
+        0
+      ]
+    ],
+    "ntheta": 65,
+    "old_maximum_m": 11,
+    "transfer": "exact zero padding"
+  },
+  "experiment": "R3-angular-zero-padding-control",
+  "limitations": [
+    "This is a bounded dense axisymmetric control, not production linear algebra.",
+    "Only four new axisymmetric angular modes and one or a few local steps are tested."
+  ],
+  "schema": "vmex.polish-recovery/2",
+  "source": {
+    "generator": "benchmarks/polish_recovery_angular.py",
+    "generator_sha256": "140ccb2f92cdaf8332ca506a24a78f48b728b8bb9bdbba682c8a87e58a3bbaa7",
+    "input_native_state": "artifacts/r7/cold-1/refine_bisect_state.npz",
+    "input_native_state_sha256": "7a0fab838bc536e0a27139d29a858f2ce024c659da3baeee3cc788e5895a501c",
+    "output_native_state": "artifacts/r7/cold-1/angular15_state.npz",
+    "output_native_state_sha256": "e4c24e08c7dd39eb414f35cb90ddd66257c0541df00c52aa0fad51e5f18c2a43"
+  },
+  "status": "measured-not-promoted",
+  "work": {
+    "certificate_seconds": 26.036140749929473,
+    "constraint_factor_seconds": 4.069460375001654,
+    "dense_memory_cap_bytes": 2147483648,
+    "dense_solve_seconds": 4.961575041059405,
+    "explicit_array_budget_bytes": 1162137600,
+    "explicit_jacobian_bytes": 693388800,
+    "explicit_jacobian_shape": [
+      37440,
+      2315
+    ],
+    "explicit_reduced_jacobian_bytes": 468748800,
+    "jacobian_seconds": 37.91642279201187,
+    "total_process_seconds": 78.9344341250835
+  }
+}

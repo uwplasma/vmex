@@ -1,0 +1,322 @@
+{
+  "checks": {
+    "final_force_residual_norm": 3.6889887441113497e-06,
+    "final_full_gradient_norm": 4.119844741033589e-06,
+    "final_gauge_residual_norm": 1.5571047114546688e-18,
+    "final_operator_frobenius_norm": 74729.96327374218,
+    "final_projected_gradient_frobenius_relative": 1.8186172914891852e-09,
+    "final_projected_gradient_norm": 5.01352765616065e-10,
+    "final_projected_gradient_relative_to_full": 0.0001216921503430941,
+    "force_certificate": {
+      "epsilon_B": 3.6889377630620564e-06,
+      "force_rms_N_per_m3": 21.82171845174457,
+      "method": "independent shifted point oracle",
+      "minimum_signed_jacobian": 23.84337604299921,
+      "point_force_relative_error": 0.0,
+      "radial_refinement_difference": 1.381787418526962e-05
+    },
+    "history": [
+      {
+        "acceptance_reason": "ordinary_descent",
+        "accepted": true,
+        "compressed_product_relative_error": 1.3333192519866563e-15,
+        "compressed_transpose_relative_error": 9.777345634375982e-16,
+        "constraint_defect_norm": 0.0,
+        "current_exact_stationarity_frobenius": null,
+        "exact_hessian_gradient_fallback": null,
+        "exact_stationarity_projection": null,
+        "force_residual_norm": 0.00010165333842751534,
+        "iteration": 1,
+        "linear_certificate": {
+          "certificate_method": "independent full-domain force JVP/VJP",
+          "factor_cache": {
+            "entries": 1,
+            "hits": 0,
+            "misses": 1,
+            "size": 2
+          },
+          "factor_solve_seconds": 1.6645219170022756,
+          "kkt_nnz": 5089989,
+          "model_norm": 3.693600885272444e-06,
+          "normal_nnz": 3536853,
+          "original_constraint_norm": 4.53479082565295e-14,
+          "stationarity_norm": 1.3459696893570003e-12,
+          "stationarity_relative": 6.257667590792225e-12,
+          "true_kkt_relative_residual": 6.2612182031522036e-12
+        },
+        "linear_passes": true,
+        "local_normal_assembly": {
+          "assembly_seconds": 19.480875499895774,
+          "color_count": 348,
+          "gradient_vjp_relative_error": 9.777345634375982e-16,
+          "max_local_jacobian_nnz": 507384,
+          "normal_jvp_relative_error": 1.3333192519866563e-15,
+          "normal_nnz": 3536853,
+          "span_count": 94,
+          "symmetry_relative_error": 5.195362437862312e-17
+        },
+        "raw_step_accepted_fraction": 1.0,
+        "raw_step_norm": 0.00039190426608829836,
+        "trials": [
+          {
+            "force_residual_norm": 7.067497729964906e-06,
+            "fraction": 1.0,
+            "gauge_residual_norm": 4.5347907970911185e-14,
+            "minimum_signed_jacobian": 0.21692172031382395,
+            "relative_force_reduction": 0.9304745142727956
+          }
+        ]
+      },
+      {
+        "acceptance_reason": "ordinary_descent",
+        "accepted": true,
+        "compressed_product_relative_error": 1.3613510987578195e-15,
+        "compressed_transpose_relative_error": 1.549161016743676e-15,
+        "constraint_defect_norm": 4.534790797091118e-14,
+        "current_exact_stationarity_frobenius": null,
+        "exact_hessian_gradient_fallback": null,
+        "exact_stationarity_projection": null,
+        "force_residual_norm": 7.067497729964906e-06,
+        "iteration": 2,
+        "linear_certificate": {
+          "certificate_method": "independent full-domain force JVP/VJP",
+          "factor_cache": {
+            "entries": 2,
+            "hits": 0,
+            "misses": 2,
+            "size": 2
+          },
+          "factor_solve_seconds": 0.34731974999886006,
+          "kkt_nnz": 5089989,
+          "model_norm": 3.688990166748787e-06,
+          "normal_nnz": 3536853,
+          "original_constraint_norm": 6.242854141052548e-17,
+          "stationarity_norm": 2.24482408222537e-15,
+          "stationarity_relative": 5.967222766356309e-13,
+          "true_kkt_relative_residual": 5.969529832575247e-13
+        },
+        "linear_passes": true,
+        "local_normal_assembly": {
+          "assembly_seconds": 15.876040417002514,
+          "color_count": 348,
+          "gradient_vjp_relative_error": 1.549161016743676e-15,
+          "max_local_jacobian_nnz": 507384,
+          "normal_jvp_relative_error": 1.3613510987578195e-15,
+          "normal_nnz": 3536853,
+          "span_count": 94,
+          "symmetry_relative_error": 5.55010479849944e-17
+        },
+        "raw_step_accepted_fraction": 1.0,
+        "raw_step_norm": 1.258783459909628e-06,
+        "trials": [
+          {
+            "force_residual_norm": 3.6889889164179834e-06,
+            "fraction": 1.0,
+            "gauge_residual_norm": 6.242840528753834e-17,
+            "minimum_signed_jacobian": 0.2169230476513998,
+            "relative_force_reduction": 0.47803465139049983
+          }
+        ]
+      },
+      {
+        "acceptance_reason": "ordinary_descent",
+        "accepted": true,
+        "compressed_product_relative_error": 1.260745706662796e-15,
+        "compressed_transpose_relative_error": 3.3574141969139864e-13,
+        "constraint_defect_norm": 6.242840528753832e-17,
+        "current_exact_stationarity_frobenius": null,
+        "exact_hessian_gradient_fallback": null,
+        "exact_stationarity_projection": null,
+        "force_residual_norm": 3.6889889164179834e-06,
+        "iteration": 3,
+        "linear_certificate": {
+          "certificate_method": "independent full-domain force JVP/VJP",
+          "factor_cache": {
+            "entries": 2,
+            "hits": 0,
+            "misses": 3,
+            "size": 2
+          },
+          "factor_solve_seconds": 0.3041507910238579,
+          "kkt_nnz": 5089989,
+          "model_norm": 3.688988745101383e-06,
+          "normal_nnz": 3536853,
+          "original_constraint_norm": 1.556386360518741e-18,
+          "stationarity_norm": 5.891417933192722e-17,
+          "stationarity_relative": 1.4082128140141584e-11,
+          "true_kkt_relative_residual": 1.4087041263966416e-11
+        },
+        "linear_passes": true,
+        "local_normal_assembly": {
+          "assembly_seconds": 15.738954750006087,
+          "color_count": 348,
+          "gradient_vjp_relative_error": 3.3574141969139864e-13,
+          "max_local_jacobian_nnz": 507384,
+          "normal_jvp_relative_error": 1.260745706662796e-15,
+          "normal_nnz": 3536853,
+          "span_count": 94,
+          "symmetry_relative_error": 5.371768168303629e-17
+        },
+        "raw_step_accepted_fraction": 1.0,
+        "raw_step_norm": 7.050462547898171e-08,
+        "trials": [
+          {
+            "force_residual_norm": 3.688988744112502e-06,
+            "fraction": 1.0,
+            "gauge_residual_norm": 1.5571047114546688e-18,
+            "minimum_signed_jacobian": 0.21692305327359526,
+            "relative_force_reduction": 4.6708050706099516e-08
+          }
+        ]
+      },
+      {
+        "acceptance_reason": null,
+        "accepted": false,
+        "compressed_product_relative_error": 1.405179170347043e-15,
+        "compressed_transpose_relative_error": 3.816361970325661e-13,
+        "constraint_defect_norm": 1.557104711454669e-18,
+        "current_exact_stationarity_frobenius": null,
+        "exact_hessian_gradient_fallback": null,
+        "exact_stationarity_projection": null,
+        "force_residual_norm": 3.688988744112502e-06,
+        "iteration": 4,
+        "linear_certificate": {
+          "certificate_method": "independent full-domain force JVP/VJP",
+          "factor_cache": {
+            "entries": 2,
+            "hits": 0,
+            "misses": 4,
+            "size": 2
+          },
+          "factor_solve_seconds": 0.30427583307027817,
+          "kkt_nnz": 5089989,
+          "model_norm": 3.6889887440555188e-06,
+          "normal_nnz": 3536853,
+          "original_constraint_norm": 1.233677377508082e-19,
+          "stationarity_norm": 1.6347951982247679e-18,
+          "stationarity_relative": 3.9680990457747417e-13,
+          "true_kkt_relative_residual": 3.97938171918701e-13
+        },
+        "linear_passes": true,
+        "local_normal_assembly": {
+          "assembly_seconds": 15.675863750046119,
+          "color_count": 348,
+          "gradient_vjp_relative_error": 3.816361970325661e-13,
+          "max_local_jacobian_nnz": 507384,
+          "normal_jvp_relative_error": 1.405179170347043e-15,
+          "normal_nnz": 3536853,
+          "span_count": 94,
+          "symmetry_relative_error": 5.256373902379315e-17
+        },
+        "raw_step_accepted_fraction": null,
+        "raw_step_norm": 1.5437995160343054e-09,
+        "trials": [
+          {
+            "force_residual_norm": 3.6889887440493363e-06,
+            "fraction": 1.0,
+            "gauge_residual_norm": 1.241360289566039e-19,
+            "minimum_signed_jacobian": 0.21692306294384636,
+            "relative_force_reduction": 1.7122792276448482e-11
+          },
+          {
+            "force_residual_norm": 3.688988744064152e-06,
+            "fraction": 0.5,
+            "gauge_residual_norm": 7.8233017162342e-19,
+            "minimum_signed_jacobian": 0.21692305810872078,
+            "relative_force_reduction": 1.3106548849155782e-11
+          },
+          {
+            "force_residual_norm": 3.6889887440842446e-06,
+            "fraction": 0.25,
+            "gauge_residual_norm": 1.169042202971623e-18,
+            "minimum_signed_jacobian": 0.21692305569115833,
+            "relative_force_reduction": 7.659942763982401e-12
+          },
+          {
+            "force_residual_norm": 3.688988744100148e-06,
+            "fraction": 0.125,
+            "gauge_residual_norm": 1.3623441170970752e-18,
+            "minimum_signed_jacobian": 0.2169230544823768,
+            "relative_force_reduction": 3.3488786203049513e-12
+          }
+        ]
+      }
+    ],
+    "independent_epsilon_B": 3.6889377630620564e-06,
+    "independent_force_rms_N_per_m3": 21.82171845174457,
+    "independent_radial_refinement_difference": 1.381787418526962e-05,
+    "minimum_signed_jacobian": 23.84337604299921,
+    "projection_constraint_norm": 2.5332227552892568e-20,
+    "projection_factorizations": 1,
+    "projection_kkt_nnz": 1558839,
+    "projection_solves": 1,
+    "projection_true_residual_relative": 9.434740784631423e-15,
+    "stationarity_certified_object": "stored (initial state, accepted_coordinates) pair",
+    "stationarity_pass": true,
+    "stationarity_reference_norm": 0.2756779933646894,
+    "stationarity_tolerance": 1e-08
+  },
+  "complete": true,
+  "discretization": {
+    "basis_degree": 5,
+    "basis_size": 99,
+    "compressed_colors": 348,
+    "coordinates": 5703,
+    "force_pattern_nnz": 47637234,
+    "force_rows": 137052,
+    "gauge_rows": 1862,
+    "global_force_jacobian_materialized": false
+  },
+  "experiment": "R5-compressed-sparse-feasible-force-step",
+  "limitations": [
+    "This is an axisymmetric fixed-profile research generator, not the public polish driver.",
+    "The sparse-direct normal equations require a conditioning-limited comparison before production promotion.",
+    "Peak RSS is process high-water memory and may include earlier JAX compilation allocations."
+  ],
+  "model": {
+    "axisymmetric_only": true,
+    "damping": 0.0,
+    "evaluation_mode": "coefficient-first-split-jets",
+    "fixed_profiles": true,
+    "force_scale_N_per_m3": 5915447.712414409,
+    "linear_solver": "normal",
+    "linearization": "local-normal",
+    "max_exact_newton_iterations": 40,
+    "max_linear_iterations": 80,
+    "solve_radial_order": 6,
+    "stage": "saved original frozen gauge",
+    "stationarity_hessian": "gauss-newton",
+    "stationarity_refinement": false,
+    "volume_scale_m3": 633.7993467060758
+  },
+  "product_qualified": false,
+  "refinement": {
+    "inserted_knots": [],
+    "new_maximum_m": 19,
+    "old_maximum_m": 19,
+    "selected_span_indices": [],
+    "span_force_squared_contributions": null
+  },
+  "schema": "vmex.polish-recovery/4",
+  "source": {
+    "generator": "benchmarks/polish_recovery_sparse.py",
+    "generator_sha256": "f6dba8615f5ba32c72648cf350b5fb7b1bf455931adf454d5adc093262e3b31f",
+    "input_native_state": "artifacts/r7/quintic-s2_state.npz",
+    "input_native_state_sha256": "e1c20d594fcc5f8f175616b5fc49ebe8aeeecd1f06583e37e3dfef15eb6c7100",
+    "output_native_state": "artifacts/r7/quintic-force_state.npz",
+    "output_native_state_sha256": "c731dc17428c52a6f66e4e9120bd017450f07221b47978c1b0656bbc9d1d5c54"
+  },
+  "status": "measured-not-promoted",
+  "work": {
+    "certificate_seconds": 58.47857120796107,
+    "compressed_force_assembly_seconds": 66.7717344169505,
+    "constraint_assembly_seconds": 1.2103681659791619,
+    "final_stationarity_assembly_seconds": 0.0,
+    "linearization_memory_estimate_name": "largest_local_jacobian_plus_all_local_normal_contributions",
+    "memory_cap_bytes": 2147483648,
+    "peak_process_rss_bytes": 3502702592,
+    "sparse_factor_solve_seconds": 2.6202682910952717,
+    "sparse_force_value_index_estimate_bytes": 278684280,
+    "total_process_seconds": 135.22525233298074
+  }
+}

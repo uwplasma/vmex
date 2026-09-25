@@ -1,0 +1,44 @@
+{
+  "child_signal": null,
+  "command": [
+    "/Users/rogerio/local/VMEX-polish-recovery/.venv/bin/python",
+    "benchmarks/polish_recovery_sparse.py",
+    "--input-state",
+    "artifacts/r7/cold-1/insert12a_state.npz",
+    "--stable-derivatives",
+    "--linearization",
+    "local-normal",
+    "--linear-solver",
+    "normal",
+    "--reanchor",
+    "--radial-order",
+    "6",
+    "--max-steps",
+    "2",
+    "--certificate",
+    "none",
+    "--output-json",
+    "artifacts/r7/cold-1/order6.json",
+    "--output-state",
+    "artifacts/r7/cold-1/order6_state.npz"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 15.253123583970591,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/order6_state.npz"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/order6_state.npz": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/order6-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 996671488,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/order6-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/cold-1/order6-run.stdout.log",
+  "timeout_seconds": 900.0
+}

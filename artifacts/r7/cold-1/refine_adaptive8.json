@@ -1,0 +1,174 @@
+{
+  "checks": {
+    "final_force_residual_norm": 6.445335446108669e-05,
+    "final_full_gradient_norm": 5.51510304814641e-05,
+    "final_gauge_residual_norm": 3.5707583822241067e-19,
+    "final_projected_gradient_norm": 2.9362685138330958e-05,
+    "final_projected_gradient_relative_to_full": 0.5324050136869077,
+    "history": [
+      {
+        "accepted": true,
+        "constraint_defect_norm": 0.0,
+        "initial_force_residual_norm": 0.00011278370985566341,
+        "iteration": 1,
+        "largest_reduced_singular_value": 4733.825050266893,
+        "linear_constraint_residual_norm": 3.5630777607917237e-19,
+        "linearized_model_norm": 6.443901965019653e-05,
+        "linearized_unreachable_residual_fraction": 0.5713504169410929,
+        "projected_normal_residual_norm": 1.643245752265771e-12,
+        "projected_normal_residual_relative": 1.9778461464988748e-12,
+        "projected_stationarity_norm": 0.014217991729838621,
+        "projected_stationarity_relative": 0.009777566831089352,
+        "reduced_coordinates": 1813,
+        "reduced_jacobian_rank": 1813,
+        "smallest_retained_reduced_singular_value": 0.001941796967486894,
+        "trials": [
+          {
+            "force_residual_norm": 6.445335446108669e-05,
+            "fraction": 1.0,
+            "gauge_residual_norm": 3.5707583822241067e-19,
+            "minimum_signed_jacobian": 0.8742443461671511
+          }
+        ]
+      }
+    ],
+    "independent_epsilon_B": 6.445451944418365e-05,
+    "independent_force_rms_N_per_m3": 381.2773396008662,
+    "independent_radial_refinement_difference": 1.80753384145195e-05,
+    "initial_force_residual_norm": 0.0001127837098556634,
+    "minimum_signed_jacobian": 23.84914752653112
+  },
+  "discretization": {
+    "constraint_nullity": 1813,
+    "coordinates": 2683,
+    "force_rows": 43680,
+    "gauge_constraints": 870,
+    "ntheta": 65
+  },
+  "experiment": "R3-exact-radial-h-refinement",
+  "limitations": [
+    "This is a bounded dense reference on the axisymmetric user tokamak, not production linear algebra.",
+    "One radial h-refinement does not qualify angular, degree, 3-D, current, derivative, or product gates."
+  ],
+  "schema": "vmex.polish-recovery/2",
+  "source": {
+    "generator": "benchmarks/polish_recovery_refine.py",
+    "generator_sha256": "b85ffa4393b935168fd32b1525d936aef3032df28b6b7b46630214facdf346d1",
+    "input_native_state": "artifacts/r7/cold-1/angular15_state.npz",
+    "input_native_state_sha256": "e4c24e08c7dd39eb414f35cb90ddd66257c0541df00c52aa0fad51e5f18c2a43",
+    "output_native_state": "artifacts/r7/cold-1/refine_adaptive8_state.npz",
+    "output_native_state_sha256": "c997eec2b3deb896695a819c9a0473d34b9f9efee84a9724198735c465d8f986"
+  },
+  "status": "measured-not-promoted",
+  "transfer": {
+    "coarse_basis_size": 51,
+    "coarse_spans": 48,
+    "fine_basis_size": 59,
+    "fine_spans": 56,
+    "inserted_knots": [
+      0.010416666666666666,
+      0.03125,
+      0.05208333333333333,
+      0.07291666666666666,
+      0.09375,
+      0.21875,
+      0.23958333333333331,
+      0.26041666666666663
+    ],
+    "method": "Boehm knot insertion through insert_high_order_state_knots",
+    "seconds": 16.781204500002787,
+    "selected_span_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      10,
+      11,
+      12
+    ],
+    "selection": "largest volume-weighted force-squared span contributions",
+    "span_force_squared_contributions": [
+      24665705.519326285,
+      99296877.59446171,
+      25908374.913830034,
+      13617001.494417232,
+      9536761.482690876,
+      6762413.460351415,
+      5313738.508873504,
+      5178320.502797293,
+      6394251.594857782,
+      8149052.845679613,
+      9479875.922213016,
+      9959732.451503169,
+      9581385.824851986,
+      8552912.135499848,
+      7194222.435922406,
+      5764217.697155391,
+      4458428.019569343,
+      3367707.42432623,
+      2517626.5244292123,
+      1883630.0907976571,
+      1432572.8252542713,
+      1117676.668981114,
+      901430.6730723229,
+      749865.462112716,
+      643663.1586389707,
+      565552.1628765815,
+      507807.50988848694,
+      462213.61965742474,
+      427442.320548038,
+      399639.3468928363,
+      379547.0990130217,
+      364361.73108410847,
+      355365.8244019595,
+      349904.569911932,
+      349156.66798461374,
+      350145.3757342413,
+      354084.6334175962,
+      357782.51666651166,
+      362685.356932399,
+      365419.9916933675,
+      368582.1179221049,
+      369367.2928432687,
+      373494.3797843799,
+      377258.9089633266,
+      390040.32565079466,
+      405016.7599735543,
+      441221.9429541165,
+      494185.5389862465
+    ],
+    "spline_value_first_second_derivative_relative_errors": {
+      "derivative_0": 2.686802190112264e-16,
+      "derivative_1": 6.449618761243971e-13,
+      "derivative_2": 1.4276598877799596e-07
+    },
+    "third_grid_relative_errors": {
+      "B": 1.211489988587723e-14,
+      "dposition_dphi": 1.521376613018723e-16,
+      "dposition_drho": 1.8481286348467557e-14,
+      "dposition_dtheta": 6.812090269549819e-17,
+      "force": 4.759580056276148e-09,
+      "force_max_absolute_N_per_m3": 1.07669188764703e-05,
+      "position": 1.5077820196979232e-16,
+      "pressure": 2.3905960174094946e-16,
+      "sqrt_g": 9.460438694051403e-15
+    },
+    "wout_refit": false
+  },
+  "work": {
+    "certificate_seconds": 22.75623004103545,
+    "constraint_factor_seconds": 6.074946417007595,
+    "dense_memory_cap_bytes": 2147483648,
+    "dense_solve_seconds": 8.16823516599834,
+    "explicit_array_budget_bytes": 1571082240,
+    "explicit_jacobian_bytes": 937547520,
+    "explicit_jacobian_shape": [
+      43680,
+      2683
+    ],
+    "explicit_reduced_jacobian_bytes": 633534720,
+    "jacobian_seconds": 44.584167832974344,
+    "total_process_seconds": 121.72065199993085
+  }
+}

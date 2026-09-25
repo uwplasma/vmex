@@ -72,7 +72,40 @@ a different metric scaling or state parameterization; (c) other. The status is
 `stationarity_pass=true` for the pair and `representation_limited` for the
 exported file until you decide.
 
-Next resume point: after that decision, R7.3 (active-local assembly, one frozen
+R7.3/R7.4 progress (2026-09-25, head after `c3683426`):
+
+- One gauge-projector LU per chart (keyed on exact CSR bytes; tested reuse and
+  invalidation). The exact stationarity loop stops once eta <= 1e-8.
+- `benchmarks/polish_recovery_cold.py` runs the whole polish from the input
+  deck in fresh processes with a dedicated compilation cache. Stage records:
+  `artifacts/r7/cold-1` (cubic), `cold-q5` (quintic, empty cache),
+  `cold-q5-reload` (quintic, populated cache).
+
+| Cold workflow (M4 CPU, float64) | cubic historical schedule | compact quintic schedule |
+|---|---|---|
+| stages after ordinary solve | 20 (3 dense) | 6 (all sparse) |
+| final coordinates / basis | 11039 / 191 | 4369 / 76 |
+| independent epsilon_B | 9.4949e-6 | 7.6771e-6 (45.41 N/m^3) |
+| eta (certified pair) | 1.0e-11 | 4.0e-10 |
+| gauge / min signed Jacobian | 2.2e-16 / 23.84 | 7.6e-20 / 23.84 |
+| radial refinement difference | 1.8e-7 | 1.6e-5 |
+| wall, empty cache | 2674 s (early stages overlapped other probes) | 352 s |
+| wall, cache reload | not run | 230 s |
+| max stage peak RSS | 8.1 GB (dense refine) | 5.6 GB (lift) |
+| ordinary VMEX solve alone | 13.0 s | 5.9 s cold / 3.1 s reload |
+
+The quintic path is the recommended default candidate. It is not a matched
+comparison of equal accuracy (it ends more accurate). It still costs ~60x an
+ordinary solve (~75x on reload), so the "few ordinary solves" target is not met.
+The remaining time is assembly (local-normal JVP sweeps) and the point
+certificate, not compilation. The quintic state is
+`benchmarks/polish_recovery_r7_quintic_cold_stationary_state.npz`.
+
+Next resume point: R7.3 cost reduction on the quintic path (active-local
+coefficient gathers, a static CSR scatter, compiled-identity reuse), a cheaper
+certificate schedule, then R7.5 (3-D, current closure, LASYM) and R7.6
+implicit derivatives. Earlier text:
+ (active-local assembly, one frozen
 projector factor, stable jit identities), then R7.4 cold-input + quintic
 comparison, R7.6 implicit derivatives on the accurate evaluator.
 
