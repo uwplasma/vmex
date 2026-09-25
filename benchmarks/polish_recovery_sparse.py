@@ -116,6 +116,14 @@ def _validate_scope(state) -> None:
             raise ValueError(f"checkpoint array {name} contains nonfinite values")
 
 
+STATIONARITY_TOLERANCE = 1.0e-8
+# Maintainer decision 2026-09-25: the certified object in the accurate mode is
+# the stored (initial state, accepted_coordinates) pair.  The rounded float64
+# coefficient export is reported separately as representation-limited.
+CERTIFIED_OBJECT = {
+    "assembled-sum": "rounded float64 coefficient state",
+    "coefficient-first-split-jets": "stored (initial state, accepted_coordinates) pair",
+}
 EVALUATION_MODES = ("assembled-sum", "coefficient-first-split-jets")
 
 
@@ -872,37 +880,69 @@ def _sparse_feasible_step_lsmr(
     }
 
 
+class _GaugeProjector:
+    """One sparse LU of [[I, C.T], [C, 0]] per frozen chart.
+
+    The factor is keyed on the constraint's exact CSR bytes, so a changed C
+    always refactors; the same chart reuses one factor for every projection.
+    """
+
+    def __init__(self, constraint):
+        constraint = sparse.csr_matrix(constraint)
+        self.constraint = constraint
+        self.key = _csr_key(constraint)
+        self.coordinates = int(constraint.shape[1])
+        self.augmented = sparse.bmat(
+            [[sparse.eye(self.coordinates, format="csc"), constraint.T], [constraint, None]],
+            format="csc",
+        )
+        self.factor = sparse_linalg.splu(self.augmented)
+        self.solves = 0
+
+
+def _csr_key(matrix) -> str:
+    matrix = sparse.csr_matrix(matrix)
+    digest = hashlib.sha256(str(matrix.shape).encode())
+    for part in (matrix.data, matrix.indices, matrix.indptr):
+        digest.update(np.ascontiguousarray(part).tobytes())
+    return digest.hexdigest()
+
+
+_PROJECTOR: dict[str, _GaugeProjector] = {}
+PROJECTOR_STATS = {"factorizations": 0, "solves": 0}
+
+
+def _gauge_projector(constraint) -> _GaugeProjector:
+    key = _csr_key(constraint)
+    projector = _PROJECTOR.get(key)
+    if projector is None:
+        _PROJECTOR.clear()  # one chart at a time; release the previous factor
+        projector = _PROJECTOR[key] = _GaugeProjector(constraint)
+        PROJECTOR_STATS["factorizations"] += 1
+    return projector
+
+
 def _sparse_projected_gradient(gradient, constraint):
     """Project a gradient through the original sparse gauge rows."""
 
-    coordinates = int(constraint.shape[1])
-    augmented = sparse.bmat(
-        [
-            [sparse.eye(coordinates, format="csr"), constraint.T],
-            [constraint, None],
-        ],
-        format="csr",
-    )
-    rhs = np.concatenate((np.asarray(gradient), np.zeros(constraint.shape[0])))
-    pattern, values = CsrPattern.from_scipy(augmented, include_diagonal=True)
-    solution = np.asarray(
-        sparse_solve(
-            pattern,
-            jnp.asarray(values),
-            jnp.asarray(rhs),
-            options=HostFactorOptions(backend="superlu"),
-        )
-    )
+    projector = _gauge_projector(constraint)
+    constraint = projector.constraint
+    coordinates = projector.coordinates
+    rhs = np.concatenate((np.asarray(gradient, dtype=float), np.zeros(constraint.shape[0])))
+    solution = projector.factor.solve(rhs)
+    PROJECTOR_STATS["solves"] += 1
     projected = solution[:coordinates]
     multipliers = solution[coordinates:]
-    stationarity = projected + constraint.T @ multipliers - gradient
+    stationarity = projected + constraint.T @ multipliers - rhs[:coordinates]
     feasibility = constraint @ projected
     residual = np.concatenate((stationarity, feasibility))
     return projected, {
         "projection_true_residual_relative": float(np.linalg.norm(residual))
         / max(float(np.linalg.norm(rhs)), np.finfo(float).tiny),
         "projection_constraint_norm": float(np.linalg.norm(feasibility)),
-        "projection_kkt_nnz": int(augmented.nnz),
+        "projection_kkt_nnz": int(projector.augmented.nnz),
+        "projection_factorizations": PROJECTOR_STATS["factorizations"],
+        "projection_solves": PROJECTOR_STATS["solves"],
     }
 
 
@@ -952,7 +992,7 @@ def main() -> None:
         help="optional NPZ of raw (pre-line-search) steps and accepted fractions",
     )
     parser.add_argument("--memory-gib", type=float, default=2.0)
-    parser.add_argument("--certificate", choices=("point", "tensorized"), default="point")
+    parser.add_argument("--certificate", choices=("point", "tensorized", "none"), default="point")
     parser.add_argument(
         "--output-json",
         type=Path,
@@ -1140,6 +1180,19 @@ def main() -> None:
             current_exact_stationarity = float(np.linalg.norm(projected_gradient)) / max(
                 current_operator_frobenius * float(np.linalg.norm(residual)), np.finfo(float).tiny
             )
+            if current_exact_stationarity <= STATIONARITY_TOLERANCE:
+                # Converged: further steps are below the evaluation floor and
+                # would only select among rounding-level candidates.
+                history.append(
+                    {
+                        "iteration": iteration + 1,
+                        "force_residual_norm": float(np.linalg.norm(residual)),
+                        "current_exact_stationarity_frobenius": current_exact_stationarity,
+                        "accepted": False,
+                        "acceptance_reason": "stationarity_target_met",
+                    }
+                )
+                break
         elif args.linear_solver == "normal":
             if args.linearization == "sparse":
                 step, linear = _sparse_feasible_step(matrix, residual, constraint, defect, args.damping)
@@ -1382,8 +1435,14 @@ def main() -> None:
             "minimum_signed_jacobian": float(point.minimum_signed_jacobian),
             "point_force_relative_error": 0.0,
         }
-    else:
+    elif args.certificate == "tensorized":
         certificate = _tensorized_certificate(final_state)
+    else:
+        # Intermediate continuation stage: no independent force claim is made.
+        certificate = {
+            "method": "skipped (intermediate stage; in-loop quadrature norm only)",
+            "minimum_signed_jacobian": float(minimum_signed_jacobian(final_state, plan)),
+        }
     certificate_seconds = time.perf_counter() - certificate_started
     final_residual, pullback = jax.vjp(force, coordinates)
     final_gradient = np.asarray(pullback(final_residual)[0])
@@ -1488,7 +1547,8 @@ def main() -> None:
             "final_operator_frobenius_norm": operator_frobenius,
             "stationarity_reference_norm": stationarity_reference,
             "final_projected_gradient_frobenius_relative": (final_stationarity_frobenius),
-            "stationarity_tolerance": 1.0e-8,
+            "stationarity_tolerance": STATIONARITY_TOLERANCE,
+            "stationarity_certified_object": CERTIFIED_OBJECT[evaluation_mode],
             "stationarity_pass": (final_stationarity_frobenius is not None and final_stationarity_frobenius <= 1.0e-8),
             **projection,
             "force_certificate": certificate,

@@ -2101,3 +2101,28 @@ def test_same_chart_driver_replay_uses_the_serialized_metric(tmp_path, monkeypat
     loaded = recovery._load_original_problem(checkpoint, stable_derivatives=True)
     assert np.array_equal(np.asarray(loaded[5]), saved)
     assert loaded[2].spline_value is not None
+
+
+def test_gauge_projector_reuses_one_factor_and_refactors_on_change():
+    """Same chart: one LU for all projections; changed C: new, exact factor."""
+
+    from scipy import sparse
+
+    import benchmarks.polish_recovery_sparse as recovery
+
+    rng = np.random.default_rng(11)
+    constraint = sparse.random(4, 12, density=0.5, random_state=3, format="csr") + sparse.eye(4, 12, format="csr")
+    before = recovery.PROJECTOR_STATS["factorizations"]
+    for _ in range(3):
+        vector = rng.standard_normal(12)
+        projected, metrics = recovery._sparse_projected_gradient(vector, constraint)
+        dense = constraint.toarray()
+        reference = vector - dense.T @ np.linalg.solve(dense @ dense.T, dense @ vector)
+        np.testing.assert_allclose(projected, reference, rtol=1e-12, atol=1e-12)
+        assert metrics["projection_true_residual_relative"] < 1e-13
+    assert recovery.PROJECTOR_STATS["factorizations"] == before + 1
+    changed = constraint.copy()
+    changed.data[0] *= 1.0 + 1e-12
+    recovery._sparse_projected_gradient(rng.standard_normal(12), changed)
+    assert recovery.PROJECTOR_STATS["factorizations"] == before + 2
+    assert len(recovery._PROJECTOR) == 1

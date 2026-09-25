@@ -58,7 +58,10 @@ Jacobian 23.84, radial refinement difference 1.88e-7. 142 s wall, 4.4 GB peak
 RSS for 3 iterations + certificate. A fresh-process replay reproduces eta
 `1.44e-13` (`replay-check.json`).
 
-**Open decision for Rogerio (not resolved by the agent):** the exported
+**Decision (Rogerio, 2026-09-25): option (a) accepted.** The certified object
+in the accurate mode is the stored `(initial, accepted_coordinates)` pair;
+driver records carry `stationarity_certified_object`. The float64 export's eta
+is reported as representation-limited. Original note: the exported
 ordinary float64 coefficient file (the rounded sum) has eta `5.3e-8` under the
 accurate evaluator. That is its representation floor (0.5 ulp times the
 measured sensitivity), not a solver defect. Force is identical to ten digits.
