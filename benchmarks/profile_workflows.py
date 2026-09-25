@@ -9,7 +9,7 @@ Timing regimes are process-level where they must be:
 
 - ``cold``            new process, empty persistent compilation cache;
 - ``cache_reload``    new process, populated persistent cache;
-- ``warm``            same process, same shapes and static arguments;
+- ``warm``            all stages in order, same shapes and static arguments;
 - ``warm_newparams``  same process, changed physical parameters, same shapes;
 - ``reshape``         same process, changed resolution/shape.
 
@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # this repo's commit.
 sys.path.insert(0, str(ROOT))
 DATA = ROOT / "examples" / "data"
-SCHEMA = 1
+SCHEMA = 2  # Warm timings now repeat every stage, not just the first.
 
 _COLD_REGIMES = ("cold", "cache_reload")
 _WARM_REGIMES = ("warm", "warm_newparams", "reshape")
@@ -801,6 +801,12 @@ WORKFLOWS: dict[str, Workflow] = {
 # ---------------------------------------------------------------------------
 
 
+def _jax() -> Any:
+    import jax
+
+    return jax
+
+
 def _run_in_process(ident: str, regime: str,
                     trace_dir: Path | None = None) -> dict[str, Any]:
     """Measure one workflow in this process (warm regimes, or a cold child)."""
@@ -817,6 +823,19 @@ def _run_in_process(ident: str, regime: str,
     stages, variants = workflow.build()
     build_seconds = time.perf_counter() - build_started
 
+    if _jax().config.jax_disable_jit:
+        raise RuntimeError(
+            f"{ident}/{regime} would measure nothing: jax_disable_jit is on, "
+            "so the workflow runs as eager primitives instead of compiled "
+            "programs (pytest's conftest disables jit suite-wide; a test "
+            "measuring this harness has to re-enable it).")
+    # A stage's first call must be the compile this record reports.  JAX keeps
+    # compiled executables in a process-wide cache keyed by the program, not by
+    # the callable, so anything that ran earlier in this process -- another
+    # regime, another test in the same xdist worker -- can serve the stage with
+    # no compilation and no log record, leaving a silent ``compiles: 0``.
+    _jax().clear_caches()
+
     timings: dict[str, float] = {"build": build_seconds}
     counters: dict[str, Any] = {}
     for name, stage in stages.items():
@@ -832,16 +851,26 @@ def _run_in_process(ident: str, regime: str,
             raise ValueError(
                 f"workflow {ident} defines no {regime} variant; a plain "
                 "warm repeat must not be reported under that label")
-        repeat = variants.get(regime) or next(iter(stages.values()))
+        repeat_stages = ((variants[regime],) if regime in variants
+                         else tuple(stages.values()))
         counter.reset()
         samples = []
         repeats = 3 if regime == "warm" else 1
         for _ in range(repeats):
             started = time.perf_counter()
-            repeat()
+            for stage in repeat_stages:
+                stage()
             samples.append(time.perf_counter() - started)
         timings[regime] = sorted(samples)[len(samples) // 2]
         counters[regime] = counter.snapshot()
+
+    if not any(counters[name]["compiles"] for name in stages):
+        counts = {name: counters[name]["compiles"] for name in stages}
+        raise RuntimeError(
+            f"{ident}/{regime} measured nothing: no stage compiled after the "
+            f"cache was cleared ({counts}).  The compile counter reads JAX's "
+            "log records, so a zero here means the counter is broken, not that "
+            "the work was free.")
 
     if trace_dir is not None:
         # One XProf trace per stage, captured on a warm repeat so the trace
@@ -870,20 +899,29 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
     matching ``cold`` run left behind, so a reload claim always follows a
     logged population of the same directory.
     """
+    # vmex puts entries in a per-machine subdirectory of the cache directory
+    # it is given, so look at files anywhere below it.
     if regime == "cold":
-        for stale in cache_dir.glob("*"):
+        for stale in [path for path in cache_dir.rglob("*") if path.is_file()]:
             stale.unlink()
-    elif regime == "cache_reload" and not any(cache_dir.glob("*")):
+    elif regime == "cache_reload" and not any(
+            path.is_file() for path in cache_dir.rglob("*")):
         # A reload claim needs a logged population of this same directory:
         # run one unrecorded cold child to fill it.
         _run_cold(ident, "cold", cache_dir)
+    # JAX_COMPILATION_CACHE_DIR outranks VMEX_COMPILATION_CACHE_DIR, and
+    # ``import vmex`` exports it (``_configure_jax_environment``).  A parent
+    # that imported vmex would therefore hand the child its own default cache,
+    # so "cold" would start warm and nothing would land in ``cache_dir``.  Set
+    # the name that wins, and drop the one it would shadow.
     env = dict(
         os.environ,
         VMEX_COMPILATION_CACHE="1",
-        VMEX_COMPILATION_CACHE_DIR=str(cache_dir),
+        JAX_COMPILATION_CACHE_DIR=str(cache_dir),
         VMEX_PROFILE_CHILD="1",
     )
-    entries_before = len(list(cache_dir.glob("*")))
+    env.pop("VMEX_COMPILATION_CACHE_DIR", None)
+    entries_before = sum(path.is_file() for path in cache_dir.rglob("*"))
     started = time.perf_counter()
     proc = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), ident,
@@ -902,10 +940,21 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
             f"{ident}/{regime} child failed:\n{proc.stderr[-4000:]}")
     record = json.loads(proc.stdout.strip().splitlines()[-1])
     record["timing_s"]["process_wall"] = wall
+    used = record.pop("cache_directory", None)
+    entries_after = sum(path.is_file() for path in cache_dir.rglob("*"))
+    if not used or cache_dir.resolve() not in (
+            Path(used).resolve(), *Path(used).resolve().parents):
+        raise RuntimeError(
+            f"{ident}/{regime} measured nothing: the child compiled into "
+            f"{used!r}, not the controlled {cache_dir}.")
+    if not entries_after:
+        raise RuntimeError(
+            f"{ident}/{regime} measured nothing: the child left {cache_dir} "
+            "empty, so no reload claim can rest on it.")
     record["cache"] = {
-        "directory": str(cache_dir),
+        "directory": used,
         "entries_before": entries_before,
-        "entries_after": len(list(cache_dir.glob("*"))),
+        "entries_after": entries_after,
     }
     return record
 
@@ -944,6 +993,7 @@ def main(argv: list[str] | None = None) -> int:
 
         jax.config.update("jax_enable_x64", True)
         record = _run_in_process(idents[0], args.regimes[0])
+        record["cache_directory"] = jax.config.jax_compilation_cache_dir
         print(json.dumps(record))
         return 0
 

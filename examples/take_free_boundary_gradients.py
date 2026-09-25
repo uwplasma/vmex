@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """Differentiate a true NESTOR free-boundary solve through its coupled root.
 
-Preview: this script needs ESSOS branch ``rj/vmex-optimization-interfaces``.
 """
 
 from dataclasses import replace
@@ -21,12 +20,6 @@ from vmex.core.freeboundary_implicit import (
 
 from essos.coils import Coils
 from essos.fields import BiotSavart
-
-if not all(hasattr(Coils, name) for name in ("from_json", "with_dofs")):
-    raise ImportError(
-        "This example needs ESSOS branch rj/vmex-optimization-interfaces "
-        "(uwplasma/ESSOS#58)."
-    )
 
 DATA = Path(__file__).resolve().parent / "data"
 NS, MPOL, NTOR, NITER, FTOL = 25, 5, 5, 12000, 1.0e-10
@@ -57,15 +50,23 @@ inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field",
               phiedge=-0.025, ns_array=np.array([NS]),
               niter_array=np.array([NITER]), ftol_array=np.array([FTOL]))
 params = im.params_from_input(inp)
-config = make_free_boundary_config(
-    inp, biot_savart, ns=NS, ftol=FTOL, max_iterations=NITER,
-    adjoint_tol=1.0e-9,
-    field_from_parameters=field_from_parameters)
-solver_context = im.runtime_from_params(params, config.implicit)
 
-def aspect_from_coils(parameters):
-    equilibrium_state = solve_free_boundary_implicit(params, parameters, config)
-    return im.aspect_ratio(equilibrium_state, solver_context)
+
+def configured(**overrides):
+    config = make_free_boundary_config(
+        inp, biot_savart, ns=NS, ftol=FTOL, max_iterations=NITER,
+        adjoint_tol=1.0e-9,
+        field_from_parameters=field_from_parameters, **overrides)
+    context = im.runtime_from_params(params, config.implicit)
+
+    def aspect_from_coils(parameters):
+        state = solve_free_boundary_implicit(params, parameters, config)
+        return im.aspect_ratio(state, context)
+
+    return aspect_from_coils
+
+
+aspect_from_coils = configured()
 
 print("Solving the free boundary and its implicit adjoint...")
 parameters = jnp.zeros(base_dofs.size)
@@ -76,11 +77,27 @@ direction = jnp.zeros_like(parameters).at[2].set(0.1)
 direction = direction.at[-coils.curves.n_base_curves:].set(
     1.0 / coils.curves.n_base_curves)
 direction /= jnp.linalg.norm(direction)
-step = 1.0e-1
 autodiff = jnp.vdot(gradient, direction)
+
+# The certificate is the second adjoint. The coupled GCROT adjoint and the
+# edge Schur adjoint are independent solvers of the same linear system, so
+# agreement between them certifies both. Every solve is Newton-anchored on
+# the coupled plasma--vacuum root they linearize, so they agree to 3.5e-10 at
+# the settings above and 1.1e-11 at the smoke-test settings (ftol 1e-7).
+# Before the anchor the solves stopped wherever ftol let them, 1.5e-04 and
+# 1.6e-02 apart, and the central difference below read 0 at the smoke-test
+# settings; it now agrees with both to 1.1e-04 and 1.1e-05, the difference
+# quotient's own truncation at this step.
+schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
+schur = jnp.vdot(schur_gradient, direction)
+disagreement = jnp.abs(autodiff - schur) / jnp.abs(schur)
+
+step = 1.0e-1
 finite_difference = (aspect_from_coils(parameters + step * direction)
                      - aspect_from_coils(parameters - step * direction)) / (2 * step)
-relative_error = jnp.abs(autodiff - finite_difference) / jnp.abs(finite_difference)
+
 print(f"aspect = {float(aspect):.6f}")
-print(f"directional d(aspect)/d(coils): implicit = {float(autodiff):.6e}, "
-      f"central FD = {float(finite_difference):.6e}, relative error = {float(relative_error):.2e}")
+print(f"directional d(aspect)/d(coils): coupled GCROT = {float(autodiff):.8e}, "
+      f"edge Schur = {float(schur):.8e}, they differ by {float(disagreement):.2e}")
+print(f"central FD at step {step:g} = {float(finite_difference):.6e} "
+      "(step-limited; see the comment above)")

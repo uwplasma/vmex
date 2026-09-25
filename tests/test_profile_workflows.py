@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,10 @@ profile_workflows = importlib.util.module_from_spec(_SPEC)
 # dataclass decorator resolves them through sys.modules[cls.__module__].
 sys.modules[_SPEC.name] = profile_workflows
 _SPEC.loader.exec_module(profile_workflows)
+
+# Compilation is what these tests measure, and the suite conftest disables jit
+# globally; without this the records would describe eager primitives.
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
 
 def test_registry_rows_are_well_formed():
@@ -87,7 +92,7 @@ def test_compile_counting_and_warm_contract(monkeypatch):
 
     record = profile_workflows._run_in_process("T0", "warm")
     assert record["workflow"] == "T0"
-    assert record["schema"] == profile_workflows.SCHEMA
+    assert record["schema"] == profile_workflows.SCHEMA == 2
     assert record["compile"]["run"]["compiles"] >= 1
     assert record["compile"]["warm"]["compiles"] == 0
     assert record["timing_s"]["warm"] <= record["timing_s"]["run"]
@@ -105,6 +110,75 @@ def test_compile_counting_and_warm_contract(monkeypatch):
     monkeypatch.setitem(profile_workflows.WORKFLOWS, "T1", bare)
     with pytest.raises(ValueError, match="no reshape variant"):
         profile_workflows._run_in_process("T1", "reshape")
+
+
+def test_warm_repeats_all_stages_in_dependency_order(monkeypatch):
+    calls = []
+    stages, variants = _tiny_workflow()
+    kernel = stages["run"]
+
+    def solve():
+        calls.append("solve")
+        return kernel()
+
+    def diagnostic():
+        assert calls[-1] == "solve"
+        calls.append("diagnostic")
+        return kernel()
+
+    workflow = profile_workflows.Workflow(
+        "T2", "solve followed by diagnostic",
+        lambda: ({"solve": solve, "diagnostic": diagnostic}, variants), ())
+    monkeypatch.setitem(profile_workflows.WORKFLOWS, "T2", workflow)
+    record = profile_workflows._run_in_process("T2", "warm")
+    assert calls == ["solve", "diagnostic"] * 4
+    assert record["compile"]["warm"]["compiles"] == 0
+
+
+def test_a_stage_that_compiles_nothing_is_an_error_not_a_zero(monkeypatch):
+    """A warm executable must not be reported as a free stage."""
+    tiny = profile_workflows.Workflow(
+        "T0", "tiny self-test kernel", _tiny_workflow, ())
+    monkeypatch.setitem(profile_workflows.WORKFLOWS, "T0", tiny)
+    monkeypatch.setattr(profile_workflows._CompileCounter, "emit",
+                        lambda self, record: None)
+    with pytest.raises(RuntimeError, match="measured nothing"):
+        profile_workflows._run_in_process("T0", "warm")
+
+
+def test_cold_child_must_use_the_controlled_cache_directory(monkeypatch, tmp_path):
+    """The child inherits JAX_COMPILATION_CACHE_DIR unless the harness wins."""
+    monkeypatch.setenv("JAX_COMPILATION_CACHE_DIR", str(tmp_path / "inherited"))
+    monkeypatch.setenv("VMEX_COMPILATION_CACHE_DIR", str(tmp_path / "shadowed"))
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "entry").write_text("")
+    seen: dict[str, str] = {}
+
+    def child(command, *, env, **_):
+        seen.update(env)
+        record = {"timing_s": {}, "cache_directory": seen["reports"]}
+        return subprocess.CompletedProcess(command, 0, json.dumps(record), "")
+
+    monkeypatch.setattr(profile_workflows.subprocess, "run", child)
+
+    seen["reports"] = str(cache_dir)
+    record = profile_workflows._run_cold("F6", "cache_reload", cache_dir)
+    assert seen["JAX_COMPILATION_CACHE_DIR"] == str(cache_dir)
+    assert "VMEX_COMPILATION_CACHE_DIR" not in seen
+    assert record["cache"]["entries_after"] == 1
+
+    # A child that compiled somewhere else, or left the directory empty, is a
+    # broken measurement rather than a record of zero.
+    seen["reports"] = str(tmp_path / "inherited")
+    with pytest.raises(RuntimeError, match="not the controlled"):
+        profile_workflows._run_cold("F6", "cache_reload", cache_dir)
+
+    # ``cold`` empties the directory first, so a child that writes nothing
+    # leaves it empty -- an error, not a record of zero entries.
+    seen["reports"] = str(cache_dir)
+    with pytest.raises(RuntimeError, match="left .* empty"):
+        profile_workflows._run_cold("F6", "cold", cache_dir)
 
 
 def test_trace_dir_captures_one_xprof_trace_per_stage(monkeypatch, tmp_path):
@@ -130,11 +204,16 @@ def test_record_schema_is_json_serializable(monkeypatch):
 @pytest.mark.full   # two subprocess solves: nightly, not the PR lane
 def test_cold_and_cache_reload_subprocess_regimes(tmp_path):
     """The cold child really is cold, and the reload really hits the cache."""
+    # Inherited cache settings would decide the outcome: JAX_COMPILATION_CACHE_DIR
+    # (exported by any earlier ``import vmex``) outranks what the harness sets,
+    # and VMEX_COMPILATION_CACHE=disabled would switch the cache off entirely.
+    env = {k: v for k, v in os.environ.items()
+           if "COMPILATION_CACHE" not in k}
     out = subprocess.run(
         [sys.executable, str(ROOT / "benchmarks" / "profile_workflows.py"),
          "F6", "--regimes", "cold", "cache_reload",
          "--cache-dir", str(tmp_path / "cache")],
-        capture_output=True, text=True, timeout=3000, cwd=ROOT,
+        capture_output=True, text=True, timeout=3000, cwd=ROOT, env=env,
     )
     assert out.returncode == 0, out.stderr[-2000:]
     records = json.loads(out.stdout)

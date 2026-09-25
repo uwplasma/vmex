@@ -203,12 +203,12 @@ def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict
     # table is the sine family.
     sqrt_s_half = jnp.sqrt(s_half_j)
 
-    def zeta_derivative_half(even, odd):
+    def derivative_half(even, odd):
         return 0.5 * (jnp.asarray(even)[j] + jnp.asarray(even)[j - 1]
                       + sqrt_s_half * (jnp.asarray(odd)[j] + jnp.asarray(odd)[j - 1]))
 
-    rv12 = zeta_derivative_half(geometry.dR_dzeta_even, geometry.dR_dzeta_odd)
-    zv12 = zeta_derivative_half(geometry.dZ_dzeta_even, geometry.dZ_dzeta_odd)
+    rv12 = derivative_half(geometry.dR_dzeta_even, geometry.dR_dzeta_odd)
+    zv12 = derivative_half(geometry.dZ_dzeta_even, geometry.dZ_dzeta_odd)
     dphids = 0.25
     rs12 = jnp.asarray(jacobian.dR_ds)[j] + dphids * (
         jnp.asarray(geometry.R_odd)[j] + jnp.asarray(geometry.R_odd)[j - 1]) / sqrt_s_half
@@ -239,16 +239,16 @@ def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict
 
     # lambda: reconstruct the wout lmns sine table from the (lamscale-scaled)
     # angular derivatives; the wout convention carries a 1/phips factor.
+    # Match magnetic_fields: average the odd representation before multiplying
+    # by sqrt(s_half), including its regular axis extension. Averaging physical
+    # full-mesh rows instead violates the straight-field-line identity.
     lamscale = jnp.asarray(fields.lamscale)
     phips_j = jnp.asarray(setup.phips)[j]
 
-    def half_native(even, odd):
-        return 0.5 * (phys_row(even, odd, j - 1) + phys_row(even, odd, j)) * lamscale
-
-    lambda_theta = mirror(half_native(
-        geometry.dlambda_dtheta_even, geometry.dlambda_dtheta_odd), "even")
-    lambda_zeta = mirror(half_native(
-        geometry.dlambda_dzeta_even, geometry.dlambda_dzeta_odd), "even")
+    lambda_theta = mirror(derivative_half(
+        geometry.dlambda_dtheta_even, geometry.dlambda_dtheta_odd) * lamscale, "even")
+    lambda_zeta = mirror(derivative_half(
+        geometry.dlambda_dzeta_even, geometry.dlambda_dzeta_odd) * lamscale, "even")
     lth_c, lth_s = project(lambda_theta, "cos"), project(lambda_theta, "sin")
     lze_c, lze_s = project(lambda_zeta, "cos"), project(lambda_zeta, "sin")
     m_safe = jnp.asarray(np.where(xm != 0, xm, 1), dtype=jnp.float64)

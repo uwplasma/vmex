@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """Evaluate the coil plus finite-beta plasma field outside a VMEX boundary.
 
-Preview: this script needs ESSOS branch ``rj/vmex-optimization-interfaces``.
 """
 
 from pathlib import Path
@@ -14,12 +13,6 @@ from vmex import optimize as opt
 
 from essos.coils import Coils
 from essos.fields import BiotSavart
-
-if not all(hasattr(Coils, name) for name in ("from_json", "with_dofs", "dof_names")):
-    raise ImportError(
-        "This example needs ESSOS branch rj/vmex-optimization-interfaces "
-        "(uwplasma/ESSOS#58)."
-    )
 
 DATA = Path(__file__).resolve().parent / "data"
 INPUT = DATA / "input.LandremanPaul2021_QA_beta0p5_bootstrap"
@@ -38,19 +31,35 @@ def coil_field_from_dofs(dofs):
     return lambda points: jax.vmap(field.B)(points)
 
 # The exterior total field is the actual ESSOS coil field plus the plasma-current
-# field from virtual casing. The point is placed just outside the VMEC LCFS.
+# field from virtual casing, a periodic trapezoid rule over the LCFS whose error
+# decays as exp(-2 pi d / h) with h the finest source spacing. The source grid is
+# not a constant: it is sized from the boundary's aspect ratio and the requested
+# digits, so a high-aspect boundary is not extended on a grid four orders too
+# coarse. Leaving nphi and ntheta unset is what asks for that rule; this QA
+# boundary gets 64 x 64, h = 2 pi R / 128, about 0.07 m here, so the point is
+# placed 0.25 m (1.5 minor radii) outboard of the LCFS, still well inside the
+# coils. On a 12 x 12 grid at 0.03 m the plasma field came out near 15 T against
+# about 0.03 T; closer points are switched to the graded near-surface rule.
+DISTANCE = 0.25  # metres along the axis-to-edge ray at theta = phi = 0
+DIGITS = 4
 final_equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
 axis, edge = final_equilibrium.field.get_points_cart()
-xyz = edge + 0.03 * (edge - axis) / jnp.linalg.norm(edge - axis)
+xyz = edge + DISTANCE * (edge - axis) / jnp.linalg.norm(edge - axis)
 print("Building the coil + virtual-casing exterior field...")
 outside = final_equilibrium.exterior_field(
     external_parameters=coils.dofs, external_field_from_parameters=coil_field_from_dofs,
-    external_dof_names=coils.dof_names, nphi=12, ntheta=12, digits=4).set_points_xyz(xyz[None])
+    external_dof_names=coils.dof_names,
+    # Refuse, rather than return, a field whose estimated error exceeds
+    # 10**-DIGITS. This is a constructor argument, not only an attribute.
+    digits=DIGITS, accuracy_check="raise").set_points_xyz(xyz[None])
 
 # All returned field components and spatial derivative axes are Cartesian.
 # VJPs hold xyz fixed and return boundary modes followed by ESSOS coil modes.
 print("Evaluating B and its spatial derivatives...")
 B = outside.B()
+error_estimate = outside.B_error_estimate()
+print(f"estimated relative error of the plasma field = {float(error_estimate.max()):.1e} "
+      f"(requested {10.0 ** -DIGITS:.0e})")
 absB = outside.absB()
 gradB = outside.gradB()
 gradgradB = outside.gradgradB()
@@ -73,3 +82,5 @@ print("gradB, gradgradB, gradgradgradB shapes =",
 print("dof_names =", outside.dof_names)
 print("B, gradB, gradgradB, gradgradgradB VJP shapes =",
       dBdx.shape, dgradBdx.shape, d2Bdx.shape, d3Bdx.shape)
+print("largest VJP entries =",
+      [float(jnp.abs(vjp).max()) for vjp in (dBdx, dgradBdx, d2Bdx, d3Bdx)])

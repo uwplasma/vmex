@@ -22,6 +22,9 @@ Inputs
 .. automodule:: vmex.core.input
    :members:
 
+.. automodule:: vmex.core.desc
+   :members:
+
 Run directives (``!@VMEX`` comment lines and the JSON ``_vmex`` section) are
 execution metadata and never become :class:`~vmex.core.input.VmecInput`
 fields; they are parsed and resolved here.  The precedence rule is stated

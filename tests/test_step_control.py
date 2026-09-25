@@ -352,3 +352,30 @@ def test_jac75_chain_exhausts_retries_with_typed_error(monkeypatch) -> None:
     assert calls[2]["lmove_axis"] is False
     with _pytest.raises(VmecJacobianError):
         solver._finalize(carry, rt)
+
+
+def test_jac75_retry_rebinds_baselines_with_the_stage_use_fft(monkeypatch) -> None:
+    """The JAC75 recovery rebuilds the retried runtime's constraint baselines
+    with the stage's own ``use_fft``, so a retry keeps the original kernel."""
+    from vmex.core import solver
+    from vmex.core.errors import SUCCESSFUL_TERM_FLAG
+
+    rt, delt0_in, nstep_in = _recovery_runtime()
+    calls: list[dict] = []
+    _install_fake_loop(monkeypatch, rt, calls, failures=1)
+    rebinds: list[bool] = []
+    real_rebind = solver.runtime_with_baselines
+
+    def recording_rebind(runtime, state, *, use_fft=False):
+        rebinds.append(bool(use_fft))
+        return real_rebind(runtime, state, use_fft=use_fft)
+
+    monkeypatch.setattr(solver, "runtime_with_baselines", recording_rebind)
+    carry = solver._solve_stage(
+        rt, None, mode="cli", verbose=False, emit=lambda *a, **k: None,
+        time_step0=delt0_in, nstep=nstep_in, use_fft=True,
+        jacobian_retries=1,
+    )
+    assert int(carry.ier) == SUCCESSFUL_TERM_FLAG
+    assert len(calls) == 2
+    assert rebinds == [True]

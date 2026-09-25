@@ -1,0 +1,734 @@
+diff --git a/src/HINT/stepb_mod.f90 b/src/HINT/stepb_mod.f90
+--- a/src/HINT/stepb_mod.f90
++++ b/src/HINT/stepb_mod.f90
+@@ -151,7 +151,11 @@
+ 
+   PRIVATE
+ 
+-  LOGICAL :: lhistoryb =  .true.
++  LOGICAL :: lhistoryb             =  .true., &
++    &        lcurrent_drive_diag   = .false., &
++    &        current_drive_diag_now = .false.
++  LOGICAL, PUBLIC, PROTECTED :: lsource_support_diag = .false., &
++    &                           source_support_ready = .false.
+   INTEGER :: nstepb    =  1000, &
+     &        nrefb     =  1000, &
+     &        nsmoothb  =     1, &
+@@ -170,7 +174,17 @@
+     &         vvec0max,                 &
+ 
+     &         volume0,                  &
+-    &         volume1
++    &         volume1,                  &
++    &         current_drive_diag_timeb
++  REAL(DP), PUBLIC, PROTECTED :: source_support_jcuts      = 0.0_DP, &
++    &                            source_support_trace_time = 0.0_DP
++  INTEGER :: current_drive_diag_iab    = 0, &
++    &        current_drive_diag_istepb = 0
++  INTEGER, PARAMETER :: faraday_term_total    = 0, &
++    &                  faraday_term_ideal    = 1, &
++    &                  faraday_term_response = 2, &
++    &                  faraday_term_imposed  = 3, &
++    &                  faraday_term_cleaning = 4
+   REAL(DP), ALLOCATABLE ::                    &
+ 
+     &                      rgb(:),            &
+@@ -257,7 +271,9 @@
+   CHARACTER(LEN=200) :: historyb_file =  'history_b.txt'
+ 
+ 
+-  NAMELIST /stepb_inp1/  lhistoryb,    &
++  NAMELIST /stepb_inp1/  lhistoryb,          &
++    &                    lcurrent_drive_diag, &
++    &                    lsource_support_diag, &
+     &                    nstepb,       &
+     &                    nrefb,        &
+     &                    nsmoothb,     &
+@@ -308,7 +324,10 @@
+       &        istatus(MPI_STATUS_SIZE,0:5)
+ 
+ 
++    source_support_ready = .false.
+     time1 =  MPI_WTIME()
++
++    current_drive_diag_iab =  iab
+ 
+     IF(myrank == 0)THEN
+       PRINT *
+@@ -319,6 +338,10 @@
+     END IF
+ 
+     CALL cal_s
++
++    source_support_jcuts      = jcuts
++    source_support_trace_time = time
++    source_support_ready      = .true.
+ 
+     CALL preprocessing
+ 
+@@ -561,11 +584,11 @@
+     PRINT *
+     PRINT *,  '  CONTROL PARAMETERS IN STEPB '
+     PRINT *,  '  ----------------------------'
+-    PRINT *,  '   lhistoryb'
+-
+-    fmt = '(7X, L5)'
+-
+-    PRINT fmt, lhistoryb
++    PRINT *,  '   lhistoryb  lcurrent_drive_diag  lsource_support_diag'
++
++    fmt = '(7X, 3L10)'
++
++    PRINT fmt, lhistoryb, lcurrent_drive_diag, lsource_support_diag
+ 
+     PRINT *,  '  -------------------------------------'
+     PRINT *,  '   nstepb   nrefb  nsmoothb  nenergyb'
+@@ -615,6 +638,8 @@
+     CALL MPI_BARRIER(MPI_COMM_WORLD, ierr)
+ 
+     CALL MPI_BCAST(lhistoryb,  1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_BCAST(lcurrent_drive_diag, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_BCAST(lsource_support_diag, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, ierr)
+ 
+     CALL MPI_BCAST(nstepb,     1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+     CALL MPI_BCAST(nrefb,      1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+@@ -1253,14 +1278,16 @@
+ 
+   END SUBROUTINE cal_viscos
+ 
+-  SUBROUTINE faraday
+-
+-    IMPLICIT NONE
+-
++  SUBROUTINE faraday (requested_term)
++
++    IMPLICIT NONE
++
++    INTEGER, INTENT(IN), OPTIONAL :: requested_term
+ !Local variables
+     INTEGER :: i, &
+       &        j, &
+-      &        k
++      &        k, &
++      &        selected_term
+     REAL(DP) :: der1dz,       &
+       &         der1dphi,     &
+       &         dephi1dr,     &
+@@ -1293,6 +1320,9 @@
+     INTEGER :: ierr
+ 
+ 
++    selected_term =  faraday_term_total
++    IF(PRESENT(requested_term)) selected_term =  requested_term
++
+     CALL sendreciv_array(vr1)
+     CALL sendreciv_array(vphi1)
+     CALL sendreciv_array(vz1)
+@@ -1310,13 +1340,39 @@
+           vxb(2)       = (vz0(i,j,k)   + vz1(i,j,k))   * (br0(i,j,k)   + br1(i,j,k))   - (vr0(i,j,k)   + vr1(i,j,k))   * (bz0(i,j,k)   + bz1(i,j,k))
+           vxb(3)       = (vr0(i,j,k)   + vr1(i,j,k))   * (bphi0(i,j,k) + bphi1(i,j,k)) - (vphi0(i,j,k) + vphi1(i,j,k)) * (br0(i,j,k)   + br1(i,j,k))
+ #ifdef BDIFF2ND
+-          er1(i,j,k)   =  vxb(1) + eta(i,j,k) * jrn(i,j,k)
+-          ephi1(i,j,k) =  vxb(2) + eta(i,j,k) * jphin(i,j,k)
+-          ez1(i,j,k)   =  vxb(3) + eta(i,j,k) * jzn(i,j,k)
++          SELECT CASE(selected_term)
++            CASE(faraday_term_total)
++              er1(i,j,k)   =  vxb(1) + eta(i,j,k) * jrn(i,j,k)
++              ephi1(i,j,k) =  vxb(2) + eta(i,j,k) * jphin(i,j,k)
++              ez1(i,j,k)   =  vxb(3) + eta(i,j,k) * jzn(i,j,k)
++            CASE(faraday_term_ideal)
++              er1(i,j,k)   =  vxb(1)
++              ephi1(i,j,k) =  vxb(2)
++              ez1(i,j,k)   =  vxb(3)
++            CASE(faraday_term_imposed)
++              er1(i,j,k)   =  eta(i,j,k) * jrn(i,j,k)
++              ephi1(i,j,k) =  eta(i,j,k) * jphin(i,j,k)
++              ez1(i,j,k)   =  eta(i,j,k) * jzn(i,j,k)
++          END SELECT
+ #else
+-          er1(i,j,k)   =  vxb(1) - eta(i,j,k) * (jr1(i,j,k)   - jrn(i,j,k))
+-          ephi1(i,j,k) =  vxb(2) - eta(i,j,k) * (jphi1(i,j,k) - jphin(i,j,k))
+-          ez1(i,j,k)   =  vxb(3) - eta(i,j,k) * (jz1(i,j,k)   - jzn(i,j,k))
++          SELECT CASE(selected_term)
++            CASE(faraday_term_total)
++              er1(i,j,k)   =  vxb(1) - eta(i,j,k) * (jr1(i,j,k)   - jrn(i,j,k))
++              ephi1(i,j,k) =  vxb(2) - eta(i,j,k) * (jphi1(i,j,k) - jphin(i,j,k))
++              ez1(i,j,k)   =  vxb(3) - eta(i,j,k) * (jz1(i,j,k)   - jzn(i,j,k))
++            CASE(faraday_term_ideal)
++              er1(i,j,k)   =  vxb(1)
++              ephi1(i,j,k) =  vxb(2)
++              ez1(i,j,k)   =  vxb(3)
++            CASE(faraday_term_response)
++              er1(i,j,k)   = -eta(i,j,k) * jr1(i,j,k)
++              ephi1(i,j,k) = -eta(i,j,k) * jphi1(i,j,k)
++              ez1(i,j,k)   = -eta(i,j,k) * jz1(i,j,k)
++            CASE(faraday_term_imposed)
++              er1(i,j,k)   =  eta(i,j,k) * jrn(i,j,k)
++              ephi1(i,j,k) =  eta(i,j,k) * jphin(i,j,k)
++              ez1(i,j,k)   =  eta(i,j,k) * jzn(i,j,k)
++          END SELECT
+ #endif
+         END DO loop030
+       END DO loop020
+@@ -1387,13 +1443,22 @@
+           lapb1(2)        =  nabla2bphi1 - bphi1(i,j,k) / rgb(i)**2 + 2 * dbr1dphi   / rgb(i)**2
+           lapb1(3)        =  nabla2bz1
+ 
+-          rote(1)         =  rote(1) + eta_diff * eta(i,j,k) * lapb1(1) + kappa_divb * ddivb1dr
+-          rote(2)         =  rote(2) + eta_diff * eta(i,j,k) * lapb1(2) + kappa_divb * ddivb1dphi
+-          rote(3)         =  rote(3) + eta_diff * eta(i,j,k) * lapb1(3) + kappa_divb * ddivb1dz
++          IF((selected_term == faraday_term_total) .OR. (selected_term == faraday_term_response))THEN
++            rote(1) =  rote(1) + eta_diff * eta(i,j,k) * lapb1(1)
++            rote(2) =  rote(2) + eta_diff * eta(i,j,k) * lapb1(2)
++            rote(3) =  rote(3) + eta_diff * eta(i,j,k) * lapb1(3)
++          END IF
++          IF((selected_term == faraday_term_total) .OR. (selected_term == faraday_term_cleaning))THEN
++            rote(1) =  rote(1) + kappa_divb * ddivb1dr
++            rote(2) =  rote(2) + kappa_divb * ddivb1dphi
++            rote(3) =  rote(3) + kappa_divb * ddivb1dz
++          END IF
+ #else
+-          rote(1)         =  rote(1) + kappa_divb * ddivb1dr
+-          rote(2)         =  rote(2) + kappa_divb * ddivb1dphi
+-          rote(3)         =  rote(3) + kappa_divb * ddivb1dz
++          IF((selected_term == faraday_term_total) .OR. (selected_term == faraday_term_cleaning))THEN
++            rote(1) =  rote(1) + kappa_divb * ddivb1dr
++            rote(2) =  rote(2) + kappa_divb * ddivb1dphi
++            rote(3) =  rote(3) + kappa_divb * ddivb1dz
++          END IF
+ #endif
+           dbr1dt(i,j,k)   =  rote(1) * dt_b
+           dbphi1dt(i,j,k) =  rote(2) * dt_b
+@@ -2277,7 +2342,11 @@
+     INTEGER :: ierr
+ 
+ 
++    current_drive_diag_istepb =  istepb
++    current_drive_diag_timeb  =  timeb
++    current_drive_diag_now    =  lcurrent_drive_diag
+     CALL cal_j
++    current_drive_diag_now    =  .false.
+     CALL cal_viscos
+ 
+     CALL MPI_BARRIER(MPI_COMM_WORLD, ierr)
+@@ -2441,6 +2510,8 @@
+ 
+     END IF
+ 
++    IF(lcurrent_drive_diag) CALL diagnose_current_rate
++
+     CALL MPI_BARRIER(MPI_COMM_WORLD, ierr)
+ 
+ 
+@@ -2700,12 +2771,14 @@
+       &        i,  &
+       &        j,  &
+       &        k
+-    REAL(DP) :: s,       &
+-      &         ds,      &
+-      &         netj0,   &
+-      &         netj1,   &
+-      &         valuej0, &
+-      &         valuej1
++    REAL(DP) :: s,               &
++      &         ds,              &
++      &         netj0,           &
++      &         netj1,           &
++      &         valuej0,         &
++      &         valuej1,         &
++      &         diag_time_start, &
++      &         diag_elapsed
+ !For MPI
+     INTEGER :: ierr
+ 
+@@ -2714,7 +2787,18 @@
+     jphin(-1:ilen+2,-1:jlen+2,-1:klen+2) =  0.0_DP
+     jzn(-1:ilen+2,-1:jlen+2,-1:klen+2)   =  0.0_DP
+ 
+-    IF(jvecnmax == 0.0_DP) RETURN
++    netj0 =  0.0_DP
++    netj1 =  0.0_DP
++
++    IF(current_drive_diag_now) diag_time_start =  MPI_WTIME()
++
++    IF(jvecnmax == 0.0_DP)THEN
++      IF(current_drive_diag_now)THEN
++        diag_elapsed =  MPI_WTIME() - diag_time_start
++        CALL diagnose_current_drive(netj0, netj1, diag_elapsed)
++      END IF
++      RETURN
++    END IF
+ 
+     CALL cal_volume
+ 
+@@ -2793,8 +2877,282 @@
+ 
+     CALL MPI_BARRIER(MPI_COMM_WORLD, ierr)
+ 
++    IF(current_drive_diag_now)THEN
++      diag_elapsed =  MPI_WTIME() - diag_time_start
++      CALL diagnose_current_drive(netj0, netj1, diag_elapsed)
++    END IF
++
+ 
+   END SUBROUTINE cal_netj
++
++  SUBROUTINE diagnose_current_drive (netj0, netj1, diag_elapsed)
++
++    IMPLICIT NONE
++
++    REAL(DP), INTENT(IN) :: netj0,        &
++      &                    netj1,        &
++      &                    diag_elapsed
++    INTEGER :: i,              &
++      &        j,              &
++      &        k,              &
++      &        kg,             &
++      &        active_cells_l, &
++      &        active_cells,   &
++      &        ierr
++    REAL(DP) :: current_scale, &
++      &         target_current, &
++      &         ss_min_l,       &
++      &         ss_max_l,       &
++      &         ss_min,         &
++      &         ss_max,         &
++      &         bphi_min_l,     &
++      &         bphi_max_l,     &
++      &         bphi_min,       &
++      &         bphi_max,       &
++      &         bphi,           &
++      &         volume0_diag,   &
++      &         volume1_diag,   &
++      &         diag_elapsed_max
++    REAL(DP) :: source_cut_l(ntor),            &
++      &         source_abs_cut_l(ntor),        &
++      &         attained_same_cut_l(ntor),     &
++      &         attained_pressure_cut_l(ntor), &
++      &         source_cut(ntor),              &
++      &         source_abs_cut(ntor),          &
++      &         attained_same_cut(ntor),       &
++      &         attained_pressure_cut(ntor)
++
++
++    source_cut_l(:)            =  0.0_DP
++    source_abs_cut_l(:)        =  0.0_DP
++    attained_same_cut_l(:)     =  0.0_DP
++    attained_pressure_cut_l(:) =  0.0_DP
++    ss_min_l                   =  HUGE(1.0_DP)
++    ss_max_l                   = -HUGE(1.0_DP)
++    bphi_min_l                 =  HUGE(1.0_DP)
++    bphi_max_l                 = -HUGE(1.0_DP)
++    active_cells_l             =  0
++
++    current_scale =  rmaj0 * b0 * dr * dz / mu0
++
++    DO k=ksta2,kend2
++      kg =  ksta + k - 1
++      DO j=jsta2,jend2
++        DO i=ista2,iend2
++          IF(ss(i,j,k) < jcuts)THEN
++            ss_min_l =  MIN(ss_min_l, ss(i,j,k))
++            ss_max_l =  MAX(ss_max_l, ss(i,j,k))
++            bphi =  bphi0(i,j,k) + bphi1(i,j,k)
++            bphi_min_l =  MIN(bphi_min_l, bphi)
++            bphi_max_l =  MAX(bphi_max_l, bphi)
++            active_cells_l =  active_cells_l + 1
++            source_cut_l(kg) =  source_cut_l(kg) + current_scale * jphin(i,j,k)
++            source_abs_cut_l(kg) =  source_abs_cut_l(kg) + ABS(current_scale * jphin(i,j,k))
++            attained_same_cut_l(kg) =  attained_same_cut_l(kg) + current_scale * jphi1(i,j,k)
++          END IF
++          IF(p1b(i,j,k) > 0.0_DP)THEN
++            attained_pressure_cut_l(kg) =  attained_pressure_cut_l(kg) + current_scale * jphi1(i,j,k)
++          END IF
++        END DO
++      END DO
++    END DO
++
++    CALL MPI_REDUCE(source_cut_l, source_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(source_abs_cut_l, source_abs_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(attained_same_cut_l, attained_same_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(attained_pressure_cut_l, attained_pressure_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(ss_min_l, ss_min, 1, MPI_REAL8, MPI_MIN, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(ss_max_l, ss_max, 1, MPI_REAL8, MPI_MAX, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(bphi_min_l, bphi_min, 1, MPI_REAL8, MPI_MIN, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(bphi_max_l, bphi_max, 1, MPI_REAL8, MPI_MAX, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(active_cells_l, active_cells, 1, MPI_INTEGER, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++    CALL MPI_REDUCE(diag_elapsed, diag_elapsed_max, 1, MPI_REAL8, MPI_MAX, 0, MPI_COMM_WORLD, ierr)
++
++    IF(myrank == 0)THEN
++      SELECT CASE(TRIM(j_type))
++        CASE('power_series')
++          target_current =  inet0 + inet1
++        CASE DEFAULT
++          target_current =  inet0
++      END SELECT
++
++      IF(jvecnmax == 0.0_DP)THEN
++        volume0_diag =  0.0_DP
++        volume1_diag =  0.0_DP
++      ELSE
++        volume0_diag =  volume0
++        volume1_diag =  volume1
++      END IF
++
++      IF(active_cells == 0)THEN
++        ss_min =  0.0_DP
++        ss_max =  0.0_DP
++        bphi_min =  0.0_DP
++        bphi_max =  0.0_DP
++      END IF
++
++      WRITE(*,'(A)') 'CURRENT_DRIVE_DIAG_UNITS currents=A step_start_paxis=mu0_Pa_over_B0_squared '// &
++        & 'bphi=Bphi_over_B0 volumes=code_profile_integrals timeb=code_time mpi=wall_seconds'
++      WRITE(*,'(A,1X,A,2I8,8ES24.15)') 'CURRENT_DRIVE_DIAG_CONTEXT', TRIM(j_type), &
++        & current_drive_diag_iab, current_drive_diag_istepb, current_drive_diag_timeb, paxis, &
++        & target_current, jcuts, volume0_diag, volume1_diag, netj0, netj1
++      WRITE(*,'(A,I12,4ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE_MASK', active_cells, &
++        & ss_min, ss_max, bphi_min, bphi_max
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE', source_cut(1), MINVAL(source_cut), &
++        & SUM(source_cut) / ntor, MAXVAL(source_cut)
++      IF(source_abs_cut(1) > 0.0_DP)THEN
++        WRITE(*,'(A,2ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE_CANCELLATION', source_abs_cut(1), &
++          & source_cut(1) / source_abs_cut(1)
++      ELSE
++        WRITE(*,'(A,2ES24.15)') 'CURRENT_DRIVE_DIAG_SOURCE_CANCELLATION', source_abs_cut(1), 0.0_DP
++      END IF
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_DIAG_ATTAINED_SAME', attained_same_cut(1), MINVAL(attained_same_cut), &
++        & SUM(attained_same_cut) / ntor, MAXVAL(attained_same_cut)
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_DIAG_ATTAINED_PRESSURE', attained_pressure_cut(1), &
++        & MINVAL(attained_pressure_cut), SUM(attained_pressure_cut) / ntor, MAXVAL(attained_pressure_cut)
++      WRITE(*,'(A,ES24.15)') 'CURRENT_DRIVE_DIAG_MPI_MAX_SECONDS', diag_elapsed_max
++    END IF
++
++
++  END SUBROUTINE diagnose_current_drive
++
++  SUBROUTINE diagnose_current_rate
++
++    IMPLICIT NONE
++
++    REAL(DP), ALLOCATABLE :: saved_dvr(:,:,:),   &
++      &                      saved_dvphi(:,:,:), &
++      &                      saved_dvz(:,:,:),   &
++      &                      saved_dbr(:,:,:),   &
++      &                      saved_dbphi(:,:,:), &
++      &                      saved_dbz(:,:,:)
++    REAL(DP) :: rate_ideal(ntor),    &
++      &         rate_response(ntor), &
++      &         rate_imposed(ntor),  &
++      &         rate_cleaning(ntor), &
++      &         rate_sum(ntor),      &
++      &         rate_total(ntor),    &
++      &         rate_closure(ntor),  &
++      &         closure_scale,       &
++      &         diag_start,          &
++      &         diag_elapsed,        &
++      &         diag_elapsed_max
++    INTEGER :: ierr
++
++
++    diag_start =  MPI_WTIME()
++
++    ALLOCATE(saved_dvr(-1:ilen+2,-1:jlen+2,-1:klen+2),   &
++      &      saved_dvphi(-1:ilen+2,-1:jlen+2,-1:klen+2), &
++      &      saved_dvz(-1:ilen+2,-1:jlen+2,-1:klen+2),   &
++      &      saved_dbr(-1:ilen+2,-1:jlen+2,-1:klen+2),   &
++      &      saved_dbphi(-1:ilen+2,-1:jlen+2,-1:klen+2), &
++      &      saved_dbz(-1:ilen+2,-1:jlen+2,-1:klen+2))
++
++    saved_dvr   =  dvr1dt
++    saved_dvphi =  dvphi1dt
++    saved_dvz   =  dvz1dt
++    saved_dbr   =  dbr1dt
++    saved_dbphi =  dbphi1dt
++    saved_dbz   =  dbz1dt
++
++    CALL faraday(faraday_term_ideal)
++    CALL diagnostic_current_rate_cut(rate_ideal)
++    CALL faraday(faraday_term_response)
++    CALL diagnostic_current_rate_cut(rate_response)
++    CALL faraday(faraday_term_imposed)
++    CALL diagnostic_current_rate_cut(rate_imposed)
++    CALL faraday(faraday_term_cleaning)
++    CALL diagnostic_current_rate_cut(rate_cleaning)
++    CALL faraday
++    CALL diagnostic_current_rate_cut(rate_total)
++
++    dvr1dt   =  saved_dvr
++    dvphi1dt =  saved_dvphi
++    dvz1dt   =  saved_dvz
++    dbr1dt   =  saved_dbr
++    dbphi1dt =  saved_dbphi
++    dbz1dt   =  saved_dbz
++
++    DEALLOCATE(saved_dvr, saved_dvphi, saved_dvz, saved_dbr, saved_dbphi, saved_dbz)
++
++    diag_elapsed =  MPI_WTIME() - diag_start
++    CALL MPI_REDUCE(diag_elapsed, diag_elapsed_max, 1, MPI_REAL8, MPI_MAX, 0, MPI_COMM_WORLD, ierr)
++
++    IF(myrank == 0)THEN
++      rate_sum     =  rate_ideal + rate_response + rate_imposed + rate_cleaning
++      rate_closure =  rate_total - rate_sum
++      closure_scale =  MAX(MAXVAL(ABS(rate_total)), TINY(1.0_DP))
++#ifdef BDIFF2ND
++      WRITE(*,'(A)') 'CURRENT_DRIVE_RATE_MODEL BDIFF2ND response=eta_diff_eta_laplacian_B'
++#else
++      WRITE(*,'(A)') 'CURRENT_DRIVE_RATE_MODEL OHM response=-curl_eta_Jresponse imposed=+curl_eta_Jimposed'
++#endif
++      WRITE(*,'(A)') 'CURRENT_DRIVE_RATE_UNITS current_rate=A_per_code_time mask=frozen_ss_lt_jcuts '// &
++        & 'state=post_RKG_cal_energy boundary=production_bcondition'
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_RATE_IDEAL', rate_ideal(1), MINVAL(rate_ideal), &
++        & SUM(rate_ideal) / ntor, MAXVAL(rate_ideal)
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_RATE_RESPONSE', rate_response(1), MINVAL(rate_response), &
++        & SUM(rate_response) / ntor, MAXVAL(rate_response)
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_RATE_IMPOSED', rate_imposed(1), MINVAL(rate_imposed), &
++        & SUM(rate_imposed) / ntor, MAXVAL(rate_imposed)
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_RATE_CLEANING', rate_cleaning(1), MINVAL(rate_cleaning), &
++        & SUM(rate_cleaning) / ntor, MAXVAL(rate_cleaning)
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_RATE_SUM', rate_sum(1), MINVAL(rate_sum), &
++        & SUM(rate_sum) / ntor, MAXVAL(rate_sum)
++      WRITE(*,'(A,4ES24.15)') 'CURRENT_DRIVE_RATE_TOTAL', rate_total(1), MINVAL(rate_total), &
++        & SUM(rate_total) / ntor, MAXVAL(rate_total)
++      WRITE(*,'(A,2ES24.15)') 'CURRENT_DRIVE_RATE_CLOSURE_MAX_ABS_REL', MAXVAL(ABS(rate_closure)), &
++        & MAXVAL(ABS(rate_closure)) / closure_scale
++      WRITE(*,'(A,ES24.15)') 'CURRENT_DRIVE_RATE_MPI_MAX_SECONDS', diag_elapsed_max
++    END IF
++
++
++  END SUBROUTINE diagnose_current_rate
++
++  SUBROUTINE diagnostic_current_rate_cut (rate_cut)
++
++    IMPLICIT NONE
++
++    REAL(DP), INTENT(OUT) :: rate_cut(ntor)
++    REAL(DP) :: rate_cut_l(ntor), &
++      &         current_scale,    &
++      &         dbr_increment_dz, &
++      &         dbz_increment_dr
++    INTEGER :: i,  &
++      &        j,  &
++      &        k,  &
++      &        kg, &
++      &        ierr
++
++
++    CALL bcondition
++    CALL sendreciv_array(dbr1dt)
++    CALL sendreciv_array(dbphi1dt)
++    CALL sendreciv_array(dbz1dt)
++
++    rate_cut_l(:) =  0.0_DP
++    current_scale =  rmaj0 * b0 * dr * dz / (mu0 * dt_b)
++
++    DO k=ksta2,kend2
++      kg =  ksta + k - 1
++      DO j=jsta2,jend2
++        DO i=ista2,iend2
++          IF(ss(i,j,k) < jcuts)THEN
++            dbr_increment_dz =  cz(1) * dbr1dt(i,j+2,k) + cz(2) * dbr1dt(i,j+1,k) &
++              &               + cz(3) * dbr1dt(i,j-1,k) + cz(4) * dbr1dt(i,j-2,k)
++            dbz_increment_dr =  cr(1) * dbz1dt(i+2,j,k) + cr(2) * dbz1dt(i+1,j,k) &
++              &               + cr(3) * dbz1dt(i-1,j,k) + cr(4) * dbz1dt(i-2,j,k)
++            rate_cut_l(kg) =  rate_cut_l(kg) + current_scale * (dbr_increment_dz - dbz_increment_dr)
++          END IF
++        END DO
++      END DO
++    END DO
++
++    CALL MPI_REDUCE(rate_cut_l, rate_cut, ntor, MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, ierr)
++
++
++  END SUBROUTINE diagnostic_current_rate_cut
+ 
+   SUBROUTINE cal_eta
+ 
+diff --git a/src/HINT/write_eq_field.f90 b/src/HINT/write_eq_field.f90
+--- a/src/HINT/write_eq_field.f90
++++ b/src/HINT/write_eq_field.f90
+@@ -48,6 +48,11 @@
+     &                         bvec1
+   USE v_mod,           ONLY : vvec1
+   USE p_mod,           ONLY : p1
++  USE flux_mod,        ONLY : flx
++  USE stepb_mod,       ONLY : lsource_support_diag,   &
++    &                         source_support_ready,   &
++    &                         source_support_jcuts,   &
++    &                         source_support_trace_time
+   USE file_mod,        ONLY : file_type, &
+     &                         mag_file
+   USE hdf5
+@@ -88,14 +93,26 @@
+     &        vp_varid,   &
+     &        vz_varid,   &
+     &        p_varid,    &
++    &        support_varid, &
++    &        support_jcuts_varid, &
++    &        support_time_varid, &
+     &        x_dimid,    &
+     &        y_dimid,    &
+     &        z_dimid,    &
++    &        t_dimid,    &
++    &        count1(1),  &
++    &        start1(1),  &
+     &        count2(2),  &
+     &        start2(2),  &
+     &        count4(4),  &
+     &        start4(4),  &
+-    &        dim3ids(3)
++    &        dim3ids(3), &
++    &        dim4ids(4), &
++    &        support_status, &
++    &        support_jcuts_status, &
++    &        support_time_status, &
++    &        n_support_vars
++  INTEGER, ALLOCATABLE :: support(:,:,:)
+   REAL(DP), ALLOCATABLE :: w1d(:),    &
+     &                      w3d(:,:,:)
+ !For snapfile
+@@ -310,6 +327,58 @@
+ 
+         CALL check(NF90_OPEN(TRIM(mag_file), NF90_WRITE, ncid))
+ 
++        IF(lsource_support_diag .AND. source_support_ready)THEN
++          CALL check(NF90_INQ_DIMID(ncid, "R",    x_dimid))
++          CALL check(NF90_INQ_DIMID(ncid, "Z",    y_dimid))
++          CALL check(NF90_INQ_DIMID(ncid, "phi",  z_dimid))
++          CALL check(NF90_INQ_DIMID(ncid, "time", t_dimid))
++
++          dim4ids = (/x_dimid, y_dimid, z_dimid, t_dimid/)
++
++          support_status = NF90_INQ_VARID(ncid, "source_support", support_varid)
++          support_jcuts_status = NF90_INQ_VARID(ncid, "source_support_jcuts", support_jcuts_varid)
++          support_time_status = NF90_INQ_VARID(ncid, "source_support_trace_time", support_time_varid)
++
++          CALL check_optional_variable_status(support_status)
++          CALL check_optional_variable_status(support_jcuts_status)
++          CALL check_optional_variable_status(support_time_status)
++
++          n_support_vars = 0
++          IF(support_status == NF90_NOERR) n_support_vars = n_support_vars + 1
++          IF(support_jcuts_status == NF90_NOERR) n_support_vars = n_support_vars + 1
++          IF(support_time_status == NF90_NOERR) n_support_vars = n_support_vars + 1
++
++          IF(n_support_vars == 0)THEN
++            CALL check(NF90_REDEF(ncid))
++            CALL check(NF90_DEF_VAR(ncid, "source_support", NF90_BYTE, dim4ids, support_varid))
++            CALL check(NF90_PUT_ATT(ncid, support_varid, "_FillValue", NF90_FILL_BYTE))
++            CALL check(NF90_PUT_ATT(ncid, support_varid, "long_name", &
++              & "amplitude-independent imposed-current eligibility"))
++            CALL check(NF90_PUT_ATT(ncid, support_varid, "definition", &
++              & "1 where R index=3:nr-2, Z index=3:nz-2, all phi, and frozen flux is less than " // &
++              & "source_support_jcuts; 0 otherwise"))
++            CALL check(NF90_PUT_ATT(ncid, support_varid, "scope", &
++              & "safe eligibility superset; does not imply nonzero imposed current"))
++            CALL check(NF90_DEF_VAR(ncid, "source_support_jcuts", NF90_REAL8, (/t_dimid/), &
++              & support_jcuts_varid))
++            CALL check(NF90_PUT_ATT(ncid, support_jcuts_varid, "long_name", &
++              & "strict frozen-flux eligibility threshold"))
++            CALL check(NF90_DEF_VAR(ncid, "source_support_trace_time", NF90_REAL8, (/t_dimid/), &
++              & support_time_varid))
++            CALL check(NF90_PUT_ATT(ncid, support_time_varid, "long_name", &
++              & "step-B entry time at which the eligibility flux was traced"))
++            CALL check(NF90_ENDDEF(ncid))
++          ELSE IF(n_support_vars == 3)THEN
++            CALL check_variable_schema(ncid, support_varid, NF90_BYTE, dim4ids, "source_support")
++            CALL check_variable_schema(ncid, support_jcuts_varid, NF90_REAL8, (/t_dimid/), &
++              & "source_support_jcuts")
++            CALL check_variable_schema(ncid, support_time_varid, NF90_REAL8, (/t_dimid/), &
++              & "source_support_trace_time")
++          ELSE
++            CALL schema_abort("partial source-support schema")
++          END IF
++        END IF
++
+         CALL check(NF90_INQ_VARID(ncid, "t_snap", t_varid))
+ 
+         CALL check(NF90_INQ_VARID(ncid, "B_R",    br_varid))
+@@ -359,6 +428,26 @@
+         w3d(1:nr,1:nz,1:ntor) =  p1(1:nr,1:nz,1:ntor) * b0**2
+ 
+         CALL check(NF90_PUT_VAR(ncid, p_varid,  w3d, count=count4, start=start4))
++
++        IF(lsource_support_diag .AND. source_support_ready)THEN
++          ALLOCATE(support(nr,nz,ntor))
++          support = 0
++          IF((nr >= 5) .AND. (nz >= 5))THEN
++            support(3:nr-2,3:nz-2,1:ntor) = MERGE(1, 0, &
++              & flx(3:nr-2,3:nz-2,1:ntor) < source_support_jcuts)
++          END IF
++          CALL check(NF90_PUT_VAR(ncid, support_varid, support, count=count4, start=start4))
++          DEALLOCATE(support)
++
++          count1 = (/1/)
++          start1 = (/kstep/)
++          w1d(1) = source_support_jcuts
++          CALL check(NF90_PUT_VAR(ncid, support_jcuts_varid, w1d, &
++            & count=count1, start=start1))
++          w1d(1) = source_support_trace_time
++          CALL check(NF90_PUT_VAR(ncid, support_time_varid, w1d, &
++            & count=count1, start=start1))
++        END IF
+ 
+         CALL check(NF90_CLOSE(ncid))
+ 
+@@ -477,6 +566,58 @@
+ 
+ CONTAINS
+ 
++  SUBROUTINE check_optional_variable_status(status)
++
++    IMPLICIT NONE
++
++    INTEGER, INTENT(IN) :: status
++
++
++    IF((status /= NF90_NOERR) .AND. (status /= NF90_ENOTVAR)) CALL check(status)
++
++
++  END SUBROUTINE check_optional_variable_status
++
++  SUBROUTINE check_variable_schema(ncid, varid, expected_type, expected_dimids, variable_name)
++
++    IMPLICIT NONE
++
++    INTEGER, INTENT(IN) :: ncid,            &
++      &                    varid,           &
++      &                    expected_type,   &
++      &                    expected_dimids(:)
++    CHARACTER(LEN=*), INTENT(IN) :: variable_name
++    INTEGER :: actual_type,                    &
++      &        actual_ndims,                   &
++      &        actual_dimids(NF90_MAX_VAR_DIMS)
++
++
++    CALL check(NF90_INQUIRE_VARIABLE(ncid, varid, xtype=actual_type, ndims=actual_ndims, &
++      & dimids=actual_dimids))
++    IF((actual_type /= expected_type) .OR. (actual_ndims /= SIZE(expected_dimids)))THEN
++      CALL schema_abort("incompatible " // TRIM(variable_name) // " type or rank")
++    END IF
++    IF(ANY(actual_dimids(1:actual_ndims) /= expected_dimids))THEN
++      CALL schema_abort("incompatible " // TRIM(variable_name) // " dimensions")
++    END IF
++
++
++  END SUBROUTINE check_variable_schema
++
++  SUBROUTINE schema_abort(message)
++
++    IMPLICIT NONE
++
++    CHARACTER(LEN=*), INTENT(IN) :: message
++    INTEGER :: abort_ierr
++
++
++    PRINT *, "write_eq_field: ", TRIM(message)
++    CALL MPI_ABORT(MPI_COMM_WORLD, 1, abort_ierr)
++
++
++  END SUBROUTINE schema_abort
++
+   SUBROUTINE check(status)
+ 
+     IMPLICIT NONE

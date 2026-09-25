@@ -69,7 +69,7 @@ jobs:
         name: Select the parity lanes this change needs
         shell: bash
         env:
-          ALL: '[{"lane":"a-free","selector":"pr-parity-a1","parallel":"-n 2"},{"lane":"a-core","selector":"pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c1","selector":"pr-parity-c1","parallel":"-n 4"},{"lane":"c3d","selector":"pr-parity-c3 pr-parity-d","parallel":"-n 4"},{"lane":"e-polish","selector":"pr-parity-e","parallel":"-n 4"},{"lane":"f-options","selector":"pr-parity-f","parallel":"-n 4"},{"lane":"c2","selector":"pr-parity-c2","parallel":"-n 4"},{"lane":"misc","selector":"pr-examples pr-external pr-full-only pr-gradient","parallel":"-n 4"}]'
+          ALL: '[{"lane":"a-free","selector":"pr-parity-a1","parallel":"-n 2"},{"lane":"a-core","selector":"pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c1","selector":"pr-parity-c1","parallel":"-n 4"},{"lane":"c3","selector":"pr-parity-c3","parallel":"-n 4"},{"lane":"d","selector":"pr-parity-d","parallel":"-n 4"},{"lane":"e-polish","selector":"pr-parity-e","parallel":"-n 4"},{"lane":"f-options","selector":"pr-parity-f","parallel":"-n 4"},{"lane":"c2","selector":"pr-parity-c2","parallel":"-n 4"},{"lane":"c4","selector":"pr-parity-c4","parallel":"-n 4"},{"lane":"c5","selector":"pr-parity-c5","parallel":"-n 4"},{"lane":"c6","selector":"pr-parity-c6","parallel":"-n 4"},{"lane":"c7","selector":"pr-parity-c7","parallel":"-n 4"},{"lane":"gradient","selector":"pr-gradient","parallel":"-n 4"},{"lane":"misc","selector":"pr-examples pr-external pr-full-only pr-gradient-fd","parallel":"-n 4"}]'
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
@@ -110,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -127,8 +127,8 @@ jobs:
           echo "working tree: ${size_kb} KiB"
           test "$size_kb" -lt 40960
       - name: Load the docs configuration
-        # The `quality` job builds the docs on 3.12 only, so a 3.11+ construct
-        # in docs/conf.py (tomllib, say) would break the docs build on the
+        # The `quality` job builds the docs on 3.12 only, so a 3.12+ construct
+        # in docs/conf.py would break the docs build on the
         # declared floor with no job noticing. Executing conf.py needs no Sphinx.
         run: python -c "import runpy; runpy.run_path('docs/conf.py')"
       - name: Run fast tests
@@ -260,7 +260,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The lane ran 6:39-7:06 before the cross-device multigrid guard joined it
+    # and hit the 10-minute cap at 10:17 with a heavier first draft of that
+    # test.  The guard is now a two-iteration ladder, but a two-core runner has
+    # little headroom left at 10.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -286,6 +290,34 @@ jobs:
         with:
           name: coverage-device
           path: coverage.device
+          retention-days: 3
+
+  desc:
+    # DESC-generated fixtures and CLI round trips take minutes, which the
+    # 8-minute fast lane cannot hold; without DESC those tests skip there.
+    name: DESC interoperability
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install . 'desc-opt>=0.17' pytest pytest-cov pytest-xdist
+      - name: Run the DESC bridge tests
+        env:
+          JAX_ENABLE_X64: "1"
+        run: |
+          pytest -q -n 4 tests/test_desc.py --durations=10 --cov=vmex --cov-report=term
+          mv .coverage coverage.desc
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: coverage-desc
+          path: coverage.desc
           retention-days: 3
 
   jax-compatibility:
@@ -318,7 +350,7 @@ jobs:
     name: Changed executable lines (>= 95%)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [changes, fast, physics, parity, device]
+    needs: [changes, fast, physics, parity, device, desc]
     permissions:
       contents: read
       id-token: write
@@ -328,7 +360,8 @@ jobs:
       needs.fast.result == 'success' &&
       needs.physics.result == 'success' &&
       needs.parity.result == 'success' &&
-      needs.device.result == 'success'
+      needs.device.result == 'success' &&
+      needs.desc.result == 'success'
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -344,7 +377,7 @@ jobs:
           merge-multiple: true
       - name: Combine coverage and enforce the mirror floor
         run: |
-          coverage combine coverage.device coverage.fast coverage.physics-* coverage.parity-*
+          coverage combine coverage.device coverage.desc coverage.fast coverage.physics-* coverage.parity-*
           coverage report --include='*/vmex/mirror/*' --fail-under=90
           coverage xml
       - name: Publish combined coverage
@@ -370,7 +403,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [changes, quality, fast, physics, parity, device, jax-compatibility, changed-coverage]
+    needs: [changes, quality, fast, physics, parity, desc, device, jax-compatibility, changed-coverage]
     steps:
       - name: Require every review gate
         env:

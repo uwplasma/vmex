@@ -1,1 +1,0 @@
-&nlinp lim_form='netcdf',lim_file='limiter-12.nc',vessel_model='3D',vessel_file='HINT_CHECKOUT/runs/qa-native-inputs/wall-12cm.dat',mtor=2,nr=128,nz=128,ntor=64,rminb=0.5261629780308137,rmaxb=1.4432674065183053,zminb=-0.5722578606822835,zmaxb=0.5722578606822835 /

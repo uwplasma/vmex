@@ -22,9 +22,10 @@ Workflow
 Development install and checks::
 
   pip install -e .[dev]
-  ruff check .
+  python tools/preflight.py --static   # lint, types, docs prose, guard tests
+  python tools/preflight.py            # also the suites the diff affects
+  python tools/preflight.py --docs     # also a warning-free Sphinx build
   python tools/test_manifest.py check
-  pytest -q
 
 The workflows obtain their selectors from the manifest:
 
@@ -35,8 +36,14 @@ The workflows obtain their selectors from the manifest:
   nonlinear polish, homotopy, file-directive and free-boundary adjoint checks.
   A full-suite ownership entry alone does not schedule a test: its selector
   must also appear in a workflow.
-- ``Weekly high resolution`` runs the selected high-resolution campaigns.
-- ``Trusted GPU physics`` is an explicit self-hosted dispatch.
+- ``Weekly high resolution`` runs the selected high-resolution campaigns and
+  the ``full``-marked tests of every ``full-*`` lane that no other workflow runs.
+- ``Docs linkcheck`` audits external links weekly and on documentation pull
+  requests; ``Publish to PyPI`` runs on ``v*`` release tags only.
+- Every lane a manifest record names must be selected by one of these
+  workflows or declared under ``local_only`` in ``tests/manifest.json`` with
+  the reason and the command (``tests/test_test_manifest.py`` enforces it).
+  ``gpu-smoke`` is the one local-only lane; see `GPU checks`_.
 
 Use ``pytest --vmex-report=report.json`` to record the 50 slowest tests and all
 skip reasons with the same metadata.
@@ -111,22 +118,31 @@ that invocation. It covers finite-beta current/Mercier profiles and a
 converged, asymmetrically forced LASYM free-boundary case including NESTOR
 potential and surface-field tables. Omitting ``--run-vmec2000`` skips it.
 
-GPU CI
-------
+GPU checks
+----------
 
-``Trusted GPU physics`` is a manual workflow because this is a public repository: pull
-requests from forks are never run automatically on persistent self-hosted
-hardware.  Its runner must carry the labels ``self-hosted``, ``linux``,
-``x64``, and ``gpu``, provide an NVIDIA driver 580 or newer for CUDA 13, and
-must not define ``JAX_PLATFORMS`` or ``JAX_PLATFORM_NAME``.  The workflow
-installs the official ``jax[cuda13]`` distribution, verifies that JAX selects
-the GPU by ordinary hardware discovery, then runs focused placement checks and
-the quick nonzero-shear CPU/GPU parity audit for MHD energy, magnetic well,
-DMerc, ``jdotb``, Glasser ``D_R``, quasisymmetry, and quasi-isodynamic
-gradients. Timing is recorded in the uploaded ``device-parity`` artifact but
-is not a pass/fail gate. The focused suite also compares the LASYM ``jdotb``
-implicit Jacobian on CPU and GPU. A missing or misconfigured accelerator is
-a failure, not a skipped green GPU job.
+No CI runner has a GPU. The former ``Trusted GPU physics`` workflow ran on a
+self-hosted runner that was registered by hand for each use; none is
+registered now, it last passed on 2026-07-31, and it was retired so that no
+lane looks scheduled that cannot run. The GPU tests are the local-only
+``gpu-smoke`` lane in ``tests/manifest.json``. Run them on a machine with an
+NVIDIA driver 580 or newer, without ``JAX_PLATFORMS`` or
+``JAX_PLATFORM_NAME`` set::
+
+  pip install -U "jax[cuda13]"
+  pip install -e ".[coils,turbulence,freeb]" pytest
+  pytest -q $(python tools/test_manifest.py select gpu-smoke)
+  python benchmarks/device_parity.py --quick --devices cpu,gpu --metrics quasisymmetry
+
+With a GPU present, ``tests/test_gpu_ci.py`` fails if JAX does not select it
+by ordinary discovery or a platform pin is set; without one its GPU tests
+skip, so check the skip count (``--vmex-report``) before reading a local run
+as a GPU result. The parity audit accepts the metrics ``mhd_energy``,
+``magnetic_well``, ``dmerc_interior_mean``, ``jdotb_interior_mean``,
+``glasser_d_r_interior_mean``, ``quasisymmetry`` and ``quasi_isodynamic``,
+and ``--gpu-id 1`` repeats it on a second GPU. Timing in its JSON output is
+informational. The CPU halves of these tests, and the two-device placement
+checks on forced host devices, still run in the ``CI`` workflow.
 
 Releasing
 ---------

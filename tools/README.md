@@ -36,10 +36,16 @@ This directory contains developer-facing tools, not end-user examples.
   python tools/pack_reference_assets.py --outdir dist/assets
   ```
 
-- `profile_hotpaths.py`: cold-vs-warm wall-time + peak-RSS profile of the
-  production hot paths (fixed-boundary solve and the differentiable
-  `value_and_grad` adjoint). Backend-agnostic — the same script produces the
-  CPU and GPU numbers with `--device cpu` / `--device gpu`.
+- `build_qi_sheet_mgrid.py`: builds the public QI sheet-current mgrid and its
+  free-boundary deck deterministically from `examples/data/input.nfp2_QI` —
+  no bundled asset, so nothing to fetch. It is a **required** fixture
+  dependency, not a convenience script: `tests/test_qi_sheet_gate.py` calls
+  `build()` in-session for the weekly `qi-gate` lane, which compares five
+  radial rungs against recorded VMEC2000 goldens. Standalone use:
+
+  ```console
+  python tools/build_qi_sheet_mgrid.py --outdir DIR
+  ```
 
 Hardware parity across forward solves and boundary gradients is audited by
 `benchmarks/device_parity.py`; use `--quick` for its reduced-grid smoke mode.

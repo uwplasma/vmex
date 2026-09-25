@@ -370,22 +370,37 @@ def test_qi_residual_golden_pin():
     assert float(ours["total"]) > 0.0
 
 
-def test_qi_regression_pin_and_jit(solovev_eq):
-    """QI residual on a cached converged state: pin, finiteness, jit parity.
-    Pin recorded 2026-07-09 (x64 CPU; solovev ns=11 ftol 1e-14, surfaces
-    (0.5, 1.0), mboz=nboz=8) -> total = 0.13626; rtol 1e-3 because the
-    residual amplifies convergence-path drift (~1e-4 between BLAS/jit
-    configurations)."""
+def test_qi_regression_pin_and_jit():
+    """QI residual on the golden li383_low_res wout: pin, finiteness, jit parity.
+
+    Pin recorded 2026-09-13 (x64 CPU, JAX 0.9.2 and 0.11.1 agree; surfaces
+    (0.5, 1.0), mboz=nboz=8) -> total = 0.357984; rtol 1e-3 as before. The
+    golden VMEC2000 wout needs no solve and no /tmp state cache. The former
+    solovev pin sat on an argmin tie: an axisymmetric |B| has equal minima
+    along each field line, so rounding picked the well and the total flipped
+    between 0.13626 and 0.13500. The guard below keeps the pinned wells
+    unique; smooth wells (plan D1) remove the argmin altogether."""
     pytest.importorskip("booz_xform_jax")
-    booz = opt.boozer_modes_from_wout(solovev_eq.wout, surfaces=[0.5, 1.0],
-                                      mboz=8, nboz=8)
+    w = _golden_wout("li383_low_res")
+    booz = opt.boozer_modes_from_wout(w, surfaces=[0.5, 1.0], mboz=8, nboz=8)
     out = opt.quasi_isodynamic_residual(
         bmnc_b=booz["bmnc_b"], xm_b=booz["xm_b"], xn_b=booz["xn_b"],
         iota_b=booz["iota_b"], nfp=booz["nfp"], **QI_KW)
     res = np.asarray(out["residuals1d"])
     total = float(out["total"])
     assert np.all(np.isfinite(res))
-    np.testing.assert_allclose(total, 0.1362660686195369, rtol=1e-3)
+    # The residual's two argmins read normalized |B| (range 1) per field line
+    # over the periodic and the endpoint-inclusive samples.
+    grid = opt._qi_grid(
+        booz["bmnc_b"], booz["xm_b"], booz["xn_b"], booz["iota_b"], nfp=booz["nfp"],
+        weights=None, phimin=0.0,
+        **{k: QI_KW[k] for k in ("nphi", "nalpha", "n_bounce",
+                                 "include_bounce_endpoints", "softness")})
+    bnorm = np.swapaxes(np.asarray(grid[6]), 1, 2)
+    for samples in (bnorm[..., :-1], bnorm):
+        ordered = np.sort(samples, axis=-1)
+        assert np.min(ordered[..., 1] - ordered[..., 0]) > 1.0e-6, "tied well minimum"
+    np.testing.assert_allclose(total, 0.35798447568604536, rtol=1e-3)
 
     total_jit = jax.jit(
         lambda bm: opt.quasi_isodynamic_residual(
@@ -394,7 +409,7 @@ def test_qi_regression_pin_and_jit(solovev_eq):
     np.testing.assert_allclose(float(total_jit), total, rtol=1e-12)
     # the wout-level convenience wrapper agrees (same booz configuration)
     total_wrap = float(opt.quasi_isodynamic_residual_from_wout(
-        solovev_eq.wout, surfaces=[0.5, 1.0], mboz=8, nboz=8, **QI_KW)["total"])
+        w, surfaces=[0.5, 1.0], mboz=8, nboz=8, **QI_KW)["total"])
     np.testing.assert_allclose(total_wrap, total, rtol=1e-12)
 
 
@@ -569,6 +584,41 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     np.testing.assert_array_equal(bad_gradient, np.zeros_like(problem.x0))
 
 
+def test_equilibrium_from_x_is_the_state_the_objective_read():
+    """``equilibrium_from_x`` returns the refined state, not the host solve.
+
+    The objective reads the fixed-point-refined state.  On ``li383_low_res``
+    that state is 1.4e-2 from the host solve in one coefficient, and the
+    materialized equilibrium used to report a mean iota of 0.55449 against
+    the objective's 0.55359.  Materializing straight after construction,
+    before any objective evaluation, must give the same state too.
+    """
+    from vmex.core.statephysics import mean_iota
+
+    inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
+    problem = opt.make_problem(
+        inp, objective_terms=[(opt.mean_iota, 0.0, 1.0)], max_mode=1)
+    before = problem.equilibrium_from_x(problem.x0)
+    objective = float(np.asarray(problem.residual(problem.x0))[0])
+    after = problem.equilibrium_from_x(problem.x0)
+    for eq in (before, after):
+        np.testing.assert_allclose(
+            float(mean_iota(eq.state, eq.runtime)), objective, rtol=1e-12)
+        np.testing.assert_allclose(
+            float(np.mean(np.asarray(eq.wout.iotas)[1:])), objective, rtol=1e-12)
+
+    # Without a refined state for this decision vector there is nothing
+    # certified to return, never the host solve in its place.
+    from vmex.core import implicit as im
+
+    cfg = problem.metadata["config"]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delitem(im._LAST_REFINED, cfg)
+        patch.setattr(im, "_host_solve_and_mask_status", lambda *args: None)
+        with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+            problem.equilibrium_from_x(problem.x0)
+
+
 def test_from_loss_honors_bound_scalar_method_literally(monkeypatch):
     """The ``loss=`` lane uses a bound scalar objective method exactly as passed.
 
@@ -633,8 +683,9 @@ def test_from_loss_honors_bound_scalar_method_literally(monkeypatch):
         np.testing.assert_array_equal(actual, cached)
     assert eq.result.fsqr == saved_anchor.fsqr
     expected = float(jax.device_get(qs.total_state(eq.state, eq.runtime)))
-    # Materialization must use the same refined anchor as the scalar value.
-    np.testing.assert_allclose(value, expected, rtol=1e-12, atol=1e-12)
+    # The materialized equilibrium is the refined fixed point the problem
+    # evaluated, so the two agree to roundoff.
+    np.testing.assert_allclose(value, expected, rtol=1e-12, atol=1e-14)
 
     with pytest.raises(ValueError, match="must return a scalar"):
         opt.VmecProblem.from_loss(inp, qs.residuals_state, max_mode=1)
@@ -692,7 +743,7 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
         problem._rj_cache = None
         jacobian = problem.residual_jac(problem.x0)
         assert np.all(np.isfinite(jacobian))
-        assert holder["last_jac_key"] == FunctionProblem._key(problem.x0)
+        assert holder["last_jac_key"][0] == FunctionProblem._key(problem.x0)
 
     with monkeypatch.context() as m:
         nonce = itertools.count()
@@ -752,7 +803,10 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
 def test_auto_jac_chunk_stays_bounded_with_large_device(monkeypatch):
     """A reported accelerator budget must not turn ``auto`` into one vmap."""
     monkeypatch.setattr(opt, "auto_chunk_size", lambda dim: dim)
-    assert opt._auto_jac_chunk(120) == 11
+    assert opt._auto_jac_chunk(120) == 10
+    assert opt._auto_jac_chunk(8) == 2
+    assert opt._auto_jac_chunk(48) == 6
+    assert opt._auto_jac_chunk(53) == 8  # do not serialize a prime-size batch
 
 
 def test_jacobian_certificate_retains_the_worst_residual_evidence():
@@ -763,7 +817,7 @@ def test_jacobian_certificate_retains_the_worst_residual_evidence():
         tolerance=jnp.array([1.0e-6, 1.0e-4]),
     )
     np.testing.assert_allclose(
-        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4]
+        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4, 8, 2]
     )
 
 
@@ -913,6 +967,14 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     np.testing.assert_allclose(problem.jax_fun(problem.x0), jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_value, jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_gradient, jax_gradient, rtol=1e-12)
+    # Concrete calls reuse the host lane; the traced program (a user's
+    # jax.jit) must still agree with it.
+    with jax.disable_jit(False):
+        traced_value, traced_gradient = jax.jit(problem.jax_value_and_grad)(
+            jax.numpy.asarray(problem.x0)
+        )
+    np.testing.assert_allclose(traced_value, jax_value, rtol=1e-10)
+    np.testing.assert_allclose(traced_gradient, jax_gradient, rtol=1e-10)
     assert np.all(np.isfinite(np.asarray(problem.jax_residual_jac(problem.x0))))
     assert problem.input_from_x(problem.x0) == inp
     np.testing.assert_array_equal(problem.x_from_input(inp), problem.x0)
@@ -945,7 +1007,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     assert "converged equilibrium" in problem.metadata["derivative_description"]
     assert problem.metadata["weight_semantics"] == "cost"
     assert problem.metadata["implicit_jacobian_method"] == "block_tridiagonal"
-    assert problem.metadata["jacobian_batch_size"] == 1
+    assert problem.metadata["jacobian_batch_size"] == "auto"
     assert problem.metadata["input_resolution"] == {
         "mpol": inp.mpol,
         "ntor": inp.ntor,
@@ -965,9 +1027,30 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
 
     from vmex.core import implicit as implicit_module
 
+    config = problem.metadata["config"]
+    # Cold trial/retry kernels must compile on the optimizer's host thread,
+    # outside a running GPU callback. Cached derivative callbacks are fine.
+    import threading
+
+    solve_threads = []
+    real_host_solve = implicit_module._host_solve
+
+    def record_uncached_solve(cfg, params):
+        hit = implicit_module._LAST_SOLVE.get(cfg)
+        if hit is None or hit[0] != implicit_module._params_key(params):
+            solve_threads.append(threading.get_ident())
+        return real_host_solve(cfg, params)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(implicit_module, "_host_solve", record_uncached_solve)
+        trial = problem.x0.copy()
+        trial[0] += 2.0e-5
+        direct_jacobian = problem.residual_jac(trial)
+        np.testing.assert_allclose(
+            direct_jacobian, problem.jax_residual_jac(trial), rtol=1e-6, atol=1e-8)
+    assert solve_threads == [threading.get_ident()]
     # A rejected equilibrium gets the exact derivative of its smooth penalty
     # residual, never a Jacobian cached for a different physical point.
-    config = problem.metadata["config"]
     rejected_trial = problem.x0.copy()
     rejected_trial[0] += 1.0e-5
     real_device_get = opt.jax.device_get
@@ -1067,7 +1150,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     problem._vg_cache = None
     with pytest.raises(RuntimeError, match="synthetic derivative failure"):
         problem.value_and_grad(trial)
-    assert problem.metadata["holder"]["last_jac_key"] != FunctionProblem._key(trial)
+    assert problem.metadata["holder"]["last_jac_key"][0] != FunctionProblem._key(trial)
     problem._rj_cache = None
     with pytest.raises(RuntimeError, match="synthetic derivative failure"):
         problem.residual_jac(trial)
@@ -1105,6 +1188,14 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     evaluation = problem.evaluate(problem.x0)
     assert evaluation.success
     assert evaluation.diagnostics["solve_stats"]["solves"] >= 1
+    counters = evaluation.diagnostics["solve_stats"]
+    assert counters["jacobian_columns"] >= counters["jacobians"] >= 1
+    assert counters["jacobian_seconds"] > 0.0 and counters["solve_seconds"] > 0.0
+    assert counters["refinements"] >= 1
+    record = opt.OptimizationMonitor(problem, stream=None).record(
+        problem.x0, cost=0.0, terms={})
+    assert record.counters == counters
+    assert record.rejected_trials == problem.metadata["holder"]["failed_trials"]
     scalar = opt.VmecProblem.from_loss(
         inp,
         lambda state, runtime: 0.5 * (opt.aspect_ratio(state, runtime) - 4.0) ** 2,
@@ -1117,6 +1208,13 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     assert scalar.fun(np.full_like(scalar.x0, np.nan)) == 1.0e12
     assert np.isfinite(float(scalar.jax_fun(scalar.x0)))
     assert scalar.equilibrium_from_x(scalar.x0).result.converged
+    solve_threads.clear()
+    with monkeypatch.context() as patch:
+        patch.setattr(implicit_module, "_host_solve", record_uncached_solve)
+        trial = scalar.x0.copy()
+        trial[0] += 2.0e-5
+        np.testing.assert_allclose(scalar.fun(trial), scalar.jax_fun(trial), rtol=1e-10)
+    assert solve_threads == [threading.get_ident()]
 
     holder = scalar.metadata["holder"]
     real_device_get = opt.jax.device_get
@@ -1178,6 +1276,82 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     with pytest.raises(ValueError, match="jac_solver"):
         opt.least_squares(obj, inp, max_mode=1, jac="implicit",
                           jac_solver="svd", max_nfev=1)
+
+
+def test_reverse_lane_factors_once_per_point(monkeypatch):
+    """Reverse rows and gradients reuse one raw block factorization.
+
+    Mapping the implicit rule's pullback over residual rows factors the raw
+    block Jacobian once per row batch: XLA does not hoist it out of the map.
+    The reverse lane factors once per point and must still equal the
+    row-by-row pullback of the residual.  Its scalar gradient, and the block
+    lane's certificate fallback, pull back ``r`` once.
+    """
+    from vmex.core import implicit as implicit_module
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
+    inp = dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+
+    def radial_profile(state, runtime):
+        del runtime
+        return state.R_cos[1:, 1]
+
+    terms = [(opt.aspect_ratio, 4.0, 1.0), (radial_profile, 0.0, 1.0)]
+    factorizations = []
+    real_system = implicit_module._raw_block_system
+
+    def counted_system(*args, **kwargs):
+        system = real_system(*args, **kwargs)
+        jax.debug.callback(lambda: factorizations.append(1))
+        return system
+
+    monkeypatch.setattr(implicit_module, "_raw_block_system", counted_system)
+    with jax.disable_jit(False):
+        problem = opt.VmecProblem.from_tuples(
+            inp, terms, max_mode=1,
+            implicit_jacobian_method="reverse_adjoint",
+            jacobian_batch_size=1, use_ess=False,
+        )
+        x = jnp.asarray(problem.x0)
+        # Solve and refine at x first: the refinement's Newton finish factors
+        # the raw block Jacobian too, and its memo serves the calls counted below.
+        problem.residual(problem.x0)
+        factorizations.clear()
+        jacobian = np.asarray(problem.jax_residual_jac(x))
+        assert jacobian.shape[0] > 1
+        assert len(factorizations) == 1
+
+        rows, pullback = jax.vjp(problem.jax_residual, x)
+        reference = np.stack([
+            np.asarray(pullback(row)[0]) for row in jnp.eye(rows.size)
+        ])
+        np.testing.assert_allclose(jacobian, reference, rtol=1e-9, atol=1e-12)
+        expected = reference.T @ np.asarray(rows)
+
+        factorizations.clear()
+        value, gradient = problem.jax_value_and_grad(x)
+        assert len(factorizations) == 1
+        np.testing.assert_allclose(value, 0.5 * float(rows @ rows), rtol=1e-12)
+        np.testing.assert_allclose(gradient, expected, rtol=1e-9, atol=1e-12)
+        _, traced = jax.jit(problem.jax_value_and_grad)(x)
+        np.testing.assert_allclose(traced, expected, rtol=1e-9, atol=1e-12)
+
+        block = opt.VmecProblem.from_tuples(
+            inp, terms, max_mode=1,
+            implicit_jacobian_method="block_tridiagonal", use_ess=False,
+        )
+        monkeypatch.setattr(
+            opt, "_select_jax_jacobian",
+            lambda candidate, summary, reverse_candidate: reverse_candidate(),
+        )
+        _, fallback = jax.jit(block.jax_value_and_grad)(x)
+        np.testing.assert_allclose(fallback, expected, rtol=1e-9, atol=1e-12)
 
 
 def test_public_problem_factory_validation():
@@ -1290,7 +1464,255 @@ def test_least_squares_max_mode_schedule():
     np.testing.assert_array_equal(opt.pack_boundary(res.input, 1), res.x)
 
 
+def test_equilibrium_exterior_field_sizes_its_source_grid(monkeypatch):
+    """The equilibrium factory must use the geometry rule, not a fixed 32 x 32.
+
+    ``VmecExtender.from_wout``/``from_state`` size the virtual-casing source
+    grid from the boundary's aspect ratio and the requested digits; this
+    factory and ``VmecProblem.exterior_field`` are the only other ways to build
+    an exterior field, and both used to hard-code 32 and drop
+    ``accuracy_check``.  Nothing here evaluates a field: the surface data and
+    the extender are stubbed, so the test costs one cached solovev solve.
+    """
+    from vmex.core import extender as ext
+    from vmex.core import virtual_casing as vc
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    problem = opt.VmecProblem.from_input(inp, max_mode=1)
+    equilibrium = problem.equilibrium_from_x(problem.x0)
+
+    recorded: dict = {}
+    monkeypatch.setattr(vc, "surface_field_data_from_state",
+                        lambda *args, **kwargs: recorded.update(kwargs))
+    monkeypatch.setattr(
+        ext.VmecExtender, "from_parameterized_surface_data",
+        classmethod(lambda cls, surface_data, parameters, **kwargs: (
+            surface_data(parameters), kwargs)))
+
+    _, forwarded = equilibrium.exterior_field(digits=4, accuracy_check="raise")
+    chosen = ext._source_nphi_for_digits(inp, 4)
+    assert recorded["nphi"] == recorded["ntheta"] == chosen
+    assert forwarded["accuracy_check"] == "raise"
+
+    # An explicit grid still wins, and a different digits moves the default.
+    equilibrium.exterior_field(digits=4, nphi=16, ntheta=8)
+    assert (recorded["nphi"], recorded["ntheta"]) == (16, 8)
+    equilibrium.exterior_field(digits=12)
+    assert recorded["nphi"] >= chosen
+
+    # The vacuum branch returns before any virtual casing, but still after the
+    # grid is sized, so the rule cannot be skipped by that route either.
+    vacuum = equilibrium.exterior_field(
+        plasma="vacuum", external_field=lambda xyz: xyz)
+    assert vacuum.plasma_field is None and not vacuum.uses_virtual_casing
+
+
 def test_equilibrium_wout_is_cached(solovev_eq):
     """Equilibrium.wout is computed once and reused (cached_property)."""
     assert solovev_eq.wout is solovev_eq.wout
     assert dataclasses.is_dataclass(solovev_eq.wout)
+
+
+def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
+    """A trial that is not a root must not be differentiated by default.
+
+    The implicit adjoint assumes ``F = 0``; at ``1e6`` the library accepted a
+    residual of 1e-6 against a 1e-12 deck, and the finite-beta single stage
+    walked to a design with no converged equilibrium at ns = 31, 51 or 101
+    (#361).  Every public entry point carries the same bar.
+    """
+    import inspect
+
+    from vmex.core import implicit as im
+    from vmex.core import optimize as optimize_module
+
+    defaults = {
+        name: inspect.signature(fn).parameters["max_fsq_ratio"].default
+        for name, fn in inspect.getmembers(optimize_module, inspect.isfunction)
+        if "max_fsq_ratio" in inspect.signature(fn).parameters
+    }
+    assert defaults, "no entry point exposes max_fsq_ratio"
+    # The implicit config builder and the dataclass it returns carry the same
+    # bar, so a status solve on a default config certifies nothing looser.
+    defaults["implicit.make_config"] = inspect.signature(
+        im.make_config).parameters["max_fsq_ratio"].default
+    defaults["implicit.ImplicitConfig"] = im.ImplicitConfig.__dataclass_fields__[
+        "max_fsq_ratio"].default
+    assert set(defaults.values()) == {1.0e2}, defaults
+
+
+
+def _ladder_input():
+    """A small three-dimensional deck a two-rung max_mode ladder fits on."""
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = inp.change_resolution(mpol=3, ntor=2, ntheta=10, nzeta=8)
+    return dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+
+
+def test_subproblem_stage_matches_a_problem_built_at_that_max_mode():
+    """One problem built at the ladder's largest ``max_mode``, sub-setted per
+    stage, must be indistinguishable from the per-stage rebuild it replaces --
+    same free variables, same scaling, same residual and same Jacobian -- and
+    it must hold every higher harmonic of the actual VMEC boundary fixed."""
+    inp = _ladder_input()
+    terms = [(opt.aspect_ratio, 4.0, 1.0)]
+    built_at_2 = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=2, use_ess=True, ess_alpha=1.2, progress=False)
+    built_at_1 = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=1, use_ess=True, ess_alpha=1.2, progress=False)
+    stage = built_at_2.subproblem(max_mode=1)
+
+    assert tuple(stage.dof_names) == tuple(built_at_1.dof_names)
+    np.testing.assert_array_equal(stage.x0, built_at_1.x0)
+    np.testing.assert_array_equal(stage.scales, built_at_1.scales)
+    # A stage is a contiguous-in-order subset, never a reshuffle.
+    assert np.all(np.diff(stage.free_indices) > 0)
+    assert stage.metadata["max_mode"] == 1
+    assert stage.metadata["holder"] is built_at_2.metadata["holder"]
+
+    probe = built_at_1.x0 + 0.01 * built_at_1.scales
+    residual, jacobian = stage.residual_and_jac(probe)
+    reference_residual, reference_jacobian = built_at_1.residual_and_jac(probe)
+    assert jacobian.shape == reference_jacobian.shape
+    np.testing.assert_allclose(residual, reference_residual, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(jacobian, reference_jacobian, rtol=1e-9, atol=1e-11)
+
+    # The leak test.  Move every free variable, then compare the whole
+    # INDATA boundary -- not the decision vector, which cannot show a leak --
+    # against the deck the parent problem starts from.  Exactly the stage's
+    # own harmonics may differ; a frozen one moving is a design changed
+    # silently, which no convergence check would catch.
+    moved_deck = stage.input_from_x(probe)
+    base_deck = built_at_2.input_from_x(built_at_2.x0)
+    moved = set()
+    for family, new, old in (("RBC", moved_deck.rbc, base_deck.rbc),
+                             ("ZBS", moved_deck.zbs, base_deck.zbs)):
+        for row, column in np.argwhere(np.asarray(new) != np.asarray(old)):
+            moved.add(f"{family}({int(row) - int(inp.ntor)},{int(column)})")
+    assert moved == set(stage.dof_names)
+
+    full = stage.embed(probe)
+    np.testing.assert_array_equal(full[stage.frozen_indices], stage.frozen_values)
+    with pytest.raises(ValueError, match="exceeds"):
+        built_at_2.subproblem(max_mode=3)
+    with pytest.raises(TypeError, match="exactly one"):
+        built_at_2.subproblem([0], max_mode=1)
+
+
+def test_subproblem_ladder_compiles_once():
+    """The point of the sub-problem: a second ladder rung adds no compilation.
+
+    A rebuilt stage is a jit cache miss by construction -- the decision vector
+    changes length -- even though ``MINIMUM_MPOL``-style ladders keep every
+    array shape inside the solve identical from rung to rung.
+    """
+    import logging
+
+    class _Compiles(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.count = 0
+
+        def emit(self, record):
+            self.count += record.getMessage().startswith("Compiling ")
+
+    inp = _ladder_input()
+    terms = [(opt.aspect_ratio, 4.0, 1.0)]
+    problem = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=2, use_ess=True, ess_alpha=1.2, progress=False)
+
+    counter = _Compiles()
+    logger = logging.getLogger("jax")
+    previous_level, previous_flag = logger.level, jax.config.jax_log_compiles
+    jax.config.update("jax_log_compiles", True)
+    logger.addHandler(counter)
+    logger.setLevel(logging.WARNING)
+    try:
+        first = problem.subproblem(max_mode=1)
+        first.residual_and_jac(first.x0)
+        compiles_after_first_rung = counter.count
+        second = problem.subproblem(max_mode=2, x=first.embed(first.x0))
+        second.residual_and_jac(second.x0 + 1.0e-4 * second.scales)
+        compiles_after_second_rung = counter.count
+    finally:
+        logger.removeHandler(counter)
+        logger.setLevel(previous_level)
+        jax.config.update("jax_log_compiles", previous_flag)
+
+    assert compiles_after_second_rung == compiles_after_first_rung, (
+        "the second ladder rung recompiled: "
+        f"{compiles_after_second_rung - compiles_after_first_rung} programs")
+
+
+def test_eager_state_objective_gradient_compiles_once():
+    """An un-jitted value_and_grad over a state objective reuses its programs.
+
+    With the status branch as a ``lax.cond``, every eager call traced and
+    compiled the branch again, because each call's state and linearization
+    data entered it as new constants (7-15 s of XLA per call on this 5-surface
+    deck). A concrete status now takes its branch in Python, and the jitted
+    gradient, where the status is abstract, is unchanged.
+    """
+    import jax.monitoring
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(
+        inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4),
+        ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]))
+    problem = opt.VmecProblem.from_tuples(
+        inp, [(opt.aspect_ratio, 4.0, 1.0)], max_mode=1, use_ess=False)
+
+    def objective(x):
+        return problem.jax_objective_from_state(
+            x, lambda state, runtime: jnp.atleast_1d(opt.aspect_ratio(state, runtime)),
+            n_extra_terms=1)
+
+    eager = jax.value_and_grad(objective, has_aux=True)
+    points = [jnp.asarray(problem.x0) * (1.0 + 1.0e-3 * k) for k in range(3)]
+    eager(points[0])
+    eager(points[1])
+    compiles = []
+    jax.monitoring.register_event_duration_secs_listener(
+        lambda name, duration, **_: compiles.append(name)
+        if name.endswith("backend_compile_duration") else None)
+    (value, _), gradient = eager(points[2])
+    assert compiles == [], f"an eager repeat compiled {len(compiles)} programs"
+    (value_jit, _), gradient_jit = jax.jit(eager)(points[2])
+    np.testing.assert_allclose(float(value), float(value_jit), rtol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(gradient), np.asarray(gradient_jit),
+                               rtol=1.0e-8, atol=1.0e-12)
+
+
+def test_host_state_runtime_is_the_unanchored_forward_solve(monkeypatch):
+    """Figures read a plain forward solve; only the adjoint lane anchors it."""
+    from vmex.core import implicit as imp
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(
+        inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4),
+        ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]))
+    problem = opt.VmecProblem.from_tuples(
+        inp, [(opt.aspect_ratio, 4.0, 1.0)], max_mode=1, use_ess=False)
+    reference = opt.solve_equilibrium(problem.input_from_x(problem.x0)).solution
+
+    def no_anchor(*args, **kwargs):
+        raise AssertionError("a figure must not pay for the derivative anchor")
+
+    monkeypatch.setattr(imp, "_refine_fixed_point", no_anchor)
+    # A cold forward solve: an earlier test on an equal config leaves a hot
+    # restart that converges to a different point within ftol.
+    for cache in (imp._LAST_SOLVE, imp._HOT_CACHE, imp._PERTURB_SEED):
+        cache.clear()
+    state, runtime = problem.metadata["host_state_runtime"](problem.x0)
+    assert type(runtime).__name__ == "SolverRuntime"
+    for field in ("R_cos", "Z_sin", "L_sin"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(state, field)), np.asarray(getattr(reference, field)),
+            rtol=0.0, atol=1.0e-9)

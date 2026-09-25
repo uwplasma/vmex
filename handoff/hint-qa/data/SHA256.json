@@ -1,0 +1,16 @@
+{
+  "beta0p5.nc": "bc676e94d047ad5133a0af1bc721415a6c178bf89b8d86caa4eadf288ba7b9a2",
+  "beta2p5.nc": "3866ec46424c394bad1656366643be0ab137fbaf40b49852841b5a6461482938",
+  "targets.npz": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5",
+  "../../../examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79",
+  "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json": "09485e34e6e4f90b0ac765ee068d1b6f5ca1e58e4c7bd47a8b9df25b0ddf3a73",
+  "../../../examples/data/input.LandremanPaul2021_QA_beta2p5_bootstrap": "f1c5ab0704f8097f680e1caed519c899fdecd0f4b9b73d4e4a33d798c26a9bd5",
+  "../../../examples/data/ESSOS_biot_savart_LandremanPaulQA_beta2p5_bootstrap.json": "3888630f63d2c8662145b5d6a5a1ff18de893d265bb52105f931093d10263c1d",
+  "coarse.in": "687e97042b49fc69edb3744e4598b899687fe63e89e0a41af8bca44996b28bb2",
+  "fine.in": "0b7f3eac8144bcbf0da1af1d48a60a2de5a1b77cb65911b7ada42ecc25ebf1bb",
+  "native-samples.npz": "3fee6693d8643419441fd934eb584a92b475a8bfc3daa80e5877818a976694d6",
+  "vmex-cpu.npz": "4f0a87511b74010e636430d4990c58d6558d2c03584a70f892865c49221189b5",
+  "native-force.npz": "e2742af31c22db5ae760ae616716889007169f97845bad153a48369dc34a8344",
+  "source-eligibility-mask.npz": "4ab65c8168c30ad9cfc4361daa320c234bd01ffda7a6deda39f986fdf47d058d",
+  "source-eligibility-targets.npz": "bc9bb06d301e29e28d016ebfd49207828ffc7abb26bbc8131b3064b8976102db"
+}

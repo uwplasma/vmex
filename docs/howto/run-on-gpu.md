@@ -1,17 +1,16 @@
 # Run on GPU
 
 Pass `--device gpu` (CLI) or `device="gpu"` (Python) to place a solve on an
-accelerator; the default `auto` applies a measured policy that picks the GPU
-only where it wins — per-iteration work `ns*mnmax*nznt >= 100_000` and at
-most 512 active Fourier modes, where the measured advantage is 2-3x wall
-(`benchmarks/gpu_baseline.json`).
+accelerator. The default `auto` uses a workload heuristic from an earlier
+benchmark campaign; it does not measure your hardware or guarantee a speedup.
+Compare CPU and GPU on your workload before choosing a device.
 
 ## Select the device
 
 ```console
 vmex input.case --device gpu     # explicit: always wins
 vmex input.case --device cpu
-vmex input.case --device auto    # default: measured policy
+vmex input.case --device auto    # default: workload heuristic
 vmex input.case --device none    # leave placement to JAX
 ```
 
@@ -28,9 +27,10 @@ placement. Install notes for GPU wheels: {doc}`/installation`.
 
 ## When the GPU pays off
 
-The policy in {mod}`vmex.core.device` is measured, not guessed
-(`benchmarks/gpu_baseline.json`; regenerate with
-`benchmarks/device_parity.py` and the benchmark scripts):
+The policy in {mod}`vmex.core.device` uses the historical measurements in
+`benchmarks/gpu_baseline.json` (regenerate with `benchmarks/device_parity.py`
+and the benchmark scripts). These motivated the thresholds below; the later
+A4000 results show why they are not a portable performance guarantee:
 
 - Per-iteration throughput favors the GPU — up to 3x wall on
   NuhrenbergZille-class decks — but the GPU pays fixed per-solve overheads
@@ -53,13 +53,54 @@ The policy in {mod}`vmex.core.device` is measured, not guessed
 Ask the policy directly:
 
 ```python
+import vmex as vj
 from vmex.core.device import GPU_MIN_ITERATION_WORK, iteration_work, recommended_device
+from vmex.core.solver import resolution_from_input
 
-print(iteration_work(runtime.resolution), GPU_MIN_ITERATION_WORK)
-print(recommended_device(runtime.resolution))    # "cpu" or "gpu"
+inp = vj.VmecInput.from_file("input.my_case")
+# The finest multigrid stage is the one that dominates the run.
+resolution = resolution_from_input(inp, ns=int(inp.ns_array[-1]))
+
+print(iteration_work(resolution), GPU_MIN_ITERATION_WORK)
+print(recommended_device(resolution))    # "cpu" or "gpu"
 ```
 
-## What stays on CPU regardless
+On the two shipped decks that prints `1632 100000` / `cpu` for
+`input.circular_tokamak` and `1536000 100000` / `gpu` for
+`input.LandremanPaul2021_QA_lowres`.
+
+```{warning}
+**The crossover these thresholds encode does not transfer between machines.**
+They come from `benchmarks/gpu_baseline.json`, measured 2026-07-09. The same
+sweep re-run on 2026-09-16 on two RTX A4000s (JAX 0.11.1, driver 580.173,
+one process per cell — `benchmarks/gpu_a4000_2026-09-16.json`) found **no cell
+where the GPU wins**, warm wall in seconds:
+
+| case | CPU warm | GPU warm | GPU gain |
+| --- | --- | --- | --- |
+| `solovev` | 0.07 | 0.31 | 0.21x |
+| `cth_like_fixed_bdy` | 0.42 | 0.74 | 0.57x |
+| `nfp4_QH_warm_start` | 0.32 | 1.45 | 0.22x |
+| `LandremanPaul2021_QA_lowres` | 0.29 | 0.43 | 0.67x |
+| `NuhrenbergZille_1988_QHS` | 110.91 | 133.64 | 0.83x |
+| synthetic nfp4 QH, ns 35 to 151 | 0.12–0.71 | 0.47–1.41 | 0.22–0.51x |
+
+`NuhrenbergZille_1988_QHS` is the largest case in the sweep at 111 s of warm CPU
+work, and the synthetic scan walks `ns` and `mnmax` up without crossing over, so
+this is not a threshold that is merely set too low here. Cold wall was about 2x
+the CPU's throughout, and the iteration counts match exactly between each deck's
+CPU and GPU cell (434, 2829, 125, 189), so the two ran the same physics. Peak
+device memory across every GPU cell was 4.8 to 113.5 MB.
+
+So treat `recommended_device` as a starting guess and time the deck you actually
+run: `python benchmarks/run_gpu_matrix.py --skip-tridiag --out my_gpu_matrix.json`
+reproduces the table above on your own hardware (without `--out` it overwrites
+the committed `benchmarks/gpu_baseline.json`). The implicit-gradient path is the exception that
+does pay off — the single-stage finite-beta value-and-gradient is 1.3–1.6 s warm
+on the GPU against 2.15 s on that machine's CPU.
+```
+
+## CPU placement and optimization defaults
 
 - **Ensembles.** Multi-solve ensembles are CPU-threaded
   ({doc}`parallel-ensembles`): the host solver's `pure_callback` cannot run

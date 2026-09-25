@@ -1,0 +1,409 @@
+{
+  "scope": "Native input preparation only; no HINT equilibrium or topology qualification",
+  "source_commit": "602b41bc79abaddffa6237f007a1011a72fecc71",
+  "published_runner_sha256": "d1de13da5a9169724afc52d355455daed8e96f01c390b377cbe45ed51fb85bf9",
+  "executed_runner_sha256": "3e68462770d7637d9e94930f7bd5eabe33797c563e871152504048750d2ed3f1",
+  "post_run_changes": "Final metadata-capable runner rerun through both native preprocessors; every NetCDF variable and both case decks match the prior pinned run exactly.",
+  "provenance_sha256": "9b1ec70fdb9a02795f54a0f5487d8a1f2b4a1a5855e44136f1a2c470c1886945",
+  "comparison_sha256": "78b2e2c73ff1e458770e53e3115614ffe02e40b8029fd650c8aac357b099949b",
+  "runtime": {
+    "jax_backend": "cpu",
+    "jax_device_kind": "cpu",
+    "platform": "macOS-14.4.1-arm64-arm-64bit",
+    "python": "3.11.14"
+  },
+  "elapsed_seconds": 5.440611875033937,
+  "grid": [
+    64,
+    64,
+    32
+  ],
+  "jax_enable_x64": true,
+  "native_binaries": {
+    "mkflx": {
+      "name": "mkflx.exe",
+      "sha256": "a36ec8405eace9792e8c8d3a0ea8ac6f05804dc0d8a47b2b46d908df5506d18e"
+    },
+    "mklim": {
+      "name": "mklim.exe",
+      "sha256": "52da9e97d020124bd3e5677dd2b32b4669c455d7eeee960331faff45379043f6"
+    }
+  },
+  "native_build": {
+    "build_config_sha256": "24f5ba786e2033abfd003b322901d45d3921d57de89894ea3529630d501778b9",
+    "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2",
+    "mode": "Release"
+  },
+  "linked_native_source_certified": false,
+  "environment_requirements": [
+    "absl-py==2.5.0",
+    "booz_xform_jax==0.4.0",
+    "certifi==2026.7.22",
+    "cftime==1.6.5",
+    "contourpy==1.3.3",
+    "cycler==0.12.1",
+    "diffrax==0.7.2",
+    "equinox==0.13.8",
+    "essos==0.17",
+    "f90nml==1.4.4",
+    "filelock==4.0.1",
+    "fonttools==4.65.0",
+    "h5py==3.16.0",
+    "jax==0.9.2",
+    "jaxkd==0.1.2",
+    "jaxlib==0.9.2",
+    "jaxopt==0.8.5",
+    "jaxtyping==0.3.11",
+    "kiwisolver==1.5.1",
+    "lineax==0.1.0",
+    "matplotlib==3.11.2",
+    "ml_dtypes==0.6.0",
+    "narwhals==2.26.0",
+    "netCDF4==1.7.4",
+    "numpy==2.4.6",
+    "opt_einsum==3.4.0",
+    "optax==0.2.8",
+    "optimistix==0.1.0",
+    "packaging==26.3",
+    "pillow==12.3.0",
+    "plotly==7.1.0",
+    "pyevtk==1.7.0",
+    "pyparsing==3.3.3",
+    "python-dateutil==2.9.0.post0",
+    "scipy==1.17.1",
+    "shapely==2.0.7",
+    "six==1.17.0",
+    "solvax==0.21.0",
+    "tqdm==4.70.1",
+    "typing_extensions==4.16.0",
+    "vmex @ git+https://github.com/uwplasma/vmex@602b41bc79abaddffa6237f007a1011a72fecc71",
+    "wadler_lindig==0.1.7"
+  ],
+  "cases": {
+    "beta0p5": {
+      "current_mapping_sha256": "4faf985eb768e14cd02f969a17b2404f3a696eb49310eb59b7581cba166e6621",
+      "hint_input_sha256": "687e97042b49fc69edb3744e4598b899687fe63e89e0a41af8bca44996b28bb2",
+      "retained_comparison": {
+        "flux.nc": {
+          "norm_s": {
+            "exact": false,
+            "max_abs": 1.5987211554602254e-14,
+            "rms": 2.970434513654389e-16
+          }
+        },
+        "limiter.nc": {
+          "limiter": {
+            "exact": true,
+            "max_abs": 0.0,
+            "rms": 0.0
+          }
+        },
+        "vacuum.nc": {
+          "Bvac_R": {
+            "exact": false,
+            "max_abs": 7.545963853772264e-12,
+            "rms": 4.574338775682013e-14
+          },
+          "Bvac_Z": {
+            "exact": false,
+            "max_abs": 5.243805389909539e-12,
+            "rms": 2.3857992609713046e-14
+          },
+          "Bvac_phi": {
+            "exact": false,
+            "max_abs": 9.400480394106125e-12,
+            "rms": 4.0892905962077623e-14
+          }
+        }
+      },
+      "explicit_x64_development_essos_array_parity": true
+    },
+    "beta2p5": {
+      "current_mapping_sha256": "b9edce598573e0117ec6cffd38fe29713acec511a0a7e4557ba47aa1e453ca8e",
+      "hint_input_sha256": "2adb1a9bff3b49d47b980189fe4c952e6695692db199c50306e1fa753d67f75c",
+      "retained_comparison": {
+        "flux.nc": {
+          "norm_s": {
+            "exact": false,
+            "max_abs": 3.375077994860476e-14,
+            "rms": 3.205857077889108e-16
+          }
+        },
+        "limiter.nc": {
+          "limiter": {
+            "exact": true,
+            "max_abs": 0.0,
+            "rms": 0.0
+          }
+        },
+        "vacuum.nc": {
+          "Bvac_R": {
+            "exact": false,
+            "max_abs": 6.0254023992456496e-12,
+            "rms": 4.3066975102249274e-14
+          },
+          "Bvac_Z": {
+            "exact": false,
+            "max_abs": 3.296918293926865e-12,
+            "rms": 2.4236272589245155e-14
+          },
+          "Bvac_phi": {
+            "exact": false,
+            "max_abs": 4.774847184307873e-12,
+            "rms": 2.7249210582792477e-14
+          }
+        }
+      },
+      "explicit_x64_development_essos_array_parity": true
+    }
+  },
+  "limitations": [
+    "Legacy binaries remain identifiable only by hash; new selected-tool builds fingerprint staged sources, helper and compiler wrapper, but not all external libraries or underlying compiler binaries.",
+    "Current table normalization is a prescribed HINT current protocol, not proof of attained current or self-consistent bootstrap current.",
+    "Retained fields differ slightly; no backend cause is inferred.",
+    "Only coarse native preprocessing was executed; fine decks were rendered and checked but fine fields were not regenerated.",
+    "Wall-coil continuous clearance, simulation snapshots and hosted raw data remain separate gates."
+  ],
+  "final_runner_validation": {
+    "status": "complete",
+    "all_output_variables_and_decks_equal_pinned_run": true,
+    "elapsed_seconds": 5.789904417004436,
+    "provenance_sha256": "1a59abaa7b29bfd4d1c48d0e11891a216e2fb35ea0fbe3f01e2de61ecc4e6ace",
+    "driver": {
+      "name": "prepare.py",
+      "sha256": "a607b329304a61a9137a14e02e9e7e5b17f945920c71ca8a6772d79cc1179bc2"
+    },
+    "vmex_source": {
+      "checkout_clean": false,
+      "commit": "602b41bc79abaddffa6237f007a1011a72fecc71",
+      "module": "vmex/__init__.py",
+      "module_sha256": "72d38d7a1cc348d241e442bde79af0779ec02203d17ceca39b821c444efc7c52",
+      "package_clean": true,
+      "tree": "462aabba0b4a97e5af9d642bcedb3d504e5a1370"
+    }
+  },
+  "source_manifest_build_validation": {
+    "build_helper_sha256": "e19b882e43fa1c7467e0a2b14864740ae064a40ad6e63d45008f3150064f7357",
+    "native_build": {
+      "build_config_sha256": "9d2d1eed42fd4bf0661d849253a7e53bf6930b14e71cbffa901993c19e8baf9c",
+      "build_helper_sha256": "e19b882e43fa1c7467e0a2b14864740ae064a40ad6e63d45008f3150064f7357",
+      "compiler_basename": "mpif90",
+      "compiler_wrapper_sha256": "2b8d777cefc393e256dfb4dfe4f29100dba6c421f1d4e5cc3fd30bf3cea66431",
+      "declared_source_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+      "flags": [
+        "-cpp",
+        "-DNETCDF",
+        "-ffree-line-length-none",
+        "-fopenmp",
+        "-O2"
+      ],
+      "limitation": "Checks selected binary identities against build-time staged-source fingerprints; external libraries and the underlying compiler are not fully fingerprinted.",
+      "mode": "Release",
+      "platform": "macOS-14.4.1-arm64-arm-64bit",
+      "source_manifest_verified": true,
+      "tools": {
+        "mkflx": {
+          "binary_sha256": "a36ec8405eace9792e8c8d3a0ea8ac6f05804dc0d8a47b2b46d908df5506d18e",
+          "source_set_sha256": "6b42031fe82a724af54174ae2a20cdf5522869940fb5475fa2d2c12059073a02"
+        },
+        "mklim": {
+          "binary_sha256": "52da9e97d020124bd3e5677dd2b32b4669c455d7eeee960331faff45379043f6",
+          "source_set_sha256": "6a1d039911fd8e73a5314231ae3bc78504fca31cfe42b9221d26eb61d5bd18be"
+        }
+      }
+    },
+    "preparation_provenance_sha256": "294817002e9ea73277d6742b9768e1bdfbc3d98d70e2694e6badee3cb13239b4",
+    "elapsed_seconds": 6.123407832987141,
+    "all_arrays_and_decks_equal_prior_run": true,
+    "checks": [
+      "forced recompilation in reused build directory",
+      "stale manifest invalidated on failed invocation",
+      "source-root output rejected before mutation",
+      "source revision and bytes unchanged during build",
+      "binary/source/selected-tool manifest mismatches rejected"
+    ],
+    "scope": "MKFLX and MKLIM only; full HINT solver not rebuilt in this validation"
+  },
+  "full_solver_build": {
+    "scope": "Isolated forced Release rebuild of the native HINT solver with the published source-fingerprint helper; serial zero-drive fixture only.",
+    "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+    "build_helper": {
+      "path": "handoff/hint-qa/build.py",
+      "sha256": "e19b882e43fa1c7467e0a2b14864740ae064a40ad6e63d45008f3150064f7357"
+    },
+    "compiler_identity": {
+      "basename": "mpif90",
+      "kind": "compiler_driver_or_wrapper",
+      "limitation": "This identifies the invoked compiler driver or wrapper, not every underlying compiler, linker, or library.",
+      "resolved_executable_sha256": "2b8d777cefc393e256dfb4dfe4f29100dba6c421f1d4e5cc3fd30bf3cea66431",
+      "version_first_line": "GNU Fortran (MacPorts gcc13 13.4.0_1+stdlib_flag) 13.4.0",
+      "version_sha256": "c5941daddf358dec969c982c1e9f19de882fc2c8b91f09ad8e8d2502c63dce1f"
+    },
+    "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2",
+    "source": {
+      "binaries": {
+        "hint.exe": {
+          "bytes": 377288,
+          "sha256": "2c3be2d6b548465de5145f5037c36e0cc245b5dd5181221d7962a93eeb41dbc1"
+        }
+      },
+      "build_log_sha256": "a884fc92a04a8026d282a7878336114aa4dde9e632a11f72805ec6cf18b95351",
+      "source_files": {
+        "src/HINT/Makefile.template": {
+          "bytes": 665,
+          "sha256": "63d444f0d0fd4e2426231337199db94a8784d9ee56aae8ac1c551d03d87aa1c4"
+        },
+        "src/HINT/axis_mod.f90": {
+          "bytes": 20312,
+          "sha256": "4d5d1adcff806f1b5417144f66f69a8d2171d94dded0c7eee5bd7729473e02dc"
+        },
+        "src/HINT/bcast.f90": {
+          "bytes": 6335,
+          "sha256": "4717e71d6da460ba5379ecaefff36c79a8509d66de4abfe368b73639205da03f"
+        },
+        "src/HINT/cal_jv.f90": {
+          "bytes": 5756,
+          "sha256": "0f66c5e644a4b7f4a901bc50a7e1cea33983683729882e9f6e8952c2e4e8eb40"
+        },
+        "src/HINT/cal_press.f90": {
+          "bytes": 6768,
+          "sha256": "7d5668f2d46f53563b9b703e23e0c64300f616ebd12b89c3106aa899fbd260a9"
+        },
+        "src/HINT/cal_resetp.f90": {
+          "bytes": 1346,
+          "sha256": "f028831080539428880399647fdc82a11e6aead535c9185ed5b12445fc5ad883"
+        },
+        "src/HINT/cal_resetv.f90": {
+          "bytes": 1475,
+          "sha256": "14a59d9ddd294b1d33be0dd818a2770ddbb7bec443549873ad6e75e33bdc29fc"
+        },
+        "src/HINT/evolve.f90": {
+          "bytes": 2214,
+          "sha256": "0421546b1c1d7ec801165d13b5dac06f31adf55da077ec9873842343292458ab"
+        },
+        "src/HINT/factorc_mod.f90": {
+          "bytes": 5392,
+          "sha256": "6734dd51ec083f7a82b6de5064dac6ff08b7594db5157582dcf9372c70f54240"
+        },
+        "src/HINT/file_close.f90": {
+          "bytes": 1095,
+          "sha256": "d5aa4b0586f824765275da2423627bc7c4cdee701da301dd12b1c4909054965a"
+        },
+        "src/HINT/file_open.f90": {
+          "bytes": 1595,
+          "sha256": "f917fd39cb40d450060fa1c424ff2e9793ec1d077021f815c774b634689ae60a"
+        },
+        "src/HINT/flux_mod.f90": {
+          "bytes": 16286,
+          "sha256": "ab3d8a18a7f51fcd3a95d049766316e2bb5deb9c17e3f2ca46fb9657e6cdf4a1"
+        },
+        "src/HINT/free_mem.f90": {
+          "bytes": 1243,
+          "sha256": "62cc8ea93ec81f69bc9105223d7c4f0e81edb17af054e776b987664ffc0ef3de"
+        },
+        "src/HINT/main.f90": {
+          "bytes": 3115,
+          "sha256": "4384602126b45b6400eb07b17624aeb389cc0b052aa08cc296b199aa6ef6db74"
+        },
+        "src/HINT/make_mem.f90": {
+          "bytes": 2473,
+          "sha256": "aba8600d2696198eda09e1a7296687c9bbb075503b2bb176e70bcf9a0400cbf4"
+        },
+        "src/HINT/module.f90": {
+          "bytes": 6211,
+          "sha256": "4cf42d801818d21c1fc3d3d293924450d990b55cb79e57a5d445926e6b913f05"
+        },
+        "src/HINT/mpi_param_mod.f90": {
+          "bytes": 19658,
+          "sha256": "f350924ad2367299c697e720f61f5bc5fb59e6d8d98af5e4c46a37e534ae1251"
+        },
+        "src/HINT/p_update.f90": {
+          "bytes": 559,
+          "sha256": "6a3a5676a97aeca2eeb3c60ddf2ff2b0304305051f8258963f36b8716ee9e667"
+        },
+        "src/HINT/precalc.f90": {
+          "bytes": 1575,
+          "sha256": "308e56f5a2e2d756a0831d93942c276bbbf3cca746f8e38369b4325b964864d3"
+        },
+        "src/HINT/printout.f90": {
+          "bytes": 6706,
+          "sha256": "99de2ffb4f581f4a097b4d8f2f9f9773218a716e94975e6d6e2d9e4d3e95e24b"
+        },
+        "src/HINT/read_eq_field.f90": {
+          "bytes": 14817,
+          "sha256": "41599e45daae9bd9523bf1a936a2ee4382a430ba4f01a28e6c31280b9708a698"
+        },
+        "src/HINT/read_flux.f90": {
+          "bytes": 9159,
+          "sha256": "5022362e5e9ad4086a6119a6277846c7bf6d00f5415ebaf4f0b6c48a6e12199d"
+        },
+        "src/HINT/read_limiter.f90": {
+          "bytes": 10584,
+          "sha256": "915715359edf2cc028414e2fe8d26f7319ee610e8a9f0e2da1e3d57d518dcf3b"
+        },
+        "src/HINT/read_vac_field.f90": {
+          "bytes": 19426,
+          "sha256": "ae35aa49c6679dea8e7244c63743342746b2accbd9cdc08b79d3fae78ee6a313"
+        },
+        "src/HINT/readin.f90": {
+          "bytes": 5467,
+          "sha256": "8fa34262a40dc9dffd648720ae78f618db1a664b3f2e7c0c2b465a709a5c9a86"
+        },
+        "src/HINT/stepa_modules/fline_method_mod.f90": {
+          "bytes": 28368,
+          "sha256": "e69c501471970f9bfb2e644ba023b57c242207ea4cdcce9742aa9e4b86767bea"
+        },
+        "src/HINT/stepb_mod.f90": {
+          "bytes": 125024,
+          "sha256": "21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488"
+        },
+        "src/HINT/symmetry_mod.f90": {
+          "bytes": 1432,
+          "sha256": "d46481e706bc770d2cce648df60da8dfef09cb64175d64c523f66e2e1412f01a"
+        },
+        "src/HINT/vsetup.f90": {
+          "bytes": 4946,
+          "sha256": "3b927437559cd29cd290bc84a9ff57dca7970ecc6fb13f718e6b6581e98ab6be"
+        },
+        "src/HINT/write_eq_field.f90": {
+          "bytes": 15956,
+          "sha256": "ece2e96d9cd1b2158a2d2466111f4340a0ab74c1a9a642fab0730b051427da31"
+        }
+      },
+      "source_set_sha256": "0ea07c888ffa74ef035ae189ee97afd9fe8c0efbad1e1ed19c61c819e2666385"
+    },
+    "raw_config_sha256": "61d6a3216358720a8291b495a49a3e252b2f3032b3f4aca17fe07ae96c0a4124",
+    "validation": {
+      "exit_code": 0,
+      "wall_seconds": 3.0729879999998957,
+      "input_sha256": "3e8d2a236d4a92faad860b75e6aadd45eff8028737ec22bcb086fefb69148026",
+      "snapshot_sha256": "d2335d3ff36bca923f01d0d6e8c68e122d62c50cc60e0a5be6d493c0f4c76253",
+      "history_sha256": "d8547fab743b75f338ecc45237842f36eb41e4c6cebfaf5089dd0ac44785b23d",
+      "history_bitwise_equal_to_prior_fixture": false,
+      "all_output_variables_finite": true,
+      "per_variable_max_absolute_difference": {
+        "mtor": 0.0,
+        "rminb": 0.0,
+        "rmaxb": 0.0,
+        "zminb": 0.0,
+        "zmaxb": 0.0,
+        "t_snap": 0.0,
+        "B_R": 0.0,
+        "B_phi": 0.0,
+        "B_Z": 0.0,
+        "v_R": 1.2874900798265365e-19,
+        "v_phi": 1.6940658945086007e-20,
+        "v_Z": 1.8973538018496328e-19,
+        "P": 4.649058915617843e-16
+      },
+      "source_diagnostic_samples": 4,
+      "imposed_source_all_zero": true,
+      "scope": "Short serial MPI zero-drive fixture, four magnetic updates; no production equilibrium or cross-platform qualification."
+    },
+    "limitations": [
+      "External compiler/linker/library closure is not fingerprinted.",
+      "No production equilibrium or cross-platform qualification follows from the short fixture.",
+      "Pressure/velocity roundoff differs from the earlier fixture; full-file bitwise identity is not claimed."
+    ]
+  }
+}

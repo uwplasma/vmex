@@ -34,17 +34,20 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     # A test module runs the lanes that own it, and nothing else.
     lanes = ci_scope.needed_lanes(["tests/test_gammac.py"])
     assert lanes and lanes < {entry["selector"] for entry in entries} | lanes
-    assert "pr-parity-c2" in lanes
+    assert "pr-parity-c4" in lanes
     assert ci_scope.needed_lanes(["tests/test_gammac.py"]) == lanes
+    # A selector lane that runs nodes of a module it does not own runs on its
+    # changes too (test_monitoring.py is owned by parity-d, selected by field).
+    assert "pr-physics-field" in ci_scope.needed_lanes(["tests/test_monitoring.py"])
 
     # Benchmarks and examples are attributed through the tests that name them.
-    assert ci_scope.needed_lanes(["benchmarks/e2_dense_reference.py"])
+    assert ci_scope.needed_lanes(["benchmarks/run_freeboundary_multigrid.py"])
     assert ci_scope.needed_lanes(["examples/optimization/QA_optimization.py"])
 
     # A new benchmark nothing names still inherits the lanes of every test that
     # imports the package, which is the safe direction to err in.
     assert ci_scope.needed_lanes(["benchmarks/_brand_new_probe.py"]) == ci_scope.needed_lanes(
-        ["benchmarks/e2_dense_reference.py"]
+        ["benchmarks/run_freeboundary_multigrid.py"]
     )
     # A module the manifest does not own gives no ownership to narrow by.
     assert ci_scope.needed_lanes(["tests/test_not_in_the_manifest.py"]) is None
@@ -102,12 +105,9 @@ def test_manifest_routes_short_pr_and_weekly_selectors() -> None:
     assert "tests/mirror/test_free_boundary.py" in test_manifest.select(
         "pr-mirror-field"
     )
-    assert "tests/mirror/test_splines.py" in test_manifest.select(
-        "pr-physics-mirror-spline"
-    )
-    assert test_manifest.select("pr-physics-mirror-output") == [
-        "tests/mirror/test_output.py"
-    ]
+    spline = test_manifest.select("pr-mirror-spline")
+    assert "tests/mirror/test_splines.py" in spline
+    assert "tests/mirror/test_output.py" in spline
     assert len(test_manifest.select("weekly-hmfb-fixed")) == 2
     assert len(test_manifest.select("weekly-hmfb-free")) == 2
     weekly = test_manifest.select("weekly-mirror")
@@ -172,6 +172,13 @@ def _invoked_lanes() -> set[str]:
     for declaration in re.findall(r"^\s*ALL:\s*'(\[.*\])'\s*$", text, re.M):
         for entry in json.loads(declaration):
             invoked.update(str(entry.get("selector", "")).split())
+    # ``select full-${{ matrix.campaign }}`` over ``campaign: [opt-qi, ...]``.
+    for path in (ROOT / ".github" / "workflows").glob("*.yml"):
+        body = path.read_text()
+        values = [value.strip() for group in re.findall(r"^\s*campaign:\s*\[(.*)\]", body, re.M)
+                  for value in group.split(",")]
+        for prefix in re.findall(r"select ([a-z-]+)\$\{\{ matrix\.campaign \}\}", body):
+            invoked.update(prefix + value for value in values)
     return invoked
 
 
@@ -202,12 +209,49 @@ def test_every_primary_pr_lane_is_invoked_by_a_workflow() -> None:
     )
 
 
+def test_every_full_lane_is_invoked_by_a_workflow() -> None:
+    """``full`` tests run only where a scheduled job selects their lane (#345)."""
+    data, records = test_manifest.load()
+    full = {lane for record in records for lane in record["lanes"] if lane.startswith("full-")}
+    missing = sorted((full | set(data["campaigns"])) - _invoked_lanes())
+    assert not missing, f"full lanes that no workflow invokes: {missing}"
+
+
+def test_every_manifest_lane_runs_in_a_workflow_or_is_declared_local_only() -> None:
+    """A lane label no workflow selects is coverage nobody runs.
+
+    Retired lanes must not linger as labels that look scheduled.  A lane that
+    needs hardware hosted CI lacks (a GPU) is declared under ``local_only``
+    with the reason and the command that runs it, and no workflow may select
+    it, so a red lane on an absent runner cannot come back unnoticed.
+    """
+    data, records = test_manifest.load()
+    named = {lane for record in records for lane in record["lanes"]}
+    named |= set(data.get("selectors", {})) | set(data["campaigns"])
+    local = data.get("local_only", {})
+    invoked = _invoked_lanes()
+    for lane, entry in local.items():
+        assert lane in named, f"local_only lane {lane} owns nothing"
+        assert lane not in invoked, f"local_only lane {lane} is selected by a workflow"
+        assert entry.get("reason") and entry.get("command"), lane
+        assert f"select {lane}" in entry["command"], lane
+    orphans = sorted(named - invoked - set(local))
+    assert not orphans, (
+        f"manifest lanes that no workflow runs: {orphans}. Select them in a "
+        "workflow, move their tests to a lane that runs, or declare them under "
+        "local_only with a reason and command."
+    )
+    workflows = "\n".join(
+        path.read_text() for path in (ROOT / ".github" / "workflows").glob("*.yml"))
+    assert "self-hosted" not in workflows, "no self-hosted runner is registered"
+
+
 def test_workflow_selects_manifest_lanes() -> None:
     workflows = {
         path.name: path.read_text()
         for path in (ROOT / ".github" / "workflows").glob("*.yml")
     }
-    for name in ("ci.yml", "gpu.yml", "nightly.yml", "weekly.yml"):
+    for name in ("ci.yml", "nightly.yml", "weekly.yml"):
         assert "tools/test_manifest.py select" in workflows[name]
     assert "name: PR gate" in workflows["ci.yml"]
     nightly = workflows["nightly.yml"]
@@ -236,7 +280,7 @@ def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "jit_restoration_probe",
          "tests/test_scaling.py::test_input_scaling_changes_only_dimensional_quantities",
-         "tests/test_cli_freeboundary.py::test_free_boundary_default_raises_before_wout",
+         "tests/test_cli_freeboundary.py::test_free_boundary_keeps_the_state_on_iteration_exhaustion",
          "tests/test_optimize.py::test_public_problem_factory_validation"],
         cwd=ROOT, env=env, text=True, capture_output=True, timeout=120,
     )
@@ -303,5 +347,4 @@ def test_mirror_primary_suite_runs_once_in_physics() -> None:
     assert "pr-mirror-spline" not in parity
     assert not physics & parity, "a lane declared in both matrices runs twice"
     # The complete primary selector includes the former separate output job.
-    assert set(test_manifest.select("pr-physics-mirror-output")) <= set(
-        test_manifest.select("pr-mirror-spline"))
+    assert "tests/mirror/test_output.py" in test_manifest.select("pr-mirror-spline")

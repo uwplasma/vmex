@@ -160,6 +160,14 @@ class OptimizationRecord:
         named residual slice of the problem, so the values sum to ``cost``
         for a pure least-squares problem.  Empty when the problem exposes
         no term slices and the caller supplied none.
+    counters:
+        Cumulative effort counters of the problem's implicit configuration
+        at this record: solves and descent iterations, refinement calls,
+        steps and Krylov iterations, Jacobian calls, columns and certifier
+        Krylov iterations, adjoint calls and Krylov iterations, and the host
+        seconds of each part.  An entry is ``None`` when the work ran inside a
+        compiled program where it cannot be observed.  Empty under the same
+        conditions as ``equilibrium_solves``.
     """
 
     iteration: int
@@ -169,6 +177,7 @@ class OptimizationRecord:
     equilibrium_solves: int | None
     rejected_trials: int | None
     terms: Mapping[str, float] = field(default_factory=dict)
+    counters: Mapping[str, float | None] = field(default_factory=dict)
 
 
 class OptimizationMonitor:
@@ -333,20 +342,21 @@ class OptimizationMonitor:
             return result.get(name, default)
         return getattr(result, name, default)
 
-    def _counters(self) -> tuple[int | None, int | None]:
+    def _counters(self) -> tuple[int | None, int | None, dict[str, Any]]:
         if self.problem is None:
-            return None, None
+            return None, None, {}
         metadata = self.problem.metadata
         holder = metadata.get("holder", {})
         rejected = holder.get("failed_trials")
         cfg = metadata.get("config")
         if cfg is None:
-            return None, rejected
+            return None, rejected, {}
         from . import implicit as imp
 
         stats = imp._SOLVE_STATS.get(cfg)
-        solves = None if stats is None else int(stats.get("solves", 0))
-        return solves, rejected
+        if stats is None:
+            return None, rejected, {}
+        return int(stats.get("solves", 0)), rejected, dict(stats)
 
     def _term_costs(self, x: np.ndarray, residual: Any = None) -> dict[str, float]:
         """Per-term costs, reusing the optimizer's own residual when it has one.
@@ -425,6 +435,7 @@ class OptimizationMonitor:
         equilibrium_solves: int | None = None,
         rejected_trials: int | None = None,
         terms: Mapping[str, Any] | None = None,
+        counters: Mapping[str, Any] | None = None,
     ) -> OptimizationRecord:
         """Append one already-computed accepted iterate and return its record.
 
@@ -449,6 +460,9 @@ class OptimizationMonitor:
             Per-term weighted costs by label.  ``None`` splits the
             problem's own residual over its named term slices instead,
             which may evaluate the residual once at ``x``.
+        counters:
+            Effort counters by name.  ``None`` reads them from the
+            monitor's ``problem``, empty when it carries none.
 
         Returns
         -------
@@ -462,12 +476,14 @@ class OptimizationMonitor:
             # Optimizers restart their iteration count at every continuation
             # stage.  Keep one monitor's combined history strictly ordered.
             iteration = self.records[-1].iteration + 1
-        if equilibrium_solves is None or rejected_trials is None:
-            solves, rejected = self._counters()
+        if equilibrium_solves is None or rejected_trials is None or counters is None:
+            solves, rejected, measured = self._counters()
             if equilibrium_solves is None:
                 equilibrium_solves = solves
             if rejected_trials is None:
                 rejected_trials = rejected
+            if counters is None:
+                counters = measured
         reduction = None
         if self.records:
             reduction = self.records[-1].cost - float(cost)
@@ -480,6 +496,7 @@ class OptimizationMonitor:
             rejected_trials=rejected_trials,
             terms={} if terms is None else {
                 str(name): float(value) for name, value in terms.items()},
+            counters=dict(counters),
         )
         self.records.append(item)
         self._x_history.append(np.asarray(x, dtype=float).copy())

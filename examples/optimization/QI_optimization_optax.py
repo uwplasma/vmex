@@ -1,10 +1,14 @@
 #!/usr/bin/env python
-"""Optimize an explicit VMEX QI problem with an arbitrary Optax transform."""
+"""Optimize a constructed-QI boundary with an Optax gradient transform.
 
-from __future__ import annotations
+VMEX exposes the problem through ``jax_value_and_grad``, so any Optax chain
+drives it: here gradient clipping followed by Adam, stepped in a plain Python
+loop rather than by a line-searching optimizer. That is the trade — a fixed
+step schedule, no line search, and the monitor records every step.
+"""
 
-from dataclasses import replace
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -18,42 +22,94 @@ from vmex.core.input import VmecInput
 from vmex.core.qi import ConstructedQIResidual
 
 
-ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-MAX_MODE = 1 if ci_smoke else 3
-STEPS = 1 if ci_smoke else 100
-VARY_MAJOR_RADIUS = False     # set True to optimize RBC(0,0) instead of fixing it
+# The seed deck:
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
 
-inp = VmecInput.from_file(Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial")
-mpol = max(MAX_MODE + 2, 5)
+# Highest boundary Fourier mode number that is varied, and the Adam steps:
+MAX_MODE = 3
+STEPS = 12
+
+# Optax transform: gradient clipping, then Adam at this learning rate:
+GRADIENT_CLIP = 1.0
+LEARNING_RATE = 1.0e-2
+
+# Flux surfaces the QI residual is evaluated on, and the Boozer resolution:
+SURFACES = np.linspace(0.1, 1.0, 6)
+QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
+
+# Targets and limits:
+ASPECT_TARGET = 8.0
+IOTA_FLOOR = 0.3                  # floor on |mean iota|
+ELONGATION_LIMIT = 8.0
+
+# Step control:
+BOUNDARY_STEP = 0.02              # metres represented by one scaled variable
+VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
+
+# Equilibrium resolution: poloidal and toroidal mode numbers are MAX_MODE + 2,
+# but never below MINIMUM_MPOL:
+MINIMUM_MPOL = 5
+
+# Verification solve of the optimized boundary:
+FINAL_NS = 71
+FINAL_FTOL = 1e-14
+FINAL_NITER = 8000
+
+# Every output file name contains this:
+OUTPUT_NAME = "QI_optax_adam"
+
+# VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
+ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
+if ci_smoke:
+    MAX_MODE, STEPS = 1, 1
+    QI_OPTIONS = dict(mboz=8, nboz=8, nphi=31, nalpha=7, n_bounce=7)
+    FINAL_NS, FINAL_FTOL = 31, 1e-10
+
+###############################################################################
+# End of input parameters.
+###############################################################################
+
+### Set up the equilibrium ####################################################
+
+inp = VmecInput.from_file(INPUT_FILE)
+mpol = max(MAX_MODE + 2, MINIMUM_MPOL)
 inp = replace(inp, delt=0.5).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-SURFACES = np.linspace(0.1, 1.0, 6)
-qi = ConstructedQIResidual(SURFACES, mboz=8 if ci_smoke else 12,
-    nboz=8 if ci_smoke else 12, nphi=31 if ci_smoke else 61,
-    nalpha=7 if ci_smoke else 18, n_bounce=7 if ci_smoke else 21)
+
+### Set up the objective ######################################################
+
+qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
+
 
 def iota_floor(equilibrium_state, solver_context):
+    """Hinge on |mean iota| below its floor."""
     return jnp.maximum(
-        0.3 - jnp.abs(opt.mean_iota(equilibrium_state, solver_context)), 0.0)
+        IOTA_FLOOR - jnp.abs(opt.mean_iota(equilibrium_state, solver_context)), 0.0)
+
 
 def elongation_excess(equilibrium_state, solver_context):
+    """Hinge on the cross-section elongation above its limit."""
     return jnp.maximum(
-        opt.max_elongation(equilibrium_state, solver_context) - 8.0, 0.0)
+        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
 
-terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, 10.0, 0.005),
+
+# Each term is (function, target, weight).
+terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
          (iota_floor, 0.0, 10.0), (elongation_excess, 0.0, 1.0)]
 problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=MAX_MODE,
     vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, progress=True, evaluation_progress=True)
 print(f"dof_names = {problem.dof_names}")
 problem.compile_value_and_gradient()
 transform = optax.chain(
-    optax.clip_by_global_norm(1.0),
-    optax.adam(1.0e-2),
+    optax.clip_by_global_norm(GRADIENT_CLIP),
+    optax.adam(LEARNING_RATE),
 )
-x0, scales = jnp.asarray(problem.x0), 0.02 * jnp.asarray(problem.scales)
+x0, scales = jnp.asarray(problem.x0), BOUNDARY_STEP * jnp.asarray(problem.scales)
 y = jnp.zeros_like(x0)
 state = transform.init(y)
 monitor = OptimizationMonitor(problem)
+
+### Run the optimization ######################################################
 
 for iteration in range(STEPS):
     x = x0 + scales * y
@@ -68,18 +124,23 @@ for iteration in range(STEPS):
         iteration=iteration,
     )
 
+### Check the result ##########################################################
+
 x = x0 + scales * y
 equilibrium = problem.equilibrium_from_x(x)
-final_input = replace(problem.input_from_x(x), ns_array=np.array([31 if ci_smoke else 101]),
-                      ftol_array=np.array([1e-10 if ci_smoke else 1e-14]), niter_array=np.array([8000]))
+final_input = replace(problem.input_from_x(x), ns_array=np.array([FINAL_NS]),
+                      ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
 final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium.solution,
                                           verbose=not ci_smoke, raise_on_max_iterations=True)
-input_path = final_input.to_indata("input.QI_optax_adam")
-wout_path = vj.write_wout("wout_QI_optax_adam.nc", final_equilibrium.wout)
+
+### Print, plot and save ######################################################
+
+input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
+wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
 print(f"Optax Adam: final cost = {float(problem.jax_fun(x)):.12e}, "
       f"QI total = {float(qi.total(final_equilibrium)):.6e}")
-print(f"wrote {input_path}\nwrote {wout_path}")
-monitor.save("QI_optax_adam_objectives.csv")
-monitor.plot("QI_optax_adam_objectives.png")
+print(f"Wrote {input_path}\nWrote {wout_path}")
+print(f"Wrote {monitor.save(f'{OUTPUT_NAME}_objectives.csv')}")
+print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
 for path in vj.plot_wout(wout_path, ".").values():
-    print(f"wrote {path}")
+    print(f"Wrote {path}")

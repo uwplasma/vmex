@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,7 @@ import pytest
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp  # noqa: E402
 
-from vmex.core.errors import MgridNotFoundError  # noqa: E402
+from vmex.core.errors import MgridNotFoundError, VmecNumericalError  # noqa: E402
 from vmex.core import extender as ext  # noqa: E402
 from vmex.core.extender import MagneticField, VmecExtender, VmecInteriorField  # noqa: E402
 from vmex.core.mgrid import (  # noqa: E402
@@ -197,12 +198,73 @@ def test_high_spatial_derivatives_and_parameter_vjps_are_exact():
         np.testing.assert_allclose(method(cotangent), expected_method(cotangent))
 
 
+def test_spatial_derivatives_compile_once_per_order():
+    """Nested ``jacfwd`` must run in one compiled kernel, giving the same values.
+
+    Before the per-order cache the expanded third-derivative graph was
+    dispatched primitive by primitive: over a thousand XLA compilations for a
+    single point, which is what made the field examples exceed their budgets.
+    The suite runs with ``jax_disable_jit``, so enable jit explicitly here.
+    """
+    parameters = jnp.array([1.2, -0.7])
+    points = jnp.array([[0.4, -0.2, 0.3]])
+
+    def parameterized_field(p, xyz):
+        x, y, z = xyz.T
+        return jnp.stack((p[0] * x**3 + p[1] * y,
+                          p[0] * x * y**2 + p[1] * z**2,
+                          p[0] * z + p[1] * x**2 * y), axis=-1)
+
+    def build():
+        return MagneticField(
+            lambda xyz: parameterized_field(parameters, xyz), parameters=parameters,
+            parameter_data_fn=lambda p: {"coefficients": p},
+            B_from_data=lambda data, xyz: parameterized_field(
+                data["coefficients"], xyz)).set_points(points)
+
+    eager = build()
+    reference = [eager.gradB(), eager.gradgradB(), eager.gradgradgradB(),
+                 eager.gradgradgradB_vjp(jnp.ones((1, 3, 3, 3, 3)))]
+
+    compiled: list[str] = []
+
+    class _Counter(logging.Handler):
+        def emit(self, record):
+            if "Finished XLA compilation of" in record.getMessage():
+                compiled.append(record.getMessage())
+
+    field = build()
+    logger, handler, level = logging.getLogger("jax"), _Counter(), None
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    counts = []
+    try:
+        with jax.disable_jit(False):
+            for _ in range(2):
+                compiled.clear()
+                with jax.log_compiles():
+                    jitted = [field.gradB(), field.gradgradB(), field.gradgradgradB(),
+                              field.gradgradgradB_vjp(jnp.ones((1, 3, 3, 3, 3)))]
+                counts.append(len(compiled))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+    for expected, got in zip(reference, jitted):
+        np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-12)
+    # A zero first count would mean the counted message was renamed upstream.
+    assert 1 <= counts[0] <= 12, f"the derivative chain took {counts[0]} compilations"
+    assert counts[1] == 0, f"repeating the calls recompiled {counts[1]} times"
+
+
 def test_extender_helper_contracts_and_public_equilibrium_aliases():
     """Radial parity, seeded inversion, and the equilibrium field entry points.
 
     ``_radial_value_and_derivative`` regularizes ``rho**|m|`` spectra before
-    interpolating; without modes it must reduce to plain linear interpolation
-    in ``s``.  The seeded interior inversion requires one flux seed per point,
+    interpolating; without modes it interpolates the table directly, with a C2
+    cubic spline, so it reproduces a quadratic exactly where the piecewise
+    linear interpolant it replaced did not.  The seeded interior inversion
+    requires one flux seed per point,
     and near-surface continuation is only defined when the plasma current is
     represented (virtual casing).
     """
@@ -212,9 +274,12 @@ def test_extender_helper_contracts_and_public_equilibrium_aliases():
         lambda value: ext._radial_value_and_derivative(
             coefficients, value, modes))(s)
     plain, derivative = evaluate(None)
-    mesh = np.linspace(0.0, 1.0, 4)
+    # The table is (3 s)^2 on a four-node mesh, which the spline reproduces to
+    # round-off; np.interp on the same nodes gives 0.75 and 2.5.
     np.testing.assert_allclose(
-        np.asarray(plain)[:, 0], np.interp(np.asarray(s), mesh, [0.0, 1.0, 4.0, 9.0]))
+        np.asarray(plain)[:, 0], (3.0 * np.asarray(s)) ** 2, rtol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(derivative)[:, 0], 18.0 * np.asarray(s), rtol=1e-12)
     assert np.all(np.asarray(derivative) > 0.0)
     # m = 1 coefficients carry the sqrt(s) parity: the same table is no longer
     # linear in s once the radial power is restored.
@@ -227,8 +292,8 @@ def test_extender_helper_contracts_and_public_equilibrium_aliases():
             initial_flux=jnp.zeros((1, 3)))
 
     field = MagneticField(lambda xyz: jnp.zeros_like(xyz))
-    with pytest.raises(RuntimeError, match="virtual casing"):
-        VmecExtender(field).with_near_surface_continuation()
+    with pytest.raises(RuntimeError, match="virtual-casing plasma field"):
+        VmecExtender(field).with_graded_quadrature()
 
     # ``solution``/``solver_context`` are the public names of the solver-native
     # attributes, and a problem-supplied exterior factory wins over the default.
@@ -374,6 +439,55 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
         @ shaped_tracer.B_contravariant(point))(coordinates)
     np.testing.assert_allclose(shaped_mapped_B, shaped_field.B(), rtol=2e-11, atol=2e-11)
 
+    # The derivative methods differentiate explicitly in flux coordinates at
+    # the root; nesting jacfwd through the implicitly differentiated inversion
+    # is the independent route to the same numbers.
+    shaped_points = points + jnp.array([[0.01, -0.02, 0.015], [-0.02, 0.01, 0.01]])
+    def shaped_B(point):
+        return ext._interior_coordinates_and_B(
+            shaped_spectra, point[None], newton_iterations=10)[1][0]
+    nested = shaped_B
+    with jax.disable_jit(False):
+        for method in (shaped_field.gradB, shaped_field.gradgradB,
+                       shaped_field.gradgradgradB):
+            nested = jax.jacfwd(nested)
+            expected_nested = jax.jit(jax.vmap(nested))(shaped_points)
+            np.testing.assert_allclose(
+                method(shaped_points), expected_nested, rtol=1e-10,
+                atol=1e-10 * float(jnp.abs(expected_nested).max()))
+
+        # Too few Newton steps must not pass for a field value; a point outside
+        # the plasma is still a quiet NaN. The starting guess sweeps the forward
+        # map, so an ellipse it lands on almost exactly; a bean-shaped section,
+        # whose VMEC poloidal angle runs well away from the polar angle, is far
+        # enough from any swept node that one step cannot close the residual.
+        bean = dict(
+            shaped_spectra,
+            xm=jnp.array([0.0, 1.0, 2.0]), xn=jnp.zeros(3),
+            rmnc=jnp.concatenate(
+                (shaped_spectra["rmnc"],
+                 (0.4 * minor_radius * s_mesh)[:, None]), axis=1),
+            zmns=jnp.concatenate(
+                (shaped_spectra["zmns"],
+                 (-0.4 * minor_radius * s_mesh)[:, None]), axis=1))
+        inside = ext._flux_coordinates_to_xyz(bean, coordinates)
+        starved = VmecInteriorField(bean, newton_iterations=1)
+        with pytest.raises(VmecNumericalError, match="did not converge at 2 of 2"):
+            starved.B(inside)
+        with pytest.raises(VmecNumericalError, match="newton_iterations=1"):
+            starved.flux_coordinates(inside)
+        assert jnp.all(jnp.isnan(jax.jit(starved.B)(inside)))  # traced: cannot raise
+        # Two steps are enough, and the default is exact: the raise above is a
+        # starved budget, not a boundary this code cannot invert.
+        np.testing.assert_allclose(
+            VmecInteriorField(bean, newton_iterations=2).flux_coordinates(inside),
+            coordinates, rtol=0, atol=1e-9)
+        np.testing.assert_allclose(
+            VmecInteriorField(bean).flux_coordinates(inside), coordinates,
+            rtol=0, atol=2e-12)
+        outside = jnp.array([[major_radius + 1.5 * minor_radius, 0.0, 0.0]])
+        assert jnp.all(jnp.isnan(shaped_field.B(outside)))
+
     # Known flux coordinates avoid a fragile generic inverse-map guess for
     # strongly shaped cross-sections while Cartesian derivatives stay fixed
     # at the mapped physical points.
@@ -413,6 +527,54 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
     expected_vjp = jax.grad(lambda p: jnp.vdot(seeded_B(p), weight))(parameters)
     np.testing.assert_allclose(
         parameterized.B_vjp(weight), expected_vjp, rtol=2e-10, atol=2e-10)
+    with pytest.raises(ValueError, match="cotangent has shape"):
+        parameterized.B_vjp(jnp.ones(weight.shape + (3,)))
+
+
+@pytest.mark.usefixtures("_module_jit_enabled")  # one solve, 200 s interpreted
+def test_interior_geometry_matches_the_wout_table():
+    """The interior field and the wout must describe the same surfaces.
+
+    ``_state_field_spectra`` and ``wout_from_state`` build ``rmnc``/``zmns``
+    from the same state and must agree exactly; the interior field is the only
+    consumer of the former, and it once carried an extra ``sqrt(s)`` on the
+    odd-``m`` rows that pulled every interior surface towards the axis while
+    leaving the boundary — and so every virtual-casing path — untouched.  The
+    identity holds for any state, converged or not, so one iteration is enough.
+    """
+    from dataclasses import replace
+
+    from vmex.core.input import VmecInput
+    from vmex.core.multigrid import solve_multigrid
+    from vmex.core.virtual_casing import _state_field_spectra
+    from vmex.core.wout import wout_from_state
+
+    deck = REPO / "examples" / "data" / "input.DSHAPE"
+    inp = VmecInput.from_file(deck).change_resolution(mpol=4, ntor=0)
+    inp = replace(inp, ns_array=np.array([9]), ftol_array=np.array([1e-20]),
+                  niter_array=np.array([1]))
+    result = solve_multigrid(inp, verbose=False, raise_on_max_iterations=False)
+
+    spectra = _state_field_spectra(inp, result.state)
+    wout = wout_from_state(
+        inp=inp, state=result.state, fsqr=float(result.fsqr),
+        fsqz=float(result.fsqz), fsql=float(result.fsql),
+        niter=int(result.iterations), converged=False)
+
+    xm, xn = np.asarray(spectra["xm"]), np.asarray(spectra["xn"])
+    order = [int(np.where((np.asarray(wout.xm) == m)
+                          & (np.asarray(wout.xn) == n))[0][0])
+             for m, n in zip(xm, xn)]
+    odd = xm % 2 == 1
+    assert odd.any(), "deck has no odd-m modes, so it cannot see the defect"
+    # Interior odd-m amplitudes must be non-trivial, or agreement is vacuous.
+    interior_odd = np.abs(np.asarray(wout.rmnc)[1:-1][:, odd]).max()
+    assert interior_odd > 1e-3, interior_odd
+
+    np.testing.assert_array_equal(
+        np.asarray(spectra["rmnc"]), np.asarray(wout.rmnc)[:, order])
+    np.testing.assert_array_equal(
+        np.asarray(spectra["zmns"]), np.asarray(wout.zmns)[:, order])
 
 
 def test_magnetic_field_cylindrical_points_round_trip():
@@ -453,6 +615,14 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
     )
     assert (supplied.gradB(points).shape, supplied.gradgradB(points).shape,
             supplied.gradgradgradB(points).shape) == expected
+    # A NumPy-only B_fn cannot be traced; with an explicit derivative it is a
+    # supported field, so B() must never wrap B_fn in jit (enabled here).
+    numpy_only = MagneticField(
+        lambda xyz: 2.0 * np.asarray(xyz),
+        gradB_fn=lambda xyz: np.broadcast_to(2.0 * np.eye(3), xyz.shape + (3,)))
+    with jax.disable_jit(False):
+        np.testing.assert_allclose(numpy_only.B(points), 2.0 * points)
+        np.testing.assert_allclose(numpy_only.gradB(points)[0], 2.0 * np.eye(3))
     for name, function in (
         ("gradient", lambda xyz: jnp.zeros(xyz.shape)),
         ("second", lambda xyz: jnp.zeros(xyz.shape + (3,))),
@@ -488,33 +658,41 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
         VmecExtender(object()).B(points)
     with pytest.raises(ValueError, match="at least one"):
         VmecExtender(None)
-    with pytest.raises(ValueError, match="near_surface_plan"):
-        VmecExtender(_linear_vacuum_field, near_surface_plan=object())
+    with pytest.raises(ValueError, match="near_surface"):
+        VmecExtender(_linear_vacuum_field, near_surface="taylor")
 
     class PlasmaField:
+        """A plasma field without quadrature data: evaluated as given."""
+
         @staticmethod
         def B_plasma_xyz(xyz):
             return jnp.ones_like(xyz)
 
-        @staticmethod
-        def B_plasma_near_surface_xyz(xyz, plan):
-            assert plan == "near-plan"
-            return 2.0 * jnp.ones_like(xyz)
-
-        @staticmethod
-        def plan_near_surface(**kwargs):
-            assert kwargs == {"digits": 3, "precision": "precision", "B_surface": None}
-            return "near-plan"
-
     direct_plasma = VmecExtender(None, PlasmaField())
     np.testing.assert_allclose(direct_plasma.B(points), 1.0)
-    continued = direct_plasma.with_near_surface_continuation(
-        digits=3, precision="precision")
-    assert continued.uses_virtual_casing and continued.uses_near_surface_continuation
-    np.testing.assert_allclose(continued.B(points), 2.0)
+    np.testing.assert_allclose(direct_plasma.gradB(points), 0.0)
+    assert direct_plasma.uses_virtual_casing
+    graded = direct_plasma.with_graded_quadrature(nodes=(16, 32))
+    assert graded.near_surface == "graded" and graded.graded_nodes == (16, 32)
+    assert direct_plasma.near_surface == "auto"
+    np.testing.assert_allclose(graded.B(points), 1.0)  # no surface data to grade
 
     assert ext._has_plasma_sources(SimpleNamespace(
         betatotal=0.0, wp=0.0, ctor=0.0, presf=np.array([0.0, 1.0])))
+    # Dimensional quantities are judged against this equilibrium's own field
+    # scale. A vacuum wout carries a residual net current and axis noise in the
+    # current-density spectra; an absolute floor called that a plasma source and
+    # ran virtual casing on a vacuum equilibrium.
+    vacuum = SimpleNamespace(betatotal=1.0e-30, wp=0.0, ctor=1.5e-10, rbtor=2.4,
+                             b0=1.2, presf=np.zeros(4),
+                             currumnc=np.full(4, 9.9e4))
+    assert not ext._has_plasma_sources(vacuum)
+    assert ext._has_plasma_sources(SimpleNamespace(
+        betatotal=5.0e-3, wp=1.0, ctor=1.0e4, rbtor=2.4, b0=1.2,
+        presf=np.full(4, 1.0e4)))
+    # A net current large enough to matter is caught with beta still zero.
+    assert ext._has_plasma_sources(
+        SimpleNamespace(betatotal=0.0, wp=0.0, ctor=1.0e5, rbtor=2.4, b0=1.2))
     data = SimpleNamespace(nextcur=2, mgrid_mode="R", raw_coil_cur=[2.0, 4.0])
     captured = {}
     monkeypatch.setattr(ext, "read_mgrid", lambda path: data)
@@ -527,6 +705,13 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
     mgrid_field = VmecExtender.from_wout(wout, base_dir=tmp_path)
     assert mgrid_field.B(points).shape == points.shape
     np.testing.assert_allclose(captured["extcur"], [5.0, 0.0])
+    # A free-boundary wout written without its coil currents (nextcur = 0, as
+    # solve_file writes one) used to extend with an identically zero coil field.
+    for missing in ([0.0], [], [0.0, 0.0]):
+        with pytest.raises(ValueError, match="no coil currents"):
+            VmecExtender.from_wout(SimpleNamespace(
+                betatotal=0.0, wp=0.0, ctor=0.0, mgrid_file="mgrid.nc",
+                extcur=missing), base_dir=tmp_path)
     with pytest.raises(ValueError, match="plasma must"):
         VmecExtender.from_wout(wout, plasma="bad")
     with pytest.raises(ValueError, match="vacuum extension"):
@@ -541,13 +726,20 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
     interior = VmecInteriorField.from_parameterized_state(
         object(), lambda p: (object(), object()), jnp.ones(1), dof_names=("p",))
     assert interior.spectra is spectra and interior.dof_names == ("p",)
-    monkeypatch.setattr(vc, "surface_field_data_from_wout", lambda *a, **k: "surface")
-    monkeypatch.setattr(vc, "surface_field_data_from_state", lambda *a, **k: "state")
+    projections = []
+    monkeypatch.setattr(vc, "surface_field_data_from_wout",
+                        lambda *a, **k: projections.append(k["project_current"]) or "surface")
+    monkeypatch.setattr(vc, "surface_field_data_from_state",
+                        lambda *a, **k: projections.append(k["project_current"]) or "state")
     monkeypatch.setattr(VmecExtender, "from_surface_data", classmethod(
         lambda cls, surface, **kwargs: sentinel))
     finite = SimpleNamespace(betatotal=0.01, wp=0.0, ctor=0.0, mgrid_file="")
     assert VmecExtender.from_wout(finite, external_field=_linear_vacuum_field) is sentinel
     assert VmecExtender.from_state(object(), object()) is sentinel
+    # the curl-free source projection is reachable from both classmethods, off by default
+    VmecExtender.from_wout(finite, external_field=_linear_vacuum_field, project_current=True)
+    VmecExtender.from_state(object(), object(), project_current=True)
+    assert projections == [False, False, True, True]
 
     from vmex.core import wout as wout_module
     monkeypatch.setattr(wout_module, "read_wout", lambda path: wout)

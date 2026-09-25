@@ -67,6 +67,7 @@ Scope notes
 from __future__ import annotations
 
 import dataclasses
+import inspect
 from typing import Any, Iterable
 
 import numpy as np
@@ -179,7 +180,9 @@ def _boozer_kernel_state(state, rt, *, rows, s_half, mboz, nboz, oversample):
             constants, grids, oversample, rt.resolution.nfp)
         xm_b = np.asarray(grids.xm_b, dtype=float)
         xn_b = np.asarray(grids.xn_b, dtype=float)
+    magnetic_only = "magnetic_only" in inspect.signature(booz_xform_jax_impl).parameters
     out = booz_xform_jax_impl(
+        **({"magnetic_only": True} if magnetic_only else {}),
         rmnc=stack("rmnc"), zmns=stack("zmns"), lmns=stack("lmns"),
         bmnc=stack("bmnc"), bsubumnc=stack("bsubumnc"),
         bsubvmnc=stack("bsubvmnc"), iota=stack("iota"),
@@ -331,7 +334,9 @@ def boozer_spectrum_high_order(
         xm_nyq=first["xm_nyq"],
         xn_nyq=first["xn_nyq"],
     )
+    magnetic_only = "magnetic_only" in inspect.signature(booz_xform_jax_impl).parameters
     out = booz_xform_jax_impl(
+        **({"magnetic_only": True} if magnetic_only else {}),
         rmnc=stack("rmnc"),
         zmns=stack("zmns"),
         lmns=stack("lmns"),

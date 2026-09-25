@@ -1,30 +1,33 @@
+#!/usr/bin/env python
 """Solved two-coil free-boundary mirror beta scan and physics plots.
 
-Run from the repository root with::
+Two circular ESSOS coils make an axisymmetric vacuum mirror. The script
+continues the coupled plasma-boundary-vacuum equilibrium through the beta
+points in ``BETAS`` (0, 10, 50 and 80 %), each solved to the residual
+tolerance ``FTOL``; no prescribed finite-beta boundary is plotted. The points
+through 10 % are the supported lane and must pass the strong-force gate; 50
+and 80 % are extended validation outside the supported model range. Each
+point costs about a minute on a laptop CPU, so add intermediate points (1, 3,
+25 %, ...) only when the extra minutes are wanted. It writes one MOUT and
+restart file per point, a JSON summary, the mirror ratios, per-state figures
+for three points, and the beta-scan composite.
 
-    python examples/mirror/mirror_free_boundary_beta_scan.py
-
-The first four points are the supported 0--10% validation scan. The last three
-remain extended validation pending refined-grid promotion.
-Every curve and surface comes from a coupled
-plasma-boundary-vacuum equilibrium solve with residual tolerance ``FTOL``; no
-prescribed finite-beta boundary is plotted.
+The composite the docs embed is written straight into
+``docs/_static/figures`` as lossless WebP, so re-running this script
+reproduces the committed bytes; ``VMEX_EXAMPLES_CI=1`` sends it to
+``OUTPUT_DIR`` instead. The coils need ESSOS (``pip install "vmex[coils]"``);
+without it the script exits with that message.
 """
 
 import json
 import os
 from pathlib import Path
-import sys
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from vmex.mirror import (  # noqa: E402
+from vmex.mirror import (
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
@@ -35,62 +38,87 @@ from vmex.mirror import (  # noqa: E402
     solve_beta_scan,
     write_mout,
 )
-from vmex.mirror.output import (  # noqa: E402
-    plot_axisymmetric_beta_scan_summary,
-    summarize_axisymmetric_beta_scan,
-)
-from vmex.mirror.output import (  # noqa: E402
+from vmex.mirror.output import (
     FreeBoundaryRestart,
     load_free_boundary_restart,
+    plot_axisymmetric_beta_scan_summary,
     save_free_boundary_restart,
+    summarize_axisymmetric_beta_scan,
 )
 
-# Inputs: edit these values, then run the file directly.
-CI = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-# The smoke run retains vacuum, the supported endpoint, and an extended state.
-BETAS = np.asarray(
-    [0.0, 0.10, 0.25, 0.50]
-    if CI
-    else [0.0, 0.01, 0.03, 0.10, 0.25, 0.50, 0.80]
-)
+try:
+    from essos.coils import Coils, Curves
+    from essos.fields import BiotSavart
+except ModuleNotFoundError:
+    raise SystemExit("This example needs ESSOS: pip install 'vmex[coils]'") from None
+
+# Requested central beta of each point; the scan continues from vacuum:
+BETAS = np.asarray([0.0, 0.10, 0.50, 0.80])
+
+# Largest beta of the supported lane, and its strong-force gate:
 SUPPORTED_BETA_MAX = 0.10
 STRONG_FORCE_GATE = 5.0e-2
-NS = 5 if CI else 7
-NXI = 7 if CI else 13
-SPLINE_ELEMENTS = 4 if CI else 7
-EXTERIOR_NTHETA = 8 if CI else 12
+
+# Radial surfaces, axial samples, and axial spline elements:
+NS = 7
+NXI = 13
+SPLINE_ELEMENTS = 7
+
+# Exterior (vacuum) boundary-integral resolution:
+EXTERIOR_NTHETA = 12
 EXTERIOR_ORDER = 6
 EXTERIOR_SPECTRAL_SIDE_DENSITY = True
+
+# Force tolerance and iteration budget per point:
 FTOL = 1.0e-12
-MAX_ITERATIONS = 500 if CI else 2000
+MAX_ITERATIONS = 2000
+
+# Axial extent of the modelled grid [m]:
 Z_MIN, Z_MAX = -0.8, 0.8
-# Compact coils sized to the plasma: same vacuum on-axis midplane field as the
-# former 0.9 m / 2.0e5 A loops (B(0) ~ 0.0836 T), with a deeper mirror well.
+
+# Two circular coils sized to the plasma [m, m, A]: vacuum field on axis at
+# the midplane B(0) ~ 0.0836 T:
 COIL_RADIUS = 0.5
 COIL_SEPARATION = 2.0
 COIL_CURRENT = 3.72e5
+
+# Vacuum plasma radius at the midplane [m]:
 CENTER_RADIUS = 0.25
+
+# Directory for the MOUT, restart, JSON and per-state figure files:
 OUTPUT_DIR = Path("results/mirror_free_boundary_beta_scan")
-# The beta-scan composite the README embeds is written straight into the
-# documentation tree as lossless WebP, so re-running this script reproduces the
-# committed bytes; the CI smoke run redirects it to OUTPUT_DIR instead.
-FIGURE_DIR = OUTPUT_DIR if CI else REPO_ROOT / "docs" / "_static" / "figures"
+
+# Write one hot-start .npz per beta point; to resume, set RESTART_FROM to one
+# of them (e.g. OUTPUT_DIR / "beta_010p0pct.npz") and trim BETAS to the rest:
 SAVE_RESTARTS = True
-RESTART_FROM = None  # e.g. OUTPUT_DIR / "beta_003p0pct.npz"; then trim BETAS
+RESTART_FROM = None
+
+# VMEX_EXAMPLES_CI=1 is the smoke pass the test suite runs: vacuum, the
+# supported endpoint and two extended points on a coarse grid, with the
+# composite kept out of the docs tree:
+ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIGURE_DIR = REPO_ROOT / "docs" / "_static" / "figures"
+if ci_smoke:
+    BETAS = np.asarray([0.0, 0.10, 0.25, 0.50])
+    NS, NXI, SPLINE_ELEMENTS = 5, 7, 4
+    EXTERIOR_NTHETA = 8
+    MAX_ITERATIONS = 500
+    FIGURE_DIR = OUTPUT_DIR
+
+###############################################################################
+# End of input parameters.
+###############################################################################
 
 jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+### Coils and vacuum field ####################################################
 
 coil_dofs = np.zeros((2, 3, 3))
 coil_dofs[:, 0, 2] = COIL_RADIUS
 coil_dofs[:, 1, 1] = COIL_RADIUS
 coil_dofs[:, 2, 0] = np.asarray([-0.5, 0.5]) * COIL_SEPARATION
-try:
-    from essos.coils import Coils, Curves
-    from essos.fields import BiotSavart
-except ModuleNotFoundError as error:
-    raise ModuleNotFoundError("This example requires ESSOS: pip install -e /path/to/ESSOS") from error
-
 coils = Coils(
     Curves(jnp.asarray(coil_dofs), n_segments=128, nfp=1, stellsym=False),
     jnp.full(2, COIL_CURRENT),
@@ -104,6 +132,8 @@ def external_field(points):
     points = jnp.asarray(points)
     return jax.vmap(biot_savart.B)(points.reshape(-1, 3)).reshape(points.shape)
 
+
+### Grid and vacuum boundary ##################################################
 
 config = MirrorConfig(
     resolution=MirrorResolution(ns=NS, mpol=0, nxi=NXI),
@@ -132,6 +162,8 @@ initial_boundary = discretization.fit_boundary(
     ),
     source_grid,
 )
+### Solve the beta scan #######################################################
+
 print(f"Solving {BETAS.size} beta points at ns={NS}, nxi={NXI}, ftol={FTOL:.0e}")
 results = solve_beta_scan(
     initial_boundary,
@@ -146,6 +178,8 @@ results = solve_beta_scan(
     exterior_order=EXTERIOR_ORDER,
     exterior_spectral_side_density=EXTERIOR_SPECTRAL_SIDE_DENSITY,
 )
+### Save the states and the summary ###########################################
+
 gamma = np.asarray(coils.gamma)
 if SAVE_RESTARTS:
     for beta, result in zip(BETAS, results, strict=True):
@@ -191,6 +225,8 @@ summary = [
 for row in summary:
     if row["model_supported_beta_range"]:
         assert row["passes_strong_force_gate"], f"supported beta point failed the force gate: {row}"
+
+### Plot ######################################################################
 
 middle_beta = min(0.10, 0.5 * float(BETAS[-1]))
 display_indices = sorted({0, int(np.argmin(np.abs(BETAS - middle_beta))), len(BETAS) - 1})

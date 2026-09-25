@@ -1,35 +1,71 @@
 # VMEX
 
-VMEX is a clean-room, JAX-native reimplementation of the VMEC2000 ideal-MHD
-equilibrium code for stellarators and tokamaks. It solves fixed- and
-free-boundary equilibria with VMEC2000-derived numerics, writes standard
-`wout_*.nc` files that load unchanged in simsopt and booz_xform, and — unlike
-the Fortran original — differentiates converged fixed-boundary equilibria via
-implicit differentiation. It runs on CPUs and GPUs.
+VMEX is a JAX reimplementation of VMEC2000, the standard code for
+three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads
+VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum
+field from an MGRID table or coils), reproduces VMEC2000's iterations and writes
+`wout_*.nc` files that load unchanged in simsopt and booz_xform. Unlike the
+Fortran original it differentiates the converged equilibrium through the
+implicit function theorem. Its goal is fast, differentiable and
+VMEC2000-compatible equilibria for stellarator optimization, including
+single-stage design of the plasma boundary and the coils together.
 
 ```console
 pip install vmex
-vmex --test                        # bundled QH case: solve + wout + plots
-vmex input.circular_tokamak        # run any VMEC input deck
-vmex --plot wout_circular_tokamak.nc
+vmex --test                        # solve, write and plot the bundled QH deck in ./vmex_test
+vmex vmex_test/input.nfp4_QH_warm_start          # run any VMEC input deck
+vmex --plot vmex_test/wout_nfp4_QH_warm_start.nc
 ```
 
-The same solve from Python, with an exact gradient at the end:
+The same solve from Python, followed by an implicit derivative:
 
 ```python
 import jax
 import vmex as vj
 from vmex.core import implicit
 
-inp = vj.VmecInput.from_file("input.circular_tokamak")
+inp = vj.VmecInput.from_file("vmex_test/input.nfp4_QH_warm_start")
 result = vj.solve_multigrid(inp)               # converged equilibrium
 
 p0 = implicit.params_from_input(inp)           # differentiable parameters
 grad = jax.grad(lambda p: implicit.run(inp, p).wb)(p0)
 ```
 
+This derivative describes the discrete equilibrium equations. Check equilibrium
+and response convergence, then verify the observable under resolution refinement
+and independently reconverged perturbations; see {doc}`tutorials/first-gradient`.
+
 New here? {doc}`all-of-vmex` is the whole mental model on one page;
 {doc}`installation` covers CPU/GPU installs and `vmex --doctor`.
+
+## How it works
+
+- **Equilibrium.** A stationary point of the ideal-MHD energy over nested flux
+  surfaces, with `R`, `Z` and `λ` as Fourier series in the angles and finite
+  differences in radius ({doc}`explanation/variational-problem`).
+- **Solver.** VMEC2000's damped second-order Richardson force iteration, its
+  radial preconditioner and its `NS_ARRAY` multigrid ladder
+  ({doc}`explanation/iteration`).
+- **Free boundary.** NESTOR's Green's-function vacuum solve coupled to the
+  plasma iteration; virtual casing for the field outside the plasma
+  ({doc}`explanation/nestor-vacuum`).
+- **Derivatives.** The implicit function theorem at the converged root: one
+  adjoint solve per scalar objective, derivatives of the discrete equations
+  ({doc}`explanation/adjoint-gradients`).
+
+## What has been measured
+
+- **Parity.** CI holds six decks to VMEC2000 (`wb` to `1e-7`, harmonics and
+  `iota` to `1e-5`). Six decks never run before agreed to `2.5e-10`, with
+  identical iteration counts on five ({doc}`explanation/validation`).
+- **Speed.** On those decks (VMEX 0.8.1, Apple M4 CPU) VMEX took 0.50–1.34
+  times the VMEC2000 wall time with a warm compilation cache and 0.60–3.13
+  times from a cold one ({doc}`reference/performance`).
+- **Gradients.** CI compares adjoint gradients with central finite
+  differences to `1e-6` (Solov'ev) and `2e-4` (3-D `li383`).
+- **Limits.** Free-boundary derivatives are experimental (CPU by default), and
+  3-D force-balance polishing has not certified; {doc}`reference/capabilities`
+  is the support contract.
 
 ::::{grid} 2
 :gutter: 3
@@ -38,8 +74,7 @@ New here? {doc}`all-of-vmex` is the whole mental model on one page;
 :link: tutorials/index
 :link-type: doc
 
-Learn by doing: [your first equilibrium](tutorials/first-equilibrium.md),
-[plots and Boozer coordinates](tutorials/plots-and-boozer.md),
+Learn by doing: [your first equilibrium and its plots](tutorials/first-equilibrium.md),
 [a first gradient](tutorials/first-gradient.md),
 [a first optimization](tutorials/first-optimization.md).
 :::
@@ -59,11 +94,12 @@ Task recipes: [run on GPU](howto/run-on-gpu.md),
 :link: reference/index
 :link-type: doc
 
-Every [CLI flag](reference/cli.rst), [input key](reference/input-file.rst),
-[wout variable](reference/wout-file.rst),
+Every [CLI flag](reference/cli.rst),
+[input key and its VMEC2000 disposition](reference/vmec2000-compatibility.rst),
+[output variable](reference/wout-file.rst) and
 [objective](reference/objectives.rst); the
-[VMEC2000 compatibility contract](reference/vmec2000-compatibility.rst), the
-[capability contract](reference/capabilities.rst), and the
+[capability contract](reference/capabilities.rst),
+[performance records](reference/performance.rst) and the
 [API](reference/api/basic.rst).
 :::
 
@@ -71,11 +107,11 @@ Every [CLI flag](reference/cli.rst), [input key](reference/input-file.rst),
 :link: explanation/index
 :link-type: doc
 
-The theory: [the variational problem](explanation/variational-problem.rst),
-[spectral representation](explanation/spectral-representation.rst),
-[preconditioners](explanation/preconditioners.rst),
-[NESTOR](explanation/nestor-vacuum.rst),
-[adjoint gradients and SOLVAX](explanation/adjoint-gradients.md).
+The methods: [the equilibrium problem](explanation/variational-problem.rst),
+[the solver](explanation/iteration.rst),
+[NESTOR and virtual casing](explanation/nestor-vacuum.rst),
+[adjoint gradients](explanation/adjoint-gradients.md), and
+[what is validated](explanation/validation.md).
 :::
 
 ::::
@@ -92,10 +128,10 @@ first. Contributions follow {doc}`project/contributing`.
 :alt: Runtime comparison of VMEX against VMEC2000 and VMEC++
 :width: 95%
 
-Benchmark-suite runtimes: vmex (cold and warm) versus VMEC2000 and a
-VMEC++. Warm (compiled-cache) solves are the relevant
-number for optimization loops; the full generated table is
-{doc}`reference/performance`.
+Benchmark-suite runtimes at ns = 201 from `benchmarks/baseline.json`
+(Apple-Silicon CPU, VMEX 0.3.0, July 2026): VMEX cold and warm against
+VMEC2000 and VMEC++. Warm solves reuse the compiled program, as in
+optimization loops; the table is in {doc}`reference/performance`.
 ```
 
 ```{toctree}

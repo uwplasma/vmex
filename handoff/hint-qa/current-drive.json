@@ -1,0 +1,1659 @@
+{
+  "schema_version": 1,
+  "observation": {
+    "status": "completed",
+    "exit_code": 0,
+    "diagnostic_semantics": "first cal_energy sample after 100 magnetic updates from retained restart; diagnostic-only block cap",
+    "context": {
+      "j_type": "linear",
+      "iab": 1,
+      "istepb": 100,
+      "timeb": 0.009999999999999995,
+      "global_time": 1.0900000000000185,
+      "step_start_paxis_mu0_Pa_over_B0_squared": 0.00242711332551286,
+      "target_current_A": -95778.34986522896,
+      "jcuts": 1.0,
+      "volume0_code": -0.0629358114899968,
+      "volume1_code": 0.0,
+      "netj0_code": 0.2317194794277555,
+      "netj1_code": 0.0
+    },
+    "source_mask": {
+      "active_cell_count": 14893,
+      "ss_min": 0.0,
+      "ss_max": 0.9999563660074586,
+      "Bphi_over_B0_min": 0.6301890578766978,
+      "Bphi_over_B0_max": 0.7722704039649262
+    },
+    "source_current_A": {
+      "cut0": -95778.34986522917,
+      "min": -95880.88701670032,
+      "mean": -95672.99150774673,
+      "max": -95518.54363729444,
+      "mean_fraction_of_target": 0.9988999773160586,
+      "peak_to_peak_A": 362.3433794058801
+    },
+    "source_cancellation": {
+      "cut0_absolute_integral_A": 95778.34986522917,
+      "cut0_signed_over_absolute": -1.0
+    },
+    "attained_same_mask_A": {
+      "cut0": -24047.46372565527,
+      "min": -24047.46372565527,
+      "mean": -19062.80777448137,
+      "max": -14514.74575787456,
+      "mean_fraction_of_target": 0.19903044687348354
+    },
+    "attained_positive_pressure_A": {
+      "cut0": -23092.24109393784,
+      "min": -23092.24109393784,
+      "mean": -17783.72271393783,
+      "max": -13107.08755650267,
+      "mean_fraction_of_target": 0.18567581023228688
+    },
+    "mpi_max_seconds": 0.0004694860000000745,
+    "history_pressure_current_A": -17783.722714,
+    "finite_output": true,
+    "limitation": "One 100-step diagnostic block only. This tests native source/attained accounting near the retained state; it is not a relaxation, convergence, or production endpoint.",
+    "field_definitions": {
+      "current_scale_A": "rmaj0*b0*dr*dz/mu0 per interior R-Z cell",
+      "cut_statistics_order": [
+        "cut0 (global toroidal index 1)",
+        "minimum signed integral over 32 toroidal cuts",
+        "mean signed integral over 32 toroidal cuts",
+        "maximum signed integral over 32 toroidal cuts"
+      ],
+      "source_current_A": "sum(current_scale_A*jphin) over unique owned derivative-interior cells satisfying ss<jcuts; jphin is the imposed parallel-source toroidal component formed by cal_netj from the total Bphi and normalized profile",
+      "attained_same_mask_A": "sum(current_scale_A*jphi1) over the identical ss<jcuts cells; jphi1 is the toroidal component of curl(response field) computed by cal_j before cal_netj, not total or parallel current",
+      "attained_positive_pressure_A": "sum(current_scale_A*jphi1) over p1b>0, exactly the support and quantity used by native history current",
+      "source_mask_active_cell_count": "sum of unique interior source-mask cells across every toroidal cut (not a per-cut count)",
+      "source_mask_ss_and_Bphi_extrema": "global extrema on ss<jcuts; ss is the step-start traced flux label and Bphi is normalized by B0",
+      "source_cancellation": "cut0 sum(abs(cellwise source current)) and signed_source/absolute_source",
+      "step_start_paxis": "axis pressure traced before the step-B substep loop, in mu0*Pa/B0^2; not retraced at diagnostic time",
+      "mpi_max_seconds": "maximum rank elapsed wall time around cal_volume, source formation, source halo exchange and its barrier; excludes subsequent diagnostic reductions/output"
+    },
+    "interpretation": "The imposed source is supported and normalized as intended, while curl(response) is much smaller at this one mature-state sample. This does not by itself prove a drive implementation defect: the measured attained toroidal response includes perpendicular-current effects and may reflect relaxation/Faraday/resistive timescales. A controlled next measurement should resolve rate-of-change and Ohm/Faraday contributions before another eta variation."
+  },
+  "provenance": {
+    "restart": {
+      "sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+      "snapshots": 19,
+      "last_time": 1.0800000000000185,
+      "parent_sha256": "b801cd321fce9473efd668143409f06efdc7166003fcd1a47e7b8ebb3a38ff62",
+      "parent_last_time": 0.8800000000000148
+    },
+    "input": {
+      "sha256": "847189783892763b5cf62c5a606117ba1f07c6d82252dd89a916f76b350095cc",
+      "baseline_input_sha256": "1da9cc2877c6c22ad2028d1b91155e38c8c0199a7ce3bc4a052d586d766a731e",
+      "changes": [
+        "nstep 2 -> 1 (outer cap)",
+        "nstepb 1000 -> 100 (diagnostic-only block cap)",
+        "lcurrent_drive_diag false/default -> true"
+      ],
+      "unchanged_key_settings": {
+        "mpi": "1x1x4",
+        "dt_b": 0.0001,
+        "nenergyb": 100,
+        "nrefb": 100,
+        "nsmoothb": 1,
+        "eta0": 0.001,
+        "eta1": 0.0,
+        "eta_diff": 1.0,
+        "kappa_divb": 0.0001,
+        "j_type": "linear",
+        "jcuts": 1.0,
+        "inet0_A": -95778.34986522896,
+        "pressure_reset": false
+      }
+    },
+    "source": {
+      "stepb_mod_sha256": "bc4913186bd6de2a0118ba9f1e65a252160420cc47d62733abd0fc398c2e8fc2",
+      "source_manifest_sha256": "f96ee2dedaf55f6a374a8d71b24a112b49bae8ab484aeb38b3fbde0fd0f391a7",
+      "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+      "patches": [
+        "hint-portability.patch",
+        "hint-diagnostics.patch"
+      ],
+      "diagnostic_patch_sha256": "3d763783f847211ece51b043bef9747408655de52b4db2bbdff34e7a7a978ea4",
+      "diagnostic_patch_url": "https://github.com/uwplasma/vmex/blob/cacb37bab2e4837745132865d42accd13990ba6a/handoff/hint-qa/hint-diagnostics.patch"
+    },
+    "build": {
+      "binary_sha256": "5d66d706823a9e517cd6c0a391d21e92abee88ba6413d1c7363991b73302f2a6",
+      "compiler": "conda-forge GNU Fortran 13.4.0 via Open MPI wrapper",
+      "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2"
+    },
+    "execution": {
+      "mpi_ranks": 4,
+      "omp_threads": 1,
+      "exit_code": 0,
+      "elapsed_wall_seconds": 51.2,
+      "swaps": 0
+    },
+    "output": {
+      "sha256": "7aa9a5d37e0233165cc319c73bdaf1455c823dd75f7347c94cecfc5a2d1b4449",
+      "snapshots": 20,
+      "last_time": 1.0900000000000185,
+      "all_last_fields_finite": true
+    },
+    "warning": "The shortened 100-step block matches the first 100 magnetic updates of the retained settings. Its endpoint is not cadence-identical beyond that block and must not be reused as production state without deliberation."
+  },
+  "reproduction_limit": "Hash-identified raw restart and prepared native inputs are not yet in a downloadable public dataset. This record is evidence of the bounded run, not an independently reproduced equilibrium.",
+  "current_rate_followup": {
+    "observation": {
+      "status": "completed",
+      "diagnostic_semantics": "instantaneous post-RKG magnetic current-rate RHS at the existing cal_energy sample after cal_j, integrated on the frozen ss<jcuts source mask",
+      "units": "A per code time",
+      "cut_statistics_order": [
+        "cut0 (global toroidal index 1)",
+        "minimum signed integral over 32 toroidal cuts",
+        "mean signed integral over 32 toroidal cuts",
+        "maximum signed integral over 32 toroidal cuts"
+      ],
+      "terms_A_per_code_time": {
+        "ideal_curl_v_cross_B": [
+          3710.210542249218,
+          959.198453445766,
+          2765.84845806922,
+          4312.333208646012
+        ],
+        "resistive_response_minus_curl_eta_Jresponse": [
+          38466.71611181377,
+          9661.22073614133,
+          23121.07949006002,
+          38898.20001231909
+        ],
+        "imposed_drive_plus_curl_eta_Jimposed": [
+          -52483.9567673131,
+          -52718.87334268884,
+          -35437.52738240956,
+          -19597.79043409096
+        ],
+        "divergence_cleaning_kappa_grad_divB": [
+          -1.347552418898007e-27,
+          -5.082799280030924e-27,
+          -9.39996770330904e-29,
+          6.64848674673804e-27
+        ],
+        "term_sum": [
+          -10307.03011325011,
+          -11705.17200787588,
+          -9550.599434280322,
+          -8349.956044800972
+        ],
+        "independent_total_RHS": [
+          -10307.03011325016,
+          -11705.1720078759,
+          -9550.599434280322,
+          -8349.956044800992
+        ]
+      },
+      "closure": {
+        "max_absolute_A_per_code_time": 6.730260793119669e-11,
+        "max_relative_to_total": 5.749817933979247e-15
+      },
+      "mpi_max_seconds": 0.0131599519999952,
+      "field_definitions": {
+        "state": "new non-mutating Faraday evaluation from the post-RKG current state; no last-RK-stage increment is reinterpreted as an instantaneous RHS",
+        "terms": "each term and the independently evaluated total use the production Faraday curl, divergence and magnetic boundary stencils",
+        "current_rate": "the production fourth-order toroidal curl is applied to each magnetic increment, integrated with rmaj0*b0*dr*dz/mu0, and divided by dt_b",
+        "mask": "the same ss<jcuts cells are used for every term and remain unchanged throughout the diagnostic"
+      },
+      "interpretation": "At this sample the imposed term drives toroidal response current in the requested negative direction, while resistive-response and ideal terms oppose it; the net mean rate remains negative. This supports active relaxation and current redistribution rather than absent imposed support at this state.",
+      "limitation": "This is one instantaneous frozen-mask RHS sample. It does not establish a constant long-time relaxation rate, physical-second timescale, convergence, or a production endpoint."
+    },
+    "provenance": {
+      "source": {
+        "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+        "portability_patch_sha256": "d83abd6596ae500538dab6b88ec30815cb4688b925db0f281fbc9cfa6c07d580",
+        "diagnostics_patch_sha256": "a1fbb4061c9254e1d2113ed08296812e016b6e84e6ca53e34b0a255a339bfe67",
+        "resulting_stepb_mod_sha256": "21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488",
+        "clean_apply_verified": true
+      },
+      "build": {
+        "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
+        "compiler": "conda-forge GNU Fortran 13.4.0 via Open MPI wrapper",
+        "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2"
+      },
+      "mature_sample": {
+        "restart_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+        "input_sha256": "847189783892763b5cf62c5a606117ba1f07c6d82252dd89a916f76b350095cc",
+        "output_sha256": "7aa9a5d37e0233165cc319c73bdaf1455c823dd75f7347c94cecfc5a2d1b4449",
+        "history_sha256": "44780551dfefde1e83b678e1f26fdde20e5db232e8d677c6d6c53a743d601abb",
+        "run_log_sha256": "3465ad169276d7e00c11d4697035739c2a649d77a882cf29a7ef3f17d30cdc9d",
+        "resource_log_sha256": "7f554292151ee21a39df14ce6eb86f8d5a6268663be8a216d6914159b6641db1",
+        "mpi_ranks": 4,
+        "omp_threads": 1,
+        "exit_code": 0,
+        "elapsed_wall_seconds": 32.47,
+        "max_rss_kib": 113392,
+        "swaps": 0,
+        "timeb_code": 0.01,
+        "global_time_code": 1.0900000000000185
+      },
+      "validation": {
+        "two_update_fixture": {
+          "restart_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+          "previous_binary_off_input_sha256": "c36fd48dc0e69f74a6227203ad8badeeee0370f1d56ef6e7d2703e564efca5f5",
+          "new_binary_off_input_sha256": "c36fd48dc0e69f74a6227203ad8badeeee0370f1d56ef6e7d2703e564efca5f5",
+          "new_binary_on_input_sha256": "009b96d0812ef425637b0cd685fd685bf98bbe5b719d1eb265e1f31aece65aa3",
+          "field_sha256_all_three": "8517b5aa2d1b08ff5f2da2685459500696b085e518745c32a8bd3d42ae4ff419",
+          "history_sha256_all_three": "679d6b7d5bfd2bbeac2aaf247342ce8960cc7986ac8b564b2b36c4bb775ca676",
+          "previous_off_equals_new_off_byte_for_byte": true,
+          "new_off_equals_new_on_byte_for_byte": true,
+          "instantaneous_closure_relative_samples": [
+            5.419176891006536e-15,
+            8.208104696609022e-15
+          ]
+        },
+        "mpi_ownership": {
+          "one_rank_input_sha256": "1e9e0e7cf0360f6ede071e3ac863b512321b9df8142c814fcc9a03ecbd706364",
+          "four_rank_input_sha256": "009b96d0812ef425637b0cd685fd685bf98bbe5b719d1eb265e1f31aece65aa3",
+          "rate_output_without_timing_sha256_both": "30101b073860999ae7a6c64a500fce64f4453549165948ed8f122bcc6ccb874c",
+          "one_rank_four_rank_rate_output_without_timing_byte_identical": true,
+          "field_and_history_byte_identical": true
+        }
+      },
+      "warning": "The 100-step block matches the first 100 magnetic updates of the retained settings. Its endpoint is not cadence-identical beyond that block and must not be reused as production state without deliberation."
+    }
+  },
+  "original_length_block": {
+    "observation": {
+      "diagnostic_semantics": "ten instantaneous post-RKG magnetic current-rate RHS samples at the original nenergyb=100 cadence during one original-length nstepb=1000 block; every rate uses that sample frozen ss<jcuts mask",
+      "field_definitions": {
+        "current_rate": "production fourth-order toroidal curl applied to each production-Faraday magnetic increment, integrated with rmaj0*b0*dr*dz/mu0 and divided by dt_b.",
+        "history_force_relative": "native <F>_r = <F>_a / (<|grad(p_norm)|^2> + <|J_response_norm cross B_total_norm|^2>), dimensionless.",
+        "history_force_residual_mean_square_code": "native <F>_a = volume average of | -grad(p_norm) + J_response_norm cross B_total_norm |^2 over p1b>0; p_norm=mu0*P/B0^2, lengths are normalized by rmaj0, B is normalized by B0, and J_response_norm is the code-space curl of the response field. This is a squared normalized code residual, with no SI force-density conversion.",
+        "means": "signed arithmetic mean of the 32 per-cut integrals; raw per-cut arrays were not retained."
+      },
+      "interpretation": "The imposed term remains active in the requested negative-current direction at every sample. Ideal and resistive-response terms oppose it, but the net rate remains negative and native current becomes monotonically more negative. The normalized squared force residual improves overall, reaches its minimum at global time 1.16, then rises slightly through 1.18; this is a nonmonotonic late trend, not evidence of steady convergence.",
+      "limitations": [
+        "Instantaneous rates use each sample frozen source mask; masks can change between samples.",
+        "Interval current changes are trend checks, not equality tests against the instantaneous same-mask RHS.",
+        "No raw per-cut arrays were retained; the series reports cut means only.",
+        "No physical-second conversion, convergence claim, or production-endpoint claim is made."
+      ],
+      "retained_start_at_global_time_1p08": {
+        "history_force_relative": 0.014006101045,
+        "history_force_residual_mean_square_code": 1.0750226237e-05,
+        "history_positive_pressure_current_A": -17692.417269
+      },
+      "series": {
+        "attained_positive_pressure_mean_A": [
+          -17783.72271393783,
+          -17878.48160552436,
+          -17973.62771851875,
+          -18069.13611239739,
+          -18164.97286903589,
+          -18261.0946979277,
+          -18357.4488140534,
+          -18453.97308273059,
+          -18550.59640685078,
+          -18647.2393187083
+        ],
+        "attained_same_mask_mean_A": [
+          -19062.80777448137,
+          -19158.42568584909,
+          -19254.40954432086,
+          -19350.7330630627,
+          -19447.3604205923,
+          -19544.24606720454,
+          -19641.33478002089,
+          -19738.5619594355,
+          -19835.85414291911,
+          -19933.12970055666
+        ],
+        "closure_max_relative": [
+          5.749817933979247e-15,
+          4.373833546253341e-15,
+          5.503330858025491e-15,
+          6.337579474965737e-15,
+          6.629826925397364e-15,
+          6.328205153354642e-15,
+          6.209717923719787e-15,
+          4.661533563522486e-15,
+          4.034909072924028e-15,
+          3.721059222257862e-15
+        ],
+        "global_time_code": [
+          1.09,
+          1.1,
+          1.11,
+          1.12,
+          1.13,
+          1.14,
+          1.15,
+          1.16,
+          1.17,
+          1.18
+        ],
+        "history_force_relative": [
+          0.013902991484,
+          0.01373889906,
+          0.013543822066,
+          0.013339952299,
+          0.013149233607,
+          0.012991117665,
+          0.012880646264,
+          0.012827040251,
+          0.012832922359,
+          0.012894234319
+        ],
+        "history_force_residual_mean_square_code": [
+          1.0678592355e-05,
+          1.0578705408e-05,
+          1.0455153145e-05,
+          1.0324774335e-05,
+          1.0204344021e-05,
+          1.0108829076e-05,
+          1.0049868093e-05,
+          1.0034619455e-05,
+          1.0065086192e-05,
+          1.0137979282e-05
+        ],
+        "history_positive_pressure_current_A": [
+          -17783.722714,
+          -17878.481606,
+          -17973.627719,
+          -18069.136112,
+          -18164.972869,
+          -18261.094698,
+          -18357.448814,
+          -18453.973083,
+          -18550.596407,
+          -18647.239319
+        ],
+        "rate_mean_A_per_code_time": {
+          "divergence_cleaning_kappa_grad_divB": [
+            -9.39996770330904e-29,
+            2.357953539239698e-28,
+            -4.641686417907272e-28,
+            3.203661119322515e-28,
+            8.017147310947694e-28,
+            6.588794385682175e-28,
+            2.172007097061686e-28,
+            -2.962904561668809e-28,
+            2.100352576349767e-28,
+            2.085745318683976e-28
+          ],
+          "ideal_curl_v_cross_B": [
+            2765.84845806922,
+            2684.266829490088,
+            2606.503098710296,
+            2533.294878087108,
+            2465.377334094158,
+            2403.47105517586,
+            2348.26964577501,
+            2300.428410535573,
+            2260.555114447429,
+            2229.203334699692
+          ],
+          "imposed_drive_plus_curl_eta_Jimposed": [
+            -35437.52738240956,
+            -35438.76267288984,
+            -35440.03782586021,
+            -35441.3403645654,
+            -35442.65678581929,
+            -35443.97279845422,
+            -35445.27358454631,
+            -35446.54407635186,
+            -35447.76924153201,
+            -35448.93436904676
+          ],
+          "independent_total_RHS": [
+            -9550.599434280322,
+            -9587.609835672905,
+            -9622.077817017807,
+            -9653.121013281116,
+            -9679.836081590198,
+            -9701.319962235602,
+            -9716.691336553311,
+            -9725.110544112327,
+            -9725.7966614908,
+            -9718.040984677957
+          ],
+          "resistive_response_minus_curl_eta_Jresponse": [
+            23121.07949006002,
+            23166.88600772686,
+            23211.45691013211,
+            23254.92447319718,
+            23297.44337013494,
+            23339.18178104274,
+            23380.312602218,
+            23421.00512170397,
+            23461.41746559378,
+            23501.69004966912
+          ]
+        },
+        "source_current_mean_A": [
+          -95672.99150774673,
+          -95676.14722399379,
+          -95679.43617327794,
+          -95682.82498622888,
+          -95686.27752600366,
+          -95689.75551021216,
+          -95693.21917182827,
+          -95696.62794485423,
+          -95699.94116013862,
+          -95703.11873655302
+        ],
+        "timeb_code": [
+          0.01,
+          0.02,
+          0.03,
+          0.04,
+          0.05,
+          0.06,
+          0.07,
+          0.08,
+          0.09,
+          0.1
+        ]
+      },
+      "status": "completed"
+    },
+    "provenance": {
+      "build": {
+        "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
+        "compiler": "conda-forge GNU Fortran 13.4.0 via Open MPI wrapper",
+        "flags": "-cpp -DNETCDF -ffree-line-length-none -fopenmp -O2"
+      },
+      "execution": {
+        "elapsed_wall_seconds": 60.5,
+        "exit_code": 0,
+        "gpu_used": false,
+        "max_rss_kib": 112928,
+        "mpi_ranks": 4,
+        "omp_threads": 1,
+        "stepb_seconds": 28.1953,
+        "swaps": 0,
+        "timeout_cleanup_seconds": 30,
+        "timeout_seconds": 300
+      },
+      "input": {
+        "baseline_sha256": "1da9cc2877c6c22ad2028d1b91155e38c8c0199a7ce3bc4a052d586d766a731e",
+        "changes": [
+          "nstep 2 -> 1 (one outer-block cap)",
+          "lcurrent_drive_diag false/default -> true"
+        ],
+        "run_sha256": "78fcb9e961bffa01631ee2d2dda35fa5ad3405c6bc3d80196f0d95cca80cdb68",
+        "unchanged": {
+          "dt_b": 0.0001,
+          "eta0": 0.001,
+          "eta1": 0.0,
+          "eta_diff": 1.0,
+          "history": true,
+          "kappa_divb": 0.0001,
+          "mpi": "1x1x4",
+          "nenergyb": 100,
+          "nrefb": 100,
+          "nsmoothb": 1,
+          "nstepb": 1000
+        }
+      },
+      "output": {
+        "diagnostic_groups": 10,
+        "field_sha256": "30c04bf36ed4a3c3bb325a9e74fcbc21ab863f91aa4aab286e3e11a085454c16",
+        "history_sha256": "427d2d9e2d5b36e89dd378ff528891d7a0665be0a82a98201429135840399c1e",
+        "input_diff_sha256": "55876dc6a0429e4423e8fef898aa901d74c75190f50195f4364e0d9b9ab972cf",
+        "last_fields_all_finite": true,
+        "last_time_code": 1.1800000000000204,
+        "resource_log_sha256": "0bccac2b58a72bb9d3b0ec38965b09a38b3a954bf4bf523fc1c08e6c2ec68162",
+        "run_log_sha256": "b068bfe6a244d2ddd0846ac3087985db09bc8f9af66e5291c3154f2023b8513a",
+        "snapshots": 20
+      },
+      "published_record_commit": "39c07fd4730b8331517b9d1ab1adfcebe5307bd0",
+      "restart": {
+        "last_time_code": 1.0800000000000185,
+        "sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+        "snapshots": 19,
+        "used_directly_in_new_isolated_run": true
+      },
+      "source": {
+        "diagnostics_patch_sha256": "a1fbb4061c9254e1d2113ed08296812e016b6e84e6ca53e34b0a255a339bfe67",
+        "portability_patch_sha256": "d83abd6596ae500538dab6b88ec30815cb4688b925db0f281fbc9cfa6c07d580",
+        "stepb_mod_sha256": "21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488",
+        "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f"
+      },
+      "warning": "The t=1.18 endpoint is an observation artifact only and must not be reused as a production restart without separate deliberation."
+    }
+  },
+  "drive_off_partial_observation": {
+    "artifact_hashes": {
+      "exit_status": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "finish_timestamp": "1b20f94a207cbfb0e441f05dd5ba330f87d02af52044cc26bbfea2671c4511dc",
+      "unchanged_restart": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+      "magnetic_history": "47818d2432023211234517a7e9e784d522e1ffbf896874286a2f5aa6ece8e8a1",
+      "preflight_manifest": "ae16b965f547061a4bbbe51a2ff3b63309603d67ccf2e4a485a5b3d6f6cb3bb2",
+      "initial_preparation_failure": "e1cb643ff1ffb15d4bab75698f5f9523340afb1b670da361e084e097cc69a8d9",
+      "resource_log": "de8d46358d0b16a5e7008d076f73bf3cf73a879608ae2c6ac18cb72428049e14",
+      "solver_stdout": "edb65d8834cda6d40588a65496c7ba0f5d25ed783fcea625a79d5db36a7d3482",
+      "start_timestamp": "f5d8db38a09596a16ffb8890e5032dbe1555e5dc707680b5767265632eaec91e",
+      "launcher_stdout": "57232a80c1aefc21c626f0f7b47ee3e7bbe0f71ee68e5431f2b04c83c438b4f7"
+    },
+    "control": {
+      "drive_off_input_sha256": "de83afa1c1f368817a1c9716f6c3396e2e53c04ede2032da9cc516f7757b52da",
+      "driven_reference_input_sha256": "78fcb9e961bffa01631ee2d2dda35fa5ad3405c6bc3d80196f0d95cca80cdb68",
+      "identical_start_restart_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+      "only_input_change": "inet0=-9.57783498652289563e+04 to inet0=0.; inet1 was already 0.",
+      "unchanged": {
+        "diagnostics": true,
+        "dt_b": 0.0001,
+        "eta0": 0.001,
+        "eta1": 0.0,
+        "eta_diff": 1.0,
+        "kappa_divb": 0.0001,
+        "lresetp": false,
+        "mpi_grid": [
+          1,
+          1,
+          4
+        ],
+        "nenergyb": 100,
+        "nrefb": 100,
+        "nsmoothb": 1,
+        "nstep": 1,
+        "nstepb": 1000,
+        "omp_threads": 1
+      }
+    },
+    "future_preflight_fix": [
+      "Create a fresh destination with install -m 0600 from the retained restart; never chmod the retained original.",
+      "Require a regular readable and writable restart/output path.",
+      "Open the destination as r+b without writing, then checksum it.",
+      "Existence/readability/checksum-verify every deck input and preserve no-clobber guards."
+    ],
+    "limitations": [
+      "The second attempt completed the block only in memory and exited nonzero during output.",
+      "No endpoint field was saved, so no endpoint field finiteness or independent field audit exists.",
+      "Trend comparison to the driven block is observational and does not certify an equilibrium or causal physical model.",
+      "Both preparation failures must remain disclosed with any use of the partial diagnostic series."
+    ],
+    "partial_diagnostics": {
+      "active_mask_cells_unique": [
+        14893.0
+      ],
+      "all_logged_values_finite": true,
+      "closure_max_relative": 1.998642405230685e-15,
+      "force_relative_first_last": [
+        0.01310679774,
+        0.0093696513034
+      ],
+      "force_residual_mean_square_code_first_last": [
+        1.0057025028e-05,
+        7.3316328961e-06
+      ],
+      "history_current_A_first_last": [
+        -17505.505041,
+        -16001.909118
+      ],
+      "samples": 10,
+      "source_and_imposed_terms_zero": true,
+      "summary_sha256": "f31bc77b9944ab6d0012e36edf0e931c91c0e632d298fa3352d5c10272554cfb",
+      "total_rate_mean_A_per_code_time_first_last": [
+        25067.1421435373,
+        18942.79972281454
+      ]
+    },
+    "preparation_failures": [
+      {
+        "attempt": 1,
+        "cause": "required deck input links were omitted from isolated directory",
+        "classification": "preparation failure before evolution",
+        "diagnostic_samples": 0,
+        "elapsed_wall_seconds": 2.1,
+        "exit_code": 1,
+        "record_sha256": "e1cb643ff1ffb15d4bab75698f5f9523340afb1b670da361e084e097cc69a8d9",
+        "restart_unchanged": true
+      },
+      {
+        "attempt": 2,
+        "cause": "retained restart copy preserved mode 0400; final NF90_WRITE failed with NetCDF HDF error",
+        "classification": "preparation failure after in-memory evolution",
+        "diagnostic_samples": 10,
+        "elapsed_wall_seconds": 65.09,
+        "exit_code": 1,
+        "max_rss_kib": 113548,
+        "saved_field_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+        "saved_field_state": "unchanged 19-snapshot t=1.08 input; no endpoint persisted",
+        "stepb_seconds": 33.7157,
+        "swaps": 0
+      }
+    ],
+    "scope": "Ten complete in-memory diagnostic samples from one 1000-update control block. No saved endpoint field, independent endpoint audit, equilibrium certificate, or successful-run claim.",
+    "status": "partial_observation_only_failed_output_write",
+    "series": {
+      "all_logged_values_finite": true,
+      "attained_pressure_cut_stats_A": [
+        [
+          -22629.5703365771,
+          -22629.5703365771,
+          -17505.50504113614,
+          -12981.93885920251
+        ],
+        [
+          -22283.10083168139,
+          -22283.10083168139,
+          -17324.98367421006,
+          -12934.96623987693
+        ],
+        [
+          -21952.03042489784,
+          -21952.03042489784,
+          -17147.85047385087,
+          -12880.80910005574
+        ],
+        [
+          -21635.58532593252,
+          -21635.58532593252,
+          -16974.12715722997,
+          -12820.23742614671
+        ],
+        [
+          -21332.9743259342,
+          -21332.9743259342,
+          -16803.81221495942,
+          -12754.04920761013
+        ],
+        [
+          -21043.39124837216,
+          -21043.39124837216,
+          -16636.8827427596,
+          -12683.063656732
+        ],
+        [
+          -20766.01756015393,
+          -20766.01756015393,
+          -16473.2961877874,
+          -12608.11258708342
+        ],
+        [
+          -20500.0253689849,
+          -20500.0253689849,
+          -16312.99204376177,
+          -12530.030315369
+        ],
+        [
+          -20244.58093638266,
+          -20244.58093638266,
+          -16155.89351021088,
+          -12449.64247020266
+        ],
+        [
+          -19998.84873579714,
+          -19998.84873579714,
+          -16001.90911782571,
+          -12367.29346522942
+        ]
+      ],
+      "attained_same_cut_stats_A": [
+        [
+          -23530.54915841492,
+          -23530.54915841492,
+          -18712.56699146974,
+          -14315.78208660495
+        ],
+        [
+          -23133.65838777872,
+          -23133.65838777872,
+          -18465.94101521307,
+          -14203.02834952036
+        ],
+        [
+          -22755.45032819817,
+          -22755.45032819817,
+          -18227.32219944123,
+          -14087.70629005065
+        ],
+        [
+          -22394.90671473201,
+          -22394.90671473201,
+          -17996.35033322524,
+          -13970.11504395602
+        ],
+        [
+          -22051.01281015138,
+          -22051.01281015138,
+          -17772.67615503439,
+          -13850.61766790935
+        ],
+        [
+          -21722.75837590403,
+          -21722.75837590403,
+          -17555.95990737699,
+          -13729.63383683417
+        ],
+        [
+          -21409.13881997938,
+          -21409.13881997938,
+          -17345.8701586609,
+          -13607.63082849053
+        ],
+        [
+          -21109.15673704583,
+          -21109.15673704583,
+          -17142.08288549001,
+          -13485.1130400538
+        ],
+        [
+          -20821.82397015806,
+          -20821.82397015806,
+          -16944.28079531902,
+          -13362.6103271455
+        ],
+        [
+          -20546.16423226149,
+          -20546.16423226149,
+          -16752.15286070164,
+          -13240.66549597838
+        ]
+      ],
+      "closure_max_abs_A_per_code_time": [
+        7.275957614183426e-11,
+        6.184563972055912e-11,
+        5.093170329928398e-11,
+        4.365574568510056e-11,
+        6.548361852765083e-11,
+        5.820766091346741e-11,
+        5.820766091346741e-11,
+        3.637978807091713e-11,
+        4.729372449219227e-11,
+        5.456968210637569e-11
+      ],
+      "closure_max_relative": [
+        1.763900788495708e-15,
+        1.572734532063253e-15,
+        1.358687770489723e-15,
+        1.221592471140539e-15,
+        1.921638826185292e-15,
+        1.790490627929631e-15,
+        1.873970985203463e-15,
+        1.224448105827499e-15,
+        1.661825922281623e-15,
+        1.998642405230685e-15
+      ],
+      "context": [
+        {
+          "iab": 1,
+          "istepb": 100,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.009999999999999995,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 200,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.01999999999999993,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 300,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.02999999999999987,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 400,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.04000000000000012,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 500,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.05000000000000041,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 600,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.06000000000000069,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 700,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.07000000000000098,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 800,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.08000000000000126,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 900,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.09000000000000155,
+          "volume0": 0.0,
+          "volume1": 0.0
+        },
+        {
+          "iab": 1,
+          "istepb": 1000,
+          "j_type": "linear",
+          "jcuts": 1.0,
+          "netj0": 0.0,
+          "netj1": 0.0,
+          "paxis": 0.00242711332551286,
+          "target_A": 0.0,
+          "timeb": 0.1000000000000018,
+          "volume0": 0.0,
+          "volume1": 0.0
+        }
+      ],
+      "force_relative": [
+        0.01310679774,
+        0.012305242226,
+        0.011600501426,
+        0.010989891393,
+        0.010475306119,
+        0.010059972701,
+        0.0097457301649,
+        0.0095309842194,
+        0.0094094401947,
+        0.0093696513034
+      ],
+      "force_residual_mean_square_code": [
+        1.0057025028e-05,
+        9.4575649443e-06,
+        8.932591438e-06,
+        8.4798036291e-06,
+        8.1005712492e-06,
+        7.797417762e-06,
+        7.5718876891e-06,
+        7.4229133105e-06,
+        7.3457658432e-06,
+        7.3316328961e-06
+      ],
+      "global_time": [
+        1.09,
+        1.1,
+        1.11,
+        1.12,
+        1.13,
+        1.14,
+        1.15,
+        1.16,
+        1.17,
+        1.18
+      ],
+      "history_positive_pressure_current_A": [
+        -17505.505041,
+        -17324.983674,
+        -17147.850474,
+        -16974.127157,
+        -16803.812215,
+        -16636.882743,
+        -16473.296188,
+        -16312.992044,
+        -16155.89351,
+        -16001.909118
+      ],
+      "marker_counts": {
+        "cleaning": 10,
+        "closure": 10,
+        "context": 10,
+        "ideal": 10,
+        "imposed": 10,
+        "mask": 10,
+        "pressure": 10,
+        "response": 10,
+        "same": 10,
+        "source": 10,
+        "sum": 10,
+        "total": 10
+      },
+      "rate_mean_A_per_code_time": {
+        "cleaning": [
+          2.799197998279249e-28,
+          -5.292433167072373e-28,
+          9.561568716044082e-28,
+          -9.639276694887768e-28,
+          -5.934362922871627e-29,
+          -9.248960242304633e-29,
+          5.502231550258727e-28,
+          1.19674235326743e-28,
+          2.956522111247277e-28,
+          2.310315455681e-28
+        ],
+        "ideal": [
+          2766.49746546412,
+          2685.38053326299,
+          2607.771641647036,
+          2534.272535358029,
+          2465.482267727292,
+          2401.991161523783,
+          2344.37426029892,
+          2293.185263538354,
+          2248.951610442163,
+          2212.170976129271
+        ],
+        "imposed": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "response": [
+          22300.64467807319,
+          21562.88076105193,
+          20858.64553196842,
+          20186.10691933342,
+          19543.58230571107,
+          18929.52135519523,
+          18342.4893233261,
+          17781.15121356787,
+          17244.25708487314,
+          16730.62874668527
+        ],
+        "sum": [
+          25067.1421435373,
+          24248.26129431491,
+          23466.41717361546,
+          22720.37945469146,
+          22009.06457343837,
+          21331.51251671901,
+          20686.86358362502,
+          20074.33647710623,
+          19493.2086953153,
+          18942.79972281454
+        ],
+        "total": [
+          25067.1421435373,
+          24248.26129431492,
+          23466.41717361546,
+          22720.37945469145,
+          22009.06457343836,
+          21331.51251671902,
+          20686.86358362503,
+          20074.33647710623,
+          19493.20869531531,
+          18942.79972281454
+        ]
+      },
+      "samples": 10,
+      "source_cut_stats_A": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "source_mask_stats": [
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301948830620697,
+          0.7722518151923246
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301860162659333,
+          0.772210042844568
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.630177132879988,
+          0.7721659223207213
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.630168290377126,
+          0.7721196061486917
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301595312879307,
+          0.7720712796017087
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301508858245344,
+          0.772021165705872
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301423743994887,
+          0.7719695281794289
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301340099499803,
+          0.771916672150869
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301257999999414,
+          0.7718629427303049
+        ],
+        [
+          14893.0,
+          0.0,
+          0.9999563660074586,
+          0.6301177484142698,
+          0.7718087216924042
+        ]
+      ],
+      "timeb": [
+        0.01,
+        0.02,
+        0.03,
+        0.04,
+        0.05,
+        0.06,
+        0.07,
+        0.08,
+        0.09,
+        0.1
+      ]
+    },
+    "cut_stat_columns": [
+      "first_cut",
+      "minimum",
+      "mean",
+      "maximum"
+    ],
+    "source_mask_columns": [
+      "active_cells",
+      "s_min",
+      "s_max",
+      "Bphi_min_normalized",
+      "Bphi_max_normalized"
+    ],
+    "source": {
+      "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+      "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
+      "stepb_mod_sha256": "21aa3e90830b8be8166cfca21f845f29cd8b7638a639b0ddc6123b46cac0e488"
+    }
+  },
+  "drive_off_persisted_control": {
+    "status": "completed_with_readable_endpoint",
+    "exit_code": 0,
+    "initial_snapshot_count": 19,
+    "final_snapshot_count": 20,
+    "initial_code_time": 1.0800000000000185,
+    "final_code_time": 1.1800000000000204,
+    "all_endpoint_fields_finite": true,
+    "endpoint_fields": {
+      "B_R": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -250.4183404950359,
+        "max": 250.4183381454328
+      },
+      "B_phi": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -160.71201552147318,
+        "max": 128.77673461653106
+      },
+      "B_Z": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -100.46793070659021,
+        "max": 267.32165172918826
+      },
+      "P": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": 0.0,
+        "max": 0.17040731583375143
+      },
+      "v_R": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -0.008164333170400708,
+        "max": 0.013134080721843034
+      },
+      "v_phi": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -0.0040717608548509095,
+        "max": 0.004070173613516807
+      },
+      "v_Z": {
+        "shape": [
+          32,
+          64,
+          64
+        ],
+        "min": -0.009520577585884114,
+        "max": 0.009510899912699372
+      }
+    },
+    "source_restart_sha256": "98111d342f3fdad33bce38733076f085ab659cd2668bf5de9cbbc0aca1ee7938",
+    "endpoint_sha256": "9760ebbe49e8d4e1c481a0c45c951b133d72e7adafe9bd281d0aeffafad7dde7",
+    "input_sha256": "de83afa1c1f368817a1c9716f6c3396e2e53c04ede2032da9cc516f7757b52da",
+    "binary_sha256": "f2e2ac79ef5a5f26868f7179523cbed3c8a811058af23dbd5a210daa78689360",
+    "log_sha256": "aeb2c43196c1c9ea8c8dd8c1a01d32414c04135ee26d45b1955644826ea5b559",
+    "history_sha256": "47818d2432023211234517a7e9e784d522e1ffbf896874286a2f5aa6ece8e8a1",
+    "preflight_sha256": "3c833512933dd1124e8796532b061846d734724bdc8c8f00f121165a56c56639",
+    "source_restart_mode": "0o400",
+    "diagnostic_samples": 10,
+    "endpoint_field_units": "native stored values; no conversion or plasma-region classification in this readback",
+    "wall_seconds": 61.1,
+    "max_rss_kib": 113396,
+    "non_timing_diagnostic_lines_identical_to_partial_run": 160,
+    "history_byte_identical_to_partial_run": true,
+    "preflight_script_sha256": "eeb9bd1b23b3dbdc39f4e1bc306bb80ad428a557e050e849d46a716d267a96f1",
+    "limitations": [
+      "Persistence/readback qualification only; no equilibrium certificate.",
+      "No independent endpoint sampling, force, support or topology audit yet.",
+      "Raw endpoint requires public hosting for independent reproduction."
+    ]
+  },
+  "endpoint_control_field_audit": {
+    "driven": {
+      "restart_sha256": "30c04bf36ed4a3c3bb325a9e74fcbc21ab863f91aa4aab286e3e11a085454c16",
+      "snapshot_sha256": "bdeb79b205adf39ffd603b9a848c706c6ede061ff34b87e45ef7df442737cabf",
+      "code_time": 1.1800000000000204,
+      "input_sha256": "78fcb9e961bffa01631ee2d2dda35fa5ad3405c6bc3d80196f0d95cca80cdb68",
+      "sample_total_sha256": "d7ac0285e28f932620460bf88ac1051725825cdc9b09586cb152dfe5e04a74ea",
+      "sample_response_sha256": "0314f2ed1b60f6935cf392e98bbdc49e6e56d6940b83e312d4ed62b204a166ec",
+      "response_rms_T": 0.012917729789766304
+    },
+    "drive_off": {
+      "restart_sha256": "9760ebbe49e8d4e1c481a0c45c951b133d72e7adafe9bd281d0aeffafad7dde7",
+      "snapshot_sha256": "5857d94b17f4c4cfe8f8578fcdfbfb39d3dacab16eeb760dba21a60b5fa3bf67",
+      "code_time": 1.1800000000000204,
+      "input_sha256": "de83afa1c1f368817a1c9716f6c3396e2e53c04ede2032da9cc516f7757b52da",
+      "sample_total_sha256": "ccb3282da45d64a989b2ce08b9b63da86b853413869785f6c8937b910a50d40b",
+      "sample_response_sha256": "a7f961d7974a8fb01a8041ebbc1da46c117de4d710794b81ec289bc95b844dd0",
+      "response_rms_T": 0.011198311273359648
+    },
+    "vacuum_sha256": "392689512f2a9803fbf8a69e9812c8dd9af865a35426197593a72a4c7abab5c2",
+    "control_field_difference": {
+      "rms_vector_delta_T": 0.00202590723013511,
+      "max_vector_delta_T": 0.005135946575356406
+    },
+    "source": {
+      "sampler_sha256": "9d6b0b1f6458bece73f4619a59356473eb1e792d601dcab3b6b65e409fc52d9d",
+      "sampling_helper_sha256": "f615b2407d82953ddcff6cfd6368a558c5ebc66aca0b885bdd9514d3edbfa0f0",
+      "targets_sha256": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5",
+      "extractor_sha256": "8ea0a15c640ff4d9b1e2395e3f80fd826fff6c91b5dda5116f340ffab04b447b",
+      "audit_driver_sha256": "b4934f9db99600a7c207d5721819828405a34bf42d22a9e44455d2f2c857f8b3",
+      "native_writer_sha256": "ece2e96d9cd1b2158a2d2466111f4340a0ab74c1a9a642fab0730b051427da31"
+    },
+    "scope": "Matched code-time1.18 driven/drive-off controls on one grid; native cylindrical component samples at identical Cartesian targets. Not an inter-code comparison or equilibrium certificate.",
+    "limitations": [
+      "Exteriority to relaxed plasma-current support is not certified.",
+      "No field/interpolation/grid convergence or topology qualification.",
+      "All-domain extrema near coils cannot be interpreted as plasma-region fields."
+    ],
+    "samples_sha256": "56eb9f4bdea84a792449477ffa301934130ddc3326190cff1d2040d21c4c20fe",
+    "samples": "data/endpoint-controls.npz",
+    "target_count": 192,
+    "component_order": [
+      "B_R",
+      "B_phi",
+      "B_Z"
+    ],
+    "extraction": "Final native time slice: B_cyl=stack(B_R,B_phi,B_Z); P_mu0_Pa=P; R,phi,Z from the hash-matched vacuum grid after bounds/mtor validation.",
+    "units": "Native writer multiplies code magnetic field by b0 before storage (tesla), pressure by b0 squared (mu0 Pa). No additional field rescaling during extraction.",
+    "independent_checks": {
+      "target_coordinates_identical_to_startup_archive": true,
+      "vacuum_max_abs_difference_from_startup_T": 3.9968028886505635e-15,
+      "cartesian_rotated_rms_delta_T": 0.0020259072301351106,
+      "response_difference_max_roundoff_T": 1.6940658945086007e-21
+    }
+  },
+  "endpoint_support_audit": {
+    "scope": "Read-only target pressure/wall support audit; no simulation.",
+    "inputs": {
+      "driven_snapshot": "bdeb79b205adf39ffd603b9a848c706c6ede061ff34b87e45ef7df442737cabf",
+      "drive_off_snapshot": "5857d94b17f4c4cfe8f8578fcdfbfb39d3dacab16eeb760dba21a60b5fa3bf67",
+      "native_samples": "56eb9f4bdea84a792449477ffa301934130ddc3326190cff1d2040d21c4c20fe",
+      "limiter": "0f4d81fc679eb674d76619b55bffdd73843d39e283a6d9d7aaf388e7d3a5c8d1",
+      "targets": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5"
+    },
+    "native_conventions": {
+      "interpolator": "MAGVAL spline_mod:spl3df fourth-order 8x8x8 tensor formula",
+      "stencil_indices": "For each dimension, base=int((x-min)/h), then base-2 through base+5; upper-end base clamp follows spl3df.",
+      "phi": "mgval1 folding into [0,2*pi/mtor), followed by MAGVAL periodic ghost-plane mapping",
+      "pressure_positive": "stored native pressure > 0.0, matching HINT pressure-mask comparisons",
+      "limiter_inside": "stored limiter > 0.0, matching HINT read_limiter",
+      "active_weight": "abs(tensor coefficient) > 1.0e-12",
+      "rz_ghost_planes_used": false
+    },
+    "validation": {
+      "reconstructed_native_field_max_vector_error_T": 1.5263043145882805e-14,
+      "reconstructed_native_field_rms_vector_error_T": 4.5102814928569735e-15,
+      "pressure_arrays_driven_drive_off_bitwise_equal": true,
+      "minimum_positive_pressure": 0.000209491782787658,
+      "maximum_pressure": 0.17040731583375143,
+      "limiter_unique_values": [
+        0.0,
+        1.0
+      ]
+    },
+    "all_targets": {
+      "count": 192,
+      "pressure_zero_full_stencil_targets": 5,
+      "pressure_zero_active_stencil_targets": 7,
+      "wall_full_stencil_inside_targets": 14,
+      "wall_full_active_stencil_inside_targets": 24,
+      "negative_interpolated_pressure_targets": 53,
+      "nearest_limiter_node_inside_targets": 192,
+      "enclosing_eight_corner_cell_inside_targets": 188
+    },
+    "offset_blocks": [
+      {
+        "offset_block": 0,
+        "offset_over_Aminor": 0.05,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 0,
+        "pressure_zero_active_stencil_targets": 0,
+        "wall_full_stencil_inside_targets": 7,
+        "wall_full_active_stencil_inside_targets": 14
+      },
+      {
+        "offset_block": 1,
+        "offset_over_Aminor": 0.15,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 0,
+        "pressure_zero_active_stencil_targets": 0,
+        "wall_full_stencil_inside_targets": 5,
+        "wall_full_active_stencil_inside_targets": 6
+      },
+      {
+        "offset_block": 2,
+        "offset_over_Aminor": 0.3,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 1,
+        "pressure_zero_active_stencil_targets": 2,
+        "wall_full_stencil_inside_targets": 2,
+        "wall_full_active_stencil_inside_targets": 4
+      },
+      {
+        "offset_block": 3,
+        "offset_over_Aminor": 0.5,
+        "target_count": 48,
+        "pressure_zero_full_stencil_targets": 4,
+        "pressure_zero_active_stencil_targets": 5,
+        "wall_full_stencil_inside_targets": 0,
+        "wall_full_active_stencil_inside_targets": 0
+      }
+    ],
+    "limitation": "Pressure support is not relaxed current support. The source-current ss mask was not retained; vacuum flux is an initial map and is not a substitute.",
+    "samples": "data/endpoint-support.npz",
+    "samples_sha256": "2ba0fa630b595f67e788b3d24cd4cd5823bf4c6090346214eec54a9f099a30e3",
+    "interpretation": "Stencil occupancy is not pointwise plasma membership. Positive pressure is not the imposed-current or attained-current support. Negative interpolated pressure can be high-order ringing."
+  },
+  "source_eligibility_diagnostic": {
+    "schema": 1,
+    "interpretation": "Bounded native HINT validation of an optional amplitude-independent imposed-current eligibility diagnostic. The mask is a safe eligibility superset and does not imply nonzero imposed or attained current.",
+    "source": {
+      "upstream_branch": "current",
+      "upstream_commit": "bf31fc39f7179bdd91d84319c51c68e2f6fff25f",
+      "upstream_tree": "cb149a9064330584728322be3df1e9e26bf9c3eb",
+      "combined_diagnostics_patch_sha256": "27bfa9805b5eca781cb9ec451f3f69a45fbc21a7d6629e62c9cd6d7604e2d34f",
+      "incremental_review_patch_sha256": "79e53022de69e769e808db02603220d12c0abaa648152c6a834d6f824ae97d50",
+      "final_source_sha256": {
+        "src/HINT/stepb_mod.f90": "4f383616ff56d85255e378837b1511b637d854d985bed6159c3396eace33c631",
+        "src/HINT/write_eq_field.f90": "2145caac9e00296906cb71427f6ae2a23a4d35e7a09858f15a1ed2d41db271d9"
+      },
+      "source_set_sha256": "84ba79f1474702118d50e74d27e79db4309563785aac27d18a2e392d1cbeb79e"
+    },
+    "build": {
+      "mode": "Release",
+      "forced_rebuild": true,
+      "serial_build": true,
+      "binary_sha256": "2cce6c0affbab718a3178efa1c636f72af495dfa1eecafe70d34a98f7976dddf",
+      "binary_bytes": 394776,
+      "build_log_sha256": "a884fc92a04a8026d282a7878336114aa4dde9e632a11f72805ec6cf18b95351",
+      "build_config_sha256": "6736028cebced29ab13bf1798e1bd02c5e2b0b6b1bffa7d79bea2a5d8591ce9a",
+      "build_helper_sha256": "e19b882e43fa1c7467e0a2b14864740ae064a40ad6e63d45008f3150064f7357",
+      "compiler": "GNU Fortran 13.4.0",
+      "compiler_driver_sha256": "2b8d777cefc393e256dfb4dfe4f29100dba6c421f1d4e5cc3fd30bf3cea66431"
+    },
+    "final_executions": {
+      "default_off_serial": {
+        "mpi_ranks": 1,
+        "omp_threads": 1,
+        "exit_code": 0,
+        "wall_seconds": 2.447405541,
+        "input_sha256": "3e8d2a236d4a92faad860b75e6aadd45eff8028737ec22bcb086fefb69148026",
+        "log_sha256": "24bcfea989a087f0223e354f4e47d4035bff7a9532e2b54be7031304462945dc",
+        "output_sha256": "d2335d3ff36bca923f01d0d6e8c68e122d62c50cc60e0a5be6d493c0f4c76253",
+        "source_support_schema_present": false
+      },
+      "enabled_serial": {
+        "mpi_ranks": 1,
+        "mpi_decomposition": [
+          1,
+          1,
+          1
+        ],
+        "omp_threads": 1,
+        "exit_code": 0,
+        "wall_seconds": 2.442893792,
+        "input_sha256": "23011cfcbf91788addcb0a3fe550c382c1e5cb0071aa3637b39576e5c12f78b1",
+        "log_sha256": "3de8bb13f1de678d7e3a2a98e5c0749ea4daf5005ab0774ef7dc6c804878ac98",
+        "output_sha256": "611ab65af176f7dfd19729de82cafda4d8e64492a83cd2f4861a7121f4493cdb"
+      },
+      "enabled_four_rank_toroidal": {
+        "mpi_ranks": 4,
+        "mpi_decomposition": [
+          1,
+          1,
+          4
+        ],
+        "omp_threads": 1,
+        "exit_code": 0,
+        "wall_seconds": 1.010833458,
+        "input_sha256": "46cbd2ea43e1c4ff5ac3992ec2db44eaf8192ab57a9956c2db2d08d664b5eb95",
+        "log_sha256": "c4db05c7f109cd90c8fdaaa488e21597c400528614a34b7578691f8ca6235b4e",
+        "output_sha256": "611ab65af176f7dfd19729de82cafda4d8e64492a83cd2f4861a7121f4493cdb"
+      }
+    },
+    "validation": {
+      "default_off_vs_enabled_serial": {
+        "bitwise_equal_variables": [
+          "t_snap",
+          "B_R",
+          "B_phi",
+          "B_Z",
+          "v_R",
+          "v_phi",
+          "v_Z",
+          "P"
+        ],
+        "maximum_absolute_difference": 0.0
+      },
+      "enabled_serial_vs_four_rank": {
+        "files_byte_identical": true,
+        "bitwise_equal_variables": [
+          "t_snap",
+          "B_R",
+          "B_phi",
+          "B_Z",
+          "v_R",
+          "v_phi",
+          "v_Z",
+          "P",
+          "source_support",
+          "source_support_jcuts",
+          "source_support_trace_time"
+        ],
+        "maximum_absolute_difference": 0.0,
+        "current_drive_source_mask_counts_serial": [
+          11226,
+          11226,
+          11576,
+          11576
+        ],
+        "current_drive_source_mask_counts_four_rank": [
+          11226,
+          11226,
+          11576,
+          11576
+        ]
+      },
+      "netcdf_schema": {
+        "source_support_dtype": "int8",
+        "source_support_python_dimensions": [
+          "time",
+          "phi",
+          "Z",
+          "R"
+        ],
+        "source_support_shape": [
+          3,
+          32,
+          64,
+          64
+        ],
+        "source_support_fill_value": -127,
+        "initial_record_entirely_fill": true,
+        "subsequent_record_values": [
+          0,
+          1
+        ],
+        "eligible_ones_by_written_record": [
+          11226,
+          11576
+        ],
+        "ineligible_zeros_by_written_record": [
+          119846,
+          119496
+        ],
+        "two_cell_R_Z_boundary_nonzero_count": 0,
+        "jcuts_by_record": [
+          null,
+          1.0,
+          1.0
+        ],
+        "trace_time_by_record": [
+          null,
+          0.0,
+          0.0002
+        ],
+        "endpoint_time_by_record": [
+          0.0,
+          0.0002,
+          0.0004
+        ],
+        "definition_attribute": "1 where R index=3:nr-2, Z index=3:nz-2, all phi, and frozen flux is less than source_support_jcuts; 0 otherwise",
+        "indexing": "Fortran one-based",
+        "threshold_comparison": "strict less-than",
+        "scope": "safe eligibility superset; does not imply nonzero imposed current"
+      },
+      "legacy_default_off_to_enabled_follow": {
+        "exit_code": 0,
+        "wall_seconds": 1.422575083,
+        "input_sha256": "4d088aca4bb0517889bee5342f4b138593bd99763f7b03b1ce68cf04e4712c7c",
+        "log_sha256": "ae511f7ac7601da3bbccf4c0eafff7e2b86dfe51a72445c5e662d45e893b936b",
+        "output_sha256": "502e6d1d346c75e0b30d6aedbac44a185effbd9cd00b86b2cf16895fbf0291b6",
+        "old_records_entirely_fill": 3,
+        "new_record_eligible_ones": 11868,
+        "new_record_ineligible_zeros": 119204,
+        "new_record_trace_time": 0.0004,
+        "new_record_endpoint_time": 0.0006000000000000001,
+        "native_follow_read_succeeded": true
+      },
+      "enabled_to_disabled_follow": {
+        "exit_code": 0,
+        "wall_seconds": 1.364736,
+        "input_sha256": "6fdfb9e08eafa75ce801555da2003b9f6ce87bac40e2e9f0bad5635c585c3db0",
+        "log_sha256": "4a451353843be8b2562298c4a32ea556cdb05e871ef7e887edd8cab72a7b850c",
+        "output_sha256": "51ba6b3db9ff71409c4eebec01991524b9905b3dc23a1040a1eace2dc221cedb",
+        "new_mask_record_entirely_fill": true,
+        "new_jcuts_record_fill": true,
+        "new_trace_time_record_fill": true,
+        "stale_values_reused": false
+      },
+      "partial_schema_rejection": {
+        "exit_code": 1,
+        "wall_seconds": 1.348445208,
+        "log_sha256": "92e3d8366a2d13b1fd9baf02c038c146458d3eb70a4b7c39229a72ef39aeb879",
+        "message": "write_eq_field: partial source-support schema"
+      },
+      "wrong_type_schema_rejection": {
+        "exit_code": 1,
+        "wall_seconds": 1.415578917,
+        "log_sha256": "00dea1c766534bb7d1adedf324963963ab1659c633033696b9c4dba05d1bbc36",
+        "message": "write_eq_field: incompatible source_support type or rank"
+      }
+    },
+    "excluded_pre_metadata_executions": {
+      "reason": "These runs used the earlier binary before the exact one-based eligibility-bound attribute was added. Their numerical path is unchanged, but their binary and output hashes are retained only as prototype provenance and are not final validation evidence.",
+      "binary_sha256": "bbc4d5021be38c3c7bd00fa366637e968a0eb2c16f6dce2589797e59233e8b56",
+      "source_set_sha256": "d77262de0bcacd44fb7cc177f2c1f4169cab7e45bc28d2fabe2846d794553259",
+      "default_off_output_sha256": "d2335d3ff36bca923f01d0d6e8c68e122d62c50cc60e0a5be6d493c0f4c76253",
+      "enabled_output_sha256": "0fc47d72716d0b9e5a949985a1367917b1ac3614e163223ea11345b7aacc7441"
+    },
+    "limitations": [
+      "This validates diagnostic semantics, output compatibility, and MPI decomposition invariance on a short zero-drive fixture; it is not an equilibrium or exterior-field certificate.",
+      "The mask records eligibility under the frozen flux threshold, not actual nonzero imposed current and not attained response-current support.",
+      "HDF5, binary output, and standalone snapshot files are outside this diagnostic implementation."
+    ],
+    "parent_review": {
+      "combined_patch_reproduces_tested_sources": true,
+      "independent_checks": [
+        "off/on physical-array bitwise parity",
+        "serial/four-rank whole-file byte parity",
+        "initial fill and valid 0/1 mask values",
+        "two-cell R/Z boundary exclusions",
+        "mask counts and trace times"
+      ]
+    }
+  }
+}

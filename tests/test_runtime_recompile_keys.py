@@ -1,7 +1,7 @@
 """Lane recompile keys of :class:`vmex.core.solver.SolverRuntime`.
 
 Pins the perf contract that host loop-driver configuration never keys a lane
-recompile (lower-only — no solves are run here):
+recompile, with lower-only checks and a small compiled-loop regression:
 
 - ``nstep`` (print cadence) and ``time_step0`` (initial DELT) are call
   arguments of ``_run_loop``/``_initial_carry``, NOT runtime fields — as
@@ -41,8 +41,8 @@ def test_loop_driver_scalars_are_not_runtime_fields() -> None:
 def test_initial_delt_does_not_change_lane_structure() -> None:
     """Two initial carries differing only in DELT share one lane key.
 
-    The structural key (treedef + leaf avals) is exactly what selects a
-    compiled lane executable, so equality here IS executable reuse.
+    This pins structure, not placement: commitment and sharding can also
+    distinguish JAX executables (tested with actual calls below).
     """
     rt = _small_runtime()
     state = solver._initial_state(rt.setup)
@@ -77,8 +77,128 @@ def test_ftol_variants_share_one_structural_key_and_lowering() -> None:
 
     # Lower-only executable-identity pin: the ftol scalar is an ARGUMENT of
     # the lowered program, never a baked constant, so the lowered text is
-    # byte-identical across tolerance variants (one compile serves both).
+    # byte-identical across tolerance variants at compatible placement.
     text_a = solver._block_lane.lower(carry_a, rt_a).as_text()
     text_b = solver._block_lane.lower(carry_b, rt_b).as_text()
     assert text_a == text_b
     assert not np.array_equal(float(rt_a.ftol), float(rt_b.ftol))
+
+
+def test_mixed_commitment_reuses_lane_without_donating_inputs():
+    """Predictor/axis-retry placement must not create another executable."""
+    import jax
+
+    with jax.disable_jit(False):
+        rt = _small_runtime(1.0)
+        state = solver._initial_state(rt.setup)
+        target = state.R_cos.sharding
+        originals = [np.asarray(x).copy() for x in jax.tree.leaves((state, rt))]
+        solver._block_lane.clear_cache()
+        results = []
+        counts = []
+        for mixed in (False, True):
+            seed = dataclasses.replace(
+                state, R_cos=jax.device_put(state.R_cos, target)
+            ) if mixed else state
+            runtime = dataclasses.replace(
+                rt, rcon0=jax.device_put(rt.rcon0, target)
+            ) if mixed else rt
+            result = solver._run_loop(
+                seed, runtime, mode="cli", ijacob=0, verbose=False, emit=None,
+                time_step0=0.9, nstep=200,
+                initial_residuals=(
+                    tuple(jax.device_put(np.asarray(1.0), target) for _ in range(3))
+                    if mixed else None
+                ),
+            )
+            jax.block_until_ready(result)
+            results.append(result)
+            counts.append(solver._block_lane._cache_size())
+        assert counts == [1, 1]
+        for x, y in zip(jax.tree.leaves(results[0]), jax.tree.leaves(results[1])):
+            np.testing.assert_array_equal(x, y)
+            assert x.sharding == target and y.sharding == target
+        for expected, actual in zip(originals, jax.tree.leaves((state, rt))):
+            np.testing.assert_array_equal(actual, expected)
+
+
+def test_default_device_context_reuses_lane():
+    """A committed solve inside and outside a default-device context shares one lane executable."""
+    import jax
+
+    with jax.disable_jit(False):
+        rt = _small_runtime(1.0)
+        state = solver._initial_state(rt.setup)
+        device = next(iter(state.R_cos.devices()))
+        solver._block_lane.clear_cache()
+        results, sizes = [], []
+        for inside in (False, True):
+            def run():
+                return solver._run_loop(
+                    state, rt, mode="cli", ijacob=0, verbose=False, emit=None,
+                    time_step0=0.9, nstep=200,
+                )
+            if inside:
+                with jax.default_device(device):
+                    result = run()
+            else:
+                result = run()
+            jax.block_until_ready(result)
+            results.append(result)
+            sizes.append(solver._block_lane._cache_size())
+        assert sizes == [1, 1]
+        for x, y in zip(jax.tree.leaves(results[0]), jax.tree.leaves(results[1])):
+            np.testing.assert_array_equal(x, y)
+
+
+def test_failed_prefetched_executable_falls_back_to_the_lane(monkeypatch):
+    """A prefetched executable that rejects its arguments hands the rung to the jitted lane."""
+    import jax
+
+    def run():
+        return solver._run_loop(
+            state, rt, mode="cli", ijacob=0, verbose=False, emit=None,
+            time_step0=0.9, nstep=200,
+        )
+
+    def rejecting(carry, runtime):
+        raise TypeError("argument drift")
+
+    class Prefetched(dict):
+        def get(self, key, default=None):
+            return rejecting
+
+    with jax.disable_jit(False):
+        rt = _small_runtime(1.0)
+        state = solver._initial_state(rt.setup)
+        expected = run()
+        monkeypatch.setattr(solver, "_LANE_EXECUTABLES", Prefetched())
+        fallback = run()
+    for x, y in zip(jax.tree.leaves(expected), jax.tree.leaves(fallback)):
+        np.testing.assert_array_equal(x, y)
+
+
+def test_mixed_named_sharding_is_not_normalized(monkeypatch):
+    """A single-device state must not overwrite another leaf's named layout."""
+    import jax
+
+    rt = _small_runtime(1.0)
+    state = solver._initial_state(rt.setup)
+    target = next(iter(state.R_cos.devices()))
+    named = jax.sharding.NamedSharding(
+        jax.sharding.Mesh(np.asarray([target]), ("device",)),
+        jax.sharding.PartitionSpec(),
+    )
+    rt = dataclasses.replace(rt, rcon0=jax.device_put(rt.rcon0, named))
+    seen = []
+
+    def lane(carry, runtime):
+        seen.append(runtime.rcon0.sharding)
+        return dataclasses.replace(carry, done=True, iteration=0, ier=11)
+
+    monkeypatch.setattr(solver, "_block_lane", lane)
+    solver._run_loop(
+        state, rt, mode="cli", ijacob=0, verbose=False, emit=None,
+        time_step0=0.9, nstep=200,
+    )
+    assert seen == [named]

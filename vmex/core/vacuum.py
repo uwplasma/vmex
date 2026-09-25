@@ -766,7 +766,6 @@ def _analytic_terms(
     lmax = mf + nf
     tlp_all = _tl_stable(adp, adm, cma, sqrtc, sqrta, tlp0, lmax)
     tlm_all = _tl_stable(adm, adp, cma, sqrtc, sqrta, tlm0, lmax)
-    zero_t = jnp.zeros_like(tlp0)
 
     snr = sign * Rf * Zuf
     snv = sign * (Ruf * Zvf - Rvf * Zuf)
@@ -785,85 +784,45 @@ def _analytic_terms(
     ra1p = azp1u / adp
     ra1m = azm1u / adm
 
-    bsin = jnp.zeros((mf + 1, 2 * nf + 1), dtype=Rf.dtype)
-    bcos = jnp.zeros((mf + 1, 2 * nf + 1), dtype=Rf.dtype)
-    gsin = jnp.zeros((mf + 1, 2 * nf + 1, npts), dtype=Rf.dtype) if include_kernel else None
-    gcos = jnp.zeros((mf + 1, 2 * nf + 1, npts), dtype=Rf.dtype) if include_kernel else None
-    cmns = np.asarray(basis.cmns)  # static: skip exact-zero coefficients
+    # Contract recurrence orders before projecting onto Fourier modes.  The
+    # former ell/m/n scatter loop expanded the differentiated NESTOR program
+    # with every nonzero cmns coefficient, overwhelming CPU compilation.
+    m = np.asarray(basis.xmpot, dtype=np.int64)
+    n = np.asarray(basis.n_raw, dtype=np.int64)
+    weights = jnp.asarray(np.asarray(basis.cmns)[:, m, np.abs(n)], dtype=Rf.dtype)
+    weights = jnp.where(jnp.asarray((m == 0) & (n < 0))[None, :], 0., weights)
 
-    for ell in range(0, mf + nf + 1):
-        fl = float(ell)
-        sign1 = 1.0 if ell % 2 == 0 else -1.0
-        tlp = tlp_all[ell]
-        tlm = tlm_all[ell]
-        tlp_prev = tlp_all[ell - 1] if ell > 0 else zero_t
-        tlm_prev = tlm_all[ell - 1] if ell > 0 else zero_t
-        tlpm = tlp + tlm
-        slp = slm = slpm = None
-        if include_kernel:
-            slp = (r1p * fl + ra1p) * tlp + r0p * fl * tlp_prev \
-                - (r1p + r0p) / sqrtc + sign1 * (r0p - r1p) / sqrta
-            slm = (r1m * fl + ra1m) * tlm + r0m * fl * tlm_prev \
-                - (r1m + r0m) / sqrtc + sign1 * (r0m - r1m) / sqrta
-            slpm = slp + slm
-        for nabs in range(0, nf + 1):
-            zv = float(nabs) * zeta
-            cosv = jnp.cos(zv)
-            sinv = jnp.sin(zv)
-            for m in range(0, mf + 1):
-                cm = float(cmns[ell, m, nabs])
-                if cm == 0.0:
-                    continue
-                mu = float(m) * theta
-                sinu = jnp.sin(mu)
-                cosu = jnp.cos(mu)
-                col_p = int(nabs + nf)
-                col_m = int((-nabs) + nf)
-                if nabs == 0 or m == 0:
-                    sinp = (sinu * cosv - sinv * cosu) * cm
-                    bsin = bsin.at[m, col_p].add(jnp.sum(tlpm * bex * sinp))
-                    if include_kernel:
-                        gsin = gsin.at[m, col_p, :].add(slpm * sinp)
-                    if lasym:
-                        cosp = (cosu * cosv + sinv * sinu) * cm
-                        bcos = bcos.at[m, col_p].add(jnp.sum(tlpm * bex * cosp))
-                        if include_kernel:
-                            gcos = gcos.at[m, col_p, :].add(slpm * cosp)
-                else:
-                    sinp0 = sinu * cosv * cm
-                    temp = -cosu * sinv * cm
-                    sinm = sinp0 - temp
-                    sinp = sinp0 + temp
-                    # analyt.f calls analysesum2 with swapped (slm, tlm,
-                    # slp, tlp) order; preserved for exact parity.
-                    bsin = bsin.at[m, col_p].add(jnp.sum(tlm * bex * sinp))
-                    bsin = bsin.at[m, col_m].add(jnp.sum(tlp * bex * sinm))
-                    if include_kernel:
-                        gsin = gsin.at[m, col_p, :].add(slm * sinp)
-                        gsin = gsin.at[m, col_m, :].add(slp * sinm)
-                    if lasym:
-                        cosp0 = cosu * cosv * cm
-                        temp2 = sinu * sinv * cm
-                        cosm = cosp0 - temp2
-                        cosp = cosp0 + temp2
-                        bcos = bcos.at[m, col_p].add(jnp.sum(tlm * bex * cosp))
-                        bcos = bcos.at[m, col_m].add(jnp.sum(tlp * bex * cosm))
-                        if include_kernel:
-                            gcos = gcos.at[m, col_p, :].add(slm * cosp)
-                            gcos = gcos.at[m, col_m, :].add(slp * cosm)
+    def contract(plus, minus):
+        # analysesum2 swaps T/S+ and T/S-: positive n uses minus,
+        # negative n uses plus; m=0 or n=0 uses their sum.
+        p = jnp.einsum("lk,lp->kp", weights, plus, precision=jax.lax.Precision.HIGHEST)
+        q = jnp.einsum("lk,lp->kp", weights, minus, precision=jax.lax.Precision.HIGHEST)
+        axis = jnp.asarray((m == 0) | (n == 0))[:, None]
+        return jnp.where(axis, p + q, jnp.where(jnp.asarray(n > 0)[:, None], q, p))
 
-    m_j = np.asarray(basis.xmpot, dtype=np.int64)
-    col_j = np.asarray(basis.n_raw + nf, dtype=np.int64)
-    out_s = bsin[m_j, col_j]
-    gr_s = gsin[m_j, col_j, :] if include_kernel else None
+    phase = jnp.asarray(m)[:, None] * theta - jnp.asarray(n)[:, None] * zeta
+    trig = jnp.sin(phase)
     if lasym:
-        out_c = bcos[m_j, col_j]
-        bvec = jnp.concatenate([out_s, out_c], axis=0)
-        grp = (
-            jnp.concatenate([gr_s, gcos[m_j, col_j, :]], axis=0) if include_kernel else None
-        )
-        return bvec, grp
-    return out_s, gr_s
+        trig = jnp.concatenate((trig, jnp.cos(phase)), axis=0)
+    integral = contract(tlp_all, tlm_all)
+    if lasym:
+        integral = jnp.concatenate((integral, integral), axis=0)
+    bvec = jnp.sum(integral * bex * trig, axis=1)
+    if not include_kernel:
+        return bvec, None
+    ell = jnp.arange(lmax + 1, dtype=Rf.dtype)[:, None]
+    parity = jnp.where(jnp.arange(lmax + 1)[:, None] % 2 == 0, 1., -1.)
+
+    def kernel(t, r1, r0, ra1):
+        previous = jnp.concatenate((jnp.zeros_like(t[:1]), t[:-1]), axis=0)
+        return ((r1 * ell + ra1) * t + r0 * ell * previous
+                - (r1 + r0) / sqrtc + parity * (r0 - r1) / sqrta)
+
+    integral = contract(kernel(tlp_all, r1p, r0p, ra1p),
+                        kernel(tlm_all, r1m, r0m, ra1m))
+    if lasym:
+        integral = jnp.concatenate((integral, integral), axis=0)
+    return bvec, integral * trig
 
 
 def _mode_rhs_from_gsource(gsource: Array, basis: VacuumBasis) -> Array:

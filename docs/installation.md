@@ -1,15 +1,22 @@
 # Installation
 
-`pip install vmex` installs everything needed for solving, plotting, and the
-Boozer transform — no user-facing extras to remember. Verify with
-`vmex --doctor` and `vmex --test`.
+`pip install vmex` installs everything needed for solving, plotting, the
+Boozer transform and optimization with SciPy. Optional extras add coils,
+virtual casing, effective ripple, turbulence proxies and external optimizers
+(below). Verify with `vmex --doctor` and `vmex --test`.
 
 ## Requirements
 
-- Python 3.10+ (Python 3.12+ recommended for current accelerator-enabled JAX)
-- `numpy`, `jax` + `jaxlib` (0.4.36 or newer: VMEX sets the
-  `jax_logging_level` option introduced in that release), `netCDF4`,
-  `matplotlib`, `booz_xform_jax` (all installed automatically)
+- Python 3.11+, and 3.12+ recommended: jax and jaxlib 0.11 require Python 3.12,
+  so a 3.11 environment resolves JAX 0.10.2 at the newest. CI tests 3.11, 3.12
+  and 3.13.
+- Installed automatically: `numpy`, `jax` + `jaxlib` (0.9.2 or newer, the
+  oldest release CI tests), `scipy` (1.16 or newer: the optimization examples
+  pass `least_squares(callback=...)`, which SciPy 1.16 introduced),
+  `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
+  `booz_xform_jax>=0.4.0` and `solvax>=0.21.0` (the linear solvers). `import
+  vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to
+  upgrade.
 
 ## From PyPI
 
@@ -29,16 +36,24 @@ first check that `pip --version` and
 
 `vmex --test` runs the bundled fixed-boundary QH case end to end: it copies
 the packaged `input.nfp4_QH_warm_start` deck into `./vmex_test/`, solves it
-(with `FTOL_ARRAY = 1e-12` for a fast first check), writes
+(with `FTOL_ARRAY = 1e-12`), writes
 `wout_nfp4_QH_warm_start.nc`, and renders diagnostic figures into
 `vmex_test/figures/`. It also prints the equivalent manual commands so you
 can reproduce each step yourself.
 
-JAXopt and Optax are optional because SciPy and the public problem callables
-are part of the core install. Install the external-optimizer examples with:
+## Optional extras
+
+| extra | adds | used by |
+|---|---|---|
+| `vmex[coils]` | `essos>=0.17` | coil fields, free boundary from coils, single-stage examples, alpha tracing |
+| `vmex[freeb]` | `virtual-casing-jax>=0.0.8` | virtual-casing exterior fields (`VmecExtender`) |
+| `vmex[neoclassical]` | `neo-jax>=1.0.2` | effective ripple |
+| `vmex[turbulence]` | `gkx>=1.8.0` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
+| `vmex[optimizers]` | `jaxopt`, `optax` | the JAXopt and Optax example drivers |
+| `vmex[all]` | all of the above | every example |
 
 ```console
-pip install "vmex[optimizers]"
+pip install "vmex[all]"
 ```
 
 ## From conda-forge

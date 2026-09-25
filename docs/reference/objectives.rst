@@ -262,11 +262,19 @@ independent resolved grid for reporting:
        inp, max_mode=5, jac="implicit", use_ess=True)
    reported_qi = qi_report.total(result.equilibrium)
 
-Sanity anchors (CI-gated): an analytically QI field scores ``< 1e-24``, the
-bundled ``nfp1_QI`` deck scores 36x below a circular tokamak and 138x below
-the (QA, deliberately non-QI) Landreman–Paul configuration.  The measured
-single-call campaign — seed 4.5e-1 to 1.8e-2 (25x) in 17.3 minutes — is in
-:doc:`/howto/optimize-a-boundary`.  The earlier Goodman-style *wout-lane* residual
+Sanity anchors, asserted for :class:`~vmex.core.omnigenity.QIResidual` in
+``tests/test_omnigenity.py``: an analytically QI field scores ``< 1e-24``;
+the bundled ``nfp1_QI`` deck scores at least 20x below a circular tokamak,
+and lowest of the three when the (QA, deliberately non-QI) Landreman–Paul
+configuration is added.  ``examples/optimization/QI_optimization.py`` starts
+from the near-QI ``input.QI_nfp2_initial`` seed and runs one ``max_mode = 2``
+stage of 20 evaluations: on a 36-core workstation at four threads it reaches
+constructed QI 3.0e-3 (fine-grid validation 2.8e-3) with the ι, mirror and
+elongation limits met in 612 s, where the previous circular-seed example ran
+1,456 s and ended in a final solve that did not converge
+(``benchmarks/qi_optimization_profile_office.json``);
+:doc:`/howto/optimize-a-boundary` describes the workflow.  The
+earlier Goodman-style *wout-lane* residual
 (:func:`~vmex.core.optimize.quasi_isodynamic_residual`, host NumPy,
 ``jac=None``) remains available for diagnostics and cross-checks.
 
@@ -376,8 +384,7 @@ Bootstrap current (Redl)
 
 :mod:`vmex.core.bootstrap` implements the Redl (2021) analytic
 bootstrap formula, differentiably, plus the machinery to make an
-equilibrium's current profile self-consistent with it (plan R26g,
-reproducing the workflow of Landreman–Buller–Drevlak, arXiv:2205.02914):
+equilibrium's current profile self-consistent with it (reproducing the workflow of Landreman–Buller–Drevlak, arXiv:2205.02914):
 
 - :class:`~vmex.core.bootstrap.KineticProfiles` — prescribed
   ``n_e/T_e/T_i/Z_eff`` polynomials in ``s`` (objective parameters, not
@@ -460,8 +467,11 @@ The QA/QH examples also include
 and :func:`~vmex.core.stability.glasser_stability_residual` (stable ``DR <= 0``
 where shear is nonzero). These dimensional VMEC values are much larger than
 QS or beta residuals, so their weights must be calibrated explicitly. Their
-live-state derivatives are checked against independently reconverged finite
-differences in ``tests/test_implicit_grad.py``.
+live-state derivatives are checked in ``tests/test_implicit_grad.py`` against
+frozen-path finite differences
+(:func:`~vmex.core.implicit.frozen_path_directional_fd`), which Newton-solve
+the same frozen residual at the perturbed parameters. That verifies the
+linearization, not agreement with independently reconverged equilibria.
 
 For a vacuum design, :func:`~vmex.core.stability.trial_pressure_d_merc_state`
 and :func:`~vmex.core.stability.trial_pressure_glasser_d_r_state` replace the
@@ -494,7 +504,7 @@ MHD stability
 -------------
 
 :mod:`vmex.core.stability` provides the infinite-n ideal-ballooning
-objective (plan R26h.h1) — a JAX port of the COBRA eigenproblem in the Gaur
+objective, a JAX port of the COBRA eigenproblem in the Gaur
 *et al.* formulation (*Plasma Phys. Control. Fusion* **67**, 125015 (2025),
 arXiv:2410.04576), with field-line coefficients per simsopt's
 COBRA-validated ``vmec_fieldlines`` conventions and a batched
@@ -556,8 +566,7 @@ Turbulence proxies (GKX)
 :mod:`vmex.core.turbulence` wires the gyrokinetic proxies of
 `GKX <https://github.com/uwplasma/GKX>`_ (uwplasma's
 JAX-native Hermite–Laguerre flux-tube solver, formerly SPECTRAX-GK;
-``pip install gkx``, optional dependency) into the objective protocol
-(plan R26h.h4):
+``pip install gkx``, optional dependency) into the objective protocol:
 
 - :func:`~vmex.core.turbulence.gk_fieldline_geometry` /
   :func:`~vmex.core.turbulence.gk_fieldline_geometry_from_wout` /

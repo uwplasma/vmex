@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "scope": "Native source-eligibility stencil classification for the exact 192 retained targets.",
+  "mask": {
+    "sha256": "4ab65c8168c30ad9cfc4361daa320c234bd01ffda7a6deda39f986fdf47d058d",
+    "grid_eligible_nodes": 14899,
+    "unique_values": [
+      0,
+      1
+    ],
+    "jcuts": 1.0,
+    "trace_time": 1.1800000000000204,
+    "endpoint_time": 1.2800000000000222
+  },
+  "native_conventions": {
+    "interpolator": "MAGVAL spline_mod:spl3df fourth-order 8x8x8 tensor formula",
+    "stencil_indices": "For each dimension, base=int((x-min)/h), then base-2 through base+5; upper-end base clamp follows spl3df.",
+    "phi": "mgval1 folding into [0,2*pi/mtor), followed by MAGVAL periodic ghost-plane mapping",
+    "active_weight_threshold": 1e-12,
+    "rz_ghost_planes_used": false
+  },
+  "all_targets": {
+    "target_count": 192,
+    "any_eligible_full_stencil_targets": 187,
+    "zero_eligible_full_stencil_targets": 5,
+    "all_eligible_full_stencil_targets": 0,
+    "any_eligible_active_stencil_targets": 185,
+    "zero_eligible_active_stencil_targets": 7,
+    "all_eligible_active_stencil_targets": 0
+  },
+  "offset_blocks": [
+    {
+      "offset_block": 0,
+      "offset_over_Aminor": 0.05,
+      "target_count": 48,
+      "any_eligible_full_stencil_targets": 48,
+      "zero_eligible_full_stencil_targets": 0,
+      "all_eligible_full_stencil_targets": 0,
+      "any_eligible_active_stencil_targets": 48,
+      "zero_eligible_active_stencil_targets": 0,
+      "all_eligible_active_stencil_targets": 0
+    },
+    {
+      "offset_block": 1,
+      "offset_over_Aminor": 0.15,
+      "target_count": 48,
+      "any_eligible_full_stencil_targets": 48,
+      "zero_eligible_full_stencil_targets": 0,
+      "all_eligible_full_stencil_targets": 0,
+      "any_eligible_active_stencil_targets": 48,
+      "zero_eligible_active_stencil_targets": 0,
+      "all_eligible_active_stencil_targets": 0
+    },
+    {
+      "offset_block": 2,
+      "offset_over_Aminor": 0.3,
+      "target_count": 48,
+      "any_eligible_full_stencil_targets": 47,
+      "zero_eligible_full_stencil_targets": 1,
+      "all_eligible_full_stencil_targets": 0,
+      "any_eligible_active_stencil_targets": 46,
+      "zero_eligible_active_stencil_targets": 2,
+      "all_eligible_active_stencil_targets": 0
+    },
+    {
+      "offset_block": 3,
+      "offset_over_Aminor": 0.5,
+      "target_count": 48,
+      "any_eligible_full_stencil_targets": 44,
+      "zero_eligible_full_stencil_targets": 4,
+      "all_eligible_full_stencil_targets": 0,
+      "any_eligible_active_stencil_targets": 43,
+      "zero_eligible_active_stencil_targets": 5,
+      "all_eligible_active_stencil_targets": 0
+    }
+  ],
+  "interpretation": "Eligibility is an amplitude-independent safe superset for imposed-current source ownership frozen at step-B entry. It is not attained-current support; evolved response fields and currents can extend outside this mask.",
+  "per_target_data": "data/source-eligibility-targets.npz"
+}

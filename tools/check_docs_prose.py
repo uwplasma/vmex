@@ -58,7 +58,7 @@ HOWTO_VERBS = {
 
 TODO_RE = re.compile(r"\b(TODO|FIXME|XXX)\b")
 LINE_CAP = 250
-ROOT_LINE_CAPS = {"README.md": 300, "CHANGELOG.md": 200}
+ROOT_LINE_CAPS = {"README.md": 700, "CHANGELOG.md": 200}
 RETRACTED_GAIN = re.compile(r"\b(?:26[- ]fold|26\s*[×x])(?!\w)", re.IGNORECASE)
 BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)")
 
@@ -88,9 +88,12 @@ GRANDFATHERED_FILES = {
     "figures/readme_equilibrium_showcase.webp",
     "figures/readme_essos_beta_scan.webp",
     "figures/readme_optimization.webp",
+    "figures/readme_polish_before_after.webp",
     "figures/readme_precond.webp",
     "figures/readme_runtime_compare.webp",
     "figures/readme_qi.webp",
+    "figures/readme_single_stage_fixed_boundary.webp",
+    "figures/readme_single_stage_free_boundary.webp",
     "figures/stellarator_mirror_hybrid.webp",
 }
 

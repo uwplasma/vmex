@@ -48,15 +48,16 @@ def test_cache_dir_env_precedence(clean_cache_env):
     assert path is not None and "vmex" in path and "jax_cache" in path
 
     # explicit JAX var wins verbatim; 'disabled' turns it off
+    fingerprint = _compat._cache_machine_fingerprint()
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/jaxcache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/jaxcache/{fingerprint}"
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "disabled")
     assert _compat._default_compilation_cache_dir() is None
     mp.delenv("JAX_COMPILATION_CACHE_DIR")
 
     # vmec-specific dir override
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmeccache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/vmeccache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/vmeccache/{fingerprint}"
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "no")
     assert _compat._default_compilation_cache_dir() is None
     mp.delenv("VMEX_COMPILATION_CACHE_DIR")
@@ -78,7 +79,7 @@ def test_cache_dir_env_precedence(clean_cache_env):
 
 
 def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
-    """macOS + jaxlib < 0.10 kills the process reading big cache entries
+    """jaxlib < 0.10 kills the process reading big cache entries
     (LLVM ORC materializes per-kernel objects recursively and overflows a
     worker-thread stack inside PyClient::DeserializeExecutable), so the
     cache defaults off there — but explicit user choices always win."""
@@ -90,23 +91,23 @@ def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
     assert _compat._default_compilation_cache_dir() is not None
     mp.delenv("VMEX_COMPILATION_CACHE")
 
+    fingerprint = _compat._cache_machine_fingerprint()
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/jaxcache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/jaxcache/{fingerprint}"
     mp.delenv("JAX_COMPILATION_CACHE_DIR")
 
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmexcache")
-    assert _compat._default_compilation_cache_dir() == "/tmp/vmexcache"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/vmexcache/{fingerprint}"
 
 
-def test_cache_deserialize_unsafe_is_darwin_and_jaxlib_scoped(monkeypatch):
+@pytest.mark.parametrize("system", ["Linux", "Darwin"])
+def test_cache_deserialize_unsafe_is_jaxlib_scoped_on_every_platform(
+        monkeypatch, system):
+    monkeypatch.setattr(_compat.platform, "system", lambda: system)
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 9, 2))
-    monkeypatch.setattr(_compat.platform, "system", lambda: "Linux")
-    assert _compat._cache_deserialize_unsafe() is False  # macOS-only crash
-
-    monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
     assert _compat._cache_deserialize_unsafe() is True   # affected jaxlib
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 10, 0))
-    assert _compat._cache_deserialize_unsafe() is False  # fixed in 0.10.0
+    assert _compat._cache_deserialize_unsafe() is False  # fixed in 0.10
     monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: None)
     assert _compat._cache_deserialize_unsafe() is True   # unknown = unsafe
 
@@ -446,6 +447,26 @@ def test_prune_cache_entries_keeps_the_most_recently_used(tmp_path):
     assert _compat._prune_cache_entries(str(tmp_path), 10) == 0
 
 
+def test_prune_cache_entries_keeps_recent_entries_up_to_four_times_the_cap(tmp_path):
+    """Recent entries survive the cap; stale ones are pruned to it."""
+    import time
+
+    now = time.time_ns()
+    _seed_cache(tmp_path, 30)  # atimes 0..29: long stale
+    for i in range(25):
+        (tmp_path / f"r{i}-cache").write_bytes(b"x")
+        (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 30
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(25))
+
+    # a workload's recent entries are still bounded, at four times the cap
+    for i in range(25, 50):
+        (tmp_path / f"r{i}-cache").write_bytes(b"x")
+        (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 10
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(40))
+
+
 def test_prune_cache_entries_survives_a_hostile_directory(tmp_path):
     _seed_cache(tmp_path, 5)
     (tmp_path / "k2-atime").unlink()  # entry with no atime sidecar
@@ -527,3 +548,22 @@ def test_configure_compilation_cache_ignores_an_unparseable_entry_bound(tmp_path
     # the bound is skipped, the rest of the configuration still lands
     assert len(list(tmp_path.glob("*-cache"))) == 4
     assert fake.config.updates["jax_compilation_cache_dir"] == str(tmp_path)
+
+
+def test_explicit_cache_dir_is_split_by_machine(clean_cache_env):
+    """A user-chosen cache directory never mixes CPUs.
+
+    On a cluster the same shared path is read by login and compute nodes whose
+    CPU features differ; an executable compiled on one is rejected on the other
+    ("Target machine feature ... is not supported on the host machine") and
+    recompiled.  Two machines with different fingerprints must land in
+    different subdirectories of the same user path.
+    """
+    mp = clean_cache_env
+    mp.setenv("JAX_COMPILATION_CACHE_DIR", "/shared/jax")
+    mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-aaaa")
+    first = _compat._default_compilation_cache_dir()
+    mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-bbbb")
+    second = _compat._default_compilation_cache_dir()
+    assert first == "/shared/jax/linux-x86_64-aaaa"
+    assert second == "/shared/jax/linux-x86_64-bbbb"

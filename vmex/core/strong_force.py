@@ -1067,7 +1067,13 @@ def _constrained_spline_fit(
         coefficients[index] = value
         rhs -= matrix[:, index] * value
     if free.size:
-        coefficients[free] = np.linalg.lstsq(matrix[:, free], rhs, rcond=1.0e-12)[0]
+        solution, _, rank, _ = np.linalg.lstsq(matrix[:, free], rhs, rcond=1.0e-12)
+        if rank < free.size:
+            raise ValueError(
+                f"radial lift is underdetermined (rank {rank}/{free.size}); "
+                "reduce spline spans/degree or supply more resolved radial samples"
+            )
+        coefficients[free] = solution
     return coefficients
 
 
@@ -1086,7 +1092,9 @@ def lift_high_order_state(
     variables and Fourier normalization, converts internal lambda to the wout
     convention, enforces ``rho**abs(m)`` regularity, preserves the magnetic
     axis for m=0 and the fixed R/Z boundary exactly, and removes the lambda
-    ``(m,n)=(0,0)`` gauge mode structurally.
+    ``(m,n)=(0,0)`` gauge mode structurally. A basis whose unconstrained
+    coefficients are not determined by the retained radial samples is rejected;
+    a minimum-norm fill can invent curvature in unsampled spans.
 
     Each knot span must contain a source sample strictly inside it. Endpoint
     samples alone do not resolve a span; refine the source mesh or coarsen the

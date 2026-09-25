@@ -4,11 +4,7 @@ import os
 import sys
 from datetime import date
 from pathlib import Path
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - Python 3.10 fallback, matches tests/test_packaging_metadata.py
-    import tomli as tomllib
+import tomllib
 
 
 # -- Path setup ----------------------------------------------------------------
@@ -97,7 +93,7 @@ rediraffe_redirects = {
     "quickstart": "all-of-vmex",
     "tutorials": "tutorials/index",
     "cli": "reference/cli",
-    "input_reference": "reference/input-file",
+    "input_reference": "reference/vmec2000-compatibility",
     "wout_reference": "reference/wout-file",
     "objectives": "reference/objectives",
     "optimization": "reference/optimization",
@@ -105,12 +101,23 @@ rediraffe_redirects = {
     "capabilities": "reference/capabilities",
     "performance": "reference/performance",
     "equations": "explanation/variational-problem",
-    "theory": "explanation/spectral-representation",
+    "theory": "explanation/variational-problem",
     "algorithms": "explanation/iteration",
     "architecture": "explanation/architecture",
     "confinement": "explanation/confinement",
     "mirror_geometry": "explanation/mirror-geometry",
-    "parallelization": "explanation/parallelization",
+    "parallelization": "explanation/architecture",
+    # Pages merged in the 2026-09 documentation consolidation.
+    "explanation/spectral-representation": "explanation/variational-problem",
+    "explanation/preconditioners": "explanation/iteration",
+    "explanation/multigrid": "explanation/iteration",
+    "explanation/parallelization": "explanation/architecture",
+    "tutorials/plots-and-boozer": "tutorials/first-equilibrium",
+    "howto/use-wout-downstream": "howto/plot-diagnostics",
+    "howto/trace-alpha-particles": "howto/use-essos-fields-and-coils",
+    "reference/input-file": "reference/vmec2000-compatibility",
+    "reference/mout-file": "reference/wout-file",
+    "howto/parameter-scans": "howto/restart-from-previous-run",
     "scaling": "howto/scale-a-configuration",
     "contributing": "project/contributing",
     "references": "project/references",

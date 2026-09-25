@@ -29,6 +29,7 @@ import platform
 
 _CACHE_FORMAT_VERSION = "3"
 _CACHE_MAX_ENTRIES = 1024            # resident executables; see _prune_cache_entries
+_CACHE_RECENT_SECONDS = 24 * 3600    # entries used this recently survive the cap, up to 4x it
 _CACHE_SIZE_FLOOR = 2 << 30          # 2 GiB
 _CACHE_SIZE_CEILING = 20 << 30       # 20 GiB
 _CACHE_DISK_FRACTION = 0.10
@@ -74,7 +75,18 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
     small, so it never fires.
 
     Bounding the entry count instead costs one scan per process rather than
-    one per write.  Returns the number of entries removed.
+    one per write.  A fixed bound alone evicts a large workload's own working
+    set: the QI optimization example writes 1,342 executables, so a 1,024 cap
+    dropped 318 of them at every import, and every returning run recompiled
+    and rewrote the same 318.  Entries used within ``_CACHE_RECENT_SECONDS``
+    are therefore kept up to four times ``max_entries``, and only older ones
+    are trimmed to ``max_entries``.  Measured on a 36-thread Xeon: the QI
+    example's warm run misses nothing (its compile 68.0 s -> 38.6 s); a cold
+    seed-deck solve against 4,026 stale entries still sees the cache pruned to
+    1,024 (10.2 s, against 9.7 s with the plain cap); and the worst case, 4,026
+    recent entries, costs 17.9 s, where a fixed 4,096 cap costs 19.0 s on any
+    mature cache (a write scans 99 ms at 4,026 entries against 26 ms at 1,024).
+    Returns the number of entries removed.
     """
     try:
         import pathlib
@@ -107,7 +119,14 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
             except Exception:
                 return 0
 
-        for entry in sorted(entries, key=_atime)[: len(entries) - max_entries]:
+        import time
+
+        atimes = {entry: _atime(entry) for entry in entries}
+        ordered = sorted(entries, key=atimes.__getitem__, reverse=True)
+        recent_cutoff = time.time_ns() - _CACHE_RECENT_SECONDS * 1_000_000_000
+        recent = sum(1 for entry in ordered if atimes[entry] >= recent_cutoff)
+        keep = max(max_entries, min(recent, 4 * max_entries))
+        for entry in ordered[keep:]:
             sidecar = entry.with_name(
                 entry.name[: -len(_CACHE_ENTRY_SUFFIX)] + _CACHE_ATIME_SUFFIX
             )
@@ -166,20 +185,19 @@ def _jaxlib_version_tuple() -> tuple[int, ...] | None:
 def _cache_deserialize_unsafe() -> bool:
     """True when *reading* the persistent cache can kill this process.
 
-    jaxlib < 0.10 on macOS dies with SIGBUS/SIGILL inside
-    ``PyClient::DeserializeExecutable`` when loading a cached XLA:CPU
-    executable holding more than a few hundred kernels: LLVM ORC
-    materializes the per-kernel Mach-O objects recursively on one
-    fixed-size worker-thread stack (RTDyldObjectLinkingLayer::emit ->
+    jaxlib < 0.10 dies inside ``PyClient::DeserializeExecutable`` when
+    loading a cached XLA:CPU executable holding more than a few hundred
+    kernels (SIGBUS/SIGILL on macOS, SIGSEGV on Linux): LLVM ORC
+    materializes the per-kernel objects recursively on one fixed-size
+    worker-thread stack (RTDyldObjectLinkingLayer::emit ->
     ExecutionSession::lookup -> dispatchOutstandingMUs -> emit -> ...),
     and every vmex solve/adjoint executable is large enough to overflow
     it deterministically on the first warm rerun.  Reproduced on jaxlib
-    0.9.2 with a 300-kernel jit program; verified fixed in jaxlib 0.10.0.
+    0.9.2 with a 300-kernel jit program on both platforms; the same
+    program reloads cleanly on jaxlib 0.10.
     An unknown jaxlib version counts as unsafe: losing the cache costs a
     recompile, trusting it can cost the process.
     """
-    if platform.system() != "Darwin":
-        return False
     version = _jaxlib_version_tuple()
     return version is None or version < _CACHE_DESERIALIZE_SAFE_JAXLIB
 
@@ -291,13 +309,20 @@ def _cache_machine_fingerprint() -> str:
     return f"{system}-{machine}-{digest}"
 
 
+def _machine_scoped(directory: str) -> str:
+    """Return ``directory/<machine fingerprint>`` (see _cache_machine_fingerprint)."""
+    import pathlib
+
+    return str(pathlib.Path(directory).expanduser() / _cache_machine_fingerprint())
+
+
 def _default_compilation_cache_dir() -> str | None:
     """Return the configured JAX compilation-cache directory.
 
     The persistent cache is enabled **by default on every backend** (CPU too)
     so repeated cold-process CLI/API runs reuse compiled kernels instead of
-    recompiling (a solovev CLI rerun drops 4.3 s -> 1.2 s) — except on
-    macOS with jaxlib < 0.10, where deserializing a large cached CPU
+    recompiling (a solovev CLI rerun drops 4.3 s -> 1.2 s) — except with
+    jaxlib < 0.10, where deserializing a large cached CPU
     executable crashes the process (see :func:`_cache_deserialize_unsafe`)
     and the default is therefore off until jaxlib is upgraded;
     ``VMEX_COMPILATION_CACHE=1`` or an explicit cache-dir variable still
@@ -305,30 +330,34 @@ def _default_compilation_cache_dir() -> str | None:
     host-feature-mismatch hazard (AOT executables tied to a specific
     instruction set, dangerous on shared home filesystems) is handled by
     :func:`_cache_machine_fingerprint`, so heterogeneous machines never share
-    a cache entry.  Opt out with ``VMEX_COMPILATION_CACHE=disabled`` (or
-    ``VMEX_COMPILATION_CACHE_DIR=disabled``); point it elsewhere with
-    ``JAX_COMPILATION_CACHE_DIR=/path``.
+    a cache entry -- including under a directory the user chose: an explicit
+    ``JAX_COMPILATION_CACHE_DIR`` or ``VMEX_COMPILATION_CACHE_DIR`` is the
+    parent of a per-machine subdirectory, because such paths usually sit on a
+    shared cluster filesystem where login and compute nodes differ in CPU
+    features (XLA then logs "Target machine feature ... is not supported on
+    the host machine" and recompiles).  Opt out with
+    ``VMEX_COMPILATION_CACHE=disabled`` (or ``VMEX_COMPILATION_CACHE_DIR=disabled``).
     """
     # Already set by the user — respect it.
     if "JAX_COMPILATION_CACHE_DIR" in os.environ:
         val = os.environ["JAX_COMPILATION_CACHE_DIR"].strip()
         if val.lower() in ("", "disabled", "0", "false", "no"):
             return None
-        return val
+        return _machine_scoped(val)
 
     # User can opt out via VMEX_COMPILATION_CACHE_DIR=disabled
     vmec_val = _env("COMPILATION_CACHE_DIR").strip()
     if vmec_val.lower() in ("disabled", "0", "false", "no"):
         return None
     if vmec_val:
-        return vmec_val
+        return _machine_scoped(vmec_val)
 
     cache_flag = _env("COMPILATION_CACHE").strip().lower()
     if cache_flag in ("disabled", "0", "false", "no", "off"):
         return None
 
-    # macOS + jaxlib < 0.10 crashes deserializing large cached CPU
-    # executables (see _cache_deserialize_unsafe): default the cache off
+    # jaxlib < 0.10 crashes deserializing large cached CPU executables on
+    # every platform (see _cache_deserialize_unsafe): default the cache off
     # there.  An explicit VMEX_COMPILATION_CACHE=1 (or a *_CACHE_DIR path
     # above) still turns it on.
     if (cache_flag not in ("1", "true", "yes", "on", "enabled")

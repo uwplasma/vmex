@@ -11,6 +11,7 @@ traceback.
 from __future__ import annotations
 
 import ast
+import contextlib
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,13 +41,13 @@ def test_refinement_krylov_budget_independent_of_adjoint(monkeypatch, size, expe
     def linear_solve(matvec, rhs, **kwargs):
         seen.append((kwargs["m"], kwargs["k"]))
         np.testing.assert_allclose(matvec(rhs), rhs)
-        return SimpleNamespace(x=rhs)
+        return SimpleNamespace(x=rhs, iterations=0, residual_norm=0.0)
 
     monkeypatch.setattr(im, "residual_fn", lambda *_: lambda state, params: state)
     monkeypatch.setattr(im, "_solvax_gcrot", linear_solve)
     state = jax.numpy.ones(size)
     cfg = SimpleNamespace(adjoint_gcrot_m=2, adjoint_gcrot_k=1)
-    refined, residual, norm = im._refine_step_core.__wrapped__(
+    refined, residual, norm, _, _ = im._refine_step_core.__wrapped__(
         state, state, None, None, None, cfg)
     assert seen == [expected]
     np.testing.assert_array_equal(refined, np.zeros(size))
@@ -465,13 +466,14 @@ def host_response():
     owner = next(node for node in ast.parse(path.read_text()).body
                  if isinstance(node, ast.FunctionDef) and node.name == "_least_squares_implicit")
     nodes = [node for node in owner.body if isinstance(node, ast.FunctionDef)
-             and node.name in ("certified_trial", "jac_fn", "value_and_grad")]
+             and node.name in ("certified_trial", "jac_fn", "jacobian_host", "value_and_grad")]
     cfg = type("Config", (), {"ftol": 1e-12, "max_fsq_ratio": 1e6})()
     x = np.array([1.])
     def key(value):
         return np.asarray(value, dtype=float).tobytes()
     cache = SimpleNamespace(_LAST_STATUS_ERROR={}, _LAST_SOLVE={},
-        _LAST_PRIMAL_CERTIFICATE={}, _LAST_REFINED={}, _params_key=key, _primal_state_key=key)
+        _LAST_PRIMAL_CERTIFICATE={}, _LAST_REFINED={}, _params_key=key, _primal_state_key=key,
+        _timed=lambda *args: contextlib.nullcontext())
     control = dict(eligible=True, event=None, phase="reverse", status=0, linear=0, stashes=0)
     holder = dict(nres=2, lin=None, failed_trials=0, derivative_fallbacks=0,
                   last_jac=None, last_jac_key=None)
@@ -511,6 +513,7 @@ def host_response():
         FunctionProblem=SimpleNamespace(_key=key), fun=status, rows_jit=status,
         holder=holder, jac_solver="reverse", traceable_scalar=None, warm_start="perturbation",
         reverse_jit=lambda value: linear(value, "reverse"),
+        reverse_gradient_jit=lambda value, rows: linear(value, "reverse").T @ rows,
         jac_jit=lambda value: linear(value, "block"),
         gmres_jit=lambda value: linear(value, "gmres"),
         _record_linear_response=lambda *args: None,
@@ -586,5 +589,6 @@ def test_host_scalar_preserves_unrelated_derivative_error(host_response, drop_ce
             cache._LAST_PRIMAL_CERTIFICATE.pop(cfg)
         raise RuntimeError("unrelated derivative failure")
     ns["jac_fn"] = fail
+    ns["reverse_gradient_jit"] = lambda value, rows: fail(value)
     with pytest.raises(RuntimeError, match="unrelated derivative failure"):
         ns["value_and_grad"](ns["x0"])

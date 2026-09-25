@@ -63,10 +63,13 @@ def test_implicit_least_squares_honors_multigrid_solve_kwargs():
         "niter_array": [5],
         "device": "cpu",
     }
+    # The block Newton refinement certifies even this five-iteration seed as a
+    # root, so disable refinement: the exhausted host primal is then the state
+    # the certificate measures, and it must be rejected.
     alternate_problem = opt.VmecProblem.from_tuples(
         inp, [(qh, 0.0, 1.0), (opt.aspect_ratio, 4.0, 1.0)],
         max_mode=1, hot_restart=True, warm_start=None,
-        solve_kwargs=alternate_controls,
+        solve_kwargs=alternate_controls, refine_tol=np.inf,
     )
     # Query the value-only graph: an intentionally exhausted forward solve
     # cannot supply an ordinary implicit Jacobian under the primal contract.

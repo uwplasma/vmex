@@ -4,11 +4,11 @@ Self-contained matplotlib (Agg) figure set read from a ``wout_*.nc`` file
 (or an in-memory :class:`vmex.core.wout.WoutData`):
 
 - ``summary``   3x3 publication diagnostic set: rotational transform (full
-  mesh) with the parallel (bootstrap) current ``<J.B>`` on its right axis,
-  pressure with the confinement diagnostics ``eps_eff^(3/2)`` (NEO_JAX) and
+  mesh), pressure with the confinement diagnostics ``eps_eff^(3/2)`` (NEO_JAX) and
   ``Gamma_c`` sharing one right axis (bounded-resolution radial trends,
   cached per in-memory WOUT — see :class:`ConfinementSummary`), relative
-  radial force error, Mercier ``DMerc``
+  radial force error with the bootstrap current ``<J.B>`` on its right
+  axis, Mercier ``DMerc``
   and Glasser ``D_R`` with ``V''(s)`` on the right axis, a 3-D LCFS,
   a Velasco-style polar second-adiabatic-invariant map ``J(alpha, s)``, ``|B|``
   in Boozer coordinates at mid radius and on the LCFS (line contours with a
@@ -16,8 +16,6 @@ Self-contained matplotlib (Agg) figure set read from a ``wout_*.nc`` file
 - ``surfaces``  flux-surface cross-sections at several zeta over one field
   period, with the magnetic axis marked;
 - ``modB``      ``|B|`` contours in (zeta, theta) at mid radius and boundary;
-- ``profiles``  iota / pressure / current profiles plus the ``fsqt``
-  force-residual convergence trace;
 - ``stability`` Mercier decomposition and a frozen-equilibrium pressure scan;
 - ``3d``        3-D plasma boundary colored by ``|B|`` (jet colormap).
 
@@ -43,6 +41,7 @@ plus the per-figure helpers each of those dispatches to.
 from __future__ import annotations
 
 import dataclasses
+import textwrap
 import time
 import weakref
 from collections import OrderedDict
@@ -61,7 +60,6 @@ __all__ = [
     "plot_summary",
     "plot_surfaces",
     "plot_modB",
-    "plot_profiles",
     "plot_stability",
     "plot_boundary_3d",
     "plot_boozmn_modB",
@@ -468,26 +466,27 @@ def _eval_modes(cos_coeff, sin_coeff, xm, xn, theta, phi, *, dtheta: int = 0, dp
     """
     xm = np.asarray(xm, dtype=float)
     xn = np.asarray(xn, dtype=float)
-    # (mn, ntheta, nphi) phase table; grids here are small (<=260x260).
-    angle = (
-        xm[:, None, None] * np.asarray(theta)[None, :, None]
-        - xn[:, None, None] * np.asarray(phi)[None, None, :]
-    )
     cos_coeff = None if cos_coeff is None else np.asarray(cos_coeff, dtype=float)
     sin_coeff = None if sin_coeff is None else np.asarray(sin_coeff, dtype=float)
-    if dtheta == 0 and dphi == 0:
-        terms = [(cos_coeff, np.cos(angle)), (sin_coeff, np.sin(angle))]
-    else:
+    if dtheta or dphi:
         factor = xm if dtheta else -xn
-        terms = [
-            (None if cos_coeff is None else cos_coeff * factor.reshape((1,) * (cos_coeff.ndim - 1) + (-1,)), -np.sin(angle)),
-            (None if sin_coeff is None else sin_coeff * factor.reshape((1,) * (sin_coeff.ndim - 1) + (-1,)), np.cos(angle)),
-        ]
+        cos_coeff, sin_coeff = (
+            None if sin_coeff is None else sin_coeff * factor,
+            None if cos_coeff is None else -cos_coeff * factor,
+        )
+    # Angle addition avoids allocating a modes x theta x phi phase table.
+    # Coefficient leading dimensions (e.g. radial surfaces) remain batched.
+    mt = np.multiply.outer(np.asarray(theta), xm)
+    np_ = np.multiply.outer(xn, np.asarray(phi))
+    cm, sm = np.cos(mt), np.sin(mt)
+    cn, sn = np.cos(np_), np.sin(np_)
     out = None
-    for coeff, basis in terms:
-        if coeff is None:
-            continue
-        term = np.tensordot(coeff, basis, axes=(-1, 0))
+    if cos_coeff is not None:
+        c = cos_coeff[..., None, :]
+        out = (cm * c) @ cn + (sm * c) @ sn
+    if sin_coeff is not None:
+        s = sin_coeff[..., None, :]
+        term = (sm * s) @ cn - (cm * s) @ sn
         out = term if out is None else out + term
     assert out is not None
     return out
@@ -611,11 +610,12 @@ def _pi_ticks(ax, axis: str = "y") -> None:
 # Glasser D_R reconstruction from wout tables (mercier.f integrals)
 # ==========================================================================
 
-def _glasser_d_r_from_wout(wout, *, ntheta: int | None = None, nzeta: int | None = None) -> dict[str, Any]:
+def _glasser_d_r_from_wout(wout) -> dict[str, Any]:
     """Glasser--Greene--Johnson ``D_R`` profile reconstructed from a wout file.
 
     Re-evaluates the ``mercier.f`` surface integrals (``tpp/tbb/tjb/tjj``)
-    from the wout Fourier tables on a uniform angular grid and assembles
+    from the wout Fourier tables on the solver's own uniform angular grid (so
+    the integrals match the stored ``DMerc`` quadrature) and assembles
 
         ``H   = S (tjb - tbb * mu0 <J.B>/<B.B>)``
         ``D_R = -DMerc + (H - S^2/2)^2 / S^2``     (0 where the shear vanishes)
@@ -651,11 +651,14 @@ def _glasser_d_r_from_wout(wout, *, ntheta: int | None = None, nzeta: int | None
     xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
     xm = np.asarray(wout.xm, dtype=float)
     xn = np.asarray(wout.xn, dtype=float)
-    if ntheta is None:
-        ntheta = int(min(256, max(64, 4 * (int(xm_nyq.max()) + 1))))
-    if nzeta is None:
-        n_over_nfp = int(np.max(np.abs(xn_nyq))) // max(nfp, 1)
-        nzeta = int(min(256, max(64, 4 * (n_over_nfp + 1))))
+    # The solver's own angular grid, recovered from the Nyquist extents
+    # (VMEC2000: mnyq = ntheta1/2, nnyq = nzeta/2; an odd NZETA comes back one
+    # point short).  The stored DMerc is a quadrature on that grid, so D_R
+    # takes both of its terms from the same quadrature.  That grid is not
+    # angularly converged in general: on the NFP=4 QI deck, raising
+    # NTHETA/NZETA from 16/14 to 48 moves DMerc by 4.35% at s = 0.04.
+    ntheta = max(1, 2 * int(xm_nyq.max()))
+    nzeta = max(1, 2 * (int(np.max(np.abs(xn_nyq))) // max(nfp, 1)))
     theta = 2.0 * np.pi * np.arange(ntheta) / ntheta
     zeta = 2.0 * np.pi * np.arange(nzeta) / (nzeta * nfp)
 
@@ -756,7 +759,7 @@ def _glasser_d_r_from_wout(wout, *, ntheta: int | None = None, nzeta: int | None
             h_glasser = shear[i] * (tjb - tbb * ratio[i])
             d_r[i] = -dmerc_stored[i] + (h_glasser - 0.5 * shear[i] ** 2) ** 2 / shear[i] ** 2
 
-    # Self-check: the reconstructed integrals must reproduce the stored DMerc.
+    # Self-check: consistency with the stored DMerc (same quadrature), not angular convergence.
     interior = slice(2, ns - 1)
     scale = float(np.max(np.abs(dmerc_stored[interior])))
     if scale == 0.0:
@@ -991,6 +994,25 @@ def _confinement_cache_put(key: tuple, wout, value: ConfinementSummary) -> None:
         _CONFINEMENT_CACHE.popitem(last=False)
 
 
+def _neo_surface_subset(neo_booz: dict[str, Any]) -> dict[str, Any]:
+    """Two fewer, evenly spread Boozer surfaces for the summary's NEO trend.
+
+    NEO is the slowest summary diagnostic, so the effective-ripple trend
+    drops two of the shared transform's surfaces (keeping the innermost and
+    the LCFS); the ``J`` map and ``|B|`` panels keep all of them.
+    """
+    ns_b = int(neo_booz.get("ns_b", 0))
+    if ns_b <= 3:
+        return neo_booz
+    keep = np.unique(np.round(np.linspace(0, ns_b - 1, ns_b - 2)).astype(int))
+    subset = dict(neo_booz, ns_b=int(keep.size))
+    for key in ("iota_b", "buco_b", "bvco_b", "s_b"):
+        subset[key] = np.asarray(neo_booz[key])[keep]
+    for key in ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b"):
+        subset[key] = np.asarray(neo_booz[key])[:, keep]
+    return subset
+
+
 def _epsilon_effective_profile(booz: dict[str, Any] | None, note: str):
     """``(s, eps_eff^{3/2}, note)`` from the shared summary Boozer result."""
     if booz is None:
@@ -1001,7 +1023,7 @@ def _epsilon_effective_profile(booz: dict[str, Any] | None, note: str):
         from .neoclassical import diagnostic_neo_config, epsilon_effective_from_boozer
 
         surfaces, values = epsilon_effective_from_boozer(
-            booz["neo_booz"], config=diagnostic_neo_config())
+            _neo_surface_subset(booz["neo_booz"]), config=diagnostic_neo_config())
     except ImportError:
         return None, None, "effective ripple requires NEO_JAX (vmex[neoclassical])"
     except Exception as exc:  # noqa: BLE001 - summary stays usable without NEO
@@ -1160,7 +1182,13 @@ def _j_invariant_map(
     bounce integrals reuse the differentiable sine-mapped Gauss-Legendre
     kernel of :func:`vmex.core.bounce.bounce_action`, also used by DESC.
     """
+    import jax
     from .bounce import bounce_action_from_boozer
+
+    bounce_action_from_boozer = jax.jit(
+        bounce_action_from_boozer,
+        static_argnames=("nfp", "points_per_period", "num_periods",
+                         "max_wells", "quadrature_order"))
 
     bmnc_b = booz["bmnc_b"]
     nsurf = int(bmnc_b.shape[0])
@@ -1299,10 +1327,10 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
     well_ax.spines["right"].set_color(_LINE_COLORS[2])
     title = r"Mercier, resistive interchange, and $V''(s)$"
     if vacuum:
-        title += "\n(vacuum limits are not finite-pressure stability certificates)"
+        title += "\n(vacuum limits are not finite-pressure\nstability certificates)"
     if not d_r_info.get("valid"):
         title += ("\n($D_R$ unavailable for LASYM WOUT)" if "LASYM" in note
-                  else f"\n($D_R$ unavailable: {note})")
+                  else "\n$D_R$ unavailable:\n" + textwrap.fill(str(note), width=38))
     ax.set_title(title)
     ax.legend(
         lines, [line.get_label() for line in lines], loc="upper center",
@@ -1388,54 +1416,131 @@ def _fmt_compact(value: float) -> str:
     return f"{mantissa}e{int(exponent)}"
 
 
-def _relative_force_error_profile(wout) -> tuple[np.ndarray, np.ndarray]:
-    """Return solved-surface radius and relative radial force error.
+def _relative_force_error_profile(wout) -> tuple[np.ndarray, np.ndarray, float]:
+    """Return ``rho``, ``<|F|>_s / <|grad(B^2/2mu0)|>_V`` and its ``V`` average.
 
-    ``equif[0]`` and ``equif[-1]`` are linear extrapolations made while
-    writing WOUT, so neither belongs in a maximum-error certificate.
+    ``F = J x B - grad p`` and ``grad(B^2/2mu0)`` are rebuilt from the WOUT
+    tables on the interior full-mesh surfaces: ``mu0 sqrt(g) J^u, J^v`` from
+    radial differences of the half-mesh ``B_u, B_v`` and angular derivatives
+    of ``B_s``, the helical part from ``d_u B_v - d_v B_u``, and the metric
+    from ``R, Z`` with centred radial differences.  Each surface average is
+    divided by the ``|sqrt(g)|``-weighted average of ``|grad(B^2/2mu0)|``
+    over ``V: 0.1 <= s <= 0.99``, which is DESC's ``|F|_normalized`` and the
+    window ``magnetic_relative_force_error`` of
+    :class:`~vmex.core.strong_force.ForceErrorNormalizations`.  WOUT's
+    ``equif`` (``postprocess.force_balance``) is bounded by 1 and equals 1 on
+    every surface of a currentless vacuum, so it is not plotted.
     """
     ns = int(wout.ns)
-    rho = np.sqrt(np.linspace(0.0, 1.0, ns))
-    error = np.abs(np.asarray(wout.equif, dtype=float))
-    interior = slice(1, -1) if ns > 2 else slice(None)
-    finite = np.isfinite(error[interior])
-    return rho[interior][finite], error[interior][finite]
+    if ns < 4:
+        return np.empty(0), np.empty(0), float("nan")
+    lasym, nfp, ohs = bool(getattr(wout, "lasym", False)), int(wout.nfp), float(ns - 1)
+
+    def table(name, partner=False):  # lasym parity partners are None when symmetric
+        value = getattr(wout, name, None) if lasym or not partner else None
+        return None if value is None else np.asarray(value, dtype=float)
+
+    xm, xn, xm_nyq, xn_nyq = (table(name) for name in ("xm", "xn", "xm_nyq", "xn_nyq"))
+    ntheta = int(min(128, max(32, 2 * (int(xm_nyq.max()) + 1))))
+    n_max = int(np.max(np.abs(xn_nyq))) // nfp
+    nzeta = 1 if n_max == 0 else int(min(128, max(16, 2 * (n_max + 1))))
+    theta = 2.0 * np.pi * np.arange(ntheta) / ntheta
+    zeta = 2.0 * np.pi * np.arange(nzeta) / (nzeta * nfp)
+
+    def modes(cos, sin, m, n, **derivative):
+        return _eval_modes(cos, sin, m, n, theta, zeta, **derivative)
+
+    def nyquist(name, **derivative):
+        return modes(table(name + "mnc"), table(name + "mns", True), xm_nyq, xn_nyq, **derivative)
+
+    def mid(a):  # half-mesh rows j, j + 1 -> full-mesh row j
+        return 0.5 * (a[2:] + a[1:-1])
+
+    def diff(a):
+        return ohs * (a[2:] - a[1:-1])
+
+    def centred(a):
+        return None if a is None else 0.5 * ohs * (a[2:] - a[:-2])
+
+    bsupu, bsupv = mid(nyquist("bsupu")), mid(nyquist("bsupv"))
+    bsubu, bsubv = nyquist("bsubu"), nyquist("bsubv")
+    bsubs_cos, bsubs_sin = table("bsubsmnc", True), table("bsubsmns")
+    bsubs_u = modes(bsubs_cos, bsubs_sin, xm_nyq, xn_nyq, dtheta=1)[1:-1]
+    bsubs_v = modes(bsubs_cos, bsubs_sin, xm_nyq, xn_nyq, dphi=1)[1:-1]
+    helical = mid(nyquist("bsubv", dtheta=1) - nyquist("bsubu", dphi=1))
+    force_s = ((bsubs_v - diff(bsubv)) * bsupv - (diff(bsubu) - bsubs_u) * bsupu) / _MU0
+    force_s = force_s - diff(np.asarray(wout.pres, dtype=float))[:, None, None]
+    modb = nyquist("b")
+    gradient = (diff(modb**2), mid(2.0 * modb * nyquist("b", dtheta=1)), mid(2.0 * modb * nyquist("b", dphi=1)))
+
+    rmnc, rmns, zmnc, zmns = table("rmnc"), table("rmns", True), table("zmnc", True), table("zmns")
+    radius = modes(rmnc, rmns, xm, xn)[1:-1]
+    e_s = np.stack([modes(centred(rmnc), centred(rmns), xm, xn), np.zeros_like(radius),
+                    modes(centred(zmnc), centred(zmns), xm, xn)], axis=-1)
+    e_u = np.stack([modes(rmnc, rmns, xm, xn, dtheta=1)[1:-1], np.zeros_like(radius),
+                    modes(zmnc, zmns, xm, xn, dtheta=1)[1:-1]], axis=-1)
+    e_v = np.stack([modes(rmnc, rmns, xm, xn, dphi=1)[1:-1], radius,
+                    modes(zmnc, zmns, xm, xn, dphi=1)[1:-1]], axis=-1)
+    # sqrt(g) grad(s, u, v) = (e_u x e_v, e_v x e_s, e_s x e_u): weighting by
+    # |sqrt(g)| turns each covariant vector into a norm without dividing.
+    basis = (np.cross(e_u, e_v), np.cross(e_v, e_s), np.cross(e_s, e_u))
+    volume = np.abs(np.einsum("...i,...i->...", e_s, basis[0]))
+
+    def weighted_norm(components):
+        return np.linalg.norm(sum(c[..., None] * b for c, b in zip(components, basis)), axis=-1)
+
+    force = weighted_norm((force_s, -helical * bsupv / _MU0, helical * bsupu / _MU0))
+    s = np.linspace(0.0, 1.0, ns)[1:-1]
+    window = (s >= 0.1) & (s <= 0.99)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        scale = weighted_norm(gradient)[window].sum() / (2.0 * _MU0 * volume[window].sum())
+        profile = force.sum(axis=(1, 2)) / volume.sum(axis=(1, 2)) / scale
+        average = force[window].sum() / volume[window].sum() / scale
+    finite = np.isfinite(profile)
+    return np.sqrt(s)[finite], profile[finite], float(average)
 
 
 def _relative_force_error_panel(ax, wout) -> float:
-    """Draw the WOUT radial force-balance diagnostic and return its maximum."""
-    rho, error = _relative_force_error_profile(wout)
+    """Draw the normalized force-error profile and return its ``V`` average."""
+    rho, error, average = _relative_force_error_profile(wout)
     positive = error[error > 0.0]
     floor = max(
         float(np.min(positive)) * 0.1 if positive.size else 1.0e-16,
         np.finfo(float).tiny,
     )
     if error.size:
-        ax.semilogy(rho, np.maximum(error, floor), ".-", color=_LINE_COLORS[0])
-        maximum = float(np.max(error))
+        ax.semilogy(rho, np.maximum(error, floor), ".-", color=_LINE_COLORS[0],
+                    label="force error")
+        if positive.size and np.min(positive) > np.max(positive) / 10.0:
+            from matplotlib.ticker import MaxNLocator, NullLocator, ScalarFormatter
+
+            # One formatter owns the narrow-range offset; separate major and
+            # minor offsets would label the same logarithmic axis differently.
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+            ax.yaxis.set_minor_locator(NullLocator())
+            ax.yaxis.set_major_formatter(ScalarFormatter(useOffset=True))
     else:
         ax.text(0.5, 0.5, "force error unavailable", ha="center", va="center",
                 transform=ax.transAxes)
-        maximum = float("nan")
+        average = float("nan")
     ax.set_xlabel(
         r"normalized radius $\rho=\sqrt{s}$,  $s=\psi/\psi_B$"
     )
     ax.set_ylabel(
-        "relative force error\n"
-        r"$\epsilon_F=|(\mathbf{J}\!\times\!\mathbf{B}-\nabla p)_s|/"
-        r"(|(\mathbf{J}\!\times\!\mathbf{B})_s|+|(\nabla p)_s|)$"
+        "normalized force error\n"
+        r"$\langle|\mathbf{J}\!\times\!\mathbf{B}-\nabla p|\rangle_s\,/\,"
+        r"\langle|\nabla(B^2/2\mu_0)|\rangle_{0.1\leq s\leq 0.99}$"
     )
-    ax.set_title("radial force balance")
+    ax.set_title("force balance")
     ax.set_xlim(0.0, 1.0)
-    return maximum
+    return average
 
 
 def _scalar_card_panel(ax, wout) -> None:
     """Equilibrium scalar card (threed1-style global quantities)."""
     ax.set_axis_off()
     iotaf = np.asarray(wout.iotaf, dtype=float)
-    _rho, force_error = _relative_force_error_profile(wout)
-    max_force_error = float(np.max(force_error)) if force_error.size else float("nan")
+    force_error = _relative_force_error_profile(wout)[2]
     rows = [
         ("field periods", f"{int(wout.nfp)}"),
         ("resolution", f"ns={int(wout.ns)}, mpol={int(wout.mpol)}, ntor={int(wout.ntor)}"),
@@ -1447,7 +1552,7 @@ def _scalar_card_panel(ax, wout) -> None:
         (r"$\beta$ pol / tor", f"{_fmt_compact(float(wout.betapol))} / {_fmt_compact(float(wout.betator))}"),
         (r"$I_{tor}$ [A]", _fmt_compact(float(wout.ctor))),
         (r"$\iota$ axis / edge", f"{float(iotaf[0]):.4f} / {float(iotaf[-1]):.4f}"),
-        (r"max $\epsilon_F$", _fmt_compact(max_force_error)),
+        (r"$\langle|F|\rangle/\langle|\nabla B^2/2\mu_0|\rangle$", _fmt_compact(force_error)),
         ("asymmetric", "yes" if bool(getattr(wout, "lasym", False)) else "no"),
     ]
     ax.text(
@@ -1513,27 +1618,10 @@ def _summary_figure(
             booz = None
             booz_note = f"Boozer transform unavailable:\n{type(exc).__name__}"
 
-        # 1. rotational transform and parallel current share radius.
+        # 1. rotational transform.
         _profile_panel(
             axes[0, 0], s, np.asarray(wout.iotaf, dtype=float),
-            xlabel=_S_LABEL, ylabel=r"$\iota$",
-            title="rotational transform and parallel current",
-        )
-        axes[0, 0].lines[0].set_label(r"$\iota$")
-        current_axis = axes[0, 0].twinx(); meta["current_axis"] = current_axis
-        current_line = current_axis.plot(
-            s, 1.0e-3 * np.asarray(wout.jdotb, dtype=float), "-",
-            color=_LINE_COLORS[2], label=r"$\langle\mathbf{J}\cdot\mathbf{B}\rangle$",
-        )[0]
-        current_axis.set_ylabel(
-            r"$\langle \mathbf{J}\cdot\mathbf{B} \rangle$ [kA T/m$^2$]",
-            color=_LINE_COLORS[2],
-        )
-        current_axis.tick_params(axis="y", colors=_LINE_COLORS[2])
-        axes[0, 0].legend(
-            [axes[0, 0].lines[0], current_line],
-            [axes[0, 0].lines[0].get_label(), current_line.get_label()],
-            loc="best", fontsize=11,
+            xlabel=_S_LABEL, ylabel=r"$\iota$", title="rotational transform",
         )
 
         # 2. pressure (left) with the confinement diagnostics eps_eff^{3/2}
@@ -1554,8 +1642,21 @@ def _summary_figure(
             loc="best", fontsize=11,
         )
 
-        # Relative radial force balance on the solved interior surfaces.
-        meta["max_relative_force_error"] = _relative_force_error_panel(axes[0, 2], wout)
+        # Force error normalized by the magnetic pressure gradient (DESC),
+        # with the bootstrap <J.B> against the same rho on its right axis.
+        meta["force_error"] = _relative_force_error_panel(axes[0, 2], wout)
+        current_axis = axes[0, 2].twinx(); meta["current_axis"] = current_axis
+        current_line = current_axis.plot(
+            np.sqrt(s), 1.0e-3 * np.asarray(wout.jdotb, dtype=float), "-",
+            color=_LINE_COLORS[2], label=r"$\langle\mathbf{J}\cdot\mathbf{B}\rangle$",
+        )[0]
+        current_axis.set_ylabel(
+            r"Bootstrap $\langle \mathbf{J}\cdot\mathbf{B} \rangle$ [kA T/m$^2$]",
+            color=_LINE_COLORS[2],
+        )
+        current_axis.tick_params(axis="y", colors=_LINE_COLORS[2])
+        axes[0, 2].legend(
+            handles=[*axes[0, 2].lines, current_line], loc="best", fontsize=11)
 
         # Stability profiles share one panel; right-axis color identifies W.
         d_r_info = _glasser_d_r_from_wout(wout)
@@ -1633,15 +1734,17 @@ def plot_summary(
     The panels, row by row on a 15.0 by 11.5 inch canvas:
 
     1. rotational transform ``iota`` (full mesh, dimensionless) against
-       ``s = psi/psi_edge``, with the flux-surface-averaged parallel current
-       ``<J.B>`` in kA T m^-2 on a coloured right axis;
+       ``s = psi/psi_edge``;
     2. pressure ``presf`` in kPa, with the dimensionless confinement
        diagnostics ``eps_eff^(3/2)`` and ``Gamma_c`` sharing one right axis
        (see :func:`confinement_summary`; an unavailable diagnostic is named,
        never drawn as zero);
-    3. relative radial force error against ``rho = sqrt(s)`` on a log axis —
-       ``|(J x B - grad p)_s|`` over ``|(J x B)_s| + |(grad p)_s|`` — over the
-       solved interior surfaces only;
+    3. force error against ``rho = sqrt(s)`` on a log axis: the surface
+       average of ``|J x B - grad p|`` over the volume average of
+       ``|grad(B^2/2mu0)|`` on ``0.1 <= s <= 0.99`` (DESC's normalization;
+       the scalar card gives the volume average), on interior surfaces,
+       with the flux-surface-averaged bootstrap current ``<J.B>`` in
+       kA T m^-2 on a coloured right axis;
     4. Mercier ``DMerc`` and the Glasser-Greene-Johnson ``D_R`` against ``s``,
        with the physical ``d2V/ds2`` on the right axis;
     5. the 3-D last closed flux surface coloured by ``|B|`` in T;
@@ -1946,112 +2049,6 @@ def plot_modB(
     return out_path
 
 
-def plot_profiles(wout, out_path: str | Path) -> Path:
-    """Write the six-panel radial-profile and convergence figure.
-
-    Five panels share ``s = psi/psi_edge`` on the abscissa; each series is
-    drawn on the mesh VMEC actually stores it on, so half-mesh quantities are
-    plotted at ``(j - 0.5)/(ns - 1)`` and their unused row 0 is skipped:
-
-    1. rotational transform ``iotaf`` (full mesh, dimensionless);
-    2. pressure — ``presf`` on the full mesh and ``pres`` on the half mesh,
-       both in Pa;
-    3. ``jcuru`` and ``jcurv``, VMEC's surface-averaged current densities, in
-       A;
-    4. ``buco`` and ``bvco``, the half-mesh covariant field averages
-       ``<B_theta>`` and ``<B_zeta>`` in T m;
-    5. enclosed toroidal ``phi`` and poloidal ``chi`` flux in Wb.
-
-    The sixth panel is the convergence trace rather than a profile: the
-    stored force residual ``fsqt`` (and ``wdot`` where positive) on a log
-    ordinate against the stored-iteration sample index, with a dashed line at
-    the achieved tolerance ``ftolv``.  VMEC keeps at most 100 samples and
-    leaves unused slots at zero, so the trace stops at the last positive
-    ``fsqt`` entry.  A WOUT with no history gets a "no fsqt history" note.
-
-    Parameters
-    ----------
-    wout:
-        Path to a ``wout_*.nc`` or a :class:`~vmex.core.wout.WoutData`.
-    out_path:
-        Destination image file.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`, saved at 200 dpi on
-    the Agg backend and closed.
-    """
-    plt = _import_matplotlib()
-    wout, _ = _as_wout(wout)
-    ns = int(wout.ns)
-    s = np.linspace(0.0, 1.0, ns)
-    s_half = _half_mesh_s(ns)
-
-    with _rc_context():
-        fig, axes = plt.subplots(2, 3, figsize=(13.0, 7.0), layout="constrained")
-
-        ax = axes[0, 0]
-        ax.plot(s, np.asarray(wout.iotaf, dtype=float), ".-")
-        ax.set_ylabel(r"$\iota$")
-        ax.set_title("rotational transform (full mesh)")
-
-        ax = axes[0, 1]
-        ax.plot(s, np.asarray(wout.presf, dtype=float), ".-", label="presf (full)")
-        ax.plot(s_half, np.asarray(wout.pres, dtype=float)[1:], ".", ms=3, label="pres (half)")
-        ax.set_ylabel("pressure [Pa]")
-        ax.legend()
-
-        ax = axes[0, 2]
-        ax.plot(s, np.asarray(wout.jcuru, dtype=float), ".-", label="jcuru")
-        ax.plot(s, np.asarray(wout.jcurv, dtype=float), ".-", label="jcurv")
-        ax.set_ylabel("current density [A]")
-        ax.legend()
-
-        ax = axes[1, 0]
-        ax.plot(s_half, np.asarray(wout.buco, dtype=float)[1:], ".-", label="buco")
-        ax.plot(s_half, np.asarray(wout.bvco, dtype=float)[1:], ".-", label="bvco")
-        ax.set_ylabel(r"$\langle B_u \rangle$, $\langle B_v \rangle$")
-        ax.legend()
-
-        ax = axes[1, 1]
-        phi_flux = np.asarray(wout.phi, dtype=float)
-        chi_flux = np.asarray(wout.chi, dtype=float)
-        ax.plot(s, phi_flux, ".-", label=r"$\phi$ (toroidal)")
-        ax.plot(s, chi_flux, ".-", label=r"$\chi$ (poloidal)")
-        ax.set_ylabel("flux [Wb]")
-        ax.legend()
-
-        for ax in axes.ravel()[:5]:
-            ax.set_xlabel(_S_LABEL)
-
-        # fsqt convergence trace (VMEC stores up to 100 sampled residuals).
-        ax = axes[1, 2]
-        fsqt = np.asarray(getattr(wout, "fsqt", np.zeros(0)), dtype=float).ravel()
-        wdot = np.asarray(getattr(wout, "wdot", np.zeros(0)), dtype=float).ravel()
-        mask = fsqt > 0.0
-        if np.any(mask):
-            last = int(np.max(np.nonzero(mask)[0])) + 1
-            it = np.arange(1, last + 1)
-            ax.semilogy(it, np.maximum(fsqt[:last], 1e-30), ".-", label="fsqt")
-            wmask = wdot[:last] > 0.0
-            if np.any(wmask):
-                ax.semilogy(it[wmask], wdot[:last][wmask], ".-", alpha=0.7, label="wdot")
-            ftolv = float(getattr(wout, "ftolv", 0.0) or 0.0)
-            if ftolv > 0.0:
-                ax.axhline(ftolv, color="k", ls="--", lw=0.8)
-            ax.legend()
-        else:
-            ax.text(0.5, 0.5, "no fsqt history", ha="center", va="center", transform=ax.transAxes)
-        ax.set_xlabel("stored iteration sample")
-        ax.set_ylabel("force residual")
-        ax.set_title("convergence (fsqt)")
-
-        out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
-        plt.close(fig)
-    return out_path
-
-
 def plot_boundary_3d(
     wout,
     out_path: str | Path,
@@ -2115,7 +2112,6 @@ _WOUT_FIGURES = {
     "summary": ("summary", plot_summary),
     "surfaces": ("surfaces", plot_surfaces),
     "modB": ("modB", plot_modB),
-    "profiles": ("profiles", plot_profiles),
     "stability": ("stability", plot_stability),
     "3d": ("boundary3d", plot_boundary_3d),
 }
@@ -2125,7 +2121,7 @@ def plot_wout(
     wout,
     outdir: str | Path,
     which: Sequence[str] = (
-        "summary", "surfaces", "modB", "profiles", "stability", "3d",
+        "summary", "surfaces", "modB", "stability", "3d",
     ),
     *,
     name: str | None = None,
@@ -2140,8 +2136,8 @@ def plot_wout(
     outdir:
         Output directory (created if missing).
     which:
-        Any subset of ``("summary", "surfaces", "modB", "profiles",
-        "stability", "3d")``.
+        Any subset of ``("summary", "surfaces", "modB", "stability",
+        "3d")``.
     name:
         Basename prefix for the figures (default: case name from the path).
     j_pitch:

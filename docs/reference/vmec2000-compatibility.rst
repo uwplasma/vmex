@@ -1,91 +1,559 @@
-VMEC2000 compatibility and research scope
-=========================================
+Input file and VMEC2000 compatibility
+=====================================
 
-Purpose
--------
+This page lists every input VMEX reads, its default, and what VMEX does with
+it relative to VMEC2000.  A control is called *implemented* only when it
+reaches the solver path; validation evidence is stated separately.  The
+mechanisms behind the controls are explained in :doc:`/explanation/iteration`,
+:doc:`/explanation/variational-problem` and :doc:`/explanation/nestor-vacuum`.
 
-This page is the normative disclosure of what VMEX does with VMEC2000 input,
-solver, output, and differentiation features.  It is deliberately more
-conservative than a feature list: a control is called *supported* only when it
-reaches the production path, and validation evidence is stated separately.
+The VMEC2000 reference is the STELLOPT tree: ``vmec_input.f`` (the
+``&INDATA`` namelist and defaults), ``readin.f`` (post-read normalization and
+preconditioner selection), ``runvmec.f``/``evolve.f``/``vmec.f`` (multigrid,
+convergence and WOUT policy), ``NESTOR_vacuum`` (vacuum solve), and
+``wrout.f``/``jxbforce.f`` (WOUT variables).
 
-The source of truth used for this audit is the STELLOPT VMEC2000 tree:
+Input formats
+-------------
 
-* ``LIBSTELL/Sources/Modules/vmec_input.f`` for the complete ``&INDATA``
-  namelist and defaults;
-* ``VMEC2000/Sources/Input_Output/readin.f`` for post-read normalization and
-  preconditioner selection;
-* ``VMEC2000/Sources/TimeStep/runvmec.f``, ``evolve.f`` and ``vmec.f`` for
-  multigrid, convergence, continuation, and WOUT policy;
-* ``VMEC2000/Sources/General`` for force, restart, RFP, and axis behavior;
-* ``VMEC2000/Sources/NESTOR_vacuum`` for the vacuum solve; and
-* ``VMEC2000/Sources/Input_Output/wrout.f`` and ``jxbforce.f`` for WOUT
-  variables and derived diagnostics.
+:meth:`vmex.core.input.VmecInput.from_file` auto-detects two formats:
+
+- the VMEC2000 ``&INDATA`` Fortran namelist (``input.<case>``), and
+- structured JSON (``.json`` suffix or leading ``{``) with the same names.
+
+Both round-trip: ``VmecInput.to_json`` and ``VmecInput.to_indata`` write
+decks that parse back to the same input.  VMEC2000 defaults and ``readin.f``
+normalizations are applied on construction (the :mod:`vmex.core.input`
+docstring has the exact rules).  Unknown names and active unsupported
+physics fail before setup.
+
+``VmecInput`` has value semantics: its arrays are owned and read-only, so an
+in-place edit cannot invalidate a compiled solve.  Copy the array, edit it,
+and build the new deck with ``dataclasses.replace``.
+
+Fortran namelist semantics
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+INDATA assignments are replayed in source order into the initialized
+``vmec_input.f`` arrays, as a Fortran namelist reader does.  A later short
+dense assignment replaces only the elements it supplies:
+
+.. code-block:: fortran
+
+   FTOL_ARRAY = 1e-6, 1e-11, 1e-30, 1e-30
+   FTOL_ARRAY = 1e-7, 1e-7
+
+leaves entries 3 and 4 at ``1e-30``.  Indexed and dense writes override one
+another in textual order.
+
+- An indexed designator followed by several values is a starting-element
+  assignment: ``APHI(1)=1,0`` writes elements 1 and 2.
+- Array sections use inclusive Fortran bounds, first subscript fastest, so
+  ``RBC(-6:6,0)=...`` equals the 13 scalar assignments.  Omitted limits
+  (``RBC(:,0)``, ``RBC(-6:,0)``) resolve from the declared VMEC2000 bounds.
+  Bounds, rank and value count are checked before setup.
+- Repeat syntax works for values (``4*0.0``) and nulls (``3*``).  A null
+  field advances the position without replacing the current value, so
+  ``APHI=,0.5`` keeps the default first coefficient.
+- Single- and double-quoted strings may contain spaces, commas, ``!`` or
+  ``=``; a doubled delimiter is a literal quote.
+
+Structured JSON
+~~~~~~~~~~~~~~~
+
+Keys are the lower-case :class:`~vmex.core.input.VmecInput` field names,
+which match INDATA except for the axis arrays (``raxis_c``, ``zaxis_s``,
+``raxis_s``, ``zaxis_c``) and the alias ``adiabatic_index`` for ``gamma``.
+Boundary coefficients are sparse ``{"n", "m", "value"}`` lists; axis arrays
+are dense of length ``ntor + 1``:
+
+.. code-block:: json
+
+   {
+     "lasym": false, "nfp": 5, "mpol": 5, "ntor": 4,
+     "ns_array": [31], "ftol_array": [1e-12], "niter_array": [2000],
+     "phiedge": 0.5,
+     "raxis_c": [1.0, 0.1, 0.0, 0.0, 0.0],
+     "zaxis_s": [0.0, 0.1, 0.0, 0.0, 0.0],
+     "rbc": [{"n": 0, "m": 0, "value": 1.0}, {"n": 0, "m": 1, "value": 0.3}],
+     "zbs": [{"n": 0, "m": 1, "value": 0.3}]
+   }
+
+``free_boundary_method="nestor"`` is accepted; ``only_coils`` and ``biest``
+are different boundary models and are rejected.  Unknown keys are errors.
+
+DESC equilibria
+~~~~~~~~~~~~~~~
+
+The CLI also accepts a DESC equilibrium as the input argument: a DESC text
+deck, an HDF5 file (``.h5``/``.hdf5``, needs ``h5py``) or a pickle
+(``.pkl``/``.pickle``).  DESC itself is not imported, and pickles are read
+with an unpickler that never runs their code.
+:func:`vmex.core.desc.write_desc_input` converts the boundary and profiles to
+an ``input.<name>`` INDATA deck next to the source (or in ``--outdir``),
+which the ordinary solve then runs.
+
+``--desc-tol`` (default ``0.01``, allowed range ``0`` to ``0.01``) bounds the
+boundary position and angular derivatives discarded when the Fourier
+resolution is truncated, relative to the RMS boundary shape; ``0`` keeps
+every nonzero mode.  One extra poloidal (and, for ``ntor > 0``, toroidal)
+harmonic is then added for the interior solve.
 
 Status vocabulary
 -----------------
 
 ``implemented``
-   The production VMEX path consumes the control or implements the method.
-   This does not by itself claim numerical parity for every equilibrium.
+   The VMEX solver path consumes the control.  This alone does not claim
+   numerical parity for every equilibrium.
 
 ``parity-regressed``
-   Tests compare the relevant trajectory, state, or WOUT quantity with
-   VMEC2000 for at least one representative case.
+   Tests compare the trajectory, state or WOUT quantity with VMEC2000 on at
+   least one representative case.
 
 ``deliberate divergence``
-   VMEX implements the same mathematical purpose with a disclosed different
-   algorithm or extends VMEC2000 behavior.
+   Same mathematical purpose, disclosed different algorithm or extension.
 
 ``partial``
-   A documented subset is implemented.  The omitted subset fails explicitly
-   where silently dropping it could change a result.
+   A documented subset is implemented; the rest fails explicitly where
+   dropping it could change a result.
 
 ``accepted no-op``
-   The value cannot change equilibrium physics and is retained only so legacy
-   decks parse.  VMEX does not produce the requested legacy artifact.
+   Cannot change equilibrium physics; kept so legacy decks parse.  VMEX does
+   not produce the requested legacy artifact.
 
 ``accepted with warning``
-   The equilibrium equations are unaffected, so the deck can run, but VMEX
-   warns that a requested auxiliary artifact is not produced.
+   The equations are unaffected, but VMEX warns that a requested auxiliary
+   artifact is not produced.
 
 ``rejected when active``
-   The parser recognizes the VMEC2000 control but raises
-   :class:`~vmex.core.input.UnsupportedInputModeError` before setup.  It never
-   substitutes an ordinary equilibrium for the requested model.
+   Recognized, but raises :class:`~vmex.core.input.UnsupportedInputModeError`
+   before setup.  An ordinary equilibrium is never substituted.
 
-``not implemented``
-   No production implementation or parity claim exists.
+INDATA variables
+----------------
+
+Symmetry and resolution
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 11 16 51
+
+   * - Variable
+     - Default
+     - Status
+     - VMEX behavior
+   * - ``LASYM``
+     - ``F``
+     - implemented
+     - Non-stellarator-symmetric mode; enables the ``RBS/ZBC`` and
+       ``*mns/*mnc`` partners.
+   * - ``NFP``
+     - 1
+     - implemented
+     - Number of field periods.
+   * - ``MPOL``
+     - 6
+     - implemented
+     - Poloidal modes ``m = 0 .. MPOL-1``.
+   * - ``NTOR``
+     - 0
+     - implemented
+     - Toroidal modes ``n = -NTOR .. NTOR``.
+   * - ``NTHETA`` / ``NZETA``
+     - 0
+     - implemented
+     - Angular grid points; 0 selects the VMEC default.  Explicit values
+       below ``2*MPOL+6`` / ``2*NTOR+4`` stay legal for VMEC2000 parity but
+       can alias nonlinear force products (see the diagnostic below).  With a
+       tabulated free-boundary field, an ``NZETA`` that does not divide the
+       mgrid's planes per period raises before iteration one
+       (``mgrid_mod.f``'s ``ier_flag = 9``); ``NZETA = 0`` picks the smallest
+       divisor at or above ``2*NTOR+4``, where VMEC2000 simply rejects (see
+       :func:`vmex.core.freeboundary.free_boundary_resolution`).
+
+Multigrid ladder and stepping
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 11 16 51
+
+   * - Variable
+     - Default
+     - Status
+     - VMEX behavior
+   * - ``NS_ARRAY``
+     - ``[31]``
+     - parity-regressed
+     - Radial surfaces per stage.  The active ladder ends at the first
+       nonpositive or decreasing entry; equal entries rerun.  The old
+       ``NS_ARRAY(1)=0`` form expands through ``NSIN`` to ``[NSIN, 31]``.
+       Fixed and free boundary use the same ladder.
+   * - ``FTOL_ARRAY``
+     - ``[1e-10]``
+     - implemented
+     - Force tolerance per stage (converged when ``FSQR``, ``FSQZ`` and
+       ``FSQL`` are all below it).  An explicit zero first entry generates
+       ``readin.f``'s geometric ladder from ``1e-8`` to ``FTOL``.
+   * - ``FTOL``
+     - 1e-10
+     - implemented
+     - Single-grid tolerance when ``FTOL_ARRAY(1)=0`` and the final target
+       of the generated ladder.
+   * - ``NITER_ARRAY`` / ``NITER``
+     - ``[100]``
+     - implemented
+     - Iteration cap per stage.  Scalar ``NITER`` fills the array only when
+       every entry is still ``-1`` (VMEC2000's fallback).  A ``-1`` left in a
+       partially assigned array runs one ``eqsolve`` pass before the limit
+       check, as in VMEC2000.
+   * - ``DELT``
+     - 1.0
+     - implemented
+     - Initial time step.  After VMEC2000's 75-Jacobian-reset condition, the
+       driver retries the stage from its best finite checkpoint with a
+       smaller ``DELT`` (``jacobian_retries=2`` by default); set
+       ``jacobian_retries=0`` / ``--jacobian-retries 0`` for VMEC2000's
+       immediate stop.
+   * - ``TCON0``
+     - 1.0
+     - implemented
+     - Constraint-force (spectral-condensation) multiplier; see
+       `LASYM constraint scaling (tcon)`_.
+   * - ``NSTEP``
+     - 10
+     - implemented
+     - Iterations between progress prints.
+   * - ``APHI``
+     - ``[1, 0, ...]``
+     - implemented, with a validity gate
+     - Radial-flux map ``Phi(x) = sum_i APHI(i)*x**i`` up to the edge-flux
+       normalization.  If ``Phi'(s)`` changes sign inside ``s`` in
+       ``[0, 1]`` the ``s -> Phi`` map folds, and VMEX raises a typed input
+       error naming the interval (VMEC2000 runs such decks and can write a
+       WOUT with NaN residuals or negative pressure).  Tangential zeros and
+       zeros at ``s = 0`` or ``s = 1`` are allowed.
+   * - ``PHIEDGE``
+     - 1.0
+     - implemented
+     - Total enclosed toroidal flux [Wb].
+   * - ``TIME_SLICE``
+     - 0
+     - implemented
+     - Printed in the run header; no effect on the equations.
+   * - ``LFORBAL``
+     - ``F``
+     - implemented
+     - Replaces the ``m=1, n=0`` R/Z forces with VMEC2000's non-variational
+       flux-averaged force balance (``fbal.f``), using full-mesh ``chipf``
+       reconstructed from half-mesh ``chips`` by ``add_fluxes.f90`` for both
+       ``NCURR`` modes; WOUT uses the same reconstruction.  See
+       `Pressureless current-free vacuum limit`_.
+   * - ``LMOVE_AXIS``
+     - ``T``
+     - implemented
+     - Allows the first-pass ``irst=4`` axis re-guess when the first force
+       sum exceeds the VMEC2000 threshold.  A missing or all-zero axis is not
+       pre-inferred: VMEX follows VMEC2000's zero-axis first pass and one
+       ``eqsolve.f`` recovery transfer.  Recorded in WOUT.
+   * - ``LFULL3D1OUT``
+     - ``F``
+     - accepted no-op
+     - Does not gate the WOUT.  An NITER-exhausted run writes its WOUT with
+       ``ier_flag = 2`` either way, as ``fileout.f`` does; the threed1 file
+       it requests is not produced.
+   * - ``RESTART_WOUT``
+     - ``''``
+     - VMEX extension
+     - Hot restart from the named ``wout_*.nc`` (relative to the deck unless
+       absolute); the CLI ``--restart`` flag overrides it.  See
+       :doc:`/howto/restart-from-previous-run`.
+   * - ``PRE_NITER``
+     - —
+     - rejected when active with 2-D GMRES
+     - VMEC2000's post-activation iteration-budget change is not
+       implemented.
+   * - ``MAX_MAIN_ITERATIONS``
+     - —
+     - rejected above 1
+     - Use an explicit hot restart instead of extra ``NITER`` blocks.
+   * - ``LGIVEUP`` / ``FGIVEUP``
+     - —
+     - rejected when ``LGIVEUP=T``
+     - VMEC2000's early stop between poorly converged stages is not
+       implemented.
+   * - ``OMP_NUM_THREADS``
+     - —
+     - accepted no-op
+     - JAX/XLA owns threading; see :doc:`/explanation/architecture`.
+
+Profiles
+~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 11 16 51
+
+   * - Variable
+     - Default
+     - Status
+     - VMEX behavior
+   * - ``PMASS_TYPE``
+     - ``power_series``
+     - implemented
+     - Pressure profile type, e.g. ``power_series``, ``two_power``,
+       ``two_power_gs``, ``two_Lorentz``, ``gauss_trunc``, ``rational``,
+       ``cubic_spline``, ``akima_spline``, ``line_segment``, ``pedestal``
+       (full list in :mod:`vmex.core.profiles`).
+   * - ``AM`` / ``AM_AUX_S`` / ``AM_AUX_F``
+     - zeros / —
+     - implemented
+     - Pressure coefficients (dense, indices 0..20) / spline knots and values.
+   * - ``PRES_SCALE``
+     - 1.0
+     - implemented
+     - Pressure scale factor [Pa].
+   * - ``GAMMA``
+     - 0.0
+     - implemented
+     - Adiabatic index (JSON alias ``adiabatic_index``).
+   * - ``SPRES_PED``
+     - 1.0
+     - implemented
+     - Pressure pedestal location in ``s``.
+   * - ``BLOAT``
+     - 1.0
+     - implemented
+     - Profile-argument expansion factor.
+   * - ``NCURR``
+     - 0
+     - implemented
+     - 0: prescribed iota (``AI``); 1: prescribed toroidal current (``AC``).
+   * - ``PCURR_TYPE``
+     - ``power_series``
+     - implemented
+     - Current profile type; ``*_i`` forms prescribe :math:`I(s)`, ``*_ip``
+       forms :math:`I'(s)`.  One of ``power_series``, ``power_series_i``,
+       ``two_power``, ``two_power_gs``, ``gauss_trunc``, ``sum_atan``,
+       ``rational``, ``pedestal``, ``sum_cossq_s``, ``sum_cossq_sqrts``,
+       ``sum_cossq_s_free``, and the ``_i``/``_ip`` spline and
+       ``line_segment`` forms.  ``sum_atan``, ``rational``, ``pedestal`` and
+       ``sum_cossq_*`` prescribe :math:`I(s)`.
+   * - ``AC`` / ``AC_AUX_S`` / ``AC_AUX_F``
+     - zeros / —
+     - implemented
+     - Current coefficients / spline knots and values.
+   * - ``CURTOR``
+     - 0.0
+     - implemented
+     - Total toroidal current [A].
+   * - ``PIOTA_TYPE``
+     - ``power_series``
+     - implemented, excluding RFP
+     - Iota profile type: ``power_series``, ``sum_atan``,
+       ``nice_quadratic``, ``rational``, ``cubic_spline``, ``akima_spline``,
+       ``line_segment``.
+   * - ``AI`` / ``AI_AUX_S`` / ``AI_AUX_F``
+     - zeros / —
+     - implemented
+     - Iota coefficients / spline knots and values.
+
+Axis and boundary
+~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 11 16 51
+
+   * - Variable
+     - Default
+     - Status
+     - VMEX behavior
+   * - ``RAXIS_CC`` / ``ZAXIS_CS``
+     - zeros
+     - implemented
+     - Axis initial guess, cos/sin coefficients for ``n = 0 .. NTOR``.
+   * - ``RAXIS_CS`` / ``ZAXIS_CC``
+     - zeros
+     - implemented
+     - Asymmetric axis partners (``LASYM = T``).
+   * - obsolete ``RAXIS`` / ``ZAXIS``
+     - —
+     - implemented
+     - Nonzero entries override the modern names, as in
+       ``read_indata_namelist``.
+   * - ``RBC(n,m)`` / ``ZBS(n,m)``
+     - zeros
+     - implemented
+     - Boundary coefficients of
+       :math:`R\cos / Z\sin(m\theta - n\,\mathrm{NFP}\,\zeta)`.
+   * - ``RBS(n,m)`` / ``ZBC(n,m)``
+     - zeros
+     - implemented
+     - Asymmetric boundary partners (``LASYM = T``).
+   * - ``TVOLUME`` / ``LVOLUME_RFIX``
+     - —
+     - rejected when active
+     - Target-volume rescaling (``RESCALE_BOUNDARY``) is not ported.
+
+Free boundary
+~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 11 16 51
+
+   * - Variable
+     - Default
+     - Status
+     - VMEX behavior
+   * - ``LFREEB``
+     - ``T``
+     - implemented
+     - Free-boundary mode; forced ``F`` when ``MGRID_FILE = 'NONE'``.
+   * - ``MGRID_FILE``
+     - ``'NONE'``
+     - implemented
+     - MAKEGRID vacuum-field file.  An unreadable file falls back to a
+       fixed-boundary solve with a warning, as VMEC2000 does, and the WOUT
+       records the fixed-boundary solve.  ``'DIRECT_COILS'`` tabulates an
+       ESSOS coil field into an in-memory mgrid (with ``vmex --coils``).
+   * - ``EXTCUR``
+     - —
+     - implemented
+     - External coil-group currents [A].
+   * - ``NVACSKIP``
+     - 1
+     - implemented
+     - Full vacuum-solve cadence and adaptive lower bound; ``<= 0`` falls
+       back to ``NFP``.
+   * - ``MFILTER_FBDY`` / ``NFILTER_FBDY``
+     - -1
+     - implemented
+     - Suppress high boundary modes in setup and in the free-boundary
+       degrees of freedom.
+   * - ``TRIP3D_FILE``
+     - ``'NONE'``
+     - rejected when active
+     - A non-``NONE`` value raises ``D00E_TRIP3D_MODE_UNSUPPORTED``.
+
+Preconditioner
+~~~~~~~~~~~~~~
+
+``PRECON_TYPE`` defaults to ``NONE`` and ``PREC2D_THRESHOLD`` to ``1e-30``.
+VMEC2000's ``readin.f`` maps four strings to four different 2-D block
+algorithms (``CG``, ``GMRES``, ``GMRESR``, ``TFQMR``, types 1-4); ``NONE``,
+``DEFAULT`` and unknown strings keep the 1-D radial preconditioner.  VMEX
+uses this contract:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 22 54
+
+   * - ``PRECON_TYPE``
+     - Status
+     - Meaning
+   * - ``NONE`` or ``DEFAULT``
+     - implemented
+     - VMEC-parity 1-D radial tridiagonal plus lambda preconditioner.  These
+       disable only the optional 2-D block preconditioner, not ``scalfor``
+       or lambda scaling.
+   * - ``GMRES``
+     - deliberate divergence
+     - Exact JAX JVP of the preconditioned force, solved matrix-free by
+       restarted SOLVAX GMRES.  VMEC2000 assembles a block-tridiagonal
+       operator by finite differences.
+   * - ``CG``, ``GMRESR``, ``TFQMR``
+     - rejected when active
+     - Not aliases for VMEX GMRES.
+   * - any other string
+     - rejected
+     - Prevents a typo from selecting a solver.
+
+``PREC2D_THRESHOLD`` is read by VMEX GMRES on the finest radial stage after
+the minimum-iteration gate; :class:`~vmex.core.preconditioner_2d.Prec2DConfig`
+is the Python interface.  A preconditioner changes the update, never the
+equilibrium root: convergence is judged on the physical ``FSQR``, ``FSQZ``,
+``FSQL``.
+
+The radial solve replays VMEC2000 ``serial_tridslv``'s modified-pivot test at
+the same ``1e-8`` relative threshold and also checks a normwise backward
+residual.  Where VMEC2000 executes ``STOP`` on a rejected pivot, VMEX applies
+the identity to the rejected coefficient columns only and keeps the update
+finite; ``tools/diagnose_input.py`` reports this as
+``D04E_RADIAL_PRECONDITIONER_REJECTED``.
+
+Reconstruction, anisotropy and legacy output
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The reconstruction family is accepted only while reconstruction is inactive
+and is rejected as a unit otherwise (``LRECON`` with ``IMSE>0`` or
+``ITSE>0`` raises ``D00A_RECONSTRUCTION_MODE_UNSUPPORTED``; an inert
+``LRECON=T`` stays inert, as in VMEC2000):
+
+``LRECON, IMSE, ITSE, PSA, PFA, ISA, IFA, IMATCH_PHIEDGE, IOPT_RAXIS,
+TENSI, TENSP, TENSI2, FPOLYI, MSEANGLE_OFFSET, MSEANGLE_OFFSETM, ISNODES,
+IPNODES, RSTARK, DATASTARK, SIGMA_STARK, RTHOM, DATATHOM, SIGMA_THOM,
+PRESFAC, PRES_OFFSET, PHIDIAM, SIGMA_DELPHID, NFLXS, INDXFLX, DSIOBT,
+SIGMA_FLUX, NBFLD, INDXBFLD, BBC, SIGMA_B, SIGMA_CURRENT, LPOFR``.
+
+The ANIMEC family ``AH, AT, BCRIT, PH_TYPE, PT_TYPE, AH_AUX_S, AH_AUX_F,
+AT_AUX_S, AT_AUX_F`` is accepted at its isotropic defaults; nonzero ``AH`` or
+non-default ``AT`` raises ``D00F_ANIMEC_MODE_UNSUPPORTED``.  ``LRFP=T``
+raises ``D00B_RFP_MODE_UNSUPPORTED``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 20 48
+
+   * - Variables
+     - Status
+     - VMEX behavior
+   * - ``LBSUBS=T``
+     - rejected when active
+     - Requests a different ``B_s`` diagnostic in ``jxbforce.f``.
+   * - ``LNYQUIST=F``
+     - rejected when active
+     - VMEX writes the Nyquist WOUT only.
+   * - ``LMAC, LEDGE_DUMP, LOLDOUT, LWOUTTXT, LDIAGNO``
+     - accepted with warning
+     - Auxiliary monitor, edge, legacy, text-WOUT or DIAGNO files are not
+       produced; the netCDF WOUT is.
+   * - ``LMOVIE, LSPECTRUM_DUMP, LOPTIM``
+     - accepted no-op
+     - Obsolete; no behavior in the audited VMEC2000 source.
+   * - ``LBOOZ, MBOOZ, NBOOZ, BOOZ_SURFACES``
+     - VMEX extension; ``LBOOZ=T`` rejected
+     - Use ``vmex --booz --mbooz ... --nbooz ... --booz-surfaces ...``
+       (:doc:`cli`).
 
 No-silent-physics policy
 ------------------------
 
-Input passes through four distinct gates:
+Parsing a name is not evidence that the solver uses it.  VMEX applies these
+rules:
 
-``tokenize -> classify -> construct/normalize -> setup/solve -> output``.
-
-Parsing a name is not evidence that the solver uses it.  VMEX therefore
-applies these rules:
-
-1. Unknown INDATA variables and unknown structured JSON keys are input errors.
-2. Active controls which change the mathematical problem, iteration contract,
-   or requested WOUT convention are either implemented or rejected before
+1. Unknown INDATA variables and unknown JSON keys are input errors.
+2. Active controls that change the mathematical problem, the iteration
+   contract or the WOUT convention are implemented or rejected before
    iteration 1.
 3. Neutral spellings such as ``AH=0``, ``AT=[1,0,...]``,
-   ``TRIP3D_FILE='NONE'``, and an inactive reconstruction block remain
-   accepted.
-4. Active legacy output requests which do not change the equilibrium are
-   accepted with a warning when the artifact is unavailable; truly obsolete
-   controls with no VMEC2000 production behavior are listed as no-ops.
-5. Symmetry-limited derived methods raise on ``LASYM=T`` instead of omitting
+   ``TRIP3D_FILE='NONE'`` and an inactive reconstruction block are accepted.
+4. Active legacy output requests that do not change the equilibrium are
+   accepted with a warning; obsolete controls are no-ops.
+5. Symmetry-limited derived methods raise on ``LASYM=T`` instead of dropping
    Fourier partners.
 
-The privacy-preserving ``tools/diagnose_input.py`` reports the same
-classification as the production parser.  Its stable ``D00*`` code contains
-no filename, coefficient, input value, or equilibrium result.  It also reports
-whether explicit angular grids meet VMEC2000's automatic-resolution floor;
-``W01_ANGULAR_GRID_BELOW_VMEC_DEFAULT`` is a convergence-risk warning, not a
-parser or physics-mode rejection.
+From a source checkout, ``python tools/diagnose_input.py input.case`` runs
+the same classification plus a first-force-pass check without a full solve.
+Its default output is a PASS/FAIL checklist and one assessment code (for
+example ``D00E_TRIP3D_MODE_UNSUPPORTED``), with no path, input value,
+coefficient or force magnitude, so it can be shared for a confidential deck;
+``--details`` adds values for local use.
+``W01_ANGULAR_GRID_BELOW_VMEC_DEFAULT`` flags explicit ``NTHETA``/``NZETA``
+below the VMEC2000 automatic floor; it is a convergence-risk warning, not a
+rejection.
 
 Equilibrium capability matrix
 -----------------------------
@@ -99,373 +567,66 @@ Equilibrium capability matrix
      - Scope and evidence
    * - Fixed boundary, stellarator symmetric
      - parity-regressed
-     - VMEC force iteration, multigrid, restart logic, profiles, and WOUT
-       variables have representative VMEC2000 golden tests.
+     - Force iteration, multigrid, restart, profiles and WOUT variables have
+       VMEC2000 golden tests.
    * - Fixed boundary, ``LASYM=T``
-     - parity-regressed with one corrected legacy diagnostic
-     - Full asymmetric solve and WOUT partner channels are implemented.
-       ``currvmns`` uses the corrected PARVMEC-calibrated VMEC++ 0.7.1
-       inner-half-mesh denominator rather than the known legacy
-       ``read_wout_mod.f90`` index slip.  Symmetry-limited *derived
-       objectives* are a separate row below.
+     - parity-regressed, one corrected diagnostic
+     - Full asymmetric solve and WOUT partners.  ``currvmns`` uses the
+       corrected denominator described in `LASYM currvmns`_.
    * - Free boundary, NESTOR, symmetric
-     - implemented; parity-regressed on representative cases
-     - Mgrid external field, plasma-current filament, full/incremental vacuum
-       cadence, pressure coupling, and WOUT equilibrium channels.
+     - parity-regressed on representative cases
+     - Mgrid field, plasma-current filament, full/incremental vacuum cadence,
+       pressure coupling and WOUT channels.
    * - Free boundary, NESTOR, ``LASYM=T``
-     - implemented; live-VMEC2000-tested
-     - A CTH-like asymmetric case exercises the solve, and the live VMEC2000
-       comparison covers a converged LASYM free-boundary case including its
-       NESTOR vacuum-potential and surface-field WOUT partners.
-   * - Fixed-boundary ``NS_ARRAY``
-     - parity-regressed
-     - Increasing stages interpolate the final state, equal stages rerun, and
-       ``readin.f`` ends the active ladder at the first decreasing or
-       nonpositive entry.
+     - live-VMEC2000-tested
+     - A converged CTH-like asymmetric case, including the NESTOR potential
+       and surface-field WOUT partners.
    * - Free-boundary ``NS_ARRAY``
-     - implemented by PR #70
-     - Plasma state, ``ivac``, adaptive ``nvacskip``, boundary pressure, and
-       vacuum continuation are carried.  Resolution-specific NESTOR basis,
-       Green-function, filament, matrix, and cache structures are rebuilt or
-       selected at every executed resolution.
+     - implemented
+     - Plasma state, ``ivac``, adaptive ``nvacskip``, boundary pressure and
+       vacuum continuation are carried; resolution-specific NESTOR
+       structures are rebuilt at each grid.
    * - Hot restart
      - implemented
-     - Fixed and free boundary accept ``initial_state`` and ``restart_from``
-       (any VMEC2000-compatible wout file, a ``WoutData``, a ``SolveResult``,
-       or a ``SpectralState``; CLI ``--restart`` / deck ``RESTART_WOUT``).
-       Coarse multigrid rungs below the restart resolution are skipped.  A
-       user free-boundary restart repeats activation (reset-file semantics);
-       continuation between radial stages carries the active vacuum state.
-   * - Mgrid
-     - implemented
-     - MAKEGRID netCDF field and coil-group currents are interpolated in
-       :class:`~vmex.core.mgrid.MgridField`.
-   * - ESSOS/SIMSOPT field callable
-     - deliberate VMEX extension
-     - A Cartesian ``xyz -> B`` callable can be tabulated once into an
-       ``MgridField``.  The table/current scale remains differentiable; coil
-       geometry derivatives are not retained by tabulation.
-   * - CLI ``--coils`` / ``DIRECT_COILS``
-     - deliberate VMEX extension
-     - The ESSOS coils' Biot-Savart field is tabulated in memory into an
-       ``MgridField`` which then follows the same NESTOR path.  This is not
-       an interpolation-free coil solve.
-   * - ``free_boundary_method='only_coils'``
-     - rejected when active
-     - This is a different boundary model, not an alias for choosing a coil
-       input source.
-   * - BIEST vacuum method
-     - not implemented
-     - the ``biest`` selector is rejected rather than mapped to NESTOR.
-   * - TRIP3D coupling
-     - rejected when active
-     - A non-``NONE`` ``TRIP3D_FILE`` receives
-       ``D00E_TRIP3D_MODE_UNSUPPORTED``.
-   * - Reconstruction
-     - rejected when active
-     - Effective ``LRECON`` with ``IMSE>0`` or ``ITSE>0`` receives
-       ``D00A_RECONSTRUCTION_MODE_UNSUPPORTED``.  An inert ``LRECON=T`` with no
-       reconstruction signals remains inert, matching VMEC2000.
-   * - Reversed-field pinch
-     - rejected when active
-     - ``LRFP=T`` receives ``D00B_RFP_MODE_UNSUPPORTED``.  VMEX does not claim
-       the reciprocal-q profile, force, residue, or vacuum sign semantics.
-   * - ANIMEC anisotropy/flow
-     - rejected when active
-     - Nonzero ``AH`` or non-default ``AT`` receives
-       ``D00F_ANIMEC_MODE_UNSUPPORTED``.
-   * - Boundary target-volume rescaling
-     - rejected when active
-     - ``TVOLUME>0`` / ``LVOLUME_RFIX`` geometry rescaling from
-       ``vmec_input.f:RESCALE_BOUNDARY`` is not yet ported.
-
-Complete INDATA disposition
----------------------------
-
-Core grid, profiles, and geometry
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 32 18 50
-
-   * - VMEC2000 variables
-     - Status
-     - Effective VMEX behavior
-   * - ``LASYM, NFP, MPOL, NTOR, NTHETA, NZETA``
-     - implemented
-     - Select symmetry, Fourier resolution, and angular quadrature.
-       Free boundary with a tabulated field adds VMEC2000's angular
-       compatibility rule (``mgrid_mod.f``: ``MOD(kp, NZETA) /= 0`` is
-       ``ier_flag = 9``): an explicitly incompatible ``NZETA`` raises the
-       typed input error before iteration one, and ``NZETA = 0`` selects the
-       smallest divisor of the mgrid's planes-per-period at or above the
-       ``2*NTOR + 4`` floor (VMEC2000 itself has no automatic compatible
-       selection and simply rejects) — see
-       :func:`vmex.core.freeboundary.free_boundary_resolution`.
-   * - ``NS_ARRAY``
-     - implemented
-     - Radial resolution-continuation ladder.  The explicit old-style
-       ``NS_ARRAY(1)=0`` form expands through ``NSIN`` to ``[NSIN,31]``.
-       ``readin.f`` accepts a positive nondecreasing prefix (equal grids
-       rerun) and excludes the first decreasing/nonpositive value and its tail.
-   * - ``FTOL_ARRAY``
-     - implemented
-     - Per-stage physical-force stopping tolerance.  Repeated dense/indexed
-       namelist assignments overlay in source order.  An explicit zero first
-       entry generates VMEC2000's geometric ``1e-8 -> FTOL`` ladder.
-   * - ``FTOL``
-     - implemented
-     - Used directly for a single grid when ``FTOL_ARRAY(1)=0`` and as the
-       final target of the generated multigrid tolerance ladder.
-   * - ``NITER_ARRAY, NITER``
-     - implemented
-     - VMEC2000's ``ALL(NITER_ARRAY==-1) -> NITER`` fallback is reproduced;
-       any explicit array write preserves unassigned ``-1`` elements.  Such a
-       stage executes one force/evolution pass before the ``iter2 >= niter``
-       limit is observed.
-   * - ``DELT, TCON0, NSTEP``
-     - implemented
-     - Initial time step, spectral-condensation multiplier, and print cadence.
-       VMEX's driver retries a fatal 75-reset stage from its best finite
-       checkpoint with reduced ``DELT`` (two attempts by default); set
-       ``jacobian_retries=0``/``--jacobian-retries 0`` for exact VMEC2000
-       termination behavior.
-   * - ``APHI, PHIEDGE``
-     - implemented, with a validity gate
-     - Toroidal-flux map and edge flux.  Indexed and section assignments use
-       Fortran lower bounds and column-major order.  An ``APHI`` whose flux
-       derivative changes sign inside ``s`` in ``[0, 1]`` (a folded
-       ``s -> Phi`` map) raises a typed input error at setup; VMEC2000
-       accepts such decks and terminates through a written WOUT that can
-       carry NaN residuals or negative pressure.
-   * - ``GAMMA, BLOAT, SPRES_PED, PRES_SCALE``
-     - implemented
-     - Profile/equation-of-state controls used by setup.
-   * - ``PMASS_TYPE, AM, AM_AUX_S, AM_AUX_F``
-     - implemented
-     - Pressure profile types listed in :mod:`vmex.core.profiles`.
-   * - ``PIOTA_TYPE, AI, AI_AUX_S, AI_AUX_F``
-     - implemented, excluding RFP interpretation
-     - Prescribed-iota profile for ``NCURR=0``.
-   * - ``PCURR_TYPE, AC, AC_AUX_S, AC_AUX_F, CURTOR, NCURR``
-     - implemented
-     - Prescribed-current lane for ``NCURR=1`` and ordinary current data.
-   * - ``RAXIS_CC, ZAXIS_CS, RAXIS_CS, ZAXIS_CC``
-     - implemented
-     - Initial axis Fourier coefficients.
-   * - obsolete ``RAXIS, ZAXIS``
-     - implemented compatibility
-     - Nonzero legacy entries override their modern partners as in
-       ``read_indata_namelist``.
-   * - ``RBC, ZBS, RBS, ZBC``
-     - implemented
-     - Scalar, starting-element, and multidimensional Fortran namelist
-       sections are supported with declared bounds, inclusive section limits,
-       first-subscript-fastest order, source-ordered overlay, repeat and null
-       fields, and single/double-quoted character literals.
-   * - ``TVOLUME, LVOLUME_RFIX``
-     - rejected when active
-     - Positive target-volume rescaling is not silently omitted.
-
-Force, axis, and iteration controls
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 31 18 51
-
-   * - VMEC2000 variables
-     - Status
-     - Effective VMEX behavior
-   * - ``LFORBAL``
-     - implemented by PR #70
-     - Selects VMEC2000's non-variational average-force replacement for the
-       ``m=1,n=0`` R/Z channels.  ``calc_fbal`` consumes full-mesh ``chipf``
-       reconstructed from the effective half-mesh ``chips`` by the
-       ``add_fluxes.f90`` formulas for both ``NCURR`` modes; WOUT uses the
-       same reconstruction.
-   * - ``LMOVE_AXIS``
-     - implemented by PR #70
-     - Enables the first-pass ``irst=4`` axis re-guess when the finite force sum
-       exceeds the VMEC2000 threshold.  Missing/all-zero axis coefficients are
-       not pre-inferred in production: VMEX now follows VMEC2000's supplied
-       zero-axis first pass and exactly one ``eqsolve.f`` recovery transfer.
-       The value is preserved in WOUT.
-   * - ``LFULL3D1OUT``
-     - implemented
-     - With ``T``, an NITER-exhausted fixed- or free-boundary run writes the
-       unconverged WOUT and summary with ``ier_flag=2``.  With ``F``, the CLI
-       returns that typed status before fileout, matching ``vmec.f``.  Fatal
-       numerical/Jacobian failures never write a WOUT.
-   * - ``PRE_NITER``
-     - rejected when active with 2-D GMRES
-     - VMEC2000 changes the total post-activation iteration cap.  VMEX does not
-       yet implement that budget mutation.
-   * - ``MAX_MAIN_ITERATIONS``
-     - rejected above 1
-     - VMEC2000 can request additional ``NITER`` blocks after
-       ``more_iter_flag``.  VMEX instead exposes explicit hot restart.
-   * - ``LGIVEUP, FGIVEUP``
-     - rejected when ``LGIVEUP=T``
-     - VMEC2000's early stop between poorly converged radial stages is not yet
-       implemented.
-   * - ``TIME_SLICE``
-     - implemented
-     - Preserved in the VMEC-style run header.  It does not change the
-       equilibrium equations.
-   * - ``OMP_NUM_THREADS``
-     - accepted no-op
-     - JAX/XLA owns CPU threading; see :doc:`/explanation/parallelization`.
-
-Free-boundary controls
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 18 52
-
-   * - VMEC2000 variables
-     - Status
-     - Effective VMEX behavior
-   * - ``LFREEB, MGRID_FILE, EXTCUR``
-     - implemented
-     - Select NESTOR and the external coil-group field.  ``MGRID_FILE='NONE'``
-       selects fixed boundary.  An unreadable requested mgrid follows
-       VMEC2000's warning/fixed-boundary fallback, including fixed WOUT
-       metadata.
-   * - ``NVACSKIP``
-     - implemented
-     - Full-vacuum cadence and adaptive lower bound; nonpositive input falls
-       back to ``NFP``.
-   * - ``MFILTER_FBDY, NFILTER_FBDY``
-     - implemented
-     - Suppress selected high boundary modes in setup and implicit boundary
-       degrees of freedom.
-   * - ``TRIP3D_FILE``
-     - rejected when non-``NONE``
-     - No external-field substitution occurs.
-
-Preconditioner controls
-~~~~~~~~~~~~~~~~~~~~~~~
-
-VMEC2000's strings do not denote one interchangeable implementation.
-``readin.f`` selects a 2-D block operator with four distinct evolution/Krylov
-algorithms: ``CG`` (type 1), ``GMRES`` (type 2), ``GMRESR`` (type 3), and
-``TFQMR`` (type 4).  ``NONE``, ``DEFAULT``, and unrecognized strings leave the
-ordinary 1-D radial preconditioner in the audited source.
-
-VMEX uses this explicit contract:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 24 22 54
-
-   * - ``PRECON_TYPE``
-     - VMEX status
-     - Meaning
-   * - ``NONE`` or ``DEFAULT``
-     - implemented
-     - VMEC-parity 1-D radial tridiagonal plus lambda preconditioner.  These
-       spellings disable only the optional 2-D block preconditioner.
-   * - ``GMRES``
-     - deliberate divergence
-     - Exact JAX JVP of the preconditioned force, solved matrix-free by
-       restarted SOLVAX GMRES.  VMEC2000 instead finite-difference assembles a
-       block-tridiagonal operator.
-   * - ``CG``, ``GMRESR``, ``TFQMR``
-     - rejected when active
-     - These are not aliases for VMEX GMRES.
-   * - any other string
+     - ``initial_state`` / ``restart_from`` (a wout file, ``WoutData``,
+       ``SolveResult`` or ``SpectralState``), CLI ``--restart``, deck
+       ``RESTART_WOUT``.  Coarse rungs below the restart resolution are
+       skipped.  A user free-boundary restart repeats vacuum activation;
+       continuation between stages carries the vacuum state.
+   * - ESSOS/SIMSOPT field callable, ``--coils`` / ``DIRECT_COILS``
+     - VMEX extension
+     - An ``xyz -> B`` field is tabulated once into an
+       :class:`~vmex.core.mgrid.MgridField` and follows the NESTOR path.
+       Table values and current scale stay differentiable; coil geometry
+       does not through the table.
+   * - ``only_coils`` / BIEST vacuum
      - rejected
-     - Prevents typographical selection of unintended solver behavior.
-
-``PREC2D_THRESHOLD`` is consumed by VMEX GMRES on the finest radial stage
-after the minimum-iteration gate.  An explicit Python
-:class:`~vmex.core.preconditioner_2d.Prec2DConfig` remains the VMEX-native
-advanced interface.
-
-The production radial solve uses SOLVAX's checked tridiagonal interface.  It
-replays VMEC2000 ``serial_tridslv``'s unregularized modified-pivot test at the
-same ``1e-8`` relative threshold and additionally verifies a normwise backward
-residual.  VMEC2000 executes a process-wide ``STOP`` on a rejected pivot;
-VMEX instead applies the identity action only to rejected coefficient columns,
-keeps the update finite, and reports
-``D04E_RADIAL_PRECONDITIONER_REJECTED``.  Well-conditioned columns retain the
-ordinary platform-selected Thomas/fused solve and its existing parity tests.
-
-Reconstruction, anisotropy, and legacy output controls
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The complete VMEC2000 reconstruction family is classified together because
-its arrays have no ordinary-equilibrium meaning:
-
-``LRECON, IMSE, ITSE, PSA, PFA, ISA, IFA, IMATCH_PHIEDGE, IOPT_RAXIS,
-TENSI, TENSP, TENSI2, FPOLYI, MSEANGLE_OFFSET, MSEANGLE_OFFSETM, ISNODES,
-IPNODES, RSTARK, DATASTARK, SIGMA_STARK, RTHOM, DATATHOM, SIGMA_THOM,
-PRESFAC, PRES_OFFSET, PHIDIAM, SIGMA_DELPHID, NFLXS, INDXFLX, DSIOBT,
-SIGMA_FLUX, NBFLD, INDXBFLD, BBC, SIGMA_B, SIGMA_CURRENT, LPOFR``.
-
-They are accepted only while the effective reconstruction mode is inactive;
-active reconstruction is rejected as a unit.
-
-The ANIMEC family ``AH, AT, BCRIT, PH_TYPE, PT_TYPE, AH_AUX_S, AH_AUX_F,
-AT_AUX_S, AT_AUX_F`` is similarly accepted at its isotropic defaults and
-rejected when ``AH`` or ``AT`` activates anisotropic physics.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 32 20 48
-
-   * - Output/legacy variables
-     - Status
-     - Disclosure
-   * - ``LBSUBS=T``
+     - Different boundary models, not aliases for NESTOR.
+   * - TRIP3D, reconstruction, RFP, ANIMEC, target-volume rescaling
      - rejected when active
-     - Requests a different ``B_s`` diagnostic in ``jxbforce.f``.
-   * - ``LNYQUIST=F``
-     - rejected when active
-     - VMEX currently writes its Nyquist WOUT contract.
-   * - ``LMAC, LEDGE_DUMP, LOLDOUT, LWOUTTXT, LDIAGNO``
-     - accepted with warning
-     - These request auxiliary VMEC2000 monitor, edge, legacy, text-WOUT, or
-       DIAGNO artifacts which VMEX does not produce.  The netCDF WOUT and
-       equilibrium solve remain available.
-   * - ``LMOVIE, LSPECTRUM_DUMP, LOPTIM``
-     - accepted no-op
-     - These are obsolete and have no production behavior in the audited
-       VMEC2000 source.  They do not change the equilibrium force solve.
-   * - ``LBOOZ, MBOOZ, NBOOZ, BOOZ_SURFACES``
-     - VMEX extension; ``LBOOZ=T`` rejected
-     - Use ``vmex --booz --mbooz ... --nbooz ... --booz-surfaces ...``.
+     - See the tables above.
 
-WOUT contract and limitations
------------------------------
+WOUT contract
+-------------
 
-VMEX writes a VMEC2000-shaped netCDF WOUT; :doc:`wout-file` lists every
-variable.  The following distinctions are important:
+VMEX writes a VMEC2000-shaped netCDF WOUT; :doc:`wout-file` lists the
+variables.
 
 * ``lrecon`` and ``lrfp`` are false because active modes are rejected.
-* ``lmove_axis`` records the actual input value.
-* ``lfreeb`` records the *effective* solve.  A missing-mgrid fixed-boundary
-  fallback is not labeled free-boundary.
-* ``ier_flag=2`` runs (NITER exhaustion) write the unconverged WOUT for
-  either boundary mode — the CLI default, matching ``fileout.f``'s normal
-  termination on ``more_iter_flag``.
-* NESTOR potential/surface WOUT variables are exported for both symmetric
-  and asymmetric solves; the live VMEC2000 comparison includes a converged
-  LASYM free-boundary case whose ``potcos`` and asymmetric surface partners
-  match.  (Earlier consolidation states exported only the symmetric set —
-  that gap is closed.)
-* PR #72 adds ``curlabel`` schema preservation.  It is complementary to, not a
-  replacement for, the free-boundary solve changes.
+* ``lmove_axis`` records the input value.
+* ``lfreeb`` records the solve actually run: a missing-mgrid fallback is not
+  labeled free-boundary.
+* NITER exhaustion writes the unconverged WOUT with ``ier_flag = 2`` for
+  either boundary mode (VMEC2000's ``vmec.f`` records ``0`` there).  Fatal
+  numerical or Jacobian failures never write a WOUT.
+* NESTOR potential and surface variables are written for symmetric and
+  asymmetric solves.
 
-Differentiation and derived-method matrix
------------------------------------------
+Differentiation and derived methods
+-----------------------------------
 
-``AD`` below means algorithmic/automatic differentiation of the stated VMEX
-map.  ``FD-validated`` means a test compares that derivative with a finite
-difference; it does not mean the method itself uses FD.
+*AD* is automatic differentiation of the stated map; *FD-validated* means a
+test compares that derivative with finite differences.
 
 .. list-table::
    :header-rows: 1
@@ -473,314 +634,146 @@ difference; it does not mean the method itself uses FD.
 
    * - Method
      - Status
-     - Exact scope
+     - Scope
    * - Fixed-boundary implicit equilibrium derivative
      - implemented; FD-validated
-     - Boundary/profile/current/flux parameters at a converged fixed point.
-       Multigrid and adaptive iteration history are initializers, not
+     - Boundary, profile, current and flux parameters at a converged fixed
+       point.  Multigrid and iteration history are initializers, not
        differentiated.
-   * - NESTOR forward solve derivative
-     - not implemented
-     - The host-driven full/incremental NESTOR fixed point has no adjoint or
-       custom derivative.
+   * - Free-boundary implicit derivative
+     - experimental
+     - :mod:`vmex.core.freeboundary_implicit`: reverse-mode derivative of
+       the reconverged VMEC--NESTOR root with respect to profiles and
+       external-field parameters (ESSOS coil shape and currents, or mgrid
+       currents), checked against reconverged finite differences.
+       ``device="auto"`` runs it on the CPU; see :doc:`capabilities` for the
+       open promotion gates.
    * - Virtual-casing external-field residual
      - implemented; FD-validated
-     - Coil/current derivatives on a specified plasma boundary.  This is not
-       the derivative of a fully reconverged NESTOR equilibrium.
-   * - Simultaneous boundary + coil surface-field construction
+     - Coil/current derivatives on a prescribed plasma boundary.
+   * - State-to-surface field data for virtual casing
      - partial
-     - Traceable state-to-surface data is vmex-native and needs no optional
-       dependency; ``LASYM=T`` is rejected as unvalidated.  The virtual-casing
-       solver paths built on it require the optional ``virtual_casing_jax``
-       package, required as ``virtual-casing-jax >= 0.0.4`` from the canonical
-       ``uwplasma/virtual_casing_jax`` repository.
+     - Traceable and vmex-native; ``LASYM=T`` raises.  The solver paths need
+       the optional ``virtual-casing-jax >= 0.0.8``.
    * - Mgrid tabulation
-     - partial derivative contract
-     - Differentiable in table values/current scale, not in the coil geometry
-       used to generate a frozen table.
+     - partial
+     - Differentiable in table values and current scale, not in the coil
+       geometry that produced the table.
    * - Mercier WOUT diagnostic
-     - implemented; host and traceable lanes
-     - VMEC2000-style WOUT engine and FD-validated implicit objective for
-       symmetric and ``LASYM`` equilibria.
+     - implemented
+     - VMEC2000-style WOUT engine and FD-validated implicit objective,
+       symmetric and ``LASYM``.
    * - Traceable Boozer/QI/omnigenity
      - implemented; FD-validated
-     - Symmetric and ``LASYM`` cosine/sine spectra and objectives.
+     - Symmetric and ``LASYM`` spectra and objectives.
    * - Ballooning and turbulence geometry
-     - partial
-     - Current traceable implementations require ``LASYM=F`` and raise
-       otherwise.
+     - implemented
+     - Symmetric and ``LASYM`` through the sine-parity ``R``/``Z``/``λ``
+       field-line geometry (:mod:`vmex.core.stability`,
+       :mod:`vmex.core.turbulence`).
    * - ``L_grad_B`` WOUT and state objectives
      - partial
-     - ``LASYM=F`` only.  Both public lanes now raise on asymmetric input;
-       asymmetric partners are never discarded.
+     - ``LASYM=F`` only; both lanes raise on asymmetric input.
    * - Quasilinear/nonlinear-window turbulence proxies
      - value-level
      - Eigenvector-weighted objectives use finite-difference optimization;
-       the documented growth-rate lane is AD-capable.
+       the growth-rate lane is AD-capable.
 
-Terms and design decisions
---------------------------
+LASYM currvmns
+--------------
 
-Fixed boundary
-   The last radial surface is prescribed by ``RBC/ZBS/RBS/ZBC`` and is not
-   evolved by the plasma force iteration.
-
-Free boundary
-   The plasma edge evolves and is coupled to exterior magnetic pressure.
-   ``LFREEB`` is a physics selection, not merely an output flag.
-
-NESTOR
-   VMEC2000's boundary-integral vacuum solver.  It solves for a harmonic
-   scalar potential so the total exterior field is tangent to the plasma
-   boundary.
-
-Mgrid
-   A cylindrical grid of external magnetic-field components, partitioned by
-   coil group and weighted by ``EXTCUR``.
-
-Multigrid
-   In VMEC terminology, a radial *resolution-continuation ladder*
-   (``NS_ARRAY``), not a V-cycle correction method.  Each stage performs a
-   nonlinear equilibrium solve and transfers the state to the next stage.
-   Fixed and free boundary use the same normalized nondecreasing prefix.
-
-Hot restart
-   Seeding a solve with an existing spectral state — via ``initial_state=``
-   in memory, or rebuilt from any VMEC2000-compatible wout file
-   (``restart_from`` / ``--restart`` / ``RESTART_WOUT``).  Fixed-boundary
-   hot restart adapts the edge smoothly to a changed boundary and
-   interpolates across radial resolutions; free-boundary restart
-   distinguishes user reset semantics from within-ladder vacuum continuation.
-
-Raw/physical force residual
-   ``FSQR``, ``FSQZ``, and ``FSQL`` are normalized physical force channels and
-   determine convergence.
-
-Preconditioned update residual
-   Lower-case/internal force norms measure the update after the radial or
-   optional 2-D preconditioner.  Changing a preconditioner must not change the
-   equilibrium root.
-
-``LFORBAL``
-   Replaces selected R/Z force coefficients with a non-variational
-   flux-averaged force-balance form.  Its radial force uses full-mesh
-   ``phipf/chipf`` and half-mesh current/pressure differences exactly as
-   ``fbal.f``/``add_fluxes.f90`` specify.  It changes the force operator and
-   must be propagated through setup, solve, diagnostics, and differentiation.
-
-``LMOVE_AXIS``
-   Enables the VMEC2000 first-force axis-recovery control transfer.  It is not
-   equivalent to supplying an axis and is independent of the preconditioner.
-
-LASYM ``currvmns``
-   The legacy ``read_wout_mod.f90::Compute_Currents`` asymmetric odd-``m``
-   branch divides the inner ``bsubumns`` coefficient by the outer
-   half-mesh ``sqrt(s)``.  VMEX deliberately uses the corresponding inner
-   half-mesh denominator, matching the PARVMEC-calibrated correction in
-   VMEC++ 0.7.1.  This changes only the derived asymmetric current-density
-   WOUT channel, not the equilibrium force iteration.
+The legacy ``read_wout_mod.f90::Compute_Currents`` asymmetric odd-``m``
+branch divides the inner ``bsubumns`` coefficient by the outer half-mesh
+``sqrt(s)``.  VMEX uses the inner half-mesh denominator, matching the
+PARVMEC-calibrated correction in VMEC++ 0.7.1.  Only the derived asymmetric
+current-density WOUT channel changes, not the force iteration.
 
 LASYM constraint scaling (``tcon``)
-   Older VMEC2000 trees carry two LASYM-only factors of one half, and they
-   are a matched pair, not two independent corrections:
+-----------------------------------
 
-   1. ``fixaray.f`` sets the Fourier *analysis* weight to
-      ``dnorm = 1/(nzeta*ntheta3)`` when ``LASYM`` is on (half the symmetric
-      ``1/(nzeta*(ntheta2-1))``), which halves every reduced-interval force
-      projection; and
-   2. ``bcovar.f`` applies ``IF (lasym) tcon = p5*tcon`` to the whole
-      spectral-condensation array.
+Older VMEC2000 trees carry two LASYM-only factors of one half, and they are a
+matched pair, not two independent corrections:
 
-   Upstream retired **both** together.  STELLOPT ``v6.5.0-42-g9177f58c`` and
-   PARVMEC ``master`` set ``dnorm = 1/(nzeta*(ntheta2-1))`` unconditionally —
-   correct, because ``symforce.f`` gives the kernel a definite parity first,
-   so the endpoint-half-weighted reduced integral already equals the
-   full-grid average — and comment out the ``tcon`` halving in both
-   ``bcovar`` routines.  VMEC++ 0.5.3 independently implements the same
-   convention (``intNorm = 1/(nZeta*(nThetaReduced-1))`` with no ``LASYM``
-   branch, and only the ``tcon(ns) = 0.5*tcon(ns-1)`` edge rule).
+1. ``fixaray.f`` sets the Fourier *analysis* weight to
+   ``dnorm = 1/(nzeta*ntheta3)`` when ``LASYM`` is on (half the symmetric
+   ``1/(nzeta*(ntheta2-1))``), which halves every reduced-interval force
+   projection; and
+2. ``bcovar.f`` applies ``IF (lasym) tcon = p5*tcon`` to the whole
+   spectral-condensation array.
 
-   VMEX follows the retired-pair convention.  ``constraint_scaling`` takes no
-   ``lasym`` argument and ``trig_tables`` builds one ``cosmui``/``sinmui`` for
-   both symmetry modes; only the surface-average weight ``dnorm3``
-   (``wint``/``cosmui3``) stays LASYM-dependent.  Reinstating the ``tcon``
-   halving *alone* — the reading a 2024 source snapshot invites — reproduces
-   neither convention, because it changes the constraint-to-MHD force ratio
-   by two in a code that no longer halves the analysis weight.
+Upstream retired **both** together.  STELLOPT ``v6.5.0-42-g9177f58c`` and
+PARVMEC ``master`` set ``dnorm = 1/(nzeta*(ntheta2-1))`` unconditionally —
+correct, because ``symforce.f`` gives the kernel a definite parity first, so
+the endpoint-half-weighted reduced integral already equals the full-grid
+average — and comment out the ``tcon`` halving in both ``bcovar`` routines.
+VMEC++ 0.5.3 independently implements the same convention
+(``intNorm = 1/(nZeta*(nThetaReduced-1))`` with no ``LASYM`` branch, and only
+the ``tcon(ns) = 0.5*tcon(ns-1)`` edge rule).
 
-   Measured on ``input.up_down_asymmetric_tokamak`` (``NS = 17``, 2000
-   iterations, ``NSTEP = 1``), comparing the per-iteration
-   ``(FSQR, FSQZ, FSQL)`` trajectory against both binaries, at the three
-   printed digits of the VMEC screen output:
+VMEX follows the retired-pair convention.  ``constraint_scaling`` takes no
+``lasym`` argument and ``trig_tables`` builds one ``cosmui``/``sinmui`` for
+both symmetry modes; only the surface-average weight ``dnorm3``
+(``wint``/``cosmui3``) stays LASYM-dependent.  Reinstating the ``tcon``
+halving *alone* — the reading a 2024 source snapshot invites — reproduces
+neither convention, because it changes the constraint-to-MHD force ratio by
+two in a code that no longer halves the analysis weight.
 
-   .. list-table::
-      :header-rows: 1
-      :widths: 34 33 33
+Measured on ``input.up_down_asymmetric_tokamak`` (``NS = 17``, 2000
+iterations, ``NSTEP = 1``), comparing the per-iteration
+``(FSQR, FSQZ, FSQL)`` trajectory against both binaries, at the three printed
+digits of the VMEC screen output:
 
-      * - VMEX variant
-        - vs. upstream ``xvmec2000``
-        - vs. 2024-snapshot ``xvmec2000``
-      * - as shipped (no halving)
-        - **4.9e-3** (print precision)
-        - 5.5e+1
-      * - ``tcon`` halved only
-        - 2.8e+1
-        - 5.7e+1
-      * - ``dnorm`` halved only
-        - 5.9e+1
-        - 1.8e+0
-      * - both halved
-        - 7.5e+1
-        - **5.0e-3** (print precision)
+.. list-table::
+   :header-rows: 1
+   :widths: 34 33 33
 
-   (max relative deviation over all 2000 iterations).  The pair also shifts
-   the converged state: between the two binaries the asymmetric harmonics of
-   ``input.up_down_asymmetric_tokamak`` move by 1.8e-2 (``rmns``) and 1.4e-2
-   (``zmnc``) relative to their maxima and ``wb`` by 1.5e-7, and VMEX
-   reproduces each side of that shift to the same figures.  The shipped
-   golden fixtures come from the upstream binary, so the end-to-end
-   ``tests/test_parity_breadth.py`` case already fails if the halving is
-   reintroduced (it would move ``rmns`` by 2.1e-4 absolute against a 2e-5
-   tolerance).  ``tests/test_forces_residuals.py`` pins the convention
-   directly, as an exact symmetric limit: for a stellarator-symmetric
-   configuration the ``LASYM`` lane must reproduce the symmetric lane's
-   ``tcon`` and ``gcon`` to round-off, and either half-factor breaks that by
-   exactly two.
+   * - VMEX variant
+     - vs. upstream ``xvmec2000``
+     - vs. 2024-snapshot ``xvmec2000``
+   * - as shipped (no halving)
+     - **4.9e-3** (print precision)
+     - 5.5e+1
+   * - ``tcon`` halved only
+     - 2.8e+1
+     - 5.7e+1
+   * - ``dnorm`` halved only
+     - 5.9e+1
+     - 1.8e+0
+   * - both halved
+     - 7.5e+1
+     - **5.0e-3** (print precision)
 
-``LFULL3D1OUT``
-   Selects VMEC2000's forced-output path after iteration-budget exhaustion.
-   The resulting WOUT retains ``ier_flag=2`` and does not declare the state
-   converged.  When false, no WOUT is written for ordinary NITER exhaustion.
-
-CLI lane / JIT lane
-   Two controllers around the same force and update kernels.  The CLI lane
-   prints/checks between compiled blocks; the JIT lane is a traced loop.
-   ``VMEX_FAST_COMPILE`` and device policy may change compilation/execution
-   strategy, never the intended physics mode.
-
-AD / FD
-   Automatic differentiation computes derivatives of a coded map.  Finite
-   differences perturb inputs and rerun that map.  An AD result is
-   research-grade only for the exact map disclosed and independently checked
-   over a stated parameter/regime envelope.
+(max relative deviation over all 2000 iterations).  The pair also shifts the
+converged state: between the two binaries the asymmetric harmonics of
+``input.up_down_asymmetric_tokamak`` move by 1.8e-2 (``rmns``) and 1.4e-2
+(``zmnc``) relative to their maxima and ``wb`` by 1.5e-7, and VMEX reproduces
+each side of that shift to the same figures.  The shipped golden fixtures come
+from the upstream binary, so the end-to-end ``tests/test_parity_breadth.py``
+case already fails if the halving is reintroduced (it would move ``rmns`` by
+2.1e-4 absolute against a 2e-5 tolerance).  ``tests/test_forces_residuals.py``
+pins the convention directly, as an exact symmetric limit: for a
+stellarator-symmetric configuration the ``LASYM`` lane must reproduce the
+symmetric lane's ``tcon`` and ``gcon`` to round-off, and either half-factor
+breaks that by exactly two.
 
 Pressureless current-free vacuum limit
 --------------------------------------
 
 A pressureless, current-free, nearly axisymmetric vacuum can be harder to
-iterate than its simple boundary suggests.  In the axisymmetric limit the
-interior surfaces have a weak parameterization direction: the variational
-``m=1,n=0`` force changes little while the magnetic axis drifts.  Tiny
+iterate than its boundary suggests.  In the axisymmetric limit the interior
+surfaces have a weak parameterization direction: the variational
+``m=1,n=0`` force changes little while the magnetic axis drifts, and small
 three-dimensional boundary modes only weakly remove that direction.
 
-The public :download:`NFP=3 example
-<../../examples/data/input.near_degenerate_vacuum_nfp3>` reproduces this limit.
-With ``LFORBAL=F``, VMEX and VMEC2000 follow the same trajectory and stop just
-above ``FTOL=1e-11`` after 3,500 iterations.  With ``LFORBAL=T``, both replace
-that one variational equation by VMEC2000's flux-averaged force balance and
+The :download:`NFP=3 example
+<../../examples/data/input.near_degenerate_vacuum_nfp3>` reproduces this
+limit.  With ``LFORBAL=F``, VMEX and VMEC2000 follow the same trajectory and
+stop just above ``FTOL=1e-11`` after 3,500 iterations.  With ``LFORBAL=T``,
+both replace that equation by VMEC2000's flux-averaged force balance and
 converge in 941 iterations to
-``(FSQR, FSQZ, FSQL) = (9.13e-12, 5.38e-12, 2.32e-12)``.  The primary WOUT
-geometry and field coefficients agree to better than ``5e-10`` relative.
+``(FSQR, FSQZ, FSQL) = (9.13e-12, 5.38e-12, 2.32e-12)``; the WOUT geometry
+and field coefficients agree to better than ``5e-10`` relative.
 
-For this class of input, review ``LFORBAL`` first.  Loosening ``FTOL`` or
-removing genuinely unused high-order volume modes may also end the iteration,
-but changes the requested accuracy or discretization.  VMEX does none of
-these automatically.
-
-Open-PR ownership and merge preservation
-----------------------------------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 13 33 54
-
-   * - PR
-     - Primary scope
-     - Relationship to this audit
-   * - #61--#64
-     - Device contract and accelerator selection/CI
-     - Performance/placement only; they do not repair ignored VMEC2000 physics
-       controls.
-   * - #65--#66
-     - Traceable Mercier method/objective
-     - Adds an explicitly symmetry-limited derived method; does not change the
-       equilibrium parser.
-   * - #67--#68
-     - Accelerator documentation, doctor, and benchmarks
-     - Complement the device design disclosure.
-   * - #69
-     - Nonfinite/axis diagnostics and parser hardening
-     - Originally detected active reconstruction/RFP only in the diagnostic.
-       Production enforcement and the complete no-silent-mode policy belong to
-       the revised #70 stack and must survive merge.
-   * - #70
-     - Free-boundary multigrid and VMEC2000 parity hardening
-     - Owns multidimensional namelist sections, APHI/profile parsing, finite
-       first-force diagnosis, exact single-transfer axis recovery, LFORBAL,
-       full-mesh force-balance profiles, bounded JAC75 best-checkpoint recovery,
-       angular-grid risk diagnostics, free-boundary vacuum
-       continuation/rebuild, guarded radial solves, effective fallback
-       metadata, preconditioner semantics, and this compatibility ledger.
-   * - #71
-     - Hot-restart example/documentation
-     - Depends on #70's free-boundary multigrid behavior; keep after #70.
-   * - #72
-     - ``curlabel`` WOUT schema
-     - Complementary output parity; retain when resolving WOUT conflicts.
-   * - #73
-     - Symmetric NESTOR potential/surface WOUT export
-     - Closes part of the documented fill-value gap; the asymmetric export has
-       since landed and is live-VMEC2000-tested.
-   * - #74
-     - Bounded nightly validation
-     - CI scheduling/limits only; no solver semantics.
-
-Public integrated stress gate
------------------------------
-
-``tests/test_vmec2000_feature_stress.py`` constructs a reproducible difficult
-case solely from the tracked public
-``input.serial2500170_surface_points_mpol12_ntor12`` boundary.  The stress
-header combines ``MPOL=13``, ``NTOR=9`` (238 modes), no supplied axis,
-``LFORBAL=T``, ``PRECON_TYPE='NONE'``, compact multidimensional boundary
-sections, repeated dense array overlays, an ``APHI`` starting-element write,
-and a four-stage ``21,34,55,89`` ladder.  The mandatory gate parses the exact
-combination and reaches a finite first force with automatic axis recovery and
-an accepted radial solve.  The full gate runs the 21-surface fixed-boundary
-problem to the VMEC2000 equilibrium and pins its residual channels, energy,
-axis, iteration count, and reset count.
-
-The same PR's public free-boundary matrix uses the bundled CTH-like mgrid
-fixtures to cover one-time vacuum activation, increasing/equal radial grids,
-NESTOR structure rebuild/reuse, carried ``ivac/nvacskip/rbsq`` and invariant
-residuals, first-fine-grid edge-force norms, evolved-edge hot restart,
-``LFORBAL``, ``PRECON_TYPE='NONE'``, active VMEX GMRES, JAC75 checkpoint
-recovery, and WOUT comparison.  Its ``7 -> 15`` converged trajectory pins the
-same first fine-grid ``FSQR/FSQZ/FSQL`` screen row as local VMEC2000 before
-comparing the final WOUT.  The ESSOS/SIMSOPT adapters and free-boundary
-AD-versus-FD tests remain separate so an optional external package cannot
-weaken the mandatory mgrid/NESTOR gates.
-
-Research-grade completion criteria
-----------------------------------
-
-A remaining row is complete only when all applicable evidence exists:
-
-1. a production implementation, not a diagnostic-only branch;
-2. unit tests that prove the control reaches the intended kernel/controller;
-3. VMEC2000 comparison of trajectory and converged state where parity is the
-   goal;
-4. fixed/free and symmetric/asymmetric coverage where the method claims those
-   modes;
-5. multigrid and hot-restart coverage where state is transferred;
-6. WOUT schema/value comparison where outputs are claimed;
-7. AD-versus-FD checks for every differentiability claim, with the exact
-   differentiated map identified; and
-8. benchmarks that report hardware, precision, cold/warm compilation, solver
-   tolerance, iteration count, and failure policy.
-
-The highest-priority unimplemented parity work exposed by this audit is:
-VMEC2000 continuation controls (``PRE_NITER``, ``MAX_MAIN_ITERATIONS``,
-``LGIVEUP``), target-volume rescaling, the non-GMRES 2-D preconditioner modes,
-TRIP3D/reconstruction/RFP/ANIMEC physics where required by research programs,
-and a true NESTOR equilibrium derivative.
+For this class of input, try ``LFORBAL`` first.  Loosening ``FTOL`` or
+removing unused high-order modes may also end the iteration, but changes the
+requested accuracy or discretization.  VMEX does none of these automatically.

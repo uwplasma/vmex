@@ -3,9 +3,14 @@
 
 The commented ``Coils.from_simsopt`` line accepts a SIMSOPT coil JSON without
 changing the VMEX virtual-casing or ESSOS tracing workflow.
-Preview: this script needs ESSOS branch ``rj/vmex-optimization-interfaces``.
 
-Outside the CI smoke run, the phi=0 Poincare panel pair the README embeds is
+Outside the boundary the plasma field is evaluated by the target-graded
+near-surface quadrature (``VmecExtender.with_graded_quadrature``), which keeps
+the virtual-casing field accurate a few millimetres off the boundary. The
+exterior traces still end at a stopping distance, and a finite trace does not
+by itself establish magnetic topology.
+
+Outside the CI smoke run, the phi=0 Poincare panel pair is
 also written straight into ``docs/_static/figures`` as lossless WebP, so
 re-running this script reproduces the committed bytes.
 """
@@ -27,16 +32,10 @@ from vmex import optimize as opt
 from vmex.core import virtual_casing as vc
 from vmex.core.extender import VmecExtender
 
-try:
-    from essos.coils import Coils
-    from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
-    from essos.fields import BiotSavart
-    from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
-except ImportError as error:
-    raise ImportError(
-        "This example needs ESSOS branch rj/vmex-optimization-interfaces "
-        "(uwplasma/ESSOS#58)."
-    ) from error
+from essos.coils import Coils
+from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
+from essos.fields import BiotSavart
+from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
 
 DATA = Path(__file__).resolve().parent / "data"
 README_FIGURE = (Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
@@ -44,11 +43,12 @@ README_FIGURE = (Path(__file__).resolve().parents[1] / "docs" / "_static" / "fig
 N_FIELDLINES, N_TOROIDAL_TURNS, TRACE_LENGTH, N_SAMPLES = 14, 400, 3000.0, 25000
 # Cartesian coil/exterior traces use arclength, so rescaling B does not change coverage.
 TRACE_TOLERANCE, OUTSIDE_OFFSET = 1.0e-7, 0.005
-# Virtual casing is singular on the source surface. The fast field below is a
-# local first-order continuation, so terminate it before extrapolation can
-# create false islands. Stop before leaving the resolved exterior region.
+# Virtual casing is singular on the source surface; the graded rule resolves
+# it to about 1e-7 of the field 5 mm out with 64 x 256 nodes, at a few ms per
+# point. The traces stop 55 mm out, where the coil field dominates.
 MAX_SURFACE_DISTANCE = 0.055
 NPHI, NTHETA, VC_DIGITS = 24, 24, 4
+GRADED_NODES = (64, 256)
 TRACE_PROGRESS = True
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
@@ -102,9 +102,8 @@ alignment = (jnp.sum(interface.weights * jnp.sum(B_surface * surface_data.B_tota
 print(f"True boundary B.n/B: mean = {100 * float(jnp.sum(interface.weights * Bn_over_B)):.3f}%, "
       f"max = {100 * float(jnp.max(Bn_over_B)):.3f}%")
 print(f"Boundary field alignment = {float(alignment):.6f}")
-print("Preparing the near-surface virtual-casing continuation...")
-exterior = exterior.with_near_surface_continuation(
-    digits=VC_DIGITS, precision=precision, B_surface=interface.B_plasma)
+print("Switching the exterior plasma field to the graded near-surface quadrature...")
+exterior = exterior.with_graded_quadrature(nodes=GRADED_NODES)
 coil_B_outside = coil_field(outside_xyz); total_B_outside = exterior.B(outside_xyz)
 plasma_fraction = jnp.linalg.norm(total_B_outside - coil_B_outside, axis=1) / jnp.linalg.norm(total_B_outside, axis=1)
 direction_difference = jnp.rad2deg(jnp.arccos(jnp.clip(jnp.sum(

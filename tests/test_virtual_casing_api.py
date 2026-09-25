@@ -1,5 +1,7 @@
 """Public naming contract for prescribed-interface virtual casing."""
 
+from pathlib import Path
+
 import vmex as vj
 from vmex.core import virtual_casing
 
@@ -13,3 +15,112 @@ def test_prescribed_interface_has_clear_public_name_and_compatibility_base():
         is virtual_casing.surface_field_data_from_high_order
     )
     assert vj.surface_field_data_from_wout is virtual_casing.surface_field_data_from_wout
+
+
+def test_exterior_source_grid_is_sized_from_the_boundary():
+    """A fixed 32 x 32 missed the requested accuracy by four orders.
+
+    The off-surface quadrature error decays as ``exp(-2 pi d / h)`` with ``h``
+    the finest source level's largest spacing, so the sampling that reaches
+    ``digits`` at one minor radius scales with ``R0 / a``.  The old constant
+    default put the shipped QA boundary's achieved error at 2.5e-02 against a
+    requested 1e-6; the rule returns 64 there and 4.3e-07.  A tokamak-like
+    aspect ratio stays on the historical floor, so its grid does not move.
+    """
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+    import pytest
+
+    from vmex.core import extender as ext
+
+    class _Wout:
+        def __init__(self, major, minor, nfp):
+            # m = 0 and m = 1 only: R(theta) = major + minor cos(theta).
+            self.rmnc = np.array([[major, minor]])
+            self.xm = np.array([0.0, 1.0])
+            self.nfp = nfp
+
+    tokamak = _Wout(3.0, 1.0, 1)          # R0/a = 3
+    assert ext._source_nphi_for_digits(tokamak, 6) == ext._DEFAULT_SOURCE_NPHI
+
+    qa = _Wout(1.2237, 0.0768, 2)         # the shipped QA boundary
+    assert ext._source_nphi_for_digits(qa, 6) == 64
+
+    # More digits or a thinner boundary asks for more; the cap holds.
+    assert ext._source_nphi_for_digits(qa, 12) > 64
+    assert ext._source_nphi_for_digits(_Wout(100.0, 0.01, 1), 12) == ext._MAX_SOURCE_NPHI
+
+    # A boundary the rule cannot read falls back rather than raising.
+    assert ext._source_nphi_for_digits(object(), 6) == ext._DEFAULT_SOURCE_NPHI
+
+    # A traced boundary is not unreadable: falling back there would silently
+    # change the source resolution of a jitted caller.
+    def traced(major):
+        boundary = _Wout(1.2237, 0.0768, 2)
+        boundary.rmnc = jnp.array([[1.0, 0.0768]]) * major
+        return ext._source_nphi_for_digits(boundary, 6)
+    with jax.disable_jit(False), pytest.raises(TypeError, match="traced boundary"):
+        jax.jit(traced)(1.2237)
+
+    # The two facades that build an exterior field from a problem or an
+    # equilibrium used to hard-code 32 x 32, bypassing this rule entirely.
+    import inspect
+
+    from vmex.core.problem import VmecProblem
+
+    signature = inspect.signature(VmecProblem.exterior_field)
+    assert signature.parameters["nphi"].default is None
+    assert signature.parameters["ntheta"].default is None
+    assert "accuracy_check" in signature.parameters
+    from vmex.core import optimize as opt
+
+    factory = inspect.getsource(opt).split("def exterior_field_factory", 1)[1]
+    assert "_source_nphi_for_digits(inp, digits)" in factory
+    assert 'kwargs.pop("accuracy_check"' in factory
+
+    # from_state feeds it a VmecInput instead of a wout; the same boundary has
+    # to give the same answer through either, or a live equilibrium and its
+    # exported wout would be extended on different grids.
+    from vmex.core.input import VmecInput
+    from vmex.core.wout import read_wout
+
+    data = Path(__file__).resolve().parents[1] / "examples" / "data"
+    reference = data / "wout_LandremanPaul2021_QA_lowres_reference.nc"
+    if reference.exists():
+        assert (ext._source_nphi_for_digits(read_wout(reference), 6)
+                == ext._source_nphi_for_digits(
+                    VmecInput.from_file(data / "input.LandremanPaul2021_QA_lowres"), 6)
+                == 64)
+    assert ext._source_nphi_for_digits(
+        VmecInput.from_file(data / "input.circular_tokamak"), 6
+    ) == ext._DEFAULT_SOURCE_NPHI
+
+
+def test_surface_field_from_a_live_state_takes_the_state_spectra():
+    """The live-state spectra carry more than the surface assembly takes.
+
+    ``_state_field_spectra`` also returns ``lmns``, ``phipf`` and ``chipf`` for
+    the interior field's native form. Splatting all of it into the surface
+    assembly raised ``TypeError`` for every caller of
+    ``surface_field_data_from_state`` -- the single-stage movies, the
+    field-line tracing and fixed/free comparison examples, and the finite-beta
+    single stage -- and the only tests that reached it were nightly. A coarse
+    solve is enough to catch it: this checks the call, not the physics.
+    """
+    from dataclasses import replace
+
+    import numpy as np
+
+    from vmex import optimize as opt
+
+    data = Path(__file__).resolve().parents[1] / "examples" / "data"
+    inp = replace(vj.VmecInput.from_file(data / "input.solovev"),
+                  ns_array=np.array([7]), ftol_array=np.array([1.0e-8]),
+                  niter_array=np.array([500]))
+    equilibrium = opt.solve_equilibrium(inp, verbose=False)
+    surface = virtual_casing.surface_field_data_from_state(
+        inp, equilibrium.solution, nphi=4, ntheta=5)
+    B = np.asarray(surface.B_total)
+    assert B.shape == (3, 4, 5)
+    assert np.all(np.isfinite(B)) and np.max(np.abs(B)) > 0.0

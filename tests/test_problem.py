@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmex
 from vmex.core.problem import Evaluation, FunctionProblem, VmecProblem
 
 
@@ -315,6 +314,14 @@ def test_vmec_problem_field_facades_validate_and_route(monkeypatch):
     with pytest.raises(ValueError, match="quantity"):
         problem.surface_field_values(problem.x0, "bootstrap")
 
+    # A plain forward solve, when the problem offers one, is what a figure
+    # reads: the differentiable (anchored) lane is not called.
+    calls = []
+    problem.metadata["host_state_runtime"] = lambda x: calls.append("host") or ("s", "r")
+    problem.metadata["jax_state_runtime"] = lambda x: calls.append("jax") or ("s", "r")
+    problem.surface_field_values(problem.x0, "absB", nphi=2, ntheta=3)
+    assert calls == ["host"]
+
 
 def test_vmec_problem_reports_under_converged_fsq():
     class Config:
@@ -567,12 +574,6 @@ def test_vmex_jax_logging_default_and_override() -> None:
         capture_output=True, text=True,
     )
     assert standard_override.stdout.strip() == "INFO"
-
-
-def test_old_jax_gets_one_actionable_logging_notice() -> None:
-    old_jax = SimpleNamespace(__version__="0.4.35", config=SimpleNamespace())
-    with pytest.warns(RuntimeWarning, match="JAX 0.4.35.*Upgrade JAX"):
-        vmex._configure_jax_logging(old_jax)
 
 
 def test_direct_jaxopt_and_optax_contracts():
@@ -943,3 +944,226 @@ def test_primal_snapshot_is_atomic_with_derivative_cache(monkeypatch, phase):
         result = first.result(timeout=2.0)
         assert (result.value if phase == "evaluation" else result[0]) == 1.0
         assert second.result(timeout=2.0)[0] == 2.0
+
+
+def _staged_problem():
+    """Four variables, a residual and Jacobian that depend on every one."""
+    weights = np.array([1.0, 2.0, 3.0, 4.0])
+
+    def residual_and_jac(x):
+        return weights * x, np.diag(weights)
+
+    return FunctionProblem(
+        [1.0, 2.0, 3.0, 4.0],
+        residual_and_jac=residual_and_jac,
+        names=("a", "b", "c", "d"),
+        bounds=(np.full(4, -9.0), np.arange(4.0)),
+        scales=[1.0, 2.0, 4.0, 8.0],
+        metadata={"shared": []},
+    )
+
+
+def test_subproblem_freezes_everything_outside_the_active_set():
+    """A sub-problem optimizes its own variables and holds the rest, and the
+    full vector it embeds into differs from the base in exactly those."""
+    problem = _staged_problem()
+    base = np.array([10.0, 20.0, 30.0, 40.0])
+    sub = problem.subproblem(["a", "c"], x=base)
+
+    assert tuple(sub.dof_names) == ("a", "c")
+    np.testing.assert_array_equal(sub.x0, [10.0, 30.0])
+    np.testing.assert_array_equal(sub.scales, [1.0, 4.0])
+    np.testing.assert_array_equal(sub.free_indices, [0, 2])
+    np.testing.assert_array_equal(sub.frozen_indices, [1, 3])
+    assert sub.frozen_names == ("b", "d")
+    np.testing.assert_array_equal(sub.frozen_values, [20.0, 40.0])
+    np.testing.assert_array_equal(sub.bounds[0], [-9.0, -9.0])
+    np.testing.assert_array_equal(sub.bounds[1], [0.0, 2.0])
+
+    full = sub.embed([-1.0, -3.0])
+    np.testing.assert_array_equal(full, [-1.0, 20.0, -3.0, 40.0])
+    # The point of the view: nothing outside the active set may move, and the
+    # check is on the embedded vector rather than on the sub-vector, because a
+    # leak here would change a design silently.
+    np.testing.assert_array_equal(full[sub.frozen_indices], sub.frozen_values)
+
+    residual, jacobian = sub.residual_and_jac([-1.0, -3.0])
+    np.testing.assert_allclose(residual, problem.residual(full))
+    assert jacobian.shape == (4, 2)
+    np.testing.assert_allclose(jacobian, problem.residual_jac(full)[:, [0, 2]])
+
+
+def test_subproblem_accepts_indices_and_shares_the_parent_metadata():
+    problem = _staged_problem()
+    sub = problem.subproblem([3, 1])
+    assert tuple(sub.dof_names) == ("d", "b")  # the caller's order, not sorted
+    np.testing.assert_array_equal(sub.x0, [4.0, 2.0])
+    np.testing.assert_array_equal(sub.embed([7.0, 8.0]), [1.0, 8.0, 3.0, 7.0])
+    assert sub.parent is problem
+    # The shared mutable counters a monitor reads stay one object.
+    assert sub.metadata["shared"] is problem.metadata["shared"]
+
+
+def test_subproblem_rejects_a_malformed_active_set():
+    problem = _staged_problem()
+    with pytest.raises(ValueError, match="not decision variables"):
+        problem.subproblem(["a", "zzz"])
+    with pytest.raises(ValueError, match="repeats"):
+        problem.subproblem([1, 1])
+    with pytest.raises(ValueError, match="out-of-range"):
+        problem.subproblem([0, 4])
+    with pytest.raises(TypeError, match="all names or all indices"):
+        problem.subproblem(["a", 2])
+    with pytest.raises(ValueError, match="shape"):
+        problem.subproblem(["a"], x=[1.0, 2.0])
+    sub = problem.subproblem(["a", "c"])
+    with pytest.raises(ValueError, match="expected 2 free variables"):
+        sub.embed([1.0])
+
+
+def test_subproblem_carries_scalar_bounds_and_rejects_a_wrong_length():
+    def value_and_grad(x):
+        return 0.5 * float(x @ x), np.asarray(x, dtype=float)
+
+    problem = FunctionProblem(
+        [1.0, 2.0, 3.0], value_and_grad=value_and_grad, names=("a", "b", "c"),
+        bounds=(-1.0, 1.0))
+    sub = problem.subproblem(["b"])
+    assert sub.bounds == (-1.0, 1.0)
+    value, gradient = sub.value_and_grad([5.0])
+    assert value == pytest.approx(0.5 * (1.0 + 25.0 + 9.0))
+    np.testing.assert_allclose(gradient, [5.0])
+
+    problem.bounds = (np.zeros(2), np.ones(2))
+    with pytest.raises(ValueError, match="one entry per decision variable"):
+        problem.subproblem(["b"])
+
+
+def test_subproblem_restricts_scipy_bounds_and_rejects_an_unknown_kind():
+    """A ``Bounds`` object is restricted in place, anything else is refused."""
+    from scipy.optimize import Bounds
+
+    def residual_and_jac(x):
+        return np.asarray(x, dtype=float), np.eye(3)
+
+    problem = FunctionProblem(
+        [1.0, 2.0, 3.0], residual_and_jac=residual_and_jac, names=("a", "b", "c"),
+        bounds=Bounds(np.array([-1.0, -2.0, -3.0]), np.array([1.0, 2.0, 3.0])))
+    sub = problem.subproblem(["c", "a"])
+    assert isinstance(sub.bounds, Bounds)
+    np.testing.assert_array_equal(sub.bounds.lb, [-3.0, -1.0])
+    np.testing.assert_array_equal(sub.bounds.ub, [3.0, 1.0])
+
+    problem.bounds = "wide open"
+    with pytest.raises(TypeError, match="lower, upper"):
+        problem.subproblem(["a"])
+
+
+def test_subproblem_restricts_a_separately_supplied_gradient():
+    """``fun`` plus ``grad`` is a lane of its own: the gradient is sliced."""
+    calls = []
+
+    def fun(x):
+        calls.append(np.asarray(x, dtype=float).copy())
+        return float(np.sum(np.asarray(x, dtype=float) ** 2))
+
+    def grad(x):
+        return 2.0 * np.asarray(x, dtype=float)
+
+    problem = FunctionProblem([1.0, 2.0, 3.0], fun=fun, grad=grad,
+                              names=("a", "b", "c"))
+    sub = problem.subproblem(["a", "c"])
+    assert sub.fun([4.0, 5.0]) == pytest.approx(16.0 + 4.0 + 25.0)
+    np.testing.assert_array_equal(calls[-1], [4.0, 2.0, 5.0])
+    np.testing.assert_allclose(sub.grad([4.0, 5.0]), [8.0, 10.0])
+
+
+def test_subproblem_restricts_the_traceable_lanes():
+    """The ``jax_*`` lanes compose with a traceable embedding, so a stage stays
+    differentiable in its own variables and constant in the frozen ones."""
+    jax = pytest.importorskip("jax")
+    jnp = jax.numpy
+    weights = jnp.asarray([1.0, 2.0, 3.0, 4.0])
+
+    def jax_residual(x):
+        return weights * x
+
+    def jax_residual_jac(x):
+        return jnp.diag(weights) * jnp.ones_like(x)
+
+    def jax_value_and_grad(x):
+        return 0.5 * jnp.vdot(weights * x, weights * x), weights ** 2 * x
+
+    problem = FunctionProblem(
+        [1.0, 2.0, 3.0, 4.0],
+        residual_and_jac=lambda x: (np.asarray(weights) * x, np.diag(np.asarray(weights))),
+        jax_residual=jax_residual,
+        jax_residual_jac=jax_residual_jac,
+        jax_value_and_grad=jax_value_and_grad,
+        names=("a", "b", "c", "d"))
+    sub = problem.subproblem(["b", "d"], x=np.array([10.0, 20.0, 30.0, 40.0]))
+
+    rows = np.asarray(sub.jax_residual(jnp.asarray([2.0, 3.0])))
+    np.testing.assert_allclose(rows, np.asarray(weights) * [10.0, 2.0, 30.0, 3.0])
+    columns = np.asarray(sub.jax_residual_jac(jnp.asarray([2.0, 3.0])))
+    assert columns.shape == (4, 2)
+    value, gradient = sub.jax_value_and_grad(jnp.asarray([2.0, 3.0]))
+    full = np.array([10.0, 2.0, 30.0, 3.0])
+    assert float(value) == pytest.approx(
+        0.5 * float(np.sum((np.asarray(weights) * full) ** 2)))
+    np.testing.assert_allclose(np.asarray(gradient),
+                               (np.asarray(weights) ** 2 * full)[[1, 3]])
+    assert float(np.asarray(sub.jax_fun(jnp.asarray([2.0, 3.0])))) == pytest.approx(
+        float(value))
+
+
+def test_vmec_subproblem_needs_a_recorded_deck_for_a_max_mode_stage():
+    """Without the deck and ``max_mode`` in the metadata a stage cannot be cut."""
+    problem = VmecProblem(
+        [1.0, 2.0],
+        residual=lambda x: np.asarray(x, dtype=float),
+        residual_jac=lambda x: np.eye(2),
+        input_from_x=lambda x: x,
+        x_from_input=lambda deck: np.asarray(deck, dtype=float),
+        names=("RBC(0,1)", "ZBS(0,1)"))
+    with pytest.raises(AttributeError, match="does not record the input deck"):
+        problem.subproblem(max_mode=1)
+
+
+def test_status_branch_is_python_when_concrete_and_cond_when_traced(monkeypatch):
+    """A concrete status picks its branch in Python; a traced one keeps lax.cond."""
+    import jax
+    import jax.numpy as jnp
+
+    from vmex.core import implicit as imp
+    from vmex.core.problem import _branch_on_status
+
+    taken = []
+
+    def accepted(_):
+        taken.append("accepted")
+        return jnp.asarray(1.0)
+
+    def rejected(_):
+        taken.append("rejected")
+        return jnp.asarray(2.0)
+
+    assert float(_branch_on_status(jnp.int32(0), accepted, rejected)) == 1.0
+    assert float(_branch_on_status(np.int32(3), accepted, rejected)) == 2.0
+    assert taken == ["accepted", "rejected"]
+    taken.clear()
+    with jax.disable_jit(False):
+        traced = jax.jit(lambda s: _branch_on_status(s, accepted, rejected))
+        assert float(traced(jnp.int32(0))) == 1.0
+        assert float(traced(jnp.int32(1))) == 2.0
+    assert set(taken) == {"accepted", "rejected"}  # both branches traced once
+
+    # The status reverse rule: a failed trial returns a zero pullback eagerly,
+    # without tracing the adjoint.
+    monkeypatch.setattr(imp, "_solve_implicit_bwd_impl", lambda *a: pytest.fail(
+        "a failed trial must not run the adjoint"))
+    params = {"rbc": jnp.ones(3)}
+    (gradient,) = imp._solve_implicit_status_bwd(
+        SimpleNamespace(device=None), (params, None, None, jnp.int32(2)),
+        (jnp.ones(2), None, None, None))
+    np.testing.assert_array_equal(np.asarray(gradient["rbc"]), np.zeros(3))

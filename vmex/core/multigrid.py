@@ -443,9 +443,15 @@ def solve_multigrid(
                 precon_type=precon_type, prec2d_threshold=prec2d_threshold,
                 prec2d=prec2d, use_fft=stage_use_fft,
             )
-            state = _put_numeric_leaves(
-                state, _placement_device(device, resolution)
-            )
+            target = _placement_device(device, resolution)
+            state = _put_numeric_leaves(state, target)
+            # The previous rung's residual scalars ride into this rung's
+            # carry.  AUTO can place two rungs on different devices, and the
+            # jit lane rejects a carry whose leaves disagree, so they move
+            # with the state -- as the free-boundary driver already does for
+            # its own continuations.
+            residual_continuation = _put_numeric_leaves(
+                residual_continuation, target)
             if state is not None and int(state.R_cos.shape[0]) != nsval:
                 state = interpolate_state(state, ns_fine=nsval, modes=rt.modes)
             if state is not None:

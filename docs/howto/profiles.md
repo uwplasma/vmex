@@ -100,5 +100,5 @@ deck using one or two of the six peaks gets NaN there. Every peak that is
 actually set is bit-identical to VMEC.
 
 Every profile key, default, and accepted `*_TYPE` string:
-{doc}`/reference/input-file` (Pressure profile / Current and iota sections).
+{doc}`/reference/vmec2000-compatibility` (the Profiles section).
 The evaluation code is {mod}`vmex.core.profiles`.

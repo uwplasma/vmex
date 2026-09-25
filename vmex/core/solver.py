@@ -132,7 +132,9 @@ from .device import (
     GPU_MAX_SPECTRAL_MODES,
     _placement_device,
     _put_numeric_leaves,
+    commit_to_single_device,
     device_context,
+    placement_neutral,
 )
 from .errors import (
     AXIS_REGUESS_FLAG, BAD_JACOBIAN_FLAG, JAC75_FLAG, MISC_ERROR_FLAG, MORE_ITER_FLAG,
@@ -168,7 +170,7 @@ from .residuals import (
     preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
     zero_m1_z_force,
 )
-from .setup import RunSetup, guess_axis, interior_guess, run_setup
+from .setup import GUESS_AXIS_GRID_POINTS, RunSetup, guess_axis, interior_guess, run_setup
 from .step import (
     DAMPING_CAP, GROWTH_BACKOFF_DIVISOR, GROWTH_LIMIT, GROWTH_MIN_ITERATIONS,
     JACOBIAN_RESET_FACTOR, NDAMP, RESTART_GROWTH, RESTART_JACOBIAN, STEP_OK,
@@ -831,8 +833,26 @@ def runtime_with_baselines(
     return replace(rt, rcon0=rcon0, zcon0=zcon0)
 
 
-@functools.partial(jax.jit, static_argnames="use_fft")
 def _constraint_baselines(
+    state: SpectralState, rt: SolverRuntime, *, use_fft: bool = False
+):
+    """:func:`_constraint_baselines_lane` with one executable per structure.
+
+    Callers differ in ways the lane does not read but a jit key does: the
+    runtime's own ``rcon0/zcon0`` (a scalar placeholder or earlier
+    baselines), the arguments' commitment, the default-device context, and
+    whether ``use_fft`` is passed.  The baselines are dropped from the
+    runtime, the arguments committed to their shared placement (which then
+    fixes where the lane runs, so the context is cleared), and ``use_fft``
+    always passed by keyword.  Values are unchanged.
+    """
+    state, rt = commit_to_single_device((state, replace(rt, rcon0=None, zcon0=None)))
+    with placement_neutral((state, rt)):
+        return _constraint_baselines_lane(state, rt, use_fft=bool(use_fft))
+
+
+@functools.partial(jax.jit, static_argnames="use_fft")
+def _constraint_baselines_lane(
     state: SpectralState, rt: SolverRuntime, *, use_fft: bool = False
 ):
     """One-time ``rcon0/zcon0 = s * rcon(ns)`` (funct3d.f, iter2 == iter1).
@@ -886,12 +906,34 @@ def _field_chain_lane(state: SpectralState, rt: SolverRuntime):
     return geometry, jacobian, metrics, fields, energies
 
 
+#: One jitted whole-tree copy of a loop carry.  ``jax.tree.map(jnp.array, ...)``
+#: dispatches one ``copy`` program per leaf, and on a cold process each
+#: distinct (shape, dtype) pair compiles its own XLA module (33 of them on the
+#: QA ladder); one jitted copy is a single program for the whole tree.  The
+#: lane is not donated, so every output leaf is a freshly allocated buffer,
+#: which is what the donated block/while lanes require of their input.
+_distinct_buffers = jax.jit(lambda tree: jax.tree.map(jnp.array, tree))
+
+
+def _host_zeros(shape, dtype) -> Array:
+    """A zero array built on the host and transferred, not computed by XLA.
+
+    ``jnp.zeros`` dispatches a ``broadcast_in_dim`` program and ``jnp.asarray``
+    a staging one, so on a cold process every distinct (shape, dtype) pair
+    pays a first-dispatch XLA compilation; ``device_put`` of a host buffer
+    compiles nothing.  The constant is identical either way — zero is exactly
+    representable — and the array is uncommitted, exactly as ``jnp.zeros``
+    leaves it, so device placement is unchanged.
+    """
+    return jax.device_put(np.zeros(shape, dtype=dtype))
+
+
 def _zero_cache(rt: SolverRuntime) -> PreconditionerCache:
     """Zero-filled cache (shapes only; iteration 1 always refreshes it)."""
     res = rt.resolution
     ns, mpol, nr = res.ns, res.mpol, res.ntor + 1
     dtype = rt.setup.s_full.dtype
-    z = lambda shape: jnp.zeros(shape, dtype=dtype)  # noqa: E731
+    z = lambda shape: _host_zeros(shape, dtype)  # noqa: E731
     coeffs = RadialPreconditionerCoefficients(
         axm=z((ns - 1, 2)), axd=z((ns, 2)), bxm=z((ns - 1, 2)), bxd=z((ns, 2)),
         cx=z((ns,)),
@@ -1482,8 +1524,93 @@ def _evaluation_nonfinite(result: _EvalResult) -> Array:
     )
 
 
+def _guess_axis_traced(geometry, *, s, trig, signgs, grid_points=GUESS_AXIS_GRID_POINTS):
+    """Fixed-shape JAX port of :func:`~vmex.core.setup.guess_axis` for traced solves.
+
+    The same ``guess_axis.f`` grid search and tie-breaks, vectorized over
+    zeta planes; up-down-symmetric planes scan a zero ``z`` grid of full size,
+    which selects the same point as the host's single ``z = 0`` row.  The host
+    solver keeps the NumPy routine.
+    """
+    lasym = bool(trig.lasym)
+    ntheta1, ntheta2, ntheta3 = int(trig.ntheta1), int(trig.ntheta2), int(trig.ntheta3)
+    ns, nzeta = int(s.shape[0]), int(geometry.R_even.shape[2])
+    sqrts = jnp.sqrt(jnp.maximum(s, 0.0))
+    ns12 = (ns + 1) // 2 - 1
+    ds = (ns - 1 - ns12) * (s[1] - s[0])
+    # Products stay out of fused multiply-adds, so the near-tied minima the
+    # search compares round exactly as in NumPy.
+    exact = lax.optimization_barrier
+    ru0 = geometry.dR_dtheta_even + exact(sqrts[:, None, None] * geometry.dR_dtheta_odd)
+    zu0 = geometry.dZ_dtheta_even + exact(sqrts[:, None, None] * geometry.dZ_dtheta_odd)
+    reduced = (
+        geometry.R_even[ns - 1, :ntheta3] + geometry.R_odd[ns - 1, :ntheta3],
+        geometry.Z_even[ns - 1, :ntheta3] + geometry.Z_odd[ns - 1, :ntheta3],
+        geometry.R_even[ns12, :ntheta3] + exact(sqrts[ns12] * geometry.R_odd[ns12, :ntheta3]),
+        geometry.Z_even[ns12, :ntheta3] + exact(sqrts[ns12] * geometry.Z_odd[ns12, :ntheta3]),
+        0.5 * (ru0[ns - 1, :ntheta3] + ru0[ns12, :ntheta3]),
+        0.5 * (zu0[ns - 1, :ntheta3] + zu0[ns12, :ntheta3]),
+    )
+    full = [jnp.zeros((ntheta1, nzeta), a.dtype).at[:ntheta3].set(a) for a in reduced]
+    if not lasym:  # R(v,-u) = R(2pi-v,u), Z(v,-u) = -Z(2pi-v,u)
+        rows = (ntheta1 - np.arange(ntheta2, ntheta1))[:, None]
+        cols = ((nzeta - np.arange(nzeta)) % nzeta)[None, :]
+        for k, flip in enumerate((False, True, False, True, True, False)):
+            mirrored = reduced[k][rows, cols]
+            full[k] = full[k].at[ntheta2:].set(-mirrored if flip else mirrored)
+    r1b, z1b, r12, z12, ru12, zu12 = full
+    frac = jnp.arange(grid_points, dtype=s.dtype) / float(max(grid_points - 1, 1))
+    planes = np.arange(nzeta if lasym else nzeta // 2 + 1)
+    fixed_z = np.zeros(planes.size, bool) if lasym else (planes == 0) | (planes == nzeta // 2)
+
+    def plane(iv, zero_z):
+        rmin, rmax = jnp.min(r1b[:, iv]), jnp.max(r1b[:, iv])
+        zmin, zmax = jnp.min(z1b[:, iv]), jnp.max(z1b[:, iv])
+        rmid, zmid = 0.5 * (rmax + rmin), 0.5 * (zmax + zmin)
+        rs = (r1b[:, iv] - r12[:, iv]) / ds + geometry.R_even[0, 0, iv]
+        zs = (z1b[:, iv] - z12[:, iv]) / ds + geometry.Z_even[0, 0, iv]
+        tau0 = exact(ru12[:, iv] * zs) - exact(zu12[:, iv] * rs)
+        r_grid = rmin + exact((rmax - rmin) * frac)
+        z_grid = jnp.where(zero_z, 0.0, zmin + exact((zmax - zmin) * frac))
+        tau = signgs * ((tau0[None, None, :] - exact(ru12[:, iv][None, None, :] * z_grid[:, None, None]))
+                        + exact(zu12[:, iv][None, None, :] * r_grid[None, :, None]))
+        min_tau = jnp.min(tau, axis=2)
+        max_tau = jnp.max(min_tau)
+        z_abs = jnp.abs(z_grid)
+
+        def nearest_row(rows):  # first row of smallest |z| among ``rows``
+            smallest = jnp.min(jnp.where(rows, z_abs, jnp.inf))
+            return jnp.argmax(rows & (z_abs == smallest)), jnp.any(rows)
+
+        best = min_tau == max_tau
+        first = jnp.argmax(best.reshape(-1))
+        z_first = z_grid[first // grid_points]
+        row, found = nearest_row(jnp.any(best, axis=1))
+        z_pos = jnp.where(found & (jnp.abs(z_first) > z_abs[row]), z_grid[row], z_first)
+        row, found = nearest_row(jnp.any(min_tau == 0.0, axis=1) & (z_abs < jnp.abs(zmid)))
+        z_zero = jnp.where(found, z_grid[row], zmid)
+        rbest = jnp.where(max_tau > 0.0, r_grid[first % grid_points], rmid)
+        zbest = jnp.where(max_tau > 0.0, z_pos, jnp.where(max_tau == 0.0, z_zero, zmid))
+        return rbest, zbest
+
+    rcom, zcom = jax.vmap(plane)(jnp.asarray(planes), jnp.asarray(fixed_z))
+    if not lasym:
+        mirror = nzeta - np.arange(nzeta // 2 + 1, nzeta)
+        rcom = jnp.concatenate([rcom, rcom[mirror]])
+        zcom = jnp.concatenate([zcom, -zcom[mirror]])
+    cosnv, sinnv, nscale = (np.asarray(t, dtype=float) for t in (trig.cosnv, trig.sinnv, trig.nscale))
+    dzeta = 2.0 / float(nzeta)
+    half = np.ones(nscale.size)
+    half[0] = 0.5
+    if nzeta % 2 == 0 and nzeta // 2 <= nscale.size - 1:
+        half[nzeta // 2] = 0.5
+    return (dzeta * (cosnv.T @ rcom) / nscale * half, -dzeta * (sinnv.T @ rcom) / nscale,
+            dzeta * (cosnv.T @ zcom) / nscale * half, -dzeta * (sinnv.T @ zcom) / nscale)
+
+
 def reguess_initial_axis(
-    rt: SolverRuntime, state: SpectralState, *, use_fft: bool = False
+    rt: SolverRuntime, state: SpectralState, *, use_fft: bool = False,
+    guess=guess_axis,
 ) -> tuple[SolverRuntime, SpectralState, tuple[Array, Array, Array, Array]]:
     """Apply VMEC2000's first-pass magnetic-axis retry.
 
@@ -1491,11 +1618,12 @@ def reguess_initial_axis(
     for ``LMOVE_AXIS=T`` with a first raw-force sum above ``1e2``.  Besides
     rebuilding the ``profil3d`` state, this updates the setup's axis arrays
     and rebinds the constraint baselines to that state
-    (``funct3d.f: iter2 == iter1``).
+    (``funct3d.f: iter2 == iter1``).  ``guess`` is the host
+    :func:`~vmex.core.setup.guess_axis`, or :func:`_guess_axis_traced` inside a trace.
     """
     setup = rt.setup
     _, geometry = _geometry_lane(state, rt, use_fft=use_fft)
-    axis = guess_axis(
+    axis = guess(
         geometry, s=setup.s_full, trig=rt.trig, signgs=setup.signgs
     )
     arrays = interior_guess(
@@ -1863,11 +1991,11 @@ def _initial_carry(
     dtype = rt.setup.s_full.dtype
     one = jnp.asarray(1.0, dtype=dtype)
     zeros = (
-        jax.tree.map(jnp.zeros_like, state)
+        jax.tree.map(lambda leaf: _host_zeros(leaf.shape, leaf.dtype), state)
         if xcdot is None else xcdot
     )
     delt0 = jnp.asarray(float(time_step0), dtype=dtype)
-    zero, inf = jnp.zeros((), dtype=dtype), jnp.asarray(jnp.inf, dtype=dtype)
+    zero, inf = _host_zeros((), dtype), jnp.asarray(jnp.inf, dtype=dtype)
     # NOTE: scalar counters/flags carry explicit (non-weak) dtypes so that the
     # initial carry has exactly the avals of the carry the jitted lanes
     # return; weak-typed Python scalars here would force a second lane
@@ -1882,15 +2010,21 @@ def _initial_carry(
     return _LoopCarry(
         state=state, xcdot=zeros, xstore=state, cache=_zero_cache(rt),
         time_step=delt0,
-        inv_tau=jnp.full((NDAMP,), DAMPING_CAP, dtype=dtype) / delt0,
+        # Host-side constant: DAMPING_CAP/delt0 is the same double division
+        # either way, and this keeps the cold path from compiling a `full`
+        # and a `divide` program for it (see _host_zeros).
+        inv_tau=jax.device_put(
+            np.full((NDAMP,), DAMPING_CAP, dtype=dtype)
+            / np.asarray(float(time_step0), dtype=dtype)
+        ),
         fsq=one, res0=inf, res1=inf,
         fsqr=fsqr0, fsqz=fsqz0, fsql=fsql0,
         fsqr1=one, fsqz1=one, fsql1=one,
         wb=zero, wp=zero, r00=zero,
         iteration=int_(1), iter1=int_(1),
-        ijacob=int_(int(ijacob)),
-        done=jnp.zeros((), dtype=bool), ier=int_(NORM_TERM_FLAG),
-        trajectory=jnp.zeros((rt.max_iterations, _TRAJ_COLS), dtype=dtype),
+        ijacob=int_(ijacob),
+        done=_host_zeros((), bool), ier=int_(NORM_TERM_FLAG),
+        trajectory=_host_zeros((rt.max_iterations, _TRAJ_COLS), dtype),
     )
 
 
@@ -2221,17 +2355,22 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         # (xstore=state, shared cache zeros), so copy to distinct buffers —
         # same rationale as the CLI-lane copy below, values bit-for-bit
         # unchanged.
-        carry = jax.tree.map(jnp.array, carry)
+        carry = _distinct_buffers(carry)
         return (_while_lane_fft if use_fft else _while_lane)(carry, rt)
 
     if mode != "cli":
         raise ValueError(f"unknown mode {mode!r}; expected 'cli' or 'jit'")
+    # Predictors and axis retries mix committed and uncommitted arrays on
+    # the same device. Normalize once to reuse the lane executable, without
+    # changing the selected device or imposing a layout on sharded solves.
+    # Before the copy below, so the copy's own executable sees one commitment.
+    carry, rt = commit_to_single_device((carry, rt))
     # The donated CLI lane (_block_lane, donate_argnums=0) requires every leaf
     # of the input carry to be a distinct buffer; _initial_carry aliases some
     # (xstore=state, shared cache zeros).  One copy to distinct buffers here
     # (values bit-for-bit unchanged) makes the per-block donation valid and is
     # amortized over the whole solve.
-    carry = jax.tree.map(jnp.array, carry)
+    carry = _distinct_buffers(carry)
     if verbose and emit_banner:
         # initialize_radial.f prints the total Fourier mode count (mnmax), not mpol.
         emit(stage_banner(rt.resolution.ns, rt.resolution.mnmax, float(rt.ftol), rt.max_iterations), end="")
@@ -2256,18 +2395,25 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             emit(compile_notice(rt.resolution.ns,
                                 prefetched=executable is not None), end="")
         _USED_LANE_KEYS.add(key)
+    # Committed arguments already fix placement, so keep the caller's
+    # default-device context out of the lane's jit key: a construction solve
+    # and trial solves run inside a device context then share one executable.
+    def step(fn, carry):
+        with placement_neutral((carry, rt)):
+            return fn(carry, rt)
+
     for _ in range(max_passes):
         if executable is not None:
             try:
-                carry = executable(carry, rt)
+                carry = step(executable, carry)
             except Exception:
                 # Structural/placement drift (argument validation precedes
                 # execution and donation, so the carry is intact): fall back
                 # to the on-demand jitted lane for the rest of the rung.
                 executable = None
-                carry = lane(carry, rt)
+                carry = step(lane, carry)
         else:
-            carry = lane(carry, rt)
+            carry = step(lane, carry)
         done = bool(carry.done)
         upto = int(carry.iteration) if done else int(carry.iteration) - 1
         # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
@@ -2352,12 +2498,8 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
         # once.  A high finite first force uses the same transfer while
         # preserving the triggering pass's momentum.
         retry_reason = int(carry.ier)
-        if (
-            allow_axis_reguess
-            and try_axis_reguess
-            and retry_reason in (BAD_JACOBIAN_FLAG, AXIS_REGUESS_FLAG)
-            and int(carry.ijacob) == 0
-            and attempt_rt.resolution.ns >= 3
+        if allow_axis_reguess and try_axis_reguess and _axis_retry(
+            retry_reason, int(carry.ijacob), attempt_rt.resolution.ns
         ):
             if verbose:
                 if retry_reason == BAD_JACOBIAN_FLAG:
@@ -2401,7 +2543,9 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
             break
         attempt_delt0 = min(0.5, 0.5 * attempt_delt0)
         attempt_state = carry.xstore
-        attempt_rt = runtime_with_baselines(attempt_rt, attempt_state)
+        attempt_rt = runtime_with_baselines(
+            attempt_rt, attempt_state, use_fft=use_fft
+        )
         if verbose:
             emit(
                 " JACOBIAN RECOVERY RETRY "
@@ -2416,6 +2560,49 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
             attempt_residuals=(carry.fsqr, carry.fsqz, carry.fsql),
         )
     return carry
+
+
+def _axis_retry(ier, ijacob, ns):
+    """``eqsolve.f``: re-guess the axis after this pass (host ints or traced arrays)."""
+    return ((ier == BAD_JACOBIAN_FLAG) | (ier == AXIS_REGUESS_FLAG)) & (ijacob == 0) & (ns >= 3)
+
+
+def _solve_stage_traced(rt: SolverRuntime, state0: SpectralState | None, *,
+                        time_step0: float, use_fft: bool = False) -> _LoopCarry:
+    """:func:`_solve_stage` as one traceable program, for a solve inside ``jax.jit``.
+
+    Runs the ``lax.while_loop`` lane and, on the host driver's condition (a
+    first-iteration bad Jacobian or raw-force axis transfer with
+    ``ijacob == 0`` and ``ns >= 3``), re-guesses the axis with
+    :func:`_guess_axis_traced` and runs the same lane once more with the same
+    state, velocity and residual continuation.  The JAC75 retries stay on the
+    host: they change the static ``lmove_axis``, so a traced solve returns
+    that flag instead.
+    """
+    state0 = _initial_state(rt.setup) if state0 is None else state0
+    zeros = jax.tree.map(jnp.zeros_like, state0)
+    one = jnp.ones((), dtype=rt.setup.s_full.dtype)
+    start = jax.tree.map(jnp.array, _initial_carry(state0, rt, ijacob=0, time_step0=time_step0))
+
+    def trip(loop):
+        _, first, state, runtime, ijacob, xcdot, residuals, _ = loop
+        carry = _run_loop(state, runtime, mode="jit", ijacob=ijacob, verbose=False, emit=None,
+                          time_step0=time_step0, nstep=1, use_fft=use_fft,
+                          initial_xcdot=xcdot, initial_residuals=residuals)
+        axis_transfer = carry.ier == AXIS_REGUESS_FLAG
+        retry = first & _axis_retry(carry.ier, carry.ijacob, runtime.resolution.ns)
+
+        def reguess(_):
+            new_rt, new_state, _axis = reguess_initial_axis(
+                runtime, state, use_fft=use_fft, guess=_guess_axis_traced)
+            return (new_state, new_rt, jnp.ones_like(ijacob),
+                    _select(axis_transfer, carry.xcdot, zeros), (carry.fsqr, carry.fsqz, carry.fsql))
+
+        following = lax.cond(retry, reguess, lambda _: (state, runtime, ijacob, xcdot, residuals), None)
+        return (retry, jnp.zeros((), bool), *following, carry)
+
+    loop = (jnp.ones((), bool), jnp.ones((), bool), state0, rt, start.ijacob, zeros, (one, one, one), start)
+    return lax.while_loop(lambda loop: loop[0], trip, loop)[-1]
 
 
 def _finalize(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:

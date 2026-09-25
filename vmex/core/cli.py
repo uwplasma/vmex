@@ -43,6 +43,16 @@ behavior, where a mere NITER exhaustion of the final grid still terminates
 normally through the output path.  The exit code remains the distinct
 ``ier_flag = 2``.  Fatal numerical/Jacobian errors never produce a WOUT
 and exit with their own ``ier_flag`` codes.
+
+``LFULL3D1OUT`` does not gate that WOUT.  ``vmec.f`` re-enters ``runvmec``
+with ``ictrl(1) = output_flag + cleanup_flag`` on ``more_iter_flag``, and
+sets ``ictrl(2) = 0`` (``norm_term_flag``); ``LFULL3D1OUT=T`` only upgrades
+that to ``successful_term_flag`` for the extra threed1 request message.
+``runvmec.f`` calls ``fileout`` whenever ``ier_flag /= more_iter_flag``, and
+``fileout.f`` computes ``lwrite = lterm .or. ier_flag == more_iter_flag``
+before ``wrout``, so the WOUT is written either way.  VMEX keeps the
+non-convergence visible where VMEC2000 loses it: ``wout.ier_flag`` records
+``2`` rather than the ``0`` ``vmec.f`` substitutes.
 """
 
 from __future__ import annotations
@@ -163,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help=(
-            "VMEC input file (input.* namelist or VMEC++ .json) to solve, or a "
+            "VMEC input file (input.* namelist or VMEC++ .json), DESC text/HDF5/pickle file to solve, or a "
             "wout_*.nc/mout_*.nc/boozmn_*.nc file for --plot/--booz."
         ),
     )
@@ -174,6 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SCALE",
         help="with --scale: optional multiplicative B_scale R_scale factors",
     )
+    p.add_argument("--desc-tol", type=float, default=0.01,
+                   help="DESC boundary truncation bound (0..0.01; 0 retains all nonzero modes).")
     p.add_argument(
         "--scale",
         action="store_true",
@@ -799,10 +811,9 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             restart_from=restart_source,
             verbose=verbose,
             emit=emit,
-            # vmec.f only forces an NITER-exhausted state through fileout
-            # when LFULL3D1OUT=T.  Otherwise the typed ier_flag=2 error
-            # returns before the WOUT path.
-            raise_on_max_iterations=not bool(inp.lfull3d1out),
+            # vmec.f sends an NITER-exhausted state through fileout whether
+            # or not LFULL3D1OUT is set; see the module docstring.
+            raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
             # Opt-in cold-run overlap; the library default is also False.
@@ -827,7 +838,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             verbose=verbose,
             emit=emit,
             # vmec.f/fileout.f semantics — see the free-boundary call above.
-            raise_on_max_iterations=not bool(effective_inp.lfull3d1out),
+            raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
             # Opt-in cold-run overlap; background compiler threads otherwise
@@ -865,6 +876,14 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
         emit(f"\n Wrote WOUT file: {wout_path}")
         if not bool(result.converged):
             emit("\n HINT : increase NITER or loosen FTOL")
+    elif not bool(result.converged):
+        # The typed termination message used to reach --quiet runs through
+        # the raised convergence error.  The CLI keeps the state instead, so
+        # say why the exit code is non-zero rather than exiting silently.
+        from .errors import WERROR_MESSAGES
+
+        emit(f"\n {WERROR_MESSAGES.get(int(result.ier_flag), 'UNKNOWN TERMINATION CODE')}")
+        emit(f" Wrote WOUT file: {wout_path}")
 
     plot_dir = outdir if outdir is not None else input_path.parent
     if args.plot is not None:
@@ -1249,6 +1268,12 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             _run_trace(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         return 0
 
+    from .desc import is_desc_file, write_desc_input
+
+    if is_desc_file(input_path):
+        input_path = write_desc_input(input_path, outdir, tolerance=args.desc_tol)
+        if not quiet:
+            emit(f" Wrote DESC-derived VMEC input: {input_path}")
     return _solve_input_file(args, input_path, outdir, emit=emit)
 
 

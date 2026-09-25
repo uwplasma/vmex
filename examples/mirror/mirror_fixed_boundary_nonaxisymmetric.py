@@ -1,30 +1,26 @@
+#!/usr/bin/env python
 """Native-spline fixed-boundary mirror equilibria.
 
 Solves the supported rotating-ellipse case, the Agren-Savenko straight
 field-line paraxial-accuracy benchmark, and a standard axisymmetric mirror,
 then renders the axisymmetric and 90-degree rotating-ellipse solves side by
-side in 3-D. The straight field-line mirror is an analytic field that is only
-an equilibrium to order ``(a/c)^2``; it is gated on its clean unconstrained
-bulk force and on the refinement convergence of that bulk force, and its
-elevated end-collar force is the expected boundary layer at the frozen cuts.
+side in 3-D, and differentiates the rotating-ellipse volume against two fully
+reconverged solves. The straight field-line mirror is an analytic field that
+is only an equilibrium to order ``(a/c)^2``, so it is validation only: it is
+gated on its unconstrained bulk force, and its elevated end-collar force is
+the expected boundary layer at the frozen cuts. Its lane status is in
+``docs/explanation/mirror-geometry.rst``.
 """
-
-from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-import sys
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from vmex.mirror import (  # noqa: E402
+from vmex.mirror import (
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
@@ -39,42 +35,69 @@ from vmex.mirror import (  # noqa: E402
     spline_fixed_boundary_adjoint,
     write_mout,
 )
-from vmex.mirror.analytic import (  # noqa: E402
+from vmex.mirror.analytic import (
     AxisymmetricPolynomialMirror,
     RotatingEllipseParaxial,
     StraightFieldLineMirror,
 )
-from vmex.mirror.output import plot_mirror_3d_pair  # noqa: E402
-from vmex.mirror.implicit import spline_fixed_boundary_parameters  # noqa: E402
-from vmex.mirror.forces import force_gate_zones  # noqa: E402
-from vmex.mirror.geometry import magnetic_field_squared  # noqa: E402
-from vmex.mirror.splines import initialize_from_cartesian_field  # noqa: E402
+from vmex.mirror.forces import force_gate_zones
+from vmex.mirror.geometry import magnetic_field_squared
+from vmex.mirror.implicit import spline_fixed_boundary_parameters
+from vmex.mirror.output import plot_mirror_3d_pair
+from vmex.mirror.splines import initialize_from_cartesian_field
 
-# Inputs: edit these constants, then run this file directly.
+# Non-axisymmetric cases, each continued in shape from a straight cylinder:
 CASES = ("rotating_ellipse", "straight_field_line")
+
+# Mirror resolution (radial surfaces, largest poloidal mode, source axial
+# samples) and the number of axial spline elements:
 NS, MPOL, SOURCE_NXI = 7, 6, 17
 SPLINE_ELEMENTS = 6
+
+# Shape-continuation stages from the cylinder (0) to the final boundary (1):
 SHAPE_STAGES = (0.0, 0.25, 0.5, 0.75, 1.0)
+
+# Force tolerance and iteration budget of every solve:
 FTOL = 1.0e-12
 MAX_ITERATIONS = 1000
+
+# Adjoint volume gradient of the rotating ellipse against two re-solves:
 RUN_GRADIENT_CHECK = True
 FINITE_DIFFERENCE_STEP = 2.0e-4
-STRONG_FORCE_GATE = 5.0e-2
-OUTPUT_DIR = Path("results/mirror_fixed_boundary_nonaxisymmetric")
-# The paired 3-D figure the README and docs embed is written straight into the
-# documentation tree as lossless WebP, so re-running this script reproduces the
-# committed bytes; VMEX_EXAMPLES_CI=1 redirects it to OUTPUT_DIR instead.
-CI = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-FIGURE_DIR = OUTPUT_DIR if CI else REPO_ROOT / "docs" / "_static" / "figures"
 
+# Gate on the normalized strong-force residual:
+STRONG_FORCE_GATE = 5.0e-2
+
+# Per-case boundary radius [m] and axial flux derivative:
 RADIUS = {"rotating_ellipse": 0.12, "straight_field_line": 0.10}
 AXIAL_FLUX_DERIVATIVE = {"rotating_ellipse": 0.0072, "straight_field_line": 0.005}
+
+# Standard axisymmetric mirror: radius [m], poloidal modes, on-axis mirror
+# strength (analytic mirror ratio 1 + strength):
 AXISYMMETRIC_RADIUS = 0.12
 AXISYMMETRIC_MPOL = 4
 AXISYMMETRIC_MIRROR_STRENGTH = 0.5
 
+# Directory for the MOUT files, per-case figures and summary.json:
+OUTPUT_DIR = Path("results/mirror_fixed_boundary_nonaxisymmetric")
+
+# The paired 3-D figure the docs embed is written straight into the
+# documentation tree as lossless WebP, so re-running this script reproduces
+# the committed bytes. VMEX_EXAMPLES_CI=1 is the smoke pass the test suite
+# runs; it sends that figure to OUTPUT_DIR instead:
+ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIGURE_DIR = OUTPUT_DIR if ci_smoke else REPO_ROOT / "docs" / "_static" / "figures"
+
+###############################################################################
+# End of input parameters.
+###############################################################################
+
 jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+### Set up the grids ##########################################################
+
 config = MirrorConfig(
     resolution=MirrorResolution(ns=NS, mpol=MPOL, nxi=SOURCE_NXI),
     z_min=-1.0,
@@ -107,6 +130,8 @@ def boundary_for(case: str, stage: float) -> MirrorBoundary:
         raise ValueError(f"unknown mirror case {case!r}")
     return MirrorBoundary.from_radius(values, source_grid)
 
+
+### Solve the non-axisymmetric cases #########################################
 
 summaries = {}
 for case in CASES:
@@ -251,8 +276,10 @@ for case in CASES:
         assert zones.all_volume < STRONG_FORCE_GATE
     else:
         # Bulk (unconstrained volume) force is the physical equilibrium gate;
-        # its refinement convergence is recorded in docs/explanation/mirror-geometry.rst.
+        # no refinement ladder for the corrected cuts is recorded yet.
         assert zones.bulk < STRONG_FORCE_GATE
+
+### Solve the axisymmetric mirror ############################################
 
 # Standard axisymmetric mirror through the one-call entry point: the boundary
 # is the exact circular flux surface of an analytic vacuum mirror.
@@ -339,6 +366,8 @@ assert float(axisymmetric_evaluated.normalized_divergence_rms) < 1.0e-12
 # The solved on-axis ratio reproduces the analytic fixture's 1 + mirror_strength
 # to 7.5e-4 at the shipped resolution; the gate leaves room for platform drift.
 assert abs(summaries["axisymmetric"]["R_m_axis"][0] / (1.0 + AXISYMMETRIC_MIRROR_STRENGTH) - 1.0) < 3.0e-3
+
+### Plot and save ############################################################
 
 # Side-by-side solved 3-D geometry: circular-section axisymmetric mirror on
 # the left, the 90-degree rotating ellipse on the right, coloured by LCFS |B|.

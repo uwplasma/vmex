@@ -171,17 +171,23 @@ def test_summary_combines_stability_and_well(summary_figure):
         stability.get_window_extent(renderer).y0 + 2)
 
 
-def test_summary_combines_iota_current_and_confinement(
+def test_summary_combines_force_current_and_confinement(
     solved_case, summary_figure,
 ):
-    """iota carries <J.B> on its right axis; pressure carries confinement."""
+    """Force balance carries bootstrap <J.B>; iota stands alone; pressure carries confinement."""
     _, meta = summary_figure
     iota = meta["axes"]["iota"]
+    assert len(iota.lines) == 1 and iota.get_legend() is None
+    assert iota.get_title() == "rotational transform"
+
+    force = meta["axes"]["force_balance"]
     current = meta["current_axis"]
-    assert len(iota.lines) == 1 and len(current.lines) == 1
-    assert "rotational transform and parallel current" in iota.get_title()
-    labels = [text.get_text() for text in iota.get_legend().get_texts()]
-    assert any(label == r"$\iota$" for label in labels)
+    assert len(current.lines) == 1
+    assert current.get_shared_x_axes().joined(current, force)
+    assert current.get_ylabel().startswith(r"Bootstrap $\langle \mathbf{J}")
+    assert current.get_ylabel().endswith("[kA T/m$^2$]")
+    labels = [text.get_text() for text in force.get_legend().get_texts()]
+    assert "force error" in labels
     assert any(r"\mathbf{J}" in label for label in labels)
 
     profiles = meta["axes"]["profiles"]
@@ -221,19 +227,35 @@ def test_summary_confinement_axis_draws_only_valid_profiles(summary_figure):
 
 
 def test_summary_reports_force_error(solved_case, summary_figure):
-    """The force panel keeps its equation, log scale, and scalar-card max."""
+    """The force panel states its normalization; the card gives its volume average."""
     _, meta = summary_figure
     force = meta["axes"]["force_balance"]
     assert force.get_yscale() == "log"
     assert r"\rho=\sqrt{s}" in force.get_xlabel()
     assert r"s=\psi/\psi_B" in force.get_xlabel()
-    assert "relative force error" in force.get_ylabel()
-    assert r"\mathbf{J}" in force.get_ylabel() and r"\nabla p" in force.get_ylabel()
+    assert r"\nabla p" in force.get_ylabel() and r"\nabla(B^2/2\mu_0)" in force.get_ylabel()
+    assert r"0.1\leq s\leq 0.99" in force.get_ylabel()
     _, wout = solved_case
-    expected = float(np.max(np.abs(np.asarray(wout.equif)[1:-1])))
-    assert meta["max_relative_force_error"] == pytest.approx(expected)
+    assert meta["force_error"] == plotting._relative_force_error_profile(wout)[2]
+    # Converged finite-beta deck: 1.3e-3 measured, while equif reaches 0.94.
+    assert meta["force_error"] < 1.0e-2
     card_text = " ".join(text.get_text() for text in meta["axes"]["card"].texts)
-    assert r"max $\epsilon_F$" in card_text
+    assert r"\nabla B^2/2\mu_0" in card_text
+
+
+@pytest.mark.parametrize("niter,low,high", [(3000, 0.0, 1.0e-2), (40, 5.0e-2, np.inf)])
+def test_force_error_resolves_vacuum_convergence(niter, low, high):
+    """equif is 1 on a currentless vacuum at any residual; the plotted error is not."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres"),
+        ns_array=[16], niter_array=[niter], ftol_array=[1e-12],
+    )
+    wout = wout_from_state(inp=inp, state=opt.solve_equilibrium(inp).state, fsqr=0.0, fsqz=0.0, fsql=0.0)
+    np.testing.assert_allclose(np.abs(wout.equif[1:-1]), 1.0, atol=1e-6)
+    rho, profile, average = plotting._relative_force_error_profile(wout)
+    assert rho.size == 14 and np.all(profile > 0.0)
+    # Measured 1.6e-3 converged and 0.14 after 40 iterations.
+    assert low < average < high
 
 
 def test_summary_style_constants():
@@ -613,6 +635,64 @@ def test_d_r_self_check_rejects_inconsistent_dmerc(solved_case):
     assert info["d_r"] is None
 
 
+def _mirror_toroidal_angle(wout):
+    """Return the WOUT of the same equilibrium seen through ``zeta -> -zeta``.
+
+    Modes ``(m, n)`` with ``m > 0`` move to ``(m, -n)``; ``m = 0`` sine
+    coefficients change sign.  The pseudo-scalars (iota, the poloidal
+    covariant field, ``B_s`` and ``<J.B>``) flip.  This is the map a solve of
+    the mirrored deck produces, checked table by table on the NFP=4 QI deck
+    to 5e-10.
+    """
+    def flip(table, xm, xn, *, sine, negate):
+        xm = np.asarray(xm, dtype=int)
+        xn = np.asarray(xn, dtype=int)
+        column = {(m, n): k for k, (m, n) in enumerate(zip(xm, xn))}
+        order = [column[(m, -n)] if m > 0 else k for k, (m, n) in enumerate(zip(xm, xn))]
+        out = np.asarray(table, dtype=float)[:, order]
+        if sine:
+            out[:, xm == 0] *= -1.0
+        return -out if negate else out
+
+    base, nyq = (wout.xm, wout.xn), (wout.xm_nyq, wout.xn_nyq)
+    return dataclasses.replace(
+        wout,
+        rmnc=flip(wout.rmnc, *base, sine=False, negate=False),
+        zmns=flip(wout.zmns, *base, sine=True, negate=False),
+        gmnc=flip(wout.gmnc, *nyq, sine=False, negate=False),
+        bmnc=flip(wout.bmnc, *nyq, sine=False, negate=False),
+        bsubumnc=flip(wout.bsubumnc, *nyq, sine=False, negate=True),
+        bsubvmnc=flip(wout.bsubvmnc, *nyq, sine=False, negate=False),
+        bsubsmns=flip(wout.bsubsmns, *nyq, sine=True, negate=True),
+        iotas=-np.asarray(wout.iotas), iotaf=-np.asarray(wout.iotaf),
+        buco=-np.asarray(wout.buco), jdotb=-np.asarray(wout.jdotb),
+    )
+
+
+def test_d_r_self_check_holds_for_both_iota_signs_on_the_solver_grid(solved_case):
+    """D_R and its self-check do not depend on the sign of iota.
+
+    The stored DMerc is a quadrature on the solver's angular grid, and the
+    reconstruction integrates on that grid, so both orientations reproduce
+    it to round-off.  The finer grid it used before disagreed by 3.8e-2 on
+    the negative-iota NFP=4 QI deck, which dropped that deck's D_R curve.
+    """
+    _, wout = solved_case
+    mirrored = _mirror_toroidal_angle(wout)
+    iota_edge = float(np.asarray(wout.iotaf)[-1])
+    assert iota_edge != 0.0
+    assert float(np.asarray(mirrored.iotaf)[-1]) == -iota_edge
+    infos = [plotting._glasser_d_r_from_wout(case) for case in (wout, mirrored)]
+    for info in infos:
+        assert info["valid"], info["note"]
+        # measured 1e-13 on this deck; the previous fixed 64-point grid left 5.4e-9
+        assert info["mismatch"] < 1.0e-11
+    interior = slice(2, -1)
+    scale = float(np.max(np.abs(np.asarray(wout.DMerc)[interior])))
+    np.testing.assert_allclose(
+        infos[1]["d_r"][interior], infos[0]["d_r"][interior], rtol=0.0, atol=1.0e-9 * scale)
+
+
 def test_j_invariant_map_rejects_degenerate_field():
     """A constant Boozer |B| cannot define a trapped-particle pitch."""
     booz = {
@@ -628,12 +708,10 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     """A radial maximum-J diagnostic holds physical pitch fixed."""
     import vmex.core.bounce as bounce
 
-    pitches = []
-
     def _fake_bounce(*, alpha, pitch, **_kwargs):
-        pitches.append(float(np.asarray(pitch)[0]))
         shape = (1, len(alpha), 1, 1)
-        return {"action": np.ones(shape), "usable_mask": np.ones(shape, dtype=bool)}
+        return {"action": jax.numpy.broadcast_to(pitch, shape),
+                "usable_mask": jax.numpy.ones(shape, dtype=bool)}
 
     monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)
     booz = {
@@ -643,17 +721,15 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
         "s_b": np.array([0.25, 0.75]),
     }
     result = plotting._j_invariant_map(booz, pitch_fraction=0.5, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 1.05, 1.0 / 1.05], rtol=0.0, atol=2e-4)
-    np.testing.assert_allclose(result["pitch"], pitches[0])
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05, rtol=0.0, atol=2e-4)
+    np.testing.assert_allclose(result["j_map"], result["pitch"])
 
-    pitches.clear()
     result = plotting._j_invariant_map(booz, pitch=1.0 / 1.05, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 1.05, 1.0 / 1.05])
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05)
     np.testing.assert_allclose(result["pitch_inverse"], 1.05)
 
-    pitches.clear()
     result = plotting._j_invariant_map(booz, pitch=1.0 / 0.85, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 0.85])
+    np.testing.assert_allclose(result["j_map"][0], 1.0 / 0.85)
     np.testing.assert_array_equal(result["trapped_surface"], [True, False])
     assert np.all(np.isfinite(result["j_map"][0]))
     assert np.all(np.isnan(result["j_map"][1]))
@@ -736,9 +812,58 @@ def test_plot_surfaces_pads_unused_axes(solved_case, tmp_path):
     assert path.exists() and path.stat().st_size > 0
 
 
-def test_plot_profiles_without_fsqt_history(solved_case, tmp_path):
-    """An all-zero fsqt history draws the no-history note panel."""
-    _, wout = solved_case
-    assert not np.any(np.asarray(wout.fsqt) > 0.0)  # in-memory wout: no history
-    path = plotting.plot_profiles(wout, tmp_path / "profiles.png")
-    assert path.exists() and path.stat().st_size > 0
+@pytest.mark.parametrize("derivative", ({}, {"dtheta": 1}, {"dphi": 1}))
+@pytest.mark.parametrize("parity", ("cos", "sin", "both"))
+@pytest.mark.parametrize("batch_shape", ((), (3,), (2, 3)))
+def test_plot_fourier_synthesis_matches_dense_series(derivative, parity, batch_shape):
+    """Signed modes, asymmetric partners and radial batches keep their series."""
+    rng = np.random.default_rng(918)
+    m, n = np.meshgrid(np.arange(16), np.arange(-12, 13), indexing="ij")
+    m, n = m.ravel(), 3 * n.ravel()
+    theta = np.linspace(0., 2 * np.pi, 31)
+    phi = np.linspace(0., 2 * np.pi / 3, 37)
+    c, s = rng.normal(size=(2, *batch_shape, m.size))
+    c = None if parity == "sin" else c
+    s = None if parity == "cos" else s
+    phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * phi
+    cosine, sine = np.cos(phase), np.sin(phase)
+    if derivative:
+        factor = m if "dtheta" in derivative else -n
+        cosine, sine = -sine * factor[:, None, None], cosine * factor[:, None, None]
+    expected = np.zeros((*batch_shape, theta.size, phi.size))
+    if c is not None:
+        expected += np.tensordot(c, cosine, axes=(-1, 0))
+    if s is not None:
+        expected += np.tensordot(s, sine, axes=(-1, 0))
+    actual = plotting._eval_modes(c, s, m, n, theta, phi, **derivative)
+    np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=2e-11)
+
+
+def test_near_unity_force_ticks_and_long_stability_status_fit(monkeypatch):
+    """Narrow-range force profiles keep distinct ticks; failure notes stay readable."""
+    plt = plotting._import_matplotlib()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
+    wout = SimpleNamespace(ns=31, DMerc=np.linspace(-1., -2., 31), betatotal=0.,
+                          vp=np.linspace(1., 2., 31))
+    narrow = np.linspace(1 - 1e-10, 1., 29)
+    monkeypatch.setattr(plotting, "_relative_force_error_profile",
+                        lambda _: (np.linspace(0.2, 0.98, 29), narrow, 1.0))
+    try:
+        assert plotting._relative_force_error_panel(axes[0], wout) == 1.0
+        plotting._stability_panel(axes[1], wout, {
+            "valid": False, "note": "D_R self-check failed (DMerc mismatch 3.8e-02)"
+        }, s_plot_ignore=.2)
+        fig.canvas.draw()
+        labels = [text.get_text() for text in _drawn_tick_labels(axes[0].yaxis)]
+        lo, hi = axes[0].get_ylim()
+        labels += [tick.label1.get_text() for tick in axes[0].yaxis.get_minor_ticks()
+                   if lo <= tick.get_loc() <= hi and tick.label1.get_text()]
+        assert len(labels) > 1 and len(labels) == len(set(labels))
+        assert axes[0].get_yscale() == "log"
+        assert axes[0].yaxis.get_offset_text().get_text()
+        np.testing.assert_array_equal(axes[0].lines[0].get_ydata(), narrow)
+        extent = axes[1].title.get_window_extent(fig.canvas.get_renderer())
+        assert extent.x0 >= fig.bbox.x0 and extent.x1 <= fig.bbox.x1
+        assert "self-check failed" in axes[1].get_title()
+    finally:
+        plt.close(fig)

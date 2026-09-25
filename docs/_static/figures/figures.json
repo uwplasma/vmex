@@ -18,23 +18,6 @@
       "note": "Closed-form plot of the exponential spectral scaling exp(-alpha*max(|m|,|n|)); it solves nothing and reads nothing, so there is no hardware to record. No docs page currently embeds it \u2014 it is kept as a generated asset for the objectives pages, and the empty used_in below records that honestly."
     },
     {
-      "path": "docs/_static/figures/gradient_stack_speedup.webp",
-      "sha256": "ea97c7e489ec4a953d1715baa96ec8438003d8cc00e8524338d6ce1f4e207caa",
-      "bytes": 20594,
-      "generator": "docs/_static/figures/sources/make_optimization_docs_figures.py",
-      "command": "python docs/_static/figures/sources/make_optimization_docs_figures.py",
-      "inputs": [],
-      "record": null,
-      "generated": "2026-09-03",
-      "hardware": "Apple Silicon CPU",
-      "reproducible": "command",
-      "bytes_verified": true,
-      "used_in": [
-        "docs/explanation/adjoint-gradients.md"
-      ],
-      "note": "The bar heights are measurements from 2026-07-12 typed into the generator, not read from a committed artifact; re-running redraws the same typed numbers. Treat it as an illustration of the gradient-stack argument, not as a citable timing record. The `generated` date is the render, not the measurement."
-    },
-    {
       "path": "docs/_static/figures/mirror_fixed_boundary_3d.webp",
       "sha256": "8ee4a29853495875bb65bae21306b26111cce6dbd17f483f473ee8b483673fef",
       "bytes": 147018,
@@ -54,20 +37,21 @@
     },
     {
       "path": "docs/_static/figures/mirror_free_boundary_beta_scan.webp",
-      "sha256": "1273a209461b68ce2369e3fb01476a9ccf2f450cab0708fdd28713f3bab4297a",
-      "bytes": 169854,
+      "sha256": "725233ae2353863432dd214eee4d6ce62bef7d7201e0fd3269c30ddcbaeef90e",
+      "bytes": 163152,
       "generator": "examples/mirror/mirror_free_boundary_beta_scan.py",
       "command": "python examples/mirror/mirror_free_boundary_beta_scan.py",
       "inputs": [],
       "record": "benchmarks/mirror_free_boundary_axisymmetric.json",
-      "generated": "2026-09-05",
+      "generated": "2026-09-23",
       "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
-        "README.md"
+        "README.md",
+        "docs/explanation/mirror-geometry.rst"
       ],
-      "note": "ESSOS two-loop coil set built from constants inside the example. The example calls vmex.mirror.output.plot_axisymmetric_beta_scan_summary with image_format=\"webp\", which writes this composite as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Needs the ESSOS optional dependency. Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
+      "note": "ESSOS two-loop coil set built from constants inside the example. The example calls vmex.mirror.output.plot_axisymmetric_beta_scan_summary with image_format=\"webp\", which writes this composite as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Needs the ESSOS optional dependency. Re-rendered on 2026-09-23 for the four-point scan (0, 10, 50 and 80 percent) that keeps the example under five minutes, and re-derived by a second run that reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/qi_mirror_hybrid.webp",
@@ -111,23 +95,43 @@
       ]
     },
     {
+      "path": "docs/_static/figures/readme_diagnostics_qa.webp",
+      "sha256": "9ada42344111615999772c48508a8fc7fa5cfd1cfce5c96c66b96705038920a9",
+      "bytes": 133764,
+      "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
+      "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
+      "inputs": [
+        "examples/data/input.nfp2_QA_finite_beta"
+      ],
+      "record": "docs/_static/figures/readme_diagnostics.json",
+      "generated": "2026-09-23",
+      "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "The `vmex examples/data/input.nfp2_QA_finite_beta --plot` summary panel, rendered with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple) and the DESC-normalized force panel (bootstrap <J.B> on its right axis), and downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-09-23 after <J.B> moved from the iota panel to the force panel; a second run reproduced the bytes."
+    },
+    {
       "path": "docs/_static/figures/readme_diagnostics_summary.webp",
-      "sha256": "7e87a2dc037da1e6152900ea8b68f86333b8500ab414c9be6372ac2089cc7dc7",
-      "bytes": 414012,
+      "sha256": "387923eac854ec067f9f419ab9602ad55404d112fa9e0ef848ada163f14de2f3",
+      "bytes": 172406,
       "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "inputs": [
         "examples/data/input.nfp4_QI_finite_beta"
       ],
       "record": "docs/_static/figures/readme_diagnostics.json",
-      "generated": "2026-09-03",
+      "generated": "2026-09-23",
       "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
+        "README.md",
         "docs/explanation/validation.md"
       ],
-      "note": "Regenerated from a bundled deck in 2026-09; the figure it replaced had no generator and no recorded input. The record file carries the deck hash, the solved scalars the README quotes, and the run's commit and versions."
+      "note": "Regenerated from a bundled deck in 2026-09; the figure it replaced had no generator and no recorded input. Re-rendered on 2026-09-14 as the `vmex examples/data/input.nfp4_QI_finite_beta --plot` summary panel with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple), the DESC-normalized force panel (bootstrap <J.B> on its right axis) and D_R reconstructed on the solver grid, downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars the validation page quotes, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-09-23 after <J.B> moved from the iota panel to the force panel; a second run reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/readme_equilibrium_showcase.webp",
@@ -184,7 +188,7 @@
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [],
-      "note": "The example writes its three-panel vmex_fieldline_tracing_finite_beta.png to the working directory and, outside the CI smoke run, crops the phi=0 Poincare panel pair from the same render into this file as lossless WebP, so the crop is no longer done by hand. Needs ESSOS branch rj/vmex-optimization-interfaces (uwplasma/ESSOS#58; run here at its merge commit 1b3210c). Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
+      "note": "The example writes its three-panel vmex_fieldline_tracing_finite_beta.png to the working directory and, outside the CI smoke run, crops the phi=0 Poincare panel pair from the same render into this file as lossless WebP, so the crop is no longer done by hand. Needs ESSOS >= 0.17 (uwplasma/ESSOS#58; run here at that PR's merge commit 1b3210c, before the release carried it). Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/readme_optimization.webp",
@@ -202,6 +206,25 @@
         "README.md"
       ],
       "note": "Reads input.QA_optimized / input.QH_optimized / input.QP_optimized from the working directory. Those decks are the output of examples/optimization/{QA,QH,QP}_optimization.py and are not committed, so the figure cannot be regenerated from a clean checkout alone."
+    },
+    {
+      "path": "docs/_static/figures/readme_polish_before_after.webp",
+      "sha256": "685274105cb8efaa1c72b886ef6459ebb47b33002232257553e597396f6f6b7e",
+      "bytes": 36630,
+      "generator": "examples/force_balance_polishing.py",
+      "command": "python examples/force_balance_polishing.py",
+      "inputs": [
+        "examples/data/input.shaped_tokamak_pressure_polished"
+      ],
+      "record": null,
+      "generated": "2026-09-20",
+      "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "The example solves and polishes the deck, writes the unpolished state through the same export as the polished one (both WOUT files on 129 surfaces), reads each file back and certifies it with the same independent oracle, and plots the two certificates. It writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to its output directory. Rendered on 2026-09-20 and re-derived by a second run that reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/readme_polish_summary.webp",
@@ -284,6 +307,46 @@
         "docs/index.md"
       ],
       "note": "Regenerated in 2026-09 from the committed baselines. The previously committed pixels dated from 2026-07-07 and came from a pipeline no longer in the tree; its sidecar readme_runtime_compare.json/.csv were deleted so the figure has one provenance story. Hardware is a property of benchmarks/baseline.json, not of the render."
+    },
+    {
+      "path": "docs/_static/figures/readme_single_stage_fixed_boundary.webp",
+      "sha256": "4e174c1804762892db6f09088cf02072af2c51fceace6e1b547ab86e9cc2bc9d",
+      "bytes": 81238,
+      "generator": "docs/_static/figures/sources/make_readme_single_stage_movies.py",
+      "command": "python docs/_static/figures/sources/make_readme_single_stage_movies.py --only fixed",
+      "inputs": [
+        "examples/optimization/single_stage_optimization.py",
+        "examples/data/input.minimal_seed_nfp2"
+      ],
+      "record": null,
+      "generated": "2026-09-23",
+      "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Animated WebP (13 frames, 374 x 324 px) of the accepted iterates of the fixed-boundary vacuum single-stage example: boundary wireframe and coils on fixed axes. Rendered with the example as it stands in PR #411 (single-stage/finish), which needs vmex[coils] (uwplasma/ESSOS at db9e4d1). Animated WebP plays inline in a GitHub README from a committed file. A second run reproduced the bytes."
+    },
+    {
+      "path": "docs/_static/figures/readme_single_stage_free_boundary.webp",
+      "sha256": "5baa640137f5f9c330b3a27ba2635003789aaa08f273d7f990d1d6468b0bbfe5",
+      "bytes": 58054,
+      "generator": "docs/_static/figures/sources/make_readme_single_stage_movies.py",
+      "command": "python docs/_static/figures/sources/make_readme_single_stage_movies.py --only free",
+      "inputs": [
+        "examples/optimization/single_stage_free_boundary_optimization_finite_beta.py",
+        "examples/data/input.minimal_seed_nfp2"
+      ],
+      "record": null,
+      "generated": "2026-09-23",
+      "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Animated WebP (9 frames, 374 x 324 px) of the accepted iterates of the free-boundary 0.5% beta single-stage example: each frame re-solves the free boundary in that iterate's coil field. Rendered with the example as it stands in PR #411 (single-stage/finish), which needs vmex[coils] (uwplasma/ESSOS at db9e4d1). A second run reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/readme_strong_force_comparison.webp",
