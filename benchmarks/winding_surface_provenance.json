@@ -13,6 +13,18 @@
       "target_path": "examples/optimization/QA_winding_optimization.py",
       "sha256": "0d67d7f1929a3cc1e181478d71ed2eded71dc707b4603c61bfce62204a1926fc",
       "git_blob": "91634c779346ce0510538cec79dc77a38376b766"
+    },
+    "pr301_304_generator": {
+      "path": "benchmarks/winding_surface_provenance/pr301_304_generator.py.source",
+      "target_path": "benchmarks/winding_surface_pr301_304.py",
+      "sha256": "00c2eddb141e8b78e44b8888259f36e569b9ab724839977fd1d930d990be9486",
+      "git_blob": "9ca78440446204c830cbcc89aaaabcb982a2d381"
+    },
+    "winding_pre301_example": {
+      "path": "benchmarks/winding_surface_provenance/winding_pre301_example.py.source",
+      "target_path": "examples/optimization/QA_optimization.py",
+      "sha256": "428b52c801293526971619b9586cf9408981417c9a4e48bdd57fd5b3078c714a",
+      "git_blob": "dc43e2b8211a6678feffbf50cf40bf01c054ff72"
     }
   },
   "recoveries": {
@@ -44,6 +56,11 @@
       "patch_sha256": "6816d910e87f5e084d2c50d28bf60e687b252b719784ae2e1129f836eda55e0f",
       "result_blob": "f59fe6a07bc3ccc5498860532095e85e6c944934"
     },
+    "generator_pr301_304": {
+      "recovery": "snapshot",
+      "snapshot": "pr301_304_generator",
+      "result_blob": "9ca78440446204c830cbcc89aaaabcb982a2d381"
+    },
     "example_original": {
       "recovery": "patch",
       "base_snapshot": "winding_example_base",
@@ -62,6 +79,13 @@
       "recovery": "snapshot",
       "snapshot": "winding_example_base",
       "result_blob": "91634c779346ce0510538cec79dc77a38376b766"
+    },
+    "example_pr366_ab099": {
+      "recovery": "patch",
+      "base_snapshot": "winding_example_base",
+      "patch": "benchmarks/winding_surface_provenance/pr366_ab099.diff",
+      "patch_sha256": "613ce79e16c643fdd9c4fa8b6d62f97256e29458335f69b3b75cf23e1b8e9808",
+      "result_blob": "048532f01a886bbfe524dbd5ff94ed7a77ad4404"
     },
     "example_pr367": {
       "recovery": "patch",
@@ -90,6 +114,46 @@
       "patch": "benchmarks/winding_surface_provenance/native_gcrot.diff",
       "patch_sha256": "913fde610dde7e0601f8a630167fdb0b0533a6801b78c239b9c44801dad1d842",
       "result_blob": "be4a76c1de495d2aef9d4a705faaa6d5f2c31f1c"
+    },
+    "example_pre301": {
+      "recovery": "snapshot",
+      "snapshot": "winding_pre301_example",
+      "result_blob": "dc43e2b8211a6678feffbf50cf40bf01c054ff72"
+    },
+    "example_pr301": {
+      "recovery": "patch",
+      "base_snapshot": "winding_pre301_example",
+      "patch": "benchmarks/winding_surface_provenance/example_pr301.diff",
+      "patch_sha256": "48c9aef6a8ec508165aad1fc284b98918e20bf86de0adda72bc9ed77cc1cffc0",
+      "result_blob": "41ff5099b178cfc763ca66d417387d3f624c6e55"
+    },
+    "example_pr303": {
+      "recovery": "patch",
+      "base_snapshot": "winding_pre301_example",
+      "patch": "benchmarks/winding_surface_provenance/example_pr303.diff",
+      "patch_sha256": "6270087a0cf0595140b83705c2791859e415461695c20890dfaef20b5e9fb4c0",
+      "result_blob": "0d73dfb6abf177bc90f96c7a4768036ba510e7ad"
+    },
+    "example_pr304": {
+      "recovery": "patch",
+      "base_snapshot": "winding_pre301_example",
+      "patch": "benchmarks/winding_surface_provenance/example_pr304.diff",
+      "patch_sha256": "b26d2ad721fe6b9b06e93dbfd93c0c99676e1bc55b708b5adf3feadff94c4f58",
+      "result_blob": "fb2c917dfed2fb29d7616a1e5530f0b4ae646c1b"
+    },
+    "example_returned_residual": {
+      "recovery": "patch",
+      "base_snapshot": "winding_example_base",
+      "patch": "benchmarks/winding_surface_provenance/returned_residual.diff",
+      "patch_sha256": "05abe03f5836683a270100494bad8b161ff0e673577aed16d82d047bddbab5ff",
+      "result_blob": "cb37178a7ca50b639ddc66dd73ac139e16f3af91"
+    },
+    "example_fused_geometry": {
+      "recovery": "patch",
+      "base_snapshot": "winding_example_base",
+      "patch": "benchmarks/winding_surface_provenance/fused_geometry.diff",
+      "patch_sha256": "feba508fdb3918ff83031f6377661822cf94fd7477ed23a0d7e36b5380520f17",
+      "result_blob": "8cc6d82173d5d299e817169e06a2fc41d76d5010"
     }
   },
   "records": {
@@ -190,6 +254,40 @@
         "full_svd_100_reference": {
           "recorded_commit": "3f53e0740f5ec0a3a0e78149a188f1f16cd125d8",
           "recovery": "example_original"
+        }
+      }
+    },
+    "benchmarks/winding_surface_pr301_304_comparison_20260923.json": {
+      "recorded_measurement_commit": "6edf6590e414de48553efb111479bfe089d5bca8",
+      "generator_recovery": "generator_pr301_304",
+      "sources": {
+        "pre_301": {
+          "recorded_commit": "913377b6c8587ee02d9a34155c5b456a4e289181",
+          "recovery": "example_pre301"
+        },
+        "pr301": {
+          "recorded_commit": "38d60046fd94af3c2e981106f1e338c3eb773c3e",
+          "recovery": "example_pr301"
+        },
+        "pr303": {
+          "recorded_commit": "8225d40fb2156774e0f659264c23dc752a053d1b",
+          "recovery": "example_pr303"
+        },
+        "pr304": {
+          "recorded_commit": "bcdcffdb1b4a4c1bddf2c3ad29dfb8abd9e7aebb",
+          "recovery": "example_pr304"
+        },
+        "pr366": {
+          "recorded_commit": "ab09983b8b61b262ac89c0024495ab31ca03c67b",
+          "recovery": "example_pr366_ab099"
+        },
+        "combined": {
+          "recorded_commit": "6edf6590e414de48553efb111479bfe089d5bca8",
+          "recovery": "example_returned_residual"
+        },
+        "fused_geometry_candidate": {
+          "recorded_commit": "f104fe4a9757db5868619fc582c2fd8a2ececf01",
+          "recovery": "example_fused_geometry"
         }
       }
     }

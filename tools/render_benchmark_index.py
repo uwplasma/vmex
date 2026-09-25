@@ -74,6 +74,8 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/adjoint_formulation_*.json", "benchmarks/adjoint_formulation.py"),
     ("benchmarks/newton_finish_arms_*.json", "benchmarks/newton_finish_arms.py"),
     ("benchmarks/winding_surface_provenance.json", ""),
+    ("benchmarks/winding_surface_pr301_304_comparison_*.json", "benchmarks/winding_surface_pr301_304.py"),
+    ("benchmarks/winding_surface_pr301_304_shards/*.json", "benchmarks/winding_surface_pr301_304.py"),
     ("benchmarks/winding_surface_*.json", "benchmarks/winding_surface_optimization.py"),
     ("benchmarks/strong_force_m4.json", "benchmarks/strong_force.py"),
     ("benchmarks/strong_force_cases_m4.json", "benchmarks/make_strong_force_comparison.py"),

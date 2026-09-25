@@ -366,3 +366,167 @@ This combination is now the code in PR #366.  It is objective-agnostic: the inne
 objective, its normalization, and all returned observables receive the corrected
 total derivative, while the speedups arise from symmetry and adjoint structure
 rather than special-casing the current inverse-distance outer residual.
+
+## Comparison with PRs #301, #303, and #304
+
+The follow-up review covers [PR #301](https://github.com/uwplasma/vmex/pull/301),
+[PR #303](https://github.com/uwplasma/vmex/pull/303), and
+[PR #304](https://github.com/uwplasma/vmex/pull/304).  Raw samples are in
+[`winding_surface_pr301_304_comparison_20260923.json`](winding_surface_pr301_304_comparison_20260923.json),
+the five independently completed inputs are retained under
+[`winding_surface_pr301_304_shards/`](winding_surface_pr301_304_shards/), and
+[`winding_surface_pr301_304.py`](winding_surface_pr301_304.py) regenerates the
+comparison and figures.  The merged record stores and verifies the SHA-256 of
+every shard.  The provenance manifest also retains the exact historical source
+blobs and benchmark generator, so the comparison is reconstructible without
+access to the old branches.
+
+### Relationship between the methods
+
+These three PRs are a chronological stack rather than independent alternatives.
+The selected Fourier-geometry source has the same SHA-256 in #301, #303, and
+#304, confirming that the later two build on #301 rather than replacing it.
+
+| revision | new method at that stage | relationship to PR #366 | scope difference |
+| --- | --- | --- | --- |
+| #301 | replace scalar Fourier-mode loops with vectorized contractions | same core contraction approach | #366 has its current equivalent integrated with the newer objective and active-mode path |
+| #303 | cache `jax.linearize` and solve the original optimality-Jacobian system with GCROT | same direct-system Krylov approach | #366 adds an explicit true-residual certificate, transpose support, and the current reverse-adjoint wiring |
+| #304 | split the NFP=2 induction spectrum into `A+B` and `A-B` sectors | same field-period symmetry principle | #304 first builds the full induction matrix and only handles NFP=2; #366 assembles one block row and applies a block DFT for arbitrary NFP |
+| #366 | integrate generalized contractions, certified GCROT, one-block periodic spectra, pairwise reductions, and a reverse adjoint | superset/generalization of the stack | retains the current objective, active modes, bounds, and `maxiter=100` solve |
+
+The historical examples also differ in objectives, bounds, active modes, and
+optimizer wiring.  Timing their branch heads directly would therefore confound
+algorithm and application changes.  The nested benchmark instead ports each
+reviewed method into the same PR-#366 scaffold; only the geometry, spectral, and
+root-linear-solve methods vary.  All arms use 25 active DOFs, identical L-BFGS-B
+bounds and tolerances, and `maxiter=100`.
+
+### Isolated runtime and resolution sweep
+
+![Isolated methods from PRs #301, #304, and #366](winding_surface_pr301_304_comparison_20260923_methods.svg)
+
+For geometry, the table reports geometric-mean speedup over the pre-#301 scalar
+loops across nominal, close-clearance, and shaped cases.  The vectorized methods
+are not uniformly faster for value-only calls at the smaller grids, but their
+gradient and HVP gains persist at every tested resolution and generally grow at
+24×24.  Thus the useful derivative speedup is resolution-robust, while its
+magnitude is demonstrably resolution-dependent.
+
+| resolution | #301 value | #301 gradient | #301 HVP | #366 value | #366 gradient | #366 HVP |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8×8 | 0.99× | 4.37× | 3.50× | 1.38× | 4.85× | 4.36× |
+| 12×12 | 0.90× | 2.71× | 3.48× | 0.80× | 1.77× | 3.24× |
+| 16×16 | 0.77× | 3.87× | 3.80× | 0.84× | 3.21× | 3.91× |
+| 24×24 | 1.83× | 3.99× | 7.61× | 2.02× | 10.28× | 12.02× |
+
+For spectral entropy, speedup is relative to the unreduced full-matrix SVD used
+by #301 and #303.  #304 establishes that sector decomposition is valuable, but
+its gradient is 12% slower at 16×16.  PR #366's one-block-row implementation is
+faster for gradients and HVPs at every resolution and avoids #304's NFP=2 and
+full-matrix restrictions.
+
+| resolution | #304 value | #304 gradient | #304 HVP | #366 value | #366 gradient | #366 HVP |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8×8 | 1.21× | 1.91× | 2.46× | 1.13× | 2.28× | 3.50× |
+| 12×12 | 1.63× | 1.14× | 2.23× | 1.73× | 1.72× | 2.96× |
+| 16×16 | 1.61× | 0.88× | 1.62× | 1.82× | 1.70× | 1.99× |
+| 24×24 | 2.19× | 1.52× | 1.41× | 1.79× | 2.60× | 2.19× |
+
+![Standalone value and derivative fidelity](winding_surface_pr301_304_comparison_20260923_fidelity.svg)
+
+All optimized standalone methods preserve value, gradient, and second-order
+fidelity against direct references.  Maxima below cover every case and all four
+resolutions.
+
+| implementation | value absolute error | gradient relative L2 | HVP relative L2 |
+| --- | ---: | ---: | ---: |
+| #301 geometry contraction | 7.22e-16 | 6.20e-16 | 6.04e-16 |
+| #366 geometry contraction | 7.22e-16 | 6.20e-16 | 6.04e-16 |
+| fused geometry prototype | 1.11e-15 | 7.65e-16 | 6.05e-16 |
+| #304 full-matrix sectors | 1.11e-16 | 6.93e-15 | 1.67e-12 |
+| #366 one-block sectors | 8.33e-17 | 7.05e-15 | 1.67e-12 |
+
+### Linear-solve accuracy and the compatible addition
+
+![Direct linear-solve runtime and fidelity](winding_surface_pr301_304_comparison_20260923_linear.svg)
+
+The 25×25 linear tests include a moderate SPD system, an SPD system with
+condition number `1e6`, and an indefinite system.  The older normal-equations CG
+can appear fast but is not accuracy-matched: its worst relative residual is
+`2.56e-1` and its worst solution error is `8.68e-1`.  All direct GCROT variants
+remain below `9e-12` in residual, solution, and transpose-response error.
+
+| method | moderate SPD (ms) | ill-conditioned SPD (ms) | indefinite (ms) | worst residual | worst solution error | worst VJP error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| normal-equations CG | 0.046 | 0.124 | 0.063 | 2.56e-1 | 8.68e-1 | 6.26e-6 |
+| #303 GCROT | 0.249 | 0.204 | 0.249 | 8.98e-12 | 8.72e-12 | 7.82e-12 |
+| #366 explicit certificate | 0.314 | 0.226 | 0.219 | 8.98e-12 | 8.72e-12 | 7.82e-12 |
+| returned-residual certificate | 0.262 | 0.229 | 0.185 | 8.98e-12 | 8.72e-12 | 7.82e-12 |
+
+PR #303 trusts GCROT's convergence result, whereas #366 independently applies
+the Hessian once more to certify the final residual.  Solvax already recomputes
+and returns that true residual norm after GCROT terminates.  The selected
+combination therefore keeps #366's numerical inequality and failure behavior but
+uses `result.residual_norm`, eliminating the redundant Hessian application.  A
+regression test supplies a false convergence flag with a failing returned
+residual and confirms that the solve still returns NaNs.
+
+### End-to-end optimization context
+
+![Controlled PR methods inside the nested optimization](winding_surface_pr301_304_comparison_20260923_context.svg)
+
+Warm mixed-objective gradient medians are shown below.  Entropy-only and
+inverse-distance-only gradients were measured separately as well, so no
+conclusion depends on `1/minimum_distance` being the only future outer
+objective.
+
+| case | resolution | dense reference (ms) | #301 port (ms) | #303 port (ms) | #304 port (ms) | #366 (ms) | combined (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| nominal | 12×12 | 1,302.98 | 7,002.78 | 871.34 | 905.22 | 461.21 | 442.02 |
+| nominal | 16×16 | 2,647.95 | 27,589.43 | 1,980.98 | 1,389.33 | 1,187.06 | 1,209.20 |
+| shaped | 12×12 | 996.43 | 9,613.43 | 1,108.73 | 957.05 | 618.04 | 587.25 |
+| shaped | 16×16 | 3,215.34 | 36,522.86 | 2,902.73 | 2,489.93 | 1,751.71 | 1,770.31 |
+
+Across the four cases, geometric-mean mixed-gradient gains are 10.51× from #301
+to #303, 1.17× from #303 to #304, and 1.50× from #304 to #366.  The #366 gain
+over #304 occurs in every case (`1.17×`–`1.96×`).  The returned-residual change
+is warm-runtime neutral: its geometric-mean gain is only 1.016× and the case
+range is `0.982×`–`1.052×`.  It does, however, reduce compile-plus-first-call
+time in all four cases (`1.022×`–`1.646×`, 1.247× geometric mean).  The report
+therefore claims a consistent graph/compile improvement, not a meaningful warm
+speedup.
+
+Every arm reaches the `1e-6` stationarity requirement.  Accuracy against the
+independent dense implicit reference is:
+
+| implementation | max observable absolute error | entropy gradient relative L2 | inverse-distance gradient relative L2 | mixed gradient relative L2 |
+| --- | ---: | ---: | ---: | ---: |
+| #301 port | 0 | 7.62e-5 | 1.61e-3 | 8.64e-4 |
+| #303 port | 0 | 9.98e-9 | 7.34e-8 | 5.60e-8 |
+| #304 port | 4.59e-10 | 1.00e-8 | 7.34e-8 | 5.57e-8 |
+| #366 | 3.62e-10 | 1.03e-8 | 7.57e-8 | 5.81e-8 |
+| combined | 3.62e-10 | 1.03e-8 | 7.57e-8 | 5.81e-8 |
+
+The combined and #366 values and gradients are bit-for-bit identical in this
+test.  Five-point directional finite differences provide a second, optimizer-
+level derivative check.  At step `3e-4`, maximum relative errors over both
+geometries, both resolutions, and two directions are `2.81e-3` for entropy,
+`2.93e-3` for inverse distance, and `2.13e-3` for their mixture.  The smaller
+`1e-4` step reaches the inner solver's tolerance floor, as expected.
+
+### Combination decision
+
+The best combination is the existing PR-#366 architecture plus reuse of GCROT's
+returned true-residual certificate.  Directly cherry-picking #301 or #303 would
+duplicate methods already present.  Directly cherry-picking #304 would regress
+the spectrum path to a full-matrix, NFP=2-only implementation.  A fused Fourier
+geometry prototype was also evaluated: it remained accurate and sometimes
+improved derivative timing, but did not consistently beat #366 across cases and
+resolutions, so it is retained only as a benchmark arm rather than production
+code.
+
+This decision preserves the broadly useful improvements: vectorized geometry,
+field-period spectral and pairwise reductions, and a reverse implicit adjoint.
+None is specialized to the present inverse-distance outer objective.  The one
+new production change removes redundant work without changing the solve,
+certificate threshold, or any returned derivative.

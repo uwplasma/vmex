@@ -90,25 +90,6 @@ COLORS = {
     "full_svd_dense_reference": "#111827",
 }
 
-DISPLAY_LABELS = {
-    "pre_301_loops": "Pre-#301 loops",
-    "pr301_contraction": "#301 contraction",
-    "pr366_contraction": "#366 contraction",
-    "fused_geometry_candidate": "Fused candidate",
-    "pr301_pr303_full_svd": "#301/#303 full SVD",
-    "pr304_full_matrix_sectors": "#304 full-matrix sectors",
-    "pr366_one_block_sectors": "#366 one-block sectors",
-    "normal_cg": "Normal-equation CG",
-    "pr303_gcrot": "#303 GCROT",
-    "pr366_explicit_certificate": "#366 explicit certificate",
-    "returned_residual_certificate": "Returned-residual certificate",
-    "pr301_port": "#301 port",
-    "pr303_port": "#303 port",
-    "pr304_port": "#304 port",
-    "pr366": "#366",
-    "combined": "Combined",
-}
-
 
 def _git(*args: str) -> str:
     return subprocess.run(
@@ -710,10 +691,7 @@ def _line_panel(axis, rows: list[dict], labels: list[str], metric: Callable,
         lower = [min(values) for values in samples]
         upper = [max(values) for values in samples]
         color = COLORS[label]
-        axis.plot(
-            x_values, center, "o-", label=DISPLAY_LABELS.get(label, label),
-            color=color,
-        )
+        axis.plot(x_values, center, "o-", label=label, color=color)
         axis.fill_between(x_values, lower, upper, alpha=0.13, color=color)
     axis.set_title(title)
     axis.set_xlabel("toroidal = poloidal resolution")
@@ -783,7 +761,7 @@ def plot_linear(record: dict, path: Path) -> None:
     rows = record["linear_solve"]
     labels = list(dict.fromkeys(row["variant"] for row in rows))
     cases = list(dict.fromkeys(row["case"] for row in rows))
-    fig, axes = plt.subplots(1, 3, figsize=(14.5, 5.0))
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.5), constrained_layout=True)
     x = np.arange(len(cases))
     width = 0.19
     for index, label in enumerate(labels):
@@ -792,7 +770,7 @@ def plot_linear(record: dict, path: Path) -> None:
         axes[0].bar(
             x + (index - 1.5) * width,
             [selected[case]["timing"]["solve"]["median_ms"] for case in cases],
-            width, label=DISPLAY_LABELS.get(label, label), color=COLORS[label])
+            width, label=label, color=COLORS[label])
         axes[1].bar(
             x + (index - 1.5) * width,
             [max(selected[case]["fidelity"]["relative_residual"],
@@ -812,13 +790,7 @@ def plot_linear(record: dict, path: Path) -> None:
         axis.set_ylabel(ylabel)
         axis.set_yscale("log")
         axis.grid(axis="y", alpha=0.25)
-    handles, legend_labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles, legend_labels, loc="upper center", ncol=4,
-        bbox_to_anchor=(0.5, 0.925),
-    )
-    fig.suptitle("Direct linear-solve method comparison", y=0.995)
-    fig.subplots_adjust(top=0.76, bottom=0.16, wspace=0.30)
+    fig.legend(loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.08))
     fig.savefig(path, format="svg", bbox_inches="tight")
     plt.close(fig)
 

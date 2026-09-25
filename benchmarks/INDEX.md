@@ -6,8 +6,8 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-98 committed artifacts: 44 standalone records and 1 grouped directory holding
-54 files. 42 of the 45 entries below are cited by a page, a test or another
+104 committed artifacts: 50 standalone records and 1 grouped directory holding
+54 files. 48 of the 51 entries below are cited by a page, a test or another
 script; 3 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -57,12 +57,18 @@ hand rather than by a script in this tree.
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_m4.json` | `benchmarks/strong_force.py` | `9481f64a` |  | `docs/reference/performance.rst` |
 | `benchmarks/strong_root_m4.json` | `benchmarks/strong_root.py` | `0d98b9d8` |  | `docs/explanation/high-order-force-balance.rst` |
-| `benchmarks/winding_surface_before_next_20260918.json` | `benchmarks/winding_surface_optimization.py` | `3b5058fa` | 2026-09-18 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json` |
+| `benchmarks/winding_surface_before_next_20260918.json` | `benchmarks/winding_surface_optimization.py` | `3b5058fa` | 2026-09-18 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json`, `tests/test_winding_optimization.py` |
 | `benchmarks/winding_surface_optimization.md` |  |  |  | `examples/optimization/QA_winding_optimization.py` |
-| `benchmarks/winding_surface_pr367_candidates_20260922.json` | `benchmarks/winding_surface_optimization.py` | `746d6c0a` | 2026-09-22 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json` |
-| `benchmarks/winding_surface_pr367_comparison_20260922.json` | `benchmarks/winding_surface_optimization.py` | `92187d5e` | 2026-09-22 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json` |
+| `benchmarks/winding_surface_pr301_304_comparison_20260923.json` | `benchmarks/winding_surface_pr301_304.py` | `6edf6590` | 2026-09-23 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json`, `tests/test_winding_optimization.py` |
+| `benchmarks/winding_surface_pr301_304_shards/context_nominal_12.json` | `benchmarks/winding_surface_pr301_304.py` | `6edf6590` | 2026-09-23 | `benchmarks/winding_surface_pr301_304_comparison_20260923.json` |
+| `benchmarks/winding_surface_pr301_304_shards/context_nominal_16.json` | `benchmarks/winding_surface_pr301_304.py` | `6edf6590` | 2026-09-23 | `benchmarks/winding_surface_pr301_304_comparison_20260923.json` |
+| `benchmarks/winding_surface_pr301_304_shards/context_shaped_12.json` | `benchmarks/winding_surface_pr301_304.py` | `6edf6590` | 2026-09-23 | `benchmarks/winding_surface_pr301_304_comparison_20260923.json` |
+| `benchmarks/winding_surface_pr301_304_shards/context_shaped_16.json` | `benchmarks/winding_surface_pr301_304.py` | `6edf6590` | 2026-09-23 | `benchmarks/winding_surface_pr301_304_comparison_20260923.json` |
+| `benchmarks/winding_surface_pr301_304_shards/standalone.json` | `benchmarks/winding_surface_pr301_304.py` | `6edf6590` | 2026-09-23 | `benchmarks/winding_surface_pr301_304_comparison_20260923.json` |
+| `benchmarks/winding_surface_pr367_candidates_20260922.json` | `benchmarks/winding_surface_optimization.py` | `746d6c0a` | 2026-09-22 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json`, `tests/test_winding_optimization.py` |
+| `benchmarks/winding_surface_pr367_comparison_20260922.json` | `benchmarks/winding_surface_optimization.py` | `92187d5e` | 2026-09-22 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json`, `tests/test_winding_optimization.py` |
 | `benchmarks/winding_surface_provenance.json` |  |  |  | `benchmarks/winding_surface_optimization.md`, `tests/test_winding_optimization.py` |
-| `benchmarks/winding_surface_three_way_20260918.json` | `benchmarks/winding_surface_optimization.py` | `ebbae340` | 2026-09-18 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json` |
+| `benchmarks/winding_surface_three_way_20260918.json` | `benchmarks/winding_surface_optimization.py` | `ebbae340` | 2026-09-18 | `benchmarks/winding_surface_optimization.md`, `benchmarks/winding_surface_provenance.json`, `tests/test_winding_optimization.py` |
 
 ## Grouped directories
 

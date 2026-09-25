@@ -311,6 +311,29 @@ def test_winding_benchmark_svgs_are_valid_xml():
         ET.parse(path)
 
 
+def test_winding_benchmark_shards_are_integrity_checked():
+    """Merged records retain every independently measured input verbatim."""
+    records = sorted((REPO / "benchmarks").glob("winding_surface_*.json"))
+    checked = 0
+    for path in records:
+        record = json.loads(path.read_text())
+        provenance = record.get("_provenance", {})
+        for shard_spec in provenance.get("shards", []):
+            shard_path = REPO / shard_spec["path"]
+            shard_bytes = shard_path.read_bytes()
+            assert hashlib.sha256(shard_bytes).hexdigest() == shard_spec["sha256"]
+            shard = json.loads(shard_bytes)
+            assert shard["_provenance"]["measurement_commit"] == provenance[
+                "measurement_commit"
+            ]
+            assert shard["_provenance"]["source_commits"] == provenance[
+                "source_commits"
+            ]
+            assert shard["_provenance"]["command"] == shard_spec["command"]
+            checked += 1
+    assert checked
+
+
 @pytest.mark.parametrize("matrix", [
     [[3.0, 1.0], [1.0, -2.0]],
     [[3.0, 2.0], [-1.0, 4.0]],
