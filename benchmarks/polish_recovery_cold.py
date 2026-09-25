@@ -59,6 +59,11 @@ QUINTIC_SCHEDULE: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
+# A two-batch variant (22 then 26 knots) was measured and rejected: coarser
+# adaptivity ended at epsilon_B 1.32e-5 on the same basis size, no faster
+# (artifacts/r7/cold-q5fast).
+SCHEDULES = {"quintic": QUINTIC_SCHEDULE}
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -119,10 +124,11 @@ def main() -> None:
     wout = wout_dir / "wout_shaped_tokamak_pressure.nc"
     run("p0_ordinary", [str(Path(python).with_name("vmex")), str(INPUT), "--outdir", str(wout_dir)], [wout])
     state = prefix / "lift_state.npz"
-    degree = "5" if args.schedule == "quintic" else "3"
+    degree = "3" if args.schedule == "cubic" else "5"
+    lift_extra = [] if args.schedule == "cubic" else ["--skip-certificate"]
     run(
         "lift_p3",
-        [python, "benchmarks/polish_recovery_p3.py", "--wout", str(wout), "--max-steps", "4", "--degree", degree,
+        [python, "benchmarks/polish_recovery_p3.py", "--wout", str(wout), "--max-steps", "4", "--degree", degree, *lift_extra,
          "--output-json", str(prefix / "lift.json"), "--output-state", str(state)],
         [state],
     )
@@ -141,7 +147,7 @@ def main() -> None:
         )
         state = output
     sparse_common = ("--stable-derivatives", "--linearization", "local-normal", "--linear-solver", "normal")
-    for label, extra in SPARSE_SCHEDULE if args.schedule == "cubic" else QUINTIC_SCHEDULE:
+    for label, extra in SPARSE_SCHEDULE if args.schedule == "cubic" else SCHEDULES[args.schedule]:
         output = prefix / f"{label}_state.npz"
         run(
             label,

@@ -259,6 +259,11 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int, default=4)
     parser.add_argument("--degree", type=int, default=3, help="native radial spline degree of the lift")
     parser.add_argument("--max-spans", type=int, default=32)
+    parser.add_argument(
+        "--skip-certificate",
+        action="store_true",
+        help="continuation lift: record no independent force (the final stage certifies)",
+    )
     parser.add_argument("--dense-memory-gib", type=float, default=2.0)
     args = parser.parse_args()
     if args.max_steps < 1 or args.dense_memory_gib <= 0.0:
@@ -384,7 +389,7 @@ def main() -> None:
         layout.unpack(coordinate_scale * coordinates),
     )
     certificate_started = time.perf_counter()
-    certificate = certify_strong_force(accepted_state)
+    certificate = None if args.skip_certificate else certify_strong_force(accepted_state)
     certificate_seconds = time.perf_counter() - certificate_started
     final_projected, final_gradient, final_projected_relative = _final_projected_gradient(
         force_residual, coordinates, nullspace
@@ -440,10 +445,16 @@ def main() -> None:
             "final_projected_gradient_norm": final_projected,
             "final_full_gradient_norm": final_gradient,
             "final_projected_gradient_relative_to_full": final_projected_relative,
-            "independent_force_rms_N_per_m3": float(certificate.absolute_l2),
-            "independent_epsilon_B": float(certificate.absolute_l2 / force_scale),
-            "independent_radial_refinement_difference": float(certificate.radial_refinement_difference),
-            "minimum_signed_jacobian": float(certificate.minimum_signed_jacobian),
+            "independent_force_rms_N_per_m3": None if certificate is None else float(certificate.absolute_l2),
+            "independent_epsilon_B": None if certificate is None else float(certificate.absolute_l2 / force_scale),
+            "independent_radial_refinement_difference": (
+                None if certificate is None else float(certificate.radial_refinement_difference)
+            ),
+            "minimum_signed_jacobian": (
+                float(minimum_signed_jacobian(accepted_state, plan))
+                if certificate is None
+                else float(certificate.minimum_signed_jacobian)
+            ),
         },
         "work": {
             "explicit_jacobian_shape": [force_rows, layout.size],
