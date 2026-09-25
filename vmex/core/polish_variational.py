@@ -9,7 +9,7 @@ The strong-force oracle remains independent in :mod:`vmex.core.strong_force`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -25,19 +25,6 @@ from .polish import (
 from .strong_force import HighOrderEquilibriumState, StrongForceSamples
 
 Array = Any
-
-
-@dataclass(frozen=True)
-class NativeForceSparsity:
-    """Host-side sparse support and a collision-free column partition.
-
-    ``pattern`` is a SciPy CSR matrix.  It is deliberately kept outside JAX
-    pytrees: this object describes the fixed spline/mode topology used to
-    recover a linearized force matrix from compressed products.
-    """
-
-    pattern: Any
-    column_groups: tuple[np.ndarray, ...]
 
 
 _STABLE_TABLES = (
@@ -514,70 +501,6 @@ def native_tangential_gauge_matrix(
     return matrix
 
 
-def native_force_jacobian_sparsity(
-    layout: NativeCorrectionLayout,
-    variational: VariationalPlan,
-) -> NativeForceSparsity:
-    """Return conservative radial support for the native force Jacobian.
-
-    The point-local force algebra can couple every retained field/Fourier mode
-    at a fixed radial point, but values and their first/second derivatives only
-    depend on the compact support of the corresponding radial B-spline.  The
-    residual is flattened in ``(rho, theta, zeta, Cartesian component)`` order.
-
-    Columns are colored by ``(field, mode, basis_index mod (degree + 1))``.
-    B-splines in one such group have disjoint support at the open span
-    quadrature nodes.  The returned partition is checked against the actual
-    structural pattern rather than trusted from the formula alone.
-    """
-
-    try:
-        from scipy import sparse
-    except ImportError as error:  # pragma: no cover - SciPy is a VMEX dependency
-        raise ImportError("native sparse force recovery requires SciPy") from error
-
-    active = np.asarray(layout.active_indices, dtype=np.int64)
-    block = int(layout.mnmax) * int(layout.nbasis)
-    full_size = 6 * block
-    if active.ndim != 1 or np.unique(active).size != active.size or np.any(active < 0) or np.any(active >= full_size):
-        raise ValueError("native active indices are not a valid packed layout")
-    radial_index = active % int(layout.nbasis)
-    support = (
-        (np.asarray(variational.radial_value) != 0.0)
-        | (np.asarray(variational.radial_derivative) != 0.0)
-        | (np.asarray(variational.radial_second_derivative) != 0.0)
-    )
-    # All retained modes use the same knot vector.  Taking the union protects
-    # the axis-power special cases without inferring zeros from a state value.
-    radial_support = np.any(support, axis=0)[:, radial_index]
-    if np.any(~np.any(radial_support, axis=0)):
-        raise ValueError("native force pattern contains an unsupported coordinate")
-    angular_components = int(variational.theta.size) * int(variational.zeta.size) * 3
-    pattern = sparse.kron(
-        sparse.csr_matrix(radial_support.astype(np.int8)),
-        sparse.csr_matrix(np.ones((angular_components, 1), dtype=np.int8)),
-        format="csr",
-    )
-    field_mode = active // int(layout.nbasis)
-    # The first quadrature point can see fewer functions only for a malformed
-    # plan; infer degree robustly from maximum simultaneous radial support.
-    degree = int(np.max(np.sum(np.any(support, axis=0), axis=1))) - 1
-    if degree < 1:
-        raise ValueError("native force pattern could not infer spline support width")
-    color = field_mode * (degree + 1) + radial_index % (degree + 1)
-    groups: list[np.ndarray] = []
-    csc = pattern.tocsc()
-    for value in np.unique(color):
-        columns = np.flatnonzero(color == value).astype(np.int32)
-        touched = np.concatenate([csc.indices[csc.indptr[j] : csc.indptr[j + 1]] for j in columns])
-        if np.unique(touched).size != touched.size:
-            raise ValueError("native analytic force coloring has a row collision")
-        groups.append(columns)
-    if not np.array_equal(np.sort(np.concatenate(groups)), np.arange(layout.size)):
-        raise ValueError("native force colors do not partition packed coordinates")
-    return NativeForceSparsity(pattern=pattern, column_groups=tuple(groups))
-
-
 def _stable_radial_tables(radial_basis, s: np.ndarray, rho: np.ndarray, m: np.ndarray) -> dict:
     """Return coefficient-first derivative tables for ``rho**m q(rho**2)``.
 
@@ -773,39 +696,6 @@ def evaluate_variational_fields(
 
 
 @jax.jit
-def evaluate_fixed_label_displacement(
-    state: HighOrderEquilibriumState,
-    direction: Any,
-    plan: VariationalPlan,
-) -> Array:
-    """Map a native coefficient variation to its physical displacement.
-
-    The straight-field-line label is held fixed, so a lambda variation also
-    induces the tangential subtraction in equation (5) of the recovery plan.
-    ``direction`` must provide the six geometry/lambda coefficient tables of
-    :class:`vmex.core.polish.HighOrderCorrection`.
-    """
-
-    delta_R, _, _, _ = _channel(direction.R_cos, direction.R_sin, plan)
-    delta_Z, _, _, _ = _channel(direction.Z_cos, direction.Z_sin, plan)
-    delta_lambda, _, _, _ = _channel(direction.L_cos, direction.L_sin, plan)
-    _, _, lambda_theta, _ = _channel(state.L_cos, state.L_sin, plan)
-    fields = evaluate_variational_fields(state, plan)
-    _, zz = jnp.meshgrid(plan.theta, plan.zeta, indexing="ij")
-    phi = zz.reshape(-1) / float(plan.nfp)
-    coordinate_variation = jnp.stack(
-        (
-            delta_R * jnp.cos(phi)[None],
-            delta_R * jnp.sin(phi)[None],
-            delta_Z,
-        ),
-        axis=-1,
-    ).reshape(fields.position.shape)
-    relabeling = (delta_lambda / (1.0 + lambda_theta)).reshape(plan.shape)
-    return coordinate_variation - (fields.dposition_dtheta * relabeling[..., None])
-
-
-@jax.jit
 def native_tangential_gauge_residual(
     state: HighOrderEquilibriumState,
     direction: Any,
@@ -843,48 +733,6 @@ def native_tangential_gauge_residual(
         jnp.asarray(gauge.row_modes),
         jnp.asarray(gauge.row_basis),
     ] * jnp.asarray(gauge.row_scale)
-
-
-@jax.jit
-def native_variational_kkt_residual(
-    variables: Array,
-    base_state: HighOrderEquilibriumState,
-    layout: NativeCorrectionLayout,
-    gauge: NativeGaugePlan,
-    energy_scale: Array,
-    coordinate_scale: Array,
-) -> Array:
-    """Return the bordered fixed-pressure stationarity/gauge equations.
-
-    ``variables`` concatenates every native structural coordinate with one
-    multiplier per normalized-tangent constraint.  This formulation removes
-    the coordinate gauge without freezing Z, adding a penalty to the physical
-    energy, or constructing a dense nullspace basis.
-    """
-
-    variables = jnp.asarray(variables)
-    expected = layout.size + gauge.size
-    if variables.shape != (expected,):
-        raise ValueError(f"KKT variables have shape {variables.shape}; expected {(expected,)}")
-    coordinates = variables[: layout.size]
-    multipliers = variables[layout.size :]
-    coordinate_scale = jnp.asarray(coordinate_scale)
-    if coordinate_scale.shape != (layout.size,):
-        raise ValueError(f"coordinate_scale has shape {coordinate_scale.shape}; expected {(layout.size,)}")
-
-    def corrected_state(value):
-        return apply_high_order_correction(base_state, layout.unpack(coordinate_scale * value))
-
-    def energy(value):
-        return fixed_pressure_energy(corrected_state(value), gauge.variational, energy_scale)
-
-    def constraints(value):
-        return native_tangential_gauge_residual(base_state, layout.unpack(coordinate_scale * value), gauge)
-
-    gradient = jax.grad(energy)(coordinates)
-    constraint, pullback = jax.vjp(constraints, coordinates)
-    stationarity = gradient + pullback(multipliers)[0]
-    return jnp.concatenate((stationarity, constraint))
 
 
 @jax.jit
@@ -929,234 +777,6 @@ def native_physical_force_residual(
     volume_scale = jnp.asarray(volume_scale)
     normalized_weight = jnp.sqrt(volume_weights / volume_scale)
     return (normalized_weight[..., None] * samples.force / scale).reshape(-1)
-
-
-@jax.jit
-def native_force_kkt_residual(
-    variables: Array,
-    base_state: HighOrderEquilibriumState,
-    layout: NativeCorrectionLayout,
-    gauge: NativeGaugePlan,
-    coordinate_scale: Array,
-    force_scale: Array,
-    volume_scale: Array,
-) -> Array:
-    """Return exact constrained least-squares stationarity for candidate B."""
-
-    variables = jnp.asarray(variables)
-    expected = layout.size + gauge.size
-    if variables.shape != (expected,):
-        raise ValueError(f"force KKT variables have shape {variables.shape}; expected {(expected,)}")
-    coordinates = variables[: layout.size]
-    multipliers = variables[layout.size :]
-
-    def physical(value):
-        return native_physical_force_residual(
-            value,
-            base_state,
-            layout,
-            gauge,
-            coordinate_scale,
-            force_scale,
-            volume_scale,
-        )
-
-    def constraints(value):
-        return native_tangential_gauge_residual(
-            base_state,
-            layout.unpack(jnp.asarray(coordinate_scale) * value),
-            gauge,
-        )
-
-    force, force_pullback = jax.vjp(physical, coordinates)
-    constraint, constraint_pullback = jax.vjp(constraints, coordinates)
-    stationarity = force_pullback(force)[0] + constraint_pullback(multipliers)[0]
-    return jnp.concatenate((stationarity, constraint))
-
-
-@jax.jit
-def native_force_gauss_newton_action(
-    variables: Array,
-    direction: Array,
-    base_state: HighOrderEquilibriumState,
-    layout: NativeCorrectionLayout,
-    gauge: NativeGaugePlan,
-    coordinate_scale: Array,
-    force_scale: Array,
-    volume_scale: Array,
-    damping: Array,
-) -> Array:
-    """Apply the symmetric bordered Gauss--Newton operator matrix-free.
-
-    The variable vector is ``(coordinates, multipliers)``.  The upper block
-    is ``J_force.T @ J_force + damping * I`` plus the gauge adjoint, and the
-    lower block is the native tangent constraint Jacobian.  Neither the force
-    Jacobian nor a gauge nullspace is constructed.
-    """
-
-    variables = jnp.asarray(variables)
-    direction = jnp.asarray(direction)
-    expected = layout.size + gauge.size
-    if variables.shape != (expected,) or direction.shape != (expected,):
-        raise ValueError(f"Gauss-Newton vectors must both have shape {(expected,)}")
-    coordinates = variables[: layout.size]
-    delta_coordinates = direction[: layout.size]
-    delta_multipliers = direction[layout.size :]
-
-    def physical(value):
-        return native_physical_force_residual(
-            value,
-            base_state,
-            layout,
-            gauge,
-            coordinate_scale,
-            force_scale,
-            volume_scale,
-        )
-
-    def constraints(value):
-        return native_tangential_gauge_residual(
-            base_state,
-            layout.unpack(jnp.asarray(coordinate_scale) * value),
-            gauge,
-        )
-
-    _, force_pullback = jax.vjp(physical, coordinates)
-    _, constraint_pullback = jax.vjp(constraints, coordinates)
-    force_direction = jax.jvp(physical, (coordinates,), (delta_coordinates,))[1]
-    constraint_direction = jax.jvp(constraints, (coordinates,), (delta_coordinates,))[1]
-    stationarity_direction = (
-        force_pullback(force_direction)[0]
-        + constraint_pullback(delta_multipliers)[0]
-        + jnp.asarray(damping) * delta_coordinates
-    )
-    return jnp.concatenate((stationarity_direction, constraint_direction))
-
-
-def native_force_gauss_newton_step(
-    variables: Array,
-    base_state: HighOrderEquilibriumState,
-    layout: NativeCorrectionLayout,
-    gauge: NativeGaugePlan,
-    coordinate_scale: Array,
-    force_scale: Array,
-    volume_scale: Array,
-    *,
-    damping: float = 1.0e-4,
-    tolerance: float = 1.0e-6,
-    restart: int = 40,
-    max_restarts: int = 10,
-    preconditioner: Callable[[Array], Array] | None = None,
-) -> tuple[Array, Array]:
-    """Solve one damped bordered Gauss--Newton step using matrix-free GMRES.
-
-    The returned second value is the independently recomputed relative
-    residual of the linear system.  The caller must reject inaccurate steps
-    and still perform a nonlinear line search and force certificate.
-    """
-
-    variables = jnp.asarray(variables)
-    expected = layout.size + gauge.size
-    if variables.shape != (expected,):
-        raise ValueError(f"Gauss-Newton variables have shape {variables.shape}; expected {(expected,)}")
-    if not np.isfinite(damping) or damping < 0.0:
-        raise ValueError("damping must be finite and nonnegative")
-    if not np.isfinite(tolerance) or tolerance <= 0.0:
-        raise ValueError("tolerance must be finite and positive")
-    if restart < 1 or max_restarts < 1:
-        raise ValueError("restart and max_restarts must be positive")
-
-    coordinates = variables[: layout.size]
-    multipliers = variables[layout.size :]
-
-    def physical(value):
-        return native_physical_force_residual(
-            value,
-            base_state,
-            layout,
-            gauge,
-            coordinate_scale,
-            force_scale,
-            volume_scale,
-        )
-
-    def constraints(value):
-        return native_tangential_gauge_residual(
-            base_state,
-            layout.unpack(jnp.asarray(coordinate_scale) * value),
-            gauge,
-        )
-
-    force, force_pullback = jax.vjp(physical, coordinates)
-    constraint, constraint_pullback = jax.vjp(constraints, coordinates)
-    gradient = force_pullback(force)[0] + constraint_pullback(multipliers)[0]
-    rhs = -jnp.concatenate((gradient, constraint))
-
-    def operator(direction):
-        return native_force_gauss_newton_action(
-            variables,
-            direction,
-            base_state,
-            layout,
-            gauge,
-            coordinate_scale,
-            force_scale,
-            volume_scale,
-            jnp.asarray(damping),
-        )
-
-    solution, _ = jax.scipy.sparse.linalg.gmres(
-        operator,
-        rhs,
-        tol=float(tolerance),
-        atol=0.0,
-        restart=int(restart),
-        maxiter=int(max_restarts),
-        M=preconditioner,
-    )
-    true_residual = operator(solution) - rhs
-    relative_residual = jnp.linalg.norm(true_residual) / jnp.maximum(jnp.linalg.norm(rhs), 1.0e-300)
-    return solution, relative_residual
-
-
-def native_polish_trial_is_acceptable(
-    *,
-    force_before: float,
-    force_after: float,
-    gauge_residual: float,
-    minimum_signed_jacobian: float,
-    linear_residual: float,
-    linear_tolerance: float,
-    gauge_tolerance: float = 1.0e-6,
-) -> bool:
-    """Return whether a native nonlinear trial passes every declared gate.
-
-    This host-side predicate fails closed for nonfinite measurements.  The
-    independently recomputed true linear residual is deliberately separate
-    from force descent, gauge feasibility, and sampled geometry validity.
-    """
-
-    values = np.asarray(
-        (
-            force_before,
-            force_after,
-            gauge_residual,
-            minimum_signed_jacobian,
-            linear_residual,
-            linear_tolerance,
-            gauge_tolerance,
-        ),
-        dtype=float,
-    )
-    return bool(
-        np.all(np.isfinite(values))
-        and linear_tolerance > 0.0
-        and gauge_tolerance > 0.0
-        and 0.0 <= linear_residual <= linear_tolerance
-        and 0.0 <= gauge_residual < gauge_tolerance
-        and minimum_signed_jacobian > 0.0
-        and 0.0 <= force_after < force_before
-    )
 
 
 @jax.jit
@@ -1350,25 +970,6 @@ def evaluate_tensorized_strong_force(
 
 
 @jax.jit
-def fixed_pressure_energy(
-    state: HighOrderEquilibriumState,
-    plan: VariationalPlan,
-    energy_scale: Array = 1.0,
-) -> Array:
-    """Return the dimensionless fixed-pressure functional ``W/E_ref``.
-
-    The signed Jacobian is used inside the declared fixed-sign admissible
-    domain.  Call :func:`minimum_signed_jacobian` before accepting a trial;
-    clipping or taking an absolute value here would change the variation.
-    """
-
-    fields = evaluate_variational_fields(state, plan)
-    signed_jacobian = float(plan.jacobian_sign) * fields.sqrt_g
-    density = jnp.sum(fields.B * fields.B, axis=-1) / (2.0 * MU0) - fields.pressure
-    return jnp.sum(jnp.asarray(plan.quadrature_weights) * signed_jacobian * density) / jnp.asarray(energy_scale)
-
-
-@jax.jit
 def minimum_signed_jacobian(
     state: HighOrderEquilibriumState,
     plan: VariationalPlan,
@@ -1380,25 +981,16 @@ def minimum_signed_jacobian(
 
 
 __all__ = [
-    "NativeForceSparsity",
     "VariationalFieldSamples",
     "NativeGaugePlan",
     "VariationalPlan",
-    "evaluate_fixed_label_displacement",
     "evaluate_tensorized_strong_force",
     "evaluate_variational_fields",
-    "fixed_pressure_energy",
     "make_variational_plan",
     "make_native_gauge_plan",
     "minimum_signed_jacobian",
     "native_tangential_gauge_residual",
     "native_coordinate_scales",
-    "native_force_kkt_residual",
-    "native_force_gauss_newton_action",
-    "native_force_gauss_newton_step",
-    "native_force_jacobian_sparsity",
     "native_tangential_gauge_matrix",
-    "native_polish_trial_is_acceptable",
     "native_physical_force_residual",
-    "native_variational_kkt_residual",
 ]

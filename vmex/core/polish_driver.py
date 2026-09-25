@@ -254,6 +254,15 @@ class PolishConfig:
         the combined coordinate-and-``alpha`` norm, ``arclength_step`` is an
         arclength in that same combined norm.  Steps must be nonnegative and
         the increment strictly positive.  Homotopy route only.
+    lane:
+        ``"auto"`` (default) uses the native constrained force least squares
+        of :mod:`vmex.core.polish_native` for decks inside its scope
+        (axisymmetric, fixed boundary, ``NCURR = 0``, ``GAMMA = 0``, no
+        ``LASYM``) and the collocation lane otherwise; ``"native"`` and
+        ``"collocation"`` force one.  The native lane accepts on its own
+        contract: independent volume-RMS force over the wout scale
+        ``volavgB**2 / (mu0 Aminor_p)`` at most 1e-5, and Frobenius-scaled
+        projected stationarity at most 1e-8.
     fail_policy:
         What a failed attempt does.  ``"raise"`` raises
         :class:`~vmex.core.errors.StrongForceContinuationError` (homotopy
@@ -289,6 +298,7 @@ class PolishConfig:
     max_arclength_steps: int = 16
     arclength_step: float = 1.0e-2
     fail_policy: Literal["raise", "return_unpolished"] = "raise"
+    lane: Literal["auto", "native", "collocation"] = "auto"
     auto_budget_seconds: float = _DEFAULT_AUTO_BUDGET_SECONDS
 
     def __post_init__(self) -> None:
@@ -350,6 +360,8 @@ class PolishConfig:
             raise ValueError("pseudo-arclength controls are invalid")
         if self.fail_policy not in ("raise", "return_unpolished"):
             raise ValueError("fail_policy must be 'raise' or 'return_unpolished'")
+        if self.lane not in ("auto", "native", "collocation"):
+            raise ValueError("lane must be 'auto', 'native' or 'collocation'")
         if not self.auto_budget_seconds > 0.0:
             raise ValueError("auto_budget_seconds must be positive")
 
@@ -708,12 +720,17 @@ def polished_wout_ns(
 
     Returns
     -------
-    ``max(solve_ns, 129, 2 * native.radial_basis.size + 1)`` as a Python
-    ``int``, the ``ns`` to build the export runtime with.
+    ``max(solve_ns, 129, 2 * native.radial_basis.size + 1, 4 / ds_min + 1)``
+    as a Python ``int`` (``ds_min`` the narrowest radial span), the ``ns`` to
+    build the export runtime with.
     """
 
     determined = 2 * int(native.radial_basis.size) + 1
-    return max(int(solve_ns), _POLISHED_WOUT_MIN_NS, determined)
+    # Uniform-in-s surfaces must also resolve the narrowest (adaptively
+    # inserted) span, or the samples no longer determine the native state.
+    narrowest = float(np.min(np.diff(np.asarray(native.radial_basis.breakpoints))))
+    resolving = int(np.ceil(4.0 / narrowest)) + 1
+    return max(int(solve_ns), _POLISHED_WOUT_MIN_NS, determined, resolving)
 
 
 def polished_wout_state(
@@ -754,8 +771,22 @@ def polished_wout_state(
     from .solver import prepare_runtime, resolution_from_input
 
     ns = polished_wout_ns(native, solve_ns=solve_ns)
+    source = polished_wout_input(native, source)
     runtime = prepare_runtime(source, resolution_from_input(source, ns=ns))
     return sample_high_order_state(native, runtime)
+
+
+def polished_wout_input(native: HighOrderEquilibriumState, source):
+    """The deck whose Fourier resolution carries every mode of ``native``.
+
+    The native polish may add poloidal modes beyond the solve's ``MPOL``;
+    the export then raises ``MPOL`` to hold them (a wider but ordinary wout).
+    """
+
+    mpol = int(np.max(np.abs(np.asarray(native.m)))) + 1
+    if mpol <= int(source.mpol):
+        return source
+    return source.change_resolution(mpol=mpol, ntor=int(source.ntor))
 
 
 def _corrected_state(
@@ -1410,6 +1441,77 @@ def polish_collocation_least_squares(
     )
 
 
+def _polish_native_lane(source, refined_state, legacy_runtime, config, *, verbose, emit, started):
+    """Lift to the quintic native basis and run :func:`polish_native`."""
+
+    from .polish_native import NativePolishConfig, physical_scales, polish_native
+    from .strong_force import certify_strong_force, lift_high_order_state
+
+    native_config = NativePolishConfig()
+    if verbose:
+        emit(" native polish: lifting to the quintic spline basis...")
+    lifted = lift_high_order_state(
+        refined_state, legacy_runtime, inp=source, degree=native_config.degree
+    )
+    initial = certify_strong_force(lifted)
+    force_scale, volume_scale = physical_scales(lifted)
+    result = polish_native(
+        lifted, force_scale=force_scale, volume_scale=volume_scale,
+        config=native_config, emit=emit if verbose else None,
+    )
+    final = certify_strong_force(result.state)
+    independent = float(final.absolute_l2) / force_scale
+    converged = bool(
+        result.stationarity <= native_config.stationarity_tolerance
+        and independent <= native_config.force_tolerance
+        and float(final.minimum_signed_jacobian) > 0.0
+    )
+    report = PolishReport(
+        converged=converged,
+        termination_reason="native-certified" if converged else "native-not-converged",
+        final_alpha=1.0,
+        initial_normalized_l2=float(initial.normalized_l2),
+        final_normalized_l2=float(final.normalized_l2),
+        continuation_accepted=result.charts,
+        continuation_rejected=0,
+        nonlinear_iterations=result.gauss_newton_steps + result.newton_steps,
+        linear_iterations=0,
+        residual_evaluations=0,
+        arclength_steps=0,
+        minimum_signed_jacobian=float(final.minimum_signed_jacobian),
+        factor_build_seconds=0.0,
+        solve_seconds=perf_counter() - started,
+        least_squares_cost=0.5 * result.force_norm**2,
+        least_squares_relative_optimality=result.stationarity,
+        least_squares_success=converged,
+        radial_refinement_tolerance=config.radial_refinement_tolerance,
+        **_normalization_fields(initial, final),
+    )
+    if verbose:
+        emit(f" native polish: |F|_rms / F* = {independent:.3E} (tolerance "
+             f"{native_config.force_tolerance:.1E}), eta = {result.stationarity:.3E} "
+             f"(tolerance {native_config.stationarity_tolerance:.1E}), "
+             f"{report.solve_seconds:.1f} s: {'CERTIFIED' if converged else 'FAILED'}")
+    if converged:
+        return PolishResult(result.state, final, report,
+                            jnp.zeros((0,), dtype=jnp.asarray(refined_state.R_cos).dtype),
+                            None, refined_state)
+    if config.fail_policy == "raise":
+        raise StrongForceCertificationError(
+            f"native polish did not converge: |F|/F* = {independent:.3e}, "
+            f"eta = {result.stationarity:.3e}",
+            hint="set PolishConfig(lane='collocation') or inspect the polish report",
+            solver_converged=False,
+            normalized_l2=float(final.normalized_l2),
+            tolerance=native_config.force_tolerance,
+            radial_refinement=float(final.radial_refinement_difference),
+            radial_refinement_tolerance=config.radial_refinement_tolerance,
+        )
+    return PolishResult(lifted, initial, report,
+                        jnp.zeros((0,), dtype=jnp.asarray(refined_state.R_cos).dtype),
+                        None, refined_state)
+
+
 def polish_legacy_solution(
     source,
     resolution,
@@ -1503,6 +1605,11 @@ def polish_legacy_solution(
         legacy_state,
         dof_mask,
     )
+    from .polish_native import native_polish_supported
+
+    if config.lane == "native" or (config.lane == "auto" and native_polish_supported(source)):
+        return _polish_native_lane(source, refined_state, legacy_runtime, config,
+                                   verbose=verbose, emit=emit, started=started)
     # Certification is a reconstruction problem, not a requirement to retain
     # one spline coefficient per legacy sample. Evaluate the stable,
     # overdetermined lift first; an already-certified result needs neither the
@@ -1618,6 +1725,7 @@ __all__ = [
     "polish_collocation_least_squares",
     "polish_legacy_solution",
     "polished_compatibility_state",
+    "polished_wout_input",
     "polished_wout_ns",
     "polished_wout_state",
 ]

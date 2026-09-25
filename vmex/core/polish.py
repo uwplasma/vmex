@@ -117,37 +117,6 @@ class NativeCorrectionLayout:
         return _unflatten_high(flat, self.mnmax, self.nbasis)
 
 
-def native_packed_mode_groups(
-    layout: NativeCorrectionLayout,
-) -> tuple[np.ndarray, ...]:
-    """Partition packed native coordinates by Fourier mode.
-
-    ``layout.active_indices`` addresses the flattened six-field coefficient
-    table, whereas native solver vectors contain only the packed active
-    coordinates.  This helper returns positions in that packed vector.  It is
-    a host-side setup operation and validates the layout before any indices
-    enter a traced gather/scatter.
-    """
-
-    active = np.asarray(layout.active_indices, dtype=np.int64)
-    full_size = len(_FIELDS) * int(layout.mnmax) * int(layout.nbasis)
-    if active.ndim != 1 or np.unique(active).size != active.size:
-        raise ValueError("native active indices must be unique and one-dimensional")
-    if np.any(active < 0) or np.any(active >= full_size):
-        raise ValueError("native active coefficient-table index is out of bounds")
-    block = int(layout.mnmax) * int(layout.nbasis)
-    mode_ids = (active % block) // int(layout.nbasis)
-    groups = tuple(
-        np.flatnonzero(mode_ids == mode).astype(np.int32)
-        for mode in np.unique(mode_ids)
-    )
-    if not groups or not np.array_equal(
-        np.sort(np.concatenate(groups)), np.arange(active.size)
-    ):
-        raise ValueError("native mode groups must partition packed coordinates")
-    return groups
-
-
 def make_native_correction_layout(
     native: HighOrderEquilibriumState,
     *,

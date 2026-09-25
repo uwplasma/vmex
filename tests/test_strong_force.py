@@ -22,27 +22,18 @@ from vmex.core.omnigenity import boozer_spectrum_high_order
 from vmex.core.profiles import MU0
 from vmex.core.profiles import iota as input_iota, pressure as input_pressure
 from vmex.core.polish_variational import (
-    evaluate_fixed_label_displacement,
     evaluate_tensorized_strong_force,
     evaluate_variational_fields,
-    fixed_pressure_energy,
     make_native_gauge_plan,
     make_variational_plan,
     minimum_signed_jacobian,
-    native_force_gauss_newton_action,
-    native_force_gauss_newton_step,
-    native_force_jacobian_sparsity,
     native_tangential_gauge_matrix,
-    native_polish_trial_is_acceptable,
     native_physical_force_residual,
     native_tangential_gauge_residual,
     native_coordinate_scales,
-    native_variational_kkt_residual,
 )
 from vmex.core.polish import (
-    HighOrderCorrection,
     make_native_correction_layout,
-    native_packed_mode_groups,
 )
 from vmex.core.radial_basis import BSplineBasis
 from vmex.core.solver import _initial_state, prepare_runtime, resolution_from_input
@@ -814,300 +805,6 @@ def test_tensorized_variational_fields_match_independent_point_oracle():
     assert float(minimum_signed_jacobian(state, plan)) > 0.0
 
 
-def test_fixed_pressure_energy_matches_circular_torus_and_derivative():
-    """The gamma-zero sign, full-torus measure, and AD gradient are correct."""
-
-    state = _constant_toroidal_field_state(degree=3)
-    plan = make_variational_plan(state, radial_order=5, ntheta=17, nzeta=3)
-    volume = 2.0 * np.pi**2 * 10.0
-    np.testing.assert_allclose(
-        fixed_pressure_energy(state, plan),
-        volume / (2.0 * MU0),
-        rtol=2e-13,
-        atol=2e-8,
-    )
-    pressure = 1.25e4
-    finite_pressure = replace(state, pressure=jnp.full_like(state.pressure, pressure))
-    np.testing.assert_allclose(
-        fixed_pressure_energy(finite_pressure, plan),
-        volume * (1.0 / (2.0 * MU0) - pressure),
-        rtol=2e-13,
-        atol=2e-8,
-    )
-    three_periods = replace(state, nfp=3)
-    np.testing.assert_allclose(
-        fixed_pressure_energy(
-            three_periods,
-            make_variational_plan(three_periods, radial_order=5, ntheta=17, nzeta=3),
-        ),
-        volume / (2.0 * MU0),
-        rtol=2e-13,
-        atol=2e-8,
-    )
-
-    direction = jnp.zeros_like(state.R_cos).at[0, 1].set(1.0)
-
-    def energy(step):
-        return fixed_pressure_energy(replace(state, R_cos=state.R_cos + step * direction), plan)
-
-    derivative = jax.grad(energy)(0.0)
-    step = 1.0e-5
-    finite_difference = (energy(step) - energy(-step)) / (2.0 * step)
-    np.testing.assert_allclose(derivative, finite_difference, rtol=2e-8, atol=2e-5)
-
-
-def test_variational_hessian_action_is_symmetric():
-    """Two AD Hessian actions satisfy the fixed-iota symmetry contract."""
-
-    state = _constant_toroidal_field_state(degree=3)
-    plan = make_variational_plan(state, radial_order=4, ntheta=11, nzeta=3)
-    first = jnp.zeros_like(state.R_cos).at[0, 1].set(0.7).at[1, 2].set(-0.2)
-    second = jnp.zeros_like(state.R_cos).at[0, 2].set(-0.4).at[1, 1].set(0.3)
-
-    def gradient(coefficients):
-        return jax.grad(lambda values: fixed_pressure_energy(replace(state, R_cos=values), plan))(coefficients)
-
-    _, apply_hessian = jax.linearize(gradient, state.R_cos)
-    lhs = jnp.vdot(first, apply_hessian(second))
-    rhs = jnp.vdot(apply_hessian(first), second)
-    np.testing.assert_allclose(lhs, rhs, rtol=3e-11, atol=3e-6)
-
-
-def test_native_layout_preserves_both_normal_geometry_directions():
-    """Structural coordinates keep R and Z motion while fixing the edge."""
-
-    state = _constant_toroidal_field_state(degree=3)
-    layout = make_native_correction_layout(state)
-    basis_size = state.radial_basis.size
-    assert layout.size == 4 * basis_size - 3
-    correction = layout.unpack(jnp.ones((layout.size,)))
-    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin"):
-        np.testing.assert_array_equal(np.asarray(getattr(correction, name))[:, -1], 0.0)
-    assert float(correction.L_sin[1, -1]) == 1.0
-    np.testing.assert_array_equal(correction.L_sin[0], 0.0)
-    np.testing.assert_array_equal(layout.pack(correction), 1.0)
-
-    radial_shape = state.radial_basis.fit(1.0 - jnp.asarray(state.radial_basis.collocation_nodes))
-    zeros = jnp.zeros_like(state.R_cos)
-    radial = HighOrderCorrection(
-        R_cos=zeros.at[1].set(radial_shape),
-        R_sin=zeros,
-        Z_cos=zeros,
-        Z_sin=zeros,
-        L_cos=zeros,
-        L_sin=zeros,
-    )
-    vertical = replace(
-        radial,
-        R_cos=zeros,
-        Z_sin=zeros.at[1].set(radial_shape),
-    )
-    plan = make_variational_plan(state, radial_order=2, ntheta=4, nzeta=1)
-    radial_displacement = evaluate_fixed_label_displacement(state, radial, plan)
-    vertical_displacement = evaluate_fixed_label_displacement(state, vertical, plan)
-    assert float(jnp.max(jnp.abs(radial_displacement[:, 0, 0, 0]))) > 0.1
-    assert float(jnp.max(jnp.abs(vertical_displacement[:, 1, 0, 2]))) > 0.1
-
-
-def test_native_packed_mode_groups_partition_solver_coordinates():
-    """Mode groups use packed positions for symmetric and asymmetric layouts."""
-
-    base = _constant_toroidal_field_state(degree=3)
-
-    def pad(values):
-        return jnp.pad(values, ((0, 2), (0, 0)))
-
-    state = replace(
-        base,
-        m=np.asarray([0, 1, 1, 2]),
-        n=np.asarray([0, 0, 1, -1]),
-        R_cos=pad(base.R_cos),
-        R_sin=pad(base.R_sin),
-        Z_cos=pad(base.Z_cos),
-        Z_sin=pad(base.Z_sin),
-        L_cos=pad(base.L_cos),
-        L_sin=pad(base.L_sin),
-        boundary_R_cos=jnp.pad(base.boundary_R_cos, (0, 2)),
-        boundary_R_sin=jnp.pad(base.boundary_R_sin, (0, 2)),
-        boundary_Z_cos=jnp.pad(base.boundary_Z_cos, (0, 2)),
-        boundary_Z_sin=jnp.pad(base.boundary_Z_sin, (0, 2)),
-    )
-    for lasym in (False, True):
-        layout = make_native_correction_layout(state, lasym=lasym)
-        groups = native_packed_mode_groups(layout)
-        packed = np.concatenate(groups)
-        np.testing.assert_array_equal(np.sort(packed), np.arange(layout.size))
-        vector = np.arange(layout.size, dtype=float)
-        gathered = np.zeros_like(vector)
-        active = np.asarray(layout.active_indices)
-        mode_ids = (active % (layout.mnmax * layout.nbasis)) // layout.nbasis
-        for mode, group in zip(np.unique(mode_ids), groups, strict=True):
-            assert np.all(mode_ids[group] == mode)
-            gathered[group] = vector[group]
-        np.testing.assert_array_equal(gathered, vector)
-
-    layout = make_native_correction_layout(state)
-    with pytest.raises(ValueError, match="unique"):
-        native_packed_mode_groups(
-            replace(layout, active_indices=np.r_[layout.active_indices, layout.active_indices[0]])
-        )
-    with pytest.raises(ValueError, match="out of bounds"):
-        native_packed_mode_groups(
-            replace(
-                layout,
-                active_indices=np.r_[
-                    layout.active_indices,
-                    6 * layout.mnmax * layout.nbasis,
-                ],
-            )
-        )
-
-
-def test_native_gauge_generator_has_zero_fixed_label_displacement():
-    """A smooth boundary-fixed relabeling is a null physical displacement."""
-
-    base = _constant_toroidal_field_state(degree=3)
-
-    def pad(values):
-        return jnp.pad(values, ((0, 1), (0, 0)))
-
-    state = replace(
-        base,
-        m=np.asarray([0, 1, 2]),
-        n=np.asarray([0, 0, 0]),
-        R_cos=pad(base.R_cos),
-        R_sin=pad(base.R_sin),
-        Z_cos=pad(base.Z_cos),
-        Z_sin=pad(base.Z_sin),
-        L_cos=pad(base.L_cos),
-        L_sin=pad(base.L_sin),
-        boundary_R_cos=jnp.pad(base.boundary_R_cos, (0, 1)),
-        boundary_R_sin=jnp.pad(base.boundary_R_sin, (0, 1)),
-        boundary_Z_cos=jnp.pad(base.boundary_Z_cos, (0, 1)),
-        boundary_Z_sin=jnp.pad(base.boundary_Z_sin, (0, 1)),
-    )
-    nodes = jnp.asarray(state.radial_basis.collocation_nodes)
-    one_minus_s = state.radial_basis.fit(1.0 - nodes)
-    s_one_minus_s = state.radial_basis.fit(nodes * (1.0 - nodes))
-    zeros = jnp.zeros_like(state.R_cos)
-    gauge = HighOrderCorrection(
-        R_cos=zeros.at[0].set(-0.5 * s_one_minus_s).at[2].set(0.5 * one_minus_s),
-        R_sin=zeros,
-        Z_cos=zeros,
-        Z_sin=zeros.at[2].set(0.5 * one_minus_s),
-        L_cos=zeros,
-        L_sin=zeros.at[1].set(one_minus_s),
-    )
-    plan = make_variational_plan(state, radial_order=4, ntheta=17, nzeta=1)
-    displacement = evaluate_fixed_label_displacement(state, gauge, plan)
-    assert float(jnp.max(jnp.abs(displacement))) < 2.0e-15
-
-    gauge_plan = make_native_gauge_plan(state, plan)
-    gauge_residual = native_tangential_gauge_residual(state, gauge, gauge_plan)
-    assert float(jnp.linalg.norm(gauge_residual)) > 1.0e-3
-    normal = replace(
-        gauge,
-        R_cos=zeros.at[1].set(one_minus_s),
-        Z_sin=zeros.at[1].set(one_minus_s),
-        L_sin=zeros,
-    )
-    np.testing.assert_allclose(
-        native_tangential_gauge_residual(state, normal, gauge_plan),
-        0.0,
-        rtol=0.0,
-        atol=2.0e-15,
-    )
-    layout = make_native_correction_layout(state)
-    constraint = jax.jacfwd(lambda vector: native_tangential_gauge_residual(state, layout.unpack(vector), gauge_plan))(
-        jnp.zeros((layout.size,))
-    )
-    assert np.linalg.matrix_rank(np.asarray(constraint), tol=1.0e-11) == gauge_plan.size
-    kkt_size = layout.size + gauge_plan.size
-    coordinate_scale = native_coordinate_scales(state, layout, plan)
-    kkt_jacobian = jax.jacfwd(
-        lambda variables: native_variational_kkt_residual(
-            variables,
-            state,
-            layout,
-            gauge_plan,
-            1.0e8,
-            coordinate_scale,
-        )
-    )(jnp.zeros((kkt_size,)))
-    np.testing.assert_allclose(
-        kkt_jacobian,
-        kkt_jacobian.T,
-        rtol=3.0e-11,
-        atol=3.0e-10,
-    )
-    gauge_weight = jnp.linspace(0.2, 1.0, gauge_plan.size)
-
-    def parameter_dependent_gauge(step):
-        changed = replace(
-            state,
-            R_cos=state.R_cos.at[1, -1].add(0.1 * step),
-        )
-        return jnp.vdot(
-            native_tangential_gauge_residual(changed, normal, gauge_plan),
-            gauge_weight,
-        )
-
-    gauge_jvp = jax.grad(parameter_dependent_gauge)(0.0)
-    step = 1.0e-5
-    gauge_finite_difference = (parameter_dependent_gauge(step) - parameter_dependent_gauge(-step)) / (2.0 * step)
-    assert abs(float(gauge_jvp)) > 1.0e-5
-    np.testing.assert_allclose(gauge_jvp, gauge_finite_difference, rtol=2.0e-8, atol=2.0e-10)
-
-    def energy(step):
-        return fixed_pressure_energy(
-            replace(
-                state,
-                R_cos=state.R_cos + step * gauge.R_cos,
-                Z_sin=state.Z_sin + step * gauge.Z_sin,
-                L_sin=state.L_sin + step * gauge.L_sin,
-            ),
-            plan,
-        )
-
-    assert abs(float(jax.grad(energy)(0.0))) < 1.0e-7
-
-
-def test_variational_virtual_work_matches_independent_strong_force():
-    """Off-root energy variation equals force work, including lambda."""
-
-    state = _constant_toroidal_field_state(degree=3)
-    plan = make_variational_plan(state, radial_order=4, ntheta=13, nzeta=3)
-    zeros = jnp.zeros_like(state.R_cos)
-    direction = HighOrderCorrection(
-        R_cos=zeros.at[0, 1].set(0.3),
-        R_sin=zeros,
-        Z_cos=zeros,
-        Z_sin=zeros.at[1, 1].set(-0.2),
-        L_cos=zeros,
-        L_sin=zeros.at[1, 1].set(0.1),
-    )
-
-    def energy(step):
-        return fixed_pressure_energy(
-            replace(
-                state,
-                R_cos=state.R_cos + step * direction.R_cos,
-                Z_sin=state.Z_sin + step * direction.Z_sin,
-                L_sin=state.L_sin + step * direction.L_sin,
-            ),
-            plan,
-        )
-
-    variation = jax.grad(energy)(0.0)
-    rr, tt, zz = jnp.meshgrid(plan.rho, plan.theta, plan.zeta, indexing="ij")
-    oracle = evaluate_strong_force(state, rr, tt, zz)
-    displacement = evaluate_fixed_label_displacement(state, direction, plan)
-    force_work = -jnp.sum(
-        plan.quadrature_weights * (state.jacobian_sign * oracle.sqrt_g) * jnp.sum(oracle.force * displacement, axis=-1)
-    )
-    np.testing.assert_allclose(variation, force_work, rtol=2e-12, atol=2e-7)
-
-
 def test_tensorized_strong_force_matches_finite_pressure_point_oracle():
     """Analytic second-jet force tables reproduce every physical channel."""
 
@@ -1195,212 +892,6 @@ def test_native_force_residual_uses_fixed_physical_scales():
     volume_weights = plan.quadrature_weights * state.jacobian_sign * fields.sqrt_g
     expected_squared_norm = jnp.sum(volume_weights[..., None] * (fields.force / force_scale) ** 2) / volume_scale
     np.testing.assert_allclose(jnp.vdot(residual, residual), expected_squared_norm, rtol=2e-13, atol=2e-13)
-
-
-def test_native_force_gauss_newton_action_matches_dense_reference():
-    """Bordered force GN matvec matches J.T@J and C.T/C without forming them."""
-
-    state = _constant_toroidal_field_state(degree=3)
-    plan = make_variational_plan(state, radial_order=4, ntheta=9, nzeta=3)
-    layout = make_native_correction_layout(state)
-    gauge = make_native_gauge_plan(state, plan)
-    coordinate_scale = native_coordinate_scales(state, layout, plan)
-    force_scale = jnp.asarray([2.0, 3.0, 4.0])
-    volume_scale = 2.0 * np.pi**2 * 10.0
-    damping = 0.03
-
-    def physical(value):
-        return native_physical_force_residual(
-            value,
-            state,
-            layout,
-            gauge,
-            coordinate_scale,
-            force_scale,
-            volume_scale,
-        )
-
-    def constraints(value):
-        return native_tangential_gauge_residual(state, layout.unpack(coordinate_scale * value), gauge)
-
-    size = layout.size + gauge.size
-    variables = jnp.zeros((size,))
-    direction = jnp.linspace(-0.5, 0.75, size)
-    force_jacobian = jax.jacfwd(physical)(variables[: layout.size])
-    constraint_jacobian = jax.jacfwd(constraints)(variables[: layout.size])
-    for group in native_packed_mode_groups(layout):
-        group_jax = jnp.asarray(group)
-        local = jax.jacfwd(lambda value: physical(jnp.zeros((layout.size,)).at[group_jax].set(value)))(
-            jnp.zeros((group.size,))
-        )
-        np.testing.assert_allclose(local, force_jacobian[:, group], rtol=2e-12, atol=2e-12)
-    dx = direction[: layout.size]
-    dlambda = direction[layout.size :]
-    expected = jnp.concatenate(
-        (
-            force_jacobian.T @ force_jacobian @ dx + constraint_jacobian.T @ dlambda + damping * dx,
-            constraint_jacobian @ dx,
-        )
-    )
-    actual = native_force_gauss_newton_action(
-        variables,
-        direction,
-        state,
-        layout,
-        gauge,
-        coordinate_scale,
-        force_scale,
-        volume_scale,
-        damping,
-    )
-    np.testing.assert_allclose(actual, expected, rtol=2e-10, atol=2e-9)
-    damping = 0.03
-    residual = physical(variables[: layout.size])
-    rhs = -jnp.concatenate(
-        (
-            force_jacobian.T @ residual,
-            constraints(variables[: layout.size]),
-        )
-    )
-    dense_operator = jnp.block(
-        [
-            [
-                force_jacobian.T @ force_jacobian + damping * jnp.eye(layout.size),
-                constraint_jacobian.T,
-            ],
-            [
-                constraint_jacobian,
-                jnp.zeros((gauge.size, gauge.size)),
-            ],
-        ]
-    )
-    actual_step, linear_residual = native_force_gauss_newton_step(
-        variables,
-        state,
-        layout,
-        gauge,
-        coordinate_scale,
-        force_scale,
-        volume_scale,
-        damping=damping,
-        tolerance=1e-9,
-        restart=size,
-        max_restarts=2,
-    )
-    assert float(linear_residual) < 1e-8
-    dense_true_residual = dense_operator @ actual_step - rhs
-    relative_dense_residual = jnp.linalg.norm(dense_true_residual) / jnp.linalg.norm(rhs)
-    assert float(relative_dense_residual) < 1e-8
-
-
-def test_native_force_sparse_coloring_recovers_dense_jacobian():
-    """Analytic radial support and colors recover every force derivative."""
-
-    from solvax.compression import matrix_from_products, verify_products
-
-    state = _constant_toroidal_field_state(degree=3)
-    plan = make_variational_plan(state, radial_order=3, ntheta=7, nzeta=1)
-    layout = make_native_correction_layout(state)
-    gauge = make_native_gauge_plan(state, plan)
-    coordinate_scale = native_coordinate_scales(state, layout, plan)
-    coordinates = jnp.linspace(-2.0e-4, 3.0e-4, layout.size)
-
-    def residual(value):
-        return native_physical_force_residual(
-            value,
-            state,
-            layout,
-            gauge,
-            coordinate_scale,
-            5.0e6,
-            2.0 * np.pi**2 * 10.0,
-        )
-
-    dense = np.asarray(jax.jacfwd(residual)(coordinates))
-    structure = native_force_jacobian_sparsity(layout, plan)
-    recovered = matrix_from_products(
-        lambda direction: jax.jvp(residual, (coordinates,), (direction,))[1],
-        structure.pattern,
-        groups=structure.column_groups,
-    )
-    outside = structure.pattern.toarray() == 0
-    assert np.max(np.abs(dense[outside]), initial=0.0) < 2.0e-12
-    np.testing.assert_allclose(recovered.toarray(), dense, rtol=3.0e-11, atol=2.0e-11)
-    assert (
-        verify_products(
-            recovered,
-            lambda direction: jax.jvp(residual, (coordinates,), (direction,))[1],
-            samples=3,
-            seed=448,
-        )
-        < 2.0e-11
-    )
-
-
-def test_native_force_local_normal_matches_dense_small_reference():
-    """Span-local assembly preserves the small dense GN matrix and gradient."""
-
-    from benchmarks.polish_recovery_sparse import FORCE_SCALE, VOLUME_SCALE, _local_normal_system
-
-    state = _constant_toroidal_field_state(degree=3)
-    plan = make_variational_plan(state, radial_order=3, ntheta=7, nzeta=1)
-    layout = make_native_correction_layout(state)
-    gauge = make_native_gauge_plan(state, plan)
-    coordinate_scale = native_coordinate_scales(state, layout, plan)
-    coordinates = jnp.linspace(-2.0e-4, 3.0e-4, layout.size)
-
-    def residual(value):
-        return native_physical_force_residual(
-            value,
-            state,
-            layout,
-            gauge,
-            coordinate_scale,
-            FORCE_SCALE,
-            VOLUME_SCALE,
-        )
-
-    residual_value = np.asarray(residual(coordinates))
-    dense = np.asarray(jax.jacfwd(residual)(coordinates))
-    normal, gradient, metrics = _local_normal_system(
-        residual,
-        coordinates,
-        residual_value,
-        state,
-        plan,
-        layout,
-        gauge,
-        coordinate_scale,
-    )
-    np.testing.assert_allclose(normal.toarray(), dense.T @ dense, rtol=2.0e-9, atol=2.0e-12)
-    np.testing.assert_allclose(gradient, dense.T @ residual_value, rtol=2.0e-9, atol=2.0e-12)
-    assert metrics["gradient_vjp_relative_error"] < 2.0e-9
-    assert metrics["normal_jvp_relative_error"] < 2.0e-9
-    assert metrics["symmetry_relative_error"] < 2.0e-12
-
-
-def test_native_polish_trial_acceptance_fails_closed():
-    """Linear, gauge, force, geometry, and finite gates are independent."""
-
-    passing = {
-        "force_before": 0.012436,
-        "force_after": 0.0003245,
-        "gauge_residual": 1.0e-12,
-        "minimum_signed_jacobian": 1.35047,
-        "linear_residual": 1.0e-12,
-        "linear_tolerance": 1.0e-9,
-    }
-    assert native_polish_trial_is_acceptable(**passing)
-    for name, value in (
-        ("force_after", passing["force_before"]),
-        ("gauge_residual", 1.0e-6),
-        ("minimum_signed_jacobian", 0.0),
-        ("linear_residual", 3.04e-5),
-        ("linear_residual", np.nan),
-        ("force_after", np.inf),
-    ):
-        failed = passing | {name: value}
-        assert not native_polish_trial_is_acceptable(**failed)
 
 
 def test_radial_lift_rejects_unfed_spans_despite_surplus_samples():
@@ -2058,71 +1549,77 @@ def test_stable_plan_pytree_round_trip_and_split_force_equivalence():
     np.testing.assert_allclose(jnp.vdot(other, hv), jnp.vdot(direction, hw), rtol=1.0e-10)
 
 
-def test_same_chart_driver_replay_uses_the_serialized_metric(tmp_path, monkeypatch):
-    """A one-ulp recomputed scale must not reach a same-chart continuation."""
 
-    import benchmarks.polish_recovery_sparse as recovery
-    from benchmarks.polish_recovery_p3 import _checkpoint_arrays, _write_npz_atomic
+@pytest.fixture
+def _jit_enabled():
+    """Run one test compiled (this suite disables jit globally)."""
 
-    state = _constant_toroidal_field_state(degree=3)
-    plan = make_variational_plan(state, radial_order=3, ntheta=7, nzeta=1)
-    layout = make_native_correction_layout(state)
-    gauge = make_native_gauge_plan(state, plan)
-    saved = np.asarray(native_coordinate_scales(state, layout, plan))
-    checkpoint = tmp_path / "state.npz"
-    _write_npz_atomic(checkpoint, _checkpoint_arrays(state, state, np.zeros(layout.size), saved, gauge))
-    recompute = recovery.native_coordinate_scales
-    monkeypatch.setattr(
-        recovery,
-        "native_coordinate_scales",
-        lambda *args: jnp.asarray(np.nextafter(np.asarray(recompute(*args)), np.inf)),
+    with jax.disable_jit(False):
+        yield
+
+
+def _native_chart(degree=3):
+    from vmex.core import polish_native
+
+    state = _graded_mode_state(degree)
+    return polish_native, state, polish_native._chart(state, 1.0e3, 10.0)
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_native_normal_system_matches_the_dense_gauss_newton_reference():
+    """Span-local compressed assembly reproduces A^T A and A^T r exactly."""
+
+    native, _, chart = _native_chart()
+    coordinates = jnp.linspace(-2.0e-4, 3.0e-4, chart.layout.size)
+    residual = np.asarray(chart.force(coordinates))
+    dense = np.asarray(jax.jacfwd(chart.force)(coordinates))
+    normal, gradient = native._normal_system(chart, coordinates, residual, 1.0e3, 10.0)
+    scale = np.max(np.abs(dense.T @ dense))
+    np.testing.assert_allclose(normal.toarray(), dense.T @ dense, rtol=0.0, atol=1.0e-12 * scale)
+    np.testing.assert_allclose(gradient, dense.T @ residual, rtol=1.0e-10, atol=1.0e-14)
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_native_projector_is_the_orthogonal_projector_onto_the_gauge_kernel():
+    native, _, chart = _native_chart()
+    constraint = chart.constraint.toarray()
+    projector = native._Projector(chart.constraint)
+    vector = np.random.default_rng(2).standard_normal(chart.layout.size)
+    expected = vector - constraint.T @ np.linalg.solve(constraint @ constraint.T, constraint @ vector)
+    np.testing.assert_allclose(projector(vector), expected, rtol=1.0e-10, atol=1.0e-12)
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_native_polish_reduces_force_and_stays_feasible():
+    """One refined chart plus the Newton step: monotone force, exact gauge."""
+
+    native, state, chart = _native_chart(degree=5)
+    initial = float(jnp.linalg.norm(chart.force(jnp.zeros(chart.layout.size))))
+    config = native.NativePolishConfig(
+        force_tolerance=0.0, angular_padding=1, insert_count=2, max_refinements=1,
+        steps_per_chart=2, max_newton_steps=1,
     )
-    certificate = SimpleNamespace(
-        absolute_l2=1.0, radial_refinement_difference=0.0, minimum_signed_jacobian=1.0
-    )
-    monkeypatch.setattr(recovery, "certify_strong_force", lambda _: certificate)
-    output = tmp_path / "out.npz"
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "polish_recovery_sparse.py",
-            "--input-state", str(checkpoint),
-            "--max-steps", "0",
-            "--output-json", str(tmp_path / "out.json"),
-            "--output-state", str(output),
-        ],
-    )
-    recovery.main()
-    with np.load(output) as data:
-        replayed = np.asarray(data["coordinate_scale"])
-        mode = str(data["evaluation_mode"])
-    assert np.array_equal(replayed, saved)
-    assert mode == "assembled-sum"
-    loaded = recovery._load_original_problem(checkpoint, stable_derivatives=True)
-    assert np.array_equal(np.asarray(loaded[5]), saved)
-    assert loaded[2].spline_value is not None
+    result = native.polish_native(state, force_scale=1.0e3, volume_scale=10.0, config=config)
+    assert result.charts == 2 and result.gauss_newton_steps >= 1
+    assert result.force_norm < initial
+    assert np.isfinite(result.stationarity) and not result.converged
+    assert int(np.max(np.asarray(result.state.m))) == int(np.max(np.asarray(state.m))) + 1
+    assert result.state.radial_basis.size == state.radial_basis.size + 2
+    assert float(minimum_signed_jacobian(result.state, make_variational_plan(result.state))) > 0.0
 
 
-def test_gauge_projector_reuses_one_factor_and_refactors_on_change():
-    """Same chart: one LU for all projections; changed C: new, exact factor."""
+@pytest.mark.usefixtures("_jit_enabled")
+def test_native_polish_scope_and_physical_scales():
+    from types import SimpleNamespace
 
-    from scipy import sparse
+    from vmex.core.polish_native import native_polish_supported, physical_scales
 
-    import benchmarks.polish_recovery_sparse as recovery
-
-    rng = np.random.default_rng(11)
-    constraint = sparse.random(4, 12, density=0.5, random_state=3, format="csr") + sparse.eye(4, 12, format="csr")
-    before = recovery.PROJECTOR_STATS["factorizations"]
-    for _ in range(3):
-        vector = rng.standard_normal(12)
-        projected, metrics = recovery._sparse_projected_gradient(vector, constraint)
-        dense = constraint.toarray()
-        reference = vector - dense.T @ np.linalg.solve(dense @ dense.T, dense @ vector)
-        np.testing.assert_allclose(projected, reference, rtol=1e-12, atol=1e-12)
-        assert metrics["projection_true_residual_relative"] < 1e-13
-    assert recovery.PROJECTOR_STATS["factorizations"] == before + 1
-    changed = constraint.copy()
-    changed.data[0] *= 1.0 + 1e-12
-    recovery._sparse_projected_gradient(rng.standard_normal(12), changed)
-    assert recovery.PROJECTOR_STATS["factorizations"] == before + 2
-    assert len(recovery._PROJECTOR) == 1
+    base = dict(lasym=False, ntor=0, ncurr=0, gamma=0.0, lfreeb=False)
+    assert native_polish_supported(SimpleNamespace(**base))
+    for key, value in (("lasym", True), ("ntor", 1), ("ncurr", 1), ("gamma", 5 / 3), ("lfreeb", True)):
+        assert not native_polish_supported(SimpleNamespace(**{**base, key: value}))
+    # Constant toroidal field B = 1/R through circular surfaces (R0 = 10, a = 1):
+    # V = 2 pi^2 R0 a^2, Aminor = a.
+    force_scale, volume = physical_scales(_constant_toroidal_field_state(degree=3))
+    np.testing.assert_allclose(volume, 2 * np.pi**2 * 10.0, rtol=1.0e-6)
+    assert np.isfinite(force_scale) and force_scale > 0.0
