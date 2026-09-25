@@ -1,0 +1,38 @@
+{
+  "schema": "vmex-r7-replay-check/1",
+  "state": "benchmarks/polish_recovery_r7_basis191_stationary_state.npz",
+  "state_sha256": "e5b1d0673d8f214829f0e52d79ba3204882d9a49a0fd5357f590376091ab274e",
+  "source_head": "131580da529a5e7c9f9db31d6fc2361b225e9c24",
+  "generator_sha256": "4bbdecab530bf14fbd1e4875f569e87db51160b286e668c979eb3ede9326e334",
+  "modes": {
+    "coefficient-first-split-jets pair": {
+      "residual_norm": 9.582950834978377e-06,
+      "projected_gradient_norm": 8.030693284415756e-13,
+      "operator_frobenius": 580517.482876157,
+      "eta": 1.4435720863844926e-13,
+      "projection_true_residual_relative": 2.000765924921068e-15
+    },
+    "coefficient-first-split-jets exported float64 sum": {
+      "residual_norm": 9.582950834969417e-06,
+      "projected_gradient_norm": 2.955601341119244e-07,
+      "operator_frobenius": 580517.4828761563,
+      "eta": 5.312895715746051e-08,
+      "projection_true_residual_relative": 2.0833956019933185e-15
+    },
+    "assembled-sum pair": {
+      "residual_norm": 9.582950790863371e-06,
+      "projected_gradient_norm": 6.635440169746413e-07,
+      "operator_frobenius": 580517.4828761556,
+      "eta": 1.1927657942813333e-07,
+      "projection_true_residual_relative": 2.189096695840406e-15
+    },
+    "assembled-sum exported float64 sum": {
+      "residual_norm": 9.582950790863371e-06,
+      "projected_gradient_norm": 6.635480569918047e-07,
+      "operator_frobenius": 580517.4828761556,
+      "eta": 1.192773056488749e-07,
+      "projection_true_residual_relative": 2.4974471792210295e-15
+    }
+  },
+  "elapsed_seconds": 129.02562408300582
+}

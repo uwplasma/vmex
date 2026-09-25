@@ -16,7 +16,9 @@ import jax.numpy as jnp
 import numpy as np
 
 from .profiles import MU0
+from .radial_basis import _basis_levels
 from .polish import (
+    HighOrderCorrection,
     NativeCorrectionLayout,
     apply_high_order_correction,
 )
@@ -36,6 +38,16 @@ class NativeForceSparsity:
 
     pattern: Any
     column_groups: tuple[np.ndarray, ...]
+
+
+_STABLE_TABLES = (
+    "spline_value",
+    "spline_first",
+    "spline_second",
+    "difference_first",
+    "difference_second",
+    "axis_factors",
+)
 
 
 @jax.tree_util.register_pytree_node_class
@@ -66,6 +78,15 @@ class VariationalPlan:
     quadrature_weights: Array
     nfp: int
     jacobian_sign: int
+    # Optional coefficient-first radial tables (see ``_stable_radial_jets``).
+    # ``spline_*`` have shape (nrho, nbasis - k); ``difference_*`` hold the
+    # knot factors p/(t[i+p+1]-t[i+1]); ``axis_factors`` is (6, nrho, nmode).
+    spline_value: Array | None = None
+    spline_first: Array | None = None
+    spline_second: Array | None = None
+    difference_first: Array | None = None
+    difference_second: Array | None = None
+    axis_factors: Array | None = None
 
     def tree_flatten(self):
         """Expose numerical tables as traced data and topology as metadata."""
@@ -96,14 +117,17 @@ class VariationalPlan:
                 "quadrature_weights",
             )
         )
-        return children, (int(self.nfp), int(self.jacobian_sign))
+        stable = tuple(getattr(self, name) for name in _STABLE_TABLES)
+        return children + stable, (int(self.nfp), int(self.jacobian_sign))
 
     @classmethod
     def tree_unflatten(cls, metadata, children):
         """Rebuild a plan from its JAX pytree representation."""
 
         nfp, jacobian_sign = metadata
-        return cls(*children, nfp=nfp, jacobian_sign=jacobian_sign)
+        count = len(children) - len(_STABLE_TABLES)
+        stable = dict(zip(_STABLE_TABLES, children[count:]))
+        return cls(*children[:count], nfp=nfp, jacobian_sign=jacobian_sign, **stable)
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -193,8 +217,15 @@ def make_variational_plan(
     radial_order: int | None = None,
     ntheta: int | None = None,
     nzeta: int | None = None,
+    stable_derivatives: bool = False,
 ) -> VariationalPlan:
-    """Build a tensor grid and analytic coefficient-to-first-jet tables."""
+    """Build a tensor grid and analytic coefficient-to-first-jet tables.
+
+    With ``stable_derivatives`` the force kernels differentiate spline
+    coefficients by local differences before evaluating lower-degree splines
+    (``_stable_radial_jets``).  The represented fields are identical; only the
+    floating-point cancellation pattern changes.
+    """
 
     degree = int(state.radial_basis.degree)
     order = degree + 3 if radial_order is None else int(radial_order)
@@ -257,7 +288,11 @@ def make_variational_plan(
     # zeta spans one field period and sqrt_g contains dphi/dzeta=1/nfp;
     # multiplying by nfp integrates the full torus.
     quadrature_weights = float(state.nfp) * weights_rho[:, None, None] * angular_weight
+    stable = {}
+    if stable_derivatives:
+        stable = _stable_radial_tables(state.radial_basis, s, rho, m)
     return VariationalPlan(
+        **stable,
         rho=jnp.asarray(rho),
         theta=jnp.asarray(theta),
         zeta=jnp.asarray(zeta),
@@ -543,6 +578,78 @@ def native_force_jacobian_sparsity(
     return NativeForceSparsity(pattern=pattern, column_groups=tuple(groups))
 
 
+def _stable_radial_tables(radial_basis, s: np.ndarray, rho: np.ndarray, m: np.ndarray) -> dict:
+    """Return coefficient-first derivative tables for ``rho**m q(rho**2)``.
+
+    For degree p and knots t, q_s = sum_i d_i B_{i,p-1}(s; t[1:-1]) with
+    d_i = p (c_{i+1} - c_i) / (t_{i+p+1} - t_{i+1}); repeating once gives q_ss.
+    Differences of neighbouring coefficients are formed before any large knot
+    factor multiplies them, so a constant mode differentiates to exact zeros.
+    """
+
+    knots = np.asarray(radial_basis.knots, dtype=float)
+    degree = int(radial_basis.degree)
+    if degree < 2:
+        raise ValueError("coefficient-first second derivatives need degree >= 2")
+    size = knots.size - degree - 1
+    first_gap = knots[degree + 1 : degree + size] - knots[1:size]
+    second_gap = knots[degree + 1 : degree + size - 1] - knots[2:size]
+    if np.any(first_gap <= 0.0) or np.any(second_gap <= 0.0):
+        raise ValueError("knot multiplicity too high for a continuous second radial derivative")
+    levels = _basis_levels(jnp.asarray(knots), jnp.asarray(s), degree)
+    # On a clamped vector the first and last lower-degree functions of the full
+    # knot sequence vanish identically; the interior ones are the trimmed basis.
+    spline_value = np.asarray(levels[degree])
+    spline_first = np.asarray(levels[degree - 1])[:, 1:-1]
+    spline_second = np.asarray(levels[degree - 2])[:, 2:-2]
+    m = m.astype(float)
+    r = rho[:, None]
+    mm = m[None, :]
+    safe = np.where(mm > 0, mm - 1.0, 0.0)
+    safe2 = np.where(mm > 1, mm - 2.0, 0.0)
+    axis = np.stack(
+        (
+            r**mm,
+            np.where(mm > 0, mm * r**safe, 0.0),
+            np.where(mm > 1, mm * (mm - 1.0) * r**safe2, 0.0),
+            2.0 * r ** (mm + 1.0),
+            (4.0 * mm + 2.0) * r**mm,
+            4.0 * r ** (mm + 2.0),
+        )
+    )
+    return {
+        "spline_value": jnp.asarray(spline_value),
+        "spline_first": jnp.asarray(spline_first),
+        "spline_second": jnp.asarray(spline_second),
+        "difference_first": jnp.asarray(degree / first_gap),
+        "difference_second": jnp.asarray((degree - 1) / second_gap),
+        "axis_factors": jnp.asarray(axis),
+    }
+
+
+def _stable_radial_jets(coefficients: Array, plan: VariationalPlan) -> tuple[Array, Array, Array]:
+    """Return (value, d/drho, d2/drho2) with shape (nrho, nmode) coefficient-first."""
+
+    coefficients = jnp.asarray(coefficients)
+    first = jnp.diff(coefficients, axis=1) * plan.difference_first
+    second = jnp.diff(first, axis=1) * plan.difference_second
+    q = jnp.einsum("mb,rb->rm", coefficients, plan.spline_value)
+    q_s = jnp.einsum("mb,rb->rm", first, plan.spline_first)
+    q_ss = jnp.einsum("mb,rb->rm", second, plan.spline_second)
+    a = plan.axis_factors
+    return a[0] * q, a[1] * q + a[3] * q_s, a[2] * q + a[4] * q_s + a[5] * q_ss
+
+
+def _radial_jets(coefficients: Array, plan: VariationalPlan) -> tuple[Array, Array, Array]:
+    if plan.spline_value is not None:
+        return _stable_radial_jets(coefficients, plan)
+    coefficients = jnp.asarray(coefficients)
+    return tuple(
+        jnp.einsum("mb,mrb->rm", coefficients, table)
+        for table in (plan.radial_value, plan.radial_derivative, plan.radial_second_derivative)
+    )
+
+
 def _channel(
     cosine_coefficients: Array,
     sine_coefficients: Array,
@@ -550,12 +657,16 @@ def _channel(
 ) -> tuple[Array, Array, Array, Array]:
     """Synthesize one scalar channel and its three coordinate derivatives."""
 
-    cosine_coefficients = jnp.asarray(cosine_coefficients)
-    sine_coefficients = jnp.asarray(sine_coefficients)
-    cosine_radial = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_value)
-    sine_radial = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_value)
-    cosine_drho = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_derivative)
-    sine_drho = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_derivative)
+    if plan.spline_value is not None:
+        cosine_radial, cosine_drho, _ = _stable_radial_jets(cosine_coefficients, plan)
+        sine_radial, sine_drho, _ = _stable_radial_jets(sine_coefficients, plan)
+    else:
+        cosine_coefficients = jnp.asarray(cosine_coefficients)
+        sine_coefficients = jnp.asarray(sine_coefficients)
+        cosine_radial = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_value)
+        sine_radial = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_value)
+        cosine_drho = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_derivative)
+        sine_drho = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_derivative)
 
     def synthesize(cosine_table: Array, sine_table: Array) -> Array:
         return jnp.einsum("rm,ma->ra", cosine_radial, cosine_table) + jnp.einsum("rm,ma->ra", sine_radial, sine_table)
@@ -575,14 +686,8 @@ def _channel_second(
     """Synthesize a scalar channel through its coordinate Hessian."""
 
     value, drho, dtheta, dzeta = _channel(cosine_coefficients, sine_coefficients, plan)
-    cosine_coefficients = jnp.asarray(cosine_coefficients)
-    sine_coefficients = jnp.asarray(sine_coefficients)
-
-    def radial(table: Array) -> tuple[Array, Array]:
-        return (
-            jnp.einsum("mb,mrb->rm", cosine_coefficients, table),
-            jnp.einsum("mb,mrb->rm", sine_coefficients, table),
-        )
+    cosine_jets = _radial_jets(cosine_coefficients, plan)
+    sine_jets = _radial_jets(sine_coefficients, plan)
 
     def synthesize(
         radial_pair: tuple[Array, Array],
@@ -592,9 +697,7 @@ def _channel_second(
             jnp.einsum("rm,ma->ra", radial_pair[1], angular_pair[1])
         )
 
-    radial_value = radial(plan.radial_value)
-    radial_first = radial(plan.radial_derivative)
-    radial_second = radial(plan.radial_second_derivative)
+    radial_value, radial_first, radial_second = zip(cosine_jets, sine_jets)
     return (
         value,
         drho,
@@ -808,8 +911,13 @@ def native_physical_force_residual(
     if coordinate_scale.shape != (layout.size,):
         raise ValueError(f"coordinate_scale has shape {coordinate_scale.shape}; expected {(layout.size,)}")
     scale = jnp.broadcast_to(jnp.asarray(force_scale), (3,))
-    state = apply_high_order_correction(base_state, layout.unpack(coordinate_scale * coordinates))
-    samples = evaluate_tensorized_strong_force(state, gauge.variational)
+    correction = layout.unpack(coordinate_scale * coordinates)
+    if gauge.variational.spline_value is not None:
+        # Accurate mode: the certified object is the (base, coordinates) pair.
+        samples = evaluate_tensorized_strong_force(base_state, gauge.variational, correction)
+    else:
+        state = apply_high_order_correction(base_state, correction)
+        samples = evaluate_tensorized_strong_force(state, gauge.variational)
     volume_weights = (
         jnp.broadcast_to(
             jnp.asarray(gauge.variational.quadrature_weights),
@@ -1055,17 +1163,31 @@ def native_polish_trial_is_acceptable(
 def evaluate_tensorized_strong_force(
     state: HighOrderEquilibriumState,
     plan: VariationalPlan,
+    correction: HighOrderCorrection | None = None,
 ) -> StrongForceSamples:
     """Evaluate strong force from analytic coefficient-to-second-jet tables.
 
     Only a local forward-mode chain rule is used to differentiate the
     covariant magnetic components.  No spatial coordinate is passed through
     nested pointwise AD, and the independent point oracle remains unchanged.
+
+    With ``correction`` the geometry is ``state + correction`` but the two
+    coefficient sets are synthesized separately and added as jets.  Because the
+    jets are linear in coefficients this is the same field; it avoids rounding
+    the O(1) coefficient sum, whose one-ulp error the second radial derivative
+    tables amplify by ~1/ds**2.
     """
 
-    R = _channel_second(state.R_cos, state.R_sin, plan)
-    Z = _channel_second(state.Z_cos, state.Z_sin, plan)
-    L = _channel_second(state.L_cos, state.L_sin, plan)
+    def channel(cosine: str, sine: str):
+        jets = _channel_second(getattr(state, cosine), getattr(state, sine), plan)
+        if correction is None:
+            return jets
+        extra = _channel_second(getattr(correction, cosine), getattr(correction, sine), plan)
+        return tuple(a + b for a, b in zip(jets, extra))
+
+    R = channel("R_cos", "R_sin")
+    Z = channel("Z_cos", "Z_sin")
+    L = channel("L_cos", "L_sin")
     _, zz = jnp.meshgrid(plan.theta, plan.zeta, indexing="ij")
     phi = zz.reshape(-1) / float(plan.nfp)
     cosine_phi = jnp.cos(phi)[None]

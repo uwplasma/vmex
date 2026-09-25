@@ -1,0 +1,30 @@
+{
+  "child_signal": null,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/r7_compensated_probe.py",
+    "--state",
+    "benchmarks/polish_recovery_r6_basis191_exact_stationarity_merit_second_state.npz",
+    "--output",
+    "artifacts/r7/compensated-probe.json"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 32.15280474990141,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/compensated-probe.json"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/compensated-probe.json": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/compensated-probe-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 2169651200,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/compensated-probe-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/compensated-probe-run.stdout.log",
+  "timeout_seconds": 600.0
+}

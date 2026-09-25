@@ -8,7 +8,71 @@ not replace the unrelated lanes retained below.  Work is on
 `rj/force-balance-recovery` from `4632dad8` and remains unmerged pending
 Rogerio's review.
 
-Current checkpoint:
+### R7 continuation (2026-09-24): the stationarity floor was evaluation noise
+
+Resumed from the R7 review handoff at PR head `131580da` (unchanged since the
+review). All five checkpoint/input hashes verified. Records are in
+`artifacts/r7/` and `benchmarks/polish_recovery_r7_*`; generators are
+`benchmarks/r7_*.py`. Environment: Apple M4 CPU, float64, Python 3.14.6,
+JAX 0.11.2, NumPy 2.5.3, SciPy 1.18.1, SOLVAX 0.26.0; `np.longdouble` has
+52 mantissa bits here (no extra precision).
+
+Diagnosis table (frozen R6 state `bac2fb88...`):
+
+| Hypothesis | Measurement | Verdict |
+|---|---|---|
+| F1 replay: saved scale bypassed | saved and recomputed scales bitwise equal at this state (`frozen-audit.json`) | real latent defect, fixed + regression test; not the plateau cause |
+| Gradient-path ordering | jit vs eager `||P dg||` = 3.2e-11 (gate threshold 5.56e-8) | not the cause; this check badly understates the noise |
+| Input rounding of O(1) coefficients | one-ulp perturbation on half the stored coefficients moves `||Pg||` by 7-11e-7 (13-19x the threshold) | dominant floor |
+| Internal arithmetic of the jet contraction | after exact first-order compensation of the ulp change, 1.3-1.9e-7 remains with the assembled derivative tables, 1.3e-12 with coefficient-first differentiation | second floor, removed by the stable kernel |
+| Taylor consistency (legacy) | `T_g(h)` flat at 3-5e-7 for h in [1e-4, 4] for Newton and random feasible directions; Newton linear term 1.2e-7 is buried | Newton could not make progress |
+| Taylor consistency (accurate) | `T_g` floor 1e-12; random direction shows clean h^2 scaling; full Newton step eta 9.8e-8 -> 1.9e-13, observed objective change -2.04e-22 vs model -2.38e-22 | resolved |
+| F2 local/global factor 0.5 | raw steps from the R5 input: norm ratio 0.9995, cosine 0.999998; accepted fractions 1.0 vs 0.5 (`f2-raw-step-comparison.json`) | closed: a line-search artifact of noisy acceptance, not a solver difference |
+
+Consequence for earlier records: the R6 value `2.22e-8` was a selection-biased
+draw from evaluator noise (the merit search kept the lowest noisy trial). Under
+the accurate evaluator that state has eta `9.8e-8`. R6 stationarity numbers are
+not measurements of the true projected gradient and must not be compared with
+R7 numbers.
+
+Implemented (opt-in, default behaviour and historical replay unchanged):
+
+- `make_variational_plan(..., stable_derivatives=True)` builds coefficient-first
+  tables: q_s and q_ss from `diff(c) * p/(t[i+p+1]-t[i+1])` evaluated in lower
+  degree, then the unchanged axis chain rule with explicit m=0/1 limits;
+  multiplicities that break C2 are refused.
+- In that mode `native_physical_force_residual` synthesizes jets of the base
+  state and of `scale*c` separately and adds jets; it never forms the rounded
+  coefficient sum. The certified object is the `(initial, accepted_coordinates)`
+  pair; checkpoints carry `evaluation_mode = coefficient-first-split-jets`.
+- Driver: same-chart continuation reuses the loader's base/plan/layout/gauge/
+  stored scale (F1); `--stable-derivatives/--no-stable-derivatives`;
+  `--output-steps` saves raw steps and accepted fractions (F2).
+
+R7 result (`benchmarks/polish_recovery_r7_basis191_stationary.json`, state
+`polish_recovery_r7_basis191_stationary_state.npz`): one exact-Hessian KKT
+Newton step (3 GMRES iterations) gives eta `1.86e-13` (in-loop jit gradient) and
+`5.88e-12` (final eager VJP path), both far below `1e-8`; independent point
+epsilon_B `9.5829507294e-6` (56.687 N/m^3), gauge `1.5e-18`, minimum signed
+Jacobian 23.84, radial refinement difference 1.88e-7. 142 s wall, 4.4 GB peak
+RSS for 3 iterations + certificate. A fresh-process replay reproduces eta
+`1.44e-13` (`replay-check.json`).
+
+**Open decision for Rogerio (not resolved by the agent):** the exported
+ordinary float64 coefficient file (the rounded sum) has eta `5.3e-8` under the
+accurate evaluator. That is its representation floor (0.5 ulp times the
+measured sensitivity), not a solver defect. Force is identical to ten digits.
+Options: (a) declare the certified object the stored double-word pair (schema
+already carries both parts) and report the exported-file eta as
+representation-limited; (b) keep eta<=1e-8 on the float64 file, which requires
+a different metric scaling or state parameterization; (c) other. The status is
+`stationarity_pass=true` for the pair and `representation_limited` for the
+exported file until you decide.
+
+Next resume point: after that decision, R7.3 (active-local assembly, one frozen
+projector factor, stable jit identities), then R7.4 cold-input + quintic
+comparison, R7.6 implicit derivatives on the accurate evaluator.
+
 
 - P0 reproduced the exact bundled `input.shaped_tokamak_pressure` (SHA-256
   `5b2740db...fe5102`) in an isolated current dependency environment.  The
@@ -388,7 +452,7 @@ Current checkpoint:
   promotion remain open. No end-to-end speedup or production-polish claim is
   made at this checkpoint.
 
-## Current PR handoff (2026-09-24, R6 stationarity and local-normal checkpoint)
+## Current PR handoff (2026-09-24; R6 text below is superseded by the R7 continuation above)
 
 The active draft is [PR #448](https://github.com/uwplasma/vmex/pull/448),
 branch `rj/force-balance-recovery`, based on `main` at

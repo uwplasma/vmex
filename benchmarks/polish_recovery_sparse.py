@@ -116,7 +116,16 @@ def _validate_scope(state) -> None:
             raise ValueError(f"checkpoint array {name} contains nonfinite values")
 
 
-def _load_original_problem(path: Path):
+EVALUATION_MODES = ("assembled-sum", "coefficient-first-split-jets")
+
+
+def _load_original_problem(path: Path, *, stable_derivatives: bool | None = None):
+    """Load one saved chart exactly: base, plan, layout, gauge, stored metric.
+
+    ``stable_derivatives=None`` replays the checkpoint's declared evaluation
+    mode; True/False selects it explicitly (the chart and metric are unchanged).
+    """
+
     base = _load_state(path, prefix="initial")
     accepted = _load_state(path, prefix="accepted")
     _validate_scope(base)
@@ -137,6 +146,9 @@ def _load_original_problem(path: Path):
             else max(4 * int(np.max(np.abs(np.asarray(base.m)))) + 5, 8)
         )
         nzeta = int(np.asarray(data["solve_nzeta"]).item()) if schema == "vmex.polish-recovery-native-state/2" else 1
+        saved_mode = str(np.asarray(data["evaluation_mode"]).item()) if "evaluation_mode" in data else EVALUATION_MODES[0]
+        if saved_mode not in EVALUATION_MODES:
+            raise ValueError(f"unknown checkpoint evaluation mode {saved_mode!r}")
         if schema == "vmex.polish-recovery-native-state/2":
             if str(np.asarray(data["gauge_reference"]).item()) != "initial native state":
                 raise ValueError("unsupported checkpoint gauge reference")
@@ -153,7 +165,11 @@ def _load_original_problem(path: Path):
                     or bool(np.asarray(data["lasym"]).item())
                 ):
                     raise NotImplementedError("sparse recovery supports GAMMA=0, NCURR=0, LASYM=false")
-    plan = make_variational_plan(base, radial_order=radial_order, ntheta=ntheta, nzeta=nzeta)
+    if stable_derivatives is None:
+        stable_derivatives = saved_mode == EVALUATION_MODES[1]
+    plan = make_variational_plan(
+        base, radial_order=radial_order, ntheta=ntheta, nzeta=nzeta, stable_derivatives=bool(stable_derivatives)
+    )
     layout = make_native_correction_layout(base)
     gauge = make_native_gauge_plan(base, plan)
     recomputed_scale = np.asarray(native_coordinate_scales(base, layout, plan))
@@ -346,6 +362,16 @@ def _slice_variational_plan(plan: VariationalPlan, start: int, stop: int) -> Var
         profile_basis=plan.profile_basis[start:stop, :],
         profile_derivative=plan.profile_derivative[start:stop, :],
         quadrature_weights=plan.quadrature_weights[start:stop, ...],
+        **(
+            {}
+            if plan.spline_value is None
+            else {
+                "spline_value": plan.spline_value[start:stop],
+                "spline_first": plan.spline_first[start:stop],
+                "spline_second": plan.spline_second[start:stop],
+                "axis_factors": plan.axis_factors[:, start:stop],
+            }
+        ),
     )
 
 
@@ -911,6 +937,20 @@ def main() -> None:
             "decreases that remain within the force target"
         ),
     )
+    parser.add_argument(
+        "--stable-derivatives",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "coefficient-first radial derivatives with base and correction jets "
+            "synthesized separately (default: replay the checkpoint's mode)"
+        ),
+    )
+    parser.add_argument(
+        "--output-steps",
+        type=Path,
+        help="optional NPZ of raw (pre-line-search) steps and accepted fractions",
+    )
     parser.add_argument("--memory-gib", type=float, default=2.0)
     parser.add_argument("--certificate", choices=("point", "tensorized"), default="point")
     parser.add_argument(
@@ -952,8 +992,9 @@ def main() -> None:
         old_scale,
         old_coordinates,
         old_radial_order,
-    ) = _load_original_problem(args.input_state)
-    del old_layout, old_gauge, old_scale
+    ) = _load_original_problem(args.input_state, stable_derivatives=args.stable_derivatives)
+    stable_derivatives = old_plan.spline_value is not None
+    evaluation_mode = EVALUATION_MODES[int(stable_derivatives)]
     current_maximum_m = int(np.max(np.asarray(accepted.m)))
     angular_enrichment = args.maximum_m is not None and args.maximum_m > current_maximum_m
     if args.maximum_m is not None and args.maximum_m < current_maximum_m:
@@ -963,18 +1004,21 @@ def main() -> None:
         if angular_enrichment:
             new_m = np.arange(current_maximum_m + 1, args.maximum_m + 1, dtype=int)
             base = append_high_order_state_modes(base, new_m, np.zeros_like(new_m))
-        plan = make_variational_plan(base, radial_order=args.radial_order)
+        plan = make_variational_plan(base, radial_order=args.radial_order, stable_derivatives=stable_derivatives)
         layout = make_native_correction_layout(base)
         gauge = make_native_gauge_plan(base, plan)
         scale = native_coordinate_scales(base, layout, plan)
         coordinates = jnp.zeros((layout.size,), dtype=jnp.float64)
         stage = "new exact-refinement chart"
     else:
+        # Same-chart continuation: reuse the validated objects and the exact
+        # serialized metric.  Recomputing the scale here can differ by
+        # round-off and silently move the physical coefficients.
         base = old_base
         plan = old_plan
-        layout = make_native_correction_layout(base)
-        gauge = make_native_gauge_plan(base, plan)
-        scale = native_coordinate_scales(base, layout, plan)
+        layout = old_layout
+        gauge = old_gauge
+        scale = old_scale
         coordinates = old_coordinates
         selected = np.empty(0, dtype=int)
         inserted = np.empty(0)
@@ -1040,6 +1084,7 @@ def main() -> None:
     last_normal = None
     last_local_metrics = None
     last_linearization_coordinates = None
+    raw_steps = []
     for iteration in range(args.max_steps):
         residual = np.asarray(force(coordinates))
         defect = np.asarray(constraint_function(coordinates))
@@ -1201,6 +1246,8 @@ def main() -> None:
                         else ("ordinary_descent" if ordinary_descent else "force-qualified_stationarity_refinement")
                     )
                     break
+        accepted_fraction = trials[-1]["fraction"] if accepted_coordinates is not None and trials else None
+        raw_steps.append((np.asarray(step, dtype=float), accepted_fraction))
         if accepted_coordinates is None and exact_stationarity:
             projected_gradient, _ = _sparse_projected_gradient(exact_gradient, constraint)
             projected_norm = float(np.linalg.norm(projected_gradient))
@@ -1282,6 +1329,8 @@ def main() -> None:
                 "exact_hessian_gradient_fallback": exact_gradient_fallback,
                 "accepted": accepted_coordinates is not None,
                 "acceptance_reason": acceptance_reason,
+                "raw_step_norm": float(np.linalg.norm(raw_steps[-1][0])),
+                "raw_step_accepted_fraction": raw_steps[-1][1],
                 "trials": trials,
             }
         )
@@ -1291,7 +1340,17 @@ def main() -> None:
 
     final_state = apply_high_order_correction(base, layout.unpack(scale * coordinates))
     arrays = _checkpoint_arrays(final_state, base, coordinates, scale, gauge)
+    arrays["evaluation_mode"] = np.asarray(evaluation_mode)
     _write_npz_atomic(args.output_state, arrays)
+    if args.output_steps is not None:
+        _write_npz_atomic(
+            args.output_steps,
+            {
+                "raw_steps": np.stack([step for step, _ in raw_steps]) if raw_steps else np.zeros((0, layout.size)),
+                "accepted_fraction": np.asarray([np.nan if f is None else f for _, f in raw_steps]),
+                "input_state_sha256": np.asarray(_sha256(args.input_state)),
+            },
+        )
     pending = {
         "schema": "vmex.polish-recovery/4",
         "experiment": "R5-compressed-sparse-feasible-force-step",
@@ -1392,6 +1451,7 @@ def main() -> None:
             "linear_solver": args.linear_solver,
             "linearization": args.linearization,
             "stationarity_hessian": args.stationarity_hessian,
+            "evaluation_mode": evaluation_mode,
             "max_exact_newton_iterations": args.max_exact_newton_iterations,
             "max_linear_iterations": args.max_linear_iterations,
             "stationarity_refinement": args.stationarity_refinement,

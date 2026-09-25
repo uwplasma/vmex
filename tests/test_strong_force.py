@@ -1920,3 +1920,184 @@ def test_high_order_surface_reports_asymmetry_it_carries():
     assert surface_field_data_from_high_order(asymmetric, **kwargs).stellsym is False
     # an explicit request for no symmetry is still honoured
     assert surface_field_data_from_high_order(symmetric, use_stellsym=False, **kwargs).stellsym is False
+
+
+def _graded_mode_state(degree: int) -> HighOrderEquilibriumState:
+    """Small m=0..3 state on strongly graded knots with a large constant background."""
+
+    breaks = np.asarray([0.0, 1.0e-3, 4.0e-3, 0.02, 0.1, 0.35, 0.7, 1.0])
+    basis = BSplineBasis.clamped(breaks, degree=degree)
+    rng = np.random.default_rng(448)
+    m = np.arange(4)
+    base = _constant_toroidal_field_state(degree=degree)
+    r_cos = 1.0e-3 * rng.standard_normal((4, basis.size))
+    r_cos[0] += 6.0
+    r_cos[1] += 1.0
+    z_sin = 1.0e-3 * rng.standard_normal((4, basis.size))
+    z_sin[1] += 1.0
+    l_sin = 1.0e-3 * rng.standard_normal((4, basis.size))
+    zeros = np.zeros((4, basis.size))
+    return replace(
+        base,
+        radial_basis=basis,
+        m=m,
+        n=np.zeros(4, dtype=int),
+        R_cos=jnp.asarray(r_cos),
+        R_sin=jnp.asarray(zeros),
+        Z_cos=jnp.asarray(zeros),
+        Z_sin=jnp.asarray(z_sin),
+        L_cos=jnp.asarray(zeros),
+        L_sin=jnp.asarray(l_sin),
+        phipf=jnp.full((basis.size,), 0.5),
+        chipf=jnp.full((basis.size,), 0.2),
+        pressure=jnp.asarray(1.0e3 * np.linspace(1.0, 0.0, basis.size)),
+        boundary_R_cos=jnp.asarray([6.0, 1.0, 0.0, 0.0]),
+        boundary_R_sin=jnp.zeros(4),
+        boundary_Z_cos=jnp.zeros(4),
+        boundary_Z_sin=jnp.asarray([0.0, 1.0, 0.0, 0.0]),
+    )
+
+
+@pytest.mark.parametrize("degree", [3, 5])
+def test_coefficient_first_radial_jets_match_scipy_spline_derivatives(degree):
+    """Coefficient differencing reproduces rho**m q(rho**2) and its rho jets."""
+
+    from scipy.interpolate import BSpline
+
+    from vmex.core.polish_variational import _stable_radial_jets
+
+    state = _graded_mode_state(degree)
+    plan = make_variational_plan(state, radial_order=degree + 1, ntheta=7, nzeta=1, stable_derivatives=True)
+    rho = np.asarray(plan.rho)
+    value, first, second = (np.asarray(x) for x in _stable_radial_jets(state.R_cos, plan))
+    knots = np.asarray(state.radial_basis.knots)
+    for mode in range(4):
+        spline = BSpline(knots, np.asarray(state.R_cos[mode]), degree)
+        q, q_s, q_ss = spline(rho**2), spline.derivative(1)(rho**2), spline.derivative(2)(rho**2)
+        expected = (
+            rho**mode * q,
+            mode * rho ** max(mode - 1, 0) * q * (mode > 0) + 2.0 * rho ** (mode + 1) * q_s,
+            mode * (mode - 1) * rho ** max(mode - 2, 0) * q * (mode > 1)
+            + (4 * mode + 2) * rho**mode * q_s
+            + 4.0 * rho ** (mode + 2) * q_ss,
+        )
+        for actual, reference in zip((value, first, second), expected):
+            scale = np.max(np.abs(reference)) + 1.0
+            np.testing.assert_allclose(actual[:, mode], reference, rtol=0.0, atol=2.0e-12 * scale)
+    # The assembled derivative tables describe the same spline.
+    legacy = make_variational_plan(state, radial_order=degree + 1, ntheta=7, nzeta=1)
+    for table, actual in zip(
+        (legacy.radial_value, legacy.radial_derivative, legacy.radial_second_derivative),
+        (value, first, second),
+    ):
+        reference = np.einsum("mb,mrb->rm", np.asarray(state.R_cos), np.asarray(table))
+        np.testing.assert_allclose(actual, reference, rtol=0.0, atol=1.0e-9 * (np.max(np.abs(reference)) + 1.0))
+
+
+def test_coefficient_first_jets_differentiate_constants_to_exact_zero():
+    """A constant m=0 mode has bitwise-zero radial derivatives, unlike the tables."""
+
+    from vmex.core.polish_variational import _stable_radial_jets
+
+    state = _graded_mode_state(3)
+    plan = make_variational_plan(state, radial_order=4, ntheta=7, nzeta=1, stable_derivatives=True)
+    constant = jnp.zeros_like(state.R_cos).at[0].set(6.123456789)
+    value, first, second = _stable_radial_jets(constant, plan)
+    assert np.all(np.asarray(first)[:, 0] == 0.0)
+    assert np.all(np.asarray(second)[:, 0] == 0.0)
+    np.testing.assert_allclose(np.asarray(value)[:, 0], 6.123456789, rtol=2.0e-16 * 8)
+
+
+def test_coefficient_first_tables_reject_discontinuous_second_derivatives():
+    from vmex.core.polish_variational import _stable_radial_tables
+
+    knots = np.asarray([0.0] * 4 + [0.5] * 3 + [1.0] * 4)
+    fake = SimpleNamespace(knots=knots, degree=3)
+    s = np.linspace(0.05, 0.95, 5)
+    with pytest.raises(ValueError, match="multiplicity"):
+        _stable_radial_tables(fake, s, np.sqrt(s), np.arange(2))
+    with pytest.raises(ValueError, match="degree >= 2"):
+        _stable_radial_tables(SimpleNamespace(knots=np.asarray([0.0, 0.0, 1.0, 1.0]), degree=1), s, np.sqrt(s), np.arange(1))
+
+
+def test_stable_plan_pytree_round_trip_and_split_force_equivalence():
+    """Split jets give the same force, JVP, VJP, and symmetric Hessian action."""
+
+    state = _graded_mode_state(3)
+    legacy = make_variational_plan(state, radial_order=4, ntheta=11, nzeta=1)
+    stable = make_variational_plan(state, radial_order=4, ntheta=11, nzeta=1, stable_derivatives=True)
+    leaves, treedef = jax.tree_util.tree_flatten(stable)
+    rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
+    assert rebuilt.spline_value is not None and rebuilt.axis_factors.shape == stable.axis_factors.shape
+    assert jax.tree_util.tree_flatten(legacy)[1] != treedef
+    layout = make_native_correction_layout(state)
+    scale = native_coordinate_scales(state, layout, legacy)
+    coordinates = jnp.asarray(np.random.default_rng(3).standard_normal(layout.size) * 1.0e-4)
+    direction = jnp.asarray(np.random.default_rng(4).standard_normal(layout.size))
+    other = jnp.asarray(np.random.default_rng(5).standard_normal(layout.size))
+
+    def residual(plan):
+        gauge = make_native_gauge_plan(state, plan)
+        return lambda value: native_physical_force_residual(value, state, layout, gauge, scale, 1.0e3, 10.0)
+
+    old, new = residual(legacy), residual(stable)
+    np.testing.assert_allclose(new(coordinates), old(coordinates), rtol=0.0, atol=2.0e-9 * float(jnp.max(jnp.abs(old(coordinates)))))
+    old_jvp = jax.jvp(old, (coordinates,), (direction,))[1]
+    new_jvp = jax.jvp(new, (coordinates,), (direction,))[1]
+    np.testing.assert_allclose(new_jvp, old_jvp, rtol=0.0, atol=2.0e-9 * float(jnp.max(jnp.abs(old_jvp))))
+    weight = old(coordinates)
+    np.testing.assert_allclose(
+        jax.vjp(new, coordinates)[1](weight)[0],
+        jax.vjp(old, coordinates)[1](weight)[0],
+        rtol=2.0e-9,
+        atol=1.0e-12,
+    )
+    gradient = jax.grad(lambda value: 0.5 * jnp.vdot(new(value), new(value)))
+    hv = jax.jvp(gradient, (coordinates,), (direction,))[1]
+    hw = jax.jvp(gradient, (coordinates,), (other,))[1]
+    np.testing.assert_allclose(jnp.vdot(other, hv), jnp.vdot(direction, hw), rtol=1.0e-10)
+
+
+def test_same_chart_driver_replay_uses_the_serialized_metric(tmp_path, monkeypatch):
+    """A one-ulp recomputed scale must not reach a same-chart continuation."""
+
+    import benchmarks.polish_recovery_sparse as recovery
+    from benchmarks.polish_recovery_p3 import _checkpoint_arrays, _write_npz_atomic
+
+    state = _constant_toroidal_field_state(degree=3)
+    plan = make_variational_plan(state, radial_order=3, ntheta=7, nzeta=1)
+    layout = make_native_correction_layout(state)
+    gauge = make_native_gauge_plan(state, plan)
+    saved = np.asarray(native_coordinate_scales(state, layout, plan))
+    checkpoint = tmp_path / "state.npz"
+    _write_npz_atomic(checkpoint, _checkpoint_arrays(state, state, np.zeros(layout.size), saved, gauge))
+    recompute = recovery.native_coordinate_scales
+    monkeypatch.setattr(
+        recovery,
+        "native_coordinate_scales",
+        lambda *args: jnp.asarray(np.nextafter(np.asarray(recompute(*args)), np.inf)),
+    )
+    certificate = SimpleNamespace(
+        absolute_l2=1.0, radial_refinement_difference=0.0, minimum_signed_jacobian=1.0
+    )
+    monkeypatch.setattr(recovery, "certify_strong_force", lambda _: certificate)
+    output = tmp_path / "out.npz"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "polish_recovery_sparse.py",
+            "--input-state", str(checkpoint),
+            "--max-steps", "0",
+            "--output-json", str(tmp_path / "out.json"),
+            "--output-state", str(output),
+        ],
+    )
+    recovery.main()
+    with np.load(output) as data:
+        replayed = np.asarray(data["coordinate_scale"])
+        mode = str(data["evaluation_mode"])
+    assert np.array_equal(replayed, saved)
+    assert mode == "assembled-sum"
+    loaded = recovery._load_original_problem(checkpoint, stable_derivatives=True)
+    assert np.array_equal(np.asarray(loaded[5]), saved)
+    assert loaded[2].spline_value is not None

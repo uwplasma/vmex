@@ -1,0 +1,34 @@
+{
+  "schema": "vmex-r7-compensated-probe/1",
+  "state_sha256": "bac2fb88d025edc71c00f381bd0414a330b395e36fb55a5cd9c18cd6350cf44d",
+  "generator_sha256": "b4af2eeccccb876aa19e8bf175f135285d23cb0433d5611972fd1df58a6e3ad5",
+  "fields": [
+    "L_cos",
+    "L_sin",
+    "R_cos",
+    "R_sin",
+    "Z_cos",
+    "Z_sin"
+  ],
+  "projected_gradient_norm": 1.235307966716225e-07,
+  "gate_threshold_projected": 5.56307046831159e-08,
+  "trials": [
+    {
+      "plain_projected_error": 7.397470031451877e-07,
+      "compensated_projected_error": 1.304217290879841e-07,
+      "remainder_linear_term": 7.472351754812677e-07
+    },
+    {
+      "plain_projected_error": 8.763220090930792e-07,
+      "compensated_projected_error": 1.9150554183436128e-07,
+      "remainder_linear_term": 9.285762267227639e-07
+    },
+    {
+      "plain_projected_error": 7.552909128981791e-07,
+      "compensated_projected_error": 1.3414890015583035e-07,
+      "remainder_linear_term": 7.150576239517154e-07
+    }
+  ],
+  "jit_vs_eager_projected_difference": 3.235460084089244e-11,
+  "elapsed_seconds": 31.083110917010345
+}

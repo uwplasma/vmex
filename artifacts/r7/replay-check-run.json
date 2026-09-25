@@ -1,0 +1,30 @@
+{
+  "child_signal": null,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/r7_replay_check.py",
+    "--state",
+    "benchmarks/polish_recovery_r7_basis191_stationary_state.npz",
+    "--output",
+    "artifacts/r7/replay-check.json"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 129.78337604203261,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/replay-check.json"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/replay-check.json": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/replay-check-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 2871410688,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/replay-check-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/replay-check-run.stdout.log",
+  "timeout_seconds": 900.0
+}

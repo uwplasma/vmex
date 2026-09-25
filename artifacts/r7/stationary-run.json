@@ -1,0 +1,48 @@
+{
+  "child_signal": null,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/polish_recovery_sparse.py",
+    "--input-state",
+    "benchmarks/polish_recovery_r6_basis191_exact_stationarity_merit_second_state.npz",
+    "--stable-derivatives",
+    "--linearization",
+    "local-normal",
+    "--linear-solver",
+    "normal",
+    "--stationarity-hessian",
+    "exact",
+    "--stationarity-refinement",
+    "--max-steps",
+    "3",
+    "--certificate",
+    "point",
+    "--output-json",
+    "benchmarks/polish_recovery_r7_basis191_stationary.json",
+    "--output-state",
+    "benchmarks/polish_recovery_r7_basis191_stationary_state.npz",
+    "--output-steps",
+    "artifacts/r7/stationary-raw-steps.npz"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 143.5688241670141,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r7_basis191_stationary.json",
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r7_basis191_stationary_state.npz"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r7_basis191_stationary.json": true,
+    "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r7_basis191_stationary_state.npz": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/stationary-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 15032385536,
+  "sampled_peak_tree_rss_bytes": 4407885824,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/stationary-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/stationary-run.stdout.log",
+  "timeout_seconds": 1200.0
+}

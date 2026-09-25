@@ -1,0 +1,33 @@
+{
+  "child_signal": null,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/r7_taylor_audit.py",
+    "--stable-derivatives",
+    "--state",
+    "benchmarks/polish_recovery_r6_basis191_exact_stationarity_merit_second_state.npz",
+    "--expected-sha256",
+    "bac2fb88d025edc71c00f381bd0414a330b395e36fb55a5cd9c18cd6350cf44d",
+    "--output",
+    "artifacts/r7/taylor-audit-stable.json"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 48.66309987497516,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/taylor-audit-stable.json"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/taylor-audit-stable.json": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/taylor-audit-stable-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 12884901888,
+  "sampled_peak_tree_rss_bytes": 2251309056,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/taylor-audit-stable-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/taylor-audit-stable-run.stdout.log",
+  "timeout_seconds": 900.0
+}

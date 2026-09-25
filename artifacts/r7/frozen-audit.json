@@ -1,0 +1,121 @@
+{
+  "complete": true,
+  "constraint": {
+    "data_sha256": "bfd1e7825c2389433b2f498b2727b94c1f20e38c8ee9500f41db6722107d5f2f",
+    "factorization_count": 1,
+    "indices_sha256": "e5088b705e342eceaa32ef1d838d9871830865441d790617b86278f9a5cb6a9c",
+    "indptr_sha256": "e020eff5253c44393400f417aa128fe0e27d61fb8a2df923b98581853c9fe3fc",
+    "nnz": 976638,
+    "shape": [
+      3610,
+      11039
+    ]
+  },
+  "elapsed_seconds": 20.679912582971156,
+  "environment": {
+    "jax": "0.11.2",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1"
+  },
+  "generator_sha256": "4757056e02b34792742da82119773a46e44c42c7c31e5384487e8398196ec4f0",
+  "gradient_path_comparisons": {
+    "grad_objective__jit_grad_objective": {
+      "absolute_full_gradient_difference": 3.23467211934825e-11,
+      "absolute_projected_gradient_difference": 3.2345749815523116e-11,
+      "relative_to_first_projected_gradient": 0.000261849976028078
+    },
+    "vjp_force__grad_objective": {
+      "absolute_full_gradient_difference": 0.0,
+      "absolute_projected_gradient_difference": 0.0,
+      "relative_to_first_projected_gradient": 0.0
+    },
+    "vjp_force__jit_grad_objective": {
+      "absolute_full_gradient_difference": 3.23467211934825e-11,
+      "absolute_projected_gradient_difference": 3.2345749815523116e-11,
+      "relative_to_first_projected_gradient": 0.000261849976028078
+    }
+  },
+  "gradient_paths": {
+    "grad_objective": {
+      "array_sha256": "104c524e7c34a3dddf20b935591b41c3593d20decad46a4af3a259b766758c06",
+      "full_norm": 0.00011977215901742908,
+      "projected_norm": 1.2352779368616287e-07,
+      "projection_true_relative_residual": 2.688886033475992e-15
+    },
+    "jit_grad_objective": {
+      "array_sha256": "80490df153e4a8d7f609ccfff3a4d982fdd758a30e4157d5c007fdb9dc32f841",
+      "full_norm": 0.00011977215902118818,
+      "projected_norm": 1.235307966716225e-07,
+      "projection_true_relative_residual": 2.057272939041532e-15
+    },
+    "vjp_force": {
+      "array_sha256": "104c524e7c34a3dddf20b935591b41c3593d20decad46a4af3a259b766758c06",
+      "full_norm": 0.00011977215901742908,
+      "projected_norm": 1.2352779368616287e-07,
+      "projection_true_relative_residual": 2.688886033475992e-15
+    }
+  },
+  "limitations": [
+    "No physical-force recertification, nonlinear solve, or derivative qualification is performed.",
+    "Matching gradient paths does not prove negligible rounding error shared by those paths.",
+    "A difference is diagnostic evidence, not authorization to choose whichever path passes a gate."
+  ],
+  "original_gauge_norm": 3.9116858047019696e-18,
+  "phase": "complete",
+  "production_qualified": false,
+  "replay": {
+    "field_errors": {
+      "L_cos": {
+        "recomputed_scale_max_difference_from_checkpoint": 0.0,
+        "saved_scale_bitwise_equal": true,
+        "saved_scale_max_difference_from_checkpoint": 0.0
+      },
+      "L_sin": {
+        "recomputed_scale_max_difference_from_checkpoint": 0.0,
+        "saved_scale_bitwise_equal": true,
+        "saved_scale_max_difference_from_checkpoint": 0.0
+      },
+      "R_cos": {
+        "recomputed_scale_max_difference_from_checkpoint": 0.0,
+        "saved_scale_bitwise_equal": true,
+        "saved_scale_max_difference_from_checkpoint": 0.0
+      },
+      "R_sin": {
+        "recomputed_scale_max_difference_from_checkpoint": 0.0,
+        "saved_scale_bitwise_equal": true,
+        "saved_scale_max_difference_from_checkpoint": 0.0
+      },
+      "Z_cos": {
+        "recomputed_scale_max_difference_from_checkpoint": 0.0,
+        "saved_scale_bitwise_equal": true,
+        "saved_scale_max_difference_from_checkpoint": 0.0
+      },
+      "Z_sin": {
+        "recomputed_scale_max_difference_from_checkpoint": 0.0,
+        "saved_scale_bitwise_equal": true,
+        "saved_scale_max_difference_from_checkpoint": 0.0
+      }
+    },
+    "loaded_scale_is_used_below": true,
+    "saved_scale_equal_recomputed": true,
+    "scale_max_absolute_difference": 0.0,
+    "scale_max_relative_difference": 0.0,
+    "scale_unequal_entries": 0
+  },
+  "repo": "/Users/rogerio/local/VMEX-polish-recovery",
+  "repo_head": "131580da529a5e7c9f9db31d6fc2361b225e9c24",
+  "residual_norm": 9.582950785299043e-06,
+  "schema": "vmex-r7-frozen-state-audit/1",
+  "snapshot": {
+    "coordinates_sha256": "030c57a4d9200ced2b52ad0bad24cbe1092038f54ea3869ff816ea9fa14f5490",
+    "full_gradient_sha256": "104c524e7c34a3dddf20b935591b41c3593d20decad46a4af3a259b766758c06",
+    "layout_sha256": "2dfb29034eeb7a893b9e48e1881b321483cf2fc52e2feeba8b76c194bc7b8844",
+    "quadrature_sha256": "d7512912d36573367cf2d4787b44994e76f96038f002da01be0ece6e1271e45d",
+    "radial_order": 6,
+    "residual_sha256": "dd26849ad211177458d8b93d10e00a42154434de376dc1317735cfd118381842",
+    "rho_sha256": "4e3f1be6d57f9a31f851621c8a250321abbf3d2236d4f6e7f2948b330f788ca2",
+    "scale_sha256": "882cc9cdfdba4b2d48d81ff5a838ae0d9a373f817bdc6a4558465a8a39df88e1"
+  },
+  "state": "/Users/rogerio/local/VMEX-polish-recovery/benchmarks/polish_recovery_r6_basis191_exact_stationarity_merit_second_state.npz",
+  "state_sha256": "bac2fb88d025edc71c00f381bd0414a330b395e36fb55a5cd9c18cd6350cf44d"
+}

@@ -1,0 +1,18 @@
+{
+  "schema": "vmex-r7-raw-step-comparison/1",
+  "input_state_sha256": "2794102bae08c55b06b8a40f0a97c1fe21a666ec770090f6f914b0b4c2389613",
+  "first": "artifacts/r7/f2-sparse-steps.npz",
+  "second": "artifacts/r7/f2-local-normal-steps.npz",
+  "raw_norms": [
+    4.128984179113604e-10,
+    4.1268917871839584e-10
+  ],
+  "raw_norm_ratio_second_over_first": 0.9994932429287984,
+  "raw_cosine": 0.9999984556762858,
+  "raw_relative_difference": 0.001828629258162957,
+  "accepted_fractions": [
+    1.0,
+    0.5
+  ],
+  "accepted_increment_norm_ratio": 0.4997466214643992
+}
