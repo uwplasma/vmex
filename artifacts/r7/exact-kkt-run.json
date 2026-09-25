@@ -1,0 +1,30 @@
+{
+  "child_signal": null,
+  "command": [
+    ".venv/bin/python",
+    "benchmarks/r7_exact_kkt_probe.py",
+    "--state",
+    "benchmarks/polish_recovery_r7_quintic_cold_stationary_state.npz",
+    "--output",
+    "artifacts/r7/exact-kkt.json"
+  ],
+  "complete": true,
+  "cwd": "/Users/rogerio/local/VMEX-polish-recovery",
+  "elapsed_seconds": 31.66173420799896,
+  "expected_outputs": [
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/exact-kkt.json"
+  ],
+  "output_exists": {
+    "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/exact-kkt.json": true
+  },
+  "resource_trace": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/exact-kkt-run.resources.jsonl",
+  "returncode": 0,
+  "rss_limit_bytes": 15032385536,
+  "sampled_peak_tree_rss_bytes": 1865809920,
+  "schema": "vmex.checked-run/1",
+  "scope": "execution outcome only; exit zero does not certify physics",
+  "status": "completed",
+  "stderr": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/exact-kkt-run.stderr.log",
+  "stdout": "/Users/rogerio/local/VMEX-polish-recovery/artifacts/r7/exact-kkt-run.stdout.log",
+  "timeout_seconds": 1500.0
+}

@@ -112,6 +112,30 @@ same certified result (epsilon_B 7.677e-6, eta 4.0e-10). The remaining cost is
 the dense lift stage (35 s, 5.5 GB), per-stage process start plus new-shape
 compilation (~20-30 s each), and the 42 s point certificate.
 
+R7.6 implicit derivative (2026-09-25, `benchmarks/r7_implicit_derivative.py`,
+`artifacts/r7/implicit-derivative-final.json`), on the cold quintic root with
+parameter p -> (1+a)p (gauge, metric, and boundary unchanged):
+
+- Exact-Hessian tangent: 7 GMRES iterations with the sparse GN-KKT
+  preconditioner, true residual 3e-13, 0.7 s.
+- Re-solved roots at +-h converge quadratically (2.6e-3 -> 6e-8 -> 3e-11 -> 4e-13).
+- Tangent and adjoint agree to 1e-12..1e-14. Central differences agree to
+  1e-9..3e-8 relative over h = 3e-5..1e-3 for R(0.5, 0) and Z(0.5, pi/2). The
+  axis R derivative is tiny (5.2e-7), so its 1e-6 relative FD error is ~5e-13
+  absolute.
+- The adjoint GMRES hits its iteration cap at relative residual 1e-11..2e-8,
+  but its normwise backward error is 4e-21..3e-20. The solves are backward
+  stable; the residual floor reflects conditioning (adjoint solution norms up
+  to 1e4 for point outputs), not an inaccurate solver. Constraint-row balancing
+  (x504) was tested and changed nothing; C itself has sigma_min/sigma_max ~1e-3.
+- `benchmarks/r7_exact_kkt_probe.py` assembles the exact H from 638 colored
+  HVPs in 16.6 s (product error 1e-15); the residual-weighted term is 4e-9 of H
+  at this root, and the exact K factors in 0.9 s.
+
+Status: the derivative is qualified for this parameter and these outputs.
+Boundary-shape parameters (which move C, the metric, and the lift) are the next
+derivative case.
+
 Next resume point: R7.3 cost reduction on the quintic path (active-local
 coefficient gathers, a static CSR scatter, compiled-identity reuse), a cheaper
 certificate schedule, then R7.5 (3-D, current closure, LASYM) and R7.6
