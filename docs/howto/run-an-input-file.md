@@ -20,9 +20,13 @@ confirms the two representations describe one equilibrium:
 :language: python
 ```
 
-Every input key, its default, and its VMEC2000 semantics:
-{doc}`/reference/input-file`. Which flags of a VMEC2000 deck are honored,
-approximated, or rejected: {doc}`/reference/vmec2000-compatibility`.
+A DESC input or output (`vmex equilibrium.h5`, text inputs, HDF5 or pickle
+outputs) is converted to `input.equilibrium` and solved the same way; DESC
+itself need not be installed, and `--desc-tol` sets the boundary-mode
+truncation (`0` keeps every mode).
+
+Every input key, its default, its VMEC2000 semantics, and whether VMEX
+honors, approximates or rejects it: {doc}`/reference/vmec2000-compatibility`.
 
 ## Control where output goes
 

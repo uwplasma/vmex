@@ -78,13 +78,19 @@ def _is_narrowable(path: str) -> bool:
 
 
 def _owning_lanes(modules: Iterable[str], manifest: dict) -> set[str]:
-    """PR lanes that own any of ``modules``, by the manifest's own ownership."""
+    """PR lanes that run any of ``modules``: record ownership or a node selector."""
     wanted = set(modules)
     lanes: set[str] = set()
     for record in manifest["records"]:
         path, lane_list = record[0], record[-1]
         if path in wanted:
             lanes |= {lane for lane in lane_list if lane.startswith("pr-")}
+    # A selector lane (``pr-implicit-response-a`` and the like) runs nodes of
+    # modules it does not own; a change to such a module must run it too.
+    for lane, selectors in manifest.get("selectors", {}).items():
+        if lane.startswith("pr-") and any(
+                selector.split("::", 1)[0] in wanted for selector in selectors):
+            lanes.add(lane)
     return lanes
 
 

@@ -17,8 +17,8 @@ the boundary. Everything else in these docs is detail on one of those steps.
 * - input
   - {class}`~vmex.core.input.VmecInput`
   - frozen dataclass with VMEC2000 semantics; reads `&INDATA` namelists and
-    structured JSON ({doc}`reference/input-file`), builds from keyword
-    arguments, round-trips to either format
+    structured JSON ({doc}`reference/vmec2000-compatibility`), builds from keyword
+    arguments, round-trips to either format; DESC inputs are converted
 * - solve
   - {func}`~vmex.core.multigrid.solve_multigrid` →
     {class}`~vmex.core.solver.SolveResult`
@@ -26,7 +26,7 @@ the boundary. Everything else in these docs is detail on one of those steps.
     ({doc}`explanation/iteration`); free boundary via
     {func}`~vmex.core.multigrid.solve_free_boundary_multigrid`
 * - output
-  - {func}`~vmex.core.wout.wout_from_state` /
+  - {func}`~vmex.core.wout.wout_from_result` /
     {func}`~vmex.core.wout.write_wout` → `wout_*.nc`
   - the VMEC2000 variable set ({doc}`reference/wout-file`); loads unchanged
     in simsopt and booz_xform
@@ -67,18 +67,15 @@ Four solve entry points share the same numerics; pick by what you need back:
 ## The two lanes
 
 The same jitted physics runs through two lanes (`vmex --mode cli|jit`): the
-default **CLI lane** — a Python loop over a jitted N-iteration block with
-host residual checks, exact-`ftol` early exit, and live VMEC2000-format
-printing — and the **JIT lane**, one `lax.while_loop`, fully traceable, the
-forward solver inside the differentiable API. A regression test pins the two
-lanes to machine-precision agreement ({doc}`explanation/iteration`). Device
-placement (CPU vs GPU) follows the measured policy of
-{mod}`vmex.core.device` ({doc}`howto/run-on-gpu`).
+default host-driven **CLI lane**, with exact-`ftol` early exit and
+VMEC2000-format printing, and the traced **JIT lane**, the forward solver
+inside the differentiable API ({doc}`explanation/iteration`). Device placement
+is described in {doc}`explanation/architecture` and {doc}`howto/run-on-gpu`.
 
 ## The multigrid ladder
 
 `NS_ARRAY = 5 17 51` solves at ns=5, interpolates to 17, re-solves, then 51 —
-VMEC2000's exact `interp.f` transfer ({doc}`explanation/multigrid`). The same
+VMEC2000's exact `interp.f` transfer ({doc}`explanation/iteration`). The same
 seam gives hot restart: seed any solve from a previous state
 (`initial_state=`) or from any wout file (`restart_from=` / `--restart`),
 skipping rungs the seed already covers
@@ -90,17 +87,19 @@ Fixed-boundary equilibria are differentiable in boundary Fourier
 coefficients, profiles, `phiedge`, `pres_scale`, and `curtor` through the
 implicit function theorem on the converged fixed point — checked against
 central finite differences on the bundled Solovev case
-(`examples/take_gradients.py`, which prints the relative agreement it
-reaches; `tests/test_examples.py::test_take_gradients` fails above `1e-4`). Coil/`extcur` derivatives on a specified
+(`examples/take_fixed_boundary_gradients.py`, which prints the relative
+agreement it reaches;
+`tests/test_examples.py::test_take_fixed_boundary_gradients` fails above
+`1e-4`). Coil/`extcur` derivatives on a specified
 boundary go through the virtual-casing residual — the mature single-stage
 lane. VMEX also differentiates the reconverged
 VMEC--NESTOR free-boundary root itself:
 {func}`vmex.core.freeboundary_implicit.solve_free_boundary_implicit` takes the
 reverse-mode derivative of the coupled fixed point with respect to plasma
 profiles and direct coil shape/current dofs. The default transpose is
-`coupled_gcrot`; `boundary_schur` is opt-in. The example needs ESSOS, which
-`pip install "vmex[coils]"` installs. This CPU-only path remains
-experimental because its
+`coupled_gcrot`; `boundary_schur` is opt-in. Its example,
+`examples/take_free_boundary_gradients.py`, needs ESSOS
+(`pip install "vmex[coils]"`). This path remains experimental because its
 cold compile, memory use, and failed-trial recovery are not yet bounded. See
 {doc}`reference/capabilities` for its validation grade and
 {doc}`explanation/adjoint-gradients` for the method.
@@ -117,38 +116,12 @@ omnigenity/QI, aspect ratio, iota, Mercier, bootstrap, turbulence proxies
 Jacobians (`jac="implicit"`); {doc}`howto/optimize-a-boundary` is the
 campaign recipe.
 
-## A worked 20-line script
+## Where to go next
 
-```python
-import jax
-import numpy as np
-import vmex as vj
-from vmex.core import implicit
-from vmex.core import optimize as opt
-
-# 1. input: read a deck (or build VmecInput(**fields) from scratch)
-inp = vj.VmecInput.from_file("input.circular_tokamak")
-
-# 2. solve: full multigrid ladder, VMEC2000-format iteration printout
-eq = opt.solve_equilibrium(inp)
-print("converged:", eq.result.converged, "aspect:", float(eq.wout.aspect))
-
-# 3. output: standard wout, plus figures
-vj.write_wout("wout_circular_tokamak.nc", eq.wout)
-vj.plot_wout("wout_circular_tokamak.nc", outdir=".")
-
-# 4. differentiate: exact d(wb)/d(params) via the implicit adjoint
-p0 = implicit.params_from_input(inp)
-grad = jax.grad(lambda p: implicit.run(inp, p).wb)(p0)
-
-# 5. optimize: reshape the boundary toward aspect ratio 4
-result = opt.least_squares([(opt.aspect_ratio, 4.0, 1.0)],
-                           inp, max_mode=1, jac="implicit")
-```
-
-Each numbered step has a tutorial: {doc}`tutorials/first-equilibrium`,
-{doc}`tutorials/plots-and-boozer`, {doc}`tutorials/first-gradient`,
-{doc}`tutorials/first-optimization`.
+Each stage has a tutorial that runs a script CI executes:
+{doc}`tutorials/first-equilibrium` (solve, write, plot and Boozer-transform),
+{doc}`tutorials/first-gradient` (differentiate), and
+{doc}`tutorials/first-optimization` (optimize a boundary).
 
 ## The other lane: mirrors
 

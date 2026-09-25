@@ -25,12 +25,12 @@ from vmex import optimize as opt
 NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 SURFACES = np.array([0.5, 0.7, 0.9])
-MAX_MODES = [1, 2, 3, 4]
-MAXITER = 50
+MAX_MODES = [1, 3]
+MAXITER = 6
 METHOD = "BFGS"  # or "L-BFGS-B"
 PARAMETER_BOUND = 1.0
 BOUNDARY_STEP = 0.05              # metres represented by one scaled variable
-ASPECT_TARGET = 7.0
+ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 ELONGATION_LIMIT = 12.0
@@ -39,7 +39,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 SEED_PERTURBATION = 0.05
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1.0e-14
 FINAL_NITER = 20000
 
@@ -90,7 +90,7 @@ def mirror_excess(equilibrium_state, solver_context):
 
 objective_function_terms = [
     (qs, 0.0, 1.0),
-    (opt.aspect_ratio, ASPECT_TARGET, 0.005),
+    (opt.aspect_ratio, ASPECT_TARGET, 0.01),
     (iota_floor, 0.0, 10.0),
     (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),

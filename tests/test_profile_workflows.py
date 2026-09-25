@@ -92,7 +92,7 @@ def test_compile_counting_and_warm_contract(monkeypatch):
 
     record = profile_workflows._run_in_process("T0", "warm")
     assert record["workflow"] == "T0"
-    assert record["schema"] == profile_workflows.SCHEMA
+    assert record["schema"] == profile_workflows.SCHEMA == 2
     assert record["compile"]["run"]["compiles"] >= 1
     assert record["compile"]["warm"]["compiles"] == 0
     assert record["timing_s"]["warm"] <= record["timing_s"]["run"]
@@ -110,6 +110,29 @@ def test_compile_counting_and_warm_contract(monkeypatch):
     monkeypatch.setitem(profile_workflows.WORKFLOWS, "T1", bare)
     with pytest.raises(ValueError, match="no reshape variant"):
         profile_workflows._run_in_process("T1", "reshape")
+
+
+def test_warm_repeats_all_stages_in_dependency_order(monkeypatch):
+    calls = []
+    stages, variants = _tiny_workflow()
+    kernel = stages["run"]
+
+    def solve():
+        calls.append("solve")
+        return kernel()
+
+    def diagnostic():
+        assert calls[-1] == "solve"
+        calls.append("diagnostic")
+        return kernel()
+
+    workflow = profile_workflows.Workflow(
+        "T2", "solve followed by diagnostic",
+        lambda: ({"solve": solve, "diagnostic": diagnostic}, variants), ())
+    monkeypatch.setitem(profile_workflows.WORKFLOWS, "T2", workflow)
+    record = profile_workflows._run_in_process("T2", "warm")
+    assert calls == ["solve", "diagnostic"] * 4
+    assert record["compile"]["warm"]["compiles"] == 0
 
 
 def test_a_stage_that_compiles_nothing_is_an_error_not_a_zero(monkeypatch):

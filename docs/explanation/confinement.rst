@@ -101,7 +101,7 @@ mode numbers ``xm_b``, ``xn_b``) consumed by every metric below.
 One transform implementation — ``booz_xform_jax``'s — executes these
 equations; vmex only feeds it. The host driver
 :func:`vmex.core.boozer.run_booz_xform` calls it on a ``wout_*.nc`` file and
-writes a standard ``boozmn_*.nc`` (used by ``vmec --booz`` and by
+writes a standard ``boozmn_*.nc`` (used by ``vmex --booz`` and by
 :func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout`). The
 traceable :func:`~vmex.core.omnigenity.boozer_spectrum_state` calls the same
 jittable kernel in memory on wout-convention tables built from the solver's
@@ -504,7 +504,8 @@ VMEC2000 does not write ``D_R`` itself.  A live `DCON/GPEC
 <https://github.com/PrincetonUniversity/GPEC>`_ evaluation independently
 reproduces the symmetric VMEC normalization at ``ns=51`` (``D_I`` maximum
 absolute difference ``9.10e-4`` and ``D_R`` ``8.63e-5`` over normalized
-poloidal flux ``[0.1, 1)``).
+poloidal flux ``[0.1, 1)``); ``tests/test_stability.py`` holds the two to
+that reference within ``1e-3`` and ``1e-4``.
 
 LASYM scope.  ``mercier.f`` integrates real-space fields over the full
 theta interval with the uniform lasym weights and the ``jxbforce.f`` inputs
@@ -639,7 +640,7 @@ stores the same full-mesh result as ``vmex_trapped_fraction``. A QI axis with
 finite :math:`B_0(\varphi)` mirror ratio therefore has a finite trapped
 fraction rather than an imposed zero. Their normalized mismatch is the residual
 :class:`~vmex.core.bootstrap.RedlBootstrapMismatch` (the exact formula and
-the finite-beta profile conventions are in :doc:`variational-problem`); driving it to
+the finite-beta profile conventions are in :doc:`/reference/objectives`); driving it to
 zero, optionally with ``current_dofs`` freed, yields a current profile
 consistent with the plasma the equilibrium describes.
 

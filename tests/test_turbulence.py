@@ -11,7 +11,7 @@ gradient, the two-positional objective-term contract; the eigenvector-
 weighted proxies are value-level because JAX declines non-symmetric
 eigenvector derivatives).
 
-gkx is optional (``pip install 'gkx>=1.7.1'``; the legacy ``spectraxgk``
+gkx is optional (``pip install 'gkx>=1.8.0'``; the legacy ``spectraxgk``
 name is not supported) — dependent lanes skip cleanly without it.
 """
 

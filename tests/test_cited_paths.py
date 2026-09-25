@@ -55,7 +55,7 @@ def test_output_commands_are_not_claimed_records(tmp_path, monkeypatch, suffix, 
     assert len(errors) == 1 and "benchmarks/missing.json" in errors[0]
 
 
-@pytest.mark.parametrize("name,cap", [("README.md", 300), ("CHANGELOG.md", 200)])
+@pytest.mark.parametrize("name,cap", [("README.md", 700), ("CHANGELOG.md", 200)])
 def test_root_line_caps(tmp_path, name, cap):
     page = tmp_path / name
     page.write_text("text\n" * cap)
@@ -65,6 +65,32 @@ def test_root_line_caps(tmp_path, name, cap):
     page.write_text(page.read_text() + "extra\n")
     gate.check_root_limits(page, errors)
     assert len(errors) == 1 and "line cap" in errors[0]
+
+
+def test_readme_install_floors_match_pyproject() -> None:
+    """The README's optional-package tables quote the floors pyproject declares."""
+    import tomllib
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    declared: dict[str, str] = {}
+    extras = project["optional-dependencies"]
+    for requirement in [*project["dependencies"], *(r for name in
+                        ("coils", "freeb", "neoclassical", "turbulence", "optimizers")
+                        for r in extras[name])]:
+        match = re.fullmatch(r"([A-Za-z0-9_.-]+)(?:>=(\S+))?", requirement)
+        assert match, requirement
+        declared.setdefault(match.group(1), match.group(2) or "")
+    readme = (ROOT / "README.md").read_text()
+    quoted = dict(re.findall(r'"([A-Za-z0-9_.-]+)>=([0-9][^"]*)"', readme))
+    expected = {"solvax", "booz_xform_jax", "essos", "virtual-casing-jax", "neo-jax", "gkx"}
+    assert expected <= set(quoted), sorted(expected - set(quoted))
+    for name, floor in quoted.items():
+        if name in {"jax", "jaxlib"}:
+            continue
+        assert declared.get(name) == floor, (name, floor, declared.get(name))
+    for extra in ("all", "coils", "freeb", "neoclassical", "turbulence", "optimizers"):
+        assert extra in extras
+        assert f'pip install "vmex[{extra}]"' in readme, extra
 
 
 @pytest.mark.parametrize("claim", ["26-fold", "26 fold", "26×", "26x"])

@@ -292,8 +292,8 @@ def test_extender_helper_contracts_and_public_equilibrium_aliases():
             initial_flux=jnp.zeros((1, 3)))
 
     field = MagneticField(lambda xyz: jnp.zeros_like(xyz))
-    with pytest.raises(RuntimeError, match="virtual casing"):
-        VmecExtender(field).with_near_surface_continuation()
+    with pytest.raises(RuntimeError, match="virtual-casing plasma field"):
+        VmecExtender(field).with_graded_quadrature()
 
     # ``solution``/``solver_context`` are the public names of the solver-native
     # attributes, and a problem-supplied exterior factory wins over the default.
@@ -658,30 +658,24 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
         VmecExtender(object()).B(points)
     with pytest.raises(ValueError, match="at least one"):
         VmecExtender(None)
-    with pytest.raises(ValueError, match="near_surface_plan"):
-        VmecExtender(_linear_vacuum_field, near_surface_plan=object())
+    with pytest.raises(ValueError, match="near_surface"):
+        VmecExtender(_linear_vacuum_field, near_surface="taylor")
 
     class PlasmaField:
+        """A plasma field without quadrature data: evaluated as given."""
+
         @staticmethod
         def B_plasma_xyz(xyz):
             return jnp.ones_like(xyz)
 
-        @staticmethod
-        def B_plasma_near_surface_xyz(xyz, plan):
-            assert plan == "near-plan"
-            return 2.0 * jnp.ones_like(xyz)
-
-        @staticmethod
-        def plan_near_surface(**kwargs):
-            assert kwargs == {"digits": 3, "precision": "precision", "B_surface": None}
-            return "near-plan"
-
     direct_plasma = VmecExtender(None, PlasmaField())
     np.testing.assert_allclose(direct_plasma.B(points), 1.0)
-    continued = direct_plasma.with_near_surface_continuation(
-        digits=3, precision="precision")
-    assert continued.uses_virtual_casing and continued.uses_near_surface_continuation
-    np.testing.assert_allclose(continued.B(points), 2.0)
+    np.testing.assert_allclose(direct_plasma.gradB(points), 0.0)
+    assert direct_plasma.uses_virtual_casing
+    graded = direct_plasma.with_graded_quadrature(nodes=(16, 32))
+    assert graded.near_surface == "graded" and graded.graded_nodes == (16, 32)
+    assert direct_plasma.near_surface == "auto"
+    np.testing.assert_allclose(graded.B(points), 1.0)  # no surface data to grade
 
     assert ext._has_plasma_sources(SimpleNamespace(
         betatotal=0.0, wp=0.0, ctor=0.0, presf=np.array([0.0, 1.0])))
@@ -711,6 +705,13 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
     mgrid_field = VmecExtender.from_wout(wout, base_dir=tmp_path)
     assert mgrid_field.B(points).shape == points.shape
     np.testing.assert_allclose(captured["extcur"], [5.0, 0.0])
+    # A free-boundary wout written without its coil currents (nextcur = 0, as
+    # solve_file writes one) used to extend with an identically zero coil field.
+    for missing in ([0.0], [], [0.0, 0.0]):
+        with pytest.raises(ValueError, match="no coil currents"):
+            VmecExtender.from_wout(SimpleNamespace(
+                betatotal=0.0, wp=0.0, ctor=0.0, mgrid_file="mgrid.nc",
+                extcur=missing), base_dir=tmp_path)
     with pytest.raises(ValueError, match="plasma must"):
         VmecExtender.from_wout(wout, plasma="bad")
     with pytest.raises(ValueError, match="vacuum extension"):
@@ -725,13 +726,20 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
     interior = VmecInteriorField.from_parameterized_state(
         object(), lambda p: (object(), object()), jnp.ones(1), dof_names=("p",))
     assert interior.spectra is spectra and interior.dof_names == ("p",)
-    monkeypatch.setattr(vc, "surface_field_data_from_wout", lambda *a, **k: "surface")
-    monkeypatch.setattr(vc, "surface_field_data_from_state", lambda *a, **k: "state")
+    projections = []
+    monkeypatch.setattr(vc, "surface_field_data_from_wout",
+                        lambda *a, **k: projections.append(k["project_current"]) or "surface")
+    monkeypatch.setattr(vc, "surface_field_data_from_state",
+                        lambda *a, **k: projections.append(k["project_current"]) or "state")
     monkeypatch.setattr(VmecExtender, "from_surface_data", classmethod(
         lambda cls, surface, **kwargs: sentinel))
     finite = SimpleNamespace(betatotal=0.01, wp=0.0, ctor=0.0, mgrid_file="")
     assert VmecExtender.from_wout(finite, external_field=_linear_vacuum_field) is sentinel
     assert VmecExtender.from_state(object(), object()) is sentinel
+    # the curl-free source projection is reachable from both classmethods, off by default
+    VmecExtender.from_wout(finite, external_field=_linear_vacuum_field, project_current=True)
+    VmecExtender.from_state(object(), object(), project_current=True)
+    assert projections == [False, False, True, True]
 
     from vmex.core import wout as wout_module
     monkeypatch.setattr(wout_module, "read_wout", lambda path: wout)

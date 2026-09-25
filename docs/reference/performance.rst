@@ -1,193 +1,82 @@
-Performance and validation
-==========================
+Performance records
+===================
 
-This page summarizes the measured performance and parity status of the core
-solver. All numbers come from checked-in benchmark artifacts —
-``benchmarks/baseline.json`` (CPU suite, regenerated with
-``benchmarks/run_baseline.py``) and ``benchmarks/gpu_baseline.json`` (GPU
-matrix, ``benchmarks/run_gpu_matrix.py``; 2x NVIDIA RTX A4000, jax 0.6.2
-cuda12) — and from the end-to-end parity suite in
-``tests/test_parity_breadth.py``.
+This page collects the measured wall time, iteration counts and memory of the
+solver and of the force-balance polish.  Every number on it quotes a committed
+record under ``benchmarks/`` and names the VMEX version, commit or date that
+record was measured at; a number without a record is not stated.  Hosts differ
+between records, so the quantity that carries across machines is a ratio
+between codes on one host, not an absolute time.  The most current speed
+record is ``benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json`` (VMEX 0.8.1,
+Apple M4): on six decks VMEX had never been run on, it took 0.50–1.34x the
+VMEC2000 wall time with a warm persistent compilation cache and 0.60–3.13x
+with the cache cleared.
 
-High-order strong-force kernel
-------------------------------
+Fresh decks against ``xvmec2000`` (VMEX 0.8.1, 2026-09-02)
+------------------------------------------------------------
 
-The independent continuum oracle is fused and cached by radial basis and
-validation-grid shape.  ``benchmarks/strong_force.py`` measures pointwise
-``J x B - grad(p)`` and its reverse-mode coefficient gradient.  The checked-in
-``benchmarks/strong_force_m4.json`` run disabled the persistent compilation
-cache, used float64, five Fourier modes, eight radial elements, 64 points, and
-20 warm repeats on an Apple M4:
+Six fixed-boundary decks VMEX had never been benchmarked on (``nfp = 1`` to
+``6``, tokamak and stellarator, vacuum and finite beta with net current) were
+run through ``vmex`` and the serial Fortran ``xvmec2000`` on an Apple M4 with
+JAX 0.11.1 in float64, at VMEX commit ``8ef81c44``.  Cold is a fresh process
+with the persistent compilation cache removed; warm is a fresh process
+reusing it; each run used a fresh directory.  The record, with reference
+binary and deck hashes, is
+``benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json``, with a per-deck
+narrative in the companion ``.md``.  Iterations are listed as xvmec2000 /
+vmex.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 9 14 14 14 14 14
+=========================  =============  ================  =============  =============  =============  ===========
+deck                       nfp/mpol/ntor  ns ladder         xvmec2000 [s]  vmex cold [s]  vmex warm [s]  iterations
+=========================  =============  ================  =============  =============  =============  ===========
+ITER model (tokamak)       1/12/0         13→201, 6 levels  6.7            21.0           9.0            1469 / 1470
+ESTELL                     2/6/5          9→65, 4 levels    23.1           24.0           14.2           2301 / 2301
+ARIES-CS n3are             3/9/5          16/49             5.1            10.6           5.8            1496 / 1496
+HSX QHS (vacuum)           4/10/10        11→201, 7 levels  162.3          97.2           81.7           1575 / 1575
+W7-X standard              5/10/10        13/25/51          9.2            14.9           8.0            1105 / 1105
+Nührenberg–Zille 1988 QHS  6/9/5          16/51             6.4            11.5           6.5            1843 / 1843
+=========================  =============  ================  =============  =============  =============  ===========
 
-   * - degree
-     - cold force [s]
-     - warm force [ms]
-     - cold grad [s]
-     - warm grad [ms]
-     - second-radial-derivative L2 error
-   * - 3
-     - 1.43
-     - 0.290
-     - 1.84
-     - 0.552
-     - 2.87e-3
-   * - **5**
-     - 2.12
-     - 0.458
-     - 2.63
-     - 0.853
-     - **7.73e-7**
-   * - 7
-     - 2.90
-     - 0.720
-     - 3.43
-     - 1.23
-     - 6.09e-10
+On every deck VMEX follows the Fortran trajectory: the same per-level
+iteration counts (the ITER model differs by one iteration at its 1e-18
+floor) and the same Jacobian-reset counts on the five decks that record
+them.  The largest recorded differences are ``1.4e-10`` relative in
+``iotaf`` (ARIES-CS), ``2.2e-13`` relative in beta, and ``2.8e-17``
+absolute in the boundary harmonics (W7-X).  Warm, VMEX took 0.50x (HSX) to
+1.34x (ITER model) the Fortran wall time.  The cold gap is XLA compilation:
+on the ITER model the compile census counts 12.65 s across 650 programs, six
+of them ``_block_lane`` compiles (one per ``NS_ARRAY`` level), against a
+12.0 s cold-minus-warm difference.  That cost is paid once per machine and
+JAX version.
 
-The accuracy column reconstructs ``rho^2 exp(s)`` and compares its second
-``rho`` derivative at 2001 points.  Degree 5 reduces that error by about 3700x
-relative to degree 3 while retaining sub-millisecond warm force and gradient
-evaluation.  Degree 7 is available for p-refinement and certification, but its
-clean cold compilation used about 142 MiB more incremental peak RSS than
-degree 5.  This measured accuracy/runtime/memory compromise is why degree 5 is
-the production default.
+Numerical reproducibility
+-------------------------
 
-High-order low-physics preconditioner
--------------------------------------
+Everything runs in float64 (``jax_enable_x64`` is mandatory).  Two solves of
+the same input on the same machine, JAX version and device are
+bit-identical, and persistent-cache hits reload byte-identical executables,
+so cached and freshly compiled runs agree bit for bit.  Across VMEX versions
+the algorithm is fixed but the compiled graph is not: a restructured traced
+lane changes XLA's fusion and hence the order of floating-point reductions,
+so a trajectory can drift from an earlier release in the last places while
+keeping its iteration count.  The golden, restart, step-control and parity
+suites pin that tolerance class.  The batched tridiagonal solver used on
+accelerators is numerically equivalent to, not bit-identical with, the CPU
+Thomas sweep.
 
-``benchmarks/polish_preconditioner.py`` measures the high-to-low transfer,
-one stored exact raw-force block factor, and forward/transpose high-order
-applications.  The committed ``benchmarks/polish_preconditioner_m4.json``
-disabled the persistent compilation cache, used float64 and 20 warm repeats,
-and records both accuracy and peak process RSS:
+Bundled-deck baseline (VMEX 0.3.0, 2026-07-26)
+------------------------------------------------
 
-.. list-table::
-   :header-rows: 1
-   :widths: 10 10 10 14 14 14 14 14
-
-   * - ns
-     - mpol
-     - ntor
-     - factor [s]
-     - cold forward [ms]
-     - warm forward [ms]
-     - warm transpose [ms]
-     - factor peak RSS [MiB]
-   * - 5
-     - 3
-     - 0
-     - 4.61
-     - 98.1
-     - 0.0274
-     - 0.0269
-     - 193
-   * - 7
-     - 4
-     - 0
-     - 4.44
-     - 121
-     - 0.0289
-     - 0.0291
-     - 201
-   * - 5
-     - 3
-     - 1
-     - 5.58
-     - 159
-     - 0.0306
-     - 0.0336
-     - 217
-
-Across these small structural cases, the transfer round trip is below
-``1.2e-15``, forward/transpose duality below ``2.6e-15``, and the factored
-low-block residual below ``4.8e-12``.  Factor construction includes JAX
-assembly/compilation and dominates a first use; its factors are therefore
-retained across Krylov steps and continuation stages until the documented
-quality policy requests a refresh.  The table is a reproducibility and
-overhead gate, not a production-resolution scaling claim.
-
-Collocation-polish derivative gate
-----------------------------------
-
-``benchmarks/polish_implicit.py`` measures matrix-free IFT tangents,
-adjoints, and the optimization-facing custom VJP of the same rectangular
-least-squares stationarity equation used by the public primal.  The clean
-Apple M4 record in ``benchmarks/polish_implicit_m4.json`` uses a 17-coordinate
-Solov'ev structural gate.  Its primal reaches relative optimality
-``1.13e-7`` in nine steps.  Median warm times over ten repeats are 6.44 ms for
-the tangent, 6.83 ms for the adjoint, and 6.61 ms for the custom VJP.  With
-the persistent compilation cache disabled, cold compile-plus-execute times
-are 7.13 s, 7.50 s, and 9.43 s, respectively.
-
-The same record reports incremental process peak RSS of 52.2 MiB for the first
-tangent executable, 156.4 MiB for the separately compiled adjoint, and 237.9
-MiB for the separately compiled custom-VJP executable.  These increments
-include XLA compilation and are intentionally not described as live solve
-buffers.  Tangent and adjoint each take 17 Krylov iterations with the
-deterministic diagonal normal scaling.  Their complete dot-product mismatch is
-``1.90e-10`` and the custom VJP agrees with the explicit adjoint to
-``8.75e-21`` relative squared error.  The objective is relative field-strength
-variance at ``rho=0.7`` evaluated through the native high-order field view.  Its
-implicit directional derivative agrees with two independently re-polished
-finite-difference endpoints to ``5.11e-5`` relative error; those two solves take
-21.22 s, compared with a 6.61 ms warm scalar gradient.  A Taylor-remainder
-test independently verifies the expected second-order decrease under step
-halving.  This is a correctness and overhead gate for the production
-mathematical formulation at structural resolution, not a production-size
-optimization timing claim.
-
-Polish memory at production stellarator resolution
---------------------------------------------------
-
-``benchmarks/polish_memory.py`` runs the polish setup three times on one
-build, changing only how the independent force sweep is scheduled, and
-records each arm's peak resident memory from ``os.wait4`` so an arm the OS
-kills still reports one.  The record is
-``benchmarks/polish_memory_w7x.json``, measured on the W7-X standard
-configuration (``MPOL = NTOR = 10``, ``ns`` 13/25/51) — the resolution at
-which polishing was reported to run out of memory.
-
-The ``flat`` arm is the pre-0.8.2 sweep: one ``vmap`` over every evaluation
-point, which asks for a single 34 GB allocation on the first certificate —
-34.3 GiB peak resident on the 36-core, 62 GB office host, after which the
-arm is killed building the chart.  ``batched`` schedules the same per-point
-kernel in automatically sized batches: its certificate peaks at 3.0 GiB,
-but without checkpointing the chart build still stores whole-grid
-linearization residuals and the arm dies there too (a single 79 GB
-allocation).  ``auto`` is the shipped policy, which additionally checkpoints
-the kernel so reverse-mode passes stay per-batch: 3.0 GiB at the
-certificate, 15.4 GiB at the chart, and it completes.  Values and
-derivatives agree across all three to round-off of each field's scale
-(2e-12 of max|J| for the current density, whose near-zero entries in a
-vacuum field are pure cancellation); only the schedule differs.  This is a memory record, not a runtime claim:
-the batched arms trade a modest amount of time for the memory, and the wall
-times in the record include that trade.
-
-Polish cost prediction
-----------------------
-
-``benchmarks/polish_cost.py`` records, per deck, what one Gauss--Newton
-linear product costs and what the configured iteration limits therefore
-allow in the worst case.  These are the measurements behind
-``PolishConfig.auto_budget_seconds`` — the ceiling ``POLISH = AUTO`` prices
-a solve against before committing to it — and they are machine-specific by
-design, which is why AUTO measures at run time rather than consulting a
-size heuristic.  The record is ``benchmarks/polish_cost_office.json``, measured on the 36-core office host at driver defaults (80 nonlinear × 600 linear): the shaped tokamak prices at 1 126 s and the bundled Solov'ev at 501 s, both inside the default 3 600 s budget, while the finite-beta QA case prices at 87 848 s and is the deck AUTO turns away.
-
-Benchmark suite (CPU, ns = 201)
--------------------------------
-
-Wall times in seconds; "cold" is a fresh process including JIT compilation,
-"warm" is a second in-process solve reusing the compiled executable (the
-number that matters inside optimization loops, where the structural
-executable cache makes every solve after the first warm). Every deck's
-final ``NS_ARRAY`` stage is ramped to **ns = 201** — production radial
-resolution, where the physics dominates the compile overhead and the warm
-comparison is fairest.
+Wall times in seconds, with every deck's final ``NS_ARRAY`` stage ramped to
+``ns = 201``.  "Cold" is a fresh process including JIT compilation; "warm" is
+a second in-process solve reusing the compiled executable, the case inside
+an optimization loop.  The table is rendered from ``benchmarks/baseline.json``
+by ``tools/render_performance_docs.py``.  That record was measured on
+2026-07-26 at commit ``314e5ba5`` (VMEX 0.3.0) on an Apple-Silicon host, one
+fresh process per code run sequentially; its ``_provenance`` block states that
+runtime package versions were not recorded, and it has not been re-measured
+since.  Read it as a VMEX 0.3.0 result; the fresh-deck record above is the
+current comparison.
 
 .. begin generated-baseline-table (tools/render_performance_docs.py)
 
@@ -279,184 +168,34 @@ marks an aborted run and ``n/a`` an unsupported configuration.
 
 .. end generated-baseline-table
 
-These are wall-clock seconds measured on an otherwise idle Apple-Silicon
-host — one fresh process per code, run sequentially (never interleaved), so
-each row is one controlled baseline rather than a statistical benchmark;
-repeated runs move the small rows by tens of milliseconds and the ratios by
-a few percent.  The comparable quantity across hosts is the warm/Fortran
-*ratio*, not the absolute numbers.
+VMEC++ ran through its Python API in a fresh process on the same host; its
+``failed`` rows aborted during the first iterations.  The record also carries
+each run's iteration count and peak RSS.
 
-Reading the table:
+Free-boundary multigrid parity (commit ``b0cc789e``, 2026-07-24)
+------------------------------------------------------------------
 
-- **Warm** solves reuse the compiled executable — the number that matters
-  inside optimization loops.  The generated caption above counts the rows
-  where the warm solve beats VMEC2000; the converged symmetric
-  **free-boundary** row is among them (the NESTOR path reaches VMEC2000
-  parity *and* edges out the Fortran wall clock).
-- **Cold** runs pay a one-time XLA compile, so a single fire-and-forget run
-  is usually slower than Fortran — except on the biggest decks, where even
-  the cold run, compile included, wins.  The persistent compilation cache
-  removes most of the compile cost on subsequent processes.
-- **VMEC++** (10-thread default; invoked once per
-  deck through its Python API in a fresh process, same host, same sequential
-  protocol) is faster on some converged large decks; its ``failed`` rows
-  aborted during the first iterations.  ``vmex`` completes every supported
-  convergent row and the deliberately NITER-bounded LASYM stress row
-  (zero-crash policy); ``n/a`` marks a configuration the reference does not
-  support (``lasym`` free boundary).
+``benchmarks/freeboundary_multigrid.json`` runs the public converged
+CTH-like ``NS_ARRAY = 7, 15`` ladder on an Apple-Silicon CPU (measurement
+commit ``b0cc789e``, VMEX 0.3.0; the record states that the VMEC2000
+executable hash was not recorded).  VMEC2000 takes 239 + 340 iterations in
+0.92 s; VMEX takes 250 + 340 iterations, 8.61 s cold and 1.20 s warm.  Both
+turn the vacuum on exactly once and enter the fine grid at the same raw
+residual, ``FSQR = 1.73``.  Against the VMEC2000 wout, the final
+scale-relative maximum differences are ``6.08e-5`` (R), ``3.59e-4`` (Z),
+``1.99e-6`` (iota) and ``6.07e-8`` (relative ``wb``).
 
-Production workflows
---------------------
+``tests/test_parity_breadth.py`` gates iteration counts against the golden
+VMEC2000 runs within ``+-25%`` (the count moves with the floating-point
+path) and asserts ``wb`` within 1e-7 relative and ``rmnc/zmns`` and
+``iotaf`` at rtol 1e-5; the physics comparisons are in
+:doc:`/explanation/validation`.
 
-``benchmarks/profile_workflows.py`` times the workflows a design loop
-actually runs.  The committed CPU records are ``benchmarks/baselines/m4/``
-— one JSON per workflow and regime, each carrying its commit, dirty flag,
-case sha256, jax version, timings, and peak RSS.  Warm times from that
-record (Apple M4, ``8e6fdff4``, jax 0.9.2, float64):
-
-.. list-table::
-   :header-rows: 1
-   :widths: 12 44 22 22
-
-   * - id
-     - workflow (deck)
-     - warm [s]
-     - peak RSS [MiB]
-   * - F1
-     - fixed-boundary single-grid value (``li383_low_res``)
-     - 0.104
-     - 708
-   * - F2
-     - fixed-boundary multigrid value (``cth_like_fixed_bdy``)
-     - 0.262
-     - 1045
-   * - F4
-     - implicit scalar value + gradient (``li383_low_res``)
-     - 11.8
-     - 7997
-   * - F8
-     - least-squares campaign, 5 evaluations (``minimal_seed_nfp2``)
-     - 147
-     - 11379
-
-``python benchmarks/profile_workflows.py --list`` prints the full registry;
-``--all --regimes warm --out benchmarks/baselines/m4/`` regenerates it.
-
-There is no matching GPU record for these workflows, so this page makes no
-workflow-level CPU-versus-GPU claim.  The GPU evidence that does exist is
-``benchmarks/gpu_baseline.json`` (2x NVIDIA RTX A4000, jax 0.6.2 cuda12) and
-covers the baseline decks, the tridiagonal solve, and an iteration-throughput
-scan — read against the CPU baseline table above with the usual caution that
-the two were measured on different hosts.  Free-boundary GPU
-runs use a hybrid decomposition: plasma iterations stay on the accelerator,
-while the small dense NESTOR block runs on CPU with a reused LU factor. The
-gradient pipeline is launch-bound on an accelerator,
-which is why high-level optimization uses
-:func:`vmex.core.device.resolve_implicit_device` to pin implicit-gradient work
-to the CPU by default. Low-level :func:`vmex.core.implicit.run` follows JAX
-placement when ``device`` is omitted; ``device="auto"`` opts into the
-measured CPU policy. The
-GPU's wins come against slower server cores and larger-than-production
-problem sizes (see the GPU guidance below).
-
-Optimization wall time
-~~~~~~~~~~~~~~~~~~~~~~
-
-No committed record times a whole optimization campaign from a seed to a
-final design, so this page states no campaign duration.  The committed
-records time parts of one: rows F4 and F8 above (one implicit scalar value
-and gradient; five least-squares evaluations) and the QA startup records
-``benchmarks/qa_optimization_startup_least_squares_m4.json`` and
-``benchmarks/qa_optimization_startup_scalar_m4.json`` (48 boundary degrees
-of freedom on one Apple CPU host; read in :doc:`/reference/optimization`).
-None of them splits a warm evaluation into the equilibrium solve, its
-refinement, and the Jacobian or adjoint, so none of them says where the warm
-time goes.  The block-tridiagonal implicit Jacobian and the perturbation warm
-start are on by default and described in
-:doc:`/explanation/adjoint-gradients`; neither has a committed before/after
-record.
-
-Parity with VMEC2000
---------------------
-
-Free-boundary multigrid has a dedicated reproducible artifact,
-``benchmarks/freeboundary_multigrid.json``.  On the public converged CTH-like
-``NS_ARRAY = 7, 15`` ladder (Apple Silicon CPU, 2026-07-21), VMEC2000 takes
-239 + 340 iterations in 0.92 s; vmex takes 250 + 340 iterations, 8.61 s cold
-and 1.20 s warm.  Both activate vacuum exactly once.  Against an ns=15
-VMEC2000 wout, vmex's final scale-relative maximum errors are
-``6.08e-5`` (R), ``3.59e-4`` (Z), ``1.99e-6`` (iota), and ``6.07e-8``
-(relative ``wb``).  Both codes enter the fine grid at the same raw residual,
-``FSQR = 1.73``, and take exactly 340 fine-grid iterations to the same fixed
-point.  Warm execution is within 1.31x of Fortran on this small case; the
-one-time XLA compile dominates the cold result.
-
-Per-iteration algorithmic parity (same step control, preconditioner cadence,
-constants) means the solver does not just reach the same answer — it takes
-essentially the same number of iterations as VMEC2000 on the benchmark decks.
-The counts below are *observed* on the runs recorded here; what CI enforces
-is looser, a ``+-25%`` window around the golden iteration count
-(``tests/test_parity_breadth.py``), because iteration counts are the one
-parity quantity that legitimately moves with the floating-point path.  Read
-"observed" as "this run matched", not as a guarantee:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 36 16 16 32
-
-   * - case
-     - VMEC2000 iters
-     - vmex iters
-     - notes
-   * - solovev
-     - 215
-     - 215
-     - observed equal
-   * - DSHAPE (multigrid 16/32/64/128)
-     - 908
-     - 903
-     -
-   * - circular_tokamak (multigrid 10/17)
-     - 368
-     - 368
-     - observed equal
-   * - cth_like_fixed_bdy
-     - 434
-     - 434
-     - observed equal
-   * - nfp4_QH_warm_start (ns=35)
-     - 450
-     - 450
-     - observed equal
-   * - LandremanPaul2021_QA_lowres
-     - 1000
-     - 1000
-     - golden run is NITER-capped at its FTOL 1e-13
-   * - LandremanPaul2021_QH_reactorScale_lowres
-     - 2408
-     - 2406
-     -
-   * - up_down_asymmetric_tokamak (lasym)
-     - 2000 (capped)
-     - 1951
-     - both stopped at the matched residual 1.5e-13; a fully converged
-       VMEC2000 rerun (fsq ~1e-16) matches the core to <= 7.3e-7 on every
-       checked harmonic, in 3197 vs 3118 iterations
-   * - li383_low_res (single grid, ns=16)
-     - 123
-     - within the ±25% parity gate
-     -
-
-Parity holds not just at the converged endpoint but along the whole
-trajectory.  The trace below runs the quick-start QH case
-(``nfp4_QH_warm_start``, single grid at ``ns=51``) through all three codes
-and plots the total force residual ``fsqr + fsqz + fsql`` per iteration:
-the vmex curve lies exactly on top of VMEC2000's (both converge in 502
-iterations), and VMEC++ follows a
-near-identical path (501 iterations).
-The vmex trace comes from ``SolveResult.fsq_history``, the VMEC2000
-trace from its stdout iteration table run with ``NSTEP = 1``, and the
-VMEC++ trace from the ``fsqt`` array of its wout payload.
+The figure plots the total force residual ``fsqr + fsqz + fsql`` per
+iteration for ``nfp4_QH_warm_start`` on a single grid at ``ns=51``: 502
+iterations for VMEX and VMEC2000, 501 for VMEC++.  The traces are in
+``benchmarks/convergence_nfp4_ns51.json``, last written on 2026-07-29 (PR
+#80); host and JAX version were not recorded.
 
 .. figure:: /_static/figures/readme_convergence.webp
    :alt: force residual vs iteration for VMEX, VMEC2000, and VMEC++
@@ -464,163 +203,73 @@ VMEC++ trace from the ``fsqt`` array of its wout payload.
    :width: 95%
 
    Force residual vs iteration on ``nfp4_QH_warm_start`` at ``ns=51``
-   (``benchmarks/make_readme_figures.py --only convergence``; traces cached
-   in ``benchmarks/convergence_nfp4_ns51.json``).
+   (``benchmarks/make_readme_figures.py --only convergence``).
 
-The parity suite additionally asserts, per case: convergence at the deck's
-``ftol``; ``wb`` within 1e-7 relative of the golden wout; boundary/interior
-``rmnc/zmns`` harmonics at rtol 1e-5; and ``iotaf`` at rtol 1e-5. Where the
-golden VMEC2000 run is itself NITER-capped (LandremanPaul QA, the lasym
-tokamak), both codes are stopped at a matched residual and the documented
-absolute tolerances cover the golden run's own remaining non-convergence.
-wout files are compared per-variable with CompareWOut-style combined
-rel+abs tolerances.
+GPU (VMEX 0.9.1, 2026-09-16)
+----------------------------
 
-Keeping the persistent cache small
-----------------------------------
+``benchmarks/gpu_a4000_2026-09-16.json`` re-measured the CPU-versus-GPU
+sweep on two NVIDIA RTX A4000s with JAX 0.11.1 at the VMEX 0.9.1 commit.
+The GPU won no cell: warm gain ran 0.17x to 0.83x across every shipped deck
+and every point of the synthetic ``ns x mnmax`` scan, including
+``NuhrenbergZille_1988_QHS`` at 111 s of warm CPU work.  It replaces the
+2026-07-09 record ``benchmarks/gpu_baseline.json`` (jax 0.6.2), whose
+throughput crossover does not transfer.  The placement policy and how to
+measure on your own hardware are in :doc:`/howto/run-on-gpu` and
+:doc:`/explanation/architecture`.
 
-The persistent compilation cache is bounded by entry count as well as by
-bytes.  JAX re-scans the whole cache directory on every *write*: ``put``
-globs each entry, stats it and reads its access-time sidecar, all under the
-directory-wide lock.  The cost is linear in the number of resident entries —
-0.028 ms per entry on an Apple M4 — so a write costs 5.7 ms at 250 entries
-and 304 ms at 10880, the size a working machine reaches in a few weeks.
-VMEX stores every program (the sub-second ones repay their cost on reload),
-so a cold solve writes a few hundred entries and a mature cache turned a
-7.5 s solve into 31.3 s, 82% of it directory scans.
+Persistent compilation cache (2026-09-03)
+-----------------------------------------
+
+JAX re-scans the whole cache directory on every write: ``put`` globs each
+entry, stats it and reads its access-time sidecar under the directory-wide
+lock, so the cost grows with the number of resident entries.
+``benchmarks/cache_entry_scaling_m4_2026-09-03.json`` (commit ``2d3be2c0``,
+Apple M4, JAX 0.11.1; the record notes other work was running, so its wall
+times are upper bounds) measures 0.028 ms per resident entry: a write costs
+5.7 ms at 250 entries and 304 ms at 10880.  On one bundled deck a solve took
+7.46 s against an empty cache and 31.3 s against a 10880-entry cache,
+25.623 s of it in cache writes.
 
 JAX's own bound is on bytes and these entries are small, so it never fires.
 VMEX therefore trims the directory to its least-recently-used ``1024``
-entries once per process, before anything writes: one scan per process
-instead of one per write.  The same solve then costs 11.5 s on that cache,
-and a warm rerun 3.1 s with 289 of 289 lookups hitting — pruning by access
-time keeps the working set.  Set ``VMEX_CACHE_MAX_ENTRIES`` to change the
-bound, or to ``0`` to disable trimming.  The measurements, with provenance,
-are in ``benchmarks/cache_entry_scaling_m4_2026-09-03.json``.
+entries once per process, before anything writes.  With that bound the same
+solve took 11.48 s, and a warm rerun 3.14 s with 289 of 289 lookups hitting.
+Entries used within the last 24 hours survive the trim up to four times the
+bound, so a large workload keeps its own working set.  Set
+``VMEX_CACHE_MAX_ENTRIES`` to change the bound, or to ``0`` to disable
+trimming.
 
-A fixed bound alone evicts a large workload's own working set: the QI
-optimization example writes 1,342 executables, so the ``1024`` bound dropped
-318 of them at every import and every returning run recompiled them.  Entries
-used in the last 24 hours are therefore kept up to four times the bound, and
-only older entries are trimmed to it.  On a 36-thread Xeon the QI example's
-warm run then misses nothing (its compile falls from 68.0 s to 38.6 s); a cold
-seed-deck solve against 4,026 stale entries still sees the cache trimmed to
-``1024`` (10.2 s, against 9.7 s with the plain bound); and the worst case,
-4,026 entries all used within the day, costs 17.9 s, where a fixed ``4096``
-bound costs 19.0 s on any mature cache.
+With jaxlib < 0.10 the cache defaults to off, because those releases crash
+deserializing large cached CPU executables; ``VMEX_COMPILATION_CACHE=1``
+forces it on.
 
-Fresh decks against ``xvmec2000`` (2026-09-02)
------------------------------------------------
+High-mode FFT synthesis (commit ``ecfbe31d``, 2026-07-28)
+---------------------------------------------------------
 
-The parity table above uses the bundled regression decks.  As a final check
-that the 0.8.1 cold-start work did not trade physics for speed, six input
-files VMEX had never been benchmarked on — spanning ``nfp = 1`` to ``6``,
-tokamak and stellarator, vacuum and finite beta with net current — were run
-through ``vmex`` and the reference Fortran ``xvmec2000`` on an Apple M4 (JAX
-0.11.1, float64, serial Fortran).  Cold means a fresh process with the
-persistent compilation cache removed; warm means a fresh process reusing it;
-every run is in a fresh directory so no restart file is picked up.  The
-machine-readable record with provenance (vmex commit, reference binary hash,
-deck hashes, per-deck maxima) is
-``benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json``; the per-deck
-narrative is the companion ``.md``.
+``use_fft=None`` (the default) selects the separable toroidal FFT synthesis
+only above 512 modes on accelerators and ARM CPUs; smaller problems and x86
+CPUs keep the dense real contraction, and the implicit-differentiation path
+always uses the dense lanes.  An explicit ``use_fft=True`` or ``False``
+always wins.  ``benchmarks/high_mode_fft.json`` (Apple M4, JAX 0.10.2,
+measurement commit ``ecfbe31d``, VMEX 0.3.0) compares the two on the
+537-mode CTH-like case: peak RSS 8.21 GB with FFT against 9.63 GB dense,
+983 s against 826 s cold, and 335 s for both warm.  Both runs stop at the
+2500-iteration cap, so they are compared on cost, not on a converged answer.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 22 24 10 12 12 20
-
-   * - deck
-     - resolution
-     - xvmec2000
-     - vmex cold
-     - vmex warm
-     - physics
-   * - ITER model (tokamak)
-     - nfp 1, mpol 12, ns 13→201 (6 levels), ftol 1e-18
-     - 6.7 s
-     - 21.0 s
-     - 9.0 s
-     - iters 1469 vs 1470; iotaf 1.5e-16 rel, boundary exact
-   * - ESTELL
-     - nfp 2, mpol 6, ntor 5, ns 9→65, ftol 1e-12
-     - 23.1 s
-     - 24.0 s
-     - 14.2 s
-     - 2301 iters identical; iotaf 3.5e-12 rel, boundary 1.4e-17
-   * - ARIES-CS n3are (finite beta, net current)
-     - nfp 3, mpol 9, ntor 5, ns 16/49, ftol 1e-11
-     - 5.1 s
-     - 10.6 s
-     - 5.8 s
-     - 1496 iters identical; beta 2.2e-13 rel, iotaf 1.4e-10 rel
-   * - HSX QHS (vacuum)
-     - nfp 4, mpol 10, ntor 10, ns 11→201 (7 levels), ftol 1e-12
-     - 162.3 s
-     - 97.2 s
-     - 81.7 s
-     - 1575 iters identical; iotaf 2.5e-10 rel, boundary 2.2e-19
-   * - W7-X standard (fixed boundary)
-     - nfp 5, mpol 10, ntor 10, ns 13/25/51, ftol 1e-12
-     - 9.2 s
-     - 14.9 s
-     - 8.0 s
-     - 1105 iters identical; iotaf 7.6e-12 rel, boundary 2.8e-17
-   * - Nührenberg–Zille 1988 QHS
-     - nfp 6, mpol 9, ntor 5, ns 16/51, ftol 1e-11
-     - 6.4 s
-     - 11.5 s
-     - 6.5 s
-     - 1843 iters identical; iotaf 3.8e-11 rel, boundary 6.9e-18
-
-On every deck VMEX reproduces the Fortran trajectory — the same per-level
-iteration counts (the ITER model differs by one iteration at its 1e-18
-round-off floor), the same Jacobian-reset counts, the same final residuals to
-three figures — and the exported ``wout`` quantities (volume, aspect ratio,
-beta, ``b0``, ``iotaf``, ``presf``, ``phi``, boundary harmonics) agree to at
-most ``1.4e-10`` relative in ``iotaf`` (ARIES-CS, the finite-beta net-current
-case), ``2.2e-13`` in beta, and ``1e-17`` absolute in the boundary harmonics;
-the per-deck maxima are in the artifact.  Warm, VMEX ranges from parity to twice the speed of the
-Fortran and is fastest exactly where runtime matters most (HSX, ESTELL).  The
-cold gap is XLA compilation and nothing else: on the worst case (the ITER
-model) the compile census counts 12.65 s across 650 programs — one
-``_block_lane`` compile per ``NS_ARRAY`` level plus a tail of single-op
-programs — matching the 12.0 s cold-minus-warm difference; it is paid once per
-machine and JAX version.
-
-Numerical reproducibility
--------------------------
-
-Everything runs in float64 (``jax_enable_x64`` is mandatory).  Two solves of
-the same input on the same machine, JAX version, and device are bit-identical.
-Across VMEX versions the *algorithm* is fixed but the compiled graph is not:
-restructuring a traced lane changes XLA's fusion and hence the association
-order of floating-point reductions, so trajectories can differ from an earlier
-release at one unit in the last place per iteration.  On the regression decks
-this compounds to ``~1e-10`` relative in the late-iteration residual history
-with identical iteration counts and converged geometry agreeing to ``1e-12``;
-the golden, restart, step-control, and parity suites pin exactly that
-tolerance class.  CPU and accelerator results agree to the same class (the
-batched tridiagonal solver on accelerators is numerically equivalent, not
-bit-identical, to the CPU Thomas sweep).  Persistent compilation-cache hits
-reload byte-identical executables, so cached and freshly compiled runs agree
-bit for bit.
-
-2D block preconditioner
------------------------
+2D block preconditioner (VMEX 0.8.1, 2026-09-03)
+------------------------------------------------
 
 The default 1D radial preconditioner is what reproduces VMEC2000
-iteration-for-iteration. For *stiff* decks — very high aspect ratio or strong
-finite-β coupling — an opt-in 2D block preconditioner
+iteration for iteration.  For stiff decks, such as very high aspect ratio or
+strong finite-β coupling, the opt-in 2D block preconditioner
 (:mod:`vmex.core.preconditioner_2d`) replaces the radial-only approximation
 with a matrix-free Newton step: a Jacobian-vector-product Hessian applied
-through GMRES (SOLVAX's ``block_thomas_truncated`` / Krylov layer). It cuts the
-iteration count 5–11x on the stiff cases below, and is a strict add-on — the
-default 1D path stays byte-identical, so parity is untouched.
-
-Every row comes from ``benchmarks/preconditioner_2d_stiff_cases.json``,
-written by ``python benchmarks/preconditioner_2d_stiff.py``; the artifact
-carries the commit, host, and package versions its run used, and
+through GMRES.  The default 1D path is unchanged by its presence.  The rows
+come from ``benchmarks/preconditioner_2d_stiff_cases.json`` (commit
+``8b1c5ffe``, Apple M3 Max, JAX 0.9.2, measured 2026-09-03), and
 ``tests/test_figure_provenance.py`` fails when this table drifts from it.
+The iteration count falls 5.4x to 10.9x on these three cases.
 
 .. list-table::
    :header-rows: 1
@@ -655,357 +304,138 @@ carries the commit, host, and package versions its run used, and
    Iterations to converge, 2D block vs 1D radial preconditioner
    (``benchmarks/make_readme_figures.py --only precond``).
 
-It is opt-in, not the default, on purpose. Fewer iterations is not fewer
-seconds: each 2D Newton step (a GMRES solve over Hessian-vector products) costs
-far more than a 1D radial sweep, so the measured wall-clock ranges 0.55–1.16x
-across easy and stiff decks — a wash to *slower* (≈2x slower on a plain circular
-tokamak, a tie even on the aspect-100 case) — and peak memory is ≈30% higher
-(the extra GMRES/HVP compile graph). The converged ``wb`` matches the 1D
-result to the agreement column above — 3.6e-11 and 3.8e-11 on the two
-tokamak rows, 5.7e-7 on the stellarator — so it changes the path, not the
-fixed point. Reach for it when the 1D iteration count is the bottleneck or
-stalls, not as a blanket default.
+It is opt-in on purpose.  Fewer iterations is not fewer seconds: each 2D
+Newton step is a GMRES solve over Hessian-vector products and costs more than
+a 1D radial sweep.  The record's wall times include compilation and its
+protocol states they are not a speed claim, so this page makes none.  The
+converged ``wb`` matches the 1D result to the agreement column, so the
+preconditioner changes the path, not the fixed point.  Reach for it when the
+1D iteration count is the bottleneck or stalls.
 
-One such stall is reproducible on the aspect-100 case at ``ns=51`` and
-``FTOL=1e-11``.  With ``PRECON_TYPE='GMRES'`` and
-``PREC2D_THRESHOLD=1e-6``, VMEX converges in 18 iterations, while VMEC2000's
-finite-difference block GMRES remains at a maximum residual of ``2.05e-9``
-after 1,600 explicit ``PRE_NITER`` steps.  A separate VMEC2000 1-D solve
-converges and agrees with the VMEX result in ``wb`` to ``1.3e-11`` relative
-and in the primary geometry to better than ``1e-5``.  The opt-in live test
-``test_live_vmec2000_exact_jvp_gmres_robustness`` reproduces all three paths.
-This is a convergence-reliability result, not a CPU speed or memory claim:
-the small VMEC2000 1-D solve is still much cheaper than a cold JAX process.
+One such stall: on the aspect-100 case at ``ns=51``, ``FTOL=1e-11``,
+``PRECON_TYPE='GMRES'`` and ``PREC2D_THRESHOLD=1e-6``, the opt-in live test
+``test_live_vmec2000_exact_jvp_gmres_robustness`` asserts that VMEC2000's
+finite-difference block GMRES stops between 1e-10 and 1e-8 and asks for more
+``PRE_NITER``, while VMEX converges below 1e-11 in fewer iterations than a
+VMEC2000 1D solve and matches its ``wb`` to 1e-8 relative.
 
-Memory
-------
+High-order strong-force kernel (VMEX 0.7.0, 2026-08-28)
+-------------------------------------------------------
 
-Peak resident memory is 0.6–1.5 GB on most bundled rows and about 3.3 GB on
-the largest bundled multigrid deck, but those figures are not a
-high-resolution upper bound. The spectral state is small; compiled transform
-graphs and implicit block factors are not. On high-mode decks the separable
-toroidal FFT synthesis reduces peak memory relative to the full mode-stacked
-contraction -- 8.21 GB against 9.63 GB on the 537-mode CTH-like case in
-``benchmarks/high_mode_fft.json`` -- while wall time is not improved there
-(983 s against 826 s cold, and a tie warm at 335 s); both runs in that record
-stop at the iteration cap, so they are compared on cost, not on a converged
-answer.  The stage-cache release keeps peak RSS at the largest single rung. A residual memory gap to
-single-purpose compiled implementations remains, dominated by XLA compiled
-executables and the runtime floor rather than by the physics working set.
-Current-head numbers for the reference high-mode deck are produced by the
-reproducible harness (``benchmarks/profile_high_resolution.py`` and
-``benchmarks/run_baseline.py``) rather than recorded here, so the
-documentation cannot go stale against the code.
+``benchmarks/strong_force.py`` measures the independent continuum oracle,
+pointwise ``J x B - grad(p)``, and its reverse-mode coefficient gradient.
+The record ``benchmarks/strong_force_m4.json`` (commit ``9481f64a``, arm64
+macOS, JAX 0.11.1) disabled the persistent compilation cache and used
+float64, five Fourier modes, eight radial elements, 64 points and 20 warm
+repeats:
 
-The new synthesis repacks the signed helical coefficients into separable
-theta/zeta blocks, evaluates zeta with ``jax.numpy.fft.irfft``, and
-performs a short real poloidal contraction. Undersampled toroidal grids fall
-back to the established dense DFT. The implicit callback also retains the
-dense-real path: a direct FFT tangent expanded complex Jacobian probe batches
-past 10 GiB RSS, and compiling fast primal plus dense tangent representations
-in one process exceeded 7 GiB. Fixed-boundary
-:func:`~vmex.core.solver.solve` and
-:func:`~vmex.core.multigrid.solve_multigrid` select separate FFT lanes only
-above 512 modes on accelerators and ARM CPUs. Smaller problems retain the
-dense-real lane: on the M4, FFT was 38--88% slower warm on three 5--8-mode
-routine decks and its 8% warm win at 128 modes came with a 13% first-solve
-loss. At 162 modes, both lanes reached the supplied 10,000-iteration cap with
-near-zero residuals, but dense was 4.3% faster (279.55 s versus 291.69 s).
-x86 CPUs also remain dense: on the x86 hosts measured so far the dense
-contraction beat the FFT repacking, while ARM CPUs and accelerators prefer
-the FFT path above the mode threshold.  Re-run
-``benchmarks/profile_high_resolution.py`` on the target host to re-derive the
-choice rather than trusting stale numbers.
-Explicit ``use_fft=True`` or ``use_fft=False`` always wins. Implicit AD
-retains the dense lanes and their existing checksum/storage gate. The shared
-runtime pytree is unchanged.
+======  ==============  ===============  =============  ==============  ================
+degree  cold force [s]  warm force [ms]  cold grad [s]  warm grad [ms]  d2/drho2 L2 err
+======  ==============  ===============  =============  ==============  ================
+3       1.43            0.290            1.84           0.552           2.87e-3
+**5**   2.12            0.458            2.63           0.853           **7.73e-7**
+7       2.90            0.720            3.43           1.23            6.09e-10
+======  ==============  ===============  =============  ==============  ================
 
-Stage-cache release
-~~~~~~~~~~~~~~~~~~~
+The accuracy column reconstructs ``rho^2 exp(s)`` and compares its second
+``rho`` derivative at 2001 points.  Degree 5, the default of
+:func:`~vmex.core.strong_force.lift_high_order_state` (the polish driver
+defaults to 3), keeps warm force and gradient evaluation below a
+millisecond; degree 7 is available for
+p-refinement and certification at a larger compile footprint (the record's
+``peak_rss_increase_mib`` fields).
 
-The one-shot CLI calls JAX's public ``clear_caches`` between distinct radial
-grids, so peak memory tracks the largest single rung instead of accumulating
-every rung's executables; the persistent on-disk compilation cache is
-unaffected.  Library :func:`~vmex.core.multigrid.solve_multigrid` and
-:func:`~vmex.core.multigrid.solve_free_boundary_multigrid` retain warm stage
-executables by default (the right policy for scans and repeated solves) and
-accept ``release_stage_cache=True`` to opt into the one-shot behaviour.
-The machine-scoped disk cache is bounded to 10% of the free disk (2 GiB
-floor, 20 GiB ceiling).  With jaxlib < 0.10 the cache defaults to off on
-every platform: those jaxlib releases crash (``SIGBUS``/``SIGILL`` on macOS,
-``SIGSEGV`` on Linux) inside
-``PyClient::DeserializeExecutable`` when loading a cached CPU executable
-holding more than a few hundred kernels (LLVM ORC materializes the
-per-kernel objects recursively on one fixed-size worker-thread stack), and
-every solve-scale executable exceeds that.  Upgrading jaxlib re-enables the
-cache automatically; ``VMEX_COMPILATION_CACHE=1`` forces it on for small
-workloads.  VMEX does not delete caches owned by other applications.
-The CLI and library compile solver lanes sequentially by default.
-``--prefetch-compile`` (or ``prefetch_compile=True`` in the library) overlaps
-the next rung's compilation.  This can reduce cold-start latency on a
-core-rich host, but increases peak memory and can contend with the active
-solve when the available CPU set is small.  ``--no-prefetch-compile`` remains
-an explicit spelling of the default.
+High-order low-physics preconditioner (VMEX 0.7.0, 2026-08-28)
+--------------------------------------------------------------
 
-Reproducible resource profiles
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``benchmarks/polish_preconditioner.py`` measures the high-to-low transfer,
+one stored exact raw-force block factor, and forward and transpose
+high-order applications.  The record ``benchmarks/polish_preconditioner_m4.json``
+(commit ``7bb306e0``, arm64 macOS, JAX 0.11.1) disabled the persistent
+compilation cache and used float64 and 20 warm repeats:
 
-``benchmarks/profile_resources.py`` is the common fixed-boundary,
-free-boundary, implicit-AD, and mirror resource harness. Each case runs in a
-fresh process and reports cold and warm wall time, OS peak RSS, device peak
-memory when the backend exposes it, residuals, iterations, native thread
-count, and output or gradient SHA-256. Prefetched fixed- and free-boundary
-rows also report XLA executable memory. Other rows state why no executable
-estimate is available.
+==  ====  ====  ==========  =================  =================  ===================  ===============
+ns  mpol  ntor  factor [s]  cold forward [ms]  warm forward [ms]  warm transpose [ms]  factor RSS [MiB]
+==  ====  ====  ==========  =================  =================  ===================  ===============
+5   3     0     4.61        98.1               0.0274             0.0269               193
+7   4     0     4.44        121                0.0289             0.0291               201
+5   3     1     5.58        159                0.0306             0.0336               217
+==  ====  ====  ==========  =================  =================  ===================  ===============
 
-The harness selects hardware only through the public ``device=`` API. It
-records inherited JAX platform environment settings instead of creating
-them. ``--device gpu --device-index 1`` selects a second visible GPU by
-passing its JAX device object, without a platform environment pin. Fetch the
-released mgrid assets before the default free-boundary row::
+Across these cases the transfer round trip is below ``1.2e-15``,
+forward/transpose duality below ``2.6e-15``, and the factored low-block
+residual below ``4.8e-12``.  Factor construction includes JAX assembly and
+compilation and dominates a first use, so factors are kept across Krylov
+steps and continuation stages until the quality policy requests a refresh.
+The table is an overhead gate at structural resolution, not a scaling claim.
 
-   python tools/fetch_assets.py --bundle reference-nc
-   python benchmarks/profile_resources.py --device cpu --out /tmp/vmex-resources.json
+Collocation-polish derivative gate (VMEX 0.7.1, 2026-08-29)
+-----------------------------------------------------------
 
-An external high-resolution deck can replace the fixed and implicit inputs
-without copying it into the repository::
+``benchmarks/polish_implicit.py`` measures matrix-free implicit-function
+tangents, adjoints, and the custom VJP of the least-squares stationarity
+equation the polish solves.  The record ``benchmarks/polish_implicit_m4.json``
+(commit ``e176b1ac``, arm64 macOS, JAX 0.11.1, persistent cache disabled)
+uses a 17-coordinate Solov'ev structural case whose primal reaches relative
+optimality ``1.13e-7`` in nine steps.
 
-   python benchmarks/profile_resources.py \
-     --cases fixed,implicit \
-     --fixed-input /path/to/input.hsx \
-     --implicit-input /path/to/input.hsx \
-     --vmec2000-executable /path/to/xvmec2000 \
-     --vmec2000-source /path/to/STELLOPT \
-     --vmecpp-python /path/to/vmecpp-python \
-     --vmecpp-source /path/to/vmecpp \
-     --vmecpp-threads 10 \
-     --out /tmp/hsx-resources.json
+- Warm medians over ten repeats: 6.44 ms tangent, 6.83 ms adjoint, 6.61 ms
+  custom VJP.  Cold compile-plus-execute: 7.13 s, 7.50 s and 9.43 s.
+- Incremental peak RSS, compilation included: 52.2 MiB, 156.4 MiB and
+  237.9 MiB.
+- Tangent and adjoint each take 17 Krylov iterations; their dot-product
+  mismatch is ``1.90e-10``, and the custom VJP agrees with the explicit
+  adjoint to ``8.75e-21`` relative squared error.
+- For the relative field-strength variance at ``rho=0.7``, the implicit
+  directional derivative agrees with two re-polished finite-difference
+  endpoints to ``5.11e-5`` relative error; those two solves take 21.22 s
+  against the 6.61 ms warm gradient.
 
-The default retains compiled stages for a repeated library solve.
-``--release-stage-cache --no-prefetch-compile`` instead measures the
-lower-peak, one-shot policy used by the CLI. Its second timing can reload
-released stages and is therefore not an in-memory warm-run measurement.
+Polish memory at production stellarator resolution (VMEX 0.8.1, 2026-09-03)
+---------------------------------------------------------------------------
 
-The report stores input and executable hashes, VMEX/JAX versions, VMEC++
-version, hardware, and git revision without storing private paths. Mirror
-scaling defaults to the ``5:7:4,7:13:7,9:17:9`` coarse/medium/fine ladder;
-``--mirror-ladder`` changes it explicitly.
+``benchmarks/polish_memory.py`` runs the polish setup three times on one
+build, changing only how the independent force sweep is scheduled, and
+records each arm's peak resident memory from ``os.wait4`` so an arm the OS
+kills still reports one.  The record is ``benchmarks/polish_memory_w7x.json``
+(commit ``529f1789``, x86_64 Linux CPU, JAX 0.9.2), on the W7-X standard
+configuration at ``MPOL = NTOR = 10``, ``ns = 51``, the resolution at which
+polishing was reported to run out of memory.
 
-Implicit-storage experiments (recorded so they are not repeated)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- ``flat``, the pre-0.8.2 sweep (one ``vmap`` over every evaluation point),
+  peaks at 34.2 GiB on the first certificate and exits at the chart stage.
+- ``batched`` schedules the same per-point kernel in automatically sized
+  batches.  Its certificate peaks at 3.05 GiB, but without checkpointing the
+  chart build still stores whole-grid linearization residuals and the arm
+  exits there too.
+- ``auto``, the shipped policy, also checkpoints the kernel so reverse-mode
+  passes stay per batch: 3.01 GiB at the certificate, 15.4 GiB at the chart,
+  and it completes.
 
-Column chunking bounds simultaneous design-variable probes, not the dominant
-dense ``O(ns * m_block**2)`` block bands and factors.  Candidate reductions
-were measured on a fixed high-mode implicit workload with
-``benchmarks/profile_high_resolution.py`` (which records resolution, devices,
-wall time, peak RSS, and the Jacobian's finiteness, norm, and SHA-256) and
-rejected, each for a concrete reason:
+The certificate's absolute L2 force error agrees across the three arms to 14
+significant digits; only the schedule differs.  This is a memory record:
+the batched arms trade time for memory, and the record's wall times include
+that trade.
 
-- an automatic chunk schedule was faster but raised peak RSS by more than a
-  third;
-- float32 bands/factors and row scaling made the demanding Jacobian
-  non-finite -- low precision is not a safe drop-in replacement;
-- a regularised scaled factorisation more than doubled the wall time;
-- matrix-free GMRES sampled ~24% less memory but did not finish one Jacobian
-  in over five times the block-path wall;
-- streaming the three radial probe colours preserved the checksum but the
-  allocator retained loop intermediates into factorisation, *raising* RSS;
-- differentiating a genuinely local three-surface kernel (which matches the
-  global residual to ``2e-12``, LASYM included) still failed the end-to-end
-  gate: compilation/allocator retention plus the unchanged dense factors
-  erased the local-temporary saving.  The kernel remains as a tested
-  foundation for a future lower-storage factor representation.
+Polish cost prediction (VMEX 0.8.1, 2026-09-03)
+-----------------------------------------------
 
-The conclusion stands until the factor *representation* changes: scalar
-objectives use the matrix-free reverse adjoint, vector objectives keep the
-exact block path, and any new storage candidate must reproduce the recorded
-norm/checksum and beat both wall and RSS end to end.
+``benchmarks/polish_cost.py`` records, per deck, what one Gauss--Newton
+linear product costs and what the configured iteration limits allow in the
+worst case.  These measurements are behind
+``PolishConfig.auto_budget_seconds``, the ceiling ``POLISH = AUTO`` prices a
+solve against before committing to it.  They are machine-specific, which is
+why AUTO measures at run time.  The record is
+``benchmarks/polish_cost_office.json`` (commit ``529f1789``, AMD 36-core
+x86_64 Linux CPU, JAX 0.9.2) at driver defaults, 80 nonlinear iterations of
+up to 600 linear products: the shaped tokamak prices at 1 126 s and the
+bundled Solov'ev at 501 s, both inside the default 3 600 s budget, while the
+finite-beta QA case prices at 87 848 s and is the deck AUTO turns away.
 
-GPU guidance
-------------
+Historical and generated records
+--------------------------------
 
-Measured behavior (``benchmarks/gpu_baseline.json`` plus the supplied
-high-mode HSX case):
-
-- **Per-iteration throughput favours the GPU across the tested low- and
-  moderate-mode cases** (0.83 ms vs 1.90 ms per iteration at
-  ``ns=35, mpol=2, ntor=2``; up to ~3x on NuhrenbergZille-class decks:
-  90 s vs 277 s wall).
-- **The GPU pays fixed per-solve overheads** (~0.2-0.4 s dispatch/transfer
-  floor plus compile or cache-load in cold processes), so small decks that
-  finish in well under a second of CPU work stay faster on the CPU
-  (``solovev``: 0.043 s CPU vs 0.29 s CUDA warm).
-- **Fast desktop CPUs change the calculus**: the GPU wins above were
-  measured against the office box's slower server cores, and no committed
-  record compares an idle Apple-Silicon CPU with that GPU on the same
-  workflow. On a modern desktop, treat the GPU as an option to measure for
-  very large or heavily batched solves, not a default.
-- **High Fourier mode count is a separate limit**: on the same office host,
-  the 858-mode HSX deck was 3.44x faster on CPU than on a cache-warm A4000,
-  despite its large aggregate work proxy.
-
-Device policy
-~~~~~~~~~~~~~
-
-:mod:`vmex.core.device` encodes this as a default placement rule using
-the per-iteration work proxy ``ns * mnmax * nznt`` (the cost driver of the
-batched-matmul transforms): the solve stays on CPU below
-``GPU_MIN_ITERATION_WORK = 100_000`` and above
-``GPU_MAX_SPECTRAL_MODES = 512``, and uses GPU in the middle region.  The
-calibration evidence and the full precedence rules — an explicit ``device=``
-argument always wins, ``device=None`` leaves placement to JAX, and an active
-``jax.default_device`` context or user-pinned platform makes ``"auto"``
-stand down — are in :ref:`explanation/architecture:Device policy (CPU/GPU)`.
-
-.. code-block:: python
-
-   solve(inp, device="cpu")
-   solve(inp, device="gpu")
-   with jax.default_device(jax.devices("gpu")[0]):
-       solve(inp)  # AUTO respects this context
-
-The mirror solver uses its own measured default because host SciPy repeatedly
-drives JAX callbacks: ``vmex.mirror`` solves choose CPU under ``"auto"``
-with the same explicit/``None``/active-context precedence (measurement in
-:ref:`explanation/architecture:Device policy (CPU/GPU)`).
-
-Persistent compilation cache
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-``vmex`` enables JAX's persistent XLA compilation cache on CPUs and
-accelerators, so the multi-second compile cost is paid once per machine, not
-once per process.
-
-On macOS CPU, VMEX also raises XLA's parallel-codegen partition count from 32
-to 128. This bounds LLVM linker recursion for large differentiated
-single-stage graphs and avoids native stack-guard failures without changing
-floating-point operations. An explicit user ``XLA_FLAGS`` value always wins;
-accelerator backends receive no CPU-only flag.
-
-.. warning::
-
-   **cwd-shadowing pitfall.** Running ``python`` with a working directory
-   that contains a ``vmex`` source checkout can shadow the installed
-   package as a namespace package: ``vmex/__init__.py`` never runs, the
-   persistent compilation cache is never enabled, and every solve pays the
-   full XLA recompile (measured ~7 s vs ~1.7 s warm on CUDA for solovev).
-   If GPU runs are mysteriously slow, check that
-   ``python -c "import vmex; print(vmex.__file__)"`` points where
-   you expect.
-
-Float64 is required (enforced at solver import). On GPUs this means fp64
-arithmetic, but the solve is latency- rather than FLOP-bound at benchmark
-sizes: over the 24 ``(ns, ncols)`` points in the ``tridiag`` block of
-``benchmarks/gpu_baseline.json``, the tridiagonal preconditioner solve
-measures an fp32/fp64 time ratio between ``0.95`` and ``1.16`` — halving the
-word width buys nothing — and its cost is 15 to 19 us per radial row,
-essentially independent of the number of spectral columns (a 2400-column
-solve costs what a 30-column solve costs).
-
-GPU decision sweep (office rig)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The following command generates a new CPU/GPU sweep on a dual-GPU host —
-warm per-iteration marginals on the ``ns x mnmax`` grid (``ns`` 51/101/201,
-``mnmax`` 8/128/288) for the production CLI lane and the multigrid ladder,
-the free-boundary NS sweep (steady vacuum lane, NESTOR included), the
-537-mode probe where the GPU default switches to FFT synthesis, and the
-fixed/free/gradient workflow profiles (cold+warm+memory)::
-
-   python benchmarks/run_gpu_matrix.py --office --out /tmp/vmex-gpu-office.json
-
-Each cell is a fresh subprocess selecting hardware through the public
-``device=`` API.  For the CUDA-graph A/B, repeat with command buffers and a
-second output file, then compare the two ``stepscan`` sections::
-
-   python benchmarks/run_gpu_matrix.py --office \
-       --xla-flags "--xla_gpu_enable_command_buffer=FUSION,CUSTOM_CALL" \
-       --out /tmp/vmex-gpu-office-cmdbuf.json
-
-These output files are generated by the commands; they are not committed
-measurements. The applied ``XLA_FLAGS`` are recorded in each output
-artifact's ``meta`` block.
-
-Reproducing the numbers
------------------------
-
-.. code-block:: bash
-
-   python benchmarks/run_baseline.py         # CPU suite -> benchmarks/baseline.json
-   python benchmarks/run_freeboundary_multigrid.py  # free-bdy ladder + VMEC2000 parity
-   python benchmarks/run_gpu_matrix.py       # GPU matrix -> benchmarks/gpu_baseline.json
-   python benchmarks/profile_production.py --device cpu
-   python benchmarks/profile_production.py --device gpu
-   pytest tests/test_parity_breadth.py     # end-to-end parity suite
-
-For a compact hardware-parity audit, ``device_parity.py`` runs the same small
-nonzero-shear equilibrium on explicitly selected CPU/GPU devices and records
-the forward state plus boundary derivatives of MHD energy, magnetic well, quasisymmetry,
-quasi-isodynamicity, and the mean traceable ``DMerc``, ``jdotb``, and
-Glasser ``D_R`` interior profiles in JSON. It does not set or require JAX
-platform environment variables::
-
-   python benchmarks/device_parity.py --quick --metrics mhd_energy --output /tmp/vmex-smoke.json
-   python benchmarks/device_parity.py --devices cpu,gpu --output /tmp/vmex-parity.json
-
-On a CPU-only host the default runs the CPU lane and marks the cross-device
-comparison as skipped; ``--devices cpu`` requests that lane explicitly.
-The first command is the short smoke lane; omit ``--metrics`` to audit all
-seven objectives.
-
-The parity suite needs the golden VMEC2000 fixtures (fetched release assets);
-it is skipped automatically when they are unavailable.
-
-Workflow observability harness
-------------------------------
-
-``benchmarks/profile_workflows.py`` is the one driver for timing, memory,
-and compile observability of the principal workflows. Every record separates
-build, per-stage execution (fenced with ``block_until_ready``), and — for the two
-process-level regimes — total process wall time, alongside trace/compile
-counts read from JAX's own ``jax_log_compiles`` records and peak host RSS::
-
-   python benchmarks/profile_workflows.py --list
-   python benchmarks/profile_workflows.py F1 F4 --regimes cold warm
-   python benchmarks/profile_workflows.py --all --regimes warm --out benchmarks/baselines/m4/
-   python benchmarks/profile_workflows.py F4 C2 --trace-dir /tmp/vmex-traces/
-
-The trace directory is generated output, not an archived benchmark record.
-
-The registry covers the workflow matrix defined in
-``benchmarks/profile_workflows.py``: fixed-boundary solves (single-grid,
-multigrid, polished), implicit value/gradient, vector residual
-plus full Jacobian, hot-restart scans, optimization campaigns (scalar
-L-BFGS-B and residual least-squares), single-stage plasma-plus-coils with
-ESSOS, the free-boundary implicit value and adjoint, symmetric-versus-LASYM
-pairs at matched resolution, mirror equilibria (fixed-boundary,
-free-boundary, and the periodic hybrid with its GK geometry export), Boozer
-transforms at one and many surfaces, and the epsilon-effective and Gamma-c
-diagnostics. ``--trace-dir`` captures one XProf trace per stage on a warm
-repeat, so every workflow class has execution-level evidence, not only wall
-times. Committed baselines live under ``benchmarks/baselines/`` (one
-directory per platform), each record stamped with the commit it measured
-and a clean-tree flag.
-
-Five timing regimes are never mixed in one number:
-
-``cold``
-   a fresh process with an emptied persistent compilation cache;
-``cache_reload``
-   a second fresh process reusing the cache the matching ``cold`` run
-   populated (the record carries the entry counts before and after, so a
-   reload claim always has logged evidence);
-``warm``
-   same process, same shapes and static arguments — the median of repeats;
-``warm_newparams``
-   same process, changed physical parameters at unchanged shapes (the
-   no-recompile contract, asserted by the harness's own tests);
-``reshape``
-   same process, changed resolution.
-
-Two measurement traps the harness handles, documented because they silently
-zero results otherwise: importing vmex sets ``jax_logging_level = "ERROR"``,
-which filters the records the compile counter reads (the harness imports vmex
-before installing its handler), and ``jax_explain_cache_misses`` breaks
-``jax.lax.platform_dependent`` on jax 0.9.2 inside the very solves being
-measured, so it is opt-in rather than default.
+``benchmarks/baselines/m4/`` holds historical schema-1 workflow records; their
+aggregate warm timing repeats only the first stage, so they do not establish
+complete-workflow performance.  ``benchmarks/INDEX.md`` lists every committed
+record with the script that generates it.

@@ -123,7 +123,7 @@ def test_multi_rhs_pullback_matches_scalar_vjp():
     ``test_block_response_forward_transpose_and_fd``.  The default
     ``solver="gcrot"`` solves the preconditioned adjoint, which differs from
     the raw one by the formulation difference where the anchor is not an exact
-    root (at most 1.1e-3 on record, benchmarks/adjoint_formulation_20260914.json).
+    root (at most 1.1e-3 on record, https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/adjoint_formulation_20260914.json).
     """
     _, cfg, p0 = _solovev_setup()
     x_star, mask = im.solve_implicit_with_aux(p0, cfg)
@@ -204,7 +204,7 @@ def test_block_response_forward_transpose_and_fd():
     # The default GCROT pullback solves the preconditioned adjoint.  Where the
     # anchor is not an exact root the formulations differ by O(|F|); the
     # largest difference on record is 1.1e-3, on the QI seed state
-    # (benchmarks/adjoint_formulation_20260914.json).
+    # (https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/adjoint_formulation_20260914.json).
     preconditioned = im.implicit_state_pullback_multi_rhs(
         p0, cfg, state, mask, cotangents
     )

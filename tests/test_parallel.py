@@ -6,8 +6,8 @@ bit, the outcome of solving each one alone (the concurrency only overlaps the
 GIL-releasing XLA execution windows — it touches no numerics).  These tests
 assert exactly that on a varied ensemble, plus the small behavioural surface
 (ordering, worker clamping, exception policy).  Strong-scaling *timing* is a
-measurement, not a unit test — it lives in ``examples/parallel_ensemble_scan.py``
-and ``docs/explanation/parallelization.rst``.
+measurement, not a unit test — it lives in ``examples/parallel_ensemble_scan.py``;
+the mechanism is explained in ``docs/explanation/architecture.rst``.
 """
 
 from __future__ import annotations

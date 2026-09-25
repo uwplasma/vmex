@@ -36,17 +36,17 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 2, 3]
-MAX_NFEV = [10, 10, 15]
+MAX_MODES = [1, 2]
+MAX_NFEV = [10, 15]
 
 # Targets:
-ASPECT_TARGET = 5.0
+ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 
 # Alternative settings for a larger design space:
-#   MAX_MODES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-#   MAX_NFEV = [10, 10, 15, 20, 25, 40, 50, 60, 60]
+#   MAX_MODES = [1, 3, 5, 7, 9]
+#   MAX_NFEV = [15, 25, 30, 40, 50]
 #   ASPECT_TARGET = 3.5
 #   MAGNETIC_WELL_TARGET = 0.07
 
@@ -62,7 +62,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1.0e-14
 FINAL_NITER = 8000
 
@@ -110,7 +110,7 @@ objective_function_terms = [
 report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 

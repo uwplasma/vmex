@@ -78,7 +78,7 @@ with the VMEC2000 cadence:
 
 The multigrid form of this coupling — carried vacuum state, per-stage NESTOR
 rebuilds, one activation across the ladder — is described in
-:doc:`multigrid`.
+:doc:`iteration`.
 
 External fields
 ---------------
@@ -129,7 +129,7 @@ enclosed plasma currents is the internal branch
 :math:`-\nabla G[\sigma]-\mathrm{BiotSavart}[\mathbf{J}]`, evaluated with an
 accurate singular quadrature (reused from the optional
 ``virtual_casing_jax`` package,
-required as ``virtual-casing-jax >= 0.0.7`` from the canonical
+required as ``virtual-casing-jax >= 0.0.8`` from the canonical
 ``uwplasma/virtual_casing_jax`` repository;
 :func:`~vmex.core.virtual_casing.surface_field_data_from_wout`
 adapts a converged boundary + field, and
@@ -184,14 +184,10 @@ boundary/current DOFs. The virtual-casing path applies outside the LCFS;
 :class:`~vmex.core.extender.VmecInteriorField` evaluates the live VMEC
 spectral field inside. Direct off-surface quadrature must stay away from the
 source surface and all targets must stay away from external coil filaments.
-For near-LCFS field-line tracing,
-:meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation`
-prepares the singular on-surface plasma field and gradient once, then uses the
-first-order continuation
-:math:`\mathbf B(\mathbf x_\Gamma+\delta\mathbf x)=\mathbf B_\Gamma+
-\nabla\mathbf B_\Gamma\delta\mathbf x+O(|\delta\mathbf x|^2)`. This removes
-the otherwise prohibitive source-grid refinement from every ODE step; direct
-quadrature remains the validation path farther from the LCFS.
+Near the surface the direct quadrature is replaced, point by point, by a
+target-graded rule (below); :meth:`~vmex.core.extender.VmecExtender.with_graded_quadrature`
+uses that rule everywhere, including under ``jit``. A finite field-line trace
+does not by itself validate magnetic topology.
 
 Virtual casing reconstructs the field produced by currents inside the plasma
 surface. It does not determine the external coil field: supply an ESSOS coil
@@ -222,9 +218,13 @@ holds one field period, so the default ``levels`` of ``from_wout``,
 ``2 nfp nphi`` toroidal points on the whole torus and a toroidal spacing
 :math:`h = 2\pi R/(2\,\mathrm{nfp}\,\mathrm{nphi})`, which improves with
 ``nfp`` rather than ignoring it. Keep :math:`d \gtrsim 2h`: one spacing gives
-about three digits, two spacings about five. The default
-``nphi = ntheta = 32`` on an ``nfp = 2`` QA configuration with
-:math:`R \approx 1` m has :math:`h \approx 0.05` m, about 0.3 minor radii.
+about three digits, two spacings about five. Unless ``nphi``, ``ntheta`` or
+``levels`` is given, the per-period sampling is sized from the boundary so
+that the requested ``digits`` are reached one minor radius out,
+:math:`\mathrm{nphi} \ge \mathrm{digits}\,\ln 10\,R_0/(2\,\mathrm{nfp}\,a)`
+with a floor of 32 (``_source_nphi_for_digits``); on the shipped QA WOUT
+(:math:`R_0/a = 15.9`, ``nfp = 2``) that gives 64, and a tokamak-like aspect
+ratio stays at 32.
 
 The requested ``digits`` does not bound the returned error. The schedule
 refines, target by target, until the achieved-error estimate below meets the
@@ -234,7 +234,9 @@ vacuum deck ``input.LandremanPaul2021_QA_lowres`` (``ctor`` of order
 :math:`10^{-11}` A, so the exact plasma field outside is zero) the returned
 field has these median | maximum errors relative to ``volavgB``, for 40
 targets along the outward normal, ``digits = 4``, versus distance in minor
-radii :math:`a` and per-period source grid ``nphi = ntheta = N``:
+radii :math:`a` and per-period source grid ``nphi = ntheta = N``. The runs
+date from 2026-09-13 (``benchmarks/review_20260913.json`` records the
+``N = 32`` rows), before the grid was sized from the boundary:
 
 .. list-table::
    :header-rows: 1
@@ -246,7 +248,7 @@ radii :math:`a` and per-period source grid ``nphi = ntheta = N``:
      - 0.1 a
      - 0.05 a
      - 0.02 a
-   * - 32 (default)
+   * - 32
      - 3e-5 | 3e-3
      - 6e-3 | 1.3e-2
      - 0.12 | 0.18
@@ -282,8 +284,8 @@ factor). Errors are relative to the RMS of :math:`|B|` on the surface. When any 
 :class:`~vmex.core.extender.ExteriorFieldAccuracyError` with
 ``accuracy_check="raise"``; ``accuracy_check="off"`` skips the estimate. The
 returned field is identical in every mode. Traced calls (``jit``, ``grad``,
-field-line integration) never check and can call the estimate directly. It
-costs 1.2 to 1.5 times the plasma-field evaluation it checks.
+field-line integration) never check and can call the estimate directly. The
+eager check evaluates the schedule a second time to obtain it.
 
 On 816 targets at ``digits = 4`` (the vacuum deck above at N = 32 and 64 over
 six distances, and the torus oracle on two schedules from 0.25 to 4 finest
@@ -297,15 +299,57 @@ the estimate now chooses the level. The estimate does not see truncation of the 
 grid itself: at d = a with N = 64 the error reached 26 times the estimate for
 one target in ten, while staying below :math:`3\times10^{-4}`.
 
-Use the direct path above about 0.5 a with ``N >= 64``. Below about 0.2 a use
-:meth:`~vmex.core.extender.VmecExtender.with_near_surface_continuation`: on
-the 2.5 % beta QA deck with a 32 x 32 grid it was within 0.1--0.2 % of
-:math:`|B|` at 0.1--0.2 a against a 256 x 256 direct reference, where the
-direct default was 12--31 % off, but its first-order continuation is worse
-than the direct path at 0.5 a (0.7--2 %) and the plan took about one to one
-and a half minutes to build on one laptop CPU. Between the two, check the
-estimate. These timings and errors are from a single review measurement on
-2026-09-13, not a committed benchmark record.
+Use the direct path above about 0.5 a with ``N >= 64``. Against a converged
+target-graded quadrature of the same surface data on the 2.5 % beta QA deck
+(ns = 51, remeasured 2026-09-22), the grid that
+:meth:`~vmex.core.extender.VmecExtender.from_state` chooses there
+(64 x 64 per period) returns the plasma field to 1e-13 at d = a and at worst
+1e-6 at 0.5 a, but 2.4 % at 0.2 a and order one at 0.1 a and closer; the
+estimate tracks the error (0.76 to 1.09 times it) and flags every such point.
+:meth:`~vmex.core.extender.VmecExtender.B` and its derivatives therefore
+switch, at every point whose estimate misses ``10**-digits``, to a
+target-graded periodic trapezoid rule
+(:func:`~vmex.core.virtual_casing.graded_plasma_field`): about the target's
+nearest surface point the angles are substituted,
+:math:`\theta=\theta^*+u-a\sin u` and likewise :math:`\phi`, and the rule
+is applied on a uniform grid in :math:`u`. The substitution is entire and
+periodic, so the rule stays spectrally accurate, while the node spacing at the
+target shrinks to one eighth of the distance. The surface data are
+interpolated spectrally from their samples, and the closed-form layer kernels
+give ``B`` and its derivatives in one pass. At the default 128 x 512 nodes it
+matches a converged reference of the same data to 1e-12 in the field and 1e-10
+in its gradient from one minor radius down to 0.01 a, and 3e-8 at 0.003 a; on
+the two-source torus it reproduces the filament field outside and minus the
+applied field inside to 6e-10 of the field scale 1 mm from a 0.3 m surface.
+It costs 6--12 ms per point on a loaded laptop CPU (2--5 ms at 32 x 128 to
+64 x 256 nodes, which keep the field to 1e-5 or better down to 0.01 a). Its
+error estimate is the difference from the same rule at three quarters of the
+nodes. ``near_surface="direct"`` restores the direct path everywhere;
+``near_surface="graded"`` or
+:meth:`~vmex.core.extender.VmecExtender.with_graded_quadrature` uses the
+graded rule everywhere, including under ``jit``, where the per-point switch is
+not available. The graded rule is our own construction for this global
+toroidal rule, validated numerically, not taken from a reference.
+
+Spatial derivatives of the direct path come from the same closed-form
+kernels on the finest schedule level, where nested ``jacfwd`` through the
+schedule used to differentiate the quadrature: the values agree to 1e-12. On
+the office workstation (A/B/A/B, ``benchmarks/extender_ab_20260923.json``,
+generator ``benchmarks/extender_ab.py``) the first ``B`` to ``gradgradgradB``
+calls at 16 targets took 2.9 s against 6.0 s, and a warm ``gradgradgradB``
+took 0.09 s against 0.50 s at 16 targets and 0.47 s against 1.98 s at 128.
+At 16 targets 0.05 minor radii out the default settings now cost 0.42 s warm
+(3.4 s first) where the direct path took 0.04 s, and returned a field 25
+times too large.
+
+The first-order near-surface continuation that preceded it has been removed:
+with a 32 x 32 grid it was off by 1.6--2.4 % of the plasma field (about 1e-3
+of :math:`|B|`) at every distance from 0.01 a to 0.1 a, a floor set by its
+bilinear on-surface table, and preparing it took 196--397 s and 18.5 GB of
+memory.
+
+Use the direct path's estimate, and refine the source data separately: the
+estimates do not bound source-data truncation.
 
 Coupled free-boundary adjoint
 -----------------------------
@@ -330,10 +374,27 @@ The public construction is explicit: create
 :func:`~vmex.core.freeboundary_implicit.make_free_boundary_config`, map the
 coil vector to a field with ``field_from_parameters``, call the implicit solve,
 stack physics rows with :func:`vmex.core.optimize.residuals_from_tuples`, and
-apply ``jax.value_and_grad``. ``take_free_boundary_gradients.py`` checks one
-direction against independent re-solves. The free-boundary single-stage
+apply ``jax.value_and_grad``. ``take_free_boundary_gradients.py`` certifies
+one direction by comparing the coupled GCROT adjoint with the boundary-Schur
+adjoint, two independent solvers of the same linear system; a central
+difference of re-solves has no usable step on this free boundary. The
+free-boundary single-stage
 previews pass the same scalar pair to SciPy. These examples need ESSOS
 (``pip install "vmex[coils]"``).
+
+Accuracy scope. Against finite differences of re-solves anchored by Newton
+steps on the same projected coupled residual, the adjoint agreed to
+1e-9--6e-7 on the 0.5 % beta single-stage objective. The forward solve does
+not apply that anchoring. A status-0 solve at ``ftol = 1e-12`` sat about 1.2e-2
+from the root in coefficient norm, and restarts from different references
+returned values differing by up to 12 %. The gradient is exact for the root;
+the value belongs to a nearby unanchored state. A zero-beta, zero-current
+free boundary exists only when a nested flux surface of the coil field
+encloses PHIEDGE. When an island chain or stochastic layer sits at that flux
+(a 4/9 chain in one optimized coil set, confirmed by field-line tracing),
+VMEX, VMEC2000 and VMEC++ limit-cycle instead of converging. Small beta does
+not regularize it. Keep the transform away from the resonance, or reduce
+PHIEDGE inside the good surfaces.
 
 This path is currently limited to reverse mode. Its low-memory host Krylov
 lane peaks near 3--5 GB on the bundled coarse examples, but the first coupled
@@ -341,7 +402,11 @@ transpose still takes about one to two minutes to compile on the reference
 CPU and is not yet a practical GPU path. Its ``device="auto"`` policy therefore
 uses the CPU on an accelerator host unless the process already pins JAX
 placement, while retaining an explicit per-call GPU override.
-``adjoint_solver="boundary_schur"`` enables the boundary-Schur transpose. It
+Three transpose solvers are available through ``adjoint_solver``:
+``"coupled_gcrot"`` (the certified default), ``"edge_response"``, which
+iterates the coupled transpose on a dense model of NESTOR's edge response
+built once per gradient, and ``"boundary_schur"``, the boundary-Schur
+transpose. The boundary-Schur solver
 differentiates one three-surface force row at a time, retains every terminal
 radial stencil coupling in the bulk, isolates the one evolved edge row that
 contains NESTOR's response, and eliminates the radial bulk with a

@@ -66,9 +66,9 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 71
 FINAL_FTOL = 1e-14
-FINAL_NITER = 8000
+FINAL_NITER = 20000
 
 # Every output file name contains this:
 OUTPUT_NAME = "QA_global_optimized"
@@ -133,7 +133,7 @@ def value_and_gradient(y):
     return value, scales * gradient
 
 
-monitor = opt.OptimizationMonitor(problem, stream=None)
+monitor = opt.OptimizationMonitor(problem)
 best = {"y": np.zeros_like(x0), "value": np.inf}
 
 

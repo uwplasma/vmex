@@ -79,14 +79,15 @@ direction = direction.at[-coils.curves.n_base_curves:].set(
 direction /= jnp.linalg.norm(direction)
 autodiff = jnp.vdot(gradient, direction)
 
-# The certificate is the second adjoint, not a difference quotient. A free
-# boundary re-solve is path dependent, so a central difference here has no
-# usable step: above about 1e-2 truncation dominates and below it the solve's
-# own floor makes the quotient change sign. The coupled GCROT adjoint and the
+# The certificate is the second adjoint. The coupled GCROT adjoint and the
 # edge Schur adjoint are independent solvers of the same linear system, so
-# agreement between them certifies both. How close they agree is set by how
-# tight a root the equilibrium is: 1.6e-04 at the settings above and 1.6e-02
-# at the smoke-test settings, where ftol is 1e-7.
+# agreement between them certifies both. Every solve is Newton-anchored on
+# the coupled plasma--vacuum root they linearize, so they agree to 3.5e-10 at
+# the settings above and 1.1e-11 at the smoke-test settings (ftol 1e-7).
+# Before the anchor the solves stopped wherever ftol let them, 1.5e-04 and
+# 1.6e-02 apart, and the central difference below read 0 at the smoke-test
+# settings; it now agrees with both to 1.1e-04 and 1.1e-05, the difference
+# quotient's own truncation at this step.
 schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
 schur = jnp.vdot(schur_gradient, direction)
 disagreement = jnp.abs(autodiff - schur) / jnp.abs(schur)

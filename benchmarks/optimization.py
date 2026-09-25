@@ -114,7 +114,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int)
     parser.add_argument("--forward-ftol", type=float)
     parser.add_argument("--forward-max-iterations", type=int)
-    parser.add_argument("--max-fsq-ratio", type=float, default=1.0e6)
+    parser.add_argument("--max-fsq-ratio", type=float, default=1.0e2)
     args = parser.parse_args()
 
     compile_log = CompileLog()

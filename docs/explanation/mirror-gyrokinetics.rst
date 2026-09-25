@@ -156,16 +156,28 @@ drifts.  The spline recovery matrix and mode numbers are static arrays.  The
 mapping imports no GKX code, so VMEX remains independently installable; GKX's
 adapter only converts the returned dictionary to its generic sampled geometry.
 
-The validation ladder is deliberately ordered:
+The validation ladder is deliberately ordered. Rungs 1--3 are met by tests in
+this repository; rung 4 is partly measured; rungs 5 and 6 belong to GKX or are
+open.
 
-#. positive Jacobian, divergence, axis/frame closure, and field-line closure;
-#. constant equal-arc ``gradpar``, positive perpendicular metric determinant,
-   and the independent spectral identity for ``bgrad``;
-#. JAX directional derivatives against centered finite differences;
-#. CPU/GPU value and gradient parity plus cold/warm JIT and memory audits;
-#. GKX constant-field and manufactured mirror-force tests;
-#. linear resolution/eigenfunction convergence, then quasilinear and matched
-   nonlinear audits, then held-out differentiable optimization.
+#. **Met.** Positive Jacobian, divergence, axis/frame closure, and field-line
+   closure: the hybrid solve tests in ``tests/mirror/test_splines.py`` check
+   the Jacobian sign, divergence, and axis closure;
+   ``tests/mirror/test_turbulence.py`` checks the exported closure residual and
+   rejects a line that does not close.
+#. **Met.** Constant equal-arc ``gradpar``, positive perpendicular metric
+   determinant, and the independent spectral identity for ``bgrad``
+   (``test_closed_mirror_contract_is_periodic_equal_arc_and_positive``).
+#. **Met.** JAX directional derivatives against centered finite differences
+   (``test_geometry_directional_derivative_matches_centered_difference``).
+#. **Partial.** Cold/warm JIT and memory profiles of the hybrid solve plus this
+   export are recorded on CPU as workflow ``M3`` of
+   ``benchmarks/profile_workflows.py`` (``benchmarks/baselines/m4/M3_*.json``);
+   CPU/GPU value and gradient parity is not recorded.
+#. **External.** GKX constant-field and manufactured mirror-force tests live in
+   GKX, not here.
+#. **Open.** Linear resolution/eigenfunction convergence, then quasilinear and
+   matched nonlinear audits, then held-out differentiable optimization.
 
 Open-ended mirror roadmap
 --------------------------

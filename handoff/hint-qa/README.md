@@ -1107,5 +1107,6 @@ HINT current/force state, common topology result, full raw restart package or
 independent cold reproduction exists. Its earlier CI run passed the fast,
 physics, quality and two-device checks, but the C2 manifest lane and aggregate
 gate failed; that failure must be reevaluated on the current CI definition.
-Do not interpret this branch's older `plan.md` diff as replacing the merged
-[current research plan](https://github.com/uwplasma/vmex/blob/main/plan.md).
+The merge retains the
+[current research plan](https://github.com/uwplasma/vmex/blob/main/plan.md);
+this README carries the HINT-specific operational record.

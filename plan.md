@@ -1,126 +1,1402 @@
 # VMEX research plan
 
-**HINT comparison checkpoint, 2026-09-21.** Main is now `45f3a7aea` with #409 merged; the
-HINT branch already contains it. The compact [QA protocol](handoff/hint-qa/README.md)
-is the canonical study plan and evidence record. The proposed replacement
-product plan [#413](https://github.com/uwplasma/vmex/pull/413) remains open;
-reconcile its six research lanes after integration rather than retaining two
-operational queues. The historical product plan below is unchanged here.
+This file is the complete handoff for the VMEX research programme: a
+collaborator should be able to resume from it alone. It has two parts.
 
-The HINT branch retires its obsolete solver/cache/refinement implementation;
-it adds no VMEX solver changes. Historical CPU/GPU and derivative evidence
-must be requalified. Merged #409 fixes live surface assembly; #410 owns dependency
-floor validation, #416 fixes history-dependent free-boundary recovery, and
-#417 ties derivative admission/reuse to measured refined states; draft #418
-closes its direct-API validity-check bypass. Require review
-and current checks, then test the integrated revision on the exact QA cases.
-The rank-based lift candidate #414 supersedes the rejected per-span sampling
-rule; neither it nor #412's force-reporting work certifies general 3-D polishing.
+- **Part I, current state and acceptance gates (2026-09-22).** The
+  authoritative operational plan: status, open pull requests, the maintainer's
+  decisions, CI capacity, the six research lanes (A–F) with their
+  acceptance gates, dependencies, and the continuation logbook. Checkpoint:
+  main is VMEX 0.11.0 (#425, `780eb86e`) plus #427 (`equilibrium_from_x`
+  returns the refined state the objective read, `084f6c0e`) and #428 (m=1
+  family closure test for the mean-iota re-solve gap, `604e6a76`), checked
+  2026-09-22 UTC. Recheck remote heads before use.
+- **Part II, historical plan and logbook (2026-09-13 to 2026-09-20).** The
+  previous plan kept in full: baseline evidence, root causes, the phased
+  programme with its measurements and kill rules, force-balance decisions,
+  former PR dispositions, the runbook, agent briefs and the execution logbook.
+  Superseded sections are marked with what superseded them; disproved claims
+  stay in place, marked disproved.
 
-Execute three independent bounded lanes now:
+To resume: read Part I top to bottom, check the open-PR table against GitHub,
+then continue at the first unmet gate of the lane you own. Consult Part II for
+why a gate exists, what was already measured and what must not be repeated.
+Older revisions (for example the 2026-09-06 plan at `f09288b3`) remain
+readable through git history.
 
-1. Qualify the integrated VMEX 0.5% root, physical diagnostics and captured
-   CPU/GPU field/response arrays. Follow with exact-case FD/Taylor/duality and
-   free-boundary repeatability; a finite example output is not a gradient oracle.
-   The bounded two-lift screen is strongly representation-sensitive: control
-   reconstruction error before using its force norm to admit the native root.
-   A native-form diagnostic agrees with independent Cartesian derivatives to
-   4.16e-9 relative but still has large force residuals; qualify common-target
-   radial/angular convergence before accepting the equilibrium. A fixed-state
-   16x16 to 32x32 quadrature check changes global force L2 by only 0.0875%
-   but an outer radial band by 9.87%. The 32x32 to 48x48 follow-up contracts
-   that band change to 0.0155%. Changing only NS31 to NS61 reduces native
-   force L2 by 88.2%, but mean force/mean pressure gradient remains 0.451.
-   NS121 converges but changes force L2 by another 24.47%, with mixed
-   per-radius trends. NS121 measurement refinement changes force L2 only
-   0.0104% globally and less than 0.028% per band. Solver angular20-to-40 changes
-   force L2 by 1.92% at NS121. Qualify its measurement and isolate Fourier
-   truncation and radial reconstruction next; no radial or physical certificate
-   follows from the three-level ladder. At NS121/angular40, MPOL7-to-8
-   reduces force L2 by 47.65% and every radial band by 32.1–51.9%; Fourier
-   truncation is material. Qualify measurement on that state and separate
-   poloidal/toroidal truncation before attributing the remaining radial error.
-   GPU AUTO exposed mixed callback devices; explicit placement timed out at
-   660 s without arrays. Draft #421 at `95aed755` now follows #418 and
-   certifies the exact returned coefficients on the runtime device. Its integrated CPU modules pass 52 tests,
-   with five focused two-device tests and a real small CPU solve. A GPU-facing
-   check used a CPU root; an accelerator-root attempt stopped during priming
-   at 120 s before callback entry. Qualify that path before retrying the complete
-   GPU capture; no CPU/GPU parity or specific timeout cause is established.
-2. Resolve HINT current evolution and Ohm/Faraday balance before extending
-   relaxation or changing resistivity. The bounded later-time diagnostic now
-   confirms source normalization, while attained response current on the same
-   support averages only 19.903% of the target at code time 1.09. The new
-   term-rate diagnostic shows active imposed drive opposed by response and
-   ideal terms, with net -9.55 kA/code-time. The original-length block to
-   time 1.18 confirms continuing current relaxation; force improves overall
-   but rebounds after 1.16. A drive-off control reverses the current trend
-   and improves both force normalizations over the same block; its final
-   checkpoint write failed due a read-only restart copy. Preserve the complete
-   logged series as partial evidence, plus the earlier missing-input failure.
-   Repair preflight/output handling before requesting an auditable endpoint;
-   neither the drive-off trajectory nor the driven block is an equilibrium.
-   The writable-copy repetition now exits zero with a readable time-1.18
-   endpoint, 20 snapshots, finite fields and unchanged retained input. Its
-   history and non-timing diagnostics exactly reproduce the partial run.
-   Native endpoint sampling at 192 common targets now measures driven/off
-   differences of 2.02591 mT RMS and 5.13595 mT maximum. Classify targets
-   against relaxed support next; this control sensitivity is not inter-code error.
-   The native 8x8x8 stencil audit now finds only 5/192 pressure-clear stencils
-   and 14/192 wholly inside the limiter. This is not pointwise membership.
-   Retain the native ss<jcuts eligibility mask, excluding inactive boundary
-   layers, with its frozen trace time and threshold. It is an amplitude-
-   independent conservative source region, not evidence of nonzero current;
-   attained response currents can extend beyond it. Vacuum flux is not a
-   substitute for this native diagnostic.
-3. Complete the reproducible preprocessing and raw-data package. The published
-   compact native samples reproduce all six field metrics, but do not recreate
-   an equilibrium without the missing prepared fields and restart assets.
+# Part I. Current state and acceptance gates (2026-09-22)
 
-M8/N6 measurement32-to48 now reproduces the exact state and passes global/per-bin
-force-L2 limits (+0.00921% globally, at most 0.02630% per bin). The full gate
-fails: one mean-force ratio changes 1.36978%, and the outer pointwise-normalized
-metric changes 1.01106%, exceeding 1%. Exact native coefficients were saved and
-hash-verified. Full public replay now reproduces all 17 angular48 arrays exactly.
-The angular48-to64 follow-up passes all prospective gates (largest bin mean/
-ratio change 0.2442%, pointwise-normalized change 0.2823%). Retain the earlier
-failed refinement. Proceed to separate M9/N6 and M8/N7 sensitivities with saved
-states; measurement sufficiency does not certify Fourier/radial convergence.
-The pair now completes: M9/N6 force L2 rises 10.18% globally and 50.84% in
-the innermost sampled bin; M8/N7 changes -0.422% globally. Physical boundary
-coefficients remain identical. Both angular64-to80 replays now pass the
-unchanged gates (maximum mean/ratio/pointwise changes 0.104% and 0.182%).
-Investigate the nonmonotonic poloidal response and residual-family provenance
-before more solves; measurement sufficiency is not physical convergence.
-Small explicit native CPU/GPU solves at #423 also pass placement checks,
-including a converged asymmetric case. A separate combined check now follows
-that native result through the callback and certificate, preserving exact
-coefficients on each platform; CPU/GPU maximum difference is 2.74e-12.
-Refinement was disabled and no observable-specific primal tolerance selected:
-the refined exact QA case still requires integrated GPU qualification.
-#422 is merged into #421 as e94e46c6 after independent review and 11 explicitly
-JIT-enabled two-CPU cases. The parent remains open; no main promotion follows.
-Preserve the merged #422 branch while the new exact-state certificate candidate
-#423 depends on it. Follow-up 02bf33d9 already handles boundary-transform
-roundoff and public-measurement device placement; retire the duplicate local
-correction and qualify the integrated stack instead. Main 45f3a7ae is already
-an ancestor of this branch; no rebase or history rewrite is needed at this
-checkpoint. Latest main CI runs were cancelled, not an integrated green gate.
-The latest #413 plan records failed independent-root/fine-grid QI gates and an
-unqualified finite-beta optimization derivative. These remain separate product
-research, not prerequisites to the forward HINT field comparison.
+## Resume here (after 0.11.1, 2026-09-23)
 
-Then establish matched time/grid/wall/trace convergence at 0.5%, compare total
-and response fields with separate error budgets, and qualify 2.5% and common-
-tracer topology. Keep prescribed-boundary reconstruction separate from matched
-free-boundary equilibrium, and preserve the known 2.5% coil/WOUT mismatch.
-The fresh-grid response RMS/max differences of 0.074009/0.321955 mT are startup
-diagnostics, not inter-code error or equilibrium convergence. Current CPU root
-and #409 exterior-example checks pass; the portable capture command reproduces
-all 15 field/derivative/VJP arrays byte-for-byte across two CPU processes; native diagnostics pass short serial/MPI,
-off/on and zero-source controls. The later-time accounting measurement passes; current closure, integrated
-GPU parity and research acceptance remain open. See the protocol for exact sources,
-commands, metrics, test scope and publication gates.
+**0.11.1 is released** (tag `v0.11.1`, on PyPI). It carries #427, #428, #413,
+#429, #433, #431, #432, #435, #430, #441, #437, #434, #436, #438, #439, #411,
+#442, #440 and #426; the CHANGELOG entry has the measured numbers. The last
+six were landed from one green integration run (#444) whose tree is exactly
+main's after the merges.
+
+**Order of work for the next session (maintainer, 2026-09-23):**
+
+1. **Make CI faster without losing tests or coverage.** No self-hosted
+   runners or paid plan for now.
+   - Evidence: the last full main run took 121 min wall for 254 job-minutes,
+     with a 22.5-minute longest job. The wall time is queueing on the free
+     plan's 20 concurrent jobs, shared across uwplasma, so reducing
+     job-minutes is what helps; further sharding would not.
+   - Cache installs across jobs (uv or pip cache keyed on
+     `pyproject.toml`/lock): all 32 jobs reinstall their dependencies.
+   - Reuse JAX compilation across CI runs with a read-mostly persistent
+     compilation cache restored by `actions/cache`: populate it once per key,
+     then open it read-only in test workers, which avoids the eviction-lock
+     hang that got `VMEX_COMPILATION_CACHE` disabled.
+1b. **Coherent dependency floors across the stack (maintainer, 2026-09-23).**
+   A user should never have to upgrade packages by hand after
+   `pip install "vmex[all]"`. Reported on 0.11.1: `pip install -e .` into an
+   environment with equinox 0.11.11 installed solvax 0.26.0 and jax 0.10.2,
+   and the first `vmex <input> --plot` crashed on import
+   (`solvax -> equinox -> jax.interpreters.batching.NotMapped is deprecated`);
+   upgrading equinox by hand to 0.13.8 fixed it. solvax 0.26.0 declares bare
+   `equinox` and `jax` with no floors, so pip keeps an incompatible old
+   equinox.
+   - solvax: add an `equinox` floor at the first release compatible with the
+     jax versions solvax supports (verify; 0.13.x worked with jax 0.10.2), and
+     a `jax`/`jaxlib` floor; release solvax and raise vmex's solvax floor to
+     it.
+   - vmex: raise floors to versions that are known to work together (jax,
+     jaxlib, solvax, booz_xform_jax, virtual-casing-jax, essos, neo-jax, gkx,
+     equinox if imported), so `vmex[all]` resolves to a coherent, current
+     set; do the same audit in the sibling packages (booz_xform_jax,
+     virtual_casing_jax, ESSOS, neo-jax, gkx), each declaring floors for what
+     it imports.
+   - Guard it: a CI job that installs `vmex[all]` into an environment
+     pre-seeded with old versions of the transitive dependencies (e.g.
+     equinox 0.11.x, jax 0.5) and runs `vmex examples/data/input.solovev
+     --plot`, so a missing floor fails CI instead of a user's first run; plus
+     the existing minimum-versions job at the new floors. Keep the README
+     install table's floors in sync (a test already checks them).
+   - Related, same report: pip warned that other installed packages
+     (desc-opt, interpax, quadax, orthax, jax-finufft) pin jax below 0.10;
+     document in the installation page that DESC interoperability needs a
+     jax that DESC supports, or a separate environment.
+1c. **README: say that polishing is requested from the input file.** A
+   `! VMEX: POLISH_FORCE_BALANCE = .TRUE.` line at the top of an INDATA deck
+   is a comment to VMEC2000 (ignored there) and a directive to VMEX
+   (`examples/data/input.shaped_tokamak_pressure_polished`). The README's
+   polishing section should state this, with the exact line.
+2. **Example timings still open from #426.** 18 optimization scripts were
+   timed under five minutes with a converged NS = 71 check; scripts over
+   budget kept their previous defaults. The untimed scripts are listed in
+   #426's body.
+3. **`vmex --trace`: fast reactor-scale alpha losses.** The flag already exists
+   (0.10.0); the work is new defaults (1000 particles, 1e-2 s), scaling on by
+   default with the scaling target fixed, a converged step, and speed. Full
+   scope, ESSOS PR order, phases and acceptance gates: section T below.
+4. **Mirrors:**
+   - Verify accuracy (analytic and independent references, the Pleiades
+     reference where available) and solve speed of the fixed- and
+     free-boundary mirror solves; fix what is slow or wrong. On the office
+     machine the QI hybrid (389 s) and any finite-beta scan exceed five
+     minutes (#434).
+   - Make the mirror examples as concise as the tokamak and stellarator
+     examples: the API does the assembly, the user still sees parameters,
+     geometry and resolution. Add `examples/mirror/mirror_fixed_boundary_axisymmetric.py`.
+   - Solve mirror configurations from input files (`vmex <input>`,
+     `vj.solve_file`).
+5. **Later (not scheduled):** cut compilation cost on free- and
+   fixed-boundary solves (cold compile is 25-60 % of example wall time; about
+   120 s fixed cost on the free boundary, #439).
+
+**Open PRs:**
+
+| PR | State | Next step |
+|---|---|---|
+| #301-#304, #306, #366, #367, #302 | winding surface and HINT comparison; untouched by instruction | Keep in their PRs, unmerged. |
+| #417, #418, #421, #423, #424, #419, #371, #377, #415 | superseded or failed directions | Close with pointers (left to the maintainer). |
+
+Other follow-ups recorded in the merged PRs: `multigrid.solve_file` should
+pass the free-boundary metadata to the wout writer (#430); the graded rule
+under a trace needs `near_surface="graded"` and the default source grid is
+sized for d = a only (#441); the exterior-field VJP differs 2-4x from
+independent re-solves on boundary directions because of the m = 1 gauge
+drift (#428, #430). The next weekly run is the first to test #437's core-1
+cap and examples fixes.
+
+Measurement caveat: most timings in these PRs were taken on a shared laptop
+or office machine under load; ratios come from interleaved A/B runs, and
+absolute wall times are upper bounds.
+
+## T. Fast reactor-scale alpha losses: `vmex --trace`
+
+**Priority:** after the CI-speed work and the 0.11.1 follow-ups (#443), before
+the mirror work. Scoped 2026-09-23 against `origin/main` `b5f5267ef` and ESSOS
+`main` `c9b41222e` (= ESSOS 0.17). Research only; nothing below has been
+implemented yet.
+
+### T.0 What already exists (do not rebuild it)
+
+`vmex --trace` shipped in 0.10.0 (`958ffde1a`). It is wired like `--plot` and
+`--booz`: it runs on a `wout_*.nc` or after a solve, and
+`--scale` refuses to combine with it. The code is `vmex/core/tracing.py`
+(`essos_vmec_field` and `trace_alphas`, which return `AlphaTracingResult`),
+`_run_trace` in `vmex/core/cli.py`, and `plotting.plot_tracing`. It writes four
+figures: `*_trace_trajectories.png`, `*_trace_vparallel.png`,
+`*_trace_loss_fraction.png` and `*_trace_energy_error.png`. The tracer is
+`essos.dynamics.Tracing(model="GuidingCenter")`: fixed-step Dopri8 in VMEC
+`(s, θ, φ)`, `vmap` over particles, and sharding over `jax.devices()`.
+Particles start on s = 0.25 with uniform θ, φ over one field period, uniform
+pitch in [-1, 1) and 3.52 MeV. A particle counts as lost when a sampled s is
+at least 0.99. The defaults are 200 particles, `tmax = 3e-4` s and
+`dt = 5e-7` s. It does not scale the equilibrium; the docs tell users to run
+`vmex --scale` first. The feature is therefore a change of defaults plus
+built-in scaling, a fix to the scaling target, and a speed programme. It is not
+a new command.
+
+### T.1 Measured baseline: too slow and not converged at the default step
+
+The runs used the ESSOS 0.17 wheel, JAX 0.10.2 and diffrax 0.7.2 on an Apple
+M3 Max (10P+4E cores). The script is `scratchpad/trace-plan/bench.py`.
+Particles were launched on s = 0.25 with the vmex sampling, and each wall time
+includes the per-call JIT.
+
+| wout (Nyquist modes) | particles × t | dt / tolerance | devices | wall | loss |
+|---|---|---|---|---|---|
+| LP QA reactorScale (128) | 20 × 1e-3 s | 5e-7 fixed | 1 | 7.7 s | 0 |
+| LP QA reactorScale (128) | 100 × 1e-3 s | 5e-7 fixed | 1 | 31.3 s | 0 |
+| LP QA reactorScale (128) | 100 × 1e-3 s | 5e-7 fixed | 10 | 6.8 s | 0 |
+| LP QA reactorScale (128) | 200 × 1e-3 s | 5e-7 fixed | 10 | 11.6 s | 0 (3 axis) |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | 1e-6 fixed | 10 | 23.9 s | **8.0 %** |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | 5e-7 fixed (vmex default) | 10 | 47.6 s | **3.5 %** |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | 2.5e-7 fixed | 10 | 83.2 s | **2.5 %** |
+| ARIES-CS `n3are` (450) | 200 × 2e-3 s | adaptive Dopri8, rtol = atol = 1e-7 | 10 | 465.7 s | **2.5 %** |
+
+The first four rows ran at load average ~4–5 and the ARIES-CS rows at ~7–13,
+with other sessions active. Treat the times as upper bounds; the ratios are
+reliable.
+
+Findings:
+
+1. **The default step overestimates losses.** At `dt = 5e-7` a 3.5 MeV alpha
+   (~1.3e7 m/s) moves ~6.5 m per step, which is 40 % of an ARIES-CS field
+   period. The loss fraction converges to 2.5 % only at `dt <= 2.5e-7`, where
+   the fixed and adaptive runs agree. ESSOS's VMEC field interpolates linearly
+   in s, so ∂/∂s is piecewise constant. That caps the effective order of
+   Dopri8.
+2. **Cost is set by the right-hand side.** One GC right-hand side takes about
+   8–10 µs per particle. Each evaluation performs about ten Fourier syntheses
+   over all Nyquist modes plus `jacfwd`/`grad` passes, and Dopri8 uses 13
+   stages per step. Scaling is linear in particles × time. The adaptive runs are
+   5.6× slower than fixed steps because the `vmap`'d `while_loop` runs all
+   particles in lockstep.
+3. **Extrapolated cost of 1000 × 1e-2 s at the converged `dt = 2.5e-7`:**
+   ~19 min for QA and ~35 min for ARIES-CS on 10 host devices. On the
+   single-device default this becomes ~3–6 h. The 5-minute target needs
+   **≥ 7×** for 1000 particles and **≥ 35×** for 5000.
+4. **Multi-device sharding on CPU is almost free.** Setting
+   `--xla_force_host_platform_device_count=10` gave 4.6× on the same run
+   (31.3 → 6.8 s). vmex does not set it today.
+5. **Axis handling.** ESSOS#47, merged in 0.17, already stops VMEC GC orbits at
+   `s <= 1e-6` and counts them as `total_particles_unresolved`. Axis crossings
+   are still not continued: 3–7 of 200 orbits within 2 ms. Over 1e-2 s they
+   bias the confined count and discard statistics.
+
+### T.2 Scaling target: fix it before tracing through it
+
+`aries_cs_scales` (`vmex/core/scaling.py`) returns
+`(5.7/|wout.b0|, 1.7/Aminor_p)`. The wout `b0` is the toroidal field at the
+axis in one plane. It is neither of the literature normalisations:
+
+| source | length | field |
+|---|---|---|
+| ARIES-CS design (Najmabadi et al., FST 54, 655, 2008) | R = 7.75 m, A = 4.5 | 5.7 T average on axis |
+| Landreman & Paul, PRL 128, 035001 (2022), arXiv:2108.03711 | a = 1.7 m | B₀₀(s=0) = 5.7 T (Boozer (0,0) on axis) |
+| Landreman, Buller & Drevlak, PoP 29, 082501 (2022), arXiv:2205.02914 | a = 1.70 m | ⟨B⟩ = 5.86 T (volume average) |
+| Bader et al., NF 61, 116060 (2021); Paul et al., NF 62, 126054 (2022), arXiv:2208.02351 | V = 444 m³ | ⟨B⟩ = 5.86 T |
+| reference wouts in ESSOS/SIMSOPT: `wout_n3are_R7.75B5.7.nc`, `wout_LandremanPaul2021_QA_reactorScale_lowres.nc` | `Aminor_p` = 1.7044 m | `volavgB` = 5.8646 T (b0 = 5.33 and 5.18 T) |
+
+The current rule rescales the ARIES-CS wout itself by **1.070** in B, and the
+reactor-scale LP QA wout by **1.101**, which gives ⟨B⟩ = 6.46 T. A 7–10 % field
+error shrinks orbit widths and understates losses.
+
+**Decision.** Default to `Aminor_p = 1.7044 m` and `volavgB = 5.8646 T`, the
+ARIES-CS wout's own values and the de facto target of the shipped reactor-scale
+files. Under that rule both reference wouts map to factors of 1.000. Keep the
+LP-PRL convention (B₀₀(s=0) = 5.7 T, a = 1.7 m) as a named option, computed
+from `bmnc(m=0, n=0)` extrapolated to the axis. `ScaleProbe` gains `volavgB` so
+`aries_cs_input_scales` follows the same rule. Update the `--scale` help, the
+docstrings and the howto.
+
+### T.3 CLI contract
+
+```console
+vmex wout_case.nc --trace                       # 1000 alphas, 1e-2 s, scaled to ARIES-CS in memory
+vmex input.case --trace                         # solve, then the same
+vmex wout_case.nc --trace --trace-particles 5000 --trace-tmax 1e-2
+vmex wout_case.nc --trace --trace-no-scale      # trace the equilibrium as given
+```
+
+- **Flag names.** Keep the released names (`--trace-particles`,
+  `--trace-tmax`, `--trace-s`, `--trace-seed`, `--trace-timestep`,
+  `--trace-times`), which shipped in 0.10.0 and 0.11.0. Do not add bare
+  `--particles`/`--time`, which would collide with future flags. Change the
+  defaults to `--trace-particles 1000`, `--trace-tmax 1e-2` and
+  `--trace-times 1000` (a loss-time resolution of 1e-5 s). Set
+  `--trace-timestep` to the converged value from T.1 until P2 replaces the
+  integrator.
+- **Built-in scaling.** `--trace` scales in memory with
+  `scale_wout(wout, *aries_cs_scales(wout))` and prints both factors and the
+  resulting `Aminor_p`/`volavgB`. `--trace-no-scale` opts out. Keep `--scale`
+  itself mutually exclusive with `--trace`, because it writes a file.
+- **Parallelism.** When `--trace` is present, set
+  `XLA_FLAGS=--xla_force_host_platform_device_count=<performance cores>` before
+  JAX is imported, unless the user already set `XLA_FLAGS`. Verify that this
+  does not slow the preceding solve.
+- **Outputs,** beside the input or in `--outdir`:
+  - `<case>_trace_loss_fraction.png` is the primary figure: cumulative loss
+    fraction against time on a log time axis. Its title carries the
+    configuration, N, s₀, scaling and wall time, with a binomial 1σ band.
+  - `<case>_trace.json` holds the counts, factors, versions, device count, wall
+    time and `dt`.
+  - `<case>_trace.npz` holds `times`, `loss_fractions`, `lost_times` and the
+    initial conditions, so a run can be replotted and compared.
+  - The other three figures stay. The trajectory panels plot at most 8 orbits.
+- **Console.** Print loss fraction ± binomial σ, lost / axis-unresolved /
+  failed counts, wall time split into compile and run, and the scaling factors.
+
+### T.4 Dependencies (ESSOS, in order; each merge needs maintainer approval, and an ESSOS release needs manual review)
+
+| ESSOS PR | what it does | state | action |
+|---|---|---|---|
+| #47 VMEC axis events | stops GC orbits at the axis or LCFS and reports axis hits separately | merged; in 0.17 | none |
+| #52 one loss surface | `boundary_threshold` (default 1.0) drives both the event and the loss count, removing the s = 1 event / s = 0.99 sample mismatch | draft, **conflicting** | rebase on main, then merge (1st) |
+| #53 termination metadata | per-particle `termination_times`/`termination_states` | draft, stacked on #52 | merge (2nd) |
+| #54 event-based losses | counts losses from the boundary mask and termination time instead of sampled `inf` values; separates axis, custom and failure outcomes | draft, stacked | merge (3rd); vmex then reads exact loss times |
+| #55 refined events | Newton-refined axis and LCFS event times; rejects out-of-range starts; +11 % cold time | draft, stacked | merge (4th) |
+| #56 fill event tails | post-event samples become the last finite state | draft, stacked | merge (5th); vmex drops its non-finite bookkeeping |
+| #57 batched progress | progress reported per particle batch; `particle_batch_size`; +17 % time | draft, stacked | merge only with progress off by default |
+| #48 solver controls | `max_steps`/progress controls | draft, conflicting | close as superseded; 0.17 already has `max_steps = 1_000_000` and the progress meter |
+| #61 `Vmec.from_arrays` + soft loss | builds the field from arrays, removing the temp-wout hop; differentiable surrogate | open, conflicting | not needed for `--trace`; rebase later for the optimisation objective |
+| #25 interpolated fields | SIMSOPT-style interpolated field (coil-oriented, VMEC example) | open since 2025-10, conflicting | reuse its interpolation machinery in P2b; do not merge as-is |
+| #49 near-axis convergence + fixed-step note | examples only; based on `eg/analysis` | open | none (informational) |
+
+After #52–#56 land, release **ESSOS 0.18** and raise the vmex `coils` extra
+floor to `essos>=0.18`. The fallback is to feature-detect
+`termination_times` and keep the 0.17 path. The P2 items add ESSOS 0.19 or
+later.
+
+### T.5 Phases
+
+**P1: contract and correctness (vmex only, ESSOS 0.17/0.18).**
+T.2 scaling fix; T.3 defaults, in-memory scaling, JSON/NPZ output, primary
+figure; CPU device sharding; converged default step. README (T.7). Tests:
+the tiny-budget smoke test (8 particles) stays; add a CLI contract test for
+the files, the JSON keys and the printed scaling factors; add a unit test that
+the n3are and LP-QA reactor-scale wouts give factors 1 ± 1e-3.
+Expected wall: ~20–35 min for 1000 × 1e-2 s on the laptop. Ship it as correct
+but not fast, with the time stated in the help text.
+
+**P2: speed (ESSOS).**
+- (a) Land the #52–#56 stack.
+- (b) Add a Boozer-coordinate GC field built from vmex's `booz_xform_jax`
+  output. Tabulate |B|, I(s), G(s), ι(s) (and the K/B_s term at finite β) on a
+  regular grid in (√s, θ_B, ζ_B) and evaluate with periodic cubic splines, as
+  in SIMSOPT `InterpolatedBoozerField` / FIRM3D #73, using the #25 machinery.
+  Use the GC equations in Boozer coordinates (SIMSOPT `tracing` Boozer model).
+  The target is a right-hand side of ≤ 1 µs per particle, ≥ 10× cheaper.
+- (c) Add a regular chart near the axis: pseudo-Cartesian (√s cos θ, √s sin θ)
+  below s ≈ 0.01, as in DESC and FIRM3D #79. The target is zero axis-unresolved
+  orbits.
+- (d) Choose the integrator by measurement at matched loss convergence
+  (Dopri5, Tsit5 or Dopri8, fixed or adaptive), and keep fixed steps under
+  `vmap`.
+
+Gate: 1000 × 1e-2 s in ≤ 5 min on the laptop.
+
+**P3: symplectic GC integrator, only if P2 misses the gate, or for 5000
+particles and 0.2 s.**
+Use Albert–Kasilov–Kernbichler explicit–implicit Euler in canonicalised flux
+coordinates: JCP 403, 109065 (2020), arXiv:1903.06885. It is more than 3×
+faster than RK45 at equal statistical accuracy, and SIMPLE uses it. The
+closest ports are FIRM3D `ODE_solver="symplectic"` (#30 merged; #79 axis fix
+open) and SIMSOPT branch `symplectic` (`1ecf27f26`: 5 commits, unmerged, 2733
+behind master, with no PR). Implement it in ESSOS over the P2b Boozer field,
+with a fixed step per field period, a Newton implicit stage and `vmap`.
+Orbit classification (Albert et al., JPP 86, 815860201, 2020: a further
+2–5×) applies to 0.2–1 s runs, not 1e-2 s. Leave it out.
+
+### T.6 Acceptance gates
+
+- **G1 scaling.** The reference wouts map to factors 1 ± 1e-3. Scaling a wout
+  and scaling-then-solving its deck commute (the existing `scale_wout`
+  contract).
+- **G2 cross-code.** Use the same scaled wout and identical initial conditions
+  (N = 1000, s = 0.25, 1e-2 s), with SIMSOPT `trace_particles_boozer` or SIMPLE
+  as the reference. The loss fraction must agree within 2 binomial σ, and
+  per-particle lost/confined labels must agree at ≥ 95 %. Run it on the
+  ARIES-CS `n3are` wout (lossy) and the LP QA reactor-scale wout (near zero).
+- **G3 published number (manual or weekly lane, not per PR).** ARIES-CS
+  `n3are` at ⟨B⟩ = 5.86 T and V = 444 m³ (the file's own scale), s = 0.3,
+  0.2 s, N ≥ 1000. The reference is 2470 of 10⁴ lost (Paul et al. 2022,
+  Table 2), and the result must match within 2σ (σ ≈ 1.4 % at N = 1000). The
+  LP precise QA at the PRL's Protocol A loses only "a few" of 5000.
+- **G4 convergence.** Halving the step changes the loss fraction by < 1σ. There
+  are no failed orbits, and after P2c there are no axis-unresolved orbits.
+- **G5 wall time.** 1000 × 1e-2 s in ≤ 5 min on the M3 Max laptop (10 devices,
+  load < 4, compile included), and 5000 ≤ 25 min. Record it in a cited
+  `benchmarks/` JSON and time it A/B/A/B on a pinned SHA.
+
+### T.7 README
+
+In the first "Inspect the physics" bullet and in "Solve, plot and restart",
+add `vmex --scale wout_my_case.nc` beside the `--plot`/`--booz` lines, plus
+one sentence: "`--scale` writes `*_scaled` at ARIES-CS size (a = 1.70 m,
+⟨B⟩ = 5.86 T); two factors `B R` scale by hand." Add
+`vmex wout_my_case.nc --trace` with its one-line output and the loss-fraction
+figure once G2 passes. Stay within the README line cap.
+
+### T.8 Risks
+
+- **Convention spread.** B₀₀(axis) = 5.7 T and ⟨B⟩ = 5.86 T differ by up to
+  ~10 % on real configurations. State the convention in every output and
+  figure.
+- **1e-2 s only captures prompt losses.** Published losses are at 0.2 s. Keep
+  G3 on a slow lane and never compare 1e-2 s numbers against 0.2 s tables.
+- **Merges and releases are gated.** Every ESSOS merge needs maintainer
+  approval and every release needs manual review. P1 must work on 0.17.
+- **`vmap` lockstep.** One slow orbit sets the wall time. Adaptive stepping
+  under `vmap` is 5.6× slower; P2d must measure it and must not assume it.
+- **Scope limits.** `lasym` wouts stay rejected, since ESSOS reads symmetric
+  tables only. A finite-β Boozer field needs the B_s/K term, or P2b is
+  vacuum-only.
+- **Device count.** Forcing host devices is process-global. Check solve+trace
+  in one process and GPU hosts, which must not get a forced CPU device count.
+
+## Current status
+
+| Area | Status | Public evidence / source | Next action and completion gate |
+|---|---|---|---|
+| Counters and controlled profiling | Delivered; warm measurement correction merged (#420, `17bd8469`) | #310, #393, #420; `benchmarks/optimization.py`, `benchmarks/profile_workflows.py` | Remeasure warm aggregates with schema 2, then complete a JIT-enabled checkpoint separating cold, cache reload and warm runs. |
+| Newton refinement and block responses | Delivered; anchor contract active; `equilibrium_from_x` now returns the refined state (#427); mean-iota re-solve gap explained as the m=1 gauge family (#428) | #330, #335, #338, #427 (`084f6c0e`), #428 (`604e6a76`); `vmex/core/implicit.py` | Lane A: anchor the free-boundary state at its root and bound the reference restart (new PR to follow). |
+| Stage compilation and Jacobian batching | Delivered | #390 (`39db0388`), #392 (`a18bc448`) | Preserve frozen stage variables, final designs and memory bounds on current integrated sources. |
+| Cold setup and WOUT export | Delivered | #396 (`ddf7d3ee`), #400 | Measure remaining startup costs after these changes, not against the superseded eager setup. |
+| Free-boundary root and Schur reuse | Delivered; deterministic cold recovery merged (#416, `6f1df723`); adjoint exact at the root but the returned state is off it (lane A) | #383 (`92e6e0bf`), #385, #397 (`3c965913`), #416 | Lane A (off-root state, restart cap) and lane B (vacuum islands, feasible full designs). |
+| Native interior field and exterior accuracy | Validated against independent oracles (#430); near-surface graded rule and closed-form derivative kernels in the library, continuation removed (logbook 2026-09-23) | #378, #399, #403, #409, #430; `benchmarks/extender_ab_20260923.json` | Keep the curl-free projection opt-in. E2's table for long exterior traces; a traced per-point switch; grid sizing below d = a. |
+| Fixed-boundary single stage | Both fixed-boundary examples (zero and 0.5 % beta) meet every target in #411's runs at `952c3160` | #368; draft #411 (`35024f37`), which supersedes #371 | Refresh the four scripts' docstring numbers from #411's run table, requalify the shipped budgets, then merge #411. |
+| Free-boundary single stage (zero and 0.5 % beta) | 0.5 % beta meets every target; zero beta meets every target once an iota ceiling (max\|iota\| <= 0.44) keeps the 4/9 island chain out of the plasma | draft #411 ([run table](https://github.com/uwplasma/vmex/pull/411#issuecomment-5784049398)); #411 supersedes #377 | Lane B: land the iota ceiling and cold 16 -> 51 verification in #411; per-trial cost (lane A restart cap) is the remaining usability gap. |
+| QI objective | Bounded candidate rejected; nonsmoothness remains | `vmex/core/optimize.py`, `413d7fd2` | Lane D: retain current objective and the measured limitation; no width sweep or production surrogate promotion. |
+| Strong-force polishing | Active research; general 3-D promotion unmet; unresolved-lift rejection merged (#414, `311e7ddd`); same-mesh comparison merged (#412, `07d43327`) | `docs/explanation/validation.md`, existing E1/E2 records | Lane E: resolve lift/axis accuracy, then certify an affordable 3-D correction and its derivative. |
+| Optimization example defaults | Owner decision: bake #426's defaults into main | draft #426 (`52d27ee5`) | Finite-beta examples set beta through PHIEDGE normalization, not a pressure-calibration loop (in progress); fix the final `INITIAL JACOBIAN CHANGED SIGN!` refinement failure #426 reports. |
+| Plan, evidence and repository footprint | Active | This plan; `benchmarks/INDEX.md` | Lane F: compact public reproduction, no dead artifacts, no deletion of sole scientific evidence. |
+| Winding surfaces and broad new physics | Deferred | #301/#303/#304 and independent contributor PRs | Do not restart winding work or alter contributor branches as part of this campaign. |
+
+The latest open-PR list supersedes numbers in historical entries; the table
+under "Open pull requests" below is the state at this checkpoint. Coordinate
+with these contributors instead of duplicating their work. #302/#306 are design references: port only
+needed contracts onto current main, not their old implementation/evidence trees.
+
+## Open pull requests at this checkpoint
+
+State on 2026-09-22 after main `604e6a76` (0.11.0 + #427 + #428). "Head" is
+the commit reviewed here; recheck before acting. No merge is authorized
+without maintainer approval.
+
+| PR | State | Owns | Disposition |
+|---|---|---|---|
+| #407, #410, #416 | merged, released in 0.11.0 (#425) | c1/c2 lane split; released integration floors; deterministic free-boundary cold recovery | done; "CI capacity", "Dependencies", lane B |
+| #408, #409, #412, #414, #420 | merged, released in 0.11.0 | Schur warning timings; surface-call spectra; same-mesh polishing comparison; unresolved-lift rejection; complete warm profiling | done |
+| #427, #428 | merged after 0.11.0 | `equilibrium_from_x` returns the refined state; m=1 family closure test for the mean-iota gap | done; lane A |
+| #411 | draft, `35024f37` | the four single-stage examples (renames, least-squares form, matched fixed/free and finite-beta pairs, iota ceiling) | finish and merge; supersedes #371 and #377 (lane B) |
+| #371, #377 | open, `9b427fb0` / `e53e3b57` | earlier single-stage split; earlier finite-beta free-boundary record | close as superseded by #411 when it merges |
+| #413 | this plan and documentation corrections | plan, README, doc qualifications | lane F |
+| #415 | draft, `9f754112` | remove duplicated benchmark narratives | merge after a rebase on main |
+| #417 → #418 → #421 → #423 → #424 | stacked drafts, heads `1459f9df`, `9e0baa28`, `e94e46c6`, `02bf33d9`, `7de9f45d` | refined-state anchor contract, direct primal validity, callback device placement, exact supplied-state measurement, certification of freshly materialized equilibria | close: the premise did not reproduce on main; the one real defect landed as #427 ([review](https://github.com/uwplasma/vmex/pull/417#issuecomment-5766740229)) |
+| #419 | draft, `709a35ea` | guarded radial-factor reuse | close: the direction failed its gates; its finding is kept in lane C |
+| #426 | draft, `52d27ee5` | optimization example defaults (QA/QH/QI/QP mode ladders, budgets, aspect targets, live monitoring, vector-residual finite-beta QA) | owner: bake the defaults into main; replace its finite-beta pressure calibration with PHIEDGE normalization ("Maintainer decisions") |
+
+The #417 stack never touches the free-boundary derivative path
+(`freeboundary_implicit` calls none of its admission code), so it is not on
+the critical path of lane B. The critical path for the free-boundary workflow
+is now lane A's off-root state and restart budget, then #411.
+
+## Maintainer decisions
+
+**Single-stage example scope.** The standard single-stage examples are one
+matched fixed/free-boundary pair using the proven fixed-boundary vacuum case's
+seed geometry, NFP, physical limits, objective definitions and coil
+parameterization, plus one finite-beta pair at 0.5 percent beta with a simple
+pressure profile and zero plasma current. #411 implements this. The detailed
+acceptance rules are in lane B.
+
+**Bootstrap examples are deferred.** Bootstrap current and plasma-current
+optimization go to `single_stage_fixed_boundary_finite_beta_bootstrap.py` and
+`single_stage_free_boundary_finite_beta_bootstrap.py`, to be added only when
+those workflows are ready. Do not add them, or duplicates of them, before then.
+
+**Optimization example defaults (#426).** The improved mode ladders,
+iteration budgets, aspect-ratio targets, boundary steps, verification
+resolutions and live progress output in #426 are to be baked into main as the
+defaults of the QA/QH/QI/QP examples.
+
+**Finite beta through PHIEDGE, not a pressure loop.** At zero net current,
+volume-average beta depends on the pressure and field only through
+`PRES_SCALE/PHIEDGE^2`. Finite-beta fixed-boundary examples therefore set beta
+by normalizing PHIEDGE for the requested beta, instead of #426's
+pressure-calibration/continuation loop at fixed PHIEDGE. Work in progress; it
+replaces the calibration in #426 and in #411's fixed-boundary finite-beta
+script (`PRES_SCALE` from one seed solve) once measured.
+
+**Vacuum free boundary is fixed in the example, not the solver.** The
+zero-beta free-boundary limit cycle is a missing equilibrium (a 4/9 island
+chain at the requested flux), not a solver defect; see lane B. The example
+keeps the transform below the resonance. Tiny-beta regularization is rejected.
+
+**Examples run in at most five minutes.** Every example, including
+compilation, optimization and its final verification solve, must finish in
+five minutes on a laptop; longer runs scare users away. Reduce iterations and
+degrees of freedom where needed, but an optimization example must still
+visibly change its design (coils and surface, for single stage). The
+preferred route is making VMEX faster (solves and derivatives), not only
+smaller examples.
+
+**Only cited benchmark records stay.** The earlier policy of keeping uncited
+records in `benchmarks/` is reversed (#431): records and scripts not cited by
+the published docs or tests, and not run by CI, are deleted; git history keeps
+them, linked by permalink where the plan or code still names them.
+
+**Documentation explains methods, goals and results** (#429). New numbers in
+the docs must cite a committed record or test.
+
+## CI capacity (c1/c2 parity lanes)
+
+The split is implemented (#407, `be805b73`, released in 0.11.0). Five
+solve-heavy modules moved from c2 to the new lane `pr-parity-c5`
+(`test_wout_from_result.py`, `test_refine_staging.py`, `test_scaling.py`,
+`test_solver_axis_initialization.py`, `test_vacuum_analytic_recurrence.py`);
+`test_strong_force.py` and `test_mgrid.py` moved from c1 to `pr-parity-c6`;
+`test_strong_force_solovev.py` and `test_force_oracle.py` moved from c1 to
+`pr-parity-c7`. c1 fell from 1216–1458 s to 415 s of job wall time. `PR gate`
+needs the whole parity matrix, so the new lanes are gated without a change to
+the required checks. c2 still owns `plan.md` (`tests/test_test_manifest.py`
+asserts it), so every plan edit runs c2. A cancelled lane at its cap on a
+documentation PR is still a capacity issue, not a defect: rerun it and record
+the job time.
+
+**Lane audit (2026-09-23).** Every workflow job's last 30 runs (41 for `CI`)
+were read, plus a fresh `Weekly high resolution` dispatch on `2feba0d1c`. All
+`CI` jobs passed every run that was not cancelled; each `PR gate` failure was a
+cancelled or superseded run, or a failure in that PR's own code. Nightly is green
+(opt-qh failed 2026-09-16 to 09-22 and recovered after #427). Retired: `Trusted GPU physics`
+(`gpu.yml`), which needs a self-hosted runner that is registered by hand and is
+not registered now; its last success was 2026-07-31. Its `gpu-smoke` tests are
+declared `local_only` in `tests/manifest.json`, with the command in
+`docs/project/contributing.rst`. Fixed: the weekly examples shards (a stale
+LASYM objectives filename since #398, and the QI maximum-J example's 900 s
+timeout against 814–832 s runs), weekly core-1's 15-minute cap (cancelled at
+it), and `Publish to PyPI` failing on every asset-bundle release. Removed the
+manifest lane labels that no workflow selects (`device-rig`,
+`pr-implicit-response`, `pr-physics-mirror-spline`,
+`pr-physics-mirror-output`). A guard test now fails on any lane no workflow
+selects unless it is declared `local_only`. Weekly hmfb failed today only at
+`pip install` (PyPI briefly returned no `equinox` distribution), so it was
+rerun rather than changed.
+
+## Execution and acceptance
+
+First qualify the integrated certification, recovery, dependency and profiler
+changes. Then establish consistent equilibrium families and close the controlled
+collaborator comparison on one QI and one QA workflow before expanding the
+matrix. Factor reuse depends on those accuracy gates. Free-boundary checks can
+proceed independently; QI surrogate sweeps and broad polishing rewrites remain
+stopped. Coordinate shared source edits, use isolated worktrees and exact pins,
+and inspect compute occupancy before bounded runs. Do not stop others' jobs.
+
+Every implementation PR must include the problem, exact tested revisions,
+before/after evidence, accuracy and memory limits, runnable public commands,
+and remaining gates. Preserve at least 95% changed executable coverage with
+meaningful physics/numerics tests; coverage alone does not certify a method.
+Exercise JIT explicitly for staged behavior, since ordinary unit tests disable
+it. Review CPU and GPU placement rather than inferring it from available hardware.
+
+Obtain explicit maintainer approval before any merge; earlier blanket merge
+authorization is superseded. ESSOS also requires manual release review. Require
+the intended scientific gates and current checks; never bypass failed numerical
+checks. (The earlier deferral of every release until all research gates
+passed was superseded by 0.11.0, which shipped the integration fixes with
+their limitations named.) VMEX 0.12 follows when #411 and #426's defaults are
+on main and lane A's free-boundary anchoring has landed or is explicitly named
+as a limitation; the release notes must carry the qualifications of lanes A
+and B.
+
+Commit authorship is the maintainer's, with no agent attribution. Inspect the
+exact outgoing diff and text before publication: no private filesystem paths,
+home usernames, host aliases, checkout/environment names, or private artifact
+and script names. Store machine-specific recovery details privately.
+
+## A. Derivative and equilibrium consistency
+
+Source: `vmex/core/implicit.py`, `vmex/core/optimize.py`,
+`vmex/core/freeboundary_implicit.py`; baseline `f719c4ff`, re-audited at
+`780eb86e`.
+Native FSQ, the refined nonlinear residual, the linear-response residual and
+observable accuracy are distinct quantities. Current refinement may return an
+improved state without reaching its target; host admission uses native FSQ,
+and Jacobian reuse keys do not explicitly identify the refined state.
+
+Implement the smallest state/provenance contract that ensures a residual and
+its derivative use the same coefficients, parameters, mask and residual
+operator. Refresh stale evidence, reject invalid responses without caching
+them, and preserve unrelated programming errors. Do not introduce a universal
+1e-10 primal cutoff: near-null modes impose measured attainable floors.
+Expose qualification when the observable's requested accuracy is not justified.
+(Superseded in part 2026-09-22: on main the fixed-boundary residual and
+derivative already use the same refined state and repeat across histories;
+the contract work that remains is free boundary, below.)
+
+**Independent audit verdict (2026-09-22,
+[#417 comment](https://github.com/uwplasma/vmex/pull/417#issuecomment-5784815035)).**
+Measured on main `780eb86e` (0.11.0) with #411's finite-beta free-boundary
+single stage (0.5 % beta, ns 31, mpol = ntor = 5, 81 coil dofs), laptop under
+load; timings are labelled accordingly.
+
+- **The free-boundary adjoint is exact at the root.** Against central FD of
+  Newton-anchored roots with the same frozen complement it agrees to
+  1e-9–6e-7 (6.0e-8 objective, 8.2e-9 beta, 1.8e-8 mean iota, 1.0e-7 aspect at the seed;
+  1.3e-9–6.4e-7 for every term at the optimum).
+- **It is fast.** A gradient adds 5.5–9 s to a value, almost independent of the
+  number of coil dofs (45/81/117), 4–13x faster than forward FD near the seed
+  and 68x mid-optimization (35.3 s against 2415 s at 81 dofs). Live JAX arrays
+  stay at 210 (1.2 MiB) over 20 consecutive gradients: no leak. Peak RSS
+  2.4–3.2 GiB for the trial loop, 4.5 GiB fixed boundary.
+- **(i) The returned free-boundary state is not at that root.** A status-0
+  solve at ftol 1e-12 sits 1.15e-2 (seed) and 1.26e-2 (optimum) from the root
+  in coefficient norm; four Newton steps on the projected coupled residual take
+  |F| from 3e-7 to 5e-14. Fixed boundary anchors this with `_refined_state`;
+  free boundary has no anchor. Warm FD therefore reads dJ/h = 15.6 where cold
+  solves and the adjoint give 30.0 and 29.7: the restart meets ftol along a
+  soft mode before reaching the root. The gradient is right; the values the
+  optimizer compares it with are not at the same point.
+- **(ii) Wasted restart work.** Near the optimum about 80 % of each trial
+  (about 20 s of 25 s) is a seed-reference restart that runs to its
+  4000-iteration cap without converging before the cold fallback converges in
+  823–1425 iterations. A stall test or budget before the fallback would cut the
+  trial cost about 4x.
+- **(iii) The value map depends on the start at finite beta.** From the seed
+  reference, a mid-path reference and a cold start, J differs by up to 12 %
+  (t = 0.25: 1.1598, 1.3257, 1.2959); every evaluation returned status 0, so no
+  status flip was seen at finite beta, but the map is not a function of the
+  coils alone, and it jumps where the production path switches from restart to
+  fallback.
+- **The ~1 % mean-iota gap is not a missing term.** It is the released m=1
+  `Z_sin` gauge family: the linearization holds it at its converged value,
+  each cold re-solve freezes it where its own path left it (about 0.5 per unit
+  boundary change). On `li383_low_res` (ftol 1e-13, h = 5e-4) the gap is 1.0 %
+  (RBC(1,1)) and 2.8 % (ZBS(-1,1)); adding the iota response to that drift
+  closes it to 2.3e-6 and 1.6e-5. Over mpol 4–8 and ns 16–64 the gap spans
+  0.06–2.8 % and does not fall monotonically. #428 pins the closure as a test
+  (`tests/test_implicit_grad_fd.py::test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family`).
+  Pinning the family to a canonical, parameter-differentiable value is the
+  option if sub-percent agreement with re-solves is wanted (VMEC++ #849 is the
+  precedent; see lane C).
+
+Work on (i) and (ii) is in progress; a new PR will follow. Its gates: the
+anchored free-boundary state repeats from different references, the value
+and gradient refer to the same state (warm and cold FD agree with the adjoint
+at the audit's precision), and trial cost at the optimum falls without a new
+failure mode.
+
+The #417 → #424 stack (hardening of the fixed-boundary anchor contract) is to
+be closed: its premise did not reproduce on main (Jacobians bit-identical to
+#424, history-independent residuals and Jacobians) and it never touches
+`freeboundary_implicit.py`. Its one real defect, `equilibrium_from_x` returning
+the unrefined state (objective mean iota 0.553590 against WOUT 0.554491),
+landed as #427. The stack's record, as it stood on 2026-09-21, is kept in the
+continuation logbook below.
+
+Gate on repeated points after accepted/rejected trials, independent problem
+instances, direct Jacobian calls, changed/missing anchors, and host/staged lanes.
+Report raw/projected nonlinear and linear residuals. Verify forward/reverse
+agreement and two-sided Taylor convergence; use independently reconverged
+perturbations wherever their noise floor permits. A same-root linear identity
+is not proof of accurate nonlinear parameter dependence. Public fixtures must
+replace reliance on unavailable collaborator states. The baseline counters
+are in [`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json).
+
+## B. Free-boundary scientific workflow
+
+Source: `vmex/core/freeboundary_implicit.py`, existing single-stage examples;
+baseline #383/#397. The fixed reference and bounded cold-rebuild mechanism
+already exist. Test them rather than implementing a second policy.
+
+**Current state (2026-09-22).** #416 is merged. The four single-stage examples
+live in draft #411, which supersedes #371 and #377. Its latest runs (clearance
+limit 0.15 m, aspect limit 6.0 with an aspect-5.97 seed, order-4 coils on a
+0.5 m circle, one-sided coil length <= 5.5 m, 50 iterations / 100 trials; four
+runs concurrent on one laptop, so wall times are pessimistic):
+
+| example | targets | wall | peak RSS | iterations / trials |
+|---|---|---|---|---|
+| fixed, zero beta (`952c3160`) | all met (min iota 0.4289, aspect 5.969, B.n/B RMS 0.800 %, clearance 0.261 m) | 335 s | 3.8 GB | 50 / 86 |
+| fixed, 0.5 % beta (`952c3160`) | all met (beta 0.5011 %, min iota 0.4295, aspect 5.971, B.n/B RMS 0.800 %) | 566 s | 9.1 GB | 50 / 65 |
+| free, 0.5 % beta (`952c3160`) | all met (beta 0.4833 %, min iota 0.4309, aspect 5.930, clearance 0.246 m) | 2399 s | 14.3 GB | 27 / 109 (trial cap) |
+| free, zero beta, before the iota ceiling (`952c3160`; `08d97509` warm-verified) | misses B.n/B RMS (1.18–1.48 % vs 1 %); verification solve limit-cycles | 1536 s | 7.7 GB | 27 / 95 (9 rejected) |
+| free, zero beta, with max\|iota\| <= 0.44 (`35024f37`) | all met (min iota 0.431, max iota 0.436, aspect 5.93, B.n/B RMS 0.617 %, coil-surface 0.244 m, coil-coil 0.191 m, max curvature 6.90); cold 16 -> 51 verification converges to 1e-12 | 1898 s | not recorded | 30 / 101 (2 rejected) |
+
+Earlier #411 runs at `e0fa2174` (aspect-4 seed, order-3 coils) missed targets
+in three of four examples; that table is on #411 and is superseded by the one
+above. Coil terms are inactive at the end of every run (coils 4.5–4.8 m);
+quasisymmetry is traded against the iota floor (seed min iota 0.404 below the
+0.43 floor), not against the coils. Free-boundary wall time (26–40 min) is
+still too long for a user-facing example: per-trial cost is 16–22 s against
+4–9 s fixed boundary, and lane A (ii) accounts for most of it near the
+optimum. The scripts' docstring numbers predate these runs and must be
+refreshed from this table before #411 merges.
+
+**The zero-beta free-boundary limit cycle is a missing equilibrium, not a
+solver defect**
+([#411 diagnosis](https://github.com/uwplasma/vmex/pull/411#issuecomment-5784049398)).
+Field-line tracing of the optimized coils (64 lines, 1000 transits) finds
+nested surfaces with iota 0.459 -> 0.449 out to 0.79 of PHIEDGE, then a
+separatrix, a 9-island chain locked at 4/9 = 0.4444, and a stochastic layer
+outside. The PHIEDGE boundary cuts through the islands: no nested flux surface
+encloses the requested flux, so no zero-beta, zero-current nested-surface
+equilibrium exists for that deck. VMEC2000 (fsq floors at 3.6e-8, bursts to
+3.8e-4, DELT collapses to 7.4e-3) and VMEC++ (bursts to 4e-5, then
+`JACOBIAN_75_TIMES_BAD` at 9022 iterations) fail on the same mgrid deck the
+same way; VMEX floors near 4e-9 with bursts to 1e-4. Controls: the
+Landreman-Paul QA coils converge cold at zero beta (ns 31 to 1e-11 in 1832
+iterations; 16 -> 51 in 627 at ns 51), so zero beta alone is not degenerate.
+Ruled out: tiny-beta regularization (<beta> 1e-6 to 5.4e-3, none converged in
+20000 iterations; do not build it into VMEX), NESTOR cadence and DELT
+(NVACSKIP 6/15, DELT 0.3), higher resolution, and any zero-pressure code path.
+Inside the good surfaces a vacuum solution exists (PHIEDGE x 0.70 converges
+with the 16 -> 51 ladder). While unconverged, VMEX's iota read below the
+field-line iota, so the `min |iota| >= 0.43` floor pushed the real profile up
+through 4/9.
+
+Fix, in the example: add `max |iota| <= 0.44` (penalty from 0.437) next to the
+floor, restore the cold 16 -> 51 verification at ftol 1e-12 (revert the
+warm-started verification of `08d97509`, keeping the `[accepted]` diagnostic
+line), and report max |iota|. The window [0.42, 0.44] excludes 2/5 and 4/9;
+the rationals left with n a multiple of NFP are high order (3/7, 5/12).
+Independent cold solves of the new coils at ns 16, 31 and 51 converge and give
+B.n/B 0.617–0.618 %; field-line tracing shows no locked chain and nested
+surfaces to about 1.11 times the boundary distance on the outboard midplane
+(thin margin at phi = pi/4). Suggested solver follow-up (optional, not a fix):
+for a zero-beta, zero-current free boundary, report the coil-field B.n/B RMS
+on the boundary or DEL-BSQ and warn when it does not fall with resolution;
+that catches a missing flux surface directly instead of as a limit cycle. The
+history-dependent trial status seen before (status 0 during the optimization,
+status 2 with fsq 1.374e-8 on re-solve) is a symptom of the missing fixed
+point at the old coils.
+
+**Record of the #416/#377 derivative studies (2026-09-21).** Superseded as the
+current account by lane A's audit (exact adjoint at the root; values off the
+root; m=1 gauge family). Kept for its measurements.
+
+Draft #416 removes the exhausted global rebuild budget and passes controlled
+and physical repeated-point checks. The [independent pressure study](https://github.com/uwplasma/vmex/pull/416#issuecomment-5755622514)
+on #416 plus #417 now resolves one discrepancy: tightening native `ftol` from
+1e-9 to 1e-10 to 1e-12 reduces the adjoint/re-solve gap from 14.24 percent to
+8.54 percent to 0.0167 percent. At the tightest level, independent differences
+at relative steps 1e-3 and 1e-4 agree within 1.1e-5 relative; every repeated
+state coefficient agrees exactly. This qualifies the tested pressure observable
+on one coarse asymmetric deck, not every free-boundary derivative. Preserve
+it as a physical regression. The [actual finite-beta objective study](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756092179)
+now finds no finite-difference agreement window at `ftol=1e-9`, despite exact
+repeated states and unchanged active sets. At the saved endpoint, AD is +1.189
+but centered differences are -2.034 and -9.736 at steps 1e-3 and 1e-4.
+The [exact-reference tighter study](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756328738)
+preserved that full production stage at `ftol=1e-12`. The admitted base's raw
+norm improved from 1.64e-3 to 7.98e-5 and its coefficients repeated exactly.
+However, the minus perturbation at h=1e-3 failed admission after cold recovery
+(FSQ/ftol=711.87), while the plus side passed. The smaller-step sweep stopped;
+this pair cannot assess derivative accuracy. The 8,000-step `[15, 31]` trial
+ladder also missed convergence (FSQ/ftol=1413.12), but its saved state has
+[valid direct geometry](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756768575).
+The initial contrary diagnosis used a fixed-boundary accessor that replaced
+the evolved edge; it did not measure the supplied free-boundary state.
+The [same-state recovery A/B](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756840863)
+rejects restoring the full production continuation payload as the fix: both
+arms failed, and restoring it worsened FSQ by 273x. Completed tight pairs at
+[h=1e-4](https://github.com/uwplasma/vmex/pull/377#issuecomment-5756902103)
+and [h=5e-5](https://github.com/uwplasma/vmex/pull/377#issuecomment-5757012060)
+preserved the same saved base, adjoint and production reference. Both pairs
+passed native/geometry admission without cold recovery; the directional gap
+fell from 2.1746 percent to 0.08114 percent. This improves local agreement but
+does not establish an asymptotic window or quantify nonlinear root error.
+The [new complete base capture](https://github.com/uwplasma/vmex/pull/377#issuecomment-5757443492)
+on composite `c7807705` saved state, parameters, mask and `rcon0/zcon0`
+before differentiation. It reproduced the old base exactly; the adjoint
+repeated within 5.54e-9 with true relative transpose residual 2.87e-11.
+The saved h=5e-5 state chord nevertheless has a 2.31 percent tangent defect
+relative to the field term, using the base frozen complement and constraints.
+Its nonzero frozen m=1 component also enters the full objective chord but not
+the projected residual chord. Do not attribute that discrepancy solely to
+finite-step curvature or root noise before separating the complement term.
+Next replay the existing endpoints against the same base operator and resolve
+the adjoint-weighted tangent/complement identity; no new endpoint solves are
+needed for that discrimination. The public record includes controls and
+checksums but lacks downloadable tapes and a standalone generator: publish
+those or qualify newly generated public inputs before claiming reproducibility.
+Do not substitute zero constraints or repeat the completed base capture.
+Qualification on the proposed minimum stack remains separate from this
+SOLVAX 0.20.0 study, as do other directions and final design feasibility.
+Native stopping, measured coupled residuals and observable agreement remain
+separate gates; #385's same-root identity alone was insufficient.
+
+The standard single-stage examples now target a simpler matched comparison:
+use the proven fixed-boundary vacuum case's seed geometry, NFP, physical
+limits, objective definitions and coil parameterization for the fixed/free
+pair. First recheck its recorded feasible result on the integrated source;
+then select the shortest measured budget that still passes independent final
+checks. An iteration cap alone is not a runtime bound: count evaluations,
+line-search trials, equilibrium solves, compilation and output costs.
+Free boundary evolves the plasma surface from the coil field, so do not copy
+independent boundary DOFs or assume the circular coil seed carries the fixed
+seed's transform. Reuse the fixed-boundary coil-fit initialization and verify
+its free-boundary root before optimization. Report physical limits on the same
+fine grids; include coil-surface clearance in both formulations.
+
+For the standard finite-beta pair, set the target to 0.5 percent (`0.005`),
+use a simple pressure shape such as `p(s)=p0*(1-s)`, and prescribe zero plasma
+current (`ncurr=1`, zero current profile and `curtor=0`). Calibrate seed pressure
+and report final beta; keep the same beta convention and acceptance in both
+scripts. (Maintainer decision 2026-09-22: set beta through PHIEDGE
+normalization rather than a pressure-calibration loop; see "Maintainer
+decisions".) Remove bootstrap mismatch, kinetic-profile preparation, bootstrap
+Picard iterations and plasma-current DOFs from these introductory examples.
+Coil currents are separate external-field parameters. Self-consistent bootstrap
+and plasma-current optimization are deferred to later
+`single_stage_fixed_boundary_finite_beta_bootstrap.py` and
+`single_stage_free_boundary_finite_beta_bootstrap.py`; do not add duplicate
+scripts before those workflows are ready. Keep the existing 2.5-percent case
+as derivative evidence, not the default example or a task to rerun unchanged.
+Simpler optimization does not qualify a gradient: retain the same-root and
+independent-perturbation checks before claiming convergence or speedup.
+
+The next paragraph is the pre-#411 record; #411's table above supersedes its
+design results. With #409 merged, integrate example reporting fixes and qualify these simpler
+vacuum and finite-beta workflows on the memory-fixed source. Measure retained
+arrays, RSS/device memory slope, fallback counts, accepted progress and final
+fine-grid verification. The updated #377 vacuum record at `cf9811bf` reports
+1164.1 s and 4.09 GiB,
+with its stated targets met, replacing 3304.1 s and 18.89 GiB. The recovered
+finite-beta run at the same source completed in 1776.2 s and 5.26 GiB: its
+output solve converged, but L-BFGS-B stopped abnormally and minimum absolute
+iota was 0.258577 against 0.42. The committed record is updated in #377
+(`e53e3b57`); these shared-CPU timings predate #416 and are not a controlled
+speedup comparison. The [optimized-coil verification](https://github.com/uwplasma/vmex/pull/377#issuecomment-5755533991)
+now supports `[15, 31]`: it converged where single-grid budgets through 20,000
+iterations failed. The extra 9-surface rung also converged but is not required
+by this case. Reproduce the optimizer failure after recovery fixes, not an
+already completed measurement.
+Determine whether root accuracy, the optimizer or the seed limits progress
+before adjusting weights. Require all stated constraints, not merely a lower
+weighted objective. Preserve the documented experimental free-boundary AD scope
+until CPU/GPU and independent derivative gates actually pass.
+
+## C. Reuse numerical work without changing the certified operator
+
+SOLVAX #117 merged at `1d02a140`, providing reusable scalar tridiagonal
+factorization and checked factored solves; it is not in the current 0.24.0
+release. Keep released-package qualification separate from VMEX adoption.
+The VMEX scalar-cache experiment is rejected: complete solves did not improve
+and the 151-surface carried cache grew from 277,568 to 491,264 bytes, despite
+bit-identical trajectories. Do not integrate it on kernel timings alone. VMEX
+retains ownership of physical bands and invalidation on updates and recovery.
+
+**#419 is to be closed (2026-09-22): the guarded-reuse direction failed its
+gates.** Its finding is kept here: independent reconvergence moves the frozen
+m=1 `Z_sin` complement between families (cross-family projected residuals
+0.066 and 0.092 against 1e-13 within a family), which is the same gauge family
+that lane A identified as the whole mean-iota re-solve gap (#428). Any reuse
+or pinning experiment must first fix that family; the record follows.
+
+Draft #419 included the [bounded QI optimizer result](https://github.com/uwplasma/vmex/pull/419#issuecomment-5756488807):
+312/312 reused response columns passed exact-current checks at 1e-11 tolerance,
+but both arms exhausted their budgets. Independent reconvergence changed the
+frozen m=1 Z-sine complement: each state's projected residual was about 1e-13,
+while cross-family residuals were 0.066 and 0.092. Fine angular sampling also
+raised mirror ratios to 0.21056 and 0.21114, above the hard 0.21 limit.
+Do not promote reuse or redefine these failed gates around a saved state.
+First establish a consistent residual family and the physical/parameter
+dependence of the released components; distinguish coordinate gauge and
+sampling sensitivity from physical equilibrium changes. Then repeat the
+independent-root and fine-grid checks before timing a complete optimizer.
+An explicit precedent is [VMEC++ #849](https://github.com/proximafusion/vmecpp/pull/849)
+(`cec07e9e`, open): it pins the m=1 gauge to a boundary-derived radial profile
+and differentiates that profile. Test this as an opt-in VMEX experiment on the
+two saved states, with identical assembly in the root, objective and derivative.
+The native high-force phase can evolve these components, so the pinned profile
+defines a new discrete family rather than reproducing native cold-start history.
+Require same-family reconvergence, parameter-direction checks including the
+profile derivative, and independent physical/resolution checks before adoption;
+retain existing restart semantics until explicitly qualified. The
+[bounded post-solve projection](https://github.com/uwplasma/vmex/pull/419#issuecomment-5756859333)
+failed both root gates. An A-only trace found an accurate first raw linear
+solve (relative defect 1.17e-12), followed by a full step that increased the
+projected nonlinear residual from 0.0603 to 2.29e9. The
+[bounded globalized follow-up](https://github.com/uwplasma/vmex/pull/419#issuecomment-5757238643)
+accepted eight finite, geometry-valid steps with independently accurate linear
+directions. Raw residual fell from 8626 to 6837, but projected residual remained
+0.0357 and derivative admission failed. Stop extending post-solve recovery;
+inspect pinning from initialization and through multigrid transfers next.
+This does not qualify the gauge policy or reject initialization-time pinning.
+Reuse accepted-point factors for nearby refinement only with measured progress
+and bounded refactor fallback.
+Stale factors used as an exact solver already failed: do not revive that idea.
+Report factorization counts, correction iterations, refactor rate, final state
+and observable differences, compile cost and memory.
+
+Use numerical tolerances for same-point derivatives and final physical quality,
+not bitwise optimizer trajectory identity. Tiny linear-algebra differences can
+alter trust-region steps; investigate conditioning and feasibility before
+attributing different trajectories to inaccurate derivatives or claiming speedup.
+
+Revisit broad inter-rung cache clearing after checking #397's memory behavior
+at high resolution. Preserve the memory bound that motivated cache release.
+Earlier descent-to-Newton handover follows lane A; if a finish fails, recover
+with the original solve policy. No accepted trial may lose its accuracy contract.
+
+## D. QI smoothness and the Boozer dependency
+
+Inspect existing `d1/smooth-qi-well` work before implementing anything new.
+Map two-sided Taylor behavior and well-topology changes on public frozen
+spectra and real solved states. Separate interpolation/well selection error
+from equilibrium noise. Compare one justified smooth alternative with the
+current objective; do not start a second omnigenity formulation concurrently.
+
+Use the same seed, constraints and budgets. Check final QI on an independent
+fine Boozer grid, accepted progress, failed trials, full runtime and memory;
+include a transport-related diagnostic when available. An improved surrogate
+must preserve the physical design quality. Do not freeze well minima in
+production to make a derivative test pass.
+
+The [paired design record](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755523238)
+shows candidate `413d7fd2` failed the same-budget solved-design gate
+against `f719c4ff`: fine-grid QI increased from 0.002767 to 0.004558 (65 percent),
+although both designs met the stated constraints. It remains experimental.
+The [saved-boundary cross-evaluation](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755580667)
+now separates score changes from design quality. At identical frozen spectra,
+the definitions differ by at most 0.51 percent; the candidate boundary remains
+61 percent worse on the fine grid under the current definition. All four
+residual families worsen, especially branch width. This supports an inferior
+optimization trajectory, not a mere change of metric. Keep the candidate out
+of production and stop this surrogate experiment without a width sweep.
+The hard-well differentiability limitation remains documented; a new attempt
+requires evidence of a better trajectory, not another local Taylor test alone. Both arms used
+JAX 0.11.1, Boozer 0.4.0 and SOLVAX 0.24.0. Different shared load and compilation
+state prevent a runtime claim from the 295 s versus 205 s measurements.
+
+The PyPI booz_xform_jax 0.4.0 wheel passed four symmetric/asymmetric dense-
+reference projection tests, including magnetic-only values and bmnc JVP/VJP
+([evidence](https://github.com/uwplasma/vmex/pull/410#issuecomment-5755351706)).
+At the proposed Boozer 0.4.0/SOLVAX 0.21.0 floors with JAX 0.9.2,
+[VMEX integration](https://github.com/uwplasma/vmex/pull/410#issuecomment-5755560071)
+passed all 21 Boozer-table, nine plotting and eight omnigenity tests, with JIT
+and full-marked tests enabled. The clean all-extras minimum-version stack uses
+JAX 0.10.1. Its numerical checks exposed missing `tprim`/`fprim` drive fields
+in GKX 1.7.1; the 1.8.0 floor
+correction was added to #410, which merged (`e76930af`) and shipped in 0.11.0. Eleven packaging, four GKX,
+one NEO and three NESTOR/adjoint checks pass. The new minimum-version nightly
+selection passes all seven tests together; explicit optional-package imports
+prevent missing integrations from silently skipping the gate. Static preflight, warning-free
+Sphinx build and all six source/HTML navigation checks pass. The dependency
+gate of this lane is closed; the QI smoothness gate above is not.
+
+## E. Strong-force polishing
+
+Keep the current axis-regular `rho^|m| q(s)` representation with splines in
+`s`; the recorded knot/coordinate changes do not justify a replacement.
+E1's complete virtual-work identity passes. E2 succeeds on the shaped tokamak
+but misses the 3-D force-reduction gate. Existing resolution scans implicate
+axis source data and the lift; increasing the spline basis can worsen the fit.
+
+First audit `lift_high_order_state` for unsupported spans, rank and axis
+regularity. Refuse an underdetermined lift rather than filling it silently.
+Use manufactured/analytic fields and independent off-grid quadrature to
+separate representation error from nonlinear-solver error. Then resume the
+bounded E3 correction and radial/angular resolution ladder, using
+[`benchmarks/e1_functional_consistency.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e1_functional_consistency.py), [`benchmarks/e2_dense_reference.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e2_dense_reference.py),
+[`benchmarks/residual_vs_resolution.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/residual_vs_resolution.py) and [`benchmarks/knot_grading.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/knot_grading.py)
+(removed from the tree; restore them from that revision).
+
+Promotion requires a non-axisymmetric finite-beta case with positive geometry,
+preserved boundary/flux/profile constraints, independently reduced strong force,
+nonlinear stationarity and derivative verification. Report dimensional force,
+volume-normalized force and near-axis/bulk/edge contributions. The bounded
+legacy `eps_F` is insufficient. Separate native-state comparison from WOUT
+export/refitting error. Stop a failed bounded attempt and record its cause;
+do not repeat multi-hour W7-X attempts without new evidence of progress.
+
+The closed-hybrid force plateau in issue #211 remains an explicit admission
+question, not permission to relax a threshold. Broader mirror/anisotropy and
+coordinate rewrites remain deferred. The [resolved analytic recovery study](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755801536)
+reduces independent force strongly but still misses stationarity after 40 steps.
+It consumes 7,927 of 8,000 possible PCG iterations. A
+[fixed-endpoint dense comparison](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755874974)
+now identifies inner PCG starvation in this case: the dense step reaches
+independent `eps_F=6.62e-8`, while PCG has linear residual 0.230 and barely
+improves force. The [bounded follow-up](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756143841)
+rejects strict inner convergence as a recovery policy (12 rejected trials)
+and rank-64 Nyström as the fix (linear tolerance missed; off-grid J worsened).
+[SOLVAX #119](https://github.com/uwplasma/SOLVAX/pull/119) exposes inner diagnostics
+while preserving useful inexact steps; 15 focused tests pass. These are PCG's
+recursive residuals, not independent certificates. The
+[saved-matrix LSQR/LSMR comparison](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756201847)
+produced no useful physical step at 200 iterations. Even
+[2,000 LSMR iterations](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756210776)
+missed the 1e-3 true-normal-residual gate (2.416e-3), with direction error
+0.987 relative to the dense reference. Stop this solver sweep.
+The [bounded production-chart QA diagnostic](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756509703)
+now supplies the exact experimental patch and reproduction controls. Its
+18,018-by-1,336 augmented solve passed GELSD/GELSY checks below 1e-14;
+stored-matrix PCG also converged in 324/600 iterations. One admissible dense
+step reduced independent dimensional force L2 by 25 percent, not the required
+10x, and did not establish nonlinear stationarity. Total cost was 604 seconds
+and 11.13 GiB peak RSS; setup and Jacobian assembly dominated factorization.
+Do not integrate a dense production path on this evidence or extend the sweep.
+Stored-matrix PCG is not a matrix-free parity check; one step does not identify
+a representation limit. A further correction experiment requires a specific
+failing production endpoint and a measured cause, with independent physics
+gates retained. General 3-D polishing remains unqualified.
+
+## F. Public evidence, documentation and repository maintenance
+
+Use `benchmarks/INDEX.md` to preserve the connection between claims, inputs,
+generators and records. For September 19 conclusions held outside the repo,
+recover and sanitize the minimal executable reproduction and compact numerical
+record in existing benchmark infrastructure. Inspect every field and string;
+never copy private reports wholesale. If evidence is unavailable, mark the
+claim unverified and schedule only the experiment needed to decide it.
+
+Retain one canonical record per scientific claim. Delete redundant narrative
+summaries and obsolete uncited records only after checking code, tests, docs,
+figure provenance and generators. Regenerate the index. Large raw profiles and
+arrays belong in a versioned research artifact with public provenance, not the
+source tree. Preserve historical results through immutable commits. Do not
+rewrite repository history to save a small archive.
+
+Delete merged branches only when their remote head still equals the recorded
+merged PR head, no open PR depends on them, and no active worktree uses them.
+Use expected-head protection against concurrent pushes. Preserve unsubmitted
+contributor branches; an old timestamp does not prove abandonment.
+
+Keep tutorials/how-to/reference/explanation organization. Shorten the README
+without losing runnable simple and advanced entry points, accuracy scopes and
+high-impact results. Use the current public helpers. Synchronize release and
+capability statements, and close documented issues only after checking the fix.
+#413 removes the unqualified exterior field-line showcase from the README
+while retaining its artifact and figure record (now cited by no page). The field explanation and
+example docstring match the implementation's near-surface-continuation warning;
+source sampling is described as geometry-dependent. No numerical behavior
+changed. Independent qualification of the supplied-surface-field variant is
+still required before restoring a physical-topology claim.
+
+Documentation claims corrected in #413 on 2026-09-22, each checked against
+the code or a measurement first:
+
+- `docs/explanation/adjoint-gradients.md` (validating the gradients): quotes
+  the measured m=1 gauge gap (1.0 % / 2.8 % on `li383_low_res`, closure 2e-6,
+  test from #428) instead of main's "naive FD matches `jax.grad` to
+  rtol <= 1e-6" for bulk integrals, and says free-boundary checks need
+  Newton-anchored re-solves.
+- `docs/reference/objectives.rst` (Mercier/Glasser rows): the tests use
+  frozen-path FD (`frozen_path_directional_fd`), not independently
+  reconverged equilibria.
+- `README.md` (single stage), `docs/explanation/nestor-vacuum.rst` (coupled
+  adjoint) and `docs/explanation/validation.md` ("What is NOT validated"): the
+  free-boundary off-root state and the zero-beta island-chain finding.
+- `docs/explanation/validation.md` (tokamak polish): explains why the README's
+  read-back WOUT numbers (2.9e3 -> 61 N m^-3 near axis) differ from the
+  native-state table (9.8e2 -> 6.7e1).
+- `examples/hot_restart_scan.py` docstring, `docs/howto/restart-from-previous-run.md`
+  and `docs/howto/parameter-scans.md`: "a handful of iterations" and "many
+  iterations, not one" replaced by measurements. The example's PHIEDGE scan at
+  zero pressure with a prescribed transform takes one warm iteration per point
+  (about 300 cold; rerun 2026-09-22). Boundary moves of 1e-4 to 1e-2 on the
+  low-resolution QA deck took 212–391 against 806 (Part II §2).
+
+Left to a code PR, because they are docstrings in `vmex/core`:
+`vmex/core/implicit.py::frozen_path_directional_fd` still says a naive
+re-solve FD of `wb`/aspect matches `jax.grad` to `rtol <= 1e-6`. Its
+`li383_low_res` example (adjoint -0.773 against naive FD +0.045 for
+`d(iota_edge)/d(RBC(-1,1))`) should be re-measured now that the refined-state
+anchor and the m=1 family account are in place. The `freeboundary_implicit`
+module docstrings should state the off-root scope once lane A's anchoring
+lands.
+
+## Dependencies and publication
+
+#420 (merged `17bd8469`) corrects aggregate warm profiling: schema 1 repeated
+only the first stage, omitting transforms or derivatives from multi-stage
+workflows. Schema 2 repeats every stage in order. Nine focused JIT-enabled
+tests pass, covering all 21 changed executable lines. Remeasure affected warm
+aggregates before citing them; separately recorded first-call stages remain valid.
+
+Verified release inventory at this checkpoint: VMEX 0.11.0 (#425), whose
+floors are `booz_xform_jax>=0.4.0`, `solvax>=0.21.0`, `gkx>=1.8.0` (turbulence
+extra) and `virtual-casing-jax>=0.0.7` (#410); latest sibling releases checked
+2026-09-21 were SOLVAX 0.24.0, booz_xform_jax 0.4.0, virtual-casing-jax 0.0.7
+and ESSOS 0.17. Review current
+source and installed-package interoperability before proposing upgrades.
+Keep generic linear algebra in SOLVAX, Boozer transforms in booz_xform_jax,
+quadrature/error estimates in virtual-casing-jax, and coil physics in ESSOS.
+Open focused upstream PRs for measured defects; ESSOS merges/releases require
+manual review. No release solely to refresh a version number.
+
+First close the collaborator case and representative QA/QI comparisons, then
+expand the publication matrix to cold/cache-reload/warm CLI and Python runs,
+QA/QH/QI/QP across declared NFP/resolution choices, fixed/free-boundary single
+stage, CPU/GPU, and final physical accuracy. Use quiet paired runs and actual
+device placement; never compare profiled and unprofiled times as a speedup.
+The collaborator's 0.3/modified-0.7 report remains unresolved by a controlled
+complete comparison. Pin available historical sources; label unavailable modifications
+unreproducible rather than inventing equivalence.
+
+Paper 1 can cover validated equilibrium/AD/optimization performance, with
+public inputs, commands, dependencies, hardware and compact outputs. General
+3-D strong-force improvement is a separate claim requiring lane E. Complete a
+JIT-enabled CPU/GPU and optional-dependency checkpoint before either promotion;
+per-PR green tests and line coverage alone are insufficient. Keep real public-API
+smokes in required CI: #409 escaped fast tests that mocked the broken call.
+Investigate the cross-module test-order failure recorded in #390.
+
+Extend #390 stage reuse only to compatible unconverted ladders, checking frozen
+variables and final designs. Profile plotting separately from equilibrium work;
+measure Boozer/confinement diagnostics and cache-release costs before changing
+policy. The GPU guide now labels automatic placement as a historical workload
+heuristic; device defaults still need current workload evidence. Issue #157 is
+closed after verifying the published correction and executing its resolution
+example on the bundled circular tokamak (work 1632, recommendation CPU).
+
+## Continuation logbook
+
+Entries below record observations at the time, not pending instructions.
+The current status table and lanes above supersede their earlier checkpoints.
+
+### 2026-09-21: restart from the current repository
+
+Reviewed main `f719c4ff`, current open PRs and sibling releases. Replaced the
+obsolete operational queue while retaining historical reasoning by immutable
+link. (Superseded the same day by the maintainer: the historical plan is kept
+in this file as Part II, see the rework entry below.) Identified #409 as the immediate public-call integration correction;
+do not duplicate it. Started isolated derivative-contract, factor-reuse and
+QI investigations. Free-boundary qualification and polishing remain required,
+not silently deferred by the performance work. All six lane gates above remain
+open unless a later entry links the final implementation and evidence.
+
+Removed 58 unchanged, merged branches after checking
+open PR dependencies and worktree use, with expected-head leases. Tags and
+commit history were retained. Another 37 candidates were already absent on recheck; no removal is attributed
+to this work. Unsubmitted and active contributor branches remain protected.
+
+Open #410 now owns dependency-floor updates, #411 the revised single-stage
+example split, and #412 the same-mesh polishing comparison. Do not duplicate
+them. At this checkpoint the Boozer package index still listed 0.3.0;
+the later released-wheel qualification is recorded in lane D. Draft #414 (`edf779ca`) rejects unresolved radial lifts using the rank of the
+existing least-squares factorization. Four analytic tests and two existing
+lift/certificate integration tests pass. A Linux CPU run at the exact PR head
+then passed the four analytic tests under coverage.py: all four changed
+executable statements covered, none missing. This is changed-statement
+coverage, not full-module or branch coverage; repository CI remains pending.
+This does not close the 3-D polishing gate. #414 later merged as `311e7ddd`.
+
+### 2026-09-21: scientific contract review
+
+A focused controlled recovery test reproduced a remaining free-boundary
+history dependence: unrelated failed rebuilds exhaust the configuration-wide
+budget and change the answer at a previously successful point. The candidate
+allows one cold retry per stalled call; physical validation and final
+status-aware checks remain required before promotion. Derivative/state-identity
+work was then unpublished; its subsequent implementation and coverage are
+recorded under #417/#418 in lane A.
+
+[SOLVAX #117](https://github.com/uwplasma/solvax/pull/117) at `a217447` retains
+original coefficient bands for checked factored solves; reconstructing them
+from factors would lose information through cancellation. The focused suite
+reports 127 passing tests. VMEX integration and end-to-end gains remain open.
+
+The bounded QI experiment found a well-selection transition with a one-sided
+Taylor remainder floor. One subcell alternative removed that local floor,
+but changed the fixture objective by 0.535 percent. No production change or
+optimized-design/transport qualification follows from that experiment alone.
+The [public frozen-spectrum probe and measured Taylor table](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755290878)
+reproduce the baseline switch without a new repository file. Historical
+environment details were not captured; recheck the transition on the installed
+stack. The September 19 factor-reuse reproductions required by lane F remain
+outstanding.
+
+Draft #415 removes two duplicated benchmark narratives, retaining the JSON
+measurements and validation documentation. Citation and performance-documentation
+guards pass (38 tests); no unique measurement or numerical code is removed.
+
+### 2026-09-21: recovery candidate and released-wheel validation
+
+Draft #416 (`85517771`) removes history-dependent rebuild suppression, with
+one cold retry per stalled call. The eight-failure controlled regression and
+a real asymmetric repeated-point test after a rejected doubled-current trial
+pass. The agent reports 20 non-full module tests, 100 percent changed-line
+coverage and passing preflight; required repository CI and parent final review
+remain promotion gates. This restores repeatability, not free-boundary
+pressure-gradient accuracy or finite-beta design feasibility.
+
+Boozer 0.4.0 is now published on PyPI. The isolated released-wheel checks above
+passed on CPU with Python 3.11.14 and JAX 0.9.2/x64; both fixtures match the
+release tag. SOLVAX #117 now reports 128 passing focused tests at `9c6f1a17`.
+The revised VMEX scalar-factor cache still failed: two 151-surface pairs
+regressed by 0.6–1.2 percent and increased carried cache storage by 77 percent.
+The implementation was withdrawn; exact-state parity does not justify a slower,
+larger cache. Shared-load timings are diagnostic, not portable speed estimates.
+
+### 2026-09-21: plan rework keeps the full history in this file
+
+The maintainer rejected replacing the historical plan with links to older
+revisions: the code stays slim, but the plan must carry enough context for a
+complete handoff. The historical plan therefore returns in full as Part II,
+with superseded sections marked; the current material above is Part I. The
+only text removed from the historical plan is a host alias and private lock
+paths (§7 and §9), which must not be published. #413's documentation changes
+were reduced to factual corrections checked against the code: the adjoint
+equations and the default block-transpose adjoint with its Krylov fallback,
+preconditioner recomputation, the column certificate on the raw operator,
+the unqualified near-surface continuation, geometry-dependent default source
+sampling, the automatic GPU placement as a workload heuristic, and the scope of
+the implicit and free-boundary derivative claims.
+
+### 2026-09-21: derivative stack record (superseded 2026-09-22)
+
+> **Superseded 2026-09-22.** The independent review found the stack's premise
+> not reproduced on main; its one real defect landed as #427 and the stack is
+> to be closed. Lane A carries the current verdict. Kept as the record of what
+> the stack implemented and measured.
+
+Draft #417 (`1459f9df`) is rebased onto `45f3a7ae`; its 21-test suite passes
+with 98 percent changed executable coverage (319/325). Remaining uncovered
+lines are direct multi-RHS guards. Contributor-owned #418 is now restacked at
+`9e0baa28` and reports 18 passing focused tests on that exact stack. Review the
+pair together: direct calls must retain finite-state, geometry and FSQ admission
+when no absolute tolerance is supplied. Full optimization and GPU gates remain open.
+Callback placement #421 (`95aed755`) now includes #418 and fresh certificate
+alignment. PR #422 (`e25aa1fd`) merged into the #421 feature branch at `e94e46c6`,
+with only complementary tests; it has not delivered that stack to main.
+Eleven forced-two-CPU cases pass,
+covering caller/runtime mismatch, explicit-device precedence and exact returned
+coefficients. Instrumented measurement hooks do not certify a physical root.
+The earlier GPU-facing check used a CPU host root; accelerator-resident root
+and complete optimization qualification remain open on the combined stack.
+Draft #423 (`c5fa14d8`) fixes a further certificate mismatch: measure the
+supplied state directly and reject inconsistent fixed edges separately from
+geometry, rather than silently assembling a different edge. The regression
+fails on its parent; 55 focused tests and 11 forced-two-CPU cases pass, with
+12/12 changed executable source lines covered. A real small JIT-enabled root
+passes. Follow-up `02bf33d9` admits transform roundoff and aligns all public
+measurement inputs before either check, preserving the supplied coefficients.
+Eight focused cases cover ulp/material changes, geometric scaling, staged
+asymmetric setup and cross-device measurement; all nine added executable source
+statements are covered. The combined penalty/device suite passes all 71 tests
+on JAX 0.10.1/SOLVAX 0.21.0 with two CPU devices. A subsequent
+[explicit CPU/CUDA callback check](https://github.com/uwplasma/vmex/pull/423#issuecomment-5757198007)
+on NS5/MPOL3 Solovev passed on JAX 0.11.1/SOLVAX 0.22.0, with coefficients
+agreeing within 3.2e-15 and repeated certificates identical. Template placement
+was verified; native result placement was not independently recorded before
+host conversion. Asymmetric accelerator and complete optimization gates remain.
+Draft #424 (`7de9f45d`, based on #423) addresses a newly reproduced public-API
+regression: factory preflight caches a native-only solve, so immediate
+`equilibrium_from_x(x0)` skipped certification and then failed. The draft
+refreshes missing/stale evidence through the status callback and reuses valid
+certificates. It also removes cache-hit-count dependence from penalty fault
+injection. The original materialization failure is reproduced independently;
+the candidate's numerical suite and coverage remain unverified. Its PR includes
+commands and evidence for continuation. Work is handed off without further
+runs or subagents at the maintainer's request; no merges are authorized.
+
+### 2026-09-22: VMEX 0.11.0, the free-boundary audit and the vacuum finding
+
+VMEX 0.11.0 was released (#425, `780eb86e`), carrying #403, #407, #408, #409,
+#410, #412, #414, #416 and #420. #427 (`equilibrium_from_x` returns the
+refined state; objective and WOUT mean iota now agree to 1e-12, where main
+differed by 1.6e-3) and #428 (closure test for the mean-iota gap) merged after
+it.
+
+The independent review of the #417 stack did not reproduce its premise on
+main; the stack and #419 are to be closed and #371/#377 are superseded by
+#411. The follow-up audit of the free-boundary adjoint (lane A) found it
+exact at the root and 4–68x faster than finite differences, and located the
+remaining problems in the forward state: no Newton anchoring (about 1.2e-2 off
+the root), a seed-reference restart that burns about 80 % of each late trial,
+and start-dependent values at finite beta. The mean-iota gap is the m=1 gauge
+family, not a missing term. Anchoring and a restart budget are in progress.
+
+The zero-beta free-boundary limit cycle in #411 was traced to a 4/9 island
+chain at the boundary of the optimized coils (lane B), reproduced by VMEC2000
+and VMEC++; an iota ceiling at 0.44 in the example removes it, and all four
+single-stage examples now meet their targets. Tiny-beta regularization was
+tested and rejected.
+
+The maintainer decided: bake #426's optimization defaults into main; set
+finite-beta beta through PHIEDGE normalization instead of a pressure loop
+(in progress); defer the bootstrap single-stage scripts. The release deferral
+stated in "Execution and acceptance" was superseded by 0.11.0 and restated for
+0.12. This entry also corrected stale documentation claims listed in lane F.
+
+### 2026-09-22/23: review, fixes, docs, and the pause
+
+- Merged: #427 (`equilibrium_from_x` returns the refined state: iota 0.551556
+  vs 0.552562 on 0.11.0), #428 (m=1 family closure test; the defect-pinning
+  `gap > 3e-3` assertion was dropped), #413 (this plan), #429 (docs: 54 -> 44
+  pages; README/landing explain methods, goals, results).
+- Free-boundary adjoint audit (#417 comment 5784815035): exact at the root
+  (1e-7..1e-9 vs FD of Newton-anchored roots), +5-9 s per gradient, 4-68x
+  faster than FD, no leak. Two practical defects: the returned state is off the
+  root, and ~80 % of trial time near the optimum is a restart run to its cap.
+  #432 found why `ftol` is not a root test here (sum of squares; the edge row
+  enters `getfsq` only for 50 iterations after a restart, as in VMEC2000's
+  `residue.f90`): converged states sat 3.5e-2 to 1.3e-1 from the root, mostly a
+  poloidal-angle relabelling pinned only by the weak spectral-condensation
+  force, and the objective there was 0.2-17 % off.
+- Vacuum free boundary: the limit cycle was a 4/9 island chain at the
+  requested flux (field-line tracing; VMEC2000 and VMEC++ fail the same way;
+  Landreman-Paul coils converge cold at zero beta); fixed in #411 with an iota
+  ceiling. Tiny-beta regularization rejected.
+- PHIEDGE: beta depends only on `PRES_SCALE/PHIEDGE^2` at zero current, so
+  PHIEDGE is set in closed form at the target aspect with one correction solve
+  (#426). For free boundary the coils fix |B| and PHIEDGE sets plasma size, so
+  the analogue is choosing `PRES_SCALE` from the coil field.
+- Single-stage runs (#411, loaded laptop): fixed zero beta 335 s and fixed
+  0.5 % beta 566 s meet every target; free 0.5 % beta 2399 s meets every
+  target; free zero beta with the iota ceiling meets every target (~1900 s).
+  All exceed the new five-minute limit; bottleneck analysis and speedups are
+  in the #411 handoff comment.
+- `benchmarks/`/`tools/` audit: neither ships in the wheel; `benchmarks/`
+  goes from 132 to 70 files (#431); `tools/` keeps 17 of 18 (CI lane selection,
+  doc guards, asset fetch). Deleting files does not shrink clones (history is
+  36.6 MiB; `--depth 1` is 4.7 MiB; `docs/_static` is 43 % of history).
+
+### 2026-09-22: the exterior and interior fields against independent oracles
+
+A validation pass over virtual casing (VC), its derivatives and the extender
+at `604e6a76`, with virtual-casing-jax 0.0.7 from PyPI (#430). The references are
+independent of the code under test: an own surface-integral evaluator on a
+target-graded periodic trapezoid rule (E7's substitution, two refinements
+agreeing to 2e-9 in B and 2e-6 in grad B down to `d = 0.01 a`), a volume
+Biot–Savart integral of `curl B` of the interior field, the coil field of
+free-boundary equilibria, and `frozen_path_directional_fd`. Timings were
+taken with other jobs on the laptop (load 4–90) and are upper bounds.
+
+- **Validated.** Virtual casing of the native-form LCFS field equals the
+  volume Biot–Savart field of the interior current to 3e-12 on the 2.5 % β QA
+  deck (six Gauss points per radial spline cell; three leave a 1e-6 floor),
+  which ties the exterior path's formula, signs, normal and nfp replication to
+  the interior field; the asset-free version is now a PR test. The shipped path
+  equals the own evaluator to 1e-14. At the grid `from_state` picks for that
+  deck (64 × 64 per period) the plasma field is right to 1e-13 at `d = a`,
+  1e-6 at 0.5 a, 2.4e-2 at 0.2 a and O(1) from 0.1 a in; the order-0 estimate
+  is 0.76–1.09 × the true error, so it tracks rather than bounds it, and it
+  flags every unresolved point. Nested-AD derivatives equal the closed-form
+  kernels to 3e-12; the a-priori per-order estimate is never below the true
+  error of orders 1–3 and 3–6 × (order 1) to 14 × (order 3) above it.
+  Surface-data → field derivatives match central FD to 1e-9 (geometry) and
+  1e-11 (field); state → exterior and interior field to 6e-8 and 2e-6;
+  on-surface VC to 2e-8; the linearized-VC JVP columns of the functional API
+  to 5e-9. On free-boundary CTH-like equilibria VC at interior points equals
+  minus the MGRID coil field to 3–5e-4 (vacuum) and 4–7e-4 (β = 0.19 %), the
+  interior field equals the coil field to 2e-4–3e-3 in vacuum, and coil plus
+  VC just outside matches the interior field at the LCFS to 4e-4–1e-3 (vacuum)
+  and 3–6e-3 (finite β) — floors set by MGRID interpolation and ns = 31, not by
+  VC. Interior field on the breathing circle: B 2.5e-8 → 5e-14, grad B
+  2.8e-6 → 3e-8, grad-grad B 2.2e-4 → 1.2e-5 over ns = 41 → 161, div B at
+  round-off, curl B within 5e-8 of the exact current.
+- **Derivatives in problem parameters are exact for the frozen map, and the
+  re-solve map differs.** On `li383_low_res` the implicit reverse pass through
+  equilibrium, live-state surface data and VC matches the frozen-path FD to
+  4e-7–1e-6 on three boundary directions and 3e-10 on the current (interior
+  field: 1e-5–3e-4 and 2e-10). Independent re-solves differ by 2–4× on the
+  boundary directions (interior 6 %–110 %) and by 3e-3 on the current; on the
+  QA deck by up to 10×. That is #428's m = 1 gauge drift, which the exterior
+  field feels far more than iota does; the re-solve states themselves move
+  with warm-start history (λ by 5e-3, R by 3e-5 at one point). A new weekly
+  test pins the frozen-path agreement. Consequence for lane A: an optimizer
+  that line-searches the production map on an exterior-field objective is
+  not following the derivative it is given.
+- **Fixed** (#430). `_mgrid_from_wout` built an identically zero
+  coil field from a wout that names an MGRID but carries no currents, which
+  is what `solve_file` writes for a free-boundary deck (`multigrid.py` does not
+  pass the free-boundary metadata that the CLI passes; left to that file's
+  owner); it now raises. The per-order estimate returned NaN with hundreds of
+  RuntimeWarnings for targets tens of minor radii out, and the eager
+  derivative check then warned "error up to inf" where the field is exact;
+  fixed upstream (virtual_casing_jax #15: asinh Newton start, clamped root,
+  unknown-near-is-inf) and released as 0.0.8, now the `freeb` floor. `project_current` is
+  reachable from `from_wout`/`from_state` (default off). The continuation's
+  docstring blamed it for disagreeing with a direct value on a current-free
+  deck, where both numbers were errors; it now carries a finite-β record.
+- **The near-surface continuation** (E2's retired Taylor plan) is approximate
+  and not affordable: 1.6–2.4 % of the plasma field (about 1e-3 of |B|) at
+  every distance from 0.01 a to 0.1 a — a floor from its bilinear table —
+  3.9–6.6 % at 0.2 a and 18–32 % at 0.5 a, with 196–397 s and 18.5 GB to
+  prepare at 32 × 32; at the 64 × 64 default the process was killed for memory
+  on a 36 GB machine. It is not needed above 0.5 a. E7's graded rule is the
+  replacement: the reference above is that rule, 0.2–0.4 s per target in
+  unoptimised NumPy; remove the continuation once E7 lands.
+- **The curl-free projection default (#381) should stay off.** The removed
+  part of the covariant pair sits just above the resolved modes (m = 8, 9 at
+  mpol = 7) and does not shrink with ns (QA, 6e-3 of the gradient part at
+  ns = 31–201). Against a joint (mpol, ns) = (12, 128) reference on li383,
+  projecting leaves the plasma field's error unchanged or raises it by up to
+  1.6×, and raises grad B's by up to 1.9× (mpol 6–10, d = 0.2–1 a); only on an axisymmetric deck, where the curl
+  is a radial discretisation error (3.6e-4 at ns = 51 → 7.8e-5 at 401), does it
+  help, by about 5× at ns = 51–101. It makes the exterior field curl-free, which is
+  a physical requirement, but it does not make it closer to the equilibrium's
+  field at practical resolution; keep it opt-in.
+- **Open.** E7 in the library (point queries and E2's table). E5's wiring:
+  the closed-form kernels are 5–15× faster warm for all four orders, but their
+  first call costs 17 s because `level_sources` builds the densities eagerly;
+  fix that upstream first. The interior third derivative stalls at 6e-4 on
+  the breathing circle (cubic splines have no fourth radial derivative); a
+  quintic interpolant would restore convergence, below the E8 gate today.
+  The order-0 estimate can sit 1.3× under the true error.
+
+### 2026-09-23: the graded near-surface rule replaces the continuation
+
+E7 is in the library as `virtual_casing.graded_plasma_field` and as
+`VmecExtender`'s `near_surface` mode ("auto" by default: eager calls switch
+each point whose direct estimate misses `10**-digits` to the graded rule;
+"graded"/`with_graded_quadrature()` everywhere, traceable; "direct" as
+before). The rule interpolates the one-period surface samples spectrally,
+grades about the target's nearest surface point with local spacing d/8, and
+takes B and its derivatives from virtual-casing-jax's closed-form layer
+kernels. Measured at 128 × 512 nodes on the 2.5 % β QA deck: 1e-12 in B and
+1e-10 in grad B from d = a down to 0.01 a (3e-8 at 0.003 a) against the
+converged reference; on the two-source torus oracle 6e-10 of the field scale
+1 mm from a 0.3 m surface, inside and outside. `with_near_surface_continuation`
+and `near_surface_plan` are removed; the tracing example traces through the
+graded field at 64 × 256 nodes (about 4 ms per point).
+
+E5 is wired: direct-path derivatives use the closed-form kernels on the finest
+level (same values to 1e-12). The 17 s first call was `level_sources`
+dispatching eagerly; VMEX now compiles it ahead of time (0.5 s). One trap:
+`jax.ensure_compile_time_eval` also dispatches eagerly (26 s), so cached data
+are built with `jax.jit(...).lower().compile()()`, which runs outside any
+caller's trace. A/B/A/B on the office workstation
+(`benchmarks/extender_ab_20260923.json`): first `B`…`gradgradgradB` calls at
+16 targets 6.0 s → 2.9 s; warm `gradgradgradB` 0.50 → 0.09 s (16 targets) and
+1.98 → 0.47 s (128); near-surface `B` at 16 targets 0.05 a out costs 0.42 s
+warm instead of 0.04 s, and is right where the direct value was 25× too large.
+
+Still open: traced calls under "auto" use the direct path (a per-point switch
+under a trace would pay for both); the per-order switch uses the a-priori
+estimate, 3–14× conservative, so some resolved points take the slower rule;
+E2's table for long exterior traces; the default source grid is still sized
+for d = a only.
+
+# Part II. Historical plan and logbook (2026-09-13 to 2026-09-20)
+
+> **Status of Part II.** This is the plan as it stood on main at `f719c4ff`,
+> kept in full so that its reasoning, measurements, disproved hypotheses and
+> decisions remain readable here. Where Part I disagrees, Part I is current.
+> Superseded sections carry a note naming what superseded them; everything
+> else (evidence, root causes, kill rules, force-balance decisions, logbook)
+> remains the record. Text is unchanged except for those notes and the removal
+> of private host aliases and lock paths from §7 and §9.
 
 Authoritative plan, revised **2026-09-13** by an independent review of the
 2026-09-06 plan (merged as [#283](https://github.com/uwplasma/vmex/pull/283),
@@ -150,7 +1426,13 @@ deleted.
 **Release hold.** No tag, version bump or publication date is scheduled. One
 release follows the gates of §4 and §5.
 
+> **Superseded 2026-09-21.** VMEX 0.9.0, 0.9.1 and 0.10.0 have since been
+> released. The next release waits for the integration and research gates in
+> Part I ("Execution and acceptance").
+
 ## 0. How to use this plan
+
+> **Superseded 2026-09-21.** Resume from the Part I preamble instead. §3, the kill rules of §4, §5 and §9 remain evidence; §6 and §8 are historical.
 
 An agent resuming this work reads §1, §3, §4 (phases and PR list), §6
 (dispositions and release candidate), §7 (environment), §8 (the coordination rules and the brief it
@@ -164,6 +1446,8 @@ inventories, and does not launch a multi-hour run before the counters of
 Phase A exist.
 
 ## 1. Decision: fix what users measure
+
+> **Superseded 2026-09-21.** The four complaints remain the motivation. The A–H priority table is replaced by Part I lanes A–F: A (counters) and C (derivative sizing, #390/#392) are delivered; B maps to Part I lanes A and C; D to lane D; E to the native interior field and exterior-accuracy rows of the status table; F to lane B; G to "Dependencies and publication"; H to lane F and "Example scope".
 
 Users report four things: quasi-isodynamic optimization is slow; single-stage
 and free-boundary single-stage optimization are slow and end without a valid
@@ -780,6 +2064,8 @@ them.
 
 ## 4. Programme
 
+> **Superseded 2026-09-21.** The phase tables are replaced by Part I lanes A–F as the work queue. Their measurements, gates and kill rules remain evidence; "Kill rules and things not to repeat" stays in force unless Part I records new evidence against a rule.
+
 Principles: one nonlinear solve per trial; the objective is a function of `x`;
 a derivative is sized to its number of outputs; every accuracy claim has a
 known-answer oracle; every performance claim is a before/after row in
@@ -1041,17 +2327,17 @@ and not a defect.
 These verdicts stand and are not reopened by this revision.
 
 - **E1 passes.** The energy gradient equals complete virtual work to 7.9e-14;
-  omitting lambda leaves 3.1 % (`benchmarks/e1_functional_consistency.py`).
+  omitting lambda leaves 3.1 % ([`benchmarks/e1_functional_consistency.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e1_functional_consistency.py)).
 - **E2 passes the shaped tokamak and fails 3-D.** Full R/Z reference 188.5 vs
   the structured chart's 335.3 N m⁻³; on the finite-β QA deck the best step
   reaches 2.31× against a 10× gate and the chart advantage is 1.1–1.2×
-  (`benchmarks/e2_dense_reference.py`). Six toroidal planes under-resolve the
+  ([`benchmarks/e2_dense_reference.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e2_dense_reference.py)). Six toroidal planes under-resolve the
   nfp = 2 deck; use twelve.
 - **The axis source data and fit are the 3-D limiter.** Three independent
   lines converge on it: E2, the residual-versus-resolution scan
-  (`benchmarks/residual_vs_resolution.py`, near-axis residual rises with spline
+  ([`benchmarks/residual_vs_resolution.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/residual_vs_resolution.py), near-axis residual rises with spline
   refinement) and the refuted knot-grading hypothesis
-  (`benchmarks/knot_grading.py`). `lift_high_order_state` must reject bases
+  ([`benchmarks/knot_grading.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/knot_grading.py)). `lift_high_order_state` must reject bases
   with unfed spans instead of returning a minimum-norm fill.
 - **Coordinates.** Keep `ρ^|m| q(s)` with B-splines in `s`; no chart
   replacement, no generalized toroidal angle, no ρ-uniform mesh.
@@ -1063,6 +2349,8 @@ These verdicts stand and are not reopened by this revision.
 
 ## 6. Open pull requests and the release candidate
 
+> **Superseded 2026-09-21.** The PR dispositions below are historical. Current PR state is the Part I table "Open pull requests at this checkpoint".
+
 State on 2026-09-13, evening. "Merge" always means after explicit maintainer
 approval with every real CI lane green; the unsigned-commit PR gate is the only
 check that may be red.
@@ -1073,11 +2361,11 @@ check that may be red.
 | vmex #300 | DESC input bridge; lanes green except a cancelled Python 3.12 fast lane, re-run | merge when that lane is green |
 | vmex #309 (A4) | documentation matched to records | merged `1aa5465e` |
 | vmex #312 (A2, merged `68a119e9`) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
-| vmex #310 (A1) | optimization counters and their record `benchmarks/optimization_counters_20260913.json` | merged `2b9d3a3e`; next #319 → #320 → B4b |
+| vmex #310 (A1) | optimization counters and their record [`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json) | merged `2b9d3a3e`; next #319 → #320 → B4b |
 | vmex #311 (A3, merged `0c083539`) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
 | vmex #313 and #314 (merged `373f1e83`, `746215d3`), #315, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; #316's CTH free-boundary gradient check passes locally; #318 needs its counter rows before merge; #314's c3d failure was a test defect already on `main`: `test_qi_regression_pin_and_jit` pins the QI total on the axisymmetric Solov'ev deck, whose toroidal Boozer coefficients are about 1e-16, so the well argmin ties and 1e-15 noise flips the total between 0.13626 and 0.13500; #323 (merged `b0646713`) moves the pin to the golden `wout_li383_low_res`, whose minimum is unique; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
-| vmex #302 | revised 2026-09-21: historical 57,000-line archive preserved separately; compact HINT protocol, exact reference WOUTs/targets, native patch/build support and field summary retained. Old universal primal/cache/refinement changes retired; per-span lift rejection withdrawn after independent review | review the reconciled documentation/data PR on current main; no new solver or QA certification claim. Qualify the integrated #409/#410 baseline under the HINT protocol before new numerical claims |
+| vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck: at the reachable |P(gc)| ≈ 1.88e-7 every trial would fail `primal_tol` and return value-only, so the optimizer would never receive an implicit gradient (B1); no finish certifies better than 6.6e-9 on that deck, and the floor comes from non-gauge soft λ modes | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
 | vmex #319 (B4a, merged `c5ee2e0d`; total compile seconds 53.1 → 48.8 on QA and 50.2 → 36.5 on QI; its extra build programs are second copies caused by the committed final carry, with build compile time 4.66 → 4.64 s on QA and 8.09 → 8.86 s on QI, not removable without restoring the across-trial duplicates it removes) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
 | vmex #320 (B1a, retargeted to `main`; B1's QA_lowres run shows the plain rule would discard a certification, so it gains a linear-progress guard: stop only when the unconverged inner solve gained fewer than three digits and the step made no progress) | refinement stops after an unconverged step that does not lower |F| (+14/−9 in `implicit.py`, jit-exercised test on both JAX versions); stacked on #319 as `9b77a10e`, calling the shared commitment helper at both refinement call sites with one compile per lane pinned; QI first derivative 58.9 → 40.2 s with value, gradient, residual, Jacobian and refined state bit-identical | merge after #319, when its benchmark rows show 6,000 → 2,000 GCROT iterations with bit-identical outputs and CI is green |
@@ -1129,18 +2417,18 @@ the HINT-comparison stack stay parked and are out of this review's scope.
 ## 7. Environment and runbook
 
 - **Machines.** Apple-silicon laptops and a 36-core workstation with two RTX
-  A4000 GPUs (`ssh office`). Numerical comparisons use isolated environments:
+  A4000 GPUs (the office workstation). Numerical comparisons use isolated environments:
   Python 3.12 with JAX 0.11.1 and VMEC++ 0.7.4 for the head, Python 3.11 with
   JAX 0.9.2 for the floor. VMEC++ wheels older than 0.7 are not references.
-- **Heavy-job locks and load.** Laptop `~/local/.vmex-heavy.lock`, office
-  `~/vmex-agents/.heavy.lock`; take a lock with `mkdir` and set the release trap
+- **Heavy-job locks and load.** One heavy-job lock directory per machine
+  (locations kept in private notes); take a lock with `mkdir` and set the release trap
   only after acquiring it. Other sessions share both machines, so a timing or
   peak-memory row counts only when the 1-minute load at its start and end is at
   most 20 on the laptop (14 cores) or 24 on the office workstation (36 cores);
   counts, identities and targets count at any load.
-  On the office workstation only A/B timing rows take `.heavy.lock`.
+  On the office workstation only A/B timing rows take the heavy-job lock.
   Whole-example runs longer than twenty minutes take one of two slots,
-  `~/vmex-agents/.long.lock` or `.long2.lock`, with four threads, and report
+  two long-job lock directories, with four threads, and report
   wall time to the minute. Untimed work (seed evaluations, counts,
   identities, focused tests) takes no lock while the load is at most 24 and
   at least 16 GB is free.
@@ -1166,6 +2454,8 @@ python tools/preflight.py --static
   retargets within the same minute start two CI runs; wait on the survivor.
 
 ## 8. Agent briefs
+
+> **Superseded 2026-09-21.** The briefs below are completed or replaced by Part I lanes; they remain as the record of what each PR was asked to do and why. The coordination rules are replaced by Part I "Execution and acceptance": in particular, earlier blanket merge authorization is superseded, and every merge needs explicit maintainer approval.
 
 Each brief is self-contained: an agent reads §0–§1, its phase table in §4,
 the coordination rules below and its own brief, and starts. Line numbers are
@@ -1389,7 +2679,7 @@ changes the return drift from 1e-7 to 2e-7 (§2). #302 and #306 carry the
 contract to keep: derivatives only at a state with a fresh projected residual,
 raw FSQ and admissible geometry, and caches keyed by state identity.
 
-**Measured (A1 counters, `benchmarks/optimization_counters_20260913.json`; shared laptop under other sessions' load, so seconds are diagnostic).** On the 8-dof QA and QI rows of
+**Measured (A1 counters, [`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json); shared laptop under other sessions' load, so seconds are diagnostic).** On the 8-dof QA and QI rows of
 `benchmarks/optimization.py`, one evaluation's first derivative spends 29.4 s
 (QA) and 40.0 s (QI) in refinement, against 2.8–3.2 s for the 185-iteration
 solve: all three refinement steps exhaust their GCROT budget (`m = 100` ×
@@ -1499,7 +2789,7 @@ If both Newton arms die, test refining only where a derivative is requested.
 
 ### B4. One compiled path: full jit without recompilation
 
-**Facts.** On A1's rows (`benchmarks/optimization_counters_20260913.json`) the JAX value-and-gradient lane spends 41.6 s
+**Facts.** On A1's rows ([`benchmarks/optimization_counters_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/optimization_counters_20260913.json)) the JAX value-and-gradient lane spends 41.6 s
 (QA) and 71.0 s (QI) compiling after the host derivative has already
 compiled, and builds take 244–500 XLA compiles; a five-evaluation warm
 campaign recorded 102 compiles (`benchmarks/baselines/m4/F8_warm.json`). The
@@ -1637,7 +2927,7 @@ factorization per point, with seconds, adjoint iterations and peak RSS on seed
 QA. After B3a merges, B4c's QI gate re-runs at 1e-10.
 
 **Owns.** B3a: the backward rule in `vmex/core/implicit.py` and
-`benchmarks/adjoint_formulation.py`. B3b: the reverse lanes in
+[`benchmarks/adjoint_formulation.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/adjoint_formulation.py). B3b: the reverse lanes in
 `vmex/core/optimize.py`.
 
 ### D0. A QI example that starts near QI
@@ -1769,6 +3059,8 @@ Branch `ferr/force-balance-diagnostic`.
   NESTOR cost split (F0 measures it).
 
 ## 9. Execution logbook
+
+> **Superseded 2026-09-21.** Historical. New entries go in the Part I continuation logbook.
 
 Format: date, PR (base and head), gate, command and environment, result with
 units, limitation, next action. The 2026-09-05 to 2026-09-08 entries (Phase 1
@@ -1969,7 +3261,7 @@ heavy job is running and the heavy-job lock is released. State to resume from:
 - B1: the MPOL = NTOR = 8 QA deck run was stopped before it finished and has
   no record; the adjoint-through-block-factorization arm (f) and the
   refinement stagnation-abort arm (g) were not run. The seed-deck results
-  above are interim until `benchmarks/newton_finish_arms_20260913.json` is
+  above are interim until [`benchmarks/newton_finish_arms_20260913.json`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/newton_finish_arms_20260913.json) is
   committed from branch `b1/newton-finish`.
 - Five other tests in `tests/test_optimize.py` still read the shared `/tmp`
   Solov'ev state (a test-isolation follow-up). No package was tagged.
@@ -1987,7 +3279,7 @@ lock and CI capacity remain the pacing constraints.
 
 **2026-09-14, paused again.** Stopped on maintainer request; no agent, watch
 or heavy job runs on the laptop or the office workstation, and both heavy-job
-locks are released. The office worktrees under `~/vmex-agents` remain for
+locks are released. The office worktrees remain for
 reuse. State to resume from:
 
 - Awaiting CI, then admin-merge when every real lane is green: #300 (its
@@ -2122,7 +3414,7 @@ A session limit stopped three agents mid-task; their office jobs had finished.
   is about 1,700 GCROT iterations and 96 % of each value-only trial on both
   libraries. B1c is therefore the next lever for single stage and QI (88 % of
   #333's least-squares phase), and least squares gets one more proxy after it.
-- **Office runbook:** only A/B timing rows take `.heavy.lock`; whole-example runs
+- **Office runbook:** only A/B timing rows take the heavy-job lock; whole-example runs
   take one of two long slots; untimed work runs lock-free at load ≤ 24.
 - **Force-balance panel:** users report errors near 100 %; brief F-err (§8)
   investigates the saturating `equif` normalization against DESC and VMEC2000.
@@ -2384,9 +3676,10 @@ error estimates and ratios are not affected.
   `fetch_assets.py` 23 times and in three workflows, `test_manifest.py` in four
   -- and `assets/manifest.json` is read by eight places including `MANIFEST.in`,
   so the one-file directory stays.
-- **`benchmarks/baselines/m4/` should NOT be consolidated.** It is 54 files,
-  8.7 % of the tree, and nothing reads them programmatically -- so merging them
-  into one keyed record looks like the biggest available win. It is not:
+- **`benchmarks/baselines/m4/` should NOT be consolidated.** It held 54 files,
+  8.7 % of the tree; since 2026-09-22 only the records the docs or tests cite
+  stay there (the rest are in git history). Merging them
+  into one keyed record looks like a win. It is not:
   `profile_workflows.py` writes `{workflow}_{regime}.json` one cell at a time
   and re-executes itself in a subprocess for the cold regimes, so one file per
   cell is what lets a partial run on a shared machine keep its completed cells.

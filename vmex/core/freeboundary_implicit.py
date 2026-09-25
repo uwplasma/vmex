@@ -8,6 +8,12 @@ tape; one matrix-free adjoint supplies derivatives with respect to plasma
 profiles and explicit external-field parameters (including ESSOS coil shape
 and current degrees of freedom or an :class:`~vmex.core.mgrid.MgridField`
 current vector).
+
+The forward pass also Newton-anchors the returned state on that coupled
+root (:func:`_anchor_root`), because VMEC's ``ftol`` test does not put it
+there, and a trial whose restart from the configuration's reference cannot
+converge falls back to a cold solve after a bounded budget
+(:func:`_restart_budget`).
 """
 
 from __future__ import annotations
@@ -24,7 +30,8 @@ import numpy as np
 from jax.flatten_util import ravel_pytree
 from scipy.sparse import bsr_matrix
 from scipy.sparse.linalg import LinearOperator, gcrotmk
-from solvax import SpluFactorization
+from solvax import SpluFactorization, block_thomas_factor, block_thomas_solve
+from solvax import gmres as _solvax_gmres
 
 from . import implicit as im
 from .device import AUTO, resolve_implicit_device
@@ -37,7 +44,7 @@ from .freeboundary import (
     _vacuum_scalars,
     free_boundary_resolution,
 )
-from .errors import VmecError
+from .errors import VmecConvergenceError, VmecError
 from .input import VmecInput
 from .solver import SpectralState, evaluate_forces
 
@@ -89,6 +96,7 @@ def make_free_boundary_config(
     field_from_parameters: Callable[[Any], Any] | None = None,
     device: Any = AUTO,
     max_fsq_ratio: float = 1.0,
+    refine_tol: float = 1.0e-10,
 ) -> FreeBoundaryImplicitConfig:
     """Build a coupled free-boundary derivative configuration.
 
@@ -123,6 +131,13 @@ def make_free_boundary_config(
     previous 1e6 also admitted roots that stopped 49x past ``ftol``; an
     uncertified state is a failed trial (status 2), because its adjoint is
     taken off the root and its value depends on the path there.
+
+    ``refine_tol`` is the residual at which a certifiable solve counts as
+    anchored on the coupled plasma--vacuum root: VMEC's ``ftol`` does not
+    test that root (see :func:`_anchor_root`), so every such solve is
+    Newton-refined until ``|F| <= refine_tol`` and differentiated there.  A
+    solve the anchor cannot land is status 3.  ``inf`` skips the anchor and
+    restores the unanchored behaviour.
     """
     if not inp.lfreeb:
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
@@ -133,6 +148,7 @@ def make_free_boundary_config(
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
         adjoint_gcrot_m=adjoint_gcrot_m, adjoint_gcrot_k=adjoint_gcrot_k,
         device=solve_device, max_fsq_ratio=max_fsq_ratio,
+        refine_tol=refine_tol,
     )
     if cfg.resolution != resolution:
         cfg = dataclasses.replace(cfg, resolution=resolution)
@@ -325,11 +341,6 @@ def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
 
 
 _FREE_MASK_CACHE: dict[tuple, SpectralState] = {}
-#: Cold rebuilds allowed per configuration after a restart misses ``ftol``.
-#: Only unproductive rebuilds are counted, so a deck that a rebuild does fix
-#: keeps its rebuilds indefinitely and a deck it never fixes stops paying.
-_REBUILDS = 8
-_REBUILD_BUDGET: dict[FreeBoundaryImplicitConfig, int] = {}
 
 #: One reference stage per configuration; every solve restarts from it.  It is
 #: kept whether or not it converged: a configuration with no reachable root
@@ -337,6 +348,8 @@ _REBUILD_BUDGET: dict[FreeBoundaryImplicitConfig, int] = {}
 #: is what reports the miss.
 _FREE_HOT_CACHE: dict[FreeBoundaryImplicitConfig, Any] = {}
 _FREE_LAST_RESULT: dict[FreeBoundaryImplicitConfig, Any] = {}
+#: What :func:`_anchor_root` reported for the last solve (``None``: skipped).
+_FREE_LAST_ANCHOR: dict[FreeBoundaryImplicitConfig, Any] = {}
 
 
 def _mask_key(cfg: FreeBoundaryImplicitConfig) -> tuple:
@@ -418,23 +431,23 @@ def _host_solve_and_mask_impl(
     if reference is None:
         reference = _FREE_HOT_CACHE[cfg] = _cold_reference(solve, icfg, inp, field)
     try:
-        stage = solve(**_continuation(reference))
+        stage = solve(**_continuation(reference),
+                      max_iterations=_restart_budget(icfg, reference))
     except VmecError:
         # The reference may be too far from this trial; start over cold.
         stage = _cold_reference(solve, icfg, inp, field)
-    if not bool(stage.result.converged) and _REBUILD_BUDGET.get(cfg, _REBUILDS) > 0:
-        # A restart carries the reference's state, and far enough from it that
-        # state is a worse start than none: measured, a 2 % change in every
-        # coil current stalls at the iteration cap and lands 9.2e-3 away from
-        # the cold answer, which converges in 76.  Solve this trial cold
-        # instead.  The stored reference is deliberately NOT replaced: every
-        # call stays a function of its own parameters and the one reference,
-        # which is what makes repeated calls bit-identical.
-        rebuilt = _cold_reference(solve, icfg, inp, field)
-        if not bool(rebuilt.result.converged):
-            # Bound the wasted work on a deck where rebuilding never helps.
-            _REBUILD_BUDGET[cfg] = _REBUILD_BUDGET.get(cfg, _REBUILDS) - 1
-        stage = rebuilt
+    else:
+        if not bool(stage.result.converged):
+            # A restart carries the reference's state, and far enough from it
+            # that state is a worse start than none: measured, a 2 % change in
+            # every coil current stalls at the iteration cap and lands 9.2e-3
+            # away from the cold answer, which converges in 76. Solve this
+            # trial cold instead -- after at most ``_restart_budget``
+            # iterations, not the full ``max_iterations``. The stored
+            # reference is deliberately NOT replaced, so every call stays a
+            # function of its own parameters and the one reference, making
+            # repeated calls bit-identical.
+            stage = _cold_reference(solve, icfg, inp, field)
     _FREE_LAST_RESULT[cfg] = stage.result
     state = stage.result.state
     rcon0, zcon0 = stage.rcon0, stage.zcon0
@@ -467,10 +480,52 @@ def _host_solve_and_mask_impl(
         )
         _FREE_MASK_CACHE[key] = mask
 
+    # Anchor a certifiable state on the coupled root the adjoint linearizes,
+    # so the value, the objective's cotangent and the linearization all read
+    # the same point (see _anchor_root).  An uncertifiable solve is never
+    # differentiated, so it is not worth the Newton work.
+    report = None
+    result = stage.result
+    fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
+    if bool(result.converged) or fsq / icfg.ftol <= icfg.max_fsq_ratio:
+        with im._timed(icfg, "anchor"):
+            state, report = _anchor_root(
+                cfg, params, field_parameters, state, mask, rcon0, zcon0)
+        if error_on_no_convergence and not report.certified:
+            raise VmecConvergenceError(
+                "the free-boundary solve met ftol but Newton did not anchor "
+                f"it on the coupled root: |F| {report.residual:.3e} > "
+                f"refine_tol {icfg.refine_tol:.1e} after {report.steps} "
+                "steps",
+                hint="tighten ftol, or pass refine_tol=inf to "
+                     "make_free_boundary_config to skip the anchor")
+    _FREE_LAST_ANCHOR[cfg] = report
+
     to_numpy = lambda tree: jax.tree.map(  # noqa: E731
         lambda value: np.asarray(value, dtype=np.float64), tree
     )
     return to_numpy(state), to_numpy(mask), to_numpy(rcon0), to_numpy(zcon0)
+
+
+def _restart_budget(icfg, reference) -> int:
+    """Iterations a restart from the reference may spend before going cold.
+
+    The restart exists to be cheaper than a cold solve, so it gets the
+    iterations the configuration's own cold reference needed, never less
+    than a tenth of ``max_iterations`` and never more than all of it.  On the
+    finite-beta single-stage deck (reference: 943 iterations) restarts that
+    converge do so in 329 or 1305 where the cold solve takes 823-1425, and
+    from halfway to the optimum every restart ran to the 4000 cap without
+    converging -- 19-21 s of each 25 s trial -- before the cold solve that
+    certified it.  A budget spent is deterministic: the restart is a fixed
+    function of the parameters and the one reference, so the same parameters
+    always take the same branch.
+    """
+    cap = int(icfg.max_iterations)
+    iterations = getattr(reference.result, "iterations", None)
+    if iterations is None:
+        return cap
+    return int(min(cap, max(int(iterations), cap // 10, 1)))
 
 
 def _host_solve_and_mask_status(cfg, params_np, field_parameters_np):
@@ -499,6 +554,9 @@ def _host_solve_and_mask_status(cfg, params_np, field_parameters_np):
     fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
     ratio = fsq / cfg.implicit.ftol
     status = 0 if bool(result.converged) or ratio <= cfg.implicit.max_fsq_ratio else 2
+    report = _FREE_LAST_ANCHOR.get(cfg)
+    if status == 0 and report is not None and not report.certified:
+        status = 3
     return state, mask, rcon0, zcon0, np.int32(status), np.float64(fsq), np.float64(ratio)
 
 
@@ -647,10 +705,9 @@ def _solve_bwd_impl(cfg, saved, state_bar):
                 "coupled GCROT solve instead. That is a different solver, so "
                 "the gradient agrees only to the Krylov tolerance, and it is "
                 "the slower of the two -- measured on the free-boundary "
-                "single-stage deck at ns = 25, one value-and-gradient costs "
-                "46.5 s through the Schur lane against 60.9-74.7 s staged, "
-                "and the gap widens as the Schur lane gets faster. Call the "
-                "objective eagerly to keep the solver you asked for.",
+                "single-stage deck at ns = 25, one warm value-and-gradient "
+                "costs 5.1 s through the Schur lane against 38.6 s staged. "
+                "Call the objective eagerly to keep the solver you asked for.",
                 RuntimeWarning, stacklevel=2)
         _, state_pullback = jax.vjp(
             lambda z: residual(
@@ -721,10 +778,14 @@ def _packers(cfg: FreeBoundaryImplicitConfig, dof_mask):
 # lane and strands that trial's arrays in JAX's trace cache as jaxpr
 # constants; the boundary-Schur lane used to leak a whole block system
 # (ns x block x block) per successful gradient that way.
-@functools.partial(jax.jit, static_argnames=("cfg",))
+@functools.partial(jax.jit, static_argnames=("cfg", "probe_chunk_size"))
 def _frozen_bulk_blocks(params, field_parameters, frozen, rcon0, zcon0,
-                        dof_mask, z_star, bsqvac, *, cfg):
-    """Radial block tridiagonal of the raw Jacobian at frozen edge pressure."""
+                        dof_mask, z_star, bsqvac, *, cfg, probe_chunk_size=None):
+    """Radial block tridiagonal of the raw Jacobian at frozen edge pressure.
+
+    ``probe_chunk_size`` overrides ``cfg.schur_probe_chunk_size``; the Newton
+    anchor passes the fixed-boundary refinement's ``ceil(sqrt(block))``.
+    """
     icfg = cfg.implicit
     runtime = dataclasses.replace(
         im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
@@ -742,7 +803,8 @@ def _frozen_bulk_blocks(params, field_parameters, frozen, rcon0, zcon0,
     system = im._raw_block_system(
         (params, field_parameters), icfg, frozen, dof_mask,
         im._active_state_fields(icfg),
-        probe_chunk_size=cfg.schur_probe_chunk_size, residual=frozen_root,
+        probe_chunk_size=(cfg.schur_probe_chunk_size if probe_chunk_size is None
+                          else probe_chunk_size), residual=frozen_root,
         z_star=z_star, runtime=runtime, physical_state=frozen,
         include_edge=True, factor=False,
     )
@@ -894,8 +956,13 @@ def _host_boundary_schur_adjoint(
     where ``U`` injects the evolved edge row. Direct three-surface assembly
     already retains every terminal VMEC stencil coupling in ``A``; only
     NESTOR's response to the moving edge remains in ``E``. One sparse bulk
-    factorization and the edge solve recover the full adjoint. The final
-    answer is certified against the original coupled transpose operator.
+    factorization and the edge solve recover the full adjoint. ``E``'s
+    columns come from NESTOR's dense edge response (:func:`_edge_response`),
+    its exact linearization at this root, so each costs a VMEC transpose
+    instead of a NESTOR reverse sweep: on the finite-beta single-stage deck
+    the warm adjoint falls from 3.1 s to 1.6-1.9 s and its compile from 40 s
+    to 31 s. The final answer is certified against the original coupled
+    transpose operator.
     """
     icfg = cfg.implicit
     field = cfg.field_from_parameters(field_parameters)
@@ -908,11 +975,20 @@ def _host_boundary_schur_adjoint(
     bsqvac = jax.lax.stop_gradient(cfg.vacuum_program.bsq(frozen, rt, field))
     lower_blocks, diagonal, upper_blocks, row_scale, column_scale = (
         _frozen_bulk_blocks(params, field_parameters, frozen, rcon0, zcon0,
-                            mask, z_star, bsqvac, cfg=cfg))
+                            mask, z_star, bsqvac, cfg=cfg,
+                            probe_chunk_size=_bulk_probe_chunk(cfg, mask)))
     coupled_residual = _projected_residual(cfg, mask, formulation="raw")
     coupled_pullback = _prepare_transpose(
         z_star, params, field_parameters, frozen, rcon0, zcon0,
         residual=coupled_residual)
+    # The Schur columns come from NESTOR's dense edge response, which is its
+    # exact linearization at this root: a VMEC transpose per column instead
+    # of a NESTOR reverse sweep.  The answer is still certified on the exact
+    # coupled transpose below.
+    edge_pullback = _prepare_response_transpose(
+        z_star, params, field_parameters, frozen, rcon0, zcon0, mask,
+        _edge_response(cfg, params, field_parameters, frozen, rcon0, zcon0),
+        cfg=cfg, formulation="raw")
 
     dtype = rhs.R_cos.dtype
     packed_mask = np.asarray(_pack_state(mask, mask, cfg=cfg)[-1])
@@ -984,12 +1060,12 @@ def _host_boundary_schur_adjoint(
     def apply(value):
         nonlocal calls
         calls += 1
-        return probe(np.atleast_2d(value), coupled_pullback)[0]
+        return probe(np.atleast_2d(value), edge_pullback)[0]
 
     apply(edge_rhs)
 
     identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
-    schur = probe(identity, coupled_pullback).T
+    schur = probe(identity, edge_pullback).T
     calls += nedge
     solve_reduced, condition = _balanced_dense_solver(schur)
     edge_solution = solve_reduced(edge_rhs)
@@ -1001,7 +1077,7 @@ def _host_boundary_schur_adjoint(
         print(f"[vmex adjoint] balanced Schur condition={condition:.3e}")
 
     correction_rows = _edge_probe_columns(
-        jnp.asarray(np.atleast_2d(edge_solution), dtype), coupled_pullback,
+        jnp.asarray(np.atleast_2d(edge_solution), dtype), edge_pullback,
         lower_blocks, diagonal, upper_blocks, mask, edge_basis, cfg=cfg,
         chunk=chunk)[0]
     correction = _unpack_projected(
@@ -1025,6 +1101,405 @@ def _host_boundary_schur_adjoint(
     return solution
 
 
+# ---------------------------------------------------------------------------
+# Newton anchoring of the coupled root
+# ---------------------------------------------------------------------------
+#: Newton steps one attempt may take.  From solves at ``ftol = 1e-10`` along
+#: the finite-beta single-stage optimization path it lands in 7 to 15, from
+#: ``ftol = 1e-9`` in 7 to 23; the budget leaves room for a slower point
+#: without letting a non-contracting one run on.
+_ANCHOR_MAX_STEPS = 25
+
+#: Inexact-Newton forcing term of each step's Krylov solve, as in the
+#: fixed-boundary refinement (``implicit._REFINE_FORCING``).  A forcing that
+#: loosens to 1e-2 while the contraction is slow (Eisenstat--Walker style)
+#: was measured: it cut the Krylov work but failed to anchor five of eight
+#: points on that path that this fixed one lands.
+_ANCHOR_FORCING = 1.0e-6
+
+#: GMRES iterations per solve (one unrestarted cycle).  The preconditioner
+#: is exact where it was built, so the Krylov solve only covers its
+#: staleness: 1-3 iterations there and at most about 70 on the single-stage
+#: deck; the bulk factors alone needed 40-110.
+_ANCHOR_KRYLOV = 150
+
+#: A Newton solve that took more Krylov iterations than this rebuilds the
+#: preconditioner at the next iterate.  A rebuild costs about 1 s on the
+#: single-stage deck; 20 and 40 cost the same there (Krylov 183 against 310).
+_ANCHOR_REFACTOR_KRYLOV = 40
+
+#: Relative accuracy of the simplified correction behind the damping test;
+#: the test compares two lengths, so two digits suffice.
+_ANCHOR_TEST_FORCING = 1.0e-2
+
+#: Damping of the first step, one per attempt: an attempt that fails starts
+#: again from the host state with a smaller first step.  On a finite-difference
+#: leg of ``take_free_boundary_gradients.py`` a first step of 0.5 passed the
+#: monotonicity test and still led where the next Newton corrections grew
+#: from 0.11 to 1.8; a quarter step from the same state lands.
+_ANCHOR_FIRST_DAMPING = (1.0, 0.25, 0.0625)
+
+#: Add NESTOR's coupling to the bulk preconditioner (:func:`_anchor_coupling`);
+#: off, the bulk factors alone precondition (4-8x the Krylov iterations).
+_ANCHOR_WOODBURY = True
+
+#: Smallest Newton damping factor before an attempt gives up.  Steps are
+#: damped on Deuflhard's natural monotonicity test, not on ``|F|`` (see
+#: :func:`_anchor_root`).
+_ANCHOR_MIN_DAMPING = 1.0 / 64.0
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _anchor_raw_residual(z, params, field_parameters, frozen, rcon0, zcon0,
+                         dof_mask, *, cfg):
+    """Packed raw coupled residual (exact NESTOR) at ``z``."""
+    _, pack, _ = _packers(cfg, dof_mask)
+    return pack(_projected_residual_lane(
+        z, params, field_parameters, frozen, rcon0, zcon0, dof_mask, None,
+        None, cfg=cfg, formulation="raw"))
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _anchor_norm(z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
+                 *, cfg):
+    """``|F(z)|`` of the preconditioned coupled residual the adjoint uses."""
+    return im._tree_norm(_projected_residual_lane(
+        z, params, field_parameters, frozen, rcon0, zcon0, dof_mask, None,
+        None, cfg=cfg, formulation="preconditioned"))
+
+
+@jax.jit
+def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
+    """Block-Thomas factors of the scaled bulk block tridiagonal.
+
+    The same two-sided scaling the Schur adjoint's sparse LU uses; here the
+    factors only precondition, so the fixed-boundary refinement's JAX block
+    elimination (``implicit._refine_block_factor_core``) is accurate enough
+    and keeps each Krylov solve inside one compiled program.
+    """
+    ns = diagonal.shape[0]
+    previous = jnp.maximum(jnp.arange(ns) - 1, 0)
+    following = jnp.minimum(jnp.arange(ns) + 1, ns - 1)
+    return block_thomas_factor(
+        row_scale[:, :, None] * lower * column_scale[previous][:, None, :],
+        row_scale[:, :, None] * diagonal * column_scale[:, None, :],
+        row_scale[:, :, None] * upper * column_scale[following][:, None, :])
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
+                     dof_mask, response, factors, row_scale, column_scale, *,
+                     cfg):
+    """Woodbury terms that add NESTOR's coupling to the bulk factors.
+
+    At frozen edge pressure the raw Jacobian is the block tridiagonal ``A``
+    the factors invert.  NESTOR adds ``E = P Q``: ``Q = dh/dz`` maps the
+    state to NESTOR's own inputs ``h`` (:func:`_vacuum_inputs`: edge
+    coefficients, ``ctor``, the axis) and ``P`` is the edge force's response
+    to them through :func:`_edge_response`.  Its rank is ``h``'s length (129
+    on the single-stage deck), so ``(A + P Q)^-1`` is applied exactly by the
+    Woodbury identity with one small capacitance factorization.  Returns
+    ``(A^-1 P, Q, lu(I + Q A^-1 P))``, packed and flattened.
+    """
+    project, pack, unpack = _packers(cfg, dof_mask)
+    icfg = cfg.implicit
+    value, jacobian, _ = response
+    shape = row_scale.shape
+    rt = dataclasses.replace(
+        im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=int(icfg.resolution.ns),
+        presf_ns_scale=_presf_ns_scale_traceable(
+            params, icfg.inp, int(icfg.resolution.ns)),
+    )
+    _, force_of_pressure = jax.linearize(
+        lambda bsq: pack(_projected_residual_lane(
+            z, params, field_parameters, frozen, rcon0, zcon0, dof_mask, bsq,
+            None, cfg=cfg, formulation="raw")), value)
+    columns = jax.vmap(force_of_pressure, in_axes=-1, out_axes=-1)(jacobian)
+    columns = columns.reshape(-1, columns.shape[-1])
+
+    def inputs(packed):
+        state = jax.tree.map(jnp.add, frozen, project(unpack(packed)))
+        return ravel_pytree(_vacuum_inputs(state, rt))[0]
+
+    _, inputs_t = jax.vjp(inputs, jnp.zeros(shape, row_scale.dtype))
+    rows = jax.vmap(lambda e: inputs_t(e)[0])(
+        jnp.eye(columns.shape[-1], dtype=columns.dtype))
+    rows = rows.reshape(rows.shape[0], -1)
+
+    def bulk_inverse(flat):
+        scaled = flat.reshape(shape) * row_scale
+        solved = block_thomas_solve(factors, scaled[..., None])[..., 0]
+        return (solved * column_scale).ravel()
+
+    solved = jax.vmap(bulk_inverse, in_axes=-1, out_axes=-1)(columns)
+    capacitance = jnp.eye(rows.shape[0], dtype=rows.dtype) + rows @ solved
+    return solved, rows, jax.scipy.linalg.lu_factor(capacitance)
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _anchor_linear_solve(force, z, params, field_parameters, frozen, rcon0,
+                         zcon0, dof_mask, response, factors, row_scale,
+                         column_scale, coupling, *, cfg, rtol):
+    """``-J(z)^-1 force`` for the packed raw coupled residual, staged.
+
+    GMRES on the raw linearization at ``z``, preconditioned by the bulk
+    factors (possibly from an earlier iterate), with NESTOR through its
+    dense edge response ``response`` -- a VMEC force tangent per matvec
+    instead of a NESTOR sweep (9 ms against 45-70 ms on the single-stage
+    deck) -- or exactly when ``response`` is ``None``.  One compiled program
+    per ``(cfg, rtol)`` runs the whole solve, as the fixed-boundary
+    refinement's ``_refine_block_step_core`` does; driving the same Krylov
+    loop from the host cost 22 ms per iteration.  Inactive entries get an
+    identity equation.  ``rtol`` is traced, so the Newton and the damping
+    solves share one executable.  Returns the packed correction, the
+    iteration count and the final relative residual.
+    """
+    project, pack, unpack = _packers(cfg, dof_mask)
+    shape = force.shape
+    _, linear = jax.linearize(
+        lambda zz: _projected_residual_lane(
+            zz, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
+            None, response, cfg=cfg, formulation="raw"), z)
+
+    def operator(flat):
+        packed = flat.reshape(shape)
+        tangent = project(unpack(packed))
+        return (pack(project(linear(tangent))) + packed
+                - pack(tangent)).ravel()
+
+    def precondition(flat):
+        scaled = flat.reshape(shape) * row_scale
+        solved = block_thomas_solve(factors, scaled[..., None])[..., 0]
+        solved = (solved * column_scale).ravel()
+        if coupling is None:
+            return solved
+        bulk_p, q, lu = coupling
+        return solved - bulk_p @ jax.scipy.linalg.lu_solve(lu, q @ solved)
+
+    rhs = -force.ravel()
+    solution = _solvax_gmres(
+        operator, rhs, precond=precondition,
+        restart=min(_ANCHOR_KRYLOV, int(rhs.shape[0])), rtol=rtol, atol=0.0,
+        max_restarts=1)
+    return (solution.x.reshape(shape), solution.iterations,
+            solution.residual_norm / jnp.linalg.norm(rhs))
+
+
+@dataclass(frozen=True)
+class _AnchorReport:
+    """What the Newton anchor did to one host state."""
+
+    certified: bool
+    initial_residual: float
+    residual: float
+    steps: int = 0
+    krylov_iterations: int = 0
+    factorizations: int = 0
+    displacement: float = 0.0
+    attempts: int = 0
+
+
+def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
+    """Newton-anchor a converged free-boundary state on its coupled root.
+
+    VMEC's convergence test is not a root test for this residual.  ``ftol``
+    bounds summed squares of the invariant forces, and the free-boundary
+    edge row joins that sum only during the first 50 iterations after a
+    (re)start (``residuals.edge_force_condition``; ``getfsq`` in
+    VMEC2000's ``residue.f90``).  A small sum of squares does not mean a
+    nearby root where ``dF/dz`` has a small singular value.  On the
+    finite-beta single-stage deck a solve converged at ``ftol = 1e-10``
+    leaves ``|F| ~ 3e-06`` and lies 3.5e-02 to 1.3e-01 from the root in
+    coefficient norm, mostly lambda ``(m, n) = (2, 0)`` with low-``m`` R/Z --
+    the pattern of a poloidal-angle relabelling, which only the weak
+    spectral-condensation force pins.  The objective there differs from the
+    objective at the root by 0.2-17 %, while the adjoint differentiates the
+    root.
+
+    The anchor is the free-boundary counterpart of
+    ``implicit._refined_state``: Newton on the projected coupled residual.
+    Each step solves the raw linearization by GMRES, with NESTOR entering
+    through its dense edge response, rebuilt at every iterate.  The
+    preconditioner is the exact Jacobian where it is built: the block
+    factors of the radial block tridiagonal at frozen vacuum pressure (the
+    Schur adjoint's bulk operator) plus NESTOR's low-rank coupling through
+    the Woodbury identity (:func:`_anchor_coupling`).  It is rebuilt only
+    when GMRES says it has gone stale.  Steps are damped on
+    Deuflhard's natural monotonicity test (the NLEQ-ERR strategy): the
+    simplified correction ``J^-1 F(z + a dz)`` must be shorter than ``dz``.
+    ``|F|`` is no guide here -- the first full step raises it by three
+    decades along the gauge direction and still lands, while undamped steps
+    from other points diverge.
+
+    The state is certified once ``|F| <= refine_tol``; like the
+    fixed-boundary refinement it keeps stepping while a step still gains a
+    decade, so it lands at the residual floor (3e-14 to 9e-14 on that deck).
+    The anchored root does not depend on where VMEC stopped: from solves at
+    ``ftol = 1e-10`` and ``1e-12`` the anchored objectives agree to 1e-10
+    (optimized coils) and 8e-9 (a quarter of the way), where the unanchored
+    ones differ by 2.8 % and 5 %.  A run that does not certify returns the
+    host state with ``certified=False``; the callers turn that into an
+    uncertified trial (status 3) or an error, never a silent pass.
+    ``refine_tol = inf`` disables the anchor.
+    """
+    icfg = cfg.implicit
+    tol = float(icfg.refine_tol)
+    if not np.isfinite(tol) or tol <= 0.0:
+        return state, _AnchorReport(True, np.nan, np.nan)
+    arrays = (params, field_parameters, state, mask, rcon0, zcon0)
+    params, field_parameters, state, mask, rcon0, zcon0 = im._device_pin(
+        icfg, jax.tree.map(jnp.asarray, arrays))
+    project = im._dof_projector(icfg, mask)
+    z = project(state)
+    lane = (params, field_parameters, state, rcon0, zcon0, mask)
+    base = float(_anchor_norm(z, *lane, cfg=cfg))
+    if not np.isfinite(base) or base <= tol:
+        return state, _AnchorReport(bool(np.isfinite(base)), base, base)
+
+    field = cfg.field_from_parameters(field_parameters)
+    ns = int(icfg.resolution.ns)
+    rt = dataclasses.replace(
+        im.runtime_from_params(params, icfg), rcon0=rcon0, zcon0=zcon0,
+        lfreeb=True, jmax=ns,
+        presf_ns_scale=_presf_ns_scale_traceable(params, icfg.inp, ns))
+    chunk = _bulk_probe_chunk(cfg, mask)
+    debug = im._adjoint_debug_enabled()
+
+    def iterate_state(z_at):
+        return jax.tree.map(jnp.add, state, jax.tree.map(
+            jnp.subtract, z_at, project(state)))
+
+    def factor(z_at, response_at):
+        """Preconditioner at the iterate ``z_at``: bulk factors + coupling."""
+        at = iterate_state(z_at)
+        bsqvac = jax.lax.stop_gradient(cfg.vacuum_program.bsq(at, rt, field))
+        lower, diagonal, upper, row_scale, column_scale = _frozen_bulk_blocks(
+            params, field_parameters, at, rcon0, zcon0, mask, z_at, bsqvac,
+            cfg=cfg, probe_chunk_size=chunk)
+        factors = _anchor_factor(lower, diagonal, upper, row_scale,
+                                 column_scale)
+        coupling = (_anchor_coupling(
+            z_at, params, field_parameters, state, rcon0, zcon0, mask,
+            response_at, factors, row_scale, column_scale, cfg=cfg)
+            if _ANCHOR_WOODBURY else None)
+        return factors, row_scale, column_scale, coupling
+
+    def raw(z_at):
+        return _anchor_raw_residual(z_at, *lane, cfg=cfg)
+
+    def correction(force, z_at, rtol):
+        """``(-J(z_at)^-1 F, Krylov iterations, relative residual)``."""
+        packed, iterations, linear = _anchor_linear_solve(
+            force, z_at, params, field_parameters, state, rcon0, zcon0, mask,
+            response, *bulk, cfg=cfg, rtol=rtol)
+        return packed, int(iterations), float(linear)
+
+    initial_response = _edge_response(
+        cfg, params, field_parameters, state, rcon0, zcon0)
+    initial_bulk = bulk = factor(z, initial_response)
+    z0, force0 = z, raw(z)
+    best_z, best = z, base
+    factorizations = 1
+    steps = krylov = attempts = 0
+    # An attempt whose first step would start at or above the factor the
+    # previous attempt's first step accepted retraces that attempt exactly
+    # (the halvings are the same deterministic tests), so it is skipped.
+    first_accepted = np.inf
+    for first_damping in _ANCHOR_FIRST_DAMPING:
+        if best <= tol:
+            break
+        if first_damping >= first_accepted:
+            continue
+        # Every attempt starts again from the host state, so the anchored
+        # state is still a function of that state alone.
+        attempts += 1
+        z, force, bulk, previous = z0, force0, initial_bulk, base
+        damping = 0.25 * first_damping
+        refactor = False
+        for attempt_step in range(_ANCHOR_MAX_STEPS):
+            # NESTOR's dense response is cheap (0.34 s) and exact at ``z``,
+            # so it is rebuilt every step; the preconditioner is kept until
+            # GMRES says it has gone stale.
+            response = initial_response if z is z0 else _edge_response(
+                cfg, params, field_parameters, iterate_state(z), rcon0, zcon0)
+            if refactor:
+                bulk = factor(z, response)
+                factorizations += 1
+            newton, iterations, linear = correction(force, z, _ANCHOR_FORCING)
+            krylov += iterations
+            refactor = iterations > _ANCHOR_REFACTOR_KRYLOV
+            level = float(jnp.linalg.norm(newton))
+            step = _unpack_projected(newton, mask, cfg=cfg)
+            steps += 1
+            # Damping on Deuflhard's natural monotonicity test (NLEQ-ERR): the
+            # simplified correction ``J^-1 F(z + a dz)``, with this step's
+            # Jacobian, must be shorter than ``dz``.  ``|F|`` itself is no guide:
+            # the first full step routinely raises it by three decades along the
+            # poloidal-angle gauge direction and still lands, while an undamped
+            # run from some points diverges (|F| 2.4e-03 -> 2.2e+01).  The test
+            # needs only a couple of digits.  Each step starts from four times
+            # the last accepted factor and halves: Deuflhard's Kantorovich
+            # prediction was measured here and under-damps the gauge direction
+            # into 1/64 steps that never finish.
+            damping = min(1.0, 4.0 * damping)
+            trials = 0
+            while True:
+                trials += 1
+                trial = jax.tree.map(lambda a, b: a + damping * b, z, step)
+                trial_force = raw(trial)
+                simplified, iterations, _ = correction(
+                    trial_force, z, _ANCHOR_TEST_FORCING)
+                krylov += iterations
+                trial_level = float(jnp.linalg.norm(simplified))
+                passed = bool(np.isfinite(trial_level)) and trial_level <= (
+                    1.0 - 0.25 * damping) * level
+                if passed or damping <= _ANCHOR_MIN_DAMPING:
+                    break
+                damping = max(_ANCHOR_MIN_DAMPING, 0.5 * damping)
+            if attempt_step == 0:
+                first_accepted = damping if passed else 0.0
+            if not passed:
+                if debug:
+                    print(f"[vmex anchor] step {steps}: no damped step passes "
+                          f"the natural monotonicity test (|dz| {level:.3e})")
+                break
+            z, force = trial, trial_force
+            residual = float(_anchor_norm(z, *lane, cfg=cfg))
+            if debug:
+                print(f"[vmex anchor] step {steps}: |F| {previous:.3e} -> "
+                      f"{residual:.3e}, |dz| {level:.3e} -> {trial_level:.3e}, "
+                      f"damping {damping:.3g} after {trials} trial(s), Newton "
+                      f"GMRES to {linear:.1e}, {krylov} Krylov iterations so far")
+            gained = residual < 0.1 * previous
+            previous = residual
+            if residual < best:
+                best_z, best = z, residual
+            if best <= tol and (not gained or residual == 0.0):
+                break
+    im._count(icfg, anchors=1, anchor_steps=steps,
+              anchor_krylov_iterations=krylov,
+              anchor_factorizations=factorizations)
+    if best > tol:
+        return state, _AnchorReport(False, base, best, steps, krylov,
+                                    factorizations, attempts=attempts)
+    correction = jax.tree.map(jnp.subtract, best_z, project(state))
+    return jax.tree.map(jnp.add, state, correction), _AnchorReport(
+        True, base, best, steps, krylov, factorizations,
+        float(im._tree_norm(correction)), attempts)
+
+
+def _bulk_probe_chunk(cfg, mask) -> int:
+    """Bulk-block probe chunk of the anchor and the Schur adjoint: one block.
+
+    Each probe differentiates a three-surface kernel, so a full block of
+    cotangents is small; on the single-stage deck (block 150) the blocks
+    assemble in 1.1 s against 2.6 s at the fixed-boundary refinement's
+    ``ceil(sqrt(block))`` and 6.6 s one column at a time.
+    """
+    return len(im._active_state_fields(cfg.implicit)) * int(mask.R_cos.shape[1])
+
+
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
 def solve_free_boundary_implicit_status(
     params: im.ImplicitParams,
@@ -1033,8 +1508,10 @@ def solve_free_boundary_implicit_status(
 ) -> tuple[SpectralState, Array, Array, Array]:
     """Differentiable state with an exception-free optimizer-trial status.
 
-    Status 0 is derivative-certified, 1 denotes a failed solve, and 2 an
-    under-converged solve. Only status 0 evaluates the implicit pullback.
+    Status 0 is derivative-certified, 1 denotes a failed solve, 2 an
+    under-converged solve, and 3 a solve that met ``ftol`` but that Newton
+    could not anchor on the coupled root (``refine_tol``). Only status 0
+    evaluates the implicit pullback.
 
     The arguments are exactly those of :func:`solve_free_boundary_implicit`.
     The difference is the failure contract: a solve that would raise there
@@ -1113,14 +1590,14 @@ def _prepare_transpose(z, p, field, base, rcon, zcon, *, residual):
 # recompiling every backward pass or reading a stale linearization. Taking the
 # mask and the response as traced arguments leaves ``cfg`` the only static key,
 # so one compiled transpose serves every gradient in a process.
-@functools.partial(jax.jit, static_argnames=("cfg",))
+@functools.partial(jax.jit, static_argnames=("cfg", "formulation"))
 def _prepare_response_transpose(z, p, field, base, rcon, zcon, dof_mask,
-                                response, *, cfg):
+                                response, *, cfg, formulation="preconditioned"):
     """Save the response-linearized transpose of the coupled root."""
     return jax.vjp(
         lambda zz: _projected_residual_lane(
             zz, p, field, base, rcon, zcon, dof_mask, None, response,
-            cfg=cfg, formulation="preconditioned"), z,
+            cfg=cfg, formulation=formulation), z,
     )[1]
 
 

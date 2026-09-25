@@ -9,7 +9,7 @@ Timing regimes are process-level where they must be:
 
 - ``cold``            new process, empty persistent compilation cache;
 - ``cache_reload``    new process, populated persistent cache;
-- ``warm``            same process, same shapes and static arguments;
+- ``warm``            all stages in order, same shapes and static arguments;
 - ``warm_newparams``  same process, changed physical parameters, same shapes;
 - ``reshape``         same process, changed resolution/shape.
 
@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # this repo's commit.
 sys.path.insert(0, str(ROOT))
 DATA = ROOT / "examples" / "data"
-SCHEMA = 1
+SCHEMA = 2  # Warm timings now repeat every stage, not just the first.
 
 _COLD_REGIMES = ("cold", "cache_reload")
 _WARM_REGIMES = ("warm", "warm_newparams", "reshape")
@@ -851,13 +851,15 @@ def _run_in_process(ident: str, regime: str,
             raise ValueError(
                 f"workflow {ident} defines no {regime} variant; a plain "
                 "warm repeat must not be reported under that label")
-        repeat = variants.get(regime) or next(iter(stages.values()))
+        repeat_stages = ((variants[regime],) if regime in variants
+                         else tuple(stages.values()))
         counter.reset()
         samples = []
         repeats = 3 if regime == "warm" else 1
         for _ in range(repeats):
             started = time.perf_counter()
-            repeat()
+            for stage in repeat_stages:
+                stage()
             samples.append(time.perf_counter() - started)
         timings[regime] = sorted(samples)[len(samples) // 2]
         counters[regime] = counter.snapshot()
@@ -897,10 +899,13 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
     matching ``cold`` run left behind, so a reload claim always follows a
     logged population of the same directory.
     """
+    # vmex puts entries in a per-machine subdirectory of the cache directory
+    # it is given, so look at files anywhere below it.
     if regime == "cold":
-        for stale in cache_dir.glob("*"):
+        for stale in [path for path in cache_dir.rglob("*") if path.is_file()]:
             stale.unlink()
-    elif regime == "cache_reload" and not any(cache_dir.glob("*")):
+    elif regime == "cache_reload" and not any(
+            path.is_file() for path in cache_dir.rglob("*")):
         # A reload claim needs a logged population of this same directory:
         # run one unrecorded cold child to fill it.
         _run_cold(ident, "cold", cache_dir)
@@ -916,7 +921,7 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
         VMEX_PROFILE_CHILD="1",
     )
     env.pop("VMEX_COMPILATION_CACHE_DIR", None)
-    entries_before = len(list(cache_dir.glob("*")))
+    entries_before = sum(path.is_file() for path in cache_dir.rglob("*"))
     started = time.perf_counter()
     proc = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), ident,
@@ -936,8 +941,9 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
     record = json.loads(proc.stdout.strip().splitlines()[-1])
     record["timing_s"]["process_wall"] = wall
     used = record.pop("cache_directory", None)
-    entries_after = len(list(cache_dir.glob("*")))
-    if not used or Path(used).resolve() != cache_dir.resolve():
+    entries_after = sum(path.is_file() for path in cache_dir.rglob("*"))
+    if not used or cache_dir.resolve() not in (
+            Path(used).resolve(), *Path(used).resolve().parents):
         raise RuntimeError(
             f"{ident}/{regime} measured nothing: the child compiled into "
             f"{used!r}, not the controlled {cache_dir}.")

@@ -2,7 +2,7 @@
 
 Wires the gyrokinetic turbulence proxies of `GKX
 <https://github.com/uwplasma/GKX>`_ (uwplasma; JAX-native Hermite-Laguerre
-flux-tube solver; PyPI ``gkx`` >= 1.7.1, formerly published as
+flux-tube solver; PyPI ``gkx`` >= 1.8.0, formerly published as
 ``spectraxgk``) to converged ``(SpectralState, SolverRuntime)`` pairs, in
 two layers:
 
@@ -49,8 +49,8 @@ two layers:
    validated in ``tests/test_turbulence.py``.
 
 The heavy dependency is optional: only the objective wrappers import
-``gkx`` (>= 1.7.1; ``pip install 'vmex[turbulence]'`` or
-``pip install 'gkx>=1.7.1'``; its ``solvax`` pin is satisfied API-wise by
+``gkx`` (>= 1.8.0; ``pip install 'vmex[turbulence]'`` or
+``pip install 'gkx>=1.8.0'``; its ``solvax`` pin is satisfied API-wise by
 the in-house solvax's ``gmres``/``tridiagonal_solve``/``chunked_jacfwd``).
 The geometry adapter works without it.
 
@@ -143,7 +143,7 @@ TURBULENCE_OBJECTIVE_NAMES = (
 def _gkx():
     """Import the optional GKX dependency with a helpful error.
 
-    Only ``gkx`` (>= 1.7.1; formerly published as ``spectraxgk``) works:
+    Only ``gkx`` (>= 1.8.0; formerly published as ``spectraxgk``) works:
     the objective wrappers import ``gkx.objectives`` submodules directly,
     so a pre-rename ``spectraxgk`` install can never satisfy them.
     """
@@ -154,8 +154,8 @@ def _gkx():
     except ImportError as err:  # pragma: no cover - exercised via message test
         raise ImportError(
             "the turbulence objectives need the optional dependency "
-            "gkx >= 1.7.1 (github.com/uwplasma/GKX): pip install 'vmex[turbulence]' "
-            "or pip install 'gkx>=1.7.1'.  The geometry adapter "
+            "gkx >= 1.8.0 (github.com/uwplasma/GKX): pip install 'vmex[turbulence]' "
+            "or pip install 'gkx>=1.8.0'.  The geometry adapter "
             "gk_fieldline_geometry works without it.") from err
 
 

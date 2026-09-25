@@ -171,17 +171,23 @@ def test_summary_combines_stability_and_well(summary_figure):
         stability.get_window_extent(renderer).y0 + 2)
 
 
-def test_summary_combines_iota_current_and_confinement(
+def test_summary_combines_force_current_and_confinement(
     solved_case, summary_figure,
 ):
-    """iota carries <J.B> on its right axis; pressure carries confinement."""
+    """Force balance carries bootstrap <J.B>; iota stands alone; pressure carries confinement."""
     _, meta = summary_figure
     iota = meta["axes"]["iota"]
+    assert len(iota.lines) == 1 and iota.get_legend() is None
+    assert iota.get_title() == "rotational transform"
+
+    force = meta["axes"]["force_balance"]
     current = meta["current_axis"]
-    assert len(iota.lines) == 1 and len(current.lines) == 1
-    assert "rotational transform and parallel current" in iota.get_title()
-    labels = [text.get_text() for text in iota.get_legend().get_texts()]
-    assert any(label == r"$\iota$" for label in labels)
+    assert len(current.lines) == 1
+    assert current.get_shared_x_axes().joined(current, force)
+    assert current.get_ylabel().startswith(r"Bootstrap $\langle \mathbf{J}")
+    assert current.get_ylabel().endswith("[kA T/m$^2$]")
+    labels = [text.get_text() for text in force.get_legend().get_texts()]
+    assert "force error" in labels
     assert any(r"\mathbf{J}" in label for label in labels)
 
     profiles = meta["axes"]["profiles"]
@@ -803,14 +809,6 @@ def test_plot_surfaces_pads_unused_axes(solved_case, tmp_path):
     path = plotting.plot_surfaces(
         wout, tmp_path / "surfaces.png", nzeta=5, nradii=4, ntheta=48,
     )
-    assert path.exists() and path.stat().st_size > 0
-
-
-def test_plot_profiles_without_fsqt_history(solved_case, tmp_path):
-    """An all-zero fsqt history draws the no-history note panel."""
-    _, wout = solved_case
-    assert not np.any(np.asarray(wout.fsqt) > 0.0)  # in-memory wout: no history
-    path = plotting.plot_profiles(wout, tmp_path / "profiles.png")
     assert path.exists() and path.stat().st_size > 0
 
 

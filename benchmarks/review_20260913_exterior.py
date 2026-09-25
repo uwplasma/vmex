@@ -7,6 +7,11 @@ zero, so every non-zero value returned there is quadrature or representation
 error. ``--reference`` instead compares the default paths against a 256x256
 direct evaluation on a finite-beta deck (self-convergence).
 
+``--reference`` uses the near-surface continuation that 0.11.1 removed
+(``with_near_surface_continuation``); run it at the record's revision,
+``f09288b3``. The graded rule that replaced it is measured by
+``benchmarks/extender_ab.py`` and ``tests/test_near_surface_quadrature.py``.
+
     PYTHONPATH=. python benchmarks/review_20260913_exterior.py wout.nc out.json
     PYTHONPATH=. python benchmarks/review_20260913_exterior.py wout.nc out.json --reference
 """

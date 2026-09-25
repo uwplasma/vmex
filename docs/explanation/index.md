@@ -1,9 +1,8 @@
 # Explanation
 
-The theory and the design rationale — why VMEX works the way it does. Read
-in any order; each page opens with what it covers.
+Why VMEX works the way it does. Each page opens with what it covers.
 
-## What the code is known to do
+## What is known to work
 
 ```{toctree}
 :maxdepth: 1
@@ -11,21 +10,18 @@ in any order; each page opens with what it covers.
 validation
 ```
 
-## The physics and numerics
+## The equilibrium and the solver
 
 ```{toctree}
 :maxdepth: 1
 
 variational-problem
-spectral-representation
-high-order-force-balance
 iteration
-preconditioners
-multigrid
 nestor-vacuum
+high-order-force-balance
 ```
 
-## Differentiation
+## Derivatives
 
 ```{toctree}
 :maxdepth: 1
@@ -41,7 +37,7 @@ adjoint-gradients
 confinement
 ```
 
-## Other topologies and the code base
+## Mirrors and the code base
 
 ```{toctree}
 :maxdepth: 1
@@ -50,5 +46,4 @@ mirror-geometry
 mirror-boundary-conditions
 mirror-gyrokinetics
 architecture
-parallelization
 ```

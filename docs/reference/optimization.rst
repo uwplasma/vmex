@@ -120,12 +120,6 @@ steps. Their iterates, stopping tests, and possibly the local minimum reached
 can differ. Always compare final physical terms and held-out validation
 metrics, not iteration counts alone.
 
-Measured on the QA workflow at a matched evaluation budget, the least-squares
-driver reached roughly a 3x lower objective than the scalar lane; the scalar
-lane's gains are a cheaper cold start and lower peak memory (44.7 s to 32.2 s
-wall, 2965 to 2574 MiB peak RSS on an Apple M4), so it is the cold-start and
-low-memory option, not a replacement for the least-squares driver.
-
 Choose deliberately:
 
 * Keep the vector route when residual-level diagnostics, a least-squares trust
@@ -138,8 +132,9 @@ Choose deliberately:
 * ``compile_value_and_gradient`` makes the first scalar compile explicit;
   it does not turn a cold timing into a warm timing.
 
-The committed QA startup measurements make the tradeoff concrete for 6,723
-rows and 48 boundary degrees of freedom on one Apple CPU host. Cold startup
+The committed QA startup measurements (VMEX 0.7.0, Apple M4, before
+``jacobian_batch_size="auto"`` became the default) make the tradeoff concrete
+for 6,723 rows and 48 boundary degrees of freedom. Cold startup
 dropped from 44.7 s and 2,965 MiB peak RSS for the residual Jacobian to 32.2 s
 and 2,574 MiB for the scalar adjoint. Warm value/gradient medians were 16.6 s
 and 17.4 s, respectively, so the scalar path did not improve warm throughput
@@ -227,9 +222,8 @@ explicit host method    raise :class:`vmex.core.errors.AdjointSolveError`
 
 ``jacobian_batch_size="auto"`` is the default. It sizes from the available
 memory the batch of probe rows the block system assembles at once, which is
-where a block Jacobian spends its time: a warm QI Jacobian measures 3.0-3.9 s
-at ``1`` against 0.83 s at ``"auto"`` and 0.56 s at ``None``, and the Jacobian
-agrees to 6e-11 across every width from ``(1, 1)`` to ``(150, 150)``. Set
+where a block Jacobian spends its time; the batch width changes the cost, not
+the Jacobian. Set
 ``jacobian_batch_size=1`` for the serial pass when peak memory, not
 throughput, is the binding constraint; ``None`` is the widest and the most
 memory-hungry. ``adjoint_tol`` and ``adjoint_maxiter`` control the certified
@@ -262,8 +256,10 @@ VMEC reports ``FSQ = fsqr + fsqz + fsql``. A converged trial is always
 derivative-certified. If a trial exhausts its iteration budget, VMEX only
 differentiates it when ``FSQ / forward_ftol <= max_fsq_ratio``; otherwise all
 scalar interfaces return the same smooth rejection wall. The default
-``1e6`` is deliberately tolerant of nearly converged optimization trials.
-Reduce it for stricter studies after profiling the intended configurations.
+``1e2`` of the optimization factories (``make_problem``, ``least_squares``,
+``minimize``) keeps the implicit derivative, which assumes ``F = 0``, away from
+trials whose residual is far above the deck tolerance. Tighten it for stricter
+studies.
 
 Inspect the policy instead of guessing:
 
@@ -427,13 +423,20 @@ keeps the construction visible in the driver::
 NESTOR moves the LCFS and only the coil vector is optimized. The vacuum example
 adds coil geometry terms; the finite-beta example adds beta and Redl bootstrap
 terms. This path is reverse-mode only. Status 0 enters the adjoint; status 1
-means a failed solve and status 2 means an under-converged solve.
+means a failed solve, status 2 an under-converged solve, and status 3 a solve
+that met ``ftol`` but could not be Newton-anchored on the coupled
+plasma--vacuum root. Every status-0 state is anchored there (to
+``refine_tol``, 1e-10 by default), so its value and its adjoint refer to the
+same point; VMEC's ``ftol`` alone leaves the state off that root along weakly
+damped directions.
 The certified whole-state GCROT transpose remains the default.
 ``adjoint_solver="boundary_schur"`` selects the advanced boundary-Schur lane, which
 eliminates the block-tridiagonal radial bulk and solves only the evolved-edge
 correction before checking the full coupled residual. Local three-surface
 rows and a pivoted sparse band solve reduce its cold cost substantially, but
-local-row compilation still keeps it opt-in. ``device="auto"`` uses the CPU
+local-row compilation still keeps it opt-in. It is a host lane: under an
+outer ``jax.jit`` the pullback warns and uses the staged coupled GCROT solve
+instead, so call the objective eagerly to keep it. ``device="auto"`` uses the CPU
 for this response on accelerator hosts; an explicit ``device="gpu"`` or
 process-wide JAX placement overrides that measured lower-memory default.
 
@@ -587,8 +590,8 @@ the VMEC mesh surfaces, so converge them in ``NS_ARRAY``.
 
 ``examples/vmex_get_B_gradB.py`` demonstrates the stable interior field API,
 including Cartesian and flux-coordinate queries, three spatial derivatives,
-and parameter VJPs. The exterior VJP and field-line tracing scripts need the
-ESSOS branch noted above.
+and parameter VJPs. The exterior VJP and field-line tracing scripts need
+ESSOS 0.17 or newer (``pip install "vmex[coils]"``).
 
 To include coil parameters in an exterior-field VJP, pass the same functional
 ESSOS update used by an optimization:

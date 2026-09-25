@@ -9,6 +9,7 @@ explicit-point methods remain JAX-transformable.
 
 from __future__ import annotations
 
+import copy
 import math
 import warnings
 from pathlib import Path
@@ -21,10 +22,12 @@ import numpy as np
 from .errors import VmecNumericalError
 from .mgrid import MgridField, read_mgrid
 from .profiles import MU0
+from .virtual_casing import GRADED_NODES as _GRADED_NODES
 
 Array = Any
 PlasmaMode = Literal["auto", "include", "vacuum"]
 AccuracyCheck = Literal["warn", "raise", "off"]
+NearSurface = Literal["auto", "graded", "direct"]
 
 __all__ = [
     "ExteriorFieldAccuracyError",
@@ -1259,8 +1262,19 @@ def _mgrid_from_wout(wout: Any, base_dir: Path | None) -> MgridField | None:
     path = Path(path_text).expanduser()
     if not path.is_absolute() and base_dir is not None:
         path = base_dir / path
-    data = read_mgrid(path)
     extcur = np.asarray(getattr(wout, "extcur", ()), dtype=float).reshape(-1)
+    if not np.any(np.isfinite(extcur) & (extcur != 0.0)):
+        # Filling the missing currents with zeros built a coil field that is
+        # identically zero, so a free-boundary wout without its currents
+        # extended as if there were no coils.  VMEX's own solve_file writes
+        # such a wout (nextcur = 0) for a free-boundary deck.
+        raise ValueError(
+            f"the wout names MGRID_FILE {path_text!r} but carries no coil "
+            "currents (nextcur = 0 or every EXTCUR zero), so the coil field "
+            "cannot be built from it; pass external_field (an MgridField built "
+            "with the deck's EXTCUR, or a coil callable), or build the field "
+            "with VmecExtender.from_equilibrium from the solved deck")
+    data = read_mgrid(path)
     scaled = np.zeros((data.nextcur,), dtype=float)
     scaled[: min(extcur.size, data.nextcur)] = extcur[: data.nextcur]
     if str(data.mgrid_mode).upper().startswith(("R", "N")):
@@ -1325,6 +1339,19 @@ def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
     return int(min(power, _MAX_SOURCE_NPHI))
 
 
+def _concrete(function: Callable[..., Any], *args: Any) -> Any:
+    """Evaluate ``function(*args)`` to concrete arrays, even while tracing.
+
+    Cached quadrature data built inside a caller's ``jit`` would otherwise be
+    that trace's tracers and leak into every later call.  Compiling ahead of
+    time and calling the executable runs it outside any trace; the arguments
+    are concrete, so it is the same computation.  (``ensure_compile_time_eval``
+    would also work, but dispatches every primitive eagerly: 26 s against
+    0.5 s for the source densities.)
+    """
+    return jax.jit(lambda: function(*args)).lower().compile()()
+
+
 class VmecExtender(MagneticField):
     """Total field outside the last closed VMEC flux surface.
 
@@ -1334,12 +1361,22 @@ class VmecExtender(MagneticField):
     targets must not lie exactly on the source surface.
 
     :meth:`B` is the plain sum of whichever contributions are present, in
-    tesla at Cartesian points in metres.  Spatial derivatives come from
-    differentiating that same Cartesian graph, so they carry no separate
-    cylindrical-axis singularity.  Prefer the classmethods
+    tesla at Cartesian points in metres.  Prefer the classmethods
     (:meth:`from_wout`, :meth:`from_file`, :meth:`from_state`,
     :meth:`from_equilibrium`, :meth:`from_surface_data`) — this constructor
     is the low-level form that takes already-built pieces.
+
+    **Two quadratures.**  The direct path is a periodic trapezoid rule on the
+    source grid; its error decays as ``exp(-2 pi d / h)`` with ``d`` the
+    distance to the surface and ``h`` the node spacing, so it is exact to
+    rounding a minor radius out and useless within a few spacings.  Near the
+    surface the target-graded rule of
+    :func:`~vmex.core.virtual_casing.graded_plasma_field` takes over: every
+    target gets nodes clustered about its nearest surface point, which keeps
+    ``B`` to about 1e-12 and ``grad B`` to about 1e-10 down to 0.01 minor
+    radii at about 16 ms per target.  Spatial derivatives of the direct path
+    come from the closed-form layer kernels, all orders in one pass over the
+    finest schedule level.
 
     Parameters
     ----------
@@ -1349,87 +1386,59 @@ class VmecExtender(MagneticField):
         such as an :class:`~vmex.core.mgrid.MgridField`, or a plain callable
         ``xyz (n, 3) [m] -> B (n, 3) [T]`` such as an ESSOS Biot-Savart coil
         field.  May be ``None`` for the plasma field alone, but then
-        ``plasma_field`` must be given.
+        ``plasma_field`` must be given.  It must be traceable by JAX for the
+        spatial derivatives.
     plasma_field:
         Optional virtual-casing exterior field carrying the field of the
         currents inside the last closed flux surface — a
         ``virtual_casing_jax.VirtualCasingExteriorField``, normally built by
         :meth:`from_surface_data`.  ``None`` selects the pure vacuum path,
         correct only for a current-free equilibrium.
-    near_surface_plan:
-        Optional precomputed continuation plan from the plasma field's
-        ``plan_near_surface``; supply it through
-        :meth:`with_near_surface_continuation` rather than directly.  When
-        present, plasma-field targets are evaluated by the fast first-order
-        Taylor continuation off the boundary instead of the full off-surface
-        virtual-casing schedule, which is accurate only near the surface.
-        It requires ``plasma_field``.
     accuracy_check:
-        What an eager :meth:`B` call does when the direct virtual-casing
-        quadrature misses the ``digits`` it was built with, judged by
+        What an eager call does when the quadrature it used misses the
+        ``digits`` the field was built with, judged by
         :meth:`B_error_estimate`: ``"warn"`` (default) emits
         :class:`ExteriorFieldAccuracyWarning`, ``"raise"`` raises
-        :class:`ExteriorFieldAccuracyError`, ``"off"`` skips the estimate.
+        :class:`ExteriorFieldAccuracyError`, ``"off"`` skips the check.
         Traced calls (``jit``, ``grad``, field-line integrators) never check;
         call :meth:`B_error_estimate` there.  The returned field is the same
         in every mode.  The attribute may also be set after construction.
+    near_surface:
+        Which quadrature evaluates the plasma field. ``"auto"`` (default):
+        eager calls use the direct path wherever its error estimate meets
+        ``10**-digits`` and the graded rule at the points where it does not;
+        traced calls use the direct path, since a per-point switch under a
+        trace would pay for both.  ``"graded"``: every call, traced or not,
+        uses the graded rule — for objectives or field-line traces that stay
+        close to the surface.  ``"direct"``: every call uses the direct path.
+        The attribute may also be set after construction.
+    graded_nodes:
+        ``(poloidal, toroidal)`` node counts of the graded rule over the full
+        torus, default :data:`~vmex.core.virtual_casing.GRADED_NODES`.
     """
 
     def __init__(
-        self, external_field: Any, plasma_field: Any | None = None,
-        near_surface_plan: Any | None = None, *,
+        self, external_field: Any, plasma_field: Any | None = None, *,
         accuracy_check: AccuracyCheck = "warn",
+        near_surface: NearSurface = "auto",
+        graded_nodes: tuple[int, int] | None = None,
     ) -> None:
         if external_field is None and plasma_field is None:
             raise ValueError("at least one external or plasma field is required")
-        if near_surface_plan is not None and plasma_field is None:
-            raise ValueError("near_surface_plan requires a plasma field")
         self.external_field = external_field
         self.plasma_field = plasma_field
-        self.near_surface_plan = near_surface_plan
         self.accuracy_check = accuracy_check
-        self._plasma_fns: dict[tuple[str, int, int], Callable[..., Array]] = {}
+        self._kernels: dict[tuple[Any, ...], Any] = {}
+        self._graded_nodes = (_GRADED_NODES if graded_nodes is None
+                              else (int(graded_nodes[0]), int(graded_nodes[1])))
+        self.near_surface = near_surface
 
         def B_fn(points: Array) -> Array:
-            value = jnp.zeros_like(points)
-            if self.external_field is not None:
-                value = value + _field_cartesian(self.external_field, points)
-            if self.plasma_field is not None:
-                value = value + self._plasma("B")(points)
-            return value
+            return self._field(0, points)
 
-        # Differentiate the same Cartesian field graph used by B().  This is
-        # both simpler and avoids the cylindrical-axis singularity in older
-        # virtual_casing_jax ``gradB_plasma_xyz`` implementations.
         super().__init__(B_fn)
 
-    def _plasma(self, name: str) -> Callable[..., Array]:
-        """Compiled virtual-casing field (``"B"``) or its error estimate.
-
-        This is VMEX's own JAX graph, about a thousand primitives: dispatched
-        eagerly one call costs a quarter second, compiled two milliseconds.
-        The key is the identity of the plasma field and continuation plan, so
-        replacing either attribute rebuilds the callable; the external field
-        stays unwrapped because a user callable need not be traceable.
-        """
-        field, plan = self.plasma_field, self.near_surface_plan
-        key = (name, id(field), id(plan))
-        if key not in self._plasma_fns:
-            if any(other[1:] != key[1:] for other in self._plasma_fns):
-                self._plasma_fns.clear()  # a replaced field or plan: drop its kernels
-            function: Callable[..., Array]
-            if name == "estimate":
-                from . import virtual_casing as vc
-
-                def function(xyz: Array, B: Array | None) -> Array:
-                    return vc.offsurface_error_estimate(field, xyz, B_plasma=B)
-            elif plan is None:
-                function = field.B_plasma_xyz
-            else:
-                def function(xyz: Array) -> Array:  # type: ignore[misc]
-                    return field.B_plasma_near_surface_xyz(xyz, plan)
-            self._plasma_fns[key] = jax.jit(function)
-        return self._plasma_fns[key]
+    # -- configuration -----------------------------------------------------
 
     @property
     def accuracy_check(self) -> AccuracyCheck:
@@ -1443,159 +1452,280 @@ class VmecExtender(MagneticField):
             raise ValueError("accuracy_check must be 'warn', 'raise', or 'off'")
         self._accuracy_check = mode
 
-    def B(self, points: Array | None = None) -> Array:
-        """Return Cartesian ``B``; eager calls check the quadrature accuracy."""
-        value = super().B(points)
-        if (self._accuracy_check != "off" and self.near_surface_plan is None
-                and hasattr(self.plasma_field, "schedule_levels")
-                and not isinstance(value, jax.core.Tracer)):
-            xyz = self._require_points() if points is None else _check_points(points)
-            plasma = value
-            if self.external_field is not None:
-                plasma = value - _field_cartesian(self.external_field, xyz)
-            self._check_accuracy(xyz, plasma)
-        return value
+    @property
+    def near_surface(self) -> NearSurface:
+        """``"auto"``, ``"graded"`` or ``"direct"``; see the class documentation."""
+        return self._near_surface
 
-    def _checked_derivative(self, order: int, points: Array | None) -> Array:
-        """One spatial derivative, with the eager accuracy check at ITS order.
+    @near_surface.setter
+    def near_surface(self, mode: NearSurface) -> None:
+        """Set the quadrature choice; any other value raises ``ValueError``."""
+        if mode not in ("auto", "graded", "direct"):
+            raise ValueError("near_surface must be 'auto', 'graded', or 'direct'")
+        self._near_surface = mode
+        # parameter pullbacks trace the plasma field in the current mode
+        self._data_pullbacks = {}
 
-        ``B`` has been checked on eager calls since the achieved-error estimate
-        landed; its derivatives never were, and they are the ones that need it.
-        Half a minor radius off a finite-beta boundary the same grid gives
-        ``B`` to 1e-06 and its third derivative to 2e-02, and nothing said so.
-        """
-        value = getattr(MagneticField, ("gradB", "gradgradB", "gradgradgradB")[order - 1])(
-            self, points)
-        if (self._accuracy_check != "off" and self.near_surface_plan is None
-                and self.plasma_field is not None
-                and hasattr(self.plasma_field, "schedule_levels")
-                and not isinstance(value, jax.core.Tracer)):
-            xyz = self._require_points() if points is None else _check_points(points)
-            try:
-                self._check_accuracy(xyz, None, order=order)
-            except NotImplementedError:
-                # an older virtual-casing-jax has no per-order estimate; the
-                # value is unaffected, so do not fail the call over the check
-                pass
-        return value
-
-    def gradB(self, points: Array | None = None) -> Array:
-        """Return ``dB_i/dx_j``; eager calls check accuracy at first order."""
-        return self._checked_derivative(1, points)
-
-    def gradgradB(self, points: Array | None = None) -> Array:
-        """Return ``d2B_i/dx_j dx_k``; eager calls check accuracy at second order."""
-        return self._checked_derivative(2, points)
-
-    def gradgradgradB(self, points: Array | None = None) -> Array:
-        """Return ``d3B_i/dx_j dx_k dx_l``; eager calls check accuracy at third order."""
-        return self._checked_derivative(3, points)
-
-    def B_error_estimate(self, points: Array | None = None, *, order: int = 0) -> Array:
-        """Estimated relative error of the plasma field, shape ``(n,)``.
-
-        Per point, the difference between the value the virtual-casing
-        schedule returned and its finest source grid, or, for points already
-        on the finest grid, that grid's double-layer quadrature error
-        (:func:`~vmex.core.virtual_casing.offsurface_error_estimate`).  It is
-        relative to the RMS surface ``|B|``, compares with ``10**-digits``,
-        and ``-log10`` of it is the achieved digits.  The error decays as
-        ``exp(-2 pi d / h)`` with ``d`` the distance to the surface and ``h``
-        the largest spacing of the finest level, whose toroidal part is
-        ``2 pi R / n_toroidal`` over the full torus.  Points must lie outside
-        the surface.  Derivatives lose accuracy faster than ``B``.  Costs
-        slightly more than the plasma part of a :meth:`B` call (1.2 to 1.5
-        times, warm) and is traceable; ``accuracy_check="off"`` avoids paying
-        it on every eager call.
-
-        ``order`` is the highest spatial derivative the caller means to take.
-        It matters: measured against a converged reference half a minor radius
-        off a finite-beta boundary, ``B`` is right to 1e-06 while its third
-        derivative is wrong by 2e-02 on the same grid, because each derivative
-        multiplies the quadrature error by roughly the grid count.  The default
-        ``order=0`` is the a-posteriori estimate described above and is
-        traceable; a higher order uses the a-priori estimate, which is
-        host-side and raises rather than silently failing under a trace.
-        """
-        if self.plasma_field is None:
-            raise RuntimeError("the field has no virtual-casing plasma contribution")
-        if self.near_surface_plan is not None:
-            raise RuntimeError(
-                "the near-surface continuation has no quadrature error estimate")
-        xyz = self._require_points() if points is None else _check_points(points)
-        if int(order) > 0:
-            from . import virtual_casing as vc
-
-            return vc.offsurface_error_estimate(self.plasma_field, xyz, order=int(order))
-        return self._plasma("estimate")(xyz, None)
-
-    def _check_accuracy(self, xyz: Array, plasma: Array | None, order: int = 0) -> None:
-        if order:
-            from . import virtual_casing as vc
-
-            estimate = np.asarray(
-                vc.offsurface_error_estimate(self.plasma_field, xyz, order=order))
-        else:
-            estimate = np.asarray(self._plasma("estimate")(xyz, plasma))
-        digits = int(self.plasma_field.config.digits)
-        missed = ~(estimate <= 10.0 ** (-digits))
-        if not np.any(missed):
-            return
-        worst = float(np.max(np.where(np.isfinite(estimate), estimate, np.inf)))
-        nt, npol = self.plasma_field.schedule_levels[-1]
-        quantity = "field" if not order else f"order-{order} derivative"
-        message = (
-            f"virtual-casing exterior {quantity}: {int(missed.sum())} of {missed.size} "
-            f"points have estimated quadrature error up to {worst:.1e}, above the "
-            f"requested 1e-{digits}. The direct quadrature on the finest source "
-            f"grid ({nt} toroidal x {npol} poloidal points over the full torus) "
-            "needs targets about two grid spacings off the surface; move the "
-            "points out, raise nphi/ntheta or levels, or use "
-            "with_near_surface_continuation().")
-        if self._accuracy_check == "raise":
-            raise ExteriorFieldAccuracyError(message)
-        warnings.warn(message, ExteriorFieldAccuracyWarning, stacklevel=3)
+    @property
+    def graded_nodes(self) -> tuple[int, int]:
+        """``(poloidal, toroidal)`` node counts of the graded rule."""
+        return self._graded_nodes
 
     @property
     def uses_virtual_casing(self) -> bool:
         """Whether plasma-current virtual casing contributes to the field."""
         return self.plasma_field is not None
 
-    @property
-    def uses_near_surface_continuation(self) -> bool:
-        """Whether plasma-field targets use a prepared Taylor continuation."""
-        return self.near_surface_plan is not None
+    def with_graded_quadrature(self, nodes: tuple[int, int] | None = None) -> "VmecExtender":
+        """A copy that evaluates the plasma field by the graded rule everywhere.
 
-    def with_near_surface_continuation(
-        self, *, digits: int | None = None, precision: Any | None = None,
-        B_surface: Any | None = None,
-    ) -> "VmecExtender":
-        """Return a fast first-order local continuation from the LCFS.
-
-        .. warning::
-
-           **This path does not currently reproduce the direct quadrature and
-           should not be used for physics.** Measured 2026-09-16 on the shipped
-           QA wout at the default grid (finest 256 x 128, ``h_tor`` 0.030 m,
-           ``a`` 0.077 m): preparing it took 416 s, and the field it returns is
-           ~1e-5 in magnitude at every distance while the direct field falls
-           from 0.52 T at ``d = 0.25 h`` to 4e-6 T at ``4 h``. Where the direct
-           quadrature carries a certified estimate of 3.7e-08 (``d = 3 h``) and
-           1.7e-10 (``4 h``) the two disagree by factors of 4 and 7, so the
-           disagreement is the continuation's, not the reference's. It also has
-           no error estimate of its own -- :meth:`B_error_estimate` raises on
-           it. Use the direct path, at a distance its estimate certifies.
-
-        The Taylor field is intended for nearby point queries. Long field-line
-        traces must use a distance stopping criterion or a separately validated
-        volume representation; unrestricted extrapolation can change topology.
+        For traced use close to the surface — field-line tracing, objectives
+        on a nearby coil-clearance surface — where the per-point switch of
+        ``near_surface="auto"`` is not available.  Each target costs about the
+        same as a direct call on a 128 x 512 grid; fewer ``nodes`` trade
+        accuracy for speed (``(64, 256)`` keeps ``B`` to about 1e-5 down to
+        0.01 minor radii).  This replaces the first-order near-surface
+        continuation, which carried a 1.6-2.4 % error floor next to the
+        surface and took minutes and tens of GB to prepare.
         """
         if self.plasma_field is None:
-            raise RuntimeError("near-surface continuation requires virtual casing")
-        plan = self.plasma_field.plan_near_surface(
-            digits=digits, precision=precision, B_surface=B_surface)
-        return type(self)(self.external_field, self.plasma_field, plan,
-                          accuracy_check=self._accuracy_check)
+            raise RuntimeError("graded quadrature requires a virtual-casing plasma field")
+        other = copy.copy(self)
+        other._kernels = {}
+        other._spatial_fns = {}
+        other._data_pullbacks = {}
+        if nodes is not None:
+            other._graded_nodes = (int(nodes[0]), int(nodes[1]))
+        other.near_surface = "graded"
+        return other
+
+    # -- evaluation ----------------------------------------------------------
+
+    def _quadrature_capable(self) -> bool:
+        field = self.plasma_field
+        return hasattr(field, "schedule_levels") and hasattr(field, "surface_data")
+
+    def _kernel(self, key: tuple[Any, ...], build: Callable[[], Any]) -> Any:
+        """A compiled callable per plasma field; replacing the field rebuilds it."""
+        key = (id(self.plasma_field), id(self.external_field)) + key
+        if key not in self._kernels:
+            if any(other[:2] != key[:2] for other in self._kernels):
+                self._kernels.clear()  # a replaced field: drop its kernels
+            self._kernels[key] = build()
+        return self._kernels[key]
+
+    def _external(self, order: int, xyz: Array) -> Array:
+        if self.external_field is None:
+            return jnp.zeros(xyz.shape + (3,) * order, xyz.dtype)
+        if order == 0:
+            return _field_cartesian(self.external_field, xyz)
+        external = self.external_field
+
+        def build():
+            function = lambda point: _field_cartesian(external, point[None, :])[0]  # noqa: E731
+            for _ in range(order):
+                function = jax.jacfwd(function)
+            return jax.jit(jax.vmap(function))
+
+        return self._kernel(("external", order), build)(xyz)
+
+    def _direct_sources(self):
+        """Nodes and weighted densities of the finest schedule level, compiled once.
+
+        ``level_sources`` builds them eagerly, primitive by primitive, which
+        took 17 s on the first call; compiled, 0.6 s.  A traced ``B_total``
+        (the parameter-derivative path) is built inside the trace instead.
+        """
+        field = self.plasma_field
+
+        def sources(B_total):
+            view = copy.copy(field)
+            view.B_total = B_total
+            view._level_source_cache = {}
+            return view.level_sources()
+
+        if isinstance(field.B_total, jax.core.Tracer):
+            return sources(field.B_total)
+        return self._kernel(("sources",), lambda: _concrete(sources, field.B_total))
+
+    def _direct(self, order: int, xyz: Array) -> Array:
+        """The direct path: the schedule for ``B``, closed-form kernels beyond."""
+        if not self._quadrature_capable():
+            function = lambda point: self.plasma_field.B_plasma_xyz(point[None, :])[0]  # noqa: E731
+            for _ in range(order):
+                function = jax.jacfwd(function)
+            return jax.vmap(function)(xyz) if order else self.plasma_field.B_plasma_xyz(xyz)
+        if order == 0:
+            return self._kernel(("B",), lambda: jax.jit(self.plasma_field.B_plasma_xyz))(xyz)
+        from virtual_casing_jax.derivative_kernels import layer_derivatives
+
+        return layer_derivatives(xyz, *self._direct_sources(), order=int(order))[order]
+
+    def _series(self):
+        from . import virtual_casing as vc
+
+        surface = self.plasma_field.surface_data
+        if isinstance(jnp.asarray(surface.B_total), jax.core.Tracer):
+            return vc._graded_series(surface)
+        return self._kernel(("series",), lambda: _concrete(vc._graded_series, surface))
+
+    def _graded(self, order: int, xyz: Array, nodes: tuple[int, int] | None = None) -> Array:
+        from . import virtual_casing as vc
+
+        nodes = self._graded_nodes if nodes is None else nodes
+        series = self._series()
+        if isinstance(series["coefficients"], jax.core.Tracer) or isinstance(
+                xyz, jax.core.Tracer):
+            return vc._graded_field(series, xyz, order, nodes)[order]
+        function = self._kernel(("graded", order, nodes), lambda: jax.jit(
+            lambda s, p: vc._graded_field(s, p, order, nodes)[order]))
+        return function(series, xyz)
+
+    def _graded_estimate(self, order: int, xyz: Array) -> Array:
+        """``|graded(N) - graded(3N/4)|`` over the RMS surface ``|B|``, per point.
+
+        The rule converges geometrically in its node count, so the coarser
+        evaluation's error dominates the difference and it bounds the finer
+        one's from above.
+        """
+        n_theta, n_phi = self._graded_nodes
+        coarse = (max(8, (3 * n_theta) // 4), max(8, (3 * n_phi) // 4))
+        difference = self._graded(order, xyz) - self._graded(order, xyz, coarse)
+        surface = self.plasma_field.surface_data
+        scale = jnp.sqrt(jnp.mean(jnp.sum(jnp.asarray(surface.B_total) ** 2, axis=0)))
+        return jnp.max(jnp.abs(difference.reshape(xyz.shape[0], -1)), axis=1) / scale
+
+    def _direct_estimate(self, order: int, xyz: Array) -> Array:
+        from . import virtual_casing as vc
+
+        if order:
+            return vc.offsurface_error_estimate(self.plasma_field, xyz, order=int(order))
+        return self._kernel(("estimate",), lambda: jax.jit(
+            lambda p: vc.offsurface_error_estimate(self.plasma_field, p)))(xyz)
+
+    def _field(self, order: int, xyz: Array) -> Array:
+        """``order``-th derivative of the total field, choosing the quadrature."""
+        value = self._external(order, xyz)
+        if self.plasma_field is None:
+            return value
+        if not self._quadrature_capable():
+            return value + self._direct(order, xyz)
+        mode = self._near_surface
+        traced = isinstance(xyz, jax.core.Tracer) or isinstance(
+            jnp.asarray(self.plasma_field.B_total), jax.core.Tracer)
+        if mode == "graded":
+            plasma = self._graded(order, xyz)
+            if not traced and self._accuracy_check != "off":
+                self._report(order, np.asarray(self._graded_estimate(order, xyz)),
+                             np.ones(xyz.shape[0], bool))
+            return value + plasma
+        plasma = self._direct(order, xyz)
+        if traced or (mode == "direct" and self._accuracy_check == "off"):
+            return value + plasma
+        estimate = np.array(self._direct_estimate(order, xyz), dtype=float)
+        tolerance = 10.0 ** (-int(self.plasma_field.config.digits))
+        graded = np.zeros(xyz.shape[0], bool)
+        if mode == "auto":
+            graded = ~(estimate <= tolerance)
+            if graded.any():
+                index = np.flatnonzero(graded)
+                plasma = jnp.asarray(plasma).at[index].set(self._graded(order, xyz[index]))
+                if self._accuracy_check != "off":
+                    estimate[index] = np.asarray(self._graded_estimate(order, xyz[index]))
+        if self._accuracy_check != "off":
+            self._report(order, estimate, graded)
+        return value + plasma
+
+    def _report(self, order: int, estimate: np.ndarray, graded: np.ndarray) -> None:
+        digits = int(self.plasma_field.config.digits)
+        missed = ~(estimate <= 10.0 ** (-digits))
+        if not np.any(missed):
+            return
+        worst = float(np.max(np.where(np.isfinite(estimate), estimate, np.inf)))
+        quantity = "field" if not order else f"order-{order} derivative"
+        if np.any(missed & graded):
+            advice = ("the graded near-surface rule at "
+                      f"{self._graded_nodes[0]} x {self._graded_nodes[1]} nodes missed "
+                      "too; raise graded_nodes, or move the points off the surface")
+        else:
+            nt, npol = self.plasma_field.schedule_levels[-1]
+            advice = (f"the direct quadrature on the finest source grid ({nt} toroidal x "
+                      f"{npol} poloidal points over the full torus) needs targets about "
+                      "two grid spacings off the surface; use near_surface='auto' or "
+                      "'graded', raise nphi/ntheta or levels, or move the points out")
+        message = (
+            f"virtual-casing exterior {quantity}: {int(missed.sum())} of {missed.size} "
+            f"points have estimated quadrature error up to {worst:.1e}, above the "
+            f"requested 1e-{digits}; {advice}.")
+        if self._accuracy_check == "raise":
+            raise ExteriorFieldAccuracyError(message)
+        warnings.warn(message, ExteriorFieldAccuracyWarning, stacklevel=4)
+
+    def B(self, points: Array | None = None) -> Array:
+        """Return Cartesian ``B``; eager calls choose and check the quadrature."""
+        xyz = self._require_points() if points is None else _check_points(points)
+        return self._field(0, xyz)
+
+    def gradB(self, points: Array | None = None) -> Array:
+        """Return ``dB_i/dx_j``; eager calls choose and check at first order."""
+        xyz = self._require_points() if points is None else _check_points(points)
+        return self._field(1, xyz)
+
+    def gradgradB(self, points: Array | None = None) -> Array:
+        """Return ``d2B_i/dx_j dx_k``; eager calls choose and check at second order."""
+        xyz = self._require_points() if points is None else _check_points(points)
+        return self._field(2, xyz)
+
+    def gradgradgradB(self, points: Array | None = None) -> Array:
+        """Return ``d3B_i/dx_j dx_k dx_l``; eager calls choose and check at third order."""
+        xyz = self._require_points() if points is None else _check_points(points)
+        return self._field(3, xyz)
+
+    def B_error_estimate(self, points: Array | None = None, *, order: int = 0) -> Array:
+        """Estimated relative error of the plasma field, shape ``(n,)``.
+
+        It estimates the quadrature the same call of :meth:`B` (``order=0``)
+        or of the ``order``-th derivative would use, relative to the RMS
+        surface ``|B|``; compare it with ``10**-digits``, and ``-log10`` of it
+        is the achieved digits.
+
+        For the direct path at ``order=0``: per point, the larger of the
+        finest level's double-layer quadrature error and the squared relative
+        change between the last two schedule levels
+        (:func:`~vmex.core.virtual_casing.offsurface_error_estimate`).  The
+        error decays as ``exp(-2 pi d / h)`` with ``d`` the distance to the
+        surface and ``h`` the largest spacing of the finest level.  Measured
+        against a converged target-graded quadrature of the same data on the
+        2.5 % beta QA deck, it is 0.76 to 1.09 times the true error wherever
+        that error is above round-off, so it tracks the error rather than
+        bounding it.  It is traceable.  At ``order > 0`` the direct path uses
+        the a-priori estimate of af Klinteberg, Sorgentone and Tornberg, which
+        is host-side and raises under a trace; on the same deck it was never
+        below the true error of orders 1 to 3 and above it by 3 to 6 times at
+        first order and up to 14 times at third.
+
+        For the graded rule: the difference from the same rule at three
+        quarters of its nodes, which bounds its error from above; traceable.
+        Under ``near_surface="auto"`` an eager call reports the graded
+        estimate at the points the direct path would have missed; a traced
+        call reports the direct estimate, as a traced :meth:`B` uses it.
+        """
+        if self.plasma_field is None:
+            raise RuntimeError("the field has no virtual-casing plasma contribution")
+        xyz = self._require_points() if points is None else _check_points(points)
+        order = int(order)
+        if self._near_surface == "graded":
+            return self._graded_estimate(order, xyz)
+        estimate = self._direct_estimate(order, xyz)
+        if self._near_surface == "direct" or isinstance(estimate, jax.core.Tracer):
+            return estimate
+        estimate = np.array(estimate, dtype=float)
+        miss = ~(estimate <= 10.0 ** (-int(self.plasma_field.config.digits)))
+        if miss.any():
+            index = np.flatnonzero(miss)
+            estimate[index] = np.asarray(self._graded_estimate(order, xyz[index]))
+        return jnp.asarray(estimate)
+
 
     @classmethod
     def from_surface_data(
@@ -1608,6 +1738,8 @@ class VmecExtender(MagneticField):
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
         accuracy_check: AccuracyCheck = "warn",
+        near_surface: NearSurface = "auto",
+        graded_nodes: tuple[int, int] | None = None,
     ) -> "VmecExtender":
         """Construct the finite-beta path from traceable VMEX surface data.
 
@@ -1621,6 +1753,9 @@ class VmecExtender(MagneticField):
         ``((nfp nphi, ntheta), (2 nfp nphi, 2 ntheta))``. Without it an nfp = 5
         boundary sampled at 32 points per period was resolved by a finest level
         of 64 over the whole torus -- 13 per period.
+
+        ``near_surface`` and ``graded_nodes`` choose the quadrature near the
+        surface; see the class documentation.
         """
         from . import virtual_casing as vc
 
@@ -1643,7 +1778,8 @@ class VmecExtender(MagneticField):
             branch="internal",
         )
         plasma_field = vc.VirtualCasingExteriorField(surface_data, config)
-        return cls(external_field, plasma_field, accuracy_check=accuracy_check)
+        return cls(external_field, plasma_field, accuracy_check=accuracy_check,
+                   near_surface=near_surface, graded_nodes=graded_nodes)
 
     @classmethod
     def from_parameterized_surface_data(
@@ -1719,10 +1855,13 @@ class VmecExtender(MagneticField):
                 initial_surface_data, gamma=gamma, B_total=B_total,
                 normal=normal, area_vector=area_vector)
             live_external_field = make_external(external_dofs)
+            # the pullback differentiates the quadrature the field is using
             return cls.from_surface_data(
                 data, external_field=live_external_field, digits=digits,
                 levels=levels, chunk_size=chunk_size,
-                target_chunk_size=target_chunk_size).B(points)
+                target_chunk_size=target_chunk_size,
+                near_surface=field.near_surface,
+                graded_nodes=field.graded_nodes).B(points)
 
         field = cls.from_surface_data(
             initial_surface_data, external_field=initial_external_field,
@@ -1749,6 +1888,7 @@ class VmecExtender(MagneticField):
         target_chunk_size: int | str = "auto",
         base_dir: str | Path | None = None,
         accuracy_check: AccuracyCheck = "warn",
+        project_current: bool = False,
     ) -> "VmecExtender":
         """Construct an exterior field from a wout-like object.
 
@@ -1760,6 +1900,12 @@ class VmecExtender(MagneticField):
         4.3e-07 at (64, 64) -- and (64, 64) is also the cheapest of the three
         per call, so the poloidal count follows the toroidal one.  Pass either
         explicitly to override.
+
+        ``project_current`` keeps only the surface-gradient part of the LCFS
+        field before virtual casing
+        (:func:`~vmex.core.virtual_casing.surface_field_data_from_wout`), so
+        the sheet current is conserved and the exterior plasma field is
+        curl-free; it is off by default.
         """
         if plasma not in ("auto", "include", "vacuum"):
             raise ValueError("plasma must be 'auto', 'include', or 'vacuum'")
@@ -1780,6 +1926,7 @@ class VmecExtender(MagneticField):
                 wout,
                 nphi=chosen if nphi is None else nphi,
                 ntheta=chosen if ntheta is None else ntheta,
+                project_current=project_current,
             )
             return cls.from_surface_data(
                 surface,
@@ -1819,11 +1966,12 @@ class VmecExtender(MagneticField):
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
         accuracy_check: AccuracyCheck = "warn",
+        project_current: bool = False,
     ) -> "VmecExtender":
         """Construct the differentiable finite-beta path from a live VMEX state.
 
-        ``nphi`` and ``ntheta`` default from the boundary exactly as in
-        :meth:`from_wout`; pass either explicitly to override.
+        ``nphi``, ``ntheta`` and ``project_current`` behave exactly as in
+        :meth:`from_wout`; pass the grid explicitly to override its default.
         """
         from . import virtual_casing as vc
 
@@ -1832,6 +1980,7 @@ class VmecExtender(MagneticField):
             inp, state,
             nphi=chosen if nphi is None else nphi,
             ntheta=chosen if ntheta is None else ntheta,
+            project_current=project_current,
         )
         return cls.from_surface_data(
             surface,

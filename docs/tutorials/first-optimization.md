@@ -13,7 +13,7 @@ import scipy.optimize
 import vmex as vj
 from vmex import optimize as opt
 
-inp = vj.VmecInput.from_file("input.circular_tokamak")
+inp = vj.VmecInput.from_file("examples/data/input.circular_tokamak")
 max_mode = 1
 mpol = max(max_mode + 2, 5)
 inp = replace(inp, delt=0.5).change_resolution(

@@ -190,17 +190,17 @@ fixed_equilibrium.set_points_flux(fixed_flux_points)
 B_fixed_inside = fixed_equilibrium.B()
 fixed_exterior = fixed_equilibrium.exterior_field(external_field=external_field,
     nphi=NPHI, ntheta=NTHETA, digits=VC_DIGITS)
-fixed_exterior = fixed_exterior.with_near_surface_continuation(
-    digits=VC_DIGITS, precision=precision, B_surface=interface.B_plasma)
+# Eager queries switch each point the direct quadrature cannot resolve to the
+# target-graded near-surface rule (near_surface="auto", the default).
 outer_xyz = xyz[len(inner_s) * points_per_surface:]
-print("Evaluating the virtual-casing continuation through the outer region...")
+print("Evaluating the virtual-casing field through the outer region...")
 B_fixed_exterior = fixed_exterior.B(outer_xyz)
 B_comparison = jnp.concatenate((B_fixed_inside, B_fixed_exterior))
 direct_check = fixed_equilibrium.exterior_field(external_field=external_field,
     nphi=NPHI, ntheta=NTHETA, digits=VC_DIGITS, levels=CHECK_LEVELS)
 B_direct_check = direct_check.B(outer_xyz[-1:])
-continuation_check = B_fixed_exterior[-1:]
-continuation_error = (jnp.linalg.norm(continuation_check - B_direct_check)
+auto_check = B_fixed_exterior[-1:]
+auto_error = (jnp.linalg.norm(auto_check - B_direct_check)
                       / jnp.linalg.norm(B_direct_check))
 finite = jnp.all(jnp.isfinite(B_free) & jnp.isfinite(B_comparison), axis=1)
 point_error = (jnp.linalg.norm(B_comparison - B_free, axis=1)
@@ -211,8 +211,8 @@ print(f"Median |B| [T]: parent={float(jnp.nanmedian(jnp.linalg.norm(B_free, axis
       f"restricted={float(jnp.nanmedian(jnp.linalg.norm(B_comparison, axis=1))):.3f}, "
       f"coils={float(jnp.nanmedian(jnp.linalg.norm(external_field(xyz), axis=1))):.3f}")
 print(f"Radial field-comparison RMS errors = {np.asarray(radial_field_error)}")
-print(f"Continuation/direct-VC difference at the far check point = "
-      f"{100 * float(continuation_error):.2f}%")
+print(f"Exterior field vs a finer direct quadrature at the far check point = "
+      f"{100 * float(auto_error):.2e}%")
 
 # Plot eleven parent surfaces and the corresponding restricted surfaces through
 # s_free=0.5. The two black dash patterns keep coincident comparisons visible;

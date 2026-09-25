@@ -14,7 +14,7 @@ Representation and fixed constraints
 The continuous coordinates are ``(rho, theta, zeta)``, where ``rho=sqrt(s)``
 and ``zeta`` advances from zero to ``2*pi`` over one field period.  Physical
 cylindrical angle is ``phi=zeta/NFP``.  This is a module-local convention: the
-legacy kernel documented in :doc:`spectral-representation` uses the physical
+legacy kernel documented in :doc:`variational-problem` uses the physical
 toroidal angle directly.  Each real Fourier amplitude is
 
 .. math::
@@ -48,7 +48,11 @@ overdetermined fit with roughly two mesh samples per free spline span, capped
 at 32 spans.  An equal-size interpolant reproduces mesh-scale noise exactly and
 can turn that noise into very large second derivatives in ``curl(B)`` even when
 the sampled surface coordinates look accurate.  Callers with a genuinely
-high-order source may supply an explicit ``radial_basis``.
+high-order source may supply an explicit ``radial_basis``. The retained samples
+must determine every unconstrained spline coefficient: rank-deficient fits,
+including bases with unfed spans, raise ``ValueError`` rather than inventing
+curvature through a minimum-norm fill. Reduce spans/degree or resolve the
+source radial mesh before lifting again.
 
 Independent continuum oracle
 ----------------------------

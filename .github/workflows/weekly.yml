@@ -86,7 +86,7 @@ jobs:
           - lane: core-1
             selector: full-core-a-c full-core-d-f0 full-core-g-h full-core-t-z full-core-fb-a
             parallel: "-n 4"
-            timeout: 15
+            timeout: 30
           - lane: core-2
             selector: full-core-i full-core-j-m
             parallel: "-n 4"

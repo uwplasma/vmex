@@ -30,9 +30,10 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   - `parallel_ensemble_scan.py` — solve an ensemble of independent equilibria
     concurrently on CPU (`vmex.parallel.solve_ensemble`); prints the measured
     strong-scaling curve and checks the results are bit-identical to serial.
-  - `take_gradients.py` — exact fixed-boundary gradients of wout scalars
-    (aspect, magnetic energy, ...) by implicit differentiation, checked against
-    finite differences; O(1) memory, no step size to tune.
+  - `take_fixed_boundary_gradients.py` — exact fixed-boundary gradients of
+    wout scalars (aspect, magnetic energy, ...) by implicit differentiation,
+    checked against central finite differences; no step size to tune. The
+    fixed-boundary companion to `take_free_boundary_gradients.py`.
   - `free_boundary_mgrid.py` — free-boundary equilibrium from coil currents and
     an mgrid vacuum field (NESTOR); the LCFS is solved for, not prescribed.
   - `free_boundary_beta_scan.py` — ramp the pressure of the free-boundary case
@@ -78,32 +79,39 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
-  The finite-beta examples calibrate a prescribed linear pressure profile and
-  include radially weighted Mercier and resistive-interchange terms. Each of the
-  eight is self-contained: the scalarized loss, the L-BFGS-B call and the
-  monitor wiring are in the file beside its physical targets, resolution and
-  save names, so a reader never has to open a second file to follow one run.
+  The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
+  through the toroidal flux: at zero net current beta depends on PRES_SCALE /
+  PHIEDGE^2 alone, so `PHIEDGE = pi a^2 sqrt(mu0 PRES_SCALE / TARGET_BETA)` with
+  `a = R0 / ASPECT_TARGET`, and one correction solve on the seed, scaled to the
+  target aspect ratio, brings beta to within 0.05 % (relative) of the target.
+  The beta and aspect-ratio targets then agree, which a pressure calibrated at
+  the seed's own aspect ratio does not. They include radially weighted Mercier
+  and resistive-interchange terms, and `QA_optimization_finite_beta.py` is the
+  least-squares counterpart of the QA one. Each of the eight scalar scripts is
+  self-contained: the scalarized loss, the L-BFGS-B call and the monitor wiring
+  are in the file beside its physical targets, resolution and save names, so a
+  reader never has to open a second file to follow one run.
   The scalar lane trades objective progress per evaluation (roughly 3x higher
   objective at a matched budget on the QA workflow) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
-  `single_stage_optimization_penalty.py` *(preview)* is the simplest joint
+  `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
   constraint is a quadratic penalty and the optimizer is one bounded L-BFGS-B
-  solve. `single_stage_optimization.py` *(preview)* is the same problem with
-  the constraints in a Powell-Hestenes-Rockafellar augmented Lagrangian. Both
-  vary a prescribed boundary and coil Fourier coefficients, neither calls a
-  free-boundary solve, and both reach every target at the full budget; the
-  augmented Lagrangian gets there with the limits stated as they are and a 1.4x
-  lower objective, while the penalized file needs tightened thresholds and
-  tuned weights because a quadratic penalty settles just inside whatever
-  threshold it is given. Each docstring carries the measured comparison.
+  solve. `single_stage_optimization_augmented_lagrangian.py` *(preview)* is the
+  same problem with the three limits in a Powell-Hestenes-Rockafellar augmented
+  Lagrangian, and `single_stage_optimization_least_squares.py` *(preview)*
+  keeps the terms as a residual vector for a bounded Gauss-Newton (TRF) solve.
+  All three vary a prescribed boundary and coil Fourier coefficients and none
+  calls a free-boundary solve. Each is self-contained, so one file can be read
+  and modified without opening another.
   `QA_optimization_bootstrap.py`, `QH_optimization_bootstrap.py` and
   `QI_optimization_bootstrap.py` also vary
   a stage-refined current spline against self-consistent Redl, DMerc, and DR
   targets. `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
   casing and coil derivatives. The free-boundary single-stage previews leave
-  the LCFS implicit and vary only coil shape and current through the coupled
-  NESTOR adjoint.
+  the LCFS implicit and vary only the coil shapes, through the coupled NESTOR
+  adjoint. Each single-stage script runs in 2.1-4.6 min end to end on a laptop,
+  with a cold JAX cache, and states its own measured time.
   `QA_optimization_DMerc_vacuum.py` screens a vacuum candidate with the
   frozen-geometry pressure proxies before re-solving at finite pressure, and
   `QA_optimization_global.py` explores basins with SciPy basin hopping before

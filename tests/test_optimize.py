@@ -584,6 +584,41 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     np.testing.assert_array_equal(bad_gradient, np.zeros_like(problem.x0))
 
 
+def test_equilibrium_from_x_is_the_state_the_objective_read():
+    """``equilibrium_from_x`` returns the refined state, not the host solve.
+
+    The objective reads the fixed-point-refined state.  On ``li383_low_res``
+    that state is 1.4e-2 from the host solve in one coefficient, and the
+    materialized equilibrium used to report a mean iota of 0.55449 against
+    the objective's 0.55359.  Materializing straight after construction,
+    before any objective evaluation, must give the same state too.
+    """
+    from vmex.core.statephysics import mean_iota
+
+    inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
+    problem = opt.make_problem(
+        inp, objective_terms=[(opt.mean_iota, 0.0, 1.0)], max_mode=1)
+    before = problem.equilibrium_from_x(problem.x0)
+    objective = float(np.asarray(problem.residual(problem.x0))[0])
+    after = problem.equilibrium_from_x(problem.x0)
+    for eq in (before, after):
+        np.testing.assert_allclose(
+            float(mean_iota(eq.state, eq.runtime)), objective, rtol=1e-12)
+        np.testing.assert_allclose(
+            float(np.mean(np.asarray(eq.wout.iotas)[1:])), objective, rtol=1e-12)
+
+    # Without a refined state for this decision vector there is nothing
+    # certified to return, never the host solve in its place.
+    from vmex.core import implicit as im
+
+    cfg = problem.metadata["config"]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delitem(im._LAST_REFINED, cfg)
+        patch.setattr(im, "_host_solve_and_mask_status", lambda *args: None)
+        with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+            problem.equilibrium_from_x(problem.x0)
+
+
 def test_from_loss_honors_bound_scalar_method_literally():
     """The ``loss=`` lane uses a bound scalar objective method exactly as passed.
 
@@ -603,10 +638,9 @@ def test_from_loss_honors_bound_scalar_method_literally():
     assert np.isfinite(value)
     eq = problem.equilibrium_from_x(problem.x0)
     expected = float(jax.device_get(qs.total_state(eq.state, eq.runtime)))
-    # The problem evaluates the guarded-refinement fixed point; the
-    # materialized equilibrium is the host solve, so agreement is at the
-    # solver-refinement level, not machine precision.
-    np.testing.assert_allclose(value, expected, rtol=1e-5, atol=1e-10)
+    # The materialized equilibrium is the refined fixed point the problem
+    # evaluated, so the two agree to roundoff.
+    np.testing.assert_allclose(value, expected, rtol=1e-12, atol=1e-14)
 
     with pytest.raises(ValueError, match="must return a scalar"):
         opt.VmecProblem.from_loss(inp, qs.residuals_state, max_mode=1)
@@ -1444,6 +1478,7 @@ def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
     """
     import inspect
 
+    from vmex.core import implicit as im
     from vmex.core import optimize as optimize_module
 
     defaults = {
@@ -1452,6 +1487,12 @@ def test_max_fsq_ratio_default_is_strict_on_every_entry_point():
         if "max_fsq_ratio" in inspect.signature(fn).parameters
     }
     assert defaults, "no entry point exposes max_fsq_ratio"
+    # The implicit config builder and the dataclass it returns carry the same
+    # bar, so a status solve on a default config certifies nothing looser.
+    defaults["implicit.make_config"] = inspect.signature(
+        im.make_config).parameters["max_fsq_ratio"].default
+    defaults["implicit.ImplicitConfig"] = im.ImplicitConfig.__dataclass_fields__[
+        "max_fsq_ratio"].default
     assert set(defaults.values()) == {1.0e2}, defaults
 
 
@@ -1561,3 +1602,72 @@ def test_subproblem_ladder_compiles_once():
     assert compiles_after_second_rung == compiles_after_first_rung, (
         "the second ladder rung recompiled: "
         f"{compiles_after_second_rung - compiles_after_first_rung} programs")
+
+
+def test_eager_state_objective_gradient_compiles_once():
+    """An un-jitted value_and_grad over a state objective reuses its programs.
+
+    With the status branch as a ``lax.cond``, every eager call traced and
+    compiled the branch again, because each call's state and linearization
+    data entered it as new constants (7-15 s of XLA per call on this 5-surface
+    deck). A concrete status now takes its branch in Python, and the jitted
+    gradient, where the status is abstract, is unchanged.
+    """
+    import jax.monitoring
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(
+        inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4),
+        ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]))
+    problem = opt.VmecProblem.from_tuples(
+        inp, [(opt.aspect_ratio, 4.0, 1.0)], max_mode=1, use_ess=False)
+
+    def objective(x):
+        return problem.jax_objective_from_state(
+            x, lambda state, runtime: jnp.atleast_1d(opt.aspect_ratio(state, runtime)),
+            n_extra_terms=1)
+
+    eager = jax.value_and_grad(objective, has_aux=True)
+    points = [jnp.asarray(problem.x0) * (1.0 + 1.0e-3 * k) for k in range(3)]
+    eager(points[0])
+    eager(points[1])
+    compiles = []
+    jax.monitoring.register_event_duration_secs_listener(
+        lambda name, duration, **_: compiles.append(name)
+        if name.endswith("backend_compile_duration") else None)
+    (value, _), gradient = eager(points[2])
+    assert compiles == [], f"an eager repeat compiled {len(compiles)} programs"
+    (value_jit, _), gradient_jit = jax.jit(eager)(points[2])
+    np.testing.assert_allclose(float(value), float(value_jit), rtol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(gradient), np.asarray(gradient_jit),
+                               rtol=1.0e-8, atol=1.0e-12)
+
+
+def test_host_state_runtime_is_the_unanchored_forward_solve(monkeypatch):
+    """Figures read a plain forward solve; only the adjoint lane anchors it."""
+    from vmex.core import implicit as imp
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(
+        inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4),
+        ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]))
+    problem = opt.VmecProblem.from_tuples(
+        inp, [(opt.aspect_ratio, 4.0, 1.0)], max_mode=1, use_ess=False)
+    reference = opt.solve_equilibrium(problem.input_from_x(problem.x0)).solution
+
+    def no_anchor(*args, **kwargs):
+        raise AssertionError("a figure must not pay for the derivative anchor")
+
+    monkeypatch.setattr(imp, "_refine_fixed_point", no_anchor)
+    # A cold forward solve: an earlier test on an equal config leaves a hot
+    # restart that converges to a different point within ftol.
+    for cache in (imp._LAST_SOLVE, imp._HOT_CACHE, imp._PERTURB_SEED):
+        cache.clear()
+    state, runtime = problem.metadata["host_state_runtime"](problem.x0)
+    assert type(runtime).__name__ == "SolverRuntime"
+    for field in ("R_cos", "Z_sin", "L_sin"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(state, field)), np.asarray(getattr(reference, field)),
+            rtol=0.0, atol=1.0e-9)

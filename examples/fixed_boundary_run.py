@@ -62,10 +62,7 @@ print(f"\nconverged = {result.converged} after {int(result.iterations)} "
 
 ### Print, plot and save ######################################################
 
-wout = vj.wout_from_state(
-    inp=inp, state=result.state,
-    fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
-    niter=int(result.iterations), converged=bool(result.converged))
+wout = vj.wout_from_result(inp, result)
 print(f"\nwout scalars: aspect = {float(wout.aspect):.4f}, "
       f"volume = {float(wout.volume_p):.4f} m^3, "
       f"B0 = {float(wout.b0):.4f} T, betatotal = {float(wout.betatotal):.3e}")
@@ -73,7 +70,7 @@ print(f"\nwout scalars: aspect = {float(wout.aspect):.4f}, "
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 wout_path = vj.write_wout(OUTPUT_DIR / f"wout_{case}.nc", wout)
 print(f"Wrote {wout_path}")
-# plot_wout writes the summary, surfaces, |B|, profiles, stability and 3-D figures.
+# plot_wout writes the summary, surfaces, |B|, stability and 3-D figures.
 for path in vj.plot_wout(wout_path, OUTPUT_DIR).values():
     print(f"Wrote {path}")
 
