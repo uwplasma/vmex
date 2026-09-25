@@ -899,10 +899,13 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
     matching ``cold`` run left behind, so a reload claim always follows a
     logged population of the same directory.
     """
+    # vmex puts entries in a per-machine subdirectory of the cache directory
+    # it is given, so look at files anywhere below it.
     if regime == "cold":
-        for stale in cache_dir.glob("*"):
+        for stale in [path for path in cache_dir.rglob("*") if path.is_file()]:
             stale.unlink()
-    elif regime == "cache_reload" and not any(cache_dir.glob("*")):
+    elif regime == "cache_reload" and not any(
+            path.is_file() for path in cache_dir.rglob("*")):
         # A reload claim needs a logged population of this same directory:
         # run one unrecorded cold child to fill it.
         _run_cold(ident, "cold", cache_dir)
@@ -918,7 +921,7 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
         VMEX_PROFILE_CHILD="1",
     )
     env.pop("VMEX_COMPILATION_CACHE_DIR", None)
-    entries_before = len(list(cache_dir.glob("*")))
+    entries_before = sum(path.is_file() for path in cache_dir.rglob("*"))
     started = time.perf_counter()
     proc = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), ident,
@@ -938,8 +941,9 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
     record = json.loads(proc.stdout.strip().splitlines()[-1])
     record["timing_s"]["process_wall"] = wall
     used = record.pop("cache_directory", None)
-    entries_after = len(list(cache_dir.glob("*")))
-    if not used or Path(used).resolve() != cache_dir.resolve():
+    entries_after = sum(path.is_file() for path in cache_dir.rglob("*"))
+    if not used or cache_dir.resolve() not in (
+            Path(used).resolve(), *Path(used).resolve().parents):
         raise RuntimeError(
             f"{ident}/{regime} measured nothing: the child compiled into "
             f"{used!r}, not the controlled {cache_dir}.")

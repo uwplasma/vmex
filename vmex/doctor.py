@@ -156,8 +156,7 @@ def _compilation_cache_line() -> str:
     """
     from ._compat import _default_cache_max_size, _default_compilation_cache_dir
 
-    directory = os.environ.get(
-        "JAX_COMPILATION_CACHE_DIR") or _default_compilation_cache_dir()
+    directory = _default_compilation_cache_dir()
     if not directory:
         return "VMEX compile cache:    disabled"
     try:

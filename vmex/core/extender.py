@@ -489,7 +489,13 @@ def _radial_table(coefficients: Array, modes: Array | None,
         s_mesh = jnp.arange(ns, dtype=coefficients.dtype) / (ns - 1)
         scale = s_mesh[:, None] ** powers[None, :]
         regular = coefficients / jnp.where(scale == 0.0, 1.0, scale)
-        regular = regular.at[0].set(jnp.where(powers > 0, regular[1], regular[0]))
+        # The regular coefficient is smooth in s, so its axis value is a linear
+        # extrapolation from the first two surfaces.  Copying the first surface
+        # made the axis value first order in the radial step and left the
+        # first cell with a zero s-slope, an O(1) error in R_s and Z_s (and so
+        # in the native Jacobian and current) that no radial refinement removes.
+        axis = 2.0 * regular[1] - regular[2] if ns > 2 else regular[1]
+        regular = regular.at[0].set(jnp.where(powers > 0, axis, regular[0]))
     # Zero moments reduce the evaluation below to plain linear interpolation.
     return regular, _spline_moments(regular) if spline else jnp.zeros_like(regular)
 

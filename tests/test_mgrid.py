@@ -257,6 +257,28 @@ def test_spatial_derivatives_compile_once_per_order():
     assert counts[1] == 0, f"repeating the calls recompiled {counts[1]} times"
 
 
+def test_radial_parity_axis_row_is_extrapolated_not_copied():
+    """An ``m > 0`` coefficient ``s**(m/2) (a + b s)`` is reproduced near the axis.
+
+    Its regularized part ``a + b s`` is linear, so the interpolant must recover
+    both the value and the s-slope in the first cell.  Copying the first
+    surface into the axis row gave a zero slope there and an axis value off by
+    ``b/(ns-1)``, independent of the evaluation radius.
+    """
+    ns = 9
+    s_mesh = np.arange(ns)/(ns-1)
+    modes = jnp.asarray([1.0, 2.0])
+    a, b = np.asarray([0.7, -0.3]), np.asarray([0.4, 1.1])
+    table = jnp.asarray(s_mesh[:, None]**(np.asarray(modes)/2)*(a+b*s_mesh[:, None]))
+    for s in (1e-6, 0.03, 0.1):
+        value, derivative = ext._radial_value_and_derivative(table, jnp.asarray(s), modes)
+        powers = np.asarray(modes)/2
+        exact = s**powers*(a+b*s)
+        exact_derivative = powers*s**(powers-1)*(a+b*s)+s**powers*b
+        np.testing.assert_allclose(np.asarray(value), exact, rtol=1e-12)
+        np.testing.assert_allclose(np.asarray(derivative), exact_derivative, rtol=1e-10)
+
+
 def test_extender_helper_contracts_and_public_equilibrium_aliases():
     """Radial parity, seeded inversion, and the equilibrium field entry points.
 
