@@ -554,6 +554,59 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
 
 
 @pytest.mark.usefixtures("_module_jit_enabled")  # one solve, 200 s interpreted
+def test_flux_coordinates_compile_once_and_repeat_for_free():
+    """``flux_coordinates`` and its exterior-point check run as compiled kernels.
+
+    Both used to run primitive by primitive: 468 compilations for three points
+    here, and over a minute on the HSX wout (858 modes, 501 points, 88 of them
+    outside the plasma).  Three kernels and a few element-wise bookkeeping ops
+    remain.  The suite runs with ``jax_disable_jit``, so enable jit here.
+    """
+    ns, major_radius, minor_radius = 7, 1.0, 0.3
+    s_mesh = jnp.linspace(0.0, 1.0, ns)
+    spectra = {
+        "nfp": 1, "ns": ns,
+        "xm": jnp.array([0.0, 1.0]), "xn": jnp.array([0.0, 0.0]),
+        "xmn": jnp.array([0.0]), "xnn": jnp.array([0.0]),
+        "rmnc": jnp.stack((jnp.full(ns, major_radius), minor_radius * jnp.sqrt(s_mesh)), axis=1),
+        "zmns": jnp.stack((jnp.zeros(ns), minor_radius * jnp.sqrt(s_mesh)), axis=1),
+        "rmns": None, "zmnc": None,
+        "bsupu": jnp.zeros((ns, 1)), "bsupv": jnp.ones((ns, 1)),
+        "bsupu_s": None, "bsupv_s": None, "lasym": False, "signgs": -1,
+    }
+    # Two interior points and one far outside, which takes the loud-failure check.
+    points = jnp.array([[1.1, 0.2, 0.05], [0.2, -0.85, -0.1], [2.0, 0.0, 0.0]])
+    field = VmecInteriorField(spectra)
+
+    compiled: list[str] = []
+
+    class _Counter(logging.Handler):
+        def emit(self, record):
+            if "Finished XLA compilation of" in record.getMessage():
+                compiled.append(record.getMessage())
+
+    logger, handler = logging.getLogger("jax"), _Counter()
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    counts = []
+    try:
+        with jax.disable_jit(False):
+            for _ in range(2):
+                compiled.clear()
+                with jax.log_compiles():
+                    jitted = field.flux_coordinates(points)
+                counts.append(len(compiled))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+    # The eager reference runs last, or its primitives would warm the cache.
+    eager = VmecInteriorField(spectra).flux_coordinates(points)
+    np.testing.assert_allclose(jitted, eager, rtol=0, atol=1e-12)
+    assert 1 <= counts[0] <= 24, f"flux_coordinates took {counts[0]} compilations"
+    assert counts[1] == 0, f"repeating the call recompiled {counts[1]} times"
+
+
 def test_interior_geometry_matches_the_wout_table():
     """The interior field and the wout must describe the same surfaces.
 
