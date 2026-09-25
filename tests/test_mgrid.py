@@ -889,6 +889,50 @@ def test_grad_wrt_extcur_finite_nonzero(data: MgridData) -> None:
     assert np.max(np.abs(g_np)) > 0.0
 
 
+def test_tricubic_interpolation_is_third_order_and_continuously_differentiable() -> None:
+    """``order=3`` converges at third order and its gradient has no cell-face jumps."""
+
+    def field(points):
+        x, y, z = np.asarray(points).T
+        return np.stack((np.sin(2.0 * x) * np.cos(z), np.cos(y) * np.exp(0.5 * z),
+                         np.sin(x + y) + z**2), axis=-1)
+
+    def b_xyz(f, xyz):
+        r, phi = jnp.hypot(xyz[..., 0], xyz[..., 1]), jnp.arctan2(xyz[..., 1], xyz[..., 0])
+        br, bp, bz = f.b_cyl(r, phi, xyz[..., 2])
+        return jnp.stack((br * jnp.cos(phi) - bp * jnp.sin(phi),
+                          br * jnp.sin(phi) + bp * jnp.cos(phi), bz), axis=-1)
+
+    rng = np.random.default_rng(0)
+    r = rng.uniform(1.2, 1.8, 200)
+    phi = rng.uniform(0.0, 2.0 * np.pi, 200)
+    xyz = np.stack((r * np.cos(phi), r * np.sin(phi), rng.uniform(-0.3, 0.3, 200)), axis=-1)
+    errors = {}
+    for n in (17, 33):
+        data = tabulate_cartesian_field(field, rmin=1.0, rmax=2.0, zmin=-0.5, zmax=0.5,
+                                        ir=n, jz=n, kp=2 * (n - 1), nfp=1)
+        for order in (1, 3):
+            f = MgridField.from_mgrid_data(data, extcur=[1.0], order=order)
+            errors[n, order] = np.abs(np.asarray(b_xyz(f, jnp.asarray(xyz))) - field(xyz)).max()
+    assert errors[33, 3] < 0.05 * errors[33, 1], errors
+    assert errors[17, 3] / errors[33, 3] > 6.0, errors  # third order; trilinear gives 4
+    # Grid nodes are reproduced, and the jit/pytree path keeps the order.
+    cubic = MgridField.from_mgrid_data(data, extcur=[1.0], order=3)
+    node = jnp.array([[1.5, 0.0, 0.0]])
+    np.testing.assert_allclose(b_xyz(cubic, node), field(node), rtol=0, atol=1e-13)
+    np.testing.assert_allclose(jax.jit(b_xyz)(cubic, node), b_xyz(cubic, node), rtol=1e-14, atol=0)
+    # d B / d R across the cell face at R = 1.5: continuous for order 3 only.
+    face = jnp.array([1.5 * np.cos(0.05), 1.5 * np.sin(0.05), 0.07])  # R = 1.5 is a node
+    jumps = {}
+    for order in (1, 3):
+        f = MgridField.from_mgrid_data(data, extcur=[1.0], order=order)
+        radial = jax.grad(lambda x, f=f: b_xyz(f, x)[0])
+        jumps[order] = float(jnp.abs(radial(face * (1 + 1e-9)) - radial(face * (1 - 1e-9))).max())
+    assert jumps[3] < 1e-6 < jumps[1], jumps
+    with pytest.raises(ValueError, match="order must be 1"):
+        MgridField.from_mgrid_data(data, extcur=[1.0], order=2)
+
+
 def test_tabulate_cartesian_callable_and_cylindrical_conversion() -> None:
     def field(points):
         p = np.asarray(points)
