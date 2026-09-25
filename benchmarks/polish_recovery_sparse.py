@@ -463,11 +463,16 @@ def _local_normal_system(force, coordinates, residual, base, plan, layout, gauge
             shape=local_pattern.shape,
         )
         max_local_jacobian_nnz = max(max_local_jacobian_nnz, int(local_jacobian.nnz))
-        local_normal = (local_jacobian.T @ local_jacobian).tocoo()
-        row_parts.append(local_normal.row.astype(np.int64, copy=False))
-        column_parts.append(local_normal.col.astype(np.int64, copy=False))
-        value_parts.append(local_normal.data.astype(np.float64, copy=False))
-        gradient += np.asarray(local_jacobian.T @ residual[row_start:row_stop]).reshape(-1)
+        # A span's Jacobian is nearly dense on its few active columns: gather
+        # them, form the block with BLAS, and scatter it (sparse-sparse
+        # products here took ~80% of the assembly time).
+        active_columns = np.unique(local_pattern.indices)
+        dense = local_jacobian[:, active_columns].toarray()
+        block = dense.T @ dense
+        row_parts.append(np.repeat(active_columns, active_columns.size))
+        column_parts.append(np.tile(active_columns, active_columns.size))
+        value_parts.append(block.reshape(-1))
+        gradient[active_columns] += dense.T @ residual[row_start:row_stop]
 
     normal = sparse.coo_matrix(
         (np.concatenate(value_parts), (np.concatenate(row_parts), np.concatenate(column_parts))),
@@ -1452,8 +1457,15 @@ def main() -> None:
     )
     final_stationarity_frobenius = None
     stationarity_assembly_seconds = 0.0
-    if last_linearization_coordinates is not None and not np.array_equal(
-        last_linearization_coordinates, np.asarray(coordinates)
+    intermediate = args.certificate == "none"
+    if intermediate:
+        # No stationarity claim is made for an intermediate stage; skip the
+        # final re-linearization rather than normalize with a stale operator.
+        last_matrix = last_normal = None
+    if (
+        not intermediate
+        and last_linearization_coordinates is not None
+        and not np.array_equal(last_linearization_coordinates, np.asarray(coordinates))
     ):
         if args.linearization == "sparse":
             last_matrix, stationarity_assembly_seconds, product_error, transpose_error = _compressed_jacobian(

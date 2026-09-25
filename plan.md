@@ -101,6 +101,17 @@ The remaining time is assembly (local-normal JVP sweeps) and the point
 certificate, not compilation. The quintic state is
 `benchmarks/polish_recovery_r7_quintic_cold_stationary_state.npz`.
 
+R7.3 measured speedups (2026-09-25): profiling showed 78% of the span-local
+normal assembly was SciPy sparse-sparse `A_e.T @ A_e` on nearly dense span
+blocks. Gathering each span's active columns into a dense block (BLAS) and
+scattering it cut a warm basis-76 assembly from 17.7 s to 4.0 s, with the same
+full-domain checks (Hv 1.5e-15, g 4.5e-13, symmetry 8.9e-18). Intermediate
+stages also skip the final re-linearization used only for the eta report. The
+cold quintic workflow now takes **266 s** (`artifacts/r7/cold-q5b`), with the
+same certified result (epsilon_B 7.677e-6, eta 4.0e-10). The remaining cost is
+the dense lift stage (35 s, 5.5 GB), per-stage process start plus new-shape
+compilation (~20-30 s each), and the 42 s point certificate.
+
 Next resume point: R7.3 cost reduction on the quintic path (active-local
 coefficient gathers, a static CSR scatter, compiled-identity reuse), a cheaper
 certificate schedule, then R7.5 (3-D, current closure, LASYM) and R7.6
