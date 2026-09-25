@@ -537,16 +537,24 @@ class MgridField:
 
     @classmethod
     def from_mgrid_data(cls, data: MgridData, extcur: Any | None = None) -> "MgridField":
-        """Build a field from :class:`MgridData`; defaults extcur to raw currents.
+        """Build a field from :class:`MgridData`; the default is the file's own field.
 
-        The default reproduces the file's own field (raw/baked tables).  To
-        solve a *deck*, pass the deck's ``EXTCUR`` (divided by
-        ``raw_coil_cur`` for mode-``R``/``N`` files) or use the solver's
-        ``mgrid_path`` argument, which applies that scaling automatically —
-        otherwise the input's ``EXTCUR`` is silently ignored.
+        ``extcur`` multiplies each group's table.  The default reproduces the
+        currents the file was computed with: ``raw_coil_cur`` for a
+        per-ampere (mode ``S``) table, and one for a mode ``R``/``N`` table,
+        which already carries its currents (VMEC2000 divides ``EXTCUR`` by
+        ``raw_coil_cur`` for those files).  To solve a *deck*, pass the deck's
+        ``EXTCUR`` (divided by ``raw_coil_cur`` for mode-``R``/``N`` files) or
+        use the solver's ``mgrid_path`` argument, which applies that scaling
+        automatically — otherwise the input's ``EXTCUR`` is silently ignored.
         """
 
-        cur = data.raw_coil_cur if extcur is None else extcur
+        if extcur is None:
+            raw = np.asarray(data.raw_coil_cur, dtype=np.float64)
+            baked = str(data.mgrid_mode).upper().startswith(("R", "N"))
+            cur = np.where(raw != 0.0, 1.0, 0.0) if baked else raw
+        else:
+            cur = extcur
         cur_arr = jnp.atleast_1d(jnp.asarray(cur, dtype=jnp.float64)).reshape(-1)
         if int(cur_arr.shape[0]) != int(data.nextcur):
             raise ValueError(f"extcur length {int(cur_arr.shape[0])} does not match nextcur {data.nextcur}")
