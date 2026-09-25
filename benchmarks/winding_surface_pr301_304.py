@@ -50,6 +50,7 @@ DEFAULT_REFS = {
     "pr303": "origin/pr-303",
     "pr304": "origin/pr-304",
     "pr366": "origin/ds/winding-adjoint-performance",
+    "combined": "HEAD",
 }
 
 GEOMETRY_FUNCTIONS = {
@@ -558,6 +559,12 @@ def run(args: argparse.Namespace) -> dict:
             },
         },
         "review": {
+            "pull_requests": {
+                "pr301": "https://github.com/uwplasma/vmex/pull/301",
+                "pr303": "https://github.com/uwplasma/vmex/pull/303",
+                "pr304": "https://github.com/uwplasma/vmex/pull/304",
+                "pr366": "https://github.com/uwplasma/vmex/pull/366",
+            },
             "stack_order": ["pr301", "pr303", "pr304"],
             "geometry_helper_sha256": geometry_hashes,
             "controlled_port": (
