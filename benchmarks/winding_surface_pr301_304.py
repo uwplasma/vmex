@@ -459,30 +459,31 @@ def run(args: argparse.Namespace) -> dict:
             geometry_sources["fused_geometry_candidate"])
 
     geometry_rows = []
-    for case_name in args.cases:
-        case = common.CASES[case_name]
-        winding, _ = common._dofs(case)
-        for resolution in args.resolutions:
-            rng = np.random.default_rng(case.seed + 30_100 + resolution)
-            direction = jnp.asarray(rng.normal(size=winding.shape))
-            direction /= jnp.linalg.norm(direction)
-            measured = {}
-            for label, namespace in geometry_variants.items():
-                print(
-                    f"geometry case={case_name} resolution={resolution} "
-                    f"variant={label}", flush=True)
-                row, outputs = _scalar_row(
-                    label, _geometry_scalar(namespace, resolution), winding,
-                    direction, args.repeats, {
-                        "case": case_name,
-                        "resolution": resolution,
-                        "quadrature_points": resolution ** 2,
-                    })
-                measured[label] = (row, outputs)
-            reference = measured["pre_301_loops"][1]
-            geometry_rows.extend(
-                _attach_fidelity(row, outputs, reference)
-                for row, outputs in measured.values())
+    if "geometry" in args.tracks:
+        for case_name in args.cases:
+            case = common.CASES[case_name]
+            winding, _ = common._dofs(case)
+            for resolution in args.resolutions:
+                rng = np.random.default_rng(case.seed + 30_100 + resolution)
+                direction = jnp.asarray(rng.normal(size=winding.shape))
+                direction /= jnp.linalg.norm(direction)
+                measured = {}
+                for label, namespace in geometry_variants.items():
+                    print(
+                        f"geometry case={case_name} resolution={resolution} "
+                        f"variant={label}", flush=True)
+                    row, outputs = _scalar_row(
+                        label, _geometry_scalar(namespace, resolution), winding,
+                        direction, args.repeats, {
+                            "case": case_name,
+                            "resolution": resolution,
+                            "quadrature_points": resolution ** 2,
+                        })
+                    measured[label] = (row, outputs)
+                reference = measured["pre_301_loops"][1]
+                geometry_rows.extend(
+                    _attach_fidelity(row, outputs, reference)
+                    for row, outputs in measured.values())
 
     _, pr366_source = _source(refs["pr366"], CURRENT_EXAMPLE)
     spectrum_rows = []
@@ -491,47 +492,51 @@ def run(args: argparse.Namespace) -> dict:
         "pr304_full_matrix_sectors": "pr304",
         "pr366_one_block_sectors": "pr366",
     }
-    for case_name in args.cases:
-        case = common.CASES[case_name]
-        winding, plasma = common._dofs(case)
-        value = jnp.concatenate((winding, plasma))
-        for resolution in args.resolutions:
-            rng = np.random.default_rng(case.seed + 30_400 + resolution)
-            direction = jnp.asarray(rng.normal(size=value.shape))
-            direction /= jnp.linalg.norm(direction)
-            measured = {}
-            for label, method in spectrum_variants.items():
-                print(
-                    f"spectrum case={case_name} resolution={resolution} "
-                    f"variant={label}", flush=True)
-                namespace = common._namespace(
-                    pr366_source, resolution=resolution)
-                _install_spectrum(namespace, method)
-                row, outputs = _scalar_row(
-                    label, _spectrum_scalar(namespace, resolution), value,
-                    direction, args.repeats, {
-                        "case": case_name,
-                        "resolution": resolution,
-                        "matrix_order": resolution ** 2,
-                    })
-                measured[label] = (row, outputs)
-            reference = measured["pr301_pr303_full_svd"][1]
-            spectrum_rows.extend(
-                _attach_fidelity(row, outputs, reference)
-                for row, outputs in measured.values())
+    if "spectrum" in args.tracks:
+        for case_name in args.cases:
+            case = common.CASES[case_name]
+            winding, plasma = common._dofs(case)
+            value = jnp.concatenate((winding, plasma))
+            for resolution in args.resolutions:
+                rng = np.random.default_rng(case.seed + 30_400 + resolution)
+                direction = jnp.asarray(rng.normal(size=value.shape))
+                direction /= jnp.linalg.norm(direction)
+                measured = {}
+                for label, method in spectrum_variants.items():
+                    print(
+                        f"spectrum case={case_name} resolution={resolution} "
+                        f"variant={label}", flush=True)
+                    namespace = common._namespace(
+                        pr366_source, resolution=resolution)
+                    _install_spectrum(namespace, method)
+                    row, outputs = _scalar_row(
+                        label, _spectrum_scalar(namespace, resolution), value,
+                        direction, args.repeats, {
+                            "case": case_name,
+                            "resolution": resolution,
+                            "matrix_order": resolution ** 2,
+                        })
+                    measured[label] = (row, outputs)
+                reference = measured["pr301_pr303_full_svd"][1]
+                spectrum_rows.extend(
+                    _attach_fidelity(row, outputs, reference)
+                    for row, outputs in measured.values())
 
     linear_rows = []
-    for case_name, (matrix, rhs, cotangent) in _linear_cases().items():
-        for label, solve in LINEAR_METHODS.items():
-            print(f"linear case={case_name} variant={label}", flush=True)
-            linear_rows.append(_linear_row(
-                label, solve, case_name, matrix, rhs, cotangent,
-                args.repeats))
+    if "linear" in args.tracks:
+        for case_name, (matrix, rhs, cotangent) in _linear_cases().items():
+            for label, solve in LINEAR_METHODS.items():
+                print(f"linear case={case_name} variant={label}", flush=True)
+                linear_rows.append(_linear_row(
+                    label, solve, case_name, matrix, rhs, cotangent,
+                    args.repeats))
 
-    context_rows = _context_rows(
-        pr366_source, args.context_cases, args.context_resolutions,
-        args.context_repeats, tuple(args.directional_steps),
-        args.directional_directions)
+    context_rows = []
+    if "context" in args.tracks:
+        context_rows = _context_rows(
+            pr366_source, args.context_cases, args.context_resolutions,
+            args.context_repeats, tuple(args.directional_steps),
+            args.directional_directions)
 
     return {
         "_provenance": {
@@ -595,6 +600,7 @@ def run(args: argparse.Namespace) -> dict:
             "context_resolutions": args.context_resolutions,
             "directional_steps": args.directional_steps,
             "directional_directions": args.directional_directions,
+            "tracks": args.tracks,
             "field_periods": 2,
             "active_dofs": 25,
             "timing_protocol": (
@@ -606,6 +612,63 @@ def run(args: argparse.Namespace) -> dict:
         "linear_solve": linear_rows,
         "optimization_context": context_rows,
     }
+
+
+def merge_records(paths: list[Path], command: list[str]) -> dict:
+    """Merge independently completed benchmark tracks without losing provenance."""
+    records = [json.loads(path.read_text()) for path in paths]
+    if not records:
+        raise ValueError("at least one --merge input is required")
+    source_commits = records[0]["_provenance"]["source_commits"]
+    if any(record["_provenance"]["source_commits"] != source_commits
+           for record in records[1:]):
+        raise ValueError("benchmark shards used different source commits")
+    measurement_commits = {
+        record["_provenance"]["measurement_commit"] for record in records}
+    if len(measurement_commits) != 1:
+        raise ValueError("benchmark shards used different generator commits")
+
+    merged = records[0]
+    for key in ("geometry", "spectrum", "linear_solve", "optimization_context"):
+        merged[key] = [row for record in records for row in record[key]]
+    merged["_provenance"] = {
+        **records[0]["_provenance"],
+        "measurement_dirty": any(
+            record["_provenance"]["measurement_dirty"] for record in records),
+        "measurement_date": max(
+            record["_provenance"]["measurement_date"] for record in records),
+        "command": " ".join(command),
+        "shards": [
+            {
+                "path": str(path),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "command": record["_provenance"]["command"],
+                "measurement_date": record["_provenance"]["measurement_date"],
+            }
+            for path, record in zip(paths, records)
+        ],
+    }
+
+    def unique(values):
+        return list(dict.fromkeys(values))
+
+    merged["configuration"]["cases"] = list({
+        case["name"]: case
+        for record in records for case in record["configuration"]["cases"]
+    }.values())
+    merged["configuration"]["resolutions"] = sorted(unique(
+        resolution for record in records
+        for resolution in record["configuration"]["resolutions"]))
+    merged["configuration"]["context_cases"] = unique(
+        case for record in records
+        for case in record["configuration"]["context_cases"])
+    merged["configuration"]["context_resolutions"] = sorted(unique(
+        resolution for record in records
+        for resolution in record["configuration"]["context_resolutions"]))
+    merged["configuration"]["tracks"] = unique(
+        track for record in records
+        for track in record["configuration"]["tracks"])
+    return merged
 
 
 def _aggregate(rows: list[dict], labels: list[str], metric: Callable):
@@ -761,6 +824,13 @@ def main() -> None:
         help="override a source as LABEL=GIT_REF")
     parser.add_argument("--fused-ref")
     parser.add_argument(
+        "--tracks", nargs="+",
+        choices=("geometry", "spectrum", "linear", "context"),
+        default=["geometry", "spectrum", "linear", "context"])
+    parser.add_argument(
+        "--merge", nargs="+", type=Path,
+        help="merge completed shard records instead of running benchmarks")
+    parser.add_argument(
         "--cases", nargs="+", choices=common.CASES,
         default=list(common.CASES))
     parser.add_argument(
@@ -780,7 +850,8 @@ def main() -> None:
     args = parser.parse_args()
     args.command = [
         "python", "benchmarks/winding_surface_pr301_304.py", *os.sys.argv[1:]]
-    record = run(args)
+    record = (merge_records(args.merge, args.command)
+              if args.merge else run(args))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(record, indent=2) + "\n")
     if args.figure_prefix:
