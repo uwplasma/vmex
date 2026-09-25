@@ -567,3 +567,38 @@ def test_explicit_cache_dir_is_split_by_machine(clean_cache_env):
     second = _compat._default_compilation_cache_dir()
     assert first == "/shared/jax/linux-x86_64-aaaa"
     assert second == "/shared/jax/linux-x86_64-bbbb"
+
+
+def test_machine_scoping_is_idempotent(tmp_path):
+    fingerprint = _compat._cache_machine_fingerprint()
+    once = _compat._machine_scoped(str(tmp_path))
+    assert once == str(tmp_path / fingerprint)
+    assert _compat._machine_scoped(once) == once
+
+
+def _import_cache_dir(env):
+    import subprocess
+
+    code = "import jax, vmex; print(jax.config.jax_compilation_cache_dir)"
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True
+    )
+    return result.stdout.strip().splitlines()[-1]
+
+
+def test_import_points_jax_at_the_single_scoped_default(tmp_path):
+    import os
+    import pathlib
+
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if "COMPILATION_CACHE" not in key and not key.startswith("VMEX_")
+    }
+    env["HOME"] = str(tmp_path)
+    fingerprint = _compat._cache_machine_fingerprint()
+    expected = tmp_path / ".cache" / "vmex" / "jax_cache" / fingerprint
+    assert pathlib.Path(_import_cache_dir(env)) == expected
+    explicit = tmp_path / "explicit"
+    env["JAX_COMPILATION_CACHE_DIR"] = str(explicit)
+    assert pathlib.Path(_import_cache_dir(env)) == explicit / fingerprint
