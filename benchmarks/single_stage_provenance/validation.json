@@ -1,0 +1,44 @@
+{
+  "date": "2026-09-23",
+  "platform": "macOS CPU",
+  "python": "3.11.16",
+  "jax": "0.10.2",
+  "numpy": "2.2.6",
+  "scipy": "1.17.1",
+  "essos": "0.18.dev6+g468091f86",
+  "float64": true,
+  "checks": [
+    {
+      "command": "python -B -m pytest tests/test_freeboundary_fast_example.py tests/test_freeboundary_problem_api.py -q",
+      "passed": 75,
+      "failed": 0
+    },
+    {
+      "command": "python -B -m pytest examples/coil-constraints-benchmarks/test_coil_constraints.py -q",
+      "passed": 9,
+      "failed": 0
+    },
+    {
+      "command": "python -B -m pytest tests/test_examples.py -k every_example_parses -q",
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "command": "python -B -m pytest tests/test_examples.py -k every_example_is_run_or_listed_as_untested -q",
+      "passed": 0,
+      "failed": 1,
+      "reason": "Pre-existing untracked examples/m=3n=3iota=0p2aspect=5angular48x40 is absent from the repository test inventory; preserved without changes."
+    },
+    {
+      "command": "ruff check --no-cache --select F examples/coil-constraints-benchmarks vmex/core/freeboundary_problem.py",
+      "status": "passed"
+    },
+    {
+      "command": "Both scalar scripts --dry-run",
+      "status": "passed"
+    }
+  ],
+  "baseline_rename": "All source/input hashes unchanged except README title; source_manifest.json records original hashes. References updated in docs and tests.",
+  "scope": "Analytic API and geometry/derivative tests only. No full VMEX benchmark derivative qualification or optimization launched.",
+  "note": "An initial geometry inspection captured a cold ESSOS property inside a JIT closure and raised UnexpectedTracerError. Repeating with the property materialized before tracing passed. Production tests construct fresh coils per call and passed."
+}

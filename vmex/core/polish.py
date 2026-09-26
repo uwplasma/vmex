@@ -872,12 +872,12 @@ def make_strong_root_layout(
         mode_indices = np.flatnonzero(
             (m == mode_key[0]) & (np.abs(n) == mode_key[1])
         )
-        candidates = []
+        candidate_indices: list[np.int32] = []
         for field in range(len(_FIELDS)):
             for mode in mode_indices:
                 base = field * block + int(mode) * nbasis
-                candidates.extend(base + np.arange(nbasis, dtype=np.int32))
-        candidates = np.asarray(candidates, dtype=np.int32)
+                candidate_indices.extend(base + np.arange(nbasis, dtype=np.int32))
+        candidates = np.asarray(candidate_indices, dtype=np.int32)
         candidates = candidates[active[candidates]]
         if candidates.size == 0:
             continue

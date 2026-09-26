@@ -22,6 +22,17 @@ Array = Any
 HostFun = Callable[[np.ndarray], Any]
 
 
+def _nonlinear_constraint(values, jacobian, lower, upper, scales):
+    from scipy.optimize import NonlinearConstraint
+
+    lo, hi, scale = np.broadcast_arrays(np.asarray(lower, dtype=float),
+        np.asarray(upper, dtype=float), np.asarray(scales, dtype=float))
+    if np.any(np.isnan(lo) | np.isnan(hi) | (lo > hi)) or np.any(~np.isfinite(scale) | (scale <= 0)):
+        raise ValueError("ordered bounds and finite positive constraint scales required")
+    return NonlinearConstraint(lambda x: np.asarray(values(x))/scale, lo/scale, hi/scale,
+                               jac=lambda x: np.asarray(jacobian(x))/scale[..., None])
+
+
 def _slice_bounds(bounds: Any, free: np.ndarray, size: int) -> Any:
     """Restrict carried box constraints to the ``free`` decision variables.
 
@@ -765,6 +776,30 @@ class FunctionProblem:
             report_interval=self.report_interval,
         )
 
+    def nonlinear_constraint(self, lower, upper, *, scales=1.0):
+        """Bound residual values in their original units, with analytic derivatives.
+
+        Return a SciPy NonlinearConstraint for ``opt.minimize(problem, ...)``
+        or SciPy. Positive row scales condition values, bounds and Jacobians
+        together without changing the feasible set.
+        """
+        return _nonlinear_constraint(self.residual, self.residual_jac, lower, upper, scales)
+
+    def with_acceptance(self, on_accept):
+        """Compose a host objective with an accepted-state owner.
+
+        Return a view for ``opt.minimize``. ``on_accept(x)`` runs only after
+        optimizer acceptance, never on trial evaluations. It must either
+        commit successfully or raise without changing its accepted state.
+        This is useful when adding coil costs/coordinates to a stateful VMEC
+        objective; x0 must map to that owner's already-accepted state.
+        Scales, constraints and callbacks retain original units.
+        Ordinary FunctionProblem instances remain stateless and unchanged.
+        """
+        if getattr(self, "accept_x", None) is not None:
+            raise ValueError("this problem already owns accepted-state promotion")
+        return _AcceptedFunctionProblem(self, on_accept)
+
     def compile_value_and_gradient(
         self,
         x: Array | None = None,
@@ -1104,6 +1139,48 @@ class VmecProblem(FunctionProblem):
             raise AttributeError("this problem does not provide boundary arrays")
         return self._boundary_from_x(x)
 
+    def restart_from(self, equilibrium):
+        """Seed the next host solve from a compatible equilibrium.
+
+        This changes only the warm initial guess; it neither evaluates nor
+        accepts a point. Resolution and symmetry must match. Any pending
+        perturbation predictor is discarded so it cannot override this seed.
+        Use ``with_accepted_state`` to apply this policy to every host trial.
+        """
+        cfg = self.metadata.get("config")
+        if cfg is None or not cfg.hot_restart:
+            raise ValueError("restart seeding requires an implicit problem with hot_restart=True")
+        for name in ("mpol", "ntor", "nfp", "lasym"):
+            if getattr(equilibrium.inp, name) != getattr(cfg.inp, name):
+                raise ValueError(f"restart equilibrium differs in {name}")
+        from .restart import restart_state
+        from . import implicit as imp
+
+        state = restart_state(equilibrium.state, cfg.inp)
+        fields = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
+        shape = np.shape(state.R_cos)
+        if (len(shape) != 2 or shape[0] != cfg.resolution.ns
+                or any(np.shape(getattr(state, name)) != shape
+                       or not np.all(np.isfinite(getattr(state, name))) for name in fields)):
+            raise ValueError("restart requires finite state arrays at the problem resolution")
+        imp._HOT_CACHE[cfg] = state
+        imp._PERTURB_SEED.pop(cfg, None)
+        self.metadata.get("holder", {}).update(lin=None)
+
+    def with_accepted_state(self):
+        """Return a host view seeded from its last optimizer-accepted equilibrium.
+
+        ``view.accepted`` exposes parameters and equilibrium; ``accept_x``
+        promotes a usable candidate. Trial values, gradients and residuals do
+        not advance that anchor. Use ``opt.minimize(view, ...)`` directly or
+        compose a larger objective with ``FunctionProblem.with_acceptance``.
+        The source and view share caches and must not run concurrently.
+        JAX-traced optimization is deliberately not exposed by this host view.
+        """
+        if isinstance(self, _AcceptedVmecProblem):
+            return self
+        return _AcceptedVmecProblem(self)
+
     def jax_objective_from_state(
         self,
         x: Array,
@@ -1392,6 +1469,105 @@ class VmecProblem(FunctionProblem):
             message=str(error),
             diagnostics=diagnostics,
         )
+
+
+@dataclass(frozen=True)
+class _AcceptedPoint:
+    parameters: np.ndarray
+    equilibrium: Any = None
+
+
+class _AcceptedIterates:
+    def subproblem(self, *args, **kwargs):
+        raise NotImplementedError("create the subproblem before adding accepted-state ownership")
+
+    def _init_acceptance(self, on_accept):
+        if not callable(on_accept):
+            raise TypeError("on_accept must be callable")
+        self._on_accept = on_accept
+        self._accepted_parameters = self.x0.copy()
+        self.accepted_step = 0
+
+    @property
+    def accepted(self):
+        return _AcceptedPoint(self._accepted_parameters.copy(),
+                              getattr(self, "_accepted_equilibrium", None))
+
+    def accept_x(self, x):
+        from .errors import TrialRejected
+
+        point = np.asarray(x, dtype=float).copy()
+        if point.shape != self.x0.shape or not np.all(np.isfinite(point)):
+            raise ValueError("accepted point must be finite and match x0")
+        with self._lock:
+            if np.array_equal(point, self._accepted_parameters):
+                return self.accepted
+            value, gradient = self.value_and_grad(point)
+            if not np.isfinite(value) or not np.all(np.isfinite(gradient)):
+                raise TrialRejected("cannot accept a nonfinite objective or gradient")
+            self._on_accept(point.copy())
+            self._accepted_parameters = point
+            self.accepted_step += 1
+            return self.accepted
+
+
+def _host_view_options(source, wrap):
+    return dict(fun=wrap(source.fun), value_and_grad=wrap(source.value_and_grad),
+        residual=wrap(source.residual) if source._residual is not None or source._residual_and_jac is not None else None,
+        residual_jac=wrap(source.residual_jac) if source._residual_jac is not None or source._residual_and_jac is not None else None,
+        names=source.names, bounds=source.bounds, scales=source.scales.copy(), metadata=source.metadata,
+        evaluation_progress=source.evaluation_progress, report_interval=source.report_interval)
+
+
+class _AcceptedFunctionProblem(_AcceptedIterates, FunctionProblem):
+    def __init__(self, source, on_accept):
+        super().__init__(source.x0, **_host_view_options(source, lambda function: function))
+        self._init_acceptance(on_accept)
+
+
+class _AcceptedVmecProblem(_AcceptedIterates, VmecProblem):
+    def __init__(self, source):
+        self._source = source
+        equilibrium = source.equilibrium_from_x(source.x0)
+        self._check_equilibrium(equilibrium)
+        source.restart_from(equilibrium)
+        self._accepted_equilibrium = equilibrium
+
+        def seeded(function):
+            def call(x, **kwargs):
+                source.restart_from(self._accepted_equilibrium)
+                return function(x, **kwargs)
+            return call
+
+        super().__init__(source.x0, input_from_x=source.input_from_x,
+            x_from_input=source.x_from_input, boundary_from_x=source.boundary_from_x,
+            equilibrium_from_x=seeded(source.equilibrium_from_x),
+            **_host_view_options(source, seeded))
+        self._init_acceptance(self._promote_equilibrium)
+
+    def _check_equilibrium(self, equilibrium):
+        from .errors import TrialRejected
+
+        cfg = self._source.metadata.get("config")
+        if cfg is None:
+            raise ValueError("accepted-state views require an implicit VMEC problem")
+        result = equilibrium.result
+        forces = np.asarray([result.fsqr, result.fsqz, result.fsql], dtype=float)
+        if (not np.all(np.isfinite(forces)) or np.any(forces < 0)
+                or not (result.converged or forces.sum() <= cfg.ftol * cfg.max_fsq_ratio)):
+            raise TrialRejected("cannot accept an equilibrium outside the derivative force gate")
+
+    def _promote_equilibrium(self, x):
+        from .errors import TrialRejected
+
+        try:
+            equilibrium = self.equilibrium_from_x(x)
+        except RuntimeError as error:
+            raise TrialRejected(str(error)) from error
+        self._check_equilibrium(equilibrium)
+        # Validate compatibility and seed arrays before changing the anchor.
+        self._source.restart_from(equilibrium)
+        self._accepted_equilibrium = equilibrium
 
 
 __all__ = ["Evaluation", "FunctionProblem", "VmecProblem"]

@@ -1,0 +1,44 @@
+&INDATA
+! Shared starting plasma for the three-way optimization benchmark.
+! Pure NFP=2 rotating ellipse; Fourier indices are (n,m).
+! Target mean vacuum iota = 0.2, aspect = 5, major radius = 1 m.
+! Iota is solved from the geometry with zero plasma current (NCURR=1).
+  NFP = 2
+  LASYM = .FALSE.
+  MPOL = 3
+  NTOR = 3
+  NTHETA = 48
+  NZETA = 40
+  NS_ARRAY = 31
+  FTOL_ARRAY = 1.0E-11
+  NITER_ARRAY = 12000
+  DELT = 0.7
+  NSTEP = 200
+  TCON0 = 1.0
+  LFORBAL = .FALSE.
+  LMOVE_AXIS = .TRUE.
+
+! Vacuum: zero pressure and zero toroidal plasma current.
+  AM = 0.0
+  PRES_SCALE = 0.0
+  NCURR = 1
+  AC = 0.0
+  CURTOR = 0.0
+! Flux calibrated to |VMEX on-axis b0| = 1 T; no coil set selected yet.
+  PHIEDGE = 1.25504489489764309E-01
+
+! One shared fixed-boundary starting deck. No separate free input yet.
+  LFREEB = .FALSE.
+  MGRID_FILE = 'NONE'
+  RAXIS_CC = 1.0, 0.0, 0.0, 0.0
+  ZAXIS_CS = 0.0, 0.0, 0.0, 0.0
+
+! R=1+a*cos(theta)+b*cos(theta-2*phi),
+! Z=  a*sin(theta)-b*sin(theta-2*phi).
+! a^2-b^2=(0.2 m)^2 fixes the area-equivalent aspect ratio at 5.
+  RBC(0,0) = 1.0
+  RBC(0,1) = 2.12399727848182590E-01
+  ZBS(0,1) = 2.12399727848182590E-01
+  RBC(1,1) = 7.15097503140796759E-02
+  ZBS(1,1) = -7.15097503140796759E-02
+/

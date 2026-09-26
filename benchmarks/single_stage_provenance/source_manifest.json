@@ -1,0 +1,22 @@
+{
+  "source": "../single-stage-benchmarks",
+  "source_revision": "0d23ffe60aa8afe4609d28d5a372dbfb0f2e3c04",
+  "original_sha256": {
+    "solve_free_boundary_initial_coils.py": "2be3ee1ec9438ee54ec2826a03fc837a9af377dd46aa150d6811e3f3c72cf991",
+    "_scalar_constraints.py": "8630306f5586d7b5057f81779e98349ff97571663fda1376dd17b10c4f047a83",
+    "coils.initial.scalar.metadata.json": "cb43a9b6f256a0cbd2dc3936280ac4412f1d6fb65889263d45aae180ec44d954",
+    "qa_optimization.py": "178f2a120fd3b71800dc098c52a50fda01c059732de5d33d1ee6df16f5255c9b",
+    "coils.initial.scalar.json": "ece3dc5294d9adc4ef9f1c23aa58b114984106d9a5259778e1fb7ed54ec03e6c",
+    "input.rotating_ellipse": "55c93942f63bfe693a2a25d101031ee48b32516a00b3da15f13758d7fd23fc28",
+    "README.md": "b2b440c1e1f26d7c5f1747368d4028ab0b83319586e07bac51a33e5508787d19",
+    "_scalar_diagnostics.py": "57389673db026271d198627abc2b2de39e27b9f2920af8d44f65150518d44f21",
+    "verify_single_stage_constraints.py": "20e2fe73ab6a7d9abfe924af5db24d49a300517a8a73d2b79d9f19c91ec96a57",
+    ".gitignore": "5f4d3fb5ed7eb529c5490c79dc3250eeb8b5cd5f5fbe13079b32c96d7b78d04a",
+    "verify_free_boundary_single_stage.py": "24ec753dfde9e7d9afd6bfe2530a9e49fa9c8b3896682591d9177ae66734ea5e",
+    "coils_single_stage_scalar_fitted_1789769333906005000.json": "83b7d836ac273298ec2ead60b4694365b3696332f1d217f5d6a618fe55edbb20",
+    "free_boundary_single_stage_optimization.py": "aaa7e8b8ef16e802faa502148d26f4cce06e3894b8bad09c9851287fa7c60daf",
+    "compare_scalar_steps.py": "167cccb0a683b9975952ccf4ddacc5dc2465c334e7eb961a72ae42a91d04cd05",
+    "free_boundary_single_stage_optimization_scalar.py": "6a900e11d93c01cd918ec4f388d67f0195a082c418a091ed1e2ebb1527daeed5",
+    "single_stage_optimization_scalar.py": "202e4448e263258678f5f3405e712fb23735d923e37e866afafd0d5a0333417f"
+  }
+}

@@ -1536,7 +1536,9 @@ def _make_vacuum_lane(fused: FusedVacuum, *, use_fft: bool = False):
             (ivac <= 2) | jnp.logical_not(good), jnp.zeros_like(vc.nvacskip),
             (it - c.iter1).astype(vc.nvacskip.dtype) % jnp.maximum(one, vc.nvacskip),
         )
-        full = ivacskip == 0
+        # Strict acceptance uses the current geometry's vacuum matrix, as
+        # fixed-state certification does, rather than a cached skip solve.
+        full = (ivacskip == 0) | rt.include_edge_in_convergence
         # int() truncation toward zero == astype for the positive operand.
         nvacskip = jnp.where(
             full,
@@ -1631,6 +1633,8 @@ def _solve_free_boundary_stage(
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
     jacobian_retries: int = 2,
+    include_edge_in_convergence: bool = False,
+    edge_force_tolerance: float | None = None,
     constraint_continuation: tuple[Array, Array] | None = None,
     reuse_vacuum_cache: bool = False,
     allow_initial_axis_reguess: bool = True,
@@ -1700,6 +1704,15 @@ def _solve_free_boundary_stage(
         prec2d_threshold=prec2d_threshold, prec2d=prec2d,
         use_fft=use_fft,
     )
+    if type(include_edge_in_convergence) is not bool:
+        raise TypeError("include_edge_in_convergence must be bool")
+    if edge_force_tolerance is not None and not include_edge_in_convergence:
+        raise ValueError("edge_force_tolerance requires include_edge_in_convergence")
+    edge_tol = (float(rt.ftol) if edge_force_tolerance is None else float(edge_force_tolerance)) if include_edge_in_convergence else 0.0
+    if include_edge_in_convergence and (not np.isfinite(edge_tol) or edge_tol <= 0):
+        raise ValueError("edge_force_tolerance must be finite and positive")
+    rt = replace(rt, include_edge_in_convergence=include_edge_in_convergence,
+                 edge_force_tolerance=edge_tol)
     if not allow_initial_axis_reguess:
         rt = replace(rt, lmove_axis=False)
     ns = int(resolution.ns)
@@ -2122,7 +2135,7 @@ def _solve_free_boundary_stage(
                 rt_fixed = replace(rt_fixed, rcon0=0.9 * rt_fixed.rcon0, zcon0=0.9 * rt_fixed.zcon0)
                 rt_freeb = replace(rt_freeb, rcon0=0.9 * rt_freeb.rcon0, zcon0=0.9 * rt_freeb.zcon0)
                 ivacskip = (it - iter1) % max(1, fb.nvacskip)
-                if fb.ivac <= 2 or not jacobian_good:
+                if fb.ivac <= 2 or not jacobian_good or rt_freeb.include_edge_in_convergence:
                     ivacskip = 0
                 if ivacskip == 0:
                     fb.nvacskip = max(fb.nvskip0, int(1.0 / max(1.0e-1, 1.0e11 * fsq_rz)))
@@ -2217,6 +2230,8 @@ def _solve_free_boundary_stage(
                 # high-mode recoveries where the FFT selection matters most.
                 use_fft=use_fft,
                 jacobian_retries=int(jacobian_retries) - 1,
+                include_edge_in_convergence=include_edge_in_convergence,
+                edge_force_tolerance=edge_force_tolerance,
                 constraint_continuation=(
                     current_rt.rcon0, current_rt.zcon0
                 ) if fb.turned_on else None,
@@ -2282,6 +2297,8 @@ def solve_free_boundary(
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
     jacobian_retries: int = 2,
+    include_edge_in_convergence: bool = False,
+    edge_force_tolerance: float | None = None,
     use_fft: bool | None = None,
 ) -> SolveResult:
     """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
@@ -2323,6 +2340,8 @@ def solve_free_boundary(
             precon_type=precon_type, prec2d_threshold=prec2d_threshold,
             prec2d=prec2d,
             jacobian_retries=jacobian_retries,
+            include_edge_in_convergence=include_edge_in_convergence,
+            edge_force_tolerance=edge_force_tolerance,
             constraint_continuation=None, reuse_vacuum_cache=False,
             use_fft=_resolve_use_fft(use_fft, device, resolution),
         )

@@ -1,5 +1,12 @@
 # Examples
 
+The [single-stage benchmarks](single-stage-benchmarks/README.md) provide
+shared rotating-ellipse inputs and prescribed-boundary QA, fixed-boundary
+single-stage, and free-boundary single-stage research examples.
+
+The [coil-constraints benchmarks](coil-constraints-benchmarks/README.md) add matched
+explicit coil inequalities and independent geometric verification.
+
 All runnable examples live under this single `examples/` tree. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
@@ -148,3 +155,9 @@ unless they are compact reviewed documentation artifacts.
 
 Published-equilibrium comparisons and reproducibility studies belong in
 `../benchmarks/`, not among the user-facing optimization examples.
+
+## Three-method single-stage comparison
+
+The maintained custom workflow is in [single-stage-benchmarks](single-stage-benchmarks/README.md),
+including the free-boundary scalar and L-BFGS-B entry points and their separate
+qualification script. Earlier case-specific drivers have been retired.

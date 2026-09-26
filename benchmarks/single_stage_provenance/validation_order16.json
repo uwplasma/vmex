@@ -1,0 +1,35 @@
+{
+  "coil_order": 16,
+  "shape_variables": 297,
+  "field_quadrature": 256,
+  "curvature_points": 1024,
+  "distance_segments": 256,
+  "verification_curve_points": [
+    4096,
+    8192
+  ],
+  "unit_tests": {
+    "passed": 11,
+    "seconds": 22.41,
+    "command": "python -B -m pytest examples/coil-constraints-benchmarks/test_coil_constraints.py -q"
+  },
+  "checks": [
+    "Seed shape and current preservation after zero-padding",
+    "All 14 coil rows: scaled directional finite differences at order 16",
+    "Moving-surface explicit derivative",
+    "256 vs 512 field quadrature at a perturbed order-16 seed",
+    "Independent geometric verification on analytic cases"
+  ],
+  "sources": {
+    "_scalar_constraints.py": "ad7330745496697afb8c669fd0c89c2823f3790e723a596a56794ac4b5899778",
+    "test_coil_constraints.py": "47dcc8f241ce29e9f2ce89037cea7dc4561037dd6af00a8d4c28045b4cfe39c9",
+    "_scalar_diagnostics.py": "57389673db026271d198627abc2b2de39e27b9f2920af8d44f65150518d44f21",
+    "verify_free_boundary_single_stage.py": "7e6da7d4ffaa6b8a060b217c329f2b17396fb2e3875d5d3e49dc60b285b9166d",
+    "_coil_resolution.py": "9c2fba1ddf191c6a3552ac44edcec7131a63dba943ab304da810b854e53f16e3",
+    "parameters.py": "262b1fef4c86ddfcc0fa83e202044a1be9ec245ff8557274f3b0a989045242eb",
+    "_coil_constraints.py": "1749be7641225f16dd689911dc1ca19b3fa0f24e567446be40ba03e4f3a9c109",
+    "free_boundary_single_stage_optimization_scalar.py": "a595c9af94963ff592f857083a29c2e8f96ba2503d7b0f31b134e196a38b6f15",
+    "single_stage_optimization_scalar.py": "fe1093c009d0a16d94c6b0a345469f02e7953623284777a9f7c089d480857bb6"
+  },
+  "scope": "Local CPU float64 geometry checks; full equilibrium qualification is run separately on each GPU case."
+}

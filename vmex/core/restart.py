@@ -202,7 +202,7 @@ def restart_state(
 ) -> "SpectralState":
     """Normalize any ``restart_from`` source to one seed state for ``inp``.
 
-    Accepts a wout path (``str``/``Path``), a parsed
+    Accepts a wout or lossless spectral NPZ path (``str``/``Path``), a parsed
     :class:`~vmex.core.wout.WoutData`, a previous
     :class:`~vmex.core.solver.SolveResult`, or a bare
     :class:`~vmex.core.solver.SpectralState`.  State-like sources must match
@@ -213,6 +213,16 @@ def restart_state(
     from .solver import SolveResult, SpectralState
     from .wout import WoutData
 
+    if isinstance(source, (str, Path)) and Path(source).suffix == ".npz":
+        fields = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
+        with np.load(source, allow_pickle=False) as archive:
+            arrays = [archive[name].copy() for name in fields]
+            if "phiedge" in archive and not np.array_equal(archive["phiedge"], inp.phiedge):
+                raise VmecInputError("spectral seed PHIEDGE differs from the input")
+        if any(a.dtype != np.float64 or a.ndim != 2 or a.shape != arrays[0].shape
+               or not np.all(np.isfinite(a)) for a in arrays):
+            raise VmecInputError("spectral seed requires six finite float64 arrays of equal shape")
+        source = SpectralState(*arrays)
     if isinstance(source, (str, Path, WoutData)):
         return state_from_wout(source, inp=inp, ns=ns)
     if isinstance(source, SolveResult):

@@ -55,6 +55,10 @@ WERROR_MESSAGES: dict[int, str] = {
 }
 
 
+class TrialRejected(Exception):
+    """An expected numerical rejection; backtracking may try a smaller step."""
+
+
 @dataclass
 class VmecError(Exception):
     """Base class for all vmex failures.

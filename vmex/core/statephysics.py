@@ -620,3 +620,69 @@ def _lgradb_state_tables(state: SpectralState, rt: SolverRuntime) -> dict:
         rmnc=rmnc, zmns=zmns, bsupumnc=bsupumnc, bsupvmnc=bsupvmnc,
         ns=ns, nfp=nfp,
     )
+
+
+def boundary_from_wout(wout, *, mpol=None, ntor=None):
+    """Return physical edge (RBC, ZBS, RBS, ZBC) from a WoutData object.
+
+    Output arrays use (n+NTOR, m) indexing. Optional resolution changes retain
+    represented modes, truncate higher modes and zero-fill new modes. The
+    input deck still supplies pressure/current profiles for a restart.
+    """
+    mpol = int(wout.mpol) if mpol is None else int(mpol)
+    ntor = int(wout.ntor) if ntor is None else int(ntor)
+    if mpol < 1 or ntor < 0:
+        raise ValueError("positive MPOL and nonnegative NTOR required")
+    m = np.asarray(wout.xm, dtype=int)
+    n = np.rint(np.asarray(wout.xn) / int(wout.nfp)).astype(int)
+    keep = (m >= 0) & (m < mpol) & (np.abs(n) <= ntor)
+    result = []
+    for name in ("rmnc", "zmns", "rmns", "zmnc"):
+        values = getattr(wout, name, None)
+        coefficients = np.zeros((2*ntor+1, mpol))
+        if values is not None:
+            table = np.asarray(_mode_matrix(wout, name, ns=int(wout.ns), mn=len(m)))
+            coefficients[n[keep]+ntor, m[keep]] = table[-1, keep]
+        result.append(coefficients)
+    return tuple(result)
+
+
+def boundary_from_state(state: SpectralState, rt: SolverRuntime):
+    """Return physical edge (RBC, ZBS, RBS, ZBC) arrays, indexed by (n+NTOR, m).
+
+    Undo VMEC's m=1 constraint and Fourier normalization before constructing
+    a surface. The operation is traceable, including the moving free boundary.
+    Inactive asymmetric arrays are zero for stellarator-symmetric equilibria.
+    """
+    rc, zs, rs, zc = m1_constrained_to_physical(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
+        modes=rt.modes, lthreed=bool(rt.setup.lthreed),
+        lasym=bool(rt.setup.lasym), lconm1=bool(rt.setup.lconm1))
+    scale = jnp.asarray(1.0 / physical_to_internal_scale(rt.modes, rt.trig))
+    m, n = np.asarray(rt.modes.m), np.asarray(rt.modes.n)
+    ntor, mpol = int(rt.resolution.ntor), int(rt.resolution.mpol)
+    def array(coefficients):
+        return jnp.zeros((2*ntor+1, mpol), dtype=rc.dtype).at[n+ntor, m].set(coefficients[-1]*scale)
+    rbc, zbs = array(rc), array(zs)
+    if bool(rt.setup.lasym):
+        return rbc, zbs, array(rs), array(zc)
+    return rbc, zbs, jnp.zeros_like(rbc), jnp.zeros_like(zbs)
+
+
+def major_radius(state: SpectralState, rt: SolverRuntime) -> Array:
+    """WOUT Rmajor_p [m], using canonical boundary quadrature."""
+    return _aspect_scalars(state, rt)[1]
+
+
+def minor_radius(state: SpectralState, rt: SolverRuntime) -> Array:
+    """WOUT Aminor_p [m], using canonical boundary quadrature."""
+    return _aspect_scalars(state, rt)[0]
+
+
+def on_axis_magnetic_field(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Signed WOUT b0 [T]: rbtor0 / R_axis(theta=0, phi=0)."""
+    from .fields import surface_currents
+    geometry, _, _, fields, _ = _field_chain(state, rt)
+    currents = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
+        trig=rt.trig, s=rt.setup.s_full, signgs=rt.setup.signgs)
+    return currents.rbtor0 / geometry.R_even[0, 0, 0]

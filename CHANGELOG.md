@@ -5,6 +5,32 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## Unreleased fork changes
+
+### Added
+
+- Matched fixed/free-boundary coil-constraint benchmarks: order-16 coils,
+  length, peak/mean-squared curvature, clearance and geometry verification.
+- `FreeBoundaryProblem.from_loss(coil_quantities=...)` includes direct coil
+  and implicit equilibrium derivatives for moving-boundary constraints.
+- Opt-in coupled-root polishing and measured LU refresh for free-boundary
+  scalar optimization, with bounded dense recovery and derivative checks.
+- Public fixed-boundary accepted-state views and composed-objective hooks, so
+  both scalar single-stage examples share one optimizer and constraint API.
+
+### Changed
+
+- Scalar examples share setup in `examples/single_stage_support/` (inputs and
+  coils in `data/`), default to SLSQP, and keep derivative verification and
+  per-case constraint settings separate. Qualification fingerprints cover the
+  shared code and unavailable optional metadata. Historical validation records
+  are in `benchmarks/single_stage_provenance/`.
+
+### Fixed
+
+- Fixed scalar restarts use the public `restart_from` argument; stage-two
+  fitting varies coil coordinates alone and preserves currents.
+
 ## 0.11.2 - 2026-09-24
 
 A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or

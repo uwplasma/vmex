@@ -95,4 +95,3 @@ d_aspect = abs(float(wout_power.aspect) - float(wout_spline.aspect))
 d_beta = abs(float(wout_power.betatotal) - float(wout_spline.betatotal))
 print(f"\nrepresentation-independent: |d aspect| = {d_aspect:.2e}, "
       f"|d beta| = {d_beta:.2e} (the two profile forms describe one equilibrium)")
-

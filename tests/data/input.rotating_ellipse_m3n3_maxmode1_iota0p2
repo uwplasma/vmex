@@ -1,0 +1,42 @@
+&INDATA
+  LASYM = F
+  NFP = 2
+  MPOL = 3
+  NTOR = 3
+  NTHETA = 0
+  NZETA = 0
+
+  NS_ARRAY = 13, 25, 31
+  FTOL_ARRAY = 1.0E-8, 1.0E-10, 1.0E-12
+  NITER_ARRAY = 4000, 8000, 12000
+  DELT = 0.7
+  NSTEP = 100
+  TCON0 = 1.0
+
+  PHIEDGE = -2.5E-2
+  NCURR = 1
+  CURTOR = 0.0
+  AC = 0.0
+  AM = 0.0
+  PRES_SCALE = 0.0
+
+  LFREEB = F
+  MGRID_FILE = 'NONE'
+
+  RAXIS_CC = 1.0, 0.0, 0.0, 0.0
+  ZAXIS_CS = 0.0, 0.0, 0.0, 0.0
+
+  ! Exact centered NFP=2 max-mode-1 rotating ellipse used by the dof111
+  ! case. Only the equilibrium truncation changes: MPOL=NTOR=3.
+  ! Every nonzero LCFS coefficient satisfies m <= 1 and |n| <= 1.
+  ! The fixed-boundary seed definition has:
+  !   J_QA=sum(r_QA**2)=0.1, iota_edge=0.2, Rmajor=1 m,
+  !   area-equivalent Aminor=sqrt(0.30*0.15) m.
+  RBC(0,0) = 1.0
+  RBC(-1,1) = 1.4849476818216942E-2
+  ZBS(-1,1) = -1.4849476818216942E-2
+  RBC(0,1) = 2.2616716021021283E-1
+  ZBS(0,1) = 2.2616716021021283E-1
+  RBC(1,1) = 7.701348840156191E-2
+  ZBS(1,1) = -7.701348840156191E-2
+/

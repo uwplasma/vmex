@@ -211,6 +211,19 @@ Free boundary
 .. automodule:: vmex.core.freeboundary_implicit
    :members:
 
+Continuation keeps the accepted anchor, trial endpoints, and numerical root
+certificates together. Shared pullbacks use the state and constraint baselines
+from that same root; the numerical certificate does not establish physical
+qualification of a case.
+
+.. automodule:: vmex.core.freeboundary_continuation
+   :members:
+
+The projected optimizer is a separate research method with target restoration.
+
+.. automodule:: vmex.core.projected_optimization
+   :members:
+
 .. automodule:: vmex.core.virtual_casing
    :members:
 

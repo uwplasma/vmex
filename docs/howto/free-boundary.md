@@ -90,3 +90,11 @@ default `device="auto"` it runs on the CPU even on a GPU host.
 Its coil examples need ESSOS (`pip install "vmex[coils]"`). Scope is in
 {doc}`/reference/capabilities` and the mechanism in
 {doc}`/explanation/nestor-vacuum`.
+
+
+## Reuse a dense LU in continuation derivatives
+
+For explicit continuation loops, the opt-in {ref}`free-boundary-seed-lu` API
+reuses certified LU factors while rebuilding the operator at every root.
+Adjoints and predictors retain full-residual checks. Dense remains the default;
+`FreeBoundaryProblem` and its projected optimizer are unchanged.

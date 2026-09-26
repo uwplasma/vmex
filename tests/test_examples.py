@@ -111,6 +111,27 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
+    "examples/single_stage_support/verification.py": "shared production support or separate qualification; tested in single-stage API suites",
+    "examples/single_stage_support/fixed.py": "shared production support or separate qualification; tested in single-stage API suites",
+    "examples/single_stage_support/free.py": "shared production support or separate qualification; tested in single-stage API suites",
+    "examples/single_stage_support/diagnostics.py": "shared example support; tested by single-stage suites",
+    "examples/single_stage_support/constraints.py": "shared example support; tested by single-stage suites",
+    "examples/single_stage_support/common.py": "shared production support or separate qualification; tested in single-stage API suites",
+    "examples/single-stage-benchmarks/verify_single_stage.py": "shared production support or separate qualification; tested in single-stage API suites",
+    "examples/coil-constraints-benchmarks/verify_single_stage.py": "shared production support or separate qualification; tested in single-stage API suites",
+    "examples/coil-constraints-benchmarks/single_stage_optimization_scalar.py": "hard-constraint research workflow; shared geometry tests, separate equilibrium qualification",
+    "examples/coil-constraints-benchmarks/free_boundary_single_stage_optimization_scalar.py": "hard-constraint research workflow; API and geometry tests, separate equilibrium qualification",
+    "examples/coil-constraints-benchmarks/verify_free_boundary_single_stage.py": "separate coupled derivative qualification; not executed by ordinary CI",
+    "examples/coil-constraints-benchmarks/parameters.py": "shared configuration module imported by geometry tests, not a runnable example",
+    "examples/single-stage-benchmarks/compare_scalar_steps.py": "research workflow; API/callback tests, separate numerical qualification",
+    "examples/single-stage-benchmarks/free_boundary_single_stage_optimization.py": "research workflow; API/callback tests, separate numerical qualification",
+    "examples/single-stage-benchmarks/free_boundary_single_stage_optimization_scalar.py": "research workflow; API/callback tests, separate numerical qualification",
+    "examples/single-stage-benchmarks/qa_optimization.py": "research workflow; API/callback tests, separate numerical qualification",
+    "examples/single-stage-benchmarks/single_stage_optimization_scalar.py": "research workflow; API/callback tests, separate numerical qualification",
+    "examples/single-stage-benchmarks/solve_free_boundary_initial_coils.py": "research workflow; API/callback tests, separate numerical qualification",
+    "examples/single-stage-benchmarks/verify_free_boundary_single_stage.py": "research workflow; API/callback tests, separate numerical qualification",
+    "examples/single-stage-benchmarks/verify_single_stage_constraints.py": "standalone derivative audit; analytic and dry-run tests below, separate numerical qualification",
+
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
@@ -540,7 +561,7 @@ def test_free_boundary_single_stage_examples_show_explicit_optimizer_contract():
         assert "solve_free_boundary_implicit_status" in text
         assert "jax.value_and_grad" in text
         assert "FunctionProblem.from_functions" in text
-        assert "minimize(free_problem.value_and_grad" in text
+        assert "opt.minimize(free_problem, method=METHOD" in text
         assert "pack_boundary" not in text
         assert "mgrid file" in text
         # Coils fitted to the fixed-boundary seed, then checked by a free solve,
@@ -1322,3 +1343,42 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
         bounded = re.search(r"Exterior trace QA: (\d+)/(\d+) lines remained", out)
         assert bounded is not None and int(bounded.group(1)) > 0
     assert (tmp_path / output).stat().st_size > 10_000
+
+
+def test_fixed_scalar_derivative_checks_are_standalone(tmp_path, monkeypatch, capsys):
+    """The comparison production script never runs its constraint FD audit."""
+    import ast
+    import importlib.util
+    import json
+    from types import SimpleNamespace
+    import numpy as np
+
+    folder = Path(__file__).resolve().parents[1] / "examples/single-stage-benchmarks"
+    source = (folder / "single_stage_optimization_scalar.py").read_text()
+    tree = ast.parse(source)
+    assert "constraint_gradient_check.json" not in source
+    assert "finite_difference" not in source
+    assert not any(isinstance(node, ast.Name) and node.id == "checks" for node in ast.walk(tree))
+    monkeypatch.syspath_prepend(str(folder))
+    spec = importlib.util.spec_from_file_location("fixed_constraint_checks", folder / "verify_single_stage_constraints.py")
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    output = tmp_path / "not-created"
+    assert verifier.main(["--dry-run", "--output", str(output)]) == 0
+    assert json.loads(capsys.readouterr().out)["ftol"] == 1e-22
+    assert not output.exists()
+
+    matrix = np.array([[2., .3], [-.2, 1.], [.4, -.5]])
+    problem = SimpleNamespace(x0=np.zeros(2), scales=np.array([.5, 2.]))
+    def values(x):
+        return matrix @ x
+    good = verifier.check_constraints(problem, values, lambda x: matrix)
+    assert good["passed"] and len(good["checks"]) == 2
+    assert not verifier.check_constraints(problem, values, lambda x: matrix*2)["passed"]
+    failed = verifier.check_constraints(problem, lambda x: np.full(3, np.nan), lambda x: matrix)
+    assert not failed["passed"]
+    json.dumps(failed, allow_nan=False)
+
+    from single_stage_support.constraints import PhysicalConstraints
+    limits = PhysicalConstraints()
+    assert limits.FORCE_TOLERANCE == 1e-11

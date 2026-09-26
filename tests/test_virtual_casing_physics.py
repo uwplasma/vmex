@@ -778,4 +778,3 @@ def test_exterior_field_parameter_derivative_is_exact_on_the_frozen_path():
         frozen, info = im.frozen_path_directional_fd(base, config, exterior, tangent, h=step)
         assert max(info["newton_res"]) < 1e-10
         assert abs(implicit - frozen) <= tolerance * abs(frozen), (implicit, frozen)
-

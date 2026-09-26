@@ -41,6 +41,17 @@ def test_citations_reject_missing_records(tmp_path, monkeypatch, suffix, content
     assert len(errors) == 1 and "benchmarks/missing" in errors[0]
 
 
+def test_example_directory_suffix_is_not_a_benchmark_record(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    page = tmp_path / "page.rst"
+    page.write_text("``examples/single-stage-benchmarks/run.py``\n"
+                    "``examples/coil-constraints-benchmarks/run.py``\n"
+                    "``../../benchmarks/missing.json``\n")
+    errors = []
+    gate.check_cited_paths(page, errors)
+    assert len(errors) == 1 and "benchmarks/missing.json" in errors[0]
+
+
 @pytest.mark.parametrize("suffix,content", [
     (".md", "```bash\nwrite --out benchmarks/generated.json\n```\n"),
     (".rst", ".. code-block:: bash\n\n   write --out benchmarks/generated.json\n\n"),

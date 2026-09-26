@@ -180,6 +180,51 @@ class OptimizationRecord:
     counters: Mapping[str, float | None] = field(default_factory=dict)
 
 
+class CoilDiagnostics:
+    """Physical coil-motion diagnostics shared by fixed/free-boundary examples.
+
+    ``parameter_scales`` converts x to optimizer units; ``coefficient_step``
+    is the ESSOS coefficient scale used for reporting. Coil currents are in A,
+    curve positions and unscaled Fourier coefficients in metres. No field or
+    equilibrium evaluation is performed.
+    """
+
+    def __init__(self, parameter_scales, *, coefficient_step):
+        self.scales = np.asarray(parameter_scales)
+        self.coefficient_step = float(coefficient_step)
+        if np.any(~np.isfinite(self.scales) | (self.scales <= 0)) or not np.isfinite(coefficient_step) or coefficient_step <= 0:
+            raise ValueError("finite positive diagnostic scales required")
+        self.previous = self.initial_gamma = None
+
+    def record(self, x, coils, *, path=None):
+        """Return step metrics and optionally save this iterate's geometry arrays."""
+        coefficients = np.asarray(coils.curves.dofs)
+        dofs = coefficients.ravel()
+        gamma, currents = np.asarray(coils.gamma), np.asarray(coils.dofs_currents_raw)
+        current = dict(u=np.asarray(x)/self.scales, dofs=dofs,
+            raw=coefficients/np.asarray(coils.curves.scaling), gamma=gamma, currents=currents)
+        if any(not np.all(np.isfinite(value)) for value in current.values()):
+            raise ValueError("nonfinite coil diagnostics")
+        previous = current if self.previous is None else self.previous
+        initial = gamma if self.initial_gamma is None else self.initial_gamma
+        du = current["u"]-previous["u"]
+        coil_du = (dofs-previous["dofs"])/self.coefficient_step
+        displacement = np.linalg.norm(gamma-previous["gamma"], axis=-1)
+        metrics = dict(step_u_l2=float(np.linalg.norm(du)), step_u_linf=float(np.max(np.abs(du))),
+            coil_step_u_l2=float(np.linalg.norm(coil_du)), coil_step_u_linf=float(np.max(np.abs(coil_du))),
+            coil_coefficient_step_l2_m=float(np.linalg.norm(current["raw"]-previous["raw"])),
+            coil_displacement_rms_m=float(np.sqrt(np.mean(displacement**2))),
+            coil_displacement_max_m=float(displacement.max()),
+            coil_displacement_from_start_max_m=float(np.linalg.norm(gamma-initial, axis=-1).max()),
+            current_step_max_A=float(np.max(np.abs(currents-previous["currents"]))))
+        if path is not None:
+            with Path(path).open("xb") as stream:
+                np.savez_compressed(stream, **current)
+        self.previous = {key: value.copy() for key, value in current.items()}
+        self.initial_gamma = np.array(initial, copy=True)
+        return metrics
+
+
 class OptimizationMonitor:
     """Record and optionally print optimizer iterations and trials.
 

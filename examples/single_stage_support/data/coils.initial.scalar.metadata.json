@@ -1,0 +1,20 @@
+{
+  "stage_two": true,
+  "optimizer": "L-BFGS-B",
+  "iterations": 200,
+  "success": false,
+  "message": "STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT",
+  "objective": 3.7471004810618944,
+  "input_sha256": "55c93942f63bfe693a2a25d101031ee48b32516a00b3da15f13758d7fd23fc28",
+  "normal_field_rms": 0.004805507067256542,
+  "coil_flux_Wb": 0.1255044894897642,
+  "refined_coil_flux_Wb": 0.12550448948976425,
+  "current_scale": 1.5452729555423992,
+  "currents_A": [
+    417223.6979964478,
+    417223.6979964478,
+    417223.6979964478
+  ],
+  "seconds": 21.231189832964446,
+  "coils_sha256": "ece3dc5294d9adc4ef9f1c23aa58b114984106d9a5259778e1fb7ed54ec03e6c"
+}

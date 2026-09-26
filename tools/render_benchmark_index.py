@@ -75,6 +75,7 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/strong_root_*.json", "benchmarks/strong_root.py"),
     # Hand-recorded records: no script in the tree writes them.  They are
     # status and narrative records gated by tests or quoted by docs.
+    ("benchmarks/single_stage_provenance/*.json", ""),
     ("benchmarks/mirror_*.json", ""),
     ("benchmarks/cache_entry_scaling_*.json", ""),
     ("benchmarks/desc_native_vs_lifted_*.json", ""),

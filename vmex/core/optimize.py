@@ -117,6 +117,10 @@ from .statephysics import (
     _lgradb_state_tables,
     _mode_matrix,
     aspect_ratio,
+    boundary_from_state,
+    boundary_from_wout,
+    major_radius,
+    on_axis_magnetic_field,
     edge_iota,
     elongation_profile,
     iota_edge,
@@ -129,20 +133,32 @@ from .statephysics import (
 )
 from .wout import WoutData, wout_from_state
 from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progress
-from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord
+from .monitoring import CoilDiagnostics, EquilibriumReporter, OptimizationMonitor, OptimizationRecord
 
 __all__ = [
+    "FreeBoundaryProblem",  # noqa: F822
+    "TargetBand",  # noqa: F822
+    "CoilParameters",  # noqa: F822
+    "minimize_projected",  # noqa: F822
+    "ProjectedOptions",  # noqa: F822
+    "TrialRejected",  # noqa: F822
+    "OptimizationQualification",  # noqa: F822
     "VmecProblem",
     "FunctionProblem",
     "Evaluation",
     "EquilibriumReporter",
     "OptimizationMonitor",
     "OptimizationRecord",
+    "CoilDiagnostics",
     "make_problem",
     "Equilibrium",
     "solve_equilibrium",
     "QuasisymmetryRatioResidual",
     "aspect_ratio",
+    "boundary_from_state",
+    "boundary_from_wout",
+    "major_radius",
+    "on_axis_magnetic_field",
     "mean_iota",
     "min_abs_iota",
     "soft_min_abs_iota",
@@ -190,6 +206,21 @@ Array = Any
 
 
 def __getattr__(name: str):  # PEP 562 lazy re-export
+    if name == "OptimizationQualification":
+        from ._freeboundary_checkpoint import OptimizationQualification
+        return OptimizationQualification
+    if name in ("FreeBoundaryProblem", "TargetBand"):
+        from . import freeboundary_problem
+        return getattr(freeboundary_problem, name)
+    if name == "CoilParameters":
+        from .coil_parameters import CoilParameters
+        return CoilParameters
+    if name == "TrialRejected":
+        from .errors import TrialRejected
+        return TrialRejected
+    if name in ("minimize_projected", "ProjectedOptions"):
+        from . import projected_optimization
+        return getattr(projected_optimization, name)
     # bootstrap.py lazily imports this module inside self_consistent_bootstrap,
     # so the f_boot objective is re-exported lazily to keep the two decoupled.
     if name == "RedlBootstrapMismatch":
@@ -2273,9 +2304,160 @@ def least_squares(
     return result
 
 
+def _minimize_problem(problem, *, x0=None, method="L-BFGS-B", bounds=None,
+                      constraints=(), callback=None, options=None, tol=None):
+    """Condition SciPy coordinates and own accepted-state promotion."""
+    from scipy.optimize import Bounds, LinearConstraint, NonlinearConstraint, OptimizeResult
+    from scipy.optimize import minimize as scipy_minimize
+    from scipy.sparse import issparse
+    from scipy.sparse.linalg import LinearOperator
+    from .errors import TrialRejected
+
+    if method not in ("BFGS", "L-BFGS-B", "SLSQP"):
+        raise ValueError("problem minimization supports BFGS, L-BFGS-B and SLSQP")
+    start = np.asarray(problem.x0 if x0 is None else x0, dtype=float).copy()
+    scales = np.asarray(problem.scales, dtype=float)
+    if (start.shape != scales.shape or start.ndim != 1 or not np.all(np.isfinite(start))
+            or not np.all(np.isfinite(scales) & (scales > 0))):
+        raise ValueError("x0 must be finite and match finite positive problem scales")
+    promote = getattr(problem, "accept_x", None)
+    if promote is not None and not np.array_equal(start, problem.accepted.parameters):
+        raise ValueError("stateful minimization must start at the accepted equilibrium")
+    options = dict(options or {})
+    budget = int(options.get("maxiter", 100))
+    if budget < 0:
+        raise ValueError("maxiter must be nonnegative")
+    if promote is not None and method == "SLSQP":
+        options["maxiter"] = budget + 1
+    if bounds is None:
+        bounds = problem.bounds
+        if isinstance(bounds, tuple) and len(bounds) == 2:
+            bounds = Bounds(*bounds)
+    if bounds is not None:
+        if not isinstance(bounds, Bounds):
+            pairs = [(float('-inf') if lo is None else lo,
+                      float('inf') if hi is None else hi) for lo, hi in bounds]
+            bounds = Bounds(*np.asarray(pairs).T)
+        bounds = Bounds((np.asarray(bounds.lb)-start)/scales, (np.asarray(bounds.ub)-start)/scales,
+                        keep_feasible=bounds.keep_feasible)
+        if method == "BFGS":
+            raise ValueError("BFGS does not support bounds; use L-BFGS-B or SLSQP")
+    if isinstance(constraints, (LinearConstraint, NonlinearConstraint, dict)):
+        constraints = (constraints,)
+    constraints = tuple(constraints)
+    if constraints and method != "SLSQP":
+        raise ValueError("nonlinear/linear constraints require SLSQP")
+    scaled_constraints = []
+    for constraint in constraints:
+        if isinstance(constraint, (LinearConstraint, NonlinearConstraint)) and (
+                np.all(np.isneginf(constraint.lb)) and np.all(np.isposinf(constraint.ub))):
+            continue
+        if isinstance(constraint, LinearConstraint):
+            matrix = constraint.A.multiply(scales) if issparse(constraint.A) else constraint.A * scales
+            scaled_constraints.append(LinearConstraint(
+                matrix, constraint.lb-constraint.A@start, constraint.ub-constraint.A@start))
+        elif isinstance(constraint, NonlinearConstraint):
+            if not callable(constraint.jac):
+                raise ValueError("constraints require an analytic Jacobian")
+            def values(u, c=constraint):
+                try:
+                    return c.fun(start+scales*u)
+                except TrialRejected:
+                    # Values can reject a line-search probe; never fabricate its Jacobian.
+                    lo, hi = np.broadcast_arrays(c.lb, c.ub)
+                    return np.where(np.isfinite(lo), lo-1e6, np.where(np.isfinite(hi), hi+1e6, 0.))
+            scaled_constraints.append(NonlinearConstraint(
+                values, constraint.lb, constraint.ub,
+                jac=lambda u, c=constraint: np.asarray(c.jac(start+scales*u))*scales))
+        else:
+            raise TypeError("use scipy LinearConstraint or NonlinearConstraint")
+
+    accepted = start.copy()
+    value, gradient = problem.value_and_grad(accepted)
+    accepted_value, accepted_gradient = value, np.asarray(gradient).copy()
+    accepted_steps = 0
+    nfev, njev = 1, 1
+    if promote is not None and budget == 0:
+        return OptimizeResult(x=start, fun=value, jac=gradient, success=False,
+            status=99, message="accepted_step_budget_reached", stop_reason="accepted_step_budget_reached",
+            accepted_steps=0, nit=0, nfev=1, njev=1)
+
+    class _Stop(Exception):
+        pass
+
+    def accept(u):
+        nonlocal accepted, accepted_value, accepted_gradient, accepted_steps
+        x = start + np.asarray(u)*scales
+        if np.array_equal(x, accepted):
+            return
+        current_value, current_gradient = problem.value_and_grad(x)
+        if promote is not None:
+            promote(x)
+        accepted, accepted_value = x.copy(), current_value
+        accepted_gradient = np.asarray(current_gradient).copy()
+        accepted_steps += 1
+        if callback is not None:
+            try:
+                if set(inspect.signature(callback).parameters) == {"intermediate_result"}:
+                    callback(intermediate_result=OptimizeResult(
+                        x=accepted.copy(), fun=accepted_value, nit=accepted_steps))
+                else:
+                    callback(accepted.copy())
+            except StopIteration as error:
+                raise _Stop("callback_stopped") from error
+        if promote is not None and accepted_steps >= budget:
+            raise _Stop("accepted_step_budget_reached")
+
+    def value_and_grad(u):
+        nonlocal nfev, njev
+        nfev += 1
+        njev += 1
+        value, gradient = problem.value_and_grad(start+scales*u)
+        return value, np.asarray(gradient)*scales
+
+    def fun(u):
+        nonlocal nfev
+        nfev += 1
+        try:
+            return problem.fun(start+scales*u)
+        except TrialRejected:
+            return np.inf
+
+    def jac(u):
+        _, gradient = value_and_grad(u)
+        # SLSQP's major-iteration callback can precede backtracking. The next
+        # Jacobian request identifies its accepted line-search point instead.
+        accept(u)
+        return gradient
+
+    try:
+        result = scipy_minimize(fun if method == "SLSQP" else value_and_grad,
+            np.zeros_like(start), jac=jac if method == "SLSQP" else True, method=method,
+            bounds=bounds, constraints=scaled_constraints,
+            callback=None if method == "SLSQP" else accept, options=options, tol=tol)
+        if result.success:
+            accept(result.x)
+        result.x = start + np.asarray(result.x)*scales
+        if getattr(result, "jac", None) is not None:
+            result.jac = np.asarray(result.jac)/scales
+        if getattr(result, "hess_inv", None) is not None:
+            inverse = result.hess_inv
+            result.hess_inv = LinearOperator((start.size, start.size),
+                matvec=lambda v: scales*(inverse @ (scales*v)), dtype=float)
+        result.stop_reason = None
+    except (_Stop, TrialRejected) as error:
+        reason = str(error) if isinstance(error, _Stop) else "equilibrium_trial_rejected"
+        result = OptimizeResult(success=False, status=99, message=str(error),
+            stop_reason=reason, nit=accepted_steps, nfev=nfev, njev=njev)
+    if result.success or promote is not None or getattr(result, "stop_reason", None):
+        result.x, result.fun, result.jac = accepted.copy(), accepted_value, accepted_gradient.copy()
+    result.accepted_steps = accepted_steps
+    return result
+
+
 def minimize(
-    objective_terms: Sequence[tuple[Callable, float, Any]],
-    inp: VmecInput,
+    objective_terms: Sequence[tuple[Callable, float, Any]] | FunctionProblem,
+    inp: VmecInput | None = None,
     *,
     max_mode: int | Sequence[int] = 1,
     vary_major_radius: bool = False,
@@ -2294,7 +2476,17 @@ def minimize(
     forward_max_iterations: int | None = None,
     **scipy_kwargs,
 ):
-    """Minimize the scalarized residual norm with one adjoint per gradient.
+    """Minimize a FunctionProblem, or a scalarized VMEC residual definition.
+
+    ``minimize(problem, method=..., bounds=..., constraints=..., callback=...,
+    options=...)`` uses the problem's public value/gradient interface. All
+    coordinates, bounds, constraints, callbacks and returned derivatives use
+    the problem's original units; ``problem.scales`` conditions SciPy internally.
+    A problem exposing ``accept_x`` promotes only certified accepted iterates.
+    BFGS, L-BFGS-B and SLSQP are supported by this interface. Callbacks receive
+    an x vector, or an OptimizeResult when named ``intermediate_result``.
+
+    The existing ``minimize(objective_terms, inp, ...)`` interface is unchanged.
 
     The objective is exactly ``0.5 * sum(rows**2)``, with ``rows`` defined by
     :func:`least_squares`.  Unlike Gauss--Newton least squares, a reverse
@@ -2317,6 +2509,17 @@ def minimize(
     defaults are certified on the QI, QS, ``L_grad_B``, ``DMerc`` and ``D_R``
     objective lanes; an unconverged adjoint is never returned as a gradient.
     """
+    if isinstance(objective_terms, FunctionProblem):
+        if inp is not None:
+            raise TypeError("a FunctionProblem already owns its input")
+        if (not np.isscalar(max_mode) or max_mode != 1 or vary_major_radius or current_dofs is not None
+                or not hot_restart or device is not AUTO or solve_kwargs is not None or verbose != 0
+                or adjoint_tol != 1e-6 or adjoint_maxiter != 300 or max_fsq_ratio != 1e2
+                or refine_tol != 1e-10 or forward_ftol is not None or forward_max_iterations is not None):
+            raise TypeError("configure equilibrium, coordinates and adjoint controls when building the problem")
+        return _minimize_problem(objective_terms, x0=x0, method=method, **scipy_kwargs)
+    if inp is None:
+        raise TypeError("objective tuples require a VmecInput")
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
     modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
                       else [int(m) for m in max_mode])
