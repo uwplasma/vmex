@@ -1693,13 +1693,46 @@ def _host_adjoint(
     return unravel(jnp.asarray(solution, dtype=rhs_flat.dtype))
 
 
+@functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
+def phiedge_root(residual: Callable, params: im.ImplicitParams,
+                 field_parameters: Any) -> Array:
+    """Return ``params.phiedge`` as the root of ``residual``, with its IFT gradient.
+
+    ``params.phiedge`` must already solve ``residual(params, field_parameters)
+    = 0`` (for example from :func:`vmex.core.freeboundary.solve_phiedge`),
+    where ``residual`` is a scalar of the equilibrium such as the LCFS
+    outboard radius of :func:`solve_free_boundary_implicit` minus its
+    target.  The implicit function theorem gives ``dphiedge/dp =
+    -(dg/dp) / (dg/dphiedge)``; both partials come from one gradient of
+    ``residual``, i.e. one coupled adjoint solve.  Use the returned value as
+    the ``phiedge`` of the parameters an objective is evaluated at, so
+    ``jax.grad`` with respect to coil currents or dofs sees PHIEDGE move.
+    """
+    return params.phiedge
+
+
+def _phiedge_root_fwd(residual, params, field_parameters):
+    grads = jax.grad(residual, argnums=(0, 1))(params, field_parameters)
+    return params.phiedge, grads
+
+
+def _phiedge_root_bwd(residual, grads, phiedge_bar):
+    grad_params, grad_field = grads
+    scale = -phiedge_bar / grad_params.phiedge
+    grad_params = dataclasses.replace(  # the root does not depend on its seed
+        grad_params, phiedge=jnp.zeros_like(grad_params.phiedge))
+    return jax.tree.map(lambda g: scale * g, (grad_params, grad_field))
+
+
 solve_free_boundary_implicit.defvjp(_solve_fwd, _solve_bwd)
 solve_free_boundary_implicit_status.defvjp(_solve_status_fwd, _solve_status_bwd)
+phiedge_root.defvjp(_phiedge_root_fwd, _phiedge_root_bwd)
 
 
 __all__ = [
     "FreeBoundaryImplicitConfig",
     "make_free_boundary_config",
+    "phiedge_root",
     "solve_free_boundary_implicit",
     "solve_free_boundary_implicit_status",
 ]

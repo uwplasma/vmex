@@ -149,6 +149,7 @@ EXECUTED_EXAMPLES = {
     "examples/free_boundary_beta_scan.py",
     "examples/free_boundary_essos_coils.py",
     "examples/free_boundary_mgrid.py",
+    "examples/free_boundary_phiedge.py",
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
     "examples/mirror/mirror_free_boundary_beta_scan.py",
@@ -834,6 +835,15 @@ def test_free_boundary_essos_coils(tmp_path):
     assert abs(actual - nominal) <= 0.15, (
         f"actual betatotal {actual}% not calibrated to nominal {nominal}%")
     assert fsq < 1e-7, f"free-boundary point should converge, fsq={fsq}"
+
+
+@pytest.mark.full  # nightly: PHIEDGE root solve on the ESSOS QA coils
+def test_free_boundary_phiedge(tmp_path):
+    pytest.importorskip("essos.coils")
+    pytest.importorskip("essos.fields")
+    out = _run_example(EXAMPLES / "free_boundary_phiedge.py", tmp_path, timeout=900)
+    error = float(re.search(r"relative error ([0-9.eE+-]+)", out).group(1))
+    assert error <= 2e-3, out  # cold re-solve at the returned PHIEDGE; RTOL = 1e-3 in CI mode
 
 
 @pytest.mark.full  # nightly: fixed + free-boundary solve either side of the seam (~100s)

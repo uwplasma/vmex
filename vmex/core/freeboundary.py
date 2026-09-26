@@ -60,6 +60,8 @@ from .errors import (
     MORE_ITER_FLAG,
     NORM_TERM_FLAG,
     SUCCESSFUL_TERM_FLAG,
+    VmecConvergenceError,
+    VmecError,
     VmecInputError,
 )
 from .fields import magnetic_fields, metric_elements
@@ -2327,3 +2329,126 @@ def solve_free_boundary(
             use_fft=_resolve_use_fft(use_fft, device, resolution),
         )
     return stage.result
+
+
+def _phiedge_metric(metric: Any):
+    """Resolve ``metric`` to a host callable ``(inp, result) -> float``."""
+    if callable(metric):
+        return metric
+    if metric not in ("r_outboard", "volume"):
+        raise ValueError(f"metric must be 'r_outboard', 'volume' or a callable, got {metric!r}")
+    from .wout import wout_from_result
+
+    def evaluate(inp: VmecInput, result: SolveResult) -> float:
+        wout = wout_from_result(inp, result)
+        if metric == "volume":
+            return float(wout.volume_p)
+        return float(np.sum(np.asarray(wout.rmnc)[-1]))  # LCFS R at theta = phi = 0
+
+    return evaluate
+
+
+def solve_phiedge(
+    inp: VmecInput,
+    external_field: MgridField | None = None,
+    target: float = 0.0,
+    *,
+    metric: Any = "r_outboard",
+    phiedge0: float | None = None,
+    rtol: float = 1e-4,
+    max_iter: int = 12,
+    **solve_kwargs: Any,
+) -> tuple[VmecInput, SolveResult]:
+    """Find the PHIEDGE whose free-boundary LCFS meets a geometric target.
+
+    Each residual ``metric - target`` is one :func:`solve_free_boundary`
+    call, warm-started from the nearest converged state.  The root is found
+    by a host-side secant that switches to bisection once the target is
+    bracketed; a step whose solve fails, or needs more than twice the first
+    (cold) solve's iterations, is halved back toward the last converged
+    PHIEDGE.  The first step is a 5% probe; the secant fixes its
+    direction, so the metric need not grow with ``|PHIEDGE|``.  For the
+    derivative of the solved PHIEDGE with respect to coil parameters, see
+    :func:`vmex.core.freeboundary_implicit.phiedge_root`.
+
+    Parameters
+    ----------
+    inp, external_field:
+        The free-boundary deck and field, as for :func:`solve_free_boundary`.
+    target:
+        The value the metric must reach, in the metric's units.
+    metric:
+        ``"r_outboard"`` (LCFS major radius at ``theta = phi = 0`` [m], the
+        outboard midplane of a stellarator-symmetric deck), ``"volume"``
+        (plasma volume [m^3]) or a callable ``(inp, result) -> float``.
+    phiedge0:
+        Initial PHIEDGE [Wb]; defaults to ``inp.phiedge``.
+    rtol:
+        Stop when ``|metric - target| <= rtol * |target|``.
+    max_iter:
+        Maximum number of free-boundary solves.
+    **solve_kwargs:
+        Forwarded to :func:`solve_free_boundary` (``mgrid_path``, ``ftol``,
+        ``max_iterations``, ...).
+
+    Returns
+    -------
+    tuple[VmecInput, SolveResult]
+        The deck with the solved ``phiedge`` and its converged solve result.
+
+    Raises
+    ------
+    vmex.core.errors.VmecConvergenceError
+        No PHIEDGE met the target within ``max_iter`` solves, for example
+        because the target is out of reach or no equilibrium exists there.
+    """
+    evaluate = _phiedge_metric(metric)
+    x = float(inp.phiedge if phiedge0 is None else phiedge0)
+    if x == 0.0:
+        raise ValueError("the PHIEDGE guess must be nonzero")
+    tol = rtol * max(abs(float(target)), 1e-300)
+    good: list[tuple[float, float, SolveResult]] = []  # converged (phiedge, residual, result)
+    last_failed = ""
+    for _ in range(max_iter):
+        trial = replace(inp, phiedge=x)
+        kwargs = dict(solve_kwargs)
+        warm = None
+        if good:  # a warm start needing twice the cold solve's iterations is failing
+            warm = min(good, key=lambda g: abs(g[0] - x))[2].state
+            kwargs["max_iterations"] = min(2 * int(good[0][2].iterations), int(
+                solve_kwargs.get("max_iterations") or inp.niter_array[0]))
+        try:
+            result = solve_free_boundary(trial, external_field=external_field,
+                                         initial_state=warm, **kwargs)
+        except VmecError as exc:
+            if not good:
+                raise
+            last_failed = f"; the solve at PHIEDGE={x:.6g} failed: {exc}"
+            x = 0.5 * (x + good[-1][0])
+            continue
+        f = evaluate(trial, result) - float(target)
+        if abs(f) <= tol:
+            return trial, result
+        good.append((x, f, result))
+        below = [g for g in good if g[1] < 0.0]
+        above = [g for g in good if g[1] > 0.0]
+        if len(good) == 1:
+            x_new = x * (1.05 if f < 0.0 else 0.95)  # metrics grow with |PHIEDGE|
+        else:
+            (x0, f0, _), (x1, f1, _) = good[-2], good[-1]
+            x_new = x1 - f1 * (x1 - x0) / (f1 - f0) if f1 != f0 else 2.0 * x1
+        if below and above:
+            lo = min(below, key=lambda g: abs(g[1]))[0]
+            hi = min(above, key=lambda g: abs(g[1]))[0]
+            if not min(lo, hi) < x_new < max(lo, hi):
+                x_new = 0.5 * (lo + hi)
+        elif len(good) > 1:  # extrapolate at most twice the last step
+            step = 2.0 * abs(good[-1][0] - good[-2][0])
+            x_new = x + float(np.clip(x_new - x, -step, step))
+        x = x_new
+    name = metric if isinstance(metric, str) else getattr(metric, "__name__", "metric")
+    raise VmecConvergenceError(
+        f"PHIEDGE solve did not reach {name} = {target:.6g} in {max_iter} solves{last_failed}",
+        hint="the target may be out of reach for this field; check it against a vacuum "
+             "flux-surface plot or raise max_iter",
+        iteration=max_iter)

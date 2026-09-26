@@ -13,6 +13,7 @@ run-an-input-file
 restart-from-previous-run
 run-on-gpu
 free-boundary
+match-phiedge
 use-essos-fields-and-coils
 profiles
 scale-a-configuration

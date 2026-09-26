@@ -41,6 +41,9 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   - `free_boundary_essos_coils.py` — free-boundary beta scan directly from
     ESSOS coils (tabulated to a temporary mgrid); `PRES_SCALE` is calibrated per point so the
     *actual* wout `betatotal` hits 0/1/2/3 %.
+  - `free_boundary_phiedge.py` — find the PHIEDGE whose free-boundary LCFS
+    passes through a target outboard-midplane radius (`vj.solve_phiedge`), for
+    comparing with codes pinned by an edge point instead of a flux.
   - `vmex_essos_workflow.py` — both Python seams in one round trip: a solved
     equilibrium becomes an `essos.fields.Vmec` (`vj.essos_vmec_field`) that
     ESSOS traces field lines through, and an ESSOS coil set becomes the
