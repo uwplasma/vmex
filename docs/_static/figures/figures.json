@@ -209,22 +209,22 @@
     },
     {
       "path": "docs/_static/figures/readme_polish_before_after.webp",
-      "sha256": "685274105cb8efaa1c72b886ef6459ebb47b33002232257553e597396f6f6b7e",
-      "bytes": 36630,
+      "sha256": "a1ee09668fbcf7e99758e050329e77df7b23a9936b4e644de520c7b5d3c5b5f5",
+      "bytes": 35778,
       "generator": "examples/force_balance_polishing.py",
       "command": "python examples/force_balance_polishing.py",
       "inputs": [
-        "examples/data/input.shaped_tokamak_pressure_polished"
+        "examples/data/input.shaped_tokamak_pressure"
       ],
       "record": null,
-      "generated": "2026-09-20",
-      "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
+      "generated": "2026-09-26",
+      "hardware": "Apple M4 (arm64), macOS 26.6, CPU",
       "reproducible": "command",
-      "bytes_verified": true,
+      "bytes_verified": false,
       "used_in": [
         "README.md"
       ],
-      "note": "The example solves and polishes the deck, writes the unpolished state through the same export as the polished one (both WOUT files on 129 surfaces), reads each file back and certifies it with the same independent oracle, and plots the two certificates. It writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to its output directory. Rendered on 2026-09-20 and re-derived by a second run that reproduced the bytes."
+      "note": "The example solves and natively polishes the deck, writes the unpolished state through the same export as the polished one (both WOUT files on 370 surfaces), reads each file back on the polished spline basis, certifies it with the same independent oracle, and plots the two certificates. It writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it."
     },
     {
       "path": "docs/_static/figures/readme_polish_summary.webp",

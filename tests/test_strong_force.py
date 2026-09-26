@@ -1458,7 +1458,7 @@ def test_coefficient_first_radial_jets_match_scipy_spline_derivatives(degree):
     from vmex.core.polish_native import _stable_radial_jets
 
     state = _graded_mode_state(degree)
-    plan = make_variational_plan(state, radial_order=degree + 1, ntheta=7, nzeta=1, stable_derivatives=True)
+    plan = make_variational_plan(state, radial_order=degree + 1, ntheta=7, nzeta=1)
     rho = np.asarray(plan.rho)
     value, first, second = (np.asarray(x) for x in _stable_radial_jets(state.R_cos, plan))
     knots = np.asarray(state.radial_basis.knots)
@@ -1491,7 +1491,7 @@ def test_coefficient_first_jets_differentiate_constants_to_exact_zero():
     from vmex.core.polish_native import _stable_radial_jets
 
     state = _graded_mode_state(3)
-    plan = make_variational_plan(state, radial_order=4, ntheta=7, nzeta=1, stable_derivatives=True)
+    plan = make_variational_plan(state, radial_order=4, ntheta=7, nzeta=1)
     constant = jnp.zeros_like(state.R_cos).at[0].set(6.123456789)
     value, first, second = _stable_radial_jets(constant, plan)
     assert np.all(np.asarray(first)[:, 0] == 0.0)
@@ -1516,11 +1516,10 @@ def test_stable_plan_pytree_round_trip_and_split_force_equivalence():
 
     state = _graded_mode_state(3)
     legacy = make_variational_plan(state, radial_order=4, ntheta=11, nzeta=1)
-    stable = make_variational_plan(state, radial_order=4, ntheta=11, nzeta=1, stable_derivatives=True)
+    stable = make_variational_plan(state, radial_order=4, ntheta=11, nzeta=1)
     leaves, treedef = jax.tree_util.tree_flatten(stable)
     rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
     assert rebuilt.spline_value is not None and rebuilt.axis_factors.shape == stable.axis_factors.shape
-    assert jax.tree_util.tree_flatten(legacy)[1] != treedef
     layout = make_native_correction_layout(state)
     scale = native_coordinate_scales(state, layout, legacy)
     coordinates = jnp.asarray(np.random.default_rng(3).standard_normal(layout.size) * 1.0e-4)

@@ -1490,8 +1490,11 @@ def _polish_native_lane(source, refined_state, legacy_runtime, config, *, verbos
     if verbose:
         emit(f" native polish: |F|_rms / F* = {independent:.3E} (tolerance "
              f"{native_config.force_tolerance:.1E}), eta = {result.stationarity:.3E} "
-             f"(tolerance {native_config.stationarity_tolerance:.1E}), "
-             f"{report.solve_seconds:.1f} s: {'CERTIFIED' if converged else 'FAILED'}")
+             f"(tolerance {native_config.stationarity_tolerance:.1E}), {report.solve_seconds:.1f} s")
+        emit(polish_certificate_summary(
+            report.initial_normalized_l2, report.final_normalized_l2, config.certificate_tolerance,
+            verdict="CERTIFIED" if converged else "FAILED",
+            measures=force_error_measures(initial, final), window=report.normalization_window), end="")
     if converged:
         return PolishResult(result.state, final, report,
                             jnp.zeros((0,), dtype=jnp.asarray(refined_state.R_cos).dtype),
@@ -1596,6 +1599,14 @@ def polish_legacy_solution(
     # Each phase below can run minutes at high resolution with no output of
     # its own, so the CLI announces every one before it starts — a silent
     # console must always be attributable to a named phase.
+    from .polish_native import native_polish_supported
+
+    if config.lane == "native" or (config.lane == "auto" and native_polish_supported(source)):
+        # The native lane re-solves the continuum force itself, so it lifts the
+        # converged legacy state directly; the discrete Newton anchor below
+        # only serves the collocation lane.
+        return _polish_native_lane(source, legacy_state, legacy_runtime, config,
+                                   verbose=verbose, emit=emit, started=started)
     if verbose:
         emit(" refining the converged state (Newton anchor)...")
     dof_mask = implicit._dof_mask(legacy_state, legacy_runtime, implicit_config)
@@ -1605,11 +1616,6 @@ def polish_legacy_solution(
         legacy_state,
         dof_mask,
     )
-    from .polish_native import native_polish_supported
-
-    if config.lane == "native" or (config.lane == "auto" and native_polish_supported(source)):
-        return _polish_native_lane(source, refined_state, legacy_runtime, config,
-                                   verbose=verbose, emit=emit, started=started)
     # Certification is a reconstruction problem, not a requirement to retain
     # one spline coefficient per legacy sample. Evaluate the stable,
     # overdetermined lift first; an already-certified result needs neither the

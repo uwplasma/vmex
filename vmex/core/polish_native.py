@@ -31,7 +31,7 @@ collocation lane of :mod:`vmex.core.polish_driver`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Callable, NamedTuple
 
@@ -39,6 +39,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy import sparse
+from scipy.linalg import blas
 from scipy.sparse import linalg as sparse_linalg
 
 from .polish import (
@@ -236,14 +237,13 @@ def make_variational_plan(
     radial_order: int | None = None,
     ntheta: int | None = None,
     nzeta: int | None = None,
-    stable_derivatives: bool = False,
 ) -> VariationalPlan:
-    """Build a tensor grid and analytic coefficient-to-first-jet tables.
+    """Build a tensor grid, coefficient-to-jet tables, and quadrature weights.
 
-    With ``stable_derivatives`` the force kernels differentiate spline
-    coefficients by local differences before evaluating lower-degree splines
-    (``_stable_radial_jets``).  The represented fields are identical; only the
-    floating-point cancellation pattern changes.
+    Field kernels differentiate spline coefficients by local differences
+    before evaluating lower-degree splines (``_stable_radial_jets``); the
+    assembled derivative tables serve the linear maps (gauge, scales, and the
+    Jacobian's synthesis), where their cancellation is harmless.
     """
 
     degree = int(state.radial_basis.degree)
@@ -307,11 +307,8 @@ def make_variational_plan(
     # zeta spans one field period and sqrt_g contains dphi/dzeta=1/nfp;
     # multiplying by nfp integrates the full torus.
     quadrature_weights = float(state.nfp) * weights_rho[:, None, None] * angular_weight
-    stable = {}
-    if stable_derivatives:
-        stable = _stable_radial_tables(state.radial_basis, s, rho, m)
     return VariationalPlan(
-        **stable,
+        **_stable_radial_tables(state.radial_basis, s, rho, m),
         rho=jnp.asarray(rho),
         theta=jnp.asarray(theta),
         zeta=jnp.asarray(zeta),
@@ -551,7 +548,7 @@ def _stable_radial_tables(radial_basis, s: np.ndarray, rho: np.ndarray, m: np.nd
     second_gap = knots[degree + 1 : degree + size - 1] - knots[2:size]
     if np.any(first_gap <= 0.0) or np.any(second_gap <= 0.0):
         raise ValueError("knot multiplicity too high for a continuous second radial derivative")
-    levels = _basis_levels(jnp.asarray(knots), jnp.asarray(s), degree)
+    levels = _basis_levels(knots, s, degree)
     # On a clamped vector the first and last lower-degree functions of the full
     # knot sequence vanish identically; the interior ones are the trimmed basis.
     spline_value = np.asarray(levels[degree])
@@ -595,16 +592,6 @@ def _stable_radial_jets(coefficients: Array, plan: VariationalPlan) -> tuple[Arr
     return a[0] * q, a[1] * q + a[3] * q_s, a[2] * q + a[4] * q_s + a[5] * q_ss
 
 
-def _radial_jets(coefficients: Array, plan: VariationalPlan) -> tuple[Array, Array, Array]:
-    if plan.spline_value is not None:
-        return _stable_radial_jets(coefficients, plan)
-    coefficients = jnp.asarray(coefficients)
-    return tuple(
-        jnp.einsum("mb,mrb->rm", coefficients, table)
-        for table in (plan.radial_value, plan.radial_derivative, plan.radial_second_derivative)
-    )
-
-
 def _channel(
     cosine_coefficients: Array,
     sine_coefficients: Array,
@@ -612,16 +599,8 @@ def _channel(
 ) -> tuple[Array, Array, Array, Array]:
     """Synthesize one scalar channel and its three coordinate derivatives."""
 
-    if plan.spline_value is not None:
-        cosine_radial, cosine_drho, _ = _stable_radial_jets(cosine_coefficients, plan)
-        sine_radial, sine_drho, _ = _stable_radial_jets(sine_coefficients, plan)
-    else:
-        cosine_coefficients = jnp.asarray(cosine_coefficients)
-        sine_coefficients = jnp.asarray(sine_coefficients)
-        cosine_radial = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_value)
-        sine_radial = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_value)
-        cosine_drho = jnp.einsum("mb,mrb->rm", cosine_coefficients, plan.radial_derivative)
-        sine_drho = jnp.einsum("mb,mrb->rm", sine_coefficients, plan.radial_derivative)
+    cosine_radial, cosine_drho, _ = _stable_radial_jets(cosine_coefficients, plan)
+    sine_radial, sine_drho, _ = _stable_radial_jets(sine_coefficients, plan)
 
     def synthesize(cosine_table: Array, sine_table: Array) -> Array:
         return jnp.einsum("rm,ma->ra", cosine_radial, cosine_table) + jnp.einsum("rm,ma->ra", sine_radial, sine_table)
@@ -641,8 +620,8 @@ def _channel_second(
     """Synthesize a scalar channel through its coordinate Hessian."""
 
     value, drho, dtheta, dzeta = _channel(cosine_coefficients, sine_coefficients, plan)
-    cosine_jets = _radial_jets(cosine_coefficients, plan)
-    sine_jets = _radial_jets(sine_coefficients, plan)
+    cosine_jets = _stable_radial_jets(cosine_coefficients, plan)
+    sine_jets = _stable_radial_jets(sine_coefficients, plan)
 
     def synthesize(
         radial_pair: tuple[Array, Array],
@@ -790,25 +769,18 @@ def native_physical_force_residual(
         raise ValueError(f"force coordinates have shape {coordinates.shape}; expected {(layout.size,)}")
     if coordinate_scale.shape != (layout.size,):
         raise ValueError(f"coordinate_scale has shape {coordinate_scale.shape}; expected {(layout.size,)}")
-    scale = jnp.broadcast_to(jnp.asarray(force_scale), (3,))
+    # The certified object is the (base, coordinates) pair: base and correction
+    # jets are synthesized separately (see evaluate_tensorized_strong_force).
     correction = layout.unpack(coordinate_scale * coordinates)
-    if gauge.variational.spline_value is not None:
-        # Accurate mode: the certified object is the (base, coordinates) pair.
-        samples = evaluate_tensorized_strong_force(base_state, gauge.variational, correction)
-    else:
-        state = apply_high_order_correction(base_state, correction)
-        samples = evaluate_tensorized_strong_force(state, gauge.variational)
-    volume_weights = (
-        jnp.broadcast_to(
-            jnp.asarray(gauge.variational.quadrature_weights),
-            gauge.variational.shape,
-        )
-        * float(base_state.jacobian_sign)
-        * samples.sqrt_g
-    )
-    volume_scale = jnp.asarray(volume_scale)
-    normalized_weight = jnp.sqrt(volume_weights / volume_scale)
-    return (normalized_weight[..., None] * samples.force / scale).reshape(-1)
+    samples = evaluate_tensorized_strong_force(base_state, gauge.variational, correction)
+    return _weighted_force(samples, gauge.variational, base_state.jacobian_sign, force_scale, volume_scale).reshape(-1)
+
+
+def _weighted_force(samples, plan: VariationalPlan, jacobian_sign, force_scale, volume_scale) -> Array:
+    """``sqrt(w |sqrt g| / V) F / F*`` with shape ``plan.shape + (3,)``."""
+
+    weights = jnp.broadcast_to(jnp.asarray(plan.quadrature_weights), plan.shape) * float(jacobian_sign) * samples.sqrt_g
+    return jnp.sqrt(weights / jnp.asarray(volume_scale))[..., None] * samples.force / jnp.asarray(force_scale)
 
 
 @jax.jit
@@ -837,9 +809,17 @@ def evaluate_tensorized_strong_force(
         extra = _channel_second(getattr(correction, cosine), getattr(correction, sine), plan)
         return tuple(a + b for a, b in zip(jets, extra))
 
-    R = channel("R_cos", "R_sin")
-    Z = channel("Z_cos", "Z_sin")
-    L = channel("L_cos", "L_sin")
+    return _samples_from_jets(channel("R_cos", "R_sin"), channel("Z_cos", "Z_sin"), channel("L_cos", "L_sin"), plan, state)
+
+
+def _samples_from_jets(R, Z, L, plan: VariationalPlan, state: HighOrderEquilibriumState) -> StrongForceSamples:
+    """Pointwise strong force from the R, Z, lambda second jets (10 arrays each).
+
+    Each node's force depends only on that node's 30 jets; the Jacobian of the
+    force residual is therefore ``A = D S`` with ``D`` pointwise and ``S`` the
+    fixed synthesis tables (see ``_normal_system``).
+    """
+
     _, zz = jnp.meshgrid(plan.theta, plan.zeta, indexing="ij")
     phi = zz.reshape(-1) / float(plan.nfp)
     cosine_phi = jnp.cos(phi)[None]
@@ -1053,11 +1033,12 @@ class _Chart(NamedTuple):
     scale: jax.Array
     constraint: sparse.csr_matrix
     force: Callable[[jax.Array], jax.Array]
+    pattern: dict  # per-chart CSR scatter of the span blocks, built on first use
 
 
 def _chart(state, force_scale: float, volume_scale: float) -> _Chart:
     degree = int(state.radial_basis.degree)
-    plan = make_variational_plan(state, radial_order=degree + 3, stable_derivatives=True)
+    plan = make_variational_plan(state, radial_order=degree + 3)
     layout = make_native_correction_layout(state)
     gauge = make_native_gauge_plan(state, plan)
     scale = native_coordinate_scales(state, layout, plan)
@@ -1068,7 +1049,7 @@ def _chart(state, force_scale: float, volume_scale: float) -> _Chart:
             coordinates, state, layout, gauge, scale, force_scale, volume_scale
         )
 
-    return _Chart(state, plan, layout, gauge, scale, constraint, force)
+    return _Chart(state, plan, layout, gauge, scale, constraint, force, {})
 
 
 def _state(chart: _Chart, coordinates) -> HighOrderEquilibriumState:
@@ -1077,88 +1058,104 @@ def _state(chart: _Chart, coordinates) -> HighOrderEquilibriumState:
     )
 
 
+# Radial-table index and angular table of each of the 10 jets, in the order of
+# ``_channel_second``: value, d/drho, d/dtheta, d/dzeta, then the six second
+# derivatives (rho rho, rho theta, rho zeta, theta theta, theta zeta, zeta zeta).
+_JET_RADIAL = (0, 1, 0, 0, 2, 1, 1, 0, 0, 0)
+_JET_ANGULAR = ("", "", "_theta", "_zeta", "", "_theta", "_zeta", "_theta_theta", "_theta_zeta", "_zeta_zeta")
+
+
 @jax.jit
-def _span_products(coordinates, directions, base, layout, gauge, scale, force_scale, volume_scale, span_plan):
-    """Compressed force tangents on one radial span, shape (colors, rows)."""
+def _jet_jacobian(base, correction, plan, force_scale, volume_scale):
+    """``D[k] = d r / d jet_k`` at every node, shape ``(30,) + plan.shape + (3,)``.
 
-    span_gauge = replace(gauge, variational=span_plan)
+    The residual is pointwise in the jets, so one forward tangent per jet
+    (30 in all) gives the full pointwise derivative.
+    """
 
-    def force(value):
-        return native_physical_force_residual(
-            value, base, layout, span_gauge, scale, force_scale, volume_scale
-        )
+    def jets(field):
+        base_jets = _channel_second(getattr(base, field + "_cos"), getattr(base, field + "_sin"), plan)
+        extra = _channel_second(getattr(correction, field + "_cos"), getattr(correction, field + "_sin"), plan)
+        return jnp.stack([a + b for a, b in zip(base_jets, extra)])
 
-    return jax.vmap(lambda direction: jax.jvp(force, (coordinates,), (direction,))[1])(directions)
+    stacked = jnp.stack([jets("R"), jets("Z"), jets("L")])
 
+    def residual(values):
+        samples = _samples_from_jets(tuple(values[0]), tuple(values[1]), tuple(values[2]), plan, base)
+        return _weighted_force(samples, plan, base.jacobian_sign, force_scale, volume_scale)
 
-def _span_plan(plan: VariationalPlan, start: int, stop: int) -> VariationalPlan:
-    return replace(
-        plan,
-        rho=plan.rho[start:stop],
-        radial_value=plan.radial_value[:, start:stop, :],
-        radial_derivative=plan.radial_derivative[:, start:stop, :],
-        radial_second_derivative=plan.radial_second_derivative[:, start:stop, :],
-        profile_basis=plan.profile_basis[start:stop, :],
-        profile_derivative=plan.profile_derivative[start:stop, :],
-        quadrature_weights=plan.quadrature_weights[start:stop, ...],
-        spline_value=plan.spline_value[start:stop],
-        spline_first=plan.spline_first[start:stop],
-        spline_second=plan.spline_second[start:stop],
-        axis_factors=plan.axis_factors[:, start:stop],
-    )
+    def tangent(k):
+        direction = (jnp.arange(30) == k).astype(stacked.dtype).reshape(3, 10, 1, 1) * jnp.ones_like(stacked)
+        return jax.jvp(residual, (stacked,), (direction,))[1]
+
+    return jax.lax.map(tangent, jnp.arange(30))
 
 
 def _normal_system(chart: _Chart, coordinates, residual, force_scale, volume_scale):
-    """Gauss-Newton normal matrix ``A^T A`` and gradient ``A^T r``, span by span.
+    """Gauss-Newton normal matrix ``A^T A`` and gradient ``A^T r`` by partial assembly.
 
-    Spline support makes each radial span's Jacobian block dense on a few
-    columns: two coefficients of one field and mode that are ``degree + 1``
-    apart never share a span, so ``(field mode, index mod (degree+1))``
-    colors the columns and one batched JVP per span recovers the block.  The
-    global force Jacobian is never formed.
+    ``A = D S``: ``D`` is the pointwise jet derivative (``_jet_jacobian``) and
+    ``S`` the tensor-product synthesis ``radial table x angular table`` of each
+    coefficient.  Each radial span's dense block ``G = D S`` is formed from
+    small contractions on its supported columns and accumulated as ``G^T G``;
+    the global Jacobian is never formed.
     """
 
     plan, layout = chart.plan, chart.layout
+    correction = layout.unpack(chart.scale * jnp.asarray(coordinates))
+    jet = np.asarray(_jet_jacobian(chart.base, correction, plan, force_scale, volume_scale))
+    nrho = int(plan.rho.size)
+    jet = jet.reshape(3, 10, nrho, -1, 3)
+    radial = [np.asarray(t) for t in (plan.radial_value, plan.radial_derivative, plan.radial_second_derivative)]
+    angular = {
+        parity: [np.asarray(getattr(plan, parity + suffix)) for suffix in _JET_ANGULAR]
+        for parity in ("cosine", "sine")
+    }
     active = np.asarray(layout.active_indices, dtype=np.int64)
-    nbasis = int(layout.nbasis)
-    width = int(chart.base.radial_basis.degree) + 1
-    _, color = np.unique((active // nbasis) * width + (active % nbasis) % width, return_inverse=True)
-    directions = np.zeros((int(color.max()) + 1, layout.size))
-    directions[color, np.arange(layout.size)] = 1.0
-    directions = jnp.asarray(directions)
-    support = (
-        (np.asarray(plan.radial_value) != 0.0)
-        | (np.asarray(plan.radial_derivative) != 0.0)
-        | (np.asarray(plan.radial_second_derivative) != 0.0)
-    ).any(axis=0)[:, active % nbasis]
+    nbasis, mnmax = int(layout.nbasis), int(layout.mnmax)
+    channel, remainder = np.divmod(active, mnmax * nbasis)
+    mode, basis = np.divmod(remainder, nbasis)
+    support = (radial[0] != 0.0) | (radial[1] != 0.0) | (radial[2] != 0.0)  # (mode, rho, basis)
+    scale = np.asarray(chart.scale)
     spans = int(chart.base.radial_basis.breakpoints.size - 1)
-    order = int(plan.rho.size) // spans
-    rows_per_node = int(plan.theta.size * plan.zeta.size * 3)
-    rows, cols, vals = [], [], []
+    order = nrho // spans
+    residual = np.asarray(residual).reshape(nrho, -1)
+    cache = chart.pattern
+    if not cache:
+        # The span supports are fixed per chart: build the CSR pattern of their
+        # union and each block's positions in its data array once.
+        cache["columns"] = [np.flatnonzero(support[mode, span * order:(span + 1) * order, basis].any(axis=1))
+                            for span in range(spans)]
+        keys = [np.add.outer(c * layout.size, c).reshape(-1) for c in cache["columns"]]
+        union = np.unique(np.concatenate(keys))
+        cache["indices"] = union % layout.size
+        cache["indptr"] = np.searchsorted(union, np.arange(layout.size + 1) * layout.size)
+        cache["positions"] = [np.searchsorted(union, k) for k in keys]
+    data = np.zeros(cache["indices"].size)
     gradient = np.zeros(layout.size)
-    residual = np.asarray(residual)
     for span in range(spans):
-        start, stop = span * order, (span + 1) * order
-        products = np.asarray(
-            _span_products(
-                jnp.asarray(coordinates), directions, chart.base, layout, chart.gauge, chart.scale,
-                jnp.asarray(force_scale), jnp.asarray(volume_scale), _span_plan(plan, start, stop),
+        nodes = slice(span * order, (span + 1) * order)
+        columns = cache["columns"][span]
+        block = np.empty((order, jet.shape[3], 3, columns.size))
+        # Active columns are channel-major, so each channel is a contiguous range.
+        for ch in np.unique(channel[columns]):
+            where = np.flatnonzero(channel[columns] == ch)
+            pick = columns[where]
+            field, parity = divmod(int(ch), 2)
+            tables = angular["sine" if parity else "cosine"]
+            synthesis = np.stack([
+                radial[_JET_RADIAL[k]][mode[pick], nodes, basis[pick]][:, :, None] * tables[k][mode[pick]][:, None, :]
+                for k in range(10)
+            ])  # (jet, column, rho, angle)
+            block[..., where[0] : where[-1] + 1] = np.einsum(
+                "krac,kjra->racj", jet[field, :, nodes], synthesis, optimize=True
             )
-        )
-        columns = np.flatnonzero(support[start:stop].any(axis=0))
-        # Column j of the block is its color's product; rows outside j's
-        # radial support are structurally zero.
-        block = products[color[columns]].T
-        node_of_row = np.repeat(np.arange(order), rows_per_node)
-        block = np.where(support[start:stop][node_of_row][:, columns], block, 0.0)
-        rows.append(np.repeat(columns, columns.size))
-        cols.append(np.tile(columns, columns.size))
-        vals.append((block.T @ block).reshape(-1))
-        gradient[columns] += block.T @ residual[start * rows_per_node : stop * rows_per_node]
-    normal = sparse.coo_matrix(
-        (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
-        shape=(layout.size, layout.size),
-    ).tocsr()
+        block = block.reshape(-1, columns.size) * scale[columns]
+        gram = blas.dsyrk(1.0, block, trans=1)  # upper triangle of block^T block
+        gram = np.triu(gram) + np.triu(gram, 1).T
+        data[cache["positions"][span]] += gram.reshape(-1)
+        gradient[columns] += block.T @ residual[nodes].reshape(-1)
+    normal = sparse.csr_matrix((data, cache["indices"], cache["indptr"]), shape=(layout.size, layout.size))
     return normal, gradient
 
 
@@ -1211,19 +1208,22 @@ def _gauss_newton(chart: _Chart, coordinates, force_scale, volume_scale, steps: 
     return coordinates, taken
 
 
-def _refine(state, force_scale, volume_scale, count: int):
-    """Insert ``count`` knots at the midpoints of the largest-force spans."""
+def _refine(chart: _Chart, coordinates, count: int):
+    """Insert ``count`` knots at the midpoints of the largest-force spans.
 
-    spans = int(state.radial_basis.breakpoints.size - 1)
-    count = min(int(count), spans - 1)
-    order = int(state.radial_basis.degree) + 3
-    plan = make_variational_plan(state, radial_order=order, stable_derivatives=True)
-    samples = evaluate_tensorized_strong_force(state, plan)
-    density = plan.quadrature_weights * state.jacobian_sign * samples.sqrt_g * jnp.sum(samples.force**2, axis=-1)
-    scores = np.asarray(jnp.sum(density, axis=(1, 2))).reshape(spans, order).sum(axis=1)
-    selected = np.sort(np.argsort(scores)[-count:])
-    breaks = np.asarray(state.radial_basis.breakpoints)
-    return insert_high_order_state_knots(state, 0.5 * (breaks[selected] + breaks[selected + 1]))
+    The chart residual is ``sqrt(w |sqrt g| / V) F / F*`` at every quadrature
+    point, so its squared sum per radial span is the span's force score; no
+    second force evaluation (and no compilation for a new plan) is needed.
+    """
+
+    breaks = np.asarray(chart.base.radial_basis.breakpoints)
+    spans = breaks.size - 1
+    residual = np.asarray(chart.force(coordinates))
+    scores = (residual**2).reshape(spans, -1).sum(axis=1)
+    selected = np.sort(np.argsort(scores)[-min(int(count), spans - 1):])
+    return insert_high_order_state_knots(
+        _state(chart, coordinates), 0.5 * (breaks[selected] + breaks[selected + 1])
+    )
 
 
 def _stationarity(chart: _Chart, coordinates, force_scale, volume_scale, config: NativePolishConfig):
@@ -1300,7 +1300,7 @@ def polish_native(
     force_norm = np.inf
     for stage in range(config.max_refinements + 1):
         if stage:
-            state = _refine(_state(chart, coordinates), force_scale, volume_scale, config.insert_count)
+            state = _refine(chart, coordinates, config.insert_count)
         chart = _chart(state, force_scale, volume_scale)
         coordinates = jnp.zeros((chart.layout.size,))
         coordinates, taken = _gauss_newton(chart, coordinates, force_scale, volume_scale, config.steps_per_chart)

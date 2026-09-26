@@ -1,33 +1,11 @@
 #!/usr/bin/env python
-"""Polish a shaped tokamak's force balance and show what it does and does not change.
+"""Polish a shaped tokamak to a certified, stationary continuum force balance.
 
-VMEX first converges the ordinary VMEC discretization. The optional polish then
-solves the higher-order strong force-balance residual and certifies the result
-with an independent force oracle. A certified equilibrium is exported by
-sampling the native state on a denser radial mesh, where the WOUT
-reconstruction can carry the polish gain; ``solve_file`` writes that file.
-
-The polish is requested by a VMEX-only directive in the deck, so there is no
-Python flag to set here. What this script adds is the evidence:
-
-* the certificate: the same independent oracle on the state before and after
-  the polish;
-* a fair comparison of the two WOUT files. The unpolished state goes through
-  the very same export, onto the same radial mesh, and both files are read
-  back through the same importer and oracle, so they differ only in the
-  polish. (Comparing the solve-mesh WOUT with the denser polished one
-  compares two meshes as well as the polish.)
-* what the polish does not do. It removes the near-axis force error and
-  lowers the edge error, but it does not lower the error at every radius, and
-  the volume-averaged ``<|F|>/<|grad(B^2/2mu0)|>`` falls by much less. The
-  force-balance panel of the WOUT summary plot cannot see the gain: its
-  finite-difference reconstruction reads about 6e-3 on both files.
-
-The two-panel figure ``polish_before_after.webp`` is the README figure. Outside
-the test suite's run it is written straight into ``docs/_static/figures``.
-
-This example has no smoke path: the polish is the demonstration, and the deck
-asks for it.
+The ordinary VMEC solve converges its discrete equations, which does not bound
+the continuum force J x B - grad p.  ``polish=True`` re-solves that force on a
+native quintic-spline representation and certifies it with an independent
+oracle.  This script prints the certificate before and after, checks that the
+written WOUT carries the polished state, and draws the README figure.
 """
 
 import os
@@ -38,16 +16,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import vmex as vj
-from vmex.core.plotting import _relative_force_error_profile
-from vmex.core.polish_driver import polished_wout_state
+from vmex.core.polish_driver import polished_wout_input, polished_wout_state
 
-# Input deck.  Its POLISH_FORCE_BALANCE directive is what requests the polish:
-INPUT_FILE = (
-    Path(__file__).resolve().parent / "data" / "input.shaped_tokamak_pressure_polished"
-)
+# Input deck: fixed-boundary, axisymmetric, prescribed pressure and iota.
+INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.shaped_tokamak_pressure"
 
-# Directory that receives every output file.  The before and after summary
-# figures go into subdirectories of it:
+# Directory that receives every output file:
 OUTPUT_DIR = Path("output_force_balance_polishing")
 BEFORE_NAME = "shaped_tokamak_before_polish"
 README_FIGURE = (Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
@@ -59,29 +33,21 @@ if os.environ.get("VMEX_EXAMPLES_CI") == "1":
 # End of input parameters.
 ###############################################################################
 
-### Set up the equilibrium ####################################################
-
-inp = vj.VmecInput.from_file(INPUT_FILE)
-
 ### Solve and polish ##########################################################
 
-# solve_file reads the VMEX-only directive in the deck; because the polish
-# certifies, the WOUT it writes samples the native state on the export mesh.
-result = vj.solve_file(INPUT_FILE, write_wout=True, outdir=OUTPUT_DIR, verbose=True)
+inp = vj.VmecInput.from_file(INPUT_FILE)
+result = vj.solve_file(INPUT_FILE, polish=True, write_wout=True, outdir=OUTPUT_DIR, verbose=True)
 if result.polished_state is None or result.polish_report is None:
-    raise RuntimeError("the input deck did not request force-balance polishing")
-
-### Check the result ##########################################################
-
+    raise RuntimeError("the solve did not run force-balance polishing")
 report = result.polish_report
 if not report.converged:
-    raise RuntimeError(
-        f"the polish did not certify: {report.termination_reason}"
-    )
-# The same independent force oracle evaluated the legacy state and the
-# certified polished state; these are the certificate numbers.  eps_F is the
-# acceptance threshold and is bounded above by 2 by construction, so the
-# quantities that can actually move are printed with it.
+    raise RuntimeError(f"the polish did not certify: {report.termination_reason}")
+
+### The certificate ###########################################################
+
+# The same independent oracle on the lifted VMEC state and on the polished
+# state.  eps_F is bounded above by 2 by construction; the other two rows are
+# the dimensional and volume-normalized force over the stated flux window.
 window = report.normalization_window
 print(
     "\nindependent strong-force certificate over "
@@ -89,69 +55,46 @@ print(
     f"\n  eps_F volume L2 (<= 2 by construction) "
     f"{report.initial_normalized_l2:.3e} -> {report.final_normalized_l2:.3e}"
     f"\n  <|F|> [N m^-3]                        "
-    f"{report.initial_volume_average_force:.3e} -> "
-    f"{report.final_volume_average_force:.3e}"
+    f"{report.initial_volume_average_force:.3e} -> {report.final_volume_average_force:.3e}"
     f"\n  <|F|>/<|grad(B^2/2mu0)|>              "
     f"{report.initial_magnetic_relative_force_error:.3e} -> "
     f"{report.final_magnetic_relative_force_error:.3e}"
 )
-print(
-    f"polish work: {report.nonlinear_iterations} nonlinear iterations, "
-    f"{report.solve_seconds:.2f} s"
-)
+print(f"polish work: {report.nonlinear_iterations} nonlinear iterations, "
+      f"{report.solve_seconds:.1f} s, projected stationarity "
+      f"{report.least_squares_relative_optimality:.1e}")
 
-### Write both WOUT files on the same mesh ####################################
+### Both WOUT files on the same mesh ##########################################
 
-# solve_file already wrote the certified polished WOUT.  Put the ordinary VMEC
-# state through the same export, so the two files differ only in the polish:
-# read it as a continuous state and sample that on the polished file's mesh.
-solve_ns = int(np.shape(np.asarray(result.state.R_cos))[0])
+# solve_file wrote the polished WOUT.  Put the ordinary VMEC state through the
+# same export and read both back on the polished spline basis, so the two
+# files differ only in the polish.
+native = result.native_equilibrium
 run = dict(fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
            niter=int(result.iterations), converged=bool(result.converged))
-legacy = vj.high_order_state_from_wout(
-    vj.wout_from_state(inp=inp, state=result.state, **run), inp=inp)
+legacy = vj.high_order_state_from_wout(vj.wout_from_state(inp=inp, state=result.state, **run), inp=inp)
+polished_path = OUTPUT_DIR / f"wout_{INPUT_FILE.name.removeprefix('input.')}.nc"
+ns = int(vj.read_wout(polished_path).ns)
 legacy_path = vj.write_wout(
     OUTPUT_DIR / f"wout_{BEFORE_NAME}.nc",
-    vj.wout_from_state(inp=inp, state=polished_wout_state(legacy, inp, solve_ns=solve_ns),
-                       **run),
+    vj.wout_from_state(inp=inp, state=polished_wout_state(legacy, inp, solve_ns=ns), **run),
 )
-case = INPUT_FILE.name.removeprefix("input.")
-polished_path = OUTPUT_DIR / f"wout_{case}.nc"
-print(f"Wrote {legacy_path}\nusing {polished_path}")
-
-### Compare the two files #####################################################
-
-# Read each file back through the same importer and certify it with the same
-# oracle.  This is what a user of the WOUT gets.
-files = {"VMEC solve": legacy_path, "polished": polished_path}
+files = {"VMEC solve": (legacy_path, inp), "polished": (polished_path, polished_wout_input(native, inp))}
 certificates = {
-    label: vj.certify_strong_force(vj.high_order_state_from_wout(path, inp=inp))
-    for label, path in files.items()
+    label: vj.certify_strong_force(
+        vj.high_order_state_from_wout(path, inp=deck, radial_basis=native.radial_basis))
+    for label, (path, deck) in files.items()
 }
 before, after = certificates.values()
-print(f"\nboth WOUT files on ns = {int(vj.read_wout(polished_path).ns)}, "
-      "read back and certified the same way (before -> after):")
+print(f"\nboth WOUT files on ns = {ns}, read back and certified the same way:")
 for label, field in (("RMS |F|, whole volume  [N m^-3]", "absolute_l2"),
                      ("RMS |F|, rho < 0.2     [N m^-3]", "near_axis_l2"),
                      ("RMS |F|, 0.2..0.8      [N m^-3]", "bulk_l2"),
                      ("RMS |F|, rho > 0.8     [N m^-3]", "edge_l2")):
-    print(f"  {label} {float(getattr(before, field)):.3e} => "
-          f"{float(getattr(after, field)):.3e}")
-print(f"  window <|F|>/<|grad(B^2/2mu0)|>  "
-      f"{float(before.window_normalizations.magnetic_relative_force_error):.3e} => "
-      f"{float(after.window_normalizations.magnetic_relative_force_error):.3e}")
-print("  the written polished file reproduces the certificate: eps_F "
-      f"{report.final_normalized_l2:.3e} native, {float(after.normalized_l2):.3e} "
-      "read back")
-worse = (np.asarray(after.flux_surface_average) > np.asarray(before.flux_surface_average))
-if worse.any():
-    rho = np.asarray(after.radial_nodes)[worse]
-    print(f"  the polish does not lower the error everywhere: it is higher on "
-          f"{worse.mean():.0%} of the surfaces, between rho = {rho.min():.2f} "
-          f"and {rho.max():.2f}")
-summary = [_relative_force_error_profile(vj.read_wout(path))[2] for path in files.values()]
-print(f"  summary-plot force panel: {summary[0]:.3e} => {summary[1]:.3e}; this "
-      "WOUT finite-difference reconstruction does not resolve the change")
+    print(f"  {label} {float(getattr(before, field)):.3e} => {float(getattr(after, field)):.3e}")
+print(f"  the written file reproduces the native state: RMS |F| "
+      f"{float(vj.certify_strong_force(native).absolute_l2):.4e} native, "
+      f"{float(after.absolute_l2):.4e} read back")
 
 ### Plot and save #############################################################
 
@@ -163,9 +106,8 @@ figure, (profile, regions) = plt.subplots(1, 2, figsize=(9.0, 3.6),
                                           gridspec_kw={"width_ratios": [1.6, 1.0]},
                                           layout="constrained")
 for label, certificate in certificates.items():
-    rho = np.asarray(certificate.radial_nodes)
-    force = np.asarray(certificate.flux_surface_average)
-    profile.semilogy(rho, force, color=colors[label], linewidth=2.0, label=label)
+    profile.semilogy(np.asarray(certificate.radial_nodes), np.asarray(certificate.flux_surface_average),
+                     color=colors[label], linewidth=2.0, label=label)
 profile.set(xlim=(0.0, 1.0), xlabel=r"$\rho=\sqrt{s}$",
             ylabel=r"$\langle|\mathbf{J}\times\mathbf{B}-\nabla p|\rangle_s$  [N m$^{-3}$]")
 profile.grid(True, which="major", color=GRID)
@@ -173,10 +115,8 @@ profile.legend(loc="upper center")
 names = ("near axis\n" r"$\rho<0.2$", "bulk\n" r"$0.2\leq\rho\leq0.8$", "edge\n" r"$\rho>0.8$")
 x, width = np.arange(3), 0.38
 for i, (label, certificate) in enumerate(certificates.items()):
-    values = [float(certificate.near_axis_l2), float(certificate.bulk_l2),
-              float(certificate.edge_l2)]
-    bars = regions.bar(x + (i - 0.5) * (width + 0.02), values, width,
-                       color=colors[label], label=label)
+    values = [float(certificate.near_axis_l2), float(certificate.bulk_l2), float(certificate.edge_l2)]
+    bars = regions.bar(x + (i - 0.5) * (width + 0.02), values, width, color=colors[label], label=label)
     regions.bar_label(bars, fmt="%.0f", fontsize=8, color=INK2, padding=2)
 regions.set_yscale("log")
 regions.set_xticks(x, names)
@@ -185,11 +125,4 @@ regions.grid(True, axis="y", which="major", color=GRID)
 regions.legend(loc="upper right")
 figure.savefig(README_FIGURE, dpi=160, pil_kwargs={"lossless": True})
 plt.close(figure)
-print(f"Wrote {README_FIGURE}")
-
-# The full WOUT summaries, now on the same mesh.  Their force-balance panel is
-# the finite-difference reconstruction printed above, not the certificate.
-for stage, path in (("before", legacy_path), ("after", polished_path)):
-    stage_dir = OUTPUT_DIR / stage
-    for figure_path in vj.plot_wout(path, stage_dir).values():
-        print(f"Wrote {figure_path}")
+print(f"Wrote {legacy_path}\nWrote {polished_path}\nWrote {README_FIGURE}")

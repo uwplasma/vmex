@@ -904,29 +904,42 @@ gate of this lane is closed; the QI smoothness gate above is not.
 
 ## E. Strong-force polishing
 
-Status (2026-09-25, PR #448): `vmex --polish` runs the native constrained
-force least squares of `vmex/core/polish_native.py` for decks in its qualified
-scope (axisymmetric, fixed boundary, `NCURR = 0`, `GAMMA = 0`, no `LASYM`);
-other decks keep the collocation lane (`PolishConfig.lane` selects). On
-`input.shaped_tokamak_pressure` the whole polish (lift to quintic splines,
-poloidal padding to m = 19, three force-driven knot-insertion charts of
-span-local Gauss-Newton KKT steps, one exact-Hessian Newton step) certifies
-`|F|_rms / (volavgB^2 / mu0 Aminor_p) = 7.1e-6` and projected stationarity
-`eta = 4.6e-10` in about 5 minutes on an M4 CPU, against ~5 s for the ordinary
-solve. The implicit derivative of that root with respect to the pressure
-amplitude matched independently re-solved central differences to 1e-8.
+Status (2026-09-26, PR #448): `vmex --polish` runs the native constrained force
+least squares of `vmex/core/polish_native.py` for decks in its qualified scope
+(axisymmetric, fixed boundary, `NCURR = 0`, `GAMMA = 0`, no `LASYM`); other decks
+keep the collocation lane (`PolishConfig.lane`). On `input.shaped_tokamak_pressure`
+it certifies `|F|_rms / (volavgB^2 / mu0 Aminor_p) = 7.1e-6` and projected
+stationarity `eta = 1.3e-10`. End to end, `vmex --polish` takes 68 s with an empty
+compilation cache and 32 s with a populated one (M4 CPU, float64; the ordinary solve
+alone is ~5 s). The implicit derivative with respect to the pressure amplitude
+matched re-solved central differences to 1e-8.
 
-Two findings shaped the implementation. (1) The stationarity plateau of the
-earlier attempts was evaluation noise: contracting O(1) spline coefficients
-with second-derivative tables loses ~1e-7 of `P A^T r`, and rounding the
-coefficient sum loses more; coefficient-first differencing with separately
-synthesized base and correction jets brings it to ~1e-12. (2) A compact quintic
-basis reaches the force target with 4.4k coordinates where the cubic needed
-11k and a 20-stage schedule.
+Where the time went, and the fixes (profiled with `jax.monitoring` compile events,
+`jax_log_compiles`, and a `jax.profiler` Perfetto trace): the first version spent
+most of ~6 minutes compiling (2,383 XLA compilations) because every chart changes
+array shapes and setup ran eagerly op by op. Fixes: score knot insertion from the
+chart residual instead of a new force evaluation; host (NumPy) B-spline basis
+evaluation and Boehm insertion for concrete inputs; skip the legacy Newton anchor
+in the native lane. Warm arithmetic: the Gauss-Newton normal matrix is formed by
+partial assembly, `A = D S` with `D` the pointwise derivative with respect to the
+30 jets (30 JVPs instead of one per column color) and `S` the tensor-product
+synthesis, a batched contraction per channel, `dsyrk`, and a cached per-chart
+CSR scatter (5.0 s -> 0.55 s per assembly). The independent certificate's point
+oracle evaluates only the `degree + 1` nonzero B-splines by de Boor's algorithm
+(11x faster, unchanged certificate). Remaining warm cost: SuperLU KKT factors
+(~0.9 s each on the final chart; COLAMD beats the symmetric orderings), the two
+certificates, and per-chart compiles.
 
-Open gates: genuine 3-D and prescribed-current closure, `LASYM`, boundary-shape
-derivatives, and a lower polish cost (assembly and the independent certificate
-dominate; each insertion recompiles for new shapes).
+3-D (next): the assembled per-span blocks grow as (3 x mnmax x (degree+1))^2 per
+span, so W7-X-class resolutions (mnmax ~300-550, ~4e4-1e5 coordinates) need a
+matrix-free Gauss-Newton: `S`, then pointwise `D`, then `S^T`, with sum-factorized
+angular synthesis (contract n, then m), CG/LSQR on the gauge-projected normal
+equations, and a preconditioner of per-(m,n) banded radial blocks (GVEC-style,
+formed exactly from `D` and `S`) plus a factored coarse-Fourier block. Cheaper rows:
+a half-period stellarator-symmetric grid and a two-component residual in
+`(grad rho, B x grad rho)` (`F . B = 0` identically here), each ~2-3x. Rewrite
+`native_tangential_gauge_matrix` as tensor contractions (its mode loop is O(mnmax^2)).
+Then prescribed-current closure, `LASYM`, and boundary-shape derivatives.
 
 ## F. Public evidence, documentation and repository maintenance
 
