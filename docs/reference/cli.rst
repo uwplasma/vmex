@@ -94,32 +94,15 @@ Options
    * - ``--max-iter N``
      - Override the final-stage ``NITER_ARRAY`` iteration cap.
    * - ``--polish [MODE]`` / ``--no-polish``
-     - Force-balance polishing after the finest fixed-boundary stage:
-       ``auto``, ``true`` (the bare flag), or ``false``. Overrides the
-       ``!@VMEX POLISH`` input directive. With no flag or directive,
-       polishing is disabled.
-       Precedence is ``CLI > Python keyword > file directive > default``.
-   * - ``--polish-tol VALUE``
-     - Override the polish force tolerance
-       (:class:`vmex.PolishConfig` ``tolerance``).
+     - Force-balance polishing after the finest stage, for fixed-boundary
+       axisymmetric decks with ``NCURR = 0`` and ``GAMMA = 0``: ``auto``
+       (polish when supported), ``true`` (the bare flag), or ``false``.
+       Overrides the ``!@VMEX POLISH`` input directive; with no flag or
+       directive, polishing is disabled.  Precedence is
+       ``CLI > Python keyword > file directive > default``.
    * - ``--polish-fail {error,fallback,warn}``
      - What a failed polish does: raise, return the unpolished state, or
        return it and print a warning. Never a silent substitution.
-   * - ``--polish-degree {3,5,7}``
-     - Radial B-spline degree of the polished representation.
-   * - ``--polish-max-iter N``
-     - Cap the polish Gauss-Newton iterations
-       (:class:`vmex.PolishConfig` ``max_nonlinear_iterations``).
-   * - ``--polish-spans N``
-     - Radial B-spline spans of the polished representation
-       (default: derived from the solve resolution, at most 32).
-   * - ``--polish-budget SECONDS``
-     - Wall-clock ceiling ``--polish auto`` will commit to.  AUTO times one
-       Gauss-Newton linear product on the problem at hand, multiplies by the
-       iteration limits, and returns the equilibrium unpolished if the
-       result exceeds this (:class:`vmex.PolishConfig`
-       ``auto_budget_seconds``, default 3600).  ``--polish true`` never
-       consults it.
    * - ``--restart WOUT``
      - Hot-restart the solve from a ``wout_*.nc`` file (VMEX- or
        VMEC2000-written): the equilibrium state is rebuilt from the file,

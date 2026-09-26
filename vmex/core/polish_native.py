@@ -1,21 +1,21 @@
-"""Native constrained force least squares: the polish solver for supported decks.
+"""Native constrained force least squares: the force-balance polish solver.
 
 The ordinary VMEX solve converges a discrete projected variational problem;
 its tiny FSQR/FSQZ/FSQL do not bound the continuum force
-``F = J x B - grad p``.  This module corrects the independently evaluated
-physical force on the native axis-regular spline representation
-(``a_m(rho) = rho**|m| q(rho**2)``):
+``F = J x B - grad p``.  This module minimizes the volume-weighted physical
+force on the native axis-regular spline representation
+(``a_m(rho) = rho**|m| q(rho**2)``)::
 
-    r_i(c) = sqrt(w_i |sqrt g_i| / V) F_i(c) / F,    min 0.5 |r|^2  s.t.  C c = 0,
+    r_i(c) = sqrt(w_i |sqrt g_i| / V) F_i(c) / F*,   min 0.5 |r|^2   s.t.   C c = 0
 
-with packed coefficient corrections ``c`` in a fixed metric, ``C`` the frozen
-linear tangential (relabeling) gauge, and exact structural boundary and axis
-constraints.  Each chart takes Gauss-Newton KKT steps whose normal matrix is
-assembled span by span from compressed forward products; charts are refined
-exactly (angular zero padding, then knot insertion where the force is
-largest).  A final exact-Hessian Newton step on the constrained stationarity
-equations ``[A^T r + C^T nu, C c] = 0`` (GMRES, Gauss-Newton KKT factor as
-preconditioner) brings the Frobenius-scaled projected gradient
+over packed coefficient corrections ``c`` in a fixed metric, with ``C`` the
+frozen linear tangential (relabeling) gauge and exact structural boundary and
+axis constraints.  Each chart takes Gauss-Newton KKT steps whose normal matrix
+is formed by partial assembly (``A = D S``, see ``_normal_system``); charts
+are refined exactly (angular zero padding, then knot insertion where the force
+is largest).  A final exact-Hessian Newton step on the stationarity equations
+``[A^T r + C^T nu, C c] = 0`` (GMRES, Gauss-Newton KKT factor as
+preconditioner) brings the Frobenius-scaled projected gradient::
 
     eta = |P A^T r| / (|A|_F |r|)
 
@@ -25,8 +25,7 @@ separately, which keeps the evaluated stationarity accurate to ~1e-12 instead
 of the ~1e-7 floor of contracting O(1) coefficients with derivative tables.
 
 Scope: fixed boundary, axisymmetric, prescribed pressure and iota
-(``NCURR = 0``, ``GAMMA = 0``), stellarator-symmetric.  Other decks keep the
-collocation lane of :mod:`vmex.core.polish_driver`.
+(``NCURR = 0``, ``GAMMA = 0``), stellarator-symmetric.
 """
 
 from __future__ import annotations
@@ -992,14 +991,16 @@ def minimum_signed_jacobian(
     return jnp.min(float(plan.jacobian_sign) * fields.sqrt_g)
 
 @dataclass(frozen=True)
-class NativePolishConfig:
-    """Schedule of the native polish.
+class PolishConfig:
+    """Tolerances and schedule of the force-balance polish.
 
-    ``force_tolerance`` bounds the quadrature force norm ``|r|`` (the
-    volume-RMS force over ``force_scale``); ``stationarity_tolerance`` bounds
-    ``eta``.  ``angular_padding`` exact zero-padded poloidal modes are added
-    once; then up to ``max_refinements`` stages each insert ``insert_count``
-    knots at the midpoints of the spans with the largest force.
+    ``force_tolerance`` bounds the volume-RMS force over the wout scale
+    ``volavgB**2 / (mu0 Aminor_p)`` and ``stationarity_tolerance`` the
+    projected gradient ``eta``.  ``angular_padding`` zero-padded poloidal modes
+    are added once; then up to ``max_refinements`` charts each insert
+    ``insert_count`` knots at the midpoints of the largest-force spans.
+    ``fail_policy="return_unpolished"`` returns the unpolished state instead of
+    raising when a tolerance is missed.
     """
 
     force_tolerance: float = 1.0e-5
@@ -1010,6 +1011,15 @@ class NativePolishConfig:
     max_refinements: int = 6
     steps_per_chart: int = 2
     max_newton_steps: int = 4
+    fail_policy: str = "raise"
+
+    def __post_init__(self) -> None:
+        if self.fail_policy not in ("raise", "return_unpolished"):
+            raise ValueError("fail_policy must be 'raise' or 'return_unpolished'")
+        if self.degree not in (3, 5, 7):
+            raise ValueError("degree must be 3, 5 or 7")
+        if min(self.force_tolerance, self.stationarity_tolerance) <= 0.0:
+            raise ValueError("tolerances must be positive")
 
 
 class NativePolishResult(NamedTuple):
@@ -1226,7 +1236,7 @@ def _refine(chart: _Chart, coordinates, count: int):
     )
 
 
-def _stationarity(chart: _Chart, coordinates, force_scale, volume_scale, config: NativePolishConfig):
+def _stationarity(chart: _Chart, coordinates, force_scale, volume_scale, config: PolishConfig):
     """Exact-Hessian constrained Newton on the stationarity equations."""
 
     gradient = jax.jit(jax.grad(lambda c: 0.5 * jnp.vdot(chart.force(c), chart.force(c))))
@@ -1275,7 +1285,7 @@ def polish_native(
     *,
     force_scale: float,
     volume_scale: float,
-    config: NativePolishConfig | None = None,
+    config: PolishConfig | None = None,
     emit: Callable[[str], Any] | None = None,
 ) -> NativePolishResult:
     """Correct the physical force of a lifted native state (see module docstring).
@@ -1288,7 +1298,7 @@ def polish_native(
     every physical tolerance.
     """
 
-    config = NativePolishConfig() if config is None else config
+    config = PolishConfig() if config is None else config
     started = perf_counter()
     say = (lambda _message: None) if emit is None else emit
     m_max = int(np.max(np.abs(np.asarray(state.m))))
@@ -1362,7 +1372,7 @@ def native_polish_supported(source) -> bool:
 
 __all__ = [
     "NativeGaugePlan",
-    "NativePolishConfig",
+    "PolishConfig",
     "NativePolishResult",
     "VariationalFieldSamples",
     "VariationalPlan",

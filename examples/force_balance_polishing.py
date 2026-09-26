@@ -5,7 +5,9 @@ The ordinary VMEC solve converges its discrete equations, which does not bound
 the continuum force J x B - grad p.  ``polish=True`` re-solves that force on a
 native quintic-spline representation and certifies it with an independent
 oracle.  This script prints the certificate before and after, checks that the
-written WOUT carries the polished state, and draws the README figure.
+written WOUT carries the polished state, and draws the two README figures:
+the certified force profiles, and ``vmex --plot`` of both WOUT files side by
+side.
 """
 
 import os
@@ -24,10 +26,11 @@ INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.shaped_tokamak_pr
 # Directory that receives every output file:
 OUTPUT_DIR = Path("output_force_balance_polishing")
 BEFORE_NAME = "shaped_tokamak_before_polish"
-README_FIGURE = (Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
-                 / "readme_polish_before_after.webp")
+FIGURES = Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
 if os.environ.get("VMEX_EXAMPLES_CI") == "1":
-    README_FIGURE = OUTPUT_DIR / "polish_before_after.webp"
+    FIGURES = OUTPUT_DIR
+README_FIGURE = FIGURES / ("polish_before_after.webp" if FIGURES == OUTPUT_DIR else "readme_polish_before_after.webp")
+PLOT_FIGURE = FIGURES / ("polish_plot.webp" if FIGURES == OUTPUT_DIR else "readme_polish_plot.webp")
 
 ###############################################################################
 # End of input parameters.
@@ -62,7 +65,7 @@ print(
 )
 print(f"polish work: {report.nonlinear_iterations} nonlinear iterations, "
       f"{report.solve_seconds:.1f} s, projected stationarity "
-      f"{report.least_squares_relative_optimality:.1e}")
+      f"{report.stationarity:.1e}")
 
 ### Both WOUT files on the same mesh ##########################################
 
@@ -125,4 +128,16 @@ regions.grid(True, axis="y", which="major", color=GRID)
 regions.legend(loc="upper right")
 figure.savefig(README_FIGURE, dpi=160, pil_kwargs={"lossless": True})
 plt.close(figure)
-print(f"Wrote {legacy_path}\nWrote {polished_path}\nWrote {README_FIGURE}")
+
+# `vmex --plot` of both files, side by side.  Its force panel is a
+# finite-difference reconstruction from the WOUT, not the certificate above.
+summaries = [vj.plot_wout(path, OUTPUT_DIR / stage, which=("summary",))["summary"]
+             for stage, path in (("before", legacy_path), ("after", polished_path))]
+figure, axes = plt.subplots(1, 2, figsize=(16.0, 6.4), layout="constrained")
+for axis, image, title in zip(axes, summaries, ("VMEC solve", "polished")):
+    axis.imshow(plt.imread(image))
+    axis.set_title(title, color=INK2, fontsize=14)
+    axis.axis("off")
+figure.savefig(PLOT_FIGURE, dpi=110, bbox_inches="tight", pad_inches=0.05, pil_kwargs={"lossless": True})
+plt.close(figure)
+print(f"Wrote {legacy_path}\nWrote {polished_path}\nWrote {README_FIGURE}\nWrote {PLOT_FIGURE}")

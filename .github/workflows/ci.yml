@@ -344,7 +344,7 @@ jobs:
           JAX_PLATFORMS: cpu
         run: |
           python -m pip freeze
-          pytest -q -m "not full and not weekly" tests/test_polish_linear.py --durations=10
+          pytest -q -m "not full and not weekly" tests/test_polish.py --durations=10
 
   changed-coverage:
     name: Changed executable lines (>= 95%)

@@ -362,21 +362,25 @@ validation. See the [mirror guide](https://vmex.readthedocs.io/en/latest/howto/m
 
 A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged; it does not bound the continuous
 force error `J × B − ∇p`. Optional polishing (`--polish`, or `polish=True`) re-solves that force on
-a native quintic-spline representation: constrained Gauss–Newton steps with force-driven knot
-insertion, then one exact-Hessian Newton step, certified by an independent oracle. It covers
-fixed-boundary axisymmetric decks with prescribed pressure and iota; other decks keep the older
-collocation polish, and an accurate, affordable 3-D polish is still an open goal.
+a native quintic-spline representation — constrained Gauss–Newton steps with force-driven knot
+insertion, then one exact-Hessian Newton step — and certifies it with an independent oracle. It
+covers fixed-boundary axisymmetric decks with prescribed pressure and iota; a non-axisymmetric
+polish is future work.
 
 ![Force error of a shaped finite-pressure tokamak before and after polishing](docs/_static/figures/readme_polish_before_after.webp)
 
-`python examples/force_balance_polishing.py` (under a minute with a warm compilation cache, about
-two minutes cold) polishes `input.shaped_tokamak_pressure` to an RMS force of 7e-6 of
-`volavgB²/(μ₀ Aminor_p)` with projected stationarity 1e-10. Read back from WOUT files on the same
-370-surface mesh, the RMS force falls from 2.0e5 to 42 N m⁻³ over the volume, from 9.8e5 to 190 near
-the axis (`ρ < 0.2`), and from 3.2e3 to 23 at the edge; the written file reproduces the native
-certificate to all printed digits. `eps_F` is bounded above by 2 by construction and saturates in
-vacuum; read the dimensional metrics with it. See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
-for the method and certificate.
+`python examples/force_balance_polishing.py` (about a minute with a warm compilation cache) polishes
+`input.shaped_tokamak_pressure` to an RMS force of 7e-6 of `volavgB²/(μ₀ Aminor_p)` with projected
+stationarity 1e-10. Read back from WOUT files on the same 370-surface mesh, the RMS force falls from
+2.0e5 to 42 N m⁻³ over the volume, from 9.8e5 to 190 near the axis (`ρ < 0.2`) and from 3.2e3 to 23
+at the edge; the written file reproduces the native certificate.
+`eps_F` is bounded above by 2 by construction and saturates in vacuum; read the dimensional metrics with it.
+
+![vmex --plot of the unpolished and polished WOUT files](docs/_static/figures/readme_polish_plot.webp)
+
+The same two files through `vmex --plot`: the summary's `⟨|F|⟩/⟨|∇(B²/2μ₀)|⟩` falls from 3.9e-4 to
+7.7e-6. See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
+and the [validation record](docs/explanation/validation.md).
 
 ## Performance and parallel execution
 

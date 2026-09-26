@@ -457,8 +457,7 @@ class StrongForceReport:
         Largest ``|J x B - grad(p)|`` over the grid nodes, N/m^3.
     normalized_l2, normalized_p99, normalized_linf:
         The same three statistics of the normalised pointwise residual;
-        dimensionless.  ``normalized_l2`` is the quantity the polish drivers
-        compare against ``PolishConfig.certificate_tolerance``.
+        dimensionless; bounded above by 2 by construction.
     radial_l2, helical_l2:
         Volume-weighted RMS of ``StrongForceSamples.radial_force_density``
         and ``.helical_force_density``, N/m^3 -- the split of the residual

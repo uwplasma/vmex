@@ -61,18 +61,12 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/preconditioner_2d_stiff_cases.json", "benchmarks/preconditioner_2d_stiff.py"),
     ("benchmarks/capabilities.json", "tools/render_capabilities.py"),
     ("benchmarks/device_cache_reload_m4.json", "benchmarks/device_cache_reload.py"),
-    ("benchmarks/polish_cost_*.json", "benchmarks/polish_cost.py"),
-    ("benchmarks/polish_memory_*.json", "benchmarks/polish_memory.py"),
-    ("benchmarks/polish_implicit_*.json", "benchmarks/polish_implicit.py"),
-    ("benchmarks/polish_preconditioner_*.json", "benchmarks/polish_preconditioner.py"),
-    ("benchmarks/polish_force_error_*.json", "benchmarks/strong_polish.py"),
     ("benchmarks/qa_optimization_startup_*.json", "benchmarks/qa_optimization_startup.py"),
     ("benchmarks/single_stage_profile_*.json", "benchmarks/single_stage_profile.py"),
     ("benchmarks/qi_optimization_profile_*.json", "benchmarks/qi_optimization_profile.py"),
     ("benchmarks/strong_force_m4.json", "benchmarks/strong_force.py"),
     ("benchmarks/strong_force_cases_m4.json", "benchmarks/make_strong_force_comparison.py"),
     ("benchmarks/strong_force_comparison_m4.json", "benchmarks/make_strong_force_comparison.py"),
-    ("benchmarks/strong_root_*.json", "benchmarks/strong_root.py"),
     # Hand-recorded records: no script in the tree writes them.  They are
     # status and narrative records gated by tests or quoted by docs.
     ("benchmarks/mirror_*.json", ""),
