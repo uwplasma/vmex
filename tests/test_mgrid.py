@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -255,6 +255,28 @@ def test_spatial_derivatives_compile_once_per_order():
     # A zero first count would mean the counted message was renamed upstream.
     assert 1 <= counts[0] <= 12, f"the derivative chain took {counts[0]} compilations"
     assert counts[1] == 0, f"repeating the calls recompiled {counts[1]} times"
+
+
+def test_radial_parity_axis_row_is_extrapolated_not_copied():
+    """An ``m > 0`` coefficient ``s**(m/2) (a + b s)`` is reproduced near the axis.
+
+    Its regularized part ``a + b s`` is linear, so the interpolant must recover
+    both the value and the s-slope in the first cell.  Copying the first
+    surface into the axis row gave a zero slope there and an axis value off by
+    ``b/(ns-1)``, independent of the evaluation radius.
+    """
+    ns = 9
+    s_mesh = np.arange(ns)/(ns-1)
+    modes = jnp.asarray([1.0, 2.0])
+    a, b = np.asarray([0.7, -0.3]), np.asarray([0.4, 1.1])
+    table = jnp.asarray(s_mesh[:, None]**(np.asarray(modes)/2)*(a+b*s_mesh[:, None]))
+    for s in (1e-6, 0.03, 0.1):
+        value, derivative = ext._radial_value_and_derivative(table, jnp.asarray(s), modes)
+        powers = np.asarray(modes)/2
+        exact = s**powers*(a+b*s)
+        exact_derivative = powers*s**(powers-1)*(a+b*s)+s**powers*b
+        np.testing.assert_allclose(np.asarray(value), exact, rtol=1e-12)
+        np.testing.assert_allclose(np.asarray(derivative), exact_derivative, rtol=1e-10)
 
 
 def test_extender_helper_contracts_and_public_equilibrium_aliases():
@@ -532,6 +554,59 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
 
 
 @pytest.mark.usefixtures("_module_jit_enabled")  # one solve, 200 s interpreted
+def test_flux_coordinates_compile_once_and_repeat_for_free():
+    """``flux_coordinates`` and its exterior-point check run as compiled kernels.
+
+    Both used to run primitive by primitive: 468 compilations for three points
+    here, and over a minute on the HSX wout (858 modes, 501 points, 88 of them
+    outside the plasma).  Three kernels and a few element-wise bookkeeping ops
+    remain.  The suite runs with ``jax_disable_jit``, so enable jit here.
+    """
+    ns, major_radius, minor_radius = 7, 1.0, 0.3
+    s_mesh = jnp.linspace(0.0, 1.0, ns)
+    spectra = {
+        "nfp": 1, "ns": ns,
+        "xm": jnp.array([0.0, 1.0]), "xn": jnp.array([0.0, 0.0]),
+        "xmn": jnp.array([0.0]), "xnn": jnp.array([0.0]),
+        "rmnc": jnp.stack((jnp.full(ns, major_radius), minor_radius * jnp.sqrt(s_mesh)), axis=1),
+        "zmns": jnp.stack((jnp.zeros(ns), minor_radius * jnp.sqrt(s_mesh)), axis=1),
+        "rmns": None, "zmnc": None,
+        "bsupu": jnp.zeros((ns, 1)), "bsupv": jnp.ones((ns, 1)),
+        "bsupu_s": None, "bsupv_s": None, "lasym": False, "signgs": -1,
+    }
+    # Two interior points and one far outside, which takes the loud-failure check.
+    points = jnp.array([[1.1, 0.2, 0.05], [0.2, -0.85, -0.1], [2.0, 0.0, 0.0]])
+    field = VmecInteriorField(spectra)
+
+    compiled: list[str] = []
+
+    class _Counter(logging.Handler):
+        def emit(self, record):
+            if "Finished XLA compilation of" in record.getMessage():
+                compiled.append(record.getMessage())
+
+    logger, handler = logging.getLogger("jax"), _Counter()
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    counts = []
+    try:
+        with jax.disable_jit(False):
+            for _ in range(2):
+                compiled.clear()
+                with jax.log_compiles():
+                    jitted = field.flux_coordinates(points)
+                counts.append(len(compiled))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+    # The eager reference runs last, or its primitives would warm the cache.
+    eager = VmecInteriorField(spectra).flux_coordinates(points)
+    np.testing.assert_allclose(jitted, eager, rtol=0, atol=1e-12)
+    assert 1 <= counts[0] <= 24, f"flux_coordinates took {counts[0]} compilations"
+    assert counts[1] == 0, f"repeating the call recompiled {counts[1]} times"
+
+
 def test_interior_geometry_matches_the_wout_table():
     """The interior field and the wout must describe the same surfaces.
 
@@ -837,6 +912,60 @@ def test_extcur_scaling_is_linear(data: MgridData) -> None:
         np.testing.assert_allclose(3.0 * np.asarray(a), np.asarray(b), rtol=1e-13, atol=0.0)
 
 
+def test_default_extcur_is_the_file_field_in_every_mgrid_mode(
+        data: MgridData, tmp_path: Path) -> None:
+    """A mode-R/N table carries its currents; only a mode-S table is per ampere.
+
+    The default must equal the deck-aware loader at ``EXTCUR = raw_coil_cur``,
+    the currents the file was computed with.  Multiplying a raw table by its
+    own currents gave ``-B`` for the HSX mgrid (mode R, raw current -1 A).
+    """
+    from vmex.core.freeboundary import _external_field_from_input
+
+    r, phi, z = _random_points(data, n=40, seed=11)
+    table = MgridField.from_mgrid_data(data, extcur=np.ones(data.nextcur)).b_cyl(r, phi, z)
+    raw = tuple(-2.5 for _ in range(data.nextcur))
+    for mode, factor in (("S", -2.5), ("R", 1.0), ("N", 1.0)):
+        variant = replace(data, mgrid_mode=mode, raw_coil_cur=raw)
+        default = MgridField.from_mgrid_data(variant).b_cyl(r, phi, z)
+        path = tmp_path / f"mgrid_{mode}.nc"
+        write_mgrid(path, variant)
+        deck = SimpleNamespace(extcur=list(raw), mgrid_file=str(path))
+        solver = _external_field_from_input(deck).b_cyl(r, phi, z)
+        for got, want, loaded in zip(default, table, solver):
+            np.testing.assert_allclose(got, factor * np.asarray(want), rtol=1e-14, atol=0.0)
+            np.testing.assert_allclose(got, loaded, rtol=1e-14, atol=0.0)
+
+
+def test_sum_groups_reads_the_same_field_into_one_group(
+        data: MgridData, tmp_path: Path) -> None:
+    """Summing the groups while reading gives the per-group field at 1/nextcur the size.
+
+    On the 5.8 GB HSX mgrid (12 groups) this cut peak memory from 6.1 GB to
+    0.63 GB and interpolation 17x.  A zero-current group is skipped, not read.
+    """
+    r, phi, z = _random_points(data, n=40, seed=5)
+    two = replace(data, nextcur=3, coil_groups=("a", "b", "c"), raw_coil_cur=(2.0, -3.0, 5.0),
+                  br=np.concatenate((data.br, 0.5 * data.br, data.br)),
+                  bp=np.concatenate((data.bp, -data.bp, data.bp)),
+                  bz=np.concatenate((data.bz, 2.0 * data.bz, data.bz)))
+    for mode in ("S", "R"):
+        path = tmp_path / f"mgrid_{mode}.nc"
+        write_mgrid(path, replace(two, mgrid_mode=mode))
+        for extcur in (None, [1.5, -0.25, 0.0]):
+            summed = read_mgrid(path, sum_groups=True, extcur=extcur)
+            assert (summed.nextcur, summed.mgrid_mode, summed.raw_coil_cur) == (1, "S", (1.0,))
+            assert summed.br.shape == (1,) + data.br.shape[1:]
+            got = MgridField.from_file(path, extcur, sum_groups=True).b_cyl(r, phi, z)
+            want = MgridField.from_file(path, extcur).b_cyl(r, phi, z)
+            for a, b in zip(got, want):
+                np.testing.assert_allclose(a, b, rtol=1e-13, atol=1e-15)
+    with pytest.raises(ValueError, match="only with sum_groups"):
+        read_mgrid(path, extcur=[1.0, 1.0, 1.0])
+    with pytest.raises(ValueError, match="does not match nextcur"):
+        read_mgrid(path, sum_groups=True, extcur=[1.0])
+
+
 def test_jit_equivalence(data: MgridData) -> None:
     r, phi, z = _random_points(data, n=100, seed=42)
     field = MgridField.from_mgrid_data(data)  # extcur defaults to raw currents
@@ -865,6 +994,50 @@ def test_grad_wrt_extcur_finite_nonzero(data: MgridData) -> None:
     assert g_np.shape == (data.nextcur,)
     assert np.all(np.isfinite(g_np))
     assert np.max(np.abs(g_np)) > 0.0
+
+
+def test_tricubic_interpolation_is_third_order_and_continuously_differentiable() -> None:
+    """``order=3`` converges at third order and its gradient has no cell-face jumps."""
+
+    def field(points):
+        x, y, z = np.asarray(points).T
+        return np.stack((np.sin(2.0 * x) * np.cos(z), np.cos(y) * np.exp(0.5 * z),
+                         np.sin(x + y) + z**2), axis=-1)
+
+    def b_xyz(f, xyz):
+        r, phi = jnp.hypot(xyz[..., 0], xyz[..., 1]), jnp.arctan2(xyz[..., 1], xyz[..., 0])
+        br, bp, bz = f.b_cyl(r, phi, xyz[..., 2])
+        return jnp.stack((br * jnp.cos(phi) - bp * jnp.sin(phi),
+                          br * jnp.sin(phi) + bp * jnp.cos(phi), bz), axis=-1)
+
+    rng = np.random.default_rng(0)
+    r = rng.uniform(1.2, 1.8, 200)
+    phi = rng.uniform(0.0, 2.0 * np.pi, 200)
+    xyz = np.stack((r * np.cos(phi), r * np.sin(phi), rng.uniform(-0.3, 0.3, 200)), axis=-1)
+    errors = {}
+    for n in (17, 33):
+        data = tabulate_cartesian_field(field, rmin=1.0, rmax=2.0, zmin=-0.5, zmax=0.5,
+                                        ir=n, jz=n, kp=2 * (n - 1), nfp=1)
+        for order in (1, 3):
+            f = MgridField.from_mgrid_data(data, extcur=[1.0], order=order)
+            errors[n, order] = np.abs(np.asarray(b_xyz(f, jnp.asarray(xyz))) - field(xyz)).max()
+    assert errors[33, 3] < 0.05 * errors[33, 1], errors
+    assert errors[17, 3] / errors[33, 3] > 6.0, errors  # third order; trilinear gives 4
+    # Grid nodes are reproduced, and the jit/pytree path keeps the order.
+    cubic = MgridField.from_mgrid_data(data, extcur=[1.0], order=3)
+    node = jnp.array([[1.5, 0.0, 0.0]])
+    np.testing.assert_allclose(b_xyz(cubic, node), field(node), rtol=0, atol=1e-13)
+    np.testing.assert_allclose(jax.jit(b_xyz)(cubic, node), b_xyz(cubic, node), rtol=1e-14, atol=0)
+    # d B / d R across the cell face at R = 1.5: continuous for order 3 only.
+    face = jnp.array([1.5 * np.cos(0.05), 1.5 * np.sin(0.05), 0.07])  # R = 1.5 is a node
+    jumps = {}
+    for order in (1, 3):
+        f = MgridField.from_mgrid_data(data, extcur=[1.0], order=order)
+        radial = jax.grad(lambda x, f=f: b_xyz(f, x)[0])
+        jumps[order] = float(jnp.abs(radial(face * (1 + 1e-9)) - radial(face * (1 - 1e-9))).max())
+    assert jumps[3] < 1e-6 < jumps[1], jumps
+    with pytest.raises(ValueError, match="order must be 1"):
+        MgridField.from_mgrid_data(data, extcur=[1.0], order=2)
 
 
 def test_tabulate_cartesian_callable_and_cylindrical_conversion() -> None:

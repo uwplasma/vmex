@@ -1048,13 +1048,35 @@ def solve_file(
     config = polish_config_from_options(options, polish_config)
     inp = request.input
 
+    # Free-boundary routing exactly as ``vmex <input>`` does it: MGRID_FILE is
+    # resolved against the deck's directory, the coil metadata reaches the
+    # wout, and an unreadable mgrid falls back to a fixed-boundary solve
+    # (VMEC2000 policy).  Explicit mgrid_path/external_field keywords win.
+    freeb_plan = None
+    if bool(inp.lfreeb) and not ({"mgrid_path", "external_field"} & solve_kwargs.keys()):
+        import dataclasses
+        import types
+        import warnings
+
+        from .cli import _free_boundary_plan
+
+        def _warn(message):
+            warnings.warn(" ".join(message.split()), RuntimeWarning, stacklevel=3)
+
+        freeb_plan = _free_boundary_plan(
+            types.SimpleNamespace(coils=None), inp, _Path(path), emit=_warn
+        )
+        if freeb_plan is None:
+            inp = dataclasses.replace(inp, lfreeb=False)
+
     if bool(inp.lfreeb):
         if options.polish is not False:
             raise ValueError(
                 "force-balance polishing requires a fixed-boundary input; "
                 f"the polish request came from the {sources['polish']}"
             )
-        result = solve_free_boundary_multigrid(inp, **solve_kwargs)
+        plan_kwargs = {} if freeb_plan is None else freeb_plan.solver_kwargs
+        result = solve_free_boundary_multigrid(inp, **{**plan_kwargs, **solve_kwargs})
     else:
         if bool(solve_kwargs.get("verbose")) and options.polish is not False:
             print(f"polish = {options.polish!r} (from {sources['polish']})")
@@ -1088,5 +1110,5 @@ def solve_file(
         directory = _Path(outdir) if outdir is not None else source.parent
         directory.mkdir(parents=True, exist_ok=True)
         wout_path = directory / f"wout_{case_from_input(source)}.nc"
-        _write_wout_from_result(inp, source, result, wout_path)
+        _write_wout_from_result(inp, source, result, wout_path, freeb_plan=freeb_plan)
     return result

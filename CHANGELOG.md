@@ -12,6 +12,14 @@ Inputs/coils live in `examples/single_stage_support/data/`, geometry tests in `t
 and historical records in `benchmarks/single_stage_provenance/`. Constraint settings are per-case;
 physics defaults and input bytes are unchanged. Upstream root anchoring receives field parameters and failure policy explicitly.
 
+## 0.11.2 - 2026-09-24
+
+A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
+`VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
+(#449). On clusters, a shared cache path was read by nodes with different CPU
+features; XLA rejected the other node's executables ("Target machine feature
+... is not supported on the host machine") and recompiled on every run.
+
 ## 0.11.1 - 2026-09-23
 
 Free-boundary trials are anchored on the coupled root their gradients

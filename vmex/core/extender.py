@@ -489,7 +489,13 @@ def _radial_table(coefficients: Array, modes: Array | None,
         s_mesh = jnp.arange(ns, dtype=coefficients.dtype) / (ns - 1)
         scale = s_mesh[:, None] ** powers[None, :]
         regular = coefficients / jnp.where(scale == 0.0, 1.0, scale)
-        regular = regular.at[0].set(jnp.where(powers > 0, regular[1], regular[0]))
+        # The regular coefficient is smooth in s, so its axis value is a linear
+        # extrapolation from the first two surfaces.  Copying the first surface
+        # made the axis value first order in the radial step and left the
+        # first cell with a zero s-slope, an O(1) error in R_s and Z_s (and so
+        # in the native Jacobian and current) that no radial refinement removes.
+        axis = 2.0 * regular[1] - regular[2] if ns > 2 else regular[1]
+        regular = regular.at[0].set(jnp.where(powers > 0, axis, regular[0]))
     # Zero moments reduce the evaluation below to plain linear interpolation.
     return regular, _spline_moments(regular) if spline else jnp.zeros_like(regular)
 
@@ -1014,7 +1020,7 @@ class VmecInteriorField(MagneticField):
         self.spectra = spectra
         self.newton_iterations = int(newton_iterations)
         self._points_flux: Array | None = None
-        self._derivative_fns: dict[tuple[int, int, int], Callable[[Array, Array], Array]] = {}
+        self._derivative_fns: dict[tuple[int, int, int], Callable[..., Any]] = {}
         self._warned = False
 
         def B_fn(points):
@@ -1074,6 +1080,17 @@ class VmecInteriorField(MagneticField):
             evaluate = self._derivative_fns[key] = jax.jit(evaluate)
         return self._loud(evaluate(xyz, seeds), xyz, seeds)
 
+    def _compiled(self, kind: int, build: Callable[[], Callable[..., Any]]) -> Callable[..., Any]:
+        """``build()`` compiled once per ``kind``, spectra and iteration bound.
+
+        Negative kinds keep these apart from :meth:`_evaluate`'s orders.
+        """
+        key = (kind, id(self.spectra), self.newton_iterations)
+        compiled = self._derivative_fns.get(key)
+        if compiled is None:
+            compiled = self._derivative_fns[key] = jax.jit(build())
+        return compiled
+
     def _loud(self, value: Array, xyz: Array, seeds: Array) -> Array:
         """Raise when an eager result is NaN because the inversion stalled.
 
@@ -1084,9 +1101,9 @@ class VmecInteriorField(MagneticField):
         """
         if isinstance(value, jax.core.Tracer) or not bool(jnp.isnan(value).any()):
             return value
-        _, valid = _invert_coordinates(
-            self.spectra, xyz, newton_iterations=self.newton_iterations,
-            initial_flux=seeds)
+        spectra, iterations = self.spectra, self.newton_iterations
+        _, valid = self._compiled(-2, lambda: lambda xyz, seeds: _invert_coordinates(
+            spectra, xyz, newton_iterations=iterations, initial_flux=seeds))(xyz, seeds)
         # Seeded callers were told which surface the point is on; everyone
         # else is classified against the boundary itself, because an
         # unconverged iterate's own s carries no information about where the
@@ -1096,8 +1113,8 @@ class VmecInteriorField(MagneticField):
         # silently classified every unseeded point as exterior and suppressed
         # the complaint this method exists to raise.
         label = jnp.asarray(seeds[:, 0])
-        interior = jnp.where(jnp.isfinite(label), label <= 1.0 + 1.0e-8,
-                             _inside_boundary(self.spectra, xyz))
+        inside = self._compiled(-3, lambda: lambda xyz: _inside_boundary(spectra, xyz))
+        interior = jnp.where(jnp.isfinite(label), label <= 1.0 + 1.0e-8, inside(xyz))
         stalled = ~valid & interior
         if bool(stalled.any()):
             raise VmecNumericalError(
@@ -1168,8 +1185,9 @@ class VmecInteriorField(MagneticField):
         if points is None and self._points_flux is not None:
             return self._points_flux
         xyz, seeds = self._seeds(points)
-        coordinates, field = _interior_coordinates_and_B(
-            self.spectra, xyz, newton_iterations=self.newton_iterations)
+        spectra, iterations = self.spectra, self.newton_iterations
+        coordinates, field = self._compiled(-1, lambda: lambda xyz: _interior_coordinates_and_B(
+            spectra, xyz, newton_iterations=iterations))(xyz)
         self._loud(field, xyz, seeds)
         return coordinates
 

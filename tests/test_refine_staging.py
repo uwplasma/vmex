@@ -244,7 +244,9 @@ def test_block_finish_reaches_the_krylov_anchor_with_one_factorization(monkeypat
     deck. The Krylov arm is today's refinement (no block steps); the default
     arm takes Newton steps through one raw block factorization first.
     """
-    _, cfg, p0 = _small_solovev_setup()
+    inp, _, p0 = _small_solovev_setup()
+    # A tolerance below one step's reach, so the single pass must miss it.
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-15)
     state, mask = _host_state(cfg, p0)
     P = im._dof_projector(cfg, mask)
     F = im.residual_fn(cfg, state, mask)
@@ -325,3 +327,41 @@ def test_block_finish_without_progress_replays_the_krylov_anchor(monkeypatch) ->
         jax.config.update("jax_disable_jit", previous)
     for replayed_leaf, krylov_leaf in zip(jax.tree.leaves(replayed), jax.tree.leaves(krylov)):
         np.testing.assert_array_equal(np.asarray(replayed_leaf), np.asarray(krylov_leaf))
+
+
+def test_refinement_restarts_from_its_best_iterate(monkeypatch) -> None:
+    """A pass that lowers |F| but misses refine_tol is restarted from its best iterate.
+
+    With one step per phase a single pass cannot certify the small deck.  The
+    restarted refinement must end strictly lower, never above the host state,
+    and without restarts the result must be the one-pass result bit for bit.
+    """
+    inp, _, p0 = _small_solovev_setup()
+    # A tolerance below one step's reach, so the single pass must miss it.
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-15)
+    state, mask = _host_state(cfg, p0)
+    P = im._dof_projector(cfg, mask)
+    F = im.residual_fn(cfg, state, mask)
+
+    def residual(tree):
+        return float(im._tree_norm(F(P(tree), p0)))
+
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 1)
+        monkeypatch.setattr(im, "_REFINE_MAX_STEPS", 1)
+        with monkeypatch.context() as m:
+            m.setattr(im, "_REFINE_RESTARTS", 0)
+            one_pass = im._refined_state(cfg, p0, state, mask)
+            m.setattr(im, "_REFINE_RESTARTS", 0)
+            again = im._refined_state(cfg, p0, state, mask)
+        restarted = im._refined_state(cfg, p0, state, mask)
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+    for a, b in zip(jax.tree.leaves(one_pass), jax.tree.leaves(again)):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+    host, single, multi = residual(state), residual(one_pass), residual(restarted)
+    assert single < host
+    assert single > float(cfg.refine_tol), "fixture no longer exercises a missed pass"
+    assert multi < single
