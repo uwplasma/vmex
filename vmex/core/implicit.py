@@ -1468,6 +1468,13 @@ _REFINE_MAX_RESTARTS = 20
 #: (mpol = ntor = 8) reaches 5.2e-5, raises ``|F|`` and certifies two steps later.
 _REFINE_MIN_PROGRESS = 1.0e-3
 
+#: Further refinement passes, each restarted (and refactorized) from the best
+#: iterate of the previous one, while a pass still lowers ``|F|`` but misses
+#: ``refine_tol``.  Measured on an exact integer-family NS=65 deck (TCON0=0):
+#: the host state 5.5e-07 refines to 1.2e-07 in one pass (its first full step
+#: overshoots), and a second pass from there reaches 6.2e-14 in three steps.
+_REFINE_RESTARTS = 2
+
 #: Newton steps through one raw block factorization, taken before the Krylov
 #: steps above.  The raw force Jacobian is exactly block tridiagonal in
 #: radius, so its factorization is the natural 2-D preconditioner (VMEC2000's
@@ -1752,6 +1759,16 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     # A warm guess that misses the tolerance cannot alter numerical results:
     # replay the original refinement from the host-solver state.
     best_z, best = refine_from(z0, fz, base)
+    # A pass that lowered |F| but missed ``tol`` usually stopped because its
+    # first Newton step started outside the quadratic region; restarting from
+    # the best iterate refactorizes there and lands inside it.
+    for _ in range(_REFINE_RESTARTS):
+        if not (tol < best < base):
+            break
+        restart_z, restart = refine_from(best_z, F(best_z, params), best)
+        if not restart < best:
+            break
+        best_z, best = restart_z, restart
     if best >= base:
         return state
     correction = P(jax.tree.map(lambda a, b: a - b, best_z, z0))
