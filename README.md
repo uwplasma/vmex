@@ -336,6 +336,14 @@ The live equilibrium exposes Cartesian `B()`, `gradB()`, `gradgradB()` and
 of freedom. Use `set_points_xyz(...)` or `set_points_flux(...)` to select
 interior evaluation points.
 
+This interior field is also the most accurate way to read an equilibrium. Against an exact
+finite-pressure solution, it gives the current 10 to 70 times more accurately than the WOUT file
+between s = 0.25 and 0.75, for equilibria from VMEX, VMEC2000 or VMEC++ alike (any WOUT can be
+loaded with `vmex.state_from_wout`). Within the first few surfaces of the axis the WOUT current
+is better. See the [interior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/interior-field.html).
+
+![B and J errors: WOUT file versus VmecInteriorField, against an exact solution](docs/_static/figures/readme_interior_field.webp)
+
 For an exterior field, `vj.VmecExtender.from_file("wout_my_case.nc",
 external_field=coils.B)` combines the plasma's virtual-casing contribution with
 the supplied coil field. The plasma part is a quadrature over a source grid on
