@@ -53,6 +53,108 @@ jax.tree_util.register_dataclass(
 
 @jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True, eq=False)
+class NativeCorrectionLayout:
+    """Direct structural coordinates for native spline corrections.
+
+    Unlike :class:`StrongRootLayout`, this layout is not defined as the image
+    of a legacy restriction/prolongation pair.  It removes only exact
+    structural nulls, the fixed R/Z edge coefficients, stellarator-asymmetric
+    channels when requested, and the angle-independent lambda gauge.  In
+    particular, independent R and Z normal displacements remain present.
+    """
+
+    mnmax: int
+    nbasis: int
+    active_indices: np.ndarray
+    lasym: bool
+
+    def tree_flatten(self):
+        """Expose active indices as data and topology as metadata."""
+
+        return (jnp.asarray(self.active_indices),), (
+            int(self.mnmax),
+            int(self.nbasis),
+            bool(self.lasym),
+        )
+
+    @classmethod
+    def tree_unflatten(cls, metadata, children):
+        """Rebuild a native layout from its pytree representation."""
+
+        mnmax, nbasis, lasym = metadata
+        (active_indices,) = children
+        return cls(
+            mnmax=mnmax,
+            nbasis=nbasis,
+            active_indices=active_indices,
+            lasym=lasym,
+        )
+
+    @property
+    def size(self) -> int:
+        """Number of structurally free native coefficients."""
+
+        return int(self.active_indices.size)
+
+    def pack(self, correction: HighOrderCorrection) -> Array:
+        """Select free coefficients from a native correction."""
+
+        flat = _flatten_high(correction)
+        return flat[jnp.asarray(self.active_indices)]
+
+    def unpack(self, vector: Array) -> HighOrderCorrection:
+        """Insert a free vector into the six native coefficient tables."""
+
+        vector = jnp.asarray(vector)
+        if vector.shape != (self.size,):
+            raise ValueError(
+                f"free vector has shape {vector.shape}; expected {(self.size,)}"
+            )
+        flat = jnp.zeros(
+            (len(_FIELDS) * self.mnmax * self.nbasis,), dtype=vector.dtype
+        )
+        flat = flat.at[jnp.asarray(self.active_indices)].set(vector)
+        return _unflatten_high(flat, self.mnmax, self.nbasis)
+
+
+def make_native_correction_layout(
+    native: HighOrderEquilibriumState,
+    *,
+    lasym: bool = False,
+) -> NativeCorrectionLayout:
+    """Construct full native R/Z/lambda structural coordinates.
+
+    A clamped spline's final coefficient is its value at ``rho=1``; removing
+    that coefficient from R and Z corrections enforces the fixed boundary
+    algebraically.  Lambda remains free at the edge, except for its complete
+    ``(m,n)=(0,0)`` gauge family.
+    """
+
+    mnmax = int(np.asarray(native.m).size)
+    nbasis = int(native.radial_basis.size)
+    active = np.ones((len(_FIELDS), mnmax, nbasis), dtype=bool)
+    if not lasym:
+        for name in ("R_sin", "Z_cos", "L_cos"):
+            active[_FIELDS.index(name)] = False
+    mode_zero = (np.asarray(native.m, dtype=int) == 0) & (
+        np.asarray(native.n, dtype=int) == 0
+    )
+    for name in ("R_sin", "Z_sin", "L_sin"):
+        active[_FIELDS.index(name), mode_zero] = False
+    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin"):
+        active[_FIELDS.index(name), :, -1] = False
+    for name in ("L_cos", "L_sin"):
+        active[_FIELDS.index(name), mode_zero] = False
+    return NativeCorrectionLayout(
+        mnmax=mnmax,
+        nbasis=nbasis,
+        active_indices=np.flatnonzero(active.reshape(-1)).astype(np.int32),
+        lasym=bool(lasym),
+    )
+
+
+@jax.tree_util.register_pytree_node_class
+@dataclass(frozen=True, eq=False)
 class HighLowTransfer:
     """Linear maps between regularized splines and legacy VMEX packing.
 
@@ -1765,12 +1867,14 @@ __all__ = [
     "HighLowTransfer",
     "HighOrderCorrection",
     "LowOrderPreconditioner",
+    "NativeCorrectionLayout",
     "StrongPhysicalChart",
     "StrongRootLayout",
     "StrongRootRuntime",
     "apply_high_order_correction",
     "build_low_order_preconditioner",
     "make_high_low_transfer",
+    "make_native_correction_layout",
     "make_strong_structured_chart",
     "make_strong_root_layout",
     "make_strong_root_runtime",

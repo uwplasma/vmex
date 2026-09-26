@@ -361,25 +361,21 @@ validation. See the [mirror guide](https://vmex.readthedocs.io/en/latest/howto/m
 ## Accuracy and optional polishing
 
 A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged; it does not bound the continuous
-force error `J × B − ∇p`. Optional spline-based polishing is off by default and remains a research
-feature. It certifies on the bundled axisymmetric shaped, finite-pressure tokamak, where the gain
-is real but not uniform; an accurate, affordable 3-D polished solve is still an open goal.
+force error `J × B − ∇p`. Optional polishing (`--polish`, or `polish=True`) re-solves that force on
+a native quintic-spline representation: constrained Gauss–Newton steps with force-driven knot
+insertion, then one exact-Hessian Newton step, certified by an independent oracle. It covers
+fixed-boundary axisymmetric decks with prescribed pressure and iota; other decks keep the older
+collocation polish, and an accurate, affordable 3-D polish is still an open goal.
 
 ![Force error of a shaped finite-pressure tokamak before and after polishing](docs/_static/figures/readme_polish_before_after.webp)
 
-`python examples/force_balance_polishing.py` (3 to 5 minutes on one CPU) writes both WOUT files on
-the same 129-surface mesh and certifies each with the same independent oracle, so they differ only
-in the polish. The near-axis error (`ρ < 0.2`) falls from 2.9e3 to 61 N m⁻³ and the edge error
-2.5-fold, but the polished state is slightly worse for `0.6 ≲ ρ ≲ 0.8`, and the volume-averaged
-`⟨|F|⟩/⟨|∇(B²/2μ₀)|⟩` falls only from 2.3e-3 to 1.9e-3. The written file keeps the native
-certificate (`eps_F` 1.80e-3 native, 1.90e-3 read back). The `--plot` summary's force panel, a
-finite-difference rebuild from the WOUT, reads about 5.8e-3 on both files and cannot show this.
-
-From the command line, `vmex examples/data/input.shaped_tokamak_pressure_polished --polish auto`
-runs the same polish; `AUTO` checks the estimated Gauss–Newton work against `--polish-budget` (an
-admission estimate, not a timeout). `eps_F` is bounded above by 2 by construction and saturates in
-vacuum; read the dimensional metrics with it. See the [validation record](docs/explanation/validation.md) for
-the failed 3-D attempts and the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
+`python examples/force_balance_polishing.py` (under a minute with a warm compilation cache, about
+two minutes cold) polishes `input.shaped_tokamak_pressure` to an RMS force of 7e-6 of
+`volavgB²/(μ₀ Aminor_p)` with projected stationarity 1e-10. Read back from WOUT files on the same
+370-surface mesh, the RMS force falls from 2.0e5 to 42 N m⁻³ over the volume, from 9.8e5 to 190 near
+the axis (`ρ < 0.2`), and from 3.2e3 to 23 at the edge; the written file reproduces the native
+certificate to all printed digits. `eps_F` is bounded above by 2 by construction and saturates in
+vacuum; read the dimensional metrics with it. See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 for the method and certificate.
 
 ## Performance and parallel execution

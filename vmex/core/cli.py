@@ -738,12 +738,13 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path,
         # it (see polished_wout_state).  Export the native state on the
         # denser certifiable mesh instead.  Unpolished results (and failed
         # polishes) take the unchanged path above.
-        from .polish_driver import polished_wout_state
+        from .polish_driver import polished_wout_input, polished_wout_state
 
         state = polished_wout_state(
             result.native_equilibrium, inp,
             solve_ns=int(np.shape(np.asarray(result.state.R_cos))[0]),
         )
+        inp = polished_wout_input(result.native_equilibrium, inp)
     wout = wout_from_state(
         inp=inp,
         state=state,

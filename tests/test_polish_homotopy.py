@@ -532,6 +532,7 @@ def test_legacy_polish_announces_refinement_and_certificate_phases():
         resolution_from_input(inp, ns=5),
         result.state,
         config=PolishConfig(
+            lane="collocation",
             max_nonlinear_iterations=1,
             collocation_scale_probes=2,
             fail_policy="return_unpolished",

@@ -422,9 +422,8 @@ def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None
     without checking ``converged`` would ship an uncertified equilibrium as
     if it were polished, so keep both guards explicit.
     """
-    deck = EXAMPLES / "data" / "input.shaped_tokamak_pressure_polished"
-    assert "POLISH_FORCE_BALANCE = .TRUE." in deck.read_text()
     source = (EXAMPLES / "force_balance_polishing.py").read_text()
+    assert "polish=True" in source
     assert "result.polished_state is None or result.polish_report is None" in source
     assert "if not report.converged:" in source
     for field in ("initial_normalized_l2", "final_normalized_l2",
@@ -432,7 +431,7 @@ def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None
         assert field in source
 
 
-@pytest.mark.full  # nightly: ordinary solve + strong-force polish + 12 figures (~2 min)
+@pytest.mark.full  # nightly: ordinary solve + native strong-force polish (~3 min)
 def test_force_balance_polishing_example(tmp_path):
     out = _run_example(EXAMPLES / "force_balance_polishing.py", tmp_path, timeout=1200)
     assert "POLISH CERTIFIED" in out
@@ -447,16 +446,11 @@ def test_force_balance_polishing_example(tmp_path):
             f"the polish must lower the reported {label}: {out}")
     outdir = tmp_path / "output_force_balance_polishing"
     for name in ("wout_shaped_tokamak_before_polish.nc",
-                 "wout_shaped_tokamak_pressure_polished.nc"):
+                 "wout_shaped_tokamak_pressure.nc"):
         assert (outdir / name).exists()
-    # both stages plot, so the before/after comparison the docstring promises
-    # is actually produced
-    for stage, stem in (("before", "shaped_tokamak_before_polish"),
-                        ("after", "shaped_tokamak_pressure_polished")):
-        assert (outdir / stage / f"{stem}_summary.png").stat().st_size > 10_000
     # the fair comparison: both files on one mesh, certified the same way; the
     # near-axis error is where the polish gain lives
-    assert "both WOUT files on ns = 129, read back and certified the same way" in out
+    assert re.search(r"both WOUT files on ns = \d+, read back and certified the same way", out), out
     near_axis = re.search(r"rho < 0\.2\s+\[N m\^-3\]\s+([0-9.eE+-]+) => ([0-9.eE+-]+)", out)
     assert near_axis is not None, out
     initial, final = (float(g) for g in near_axis.groups())

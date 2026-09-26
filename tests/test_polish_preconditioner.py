@@ -504,6 +504,7 @@ def test_polish_certificate_routes(monkeypatch, route, field, value, accepted):
         run = lambda: homotopy.polish_strong_root(  # noqa: E731
             runtime, config=config, initial_certificate=certificate)
     elif route == "legacy":
+        config = dataclasses.replace(config, lane="collocation")
         for name in ("make_config", "params_from_input", "runtime_from_params",
                      "_dof_mask", "_refined_state"):
             monkeypatch.setattr(implicit, name, lambda *a, **k: native)
@@ -810,14 +811,21 @@ def test_sample_high_order_state_requires_matching_mode_tables(small_adapter):
 
 
 def test_polished_wout_ns_covers_reconstruction_and_the_native_basis():
-    native = SimpleNamespace(radial_basis=SimpleNamespace(size=17))
+    def basis(size, breakpoints=None):
+        spans = size - 3 if breakpoints is None else len(breakpoints) - 1
+        breaks = np.linspace(0.0, 1.0, spans + 1) if breakpoints is None else breakpoints
+        return SimpleNamespace(radial_basis=SimpleNamespace(size=size, breakpoints=np.asarray(breaks)))
+
+    native = basis(17)
     # The stable wout lift caps at 32 spans; four samples per capped span.
     assert polished_wout_ns(native, solve_ns=31) == 129
     # A finer solve mesh is never coarsened.
     assert polished_wout_ns(native, solve_ns=201) == 201
     # A native basis beyond the cap still stays fully determined.
-    wide = SimpleNamespace(radial_basis=SimpleNamespace(size=90))
-    assert polished_wout_ns(wide, solve_ns=31) == 181
+    assert polished_wout_ns(basis(90), solve_ns=31) == 181
+    # Uniform-in-s surfaces put two samples in the narrowest inserted span.
+    graded = basis(20, [0.0, 0.01, 0.02, 0.5, 1.0])
+    assert polished_wout_ns(graded, solve_ns=31) == 201
 
 
 @pytest.mark.full
@@ -875,6 +883,7 @@ def _small_polish_deck():
 
 
 _BOUNDED_POLISH = dict(
+    lane="collocation",
     radial_degree=3,
     validation_tolerance=1.0e-4,
     max_nonlinear_iterations=3,
