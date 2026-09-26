@@ -2364,8 +2364,12 @@ def solve_phiedge(
     Each residual ``metric - target`` is one :func:`solve_free_boundary`
     call, warm-started from the nearest converged state.  The root is found
     by a host-side secant that switches to bisection once the target is
-    bracketed; a step whose solve fails is halved back toward the last
-    converged PHIEDGE.
+    bracketed; a step whose solve fails, or needs more than twice the first
+    (cold) solve's iterations, is halved back toward the last converged
+    PHIEDGE.  The first step is a 5% probe; the secant fixes its
+    direction, so the metric need not grow with ``|PHIEDGE|``.  For the
+    derivative of the solved PHIEDGE with respect to coil parameters, see
+    :func:`vmex.core.freeboundary_implicit.phiedge_root`.
 
     Parameters
     ----------
@@ -2400,15 +2404,22 @@ def solve_phiedge(
     """
     evaluate = _phiedge_metric(metric)
     x = float(inp.phiedge if phiedge0 is None else phiedge0)
+    if x == 0.0:
+        raise ValueError("the PHIEDGE guess must be nonzero")
     tol = rtol * max(abs(float(target)), 1e-300)
     good: list[tuple[float, float, SolveResult]] = []  # converged (phiedge, residual, result)
     last_failed = ""
     for _ in range(max_iter):
         trial = replace(inp, phiedge=x)
-        warm = min(good, key=lambda g: abs(g[0] - x))[2].state if good else None
+        kwargs = dict(solve_kwargs)
+        warm = None
+        if good:  # a warm start needing twice the cold solve's iterations is failing
+            warm = min(good, key=lambda g: abs(g[0] - x))[2].state
+            kwargs["max_iterations"] = min(2 * int(good[0][2].iterations), int(
+                solve_kwargs.get("max_iterations") or inp.niter_array[0]))
         try:
             result = solve_free_boundary(trial, external_field=external_field,
-                                         initial_state=warm, **solve_kwargs)
+                                         initial_state=warm, **kwargs)
         except VmecError as exc:
             if not good:
                 raise
@@ -2431,8 +2442,9 @@ def solve_phiedge(
             hi = min(above, key=lambda g: abs(g[1]))[0]
             if not min(lo, hi) < x_new < max(lo, hi):
                 x_new = 0.5 * (lo + hi)
-        else:
-            x_new = x * float(np.clip(x_new / x, 0.5, 2.0))  # keep the sign, bound the step
+        elif len(good) > 1:  # extrapolate at most twice the last step
+            step = 2.0 * abs(good[-1][0] - good[-2][0])
+            x_new = x + float(np.clip(x_new - x, -step, step))
         x = x_new
     name = metric if isinstance(metric, str) else getattr(metric, "__name__", "metric")
     raise VmecConvergenceError(

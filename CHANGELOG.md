@@ -9,7 +9,10 @@ revision it was measured at, and the pages that cite it.
 
 - `vmex.solve_phiedge` finds the PHIEDGE whose free-boundary LCFS meets a
   target outboard radius, volume or user metric (bracketed secant over
-  warm-started solves); example `examples/free_boundary_phiedge.py`.
+  warm-started solves); example `examples/free_boundary_phiedge.py`, guide
+  `docs/howto/match-phiedge.md`. `vmex.phiedge_root` attaches the
+  implicit-function-theorem derivative of that PHIEDGE with respect to
+  plasma and coil parameters, from one adjoint gradient.
 
 ## 0.11.2 - 2026-09-24
 

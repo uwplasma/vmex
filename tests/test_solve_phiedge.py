@@ -56,33 +56,82 @@ def test_solve_phiedge_unreachable_target_raises_typed_error(case):
     assert solved.phiedge == inp.phiedge
     with pytest.raises(ValueError, match="metric must be"):
         solve_phiedge(inp, field, 1.0, metric="aspect")
+    with pytest.raises(ValueError, match="nonzero"):
+        solve_phiedge(inp, field, 1.0, phiedge0=0.0)
+
+
+def test_phiedge_root_gradient_is_the_implicit_function_theorem(case):
+    """phiedge_root: dphi/dp = -(dg/dp)/(dg/dphi) on an analytic residual."""
+    import jax
+
+    from vmex.core import implicit as im
+    from vmex.core.freeboundary_implicit import phiedge_root
+
+    def residual(params, field):  # root phiedge = curtor / a
+        return params.phiedge * field["a"] - params.curtor
+
+    params = dataclasses.replace(im.params_from_input(case[0]), phiedge=0.75, curtor=1.5)
+    grad_p, grad_f = jax.grad(phiedge_root, argnums=(1, 2))(residual, params, {"a": 2.0})
+    np.testing.assert_allclose([grad_p.curtor, grad_p.phiedge, grad_f["a"]], [0.5, 0.0, -0.375])
+    assert phiedge_root(residual, params, {"a": 2.0}) == 0.75
+
+
+def test_solve_phiedge_recovers_from_failed_solves_and_bisects(case, monkeypatch):
+    """Host loop on a stub solver: failed trials halve back, a bracket bisects."""
+    import vmex.core.freeboundary as fb
+
+    trials = []
+
+    def stub(inp, **kwargs):
+        trials.append(inp.phiedge)
+        if inp.phiedge > 1.7:
+            raise VmecConvergenceError("stub divergence")
+        return dataclasses.make_dataclass("R", ["state", "iterations"])(None, 10)
+
+    monkeypatch.setattr(fb, "solve_free_boundary", stub)
+    solved, _ = solve_phiedge(case[0], None, 1.0, metric=lambda i, r: 1.0 + np.cbrt(i.phiedge - 1.5),
+                              phiedge0=1.0, rtol=1.0e-3, max_iter=40)
+    assert abs(solved.phiedge - 1.5) < 1.0e-6 and max(trials) > 1.7
+    with pytest.raises(VmecConvergenceError, match="stub"):  # no converged state to fall back on
+        solve_phiedge(case[0], None, 1.0, phiedge0=2.0)
 
 
 @pytest.mark.full  # nightly: compiles the coupled adjoint (minutes on a loaded CPU)
-def test_free_boundary_phiedge_derivative_matches_resolve_finite_difference(case):
-    """d(LCFS R at theta = phi = 0)/d(PHIEDGE): implicit adjoint vs re-solves.
+def test_phiedge_root_extcur_gradient_matches_resolve_finite_difference(case):
+    """d(PHIEDGE at a fixed edge observable)/d(extcur): one adjoint vs re-solved roots.
 
-    Measured: adjoint 5.51187e-2, central difference 5.51187e-2 (h = 1e-4).
+    The observable is the sum of the internal edge ``R_cos`` row, pinned at
+    its value for the deck's PHIEDGE; the perturbed roots come from
+    fixed-slope Newton steps on the Newton-anchored implicit forward.
     """
     import jax
     import jax.numpy as jnp
 
     from vmex.core import implicit as im
     from vmex.core.freeboundary_implicit import (
-        make_free_boundary_config, solve_free_boundary_implicit)
+        make_free_boundary_config, phiedge_root, solve_free_boundary_implicit)
 
     inp, field = case
-    params = im.params_from_input(inp)
+    inp = dataclasses.replace(inp, niter_array=[20000], ftol_array=[1.0e-13])
     cfg = make_free_boundary_config(
-        inp, field, ns=16, ftol=1.0e-9, max_iterations=3000,
-        adjoint_tol=1.0e-9, adjoint_maxiter=200)
+        inp, field, ns=16, ftol=1.0e-13, max_iterations=20000,
+        adjoint_tol=1.0e-10, adjoint_maxiter=200)
+    params = im.params_from_input(inp)
 
-    def r_outboard(phiedge):
-        state = solve_free_boundary_implicit(
-            dataclasses.replace(params, phiedge=phiedge), field, cfg)
-        return jnp.sum(state.R_cos[-1])
+    def edge(params, field):
+        return jnp.sum(solve_free_boundary_implicit(params, field, cfg).R_cos[-1])
 
-    phiedge, step = jnp.asarray(params.phiedge), 1.0e-4
-    derivative = float(jax.grad(r_outboard)(phiedge))
-    finite_difference = float(r_outboard(phiedge + step) - r_outboard(phiedge - step)) / (2.0 * step)
-    np.testing.assert_allclose(derivative, finite_difference, rtol=1.0e-4)
+    target = float(edge(params, field))
+
+    def residual(params, field):
+        return edge(params, field) - target
+
+    derivative = float(jax.grad(lambda f: phiedge_root(residual, params, f))(field).extcur[0])
+    step, roots = 1.0e-4, []
+    for h in (step, -step):
+        trial, shifted = params, dataclasses.replace(field, extcur=field.extcur + h)
+        for _ in range(4):  # dg/dphiedge = 0.0551 here; converges to 1e-12 Wb
+            trial = dataclasses.replace(
+                trial, phiedge=trial.phiedge - float(residual(trial, shifted)) / 0.0551)
+        roots.append(float(trial.phiedge))
+    np.testing.assert_allclose(derivative, (roots[0] - roots[1]) / (2.0 * step), rtol=1.0e-4)

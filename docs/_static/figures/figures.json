@@ -18,6 +18,26 @@
       "note": "Closed-form plot of the exponential spectral scaling exp(-alpha*max(|m|,|n|)); it solves nothing and reads nothing, so there is no hardware to record. No docs page currently embeds it \u2014 it is kept as a generated asset for the objectives pages, and the empty used_in below records that honestly."
     },
     {
+      "path": "docs/_static/figures/free_boundary_phiedge.webp",
+      "sha256": "124218828073614e22c2902282e510dd86109449804fd86eab115e143079b06c",
+      "bytes": 11732,
+      "generator": "examples/free_boundary_phiedge.py",
+      "command": "python examples/free_boundary_phiedge.py",
+      "inputs": [
+        "examples/data/ESSOS_biot_savart_LandremanPaulQA.json",
+        "examples/data/input.LandremanPaul2021_QA_lowres"
+      ],
+      "record": null,
+      "generated": "2026-09-26",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "docs/howto/match-phiedge.md"
+      ],
+      "note": "PHIEDGE root solve on the ESSOS Landreman-Paul QA coils; the example writes this 16-color lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1. Needs the ESSOS optional dependency. Two back-to-back runs reproduced the bytes."
+    },
+    {
       "path": "docs/_static/figures/mirror_fixed_boundary_3d.webp",
       "sha256": "8ee4a29853495875bb65bae21306b26111cce6dbd17f483f473ee8b483673fef",
       "bytes": 147018,

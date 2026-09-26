@@ -11,7 +11,7 @@ bracketed secant, one warm-started free-boundary solve per step.
 The coils are the Landreman & Paul (2021) precise-QA set optimized in ESSOS,
 tabulated once into an in-memory ``MgridField``; the plasma is a vacuum
 (zero pressure, zero current) so the target is purely a flux-surface one.
-The figure compares the seed boundary with the LCFS that meets the target.
+The figure shows each iterate: its metric value against PHIEDGE, and its LCFS.
 """
 
 import os
@@ -22,14 +22,19 @@ from pathlib import Path
 import numpy as np
 
 import vmex as vj
+from vmex.core.freeboundary import _phiedge_metric
 
 # The ESSOS coil set, and the plasma deck that seeds the initial guess:
 DATA_DIR = Path(__file__).resolve().parent / "data"
 COILS_FILE = DATA_DIR / "ESSOS_biot_savart_LandremanPaulQA.json"
 INPUT_FILE = DATA_DIR / "input.LandremanPaul2021_QA_lowres"
 
-# Target LCFS radius at the outboard midplane (theta = 0, phi = 0) [m]:
-R_OUTBOARD_TARGET = 1.285
+# What the LCFS must match.  METRIC is "r_outboard" (LCFS R at theta = phi = 0,
+# in m), "volume" (plasma volume, m^3), or any callable (inp, result) -> float,
+# for example the edge rotational transform:
+#     METRIC = lambda inp, result: float(vj.wout_from_result(inp, result).iotaf[-1])
+# Reachable r_outboard on these coils at NS = 16 is roughly 1.277-1.308 m.
+METRIC, TARGET = "r_outboard", 1.285
 
 # First PHIEDGE guess [Wb] and root-solve controls:
 PHIEDGE0 = -0.025
@@ -41,8 +46,9 @@ GRID = dict(rmin=0.45, rmax=1.55, zmin=-0.6, zmax=0.6, ir=96, jz=96, kp=32)
 MPOL, NTOR, NZETA = 5, 5, 16
 NS, NITER, FTOL = 31, 20000, 1e-10
 
-# Directory that receives every output file, and whether to draw the figure:
+# Directory that receives the wout, and the figure (the docs copy, lossless WebP):
 OUTPUT_DIR = Path("output_free_boundary_phiedge")
+FIGURE = Path(__file__).resolve().parents[1] / "docs/_static/figures/free_boundary_phiedge.webp"
 MAKE_PLOTS = True
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
@@ -73,13 +79,25 @@ inp = replace(
     raxis_s=inp.raxis_s[:NTOR + 1], zaxis_c=inp.zaxis_c[:NTOR + 1],
     ns_array=[NS], niter_array=[NITER], ftol_array=[FTOL], pres_scale=0.0)
 print(f"seed boundary: R(theta=0, phi=0) = {float(np.sum(inp.rbc)):.4f} m; "
-      f"target {R_OUTBOARD_TARGET:.4f} m")
+      f"target {TARGET:.4f} m")
 
 ### Solve for PHIEDGE #########################################################
 
+# Wrap the metric to record every iterate (PHIEDGE, value, wout) for the figure:
+evaluate = _phiedge_metric(METRIC)
+iterates = []
+
+
+def recorded_metric(trial, result):
+    value = evaluate(trial, result)
+    iterates.append((trial.phiedge, value, vj.wout_from_result(trial, result)))
+    print(f"  PHIEDGE = {trial.phiedge:.6f} Wb  ->  {value:.6f}")
+    return value
+
+
 start = time.perf_counter()
 solved, result = vj.solve_phiedge(
-    inp, coil_field, R_OUTBOARD_TARGET, metric="r_outboard",
+    inp, coil_field, TARGET, metric=recorded_metric,
     phiedge0=PHIEDGE0, rtol=RTOL, max_iter=MAX_SOLVES)
 elapsed = time.perf_counter() - start
 
@@ -88,7 +106,7 @@ elapsed = time.perf_counter() - start
 wout = vj.wout_from_result(solved, result)
 r_out = float(np.sum(np.asarray(wout.rmnc)[-1]))
 print(f"PHIEDGE = {solved.phiedge:.6f} Wb  ->  R_outboard = {r_out:.5f} m "
-      f"(|error| {abs(r_out - R_OUTBOARD_TARGET):.1e} m), volume = "
+      f"(|error| {abs(r_out - TARGET):.1e} m), volume = "
       f"{float(wout.volume_p):.4f} m^3, {elapsed:.1f} s")
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -102,19 +120,31 @@ if MAKE_PLOTS:
     from vmex.core.plotting import surface_rz
 
     theta = np.linspace(0.0, 2.0 * np.pi, 361)
-    m = np.arange(inp.rbc.shape[1])
-    fig, ax = plt.subplots(figsize=(5.0, 5.0), dpi=110)
-    ax.plot(np.cos(np.outer(theta, m)) @ inp.rbc.sum(axis=0),
-            np.sin(np.outer(theta, m)) @ inp.zbs.sum(axis=0),
-            "--", color="#9a9a9a", label="seed boundary")
-    R, Z = surface_rz(wout, s_index=-1, theta=theta, phi=np.array([0.0]))
-    ax.plot(R[:, 0], Z[:, 0], color="#2e6da4", lw=2.0,
-            label=f"LCFS, PHIEDGE = {solved.phiedge:.4f} Wb")
-    ax.plot(R_OUTBOARD_TARGET, 0.0, "x", ms=10, mew=2, color="#c0392b", label="target point")
-    ax.set(xlabel="R [m]", ylabel="Z [m]", title="Free-boundary LP-QA at $\\phi = 0$")
-    ax.set_aspect("equal")
-    ax.grid(alpha=0.25, lw=0.5)
-    ax.legend(loc="upper left", fontsize=8, frameon=False)
+    colors = plt.cm.viridis(np.linspace(0.0, 0.85, len(iterates)))
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(9.0, 4.0), dpi=100, width_ratios=(1.6, 1.0))
+    phi, value = np.array([(p, v) for p, v, _ in iterates]).T
+    ax0.axhline(TARGET, color="#c0392b", lw=1.0, ls="--", label="target")
+    ax0.plot(phi, value, color="#9a9a9a", lw=0.8)
+    for n, (p, v, wout) in enumerate(iterates):
+        ax0.plot(p, v, "o", color=colors[n])
+        ax0.annotate(str(n + 1), (p, v), textcoords="offset points", xytext=(5, 4), fontsize=8)
+        R, Z = surface_rz(wout, s_index=-1, theta=theta, phi=np.array([0.0]))
+        ax1.plot(R[:, 0], Z[:, 0], color=colors[n], lw=1.0, label=f"{n + 1}: {p:.4f} Wb")
+    label = {"r_outboard": "LCFS R at theta = phi = 0 [m]", "volume": "volume [m^3]"}
+    ax0.set(xlabel="PHIEDGE [Wb]", ylabel=label.get(METRIC, "metric"),
+            title="Iterates of the PHIEDGE root solve")
+    ax0.legend(frameon=False, fontsize=8)
+    if METRIC == "r_outboard":
+        ax1.plot(TARGET, 0.0, "x", ms=10, mew=2, color="#c0392b", label="target point")
+    ax1.set(xlabel="R [m]", ylabel="Z [m]", title="LCFS at $\\phi = 0$")
+    ax1.set_aspect("equal")
+    ax1.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=7, frameon=False)
+    for ax in (ax0, ax1):
+        ax.grid(alpha=0.25, lw=0.5)
     fig.tight_layout()
-    fig.savefig(OUTPUT_DIR / "phiedge_target.png")
-    print(f"Wrote {OUTPUT_DIR / 'phiedge_target.png'}")
+    from PIL import Image  # 16-color lossless WebP keeps the docs copy near 12 KB
+
+    fig.canvas.draw()
+    Image.fromarray(np.asarray(fig.canvas.buffer_rgba())).convert("RGB").quantize(16).save(
+        FIGURE, lossless=True, method=6)
+    print(f"Wrote {FIGURE}")

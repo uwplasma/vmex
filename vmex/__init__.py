@@ -23,6 +23,8 @@ links to the module that documents it.
 - :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
 - :func:`~vmex.core.freeboundary.solve_phiedge` — PHIEDGE whose free-boundary
   LCFS meets a target outboard radius or volume
+- :func:`~vmex.core.freeboundary_implicit.phiedge_root` — that PHIEDGE with
+  its implicit-function-theorem gradient
 - :func:`~vmex.core.freeboundary_implicit.make_free_boundary_config` /
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit` /
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit_status`
@@ -247,6 +249,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.multigrid", "solve_free_boundary_multigrid"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     "solve_phiedge": (".core.freeboundary", "solve_phiedge"),
+    "phiedge_root": (".core.freeboundary_implicit", "phiedge_root"),
     "make_free_boundary_config": (
         ".core.freeboundary_implicit", "make_free_boundary_config"),
     "solve_free_boundary_implicit": (
