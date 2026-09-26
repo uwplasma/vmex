@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -857,6 +857,31 @@ def test_extcur_scaling_is_linear(data: MgridData) -> None:
     f3 = MgridField.from_mgrid_data(data, extcur=3.0 * base)
     for a, b in zip(f1.b_cyl(r, phi, z), f3.b_cyl(r, phi, z)):
         np.testing.assert_allclose(3.0 * np.asarray(a), np.asarray(b), rtol=1e-13, atol=0.0)
+
+
+def test_default_extcur_is_the_file_field_in_every_mgrid_mode(
+        data: MgridData, tmp_path: Path) -> None:
+    """A mode-R/N table carries its currents; only a mode-S table is per ampere.
+
+    The default must equal the deck-aware loader at ``EXTCUR = raw_coil_cur``,
+    the currents the file was computed with.  Multiplying a raw table by its
+    own currents gave ``-B`` for the HSX mgrid (mode R, raw current -1 A).
+    """
+    from vmex.core.freeboundary import _external_field_from_input
+
+    r, phi, z = _random_points(data, n=40, seed=11)
+    table = MgridField.from_mgrid_data(data, extcur=np.ones(data.nextcur)).b_cyl(r, phi, z)
+    raw = tuple(-2.5 for _ in range(data.nextcur))
+    for mode, factor in (("S", -2.5), ("R", 1.0), ("N", 1.0)):
+        variant = replace(data, mgrid_mode=mode, raw_coil_cur=raw)
+        default = MgridField.from_mgrid_data(variant).b_cyl(r, phi, z)
+        path = tmp_path / f"mgrid_{mode}.nc"
+        write_mgrid(path, variant)
+        deck = SimpleNamespace(extcur=list(raw), mgrid_file=str(path))
+        solver = _external_field_from_input(deck).b_cyl(r, phi, z)
+        for got, want, loaded in zip(default, table, solver):
+            np.testing.assert_allclose(got, factor * np.asarray(want), rtol=1e-14, atol=0.0)
+            np.testing.assert_allclose(got, loaded, rtol=1e-14, atol=0.0)
 
 
 def test_jit_equivalence(data: MgridData) -> None:
