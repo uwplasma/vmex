@@ -12,8 +12,8 @@ uncited records are reachable through git history: link them with a
 permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
-39 committed artifacts: 34 standalone records and 1 grouped directory holding
-5 files. 35 of the 35 entries below are cited by a page, a test or another
+40 committed artifacts: 35 standalone records and 1 grouped directory holding
+5 files. 36 of the 36 entries below are cited by a page, a test or another
 script; 0 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -38,6 +38,7 @@ hand rather than by a script in this tree.
 | `benchmarks/gpu_a4000_2026-09-16.json` | `benchmarks/run_gpu_matrix.py` | `5ee94c93` | 2026-09-16 | `docs/explanation/architecture.rst`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst`, `plan.md` |
 | `benchmarks/gpu_baseline.json` | `benchmarks/run_gpu_matrix.py` | `a324f503` | 2026-07-09 | `benchmarks/gpu_a4000_2026-09-16.json`, `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/architecture.rst`, `docs/explanation/validation.md`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py`, `vmex/core/__init__.py`, `vmex/core/device.py` |
 | `benchmarks/high_mode_fft.json` | `benchmarks/run_high_mode_fft.py` | `ecfbe31d` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
+| `benchmarks/interior_field_vs_wout.json` |  |  |  | `docs/_static/figures/figures.json`, `docs/_static/figures/sources/make_interior_field_figure.py`, `docs/explanation/interior-field.md` |
 | `benchmarks/mirror_fixed_boundary.json` |  | `e02dcea7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_free_boundary_axisymmetric.json` |  | `d4f56dae` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/howto/mirror-machines.md`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py`, `tests/test_capability_docs.py` |
 | `benchmarks/mirror_free_boundary_nonaxisymmetric.json` |  | `f9eb6a44` |  | `benchmarks/capabilities.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |

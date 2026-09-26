@@ -18,6 +18,26 @@
       "note": "Closed-form plot of the exponential spectral scaling exp(-alpha*max(|m|,|n|)); it solves nothing and reads nothing, so there is no hardware to record. No docs page currently embeds it \u2014 it is kept as a generated asset for the objectives pages, and the empty used_in below records that honestly."
     },
     {
+      "path": "docs/_static/figures/readme_interior_field.webp",
+      "sha256": "f82420e6197a074138619ce9347ec3f2e24316efaded098959b623dc71bac816",
+      "bytes": 34822,
+      "generator": "docs/_static/figures/sources/make_interior_field_figure.py",
+      "command": "python docs/_static/figures/sources/make_interior_field_figure.py",
+      "inputs": [
+        "benchmarks/interior_field_vs_wout.json"
+      ],
+      "record": "benchmarks/interior_field_vs_wout.json",
+      "generated": "2026-09-26",
+      "hardware": null,
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md",
+        "docs/explanation/interior-field.md"
+      ],
+      "note": "Plots a committed record; the errors in it were measured by the analytical benchmark (commit and score hashes inside the record) on an Apple M-series CPU. Rerunning the command reproduces these bytes."
+    },
+    {
       "path": "docs/_static/figures/mirror_fixed_boundary_3d.webp",
       "sha256": "8ee4a29853495875bb65bae21306b26111cce6dbd17f483f473ee8b483673fef",
       "bytes": 147018,
