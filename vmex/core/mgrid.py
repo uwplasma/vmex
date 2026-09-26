@@ -710,8 +710,12 @@ class MgridField:
         nfp: int,
         scale: float = 1.0,
         label: str = "direct_biot_savart",
+        order: int = 1,
     ) -> "MgridField":
-        """Tabulate an ESSOS/SIMSOPT/callable Cartesian field for a solve."""
+        """Tabulate an ESSOS/SIMSOPT/callable Cartesian field for a solve.
+
+        ``order`` selects the interpolant (1 trilinear, 3 tricubic).
+        """
         data = tabulate_cartesian_field(
             field,
             rmin=rmin,
@@ -724,7 +728,7 @@ class MgridField:
             nfp=nfp,
             label=label,
         )
-        return cls.from_mgrid_data(data, extcur=jnp.asarray([scale]))
+        return cls.from_mgrid_data(data, extcur=jnp.asarray([scale]), order=order)
 
     @classmethod
     def from_coils(
@@ -742,6 +746,7 @@ class MgridField:
         margin: float = 0.1,
         scale: float = 1.0,
         label: str = "essos_coils",
+        order: int = 1,
     ) -> "MgridField":
         """Tabulate an ESSOS coil set's Biot-Savart field for a free-boundary solve.
 
@@ -756,7 +761,10 @@ class MgridField:
         Each unset bound defaults to the coil bounding box grown by
         ``margin`` (a modular coil set encloses its plasma), and ``nfp``
         defaults to the coil set's own period count.  Pass bounds explicitly
-        to bracket the plasma more tightly than the coils do.
+        to bracket the plasma more tightly than the coils do.  ``order``
+        selects the interpolant: 1 (trilinear) for a free-boundary solve, 3
+        (tricubic, continuously differentiable) for guiding-center tracing,
+        which needs grad B.
 
         Tabulation is host-side and does not retain coil-shape derivatives;
         :meth:`from_parameterized_cartesian_field` is the differentiable
@@ -784,7 +792,7 @@ class MgridField:
             zmax=float(height.max()) + zpad if zmax is None else float(zmax),
             ir=int(ir), jz=int(jz), kp=int(kp),
             nfp=int(geometry.nfp) if nfp is None else int(nfp),
-            scale=scale, label=label,
+            scale=scale, label=label, order=order,
         )
 
     @classmethod
