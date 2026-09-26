@@ -1,0 +1,126 @@
+{
+ "schema": "vmex.interior-field-vs-wout/1",
+ "summary": "One integer-axisymmetric exact equilibrium (Landreman 2026), NS=129, read two ways at the same points of native flux surfaces: fields stored in the WOUT file, and VmecInteriorField built from that WOUT with vmex.state_from_wout. Errors are relative L2 against the exact B and J.",
+ "source": {
+  "repository": "https://github.com/rogeriojorge/vmex-benchmark-analytical",
+  "commit": "418355d789f2fa9ea2c905d10f23903de61b13fb",
+  "scorer": "benchmarks/score_wout_exact.py"
+ },
+ "codes": {
+  "vmec2000": {
+   "code_identity": {
+    "repository": "PrincetonUniversity/STELLOPT (VMEC2000)",
+    "binary_sha256": "8ba1188465be8a76bcdf8ff481ab3e03ca6b125eab7a22958e92f39db710c42e",
+    "commit": "ee175502dec1766c60c2027e1df5c74c343d9794",
+    "tracked_tree_clean": false
+   },
+   "deck_sha256": "b8ab3d0b82bcc6bd397f945f6c66886097e7cbfbec79b4e262e99018a158a97e",
+   "wout_sha256": "4fc9ccca4e72e29a481d9df0896ed50158141116162edfcdf68257ac40990bae",
+   "fsq_max": 9.941103333398066e-15,
+   "score_file": "results/cross_code/runs/integer_axisymmetric_iota-ns129-vmec2000/exact_score.json",
+   "score_sha256": "d1b2aad78c9dbc7aa61ee6ab0c82486928c0c526533490cad0f0959a70b69bc8"
+  },
+  "vmecpp": {
+   "code_identity": {
+    "repository": "proximafusion/vmecpp",
+    "version": "0.5.2"
+   },
+   "deck_sha256": "b8ab3d0b82bcc6bd397f945f6c66886097e7cbfbec79b4e262e99018a158a97e",
+   "wout_sha256": "77c40b85e2ce9c0c5e8a5ce962eaedaebb8e76d5dfd6c3b820c1bf26ddd833ed",
+   "fsq_max": 9.942455156155835e-15,
+   "score_file": "results/cross_code/runs/integer_axisymmetric_iota-ns129-vmecpp/exact_score.json",
+   "score_sha256": "cad2d13a260040ab6e68ba832d1a5639b384eef35230086c30b1bea5b95c5d5b"
+  },
+  "vmex": {
+   "code_identity": {
+    "repository": "uwplasma/vmex",
+    "commit": "3b73d6f88b832aaa6c63dc7574feb7de9e80d064",
+    "tracked_tree_clean": true
+   },
+   "deck_sha256": "b8ab3d0b82bcc6bd397f945f6c66886097e7cbfbec79b4e262e99018a158a97e",
+   "wout_sha256": "7c51eb85a06a54c548eedcda8bbfc48f4133ef34326f9dcd7778c01100e37781",
+   "fsq_max": 9.941595349294504e-15,
+   "score_file": "results/cross_code/runs/integer_axisymmetric_iota-ns129-vmex/exact_score.json",
+   "score_sha256": "ed7f363c9fdcc5f4f4883b4b711e8d99e427f606a1b82b2201d6d901ff533136"
+  }
+ },
+ "surfaces": [
+  {
+   "j": 1,
+   "s": 0.0078125,
+   "B_wout_vmec2000": 0.0005398054884587107,
+   "B_wout_vmecpp": 0.0005398054884946858,
+   "B_wout_vmex": 0.0005398054885126532,
+   "J_wout_vmec2000": 0.0019293223080596555,
+   "J_wout_vmex": 0.001960172931559484,
+   "B_interior_field": 0.0011002193016989652,
+   "J_interior_field": 0.08010298099319876
+  },
+  {
+   "j": 2,
+   "s": 0.015625,
+   "B_wout_vmec2000": 0.00017794514117895513,
+   "B_wout_vmecpp": 0.00017794514120610076,
+   "B_wout_vmex": 0.00017794514116994774,
+   "J_wout_vmec2000": 0.0030411895415346953,
+   "J_wout_vmex": 0.003041809855542374,
+   "B_interior_field": 0.000914036757595138,
+   "J_interior_field": 0.03734043271250682
+  },
+  {
+   "j": 8,
+   "s": 0.0625,
+   "B_wout_vmec2000": 2.4589676714222417e-05,
+   "B_wout_vmecpp": 2.458967668102395e-05,
+   "B_wout_vmex": 2.4589676722426554e-05,
+   "J_wout_vmec2000": 0.0010211103098356268,
+   "J_wout_vmex": 0.0010218281098734847,
+   "B_interior_field": 1.316347550333143e-05,
+   "J_interior_field": 0.0035920565047101345
+  },
+  {
+   "j": 32,
+   "s": 0.25,
+   "B_wout_vmec2000": 2.656459084063734e-06,
+   "B_wout_vmecpp": 2.65645904108646e-06,
+   "B_wout_vmex": 2.656459089591309e-06,
+   "J_wout_vmec2000": 0.0005263065287782613,
+   "J_wout_vmex": 0.0005263079187238594,
+   "B_interior_field": 6.28209975529683e-07,
+   "J_interior_field": 5.146084044400607e-05
+  },
+  {
+   "j": 64,
+   "s": 0.5,
+   "B_wout_vmec2000": 9.211103093179355e-07,
+   "B_wout_vmecpp": 9.211102769111404e-07,
+   "B_wout_vmex": 9.211102849848628e-07,
+   "J_wout_vmec2000": 0.0004054222394595811,
+   "J_wout_vmex": 0.0004054217838497065,
+   "B_interior_field": 3.054271411181993e-07,
+   "J_interior_field": 1.2470072018359715e-05
+  },
+  {
+   "j": 96,
+   "s": 0.75,
+   "B_wout_vmec2000": 4.942207941576192e-07,
+   "B_wout_vmecpp": 4.942207631496942e-07,
+   "B_wout_vmex": 4.942208063088198e-07,
+   "J_wout_vmec2000": 0.00035713755682779025,
+   "J_wout_vmex": 0.00035713701233583927,
+   "B_interior_field": 2.082547775805279e-07,
+   "J_interior_field": 5.084892890938611e-06
+  },
+  {
+   "j": 127,
+   "s": 0.9921875,
+   "B_wout_vmec2000": 3.2969213957504745e-07,
+   "B_wout_vmecpp": 3.296922814311145e-07,
+   "B_wout_vmex": 3.296922637745827e-07,
+   "J_wout_vmec2000": 0.00033341202920530956,
+   "J_wout_vmex": 0.00033341201173701175,
+   "B_interior_field": 2.225981914679086e-07,
+   "J_interior_field": 0.0001301462094675374
+  }
+ ]
+}
