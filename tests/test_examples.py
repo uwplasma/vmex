@@ -842,8 +842,8 @@ def test_free_boundary_phiedge(tmp_path):
     pytest.importorskip("essos.coils")
     pytest.importorskip("essos.fields")
     out = _run_example(EXAMPLES / "free_boundary_phiedge.py", tmp_path, timeout=900)
-    error = float(re.search(r"\|error\| ([0-9.eE+-]+) m", out).group(1))
-    assert error <= 1.3e-3, out  # RTOL = 1e-3 of the 1.285 m target in CI mode
+    error = float(re.search(r"relative error ([0-9.eE+-]+)", out).group(1))
+    assert error <= 2e-3, out  # cold re-solve at the returned PHIEDGE; RTOL = 1e-3 in CI mode
 
 
 @pytest.mark.full  # nightly: fixed + free-boundary solve either side of the seam (~100s)

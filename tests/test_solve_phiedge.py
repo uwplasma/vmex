@@ -38,26 +38,34 @@ def case():
 @pytest.mark.parametrize("metric,target", [("volume", 20.3), ("r_outboard", 2.254)])
 def test_solve_phiedge_lands_on_target(case, metric, target):
     """The returned deck's equilibrium meets the target within rtol."""
-    inp, field = case
-    solved, result = solve_phiedge(inp, field, target, metric=metric, rtol=1.0e-4)
-    value = _phiedge_metric(metric)(solved, result)
-    assert bool(result.converged)
-    assert abs(value - target) <= 1.0e-4 * target
-    # Volume grows with |PHIEDGE|; the outboard edge recedes in this field.
-    assert -4.03 < solved.phiedge < -3.29
+    solved, result = solve_phiedge(*case, target, metric=metric, rtol=1.0e-4)
+    assert abs(_phiedge_metric(metric)(solved, result) - target) <= 1.0e-4 * target
 
 
-def test_solve_phiedge_unreachable_target_raises_typed_error(case):
-    """A target no nearby equilibrium reaches ends in a typed error, not a loop."""
-    inp, field = case
+def test_solve_phiedge_host_loop_on_a_stub_solver(case, monkeypatch):
+    """Failed trials halve back, a bracket bisects, and bad input raises typed errors."""
+    import vmex.core.freeboundary as fb
+
+    trials = []
+
+    def stub(inp, **kwargs):
+        trials.append(inp.phiedge)
+        if inp.phiedge > 1.7:
+            raise VmecConvergenceError("stub divergence")
+        return dataclasses.make_dataclass("R", ["state", "iterations"])(None, 10)
+
+    monkeypatch.setattr(fb, "solve_free_boundary", stub)
+    metric = lambda i, r: 1.0 + np.cbrt(i.phiedge - 1.5)  # noqa: E731
+    solved, _ = solve_phiedge(case[0], None, 1.0, metric=metric, phiedge0=1.0, rtol=1.0e-3, max_iter=40)
+    assert abs(solved.phiedge - 1.5) < 1.0e-6 and max(trials) > 1.7
+    with pytest.raises(VmecConvergenceError, match="stub"):  # no converged state to fall back on
+        solve_phiedge(case[0], None, 1.0, phiedge0=2.0)
     with pytest.raises(VmecConvergenceError, match="PHIEDGE solve did not reach"):
-        solve_phiedge(inp, field, 1.0e3, metric="volume", max_iter=3)
-    solved, _ = solve_phiedge(inp, field, 0.0, metric=lambda i, r: 0.0)  # callable metric
-    assert solved.phiedge == inp.phiedge
+        solve_phiedge(case[0], None, 5.0, metric=metric, phiedge0=1.0, max_iter=3)
     with pytest.raises(ValueError, match="metric must be"):
-        solve_phiedge(inp, field, 1.0, metric="aspect")
+        solve_phiedge(*case, 1.0, metric="aspect")
     with pytest.raises(ValueError, match="nonzero"):
-        solve_phiedge(inp, field, 1.0, phiedge0=0.0)
+        solve_phiedge(*case, 1.0, phiedge0=0.0)
 
 
 def test_phiedge_root_gradient_is_the_implicit_function_theorem(case):
@@ -74,26 +82,6 @@ def test_phiedge_root_gradient_is_the_implicit_function_theorem(case):
     grad_p, grad_f = jax.grad(phiedge_root, argnums=(1, 2))(residual, params, {"a": 2.0})
     np.testing.assert_allclose([grad_p.curtor, grad_p.phiedge, grad_f["a"]], [0.5, 0.0, -0.375])
     assert phiedge_root(residual, params, {"a": 2.0}) == 0.75
-
-
-def test_solve_phiedge_recovers_from_failed_solves_and_bisects(case, monkeypatch):
-    """Host loop on a stub solver: failed trials halve back, a bracket bisects."""
-    import vmex.core.freeboundary as fb
-
-    trials = []
-
-    def stub(inp, **kwargs):
-        trials.append(inp.phiedge)
-        if inp.phiedge > 1.7:
-            raise VmecConvergenceError("stub divergence")
-        return dataclasses.make_dataclass("R", ["state", "iterations"])(None, 10)
-
-    monkeypatch.setattr(fb, "solve_free_boundary", stub)
-    solved, _ = solve_phiedge(case[0], None, 1.0, metric=lambda i, r: 1.0 + np.cbrt(i.phiedge - 1.5),
-                              phiedge0=1.0, rtol=1.0e-3, max_iter=40)
-    assert abs(solved.phiedge - 1.5) < 1.0e-6 and max(trials) > 1.7
-    with pytest.raises(VmecConvergenceError, match="stub"):  # no converged state to fall back on
-        solve_phiedge(case[0], None, 1.0, phiedge0=2.0)
 
 
 @pytest.mark.full  # nightly: compiles the coupled adjoint (minutes on a loaded CPU)

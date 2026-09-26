@@ -1,17 +1,17 @@
 #!/usr/bin/env python
-"""Find the PHIEDGE whose free-boundary plasma reaches a given outboard point.
+"""Find the PHIEDGE whose free-boundary plasma meets a geometric target.
 
 A free-boundary run takes the enclosed toroidal flux PHIEDGE as input and
 returns the last closed flux surface.  Codes without a flux input (HINT, for
-example) are instead pinned by a geometric point, so comparing them on the
-same coils needs the inverse map: the PHIEDGE whose LCFS passes through a
-target outboard-midplane radius.  ``vj.solve_phiedge`` finds it with a
-bracketed secant, one warm-started free-boundary solve per step.
+example) are instead pinned by geometry, so comparing them on the same coils
+needs the inverse map: the PHIEDGE whose LCFS has a target volume or passes
+through a target point.  ``vj.solve_phiedge`` finds it with a bracketed
+secant, one warm-started free-boundary solve per step, and the script
+checks that a cold solve at the returned PHIEDGE reproduces the target.
 
 The coils are the Landreman & Paul (2021) precise-QA set optimized in ESSOS,
-tabulated once into an in-memory ``MgridField``; the plasma is a vacuum
-(zero pressure, zero current) so the target is purely a flux-surface one.
-The figure shows each iterate: its metric value against PHIEDGE, and its LCFS.
+tabulated once into an in-memory ``MgridField``; the plasma is a vacuum.
+The figure shows each iterate: its metric against PHIEDGE, and its LCFS.
 """
 
 import os
@@ -29,12 +29,14 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 COILS_FILE = DATA_DIR / "ESSOS_biot_savart_LandremanPaulQA.json"
 INPUT_FILE = DATA_DIR / "input.LandremanPaul2021_QA_lowres"
 
-# What the LCFS must match.  METRIC is "r_outboard" (LCFS R at theta = phi = 0,
-# in m), "volume" (plasma volume, m^3), or any callable (inp, result) -> float,
-# for example the edge rotational transform:
+# What the LCFS must match.  METRIC is one of
+#   "volume"      plasma volume [m^3]; an integral, robust to the solve history
+#   "r_outboard"  LCFS R at theta = phi = 0 [m]; follows the soft m=1 shift, so
+#                 near the edge of the reachable window (about 1.277-1.308 m on
+#                 these coils) it can depend on warm vs cold starts
+#   any callable (inp, result) -> float, e.g. the edge rotational transform
 #     METRIC = lambda inp, result: float(vj.wout_from_result(inp, result).iotaf[-1])
-# Reachable r_outboard on these coils at NS = 16 is roughly 1.277-1.308 m.
-METRIC, TARGET = "r_outboard", 1.285
+METRIC, TARGET = "volume", 0.45
 
 # First PHIEDGE guess [Wb] and root-solve controls:
 PHIEDGE0 = -0.025
@@ -78,8 +80,6 @@ inp = replace(
     raxis_c=inp.raxis_c[:NTOR + 1], zaxis_s=inp.zaxis_s[:NTOR + 1],
     raxis_s=inp.raxis_s[:NTOR + 1], zaxis_c=inp.zaxis_c[:NTOR + 1],
     ns_array=[NS], niter_array=[NITER], ftol_array=[FTOL], pres_scale=0.0)
-print(f"seed boundary: R(theta=0, phi=0) = {float(np.sum(inp.rbc)):.4f} m; "
-      f"target {TARGET:.4f} m")
 
 ### Solve for PHIEDGE #########################################################
 
@@ -103,11 +103,10 @@ elapsed = time.perf_counter() - start
 
 ### Print, plot and save ######################################################
 
+print(f"PHIEDGE = {solved.phiedge:.6f} Wb after {len(iterates)} solves, {elapsed:.1f} s")
+cold = evaluate(solved, vj.solve_free_boundary(solved, external_field=coil_field))
+print(f"cold re-solve: {METRIC} = {cold:.6f} (relative error {abs(cold / TARGET - 1):.1e})")
 wout = vj.wout_from_result(solved, result)
-r_out = float(np.sum(np.asarray(wout.rmnc)[-1]))
-print(f"PHIEDGE = {solved.phiedge:.6f} Wb  ->  R_outboard = {r_out:.5f} m "
-      f"(|error| {abs(r_out - TARGET):.1e} m), volume = "
-      f"{float(wout.volume_p):.4f} m^3, {elapsed:.1f} s")
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 wout_path = vj.write_wout(OUTPUT_DIR / "wout_LandremanPaul_QA_phiedge.nc", wout)
@@ -117,34 +116,32 @@ if MAKE_PLOTS:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from PIL import Image
     from vmex.core.plotting import surface_rz
 
     theta = np.linspace(0.0, 2.0 * np.pi, 361)
-    colors = plt.cm.viridis(np.linspace(0.0, 0.85, len(iterates)))
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(9.0, 4.0), dpi=100, width_ratios=(1.6, 1.0))
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(9.0, 4.2), width_ratios=(1.3, 1.0))
     phi, value = np.array([(p, v) for p, v, _ in iterates]).T
     ax0.axhline(TARGET, color="#c0392b", lw=1.0, ls="--", label="target")
-    ax0.plot(phi, value, color="#9a9a9a", lw=0.8)
-    for n, (p, v, wout) in enumerate(iterates):
-        ax0.plot(p, v, "o", color=colors[n])
+    ax0.plot(phi, value, "-o", color="#9a9a9a", lw=0.8, mfc="#9a9a9a")
+    ax0.plot(phi[-1], value[-1], "o", ms=9, color="#1f3b73", label="converged")
+    for n, (p, v, wout_n) in enumerate(iterates):
         ax0.annotate(str(n + 1), (p, v), textcoords="offset points", xytext=(5, 4), fontsize=8)
-        R, Z = surface_rz(wout, s_index=-1, theta=theta, phi=np.array([0.0]))
-        ax1.plot(R[:, 0], Z[:, 0], color=colors[n], lw=1.0, label=f"{n + 1}: {p:.4f} Wb")
-    label = {"r_outboard": "LCFS R at theta = phi = 0 [m]", "volume": "volume [m^3]"}
-    ax0.set(xlabel="PHIEDGE [Wb]", ylabel=label.get(METRIC, "metric"),
-            title="Iterates of the PHIEDGE root solve")
-    ax0.legend(frameon=False, fontsize=8)
+        R, Z = surface_rz(wout_n, s_index=-1, theta=theta, phi=np.array([0.0]))
+        last = n == len(iterates) - 1
+        ax1.plot(R[:, 0], Z[:, 0], color="#1f3b73" if last else "#b8b8b8", lw=2.2 if last else 0.9,
+                 label=f"converged, {p:.4f} Wb" if last else ("iterates" if n == 0 else None))
     if METRIC == "r_outboard":
         ax1.plot(TARGET, 0.0, "x", ms=10, mew=2, color="#c0392b", label="target point")
+    names = {"volume": "Plasma volume [m$^3$]", "r_outboard": "Outboard LCFS radius [m]"}
+    ax0.set(xlabel="PHIEDGE [Wb]", ylabel=names.get(METRIC, "Metric"), title="PHIEDGE iterates")
     ax1.set(xlabel="R [m]", ylabel="Z [m]", title="LCFS at $\\phi = 0$")
-    ax1.set_aspect("equal")
-    ax1.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=7, frameon=False)
+    ax1.set_aspect("equal", adjustable="datalim")
     for ax in (ax0, ax1):
         ax.grid(alpha=0.25, lw=0.5)
+        ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    from PIL import Image  # 16-color lossless WebP keeps the docs copy near 12 KB
-
-    fig.canvas.draw()
-    Image.fromarray(np.asarray(fig.canvas.buffer_rgba())).convert("RGB").quantize(16).save(
+    fig.canvas.draw()  # 32-color lossless WebP keeps the docs copy small
+    Image.fromarray(np.asarray(fig.canvas.buffer_rgba())).convert("RGB").quantize(32).save(
         FIGURE, lossless=True, method=6)
     print(f"Wrote {FIGURE}")

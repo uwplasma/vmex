@@ -19,8 +19,8 @@
     },
     {
       "path": "docs/_static/figures/free_boundary_phiedge.webp",
-      "sha256": "124218828073614e22c2902282e510dd86109449804fd86eab115e143079b06c",
-      "bytes": 11732,
+      "sha256": "454ce4db6bae9eadd506ac0d731b89b5fd54cd1629f5a7224779293f34758448",
+      "bytes": 11920,
       "generator": "examples/free_boundary_phiedge.py",
       "command": "python examples/free_boundary_phiedge.py",
       "inputs": [
@@ -35,7 +35,7 @@
       "used_in": [
         "docs/howto/match-phiedge.md"
       ],
-      "note": "PHIEDGE root solve on the ESSOS Landreman-Paul QA coils; the example writes this 16-color lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1. Needs the ESSOS optional dependency. Two back-to-back runs reproduced the bytes."
+      "note": "PHIEDGE root solve on the ESSOS Landreman-Paul QA coils; the example writes this 32-color lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1. Needs the ESSOS optional dependency. Two back-to-back runs reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/mirror_fixed_boundary_3d.webp",
