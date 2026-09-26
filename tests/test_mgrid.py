@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -554,6 +554,59 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
 
 
 @pytest.mark.usefixtures("_module_jit_enabled")  # one solve, 200 s interpreted
+def test_flux_coordinates_compile_once_and_repeat_for_free():
+    """``flux_coordinates`` and its exterior-point check run as compiled kernels.
+
+    Both used to run primitive by primitive: 468 compilations for three points
+    here, and over a minute on the HSX wout (858 modes, 501 points, 88 of them
+    outside the plasma).  Three kernels and a few element-wise bookkeeping ops
+    remain.  The suite runs with ``jax_disable_jit``, so enable jit here.
+    """
+    ns, major_radius, minor_radius = 7, 1.0, 0.3
+    s_mesh = jnp.linspace(0.0, 1.0, ns)
+    spectra = {
+        "nfp": 1, "ns": ns,
+        "xm": jnp.array([0.0, 1.0]), "xn": jnp.array([0.0, 0.0]),
+        "xmn": jnp.array([0.0]), "xnn": jnp.array([0.0]),
+        "rmnc": jnp.stack((jnp.full(ns, major_radius), minor_radius * jnp.sqrt(s_mesh)), axis=1),
+        "zmns": jnp.stack((jnp.zeros(ns), minor_radius * jnp.sqrt(s_mesh)), axis=1),
+        "rmns": None, "zmnc": None,
+        "bsupu": jnp.zeros((ns, 1)), "bsupv": jnp.ones((ns, 1)),
+        "bsupu_s": None, "bsupv_s": None, "lasym": False, "signgs": -1,
+    }
+    # Two interior points and one far outside, which takes the loud-failure check.
+    points = jnp.array([[1.1, 0.2, 0.05], [0.2, -0.85, -0.1], [2.0, 0.0, 0.0]])
+    field = VmecInteriorField(spectra)
+
+    compiled: list[str] = []
+
+    class _Counter(logging.Handler):
+        def emit(self, record):
+            if "Finished XLA compilation of" in record.getMessage():
+                compiled.append(record.getMessage())
+
+    logger, handler = logging.getLogger("jax"), _Counter()
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    counts = []
+    try:
+        with jax.disable_jit(False):
+            for _ in range(2):
+                compiled.clear()
+                with jax.log_compiles():
+                    jitted = field.flux_coordinates(points)
+                counts.append(len(compiled))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+    # The eager reference runs last, or its primitives would warm the cache.
+    eager = VmecInteriorField(spectra).flux_coordinates(points)
+    np.testing.assert_allclose(jitted, eager, rtol=0, atol=1e-12)
+    assert 1 <= counts[0] <= 24, f"flux_coordinates took {counts[0]} compilations"
+    assert counts[1] == 0, f"repeating the call recompiled {counts[1]} times"
+
+
 def test_interior_geometry_matches_the_wout_table():
     """The interior field and the wout must describe the same surfaces.
 
@@ -857,6 +910,60 @@ def test_extcur_scaling_is_linear(data: MgridData) -> None:
     f3 = MgridField.from_mgrid_data(data, extcur=3.0 * base)
     for a, b in zip(f1.b_cyl(r, phi, z), f3.b_cyl(r, phi, z)):
         np.testing.assert_allclose(3.0 * np.asarray(a), np.asarray(b), rtol=1e-13, atol=0.0)
+
+
+def test_default_extcur_is_the_file_field_in_every_mgrid_mode(
+        data: MgridData, tmp_path: Path) -> None:
+    """A mode-R/N table carries its currents; only a mode-S table is per ampere.
+
+    The default must equal the deck-aware loader at ``EXTCUR = raw_coil_cur``,
+    the currents the file was computed with.  Multiplying a raw table by its
+    own currents gave ``-B`` for the HSX mgrid (mode R, raw current -1 A).
+    """
+    from vmex.core.freeboundary import _external_field_from_input
+
+    r, phi, z = _random_points(data, n=40, seed=11)
+    table = MgridField.from_mgrid_data(data, extcur=np.ones(data.nextcur)).b_cyl(r, phi, z)
+    raw = tuple(-2.5 for _ in range(data.nextcur))
+    for mode, factor in (("S", -2.5), ("R", 1.0), ("N", 1.0)):
+        variant = replace(data, mgrid_mode=mode, raw_coil_cur=raw)
+        default = MgridField.from_mgrid_data(variant).b_cyl(r, phi, z)
+        path = tmp_path / f"mgrid_{mode}.nc"
+        write_mgrid(path, variant)
+        deck = SimpleNamespace(extcur=list(raw), mgrid_file=str(path))
+        solver = _external_field_from_input(deck).b_cyl(r, phi, z)
+        for got, want, loaded in zip(default, table, solver):
+            np.testing.assert_allclose(got, factor * np.asarray(want), rtol=1e-14, atol=0.0)
+            np.testing.assert_allclose(got, loaded, rtol=1e-14, atol=0.0)
+
+
+def test_sum_groups_reads_the_same_field_into_one_group(
+        data: MgridData, tmp_path: Path) -> None:
+    """Summing the groups while reading gives the per-group field at 1/nextcur the size.
+
+    On the 5.8 GB HSX mgrid (12 groups) this cut peak memory from 6.1 GB to
+    0.63 GB and interpolation 17x.  A zero-current group is skipped, not read.
+    """
+    r, phi, z = _random_points(data, n=40, seed=5)
+    two = replace(data, nextcur=3, coil_groups=("a", "b", "c"), raw_coil_cur=(2.0, -3.0, 5.0),
+                  br=np.concatenate((data.br, 0.5 * data.br, data.br)),
+                  bp=np.concatenate((data.bp, -data.bp, data.bp)),
+                  bz=np.concatenate((data.bz, 2.0 * data.bz, data.bz)))
+    for mode in ("S", "R"):
+        path = tmp_path / f"mgrid_{mode}.nc"
+        write_mgrid(path, replace(two, mgrid_mode=mode))
+        for extcur in (None, [1.5, -0.25, 0.0]):
+            summed = read_mgrid(path, sum_groups=True, extcur=extcur)
+            assert (summed.nextcur, summed.mgrid_mode, summed.raw_coil_cur) == (1, "S", (1.0,))
+            assert summed.br.shape == (1,) + data.br.shape[1:]
+            got = MgridField.from_file(path, extcur, sum_groups=True).b_cyl(r, phi, z)
+            want = MgridField.from_file(path, extcur).b_cyl(r, phi, z)
+            for a, b in zip(got, want):
+                np.testing.assert_allclose(a, b, rtol=1e-13, atol=1e-15)
+    with pytest.raises(ValueError, match="only with sum_groups"):
+        read_mgrid(path, extcur=[1.0, 1.0, 1.0])
+    with pytest.raises(ValueError, match="does not match nextcur"):
+        read_mgrid(path, sum_groups=True, extcur=[1.0])
 
 
 def test_jit_equivalence(data: MgridData) -> None:

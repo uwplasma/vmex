@@ -131,8 +131,30 @@ def _decode_char_scalar(x: Any) -> str:
     return str(arr).strip()
 
 
-def read_mgrid(path: str | Path) -> MgridData:
+def _file_currents(mgrid_mode: str, raw_coil_cur: Any) -> np.ndarray:
+    """Per-group table multipliers that give the file's own field.
+
+    A per-ampere (mode ``S``) table is multiplied by ``raw_coil_cur``; a mode
+    ``R``/``N`` table already carries its currents (VMEC2000 divides ``EXTCUR``
+    by ``raw_coil_cur`` for those files), so it is multiplied by one.
+    """
+    raw = np.asarray(raw_coil_cur, dtype=np.float64).reshape(-1)
+    if str(mgrid_mode).upper().startswith(("R", "N")):
+        return np.where(raw != 0.0, 1.0, 0.0)
+    return raw
+
+
+def read_mgrid(path: str | Path, *, sum_groups: bool = False,
+               extcur: Any | None = None) -> MgridData:
     """Read a VMEC2000/MAKEGRID mgrid netCDF file.
+
+    With ``sum_groups``, the coil groups are summed while reading, one group
+    at a time, into a single per-ampere group of unit current: the field of
+    fixed currents ``extcur`` (default: the file's own, as in
+    :meth:`MgridField.from_mgrid_data`) at ``1/nextcur`` of the memory and
+    interpolation cost.  Groups whose current is zero are not read.  The
+    per-group currents are then no longer separate parameters, so this is for
+    tracing and field evaluation, not for a solve that varies ``EXTCUR``.
 
     Raises
     ------
@@ -199,22 +221,36 @@ def read_mgrid(path: str | Path) -> MgridData:
         if cur_var is not None:
             raw_cur = tuple(float(v) for v in np.asarray(cur_var[:]).reshape(-1))[:nextcur]
 
-        br = np.zeros((nextcur, kp, jz, ir), dtype=np.float64)
-        bp = np.zeros((nextcur, kp, jz, ir), dtype=np.float64)
-        bz = np.zeros((nextcur, kp, jz, ir), dtype=np.float64)
+        if extcur is not None and not sum_groups:
+            raise ValueError("extcur applies only with sum_groups=True; "
+                             "otherwise pass it to MgridField.from_mgrid_data")
+        weights = (_file_currents(mode, raw_cur) if extcur is None
+                   else np.asarray(extcur, dtype=np.float64).reshape(-1))
+        if weights.size != nextcur:
+            raise ValueError(f"extcur length {weights.size} does not match nextcur {nextcur}")
+        groups = 1 if sum_groups else nextcur
+        br = np.zeros((groups, kp, jz, ir), dtype=np.float64)
+        bp = np.zeros((groups, kp, jz, ir), dtype=np.float64)
+        bz = np.zeros((groups, kp, jz, ir), dtype=np.float64)
         outs = {"br": br, "bp": bp, "bz": bz}
         for name, var in ds.variables.items():
             m = _FIELD_RE.match(name)
             if not m:
                 continue
             idx = int(m.group(2)) - 1
-            if not (0 <= idx < nextcur):
+            if not (0 <= idx < nextcur) or (sum_groups and weights[idx] == 0.0):
                 continue
             v = np.asarray(var[:], dtype=np.float64)
             if v.shape != (kp, jz, ir):
                 raise ValueError(f"{name} shape {v.shape} != expected {(kp, jz, ir)}")
-            outs[m.group(1)][idx, :, :, :] = v
+            if sum_groups:
+                outs[m.group(1)][0] += weights[idx] * v
+            else:
+                outs[m.group(1)][idx, :, :, :] = v
 
+    if sum_groups:
+        mode, coil_groups, raw_cur = "S", (f"sum of {nextcur} groups",), (1.0,)
+        nextcur = 1
     return MgridData(
         rmin=rmin,
         rmax=rmax,
@@ -615,16 +651,19 @@ class MgridField:
     @classmethod
     def from_mgrid_data(cls, data: MgridData, extcur: Any | None = None, *,
                         order: int = 1) -> "MgridField":
-        """Build a field from :class:`MgridData`; defaults extcur to raw currents.
+        """Build a field from :class:`MgridData`; the default is the file's own field.
 
-        The default reproduces the file's own field (raw/baked tables).  To
-        solve a *deck*, pass the deck's ``EXTCUR`` (divided by
-        ``raw_coil_cur`` for mode-``R``/``N`` files) or use the solver's
-        ``mgrid_path`` argument, which applies that scaling automatically —
-        otherwise the input's ``EXTCUR`` is silently ignored.
+        ``extcur`` multiplies each group's table.  The default reproduces the
+        currents the file was computed with: ``raw_coil_cur`` for a
+        per-ampere (mode ``S``) table, and one for a mode ``R``/``N`` table,
+        which already carries its currents (VMEC2000 divides ``EXTCUR`` by
+        ``raw_coil_cur`` for those files).  To solve a *deck*, pass the deck's
+        ``EXTCUR`` (divided by ``raw_coil_cur`` for mode-``R``/``N`` files) or
+        use the solver's ``mgrid_path`` argument, which applies that scaling
+        automatically — otherwise the input's ``EXTCUR`` is silently ignored.
         """
 
-        cur = data.raw_coil_cur if extcur is None else extcur
+        cur = _file_currents(data.mgrid_mode, data.raw_coil_cur) if extcur is None else extcur
         cur_arr = jnp.atleast_1d(jnp.asarray(cur, dtype=jnp.float64)).reshape(-1)
         if int(cur_arr.shape[0]) != int(data.nextcur):
             raise ValueError(f"extcur length {int(cur_arr.shape[0])} does not match nextcur {data.nextcur}")
@@ -643,9 +682,17 @@ class MgridField:
 
     @classmethod
     def from_file(cls, path: str | Path, extcur: Any | None = None, *,
-                  order: int = 1) -> "MgridField":
-        """Read ``path`` (raising :class:`MgridNotFoundError` if missing) and build a field."""
+                  sum_groups: bool = False, order: int = 1) -> "MgridField":
+        """Read ``path`` (raising :class:`MgridNotFoundError` if missing) and build a field.
 
+        ``sum_groups`` sums the groups at ``extcur`` while reading (see
+        :func:`read_mgrid`); the field's ``extcur`` is then a single unit scale.
+        ``order`` selects the interpolant (1 trilinear, 3 tricubic).
+        """
+
+        if sum_groups:
+            return cls.from_mgrid_data(read_mgrid(path, sum_groups=True, extcur=extcur),
+                                       order=order)
         return cls.from_mgrid_data(read_mgrid(path), extcur=extcur, order=order)
 
     @classmethod
