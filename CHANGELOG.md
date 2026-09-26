@@ -7,10 +7,29 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased fork changes
 
-Both scalar examples share setup and public accepted-state optimizers; separate qualification fingerprints shared code.
-Inputs/coils live in `examples/single_stage_support/data/`, geometry tests in `tests/`,
-and historical records in `benchmarks/single_stage_provenance/`. Constraint settings are per-case;
-physics defaults and input bytes are unchanged. Upstream root anchoring receives field parameters and failure policy explicitly.
+### Added
+
+- Matched fixed/free-boundary coil-constraint benchmarks: order-16 coils,
+  length, peak/mean-squared curvature, clearance and geometry verification.
+- `FreeBoundaryProblem.from_loss(coil_quantities=...)` includes direct coil
+  and implicit equilibrium derivatives for moving-boundary constraints.
+- Opt-in coupled-root polishing and measured LU refresh for free-boundary
+  scalar optimization, with bounded dense recovery and derivative checks.
+- Public fixed-boundary accepted-state views and composed-objective hooks, so
+  both scalar single-stage examples share one optimizer and constraint API.
+
+### Changed
+
+- Scalar examples share setup in `examples/single_stage_support/` (inputs and
+  coils in `data/`), default to SLSQP, and keep derivative verification and
+  per-case constraint settings separate. Qualification fingerprints cover the
+  shared code and unavailable optional metadata. Historical validation records
+  are in `benchmarks/single_stage_provenance/`.
+
+### Fixed
+
+- Fixed scalar restarts use the public `restart_from` argument; stage-two
+  fitting varies coil coordinates alone and preserves currents.
 
 ## 0.11.2 - 2026-09-24
 
@@ -102,33 +121,6 @@ GitHub release for the full notes.
 
 - `VmecExtender.with_near_surface_continuation` and `near_surface_plan`
   (1.6-2.4 % error floor, 18.5 GB to prepare); use `with_graded_quadrature()`.
-
-### Added
-
-- Matched fixed/free-boundary coil-constraint benchmarks: order-16 coils,
-  length, peak/mean-squared curvature, clearance and geometry verification.
-  Baseline examples moved to `examples/single-stage-benchmarks/`.
-- `FreeBoundaryProblem.from_loss(coil_quantities=...)` includes direct coil
-  and implicit equilibrium derivatives for moving-boundary constraints.
-- Qualification fingerprints record unavailable optional analysis metadata.
-- Opt-in coupled-root polishing and measured LU refresh for free-boundary
-  scalar optimization, with bounded dense recovery and derivative agreement
-  checks before replacing retained factors.
-- Public fixed-boundary accepted-state views and composed-objective acceptance
-  hooks, so both scalar single-stage examples use the same optimizer and
-  physical-constraint interface without accessing private solver caches.
-
-### Changed
-
-- Fixed- and free-boundary scalar examples share input/WOUT loading, coil
-  initialization, and run options. Both default to SLSQP, fit generated or
-  supplied initial coils, and accept saved fitted coils without refitting.
-  Derivative verification remains a separate workflow.
-
-### Fixed
-
-- Fixed scalar restarts use the public `restart_from` constructor argument;
-  stage-two fitting varies coil coordinates alone and preserves currents.
 
 ## 0.11.0 - 2026-09-21
 
