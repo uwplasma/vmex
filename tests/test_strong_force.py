@@ -21,7 +21,7 @@ from vmex.core.input import VmecInput
 from vmex.core.omnigenity import boozer_spectrum_high_order
 from vmex.core.profiles import MU0
 from vmex.core.profiles import iota as input_iota, pressure as input_pressure
-from vmex.core.polish_variational import (
+from vmex.core.polish_native import (
     evaluate_tensorized_strong_force,
     evaluate_variational_fields,
     make_native_gauge_plan,
@@ -490,7 +490,7 @@ def test_magnetic_pressure_gradient_uses_force_sweep_batching():
 def test_native_coordinate_scales_match_dense_reference_contraction():
     """Factored angular/radial moments preserve the physical column metric."""
 
-    from vmex.core import polish_variational as pv
+    from vmex.core import polish_native as pv
 
     state = _constant_toroidal_field_state(degree=3)
     plan = make_variational_plan(state, radial_order=3, ntheta=9, nzeta=1)
@@ -1455,7 +1455,7 @@ def test_coefficient_first_radial_jets_match_scipy_spline_derivatives(degree):
 
     from scipy.interpolate import BSpline
 
-    from vmex.core.polish_variational import _stable_radial_jets
+    from vmex.core.polish_native import _stable_radial_jets
 
     state = _graded_mode_state(degree)
     plan = make_variational_plan(state, radial_order=degree + 1, ntheta=7, nzeta=1, stable_derivatives=True)
@@ -1488,7 +1488,7 @@ def test_coefficient_first_radial_jets_match_scipy_spline_derivatives(degree):
 def test_coefficient_first_jets_differentiate_constants_to_exact_zero():
     """A constant m=0 mode has bitwise-zero radial derivatives, unlike the tables."""
 
-    from vmex.core.polish_variational import _stable_radial_jets
+    from vmex.core.polish_native import _stable_radial_jets
 
     state = _graded_mode_state(3)
     plan = make_variational_plan(state, radial_order=4, ntheta=7, nzeta=1, stable_derivatives=True)
@@ -1500,7 +1500,7 @@ def test_coefficient_first_jets_differentiate_constants_to_exact_zero():
 
 
 def test_coefficient_first_tables_reject_discontinuous_second_derivatives():
-    from vmex.core.polish_variational import _stable_radial_tables
+    from vmex.core.polish_native import _stable_radial_tables
 
     knots = np.asarray([0.0] * 4 + [0.5] * 3 + [1.0] * 4)
     fake = SimpleNamespace(knots=knots, degree=3)

@@ -904,60 +904,29 @@ gate of this lane is closed; the QI smoothness gate above is not.
 
 ## E. Strong-force polishing
 
-Keep the current axis-regular `rho^|m| q(s)` representation with splines in
-`s`; the recorded knot/coordinate changes do not justify a replacement.
-E1's complete virtual-work identity passes. E2 succeeds on the shaped tokamak
-but misses the 3-D force-reduction gate. Existing resolution scans implicate
-axis source data and the lift; increasing the spline basis can worsen the fit.
+Status (2026-09-25, PR #448): `vmex --polish` runs the native constrained
+force least squares of `vmex/core/polish_native.py` for decks in its qualified
+scope (axisymmetric, fixed boundary, `NCURR = 0`, `GAMMA = 0`, no `LASYM`);
+other decks keep the collocation lane (`PolishConfig.lane` selects). On
+`input.shaped_tokamak_pressure` the whole polish (lift to quintic splines,
+poloidal padding to m = 19, three force-driven knot-insertion charts of
+span-local Gauss-Newton KKT steps, one exact-Hessian Newton step) certifies
+`|F|_rms / (volavgB^2 / mu0 Aminor_p) = 7.1e-6` and projected stationarity
+`eta = 4.6e-10` in about 5 minutes on an M4 CPU, against ~5 s for the ordinary
+solve. The implicit derivative of that root with respect to the pressure
+amplitude matched independently re-solved central differences to 1e-8.
 
-First audit `lift_high_order_state` for unsupported spans, rank and axis
-regularity. Refuse an underdetermined lift rather than filling it silently.
-Use manufactured/analytic fields and independent off-grid quadrature to
-separate representation error from nonlinear-solver error. Then resume the
-bounded E3 correction and radial/angular resolution ladder, using
-[`benchmarks/e1_functional_consistency.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e1_functional_consistency.py), [`benchmarks/e2_dense_reference.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/e2_dense_reference.py),
-[`benchmarks/residual_vs_resolution.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/residual_vs_resolution.py) and [`benchmarks/knot_grading.py`](https://github.com/uwplasma/vmex/blob/07a47279d5cea819bb23c5329fab7f14cced2456/benchmarks/knot_grading.py)
-(removed from the tree; restore them from that revision).
+Two findings shaped the implementation. (1) The stationarity plateau of the
+earlier attempts was evaluation noise: contracting O(1) spline coefficients
+with second-derivative tables loses ~1e-7 of `P A^T r`, and rounding the
+coefficient sum loses more; coefficient-first differencing with separately
+synthesized base and correction jets brings it to ~1e-12. (2) A compact quintic
+basis reaches the force target with 4.4k coordinates where the cubic needed
+11k and a 20-stage schedule.
 
-Promotion requires a non-axisymmetric finite-beta case with positive geometry,
-preserved boundary/flux/profile constraints, independently reduced strong force,
-nonlinear stationarity and derivative verification. Report dimensional force,
-volume-normalized force and near-axis/bulk/edge contributions. The bounded
-legacy `eps_F` is insufficient. Separate native-state comparison from WOUT
-export/refitting error. Stop a failed bounded attempt and record its cause;
-do not repeat multi-hour W7-X attempts without new evidence of progress.
-
-The closed-hybrid force plateau in issue #211 remains an explicit admission
-question, not permission to relax a threshold. Broader mirror/anisotropy and
-coordinate rewrites remain deferred. The [resolved analytic recovery study](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755801536)
-reduces independent force strongly but still misses stationarity after 40 steps.
-It consumes 7,927 of 8,000 possible PCG iterations. A
-[fixed-endpoint dense comparison](https://github.com/uwplasma/vmex/pull/413#issuecomment-5755874974)
-now identifies inner PCG starvation in this case: the dense step reaches
-independent `eps_F=6.62e-8`, while PCG has linear residual 0.230 and barely
-improves force. The [bounded follow-up](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756143841)
-rejects strict inner convergence as a recovery policy (12 rejected trials)
-and rank-64 Nyström as the fix (linear tolerance missed; off-grid J worsened).
-[SOLVAX #119](https://github.com/uwplasma/SOLVAX/pull/119) exposes inner diagnostics
-while preserving useful inexact steps; 15 focused tests pass. These are PCG's
-recursive residuals, not independent certificates. The
-[saved-matrix LSQR/LSMR comparison](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756201847)
-produced no useful physical step at 200 iterations. Even
-[2,000 LSMR iterations](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756210776)
-missed the 1e-3 true-normal-residual gate (2.416e-3), with direction error
-0.987 relative to the dense reference. Stop this solver sweep.
-The [bounded production-chart QA diagnostic](https://github.com/uwplasma/vmex/pull/413#issuecomment-5756509703)
-now supplies the exact experimental patch and reproduction controls. Its
-18,018-by-1,336 augmented solve passed GELSD/GELSY checks below 1e-14;
-stored-matrix PCG also converged in 324/600 iterations. One admissible dense
-step reduced independent dimensional force L2 by 25 percent, not the required
-10x, and did not establish nonlinear stationarity. Total cost was 604 seconds
-and 11.13 GiB peak RSS; setup and Jacobian assembly dominated factorization.
-Do not integrate a dense production path on this evidence or extend the sweep.
-Stored-matrix PCG is not a matrix-free parity check; one step does not identify
-a representation limit. A further correction experiment requires a specific
-failing production endpoint and a measured cause, with independent physics
-gates retained. General 3-D polishing remains unqualified.
+Open gates: genuine 3-D and prescribed-current closure, `LASYM`, boundary-shape
+derivatives, and a lower polish cost (assembly and the independent certificate
+dominate; each insertion recompiles for new shapes).
 
 ## F. Public evidence, documentation and repository maintenance
 

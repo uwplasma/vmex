@@ -720,7 +720,7 @@ def polished_wout_ns(
 
     Returns
     -------
-    ``max(solve_ns, 129, 2 * native.radial_basis.size + 1, 4 / ds_min + 1)``
+    ``max(solve_ns, 129, 2 * native.radial_basis.size + 1, 2 / ds_min + 1)``
     as a Python ``int`` (``ds_min`` the narrowest radial span), the ``ns`` to
     build the export runtime with.
     """
@@ -729,7 +729,7 @@ def polished_wout_ns(
     # Uniform-in-s surfaces must also resolve the narrowest (adaptively
     # inserted) span, or the samples no longer determine the native state.
     narrowest = float(np.min(np.diff(np.asarray(native.radial_basis.breakpoints))))
-    resolving = int(np.ceil(4.0 / narrowest)) + 1
+    resolving = int(np.ceil(2.0 / narrowest)) + 1
     return max(int(solve_ns), _POLISHED_WOUT_MIN_NS, determined, resolving)
 
 
