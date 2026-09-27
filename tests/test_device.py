@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -586,3 +587,25 @@ def test_host_callback_is_not_pinned_across_platforms():
     same = im._callback_sharding(
         dataclasses.replace(cfg, device=jax.devices(here)[0]))
     assert isinstance(same, jax.sharding.SingleDeviceSharding)
+
+
+@pytest.mark.usefixtures("_module_jit_enabled")
+def test_host_callback_reuses_main_thread_executables():
+    """A lane traced on the main thread is not traced again in a callback.
+
+    JAX runs ``pure_callback`` bodies under ``default_device(cpu)``, which is
+    part of the trace-cache key: without ``_on_host`` every solver lane an
+    optimization's seed solve compiled was compiled again on its first trial.
+    """
+    from vmex.core import implicit as im
+
+    if jax.default_backend() != "cpu":
+        pytest.skip("the override is CPU-only")
+    traces = []
+    lane = jax.jit(lambda x: traces.append(1) or jnp.sin(x) + 1.0)
+    x = jnp.arange(3.0)
+    lane(x)
+    host = im._host_callable(lambda cfg, v: np.asarray(lane(jnp.asarray(v))), None)
+    jax.jit(lambda v: jax.pure_callback(
+        host, jax.ShapeDtypeStruct(v.shape, v.dtype), v))(x).block_until_ready()
+    assert len(traces) == 1
