@@ -82,22 +82,135 @@ def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
     """jaxlib < 0.10 kills the process reading big cache entries
     (LLVM ORC materializes per-kernel objects recursively and overflows a
     worker-thread stack inside PyClient::DeserializeExecutable), so the
-    cache defaults off there — but explicit user choices always win."""
+    cache stays off there unless VMEX_COMPILATION_CACHE=1 asks for it: a
+    cache path alone -- often exported by a cluster module -- is not that
+    request."""
     mp = clean_cache_env
     mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: True)
     assert _compat._default_compilation_cache_dir() is None
+    mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
+    mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmexcache")
+    assert _compat._default_compilation_cache_dir() is None
 
     mp.setenv("VMEX_COMPILATION_CACHE", "1")
-    assert _compat._default_compilation_cache_dir() is not None
-    mp.delenv("VMEX_COMPILATION_CACHE")
-
     fingerprint = _compat._cache_machine_fingerprint()
-    mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
-    assert _compat._default_compilation_cache_dir() == f"/tmp/jaxcache/{fingerprint}"
-    mp.delenv("JAX_COMPILATION_CACHE_DIR")
-
-    mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmexcache")
     assert _compat._default_compilation_cache_dir() == f"/tmp/vmexcache/{fingerprint}"
+
+
+def test_disabled_wins_over_every_cache_path(clean_cache_env):
+    mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
+    mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmexcache")
+    mp.setenv("VMEX_COMPILATION_CACHE", "disabled")
+    assert _compat._default_compilation_cache_dir() is None
+
+
+def test_machine_scoped_never_nests_machines():
+    """A path inherited from a job launched on another node (its last
+    component another machine's fingerprint) is re-rooted, not nested."""
+    fingerprint = _compat._cache_machine_fingerprint()
+    other = "linux-x86_64-0123456789abcdef"
+    assert _compat._machine_scoped("/shared/c") == f"/shared/c/{fingerprint}"
+    assert _compat._machine_scoped(f"/shared/c/{fingerprint}") == f"/shared/c/{fingerprint}"
+    assert _compat._machine_scoped(f"/shared/c/{other}") == f"/shared/c/{fingerprint}"
+
+
+def test_fingerprint_separates_hosts(monkeypatch):
+    """Two cluster nodes never share a cache directory, whatever their
+    /proc/cpuinfo says: XLA:CPU loads an entry built for other CPU features
+    after only logging the mismatch."""
+    real = _compat._host_identity()
+    assert real and real == _compat._host_identity()
+    monkeypatch.setattr(_compat, "_host_identity", lambda: "node001")
+    first = _compat._cache_machine_fingerprint()
+    monkeypatch.setattr(_compat, "_host_identity", lambda: "node002")
+    assert _compat._cache_machine_fingerprint() != first
+
+
+class _PolicyConfig:
+    """jax.config stand-in holding the two cache fields JAX reads."""
+
+    def __init__(self, cache_dir=None, enabled=True):
+        self.jax_compilation_cache_dir = cache_dir
+        self.jax_enable_compilation_cache = enabled
+        self.updates = []
+
+    def update(self, key, value):
+        self.updates.append(key)
+        setattr(self, key, value)
+
+
+def test_policy_overrides_jax_env_cache(clean_cache_env, tmp_path):
+    """JAX reads JAX_COMPILATION_CACHE_DIR itself at import; vmex must split
+    that raw path per machine, switch it off when disabled, and be a no-op
+    once applied (the solver re-applies it on import)."""
+    mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    mp.setattr(_compat, "_APPLIED", [None])
+    raw = str(tmp_path / "shared")
+    mp.setenv("JAX_COMPILATION_CACHE_DIR", raw)
+    fake = types.SimpleNamespace(config=_PolicyConfig(raw))
+    scoped = f"{raw}/{_compat._cache_machine_fingerprint()}"
+    assert _compat._apply_compilation_cache_policy(fake) == scoped
+    assert fake.config.jax_compilation_cache_dir == scoped
+    fake.config.updates.clear()
+    assert _compat._apply_compilation_cache_policy(fake) == scoped
+    assert fake.config.updates == []                      # idempotent
+
+    mp.setenv("VMEX_COMPILATION_CACHE", "disabled")
+    assert _compat._apply_compilation_cache_policy(fake) is None
+    assert fake.config.jax_compilation_cache_dir is None
+    assert fake.config.jax_enable_compilation_cache is False
+
+    # jaxlib < 0.10 with only a path: JAX's own env-driven cache goes off
+    mp.delenv("VMEX_COMPILATION_CACHE")
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: True)
+    fake = types.SimpleNamespace(config=_PolicyConfig(raw))
+    assert _compat._apply_compilation_cache_policy(fake) is None
+    assert fake.config.jax_enable_compilation_cache is False
+
+
+def test_policy_scopes_a_programmatic_cache_dir(clean_cache_env, tmp_path):
+    mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    mp.setattr(_compat, "_APPLIED", [None])
+    chosen = str(tmp_path / "mine")
+    fake = types.SimpleNamespace(config=_PolicyConfig(chosen))
+    assert _compat._apply_compilation_cache_policy(fake) == (
+        f"{chosen}/{_compat._cache_machine_fingerprint()}")
+
+
+def test_solver_import_scopes_an_env_derived_cache(clean_cache_env, tmp_path):
+    """core.solver re-applies the policy even when a directory is already
+    configured (previously it returned early and left JAX's raw path)."""
+    import jax
+    from vmex.core import solver
+
+    mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    raw = str(tmp_path / "raw")
+    mp.setenv("JAX_COMPILATION_CACHE_DIR", raw)
+    before = (jax.config.jax_compilation_cache_dir,
+              jax.config.jax_enable_compilation_cache)
+    try:
+        jax.config.update("jax_compilation_cache_dir", raw)
+        solver._harden_compilation_cache()
+        assert jax.config.jax_compilation_cache_dir == (
+            f"{raw}/{_compat._cache_machine_fingerprint()}")
+    finally:
+        jax.config.update("jax_compilation_cache_dir", before[0])
+        jax.config.update("jax_enable_compilation_cache", before[1])
+        _compat._APPLIED[0] = before[0]
+        _compat._reset_jax_cache()
+
+
+def test_import_does_not_export_a_machine_cache_path(clean_cache_env):
+    """A job launched from this process may run on another node."""
+    import os
+
+    _compat._configure_jax_environment()
+    assert "JAX_COMPILATION_CACHE_DIR" not in os.environ
 
 
 @pytest.mark.parametrize("system", ["Linux", "Darwin"])
@@ -120,6 +233,7 @@ def test_jaxlib_version_tuple_parses_release_and_dev(monkeypatch):
         return fake_version.value  # type: ignore[attr-defined]
 
     monkeypatch.setattr(_compat.importlib_metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "jaxlib.version", None)  # metadata fallback
     for raw, expected in [
         ("0.9.2", (0, 9, 2)),
         ("0.10.0", (0, 10, 0)),
@@ -136,6 +250,66 @@ def test_jaxlib_version_tuple_parses_release_and_dev(monkeypatch):
 
     monkeypatch.setattr(_compat.importlib_metadata, "version", missing)
     assert _compat._jaxlib_version_tuple() is None
+
+
+def test_runtime_jaxlib_version_wins_over_metadata(monkeypatch):
+    """A shadowed or stale install reports one version and imports another;
+    the deserialize gate must judge the jaxlib that actually runs."""
+    jaxlib_version = pytest.importorskip("jaxlib.version")
+    monkeypatch.setattr(_compat.importlib_metadata, "version", lambda _: "0.11.2")
+    monkeypatch.setattr(jaxlib_version, "__version__", "0.9.2")
+    assert _compat._jaxlib_version_tuple() == (0, 9, 2)
+    assert _compat._cache_deserialize_unsafe() is True
+
+
+def test_map_pressure_releases_executables_once_per_headroom(monkeypatch, tmp_path):
+    """Near vm.max_map_count every XLA:CPU compile fails with ENOMEM; the
+    guard clears JAX's executables at half the limit, then only after a
+    further quarter of growth, warns once, and never races a prefetch."""
+    import threading
+    import warnings
+
+    limit = tmp_path / "max_map_count"
+    limit.write_text("1000\n")
+    monkeypatch.setattr(_compat, "_MAP_LIMIT_FILE", str(limit))
+    monkeypatch.setattr(_compat, "_MAP_STATE", {"floor": 0, "warned": False})
+    counts = []
+    monkeypatch.setattr(_compat, "_map_count", lambda: counts.pop(0))
+    cleared = []
+    fake = types.SimpleNamespace(clear_caches=lambda: cleared.append(1))
+
+    counts[:] = [400]
+    assert _compat._relieve_map_pressure(fake) is False          # below half
+    counts[:] = [600, 300]                                       # before, after
+    with pytest.warns(RuntimeWarning, match="max_map_count=1000"):
+        assert _compat._relieve_map_pressure(fake) is True
+    counts[:] = [540]
+    assert _compat._relieve_map_pressure(fake) is False          # < 300 + 250
+    stop = threading.Event()
+    prefetch = threading.Thread(target=stop.wait, name="vmex-lane-prefetch")
+    prefetch.start()
+    try:
+        counts[:] = [900]
+        assert _compat._relieve_map_pressure(fake) is False      # compile in flight
+    finally:
+        stop.set()
+        prefetch.join()
+    counts[:] = [900, 200]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                           # warned once only
+        assert _compat._relieve_map_pressure(fake) is True
+    assert len(cleared) == 2
+
+    monkeypatch.setattr(_compat, "_MAP_LIMIT_FILE", str(tmp_path / "absent"))
+    assert _compat._relieve_map_pressure(fake) is False          # not Linux
+
+
+def test_map_count_reads_this_process():
+    count = _compat._map_count()
+    if sys.platform.startswith("linux"):
+        assert count is not None and count > 10
+    else:
+        assert count is None
 
 
 def test_cache_machine_fingerprint_shape_and_stability():

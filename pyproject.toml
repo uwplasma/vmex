@@ -25,12 +25,13 @@ classifiers = [
 
 dependencies = [
   "numpy",
-  # 0.9.2 is the oldest JAX a CI lane tests (ci.yml jax-compatibility).
+  # 0.10.2 is the oldest JAX a CI lane tests (ci.yml jax-compatibility).
   # vmex/__init__.py refuses older jax/jaxlib/scipy at import with the same
-  # floors.  jaxlib 0.9.x crashes loading large cached executables, so
-  # vmex/_compat.py keeps the persistent cache off below 0.10.
-  "jax>=0.9.2",
-  "jaxlib>=0.9.2",
+  # floors.  Older jaxlib crashes loading large cached executables (< 0.10)
+  # and flags every cached executable on an AVX-512 host as built for
+  # another machine (< 0.10.2).
+  "jax>=0.10.2",
+  "jaxlib>=0.10.2",
   # 1.16 added least_squares(callback=), which the optimization examples pass;
   # SciPy 1.16 needs Python 3.11, hence requires-python.
   "scipy>=1.16",

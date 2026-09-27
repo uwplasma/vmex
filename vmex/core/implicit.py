@@ -184,6 +184,7 @@ from .residuals import (
     zero_m1_z_force,
 )
 from .setup import RadialGrids, flux_profiles, interior_guess
+from .._compat import _relieve_map_pressure
 from .solver import (
     SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
     _force_to_state, _initial_state, _physical_coefficients,
@@ -1808,6 +1809,7 @@ def _host_solve_and_mask(cfg: ImplicitConfig, params_np, *,
     # commits to JAX's default device and later mixes devices with the
     # explicitly placed state (observed as NaN diagnostics / zero gradients
     # on a non-default GPU).
+    _relieve_map_pressure(jax)
     with _device_context(cfg):
         return _host_solve_and_mask_impl(cfg, params_np, refine=refine)
 

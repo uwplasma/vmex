@@ -54,6 +54,7 @@ from .input import VmecInput, _vmec_ns_prefix
 from .preconditioner_2d import Prec2DConfig
 from .printing import emit_flushed
 from .restart import restart_state, skip_ladder_rungs
+from .._compat import _relieve_map_pressure
 from .solver import (
     SolveResult, SpectralState, _finalize, _loop_driver_config,
     _prefetch_block_lane,
@@ -387,6 +388,7 @@ def solve_multigrid(
 
     Returns the final stage's :class:`~vmex.core.solver.SolveResult`.
     """
+    _relieve_map_pressure(jax)
     polish = _resolve_force_balance_polish(
         inp, None, polish_force_balance
     )
@@ -701,6 +703,7 @@ def solve_free_boundary_multigrid(
     on-demand compilation, and background threads are joined before the
     ``release_stage_cache`` point exactly like the fixed-boundary ladder.
     """
+    _relieve_map_pressure(jax)
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary_multigrid requires an LFREEB=T input")
 
