@@ -26,14 +26,10 @@ revision it was measured at, and the pages that cite it.
   implicit-function-theorem derivative of that PHIEDGE with respect to
   plasma and coil parameters, from one adjoint gradient.
 
-- Long CPU runs no longer abort or fail with "Failed to materialize symbols":
-  each compiled XLA:CPU kernel holds its own memory mappings, and vmex now
-  releases compiled executables before the process reaches the kernel's
-  `vm.max_map_count`.
-- The compilation cache is one directory per machine (hostname; hardware UUID
-  on macOS), so cluster nodes never load each other's executables;
-  `VMEX_COMPILATION_CACHE=disabled` overrides every cache variable, including
-  JAX's own; a cache path no longer enables the cache on jaxlib < 0.10.
+- Long CPU runs no longer abort with "Failed to materialize symbols": vmex
+  releases compiled executables before the process reaches
+  `vm.max_map_count`. The compilation cache is one directory per machine, and
+  `VMEX_COMPILATION_CACHE=disabled` overrides every cache variable.
 
 ## 0.11.2 - 2026-09-24
 

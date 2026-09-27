@@ -396,17 +396,17 @@ def _apply_compilation_cache_policy(jax_module: Any) -> str | None:
 
     JAX reads ``JAX_COMPILATION_CACHE_DIR`` itself at import, so without
     this a raw shared path (or a cache the policy turned off) would stay
-    live.  A directory set programmatically through ``jax.config`` counts
-    as the parent choice and is split per machine too.  Idempotent: a
-    config already matching the policy is left alone.
+    live.  A directory the program itself set through ``jax.config`` (neither
+    that variable's value nor one vmex applied) is the caller's choice and is
+    left as it is.  Idempotent: a config already matching the policy is left
+    alone.
     """
     cache_dir = _default_compilation_cache_dir()
     current = jax_module.config.jax_compilation_cache_dir
     enabled = jax_module.config.jax_enable_compilation_cache
     env_dir = (os.environ.get("JAX_COMPILATION_CACHE_DIR") or "").strip()
-    if (cache_dir is not None and current and current not in (env_dir, cache_dir)
-            and current != _APPLIED[0] and not _env("COMPILATION_CACHE_DIR").strip()):
-        cache_dir = _machine_scoped(current)
+    if current and current not in (env_dir, cache_dir, _APPLIED[0]):
+        return current
     if cache_dir is not None and (current != cache_dir or not enabled):
         try:
             os.makedirs(cache_dir, exist_ok=True)

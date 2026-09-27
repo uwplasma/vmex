@@ -184,14 +184,16 @@ def test_unwritable_cache_dir_turns_the_cache_off(clean_cache_env, tmp_path):
     assert fake.config.jax_enable_compilation_cache is False
 
 
-def test_policy_scopes_a_programmatic_cache_dir(clean_cache_env, tmp_path):
+def test_policy_leaves_a_programmatic_cache_dir_alone(clean_cache_env, tmp_path):
+    """A directory the program set through jax.config is its own choice."""
     mp = clean_cache_env
-    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
     mp.setattr(_compat, "_APPLIED", [None])
     chosen = str(tmp_path / "mine")
-    fake = types.SimpleNamespace(config=_PolicyConfig(chosen))
-    assert _compat._apply_compilation_cache_policy(fake) == (
-        f"{chosen}/{_compat._cache_machine_fingerprint()}")
+    for flag in ("1", "disabled"):
+        mp.setenv("VMEX_COMPILATION_CACHE", flag)
+        fake = types.SimpleNamespace(config=_PolicyConfig(chosen))
+        assert _compat._apply_compilation_cache_policy(fake) == chosen
+        assert fake.config.updates == []
 
 
 def test_solver_import_scopes_an_env_derived_cache(clean_cache_env, tmp_path):
