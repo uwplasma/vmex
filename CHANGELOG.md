@@ -5,7 +5,7 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
-## Unreleased
+## 0.11.3 - 2026-09-27
 
 - `vmex --trace` defaults to 1000 alphas over 1e-2 s at the converged step
   (2.5e-7 s at ARIES-CS size, was 5e-7 s, which overstated ARIES-CS losses
