@@ -572,7 +572,7 @@ def _baseline_struct(cfg: FreeBoundaryImplicitConfig):
 def _callback(params, field_parameters, cfg):
     rcon_struct, zcon_struct = _baseline_struct(cfg)
     return jax.pure_callback(
-        functools.partial(_host_solve_and_mask, cfg),
+        im._host_callable(_host_solve_and_mask, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct),
         params, field_parameters,
@@ -585,7 +585,7 @@ def _callback_status(params, field_parameters, cfg):
     rcon_struct, zcon_struct = _baseline_struct(cfg)
     scalar = jax.ShapeDtypeStruct((), jnp.float64)
     return jax.pure_callback(
-        functools.partial(_host_solve_and_mask_status, cfg),
+        im._host_callable(_host_solve_and_mask_status, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct, jax.ShapeDtypeStruct((), jnp.int32),
          scalar, scalar),

@@ -1957,26 +1957,36 @@ def _callback_sharding(cfg: ImplicitConfig):
     return jax.sharding.SingleDeviceSharding(cfg.device)
 
 
-@functools.lru_cache(maxsize=_CONFIG_CANON_MAX)
-def _host_callback(cfg: ImplicitConfig) -> Callable:
-    """Stable-identity host callback for :func:`_callback_solve`.
+def _on_host(fn: Callable, cfg: Any, *args):
+    """Run a ``pure_callback`` host body in the main thread's trace context.
+
+    JAX runs callback bodies under ``default_device(<first CPU device>)`` and
+    the default device is part of the jit trace-cache key, so every lane the
+    host solve reached from inside a callback was traced and compiled a second
+    time when the same lane had already run on the main thread (the seed solve
+    of every optimization). On a CPU backend that device already is the
+    default, so clearing the override changes no placement; other backends
+    keep JAX's CPU pin.
+    """
+    if jax.default_backend() != "cpu":
+        return fn(cfg, *args)
+    with jax.default_device(None):
+        return fn(cfg, *args)
+
+
+@functools.lru_cache(maxsize=2 * _CONFIG_CANON_MAX)
+def _host_callable(fn: Callable, cfg: Any) -> Callable:
+    """Stable-identity host callback ``fn(cfg, *args)`` for ``pure_callback``.
 
     ``jax.pure_callback`` keys its staged computation partly on the callback
-    callable's identity (``functools.partial`` compares by identity), so the
-    previous per-call partial minted a fresh cache key and recompiled the
-    (small) callback program on every ``run``/``solve_implicit`` — one
-    measured ``jit(pure_callback)`` recompile per warm objective evaluation.
-    Memoized per canonical config identity, bounded like ``_CONFIG_CANON``
-    so entries expire together (eviction costs a recompile, never
-    correctness).
+    callable's identity (``functools.partial`` compares by identity), so a
+    per-call partial minted a fresh cache key and recompiled the (small)
+    callback program on every ``run``/``solve_implicit`` — one measured
+    ``jit(pure_callback)`` recompile per warm objective evaluation.  Memoized
+    per canonical config identity, bounded like ``_CONFIG_CANON`` so entries
+    expire together (eviction costs a recompile, never correctness).
     """
-    return functools.partial(_host_solve_and_mask, cfg)
-
-
-@functools.lru_cache(maxsize=_CONFIG_CANON_MAX)
-def _host_callback_status(cfg: ImplicitConfig) -> Callable:
-    """Stable-identity status host callback (see :func:`_host_callback`)."""
-    return functools.partial(_host_solve_and_mask_status, cfg)
+    return functools.partial(_on_host, fn, cfg)
 
 
 def _callback_solve(params: ImplicitParams, cfg: ImplicitConfig):
@@ -1994,7 +2004,7 @@ def _callback_solve(params: ImplicitParams, cfg: ImplicitConfig):
     """
     try:
         return jax.pure_callback(
-            _host_callback(cfg),
+            _host_callable(_host_solve_and_mask, cfg),
             (_state_struct(cfg), _state_struct(cfg)), params,
             sharding=_callback_sharding(cfg),
         )
@@ -2009,7 +2019,7 @@ def _callback_solve_status(params: ImplicitParams, cfg: ImplicitConfig):
     status_struct = jax.ShapeDtypeStruct((), jnp.int32)
     scalar_struct = jax.ShapeDtypeStruct((), jnp.float64)
     return jax.pure_callback(
-        _host_callback_status(cfg),
+        _host_callable(_host_solve_and_mask_status, cfg),
         (_state_struct(cfg), _state_struct(cfg), status_struct, scalar_struct, scalar_struct),
         params,
         sharding=_callback_sharding(cfg),
