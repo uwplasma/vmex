@@ -114,7 +114,6 @@ rediraffe_redirects = {
     "explanation/parallelization": "explanation/architecture",
     "tutorials/plots-and-boozer": "tutorials/first-equilibrium",
     "howto/use-wout-downstream": "howto/plot-diagnostics",
-    "howto/trace-alpha-particles": "howto/use-essos-fields-and-coils",
     "reference/input-file": "reference/vmec2000-compatibility",
     "reference/mout-file": "reference/wout-file",
     "howto/parameter-scans": "howto/restart-from-previous-run",

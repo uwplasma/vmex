@@ -11,8 +11,7 @@ vmex wout_case.nc --trace          # 1000 alphas, 10 ms, ARIES-CS size
 vmex input.case --trace            # solve first, then trace
 ```
 
-The default run takes about 30 s on a 10-core laptop (see
-[Cost](#cost)). It prints the scaling factors, the step, the number of Boozer
+The default run takes about 30 s on a 10-core laptop (see Cost below). It prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
@@ -112,23 +111,28 @@ wins. The Boozer transform takes about 2 s.
 ## Convergence of the defaults
 
 These runs use ARIES-CS (`wout_n3are_R7.75B5.7.nc`) at reactor scale, with
-the same 1000 alphas launched from s = 0.25 and traced for 10 ms. The binomial
-σ is about 1.0 %.
+the same alphas launched from s = 0.25 and traced for 10 ms.
 
-| step [s] | mode cut | modes | lost | vs reference |
-|---|---|---|---|---|
-| 6.25e-8 | 1e-4 | 135 | 121 (12.1 %) | reference |
-| 1.25e-7 | 1e-4 | 135 | 115 | -0.6σ |
-| **1.25e-7** | **1e-3** | **41** | **125** | **+0.4σ (default)** |
-| 2.5e-7 | 1e-3 | 41 | 132 | +1.1σ |
+| alphas | step [s] | mode cut | modes | lost | vs reference (σ) |
+|---|---|---|---|---|---|
+| 4000 | 6.25e-8 | 1e-4 | 135 | 501 (12.5 %) | reference |
+| 4000 | **1.25e-7** | **1e-3** | **41** | **489 (12.2 %)** | **-0.6 (default)** |
+| 4000 | 2.5e-7 | 1e-3 | 41 | 501 | 0.0 |
+| 1000 | 6.25e-8 | 1e-4 | 135 | 121 | reference |
+| 1000 | 6.25e-8 | 1e-5 | 382 | 131 | +1.0 |
+| 1000 | 1.25e-7 | 1e-4 | 135 | 115 | -0.6 |
+| 1000 | **1.25e-7** | **1e-3** | **41** | **125** | **+0.4 (default)** |
+| 1000 | 2.5e-7 | 1e-3 | 41 | 132 | +1.1 |
 
-Halving the default step, or refining the mode cut tenfold, changes the loss
-fraction by less than 1σ (gate G4 of plan section T). At 2.5e-7 s the
-difference reaches 1σ, and the RK4 energy error grows from 1e-3 to 2e-2. The
-per-particle lost/confined labels agree only 90-92 % between any two of
-these runs. Over 10 ms these orbits are chaotic, so the fraction converges
-while individual orbits do not. Over 2 ms, 2000 alphas give 54 and 55 losses
-at 6.25e-8 s and 3.125e-8 s, 2.7 %. The earlier VMEC-coordinate tracer gave
+Halving the default step (and refining the mode cut tenfold) changes the
+loss fraction by 0.6σ at 4000 alphas. That is within the 1σ gate G4 of plan
+section T. So is refining the cut a further hundredfold at 1000 alphas. At
+2.5e-7 s the loss fraction still agrees, but the RK4 energy error grows from
+1e-3 to 2e-2, so the default keeps 1.25e-7 s. The per-particle
+lost/confined labels agree only 90-92 % between any two of these runs.
+Over 10 ms these orbits are chaotic, so the fraction converges while
+individual orbits do not. Over 2 ms, 2000 alphas give 54 and 55 losses at
+6.25e-8 s and 3.125e-8 s, 2.7 %. The earlier VMEC-coordinate tracer gave
 2.5 % ± 1.1 % at its converged step.
 
 ## From Python
