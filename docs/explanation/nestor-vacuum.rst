@@ -182,7 +182,9 @@ constructed from :meth:`~vmex.core.problem.VmecProblem.exterior_field` also
 provides ``B_vjp`` and the three spatial-derivative VJPs in the problem's
 boundary/current DOFs. The virtual-casing path applies outside the LCFS;
 :class:`~vmex.core.extender.VmecInteriorField` evaluates the live VMEC
-spectral field inside. Direct off-surface quadrature must stay away from the
+spectral field inside. At a point outside the LCFS, or where the
+coordinate inversion does not converge, it returns NaN for both ``B`` and
+the flux coordinates ``(s, theta, phi)`` rather than an extrapolated value. Direct off-surface quadrature must stay away from the
 source surface and all targets must stay away from external coil filaments.
 Near the surface the direct quadrature is replaced, point by point, by a
 target-graded rule (below); :meth:`~vmex.core.extender.VmecExtender.with_graded_quadrature`
