@@ -149,7 +149,7 @@ from packaging.version import Version as _Version
 
 # Oldest supported versions, equal to the pyproject.toml floors.  SciPy 1.16
 # added the least_squares(callback=) that the optimization examples pass.
-_MINIMUM_VERSIONS = {"scipy": (1, 16), "jax": (0, 10, 2), "jaxlib": (0, 10, 2)}
+_MINIMUM_VERSIONS = {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2)}
 
 
 def _check_supported_versions() -> None:

@@ -34,7 +34,6 @@ revision it was measured at, and the pages that cite it.
   on macOS), so cluster nodes never load each other's executables;
   `VMEX_COMPILATION_CACHE=disabled` overrides every cache variable, including
   JAX's own; a cache path no longer enables the cache on jaxlib < 0.10.
-  jax/jaxlib >= 0.10.2 is required.
 
 ## 0.11.2 - 2026-09-24
 
