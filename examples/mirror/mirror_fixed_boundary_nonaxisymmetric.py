@@ -304,7 +304,7 @@ summaries["axisymmetric"] = {"status": "supported"} | axisymmetric.summary() | {
 assert summaries["axisymmetric"]["variational_max"] <= FTOL
 assert summaries["axisymmetric"]["strong_force_normalized_rms"] < STRONG_FORCE_GATE
 assert summaries["axisymmetric"]["normalized_divergence_rms"] < 1.0e-12
-# The solved on-axis ratio reproduces 1 + mirror_strength to 7.5e-4 at this
+# The solved on-axis ratio reproduces 1 + mirror_strength to 1.0e-3 at this
 # resolution; the gate leaves room for platform drift.
 assert abs(summaries["axisymmetric"]["R_m_axis"][0] / (1.0 + AXISYMMETRIC_MIRROR_STRENGTH) - 1.0) < 3.0e-3
 
