@@ -60,6 +60,43 @@ Landreman-Paul precise-QA coil set this way:
 :language: python
 ```
 
+## Mgrid interpolation order
+
+{class}`~vmex.core.mgrid.MgridField` interpolates the tabulated field with
+one of two kernels, selected by `order`:
+
+| `order` | Kernel | Smoothness | Use |
+|---|---|---|---|
+| `1` (default) | trilinear | C0 value, piecewise-constant gradient | VMEC2000 / MAKEGRID parity; reproduces reference wouts |
+| `3` | tricubic Catmull-Rom | C1, third-order accurate | accuracy on a given table |
+
+Measured on the Landreman-Paul precise-QA coils tabulated on a
+181 x 201 x 64 grid, the error against direct Biot-Savart is rms 1.8e-5 /
+max 1.1e-4 (relative) for trilinear and about 8e-8 for tricubic. On the
+CTH-like deck one tricubic field evaluation costs 4.2x a trilinear one, and a
+full free-boundary solve takes 12% longer (1.63 s to 1.83 s). The trilinear
+kink matters on coarse tables: on a 1 cm table two converged tokamak
+equilibria differed by 7 mm in axis position; the tricubic kernel or a finer
+table removes the discrepancy.
+
+The CLI and `solve_file` always use `order=1`. To solve a deck with the
+tricubic kernel, build its field and pass it as `external_field`:
+
+```python
+import vmex as vj
+
+inp = vj.VmecInput.from_file("input.case")
+field = vj.MgridField.from_input(inp, order=3)   # MGRID_FILE scaled by EXTCUR
+result = vj.solve_free_boundary(inp, external_field=field)
+```
+
+{meth}`~vmex.core.mgrid.MgridField.from_file` and
+{meth}`~vmex.core.mgrid.MgridField.from_mgrid_data` take the same `order`
+keyword. {meth}`~vmex.core.mgrid.MgridField.from_coils` and
+{meth}`~vmex.core.mgrid.MgridField.from_cartesian_field` return an
+`order=1` field; switch the kernel with
+`dataclasses.replace(field, order=3)`.
+
 ## Key knobs
 
 - `EXTCUR` — coil-group currents scaling the mgrid field.
