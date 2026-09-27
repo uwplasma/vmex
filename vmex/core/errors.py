@@ -247,8 +247,8 @@ class AdjointSolveError(VmecNumericalError):
 class StrongForceCertificationError(VmecNumericalError):
     """A force-balance polish missed its force or stationarity tolerance.
 
-    Raised by :func:`vmex.core.polish_driver.polish_legacy_solution` when
-    :class:`~vmex.core.polish_driver.PolishConfig` has ``fail_policy="raise"``
+    Raised by :func:`vmex.core.polish.polish_legacy_solution` when
+    :class:`~vmex.core.polish.PolishConfig` has ``fail_policy="raise"``
     (the default); with ``fail_policy="return_unpolished"`` the driver returns
     the unpolished state and its report instead.
 

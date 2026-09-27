@@ -224,6 +224,7 @@ def test_polish_certificate_summary_without_measures_is_unchanged():
         1.281e-2, 1.807e-3, 1e-2, verdict="CERTIFIED") == (
         "\n POLISH CERTIFICATE : EPS-F  1.281E-02 ->  1.807E-03"
         "  (TOLERANCE  1.000E-02)\n POLISH CERTIFIED\n")
+    assert "TOLERANCE" not in printing.polish_certificate_summary(1.0, 0.5, None, verdict="CERTIFIED")
 
 
 def test_force_error_rows_render_single_and_paired_states():

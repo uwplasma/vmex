@@ -329,6 +329,6 @@ def polish_config_from_options(options: RunOptions, base: Any = None) -> Any:
         return base
     if options.polish_fail not in ("fallback", "warn"):
         return None
-    from .polish_driver import PolishConfig
+    from .polish import PolishConfig
 
     return PolishConfig(fail_policy="return_unpolished")

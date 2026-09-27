@@ -18,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import vmex as vj
-from vmex.core.polish_driver import polished_wout_input, polished_wout_state
+from vmex.core.polish import polished_wout_input, polished_wout_state
 
 # Input deck: fixed-boundary, axisymmetric, prescribed pressure and iota.
 INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.shaped_tokamak_pressure"

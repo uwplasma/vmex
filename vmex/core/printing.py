@@ -226,7 +226,7 @@ def polish_banner(
 
     States the request mode, the native spline degree, the solve radial
     resolution feeding the lift, and the two acceptance tolerances of
-    :class:`~vmex.core.polish_driver.PolishConfig`.
+    :class:`~vmex.core.polish.PolishConfig`.
     """
     return (
         "\n -----------------------\n"
@@ -282,7 +282,7 @@ def force_error_rows(
 def polish_certificate_summary(
     initial_l2: float,
     final_l2: float,
-    tolerance: float,
+    tolerance: float | None,
     *,
     verdict: str,
     failed_checks: tuple[str, ...] = (),
@@ -297,12 +297,14 @@ def polish_certificate_summary(
     alone.  ``measures`` carries the non-saturating quantities that make the
     ``eps_F`` pair readable — the dimensional ``<|F|>`` and the
     volume-averaged normalizations — and is printed under an explicit
-    statement of the ``eps_F`` ceiling.
+    statement of the ``eps_F`` ceiling.  ``tolerance=None`` omits the
+    tolerance when ``eps_F`` is reported but not the acceptance test.
     """
     lines = [
         "",
         f" POLISH CERTIFICATE : EPS-F {float(initial_l2):10.3E} ->"
-        f" {float(final_l2):10.3E}  (TOLERANCE {float(tolerance):10.3E})",
+        f" {float(final_l2):10.3E}"
+        + ("" if tolerance is None else f"  (TOLERANCE {float(tolerance):10.3E})"),
     ]
     if measures:
         lines.extend(f"   {notice}" for notice in EPS_F_SATURATION_NOTICE)

@@ -145,7 +145,7 @@ def test_precedence_python_over_file_over_default():
 
 
 def test_polish_config_mapping_and_explicit_config_priority():
-    from vmex.core.polish_driver import PolishConfig
+    from vmex.core.polish import PolishConfig
 
     config = polish_config_from_options(RunOptions(polish=True, polish_fail="fallback"))
     assert config.fail_policy == "return_unpolished"
@@ -156,15 +156,15 @@ def test_polish_config_mapping_and_explicit_config_priority():
     assert polish_config_from_options(RunOptions(polish_fail="warn"), base) is base
 
 
-def test_plain_run_options_do_not_import_polish_driver(monkeypatch):
+def test_plain_run_options_do_not_import_polish(monkeypatch):
     """The default CLI path must not load the optional polishing stack."""
     import builtins
 
     real_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
-        if name.endswith("polish_driver"):
-            raise AssertionError("plain run imported the polishing driver")
+        if name.endswith("polish"):
+            raise AssertionError("plain run imported the polish module")
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
@@ -293,7 +293,7 @@ def test_solve_file_polish_directive_activates_polishing(tmp_path):
     source.write_text("!@VMEX POLISH = .TRUE.\n"
                       + physics.read_text(encoding="utf-8"), encoding="utf-8")
 
-    from vmex.core.polish_driver import PolishConfig
+    from vmex.core.polish import PolishConfig
 
     config = PolishConfig(fail_policy="return_unpolished")
     result = vj.solve_file(source, outdir=tmp_path, polish_config=config)

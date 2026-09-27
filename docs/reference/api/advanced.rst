@@ -32,14 +32,10 @@ High-order reconstruction and force certificate
 Force-balance polishing
 -----------------------
 
-.. automodule:: vmex.core.polish_driver
-   :members:
-
-.. automodule:: vmex.core.polish_native
-   :members: PolishConfig, polish_native, native_polish_supported, physical_scales
-
 .. automodule:: vmex.core.polish
-   :members:
+   :members: PolishConfig, PolishReport, PolishResult, polish_legacy_solution, polish_native,
+      native_polish_supported, physical_scales, polished_wout_ns, polished_wout_input,
+      polished_wout_state, sample_high_order_state
 
 :func:`vmex.solve`, :func:`vmex.solve_multigrid` and :func:`vmex.solve_file`
 accept ``polish_force_balance`` (``polish`` on the single-grid call and
@@ -64,7 +60,7 @@ A certified result carries ``native_equilibrium`` (the certified continuous
 state), ``strong_force`` (its independent certificate) and ``polish_report``;
 ``polished_state`` is its view on the solve mesh and the deck's modes, which
 :class:`vmex.core.optimize.Equilibrium` uses.  WOUT files sample the native
-state on the denser :func:`vmex.core.polish_driver.polished_wout_ns` mesh,
+state on the denser :func:`vmex.core.polish.polished_wout_ns` mesh,
 with ``MPOL`` widened to hold padded modes, so the file carries the certified
 state.
 

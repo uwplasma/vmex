@@ -2692,7 +2692,7 @@ def _polish_solve_result(
 
     if polish is False:
         return result
-    from .polish_driver import PolishConfig, polish_legacy_solution
+    from .polish import PolishConfig, polish_legacy_solution
 
     if polish_config is not None and not isinstance(polish_config, PolishConfig):
         raise TypeError("polish_config must be a PolishConfig")
@@ -2812,15 +2812,15 @@ def solve(
 
     ``polish_force_balance=False`` preserves the legacy result exactly.
     ``polish_force_balance=True`` polishes the converged solve with
-    :func:`~vmex.core.polish_driver.polish_legacy_solution` (axisymmetric
+    :func:`~vmex.core.polish.polish_legacy_solution` (axisymmetric
     fixed-boundary decks with prescribed pressure and iota; other decks raise)
-    and follows :class:`~vmex.core.polish_driver.PolishConfig` failure
+    and follows :class:`~vmex.core.polish.PolishConfig` failure
     semantics; ``"auto"`` polishes supported decks and leaves others
     unpolished.  Polishing requires a :class:`VmecInput` source.
     ``native_equilibrium``, ``strong_force`` and ``polish_report`` carry the
     certified native result; ``polished_state`` is its view on the solve mesh
     and the deck's modes (WOUT export samples the native state on the denser
-    :func:`~vmex.core.polish_driver.polished_wout_ns` mesh).  ``polish``
+    :func:`~vmex.core.polish.polished_wout_ns` mesh).  ``polish``
     remains a backward-compatible alias.
     """
     if resolution is None and isinstance(source, VmecInput):

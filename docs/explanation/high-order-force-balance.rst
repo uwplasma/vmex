@@ -52,7 +52,7 @@ never be quoted on its own: read the dimensional force and the
 The polish
 ----------
 
-:mod:`vmex.core.polish_native` minimizes the volume-weighted force
+:mod:`vmex.core.polish` minimizes the volume-weighted force
 
 .. math::
 

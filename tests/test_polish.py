@@ -13,7 +13,7 @@ from vmex.core import implicit, solver
 from vmex.core.errors import VmecInputError
 from vmex.core.input import VmecInput
 from vmex.core.polish import sample_high_order_state
-from vmex.core.polish_driver import (
+from vmex.core.polish import (
     PolishConfig,
     polish_legacy_solution,
     polished_wout_input,

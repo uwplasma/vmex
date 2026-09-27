@@ -8,9 +8,7 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``profiles``        pressure/iota/current parameterizations (pure jnp)
 - ``radial_basis``    local high-order splines + rho^|m| axis regularity
 - ``strong_force``    continuous reconstruction + independent JxB-grad(p) oracle
-- ``polish``          native coefficient layout, correction, and wout sampling
-- ``polish_native``   constrained force least squares (the polish solver)
-- ``polish_driver``   polish entry point, report, and wout export
+- ``polish``          certified force-balance polish (solver, driver, wout export)
 - ``fourier``         Resolution, ModeTable, trig tables (fixaray.f)
 - ``transforms``      totzsps/totzspa/tomnsps/tomnspa as batched matmuls
 - ``geometry``        real-space R/Z/lambda, half-mesh jacobian (jacobian.f)

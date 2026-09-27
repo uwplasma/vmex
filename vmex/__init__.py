@@ -63,9 +63,9 @@ links to the module that documents it.
 
 **Force-balance polishing**
 
-- :class:`~vmex.core.polish_driver.PolishConfig` /
-  :class:`~vmex.core.polish_driver.PolishResult` /
-  :class:`~vmex.core.polish_driver.PolishReport` — certified native force
+- :class:`~vmex.core.polish.PolishConfig` /
+  :class:`~vmex.core.polish.PolishResult` /
+  :class:`~vmex.core.polish.PolishReport` — certified native force
   balance of axisymmetric fixed-boundary decks (``solve*(..., polish=...)``)
 
 **Optimization**
@@ -303,9 +303,9 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "OptimizationMonitor": (".core.monitoring", "OptimizationMonitor"),
     "OptimizationRecord": (".core.monitoring", "OptimizationRecord"),
     # high-order strong-force polishing
-    "PolishConfig": (".core.polish_driver", "PolishConfig"),
-    "PolishReport": (".core.polish_driver", "PolishReport"),
-    "PolishResult": (".core.polish_driver", "PolishResult"),
+    "PolishConfig": (".core.polish", "PolishConfig"),
+    "PolishReport": (".core.polish", "PolishReport"),
+    "PolishResult": (".core.polish", "PolishResult"),
     "InputRequest": (".core.run_options", "InputRequest"),
     "RunOptions": (".core.run_options", "RunOptions"),
     "read_input_request": (".core.run_options", "read_input_request"),
