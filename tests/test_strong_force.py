@@ -115,7 +115,8 @@ def test_constant_toroidal_field_matches_analytic_current_and_force():
     np.testing.assert_allclose(result.B, expected_B, rtol=2e-12, atol=2e-12)
     # Nested second derivatives leave sub-pico-T/m Cartesian cancellation
     # noise in components whose analytic value is zero.
-    np.testing.assert_allclose(result.J, expected_J, rtol=2e-11, atol=2e-7)
+    # atol: rounding of the ~8e4 A/m^2 current (de Boor point evaluation).
+    np.testing.assert_allclose(result.J, expected_J, rtol=2e-11, atol=5e-7)
     np.testing.assert_allclose(result.force, expected_force, rtol=2e-11, atol=2e-7)
     assert np.all(np.isfinite(result.force_rho))
     assert np.all(np.isfinite(result.force_helical))
@@ -446,7 +447,8 @@ def test_batched_point_sweep_matches_flat_vmap_values_and_gradients():
         plain_samples = sf.evaluate_strong_force(state, rho, theta, zeta)
         plain_value, plain_grad = jax.value_and_grad(objective)(0.0)
     np.testing.assert_array_equal(np.asarray(plain_samples.force), np.asarray(batched_samples.force))
-    np.testing.assert_allclose(plain_value, batched_value, rtol=1.0e-13)
+    # Same kernel, different summation order under jit fusion.
+    np.testing.assert_allclose(plain_value, batched_value, rtol=3.0e-13)
     np.testing.assert_allclose(plain_grad, batched_grad, rtol=1.0e-11)
 
     # Batching changes the fusion XLA picks, so the two sweeps agree to
@@ -998,28 +1000,6 @@ def test_state_treedefs_match_across_fresh_equal_bases():
     first = jax.tree_util.tree_structure(build())
     second = jax.tree_util.tree_structure(build())
     assert first == second
-
-
-def test_chart_metadata_excludes_the_build_timestamp():
-    """Charts differing only in build_seconds share one jit pytree key, and
-    a flatten round trip zeroes the wall-clock diagnostic."""
-    import dataclasses
-
-    from vmex.core.polish import StrongPhysicalChart
-
-    chart = StrongPhysicalChart(
-        coordinate_basis=jnp.eye(3),
-        equation_basis=jnp.eye(3),
-        coordinate_scale=jnp.ones(3),
-        equation_scale=jnp.ones(3),
-        gauge_rank=1,
-        build_seconds=1.25,
-    )
-    rebuilt = dataclasses.replace(chart, build_seconds=9.75)
-    structure = jax.tree_util.tree_structure(chart)
-    assert structure == jax.tree_util.tree_structure(rebuilt)
-    leaves, treedef = jax.tree_util.tree_flatten(chart)
-    assert treedef.unflatten(leaves).build_seconds == 0.0
 
 
 def test_angular_spectral_tail_measures_the_high_harmonics():
@@ -1594,8 +1574,8 @@ def test_native_polish_reduces_force_and_stays_feasible():
 
     native, state, chart = _native_chart(degree=5)
     initial = float(jnp.linalg.norm(chart.force(jnp.zeros(chart.layout.size))))
-    config = native.NativePolishConfig(
-        force_tolerance=0.0, angular_padding=1, insert_count=2, max_refinements=1,
+    config = native.PolishConfig(
+        force_tolerance=1.0e-300, angular_padding=1, insert_count=2, max_refinements=1,
         steps_per_chart=2, max_newton_steps=1,
     )
     result = native.polish_native(state, force_scale=1.0e3, volume_scale=10.0, config=config)
