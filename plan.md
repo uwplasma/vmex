@@ -120,6 +120,13 @@ main's after the merges.
      geometry and resolution. Add `examples/mirror/mirror_fixed_boundary_axisymmetric.py`.
    - Solve mirror configurations from input files (`vmex <input>`,
      `vj.solve_file`).
+   - **Done (2026-09-27, branch `mirror/concise-api`):** `MirrorInput` +
+     `solve_mirror`/`solve_mirror_beta_scan`, `&MIRROR` decks (two in
+     `examples/data`), exact `CircularCoils`; compiled kernels reused across
+     solves (warm fixed-boundary solve 38 s -> 0.9 s); on-axis diagnostics
+     read the radial Gauss kernel (nodal axis row was ~1 % low). Pleiades
+     10 % beta: 1.6e-3 (ns 7) -> 7.5e-4 (ns 11). Laptop: examples 9-194 s.
+     Open: free-boundary cost (4-point scan 178 s at ns 7, 716 s at ns 11).
 5. **Later (not scheduled):** cut compilation cost on free- and
    fixed-boundary solves (cold compile is 25-60 % of example wall time; about
    120 s fixed cost on the free boundary, #439).
