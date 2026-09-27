@@ -512,19 +512,7 @@ def _external_field_from_input(
     inp: VmecInput, mgrid_path: str | Path | None = None,
 ) -> MgridField:
     """Load and scale the deck's external field once for one solve/ladder."""
-    path = _resolve_mgrid(inp, mgrid_path)
-    data_extcur = np.atleast_1d(np.asarray(
-        inp.extcur if inp.extcur is not None else [], dtype=float))
-    from .mgrid import read_mgrid
-
-    data = read_mgrid(path)  # raises MgridNotFoundError when missing
-    extcur = np.zeros((data.nextcur,), dtype=float)
-    n_copy = min(data_extcur.size, data.nextcur)
-    extcur[:n_copy] = data_extcur[:n_copy]
-    if str(data.mgrid_mode).upper().startswith(("R", "N")):
-        raw = np.asarray(data.raw_coil_cur, dtype=float)
-        extcur = np.divide(extcur, raw, out=extcur, where=raw != 0.0)
-    return MgridField.from_mgrid_data(data, extcur=extcur)
+    return MgridField.from_input(inp, _resolve_mgrid(inp, mgrid_path))
 
 
 def _mgrid_planes(external_field: Any) -> int | None:

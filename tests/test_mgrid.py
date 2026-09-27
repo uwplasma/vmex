@@ -935,6 +935,8 @@ def test_default_extcur_is_the_file_field_in_every_mgrid_mode(
         for got, want, loaded in zip(default, table, solver):
             np.testing.assert_allclose(got, factor * np.asarray(want), rtol=1e-14, atol=0.0)
             np.testing.assert_allclose(got, loaded, rtol=1e-14, atol=0.0)
+    cubic = MgridField.from_input(SimpleNamespace(extcur=None, mgrid_file="unused"), path, order=3)
+    assert cubic.order == 3 and not np.any(cubic.extcur)
 
 
 def test_sum_groups_reads_the_same_field_into_one_group(

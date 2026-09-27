@@ -631,6 +631,14 @@ class MgridField:
     field-line integrator needs from ``grad B``; on the HSX 2.5 mm mgrid it
     cuts the median error of ``grad |B|`` inside the plasma from 7.7e-3 to
     9.0e-4 against a direct Biot-Savart sum, at eight times the gathers.
+    On the Landreman-Paul QA coils (181x201x64 table) it cuts the field error
+    inside the plasma from rms 1.8e-5 (max 1.1e-4) to 8e-8.  The trilinear
+    field is only C0, so a free-boundary solve on a coarse table can land on
+    distinct converged boundaries (7 mm apart on a 1 cm tokamak table).  The
+    CTH-like free-boundary deck converges in the same iterations with either
+    kernel, 12% slower tricubic; trilinear stays the default because it is
+    the VMEC2000 parity kernel.  :meth:`from_input` builds a deck's field at
+    either order.
     """
 
     br: Any
@@ -694,6 +702,27 @@ class MgridField:
             return cls.from_mgrid_data(read_mgrid(path, sum_groups=True, extcur=extcur),
                                        order=order)
         return cls.from_mgrid_data(read_mgrid(path), extcur=extcur, order=order)
+
+    @classmethod
+    def from_input(cls, inp: Any, mgrid_path: str | Path | None = None, *,
+                   order: int = 1) -> "MgridField":
+        """The field a deck solves with: ``inp.mgrid_file`` (or ``mgrid_path``) at ``EXTCUR``.
+
+        Applies the deck scaling of the solver's ``mgrid_path`` argument
+        (``EXTCUR`` divided by ``raw_coil_cur`` for mode-``R``/``N`` files,
+        missing entries zero), so ``solve_free_boundary(inp,
+        external_field=MgridField.from_input(inp, order=3))`` solves the deck
+        with the tricubic interpolant.
+        """
+
+        data = read_mgrid(Path(str(mgrid_path or inp.mgrid_file)).expanduser())
+        deck = np.atleast_1d(np.asarray(inp.extcur if inp.extcur is not None else [], dtype=float))
+        extcur = np.zeros((data.nextcur,), dtype=float)
+        extcur[:min(deck.size, data.nextcur)] = deck[:data.nextcur]
+        if str(data.mgrid_mode).upper().startswith(("R", "N")):
+            raw = np.asarray(data.raw_coil_cur, dtype=float)
+            extcur = np.divide(extcur, raw, out=extcur, where=raw != 0.0)
+        return cls.from_mgrid_data(data, extcur=extcur, order=order)
 
     @classmethod
     def from_cartesian_field(
