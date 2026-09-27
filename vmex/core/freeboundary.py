@@ -83,7 +83,7 @@ from .solver import (
     _due_rows_pending,
     _finalize, _geometry, _initial_carry, _initial_state, _leaf_signature,
     _loop_driver_config, _make_body,
-    _result_from_carry, _zero_cache, prepare_runtime, resolution_from_input,
+    _result_from_carry, _trajectory_rows, _zero_cache, prepare_runtime, resolution_from_input,
     reguess_initial_axis, runtime_with_baselines,
     _resolve_use_fft,
 )
@@ -1328,7 +1328,7 @@ def _prefetch_stage_lane_set(
             nvacskip=jnp.asarray(1, dtype=int_dtype),
             nvskip0=jnp.asarray(1, dtype=int_dtype),
             delbsq=jnp.asarray(1.0, dtype=dtype),
-            delbsq_traj=jnp.full((rt.max_iterations,), np.nan, dtype=dtype),
+            delbsq_traj=jnp.full((_trajectory_rows(rt),), np.nan, dtype=dtype),
             ctor=jnp.asarray(0.0, dtype=dtype),
             rbtor=jnp.asarray(0.0, dtype=dtype),
             vacuum_calls=jnp.asarray(0, dtype=int_dtype),
@@ -1868,7 +1868,7 @@ def _solve_free_boundary_stage(
 
     try:
         if verbose:
-            emit(stage_banner(ns, resolution.mnmax, float(rt.ftol), rt.max_iterations), end="")
+            emit(stage_banner(ns, resolution.mnmax, float(rt.ftol), int(rt.max_iterations)), end="")
             # runvmec.f prints the residual legend once per run; later radial
             # rungs of a ladder keep only the NS banner and the column header.
             if emit_legend:
@@ -2022,7 +2022,7 @@ def _solve_free_boundary_stage(
         carry = _resume_for_vacuum(carry, fb.ivac)
 
         int_dtype = carry.iteration.dtype
-        max_passes = rt.max_iterations + 400
+        max_passes = int(rt.max_iterations) + 400
         for _ in range(max_passes):
             if bool(carry.done):
                 break
@@ -2070,7 +2070,7 @@ def _solve_free_boundary_stage(
                     nvacskip=jnp.asarray(fb.nvacskip, dtype=int_dtype),
                     nvskip0=jnp.asarray(fb.nvskip0, dtype=int_dtype),
                     delbsq=jnp.asarray(fb.delbsq, dtype=dtype),
-                    delbsq_traj=jnp.full((rt.max_iterations,), np.nan, dtype=dtype),
+                    delbsq_traj=jnp.full((_trajectory_rows(rt),), np.nan, dtype=dtype),
                     ctor=jnp.asarray(fb.ctor, dtype=dtype),
                     rbtor=jnp.asarray(fb.rbtor, dtype=dtype),
                     vacuum_calls=jnp.asarray(fb.vacuum_calls, dtype=int_dtype),
