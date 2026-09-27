@@ -206,7 +206,9 @@ def test_native_mode_padding_preserves_fields_and_force():
     zeta = jnp.asarray([0.2, 1.7, 4.8])
     original = evaluate_strong_force(state, rho, theta, zeta)
     padded = evaluate_strong_force(enriched, rho, theta, zeta)
-    np.testing.assert_allclose(padded.force, original.force, rtol=0.0, atol=0.0)
+    # Exact in real arithmetic; the longer mode sums only reorder the rounding.
+    np.testing.assert_allclose(padded.force, original.force, rtol=0.0,
+                               atol=1.0e-12 * float(np.max(np.abs(original.force))))
     with pytest.raises(ValueError, match="duplicate existing"):
         append_high_order_state_modes(state, [1], [0])
     with pytest.raises(ValueError, match="unique"):
