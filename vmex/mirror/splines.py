@@ -6,7 +6,9 @@ differentiable JAX operations.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import jax
@@ -184,8 +186,24 @@ class SplineMirrorDiscretization:
         elements: int,
         quadrature_order: int = 4,
     ) -> "SplineMirrorDiscretization":
-        """Build a clamped spline and endpoint-augmented Gauss mirror grid."""
+        """Build a clamped spline and endpoint-augmented Gauss mirror grid.
 
+        Equal requests return the same immutable object, so compiled solve
+        kernels keyed on it are reused (see ``_fixed_boundary_kernels``).
+        """
+
+        return _cached_discretization(
+            cls, "open", config.resolution, float(config.z_min), float(config.z_max), int(elements), int(quadrature_order)
+        )
+
+    @classmethod
+    def _build_open(
+        cls,
+        config: MirrorConfig,
+        *,
+        elements: int,
+        quadrature_order: int = 4,
+    ) -> "SplineMirrorDiscretization":
         elements = int(elements)
         if elements < 1:
             raise ValueError("spline discretization requires elements >= 1")
@@ -206,6 +224,18 @@ class SplineMirrorDiscretization:
     ) -> "SplineMirrorDiscretization":
         """Build coefficients evaluated on the CGL grid used by exterior panels."""
 
+        return _cached_discretization(
+            cls, "cgl", config.resolution, float(config.z_min), float(config.z_max), int(elements), int(quadrature_order)
+        )
+
+    @classmethod
+    def _build_cgl(
+        cls,
+        config: MirrorConfig,
+        *,
+        elements: int,
+        quadrature_order: int = 4,
+    ) -> "SplineMirrorDiscretization":
         elements = int(elements)
         if elements < 1:
             raise ValueError("spline discretization requires elements >= 1")
@@ -345,6 +375,15 @@ class SplineMirrorDiscretization:
             ),
             target,
         )
+
+
+@functools.lru_cache(maxsize=16)
+def _cached_discretization(
+    cls: type, kind: str, resolution: MirrorResolution, z_min: float, z_max: float, elements: int, order: int
+) -> SplineMirrorDiscretization:
+    config = MirrorConfig(resolution=resolution, z_min=z_min, z_max=z_max)
+    build = cls._build_open if kind == "open" else cls._build_cgl
+    return build(config, elements=elements, quadrature_order=order)
 
 
 def build_stellarator_mirror_hybrid(
@@ -1019,31 +1058,45 @@ class _SplineStateVectorizer:
         blocks.append(lam)
         return np.concatenate(blocks)
 
-    def unpack(self, vector: Array) -> SplineMirrorState:
+    def dynamic(self) -> dict[str, Array]:
+        """Return the per-solve data ``unpack`` reads, as traceable arrays.
+
+        Everything else in the vectorizer depends only on the discretization,
+        so compiled kernels taking these as arguments are reused across
+        solves (continuation stages, finite differences) on one grid.
+        """
+
+        return {
+            "radius": jnp.asarray(self.base.radius_coefficients),
+            "lambda": jnp.asarray(self.base.lambda_coefficients),
+            "fixed_sum": jnp.asarray(self.lambda_fixed_weighted_sum),
+            "radius_scale": jnp.asarray(self.radius_scale),
+            "flux_scale": jnp.asarray(self.flux_scale),
+        }
+
+    def unpack(self, vector: Array, dynamic: dict[str, Array] | None = None) -> SplineMirrorState:
         """Reconstruct constrained coefficients from normalized variables."""
 
+        data = self.dynamic() if dynamic is None else dynamic
         vector = jnp.asarray(vector)
-        radius = self.base.radius_coefficients.at[self.radius_indices].set(
-            vector[: self.radius_size] * self.radius_scale
-        )
+        base_lambda = data["lambda"]
+        radius = data["radius"].at[self.radius_indices].set(vector[: self.radius_size] * data["radius_scale"])
         radius = _regularize_axis_radius(radius)
         offset = self.radius_size
         if not self.solve_lambda:
-            return SplineMirrorState(radius, self.base.lambda_coefficients)
+            return SplineMirrorState(radius, base_lambda)
 
-        shape = self.base.lambda_coefficients.shape
-        free = vector[offset:].reshape(shape[0] - 1, self.lambda_free_indices.size) * self.flux_scale
-        interior = self.base.lambda_coefficients[1:, :, self.lambda_axial_indices].reshape(shape[0] - 1, -1)
+        shape = base_lambda.shape
+        free = vector[offset:].reshape(shape[0] - 1, self.lambda_free_indices.size) * data["flux_scale"]
+        interior = base_lambda[1:, :, self.lambda_axial_indices].reshape(shape[0] - 1, -1)
         interior = interior.at[:, jnp.asarray(self.lambda_free_indices)].set(free)
         weighted_free = jnp.sum(
             free * jnp.asarray(self.lambda_weights[self.lambda_free_indices])[None, :],
             axis=1,
         )
-        pivot_value = -(jnp.asarray(self.lambda_fixed_weighted_sum) + weighted_free) / float(
-            self.lambda_weights[self.lambda_pivot]
-        )
+        pivot_value = -(data["fixed_sum"] + weighted_free) / float(self.lambda_weights[self.lambda_pivot])
         interior = interior.at[:, self.lambda_pivot].set(pivot_value)
-        lam = self.base.lambda_coefficients.at[1:, :, self.lambda_axial_indices].set(
+        lam = base_lambda.at[1:, :, self.lambda_axial_indices].set(
             interior.reshape(shape[0] - 1, shape[1], self.lambda_axial_indices.size)
         )
         return SplineMirrorState(radius, lam.at[0].set(lam[1]))
@@ -1219,6 +1272,64 @@ def _packed_spline_preconditioner(
     return apply, scales, local_builder
 
 
+_KERNEL_CACHE: dict[tuple, tuple[Any, Any, Any]] = {}
+
+
+def _fixed_boundary_kernels(
+    discretization: SplineMirrorDiscretization,
+    vectorizer: _SplineStateVectorizer,
+    axis: Any,
+    gamma: float,
+) -> Any:
+    """Compiled energy-gradient and Hessian kernels, reused across solves.
+
+    The kernels take the per-solve data (base state, flux, mass, current,
+    energy scale) as arguments, so a continuation, beta or finite-difference
+    sequence on one discretization traces and compiles them once instead of
+    once per solve. Keyed on the discretization and axis objects themselves.
+    """
+
+    from .forces import mirror_energy
+    from .solver import _valid_energy_objective
+
+    key = (id(discretization), id(axis), vectorizer.solve_lambda, vectorizer.radius_size, float(gamma))
+    entry = _KERNEL_CACHE.get(key)
+    if entry is not None and entry[0] is discretization and entry[1] is axis:
+        return entry[2]
+    grid = discretization.grid
+
+    def objective(vector: Array, params: dict[str, Any]) -> Array:
+        state = discretization.evaluate_state(vectorizer.unpack(vector, params["state"]))
+        energy = mirror_energy(
+            state,
+            grid,
+            axis=axis,
+            axial_flux_derivative=params["flux"],
+            mass_profile=params["mass"],
+            current_derivative=params["current"],
+            gamma=gamma,
+        )
+        return _valid_energy_objective(energy, params["scale"])
+
+    gradient = jax.grad(objective)
+
+    def hessian_vector(vector: Array, direction: Array, params: dict[str, Any]) -> Array:
+        return jax.jvp(lambda point: gradient(point, params), (vector,), (direction,))[1]
+
+    kernels = SimpleNamespace(
+        value_and_grad=jax.jit(jax.value_and_grad(objective)),
+        hessian_vector=jax.jit(hessian_vector),
+        hessian_columns=jax.jit(
+            lambda vector, directions, params: jax.vmap(lambda d: hessian_vector(vector, d, params))(directions)
+        ),
+        hessian=jax.jit(jax.jacfwd(gradient)),
+    )
+    while len(_KERNEL_CACHE) >= 8:
+        _KERNEL_CACHE.pop(next(iter(_KERNEL_CACHE)))
+    _KERNEL_CACHE[key] = (discretization, axis, kernels)
+    return kernels
+
+
 def solve_fixed_boundary(
     initial_state: SplineMirrorState,
     boundary: SplineMirrorBoundary,
@@ -1278,7 +1389,6 @@ def solve_fixed_boundary(
         MirrorConvergenceError,
         MirrorSolveResult,
         _optimize_fixed_boundary,
-        _valid_energy_objective,
     )
 
     grid = discretization.grid
@@ -1316,11 +1426,25 @@ def solve_fixed_boundary(
     initial_evaluated = unpack(jnp.asarray(x0))
     initial_energy = evaluate_energy(initial_evaluated)
     energy_scale = max(abs(float(initial_energy.total)), np.finfo(float).tiny)
-
-    def objective(vector: Array) -> Array:
-        return _valid_energy_objective(evaluate_energy(unpack(vector)), energy_scale)
-
-    value_and_gradient = jax.jit(jax.value_and_grad(objective))
+    compiled = _fixed_boundary_kernels(discretization, vectorizer, axis, gamma)
+    params = {
+        "state": vectorizer.dynamic(),
+        "flux": jnp.asarray(axial_flux_derivative, dtype=float),
+        "mass": jnp.asarray(mass_profile, dtype=float),
+        "current": jnp.asarray(current_derivative, dtype=float),
+        "scale": jnp.asarray(energy_scale),
+    }
+    kernels = SimpleNamespace(
+        **{
+            name: functools.partial(lambda kernel, *args: kernel(*map(jnp.asarray, args), params), kernel)
+            for name, kernel in vars(compiled).items()
+        }
+    )
+    value_and_gradient = kernels.value_and_grad
+    # One compiled value-and-gradient program serves the objective and the
+    # gradient too; separate kernels would double the cold compile time.
+    kernels.objective = lambda vector: evaluate(np.asarray(vector, dtype=float))[0]
+    kernels.gradient = lambda vector: evaluate(np.asarray(vector, dtype=float))[1]
     cache_x: np.ndarray | None = None
     cache_value = 0.0
     cache_gradient = np.empty_like(x0)
@@ -1380,13 +1504,14 @@ def solve_fixed_boundary(
     history: list[tuple[float, float, float, float, float]] = []
 
     def record(iteration: int, vector: np.ndarray) -> None:
-        state = unpack(jnp.asarray(vector))
-        energy = evaluate_energy(state)
-        variational = packed_variational(vector, state)
+        # The cached value and gradient are the ones the optimizer just used;
+        # an eager energy evaluation here cost more than the solve itself.
+        value = evaluate(np.asarray(vector, dtype=float))[0]
+        variational = packed_variational(vector, None)
         history.append(
             (
                 float(iteration),
-                float(energy.total),
+                value * energy_scale,
                 float(variational.radius_rms),
                 float(variational.lambda_rms),
                 float(variational.maximum),
@@ -1406,7 +1531,7 @@ def solve_fixed_boundary(
             x0,
             lower_bounds,
             upper_bounds,
-            objective=objective,
+            kernels=kernels,
             evaluate=evaluate,
             packed_variational=packed_variational,
             unpack=unpack,

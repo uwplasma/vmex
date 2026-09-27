@@ -1,4 +1,9 @@
-"""Coupled plasma-boundary-vacuum solves for straight-axis mirrors."""
+"""Coupled plasma-boundary-vacuum solves for straight-axis mirrors.
+
+Also the one-call drivers :func:`solve_mirror` and
+:func:`solve_mirror_beta_scan`, which assemble and solve a
+:class:`~vmex.mirror.MirrorInput` at fixed or free boundary.
+"""
 
 from __future__ import annotations
 
@@ -32,12 +37,12 @@ from .forces import (
     mass_profile_from_pressure,
     mirror_energy,
 )
-from .geometry import normalized_divergence_rms
+from .geometry import magnetic_field_squared, normalized_divergence_rms
 from .exterior import (
     ExteriorVacuum,
     solve_axisymmetric_exterior_vacuum,
 )
-from .model import MirrorBoundary, MirrorConfig, MirrorState
+from .model import MirrorBoundary, MirrorConfig, MirrorInput, MirrorState
 from .output import FreeBoundaryRestart
 from .solver import _bounded_newton_krylov
 from .splines import (
@@ -959,10 +964,13 @@ def solve_beta_scan(
     exterior_ntheta: int = 40,
     exterior_order: int = 8,
     exterior_spectral_side_density: bool = False,
+    pressure_shape: Array | None = None,
     device: Any = AUTO,
 ) -> tuple[FreeBoundaryMirrorResult, ...]:
     """Continue one free-boundary state through beta on one selected device.
 
+    ``pressure_shape`` is ``p(s)/p(0)`` on the ``ns`` surfaces (default
+    ``1 - s``); each beta sets the central pressure ``beta * B_ref**2/(2 mu0)``.
     A nonzero ``current_derivative`` is rejected for the same reason as in
     :func:`solve_free_boundary`.
     """
@@ -998,6 +1006,7 @@ def solve_beta_scan(
                 exterior_ntheta=exterior_ntheta,
                 exterior_order=exterior_order,
                 exterior_spectral_side_density=exterior_spectral_side_density,
+                pressure_shape=pressure_shape,
                 device=None,
             )
 
@@ -1033,7 +1042,7 @@ def solve_beta_scan(
         axial_flux_derivative=axial_flux_derivative,
         current_derivative=current_derivative,
     )
-    pressure_shape = 1.0 - jnp.asarray(grid.s)
+    pressure_shape = 1.0 - jnp.asarray(grid.s) if pressure_shape is None else jnp.asarray(pressure_shape)
     boundary = initial_boundary if initial_restart is None else initial_restart.boundary
     state = reference_coefficients if initial_restart is None else initial_restart.plasma_state
     mass_scale = 1.0 if initial_restart is None else initial_restart.mass_scale
@@ -1073,6 +1082,234 @@ def solve_beta_scan(
         state = result.coefficient_state
         mass_scale = float(result.mass_scale)
     return tuple(results)
+
+
+
+@dataclass(frozen=True, eq=False)
+class MirrorSolution:
+    """A solved :class:`~vmex.mirror.MirrorInput` and what its output needs.
+
+    ``result`` is the fixed-boundary ``SplineMirrorSolveResult`` or the
+    :class:`FreeBoundaryMirrorResult`; ``boundary`` holds its spline
+    coefficients. ``write_mout``, ``mod_b``, ``mirror_ratios`` and
+    ``summary`` read it without further assembly.
+    """
+
+    input: MirrorInput
+    discretization: SplineMirrorDiscretization
+    result: Any
+    boundary: SplineMirrorBoundary
+    axial_flux_derivative: Any
+    coil_xyz: Any = None
+
+    @property
+    def evaluated(self) -> Any:
+        """The evaluated (quadrature-grid) result."""
+
+        return getattr(self.result, "evaluated", self.result)
+
+    def mod_b(self) -> np.ndarray:
+        """Solved ``|B|`` on the ``(ns, ntheta, nxi)`` solver grid [T]."""
+
+        evaluated = self.evaluated
+        b_squared = getattr(evaluated, "plasma_b_squared", None)
+        if b_squared is None:
+            b_squared = magnetic_field_squared(evaluated.energy.field, evaluated.energy.geometry)
+        return np.sqrt(np.maximum(np.asarray(b_squared), 0.0))
+
+    def mout(self) -> Any:
+        """Collect the MOUT data of this solution."""
+
+        from .output import mout_from_result
+
+        return mout_from_result(
+            self.evaluated,
+            self.discretization.grid,
+            self.input.config,
+            boundary=self.discretization.evaluate_boundary(self.boundary),
+            axial_flux_derivative=self.axial_flux_derivative,
+            current_derivative=self.input.current_derivative,
+            coil_xyz=self.coil_xyz,
+        )
+
+    def write_mout(self, path: Any) -> Any:
+        """Write ``mout_*.nc`` and return its path."""
+
+        from .output import write_mout
+
+        return write_mout(path, self.mout())
+
+    def mirror_ratios(self) -> Any:
+        """Axis and LCFS mirror ratios of the solved ``|B|``."""
+
+        from .metrics import mirror_ratio_diagnostics
+
+        mod_b, grid = self.mod_b(), self.discretization.grid
+        return mirror_ratio_diagnostics(
+            mod_b[0].mean(axis=0),
+            np.asarray(grid.z),
+            lcfs_field_strength=mod_b[-1],
+            axis_curvature=np.zeros(grid.nxi),
+        )
+
+    def summary(self) -> dict[str, Any]:
+        """Convergence, force and field scalars for printing or JSON."""
+
+        evaluated, grid = self.evaluated, self.discretization.grid
+        force = getattr(evaluated, "plasma_force", getattr(evaluated, "force", None))
+        variational = getattr(evaluated, "variational_max", None)
+        if variational is None:
+            variational = evaluated.variational.maximum
+        mod_b = self.mod_b()
+        center = int(np.argmin(np.abs(np.asarray(grid.z) - 0.5 * (grid.z[0] + grid.z[-1]))))
+        return {
+            "converged": bool(evaluated.converged),
+            "iterations": int(evaluated.iterations),
+            "variational_max": float(variational),
+            "strong_force_normalized_rms": float(force.normalized_rms),
+            "normalized_divergence_rms": float(evaluated.normalized_divergence_rms),
+            "axis_field_center": float(mod_b[0, :, center].mean()),
+            "boundary_radius_center": float(
+                np.asarray(self.discretization.evaluate_boundary(self.boundary).radius_scale)[:, center].mean()
+            ),
+        } | self.mirror_ratios().summary()
+
+
+def _flux_derivative(inp: MirrorInput) -> float | None:
+    return None if inp.phiedge is None else float(inp.phiedge) / (2.0 * np.pi)
+
+
+def solve_mirror(
+    inp: MirrorInput,
+    *,
+    initial: MirrorSolution | None = None,
+    seed_field: Any = None,
+    external_field: Any = None,
+    require_convergence: bool = True,
+    device: Any = AUTO,
+) -> MirrorSolution:
+    """Solve one :class:`~vmex.mirror.MirrorInput`, fixed or free boundary.
+
+    The API does the assembly: the axial B-spline discretization, the fitted
+    boundary, the self-similar start (or ``initial``'s state carried to the
+    new boundary, for continuation), and the mass profile of the requested
+    pressure. ``seed_field`` (a Cartesian ``xyz -> B`` callable) initializes
+    the field-line stream function and fixed end cuts from a known field;
+    with ``phiedge=None`` its flux profile is used. Free boundaries are
+    delegated to :func:`solve_mirror_beta_scan` (vacuum, then the requested
+    central pressure).
+    """
+
+    if inp.lfreeb:
+        if initial is not None or seed_field is not None:
+            raise ValueError("initial and seed_field apply to fixed-boundary mirrors")
+        return solve_mirror_beta_scan(inp, external_field=external_field, device=device)[-1]
+    from .splines import initialize_from_cartesian_field, solve_fixed_boundary
+
+    config = inp.config
+    discretization = SplineMirrorDiscretization.build(config, elements=int(inp.elements))
+    grid = discretization.grid
+    z = 0.5 * (config.z_min + config.z_max) + grid.dz_dxi * np.asarray(discretization.spline.collocation_nodes)
+    samples = jnp.asarray(inp.boundary_radius(np.asarray(grid.theta), z))
+    boundary = SplineMirrorBoundary(discretization.spline.fit(samples, axis=-1))
+    if initial is None:
+        radius = jnp.broadcast_to(boundary.radius_coefficients[None], (grid.ns,) + samples.shape)
+        state = SplineMirrorState(radius, jnp.zeros_like(radius))
+    else:
+        state = discretization.transfer_boundary(initial.result.coefficient_state, initial.boundary, boundary)
+    flux = _flux_derivative(inp)
+    if seed_field is not None:
+        seeded = initialize_from_cartesian_field(state, boundary, discretization, seed_field)
+        state = discretization.impose_self_similar_cuts(seeded.state, boundary)
+        flux = seeded.axial_flux_derivative if flux is None else flux
+    if flux is None:
+        raise ValueError("phiedge (the axial flux through the boundary) is required")
+    mass = 0.0
+    if float(inp.pres_scale) != 0.0:
+        reference = mirror_energy(discretization.evaluate_state(state), grid, axial_flux_derivative=flux)
+        mass = mass_profile_from_pressure(
+            jnp.asarray(inp.pressure(grid.s)), reference.volume_derivative, gamma=float(inp.gamma)
+        )
+    result = solve_fixed_boundary(
+        state,
+        boundary,
+        discretization,
+        config,
+        axial_flux_derivative=flux,
+        mass_profile=mass,
+        current_derivative=float(inp.current_derivative),
+        gamma=float(inp.gamma),
+        solve_lambda=True,
+        gradient_tolerance=float(inp.ftol),
+        require_convergence=require_convergence,
+        device=device,
+    )
+    return MirrorSolution(inp, discretization, result, boundary, flux)
+
+
+def solve_mirror_beta_scan(
+    inp: MirrorInput,
+    betas: Array | None = None,
+    *,
+    external_field: Any = None,
+    initial_restart: FreeBoundaryRestart | None = None,
+    device: Any = AUTO,
+) -> tuple[MirrorSolution, ...]:
+    """Continue a free-boundary :class:`~vmex.mirror.MirrorInput` through central beta.
+
+    The coils are ``inp``'s circular loops unless ``external_field`` (any
+    ``xyz -> B`` callable, ESSOS or SIMSOPT field, or ``MgridField``) is
+    given. ``B_ref`` is the vacuum on-axis field at the domain centre and the
+    pressure shape is ``inp.am``. ``betas=None`` solves vacuum and then the
+    central beta of ``inp.pres_scale``.
+    """
+
+    from .analytic import CircularCoils
+
+    field = external_field
+    if field is None:
+        if not np.size(inp.coil_radius):
+            raise ValueError("a free-boundary mirror needs coils (coil_radius, coil_z, coil_current) or external_field")
+        field = CircularCoils(
+            jnp.asarray(inp.coil_radius, dtype=float),
+            jnp.asarray(inp.coil_z, dtype=float),
+            jnp.asarray(inp.coil_current, dtype=float),
+        )
+    flux = _flux_derivative(inp)
+    if flux is None:
+        raise ValueError("phiedge (the axial flux through the plasma) is required")
+    config = inp.config
+    discretization = SplineMirrorDiscretization.build_cgl(config, elements=int(inp.elements))
+    grid = discretization.grid
+    z = np.asarray(grid.z)
+    axis_field = jnp.asarray(field(jnp.stack((0.0 * z, 0.0 * z, z), axis=-1)))[:, 2]
+    reference = float(axis_field[int(np.argmin(np.abs(z - 0.5 * (config.z_min + config.z_max))))])
+    boundary = discretization.fit_boundary(MirrorBoundary.from_axis_field(flux, axis_field, grid), grid)
+    central = float(inp.pressure(0.0))
+    shape = np.asarray(inp.pressure(grid.s)) / central if central != 0.0 else None
+    if betas is None:
+        betas = [0.0] + ([2.0 * float(MU0) * central / reference**2] if central > 0.0 else [])
+    results = solve_beta_scan(
+        boundary,
+        discretization,
+        config,
+        field,
+        jnp.asarray(betas, dtype=float),
+        axial_flux_derivative=flux,
+        reference_field=reference,
+        gamma=float(inp.gamma),
+        initial_restart=initial_restart,
+        exterior_ntheta=int(inp.exterior_ntheta),
+        exterior_order=int(inp.exterior_order),
+        exterior_spectral_side_density=True,
+        pressure_shape=shape,
+        device=device,
+    )
+    coil_xyz = np.asarray(field.xyz()) if isinstance(field, CircularCoils) else None
+    return tuple(
+        MirrorSolution(inp, discretization, result, result.coefficient_boundary, flux, coil_xyz)
+        for result in results
+    )
 
 
 from typing import TYPE_CHECKING

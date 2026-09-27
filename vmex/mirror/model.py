@@ -8,11 +8,12 @@ plasma boundary.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 MIRROR_INPUT_SCHEMA = "vmex.mirror.input/2"
 MIRROR_OUTPUT_SCHEMA = "vmex.mirror.mout/1"
@@ -179,6 +180,125 @@ class MirrorState:
             raise ValueError(f"radius_scale shape {self.radius_scale.shape} does not match {expected}")
         if self.lambda_stream.shape != expected:
             raise ValueError(f"lambda_stream shape {self.lambda_stream.shape} does not match {expected}")
+
+
+@dataclass(frozen=True)
+class MirrorInput:
+    """One open-mirror equilibrium: resolution, boundary, flux, profiles, coils.
+
+    The mirror counterpart of :class:`~vmex.VmecInput`, solved by
+    :func:`vmex.mirror.solve_mirror`. The lateral boundary is the polar radius
+    ``a(theta, z) = sum_m rbc[m, k] cos(m theta) + rbs[m, k] sin(m theta)``
+    about the straight axis at the axial stations ``zb[k]``, joined by a cubic
+    spline; empty ``zb`` means stations spaced uniformly over
+    ``[z_min, z_max]``. ``phiedge`` is the axial flux through the boundary
+    [Wb]; the pressure is ``pres_scale * sum_i am[i] s**i`` [Pa] and
+    ``current_derivative`` is the axial-current profile ``I'(s)``.
+
+    ``lfreeb=True`` solves the free boundary held by the circular coils
+    ``coil_radius``/``coil_z``/``coil_current`` (or an ``external_field``
+    passed to the solve); the start is the vacuum flux tube of ``phiedge``,
+    so the boundary table is not used, and finite pressure is reached by a
+    continuation from vacuum. ``elements`` is the number of axial B-spline
+    elements; ``nxi`` sizes the free-boundary axial collocation grid.
+    """
+
+    ns: int = 7
+    mpol: int = 0
+    elements: int = 6
+    nxi: int = 17
+    z_min: float = -1.0
+    z_max: float = 1.0
+    phiedge: float | None = None
+    zb: Any = ()
+    rbc: Any = ()
+    rbs: Any = ()
+    pres_scale: float = 0.0
+    am: Any = (1.0, -1.0)
+    current_derivative: float = 0.0
+    gamma: float = 5.0 / 3.0
+    ftol: float = 1.0e-12
+    niter: int = 1000
+    lfreeb: bool = False
+    coil_radius: Any = ()
+    coil_z: Any = ()
+    coil_current: Any = ()
+    exterior_ntheta: int = 12
+    exterior_order: int = 6
+
+    @property
+    def config(self) -> MirrorConfig:
+        """The numerical contract of the solve."""
+
+        return MirrorConfig(
+            resolution=MirrorResolution(ns=int(self.ns), mpol=int(self.mpol), nxi=int(self.nxi)),
+            z_min=float(self.z_min),
+            z_max=float(self.z_max),
+            ftol=float(self.ftol),
+            max_iterations=int(self.niter),
+        )
+
+    def pressure(self, s: Array) -> Array:
+        """Return ``p(s) = pres_scale * sum_i am[i] s**i`` in pascals."""
+
+        coefficients = np.asarray(self.am, dtype=float)[::-1]
+        return float(self.pres_scale) * np.polyval(coefficients, np.asarray(s, dtype=float))
+
+    def boundary_table(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return ``(zb, rbc, rbs)`` as arrays of shape ``(K,)``, ``(mpol+1, K)``."""
+
+        rbc = np.atleast_2d(np.asarray(self.rbc, dtype=float))
+        if rbc.size == 0:
+            raise ValueError("a fixed-boundary mirror needs boundary coefficients rbc")
+        modes, stations = int(self.mpol) + 1, rbc.shape[1]
+        if rbc.shape[0] > modes:
+            raise ValueError(f"rbc has {rbc.shape[0]} poloidal rows but mpol={self.mpol}")
+        rbc = np.pad(rbc, ((0, modes - rbc.shape[0]), (0, 0)))
+        rbs = np.atleast_2d(np.asarray(self.rbs, dtype=float)) if np.size(self.rbs) else np.zeros((1, stations))
+        if rbs.shape[1] != stations or rbs.shape[0] > modes:
+            raise ValueError("rbs must have at most mpol+1 rows and one column per station")
+        rbs = np.pad(rbs, ((0, modes - rbs.shape[0]), (0, 0)))
+        zb = np.asarray(self.zb, dtype=float)
+        if zb.size == 0:
+            zb = np.linspace(float(self.z_min), float(self.z_max), stations)
+        if zb.shape != (stations,) or np.any(np.diff(zb) <= 0.0):
+            raise ValueError("zb must be increasing with one entry per boundary column")
+        span = 1.0e-12 * (float(self.z_max) - float(self.z_min))
+        if stations > 1 and (zb[0] > float(self.z_min) + span or zb[-1] < float(self.z_max) - span):
+            raise ValueError("boundary stations zb must cover [z_min, z_max]")
+        return zb, rbc, rbs
+
+    def boundary_radius(self, theta: Array, z: Array) -> np.ndarray:
+        """Evaluate the boundary polar radius on the ``theta x z`` tensor grid."""
+
+        from scipy.interpolate import CubicSpline
+
+        zb, rbc, rbs = self.boundary_table()
+        z = np.asarray(z, dtype=float)
+        if zb.size == 1:
+            cosine, sine = rbc[:, :1] + 0.0 * z, rbs[:, :1] + 0.0 * z
+        else:
+            cosine, sine = CubicSpline(zb, rbc, axis=1)(z), CubicSpline(zb, rbs, axis=1)(z)
+        modes = np.arange(rbc.shape[0])[:, None] * np.asarray(theta, dtype=float)[None, :]
+        return np.cos(modes).T @ cosine + np.sin(modes).T @ sine
+
+    def with_boundary(self, radius, stations: Array | None = None) -> "MirrorInput":
+        """Tabulate a boundary function ``radius(theta, z)`` into ``rbc``/``rbs``.
+
+        The Fourier coefficients are exact on the solver's ``2*mpol+1`` theta
+        nodes; the default stations are ``8*elements+1`` uniform ``z`` values.
+        """
+
+        count = 2 * int(self.mpol) + 1
+        theta = np.linspace(0.0, 2.0 * np.pi, count, endpoint=False)
+        if stations is None:
+            stations = np.linspace(float(self.z_min), float(self.z_max), 8 * int(self.elements) + 1)
+        zb = np.asarray(stations, dtype=float)
+        values = np.broadcast_to(np.asarray(radius(theta[:, None], zb[None, :]), dtype=float), (count, zb.size))
+        modes = np.arange(int(self.mpol) + 1)[:, None] * theta[None, :]
+        rbc = 2.0 / count * np.cos(modes) @ values
+        rbc[0] *= 0.5
+        return replace(self, zb=zb, rbc=rbc, rbs=2.0 / count * np.sin(modes) @ values)
 
 
 def _regularize_axis_radius(radius_scale: Array) -> Array:

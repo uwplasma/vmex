@@ -1,4 +1,4 @@
-"""Independent paraxial fixtures for nonaxisymmetric straight mirrors.
+"""Independent analytic fields: paraxial mirror fixtures and circular coils.
 
 These formulas validate equilibrium output; they do not call the mirror solver.
 Lengths are in metres and magnetic fields are in tesla.
@@ -385,3 +385,87 @@ __all__ = [
     "RotatingEllipseParaxial",
     "StraightFieldLineMirror",
 ]
+
+
+def _complete_elliptic(m: Array) -> tuple[Array, Array]:
+    """Return ``K(m)`` and ``E(m)`` (parameter ``m = k**2``) by the AGM.
+
+    Twelve arithmetic-geometric-mean steps reach machine precision for every
+    ``m < 1 - 1e-12``, i.e. anywhere not on a coil filament.
+    """
+
+    a, b, c = jnp.ones_like(m), jnp.sqrt(1.0 - m), jnp.sqrt(m)
+    total, power = 0.5 * m, 0.5
+    for _ in range(12):
+        a, b, c = 0.5 * (a + b), jnp.sqrt(a * b), 0.5 * (a - b)
+        power *= 2.0
+        total = total + power * c**2
+    elliptic_k = 0.5 * jnp.pi / a
+    return elliptic_k, elliptic_k * (1.0 - total)
+
+
+@dataclass(frozen=True)
+class CircularCoils:
+    """Exact field of coaxial circular filament loops on the ``z`` axis.
+
+    ``radius``, ``z`` and ``current`` hold one entry per loop (metres, metres,
+    amperes). The field is the closed-form elliptic-integral solution
+    (Jackson, *Classical Electrodynamics*, 3rd ed., section 5.5), so a mirror
+    held by circular coils needs no coil package and no Biot-Savart
+    quadrature. Instances are JAX pytrees and callables ``xyz -> B`` on
+    arrays of shape ``(..., 3)``.
+    """
+
+    radius: Array
+    z: Array
+    current: Array
+
+    def __call__(self, points: Array) -> Array:
+        points = jnp.asarray(points)
+        rho = jnp.hypot(points[..., 0], points[..., 1])[..., None]
+        radius = jnp.atleast_1d(jnp.asarray(self.radius, dtype=points.dtype))
+        height = points[..., 2][..., None] - jnp.atleast_1d(jnp.asarray(self.z, dtype=points.dtype))
+        scale = 2.0e-7 * jnp.atleast_1d(jnp.asarray(self.current, dtype=points.dtype))  # mu0 I / (2 pi)
+        outer = (radius + rho) ** 2 + height**2
+        inner = (radius - rho) ** 2 + height**2
+        elliptic_k, elliptic_e = _complete_elliptic(4.0 * radius * rho / outer)
+        prefactor = scale / jnp.sqrt(outer)
+        b_z = prefactor * (elliptic_k + (radius**2 - rho**2 - height**2) / inner * elliptic_e)
+        # B_rho = mu0 I z / (2 pi rho sqrt(outer)) (-K + (a^2+rho^2+z^2) E / inner)
+        # cancels to O(rho) near the axis; there its paraxial limit
+        # -(rho/2) dBz_axis/dz is exact to O((rho/a)^2) < 1e-8.
+        near_axis = rho < 1.0e-4 * radius
+        safe_rho = jnp.where(near_axis, 1.0, rho)
+        b_rho_far = prefactor * height / safe_rho * (
+            -elliptic_k + (radius**2 + rho**2 + height**2) / inner * elliptic_e
+        )
+        b_rho_axis = 1.5 * jnp.pi * scale * radius**2 * height * rho / (radius**2 + height**2) ** 2.5
+        b_rho = jnp.sum(jnp.where(near_axis, b_rho_axis, b_rho_far), axis=-1)
+        b_z = jnp.sum(b_z, axis=-1)
+        rho = rho[..., 0]
+        safe = jnp.where(rho > 0.0, rho, 1.0)
+        cos_phi = jnp.where(rho > 0.0, points[..., 0] / safe, 1.0)
+        sin_phi = jnp.where(rho > 0.0, points[..., 1] / safe, 0.0)
+        return jnp.stack((b_rho * cos_phi, b_rho * sin_phi, b_z), axis=-1)
+
+    def axis_field(self, z: Array) -> Array:
+        """Return the exact on-axis ``B_z(z)``."""
+
+        z = jnp.asarray(z)[..., None]
+        radius = jnp.atleast_1d(jnp.asarray(self.radius))
+        current = jnp.atleast_1d(jnp.asarray(self.current))
+        return jnp.sum(
+            2.0e-7 * jnp.pi * current * radius**2 / (radius**2 + (z - jnp.atleast_1d(self.z)) ** 2) ** 1.5,
+            axis=-1,
+        )
+
+    def xyz(self, points: int = 128) -> Array:
+        """Return loop polylines of shape ``(ncoil, points, 3)`` for plotting."""
+
+        phi = jnp.linspace(0.0, 2.0 * jnp.pi, points, endpoint=False)
+        radius = jnp.atleast_1d(jnp.asarray(self.radius))[:, None]
+        height = jnp.broadcast_to(jnp.atleast_1d(jnp.asarray(self.z))[:, None], (radius.shape[0], points))
+        return jnp.stack((radius * jnp.cos(phi), radius * jnp.sin(phi), height), axis=-1)
+
+
+jax.tree_util.register_dataclass(CircularCoils, data_fields=["radius", "z", "current"], meta_fields=[])

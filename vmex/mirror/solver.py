@@ -34,7 +34,7 @@ Array = Any
 def _valid_energy_objective(energy: MirrorEnergy, energy_scale: float) -> Array:
     """Normalize energy and reject states with crossed flux surfaces."""
 
-    value = energy.total / float(energy_scale)
+    value = energy.total / energy_scale
     return jnp.where(energy.geometry.jacobian_sign_changed, jnp.inf, value)
 
 
@@ -388,8 +388,7 @@ def _bounded_newton_krylov(
 
 def _polish_fixed_coefficients(
     x0: np.ndarray,
-    gradient_function: Any,
-    objective_function: Any,
+    kernels: Any,
     vectorizer: Any,
     preconditioner: tuple[Any, np.ndarray, Any],
     *,
@@ -402,18 +401,13 @@ def _polish_fixed_coefficients(
     """Damped Newton-GMRES polish using exact JAX Hessian products."""
 
     apply_preconditioner, block_scales, build_local = preconditioner
-    hessian_vector = jax.jit(lambda point, direction: jax.jvp(gradient_function, (point,), (direction,))[1])
-    hessian_columns = jax.jit(
-        lambda point, directions: jax.vmap(
-            lambda direction: jax.jvp(gradient_function, (point,), (direction,))[1]
-        )(directions)
-    )
+    hessian_vector, hessian_columns = kernels.hessian_vector, kernels.hessian_columns
     damping = [1.0e-8]
     local_preconditioner = None
     active_preconditioner = apply_preconditioner
 
     def residual(vector: np.ndarray) -> np.ndarray:
-        return np.asarray(gradient_function(jnp.asarray(vector)), dtype=float)
+        return np.asarray(kernels.gradient(vector), dtype=float)
 
     def linear_model(vector: np.ndarray, _residual: np.ndarray) -> tuple[Any, Any]:
         nonlocal active_preconditioner, local_preconditioner
@@ -468,7 +462,7 @@ def _polish_fixed_coefficients(
         restart=200,
         max_restarts=10,
         linear_rtol=lambda residual_max: min(1.0e-8, max(1.0e-10, 0.1 * residual_max)),
-        objective_function=lambda vector: objective_function(jnp.asarray(vector)),
+        objective_function=kernels.objective,
         fallback_direction=lambda residual_value: -active_preconditioner(residual_value),
         after_step=after_step,
     )
@@ -491,7 +485,7 @@ def _optimize_fixed_boundary(
     lower_bounds: np.ndarray,
     upper_bounds: np.ndarray,
     *,
-    objective: Any,
+    kernels: Any,
     evaluate: Any,
     packed_variational: Any,
     unpack: Any,
@@ -558,8 +552,7 @@ def _optimize_fixed_boundary(
     linear_iterations = 0
     final_linear_residual = 0.0
 
-    candidate_variational = packed_variational(final_x, unpack(jnp.asarray(final_x)))
-    gradient_function = jax.jit(jax.grad(objective))
+    candidate_variational = packed_variational(final_x, None)
 
     def run_matrix_free_polish() -> None:
         nonlocal final_x, optimizer_success, optimizer_message
@@ -586,8 +579,7 @@ def _optimize_fixed_boundary(
             newton_message,
         ) = _polish_fixed_coefficients(
             final_x,
-            gradient_function,
-            objective,
+            kernels,
             vectorizer,
             preconditioner,
             ftol=config.ftol,
@@ -601,16 +593,15 @@ def _optimize_fixed_boundary(
 
     if float(candidate_variational.maximum) > config.ftol and use_matrix_free and matrix_free_context is not None:
         run_matrix_free_polish()
-        candidate_variational = packed_variational(final_x, unpack(jnp.asarray(final_x)))
+        candidate_variational = packed_variational(final_x, None)
 
     # A bounded dense fallback is the robust reference lane up to 2048 dofs.
     if float(candidate_variational.maximum) > config.ftol and final_x.size <= 2048:
-        hessian_function = jax.jit(jax.jacfwd(jax.grad(objective)))
         remaining = max(1, int(config.max_iterations) - lbfgs_iterations - newton_steps)
         polish = least_squares(
-            fun=lambda x: np.asarray(gradient_function(jnp.asarray(x)), dtype=float),
+            fun=lambda x: np.asarray(kernels.gradient(x), dtype=float),
             x0=final_x,
-            jac=lambda x: np.asarray(hessian_function(jnp.asarray(x)), dtype=float),
+            jac=lambda x: np.asarray(kernels.hessian(x), dtype=float),
             bounds=(lower_bounds, upper_bounds),
             method="trf",
             ftol=1.0e-14,
@@ -623,7 +614,7 @@ def _optimize_fixed_boundary(
         polish_evaluations = int(polish.nfev)
         optimizer_success = bool(polish.success)
         optimizer_message += f"; residual-Newton: {polish.message}"
-        candidate_variational = packed_variational(final_x, unpack(jnp.asarray(final_x)))
+        candidate_variational = packed_variational(final_x, None)
 
     return _OptimizationOutcome(
         vector=final_x,

@@ -15,6 +15,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # Model and configuration.
     "MirrorBoundary": (".model", "MirrorBoundary"),
     "MirrorConfig": (".model", "MirrorConfig"),
+    "MirrorInput": (".model", "MirrorInput"),
     "MirrorResolution": (".model", "MirrorResolution"),
     "MirrorState": (".model", "MirrorState"),
     # Coefficient-native fixed- and free-boundary solves.
@@ -40,6 +41,11 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         "solve_fixed_boundary_from_radius",
     ),
     "solve_free_boundary": (".free_boundary", "solve_free_boundary"),
+    # One-call drivers for a MirrorInput.
+    "MirrorSolution": (".free_boundary", "MirrorSolution"),
+    "solve_mirror": (".free_boundary", "solve_mirror"),
+    "solve_mirror_beta_scan": (".free_boundary", "solve_mirror_beta_scan"),
+    "CircularCoils": (".analytic", "CircularCoils"),
     # Continuation.
     "solve_beta_scan": (".free_boundary", "solve_beta_scan"),
     # Implicit differentiation.
