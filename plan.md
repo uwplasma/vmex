@@ -149,6 +149,14 @@ main's after the merges.
 5. **Later (not scheduled):** cut compilation cost on free- and
    fixed-boundary solves (cold compile is 25-60 % of example wall time; about
    120 s fixed cost on the free boundary, #439).
+   - Done (compile-cost PR): three cache-key duplicates removed with
+     bit-identical results -- callback default device, backward-pass
+     mesh/commitment, and `max_iterations` as static meta. Cold, first two
+     trials, laptop: fixed single stage 433 -> 396 compilations (30 -> 22 s,
+     wall 48 -> 36 s); free-boundary 0.5 % beta 687 -> 497 (50 -> 39 s,
+     wall 83 -> 67 s). CLI decks unchanged. Next: QA's `jacobian_rows_block`
+     is one large program (the biggest single compile); remaining free-boundary
+     duplicates are ~1 s each (`_iter_lane`, `_evaluate_lane`).
 
 **Open PRs:**
 
