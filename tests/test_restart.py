@@ -442,3 +442,16 @@ def test_cli_end_to_end_restart(tmp_path, solovev_case, capsys):
     assert wout.ier_flag == 0
     assert wout.niter <= max(3, 0.05 * cold.iterations)
     assert abs(wout.wb / cold.wb - 1.0) < 1e-12
+
+
+def test_iteration_budget_is_not_a_compile_key():
+    """A restart budget below the deck's NITER keeps the stage lanes' key.
+
+    The free-boundary restart used to compile a second set of VMEC lanes
+    (20-28 s cold) because ``max_iterations`` was static pytree metadata.
+    """
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    full = solver.prepare_runtime(inp)
+    budget = solver.prepare_runtime(inp, max_iterations=int(inp.niter_array[0]) // 10)
+    assert jax.tree.structure(full) == jax.tree.structure(budget)
+    assert int(budget.max_iterations) == int(inp.niter_array[0]) // 10
