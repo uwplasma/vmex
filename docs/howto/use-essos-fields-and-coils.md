@@ -97,70 +97,9 @@ exterior field with coils and virtual casing.
 
 ## Trace alpha particles
 
-`vmex --trace` follows an ensemble of fusion-born alpha particles
-(guiding-centre model, ESSOS tracer) through a converged equilibrium and
-reports the exact loss fraction; the same trace is one call away in Python
-via {func}`~vmex.core.tracing.trace_alphas`. It is built on the first seam
-above.
-
-### From the CLI
-
-```console
-vmex --trace wout_case.nc                  # 1000 alphas, 1e-2 s, at ARIES-CS size
-vmex input.case --trace                    # solve first, then trace
-vmex --trace wout_case.nc --trace-particles 5000 --trace-tmax 1e-2
-vmex --trace wout_case.nc --trace-no-scale # trace the equilibrium as given
-```
-
-Loss fractions are physical only at reactor scale, so `--trace` first
-scales the equilibrium in memory to ARIES-CS size (the `--scale` rule,
-`<B> = 5.8646 T` and `a = 1.7044 m`, or `--scale-target axis`) and prints
-both factors. The console output gives the loss fraction with its binomial
-error, the lost / axis-termination / solver-failure counts, and the wall
-time split into compile and run. Next to the input (or in `--outdir`) it
-writes `*_trace.json` (counts, factors, step, devices, versions, timing),
-`*_trace.npz` (times, loss fractions, loss times, initial conditions) and
-four figures: `*_trace_loss_fraction.png` (cumulative loss fraction on a log
-time axis with a 1-sigma band), `*_trace_trajectories.png` (sampled orbits
-in 3-D over a translucent LCFS), `*_trace_vparallel.png` and
-`*_trace_energy_error.png`.
-
-Particles start on one flux surface `s` (uniform in poloidal angle, one
-field period in toroidal angle, uniform pitch), at the fusion-alpha birth
-energy of 3.52 MeV. An orbit counts as lost when it reaches the ESSOS loss
-surface (`s >= 0.99` sampled in ESSOS 0.17). The default fixed step,
-`2.5e-7 s` at `a = 1.7044 m` and proportional to `a` otherwise, is the one at
-which the ARIES-CS loss fraction stops changing under step halving; the
-former `5e-7 s` overstated it by about 40 %. `--trace` gives JAX one CPU
-device per core so ESSOS shards the particles; a device count in
-`XLA_FLAGS` or `JAX_NUM_CPU_DEVICES` wins.
-
-### From Python
-
-```python
-import vmex as vj
-
-result = vj.trace_alphas("wout_case.nc", nparticles=400, tmax=1e-3)
-print(result.loss_fraction, result.particles_lost)
-vj.plot_tracing("wout_case.nc", result, outdir="figs")
-```
-
-`trace_alphas` accepts a path or an in-memory
-{class}`~vmex.core.wout.WoutData` (written through a temporary wout file —
-the route released ESSOS reads) and returns an
-{class}`~vmex.core.tracing.AlphaTracingResult` with the loss-fraction time
-series, per-particle loss times, trajectories in flux and Cartesian
-coordinates, energies, and the counts.
+`vmex --trace` and {func}`~vmex.core.tracing.trace_alphas` trace fusion alphas
+in Boozer coordinates with `essos.boozer`; see {doc}`trace-alpha-particles`.
 
 For anything else ESSOS does with an equilibrium (field lines, surfaces,
 `|B|` queries), use the bare `essos.fields.Vmec` from
 {func}`~vmex.core.tracing.essos_vmec_field` above.
-
-### Scope
-
-This is the exact loss-fraction *diagnostic*. The differentiable alpha-loss
-*objective* (a smooth surrogate a boundary optimization can descend) is a
-separate feature that waits on the ESSOS array-based field constructor
-(uwplasma/ESSOS#61) and vmex's traceable field tables. The exact loss
-fraction is piecewise constant in the boundary — use it to certify, not to
-optimize.

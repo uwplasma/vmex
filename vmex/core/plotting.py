@@ -33,9 +33,8 @@ Public API
 ----------
 ``plot_wout(path_or_WoutData, outdir, which=(...)) -> dict[str, Path]``
 ``plot_boozmn(path, outdir) -> dict[str, Path]``
-``plot_tracing(wout, result, outdir) -> dict[str, Path]`` — the four
-alpha-tracing figures for a :class:`~vmex.core.tracing.AlphaTracingResult`
-plus the per-figure helpers each of those dispatches to.
+``plot_tracing(result, outdir) -> dict[str, Path]`` — the alpha-tracing
+summary and 3-D loss figures for a :class:`~vmex.core.tracing.AlphaTracingResult`.
 """
 
 from __future__ import annotations
@@ -2505,255 +2504,118 @@ def plot_boozmn(
 # Alpha-particle tracing figures (vmex --trace; see vmex.core.tracing)
 # ==========================================================================
 
-def _trace_indices(nparticles: int, n_trajectories: int) -> np.ndarray:
-    """Evenly spaced particle indices — deterministic figure content."""
-    count = max(1, min(int(n_trajectories), int(nparticles)))
-    return np.unique(np.linspace(0, nparticles - 1, count).astype(int))
+def _boozer_boundary_xyz(boozer: dict, theta, zeta):
+    """Cartesian points on the outermost Boozer surface at ``(theta_B, zeta_B)``."""
+    m, n = boozer["xm_b"], boozer["xn_b"]
+    phase = np.multiply.outer(np.asarray(theta), m) - np.multiply.outer(np.asarray(zeta), n)
+    R = np.cos(phase) @ boozer["rmnc_b"]
+    Z = np.sin(phase) @ boozer["zmns_b"]
+    phi = np.asarray(zeta) - np.sin(phase) @ boozer["numns_b"]  # zeta_B = phi + nu
+    return R * np.cos(phi), R * np.sin(phi), Z
 
 
-def _finite_or_nan(values: np.ndarray) -> np.ndarray:
-    """Replace non-finite samples (post-loss event fill) with NaN gaps."""
-    return np.where(np.isfinite(values), values, np.nan)
+def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str, Path]:
+    """Write the ``--trace`` figure set for an :class:`~vmex.core.tracing.AlphaTracingResult`.
 
-
-def plot_trace_trajectories(
-    wout, result, out_path: str | Path, *, n_trajectories: int = 4,
-) -> Path:
-    """Write sampled guiding-centre orbits in 3-D over a translucent LCFS.
-
-    The last closed flux surface is drawn over the full torus as a grey,
-    20 %-opaque backdrop, and the selected particles' Cartesian trajectories
-    (meters, from ``result.trajectories_xyz``) are overlaid as coloured lines
-    with a per-particle legend.  Non-finite samples — the fill ESSOS writes
-    after a particle leaves the plasma — are dropped, so a lost orbit simply
-    stops.  The axes are switched off and the box aspect is cubic.
-
-    Parameters
-    ----------
-    wout:
-        The traced equilibrium, as a ``wout_*.nc`` path or a
-        :class:`~vmex.core.wout.WoutData` — used only for the backdrop.
-    result:
-        An :class:`~vmex.core.tracing.AlphaTracingResult`.
-    out_path:
-        Destination image file.
-    n_trajectories:
-        How many orbits to draw.  Indices are evenly spaced over the ensemble
-        (deterministic, not random), capped at ``result.nparticles``.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`, saved at 200 dpi on
-    the Agg backend with a tight bounding box, and closed.
+    ``<name>_trace.png`` has six panels: the cumulative loss fraction against
+    time with its binomial 1-sigma band; the loss locations on the boundary in
+    Boozer ``(zeta_B, theta_B)`` (one field period); the birth pitch
+    ``v_par/v`` of lost and confined alphas; loss time against birth pitch;
+    the loss fraction against birth ``s`` (volume births) or the loss-time
+    histogram (surface births); and ``iota(s)`` with the low-order rationals
+    ``iota = n N_fp / m`` (``m <= 6``) near which orbits resonate, and the
+    birth range of lost alphas.  ``<name>_trace_3d.png`` shows the loss
+    locations on the boundary surface in 3-D.
     """
     plt = _import_matplotlib()
-    wout, _ = _as_wout(wout)
-    with _rc_context():
-        fig = plt.figure(figsize=(6.4, 5.6), frameon=False)
-        ax = fig.add_subplot(111, projection="3d")
-        theta = np.linspace(0.0, 2.0 * np.pi, 60)
-        phi = np.linspace(0.0, 2.0 * np.pi, 180)
-        R, Z = surface_rz(wout, s_index=int(wout.ns) - 1, theta=theta, phi=phi)
-        phi2d = np.meshgrid(phi, theta)[0]
-        X, Y = R * np.cos(phi2d), R * np.sin(phi2d)
-        ax.plot_surface(
-            X, Y, Z, color="0.6", alpha=0.2, rstride=2, cstride=2,
-            linewidth=0.0, antialiased=False, shade=False,
-        )
-        for i in _trace_indices(result.nparticles, n_trajectories):
-            xyz = result.trajectories_xyz[i]
-            finite = np.isfinite(xyz).all(axis=1)
-            ax.plot(
-                xyz[finite, 0], xyz[finite, 1], xyz[finite, 2],
-                lw=1.2, label=f"particle {i + 1}",
-            )
-        scale = 0.7 * max(np.abs(X).max(), np.abs(Y).max())
-        ax.auto_scale_xyz([-scale, scale], [-scale, scale], [-scale, scale])
-        ax.set_box_aspect([1, 1, 1]); ax.set_axis_off()
-        ax.legend(loc="upper right")
-        out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI, bbox_inches="tight", pad_inches=0.05)
-        plt.close(fig)
-    return out_path
-
-
-def plot_trace_vparallel(
-    result, out_path: str | Path, *, n_trajectories: int = 4,
-) -> Path:
-    """Write the normalized parallel velocity of the sampled orbits.
-
-    ``v_par / v`` — the guiding-centre parallel velocity divided by the
-    ensemble's total speed, so the ordinate is the pitch cosine and is fixed
-    to ``[-1, 1]`` — against time in seconds.  A trapped particle oscillates
-    through zero; a passing particle keeps its sign.  Post-loss non-finite
-    samples are turned into NaN so the line breaks instead of running to the
-    edge of the axis.
-
-    Parameters
-    ----------
-    result:
-        An :class:`~vmex.core.tracing.AlphaTracingResult`.
-    out_path:
-        Destination image file.
-    n_trajectories:
-        How many orbits to draw, evenly spaced over the ensemble.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`, saved at 200 dpi on
-    the Agg backend and closed.
-    """
-    plt = _import_matplotlib()
-    with _rc_context():
-        fig, ax = plt.subplots(figsize=(6.4, 4.2), layout="constrained")
-        for i in _trace_indices(result.nparticles, n_trajectories):
-            vpar = result.trajectories[i, :, 3] / result.total_speed
-            ax.plot(result.times, _finite_or_nan(vpar), label=f"particle {i + 1}")
-        ax.set_ylim(-1.0, 1.0)
-        ax.set_xlabel("time [s]")
-        ax.set_ylabel(r"$v_{\parallel}/v$")
-        ax.legend()
-        out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
-        plt.close(fig)
-    return out_path
-
-
-def plot_trace_loss_fraction(result, out_path: str | Path, *, label: str = "") -> Path:
-    """Write the cumulative alpha-loss fraction against time (log time axis).
-
-    The shaded band is the binomial 1-sigma error ``sqrt(f (1 - f) / N)`` of
-    the running fraction ``f``.  The title carries the configuration
-    ``label``, the ensemble size, launch surface, scaling convention and
-    wall time from ``result.metadata``, and the final fraction with its
-    error, so a small ensemble cannot be mistaken for a converged estimate.
-
-    Parameters
-    ----------
-    result:
-        An :class:`~vmex.core.tracing.AlphaTracingResult`.
-    out_path:
-        Destination image file.
-    label:
-        Configuration name for the title.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`, saved at 200 dpi on
-    the Agg backend and closed.
-    """
-    plt = _import_matplotlib()
-    meta = result.metadata
-    t, f = np.asarray(result.times), np.asarray(result.loss_fractions)
-    keep = t > 0.0
-    t, f = t[keep], f[keep]
-    sigma = np.sqrt(f * (1.0 - f) / max(result.nparticles, 1))
-    scale = meta.get("scale_target")
-    with _rc_context():
-        fig, ax = plt.subplots(figsize=(6.4, 4.2), layout="constrained")
-        ax.fill_between(t, f - sigma, f + sigma, alpha=0.3, linewidth=0)
-        ax.plot(t, f, "-")
-        ax.set_xscale("log")
-        ax.set_ylim(0.0, max(0.01, 1.2 * float(np.max(f + sigma, initial=0.0))))
-        ax.set_xlabel("time [s]")
-        ax.set_ylabel("alpha loss fraction")
-        ax.set_title(
-            f"{label} N={result.nparticles}, s0={meta.get('s', float('nan')):g}, "
-            f"{'unscaled' if scale is None else 'ARIES-CS ' + scale}, "
-            f"{result.wall_time_s:.0f} s wall\n"
-            f"loss {100.0 * result.loss_fraction:.2f} "
-            f"\u00b1 {100.0 * result.loss_fraction_sigma:.2f}% "
-            f"({result.particles_lost} of {result.nparticles})",
-            fontsize=10,
-        )
-        out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
-        plt.close(fig)
-    return out_path
-
-
-def plot_trace_energy_error(
-    result, out_path: str | Path, *, n_trajectories: int = 4,
-) -> Path:
-    """Write the relative energy error of the sampled orbits.
-
-    ``|E(t)/E0 - 1|`` against time in seconds, where ``E`` is the
-    guiding-centre energy ``0.5 m v_par**2 + mu |B|`` and ``E0`` is the
-    ensemble's nominal particle energy.  This is a diagnostic of the
-    integrator, not of the configuration: a good trace keeps the curve flat
-    and small.
-
-    The first two samples are skipped — ``mu`` is fixed from the initial
-    sample, so ``t = 0`` is exact by construction and would plot as a
-    spurious zero.  Both axes are logarithmic when at least one finite
-    positive error remains; a promptly lost ensemble that leaves none keeps
-    linear axes, since a log axis cannot autoscale on that.
-
-    Parameters
-    ----------
-    result:
-        An :class:`~vmex.core.tracing.AlphaTracingResult`.
-    out_path:
-        Destination image file.
-    n_trajectories:
-        How many orbits to draw, evenly spaced over the ensemble.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`, saved at 200 dpi on
-    the Agg backend and closed.
-    """
-    plt = _import_matplotlib()
-    with _rc_context():
-        fig, ax = plt.subplots(figsize=(6.4, 4.2), layout="constrained")
-        # Skip the first samples, exact by construction of mu (t = 0).
-        times = result.times[2:]
-        indices = _trace_indices(result.nparticles, n_trajectories)
-        errors = np.abs(
-            result.energies[indices, 2:] / result.particle_energy - 1.0)
-        for i, error in zip(indices, errors):
-            ax.plot(times, _finite_or_nan(error), label=f"particle {i + 1}")
-        # Promptly lost ensembles can leave no positive finite error samples;
-        # a log axis cannot autoscale on that, so keep linear axes then.
-        if np.any(np.isfinite(errors) & (errors > 0.0)):
-            ax.set_xscale("log"); ax.set_yscale("log")
-        ax.set_xlabel("time [s]")
-        ax.set_ylabel("relative energy error")
-        ax.legend()
-        out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
-        plt.close(fig)
-    return out_path
-
-
-def plot_tracing(
-    wout, result, outdir: str | Path, *,
-    name: str | None = None, n_trajectories: int = 4,
-) -> dict[str, Path]:
-    """Write the four alpha-tracing figures for one tracing result.
-
-    ``wout`` is the traced equilibrium — a ``wout_*.nc`` path or a
-    :class:`~vmex.core.wout.WoutData` — used as the LCFS backdrop of the 3-D
-    figure; ``result`` is an :class:`~vmex.core.tracing.AlphaTracingResult`
-    from :func:`~vmex.core.tracing.trace_alphas`.  Figures land in ``outdir``
-    (created if missing) under ``name`` (default: the wout case name), with
-    ``n_trajectories`` evenly sampled orbits in the per-particle panels.
-    Returns a mapping from figure key (``trajectories``, ``vparallel``,
-    ``loss_fraction``, ``energy_error``) to the written PNG path.
-    """
-    data, default_name = _as_wout(wout)
-    label = name or default_name
     outdir = _ensure_outdir(outdir)
-    return {
-        "trajectories": plot_trace_trajectories(
-            data, result, outdir / f"{label}_trace_trajectories.png",
-            n_trajectories=n_trajectories),
-        "vparallel": plot_trace_vparallel(
-            result, outdir / f"{label}_trace_vparallel.png",
-            n_trajectories=n_trajectories),
-        "loss_fraction": plot_trace_loss_fraction(
-            result, outdir / f"{label}_trace_loss_fraction.png", label=label),
-        "energy_error": plot_trace_energy_error(
-            result, outdir / f"{label}_trace_energy_error.png",
-            n_trajectories=n_trajectories),
-    }
+    meta, bz = result.metadata, result.boozer
+    lost = np.asarray(result.lost_times) >= 0
+    t_loss = np.asarray(result.lost_times)[lost]
+    birth = np.asarray(result.initial_conditions)
+    final = np.asarray(result.final_states)
+    nfp = int(bz["nfp"])
+    scale = meta.get("scale_target")
+    title = (f"{name}: N={result.nparticles}, {meta.get('birth', 'surface')} births"
+             f"{'' if meta.get('birth') == 'volume' else ' s0=%g' % meta.get('s', 0.25)}, "
+             f"{'unscaled' if scale is None else 'ARIES-CS ' + scale}"
+             f"{', collisional' if meta.get('collisions') else ''}, "
+             f"{result.wall_time_s:.0f} s wall — loss {100 * result.loss_fraction:.2f} "
+             f"± {100 * result.loss_fraction_sigma:.2f}%")
+    written = {}
+    with _rc_context():
+        fig, ax = plt.subplots(2, 3, figsize=(15, 8.4), layout="constrained")
+        (a_f, a_map, a_p), (a_tp, a_b, a_i) = ax
+        t, f = np.asarray(result.times), np.asarray(result.loss_fractions)
+        keep = t > 0
+        t, f = t[keep], f[keep]
+        sig = np.sqrt(f * (1 - f) / max(result.nparticles, 1))
+        a_f.fill_between(t, f - sig, f + sig, alpha=0.3, linewidth=0, label="1σ")
+        a_f.plot(t, f, "-", label="lost")
+        a_f.set(xscale="log", xlabel="time [s]", ylabel="cumulative loss fraction",
+                ylim=(0, max(0.01, 1.2 * float(np.max(f + sig, initial=0)))))
+        a_f.legend(loc="upper left")
+        zeta = np.mod(final[lost, 2], 2 * np.pi / nfp)
+        theta = np.mod(final[lost, 1], 2 * np.pi)
+        h = a_map.hist2d(zeta, theta, bins=(24, 36), range=[[0, 2 * np.pi / nfp], [0, 2 * np.pi]],
+                         cmap="Blues", cmin=1)
+        fig.colorbar(h[3], ax=a_map, label="lost alphas")
+        a_map.set(xlabel=r"$\zeta_B$ (one period)", ylabel=r"$\theta_B$", title="loss locations on s = 1")
+        bins = np.linspace(-1, 1, 21)
+        a_p.hist(birth[~lost, 3], bins=bins, density=True, histtype="step", linewidth=2, label="confined")
+        a_p.hist(birth[lost, 3], bins=bins, density=True, histtype="step", linewidth=2, label="lost")
+        a_p.set(xlabel=r"birth pitch $v_\parallel/v$", ylabel="density")
+        a_p.legend()
+        a_tp.scatter(birth[lost, 3], t_loss, s=10)
+        a_tp.set(yscale="log", xlim=(-1, 1), xlabel=r"birth pitch $v_\parallel/v$", ylabel="loss time [s]")
+        if meta.get("birth") == "volume":
+            edges = np.linspace(0, 1, 11)
+            idx = np.clip(np.digitize(birth[:, 0], edges) - 1, 0, 9)
+            count = np.bincount(idx, minlength=10)
+            frac = np.bincount(idx, weights=lost, minlength=10) / np.maximum(count, 1)
+            err = np.sqrt(frac * (1 - frac) / np.maximum(count, 1))
+            mid = 0.5 * (edges[1:] + edges[:-1])
+            a_b.errorbar(mid, frac, yerr=err, fmt="o-")
+            a_b.set(xlabel="birth s", ylabel="loss fraction", title="loss vs birth radius")
+        else:
+            tb = np.logspace(np.log10(max(t[0], 1e-7)), np.log10(t[-1]), 30)
+            a_b.hist(t_loss, bins=tb)
+            a_b.set(xscale="log", xlabel="loss time [s]", ylabel="lost alphas", title="loss-time histogram")
+        s_b, iota = np.asarray(bz["s"]), np.asarray(bz["iota"])
+        a_i.plot(s_b, iota, "-", color="0.2")
+        lo, hi = float(np.min(iota)), float(np.max(iota))
+        for m in range(1, 7):
+            for k in range(-12, 13):
+                r = k * nfp / m if k else None
+                if r is not None and lo <= r <= hi and np.gcd(abs(k * nfp), m) == 1:
+                    a_i.axhline(r, color="0.7", linewidth=0.8)
+                    a_i.annotate(f"{k * nfp}/{m}", (1.0, r), fontsize=8, ha="right", va="bottom")
+        if lost.any() and meta.get("birth") == "volume":
+            a_i.axvspan(float(birth[lost, 0].min()), float(birth[lost, 0].max()), alpha=0.15,
+                        label="births of lost alphas")
+            a_i.legend(loc="best")
+        a_i.set(xlabel="s", ylabel=r"$\iota$", title=r"$\iota(s)$ and rationals $nN_{fp}/m$")
+        fig.suptitle(title, fontsize=11)
+        path = outdir / f"{name}_trace.png"
+        fig.savefig(path, dpi=_DPI)
+        plt.close(fig)
+        written["summary"] = path
+
+        fig = plt.figure(figsize=(7, 6), layout="constrained")
+        ax3 = fig.add_subplot(projection="3d")
+        th, ze = np.meshgrid(np.linspace(0, 2 * np.pi, 48), np.linspace(0, 2 * np.pi, 120))
+        X, Y, Z = _boozer_boundary_xyz(bz, th.ravel(), ze.ravel())
+        ax3.plot_surface(X.reshape(th.shape), Y.reshape(th.shape), Z.reshape(th.shape),
+                         color="0.8", alpha=0.25, linewidth=0)
+        if lost.any():
+            x, y, z = _boozer_boundary_xyz(bz, final[lost, 1], final[lost, 2])
+            sc = ax3.scatter(x, y, z, s=6, c=np.log10(t_loss), cmap="viridis", depthshade=False)
+            fig.colorbar(sc, ax=ax3, shrink=0.5, label="log10 loss time [s]")
+        ax3.set_axis_off()
+        ax3.set_box_aspect((1, 1, 0.35))
+        ax3.set_title(f"{name}: {int(lost.sum())} alpha loss locations")
+        path = outdir / f"{name}_trace_3d.png"
+        fig.savefig(path, dpi=_DPI)
+        plt.close(fig)
+        written["3d"] = path
+    return written

@@ -97,8 +97,8 @@ links to the module that documents it.
   ESSOS as an ``essos.fields.Vmec`` (optional ESSOS dependency)
 - :func:`~vmex.core.tracing.trace_alphas` →
   :class:`~vmex.core.tracing.AlphaTracingResult` /
-  :func:`~vmex.core.plotting.plot_tracing` — optional ESSOS alpha-particle
-  tracing (exact loss fraction; also ``vmex --trace``)
+  :func:`~vmex.core.plotting.plot_tracing` — optional alpha-particle
+  tracing in Boozer coordinates (ESSOS; also ``vmex --trace``)
 - :func:`~vmex.core.plotting.plot_wout` / :func:`~vmex.core.plotting.plot_boozmn`
   / :func:`~vmex.core.plotting.plot_bootstrap_current`
   / :func:`~vmex.core.plotting.plot_optimization_movie`

@@ -6,7 +6,7 @@ and from an in-memory equilibrium, the trace runs on the released ESSOS
 surface, the counts are mutually consistent, the loss fraction is a
 fraction, the in-memory equilibrium route (temporary-wout hop) reproduces
 the file route, and ``vmex --trace`` scales to ARIES-CS size in memory and
-writes its JSON/NPZ summary and four figures end to end.  Skips cleanly
+writes its JSON/NPZ summary and figures end to end.  Skips cleanly
 without ESSOS.
 """
 
@@ -41,6 +41,7 @@ SOLOVEV_DECK = DATA_DIR / "input.solovev"
 
 TRACE_KWARGS = dict(
     tmax=1e-5, nparticles=8, s=0.25, seed=1, timestep=5e-7, times_to_trace=12,
+    mboz=8, nboz=8,
 )
 
 
@@ -64,40 +65,38 @@ def test_counts_are_consistent(traced):
     n = traced.nparticles
     assert n == 8
     lost = int(np.sum(traced.lost_times >= 0.0))
-    confined = int(np.sum(traced.lost_times < 0.0))
     assert lost == traced.particles_lost
-    assert traced.particles_lost + confined == n
-    # Failed orbits (non-finite without a recorded loss) are a subset of the
-    # not-lost population, so lost + (confined - failed) + failed = n.
-    assert 0 <= traced.particles_failed <= confined
-    assert 0 <= traced.particles_unresolved <= n
-
-
-def test_loss_fraction_is_a_fraction(traced):
+    assert traced.particles_failed == 0 and traced.particles_thermalized == 0
     assert 0.0 <= traced.loss_fraction <= 1.0
-    assert traced.loss_fraction == pytest.approx(
-        traced.particles_lost / traced.nparticles)
+    assert traced.loss_fraction == pytest.approx(lost / n)
     assert traced.loss_fraction == pytest.approx(float(traced.loss_fractions[-1]))
-    f = traced.loss_fraction
-    assert traced.loss_fraction_sigma == pytest.approx(np.sqrt(f * (1 - f) / 8))
     assert np.all(np.diff(traced.loss_fractions) >= 0.0)  # cumulative
 
 
-def test_shapes_times_and_birth_energy(traced):
-    assert traced.trajectories.shape == (8, 12, 4)
-    assert traced.trajectories_xyz.shape == (8, 12, 3)
-    assert traced.times.shape == (12,)
-    assert traced.loss_fractions.shape == (12,)
-    assert traced.lost_times.shape == (8,)
-    assert traced.energies.shape == (8, 12)
-    assert traced.times[0] == 0.0
-    assert traced.times[-1] == pytest.approx(TRACE_KWARGS["tmax"])
-    # E(t=0) is the fusion-alpha birth energy by construction of mu.
-    np.testing.assert_allclose(
-        traced.energies[:, 0], traced.particle_energy, rtol=1e-12)
-    assert traced.particle_energy > 0.0
-    assert traced.total_speed > 0.0
-    assert traced.wall_time_s > 0.0
+def test_shapes_births_and_energy(traced):
+    assert traced.initial_conditions.shape == (8, 4)
+    np.testing.assert_allclose(traced.initial_conditions[:, 0], 0.25)
+    assert np.all(np.abs(traced.initial_conditions[:, 3]) <= 1.0)
+    assert traced.final_states.shape == (8, 5)
+    assert traced.times.shape == (12,) and traced.times[-1] == pytest.approx(1e-5)
+    # Collisionless RK4 conserves the orbit energy to far below a percent.
+    assert np.max(traced.energy_error) < 1e-3
+
+
+def test_volume_births_follow_the_fusion_profile(solovev_wout):
+    """Volume births peak in the core: <s> of the D-T source is well below 1/2."""
+    from vmex.core.tracing import boozer_field, dt_reactivity, sample_births
+    from vmex.core.scaling import aries_cs_scales, scale_wout
+
+    wout = read_wout(solovev_wout)
+    b_scale, r_scale = aries_cs_scales(wout)
+    field, _ = boozer_field(scale_wout(wout, b_scale=b_scale, r_scale=r_scale), mboz=8, nboz=8)
+    births = sample_births(field, 2000, birth="volume", seed=0)
+    assert births.shape == (2000, 4)
+    assert 0.1 < births[:, 0].mean() < 0.4
+    with pytest.raises(ValueError, match="birth"):
+        sample_births(field, 4, birth="line")
+    assert dt_reactivity(10.0) == pytest.approx(1.136e-22, rel=2e-3)  # Bosch & Hale 1992
 
 
 def test_essos_field_handoff_matches_the_file_route(solovev_wout):
@@ -119,13 +118,11 @@ def test_essos_field_handoff_matches_the_file_route(solovev_wout):
 
 def test_in_memory_equilibrium_matches_the_file_route(traced, solovev_wout):
     result = trace_alphas(read_wout(solovev_wout), **TRACE_KWARGS)
-    assert result.particles_lost == traced.particles_lost
-    assert result.loss_fraction == pytest.approx(traced.loss_fraction)
-    np.testing.assert_allclose(result.trajectories, traced.trajectories)
+    np.testing.assert_allclose(result.final_states, traced.final_states)
 
 
 def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
-    """The --trace contract: scaled in memory, JSON/NPZ summary, four figures."""
+    """The --trace contract: scaled in memory, JSON/NPZ summary, two figures."""
     import json
 
     from vmex.core.scaling import aries_cs_scales
@@ -135,17 +132,15 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
         rc = cli.main([
             str(solovev_wout), "--trace", "--outdir", str(tmp_path),
             "--trace-particles", "8", "--trace-tmax", "1e-5",
-            "--trace-times", "12", "--trace-seed", "1",
+            "--trace-times", "12", "--trace-seed", "1", "--mbooz", "8", "--nbooz", "8",
+            "--collisional", "--trace-birth", "volume",
         ])
     stdout = buffer.getvalue()
     assert rc == 0, stdout
-    for line in ("Loss fraction:", "Axis terminations:", "Solver failures:",
+    for line in ("Loss fraction:", "Thermalized:", "Solver failures:",
                  "Scaling: B_scale=", "compile"):
         assert line in stdout, line
-    for suffix in (
-        "trace_trajectories.png", "trace_vparallel.png",
-        "trace_loss_fraction.png", "trace_energy_error.png", "trace.npz",
-    ):
+    for suffix in ("trace.png", "trace_3d.png", "trace.npz"):
         assert (tmp_path / f"solovev_{suffix}").exists(), suffix
     summary = json.loads((tmp_path / "solovev_trace.json").read_text())
     b_scale, r_scale = aries_cs_scales(read_wout(solovev_wout))
@@ -153,12 +148,13 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     assert summary["r_scale"] == pytest.approx(r_scale)
     assert summary["volavgB"] == pytest.approx(5.8646)
     assert summary["Aminor_p"] == pytest.approx(1.7044)
-    assert summary["timestep"] == pytest.approx(2.5e-7)
+    assert summary["timestep"] == pytest.approx(1.25e-7)
     assert summary["nparticles"] == 8 and summary["scale_target"] == "volavgB"
+    assert summary["collisions"] is True
     assert {"loss_fraction_sigma", "compile_time_s", "devices", "versions"} <= set(summary)
     arrays = np.load(tmp_path / "solovev_trace.npz")
     assert arrays["initial_conditions"].shape == (8, 4)
-    np.testing.assert_allclose(arrays["initial_conditions"][:, 0], 0.25)
+    assert np.all((arrays["initial_conditions"][:, 0] > 0) & (arrays["initial_conditions"][:, 0] < 1))
     assert arrays["loss_fractions"][-1] == pytest.approx(summary["loss_fraction"])
 
 
@@ -168,4 +164,22 @@ def test_no_scale_traces_the_equilibrium_as_given(solovev_wout):
     assert (result.metadata["b_scale"], result.metadata["r_scale"]) == (1.0, 1.0)
     assert result.metadata["Aminor_p"] == pytest.approx(wout.Aminor_p)
     # The default step keeps the alpha step length a fixed fraction of the device.
-    assert result.metadata["timestep"] == pytest.approx(2.5e-7 * wout.Aminor_p / 1.7044)
+    assert result.metadata["timestep"] == pytest.approx(1.25e-7 * wout.Aminor_p / 1.7044)
+
+
+def test_plot_tracing_writes_the_surface_birth_figures(traced, tmp_path):
+    import dataclasses
+
+    from vmex.core.plotting import plot_tracing
+
+    lost_times = np.where(np.arange(8) < 2, 5e-6, -1.0)  # two losses for the loss panels
+    result = dataclasses.replace(traced, lost_times=lost_times)
+    result.metadata["birth"] = "volume"
+    written = plot_tracing(result, tmp_path, name="solovev")
+    assert set(written) == {"summary", "3d"}
+    assert all(path.stat().st_size > 0 for path in written.values())
+
+
+def test_collisional_requires_trace(solovev_wout):
+    with pytest.raises(SystemExit):
+        cli.main([str(solovev_wout), "--plot", "--collisional"])

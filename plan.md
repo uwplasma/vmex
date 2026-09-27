@@ -150,6 +150,19 @@ the mirror work. Scoped 2026-09-23 against `origin/main` `b5f5267ef` and ESSOS
 `main` `c9b41222e` (= ESSOS 0.17). Research only; nothing below has been
 implemented yet.
 
+**Status 2026-09-27 (P2 done by a different route).** P1 merged as #472.
+P2b/c/d shipped as ESSOS#89 (`essos.boozer`, ESSOS 0.19.0): a Boozer
+`|B|` spline from `booz_xform_jax`, K = 0 guiding-centre equations in the
+axis-regular chart `sqrt(s)(cos theta, sin theta)` (no axis stops), and
+fixed-step RK4 under `vmap`. The optional Monte Carlo collision operator is
+checked against the Stix `tau_se` and against `nu_D`. vmex `--trace` uses it
+with a 1.25e-7 s step and a `1e-3` mode cut. The default 1000 alphas × 1e-2 s
+on ARIES-CS take 28 s on the laptop (G5 met). The step and mode convergence
+table is in `docs/howto/trace-alpha-particles.md` (G4). P3 (symplectic) is not
+needed. The #52–#56 ESSOS stack is moot for `--trace`. Open: G2 against
+SIMSOPT/SIMPLE on identical initial conditions, and G3 (0.2 s, s = 0.3) on a
+slow lane.
+
 ### T.0 What already exists (do not rebuild it)
 
 `vmex --trace` shipped in 0.10.0 (`958ffde1a`). It is wired like `--plot` and

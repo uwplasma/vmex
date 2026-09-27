@@ -239,21 +239,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--trace",
         action="store_true",
         help=(
-            "Trace fusion alpha particles through the equilibrium with ESSOS "
-            "(guiding centre), scaled in memory to ARIES-CS size: print the "
-            "loss fraction and counts, write *_trace.json/.npz and the "
-            "loss/orbit/energy figures. Works on a wout_*.nc input or after "
-            "solving an input file (requires ESSOS). One CPU JAX device per "
-            "core unless XLA_FLAGS sets a device count."
+            "Trace fusion alphas (guiding centre in Boozer coordinates, ESSOS), "
+            "scaled in memory to ARIES-CS size: print the loss fraction, write "
+            "*_trace.json/.npz, *_trace.png and *_trace_3d.png. Works on a "
+            "wout_*.nc input or after solving an input file. The defaults "
+            "(1000 alphas, 1e-2 s) take about 30 s on 10 CPU cores; cost "
+            "scales as particles x tmax / timestep."
         ),
     )
     p.add_argument(
         "--trace-tmax", type=float, default=1e-2,
-        help="Tracing horizon in seconds (default: 1e-2).",
+        help="Tracing horizon in seconds (default: 1e-2; cost is linear in it).",
     )
     p.add_argument(
         "--trace-particles", type=int, default=1000,
-        help="Number of alpha particles (default: 1000).",
+        help="Number of alpha particles (default: 1000; cost is linear, sigma ~ 1/sqrt(N)).",
     )
     p.add_argument(
         "--trace-no-scale", action="store_true",
@@ -261,22 +261,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--trace-s", type=float, default=0.25,
-        help="Launch surface s = psi/psi_b (default: 0.25).",
+        help="Launch surface s = psi/psi_b for surface births (default: 0.25).",
+    )
+    p.add_argument(
+        "--trace-birth", choices=("surface", "volume"), default="surface",
+        help="Birth on --trace-s (default) or through the volume at the D-T fusion rate.",
     )
     p.add_argument(
         "--trace-seed", type=int, default=42,
-        help="Sampling seed for angles and pitch (default: 42).",
+        help="Sampling seed for births and collisions (default: 42).",
     )
     p.add_argument(
         "--trace-timestep", type=float, default=None,
         help=(
-            "Integrator timestep in seconds (default: the converged 2.5e-7 "
-            "times Aminor_p/1.7044 m)."
+            "RK4 step in seconds (default: the converged 1.25e-7 times "
+            "Aminor_p/1.7044 m; cost is inversely proportional)."
         ),
     )
     p.add_argument(
         "--trace-times", type=int, default=1000,
-        help="Number of saved samples per orbit (default: 1000).",
+        help="Samples of the loss-fraction curve (default: 1000).",
+    )
+    p.add_argument(
+        "--collisional", action="store_true",
+        help=(
+            "With --trace: Monte Carlo collisions (pitch-angle scattering, slowing "
+            "down, energy diffusion) on electrons, D and T with n = n0 (1 - s^5), "
+            "T = T0 (1 - s)."
+        ),
+    )
+    p.add_argument(
+        "--trace-ne0", type=float, default=4e20,
+        help="On-axis electron density [m^-3] for --collisional and volume births (default: 4e20).",
+    )
+    p.add_argument(
+        "--trace-te0", type=float, default=12.0,
+        help="On-axis temperature [keV] for --collisional and volume births (default: 12).",
     )
     p.add_argument("--outdir", type=str, default=None, help="Directory for wout/boozmn/figure output (default: alongside the input).")
     p.add_argument("--quiet", action="store_true", help="Silence the VMEC-style stdout.")
@@ -956,15 +976,15 @@ def _run_booz(wout_path: Path, args, outdir: Path, *, plot: bool, emit, quiet: b
 def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
     """Alpha-particle tracing driver for ``--trace`` (requires ESSOS)."""
     from .plotting import plot_tracing
-    from .scaling import scale_wout
     from .tracing import trace_alphas
-    from .wout import read_wout
 
     scale = None if args.trace_no_scale else args.scale_target
     if not quiet:
+        birth = ("volume" if args.trace_birth == "volume"
+                 else f"s={float(args.trace_s):g}")
         emit(
-            f" Tracing {int(args.trace_particles)} alpha particles from "
-            f"s={float(args.trace_s):g} (ESSOS GuidingCenter, "
+            f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
+            f"guiding centre{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
             f"{'unscaled' if scale is None else 'ARIES-CS ' + scale})"
         )
@@ -978,13 +998,19 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             timestep=args.trace_timestep,
             times_to_trace=int(args.trace_times),
             scale=scale,
+            birth=args.trace_birth,
+            collisions=bool(args.collisional),
+            ne0=float(args.trace_ne0),
+            T0_keV=float(args.trace_te0),
+            mboz=int(args.mbooz),
+            nboz=int(args.nbooz),
         )
     except ImportError as exc:
         raise VmecInputError(
             WERROR_MESSAGES[INPUT_ERROR_FLAG],
-            hint="--trace requires essos (pip install essos)",
+            hint="--trace requires essos>=0.19 and booz_xform_jax (pip install 'vmex[coils]')",
         ) from exc
-    except ValueError as exc:  # e.g. lasym equilibria (released-ESSOS limit)
+    except ValueError as exc:  # e.g. lasym equilibria
         raise VmecInputError(
             WERROR_MESSAGES[INPUT_ERROR_FLAG], hint=str(exc)
         ) from exc
@@ -993,10 +1019,11 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
         emit(
             f" Scaling: B_scale={meta['b_scale']:.6g}, R_scale={meta['r_scale']:.6g} "
             f"-> volavgB={meta['volavgB']:.5g} T, Aminor_p={meta['Aminor_p']:.5g} m; "
-            f"dt={meta['timestep']:.3g} s on {meta['devices']} {meta['platform']} device(s)"
+            f"dt={meta['timestep']:.3g} s, {meta['boozer_modes']} Boozer modes, "
+            f"{meta['devices']} {meta['platform']} device(s)"
         )
         emit(
-            f" ESSOS tracing took {result.wall_time_s:.2f} s "
+            f" Tracing took {result.wall_time_s:.2f} s "
             f"(compile {meta['compile_time_s']:.2f} s)"
         )
         emit(
@@ -1004,15 +1031,13 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             f"\u00b1 {100.0 * result.loss_fraction_sigma:.2f}% "
             f"({result.particles_lost} of {result.nparticles} particles lost)"
         )
-        emit(f" Axis terminations: {result.particles_unresolved}")
+        if args.collisional:
+            emit(f" Thermalized: {result.particles_thermalized}")
         emit(f" Solver failures: {result.particles_failed}")
     label = wout_path.stem.removeprefix("wout_")
     outdir.mkdir(parents=True, exist_ok=True)
     written = dict(zip(("json", "npz"), result.save(outdir / label)))
-    # The orbits live in the scaled geometry; so must the LCFS backdrop.
-    traced = scale_wout(
-        read_wout(wout_path), b_scale=meta["b_scale"], r_scale=meta["r_scale"])
-    written.update(plot_tracing(traced, result, outdir, name=label))
+    written.update(plot_tracing(result, outdir, name=label))
     for key, path in written.items():
         if not quiet:
             emit(f"   Saved {key}: {path}")
@@ -1328,6 +1353,8 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+    if (args.collisional or args.trace_birth != "surface") and not args.trace:
+        parser.error("--collisional and --trace-birth require --trace")
     if bool(args.trace):
         _split_host_devices()
     # Flushing sink: with stdout redirected to a file (cluster batch logs),

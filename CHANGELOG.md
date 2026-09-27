@@ -7,12 +7,12 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
-- `vmex --trace` defaults to 1000 alphas over 1e-2 s at the converged step
-  (2.5e-7 s at ARIES-CS size, was 5e-7 s, which overstated ARIES-CS losses
-  by about 40 %), scales the equilibrium in memory to ARIES-CS size
-  (`--trace-no-scale` opts out), shards particles over one CPU device per
-  core, and writes `*_trace.json`/`*_trace.npz` and a log-time loss figure
-  with a binomial band.
+- `vmex --trace`: 1000 alphas over 1e-2 s at ARIES-CS size by default (scaled
+  in memory; `--trace-no-scale` opts out), traced in Boozer coordinates
+  (`essos.boozer`, ESSOS 0.19) in about 30 s on a 10-core laptop, with a
+  converged step. New flags: `--trace-birth volume`, `--collisional`,
+  `--trace-ne0` and `--trace-te0`. Output: `*_trace.json`/`.npz`, a summary
+  figure and a 3-D loss map. Guide: `docs/howto/trace-alpha-particles.md`.
 - `--scale` now targets the ARIES-CS wout's own `volavgB = 5.8646 T` and
   `Aminor_p = 1.7044 m` (was `|b0| = 5.7 T`, `1.7 m`, which matches no
   published convention and put the reference reactor-scale wouts 7-10 % high

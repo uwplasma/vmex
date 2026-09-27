@@ -72,7 +72,7 @@ jobs:
           python -m pip install ".[coils,turbulence,freeb,neoclassical]" pytest pytest-cov \
             jax==0.10.1 jaxlib==0.10.1 scipy==1.16.0 solvax==0.26.0 \
             booz_xform_jax==0.4.0 virtual-casing-jax==0.0.8 \
-            essos==0.17 neo-jax==1.0.2 gkx==2.4.0
+            essos==0.19.0 neo-jax==1.0.2 gkx==2.4.0
           python -m pip check
           python -c "import essos, gkx, virtual_casing_jax, neo_jax"
       - name: Check real integration calls and derivatives

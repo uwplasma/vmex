@@ -15,6 +15,7 @@ run-on-gpu
 free-boundary
 match-phiedge
 use-essos-fields-and-coils
+trace-alpha-particles
 profiles
 scale-a-configuration
 ```
