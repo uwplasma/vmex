@@ -1974,6 +1974,29 @@ def _on_host(fn: Callable, cfg: Any, *args):
         return fn(cfg, *args)
 
 
+@contextlib.contextmanager
+def _forward_trace_context():
+    """Trace like the forward solve: no abstract mesh set.
+
+    ``custom_vjp`` runs a backward rule under an empty abstract mesh, which is
+    part of the jit trace-cache key, so each lane the forward solve had
+    already compiled (the free-boundary anchor's bulk blocks and edge
+    response) compiled again in the backward pass.  Values are unchanged.
+    """
+    from jax._src import config as jax_config
+
+    state = getattr(jax_config, "abstract_mesh_context_manager", None)
+    unset = getattr(getattr(jax_config, "config_ext", None), "unset", None)
+    if state is None or unset is None:
+        yield
+        return
+    previous = state.swap_local(unset)
+    try:
+        yield
+    finally:
+        state.set_local(previous)
+
+
 @functools.lru_cache(maxsize=2 * _CONFIG_CANON_MAX)
 def _host_callable(fn: Callable, cfg: Any) -> Callable:
     """Stable-identity host callback ``fn(cfg, *args)`` for ``pure_callback``.

@@ -678,8 +678,10 @@ def _solve_fwd(params, field_parameters, cfg):
 
 def _solve_bwd(cfg, saved, state_bar):
     icfg = cfg.implicit
-    with im._device_context(icfg):
-        saved, state_bar = im._device_pin(icfg, (saved, state_bar))
+    with im._device_context(icfg), im._forward_trace_context():
+        # Committed like the forward anchor's arguments, so its lanes are reused.
+        saved, state_bar = im.commit_to_single_device(
+            im._device_pin(icfg, (saved, state_bar)))
         return _solve_bwd_impl(cfg, saved, state_bar)
 
 
@@ -1374,8 +1376,10 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
         """Preconditioner at the iterate ``z_at``: bulk factors + coupling."""
         at = iterate_state(z_at)
         bsqvac = jax.lax.stop_gradient(cfg.vacuum_program.bsq(at, rt, field))
+        # Committed like the backward pass's arguments: one executable.
         lower, diagonal, upper, row_scale, column_scale = _frozen_bulk_blocks(
-            params, field_parameters, at, rcon0, zcon0, mask, z_at, bsqvac,
+            *im.commit_to_single_device((params, field_parameters, at, rcon0,
+                                         zcon0, mask, z_at, bsqvac)),
             cfg=cfg, probe_chunk_size=chunk)
         factors = _anchor_factor(lower, diagonal, upper, row_scale,
                                  column_scale)
