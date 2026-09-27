@@ -20,7 +20,7 @@ from vmex.core.input import UnsupportedInputModeError, VmecInput
 
 REPO = Path(__file__).resolve().parents[1]
 DATA = REPO / "examples" / "data"
-DECKS = sorted(DATA.glob("input.*"))
+DECKS = sorted(path for path in DATA.glob("input.*") if not path.name.startswith("input.mirror_"))  # &MIRROR decks: tests/mirror
 FIXTURES = Path(__file__).parent / "data"
 
 assert DECKS, f"no input decks found under {DATA}"
