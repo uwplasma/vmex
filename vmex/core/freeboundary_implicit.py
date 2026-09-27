@@ -46,7 +46,6 @@ from .freeboundary import (
 )
 from .errors import VmecConvergenceError, VmecError
 from .input import VmecInput
-from .._compat import _relieve_map_pressure
 from .solver import SpectralState, evaluate_forces
 
 Array = Any
@@ -362,7 +361,6 @@ def _host_solve_and_mask(
     cfg, params_np, field_parameters_np, *, error_on_no_convergence=True,
 ):
     """Run the callback on the implicit config's explicitly selected device."""
-    _relieve_map_pressure(jax)
     with im._device_context(cfg.implicit):
         return _host_solve_and_mask_impl(
             cfg, params_np, field_parameters_np,

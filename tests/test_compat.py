@@ -304,12 +304,20 @@ def test_map_pressure_releases_executables_once_per_headroom(monkeypatch, tmp_pa
     assert _compat._relieve_map_pressure(fake) is False          # not Linux
 
 
-def test_map_count_reads_this_process():
+def test_map_count_reads_this_process_and_every_compile_checks_it(monkeypatch):
+    """On Linux the guard runs after every XLA compilation, registered once."""
+    import jax
+
     count = _compat._map_count()
-    if sys.platform.startswith("linux"):
-        assert count is not None and count > 10
-    else:
+    if not sys.platform.startswith("linux"):
         assert count is None
+        return
+    assert count > 10
+    calls = []
+    monkeypatch.setattr(_compat, "_relieve_map_pressure", lambda: calls.append(1))
+    _compat._configure_jax_environment()                     # idempotent
+    jax.jit(lambda x: x * 3.0 + len(calls))(1.0).block_until_ready()
+    assert len(calls) == 1
 
 
 def test_cache_machine_fingerprint_shape_and_stability():

@@ -551,12 +551,12 @@ def _relieve_map_pressure(jax_module: Any = None) -> bool:
     at Linux's per-process ``vm.max_map_count`` (65530 by default on most
     clusters) every further ``mmap`` fails, so the next compile or load
     fails ("LLVM compilation error: Cannot allocate memory", "Failed to
-    materialize symbols") or aborts the process.  Called at safe points (a
-    solve's entry, a host callback's entry), this clears JAX's executable
-    caches once the count passes half the limit, and again only after
-    another quarter of growth, so a working set near the limit degrades to
-    recompiling instead of thrashing.  Never while a vmex prefetch thread
-    compiles.  Returns True when it released.
+    materialize symbols") or aborts the process.  Run after every XLA
+    compilation or cache load (a JAX monitoring listener), this clears JAX's
+    executable caches once the count passes half the limit, and again only
+    after another quarter of growth, so a working set near the limit
+    degrades to recompiling instead of thrashing.  Never while a vmex
+    prefetch thread compiles.  Returns True when it released.
     """
     import threading
 
@@ -569,8 +569,7 @@ def _relieve_map_pressure(jax_module: Any = None) -> bool:
     if (count is None or count < _MAP_PRESSURE * limit
             or count < _MAP_STATE["floor"] + _MAP_HEADROOM * limit):
         return False
-    if any("prefetch" in t.name and t.is_alive()
-           for t in threading.enumerate() if t is not threading.current_thread()):
+    if any("prefetch" in t.name and t.is_alive() for t in threading.enumerate()):
         return False
     import gc
 
@@ -592,6 +591,11 @@ def _relieve_map_pressure(jax_module: Any = None) -> bool:
             "set by an administrator) avoids the recompilation.",
             RuntimeWarning, stacklevel=2)
     return True
+
+
+def _after_compile(event: str, *_: Any, **__: Any) -> None:
+    if event == "/jax/core/compile/backend_compile_duration":
+        _relieve_map_pressure()
 
 
 def _configure_jax_environment() -> None:
@@ -688,6 +692,11 @@ def _configure_jax_environment() -> None:
         # The persistent cache is configured through jax.config only, never
         # exported: a job launched from this process may run on another node.
         _apply_compilation_cache_policy(jax)
+        if os.path.exists(_MAP_LIMIT_FILE) and not _MAP_STATE.get("listening"):
+            from jax import monitoring
+
+            monitoring.register_event_duration_secs_listener(_after_compile)
+            _MAP_STATE["listening"] = True
     except Exception:
         # Never block a vmex import over environment tuning (e.g. docs
         # builds with a mocked JAX): core.solver enforces the hard

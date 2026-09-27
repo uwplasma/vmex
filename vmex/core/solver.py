@@ -71,8 +71,6 @@ import jax
 
 jax.config.update("jax_enable_x64", True)  # float64 mandatory (§7.7)
 
-from .._compat import _relieve_map_pressure
-
 
 def _harden_compilation_cache() -> None:
     """Re-apply the persistent-cache policy at ``core.solver`` import.
@@ -2808,7 +2806,6 @@ def solve(
     :func:`~vmex.core.polish.polished_wout_ns` mesh).  ``polish``
     remains a backward-compatible alias.
     """
-    _relieve_map_pressure(jax)
     if resolution is None and isinstance(source, VmecInput):
         resolution = resolution_from_input(source)
     if resolution is None:
