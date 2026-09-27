@@ -1136,3 +1136,27 @@ def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue(_module_jit_enabl
     assert result.evaluated.final_linear_residual < 1.0e-8
     assert float(result.evaluated.variational.maximum) <= config.ftol
     assert float(result.evaluated.staggered_weak_force.maximum) <= config.ftol
+
+
+def test_mirror_deck_solve_reproduces_the_exact_vacuum_mirror(tmp_path) -> None:
+    """``&MIRROR`` deck -> vmex CLI -> MOUT, against the exact vacuum field."""
+
+    from pathlib import Path
+
+    from vmex.core.cli import main
+    from vmex.mirror import MirrorInput, read_mout
+    from vmex.mirror.analytic import AxisymmetricPolynomialMirror
+
+    deck = Path(__file__).resolve().parents[2] / "examples" / "data" / "input.mirror_axisymmetric"
+    inp = MirrorInput.from_file(deck)
+    assert MirrorInput.from_file(inp.to_file(tmp_path / "input.copy")).to_file(tmp_path / "again").read_text() == (
+        tmp_path / "input.copy"
+    ).read_text()
+    assert main([str(deck), "--outdir", str(tmp_path), "--quiet"]) == 0
+    mout = read_mout(tmp_path / "mout_mirror_axisymmetric.nc")
+    exact = AxisymmetricPolynomialMirror(1.0, 1.0, 0.5).axis_field(np.asarray(mout.z))
+    assert mout.converged and mout.variational_max <= 1.0e-12
+    # Exact field to 8.0e-4 at ns=7 and six elements (the radial difference error).
+    np.testing.assert_allclose(np.asarray(mout.mod_b)[0, 0], exact, rtol=1.0e-3)
+    with pytest.raises(ValueError, match="unknown &MIRROR variable"):
+        MirrorInput.from_text("&MIRROR\n  NFP = 2\n/\n")

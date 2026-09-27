@@ -185,3 +185,26 @@ def test_sflm_labels_sections_and_field_line_error_have_expected_order() -> None
     coarse = float(tangent_error(0.05))
     fine = float(tangent_error(0.025))
     assert fine < 0.27 * coarse
+
+
+def test_circular_coils_match_biot_savart_and_the_on_axis_formula() -> None:
+    from vmex.mirror.analytic import CircularCoils
+
+    coils = CircularCoils(jnp.array([0.9, 0.5]), jnp.array([-1.0, 1.0]), jnp.array([2.0e5, -1.0e5]))
+    points = np.array([[0.1, 0.2, 0.3], [0.0, 0.0, 0.5], [1.0e-6, 0.0, 0.2], [0.8, 0.0, -1.05]])
+    phi = np.linspace(0.0, 2.0 * np.pi, 4000, endpoint=False)
+
+    def biot_savart(point):  # trapezoid rule, spectrally exact on a smooth loop
+        total = np.zeros(3)
+        for radius, height, current in ((0.9, -1.0, 2.0e5), (0.5, 1.0, -1.0e5)):
+            wire = np.stack((radius * np.cos(phi), radius * np.sin(phi), np.full_like(phi, height)), axis=1)
+            tangent = np.stack((-np.sin(phi), np.cos(phi), 0.0 * phi), axis=1) * radius * (phi[1] - phi[0])
+            offset = point - wire
+            total += 1.0e-7 * current * np.sum(np.cross(tangent, offset) / np.linalg.norm(offset, axis=1)[:, None] ** 3, 0)
+        return total
+
+    expected = np.array([biot_savart(point) for point in points])
+    np.testing.assert_allclose(np.asarray(coils(jnp.asarray(points))), expected, rtol=0.0, atol=1.0e-12)
+    np.testing.assert_allclose(float(coils.axis_field(0.5)), expected[1, 2], rtol=1.0e-13)
+    divergence = jnp.trace(jax.jacfwd(coils)(jnp.array([0.1, 0.2, 0.3])))
+    assert abs(float(divergence)) < 1.0e-12

@@ -62,6 +62,11 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
         "mirror_ratio_diagnostics",
         "MirrorRatioDiagnostics",
         "MirrorWell",
+        "MirrorInput",
+        "MirrorSolution",
+        "solve_mirror",
+        "solve_mirror_beta_scan",
+        "CircularCoils",
     }
     internal = {
         "ChebyshevBasis",
@@ -71,7 +76,7 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
     }
     assert required <= set(mirror_api.__all__)
     assert internal.isdisjoint(mirror_api.__all__)
-    assert len(mirror_api.__all__) == 33
+    assert len(mirror_api.__all__) == 38
     assert mirror_api.solve_fixed_boundary.__module__ == "vmex.mirror.splines"
 
 
