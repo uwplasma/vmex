@@ -172,7 +172,9 @@ jobs:
       - &xla-collect
         id: xla-collect
         name: Keep the XLA cache entries this run used
-        if: success() && (github.event_name == 'push' || github.head_ref == 'ci/speed-caches') && steps.xla-restore.outputs.cache-hit != 'true'
+        # Only main writes: one writer per key, and pull requests do not spend
+        # the 10 GB repository cache budget on entries no other ref can read.
+        if: success() && github.event_name == 'push' && steps.xla-restore.outputs.cache-hit != 'true'
         run: python tools/ci_compile_cache.py collect "$VMEX_CI_COMPILATION_CACHE" >> "$GITHUB_OUTPUT"
       - &xla-save
         if: success() && steps.xla-collect.outputs.entries > 0

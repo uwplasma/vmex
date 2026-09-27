@@ -48,6 +48,25 @@ main's after the merges.
      compilation cache restored by `actions/cache`: populate it once per key,
      then open it read-only in test workers, which avoids the eviction-lock
      hang that got `VMEX_COMPILATION_CACHE` disabled.
+   - **Done (#466, 2026-09-27).** Measured first: install was 0.5 min of
+     every job (16 job-min a run) and the rest is the test step, most of it
+     XLA compilation. Installs now use `uv` without an Actions cache (0.06
+     min a job; the pip caches were 1.1 GB per `pyproject.toml` hash and had
+     filled the 10 GB repository budget). Each test lane restores a
+     compilation cache keyed on lane, CPU model and flags, Python, jaxlib
+     and the `vmex/`+`tests/` hash, with the newest same-CPU cache as the
+     fallback; `tests/conftest.py` gives every pytest process a private
+     hard-linked copy opened with eviction off (no lock, no in-place
+     rewrite; subprocess tests still get vmex's default, off); only main
+     saves, keeping just the entries its run read or wrote
+     (`tools/ci_compile_cache.py`). Measured on the full matrix: before
+     231.8 job-min, cold 228.8, warm 175.8 (-24%). Only 11 of 27 lanes
+     hit on the warm run, because GitHub assigned six CPU models (EPYC 7763,
+     9V74, 9V45; Xeon 8573C, 6973P-C) and a lane only reuses programs built
+     on its own CPU; the lanes that hit went 71.1 -> 40.2 job-min (-43%;
+     a-core 7.9 -> 3.8, parity-d 11.5 -> 4.8). The hit rate grows as main
+     fills the (lane, CPU) pairs. Caches are 2-67 MB a lane (under 1 GB for
+     all 27). Coverage selectors and the changed-line gate are unchanged.
 1b. **Coherent dependency floors across the stack (maintainer, 2026-09-23).**
    A user should never have to upgrade packages by hand after
    `pip install "vmex[all]"`. Reported on 0.11.1: `pip install -e .` into an
