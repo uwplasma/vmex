@@ -363,9 +363,17 @@ validation. See the [mirror guide](https://vmex.readthedocs.io/en/latest/howto/m
 A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged; it does not bound the continuous
 force error `J × B − ∇p`. Optional polishing (`--polish`, or `polish=True`) re-solves that force on
 a native quintic-spline representation — constrained Gauss–Newton steps with force-driven knot
-insertion, then one exact-Hessian Newton step — and certifies it with an independent oracle. It
-covers fixed-boundary axisymmetric decks with prescribed pressure and iota; a non-axisymmetric
-polish is future work.
+insertion, then one exact-Hessian Newton step — and certifies it with an independent oracle. To
+request it from a deck, put this line at the top of the INDATA file (VMEC2000 reads it as a
+comment; VMEX runs the native polish after the solve):
+
+```fortran
+! VMEX: POLISH_FORCE_BALANCE = .TRUE.
+```
+
+It currently applies to axisymmetric fixed-boundary decks with prescribed pressure and iota
+(`NCURR = 0`, `GAMMA = 0`, `LASYM = F`); any other deck with the directive stops with an input
+error. Non-axisymmetric polishing is a research lane.
 
 ![Force error of a shaped finite-pressure tokamak before and after polishing](docs/_static/figures/readme_polish_before_after.webp)
 

@@ -65,7 +65,6 @@ ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move m
 MINIMUM_MPOL = 5
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 SEED_PERTURBATION = 0.05
-POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
 
 # Verification solve of the optimized boundary:
 FINAL_NS = 71
@@ -217,8 +216,7 @@ final_input = replace(
     niter_array=np.array([FINAL_NITER]))
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution,
-    verbose=not ci_smoke, raise_on_max_iterations=True,
-    polish_force_balance=POLISH_FORCE_BALANCE)
+    verbose=not ci_smoke, raise_on_max_iterations=True)
 qi_final = report("final", final_equilibrium)["constructed QI"]
 qi_validation = ConstructedQIResidual(SURFACES, **VALIDATION_OPTIONS)
 print(f"QI total {qi_final:.3e}; independent fine-grid validation "

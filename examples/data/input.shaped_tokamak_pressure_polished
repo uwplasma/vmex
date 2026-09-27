@@ -1,4 +1,6 @@
-! VMEX: POLISH_FORCE_BALANCE = .TRUE.
+! Current-constrained (NCURR = 1) case of the archived strong-force benchmark records.
+! The native polish needs NCURR = 0; examples/force_balance_polishing.py polishes
+! input.shaped_tokamak_pressure instead.
 &INDATA
   MGRID_FILE = 'NONE'
   DELT = 0.9

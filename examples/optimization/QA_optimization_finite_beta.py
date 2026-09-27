@@ -87,7 +87,6 @@ MINIMUM_MPOL = 5
 FINAL_NS = 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
-POLISH_FORCE_BALANCE = False      # True polishes only the final saved state
 
 # Every output file name contains this:
 OUTPUT_NAME = "QA_finite_beta_optimized"
@@ -208,8 +207,7 @@ final_input = replace(
     niter_array=np.array([FINAL_NITER]))
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution,
-    verbose=not ci_smoke, raise_on_max_iterations=True,
-    polish_force_balance=POLISH_FORCE_BALANCE)
+    verbose=not ci_smoke, raise_on_max_iterations=True)
 
 ### Print, plot and save ######################################################
 

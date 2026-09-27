@@ -590,7 +590,8 @@ def test_scalar_optimization_examples_expose_one_adjoint_lane(case, finite_beta)
     text = (EXAMPLES / "optimization" / f"{case}_optimization{suffix}.py").read_text()
     assert "_scalar_driver" not in text
     assert "objective_terms" in text
-    assert "POLISH_FORCE_BALANCE = False" in text
+    # polishing is axisymmetric-only; these non-axisymmetric scripts must not offer it
+    assert "POLISH_FORCE_BALANCE" not in text
     # one stem drives input., wout_ and the monitor files
     assert f'OUTPUT_NAME = "{case}_' in text
     assert 'to_indata(f"input.{OUTPUT_NAME}")' in text

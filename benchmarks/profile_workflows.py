@@ -246,7 +246,7 @@ def _wf_fixed_multigrid() -> tuple[dict, dict]:
 def _wf_fixed_polished() -> tuple[dict, dict]:
     from vmex.core.multigrid import solve_multigrid
 
-    inp = _read_input("input.shaped_tokamak_pressure_polished")
+    inp = _read_input("input.shaped_tokamak_pressure")
 
     def solve():
         result = solve_multigrid(inp, polish_force_balance=True)
@@ -758,7 +758,7 @@ WORKFLOWS: dict[str, Workflow] = {
                    _wf_fixed_multigrid, ("input.cth_like_fixed_bdy",)),
     "F3": Workflow("F3", "fixed-boundary polished value",
                    _wf_fixed_polished,
-                   ("input.shaped_tokamak_pressure_polished",)),
+                   ("input.shaped_tokamak_pressure",)),
     "F4": Workflow("F4", "implicit scalar value + gradient",
                    _wf_scalar_gradient, ("input.li383_low_res",)),
     "F6": Workflow("F6", "hot-restart parameter scan",
