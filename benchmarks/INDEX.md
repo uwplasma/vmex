@@ -12,8 +12,8 @@ uncited records are reachable through git history: link them with a
 permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
-39 committed artifacts: 34 standalone records and 1 grouped directory holding
-5 files. 35 of the 35 entries below are cited by a page, a test or another
+31 committed artifacts: 26 standalone records and 1 grouped directory holding
+5 files. 27 of the 27 entries below are cited by a page, a test or another
 script; 0 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -42,23 +42,15 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_free_boundary_axisymmetric.json` |  | `d4f56dae` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/howto/mirror-machines.md`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py`, `tests/test_capability_docs.py` |
 | `benchmarks/mirror_free_boundary_nonaxisymmetric.json` |  | `f9eb6a44` |  | `benchmarks/capabilities.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-boundary-conditions.md`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
-| `benchmarks/polish3d_tuning.md` |  |  |  | `docs/explanation/validation.md`, `docs/reference/api/advanced.rst`, `vmex/core/polish_driver.py` |
-| `benchmarks/polish_cost_office.json` | `benchmarks/polish_cost.py` | `529f1789` |  | `docs/reference/performance.rst` |
-| `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
-| `benchmarks/polish_force_error_solovev_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
-| `benchmarks/polish_implicit_m4.json` | `benchmarks/polish_implicit.py` | `e176b1ac` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
-| `benchmarks/polish_memory_w7x.json` | `benchmarks/polish_memory.py` | `529f1789` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
-| `benchmarks/polish_preconditioner_m4.json` | `benchmarks/polish_preconditioner.py` | `7bb306e0` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/iteration.rst`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
 | `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `README.md`, `docs/reference/optimization.rst`, `plan.md` |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
 | `benchmarks/qi_optimization_profile_office.json` | `benchmarks/qi_optimization_profile.py` | `3ee6ca58` | 2026-09-14 | `docs/reference/objectives.rst`, `examples/optimization/QI_optimization.py` |
 | `benchmarks/review_20260913.json` |  | `f09288b3` | 2026-09-13 | `benchmarks/review_20260913_equilibrium.py`, `benchmarks/review_20260913_exterior.py`, `docs/explanation/nestor-vacuum.rst`, `plan.md` |
 | `benchmarks/single_stage_profile_m4.json` | `benchmarks/single_stage_profile.py` | `50814b65` | 2026-09-13 | `plan.md` |
-| `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json`, `docs/explanation/high-order-force-balance.rst`, `tests/test_performance_docs.py` |
+| `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_m4.json` | `benchmarks/strong_force.py` | `9481f64a` |  | `docs/reference/performance.rst` |
-| `benchmarks/strong_root_m4.json` | `benchmarks/strong_root.py` | `0d98b9d8` |  | `docs/explanation/high-order-force-balance.rst` |
 
 ## Grouped directories
 

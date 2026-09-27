@@ -995,12 +995,7 @@ def solve_file(
     *,
     polish: bool | str | None = None,
     polish_config: Any = None,
-    polish_tol: float | None = None,
     polish_fail: str | None = None,
-    polish_degree: int | None = None,
-    polish_max_iter: int | None = None,
-    polish_spans: int | None = None,
-    polish_budget: float | None = None,
     write_wout: bool = True,
     outdir=None,
     **solve_kwargs,
@@ -1014,19 +1009,14 @@ def solve_file(
 
     ``polish_fail`` selects what a failed polish does: ``"error"`` raises
     (driver default), ``"fallback"`` returns the unpolished state, ``"warn"``
-    does the same and emits a :class:`RuntimeWarning`.  ``polish_tol``,
-    ``polish_degree``, ``polish_max_iter``, ``polish_spans``, and
-    ``polish_budget`` (the wall-clock ceiling ``polish="auto"`` commits to
-    before declining) override
-    the matching :class:`~vmex.core.polish_driver.PolishConfig` fields, with
-    the documented precedence ``CLI flag > Python keyword > file directive >
-    package default``; an explicit ``polish_config`` wins over the scalar
-    overrides entirely.
+    does the same and emits a :class:`RuntimeWarning`, with the documented
+    precedence ``CLI flag > Python keyword > file directive > package
+    default``; an explicit ``polish_config`` wins over ``polish_fail``.
 
     ``write_wout=True`` writes ``wout_<case>.nc`` beside the input (or into
     ``outdir``) — the same output contract as ``vmex <input>``.  When
     polishing succeeded the file samples the certified native state on the
-    denser :func:`~vmex.core.polish_driver.polished_wout_ns` export mesh.  Free-boundary decks solve
+    denser :func:`~vmex.core.polish.polished_wout_ns` export mesh.  Free-boundary decks solve
     through the free-boundary ladder and reject polish requests, matching the
     fixed-boundary-only scope of the polishing lane.
 
@@ -1040,10 +1030,7 @@ def solve_file(
 
     request = read_input_request(path)
     options, sources = resolve_run_options(
-        request.options, polish=polish, polish_tol=polish_tol,
-        polish_fail=polish_fail, polish_degree=polish_degree,
-        polish_max_iter=polish_max_iter, polish_spans=polish_spans,
-        polish_budget=polish_budget,
+        request.options, polish=polish, polish_fail=polish_fail,
     )
     config = polish_config_from_options(options, polish_config)
     inp = request.input
@@ -1087,15 +1074,9 @@ def solve_file(
         # "fallback"/"warn" mapped onto the driver's return_unpolished, so a
         # failed polish arrives here as an unconverged report rather than an
         # exception -- no second solve, the legacy state is the checkpoint.
-        # An AUTO decline is exempt: nothing was attempted, so nothing
-        # failed, and it announces itself on its own terms.
-        from .printing import POLISH_AUTO_DECLINED
-
         if (options.polish_fail == "warn"
                 and result.polish_report is not None
-                and not bool(result.polish_report.converged)
-                and result.polish_report.termination_reason
-                != POLISH_AUTO_DECLINED):
+                and not bool(result.polish_report.converged)):
             import warnings
 
             warnings.warn(

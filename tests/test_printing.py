@@ -172,70 +172,11 @@ def test_compile_notice_variants():
 
 def test_polish_banner_states_the_resolved_config():
     banner = printing.polish_banner(
-        mode="auto", degree=3, spans=None, ns=31,
-        tolerance=1e-3, certificate_tolerance=1e-2, max_iterations=80)
+        mode="auto", degree=5, ns=31, force_tolerance=1e-5, stationarity_tolerance=1e-8)
     assert "BEGIN FORCE POLISHING" in banner
-    assert "MODE = AUTO" in banner and "DEGREE = 3" in banner
-    assert "SPANS = AUTO" in banner and "NS =   31" in banner
-    assert "TOL = 1.000E-03" in banner
-    assert "CERTIFICATE TOL = 1.000E-02" in banner
-    assert "MAX ITER =   80" in banner
-    explicit = printing.polish_banner(
-        mode="on", degree=5, spans=16, ns=51,
-        tolerance=1e-2, certificate_tolerance=1e-2, max_iterations=40)
-    assert "MODE = ON" in explicit and "SPANS = 16" in explicit
-
-
-def test_polish_screen_rows():
-    assert printing.polish_screen_line(0, 1.23e-1, 4.5, 1e-3) == (
-        "    0  1.23E-01  4.50E+00  1.00E-03\n"
-    )
-    accepted = printing.polish_screen_line(
-        3, 2.3e-2, 1.1, 2.5e-4, ratio=0.98, linear_iterations=12)
-    assert accepted == "    3  2.30E-02  1.10E+00  2.50E-04  9.80E-01      12\n"
-    rejected = printing.polish_screen_line(
-        4, 2.3e-2, 1.1, 1e-3, ratio=-0.5, linear_iterations=30,
-        accepted=False)
-    assert rejected.endswith("  rejected\n")
-
-
-def test_polish_progress_line_shows_elapsed_work_and_last_cost():
-    """The live line has to answer 'is it moving' without a history table."""
-
-    line = printing.polish_progress_line(
-        elapsed_seconds=3 * 3600 + 25 * 60 + 7.5,
-        products=450, product_budget=900, cost=4.1234e4)
-    assert line.startswith("  polish 03:25:07")
-    assert "450/900 linear products" in line
-    assert "50.0%" in line
-    assert "4.123E+04" in line
-    # A zero budget must not divide by zero on the way to the console.
-    assert "0/1 linear products" in printing.polish_progress_line(
-        elapsed_seconds=0.0, products=0, product_budget=0, cost=float("nan"))
-
-
-def test_polish_cost_decline_states_the_measurement_and_every_override():
-    """A refusal has to be arguable: numbers first, then the knobs."""
-
-    text = printing.polish_cost_decline(
-        seconds_per_product=42.4, products=48000,
-        predicted_seconds=2035200.0, budget_seconds=3600.0,
-        chart_size=10573, residual_rows=135792)
-    assert "DECLINED ON PREDICTED COST" in text
-    assert "10573 unknowns" in text and "135792 rows" in text
-    assert "42.4 s" in text
-    assert "23.6 days" in text and "60 min" in text
-    assert "unpolished" in text
-    for knob in ("POLISH_BUDGET", "POLISH_MAX_ITER", "POLISH = .TRUE."):
-        assert knob in text
-    # Every magnitude the clock has to render, so no branch reaches a user
-    # for the first time in production.
-    for seconds, expect in ((12.5, "12.5 s"), (600.0, "10 min"),
-                            (7200.0, "2.0 h"), (864000.0, "10.0 days")):
-        rendered = printing.polish_cost_decline(
-            seconds_per_product=1.0, products=1, predicted_seconds=seconds,
-            budget_seconds=seconds, chart_size=1, residual_rows=1)
-        assert expect in rendered
+    assert "MODE = AUTO" in banner and "DEGREE = 5" in banner and "NS =   31" in banner
+    assert "FORCE TOL = 1.000E-05" in banner
+    assert "STATIONARITY TOL = 1.000E-08" in banner
 
 
 def test_polish_certificate_summary_names_failed_checks():
@@ -283,6 +224,7 @@ def test_polish_certificate_summary_without_measures_is_unchanged():
         1.281e-2, 1.807e-3, 1e-2, verdict="CERTIFIED") == (
         "\n POLISH CERTIFICATE : EPS-F  1.281E-02 ->  1.807E-03"
         "  (TOLERANCE  1.000E-02)\n POLISH CERTIFIED\n")
+    assert "TOLERANCE" not in printing.polish_certificate_summary(1.0, 0.5, None, verdict="CERTIFIED")
 
 
 def test_force_error_rows_render_single_and_paired_states():

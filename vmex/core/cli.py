@@ -291,8 +291,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=("auto", "true", "false"),
         help=(
-            "Force-balance polishing after the finest fixed-boundary stage: "
-            "'auto', 'true' (the bare flag), or 'false'. Overrides the "
+            "Force-balance polishing after the finest stage (axisymmetric "
+            "fixed-boundary decks with NCURR=0, GAMMA=0): 'auto' (polish when "
+            "supported), 'true' (the bare flag), or 'false'. Overrides the "
             "!@VMEX POLISH input directive; the default follows the file."
         ),
     )
@@ -304,9 +305,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable polishing regardless of the input directive.",
     )
     p.add_argument(
-        "--polish-tol", type=float, default=None,
-        help="Override the polish force tolerance (PolishConfig.tolerance).")
-    p.add_argument(
         "--polish-fail",
         type=str,
         default=None,
@@ -316,28 +314,6 @@ def build_parser() -> argparse.ArgumentParser:
             "state (fallback), or return it with a warning (warn)."
         ),
     )
-    p.add_argument(
-        "--polish-degree", type=int, default=None, choices=(3, 5, 7),
-        help="Radial B-spline degree of the polished representation.")
-    p.add_argument(
-        "--polish-max-iter", type=int, default=None,
-        help=(
-            "Cap the polish Gauss-Newton iterations "
-            "(PolishConfig.max_nonlinear_iterations)."
-        ))
-    p.add_argument(
-        "--polish-spans", type=int, default=None,
-        help=(
-            "Radial B-spline spans of the polished representation "
-            "(default: derived from the solve resolution)."
-        ))
-    p.add_argument(
-        "--polish-budget", type=float, default=None, metavar="SECONDS",
-        help=(
-            "Wall-clock ceiling --polish auto will commit to before it "
-            "declines and returns the equilibrium unpolished "
-            "(PolishConfig.auto_budget_seconds). --polish true ignores it."
-        ))
     p.add_argument("--ftol", type=float, default=None, help="Override the final-stage FTOL_ARRAY tolerance.")
     p.add_argument("--max-iter", type=int, default=None, help="Override the final-stage NITER_ARRAY iteration cap.")
     p.add_argument(
@@ -523,20 +499,9 @@ def _resolve_polish_cli(args, file_options):
     options, sources = resolve_run_options(
         file_options,
         polish=polish,
-        polish_tol=args.polish_tol,
         polish_fail=args.polish_fail,
-        polish_degree=args.polish_degree,
-        polish_max_iter=args.polish_max_iter,
-        polish_spans=args.polish_spans,
-        polish_budget=args.polish_budget,
     )
-    cli_supplied = {
-        "polish": args.polish, "polish_tol": args.polish_tol,
-        "polish_fail": args.polish_fail, "polish_degree": args.polish_degree,
-        "polish_max_iter": args.polish_max_iter,
-        "polish_spans": args.polish_spans,
-        "polish_budget": args.polish_budget,
-    }
+    cli_supplied = {"polish": args.polish, "polish_fail": args.polish_fail}
     sources = {name: ("cli" if cli_supplied[name] is not None else origin)
                for name, origin in sources.items()}
     return options, sources
@@ -738,12 +703,13 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path,
         # it (see polished_wout_state).  Export the native state on the
         # denser certifiable mesh instead.  Unpolished results (and failed
         # polishes) take the unchanged path above.
-        from .polish_driver import polished_wout_state
+        from .polish import polished_wout_input, polished_wout_state
 
         state = polished_wout_state(
             result.native_equilibrium, inp,
             solve_ns=int(np.shape(np.asarray(result.state.R_cos))[0]),
         )
+        inp = polished_wout_input(result.native_equilibrium, inp)
     wout = wout_from_state(
         inp=inp,
         state=state,

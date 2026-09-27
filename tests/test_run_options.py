@@ -38,19 +38,11 @@ DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 def test_all_directives_parse_together_with_inline_comments():
     options = parse_indata_run_options(
-        "!@VMEX POLISH = AUTO\n"
-        "  ! @ VMEX  POLISH_TOL = 2.5E-4   ! tighter than default\n"
+        "  ! @ VMEX  POLISH = AUTO   ! polish when supported\n"
         "!@vmex polish_fail = FALLBACK\n"
-        "!@VMEX POLISH_DEGREE = 5\n"
-        "!@VMEX POLISH_MAX_ITER = 40\n"
-        "!@VMEX POLISH_SPANS = 16\n"
-        "!@VMEX POLISH_BUDGET = 7200\n"
         "&INDATA\nMPOL = 3\n/\n"
     )
-    assert options == RunOptions(
-        polish="auto", polish_tol=2.5e-4, polish_fail="fallback",
-        polish_degree=5, polish_max_iter=40, polish_spans=16,
-        polish_budget=7200.0)
+    assert options == RunOptions(polish="auto", polish_fail="fallback")
 
 
 def test_no_directives_means_package_defaults():
@@ -79,18 +71,9 @@ def test_consistent_repetition_is_allowed_and_conflict_is_an_error():
     "line, message",
     [
         ("!@VMEX POLISH = sometimes", "AUTO, TRUE, or FALSE"),
-        ("!@VMEX POLISH_TOL = tight", "real number"),
-        ("!@VMEX POLISH_TOL = -1.0", "positive"),
-        ("!@VMEX POLISH_DEGREE = 4", "3, 5, 7"),
-        ("!@VMEX POLISH_DEGREE = five", "integer"),
         ("!@VMEX POLISH_FAIL = explode", "error"),
-        ("!@VMEX POLISH_MAX_ITER = 0", "positive"),
-        ("!@VMEX POLISH_MAX_ITER = soon", "integer"),
-        ("!@VMEX POLISH_SPANS = -2", "positive"),
-        ("!@VMEX POLISH_SPANS = few", "integer"),
-        ("!@VMEX POLISH_BUDGET = soon", "real number"),
-        ("!@VMEX POLISH_BUDGET = 0", "positive"),
         ("!@VMEX POLISH_MODE = auto", "unknown VMEX directive"),
+        ("!@VMEX POLISH_TOL = 1e-5", "unknown VMEX directive"),
     ],
 )
 def test_invalid_directives_fail_with_named_errors(line, message):
@@ -107,9 +90,7 @@ def test_quoted_exclamation_marks_do_not_become_directives():
 
 
 def test_directive_round_trip_through_format():
-    options = RunOptions(polish="auto", polish_tol=1e-8, polish_fail="warn",
-                         polish_degree=7, polish_max_iter=40, polish_spans=16,
-                         polish_budget=1800.0)
+    options = RunOptions(polish="auto", polish_fail="warn")
     text = format_indata_directives(options) + "&INDATA\nMPOL = 3\n/\n"
     assert parse_indata_run_options(text) == options
     assert format_indata_directives(RunOptions()) == ""
@@ -122,10 +103,10 @@ def test_directive_round_trip_through_format():
 
 def test_json_vmex_section_round_trip(tmp_path):
     payload = {"mpol": 4, "ntor": 0,
-               "_vmex": {"polish": "auto", "polish_degree": 5}}
+               "_vmex": {"polish": "auto", "polish_fail": "warn"}}
     physics, options = strip_vmex_json(payload)
     assert "_vmex" not in physics and physics["mpol"] == 4
-    assert options == RunOptions(polish="auto", polish_degree=5)
+    assert options == RunOptions(polish="auto", polish_fail="warn")
 
     path = tmp_path / "case.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -153,74 +134,37 @@ def test_json_vmex_section_rejects_bad_content(section, message):
 
 
 def test_precedence_python_over_file_over_default():
-    file_options = RunOptions(polish="auto", polish_degree=5)
+    file_options = RunOptions(polish="auto", polish_fail="warn")
     resolved, sources = resolve_run_options(file_options)
     assert resolved == file_options
-    assert sources["polish"] == "file" and sources["polish_tol"] == "default"
+    assert sources["polish"] == "file" and sources["polish_fail"] == "file"
 
-    resolved, sources = resolve_run_options(file_options, polish=False,
-                                            polish_tol=1e-6)
-    assert resolved.polish is False and resolved.polish_tol == 1e-6
-    assert resolved.polish_degree == 5          # untouched file value
-    assert sources["polish"] == "python" and sources["polish_degree"] == "file"
-
-
-def test_directive_file_reaches_the_polish_config(tmp_path):
-    """A deck's POLISH_* directives land on the driver PolishConfig fields."""
-    source = tmp_path / "input.knobs"
-    source.write_text(
-        "!@VMEX POLISH = AUTO\n"
-        "!@VMEX POLISH_TOL = 5.0E-3\n"
-        "!@VMEX POLISH_MAX_ITER = 12\n"
-        "!@VMEX POLISH_SPANS = 8\n"
-        + (DATA / "input.solovev").read_text(encoding="utf-8"),
-        encoding="utf-8")
-    request = read_input_request(source)
-    options, sources = resolve_run_options(request.options)
-    assert sources["polish_tol"] == "file"
-    config = polish_config_from_options(options)
-    assert config.tolerance == 5.0e-3
-    assert config.max_nonlinear_iterations == 12
-    assert config.radial_spans == 8
-    # A Python keyword (the CLI passes its flags through the same seam)
-    # overrides the deck for that field only.
-    options, sources = resolve_run_options(request.options, polish_max_iter=30)
-    config = polish_config_from_options(options)
-    assert config.max_nonlinear_iterations == 30
-    assert config.tolerance == 5.0e-3
-    assert sources["polish_max_iter"] == "python"
-    assert sources["polish_spans"] == "file"
+    resolved, sources = resolve_run_options(file_options, polish=False)
+    assert resolved.polish is False and resolved.polish_fail == "warn"
+    assert sources["polish"] == "python" and sources["polish_fail"] == "file"
 
 
 def test_polish_config_mapping_and_explicit_config_priority():
-    from vmex.core.polish_driver import PolishConfig
+    from vmex.core.polish import PolishConfig
 
-    options = RunOptions(polish=True, polish_tol=1e-5, polish_degree=5,
-                         polish_fail="fallback", polish_max_iter=40,
-                         polish_spans=16)
-    config = polish_config_from_options(options)
-    assert config.tolerance == 1e-5
-    assert config.radial_degree == 5
-    assert config.max_nonlinear_iterations == 40
-    assert config.radial_spans == 16
+    config = polish_config_from_options(RunOptions(polish=True, polish_fail="fallback"))
     assert config.fail_policy == "return_unpolished"
-    # Nothing beyond driver defaults requested -> no config object at all,
-    # keeping the plain path identical to before this module existed.
+    # Nothing beyond driver defaults requested -> no config object at all.
     assert polish_config_from_options(RunOptions(polish=True)) is None
-    # An explicit PolishConfig wins over every directive-level scalar.
-    base = PolishConfig(tolerance=3e-3)
-    assert polish_config_from_options(options, base) is base
+    # An explicit PolishConfig wins over the directive.
+    base = PolishConfig(force_tolerance=3e-5)
+    assert polish_config_from_options(RunOptions(polish_fail="warn"), base) is base
 
 
-def test_plain_run_options_do_not_import_polish_driver(monkeypatch):
+def test_plain_run_options_do_not_import_polish(monkeypatch):
     """The default CLI path must not load the optional polishing stack."""
     import builtins
 
     real_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
-        if name.endswith("polish_driver"):
-            raise AssertionError("plain run imported the polishing driver")
+        if name.endswith("polish"):
+            raise AssertionError("plain run imported the polish module")
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
@@ -390,10 +334,9 @@ def test_solve_file_free_boundary_wout_carries_the_coil_metadata(tmp_path, monke
 def test_solve_file_polish_directive_activates_polishing(tmp_path):
     """One documented input runs the whole flow: directive -> polished wout.
 
-    The deck is the fast certified case from the polish suite (solovev at
-    mpol = 3, ns = 5 with the loose validation tolerance); the property under
-    test is that the *file directive alone* turns polishing on, so the
-    explicit PolishConfig only makes the certificate affordable, while the
+    The deck is a small solovev (mpol = 3, ns = 5); the property under test
+    is that the *file directive alone* turns polishing on, so the explicit
+    PolishConfig only keeps a missed tolerance from raising, while the
     activation comes from the ``!@VMEX`` line.
     """
     import dataclasses
@@ -410,13 +353,12 @@ def test_solve_file_polish_directive_activates_polishing(tmp_path):
     source.write_text("!@VMEX POLISH = .TRUE.\n"
                       + physics.read_text(encoding="utf-8"), encoding="utf-8")
 
-    from vmex.core.polish_driver import PolishConfig
+    from vmex.core.polish import PolishConfig
 
-    config = PolishConfig(radial_degree=3, validation_tolerance=3.0)
+    config = PolishConfig(fail_policy="return_unpolished")
     result = vj.solve_file(source, outdir=tmp_path, polish_config=config)
     assert result.converged
     assert result.polish_report is not None
-    assert bool(result.polish_report.converged)
     assert result.polished_state is not None
     assert (tmp_path / "wout_polished_case_directive.nc").exists()
 
@@ -435,7 +377,7 @@ def test_solve_file_directives_reach_driver_once(tmp_path, monkeypatch, mode, ov
     from vmex.core import multigrid
 
     path = tmp_path / "input.directives"
-    path.write_text(f"!@VMEX POLISH = {mode}\n!@VMEX POLISH_TOL = 2e-5\n"
+    path.write_text(f"!@VMEX POLISH = {mode}\n!@VMEX POLISH_FAIL = WARN\n"
                     + (DATA / "input.solovev").read_text())
     result = SimpleNamespace(polish_report=None)
     driver = Mock(return_value=result)
@@ -445,13 +387,12 @@ def test_solve_file_directives_reach_driver_once(tmp_path, monkeypatch, mode, ov
     expected = {"AUTO": "auto", ".TRUE.": True, ".FALSE.": False}[mode]
     assert driver.call_args.kwargs["polish_force_balance"] == (
         expected if override is None else override)
-    assert driver.call_args.kwargs["polish_config"].tolerance == 2e-5
+    assert driver.call_args.kwargs["polish_config"].fail_policy == "return_unpolished"
 
 
 @pytest.mark.parametrize("policy,reason,warns", [
-    ("WARN", "nonlinear-failed", True),
-    ("WARN", "auto-declined-cost", False),
-    ("FALLBACK", "nonlinear-failed", False),
+    ("WARN", "not-converged", True),
+    ("FALLBACK", "not-converged", False),
 ])
 def test_solve_file_failed_polish_does_not_repeat_the_solve(tmp_path, monkeypatch, policy, reason, warns):
     import warnings

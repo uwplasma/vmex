@@ -290,8 +290,7 @@ def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
 
 def test_deferred_nonlinear_contracts_have_scheduled_jobs() -> None:
     nightly = (ROOT / ".github/workflows/nightly.yml").read_text()
-    for lane in ("full-polish-gn", "full-polish-linear", "full-polish-homotopy",
-                 "full-run-options", "full-free-boundary-adjoint"):
+    for lane in ("full-polish-gn", "full-run-options", "full-free-boundary-adjoint"):
         assert test_manifest.select(lane)
         assert lane in _invoked_lanes()
         assert f"selector: {lane}" in nightly
@@ -311,22 +310,16 @@ def test_nonlinear_integrations_are_full_but_linear_contracts_remain_in_pr() -> 
     env.pop("RUN_FULL", None)
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q", "-m", "full",
-         "tests/test_polish_preconditioner.py", "tests/test_polish_linear.py",
-         "tests/test_polish_homotopy.py", "tests/test_run_options.py",
+         "tests/test_run_options.py",
          "tests/test_freeboundary_implicit.py"],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     nodes = {line for line in result.stdout.splitlines() if "::" in line}
     for node in (
-        "tests/test_polish_linear.py::test_collocation_polish_primal_and_derivatives",
-        "tests/test_polish_linear.py::test_physics_accepted_polish_can_fail_derivative_stationarity",
-        "tests/test_polish_preconditioner.py::test_auto_declines_a_solve_it_priced_above_its_budget",
-        "tests/test_polish_preconditioner.py::test_public_solver_auto_corrects_a_lift_that_fails_quadrature",
         "tests/test_run_options.py::test_solve_file_polish_directive_activates_polishing",
         "tests/test_freeboundary_implicit.py::test_free_boundary_current_gradient_matches_resolve_finite_difference",
     ):
         assert node in nodes
-    assert not any("::test_polish_linear_true_certificate" in node for node in nodes)
     assert not any("::test_solve_file_directives_reach_driver_once" in node for node in nodes)
 
 

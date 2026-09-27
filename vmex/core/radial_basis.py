@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -34,54 +35,66 @@ def _validate_breakpoints(breakpoints: Array) -> np.ndarray:
     return values
 
 
-def _basis_levels(knots: Array, points: Array, degree: int) -> list[Array]:
-    """Return Cox-de Boor basis levels from degree zero through ``degree``."""
+def _backend(*values):
+    """NumPy for concrete inputs, jax.numpy when any input is traced."""
 
-    knots = jnp.asarray(knots)
-    points = jnp.asarray(points).reshape(-1)
-    evaluation_points = jnp.where(points == knots[-1], jnp.nextafter(knots[-1], -jnp.inf), points)
+    return jnp if any(isinstance(value, jax.core.Tracer) for value in values) else np
+
+
+def _basis_levels(knots: Array, points: Array, degree: int) -> list[Array]:
+    """Return Cox-de Boor basis levels from degree zero through ``degree``.
+
+    Concrete inputs are evaluated with NumPy: plans are built once per
+    (changing) radial basis, and eager device ops would compile per shape.
+    """
+
+    xp = _backend(knots, points)
+    knots = xp.asarray(knots)
+    points = xp.asarray(points).reshape(-1)
+    evaluation_points = xp.where(points == knots[-1], xp.nextafter(knots[-1], -xp.inf), points)
     level = ((evaluation_points[:, None] >= knots[:-1]) & (evaluation_points[:, None] < knots[1:])).astype(points.dtype)
     levels = [level]
     for order in range(1, degree + 1):
         count = knots.size - order - 1
         left_denominator = knots[order : order + count] - knots[:count]
         right_denominator = knots[order + 1 : order + count + 1] - knots[1 : count + 1]
-        left = jnp.where(
+        left = xp.where(
             left_denominator > 0.0,
-            (evaluation_points[:, None] - knots[:count]) / jnp.where(left_denominator > 0.0, left_denominator, 1.0),
+            (evaluation_points[:, None] - knots[:count]) / xp.where(left_denominator > 0.0, left_denominator, 1.0),
             0.0,
         )
-        right = jnp.where(
+        right = xp.where(
             right_denominator > 0.0,
             (knots[order + 1 : order + count + 1] - evaluation_points[:, None])
-            / jnp.where(right_denominator > 0.0, right_denominator, 1.0),
+            / xp.where(right_denominator > 0.0, right_denominator, 1.0),
             0.0,
         )
         level = left * level[:, :count] + right * level[:, 1 : count + 1]
         levels.append(level)
     endpoint = points == knots[-1]
-    levels[-1] = levels[-1].at[:, -1].set(jnp.where(endpoint, 1.0, levels[-1][:, -1]))
-    levels[-1] = levels[-1].at[:, :-1].set(jnp.where(endpoint[:, None], 0.0, levels[-1][:, :-1]))
+    last_column = (xp.arange(levels[-1].shape[1]) == levels[-1].shape[1] - 1).astype(levels[-1].dtype)
+    levels[-1] = xp.where(endpoint[:, None], last_column, levels[-1])
     return levels
 
 
 def _basis_matrix(knots: Array, points: Array, degree: int, derivative: int = 0) -> Array:
     levels = _basis_levels(knots, points, degree)
     if derivative == 0:
-        return levels[degree]
+        return jnp.asarray(levels[degree])
     if derivative not in (1, 2):
         raise ValueError("only derivatives 0, 1, and 2 are supported")
 
-    knots = jnp.asarray(knots)
+    xp = _backend(knots, points)
+    knots = xp.asarray(knots)
     count = knots.size - degree - 1
     lower = levels[degree - 1]
     left_denominator = knots[degree : degree + count] - knots[:count]
     right_denominator = knots[degree + 1 : degree + count + 1] - knots[1 : count + 1]
-    left_scale = jnp.where(left_denominator > 0.0, degree / left_denominator, 0.0)
-    right_scale = jnp.where(right_denominator > 0.0, degree / right_denominator, 0.0)
+    left_scale = xp.where(left_denominator > 0.0, degree / xp.where(left_denominator > 0.0, left_denominator, 1.0), 0.0)
+    right_scale = xp.where(right_denominator > 0.0, degree / xp.where(right_denominator > 0.0, right_denominator, 1.0), 0.0)
     first = left_scale * lower[:, :count] - right_scale * lower[:, 1 : count + 1]
     if derivative == 1:
-        return first
+        return jnp.asarray(first)
 
     lower_count = count + 1
     lower_degree = degree - 1
@@ -89,20 +102,20 @@ def _basis_matrix(knots: Array, points: Array, degree: int, derivative: int = 0)
     lower_left_denominator = knots[lower_degree : lower_degree + lower_count] - knots[:lower_count]
     lower_right_denominator = knots[lower_degree + 1 : lower_degree + lower_count + 1] - knots[1 : lower_count + 1]
     lower_first = (
-        jnp.where(
+        xp.where(
             lower_left_denominator > 0.0,
-            lower_degree / lower_left_denominator,
+            lower_degree / xp.where(lower_left_denominator > 0.0, lower_left_denominator, 1.0),
             0.0,
         )
         * base[:, :lower_count]
-        - jnp.where(
+        - xp.where(
             lower_right_denominator > 0.0,
-            lower_degree / lower_right_denominator,
+            lower_degree / xp.where(lower_right_denominator > 0.0, lower_right_denominator, 1.0),
             0.0,
         )
         * base[:, 1 : lower_count + 1]
     )
-    return left_scale * lower_first[:, :count] - right_scale * lower_first[:, 1 : count + 1]
+    return jnp.asarray(left_scale * lower_first[:, :count] - right_scale * lower_first[:, 1 : count + 1])
 
 
 def _span_quadrature(breakpoints: np.ndarray, order: int) -> tuple[np.ndarray, np.ndarray]:
@@ -255,6 +268,34 @@ class BSplineBasis:
             matrix = _basis_matrix(self.knots, evaluation_points, self.degree, derivative)
         return matrix.reshape(original_shape + (self.size,))
 
+    def _evaluate_local(self, moved: Array, point: Array) -> Array:
+        """De Boor evaluation of the ``degree + 1`` nonzero functions at one point.
+
+        Point evaluations (the independent force oracle differentiates them
+        pointwise) otherwise contract every basis function; only the local
+        span's ``degree + 1`` are nonzero.  The span index is piecewise
+        constant, so derivatives in ``point`` are those of the local polynomial.
+        """
+
+        degree = int(self.degree)
+        knots = jnp.asarray(self.knots)
+        point = jnp.asarray(point)
+        span = jnp.clip(jnp.searchsorted(knots, point, side="right") - 1, degree, self.size - 1)
+        local = jax.lax.dynamic_slice(knots, (span - degree,), (2 * degree + 2,))
+        left = [point - local[degree + 1 - j] for j in range(degree + 1)]
+        right = [local[degree + j] - point for j in range(degree + 1)]
+        values = [jnp.ones_like(point)]
+        for j in range(1, degree + 1):
+            saved = jnp.zeros_like(point)
+            updated = []
+            for r in range(j):
+                temp = values[r] / (right[r + 1] + left[j - r])
+                updated.append(saved + right[r + 1] * temp)
+                saved = left[j - r] * temp
+            values = updated + [saved]
+        active = jax.lax.dynamic_slice_in_dim(moved, span - degree, degree + 1, axis=-1)
+        return jnp.tensordot(active, jnp.stack(values), axes=((-1,), (0,)))
+
     def evaluate(
         self,
         coefficients: Array,
@@ -269,6 +310,8 @@ class BSplineBasis:
         if coefficients.shape[axis] != self.size:
             raise ValueError(f"coefficient axis has size {coefficients.shape[axis]}; expected {self.size}")
         moved = jnp.moveaxis(coefficients, axis, -1)
+        if jnp.ndim(points) == 0 and derivative == 0 and not self.periodic:
+            return self._evaluate_local(moved, points)
         values = jnp.tensordot(
             moved,
             self.basis_matrix(points, derivative=derivative),
@@ -334,19 +377,24 @@ class BSplineBasis:
             raise ValueError("inserted knot must be new; repeated-knot refinement is unsupported")
         span = int(np.searchsorted(self.knots, knot, side="right") - 1)
         multiplicity = int(np.count_nonzero(np.isclose(self.knots, knot, rtol=0.0, atol=1.0e-14)))
-        values = jnp.moveaxis(jnp.asarray(coefficients), axis, 0)
+        # Concrete coefficients are updated on the host: the refinement changes
+        # the array shape, so eager device ops would compile once per knot.
+        traced = isinstance(coefficients, jax.core.Tracer)
+        values = jnp.moveaxis(coefficients, axis, 0) if traced else np.moveaxis(np.asarray(coefficients), axis, 0)
         if values.shape[0] != self.size:
             raise ValueError(f"coefficient axis has size {values.shape[0]}; expected {self.size}")
-        updated = jnp.zeros((self.size + 1,) + values.shape[1:], dtype=values.dtype)
-        updated = updated.at[: span - self.degree + 1].set(values[: span - self.degree + 1])
-        updated = updated.at[span - multiplicity + 1 :].set(values[span - multiplicity :])
-        for index in range(span - self.degree + 1, span - multiplicity + 1):
-            alpha = (knot - self.knots[index]) / (self.knots[index + self.degree] - self.knots[index])
-            updated = updated.at[index].set(alpha * values[index] + (1.0 - alpha) * values[index - 1])
+        low, high = span - self.degree + 1, span - multiplicity + 1
+        index = np.arange(low, high)
+        alpha = ((knot - self.knots[index]) / (self.knots[index + self.degree] - self.knots[index])).reshape(
+            (-1,) + (1,) * (values.ndim - 1)
+        )
+        blended = alpha * values[index] + (1.0 - alpha) * values[index - 1]
+        xp = jnp if traced else np
+        updated = xp.concatenate((values[:low], blended, values[high - 1 :]), axis=0)
         new_breakpoints = np.sort(np.append(self.breakpoints, knot))
         order = self.quadrature_weights.size // (self.breakpoints.size - 1)
         refined = type(self).clamped(new_breakpoints, degree=self.degree, quadrature_order=order)
-        return refined, jnp.moveaxis(updated, 0, axis)
+        return refined, jnp.asarray(xp.moveaxis(updated, 0, axis))
 
     def refine_periodic_uniform(
         self, coefficients: Array, target_size: int, *, axis: int = -1
