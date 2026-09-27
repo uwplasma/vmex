@@ -122,6 +122,9 @@ def test_fingerprint_separates_hosts(monkeypatch):
     after only logging the mismatch."""
     real = _compat._host_identity()
     assert real and real == _compat._host_identity()
+    monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
+    assert _compat._host_identity()        # hardware UUID, or the hostname
+    monkeypatch.undo()
     monkeypatch.setattr(_compat, "_host_identity", lambda: "node001")
     first = _compat._cache_machine_fingerprint()
     monkeypatch.setattr(_compat, "_host_identity", lambda: "node002")
@@ -167,6 +170,16 @@ def test_policy_overrides_jax_env_cache(clean_cache_env, tmp_path):
     mp.delenv("VMEX_COMPILATION_CACHE")
     mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: True)
     fake = types.SimpleNamespace(config=_PolicyConfig(raw))
+    assert _compat._apply_compilation_cache_policy(fake) is None
+    assert fake.config.jax_enable_compilation_cache is False
+
+
+def test_unwritable_cache_dir_turns_the_cache_off(clean_cache_env, tmp_path):
+    mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    (tmp_path / "file").write_text("")
+    mp.setenv("VMEX_COMPILATION_CACHE_DIR", str(tmp_path / "file" / "cache"))
+    fake = types.SimpleNamespace(config=_PolicyConfig(None))
     assert _compat._apply_compilation_cache_policy(fake) is None
     assert fake.config.jax_enable_compilation_cache is False
 
@@ -308,13 +321,16 @@ def test_map_count_reads_this_process_and_every_compile_checks_it(monkeypatch):
     """On Linux the guard runs after every XLA compilation, registered once."""
     import jax
 
+    monkeypatch.setattr(_compat, "_MAPS_FILE", "/no/such/maps")
+    assert _compat._map_count() is None
+    monkeypatch.undo()
     count = _compat._map_count()
     if not sys.platform.startswith("linux"):
         assert count is None
         return
     assert count > 10
     calls = []
-    monkeypatch.setattr(_compat, "_relieve_map_pressure", lambda: calls.append(1))
+    monkeypatch.setattr(_compat, "_relieve_map_pressure", calls.append)
     monkeypatch.setitem(_compat._MAP_STATE, "checked", -1.0)
     _compat._configure_jax_environment()                     # idempotent
     jax.jit(lambda x: x * 3.0 + 7.0).lower(1.0).compile()

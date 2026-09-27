@@ -19,6 +19,7 @@ and is actually used — is:
 from __future__ import annotations
 
 from typing import Any
+import contextlib
 import hashlib
 import re
 from importlib import metadata as importlib_metadata
@@ -262,22 +263,14 @@ def _host_identity() -> str:
     follows the network it joins; the hostname is the fallback.
     """
     if platform.system() == "Darwin":
-        try:
-            import ctypes
-            import uuid
+        import ctypes
+        import uuid
 
-            buf = ctypes.create_string_buffer(16)
-            timeout = (ctypes.c_long * 2)(0, 0)
-            if ctypes.CDLL(None).gethostuuid(buf, timeout) == 0:
+        buf = ctypes.create_string_buffer(16)
+        with contextlib.suppress(Exception):
+            if ctypes.CDLL(None).gethostuuid(buf, (ctypes.c_long * 2)()) == 0:
                 return str(uuid.UUID(bytes=buf.raw))
-        except Exception:
-            pass
-    try:
-        import socket
-
-        return socket.gethostname()
-    except Exception:
-        return platform.node()
+    return platform.node()
 
 
 def _cache_machine_fingerprint() -> str:
@@ -391,14 +384,11 @@ def _default_compilation_cache_dir() -> str | None:
         return None
     if flag not in _ON and _cache_deserialize_unsafe():
         return None
-    try:
-        import pathlib
+    import pathlib
 
-        parent = vmex_dir or (jax_dir or "").strip() or str(
-            pathlib.Path.home() / ".cache" / "vmex" / "jax_cache")
-        return _machine_scoped(parent)
-    except Exception:
-        return None
+    parent = vmex_dir or (jax_dir or "").strip() or str(
+        pathlib.Path("~/.cache/vmex/jax_cache").expanduser())
+    return _machine_scoped(parent)
 
 
 def _apply_compilation_cache_policy(jax_module: Any) -> str | None:
@@ -411,11 +401,8 @@ def _apply_compilation_cache_policy(jax_module: Any) -> str | None:
     config already matching the policy is left alone.
     """
     cache_dir = _default_compilation_cache_dir()
-    try:
-        current = jax_module.config.jax_compilation_cache_dir
-        enabled = jax_module.config.jax_enable_compilation_cache
-    except AttributeError:
-        current, enabled = None, True
+    current = jax_module.config.jax_compilation_cache_dir
+    enabled = jax_module.config.jax_enable_compilation_cache
     env_dir = (os.environ.get("JAX_COMPILATION_CACHE_DIR") or "").strip()
     if (cache_dir is not None and current and current not in (env_dir, cache_dir)
             and current != _APPLIED[0] and not _env("COMPILATION_CACHE_DIR").strip()):
@@ -429,8 +416,8 @@ def _apply_compilation_cache_policy(jax_module: Any) -> str | None:
             _configure_compilation_cache(jax_module, cache_dir)
             _reset_jax_cache()
     if cache_dir is None and (current or enabled):
-        _set_config(jax_module, "jax_enable_compilation_cache", False)
-        _set_config(jax_module, "jax_compilation_cache_dir", None)
+        jax_module.config.update("jax_enable_compilation_cache", False)
+        jax_module.config.update("jax_compilation_cache_dir", None)
         _reset_jax_cache()
     _APPLIED[0] = cache_dir
     return cache_dir
@@ -439,21 +426,12 @@ def _apply_compilation_cache_policy(jax_module: Any) -> str | None:
 _APPLIED: list[str | None] = [None]   # the directory this module last set
 
 
-def _set_config(jax_module: Any, key: str, value: Any) -> None:
-    try:
-        jax_module.config.update(key, value)
-    except Exception:
-        pass
-
-
 def _reset_jax_cache() -> None:
     """Drop JAX's already-opened cache object so the new setting applies."""
-    try:
+    with contextlib.suppress(Exception):
         from jax._src import compilation_cache
 
         compilation_cache.reset_cache()
-    except Exception:
-        pass
 
 
 def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None:
@@ -527,6 +505,7 @@ def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None
 
 
 _MAP_LIMIT_FILE = "/proc/sys/vm/max_map_count"
+_MAPS_FILE = "/proc/self/maps"
 _MAP_PRESSURE = 0.5     # release compiled executables above this share of the limit
 _MAP_HEADROOM = 0.25    # ... and only after this much growth since the last release
 _MAP_STATE: dict[str, Any] = {"floor": 0, "warned": False}
@@ -534,14 +513,12 @@ _MAP_STATE: dict[str, Any] = {"floor": 0, "warned": False}
 
 def _map_count() -> int | None:
     """Memory mappings of this process, or None where Linux /proc is absent."""
-    try:
-        with open("/proc/self/maps", "rb") as fh:
-            return fh.read().count(b"\n")
-    except OSError:
-        return None
+    with contextlib.suppress(OSError), open(_MAPS_FILE, "rb") as fh:
+        return fh.read().count(b"\n")
+    return None
 
 
-def _relieve_map_pressure(jax_module: Any = None) -> bool:
+def _relieve_map_pressure(jax_module: Any) -> bool:
     """Drop compiled executables before the process runs out of mappings.
 
     Every XLA:CPU kernel lives in its own JIT object with separate code,
@@ -573,8 +550,6 @@ def _relieve_map_pressure(jax_module: Any = None) -> bool:
         return False
     import gc
 
-    if jax_module is None:
-        import jax as jax_module
     jax_module.clear_caches()
     gc.collect()
     after = _map_count() or 0
@@ -601,7 +576,7 @@ def _after_compile(event: str, *_: Any, **__: Any) -> None:
     if (event == "/jax/core/compile/backend_compile_duration"
             and now - _MAP_STATE.get("checked", -1.0) >= 1.0):
         _MAP_STATE["checked"] = now
-        _relieve_map_pressure()
+        _relieve_map_pressure(sys.modules["jax"])
 
 
 def _configure_jax_environment() -> None:
