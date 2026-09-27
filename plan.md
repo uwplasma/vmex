@@ -92,6 +92,32 @@ main's after the merges.
      --plot`, so a missing floor fails CI instead of a user's first run; plus
      the existing minimum-versions job at the new floors. Keep the README
      install table's floors in sync (a test already checks them).
+   - **Status (2026-09-27): done** (this PR plus the sibling releases below,
+     all on PyPI: solvax 0.27.0, essos 0.18.1, booz_xform_jax 0.4.1,
+     virtual-casing-jax 0.0.9, gkx 2.4.1). Measured: equinox 0.11.11-0.13.0
+     fail `import` under jax >= 0.10 (warn at 0.9.2); 0.13.1-0.13.2 import but
+     fail at trace time under jax 0.11 (`jax.core.mapped_aval`, via diffrax
+     primitive batching); 0.13.3 is the first that works on jax 0.4.38-0.11.2.
+     ESSOS 0.17 also kept diffrax 0.6.2, which lacks `ClipStepSizeController`.
+     Sibling PRs: SOLVAX #129 (0.27.0), ESSOS #88 (0.18.1; the 0.18 tag was
+     cut before #88 merged and has no floors), booz_xform_jax #16 (0.4.1,
+     jax>=0.6.2, drops unused plotly), virtual_casing_jax #17 (0.0.9), GKX
+     #301 (2.4.1, solvax>=0.27.0). NEO_JAX #3 (jax floor) was closed: every
+     NEO_JAX test lane fails on the current environment independently of it
+     (vmec_jax no longer ships vmec_jax.driver; a 1e-14 legacy regression), so
+     vmex keeps neo-jax>=1.0.2.
+     vmex floors before -> after: solvax 0.21.0 -> 0.27.0, booz_xform_jax
+     0.4.0 -> 0.4.1, essos 0.17 -> 0.18.1, virtual-casing-jax 0.0.8 -> 0.0.9,
+     gkx 1.8.0 -> 2.4.1 (#471 had moved it to 2.4.0); jax/jaxlib/scipy/neo-jax
+     unchanged. #473 then raised essos to 0.19 (essos.boozer for --trace),
+     which also carries the equinox/diffrax floors, so the lanes pin 0.19.0. Guard: nightly
+     `minimum-integrations` is a floors/stale matrix; the stale lane seeds
+     jax 0.5.0, equinox 0.11.11, diffrax 0.6.2, solvax 0.20.0, booz_xform_jax
+     0.1.1, essos 0.16 and others, installs `.[all]` with pip, and runs
+     `vmex input.solovev --plot`. Verified by hand in fresh venvs on the laptop
+     (seed jax 0.10.2 + equinox 0.11.11 + solvax 0.26.0, the reported case)
+     and on office (the stale-lane seed set): pip check clean, equinox 0.13.8,
+     solve and all five figures written.
    - Related, same report: pip warned that other installed packages
      (desc-opt, interpax, quadax, orthax, jax-finufft) pin jax below 0.10;
      document in the installation page that DESC interoperability needs a

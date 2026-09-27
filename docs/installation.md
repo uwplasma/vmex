@@ -14,7 +14,7 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
   oldest release CI tests), `scipy` (1.16 or newer: the optimization examples
   pass `least_squares(callback=...)`, which SciPy 1.16 introduced),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
-  `booz_xform_jax>=0.4.0` and `solvax>=0.21.0` (the linear solvers). `import
+  `booz_xform_jax>=0.4.1` and `solvax>=0.27.0` (the linear solvers). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to
   upgrade.
 
@@ -46,15 +46,26 @@ can reproduce each step yourself.
 | extra | adds | used by |
 |---|---|---|
 | `vmex[coils]` | `essos>=0.19` | coil fields, free boundary from coils, single-stage examples, alpha tracing |
-| `vmex[freeb]` | `virtual-casing-jax>=0.0.8` | virtual-casing exterior fields (`VmecExtender`) |
+| `vmex[freeb]` | `virtual-casing-jax>=0.0.9` | virtual-casing exterior fields (`VmecExtender`) |
 | `vmex[neoclassical]` | `neo-jax>=1.0.2` | effective ripple |
-| `vmex[turbulence]` | `gkx>=2.4.0` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
+| `vmex[turbulence]` | `gkx>=2.4.1` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
 | `vmex[optimizers]` | `jaxopt`, `optax` | the JAXopt and Optax example drivers |
 | `vmex[all]` | all of the above | every example |
 
 ```console
 pip install "vmex[all]"
 ```
+
+Installing into an environment that already holds older packages is
+supported: every floor (and the floors those packages declare, such as
+solvax's `equinox>=0.13.3`) upgrades an older copy instead of keeping it, and a
+nightly CI lane installs `vmex[all]` over a stale environment to keep it so.
+
+DESC (`desc-opt`, which requires `jax<0.10`) and other packages that cap JAX
+below 0.10 need their own environment: `vmex[turbulence]` and `vmex[all]`
+require `jax>=0.10.1`, so pip either upgrades JAX past their cap (and warns)
+or cannot resolve. The core `pip install vmex` still accepts JAX 0.9.2 and can
+share an environment with DESC.
 
 ## From conda-forge
 

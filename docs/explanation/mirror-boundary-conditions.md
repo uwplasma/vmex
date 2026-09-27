@@ -254,7 +254,7 @@ L-BFGS-B globalization, damped Newton-GMRES polish with exact JAX Hessian
 products, the separable tensor preconditioner, and a dense trust-region
 rescue capped at 2048 unknowns (`vmex.mirror.solver`). `vmex.mirror` does not
 call SOLVAX. The comparison below was made against SOLVAX 0.20.0; the package
-floor is now `solvax>=0.21.0`, whose APIs that VMEX calls keep the 0.20.0
+floor is now `solvax>=0.27.0`, whose APIs that VMEX calls keep the 0.20.0
 signatures (`pyproject.toml`), and the lane has not been re-compared since.
 Condition by condition:
 

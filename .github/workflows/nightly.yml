@@ -57,24 +57,58 @@ jobs:
           retention-days: 7
 
   minimum-integrations:
-    name: Minimum integration versions
+    # floors: every declared floor pinned exactly -- latest-version jobs cannot
+    # detect missing APIs at the floors. stale: an environment seeded with old
+    # transitive dependencies, then `pip install ".[all]"` on top -- pip keeps
+    # whatever satisfies a requirement, so a missing floor anywhere in the
+    # stack (0.11.1 kept equinox 0.11.11 under jax 0.10) fails here, not on a
+    # user's first run.
+    name: Integrations (${{ matrix.install }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - install: floors
+            python: "3.11"
+          - install: stale
+            python: "3.12"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
-      # Latest-version jobs cannot detect missing APIs at the declared floors.
       - name: Install minimum integration versions
+        if: matrix.install == 'floors'
         run: |
           python -m pip install ".[coils,turbulence,freeb,neoclassical]" pytest pytest-cov \
-            jax==0.10.1 jaxlib==0.10.1 scipy==1.16.0 solvax==0.26.0 \
-            booz_xform_jax==0.4.0 virtual-casing-jax==0.0.8 \
-            essos==0.19.0 neo-jax==1.0.2 gkx==2.4.0
+            jax==0.10.1 jaxlib==0.10.1 scipy==1.16.0 solvax==0.27.0 equinox==0.13.3 \
+            booz_xform_jax==0.4.1 virtual-casing-jax==0.0.9 \
+            essos==0.19.0 diffrax==0.7.0 neo-jax==1.0.2 gkx==2.4.1
+      - name: Seed old dependencies, then install vmex[all] over them
+        if: matrix.install == 'stale'
+        run: |
+          python -m pip install jax==0.5.0 jaxlib==0.5.0 equinox==0.11.11 \
+            jaxtyping==0.2.36 diffrax==0.6.2 optimistix==0.0.10 lineax==0.0.7 \
+            optax==0.2.3 jaxopt==0.8.3 numpy==1.26.4 scipy==1.14.1 \
+            booz_xform_jax==0.1.1 solvax==0.20.0 virtual-casing-jax==0.0.2 \
+            essos==0.16 neo-jax==1.0.1
+          python -m pip install ".[all]" pytest pytest-cov
+      - name: Check the resolved environment
+        run: |
           python -m pip check
-          python -c "import essos, gkx, virtual_casing_jax, neo_jax"
+          python -m pip freeze
+          python -c "import essos.dynamics, gkx, virtual_casing_jax, neo_jax, solvax, jaxopt, optax"
+      - name: Solve and plot
+        working-directory: ${{ runner.temp }}
+        env:
+          MPLBACKEND: Agg
+        run: |
+          cp "$GITHUB_WORKSPACE/examples/data/input.solovev" .
+          vmex input.solovev --plot
+          ls wout_solovev.nc solovev_summary.png
       - name: Check real integration calls and derivatives
         run: |
           pytest -q -o addopts= -o usefixtures=_module_jit_enabled \
@@ -82,7 +116,8 @@ jobs:
             tests/test_virtual_casing_physics.py::test_synthetic_surface_gradient_fd_validates \
             tests/test_neoclassical.py::test_diagnostic_config_matches_converged_neo_on_the_qi_deck \
             tests/test_turbulence.py::test_drive_gradients_reach_gkx_as_a_over_l \
-            tests/test_turbulence.py::test_growth_rate_gradient_matches_finite_differences
+            tests/test_turbulence.py::test_growth_rate_gradient_matches_finite_differences \
+            tests/test_examples.py::test_coil_examples_need_only_the_pinned_essos_release
 
   optional-integrations:
     name: Optional integrations

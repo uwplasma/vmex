@@ -86,13 +86,12 @@ def test_plain_install_includes_plotting_and_qi_dependencies() -> None:
 
     assert "matplotlib" in dependency_names
     assert "booz_xform_jax" in dependency_names
-    assert "booz_xform_jax>=0.4.0" in project_dependencies
+    assert "booz_xform_jax>=0.4.1" in project_dependencies
     assert "packaging" in dependency_names
     assert "numpy" in dependency_names
-    assert "solvax>=0.21.0" in project_dependencies
-    assert "gkx>=2.4.0" in optional_dependencies["turbulence"]
-    # 0.0.8: the per-order error estimate is finite far from the surface
-    assert "virtual-casing-jax>=0.0.8" in optional_dependencies["freeb"]
+    assert "solvax>=0.27.0" in project_dependencies
+    assert "gkx>=2.4.1" in optional_dependencies["turbulence"]
+    assert "virtual-casing-jax>=0.0.9" in optional_dependencies["freeb"]
     assert "plots" not in optional_dependencies
     assert "plot" not in optional_dependencies
     assert "qi" not in optional_dependencies
@@ -153,3 +152,24 @@ def test_import_guard_skips_packages_without_metadata(monkeypatch) -> None:
 
     monkeypatch.setattr(vmex, "_package_version", version)
     assert vmex._check_supported_versions() is None
+
+
+def test_nightly_floors_lane_pins_the_declared_floors() -> None:
+    """The nightly "floors" lane installs exactly the floors pyproject declares."""
+    import re
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    extras = project["optional-dependencies"]
+    floors = {}
+    for dep in [*project["dependencies"], *(r for name in
+                ("coils", "freeb", "neoclassical", "turbulence") for r in extras[name])]:
+        requirement = Requirement(dep)
+        for spec in requirement.specifier:
+            floors[requirement.name] = max(floors.get(requirement.name, spec.version),
+                                           spec.version, key=Version)
+    workflow = (ROOT / ".github/workflows/nightly.yml").read_text()
+    lane = workflow[workflow.index("if: matrix.install == 'floors'"):]
+    lane = lane[:lane.index("- name:")]
+    pins = dict(re.findall(r"([A-Za-z0-9_.-]+)==(\S+)", lane))
+    for name, floor in floors.items():
+        assert name in pins and Version(pins[name]) == Version(floor), (name, floor)
