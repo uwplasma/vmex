@@ -170,11 +170,12 @@ jobs:
             pytest -q -n 4 -m "not full and not weekly" $FILES --durations=20
           fi
       - &xla-collect
+        id: xla-collect
         name: Keep the XLA cache entries this run used
         if: success() && (github.event_name == 'push' || github.head_ref == 'ci/speed-caches') && steps.xla-restore.outputs.cache-hit != 'true'
-        run: python tools/ci_compile_cache.py collect "$VMEX_CI_COMPILATION_CACHE"
+        run: python tools/ci_compile_cache.py collect "$VMEX_CI_COMPILATION_CACHE" >> "$GITHUB_OUTPUT"
       - &xla-save
-        if: success() && (github.event_name == 'push' || github.head_ref == 'ci/speed-caches') && steps.xla-restore.outputs.cache-hit != 'true'
+        if: success() && steps.xla-collect.outputs.entries > 0
         uses: actions/cache/save@v6.1.0
         with:
           path: ${{ runner.temp }}/xla-cache

@@ -44,6 +44,13 @@ The workflows obtain their selectors from the manifest:
   workflows or declared under ``local_only`` in ``tests/manifest.json`` with
   the reason and the command (``tests/test_test_manifest.py`` enforces it).
   ``gpu-smoke`` is the one local-only lane; see `GPU checks`_.
+- ``CI`` installs with ``uv`` and carries each test lane's XLA compilations
+  from run to run (``tools/ci_compile_cache.py``). The cache is keyed on the
+  runner's CPU model and flags, Python and jaxlib, so an executable never
+  loads on a CPU it was not built for; every pytest process opens a private
+  copy without eviction, so workers never share a lock; and only ``main``
+  saves, keeping the entries its run used. A lane on a new CPU, or after
+  the programs it compiles change, just compiles as before.
 
 Use ``pytest --vmex-report=report.json`` to record the 50 slowest tests and all
 skip reasons with the same metadata.

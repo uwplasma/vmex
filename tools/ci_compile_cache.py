@@ -22,7 +22,7 @@ Usage::
 
     python tools/ci_compile_cache.py key            # fingerprint=<hex>
     python tools/ci_compile_cache.py prepare ROOT
-    python tools/ci_compile_cache.py collect ROOT
+    python tools/ci_compile_cache.py collect ROOT   # entries=<n>
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def _size_mb(paths: list[Path]) -> float:
 
 
 def _report(root: Path, text: str) -> None:
-    print(text)
+    print(text, file=sys.stderr)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
@@ -138,6 +138,7 @@ def collect(root: Path) -> None:
     _report(root, f"{hits} of {len(restored)} restored entries read, {new} new, "
                   f"{dropped} unused dropped; saving {len(kept)} entries, "
                   f"{_size_mb(kept):.0f} MB")
+    print(f"entries={len(kept)}")  # the save step skips an empty cache
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,6 +147,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("root", nargs="?", type=Path)
     args = parser.parse_args(argv)
     if args.command == "key":
+        cpuinfo = Path("/proc/cpuinfo")
+        lines = cpuinfo.read_text(errors="ignore").splitlines() if cpuinfo.exists() else []
+        cpu = next((line.split(":", 1)[1].strip() for line in lines
+                    if line.startswith("model name")), platform.processor())
+        print(f"XLA cache for {cpu}", file=sys.stderr)
         print(f"fingerprint={fingerprint()}")
     elif args.root is None:
         parser.error(f"{args.command} needs ROOT")
