@@ -36,6 +36,40 @@ except Exception:  # pragma: no cover
     pass
 
 
+def _open_ci_compilation_cache(root: Path) -> None:
+    """Give this pytest process a private copy of CI's restored XLA cache.
+
+    ``tools/ci_compile_cache.py prepare`` validated ``root/seed`` for this
+    CPU, Python and jaxlib. Each process (every xdist worker, or the one
+    process of a serial lane) gets its own hard-linked copy, opened with
+    eviction off: JAX then takes no cross-process lock and never rewrites a
+    file, so workers cannot serialize on each other or read a half-written
+    entry. ``collect`` merges the copies back after the run. Set only from
+    the pytest process's own config, never the environment, so subprocess
+    tests that ask for a cold cache still get one.
+    """
+    import importlib.metadata
+    import shutil
+
+    seed = root / "seed"
+    jaxlib = tuple(int(p) for p in importlib.metadata.version("jaxlib").split(".")[:2])
+    if not seed.is_dir() or jaxlib < (0, 10):  # < 0.10 crashes on large reloads
+        return
+    mine = root / f"proc-{os.environ.get('PYTEST_XDIST_WORKER', 'main')}"
+    if not mine.exists():
+        shutil.copytree(seed, mine, copy_function=os.link)
+    for name, value in (("jax_compilation_cache_dir", str(mine)),
+                        ("jax_compilation_cache_max_size", -1),
+                        ("jax_persistent_cache_min_compile_time_secs", 0.0),
+                        ("jax_persistent_cache_min_entry_size_bytes", -1),
+                        ("jax_persistent_cache_enable_xla_caches", "none")):
+        jax.config.update(name, value)
+
+
+if os.environ.get("VMEX_CI_COMPILATION_CACHE"):  # pragma: no cover - CI only
+    _open_ci_compilation_cache(Path(os.environ["VMEX_CI_COMPILATION_CACHE"]))
+
+
 def pytest_addoption(parser):
     group = parser.getgroup("vmex integration")
     group.addoption(
