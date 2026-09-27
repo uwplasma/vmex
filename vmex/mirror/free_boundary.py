@@ -1312,6 +1312,40 @@ def solve_mirror_beta_scan(
     )
 
 
+
+def is_mirror_input(path: Any) -> bool:
+    """Whether ``path`` is a ``&MIRROR`` deck rather than a VMEC input."""
+
+    import re
+    from pathlib import Path
+
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except (OSError, IsADirectoryError):
+        return False
+    return re.search(r"^\s*&\s*MIRROR\b", text, flags=re.IGNORECASE | re.MULTILINE) is not None
+
+
+def solve_mirror_file(path: Any, *, write_mout: bool = True, outdir: Any = None, **kwargs: Any) -> MirrorSolution:
+    """Solve a ``&MIRROR`` deck the way ``vmex <input>`` does.
+
+    Writes ``mout_<case>.nc`` beside the deck (or into ``outdir``) unless
+    ``write_mout=False``; keywords go to :func:`solve_mirror`.
+    """
+
+    from pathlib import Path
+
+    source = Path(path)
+    solution = solve_mirror(MirrorInput.from_file(source), **kwargs)
+    if write_mout:
+        directory = Path(outdir) if outdir is not None else source.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        from vmex.core.cli import case_from_input
+
+        solution.write_mout(directory / f"mout_{case_from_input(source)}.nc")
+    return solution
+
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

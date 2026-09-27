@@ -1232,6 +1232,28 @@ def _scale_file(args, input_path: Path, outdir: Path | None, *, emit) -> int:
     return 0
 
 
+def _solve_mirror_file(input_path: Path, outdir: Path | None, *, plot: bool, emit, quiet: bool) -> int:
+    import jax
+
+    from vmex.mirror.free_boundary import solve_mirror_file
+
+    jax.config.update("jax_enable_x64", True)
+    directory = outdir if outdir is not None else input_path.parent
+    solution = solve_mirror_file(input_path, outdir=directory)
+    mout_path = directory / f"mout_{case_from_input(input_path)}.nc"
+    if not quiet:
+        summary = solution.summary()
+        emit(
+            f" Mirror {'free' if solution.input.lfreeb else 'fixed'} boundary: converged={summary['converged']} "
+            f"after {summary['iterations']} iterations, variational force {summary['variational_max']:.2e}, "
+            f"B(axis, centre) = {summary['axis_field_center']:.6g} T, R_m,axis = {summary['R_m_axis']}\n"
+            f" Wrote {mout_path}"
+        )
+    if plot:
+        _plot_mout_file(mout_path, directory, emit=emit, quiet=quiet)
+    return 0
+
+
 def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
     if args.scale_factors and not args.scale:
         parser.error("scale factors require --scale")
@@ -1300,6 +1322,13 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
         if bool(args.trace):
             _run_trace(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         return 0
+
+    from vmex.mirror.free_boundary import is_mirror_input
+
+    if is_mirror_input(input_path):
+        if bool(args.booz) or bool(args.trace):
+            parser.error("--booz and --trace require toroidal inputs, not &MIRROR decks")
+        return _solve_mirror_file(input_path, outdir, plot=plot_requested, emit=emit, quiet=quiet)
 
     from .desc import is_desc_file, write_desc_input
 

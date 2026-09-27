@@ -1020,6 +1020,9 @@ def solve_file(
     through the free-boundary ladder and reject polish requests, matching the
     fixed-boundary-only scope of the polishing lane.
 
+    A ``&MIRROR`` deck is solved by :func:`vmex.mirror.solve_mirror` and
+    writes ``mout_<case>.nc``; it returns a :class:`vmex.mirror.MirrorSolution`.
+
     Returns the final :class:`~vmex.core.solver.SolveResult`.
     """
     from pathlib import Path as _Path
@@ -1028,6 +1031,10 @@ def solve_file(
         polish_config_from_options, read_input_request, resolve_run_options,
     )
 
+    from vmex.mirror.free_boundary import is_mirror_input, solve_mirror_file
+
+    if is_mirror_input(path):
+        return solve_mirror_file(path, write_mout=write_wout, outdir=outdir, **solve_kwargs)
     request = read_input_request(path)
     options, sources = resolve_run_options(
         request.options, polish=polish, polish_fail=polish_fail,

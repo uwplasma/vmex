@@ -1,0 +1,25 @@
+! Axisymmetric fixed-boundary mirror: a flux surface of the exact vacuum
+! mirror B_axis(z) = 1 T * (1 + 0.5 z^2), midplane radius 0.12 m.  The solved
+! |B| reproduces the exact field (vmex/mirror/analytic.py) to 8e-4.
+! Run: vmex examples/data/input.mirror_axisymmetric --plot
+! Format: docs/reference/mirror-input.rst
+&MIRROR
+  NS = 7
+  MPOL = 0
+  ELEMENTS = 6
+  NXI = 17
+  Z_MIN = -1.0
+  Z_MAX = 1.0
+  PHIEDGE = 0.04515750413
+  ZB = -1.0 -0.875 -0.75 -0.625 -0.5 -0.375 -0.25 -0.125 0.0 0.125 0.25 0.375 0.5 0.625 0.75 0.875 1.0
+  RBC(0) = 0.097930509154 0.102002944775 0.105976885475 0.109729370943 0.113115651673 0.115978134085 0.11816146175 0.119532311449 0.12 0.119532311449 0.11816146175 0.115978134085 0.113115651673 0.109729370943 0.105976885475 0.102002944775 0.097930509154
+  PRES_SCALE = 0.0
+  AM = 1.0 -1.0
+  CURRENT_DERIVATIVE = 0.0
+  GAMMA = 1.6666666666666667
+  FTOL = 1e-12
+  NITER = 1000
+  LFREEB = F
+  EXTERIOR_NTHETA = 12
+  EXTERIOR_ORDER = 6
+/

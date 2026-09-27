@@ -226,6 +226,86 @@ class MirrorInput:
     exterior_ntheta: int = 12
     exterior_order: int = 6
 
+    _ARRAYS = frozenset({"zb", "am", "coil_radius", "coil_z", "coil_current"})
+
+    @classmethod
+    def from_text(cls, text: str) -> "MirrorInput":
+        """Parse a ``&MIRROR ... /`` namelist (see :meth:`from_file`)."""
+
+        import re
+        from dataclasses import fields
+
+        from vmex.core.input import _find_assignments, _parse_key, _parse_scalar, _strip_fortran_comments, _tokenize_values
+
+        start = re.search(r"&\s*MIRROR\b", text, flags=re.IGNORECASE)
+        end = re.search(r"^\s*/\s*$", text[start.end():], flags=re.MULTILINE) if start else None
+        if end is None:
+            raise ValueError("no &MIRROR ... / namelist found")
+        block = "\n".join(_strip_fortran_comments(line) for line in text[start.end(): start.end() + end.start()].splitlines())
+        known = {field.name for field in fields(cls)}
+        values: dict[str, Any] = {}
+        rows: dict[str, dict[int, list[float]]] = {"rbc": {}, "rbs": {}}
+        matches = _find_assignments(block)
+        for index, match in enumerate(matches):
+            name, designator = _parse_key(match.group("key"))
+            name = name.lower()
+            stop = matches[index + 1].start() if index + 1 < len(matches) else len(block)
+            parsed = [_parse_scalar(token) for token in _tokenize_values(block[match.end(): stop].strip())]
+            if name in rows:
+                if designator is None or len(designator) != 1 or not isinstance(designator[0], int):
+                    raise ValueError(f"{name.upper()} takes one poloidal index: {name.upper()}(m) = values at ZB")
+                rows[name][designator[0]] = parsed
+            elif name not in known or designator is not None:
+                raise ValueError(f"unknown &MIRROR variable {match.group('key').strip()}")
+            else:
+                values[name] = parsed if name in cls._ARRAYS else parsed[0]
+        for name, table in rows.items():
+            if table:
+                width = {len(row) for row in table.values()}
+                if len(width) != 1:
+                    raise ValueError(f"every {name.upper()} row needs one value per boundary station")
+                array = np.zeros((max(table) + 1, width.pop()))
+                for m, row in table.items():
+                    array[m] = row
+                values[name] = array
+        return cls(**values)
+
+    @classmethod
+    def from_file(cls, path: Any) -> "MirrorInput":
+        """Read a mirror input deck: one ``&MIRROR`` namelist.
+
+        Every field of this class is a (case-insensitive) variable of the
+        same name; ``RBC(m) = ...`` and ``RBS(m) = ...`` give the Fourier
+        mode ``m`` at the ``ZB`` stations. The format is documented in
+        ``docs/reference/mirror-input.rst``.
+        """
+
+        from pathlib import Path
+
+        return cls.from_text(Path(path).read_text(encoding="utf-8"))
+
+    def to_file(self, path: Any) -> Any:
+        """Write this input as a ``&MIRROR`` deck and return the path."""
+
+        from dataclasses import fields
+        from pathlib import Path
+
+        def text(value: Any) -> str:
+            if isinstance(value, bool):
+                return "T" if value else "F"
+            return " ".join(repr(float(item)) for item in np.ravel(value)) if np.ndim(value) else repr(value)
+
+        lines = ["&MIRROR"]
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if field.name in ("rbc", "rbs"):
+                for m, row in enumerate(np.atleast_2d(np.asarray(value, dtype=float)) if np.size(value) else ()):
+                    lines.append(f"  {field.name.upper()}({m}) = {text(row)}")
+            elif value is not None and not (field.name in self._ARRAYS and not np.size(value)):
+                lines.append(f"  {field.name.upper()} = {text(value)}")
+        Path(path).write_text("\n".join(lines + ["/", ""]), encoding="utf-8")
+        return Path(path)
+
     @property
     def config(self) -> MirrorConfig:
         """The numerical contract of the solve."""

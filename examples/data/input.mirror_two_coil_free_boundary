@@ -1,0 +1,28 @@
+! Free-boundary two-coil mirror, the geometry of the independent Pleiades
+! reference examples/data/pleiades_two_coil_beta_reference.csv: loops of
+! radius 0.9 m at z = +/-1 m with 2e5 A, plasma radius 0.25 m at the midplane
+! (PHIEDGE = pi 0.25^2 B_vac(0)), central beta 10 % (PRES_SCALE =
+! 0.1 B_vac(0)^2 / 2 mu0), p = PRES_SCALE (1 - s).  Solved from vacuum.
+! Run: vmex examples/data/input.mirror_two_coil_free_boundary --plot
+! Format: docs/reference/mirror-input.rst
+&MIRROR
+  NS = 7
+  MPOL = 0
+  ELEMENTS = 7
+  NXI = 13
+  Z_MIN = -0.8
+  Z_MAX = 0.8
+  PHIEDGE = 0.01641484954
+  PRES_SCALE = 278.082829
+  AM = 1.0 -1.0
+  CURRENT_DERIVATIVE = 0.0
+  GAMMA = 1.6666666666666667
+  FTOL = 1e-12
+  NITER = 2000
+  LFREEB = T
+  COIL_RADIUS = 0.9 0.9
+  COIL_Z = -1.0 1.0
+  COIL_CURRENT = 200000.0 200000.0
+  EXTERIOR_NTHETA = 12
+  EXTERIOR_ORDER = 6
+/
