@@ -29,118 +29,40 @@ High-order reconstruction and force certificate
 .. automodule:: vmex.core.strong_force
    :members:
 
-High-order correction transfer and preconditioner
--------------------------------------------------
+Force-balance polishing
+-----------------------
 
 .. automodule:: vmex.core.polish
-   :members:
+   :members: PolishConfig, PolishReport, PolishResult, polish_legacy_solution, polish_native,
+      native_polish_supported, physical_scales, polished_wout_ns, polished_wout_input,
+      polished_wout_state, sample_high_order_state
 
-.. automodule:: vmex.core.polish_driver
-   :members:
-
-.. automodule:: vmex.core.polish_homotopy
-   :members:
-
-.. automodule:: vmex.core.polish_implicit
-   :members:
-
-Both :func:`vmex.solve` and :func:`vmex.solve_multigrid` accept
-``polish_force_balance=False`` (unchanged behavior), ``True`` (required
-correction), or ``"auto"``.  ``"auto"`` skips an already-certified state,
-and additionally times one Gauss--Newton linear product before committing
-to the solve: if the configured iteration limits could run past
-``PolishConfig.auto_budget_seconds`` (``POLISH_BUDGET``,
-``--polish-budget``, default 3600 s) it reports the measurement, returns
-the equilibrium unpolished and uncertified, and names the knobs that
-override the decision.  It never raises, because nothing was attempted.
-``True`` never measures and never declines. The shorter
-``polish`` keyword remains an alias on the single-grid call. A standard VMEC
-solve never polishes unless the caller explicitly requests it. A standard
-VMEC deck enables the same path with comment directives that VMEC2000 ignores::
+:func:`vmex.solve`, :func:`vmex.solve_multigrid` and :func:`vmex.solve_file`
+accept ``polish_force_balance`` (``polish`` on the single-grid call and
+``solve_file``): ``False`` (default), ``True``, or ``"auto"``.  The polish
+covers fixed-boundary axisymmetric decks with prescribed pressure and iota
+(``NCURR = 0``, ``GAMMA = 0``, ``LASYM = F``); ``True`` on any other deck
+raises, ``"auto"`` leaves it unpolished.  A deck can request it with comment
+directives that VMEC2000 ignores::
 
    !@VMEX POLISH = AUTO
-   !@VMEX POLISH_TOL = 1.0E-8
    !@VMEX POLISH_FAIL = ERROR
-   !@VMEX POLISH_DEGREE = 5
-   !@VMEX POLISH_MAX_ITER = 40
-   !@VMEX POLISH_SPANS = 16
-   !@VMEX POLISH_BUDGET = 3600
 
-(the original single-flag spelling ``! VMEX: POLISH_FORCE_BALANCE = .TRUE.``
-still parses).  Directives are execution metadata, owned by
-:mod:`vmex.core.run_options` — they never become :class:`vmex.VmecInput`
-fields, and ``VmecInput.from_file`` ignores them while preserving all physics.
-Structured JSON carries the same keys in a reserved ``_vmex`` section that is
-removed before schema validation.  :func:`vmex.solve_file` runs a deck the way
-the CLI does — directives honored, ``wout_<case>.nc`` written — and explicit
-Python keywords override the file::
-
-   result = vmex.solve_file("input.case", polish="auto")
-
-Precedence is exactly ``CLI option > Python keyword > file directive >
-package default``; the package default is false, and the CLI prints which
-layer a polish request came from.
+(``! VMEX: POLISH_FORCE_BALANCE = .TRUE.`` still parses).  Directives belong
+to :mod:`vmex.core.run_options` and never become :class:`vmex.VmecInput`
+fields; structured JSON carries them in a reserved ``_vmex`` section.
+Precedence is ``CLI option > Python keyword > file directive > default``.
 ``polish_fail`` selects the failure behavior: ``"error"`` raises,
 ``"fallback"`` returns the unpolished state, ``"warn"`` does the same with a
-:class:`RuntimeWarning` — never a failure silently presented as polished. A successful result retains the ordinary ``state`` and exposes
-the VMEC-grid projection as ``polished_state``; an
-:class:`vmex.core.optimize.Equilibrium` requested with polishing uses that
-projected state, while the continuous solution remains in
-``native_equilibrium``.  CLI WOUT files instead sample
-``native_equilibrium`` on a denser radial mesh
-(:func:`vmex.core.polish_driver.polished_wout_ns`): on the solve mesh the
-stable wout reconstruction cannot resolve the between-node correction, so a
-solve-resolution export would silently discard most of the certified gain.
+:class:`RuntimeWarning`.
 
-Validated scope
-^^^^^^^^^^^^^^^
-
-Every case VMEX ships as a *certified* polish is axisymmetric
-(``NTOR = 0``).  No 3-D deck has yet passed the independent certificate, and
-the limit measured so far is cost rather than a demonstrated impossibility:
-on the W7-X standard configuration (``MPOL = NTOR = 10``, ``ns = 51``) one
-Gauss--Newton iteration takes about 1.75 h on 36 CPU cores, so the iteration
-count that produced the one substantial 3-D improvement — a 40% reduction in
-independent force error on a ``MPOL = NTOR = 5`` QA deck, which still failed
-the certificate — is a multi-day run at production resolution.  This is what
-``POLISH = AUTO`` measures and declines on.  The runs, their budgets, and
-their certificates are recorded in ``benchmarks/polish3d_tuning.md``.
-
-The certificate's ``normalized_l2`` divides the force error by the local
-force scale ``|JxB| + |grad p|``.  On a vacuum or near-vacuum deck both terms
-vanish and the ratio saturates at its ceiling of 2 whatever the equilibrium
-quality, so on such decks read the dimensional ``absolute_l2`` instead.
-
-The public primal path solves the overdetermined physical collocation residual
-with SOLVAX Gauss--Newton and accepts it only after independent force,
-radial-refinement, and nestedness checks.  A successful result carries a
-``polish_context`` for :func:`vmex.collocation_polish_tangent`,
-:func:`vmex.collocation_polish_adjoint`, and
-:func:`vmex.implicit_collocation_polished_state`.  These differentiate the
-exact least-squares stationarity equation, including its nonzero-residual
-Hessian term, without replaying nonlinear iterations.  The earlier square-root
-diagnostics remain internal to :mod:`vmex.core.polish_implicit`.
-
-A scalar objective differentiates through that converged state directly.  This
-example minimizes relative field-strength variation on one interior surface::
-
-   import jax
-   import jax.numpy as jnp
-   import vmex as vj
-
-   native = result.polish_context.runtime.native
-
-   def objective(value):
-       polished = vj.implicit_collocation_polished_state(
-           value, result.polish_context)
-       theta = jnp.linspace(0, 2 * jnp.pi, 12, endpoint=False)
-       zeta = jnp.linspace(0, 2 * jnp.pi, 6, endpoint=False)
-       tt, zz = jnp.meshgrid(theta, zeta, indexing="ij")
-       B = vj.evaluate_high_order_fields(polished, 0.7, tt, zz).B
-       magnitude = jnp.linalg.norm(B, axis=-1)
-       return jnp.var(magnitude / jnp.mean(magnitude))
-
-   gradient = jax.grad(objective)(native)
+A certified result carries ``native_equilibrium`` (the certified continuous
+state), ``strong_force`` (its independent certificate) and ``polish_report``;
+``polished_state`` is its view on the solve mesh and the deck's modes, which
+:class:`vmex.core.optimize.Equilibrium` uses.  WOUT files sample the native
+state on the denser :func:`vmex.core.polish.polished_wout_ns` mesh,
+with ``MPOL`` widened to hold padded modes, so the file carries the certified
+state.
 
 For boundary objectives, :func:`vmex.evaluate_high_order_surface` returns a
 one-field-period array view accepted by ESSOS, and

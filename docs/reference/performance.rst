@@ -345,92 +345,18 @@ millisecond; degree 7 is available for
 p-refinement and certification at a larger compile footprint (the record's
 ``peak_rss_increase_mib`` fields).
 
-High-order low-physics preconditioner (VMEX 0.7.0, 2026-08-28)
---------------------------------------------------------------
+Force-balance polish (2026-09-26)
+---------------------------------
 
-``benchmarks/polish_preconditioner.py`` measures the high-to-low transfer,
-one stored exact raw-force block factor, and forward and transpose
-high-order applications.  The record ``benchmarks/polish_preconditioner_m4.json``
-(commit ``7bb306e0``, arm64 macOS, JAX 0.11.1) disabled the persistent
-compilation cache and used float64 and 20 warm repeats:
-
-==  ====  ====  ==========  =================  =================  ===================  ===============
-ns  mpol  ntor  factor [s]  cold forward [ms]  warm forward [ms]  warm transpose [ms]  factor RSS [MiB]
-==  ====  ====  ==========  =================  =================  ===================  ===============
-5   3     0     4.61        98.1               0.0274             0.0269               193
-7   4     0     4.44        121                0.0289             0.0291               201
-5   3     1     5.58        159                0.0306             0.0336               217
-==  ====  ====  ==========  =================  =================  ===================  ===============
-
-Across these cases the transfer round trip is below ``1.2e-15``,
-forward/transpose duality below ``2.6e-15``, and the factored low-block
-residual below ``4.8e-12``.  Factor construction includes JAX assembly and
-compilation and dominates a first use, so factors are kept across Krylov
-steps and continuation stages until the quality policy requests a refresh.
-The table is an overhead gate at structural resolution, not a scaling claim.
-
-Collocation-polish derivative gate (VMEX 0.7.1, 2026-08-29)
------------------------------------------------------------
-
-``benchmarks/polish_implicit.py`` measures matrix-free implicit-function
-tangents, adjoints, and the custom VJP of the least-squares stationarity
-equation the polish solves.  The record ``benchmarks/polish_implicit_m4.json``
-(commit ``e176b1ac``, arm64 macOS, JAX 0.11.1, persistent cache disabled)
-uses a 17-coordinate Solov'ev structural case whose primal reaches relative
-optimality ``1.13e-7`` in nine steps.
-
-- Warm medians over ten repeats: 6.44 ms tangent, 6.83 ms adjoint, 6.61 ms
-  custom VJP.  Cold compile-plus-execute: 7.13 s, 7.50 s and 9.43 s.
-- Incremental peak RSS, compilation included: 52.2 MiB, 156.4 MiB and
-  237.9 MiB.
-- Tangent and adjoint each take 17 Krylov iterations; their dot-product
-  mismatch is ``1.90e-10``, and the custom VJP agrees with the explicit
-  adjoint to ``8.75e-21`` relative squared error.
-- For the relative field-strength variance at ``rho=0.7``, the implicit
-  directional derivative agrees with two re-polished finite-difference
-  endpoints to ``5.11e-5`` relative error; those two solves take 21.22 s
-  against the 6.61 ms warm gradient.
-
-Polish memory at production stellarator resolution (VMEX 0.8.1, 2026-09-03)
----------------------------------------------------------------------------
-
-``benchmarks/polish_memory.py`` runs the polish setup three times on one
-build, changing only how the independent force sweep is scheduled, and
-records each arm's peak resident memory from ``os.wait4`` so an arm the OS
-kills still reports one.  The record is ``benchmarks/polish_memory_w7x.json``
-(commit ``529f1789``, x86_64 Linux CPU, JAX 0.9.2), on the W7-X standard
-configuration at ``MPOL = NTOR = 10``, ``ns = 51``, the resolution at which
-polishing was reported to run out of memory.
-
-- ``flat``, the pre-0.8.2 sweep (one ``vmap`` over every evaluation point),
-  peaks at 34.2 GiB on the first certificate and exits at the chart stage.
-- ``batched`` schedules the same per-point kernel in automatically sized
-  batches.  Its certificate peaks at 3.05 GiB, but without checkpointing the
-  chart build still stores whole-grid linearization residuals and the arm
-  exits there too.
-- ``auto``, the shipped policy, also checkpoints the kernel so reverse-mode
-  passes stay per batch: 3.01 GiB at the certificate, 15.4 GiB at the chart,
-  and it completes.
-
-The certificate's absolute L2 force error agrees across the three arms to 14
-significant digits; only the schedule differs.  This is a memory record:
-the batched arms trade time for memory, and the record's wall times include
-that trade.
-
-Polish cost prediction (VMEX 0.8.1, 2026-09-03)
------------------------------------------------
-
-``benchmarks/polish_cost.py`` records, per deck, what one Gauss--Newton
-linear product costs and what the configured iteration limits allow in the
-worst case.  These measurements are behind
-``PolishConfig.auto_budget_seconds``, the ceiling ``POLISH = AUTO`` prices a
-solve against before committing to it.  They are machine-specific, which is
-why AUTO measures at run time.  The record is
-``benchmarks/polish_cost_office.json`` (commit ``529f1789``, AMD 36-core
-x86_64 Linux CPU, JAX 0.9.2) at driver defaults, 80 nonlinear iterations of
-up to 600 linear products: the shaped tokamak prices at 1 126 s and the
-bundled Solov'ev at 501 s, both inside the default 3 600 s budget, while the
-finite-beta QA case prices at 87 848 s and is the deck AUTO turns away.
+``vmex examples/data/input.shaped_tokamak_pressure --polish`` (M4 CPU,
+float64) certifies an RMS force of ``7.1e-6`` of ``volavgB**2 / (mu0
+Aminor_p)`` with projected stationarity ``1.3e-10`` in 68 s end to end with an
+empty compilation cache and 32 s with a populated one; the ordinary solve alone
+takes about 5 s.  A new chart per knot insertion changes array shapes, so the
+first run compiles each kernel shape once.  In a warm polish the Gauss--Newton
+normal matrix (partial assembly ``A = D S``, 0.55 s on the final 4 369-coordinate
+chart), the SuperLU KKT factors (about 0.9 s each), and the two independent
+certificates dominate.  Peak RSS is about 3.5 GB.
 
 Historical and generated records
 --------------------------------

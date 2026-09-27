@@ -2077,7 +2077,6 @@ class SolveResult:
     native_equilibrium: Any = None
     strong_force: Any = None
     polish_report: Any = None
-    polish_context: Any = None
 
 
 def _result_from_carry(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
@@ -2693,7 +2692,7 @@ def _polish_solve_result(
 
     if polish is False:
         return result
-    from .polish_driver import PolishConfig, polish_legacy_solution
+    from .polish import PolishConfig, polish_legacy_solution
 
     if polish_config is not None and not isinstance(polish_config, PolishConfig):
         raise TypeError("polish_config must be a PolishConfig")
@@ -2701,12 +2700,10 @@ def _polish_solve_result(
         resolved = PolishConfig() if polish_config is None else polish_config
         emit(polish_banner(
             mode="auto" if polish == "auto" else "on",
-            degree=resolved.radial_degree,
-            spans=resolved.radial_spans,
+            degree=resolved.degree,
             ns=int(resolution.ns),
-            tolerance=resolved.tolerance,
-            certificate_tolerance=resolved.certificate_tolerance,
-            max_iterations=resolved.max_nonlinear_iterations,
+            force_tolerance=resolved.force_tolerance,
+            stationarity_tolerance=resolved.stationarity_tolerance,
         ), end="")
     polished = polish_legacy_solution(
         source,
@@ -2718,13 +2715,14 @@ def _polish_solve_result(
         verbose=verbose,
         emit=emit,
     )
+    if polished is None:  # polish="auto" on a deck outside the polish's scope
+        return result
     return replace(
         result,
         polished_state=polished.compatibility_state,
         native_equilibrium=polished.native_equilibrium,
         strong_force=polished.strong_force,
         polish_report=polished.polish_report,
-        polish_context=polished.context,
     )
 
 
@@ -2813,19 +2811,17 @@ def solve(
     default (``NONE``) path is byte-identical to the 1D-only solver.
 
     ``polish_force_balance=False`` preserves the legacy result exactly.
-    ``polish_force_balance=True``
-    requires a converged legacy solve, constructs the high-order fixed-boundary
-    root, and follows :class:`~vmex.core.polish_driver.PolishConfig` failure
-    semantics.  ``polish_force_balance="auto"`` additionally permits the
-    driver to return immediately when the independent certificate already
-    passes.  Polishing
-    requires a :class:`VmecInput` source. ``polished_state`` is the native
-    correction projected onto the sampled VMEC solve mesh (the in-memory
-    VMEC-grid view; WOUT export instead samples the certified native state
-    on the denser :func:`~vmex.core.polish_driver.polished_wout_ns` mesh);
-    ``native_equilibrium``, ``strong_force``, ``polish_report``, and
-    ``polish_context`` carry the certified high-order result and its frozen
-    derivative chart. ``polish`` remains a backward-compatible alias.
+    ``polish_force_balance=True`` polishes the converged solve with
+    :func:`~vmex.core.polish.polish_legacy_solution` (axisymmetric
+    fixed-boundary decks with prescribed pressure and iota; other decks raise)
+    and follows :class:`~vmex.core.polish.PolishConfig` failure
+    semantics; ``"auto"`` polishes supported decks and leaves others
+    unpolished.  Polishing requires a :class:`VmecInput` source.
+    ``native_equilibrium``, ``strong_force`` and ``polish_report`` carry the
+    certified native result; ``polished_state`` is its view on the solve mesh
+    and the deck's modes (WOUT export samples the native state on the denser
+    :func:`~vmex.core.polish.polished_wout_ns` mesh).  ``polish``
+    remains a backward-compatible alias.
     """
     if resolution is None and isinstance(source, VmecInput):
         resolution = resolution_from_input(source)

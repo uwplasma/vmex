@@ -409,6 +409,14 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
     np.testing.assert_allclose(field.gradB(), expected_grad, rtol=0, atol=2e-10)
     np.testing.assert_allclose(field.gradgradB(), 0.0, rtol=0, atol=2e-8)
 
+    # Just inside, just outside, far outside and in the torus hole: exterior
+    # points are NaN in s, theta, phi and B alike, never the clipped s = 1.05.
+    edge = major_radius + minor_radius
+    probe = jnp.array([[edge - 1e-6, 0, 0], [edge + 1e-6, 0, 0], [2.0, 0, 0], [0.5, 0, 0]])
+    outside = np.isnan(np.asarray(field.flux_coordinates(probe)))
+    np.testing.assert_array_equal(outside, np.isnan(np.asarray(field.B(probe))))
+    np.testing.assert_array_equal(outside.all(axis=1), [False, True, True, True])
+
     axis_points = jnp.array([[major_radius, 0.0, 0.0]])
     field.set_points(axis_points)
     np.testing.assert_allclose(

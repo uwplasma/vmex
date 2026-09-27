@@ -209,41 +209,41 @@
     },
     {
       "path": "docs/_static/figures/readme_polish_before_after.webp",
-      "sha256": "685274105cb8efaa1c72b886ef6459ebb47b33002232257553e597396f6f6b7e",
-      "bytes": 36630,
+      "sha256": "d85d810fb2bf0dc382e2b89a761e55175233dd5da3a9c579682b45d23fa8d04d",
+      "bytes": 34518,
       "generator": "examples/force_balance_polishing.py",
       "command": "python examples/force_balance_polishing.py",
       "inputs": [
-        "examples/data/input.shaped_tokamak_pressure_polished"
+        "examples/data/input.shaped_tokamak_pressure"
       ],
       "record": null,
-      "generated": "2026-09-20",
-      "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
+      "generated": "2026-09-26",
+      "hardware": "Apple M4 (arm64), macOS 26.6, CPU",
       "reproducible": "command",
-      "bytes_verified": true,
+      "bytes_verified": false,
       "used_in": [
         "README.md"
       ],
-      "note": "The example solves and polishes the deck, writes the unpolished state through the same export as the polished one (both WOUT files on 129 surfaces), reads each file back and certifies it with the same independent oracle, and plots the two certificates. It writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to its output directory. Rendered on 2026-09-20 and re-derived by a second run that reproduced the bytes."
+      "note": "Certified force profiles of the unpolished and polished WOUT files, both on 370 surfaces and read back on the polished spline basis."
     },
     {
-      "path": "docs/_static/figures/readme_polish_summary.webp",
-      "sha256": "cb73631852f030c066e1243f6dc61abf9fe875289c644dd6276d13f0cc8c1630",
-      "bytes": 132596,
-      "generator": "benchmarks/make_strong_force_comparison.py",
-      "command": "python benchmarks/make_strong_force_comparison.py --summary-before-cert ... --summary-after-cert ... --summary-wout-before ... --summary-wout-after ...",
+      "path": "docs/_static/figures/readme_polish_plot.webp",
+      "sha256": "ae6b19e47a95752b5c949df095d5adb71fbc8e5d79ca6b7a1d4ca44682889c6d",
+      "bytes": 273940,
+      "generator": "examples/force_balance_polishing.py",
+      "command": "python examples/force_balance_polishing.py",
       "inputs": [
-        "benchmarks/strong_force_comparison_m4.json"
+        "examples/data/input.shaped_tokamak_pressure"
       ],
-      "record": "benchmarks/strong_force_comparison_m4.json",
-      "generated": "2026-09-02",
-      "hardware": "Apple M4",
-      "reproducible": "external-data",
+      "record": null,
+      "generated": "2026-09-26",
+      "hardware": "Apple M4 (arm64), macOS 26.6, CPU",
+      "reproducible": "command",
       "bytes_verified": false,
       "used_in": [
-        "docs/explanation/validation.md"
+        "README.md"
       ],
-      "note": "The four certificate and wout paths are supplied on the command line and are not committed. The record file carries this figure's sha256 and the before/after independent L2 the panel plots, and tests/test_performance_docs.py already guards both."
+      "note": "vmex --plot summaries of the unpolished and polished WOUT files side by side; the force panel is the WOUT finite-difference reconstruction."
     },
     {
       "path": "docs/_static/figures/readme_precond.webp",

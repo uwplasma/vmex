@@ -33,7 +33,7 @@ The workflows obtain their selectors from the manifest:
   representative fixed-boundary, free-boundary/NESTOR, mirror, device, and AD
   paths. Changed executable lines must be at least 95% covered.
 - ``Nightly`` runs optimization and optional integrations, plus the retained
-  nonlinear polish, homotopy, file-directive and free-boundary adjoint checks.
+  nonlinear polish, file-directive and free-boundary adjoint checks.
   A full-suite ownership entry alone does not schedule a test: its selector
   must also appear in a workflow.
 - ``Weekly high resolution`` runs the selected high-resolution campaigns and
@@ -63,8 +63,8 @@ PR physics and parity jobs have a 25-minute timeout. Actual successful job
 times establish the runtime gate. ``full`` marks retain expensive checks for
 scheduled runs; they do not weaken assertions. Run either tier locally::
 
-  VMEX_COMPILATION_CACHE=disabled pytest -q -m "not full and not weekly" tests/test_polish_linear.py
-  RUN_FULL=1 VMEX_COMPILATION_CACHE=disabled pytest -q tests/test_polish_linear.py
+  VMEX_COMPILATION_CACHE=disabled pytest -q -m "not full and not weekly" tests/test_polish.py
+  RUN_FULL=1 VMEX_COMPILATION_CACHE=disabled pytest -q tests/test_polish.py
 
 Use the restoring ``_module_jit_enabled`` fixture when a module needs compiled
 solves; an unscoped ``jax.config.update`` can change later tests. Directive

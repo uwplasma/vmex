@@ -340,31 +340,15 @@ def test_lforbal_iteration_exhaustion_writes_wout(tmp_path):
 
 
 def test_polish_cli_flags_override_file_directives():
-    """--polish-* flags beat !@VMEX directives; untouched fields stay file."""
+    """--polish/--polish-fail beat !@VMEX directives; untouched fields stay file."""
     from vmex.core.run_options import parse_indata_run_options
 
     file_options = parse_indata_run_options(
-        "!@VMEX POLISH = AUTO\n!@VMEX POLISH_TOL = 5.0E-3\n"
-        "!@VMEX POLISH_MAX_ITER = 12\n&INDATA\n/\n")
-    args = cli.build_parser().parse_args(
-        ["input.x", "--polish-tol", "1e-2", "--polish-spans", "8"])
-    options, sources = cli._resolve_polish_cli(args, file_options)
+        "!@VMEX POLISH = AUTO\n!@VMEX POLISH_FAIL = WARN\n&INDATA\n/\n")
+    options, sources = cli._resolve_polish_cli(cli.build_parser().parse_args(["input.x"]), file_options)
     assert options.polish == "auto" and sources["polish"] == "file"
-    assert options.polish_tol == 1e-2 and sources["polish_tol"] == "cli"
-    assert options.polish_max_iter == 12
-    assert sources["polish_max_iter"] == "file"
-    assert options.polish_spans == 8 and sources["polish_spans"] == "cli"
-    # POLISH_BUDGET follows the same precedence, and reaches the driver
-    # config as the AUTO wall-clock ceiling rather than any solver tolerance.
-    from vmex.core.run_options import polish_config_from_options
-
-    file_options = parse_indata_run_options(
-        "!@VMEX POLISH = AUTO\n!@VMEX POLISH_BUDGET = 900\n&INDATA\n/\n")
-    options, sources = cli._resolve_polish_cli(
-        cli.build_parser().parse_args(["input.x"]), file_options)
-    assert options.polish_budget == 900.0 and sources["polish_budget"] == "file"
-    assert polish_config_from_options(options).auto_budget_seconds == 900.0
-    options, sources = cli._resolve_polish_cli(
-        cli.build_parser().parse_args(["input.x", "--polish-budget", "60"]),
-        file_options)
-    assert options.polish_budget == 60.0 and sources["polish_budget"] == "cli"
+    assert options.polish_fail == "warn" and sources["polish_fail"] == "file"
+    args = cli.build_parser().parse_args(["input.x", "--polish", "--polish-fail", "error"])
+    options, sources = cli._resolve_polish_cli(args, file_options)
+    assert options.polish is True and sources["polish"] == "cli"
+    assert options.polish_fail == "error" and sources["polish_fail"] == "cli"

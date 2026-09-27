@@ -199,65 +199,18 @@ Figure/source hashes remain checked in
 The checks preserve this historical record; they do not rerun the solvers or
 certify a native accuracy ordering.
 
-### What the tokamak polish actually improves
+### Force-balance polish
 
-The [same-native-state before/after record](../../benchmarks/polish_force_error_2026-09-03.json)
-uses the same basis and certificate quadrature on the shaped tokamak:
-
-| quantity | before | after | ratio |
-|---|---|---|---|
-| `eps_F` volume L2 (bounded by 2) | `1.284e-2` | `1.803e-3` | 7.1x |
-| dimensional \|F\| volume L2, N m<sup>-3</sup> | `3.330e2` | `2.068e2` | 1.61x |
-| `<\|F\|>/<\|grad p\|>`, whole domain | `2.090e-3` | `1.586e-3` | 1.32x |
-| `<\|F\|>/<\|grad(B^2/2mu0)\|>`, whole domain | `2.374e-3` | `1.801e-3` | 1.32x |
-| `<\|F\|>/<\|grad p\|>`, `s` in `[0.1, 0.99]` | `1.658e-3` | `1.561e-3` | 1.06x |
-| \|F\| L2 near axis (`rho < 0.2`), N m<sup>-3</sup> | `9.773e2` | `6.718e1` | 14.5x |
-| \|F\| L2 bulk (`0.2 <= rho <= 0.8`) | `1.630e2` | `1.470e2` | 1.11x |
-| \|F\| L2 edge (`rho > 0.8`), N m<sup>-3</sup> | `4.089e2` | `2.844e2` | 1.44x |
-
-
-The correction is strongest near the axis. The dimensional volume L2 improves
-1.61x, while the pressure-normalized volume mean improves 1.32x overall and
-1.06x in the stated bulk window. These are different scientific questions;
-the 7.1x pointwise-ratio improvement must never be quoted on its own.
-
-The README quotes different numbers for the same polish (near-axis error
-2.9e3 -> 61 N m<sup>-3</sup>, `<|F|>/<|grad(B^2/2mu0)|>` 2.3e-3 -> 1.9e-3).
-Those come from `examples/force_balance_polishing.py`, which exports both
-states to WOUT files on the same 129-surface mesh, reads them back and
-certifies the read-back files. The table above evaluates the native spline
-states directly. The export and read-back add reconstruction error, most of
-it near the axis of the unpolished state: its near-axis error is 9.8e2 N
-m<sup>-3</sup> native but 2.9e3 read back. The polished state survives the
-round trip closely (6.7e1 native, 61 read back; `eps_F` 1.80e-3 native, 1.90e-3
-read back). Both comparisons hold one mesh and one oracle fixed. The native
-table measures the polish alone. The README pair measures what a user
-reading the WOUT files gets.
-
-Earlier versions of this section quoted a 26-fold gain from WOUTs exported at
-31 and 129 radial surfaces. That mixed correction and reconstruction effects;
-it is withdrawn. The following historical summary contains those export views:
-
-![Shaped-tokamak geometry and exported force profiles](../_static/figures/readme_polish_summary.webp)
-
-### Vacuum normalization and unsuccessful attempts
-
-The pointwise `eps_F = 2|F|/(|J×B|+|grad p|+floor)` is bounded above by 2 by
-construction. It cannot rank near-vacuum states when it saturates. In the
-[bundled Solovev record](../../benchmarks/polish_force_error_solovev_2026-09-03.json),
-its volume L2 is `1.969`, with `<|grad p|>` = `1.35e-1` Pa/m compared with
-`<|grad(B²/2mu0)|>` = `8.03e3` Pa/m. The dimensional mean force is `4.00e1`
-N/m³ and magnetic-normalized L2 is `1.22e-2`. A zero magnetic-pressure gradient
-also makes that denominator unavailable; dimensional force and a declared
-fixed `B_ref²/(mu0 a_ref)` scale remain meaningful.
-
-[`benchmarks/polish3d_tuning.md`](https://github.com/uwplasma/vmex/blob/main/benchmarks/polish3d_tuning.md) records
-uncertified QA and W7-X attempts of 5 h 22 m and 11 h 09 m on the office CPU.
-Their budgets and normalizations differ, so these do not isolate an angular
-resolution floor or predict success with more iterations. No production 3-D
-polish has yet demonstrated the complete force, stationarity and derivative
-contract. The [method reference](high-order-force-balance.rst) explains the
-remaining functional/chart limitations.
+`examples/force_balance_polishing.py` polishes `input.shaped_tokamak_pressure`
+and reads both WOUT files back on the polished spline basis: the RMS force
+falls from 2.0e5 to 42 N m<sup>-3</sup> over the volume, 9.8e5 to 190 near the
+axis and 3.2e3 to 23 at the edge, with projected stationarity 1.3e-10; the
+written file reproduces the native certificate. The pointwise
+`eps_F = 2|F|/(|J×B|+|grad p|+floor)` is bounded above by 2 by construction
+and cannot rank near-vacuum states, so read the dimensional force with it.
+The polish covers fixed-boundary axisymmetric decks with prescribed pressure
+and iota; a 3-D polish is future work. See the
+[method reference](high-order-force-balance.rst).
 
 ## Application record: finite-beta QI diagnostics
 
