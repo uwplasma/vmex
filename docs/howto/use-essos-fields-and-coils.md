@@ -106,26 +106,34 @@ above.
 ### From the CLI
 
 ```console
-vmex --trace wout_case.nc                  # trace, print, four figures
+vmex --trace wout_case.nc                  # 1000 alphas, 1e-2 s, at ARIES-CS size
 vmex input.case --trace                    # solve first, then trace
-vmex --trace wout_case.nc --outdir figs/ \
-     --trace-particles 400 --trace-tmax 1e-3 --trace-s 0.3
+vmex --trace wout_case.nc --trace-particles 5000 --trace-tmax 1e-2
+vmex --trace wout_case.nc --trace-no-scale # trace the equilibrium as given
 ```
 
-The console output gives the loss fraction, the lost / axis-termination /
-solver-failure counts, and the tracing wall time. Four figures are written
-next to the input (or into `--outdir`): `*_trace_trajectories.png` (sampled
-orbits in 3-D over a translucent LCFS), `*_trace_vparallel.png`
-(normalized parallel velocity), `*_trace_loss_fraction.png` (cumulative
-loss fraction against time), and `*_trace_energy_error.png` (relative
-energy error of the integrator).
+Loss fractions are physical only at reactor scale, so `--trace` first
+scales the equilibrium in memory to ARIES-CS size (the `--scale` rule,
+`<B> = 5.8646 T` and `a = 1.7044 m`, or `--scale-target axis`) and prints
+both factors. The console output gives the loss fraction with its binomial
+error, the lost / axis-termination / solver-failure counts, and the wall
+time split into compile and run. Next to the input (or in `--outdir`) it
+writes `*_trace.json` (counts, factors, step, devices, versions, timing),
+`*_trace.npz` (times, loss fractions, loss times, initial conditions) and
+four figures: `*_trace_loss_fraction.png` (cumulative loss fraction on a log
+time axis with a 1-sigma band), `*_trace_trajectories.png` (sampled orbits
+in 3-D over a translucent LCFS), `*_trace_vparallel.png` and
+`*_trace_energy_error.png`.
 
 Particles start on one flux surface `s` (uniform in poloidal angle, one
 field period in toroidal angle, uniform pitch), at the fusion-alpha birth
-energy of 3.52 MeV. An orbit counts as lost when it reaches `s >= 0.99`.
-Loss fractions are physically meaningful at reactor scale — run
-`vmex --scale wout_case.nc` first to put the equilibrium at ARIES-CS field
-and size.
+energy of 3.52 MeV. An orbit counts as lost when it reaches the ESSOS loss
+surface (`s >= 0.99` sampled in ESSOS 0.17). The default fixed step,
+`2.5e-7 s` at `a = 1.7044 m` and proportional to `a` otherwise, is the one at
+which the ARIES-CS loss fraction stops changing under step halving; the
+former `5e-7 s` overstated it by about 40 %. `--trace` gives JAX one CPU
+device per core so ESSOS shards the particles; a device count in
+`XLA_FLAGS` or `JAX_NUM_CPU_DEVICES` wins.
 
 ### From Python
 

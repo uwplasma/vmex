@@ -50,8 +50,12 @@ Options
        every nonzero boundary mode.
    * - ``--scale``
      - Write a scaled input or WOUT. Optional positional factors are
-       ``B_scale R_scale``; with no factors the targets are
-       ``|b0| = 5.7 T`` and ``Aminor_p = 1.7 m`` (ARIES-CS).
+       ``B_scale R_scale``; with no factors the target is ARIES-CS size in
+       the ``--scale-target`` convention.
+   * - ``--scale-target {volavgB,axis}``
+     - ARIES-CS convention of ``--scale`` and ``--trace``: ``volavgB``
+       (default) ``volavgB = 5.8646 T``, ``Aminor_p = 1.7044 m``; ``axis``
+       Boozer ``B00 = 5.7 T`` on the axis, ``a = 1.7 m``.
    * - ``--booz``
      - Run ``booz_xform_jax`` after solving, or directly from a ``wout_*.nc``
        file, and write reusable ``boozmn_*.nc`` data. It is not required for
@@ -63,17 +67,20 @@ Options
        ``all`` (default).
    * - ``--trace``
      - Trace fusion alpha particles through the equilibrium with ESSOS
-       (guiding centre, exact loss fraction): print the loss fraction and
-       the lost/axis-termination/failure counts, and write the four tracing
-       figures (3-D orbits, ``v_par/v``, loss fraction vs time, energy
-       error). Works on a ``wout_*.nc`` input or after solving an input
-       file (requires ESSOS, ``pip install essos``). See
-       :doc:`/howto/use-essos-fields-and-coils`.
+       (guiding centre), scaled in memory to ARIES-CS size: print the
+       scaling factors, the loss fraction with its binomial error and the
+       lost/axis-termination/failure counts, and write ``*_trace.json``,
+       ``*_trace.npz`` and four figures (loss fraction vs log time, 3-D
+       orbits, ``v_par/v``, energy error). Works on a ``wout_*.nc`` input
+       or after solving an input file (requires ESSOS, ``pip install
+       essos``). See :doc:`/howto/use-essos-fields-and-coils`.
+   * - ``--trace-no-scale``
+     - Trace the equilibrium as given.
    * - ``--trace-tmax X`` / ``--trace-timestep X``
-     - Tracing horizon / integrator step in seconds (defaults ``3e-4`` /
-       ``5e-7``).
+     - Tracing horizon / integrator step in seconds (defaults ``1e-2`` /
+       ``2.5e-7`` times ``Aminor_p / 1.7044 m``).
    * - ``--trace-particles N`` / ``--trace-times N``
-     - Ensemble size / saved samples per orbit (defaults 200 / 200).
+     - Ensemble size / saved samples per orbit (defaults 1000 / 1000).
    * - ``--trace-s X`` / ``--trace-seed N``
      - Launch surface ``s`` (default 0.25) and sampling seed (default 42).
    * - ``--outdir DIR``

@@ -18,6 +18,7 @@ from vmex.core.multigrid import solve_free_boundary_multigrid, solve_multigrid
 from vmex.core.postprocess import full_mesh_from_half
 from vmex.core.scaling import (
     aries_cs_scales,
+    b00_axis,
     input_minor_radius,
     probe_input,
     scale_input,
@@ -68,8 +69,8 @@ def test_free_boundary_probe_refines_without_full_ladder(monkeypatch):
 
     states = [object(), object()]
     outputs = [
-        SimpleNamespace(b0=2.0, Aminor_p=0.5),
-        SimpleNamespace(b0=2.1, Aminor_p=0.55),
+        SimpleNamespace(b0=2.0, volavgB=2.2, Aminor_p=0.5),
+        SimpleNamespace(b0=2.1, volavgB=2.31, Aminor_p=0.55),
     ]
 
     def fake_solve(*args, **kwargs):
@@ -101,6 +102,8 @@ def test_free_boundary_probe_refines_without_full_ladder(monkeypatch):
     assert (probe.coarse_ns, probe.fine_ns) == (9, 17)
     assert probe.b0 == 2.1
     assert probe.aminor == 0.55
+    assert probe.field == 2.31
+    assert probe.field_relative_change == pytest.approx(0.11 / 2.31)
 
 
 def test_mgrid_scaling_distinguishes_per_ampere_and_raw_tables():
@@ -389,10 +392,34 @@ def test_aries_cs_wout_targets(finite_beta_similarity):
     assert input_minor_radius(inp) == pytest.approx(original.Aminor_p, rel=2e-14)
     b_scale, r_scale = aries_cs_scales(original)
     scaled = scale_wout(original, b_scale=b_scale, r_scale=r_scale)
-    assert abs(scaled.b0) == pytest.approx(5.7)
-    assert scaled.Aminor_p == pytest.approx(1.7)
-    with pytest.raises(ValueError, match="nonzero b0"):
-        aries_cs_scales(dataclasses.replace(original, b0=0.0))
+    assert scaled.volavgB == pytest.approx(5.8646)
+    assert scaled.Aminor_p == pytest.approx(1.7044)
+    b_axis, r_axis = aries_cs_scales(original, "axis")
+    axis = scale_wout(original, b_scale=b_axis, r_scale=r_axis)
+    assert b00_axis(axis) == pytest.approx(5.7, rel=1e-12)
+    assert axis.Aminor_p == pytest.approx(1.7)
+    with pytest.raises(ValueError, match="nonzero field"):
+        aries_cs_scales(dataclasses.replace(original, volavgB=0.0))
+    with pytest.raises(ValueError, match="unknown scale target"):
+        aries_cs_scales(original, "b0")
+
+
+@pytest.mark.parametrize("name", ["QA", "QH"])
+def test_reactor_scale_reference_wouts_are_fixed_points(name):
+    """G1: the Landreman-Paul reactor-scale wouts are already at ARIES-CS size."""
+    path = DATA / f"wout_LandremanPaul2021_{name}_reactorScale_lowres_reference.nc"
+    if not path.exists():
+        pytest.skip(f"{path.name} not fetched (tools/fetch_assets.py)")
+    np.testing.assert_allclose(aries_cs_scales(read_wout(path)), 1.0, atol=1e-3)
+
+
+def test_b00_axis_is_the_axis_field_of_a_tokamak():
+    """Axisymmetry: Boozer B00 on the axis is |B| there, i.e. |b0|."""
+    path = DATA / "wout_circular_tokamak_reference.nc"
+    if not path.exists():
+        pytest.skip(f"{path.name} not fetched (tools/fetch_assets.py)")
+    wout = read_wout(path)
+    assert b00_axis(wout) == pytest.approx(abs(wout.b0), rel=1e-3)
 
 
 def test_boozer_transform_obeys_same_similarity(finite_beta_similarity, tmp_path):
@@ -453,8 +480,13 @@ def test_cli_explicit_input_and_default_wout_scaling(
         "--scale", str(wout_path), "--outdir", str(tmp_path), "--quiet",
     ]) == 0
     scaled_wout = read_wout(tmp_path / "wout_case_scaled.nc")
-    assert abs(scaled_wout.b0) == pytest.approx(5.7)
-    assert scaled_wout.Aminor_p == pytest.approx(1.7)
+    assert scaled_wout.volavgB == pytest.approx(5.8646)
+    assert scaled_wout.Aminor_p == pytest.approx(1.7044)
+    assert cli.main([
+        "--scale", str(wout_path), "--scale-target", "axis",
+        "--outdir", str(tmp_path), "--quiet",
+    ]) == 0
+    assert b00_axis(read_wout(tmp_path / "wout_case_scaled.nc")) == pytest.approx(5.7)
 
 
 def test_cli_scales_free_boundary_mgrid_sidecar(tmp_path):
@@ -537,7 +569,7 @@ def test_cli_default_input_scaling_reconverges_to_aries_cs(tmp_path, capsys):
         "--device", "cpu",
     ]) == 0
     output = capsys.readouterr().out
-    match = re.search(r"b0=.*?\(change ([0-9.eE+-]+)\)", output)
+    match = re.search(r"volavgB=.*?\(change ([0-9.eE+-]+)\)", output)
     assert match is not None
     declared_error = float(match.group(1))
     scaled_input = VmecInput.from_file(tmp_path / "input.tiny_scaled")
@@ -551,5 +583,5 @@ def test_cli_default_input_scaling_reconverges_to_aries_cs(tmp_path, capsys):
         niter=int(result.iterations),
         converged=bool(result.converged),
     )
-    assert abs(abs(scaled_wout.b0) / 5.7 - 1.0) <= 2.0 * declared_error
-    assert scaled_wout.Aminor_p == pytest.approx(1.7, rel=2e-12)
+    assert abs(scaled_wout.volavgB / 5.8646 - 1.0) <= 2.0 * declared_error
+    assert scaled_wout.Aminor_p == pytest.approx(1.7044, rel=2e-12)

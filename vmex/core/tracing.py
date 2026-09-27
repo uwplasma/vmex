@@ -31,19 +31,37 @@ outputs.  Consequences of that restriction:
 Particles are sampled uniformly on the surface ``s``: ``theta`` over
 ``[0, 2*pi)``, ``phi`` over one field period ``[0, 2*pi/nfp)``, and pitch
 ``v_par/v`` over ``[-1, 1)``, from ``jax.random.PRNGKey(seed)``.  A particle
-counts as lost when its orbit reaches ``s >= 0.99`` (the ESSOS
-``loss_fraction`` criterion).
+counts as lost when its orbit reaches the loss surface of the installed
+ESSOS (``s >= 0.99`` sampled in 0.17, the LCFS from 0.18).
+
+By default the equilibrium is first scaled in memory to ARIES-CS size
+(:func:`~vmex.core.scaling.aries_cs_scales`, ``scale="volavgB"``), because
+alpha orbit widths, and hence losses, depend on the absolute field and
+size.  The default step, :data:`TIMESTEP` at ``Aminor_p = 1.7044`` m and
+proportional to ``Aminor_p`` otherwise, holds the step length of a
+3.5 MeV alpha at a fixed fraction of the device.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import json
 import tempfile
 import time
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+# Converged fixed step [s] at Aminor_p = 1.7044 m (plan section T.1).
+TIMESTEP = 2.5e-7
+_COMPILE_S = [0.0, 0.0]  # compile seconds, listener registered
+
+
+def _compile_listener(event: str, duration: float, **_: Any) -> None:
+    if event.startswith("/jax/core/compile/"):
+        _COMPILE_S[0] += float(duration)
 
 
 def _essos_imports():
@@ -80,6 +98,36 @@ class AlphaTracingResult:
     trajectories: np.ndarray = dataclasses.field(repr=False)
     trajectories_xyz: np.ndarray = dataclasses.field(repr=False)
     energies: np.ndarray = dataclasses.field(repr=False)
+    initial_conditions: np.ndarray = dataclasses.field(repr=False, default=None)
+    metadata: dict = dataclasses.field(repr=False, default_factory=dict)
+
+    @property
+    def loss_fraction_sigma(self) -> float:
+        """Binomial standard error of :attr:`loss_fraction`."""
+        f = self.loss_fraction
+        return float(np.sqrt(f * (1.0 - f) / max(self.nparticles, 1)))
+
+    def save(self, stem: str | Path) -> tuple[Path, Path]:
+        """Write ``<stem>_trace.json`` (counts, factors, versions, timing) and
+        ``<stem>_trace.npz`` (times, loss fractions, loss times, initial
+        conditions ``s, theta, phi, v_par/v``), so a run can be replotted."""
+        stem = Path(stem)
+        summary = {
+            "nparticles": self.nparticles, "loss_fraction": self.loss_fraction,
+            "loss_fraction_sigma": self.loss_fraction_sigma,
+            "particles_lost": self.particles_lost,
+            "particles_unresolved": self.particles_unresolved,
+            "particles_failed": self.particles_failed,
+            "wall_time_s": self.wall_time_s,
+            "particle_energy_J": self.particle_energy, **self.metadata,
+        }
+        json_path = stem.with_name(stem.name + "_trace.json")
+        json_path.write_text(json.dumps(summary, indent=2) + "\n")
+        npz_path = stem.with_name(stem.name + "_trace.npz")
+        np.savez_compressed(
+            npz_path, times=self.times, loss_fractions=self.loss_fractions,
+            lost_times=self.lost_times, initial_conditions=self.initial_conditions)
+        return json_path, npz_path
 
 
 def essos_vmec_field(source: Any, **kwargs: Any) -> Any:
@@ -129,13 +177,14 @@ def essos_vmec_field(source: Any, **kwargs: Any) -> Any:
 def trace_alphas(
     source: Any,
     *,
-    tmax: float = 3e-4,
-    nparticles: int = 200,
+    tmax: float = 1e-2,
+    nparticles: int = 1000,
     s: float = 0.25,
     seed: int = 42,
-    timestep: float = 5e-7,
-    times_to_trace: int = 200,
+    timestep: float | None = None,
+    times_to_trace: int = 1000,
     model: str = "GuidingCenter",
+    scale: str | None = "volavgB",
 ) -> AlphaTracingResult:
     """Trace fusion alphas from surface ``s`` of a wout file or equilibrium.
 
@@ -146,19 +195,49 @@ def trace_alphas(
         :class:`~vmex.core.wout.WoutData`; handed to ESSOS by
         :func:`essos_vmec_field`.
     tmax, timestep, times_to_trace:
-        Integration horizon [s], integrator step [s], and number of saved
-        samples (uniform in time, including ``t = 0``).
+        Integration horizon [s], integrator step [s] (``None``: the
+        converged :data:`TIMESTEP` scaled by ``Aminor_p / 1.7044 m``), and
+        number of saved samples (uniform in time, including ``t = 0``).
     nparticles, s, seed:
         Ensemble size, launch surface, and sampling seed (see module notes).
     model:
         ESSOS tracing model (``"GuidingCenter"`` by default).
+    scale:
+        :data:`~vmex.core.scaling.SCALE_TARGETS` convention to scale the
+        equilibrium to ARIES-CS size in memory first, or ``None`` to trace it
+        as given.  The factors land in ``result.metadata``.
     """
+    import jax
+
+    from .scaling import SCALE_TARGETS, aries_cs_scales, scale_wout
+    from .wout import read_wout
+
     essos = _essos_imports()
-    return _trace_vmec_field(
-        essos_vmec_field(source), essos, tmax=tmax, nparticles=nparticles,
+    wout = source if hasattr(source, "rmnc") else read_wout(source)
+    b_scale = r_scale = 1.0
+    if scale is not None:
+        b_scale, r_scale = aries_cs_scales(wout, scale)
+        wout = scale_wout(wout, b_scale=b_scale, r_scale=r_scale)
+    if timestep is None:
+        timestep = TIMESTEP * float(wout.Aminor_p) / SCALE_TARGETS["volavgB"][1]
+    if not _COMPILE_S[1]:
+        jax.monitoring.register_event_duration_secs_listener(_compile_listener)
+        _COMPILE_S[1] = 1.0
+    compile_start = _COMPILE_S[0]
+    result = _trace_vmec_field(
+        essos_vmec_field(wout), essos, tmax=tmax, nparticles=nparticles,
         s=s, seed=seed, timestep=timestep, times_to_trace=times_to_trace,
         model=model,
     )
+    result.metadata.update(
+        tmax=float(tmax), timestep=float(timestep), s=float(s), seed=int(seed),
+        model=model, scale_target=scale, b_scale=b_scale, r_scale=r_scale,
+        volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
+        compile_time_s=_COMPILE_S[0] - compile_start,
+        devices=len(jax.devices()), platform=jax.default_backend(),
+        versions={name: version(name) for name in ("vmex", "essos", "jax")},
+    )
+    return result
 
 
 def _trace_vmec_field(
@@ -229,4 +308,7 @@ def _trace_vmec_field(
         trajectories=trajectories,
         trajectories_xyz=np.asarray(tracing.trajectories_xyz, dtype=float),
         energies=energies,
+        initial_conditions=np.stack(
+            [np.full(nparticles, float(s)), np.asarray(theta), np.asarray(phi),
+             np.asarray(pitch)], axis=1),
     )

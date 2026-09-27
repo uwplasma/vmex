@@ -12,8 +12,14 @@ from .input import VmecInput
 from .mgrid import MgridData
 from .wout import WoutData
 
-ARIES_CS_B0 = 5.7
-ARIES_CS_AMINOR = 1.7
+# Reference (field [T], minor radius [m]) of each ``--scale`` convention.
+# ``volavgB``: VMEC ``volavgB`` and ``Aminor_p`` of the ARIES-CS wout
+# ``n3are_R7.75B5.7`` (V = 444 m^3), the normalisation of Bader et al., NF 61,
+# 116060 (2021), Landreman, Buller & Drevlak, PoP 29, 082501 (2022) and Paul
+# et al., NF 62, 126054 (2022), and of the reactor-scale wouts ESSOS and
+# SIMSOPT ship.  ``axis``: Landreman & Paul, PRL 128, 035001 (2022), Boozer
+# B00 on the magnetic axis (:func:`b00_axis`).
+SCALE_TARGETS = {"volavgB": (5.8646, 1.7044), "axis": (5.7, 1.7)}
 
 _INPUT_LENGTHS = (
     "raxis_c", "zaxis_s", "raxis_s", "zaxis_c",
@@ -120,6 +126,9 @@ class ScaleProbe:
         Radial resolution of the first probe solve (``min(ns_final, 9)``).
     fine_ns:
         Radial resolution of the second probe solve (``min(ns_final, 17)``).
+    target, field, field_relative_change:
+        The :data:`SCALE_TARGETS` convention, the fine probe's field in that
+        convention (T) and its coarse-to-fine relative change.
     """
 
     b0: float
@@ -128,6 +137,9 @@ class ScaleProbe:
     aminor_relative_change: float
     coarse_ns: int
     fine_ns: int
+    target: str = "volavgB"
+    field: float = float("nan")
+    field_relative_change: float = float("nan")
 
 
 def _scales(b_scale: float, r_scale: float) -> tuple[float, float]:
@@ -413,36 +425,63 @@ def input_minor_radius(inp: VmecInput) -> float:
     return float(np.sqrt(2.0 * abs(np.mean(r * zu))))
 
 
-def aries_cs_scales(data: WoutData) -> tuple[float, float]:
+def b00_axis(data: WoutData) -> float:
+    """Boozer ``B00`` on the magnetic axis, ``int B^2 dl / int B dl`` [T].
+
+    On the axis ``B dl = G d(zeta_B)``, so the Boozer angle average of ``|B|``
+    is the ``|B|``-weighted mean along the axis curve; no Boozer transform is
+    needed.  The ``m = 0`` harmonics of ``bmnc`` are extrapolated to the axis
+    from the first two half-mesh surfaces and the curve comes from the axis
+    row of ``rmnc``/``zmns``.
+    """
+    m0 = np.asarray(data.xm_nyq) == 0
+    b = np.asarray(data.bmnc)
+    b_axis, xn_b = (1.5 * b[1] - 0.5 * b[2])[m0], np.asarray(data.xn_nyq)[m0]
+    g0 = np.asarray(data.xm) == 0
+    xn, r, z = np.asarray(data.xn)[g0], np.asarray(data.rmnc)[0, g0], np.asarray(data.zmns)[0, g0]
+    phi = np.linspace(0.0, 2.0 * np.pi / int(data.nfp), 256, endpoint=False)[:, None]
+    field = np.cos(xn_b * phi) @ b_axis
+    dl = np.sqrt((np.cos(xn * phi) @ r) ** 2
+                 + (np.sin(xn * phi) @ (xn * r)) ** 2
+                 + (np.cos(xn * phi) @ (xn * z)) ** 2)
+    return float(np.sum(field**2 * dl) / np.sum(field * dl))
+
+
+def scale_reference(data: WoutData, target: str = "volavgB") -> tuple[float, float]:
+    """``(field [T], minor radius [m])`` of ``data`` in a :data:`SCALE_TARGETS` convention."""
+    if target not in SCALE_TARGETS:
+        raise ValueError(f"unknown scale target {target!r}; use one of {sorted(SCALE_TARGETS)}")
+    field = float(data.volavgB) if target == "volavgB" else b00_axis(data)
+    return abs(field), float(data.Aminor_p)
+
+
+def aries_cs_scales(data: WoutData, target: str = "volavgB") -> tuple[float, float]:
     """Factors that take a converged WOUT to ARIES-CS reference magnitudes.
 
-    The reference magnitudes are the module constants ``ARIES_CS_B0 = 5.7``
-    (axis field, T) and ``ARIES_CS_AMINOR = 1.7`` (minor radius, m).  A wout
-    stores both ``b0`` and ``Aminor_p``, so the factors are exact — no probe
-    solve is needed, unlike :func:`aries_cs_input_scales`.
-
-    ``b_scale`` uses ``abs(b0)``, so the factor is always positive and
-    :func:`scale_wout` never flips the flux direction: a configuration with
-    negative ``b0`` keeps it.
-
-    Parameters
-    ----------
-    data:
-        Converged equilibrium to measure.
+    ``target`` picks the convention in :data:`SCALE_TARGETS`: ``"volavgB"``
+    (default) maps VMEC ``volavgB`` to 5.8646 T and ``Aminor_p`` to 1.7044 m,
+    the ARIES-CS wout's own values, so the reference reactor-scale wouts map
+    to factors of 1; ``"axis"`` maps Boozer ``B00`` on the axis
+    (:func:`b00_axis`) to 5.7 T and ``Aminor_p`` to 1.7 m.  A wout stores
+    everything needed, so the factors are exact — no probe solve is needed,
+    unlike :func:`aries_cs_input_scales`.  The field is taken in magnitude,
+    so :func:`scale_wout` never flips the flux direction.
 
     Returns
     -------
-    ``(b_scale, r_scale) = (5.7 / abs(b0), 1.7 / Aminor_p)``, ready to pass to
-    :func:`scale_wout` (or, with the matching deck, to :func:`scale_input`).
+    ``(b_scale, r_scale)``, ready to pass to :func:`scale_wout` (or, with the
+    matching deck, to :func:`scale_input`).
 
     Raises
     ------
     ValueError
-        If ``b0`` is zero or ``Aminor_p`` is not positive.
+        For an unknown target, a zero field or a non-positive ``Aminor_p``.
     """
-    if data.b0 == 0.0 or data.Aminor_p <= 0.0:
-        raise ValueError("ARIES-CS scaling requires nonzero b0 and positive Aminor_p")
-    return ARIES_CS_B0 / abs(data.b0), ARIES_CS_AMINOR / data.Aminor_p
+    field, aminor = scale_reference(data, target)
+    if field == 0.0 or aminor <= 0.0:
+        raise ValueError("ARIES-CS scaling requires a nonzero field and positive Aminor_p")
+    b_ref, a_ref = SCALE_TARGETS[target]
+    return b_ref / field, a_ref / aminor
 
 
 def probe_input(
@@ -451,6 +490,7 @@ def probe_input(
     mgrid_path: str | Path | None = None,
     external_field: Any = None,
     device: Any = "auto",
+    target: str = "volavgB",
 ) -> ScaleProbe:
     """Estimate ``b0`` and ``Aminor_p`` from a bounded two-resolution solve.
 
@@ -486,6 +526,8 @@ def probe_input(
     device:
         Device policy forwarded to the solver; ``"auto"`` keeps VMEX's
         default placement.
+    target:
+        :data:`SCALE_TARGETS` convention of the reported ``field``.
 
     Returns
     -------
@@ -562,17 +604,24 @@ def probe_input(
         ),
         coarse_ns=coarse_ns,
         fine_ns=fine_ns,
+        target=target,
+        field=scale_reference(fine, target)[0],
+        field_relative_change=relative(
+            scale_reference(coarse, target)[0], scale_reference(fine, target)[0]
+        ),
     )
 
 
 def aries_cs_input_scales(
     inp: VmecInput,
+    target: str = "volavgB",
     **probe_kwargs: Any,
 ) -> tuple[float, float, ScaleProbe]:
     """ARIES-CS factors for an input deck, via a bounded converged probe.
 
-    The deck itself carries no ``b0``, so :func:`probe_input` supplies it.
-    For a fixed-boundary deck the probe's ``Aminor_p`` is then *discarded* and
+    The deck itself carries no field, so :func:`probe_input` supplies it in
+    the ``target`` convention of :func:`aries_cs_scales`.  For a
+    fixed-boundary deck the probe's ``Aminor_p`` is then *discarded* and
     replaced by the exact boundary quadrature of :func:`input_minor_radius`
     (its ``aminor_relative_change`` is set to ``0.0`` accordingly); for a
     free-boundary deck the plasma boundary is an output of the solve, so the
@@ -583,33 +632,31 @@ def aries_cs_input_scales(
     ----------
     inp:
         Deck to measure.
+    target:
+        :data:`SCALE_TARGETS` convention (see :func:`aries_cs_scales`).
     **probe_kwargs:
         Forwarded verbatim to :func:`probe_input` (``mgrid_path``,
         ``external_field``, ``device``).
 
     Returns
     -------
-    ``(b_scale, r_scale, probe)`` where the factors target
-    ``ARIES_CS_B0 = 5.7`` T and ``ARIES_CS_AMINOR = 1.7`` m, and ``probe`` is
-    the :class:`ScaleProbe` the factors were derived from — report its
-    relative changes alongside any scaled result.
+    ``(b_scale, r_scale, probe)``, with ``probe`` the :class:`ScaleProbe`
+    the factors were derived from — report its relative changes alongside
+    any scaled result.
 
     Raises
     ------
     ValueError
-        If the measured ``b0`` is zero or the minor radius is not positive.
+        If the measured field is zero or the minor radius is not positive.
     """
-    probe = probe_input(inp, **probe_kwargs)
+    probe = probe_input(inp, target=target, **probe_kwargs)
     if not inp.lfreeb:
         probe = replace(
             probe,
             aminor=input_minor_radius(inp),
             aminor_relative_change=0.0,
         )
-    if probe.b0 == 0.0 or probe.aminor <= 0.0:
-        raise ValueError("ARIES-CS scaling requires nonzero b0 and positive Aminor_p")
-    return (
-        ARIES_CS_B0 / abs(probe.b0),
-        ARIES_CS_AMINOR / probe.aminor,
-        probe,
-    )
+    if probe.field == 0.0 or probe.aminor <= 0.0:
+        raise ValueError("ARIES-CS scaling requires a nonzero field and positive Aminor_p")
+    b_ref, a_ref = SCALE_TARGETS[target]
+    return b_ref / probe.field, a_ref / probe.aminor, probe

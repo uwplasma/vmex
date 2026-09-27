@@ -5,8 +5,9 @@ case.  Gates: ``essos_vmec_field`` builds the same field from a wout path
 and from an in-memory equilibrium, the trace runs on the released ESSOS
 surface, the counts are mutually consistent, the loss fraction is a
 fraction, the in-memory equilibrium route (temporary-wout hop) reproduces
-the file route, and ``vmex --trace`` writes the four tracing figures end to
-end.  Skips cleanly without ESSOS.
+the file route, and ``vmex --trace`` scales to ARIES-CS size in memory and
+writes its JSON/NPZ summary and four figures end to end.  Skips cleanly
+without ESSOS.
 """
 
 from __future__ import annotations
@@ -77,6 +78,8 @@ def test_loss_fraction_is_a_fraction(traced):
     assert traced.loss_fraction == pytest.approx(
         traced.particles_lost / traced.nparticles)
     assert traced.loss_fraction == pytest.approx(float(traced.loss_fractions[-1]))
+    f = traced.loss_fraction
+    assert traced.loss_fraction_sigma == pytest.approx(np.sqrt(f * (1 - f) / 8))
     assert np.all(np.diff(traced.loss_fractions) >= 0.0)  # cumulative
 
 
@@ -121,7 +124,12 @@ def test_in_memory_equilibrium_matches_the_file_route(traced, solovev_wout):
     np.testing.assert_allclose(result.trajectories, traced.trajectories)
 
 
-def test_cli_trace_writes_summary_and_figures(solovev_wout, tmp_path):
+def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
+    """The --trace contract: scaled in memory, JSON/NPZ summary, four figures."""
+    import json
+
+    from vmex.core.scaling import aries_cs_scales
+
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         rc = cli.main([
@@ -131,11 +139,33 @@ def test_cli_trace_writes_summary_and_figures(solovev_wout, tmp_path):
         ])
     stdout = buffer.getvalue()
     assert rc == 0, stdout
-    assert "Loss fraction:" in stdout
-    assert "Axis terminations:" in stdout
-    assert "Solver failures:" in stdout
+    for line in ("Loss fraction:", "Axis terminations:", "Solver failures:",
+                 "Scaling: B_scale=", "compile"):
+        assert line in stdout, line
     for suffix in (
-        "trace_trajectories", "trace_vparallel",
-        "trace_loss_fraction", "trace_energy_error",
+        "trace_trajectories.png", "trace_vparallel.png",
+        "trace_loss_fraction.png", "trace_energy_error.png", "trace.npz",
     ):
-        assert (tmp_path / f"solovev_{suffix}.png").exists(), suffix
+        assert (tmp_path / f"solovev_{suffix}").exists(), suffix
+    summary = json.loads((tmp_path / "solovev_trace.json").read_text())
+    b_scale, r_scale = aries_cs_scales(read_wout(solovev_wout))
+    assert summary["b_scale"] == pytest.approx(b_scale)
+    assert summary["r_scale"] == pytest.approx(r_scale)
+    assert summary["volavgB"] == pytest.approx(5.8646)
+    assert summary["Aminor_p"] == pytest.approx(1.7044)
+    assert summary["timestep"] == pytest.approx(2.5e-7)
+    assert summary["nparticles"] == 8 and summary["scale_target"] == "volavgB"
+    assert {"loss_fraction_sigma", "compile_time_s", "devices", "versions"} <= set(summary)
+    arrays = np.load(tmp_path / "solovev_trace.npz")
+    assert arrays["initial_conditions"].shape == (8, 4)
+    np.testing.assert_allclose(arrays["initial_conditions"][:, 0], 0.25)
+    assert arrays["loss_fractions"][-1] == pytest.approx(summary["loss_fraction"])
+
+
+def test_no_scale_traces_the_equilibrium_as_given(solovev_wout):
+    result = trace_alphas(solovev_wout, **{**TRACE_KWARGS, "timestep": None}, scale=None)
+    wout = read_wout(solovev_wout)
+    assert (result.metadata["b_scale"], result.metadata["r_scale"]) == (1.0, 1.0)
+    assert result.metadata["Aminor_p"] == pytest.approx(wout.Aminor_p)
+    # The default step keeps the alpha step length a fixed fraction of the device.
+    assert result.metadata["timestep"] == pytest.approx(2.5e-7 * wout.Aminor_p / 1.7044)

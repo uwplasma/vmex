@@ -1,15 +1,22 @@
 # Scale a configuration to reactor size
 
 `vmex --scale` applies the ideal-MHD dimensional similarity transform to an
-input deck or wout file — by explicit `B_scale R_scale` factors, or to the
-ARIES-CS reference magnitudes `|b0| = 5.7 T`, `Aminor_p = 1.7 m` when no
-factors are given. Use it for physical orbit studies where particle energy
+input deck or wout file — by explicit `B_scale R_scale` factors, or to
+ARIES-CS size when no factors are given. The default target,
+`--scale-target volavgB`, is the ARIES-CS wout's own VMEC `volavgB = 5.8646 T`
+and `Aminor_p = 1.7044 m`, the normalisation of Bader et al. (NF 2021),
+Landreman, Buller & Drevlak (PoP 2022) and Paul et al. (NF 2022) and of the
+reactor-scale wouts ESSOS and SIMSOPT ship, which therefore map to factors
+of 1. `--scale-target axis` is the Landreman & Paul (PRL 2022) convention:
+Boozer `B00 = 5.7 T` on the magnetic axis and `a = 1.7 m`. The two differ by
+up to about 10 % in field on real configurations, so state the convention
+with any loss fraction. `vmex --trace` applies the same scaling in memory. Use it for physical orbit studies where particle energy
 and Larmor radius are fixed (e.g. 3.5 MeV alpha calculations).
 
 ## Scale a deck or a wout
 
 ```console
-vmex --scale input.case            # target ARIES-CS |b0| and Aminor_p
+vmex --scale input.case            # target ARIES-CS volavgB and Aminor_p
 vmex --scale input.case 1.2 0.8    # explicit B_scale=1.2, R_scale=0.8
 vmex --scale wout_case.nc          # scale a finished equilibrium directly
 ```
@@ -54,8 +61,9 @@ profile is normalized to `ctor`, which scales as $B_s R_s$.
 
 ## ARIES-CS targets from an input
 
-A wout contains `b0` and `Aminor_p`, so its factors are exact. A fixed
-boundary gives `Aminor_p` directly by Fourier quadrature, but `b0` depends
+A wout contains `volavgB`, the axis spectrum and `Aminor_p`, so its factors
+are exact. A fixed boundary gives `Aminor_p` directly by Fourier quadrature,
+but the field depends
 on the converged internal field, so VMEX runs a bounded radial probe at
 `ns <= 9` and `ns <= 17` (final probe `ftol = 1e-10`) rather than the full
 ladder. The command prints both resolutions and the coarse-to-fine changes —

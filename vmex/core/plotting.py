@@ -2619,14 +2619,14 @@ def plot_trace_vparallel(
     return out_path
 
 
-def plot_trace_loss_fraction(result, out_path: str | Path) -> Path:
-    """Write the cumulative particle-loss fraction against time.
+def plot_trace_loss_fraction(result, out_path: str | Path, *, label: str = "") -> Path:
+    """Write the cumulative alpha-loss fraction against time (log time axis).
 
-    ``result.loss_fractions`` — the running fraction of the ensemble that has
-    crossed the boundary, on a fixed ``[0, 1]`` ordinate — against time in
-    seconds.  The title states the final fraction as a percentage together
-    with the absolute counts, so a small ensemble cannot be mistaken for a
-    converged loss estimate.
+    The shaded band is the binomial 1-sigma error ``sqrt(f (1 - f) / N)`` of
+    the running fraction ``f``.  The title carries the configuration
+    ``label``, the ensemble size, launch surface, scaling convention and
+    wall time from ``result.metadata``, and the final fraction with its
+    error, so a small ensemble cannot be mistaken for a converged estimate.
 
     Parameters
     ----------
@@ -2634,6 +2634,8 @@ def plot_trace_loss_fraction(result, out_path: str | Path) -> Path:
         An :class:`~vmex.core.tracing.AlphaTracingResult`.
     out_path:
         Destination image file.
+    label:
+        Configuration name for the title.
 
     Returns
     -------
@@ -2641,15 +2643,28 @@ def plot_trace_loss_fraction(result, out_path: str | Path) -> Path:
     the Agg backend and closed.
     """
     plt = _import_matplotlib()
+    meta = result.metadata
+    t, f = np.asarray(result.times), np.asarray(result.loss_fractions)
+    keep = t > 0.0
+    t, f = t[keep], f[keep]
+    sigma = np.sqrt(f * (1.0 - f) / max(result.nparticles, 1))
+    scale = meta.get("scale_target")
     with _rc_context():
         fig, ax = plt.subplots(figsize=(6.4, 4.2), layout="constrained")
-        ax.plot(result.times, result.loss_fractions, "-")
-        ax.set_ylim(0.0, 1.0)
+        ax.fill_between(t, f - sigma, f + sigma, alpha=0.3, linewidth=0)
+        ax.plot(t, f, "-")
+        ax.set_xscale("log")
+        ax.set_ylim(0.0, max(0.01, 1.2 * float(np.max(f + sigma, initial=0.0))))
         ax.set_xlabel("time [s]")
-        ax.set_ylabel("loss fraction")
+        ax.set_ylabel("alpha loss fraction")
         ax.set_title(
-            f"final loss fraction {100.0 * result.loss_fraction:.2f}% "
-            f"({result.particles_lost} of {result.nparticles})"
+            f"{label} N={result.nparticles}, s0={meta.get('s', float('nan')):g}, "
+            f"{'unscaled' if scale is None else 'ARIES-CS ' + scale}, "
+            f"{result.wall_time_s:.0f} s wall\n"
+            f"loss {100.0 * result.loss_fraction:.2f} "
+            f"\u00b1 {100.0 * result.loss_fraction_sigma:.2f}% "
+            f"({result.particles_lost} of {result.nparticles})",
+            fontsize=10,
         )
         out_path = Path(out_path)
         fig.savefig(out_path, dpi=_DPI)
@@ -2737,7 +2752,7 @@ def plot_tracing(
             result, outdir / f"{label}_trace_vparallel.png",
             n_trajectories=n_trajectories),
         "loss_fraction": plot_trace_loss_fraction(
-            result, outdir / f"{label}_trace_loss_fraction.png"),
+            result, outdir / f"{label}_trace_loss_fraction.png", label=label),
         "energy_error": plot_trace_energy_error(
             result, outdir / f"{label}_trace_energy_error.png",
             n_trajectories=n_trajectories),

@@ -27,7 +27,8 @@ and stability diagnostics, and has a separate lane for open mirrors.
 - **Design with gradients:** implicit scalar adjoints and residual Jacobians for SciPy, JAXopt or
   Optax, with quasisymmetry, quasi-isodynamic, Mercier, ballooning, bootstrap and maximum-`J` objectives.
 - **Inspect the physics:** Boozer transforms, the magnetic field and its first three spatial
-  derivatives, effective ripple, and the `--plot` diagnostic summary.
+  derivatives, effective ripple, the `--plot` diagnostic summary, `--scale` to reactor size and
+  `--trace` alpha-particle losses.
 - **Choose the hardware:** CPU or GPU equilibrium solves (optimization gradients default to CPU),
   reusable compilation and independent-case ensembles.
 - **Connect coils:** ESSOS coil fields, NESTOR free boundary from an MGRID table or coils, and the
@@ -119,8 +120,14 @@ With your own VMEC input file:
 vmex input.my_case --plot
 vmex --plot wout_my_case.nc
 vmex --booz wout_my_case.nc
+vmex --scale wout_my_case.nc
+vmex --trace wout_my_case.nc
 vmex input.nearby --restart wout_my_case.nc
 ```
+
+`--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
+by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory, traces 1000 fusion alphas for
+10 ms and writes the loss fraction against time.
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,

@@ -7,6 +7,18 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `vmex --trace` defaults to 1000 alphas over 1e-2 s at the converged step
+  (2.5e-7 s at ARIES-CS size, was 5e-7 s, which overstated ARIES-CS losses
+  by about 40 %), scales the equilibrium in memory to ARIES-CS size
+  (`--trace-no-scale` opts out), shards particles over one CPU device per
+  core, and writes `*_trace.json`/`*_trace.npz` and a log-time loss figure
+  with a binomial band.
+- `--scale` now targets the ARIES-CS wout's own `volavgB = 5.8646 T` and
+  `Aminor_p = 1.7044 m` (was `|b0| = 5.7 T`, `1.7 m`, which matches no
+  published convention and put the reference reactor-scale wouts 7-10 % high
+  in field). `--scale-target axis` keeps Landreman & Paul (2022), Boozer
+  `B00 = 5.7 T` on the axis and `a = 1.7 m` (`vmex.core.scaling.b00_axis`).
+
 - `vmex.solve_phiedge` finds the PHIEDGE whose free-boundary LCFS meets a
   target outboard radius, volume or user metric (bracketed secant over
   warm-started solves); example `examples/free_boundary_phiedge.py`, guide
