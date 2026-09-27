@@ -141,3 +141,9 @@ compilation.
 - **Noise floor.** `rtol` must stay above the metric noise set by `ftol`.
   On the DIII-D deck, `ftol = 1e-11` leaves about 2e-5 m of noise in
   `r_outboard`, so `rtol = 1e-9` needs `ftol = 1e-13`.
+- **Fixed-coil tokamaks.** With the coil currents fixed, `PHIEDGE` barely
+  moves a tokamak edge: on a test tokamak, +1% `PHIEDGE` moved
+  `r_outboard` by -0.9 mm, while 1% of one PF coil current moved it 2 to 3 cm.
+  A target outside that small range has no root, so tune the vertical-field
+  coil current together with `PHIEDGE`, or run a separate root solve with a
+  callable metric and `EXTCUR` as the free variable.
