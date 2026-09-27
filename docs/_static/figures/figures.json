@@ -39,8 +39,8 @@
     },
     {
       "path": "docs/_static/figures/mirror_fixed_boundary_3d.webp",
-      "sha256": "8ee4a29853495875bb65bae21306b26111cce6dbd17f483f473ee8b483673fef",
-      "bytes": 147018,
+      "sha256": "37364f8d12766b6c812fa6bbec725c8650ccb6b6e29c9b14197c61b8ff6e63e7",
+      "bytes": 146928,
       "generator": "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
       "command": "python examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
       "inputs": [],
@@ -57,8 +57,8 @@
     },
     {
       "path": "docs/_static/figures/mirror_free_boundary_beta_scan.webp",
-      "sha256": "725233ae2353863432dd214eee4d6ce62bef7d7201e0fd3269c30ddcbaeef90e",
-      "bytes": 163152,
+      "sha256": "39a9589620d0ae0b62930bd5a435f3238360c5c523504916ff9c1bfa9d8cbcd2",
+      "bytes": 163938,
       "generator": "examples/mirror/mirror_free_boundary_beta_scan.py",
       "command": "python examples/mirror/mirror_free_boundary_beta_scan.py",
       "inputs": [],
