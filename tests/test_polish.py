@@ -10,16 +10,18 @@ import numpy as np
 import pytest
 
 from vmex.core import implicit, solver
-from vmex.core.errors import VmecInputError
+from vmex.core.errors import StrongForceCertificationError, VmecInputError
 from vmex.core.input import VmecInput
-from vmex.core.polish import sample_high_order_state
+from vmex.core import polish
 from vmex.core.polish import (
     PolishConfig,
     polish_legacy_solution,
     polished_wout_input,
     polished_wout_ns,
+    polished_wout_state,
+    sample_high_order_state,
 )
-from vmex.core.strong_force import lift_high_order_state
+from vmex.core.strong_force import append_high_order_state_modes, certify_strong_force, lift_high_order_state
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
@@ -96,6 +98,55 @@ def test_polish_scope_and_configuration():
                              ({"force_tolerance": 0.0}, "positive")):
         with pytest.raises(ValueError, match=message):
             PolishConfig(**updates)
+
+
+def test_polish_driver_reports_fails_and_exports_with_a_stub_solver(monkeypatch, small_lift):
+    """The driver, the solver hook, and the export around a stubbed polish (the
+    real polish runs in the full-polish-gn lane)."""
+
+    native, state = small_lift
+    inp = _small_solovev_input()
+    window = SimpleNamespace(volume_average_force=2.0, magnetic_relative_force_error=1.0e-3, s_min=0.0, s_max=1.0)
+    certificate = SimpleNamespace(absolute_l2=1.0, normalized_l2=0.5, minimum_signed_jacobian=1.0,
+                                  window_normalizations=window)
+    stub = polish.NativePolishResult(native, 1.0, 1.0e-3, False, 1, 2, 1, 0.1)
+    monkeypatch.setattr(polish, "certify_strong_force", lambda _state: certificate)
+    monkeypatch.setattr(polish, "force_error_measures", lambda *_: ())
+    monkeypatch.setattr(polish, "physical_scales", lambda _state: (1.0, 1.0))
+    monkeypatch.setattr(polish, "polish_native", lambda *_, **__: stub)
+    resolution = solver.resolution_from_input(inp, ns=5)
+    lines = []
+    fallback = polish_legacy_solution(inp, resolution, state, verbose=True,
+                                      config=PolishConfig(degree=3, fail_policy="return_unpolished"),
+                                      emit=lambda *parts, **_: lines.append(" ".join(map(str, parts))))
+    report = fallback.polish_report
+    assert not report.converged and report.nonlinear_iterations == 3 and report.normalization_window == (0.0, 1.0)
+    assert "native polish: |F|_rms" in "".join(lines) and "FAILED" in "".join(lines)
+    with pytest.raises(StrongForceCertificationError, match="did not converge"):
+        polish_legacy_solution(inp, resolution, state, config=PolishConfig(degree=3))
+    exported = polished_wout_state(fallback.native_equilibrium, inp, solve_ns=5)
+    assert np.shape(np.asarray(exported.R_cos))[0] == polished_wout_ns(fallback.native_equilibrium, solve_ns=5)
+    # The solver hook: an out-of-scope AUTO keeps the result, a polish replaces it.
+    base = SimpleNamespace(state=state)
+    monkeypatch.setattr(solver, "replace", lambda result, **fields: {**vars(result), **fields})
+    for returned, check in ((None, lambda out: out is base), (fallback, lambda out: out["polish_report"] is report)):
+        monkeypatch.setattr(polish, "polish_legacy_solution", lambda *_, _r=returned, **__: _r)
+        assert check(solver._polish_solve_result(inp, resolution, base, polish="auto", polish_config=None,
+                                                 lconm1=True, verbose=True, emit=lambda *_, **__: None))
+
+
+def test_polish_building_blocks_reject_malformed_requests(small_lift):
+    native, _ = small_lift
+    with pytest.raises(ValueError, match="radial_order"):
+        polish.make_variational_plan(native, radial_order=1)
+    with pytest.raises(ValueError, match="angular grid"):
+        polish.make_variational_plan(native, ntheta=0)
+    with pytest.raises(ValueError, match="force coordinates"):
+        polish._chart(native, 1.0, 1.0).force(np.zeros(3))
+    with pytest.raises(ValueError, match="nonzero length"):
+        append_high_order_state_modes(native, [], [])
+    with pytest.raises(ValueError, match="angular shifts"):
+        certify_strong_force(native, theta_shift=1.0)
 
 
 def test_public_solver_rejects_unknown_polish_mode_before_solving():
