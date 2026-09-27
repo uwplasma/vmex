@@ -102,6 +102,7 @@ def summarize_axisymmetric_beta_scan(
     grid: "MirrorGrid",
     *,
     reference_field: float,
+    axial_flux_derivative: Any = None,
 ) -> tuple[AxisymmetricBetaDiagnostics, ...]:
     """Summarize solved beta points against the beta-zero equilibrium.
 
@@ -116,6 +117,12 @@ def summarize_axisymmetric_beta_scan(
     any ``beta < 1``.  Its accuracy is therefore controlled by the device
     aspect: ``paraxial_relative_error`` should be read against ``(a/L)^2``, and
     is expected to be of that size even at large beta.
+
+    Pass ``axial_flux_derivative`` to read the on-axis field from the radial
+    Gauss kernel (:func:`~vmex.mirror.forces.staggered_field_strength`, exact
+    to 6e-4 against a coil field at ``ns = 7``); without it the nodal
+    ``plasma_b_squared`` axis row is used, whose ``1/sqrt(g)`` extrapolation
+    reads about 1 % low at that resolution.
     """
 
     betas = jnp.asarray(requested_betas)
@@ -126,12 +133,20 @@ def summarize_axisymmetric_beta_scan(
     if grid.ntheta != 1:
         raise ValueError("axisymmetric beta diagnostics require ntheta=1")
     center = int(np.argmin(np.abs(np.asarray(grid.z))))
-    baseline_field = jnp.sqrt(results[0].plasma_b_squared[0, 0, center])
+
+    def axis_strength(result: Any) -> Any:
+        if axial_flux_derivative is None:
+            return jnp.sqrt(result.plasma_b_squared[0, 0, center])
+        return staggered_field_strength(result.plasma_state, grid, axial_flux_derivative=axial_flux_derivative)[
+            0, 0, center
+        ]
+
+    baseline_field = axis_strength(results[0])
     reference_field_squared = float(reference_field) ** 2
     summaries = []
     for requested_beta, result in zip(betas, results, strict=True):
         pressure = result.pressure
-        axis_field = jnp.sqrt(result.plasma_b_squared[0, 0, center])
+        axis_field = axis_strength(result)
         if hasattr(result.vacuum_field, "lateral_field_xyz"):
             vacuum_xyz = result.vacuum_field.lateral_field_xyz[center]
         else:

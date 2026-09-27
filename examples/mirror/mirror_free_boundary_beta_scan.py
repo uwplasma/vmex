@@ -148,7 +148,9 @@ for label, solution in zip(labels, solutions, strict=True):
     if SAVE_RESTARTS:
         save_free_boundary_restart(OUTPUT_DIR / label, FreeBoundaryRestart.from_result(solution.result))
     solution.write_mout(OUTPUT_DIR / f"mout_mirror_{label}.nc")
-diagnostics = summarize_axisymmetric_beta_scan(results, BETAS, grid, reference_field=center_field)
+diagnostics = summarize_axisymmetric_beta_scan(
+    results, BETAS, grid, reference_field=center_field, axial_flux_derivative=solutions[0].axial_flux_derivative
+)
 summary = [
     {key: float(value) for key, value in vars(item).items()}
     | {

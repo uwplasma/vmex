@@ -37,7 +37,7 @@ from .forces import (
     mass_profile_from_pressure,
     mirror_energy,
 )
-from .geometry import magnetic_field_squared, normalized_divergence_rms
+from .geometry import normalized_divergence_rms
 from .exterior import (
     ExteriorVacuum,
     solve_axisymmetric_exterior_vacuum,
@@ -1111,11 +1111,17 @@ class MirrorSolution:
     def mod_b(self) -> np.ndarray:
         """Solved ``|B|`` on the ``(ns, ntheta, nxi)`` solver grid [T]."""
 
+        from .forces import staggered_field_strength
+
         evaluated = self.evaluated
-        b_squared = getattr(evaluated, "plasma_b_squared", None)
-        if b_squared is None:
-            b_squared = magnetic_field_squared(evaluated.energy.field, evaluated.energy.geometry)
-        return np.sqrt(np.maximum(np.asarray(b_squared), 0.0))
+        return np.asarray(
+            staggered_field_strength(
+                getattr(evaluated, "plasma_state", getattr(evaluated, "state", None)),
+                self.discretization.grid,
+                axial_flux_derivative=self.axial_flux_derivative,
+                current_derivative=self.input.current_derivative,
+            )
+        )
 
     def mout(self) -> Any:
         """Collect the MOUT data of this solution."""
