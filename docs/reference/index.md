@@ -13,6 +13,7 @@ timings, each dated and tied to a committed record).
 
 cli
 vmec2000-compatibility
+mirror-input
 wout-file
 ```
 

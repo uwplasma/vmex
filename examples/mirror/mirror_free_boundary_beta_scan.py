@@ -204,7 +204,7 @@ final_gate = (
     else "beyond the supported model range"
 )
 caption = (
-    f"Two ESSOS loops (radius {COIL_RADIUS} m at z = +/-{0.5 * COIL_SEPARATION} m, "
+    f"Two circular loops (radius {COIL_RADIUS} m at z = +/-{0.5 * COIL_SEPARATION} m, "
     f"{COIL_CURRENT:.3g} A each) give vacuum B(0) = {center_field:.4f} T, "
     f"vacuum R_m,axis = {mirror_ratio:.2f} over L_mirror,B = {vacuum_well.mirror_length:.2f} m, "
     f"and R_m,LCFS = {ratios.lcfs_mirror_ratio:.2f} at beta = 0. "

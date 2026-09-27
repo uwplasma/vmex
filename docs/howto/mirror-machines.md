@@ -6,38 +6,49 @@ run recipes; the theory, gate evidence, and lane status are in
 {doc}`/explanation/mirror-geometry`, and the `mout_*.nc` output format is
 {doc}`/reference/wout-file`.
 
-## Solve a fixed-boundary mirror from one radius
+## Solve a mirror from an input file or a `MirrorInput`
 
-The one-call entry point solves an axisymmetric open mirror from a single
-LCFS radius, picking a default boundary and profiles for the requested
-resolution:
+A `&MIRROR` deck runs like a VMEC deck, with `vmex <input>` or
+`vj.solve_file`, and writes `mout_<case>.nc`
+({doc}`/reference/mirror-input` lists every variable):
 
-```python
-from vmex.mirror import MirrorConfig, MirrorResolution, solve_fixed_boundary_from_radius
-
-config = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=4, nxi=17))
-result = solve_fixed_boundary_from_radius(0.3, config)
+```console
+vmex examples/data/input.mirror_axisymmetric --plot
+vmex examples/data/input.mirror_two_coil_free_boundary --plot
 ```
 
-`MirrorResolution` takes `ns` (radial surfaces), `mpol` (largest represented
-poloidal Fourier mode; the collocation size is the read-only
-`ntheta = 2*mpol + 1`), and `nxi` (axial nodes); the returned
-`SplineMirrorSolveResult` carries the converged coefficients and the
-variational, weak, and pointwise-force residuals.
+The same fields form a {class}`vmex.mirror.MirrorInput`, and
+{func}`vmex.mirror.solve_mirror` does the assembly (spline discretization,
+fitted boundary, initial state, mass profile, vacuum start of a free
+boundary):
 
-For a shaped boundary, build `SplineMirrorBoundary` / `SplineMirrorState` /
-`SplineMirrorDiscretization` directly and call
-{func}`vmex.mirror.solve_fixed_boundary`.
+```python
+import numpy as np
+from vmex.mirror import MirrorInput, solve_mirror
+
+inp = MirrorInput(ns=7, elements=6, phiedge=0.045, rbc=[[0.12, 0.10, 0.12]])
+solution = solve_mirror(inp)
+solution.write_mout("mout_example.nc")
+print(solution.summary())
+```
+
+`MirrorInput.with_boundary(radius_function)` tabulates an analytic boundary
+`a(theta, z)`, and `solve_mirror(inp, initial=previous)` continues from a
+previous solution. {func}`vmex.mirror.solve_mirror_beta_scan` continues a
+free boundary through a list of central betas. For full control, build
+`SplineMirrorBoundary` / `SplineMirrorState` / `SplineMirrorDiscretization`
+directly and call {func}`vmex.mirror.solve_fixed_boundary`.
 
 ## Run the shipped examples
 
-Five examples live in the repository's `examples/mirror/` directory (they are
+Six examples live in the repository's `examples/mirror/` directory (they are
 not part of the installed wheel, so run them from a source checkout). Each has
 editable inputs at its top and takes no command-line arguments:
 
 ```console
+python examples/mirror/mirror_fixed_boundary_axisymmetric.py      # axisymmetric mirror against the exact field
 python examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py   # rotating-ellipse fixed boundary
-python examples/mirror/mirror_free_boundary_beta_scan.py          # axisymmetric free-boundary beta scan (needs ESSOS)
+python examples/mirror/mirror_free_boundary_beta_scan.py          # axisymmetric free-boundary beta scan
 python examples/mirror/stellarator_mirror_hybrid.py               # periodic B-spline racetrack hybrid
 python examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py     # QI-mirror hybrid: Fourier vs B-spline
 python examples/mirror/pleiades_mirror_reference.py               # Pleiades reference data (external checkout)
@@ -79,7 +90,7 @@ each point takes about a minute on a laptop CPU, so intermediate points are
 left out by default) and writes one MOUT per state, a compact JSON summary,
 restart files, and per-state figures under
 `results/mirror_free_boundary_beta_scan/`, and the beta-scan composite under
-`docs/_static/figures/`. The example's two ESSOS loops are
+`docs/_static/figures/`. The example's two circular loops (`vmex.mirror.CircularCoils`) are
 sized to the plasma: radius 0.5 m at z = +/-1.0 m carrying 3.72e5 A each,
 which keeps the central vacuum field of the recorded benchmark geometry
 (about 0.0836 T) with a deeper mirror well. Only the 0 and 10% points are in
@@ -88,7 +99,7 @@ the supported lane; 50 and 80% are extended validation
 
 External fields enter as an ESSOS/SIMSOPT Biot-Savart object, any
 vectorized `xyz -> B` callable, or a shared
-{class}`~vmex.core.mgrid.MgridField`; coil geometry stays in ESSOS. Field
+{class}`~vmex.core.mgrid.MgridField` passed as `external_field=`. Field
 callables that capture committed arrays should use `jax.tree_util.Partial`
 (or another registered pytree) so VMEX can relocate the captured leaves; an
 ordinary Python closure is opaque and pins its arrays' placement.
