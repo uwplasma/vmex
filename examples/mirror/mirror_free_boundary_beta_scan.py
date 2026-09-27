@@ -15,8 +15,9 @@ for three points, and the beta-scan composite.
 The composite the docs embed is written straight into
 ``docs/_static/figures`` as lossless WebP, so re-running this script
 reproduces the committed bytes; ``VMEX_EXAMPLES_CI=1`` sends it to
-``OUTPUT_DIR`` instead. The coils need ESSOS (``pip install "vmex[coils]"``);
-without it the script exits with that message.
+``OUTPUT_DIR`` instead. The loops are :class:`vmex.mirror.CircularCoils` (the exact
+elliptic-integral field); any ESSOS, SIMSOPT or mgrid field can replace them
+through ``solve_mirror_beta_scan(..., external_field=...)``.
 """
 
 import json
@@ -24,19 +25,15 @@ import os
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 
 from vmex.mirror import (
-    MirrorBoundary,
-    MirrorConfig,
-    MirrorResolution,
+    CircularCoils,
+    MirrorInput,
     SplineMirrorDiscretization,
     mirror_ratio_diagnostics,
-    mout_from_result,
     plot_mout,
-    solve_beta_scan,
-    write_mout,
+    solve_mirror_beta_scan,
 )
 from vmex.mirror.output import (
     FreeBoundaryRestart,
@@ -45,12 +42,6 @@ from vmex.mirror.output import (
     save_free_boundary_restart,
     summarize_axisymmetric_beta_scan,
 )
-
-try:
-    from essos.coils import Coils, Curves
-    from essos.fields import BiotSavart
-except ModuleNotFoundError:
-    raise SystemExit("This example needs ESSOS: pip install 'vmex[coils]'") from None
 
 # Requested central beta of each point; the scan continues from vacuum:
 BETAS = np.asarray([0.0, 0.10, 0.50, 0.80])
@@ -113,98 +104,51 @@ if ci_smoke:
 jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-### Coils and vacuum field ####################################################
+### Set up the equilibrium ####################################################
 
-coil_dofs = np.zeros((2, 3, 3))
-coil_dofs[:, 0, 2] = COIL_RADIUS
-coil_dofs[:, 1, 1] = COIL_RADIUS
-coil_dofs[:, 2, 0] = np.asarray([-0.5, 0.5]) * COIL_SEPARATION
-coils = Coils(
-    Curves(jnp.asarray(coil_dofs), n_segments=128, nfp=1, stellsym=False),
-    jnp.full(2, COIL_CURRENT),
+coils = CircularCoils(
+    np.full(2, COIL_RADIUS),
+    np.asarray([-0.5, 0.5]) * COIL_SEPARATION,
+    np.full(2, COIL_CURRENT),
 )
-biot_savart = BiotSavart(coils)
-
-
-def external_field(points):
-    """Evaluate the ESSOS field on an arbitrary array of Cartesian points."""
-
-    points = jnp.asarray(points)
-    return jax.vmap(biot_savart.B)(points.reshape(-1, 3)).reshape(points.shape)
-
-
-### Grid and vacuum boundary ##################################################
-
-config = MirrorConfig(
-    resolution=MirrorResolution(ns=NS, mpol=0, nxi=NXI),
+center_field = float(coils.axis_field(0.0))
+inp = MirrorInput(
+    ns=NS,
+    nxi=NXI,
+    elements=SPLINE_ELEMENTS,
     z_min=Z_MIN,
     z_max=Z_MAX,
+    phiedge=np.pi * CENTER_RADIUS**2 * center_field,
+    lfreeb=True,
+    coil_radius=coils.radius,
+    coil_z=coils.z,
+    coil_current=coils.current,
+    exterior_ntheta=EXTERIOR_NTHETA,
+    exterior_order=EXTERIOR_ORDER,
     ftol=FTOL,
-    max_iterations=MAX_ITERATIONS,
+    niter=MAX_ITERATIONS,
 )
-source_grid = config.build_grid()
-discretization = SplineMirrorDiscretization.build_cgl(config, elements=SPLINE_ELEMENTS)
-grid = discretization.grid
-initial_restart = None if RESTART_FROM is None else load_free_boundary_restart(RESTART_FROM, discretization)
-z = jnp.asarray(grid.z)
-coil_z = 0.5 * COIL_SEPARATION
-vacuum_axis_field = sum(
-    4.0e-7 * jnp.pi * COIL_CURRENT * COIL_RADIUS**2 / (2.0 * (COIL_RADIUS**2 + (z - position) ** 2) ** 1.5)
-    for position in (-coil_z, coil_z)
-)
-center = int(np.argmin(np.abs(grid.z)))
-axial_flux_derivative = 0.5 * vacuum_axis_field[center] * CENTER_RADIUS**2
-initial_boundary = discretization.fit_boundary(
-    MirrorBoundary.from_axis_field(
-        axial_flux_derivative,
-        vacuum_axis_field,
-        grid,
-    ),
-    source_grid,
-)
+
 ### Solve the beta scan #######################################################
 
 print(f"Solving {BETAS.size} beta points at ns={NS}, nxi={NXI}, ftol={FTOL:.0e}")
-results = solve_beta_scan(
-    initial_boundary,
-    discretization,
-    config,
-    external_field,
-    jnp.asarray(BETAS),
-    axial_flux_derivative=axial_flux_derivative,
-    reference_field=float(vacuum_axis_field[center]),
-    initial_restart=initial_restart,
-    exterior_ntheta=EXTERIOR_NTHETA,
-    exterior_order=EXTERIOR_ORDER,
-    exterior_spectral_side_density=EXTERIOR_SPECTRAL_SIDE_DENSITY,
-)
+restart = None
+if RESTART_FROM is not None:
+    discretization = SplineMirrorDiscretization.build_cgl(inp.config, elements=SPLINE_ELEMENTS)
+    restart = load_free_boundary_restart(RESTART_FROM, discretization)
+solutions = solve_mirror_beta_scan(inp, BETAS, initial_restart=restart)
+results = [solution.result for solution in solutions]
+grid = solutions[0].discretization.grid
+vacuum_axis_field = np.asarray(coils.axis_field(grid.z))
+
 ### Save the states and the summary ###########################################
 
-gamma = np.asarray(coils.gamma)
-if SAVE_RESTARTS:
-    for beta, result in zip(BETAS, results, strict=True):
-        label = f"beta_{100 * beta:05.1f}pct".replace(".", "p")
-        save_free_boundary_restart(OUTPUT_DIR / label, FreeBoundaryRestart.from_result(result))
-for beta, result in zip(BETAS, results, strict=True):
-    label = f"beta_{100 * beta:05.1f}pct".replace(".", "p")
-    write_mout(
-        OUTPUT_DIR / f"mout_mirror_{label}.nc",
-        mout_from_result(
-            result,
-            grid,
-            config,
-            axial_flux_derivative=axial_flux_derivative,
-            coil_xyz=gamma,
-        ),
-    )
-diagnostics = summarize_axisymmetric_beta_scan(
-    results,
-    jnp.asarray(BETAS),
-    grid,
-    reference_field=float(vacuum_axis_field[center]),
-)
-
-
+labels = [f"beta_{100 * beta:05.1f}pct".replace(".", "p") for beta in BETAS]
+for label, solution in zip(labels, solutions, strict=True):
+    if SAVE_RESTARTS:
+        save_free_boundary_restart(OUTPUT_DIR / label, FreeBoundaryRestart.from_result(solution.result))
+    solution.write_mout(OUTPUT_DIR / f"mout_mirror_{label}.nc")
+diagnostics = summarize_axisymmetric_beta_scan(results, BETAS, grid, reference_field=center_field)
 summary = [
     {key: float(value) for key, value in vars(item).items()}
     | {
@@ -261,7 +205,7 @@ final_gate = (
 )
 caption = (
     f"Two ESSOS loops (radius {COIL_RADIUS} m at z = +/-{0.5 * COIL_SEPARATION} m, "
-    f"{COIL_CURRENT:.3g} A each) give vacuum B(0) = {float(vacuum_axis_field[center]):.4f} T, "
+    f"{COIL_CURRENT:.3g} A each) give vacuum B(0) = {center_field:.4f} T, "
     f"vacuum R_m,axis = {mirror_ratio:.2f} over L_mirror,B = {vacuum_well.mirror_length:.2f} m, "
     f"and R_m,LCFS = {ratios.lcfs_mirror_ratio:.2f} at beta = 0. "
     f"Betas through {100 * SUPPORTED_BETA_MAX:g}% pass the "

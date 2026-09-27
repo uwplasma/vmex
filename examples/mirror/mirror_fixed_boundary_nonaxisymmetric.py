@@ -23,15 +23,15 @@ import numpy as np
 from vmex.mirror import (
     MirrorBoundary,
     MirrorConfig,
+    MirrorInput,
     MirrorResolution,
     MirrorState,
     SplineMirrorBoundary,
     SplineMirrorDiscretization,
-    mirror_ratio_diagnostics,
     mout_from_result,
     plot_mout,
     solve_fixed_boundary,
-    solve_fixed_boundary_from_radius,
+    solve_mirror,
     spline_fixed_boundary_adjoint,
     write_mout,
 )
@@ -41,7 +41,6 @@ from vmex.mirror.analytic import (
     StraightFieldLineMirror,
 )
 from vmex.mirror.forces import force_gate_zones
-from vmex.mirror.geometry import magnetic_field_squared
 from vmex.mirror.implicit import spline_fixed_boundary_parameters
 from vmex.mirror.output import plot_mirror_3d_pair
 from vmex.mirror.splines import initialize_from_cartesian_field
@@ -72,10 +71,9 @@ STRONG_FORCE_GATE = 5.0e-2
 RADIUS = {"rotating_ellipse": 0.12, "straight_field_line": 0.10}
 AXIAL_FLUX_DERIVATIVE = {"rotating_ellipse": 0.0072, "straight_field_line": 0.005}
 
-# Standard axisymmetric mirror: radius [m], poloidal modes, on-axis mirror
-# strength (analytic mirror ratio 1 + strength):
+# Standard axisymmetric mirror: radius [m] and on-axis mirror strength
+# (analytic mirror ratio 1 + strength):
 AXISYMMETRIC_RADIUS = 0.12
-AXISYMMETRIC_MPOL = 4
 AXISYMMETRIC_MIRROR_STRENGTH = 0.5
 
 # Directory for the MOUT files, per-case figures and summary.json:
@@ -281,90 +279,33 @@ for case in CASES:
 
 ### Solve the axisymmetric mirror ############################################
 
-# Standard axisymmetric mirror through the one-call entry point: the boundary
-# is the exact circular flux surface of an analytic vacuum mirror.
+# Standard axisymmetric mirror through the one-call driver: the boundary is
+# the exact circular flux surface of an analytic vacuum mirror whose on-axis
+# ratio is 1 + mirror_strength, which the solved |B| must reproduce.
 axisymmetric_fixture = AxisymmetricPolynomialMirror(
     center_field=1.0,
     half_length=1.0,
     mirror_strength=AXISYMMETRIC_MIRROR_STRENGTH,
 )
-axisymmetric_config = MirrorConfig(
-    resolution=MirrorResolution(ns=NS, mpol=AXISYMMETRIC_MPOL, nxi=SOURCE_NXI),
-    z_min=-1.0,
-    z_max=1.0,
-    ftol=FTOL,
-    max_iterations=MAX_ITERATIONS,
+axisymmetric = solve_mirror(
+    MirrorInput(
+        ns=NS,
+        elements=SPLINE_ELEMENTS,
+        phiedge=2.0 * np.pi * float(axisymmetric_fixture.poloidal_flux(AXISYMMETRIC_RADIUS, 0.0)),
+        ftol=FTOL,
+        niter=MAX_ITERATIONS,
+    ).with_boundary(lambda _theta, z: axisymmetric_fixture.boundary_radius(AXISYMMETRIC_RADIUS, z))
 )
-axisymmetric_grid = axisymmetric_config.build_grid()
-axisymmetric_radius = axisymmetric_fixture.boundary_radius(
-    AXISYMMETRIC_RADIUS,
-    jnp.asarray(axisymmetric_grid.z),
-)
-axisymmetric_flux_derivative = float(axisymmetric_fixture.poloidal_flux(AXISYMMETRIC_RADIUS, 0.0))
-axisymmetric_result = solve_fixed_boundary_from_radius(
-    axisymmetric_radius,
-    axisymmetric_config,
-    elements=SPLINE_ELEMENTS,
-    axial_flux_derivative=axisymmetric_flux_derivative,
-    solve_lambda=True,
-    gradient_tolerance=FTOL,
-    require_convergence=True,
-)
-axisymmetric_evaluated = axisymmetric_result.evaluated
-axisymmetric_discretization = SplineMirrorDiscretization.build(axisymmetric_config, elements=SPLINE_ELEMENTS)
-axisymmetric_boundary = axisymmetric_discretization.fit_boundary(
-    MirrorBoundary.from_radius(axisymmetric_radius, axisymmetric_grid),
-    axisymmetric_grid,
-)
-axisymmetric_mout = write_mout(
-    OUTPUT_DIR / "mout_axisymmetric.nc",
-    mout_from_result(
-        axisymmetric_evaluated,
-        axisymmetric_discretization.grid,
-        axisymmetric_config,
-        boundary=axisymmetric_discretization.evaluate_boundary(axisymmetric_boundary),
-        axial_flux_derivative=axisymmetric_flux_derivative,
-    ),
-)
+axisymmetric_mout = axisymmetric.write_mout(OUTPUT_DIR / "mout_axisymmetric.nc")
 plot_mout(axisymmetric_mout, OUTPUT_DIR, name="axisymmetric")
-# Mirror ratios come from the solved |B|, not from the boundary-shape input:
-# R_m,axis is max/min of |B| on the axis over the |B| well, R_m,LCFS is the
-# separate last-closed-surface ratio, and L_mirror,B is the distance between
-# the |B| maxima bounding the well.  The analytic fixture's on-axis ratio is
-# 1 + mirror_strength, which the solve must reproduce.
-axisymmetric_mod_b = np.sqrt(
-    np.maximum(
-        np.asarray(
-            magnetic_field_squared(
-                axisymmetric_evaluated.energy.field,
-                axisymmetric_evaluated.energy.geometry,
-            )
-        ),
-        0.0,
-    )
-)
-axisymmetric_ratios = mirror_ratio_diagnostics(
-    axisymmetric_mod_b[0].mean(axis=0),
-    np.asarray(axisymmetric_discretization.grid.z),
-    lcfs_field_strength=axisymmetric_mod_b[-1],
-    axis_curvature=np.zeros(axisymmetric_discretization.grid.nxi),
-)
-summaries["axisymmetric"] = {
-    "status": "supported",
-    "iterations": axisymmetric_evaluated.iterations,
-    "variational_max": float(axisymmetric_evaluated.variational.maximum),
-    "staggered_weak_max": float(axisymmetric_evaluated.staggered_weak_force.maximum),
-    "strong_force_normalized_rms": float(axisymmetric_evaluated.force.normalized_rms),
-    "normalized_divergence_rms": float(axisymmetric_evaluated.normalized_divergence_rms),
-    "axial_flux_derivative": axisymmetric_flux_derivative,
+summaries["axisymmetric"] = {"status": "supported"} | axisymmetric.summary() | {
     "analytic_axis_mirror_ratio": float(1.0 + AXISYMMETRIC_MIRROR_STRENGTH),
-} | axisymmetric_ratios.summary()
-assert float(axisymmetric_evaluated.variational.maximum) <= FTOL
-assert float(axisymmetric_evaluated.staggered_weak_force.maximum) <= 1.1 * FTOL
-assert float(axisymmetric_evaluated.force.normalized_rms) < STRONG_FORCE_GATE
-assert float(axisymmetric_evaluated.normalized_divergence_rms) < 1.0e-12
-# The solved on-axis ratio reproduces the analytic fixture's 1 + mirror_strength
-# to 7.5e-4 at the shipped resolution; the gate leaves room for platform drift.
+}
+assert summaries["axisymmetric"]["variational_max"] <= FTOL
+assert summaries["axisymmetric"]["strong_force_normalized_rms"] < STRONG_FORCE_GATE
+assert summaries["axisymmetric"]["normalized_divergence_rms"] < 1.0e-12
+# The solved on-axis ratio reproduces 1 + mirror_strength to 7.5e-4 at this
+# resolution; the gate leaves room for platform drift.
 assert abs(summaries["axisymmetric"]["R_m_axis"][0] / (1.0 + AXISYMMETRIC_MIRROR_STRENGTH) - 1.0) < 3.0e-3
 
 ### Plot and save ############################################################

@@ -151,6 +151,7 @@ EXECUTED_EXAMPLES = {
     "examples/free_boundary_mgrid.py",
     "examples/free_boundary_phiedge.py",
     "examples/hot_restart_scan.py",
+    "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
     "examples/mirror/mirror_free_boundary_beta_scan.py",
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
@@ -747,6 +748,17 @@ def test_free_boundary_beta_scan(tmp_path):
     assert len(betas) == 3 and betas[-1] > 1e-2, f"beta should reach finite values: {betas}"
 
 
+def test_mirror_fixed_boundary_axisymmetric_example(tmp_path):
+    """The concise driver example reproduces the exact vacuum mirror."""
+    import json
+    _run_example(EXAMPLES / "mirror" / "mirror_fixed_boundary_axisymmetric.py", tmp_path, timeout=600)
+    outdir = tmp_path / "results" / "mirror_fixed_boundary_axisymmetric"
+    summary = json.loads((outdir / "summary.json").read_text())
+    assert summary["converged"] and summary["variational_max"] <= 1.0e-12
+    assert summary["mirror_ratio_relative_error"] < 1.0e-3
+    assert summary["axis_field_max_relative_error"] < 1.0e-3
+
+
 @pytest.mark.full
 def test_mirror_fixed_boundary_nonaxisymmetric_example(tmp_path):
     import json
@@ -803,7 +815,6 @@ def test_qi_mirror_hybrid_example(tmp_path):
 @pytest.mark.full
 def test_mirror_free_boundary_beta_scan_example(tmp_path):
     import json
-    pytest.importorskip("essos")
     _run_example(EXAMPLES / "mirror" / "mirror_free_boundary_beta_scan.py", tmp_path, timeout=2400)
     outdir = tmp_path / "results" / "mirror_free_boundary_beta_scan"
     summary = json.loads((outdir / "beta_scan_summary.json").read_text())
