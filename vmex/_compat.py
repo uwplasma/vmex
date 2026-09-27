@@ -594,7 +594,13 @@ def _relieve_map_pressure(jax_module: Any = None) -> bool:
 
 
 def _after_compile(event: str, *_: Any, **__: Any) -> None:
-    if event == "/jax/core/compile/backend_compile_duration":
+    """JAX monitoring listener: the mapping check, at most once a second."""
+    import time
+
+    now = time.monotonic()
+    if (event == "/jax/core/compile/backend_compile_duration"
+            and now - _MAP_STATE.get("checked", -1.0) >= 1.0):
+        _MAP_STATE["checked"] = now
         _relieve_map_pressure()
 
 

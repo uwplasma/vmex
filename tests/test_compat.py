@@ -315,8 +315,10 @@ def test_map_count_reads_this_process_and_every_compile_checks_it(monkeypatch):
     assert count > 10
     calls = []
     monkeypatch.setattr(_compat, "_relieve_map_pressure", lambda: calls.append(1))
+    monkeypatch.setitem(_compat._MAP_STATE, "checked", -1.0)
     _compat._configure_jax_environment()                     # idempotent
     jax.jit(lambda x: x * 3.0 + 7.0).lower(1.0).compile()
+    jax.jit(lambda x: x * 5.0 + 7.0).lower(1.0).compile()  # within the second
     assert len(calls) == 1
 
 
