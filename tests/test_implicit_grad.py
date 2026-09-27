@@ -1252,6 +1252,9 @@ def test_nearby_refinement_seed_is_guarded_and_conservative(monkeypatch):
     monkeypatch.setattr(im, "residual_fn", lambda *_: lambda z, _params: z)
     monkeypatch.setattr(im, "_REFINE_MAX_STEPS", 1)
     monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)  # the Krylov steps' guard
+    # This test pins the warm-seed guard on one pass; restarts from the best
+    # iterate are covered by test_refinement_restarts_from_its_best_iterate.
+    monkeypatch.setattr(im, "_REFINE_RESTARTS", 0)
 
     calls = []
 

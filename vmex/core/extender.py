@@ -951,7 +951,8 @@ def _interior_coordinates_and_B(
     coordinates, valid = _invert_coordinates(
         spectra, points, newton_iterations=newton_iterations, initial_flux=initial_flux)
     field = _cartesian_derivative(spectra, 0, coordinates, valid)
-    return coordinates.at[:, 0].set(coordinates[:, 0] ** 2), field
+    flux = coordinates.at[:, 0].set(coordinates[:, 0] ** 2)
+    return jnp.where(valid[:, None], flux, jnp.nan), field
 
 
 class VmecInteriorField(MagneticField):
@@ -968,9 +969,9 @@ class VmecInteriorField(MagneticField):
 
     ``s`` is the normalised toroidal flux ``psi / psi_edge`` on ``[0, 1]``,
     and ``theta`` (poloidal) and ``phi`` (geometric toroidal) are in radians.
-    A point is rejected — every field component set to NaN — when the
-    converged ``s`` leaves ``[0, 1]`` by more than ``1e-8`` or the inverted
-    ``(R, Z)`` still misses the query point by more than ``1e-7`` m, so a
+    A point is rejected — its flux coordinates and every field component set
+    to NaN — when the converged ``s`` leaves ``[0, 1]`` by more than ``1e-8``
+    or the inverted ``(R, Z)`` still misses the query point by more than ``1e-7`` m, so a
     non-converged inversion cannot be mistaken for a field value.
 
     Parameters
@@ -1020,7 +1021,7 @@ class VmecInteriorField(MagneticField):
         self.spectra = spectra
         self.newton_iterations = int(newton_iterations)
         self._points_flux: Array | None = None
-        self._derivative_fns: dict[tuple[int, int, int], Callable[[Array, Array], Array]] = {}
+        self._derivative_fns: dict[tuple[int, int, int], Callable[..., Any]] = {}
         self._warned = False
 
         def B_fn(points):
@@ -1080,6 +1081,17 @@ class VmecInteriorField(MagneticField):
             evaluate = self._derivative_fns[key] = jax.jit(evaluate)
         return self._loud(evaluate(xyz, seeds), xyz, seeds)
 
+    def _compiled(self, kind: int, build: Callable[[], Callable[..., Any]]) -> Callable[..., Any]:
+        """``build()`` compiled once per ``kind``, spectra and iteration bound.
+
+        Negative kinds keep these apart from :meth:`_evaluate`'s orders.
+        """
+        key = (kind, id(self.spectra), self.newton_iterations)
+        compiled = self._derivative_fns.get(key)
+        if compiled is None:
+            compiled = self._derivative_fns[key] = jax.jit(build())
+        return compiled
+
     def _loud(self, value: Array, xyz: Array, seeds: Array) -> Array:
         """Raise when an eager result is NaN because the inversion stalled.
 
@@ -1090,9 +1102,9 @@ class VmecInteriorField(MagneticField):
         """
         if isinstance(value, jax.core.Tracer) or not bool(jnp.isnan(value).any()):
             return value
-        _, valid = _invert_coordinates(
-            self.spectra, xyz, newton_iterations=self.newton_iterations,
-            initial_flux=seeds)
+        spectra, iterations = self.spectra, self.newton_iterations
+        _, valid = self._compiled(-2, lambda: lambda xyz, seeds: _invert_coordinates(
+            spectra, xyz, newton_iterations=iterations, initial_flux=seeds))(xyz, seeds)
         # Seeded callers were told which surface the point is on; everyone
         # else is classified against the boundary itself, because an
         # unconverged iterate's own s carries no information about where the
@@ -1102,8 +1114,8 @@ class VmecInteriorField(MagneticField):
         # silently classified every unseeded point as exterior and suppressed
         # the complaint this method exists to raise.
         label = jnp.asarray(seeds[:, 0])
-        interior = jnp.where(jnp.isfinite(label), label <= 1.0 + 1.0e-8,
-                             _inside_boundary(self.spectra, xyz))
+        inside = self._compiled(-3, lambda: lambda xyz: _inside_boundary(spectra, xyz))
+        interior = jnp.where(jnp.isfinite(label), label <= 1.0 + 1.0e-8, inside(xyz))
         stalled = ~valid & interior
         if bool(stalled.any()):
             raise VmecNumericalError(
@@ -1174,8 +1186,9 @@ class VmecInteriorField(MagneticField):
         if points is None and self._points_flux is not None:
             return self._points_flux
         xyz, seeds = self._seeds(points)
-        coordinates, field = _interior_coordinates_and_B(
-            self.spectra, xyz, newton_iterations=self.newton_iterations)
+        spectra, iterations = self.spectra, self.newton_iterations
+        coordinates, field = self._compiled(-1, lambda: lambda xyz: _interior_coordinates_and_B(
+            spectra, xyz, newton_iterations=iterations))(xyz)
         self._loud(field, xyz, seeds)
         return coordinates
 

@@ -301,12 +301,13 @@ def test_unpolished_wout_stays_bit_identical_to_the_plain_state_write(tmp_path):
 
 def test_solve_file_rejects_polish_on_a_free_boundary_deck(tmp_path, monkeypatch):
     source = tmp_path / "input.freeb"
-    # MGRID_FILE must name something: readin.f (and VmecInput) force
-    # LFREEB = F when it is 'NONE', which would silently reroute this deck to
-    # the fixed-boundary branch and never reach the gate under test.
+    # MGRID_FILE must name a readable file: 'NONE' forces LFREEB = F in
+    # readin.f, and a missing file falls back to a fixed-boundary solve, either
+    # of which would never reach the gate under test.
+    mgrid = (DATA / "mgrid_cth_like_lasym_small.nc").resolve()
     source.write_text(
         "!@VMEX POLISH = .TRUE.\n"
-        "&INDATA\nLFREEB = T\nMGRID_FILE = 'mgrid_missing.nc'\nMPOL = 3\n"
+        f"&INDATA\nLFREEB = T\nMGRID_FILE = '{mgrid}'\nMPOL = 3\n"
         "NS_ARRAY = 5\nRBC(0,0) = 1.0\nRBC(0,1) = 0.3\nZBS(0,1) = 0.3\n/\n",
         encoding="utf-8")
     import vmex as vj
@@ -323,6 +324,65 @@ def test_solve_file_rejects_polish_on_a_free_boundary_deck(tmp_path, monkeypatch
     assert vj.solve_file(source, polish=False, write_wout=False) is result
     driver.assert_called_once()
     assert driver.call_args.args[0].lfreeb
+    assert driver.call_args.kwargs["mgrid_path"] == mgrid
+
+
+def test_solve_file_resolves_mgrid_beside_the_deck(tmp_path, monkeypatch):
+    """Library routing matches ``vmex <input>`` from any working directory."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import vmex as vj
+    from vmex.core import multigrid
+
+    monkeypatch.chdir(tmp_path)
+    driver = Mock(return_value=SimpleNamespace(polish_report=None))
+    monkeypatch.setattr(multigrid, "solve_free_boundary_multigrid", driver)
+    deck = (DATA / "input.cth_like_free_bdy_lasym_small").resolve()
+    vj.solve_file(deck, polish=False, write_wout=False)
+    kwargs = driver.call_args.kwargs
+    assert kwargs["mgrid_path"] == deck.parent / "mgrid_cth_like_lasym_small.nc"
+    # An explicit keyword still wins over the deck's MGRID_FILE.
+    vj.solve_file(deck, polish=False, write_wout=False, mgrid_path="elsewhere.nc")
+    assert driver.call_args.kwargs["mgrid_path"] == "elsewhere.nc"
+
+
+def test_solve_file_missing_mgrid_falls_back_to_fixed_boundary(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import vmex as vj
+    from vmex.core import multigrid
+
+    source = tmp_path / "input.freeb_missing"
+    source.write_text(
+        "&INDATA\nLFREEB = T\nMGRID_FILE = 'mgrid_missing.nc'\nMPOL = 3\n"
+        "NS_ARRAY = 5\nRBC(0,0) = 1.0\nRBC(0,1) = 0.3\nZBS(0,1) = 0.3\n/\n",
+        encoding="utf-8")
+    fixed = Mock(return_value=SimpleNamespace(polish_report=None))
+    free = Mock()
+    monkeypatch.setattr(multigrid, "solve_multigrid", fixed)
+    monkeypatch.setattr(multigrid, "solve_free_boundary_multigrid", free)
+    with pytest.warns(RuntimeWarning, match="FIXED-BOUNDARY"):
+        vj.solve_file(source, polish=False, write_wout=False)
+    free.assert_not_called()
+    assert not fixed.call_args.args[0].lfreeb
+
+
+@pytest.mark.full
+def test_solve_file_free_boundary_wout_carries_the_coil_metadata(tmp_path, monkeypatch):
+    import vmex as vj
+    from vmex.core.mgrid import read_mgrid
+    from vmex.core.wout import read_wout
+
+    monkeypatch.chdir(tmp_path)
+    deck = (DATA / "input.cth_like_free_bdy_lasym_small").resolve()
+    vj.solve_file(deck, polish=False, outdir=tmp_path, niter_array=[20],
+                  raise_on_max_iterations=False)
+    wout = read_wout(tmp_path / "wout_cth_like_free_bdy_lasym_small.nc")
+    mgrid = read_mgrid(deck.parent / "mgrid_cth_like_lasym_small.nc")
+    assert int(wout.nextcur) == int(mgrid.nextcur) > 0
+    assert str(wout.mgrid_mode).strip() == str(mgrid.mgrid_mode).strip()
 
 
 
