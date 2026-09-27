@@ -951,7 +951,8 @@ def _interior_coordinates_and_B(
     coordinates, valid = _invert_coordinates(
         spectra, points, newton_iterations=newton_iterations, initial_flux=initial_flux)
     field = _cartesian_derivative(spectra, 0, coordinates, valid)
-    return coordinates.at[:, 0].set(coordinates[:, 0] ** 2), field
+    flux = coordinates.at[:, 0].set(coordinates[:, 0] ** 2)
+    return jnp.where(valid[:, None], flux, jnp.nan), field
 
 
 class VmecInteriorField(MagneticField):
@@ -968,9 +969,9 @@ class VmecInteriorField(MagneticField):
 
     ``s`` is the normalised toroidal flux ``psi / psi_edge`` on ``[0, 1]``,
     and ``theta`` (poloidal) and ``phi`` (geometric toroidal) are in radians.
-    A point is rejected — every field component set to NaN — when the
-    converged ``s`` leaves ``[0, 1]`` by more than ``1e-8`` or the inverted
-    ``(R, Z)`` still misses the query point by more than ``1e-7`` m, so a
+    A point is rejected — its flux coordinates and every field component set
+    to NaN — when the converged ``s`` leaves ``[0, 1]`` by more than ``1e-8``
+    or the inverted ``(R, Z)`` still misses the query point by more than ``1e-7`` m, so a
     non-converged inversion cannot be mistaken for a field value.
 
     Parameters
