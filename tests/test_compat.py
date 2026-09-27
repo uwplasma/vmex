@@ -316,7 +316,7 @@ def test_map_count_reads_this_process_and_every_compile_checks_it(monkeypatch):
     calls = []
     monkeypatch.setattr(_compat, "_relieve_map_pressure", lambda: calls.append(1))
     _compat._configure_jax_environment()                     # idempotent
-    jax.jit(lambda x: x * 3.0 + len(calls))(1.0).block_until_ready()
+    jax.jit(lambda x: x * 3.0 + 7.0).lower(1.0).compile()
     assert len(calls) == 1
 
 
