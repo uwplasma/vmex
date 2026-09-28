@@ -5,6 +5,17 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## 0.11.6 - 2026-09-28
+
+- `vmex --trace` defaults to a Boozer mode cut of 1e-4, the cut the
+  six-geometry study supports, and `--trace-mode-cut` sets it. The header
+  states the cut and lists the flags that change the run (#496).
+- An outdated or missing optional dependency (ESSOS, virtual-casing-jax,
+  neo-jax, GKX) now fails with the `pip install -U` command that fixes it,
+  and the import guard also covers `booz_xform_jax` and `solvax` (#496).
+- No `RuntimeWarning` when no alpha is lost, and the terminal progress line
+  is cleared properly (#496).
+
 ## 0.11.5 - 2026-09-28
 
 - `vmex --trace` reports progress: the share of `tmax` traced, the elapsed
