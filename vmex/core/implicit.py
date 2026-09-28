@@ -1968,9 +1968,8 @@ def _on_host(fn: Callable, cfg: Any, *args):
     default, so clearing the override changes no placement; other backends
     keep JAX's CPU pin.
     """
-    if jax.default_backend() != "cpu":
-        return fn(cfg, *args)
-    with jax.default_device(None):
+    cpu = jax.default_backend() == "cpu"
+    with jax.default_device(None) if cpu else contextlib.nullcontext():
         return fn(cfg, *args)
 
 
@@ -1985,12 +1984,8 @@ def _forward_trace_context():
     """
     from jax._src import config as jax_config
 
-    state = getattr(jax_config, "abstract_mesh_context_manager", None)
-    unset = getattr(getattr(jax_config, "config_ext", None), "unset", None)
-    if state is None or unset is None:
-        yield
-        return
-    previous = state.swap_local(unset)
+    state = jax_config.abstract_mesh_context_manager
+    previous = state.swap_local(jax_config.config_ext.unset)
     try:
         yield
     finally:
