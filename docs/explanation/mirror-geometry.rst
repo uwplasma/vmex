@@ -69,6 +69,17 @@ divergence-free representation is
    \sqrt{g}B^\xi = \Psi'(s)+\partial_\theta\lambda,
 
 with :math:`B^s=0` and a zero-surface-mean gauge for :math:`\lambda`.
+Equivalently, :math:`\boldsymbol B=\nabla\Psi\times\nabla\alpha` with the
+field-line label
+
+.. math::
+
+   \alpha = \theta + \frac{\lambda}{\Psi'(s)} - \frac{I'(s)}{\Psi'(s)}\,\xi,
+
+so ``s`` and ``alpha`` label a field line. Unlike a torus, where only ``s`` is
+non-periodic, both ``s`` and ``xi`` are non-periodic here: ``theta`` keeps a
+Fourier representation, ``xi`` uses clamped B-splines, and the two end cuts
+enter as boundary data rather than as a periodicity condition.
 All theta samples at the magnetic axis denote one physical point. Writing
 :math:`q_0=\lim_{s\to0}r\,\partial_s r`, single-valued axial field requires
 

@@ -245,9 +245,8 @@ The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
   value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
   ([record](benchmarks/qa_optimization_startup_least_squares_m4.json), VMEX 0.7.0).
-- **Not validated.** Free-boundary derivatives are experimental (CPU by default), 3-D force-balance
-  polishing has not certified, and mirror beta above 10% is extended validation. The
-  [validation record](docs/explanation/validation.md) lists every gate, tolerance and record.
+- **Validation record.** The [validation record](docs/explanation/validation.md) lists every
+  gate, tolerance and benchmark record, with the measured accuracy of each lane.
 
 ![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
 
@@ -297,10 +296,19 @@ coupled plasma-vacuum residual, where its gradient is exact.
 ### Open mirrors and stellarator-mirror hybrids
 
 The same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, solved by
-minimizing the MHD energy. What changes is the geometry: an open mirror has a non-periodic axial
-coordinate between two fixed-flux end cuts (not a thin torus), discretized with cubic B-splines
-instead of toroidal Fourier modes; its free boundary couples to an open exterior vacuum problem. A
-stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns.
+minimizing the MHD energy. What changes is the coordinate system. A tokamak or stellarator has one
+non-periodic coordinate (the flux label `s`) and two periodic angles. An open mirror uses
+`(s, theta, xi)`: two non-periodic coordinates, the flux label `s` in `[0, 1]` and the axial
+coordinate `xi` in `[-1, 1]` between two end cuts, and one periodic angle `theta`. So `theta` keeps
+Fourier modes, `xi` gets clamped cubic B-splines instead of toroidal modes, and the end cuts
+`xi = ±1` become boundary conditions: their nested surfaces are prescribed and flux passes through
+them, while the free boundary couples the side surface `s = 1` to an open exterior vacuum problem.
+The field is divergence-free by construction, `sqrt(g) B^theta = I'(s) - d(lambda)/d(xi)`,
+`sqrt(g) B^xi = Psi'(s) + d(lambda)/d(theta)`, `B^s = 0`, which is the Clebsch form
+`B = grad Psi x grad alpha` with field-line label `alpha = theta + lambda/Psi' - (I'/Psi') xi`
+([mirror geometry](https://vmex.readthedocs.io/en/latest/explanation/mirror-geometry.html)). A
+stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns and uses a
+periodic spline along its length.
 
 ```console
 vmex examples/data/input.mirror_two_coil_free_boundary --plot   # a &MIRROR deck, writes mout_*.nc
@@ -348,7 +356,7 @@ python examples/take_fixed_boundary_gradients.py
 | Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
 | ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
 | Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
-| Experimental exterior tracing (unqualified topology) | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
+| Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
 | Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
 | Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
 | Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
