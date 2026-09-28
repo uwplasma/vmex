@@ -767,6 +767,14 @@ own grid error (its 10 % ratio still moves 6e-4 between its 31 x 61 and
 midplane radius 0.25 m in the finite-beta state, VMEX at the fixed flux of
 that radius in vacuum.
 
+.. image:: /_static/figures/readme_mirror_pleiades.webp
+   :alt: On-axis midplane field of VMEX and Pleiades against beta, and their difference at two VMEX resolutions
+   :width: 100%
+
+``docs/_static/figures/sources/make_mirror_pleiades_figure.py --solve``
+re-solves both rungs and rewrites ``benchmarks/mirror_pleiades_two_coil.json``;
+without ``--solve`` it plots that record.
+
 .. image:: /_static/figures/mirror_free_boundary_beta_scan.webp
    :alt: Solved axisymmetric free-boundary mirror beta scan with ESSOS coils
    :width: 100%
