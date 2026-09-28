@@ -3149,6 +3149,9 @@ def _adjoint_block_core(params: ImplicitParams, z_star: SpectralState,
 #: anchor's start point are within ~1e-3 of the root's, so the single-stage
 #: example deck certifies in 11 iterations.
 _ADJOINT_REUSE_RESTART = 20
+#: Relative GMRES target, independent of ``adjoint_tol``: the direct block
+#: adjoint it replaces reaches round-off, so the gradient must not loosen.
+_ADJOINT_REUSE_RTOL = 1.0e-13
 _ADJOINT_REUSE_MAX_RESTARTS = 2
 
 
@@ -3181,7 +3184,7 @@ def _adjoint_block_reuse_core(params: ImplicitParams, z_star: SpectralState,
     sol = _solvax_gmres(
         operator, b_flat, precond=precondition,
         restart=min(_ADJOINT_REUSE_RESTART, int(b_flat.shape[0])),
-        rtol=0.1 * _ADJOINT_RESIDUAL_SLACK * cfg.adjoint_tol,
+        rtol=_ADJOINT_REUSE_RTOL,
         atol=0.0, max_restarts=_ADJOINT_REUSE_MAX_RESTARTS)
     residual_norm = jnp.linalg.norm(b_flat - operator(sol.x))
     ok = residual_norm <= tolerance

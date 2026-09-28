@@ -1003,6 +1003,6 @@ def test_status_branch_is_python_when_concrete_and_cond_when_traced(monkeypatch)
         "a failed trial must not run the adjoint"))
     params = {"rbc": jnp.ones(3)}
     (gradient,) = imp._solve_implicit_status_bwd(
-        SimpleNamespace(device=None), (params, None, None, jnp.int32(2)),
+        SimpleNamespace(device=None), (params, None, None, jnp.int32(2), None),
         (jnp.ones(2), None, None, None))
     np.testing.assert_array_equal(np.asarray(gradient["rbc"]), np.zeros(3))
