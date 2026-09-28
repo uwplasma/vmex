@@ -402,3 +402,29 @@ def test_uncertified_restart_is_discarded(monkeypatch) -> None:
     shrink = 5.0  # 10 -> 5 -> 0: the first restart certifies and is kept
     np.testing.assert_array_equal(
         im._refined_state(Config(), params, state, state), [0.0])
+
+
+def test_block_stall_far_from_root_skips_krylov_and_rejects_the_trial(monkeypatch) -> None:
+    """A block phase ending far above refine_tol returns the state and status 3."""
+    inp, _, p0 = _small_solovev_setup()
+    # Unreachable, so no cached or earlier-converged state certifies either.
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-30)
+    state, mask = _host_state(cfg, p0)
+
+    def without_progress(config, params, frozen, dof_mask, z, factors):
+        fz = im.residual_fn(config, frozen, dof_mask)(z, params)
+        return z, fz, im._tree_norm(fz), 1.0
+
+    monkeypatch.setattr(im, "_refine_block_step", without_progress)
+    monkeypatch.setattr(im, "_REFINE_FAR_STALL", 0.0)  # any stall is now "far"
+
+    def no_krylov(*args, **kwargs):
+        raise AssertionError("Krylov fallback ran after a far block stall")
+
+    monkeypatch.setattr(im, "_refine_step", no_krylov)
+    refined = im._refined_state(cfg, p0, state, mask)
+    for a, b in zip(jax.tree.leaves(refined), jax.tree.leaves(state)):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+    status = im._host_solve_and_mask_status(
+        cfg, jax.tree.map(np.asarray, p0))[2]
+    assert int(status) == 3 and im._LAST_REFINED[cfg][2]

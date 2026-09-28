@@ -1374,11 +1374,15 @@ _HOST_ERROR: list[VmecError] = []
 _LAST_STATUS_ERROR: weakref.WeakKeyDictionary[ImplicitConfig, Exception] = \
     weakref.WeakKeyDictionary()
 
-# cfg -> (params-bytes key, refined state): one-entry memo mirroring
+# cfg -> (params-bytes key, refined state, stalled): one-entry memo mirroring
 # _LAST_SOLVE, so the fun(x)-then-jac(x) pattern that already skips the second
 # equilibrium solve also skips the second frozen-residual measurement.
+# ``stalled`` marks an anchor abandoned far from the root (_REFINE_FAR_STALL).
 _LAST_REFINED: weakref.WeakKeyDictionary[
-    ImplicitConfig, tuple[bytes, SpectralState]] = weakref.WeakKeyDictionary()
+    ImplicitConfig, tuple[bytes, SpectralState, bool]] = weakref.WeakKeyDictionary()
+
+# cfg -> whether its latest _refined_state call stopped at _REFINE_FAR_STALL.
+_ANCHOR_STALLED: dict[int, bool] = {}
 
 # Last accepted refinement displacement. At a nearby parameter point it is
 # only an initial guess: an exact residual check guards its use, and failure
@@ -1491,6 +1495,14 @@ _REFINE_BLOCK_MAX_ITERATIONS = 50
 #: two stalled steps in a row, or one past ``refine_tol``, end the Newton phase.
 _REFINE_BLOCK_STALL = 0.1
 
+#: A block phase ending above this multiple of ``refine_tol`` is far outside
+#: Newton's basin: the Krylov fallback is skipped and the state is returned
+#: unrefined and flagged, so the status lane rejects the trial (status 3)
+#: instead of differentiating an uncertified point.  On the single-stage
+#: example's first trial the block phase ends at |F| ~ 3e6 and the Krylov
+#: steps it replaced spent ~20 s to end at 3e4, still 14 decades short.
+_REFINE_FAR_STALL = 1.0e6
+
 
 def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState,
@@ -1505,13 +1517,14 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                 cfg, params, state, dof_mask,
                 initial_correction=_LAST_REFINEMENT_CORRECTION.get(cfg),
             )
+            stalled = _ANCHOR_STALLED.pop(id(cfg), False)
             correction = jax.tree.map(jnp.subtract, refined, state)
             correction_norm = float(_tree_norm(correction))
-        if np.isfinite(correction_norm) and correction_norm > 0.0:
+        if not stalled and np.isfinite(correction_norm) and correction_norm > 0.0:
             _LAST_REFINEMENT_CORRECTION[cfg] = correction
         else:
             _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
-        hit = (key, refined)
+        hit = (key, refined, stalled)
         _LAST_REFINED[cfg] = hit
     return hit[1]
 
@@ -1672,7 +1685,10 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     solves exactly the equations the host solver iterates, only closer.  Any
     refinement that fails to improve the residual — a stalled Krylov step, a
     non-finite iterate — leaves ``state`` untouched: the anchor is an
-    accuracy gain, never a precondition for returning a gradient.
+    accuracy gain, never a precondition for returning a gradient.  The one
+    exception is a first pass whose block phase ends above
+    ``_REFINE_FAR_STALL * refine_tol``: it is flagged, and the optimizer's
+    status lane rejects that trial rather than differentiate it.
     """
     tol = float(cfg.refine_tol)
     if not np.isfinite(tol) or tol <= 0.0:
@@ -1715,6 +1731,9 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
         block_z, block = block_from(z, residual)
         if block <= tol:
             return block_z, block
+        if _REFINE_BLOCK_MAX_STEPS > 0 and block > _REFINE_FAR_STALL * tol:
+            _ANCHOR_STALLED[id(cfg)] = True
+            return z, residual
         # The block finish missed: replay the Krylov refinement from the same
         # start and keep whichever lands lower.
         best_z, best = z, residual
@@ -1758,7 +1777,10 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
 
     # A warm guess that misses the tolerance cannot alter numerical results:
     # replay the original refinement from the host-solver state.
+    _ANCHOR_STALLED.pop(id(cfg), None)
     best_z, best = refine_from(z0, fz, base)
+    if _ANCHOR_STALLED.get(id(cfg)):
+        return state
     # A pass that lowered |F| but missed ``tol`` usually stopped because its
     # first Newton step started outside the quadratic region; restarting from
     # the best iterate refactorizes there and lands inside it.  Restarts are
@@ -1774,6 +1796,7 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
         if not next_residual < restart:
             break
         restart_z, restart = next_z, next_residual
+    _ANCHOR_STALLED.pop(id(cfg), None)  # only the first pass decides
     if restart <= tol:
         best_z, best = restart_z, restart
     if best >= base:
@@ -1882,8 +1905,9 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
 def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
     """Status-returning host callback for optimization trial points.
 
-    Status is 0 for a derivative-certified state, 1 for a failed solve, and 2
-    when the iteration budget was exhausted above ``cfg.max_fsq_ratio``.
+    Status is 0 for a derivative-certified state, 1 for a failed solve, 2
+    when the iteration budget was exhausted above ``cfg.max_fsq_ratio``, and
+    3 when the fixed-point anchor stalled far from the root.
     The final force residual and its ratio to ``ftol`` accompany the state so
     every optimizer interface applies the same acceptance policy.  That
     residual is the host solver's own, from before the fixed-point refinement
@@ -1933,6 +1957,9 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         ratio = fsq / cfg.ftol
         status = 0 if bool(result.converged) or ratio <= cfg.max_fsq_ratio else 2
+        refined = _LAST_REFINED.get(cfg)
+        if status == 0 and refined is not None and refined[0] == hit[0] and refined[2]:
+            status = 3  # anchor stalled far from the root: no certified gradient
         if status != 0:
             _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
         return state, mask, np.int32(status), np.float64(fsq), np.float64(ratio)
@@ -2098,8 +2125,9 @@ def solve_implicit_status(
 ) -> tuple[SpectralState, Array, Array, Array]:
     """Differentiable equilibrium with an exception-free trial status.
 
-    Status is 0 for a derivative-certified state, 1 for a failed solve, and 2
-    for an under-converged state.  ``fsq`` and ``fsq_ratio`` expose the force
+    Status is 0 for a derivative-certified state, 1 for a failed solve, 2
+    for an under-converged state, and 3 when the fixed-point anchor stalled
+    far from the root (``_REFINE_FAR_STALL``).  ``fsq`` and ``fsq_ratio`` expose the force
     residual used for that decision.  Only status 0 has an implicit pullback.
     """
     state, _, status, fsq, fsq_ratio = _callback_solve_status(params, cfg)
