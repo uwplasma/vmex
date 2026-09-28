@@ -375,14 +375,14 @@ external_field=coils.B)` adds the plasma's virtual-casing field to the coils, ac
 down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `MgridField`
 (trilinear or tricubic).
 
-![Poincare sections of the extended field: HSX, and Landreman-Paul QA against HINT](docs/_static/figures/readme_extender_islands.webp)
+![Poincare sections of the extended field around finite-beta free-boundary QA equilibria](docs/_static/figures/readme_extender_islands.webp)
 
-Field lines of the extended field at zero beta, where it equals the coil field. HSX (left): lines
-launched on VMEX surfaces stay within 8 mm of them for 200 field periods; lines launched outside are
-open. Landreman-Paul QA (right): the same seeds traced through the coils and through HINT's relaxed
-field, with the island chain and stochastic layer outside the VMEX surfaces of the matched free
-boundary; HINT and the coils agree on the rotational transform to 3e-7. Details, accuracy limits and the
-interior-field benchmark: [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+The Landreman-Paul QA held by its coils as a free boundary at 1.0% and 2.2% beta, and the field
+lines of the extended field (coils plus the plasma's virtual-casing field) launched outside it.
+Closed surfaces continue 3.1 cm past the LCFS at 1.0% beta and 1.5 cm at 2.2% beta, against 2.7 cm
+in vacuum; beyond them the lines open. The figure is built by VMEX from `examples/data` alone
+(`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
+are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
 ## Accuracy and optional polishing
 

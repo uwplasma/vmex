@@ -117,30 +117,38 @@ tabulated domain. The exterior field-line example
 field; a finite trace does not by itself establish magnetic topology. See
 {doc}`/explanation/nestor-vacuum` for the derivation.
 
-![Poincare sections of the extended field: HSX, and Landreman-Paul QA against HINT](../_static/figures/readme_extender_islands.webp)
+![Poincare sections of the extended field around finite-beta free-boundary QA equilibria](../_static/figures/readme_extender_islands.webp)
 
-The README figure plots Poincare sections at the phi = 0 plane recorded by two
-external benchmarks, both at zero beta, where the extended field equals the
-coil field. `benchmarks/extender_islands_sections.npz` holds the sections and
-`docs/_static/figures/sources/make_extender_islands_figure.py` draws them.
+The README figure is built by VMEX alone from inputs in `examples/data`.
+`python docs/_static/figures/sources/make_extender_islands_figure.py --record`
+solves `input.LandremanPaul2021_QA_lowres` as a free boundary held by
+`ESSOS_biot_savart_LandremanPaulQA.json` at fixed coil currents, with
+`p = PRES_SCALE (1 - s)` as in `examples/free_boundary_essos_coils.py`, at
+volume-averaged beta 0, 1.02% and 2.18%. Outside the plasma the field is the
+coil Biot-Savart field plus the `VmecExtender` virtual-casing field of the
+plasma currents. The plasma part is tabulated once on a 1 cm cylindrical grid
+(half a field period, completed by stellarator symmetry) and read through a
+tricubic `MgridField`. Table nodes inside the plasma, within 3 mm of it, or
+where the quadrature error estimate exceeds 1e-5 carry a neighbour-averaged
+continuation of the exterior field.
+Field lines launched on the phi = 0 outboard midplane 4 mm to 4.5 cm outside
+the LCFS are traced for 1500 m, about 220 toroidal transits.
+`benchmarks/extender_islands_sections.npz` holds the sections and the VMEX
+flux surfaces; the script without `--record` draws both figures from it.
 
-- **HSX (QHS)**, from the neutral-beam study at
-  `neutral-beam-hsx` (not yet public):
-  the main-coil Biot-Savart field, scaled to the QHS WOUT, traced from the
-  VMEX surfaces s = 0.25 to 1 and from 1 to 4 cm outside the LCFS, for 200
-  field periods. The lines launched on VMEX surfaces stay within 8 mm of
-  their surface; the lines launched outside are open and leave the frame.
-- **Landreman-Paul QA**, case Q0 of
-  `vmex-hint-benchmark` (not yet public):
-  the same seeds traced for 300 transits through the ESSOS coil field and
-  through HINT's relaxed field on a 128^2 grid, with the VMEX free-boundary
-  surfaces whose PHIEDGE matches the traced surface just inside the
-  iota = 2/5 separatrix. The HINT and coil rotational transforms agree to
-  3e-7, the magnetic axes to 1e-6 m, and the VMEX interior iota is within
-  1e-3 of the traced one at (ns, mpol) = (101, 12). The coil field's island
-  chain at iota = 2/5 bounds the region where VMEC's nested-surface model
-  applies; a zero-beta free boundary asked to enclose more flux than that has
-  no equilibrium (see {doc}`/explanation/validation`).
+![Poincare section of the coil field around the vacuum free-boundary QA](../_static/figures/extender_vacuum_islands.webp)
+
+| Case | beta | closed surfaces outside the LCFS | first open seed |
+|---|---|---|---|
+| vacuum | 0 | to 2.7 cm | 2.9 cm |
+| finite beta | 1.02% | to 3.1 cm | 3.3 cm |
+| finite beta | 2.18% | to 1.5 cm | 1.6 cm |
+
+"Closed" means the line crossed phi = 0 on every transit of the 1500 m trace
+without leaving the 10 cm neighbourhood of the LCFS; a finite trace does not by
+itself prove a flux surface. Near the LCFS the tabulated field inherits the
+continuation's error, so the first centimetre of each layer is qualitative.
+The zero-beta extended field equals the coil field and is traced directly.
 
 Joint boundary/coil optimization and the boundary-Schur adjoint remain advanced
 workflows with substantial solve costs; they require independent derivative and
