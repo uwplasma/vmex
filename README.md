@@ -368,10 +368,11 @@ down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `M
 
 ![Poincare sections of the extended field: HSX, and Landreman-Paul QA against HINT](docs/_static/figures/readme_extender_islands.webp)
 
-Field lines of the extended field at zero beta, where it equals the coil field: HSX (left) with its
-exterior island chain around the VMEX surfaces, and Landreman-Paul QA (right) traced through the coils
-and through HINT's relaxed field from the same seeds, with the VMEX surfaces of the matched free
-boundary. The HINT and coil rotational transforms agree to 3e-7. Details, accuracy limits and the
+Field lines of the extended field at zero beta, where it equals the coil field. HSX (left): lines
+launched on VMEX surfaces stay within 8 mm of them for 200 field periods; lines launched outside are
+open. Landreman-Paul QA (right): the same seeds traced through the coils and through HINT's relaxed
+field, with the island chain and stochastic layer outside the VMEX surfaces of the matched free
+boundary; HINT and the coils agree on the rotational transform to 3e-7. Details, accuracy limits and the
 interior-field benchmark: [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
 ## Accuracy and optional polishing

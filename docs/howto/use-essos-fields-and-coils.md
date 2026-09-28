@@ -127,9 +127,9 @@ coil field. `benchmarks/extender_islands_sections.npz` holds the sections and
 - **HSX (QHS)**, from the neutral-beam study at
   [rogeriojorge/neutral-beam-hsx](https://github.com/rogeriojorge/neutral-beam-hsx):
   the main-coil Biot-Savart field, scaled to the QHS WOUT, traced from the
-  outboard midplane inside the VMEX LCFS and up to 5 cm outside it. In that
-  study the lines launched on VMEX surfaces s = 0.25 to 1 stay within
-  8 mm of their surface over 200 field periods.
+  VMEX surfaces s = 0.25 to 1 and from 1 to 4 cm outside the LCFS, for 200
+  field periods. The lines launched on VMEX surfaces stay within 8 mm of
+  their surface; the lines launched outside are open and leave the frame.
 - **Landreman-Paul QA**, case Q0 of
   [rogeriojorge/vmex-hint-benchmark](https://github.com/rogeriojorge/vmex-hint-benchmark):
   the same seeds traced for 300 transits through the ESSOS coil field and
