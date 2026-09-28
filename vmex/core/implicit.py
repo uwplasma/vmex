@@ -1982,10 +1982,12 @@ def _forward_trace_context():
     already compiled (the free-boundary anchor's bulk blocks and edge
     response) compiled again in the backward pass.  Values are unchanged.
     """
-    from jax._src import config as jax_config
+    from jax._src import config as jax_config, mesh as jax_mesh
 
-    state = jax_config.abstract_mesh_context_manager
-    previous = state.swap_local(jax_config.config_ext.unset)
+    # jax >= 0.10 moved the state from ``config`` to ``mesh``.
+    state = getattr(jax_mesh, "abstract_mesh_context_manager", None) or \
+        jax_config.abstract_mesh_context_manager
+    previous = state.swap_local(jax_mesh.config_ext.unset)
     try:
         yield
     finally:

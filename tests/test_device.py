@@ -614,20 +614,19 @@ def test_host_callback_reuses_main_thread_executables():
 def test_free_boundary_backward_traces_like_the_forward_solve(monkeypatch):
     """The backward rule runs with no abstract mesh and committed arguments,
     as the forward anchor does, so the anchor's lanes are reused."""
-    from jax._src import config as jax_config
-
     from vmex.core import freeboundary_implicit as fbi
 
     seen = {}
+    forward = jax.sharding.get_abstract_mesh()
 
     def impl(cfg, saved, state_bar):
-        seen["mesh"] = jax_config.abstract_mesh_context_manager.get_local()
+        seen["mesh"] = jax.sharding.get_abstract_mesh()
         seen["committed"] = saved[0].committed
         return state_bar
 
     monkeypatch.setattr(fbi, "_solve_bwd_impl", impl)
     cfg = SimpleNamespace(implicit=SimpleNamespace(device=None))
-    with jax.sharding.use_abstract_mesh(jax.sharding.AbstractMesh((), ())):
+    with jax.sharding.use_abstract_mesh(jax.sharding.AbstractMesh((1,), ("x",))):
         fbi._solve_bwd(cfg, (jnp.ones(2), jnp.ones(2)), jnp.ones(2))
-    assert seen["mesh"] is jax_config.config_ext.unset
+    assert seen["mesh"] == forward
     assert seen["committed"]
