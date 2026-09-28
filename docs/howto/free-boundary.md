@@ -97,6 +97,36 @@ keyword. {meth}`~vmex.core.mgrid.MgridField.from_coils` and
 `order=1` field; switch the kernel with
 `dataclasses.replace(field, order=3)`.
 
+## Interpolation order of the tabulated field
+
+Every tabulated field ({meth}`~vmex.core.mgrid.MgridField.from_file`,
+{meth}`~vmex.core.mgrid.MgridField.from_coils`,
+{meth}`~vmex.core.mgrid.MgridField.from_cartesian_field` and
+{meth}`~vmex.core.mgrid.MgridField.from_input`) takes `order=1` (trilinear,
+the default) or `order=3` (tricubic, C1). The table itself is the same.
+`MgridField.from_input(inp, mgrid_path=None, *, order=1)` builds a deck's
+field with the solver's `EXTCUR` / `raw_coil_cur` scaling, so it is the way
+to get the tricubic version of the field a deck would use.
+
+Trilinear stays the default because it is the VMEC2000 parity kernel that
+every parity test and reference wout is pinned to. Tricubic is the better
+choice for coarse tables, coil optimization, and orbit tracing that needs a
+continuous grad B:
+
+- Landreman-Paul QA coils, 181x201x64 table, inside the LCFS against
+  Biot-Savart: trilinear rms 1.8e-5, max 1.1e-4; tricubic 8e-8.
+- Same coils, 96x96x32 table, 64 points 2 cm outside a free-boundary LCFS:
+  max |B| error 2.1e-3 (trilinear) vs 1.9e-4 (tricubic); max grad|B| error
+  3.1e-2 vs 7.2e-3.
+- CTH-like free-boundary deck (ftol 1e-12, CPU): `b_cyl` at 20k points
+  1.46 ms vs 6.17 ms (4.2x); full solve 1.63 s vs 1.83 s (+12%), with
+  volume and edge R00 agreeing to about 1e-5.
+
+```python
+field = vj.MgridField.from_input(inp, order=3)          # deck + mgrid file
+coil_field = vj.MgridField.from_coils(coils, order=3)   # ESSOS coils
+```
+
 ## Key knobs
 
 - `EXTCUR` — coil-group currents scaling the mgrid field.

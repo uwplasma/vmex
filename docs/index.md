@@ -110,7 +110,8 @@ Every [CLI flag](reference/cli.rst),
 The methods: [the equilibrium problem](explanation/variational-problem.rst),
 [the solver](explanation/iteration.rst),
 [NESTOR and virtual casing](explanation/nestor-vacuum.rst),
-[adjoint gradients](explanation/adjoint-gradients.md), and
+[adjoint gradients](explanation/adjoint-gradients.md),
+[interior-field accuracy](explanation/interior-field.md), and
 [what is validated](explanation/validation.md).
 :::
 

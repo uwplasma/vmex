@@ -57,6 +57,7 @@ from essos.coils import Coils
 
 coils = Coils.from_json("coils.json")
 coil_field = vj.MgridField.from_coils(coils)          # or pass a BiotSavart
+# order=3 gives a tricubic (C1) interpolant, e.g. for guiding-center tracing
 res = vj.solve_free_boundary(inp, external_field=coil_field)
 ```
 

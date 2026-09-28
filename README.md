@@ -362,6 +362,12 @@ is better. See the [interior-field explanation](https://vmex.readthedocs.io/en/l
 
 ![B and J errors: WOUT file versus VmecInteriorField, against an exact solution](docs/_static/figures/readme_interior_field.webp)
 
+Tabulated coil and mgrid fields (`MgridField.from_coils`, `from_cartesian_field`, `from_file`,
+`from_input`) take `order=1` (trilinear, the VMEC2000-parity default) or `order=3` (tricubic,
+C1). On the Landreman-Paul QA coils tricubic is about 10x more accurate in |B| just outside the
+LCFS and costs about 12% more solve time on a free-boundary deck; see the
+[free-boundary guide](https://vmex.readthedocs.io/en/latest/howto/free-boundary.html).
+
 For an exterior field, `vj.VmecExtender.from_file("wout_my_case.nc",
 external_field=coils.B)` combines the plasma's virtual-casing contribution with
 the supplied coil field. The plasma part is a quadrature over a source grid on
