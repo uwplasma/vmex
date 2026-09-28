@@ -140,6 +140,22 @@ loss against time, loss maps on the boundary, and pitch and loss-time distributi
 birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 ([guide](docs/howto/trace-alpha-particles.md)).
 
+![vmex --trace output: loss against time, loss map, pitch and loss-time distributions, iota](docs/_static/figures/readme_trace_output.webp)
+
+### `--trace` against SIMPLE and SIMSOPT
+
+The same 1000 ARIES-CS alphas (positions, pitches, energy) were traced for 10 ms by each code on the same 8 CPU
+cores. Runtimes exclude compilation and field set-up ([benchmark](benchmarks/trace_cross_code.py),
+[details](docs/howto/trace-alpha-particles.md#against-simple-and-simsopt)). The loss fractions agree within 0.6σ.
+
+| code | loss fraction | runtime |
+|---|---|---|
+| VMEX `--trace` | 12.8 % ± 1.1 % | 146 s |
+| [SIMPLE](https://github.com/itpplasma/SIMPLE) | 12.4 % ± 1.0 % | 556 s |
+| SIMSOPT | 11.9 % ± 1.0 % | 1079 s |
+
+![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT](docs/_static/figures/readme_trace_benchmark.webp)
+
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
 `D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are

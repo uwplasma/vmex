@@ -135,6 +135,30 @@ individual orbits do not. Over 2 ms, 2000 alphas give 54 and 55 losses at
 6.25e-8 s and 3.125e-8 s, 2.7 %. The earlier VMEC-coordinate tracer gave
 2.5 % ± 1.1 % at its converged step.
 
+## Against SIMPLE and SIMSOPT
+
+`benchmarks/trace_cross_code.py` traces the same 1000 alphas with three
+codes. The equilibrium is ARIES-CS (`wout_n3are_R7.75B5.7.nc`, unscaled).
+The alphas are born on s = 0.247 with the `--trace` births, and all three
+codes get the same positions, pitches and 3.52 MeV energy. Each code runs
+for 10 ms on the same 8 cores (`taskset`) of a shared 36-core x86_64
+workstation, under a load average of 28-50 from other jobs. The runtime
+leaves out JAX compilation (35 s), the field set-up of SIMPLE and the
+interpolation tables of SIMSOPT.
+
+| code | integrator | lost | loss fraction | runtime |
+|---|---|---|---|---|
+| VMEX `--trace` (ESSOS Boozer) | RK4, 1.25e-7 s | 128 | 12.8 % ± 1.1 % | 146 s |
+| SIMPLE | symplectic Euler, defaults, all orbits traced | 124 | 12.4 % ± 1.0 % | 556 s |
+| SIMSOPT `trace_particles_boozer` | RK45, tol 1e-9, `gc_noK` | 119 | 11.9 % ± 1.0 % | 1079 s |
+
+The three loss fractions agree within 0.6σ. SIMSOPT uses a `booz_xform`
+field with the same 32 × 32 resolution. SIMPLE reads its starts in VMEC
+angles. The Boozer births are mapped with `nu` and `lambda`, and the
+mapping agrees to 0.13 mm in `R, Z` and 0.2 % in SIMPLE's own `|B|`.
+`docs/_static/figures/sources/make_trace_figures.py` plots the record
+(`benchmarks/trace_cross_code.json`).
+
 ## From Python
 
 ```python

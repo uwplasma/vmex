@@ -465,6 +465,44 @@
         "docs/explanation/mirror-geometry.rst"
       ],
       "note": "The periodic B-spline racetrack is built from constants inside the example. The example calls vmex.mirror.output.plot_stellarator_mirror_hybrid with image_format=\"webp\", which writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
+    },
+    {
+      "path": "docs/_static/figures/readme_trace_benchmark.webp",
+      "sha256": "9097a237810e9e205c8e17f191dd5bec27c51fb6af9058ff07e0c94cd0d98a79",
+      "bytes": 24480,
+      "generator": "docs/_static/figures/sources/make_trace_figures.py",
+      "command": "python docs/_static/figures/sources/make_trace_figures.py wout_n3are_R7.75B5.7.nc",
+      "inputs": [
+        "benchmarks/trace_cross_code.json"
+      ],
+      "record": "benchmarks/trace_cross_code.json",
+      "generated": "2026-09-28",
+      "hardware": "x86_64 Linux workstation (36 cores, 8 used), CPU",
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Plots the three-code record written by benchmarks/trace_cross_code.py (VMEX --trace, SIMPLE, SIMSOPT on the same 1000 ARIES-CS alphas). The equilibrium wout_n3are_R7.75B5.7.nc is not in the tree (ESSOS and SIMSOPT test files); rebuilding the record also needs a SIMPLE build and simsopt. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
+    },
+    {
+      "path": "docs/_static/figures/readme_trace_output.webp",
+      "sha256": "6b2248d8bc62ac15ab0dd74044f5f9ce3da8689396e7529646f58a04dbb2b480",
+      "bytes": 35492,
+      "generator": "docs/_static/figures/sources/make_trace_figures.py",
+      "command": "python docs/_static/figures/sources/make_trace_figures.py wout_n3are_R7.75B5.7.nc",
+      "inputs": [
+        "benchmarks/trace_cross_code.json"
+      ],
+      "record": "benchmarks/trace_cross_code.json",
+      "generated": "2026-09-28",
+      "hardware": "x86_64 Linux workstation (36 cores, 8 used), CPU",
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "The six-panel *_trace.png of plot_tracing for the VMEX run of benchmarks/trace_cross_code.json, re-traced deterministically from the recorded settings (the generator checks the lost count against the record; the title shows the recorded wall time), downsized to 1200 px WebP. Needs wout_n3are_R7.75B5.7.nc from the ESSOS or SIMSOPT test files. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
     }
   ]
 }
