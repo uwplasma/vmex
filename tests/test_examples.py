@@ -113,6 +113,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 UNTESTED_EXAMPLES = {
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
+    "examples/optimization/QA_optimization_alpha_losses.py": "draft: smoke test still to add (needs essos)",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
