@@ -183,3 +183,23 @@ def test_plot_tracing_writes_the_surface_birth_figures(traced, tmp_path):
 def test_collisional_requires_trace(solovev_wout):
     with pytest.raises(SystemExit):
         cli.main([str(solovev_wout), "--plot", "--collisional"])
+
+
+@pytest.mark.parametrize("levels, expected", [((10, 4), 10), ((4, 6), 14), (None, 14)])
+def test_trace_cpu_devices_skip_efficiency_cores_only_when_fewer(monkeypatch, levels, expected):
+    """M3 Max (10 P + 4 E) keeps its performance cores; M4 (4 + 6) and Linux use every usable core."""
+    import subprocess
+    import types
+
+    from vmex.core import parallel
+
+    monkeypatch.setattr(parallel, "available_cpus", lambda: 14)
+
+    def fake_sysctl(command, **_):
+        if levels is None:
+            raise FileNotFoundError("sysctl")
+        return types.SimpleNamespace(stdout=str(levels[int(command[-1][12])]))
+
+    monkeypatch.setattr(subprocess, "run", fake_sysctl)
+    assert cli._trace_cpu_devices() == expected
+

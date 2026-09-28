@@ -1339,6 +1339,22 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
     return _solve_input_file(args, input_path, outdir, emit=emit)
 
 
+def _trace_cpu_devices() -> int:
+    """Usable cores, or only the performance cores where efficiency cores are fewer."""
+    import subprocess
+
+    from .parallel import available_cpus
+
+    cores = available_cpus()
+    try:
+        performance, efficiency = (int(subprocess.run(
+            ["sysctl", "-n", f"hw.perflevel{level}.physicalcpu"],
+            capture_output=True, text=True, check=True, timeout=5).stdout) for level in (0, 1))
+    except Exception:  # not Apple silicon
+        return max(1, cores)
+    return max(1, performance if efficiency < performance else cores)
+
+
 def _split_host_devices() -> None:
     """Give JAX one CPU device per usable core, so ESSOS shards ``--trace``.
 
@@ -1356,21 +1372,8 @@ def _split_host_devices() -> None:
     if ("host_platform_device_count" in os.environ.get("XLA_FLAGS", "")
             or jax.config.jax_num_cpu_devices > 0):
         return
-    from .parallel import available_cpus
-
-    cores = available_cpus()
     try:
-        import subprocess
-
-        performance, efficiency = (int(subprocess.run(
-            ["sysctl", "-n", f"hw.perflevel{level}.physicalcpu"],
-            capture_output=True, text=True, check=True, timeout=5).stdout) for level in (0, 1))
-        if efficiency < performance:
-            cores = performance
-    except Exception:
-        pass
-    try:
-        jax.config.update("jax_num_cpu_devices", max(1, cores))
+        jax.config.update("jax_num_cpu_devices", _trace_cpu_devices())
     except Exception:  # pragma: no cover - backend already initialised
         pass
 
