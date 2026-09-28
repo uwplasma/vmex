@@ -1384,6 +1384,13 @@ _LAST_REFINED: weakref.WeakKeyDictionary[
 # cfg -> whether its latest _refined_state call stopped at _REFINE_FAR_STALL.
 _ANCHOR_STALLED: dict[int, bool] = {}
 
+# cfg -> (params-bytes key, raw block factors): the last factorization the
+# anchor built for that trial, handed to the adjoint as its preconditioner
+# (_adjoint_block_reuse_core) so a trial factors its Jacobian once, not twice.
+_LAST_ANCHOR_FACTORS: weakref.WeakKeyDictionary[
+    ImplicitConfig, tuple[bytes, Any]] = weakref.WeakKeyDictionary()
+_BLOCK_FACTORS_BUILT: dict[int, Any] = {}
+
 # Last accepted refinement displacement. At a nearby parameter point it is
 # only an initial guess: an exact residual check guards its use, and failure
 # to reach the requested tolerance replays the established path from scratch.
@@ -1513,6 +1520,7 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
     if hit is None or hit[0] != key:
         with _timed(cfg, "refinement"):
             _count(cfg, refinements=1)
+            _BLOCK_FACTORS_BUILT.pop(id(cfg), None)
             refined = _refined_state(
                 cfg, params, state, dof_mask,
                 initial_correction=_LAST_REFINEMENT_CORRECTION.get(cfg),
@@ -1520,6 +1528,11 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
             stalled = _ANCHOR_STALLED.pop(id(cfg), False)
             correction = jax.tree.map(jnp.subtract, refined, state)
             correction_norm = float(_tree_norm(correction))
+            factors = _BLOCK_FACTORS_BUILT.pop(id(cfg), None)
+        if factors is None:
+            _LAST_ANCHOR_FACTORS.pop(cfg, None)
+        else:
+            _LAST_ANCHOR_FACTORS[cfg] = (key, factors)
         if not stalled and np.isfinite(correction_norm) and correction_norm > 0.0:
             _LAST_REFINEMENT_CORRECTION[cfg] = correction
         else:
@@ -1648,6 +1661,7 @@ def _refine_block_factors(cfg: ImplicitConfig, params: ImplicitParams,
         _pin_concrete(cfg, tree) for tree in (z, params, frozen, dof_mask)))
     factors = _refine_block_factor_core(*arguments, cfg)
     _count(cfg, refinement_factorizations=1)
+    _BLOCK_FACTORS_BUILT[id(cfg)] = factors
     return factors
 
 
@@ -2084,6 +2098,60 @@ def _callback_solve_status(params: ImplicitParams, cfg: ImplicitConfig):
     )
 
 
+def _host_anchor_factors(cfg: ImplicitConfig, params_np, status) -> Any:
+    """Raw block factors for the adjoint of the trial just solved.
+
+    The anchor's own factorization when it built one for these parameters,
+    else one at the anchored root (status 0 only; otherwise zeros, which the
+    status-0-only pullback never reads).
+    """
+    with _device_context(cfg):
+        struct = _factor_struct(cfg)
+        zeros = lambda: jax.tree.map(  # noqa: E731
+            lambda s: np.zeros(s.shape, s.dtype), struct)
+        if int(status) != 0:
+            return zeros()
+        params = _device_pin(cfg, jax.tree.map(jnp.asarray, params_np))
+        key = _params_key(params)
+        hit = _LAST_ANCHOR_FACTORS.get(cfg)
+        if hit is None or hit[0] != key:
+            refined, mask = _LAST_REFINED.get(cfg, (None, None)), _MASK_CACHE.get(
+                _mask_cache_key(cfg))
+            if refined[0] != key or mask is None:
+                return zeros()
+            mask = _device_pin(cfg, jax.tree.map(jnp.asarray, mask))
+            state = refined[1]
+            factors = _refine_block_factors(
+                cfg, params, state, mask, _dof_projector(cfg, mask)(state))
+            hit = (key, factors)
+            _LAST_ANCHOR_FACTORS[cfg] = hit
+        return jax.tree.map(lambda a: np.asarray(a), hit[1])
+
+
+_FACTOR_STRUCTS: weakref.WeakKeyDictionary[ImplicitConfig, Any] = \
+    weakref.WeakKeyDictionary()
+
+
+def _factor_struct(cfg: ImplicitConfig) -> Any:
+    """Shape/dtype tree of :func:`_refine_block_factor_core`'s output."""
+    hit = _FACTOR_STRUCTS.get(cfg)
+    if hit is None:
+        ns = int(cfg.resolution.ns)
+        m = len(_active_state_fields(cfg)) * int(_state_struct(cfg).R_cos.shape[1])
+        blocks = jax.ShapeDtypeStruct((ns, m, m), jnp.float64)
+        scale = jax.ShapeDtypeStruct((ns, m), jnp.float64)
+        hit = (jax.eval_shape(block_thomas_factor, blocks, blocks, blocks), scale, scale)
+        _FACTOR_STRUCTS[cfg] = hit
+    return hit
+
+
+def _callback_anchor_factors(params: ImplicitParams, status, cfg: ImplicitConfig):
+    """``pure_callback`` fetch of :func:`_host_anchor_factors`."""
+    return jax.pure_callback(
+        _host_callable(_host_anchor_factors, cfg), _factor_struct(cfg),
+        params, status, sharding=_callback_sharding(cfg))
+
+
 def _state_struct(cfg: ImplicitConfig) -> SpectralState:
     mn = int(np.asarray(_static_tables(cfg.resolution)[0].m).size)
     s = jax.ShapeDtypeStruct((cfg.resolution.ns, mn), jnp.float64)
@@ -2138,8 +2206,9 @@ def _solve_implicit_status_fwd(params, cfg):
     with _device_context(cfg):
         params = _device_pin(cfg, params)
         state, mask, status, fsq, fsq_ratio = _callback_solve_status(params, cfg)
-        state, mask = _device_pin(cfg, (state, mask))
-    return (state, status, fsq, fsq_ratio), (params, state, mask, status)
+        factors = _callback_anchor_factors(params, status, cfg)
+        state, mask, factors = _device_pin(cfg, (state, mask, factors))
+    return (state, status, fsq, fsq_ratio), (params, state, mask, status, factors)
 
 
 # ---------------------------------------------------------------------------
@@ -3076,6 +3145,52 @@ def _adjoint_block_core(params: ImplicitParams, z_star: SpectralState,
                              converged=ok, tolerance=tolerance)
 
 
+#: GMRES budget of the anchor-preconditioned adjoint.  Factors from the
+#: anchor's start point are within ~1e-3 of the root's, so the single-stage
+#: example deck certifies in 11 iterations.
+_ADJOINT_REUSE_RESTART = 20
+_ADJOINT_REUSE_MAX_RESTARTS = 2
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _adjoint_block_reuse_core(params: ImplicitParams, z_star: SpectralState,
+                              frozen: SpectralState, dof_mask: SpectralState,
+                              b: SpectralState, factors, cfg: ImplicitConfig):
+    """:func:`_adjoint_block_core` without its factorization.
+
+    Solves ``(dF_raw/dz)^T mu = b`` at the root by GMRES preconditioned with
+    the anchor's raw block factors (possibly from a nearby iterate), under
+    the same certificate.  ``mu`` is NaN-poisoned when it misses.
+    """
+    raw = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+    _, pullback = jax.vjp(lambda z: raw(z, params), z_star)
+    project = _dof_projector(cfg, dof_mask)
+    b_flat, unravel = ravel_pytree(b)
+    block_factors, row_scale, column_scale = factors
+
+    def operator(y):
+        return ravel_pytree(project(pullback(unravel(y))[0]))[0]
+
+    def precondition(w):
+        return ravel_pytree(_block_inverse_apply(
+            block_factors, lambda tree: _pack_active(cfg, tree),
+            lambda matrix: _unpack_active(cfg, matrix), project,
+            row_scale, column_scale, unravel(w), transpose=True))[0]
+
+    tolerance = _adjoint_acceptance(cfg, jnp.linalg.norm(b_flat))
+    sol = _solvax_gmres(
+        operator, b_flat, precond=precondition,
+        restart=min(_ADJOINT_REUSE_RESTART, int(b_flat.shape[0])),
+        rtol=0.1 * _ADJOINT_RESIDUAL_SLACK * cfg.adjoint_tol,
+        atol=0.0, max_restarts=_ADJOINT_REUSE_MAX_RESTARTS)
+    residual_norm = jnp.linalg.norm(b_flat - operator(sol.x))
+    ok = residual_norm <= tolerance
+    mu = jnp.where(ok, sol.x, jnp.nan)
+    return unravel(mu), _AdjointStats(residual_norm=residual_norm,
+                                      iterations=sol.iterations,
+                                      converged=ok, tolerance=tolerance)
+
+
 # The reverse-pass adjoint solve as ONE reusable executable per config.
 # Module scope with ``cfg`` static and the per-call linearization data as
 # traced arguments is what makes it reusable (exactly the residual-lane
@@ -3160,7 +3275,7 @@ def _solve_implicit_bwd(cfg, res, gbar):
         return _device_pin(cfg, _solve_implicit_bwd_impl(cfg, res, gbar))
 
 
-def _solve_implicit_bwd_impl(cfg, res, gbar):
+def _solve_implicit_bwd_impl(cfg, res, gbar, factors=None):
     params, x_star, dof_mask = res
     frozen = jax.lax.stop_gradient(x_star)
     edge_mask = _edge_mask(cfg)
@@ -3188,7 +3303,19 @@ def _solve_implicit_bwd_impl(cfg, res, gbar):
         # places the whole matvec chain (jitted-residual transpose included).
         _, dbg_vjp_z = jax.vjp(lambda z: F(z, params), z_star)
         _debug_stage("operator application (dF/dz)^T b", dbg_vjp_z(b)[0])
-    lam, stats = _adjoint_block_core(params, z_star, frozen, dof_mask, b, cfg)
+    if factors is None:
+        lam, stats = _adjoint_block_core(params, z_star, frozen, dof_mask, b, cfg)
+    else:
+        # The anchor's factorization preconditions the adjoint; a missed
+        # certificate refactors at the root exactly as without it.
+        lam, stats = _adjoint_block_reuse_core(
+            params, z_star, frozen, dof_mask, b, factors, cfg)
+        if any(isinstance(value, jax.core.Tracer) for value in stats):
+            lam, stats = jax.lax.cond(
+                stats.converged, lambda: (lam, stats),
+                lambda: _adjoint_block_core(params, z_star, frozen, dof_mask, b, cfg))
+        elif not bool(np.asarray(stats.converged)):
+            lam, stats = _adjoint_block_core(params, z_star, frozen, dof_mask, b, cfg)
     staged = any(isinstance(value, jax.core.Tracer) for value in stats)
     if not staged and not bool(np.asarray(stats.converged)):
         # A missed block certificate (a far-from-root anchor or a singular
@@ -3225,17 +3352,17 @@ solve_implicit.defvjp(_solve_implicit_fwd, _solve_implicit_bwd)
 
 def _solve_implicit_status_bwd(cfg, res, gbar):
     """Use the ordinary adjoint on success and a zero pullback on failure."""
-    params, state, mask, status = res
+    params, state, mask, status, factors = res
     state_bar, _, _, _ = gbar  # diagnostics have no differentiable cotangent
     zeros = jax.tree.map(jnp.zeros_like, params)
 
     def success(args):
-        prm, solved, dof_mask, cotangent = args
+        prm, solved, dof_mask, cotangent, anchor_factors = args
         return _solve_implicit_bwd_impl(
-            cfg, (prm, solved, dof_mask), cotangent
+            cfg, (prm, solved, dof_mask), cotangent, factors=anchor_factors
         )[0]
 
-    operands = (params, state, mask, state_bar)
+    operands = (params, state, mask, state_bar, factors)
     if not isinstance(status, jax.core.Tracer):
         # An un-jitted gradient runs this rule host-eagerly with a concrete
         # status. A lax.cond here would be traced and compiled again on every

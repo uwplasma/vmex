@@ -428,3 +428,29 @@ def test_block_stall_far_from_root_skips_krylov_and_rejects_the_trial(monkeypatc
     status = im._host_solve_and_mask_status(
         cfg, jax.tree.map(np.asarray, p0))[2]
     assert int(status) == 3 and im._LAST_REFINED[cfg][2]
+
+
+def test_adjoint_reusing_anchor_factors_matches_the_fresh_block_adjoint() -> None:
+    """The anchor's factorization preconditions the adjoint to the same multiplier."""
+    inp, _, p0 = _small_solovev_setup()
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-15)
+    host, mask = _host_state(cfg, p0)
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        root = im._refined_state(cfg, p0, host, mask)
+        P = im._dof_projector(cfg, mask)
+        factors = im._refine_block_factors(cfg, p0, host, mask, P(host))
+        b = P(jax.tree.map(
+            lambda a: jnp.asarray(np.random.default_rng(0).standard_normal(a.shape)), root))
+        fresh, fresh_stats = im._adjoint_block_core(p0, P(root), root, mask, b, cfg)
+        reused, stats = im._adjoint_block_reuse_core(
+            p0, P(root), root, mask, b, factors, cfg)
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+    assert bool(stats.converged) and bool(fresh_stats.converged)
+    difference = im._tree_norm(jax.tree.map(jnp.subtract, reused, fresh))
+    assert float(difference) <= 1.0e-10 * float(im._tree_norm(fresh))
+    assert jax.tree.structure(factors) == jax.tree.structure(im._factor_struct(cfg))
+    for leaf, struct in zip(jax.tree.leaves(factors), jax.tree.leaves(im._factor_struct(cfg))):
+        assert leaf.shape == struct.shape and leaf.dtype == struct.dtype
