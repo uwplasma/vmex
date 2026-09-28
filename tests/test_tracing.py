@@ -13,9 +13,7 @@ without ESSOS.
 from __future__ import annotations
 
 import contextlib
-import importlib
 import importlib.util
-import inspect
 import io
 from pathlib import Path
 
@@ -38,8 +36,6 @@ pytestmark = [
     pytest.mark.skipif(importlib.util.find_spec("essos") is None, reason="requires ESSOS"),
 ]
 
-PROGRESS_HOOK = importlib.util.find_spec("essos") is not None and "progress" in inspect.signature(
-    importlib.import_module("essos.boozer").trace_boozer).parameters
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SOLOVEV_DECK = DATA_DIR / "input.solovev"
 
@@ -144,8 +140,7 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     for line in ("Loss fraction:", "Thermalized:", "Solver failures:",
                  "Scaling: B_scale=", "compile", "volavgB=5.8646 T, Aminor_p=1.7044 m"):
         assert line in stdout, line
-    if PROGRESS_HOOK:
-        assert "traced 100% of tmax" in progress.getvalue()
+    assert "traced 100% of tmax" in progress.getvalue()
     for suffix in ("trace.png", "trace_3d.png", "trace.npz"):
         assert (tmp_path / f"solovev_{suffix}").exists(), suffix
     summary = json.loads((tmp_path / "solovev_trace.json").read_text())
@@ -210,7 +205,6 @@ def test_trace_cpu_devices_skip_efficiency_cores_only_when_fewer(monkeypatch, le
     assert cli._trace_cpu_devices() == expected
 
 
-@pytest.mark.skipif(not PROGRESS_HOOK, reason="ESSOS without the trace_boozer progress hook")
 def test_progress_leaves_the_trace_unchanged(traced, solovev_wout):
     """Reporting progress runs the horizon in chunks and changes no orbit."""
     calls = []

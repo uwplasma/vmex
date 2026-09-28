@@ -35,7 +35,6 @@ alpha orbit widths, and hence losses, depend on the absolute field and size.
 from __future__ import annotations
 
 import dataclasses
-import inspect
 import json
 import tempfile
 import time
@@ -286,8 +285,7 @@ def trace_alphas(
         Boozer resolution and the relative amplitude of dropped modes.
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
-        (ESSOS runs it in host-side chunks; the orbits are unchanged).  ESSOS
-        releases without the hook ignore it.
+        (ESSOS runs it in host-side chunks; the orbits are unchanged).
     """
     import jax
     from essos import constants
@@ -312,14 +310,11 @@ def trace_alphas(
     mass, charge = constants.ALPHA_PARTICLE_MASS, constants.ALPHA_PARTICLE_CHARGE
     energy = constants.FUSION_ALPHA_PARTICLE_ENERGY
     start = time.perf_counter()
-    hook = {}
-    if progress is not None and "progress" in inspect.signature(trace_boozer).parameters:
-        hook["progress"] = progress
     trace = trace_boozer(
         field, *births.T, speed=float(np.sqrt(2 * energy / mass)), mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
-        species=background_species(ne0, T0_keV) if collisions else None, **hook)
+        species=background_species(ne0, T0_keV) if collisions else None, progress=progress)
     wall = time.perf_counter() - start
     times = np.linspace(0.0, float(tmax), int(times_to_trace))
     lost = trace.loss_times >= 0
