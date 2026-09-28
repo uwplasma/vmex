@@ -142,9 +142,7 @@ birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 
 ![vmex --trace output: loss against time, loss map, pitch and loss-time distributions, iota](docs/_static/figures/readme_trace_output.webp)
 
-### `--trace` against SIMPLE and SIMSOPT
-
-The same 1000 ARIES-CS alphas (positions, pitches, energy) were traced for 10 ms by each code on the same 8 CPU
+**`--trace` against SIMPLE and SIMSOPT.** The same 1000 ARIES-CS alphas (positions, pitches, energy) were traced for 10 ms by each code on the same 8 CPU
 cores. Runtimes exclude compilation and field set-up ([benchmark](benchmarks/trace_cross_code.py),
 [details](docs/howto/trace-alpha-particles.md#against-simple-and-simsopt)). The loss fractions agree within 0.6σ.
 
