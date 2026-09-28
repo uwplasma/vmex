@@ -626,7 +626,8 @@ def test_free_boundary_backward_traces_like_the_forward_solve(monkeypatch):
 
     monkeypatch.setattr(fbi, "_solve_bwd_impl", impl)
     cfg = SimpleNamespace(implicit=SimpleNamespace(device=None))
+    saved, state_bar = (jnp.ones(2), jnp.ones(2)), jnp.ones(2)
     with jax.sharding.use_abstract_mesh(jax.sharding.AbstractMesh((1,), ("x",))):
-        fbi._solve_bwd(cfg, (jnp.ones(2), jnp.ones(2)), jnp.ones(2))
+        fbi._solve_bwd(cfg, saved, state_bar)
     assert seen["mesh"] == forward
     assert seen["committed"]
