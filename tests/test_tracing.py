@@ -218,3 +218,18 @@ def test_progress_leaves_the_trace_unchanged(traced, solovev_wout):
     assert calls[-1][0] == calls[-1][1] and len(calls) > 1
     np.testing.assert_array_equal(reported.lost_times, traced.lost_times)
     np.testing.assert_array_equal(reported.trajectories, traced.trajectories)
+
+
+@pytest.mark.parametrize("tty", [True, False])
+def test_trace_progress_estimates_after_the_first_chunk(monkeypatch, tty):
+    """One rewritten line in a terminal, a line per chunk in a log; no estimate from the compiling chunk."""
+    stream = io.StringIO()
+    stream.isatty = lambda: tty
+    monkeypatch.setattr(cli.sys, "stderr", stream)
+    meter = cli._TraceProgress()
+    for done in (1, 2, 4):
+        meter(done, 4)
+    text = stream.getvalue()
+    assert "25% of tmax" in text and "estimating the rest" in text
+    assert "s left" in text and "100% of tmax" in text and "done" in text
+    assert text.count("\r") == (3 if tty else 0) and text.endswith("\n")
