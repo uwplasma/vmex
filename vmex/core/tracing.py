@@ -48,7 +48,7 @@ import numpy as np
 # the relative amplitude below which Boozer |B| modes are dropped
 # (docs/howto/trace-alpha-particles.md, convergence table).
 TIMESTEP = 1.25e-7
-MODE_TOLERANCE = 6e-4
+MODE_TOLERANCE = 2e-4
 # Landreman, Buller & Drevlak (2022) profiles: n_e0 [m^-3], T_0 [keV].
 NE0, T0_KEV = 4e20, 12.0
 _COMPILE_S = [0.0, 0.0]  # compile seconds, listener registered

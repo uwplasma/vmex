@@ -284,6 +284,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Samples of the loss-fraction curve (default: 1000).",
     )
     p.add_argument(
+        "--trace-mode-cut", type=float, default=None,
+        help="Drop Boozer |B| modes below this fraction of B00 (default: 2e-4; "
+             "1e-3 misses losses in precise quasisymmetry).",
+    )
+    p.add_argument(
         "--collisional", action="store_true",
         help=(
             "With --trace: Monte Carlo collisions (pitch-angle scattering, slowing "
@@ -1017,9 +1022,10 @@ class _TraceProgress:
 def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
     """Alpha-particle tracing driver for ``--trace`` (requires ESSOS)."""
     from .plotting import plot_tracing
-    from .tracing import trace_alphas
+    from .tracing import MODE_TOLERANCE, trace_alphas
 
     scale = None if args.trace_no_scale else args.scale_target
+    mode_cut = MODE_TOLERANCE if args.trace_mode_cut is None else float(args.trace_mode_cut)
     if not quiet:
         birth = ("volume" if args.trace_birth == "volume"
                  else f"s={float(args.trace_s):g}")
@@ -1027,7 +1033,12 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
             f"guiding centre{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
-            f"{'unscaled' if scale is None else _scale_label(scale)})"
+            f"{'unscaled' if scale is None else _scale_label(scale)}, "
+            f"mode cut {mode_cut:g} of B00)"
+        )
+        emit(
+            "   Change with --trace-particles N, --trace-tmax T [s], --trace-s S, "
+            "--trace-birth surface|volume, --collisional, --trace-mode-cut C"
         )
     try:
         result = trace_alphas(
@@ -1044,6 +1055,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             ne0=float(args.trace_ne0),
             T0_keV=float(args.trace_te0),
             mboz=int(args.mbooz),
+            mode_tolerance=mode_cut,
             nboz=int(args.nbooz),
             progress=None if quiet else _TraceProgress(),
         )
@@ -1435,8 +1447,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
-    if (args.collisional or args.trace_birth != "surface") and not args.trace:
-        parser.error("--collisional and --trace-birth require --trace")
+    if (args.collisional or args.trace_birth != "surface"
+            or args.trace_mode_cut is not None) and not args.trace:
+        parser.error("--collisional, --trace-birth and --trace-mode-cut require --trace")
     if bool(args.trace):
         _split_host_devices()
     # Flushing sink: with stdout redirected to a file (cluster batch logs),

@@ -133,12 +133,13 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
             str(solovev_wout), "--trace", "--outdir", str(tmp_path),
             "--trace-particles", "8", "--trace-tmax", "1e-5",
             "--trace-times", "12", "--trace-seed", "1", "--mbooz", "8", "--nbooz", "8",
-            "--collisional", "--trace-birth", "volume",
+            "--collisional", "--trace-birth", "volume", "--trace-mode-cut", "1e-3",
         ])
     stdout = buffer.getvalue()
     assert rc == 0, stdout
     for line in ("Loss fraction:", "Thermalized:", "Solver failures:",
-                 "Scaling: B_scale=", "compile", "volavgB=5.8646 T, Aminor_p=1.7044 m"):
+                 "Scaling: B_scale=", "compile", "volavgB=5.8646 T, Aminor_p=1.7044 m",
+                 "mode cut 0.001 of B00", "Change with --trace-particles N"):
         assert line in stdout, line
     assert "traced 100% of tmax" in progress.getvalue()
     for suffix in ("trace.png", "trace_3d.png", "trace.npz"):
