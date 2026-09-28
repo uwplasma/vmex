@@ -125,13 +125,13 @@ coil field. `benchmarks/extender_islands_sections.npz` holds the sections and
 `docs/_static/figures/sources/make_extender_islands_figure.py` draws them.
 
 - **HSX (QHS)**, from the neutral-beam study at
-  [rogeriojorge/neutral-beam-hsx](https://github.com/rogeriojorge/neutral-beam-hsx):
+  `neutral-beam-hsx` (not yet public):
   the main-coil Biot-Savart field, scaled to the QHS WOUT, traced from the
   VMEX surfaces s = 0.25 to 1 and from 1 to 4 cm outside the LCFS, for 200
   field periods. The lines launched on VMEX surfaces stay within 8 mm of
   their surface; the lines launched outside are open and leave the frame.
 - **Landreman-Paul QA**, case Q0 of
-  [rogeriojorge/vmex-hint-benchmark](https://github.com/rogeriojorge/vmex-hint-benchmark):
+  `vmex-hint-benchmark` (not yet public):
   the same seeds traced for 300 transits through the ESSOS coil field and
   through HINT's relaxed field on a 128^2 grid, with the VMEX free-boundary
   surfaces whose PHIEDGE matches the traced surface just inside the
