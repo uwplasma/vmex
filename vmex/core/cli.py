@@ -61,6 +61,7 @@ import argparse
 import os
 import re
 import shutil
+import sys
 import time
 from importlib import resources
 from pathlib import Path
@@ -973,6 +974,43 @@ def _run_booz(wout_path: Path, args, outdir: Path, *, plot: bool, emit, quiet: b
     return boozmn_path
 
 
+def _scale_label(scale: str) -> str:
+    from .scaling import SCALE_TARGETS
+
+    b_target, a_target = SCALE_TARGETS[scale]
+    field = "volavgB" if scale == "volavgB" else "B00 on axis"
+    return f"ARIES-CS size: {field}={b_target:g} T, Aminor_p={a_target:g} m"
+
+
+class _TraceProgress:
+    """``--trace`` progress on stderr: share of the horizon traced, elapsed and remaining time.
+
+    The first chunk carries the Boozer transform and the compilation, so the
+    remaining time is estimated from the chunks after it.  A terminal line is
+    rewritten in place; a log gets a line per chunk.
+    """
+
+    def __init__(self) -> None:
+        self.start = time.perf_counter()
+        self.first: tuple[float, int] | None = None
+        self.tty = sys.stderr.isatty()
+
+    def __call__(self, done: int, total: int) -> None:
+        now = time.perf_counter()
+        if self.first is None:
+            self.first, left = (now, done), "estimating the rest"
+        elif done < total:
+            rate = (done - self.first[1]) / (now - self.first[0])
+            left = f"about {(total - done) / rate:.0f} s left"
+        else:
+            left = "done"
+        line = f" traced {100 * done / total:3.0f}% of tmax, {now - self.start:.0f} s elapsed, {left}"
+        sys.stderr.write(f"\r{line}   " if self.tty else f"{line}\n")
+        if self.tty and done == total:
+            sys.stderr.write("\n")
+        sys.stderr.flush()
+
+
 def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
     """Alpha-particle tracing driver for ``--trace`` (requires ESSOS)."""
     from .plotting import plot_tracing
@@ -986,7 +1024,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
             f"guiding centre{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
-            f"{'unscaled' if scale is None else 'ARIES-CS ' + scale})"
+            f"{'unscaled' if scale is None else _scale_label(scale)})"
         )
     try:
         result = trace_alphas(
@@ -1004,6 +1042,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             T0_keV=float(args.trace_te0),
             mboz=int(args.mbooz),
             nboz=int(args.nbooz),
+            progress=None if quiet else _TraceProgress(),
         )
     except ImportError as exc:
         raise VmecInputError(

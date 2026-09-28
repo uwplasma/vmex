@@ -13,7 +13,9 @@ without ESSOS.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import importlib.util
+import inspect
 import io
 from pathlib import Path
 
@@ -36,6 +38,8 @@ pytestmark = [
     pytest.mark.skipif(importlib.util.find_spec("essos") is None, reason="requires ESSOS"),
 ]
 
+PROGRESS_HOOK = importlib.util.find_spec("essos") is not None and "progress" in inspect.signature(
+    importlib.import_module("essos.boozer").trace_boozer).parameters
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SOLOVEV_DECK = DATA_DIR / "input.solovev"
 
@@ -127,8 +131,8 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
 
     from vmex.core.scaling import aries_cs_scales
 
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
+    buffer, progress = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(progress):
         rc = cli.main([
             str(solovev_wout), "--trace", "--outdir", str(tmp_path),
             "--trace-particles", "8", "--trace-tmax", "1e-5",
@@ -138,8 +142,10 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     stdout = buffer.getvalue()
     assert rc == 0, stdout
     for line in ("Loss fraction:", "Thermalized:", "Solver failures:",
-                 "Scaling: B_scale=", "compile"):
+                 "Scaling: B_scale=", "compile", "volavgB=5.8646 T, Aminor_p=1.7044 m"):
         assert line in stdout, line
+    if PROGRESS_HOOK:
+        assert "traced 100% of tmax" in progress.getvalue()
     for suffix in ("trace.png", "trace_3d.png", "trace.npz"):
         assert (tmp_path / f"solovev_{suffix}").exists(), suffix
     summary = json.loads((tmp_path / "solovev_trace.json").read_text())
@@ -203,3 +209,12 @@ def test_trace_cpu_devices_skip_efficiency_cores_only_when_fewer(monkeypatch, le
     monkeypatch.setattr(subprocess, "run", fake_sysctl)
     assert cli._trace_cpu_devices() == expected
 
+
+@pytest.mark.skipif(not PROGRESS_HOOK, reason="ESSOS without the trace_boozer progress hook")
+def test_progress_leaves_the_trace_unchanged(traced, solovev_wout):
+    """Reporting progress runs the horizon in chunks and changes no orbit."""
+    calls = []
+    reported = trace_alphas(solovev_wout, **TRACE_KWARGS, progress=lambda d, n: calls.append((d, n)))
+    assert calls[-1][0] == calls[-1][1] and len(calls) > 1
+    np.testing.assert_array_equal(reported.lost_times, traced.lost_times)
+    np.testing.assert_array_equal(reported.trajectories, traced.trajectories)

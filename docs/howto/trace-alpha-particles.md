@@ -11,7 +11,9 @@ vmex wout_case.nc --trace          # 500 alphas, 10 ms, ARIES-CS size
 vmex input.case --trace            # solve first, then trace
 ```
 
-The default run takes under a minute on a 10-core laptop (see Cost below). It prints the scaling factors, the step, the number of Boozer
+The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
+stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
+(ESSOS 0.19.2 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
