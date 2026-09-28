@@ -8,7 +8,7 @@ field ratio ``B(beta)/B_vac`` at 0, 1, 3 and 10 % central beta, and its
 difference from the finest Pleiades grid at two VMEX resolutions.
 
 ``--solve`` re-solves VMEX (about 3 h for both rungs on a loaded 36-core CPU) and rewrites
-``benchmarks/mirror_pleiades_two_coil.json``; without it the committed record
+``benchmarks/pleiades_two_coil_mirror.json``; without it the committed record
 is plotted.
 
 Usage::
@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[4]
 DATA = REPO / "examples" / "data"
-RECORD = REPO / "benchmarks" / "mirror_pleiades_two_coil.json"
+RECORD = REPO / "benchmarks" / "pleiades_two_coil_mirror.json"
 OUT = REPO / "docs" / "_static" / "figures" / "readme_mirror_pleiades.webp"
 BETAS = [0.0, 0.01, 0.03, 0.10]
 RUNGS = [(7, 7, 13), (11, 9, 17)]

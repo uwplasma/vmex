@@ -255,11 +255,11 @@
       "generator": "docs/_static/figures/sources/make_mirror_pleiades_figure.py",
       "command": "python docs/_static/figures/sources/make_mirror_pleiades_figure.py",
       "inputs": [
-        "benchmarks/mirror_pleiades_two_coil.json",
+        "benchmarks/pleiades_two_coil_mirror.json",
         "examples/data/pleiades_two_coil_beta_reference.csv",
         "examples/data/input.mirror_two_coil_free_boundary"
       ],
-      "record": "benchmarks/mirror_pleiades_two_coil.json",
+      "record": "benchmarks/pleiades_two_coil_mirror.json",
       "generated": "2026-09-28",
       "hardware": "record solved on a shared 36-core x86_64 Linux CPU (JAX 0.11.1, float64); plot rendered on Apple M3 Max (arm64), macOS 14.4.1",
       "reproducible": "command",

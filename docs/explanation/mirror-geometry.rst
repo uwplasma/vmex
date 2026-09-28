@@ -772,7 +772,7 @@ that radius in vacuum.
    :width: 100%
 
 ``docs/_static/figures/sources/make_mirror_pleiades_figure.py --solve``
-re-solves both rungs and rewrites ``benchmarks/mirror_pleiades_two_coil.json``;
+re-solves both rungs and rewrites ``benchmarks/pleiades_two_coil_mirror.json``;
 without ``--solve`` it plots that record.
 
 .. image:: /_static/figures/mirror_free_boundary_beta_scan.webp
