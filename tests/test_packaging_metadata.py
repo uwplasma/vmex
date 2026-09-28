@@ -5,6 +5,7 @@ from importlib.metadata import version as package_version
 from packaging.requirements import Requirement
 from packaging.version import Version
 from pathlib import Path
+import re
 import tomllib
 
 import pytest
@@ -120,6 +121,36 @@ def test_import_guard_floors_match_pyproject() -> None:
     assert floors == vmex._MINIMUM_VERSIONS
 
 
+def test_optional_floors_match_pyproject() -> None:
+    from vmex._compat import OPTIONAL_MINIMUMS
+
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    floors = {}
+    for extra in data["project"]["optional-dependencies"].values():
+        for requirement in map(Requirement, extra):
+            if requirement.name in OPTIONAL_MINIMUMS:
+                (spec,) = requirement.specifier
+                floors[requirement.name] = spec.version
+    assert floors == OPTIONAL_MINIMUMS
+
+
+@pytest.mark.parametrize("found, message", [
+    (None, 'essos>=0.19.2; run: pip install "essos>=0.19.2"'),
+    ("0.19.1", 'essos>=0.19.2 (found 0.19.1); run: pip install -U "essos>=0.19.2"'),
+])
+def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
+    from vmex import _compat
+
+    def version(name):
+        if found is None:
+            raise _compat.importlib_metadata.PackageNotFoundError(name)
+        return found
+
+    monkeypatch.setattr(_compat.importlib_metadata, "version", version)
+    with pytest.raises(ImportError, match=re.escape("alpha-particle tracing needs " + message)):
+        _compat.require_optional("essos", "alpha-particle tracing")
+
+
 def test_import_guard_names_found_required_and_fix(monkeypatch) -> None:
     import vmex
 
@@ -148,7 +179,7 @@ def test_import_guard_skips_packages_without_metadata(monkeypatch) -> None:
     def version(name):
         if name == "scipy":
             raise vmex._PackageNotFoundError(name)
-        return "0.11.1"
+        return "99.0"  # above every floor
 
     monkeypatch.setattr(vmex, "_package_version", version)
     assert vmex._check_supported_versions() is None

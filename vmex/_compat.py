@@ -686,3 +686,24 @@ def _configure_jax_environment() -> None:
 
 
 _configure_jax_environment()
+
+
+# Floors of the optional extras, equal to pyproject.toml (a test pins them).
+# Checked where each is first used, so that an environment left behind by
+# `git pull` over an editable install fails with the fix, not a TypeError.
+OPTIONAL_MINIMUMS = {"essos": "0.19.2", "virtual-casing-jax": "0.0.9",
+                     "neo-jax": "1.0.2", "gkx": "2.4.2"}
+
+
+def require_optional(name: str, feature: str) -> None:
+    """Raise ImportError naming the fix if ``name`` is missing or below its floor."""
+    from packaging.version import Version
+
+    minimum = OPTIONAL_MINIMUMS[name]
+    try:
+        found = importlib_metadata.version(name)
+    except importlib_metadata.PackageNotFoundError:
+        raise ImportError(f'{feature} needs {name}>={minimum}; run: pip install "{name}>={minimum}"') from None
+    if Version(found) < Version(minimum):
+        raise ImportError(f'{feature} needs {name}>={minimum} (found {found}); '
+                          f'run: pip install -U "{name}>={minimum}"')

@@ -285,7 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--trace-mode-cut", type=float, default=None,
-        help="Drop Boozer |B| modes below this fraction of B00 (default: 2e-4; "
+        help="Drop Boozer |B| modes below this fraction of B00 (default: 1e-4; "
              "1e-3 misses losses in precise quasisymmetry).",
     )
     p.add_argument(
@@ -584,13 +584,13 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     """
     import numpy as np
 
+    from .._compat import require_optional
+
     try:
+        require_optional("essos", "--coils")
         from essos.coils import Coils, Curves
     except ImportError as exc:
-        raise VmecInputError(
-            WERROR_MESSAGES[INPUT_ERROR_FLAG],
-            hint="--coils requires essos (pip install essos)",
-        ) from exc
+        raise VmecInputError("MISSING OR OUTDATED OPTIONAL DEPENDENCY", hint=str(exc)) from exc
 
     from .mgrid import MgridField
 
@@ -1061,8 +1061,8 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
         )
     except ImportError as exc:
         raise VmecInputError(
-            WERROR_MESSAGES[INPUT_ERROR_FLAG],
-            hint="--trace requires essos>=0.19.2 and booz_xform_jax (pip install 'vmex[coils]')",
+            "MISSING OR OUTDATED OPTIONAL DEPENDENCY",
+            hint=str(exc),
         ) from exc
     except ValueError as exc:  # e.g. lasym equilibria
         raise VmecInputError(

@@ -228,3 +228,16 @@ def test_trace_progress_estimates_after_the_first_chunk(monkeypatch, tty):
     assert "25% of tmax" in text and "estimating the rest" in text
     assert "s left" in text and "100% of tmax" in text and "done" in text
     assert text.count("\r") == (3 if tty else 0) and text.endswith("\n")
+
+
+def test_cli_trace_names_the_upgrade_for_an_outdated_essos(solovev_wout, tmp_path, monkeypatch):
+    """A stale environment gets the pip command, not a TypeError."""
+    from vmex import _compat
+
+    monkeypatch.setitem(_compat.OPTIONAL_MINIMUMS, "essos", "999.0")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = cli.main([str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--quiet"])
+    assert rc != 0
+    assert 'pip install -U "essos>=999.0"' in buffer.getvalue()
+    assert "MISSING OR OUTDATED OPTIONAL DEPENDENCY" in buffer.getvalue()

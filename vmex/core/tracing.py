@@ -44,11 +44,13 @@ from typing import Any
 
 import numpy as np
 
+from .._compat import require_optional
+
 # Converged RK4 step [s] at Aminor_p = 1.7044 m, scaled with Aminor_p, and
 # the relative amplitude below which Boozer |B| modes are dropped
 # (docs/howto/trace-alpha-particles.md, convergence table).
 TIMESTEP = 1.25e-7
-MODE_TOLERANCE = 2e-4
+MODE_TOLERANCE = 1e-4
 # Landreman, Buller & Drevlak (2022) profiles: n_e0 [m^-3], T_0 [keV].
 NE0, T0_KEV = 4e20, 12.0
 _COMPILE_S = [0.0, 0.0]  # compile seconds, listener registered
@@ -60,6 +62,7 @@ def _compile_listener(event: str, duration: float, **_: Any) -> None:
 
 
 def _essos_imports():
+    require_optional("essos", "alpha-particle tracing")
     try:
         from essos import constants, dynamics, fields
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -288,6 +291,8 @@ def trace_alphas(
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
     """
     import jax
+
+    require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
 

@@ -37,7 +37,7 @@ its binomial error:
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
-| `--trace-mode-cut C` | `2e-4` | drop Boozer `|B|` modes below `C B00` | about `1 / C` in modes |
+| `--trace-mode-cut C` | `1e-4` | drop Boozer `|B|` modes below `C B00` | about `1 / C` in modes |
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
 example, going from the default to 5000 alphas over 0.1 s costs 50 times the
@@ -61,7 +61,7 @@ s = 0.3 lost within 0.2 s.
   equilibrium is first scaled in memory to ARIES-CS size: `<B> = 5.8646 T`
   and `a = 1.7044 m` (the `--scale` rule, see {doc}`scale-a-configuration`).
 - **Field.** `booz_xform_jax` transforms every surface to Boozer coordinates.
-  The `|B|` spectrum, cut at modes below `2e-4` of the largest amplitude (`B00`), is
+  The `|B|` spectrum, cut at modes below `1e-4` of the largest amplitude (`B00`), is
   splined in `sqrt(s)`, and `iota`, `G` and `I` are splined in `s`.
 - **Orbits.** The guiding-centre equations in Boozer coordinates (White; the
   `K = 0` form of SIMSOPT) are integrated with fixed-step RK4 in the chart
@@ -108,7 +108,7 @@ On an Apple M3 Max laptop (10 performance cores, load average 6-9), the
 default ARIES-CS run (`wout_n3are_R7.75B5.7.nc`, 1000 alphas, 10 ms, 41
 Boozer modes) takes 28 s: 25 s of tracing, of which 1.9 s is compilation.
 It loses 12.3 % ± 1.0 %. The defaults are now 500 alphas (± 1.5 %) and a
-mode cut of 2e-4 (see the convergence section). `--trace` gives JAX one CPU
+mode cut of 1e-4 (see the convergence section). `--trace` gives JAX one CPU
 device per usable core (on Linux, the cores the process may run on). On Apple
 silicon it uses only the performance cores unless there are at least as many
 efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
@@ -169,9 +169,9 @@ A cut of 1e-3 misses the losses in the precise QA and in HSX. A good
 quasisymmetric field has all of its symmetry-breaking modes below `1e-3 B00`,
 and those are the modes that lose alphas. At 1e-5, Landreman-Paul QA still
 loses 0.7 % (96 modes) and HSX 12.0 % (342 modes, within 1σ of 1e-4). The
-default of 2e-4 sits just above the converged 1e-4 and costs less; 1e-4 takes
-about 3 times as long as 1e-3 on ARIES-CS. It has not been checked
-separately, so set `--trace-mode-cut 1e-4` for precise quasisymmetry.
+default is therefore 1e-4, which takes about 3 times as long as 1e-3 on
+ARIES-CS. `--trace-mode-cut 1e-3` is a quick look for configurations far from
+quasisymmetry.
 
 ## Against SIMPLE and SIMSOPT
 

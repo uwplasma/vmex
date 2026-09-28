@@ -14,6 +14,9 @@ __all__ = [
 
 
 def _neo_imports():
+    from .._compat import require_optional
+
+    require_optional("neo-jax", "effective ripple")
     try:
         from neo_jax import NeoConfig, run_neo
     except ImportError as exc:  # pragma: no cover - optional dependency

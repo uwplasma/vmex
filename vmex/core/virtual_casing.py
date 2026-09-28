@@ -124,6 +124,10 @@ def have_virtual_casing_jax() -> bool:
 
 
 def _require_vcj() -> None:
+    if _HAVE_VCJ:
+        from .._compat import require_optional
+
+        require_optional("virtual-casing-jax", "the virtual-casing exterior field")
     if not _HAVE_VCJ:  # pragma: no cover - dependency-guard branch
         raise ImportError(
             "vmex.core.virtual_casing requires the optional dependency "
