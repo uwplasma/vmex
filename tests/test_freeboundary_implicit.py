@@ -542,17 +542,12 @@ def test_cold_start_ladders_only_when_one_rung_cannot_converge(monkeypatch):
         assert stage.seed == ("coarse" if expected is not None else None)
 
 
-def test_restart_carries_the_reference_continuation_but_not_its_vacuum_cache():
-    """The trial's own field rebuilds the vacuum caches; the rest continues."""
+def test_restart_carries_only_the_reference_state():
+    """Constraint, residual history and vacuum are rebuilt for the trial."""
     stage = SimpleNamespace(
         continuation_state="state", vacuum="vacuum", rcon0="rcon", zcon0="zcon",
         result=SimpleNamespace(fsqr=1.0, fsqz=2.0, fsql=3.0))
-    restart = fbi._continuation(stage)
-    assert restart == {
-        "initial_state": "state", "vacuum_continuation": "vacuum",
-        "constraint_continuation": ("rcon", "zcon"),
-        "residual_continuation": (1.0, 2.0, 3.0)}
-    assert "reuse_vacuum_cache" not in restart
+    assert fbi._continuation(stage) == {"initial_state": "state"}
 
 
 def test_traced_pullback_says_it_cannot_run_the_host_schur_lane(monkeypatch):

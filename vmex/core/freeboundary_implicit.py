@@ -396,20 +396,21 @@ def _cold_reference(solve, icfg, inp, field):
 
 
 def _continuation(stage) -> dict:
-    """Restart arguments that continue ``stage`` instead of repeating turn-on.
+    """Restart arguments: the reference's spectral state, nothing else.
 
     Every solve of a configuration restarts from the same reference, never
     from the previous trial, so the returned state is a function of the
-    parameters alone.  The constraint and residual continuation travel with
-    the state, as they do between multigrid rungs; the vacuum continuation is
-    a starting guess for this trial's field, which differs from the
-    reference's, so its caches are rebuilt rather than reused.
+    parameters alone.  Only the state travels: the spectral constraint
+    (rcon0, zcon0), the residual history and the vacuum are rebuilt for this
+    trial's own field and boundary.  Carrying the reference's constraint and
+    vacuum continuation instead stalls near fsq ~ 1e-4 once the coils have
+    moved from the reference (finite-beta single-stage example, trials 5-16:
+    every restart spent its whole budget and fell back to a cold solve),
+    where the state alone converges in a few hundred iterations.  The
+    constraint then belongs to the trial, which moves the certified answer
+    by ~0.2 % in the objective, well inside the ftol-level spread.
     """
-    return dict(
-        initial_state=stage.continuation_state, vacuum_continuation=stage.vacuum,
-        constraint_continuation=(stage.rcon0, stage.zcon0),
-        residual_continuation=(
-            stage.result.fsqr, stage.result.fsqz, stage.result.fsql))
+    return dict(initial_state=stage.continuation_state)
 
 
 def _host_solve_and_mask_impl(
@@ -513,11 +514,9 @@ def _restart_budget(icfg, reference) -> int:
     The restart exists to be cheaper than a cold solve, so it gets the
     iterations the configuration's own cold reference needed, never less
     than a tenth of ``max_iterations`` and never more than all of it.  On the
-    finite-beta single-stage deck (reference: 943 iterations) restarts that
-    converge do so in 329 or 1305 where the cold solve takes 823-1425, and
-    from halfway to the optimum every restart ran to the 4000 cap without
-    converging -- 19-21 s of each 25 s trial -- before the cold solve that
-    certified it.  A budget spent is deterministic: the restart is a fixed
+    finite-beta single-stage example (reference: 785 iterations) the
+    state-only restart (:func:`_continuation`) converges in 570-730 where a
+    cold solve takes 770-940.  A budget spent is deterministic: the restart is a fixed
     function of the parameters and the one reference, so the same parameters
     always take the same branch.
     """
