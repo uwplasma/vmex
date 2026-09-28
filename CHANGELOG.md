@@ -5,6 +5,25 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## 0.11.5 - 2026-09-28
+
+- `vmex --trace` reports progress: the share of `tmax` traced, the elapsed
+  time and an estimate of the time left, on stderr. The header states the
+  ARIES-CS targets it scales to (#490).
+- `--trace` defaults: 500 alphas, and a Boozer mode cut of 6e-4 instead of
+  1e-3, which missed losses in precise quasisymmetry (#491). The tracer uses
+  one CPU device per usable core. Floor `essos>=0.19.2`.
+- `--trace` benchmarked against SIMPLE and SIMSOPT (#482).
+- Fixed-boundary optimization rejects trials whose anchor stalls far from
+  the root. Its adjoint is preconditioned with the anchor's block factors.
+  Free-boundary restarts start from the reference state alone, and those that
+  stall far from ftol go straight to the ladder (#483-#486).
+- `MgridField` takes the interpolation order, and a deck's mgrid field can be
+  built at either order (#461, #463, #479). The interior field's accuracy is
+  documented against an exact equilibrium (#462).
+- Turbulence objectives use GKX's forward-mode eigenpair rule (#480).
+- `plan.md` is retired, and the README is shorter (#481, #487, #493).
+
 ## 0.11.4 - 2026-09-27
 
 - Single-stage optimizations no longer stop early: a refinement restart is
