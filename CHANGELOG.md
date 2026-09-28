@@ -5,6 +5,24 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## 0.11.4 - 2026-09-27
+
+- Single-stage optimizations no longer stop early: a refinement restart is
+  kept only when it certifies (#477).
+- Coherent dependency floors: `solvax>=0.27.0` with `equinox>=0.13.3`,
+  `booz_xform_jax>=0.4.1`, `virtual-casing-jax>=0.0.9`, `gkx>=2.4.1`,
+  `essos>=0.19`; CI installs a stale environment to check them; DESC needs its
+  own environment (#470).
+- `vmex --trace`: about 30 s by default, Boozer tracing, summary plots,
+  `--trace-birth volume`, `--collisional`; `--scale` targets ARIES-CS
+  `a = 1.7044 m`, `<B> = 5.8646 T` (#472, #473).
+- Mirrors: `MirrorInput` API and `&MIRROR` input decks; repeat solves drop
+  from 38 s to 0.9 s through compiled-kernel reuse (#475).
+- Fewer compilations: each optimization lane compiles once (#476).
+- CI caching (#466).
+- Native axisymmetric polish; the `--polish-*` flags and the old directives
+  are removed (#448, #465).
+
 ## 0.11.3 - 2026-09-27
 
 - `vmex --trace`: 1000 alphas over 1e-2 s at ARIES-CS size by default (scaled
@@ -42,121 +60,17 @@ features; XLA rejected the other node's executables ("Target machine feature
 ## 0.11.1 - 2026-09-23
 
 Free-boundary trials are anchored on the coupled root their gradients
-differentiate, the exterior field is accurate next to the plasma surface,
-optimization results are the states the objective scored, and the
-optimization examples were re-tuned against a five-minute budget. See the
-GitHub release for the full notes.
-
-### Fixed
-
-- **Free-boundary values and gradients referred to different points** (#432).
-  VMEC's `ftol` does not place a free-boundary solve on the coupled
-  plasma--vacuum root the adjoint differentiates. Every certifiable solve is
-  now Newton-anchored on that root (`refine_tol`); one that cannot be
-  anchored is the new status 3, never a silent pass. A stalled restart from
-  the reference gets the iterations the cold reference needed before the
-  cold retry of #416.
-- **`equilibrium_from_x` returned the host solve, not the refined state the
-  objective read** (#427). On `li383_low_res` the mean iota differed by
-  1.6e-3 relative; it now matches the objective, and so does the WOUT
-  written from it.
-- **Un-jitted gradients of state objectives recompiled on every call** (#438).
-  A concrete solve status now takes its branch in Python instead of a
-  `lax.cond`: an eager repeat of `value_and_grad` on a Solov'ev deck takes
-  0.9-1.7 s with nothing compiled, against 12-15 s and three programs.
-- **The exterior field from a free-boundary wout without coil currents had no
-  coils** (#430): `VmecExtender.from_wout` now raises. The eager derivative
-  check no longer warns "up to inf" far from the surface
-  (`virtual-casing-jax>=0.0.8`, the new `freeb` floor).
-- **The QI mirror hybrid example crashed** on a private import; the mirror
-  and gradient examples follow the example template (#434).
-
-### Added
-
-- **The exterior field is accurate next to the plasma surface** (#441).
-  Eager `VmecExtender` calls switch each point the direct quadrature cannot
-  resolve to a target-graded rule (`near_surface="auto"`, default): 1e-12 in
-  B down to 0.01 minor radii on the 2.5 % beta QA deck, where the default
-  grid was off by order one. `with_graded_quadrature()` uses it everywhere,
-  under `jit` too. `from_wout`/`from_state` accept `project_current` (off by
-  default, #381).
-- **Six single-stage examples** (#411): penalty, augmented Lagrangian, least
-  squares, 0.5 % beta, and free boundary at zero and 0.5 % beta. Each meets
-  every target it states in 129-275 s on the reference laptop.
-
-### Changed
-
-- **Cheaper free-boundary anchor and boundary-Schur adjoint** (#439). The
-  anchor's preconditioner includes NESTOR's edge coupling through a Woodbury
-  update, cutting its Krylov iterations 4-6x (1483 -> 310 at the optimized
-  coils of the finite-beta single stage) with the anchored values unchanged
-  to 10 digits.
-- **Optimization example defaults** (#426): QA uses helicity [1, 2]; QI and
-  QP use [1, 3], with QI at aspect 8 and an aspect weight of at least 0.01;
-  finite beta is set through PHIEDGE. 18 scripts were timed under five
-  minutes with a converged NS = 71 check; scripts over budget keep their
-  previous defaults, and timing the remaining scripts is a follow-up.
-- The implicit `max_fsq_ratio` default is `1e2`, matching every optimize
-  entry point (#434); `take_gradients.py` is merged into
-  `take_fixed_boundary_gradients.py`.
-- Optimization movies colour each frame from a plain forward solve (#436):
-  the single-stage movie takes 12.6-21.9 s cold against 57.0 s.
-- Direct-path exterior-field derivatives use closed-form layer kernels
-  (#441, same values to 1e-12): first `B`..`gradgradgradB` calls 6.0 s ->
-  2.9 s, warm `gradgradgradB` 4-6x faster
-  (`benchmarks/extender_ab_20260923.json`).
-- The summary figure plots bootstrap `<J.B>` on the force-balance panel,
-  computes the effective ripple on 7 surfaces, and no longer writes
-  `_profiles.png`; the README shows two single-stage movies (#442).
-- The mean-iota implicit derivative's 1-3 % gap to re-solve finite
-  differences is the m = 1 angle-gauge drift of the solver's path, not a
-  missing term (#428).
-- CI: the GPU workflow is retired, the weekly and publish lanes are fixed,
-  every manifest lane must run in a workflow or be local-only (#437), and
-  parity lane c3d is split into c3 and d (#438). Uncited benchmark records
-  are removed (#431); the docs, plan and README are consolidated (#413, #429,
-  #433, #435, #440).
-
-### Removed
-
-- `VmecExtender.with_near_surface_continuation` and `near_surface_plan`
-  (1.6-2.4 % error floor, 18.5 GB to prepare); use `with_graded_quadrature()`.
+differentiate (#432), the exterior field is accurate next to the plasma
+surface, optimization results are the states the objective scored (#427), and
+the optimization examples were re-tuned against a five-minute budget. Full
+notes in the GitHub release.
 
 ## 0.11.0 - 2026-09-21
 
-See the GitHub release for this version in full.
-
-### Changed
-
-- **The interior field is built from the native VMEC form** (#403).
-  `B^theta = (chi' - lambda_zeta)/sqrt(g)` and `B^zeta = (phi' + lambda_theta)/sqrt(g)`
-  with `sqrt(g)` from the same `R`, `Z` series as the position, and a C2
-  radial interpolant. On the breathing-circle oracle at ns = 41 the second
-  derivative of B improves from 2.9e-2 to 2.2e-4 relative error and
-  `|div B|/|grad B|` is at round-off (8.5e-18). Spectra without `lmns`,
-  `phipf` and `chipf` keep the previous fitted path.
-- **Minimum versions** (#410): `booz_xform_jax>=0.4.0` (its `Booz_xform`
-  class rebuilds cached grids when the resolution changes and reports a
-  correct `__version__`; the JAX kernel is unchanged from 0.3.0),
-  `solvax>=0.21.0`, and `gkx>=1.8.0` for the turbulence extra.
-- **Force-balance polishing is compared on one mesh** (#412). The example and
-  README now state that the gain is concentrated near the axis (RMS force
-  2.9e3 -> 61 N/m^3 for rho < 0.2) with a small volume-average change
-  (2.27e-3 -> 1.91e-3), and that the summary plot's force panel cannot
-  resolve it.
-
-### Fixed
-
-- **`surface_field_data_from_state` raised `TypeError`** for every caller
-  after #403 added three keys to the live-state spectra (#409).
-- **Free-boundary recovery depended on trial history** (#416). A shared
-  cold-rebuild budget meant that, after unrelated rejected trials, a
-  recoverable point returned the stalled restart instead of its converged
-  root. Each stalled restart now gets exactly one deterministic cold retry.
-- **Radial lifts accepted under-determined spline fits** (#414), inventing
-  curvature in unsampled spans; they now raise.
-- **Warm workflow profiles timed only the first stage** (#420); schema 2
-  repeats every stage.
+The interior field is built from the native VMEC form (#403), with a C2
+radial interpolant; radial lifts reject under-determined spline fits (#414),
+stalled restarts get one deterministic cold retry, and warm workflow profiles
+time every stage (#420). Full notes in the GitHub release.
 
 ## 0.10.0 - 2026-09-20
 
