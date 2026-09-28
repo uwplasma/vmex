@@ -541,6 +541,11 @@ def test_cold_start_ladders_only_when_one_rung_cannot_converge(monkeypatch):
         assert (asked[-1] if asked else None) == expected
         assert stage.seed == ("coarse" if expected is not None else None)
 
+    # A restart that stalled far from ftol skips the single rung.
+    seen.clear()
+    stage = fbi._cold_reference(solve, cfg.implicit, inp, field, single_rung=False)
+    assert seen == ["coarse"] and asked[-1] == (15, 31)
+
 
 def test_restart_carries_only_the_reference_state():
     """Constraint, residual history and vacuum are rebuilt for the trial."""
@@ -655,7 +660,7 @@ def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
     failed_current = current.at[0].add(1.0)
     rebuilds = []
 
-    def rebuild(_solve, _icfg, _inp, trial_field):
+    def rebuild(_solve, _icfg, _inp, trial_field, **_kwargs):
         productive = np.array_equal(np.asarray(trial_field), np.asarray(current))
         rebuilds.append(productive)
         return stage(productive, "rebuild" if productive else "failed-rebuild",
@@ -735,7 +740,7 @@ def test_stalled_restart_goes_cold_within_the_budget(monkeypatch):
         budgets.append(max_iterations)
         return stage(False, "restart")
 
-    def cold(_solve, _icfg, _inp, _field):
+    def cold(_solve, _icfg, _inp, _field, **_kwargs):
         colds.append(True)
         return stage(True, "cold")
 

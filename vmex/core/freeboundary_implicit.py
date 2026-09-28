@@ -368,7 +368,7 @@ def _host_solve_and_mask(
         )
 
 
-def _cold_reference(solve, icfg, inp, field):
+def _cold_reference(solve, icfg, inp, field, *, single_rung=True):
     """Solve cold, falling back to a coarse rung when one rung cannot converge.
 
     A single fine rung started from the input guess can stall above ``ftol``
@@ -381,11 +381,14 @@ def _cold_reference(solve, icfg, inp, field):
 
     The ladder is not free -- it compiles and solves a second resolution -- so
     a deck whose single rung already converges never pays for it.
+    ``single_rung=False`` goes straight to the ladder (see
+    :data:`_FAR_RESTART_RATIO`).
     """
-    stage = solve(initial_state=None)
     ns = int(icfg.resolution.ns)
-    if bool(stage.result.converged) or ns < 8:
-        return stage
+    if single_rung or ns < 8:
+        stage = solve(initial_state=None)
+        if bool(stage.result.converged) or ns < 8:
+            return stage
     from .multigrid import solve_free_boundary_multigrid
 
     return solve(initial_state=solve_free_boundary_multigrid(
@@ -393,6 +396,14 @@ def _cold_reference(solve, icfg, inp, field):
         ftol_array=np.full(2, icfg.ftol),
         niter_array=np.full(2, icfg.max_iterations), external_field=field,
         raise_on_max_iterations=False).state)
+
+
+#: A restart that exhausts its budget with FSQ above this multiple of ftol
+#: goes straight to the ladder of :func:`_cold_reference`: in every such trial
+#: of the single-stage free-boundary examples (restart FSQ 1.3e-4 to 1.3e2,
+#: ftol 1e-10) the single cold rung also failed, spending 1500 iterations
+#: (~3 s) before the ladder ran anyway.
+_FAR_RESTART_RATIO = 1.0e3
 
 
 def _continuation(stage) -> dict:
@@ -448,7 +459,11 @@ def _host_solve_and_mask_impl(
             # reference is deliberately NOT replaced, so every call stays a
             # function of its own parameters and the one reference, making
             # repeated calls bit-identical.
-            stage = _cold_reference(solve, icfg, inp, field)
+            result = stage.result
+            fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
+            stage = _cold_reference(
+                solve, icfg, inp, field,
+                single_rung=not fsq > _FAR_RESTART_RATIO * icfg.ftol)
     _FREE_LAST_RESULT[cfg] = stage.result
     state = stage.result.state
     rcon0, zcon0 = stage.rcon0, stage.zcon0
