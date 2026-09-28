@@ -454,3 +454,33 @@ def test_adjoint_reusing_anchor_factors_matches_the_fresh_block_adjoint() -> Non
     assert jax.tree.structure(factors) == jax.tree.structure(im._factor_struct(cfg))
     for leaf, struct in zip(jax.tree.leaves(factors), jax.tree.leaves(im._factor_struct(cfg))):
         assert leaf.shape == struct.shape and leaf.dtype == struct.dtype
+
+
+def test_anchor_factor_callback_and_eager_miss_fall_back_to_the_fresh_adjoint() -> None:
+    """Rejected or unmemoized trials get zeros or root factors; a miss refactors."""
+    _, cfg, p0 = _small_solovev_setup()
+    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        root, mask = im._host_solve_and_mask(cfg, params_np)
+        for leaf in jax.tree.leaves(im._host_anchor_factors(cfg, params_np, 2)):
+            assert not np.any(leaf)                       # rejected: zeros
+        im._LAST_ANCHOR_FACTORS.pop(cfg, None)
+        at_root = im._host_anchor_factors(cfg, params_np, 0)  # rebuilt at the root
+        assert np.any(jax.tree.leaves(at_root)[0])
+        refined = im._LAST_REFINED.pop(cfg)
+        im._LAST_ANCHOR_FACTORS.pop(cfg, None)
+        assert not np.any(jax.tree.leaves(im._host_anchor_factors(cfg, params_np, 0))[0])
+        im._LAST_REFINED[cfg] = refined
+
+        root, mask = (jax.tree.map(jnp.asarray, tree) for tree in (root, mask))
+        gbar = jax.tree.map(jnp.ones_like, root)
+        zeros = jax.tree.map(jnp.zeros_like, at_root)     # certificate miss
+        (fresh,) = im._solve_implicit_bwd_impl(cfg, (p0, root, mask), gbar)
+        (missed,) = im._solve_implicit_bwd_impl(
+            cfg, (p0, root, mask), gbar, factors=zeros)
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+    for a, b in zip(jax.tree.leaves(missed), jax.tree.leaves(fresh)):
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-12, atol=0.0)
