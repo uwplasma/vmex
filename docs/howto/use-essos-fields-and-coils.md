@@ -84,6 +84,68 @@ stays inside JAX, or the virtual-casing residual
 field grid — is a coil-design inverse problem and belongs in ESSOS, not
 here.
 
+## Fields inside and outside the plasma
+
+The live equilibrium exposes Cartesian `B()`, `gradB()`, `gradgradB()` and
+`gradgradgradB()`, with corresponding VJPs in the originating problem's degrees
+of freedom. Use `set_points_xyz(...)` or `set_points_flux(...)` to select
+interior evaluation points.
+
+This interior field is also the most accurate way to read an equilibrium. Against an exact
+finite-pressure solution, it gives the current 10 to 70 times more accurately than the WOUT file
+between s = 0.25 and 0.75, for equilibria from VMEX, VMEC2000 or VMEC++ alike (any WOUT can be
+loaded with `vmex.state_from_wout`). Within the first few surfaces of the axis the WOUT current
+is better. See {doc}`/explanation/interior-field`.
+
+Tabulated coil and mgrid fields (`MgridField.from_coils`, `from_cartesian_field`, `from_file`,
+`from_input`) take `order=1` (trilinear, the VMEC2000-parity default) or `order=3` (tricubic,
+C1). On the Landreman-Paul QA coils tricubic is about 10x more accurate in |B| just outside the
+LCFS and costs about 12% more solve time on a free-boundary deck; see {doc}`free-boundary`.
+
+For an exterior field, `vj.VmecExtender.from_file("wout_my_case.nc",
+external_field=coils.B)` combines the plasma's virtual-casing contribution with
+the supplied coil field. The plasma part is a quadrature over a source grid on
+the plasma surface, sampled by default from the boundary's aspect ratio, field
+periods and requested digits. Its error grows rapidly near that surface, so at
+the points where its error estimate misses the requested digits an eager call
+switches to a target-graded quadrature, accurate to about 1e-12 of the field
+down to 0.01 minor radii at a few milliseconds per point;
+`with_graded_quadrature()` uses it everywhere, including under `jit`. Targets
+must also stay away from coil filaments, and an MGRID field has a finite
+tabulated domain. The exterior field-line example
+(`examples/vmex_fieldline_tracing_finite_beta.py`) traces through the graded
+field; a finite trace does not by itself establish magnetic topology. See
+{doc}`/explanation/nestor-vacuum` for the derivation.
+
+![Poincare sections of the extended field: HSX, and Landreman-Paul QA against HINT](../_static/figures/readme_extender_islands.webp)
+
+The README figure plots Poincare sections at the phi = 0 plane recorded by two
+external benchmarks, both at zero beta, where the extended field equals the
+coil field. `benchmarks/extender_islands_sections.npz` holds the sections and
+`docs/_static/figures/sources/make_extender_islands_figure.py` draws them.
+
+- **HSX (QHS)**, from the neutral-beam study at
+  [rogeriojorge/neutral-beam-hsx](https://github.com/rogeriojorge/neutral-beam-hsx):
+  the main-coil Biot-Savart field, scaled to the QHS WOUT, traced from the
+  outboard midplane inside the VMEX LCFS and up to 5 cm outside it. In that
+  study the lines launched on VMEX surfaces s = 0.25 to 1 stay within
+  8 mm of their surface over 200 field periods.
+- **Landreman-Paul QA**, case Q0 of
+  [rogeriojorge/vmex-hint-benchmark](https://github.com/rogeriojorge/vmex-hint-benchmark):
+  the same seeds traced for 300 transits through the ESSOS coil field and
+  through HINT's relaxed field on a 128^2 grid, with the VMEX free-boundary
+  surfaces whose PHIEDGE matches the traced surface just inside the
+  iota = 2/5 separatrix. The HINT and coil rotational transforms agree to
+  3e-7, the magnetic axes to 1e-6 m, and the VMEX interior iota is within
+  1e-3 of the traced one at (ns, mpol) = (101, 12). The coil field's island
+  chain at iota = 2/5 bounds the region where VMEC's nested-surface model
+  applies; a zero-beta free boundary asked to enclose more flux than that has
+  no equilibrium (see {doc}`/explanation/validation`).
+
+Joint boundary/coil optimization and the boundary-Schur adjoint remain advanced
+workflows with substantial solve costs; they require independent derivative and
+final-constraint checks.
+
 ## Walk both seams
 
 `examples/vmex_essos_workflow.py` runs the round trip end to end: solve a

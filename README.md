@@ -291,28 +291,38 @@ Accepted iterates of `single_stage_optimization.py` (left, fixed boundary in vac
 `examples/optimization/single_stage_optimization.py` adjusts the plasma boundary and the coils
 against one weighted objective, solving the equilibrium implicitly at every step;
 `single_stage_free_boundary_optimization.py` couples them through a true free-boundary solve. Both
-print final plasma and coil metrics; `single_stage_optimization.py` also states whether it met its
-rotational-transform and normal-field targets. A lower penalty with unmet targets is not a design. The free-boundary gradient is exact at the root of the coupled residual, but the
-free-boundary state is not yet Newton-refined onto it. A zero-beta free boundary also needs a nested
-coil-field surface enclosing PHIEDGE; at an island chain VMEX, VMEC2000 and VMEC++ all fail to
-converge ([not validated](docs/explanation/validation.md#what-is-not-validated)).
+print final plasma and coil metrics. Each free-boundary trial is Newton-refined onto the root of the
+coupled plasma-vacuum residual, where its gradient is exact.
 
 ### Open mirrors and stellarator-mirror hybrids
 
+The same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, solved by
+minimizing the MHD energy. What changes is the geometry: an open mirror has a non-periodic axial
+coordinate between two fixed-flux end cuts (not a thin torus), discretized with cubic B-splines
+instead of toroidal Fourier modes; its free boundary couples to an open exterior vacuum problem. A
+stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns.
+
+```console
+vmex examples/data/input.mirror_two_coil_free_boundary --plot   # a &MIRROR deck, writes mout_*.nc
+```
+
+```python
+from vmex.mirror import MirrorInput, solve_mirror
+solution = solve_mirror(MirrorInput.from_file("examples/data/input.mirror_two_coil_free_boundary"))
+```
+
+You give the boundary (or the coils), flux and pressure; `solve_mirror` builds the spline grid,
+initial state and exterior grid.
+
+![VMEX against Pleiades on a two-coil free-boundary mirror](docs/_static/figures/readme_mirror_pleiades.webp)
+
+Benchmarked against the independent Pleiades Green-function code on the two-coil mirror from vacuum to
+10% beta: the on-axis field agrees to 1e-4 to 1e-3 and the difference halves under refinement
+(`docs/_static/figures/sources/make_mirror_pleiades_figure.py`). More mirror and hybrid examples, and
+which lanes are validated: [mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html).
+
 ![Fixed-boundary non-axisymmetric mirror](docs/_static/figures/mirror_fixed_boundary_3d.webp)
-
-Fixed-boundary open mirrors, from `examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py`.
-
-![Free-boundary mirror beta scan](docs/_static/figures/mirror_free_boundary_beta_scan.webp)
-
-The free-boundary mirror beta scan over the validated 0 to 10 percent range,
-`examples/mirror/mirror_free_boundary_beta_scan.py` (needs `vmex[coils]`).
-
 ![Stellarator-mirror hybrid](docs/_static/figures/stellarator_mirror_hybrid.webp)
-
-Periodic stellarator-mirror hybrids, `examples/mirror/stellarator_mirror_hybrid.py`, with a
-quasi-isodynamic variant in `qi_mirror_hybrid_fourier_vs_bspline.py`. Hybrids and anisotropy are research scopes: see the
-[mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html) for what is validated.
 
 ### Running the examples
 
@@ -349,46 +359,20 @@ and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/us
 
 ## Fields, coils and free boundary
 
-The live equilibrium exposes Cartesian `B()`, `gradB()`, `gradgradB()` and
-`gradgradgradB()`, with corresponding VJPs in the originating problem's degrees
-of freedom. Use `set_points_xyz(...)` or `set_points_flux(...)` to select
-interior evaluation points.
+The equilibrium exposes Cartesian `B()` and its first three derivatives, with VJPs, anywhere inside
+the plasma (`set_points_xyz`, `set_points_flux`); it reads the current 10 to 70 times more
+accurately than the WOUT file. Outside, `vj.VmecExtender.from_file("wout_my_case.nc",
+external_field=coils.B)` adds the plasma's virtual-casing field to the coils, accurate to about 1e-12
+down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `MgridField`
+(trilinear or tricubic).
 
-This interior field is also the most accurate way to read an equilibrium. Against an exact
-finite-pressure solution, it gives the current 10 to 70 times more accurately than the WOUT file
-between s = 0.25 and 0.75, for equilibria from VMEX, VMEC2000 or VMEC++ alike (any WOUT can be
-loaded with `vmex.state_from_wout`). Within the first few surfaces of the axis the WOUT current
-is better. See the [interior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/interior-field.html).
+![Poincare sections of the extended field: HSX, and Landreman-Paul QA against HINT](docs/_static/figures/readme_extender_islands.webp)
 
-![B and J errors: WOUT file versus VmecInteriorField, against an exact solution](docs/_static/figures/readme_interior_field.webp)
-
-Tabulated coil and mgrid fields (`MgridField.from_coils`, `from_cartesian_field`, `from_file`,
-`from_input`) take `order=1` (trilinear, the VMEC2000-parity default) or `order=3` (tricubic,
-C1). On the Landreman-Paul QA coils tricubic is about 10x more accurate in |B| just outside the
-LCFS and costs about 12% more solve time on a free-boundary deck; see the
-[free-boundary guide](https://vmex.readthedocs.io/en/latest/howto/free-boundary.html).
-
-For an exterior field, `vj.VmecExtender.from_file("wout_my_case.nc",
-external_field=coils.B)` combines the plasma's virtual-casing contribution with
-the supplied coil field. The plasma part is a quadrature over a source grid on
-the plasma surface, sampled by default from the boundary's aspect ratio, field
-periods and requested digits. Its error grows rapidly near that surface, so at
-the points where its error estimate misses the requested digits an eager call
-switches to a target-graded quadrature, accurate to about 1e-12 of the field
-down to 0.01 minor radii at a few milliseconds per point;
-`with_graded_quadrature()` uses it everywhere, including under `jit`. Targets
-must also stay away from coil filaments, and an MGRID field has a finite
-tabulated domain. The exterior field-line example traces through the graded
-field; a finite trace does not by itself establish magnetic topology.
-See the [exterior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/nestor-vacuum.html)
-and [field and coil usage](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
-
-Joint boundary/coil optimization and the boundary-Schur adjoint remain advanced
-workflows with substantial solve costs; they require independent derivative and
-final-constraint checks. Open mirrors support defined isotropic
-fixed/free-boundary cases; the shipped free-boundary 0–10% beta range is the
-supported range, while higher beta, anisotropy and periodic hybrids need further
-validation. See the [mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html).
+Field lines of the extended field at zero beta, where it equals the coil field: HSX (left) with its
+exterior island chain around the VMEX surfaces, and Landreman-Paul QA (right) traced through the coils
+and through HINT's relaxed field from the same seeds, with the VMEX surfaces of the matched free
+boundary. The HINT and coil rotational transforms agree to 3e-7. Details, accuracy limits and the
+interior-field benchmark: [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
 ## Accuracy and optional polishing
 

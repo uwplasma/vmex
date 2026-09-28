@@ -361,14 +361,14 @@ a claim exists elsewhere.
   explicitly experimental, CPU only. Low-memory GPU compilation and failed-trial
   handling are open promotion gates. `tests/test_capability_docs.py`
   asserts these statuses, so the claim cannot quietly widen.
-- **Free-boundary states are not anchored at their root.** A converged
-  free-boundary solve at `ftol = 1e-12` sat about 1.2e-2 from the root of its
-  projected coupled residual in coefficient norm, on the 0.5 % beta
-  single-stage deck. Fixed boundary refines its state by Newton steps;
-  free boundary does not yet. The adjoint is exact at that root (1e-9–6e-7
-  against finite differences of anchored roots), but the values an optimizer
-  receives come from the unanchored state, and warm restarts from different
-  references gave values differing by up to 12 %.
+- **Free-boundary roots are anchored, not free.** A converged free-boundary
+  solve at `ftol = 1e-12` sat about 1.2e-2 from the root of its projected
+  coupled residual in coefficient norm on the 0.5 % beta single-stage deck,
+  and warm restarts from different references gave values differing by up to
+  12 %. The implicit free-boundary solve now Newton-anchors every certifiable
+  state on that root (#432), where the adjoint is exact (1e-9–6e-7 against
+  finite differences of anchored roots); `refine_tol=inf` skips the anchor.
+  The Newton work is an extra cost per trial.
 - **Zero-beta free boundaries that meet an island chain.** VMEC's model needs
   a nested flux surface that encloses PHIEDGE. When the coil field has an
   island chain or stochastic layer at that flux, no such equilibrium exists.
