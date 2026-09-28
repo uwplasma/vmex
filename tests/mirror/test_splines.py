@@ -1143,6 +1143,7 @@ def test_mirror_deck_solve_reproduces_the_exact_vacuum_mirror(tmp_path) -> None:
 
     from pathlib import Path
 
+    import vmex as vj
     from vmex.core.cli import main
     from vmex.mirror import MirrorInput, read_mout
     from vmex.mirror.analytic import AxisymmetricPolynomialMirror
@@ -1152,7 +1153,12 @@ def test_mirror_deck_solve_reproduces_the_exact_vacuum_mirror(tmp_path) -> None:
     assert MirrorInput.from_file(inp.to_file(tmp_path / "input.copy")).to_file(tmp_path / "again").read_text() == (
         tmp_path / "input.copy"
     ).read_text()
-    assert main([str(deck), "--outdir", str(tmp_path), "--quiet"]) == 0
+    assert main([str(deck), "--outdir", str(tmp_path), "--plot"]) == 0
+    assert (tmp_path / "mirror_axisymmetric_modB.png").is_file()
+    with pytest.raises(SystemExit):
+        main([str(deck), "--booz"])
+    solution = vj.solve_file(deck, write_wout=False)
+    assert solution.summary()["converged"]
     mout = read_mout(tmp_path / "mout_mirror_axisymmetric.nc")
     exact = AxisymmetricPolynomialMirror(1.0, 1.0, 0.5).axis_field(np.asarray(mout.z))
     assert mout.converged and mout.variational_max <= 1.0e-12
@@ -1160,3 +1166,49 @@ def test_mirror_deck_solve_reproduces_the_exact_vacuum_mirror(tmp_path) -> None:
     np.testing.assert_allclose(np.asarray(mout.mod_b)[0, 0], exact, rtol=1.0e-3)
     with pytest.raises(ValueError, match="unknown &MIRROR variable"):
         MirrorInput.from_text("&MIRROR\n  NFP = 2\n/\n")
+
+
+def test_solve_mirror_seeds_continues_and_balances_pressure() -> None:
+    """Seeded vacuum start, then a pressure step in the same boundary.
+
+    Paraxial radial balance at the midplane: ``B_axis**2/2mu0 + p(0)`` equals
+    the boundary ``B**2/2mu0`` up to ``(a/L)**2`` corrections (a/L = 0.12).
+    """
+
+    from dataclasses import replace
+
+    from vmex.mirror import MirrorInput, solve_mirror, solve_mirror_beta_scan
+    from vmex.mirror.analytic import AxisymmetricPolynomialMirror
+    from vmex.mirror.forces import MU0
+
+    fixture = AxisymmetricPolynomialMirror(1.0, 1.0, 0.5)
+    base = MirrorInput(ns=5, elements=3, niter=600).with_boundary(lambda _t, z: fixture.boundary_radius(0.12, z))
+    vacuum = solve_mirror(base, seed_field=fixture.field)  # flux profile taken from the field
+    # Measured 9.5e-3 at this coarse grid (ns=5, three elements).
+    assert abs(vacuum.summary()["axis_field_center"] - 1.0) < 2.0e-2
+    pressure = 0.1 / (2.0 * float(MU0))  # 10 % central beta at 1 T
+    finite = solve_mirror(replace(base, phiedge=2.0 * np.pi * float(fixture.poloidal_flux(0.12, 0.0)), pres_scale=pressure),
+                          initial=vacuum)
+    mod_b = finite.mod_b()
+    center = int(np.argmin(np.abs(np.asarray(finite.discretization.grid.z))))
+    axis, edge = mod_b[0, 0, center], mod_b[-1, 0, center]
+    central = float(finite.evaluated.energy.pressure[0])  # mass-conserving, 2 % below PRES_SCALE
+    assert finite.summary()["converged"] and axis < 1.0 < edge  # diamagnetic well at fixed flux
+    # Measured 1.7e-2 mismatch, the (a/L)**2 and curvature corrections.
+    np.testing.assert_allclose(axis**2 + 2.0 * float(MU0) * central, edge**2, rtol=3.0e-2)
+
+    for bad in (dict(rbc=()), dict(rbc=np.ones((3, 5)), mpol=1), dict(rbs=np.ones((1, 2))),
+                dict(zb=[0.0, 0.1, 0.0]), dict(zb=np.linspace(-0.5, 0.5, base.rbc.shape[1]))):
+        with pytest.raises(ValueError):
+            replace(base, **bad).boundary_table()
+    with pytest.raises(ValueError, match="phiedge"):
+        solve_mirror(base)
+    with pytest.raises(ValueError, match="fixed-boundary"):
+        solve_mirror(replace(base, lfreeb=True), initial=vacuum)
+    with pytest.raises(ValueError, match="coils"):
+        solve_mirror_beta_scan(replace(base, lfreeb=True))
+    with pytest.raises(ValueError, match="phiedge"):
+        solve_mirror_beta_scan(replace(base, lfreeb=True, coil_radius=[1.0], coil_z=[0.0], coil_current=[1.0]))
+    for text in ("no namelist", "&MIRROR\n RBC(1, 2) = 1\n/\n", "&MIRROR\n RBC(0) = 1 2\n RBC(1) = 1\n/\n"):
+        with pytest.raises(ValueError):
+            MirrorInput.from_text(text)

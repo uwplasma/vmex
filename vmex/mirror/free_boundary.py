@@ -1325,10 +1325,8 @@ def is_mirror_input(path: Any) -> bool:
     import re
     from pathlib import Path
 
-    try:
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-    except (OSError, IsADirectoryError):
-        return False
+    path = Path(path)
+    text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
     return re.search(r"^\s*&\s*MIRROR\b", text, flags=re.IGNORECASE | re.MULTILINE) is not None
 
 

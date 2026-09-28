@@ -344,8 +344,8 @@ class MirrorInput:
         if zb.shape != (stations,) or np.any(np.diff(zb) <= 0.0):
             raise ValueError("zb must be increasing with one entry per boundary column")
         span = 1.0e-12 * (float(self.z_max) - float(self.z_min))
-        if stations > 1 and (zb[0] > float(self.z_min) + span or zb[-1] < float(self.z_max) - span):
-            raise ValueError("boundary stations zb must cover [z_min, z_max]")
+        if stations < 2 or zb[0] > float(self.z_min) + span or zb[-1] < float(self.z_max) - span:
+            raise ValueError("at least two boundary stations zb must cover [z_min, z_max]")
         return zb, rbc, rbs
 
     def boundary_radius(self, theta: Array, z: Array) -> np.ndarray:
@@ -355,10 +355,7 @@ class MirrorInput:
 
         zb, rbc, rbs = self.boundary_table()
         z = np.asarray(z, dtype=float)
-        if zb.size == 1:
-            cosine, sine = rbc[:, :1] + 0.0 * z, rbs[:, :1] + 0.0 * z
-        else:
-            cosine, sine = CubicSpline(zb, rbc, axis=1)(z), CubicSpline(zb, rbs, axis=1)(z)
+        cosine, sine = CubicSpline(zb, rbc, axis=1)(z), CubicSpline(zb, rbs, axis=1)(z)
         modes = np.arange(rbc.shape[0])[:, None] * np.asarray(theta, dtype=float)[None, :]
         return np.cos(modes).T @ cosine + np.sin(modes).T @ sine
 
