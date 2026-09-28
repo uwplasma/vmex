@@ -72,7 +72,7 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.19` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.19.2` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.2` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
 | `pip install "vmex[turbulence]"` | `gkx>=2.4.2` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) |
@@ -85,7 +85,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
 | `booz_xform_jax` | 0.4.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.1"` |
-| `essos` | 0.19 | `vmex[coils]` | `pip install "essos>=0.19"` |
+| `essos` | 0.19.2 | `vmex[coils]` | `pip install "essos>=0.19.2"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.2 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.2"` |
 | `gkx` | 2.4.2 | `vmex[turbulence]` | `pip install "gkx>=2.4.2"` |
@@ -133,8 +133,8 @@ vmex input.nearby --restart wout_my_case.nc
 ```
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
-by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 1000 fusion alphas for
-10 ms in Boozer coordinates (about 30 s on 10 cores). It writes the loss fraction and a figure set:
+by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
+10 ms in Boozer coordinates (under a minute on 10 CPU cores, faster than a GPU at this size). It writes the loss fraction and a figure set:
 loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
 `--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
 birth profile, and `--collisional` adds slowing down and pitch-angle scattering

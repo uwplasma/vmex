@@ -252,8 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tracing horizon in seconds (default: 1e-2; cost is linear in it).",
     )
     p.add_argument(
-        "--trace-particles", type=int, default=1000,
-        help="Number of alpha particles (default: 1000; cost is linear, sigma ~ 1/sqrt(N)).",
+        "--trace-particles", type=int, default=500,
+        help="Number of alpha particles (default: 500; cost is linear, sigma ~ 1/sqrt(N)).",
     )
     p.add_argument(
         "--trace-no-scale", action="store_true",
@@ -1008,7 +1008,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
     except ImportError as exc:
         raise VmecInputError(
             WERROR_MESSAGES[INPUT_ERROR_FLAG],
-            hint="--trace requires essos>=0.19 and booz_xform_jax (pip install 'vmex[coils]')",
+            hint="--trace requires essos>=0.19.2 and booz_xform_jax (pip install 'vmex[coils]')",
         ) from exc
     except ValueError as exc:  # e.g. lasym equilibria
         raise VmecInputError(
@@ -1340,25 +1340,33 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
 
 
 def _split_host_devices() -> None:
-    """Give JAX one CPU device per performance core, so ESSOS shards ``--trace``.
+    """Give JAX one CPU device per usable core, so ESSOS shards ``--trace``.
 
-    Measured 4.6x on 10 cores.  Runs before the backend
-    starts; a device count already set through ``XLA_FLAGS`` or
-    ``JAX_NUM_CPU_DEVICES`` wins.  GPU hosts keep tracing on the GPU, since
-    ESSOS shards over ``jax.devices()``, the default backend.
+    Measured 4.6x on 10 cores.  Runs before the backend starts; a device
+    count already set through ``XLA_FLAGS`` or ``JAX_NUM_CPU_DEVICES`` wins.
+    GPU hosts keep tracing on the GPU, since ESSOS shards over
+    ``jax.devices()``, the default backend.  On Linux the count is the cores
+    this process may run on (:func:`~vmex.core.parallel.available_cpus`).  On
+    Apple silicon the shards run in lockstep, so a slower efficiency core
+    sets the pace: only performance cores are used unless efficiency cores
+    are at least as many (M4, 4 + 6 cores: all 10 are 1.7x faster than 4).
     """
     import jax
 
     if ("host_platform_device_count" in os.environ.get("XLA_FLAGS", "")
             or jax.config.jax_num_cpu_devices > 0):
         return
-    cores = os.cpu_count() or 1
-    try:  # performance cores on Apple silicon; efficiency cores slow a vmap lockstep
+    from .parallel import available_cpus
+
+    cores = available_cpus()
+    try:
         import subprocess
 
-        cores = int(subprocess.run(
-            ["sysctl", "-n", "hw.perflevel0.physicalcpu"],
-            capture_output=True, text=True, check=True, timeout=5).stdout)
+        performance, efficiency = (int(subprocess.run(
+            ["sysctl", "-n", f"hw.perflevel{level}.physicalcpu"],
+            capture_output=True, text=True, check=True, timeout=5).stdout) for level in (0, 1))
+        if efficiency < performance:
+            cores = performance
     except Exception:
         pass
     try:

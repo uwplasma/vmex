@@ -48,7 +48,7 @@ import numpy as np
 # the relative amplitude below which Boozer |B| modes are dropped
 # (docs/howto/trace-alpha-particles.md, convergence table).
 TIMESTEP = 1.25e-7
-MODE_TOLERANCE = 1e-3
+MODE_TOLERANCE = 6e-4
 # Landreman, Buller & Drevlak (2022) profiles: n_e0 [m^-3], T_0 [keV].
 NE0, T0_KEV = 4e20, 12.0
 _COMPILE_S = [0.0, 0.0]  # compile seconds, listener registered
@@ -246,7 +246,7 @@ def trace_alphas(
     source: Any,
     *,
     tmax: float = 1e-2,
-    nparticles: int = 1000,
+    nparticles: int = 500,
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,

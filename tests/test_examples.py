@@ -80,7 +80,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
-    assert coils == ["essos>=0.19"], coils
+    assert coils == ["essos>=0.19.2"], coils
 
     for script in ESSOS_COIL_EXAMPLES:
         text = script.read_text()

@@ -117,9 +117,10 @@ turbulence = [
 # example uses that API, so 0.16 is not enough and there is no longer any
 # reason to install ESSOS from git. 0.19 adds essos.boozer, which --trace
 # uses; since 0.18.1 ESSOS declares equinox>=0.13.3 and diffrax>=0.7.0 (0.17
-# kept diffrax 0.6 and equinox 0.11 already in an environment).
+# kept diffrax 0.6 and equinox 0.11 already in an environment). 0.19.2 ships
+# the Boozer tracing guide and the Boozer-vs-VMEC tracing example --trace cites.
 coils = [
-  "essos>=0.19",
+  "essos>=0.19.2",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.
