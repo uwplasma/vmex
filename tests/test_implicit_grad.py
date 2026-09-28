@@ -1023,7 +1023,7 @@ def test_lasym_wb_aspect_gradient_vs_fd(lasym):
 
 
 def test_lasym_repeated_same_shape_gradients_do_not_recompile(lasym):
-    """Same-shape LASYM repeated evaluations do not recompile (plan 14.6).
+    """Same-shape LASYM repeated evaluations do not recompile.
 
     The LASYM gradient runs the identical reverse lane as the symmetric one
     (the per-config staged ``_adjoint_gcrot_core`` plus the memoized host

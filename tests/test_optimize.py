@@ -104,7 +104,7 @@ def test_equilibrium_clear_solution_aliases(solovev_eq):
 def test_qs_helicity_sign_convention_qh():
     """nfp4_QH minimizes the (1, -1) helicity residual — pins the sign.
 
-    ``helicity_n`` multiplies ``nfp`` internally, so the plan's "QH:
+    ``helicity_n`` multiplies ``nfp`` internally, so the usual "QH:
     (m, n) = (1, -nfp)" in physical mode numbers is ``helicity_n = -1`` here.
     """
     w = _golden_wout("nfp4_QH_warm_start")
@@ -379,7 +379,7 @@ def test_qi_regression_pin_and_jit():
     solovev pin sat on an argmin tie: an axisymmetric |B| has equal minima
     along each field line, so rounding picked the well and the total flipped
     between 0.13626 and 0.13500. The guard below keeps the pinned wells
-    unique; smooth wells (plan D1) remove the argmin altogether."""
+    unique; smooth wells remove the argmin altogether."""
     pytest.importorskip("booz_xform_jax")
     w = _golden_wout("li383_low_res")
     booz = opt.boozer_modes_from_wout(w, surfaces=[0.5, 1.0], mboz=8, nboz=8)

@@ -1,7 +1,7 @@
 """Traceable ``L_grad_B`` objective (plan_pre_vmex Item E, part 1) —
 validation gates for ``l_grad_b_state``: (a) value parity vs the wout lane
 on three decks (both lanes share the pointwise math; measured 0 to 4.4e-16
-relative, 2026-07-17 x64 CPU; asserted rtol 1e-12, plan gate 1e-6);
+relative, 2026-07-17 x64 CPU; asserted rtol 1e-12, acceptance gate 1e-6);
 (b) ``jax.grad`` of the soft-min objective through the implicit solve vs
 ``frozen_path_directional_fd`` on solovev (measured rel 1.7e-6, gate 1e-4);
 (c) a ``jac="implicit"`` least-squares smoke with the new term.
@@ -41,7 +41,7 @@ _STATE_FIELDS = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
 # Value-parity decks; achieved relative difference measured 2026-07-17
 # (x64 CPU): solovev 4.4e-16, li383_low_res 0.0, LandremanPaul 0.0.
 PARITY_DECKS = ("solovev", "li383_low_res", "LandremanPaul2021_QA_lowres")
-PARITY_RTOL = 1e-12          # asserted (plan gate: 1e-6)
+PARITY_RTOL = 1e-12          # asserted (acceptance gate: 1e-6)
 
 SOFTMIN_K = 50.0             # [1/m]; soft-min bias <= log(24*24)/k ~ 0.127 m
 

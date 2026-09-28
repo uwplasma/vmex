@@ -1,8 +1,8 @@
 ! Smooth finite-beta nfp=2 QA for the README force-balance comparison:
 ! the LandremanPaul2021_QA boundary of input.LandremanPaul2021_QA_lowres at
 ! MPOL=NTOR=5 and NS 13/25, with a parabolic zero-net-current pressure
-! p(s) = PRES_SCALE*(1-s) (beta ~ 1%) - the plan's "smooth finite-beta QA"
-! comparison class (archived plan section 21.1).
+! p(s) = PRES_SCALE*(1-s) (beta ~ 1%) - the "smooth finite-beta QA"
+! comparison class.
 &INDATA
 !----- Runtime Parameters -----
   DELT =   9.00E-01

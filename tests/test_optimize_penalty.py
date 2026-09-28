@@ -1,5 +1,5 @@
-"""Zero-crash penalty-path tests for ``optimize.least_squares`` (plan Item
-I.2): a mid-campaign trial whose equilibrium solve fails must be penalized
+"""Zero-crash penalty-path tests for ``optimize.least_squares``:
+a mid-campaign trial whose equilibrium solve fails must be penalized
 (large finite residual, trust region backs off), never crash.  All four
 failure lanes are exercised deterministically by making the host solve fail
 on chosen calls: the jac=None ``fun`` body, the exception-free implicit

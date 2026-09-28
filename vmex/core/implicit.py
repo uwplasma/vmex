@@ -1278,11 +1278,11 @@ _HOT_CACHE: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
 # cfg -> (params-bytes key, SolveResult): one-entry memo of the LAST solve.
 # scipy trust-region drivers evaluate jac(x) at exactly the x that fun(x)
 # just converged (DESC's ``_update_equilibrium``/``f_where_x`` pattern), so
-# this removes one full equilibrium solve per accepted iterate (plan R25.1).
+# this removes one full equilibrium solve per accepted iterate.
 _LAST_SOLVE: weakref.WeakKeyDictionary[ImplicitConfig, tuple[bytes, SolveResult]] = \
     weakref.WeakKeyDictionary()
 
-# cfg -> one-shot SpectralState seed for the NEXT host solve (plan R25.4):
+# cfg -> one-shot SpectralState seed for the NEXT host solve:
 # the optimizer's trial evaluation deposits the DESC-style first-order
 # perturbation prediction ``x_ref + sum_j (dx)_j dz_j`` (arXiv:2203.15927,
 # ``eq.perturb`` before ``eq.solve``) right before the solve that consumes

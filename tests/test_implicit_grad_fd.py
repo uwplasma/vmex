@@ -208,7 +208,7 @@ def test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family():
 
 
 # ---------------------------------------------------------------------------
-# 8. typed errors through pure_callback (zero-crash policy, plan Item I.1)
+# 8. typed errors through pure_callback (zero-crash policy)
 # ---------------------------------------------------------------------------
 
 
@@ -235,7 +235,7 @@ def test_typed_error_through_pure_callback():
 
 
 # ---------------------------------------------------------------------------
-# 9. multigrid implicit gradient vs frozen-path FD (plan Item I.4)
+# 9. multigrid implicit gradient vs frozen-path FD
 # ---------------------------------------------------------------------------
 
 

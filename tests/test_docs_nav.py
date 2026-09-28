@@ -1,4 +1,4 @@
-"""The John test (plan_docs_vmex.md section 9.7).
+"""The John test.
 
 Three questions a user actually asks must each be answerable in at most two
 clicks from the docs landing page:

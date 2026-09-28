@@ -1,6 +1,6 @@
 name: Docs linkcheck
 
-# External-link audit of the docs tree (plan_docs_vmex.md section 9.4):
+# External-link audit of the docs tree:
 # weekly, on demand, and on pull requests that touch docs/. Hosts that
 # reject CI runners are pinned in `linkcheck_ignore` in docs/conf.py, each
 # with its reason.

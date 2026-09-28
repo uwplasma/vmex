@@ -1112,7 +1112,7 @@ class VmecInput:
 
     @classmethod
     def from_json_text(cls, text: str) -> "VmecInput":
-        """Build from structured JSON text (plan Appendix C / vmecpp.VmecInput).
+        """Build from structured JSON text (vmecpp.VmecInput layout).
 
         Same key names as the dataclass fields; ``adiabatic_index`` is
         accepted as an alias for ``gamma``; ``rbc/zbs/rbs/zbc`` are sparse

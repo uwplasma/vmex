@@ -1,4 +1,4 @@
-"""Every committed figure must say where it came from (plan 31.5 item 4).
+"""Every committed figure must say where it came from.
 
 Before this guard, 2 of 19 figures under ``docs/_static/figures`` were hashed
 anywhere in the tree; the rest could be replaced, regenerated on a different

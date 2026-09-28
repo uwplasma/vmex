@@ -28,7 +28,7 @@ units of ``nfp`` (the internal target mode number is ``nn = helicity_n * nfp``):
 
 - QA: ``(helicity_m, helicity_n) = (1, 0)``
 - QH: ``(1, -1)`` (i.e. ``chi = theta + nfp*phi``; legacy/simsopt sign — the
-  plan's "``n = -nfp``" written in physical toroidal mode numbers)
+  usual "``n = -nfp``" written in physical toroidal mode numbers)
 - QP: ``(0, 1)``
 
 Gradient modes
@@ -3751,7 +3751,7 @@ def _least_squares_implicit(
     result.derivative_fallbacks = holder["derivative_fallbacks"]
     try:
         # Hot-seed the diagnostic re-solve from the stage's last converged
-        # trial state (plan R25.1): the optimizer's final x was just solved
+        # trial state: the optimizer's final x was just solved
         # by the implicit path, so this converges in ~1 sweep instead of
         # repeating a full cold solve per continuation stage.
         seed = imp._HOT_CACHE.get(cfg)

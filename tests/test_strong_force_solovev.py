@@ -1,4 +1,4 @@
-"""Exact-solution validation of the strong-force certificate (plan P1).
+"""Exact-solution validation of the strong-force certificate.
 
 ``tests/test_strong_force.py`` anchors the oracle on a vacuum ``1/R`` field,
 where ``grad p = 0`` makes the normalized certificate degenerate (it saturates
