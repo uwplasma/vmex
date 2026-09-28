@@ -12,7 +12,7 @@ equilibrium, and ``essos.boozer`` integrates the guiding-centre equations
 (White; the ``K = 0`` form of SIMSOPT ``GuidingCenterNoKBoozerRHS``) with
 fixed-step RK4 over a spline of the ``|B|`` spectrum, in a chart that is
 regular on the magnetic axis.  One right-hand side costs about 1 µs per
-particle, against 8-10 µs for the VMEC-coordinate field (plan section T.1).
+particle, against 8-10 µs for the VMEC-coordinate field.
 A particle is lost when it reaches ``s = 1``.
 
 Births: on one surface ``s`` (default) or through the volume in proportion

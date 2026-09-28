@@ -16,7 +16,7 @@ Final values are the lines the script prints.
         --output benchmarks/qi_optimization_profile_office.json
 
 ``smoke`` sets ``VMEX_EXAMPLES_CI=1``.  A timing counts only when the load
-average at both ends is within the machine's limit (plan section 7); a run past
+average at both ends is within the machine's limit; a run past
 ``--timeout`` is killed and recorded as capped with the stages it finished.
 """
 

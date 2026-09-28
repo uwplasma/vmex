@@ -521,7 +521,7 @@ def test_paraxial_finite_beta_solve_matches_long_thin_pressure_balance(
 
 
 # ---------------------------------------------------------------------------
-# Axis regularity audit (plan section 15.3)
+# Axis regularity audit
 # ---------------------------------------------------------------------------
 
 

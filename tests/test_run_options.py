@@ -1,6 +1,6 @@
 """VMEX execution directives: parsing, precedence, and solve_file semantics.
 
-The contract under test (plan section 8): run controls travel as VMEC-safe
+The contract under test: run controls travel as VMEC-safe
 comments or a reserved ``_vmex`` JSON section, ``VmecInput`` stays physics
 only, precedence is ``CLI > Python keyword > file directive > default``, and
 a failed polish behaves per ``polish_fail`` without a second solve.

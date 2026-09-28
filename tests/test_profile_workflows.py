@@ -1,6 +1,6 @@
 """Deterministic gates for the workflow profiling harness.
 
-CI never asserts wall times (plan section 23.3).  What it can hold
+CI never asserts wall times.  What it can hold
 deterministic: the registry's structure, the record schema, correct
 compile counting on a trivially cheap injected workflow, and the
 warm-regime contract that a same-shape repeat does not recompile.

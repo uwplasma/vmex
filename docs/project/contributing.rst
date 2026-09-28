@@ -64,7 +64,7 @@ versions for the core install; optional integrations can require newer JAX.
 The broader package dependency bounds do not certify every intermediate release. The PR matrix exercises eager and compiled linear
 certificates; Nightly runs the tight real-MHD derivative and rejected-root
 cases on both versions. Update the pair deliberately after reproducing failures,
-with environment and attained residuals recorded in ``plan.md``.
+with environment and attained residuals recorded in the pull request description.
 
 PR physics and parity jobs have a 25-minute timeout. Actual successful job
 times establish the runtime gate. ``full`` marks retain expensive checks for

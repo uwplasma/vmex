@@ -1342,7 +1342,7 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
 def _split_host_devices() -> None:
     """Give JAX one CPU device per performance core, so ESSOS shards ``--trace``.
 
-    Measured 4.6x on 10 cores (plan section T.1).  Runs before the backend
+    Measured 4.6x on 10 cores.  Runs before the backend
     starts; a device count already set through ``XLA_FLAGS`` or
     ``JAX_NUM_CPU_DEVICES`` wins.  GPU hosts keep tracing on the GPU, since
     ESSOS shards over ``jax.devices()``, the default backend.

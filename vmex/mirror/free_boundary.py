@@ -76,7 +76,8 @@ def reject_net_axial_current(current_derivative: Any) -> None:
     The guard is a correctness gate, not a convenience check: with a nonzero
     ``I'(s)`` the coupled residual compares physically inconsistent fields and
     converges to a wrong answer without any diagnostic saying so.  See
-    ``plan.md`` sections 17.3 and 31.4-R2.
+    sections 17.3 and 31.4-R2 of the archived plan
+    (https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md).
     """
 
     if isinstance(current_derivative, jax.core.Tracer):

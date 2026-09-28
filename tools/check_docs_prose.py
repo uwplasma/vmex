@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Docs prose, citation and media gates (plan P0/P4).
+"""Docs prose, citation and media gates.
 
 Mechanical checks on the Diátaxis docs tree:
 
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 STATIC = DOCS / "_static"
 
-# -- 1. banned patterns (plan section 2) ------------------------------------
+# -- 1. banned patterns ------------------------------------
 
 BANNED = [
     r"\bdelve",

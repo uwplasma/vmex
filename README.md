@@ -445,4 +445,4 @@ then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
 [troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html) pages. For development,
 `pip install -e ".[dev]"` and `python tools/preflight.py --static`. Report issues with the input deck
 and `vmex --doctor` output. See [contributing](CONTRIBUTING.md), [citation](CITATION.cff),
-[license](LICENSE) and the [plan](plan.md).
+[license](LICENSE) and the [archived plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md).

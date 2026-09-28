@@ -194,7 +194,7 @@ differences of warm-started re-solves do not measure the adjoint. Against
 anchored roots the free-boundary adjoint agreed to 1e-9–6e-7 on the 0.5 %
 beta single-stage objective. The values the optimizer receives are those
 unanchored states, so the gradient and the value can refer to slightly
-different points (see the [research plan](https://github.com/uwplasma/vmex/blob/main/plan.md), lane A).
+different points (see the [research plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md), lane A).
 
 Mirror ratio, iota and Boozer/QI diagnostics can amplify root, sampling or
 branch-selection differences. On `li383_low_res`,
@@ -205,7 +205,7 @@ adjoint is wrong. Compare raw/projected residuals, frozen state components and
 independently refined diagnostics. If no agreement window is resolved, report
 that observable's derivative as unqualified; frozen-path agreement alone does
 not close the gap. See the [validation record](validation.md) and current
-[research plan](https://github.com/uwplasma/vmex/blob/main/plan.md) for the measured scope.
+[research plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md) for the measured scope.
 
 ## Forward mode for least-squares Jacobians
 

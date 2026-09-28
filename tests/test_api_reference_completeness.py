@@ -1,4 +1,4 @@
-"""The API reference documents the whole public surface (plan.md 31.5 item 9).
+"""The API reference documents the whole public surface.
 
 Three guards, all cheap and import-light:
 

@@ -13,8 +13,8 @@ permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
 34 committed artifacts: 29 standalone records and 1 grouped directory holding
-5 files. 30 of the 30 entries below are cited by a page, a test or another
-script; 0 are cited by nothing.
+5 files. 29 of the 30 entries below are cited by a page, a test or another
+script; 1 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
 `date` its recorded measurement date; both are blank where the schema of
@@ -31,11 +31,11 @@ hand rather than by a script in this tree.
 | `benchmarks/convergence_nfp4_ns51.json` | `benchmarks/make_readme_figures.py` | `40e7899f` | 2026-07-29 | `docs/_static/figures/figures.json`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/desc_native_vs_lifted_2026-09-03.json` |  | `82a424da` | 2026-09-03 | `docs/explanation/validation.md`, `tests/test_profile_workflows.py` |
 | `benchmarks/device_cache_reload_m4.json` | `benchmarks/device_cache_reload.py` | `a9a11a3b` | 2026-08-29 | `docs/howto/run-on-gpu.md` |
-| `benchmarks/extender_ab_20260923.json` | `benchmarks/extender_ab.py` |  | 2026-09-23 | `docs/explanation/nestor-vacuum.rst`, `plan.md` |
+| `benchmarks/extender_ab_20260923.json` | `benchmarks/extender_ab.py` |  | 2026-09-23 | `docs/explanation/nestor-vacuum.rst` |
 | `benchmarks/freeboundary_multigrid.json` | `benchmarks/run_freeboundary_multigrid.py` | `b0cc789e` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json` |  | `8ef81c44` | 2026-09-02 | `docs/explanation/validation.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md` |  |  |  | `README.md` |
-| `benchmarks/gpu_a4000_2026-09-16.json` | `benchmarks/run_gpu_matrix.py` | `5ee94c93` | 2026-09-16 | `docs/explanation/architecture.rst`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst`, `plan.md` |
+| `benchmarks/gpu_a4000_2026-09-16.json` | `benchmarks/run_gpu_matrix.py` | `5ee94c93` | 2026-09-16 | `docs/explanation/architecture.rst`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst` |
 | `benchmarks/gpu_baseline.json` | `benchmarks/run_gpu_matrix.py` | `a324f503` | 2026-07-09 | `benchmarks/gpu_a4000_2026-09-16.json`, `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/architecture.rst`, `docs/explanation/validation.md`, `docs/howto/run-on-gpu.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py`, `vmex/core/__init__.py`, `vmex/core/device.py` |
 | `benchmarks/high_mode_fft.json` | `benchmarks/run_high_mode_fft.py` | `ecfbe31d` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/interior_field_vs_wout.json` |  |  |  | `docs/_static/figures/figures.json`, `docs/_static/figures/sources/make_interior_field_figure.py`, `docs/explanation/interior-field.md` |
@@ -45,11 +45,11 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-boundary-conditions.md`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/pleiades_two_coil_mirror.json` | `docs/_static/figures/sources/make_mirror_pleiades_figure.py` |  | 2026-09-28 | `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst` |
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/iteration.rst`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
-| `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `README.md`, `docs/reference/optimization.rst`, `plan.md` |
+| `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `README.md`, `docs/reference/optimization.rst` |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
 | `benchmarks/qi_optimization_profile_office.json` | `benchmarks/qi_optimization_profile.py` | `3ee6ca58` | 2026-09-14 | `docs/reference/objectives.rst`, `examples/optimization/QI_optimization.py` |
-| `benchmarks/review_20260913.json` |  | `f09288b3` | 2026-09-13 | `benchmarks/review_20260913_equilibrium.py`, `benchmarks/review_20260913_exterior.py`, `docs/explanation/nestor-vacuum.rst`, `plan.md` |
-| `benchmarks/single_stage_profile_m4.json` | `benchmarks/single_stage_profile.py` | `50814b65` | 2026-09-13 | `plan.md` |
+| `benchmarks/review_20260913.json` |  | `f09288b3` | 2026-09-13 | `benchmarks/review_20260913_equilibrium.py`, `benchmarks/review_20260913_exterior.py`, `docs/explanation/nestor-vacuum.rst` |
+| `benchmarks/single_stage_profile_m4.json` | `benchmarks/single_stage_profile.py` | `50814b65` | 2026-09-13 | *nothing* |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_m4.json` | `benchmarks/strong_force.py` | `9481f64a` |  | `docs/reference/performance.rst` |
@@ -59,10 +59,13 @@ hand rather than by a script in this tree.
 
 | directory | files | generator | commits | dates | cited by |
 | --- | --- | --- | --- | --- | --- |
-| `benchmarks/baselines/m4/` | 5 | `benchmarks/profile_workflows.py` | `8e6fdff4` | 2026-08-30 | `benchmarks/make_strong_force_comparison.py`, `benchmarks/strong_force_comparison_m4.json`, `docs/explanation/mirror-gyrokinetics.rst`, `docs/howto/restart-from-previous-run.md`, `docs/reference/performance.rst`, `plan.md`, `tests/test_performance_docs.py` |
+| `benchmarks/baselines/m4/` | 5 | `benchmarks/profile_workflows.py` | `8e6fdff4` | 2026-08-30 | `benchmarks/make_strong_force_comparison.py`, `benchmarks/strong_force_comparison_m4.json`, `docs/explanation/mirror-gyrokinetics.rst`, `docs/howto/restart-from-previous-run.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 
 Workflows in `benchmarks/baselines/m4/`: F1, F8, M3 in the regimes cache_reload, cold, warm, warm_newparams.
 
 ## Cited by nothing
 
-Every committed artifact is cited.
+No page, test or script reads these records. Cite them or remove them;
+a removed record stays reachable through git history.
+
+- `benchmarks/single_stage_profile_m4.json`

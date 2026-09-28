@@ -88,7 +88,7 @@ DATE_KEYS = ("measurement_date", "date", "created_utc", "review_date_utc", "utc"
 
 #: Where a citation may come from.  ``benchmarks`` is included because a script
 #: that reads another script's record is a consumer of it.
-CITING_ROOTS = ("README.md", "CHANGELOG.md", "plan.md", "docs", "tests", "tools",
+CITING_ROOTS = ("README.md", "CHANGELOG.md", "docs", "tests", "tools",
                 "vmex", "examples", "benchmarks", ".github")
 CITING_SUFFIXES = (".md", ".rst", ".py", ".json", ".yml", ".yaml", ".toml", ".cfg", ".txt")
 
