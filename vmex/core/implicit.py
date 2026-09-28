@@ -1761,13 +1761,20 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     best_z, best = refine_from(z0, fz, base)
     # A pass that lowered |F| but missed ``tol`` usually stopped because its
     # first Newton step started outside the quadratic region; restarting from
-    # the best iterate refactorizes there and lands inside it.
+    # the best iterate refactorizes there and lands inside it.  Restarts are
+    # kept only when they certify: an uncertified restart from a far trial
+    # point drifts to a different, lower-|F| state that is not the solve's
+    # answer, and the next trials warm-start from it.
+    restart_z, restart = best_z, best
     for _ in range(_REFINE_RESTARTS):
-        if not (tol < best < base):
+        if not (tol < restart < base):
             break
-        restart_z, restart = refine_from(best_z, F(best_z, params), best)
-        if not restart < best:
+        next_z, next_residual = refine_from(
+            restart_z, F(restart_z, params), restart)
+        if not next_residual < restart:
             break
+        restart_z, restart = next_z, next_residual
+    if restart <= tol:
         best_z, best = restart_z, restart
     if best >= base:
         return state

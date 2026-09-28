@@ -94,7 +94,10 @@ not reach `refine_tol`, VMEX discards it and replays the original refinement.
 A single refinement pass can stall above `refine_tol` when its first Newton
 step is accurate but too long: the residual rises, and the pass keeps the best
 iterate it saw. VMEX then restarts from that iterate, refactorizing there, for
-at most two more passes and only while each pass still lowers the residual. On
+at most two more passes and only while each pass still lowers the residual.
+The restarted state is kept only when it reaches `refine_tol`; an uncertified
+restart from a far line-search trial otherwise becomes the next trial's warm
+start and stalled the single-stage example after one L-BFGS-B iteration. On
 an exact integer-family deck (NS=65, TCON0=0) one pass stopped at 1.2e-07;
 with the restart the same call reaches 6.2e-14. The returned state is never
 worse than the host state. The measured case and its per-step trace are in the

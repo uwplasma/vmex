@@ -332,9 +332,9 @@ def test_block_finish_without_progress_replays_the_krylov_anchor(monkeypatch) ->
 def test_refinement_restarts_from_its_best_iterate(monkeypatch) -> None:
     """A pass that lowers |F| but misses refine_tol is restarted from its best iterate.
 
-    With one step per phase a single pass cannot certify the small deck.  The
-    restarted refinement must end strictly lower, never above the host state,
-    and without restarts the result must be the one-pass result bit for bit.
+    With one step per phase a single pass cannot certify the small deck.  A
+    restart is kept only when it certifies; otherwise the result is the
+    one-pass result bit for bit, and without restarts it always is.
     """
     inp, _, p0 = _small_solovev_setup()
     # A tolerance below one step's reach, so the single pass must miss it.
@@ -364,4 +364,41 @@ def test_refinement_restarts_from_its_best_iterate(monkeypatch) -> None:
     host, single, multi = residual(state), residual(one_pass), residual(restarted)
     assert single < host
     assert single > float(cfg.refine_tol), "fixture no longer exercises a missed pass"
-    assert multi < single
+    if multi <= float(cfg.refine_tol):
+        assert multi < single
+    else:
+        for a, b in zip(jax.tree.leaves(one_pass), jax.tree.leaves(restarted)):
+            np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_uncertified_restart_is_discarded(monkeypatch) -> None:
+    """Restarts that lower |F| without certifying leave the one-pass state.
+
+    A far line-search trial (the single-stage example's first step) refined
+    from |F| ~ 2e7 to 3e4 through restarts; that uncertified state became
+    the next trials' warm start and stalled L-BFGS-B after one iteration.
+    """
+    class Config:
+        refine_tol = 0.1
+
+    monkeypatch.setattr(im, "_dof_projector", lambda *_: lambda value: value)
+    monkeypatch.setattr(im, "residual_fn", lambda *_: lambda z, _params: z)
+    monkeypatch.setattr(im, "_REFINE_MAX_STEPS", 1)
+    monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)
+    monkeypatch.setattr(im, "_REFINE_RESTARTS", 2)
+
+    def step(_config, _params, _frozen, _dof_mask, z, fz):
+        z_new = z - shrink
+        return z_new, z_new, jnp.linalg.norm(z_new), jnp.asarray(0.0)
+
+    monkeypatch.setattr(im, "_refine_step", step)
+    state, params = jnp.asarray([10.0]), jnp.asarray([0.0])
+    shrink = 1.0  # 10 -> 9 -> 8 -> 7: every restart gains, none certifies
+    np.testing.assert_array_equal(
+        im._refined_state(Config(), params, state, state), [9.0])
+    shrink = 4.0  # 10 -> 6 -> 2 -> -2: still uncertified
+    np.testing.assert_array_equal(
+        im._refined_state(Config(), params, state, state), [6.0])
+    shrink = 5.0  # 10 -> 5 -> 0: the first restart certifies and is kept
+    np.testing.assert_array_equal(
+        im._refined_state(Config(), params, state, state), [0.0])
