@@ -334,7 +334,7 @@ def test_solve_file_free_boundary_wout_carries_the_coil_metadata(tmp_path, monke
 def test_solve_file_polish_directive_activates_polishing(tmp_path):
     """One documented input runs the whole flow: directive -> polished wout.
 
-    The deck is a small solovev (mpol = 3, ns = 5); the property under test
+    The deck is a small solovev (mpol = 3, ns = 7); the property under test
     is that the *file directive alone* turns polishing on, so the explicit
     PolishConfig only keeps a missed tolerance from raising, while the
     activation comes from the ``!@VMEX`` line.
@@ -345,8 +345,11 @@ def test_solve_file_polish_directive_activates_polishing(tmp_path):
 
     inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
         mpol=3, ntor=0, ntheta=12, nzeta=4)
+    # ns = 7 is the smallest radial grid the native polish (#448) can lift:
+    # at ns <= 6 its radial spline fit is rank-deficient and the polish
+    # raises before a report exists, so return_unpolished never applies.
     inp = dataclasses.replace(
-        inp, ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-10]),
+        inp, ns_array=np.asarray([7]), ftol_array=np.asarray([1.0e-10]),
         niter_array=np.asarray([1000]))
     physics = inp.to_indata(tmp_path / "input.polished_case")
     source = tmp_path / "input.polished_case_directive"
