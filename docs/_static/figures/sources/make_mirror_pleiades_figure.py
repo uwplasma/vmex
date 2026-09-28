@@ -7,7 +7,7 @@ against the independent Pleiades reference
 field ratio ``B(beta)/B_vac`` at 0, 1, 3 and 10 % central beta, and its
 difference from the finest Pleiades grid at two VMEX resolutions.
 
-``--solve`` re-solves VMEX (a few minutes on one CPU) and rewrites
+``--solve`` re-solves VMEX (about 3 h for both rungs on a loaded 36-core CPU) and rewrites
 ``benchmarks/mirror_pleiades_two_coil.json``; without it the committed record
 is plotted.
 
@@ -80,6 +80,9 @@ def main() -> None:
         a.plot(beta, row["field_ratio"], "-", color=color, lw=1.5, label=label)
         b.semilogy(beta, np.abs(np.asarray(row["field_ratio"]) - fine), "s-", color=color, ms=4,
                    label=label)
+    coarse = ref[(ref[:, 0] == grids[0][0]) & (ref[:, 1] == grids[0][1])]
+    b.semilogy(100 * coarse[:, 2], np.abs(coarse[:, 7] - best[:, 7]), "o--", color=PLEIADES, ms=4,
+               mfc="none", label=f"Pleiades {grids[0][0]}x{grids[0][1]} (its own grid error)")
     a.set(xlabel="central beta [%]", ylabel="$B_0(\\beta)/B_{vac}$", title="On-axis midplane field")
     b.set(xlabel="central beta [%]", ylabel="|VMEX - Pleiades 51x101|",
           title="Difference halves under refinement")

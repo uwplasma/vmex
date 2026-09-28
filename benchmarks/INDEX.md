@@ -12,8 +12,8 @@ uncited records are reachable through git history: link them with a
 permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
-32 committed artifacts: 27 standalone records and 1 grouped directory holding
-5 files. 28 of the 28 entries below are cited by a page, a test or another
+33 committed artifacts: 28 standalone records and 1 grouped directory holding
+5 files. 29 of the 29 entries below are cited by a page, a test or another
 script; 0 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -43,6 +43,7 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_free_boundary_axisymmetric.json` |  | `d4f56dae` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/howto/mirror-machines.md`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py`, `tests/test_capability_docs.py` |
 | `benchmarks/mirror_free_boundary_nonaxisymmetric.json` |  | `f9eb6a44` |  | `benchmarks/capabilities.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-boundary-conditions.md`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
+| `benchmarks/mirror_pleiades_two_coil.json` |  |  | 2026-09-28 | `docs/_static/figures/figures.json`, `docs/_static/figures/sources/make_mirror_pleiades_figure.py`, `docs/explanation/mirror-geometry.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/iteration.rst`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
 | `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `README.md`, `docs/reference/optimization.rst`, `plan.md` |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |

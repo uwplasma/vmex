@@ -317,7 +317,8 @@ initial state and exterior grid.
 ![VMEX against Pleiades on a two-coil free-boundary mirror](docs/_static/figures/readme_mirror_pleiades.webp)
 
 Benchmarked against the independent Pleiades Green-function code on the two-coil mirror from vacuum to
-10% beta: the on-axis field agrees to 1e-4 to 1e-3 and the difference halves under refinement
+10% beta: the on-axis field agrees to 7.5e-4 or better on the finer VMEX grid, the difference halves
+under refinement, and what remains is the size of Pleiades' own grid error
 (`docs/_static/figures/sources/make_mirror_pleiades_figure.py`). More mirror and hybrid examples, and
 which lanes are validated: [mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html).
 

@@ -1,0 +1,38 @@
+{
+ "case": "examples/data/input.mirror_two_coil_free_boundary",
+ "reference": "examples/data/pleiades_two_coil_beta_reference.csv",
+ "betas": [
+  0.0,
+  0.01,
+  0.03,
+  0.1
+ ],
+ "b_vac": 0.0836001422205,
+ "rungs": [
+  {
+   "ns": 7,
+   "elements": 7,
+   "nxi": 13,
+   "field_ratio": [
+    1.0000584859007657,
+    0.9955498986529397,
+    0.9864899274167814,
+    0.9543186794273654
+   ],
+   "wall_s": 3047.9
+  },
+  {
+   "ns": 11,
+   "elements": 9,
+   "nxi": 17,
+   "field_ratio": [
+    1.0000153309780384,
+    0.9954371014474087,
+    0.9862332859540016,
+    0.9535074042731667
+   ],
+   "wall_s": 8392.2
+  }
+ ],
+ "date": "2026-09-28"
+}
