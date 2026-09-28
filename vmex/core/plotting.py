@@ -2562,8 +2562,9 @@ def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str
         fig.colorbar(h[3], ax=a_map, label="lost alphas")
         a_map.set(xlabel=r"$\zeta_B$ (one period)", ylabel=r"$\theta_B$", title="loss locations on s = 1")
         bins = np.linspace(-1, 1, 21)
-        a_p.hist(birth[~lost, 3], bins=bins, density=True, histtype="step", linewidth=2, label="confined")
-        a_p.hist(birth[lost, 3], bins=bins, density=True, histtype="step", linewidth=2, label="lost")
+        for mask, label in ((~lost, "confined"), (lost, "lost")):
+            if mask.any():  # an empty group has no density
+                a_p.hist(birth[mask, 3], bins=bins, density=True, histtype="step", linewidth=2, label=label)
         a_p.set(xlabel=r"birth pitch $v_\parallel/v$", ylabel="density")
         a_p.legend()
         a_tp.scatter(birth[lost, 3], t_loss, s=10)

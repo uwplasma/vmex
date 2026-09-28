@@ -994,6 +994,7 @@ class _TraceProgress:
         self.start = time.perf_counter()
         self.first: tuple[float, int] | None = None
         self.tty = sys.stderr.isatty()
+        self.width = 0
 
     def __call__(self, done: int, total: int) -> None:
         now = time.perf_counter()
@@ -1005,7 +1006,9 @@ class _TraceProgress:
         else:
             left = "done"
         line = f" traced {100 * done / total:3.0f}% of tmax, {now - self.start:.0f} s elapsed, {left}"
-        sys.stderr.write(f"\r{line}   " if self.tty else f"{line}\n")
+        # pad over the previous, possibly longer, line
+        sys.stderr.write(f"\r{line:<{self.width}}" if self.tty else f"{line}\n")
+        self.width = max(self.width, len(line))
         if self.tty and done == total:
             sys.stderr.write("\n")
         sys.stderr.flush()
