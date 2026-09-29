@@ -163,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  vmex --plot boozmn_*.nc— Boozer contour/spectrum plots\n"
             "  vmex --trace wout_*.nc — trace alpha particles (ESSOS), plot losses\n"
             "  vmex --scale input.X [B R] — scale an input or WOUT\n"
+            "  vmex --to-input wout_*.nc — reconstruct input.* from a WOUT\n"
             "  vmex --doctor          — installation and JAX backend diagnostics\n"
             "  vmex --test            — run and plot the bundled quick-start case\n"
         ),
@@ -196,6 +197,8 @@ def build_parser() -> argparse.ArgumentParser:
             "ARIES-CS size, <B>=5.8646 T and a=1.7044 m (see --scale-target)."
         ),
     )
+    p.add_argument("--to-input", action="store_true",
+                   help="Write input.<case> from a WOUT without solving it.")
     p.add_argument(
         "--scale-target", choices=("volavgB", "axis"), default="volavgB",
         help=(
@@ -1342,6 +1345,26 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
     outdir = Path(args.outdir).expanduser().resolve() if args.outdir else None
     plot_outdir = outdir if outdir is not None else input_path.parent
     quiet = bool(args.quiet)
+
+    if args.to_input:
+        if not _is_wout_path(input_path) or plot_requested or args.booz or args.trace or args.scale:
+            parser.error("--to-input requires a WOUT path and no other operation")
+        from .input import VmecInput
+
+        case = input_path.stem.removeprefix("wout_")
+        target = (outdir or input_path.parent) / f"input.{case}"
+        if target.exists():
+            target = target.with_name(target.name + "_from_wout")
+        if target.exists():
+            raise VmecInputError(WERROR_MESSAGES[INPUT_ERROR_FLAG],
+                                 hint=f"refusing to overwrite existing input: {target}")
+        try:
+            VmecInput.from_wout(input_path).to_indata(target)
+        except ValueError as exc:
+            raise VmecInputError(WERROR_MESSAGES[INPUT_ERROR_FLAG], hint=str(exc)) from exc
+        if not quiet:
+            emit(f" Wrote reconstructed VMEC input: {target}")
+        return 0
 
     if bool(args.scale):
         if plot_requested or bool(args.booz) or bool(args.trace) or bool(args.test):

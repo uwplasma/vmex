@@ -935,6 +935,97 @@ class VmecInput:
         return cls.from_indata_text(text)
 
     @classmethod
+    def from_wout(cls, source) -> "VmecInput":
+        """Make a runnable deck for the equilibrium stored in a WOUT.
+
+        WOUT omits ``NCURR``, ``PRES_SCALE``, ``BLOAT`` and multigrid controls.
+        The echoed profiles are checked against the solved profiles to infer
+        the active constraint and pressure amplitude. Use ``restart_from``
+        to seed a re-solve with the complete internal geometry.
+        """
+        from .wout import WoutData, read_wout
+        from . import profiles
+
+        w = source if isinstance(source, WoutData) else read_wout(source)
+        ns, nfp, mpol, ntor = int(w.ns), int(w.nfp), int(w.mpol), int(w.ntor)
+        if ns < 3 or nfp < 1 or mpol < 1 or ntor < 0:
+            raise ValueError("WOUT has invalid resolution or field period count")
+        if float(w.gamma) != 0.0:
+            raise ValueError("WOUT cannot reconstruct a GAMMA != 0 input profile")
+        if bool(w.lfreeb) and str(w.mgrid_file).strip().upper() == "NONE":
+            raise ValueError("free-boundary WOUT has no MGRID_FILE to reconstruct")
+        mgrid_file = str(w.mgrid_file)
+        if not isinstance(source, WoutData) and bool(w.lfreeb):
+            beside_wout = Path(source).resolve().parent / mgrid_file
+            if beside_wout.is_file():
+                mgrid_file = str(beside_wout.resolve())
+
+        modes_m = np.asarray(w.xm, dtype=float)
+        modes_n = np.asarray(w.xn, dtype=float) / nfp
+        if (len(modes_m) != len(modes_n)
+                or np.any(modes_m != np.rint(modes_m))
+                or np.any(modes_n != np.rint(modes_n))):
+            raise ValueError("WOUT Fourier mode table is not integral")
+        boundary = {name: np.zeros((2 * ntor + 1, mpol))
+                    for name in ("rbc", "zbs", "rbs", "zbc")}
+        for col, (mf, nf) in enumerate(zip(modes_m, modes_n)):
+            m, n = int(mf), int(nf)
+            if 0 <= m < mpol and abs(n) <= ntor:
+                for name, table in (("rbc", w.rmnc), ("zbs", w.zmns),
+                                    ("rbs", w.rmns), ("zbc", w.zmnc)):
+                    if table is not None:
+                        boundary[name][n + ntor, m] = np.asarray(table)[-1, col]
+
+        # The pressure presets are an input echo.  Recover their missing
+        # amplitude only if they reproduce the output half-mesh pressure.
+        s_half = (np.arange(1, ns) - 0.5) / (ns - 1)
+        observed = np.asarray(w.pres, dtype=float)[1:]
+        raw = np.asarray(profiles.pressure(
+            w.pmass_type, w.am, w.am_aux_s, w.am_aux_f, s_half), dtype=float)
+        denom = float(np.dot(raw, raw))
+        scale = float(np.dot(raw, observed) / denom) if denom > 0 else 1.0
+        pressure = dict(pmass_type=w.pmass_type, am=w.am,
+                        am_aux_s=w.am_aux_s, am_aux_f=w.am_aux_f,
+                        pres_scale=scale)
+        if (not np.isfinite(scale) or scale < 0
+                or np.max(np.abs(scale * raw - observed)) >
+                1e-5 * max(1.0, np.max(np.abs(observed)))):
+            indices = np.unique(np.rint(np.linspace(0, ns - 1, min(ns, 101))).astype(int))
+            pressure = dict(pmass_type="cubic_spline",
+                            am_aux_s=indices / (ns - 1),
+                            am_aux_f=np.asarray(w.presf, dtype=float)[indices],
+                            pres_scale=1.0)
+
+        echoed_iota = np.asarray(profiles.iota(
+            w.piota_type, w.ai, w.ai_aux_s, w.ai_aux_f, s_half), dtype=float)
+        output_iota = np.asarray(w.iotas, dtype=float)[1:]
+        current_constrained = (np.max(np.abs(echoed_iota - output_iota)) >
+                               1e-5 * max(1.0, np.max(np.abs(output_iota))))
+        iota = dict(piota_type=w.piota_type, ai=w.ai,
+                    ai_aux_s=w.ai_aux_s, ai_aux_f=w.ai_aux_f)
+        if current_constrained and not np.any(np.asarray(w.ac)) and abs(float(w.ctor)) > 1e-6:
+            # An external WOUT may have no usable current-profile echo.
+            # Preserve its solved iota as the reproducible constraint.
+            indices = np.unique(np.rint(np.linspace(0, ns - 1, min(ns, 101))).astype(int))
+            iota = dict(piota_type="cubic_spline", ai_aux_s=indices / (ns - 1),
+                        ai_aux_f=np.asarray(w.iotaf, dtype=float)[indices])
+            current_constrained = False
+
+        return cls(
+            lasym=bool(w.lasym), nfp=nfp, mpol=mpol, ntor=ntor,
+            ns_array=[ns], phiedge=float(np.asarray(w.phi)[-1]), gamma=0.0,
+            ncurr=int(current_constrained), curtor=float(w.ctor),
+            pcurr_type=w.pcurr_type, ac=w.ac,
+            ac_aux_s=w.ac_aux_s, ac_aux_f=w.ac_aux_f,
+            lfreeb=bool(w.lfreeb), mgrid_file=mgrid_file,
+            lmove_axis=bool(w.lmove_axis),
+            extcur=np.asarray(w.extcur)[:int(w.nextcur)],
+            raxis_c=w.raxis_cc, zaxis_s=w.zaxis_cs,
+            raxis_s=w.raxis_cs, zaxis_c=w.zaxis_cc,
+            **boundary, **pressure, **iota,
+        )
+
+    @classmethod
     def from_indata_text(cls, text: str) -> "VmecInput":
         """Build from ``&INDATA`` namelist text (VMEC2000 read_indata_namelist)."""
         scalars, indexed = _read_indata_text(text)

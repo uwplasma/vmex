@@ -130,6 +130,7 @@ vmex --booz wout_my_case.nc
 vmex --scale wout_my_case.nc
 vmex --trace wout_my_case.nc
 vmex input.nearby --restart wout_my_case.nc
+vmex wout_my_case.nc --to-input    # writes input.my_case
 ```
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
@@ -177,6 +178,13 @@ Pass `initial_state=result.state` for a nearby solve, or `restart_from=` for a s
 [restart](https://vmex.readthedocs.io/en/latest/howto/restart-from-previous-run.html) and
 [CLI](https://vmex.readthedocs.io/en/latest/reference/cli.html) guides cover resolution changes,
 devices, profiles and output controls.
+
+To reconstruct a standalone deck in Python, use
+`vj.VmecInput.from_wout("wout_my_case.nc").to_indata("input.my_case")`.
+The WOUT supplies the final boundary, flux and profiles. VMEX infers `NCURR`
+from the profile echo; the original multigrid ladder cannot be recovered.
+For a free-boundary case, the referenced MGRID file is also needed.
+If `input.my_case` exists, the CLI writes `input.my_case_from_wout` instead.
 
 `vmex equilibrium.h5` reads DESC text inputs and HDF5/pickle outputs without installing DESC, using the final stage or equilibrium; it writes `input.equilibrium` and solves it to write `wout_equilibrium.nc`.
 `--desc-tol 0` retains all boundary modes. The default 1% boundary tolerance does not guarantee magnetic-field accuracy. WOUT iota has the opposite sign to DESC.
