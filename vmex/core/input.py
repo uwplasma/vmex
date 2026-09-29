@@ -970,7 +970,7 @@ class VmecInput:
                 or np.any((modes_m < 0) | (modes_m >= mpol))
                 or np.any(np.abs(modes_n) > ntor)
                 or len(set(zip(modes_m, modes_n))) != len(modes_m)):
-            raise ValueError("WOUT Fourier mode table is not integral")
+            raise ValueError("WOUT has invalid Fourier mode table")
         boundary = {name: np.zeros((2 * ntor + 1, mpol))
                     for name in ("rbc", "zbs", "rbs", "zbc")}
         for col, (mf, nf) in enumerate(zip(modes_m, modes_n)):
@@ -1037,7 +1037,8 @@ class VmecInput:
             niter_array=[max(1000, int(w.niter))],
             phiedge=float(np.asarray(w.phi)[-1]), gamma=0.0,
             ncurr=int(current_constrained), curtor=float(w.ctor),
-            pcurr_type=w.pcurr_type, ac=w.ac,
+            pcurr_type=(w.pcurr_type if w.pcurr_type in profiles._PCURR_KINDS
+                        else "power_series"), ac=w.ac,
             ac_aux_s=w.ac_aux_s, ac_aux_f=w.ac_aux_f,
             lfreeb=bool(w.lfreeb), mgrid_file=mgrid_file,
             lmove_axis=bool(w.lmove_axis),

@@ -72,8 +72,8 @@ def test_reject_unrecoverable_adiabatic_pressure():
     ({"lfreeb": True, "mgrid_file": "NONE"}, "no MGRID_FILE"),
     ({"lfreeb": True, "mgrid_file": ""}, "no MGRID_FILE"),
     ({"nextcur": -1}, "invalid external current count"),
-    ({"xn": np.array([0.5, 0, 0, 0, 0, 0])}, "not integral"),
-    ({"xn": np.array([6, 0, 0, 0, 0, 0])}, "not integral"),
+    ({"xn": np.array([0.5, 0, 0, 0, 0, 0])}, "invalid Fourier mode"),
+    ({"xn": np.array([6, 0, 0, 0, 0, 0])}, "invalid Fourier mode"),
 ])
 def test_reject_invalid_wout_metadata(changes, reason):
     wout = read_wout(_golden("solovev"))
@@ -102,6 +102,7 @@ def test_fallback_profiles_use_solved_values():
     deck = VmecInput.from_wout(wout)
     assert deck.pmass_type == "cubic_spline"
     assert deck.piota_type == "cubic_spline"
+    assert deck.pcurr_type == "power_series"
     assert deck.ncurr == 0
     np.testing.assert_allclose(deck.am_aux_f, pressure)
     np.testing.assert_allclose(deck.ai_aux_f, wout.iotaf)
