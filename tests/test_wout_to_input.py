@@ -1,7 +1,6 @@
 """Reconstruct an INDATA deck from saved VMEC geometry and profiles."""
 
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -12,13 +11,17 @@ from vmex.core.wout import read_wout
 from tests.conftest import resolve_golden_dir
 
 
-DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
+def _golden(case):
+    root = resolve_golden_dir()
+    if root is None:
+        pytest.skip("VMEC2000 WOUT fixtures unavailable")
+    return root / case / f"wout_{case}.nc"
 
 
-@pytest.mark.parametrize("name", ["wout_shaped_tokamak_pressure.nc",
-                                   "wout_shaped_tokamak_pressure_polished.nc"])
-def test_reconstructed_deck_roundtrips_and_preserves_equilibrium(name, tmp_path):
-    wout = read_wout(DATA / name)
+@pytest.mark.parametrize("case,scale", [("solovev", 1.0),
+                                       ("cth_like_fixed_bdy", 432.29080924603676)])
+def test_reconstructed_deck_roundtrips_and_preserves_equilibrium(case, scale, tmp_path):
+    wout = read_wout(_golden(case))
     deck = VmecInput.from_wout(wout)
     reread = VmecInput.from_file(deck.to_indata(tmp_path / "input.case"))
     assert reread == deck
@@ -26,14 +29,14 @@ def test_reconstructed_deck_roundtrips_and_preserves_equilibrium(name, tmp_path)
     assert deck.ftol_array[-1] == pytest.approx(wout.ftolv)
     assert deck.niter_array[-1] >= wout.niter
     assert deck.phiedge == pytest.approx(wout.phi[-1], rel=1e-14)
-    assert deck.pres_scale == pytest.approx(1e4, rel=1e-12)
-    assert deck.ncurr == 0
+    assert deck.pres_scale == pytest.approx(scale, rel=1e-12)
+    assert deck.ncurr == (1 if case.startswith("cth_like") else 0)
     np.testing.assert_allclose(deck.rbc[deck.ntor], wout.rmnc[-1], rtol=0, atol=0)
     np.testing.assert_allclose(deck.zbs[deck.ntor], wout.zmns[-1], rtol=0, atol=0)
 
 
 def test_lasym_free_boundary_modes_and_coils(tmp_path):
-    base = read_wout(DATA / "wout_shaped_tokamak_pressure.nc")
+    base = read_wout(_golden("solovev"))
     wout = replace(base, lasym=True, lfreeb=True, mgrid_file="field.nc",
                    nextcur=2, extcur=np.array([1.2, -3.4]),
                    rmns=np.full_like(base.rmnc, 0.012),
@@ -49,17 +52,17 @@ def test_lasym_free_boundary_modes_and_coils(tmp_path):
 
 
 def test_cli_writes_input_without_solving(tmp_path):
-    source = DATA / "wout_shaped_tokamak_pressure.nc"
+    source = _golden("solovev")
     assert main([str(source), "--to-input", "--outdir", str(tmp_path)]) == 0
-    deck = VmecInput.from_file(tmp_path / "input.shaped_tokamak_pressure")
-    assert deck.phiedge == pytest.approx(67.86)
+    deck = VmecInput.from_file(tmp_path / "input.solovev")
+    assert deck.phiedge == pytest.approx(read_wout(source).phi[-1])
     assert main([str(source), "--to-input", "--outdir", str(tmp_path)]) == 0
-    assert (tmp_path / "input.shaped_tokamak_pressure_from_wout").exists()
+    assert (tmp_path / "input.solovev_from_wout").exists()
     assert main([str(source), "--to-input", "--outdir", str(tmp_path)]) != 0
 
 
 def test_reject_unrecoverable_adiabatic_pressure():
-    wout = read_wout(DATA / "wout_shaped_tokamak_pressure.nc")
+    wout = read_wout(_golden("solovev"))
     with pytest.raises(ValueError, match="GAMMA"):
         VmecInput.from_wout(replace(wout, gamma=5 / 3))
 
@@ -69,10 +72,7 @@ def test_reject_unrecoverable_adiabatic_pressure():
                                   "LandremanPaul2021_QA_lowres",
                                   "cth_like_free_bdy_lasym_small"])
 def test_vmec2000_wout_geometry_and_input_roundtrip(case, tmp_path):
-    golden = resolve_golden_dir()
-    if golden is None:
-        pytest.skip("VMEC2000 WOUT fixtures unavailable")
-    source = golden / case / f"wout_{case}.nc"
+    source = _golden(case)
     wout = read_wout(source)
     deck = VmecInput.from_wout(source)
     assert VmecInput.from_file(deck.to_indata(tmp_path / f"input.{case}")) == deck
