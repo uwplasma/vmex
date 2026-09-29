@@ -262,6 +262,7 @@ def trace_alphas(
     mboz: int = 32,
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
+    initial_conditions: np.ndarray | None = None,
     progress: Any = None,
 ) -> AlphaTracingResult:
     """Trace fusion alphas through a wout file or in-memory equilibrium.
@@ -286,6 +287,10 @@ def trace_alphas(
         birth profile).
     mboz, nboz, mode_tolerance:
         Boozer resolution and the relative amplitude of dropped modes.
+    initial_conditions:
+        Optional fixed ``(nparticles, 4)`` births ``(s, theta_B, zeta_B,
+        v_par/v)``. Reuse them across equilibria for a deterministic
+        particle-loss objective; otherwise sample births from each field.
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
@@ -310,8 +315,15 @@ def trace_alphas(
         jax.monitoring.register_event_duration_secs_listener(_compile_listener)
         _COMPILE_S[1] = 1.0
     compile_start = _COMPILE_S[0]
+    if initial_conditions is not None:
+        births = np.asarray(initial_conditions, float)
+        if (births.shape != (nparticles, 4) or not np.isfinite(births).all()
+                or np.any((births[:, 0] < 0) | (births[:, 0] >= 1))
+                or np.any(np.abs(births[:, 3]) > 1)):
+            raise ValueError("initial_conditions must be finite (nparticles, 4) births with 0 <= s < 1 and |pitch| <= 1")
     field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance)
-    births = sample_births(field, nparticles, s=s, birth=birth, seed=seed, ne0=ne0, T0_keV=T0_keV)
+    if initial_conditions is None:
+        births = sample_births(field, nparticles, s=s, birth=birth, seed=seed, ne0=ne0, T0_keV=T0_keV)
     mass, charge = constants.ALPHA_PARTICLE_MASS, constants.ALPHA_PARTICLE_CHARGE
     energy = constants.FUSION_ALPHA_PARTICLE_ENERGY
     start = time.perf_counter()

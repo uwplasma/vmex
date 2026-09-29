@@ -121,6 +121,19 @@ def test_in_memory_equilibrium_matches_the_file_route(traced, solovev_wout):
     np.testing.assert_allclose(result.final_states, traced.final_states)
 
 
+def test_fixed_births_reproduce_trace_and_reject_invalid_inputs(traced, solovev_wout):
+    result = trace_alphas(solovev_wout, **TRACE_KWARGS,
+                          initial_conditions=traced.initial_conditions)
+    np.testing.assert_array_equal(result.lost_times, traced.lost_times)
+    np.testing.assert_array_equal(result.final_states, traced.final_states)
+    bad = traced.initial_conditions.copy()
+    for births in (bad[:1], np.full_like(bad, np.nan),
+                   np.column_stack([np.ones(8), bad[:, 1:]]),
+                   np.column_stack([bad[:, :3], np.full(8, 1.1)])):
+        with pytest.raises(ValueError, match="initial_conditions"):
+            trace_alphas(solovev_wout, **TRACE_KWARGS, initial_conditions=births)
+
+
 def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     """The --trace contract: scaled in memory, JSON/NPZ summary, two figures."""
     import json
