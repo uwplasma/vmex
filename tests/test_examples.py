@@ -45,6 +45,7 @@ ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
+    EXAMPLES / "optimization" / "QA_optimization_alpha_losses.py",
 )
 
 
@@ -113,7 +114,6 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 UNTESTED_EXAMPLES = {
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
-    "examples/optimization/QA_optimization_alpha_losses.py": "draft: smoke test still to add (needs essos)",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
@@ -157,6 +157,7 @@ EXECUTED_EXAMPLES = {
     "examples/mirror/mirror_free_boundary_beta_scan.py",
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
     "examples/optimization/QA_optimization.py",
+    "examples/optimization/QA_optimization_alpha_losses.py",
     "examples/optimization/QA_optimization_ballooning.py",
     "examples/optimization/QA_optimization_bootstrap.py",
     "examples/optimization/QA_optimization_finite_beta.py",
@@ -826,6 +827,20 @@ def test_mirror_free_boundary_beta_scan_example(tmp_path):
     for beta in ("000p0", "010p0", "050p0"):
         for suffix in ("3d", "cross_sections", "modB", "summary"):
             assert (outdir / f"mirror_beta_{beta}pct_{suffix}.png").stat().st_size > 10_000
+
+
+@pytest.mark.full  # nightly: QA least squares, then ESSOS alpha tracing (smoke pass)
+def test_qa_alpha_losses_optimization(tmp_path):
+    pytest.importorskip("essos")
+    out = _run_example(EXAMPLES / "optimization" / "QA_optimization_alpha_losses.py",
+                       tmp_path, timeout=1200)
+    losses = dict(re.findall(r"^\s*(seed|QA stage|alpha stage): \d+ alphas for [0-9.]+ ms lose "
+                             r"([0-9.]+) %", out, re.M))
+    assert set(losses) == {"seed", "QA stage", "alpha stage"}, out
+    assert all(0.0 <= float(value) <= 100.0 for value in losses.values())
+    for name in ("wout_QA_alpha_losses_optimized.nc", "QA_alpha_losses_optimized_losses.png",
+                 "QA_alpha_losses_optimized_trace.png"):
+        assert (tmp_path / name).exists(), name
 
 
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)

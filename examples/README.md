@@ -119,6 +119,14 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   frozen-geometry pressure proxies before re-solving at finite pressure, and
   `QA_optimization_global.py` explores basins with SciPy basin hopping before
   the exact least-squares finish.
+  `QA_optimization_alpha_losses.py` (`pip install "vmex[coils]"`) adds fusion
+  alphas: a QA least-squares stage, then a derivative-free (COBYQA) stage on
+  the loss-time-weighted alpha loss traced by ESSOS in Boozer coordinates (the
+  `vmex --trace` tracer). An independent 1000-alpha, 5 ms check on the laptop
+  (about 3.5 min in total) reads 30.3 % lost for the rotating-ellipse seed and
+  5.5 % after the QA stage; the alpha stage lowers its own 1 ms ensemble from
+  2.5 % to 1.6 %, but on the independent check it reads 5.7 %, within the
+  0.7 % noise of the QA stage.
   `QA_optimization_turbulence_linear.py`,
   `QA_optimization_turbulence_quasilinear.py` and
   `QA_optimization_turbulence_nonlinear.py` (`pip install "vmex[turbulence]"`)
