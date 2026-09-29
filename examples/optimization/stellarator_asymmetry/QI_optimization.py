@@ -40,7 +40,7 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]
+MAX_NFEV = [8, 12]
 
 # Targets and limits:
 ASPECT_TARGET = 8.0               # as the symmetric QI example; 5 was not reached (12.4)
@@ -174,6 +174,8 @@ final_equilibrium = opt.solve_equilibrium(
 print(f"asymmetric boundary norm = "
       f"{np.linalg.norm(final_input.rbs) + np.linalg.norm(final_input.zbc):.6e}")
 report("final", final_equilibrium)
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT)
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)

@@ -183,6 +183,11 @@ final_equilibrium = opt.solve_equilibrium(
 print(f"asymmetric boundary norm = "
       f"{np.linalg.norm(final_input.rbs) + np.linalg.norm(final_input.zbc):.6e}")
 report("final", final_equilibrium)
+final_beta = float(final_equilibrium.wout.betatotal)
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   mirror_limit=MIRROR_LIMIT,
+                   extra=[("beta", final_beta, 0.9 * TARGET_BETA, "min"),
+                          ("beta", final_beta, 1.1 * TARGET_BETA, "max")])
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
