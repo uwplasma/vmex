@@ -236,7 +236,7 @@ print(f"Wrote {vacuum_input_path}\nWrote {vacuum_wout_path}")
 # pressure, then polish the actual finite-beta DMerc and DR from coarse to
 # resolved radial grids.  That is a sequence of full solves, so the smoke pass
 # stops above.
-certificate_wout_path = None
+certificate_wout_path, certificate_rows = None, []
 if not ci_smoke:
     am = np.zeros(21)
     am[:2] = [1.0, -1.0]  # p(s) = PRES_SCALE * (1 - s)
@@ -308,6 +308,11 @@ if not ci_smoke:
           f"min DMerc={certificate_dmerc[keep].min():.3e}, "
           f"max DR={certificate_dr[keep].max():.3e} on s >= {STABILITY_MIN_S:.1f}")
     print(f"Wrote {certificate_input_path}\nWrote {certificate_wout_path}")
+    certificate_rows = [("certificate min DMerc", certificate_dmerc[keep].min(), 0.0, "min"),
+                        ("certificate max DR", certificate_dr[keep].max(), 0.0, "max")]
+
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET, extra=certificate_rows)
 
 print(f"Wrote {monitor.save(f'{OUTPUT_NAME}_objectives.csv')}")
 print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
