@@ -903,3 +903,30 @@ def test_ballooning_matches_cobravmec(tmp_path):
     # not formulation.  Outside it the two codes agree to 6e-4.
     np.testing.assert_allclose(lam[1:], expected[1:], rtol=3e-3)
     np.testing.assert_allclose(lam[0], expected[0], rtol=6e-2)
+
+
+@pytest.mark.full  # one ns = 71 finite-beta solve
+def test_ballooning_matches_frozen_cobravmec_on_3d_qa_seed():
+    """Three-dimensional anchor: the ballooning example's seed against COBRAVMEC.
+
+    The Solovev parity above is axisymmetric.  This is the stellarator case the
+    QA ballooning example optimizes: ``input.nfp2_QA_finite_beta`` at ns = 71,
+    full-mesh row 59 (s = 0.843), zeta0 = 0.  COBRAVMEC on the vmex wout
+    (``alpha_st`` = 0.001 deg, ``zeta_k`` = 0, row 60 one-based) returns the
+    signed growth rate 0.40616 at ``k_w`` = 4 and 0.40602 at ``k_w`` = 8, so
+    its domain is converged; the conversion of
+    :func:`test_ballooning_matches_cobravmec` (factor 3.2030e-2 on this wout)
+    makes that lambda = 5.284e-3.  The alpha = pi/2 line is stable in both
+    (COBRAVMEC: -9.1e-5).  Frozen here so the gate runs without the binary.
+    """
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA_DIR / "input.nfp2_QA_finite_beta"),
+        ns_array=np.array([71]), ftol_array=np.array([1e-14]),
+        niter_array=np.array([20000]))
+    eq = opt.solve_equilibrium(inp, verbose=False)
+    assert eq.result.converged
+    lam = np.asarray(stab.ballooning_lambda(
+        eq.state, eq.runtime, s_indices=[59], alphas=[0.0, 0.5 * np.pi],
+        zeta0s=[0.0], npoints=801, nturns=3.75))[0, :, 0]
+    np.testing.assert_allclose(lam[0], 5.284e-3, rtol=1e-2)
+    assert lam[1] < 0.0

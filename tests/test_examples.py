@@ -1042,14 +1042,18 @@ def test_qa_ballooning_optimization_example(tmp_path):
     script = EXAMPLES / "optimization" / "QA_optimization_ballooning.py"
     out = _run_example(script, tmp_path, timeout=1800)
     _assert_cost_decreased(out, "QA-ballooning")
-    seed = re.search(r"max lambda = ([0-9.eE+-]+) \(unstable\)", out)
     final = re.search(r"max lambda ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
-    assert seed is not None and final is not None
+    mercier = re.search(r"min PHIEDGE\^2 DMerc ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    beta = re.search(r"beta ([0-9.]+)% -> ([0-9.]+)%", out)
+    assert final is not None and mercier is not None and beta is not None
     # The seed must be the case the objective is for: ballooning-unstable while
     # Mercier says nothing is wrong.  Otherwise the example proves nothing.
-    assert float(seed.group(1)) > 0.0
-    assert re.search(r"min DMerc = \+[0-9.eE+-]+ \(Mercier-stable\)", out)
+    assert float(final.group(1)) > 0.0
+    assert float(mercier.group(1)) > 0.0
+    # Ballooning improves without buying it with Mercier or beta.
     assert float(final.group(2)) < float(final.group(1))
+    assert float(mercier.group(2)) > 0.0
+    assert abs(float(beta.group(2)) - float(beta.group(1))) < 0.1
     assert (tmp_path / "input.QA_ballooning_optimized").exists()
     assert (tmp_path / "wout_QA_ballooning_optimized.nc").exists()
     assert (tmp_path / "QA_ballooning_optimized_stability.png").stat().st_size > 10_000
