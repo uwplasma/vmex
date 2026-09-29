@@ -7,7 +7,7 @@ is the case a ballooning objective is for: the interchange criteria see nothing
 to fix.
 
 The objective follows DESC's ``BallooningStability`` (Gaur et al., J. Plasma
-Phys. 89 (2023) 905890518): every sampled field line whose growth rate
+Phys. 89 (2023), doi:10.1017/S0022377823000107): every sampled field line whose growth rate
 exceeds a threshold contributes its excess, and a stable line contributes
 nothing, so the optimizer spends its steps on the lines that are unstable
 instead of on the mean. Pressure, current and toroidal flux are held as in
