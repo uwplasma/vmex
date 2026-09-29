@@ -12,10 +12,9 @@ point costs about a minute on a laptop CPU, so add intermediate points (1, 3,
 restart file per point, a JSON summary, the mirror ratios, per-state figures
 for three points, and the beta-scan composite.
 
-The composite the docs embed is written straight into
-``docs/_static/figures`` as lossless WebP, so re-running this script
-reproduces the committed bytes; ``VMEX_EXAMPLES_CI=1`` sends it to
-``OUTPUT_DIR`` instead. The loops are :class:`vmex.mirror.CircularCoils` (the exact
+The composite the docs embed is written to ``OUTPUT_DIR`` as lossless
+WebP; copying it over the committed one in ``docs/_static/figures``
+reproduces those bytes. The loops are :class:`vmex.mirror.CircularCoils` (the exact
 elliptic-integral field); any ESSOS, SIMSOPT or mgrid field can replace them
 through ``solve_mirror_beta_scan(..., external_field=...)``.
 """
@@ -85,17 +84,13 @@ SAVE_RESTARTS = True
 RESTART_FROM = None
 
 # VMEX_EXAMPLES_CI=1 is the smoke pass the test suite runs: vacuum, the
-# supported endpoint and two extended points on a coarse grid, with the
-# composite kept out of the docs tree:
+# supported endpoint and two extended points on a coarse grid:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FIGURE_DIR = REPO_ROOT / "docs" / "_static" / "figures"
 if ci_smoke:
     BETAS = np.asarray([0.0, 0.10, 0.25, 0.50])
     NS, NXI, SPLINE_ELEMENTS = 5, 7, 4
     EXTERIOR_NTHETA = 8
     MAX_ITERATIONS = 500
-    FIGURE_DIR = OUTPUT_DIR
 
 ###############################################################################
 # End of input parameters.
@@ -223,7 +218,7 @@ composite = plot_axisymmetric_beta_scan_summary(
         )
         for beta, row in zip(BETAS, summary, strict=True)
     ],
-    FIGURE_DIR,
+    OUTPUT_DIR,
     display=tuple(display_indices),
     name="mirror_free_boundary_beta_scan",
     strong_force_gate=STRONG_FORCE_GATE,

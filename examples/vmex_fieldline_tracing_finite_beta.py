@@ -11,8 +11,8 @@ exterior traces still end at a stopping distance, and a finite trace does not
 by itself establish magnetic topology.
 
 Outside the CI smoke run, the phi=0 Poincare panel pair is
-also written straight into ``docs/_static/figures`` as lossless WebP, so
-re-running this script reproduces the committed bytes.
+also written to the working directory as lossless WebP; copying it over
+the committed one in ``docs/_static/figures`` reproduces those bytes.
 """
 
 from dataclasses import replace
@@ -38,8 +38,7 @@ from essos.fields import BiotSavart
 from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
 
 DATA = Path(__file__).resolve().parent / "data"
-README_FIGURE = (Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
-                 / "readme_extender_exterior_islands.webp")
+README_FIGURE = Path("readme_extender_exterior_islands.webp")
 N_FIELDLINES, N_TOROIDAL_TURNS, TRACE_LENGTH, N_SAMPLES = 14, 400, 3000.0, 25000
 # Cartesian coil/exterior traces use arclength, so rescaling B does not change coverage.
 TRACE_TOLERANCE, OUTSIDE_OFFSET = 1.0e-7, 0.005

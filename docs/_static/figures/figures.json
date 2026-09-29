@@ -22,7 +22,7 @@
       "sha256": "454ce4db6bae9eadd506ac0d731b89b5fd54cd1629f5a7224779293f34758448",
       "bytes": 11920,
       "generator": "examples/free_boundary_phiedge.py",
-      "command": "python examples/free_boundary_phiedge.py",
+      "command": "python examples/free_boundary_phiedge.py && cp free_boundary_phiedge.webp docs/_static/figures/",
       "inputs": [
         "examples/data/ESSOS_biot_savart_LandremanPaulQA.json",
         "examples/data/input.LandremanPaul2021_QA_lowres"
@@ -79,7 +79,7 @@
       "sha256": "39a9589620d0ae0b62930bd5a435f3238360c5c523504916ff9c1bfa9d8cbcd2",
       "bytes": 163938,
       "generator": "examples/mirror/mirror_free_boundary_beta_scan.py",
-      "command": "python examples/mirror/mirror_free_boundary_beta_scan.py",
+      "command": "python examples/mirror/mirror_free_boundary_beta_scan.py && cp results/mirror_free_boundary_beta_scan/mirror_free_boundary_beta_scan.webp docs/_static/figures/",
       "inputs": [],
       "record": "benchmarks/mirror_free_boundary_axisymmetric.json",
       "generated": "2026-09-23",
@@ -195,7 +195,7 @@
       "sha256": "ac81e1c503dedf5fdf085079a11dfaec0d4b48922b5cf624ff51f12681b18733",
       "bytes": 31686,
       "generator": "examples/free_boundary_essos_coils.py",
-      "command": "python examples/free_boundary_essos_coils.py",
+      "command": "python examples/free_boundary_essos_coils.py && cp readme_essos_beta_scan.webp docs/_static/figures/",
       "inputs": [
         "examples/data/ESSOS_biot_savart_LandremanPaulQA.json",
         "examples/data/input.LandremanPaul2021_QA_lowres"
@@ -258,7 +258,7 @@
       "sha256": "ed6e1b55a4d5f0244e5fca83b9f917c137ec990ed23b132e70ba2a4c8658d5d2",
       "bytes": 113576,
       "generator": "examples/vmex_fieldline_tracing_finite_beta.py",
-      "command": "python examples/vmex_fieldline_tracing_finite_beta.py",
+      "command": "python examples/vmex_fieldline_tracing_finite_beta.py && cp readme_extender_exterior_islands.webp docs/_static/figures/",
       "inputs": [
         "examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap",
         "examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json"
@@ -476,7 +476,7 @@
       "sha256": "143928dbdaae7432bab69e78c544bde4292275ba38905bf6786b2feb6cbe7aa0",
       "bytes": 159326,
       "generator": "examples/mirror/stellarator_mirror_hybrid.py",
-      "command": "python examples/mirror/stellarator_mirror_hybrid.py",
+      "command": "python examples/mirror/stellarator_mirror_hybrid.py && cp results/stellarator_mirror_hybrid/stellarator_mirror_hybrid.webp docs/_static/figures/",
       "inputs": [],
       "record": null,
       "generated": "2026-09-05",

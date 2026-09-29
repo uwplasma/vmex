@@ -8,10 +8,9 @@ that turns continuously around the circuit give the field its rotational
 transform. The script prints the convergence and force diagnostics, the
 transform from a traced field line, and writes ``summary.json``.
 
-The panel figure the docs embed is written straight into
-``docs/_static/figures`` as lossless WebP, so re-running this script
-reproduces the committed bytes; ``VMEX_EXAMPLES_CI=1`` sends it to
-``OUTPUT_DIR`` instead. Run it from a source checkout with VMEX installed.
+The panel figure the docs embed is written to ``OUTPUT_DIR`` as lossless
+WebP; copying it over the committed one in ``docs/_static/figures``
+reproduces those bytes. Run it from a source checkout with VMEX installed.
 """
 
 import json
@@ -59,11 +58,8 @@ MAX_ITERATIONS = 1000
 # Directory for summary.json (and the figure under VMEX_EXAMPLES_CI=1):
 OUTPUT_DIR = Path("results/stellarator_mirror_hybrid")
 
-# VMEX_EXAMPLES_CI=1 is the smoke pass the test suite runs; it keeps the
-# committed docs figure untouched:
+# VMEX_EXAMPLES_CI=1 is the smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FIGURE_DIR = OUTPUT_DIR if ci_smoke else REPO_ROOT / "docs" / "_static" / "figures"
 
 ###############################################################################
 # End of input parameters.
@@ -108,7 +104,7 @@ result = solve_fixed_boundary(
 
 ### Plot, trace and save ######################################################
 
-figure = plot_stellarator_mirror_hybrid(result, setup, FIGURE_DIR, image_format="webp")
+figure = plot_stellarator_mirror_hybrid(result, setup, OUTPUT_DIR, image_format="webp")
 field_line = trace_closed_field_line(
     result.evaluated.energy.field,
     setup.discretization,

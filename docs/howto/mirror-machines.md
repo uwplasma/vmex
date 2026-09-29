@@ -64,9 +64,10 @@ axisymmetric mirror, differentiates rotating-ellipse volume against two fully
 reconverged solves, and writes MOUT plus 3-D, cross-section, `|B|`, residual,
 symmetry, and analytic-direction figures. The figures that the README and
 these pages embed (the paired 3-D view, the beta-scan composite, and the
-hybrid panel) are written by these scripts straight into
-`docs/_static/figures/` as lossless WebP, so re-running a script reproduces
-the committed figure; `docs/_static/figures/figures.json` records each one.
+hybrid panel) are written by these scripts into their output directory as
+lossless WebP; copying one over its committed copy in `docs/_static/figures/`
+reproduces that figure, and `docs/_static/figures/figures.json` records the
+command for each one.
 
 ## Plot the results
 

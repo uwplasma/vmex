@@ -50,7 +50,7 @@ NS, NITER, FTOL = 31, 20000, 1e-10
 
 # Directory that receives the wout, and the figure (the docs copy, lossless WebP):
 OUTPUT_DIR = Path("output_free_boundary_phiedge")
-FIGURE = Path(__file__).resolve().parents[1] / "docs/_static/figures/free_boundary_phiedge.webp"
+FIGURE = Path("free_boundary_phiedge.webp")
 MAKE_PLOTS = True
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:

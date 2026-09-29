@@ -16,9 +16,9 @@ Each step warm-starts from the previous accepted boundary, which is how
 experiments ramp and is far steadier than re-solving from the vacuum guess.
 
 Watch the Shafranov shift -- the axis moves outboard -- and the response of the
-last closed surface as beta rises. The README figure is written straight into
-``docs/_static/figures`` as lossless WebP, so re-running reproduces the
-committed bytes.
+last closed surface as beta rises. The README figure is written to the working
+directory as lossless WebP; copying it over the committed one in
+``docs/_static/figures`` reproduces those bytes.
 """
 
 import os
@@ -38,10 +38,11 @@ INPUT_FILE = DATA_DIR / "input.LandremanPaul2021_QA_lowres"
 TARGET_BETAS = [0.0, 1.0, 2.0, 3.0]
 
 # Calibration of PRES_SCALE against the achieved beta: the first-guess slope in
-# beta-percent per unit PRES_SCALE, how close counts as hit, and how many
-# rescaling attempts each target gets:
+# beta-percent per unit PRES_SCALE, how close counts as hit (relative to the
+# target, so every point is held to the same fraction), and how many rescaling
+# attempts each target gets:
 SLOPE = 1.45e-3
-BETA_TOL = 0.15
+BETA_RTOL = 0.01
 CALIBRATION_ATTEMPTS = 3
 
 # Cylindrical grid the coil field is tabulated onto.  The bounds bracket the
@@ -57,8 +58,7 @@ NITER, FTOL = 20000, 1e-10
 PHIEDGE = -0.025                  # toroidal flux matching the coil field [Wb]
 
 # The README figure, and whether to draw it:
-FIGURE_PATH = (Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
-               / "readme_essos_beta_scan.webp")
+FIGURE_PATH = Path("readme_essos_beta_scan.webp")
 MAKE_FIGURE = True
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs: one
@@ -141,7 +141,7 @@ for target in TARGET_BETAS:
             fsql=float(res.fsql), niter=int(res.iterations),
             converged=bool(res.converged), vacuum_output=res.vacuum)
         beta = 100.0 * float(wout.betatotal)
-        if target == 0.0 or abs(beta - target) <= BETA_TOL:
+        if target == 0.0 or abs(beta - target) <= BETA_RTOL * target:
             break
         ps *= target / max(beta, 1e-6)  # pressure rescale toward the target
     fsq = float(res.fsqr) + float(res.fsqz) + float(res.fsql)
@@ -153,8 +153,9 @@ for target in TARGET_BETAS:
 
 ### Print, plot and save ######################################################
 
-dev = max(abs(beta - target) for target, _ps, beta, _ar, _w in rows)
-print(f"\nactual betatotal within {dev:.3f}% of every nominal target (tolerance {BETA_TOL}%)")
+dev = max(abs(beta / target - 1.0) for target, _ps, beta, _ar, _w in rows if target)
+print(f"\nactual betatotal within {100 * dev:.2f}% (relative) of every nominal target "
+      f"(tolerance {100 * BETA_RTOL:g}%): {'met' if dev <= BETA_RTOL else 'NOT met'}")
 if len(rows) > 1:
     shift = rows[-1][3] - rows[0][3]
     print(f"magnetic axis Shafranov-shifted {shift * 100:+.2f} cm at fixed coil currents")
