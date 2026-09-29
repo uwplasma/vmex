@@ -567,7 +567,7 @@ def test_global_optimization_example_exposes_optimizer_contract():
     """The global example keeps SciPy, exact gradients, and local polish visible."""
     text = (EXAMPLES / "optimization" / "QA_optimization_global.py").read_text()
     assert "basinhopping(value_and_gradient" in text
-    assert '"method": "L-BFGS-B"' in text
+    assert 'method="L-BFGS-B"' in text and '"method": short_lbfgsb' in text
     assert "least_squares(problem.residual" in text
     assert "ess_alpha=ESS_ALPHA" in text
 
