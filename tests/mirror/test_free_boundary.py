@@ -454,7 +454,7 @@ def test_beta_scan_propagates_restart_mass_scale(monkeypatch) -> None:
         )
 
 
-def test_two_coil_deck_matches_the_pleiades_reference() -> None:
+def test_two_coil_deck_matches_the_pleiades_reference(capsys) -> None:
     """Free-boundary deck vs the independent Pleiades Grad-Shafranov solve."""
 
     from dataclasses import replace
@@ -466,7 +466,9 @@ def test_two_coil_deck_matches_the_pleiades_reference() -> None:
     reference = np.loadtxt(data / "pleiades_two_coil_beta_reference.csv", delimiter=",", skiprows=5)
     pleiades = reference[(reference[:, 0] == 51) & (reference[:, 2] == 0.10), 7][0]
     inp = MirrorInput.from_file(data / "input.mirror_two_coil_free_boundary")
-    vacuum, finite = solve_mirror_beta_scan(replace(inp, ns=5, elements=5, nxi=9), [0.0, 0.10])
+    vacuum, finite = solve_mirror_beta_scan(replace(inp, ns=5, elements=5, nxi=9), [0.0, 0.10],
+                                           verbose=True)
+    assert "beta point 2/2: beta = 10.0%" in capsys.readouterr().out
     b_vac = 0.0836001422205
     # Measured at ns=5 (23 s): vacuum 4.4e-4, 10 % beta 2.7e-3 (7.5e-4 at ns=11).
     assert abs(vacuum.summary()["axis_field_center"] / b_vac - 1.0) < 1.0e-3
