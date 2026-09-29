@@ -36,8 +36,8 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 MAX_MODE = 2
 
 # Global phase: hops, and the L-BFGS-B iterations each hop may spend:
-N_BASINS = 4
-LOCAL_MAXITER = 8
+N_BASINS = 3
+LOCAL_MAXITER = 6
 
 # Basin-hopping acceptance temperature, perturbation size, and the random
 # seed that makes the walk reproducible:
@@ -46,7 +46,7 @@ BASIN_STEPSIZE = 0.25
 BASIN_SEED = 7
 
 # Local finish: residual evaluations the polishing least squares may spend:
-POLISH_NFEV = 15
+POLISH_NFEV = 12
 
 # Targets:
 ASPECT_TARGET = 5.0
@@ -66,8 +66,8 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 71
-FINAL_FTOL = 1e-14
+FINAL_NS = 51
+FINAL_FTOL = 1e-12
 FINAL_NITER = 20000
 
 # Every output file name contains this:
@@ -196,6 +196,7 @@ final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium
 report = opt.EquilibriumReporter(("QS", qs.total, ".4e"),
     ("aspect", opt.aspect_ratio, ".3f"), ("iota", opt.mean_iota, ".3f"))
 report("final", final_equilibrium)
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR)
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
