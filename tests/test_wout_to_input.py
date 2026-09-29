@@ -70,7 +70,10 @@ def test_reject_unrecoverable_adiabatic_pressure():
 @pytest.mark.parametrize("changes,reason", [
     ({"ns": 2}, "invalid resolution"),
     ({"lfreeb": True, "mgrid_file": "NONE"}, "no MGRID_FILE"),
+    ({"lfreeb": True, "mgrid_file": ""}, "no MGRID_FILE"),
+    ({"nextcur": -1}, "invalid external current count"),
     ({"xn": np.array([0.5, 0, 0, 0, 0, 0])}, "not integral"),
+    ({"xn": np.array([6, 0, 0, 0, 0, 0])}, "not integral"),
 ])
 def test_reject_invalid_wout_metadata(changes, reason):
     wout = read_wout(_golden("solovev"))
@@ -104,6 +107,18 @@ def test_fallback_profiles_use_solved_values():
     np.testing.assert_allclose(deck.ai_aux_f, wout.iotaf)
 
 
+@pytest.mark.parametrize("kind", ["", "unavailable"])
+def test_missing_profile_metadata_uses_solved_profiles(kind, tmp_path):
+    base = read_wout(_golden("solovev"))
+    wout = replace(base, pmass_type=kind, piota_type=kind, pcurr_type=kind,
+                   ai=np.zeros_like(base.ai), ac=np.ones_like(base.ac))
+    deck = VmecInput.from_wout(wout)
+    assert deck.pmass_type == ("power_series" if not kind else "cubic_spline")
+    assert deck.piota_type == "cubic_spline"
+    assert deck.ncurr == 0
+    assert VmecInput.from_file(deck.to_indata(tmp_path / "input.legacy")) == deck
+
+
 def test_cli_rejects_wrong_operation_and_unrecoverable_wout(tmp_path):
     source = _golden("solovev")
     with pytest.raises(SystemExit):
@@ -117,7 +132,9 @@ def test_cli_rejects_wrong_operation_and_unrecoverable_wout(tmp_path):
 @pytest.mark.parametrize("case", ["solovev", "up_down_asymmetric_tokamak",
                                   "cth_like_fixed_bdy",
                                   "LandremanPaul2021_QA_lowres",
-                                  "cth_like_free_bdy_lasym_small"])
+                                  "cth_like_free_bdy_lasym_small",
+                                  "circular_tokamak", "DSHAPE", "li383_low_res",
+                                  "nfp4_QH_warm_start"])
 def test_vmec2000_wout_geometry_and_input_roundtrip(case, tmp_path):
     source = _golden(case)
     wout = read_wout(source)
