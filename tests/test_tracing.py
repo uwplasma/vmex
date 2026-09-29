@@ -83,6 +83,37 @@ def test_shapes_births_and_energy(traced):
     assert np.max(traced.energy_error) < 1e-3
 
 
+def test_vmec_flux_sign_gives_the_boozer_radial_drift(solovev_wout):
+    """VMEC Phi and the guiding-centre psi have opposite signs (FIRM3D/SIMSOPT)."""
+    import jax.numpy as jnp
+    from essos import constants as c
+    from essos.boozer import guiding_center_rhs
+    from vmex.core.tracing import boozer_field
+
+    wout = read_wout(solovev_wout)
+    field, _ = boozer_field(wout, mboz=8, nboz=8)
+    psi = -float(wout.phi[-1]) / (2 * np.pi)
+    assert field.psi0 == pytest.approx(psi)
+    s, theta, zeta, pitch = 0.25, 0.7, 0.3, 0.4
+    r = np.sqrt(s)
+    speed = np.sqrt(2 * c.FUSION_ALPHA_PARTICLE_ENERGY / c.ALPHA_PARTICLE_MASS)
+    vpar = pitch * speed
+    B, _, Btheta_over_r, Bzeta = map(float, field.modB_derivatives(r, theta, zeta))
+    mu = speed**2 * (1 - pitch**2) / (2 * B)
+    (iota, G, current), (_, Gprime, Iprime) = np.asarray(field.profiles(s))
+    C = -c.ALPHA_PARTICLE_CHARGE * iota + c.ALPHA_PARTICLE_MASS * vpar * Gprime / (psi * B)
+    F = c.ALPHA_PARTICLE_CHARGE + c.ALPHA_PARTICLE_MASS * vpar * Iprime / (psi * B)
+    D = F * G - C * current
+    expected_sdot = ((current * Bzeta - r * G * Btheta_over_r) *
+                     c.ALPHA_PARTICLE_MASS * (vpar**2 / B + mu) / (D * psi))
+    y = jnp.array([r * np.cos(theta), r * np.sin(theta), zeta, vpar])
+    dy = np.asarray(guiding_center_rhs(field, y, mu, c.ALPHA_PARTICLE_MASS,
+                                       c.ALPHA_PARTICLE_CHARGE))
+    actual_sdot = 2 * (y[0] * dy[0] + y[1] * dy[1])
+    assert abs(expected_sdot) > 1.0
+    assert actual_sdot == pytest.approx(expected_sdot, rel=1e-11)
+
+
 def test_volume_births_follow_the_fusion_profile(solovev_wout):
     """Volume births peak in the core: <s> of the D-T source is well below 1/2."""
     from vmex.core.tracing import boozer_field, dt_reactivity, sample_births
