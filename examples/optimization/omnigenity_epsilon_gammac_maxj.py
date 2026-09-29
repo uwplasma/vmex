@@ -276,12 +276,23 @@ print(f"\nhard confinement, before -> after (s = {list(GC_SURFACES)}):")
 print(f"hard Gamma_c per surface = {np.array2string(before['gamma_c'], precision=4)} -> "
       f"{np.array2string(after['gamma_c'], precision=4)}")
 print(f"hard Gamma_c mean = {gc_before:.4e} -> {gc_after:.4e}")
+# epsilon_eff is reported, not optimized: the QS ratio stands in for it.  This
+# seed is already precisely quasi-axisymmetric (epsilon_eff^(3/2) ~ 6e-7), and
+# at that level the hard value is set by the few symmetry-breaking harmonics
+# that dominate bounce-averaged transport, which the QS ratio weighs no more
+# than any other, so a ~13% QS drop can leave it ~13% higher (office run: 6.45e-7 -> 7.32e-7).  Both are far below any transport
+# relevance; add epsilon_eff rows to the objective if that number must fall.
 if before["eps32"] is not None and after["eps32"] is not None:
-    print(f"epsilon_eff^(3/2) mean = {before['eps32'].mean():.4e} -> "
-          f"{after['eps32'].mean():.4e} (s = {list(EPS_SURFACES)})")
+    eps_before, eps_after = before["eps32"].mean(), after["eps32"].mean()
+    print(f"epsilon_eff^(3/2) mean = {eps_before:.4e} -> {eps_after:.4e} "
+          f"(s = {list(EPS_SURFACES)}; {'fell' if eps_after < eps_before else 'rose'}, "
+          "reported only: the QS ratio is its optimized proxy)")
 print(f"maximum-J residual = {before['maxj_total']:.4e} -> {after['maxj_total']:.4e}, "
       f"maximum-J fraction = {before['maxj_fraction']:.1%} -> {after['maxj_fraction']:.1%}")
 print(f"QS ratio total = {before['qs_total']:.4e} -> {after['qs_total']:.4e}")
+opt.report_targets(final_equilibrium,
+                   extra=[("hard Gamma_c mean", gc_after, gc_before, "max"),
+                          ("QS ratio total", after["qs_total"], before["qs_total"], "max")])
 
 ### Print, plot and save ######################################################
 
