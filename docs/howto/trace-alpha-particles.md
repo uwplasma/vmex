@@ -169,14 +169,14 @@ at tolerance `1e-10`. Times are warmed and exclude field setup and JIT:
 |---|---:|---:|---:|---:|
 | ESSOS Boozer, [kernel PR #95](https://github.com/uwplasma/ESSOS/pull/95) | 795 | 1,024 | 15.17 | 2.08e-6 |
 | CATAPULT, released radial interpolant | 802 | 1,017 | 4.88 | 7.84e-3 |
-| CATAPULT, experimental axis regularization | 795 | 1,024 | 4.75 | 3.54e-4 |
+| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 4.75 | 3.54e-4 |
 
 All seven released-CATAPULT disagreements pass close to the axis (`s<0.03`).
 Its Boozer radial interpolation gives a nonzero `m=1` magnetic-field
 harmonic on the axis. Zeroing all `m>0` axis coefficients and using the same
 spline's derivative for `dB/ds` removes those seven losses and sharply
-reduces Hamiltonian drift. The regularization is experimental until reviewed
-upstream. A DESC run independently confines those seven births through
+reduces Hamiltonian drift. The regularization is proposed in [FIRM3D PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
+and remains experimental until merged. A DESC run independently confines those seven births through
 0.2 ms. On a re-solved `ns=101` equilibrium, ESSOS and regularized FIRM3D
 both lose the same one of the seven; unmodified FIRM3D loses two. This
 resolution check matters because axis crossings are sensitive to sparse

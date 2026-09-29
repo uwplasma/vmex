@@ -153,7 +153,7 @@ compilation; the methods and field representations differ.
 |---|---:|---:|---:|
 | VMEX `--trace` / ESSOS Boozer RK4 | 795 | 15.17 s | 2.08e-6 |
 | CATAPULT, released radial interpolation | 802 | 4.88 s | 7.84e-3 |
-| CATAPULT, experimental axis regularization | 795 | 4.75 s | 3.54e-4 |
+| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.75 s | 3.54e-4 |
 
 The seven disagreements in released CATAPULT follow axis crossings; the
 experimental regularization removes them. [The tracing guide](docs/howto/trace-alpha-particles.md)
