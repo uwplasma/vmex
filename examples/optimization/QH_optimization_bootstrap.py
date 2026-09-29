@@ -21,6 +21,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
