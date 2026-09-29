@@ -161,6 +161,7 @@ explains the common births, energy checks, and limitations. Older SIMPLE and
 SIMSOPT numbers made with the incorrect flux sign are withdrawn pending a
 new matched run.
 
+`--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
 `D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
 `vmex examples/data/input.nfp2_QA_finite_beta --plot` and `vmex examples/data/input.nfp4_QI_finite_beta --plot`.
