@@ -23,6 +23,8 @@ def test_reconstructed_deck_roundtrips_and_preserves_equilibrium(name, tmp_path)
     reread = VmecInput.from_file(deck.to_indata(tmp_path / "input.case"))
     assert reread == deck
     assert deck.ns_array[-1] == wout.ns
+    assert deck.ftol_array[-1] == pytest.approx(wout.ftolv)
+    assert deck.niter_array[-1] >= wout.niter
     assert deck.phiedge == pytest.approx(wout.phi[-1], rel=1e-14)
     assert deck.pres_scale == pytest.approx(1e4, rel=1e-12)
     assert deck.ncurr == 0
@@ -63,6 +65,7 @@ def test_reject_unrecoverable_adiabatic_pressure():
 
 
 @pytest.mark.parametrize("case", ["solovev", "up_down_asymmetric_tokamak",
+                                  "cth_like_fixed_bdy",
                                   "LandremanPaul2021_QA_lowres",
                                   "cth_like_free_bdy_lasym_small"])
 def test_vmec2000_wout_geometry_and_input_roundtrip(case, tmp_path):
@@ -84,6 +87,7 @@ def test_vmec2000_wout_geometry_and_input_roundtrip(case, tmp_path):
         if wout.lasym:
             assert deck.rbs[row, m] == wout.rmns[-1, col]
             assert deck.zbc[row, m] == wout.zmnc[-1, col]
+    if case.startswith("cth_like"):
+        assert deck.ncurr == 1
     if wout.lfreeb:
         np.testing.assert_array_equal(deck.extcur, wout.extcur[:wout.nextcur])
-        assert deck.ncurr == 1

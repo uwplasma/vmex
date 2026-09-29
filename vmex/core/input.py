@@ -1013,7 +1013,9 @@ class VmecInput:
 
         return cls(
             lasym=bool(w.lasym), nfp=nfp, mpol=mpol, ntor=ntor,
-            ns_array=[ns], phiedge=float(np.asarray(w.phi)[-1]), gamma=0.0,
+            ns_array=[ns], ftol_array=[float(w.ftolv) if w.ftolv > 0 else 1e-10],
+            niter_array=[max(1000, int(w.niter))],
+            phiedge=float(np.asarray(w.phi)[-1]), gamma=0.0,
             ncurr=int(current_constrained), curtor=float(w.ctor),
             pcurr_type=w.pcurr_type, ac=w.ac,
             ac_aux_s=w.ac_aux_s, ac_aux_f=w.ac_aux_f,
