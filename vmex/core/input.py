@@ -980,9 +980,28 @@ class VmecInput:
                 if table is not None:
                     boundary[name][n + ntor, m] = np.asarray(table)[-1, col]
 
+        s_half = (np.arange(1, ns) - 0.5) / (ns - 1)
+
+        def solved_knots(half, full):
+            from scipy.interpolate import CubicSpline
+
+            x = np.r_[0.0, s_half, 1.0]
+            y = np.r_[full[0], half, full[-1]]
+            chosen = np.unique(np.rint(np.linspace(0, ns, min(ns + 1, 11)))
+                               .astype(int)).tolist()
+            for _ in range(min(ns + 1, 101) - len(chosen)):
+                error = np.abs(y - CubicSpline(x[chosen], y[chosen],
+                                               bc_type="natural")(x))
+                error[chosen] = 0.0
+                index = int(np.argmax(error))
+                if error[index] <= 1e-12 * max(1.0, np.max(np.abs(y))):
+                    break
+                chosen.append(index)
+                chosen.sort()
+            return x[chosen], y[chosen]
+
         # The pressure presets are an input echo.  Recover their missing
         # amplitude only if they reproduce the output half-mesh pressure.
-        s_half = (np.arange(1, ns) - 0.5) / (ns - 1)
         observed = np.asarray(w.pres, dtype=float)[1:]
         try:
             raw = np.asarray(profiles.pressure(
@@ -1001,10 +1020,9 @@ class VmecInput:
         if (not pressure_kind_supported or not np.isfinite(scale) or scale < 0
                 or np.max(np.abs(scale * raw - observed)) >
                 1e-5 * max(1.0, np.max(np.abs(observed)))):
-            indices = np.unique(np.rint(np.linspace(0, ns - 1, min(ns, 101))).astype(int))
+            knots, values = solved_knots(observed, np.asarray(w.presf, dtype=float))
             pressure = dict(pmass_type="cubic_spline",
-                            am_aux_s=indices / (ns - 1),
-                            am_aux_f=np.asarray(w.presf, dtype=float)[indices],
+                            am_aux_s=knots, am_aux_f=values,
                             pres_scale=1.0)
 
         try:
@@ -1026,9 +1044,9 @@ class VmecInput:
                                     and abs(float(w.ctor)) > 1e-6):
             # An external WOUT may have no usable current-profile echo.
             # Preserve its solved iota as the reproducible constraint.
-            indices = np.unique(np.rint(np.linspace(0, ns - 1, min(ns, 101))).astype(int))
-            iota = dict(piota_type="cubic_spline", ai_aux_s=indices / (ns - 1),
-                        ai_aux_f=np.asarray(w.iotaf, dtype=float)[indices])
+            knots, values = solved_knots(output_iota, np.asarray(w.iotaf, dtype=float))
+            iota = dict(piota_type="cubic_spline", ai_aux_s=knots,
+                        ai_aux_f=values)
             current_constrained = False
 
         return cls(

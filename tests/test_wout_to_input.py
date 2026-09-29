@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from vmex.core.cli import main
+from vmex.core import profiles
 from vmex.core.input import VmecInput
 from vmex.core.wout import read_wout, write_wout
 from tests.conftest import resolve_golden_dir
@@ -102,10 +103,29 @@ def test_fallback_profiles_use_solved_values():
     deck = VmecInput.from_wout(wout)
     assert deck.pmass_type == "cubic_spline"
     assert deck.piota_type == "cubic_spline"
-    assert deck.pcurr_type == "power_series"
     assert deck.ncurr == 0
-    np.testing.assert_allclose(deck.am_aux_f, pressure)
-    np.testing.assert_allclose(deck.ai_aux_f, wout.iotaf)
+    half = (np.arange(1, base.ns) - 0.5) / (base.ns - 1)
+    np.testing.assert_allclose(profiles.pressure(
+        deck.pmass_type, deck.am, deck.am_aux_s, deck.am_aux_f, half),
+        wout.pres[1:], rtol=1e-10, atol=1e-10)
+    np.testing.assert_allclose(profiles.iota(
+        deck.piota_type, deck.ai, deck.ai_aux_s, deck.ai_aux_f, half),
+        wout.iotas[1:], rtol=1e-10, atol=1e-10)
+
+
+def test_sharp_pressure_fallback_preserves_half_mesh():
+    base = read_wout(_golden("DSHAPE"))
+    full = np.linspace(0, 1, base.ns)
+    half = (np.arange(1, base.ns) - 0.5) / (base.ns - 1)
+    def pedestal(s):
+        return 1e4 * (1 - np.tanh((s - 0.8) / 0.003)) / 2
+    wout = replace(base, pmass_type="unavailable", presf=pedestal(full),
+                   pres=np.r_[0, pedestal(half)])
+    deck = VmecInput.from_wout(wout)
+    solved = profiles.pressure(deck.pmass_type, deck.am, deck.am_aux_s,
+                               deck.am_aux_f, half)
+    np.testing.assert_allclose(solved, wout.pres[1:], rtol=0, atol=1e-2)
+    assert len(deck.am_aux_s) <= 101
 
 
 @pytest.mark.parametrize("kind", ["", "unavailable"])
@@ -116,6 +136,7 @@ def test_missing_profile_metadata_uses_solved_profiles(kind, tmp_path):
     deck = VmecInput.from_wout(wout)
     assert deck.pmass_type == ("power_series" if not kind else "cubic_spline")
     assert deck.piota_type == "cubic_spline"
+    assert deck.pcurr_type == "power_series"
     assert deck.ncurr == 0
     assert VmecInput.from_file(deck.to_indata(tmp_path / "input.legacy")) == deck
 
