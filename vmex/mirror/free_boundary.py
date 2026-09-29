@@ -7,6 +7,7 @@ Also the one-call drivers :func:`solve_mirror` and
 
 from __future__ import annotations
 
+import time
 import functools
 from dataclasses import dataclass, fields
 from typing import Any, Callable
@@ -967,8 +968,11 @@ def solve_beta_scan(
     exterior_spectral_side_density: bool = False,
     pressure_shape: Array | None = None,
     device: Any = AUTO,
+    verbose: bool = False,
 ) -> tuple[FreeBoundaryMirrorResult, ...]:
     """Continue one free-boundary state through beta on one selected device.
+
+    ``verbose`` prints one progress line per solved beta point.
 
     ``pressure_shape`` is ``p(s)/p(0)`` on the ``ns`` surfaces (default
     ``1 - s``); each beta sets the central pressure ``beta * B_ref**2/(2 mu0)``.
@@ -1009,6 +1013,7 @@ def solve_beta_scan(
                 exterior_spectral_side_density=exterior_spectral_side_density,
                 pressure_shape=pressure_shape,
                 device=None,
+                verbose=verbose,
             )
 
     beta_values = np.asarray(beta_values, dtype=float)
@@ -1048,7 +1053,8 @@ def solve_beta_scan(
     state = reference_coefficients if initial_restart is None else initial_restart.plasma_state
     mass_scale = 1.0 if initial_restart is None else initial_restart.mass_scale
     results = []
-    for beta in beta_values:
+    for index, beta in enumerate(beta_values):
+        started = time.perf_counter()
         central_pressure = float(beta) * float(reference_field) ** 2 / (2.0 * MU0)
         mass = mass_profile_from_pressure(
             central_pressure * pressure_shape,
@@ -1079,6 +1085,10 @@ def solve_beta_scan(
             if abs(achieved_beta - float(beta)) / float(beta) > beta_rtol:
                 raise RuntimeError(f"central beta did not reach rtol={beta_rtol:.3e}")
         results.append(result)
+        if verbose:
+            print(f"  beta point {index + 1}/{beta_values.size}: beta = {beta:.1%}, "
+                  f"{int(result.iterations)} iterations, "
+                  f"{time.perf_counter() - started:.1f} s", flush=True)
         boundary = result.coefficient_boundary
         state = result.coefficient_state
         mass_scale = float(result.mass_scale)
@@ -1261,6 +1271,7 @@ def solve_mirror_beta_scan(
     external_field: Any = None,
     initial_restart: FreeBoundaryRestart | None = None,
     device: Any = AUTO,
+    verbose: bool = False,
 ) -> tuple[MirrorSolution, ...]:
     """Continue a free-boundary :class:`~vmex.mirror.MirrorInput` through central beta.
 
@@ -1268,7 +1279,7 @@ def solve_mirror_beta_scan(
     ``xyz -> B`` callable, ESSOS or SIMSOPT field, or ``MgridField``) is
     given. ``B_ref`` is the vacuum on-axis field at the domain centre and the
     pressure shape is ``inp.am``. ``betas=None`` solves vacuum and then the
-    central beta of ``inp.pres_scale``.
+    central beta of ``inp.pres_scale``. ``verbose`` prints per-point progress.
     """
 
     from .analytic import CircularCoils
@@ -1311,6 +1322,7 @@ def solve_mirror_beta_scan(
         exterior_spectral_side_density=True,
         pressure_shape=shape,
         device=device,
+        verbose=verbose,
     )
     coil_xyz = np.asarray(field.xyz()) if isinstance(field, CircularCoils) else None
     return tuple(

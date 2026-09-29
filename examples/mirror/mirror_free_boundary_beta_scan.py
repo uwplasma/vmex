@@ -131,7 +131,7 @@ restart = None
 if RESTART_FROM is not None:
     discretization = SplineMirrorDiscretization.build_cgl(inp.config, elements=SPLINE_ELEMENTS)
     restart = load_free_boundary_restart(RESTART_FROM, discretization)
-solutions = solve_mirror_beta_scan(inp, BETAS, initial_restart=restart)
+solutions = solve_mirror_beta_scan(inp, BETAS, initial_restart=restart, verbose=True)
 results = [solution.result for solution in solutions]
 grid = solutions[0].discretization.grid
 vacuum_axis_field = np.asarray(coils.axis_field(grid.z))
