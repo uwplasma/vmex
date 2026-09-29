@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from vmex import VmecInput, read_wout
 
 pytest.importorskip("jax")
 pytest.importorskip("netCDF4")
@@ -452,9 +453,22 @@ def test_force_balance_polishing_example(tmp_path):
         assert np.isfinite([initial, final]).all() and 0 <= final < initial, (
             f"the polish must lower the reported {label}: {out}")
     outdir = tmp_path / "output_force_balance_polishing"
-    for name in ("wout_shaped_tokamak_before_polish.nc",
-                 "wout_shaped_tokamak_pressure.nc"):
-        assert (outdir / name).exists()
+    before, after = (read_wout(outdir / name) for name in
+                     ("wout_shaped_tokamak_before_polish.nc",
+                      "wout_shaped_tokamak_pressure.nc"))
+    assert (before.ns, before.mpol, before.ntor) == (after.ns, after.mpol, after.ntor)
+    assert np.array_equal(before.xm, after.xm) and np.array_equal(before.xn, after.xn)
+    assert np.array_equal(before.rmnc[-1], after.rmnc[-1])
+    assert not np.array_equal(before.rmnc[1:-1], after.rmnc[1:-1])
+    source = VmecInput.from_file(DATA_DIR / "input.shaped_tokamak_pressure")
+    for wout in (before, after):
+        recovered = VmecInput.from_wout(wout)
+        assert (recovered.ns_array, recovered.mpol, recovered.ntor) == ([wout.ns], wout.mpol, wout.ntor)
+        assert recovered.ncurr == source.ncurr
+        assert recovered.pres_scale == source.pres_scale
+        assert np.allclose(recovered.am, source.am)
+        assert np.allclose(recovered.ai, source.ai)
+        assert np.allclose(recovered.ac, source.ac)
     # the fair comparison: both files on one mesh, certified the same way; the
     # near-axis error is where the polish gain lives
     assert re.search(r"both WOUT files on ns = \d+, read back and certified the same way", out), out

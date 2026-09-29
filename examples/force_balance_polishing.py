@@ -19,12 +19,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import vmex as vj
 from vmex.core.polish import polished_wout_input, polished_wout_state
+from vmex.core.strong_force import append_high_order_state_modes
 
 # Input deck: fixed-boundary, axisymmetric, prescribed pressure and iota.
-INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.shaped_tokamak_pressure"
+INPUT_FILE = Path(os.environ.get(
+    "VMEX_POLISH_INPUT", Path(__file__).resolve().parent / "data" / "input.shaped_tokamak_pressure"))
 
 # Directory that receives every output file:
-OUTPUT_DIR = Path("output_force_balance_polishing")
+OUTPUT_DIR = Path(os.environ.get("VMEX_POLISH_OUTPUT_DIR", "output_force_balance_polishing"))
 BEFORE_NAME = "shaped_tokamak_before_polish"
 FIGURES = Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
 if os.environ.get("VMEX_EXAMPLES_CI") == "1":
@@ -78,11 +80,16 @@ run = dict(fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.f
 legacy = vj.high_order_state_from_wout(vj.wout_from_state(inp=inp, state=result.state, **run), inp=inp)
 polished_path = OUTPUT_DIR / f"wout_{INPUT_FILE.name.removeprefix('input.')}.nc"
 ns = int(vj.read_wout(polished_path).ns)
+polished_inp = polished_wout_input(native, inp)
+old_modes = set(zip(np.asarray(legacy.m), np.asarray(legacy.n)))
+new_modes = [(m, n) for m, n in zip(native.m, native.n) if (m, n) not in old_modes]
+if new_modes:
+    legacy = append_high_order_state_modes(legacy, *np.asarray(new_modes).T)
 legacy_path = vj.write_wout(
     OUTPUT_DIR / f"wout_{BEFORE_NAME}.nc",
-    vj.wout_from_state(inp=inp, state=polished_wout_state(legacy, inp, solve_ns=ns), **run),
+    vj.wout_from_state(inp=polished_inp, state=polished_wout_state(legacy, polished_inp, solve_ns=ns), **run),
 )
-files = {"VMEC solve": (legacy_path, inp), "polished": (polished_path, polished_wout_input(native, inp))}
+files = {"VMEC solve": (legacy_path, polished_inp), "polished": (polished_path, polished_inp)}
 certificates = {
     label: vj.certify_strong_force(
         vj.high_order_state_from_wout(path, inp=deck, radial_basis=native.radial_basis))
