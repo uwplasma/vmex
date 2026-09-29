@@ -102,104 +102,86 @@ Next to the input (or in `--outdir`):
 - `*_trace_3d.png` shows the loss locations on the 3-D boundary, coloured by
   loss time.
 
-## Cost
+## Cost and mode-cut accuracy
 
-On an Apple M3 Max laptop (10 performance cores, load average 6-9), the
-default ARIES-CS run (`wout_n3are_R7.75B5.7.nc`, 1000 alphas, 10 ms, 41
-Boozer modes) takes 28 s: 25 s of tracing, of which 1.9 s is compilation.
-It loses 12.3 % ± 1.0 %. The defaults are now 500 alphas (± 1.5 %) and a
-mode cut of 1e-4 (see the convergence section). `--trace` gives JAX one CPU
-device per usable core (on Linux, the cores the process may run on). On Apple
-silicon it uses only the performance cores unless there are at least as many
-efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
-performance cores. A device count in `XLA_FLAGS` or `JAX_NUM_CPU_DEVICES`
-wins. The Boozer transform takes about 2 s.
+Tracing cost grows with the number of particles, integration steps and retained
+Boozer modes. CPU/GPU crossover depends on hardware, device count and the
+number of saved orbit states; benchmark the intended workload. The ESSOS
+compiled-kernel change in [PR #95](https://github.com/uwplasma/ESSOS/pull/95)
+removes recompilation on repeated calls and improves the matched GTX TITAN X
+GPU workload by about 17%.
 
-**CPU or GPU.** At the default size a laptop CPU is faster than a GPU. The
-CPU cost grows linearly with the number of alphas. An RTX A4000 took 70-130 s
-at any count from 250 to 8000 alphas (1e-3 cut): the 80 000 RK4 steps run one
-after another, and each step is too little work to fill the GPU. It beat the
-M4 only from about 4000 alphas (89 s against 193 s). Use a GPU for
-`--trace-particles 5000` and up.
+The VMEC toroidal-flux sign was corrected in [VMEX PR #517](https://github.com/uwplasma/vmex/pull/517).
+Older loss tables and figures made with the opposite sign are withdrawn:
+conserved energy and a plausible total loss fraction did not reveal the
+reversed radial drift. The current default cut is `1e-4`. The
+[34-equilibrium spectral audit](../explanation/validation.md) compares all
+seven requested cuts on three surfaces per equilibrium; angular and radial
+field derivatives deteriorate much faster than `|B|` itself.
 
-## Convergence of the defaults
+On the corrected Landreman-Paul QA field, 1,000 common births at `s = 0.3`
+were traced for 10 ms on eight Apple M2 CPU devices. Times exclude transform
+and compilation and are medians of three warmed calls:
 
-These runs use ARIES-CS (`wout_n3are_R7.75B5.7.nc`) at reactor scale, with
-the same alphas launched from s = 0.25 and traced for 10 ms.
+| mode cut | modes | lost / 1000 | labels matching `1e-4` | trace [s] |
+|---|---:|---:|---:|---:|
+| `1e-4` | 16 | 16 | 100% | 34.74 |
+| `2e-4` | 7 | 14 | 99.60% | 23.45 |
+| `3e-4` | 3 | 6 | 99.00% | 9.13 |
+| `5e-4` | 3 | 6 | 99.00% | 9.08 |
+| `6e-4` | 3 | 6 | 99.00% | 10.08 |
+| `8e-4` | 3 | 6 | 99.00% | 10.24 |
+| `1e-3` | 3 | 6 | 99.00% | 9.34 |
 
-| alphas | step [s] | mode cut | modes | lost | vs reference (σ) |
-|---|---|---|---|---|---|
-| 4000 | 6.25e-8 | 1e-4 | 135 | 501 (12.5 %) | reference |
-| 4000 | 1.25e-7 | 1e-3 | 41 | 489 (12.2 %) | -0.6 |
-| 4000 | 2.5e-7 | 1e-3 | 41 | 501 | 0.0 |
-| 1000 | 6.25e-8 | 1e-4 | 135 | 121 | reference |
-| 1000 | 6.25e-8 | 1e-5 | 382 | 131 | +1.0 |
-| 1000 | 1.25e-7 | 1e-4 | 135 | 115 | -0.6 |
-| 1000 | 1.25e-7 | 1e-3 | 41 | 125 | +0.4 |
-| 1000 | 2.5e-7 | 1e-3 | 41 | 132 | +1.1 |
+The last five cuts retain the same three modes; their time differences are
+measurement noise. The 99% overall label agreement at `3e-4` hides ten
+missing losses out of 16. On ARIES-CS, `2e-4` changes 31 of 512 labels over
+2 ms relative to `1e-4`. Thus there is no geometry-independent faster cut:
+converge the timestep, inspect energy, and check individual labels on the
+intended equilibrium before relaxing `--trace-mode-cut`.
 
-Halving the default step (and refining the mode cut tenfold) changes the
-loss fraction by 0.6σ at 4000 alphas. That is within the 1σ gate G4 of plan
-section T. So is refining the cut a further hundredfold at 1000 alphas. At
-2.5e-7 s the loss fraction still agrees, but the RK4 energy error grows from
-1e-3 to 2e-2, so the default keeps 1.25e-7 s. The per-particle
-lost/confined labels agree only 90-92 % between any two of these runs.
-Over 10 ms these orbits are chaotic, so the fraction converges while
-individual orbits do not. Over 2 ms, 2000 alphas give 54 and 55 losses at
-6.25e-8 s and 3.125e-8 s, 2.7 %. The earlier VMEC-coordinate tracer gave
-2.5 % ± 1.1 % at its converged step.
+## Cross-code orbit checks
 
-### The mode cut across geometries
+The earlier 1,000-particle ARIES-CS comparison with SIMPLE and SIMSOPT used
+the wrong sign for VMEC toroidal flux in the Boozer guiding-centre equations.
+Its ESSOS loss counts, speed ratios, JSON record and plots are withdrawn.
+[`benchmarks/trace_cross_code.py`](../../benchmarks/trace_cross_code.py) remains
+available for a corrected same-birth rerun with those codes.
 
-ARIES-CS alone does not settle the cut. These runs trace 1000 alphas for
-10 ms through six equilibria at cuts of 1e-3 and 1e-4, with the same births
-at both. The cut is relative to the largest `|B|` amplitude, which is `B00` in
-every case.
+The current check uses a nonoptimized NFP=2 vacuum VMEX seed at reactor scale,
+`ns=31`, `mpol=5`, `ntor=5`. The 1,024 births are the same in each tracer:
+64 Boozer births from RNG seed 42 and 960 from seed 43, all at
+`s=0.283333`, with the same pitch and 3.52 MeV energy. They are traced for
+2 ms. On the 64-birth subset, ESSOS, FIRM3D CPU, CATAPULT GPU and DESC
+classify the same 55 particles as lost. Boozer-to-VMEC birth mapping agrees
+within 0.5 mm in `R` and `Z`; the DESC equilibrium fit differs by up to
+0.4% in `|B|` at those births. DESC (vacuum guiding centre, adaptive, `1e-6`
+tolerance) takes 32.46 s warmed for those 64 births on an Apple M2 with
+endpoint output. ESSOS takes about 1.55 s on that M2 with 101 saved states;
+these output policies differ.
 
-| equilibrium | modes at 1e-3 / 1e-4 | lost at 1e-3 / 1e-4 | difference | same label |
-|---|---|---|---|---|
-| ARIES-CS | 41 / 135 | 12.3 / 12.3 % | 0.0σ | 91 % |
-| Landreman-Paul QA | 3 / 16 | **0.0 / 0.7 %** | **-2.7σ** | 99 % |
-| Landreman-Paul QH | 4 / 14 | 0.0 / 0.0 % | | 100 % |
-| HSX | 40 / 159 | **9.6 / 12.7 %** | **-2.2σ** | 86 % |
-| W7-X (d23p4_tm, beta 5 %) | 29 / 78 | 1.9 / 2.1 % | -0.3σ | 99 % |
-| QI, 2 field periods | 30 / 172 | 3.2 / 2.9 % | +0.4σ | 98 % |
+The larger GPU comparison uses 101 saved states on a single GTX TITAN X.
+ESSOS retains 12 Boozer modes at cut `1e-4` and takes 16,000 fixed RK4 steps
+(`dt=1.25e-7 s`). CATAPULT uses a 25-point tricubic field and adaptive DP5
+at tolerance `1e-10`. Times are warmed and exclude field setup and JIT:
 
-A cut of 1e-3 misses the losses in the precise QA and in HSX. A good
-quasisymmetric field has all of its symmetry-breaking modes below `1e-3 B00`,
-and those are the modes that lose alphas. At 1e-5, Landreman-Paul QA still
-loses 0.7 % (96 modes) and HSX 12.0 % (342 modes, within 1σ of 1e-4). The
-default is therefore 1e-4, which takes about 3 times as long as 1e-3 on
-ARIES-CS. `--trace-mode-cut 1e-3` is a quick look for configurations far from
-quasisymmetry.
+| tracer | lost / 1,024 | labels matching ESSOS | trace [s] | maximum confined-orbit energy drift |
+|---|---:|---:|---:|---:|
+| ESSOS Boozer, [kernel PR #95](https://github.com/uwplasma/ESSOS/pull/95) | 795 | 1,024 | 15.17 | 2.08e-6 |
+| CATAPULT, released radial interpolant | 802 | 1,017 | 4.88 | 7.84e-3 |
+| CATAPULT, experimental axis regularization | 795 | 1,024 | 4.75 | 3.54e-4 |
 
-### Intermediate cuts and field derivatives
-
-A 34-equilibrium audit measured all seven cuts from 1e-4 to 1e-3. The [full table and protocol](../explanation/validation.md) show that radial and angular derivatives degrade faster than `|B|` itself; 1e-4 remains the general default. Use `benchmarks/trace_mode_cut.py` to test a different cutoff on a specific equilibrium.
-
-## Against SIMPLE and SIMSOPT
-
-`benchmarks/trace_cross_code.py` traces the same 1000 alphas with three
-codes. The equilibrium is ARIES-CS (`wout_n3are_R7.75B5.7.nc`, unscaled).
-The alphas are born on s = 0.247 with the `--trace` births, and all three
-codes get the same positions, pitches and 3.52 MeV energy. Each code runs
-for 10 ms on the same 8 cores (`taskset`) of a shared 36-core x86_64
-workstation, under a load average of 28-50 from other jobs. The runtime
-leaves out JAX compilation (35 s), the field set-up of SIMPLE and the
-interpolation tables of SIMSOPT.
-
-| code | integrator | lost | loss fraction | runtime |
-|---|---|---|---|---|
-| VMEX `--trace` (ESSOS Boozer) | RK4, 1.25e-7 s | 128 | 12.8 % ± 1.1 % | 146 s |
-| SIMPLE | symplectic Euler, defaults, all orbits traced | 124 | 12.4 % ± 1.0 % | 556 s |
-| SIMSOPT `trace_particles_boozer` | RK45, tol 1e-9, `gc_noK` | 119 | 11.9 % ± 1.0 % | 1079 s |
-
-The three loss fractions agree within 0.6σ. SIMSOPT uses a `booz_xform`
-field with the same 32 × 32 resolution. SIMPLE reads its starts in VMEC
-angles. The Boozer births are mapped with `nu` and `lambda`, and the
-mapping agrees to 0.13 mm in `R, Z` and 0.2 % in SIMPLE's own `|B|`.
-`docs/_static/figures/sources/make_trace_figures.py` plots the record
-(`benchmarks/trace_cross_code.json`).
+All seven released-CATAPULT disagreements pass close to the axis (`s<0.03`).
+Its Boozer radial interpolation gives a nonzero `m=1` magnetic-field
+harmonic on the axis. Zeroing all `m>0` axis coefficients and using the same
+spline's derivative for `dB/ds` removes those seven losses and sharply
+reduces Hamiltonian drift. The regularization is experimental until reviewed
+upstream. A DESC run independently confines those seven births through
+0.2 ms. On a re-solved `ns=101` equilibrium, ESSOS and regularized FIRM3D
+both lose the same one of the seven; unmodified FIRM3D loses two. This
+resolution check matters because axis crossings are sensitive to sparse
+radial data. The [ESSOS README](https://github.com/uwplasma/ESSOS/pull/94)
+compares methods and features in more detail.
 
 ## From Python
 

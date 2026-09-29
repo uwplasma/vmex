@@ -326,7 +326,12 @@ def trace_alphas(
     wall = time.perf_counter() - start
     times = np.linspace(0.0, float(tmax), int(times_to_trace))
     lost = trace.loss_times >= 0
-    failed = ~np.isfinite(trace.states).all(axis=(1, 2)) & ~lost
+    failed = (~np.isfinite(trace.states).all(axis=(1, 2)) |
+              ~np.isfinite(trace.energy_error) |
+              np.asarray(getattr(trace, "failed", np.zeros(nparticles, dtype=bool))))
+    if failed.any():
+        raise ValueError(f"{failed.sum()} alpha trajectories failed; loss fraction is undefined. "
+                         "Reduce the timestep or inspect the field")
     loss_fractions = np.array([(trace.loss_times[lost] <= t).sum() for t in times]) / nparticles
     last = -1
     boundary = {key: np.asarray(getattr(bx, key))[:, last] for key in ("rmnc_b", "zmns_b", "numns_b")}

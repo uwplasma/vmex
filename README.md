@@ -135,27 +135,32 @@ vmex wout_my_case.nc --to-input    # writes input.my_case
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
 by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
-10 ms in Boozer coordinates (under a minute on 10 CPU cores, faster than a GPU at this size). It writes the loss fraction and a figure set:
+10 ms in Boozer coordinates. It writes the loss fraction and a figure set:
 loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
 `--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
 birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 ([guide](docs/howto/trace-alpha-particles.md)).
 
-![vmex --trace output: loss against time, loss map, pitch and loss-time distributions, iota](docs/_static/figures/readme_trace_output.webp)
+**Cross-code alpha tracing.** After correcting VMEC's toroidal-flux sign
+([PR #517](https://github.com/uwplasma/vmex/pull/517)), ESSOS, CATAPULT and
+DESC agree on all 64 lost/confined labels in a common-birth, 2 ms reactor-scale
+NFP=2 vacuum case (55 lost). On 1,024 births, ESSOS and an experimental
+axis-regularized CATAPULT field agree on all labels (795 lost). Both GPU rows
+below use the same GTX TITAN X, 101 saved states, and exclude field setup and
+compilation; the methods and field representations differ.
 
-**`--trace` against SIMPLE and SIMSOPT.** The same 1000 ARIES-CS alphas (positions, pitches, energy) were traced for 10 ms by each code on the same 8 CPU
-cores. Runtimes exclude compilation and field set-up ([benchmark](benchmarks/trace_cross_code.py),
-[details](docs/howto/trace-alpha-particles.md#against-simple-and-simsopt)). The loss fractions agree within 0.6σ.
+| tracer | lost / 1,024 | warm GPU time | maximum confined-orbit energy drift |
+|---|---:|---:|---:|
+| VMEX `--trace` / ESSOS Boozer RK4 | 795 | 15.17 s | 2.08e-6 |
+| CATAPULT, released radial interpolation | 802 | 4.88 s | 7.84e-3 |
+| CATAPULT, experimental axis regularization | 795 | 4.75 s | 3.54e-4 |
 
-| code | loss fraction | runtime |
-|---|---|---|
-| VMEX `--trace` | 12.8 % ± 1.1 % | 146 s |
-| [SIMPLE](https://github.com/itpplasma/SIMPLE) | 12.4 % ± 1.0 % | 556 s |
-| SIMSOPT | 11.9 % ± 1.0 % | 1079 s |
+The seven disagreements in released CATAPULT follow axis crossings; the
+experimental regularization removes them. [The tracing guide](docs/howto/trace-alpha-particles.md)
+explains the common births, energy checks, and limitations. Older SIMPLE and
+SIMSOPT numbers made with the incorrect flux sign are withdrawn pending a
+new matched run.
 
-![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT](docs/_static/figures/readme_trace_benchmark.webp)
-
-`--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
 `D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
 `vmex examples/data/input.nfp2_QA_finite_beta --plot` and `vmex examples/data/input.nfp4_QI_finite_beta --plot`.

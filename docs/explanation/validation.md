@@ -344,65 +344,50 @@ Boozer angles using the *same radial spline* as ESSOS, rather than a comparison
 of Fourier amplitudes alone. The angular-gradient norm includes both poloidal
 and toroidal derivatives.
 
-| mode cut | median modes | median `|B|` error | median radial derivative error | median angular-gradient error | worst angular-gradient error | ARIES trace [s] | ARIES lost / 512 |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| 1e-4 | 116 | 0.0096% | 0.41% | 1.24% | 6.6% | 15.5 | 23 |
-| 2e-4 | 90 | 0.0188% | 0.81% | 2.32% | 12.6% | 12.0 | 26 |
-| 3e-4 | 73 | 0.0309% | 1.13% | 3.34% | 16.0% | 9.9 | 21 |
-| 5e-4 | 58 | 0.0524% | 1.62% | 5.02% | 22.0% | 12.9 | 26 |
-| 6e-4 | 53 | 0.0585% | 1.81% | 5.69% | 24.4% | 12.8 | 26 |
-| 8e-4 | 45 | 0.0778% | 2.26% | 6.91% | 27.3% | 10.9 | 26 |
-| 1e-3 | 37 | 0.1022% | 2.61% | 7.75% | 30.2% | 9.4 | 23 |
+| mode cut | median modes | median `|B|` error | median radial derivative error | median angular-gradient error | worst angular-gradient error | ARIES modes | ARIES lost / 512 | matching labels |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1e-4 | 116 | 0.0096% | 0.41% | 1.24% | 6.6% | 118 | 18 | 100% |
+| 2e-4 | 90 | 0.0188% | 0.81% | 2.32% | 12.6% | 89 | 27 | 93.95% |
+| 3e-4 | 73 | 0.0309% | 1.13% | 3.34% | 16.0% | 71 | 17 | 96.29% |
+| 5e-4 | 58 | 0.0524% | 1.62% | 5.02% | 22.0% | 55 | 26 | 94.14% |
+| 6e-4 | 53 | 0.0585% | 1.81% | 5.69% | 24.4% | 55 | 26 | 94.14% |
+| 8e-4 | 45 | 0.0778% | 2.26% | 6.91% | 27.3% | 46 | 30 | 94.14% |
+| 1e-3 | 37 | 0.1022% | 2.61% | 7.75% | 30.2% | 39 | 21 | 94.73% |
 
 The timed ARIES-CS row uses 512 common births drawn from the `1e-5` field at
 `s = 0.3`, 2 ms, a nominal
-`1.25e-7 s` step, 20 saved times and eight CPU devices on an Apple M2. Times
-are medians of three warmed traces after one compile per cut; transform and
-compilation are excluded. Equal mode counts at 5e-4 and 6e-4 mean the same
-field. Measured time is not strictly monotone in mode count because compiled
-array shapes and system load matter. The 21–26 losses at 2 ms are within
-sampling noise; this short run cannot validate a rare-loss configuration.
+`1.25e-7 s` step, 20 saved times and eight CPU devices on an Apple M2, with
+the corrected VMEC flux sign. The host was contended during this timing run:
+the identical 55-mode fields at 5e-4 and 6e-4 had different median times
+(26.51 and 23.25 s). Those times are not a speed ranking. More importantly,
+even 2e-4 changes 31 of 512 individual lost/confined labels relative to
+1e-4; a similar total loss count does not imply the same orbits. The short
+2 ms horizon cannot validate a rare-loss configuration.
 Across the 34 cases, angular and radial derivatives deteriorate much faster
 than `|B|` itself. Thus the existing `1e-4` default remains the dependable
 general choice; an intermediate cut may be useful after checking losses on
 the particular field.
 
-The precise Landreman-Paul QA field is a useful rare-loss check. With the
-same 1,000 births at `s = 0.3` over 10 ms, `2e-4` retains every lost/confined
-label from `1e-4` while running 2.7× faster. At `3e-4`, the retained spectrum
-falls to three modes and five particles change label; larger cuts retain that
-same three-mode field. These are one warmed timing per cut on the Apple M2.
+The precise Landreman-Paul QA field is a rare-loss check. The same 1,000
+births at `s = 0.3` were followed for 10 ms at all seven cuts, with the
+corrected VMEC flux sign. Times are medians of three warmed traces on eight
+Apple M2 CPU devices; field construction and JIT compilation are excluded.
+The 3e-4 and larger cuts retain the same three modes. Their 99% overall
+label agreement hides a 62.5% loss-count reduction (16 to 6).
 
 | mode cut | QA modes | QA lost / 1000 | labels matching 1e-4 | QA trace [s] |
 |---|---:|---:|---:|---:|
-| 1e-4 | 16 | 14 | 100% | 47.9 |
-| 2e-4 | 7 | 14 | 100% | 17.9 |
-| 3e-4 | 3 | 9 | 99.5% | 9.3 |
-| 5e-4 | 3 | 9 | 99.5% | 9.4 |
-| 6e-4 | 3 | 9 | 99.5% | 9.7 |
-| 8e-4 | 3 | 9 | 99.5% | 9.4 |
-| 1e-3 | 3 | 9 | 99.5% | 9.5 |
+| 1e-4 | 16 | 16 | 100% | 34.74 |
+| 2e-4 | 7 | 14 | 99.60% | 23.45 |
+| 3e-4 | 3 | 6 | 99.00% | 9.13 |
+| 5e-4 | 3 | 6 | 99.00% | 9.08 |
+| 6e-4 | 3 | 6 | 99.00% | 10.08 |
+| 8e-4 | 3 | 6 | 99.00% | 10.24 |
+| 1e-3 | 3 | 6 | 99.00% | 9.34 |
 
-HSX (`QHS_vac`) was also run on 500 common births at `s = 0.3` for 5 ms,
-with one warmed timing per cut. Its field has more modes and the loss labels
-are more sensitive to truncation:
-
-| mode cut | HSX modes | lost / 500 | labels matching 1e-4 | trace [s] |
-|---|---:|---:|---:|---:|
-| 1e-4 | 157 | 91 | 100% | 52.7 |
-| 2e-4 | 118 | 96 | 91.0% | 70.4 |
-| 3e-4 | 102 | 92 | 91.8% | 41.9 |
-| 5e-4 | 75 | 101 | 91.6% | 32.2 |
-| 6e-4 | 64 | 104 | 92.2% | 47.9 |
-| 8e-4 | 50 | 83 | 92.8% | 34.7 |
-| 1e-3 | 42 | 83 | 91.6% | 33.3 |
-
-**HSX accuracy limit:** at the nominal `1.25e-7 s` step, the maximum
-collisionless energy error was 5.39% (median among confined particles 2.87%).
-Halving the step reduced the maximum to 0.26% and changed the 1e-4 loss count
-from 91 to 83. These HSX orbit counts therefore screen cut sensitivity but
-are not a converged loss reference. Converge the time step on the intended
-field before judging a mode cut from losses.
+The earlier HSX orbit table used the incorrect VMEC flux sign and is withdrawn.
+Converge the timestep and check energy on the intended field before judging a
+mode cut from its losses.
 
 To reproduce the spectral table after checking out or merging PR #514, run
 `python benchmarks/trace_mode_cut.py PATH_TO_VMEC_EQUILIBRIA examples/data
@@ -413,8 +398,8 @@ The script records each equilibrium, surface, cut, mode count and error in
 JSON. The orbit option uses fixed births and reports losses, label agreement,
 energy error and compile and warm times for all seven cuts.
 For the QA table, pass its WOUT alone with `--particles 1000 --tmax 0.01
---devices 8 --repeats 1 --save-times 101`.
-For the HSX time-step check use its WOUT with `--particles 500 --tmax 0.005
+--devices 8 --repeats 3 --save-times 101`.
+For an HSX time-step check use its WOUT with `--particles 500 --tmax 0.005
 --devices 8 --orbit-cuts 1e-4 --step-factor 0.5`.
 
 **Where tracing time goes.** ESSOS evaluates the Boozer `|B|` series and its

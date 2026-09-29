@@ -91,10 +91,15 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
             start = time.perf_counter()
             out = trace_boozer(field, *births.T, **kw)
             timings.append(time.perf_counter() - start)
+        failed = (np.asarray(getattr(out, "failed", np.zeros(particles, dtype=bool))) |
+                  ~np.isfinite(out.states).all(axis=(1, 2)) |
+                  ~np.isfinite(out.energy_error))
+        if failed.any():
+            raise ValueError(f"{failed.sum()} alpha trajectories failed at cut {cut:g}; reduce timestep")
         lost = out.loss_times >= 0
         labels[cut] = lost
         results[str(cut)] = {"modes": int(field.xm.size), "lost": int(lost.sum()),
-                             "fraction": float(lost.mean()), "failed": int((~np.isfinite(out.states).all(axis=(1, 2)) & ~lost).sum()),
+                             "fraction": float(lost.mean()), "failed": 0,
                              "max_energy_error": float(np.max(out.energy_error)),
                              "trace_s": float(np.median(timings)), "cold_s": cold_s,
                              "timings_s": timings}

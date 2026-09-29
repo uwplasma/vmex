@@ -157,6 +157,26 @@ def test_vmec_flux_sign_gives_the_boozer_radial_drift(solovev_wout):
     assert actual_sdot == pytest.approx(expected_sdot, rel=1e-11)
 
 
+@pytest.mark.parametrize("failure_source", ["status", "energy"])
+def test_failed_orbit_cannot_produce_a_loss_fraction(solovev_wout, monkeypatch, failure_source):
+    from types import SimpleNamespace
+    import essos.boozer
+
+    def failed_trace(_field, s, *_angles, **_kwargs):
+        n = len(s)
+        data = dict(states=np.zeros((n, 2, 5)), loss_times=np.full(n, -1.0),
+                    thermalized_times=np.full(n, -1.0), energy_error=np.zeros(n))
+        if failure_source == "status":
+            data["failed"] = np.arange(n) == 0
+        else:
+            data["energy_error"][0] = np.nan
+        return SimpleNamespace(**data)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", failed_trace)
+    with pytest.raises(ValueError, match="loss fraction is undefined"):
+        trace_alphas(solovev_wout, **TRACE_KWARGS)
+
+
 def test_volume_births_follow_the_fusion_profile(solovev_wout):
     """Volume births peak in the core: <s> of the D-T source is well below 1/2."""
     from vmex.core.tracing import boozer_field, dt_reactivity, sample_births
