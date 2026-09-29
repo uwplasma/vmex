@@ -235,11 +235,13 @@ def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
         ze = rng.uniform(0.0, 2 * np.pi / field.nfp, m)
         B = np.asarray(modB(jnp.asarray(ss), jnp.asarray(th), jnp.asarray(ze)))
         iota, G, current = field.profiles(jnp.asarray(ss))[0].T
-        weight = np.asarray(G + iota * current) / B**2
+        weight = np.abs(np.asarray(G + iota * current)) / B**2
         if birth == "volume":
             weight = weight * (ne0 / 2 * (1 - ss**5)) ** 2 * dt_reactivity(T0_keV * (1 - ss))
         elif birth != "surface":
             raise ValueError(f"birth must be 'surface' or 'volume', got {birth!r}")
+        if not np.isfinite(weight).all() or weight.max() <= 0:
+            raise ValueError("birth density requires a positive finite Boozer volume measure")
         keep = rng.uniform(0.0, weight.max(), m) < weight
         out.append(np.stack([ss, th, ze, rng.uniform(-1.0, 1.0, m)], axis=1)[keep])
     return np.concatenate(out)[:n]

@@ -45,6 +45,48 @@ TRACE_KWARGS = dict(
 )
 
 
+def test_mode_cut_spectrum_uses_physical_boozer_angular_derivatives():
+    from types import SimpleNamespace
+
+    from benchmarks.trace_mode_cut import spectrum
+
+    s = np.array([0.04, 0.25, 0.64, 1.0])
+    bx = SimpleNamespace(s_b=s, xm_b=np.array([0, 0, 1]),
+                         xn_b=np.array([0, 1, 0]),
+                         bmnc_b=np.array([np.ones(4), np.full(4, 0.02),
+                                          5e-4 * np.sqrt(s)]))
+    cut = spectrum(bx)[0]["cuts"]
+    assert cut["0.0001"]["modes"] == 3
+    assert cut["0.001"]["modes"] == 2
+    expected = 2.5e-4 / np.hypot(0.02, 2.5e-4)
+    assert cut["0.001"]["angle_gradient_rms_rel"] == pytest.approx(expected)
+
+
+def test_cut_audit_scales_boozer_tables_without_retransform(solovev_wout, tmp_path):
+    from booz_xform_jax import Booz_xform
+    from essos.boozer import BoozerField
+
+    from benchmarks.trace_mode_cut import scaled_field
+    from vmex.core.scaling import scale_wout
+    from vmex.core.wout import write_wout
+
+    wout = read_wout(solovev_wout)
+    b, r = 2.3, 1.7
+    scaled_path = tmp_path / "wout_scaled.nc"
+    write_wout(scaled_path, scale_wout(wout, b_scale=b, r_scale=r))
+    bx = []
+    for path in (solovev_wout, scaled_path):
+        transform = Booz_xform(verbose=0, mboz=8, nboz=8)
+        transform.read_wout(str(path), flux=False)
+        transform.run()
+        bx.append(transform)
+    direct = scaled_field(bx[0], wout, b, r, 1e-4)
+    reference = BoozerField.from_booz_xform(
+        bx[1], float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), 1e-4)
+    np.testing.assert_allclose(direct.b_coef, reference.b_coef, rtol=1e-8, atol=5e-11)
+    np.testing.assert_allclose(direct.profile_coef, reference.profile_coef, rtol=1e-8, atol=5e-11)
+
+
 @pytest.fixture(scope="module")
 def solovev_wout(tmp_path_factory) -> Path:
     """One quiet CLI solve of the solovev deck, shared by the tests below."""
@@ -97,6 +139,24 @@ def test_volume_births_follow_the_fusion_profile(solovev_wout):
     with pytest.raises(ValueError, match="birth"):
         sample_births(field, 4, birth="line")
     assert dt_reactivity(10.0) == pytest.approx(1.136e-22, rel=2e-3)  # Bosch & Hale 1992
+
+
+def test_births_are_invariant_under_field_direction(solovev_wout):
+    import equinox as eqx
+
+    from vmex.core.tracing import boozer_field, sample_births
+
+    field, _ = boozer_field(read_wout(solovev_wout), mboz=8, nboz=8)
+    reversed_field = eqx.tree_at(
+        lambda f: f.profile_coef, field,
+        field.profile_coef.at[:, 1:, :].multiply(-1))
+    for birth in ("surface", "volume"):
+        np.testing.assert_array_equal(sample_births(field, 16, birth=birth, seed=7),
+                                      sample_births(reversed_field, 16, birth=birth, seed=7))
+    zero_field = eqx.tree_at(lambda f: f.profile_coef, field,
+                             field.profile_coef.at[:, 1:, :].set(0))
+    with pytest.raises(ValueError, match="positive finite"):
+        sample_births(zero_field, 16)
 
 
 def test_essos_field_handoff_matches_the_file_route(solovev_wout):

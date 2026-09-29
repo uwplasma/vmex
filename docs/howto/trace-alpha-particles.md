@@ -68,7 +68,7 @@ s = 0.3 lost within 0.2 s.
   `sqrt(s) (cos theta, sin theta)`, which is regular on the magnetic axis, so
   no orbit stops there. An alpha is lost when it reaches `s = 1`.
 - **Births.** Pitch `v_par / v` is uniform in `[-1, 1)`. The angles follow
-  the Boozer Jacobian `(G + iota I) / B^2`. With `--trace-birth volume`, `s`
+  the positive Boozer volume measure `|G + iota I| / B^2`. With `--trace-birth volume`, `s`
   follows the D-T rate `n_D n_T <sigma v>(T)`, weighted by the volume
   element (Bosch-Hale reactivity).
 - **Profiles** (volume births and `--collisional`; Landreman, Buller &
@@ -173,6 +173,10 @@ default is therefore 1e-4, which takes about 3 times as long as 1e-3 on
 ARIES-CS. `--trace-mode-cut 1e-3` is a quick look for configurations far from
 quasisymmetry.
 
+### Intermediate cuts and field derivatives
+
+A 34-equilibrium audit measured all seven cuts from 1e-4 to 1e-3. The [full table and protocol](../explanation/validation.md#alpha-tracing-mode-cut-and-field-derivatives) show that radial and angular derivatives degrade faster than `|B|` itself; 1e-4 remains the general default. Use `benchmarks/trace_mode_cut.py` to test a different cutoff on a specific equilibrium.
+
 ## Against SIMPLE and SIMSOPT
 
 `benchmarks/trace_cross_code.py` traces the same 1000 alphas with three
@@ -211,5 +215,5 @@ vj.plot_tracing(result, "figs", name="case")
 `trace_alphas` accepts a path or an in-memory
 {class}`~vmex.core.wout.WoutData` and returns an
 {class}`~vmex.core.tracing.AlphaTracingResult`. The exact loss fraction is
-piecewise constant in the boundary, so use it to certify a design, not as an
-optimization objective.
+piecewise constant in the boundary. Derivative-free optimization can minimize
+it using a fixed particle ensemble; a new ensemble checks the result.

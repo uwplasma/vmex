@@ -328,6 +328,107 @@ The ESSOS and `neo_jax` tests are `importorskip`-gated, so they run in the
 nightly optional-integrations lane and silently skip in the dependency-minimal
 core lane. A green core run is not evidence that they passed.
 
+## Alpha tracing mode cut and field derivatives
+
+`benchmarks/trace_mode_cut.py` checks every requested cut against the uncut
+Boozer spectrum on three surfaces (`s = 0.25, 0.5, 0.9`). The audit used 31
+tracked WOUTs from [vmec_equilibria](https://github.com/landreman/vmec_equilibria)
+at commit `41fcf8b`, the two matched tokamak WOUTs in
+[VMEX PR #514](https://github.com/uwplasma/vmex/pull/514), and the
+Landreman-Paul QA (`ESSOS/examples/input_files`, commit `e77c6a0`) and QH
+(`simsopt/tests/test_files`, commit `2b39098`) examples. One LASYM WOUT
+cannot enter the current
+stellarator-symmetric Boozer tracer; the table summarizes the other 34
+equilibria (102 surfaces). Errors are relative root-mean-square errors over
+Boozer angles using the *same radial spline* as ESSOS, rather than a comparison
+of Fourier amplitudes alone. The angular-gradient norm includes both poloidal
+and toroidal derivatives.
+
+| mode cut | median modes | median `|B|` error | median radial derivative error | median angular-gradient error | worst angular-gradient error | ARIES trace [s] | ARIES lost / 512 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1e-4 | 116 | 0.0096% | 0.41% | 1.24% | 6.6% | 15.5 | 23 |
+| 2e-4 | 90 | 0.0188% | 0.81% | 2.32% | 12.6% | 12.0 | 26 |
+| 3e-4 | 73 | 0.0309% | 1.13% | 3.34% | 16.0% | 9.9 | 21 |
+| 5e-4 | 58 | 0.0524% | 1.62% | 5.02% | 22.0% | 12.9 | 26 |
+| 6e-4 | 53 | 0.0585% | 1.81% | 5.69% | 24.4% | 12.8 | 26 |
+| 8e-4 | 45 | 0.0778% | 2.26% | 6.91% | 27.3% | 10.9 | 26 |
+| 1e-3 | 37 | 0.1022% | 2.61% | 7.75% | 30.2% | 9.4 | 23 |
+
+The timed ARIES-CS row uses 512 common births drawn from the `1e-5` field at
+`s = 0.3`, 2 ms, a nominal
+`1.25e-7 s` step, 20 saved times and eight CPU devices on an Apple M2. Times
+are medians of three warmed traces after one compile per cut; transform and
+compilation are excluded. Equal mode counts at 5e-4 and 6e-4 mean the same
+field. Measured time is not strictly monotone in mode count because compiled
+array shapes and system load matter. The 21–26 losses at 2 ms are within
+sampling noise; this short run cannot validate a rare-loss configuration.
+Across the 34 cases, angular and radial derivatives deteriorate much faster
+than `|B|` itself. Thus the existing `1e-4` default remains the dependable
+general choice; an intermediate cut may be useful after checking losses on
+the particular field.
+
+The precise Landreman-Paul QA field is a useful rare-loss check. With the
+same 1,000 births at `s = 0.3` over 10 ms, `2e-4` retains every lost/confined
+label from `1e-4` while running 2.7× faster. At `3e-4`, the retained spectrum
+falls to three modes and five particles change label; larger cuts retain that
+same three-mode field. These are one warmed timing per cut on the Apple M2.
+
+| mode cut | QA modes | QA lost / 1000 | labels matching 1e-4 | QA trace [s] |
+|---|---:|---:|---:|---:|
+| 1e-4 | 16 | 14 | 100% | 47.9 |
+| 2e-4 | 7 | 14 | 100% | 17.9 |
+| 3e-4 | 3 | 9 | 99.5% | 9.3 |
+| 5e-4 | 3 | 9 | 99.5% | 9.4 |
+| 6e-4 | 3 | 9 | 99.5% | 9.7 |
+| 8e-4 | 3 | 9 | 99.5% | 9.4 |
+| 1e-3 | 3 | 9 | 99.5% | 9.5 |
+
+HSX (`QHS_vac`) was also run on 500 common births at `s = 0.3` for 5 ms,
+with one warmed timing per cut. Its field has more modes and the loss labels
+are more sensitive to truncation:
+
+| mode cut | HSX modes | lost / 500 | labels matching 1e-4 | trace [s] |
+|---|---:|---:|---:|---:|
+| 1e-4 | 157 | 91 | 100% | 52.7 |
+| 2e-4 | 118 | 96 | 91.0% | 70.4 |
+| 3e-4 | 102 | 92 | 91.8% | 41.9 |
+| 5e-4 | 75 | 101 | 91.6% | 32.2 |
+| 6e-4 | 64 | 104 | 92.2% | 47.9 |
+| 8e-4 | 50 | 83 | 92.8% | 34.7 |
+| 1e-3 | 42 | 83 | 91.6% | 33.3 |
+
+**HSX accuracy limit:** at the nominal `1.25e-7 s` step, the maximum
+collisionless energy error was 5.39% (median among confined particles 2.87%).
+Halving the step reduced the maximum to 0.26% and changed the 1e-4 loss count
+from 91 to 83. These HSX orbit counts therefore screen cut sensitivity but
+are not a converged loss reference. Converge the time step on the intended
+field before judging a mode cut from losses.
+
+To reproduce the spectral table after checking out or merging PR #514, run
+`python benchmarks/trace_mode_cut.py PATH_TO_VMEC_EQUILIBRIA examples/data
+PATH_TO_QA_WOUT PATH_TO_QH_WOUT --out cuts.json`. Add `--particles 512
+--tmax 0.002 --devices 8 --save-times 20 --birth-cut 1e-5` for the ARIES
+orbit timing protocol.
+The script records each equilibrium, surface, cut, mode count and error in
+JSON. The orbit option uses fixed births and reports losses, label agreement,
+energy error and compile and warm times for all seven cuts.
+For the QA table, pass its WOUT alone with `--particles 1000 --tmax 0.01
+--devices 8 --repeats 1 --save-times 101`.
+For the HSX time-step check use its WOUT with `--particles 500 --tmax 0.005
+--devices 8 --orbit-cuts 1e-4 --step-factor 0.5`.
+
+**Where tracing time goes.** ESSOS evaluates the Boozer `|B|` series and its
+derivatives at four RK4 stages, then evaluates `|B|` again to track the maximum
+energy error at every step. Retaining fewer harmonics reduces this repeated
+work but can remove small modes that control losses. ESSOS
+[PR #92](https://github.com/uwplasma/ESSOS/pull/92) tried angle-addition
+tables: it was 1.8× faster for a single-device, 135-mode test, but 10% slower
+for the 10-device, 500-particle VMEX workload; that change is not ready to
+replace the current kernel. Checking energy only at saved times also changes
+the reported maximum. Reusing a full field evaluation at a step endpoint for
+the next step could save work while retaining the every-step energy check;
+this still needs a benchmark and a test that the orbits agree.
+
 ## Device and lane consistency
 
 Float64 is required and enforced at solver import. Across devices the
