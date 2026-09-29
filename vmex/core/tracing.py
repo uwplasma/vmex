@@ -215,7 +215,8 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
         write_wout(path, wout)
         bx.read_wout(str(path), flux=False)
     bx.run()
-    psi0 = float(np.asarray(wout.phi)[-1]) / (2 * np.pi)
+    # Boozer guiding-centre equations use psi = -Phi_tor/(2 pi) for VMEC's phi.
+    psi0 = -float(np.asarray(wout.phi)[-1]) / (2 * np.pi)
     return BoozerField.from_booz_xform(bx, psi0, mode_tolerance), bx
 
 
