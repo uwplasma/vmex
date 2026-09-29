@@ -78,7 +78,7 @@ from solvax import (
 )
 
 from .device import AUTO
-from .errors import AdjointSolveError
+from .errors import AdjointSolveError, VmecConvergenceError
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .solver import (
@@ -2486,6 +2486,24 @@ def _problem_jit(cache_key: tuple, slot: str, build: Callable):
     return entry[slot]
 
 
+def _require_certified_seed(memo, ftol: float, ratio: float) -> None:
+    """Refuse a seed whose solve would be scored as the failed-trial penalty."""
+    if memo is None:
+        return
+    result = memo[1]
+    fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
+    if bool(result.converged) or (np.isfinite(fsq) and fsq <= ratio * ftol):
+        return
+    raise VmecConvergenceError(
+        f"the seed equilibrium did not converge (fsq={fsq:.3e}, "
+        f"ftol={ftol:.1e}, accepted up to {ratio:g} x ftol); every "
+        "optimizer stage started here would sit at the failed-solve penalty",
+        hint="re-seed from a converged boundary, or raise "
+             "forward_max_iterations / lower the resolution",
+        fsq=(float(result.fsqr), float(result.fsqz), float(result.fsql)),
+        ftol=float(ftol))
+
+
 def _least_squares_implicit(
     objective_terms: Sequence[tuple[Callable, float, Any]],
     inp: VmecInput,
@@ -2714,6 +2732,7 @@ def _least_squares_implicit(
     # memo-hits this exact solve and refines then — under the compile
     # heartbeat instead of the silent factory (user-visible startup gap).
     state0_np, mask_np = imp._host_solve_and_mask(cfg, params0_np, refine=False)
+    _require_certified_seed(imp._LAST_SOLVE.get(cfg), cfg.ftol, cfg.max_fsq_ratio)
     state0 = jax.tree.map(_place, state0_np)
     params_at_x0 = params_of(_place(x0))
     runtime0 = imp.runtime_from_params(params_at_x0, cfg)
@@ -3232,6 +3251,17 @@ def _least_squares_implicit(
             residual = np.where(np.isfinite(residual), residual, 1.0e6)
         if imp._LAST_STATUS_ERROR.get(cfg) is not None:
             holder["failed_trials"] += 1
+        if not holder.get("seed_certified") and np.array_equal(
+                np.asarray(x, dtype=float), x0):
+            holder["seed_certified"] = certified_trial(x)
+            if not holder["seed_certified"]:
+                raise VmecConvergenceError(
+                    "the optimizer's starting point has no certified "
+                    "equilibrium; it would be scored as the failed-solve "
+                    "penalty (cost ~5e11, zero gradient) and the stage would "
+                    "stop there",
+                    hint="re-seed the stage from a converged boundary, or "
+                         "raise forward_max_iterations / lower the resolution")
         holder["nres"] = residual.size
         return residual
 

@@ -1671,3 +1671,18 @@ def test_host_state_runtime_is_the_unanchored_forward_solve(monkeypatch):
         np.testing.assert_allclose(
             np.asarray(getattr(state, field)), np.asarray(getattr(reference, field)),
             rtol=0.0, atol=1.0e-9)
+
+
+def test_uncertified_seed_is_refused_not_scored_as_the_penalty():
+    from types import SimpleNamespace
+
+    from vmex.core.errors import VmecConvergenceError
+
+    def memo(converged, fsq):
+        return (None, SimpleNamespace(converged=converged, fsqr=fsq, fsqz=0.0, fsql=0.0))
+
+    opt._require_certified_seed(None, 1e-12, 100.0)
+    opt._require_certified_seed(memo(True, 1.0), 1e-12, 100.0)
+    opt._require_certified_seed(memo(False, 5e-11), 1e-12, 100.0)
+    with pytest.raises(VmecConvergenceError, match="seed equilibrium did not converge"):
+        opt._require_certified_seed(memo(False, 1e-6), 1e-12, 100.0)
