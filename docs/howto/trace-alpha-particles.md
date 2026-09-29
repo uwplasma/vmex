@@ -175,7 +175,7 @@ quasisymmetry.
 
 ### Intermediate cuts and field derivatives
 
-A 34-equilibrium audit measured all seven cuts from 1e-4 to 1e-3. The [full table and protocol](../explanation/validation.md#alpha-tracing-mode-cut-and-field-derivatives) show that radial and angular derivatives degrade faster than `|B|` itself; 1e-4 remains the general default. Use `benchmarks/trace_mode_cut.py` to test a different cutoff on a specific equilibrium.
+A 34-equilibrium audit measured all seven cuts from 1e-4 to 1e-3. The [full table and protocol](../explanation/validation.md) show that radial and angular derivatives degrade faster than `|B|` itself; 1e-4 remains the general default. Use `benchmarks/trace_mode_cut.py` to test a different cutoff on a specific equilibrium.
 
 ## Against SIMPLE and SIMSOPT
 
