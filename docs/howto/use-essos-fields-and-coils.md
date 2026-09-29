@@ -117,14 +117,17 @@ tabulated domain. The exterior field-line example
 field; a finite trace does not by itself establish magnetic topology. See
 {doc}`/explanation/nestor-vacuum` for the derivation.
 
-![Poincare sections of the extended field around finite-beta free-boundary QA equilibria](../_static/figures/readme_extender_islands.webp)
+![Poincare sections of the extended field around finite-beta free-boundary QA equilibria, one with an iota = 1/2 island chain](../_static/figures/readme_extender_islands.webp)
 
 The README figure is built by VMEX alone from inputs in `examples/data`.
 `python docs/_static/figures/sources/make_extender_islands_figure.py --record`
 solves `input.LandremanPaul2021_QA_lowres` as a free boundary held by
 `ESSOS_biot_savart_LandremanPaulQA.json` at fixed coil currents, with
 `p = PRES_SCALE (1 - s)` as in `examples/free_boundary_essos_coils.py`, at
-volume-averaged beta 0, 1.02% and 2.18%. Outside the plasma the field is the
+volume-averaged beta 0, 1.02% and 2.18%, and at 1.02% with a 4 kA net toroidal
+current (`CURTOR`, current density proportional to `1 - s`). The current lifts
+iota from 0.410 to 0.514 at the edge (0.617 on axis), so the iota = 1/2 surface
+of the exterior field falls just outside the LCFS. Outside the plasma the field is the
 coil Biot-Savart field plus the `VmecExtender` virtual-casing field of the
 plasma currents. The plasma part is tabulated once on a 1 cm cylindrical grid
 (half a field period, completed by stellarator symmetry) and read through a
@@ -143,11 +146,23 @@ flux surfaces; the script without `--record` draws both figures from it.
 | vacuum | 0 | to 2.7 cm | 2.9 cm |
 | finite beta | 1.02% | to 3.1 cm | 3.3 cm |
 | finite beta | 2.18% | to 1.5 cm | 1.6 cm |
+| finite beta, 4 kA | 1.02% | island chain to 1.1 cm, surfaces to 2.9 cm | 3.1 cm |
+
+With the current, the lines launched 4 to 11 mm outside the LCFS stay on the
+iota = 1/2 chain: each alternates between the lobes on the outboard and inboard
+midplane (poloidal positions 0 and 1/2 in the unrolled panel), and on the
+inboard side spans 0.03 to 0.93 cm off the LCFS. With two field periods,
+iota = 1/2 is resonant with the (m, n) = (4, 2) harmonic, a chain of four
+islands; a line visits every other one, and the two not on the midplane launch
+line are not seeded. Closed surfaces enclose the chain from 1.3 cm; the
+separatrix lies between the seeds at 1.1 and 1.3 cm.
 
 "Closed" means the line crossed phi = 0 on every transit of the 1500 m trace
 without leaving the 10 cm neighbourhood of the LCFS; a finite trace does not by
 itself prove a flux surface. Near the LCFS the tabulated field inherits the
-continuation's error, so the first centimetre of each layer is qualitative.
+continuation's error, so the first centimetre of each layer is qualitative:
+that includes the width of the island chain, although the chain itself follows
+from the edge iota of the VMEX solution crossing 1/2.
 The zero-beta extended field equals the coil field and is traced directly.
 
 Joint boundary/coil optimization and the boundary-Schur adjoint remain advanced

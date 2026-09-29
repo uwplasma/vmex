@@ -389,12 +389,14 @@ external_field=coils.B)` adds the plasma's virtual-casing field to the coils, ac
 down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `MgridField`
 (trilinear or tricubic).
 
-![Poincare sections of the extended field around finite-beta free-boundary QA equilibria](docs/_static/figures/readme_extender_islands.webp)
+![Poincare sections of the extended field around finite-beta free-boundary QA equilibria, one with an iota = 1/2 island chain](docs/_static/figures/readme_extender_islands.webp)
 
-The Landreman-Paul QA held by its coils as a free boundary at 1.0% and 2.2% beta, and the field
-lines of the extended field (coils plus the plasma's virtual-casing field) launched outside it.
-Closed surfaces continue 3.1 cm past the LCFS at 1.0% beta and 1.5 cm at 2.2% beta, against 2.7 cm
-in vacuum; beyond them the lines open. The figure is built by VMEX from `examples/data` alone
+The Landreman-Paul QA held by its coils as a free boundary at 1.0% beta, and the field lines of
+the extended field (coils plus the plasma's virtual-casing field) launched outside it. Without net
+current (left) closed surfaces continue 3.1 cm past the LCFS, then the lines open. A 4 kA toroidal
+current (middle, and unrolled on the right) lifts the edge iota to 0.514, so iota = 1/2 falls just
+outside the plasma: an island chain about 0.9 cm wide opens from the LCFS, closed surfaces
+surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX from `examples/data` alone
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 

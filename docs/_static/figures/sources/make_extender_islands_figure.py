@@ -5,8 +5,10 @@ Everything comes from VMEX and the inputs shipped in ``examples/data``: the
 Landreman-Paul QA deck (``input.LandremanPaul2021_QA_lowres``) held by its
 ESSOS coils (``ESSOS_biot_savart_LandremanPaulQA.json``), solved as a free
 boundary at fixed coil currents with ``p = PRES_SCALE (1 - s)``, as in
-``examples/free_boundary_essos_coils.py``. Three cases: vacuum and two finite
-pressures.
+``examples/free_boundary_essos_coils.py``. Four cases: vacuum, two finite
+pressures, and the 1% pressure with a 4 kA net toroidal current (``CURTOR``,
+``j ~ 1 - s``), which lifts the edge iota to 0.514 and so places the iota = 1/2
+island chain just outside the LCFS.
 
 The field outside the plasma is the coil Biot-Savart field plus the
 ``VmecExtender`` virtual-casing field of the plasma currents. The plasma part
@@ -40,7 +42,9 @@ REPO = Path(__file__).resolve().parents[4]
 DATA = REPO / "examples" / "data"
 RECORD = REPO / "benchmarks" / "extender_islands_sections.npz"
 FIGURES = REPO / "docs" / "_static" / "figures"
-CASES = {"vacuum": 0.0, "beta1": 1.0 / 1.45e-3, "beta2": 2.0 / 1.45e-3}   # PRES_SCALE [Pa]
+CURTOR = 4000.0   # net toroidal current [A] with j ~ 1 - s: lifts the edge iota above 1/2
+CASES = {"vacuum": (0.0, 0.0), "beta1": (1.0 / 1.45e-3, 0.0), "beta2": (2.0 / 1.45e-3, 0.0),
+         "current": (1.0 / 1.45e-3, CURTOR)}   # (PRES_SCALE [Pa], CURTOR [A])
 MPOL, NTOR, NS, PHIEDGE = 5, 5, 51, -0.025
 COIL_GRID = dict(rmin=0.45, rmax=1.55, zmin=-0.6, zmax=0.6, ir=96, jz=96, kp=32)
 N_OUTSIDE, OUTSIDE_SPAN = 24, 0.045                # seeds between 4 mm and this far [m] past the LCFS
@@ -50,7 +54,7 @@ SURFACE_GAP = 0.003                                # table nodes closer to the L
 SURFACES = (0.04, 0.16, 0.36, 0.64, 1.0)
 
 
-def solve(pres_scale: float):
+def solve(pres_scale: float, curtor: float = 0.0):
     """Free-boundary LP-QA at fixed coil currents; returns (input, result, wout, coils)."""
     from dataclasses import replace
 
@@ -67,7 +71,8 @@ def solve(pres_scale: float):
         raxis_c=inp.raxis_c[:NTOR + 1], zaxis_s=inp.zaxis_s[:NTOR + 1],
         raxis_s=inp.raxis_s[:NTOR + 1], zaxis_c=inp.zaxis_c[:NTOR + 1],
         phiedge=PHIEDGE, ns_array=[NS], niter_array=[20000], ftol_array=[1e-12],
-        pmass_type="power_series", am=[1.0, -1.0] + [0.0] * 19, pres_scale=pres_scale)
+        pmass_type="power_series", am=[1.0, -1.0] + [0.0] * 19, pres_scale=pres_scale,
+        ncurr=1, pcurr_type="power_series", ac=[1.0, -1.0] + [0.0] * 19, curtor=curtor)
     res = vj.solve_free_boundary(inp, external_field=vj.MgridField.from_coils(coils, **COIL_GRID))
     wout = vj.wout_from_state(inp=inp, state=res.state, fsqr=float(res.fsqr), fsqz=float(res.fsqz),
                               fsql=float(res.fsql), niter=int(res.iterations),
@@ -101,7 +106,7 @@ def record_case(name: str) -> dict:
     from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
 
     jax.config.update("jax_enable_x64", True)
-    inp, res, wout, coil_set = solve(CASES[name])
+    inp, res, wout, coil_set = solve(*CASES[name])
     print(f"{name}: beta {float(wout.betatotal):.4%}, converged {bool(res.converged)}, "
           f"fsq {float(res.fsqr) + float(res.fsqz) + float(res.fsql):.1e}", flush=True)
     coils = BiotSavart(coil_set)
@@ -112,7 +117,7 @@ def record_case(name: str) -> dict:
     R_lcfs, Z_lcfs = np.hypot(gamma[..., 0], gamma[..., 1]), gamma[..., 2]
     classifier = SurfaceClassifier(lcfs, h=0.02, padding=GRID_MARGIN + 0.05)
 
-    if CASES[name] > 0:  # finite beta: coils + tabulated plasma-current field
+    if CASES[name][0] > 0:  # finite beta: coils + tabulated plasma-current field
         ext = vj.VmecExtender.from_state(inp, res.state, external_field=coil_B)
 
         def distance(xyz: np.ndarray) -> np.ndarray:  # signed distance to the LCFS, positive inside
@@ -191,6 +196,7 @@ def record_case(name: str) -> dict:
     ns = np.asarray(wout.rmnc).shape[0]
     cuts = [surface_rz(wout, s_index=int(round(s * (ns - 1))), theta=theta, phi=np.array([0.0])) for s in SURFACES]
     out = {f"{name}_beta": float(wout.betatotal), f"{name}_offsets": offsets,
+           f"{name}_iota": np.asarray(wout.iotaf, np.float32),
            f"{name}_counts": np.array([len(sec[0]) for sec in sections]),
            f"{name}_R": np.concatenate([np.asarray(sec[0]) for sec in sections]).astype(np.float32),
            f"{name}_Z": np.concatenate([np.asarray(sec[1]) for sec in sections]).astype(np.float32),
@@ -200,31 +206,62 @@ def record_case(name: str) -> dict:
     return out
 
 
-def panel(ax, d, name: str, title: str) -> None:
+ISLAND, OTHER = "#2a78b8", "#eb6834"
+
+
+def lines(d, name: str):
+    """Per launched line that stays for 5 or more transits: (R, Z, on an island)."""
     counts, R, Z = d[f"{name}_counts"], d[f"{name}_R"], d[f"{name}_Z"]
     start = np.concatenate(([0], np.cumsum(counts)))
+    lcfs = np.stack((d[f"{name}_surf_R"][-1], d[f"{name}_surf_Z"][-1]), 1)
     for i in np.flatnonzero(counts >= 5):  # a line that leaves within a few transits marks only its seed
-        ax.scatter(R[start[i]:start[i + 1]], Z[start[i]:start[i + 1]], s=0.5, color="#eb6834", lw=0)
+        r, z = R[start[i]:start[i + 1]], Z[start[i]:start[i + 1]]
+        angle = np.hypot(r[:, None] - lcfs[:, 0], z[:, None] - lcfs[:, 1]).argmin(1) / len(lcfs)
+        # a surface covers every poloidal angle; a line on an island chain skips most of them
+        island = np.count_nonzero(np.histogram(angle, bins=40, range=(0, 1))[0]) < 30
+        yield r, z, island
+
+
+def panel(ax, d, name: str, title: str, mark_islands: bool = False) -> None:
+    for r, z, island in lines(d, name):
+        ax.scatter(r, z, s=0.5, color=ISLAND if island and mark_islands else OTHER, lw=0)
     for i, (r, z) in enumerate(zip(d[f"{name}_surf_R"], d[f"{name}_surf_Z"])):
         ax.plot(r, z, color="#1b1b1b", lw=0.5 + 0.7 * (i == len(SURFACES) - 1))
     ax.set(aspect="equal", xlabel="R [m]", ylabel="Z [m]", title=title)
     ax.grid(alpha=0.2, lw=0.5)
 
 
+def unrolled(ax, d, name: str) -> None:
+    """The same crossings against poloidal position on the LCFS and distance outside it."""
+    lcfs = np.stack((d[f"{name}_surf_R"][-1], d[f"{name}_surf_Z"][-1]), 1)
+    for r, z, island in lines(d, name):
+        distance = np.hypot(r[:, None] - lcfs[:, 0], z[:, None] - lcfs[:, 1])
+        ax.scatter(distance.argmin(1) / len(lcfs), 100 * distance.min(1), s=1.0,
+                   color=ISLAND if island else OTHER, lw=0)
+    ax.set(xlim=(0, 1), ylim=(0, 3.5), xlabel="poloidal position on the LCFS / 2$\\pi$",
+           ylabel="distance outside the LCFS [cm]", title="unrolled")
+    ax.grid(alpha=0.2, lw=0.5)
+
+
 HANDLES = [plt.Line2D([], [], color="#1b1b1b", lw=1, label="VMEX flux surfaces"),
-           plt.Line2D([], [], color="#eb6834", marker="o", ls="", ms=3, label="field lines launched outside")]
+           plt.Line2D([], [], color=OTHER, marker="o", ls="", ms=3, label="field lines launched outside")]
 
 
 def draw(d) -> None:
     plt.rcParams.update({"font.size": 9})
-    fig, axes = plt.subplots(1, 2, figsize=(5.6, 4.6), sharey=True)
-    for ax, name in zip(axes, ("beta1", "beta2")):
-        panel(ax, d, name, f"$\\beta$ = {100 * float(d[name + '_beta']):.2f}%")
+    fig, axes = plt.subplots(1, 3, figsize=(8.4, 4.6), width_ratios=(1, 1, 1.5))
+    panel(axes[0], d, "beta1", f"$\\beta$ = {100 * float(d['beta1_beta']):.2f}%")
+    panel(axes[1], d, "current", f"$\\beta$ = {100 * float(d['current_beta']):.2f}%, "
+          f"{CURTOR / 1e3:g} kA", mark_islands=True)
+    axes[1].sharey(axes[0])
     axes[1].set_ylabel("")
+    unrolled(axes[2], d, "current")
     fig.suptitle("Free-boundary QA with its coils, $\\phi$ = 0", fontsize=10)
-    fig.legend(handles=HANDLES, loc="lower center", ncol=2, fontsize=7.5, frameon=False)
+    fig.legend(handles=HANDLES + [plt.Line2D([], [], color=ISLAND, marker="o", ls="", ms=3,
+                                             label="lines on the $\\iota$ = 1/2 island chain")],
+               loc="lower center", ncol=3, fontsize=7.5, frameon=False)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    fig.savefig(FIGURES / "readme_extender_islands.webp", dpi=110, pil_kwargs={"quality": 80, "method": 6})
+    fig.savefig(FIGURES / "readme_extender_islands.webp", dpi=100, pil_kwargs={"quality": 60, "method": 6})
     plt.close(fig)
     fig, ax = plt.subplots(figsize=(3.2, 4.6))
     panel(ax, d, "vacuum", "Vacuum, $\\phi$ = 0")

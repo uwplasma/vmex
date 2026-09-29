@@ -212,8 +212,8 @@
     },
     {
       "path": "docs/_static/figures/readme_extender_islands.webp",
-      "sha256": "201bd490c440a5b241a346a6a2e63f41f74d94aba9ddbaaa00ef08a700295587",
-      "bytes": 22684,
+      "sha256": "d104ca9113cf9df7e48734b615ad1644707c3e62073756ea10654d436a8a16c8",
+      "bytes": 34860,
       "generator": "docs/_static/figures/sources/make_extender_islands_figure.py",
       "command": "python docs/_static/figures/sources/make_extender_islands_figure.py",
       "inputs": [
@@ -222,20 +222,20 @@
         "examples/data/ESSOS_biot_savart_LandremanPaulQA.json"
       ],
       "record": "benchmarks/extender_islands_sections.npz",
-      "generated": "2026-09-28",
-      "hardware": "Linux x86_64 workstation, CPU (record); Apple M3 Max, CPU (drawing)",
+      "generated": "2026-09-29",
+      "hardware": "Linux x86_64 workstation and Apple M3 Max, CPU (record); Apple M3 Max, CPU (drawing)",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
         "README.md",
         "docs/howto/use-essos-fields-and-coils.md"
       ],
-      "note": "Drawn from benchmarks/extender_islands_sections.npz, which the same script writes with --record using only VMEX, ESSOS and inputs in examples/data: the Landreman-Paul QA deck solved as a free boundary at fixed ESSOS coil currents (p = PRES_SCALE (1 - s), PRES_SCALE = 1/1.45e-3 and 2/1.45e-3 Pa), the exterior field formed as the coil field plus the VmecExtender virtual-casing field tabulated on a 1 cm tricubic grid, and field lines launched 4 mm to 4.5 cm outside the LCFS at phi = 0 traced for 1500 m. The record was computed on a Linux x86_64 CPU; rerunning the command without --record reproduces these bytes."
+      "note": "Drawn from benchmarks/extender_islands_sections.npz, which the same script writes with --record using only VMEX, ESSOS and inputs in examples/data: the Landreman-Paul QA deck solved as a free boundary at fixed ESSOS coil currents (p = PRES_SCALE (1 - s), PRES_SCALE = 1/1.45e-3 Pa, without net current and with CURTOR = 4 kA, j proportional to 1 - s, which puts iota = 1/2 just outside the LCFS), the exterior field formed as the coil field plus the VmecExtender virtual-casing field tabulated on a 1 cm tricubic grid, and field lines launched 4 mm to 4.5 cm outside the LCFS at phi = 0 traced for 1500 m; the right panel unrolls the 4 kA section against poloidal position on and distance from the LCFS. The vacuum, 1% and 2% cases of the record were computed on a Linux x86_64 CPU, the 4 kA case on an Apple M3 Max CPU; rerunning the command without --record reproduces these bytes (checked twice with cmp)."
     },
     {
       "path": "docs/_static/figures/extender_vacuum_islands.webp",
-      "sha256": "a4a345d8a51d6a3122f575a9dad1a8b80fe57b4ae7eb079b76286bb7ab251572",
-      "bytes": 13598,
+      "sha256": "4d634852afdc38ca3ff5a41a8c3f59bf0dd55faf44a1c3707bce41fb46f83009",
+      "bytes": 13768,
       "generator": "docs/_static/figures/sources/make_extender_islands_figure.py",
       "command": "python docs/_static/figures/sources/make_extender_islands_figure.py",
       "inputs": [
@@ -244,8 +244,8 @@
         "examples/data/ESSOS_biot_savart_LandremanPaulQA.json"
       ],
       "record": "benchmarks/extender_islands_sections.npz",
-      "generated": "2026-09-28",
-      "hardware": "Linux x86_64 workstation, CPU (record); Apple M3 Max, CPU (drawing)",
+      "generated": "2026-09-29",
+      "hardware": "Linux x86_64 workstation and Apple M3 Max, CPU (record); Apple M3 Max, CPU (drawing)",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
