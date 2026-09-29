@@ -17,7 +17,7 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import basinhopping, least_squares
+from scipy.optimize import basinhopping, least_squares, minimize
 
 import vmex as vj
 from vmex import optimize as opt
@@ -138,12 +138,31 @@ best = {"y": np.zeros_like(x0), "value": np.inf}
 
 
 def basin_report(y, value, accepted):
-    """Basin-hopping callback: record the hop and keep the best accepted point."""
+    """Basin-hopping callback: record the hop and keep the best point found.
+
+    The best basin is kept whether or not the Metropolis test moved the walk
+    there: its cost is an evaluated equilibrium either way.
+    """
     gradient = value_and_gradient(y)[1]
     monitor({"x": x_from_y(y), "fun": value, "jac": gradient})
-    if accepted and value < best["value"]:
+    if np.isfinite(value) and value < best["value"]:
         best.update(y=np.asarray(y).copy(), value=float(value))
     print(f"basin cost = {value:.6e}, accepted = {accepted}")
+
+
+def short_lbfgsb(fun, x, jac=None, bounds=None, callback=None, **options):
+    """L-BFGS-B hop whose spent iteration budget is a result, not a failure.
+
+    SciPy's Metropolis test rejects an unsuccessful local search once a
+    successful one was accepted, and a hop capped at LOCAL_MAXITER ends with
+    status 1, so without this every better basin would be discarded.
+    """
+    for unused in ("args", "hess", "hessp", "constraints"):
+        options.pop(unused, None)
+    result = minimize(fun, x, jac=jac, method="L-BFGS-B", bounds=bounds,
+                      callback=callback, options=options)
+    result.success = bool(result.success or result.status == 1)
+    return result
 
 
 ### Run the optimization ######################################################
@@ -152,7 +171,7 @@ print("First print can take more than ten minutes")
 bounds = [(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size
 basinhopping(value_and_gradient, np.zeros_like(x0), niter=N_BASINS,
     T=BASIN_TEMPERATURE, stepsize=BASIN_STEPSIZE,
-    minimizer_kwargs={"method": "L-BFGS-B", "jac": True,
+    minimizer_kwargs={"method": short_lbfgsb, "jac": True,
         "bounds": bounds, "options": {"maxiter": LOCAL_MAXITER, "ftol": 1e-10}},
     callback=basin_report, rng=np.random.default_rng(BASIN_SEED), disp=True)
 
