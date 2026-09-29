@@ -122,8 +122,8 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   `alpha_particle_optimization.py` (`pip install "vmex[coils]"`) directly
   minimizes ESSOS traced alpha loss fraction with an aspect-ratio penalty,
   starting from a non-optimized NFP=2 seed. It has no symmetry stage or
-  symmetry objective. A fresh 2000-alpha, 5 ms check finds 81.2 % lost for
-  the seed and 25.7 % after optimization (aspect ratio 5.98 to 6.44).
+  symmetry objective. A fresh 2000-alpha, 5 ms check finds 81.0 % lost for
+  the seed and 28.0 % after optimization (aspect ratio 5.98 to 6.30).
   `QA_optimization_turbulence_linear.py`,
   `QA_optimization_turbulence_quasilinear.py` and
   `QA_optimization_turbulence_nonlinear.py` (`pip install "vmex[turbulence]"`)

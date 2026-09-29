@@ -2,14 +2,15 @@
 """Directly minimize fusion-alpha losses from a non-optimized NFP=2 seed.
 
 The only design terms are traced loss fraction and aspect ratio. No
-quasisymmetry, omnigenity or iota target is used. A fixed birth ensemble makes
-each trial comparable; an independent, longer trace checks the result.
+quasisymmetry, omnigenity or iota target is used. Each trial samples births
+from its own field with the same RNG seed; a longer, independent trace checks
+the result.
 
 Run ``python examples/optimization/alpha_particle_optimization.py`` after
 ``pip install 'vmex[coils]'``. ``VMEX_EXAMPLES_CI=1`` runs a short wiring test.
 This is a research example: increase the particle and evaluation budgets for
 converged optimization and check loss at the intended reactor time horizon.
-Direct loss optimization and fixed-sample methods are discussed in
+Direct loss optimization methods are discussed in
 https://arxiv.org/abs/2302.11369.
 """
 
@@ -58,18 +59,15 @@ def input_from_x(x):
 
 x0 = np.array([seed_input.rbc[n + seed_input.ntor, m] for m, n in MODES]
               + [seed_input.zbs[n + seed_input.ntor, m] for m, n in MODES])
-# Draw births once from the starting field; every trial reuses these points.
-reference = vj.trace_alphas(seed_eq.wout, nparticles=N_PARTICLES, tmax=T_MAX,
-                            s=BIRTH_S, seed=SEED, times_to_trace=20)
-births = reference.initial_conditions
 history = []
 
 
 def evaluate(x):
     eq = opt.solve_equilibrium(input_from_x(x), initial_state=seed_eq.solution)
     trace = vj.trace_alphas(eq.wout, nparticles=N_PARTICLES, tmax=T_MAX,
-                            s=BIRTH_S, seed=SEED, times_to_trace=20,
-                            initial_conditions=births)
+                            s=BIRTH_S, seed=SEED, times_to_trace=20)
+    if trace.particles_failed or not np.isfinite(trace.energy_error).all():
+        raise ValueError("unreliable alpha trace: failed orbit or nonfinite energy error")
     aspect = float(opt.aspect_ratio(eq.state, eq.runtime))
     cost = float(trace.loss_fraction + ASPECT_WEIGHT * (aspect - aspect_target) ** 2)
     return cost, trace.loss_fraction, aspect
@@ -80,7 +78,7 @@ def objective(x):
     try:
         cost, loss, aspect = evaluate(x)
     except (ValueError, RuntimeError, FloatingPointError) as exc:
-        print(f"{len(history) + 1:3d}: invalid equilibrium ({exc}); cost 10", flush=True)
+        print(f"{len(history) + 1:3d}: invalid evaluation ({exc}); cost 10", flush=True)
         cost, loss, aspect = 10.0, np.nan, np.nan
     history.append((cost, loss, aspect))
     print(f"{len(history):3d}: cost {cost:.5f}, lost {loss:.1%}, "
@@ -102,6 +100,8 @@ for label, case in (("seed", seed_input), ("optimized", final_input)):
     trace = vj.trace_alphas(eq.wout, nparticles=CHECK_PARTICLES,
                             tmax=CHECK_T_MAX, s=BIRTH_S, seed=SEED + 1,
                             times_to_trace=100)
+    if trace.particles_failed or not np.isfinite(trace.energy_error).all():
+        raise ValueError(f"unreliable {label} holdout trace")
     checks[label] = trace
     print(f"{label}: {CHECK_PARTICLES} alphas for {1e3 * CHECK_T_MAX:g} ms lose "
           f"{100 * trace.loss_fraction:.1f}% ± {100 * trace.loss_fraction_sigma:.1f}%; "

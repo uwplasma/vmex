@@ -230,8 +230,8 @@ For direct fast-ion optimization, run
 penalty from a shaped seed, with no symmetry objective, and checks the final
 loss fraction on fresh particles.
 With the supplied 2,000-particle, 2 ms training run, the 5 ms holdout loss
-fell from 81.2% to 25.7% (2,000 new particles); the aspect ratio changed
-from 5.98 to 6.44. This is an example run, not a converged reactor design.
+fell from 81.0% to 28.0% (2,000 new particles); the aspect ratio changed
+from 5.98 to 6.30. This is an example run, not a converged reactor design.
 
 ## How VMEX works
 
