@@ -47,7 +47,7 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
 MAX_MODES = [1, 2]
-MAX_NFEV = [6, 10]
+MAX_NFEV = [6, 16]
 N_CURRENT_SPLINE = [6, 8]
 
 # Targets:
@@ -62,7 +62,8 @@ IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 # grid (the first interior surface of the 71-surface grid reads -1.3e3 while
 # its neighbours read +65 and +27), so rows and reported extrema both start at
 # STABILITY_MIN_S:
-STABILITY_WEIGHT = 30.0
+STABILITY_WEIGHTS = [1.0, 30.0]     # per stage: a mode-1 boundary cannot
+                                  # fix the seed's interior, only trade beta for it
 STABILITY_MARGIN = 2.0e-3
 STABILITY_MIN_S = 0.1
 
@@ -191,8 +192,6 @@ objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (iota_floor, 0.0, 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
-    (mercier_rows, 0.0, STABILITY_WEIGHT),
-    (resistive_rows, 0.0, STABILITY_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(
@@ -205,7 +204,8 @@ monitor = opt.OptimizationMonitor()
 ### Run the optimization ######################################################
 
 report("self-consistent seed", equilibrium)
-for max_mode, max_nfev, n_spline in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE):
+for max_mode, max_nfev, n_spline, weight in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE,
+                                                STABILITY_WEIGHTS):
     print(f"\n===== QA bootstrap stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
     inp = inp.change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6,
@@ -214,7 +214,9 @@ for max_mode, max_nfev, n_spline in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE):
     # A RuntimeWarning about uncertified Jacobian columns is expected once the
     # optimizer leaves the seed and needs no action; see examples/README.md.
     problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms, max_mode=max_mode,
+        inp, objective_function_terms + [(mercier_rows, 0.0, weight),
+                                         (resistive_rows, 0.0, weight)],
+        max_mode=max_mode,
         current_dofs=n_spline - 1, vary_major_radius=VARY_MAJOR_RADIUS,
         use_ess=True, restart_from=equilibrium, progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")
