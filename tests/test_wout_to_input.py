@@ -7,7 +7,7 @@ import pytest
 
 from vmex.core.cli import main
 from vmex.core.input import VmecInput
-from vmex.core.wout import read_wout
+from vmex.core.wout import read_wout, write_wout
 from tests.conftest import resolve_golden_dir
 
 
@@ -65,6 +65,53 @@ def test_reject_unrecoverable_adiabatic_pressure():
     wout = read_wout(_golden("solovev"))
     with pytest.raises(ValueError, match="GAMMA"):
         VmecInput.from_wout(replace(wout, gamma=5 / 3))
+
+
+@pytest.mark.parametrize("changes,reason", [
+    ({"ns": 2}, "invalid resolution"),
+    ({"lfreeb": True, "mgrid_file": "NONE"}, "no MGRID_FILE"),
+    ({"xn": np.array([0.5, 0, 0, 0, 0, 0])}, "not integral"),
+])
+def test_reject_invalid_wout_metadata(changes, reason):
+    wout = read_wout(_golden("solovev"))
+    with pytest.raises(ValueError, match=reason):
+        VmecInput.from_wout(replace(wout, **changes))
+
+
+def test_resolves_mgrid_beside_wout(tmp_path, monkeypatch):
+    source = tmp_path / "wout_case.nc"
+    field = tmp_path / "field.nc"
+    field.touch()
+    wout = replace(read_wout(_golden("solovev")),
+                   lfreeb=True, mgrid_file=field.name)
+    monkeypatch.setattr("vmex.core.wout.read_wout", lambda path: wout)
+    assert VmecInput.from_wout(source).mgrid_file == str(field)
+
+
+def test_fallback_profiles_use_solved_values():
+    base = read_wout(_golden("solovev"))
+    s = np.linspace(0, 1, base.ns)
+    pressure = np.asarray(base.presf) + 5.0 * s**2
+    wout = replace(base, presf=pressure,
+                   pres=np.r_[0.0, (pressure[:-1] + pressure[1:]) / 2],
+                   iotaf=np.asarray(base.iotaf) + 0.1,
+                   iotas=np.asarray(base.iotas) + 0.1)
+    deck = VmecInput.from_wout(wout)
+    assert deck.pmass_type == "cubic_spline"
+    assert deck.piota_type == "cubic_spline"
+    assert deck.ncurr == 0
+    np.testing.assert_allclose(deck.am_aux_f, pressure)
+    np.testing.assert_allclose(deck.ai_aux_f, wout.iotaf)
+
+
+def test_cli_rejects_wrong_operation_and_unrecoverable_wout(tmp_path):
+    source = _golden("solovev")
+    with pytest.raises(SystemExit):
+        main([str(source), "--to-input", "--plot"])
+    invalid = tmp_path / "wout_adiabatic.nc"
+    write_wout(invalid, replace(read_wout(source), gamma=5 / 3))
+    assert main([str(invalid), "--to-input", "--outdir", str(tmp_path)]) != 0
+    assert not (tmp_path / "input.adiabatic").exists()
 
 
 @pytest.mark.parametrize("case", ["solovev", "up_down_asymmetric_tokamak",
