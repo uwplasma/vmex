@@ -93,9 +93,9 @@ FORWARD_FTOL = 1e-10
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
-FINAL_FTOL = 1e-14
-FINAL_NITER = 8000
+FINAL_NS = 51
+FINAL_FTOL = 1e-12
+FINAL_NITER = 20000
 
 # Every output file name contains this:
 OUTPUT_NAME = "QI_bootstrap_optimized"
