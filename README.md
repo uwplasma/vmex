@@ -151,7 +151,7 @@ compilation; the methods and field representations differ.
 
 | tracer | lost / 1,024 | warm GPU time | maximum confined-orbit energy drift |
 |---|---:|---:|---:|
-| VMEX `--trace` / ESSOS Boozer RK4 | 795 | 15.17 s | 2.08e-6 |
+| VMEX/ESSOS Boozer RK4 kernel | 795 | 15.17 s | 2.08e-6 |
 | CATAPULT, released radial interpolation | 802 | 4.88 s | 7.84e-3 |
 | CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.75 s | 3.54e-4 |
 

@@ -158,7 +158,8 @@ within 0.5 mm in `R` and `Z`; the DESC equilibrium fit differs by up to
 0.4% in `|B|` at those births. DESC (vacuum guiding centre, adaptive, `1e-6`
 tolerance) takes 32.46 s warmed for those 64 births on an Apple M2 with
 endpoint output. ESSOS takes about 1.55 s on that M2 with 101 saved states;
-these output policies differ.
+these output policies differ. DESC's maximum survivor endpoint energy error
+in this run is 2.59e-4, while ESSOS checks its maximum error at every step.
 
 The larger GPU comparison uses 101 saved states on a single GTX TITAN X.
 ESSOS retains 12 Boozer modes at cut `1e-4` and takes 16,000 fixed RK4 steps
@@ -180,7 +181,11 @@ and remains experimental until merged. A DESC run independently confines those s
 0.2 ms. On a re-solved `ns=101` equilibrium, ESSOS and regularized FIRM3D
 both lose the same one of the seven; unmodified FIRM3D loses two. This
 resolution check matters because axis crossings are sensitive to sparse
-radial data. The [ESSOS README](https://github.com/uwplasma/ESSOS/pull/94)
+radial data. The PR enforces the axis value and a consistent derivative, but
+its cubic-in-`s` `m=1` mode is still an approximation to the regular
+`sqrt(s)` behaviour. Along 40 sampled points with `s<0.03`, the patched
+FIRM3D and ESSOS fields differ by up to 0.381% in `|B|`. Matching labels on
+this ensemble is not a general convergence guarantee. The [ESSOS README](https://github.com/uwplasma/ESSOS/pull/94)
 compares methods and features in more detail.
 
 ## From Python
