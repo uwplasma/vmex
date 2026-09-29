@@ -10,6 +10,7 @@ resolve through ``conftest.resolve_golden_dir``.
 from __future__ import annotations
 
 import dataclasses
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1574,7 +1575,12 @@ def test_subproblem_ladder_compiles_once():
             self.count = 0
 
         def emit(self, record):
-            self.count += record.getMessage().startswith("Compiling ")
+            # Single-primitive eager ops (jit(multiply), jit(squeeze), ...)
+            # compile once per process on first use; whether an earlier test
+            # on the same xdist worker already paid them is order-dependent.
+            name = re.match(r"Compiling jit\((\w+)\)", record.getMessage())
+            self.count += bool(name) and not (
+                hasattr(jax.numpy, name[1]) or hasattr(jax.lax, name[1]))
 
     inp = _ladder_input()
     terms = [(opt.aspect_ratio, 4.0, 1.0)]
