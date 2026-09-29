@@ -473,3 +473,21 @@ def test_two_coil_deck_matches_the_pleiades_reference(capsys) -> None:
     # Measured at ns=5 (23 s): vacuum 4.4e-4, 10 % beta 2.7e-3 (7.5e-4 at ns=11).
     assert abs(vacuum.summary()["axis_field_center"] / b_vac - 1.0) < 1.0e-3
     assert abs(finite.summary()["axis_field_center"] / b_vac - pleiades) < 5.0e-3
+
+
+def test_small_problem_actions_come_from_one_dense_jacobian() -> None:
+    """Below the dense-action size, LSMR and the polish read one jacfwd."""
+
+    from types import SimpleNamespace
+
+    from vmex.mirror.free_boundary import _FreeEquilibriumProblem
+
+    def residual(x):
+        return jnp.array([x[0] ** 2 + x[1], jnp.sin(x[1]) * x[2], x[0] * x[2]])
+
+    problem = _FreeEquilibriumProblem(SimpleNamespace(size=3), residual, None, None, None, 1.0)
+    point, direction = np.array([0.3, -0.2, 1.1]), np.array([1.0, 2.0, -0.5])
+    exact = np.asarray(jax.jvp(residual, (jnp.asarray(point),), (jnp.asarray(direction),))[1])
+    np.testing.assert_allclose(problem.linear_operator(point).matvec(direction), exact, rtol=1e-12)
+    np.testing.assert_allclose(np.asarray(problem.linear_action(point)(jnp.asarray(direction))),
+                               exact, rtol=1e-12)
