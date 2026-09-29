@@ -6,18 +6,18 @@ maximum of the on-axis vacuum field, the LCFS ``max/min``, and a field-line
 ``max/min``), which makes numbers from different examples, tests, and doc
 pages incomparable.  This module fixes the definitions once:
 
-``R_m,axis`` (per leg)
+``R_m,axis`` (per well)
     ``max|B| / min|B|`` on the magnetic axis over one ``|B|`` well, where the well
     is the axial interval between the two ``|B|`` maxima that bound its minimum.
-    An open mirror has one well; the periodic stellarator-mirror hybrid has
-    one per straight leg, hence "per leg".
+    An open mirror has one well; a periodic stellarator-mirror hybrid has one
+    per ``|B|`` minimum on its axis, which need not be one per straight leg.
 
 ``R_m,LCFS``
     ``max|B| / min|B|`` over the last closed flux surface.  It is a different
     number from ``R_m,axis`` on any shaped boundary and is reported
     separately, never as "the" mirror ratio.
 
-``L_mirror,B`` (per leg)
+``L_mirror,B`` (per well)
     The arc-length distance between the two ``|B|`` maxima bounding a well: the
     length of the mirror cell measured by the field, not by the device.
 
@@ -77,13 +77,13 @@ class MirrorRatioDiagnostics:
 
     @property
     def axis_mirror_ratios(self) -> tuple[float, ...]:
-        """``R_m,axis`` per leg, in increasing axial order."""
+        """``R_m,axis`` per on-axis ``|B|`` well, in increasing axial order."""
 
         return tuple(well.mirror_ratio for well in self.wells)
 
     @property
     def mirror_lengths(self) -> tuple[float, ...]:
-        """``L_mirror,B`` per leg, in increasing axial order."""
+        """``L_mirror,B`` per on-axis ``|B|`` well, in increasing axial order."""
 
         return tuple(well.mirror_length for well in self.wells)
 
@@ -211,7 +211,7 @@ def axis_mirror_wells(
 
     ``minimum_relative_depth`` is the well depth, as a fraction of the total
     on-axis ``|B|`` swing, below which a well is merged into its neighbour.  It
-    keeps sampling ripple in a solved ``|B|`` from being reported as extra legs.
+    keeps sampling ripple in a solved ``|B|`` from being reported as extra wells.
     """
 
     values = np.asarray(axis_field_strength, dtype=float)
@@ -350,7 +350,7 @@ def mirror_ratio_diagnostics(
     minimum_relative_depth: float = 0.05,
     straight_curvature_tolerance: float = DEFAULT_STRAIGHT_CURVATURE_TOLERANCE,
 ) -> MirrorRatioDiagnostics:
-    """Report ``R_m,axis`` per leg, ``R_m,LCFS``, ``L_mirror,B``, ``L_straight``.
+    """Report ``R_m,axis`` per well, ``R_m,LCFS``, ``L_mirror,B``, ``L_straight``.
 
     This is the single entry point the examples, tests, and docs use, so a
     "mirror ratio" quoted anywhere in the mirror lane has exactly one meaning.

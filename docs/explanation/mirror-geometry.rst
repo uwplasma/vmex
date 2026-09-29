@@ -627,11 +627,13 @@ test and doc page in the mirror lane reports those and nothing else. All four
 are host-side diagnostics built from discrete extrema; they are not
 differentiable.
 
-:math:`R_{m,\rm axis}` (per leg)
+:math:`R_{m,\rm axis}` (per well)
    :math:`\max|B| / \min|B|` on the magnetic axis over one :math:`|B|` well,
    the well being the axial interval between the two :math:`|B|` maxima that
-   bound its minimum. An open mirror has one well; the periodic hybrid has one
-   per straight leg, which is why it is reported per leg. On an open mirror the
+   bound its minimum. An open mirror has one well; a periodic hybrid has one
+   per on-axis :math:`|B|` minimum, which need not be one per straight leg: the
+   QI hybrid's axis :math:`|B|` varies by a few percent, so its wells are
+   shallow ripples and its confining mirror is :math:`R_{m,\rm LCFS}`. On an open mirror the
    two ends of the modelled grid count as bounding maxima, since the coils
    usually sit outside the grid.
 
@@ -640,7 +642,7 @@ differentiable.
    different number from :math:`R_{m,\rm axis}` on any shaped boundary, and is
    always reported separately rather than as "the" mirror ratio.
 
-:math:`L_{\rm mirror,B}` (per leg)
+:math:`L_{\rm mirror,B}` (per well)
    The arc-length distance between the two :math:`|B|` maxima bounding a well:
    the length of the mirror cell as the field measures it, not as the device
    does.

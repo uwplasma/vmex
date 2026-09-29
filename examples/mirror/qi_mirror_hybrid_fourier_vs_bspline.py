@@ -279,9 +279,12 @@ mod_b = np.sqrt(np.maximum(np.asarray(magnetic_field_squared(
     evaluated.energy.field, evaluated.energy.geometry)), 0.0))
 b_axis = float(mod_b[0].mean())
 b_lcfs_min, b_lcfs_max = float(mod_b[-1].min()), float(mod_b[-1].max())
-# One definition, shared with the open-mirror examples: R_m,axis per leg
-# over its own |B| well, R_m,LCFS separately, L_mirror,B between the two
-# bounding |B| maxima, and L_straight from the axis curvature.
+# One definition, shared with the open-mirror examples: R_m,axis per on-axis
+# |B| well, R_m,LCFS separately, L_mirror,B between the two bounding |B|
+# maxima, and L_straight from the axis curvature.  Wells are not legs: this
+# hybrid's on-axis |B| varies by only a few percent, so its wells are shallow
+# ripples (R_m,axis ~ 1.01-1.04) that need not line up with the four legs.
+# The mirror that confines trapped particles here is the LCFS one.
 arc, period = closed_axis_arc(setup.axis)
 ratios = mirror_ratio_diagnostics(
     mod_b[0].mean(axis=0), arc, period=period,
@@ -294,9 +297,10 @@ print(f"  force normalized rms = {float(evaluated.force.normalized_rms):.3e}")
 print(f"  divergence rms       = {float(evaluated.normalized_divergence_rms):.3e}")
 print(f"  rotational transform = {float(field_line.iota):.4f}")
 print(f"  |B| axis={b_axis:.3f}  LCFS in [{b_lcfs_min:.3f}, {b_lcfs_max:.3f}]")
-print(f"  R_m,axis per leg     = {[round(x, 3) for x in ratios.axis_mirror_ratios]}")
+print(f"  on-axis |B| wells    = {len(ratios.wells)} (the axis has {len(splice.leg_lengths)} legs)")
+print(f"  R_m,axis per well    = {[round(x, 3) for x in ratios.axis_mirror_ratios]}")
 print(f"  R_m,LCFS             = {ratios.lcfs_mirror_ratio:.3f}")
-print(f"  L_mirror,B per leg   = {[round(x, 3) for x in ratios.mirror_lengths]} m")
+print(f"  L_mirror,B per well  = {[round(x, 3) for x in ratios.mirror_lengths]} m")
 print(f"  L_straight           = {ratios.straight_length:.3f} m of {period:.3f} m circuit")
 
 summary = {
