@@ -42,8 +42,8 @@ TARGET_BETAS = [0.0, 1.0, 2.0, 3.0]
 # target, so every point is held to the same fraction), and how many rescaling
 # attempts each target gets:
 SLOPE = 1.45e-3
-BETA_RTOL = 0.01
-CALIBRATION_ATTEMPTS = 3
+BETA_RTOL = 0.02
+CALIBRATION_ATTEMPTS = 4
 
 # Cylindrical grid the coil field is tabulated onto.  The bounds bracket the
 # plasma more tightly than the coil bounding box would:
@@ -146,9 +146,9 @@ for target in TARGET_BETAS:
         ps *= target / max(beta, 1e-6)  # pressure rescale toward the target
     fsq = float(res.fsqr) + float(res.fsqz) + float(res.fsql)
     axis_r = float(np.sum(np.asarray(wout.raxis_cc)))  # axis R at phi = 0
-    print(f"{target:7.1f}% {ps:11.1f} {beta:11.3f}% {int(res.iterations):6d} "
+    print(f"{target:7.1f}% {inp_i.pres_scale:11.1f} {beta:11.3f}% {int(res.iterations):6d} "
           f"{fsq:9.1e} {float(wout.aspect):7.3f} {axis_r:8.4f}")
-    rows.append((target, ps, beta, axis_r, wout))
+    rows.append((target, inp_i.pres_scale, beta, axis_r, wout))
     current = warm_boundary(current, wout)  # ramp continuation
 
 ### Print, plot and save ######################################################
