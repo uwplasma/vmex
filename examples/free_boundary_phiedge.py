@@ -104,7 +104,12 @@ elapsed = time.perf_counter() - start
 ### Print, plot and save ######################################################
 
 print(f"PHIEDGE = {solved.phiedge:.6f} Wb after {len(iterates)} solves, {elapsed:.1f} s")
-cold = evaluate(solved, vj.solve_free_boundary(solved, external_field=coil_field))
+# The cold check climbs a radial ladder, as a cold VMEC start should: straight
+# onto ns = 31 it needs ~10k iterations on macOS arm64 and exceeds NITER on
+# Linux x86; the ladder converges in under a thousand.
+cold_input = replace(solved, ns_array=[NS // 3, NS], ftol_array=[100 * FTOL, FTOL],
+                     niter_array=[NITER, NITER])
+cold = evaluate(cold_input, vj.solve_free_boundary_multigrid(cold_input, external_field=coil_field))
 print(f"cold re-solve: {METRIC} = {cold:.6f} (relative error {abs(cold / TARGET - 1):.1e})")
 wout = vj.wout_from_result(solved, result)
 
