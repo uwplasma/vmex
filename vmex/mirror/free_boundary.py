@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import brentq, least_squares
-from scipy.sparse.linalg import LinearOperator
+from scipy.sparse.linalg import LinearOperator, aslinearoperator
 
 from vmex.core.device import (
     AUTO,
@@ -56,6 +56,10 @@ from .splines import (
 
 Array = Any
 _DENSE_JACOBIAN_MAX_SIZE = 32
+# Up to this many unknowns the matrix-free trust region and the Krylov polish
+# are served from one forward-mode Jacobian per linearization point: at 48 unknowns that costs
+# about 15 JVPs, against the ~30 JVP/VJP actions LSMR spends per point.
+_DENSE_ACTION_MAX_SIZE = 128
 
 _NET_AXIAL_CURRENT_MESSAGE = (
     "the free-boundary mirror lane requires current_derivative == 0. The "
@@ -286,6 +290,9 @@ class _FreeEquilibriumProblem:
         residual_size = int(residual(point).size)
         if residual_size != self.size:
             raise ValueError(f"free residual size {residual_size} must equal state size {self.size}")
+        if self.size <= _DENSE_ACTION_MAX_SIZE:
+            return aslinearoperator(np.asarray(
+                _jacobian_lane(point, residual=residual), dtype=float))
 
         def matvec(direction: np.ndarray) -> np.ndarray:
             tangent = jnp.asarray(direction).reshape(-1)
@@ -310,6 +317,9 @@ class _FreeEquilibriumProblem:
         """Return the JAX-native exact residual Jacobian action."""
 
         point = jnp.asarray(vector)
+        if self.size <= _DENSE_ACTION_MAX_SIZE:
+            jacobian = _jacobian_lane(point, residual=self.residual_function)
+            return lambda direction: jacobian @ direction
         return lambda direction: _tangent_action_lane(
             point, direction, residual=self.residual_function)
 
@@ -325,6 +335,11 @@ class _FreeEquilibriumProblem:
 def _tangent_action_lane(point: Array, direction: Array, *,
                          residual: Callable[[Array], Array]) -> Array:
     return jax.jvp(residual, (point,), (direction,))[1]
+
+
+@functools.partial(jax.jit, static_argnames=("residual",))
+def _jacobian_lane(point: Array, *, residual: Callable[[Array], Array]) -> Array:
+    return jax.jacfwd(residual)(point)
 
 
 @functools.partial(jax.jit, static_argnames=("residual",))
