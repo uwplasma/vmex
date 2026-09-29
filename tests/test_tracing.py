@@ -127,19 +127,21 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
 
     from vmex.core.scaling import aries_cs_scales
 
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
+    buffer, progress = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(progress):
         rc = cli.main([
             str(solovev_wout), "--trace", "--outdir", str(tmp_path),
             "--trace-particles", "8", "--trace-tmax", "1e-5",
             "--trace-times", "12", "--trace-seed", "1", "--mbooz", "8", "--nbooz", "8",
-            "--collisional", "--trace-birth", "volume",
+            "--collisional", "--trace-birth", "volume", "--trace-mode-cut", "1e-3",
         ])
     stdout = buffer.getvalue()
     assert rc == 0, stdout
     for line in ("Loss fraction:", "Thermalized:", "Solver failures:",
-                 "Scaling: B_scale=", "compile"):
+                 "Scaling: B_scale=", "compile", "volavgB=5.8646 T, Aminor_p=1.7044 m",
+                 "mode cut 0.001 of B00", "Change with --trace-particles N"):
         assert line in stdout, line
+    assert "traced 100% of tmax" in progress.getvalue()
     for suffix in ("trace.png", "trace_3d.png", "trace.npz"):
         assert (tmp_path / f"solovev_{suffix}").exists(), suffix
     summary = json.loads((tmp_path / "solovev_trace.json").read_text())
@@ -183,3 +185,59 @@ def test_plot_tracing_writes_the_surface_birth_figures(traced, tmp_path):
 def test_collisional_requires_trace(solovev_wout):
     with pytest.raises(SystemExit):
         cli.main([str(solovev_wout), "--plot", "--collisional"])
+
+
+@pytest.mark.parametrize("levels, expected", [((10, 4), 10), ((4, 6), 14), (None, 14)])
+def test_trace_cpu_devices_skip_efficiency_cores_only_when_fewer(monkeypatch, levels, expected):
+    """M3 Max (10 P + 4 E) keeps its performance cores; M4 (4 + 6) and Linux use every usable core."""
+    import subprocess
+    import types
+
+    from vmex.core import parallel
+
+    monkeypatch.setattr(parallel, "available_cpus", lambda: 14)
+
+    def fake_sysctl(command, **_):
+        if levels is None:
+            raise FileNotFoundError("sysctl")
+        return types.SimpleNamespace(stdout=str(levels[int(command[-1][12])]))
+
+    monkeypatch.setattr(subprocess, "run", fake_sysctl)
+    assert cli._trace_cpu_devices() == expected
+
+
+def test_progress_leaves_the_trace_unchanged(traced, solovev_wout):
+    """Reporting progress runs the horizon in chunks and changes no orbit."""
+    calls = []
+    reported = trace_alphas(solovev_wout, **TRACE_KWARGS, progress=lambda d, n: calls.append((d, n)))
+    assert calls[-1][0] == calls[-1][1] and len(calls) > 1
+    np.testing.assert_array_equal(reported.lost_times, traced.lost_times)
+    np.testing.assert_array_equal(reported.trajectories, traced.trajectories)
+
+
+@pytest.mark.parametrize("tty", [True, False])
+def test_trace_progress_estimates_after_the_first_chunk(monkeypatch, tty):
+    """One rewritten line in a terminal, a line per chunk in a log; no estimate from the compiling chunk."""
+    stream = io.StringIO()
+    stream.isatty = lambda: tty
+    monkeypatch.setattr(cli.sys, "stderr", stream)
+    meter = cli._TraceProgress()
+    for done in (1, 2, 4):
+        meter(done, 4)
+    text = stream.getvalue()
+    assert "25% of tmax" in text and "estimating the rest" in text
+    assert "s left" in text and "100% of tmax" in text and "done" in text
+    assert text.count("\r") == (3 if tty else 0) and text.endswith("\n")
+
+
+def test_cli_trace_names_the_upgrade_for_an_outdated_essos(solovev_wout, tmp_path, monkeypatch):
+    """A stale environment gets the pip command, not a TypeError."""
+    from vmex import _compat
+
+    monkeypatch.setitem(_compat.OPTIONAL_MINIMUMS, "essos", "999.0")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = cli.main([str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--quiet"])
+    assert rc != 0
+    assert 'pip install -U "essos>=999.0"' in buffer.getvalue()
+    assert "MISSING OR OUTDATED OPTIONAL DEPENDENCY" in buffer.getvalue()

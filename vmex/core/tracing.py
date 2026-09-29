@@ -44,11 +44,13 @@ from typing import Any
 
 import numpy as np
 
+from .._compat import require_optional
+
 # Converged RK4 step [s] at Aminor_p = 1.7044 m, scaled with Aminor_p, and
 # the relative amplitude below which Boozer |B| modes are dropped
 # (docs/howto/trace-alpha-particles.md, convergence table).
 TIMESTEP = 1.25e-7
-MODE_TOLERANCE = 1e-3
+MODE_TOLERANCE = 1e-4
 # Landreman, Buller & Drevlak (2022) profiles: n_e0 [m^-3], T_0 [keV].
 NE0, T0_KEV = 4e20, 12.0
 _COMPILE_S = [0.0, 0.0]  # compile seconds, listener registered
@@ -60,6 +62,7 @@ def _compile_listener(event: str, duration: float, **_: Any) -> None:
 
 
 def _essos_imports():
+    require_optional("essos", "alpha-particle tracing")
     try:
         from essos import constants, dynamics, fields
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -246,7 +249,7 @@ def trace_alphas(
     source: Any,
     *,
     tmax: float = 1e-2,
-    nparticles: int = 1000,
+    nparticles: int = 500,
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,
@@ -259,6 +262,7 @@ def trace_alphas(
     mboz: int = 32,
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
+    progress: Any = None,
 ) -> AlphaTracingResult:
     """Trace fusion alphas through a wout file or in-memory equilibrium.
 
@@ -282,8 +286,13 @@ def trace_alphas(
         birth profile).
     mboz, nboz, mode_tolerance:
         Boozer resolution and the relative amplitude of dropped modes.
+    progress:
+        ``None``, or ``progress(done, total)``, called as the horizon advances
+        (ESSOS runs it in host-side chunks; the orbits are unchanged).
     """
     import jax
+
+    require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
 
@@ -310,7 +319,7 @@ def trace_alphas(
         field, *births.T, speed=float(np.sqrt(2 * energy / mass)), mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
-        species=background_species(ne0, T0_keV) if collisions else None)
+        species=background_species(ne0, T0_keV) if collisions else None, progress=progress)
     wall = time.perf_counter() - start
     times = np.linspace(0.0, float(tmax), int(times_to_trace))
     lost = trace.loss_times >= 0

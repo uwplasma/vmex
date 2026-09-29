@@ -2,16 +2,18 @@
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
 reports the fraction lost through the last closed flux surface. It needs the
-`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19 or later).
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.2 or later).
 
 ## Run it
 
 ```console
-vmex wout_case.nc --trace          # 1000 alphas, 10 ms, ARIES-CS size
+vmex wout_case.nc --trace          # 500 alphas, 10 ms, ARIES-CS size
 vmex input.case --trace            # solve first, then trace
 ```
 
-The default run takes about 30 s on a 10-core laptop (see Cost below). It prints the scaling factors, the step, the number of Boozer
+The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
+stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
+(ESSOS 0.19.2 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
@@ -23,7 +25,7 @@ its binomial error:
 
 | flag | default | what it sets | cost |
 |---|---|---|---|
-| `--trace-particles N` | 1000 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
+| `--trace-particles N` | 500 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
 | `--trace-timestep DT` | converged step (below) | RK4 step in seconds | `1 / DT` |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
@@ -35,6 +37,7 @@ its binomial error:
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
+| `--trace-mode-cut C` | `1e-4` | drop Boozer `|B|` modes below `C B00` | about `1 / C` in modes |
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
 example, going from the default to 5000 alphas over 0.1 s costs 50 times the
@@ -58,7 +61,7 @@ s = 0.3 lost within 0.2 s.
   equilibrium is first scaled in memory to ARIES-CS size: `<B> = 5.8646 T`
   and `a = 1.7044 m` (the `--scale` rule, see {doc}`scale-a-configuration`).
 - **Field.** `booz_xform_jax` transforms every surface to Boozer coordinates.
-  The `|B|` spectrum, cut at modes below `1e-3` of the largest amplitude, is
+  The `|B|` spectrum, cut at modes below `1e-4` of the largest amplitude (`B00`), is
   splined in `sqrt(s)`, and `iota`, `G` and `I` are splined in `s`.
 - **Orbits.** The guiding-centre equations in Boozer coordinates (White; the
   `K = 0` form of SIMSOPT) are integrated with fixed-step RK4 in the chart
@@ -104,9 +107,20 @@ Next to the input (or in `--outdir`):
 On an Apple M3 Max laptop (10 performance cores, load average 6-9), the
 default ARIES-CS run (`wout_n3are_R7.75B5.7.nc`, 1000 alphas, 10 ms, 41
 Boozer modes) takes 28 s: 25 s of tracing, of which 1.9 s is compilation.
-It loses 12.3 % ± 1.0 %. `--trace` gives JAX one CPU device per
-performance core; a device count in `XLA_FLAGS` or `JAX_NUM_CPU_DEVICES`
+It loses 12.3 % ± 1.0 %. The defaults are now 500 alphas (± 1.5 %) and a
+mode cut of 1e-4 (see the convergence section). `--trace` gives JAX one CPU
+device per usable core (on Linux, the cores the process may run on). On Apple
+silicon it uses only the performance cores unless there are at least as many
+efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
+performance cores. A device count in `XLA_FLAGS` or `JAX_NUM_CPU_DEVICES`
 wins. The Boozer transform takes about 2 s.
+
+**CPU or GPU.** At the default size a laptop CPU is faster than a GPU. The
+CPU cost grows linearly with the number of alphas. An RTX A4000 took 70-130 s
+at any count from 250 to 8000 alphas (1e-3 cut): the 80 000 RK4 steps run one
+after another, and each step is too little work to fill the GPU. It beat the
+M4 only from about 4000 alphas (89 s against 193 s). Use a GPU for
+`--trace-particles 5000` and up.
 
 ## Convergence of the defaults
 
@@ -116,12 +130,12 @@ the same alphas launched from s = 0.25 and traced for 10 ms.
 | alphas | step [s] | mode cut | modes | lost | vs reference (σ) |
 |---|---|---|---|---|---|
 | 4000 | 6.25e-8 | 1e-4 | 135 | 501 (12.5 %) | reference |
-| 4000 | **1.25e-7** | **1e-3** | **41** | **489 (12.2 %)** | **-0.6 (default)** |
+| 4000 | 1.25e-7 | 1e-3 | 41 | 489 (12.2 %) | -0.6 |
 | 4000 | 2.5e-7 | 1e-3 | 41 | 501 | 0.0 |
 | 1000 | 6.25e-8 | 1e-4 | 135 | 121 | reference |
 | 1000 | 6.25e-8 | 1e-5 | 382 | 131 | +1.0 |
 | 1000 | 1.25e-7 | 1e-4 | 135 | 115 | -0.6 |
-| 1000 | **1.25e-7** | **1e-3** | **41** | **125** | **+0.4 (default)** |
+| 1000 | 1.25e-7 | 1e-3 | 41 | 125 | +0.4 |
 | 1000 | 2.5e-7 | 1e-3 | 41 | 132 | +1.1 |
 
 Halving the default step (and refining the mode cut tenfold) changes the
@@ -134,6 +148,30 @@ Over 10 ms these orbits are chaotic, so the fraction converges while
 individual orbits do not. Over 2 ms, 2000 alphas give 54 and 55 losses at
 6.25e-8 s and 3.125e-8 s, 2.7 %. The earlier VMEC-coordinate tracer gave
 2.5 % ± 1.1 % at its converged step.
+
+### The mode cut across geometries
+
+ARIES-CS alone does not settle the cut. These runs trace 1000 alphas for
+10 ms through six equilibria at cuts of 1e-3 and 1e-4, with the same births
+at both. The cut is relative to the largest `|B|` amplitude, which is `B00` in
+every case.
+
+| equilibrium | modes at 1e-3 / 1e-4 | lost at 1e-3 / 1e-4 | difference | same label |
+|---|---|---|---|---|
+| ARIES-CS | 41 / 135 | 12.3 / 12.3 % | 0.0σ | 91 % |
+| Landreman-Paul QA | 3 / 16 | **0.0 / 0.7 %** | **-2.7σ** | 99 % |
+| Landreman-Paul QH | 4 / 14 | 0.0 / 0.0 % | | 100 % |
+| HSX | 40 / 159 | **9.6 / 12.7 %** | **-2.2σ** | 86 % |
+| W7-X (d23p4_tm, beta 5 %) | 29 / 78 | 1.9 / 2.1 % | -0.3σ | 99 % |
+| QI, 2 field periods | 30 / 172 | 3.2 / 2.9 % | +0.4σ | 98 % |
+
+A cut of 1e-3 misses the losses in the precise QA and in HSX. A good
+quasisymmetric field has all of its symmetry-breaking modes below `1e-3 B00`,
+and those are the modes that lose alphas. At 1e-5, Landreman-Paul QA still
+loses 0.7 % (96 modes) and HSX 12.0 % (342 modes, within 1σ of 1e-4). The
+default is therefore 1e-4, which takes about 3 times as long as 1e-3 on
+ARIES-CS. `--trace-mode-cut 1e-3` is a quick look for configurations far from
+quasisymmetry.
 
 ## Against SIMPLE and SIMSOPT
 

@@ -61,6 +61,7 @@ import argparse
 import os
 import re
 import shutil
+import sys
 import time
 from importlib import resources
 from pathlib import Path
@@ -252,8 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tracing horizon in seconds (default: 1e-2; cost is linear in it).",
     )
     p.add_argument(
-        "--trace-particles", type=int, default=1000,
-        help="Number of alpha particles (default: 1000; cost is linear, sigma ~ 1/sqrt(N)).",
+        "--trace-particles", type=int, default=500,
+        help="Number of alpha particles (default: 500; cost is linear, sigma ~ 1/sqrt(N)).",
     )
     p.add_argument(
         "--trace-no-scale", action="store_true",
@@ -281,6 +282,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--trace-times", type=int, default=1000,
         help="Samples of the loss-fraction curve (default: 1000).",
+    )
+    p.add_argument(
+        "--trace-mode-cut", type=float, default=None,
+        help="Drop Boozer |B| modes below this fraction of B00 (default: 1e-4; "
+             "1e-3 misses losses in precise quasisymmetry).",
     )
     p.add_argument(
         "--collisional", action="store_true",
@@ -578,13 +584,13 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     """
     import numpy as np
 
+    from .._compat import require_optional
+
     try:
+        require_optional("essos", "--coils")
         from essos.coils import Coils, Curves
     except ImportError as exc:
-        raise VmecInputError(
-            WERROR_MESSAGES[INPUT_ERROR_FLAG],
-            hint="--coils requires essos (pip install essos)",
-        ) from exc
+        raise VmecInputError("MISSING OR OUTDATED OPTIONAL DEPENDENCY", hint=str(exc)) from exc
 
     from .mgrid import MgridField
 
@@ -973,12 +979,53 @@ def _run_booz(wout_path: Path, args, outdir: Path, *, plot: bool, emit, quiet: b
     return boozmn_path
 
 
+def _scale_label(scale: str) -> str:
+    from .scaling import SCALE_TARGETS
+
+    b_target, a_target = SCALE_TARGETS[scale]
+    field = "volavgB" if scale == "volavgB" else "B00 on axis"
+    return f"ARIES-CS size: {field}={b_target:g} T, Aminor_p={a_target:g} m"
+
+
+class _TraceProgress:
+    """``--trace`` progress on stderr: share of the horizon traced, elapsed and remaining time.
+
+    The first chunk carries the Boozer transform and the compilation, so the
+    remaining time is estimated from the chunks after it.  A terminal line is
+    rewritten in place; a log gets a line per chunk.
+    """
+
+    def __init__(self) -> None:
+        self.start = time.perf_counter()
+        self.first: tuple[float, int] | None = None
+        self.tty = sys.stderr.isatty()
+        self.width = 0
+
+    def __call__(self, done: int, total: int) -> None:
+        now = time.perf_counter()
+        if self.first is None:
+            self.first, left = (now, done), "estimating the rest"
+        elif done < total:
+            rate = (done - self.first[1]) / (now - self.first[0])
+            left = f"about {(total - done) / rate:.0f} s left"
+        else:
+            left = "done"
+        line = f" traced {100 * done / total:3.0f}% of tmax, {now - self.start:.0f} s elapsed, {left}"
+        # pad over the previous, possibly longer, line
+        sys.stderr.write(f"\r{line:<{self.width}}" if self.tty else f"{line}\n")
+        self.width = max(self.width, len(line))
+        if self.tty and done == total:
+            sys.stderr.write("\n")
+        sys.stderr.flush()
+
+
 def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
     """Alpha-particle tracing driver for ``--trace`` (requires ESSOS)."""
     from .plotting import plot_tracing
-    from .tracing import trace_alphas
+    from .tracing import MODE_TOLERANCE, trace_alphas
 
     scale = None if args.trace_no_scale else args.scale_target
+    mode_cut = MODE_TOLERANCE if args.trace_mode_cut is None else float(args.trace_mode_cut)
     if not quiet:
         birth = ("volume" if args.trace_birth == "volume"
                  else f"s={float(args.trace_s):g}")
@@ -986,7 +1033,12 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
             f"guiding centre{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
-            f"{'unscaled' if scale is None else 'ARIES-CS ' + scale})"
+            f"{'unscaled' if scale is None else _scale_label(scale)}, "
+            f"mode cut {mode_cut:g} of B00)"
+        )
+        emit(
+            "   Change with --trace-particles N, --trace-tmax T [s], --trace-s S, "
+            "--trace-birth surface|volume, --collisional, --trace-mode-cut C"
         )
     try:
         result = trace_alphas(
@@ -1003,12 +1055,14 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             ne0=float(args.trace_ne0),
             T0_keV=float(args.trace_te0),
             mboz=int(args.mbooz),
+            mode_tolerance=mode_cut,
             nboz=int(args.nbooz),
+            progress=None if quiet else _TraceProgress(),
         )
     except ImportError as exc:
         raise VmecInputError(
-            WERROR_MESSAGES[INPUT_ERROR_FLAG],
-            hint="--trace requires essos>=0.19 and booz_xform_jax (pip install 'vmex[coils]')",
+            "MISSING OR OUTDATED OPTIONAL DEPENDENCY",
+            hint=str(exc),
         ) from exc
     except ValueError as exc:  # e.g. lasym equilibria
         raise VmecInputError(
@@ -1339,30 +1393,41 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
     return _solve_input_file(args, input_path, outdir, emit=emit)
 
 
-def _split_host_devices() -> None:
-    """Give JAX one CPU device per performance core, so ESSOS shards ``--trace``.
+def _trace_cpu_devices() -> int:
+    """Usable cores, or only the performance cores where efficiency cores are fewer."""
+    import subprocess
 
-    Measured 4.6x on 10 cores.  Runs before the backend
-    starts; a device count already set through ``XLA_FLAGS`` or
-    ``JAX_NUM_CPU_DEVICES`` wins.  GPU hosts keep tracing on the GPU, since
-    ESSOS shards over ``jax.devices()``, the default backend.
+    from .parallel import available_cpus
+
+    cores = available_cpus()
+    try:
+        performance, efficiency = (int(subprocess.run(
+            ["sysctl", "-n", f"hw.perflevel{level}.physicalcpu"],
+            capture_output=True, text=True, check=True, timeout=5).stdout) for level in (0, 1))
+    except Exception:  # not Apple silicon
+        return max(1, cores)
+    return max(1, performance if efficiency < performance else cores)
+
+
+def _split_host_devices() -> None:
+    """Give JAX one CPU device per usable core, so ESSOS shards ``--trace``.
+
+    Measured 4.6x on 10 cores.  Runs before the backend starts; a device
+    count already set through ``XLA_FLAGS`` or ``JAX_NUM_CPU_DEVICES`` wins.
+    GPU hosts keep tracing on the GPU, since ESSOS shards over
+    ``jax.devices()``, the default backend.  On Linux the count is the cores
+    this process may run on (:func:`~vmex.core.parallel.available_cpus`).  On
+    Apple silicon the shards run in lockstep, so a slower efficiency core
+    sets the pace: only performance cores are used unless efficiency cores
+    are at least as many (M4, 4 + 6 cores: all 10 are 1.7x faster than 4).
     """
     import jax
 
     if ("host_platform_device_count" in os.environ.get("XLA_FLAGS", "")
             or jax.config.jax_num_cpu_devices > 0):
         return
-    cores = os.cpu_count() or 1
-    try:  # performance cores on Apple silicon; efficiency cores slow a vmap lockstep
-        import subprocess
-
-        cores = int(subprocess.run(
-            ["sysctl", "-n", "hw.perflevel0.physicalcpu"],
-            capture_output=True, text=True, check=True, timeout=5).stdout)
-    except Exception:
-        pass
     try:
-        jax.config.update("jax_num_cpu_devices", max(1, cores))
+        jax.config.update("jax_num_cpu_devices", _trace_cpu_devices())
     except Exception:  # pragma: no cover - backend already initialised
         pass
 
@@ -1382,8 +1447,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
-    if (args.collisional or args.trace_birth != "surface") and not args.trace:
-        parser.error("--collisional and --trace-birth require --trace")
+    if (args.collisional or args.trace_birth != "surface"
+            or args.trace_mode_cut is not None) and not args.trace:
+        parser.error("--collisional, --trace-birth and --trace-mode-cut require --trace")
     if bool(args.trace):
         _split_host_devices()
     # Flushing sink: with stdout redirected to a file (cluster batch logs),

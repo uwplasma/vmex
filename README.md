@@ -72,7 +72,7 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.19` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.19.2` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.2` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
 | `pip install "vmex[turbulence]"` | `gkx>=2.4.2` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) |
@@ -85,7 +85,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
 | `booz_xform_jax` | 0.4.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.1"` |
-| `essos` | 0.19 | `vmex[coils]` | `pip install "essos>=0.19"` |
+| `essos` | 0.19.2 | `vmex[coils]` | `pip install "essos>=0.19.2"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.2 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.2"` |
 | `gkx` | 2.4.2 | `vmex[turbulence]` | `pip install "gkx>=2.4.2"` |
@@ -133,8 +133,8 @@ vmex input.nearby --restart wout_my_case.nc
 ```
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
-by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 1000 fusion alphas for
-10 ms in Boozer coordinates (about 30 s on 10 cores). It writes the loss fraction and a figure set:
+by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
+10 ms in Boozer coordinates (under a minute on 10 CPU cores, faster than a GPU at this size). It writes the loss fraction and a figure set:
 loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
 `--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
 birth profile, and `--collisional` adds slowing down and pitch-angle scattering
@@ -259,9 +259,8 @@ The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
   value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
   ([record](benchmarks/qa_optimization_startup_least_squares_m4.json), VMEX 0.7.0).
-- **Not validated.** Free-boundary derivatives are experimental (CPU by default), 3-D force-balance
-  polishing has not certified, and mirror beta above 10% is extended validation. The
-  [validation record](docs/explanation/validation.md) lists every gate, tolerance and record.
+- **Validation record.** The [validation record](docs/explanation/validation.md) lists every
+  gate, tolerance and benchmark record, with the measured accuracy of each lane.
 
 ![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
 
@@ -311,10 +310,19 @@ coupled plasma-vacuum residual, where its gradient is exact.
 ### Open mirrors and stellarator-mirror hybrids
 
 The same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, solved by
-minimizing the MHD energy. What changes is the geometry: an open mirror has a non-periodic axial
-coordinate between two fixed-flux end cuts (not a thin torus), discretized with cubic B-splines
-instead of toroidal Fourier modes; its free boundary couples to an open exterior vacuum problem. A
-stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns.
+minimizing the MHD energy. What changes is the coordinate system. A tokamak or stellarator has one
+non-periodic coordinate (the flux label `s`) and two periodic angles. An open mirror uses
+`(s, theta, xi)`: two non-periodic coordinates, the flux label `s` in `[0, 1]` and the axial
+coordinate `xi` in `[-1, 1]` between two end cuts, and one periodic angle `theta`. So `theta` keeps
+Fourier modes, `xi` gets clamped cubic B-splines instead of toroidal modes, and the end cuts
+`xi = ±1` become boundary conditions: their nested surfaces are prescribed and flux passes through
+them, while the free boundary couples the side surface `s = 1` to an open exterior vacuum problem.
+The field is divergence-free by construction, `sqrt(g) B^theta = I'(s) - d(lambda)/d(xi)`,
+`sqrt(g) B^xi = Psi'(s) + d(lambda)/d(theta)`, `B^s = 0`, which is the Clebsch form
+`B = grad Psi x grad alpha` with field-line label `alpha = theta + lambda/Psi' - (I'/Psi') xi`
+([mirror geometry](https://vmex.readthedocs.io/en/latest/explanation/mirror-geometry.html)). A
+stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns and uses a
+periodic spline along its length.
 
 ```console
 vmex examples/data/input.mirror_two_coil_free_boundary --plot   # a &MIRROR deck, writes mout_*.nc
@@ -362,7 +370,7 @@ python examples/take_fixed_boundary_gradients.py
 | Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
 | ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
 | Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
-| Experimental exterior tracing (unqualified topology) | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
+| Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
 | Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
 | Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
 | Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
@@ -381,14 +389,14 @@ external_field=coils.B)` adds the plasma's virtual-casing field to the coils, ac
 down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `MgridField`
 (trilinear or tricubic).
 
-![Poincare sections of the extended field: HSX, and Landreman-Paul QA against HINT](docs/_static/figures/readme_extender_islands.webp)
+![Poincare sections of the extended field around finite-beta free-boundary QA equilibria](docs/_static/figures/readme_extender_islands.webp)
 
-Field lines of the extended field at zero beta, where it equals the coil field. HSX (left): lines
-launched on VMEX surfaces stay within 8 mm of them for 200 field periods; lines launched outside are
-open. Landreman-Paul QA (right): the same seeds traced through the coils and through HINT's relaxed
-field, with the island chain and stochastic layer outside the VMEX surfaces of the matched free
-boundary; HINT and the coils agree on the rotational transform to 3e-7. Details, accuracy limits and the
-interior-field benchmark: [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+The Landreman-Paul QA held by its coils as a free boundary at 1.0% and 2.2% beta, and the field
+lines of the extended field (coils plus the plasma's virtual-casing field) launched outside it.
+Closed surfaces continue 3.1 cm past the LCFS at 1.0% beta and 1.5 cm at 2.2% beta, against 2.7 cm
+in vacuum; beyond them the lines open. The figure is built by VMEX from `examples/data` alone
+(`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
+are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
 ## Accuracy and optional polishing
 

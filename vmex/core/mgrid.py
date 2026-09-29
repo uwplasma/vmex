@@ -799,6 +799,9 @@ class MgridField:
         :meth:`from_parameterized_cartesian_field` is the differentiable
         route.
         """
+        from .._compat import require_optional
+
+        require_optional("essos", "coil fields")
         try:
             from essos.fields import BiotSavart
         except ImportError as exc:  # pragma: no cover - optional dependency
