@@ -82,9 +82,10 @@ def test_cut_audit_scales_boozer_tables_without_retransform(solovev_wout, tmp_pa
         bx.append(transform)
     direct = scaled_field(bx[0], wout, b, r, 1e-4)
     reference = BoozerField.from_booz_xform(
-        bx[1], float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), 1e-4)
+        bx[1], -float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), 1e-4)
     np.testing.assert_allclose(direct.b_coef, reference.b_coef, rtol=1e-8, atol=5e-11)
     np.testing.assert_allclose(direct.profile_coef, reference.profile_coef, rtol=1e-8, atol=5e-11)
+    assert direct.psi0 == pytest.approx(reference.psi0)
 
 
 @pytest.fixture(scope="module")

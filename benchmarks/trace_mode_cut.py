@@ -60,7 +60,7 @@ def scaled_field(bx, wout, b, r, cut):
     return BoozerField.from_booz(
         bx.s_b, b * np.asarray(bx.bmnc_b), bx.xm_b, bx.xn_b, bx.iota,
         b * r * np.asarray(bx.Boozer_G), b * r * np.asarray(bx.Boozer_I),
-        float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), int(bx.nfp), cut)
+        -float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), int(bx.nfp), cut)
 
 
 def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step_factor):
