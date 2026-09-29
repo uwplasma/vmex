@@ -254,6 +254,11 @@ diagnostics = maximum_j.compute_state(final_equilibrium.solution,
 ### Print, plot and save ######################################################
 
 report("final", final_equilibrium)
+final_beta = float(final_equilibrium.wout.betatotal)
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET,
+                   extra=[("beta", final_beta, 0.9 * TARGET_BETA, "min"),
+                          ("beta", final_beta, 1.1 * TARGET_BETA, "max")])
 print(f"maximum-J residual = {float(diagnostics['total']):.4e}, "
       f"outer-radius maximum-J fraction = {float(diagnostics['maximum_j_fraction']):.1%}")
 print(f"beta = {float(final_equilibrium.wout.betatotal):.3%}; "

@@ -212,6 +212,12 @@ final_equilibrium = opt.solve_equilibrium(
 ### Print, plot and save ######################################################
 
 final_total = report("final", final_equilibrium)["QS total"]
+final_beta = float(opt.volume_average_beta(final_equilibrium.solution,
+                                           final_equilibrium.solver_context))
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET,
+                   extra=[("beta", final_beta, 0.9 * TARGET_BETA, "min"),
+                          ("beta", final_beta, 1.1 * TARGET_BETA, "max")])
 print(f"\nQS total {final_total:.3e}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")

@@ -176,6 +176,8 @@ final_equilibrium = opt.solve_equilibrium(
 ### Print, plot and save ######################################################
 
 qi_final = report("final", final_equilibrium)["constructed QI"]
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT)
 qi_validation = ConstructedQIResidual(SURFACES, **VALIDATION_OPTIONS)
 print(f"\nQI total {qi_final:.3e}; independent fine-grid validation "
       f"{float(qi_validation.total(final_equilibrium)):.3e}")

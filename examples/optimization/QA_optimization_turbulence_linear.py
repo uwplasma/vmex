@@ -234,6 +234,9 @@ final_equilibrium = opt.solve_equilibrium(
 ### Print, plot and save ######################################################
 
 final_growth = report("final", final_equilibrium)["growth rate"]
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET,
+                   extra=[("growth rate", final_growth, seed_growth, "max")])
 print(f"\ngrowth rate {seed_growth:.5f} -> {final_growth:.5f} at NS = {FINAL_NS}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")

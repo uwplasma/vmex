@@ -235,6 +235,9 @@ final_equilibrium = opt.solve_equilibrium(
 ### Print, plot and save ######################################################
 
 final_flux = report("final", final_equilibrium)["QL heat flux"]
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET,
+                   extra=[("QL heat flux", final_flux, seed_flux, "max")])
 print(f"\nQL heat flux {seed_flux:.5f} -> {final_flux:.5f} at NS = {FINAL_NS}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")

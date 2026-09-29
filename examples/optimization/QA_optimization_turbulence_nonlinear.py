@@ -291,6 +291,8 @@ for max_mode, maxiter in zip(MAX_MODES, MAXITER):
 ### Print, plot and save ######################################################
 
 final_flux = report("final", equilibrium)["heat flux"]
+opt.report_targets(equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   extra=[("heat flux", final_flux, seed_flux, "max")])
 print(f"\nwindow heat flux {seed_flux:.5e} -> {final_flux:.5e} "
       "(one differentiated window each, a noisy estimate)")
 # The number to quote is the gated saturated mean with its standard error.

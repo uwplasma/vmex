@@ -132,6 +132,7 @@ from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progres
 from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord
 
 __all__ = [
+    "report_targets",
     "VmecProblem",
     "FunctionProblem",
     "Evaluation",
@@ -778,6 +779,49 @@ class QuasisymmetryRatioResidual:
 # conventions) — live in statephysics.py (Item I.7 consolidation) and are
 # re-exported here unchanged; ``iota_edge`` is the naming-flip alias of
 # ``edge_iota`` (implicit.py exposes the mirror alias).
+
+
+def report_targets(
+    eq: Equilibrium,
+    *,
+    aspect: float | None = None,
+    aspect_rtol: float = 0.05,
+    iota_floor: float | None = None,
+    well_floor: float | None = None,
+    mirror_limit: float | None = None,
+    elongation_limit: float | None = None,
+    extra: Sequence[tuple[str, float, float, str]] = (),
+) -> bool:
+    """Print one line saying whether an optimized equilibrium met its targets.
+
+    Keyword targets are checked on ``eq``: ``aspect`` within ``aspect_rtol``,
+    ``iota_floor`` on the profile minimum of ``|iota|``, ``well_floor`` on the
+    magnetic well, and the mirror-ratio and elongation limits as ceilings.  ``extra``
+    rows are ``(name, value, bound, "min" | "max")``.  Returns whether all
+    were met.
+    """
+    state, rt = eq.solution, eq.solver_context
+
+    def value(function):
+        return float(np.asarray(function(state, rt)))
+
+    rows = list(extra)
+    if aspect is not None:
+        a = value(aspect_ratio)
+        rows += [("aspect", a, aspect * (1 - aspect_rtol), "min"),
+                 ("aspect", a, aspect * (1 + aspect_rtol), "max")]
+    for name, function, bound, kind in (
+            ("min |iota|", min_abs_iota, iota_floor, "min"),
+            ("magnetic well", magnetic_well, well_floor, "min"),
+            ("mirror ratio", mirror_ratio, mirror_limit, "max"),
+            ("elongation", max_elongation, elongation_limit, "max")):
+        if bound is not None:
+            rows.append((name, value(function), bound, kind))
+    unmet = [f"{name} {v:.4g} {'below' if kind == 'min' else 'above'} {bound:.4g}"
+             for name, v, bound, kind in rows
+             if not (v >= bound if kind == "min" else v <= bound)]
+    print("Targets met." if not unmet else "Targets NOT met: " + "; ".join(unmet) + ".")
+    return not unmet
 
 
 def mirror_ratio(state: SpectralState, rt: SolverRuntime, *, s_index: int = -1) -> Array:

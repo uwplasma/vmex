@@ -193,6 +193,7 @@ final_equilibrium = opt.solve_equilibrium(
 ### Print, plot and save ######################################################
 
 final_total = report("final", final_equilibrium)["QS total"]
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET)
 print(f"\nQS total {final_total:.3e}")
 if USE_TRIAL_STABILITY:
     final_s = np.linspace(0.0, 1.0, int(final_input.ns_array[-1]))[2:-1]

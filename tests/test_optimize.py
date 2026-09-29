@@ -1712,3 +1712,18 @@ def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
     im._HOT_CACHE[cfg] = "warm"
     result = im._host_solve(cfg, {"leaf": np.zeros(1)})
     assert calls == ["warm", None] and result.converged
+def test_report_targets_prints_one_verdict_line(capsys, monkeypatch):
+    from types import SimpleNamespace
+
+    eq = SimpleNamespace(solution=None, solver_context=None)
+    assert opt.report_targets(eq, extra=[("QS", 1e-3, 1e-2, "max")])
+    assert not opt.report_targets(eq, extra=[("beta", 0.02, 0.025, "min")])
+    for name, value in (("aspect_ratio", 6.5), ("min_abs_iota", 0.4),
+                        ("magnetic_well", 0.02), ("mirror_ratio", 0.2),
+                        ("max_elongation", 5.0)):
+        monkeypatch.setattr(opt, name, lambda state, rt, value=value: value)
+    assert not opt.report_targets(eq, aspect=6.0, iota_floor=0.42, well_floor=0.01,
+                                  mirror_limit=0.21, elongation_limit=8.0)
+    out = capsys.readouterr().out.splitlines()
+    assert out == ["Targets met.", "Targets NOT met: beta 0.02 below 0.025.",
+                   "Targets NOT met: aspect 6.5 above 6.3; min |iota| 0.4 below 0.42."]

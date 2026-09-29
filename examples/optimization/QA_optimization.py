@@ -175,6 +175,8 @@ final_equilibrium = opt.solve_equilibrium(
 ### Print, plot and save ######################################################
 
 final_total = report("final", final_equilibrium)["QS total"]
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET)
 print(f"\nQS total {final_total:.3e}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
