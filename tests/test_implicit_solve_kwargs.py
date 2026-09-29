@@ -60,7 +60,7 @@ def test_implicit_least_squares_honors_multigrid_solve_kwargs():
     alternate = run({
         "ns_array": [5],
         "ftol_array": [1.0e-6],
-        "niter_array": [5],
+        "niter_array": [1000],
         "device": "cpu",
     })
     # The two requested ladders must produce finite, observable residuals.

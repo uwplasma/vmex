@@ -1403,6 +1403,11 @@ def _params_key(params: ImplicitParams) -> bytes:
                     for leaf in jax.tree.leaves(params))
 
 
+def _fsq(result) -> float:
+    total = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
+    return total if np.isfinite(total) else np.inf
+
+
 def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
     key = _params_key(params)
     hit = _LAST_SOLVE.get(cfg)
@@ -1433,17 +1438,24 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
                 device=solver_device)
     # Seed ladder: perturbation prediction -> plain hot restart -> cold.
     # A bad warm seed must not fail the trial (only the initial guess is at
-    # stake — every rung converges to the same fixed point).
+    # stake — every rung converges to the same fixed point), whether it
+    # raises or merely exhausts the iteration budget; the least-residual
+    # attempt is kept.
     attempts = [s for s in (perturb, hot) if s is not None] + [None]
+    result = None
     with _timed(cfg, "solve"):
         for k, init in enumerate(attempts):
             try:
-                result = run(init)
-                break
+                trial = run(init)
             except VmecError:
-                if k == len(attempts) - 1:
+                if k == len(attempts) - 1 and result is None:
                     _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
                     raise
+                continue
+            if result is None or _fsq(trial) < _fsq(result):
+                result = trial
+            if bool(result.converged):
+                break
         if cfg.hot_restart and bool(result.converged):
             _HOT_CACHE[cfg] = result.state
         _LAST_SOLVE[cfg] = (key, result)

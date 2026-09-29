@@ -1686,3 +1686,29 @@ def test_uncertified_seed_is_refused_not_scored_as_the_penalty():
     opt._require_certified_seed(memo(False, 5e-11), 1e-12, 100.0)
     with pytest.raises(VmecConvergenceError, match="seed equilibrium did not converge"):
         opt._require_certified_seed(memo(False, 1e-6), 1e-12, 100.0)
+
+
+def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
+    """A warm seed that only runs out of iterations must not end the ladder."""
+    from types import SimpleNamespace
+
+    from vmex.core import implicit as im
+
+    calls = []
+
+    def fake_solve(_inp, _resolution, *, initial_state, **_kwargs):
+        calls.append(initial_state)
+        warm = initial_state is not None
+        return SimpleNamespace(converged=not warm, fsqr=1e-6 if warm else 1e-13,
+                               fsqz=0.0, fsql=0.0, iterations=10, state=None)
+
+    monkeypatch.setattr(im, "solve", fake_solve)
+    monkeypatch.setattr(im, "input_with_params", lambda inp, params: inp)
+    class Config(SimpleNamespace):  # weak-referenceable, like ImplicitConfig
+        __hash__ = object.__hash__
+
+    cfg = Config(inp=None, hot_restart=True, multigrid=False, resolution=None,
+                 ftol=1e-12, max_iterations=10, mode=None, lconm1=True)
+    im._HOT_CACHE[cfg] = "warm"
+    result = im._host_solve(cfg, {"leaf": np.zeros(1)})
+    assert calls == ["warm", None] and result.converged
