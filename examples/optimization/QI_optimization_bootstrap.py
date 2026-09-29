@@ -82,6 +82,12 @@ CURRENT_PARAMETER_STEP = 0.05
 MAX_PARAMETER_CHANGE = 10.0       # per-stage box guardrail, in scaled step units
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 
+# Force tolerance of each optimizer trial solve.  The deck's 1e-12 is not
+# reached within its 5500 iterations once the bootstrap current is on (the
+# stage seed stalled at fsq = 5.7e-9); the verification solve below still
+# tightens to FINAL_FTOL:
+FORWARD_FTOL = 1e-10
+
 # Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
 # but never below MINIMUM_MPOL:
 MINIMUM_MPOL = 5
@@ -218,7 +224,8 @@ for max_mode, max_nfev, n_spline in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE):
     problem = opt.VmecProblem.from_tuples(
         inp, objective_function_terms, max_mode=max_mode,
         current_dofs=n_spline - 1, vary_major_radius=VARY_MAJOR_RADIUS,
-        use_ess=True, restart_from=equilibrium, progress=not ci_smoke)
+        use_ess=True, restart_from=equilibrium, forward_ftol=FORWARD_FTOL,
+        progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     step = PARAMETER_STEP * problem.scales
@@ -244,6 +251,11 @@ final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium
 ### Print, plot and save ######################################################
 
 report("final", final_equilibrium)
+final_beta = float(final_equilibrium.wout.betatotal)
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT,
+                   extra=[("beta", final_beta, 0.9 * TARGET_BETA, "min"),
+                          ("beta", final_beta, 1.1 * TARGET_BETA, "max")])
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
