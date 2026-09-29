@@ -33,11 +33,11 @@ SEED_PERTURBATION = 0.05
 SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Highest boundary Fourier mode number that is varied:
-MAX_MODE = 3
+MAX_MODE = 2
 
 # Global phase: hops, and the L-BFGS-B iterations each hop may spend:
-N_BASINS = 10
-LOCAL_MAXITER = 15
+N_BASINS = 4
+LOCAL_MAXITER = 8
 
 # Basin-hopping acceptance temperature, perturbation size, and the random
 # seed that makes the walk reproducible:
@@ -46,7 +46,7 @@ BASIN_STEPSIZE = 0.25
 BASIN_SEED = 7
 
 # Local finish: residual evaluations the polishing least squares may spend:
-POLISH_NFEV = 30
+POLISH_NFEV = 15
 
 # Targets:
 ASPECT_TARGET = 5.0
@@ -167,7 +167,6 @@ def short_lbfgsb(fun, x, jac=None, bounds=None, callback=None, **options):
 
 ### Run the optimization ######################################################
 
-print("First print can take more than ten minutes")
 bounds = [(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size
 basinhopping(value_and_gradient, np.zeros_like(x0), niter=N_BASINS,
     T=BASIN_TEMPERATURE, stepsize=BASIN_STEPSIZE,
