@@ -77,20 +77,21 @@ mgrid = vj.MgridField.from_cartesian_field(
 base_input = vj.VmecInput.from_file(
     DATA / "input.LandremanPaul2021_QA_beta2p5_bootstrap").change_resolution(
         mpol=MPOL, ntor=NTOR, ntheta=2 * MPOL + 6, nzeta=16)
-base_input = replace(base_input, delt=0.35, ns_array=np.array([NS]),
-    niter_array=np.array([NITER]), ftol_array=np.array([FTOL]))
+# The free boundary climbs a radial ladder from ns = 11: started directly on
+# ns = 31 (even from the converged fixed-boundary state) the soft m = 1 axis
+# shift oscillates and the solve never reaches FTOL.
+LADDER = [11, NS] if NS > 11 else [NS]
+base_input = replace(base_input, delt=0.35, ns_array=np.array(LADDER),
+    niter_array=np.array([3000, NITER][-len(LADDER):]),
+    ftol_array=np.array([1.0e-6, FTOL][-len(LADDER):]))
 
 def scaled_parent(scale, *, free):
     return replace(base_input, pres_scale=scale * base_input.pres_scale,
         curtor=scale * base_input.curtor, lfreeb=free,
         mgrid_file="ESSOS field (in memory)" if free else "NONE")
 
-# A converged fixed-boundary state is a useful initial interior, but VMEX must
-# still turn on NESTOR before accepting it as a free-boundary equilibrium.
-fixed_parent = opt.solve_equilibrium(scaled_parent(1.0, free=False))
 free_input = scaled_parent(1.0, free=True)
-free_result = vj.solve_free_boundary_multigrid(
-    free_input, external_field=mgrid, initial_state=fixed_parent.state, verbose=True)
+free_result = vj.solve_free_boundary_multigrid(free_input, external_field=mgrid, verbose=True)
 if BETA_SCALE != 1.0:
     free_input = scaled_parent(BETA_SCALE, free=True)
     free_result = vj.solve_free_boundary_multigrid(
