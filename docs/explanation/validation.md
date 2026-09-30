@@ -627,6 +627,8 @@ ESSOS losses occur by 0.158 ms. Maximum relative energy drift is 2.08e-5
 at every ESSOS step and 5.17e-2 on saved confined CATAPULT paths. The
 8,192-birth ensemble uses the same seed as the 4,096-birth run but is sampled
 separately, so its first half is not the earlier ensemble.
+Of the 70 CATAPULT-only losses, 66 reach `s<0.01` in ESSOS. The CATAPULT
+orbit with the largest saved-path energy drift reaches `s=0.0010`.
 
 CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
 101 states per birth. Thirty of the 31 released CATAPULT-only losses approach
