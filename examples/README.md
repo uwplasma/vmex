@@ -119,12 +119,11 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   frozen-geometry pressure proxies before re-solving at finite pressure, and
   `QA_optimization_global.py` explores basins with SciPy basin hopping before
   the exact least-squares finish.
-  `alpha_particle_optimization.py` (`pip install "vmex[coils]"`) directly
-  minimizes collisionless ESSOS traced 2 ms alpha loss fraction from `s=0.3`
-  with an aspect-ratio penalty,
-  starting from a non-optimized NFP=2 seed. It has no symmetry stage or
-  symmetry objective. A fresh 2000-alpha, 5 ms check finds 81.0 % lost for
-  the seed and 28.0 % after optimization (aspect ratio 5.98 to 6.30).
+  `alpha_particle_optimization.py` (`pip install "vmex[coils]"`) differentiates a
+  smooth ESSOS orbit-risk score from `s=0.3` through VMEX equilibria, with an
+  aspect-ratio penalty and no symmetry stage. It selects accepted iterates by
+  hard 2 ms losses and tests fresh alphas at 5 ms; the loss-curve shading is a
+  pointwise 95% Wilson interval. Short training orbits make this a research example.
   `QA_optimization_turbulence_linear.py`,
   `QA_optimization_turbulence_quasilinear.py` and
   `QA_optimization_turbulence_nonlinear.py` (`pip install "vmex[turbulence]"`)
