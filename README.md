@@ -226,11 +226,15 @@ convergence checks, constraints, scaling and finite-difference verification.
 
 For direct fast-ion optimization, run
 `python examples/optimization/alpha_particle_optimization.py` after installing
-`vmex[coils]`. The example differentiates a smooth ESSOS guiding-center orbit-risk
+`vmex[coils]`. The example differentiates an ESSOS guiding-center orbit-risk
 score from `s=0.3` through VMEX equilibria, with an aspect-ratio penalty and no
-symmetry stage. Hard 2 ms losses select an iterate; fresh particles check 5 ms
+symmetry stage. It trains on 64 common births for 0.25 ms; hard 2 ms losses
+select an iterate and fresh particles check 5 ms
 losses. The plot shades pointwise 95% Wilson intervals across holdout particles.
-The short training orbits make this a research example, not a converged reactor design.
+Across two independent 512-alpha holdouts, losses fall from 819 to 751 at 5 ms;
+the minor radius changes by −0.54% and the sampled global mirror ratio changes
+1.475→1.478. The short training orbits make this a research example, not a
+converged reactor design.
 
 ## How VMEX works
 

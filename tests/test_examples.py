@@ -834,11 +834,14 @@ def test_alpha_particle_optimization(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(EXAMPLES / "optimization" / "alpha_particle_optimization.py",
                        tmp_path, timeout=1200)
+    assert "Direct alpha-orbit autodiff optimization" in out
+    assert "smooth cost" in out
     losses = dict(re.findall(r"^(seed|optimized): \d+ alphas for [0-9.]+ ms lose "
                              r"([0-9.]+)%", out, re.M))
     assert set(losses) == {"seed", "optimized"}, out
     assert all(0.0 <= float(value) <= 100.0 for value in losses.values())
-    for name in ("wout_alpha_particle_optimized.nc", "alpha_particle_optimized_losses.png"):
+    for name in ("input.alpha_particle_optimized", "wout_alpha_particle_optimized.nc",
+                 "alpha_particle_optimized_losses.png"):
         assert (tmp_path / name).exists(), name
 
 

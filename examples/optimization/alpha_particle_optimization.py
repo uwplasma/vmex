@@ -37,7 +37,8 @@ N, T, STEPS, MAXITER = (16, 1e-5, 40, 2) if CI else (64, 2.5e-4, 2000, 3)
 HARD_N, HARD_T = (16, 1e-4) if CI else (256, 2e-3)
 CHECK_N, CHECK_T, CHECK_SEEDS = (16, 1e-4, (2,)) if CI else (512, 5e-3, (2, 3))
 SURFACES = (np.arange(10) + 0.5) / 10
-ASPECT_WEIGHT, MAX_ASPECT_DRIFT = 5.0, 0.1
+# The accepted iterate keeps the minor-radius change below about 1% for this seed.
+ASPECT_WEIGHT, MAX_ASPECT_DRIFT = 5.0, 0.04
 NAME = "alpha_particle_optimized"
 DATA = Path(__file__).resolve().parents[1] / "data" / "input.minimal_seed_nfp2"
 
@@ -119,6 +120,7 @@ def orbit_risk(field, births, reference_weight):
         yn = y + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
         sn = yn[:, 0] ** 2 + yn[:, 1] ** 2
         sn = jnp.where(jnp.isfinite(sn), sn, 1.0)
+        # Crossing events make derivatives local to a fixed loss topology.
         lost = lost | (sn >= 1.0)
         capped = jnp.where(lost, 0.95, jnp.minimum(sn, 0.95))
         w = jnp.exp((capped - 0.8) / 0.06)
@@ -192,6 +194,7 @@ def hard_check(eq, n, tmax, seed):
         eq.wout, nparticles=n, tmax=tmax, s=0.3, seed=seed, times_to_trace=101, mboz=12, nboz=12, mode_tolerance=1e-5
     )
     drift = float(np.max(np.abs(trace.energy_error)))
+    # Relative energy drift above 0.1% makes a hard-loss checkpoint unreliable.
     if trace.particles_failed or not np.isfinite(drift) or drift > 1e-3:
         raise ValueError("unreliable alpha trace")
     cost = trace.loss_fraction + ASPECT_WEIGHT * (float(eq.wout.aspect) - aspect_target) ** 2
@@ -218,13 +221,18 @@ def check(y):
     eq = problem.equilibrium_from_x(x0 + step * basis @ y)
     cost, trace = hard_check(eq, HARD_N, HARD_T, 1)
     aspect = float(eq.wout.aspect)
+    keep = cost < best_cost and abs(aspect - aspect_target) <= MAX_ASPECT_DRIFT
+    status = (
+        "selected" if keep else ("aspect window" if abs(aspect - aspect_target) > MAX_ASPECT_DRIFT else "hard cost")
+    )
     print(
         f"step {accepted}: {trace.loss_fraction:.1%} hard losses, aspect {aspect:.3f}, "
         f"minor radius {eq.wout.Aminor_p:.4f} m, "
-        f"max energy drift {np.max(np.abs(trace.energy_error)):.2e}",
+        f"max energy drift {np.max(np.abs(trace.energy_error)):.2e} "
+        f"({status})",
         flush=True,
     )
-    if cost < best_cost and abs(aspect - aspect_target) <= MAX_ASPECT_DRIFT:
+    if keep:
         best_cost, best_y = cost, np.asarray(y).copy()
 
 
@@ -258,12 +266,15 @@ for holdout_seed in CHECK_SEEDS:
 for label, eq in (("seed", seed_eq), ("optimized", final_eq)):
     bb, rr, _ = scales(eq.state, eq.runtime)
     field = field_from_state(eq.state, eq.runtime, bb, rr)
-    th, ze = np.meshgrid(
-        np.linspace(0, 2 * np.pi, 32, endpoint=False), np.linspace(0, np.pi, 32, endpoint=False), indexing="ij"
+    ss, th, ze = np.meshgrid(
+        np.linspace(0.025, 0.975, 20),
+        np.linspace(0, 2 * np.pi, 48, endpoint=False),
+        np.linspace(0, np.pi, 48, endpoint=False),
+        indexing="ij",
     )
-    b = np.asarray(jax.vmap(field.modB)(jnp.full(th.size, 0.3), th.ravel(), ze.ravel()))
+    b = np.asarray(jax.vmap(field.modB)(ss.ravel(), th.ravel(), ze.ravel()))
     print(
-        f"{label}: B(s=0.3) {b.min():.3f}–{b.max():.3f} T, "
+        f"{label}: sampled plasma B {b.min():.3f}–{b.max():.3f} T, "
         f"mirror ratio {b.max() / b.min():.3f}; "
         f"force residuals {eq.wout.fsqr:.1e}, {eq.wout.fsqz:.1e}, "
         f"{eq.wout.fsql:.1e}",

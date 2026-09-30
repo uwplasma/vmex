@@ -119,8 +119,8 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   frozen-geometry pressure proxies before re-solving at finite pressure, and
   `QA_optimization_global.py` explores basins with SciPy basin hopping before
   the exact least-squares finish.
-  `alpha_particle_optimization.py` (`pip install "vmex[coils]"`) differentiates a
-  smooth ESSOS orbit-risk score from `s=0.3` through VMEX equilibria, with an
+  `alpha_particle_optimization.py` (`pip install "vmex[coils]"`) differentiates an
+  ESSOS orbit-risk score from `s=0.3` through VMEX equilibria, with an
   aspect-ratio penalty and no symmetry stage. It selects accepted iterates by
   hard 2 ms losses and tests fresh alphas at 5 ms; the loss-curve shading is a
   pointwise 95% Wilson interval. Short training orbits make this a research example.
