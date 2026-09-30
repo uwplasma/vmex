@@ -459,6 +459,90 @@ the reported maximum. Reusing a full field evaluation at a step endpoint for
 the next step could save work while retaining the every-step energy check;
 this still needs a benchmark and a test that the orbits agree.
 
+## Cross-code alpha trace comparisons
+
+The [tracing guide](../howto/trace-alpha-particles.md#cross-code-orbit-checks) gives the exact seed-WOUT recipe and three-code command.
+
+On one i7-3820 host with eight CPU workers, the same 64 births give:
+
+| tracer | loss result | matching ESSOS labels | warm trace time | maximum reported relative energy drift |
+|---|---:|---:|---:|---:|
+| ESSOS Boozer RK4 | 55 | 64 | 1.701 s | 1.66e-6, every step |
+| SIMPLE symplectic Euler, `npoiper2=512` | 55 | 64 | 5.078 s | 1.25e-3, 401 saved states |
+| SIMPLE symplectic midpoint, `npoiper2=256` | 55 | 64 | 5.247 s | 1.20e-5, 401 saved states |
+| SIMSOPT `gc_noK`, [sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664), axis stop | 50/58 resolved; 6 axis stops | 58/58 resolved | 0.415 s | 6.77e-4, all resolved path states |
+
+The methods and output policies differ: ESSOS returns 101 states and checks
+energy every fixed step; SIMPLE saves 401 macrostep states, and SIMSOPT checks
+all adaptive states of its resolved paths. Without saved-orbit output, SIMPLE
+Euler and midpoint take 1.898 and 3.469 s, respectively; their endpoint-only
+energy errors are `8.28e-4` and `8.03e-6`. The Euler saved-path error exceeds
+the default `1e-3` benchmark limit, so the retained script defaults to
+midpoint and checks saved-path energy.
+Several unguarded SIMSOPT paths enter `s < 0`, where its Boozer angle is
+ill-defined; their matching terminal loss labels do not validate those paths.
+Saving adaptive intermediate states reveals a maximum `4.88e-3` energy
+excursion near the axis. With the inner-flux stop, the maximum drift across
+all resolved path states is `6.77e-4` on both the i7-3820 and Apple M2.
+For two stopped births, sampled SIMPLE midpoint and ESSOS paths remain above
+the `s=0.001` stop surface while SIMSOPT reaches it; these stops may reflect
+near-axis field-interpolation differences, and the other codes' saved states
+can miss a finer axis approach. Their physical outcome remains unresolved.
+
+These are trace-only times after field construction and compilation. In a fresh
+same-host run, ESSOS takes 4.526 s from WOUT to its 12-mode field and
+5.541 s for its first trace including JIT. SIMPLE spends 8.055 s in
+field/start setup; its no-orbit-output Euler trace takes 1.890 s, giving
+9.949 s through output in that run. With 401 saved states, the midpoint
+trace takes 5.247 s. SIMSOPT spends 130.728 s converting and tabulating the
+field before the guarded 0.415 s trace. Repeated trace speed therefore does
+not measure the cost of a single calculation.
+
+The larger GPU comparison requests 101 sample times on a GTX TITAN X hosted by
+an i7-3820 CPU.
+CATAPULT truncates trajectories at loss (median four stored rows across this
+ensemble); ESSOS returns 101 states per particle.
+ESSOS retains 12 Boozer modes at cut `1e-4` and takes 16,000 fixed RK4 steps
+(`dt=1.25e-7 s`). CATAPULT uses a 25×25×25 tricubic field table and adaptive DP5
+at tolerance `1e-10`. Times are warmed and exclude field setup and JIT:
+
+| tracer | lost / 1,024 | labels matching ESSOS | trace [s] | maximum confined-orbit energy drift |
+|---|---:|---:|---:|---:|
+| ESSOS Boozer, default lookup and [kernel PR #95](https://github.com/uwplasma/ESSOS/pull/95) | 795 | 1,024 | 14.72 | 2.08e-6 |
+| ESSOS Boozer, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 1,024 | 3.81 | 2.08e-6 |
+| CATAPULT, released radial interpolant | 802 | 1,017 | 4.88 | 7.84e-3 |
+| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 4.68 | 3.54e-4 |
+
+The ESSOS lookup change leaves all saved states, loss times and energy
+diagnostics bitwise identical; it also improves 100- and 300-knot GPU
+workloads without a measured eight-device CPU regression.
+With the same tabulated field, births and requested output on one host CPU
+core (FIRM3D's serial CPU particle loop), patched FIRM3D takes 74.67 and
+74.70 s in two warmed runs. It loses the same 795 particles and has maximum
+all-path relative energy drift `3.55e-4`.
+On the same host, the ESSOS Boozer kernel traces those births in 18.15 s using eight CPU
+devices; its one-device run takes 260.76 s. These CPU timings measure
+different particle-parallel policies.
+On the seven axis-sensitive births, the separate *spectral* FIRM3D CPU solver
+at adaptive tolerance `1e-10` changes from seven spurious losses and maximum
+energy drift `1.22e-2` to zero losses and `4.75e-9` after the patch.
+
+All seven released-CATAPULT disagreements pass close to the axis (`s<0.03`).
+Its Boozer radial interpolation gives a nonzero `m=1` magnetic-field
+harmonic on the axis. Zeroing all `m>0` axis coefficients and using the same
+spline's derivative for `dB/ds` removes those seven losses and sharply
+reduces Hamiltonian drift. The regularization is proposed in [FIRM3D PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
+and remains experimental until merged. A DESC run independently confines those seven births through
+0.2 ms. On a re-solved `ns=101` equilibrium, ESSOS and regularized FIRM3D
+both lose the same one of the seven; unmodified FIRM3D loses two. This
+resolution check matters because axis crossings are sensitive to sparse
+radial data. The PR enforces the axis value and a consistent derivative, but
+its cubic-in-`s` `m=1` mode is still an approximation to the regular
+`sqrt(s)` behaviour. Along 40 sampled points with `s<0.03`, the patched
+FIRM3D and ESSOS fields differ by up to 0.381% in `|B|`. Matching labels on
+this ensemble is not a general convergence guarantee. The [ESSOS README](https://github.com/uwplasma/ESSOS/pull/94)
+compares methods and features in more detail.
+
 ## Device and lane consistency
 
 Float64 is required and enforced at solver import. Across devices the
