@@ -461,7 +461,8 @@ this still needs a benchmark and a test that the orbits agree.
 
 ## Cross-code alpha trace comparisons
 
-The [tracing guide](../howto/trace-alpha-particles.md#cross-code-orbit-checks) gives the exact seed-WOUT recipe and three-code command.
+The [tracing guide](../howto/trace-alpha-particles.md) gives the exact
+seed-WOUT recipe and three-code command.
 
 On one i7-3820 host with eight CPU workers, the same 64 births give:
 

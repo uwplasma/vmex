@@ -205,7 +205,12 @@ With the corrected SIMSOPT field and a built SIMPLE executable, run
 `python benchmarks/trace_cross_code.py wout_alpha_seed_reactor.nc --simple
 PATH_TO_SIMPLE/simple.x --output cross_code.json` for the 64-birth CPU check.
 
-The [cross-code validation record](../explanation/validation.md#cross-code-alpha-trace-comparisons) reports the same-host CPU and GPU timings, full-path energy checks, and near-axis orbit discrepancies. On 1,024 common births, axis-regularized CATAPULT and ESSOS agree on all loss labels (795 lost); released CATAPULT adds seven near-axis losses. The axis correction is proposed in [FIRM3D PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90).
+The [cross-code validation record](../explanation/validation.md) reports
+same-host CPU and GPU timings, full-path energy checks and near-axis orbit
+discrepancies. On 1,024 common births, axis-regularized CATAPULT and ESSOS
+agree on all loss labels (795 lost); released CATAPULT adds seven near-axis
+losses. The axis correction is proposed in
+[FIRM3D PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90).
 
 ## From Python
 
