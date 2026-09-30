@@ -621,10 +621,10 @@ whereas the QA case below has 16, so the workloads favor different kernels.
 
 With 8,192 new common births and 20 ms on one RTX A4000, ESSOS #98 loses
 6,577 particles in 76.29/69.24 s (first/repeated); released CATAPULT loses
-6,648 in 32.61/32.71 s. They match 8,121 loss labels. Both request 101
+6,647 in 34.17/34.48 s. They match 8,122 loss labels. Both request 101
 times; CATAPULT truncates lost paths, while ESSOS returns every state. All
 ESSOS losses occur by 0.158 ms. Maximum relative energy drift is 2.08e-5
-at every ESSOS step and 2.60e-2 on saved confined CATAPULT paths. The
+at every ESSOS step and 5.17e-2 on saved confined CATAPULT paths. The
 8,192-birth ensemble uses the same seed as the 4,096-birth run but is sampled
 separately, so its first half is not the earlier ensemble.
 

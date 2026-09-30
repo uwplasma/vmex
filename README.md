@@ -158,11 +158,11 @@ paths while ESSOS returns 101 states per birth.
 | tracer | lost / 8,192 | labels matching ESSOS | first trace | repeated trace |
 |---|---:|---:|---:|---:|
 | VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.29 s | 69.24 s |
-| CATAPULT, released radial interpolation | 6,648 | 8,121 | 32.61 s | 32.71 s |
+| CATAPULT, released radial interpolation | 6,647 | 8,122 | 34.17 s | 34.48 s |
 
 All ESSOS losses occur before 0.16 ms, yet its fixed-step kernel continues
 through 20 ms; CATAPULT stops lost paths. Maximum relative energy drift is
-`2.08e-5` for ESSOS (every step) and `2.60e-2` for CATAPULT (saved confined
+`2.08e-5` for ESSOS (every step) and `5.17e-2` for CATAPULT (saved confined
 paths). The proposed [FIRM3D #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
 patch remains in draft while its near-axis regression is addressed. DESC matches all
 64 labels in the smaller GPU subset and takes 21.4 s warmed with 101 requested
