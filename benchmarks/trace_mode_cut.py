@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Audit Boozer mode cuts across WOUTs, with optional common-birth alpha traces.
 
-Usage: python benchmarks/trace_mode_cut.py PATH [PATH ...] --out /tmp/cuts.json
+Usage: python benchmarks/trace_mode_cut.py PATH [PATH ...] --out cuts.json
 PATH may be a WOUT or a directory (searched recursively). Boozer transforms
 all half-grid surfaces; field errors use s near 0.25, 0.5 and 0.9.
-``--particles 128`` adds reactor-scaled orbit comparisons on the same births;
-use a larger ensemble and
-horizon before drawing a loss-fraction conclusion.
+``--particles 128`` adds common-birth orbit comparisons; use more particles
+and a longer horizon for loss-fraction conclusions.
 """
 
 import argparse

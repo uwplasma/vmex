@@ -1,29 +1,9 @@
 #!/usr/bin/env python3
-"""Alpha losses from ``vmex --trace``, SIMPLE and SIMSOPT on the same particles.
+"""Compare common-birth alpha losses in VMEX, SIMPLE and SIMSOPT.
 
-One equilibrium, one set of births and one horizon for three guiding-centre
-codes:
-
-* VMEX: :func:`vmex.core.tracing.trace_alphas` (ESSOS Boozer tracer, fixed-step RK4);
-* SIMSOPT: ``trace_particles_boozer`` in ``gc_noK`` mode (adaptive RK45) on a
-  ``booz_xform`` field with the same Boozer resolution. Paths that reach
-  the Boozer coordinate singularity near the magnetic axis are unresolved;
-* SIMPLE (github.com/itpplasma/SIMPLE): ``simple.x`` with its symplectic
-  midpoint integrator in Boozer coordinates built from the VMEC file.
-
-The WOUT must already have the desired physical size and field strength.
-The births are those of ``vmex --trace`` (``s`` on a half-grid surface, Boozer
-angles weighted by the Jacobian, pitch uniform). SIMPLE startmode 6 reads
-those Boozer angles directly. Numerical exits and excessive energy drift fail
-the benchmark instead of being counted as confined. Loss fractions and
-agreement for SIMSOPT use only orbits that do not hit its inner-flux stop.
-
-The script requests ``--cores`` CPU workers: JAX with one
-device per core, SIMPLE with OpenMP when its binary enables it, and SIMSOPT
-with one process per core. The
-runtime excludes compilation and field set-up: VMEX is called once to warm
-its JIT, SIMPLE supplies its trace-phase timer, and SIMSOPT's field is built
-before tracing. Use ``--output`` to save a JSON record.
+Use a reactor-scale WOUT and ``--cores`` matched CPU workers. Axis-stop or
+energy-failed orbits are unresolved, not confined. Timings exclude field setup
+and compilation; see the alpha-tracing guide for the comparison protocol.
 
 Usage::
 
