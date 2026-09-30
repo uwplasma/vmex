@@ -161,7 +161,7 @@ The seven disagreements in released CATAPULT follow axis crossings; the
 experimental regularization removes them. SIMPLE matches all 64 labels in
 the smaller run. With its [VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
 and an inner-flux stop, SIMSOPT matches 58/58 resolved labels; six paths
-reach its Boozer-axis singularity and remain unresolved. [The tracing
+trigger that stop and remain unresolved. [The tracing
 guide](docs/howto/trace-alpha-particles.md) gives the WOUT recipe, energy
 checks and limitations.
 

@@ -159,7 +159,7 @@ Current SIMSOPT upstream also used the opposite sign in its VMEC-to-Boozer
 field; [SIMSOPT PR #664](https://github.com/hiddenSymmetries/simsopt/pull/664)
 corrects it. Its unpatched field matched only 44 of 64 corrected ESSOS labels;
 the patched field gave the same 64 terminal labels (55 losses), but six
-SIMSOPT paths reached the Boozer-axis singularity. With an inner-flux stop
+SIMSOPT paths approached its Boozer-axis singularity. With an inner-flux stop
 at `s=0.001`, it resolves 58 paths (50 lost) and matches ESSOS on all 58;
 the six axis stops are unresolved. SIMPLE with direct Boozer births matches
 all 64 ESSOS labels. [`benchmarks/trace_cross_code.py`](../../benchmarks/trace_cross_code.py)
@@ -226,6 +226,10 @@ ill-defined; their matching terminal loss labels do not validate those paths.
 Saving adaptive intermediate states reveals a maximum `4.88e-3` energy
 excursion near the axis. With the inner-flux stop, the maximum drift across
 all resolved path states is `6.77e-4` on both the i7-3820 and Apple M2.
+For two stopped births, sampled SIMPLE midpoint and ESSOS paths remain above
+the `s=0.001` stop surface while SIMSOPT reaches it; these stops may reflect
+near-axis field-interpolation differences, and the other codes' saved states
+can miss a finer axis approach. Their physical outcome remains unresolved.
 
 These are trace-only times after field construction and compilation. In a fresh
 same-host run, ESSOS takes 4.526 s from WOUT to its 12-mode field and
