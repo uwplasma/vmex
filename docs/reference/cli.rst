@@ -69,16 +69,16 @@ Options
      - Trace fusion alpha particles through the equilibrium with ESSOS
        (guiding centre), scaled in memory to ARIES-CS size: print the
        scaling factors, the loss fraction with its binomial error and the
-       lost/axis-termination/failure counts, and write ``*_trace.json``,
-       ``*_trace.npz`` and four figures (loss fraction vs log time, 3-D
-       orbits, ``v_par/v``, energy error). Works on a ``wout_*.nc`` input
-       or after solving an input file (requires ESSOS, ``pip install
-       essos``). See :doc:`/howto/use-essos-fields-and-coils`.
+       lost/thermalized/failure counts, and write ``*_trace.json``,
+       ``*_trace.npz`` and two figures (a six-panel trace summary and 3-D
+       loss locations). Works on a ``wout_*.nc`` input or after solving an
+       input file (``pip install "vmex[coils]"``). See
+       :doc:`/howto/trace-alpha-particles`.
    * - ``--trace-no-scale``
      - Trace the equilibrium as given.
    * - ``--trace-tmax X`` / ``--trace-timestep X``
      - Tracing horizon / integrator step in seconds (defaults ``1e-2`` /
-       ``2.5e-7`` times ``Aminor_p / 1.7044 m``).
+       ``1.25e-7`` times ``Aminor_p / 1.7044 m``).
    * - ``--trace-particles N`` / ``--trace-times N``
      - Ensemble size / saved samples per orbit (defaults 1000 / 1000).
    * - ``--trace-s X`` / ``--trace-seed N``

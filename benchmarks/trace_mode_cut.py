@@ -10,16 +10,18 @@ horizon before drawing a loss-fraction conclusion.
 """
 
 import argparse
+import hashlib
 import json
 import platform
 import time
+import traceback
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import numpy as np
 from scipy.interpolate import CubicSpline
 
-CUTS = (0.0, 1e-5, 1e-4, 2e-4, 3e-4, 5e-4, 6e-4, 8e-4, 1e-3)
+CUTS = (0.0, 1e-5, 6e-5, 8e-5, 1e-4, 2e-4, 3e-4, 5e-4, 6e-4, 8e-4, 1e-3)
 
 
 def installed_version(name):
@@ -35,7 +37,7 @@ def spectrum(bx):
     amplitude = np.abs(bm).max(axis=1)
     base = amplitude.max()
     r = np.sqrt(np.asarray(bx.s_b))
-    # Match the regularized radial spline and angular derivatives used by ESSOS.
+    # Match the ESSOS radial spline; report Boozer-angle field derivatives.
     spline = CubicSpline(r, np.where(m[:, None] > 0, bm / r, bm).T, axis=0)
     weight = np.where((m == 0) & (n == 0), 1.0, 0.5)
     rows = []
@@ -108,6 +110,8 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
         lost = out.loss_times >= 0
         labels[cut] = lost
         results[str(cut)] = {"modes": int(field.xm.size), "lost": int(lost.sum()),
+                             "lost_indices": np.flatnonzero(lost).tolist(),
+                             "loss_times": np.asarray(out.loss_times).tolist(),
                              "fraction": float(lost.mean()), "failed": 0,
                              "max_energy_error": float(np.max(out.energy_error)),
                              "trace_s": float(np.median(timings)), "cold_s": cold_s,
@@ -120,6 +124,8 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
         results[str(cut)]["baseline_loss_recall"] = (
             float(np.mean(labels[cut][reference])) if reference.any() else None)
     return {"particles": particles, "tmax": tmax, "timestep": dt, "save_times": save_times,
+            "reference_cut": float(min(cuts)),
+            "birth_sha256": hashlib.sha256(births.astype("<f8", copy=False).tobytes()).hexdigest(),
             "birth_cut": birth_cut, "step_factor": step_factor,
             "devices": len(jax.devices()), "cuts": results}
 
@@ -134,7 +140,7 @@ def main():
     ap.add_argument("--save-times", type=int, default=101, help="orbit samples, including t=0; matches vmex --trace")
     ap.add_argument("--birth-cut", type=float, choices=CUTS[1:], default=1e-4,
                     help="field used to sample common births; default 1e-4")
-    ap.add_argument("--orbit-cuts", nargs="+", type=float, choices=CUTS[2:], default=CUTS[2:])
+    ap.add_argument("--orbit-cuts", nargs="+", type=float, choices=CUTS[1:], default=CUTS[2:])
     ap.add_argument("--step-factor", type=float, default=1.0, help="multiply the default RK4 step")
     ap.add_argument("--devices", type=int, help="CPU devices; default matches vmex --trace")
     args = ap.parse_args()
@@ -177,6 +183,8 @@ def main():
             print(f"{path.name}: {len(np.asarray(bx.xm_b))} modes, {time.perf_counter()-start:.1f} s", flush=True)
         except (ValueError, RuntimeError, KeyError, OSError) as exc:
             row["error"] = f"{type(exc).__name__}: {exc}"
+            if not row["error"].startswith("ValueError: lasym:"):
+                row["traceback"] = traceback.format_exc(limit=6)
             print(f"{path.name}: {row['error']}", flush=True)
         record["cases"].append(row)
     target = json.dumps(record, indent=2) + "\n"
@@ -184,6 +192,8 @@ def main():
         args.out.write_text(target)
     else:
         print(target)
+    if any("traceback" in case for case in record["cases"]):
+        raise SystemExit("one or more WOUT audits failed; inspect the JSON tracebacks")
 
 
 if __name__ == "__main__":

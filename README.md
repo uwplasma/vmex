@@ -134,28 +134,39 @@ vmex wout_my_case.nc --to-input    # writes input.my_case
 ```
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
-by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
+by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 1,000 fusion alphas for
 10 ms in Boozer coordinates. It writes the loss fraction and a figure set:
 loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
 `--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
 birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 ([guide](docs/howto/trace-alpha-particles.md)).
+The shaded loss-curve band is the pointwise binomial standard error,
+`f(t) ± sqrt(f(t) [1 - f(t)] / N)`, where `f(t)` is the fraction of `N`
+births lost by time `t`. It describes sampling uncertainty, not orbit or
+field error; use more births for small loss fractions.
 
 **Cross-code alpha tracing.** After correcting VMEC's toroidal-flux sign
 ([PR #517](https://github.com/uwplasma/vmex/pull/517)), ESSOS, CATAPULT and
 DESC agree on all 64 lost/confined labels in a common-birth, 2 ms reactor-scale
 NFP=2 vacuum case (55 lost). On 1,024 births, ESSOS and an experimental
 axis-regularized CATAPULT field agree on all labels (795 lost). The GPU rows
-below use the same GTX TITAN X and request 101 sample times, excluding field
-setup and compilation. CATAPULT truncates lost trajectories; ESSOS returns
-101 states per particle. The methods and field representations differ.
+use the same 1,024 births and request 101 sample times, excluding field setup
+and compilation; each timing column uses one GPU. CATAPULT truncates lost
+trajectories, while ESSOS returns 101 states per particle. The field
+representations differ.
 
-| tracer | lost / 1,024 | warm GPU time | maximum confined-orbit energy drift |
+| tracer | lost / 1,024 | GTX TITAN X warm | RTX A4000 warm |
 |---|---:|---:|---:|
-| VMEX/ESSOS Boozer RK4, default lookup | 795 | 14.72 s | 2.08e-6 |
-| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 3.81 s | 2.08e-6 |
-| CATAPULT, released radial interpolation | 802 | 4.88 s | 7.84e-3 |
-| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.68 s | 3.54e-4 |
+| VMEX/ESSOS Boozer RK4, default lookup | 795 | 14.72 s | 7.433 s |
+| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 3.81 s | 2.410 s |
+| CATAPULT, released radial interpolation | 802 | 4.88 s | 2.862 s |
+| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.68 s | 2.835 s |
+
+On the A4000, maximum relative energy drift is `2.08e-6` for ESSOS (checked
+each step), `9.48e-3` for released CATAPULT and `3.55e-4` after the axis fix
+(both checked at saved states of surviving particles). DESC on the same GPU
+matches all 64 labels in a subset (55 lost) and takes 21.4 s warmed with 101
+requested states; its independent field fit differs by up to 0.4% in `|B|`.
 
 The seven disagreements in released CATAPULT follow axis crossings; the
 experimental regularization removes them. SIMPLE matches all 64 labels in

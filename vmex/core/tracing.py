@@ -252,7 +252,7 @@ def trace_alphas(
     source: Any,
     *,
     tmax: float = 1e-2,
-    nparticles: int = 500,
+    nparticles: int = 1000,
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,

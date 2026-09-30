@@ -7,11 +7,12 @@ reports the fraction lost through the last closed flux surface. It needs the
 ## Run it
 
 ```console
-vmex wout_case.nc --trace          # 500 alphas, 10 ms, ARIES-CS size
+vmex wout_case.nc --trace          # 1,000 alphas, 10 ms, ARIES-CS size
 vmex input.case --trace            # solve first, then trace
 ```
 
-The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
+The default QA example takes about 35 seconds of warmed tracing on eight Apple M2 CPU devices;
+more complex fields take longer (see Cost below). While it runs it reports, on
 stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
 (ESSOS 0.19.2 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
@@ -25,7 +26,7 @@ its binomial error:
 
 | flag | default | what it sets | cost |
 |---|---|---|---|
-| `--trace-particles N` | 500 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
+| `--trace-particles N` | 1000 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
 | `--trace-timestep DT` | converged step (below) | RK4 step in seconds | `1 / DT` |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
@@ -41,7 +42,7 @@ its binomial error:
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
 example, going from the default to 5000 alphas over 0.1 s costs 50 times the
-default, about 25 min on the same laptop. Run that on a workstation or a GPU.
+default, about 30 min of warmed QA tracing on the same laptop. Run that on a workstation or a GPU.
 
 ```console
 vmex wout_case.nc --trace --trace-particles 5000 --trace-tmax 0.1
@@ -102,6 +103,17 @@ Next to the input (or in `--outdir`):
 - `*_trace_3d.png` shows the loss locations on the 3-D boundary, coloured by
   loss time.
 
+The shaded loss-curve band is computed separately at each time as
+`f(t) ± sqrt(f(t) [1 - f(t)] / N)` for `N` independent births. This is a
+pointwise one-standard-error sampling band, not a confidence band for the
+whole curve or an estimate of timestep, field or mode-cut error. It shrinks
+to zero when no particle has been lost, so use a binomial confidence interval
+and more births to assess rare losses.
+At the 1,000-birth default, 10 losses mean 1% with a 95% Wilson interval of
+about 0.54–1.83%; zero losses still allow up to about 0.38% at that level.
+Use several thousand births for small fractions, and compare candidate fields
+using the same birth sample.
+
 ## Cost and mode-cut accuracy
 
 Tracing cost grows with the number of particles, integration steps and retained
@@ -118,9 +130,10 @@ The VMEC toroidal-flux sign was corrected in [VMEX PR #517](https://github.com/u
 Older loss tables and figures made with the opposite sign are withdrawn:
 conserved energy and a plausible total loss fraction did not reveal the
 reversed radial drift. The current default cut is `1e-4`. The
-[34-equilibrium spectral audit](../explanation/validation.md) compares all
-seven requested cuts on three surfaces per equilibrium; angular and radial
-field derivatives deteriorate much faster than `|B|` itself.
+[34-equilibrium spectral audit](../explanation/validation.md) compares the
+seven requested cuts plus `1e-5`, `6e-5` and `8e-5` on three surfaces per
+equilibrium; Boozer-angle and radial field derivatives deteriorate much
+faster than `|B|` itself.
 
 On the corrected Landreman-Paul QA field, 1,000 common births at `s = 0.3`
 were traced for 10 ms on eight Apple M2 CPU devices. Times exclude transform
@@ -139,8 +152,12 @@ and compilation and are medians of three warmed calls:
 The last five cuts retain the same three modes; their time differences are
 measurement noise. The 99% overall label agreement at `3e-4` hides ten
 missing losses out of 16. Halving the QA timestep at `1e-4` preserves all
-1,000 labels, including the 16 losses. On ARIES-CS, `2e-4` changes 31 of 512 labels over
-2 ms relative to `1e-4`. On HSX, a refined 0.5 ms, 500-birth run at `2e-4`
+1,000 labels, including the 16 losses. On an A4000, tightening QA to `6e-5`
+and `8e-5` takes 34.30 and 30.96 s versus 25.62 s at `1e-4`; each changes
+two labels relative to `1e-5`, versus one at `1e-4`. On ARIES-CS, `2e-4`
+changes 31 of 512 labels over 2 ms relative to `1e-4`, although this
+ARIES run is timestep-sensitive. On HSX, a refined 0.5 ms, 500-birth run at
+`2e-4`
 has the same 23 total losses as `1e-4` but recovers only 16 of those 23;
 warm CPU time falls from 39.97 to 31.01 s. The [full seven-cut HSX table](../explanation/validation.md)
 reports the remaining times and labels with its timestep uncertainty.

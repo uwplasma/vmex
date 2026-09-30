@@ -88,6 +88,35 @@ def test_cut_audit_scales_boozer_tables_without_retransform(solovev_wout, tmp_pa
     assert direct.psi0 == pytest.approx(reference.psi0)
 
 
+def test_cut_audit_records_common_births_and_individual_losses(solovev_wout):
+    from booz_xform_jax import Booz_xform
+    from benchmarks.trace_mode_cut import orbits
+
+    bx = Booz_xform(verbose=0, mboz=8, nboz=8)
+    bx.read_wout(str(solovev_wout), flux=False)
+    bx.run()
+    result = orbits(solovev_wout, bx, [6e-5, 1e-4], 8, 1e-5, 1, 3, 1e-4, 1)
+    assert result["reference_cut"] == 6e-5
+    assert len(result["birth_sha256"]) == 64
+    for row in result["cuts"].values():
+        assert row["lost_indices"] == np.flatnonzero(np.array(row["loss_times"]) >= 0).tolist()
+        assert row["lost"] == len(row["lost_indices"])
+
+
+def test_cut_audit_exits_nonzero_after_writing_case_error(tmp_path, monkeypatch):
+    import json
+    import sys
+
+    from benchmarks.trace_mode_cut import main
+
+    target = tmp_path / "cuts.json"
+    monkeypatch.setattr(sys, "argv", ["trace_mode_cut.py", str(tmp_path / "wout_missing.nc"),
+                                      "--out", str(target)])
+    with pytest.raises(SystemExit, match="one or more WOUT audits failed"):
+        main()
+    assert "traceback" in json.loads(target.read_text())["cases"][0]
+
+
 @pytest.fixture(scope="module")
 def solovev_wout(tmp_path_factory) -> Path:
     """One quiet CLI solve of the solovev deck, shared by the tests below."""
