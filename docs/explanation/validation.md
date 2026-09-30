@@ -615,6 +615,9 @@ entry gives the full three-call range. A separate A4000 run took 50.95 s for
 ESSOS with bitwise-identical states. Its timing variability prevents a stable
 20 ms speed ratio. The 10 ms CATAPULT #90 timing used the other A4000 and is
 omitted from this same-device table.
+ESSOS still evaluates fixed RK4 steps after a particle is lost; CATAPULT stops that
+particle's adaptive trace. The reactor case has 3,340 early ESSOS losses,
+whereas the QA case below has 16, so the workloads favor different kernels.
 
 CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
 101 states per birth. Thirty of the 31 released CATAPULT-only losses approach
