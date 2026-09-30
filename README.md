@@ -147,29 +147,26 @@ field error; use more births for small loss fractions.
 
 **Cross-code alpha tracing.** After correcting VMEC's toroidal-flux sign
 ([PR #517](https://github.com/uwplasma/vmex/pull/517)), ESSOS, CATAPULT and
-DESC agree on all 64 lost/confined labels in a common-birth, 2 ms reactor-scale
-NFP=2 vacuum case (55 lost). On 1,024 births, ESSOS and a draft
-CATAPULT axis patch agree on all labels (795 lost). The GPU rows
-use the same 1,024 births and request 101 sample times, excluding field setup
-and compilation; each timing column uses one GPU. CATAPULT truncates lost
-trajectories, while ESSOS returns 101 states per particle. The field
-representations differ.
+DESC agree on all 64 lost/confined labels in a common-birth, 2 ms case (55
+lost). The larger GPU comparison traces 4,096 common births for 20 ms in a
+reactor-scale vacuum equilibrium. ESSOS uses 12 Boozer modes and fixed RK4
+steps of `1.25e-7 s`; CATAPULT uses a 25³ field table and adaptive DP5 at
+`1e-10` tolerance. One RTX A4000 ran each first and repeated trace; times
+exclude field setup. Both request 101 sample times, but CATAPULT truncates lost
+paths while ESSOS returns 101 states per birth.
 
-| tracer | lost / 1,024 | GTX TITAN X warm | RTX A4000 warm |
-|---|---:|---:|---:|
-| VMEX/ESSOS Boozer RK4, default lookup | 795 | 14.72 s | 7.433 s |
-| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 3.81 s | 2.410 s |
-| CATAPULT, released radial interpolation | 802 | 4.88 s | 2.862 s |
-| CATAPULT, [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.68 s | 2.835 s |
+| tracer | lost / 4,096 | labels matching ESSOS | first trace | repeated trace |
+|---|---:|---:|---:|---:|
+| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 3,340 | 4,096 | 60.34 s | 50.95 s |
+| CATAPULT, released radial interpolation | 3,371 | 4,065 | 46.34 s | 49.21 s |
 
-On the A4000, maximum relative energy drift is `2.08e-6` for ESSOS (checked
-each step), `9.48e-3` for released CATAPULT and `3.55e-4` with the draft patch
-(both checked at saved states of surviving particles). DESC on the same GPU
-matches all 64 labels in a subset (55 lost) and takes 21.4 s warmed with 101
-requested states; its independent field fit differs by up to 0.4% in `|B|`.
+Thirty of the 31 CATAPULT-only losses approach `s<0.01` in ESSOS. Maximum
+relative energy drift is `2.10e-5` for ESSOS (checked each step) and `1.97e-2`
+for CATAPULT (saved confined paths). The field representations and energy
+sampling differ; these near-axis outcomes remain unresolved. DESC matches all
+64 labels in the smaller GPU subset and takes 21.4 s warmed with 101 requested
+states; its independent field fit differs by up to 0.4% in `|B|`.
 
-The seven disagreements in released CATAPULT follow axis crossings. The
-draft patch matches ESSOS labels, but its axis treatment is unvalidated.
 SIMPLE matches all 64 labels in the smaller run. With its
 [VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
 and an inner-flux stop, SIMSOPT matches 58/58 resolved labels; six paths
