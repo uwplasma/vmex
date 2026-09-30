@@ -619,6 +619,15 @@ ESSOS still evaluates fixed RK4 steps after a particle is lost; CATAPULT stops t
 particle's adaptive trace. The reactor case has 3,340 early ESSOS losses,
 whereas the QA case below has 16, so the workloads favor different kernels.
 
+With 8,192 new common births and 20 ms on one RTX A4000, ESSOS #98 loses
+6,577 particles in 76.29/69.24 s (first/repeated); released CATAPULT loses
+6,648 in 32.61/32.71 s. They match 8,121 loss labels. Both request 101
+times; CATAPULT truncates lost paths, while ESSOS returns every state. All
+ESSOS losses occur by 0.158 ms. Maximum relative energy drift is 2.08e-5
+at every ESSOS step and 2.60e-2 on saved confined CATAPULT paths. The
+8,192-birth ensemble uses the same seed as the 4,096-birth run but is sampled
+separately, so its first half is not the earlier ensemble.
+
 CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
 101 states per birth. Thirty of the 31 released CATAPULT-only losses approach
 `s<0.01` in ESSOS. The two labels still differing with #90 are unresolved.
