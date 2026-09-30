@@ -598,17 +598,23 @@ field setup and compilation are excluded. ESSOS used JAX 0.6.2 with CUDA 12.
 | CATAPULT [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 2.835 | 3.55e-4, saved states |
 
 The longer check uses the same 4,096 births at both horizons, JAX 0.9.2 for
-ESSOS, and 101 requested sample times. Each first and repeated time is one
-trace call on the RTX A4000; field setup is excluded.
+ESSOS, and 101 requested sample times. The reported first and repeated calls
+use the same RTX A4000 except where noted; field setup is excluded.
 
 | Horizon | Tracer | Lost | Labels matching ESSOS | First | Repeated | Maximum relative energy drift |
 |---|---|---:|---:|---:|---:|---:|
-| 10 ms | ESSOS #98 | 3,340 | 4,096 | 33.00 s | 25.29 s | 1.05e-5, every step |
-| 10 ms | CATAPULT released | 3,371 | 4,065 | 11.51 s | 11.51 s | 1.97e-2, saved confined paths |
-| 10 ms | CATAPULT #90 | 3,342 | 4,094 | 11.27 s | 11.26 s | 5.55e-4, saved confined paths |
-| 20 ms | ESSOS #98 | 3,340 | 4,096 | 60.34 s | 50.95 s | 2.10e-5, every step |
-| 20 ms | CATAPULT released | 3,371 | 4,065 | 46.34 s | 49.21 s | 1.97e-2, saved confined paths |
-| 20 ms | CATAPULT #90 | 3,342 | 4,094 | 22.09 s | 24.98 s | 5.57e-4, saved confined paths |
+| 10 ms | ESSOS #98 | 3,340 | 4,096 | 33.31 s | 25.63 s | 1.05e-5, every step |
+| 10 ms | CATAPULT released | 3,371 | 4,065 | 11.53 s | 11.58 s | 1.97e-2, saved confined paths |
+| 10 ms | CATAPULT #90 | 3,342 | 4,094 | — | — | 5.55e-4, saved confined paths |
+| 20 ms | ESSOS #98 | 3,340 | 4,096 | 59.05 s | 93.87–103.49 s | 2.10e-5, every step |
+| 20 ms | CATAPULT released | 3,371 | 4,065 | 21.96 s | 22.08 s | 1.97e-2, saved confined paths |
+| 20 ms | CATAPULT #90 | 3,342 | 4,094 | 21.71 s | 21.82 s | 5.57e-4, saved confined paths |
+
+At 20 ms, CATAPULT repeated values are medians of three calls; the ESSOS
+entry gives the full three-call range. A separate A4000 run took 50.95 s for
+ESSOS with bitwise-identical states. Its timing variability prevents a stable
+20 ms speed ratio. The 10 ms CATAPULT #90 timing used the other A4000 and is
+omitted from this same-device table.
 
 CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
 101 states per birth. Thirty of the 31 released CATAPULT-only losses approach

@@ -148,24 +148,26 @@ field error; use more births for small loss fractions.
 **Cross-code alpha tracing.** After correcting VMEC's toroidal-flux sign
 ([PR #517](https://github.com/uwplasma/vmex/pull/517)), ESSOS, CATAPULT and
 DESC agree on all 64 lost/confined labels in a common-birth, 2 ms case (55
-lost). The larger GPU comparison traces 4,096 common births for 20 ms in a
+lost). The larger GPU comparison traces 4,096 common births for 10 ms in a
 reactor-scale vacuum equilibrium. ESSOS uses 12 Boozer modes and fixed RK4
 steps of `1.25e-7 s`; CATAPULT uses a 25³ field table and adaptive DP5 at
-`1e-10` tolerance. One RTX A4000 ran each first and repeated trace; times
+`1e-10` tolerance. The same RTX A4000 ran each first and repeated trace; times
 exclude field setup. Both request 101 sample times, but CATAPULT truncates lost
 paths while ESSOS returns 101 states per birth.
 
 | tracer | lost / 4,096 | labels matching ESSOS | first trace | repeated trace |
 |---|---:|---:|---:|---:|
-| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 3,340 | 4,096 | 60.34 s | 50.95 s |
-| CATAPULT, released radial interpolation | 3,371 | 4,065 | 46.34 s | 49.21 s |
-| CATAPULT, proposed [axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 3,342 | 4,094 | 22.09 s | 24.98 s |
+| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 3,340 | 4,096 | 33.31 s | 25.63 s |
+| CATAPULT, released radial interpolation | 3,371 | 4,065 | 11.53 s | 11.58 s |
 
-Thirty of the 31 released CATAPULT-only losses approach `s<0.01` in ESSOS. Maximum
-relative energy drift is `2.10e-5` for ESSOS (checked each step) and `1.97e-2`
-for released CATAPULT and `5.57e-4` for the proposed patch (saved confined
-paths). The field representations and energy sampling differ; the patch's
-near-axis scaling remains unvalidated. DESC matches all
+At 20 ms, loss counts are unchanged. CATAPULT's three repeated calls take
+21.97–22.14 s; ESSOS's repeated calls range from 50.95 to 103.49 s across
+two A4000 runs despite bitwise-identical states. That spread prevents a single
+20 ms speed ratio. Thirty of the 31 released CATAPULT-only losses approach
+`s<0.01` in ESSOS. The proposed [FIRM3D #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
+patch matches 4,094 labels but has unvalidated near-axis scaling. Maximum
+relative energy drift at 10 ms is `1.05e-5` for ESSOS (every step) and
+`1.97e-2` for released CATAPULT (saved confined paths). DESC matches all
 64 labels in the smaller GPU subset and takes 21.4 s warmed with 101 requested
 states; its independent field fit differs by up to 0.4% in `|B|`.
 
