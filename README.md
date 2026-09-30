@@ -165,7 +165,8 @@ At 20 ms, loss counts are unchanged. CATAPULT's three repeated calls take
 two A4000 runs despite bitwise-identical states. That spread prevents a single
 20 ms speed ratio. Thirty of the 31 released CATAPULT-only losses approach
 `s<0.01` in ESSOS. The proposed [FIRM3D #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
-patch matches 4,094 labels but has unvalidated near-axis scaling. Maximum
+patch matches 4,094 labels but worsens some higher-resolution near-axis
+energy errors. Maximum
 relative energy drift at 10 ms is `1.05e-5` for ESSOS (every step) and
 `1.97e-2` for released CATAPULT (saved confined paths). DESC matches all
 64 labels in the smaller GPU subset and takes 21.4 s warmed with 101 requested

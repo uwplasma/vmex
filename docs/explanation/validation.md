@@ -621,6 +621,9 @@ CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
 `s<0.01` in ESSOS. The two labels still differing with #90 are unresolved.
 Its `m=1` spline has the wrong near-axis radial scaling, so the table does not
 establish axis-crossing accuracy.
+On `ns=101` common confined births with released-orbit `0.01≤s_min<0.05`,
+the p95 saved-path Hamiltonian drift rises from 7.33e-5 released to 1.26e-3
+with #90. That regression keeps the patch in draft.
 
 An independent reactor-scaled QA case uses 4,096 births at `s=0.25`, seed 42,
 10 ms, and 101 requested times. ESSOS retains 16 Boozer modes; CATAPULT uses
