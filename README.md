@@ -148,8 +148,8 @@ field error; use more births for small loss fractions.
 **Cross-code alpha tracing.** After correcting VMEC's toroidal-flux sign
 ([PR #517](https://github.com/uwplasma/vmex/pull/517)), ESSOS, CATAPULT and
 DESC agree on all 64 lost/confined labels in a common-birth, 2 ms reactor-scale
-NFP=2 vacuum case (55 lost). On 1,024 births, ESSOS and an experimental
-axis-regularized CATAPULT field agree on all labels (795 lost). The GPU rows
+NFP=2 vacuum case (55 lost). On 1,024 births, ESSOS and a draft
+CATAPULT axis patch agree on all labels (795 lost). The GPU rows
 use the same 1,024 births and request 101 sample times, excluding field setup
 and compilation; each timing column uses one GPU. CATAPULT truncates lost
 trajectories, while ESSOS returns 101 states per particle. The field
@@ -160,17 +160,18 @@ representations differ.
 | VMEX/ESSOS Boozer RK4, default lookup | 795 | 14.72 s | 7.433 s |
 | VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 3.81 s | 2.410 s |
 | CATAPULT, released radial interpolation | 802 | 4.88 s | 2.862 s |
-| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.68 s | 2.835 s |
+| CATAPULT, [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.68 s | 2.835 s |
 
 On the A4000, maximum relative energy drift is `2.08e-6` for ESSOS (checked
-each step), `9.48e-3` for released CATAPULT and `3.55e-4` after the axis fix
+each step), `9.48e-3` for released CATAPULT and `3.55e-4` with the draft patch
 (both checked at saved states of surviving particles). DESC on the same GPU
 matches all 64 labels in a subset (55 lost) and takes 21.4 s warmed with 101
 requested states; its independent field fit differs by up to 0.4% in `|B|`.
 
-The seven disagreements in released CATAPULT follow axis crossings; the
-experimental regularization removes them. SIMPLE matches all 64 labels in
-the smaller run. With its [VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
+The seven disagreements in released CATAPULT follow axis crossings. The
+draft patch matches ESSOS labels, but its axis treatment is unvalidated.
+SIMPLE matches all 64 labels in the smaller run. With its
+[VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
 and an inner-flux stop, SIMSOPT matches 58/58 resolved labels; six paths
 trigger that stop and remain unresolved. [The tracing
 guide](docs/howto/trace-alpha-particles.md) gives the WOUT recipe, energy
