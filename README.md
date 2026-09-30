@@ -169,6 +169,14 @@ near-axis scaling remains unvalidated. DESC matches all
 64 labels in the smaller GPU subset and takes 21.4 s warmed with 101 requested
 states; its independent field fit differs by up to 0.4% in `|B|`.
 
+In a separate QA equilibrium, 4,096 births at `s=0.25` traced for 10 ms with
+101 requested times give
+16 ESSOS and 21 released CATAPULT losses (4,081 matching labels). First/repeated
+traces take 31.76/24.82 s for ESSOS and 160.51/161.47 s for CATAPULT;
+maximum relative energy drift is `9.46e-5`
+at every ESSOS step and `3.03e-2` on saved confined CATAPULT paths. These
+loss labels have not been converged.
+
 SIMPLE matches all 64 labels in the smaller run. With its
 [VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
 and an inner-flux stop, SIMSOPT matches 58/58 resolved labels; six paths

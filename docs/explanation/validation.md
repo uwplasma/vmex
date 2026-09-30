@@ -616,6 +616,15 @@ CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
 Its `m=1` spline has the wrong near-axis radial scaling, so the table does not
 establish axis-crossing accuracy.
 
+An independent reactor-scaled QA case uses 4,096 births at `s=0.25`, seed 42,
+10 ms, and 101 requested times. ESSOS retains 16 Boozer modes; CATAPULT uses
+the same 25³ table and adaptive tolerance as above. ESSOS loses 16 and released
+CATAPULT loses 21 (4,081 matching labels). Their first/repeated calls take
+31.76/24.82 s and 160.51/161.47 s. Most CATAPULT particles retain all 101
+states. Maximum relative energy drift is 9.46e-5 at every ESSOS step and
+3.03e-2 on saved confined CATAPULT paths. The 15 discordant labels are not
+concentrated at the axis; loss convergence remains to be checked.
+
 In the shorter 1,024-birth run, released and patched CATAPULT disagree on seven near-axis
 births seen on the GTX TITAN X. The patch changes their outcomes and energy
 drift with little change in GPU runtime. On the first 64 common births, ESSOS
