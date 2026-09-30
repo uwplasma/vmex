@@ -364,9 +364,9 @@ even 2e-4 changes 31 of 512 individual lost/confined labels relative to
 1e-4; a similar total loss count does not imply the same orbits. The short
 2 ms horizon cannot validate a rare-loss configuration.
 Across the 34 cases, angular and radial derivatives deteriorate much faster
-than `|B|` itself. Thus the existing `1e-4` default remains the dependable
-general choice; an intermediate cut may be useful after checking losses on
-the particular field.
+than `|B|` itself. The existing `1e-4` default remains a conservative
+starting point among the tested cuts; check tighter spectra, timesteps and
+individual losses on the intended field before relying on it.
 
 The precise Landreman-Paul QA field is a rare-loss check. The same 1,000
 births at `s = 0.3` were followed for 10 ms at all seven cuts, with the
@@ -374,20 +374,60 @@ corrected VMEC flux sign. Times are medians of three warmed traces on eight
 Apple M2 CPU devices; field construction and JIT compilation are excluded.
 The 3e-4 and larger cuts retain the same three modes. Their 99% overall
 label agreement hides a 62.5% loss-count reduction (16 to 6).
+At `1e-4`, halving the 10 ms QA timestep from `1.25e-7` to `6.25e-8` s
+preserves all 16 loss IDs and all 1,000 labels; maximum relative energy
+error falls from `6.75e-5` to `9.10e-6`.
 
-| mode cut | QA modes | QA lost / 1000 | labels matching 1e-4 | QA trace [s] |
-|---|---:|---:|---:|---:|
-| 1e-4 | 16 | 16 | 100% | 34.74 |
-| 2e-4 | 7 | 14 | 99.60% | 23.45 |
-| 3e-4 | 3 | 6 | 99.00% | 9.13 |
-| 5e-4 | 3 | 6 | 99.00% | 9.08 |
-| 6e-4 | 3 | 6 | 99.00% | 10.08 |
-| 8e-4 | 3 | 6 | 99.00% | 10.24 |
-| 1e-3 | 3 | 6 | 99.00% | 9.34 |
+| mode cut | QA modes | QA lost / 1000 | baseline losses recovered | labels matching 1e-4 | QA trace [s] |
+|---|---:|---:|---:|---:|---:|
+| 1e-4 | 16 | 16 | 16/16 | 100% | 34.74 |
+| 2e-4 | 7 | 14 | 13/16 | 99.60% | 23.45 |
+| 3e-4 | 3 | 6 | 6/16 | 99.00% | 9.13 |
+| 5e-4 | 3 | 6 | 6/16 | 99.00% | 9.08 |
+| 6e-4 | 3 | 6 | 6/16 | 99.00% | 10.08 |
+| 8e-4 | 3 | 6 | 6/16 | 99.00% | 10.24 |
+| 1e-3 | 3 | 6 | 6/16 | 99.00% | 9.34 |
 
 The earlier HSX orbit table used the incorrect VMEC flux sign and is withdrawn.
+Even after correcting the sign, a 500-birth, 5 ms HSX check at `1e-4` changed
+37 individual loss labels when the timestep fell from `6.25e-8` to
+`3.125e-8` s, then changed 34 more when it fell to `1.5625e-8` s.
+Total losses were 86, 85 and 81; maximum relative energy errors were
+`2.59e-3`, `8.90e-5` and `5.04e-6`. The seven-cut HSX run at the largest
+timestep is exploratory timing data, not a cutoff accuracy result.
+Changing the number of saved states at fixed effective timestep left the
+same births bitwise identical. Changing the particle batch size introduced
+roundoff-scale differences that grew over milliseconds, consistent with
+chaotic orbit sensitivity rather than a changed step count.
 Converge the timestep and check energy on the intended field before judging a
 mode cut from its losses.
+
+A shorter 0.5 ms HSX comparison keeps 500 common births and uses an eighth
+step (`1.5625e-8 s`), 101 saved times and eight Apple M2 CPU devices. All
+seven cuts have zero failed orbits and maximum relative energy error below
+`3.1e-7`. Times are medians of three warmed runs:
+
+| mode cut | modes | lost / 500 | baseline losses recovered | labels matching `1e-4` | trace [s] |
+|---|---:|---:|---:|---:|---:|
+| 1e-4 | 157 | 23 | 23/23 | 100.0% | 39.97 |
+| 2e-4 | 118 | 23 | 16/23 | 97.2% | 31.01 |
+| 3e-4 | 102 | 21 | 14/23 | 96.8% | 26.56 |
+| 5e-4 | 75 | 18 | 10/23 | 95.8% | 20.64 |
+| 6e-4 | 64 | 20 | 13/23 | 96.6% | 29.06 |
+| 8e-4 | 50 | 23 | 13/23 | 96.0% | 22.29 |
+| 1e-3 | 42 | 16 | 9/23 | 95.8% | 19.34 |
+
+At the baseline cut, quarter and eighth steps still disagree on 3 of 500
+labels. A tighter `1e-5` spectrum (364 modes) at the eighth step also loses
+23 particles but shares only 15 loss IDs with `1e-4`: 16 labels differ, and
+`1e-4` recovers only 15/23 losses. Against `1e-5`, `2e-4` recovers 13/23
+losses and changes 20 labels. The tighter run has no failed orbits and a
+maximum relative energy error of `3.00e-7`; its single warmed trace took
+122.09 s, too few repetitions for a stable speed comparison. Thus `1e-4`
+is **not cutoff-converged for HSX losses**, and `1e-5` is a tighter reference,
+not proven physical truth. These spectral effects exceed the measured
+3-label timestep change. The nonmonotonic CPU times at `6e-4` and `8e-4`
+also show that mode count alone is not a reliable runtime predictor.
 
 To reproduce the spectral table after checking out or merging PR #514, run
 `python benchmarks/trace_mode_cut.py PATH_TO_VMEC_EQUILIBRIA examples/data
@@ -395,12 +435,17 @@ PATH_TO_QA_WOUT PATH_TO_QH_WOUT --out cuts.json`. Add `--particles 512
 --tmax 0.002 --devices 8 --save-times 20 --birth-cut 1e-5` for the ARIES
 orbit timing protocol.
 The script records each equilibrium, surface, cut, mode count and error in
-JSON. The orbit option uses fixed births and reports losses, label agreement,
-energy error and compile and warm times for all seven cuts.
+JSON. The orbit option uses fixed births and reports losses, baseline-loss
+recall, label agreement, energy error and compile and warm times for all seven cuts.
 For the QA table, pass its WOUT alone with `--particles 1000 --tmax 0.01
 --devices 8 --repeats 3 --save-times 101`.
-For an HSX time-step check use its WOUT with `--particles 500 --tmax 0.005
---devices 8 --orbit-cuts 1e-4 --step-factor 0.5`.
+For the seven-cut HSX table use `vmec_equilibria/HSX/QHS_vac/wout_HSX_QHS_vac.nc`
+with `--particles 500 --tmax 0.0005 --devices 8 --save-times 101
+--birth-cut 1e-4 --step-factor 0.125 --repeats 3`. For the 5 ms timestep
+check, use that WOUT with `--particles 500 --tmax 0.005 --devices 8
+--orbit-cuts 1e-4 --step-factor 0.5`, then 0.25 and 0.125.
+For the tighter HSX reference, use the 0.5 ms command with
+`--orbit-cuts 1e-5 --repeats 1`; keep `--birth-cut 1e-4` to preserve births.
 
 **Where tracing time goes.** ESSOS evaluates the Boozer `|B|` series and its
 derivatives at four RK4 stages, then evaluates `|B|` again to track the maximum

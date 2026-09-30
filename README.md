@@ -145,21 +145,25 @@ birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 ([PR #517](https://github.com/uwplasma/vmex/pull/517)), ESSOS, CATAPULT and
 DESC agree on all 64 lost/confined labels in a common-birth, 2 ms reactor-scale
 NFP=2 vacuum case (55 lost). On 1,024 births, ESSOS and an experimental
-axis-regularized CATAPULT field agree on all labels (795 lost). Both GPU rows
-below use the same GTX TITAN X, 101 saved states, and exclude field setup and
-compilation; the methods and field representations differ.
+axis-regularized CATAPULT field agree on all labels (795 lost). The GPU rows
+below use the same GTX TITAN X and request 101 sample times, excluding field
+setup and compilation. CATAPULT truncates lost trajectories; ESSOS returns
+101 states per particle. The methods and field representations differ.
 
 | tracer | lost / 1,024 | warm GPU time | maximum confined-orbit energy drift |
 |---|---:|---:|---:|
-| VMEX/ESSOS Boozer RK4 kernel | 795 | 15.17 s | 2.08e-6 |
+| VMEX/ESSOS Boozer RK4, default lookup | 795 | 14.72 s | 2.08e-6 |
+| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 3.81 s | 2.08e-6 |
 | CATAPULT, released radial interpolation | 802 | 4.88 s | 7.84e-3 |
-| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.75 s | 3.54e-4 |
+| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 4.68 s | 3.54e-4 |
 
 The seven disagreements in released CATAPULT follow axis crossings; the
-experimental regularization removes them. [The tracing guide](docs/howto/trace-alpha-particles.md)
-explains the common births, energy checks, and limitations. Older SIMPLE and
-SIMSOPT numbers made with the incorrect flux sign are withdrawn pending a
-new matched run.
+experimental regularization removes them. SIMPLE matches all 64 labels in
+the smaller run. With its [VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
+and an inner-flux stop, SIMSOPT matches 58/58 resolved labels; six paths
+reach its Boozer-axis singularity and remain unresolved. [The tracing
+guide](docs/howto/trace-alpha-particles.md) gives the WOUT recipe, energy
+checks and limitations.
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,

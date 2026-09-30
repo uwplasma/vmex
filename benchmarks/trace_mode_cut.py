@@ -11,13 +11,22 @@ horizon before drawing a loss-fraction conclusion.
 
 import argparse
 import json
+import platform
 import time
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import numpy as np
 from scipy.interpolate import CubicSpline
 
 CUTS = (0.0, 1e-5, 1e-4, 2e-4, 3e-4, 5e-4, 6e-4, 8e-4, 1e-3)
+
+
+def installed_version(name):
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
 
 
 def spectrum(bx):
@@ -108,6 +117,8 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
     reference = labels[min(cuts)]
     for cut in cuts:
         results[str(cut)]["label_agreement"] = float(np.mean(labels[cut] == reference))
+        results[str(cut)]["baseline_loss_recall"] = (
+            float(np.mean(labels[cut][reference])) if reference.any() else None)
     return {"particles": particles, "tmax": tmax, "timestep": dt, "save_times": save_times,
             "birth_cut": birth_cut, "step_factor": step_factor,
             "devices": len(jax.devices()), "cuts": results}
@@ -128,7 +139,8 @@ def main():
     ap.add_argument("--devices", type=int, help="CPU devices; default matches vmex --trace")
     args = ap.parse_args()
     if (args.repeats < 1 or args.save_times < 2 or args.particles < 0
-            or args.tmax <= 0 or not np.isfinite(args.step_factor) or args.step_factor <= 0
+            or not np.isfinite(args.tmax) or args.tmax <= 0
+            or not np.isfinite(args.step_factor) or args.step_factor <= 0
             or (args.devices is not None and args.devices < 1)):
         ap.error("positive tmax and step-factor, repeats >= 1, save-times >= 2, particles >= 0 and devices >= 1 are required")
     if args.particles:
@@ -142,7 +154,12 @@ def main():
     from booz_xform_jax import Booz_xform
 
     paths = sorted({q for p in args.paths for q in (p.rglob("wout*.nc") if p.is_dir() else [p])})
-    record = {"cuts": CUTS, "spectral_error": "exact Boozer-angle RMS on the ESSOS radial spline", "cases": []}
+    record = {"schema": "vmex.trace-mode-cut/1", "cuts": CUTS,
+              "spectral_error": "exact Boozer-angle RMS on the ESSOS radial spline",
+              "host": platform.uname()._asdict(),
+              "versions": {name: installed_version(name) for name in
+                           (("vmex", "jax", "booz_xform_jax") + (("essos",) if args.particles else ()))},
+              "cases": []}
     for path in paths:
         row = {"path": str(path)}
         start = time.perf_counter()

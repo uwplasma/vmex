@@ -109,7 +109,10 @@ Boozer modes. CPU/GPU crossover depends on hardware, device count and the
 number of saved orbit states; benchmark the intended workload. The ESSOS
 compiled-kernel change in [PR #95](https://github.com/uwplasma/ESSOS/pull/95)
 removes recompilation on repeated calls and improves the matched GTX TITAN X
-GPU workload by about 17%.
+GPU workload by about 17%. The independent radial lookup change in
+[ESSOS PR #98](https://github.com/uwplasma/ESSOS/pull/98) improves its warmed
+tracing kernel a further 3.86-fold on the 30-knot seed case, with bitwise
+identical orbit output.
 
 The VMEC toroidal-flux sign was corrected in [VMEX PR #517](https://github.com/uwplasma/vmex/pull/517).
 Older loss tables and figures made with the opposite sign are withdrawn:
@@ -123,20 +126,27 @@ On the corrected Landreman-Paul QA field, 1,000 common births at `s = 0.3`
 were traced for 10 ms on eight Apple M2 CPU devices. Times exclude transform
 and compilation and are medians of three warmed calls:
 
-| mode cut | modes | lost / 1000 | labels matching `1e-4` | trace [s] |
-|---|---:|---:|---:|---:|
-| `1e-4` | 16 | 16 | 100% | 34.74 |
-| `2e-4` | 7 | 14 | 99.60% | 23.45 |
-| `3e-4` | 3 | 6 | 99.00% | 9.13 |
-| `5e-4` | 3 | 6 | 99.00% | 9.08 |
-| `6e-4` | 3 | 6 | 99.00% | 10.08 |
-| `8e-4` | 3 | 6 | 99.00% | 10.24 |
-| `1e-3` | 3 | 6 | 99.00% | 9.34 |
+| mode cut | modes | lost / 1000 | baseline losses recovered | labels matching `1e-4` | trace [s] |
+|---|---:|---:|---:|---:|---:|
+| `1e-4` | 16 | 16 | 16/16 | 100% | 34.74 |
+| `2e-4` | 7 | 14 | 13/16 | 99.60% | 23.45 |
+| `3e-4` | 3 | 6 | 6/16 | 99.00% | 9.13 |
+| `5e-4` | 3 | 6 | 6/16 | 99.00% | 9.08 |
+| `6e-4` | 3 | 6 | 6/16 | 99.00% | 10.08 |
+| `8e-4` | 3 | 6 | 6/16 | 99.00% | 10.24 |
+| `1e-3` | 3 | 6 | 6/16 | 99.00% | 9.34 |
 
 The last five cuts retain the same three modes; their time differences are
 measurement noise. The 99% overall label agreement at `3e-4` hides ten
-missing losses out of 16. On ARIES-CS, `2e-4` changes 31 of 512 labels over
-2 ms relative to `1e-4`. Thus there is no geometry-independent faster cut:
+missing losses out of 16. Halving the QA timestep at `1e-4` preserves all
+1,000 labels, including the 16 losses. On ARIES-CS, `2e-4` changes 31 of 512 labels over
+2 ms relative to `1e-4`. On HSX, a refined 0.5 ms, 500-birth run at `2e-4`
+has the same 23 total losses as `1e-4` but recovers only 16 of those 23;
+warm CPU time falls from 39.97 to 31.01 s. The [full seven-cut HSX table](../explanation/validation.md)
+reports the remaining times and labels with its timestep uncertainty.
+Moreover, `1e-4` and a tighter `1e-5` HSX spectrum each lose 23 particles,
+but share only 15 loss IDs at the refined step. Even the current default is
+not cutoff-converged for HSX losses. Thus there is no geometry-independent faster cut:
 converge the timestep, inspect energy, and check individual labels on the
 intended equilibrium before relaxing `--trace-mode-cut`.
 
@@ -145,8 +155,16 @@ intended equilibrium before relaxing `--trace-mode-cut`.
 The earlier 1,000-particle ARIES-CS comparison with SIMPLE and SIMSOPT used
 the wrong sign for VMEC toroidal flux in the Boozer guiding-centre equations.
 Its ESSOS loss counts, speed ratios, JSON record and plots are withdrawn.
-[`benchmarks/trace_cross_code.py`](../../benchmarks/trace_cross_code.py) remains
-available for a corrected same-birth rerun with those codes.
+Current SIMSOPT upstream also used the opposite sign in its VMEC-to-Boozer
+field; [SIMSOPT PR #664](https://github.com/hiddenSymmetries/simsopt/pull/664)
+corrects it. Its unpatched field matched only 44 of 64 corrected ESSOS labels;
+the patched field gave the same 64 terminal labels (55 losses), but six
+SIMSOPT paths reached the Boozer-axis singularity. With an inner-flux stop
+at `s=0.001`, it resolves 58 paths (50 lost) and matches ESSOS on all 58;
+the six axis stops are unresolved. SIMPLE with direct Boozer births matches
+all 64 ESSOS labels. [`benchmarks/trace_cross_code.py`](../../benchmarks/trace_cross_code.py)
+repeats the guarded check and fails on bad exits, field mismatch or excessive
+full-path energy drift in resolved trajectories.
 
 The current check uses a nonoptimized NFP=2 vacuum VMEX seed at reactor scale,
 `ns=31`, `mpol=5`, `ntor=5`. The 1,024 births are the same in each tracer:
@@ -161,16 +179,91 @@ endpoint output. ESSOS takes about 1.55 s on that M2 with 101 saved states;
 these output policies differ. DESC's maximum survivor endpoint energy error
 in this run is 2.59e-4, while ESSOS checks its maximum error at every step.
 
-The larger GPU comparison uses 101 saved states on a single GTX TITAN X.
+The comparison WOUT comes from the same unoptimized seed as the direct-loss
+optimization example. Recreate it without running the optimizer:
+
+```python
+from dataclasses import replace
+import vmex as vj
+from vmex import optimize as opt
+from vmex.core.scaling import aries_cs_scales, scale_wout
+
+inp = vj.VmecInput.from_file("examples/data/input.minimal_seed_nfp2")
+rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = 0.17
+rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -0.03, 0.03
+seed = replace(inp, rbc=rbc, zbs=zbs, delt=0.5).change_resolution(
+    mpol=5, ntor=5, ntheta=16, nzeta=14)
+equilibrium = opt.solve_equilibrium(seed)
+b, r = aries_cs_scales(equilibrium.wout)
+vj.write_wout("wout_alpha_seed_reactor.nc", scale_wout(equilibrium.wout, b_scale=b, r_scale=r))
+```
+
+This yields `Aminor_p=1.7044 m`, `volavgB=5.8646 T`; the benchmark WOUT's
+SHA-256 is `5caaaacd2809302cf9a703a9c31fff433a51a1cfc5b543b6c45fcd024964abd2`.
+With the corrected SIMSOPT field and a built SIMPLE executable, run
+`python benchmarks/trace_cross_code.py wout_alpha_seed_reactor.nc --simple
+PATH_TO_SIMPLE/simple.x --output cross_code.json` for the 64-birth CPU check.
+
+On one i7-3820 host with eight CPU workers, the same 64 births give:
+
+| tracer | loss result | matching ESSOS labels | warm trace time | maximum reported relative energy drift |
+|---|---:|---:|---:|---:|
+| ESSOS Boozer RK4 | 55 | 64 | 1.701 s | 1.66e-6, every step |
+| SIMPLE symplectic Euler, `npoiper2=512` | 55 | 64 | 5.078 s | 1.25e-3, 401 saved states |
+| SIMPLE symplectic midpoint, `npoiper2=256` | 55 | 64 | 5.247 s | 1.20e-5, 401 saved states |
+| SIMSOPT `gc_noK`, [sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664), axis stop | 50/58 resolved; 6 axis stops | 58/58 resolved | 0.415 s | 6.77e-4, all resolved path states |
+
+The methods and output policies differ: ESSOS returns 101 states and checks
+energy every fixed step; SIMPLE saves 401 macrostep states, and SIMSOPT checks
+all adaptive states of its resolved paths. Without saved-orbit output, SIMPLE
+Euler and midpoint take 1.898 and 3.469 s, respectively; their endpoint-only
+energy errors are `8.28e-4` and `8.03e-6`. The Euler saved-path error exceeds
+the default `1e-3` benchmark limit, so the retained script defaults to
+midpoint and checks saved-path energy.
+Several unguarded SIMSOPT paths enter `s < 0`, where its Boozer angle is
+ill-defined; their matching terminal loss labels do not validate those paths.
+Saving adaptive intermediate states reveals a maximum `4.88e-3` energy
+excursion near the axis. With the inner-flux stop, the maximum drift across
+all resolved path states is `6.77e-4` on both the i7-3820 and Apple M2.
+
+These are trace-only times after field construction and compilation. In a fresh
+same-host run, ESSOS takes 4.526 s from WOUT to its 12-mode field and
+5.541 s for its first trace including JIT. SIMPLE spends 8.055 s in
+field/start setup; its no-orbit-output Euler trace takes 1.890 s, giving
+9.949 s through output in that run. With 401 saved states, the midpoint
+trace takes 5.247 s. SIMSOPT spends 130.728 s converting and tabulating the
+field before the guarded 0.415 s trace. Repeated trace speed therefore does
+not measure the cost of a single calculation.
+
+The larger GPU comparison requests 101 sample times on a GTX TITAN X hosted by
+an i7-3820 CPU.
+CATAPULT truncates trajectories at loss (median four stored rows across this
+ensemble); ESSOS returns 101 states per particle.
 ESSOS retains 12 Boozer modes at cut `1e-4` and takes 16,000 fixed RK4 steps
-(`dt=1.25e-7 s`). CATAPULT uses a 25-point tricubic field and adaptive DP5
+(`dt=1.25e-7 s`). CATAPULT uses a 25×25×25 tricubic field table and adaptive DP5
 at tolerance `1e-10`. Times are warmed and exclude field setup and JIT:
 
 | tracer | lost / 1,024 | labels matching ESSOS | trace [s] | maximum confined-orbit energy drift |
 |---|---:|---:|---:|---:|
-| ESSOS Boozer, [kernel PR #95](https://github.com/uwplasma/ESSOS/pull/95) | 795 | 1,024 | 15.17 | 2.08e-6 |
+| ESSOS Boozer, default lookup and [kernel PR #95](https://github.com/uwplasma/ESSOS/pull/95) | 795 | 1,024 | 14.72 | 2.08e-6 |
+| ESSOS Boozer, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 1,024 | 3.81 | 2.08e-6 |
 | CATAPULT, released radial interpolant | 802 | 1,017 | 4.88 | 7.84e-3 |
-| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 4.75 | 3.54e-4 |
+| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 4.68 | 3.54e-4 |
+
+The ESSOS lookup change leaves all saved states, loss times and energy
+diagnostics bitwise identical; it also improves 100- and 300-knot GPU
+workloads without a measured eight-device CPU regression.
+With the same tabulated field, births and requested output on one host CPU
+core (FIRM3D's serial CPU particle loop), patched FIRM3D takes 74.67 and
+74.70 s in two warmed runs. It loses the same 795 particles and has maximum
+all-path relative energy drift `3.55e-4`.
+On the same host, the ESSOS Boozer kernel traces those births in 18.15 s using eight CPU
+devices; its one-device run takes 260.76 s. These CPU timings measure
+different particle-parallel policies.
+On the seven axis-sensitive births, the separate *spectral* FIRM3D CPU solver
+at adaptive tolerance `1e-10` changes from seven spurious losses and maximum
+energy drift `1.22e-2` to zero losses and `4.75e-9` after the patch.
 
 All seven released-CATAPULT disagreements pass close to the axis (`s<0.03`).
 Its Boozer radial interpolation gives a nonzero `m=1` magnetic-field
