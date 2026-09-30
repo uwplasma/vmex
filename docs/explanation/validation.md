@@ -341,12 +341,12 @@ Landreman-Paul QA (`ESSOS/examples/input_files`, commit `e77c6a0`) and QH
 cannot enter the current
 stellarator-symmetric Boozer tracer; the table summarizes the other 34
 equilibria (102 surfaces). Errors are relative root-mean-square errors over
-Boozer angles using the *same radial spline* as ESSOS, rather than a comparison
-of Fourier amplitudes alone. The Boozer-angle derivative norm includes both
+Boozer angles using the *same radial spline in `r = √s`* as ESSOS, rather than a comparison
+of Fourier amplitudes alone. The radial derivative is `∂r|B|`; the Boozer-angle derivative norm includes both
 `∂θ|B|` and `∂ζ|B|`. It is a field diagnostic, not an error bound for the
 guiding-centre right-hand side or loss fraction.
 
-| mode cut | median modes | median `|B|` error | median radial derivative error | median Boozer-angle derivative error | worst Boozer-angle derivative error | ARIES M2 modes | ARIES M2 lost / 512 | matching labels |
+| mode cut | median modes | median `|B|` error | median `∂r|B|` error | median Boozer-angle derivative error | worst Boozer-angle derivative error | ARIES M2 modes | ARIES M2 lost / 512 | matching labels |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | 1e-5 | 245 | 0.0010% | 0.06% | 0.19% | 0.9% | — | — | — |
 | 6e-5 | 140 | 0.0061% | 0.28% | 0.85% | 4.2% | — | — | — |

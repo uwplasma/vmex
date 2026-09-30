@@ -22,6 +22,7 @@ import numpy as np
 from scipy.interpolate import CubicSpline
 
 CUTS = (0.0, 1e-5, 6e-5, 8e-5, 1e-4, 2e-4, 3e-4, 5e-4, 6e-4, 8e-4, 1e-3)
+TRANSFORM_MODES = 32
 
 
 def installed_version(name):
@@ -37,7 +38,7 @@ def spectrum(bx):
     amplitude = np.abs(bm).max(axis=1)
     base = amplitude.max()
     r = np.sqrt(np.asarray(bx.s_b))
-    # Match the ESSOS radial spline; report Boozer-angle field derivatives.
+    # Match the ESSOS spline in r=sqrt(s); report Boozer-angle derivatives.
     spline = CubicSpline(r, np.where(m[:, None] > 0, bm / r, bm).T, axis=0)
     weight = np.where((m == 0) & (n == 0), 1.0, 0.5)
     rows = []
@@ -161,7 +162,7 @@ def main():
 
     paths = sorted({q for p in args.paths for q in (p.rglob("wout*.nc") if p.is_dir() else [p])})
     record = {"schema": "vmex.trace-mode-cut/1", "cuts": CUTS,
-              "spectral_error": "exact Boozer-angle RMS on the ESSOS radial spline",
+              "spectral_error": f"RMS relative to the uncut mboz=nboz={TRANSFORM_MODES} spectrum on the ESSOS r=sqrt(s) spline",
               "host": platform.uname()._asdict(),
               "versions": {name: installed_version(name) for name in
                            (("vmex", "jax", "booz_xform_jax") + (("essos",) if args.particles else ()))},
@@ -170,7 +171,7 @@ def main():
         row = {"path": str(path)}
         start = time.perf_counter()
         try:
-            bx = Booz_xform(verbose=0, mboz=32, nboz=32)
+            bx = Booz_xform(verbose=0, mboz=TRANSFORM_MODES, nboz=TRANSFORM_MODES)
             bx.read_wout(str(path), flux=False)
             if bool(bx.asym):
                 raise ValueError("lasym: Boozer tracer is symmetric only")
