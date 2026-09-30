@@ -224,10 +224,10 @@ PATH_TO_SIMPLE/simple.x --output cross_code.json` for the 64-birth CPU check.
 
 The [cross-code validation record](../explanation/validation.md) reports
 same-host CPU and GPU timings, full-path energy checks and near-axis orbit
-discrepancies. On 1,024 common births, a draft CATAPULT axis patch and ESSOS
-agree on all loss labels (795 lost); released CATAPULT adds seven near-axis
-losses. The [draft patch](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
-has not been validated near the axis.
+discrepancies. On 8,192 common births over 20 ms, CATAPULT's opt-in
+[regular-axis method](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
+matches 8,191 ESSOS loss labels; the released method matches 8,122. The
+remaining regular-axis label is sensitive to ESSOS's Boozer mode cutoff.
 
 ## From Python
 

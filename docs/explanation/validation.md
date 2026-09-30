@@ -571,126 +571,51 @@ trace takes 5.247 s. SIMSOPT spends 130.728 s converting and tabulating the
 field before the guarded 0.415 s trace. Repeated trace speed therefore does
 not measure the cost of a single calculation.
 
-The larger GPU comparison requests 101 sample times on a GTX TITAN X hosted by
-an i7-3820 CPU.
-CATAPULT truncates trajectories at loss (median four stored rows across this
-ensemble); ESSOS returns 101 states per particle.
-ESSOS retains 12 Boozer modes at cut `1e-4` and takes 16,000 fixed RK4 steps
-(`dt=1.25e-7 s`). CATAPULT uses a 25×25×25 tricubic field table and adaptive DP5
-at tolerance `1e-10`. Times are warmed and exclude field setup and JIT:
+The longer GPU check traces 8,192 common alpha births in a reactor-scale vacuum
+equilibrium (`ns=31`, `mpol=5`, `ntor=5`) for 20 ms, with 101 requested
+times on one RTX A4000. ESSOS retains 12 Boozer modes at cut `1e-4` and uses
+RK4 steps of `1.25e-7 s`; CATAPULT uses a 25³ tricubic table and adaptive DP5
+at tolerance `1e-10`. Times exclude field construction. ESSOS returns every
+saved state after loss; CATAPULT stops lost paths.
 
-| tracer | lost / 1,024 | labels matching ESSOS | trace [s] | maximum confined-orbit energy drift |
-|---|---:|---:|---:|---:|
-| ESSOS Boozer, default lookup and [kernel PR #95](https://github.com/uwplasma/ESSOS/pull/95) | 795 | 1,024 | 14.72 | 2.08e-6 |
-| ESSOS Boozer, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 1,024 | 3.81 | 2.08e-6 |
-| CATAPULT, released radial interpolant | 802 | 1,017 | 4.88 | 7.84e-3 |
-| CATAPULT, [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 4.68 | 3.54e-4 |
+| Tracer | Lost | Labels matching ESSOS | First trace | Repeated trace | Maximum relative energy drift |
+|---|---:|---:|---:|---:|---:|
+| ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.29 s | 69.24 s | 2.08e-5, every step |
+| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | — | 37.49 / 37.52 s | 2.08e-5, every step |
+| CATAPULT released | 6,647 | 8,122 | 34.17 s | 34.48 s | 5.17e-2, saved confined paths |
+| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,578 | 8,191 | 36.61 s | 36.88 s | 1.17e-5, saved confined paths |
 
-The same 1,024 births, field tables and 101 requested sample times were also
-run on GPU 0 of an RTX A4000 (16 GB). Medians are from three warmed calls;
-field setup and compilation are excluded. ESSOS used JAX 0.6.2 with CUDA 12.
+The compaction times are two warmed calls; all returned ESSOS arrays match
+the default trace exactly. Its first call followed baseline compilation and
+is omitted from the cold column. All ESSOS reactor losses occur by 0.158 ms,
+so skipping stopped particles accounts for most of the speed gain. CATAPULT
+truncates lost paths (median two stored rows), whereas ESSOS returns 101.
 
-| tracer | lost / 1,024 | labels matching ESSOS | warm trace [s] | maximum survivor energy drift |
-|---|---:|---:|---:|---:|
-| ESSOS default lookup | 795 | 1,024 | 7.433 | 2.08e-6, every step |
-| ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 1,024 | 2.410 | 2.08e-6, every step |
-| released CATAPULT | 802 | 1,017 | 2.862 | 9.48e-3, saved states |
-| CATAPULT [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 2.835 | 3.55e-4, saved states |
+One reactor label differs between regular-axis CATAPULT and ESSOS at cut
+`1e-4`. That orbit crosses `s=1` with CATAPULT and with all 2,048 Boozer
+modes in ESSOS; at cut `1e-4`, ESSOS reaches `s=0.9983`. Of 70 extra losses
+in released CATAPULT, 66 approach `s<0.01` in ESSOS. The released
+CATAPULT orbit with the largest energy drift approaches `s=0.0010`;
+tightening its ODE tolerance from `1e-8` to `1e-10` increases that drift
+from 1.13% to 5.17%. Mode, field-table and timestep convergence matter
+for individual labels.
 
-The longer check uses the same 4,096 births at both horizons, JAX 0.9.2 for
-ESSOS, and 101 requested sample times. The reported first and repeated calls
-use the same RTX A4000 except where noted; field setup is excluded.
+A QA equilibrium uses 4,096 births at `s=0.25`, 10 ms and 101 requested
+times. With 16 Boozer modes, the same current ESSOS source and hashed
+inputs give either 16 or 20 losses in separate GPU processes. Both sets
+match 4,081 of the 21 released CATAPULT labels, but only 11–13 lost IDs
+overlap. ESSOS first/repeated calls take 31.63–31.97/24.62–24.67 s;
+CATAPULT takes 160.51/161.47 s. Measured ESSOS energy drift stays below
+1e-4 at every step; CATAPULT reaches 3.03e-2 on saved confined paths.
+Four ESSOS long orbits separate after 2–4 ms under roundoff-scale changes
+and cross the LCFS at 7.38–9.47 ms in the 20-loss run. The first arithmetic
+difference across the fresh processes remains under investigation; these
+individual labels are not converged.
 
-| Horizon | Tracer | Lost | Labels matching ESSOS | First | Repeated | Maximum relative energy drift |
-|---|---|---:|---:|---:|---:|---:|
-| 10 ms | ESSOS #98 | 3,340 | 4,096 | 33.31 s | 25.63 s | 1.05e-5, every step |
-| 10 ms | CATAPULT released | 3,371 | 4,065 | 11.53 s | 11.58 s | 1.97e-2, saved confined paths |
-| 10 ms | CATAPULT #90 | 3,342 | 4,094 | — | — | 5.55e-4, saved confined paths |
-| 20 ms | ESSOS #98 | 3,340 | 4,096 | 59.05 s | 93.87–103.49 s | 2.10e-5, every step |
-| 20 ms | CATAPULT released | 3,371 | 4,065 | 21.96 s | 22.08 s | 1.97e-2, saved confined paths |
-| 20 ms | CATAPULT #90 | 3,342 | 4,094 | 21.71 s | 21.82 s | 5.57e-4, saved confined paths |
-
-At 20 ms, CATAPULT repeated values are medians of three calls; the ESSOS
-entry gives the full three-call range. A separate A4000 run took 50.95 s for
-ESSOS with bitwise-identical states. Its timing variability prevents a stable
-20 ms speed ratio. The 10 ms CATAPULT #90 timing used the other A4000 and is
-omitted from this same-device table.
-ESSOS still evaluates fixed RK4 steps after a particle is lost; CATAPULT stops that
-particle's adaptive trace. The reactor case has 3,340 early ESSOS losses,
-whereas the QA case below has 16, so the workloads favor different kernels.
-
-With 8,192 new common births and 20 ms on one RTX A4000, ESSOS #98 loses
-6,577 particles in 76.29/69.24 s (first/repeated); released CATAPULT loses
-6,647 in 34.17/34.48 s. They match 8,122 loss labels. Both request 101
-times; CATAPULT truncates lost paths, while ESSOS returns every state. All
-ESSOS losses occur by 0.158 ms. Maximum relative energy drift is 2.08e-5
-at every ESSOS step and 5.17e-2 on saved confined CATAPULT paths. The
-8,192-birth ensemble uses the same seed as the 4,096-birth run but is sampled
-separately, so its first half is not the earlier ensemble.
-Of the 70 CATAPULT-only losses, 66 reach `s<0.01` in ESSOS. The CATAPULT
-orbit with the largest saved-path energy drift reaches `s=0.0010`.
-For that orbit, tightening CATAPULT's ODE tolerance from `1e-8` to `1e-10`
-raises the measured drift from 1.13% to 5.17%; ODE tolerance alone does
-not resolve the near-axis field interpolation.
-
-CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
-101 states per birth. Thirty of the 31 released CATAPULT-only losses approach
-`s<0.01` in ESSOS. The two labels still differing with #90 are unresolved.
-Its `m=1` spline has the wrong near-axis radial scaling, so the table does not
-establish axis-crossing accuracy.
-On `ns=101` common confined births with released-orbit `0.01≤s_min<0.05`,
-the p95 saved-path Hamiltonian drift rises from 7.33e-5 released to 1.26e-3
-with #90. That regression keeps the patch in draft.
-
-An independent reactor-scaled QA case uses 4,096 births at `s=0.25`, seed 42,
-10 ms, and 101 requested times. ESSOS retains 16 Boozer modes; CATAPULT uses
-the same 25³ table and adaptive tolerance as above. ESSOS loses 16 and released
-CATAPULT loses 21 (4,081 matching labels). Their first/repeated calls take
-31.76/24.82 s and 160.51/161.47 s. Most CATAPULT particles retain all 101
-states. Maximum relative energy drift is 9.46e-5 at every ESSOS step and
-3.03e-2 on saved confined CATAPULT paths. The 15 discordant labels are not
-concentrated at the axis; loss convergence remains to be checked.
-
-In the shorter 1,024-birth run, released and patched CATAPULT disagree on seven near-axis
-births seen on the GTX TITAN X. The patch changes their outcomes and energy
-drift with little change in GPU runtime. On the first 64 common births, ESSOS
-#98, patched CATAPULT and DESC all lose 55; their 101-time warm GPU runs take
-1.94, 2.63 and 21.4 s respectively; their maximum reported energy drifts
-are `1.65e-6` at every ESSOS step, `6.76e-5` at saved CATAPULT states and
-`2.62e-4` at surviving DESC endpoints. DESC 0.17.1 needs explicit GPU placement
-(`desc.set_device('gpu', gpuid=0)`) and spends another
-31.47 s loading the WOUT, uses an independently fitted field (up to 0.4%
-different in `|B|` at births), and its timing is a 64-particle comparison.
-
-The ESSOS lookup change leaves all saved states, loss times and energy
-diagnostics bitwise identical; it also improves 100- and 300-knot GPU
-workloads without a measured eight-device CPU regression.
-With the same tabulated field, births and requested output on one host CPU
-core (FIRM3D's serial CPU particle loop), patched FIRM3D takes 74.67 and
-74.70 s in two warmed runs. It loses the same 795 particles and has maximum
-all-path relative energy drift `3.55e-4`.
-On the same host, the ESSOS Boozer kernel traces those births in 18.15 s using eight CPU
-devices; its one-device run takes 260.76 s. These CPU timings measure
-different particle-parallel policies.
-On the seven axis-sensitive births, the separate *spectral* FIRM3D CPU solver
-at adaptive tolerance `1e-10` changes from seven spurious losses and maximum
-energy drift `1.22e-2` to zero losses and `4.75e-9` after the patch.
-
-All seven released-CATAPULT disagreements pass close to the axis (`s<0.03`).
-Its Boozer radial interpolation gives a nonzero `m=1` magnetic-field
-harmonic on the axis. Zeroing all `m>0` axis coefficients and using the same
-spline's derivative for `dB/ds` removes those seven losses and sharply
-reduces Hamiltonian drift. The regularization is proposed in [FIRM3D PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
-and remains unvalidated. A DESC run independently confines those seven births through
-0.2 ms. On a re-solved `ns=101` equilibrium, ESSOS and regularized FIRM3D
-both lose the same one of the seven; unmodified FIRM3D loses two. This
-resolution check matters because axis crossings are sensitive to sparse
-radial data. The PR enforces the axis value and a consistent derivative, but
-its cubic-in-`s` `m=1` mode is still an approximation to the regular
-`sqrt(s)` behaviour. Along 40 sampled points with `s<0.03`, the patched
-FIRM3D and ESSOS fields differ by up to 0.381% in `|B|`. Matching labels on
-this ensemble is not a general convergence guarantee. The [ESSOS README](https://github.com/uwplasma/ESSOS/pull/94)
-compares methods and features in more detail.
+In a separate 64-birth, 2 ms GPU check, ESSOS #98 and DESC 0.17.1 both
+lose 55 particles. Their warmed 101-time traces take 1.94 s and 21.40 s;
+DESC uses an independently fitted field with up to 0.4% difference in
+`|B|` at births.
 
 ## Device and lane consistency
 

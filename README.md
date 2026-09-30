@@ -155,26 +155,27 @@ steps of `1.25e-7 s`; CATAPULT uses a 25³ field table and adaptive DP5 at
 exclude field setup. Both request 101 sample times, but CATAPULT truncates lost
 paths while ESSOS returns 101 states per birth.
 
-| tracer | lost / 8,192 | labels matching ESSOS | first trace | repeated trace |
-|---|---:|---:|---:|---:|
-| VMEX/ESSOS Boozer RK4, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.29 s | 69.24 s |
-| CATAPULT, released radial interpolation | 6,647 | 8,122 | 34.17 s | 34.48 s |
+| tracer | lost / 8,192 | labels matching ESSOS | first trace | repeated trace | maximum energy drift |
+|---|---:|---:|---:|---:|---:|
+| VMEX/ESSOS Boozer RK4, [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.29 s | 69.24 s | 2.08e-5, every step |
+| ESSOS [survivor compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | — | 37.49 / 37.52 s | 2.08e-5, every step |
+| CATAPULT, released | 6,647 | 8,122 | 34.17 s | 34.48 s | 5.17e-2, saved confined paths |
+| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,578 | 8,191 | 36.61 s | 36.88 s | 1.17e-5, saved confined paths |
 
-All ESSOS losses occur before 0.16 ms, yet its fixed-step kernel continues
-through 20 ms; CATAPULT stops lost paths. Maximum relative energy drift is
-`2.08e-5` for ESSOS (every step) and `5.17e-2` for CATAPULT (saved confined
-paths). The proposed [FIRM3D #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
-patch remains in draft while its near-axis regression is addressed. DESC matches all
-64 labels in the smaller GPU subset and takes 21.4 s warmed with 101 requested
-states; its independent field fit differs by up to 0.4% in `|B|`.
+The compaction row reports two warmed calls; its first call followed baseline
+compilation. All ESSOS losses occur before 0.16 ms, so compaction skips most
+subsequent particle steps. The one regular-axis label differing from ESSOS at
+cut `1e-4` crosses `s=1` when ESSOS retains all Boozer modes. DESC matches all
+64 labels in the smaller GPU subset and takes 21.4 s warmed; its independent
+field fit differs by up to 0.4% in `|B|`.
 
 In a separate QA equilibrium, 4,096 births at `s=0.25` traced for 10 ms with
-101 requested times give
-16 ESSOS and 21 released CATAPULT losses (4,081 matching labels). First/repeated
-traces take 31.76/24.82 s for ESSOS and 160.51/161.47 s for CATAPULT;
-maximum relative energy drift is `9.46e-5`
-at every ESSOS step and `3.03e-2` on saved confined CATAPULT paths. These
-loss labels have not been converged.
+101 requested times give 16–20 ESSOS losses across fresh processes with
+identical inputs and source, versus 21 for released CATAPULT. Both observed
+ESSOS sets match 4,081 CATAPULT labels, but only 11–13 lost IDs overlap.
+ESSOS repeated traces take 24.62–24.67 s; CATAPULT takes 161.47 s. Measured
+ESSOS energy drift stays below `1e-4` at every step; CATAPULT reaches
+`3.03e-2` on saved confined paths. These long-orbit labels are not converged.
 
 SIMPLE matches all 64 labels in the smaller run. With its
 [VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
