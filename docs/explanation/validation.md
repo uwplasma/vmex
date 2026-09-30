@@ -597,7 +597,26 @@ field setup and compilation are excluded. ESSOS used JAX 0.6.2 with CUDA 12.
 | released CATAPULT | 802 | 1,017 | 2.862 | 9.48e-3, saved states |
 | CATAPULT [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 2.835 | 3.55e-4, saved states |
 
-The released and patched CATAPULT runs disagree on the same seven near-axis
+The longer check uses the same 4,096 births at both horizons, JAX 0.9.2 for
+ESSOS, and 101 requested sample times. Each first and repeated time is one
+trace call on the RTX A4000; field setup is excluded.
+
+| Horizon | Tracer | Lost | Labels matching ESSOS | First | Repeated | Maximum relative energy drift |
+|---|---|---:|---:|---:|---:|---:|
+| 10 ms | ESSOS #98 | 3,340 | 4,096 | 33.00 s | 25.29 s | 1.05e-5, every step |
+| 10 ms | CATAPULT released | 3,371 | 4,065 | 11.51 s | 11.51 s | 1.97e-2, saved confined paths |
+| 10 ms | CATAPULT #90 | 3,342 | 4,094 | 11.27 s | 11.26 s | 5.55e-4, saved confined paths |
+| 20 ms | ESSOS #98 | 3,340 | 4,096 | 60.34 s | 50.95 s | 2.10e-5, every step |
+| 20 ms | CATAPULT released | 3,371 | 4,065 | 46.34 s | 49.21 s | 1.97e-2, saved confined paths |
+| 20 ms | CATAPULT #90 | 3,342 | 4,094 | 22.09 s | 24.98 s | 5.57e-4, saved confined paths |
+
+CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
+101 states per birth. Thirty of the 31 released CATAPULT-only losses approach
+`s<0.01` in ESSOS. The two labels still differing with #90 are unresolved.
+Its `m=1` spline has the wrong near-axis radial scaling, so the table does not
+establish axis-crossing accuracy.
+
+In the shorter 1,024-birth run, released and patched CATAPULT disagree on seven near-axis
 births seen on the GTX TITAN X. The patch changes their outcomes and energy
 drift with little change in GPU runtime. On the first 64 common births, ESSOS
 #98, patched CATAPULT and DESC all lose 55; their 101-time warm GPU runs take
