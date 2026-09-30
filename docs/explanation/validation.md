@@ -584,7 +584,7 @@ at tolerance `1e-10`. Times are warmed and exclude field setup and JIT:
 | ESSOS Boozer, default lookup and [kernel PR #95](https://github.com/uwplasma/ESSOS/pull/95) | 795 | 1,024 | 14.72 | 2.08e-6 |
 | ESSOS Boozer, [GPU lookup PR #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 1,024 | 3.81 | 2.08e-6 |
 | CATAPULT, released radial interpolant | 802 | 1,017 | 4.88 | 7.84e-3 |
-| CATAPULT, [axis fix PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 4.68 | 3.54e-4 |
+| CATAPULT, [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 4.68 | 3.54e-4 |
 
 The same 1,024 births, field tables and 101 requested sample times were also
 run on GPU 0 of an RTX A4000 (16 GB). Medians are from three warmed calls;
@@ -595,7 +595,7 @@ field setup and compilation are excluded. ESSOS used JAX 0.6.2 with CUDA 12.
 | ESSOS default lookup | 795 | 1,024 | 7.433 | 2.08e-6, every step |
 | ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 795 | 1,024 | 2.410 | 2.08e-6, every step |
 | released CATAPULT | 802 | 1,017 | 2.862 | 9.48e-3, saved states |
-| CATAPULT [axis fix #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 2.835 | 3.55e-4, saved states |
+| CATAPULT [draft axis patch #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90) | 795 | 1,024 | 2.835 | 3.55e-4, saved states |
 
 The released and patched CATAPULT runs disagree on the same seven near-axis
 births seen on the GTX TITAN X. The patch changes their outcomes and energy
@@ -627,7 +627,7 @@ Its Boozer radial interpolation gives a nonzero `m=1` magnetic-field
 harmonic on the axis. Zeroing all `m>0` axis coefficients and using the same
 spline's derivative for `dB/ds` removes those seven losses and sharply
 reduces Hamiltonian drift. The regularization is proposed in [FIRM3D PR #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
-and remains experimental until merged. A DESC run independently confines those seven births through
+and remains unvalidated. A DESC run independently confines those seven births through
 0.2 ms. On a re-solved `ns=101` equilibrium, ESSOS and regularized FIRM3D
 both lose the same one of the seven; unmodified FIRM3D loses two. This
 resolution check matters because axis crossings are sensitive to sparse
