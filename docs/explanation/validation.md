@@ -629,6 +629,9 @@ at every ESSOS step and 5.17e-2 on saved confined CATAPULT paths. The
 separately, so its first half is not the earlier ensemble.
 Of the 70 CATAPULT-only losses, 66 reach `s<0.01` in ESSOS. The CATAPULT
 orbit with the largest saved-path energy drift reaches `s=0.0010`.
+For that orbit, tightening CATAPULT's ODE tolerance from `1e-8` to `1e-10`
+raises the measured drift from 1.13% to 5.17%; ODE tolerance alone does
+not resolve the near-axis field interpolation.
 
 CATAPULT truncates paths after loss (median two stored rows here); ESSOS keeps
 101 states per birth. Thirty of the 31 released CATAPULT-only losses approach
