@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """Optimize alpha confinement directly from a shaped NFP=2 seed.
 
-The two design terms are an ESSOS orbit-loss surrogate and aspect ratio.
-There is no quasisymmetry objective or warm stage. Hard losses select the
-accepted gradient step; fresh particles test it at a longer time. Direct
-losses are noisy even with thousands of births (Bindel et al., 2023,
+The two terms are smooth peak-flux risk and aspect ratio. Peak risk supplies
+gradients before escape; hard losses select the accepted step and fresh
+particles test it at a longer time. There is no symmetry stage. Direct losses
+are noisy even with thousands of births (Bindel et al., 2023,
 https://arxiv.org/abs/2302.11369); this is a research example.
 """
 
