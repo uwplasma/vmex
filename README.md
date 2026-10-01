@@ -173,6 +173,15 @@ Cold and warm timings include NEO and all five figures, using [Boozer #17](https
 
 ![Cold and warm VMEX plotting times](docs/_static/figures/readme_plot_timing.webp)
 
+The solved [DESC](https://desc-docs.readthedocs.io/en/latest/notebooks/tutorials/EffectiveRipple.html) HELIOTRON at `s=0.4375` gives the following `ε_eff^(3/2)` with matched reference radii ([controls](benchmarks/plot_diagnostics.json)).
+
+| code | initial controls | refined controls | change |
+|---|---|---|---|
+| DESC | 0.274016 | 0.274214 | 0.072 % |
+| NEO | 0.276067 | 0.274362 | 0.618 % |
+
+Refined values differ by 0.054 %; DESC resolves 357 wells within a capacity of 512. This agreement applies to this surface and the recorded controls.
+
 VMEX follows the deck's `NS_ARRAY`, `FTOL_ARRAY` and `NITER_ARRAY`. In Python:
 
 ```python
