@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 """Optimize alpha residence and aspect ratio with VMEX and ESSOS derivatives.
 
-Fixed births smooth the sample objective; independent longer traces check
-confinement. No symmetry objective or derivative-free stage is used.
+Fixed births keep training deterministic; fresh, longer traces check confinement.
 """
 
 import os
