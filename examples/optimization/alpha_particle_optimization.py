@@ -119,10 +119,13 @@ def orbit_risk(field, births, reference_weight):
         k4 = rhs(y + dt * k3, mu)
         yn = y + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
         sn = yn[:, 0] ** 2 + yn[:, 1] ** 2
-        sn = jnp.where(jnp.isfinite(sn), sn, 1.0)
         # Crossing events make derivatives local to a fixed loss topology.
         lost = lost | (sn >= 1.0)
-        capped = jnp.where(lost, 0.95, jnp.minimum(sn, 0.95))
+        capped = jnp.where(
+            jnp.isfinite(yn).all(axis=1),
+            jnp.where(lost, 0.95, jnp.minimum(sn, 0.95)),
+            jnp.nan,
+        )
         w = jnp.exp((capped - 0.8) / 0.06)
         return (jnp.where(lost[:, None], y, yn), lost, weight + w, weighted_s + w * capped), None
 
@@ -210,6 +213,8 @@ def value_grad(y):
     """Differentiate through equilibria, Boozer spectra, and ESSOS orbits."""
     tic = time.perf_counter()
     value, grad = problem.value_and_grad(x0 + step * basis @ y)
+    if not np.isfinite(value) or not np.isfinite(grad).all():
+        raise ValueError("nonfinite alpha objective or gradient")
     print(f"smooth cost {value:.5f}, gradient {time.perf_counter() - tic:.1f} s", flush=True)
     return value, step * basis.T @ grad
 

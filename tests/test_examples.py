@@ -845,6 +845,61 @@ def test_alpha_particle_optimization(tmp_path):
         assert (tmp_path / name).exists(), name
 
 
+def _alpha_objective_functions(**namespace):
+    path = EXAMPLES / "optimization" / "alpha_particle_optimization.py"
+    functions = [node for node in ast.parse(path.read_text()).body
+                 if isinstance(node, ast.FunctionDef) and node.name in {"orbit_risk", "value_grad"}]
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"), namespace)
+    return namespace
+
+
+@pytest.mark.parametrize("component,rate", [(0, 0.0), (0, 2.0),
+                                           (0, np.nan), (0, np.inf),
+                                           (3, np.nan), (3, np.inf)])
+def test_alpha_orbit_risk_preserves_exits_and_rejects_failed_states(component, rate):
+    import jax
+    import jax.numpy as jnp
+    from types import SimpleNamespace
+
+    field = SimpleNamespace(modB=lambda *args: jnp.array(1.0),
+                            profiles=lambda s: (jnp.ones((s.size, 3)), None))
+    functions = _alpha_objective_functions(
+        jax=jax, jnp=jnp, T=1.0, STEPS=2,
+        constants=SimpleNamespace(FUSION_ALPHA_PARTICLE_ENERGY=0.5,
+                                  ALPHA_PARTICLE_MASS=1.0, ALPHA_PARTICLE_CHARGE=1.0),
+        guiding_center_rhs=lambda field, y, *args: jnp.zeros_like(y).at[component].set(rate),
+    )
+    risk = functions["orbit_risk"](field, jnp.array([[0.3, 0.0, 0.0, 0.0]]), jnp.ones(1))
+    if np.isfinite(rate):
+        expected = 1 / (1 + np.exp(-((0.3 if rate == 0 else 0.95) - 0.8) / 0.06))
+        assert float(risk) == pytest.approx(expected, rel=1e-5)
+        derivative = jax.grad(lambda s: functions["orbit_risk"](
+            field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1)))(0.3)
+        assert float(derivative) == pytest.approx(expected * (1 - expected) / 0.06 if rate == 0 else 0.0,
+                                                rel=1e-5, abs=1e-7)
+    else:
+        assert np.isnan(risk)
+
+
+@pytest.mark.parametrize("value,gradient", [(2.0, [3.0]), (np.nan, [1.0]),
+                                           (np.inf, [1.0]), (0.0, [np.nan]), (0.0, [np.inf])])
+def test_alpha_optimizer_accepts_only_finite_value_and_gradient(value, gradient):
+    from types import SimpleNamespace
+
+    functions = _alpha_objective_functions(
+        np=np, time=SimpleNamespace(perf_counter=lambda: 0.0), x0=np.zeros(1),
+        step=0.02, basis=np.eye(1),
+        problem=SimpleNamespace(value_and_grad=lambda x: (value, np.asarray(gradient))),
+    )
+    if np.isfinite(value) and np.isfinite(gradient).all():
+        result, derivative = functions["value_grad"](np.zeros(1))
+        assert result == value
+        np.testing.assert_array_equal(derivative, 0.02 * np.asarray(gradient))
+    else:
+        with pytest.raises(ValueError, match="nonfinite alpha objective or gradient"):
+            functions["value_grad"](np.zeros(1))
+
+
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)
 def test_free_boundary_essos_coils(tmp_path):
     # The example needs only ``essos.coils`` (loading) + ``essos.fields.BiotSavart``
