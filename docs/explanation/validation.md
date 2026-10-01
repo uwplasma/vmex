@@ -594,35 +594,35 @@ trace takes 5.247 s. SIMSOPT spends 130.728 s converting and tabulating the
 field before the guarded 0.415 s trace. Repeated trace speed therefore does
 not measure the cost of a single calculation.
 
-The longer GPU check traces 8,192 common alpha births in a reactor-scale vacuum
-equilibrium (`ns=31`, `mpol=5`, `ntor=5`) for 20 ms, with 101 requested
-times on one RTX A4000. ESSOS retains 12 Boozer modes at cut `1e-4` and uses
-RK4 steps of `1.25e-7 s`; CATAPULT uses a 25³ tricubic table and adaptive DP5
-at tolerance `1e-10`. Times exclude field construction. ESSOS returns every
-saved state after loss; CATAPULT stops lost paths.
+The corrected-mass GPU check traces 8,192 common alpha births in a reactor-scale
+vacuum seed (`ns=31`, `mpol=ntor=5`) for 20 ms, with 101 requested times on one
+RTX A4000. All codes use `6.6446573450e-27 kg` and 3.52 MeV. ESSOS retains 12
+Boozer modes at cut `1e-4` with RK4 steps of `1.25e-7 s`; CATAPULT uses a 25³
+tricubic table and adaptive DP5 at tolerance `1e-10`. Trace times exclude setup.
 
 | Tracer | Lost | Labels matching ESSOS | First trace | Repeated trace | Maximum relative energy drift |
 |---|---:|---:|---:|---:|---:|
-| ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.52 s | 69.18 s | 2.08e-5, every step |
-| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | 49.59 s | 37.35 s | 2.08e-5, every step |
-| CATAPULT released | 6,647 | 8,122 | 34.17 s | 34.48 s | 5.17e-2, saved confined paths |
-| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,578 | 8,191 | 36.61 s | 36.88 s | 1.17e-5, saved confined paths |
+| ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,572 | 8,192 | 76.40 s | 69.06 s | 2.14e-5, every step |
+| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,572 | 8,192 | 49.29 s | 37.42 s | 2.14e-5, every step |
+| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,573 | 8,191 | 36.69 s | 37.04 s | 1.36e-5, saved confined paths |
 
-The ESSOS timings use fresh processes with compilation caches disabled:
-76.52/69.18 s without compaction and 49.59/37.35 s with it. Field setup adds
-1.48/1.44 s; all returned arrays match exactly. The source is ESSOS
-`7200cc70cb3a8e3a2756d0ba93fb16500131c02c` with JAX 0.9.2. All ESSOS reactor losses occur by 0.158 ms,
-so skipping stopped particles accounts for most of the speed gain. CATAPULT
-truncates lost paths (median two stored rows), whereas ESSOS returns 101.
+ESSOS uses fresh processes with compilation caches disabled; stored births,
+states, times, loss times and energy diagnostics match bitwise with compaction.
+It returns 101 states per particle; CATAPULT truncates lost paths. Setup adds
+1.19–1.30 s for ESSOS from saved tables and 8.70 s for CATAPULT, including
+its Boozer transform; these scopes differ. Source, input and binary hashes,
+settings and energy scopes are in [`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
+The sole CATAPULT-only loss is birth 6445; its corrected-mass cutoff and
+timestep convergence have not been tested.
 
-One reactor label differs between regular-axis CATAPULT and ESSOS at cut
-`1e-4`. That orbit crosses `s=1` with CATAPULT and with all 2,048 Boozer
-modes in ESSOS; at cut `1e-4`, ESSOS reaches `s=0.9983`. Of 70 extra losses
-in released CATAPULT, 66 approach `s<0.01` in ESSOS. The released
-CATAPULT orbit with the largest energy drift approaches `s=0.0010`;
-tightening its ODE tolerance from `1e-8` to `1e-10` increases that drift
-from 1.13% to 5.17%. Mode, field-table and timestep convergence matter
-for individual labels.
+Earlier runs used mass `6.6951e-27 kg`: released CATAPULT lost 6,647 particles
+and reached 5.17% saved confined-path energy drift; regular-axis CATAPULT lost
+6,578 with drift `1.17e-5`, versus 6,577 for ESSOS. Of the 70 extra released
+losses, 66 approach `s<0.01` in ESSOS. Its worst-energy orbit approaches
+`s=0.0010`; tightening ODE tolerance from `1e-8` to `1e-10` increases drift
+from 1.13% to 5.17%. The one regular-axis label disagrees at cut `1e-4`
+but agrees with the full ESSOS spectrum. These historical checks do not
+establish convergence of the corrected-mass run.
 
 A QA equilibrium uses 4,096 births at `s=0.25`, 10 ms and 101 requested
 times. With 16 Boozer modes, the same current ESSOS source and hashed

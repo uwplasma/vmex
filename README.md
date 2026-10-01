@@ -149,16 +149,15 @@ field error; use more births for small loss fractions.
 
 | tracer | lost / 8,192 | matching labels | cold trace | warm trace | maximum energy drift |
 |---|---:|---:|---:|---:|---:|
-| VMEX/ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.52 s | 69.18 s | 2.08e-5, every step |
-| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | 49.59 s | 37.35 s | 2.08e-5, every step |
-| CATAPULT, released | 6,647 | 8,122 | 34.17 s | 34.48 s | 5.17e-2, saved confined paths |
-| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,578 | 8,191 | 36.61 s | 36.88 s | 1.17e-5, saved confined paths |
+| VMEX/ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,572 | 8,192 | 76.40 s | 69.06 s | 2.14e-5, every step |
+| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,572 | 8,192 | 49.29 s | 37.42 s | 2.14e-5, every step |
+| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,573 | 8,191 | 36.69 s | 37.04 s | 1.36e-5, saved confined paths |
 
-Measurements use the earlier ESSOS alpha mass, `6.6951e-27 kg`. Cold ESSOS traces use fresh processes with compilation caches disabled; field setup adds 1.44–1.48 s. Compaction preserves every output and benefits from losses before 0.16 ms; CATAPULT truncates lost paths, while ESSOS returns all requested states.
+Mass: `6.6446573450e-27 kg`; cold traces use fresh processes, with ESSOS compilation caches disabled. Setup adds 1.19–1.30 s for ESSOS (saved tables) and 8.70 s for CATAPULT (includes Boozer transform). Compaction preserves recorded arrays; ESSOS returns 101 states per birth, while CATAPULT truncates lost paths.
 
 ESSOS, CATAPULT, DESC and SIMPLE agree on all 64 labels in a separate 2 ms case (55 losses). SIMSOPT with its [flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664) agrees on 58 resolved paths; six axis stops remain unresolved.
 
-One regular-axis label depends on the mode cut, and QA long-orbit labels remain unconverged. On W7-X, quartering the default RK4 step reduces maximum energy drift from 6.64% to 0.012%; the [tracing guide](docs/howto/trace-alpha-particles.md) gives the settings, cold/warm plots and convergence checks.
+One corrected-mass loss label differs; its convergence is untested. Earlier QA long-orbit labels remain unconverged. On W7-X, quartering the default RK4 step reduces maximum energy drift from 6.64% to 0.012%; the [tracing guide](docs/howto/trace-alpha-particles.md) gives the settings, cold/warm plots and convergence checks.
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,

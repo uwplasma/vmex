@@ -73,5 +73,30 @@
     ],
     "simple_birth_speed_relative_gap": 1.385e-5,
     "B_start_relative_rms": [0.00022454451978724826,0.00021781925876276437]
+  },
+  "long_gpu": {
+    "measurement_date": "2026-10-01",
+    "essos": "130735677f629630318577bccd9b09a13e7d5ef3",
+    "alpha_mass_source": "9ab3e36fb7e13988ea47970d07250a6dcd70c8fc",
+    "firm3d": "4dbeb5e29fdb4fca9179b2111cb897c576ecf42a + non-MPI binding guard from PR91",
+    "native_sha256": "cff8896afb436c2c3d58611f20a827c4412fdc0c3a496a348e885269483d014d",
+    "wout_sha256": "5caaaacd2809302cf9a703a9c31fff433a51a1cfc5b543b6c45fcd024964abd2",
+    "birth_coordinates_sha256": "d517cd02142e39f560a67899bb29e01a5e09255b88aed8a7a2c1cd0904cc9edc",
+    "mass_kg": 6.6446573450e-27, "energy_eV": 3520000, "particles": 8192, "tmax_s": 0.02, "saves": 101,
+    "rk4": {"modes":12,"cut":1e-4,"timestep_s":1.25e-7},
+    "catapult": {"table":25,"method":"DP5","tolerance":1e-10,"regular_axis":true},
+    "columns": ["method","lost","matching_labels","cold_s","warm_s","maximum_energy_drift"],
+    "results": [
+      ["ESSOS lookup",6572,8192,76.399376579,69.061630368,2.13525010969e-05],
+      ["ESSOS compact",6572,8192,49.286516813,37.417831455,2.13525010969e-05],
+      ["CATAPULT regular axis",6573,8191,36.693712920,37.044489144,1.35536596504e-05]
+    ],
+    "essos_failures": 0, "catapult_only_lost": [6445],
+    "bitwise_equal_stored_arrays": ["births","states","times","loss_times","energy_error"],
+    "energy_scope": ["ESSOS: every step, all particles","CATAPULT: saved confined states, interpolated table"],
+    "setup_s": [1.187528620,1.296565132,8.704214940],
+    "setup_scope": ["ESSOS: imports and saved tables, transform excluded","CATAPULT: imports, transform and GPU table"],
+    "timing_scope": "fresh-process first trace and repeated trace; field setup excluded; ESSOS compilation cache disabled",
+    "caveat": "Corrected-mass differing label has no cutoff/timestep refinement; earlier comparisons use the top-level recorded mass."
   }
 }

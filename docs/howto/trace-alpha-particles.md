@@ -230,8 +230,8 @@ The [cross-code validation record](../explanation/validation.md) reports
 same-host CPU and GPU timings, full-path energy checks and near-axis orbit
 discrepancies. On 8,192 common births over 20 ms, CATAPULT's opt-in
 [regular-axis method](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
-matches 8,191 ESSOS loss labels; the released method matches 8,122. The
-remaining regular-axis label is sensitive to ESSOS's Boozer mode cutoff.
+matches 8,191 ESSOS loss labels using the corrected alpha mass. Its one
+differing label needs cutoff and timestep refinement; earlier results used the recorded older mass.
 
 ## From Python
 
