@@ -409,8 +409,15 @@ ESSOS returns 101 states per birth; CATAPULT stops lost paths.
 Dense-path checks exposed CATAPULT's save-clock overshoot issue, fixed in
 [FIRM3D #93](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/93).
 Four births now give identical first exits with single-launch, 12.5 µs and
-125 ns saves, without post-exit rows. This verifies saving cadence separately
-from timestep and field convergence.
+125 ns saves, without post-exit rows. Six of the 512 coarse paths contained
+one post-exit row; first exits are reconstructed from the first boundary state.
+The 8,192-birth benchmark contains no post-exit paths.
+
+For one reflected birth, restoring the full spectrum reduces the maximum
+`|Δv_parallel|/v` against CATAPULT from 12.25% to 0.154%, and bounce-phase
+differences from 2.6 µs to 35 ns. Halving the timestep changes full-spectrum
+bounce times by 0.25 ns. Energy conservation and matching loss labels alone
+do not certify orbit accuracy; native table and saved-output errors remain combined.
 
 Source revisions, settings and output hashes are recorded in
 [`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
