@@ -612,8 +612,12 @@ It returns 101 states per particle; CATAPULT truncates lost paths. Setup adds
 1.19–1.30 s for ESSOS from saved tables and 8.70 s for CATAPULT, including
 its Boozer transform; these scopes differ. Source, input and binary hashes,
 settings and energy scopes are in [`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
-The sole CATAPULT-only loss is birth 6445; its corrected-mass cutoff and
-timestep convergence have not been tested.
+Birth 6445 stays confined at cut `1e-4` with `dt`, `dt/2` and `dt/4`
+(peak `s=0.999133`), but exits near 115 µs with all 2,048 modes, matching
+CATAPULT. All six energy drifts are below `1.7e-9`; this single-birth check
+identifies spectrum sensitivity and does not establish ensemble convergence.
+CATAPULT saves one adaptive step late; confined endpoints overshoot 20 ms
+by at most `2.624e-7 s`. The marginal exit is much earlier.
 
 Earlier runs used mass `6.6951e-27 kg`: released CATAPULT lost 6,647 particles
 and reached 5.17% saved confined-path energy drift; regular-axis CATAPULT lost

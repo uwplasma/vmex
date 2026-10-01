@@ -97,6 +97,20 @@
     "setup_s": [1.187528620,1.296565132,8.704214940],
     "setup_scope": ["ESSOS: imports and saved tables, transform excluded","CATAPULT: imports, transform and GPU table"],
     "timing_scope": "fresh-process first trace and repeated trace; field setup excluded; ESSOS compilation cache disabled",
-    "caveat": "Corrected-mass differing label has no cutoff/timestep refinement; earlier comparisons use the top-level recorded mass."
+    "marginal_birth": {
+      "id":6445, "horizon_s":0.00025,
+      "columns":["modes","timestep_s","lost","peak_s","loss_time_s","energy_drift"],
+      "results":[
+        [12,1.25e-07,false,0.9991330807622716,-1.0,1.622898371245185e-09],
+        [12,6.25e-08,false,0.9991330714984068,-1.0,6.067180091662294e-11],
+        [12,3.125e-08,false,0.999133070962146,-1.0,2.6890711879445917e-12],
+        [2048,1.25e-07,true,1.0002829100663633,0.00011500000000000198,1.0991243470925838e-09],
+        [2048,6.25e-08,true,1.0002829015136905,0.00011499999999999653,4.687839005868e-11],
+        [2048,3.125e-08,true,1.0000965377220172,0.00011496875000000512,2.312372515689276e-12]
+      ],
+      "full_vs_CATAPULT_birth_B_relative_difference":-2.034633511152436e-10
+    },
+    "CATAPULT_max_final_overshoot_s":2.623763542057e-7,
+    "caveat":"Only the differing birth has full-spectrum refinement; ensemble cutoff convergence remains untested. CATAPULT saves can be one adaptive step late. Earlier comparisons use the top-level recorded mass."
   }
 }

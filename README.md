@@ -157,7 +157,7 @@ Mass: `6.6446573450e-27 kg`; cold traces use fresh processes, with ESSOS compila
 
 ESSOS, CATAPULT, DESC and SIMPLE agree on all 64 labels in a separate 2 ms case (55 losses). SIMSOPT with its [flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664) agrees on 58 resolved paths; six axis stops remain unresolved.
 
-One corrected-mass loss label differs; its convergence is untested. Earlier QA long-orbit labels remain unconverged. On W7-X, quartering the default RK4 step reduces maximum energy drift from 6.64% to 0.012%; the [tracing guide](docs/howto/trace-alpha-particles.md) gives the settings, cold/warm plots and convergence checks.
+The single differing loss is spectrum-sensitive; individual loss convergence remains necessary. Earlier QA long-orbit labels remain unconverged. On W7-X, quartering the default RK4 step reduces maximum energy drift from 6.64% to 0.012%; the [tracing guide](docs/howto/trace-alpha-particles.md) gives the settings, cold/warm plots and convergence checks.
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
