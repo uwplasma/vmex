@@ -2,8 +2,7 @@
 """Compare common-birth alpha losses in VMEX, SIMPLE and SIMSOPT.
 
 Use a reactor-scale WOUT and ``--cores`` matched CPU workers. Axis-stop or
-energy-failed orbits are unresolved, not confined. Timings exclude field setup
-and compilation; see the alpha-tracing guide for the comparison protocol.
+energy-failed orbits are unresolved, not confined. Timings exclude field setup; first VMEX calls include compilation. See the alpha-tracing guide for controls.
 
 Usage::
 

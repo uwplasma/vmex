@@ -146,14 +146,14 @@ CPU traces take 765.89/762.94 s; these are different hardware from the GPU cutof
 
 ## Cross-code orbit checks
 
-SIMPLE, ESSOS, FIRM3D, CATAPULT and DESC agree on 55 losses among 64 seed-field births;
-SIMSOPT resolves 58 paths with 50 losses and six unresolved axis stops.
-The [validation record](../explanation/validation.md) gives field discrepancies,
-energy diagnostics, output policies and CPU/GPU timings.
+ESSOS, FIRM3D/CATAPULT and SIMPLE agree on all 512 loss labels over 5 ms.
+SIMSOPT has 26 unresolved axis stops and fails the energy gate; DESC's full
+comparison is incomplete. The [validation record](../explanation/validation.md)
+gives controls, energy scopes and qualified cold/warm timings.
 
-[`trace_cross_code.py`](../../benchmarks/trace_cross_code.py) checks common births,
-field agreement, exits and energy drift. The seed uses `ns=31`, `mpol=ntor=5`,
-3.52 MeV alphas at `s=0.283333`, and a 2 ms horizon.
+[`trace_cross_code.py`](../../benchmarks/trace_cross_code.py) runs an independent
+common-birth CPU check with VMEX, SIMPLE and SIMSOPT. Its launch surface is snapped
+to a half-grid point; its default 64 births differ from the recorded 512-birth cohort.
 
 The comparison WOUT comes from the same unoptimized seed as the direct-loss
 optimization example. Recreate it without running the optimizer:
@@ -179,7 +179,7 @@ This yields `Aminor_p=1.7044 m`, `volavgB=5.8646 T`; the benchmark WOUT's
 SHA-256 is `5caaaacd2809302cf9a703a9c31fff433a51a1cfc5b543b6c45fcd024964abd2`.
 With the corrected SIMSOPT field and a built SIMPLE executable, run
 `python benchmarks/trace_cross_code.py wout_alpha_seed_reactor.nc --simple
-PATH_TO_SIMPLE/simple.x --output cross_code.json` for the 64-birth CPU check.
+PATH_TO_SIMPLE/simple.x --output cross_code.json` for a 64-birth CPU check.
 
 The [cross-code record](../explanation/validation.md)
 reports loss agreement, energy diagnostics and CPU/GPU timings. Check the source
