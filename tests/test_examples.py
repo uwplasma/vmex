@@ -864,21 +864,50 @@ def test_alpha_orbit_risk_preserves_exits_and_rejects_failed_states(component, r
     field = SimpleNamespace(modB=lambda *args: jnp.array(1.0),
                             profiles=lambda s: (jnp.ones((s.size, 3)), None))
     functions = _alpha_objective_functions(
-        jax=jax, jnp=jnp, T=1.0, STEPS=2,
+        jax=jax, jnp=jnp, T=1.0, STEPS=2, RISK_START=0.6,
         constants=SimpleNamespace(FUSION_ALPHA_PARTICLE_ENERGY=0.5,
                                   ALPHA_PARTICLE_MASS=1.0, ALPHA_PARTICLE_CHARGE=1.0),
         guiding_center_rhs=lambda field, y, *args: jnp.zeros_like(y).at[component].set(rate),
     )
     risk = functions["orbit_risk"](field, jnp.array([[0.3, 0.0, 0.0, 0.0]]), jnp.ones(1))
     if np.isfinite(rate):
-        expected = 1 / (1 + np.exp(-((0.3 if rate == 0 else 0.95) - 0.8) / 0.06))
-        assert float(risk) == pytest.approx(expected, rel=1e-5)
+        assert float(risk) == pytest.approx(0.0 if rate == 0 else 1.0)
         derivative = jax.grad(lambda s: functions["orbit_risk"](
             field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1)))(0.3)
-        assert float(derivative) == pytest.approx(expected * (1 - expected) / 0.06 if rate == 0 else 0.0,
-                                                rel=1e-5, abs=1e-7)
+        assert float(derivative) == pytest.approx(0.0, abs=1e-7)
     else:
         assert np.isnan(risk)
+
+
+def test_alpha_residence_gradients_and_exit_ordering():
+    """The transition has analytic gradients; earlier exits incur higher cost."""
+    import jax
+    import jax.numpy as jnp
+    from types import SimpleNamespace
+
+    field = SimpleNamespace(modB=lambda *args: jnp.array(1.0),
+                            profiles=lambda s: (jnp.ones((s.size, 3)), None))
+    functions = _alpha_objective_functions(
+        jax=jax, jnp=jnp, T=1.0, STEPS=16, RISK_START=0.6,
+        constants=SimpleNamespace(FUSION_ALPHA_PARTICLE_ENERGY=0.5,
+                                  ALPHA_PARTICLE_MASS=1.0, ALPHA_PARTICLE_CHARGE=1.0),
+        guiding_center_rhs=lambda field, y, *args: jnp.zeros_like(y),
+    )
+    objective = lambda s: functions["orbit_risk"](
+        field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1))
+    assert float(objective(0.8)) == pytest.approx(0.5)
+    assert float(jax.grad(objective)(0.8)) == pytest.approx(1.875 / 0.4)
+    for s in (0.6, 1.0):
+        assert float(jax.grad(objective)(s)) == pytest.approx(0.0, abs=1e-7)
+    scores = []
+    for rate in (0.55, 0.8):
+        functions["guiding_center_rhs"] = lambda field, y, *args: jnp.zeros_like(y).at[0].set(rate)
+        f = lambda start: functions["orbit_risk"](
+            field, jnp.array([[start, 0.0, 0.0, 0.0]]), jnp.ones(1))
+        scores.append(float(f(0.3)))
+        finite_difference = (float(f(0.300001)) - float(f(0.299999))) / 2e-6
+        assert float(jax.grad(f)(0.3)) == pytest.approx(finite_difference, rel=1e-5)
+    assert 0 < scores[0] < scores[1] < 1
 
 
 @pytest.mark.parametrize("value,gradient", [(2.0, [3.0]), (np.nan, [1.0]),
