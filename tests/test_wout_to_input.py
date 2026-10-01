@@ -8,7 +8,7 @@ import pytest
 from vmex.core.cli import main
 from vmex.core import profiles
 from vmex.core.input import VmecInput
-from vmex.core.wout import read_wout, write_wout
+from vmex.core.wout import _PROFILE_1D, read_wout, write_wout
 from tests.conftest import resolve_golden_dir
 
 
@@ -177,3 +177,18 @@ def test_vmec2000_wout_geometry_and_input_roundtrip(case, tmp_path):
         assert deck.ncurr == 1
     if wout.lfreeb:
         np.testing.assert_array_equal(deck.extcur, wout.extcur[:wout.nextcur])
+
+
+@pytest.mark.parametrize("preset,ndfmax", [(21, 101), (21, 1001), (31, 101)])
+def test_wout_roundtrip_preserves_external_profile_dimensions(preset, ndfmax, tmp_path):
+    base = read_wout(_golden("solovev"))
+    arrays = {name: np.linspace(0.0, 1.0, preset if dim == "preset" else ndfmax)
+              for name, dim in _PROFILE_1D}
+    original = replace(base, q_factor=None, specw=None, **arrays)
+    path = write_wout(tmp_path / "wout_profiles.nc", original)
+    recovered = read_wout(path)
+    assert recovered.q_factor is None and recovered.specw is None
+    for name, values in arrays.items():
+        np.testing.assert_array_equal(getattr(recovered, name), values)
+    np.testing.assert_array_equal(recovered.rmnc, base.rmnc)
+    np.testing.assert_array_equal(recovered.bmnc, base.bmnc)
