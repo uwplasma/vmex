@@ -164,7 +164,7 @@ The `J` map follows one physical pitch, labels its `|v_parallel|/v` at midradius
 ![vmex --plot summary of the bundled finite-beta NFP=2 QA equilibrium](docs/_static/figures/readme_diagnostics_qa.webp)
 ![vmex --plot summary of the bundled finite-beta NFP=4 QI equilibrium](docs/_static/figures/readme_diagnostics_summary.webp)
 
-Cold and warm timings include NEO and writing all five figures; the J calculation is shown separately ([settings](benchmarks/plot_diagnostics.json)).
+Cold and warm timings include NEO and all five figures, using [Boozer #17](https://github.com/uwplasma/booz_xform_jax/pull/17) and [NEO #4](https://github.com/uwplasma/NEO_JAX/pull/4) (unreleased when measured); J is shown separately ([settings](benchmarks/plot_diagnostics.json)).
 
 ![Cold and warm VMEX plotting times](docs/_static/figures/readme_plot_timing.webp)
 

@@ -1769,62 +1769,13 @@ def plot_summary(
     wout, out_path: str | Path, *, s_plot_ignore: float = 0.2,
     j_pitch: float | None = None,
 ) -> Path:
-    """Write the 3x3 publication summary figure of one equilibrium.
+    """Write the 3x3 equilibrium summary at 200 dpi and return its path.
 
-    The panels, row by row on a 15.0 by 11.5 inch canvas:
-
-    1. rotational transform ``iota`` (full mesh, dimensionless) against
-       ``s = psi/psi_edge``;
-    2. pressure ``presf`` in kPa, with the dimensionless confinement
-       diagnostics ``eps_eff^(3/2)`` and ``Gamma_c`` sharing one right axis
-       (see :func:`confinement_summary`; an unavailable diagnostic is named,
-       never drawn as zero);
-    3. force error against ``rho = sqrt(s)`` on a log axis: the surface
-       average of ``|J x B - grad p|`` over the volume average of
-       ``|grad(B^2/2mu0)|`` on ``0.1 <= s <= 0.99`` (DESC's normalization;
-       the scalar card gives the volume average), on interior surfaces,
-       with the flux-surface-averaged bootstrap current ``<J.B>`` in
-       kA T m^-2 on a coloured right axis;
-    4. Mercier ``DMerc`` and the Glasser-Greene-Johnson ``D_R`` against ``s``,
-       with the physical ``d2V/ds2`` on the right axis;
-    5. the 3-D last closed flux surface coloured by ``|B|`` in T;
-    6. the second adiabatic invariant as a polar map of ``J/(v R0)`` in
-       ``x = s cos(alpha)``, ``y = s sin(alpha)``. Concentric contours indicate
-       alpha-independence of the displayed well, not every trapped orbit;
-    7. a scalar card of threed1-style global quantities;
-    8. and 9. ``|B|`` line contours in Boozer angles at mid radius and on the
-       LCFS.
-
-    One Boozer transform (``booz_xform_jax``, in process) feeds panels 6, 8, 9
-    and the effective ripple of panel 2, so ``vmex --plot`` needs no separate
-    ``--booz`` pass.  If that transform or the ``J`` map fails, the affected
-    panel carries the reason as text and the rest of the figure is still
-    written — this function does not raise for a missing diagnostic.
-
-    Parameters
-    ----------
-    wout:
-        Path to a ``wout_*.nc`` or a :class:`~vmex.core.wout.WoutData`.
-    out_path:
-        Destination image file.
-    s_plot_ignore:
-        Fraction of the radial grid to drop near the axis in the stability
-        panel, where the Mercier terms diverge; the panel starts at row
-        ``max(2, round(s_plot_ignore * ns))`` and always drops the last row.
-        It affects only panel 4.
-    j_pitch:
-        Physical pitch ``lambda = 1/B*`` in T^-1 for the ``J`` map.  Following
-        one physical ``lambda`` radially is what makes ``dJ/dpsi`` meaningful,
-        so pass the pitch an optimization targeted to certify it at the same
-        value. By default ``B*`` is one fifth into the trapping band common to
-        all sampled field lines, emphasizing more deeply trapped particles.
-        If no such band exists, the widest interval
-        with maximum line coverage is used and nontrapped lines remain blank.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`.  Saved at 200 dpi on
-    the Agg backend and closed; nothing is displayed.
+    Includes profiles, confinement, force balance, stability, boundary,
+    Boozer fields and the largest complete-well J at fixed physical pitch.
+    ``s_plot_ignore`` omits inner surfaces from the stability panel.
+    ``j_pitch`` sets lambda=1/B*; the default selects B* one fifth into the
+    common trapping band, or the interval with greatest field-line coverage.
     """
     plt = _import_matplotlib()
     fig, _meta = _summary_figure(wout, s_plot_ignore=s_plot_ignore, j_pitch=j_pitch)
