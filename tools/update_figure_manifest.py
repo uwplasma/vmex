@@ -58,19 +58,19 @@ def _sources() -> list[Path]:
     return sorted(found)
 
 
-def used_in(figure: Path) -> list[str]:
+def used_in(figure: Path, sources: dict | None = None) -> list[str]:
     """Repository-relative pages that reference this figure."""
-    name = figure.name
-    pages = []
-    for source in _sources():
-        if name in source.read_text(encoding="utf-8"):
-            pages.append(source.relative_to(REPO).as_posix())
-    return pages
+    if sources is None:
+        sources = {p.relative_to(REPO).as_posix(): p.read_text(encoding="utf-8")
+                   for p in _sources()}
+    return [page for page, text in sources.items() if figure.name in text]
 
 
 def refreshed(manifest: dict) -> dict:
     """The manifest with its derived fields recomputed."""
     updated = json.loads(json.dumps(manifest))
+    sources = {p.relative_to(REPO).as_posix(): p.read_text(encoding="utf-8")
+               for p in _sources()}
     for row in updated["figures"]:
         path = REPO / row["path"]
         if not path.is_file():
@@ -78,7 +78,7 @@ def refreshed(manifest: dict) -> dict:
         blob = path.read_bytes()
         row["sha256"] = hashlib.sha256(blob).hexdigest()
         row["bytes"] = len(blob)
-        row["used_in"] = used_in(path)
+        row["used_in"] = used_in(path, sources)
     return updated
 
 
