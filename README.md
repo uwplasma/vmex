@@ -231,10 +231,12 @@ score from `s=0.3` through VMEX equilibria, with an aspect-ratio penalty and no
 symmetry stage. It trains on 64 common births for 0.25 ms; hard 2 ms losses
 select an iterate and fresh particles check 5 ms
 losses. The plot shades pointwise 95% Wilson intervals across holdout particles.
-Across two independent 512-alpha holdouts, losses fall from 819 to 751 at 5 ms;
-the minor radius changes by −0.54% and the sampled global mirror ratio changes
-1.475→1.478. The short training orbits make this a research example, not a
-converged reactor design.
+With the physical alpha mass ([ESSOS #104](https://github.com/uwplasma/ESSOS/pull/104)),
+two independent 512-alpha holdouts reduce 5 ms losses from 818 to 425; a fresh
+512-alpha D-T volume check reduces 10 ms losses from 393 to 224. Minor radius
+changes by +0.34% and sampled global mirror ratio increases 1.475→1.839.
+This is a research example from one NFP=2 seed; aspect control leaves mirror
+ratio unconstrained.
 
 ## How VMEX works
 
