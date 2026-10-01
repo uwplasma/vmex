@@ -177,4 +177,5 @@ explanation/index
 
 project/contributing
 project/references
+project/repo-size
 ```
