@@ -145,11 +145,11 @@ The shaded loss-curve band is the pointwise binomial standard error,
 births lost by time `t`. It describes sampling uncertainty, not orbit or
 field error; use more births for small loss fractions.
 
-**Particle tracing comparisons.** Common births are traced through a reactor-scale vacuum equilibrium without collisions. The two workloads below use the same input geometry and matched births within each workload.
+**Particle tracing comparisons.** 8,192 common 3.52 MeV alpha births are traced for 20 ms through a reactor-scale vacuum equilibrium without collisions.
 
-![Matched loss curves and CPU/GPU tracing runtimes](docs/_static/figures/readme_trace_benchmark.webp)
+![Matched loss curves and cold/warm GPU tracing runtimes](docs/_static/figures/readme_trace_benchmark.webp)
 
-For 8,192 births over 20 ms, ESSOS and CATAPULT lose 6,572 and 6,573 particles; 8,191 labels agree. Cold/warm timings exclude field setup. Energy drift is `2.14e-5` at every ESSOS step and `1.36e-5` at saved confined CATAPULT states. The 64-birth comparison resolves all labels in ESSOS, SIMPLE and DESC; SIMSOPT has six unresolved axis stops. CPU: i7-3820, eight workers; GPU: RTX A4000. [Settings and field checks](docs/explanation/validation.md#cross-code-alpha-tracing).
+ESSOS and CATAPULT lose 6,572 and 6,573 particles; 8,191 labels agree. Alpha mass is `6.6446573450e-27 kg`; timings use an RTX A4000 and exclude field setup. Energy drift is `2.14e-5` at every ESSOS step and `1.36e-5` at saved confined CATAPULT states. [Controls, field checks and CPU/DESC/SIMPLE/SIMSOPT comparisons](docs/explanation/validation.md#cross-code-alpha-tracing).
 
 Shaded loss bands use `f(t) ± sqrt(f(t)[1-f(t)]/N)`, the pointwise binomial sampling error. Timestep and spectrum convergence are checked separately.
 

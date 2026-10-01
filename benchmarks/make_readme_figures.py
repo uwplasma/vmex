@@ -468,7 +468,7 @@ def make_showcase_figure(out: Path) -> None:
 
 def make_trace_comparison_figure(out: Path) -> None:
     record = json.loads((REPO / "benchmarks/trace_accuracy.json").read_text())["long_gpu"]
-    fig, axes = plt.subplots(1, 3, figsize=(11, 3.1), layout="constrained")
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3.1), layout="constrained")
     curve = record["loss_curve"]
     for name, color in [("ESSOS", BLUE), ("CATAPULT", "#d89039")]:
         f = np.asarray(curve[name + "_lost"]) / record["particles"]
@@ -484,11 +484,6 @@ def make_trace_comparison_figure(out: Path) -> None:
     axes[1].set(yticks=[0,1], yticklabels=["ESSOS", "CATAPULT"], xlabel="Trace time [s]", title="8,192 births, 20 ms; RTX A4000", xlim=(0, 62))
     axes[1].invert_yaxis()
     axes[1].legend(fontsize=8)
-    small = record["short_warm_timings"]
-    bars = axes[2].barh(np.arange(len(small)), [row[2] for row in small], color=[BLUE if row[1]=="CPU" else "#d89039" for row in small])
-    axes[2].bar_label(bars, fmt="%.2f", padding=3, fontsize=8)
-    axes[2].set(yticks=np.arange(len(small)), yticklabels=[f"{name} ({device})" for name,device,_ in small], xlabel="Warm trace time [s]", title="64 births, 2 ms\nSIMSOPT: 58 resolved", xlim=(0,27))
-    axes[2].invert_yaxis()
     for ax in axes:
         ax.spines[["top", "right"]].set_visible(False)
     fig.savefig(out, dpi=130, pil_kwargs={"lossless": True})

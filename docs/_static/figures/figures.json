@@ -491,8 +491,8 @@
     },
     {
       "path": "docs/_static/figures/readme_trace_benchmark.webp",
-      "sha256": "5e50ece635d4df60961171977c26e8c176e5e1e1807dccd51fe0e864e81b6b70",
-      "bytes": 14460,
+      "sha256": "bef5463c6538d3f188695a1f67b43179d19e13653fc4c7f9e3618d185c1d1e6f",
+      "bytes": 9512,
       "generator": "benchmarks/make_readme_figures.py",
       "command": "python benchmarks/make_readme_figures.py --only trace",
       "inputs": [
