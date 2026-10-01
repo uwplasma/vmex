@@ -14,6 +14,7 @@
   "method": "Instrumented fresh-process CLI writes all five PNGs; warm plot_wout is the second library repeat with a new WOUT read after the CLI clears JAX caches. Includes image writing; one measurement per case.",
   "neo_jax_commit": "acdca76",
   "neo_jax_status": "PR #4, unreleased when measured",
+  "png_encoding": {"level6_s": 1.589, "level1_s": 0.764, "size_ratio": 1.14, "pixels_equal": true, "note": "Five W7-X PNGs; complete CLI measurements precede this encoder change."},
   "cases": [
     {
       "case": "Landreman-Paul QA",
