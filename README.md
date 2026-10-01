@@ -229,8 +229,16 @@ Run `python examples/optimization/alpha_particle_optimization.py` after installi
 a symmetry stage; hard 2 ms losses select the iterate.
 
 The example differentiates smooth escaped residence through physical trajectories
-and checks fresh particles over longer times. Shaded bands are pointwise 95% Wilson
-intervals; mirror ratio is reported and unconstrained.
+and checks fresh particles over longer times. Three steps from the NFP=2 seed,
+with 64 training births over 0.25 ms and 1,024 independent physical holdout births over 5 ms:
+
+| Configuration | Alphas lost at 5 ms | Aspect ratio | Minor radius [m] | Max. relative energy drift |
+| --- | ---: | ---: | ---: | ---: |
+| Seed | 79.9% | 5.976 | 0.1673 | 5.4e−6 |
+| Optimized | 74.7% | 5.987 | 0.1670 | 5.2e−6 |
+
+Shaded bands are pointwise 95% Wilson intervals from lost/born counts. Tracing uses
+ARIES-CS scaling; mirror ratio is reported and unconstrained.
 
 ## How VMEX works
 

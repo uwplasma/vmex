@@ -123,7 +123,7 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   ESSOS escaped-residence score from `s=0.3` through VMEX equilibria, with an
   aspect-ratio penalty and no symmetry stage. It selects accepted iterates by
   hard 2 ms losses and tests fresh alphas at 5 ms; the loss-curve shading is a
-  pointwise 95% Wilson interval. Short training orbits make this a research example.
+  pointwise 95% Wilson interval. Training and validation horizons are explicit constants.
   `QA_optimization_turbulence_linear.py`,
   `QA_optimization_turbulence_quasilinear.py` and
   `QA_optimization_turbulence_nonlinear.py` (`pip install "vmex[turbulence]"`)
