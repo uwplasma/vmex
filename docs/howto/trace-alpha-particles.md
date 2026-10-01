@@ -246,5 +246,5 @@ vj.plot_tracing(result, "figs", name="case")
 
 `trace_alphas` accepts a path or {class}`~vmex.core.wout.WoutData` and returns
 {class}`~vmex.core.tracing.AlphaTracingResult`. For differentiable optimization,
-see [`alpha_particle_optimization.py`](../../examples/optimization/alpha_particle_optimization.py):
+see [`alpha_particle_optimization.py` (PR #515)](https://github.com/uwplasma/vmex/pull/515):
 a smooth loss surrogate supplies derivatives; independent hard-loss traces validate the result.
