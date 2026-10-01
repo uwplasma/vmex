@@ -846,6 +846,9 @@ def test_alpha_particle_optimization(tmp_path):
 
 
 def _alpha_objective_functions(**namespace):
+    from solvax import checkpointed_fori_loop
+
+    namespace["checkpointed_fori_loop"] = checkpointed_fori_loop
     path = EXAMPLES / "optimization" / "alpha_particle_optimization.py"
     functions = [node for node in ast.parse(path.read_text()).body
                  if isinstance(node, ast.FunctionDef) and node.name in {"orbit_risk", "value_grad"}]
@@ -871,7 +874,7 @@ def test_alpha_orbit_risk_preserves_exits_and_rejects_failed_states(component, r
     )
     risk = functions["orbit_risk"](field, jnp.array([[0.3, 0.0, 0.0, 0.0]]), jnp.ones(1))
     if np.isfinite(rate):
-        assert float(risk) == pytest.approx(0.0 if rate == 0 else 1.0)
+        assert float(risk) == pytest.approx(0.0 if rate == 0 else 0.75)
         derivative = jax.grad(lambda s: functions["orbit_risk"](
             field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1)))(0.3)
         assert float(derivative) == pytest.approx(0.0, abs=1e-7)
@@ -885,6 +888,7 @@ def test_alpha_residence_gradients_and_exit_ordering():
     import jax.numpy as jnp
     from types import SimpleNamespace
 
+    jax.config.update("jax_enable_x64", True)
     field = SimpleNamespace(modB=lambda *args: jnp.array(1.0),
                             profiles=lambda s: (jnp.ones((s.size, 3)), None))
     functions = _alpha_objective_functions(
@@ -893,8 +897,8 @@ def test_alpha_residence_gradients_and_exit_ordering():
                                   ALPHA_PARTICLE_MASS=1.0, ALPHA_PARTICLE_CHARGE=1.0),
         guiding_center_rhs=lambda field, y, *args: jnp.zeros_like(y),
     )
-    objective = lambda s: functions["orbit_risk"](
-        field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1))
+    def objective(s):
+        return functions["orbit_risk"](field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1))
     assert float(objective(0.8)) == pytest.approx(0.5)
     assert float(jax.grad(objective)(0.8)) == pytest.approx(1.875 / 0.4)
     for s in (0.6, 1.0):
@@ -902,8 +906,8 @@ def test_alpha_residence_gradients_and_exit_ordering():
     scores = []
     for rate in (0.55, 0.8):
         functions["guiding_center_rhs"] = lambda field, y, *args: jnp.zeros_like(y).at[0].set(rate)
-        f = lambda start: functions["orbit_risk"](
-            field, jnp.array([[start, 0.0, 0.0, 0.0]]), jnp.ones(1))
+        def f(start):
+            return functions["orbit_risk"](field, jnp.array([[start, 0.0, 0.0, 0.0]]), jnp.ones(1))
         scores.append(float(f(0.3)))
         finite_difference = (float(f(0.300001)) - float(f(0.299999))) / 2e-6
         assert float(jax.grad(f)(0.3)) == pytest.approx(finite_difference, rel=1e-5)

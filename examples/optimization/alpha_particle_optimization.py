@@ -19,6 +19,7 @@ from essos import constants
 from essos.boozer import BoozerField, guiding_center_rhs
 from scipy.linalg import null_space
 from scipy.optimize import minimize
+from solvax import checkpointed_fori_loop
 from vmex import optimize as opt
 from vmex.core.omnigenity import boozer_spectrum_state
 from vmex.core.scaling import SCALE_TARGETS
@@ -102,8 +103,12 @@ def orbit_risk(field, births, reference_weight):
     rhs = jax.vmap(lambda yy, mm: guiding_center_rhs(
         field, yy, mm, constants.ALPHA_PARTICLE_MASS, constants.ALPHA_PARTICLE_CHARGE))
 
-    def advance(carry, _):
-        y, lost, total = carry
+    def residence_score(flux):
+        x = jnp.clip((flux - RISK_START) / (1 - RISK_START), 0.0, 1.0)
+        return x**3 * (10 - 15 * x + 6 * x**2)
+
+    def advance(_, carry):
+        y, lost, total, previous = carry
         k1 = rhs(y, mu)
         k2 = rhs(y + 0.5 * dt * k1, mu)
         k3 = rhs(y + 0.5 * dt * k2, mu)
@@ -111,13 +116,12 @@ def orbit_risk(field, births, reference_weight):
         yn = y + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
         sn = yn[:, 0] ** 2 + yn[:, 1] ** 2
         lost = lost | (sn >= 1.0)
-        x = jnp.clip((sn - RISK_START) / (1 - RISK_START), 0.0, 1.0)
-        score = x**3 * (10 - 15 * x + 6 * x**2)
+        score = residence_score(sn)
         score = jnp.where(jnp.isfinite(yn).all(axis=1), jnp.where(lost, 1.0, score), jnp.nan)
-        return (jnp.where(lost[:, None], y, yn), lost, total + score), None
+        return jnp.where(lost[:, None], y, yn), lost, total + (previous + score) / 2, score
 
-    (_, _, total), _ = jax.lax.scan(advance, (y, jnp.zeros_like(s, dtype=bool), jnp.zeros_like(s)),
-                                   None, length=STEPS)
+    _, _, total, _ = checkpointed_fori_loop(
+        0, STEPS, advance, (y, jnp.zeros_like(s, dtype=bool), jnp.zeros_like(s), residence_score(s)))
     # Fixed births for AD, but candidate-dependent physical Boozer birth measure.
     iota, G, current_i = field.profiles(s)[0].T
     ratio = (jnp.abs(G + iota * current_i) / b0**2) / reference_weight

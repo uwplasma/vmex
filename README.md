@@ -228,17 +228,9 @@ Run `python examples/optimization/alpha_particle_optimization.py` after installi
 `vmex[coils]`. VMEX derivatives optimize ESSOS orbit risk and aspect ratio without
 a symmetry stage; hard 2 ms losses select the iterate.
 
-| Independent check | Seed | Selected |
-| --- | ---: | ---: |
-| Surface losses, 5 ms, 1024 alphas | 818 | 425 |
-| D-T volume losses, 10 ms, 512 alphas | 393 | 224 |
-| Minor radius [m] | 0.167335 | 0.167899 (+0.34%) |
-| Sampled mirror ratio | 1.475 | 1.839 |
-
-This research pilot uses one NFP=2 seed and 64 births for 0.25 ms with the
-[physical alpha mass](https://github.com/uwplasma/ESSOS/pull/104); shaded bands are
-pointwise 95% Wilson intervals, and mirror ratio is unconstrained.
-On an RTX A4000, the first gradient took 255.9 s; later gradients took 2.5–6.2 s.
+The example differentiates smooth escaped residence through physical trajectories
+and checks fresh particles over longer times. Shaded bands are pointwise 95% Wilson
+intervals; mirror ratio is reported and unconstrained.
 
 ## How VMEX works
 
