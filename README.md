@@ -238,6 +238,7 @@ a symmetry stage; hard 2 ms losses select the iterate.
 This research pilot uses one NFP=2 seed and 64 births for 0.25 ms with the
 [physical alpha mass](https://github.com/uwplasma/ESSOS/pull/104); shaded bands are
 pointwise 95% Wilson intervals, and mirror ratio is unconstrained.
+On an RTX A4000, the first gradient took 255.9 s; later gradients took 2.5–6.2 s.
 
 ## How VMEX works
 
