@@ -347,7 +347,7 @@ Errors use the ESSOS radial spline and compare retained modes with the full spec
 | `1e-3` | 37 | 0.1022% | 2.61% | 7.58% |
 
 Field derivatives are more sensitive than `|B|`; these errors do not bound loss fractions.
-The [W7-X study](../howto/trace-alpha-particles.md#w7-x-convergence) gives all ten cuts,
+The [W7-X study](../howto/trace-alpha-particles.md) gives all ten cuts,
 individual loss-label differences and cold/warm runtimes.
 
 | equilibrium | checked horizon | finding |
@@ -370,7 +370,7 @@ python benchmarks/trace_mode_cut.py WOUT --particles 500 --tmax 0.0005 --step-fa
 ## Cross-code alpha tracing
 
 Common births and collisionless guiding centres are compared on a reactor-scale vacuum seed.
-The [guide](../howto/trace-alpha-particles.md#cross-code-orbit-checks) gives the WOUT recipe and benchmark command.
+The [guide](../howto/trace-alpha-particles.md) gives the WOUT recipe and benchmark command.
 
 | code | device | particles / horizon | lost | warm trace | maximum relative energy drift |
 |---|---|---|---:|---:|---:|

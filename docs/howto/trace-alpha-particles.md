@@ -94,11 +94,9 @@ using the same birth sample.
 Cost scales with particles, orbit steps and retained harmonics. The `1e-4`
 cut is a starting point: tighten both timestep and spectrum on the intended equilibrium.
 
-The [34-equilibrium audit](../explanation/validation.md#alpha-tracing-accuracy)
+The [34-equilibrium audit](../explanation/validation.md)
 checks field derivatives and individual losses. Small energy drift and similar
 loss counts do not establish trajectory convergence; compare the same birth sample.
-
-(w7-x-convergence)=
 
 ## W7-X convergence
 
@@ -183,7 +181,7 @@ With the corrected SIMSOPT field and a built SIMPLE executable, run
 `python benchmarks/trace_cross_code.py wout_alpha_seed_reactor.nc --simple
 PATH_TO_SIMPLE/simple.x --output cross_code.json` for the 64-birth CPU check.
 
-The [cross-code record](../explanation/validation.md#cross-code-alpha-tracing)
+The [cross-code record](../explanation/validation.md)
 reports loss agreement, energy diagnostics and CPU/GPU timings. Check the source
 revisions and settings in `benchmarks/trace_accuracy.json` when reproducing it.
 
