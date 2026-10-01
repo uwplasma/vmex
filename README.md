@@ -232,7 +232,7 @@ The example differentiates smooth escaped residence through physical trajectorie
 and checks fresh particles over longer times. Three steps from the NFP=2 seed,
 with 64 training births over 0.25 ms and 1,024 independent physical holdout births over 5 ms:
 
-| Configuration | Alphas lost at 5 ms | Aspect ratio | Minor radius [m] | Max. relative energy drift |
+| Configuration | Alphas lost at 5 ms | Aspect ratio | Unscaled minor radius [m] | Max. relative energy drift |
 | --- | ---: | ---: | ---: | ---: |
 | Seed | 79.9% | 5.976 | 0.1673 | 5.4e−6 |
 | Optimized | 74.7% | 5.987 | 0.1670 | 5.2e−6 |
