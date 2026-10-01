@@ -138,6 +138,8 @@ not cutoff-converged for HSX losses. Thus there is no geometry-independent faste
 converge the timestep, inspect energy, and check individual labels on the
 intended equilibrium before relaxing `--trace-mode-cut`.
 
+(w7-x-convergence)=
+
 ## W7-X convergence
 
 Standard and high-mirror W7-X use 256 common births, `s=0.25`, 5 ms, and
