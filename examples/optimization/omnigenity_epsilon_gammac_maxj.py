@@ -276,12 +276,8 @@ print(f"\nhard confinement, before -> after (s = {list(GC_SURFACES)}):")
 print(f"hard Gamma_c per surface = {np.array2string(before['gamma_c'], precision=4)} -> "
       f"{np.array2string(after['gamma_c'], precision=4)}")
 print(f"hard Gamma_c mean = {gc_before:.4e} -> {gc_after:.4e}")
-# epsilon_eff is reported, not optimized: the QS ratio stands in for it.  This
-# seed is already precisely quasi-axisymmetric (epsilon_eff^(3/2) ~ 6e-7), and
-# at that level the hard value is set by the few symmetry-breaking harmonics
-# that dominate bounce-averaged transport, which the QS ratio weighs no more
-# than any other, so a ~13% QS drop can leave it ~13% higher (office run: 6.45e-7 -> 7.32e-7).  Both are far below any transport
-# relevance; add epsilon_eff rows to the objective if that number must fall.
+# epsilon_eff is reported, not optimized. A QS decrease can leave its
+# bounce-sensitive harmonics higher (6.45e-7 -> 7.32e-7 here).
 if before["eps32"] is not None and after["eps32"] is not None:
     eps_before, eps_after = before["eps32"].mean(), after["eps32"].mean()
     print(f"epsilon_eff^(3/2) mean = {eps_before:.4e} -> {eps_after:.4e} "

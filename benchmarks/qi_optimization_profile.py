@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
-"""Profile the QI optimization example end to end with the effort counters.
+"""Profile the QI example, including imports, compilation and final solve.
 
-Each run executes ``examples/optimization/QI_optimization.py`` -- this tree's,
-or with ``:baseline`` the version at ``--baseline-ref`` -- in a fresh process
-inside an empty directory, so imports, compilation, the optimization, the final
-solve and every output file fall inside the measured wall time.  The child runs
-the script unmodified through ``runpy`` and only observes it: it keeps each
-``VmecProblem`` the script builds and, after each SciPy ``least_squares`` call
-on one, records that stage's evaluations, failed trials and counter deltas.
-Final values are the lines the script prints.
-
-    OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 VMEX_COMPILATION_CACHE=disabled \
-    PYTHONPATH=. python benchmarks/qi_optimization_profile.py \
-        --runs full:baseline full --baseline-ref 9a6b5efc \
-        --output benchmarks/qi_optimization_profile_office.json
-
-``smoke`` sets ``VMEX_EXAMPLES_CI=1``.  A timing counts only when the load
-average at both ends is within the machine's limit; a run past
-``--timeout`` is killed and recorded as capped with the stages it finished.
+Each baseline/current run uses a fresh process. Effort counters record
+objective evaluations and failed trials; ``smoke`` sets ``VMEX_EXAMPLES_CI=1``.
+Runs beyond ``--timeout`` are recorded as capped.
 """
 
 from __future__ import annotations

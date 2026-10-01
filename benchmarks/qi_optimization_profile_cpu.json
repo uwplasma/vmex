@@ -13,7 +13,7 @@
   "XLA_FLAGS": "--xla_cpu_parallel_codegen_split_count=128",
   "OPENBLAS_NUM_THREADS": "4"
  },
- "timing_note": "Office workstation, one whole-example run at a time under ~/vmex-agents/.long.lock, 4 threads, VMEX_COMPILATION_CACHE=disabled. The gate pair ran back to back on library b208df4f; smoke arms alternate in fresh processes under .heavy.lock.",
+ "timing_note": "One whole-example run at a time, four threads, compilation cache disabled. Gate pair used library b208df4f; smoke arms ran in fresh processes.",
  "gate": {"wall_limit_seconds": 728.1, "qi_to_beat": 0.7886336, "iota_floor": 0.51, "mirror_limit": 0.21, "elongation_limit": 8.0, "failed_trials": 0},
  "runs": [
   {
