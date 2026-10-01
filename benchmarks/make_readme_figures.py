@@ -466,97 +466,41 @@ def make_showcase_figure(out: Path) -> None:
     print("wrote", out)
 
 
-def make_trace_accuracy_figure(out: Path) -> None:
-    record = json.loads((REPO / "benchmarks/trace_accuracy.json").read_text())
-    fig, axes = plt.subplots(len(record["cases"]), 3, figsize=(10, 5.5), squeeze=False, constrained_layout=True)
-    n = record["birth"]["used"]
-    for ax, (name, case) in zip(axes, record["cases"].items()):
-        cut, _, lost, mismatch, cold, warm, _ = np.asarray(case["cuts"]).T
-        fraction = lost / n
-        error = np.sqrt(fraction * (1 - fraction) / n)
-        ax[0].plot(cut, 100 * fraction, "o-", color=BLUE)
-        ax[0].fill_between(cut, 100 * (fraction - error), 100 * (fraction + error), color=BLUE, alpha=0.15)
-        ax[0].axhline(100 * fraction[0], color=MUTED, linestyle="--")
-        ax[0].set_title("W7-X " + name.replace("highmirror", "high mirror"))
-        ax[0].set_ylabel("Lost [%]")
-        ax[1].plot(cut, 100 * mismatch / n, "o-", color=VIOLET)
-        ax[1].set_title("Compared with cut 1e-5")
-        ax[1].set_ylabel("Different loss labels [%]")
-        ax[2].plot(cut, cold, "o-", color=BLUE_LIGHT, label="Cold")
-        ax[2].plot(cut, warm, "o-", color=BLUE, label="Warm")
-        ax[2].set_ylabel("Trace wall time [s]")
-        ax[2].legend()
-        for panel in ax:
-            panel.set_xscale("log")
-            panel.set_xlabel("Relative Boozer amplitude cutoff")
-            for side in ("top", "right"):
-                panel.spines[side].set_visible(False)
-    fig.suptitle("256 common alpha births, s=0.25, 5 ms; RK4 step 3.125e-8 s; RTX A4000", fontsize=10)
-    fig.savefig(out, dpi=125, pil_kwargs={"lossless": True})
-    with Image.open(out) as source:
-        source.convert("RGB").quantize(colors=64).convert("RGB").save(out, lossless=True)
-    plt.close(fig)
-
-
-# --------------------------------------------------------------------------
-
-def make_plot_timing_figure(out: Path) -> None:
-    record = json.loads((REPO / "benchmarks/plot_diagnostics.json").read_text())
-    cases = record["cases"]
-    fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.3), layout="constrained")
-    x = np.arange(len(cases))
-    for ax, (cold, warm, title) in zip(axes, [
-        ("cold_cli_s", "warm_plot_s", "All five figures"),
-        ("cold_j_s", "warm_j_s", "J calculation"),
-    ]):
-        for offset, key, label, color in [
-            (-.18, cold, "Cold", "#315f95"), (.18, warm, "Warm", "#d89039"),
-        ]:
-            bars = ax.bar(x + offset, [c[key] for c in cases], .36, label=label, color=color)
-            ax.bar_label(bars, fmt="%.2f", fontsize=9, padding=3)
-        ax.set_xticks(x, [c["case"] for c in cases], fontsize=9)
-        ax.set(ylabel="Wall time [s]", title=title, ylim=(0, max(c[cold] for c in cases) * 1.22))
+def make_trace_comparison_figure(out: Path) -> None:
+    record = json.loads((REPO / "benchmarks/trace_accuracy.json").read_text())["long_gpu"]
+    fig, axes = plt.subplots(1, 3, figsize=(11, 3.1), layout="constrained")
+    curve = record["loss_curve"]
+    for name, color in [("ESSOS", BLUE), ("CATAPULT", "#d89039")]:
+        f = np.asarray(curve[name + "_lost"]) / record["particles"]
+        error = np.sqrt(f * (1-f) / record["particles"])
+        axes[0].plot(1e6*np.asarray(curve["times_s"]), 100*f, label=name, color=color)
+        axes[0].fill_between(1e6*np.asarray(curve["times_s"]), 100*(f-error), 100*(f+error), color=color, alpha=.2)
+    axes[0].set(xlabel="Time [µs]", ylabel="Lost [%]", title="8,192 births; 20 ms horizon")
+    axes[0].legend(fontsize=8)
+    rows = [record["results"][1], record["results"][2]]
+    for offset, column, color, label in [(-.18, 3, BLUE_LIGHT, "Cold"), (.18, 4, BLUE, "Warm")]:
+        bars = axes[1].barh(np.arange(2)+offset, [row[column] for row in rows], height=.34, color=color, label=label)
+        axes[1].bar_label(bars, fmt="%.1f", padding=3, fontsize=8)
+    axes[1].set(yticks=[0,1], yticklabels=["ESSOS", "CATAPULT"], xlabel="Trace time [s]", title="8,192 births, 20 ms; RTX A4000", xlim=(0, 62))
+    axes[1].invert_yaxis()
+    axes[1].legend(fontsize=8)
+    small = record["short_warm_timings"]
+    bars = axes[2].barh(np.arange(len(small)), [row[2] for row in small], color=[BLUE if row[1]=="CPU" else "#d89039" for row in small])
+    axes[2].bar_label(bars, fmt="%.2f", padding=3, fontsize=8)
+    axes[2].set(yticks=np.arange(len(small)), yticklabels=[f"{name} ({device})" for name,device,_ in small], xlabel="Warm trace time [s]", title="64 births, 2 ms\nSIMSOPT: 58 resolved", xlim=(0,27))
+    axes[2].invert_yaxis()
+    for ax in axes:
         ax.spines[["top", "right"]].set_visible(False)
-    axes[0].legend(frameon=False)
-    fig.suptitle("Apple M2 · NEO enabled · persistent cache disabled", fontsize=11)
-    fig.savefig(out, dpi=140)
+    fig.savefig(out, dpi=130, pil_kwargs={"lossless": True})
     plt.close(fig)
-
-
-def make_trace_orbits_figure(out: Path, data: Path) -> None:
-    methods = [("rk4_default", "RK4, dt", ":"), ("rk4_refined", "RK4, dt/4", "--"),
-               ("dopri8_refined", "Dopri8, dt/2", "-"), ("simple401", "SIMPLE, 401 saves", "-."),
-               ("simple", "SIMPLE, 4,001 saves", "--")]
-    fig, axes = plt.subplots(3, 3, figsize=(10, 6.5), layout="constrained")
-    with np.load(data) as paths:
-        for column, (index, title) in enumerate([(0, "Passing"), (4, "Small pitch"), (8, "Late loss")]):
-            axes[0, column].set_title(f"{title}: birth {paths['ids'][index]}")
-            for name, label, style in methods:
-                times = paths[name + "_times"]
-                loss = paths[name + "_loss_times"][index]
-                times = np.minimum(times, loss) if loss >= 0 else times
-                s, pitch, energy = [paths[name + "_" + key][index] for key in ("s", "pitch", "energy")]
-                axes[0, column].plot(1000 * times, s, label=label, linewidth=1, linestyle=style)
-                axes[1, column].plot(1000 * times, pitch, linewidth=1, linestyle=style)
-                axes[2, column].semilogy(1000 * times, np.maximum(np.maximum.accumulate(np.abs(energy)), 1e-12), linewidth=1, linestyle=style)
-            for row, ylabel in enumerate(["Toroidal flux s", r"$v_\parallel/v$", r"Max saved $|E/E_0-1|$"]):
-                axes[row, column].set(xlabel="Time [ms]", ylabel=ylabel)
-                axes[row, column].spines[["top", "right"]].set_visible(False)
-            axes[0, column].set_ylim(0, 1.02)
-            axes[1, column].set_xlim(0, 0.25)
-    axes[0, 0].legend(fontsize=7)
-    fig.suptitle("W7-X, 3.52 MeV, 10 ms; dt=1.25e-7 s; recorded mass 6.695e-27 kg", fontsize=10)
-    fig.savefig(out, dpi=140, pil_kwargs={"lossless": True})
-    plt.close(fig)
-    with Image.open(out) as source:
-        source.convert("RGB").quantize(colors=32).convert("RGB").save(out, lossless=True)
+    with Image.open(out) as image:
+        image.convert("RGB").quantize(colors=64).convert("RGB").save(out, lossless=True)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="runtime,convergence,precond,showcase")
     ap.add_argument("--outdir", default=str(REPO / "docs" / "_static" / "figures"))
-    ap.add_argument("--orbit-data", type=Path, help="external NPZ with times, s, pitch, energy and loss_times per method")
     args = ap.parse_args()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -566,18 +510,12 @@ def main() -> None:
         make_runtime_figure(outdir / "readme_runtime_compare.webp")
     if "convergence" in which:
         make_convergence_figure(outdir / "readme_convergence.webp")
-    if "plot-timing" in which:
-        make_plot_timing_figure(outdir / "readme_plot_timing.webp")
     if "precond" in which:
         make_precond_figure(outdir / "readme_precond.webp")
     if "showcase" in which:
         make_showcase_figure(outdir / "readme_equilibrium_showcase.webp")
     if "trace" in which:
-        make_trace_accuracy_figure(outdir / "readme_trace_accuracy.webp")
-    if "trace-orbits" in which:
-        if args.orbit_data is None:
-            ap.error("trace-orbits requires --orbit-data")
-        make_trace_orbits_figure(outdir / "readme_trace_orbits.webp", args.orbit_data)
+        make_trace_comparison_figure(outdir / "readme_trace_benchmark.webp")
 
 
 if __name__ == "__main__":

@@ -145,41 +145,21 @@ The shaded loss-curve band is the pointwise binomial standard error,
 births lost by time `t`. It describes sampling uncertainty, not orbit or
 field error; use more births for small loss fractions.
 
-**Cross-code alpha tracing.** The RTX A4000 comparison uses 8,192 common births for 20 ms and 101 requested times. ESSOS uses 12 modes and RK4 at `1.25e-7 s`; CATAPULT uses a 25³ table and adaptive DP5 at `1e-10` tolerance.
+**Particle tracing comparisons.** Common births are traced through a reactor-scale vacuum equilibrium without collisions. The two workloads below use the same input geometry and matched births within each workload.
 
-| tracer | lost / 8,192 | matching labels | cold trace | warm trace | maximum energy drift |
-|---|---:|---:|---:|---:|---:|
-| VMEX/ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,572 | 8,192 | 76.40 s | 69.06 s | 2.14e-5, every step |
-| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,572 | 8,192 | 49.29 s | 37.42 s | 2.14e-5, every step |
-| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,573 | 8,191 | 36.69 s | 37.04 s | 1.36e-5, saved confined paths |
+![Matched loss curves and CPU/GPU tracing runtimes](docs/_static/figures/readme_trace_benchmark.webp)
 
-Mass: `6.6446573450e-27 kg`; cold traces use fresh processes, with ESSOS compilation caches disabled. Setup adds 1.19–1.30 s for ESSOS (saved tables) and 8.70 s for CATAPULT (includes Boozer transform). Compaction preserves recorded arrays; ESSOS returns 101 states per birth, while CATAPULT truncates lost paths.
+For 8,192 births over 20 ms, ESSOS and CATAPULT lose 6,572 and 6,573 particles; 8,191 labels agree. Cold/warm timings exclude field setup. Energy drift is `2.14e-5` at every ESSOS step and `1.36e-5` at saved confined CATAPULT states. The 64-birth comparison resolves all labels in ESSOS, SIMPLE and DESC; SIMSOPT has six unresolved axis stops. CPU: i7-3820, eight workers; GPU: RTX A4000. [Settings and field checks](docs/explanation/validation.md#cross-code-alpha-tracing).
 
-ESSOS, CATAPULT, DESC and SIMPLE agree on all 64 labels in a separate 2 ms case (55 losses). SIMSOPT with its [flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664) agrees on 58 resolved paths; six axis stops remain unresolved.
-
-The single differing loss is spectrum-sensitive; individual loss convergence remains necessary. Earlier QA long-orbit labels remain unconverged. On W7-X, quartering the default RK4 step reduces maximum energy drift from 6.64% to 0.012%; the [tracing guide](docs/howto/trace-alpha-particles.md) gives the settings, cold/warm plots and convergence checks.
+Shaded loss bands use `f(t) ± sqrt(f(t)[1-f(t)]/N)`, the pointwise binomial sampling error. Timestep and spectrum convergence are checked separately.
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
 `D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
 `vmex examples/data/input.nfp2_QA_finite_beta --plot` and `vmex examples/data/input.nfp4_QI_finite_beta --plot`.
-The `J` map follows one physical pitch, labels its `|v_parallel|/v` at midradius `B_min`, and shows the largest complete well.
 
 ![vmex --plot summary of the bundled finite-beta NFP=2 QA equilibrium](docs/_static/figures/readme_diagnostics_qa.webp)
 ![vmex --plot summary of the bundled finite-beta NFP=4 QI equilibrium](docs/_static/figures/readme_diagnostics_summary.webp)
-
-Cold and warm timings include NEO and all five figures, using [Boozer #17](https://github.com/uwplasma/booz_xform_jax/pull/17) and [NEO #4](https://github.com/uwplasma/NEO_JAX/pull/4) (unreleased when measured); J is shown separately ([settings](benchmarks/plot_diagnostics.json)).
-
-![Cold and warm VMEX plotting times](docs/_static/figures/readme_plot_timing.webp)
-
-The solved [DESC](https://desc-docs.readthedocs.io/en/latest/notebooks/tutorials/EffectiveRipple.html) HELIOTRON at `s=0.4375` gives the following `ε_eff^(3/2)` with matched reference radii ([controls](benchmarks/plot_diagnostics.json)).
-
-| code | initial controls | refined controls | change |
-|---|---|---|---|
-| DESC | 0.274016 | 0.274214 | 0.072 % |
-| NEO | 0.276067 | 0.274362 | 0.618 % |
-
-Refined values differ by 0.054 %; DESC resolves 357 wells within a capacity of 512. This agreement applies to this surface and the recorded controls.
 
 VMEX follows the deck's `NS_ARRAY`, `FTOL_ARRAY` and `NITER_ARRAY`. In Python:
 

@@ -328,322 +328,79 @@ The ESSOS and `neo_jax` tests are `importorskip`-gated, so they run in the
 nightly optional-integrations lane and silently skip in the dependency-minimal
 core lane. A green core run is not evidence that they passed.
 
-## Alpha tracing mode cut and field derivatives
+## Alpha tracing accuracy
 
-`benchmarks/trace_mode_cut.py` checks every requested cut against the uncut
-`mboz=nboz=32` Boozer spectrum on three surfaces (`s = 0.25, 0.5, 0.9`).
-The audit used 31
-tracked WOUTs from [vmec_equilibria](https://github.com/landreman/vmec_equilibria)
-at commit `41fcf8b`, the two matched tokamak WOUTs in
-[VMEX PR #514](https://github.com/uwplasma/vmex/pull/514), and the
-Landreman-Paul QA (`ESSOS/examples/input_files`, commit `e77c6a0`) and QH
-(`simsopt/tests/test_files`, commit `2b39098`) examples. One LASYM WOUT
-cannot enter the current
-stellarator-symmetric Boozer tracer; the table summarizes the other 34
-equilibria (102 surfaces). Errors are relative root-mean-square errors over
-Boozer angles using the *same radial spline in `r = √s`* as ESSOS, rather than a comparison
-of Fourier amplitudes alone. The radial derivative is `∂r|B|`; the Boozer-angle derivative norm includes both
-`∂θ|B|` and `∂ζ|B|`. It is a field diagnostic, not an error bound for the
-guiding-centre right-hand side or loss fraction.
+The spectral audit covers 34 equilibria and 102 surfaces at `mboz=nboz=32`.
+Errors use the ESSOS radial spline and compare retained modes with the full spectrum.
 
-| mode cut | median modes | median `|B|` error | median `∂r|B|` error | median Boozer-angle derivative error | worst Boozer-angle derivative error | ARIES M2 modes | ARIES M2 lost / 512 | matching labels |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1e-5 | 245 | 0.0010% | 0.06% | 0.19% | 0.9% | — | — | — |
-| 6e-5 | 140 | 0.0061% | 0.28% | 0.85% | 4.2% | — | — | — |
-| 8e-5 | 126 | 0.0082% | 0.35% | 1.05% | 5.2% | — | — | — |
-| 1e-4 | 115.5 | 0.0099% | 0.43% | 1.25% | 6.6% | 118 | 18 | 100% |
-| 2e-4 | 90 | 0.0201% | 0.80% | 2.32% | 12.6% | 89 | 27 | 93.95% |
-| 3e-4 | 73 | 0.0326% | 1.10% | 3.34% | 16.0% | 71 | 17 | 96.29% |
-| 5e-4 | 57.5 | 0.0529% | 1.60% | 4.97% | 22.0% | 55 | 26 | 94.14% |
-| 6e-4 | 53 | 0.0590% | 1.79% | 5.41% | 24.4% | 55 | 26 | 94.14% |
-| 8e-4 | 44.5 | 0.0778% | 2.24% | 6.82% | 27.3% | 46 | 30 | 94.14% |
-| 1e-3 | 37 | 0.1022% | 2.61% | 7.58% | 30.2% | 39 | 21 | 94.73% |
-
-The timed ARIES-CS row uses 512 common births drawn from the `1e-5` field at
-`s = 0.3`, 2 ms, a nominal
-`1.25e-7 s` step, 20 saved times and eight CPU devices on an Apple M2, with
-the corrected VMEC flux sign. The host was contended during this timing run:
-the identical 55-mode fields at 5e-4 and 6e-4 had different median times
-(26.51 and 23.25 s). Those times are not a speed ranking. More importantly,
-even 2e-4 changes 31 of 512 individual lost/confined labels relative to
-1e-4; a similar total loss count does not imply the same orbits. A later
-half-to-quarter-step ARIES check changed 18 labels even at 1e-5, so these
-ARIES loss comparisons are exploratory. The short 2 ms horizon cannot
-validate a rare-loss configuration.
-
-On one RTX A4000, the ARIES-CS `n3are_R7.75B5.7` WOUT from
-`vmec_equilibria` and `ESSOS/examples/input_files/wout_QH_simple_scaled.nc`
-were traced with 512 common births drawn from each 1e-5 field for 2 ms at
-`6.25e-8 s` steps with 20 saved states. Two warmed GPU calls
-per cut give these medians (field setup and JIT excluded):
-
-| equilibrium | cut | modes | lost / 512 | labels matching 1e-5 | trace [s] |
-|---|---:|---:|---:|---:|---:|
-| ARIES-CS | 1e-5 | 228 | 21 | 100.0% | 14.14 |
-| ARIES-CS | 6e-5 | 142 | 25 | 94.5% | 10.97 |
-| ARIES-CS | 8e-5 | 127 | 22 | 95.5% | 9.59 |
-| ARIES-CS | 1e-4 | 118 | 19 | 95.3% | 9.39 |
-| QH | 1e-5 | 187 | 0 | 100.0% | 11.93 |
-| QH | 6e-5 | 66 | 0 | 100.0% | 8.30 |
-| QH | 8e-5 | 51 | 0 | 100.0% | 6.80 |
-| QH | 1e-4 | 45 | 0 | 100.0% | 7.24 |
-
-The QH run has no loss events and cannot rank cutoff accuracy; a 10 ms
-`1e-5` pilot with the same 512 births also has none. For ARIES-CS,
-halving the timestep again changes 18/512 labels at 1e-5 and 20/512 at
-1e-4, despite maximum relative energy error falling below `6.6e-7` in both.
-At that quarter step, those two cuts still differ on 24 labels. Neither
-the half-step table nor the quarter-step pair establishes converged ARIES
-losses; a small energy drift alone is insufficient.
-Across the 34 cases, Boozer-angle and radial derivatives deteriorate much
-faster than `|B|` itself. The existing `1e-4` default is a throughput-oriented
-starting point, not an accuracy guarantee: tighter cuts improve field
-derivatives but have not consistently improved individual loss labels.
-Check spectra, timesteps and losses on the intended field before relying on it.
-
-The precise Landreman-Paul QA field is a rare-loss check. The same 1,000
-births at `s = 0.3` were followed for 10 ms at all seven cuts, with the
-corrected VMEC flux sign. Times are medians of three warmed traces on eight
-Apple M2 CPU devices; field construction and JIT compilation are excluded.
-The 3e-4 and larger cuts retain the same three modes. Their 99% overall
-label agreement hides a 62.5% loss-count reduction (16 to 6).
-At `1e-4`, halving the 10 ms QA timestep from `1.25e-7` to `6.25e-8` s
-preserves all 16 loss IDs and all 1,000 labels; maximum relative energy
-error falls from `6.75e-5` to `9.10e-6`.
-
-| mode cut | QA modes | QA lost / 1000 | baseline losses recovered | labels matching 1e-4 | QA trace [s] |
-|---|---:|---:|---:|---:|---:|
-| 1e-4 | 16 | 16 | 16/16 | 100% | 34.74 |
-| 2e-4 | 7 | 14 | 13/16 | 99.60% | 23.45 |
-| 3e-4 | 3 | 6 | 6/16 | 99.00% | 9.13 |
-| 5e-4 | 3 | 6 | 6/16 | 99.00% | 9.08 |
-| 6e-4 | 3 | 6 | 6/16 | 99.00% | 10.08 |
-| 8e-4 | 3 | 6 | 6/16 | 99.00% | 10.24 |
-| 1e-3 | 3 | 6 | 6/16 | 99.00% | 9.34 |
-
-On an RTX A4000 (JAX 0.9.2, ESSOS GPU lookup PR #98), a separate 10 ms QA
-run used the same 1,000 births, half
-the previous timestep (`6.25e-8 s`), 101 saved times, and three warmed
-repeats. Times below are GPU trace times; they exclude field setup and JIT.
-Here the reference is `1e-5`, not proof of physical convergence.
-
-| cut | modes | lost / 1000 | reference losses recovered | matching labels | trace [s] |
-|---|---:|---:|---:|---:|---:|
-| 1e-5 | 96 | 17 | 17/17 | 100.0% | 59.52 |
-| 6e-5 | 25 | 17 | 16/17 | 99.8% | 34.30 |
-| 8e-5 | 20 | 17 | 16/17 | 99.8% | 30.96 |
-| 1e-4 | 16 | 16 | 16/17 | 99.9% | 25.62 |
-
-Although 6e-5 and 8e-5 match the reference *count*, each substitutes one
-loss; they also cost 34% and 21% more than 1e-4. Halving the timestep again
-for both discordant births preserves their cutoff-dependent loss labels and
-crossing times. Their orbits stay away from the axis and conserve energy to
-better than `1.1e-9` in these targeted runs. The label differences are
-therefore not explained by the tested timestep error, and a tighter cut
-requires a field-specific accuracy check.
-
-The earlier HSX orbit table used the incorrect VMEC flux sign and is withdrawn.
-Even after correcting the sign, a 500-birth, 5 ms HSX check at `1e-4` changed
-37 individual loss labels when the timestep fell from `6.25e-8` to
-`3.125e-8` s, then changed 34 more when it fell to `1.5625e-8` s.
-Total losses were 86, 85 and 81; maximum relative energy errors were
-`2.59e-3`, `8.90e-5` and `5.04e-6`. The seven-cut HSX run at the largest
-timestep is exploratory timing data, not a cutoff accuracy result.
-Changing the number of saved states at fixed effective timestep left the
-same births bitwise identical. Changing the particle batch size introduced
-roundoff-scale differences that grew over milliseconds, consistent with
-chaotic orbit sensitivity rather than a changed step count.
-Converge the timestep and check energy on the intended field before judging a
-mode cut from its losses.
-
-A shorter 0.5 ms HSX comparison keeps 500 common births and uses an eighth
-step (`1.5625e-8 s`), 101 saved times and eight Apple M2 CPU devices. All
-seven cuts have zero failed orbits and maximum relative energy error below
-`3.1e-7`. Times are medians of three warmed runs:
-
-| mode cut | modes | lost / 500 | baseline losses recovered | labels matching `1e-4` | trace [s] |
-|---|---:|---:|---:|---:|---:|
-| 1e-4 | 157 | 23 | 23/23 | 100.0% | 39.97 |
-| 2e-4 | 118 | 23 | 16/23 | 97.2% | 31.01 |
-| 3e-4 | 102 | 21 | 14/23 | 96.8% | 26.56 |
-| 5e-4 | 75 | 18 | 10/23 | 95.8% | 20.64 |
-| 6e-4 | 64 | 20 | 13/23 | 96.6% | 29.06 |
-| 8e-4 | 50 | 23 | 13/23 | 96.0% | 22.29 |
-| 1e-3 | 42 | 16 | 9/23 | 95.8% | 19.34 |
-
-At the baseline cut, quarter and eighth steps still disagree on 3 of 500
-labels. A tighter `1e-5` spectrum (364 modes) at the eighth step also loses
-23 particles but shares only 15 loss IDs with `1e-4`: 16 labels differ, and
-`1e-4` recovers only 15/23 losses. Against `1e-5`, `2e-4` recovers 13/23
-losses and changes 20 labels. The tighter run has no failed orbits and a
-maximum relative energy error of `3.00e-7`; its single warmed trace took
-122.09 s, too few repetitions for a stable speed comparison. Thus `1e-4`
-is **not cutoff-converged for HSX losses**, and `1e-5` is a tighter reference,
-not proven physical truth. These spectral effects exceed the measured
-3-label timestep change. The nonmonotonic CPU times at `6e-4` and `8e-4`
-also show that mode count alone is not a reliable runtime predictor.
-
-At the same HSX births, timestep and 0.5 ms horizon, 6e-5 retains 187 modes
-and loses 20 particles; it recovers 12 of the 23 `1e-5` losses and changes
-19 labels. At 8e-5, 165 modes lose 23 particles, but only 14 of those are
-the reference losses and 18 labels change. These single warmed CPU runs took
-61.16 and 46.63 s on a contended host, versus 39.97 s median for 1e-4.
-Smaller cuts improve field-derivative accuracy but do not monotonically
-improve finite-horizon individual loss labels in HSX.
-
-To reproduce the spectral table after checking out or merging PR #514, run
-`python benchmarks/trace_mode_cut.py PATH_TO_VMEC_EQUILIBRIA examples/data
-PATH_TO_QA_WOUT PATH_TO_QH_WOUT --out cuts.json`. Add `--particles 512
---tmax 0.002 --devices 8 --save-times 20 --birth-cut 1e-5` for the ARIES
-orbit timing protocol.
-The script records each equilibrium, surface, cut, mode count and error in
-JSON. The orbit option uses fixed births and reports individual loss IDs and
-times, a birth hash, loss recall, label agreement, energy error and compile
-and warm times for all nine default orbit cuts. Its `first_s` includes compilation
-when needed; equal-sized spectra can reuse it within one process. The
-{ref}`W7-X convergence study <w7-x-convergence>`
-records ten cuts timed separately in fresh processes with caches disabled.
-For the QA table, pass its WOUT alone with `--particles 1000 --tmax 0.01
---devices 8 --repeats 3 --save-times 101`.
-For the seven-cut HSX table use `vmec_equilibria/HSX/QHS_vac/wout_HSX_QHS_vac.nc`
-with `--particles 500 --tmax 0.0005 --devices 8 --save-times 101
---birth-cut 1e-4 --step-factor 0.125 --repeats 3`. For the 5 ms timestep
-check, use that WOUT with `--particles 500 --tmax 0.005 --devices 8
---orbit-cuts 1e-4 --step-factor 0.5`, then 0.25 and 0.125.
-For the tighter HSX reference, use the 0.5 ms command with
-`--orbit-cuts 1e-5 --repeats 1`; keep `--birth-cut 1e-4` to preserve births.
-For the GPU QA comparison, set `CUDA_VISIBLE_DEVICES=0 JAX_PLATFORMS=cuda,cpu`
-with ESSOS PR #98 on `PYTHONPATH`, and pass `--orbit-cuts 1e-5 6e-5 8e-5 1e-4
---particles 1000 --tmax 0.01 --step-factor 0.5 --save-times 101
---birth-cut 1e-4 --repeats 3`; omit `--devices`. The reported times require
-an A4000 and warmed runs.
-For the A4000 ARIES and QH rows, use their WOUTs with the same GPU environment
-and cuts, `--particles 512 --tmax 0.002 --step-factor 0.5 --save-times 20
---birth-cut 1e-5 --repeats 2`; for the ARIES timestep check, use
-`--step-factor 0.25 --orbit-cuts 1e-5 1e-4 --repeats 1`.
-
-**Where tracing time goes.** ESSOS evaluates the Boozer `|B|` series and its
-derivatives at four RK4 stages, then evaluates `|B|` again to track the maximum
-energy error at every step. Retaining fewer harmonics reduces this repeated
-work but can remove small modes that control losses. ESSOS
-[PR #92](https://github.com/uwplasma/ESSOS/pull/92) tried angle-addition
-tables: it was 1.8× faster for a single-device, 135-mode test, but 10% slower
-for the 10-device, 500-particle VMEX workload; that change is not ready to
-replace the current kernel. Checking energy only at saved times also changes
-the reported maximum. Reusing a full field evaluation at a step endpoint for
-the next step could save work while retaining the every-step energy check;
-this still needs a benchmark and a test that the orbits agree.
-
-## W7-X particle trajectories
-
-The selected 12-birth cohort includes passing, deeply trapped and late-loss paths.
-Early pitch oscillations agree closely; late paths can diverge despite small energy error.
-
-![W7-X flux, pitch and energy comparisons](../_static/figures/readme_trace_orbits.webp)
-
-SIMPLE's 401/4,001 saves set 25/2.5 µs macrosteps and 722/73 substeps per macrostep:
-actual steps are `3.46260e-8`/`3.42466e-8 s`. Three selected loss labels change.
-The dense pitch output resolves oscillations hidden by 401 saves; changing output
-also changes integration. Initial ESSOS/SIMPLE `|B|` differs by 0.0225% RMS
-(0.0218% with all modes), independently of the cutoff.
-
-The [record](../../benchmarks/trace_accuracy.json) stores cohort IDs, steps, labels,
-energy errors and an external orbit-array hash. The figure uses saved energy
-samples; ESSOS's tabulated maximum checks every step. Historical comparisons use
-mass `6.69509884346e-27 kg`; SIMPLE's rounded constants give a `1.385e-5` relative
-birth-speed offset. The benchmark helper now normalizes mass and energy with
-SIMPLE's own constants; its effective charge still differs by 7.218 ppm.
-
-## Cross-code alpha trace comparisons
-
-The [tracing guide](../howto/trace-alpha-particles.md) gives the exact
-seed-WOUT recipe and three-code command.
-
-On one i7-3820 host with eight CPU workers, the same 64 births give:
-
-| tracer | loss result | matching ESSOS labels | warm trace time | maximum reported relative energy drift |
+| cut | median modes | median `|B|` error | median radial derivative error | median angular derivative error |
 |---|---:|---:|---:|---:|
-| ESSOS Boozer RK4 | 55 | 64 | 1.701 s | 1.66e-6, every step |
-| SIMPLE symplectic Euler, `npoiper2=512` | 55 | 64 | 5.078 s | 1.25e-3, 401 saved states |
-| SIMPLE symplectic midpoint, `npoiper2=256` | 55 | 64 | 5.247 s | 1.20e-5, 401 saved states |
-| SIMSOPT `gc_noK`, [sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664), axis stop | 50/58 resolved; 6 axis stops | 58/58 resolved | 0.415 s | 6.77e-4, all resolved path states |
+| `1e-5` | 245 | 0.0010% | 0.06% | 0.19% |
+| `6e-5` | 140 | 0.0061% | 0.28% | 0.85% |
+| `8e-5` | 126 | 0.0082% | 0.35% | 1.05% |
+| `1e-4` | 115.5 | 0.0099% | 0.43% | 1.25% |
+| `2e-4` | 90 | 0.0201% | 0.80% | 2.32% |
+| `3e-4` | 73 | 0.0326% | 1.10% | 3.34% |
+| `5e-4` | 57.5 | 0.0529% | 1.60% | 4.97% |
+| `6e-4` | 53 | 0.0590% | 1.79% | 5.41% |
+| `8e-4` | 44.5 | 0.0778% | 2.24% | 6.82% |
+| `1e-3` | 37 | 0.1022% | 2.61% | 7.58% |
 
-The methods and output policies differ: ESSOS returns 101 states and checks
-energy every fixed step; SIMPLE saves 401 macrostep states, and SIMSOPT checks
-all adaptive states of its resolved paths. Without saved-orbit output, SIMPLE
-Euler and midpoint take 1.898 and 3.469 s, respectively; their endpoint-only
-energy errors are `8.28e-4` and `8.03e-6`. The Euler saved-path error exceeds
-the default `1e-3` benchmark limit, so the retained script defaults to
-midpoint and checks saved-path energy.
-Several unguarded SIMSOPT paths enter `s < 0`, where its Boozer angle is
-ill-defined; their matching terminal loss labels do not validate those paths.
-Saving adaptive intermediate states reveals a maximum `4.88e-3` energy
-excursion near the axis. With the inner-flux stop, the maximum drift across
-all resolved path states is `6.77e-4` on both the i7-3820 and Apple M2.
-For two stopped births, sampled SIMPLE midpoint and ESSOS paths remain above
-the `s=0.001` stop surface while SIMSOPT reaches it; these stops may reflect
-near-axis field-interpolation differences, and the other codes' saved states
-can miss a finer axis approach. Their physical outcome remains unresolved.
+Field derivatives are more sensitive than `|B|`; these errors do not bound loss fractions.
+The [W7-X study](../howto/trace-alpha-particles.md#w7-x-convergence) gives all ten cuts,
+individual loss-label differences and cold/warm runtimes.
 
-These are trace-only times after field construction and compilation. In a fresh
-same-host run, ESSOS takes 4.526 s from WOUT to its 12-mode field and
-5.541 s for its first trace including JIT. SIMPLE spends 8.055 s in
-field/start setup; its no-orbit-output Euler trace takes 1.890 s, giving
-9.949 s through output in that run. With 401 saved states, the midpoint
-trace takes 5.247 s. SIMSOPT spends 130.728 s converting and tabulating the
-field before the guarded 0.415 s trace. Repeated trace speed therefore does
-not measure the cost of a single calculation.
+| equilibrium | checked horizon | finding |
+|---|---:|---|
+| W7-X standard / high mirror | 5 ms | `6e-5` and `8e-5` do not consistently improve labels relative to `1e-5` |
+| Landreman-Paul QA | 10 ms | larger cuts remove losses; matching counts can hide substituted loss IDs |
+| ARIES-CS | 2 ms | timestep refinement changes labels despite energy drift below `6.6e-7` |
+| HSX | 0.5 ms | `1e-4` and `1e-5` both lose 23/500, but share only 15 loss IDs |
+| QH | 10 ms | zero observed losses cannot rank cutoff accuracy |
 
-The corrected-mass GPU check traces 8,192 common alpha births in a reactor-scale
-vacuum seed (`ns=31`, `mpol=ntor=5`) for 20 ms, with 101 requested times on one
-RTX A4000. All codes use `6.6446573450e-27 kg` and 3.52 MeV. ESSOS retains 12
-Boozer modes at cut `1e-4` with RK4 steps of `1.25e-7 s`; CATAPULT uses a 25³
-tricubic table and adaptive DP5 at tolerance `1e-10`. Trace times exclude setup.
+The audit uses `vmec_equilibria` at `41fcf8b`, Landreman-Paul QA/QH and two
+matched shaped-tokamak WOUTs. LASYM tracing is excluded by the supported interface.
+To reproduce field errors and optional orbit checks:
 
-| Tracer | Lost | Labels matching ESSOS | First trace | Repeated trace | Maximum relative energy drift |
-|---|---:|---:|---:|---:|---:|
-| ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,572 | 8,192 | 76.40 s | 69.06 s | 2.14e-5, every step |
-| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,572 | 8,192 | 49.29 s | 37.42 s | 2.14e-5, every step |
-| CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,573 | 8,191 | 36.69 s | 37.04 s | 1.36e-5, saved confined paths |
+```console
+python benchmarks/trace_mode_cut.py EQUILIBRIA_DIR examples/data --out cuts.json
+python benchmarks/trace_mode_cut.py WOUT --particles 500 --tmax 0.0005 --step-factor 0.125 --repeats 3 --out orbits.json
+```
 
-ESSOS uses fresh processes with compilation caches disabled; stored births,
-states, times, loss times and energy diagnostics match bitwise with compaction.
-It returns 101 states per particle; CATAPULT truncates lost paths. Setup adds
-1.19–1.30 s for ESSOS from saved tables and 8.70 s for CATAPULT, including
-its Boozer transform; these scopes differ. Source, input and binary hashes,
-settings and energy scopes are in [`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
-Birth 6445 stays confined at cut `1e-4` with `dt`, `dt/2` and `dt/4`
-(peak `s=0.999133`), but exits near 115 µs with all 2,048 modes, matching
-CATAPULT. All six energy drifts are below `1.7e-9`; this single-birth check
-identifies spectrum sensitivity and does not establish ensemble convergence.
-CATAPULT saves one adaptive step late; confined endpoints overshoot 20 ms
-by at most `2.624e-7 s`. The marginal exit is much earlier.
+## Cross-code alpha tracing
 
-Earlier runs used mass `6.6951e-27 kg`: released CATAPULT lost 6,647 particles
-and reached 5.17% saved confined-path energy drift; regular-axis CATAPULT lost
-6,578 with drift `1.17e-5`, versus 6,577 for ESSOS. Of the 70 extra released
-losses, 66 approach `s<0.01` in ESSOS. Its worst-energy orbit approaches
-`s=0.0010`; tightening ODE tolerance from `1e-8` to `1e-10` increases drift
-from 1.13% to 5.17%. The one regular-axis label disagrees at cut `1e-4`
-but agrees with the full ESSOS spectrum. These historical checks do not
-establish convergence of the corrected-mass run.
+Common births and collisionless guiding centres are compared on a reactor-scale vacuum seed.
+The [guide](../howto/trace-alpha-particles.md#cross-code-orbit-checks) gives the WOUT recipe and benchmark command.
 
-A QA equilibrium uses 4,096 births at `s=0.25`, 10 ms and 101 requested
-times. With 16 Boozer modes, the same current ESSOS source and hashed
-inputs give either 16 or 20 losses in separate GPU processes. Both sets
-match 4,081 of the 21 released CATAPULT labels, but only 11–13 lost IDs
-overlap. ESSOS first/repeated calls take 31.63–31.97/24.62–24.67 s;
-CATAPULT takes 160.51/161.47 s. Measured ESSOS energy drift stays below
-1e-4 at every step; CATAPULT reaches 3.03e-2 on saved confined paths.
-Four ESSOS long orbits separate after 2–4 ms under roundoff-scale changes
-and cross the LCFS at 7.38–9.47 ms in the 20-loss run. The first arithmetic
-difference across the fresh processes remains under investigation; these
-individual labels are not converged.
+| code | device | particles / horizon | lost | warm trace | maximum relative energy drift |
+|---|---|---|---:|---:|---:|
+| ESSOS | CPU, 8 workers | 64 / 2 ms | 55 | 1.701 s | `1.66e-6`, every step |
+| SIMPLE | CPU, 8 workers | 64 / 2 ms | 55 | 5.247 s | `1.20e-5`, saved states |
+| SIMSOPT | CPU, 8 workers | 64 / 2 ms | 50/58 resolved | 0.415 s | `6.77e-4`, resolved states |
+| ESSOS | RTX A4000 | 64 / 2 ms | 55 | 1.94 s | every-step checks |
+| DESC | RTX A4000 | 64 / 2 ms | 55 | 21.40 s | `2.62e-4`, survivor endpoints |
+| ESSOS | RTX A4000 | 8,192 / 20 ms | 6,572 | 37.42 s | `2.14e-5`, every step |
+| FIRM3D / CATAPULT | RTX A4000 | 8,192 / 20 ms | 6,573 | 37.04 s | `1.36e-5`, saved confined states |
 
-In a separate 64-birth, 2 ms GPU check, ESSOS #98 and DESC 0.17.1 both
-lose 55 particles. Their warmed 101-time traces take 1.94 s and 21.40 s;
-DESC uses an independently fitted field with up to 0.4% difference in
-`|B|` at births.
+All resolved 64-birth loss labels agree; six SIMSOPT axis stops remain unresolved.
+DESC uses an independently fitted field with up to 0.4% birth-field discrepancy.
+The 64-birth runs use mass `6.69509884346e-27 kg`; the large ensemble uses
+`6.6446573450e-27 kg`. Timings exclude setup and are compared within each workload.
+CPU hardware is an i7-3820; GPU software is JAX 0.9.2.
+
+![Matched loss curves and cold/warm GPU runtimes](../_static/figures/readme_trace_benchmark.webp)
+
+The large ensemble has 8,191 agreeing labels. Full-spectrum ESSOS refinement
+reproduces the remaining CATAPULT exit near 115 µs at three timesteps; this
+single-birth result establishes spectrum sensitivity, not ensemble convergence.
+ESSOS checks energy every step and returns 101 states per birth; CATAPULT
+stops lost paths and reports saved-state energy. Setup adds 1.30 s from saved
+ESSOS tables versus 8.70 s including CATAPULT's transform and GPU table; the scopes differ.
+Source hashes, settings, output checks and refinement results are recorded in
+[`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
+
+Loss bands are pointwise binomial standard errors. No cross-code collisional
+benchmark is claimed; collision tests check rates, stochastic moments and zero-density limits.
 
 ## Device and lane consistency
 

@@ -91,51 +91,12 @@ using the same birth sample.
 
 ## Cost and mode-cut accuracy
 
-Benchmark the intended workload: device count, output policy and retained modes
-change the CPU/GPU crossover. [ESSOS #95](https://github.com/uwplasma/ESSOS/pull/95)
-reuses compiled kernels; [#98](https://github.com/uwplasma/ESSOS/pull/98)
-accelerates radial lookup with bitwise-identical orbit output.
+Cost scales with particles, orbit steps and retained harmonics. The `1e-4`
+cut is a starting point: tighten both timestep and spectrum on the intended equilibrium.
 
-The VMEC toroidal-flux sign was corrected in [VMEX PR #517](https://github.com/uwplasma/vmex/pull/517).
-Older loss tables and figures made with the opposite sign are withdrawn:
-conserved energy and a plausible total loss fraction did not reveal the
-reversed radial drift. The current default cut is `1e-4`. The
-[34-equilibrium spectral audit](../explanation/validation.md) compares the
-seven requested cuts plus `1e-5`, `6e-5` and `8e-5` on three surfaces per
-equilibrium; Boozer-angle and radial field derivatives deteriorate much
-faster than `|B|` itself.
-
-On the corrected Landreman-Paul QA field, 1,000 common births at `s = 0.3`
-were traced for 10 ms on eight Apple M2 CPU devices. Times exclude transform
-and compilation and are medians of three warmed calls:
-
-| mode cut | modes | lost / 1000 | baseline losses recovered | labels matching `1e-4` | trace [s] |
-|---|---:|---:|---:|---:|---:|
-| `1e-4` | 16 | 16 | 16/16 | 100% | 34.74 |
-| `2e-4` | 7 | 14 | 13/16 | 99.60% | 23.45 |
-| `3e-4` | 3 | 6 | 6/16 | 99.00% | 9.13 |
-| `5e-4` | 3 | 6 | 6/16 | 99.00% | 9.08 |
-| `6e-4` | 3 | 6 | 6/16 | 99.00% | 10.08 |
-| `8e-4` | 3 | 6 | 6/16 | 99.00% | 10.24 |
-| `1e-3` | 3 | 6 | 6/16 | 99.00% | 9.34 |
-
-The last five cuts retain the same three modes; their time differences are
-measurement noise. The 99% overall label agreement at `3e-4` hides ten
-missing losses out of 16. Halving the QA timestep at `1e-4` preserves all
-1,000 labels, including the 16 losses. On an A4000, tightening QA to `6e-5`
-and `8e-5` takes 34.30 and 30.96 s versus 25.62 s at `1e-4`; each changes
-two labels relative to `1e-5`, versus one at `1e-4`. On ARIES-CS, `2e-4`
-changes 31 of 512 labels over 2 ms relative to `1e-4`, although this
-ARIES run is timestep-sensitive. On HSX, a refined 0.5 ms, 500-birth run at
-`2e-4`
-has the same 23 total losses as `1e-4` but recovers only 16 of those 23;
-warm CPU time falls from 39.97 to 31.01 s. The [full seven-cut HSX table](../explanation/validation.md)
-reports the remaining times and labels with its timestep uncertainty.
-Moreover, `1e-4` and a tighter `1e-5` HSX spectrum each lose 23 particles,
-but share only 15 loss IDs at the refined step. Even the current default is
-not cutoff-converged for HSX losses. Thus there is no geometry-independent faster cut:
-converge the timestep, inspect energy, and check individual labels on the
-intended equilibrium before relaxing `--trace-mode-cut`.
+The [34-equilibrium audit](../explanation/validation.md#alpha-tracing-accuracy)
+checks field derivatives and individual losses. Small energy drift and similar
+loss counts do not establish trajectory convergence; compare the same birth sample.
 
 (w7-x-convergence)=
 
@@ -143,10 +104,8 @@ intended equilibrium before relaxing `--trace-mode-cut`.
 
 Standard and high-mirror W7-X use 256 common births, `s=0.25`, 5 ms, and
 RK4 steps of `3.125e-8 s`. The [measurement record](../../benchmarks/trace_accuracy.json)
-contains source, input and birth hashes. Runs use the earlier ESSOS alpha mass
+contains source, input and birth hashes. Runs use alpha mass
 `6.69509884346e-27 kg`; `1e-5` is a tighter reference, not an exact solution.
-
-![W7-X cutoff accuracy and cold/warm tracing times](../_static/figures/readme_trace_accuracy.webp)
 
 | cut | standard lost | different labels | cold / warm [s] | high-mirror lost | different labels | cold / warm [s] |
 |---|---:|---:|---:|---:|---:|---:|
@@ -189,9 +148,7 @@ CPU traces take 765.89/762.94 s; these are different hardware from the GPU cutof
 
 ## Cross-code orbit checks
 
-The wrong-flux-sign comparison is withdrawn. [SIMSOPT PR #664](https://github.com/hiddenSymmetries/simsopt/pull/664)
-corrects the same upstream sign error. With the corrected field, SIMPLE,
-ESSOS, FIRM3D, CATAPULT and DESC agree on 55 losses among 64 seed-field births;
+SIMPLE, ESSOS, FIRM3D, CATAPULT and DESC agree on 55 losses among 64 seed-field births;
 SIMSOPT resolves 58 paths with 50 losses and six unresolved axis stops.
 The [validation record](../explanation/validation.md) gives field discrepancies,
 energy diagnostics, output policies and CPU/GPU timings.
@@ -226,12 +183,9 @@ With the corrected SIMSOPT field and a built SIMPLE executable, run
 `python benchmarks/trace_cross_code.py wout_alpha_seed_reactor.nc --simple
 PATH_TO_SIMPLE/simple.x --output cross_code.json` for the 64-birth CPU check.
 
-The [cross-code validation record](../explanation/validation.md) reports
-same-host CPU and GPU timings, full-path energy checks and near-axis orbit
-discrepancies. On 8,192 common births over 20 ms, CATAPULT's opt-in
-[regular-axis method](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90)
-matches 8,191 ESSOS loss labels using the corrected alpha mass. The remaining
-birth exits with the full spectrum at three timesteps; earlier results use the recorded older mass.
+The [cross-code record](../explanation/validation.md#cross-code-alpha-tracing)
+reports loss agreement, energy diagnostics and CPU/GPU timings. Check the source
+revisions and settings in `benchmarks/trace_accuracy.json` when reproducing it.
 
 ## From Python
 
