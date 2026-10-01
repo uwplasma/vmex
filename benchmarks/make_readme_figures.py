@@ -523,10 +523,40 @@ def make_plot_timing_figure(out: Path) -> None:
     plt.close(fig)
 
 
+def make_trace_orbits_figure(out: Path, data: Path) -> None:
+    methods = [("rk4_default", "RK4, dt", ":"), ("rk4_refined", "RK4, dt/4", "--"),
+               ("dopri8_refined", "Dopri8, dt/2", "-"), ("simple401", "SIMPLE, 401 saves", "-."),
+               ("simple", "SIMPLE, 4,001 saves", "--")]
+    fig, axes = plt.subplots(3, 3, figsize=(10, 6.5), layout="constrained")
+    with np.load(data) as paths:
+        for column, (index, title) in enumerate([(0, "Passing"), (4, "Small pitch"), (8, "Late loss")]):
+            axes[0, column].set_title(f"{title}: birth {paths['ids'][index]}")
+            for name, label, style in methods:
+                times = paths[name + "_times"]
+                loss = paths[name + "_loss_times"][index]
+                times = np.minimum(times, loss) if loss >= 0 else times
+                s, pitch, energy = [paths[name + "_" + key][index] for key in ("s", "pitch", "energy")]
+                axes[0, column].plot(1000 * times, s, label=label, linewidth=1, linestyle=style)
+                axes[1, column].plot(1000 * times, pitch, linewidth=1, linestyle=style)
+                axes[2, column].semilogy(1000 * times, np.maximum(np.maximum.accumulate(np.abs(energy)), 1e-12), linewidth=1, linestyle=style)
+            for row, ylabel in enumerate(["Toroidal flux s", r"$v_\parallel/v$", r"Max saved $|E/E_0-1|$"]):
+                axes[row, column].set(xlabel="Time [ms]", ylabel=ylabel)
+                axes[row, column].spines[["top", "right"]].set_visible(False)
+            axes[0, column].set_ylim(0, 1.02)
+            axes[1, column].set_xlim(0, 0.25)
+    axes[0, 0].legend(fontsize=7)
+    fig.suptitle("W7-X, 3.52 MeV, 10 ms; dt=1.25e-7 s; recorded mass 6.695e-27 kg", fontsize=10)
+    fig.savefig(out, dpi=140, pil_kwargs={"lossless": True})
+    plt.close(fig)
+    with Image.open(out) as source:
+        source.convert("RGB").quantize(colors=32).convert("RGB").save(out, lossless=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="runtime,convergence,precond,showcase")
     ap.add_argument("--outdir", default=str(REPO / "docs" / "_static" / "figures"))
+    ap.add_argument("--orbit-data", type=Path, help="external NPZ with times, s, pitch, energy and loss_times per method")
     args = ap.parse_args()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -544,6 +574,10 @@ def main() -> None:
         make_showcase_figure(outdir / "readme_equilibrium_showcase.webp")
     if "trace" in which:
         make_trace_accuracy_figure(outdir / "readme_trace_accuracy.webp")
+    if "trace-orbits" in which:
+        if args.orbit_data is None:
+            ap.error("trace-orbits requires --orbit-data")
+        make_trace_orbits_figure(outdir / "readme_trace_orbits.webp", args.orbit_data)
 
 
 if __name__ == "__main__":

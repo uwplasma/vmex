@@ -534,6 +534,26 @@ the reported maximum. Reusing a full field evaluation at a step endpoint for
 the next step could save work while retaining the every-step energy check;
 this still needs a benchmark and a test that the orbits agree.
 
+## W7-X particle trajectories
+
+The selected 12-birth cohort includes passing, deeply trapped and late-loss paths.
+Early pitch oscillations agree closely; late paths can diverge despite small energy error.
+
+![W7-X flux, pitch and energy comparisons](../_static/figures/readme_trace_orbits.webp)
+
+SIMPLE's 401/4,001 saves set 25/2.5 µs macrosteps and 722/73 substeps per macrostep:
+actual steps are `3.46260e-8`/`3.42466e-8 s`. Three selected loss labels change.
+The dense pitch output resolves oscillations hidden by 401 saves; changing output
+also changes integration. Initial ESSOS/SIMPLE `|B|` differs by 0.0225% RMS
+(0.0218% with all modes), independently of the cutoff.
+
+The [record](../../benchmarks/trace_accuracy.json) stores cohort IDs, steps, labels,
+energy errors and an external orbit-array hash. The figure uses saved energy
+samples; ESSOS's tabulated maximum checks every step. Historical comparisons use
+mass `6.69509884346e-27 kg`; SIMPLE's rounded constants give a `1.385e-5` relative
+birth-speed offset. The benchmark helper now normalizes mass and energy with
+SIMPLE's own constants; its effective charge still differs by 7.218 ppm.
+
 ## Cross-code alpha trace comparisons
 
 The [tracing guide](../howto/trace-alpha-particles.md) gives the exact

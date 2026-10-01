@@ -526,6 +526,25 @@
         "README.md"
       ],
       "note": "Fresh-process CLI and in-process library timings include NEO and all five PNGs; J is shown separately. Source revisions and WOUT hashes are in the record."
+    },
+    {
+      "path": "docs/_static/figures/readme_trace_orbits.webp",
+      "sha256": "8be1b0a75e1ddbf8c76366081807b59ad678a9b3bfb0efb4c25ded0276ae7e6e",
+      "bytes": 65052,
+      "generator": "benchmarks/make_readme_figures.py",
+      "command": "python benchmarks/make_readme_figures.py --only trace-orbits --orbit-data ORBIT_DATA.npz",
+      "inputs": [
+        "benchmarks/trace_accuracy.json"
+      ],
+      "record": "benchmarks/trace_accuracy.json",
+      "generated": "2026-10-01",
+      "hardware": "RTX A4000 / i7-3820 CPU",
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "docs/explanation/validation.md"
+      ],
+      "note": "Selected W7-X traces; the external NPZ hash and settings are in the record. The generator reads per-method times, s, pitch, energy and loss_times arrays. Raw orbit arrays remain external."
     }
   ]
 }

@@ -193,7 +193,7 @@ def run_simple(simple_x, wout, births, tmax, cores, npoiper2, integmode):
         np.savetxt(
             tmp / "start.dat", np.column_stack([births[:, :3], np.ones(n), births[:, 3]]), fmt="%.16e"
         )
-        # 3.5 MeV / facE_al is the energy and n_d the mass in proton masses.
+        # SIMPLE util.F90 (9269e86) uses rounded cgs proton mass and energy units.
         (tmp / "simple.in").write_text(
             "&config\n"
             f"trace_time = {tmax:.16e}\nntestpart = {n}\nnetcdffile = 'wout.nc'\n"
@@ -201,8 +201,8 @@ def run_simple(simple_x, wout, births, tmax, cores, npoiper2, integmode):
             f"npoiper2 = {npoiper2}\nntimstep = 401\noutput_orbits_macrostep = .True.\n"
             "contr_pp = -1d10\nnotrace_passing = 0\ndeterministic = .True.\n"
             "fast_class = .False.\ntcut = -1d0\n"
-            f"n_d = {c.ALPHA_PARTICLE_MASS / c.PROTON_MASS:.16e}\nn_e = 2\n"
-            f"facE_al = {3.5e6 * c.ELEMENTARY_CHARGE / c.FUSION_ALPHA_PARTICLE_ENERGY:.16e}\n/\n"
+            f"n_d = {c.ALPHA_PARTICLE_MASS / 1.6726e-27:.16e}\nn_e = 2\n"
+            f"facE_al = {3.5e6 * 1.6022e-19 / c.FUSION_ALPHA_PARTICLE_ENERGY:.16e}\n/\n"
         )
         env = dict(os.environ, OMP_NUM_THREADS=str(cores))
         log = subprocess.run(
@@ -243,6 +243,9 @@ def run_simple(simple_x, wout, births, tmax, cores, npoiper2, integmode):
         dict(
             method=f"symplectic {'midpoint' if integmode == 3 else 'Euler'} "
                    f"(integmode {integmode}, npoiper2={npoiper2}, 401 macrostep samples)",
+            mass_kg=float(c.ALPHA_PARTICLE_MASS),
+            energy_J=float(c.FUSION_ALPHA_PARTICLE_ENERGY),
+            constants_source="SIMPLE util.F90, 9269e86",
             max_endpoint_energy_error=energy_error,
             max_saved_path_energy_error=path_energy_error,
             B_start_T=B_start,
