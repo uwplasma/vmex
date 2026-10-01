@@ -870,21 +870,9 @@ def _boozer_summary_data(
     )
     s_b = np.asarray(bx.s_b, dtype=float)
     iota_b = np.asarray(bx.iota, dtype=float)[np.asarray(indices, dtype=int)]
-    # The same transform feeds NEO's effective ripple (the summary confinement
-    # panel), so the one Boozer run is shared instead of duplicated.  NEO's
-    # BoozerData contract is symmetric-only; ``pmns_b`` carries booz_xform's
-    # ``-numns`` sign convention (see ``epsilon_effective_from_wout``).
-    neo_booz = None
-    if bmns_b is None:
-        neo_booz = {
-            "nfp_b": int(bx.nfp), "ns_b": len(indices),
-            "ixm_b": np.asarray(bx.xm_b), "ixn_b": np.asarray(bx.xn_b),
-            "iota_b": iota_b,
-            "buco_b": np.asarray(bx.Boozer_I), "bvco_b": np.asarray(bx.Boozer_G),
-            "rmnc_b": np.asarray(bx.rmnc_b), "zmns_b": np.asarray(bx.zmns_b),
-            "pmns_b": -np.asarray(bx.numns_b), "bmnc_b": np.asarray(bx.bmnc_b),
-            "s_b": s_b,
-        }
+    from .neoclassical import _neo_boozer_data
+
+    neo_booz = _neo_boozer_data(bx, indices)
     return {
         "bmnc_b": np.asarray(bx.bmnc_b, dtype=float).T,
         "bmns_b": bmns_b,
@@ -1007,8 +995,10 @@ def _neo_surface_subset(neo_booz: dict[str, Any]) -> dict[str, Any]:
     subset = dict(neo_booz, ns_b=int(keep.size))
     for key in ("iota_b", "buco_b", "bvco_b", "s_b"):
         subset[key] = np.asarray(neo_booz[key])[keep]
-    for key in ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b"):
-        subset[key] = np.asarray(neo_booz[key])[:, keep]
+    for key in ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b",
+                "rmns_b", "zmnc_b", "pmnc_b", "bmns_b"):
+        if key in neo_booz:
+            subset[key] = np.asarray(neo_booz[key])[:, keep]
     return subset
 
 
@@ -1017,7 +1007,7 @@ def _epsilon_effective_profile(booz: dict[str, Any] | None, note: str):
     if booz is None:
         return None, None, note or "Boozer transform unavailable"
     if booz.get("neo_booz") is None:
-        return None, None, "NEO_JAX's BoozerData contract is symmetric-only"
+        return None, None, "NEO Boozer tables unavailable"
     try:
         from .neoclassical import diagnostic_neo_config, epsilon_effective_from_boozer
 
