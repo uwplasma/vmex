@@ -58,9 +58,11 @@ CASES: dict[str, dict[str, object]] = {
     },
 }
 
-# Compact WebP preserves readable panel labels at README width.
-WEBP_WIDTH = 1400
-WEBP_QUALITY = 60
+# The 3000 px summary is downsampled to twice the README column width, where
+# its panel labels stay legible, and stored as lossy webp to keep the file
+# small.  Pillow's encoder is deterministic for fixed pixels and settings.
+WEBP_WIDTH = 1760
+WEBP_QUALITY = 75
 
 
 def _package_version(name: str) -> str | None:

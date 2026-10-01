@@ -59,18 +59,12 @@ $\langle|\mathbf J\times\mathbf B-\nabla p|\rangle_s/\langle|\nabla(B^2/2\mu_0)|
 Mercier `DMerc` and the Glasser
 resistive-interchange $D_R$ with $V''(s)$ on a color-matched right axis,
 a 3-D LCFS, and the second adiabatic invariant in the polar disk
-$x=s\cos\alpha$, $y=s\sin\alpha$. Concentric $J$ contours indicate
-alpha-independence of the displayed well branch. The title gives
-$|v_\parallel|/v$ at the minimum $|B|$ on
-the stated reference surface; the same physical $\lambda$ is held fixed
-throughout the disk, so $|v_\parallel|/v$ varies elsewhere. Blank regions
-have no complete trapped well at that
-pitch. Where several wells exist, the panel displays the largest complete-well
-$J$, so concentric contours alone do not certify every trapped orbit; branch
-changes and radial slopes need care. The panel samples 192 field-line angles
-and 512 points per field period;
-abrupt well-branch changes can remain visible after numerical refinement.
-`|B|` in Boozer
+$x=s\cos\alpha$, $y=s\sin\alpha$. The title gives $|v_\parallel|/v$
+at the reference field minimum; physical $\lambda$ stays fixed across the disk.
+Blank regions have no complete trapped well. The panel displays the largest
+complete-well $J$: concentric contours describe that branch, not every orbit.
+It samples 192 field-line angles and 512 points per period; well-branch changes
+can remain visible after refinement. `|B|` in Boozer
 coordinates appears at mid radius and on
 the LCFS as unfilled jet contours with a field line of slope iota. The Boozer
 transform runs in-process, so `--plot` needs no separate `--booz` pass;

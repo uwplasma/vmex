@@ -528,11 +528,11 @@
       "note": "The six-panel *_trace.png of plot_tracing for the VMEX run of benchmarks/trace_cross_code.json, re-traced deterministically from the recorded settings (the generator checks the lost count against the record; the title shows the recorded wall time), downsized to 1200 px WebP. Needs wout_n3are_R7.75B5.7.nc from the ESSOS or SIMSOPT test files. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
     },
     {
-      "path": "docs/_static/figures/readme_plot_timing.webp",
-      "sha256": "7f7da0c6a0dd687138a02589496caa9b5d2cbd247b8d1409b9371e346eeeb075",
-      "bytes": 17414,
+      "path": "docs/_static/figures/readme_j_compare.webp",
+      "sha256": "a9f1be5cedc360601df3f35abb75b577cc3b985446cfbedd1d67546d6aaa5ff8",
+      "bytes": 16176,
       "generator": "benchmarks/make_readme_figures.py",
-      "command": "python benchmarks/make_readme_figures.py --only plot-timing",
+      "command": "python benchmarks/make_readme_figures.py --only j",
       "inputs": [
         "benchmarks/plot_diagnostics.json"
       ],
@@ -544,7 +544,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Fresh-process CLI and in-process library timings include NEO and all five PNGs; J is shown separately. Source revisions and WOUT hashes are in the record."
+      "note": "Largest complete-well bounce action against independent quadrature over 72 checks; cold and repeated J map evaluations. Settings and WOUT hashes are in the record."
     }
   ]
 }

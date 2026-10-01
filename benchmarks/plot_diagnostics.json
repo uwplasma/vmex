@@ -2,80 +2,51 @@
   "hardware": "Apple M2, CPU",
   "date": "2026-09-30",
   "python": "3.11.14",
-  "jax": "0.10.2",
-  "neo_jax": "1.0.2",
-  "booz_xform_jax_commit": "d5ce4b2",
-  "booz_xform_jax_status": "PR #17, unreleased when measured",
   "vmex_source_commit": "ba7e02cc",
-  "vmex_commit": "ba7e02cc",
   "vmex_dirty": true,
   "persistent_cache": "disabled",
   "blas_threads": 1,
-  "method": "Instrumented fresh-process CLI writes all five PNGs; warm plot_wout is the second library repeat with a new WOUT read after the CLI clears JAX caches. Includes image writing; one measurement per case.",
-  "neo_jax_commit": "acdca76",
-  "neo_jax_status": "PR #4, unreleased when measured",
-  "png_encoding": {"level6_s": 1.589, "level1_s": 0.764, "size_ratio": 1.14, "pixels_equal": true, "note": "Five W7-X PNGs; complete CLI measurements precede this encoder change."},
+  "method": "Root-aware J map only; field-line sampling and bounce integration included. One cold and one repeated call per case.",
   "cases": [
     {
       "case": "Landreman-Paul QA",
-      "wout": "wout_LandremanPaul2021_QA_lowres.nc",
       "source": "https://github.com/hiddenSymmetries/simsopt/tree/d32e5a69082958c5a0a4c1037050b71938854636/tests/test_files",
       "wout_sha256": "4d301a3c32aa6b12f0c13f2c440d223427275fb00862fac3e64e52dc8421c23c",
-      "cold_cli_s": 14.063, "warm_plot_s": 6.931,
-      "cold_boozer_s": 0.556, "warm_boozer_s": 0.017,
-      "cold_j_s": 0.58, "warm_j_s": 0.53,
-      "cold_epsilon_s": 5.509, "warm_epsilon_s": 1.993,
-      "previous_cold_cli_s": 20.96, "previous_warm_plot_s": 13.278,
-      "neo_max_abs_error": 2.9778502051908996e-23
+      "cold_j_s": 0.58,
+      "warm_j_s": 0.53
     },
     {
       "case": "W7-X standard",
-      "wout": "W7-X/Standard/wout.nc",
       "source": "https://github.com/landreman/vmec_equilibria/tree/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa",
       "wout_sha256": "681aa2a94e4e55d88b91d8130ae6181cdd432154396db11e2d215693908e4131",
-      "cold_cli_s": 14.655, "warm_plot_s": 7.816,
-      "cold_boozer_s": 0.502, "warm_boozer_s": 0.024,
-      "cold_j_s": 0.803, "warm_j_s": 0.801,
-      "cold_epsilon_s": 4.707, "warm_epsilon_s": 1.14,
-      "previous_cold_cli_s": 24.251, "previous_warm_plot_s": 15.359,
-      "neo_max_abs_error": 5.421010862427522e-18
+      "cold_j_s": 0.803,
+      "warm_j_s": 0.801
     }
   ],
-  "desc_reference": {
-    "observable": "epsilon_eff^(3/2)",
-    "hardware": "Apple M2, CPU", "date": "2026-09-30", "persistent_cache": "disabled", "blas_threads": 1,
-    "versions": {"python": "3.11.14", "desc-opt": "0.17.3", "jax": "0.9.2", "jaxlib": "0.9.2", "jax-finufft": "1.3.1", "interpax_fft": "0.1.0"},
-    "source_commits": {"neo_jax": "557883d", "booz_xform_jax": "3b5866b", "vmex": "9c45d7c0"},
-    "source": "https://pypi.org/project/desc-opt/0.17.3/",
-    "example": "HELIOTRON_output.h5", "example_sha256": "305cbba9c82c32dff7cb4954367c20f0428f6ff216f5d1f53c3038870ca06dfe",
-    "equilibrium": {"L": 24, "M": 12, "N": 3, "NFP": 19, "s": 0.4375, "rho": 0.6614378277661477},
-    "method": "Packaged solved equilibrium, no refit. Native DESC Bounce2D versus VMECIO.save WOUT, Boozer transform and NEO. Set equilibrium M_grid/N_grid before DESC radial computation; requested surface grids alone are overridden.",
-    "normalization": {"DESC_R0_m": 10.000000000000066, "NEO_rt0_m": 9.944813507414272, "NEO_multiplier": 1.0111293419473337, "formula": "NEO epsilon_eff^(3/2) * (DESC R0 / NEO rt0)^2", "NEO_ref_swi": 2},
-    "wout": {"ns": 25, "M_nyq": 24, "N_nyq": 8, "M_grid": 24, "N_grid": 12, "j_vmec": 11, "sha256": "876e9120a2ff79cf1235cc2ce31baed17c5b454fea666115f7159e6d136a60b7", "mboz": 32, "nboz": 16},
-    "representation_checks": {"B_relative_rms": 7.283389053974605e-10, "NEO_relative_change_ns9_to_ns25": 0.0012463998111922703, "DESC_relative_change_grid18x6_to24x12": 0.0010335574583494802},
-    "DESC": {
-      "M_grid": 24, "N_grid": 12, "X": 32, "Y": 32, "num_alpha": 4, "alpha": "uniform [0,2pi)", "pitch_batch_size": 12, "nufft_eps": 1e-8,
-      "initial": {"epsilon_3_2": 0.27401592321198454, "Y_B": 1024, "num_quad": 32, "num_pitch": 48, "num_transit": 8, "num_well": 256, "first_call_s": 7.354489584002295, "repeat_s": 0.8081044169994129},
-      "refined": {"epsilon_3_2": 0.2742140913742857, "Y_B": 2048, "num_quad": 64, "num_pitch": 96, "num_transit": 16, "num_well": 512, "maximum_observed_wells": 357, "first_config_s": 30.68394170800093, "repeat_s": 44.66582591700353},
-      "relative_change": 0.0007231994403035621
-    },
-    "NEO": {
-      "max_rational_field_periods": 100000, "rational_surface_policy": "error",
-      "initial": {"raw_epsilon_3_2": 0.27302854162801543, "matched_epsilon_3_2": 0.2760671696291753, "theta_n": 64, "phi_n": 64, "npart": 48, "multra": 3, "nstep_per": 20, "nstep_min": 200, "nstep_max": 400, "no_bins": 80, "acc_req": 0.01},
-      "refined": {"raw_epsilon_3_2": 0.2713425589251502, "matched_epsilon_3_2": 0.2743624230482927, "theta_n": 128, "phi_n": 128, "npart": 96, "multra": 4, "nstep_per": 40, "nstep_min": 400, "nstep_max": 800, "no_bins": 160, "acc_req": 0.005, "first_config_s": 4.689326083000196, "repeat_s": 1.0147781670020777},
-      "relative_change": 0.006175115219866543
-    },
-    "refined_relative_difference": 0.0005409338129328832,
-    "timing_scope": "Synchronized calls; one repeat, no speedup ratio. DESC includes native field and angle setup; NEO excludes WOUT export and Boozer setup (0.713 s). First config calls reuse earlier compilation; only DESC initial is a fresh-process first call. Imports and model read excluded.",
-    "scope": "One surface. Controls refined together, not independent error bounds; export and reference-radius effects measured separately. High-control process: 102.447 s, peak RSS 3648.69 MiB."
-  },
   "bad_reference": {
     "source": "https://github.com/RalfMackenbach/BAD",
-    "pitch_fraction": [0.1, 0.2, 0.5, 0.9],
+    "pitch_fraction": [
+      0.1,
+      0.2,
+      0.5,
+      0.9
+    ],
     "alpha_grid_size": 12,
-    "alpha_indices": [1, 4, 8],
+    "alpha_indices": [
+      1,
+      4,
+      8
+    ],
     "method": "Exact Fourier B, refined roots, 200-point sine-mapped Gauss-Legendre; complete wells only, largest action. 72 surface/pitch/alpha checks, four trapping depths, three alpha labels at s nearest 0.5.",
     "well_count_differences": 0,
-    "max_relative_j_error": {"QA": 6.531e-07, "QH": 8.117e-06, "QI": 6.391e-05, "W7-X": 5.903e-05, "NCSX": 2.913e-06, "LASYM tokamak": 6.41e-06}
-  }
+    "max_relative_j_error": {
+      "QA": 6.531e-07,
+      "QH": 8.117e-06,
+      "QI": 6.391e-05,
+      "W7-X": 5.903e-05,
+      "NCSX": 2.913e-06,
+      "LASYM tokamak": 6.41e-06
+    }
+  },
+  "vmex_commit": "ba7e02cc"
 }

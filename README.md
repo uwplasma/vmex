@@ -159,23 +159,13 @@ cores. Runtimes exclude compilation and field set-up ([benchmark](benchmarks/tra
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
 `D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
 `vmex examples/data/input.nfp2_QA_finite_beta --plot` and `vmex examples/data/input.nfp4_QI_finite_beta --plot`.
-The `J` map follows one physical pitch, labels its `|v_parallel|/v` at midradius `B_min`, and shows the largest complete well.
 
 ![vmex --plot summary of the bundled finite-beta NFP=2 QA equilibrium](docs/_static/figures/readme_diagnostics_qa.webp)
 ![vmex --plot summary of the bundled finite-beta NFP=4 QI equilibrium](docs/_static/figures/readme_diagnostics_summary.webp)
 
-Cold and warm timings include NEO and all five figures, using [Boozer #17](https://github.com/uwplasma/booz_xform_jax/pull/17) and [NEO #4](https://github.com/uwplasma/NEO_JAX/pull/4) (unreleased when measured); J is shown separately ([settings](benchmarks/plot_diagnostics.json)).
+The J map holds physical pitch fixed, labels $|v_\parallel|/v$ at the reference field minimum, and displays the largest complete well. Independent BAD quadrature checks cover six geometries and four trapping depths ([settings](benchmarks/plot_diagnostics.json)).
 
-![Cold and warm VMEX plotting times](docs/_static/figures/readme_plot_timing.webp)
-
-The solved [DESC](https://desc-docs.readthedocs.io/en/latest/notebooks/tutorials/EffectiveRipple.html) HELIOTRON at `s=0.4375` gives the following `ε_eff^(3/2)` with matched reference radii ([controls](benchmarks/plot_diagnostics.json)).
-
-| code | initial controls | refined controls | change |
-|---|---|---|---|
-| DESC | 0.274016 | 0.274214 | 0.072 % |
-| NEO | 0.276067 | 0.274362 | 0.618 % |
-
-Refined values differ by 0.054 %; DESC resolves 357 wells within a capacity of 512. This agreement applies to this surface and the recorded controls.
+![Bounce-action accuracy and J evaluation times](docs/_static/figures/readme_j_compare.webp)
 
 VMEX follows the deck's `NS_ARRAY`, `FTOL_ARRAY` and `NITER_ARRAY`. In Python:
 
