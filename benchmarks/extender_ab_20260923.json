@@ -1,7 +1,7 @@
 {
  "schema": "vmex.extender-ab/1",
  "date": "2026-09-23",
- "host": "office workstation (36 cores), CPU, JAX 0.11.2, virtual-casing-jax 0.0.7, x64",
+ "host": "36-core CPU, CPU, JAX 0.11.2, virtual-casing-jax 0.0.7, x64",
  "conditions": "one fresh process per arm, arms alternated A/B/A/B, run under the shared timing lock; other untimed jobs may have been running",
  "arms": {
   "A": {

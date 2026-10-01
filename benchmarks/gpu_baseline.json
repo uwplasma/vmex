@@ -5,8 +5,8 @@
   "measurement_date": "2026-07-09",
   "measurement_dirty": null,
   "input_data_embedded": false,
-  "host": "pop-os",
-  "hardware": "2x NVIDIA RTX A4000 16GB (office, pop-os), jax 0.6.2 cuda12, python 3.10",
+  "host": "Linux",
+  "hardware": "2x NVIDIA RTX A4000 16GB, jax 0.6.2 cuda12, python 3.10",
   "versions": {
    "jax": "0.6.2",
    "jaxlib": null,
@@ -20,10 +20,10 @@
   "jaxlib_version": "not recorded"
  },
  "meta": {
-  "host": "pop-os",
+  "host": "Linux",
   "date": "2026-07-09 16:32",
   "synth_niter": 150,
-  "hardware": "2x NVIDIA RTX A4000 16GB (office, pop-os), jax 0.6.2 cuda12, python 3.10",
+  "hardware": "2x NVIDIA RTX A4000 16GB, jax 0.6.2 cuda12, python 3.10",
   "notes": [
    "matrix: cold_wall_s = 1st in-process solve (incl. compile/cache-load); warm_wall_s = 2nd solve. warm still includes per-solve retrace overhead (~0.2-0.4s legacy, 1.7-4.7s core_jit) because solve() retraces per call.",
    "stepscan: per_iter_ms_marginal = (wall_NITER450 - wall_NITER150)/300 on synthetic nfp4_QH decks with FTOL=1e-30 -> pure iteration throughput; per_solve_overhead_s = fixed cost per solve call.",
