@@ -329,6 +329,7 @@ On matching 370-surface WOUTs, the whole-volume RMS force falls from
 `2.0e5` to `42 N m⁻³`; near-axis RMS falls from `9.8e5` to `190 N m⁻³`.
 The [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 defines the dimensional force and normalized `eps_F` metrics.
+`eps_F` is bounded above by 2 by construction; report it with dimensional force.
 
 ![vmex --plot of the unpolished and polished WOUT files](docs/_static/figures/readme_polish_plot.webp)
 
