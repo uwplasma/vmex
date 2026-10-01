@@ -501,7 +501,7 @@ JSON. The orbit option uses fixed births and reports individual loss IDs and
 times, a birth hash, loss recall, label agreement, energy error and compile
 and warm times for all nine default orbit cuts. Its `first_s` includes compilation
 when needed; equal-sized spectra can reuse it within one process. The
-[W7-X convergence study](../howto/trace-alpha-particles.md#w7-x-convergence)
+{ref}`W7-X convergence study <w7-x-convergence>`
 records ten cuts timed separately in fresh processes with caches disabled.
 For the QA table, pass its WOUT alone with `--particles 1000 --tmax 0.01
 --devices 8 --repeats 3 --save-times 101`.
