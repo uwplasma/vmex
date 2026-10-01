@@ -66,16 +66,22 @@ def scales(state, rt):
 
 
 def field_from_state(state, rt, bs, rs):
-    """Live VMEX Boozer spectrum into ESSOS without a WOUT file or NumPy break."""
+    """Live VMEX Boozer harmonics into ESSOS without host conversion."""
+    if rt.setup.lasym and not hasattr(BoozerField, "sine_coef"):
+        raise ImportError("Upgrade ESSOS for asymmetric Boozer sine harmonics")
     a = boozer_spectrum_state(state, rt, surfaces=SURFACES, mboz=5, nboz=5, oversample=1)
     s, xm = a["s_b"], jnp.asarray(a["xm_b"], int)
     r = jnp.sqrt(s)
     b = jnp.where(xm[None, :] > 0, a["bmnc_b"] * bs / r[:, None], a["bmnc_b"] * bs)
+    sine = {}
+    if rt.setup.lasym:
+        bmns = jnp.where(xm[None, :] > 0, a["bmns_b"] * bs / r[:, None], a["bmns_b"] * bs)
+        sine["sine_coef"] = cubic(r, bmns)
     p = jnp.stack((a["iota_b"], a["G_b"] * bs * rs, a["I_b"] * bs * rs), axis=1)
     axis = (p[0] - s[0] * (p[1] - p[0]) / (s[1] - s[0])).at[2].set(0.0)
     ps = jnp.concatenate((jnp.array([0.0]), s))
     return BoozerField(r, cubic(r, b), ps, cubic(ps, jnp.concatenate((axis[None], p))),
-                       xm, jnp.asarray(a["xn_b"], int), a["psi_edge"] * bs * rs**2, a["nfp"])
+                       xm, jnp.asarray(a["xn_b"], int), a["psi_edge"] * bs * rs**2, a["nfp"], **sine)
 
 
 def birth_weight(field, births):

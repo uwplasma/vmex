@@ -851,9 +851,48 @@ def _alpha_objective_functions(**namespace):
     namespace["checkpointed_fori_loop"] = checkpointed_fori_loop
     path = EXAMPLES / "optimization" / "alpha_particle_optimization.py"
     functions = [node for node in ast.parse(path.read_text()).body
-                 if isinstance(node, ast.FunctionDef) and node.name in {"orbit_risk", "value_grad"}]
+                 if isinstance(node, ast.FunctionDef)
+                 and node.name in {"cubic", "field_from_state", "orbit_risk", "value_grad"}]
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"), namespace)
     return namespace
+
+
+@pytest.mark.parametrize("asym", [False, True])
+def test_alpha_live_sine_spectrum_preserves_coefficient_gradients(asym):
+    import jax
+    import jax.numpy as jnp
+    from types import SimpleNamespace
+
+    BoozerField = pytest.importorskip("essos.boozer").BoozerField
+    if asym and not hasattr(BoozerField, "sine_coef"):
+        pytest.skip("Requires ESSOS asymmetric Boozer support")
+    jax.config.update("jax_enable_x64", True)
+    s = jnp.array([0.05, 0.35, 0.65, 0.95])
+    def spectrum(amplitude, rt, **kwargs):
+        return dict(s_b=s, xm_b=np.array([0, 1]), xn_b=np.array([0, 2]), nfp=2,
+                    bmnc_b=jnp.stack((5 * jnp.ones_like(s), jnp.zeros_like(s)), axis=1),
+                    bmns_b=jnp.stack((jnp.zeros_like(s), amplitude * jnp.sqrt(s)), axis=1),
+                    iota_b=0.4 * jnp.ones_like(s), G_b=jnp.ones_like(s), I_b=jnp.zeros_like(s), psi_edge=1.0)
+    f = _alpha_objective_functions(jax=jax, jnp=jnp, BoozerField=BoozerField,
+                                   SURFACES=s, boozer_spectrum_state=spectrum)["field_from_state"]
+    rt = SimpleNamespace(setup=SimpleNamespace(lasym=asym))
+    expected = np.sqrt(0.4) * np.sin(0.7 - 2 * 0.2) if asym else 0.0
+    value_grad = jax.jit(jax.value_and_grad(lambda a: f(a, rt, 1.0, 1.0).modB(0.4, 0.7, 0.2)))
+    for amplitude in (0.0, 0.2):
+        field = f(amplitude, rt, 1.0, 1.0)
+        assert (getattr(field, "sine_coef", None) is not None) == asym
+        with jax.disable_jit(False):
+            value, gradient = value_grad(amplitude)
+        assert float(value) == pytest.approx(5 + amplitude * expected)
+        assert float(gradient) == pytest.approx(expected, abs=1e-12)
+
+
+def test_alpha_asymmetric_field_requires_sine_backend():
+    from types import SimpleNamespace
+
+    field = _alpha_objective_functions(BoozerField=object)["field_from_state"]
+    with pytest.raises(ImportError, match="Upgrade ESSOS"):
+        field(None, SimpleNamespace(setup=SimpleNamespace(lasym=True)), 1.0, 1.0)
 
 
 @pytest.mark.parametrize("component,rate", [(0, 0.0), (0, 2.0),
