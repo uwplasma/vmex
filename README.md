@@ -154,7 +154,7 @@ field error; use more births for small loss fractions.
 | CATAPULT, released | 6,647 | 8,122 | 34.17 s | 34.48 s | 5.17e-2, saved confined paths |
 | CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,578 | 8,191 | 36.61 s | 36.88 s | 1.17e-5, saved confined paths |
 
-Cold ESSOS traces use fresh processes with compilation caches disabled; field setup adds 1.44–1.48 s. Compaction preserves every output and benefits from losses before 0.16 ms; CATAPULT truncates lost paths, while ESSOS returns all requested states.
+Measurements use the earlier ESSOS alpha mass, `6.6951e-27 kg`. Cold ESSOS traces use fresh processes with compilation caches disabled; field setup adds 1.44–1.48 s. Compaction preserves every output and benefits from losses before 0.16 ms; CATAPULT truncates lost paths, while ESSOS returns all requested states.
 
 ESSOS, CATAPULT, DESC and SIMPLE agree on all 64 labels in a separate 2 ms case (55 losses). SIMSOPT with its [flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664) agrees on 58 resolved paths; six axis stops remain unresolved.
 

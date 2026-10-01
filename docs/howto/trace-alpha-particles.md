@@ -44,11 +44,8 @@ vmex wout_case.nc --trace --trace-birth volume --collisional --trace-tmax 0.2
 vmex wout_case.nc --trace --trace-particles 200 --trace-tmax 1e-3   # a quick look
 ```
 
-Losses from 10 ms are prompt losses only. Published reactor numbers are
-slowing-down losses over about 0.2 s: `--collisional --trace-tmax 0.2`. Do not
-compare a 10 ms number against a 0.2 s table. For reference, Paul et al.
-(NF 62, 126054, 2022, Table 2) report 2470 of 10^4 ARIES-CS alphas born on
-s = 0.3 lost within 0.2 s.
+Ten-millisecond traces measure prompt losses. For slowing-down losses use
+`--collisional --trace-tmax 0.2`; compare matching horizons and birth distributions.
 
 ## What is traced
 
@@ -145,7 +142,8 @@ intended equilibrium before relaxing `--trace-mode-cut`.
 
 Standard and high-mirror W7-X use 256 common births, `s=0.25`, 5 ms, and
 RK4 steps of `3.125e-8 s`. The [measurement record](../../benchmarks/trace_accuracy.json)
-contains source, input and birth hashes; `1e-5` is a tighter reference, not an exact solution.
+contains source, input and birth hashes. Runs use the earlier ESSOS alpha mass
+`6.69509884346e-27 kg`; `1e-5` is a tighter reference, not an exact solution.
 
 ![W7-X cutoff accuracy and cold/warm tracing times](../_static/figures/readme_trace_accuracy.webp)
 
@@ -184,7 +182,8 @@ With 1,024 common standard-W7-X births over 10 ms, timestep refinement gives:
 
 The first two RK4 settings fail the `1e-3` energy check. The refined RK4 and
 SIMPLE totals are close, but 46 particle labels differ; field interpolation,
-spectrum and timestep convergence remain necessary. SIMPLE's repeated eight-thread
+spectrum and timestep convergence remain necessary. SIMPLE's birth speed differs
+by `1.39e-5` relatively because of its legacy constants. Its repeated eight-thread
 CPU traces take 765.89/762.94 s; these are different hardware from the GPU cutoff study.
 
 ## Cross-code orbit checks

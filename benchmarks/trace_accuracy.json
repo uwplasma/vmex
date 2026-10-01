@@ -12,6 +12,7 @@
   "nboz": 32,
   "surfaces": 98,
   "energy_eV": 3520000,
+  "alpha_mass_kg": 6.69509884346e-27,
   "Aminor_p": 1.7044,
   "volavgB": 5.8646,
   "birth": {"s":0.25,"seed":42,"field_cut":1e-06,"samples":4096,"used":256},
