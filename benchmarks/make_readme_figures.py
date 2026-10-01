@@ -498,6 +498,31 @@ def make_trace_accuracy_figure(out: Path) -> None:
     plt.close(fig)
 
 
+# --------------------------------------------------------------------------
+
+def make_plot_timing_figure(out: Path) -> None:
+    record = json.loads((REPO / "benchmarks/plot_diagnostics.json").read_text())
+    cases = record["cases"]
+    fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.3), layout="constrained")
+    x = np.arange(len(cases))
+    for ax, (cold, warm, title) in zip(axes, [
+        ("cold_cli_s", "warm_plot_s", "All five figures"),
+        ("cold_j_s", "warm_j_s", "J calculation"),
+    ]):
+        for offset, key, label, color in [
+            (-.18, cold, "Cold", "#315f95"), (.18, warm, "Warm", "#d89039"),
+        ]:
+            bars = ax.bar(x + offset, [c[key] for c in cases], .36, label=label, color=color)
+            ax.bar_label(bars, fmt="%.2f", fontsize=9, padding=3)
+        ax.set_xticks(x, [c["case"] for c in cases], fontsize=9)
+        ax.set(ylabel="Wall time [s]", title=title, ylim=(0, max(c[cold] for c in cases) * 1.22))
+        ax.spines[["top", "right"]].set_visible(False)
+    axes[0].legend(frameon=False)
+    fig.suptitle("Apple M2 · NEO enabled · persistent cache disabled", fontsize=11)
+    fig.savefig(out, dpi=140)
+    plt.close(fig)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="runtime,convergence,precond,showcase")
@@ -511,6 +536,8 @@ def main() -> None:
         make_runtime_figure(outdir / "readme_runtime_compare.webp")
     if "convergence" in which:
         make_convergence_figure(outdir / "readme_convergence.webp")
+    if "plot-timing" in which:
+        make_plot_timing_figure(outdir / "readme_plot_timing.webp")
     if "precond" in which:
         make_precond_figure(outdir / "readme_precond.webp")
     if "showcase" in which:

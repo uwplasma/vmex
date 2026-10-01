@@ -1,0 +1,53 @@
+{
+  "hardware": "Apple M2, CPU",
+  "date": "2026-09-30",
+  "python": "3.11.14",
+  "jax": "0.10.2",
+  "neo_jax": "1.0.2",
+  "booz_xform_jax_commit": "d5ce4b2",
+  "booz_xform_jax_status": "PR #17, unreleased when measured",
+  "vmex_source_commit": "ba7e02cc",
+  "vmex_commit": "ba7e02cc",
+  "vmex_dirty": true,
+  "persistent_cache": "disabled",
+  "blas_threads": 1,
+  "method": "Instrumented fresh-process CLI writes all five PNGs; warm plot_wout is the second library repeat with a new WOUT read after the CLI clears JAX caches. Includes image writing; one measurement per case.",
+  "neo_jax_commit": "acdca76",
+  "neo_jax_status": "PR #4, unreleased when measured",
+  "png_encoding": {"level6_s": 1.589, "level1_s": 0.764, "size_ratio": 1.14, "pixels_equal": true, "note": "Five W7-X PNGs; complete CLI measurements precede this encoder change."},
+  "cases": [
+    {
+      "case": "Landreman-Paul QA",
+      "wout": "wout_LandremanPaul2021_QA_lowres.nc",
+      "source": "https://github.com/hiddenSymmetries/simsopt/tree/d32e5a69082958c5a0a4c1037050b71938854636/tests/test_files",
+      "wout_sha256": "4d301a3c32aa6b12f0c13f2c440d223427275fb00862fac3e64e52dc8421c23c",
+      "cold_cli_s": 14.063, "warm_plot_s": 6.931,
+      "cold_boozer_s": 0.556, "warm_boozer_s": 0.017,
+      "cold_j_s": 0.58, "warm_j_s": 0.53,
+      "cold_epsilon_s": 5.509, "warm_epsilon_s": 1.993,
+      "previous_cold_cli_s": 20.96, "previous_warm_plot_s": 13.278,
+      "neo_max_abs_error": 2.9778502051908996e-23
+    },
+    {
+      "case": "W7-X standard",
+      "wout": "W7-X/Standard/wout.nc",
+      "source": "https://github.com/landreman/vmec_equilibria/tree/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa",
+      "wout_sha256": "681aa2a94e4e55d88b91d8130ae6181cdd432154396db11e2d215693908e4131",
+      "cold_cli_s": 14.655, "warm_plot_s": 7.816,
+      "cold_boozer_s": 0.502, "warm_boozer_s": 0.024,
+      "cold_j_s": 0.803, "warm_j_s": 0.801,
+      "cold_epsilon_s": 4.707, "warm_epsilon_s": 1.14,
+      "previous_cold_cli_s": 24.251, "previous_warm_plot_s": 15.359,
+      "neo_max_abs_error": 5.421010862427522e-18
+    }
+  ],
+  "bad_reference": {
+    "source": "https://github.com/RalfMackenbach/BAD",
+    "pitch_fraction": [0.1, 0.2, 0.5, 0.9],
+    "alpha_grid_size": 12,
+    "alpha_indices": [1, 4, 8],
+    "method": "Exact Fourier B, refined roots, 200-point sine-mapped Gauss-Legendre; complete wells only, largest action. 72 surface/pitch/alpha checks, four trapping depths, three alpha labels at s nearest 0.5.",
+    "well_count_differences": 0,
+    "max_relative_j_error": {"QA": 6.531e-07, "QH": 8.117e-06, "QI": 6.391e-05, "W7-X": 5.903e-05, "NCSX": 2.913e-06, "LASYM tokamak": 6.41e-06}
+  }
+}
