@@ -1603,6 +1603,7 @@ def _boundary_3d_panel(ax, wout, *, ntheta: int, nzeta: int):
     import matplotlib
     from matplotlib import cm
     from matplotlib.colors import Normalize
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     cmap = matplotlib.colormaps[_CMAP_3D]
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
@@ -1612,10 +1613,17 @@ def _boundary_3d_panel(ax, wout, *, ntheta: int, nzeta: int):
     phi2d = np.meshgrid(phi, theta)[0]
     X, Y = R * np.cos(phi2d), R * np.sin(phi2d)
     norm = Normalize(float(B.min()), float(B.max()))
-    ax.plot_surface(
-        X, Y, Z, facecolors=cmap(norm(B)), rstride=1, cstride=1,
-        antialiased=False, linewidth=0.0, shade=False,
-    )
+    points = np.stack((X, Y, Z), axis=-1)
+    if np.isfinite(points).all():
+        vertices = np.stack((points[:-1, :-1], points[:-1, 1:],
+                             points[1:, 1:], points[1:, :-1]), axis=-2)
+        colors = cmap(norm(B[:-1, :-1])).reshape(-1, 4)
+        ax.add_collection3d(Poly3DCollection(
+            vertices.reshape(-1, 4, 3), facecolors=colors, edgecolors=colors,
+            antialiased=False, linewidth=0.0, shade=False))
+    else:
+        ax.plot_surface(X, Y, Z, facecolors=cmap(norm(B)), rstride=1, cstride=1,
+                        antialiased=False, linewidth=0.0, shade=False)
     scale = 0.7 * max(np.abs(X).max(), np.abs(Y).max())
     ax.auto_scale_xyz([-scale, scale], [-scale, scale], [-scale, scale])
     ax.set_box_aspect([1, 1, 1]); ax.set_axis_off()
