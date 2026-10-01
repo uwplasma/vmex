@@ -336,7 +336,7 @@ toroidal rule, validated numerically, not taken from a reference.
 Spatial derivatives of the direct path come from the same closed-form
 kernels on the finest schedule level, where nested ``jacfwd`` through the
 schedule used to differentiate the quadrature: the values agree to 1e-12. On
-the office workstation (A/B/A/B, ``benchmarks/extender_ab_20260923.json``,
+a 36-core CPU host (A/B/A/B, ``benchmarks/extender_ab_20260923.json``,
 generator ``benchmarks/extender_ab.py``) the first ``B`` to ``gradgradgradB``
 calls at 16 targets took 2.9 s against 6.0 s, and a warm ``gradgradgradB``
 took 0.09 s against 0.50 s at 16 targets and 0.47 s against 1.98 s at 128.

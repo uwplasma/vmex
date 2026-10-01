@@ -215,4 +215,6 @@ def test_committed_reports_do_not_expose_personal_paths() -> None:
             if path.is_file() and path.suffix in text_suffixes and "_build" not in path.parts:
                 text = path.read_text(errors="replace")
                 assert "/Users/" not in text, path
+                assert "/home/" not in text, path
                 assert "MacBook-Pro.local" not in text, path
+                assert "office" not in text.lower(), path

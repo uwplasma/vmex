@@ -5,14 +5,14 @@
   "hardware": "2x NVIDIA RTX A4000 (16 GiB each), driver 580.173.02, CUDA 12",
   "measurement_commit": "5ee94c930696d1c16d28cb651ad389124f17ffb2",
   "measurement_date": "2026-09-16",
-  "note": "Companion to benchmarks/gpu_baseline.json (2026-07-09, different hardware). On this machine the GPU does not win any cell: warm gain runs 0.17x to 0.83x across every shipped deck and every point of the synthetic ns x mnmax scan, including NuhrenbergZille_1988_QHS at 111 s of warm CPU work. The GPU_MIN_ITERATION_WORK crossover therefore does not transfer; see docs/howto/run-on-gpu.md.",
+  "note": "Companion to benchmarks/gpu_baseline.json (2026-07-09, different hardware). In this sample the GPU does not win any cell: warm gain runs 0.17x to 0.83x across every shipped deck and every point of the synthetic ns x mnmax scan, including NuhrenbergZille_1988_QHS at 111 s of warm CPU work. The GPU_MIN_ITERATION_WORK crossover therefore does not transfer; see docs/howto/run-on-gpu.md.",
   "reading_note": "Every cell records backend='gpu' and both CUDA devices: that is jax.default_backend()/jax.devices() from the worker process, which sees the accelerator whatever device the solve is pinned to, so it does NOT say where a cell ran. Read placement from peak_device_mem_mb instead -- null on cpu/ cells, 4.8 to 113.5 MB on gpu/ cells -- and note that iteration counts match exactly between the cpu/ and gpu/ cell of each deck and lane (434, 2829, 125, 189), which is the control that the two ran the same physics on different hardware.",
   "software": "JAX 0.11.1 with jax[cuda12], Python 3.12, x64 enabled"
  },
  "matrix": {
   "LandremanPaul2021_QA_lowres": {
    "cpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 24.96
    },
@@ -34,7 +34,7 @@
     "warm_wall_s": 0.289
    },
    "gpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 46.413
    },
@@ -338,7 +338,7 @@
   },
   "synth_nfp4QH_ns151_mpol2_ntor2": {
    "cpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 6.109
    },
@@ -360,7 +360,7 @@
     "warm_wall_s": 0.341
    },
    "gpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 10.29
    },
@@ -384,7 +384,7 @@
   },
   "synth_nfp4QH_ns151_mpol4_ntor4": {
    "cpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 6.595
    },
@@ -406,7 +406,7 @@
     "warm_wall_s": 0.714
    },
    "gpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 12.902
    },
@@ -430,7 +430,7 @@
   },
   "synth_nfp4QH_ns35_mpol2_ntor2": {
    "cpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 4.884
    },
@@ -452,7 +452,7 @@
     "warm_wall_s": 0.12
    },
    "gpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 7.262
    },
@@ -476,7 +476,7 @@
   },
   "synth_nfp4QH_ns35_mpol4_ntor4": {
    "cpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 8.167
    },
@@ -498,7 +498,7 @@
     "warm_wall_s": 0.217
    },
    "gpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 16.312
    },
@@ -522,7 +522,7 @@
   },
   "synth_nfp4QH_ns75_mpol2_ntor2": {
    "cpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 6.11
    },
@@ -544,7 +544,7 @@
     "warm_wall_s": 0.18
    },
    "gpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 9.77
    },
@@ -568,7 +568,7 @@
   },
   "synth_nfp4QH_ns75_mpol4_ntor4": {
    "cpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 6.239
    },
@@ -590,7 +590,7 @@
     "warm_wall_s": 0.409
    },
    "gpu/multigrid": {
-    "error": "Traceback (most recent call last):\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 471, in <module>\n    main()\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 342, in main\n    print(MARKER + json.dumps(worker_solve(args.deck, args.lane, args.device)))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 148, in worker_solve\n    cold_wall, iters1, conv1 = one_solve()\n                               ^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/benchmarks/run_gpu_matrix.py\", line 128, in one_solve\n    res = vj.solve_multigrid(inp, verbose=False, device=device)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/multigrid.py\", line 569, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/rjorge/vmex-gpu-0916/vmex/core/solver.py\", line 2595, in _finalize\n    raise VmecConvergenceError(\nvmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n",
+    "error": "vmex.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED",
     "ok": false,
     "subprocess_wall_s": 12.243
    },
@@ -615,8 +615,8 @@
  },
  "meta": {
   "date": "2026-09-16 09:34",
-  "host": "pop-os",
-  "office": false,
+  "host": "Linux",
+  "reference_grid": false,
   "synth_niter": 150,
   "xla_flags": null
  },
