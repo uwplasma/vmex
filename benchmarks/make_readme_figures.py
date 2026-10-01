@@ -1,31 +1,8 @@
 #!/usr/bin/env python3
-"""Regenerate the small set of benchmark figures used by the documentation.
+"""Generate documentation figures from committed benchmark records.
 
-Produces (into ``docs/_static/figures/``):
-
-- ``readme_runtime_compare.webp``      — VMEC2000 vs vmex (cold/warm CPU,
-  GPU where comparable) vs VMEC++, from
-  ``benchmarks/baseline.json`` and
-  ``benchmarks/gpu_baseline.json``.  Run ``benchmarks/run_baseline.py`` first.
-- ``readme_convergence.webp``          — force residual vs iteration for one
-  representative case (nfp4_QH_warm_start at ns=51) in vmex, VMEC2000
-  (NSTEP=1 stdout trace), and VMEC++ (wout
-  ``fsqt``).  Traces are cached in
-  ``benchmarks/convergence_nfp4_ns51.json``; delete it to re-run the codes.
-- ``readme_precond.webp``              — 2D block vs 1D radial preconditioner
-  iteration counts on stiff cases (R10.2 measurements).
-- ``readme_equilibrium_showcase.webp`` — flux surfaces, 3-D boundary geometry
-  coloured by ``|B|``, and ``|B|`` in Boozer coordinates on the LCFS (jet),
-  for the bundled quick-start case (solves it in-process).
-Usage:
-    python benchmarks/make_readme_figures.py
-        [--only runtime,convergence,precond,showcase]
-        [--outdir docs/_static/figures]
-
-Figures are written straight to lossless WebP, so re-running this script
-reproduces the committed bytes for any figure whose inputs have not changed.
-Their provenance rows are in ``docs/_static/figures/figures.json``; refresh
-them with ``python tools/update_figure_manifest.py`` after regenerating.
+Run with --only runtime,convergence,precond,showcase,trace (showcase solves
+its equilibrium). Refresh provenance with tools/update_figure_manifest.py.
 """
 
 from __future__ import annotations
@@ -39,6 +16,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from PIL import Image
 
 REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "examples" / "data"
@@ -488,7 +466,38 @@ def make_showcase_figure(out: Path) -> None:
     print("wrote", out)
 
 
-# --------------------------------------------------------------------------
+def make_trace_accuracy_figure(out: Path) -> None:
+    record = json.loads((REPO / "benchmarks/trace_accuracy.json").read_text())
+    fig, axes = plt.subplots(len(record["cases"]), 3, figsize=(10, 5.5), squeeze=False, constrained_layout=True)
+    n = record["birth"]["used"]
+    for ax, (name, case) in zip(axes, record["cases"].items()):
+        cut, _, lost, mismatch, cold, warm, _ = np.asarray(case["cuts"]).T
+        fraction = lost / n
+        error = np.sqrt(fraction * (1 - fraction) / n)
+        ax[0].plot(cut, 100 * fraction, "o-", color=BLUE)
+        ax[0].fill_between(cut, 100 * (fraction - error), 100 * (fraction + error), color=BLUE, alpha=0.15)
+        ax[0].axhline(100 * fraction[0], color=MUTED, linestyle="--")
+        ax[0].set_title("W7-X " + name.replace("highmirror", "high mirror"))
+        ax[0].set_ylabel("Lost [%]")
+        ax[1].plot(cut, 100 * mismatch / n, "o-", color=VIOLET)
+        ax[1].set_title("Compared with cut 1e-5")
+        ax[1].set_ylabel("Different loss labels [%]")
+        ax[2].plot(cut, cold, "o-", color=BLUE_LIGHT, label="Cold")
+        ax[2].plot(cut, warm, "o-", color=BLUE, label="Warm")
+        ax[2].set_ylabel("Trace wall time [s]")
+        ax[2].legend()
+        for panel in ax:
+            panel.set_xscale("log")
+            panel.set_xlabel("Relative Boozer amplitude cutoff")
+            for side in ("top", "right"):
+                panel.spines[side].set_visible(False)
+    fig.suptitle("256 common alpha births, s=0.25, 5 ms; RK4 step 3.125e-8 s; RTX A4000", fontsize=10)
+    fig.savefig(out, dpi=125, pil_kwargs={"lossless": True})
+    with Image.open(out) as source:
+        source.convert("RGB").quantize(colors=64).convert("RGB").save(out, lossless=True)
+    plt.close(fig)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="runtime,convergence,precond,showcase")
@@ -506,6 +515,8 @@ def main() -> None:
         make_precond_figure(outdir / "readme_precond.webp")
     if "showcase" in which:
         make_showcase_figure(outdir / "readme_equilibrium_showcase.webp")
+    if "trace" in which:
+        make_trace_accuracy_figure(outdir / "readme_trace_accuracy.webp")
 
 
 if __name__ == "__main__":

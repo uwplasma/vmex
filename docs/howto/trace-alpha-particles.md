@@ -11,12 +11,8 @@ vmex wout_case.nc --trace          # 1,000 alphas, 10 ms, ARIES-CS size
 vmex input.case --trace            # solve first, then trace
 ```
 
-The default QA example takes about 35 seconds of warmed tracing on eight Apple M2 CPU devices;
-more complex fields take longer (see Cost below). While it runs it reports, on
-stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
-(ESSOS 0.19.2 and later). It then prints the scaling factors, the step, the number of Boozer
-modes, the wall time split into compile and run, and the loss fraction with
-its binomial error:
+The CLI reports progress, scaling, timestep, mode count, timing and the
+binomial sampling error:
 
 ```text
  Loss fraction: 12.30% ± 1.04% (123 of 1000 particles lost)
@@ -28,7 +24,7 @@ its binomial error:
 |---|---|---|---|
 | `--trace-particles N` | 1000 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
-| `--trace-timestep DT` | converged step (below) | RK4 step in seconds | `1 / DT` |
+| `--trace-timestep DT` | size-scaled step | RK4 step in seconds | `1 / DT` |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
 | `--trace-s S` | 0.25 | birth surface `s = psi / psi_b` | none |
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
@@ -40,9 +36,7 @@ its binomial error:
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
 | `--trace-mode-cut C` | `1e-4` | drop Boozer `|B|` modes below `C B00` | about `1 / C` in modes |
 
-The wall time is `particles × tmax / timestep` times a per-step cost. For
-example, going from the default to 5000 alphas over 0.1 s costs 50 times the
-default, about 30 min of warmed QA tracing on the same laptop. Run that on a workstation or a GPU.
+Cost grows with `particles × tmax / timestep`; use a GPU for large ensembles.
 
 ```console
 vmex wout_case.nc --trace --trace-particles 5000 --trace-tmax 0.1
@@ -58,29 +52,22 @@ s = 0.3 lost within 0.2 s.
 
 ## What is traced
 
-- **Scale.** Loss fractions are physical only at reactor size, so the
-  equilibrium is first scaled in memory to ARIES-CS size: `<B> = 5.8646 T`
-  and `a = 1.7044 m` (the `--scale` rule, see {doc}`scale-a-configuration`).
-- **Field.** `booz_xform_jax` transforms every surface to Boozer coordinates.
-  The `|B|` spectrum, cut at modes below `1e-4` of the largest amplitude (`B00`), is
-  splined in `sqrt(s)`, and `iota`, `G` and `I` are splined in `s`.
-- **Orbits.** The guiding-centre equations in Boozer coordinates (White; the
-  `K = 0` form of SIMSOPT) are integrated with fixed-step RK4 in the chart
-  `sqrt(s) (cos theta, sin theta)`, which is regular on the magnetic axis, so
-  no orbit stops there. An alpha is lost when it reaches `s = 1`.
-- **Births.** Pitch `v_par / v` is uniform in `[-1, 1)`. The angles follow
-  the positive Boozer volume measure `|G + iota I| / B^2`. With `--trace-birth volume`, `s`
-  follows the D-T rate `n_D n_T <sigma v>(T)`, weighted by the volume
-  element (Bosch-Hale reactivity).
-- **Profiles** (volume births and `--collisional`; Landreman, Buller &
-  Drevlak, PoP 29, 082501, 2022): `n_e = n_e0 (1 - s^5)`,
-  `n_D = n_T = n_e / 2`, and `T_e = T_i = T_0 (1 - s)`.
-- **Collisions.** After every step, a Monte Carlo operator applies
-  pitch-angle scattering, slowing down and energy diffusion on electrons, D
-  and T (Ito Euler-Maruyama; Boozer & Kuo-Petravic 1981; ESSOS collision
-  rates). An alpha below 1.5 times the local temperature is thermalised and
-  counts as confined. The ESSOS tests check the slowing down against the
-  Stix time and the pitch-angle decay against `nu_D`.
+- **Scale:** ARIES-CS `<B> = 5.8646 T`, `a = 1.7044 m`, applied in memory
+  (see {doc}`scale-a-configuration`).
+- **Field:** Boozer `|B|` is splined in `sqrt(s)`; `iota`, `G` and `I` in `s`.
+- **Orbits:** collisionless `K=0` guiding centres, fixed-step RK4 in the regular
+  chart `sqrt(s) (cos theta, sin theta)`; crossing `s=1` counts as lost.
+- **Births:** uniform pitch `v_par/v` in `[-1, 1)` and angles weighted by
+  `|G + iota I| / B^2`. Volume births also use the Bosch-Hale D-T reaction rate.
+- **Profiles:** `n_e = n_e0 (1 - s^5)`, `n_D = n_T = n_e/2`,
+  `T_e = T_i = T_0 (1 - s)` (Landreman, Buller & Drevlak, PoP 29, 082501, 2022).
+- **Collisions:** Ito Euler-Maruyama pitch scattering, slowing down and energy
+  diffusion on electrons, D and T after each orbit step. Below 1.5 times the
+  local temperature, an alpha counts as thermalised and confined.
+
+The tracer rejects failed paths and numerical orbit-energy drift above `1e-3`.
+Reduce `--trace-timestep` when this check fails; low energy drift alone does not
+establish convergence of loss labels.
 
 ## Outputs
 
@@ -91,17 +78,9 @@ Next to the input (or in `--outdir`):
 - `*_trace.npz` holds the loss-fraction curve, the loss and thermalisation
   times, the births `(s, theta_B, zeta_B, v_par/v)` and the final states.
   This is enough to replot or compare runs.
-- `*_trace.png` has six panels:
-  - the cumulative loss fraction against log time, with its 1σ band;
-  - a heatmap of the loss locations on the boundary in `(zeta_B, theta_B)`;
-  - the birth pitch of lost and confined alphas;
-  - loss time against birth pitch;
-  - loss fraction against birth `s` (volume births), or a loss-time
-    histogram (surface births);
-  - `iota(s)` with the low-order rationals `n N_fp / m`, where orbit
-    resonances sit.
-- `*_trace_3d.png` shows the loss locations on the 3-D boundary, coloured by
-  loss time.
+- `*_trace.png` shows cumulative losses, boundary loss locations, birth pitch,
+  loss time against pitch, radial losses (or a loss-time histogram), and `iota(s)`.
+- `*_trace_3d.png` shows boundary loss locations coloured by loss time.
 
 The shaded loss-curve band is computed separately at each time as
 `f(t) ± sqrt(f(t) [1 - f(t)] / N)` for `N` independent births. This is a
@@ -116,15 +95,10 @@ using the same birth sample.
 
 ## Cost and mode-cut accuracy
 
-Tracing cost grows with the number of particles, integration steps and retained
-Boozer modes. CPU/GPU crossover depends on hardware, device count and the
-number of saved orbit states; benchmark the intended workload. The ESSOS
-compiled-kernel change in [PR #95](https://github.com/uwplasma/ESSOS/pull/95)
-removes recompilation on repeated calls and improves the matched GTX TITAN X
-GPU workload by about 17%. The independent radial lookup change in
-[ESSOS PR #98](https://github.com/uwplasma/ESSOS/pull/98) improves its warmed
-tracing kernel a further 3.86-fold on the 30-knot seed case, with bitwise
-identical orbit output.
+Benchmark the intended workload: device count, output policy and retained modes
+change the CPU/GPU crossover. [ESSOS #95](https://github.com/uwplasma/ESSOS/pull/95)
+reuses compiled kernels; [#98](https://github.com/uwplasma/ESSOS/pull/98)
+accelerates radial lookup with bitwise-identical orbit output.
 
 The VMEC toroidal-flux sign was corrected in [VMEX PR #517](https://github.com/uwplasma/vmex/pull/517).
 Older loss tables and figures made with the opposite sign are withdrawn:
@@ -167,34 +141,64 @@ not cutoff-converged for HSX losses. Thus there is no geometry-independent faste
 converge the timestep, inspect energy, and check individual labels on the
 intended equilibrium before relaxing `--trace-mode-cut`.
 
+## W7-X convergence
+
+Standard and high-mirror W7-X use 256 common births, `s=0.25`, 5 ms, and
+RK4 steps of `3.125e-8 s`. The [measurement record](../../benchmarks/trace_accuracy.json)
+contains source, input and birth hashes; `1e-5` is a tighter reference, not an exact solution.
+
+![W7-X cutoff accuracy and cold/warm tracing times](../_static/figures/readme_trace_accuracy.webp)
+
+| cut | standard lost | different labels | cold / warm [s] | high-mirror lost | different labels | cold / warm [s] |
+|---|---:|---:|---:|---:|---:|---:|
+| `1e-5` | 37 | 0 | 62.86 / 56.87 | 53 | 0 | 62.55 / 55.85 |
+| `6e-5` | 40 | 11 | 43.90 / 37.61 | 52 | 5 | 45.56 / 39.14 |
+| `8e-5` | 41 | 10 | 41.55 / 35.30 | 53 | 8 | 42.37 / 35.29 |
+| `1e-4` | 36 | 15 | 40.21 / 34.17 | 54 | 7 | 40.99 / 34.08 |
+| `2e-4` | 39 | 10 | 37.11 / 31.03 | 52 | 5 | 37.26 / 30.90 |
+| `3e-4` | 37 | 12 | 37.23 / 30.80 | 49 | 8 | 37.69 / 30.70 |
+| `5e-4` | 32 | 11 | 34.59 / 28.37 | 54 | 7 | 35.00 / 28.40 |
+| `6e-4` | 33 | 12 | 34.31 / 28.23 | 50 | 7 | 34.91 / 28.24 |
+| `8e-4` | 30 | 11 | 33.00 / 26.90 | 49 | 8 | 33.85 / 27.14 |
+| `1e-3` | 27 | 14 | 33.23 / 27.06 | 50 | 5 | 33.78 / 26.94 |
+
+All measured energy errors are below `6.1e-5`. Tightening to `6e-5` or `8e-5`
+does not consistently improve label agreement; similar total counts can hide different losses.
+The shaded band is the sampling standard error defined above.
+
+Births are the first 256 of 4,096 sampled at cut `1e-6`, with seed 42.
+For each cold measurement, use a fresh process with compilation caches disabled and one cut:
+
+```console
+JAX_ENABLE_COMPILATION_CACHE=0 python benchmarks/trace_mode_cut.py WOUT --particles 256 --birth-samples 4096 --s 0.25 --birth-cut 1e-6 --tmax 0.005 --step-factor 0.25 --orbit-cuts 1e-4 --repeats 1 --out cuts.json
+```
+
+With 1,024 common standard-W7-X births over 10 ms, timestep refinement gives:
+
+| method | timestep [s] | lost / 1024 | maximum relative energy drift |
+|---|---:|---:|---:|
+| ESSOS RK4 | `1.25e-7` | 250 | `6.64e-2` |
+| ESSOS RK4 | `6.25e-8` | 221 | `3.47e-3` |
+| ESSOS RK4 | `3.125e-8` | 218 | `1.21e-4` |
+| SIMPLE midpoint, 256 steps/transit | adaptive macrosteps | 220 | `8.37e-4`, 401 saved states |
+
+The first two RK4 settings fail the `1e-3` energy check. The refined RK4 and
+SIMPLE totals are close, but 46 particle labels differ; field interpolation,
+spectrum and timestep convergence remain necessary. SIMPLE's repeated eight-thread
+CPU traces take 765.89/762.94 s; these are different hardware from the GPU cutoff study.
+
 ## Cross-code orbit checks
 
-The earlier 1,000-particle ARIES-CS comparison with SIMPLE and SIMSOPT used
-the wrong sign for VMEC toroidal flux in the Boozer guiding-centre equations.
-Its ESSOS loss counts, speed ratios, JSON record and plots are withdrawn.
-Current SIMSOPT upstream also used the opposite sign in its VMEC-to-Boozer
-field; [SIMSOPT PR #664](https://github.com/hiddenSymmetries/simsopt/pull/664)
-corrects it. Its unpatched field matched only 44 of 64 corrected ESSOS labels;
-the patched field gave the same 64 terminal labels (55 losses), but six
-SIMSOPT paths approached its Boozer-axis singularity. With an inner-flux stop
-at `s=0.001`, it resolves 58 paths (50 lost) and matches ESSOS on all 58;
-the six axis stops are unresolved. SIMPLE with direct Boozer births matches
-all 64 ESSOS labels. [`benchmarks/trace_cross_code.py`](../../benchmarks/trace_cross_code.py)
-repeats the guarded check and fails on bad exits, field mismatch or excessive
-full-path energy drift in resolved trajectories.
+The wrong-flux-sign comparison is withdrawn. [SIMSOPT PR #664](https://github.com/hiddenSymmetries/simsopt/pull/664)
+corrects the same upstream sign error. With the corrected field, SIMPLE,
+ESSOS, FIRM3D, CATAPULT and DESC agree on 55 losses among 64 seed-field births;
+SIMSOPT resolves 58 paths with 50 losses and six unresolved axis stops.
+The [validation record](../explanation/validation.md) gives field discrepancies,
+energy diagnostics, output policies and CPU/GPU timings.
 
-The current check uses a nonoptimized NFP=2 vacuum VMEX seed at reactor scale,
-`ns=31`, `mpol=5`, `ntor=5`. The 1,024 births are the same in each tracer:
-64 Boozer births from RNG seed 42 and 960 from seed 43, all at
-`s=0.283333`, with the same pitch and 3.52 MeV energy. They are traced for
-2 ms. On the 64-birth subset, ESSOS, FIRM3D CPU, CATAPULT GPU and DESC
-classify the same 55 particles as lost. Boozer-to-VMEC birth mapping agrees
-within 0.5 mm in `R` and `Z`; the DESC equilibrium fit differs by up to
-0.4% in `|B|` at those births. DESC (vacuum guiding centre, adaptive, `1e-6`
-tolerance) takes 32.46 s warmed for those 64 births on an Apple M2 with
-endpoint output. ESSOS takes about 1.55 s on that M2 with 101 saved states;
-these output policies differ. DESC's maximum survivor endpoint energy error
-in this run is 2.59e-4, while ESSOS checks its maximum error at every step.
+[`trace_cross_code.py`](../../benchmarks/trace_cross_code.py) checks common births,
+field agreement, exits and energy drift. The seed uses `ns=31`, `mpol=ntor=5`,
+3.52 MeV alphas at `s=0.283333`, and a 2 ms horizon.
 
 The comparison WOUT comes from the same unoptimized seed as the direct-loss
 optimization example. Recreate it without running the optimizer:
@@ -240,8 +244,7 @@ print(result.loss_fraction, result.loss_fraction_sigma)
 vj.plot_tracing(result, "figs", name="case")
 ```
 
-`trace_alphas` accepts a path or an in-memory
-{class}`~vmex.core.wout.WoutData` and returns an
-{class}`~vmex.core.tracing.AlphaTracingResult`. The exact loss fraction is
-piecewise constant in the boundary. Derivative-free optimization can minimize
-it using a fixed particle ensemble; a new ensemble checks the result.
+`trace_alphas` accepts a path or {class}`~vmex.core.wout.WoutData` and returns
+{class}`~vmex.core.tracing.AlphaTracingResult`. For differentiable optimization,
+see [`alpha_particle_optimization.py`](../../examples/optimization/alpha_particle_optimization.py):
+a smooth loss surrogate supplies derivatives; independent hard-loss traces validate the result.

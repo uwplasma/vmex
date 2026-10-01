@@ -145,44 +145,20 @@ The shaded loss-curve band is the pointwise binomial standard error,
 births lost by time `t`. It describes sampling uncertainty, not orbit or
 field error; use more births for small loss fractions.
 
-**Cross-code alpha tracing.** After correcting VMEC's toroidal-flux sign
-([PR #517](https://github.com/uwplasma/vmex/pull/517)), ESSOS, CATAPULT and
-DESC agree on all 64 lost/confined labels in a common-birth, 2 ms case (55
-lost). The larger GPU comparison traces 8,192 common births for 20 ms in a
-reactor-scale vacuum equilibrium. ESSOS uses 12 Boozer modes and fixed RK4
-steps of `1.25e-7 s`; CATAPULT uses a 25³ field table and adaptive DP5 at
-`1e-10` tolerance. The same RTX A4000 ran each first and repeated trace; times
-exclude field setup. Both request 101 sample times, but CATAPULT truncates lost
-paths while ESSOS returns 101 states per birth.
+**Cross-code alpha tracing.** The RTX A4000 comparison uses 8,192 common births for 20 ms and 101 requested times. ESSOS uses 12 modes and RK4 at `1.25e-7 s`; CATAPULT uses a 25³ table and adaptive DP5 at `1e-10` tolerance.
 
-| tracer | lost / 8,192 | labels matching ESSOS | first trace | repeated trace | maximum energy drift |
+| tracer | lost / 8,192 | matching labels | cold trace | warm trace | maximum energy drift |
 |---|---:|---:|---:|---:|---:|
-| VMEX/ESSOS Boozer RK4, [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.29 s | 69.24 s | 2.08e-5, every step |
-| ESSOS [survivor compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | — | 37.49 / 37.52 s | 2.08e-5, every step |
+| VMEX/ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.52 s | 69.18 s | 2.08e-5, every step |
+| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | 49.59 s | 37.35 s | 2.08e-5, every step |
 | CATAPULT, released | 6,647 | 8,122 | 34.17 s | 34.48 s | 5.17e-2, saved confined paths |
 | CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,578 | 8,191 | 36.61 s | 36.88 s | 1.17e-5, saved confined paths |
 
-The compaction row reports two warmed calls; its first call followed baseline
-compilation. All ESSOS losses occur before 0.16 ms, so compaction skips most
-subsequent particle steps. The one regular-axis label differing from ESSOS at
-cut `1e-4` crosses `s=1` when ESSOS retains all Boozer modes. DESC matches all
-64 labels in the smaller GPU subset and takes 21.4 s warmed; its independent
-field fit differs by up to 0.4% in `|B|`.
+Cold ESSOS traces use fresh processes with compilation caches disabled; field setup adds 1.44–1.48 s. Compaction preserves every output and benefits from losses before 0.16 ms; CATAPULT truncates lost paths, while ESSOS returns all requested states.
 
-In a separate QA equilibrium, 4,096 births at `s=0.25` traced for 10 ms with
-101 requested times give 16–20 ESSOS losses across fresh processes with
-identical inputs and source, versus 21 for released CATAPULT. Both observed
-ESSOS sets match 4,081 CATAPULT labels, but only 11–13 lost IDs overlap.
-ESSOS repeated traces take 24.62–24.67 s; CATAPULT takes 161.47 s. Measured
-ESSOS energy drift stays below `1e-4` at every step; CATAPULT reaches
-`3.03e-2` on saved confined paths. These long-orbit labels are not converged.
+ESSOS, CATAPULT, DESC and SIMPLE agree on all 64 labels in a separate 2 ms case (55 losses). SIMSOPT with its [flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664) agrees on 58 resolved paths; six axis stops remain unresolved.
 
-SIMPLE matches all 64 labels in the smaller run. With its
-[VMEC flux-sign fix](https://github.com/hiddenSymmetries/simsopt/pull/664)
-and an inner-flux stop, SIMSOPT matches 58/58 resolved labels; six paths
-trigger that stop and remain unresolved. [The tracing
-guide](docs/howto/trace-alpha-particles.md) gives the WOUT recipe, energy
-checks and limitations.
+One regular-axis label depends on the mode cut, and QA long-orbit labels remain unconverged. On W7-X, quartering the default RK4 step reduces maximum energy drift from 6.64% to 0.012%; the [tracing guide](docs/howto/trace-alpha-particles.md) gives the settings, cold/warm plots and convergence checks.
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,

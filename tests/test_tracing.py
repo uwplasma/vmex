@@ -95,7 +95,8 @@ def test_cut_audit_records_common_births_and_individual_losses(solovev_wout):
     bx = Booz_xform(verbose=0, mboz=8, nboz=8)
     bx.read_wout(str(solovev_wout), flux=False)
     bx.run()
-    result = orbits(solovev_wout, bx, [6e-5, 1e-4], 8, 1e-5, 1, 3, 1e-4, 1)
+    result = orbits(solovev_wout, bx, [6e-5, 1e-4], 8, 1e-5, 1, 3, 1e-4, 1,
+                    s=0.25, birth_samples=16)
     assert result["reference_cut"] == 6e-5
     assert len(result["birth_sha256"]) == 64
     for row in result["cuts"].values():
@@ -186,7 +187,7 @@ def test_vmec_flux_sign_gives_the_boozer_radial_drift(solovev_wout):
     assert actual_sdot == pytest.approx(expected_sdot, rel=1e-11)
 
 
-@pytest.mark.parametrize("failure_source", ["status", "energy"])
+@pytest.mark.parametrize("failure_source", ["status", "energy", "drift"])
 def test_failed_orbit_cannot_produce_a_loss_fraction(solovev_wout, monkeypatch, failure_source):
     from types import SimpleNamespace
     import essos.boozer
@@ -198,7 +199,7 @@ def test_failed_orbit_cannot_produce_a_loss_fraction(solovev_wout, monkeypatch, 
         if failure_source == "status":
             data["failed"] = np.arange(n) == 0
         else:
-            data["energy_error"][0] = np.nan
+            data["energy_error"][0] = 1.1e-3 if failure_source == "drift" else np.nan
         return SimpleNamespace(**data)
 
     monkeypatch.setattr(essos.boozer, "trace_boozer", failed_trace)

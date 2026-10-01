@@ -499,7 +499,10 @@ orbit timing protocol.
 The script records each equilibrium, surface, cut, mode count and error in
 JSON. The orbit option uses fixed births and reports individual loss IDs and
 times, a birth hash, loss recall, label agreement, energy error and compile
-and warm times for all nine default orbit cuts.
+and warm times for all nine default orbit cuts. Its `first_s` includes compilation
+when needed; equal-sized spectra can reuse it within one process. The
+[W7-X convergence study](../howto/trace-alpha-particles.md#w7-x-convergence)
+records ten cuts timed separately in fresh processes with caches disabled.
 For the QA table, pass its WOUT alone with `--particles 1000 --tmax 0.01
 --devices 8 --repeats 3 --save-times 101`.
 For the seven-cut HSX table use `vmec_equilibria/HSX/QHS_vac/wout_HSX_QHS_vac.nc`
@@ -580,14 +583,15 @@ saved state after loss; CATAPULT stops lost paths.
 
 | Tracer | Lost | Labels matching ESSOS | First trace | Repeated trace | Maximum relative energy drift |
 |---|---:|---:|---:|---:|---:|
-| ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.29 s | 69.24 s | 2.08e-5, every step |
-| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | — | 37.49 / 37.52 s | 2.08e-5, every step |
+| ESSOS [GPU lookup #98](https://github.com/uwplasma/ESSOS/pull/98) | 6,577 | 8,192 | 76.52 s | 69.18 s | 2.08e-5, every step |
+| ESSOS [compaction #100](https://github.com/uwplasma/ESSOS/pull/100), opt-in | 6,577 | 8,192 | 49.59 s | 37.35 s | 2.08e-5, every step |
 | CATAPULT released | 6,647 | 8,122 | 34.17 s | 34.48 s | 5.17e-2, saved confined paths |
 | CATAPULT [regular axis #90](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/90), opt-in | 6,578 | 8,191 | 36.61 s | 36.88 s | 1.17e-5, saved confined paths |
 
-The compaction times are two warmed calls; all returned ESSOS arrays match
-the default trace exactly. Its first call followed baseline compilation and
-is omitted from the cold column. All ESSOS reactor losses occur by 0.158 ms,
+The ESSOS timings use fresh processes with compilation caches disabled:
+76.52/69.18 s without compaction and 49.59/37.35 s with it. Field setup adds
+1.48/1.44 s; all returned arrays match exactly. The source is ESSOS
+`7200cc70cb3a8e3a2756d0ba93fb16500131c02c` with JAX 0.9.2. All ESSOS reactor losses occur by 0.158 ms,
 so skipping stopped particles accounts for most of the speed gain. CATAPULT
 truncates lost paths (median two stored rows), whereas ESSOS returns 101.
 

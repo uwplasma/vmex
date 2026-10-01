@@ -74,7 +74,8 @@ def scaled_field(bx, wout, b, r, cut):
         -float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), int(bx.nfp), cut)
 
 
-def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step_factor):
+def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step_factor,
+           s=0.3, birth_samples=None):
     import jax
     from essos import constants as c
     from essos.boozer import trace_boozer
@@ -86,7 +87,7 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
     b, r = aries_cs_scales(wout)
     fields = {cut: scaled_field(bx, wout, b, r, cut) for cut in cuts}
     birth_field = fields[birth_cut] if birth_cut in fields else scaled_field(bx, wout, b, r, birth_cut)
-    births = sample_births(birth_field, particles, s=0.3, seed=42)
+    births = sample_births(birth_field, birth_samples or particles, s=s, seed=42)[:particles]
     speed = float(np.sqrt(2 * c.FUSION_ALPHA_PARTICLE_ENERGY / c.ALPHA_PARTICLE_MASS))
     dt = TIMESTEP * float(wout.Aminor_p) * r * step_factor / 1.7044
     results = {}
@@ -96,7 +97,7 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
                   tmax=tmax, timestep=dt, n_save=save_times)
         start = time.perf_counter()
         out = trace_boozer(field, *births.T, **kw)
-        cold_s = time.perf_counter() - start
+        first_s = time.perf_counter() - start
         timings = []
         for _ in range(repeats):
             start = time.perf_counter()
@@ -114,7 +115,7 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
                              "loss_times": np.asarray(out.loss_times).tolist(),
                              "fraction": float(lost.mean()), "failed": 0,
                              "max_energy_error": float(np.max(out.energy_error)),
-                             "trace_s": float(np.median(timings)), "cold_s": cold_s,
+                             "trace_s": float(np.median(timings)), "first_s": first_s,
                              "timings_s": timings}
         print(f"  cut {cut:g}: {field.xm.size} modes, {lost.sum()} lost, "
               f"{np.median(timings):.2f} s warm", flush=True)
@@ -126,7 +127,8 @@ def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step
     return {"particles": particles, "tmax": tmax, "timestep": dt, "save_times": save_times,
             "reference_cut": float(min(cuts)),
             "birth_sha256": hashlib.sha256(births.astype("<f8", copy=False).tobytes()).hexdigest(),
-            "birth_cut": birth_cut, "step_factor": step_factor,
+            "birth_cut": birth_cut, "s": s, "birth_samples": birth_samples or particles,
+            "step_factor": step_factor,
             "devices": len(jax.devices()), "cuts": results}
 
 
@@ -138,8 +140,10 @@ def main():
     ap.add_argument("--tmax", type=float, default=1e-3)
     ap.add_argument("--repeats", type=int, default=3, help="timed calls after one compilation call")
     ap.add_argument("--save-times", type=int, default=101, help="orbit samples, including t=0; matches vmex --trace")
-    ap.add_argument("--birth-cut", type=float, choices=CUTS[1:], default=1e-4,
+    ap.add_argument("--birth-cut", type=float, choices=(1e-6, *CUTS[1:]), default=1e-4,
                     help="field used to sample common births; default 1e-4")
+    ap.add_argument("--s", type=float, default=0.3, help="birth surface")
+    ap.add_argument("--birth-samples", type=int, help="draw this many births, then keep the first --particles")
     ap.add_argument("--orbit-cuts", nargs="+", type=float, choices=CUTS[1:], default=CUTS[2:])
     ap.add_argument("--step-factor", type=float, default=1.0, help="multiply the default RK4 step")
     ap.add_argument("--devices", type=int, help="CPU devices; default matches vmex --trace")
@@ -147,8 +151,10 @@ def main():
     if (args.repeats < 1 or args.save_times < 2 or args.particles < 0
             or not np.isfinite(args.tmax) or args.tmax <= 0
             or not np.isfinite(args.step_factor) or args.step_factor <= 0
+            or not 0 <= args.s < 1
+            or (args.birth_samples is not None and args.birth_samples < args.particles)
             or (args.devices is not None and args.devices < 1)):
-        ap.error("positive tmax and step-factor, repeats >= 1, save-times >= 2, particles >= 0 and devices >= 1 are required")
+        ap.error("require positive tmax/step-factor, repeats >= 1, save-times >= 2, particles >= 0, 0 <= s < 1, birth-samples >= particles and devices >= 1")
     if args.particles:
         import jax
         from vmex.core.cli import _split_host_devices
@@ -162,14 +168,19 @@ def main():
     paths = sorted({q for p in args.paths for q in (p.rglob("wout*.nc") if p.is_dir() else [p])})
     record = {"schema": "vmex.trace-mode-cut/1", "cuts": CUTS,
               "spectral_error": f"RMS relative to the uncut mboz=nboz={TRANSFORM_MODES} spectrum on the ESSOS r=sqrt(s) spline",
-              "host": platform.uname()._asdict(),
+              "host": {"system": platform.system(), "machine": platform.machine()},
               "versions": {name: installed_version(name) for name in
                            (("vmex", "jax", "booz_xform_jax") + (("essos",) if args.particles else ()))},
               "cases": []}
     for path in paths:
-        row = {"path": str(path)}
+        row = {"path": path.name}
         start = time.perf_counter()
         try:
+            with path.open("rb") as stream:
+                digest = hashlib.sha256()
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+            row["sha256"] = digest.hexdigest()
             bx = Booz_xform(verbose=0, mboz=TRANSFORM_MODES, nboz=TRANSFORM_MODES)
             bx.read_wout(str(path), flux=False)
             if bool(bx.asym):
@@ -179,10 +190,11 @@ def main():
                        spectrum=spectrum(bx))
             if args.particles:
                 row["orbits"] = orbits(path, bx, args.orbit_cuts, args.particles, args.tmax,
-                                       args.repeats, args.save_times, args.birth_cut, args.step_factor)
+                                       args.repeats, args.save_times, args.birth_cut, args.step_factor,
+                                       args.s, args.birth_samples)
             print(f"{path.name}: {len(np.asarray(bx.xm_b))} modes, {time.perf_counter()-start:.1f} s", flush=True)
         except (ValueError, RuntimeError, KeyError, OSError) as exc:
-            row["error"] = f"{type(exc).__name__}: {exc}"
+            row["error"] = f"{type(exc).__name__}: {exc}".replace(str(path), path.name)
             if not row["error"].startswith("ValueError: lasym:"):
                 row["traceback"] = traceback.format_exc(limit=6)
             print(f"{path.name}: {row['error']}", flush=True)

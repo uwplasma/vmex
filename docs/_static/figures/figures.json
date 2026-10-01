@@ -488,6 +488,25 @@
         "docs/explanation/mirror-geometry.rst"
       ],
       "note": "The periodic B-spline racetrack is built from constants inside the example. The example calls vmex.mirror.output.plot_stellarator_mirror_hybrid with image_format=\"webp\", which writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
+    },
+    {
+      "path": "docs/_static/figures/readme_trace_accuracy.webp",
+      "sha256": "dc36e3e2408e0158f2d795b1aef4fa04c81388ed5378179c6f5ff0f947387c7e",
+      "bytes": 27564,
+      "generator": "benchmarks/make_readme_figures.py",
+      "command": "python benchmarks/make_readme_figures.py --only trace",
+      "inputs": [
+        "benchmarks/trace_accuracy.json"
+      ],
+      "record": "benchmarks/trace_accuracy.json",
+      "generated": "2026-09-30",
+      "hardware": "RTX A4000",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "docs/howto/trace-alpha-particles.md"
+      ],
+      "note": "Fresh-process W7-X cutoff measurements with compilation caches disabled; sampling bands are pointwise binomial standard errors."
     }
   ]
 }
