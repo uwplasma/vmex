@@ -224,19 +224,20 @@ to JAX optimizers, and `problem.evaluate(x)` reports solve effort and derivative
 [optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html) cover
 convergence checks, constraints, scaling and finite-difference verification.
 
-For direct fast-ion optimization, run
-`python examples/optimization/alpha_particle_optimization.py` after installing
-`vmex[coils]`. The example differentiates an ESSOS guiding-center orbit-risk
-score from `s=0.3` through VMEX equilibria, with an aspect-ratio penalty and no
-symmetry stage. It trains on 64 common births for 0.25 ms; hard 2 ms losses
-select an iterate and fresh particles check 5 ms
-losses. The plot shades pointwise 95% Wilson intervals across holdout particles.
-With the physical alpha mass ([ESSOS #104](https://github.com/uwplasma/ESSOS/pull/104)),
-two independent 512-alpha holdouts reduce 5 ms losses from 818 to 425; a fresh
-512-alpha D-T volume check reduces 10 ms losses from 393 to 224. Minor radius
-changes by +0.34% and sampled global mirror ratio increases 1.475→1.839.
-This is a research example from one NFP=2 seed; aspect control leaves mirror
-ratio unconstrained.
+Run `python examples/optimization/alpha_particle_optimization.py` after installing
+`vmex[coils]`. VMEX derivatives optimize ESSOS orbit risk and aspect ratio without
+a symmetry stage; hard 2 ms losses select the iterate.
+
+| Independent check | Seed | Selected |
+| --- | ---: | ---: |
+| Surface losses, 5 ms, 1024 alphas | 818 | 425 |
+| D-T volume losses, 10 ms, 512 alphas | 393 | 224 |
+| Minor radius [m] | 0.167335 | 0.167899 (+0.34%) |
+| Sampled mirror ratio | 1.475 | 1.839 |
+
+This research pilot uses one NFP=2 seed and 64 births for 0.25 ms with the
+[physical alpha mass](https://github.com/uwplasma/ESSOS/pull/104); shaded bands are
+pointwise 95% Wilson intervals, and mirror ratio is unconstrained.
 
 ## How VMEX works
 
