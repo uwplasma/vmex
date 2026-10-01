@@ -372,35 +372,50 @@ python benchmarks/trace_mode_cut.py WOUT --particles 500 --tmax 0.0005 --step-fa
 Common births and collisionless guiding centres are compared on a reactor-scale vacuum seed.
 The [guide](../howto/trace-alpha-particles.md) gives the WOUT recipe and benchmark command.
 
-| code | device | particles / horizon | lost | warm trace | maximum relative energy drift |
-|---|---|---|---:|---:|---:|
-| ESSOS | CPU, 8 workers | 64 / 2 ms | 55 | 1.701 s | `1.66e-6`, every step |
-| SIMPLE | CPU, 8 workers | 64 / 2 ms | 55 | 5.247 s | `1.20e-5`, saved states |
-| SIMSOPT | CPU, 8 workers | 64 / 2 ms | 50/58 resolved | 0.415 s | `6.77e-4`, resolved states |
-| ESSOS | RTX A4000 | 64 / 2 ms | 55 | 1.94 s | every-step checks |
-| DESC | RTX A4000 | 64 / 2 ms | 55 | 21.40 s | `2.62e-4`, survivor endpoints |
-| ESSOS | RTX A4000 | 8,192 / 20 ms | 6,572 | 37.42 s | `2.14e-5`, every step |
-| FIRM3D / CATAPULT | RTX A4000 | 8,192 / 20 ms | 6,573 | 37.04 s | `1.36e-5`, saved confined states |
+| code | device | particles / horizon | lost / resolved | maximum relative energy drift |
+|---|---|---|---:|---:|
+| ESSOS | CPU | 512 / 5 ms | 403 / 512 | `4.80e-6`, every step |
+| FIRM3D / CATAPULT | RTX A4000 | 512 / 5 ms | 403 / 512 | `2.46e-6`, saved inside-domain states |
+| SIMPLE | CPU | 512 / 5 ms | 403 / 512 | `7.18e-4`, native momentum at macrosteps |
+| SIMSOPT | CPU | 512 / 5 ms | 391 / 486 | `2.76e-3`, resolved saved states |
 
-All resolved 64-birth loss labels agree; six SIMSOPT axis stops remain unresolved.
-DESC uses an independently fitted field with up to 0.4% birth-field discrepancy.
-The 64-birth runs use mass `6.69509884346e-27 kg`; the large ensemble uses
-`6.6446573450e-27 kg`. Timings exclude setup and are compared within each workload.
-CPU hardware is an i7-3820; GPU software is JAX 0.9.2.
+ESSOS, CATAPULT and SIMPLE agree on all 512 loss labels. The 26 SIMSOPT axis stops
+remain unresolved; its energy drift exceeds the `1e-3` gate. DESC's fitted field differs
+by up to 0.405% at births; its full CPU/GPU runs did not finish within the test budgets.
+SIMPLE's energy check uses its native momentum, not a reconstructed common field.
+
+ESSOS takes 9.31 s for the first trace and 7.62 s for a repeat on an Apple M2,
+with four workers, disabled compilation cache and 1.13 s of separate field setup.
+Contested CATAPULT/SIMPLE timings and unqualified SIMSOPT timings are recorded,
+and excluded from speed comparisons.
 
 ![Matched loss curves and cold/warm GPU runtimes](../_static/figures/readme_trace_benchmark.webp)
 
-The large ensemble has 8,191 agreeing labels. Full-spectrum ESSOS refinement
-reproduces the remaining CATAPULT exit near 115 µs at three timesteps; this
-single-birth result establishes spectrum sensitivity, not ensemble convergence.
-ESSOS checks energy every step and returns 101 states per birth; CATAPULT
-stops lost paths and reports saved-state energy. Setup adds 1.30 s from saved
-ESSOS tables versus 8.70 s including CATAPULT's transform and GPU table; the scopes differ.
-Source hashes, settings, output checks and refinement results are recorded in
-[`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
+For 8,192 births over 20 ms, ESSOS and CATAPULT lose 6,572 and 6,573 particles;
+8,191 labels agree. Full-spectrum ESSOS refinement reproduces the remaining
+CATAPULT exit near 115 µs at three timesteps. This checks one birth's spectrum
+sensitivity; it does not establish ensemble convergence.
 
-Loss bands are pointwise binomial standard errors. No cross-code collisional
-benchmark is claimed; collision tests check rates, stochastic moments and zero-density limits.
+| code | cold trace | warm trace | maximum relative energy drift |
+|---|---:|---:|---:|
+| ESSOS | 49.29 s | 37.42 s | `2.14e-5`, every step |
+| FIRM3D / CATAPULT | 36.69 s | 37.04 s | `1.36e-5`, saved confined states |
+
+Both workloads use alpha mass `6.6446573450e-27 kg`. The large ensemble uses an
+RTX A4000 and JAX 0.9.2; timings exclude field setup. Setup adds 1.30 s from saved
+ESSOS tables versus 8.70 s including CATAPULT's transform and GPU table.
+ESSOS returns 101 states per birth; CATAPULT stops lost paths.
+
+Dense-path checks exposed CATAPULT's save-clock overshoot issue, fixed in
+[FIRM3D #93](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/93).
+Four births now give identical first exits with single-launch, 12.5 µs and
+125 ns saves, without post-exit rows. This verifies saving cadence separately
+from timestep and field convergence.
+
+Source revisions, settings and output hashes are recorded in
+[`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
+Loss bands use `f(t) ± sqrt(f(t)[1-f(t)]/N)`, the pointwise binomial standard error.
+No cross-code collisional benchmark is claimed.
 
 ## Device and lane consistency
 
