@@ -858,3 +858,20 @@ def test_fresh_jax_import_defaults_to_float64(monkeypatch):
     monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
     subprocess.run([sys.executable, "-c",
                     "import vmex, jax; assert jax.config.x64_enabled"], check=True)
+
+
+def test_fresh_jax_environment_default_in_process(monkeypatch):
+    import jax
+
+    previous = jax.config.x64_enabled
+    startup = types.SimpleNamespace(**vars(sys))
+    startup.modules = {name:module for name,module in sys.modules.items() if name != "jax"}
+    monkeypatch.setattr(_compat, "sys", startup)
+    monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
+    try:
+        jax.config.update("jax_enable_x64", False)
+        _compat._configure_jax_environment()
+        assert _compat.os.environ["JAX_ENABLE_X64"] == "1"
+        assert jax.config.x64_enabled
+    finally:
+        jax.config.update("jax_enable_x64", previous)
