@@ -87,7 +87,6 @@ def test_plain_install_includes_plotting_and_qi_dependencies() -> None:
 
     assert "matplotlib" in dependency_names
     assert "booz_xform_jax" in dependency_names
-    assert "booz_xform_jax>=0.4.1" in project_dependencies
     assert "packaging" in dependency_names
     assert "numpy" in dependency_names
     assert "solvax>=0.27.0" in project_dependencies

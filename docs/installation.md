@@ -14,7 +14,7 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
   oldest release CI tests), `scipy` (1.16 or newer: the optimization examples
   pass `least_squares(callback=...)`, which SciPy 1.16 introduced),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
-  `booz_xform_jax>=0.4.1` and `solvax>=0.27.0` (the linear solvers). `import
+  `booz_xform_jax>=0.4.3` and `solvax>=0.27.0` (the linear solvers). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to
   upgrade.
 
@@ -47,7 +47,7 @@ can reproduce each step yourself.
 |---|---|---|
 | `vmex[coils]` | `essos>=0.19.2` | coil fields, free boundary from coils, single-stage examples, alpha tracing |
 | `vmex[freeb]` | `virtual-casing-jax>=0.0.9` | virtual-casing exterior fields (`VmecExtender`) |
-| `vmex[neoclassical]` | `neo-jax>=1.0.2` | effective ripple |
+| `vmex[neoclassical]` | `neo-jax>=1.0.4` | effective ripple |
 | `vmex[turbulence]` | `gkx>=2.4.2` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
 | `vmex[optimizers]` | `jaxopt`, `optax` | the JAXopt and Optax example drivers |
 | `vmex[all]` | all of the above | every example |
