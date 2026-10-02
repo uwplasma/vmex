@@ -850,3 +850,11 @@ def test_invalid_precision_override_does_not_demote_runtime(monkeypatch):
         assert jax.config.x64_enabled
     finally:
         jax.config.update("jax_enable_x64", previous)
+
+
+def test_fresh_jax_import_defaults_to_float64(monkeypatch):
+    import subprocess
+
+    monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
+    subprocess.run([sys.executable, "-c",
+                    "import vmex, jax; assert jax.config.x64_enabled"], check=True)
