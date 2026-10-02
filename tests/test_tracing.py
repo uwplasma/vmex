@@ -308,3 +308,27 @@ def test_compaction_dispatch_preserves_released_interfaces(solovev_wout, tmp_pat
     np.testing.assert_array_equal(default.trajectories, disabled.trajectories)
     parser = cli.build_parser()
     assert parser.parse_args([str(solovev_wout), "--no-trace-compact"]).trace_compact is False
+
+
+@pytest.mark.parametrize("horizon,losses", [
+    (5e-8, [2.4e-8, 3.3e-8]), (1e-7, [2.4e-8, 1e-7]),
+    (1e-5, [2.4e-8, 5e-6]), (5e-8, [0.0, 5e-8]), (5e-8, []),
+])
+def test_loss_histogram_keeps_all_events_at_short_horizons(traced, tmp_path, monkeypatch, horizon, losses):
+    from dataclasses import replace
+    from vmex.core import plotting
+
+    counts = []
+    def capture(fig, *_args, **_kwargs):
+        if len(fig.axes) >= 6:
+            axis = fig.axes[4]
+            counts.append(sum(p.get_height() for p in axis.patches))
+            assert axis.get_xscale() == ("log" if losses and min(losses) > 0 else "linear")
+    monkeypatch.setattr(plotting, "_save_figure", capture)
+    lost_times = np.full(traced.nparticles, -1.0)
+    lost_times[:len(losses)] = losses
+    result = replace(traced, lost_times=lost_times, times=np.array([0., horizon]),
+                     loss_fractions=np.array([0., len(losses) / traced.nparticles]),
+                     metadata={**traced.metadata, "birth": "surface"})
+    plotting.plot_tracing(result, tmp_path)
+    assert counts == [len(losses)]
