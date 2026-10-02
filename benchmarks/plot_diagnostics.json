@@ -6,7 +6,7 @@
   "vmex_dirty": true,
   "persistent_cache": "disabled",
   "blas_threads": 1,
-  "method": "Root-aware J map only; field-line sampling and bounce integration included. One cold and one repeated call per case.",
+  "method": "J map, including field-line sampling and bounce integration; one cold and one repeated call per case.",
   "cases": [
     {
       "case": "Landreman-Paul QA",
@@ -37,7 +37,7 @@
       4,
       8
     ],
-    "method": "Exact Fourier B, refined roots, 200-point sine-mapped Gauss-Legendre; complete wells only, largest action. 72 surface/pitch/alpha checks, four trapping depths, three alpha labels at s nearest 0.5.",
+    "method": "Exact Fourier B, refined roots, 200-point sine-mapped Gauss-Legendre; largest complete-well action at s nearest 0.5.",
     "well_count_differences": 0,
     "max_relative_j_error": {
       "QA": 6.531e-07,

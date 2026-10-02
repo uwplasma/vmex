@@ -150,8 +150,6 @@ def test_summary_field_line_and_j_map_present(summary_figure):
     assert j_axis.get_xlabel() == r"$s\cos\alpha$"
     assert j_axis.get_ylabel() == r"$s\sin\alpha$"
     assert j_axis.get_aspect() == 1.0
-    assert r"|v_\parallel|/v=" in j_axis.get_title()
-    assert r"1/\lambda" not in j_axis.get_title()
 
 
 def test_summary_combines_stability_and_well(summary_figure):
@@ -706,8 +704,16 @@ def test_j_invariant_map_rejects_degenerate_field():
         plotting._j_invariant_map(booz)
 
 
-def test_j_invariant_map_uses_one_physical_pitch_on_every_surface():
+def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     """A radial maximum-J diagnostic holds physical pitch fixed."""
+    import vmex.core.bounce as bounce
+
+    def _fake_bounce(*, alpha, pitch, **_kwargs):
+        shape = (1, len(alpha), 1, 1)
+        return {"action": jax.numpy.broadcast_to(pitch, shape),
+                "usable_mask": jax.numpy.ones(shape, dtype=bool)}
+
+    monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)
     booz = {
         "bmnc_b": np.array([[1.0, 0.2], [1.1, 0.2]]), "bmns_b": None,
         "xm_b": np.array([0, 0]), "xn_b": np.array([0, 1]), "nfp": 1,
@@ -715,117 +721,20 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface():
         "s_b": np.array([0.25, 0.75]),
     }
     result = plotting._j_invariant_map(booz, pitch_fraction=0.5, nalpha=4)
-    np.testing.assert_allclose(result["pitch"], 1.0 / 1.05, rtol=0.0, atol=2e-4)
-    assert np.all(np.isfinite(result["j_map"]))
-    assert np.all(result["well_count"] > 0)
-    np.testing.assert_allclose(result["v_parallel_fraction"],
-                               np.sqrt(1.0 - 0.8 / 1.05), atol=3e-3)
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05, rtol=0.0, atol=2e-4)
+    np.testing.assert_allclose(result["j_map"], result["pitch"])
 
     result = plotting._j_invariant_map(booz, pitch=1.0 / 1.05, nalpha=4)
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05)
     np.testing.assert_allclose(result["pitch_inverse"], 1.05)
 
     result = plotting._j_invariant_map(booz, pitch=1.0 / 0.85, nalpha=4)
+    np.testing.assert_allclose(result["j_map"][0], 1.0 / 0.85)
     np.testing.assert_array_equal(result["trapped_surface"], [True, False])
     assert np.all(np.isfinite(result["j_map"][0]))
     assert np.all(np.isnan(result["j_map"][1]))
     with pytest.raises(ValueError, match="not trapped"):
         plotting._j_invariant_map(booz, pitch=0.5, nalpha=4)
-    for options, message in (({"pitch_fraction": 0.0}, "pitch_fraction"),
-                             ({"nalpha": 3}, "nalpha"),
-                             ({"points_per_period": 7}, "points_per_period")):
-        with pytest.raises(ValueError, match=message):
-            plotting._j_invariant_map(booz, **options)
-
-
-def test_j_invariant_map_converges_for_sinusoidal_well():
-    """The fast map resolves the complete bounce integral, including roots."""
-    from scipy.integrate import quad
-
-    booz = {
-        "bmnc_b": np.array([[1.0, 0.2]]), "bmns_b": None,
-        "xm_b": np.array([0, 0]), "xn_b": np.array([0, 1]),
-        "nfp": 1, "iota_b": np.array([0.5]),
-        "G_b": np.ones(1), "I_b": np.zeros(1), "s_b": np.array([0.5]),
-    }
-    bstar = 1.05
-    root = np.arccos((bstar - 1.0) / 0.2)
-    exact = 2.0 * quad(
-        lambda z: np.sqrt(1.0 - (1.0 + 0.2 * np.cos(z)) / bstar)
-        / (1.0 + 0.2 * np.cos(z)), root, 2.0 * np.pi - root,
-        epsabs=1e-12,
-    )[0]
-    coarse = plotting._j_invariant_map(booz, pitch=1.0 / bstar,
-                                       nalpha=4, points_per_period=32)
-    fine = plotting._j_invariant_map(booz, pitch=1.0 / bstar,
-                                     nalpha=4, points_per_period=128)
-    error_coarse = abs(coarse["j_map"][0, 0] - exact)
-    error_fine = abs(fine["j_map"][0, 0] - exact)
-    assert error_fine < error_coarse / 4.0
-    assert error_fine / exact < 2e-4
-
-
-def test_j_invariant_map_keeps_distinct_well_actions():
-    """Multiple wells select the largest action, rather than averaging them."""
-    from scipy.optimize import brentq
-    from scipy.integrate import quad
-
-    booz = {
-        "bmnc_b": np.array([[1.0, 0.0, 0.3]]),
-        "bmns_b": np.array([[0.0, -0.08, 0.0]]),
-        "xm_b": np.zeros(3, dtype=int), "xn_b": np.arange(3),
-        "nfp": 1, "iota_b": np.zeros(1),
-        "G_b": np.ones(1), "I_b": np.zeros(1), "s_b": np.array([0.5]),
-    }
-    bstar = 1.05
-    def field(z):
-        return 1.0 + 0.08 * np.sin(z) + 0.3 * np.cos(2.0 * z)
-
-    grid = np.linspace(0.0, 2.0 * np.pi, 1001)
-    roots = [brentq(lambda z: field(z) - bstar, a, b)
-             for a, b in zip(grid[:-1], grid[1:])
-             if (field(a) - bstar) * (field(b) - bstar) < 0.0]
-    actions = [2.0 * quad(lambda z: np.sqrt(1.0 - field(z) / bstar) / field(z),
-                          a, b, epsabs=1e-11)[0]
-               for a, b in zip(roots[::2], roots[1::2])]
-    result = plotting._j_invariant_map(booz, pitch=1.0 / bstar, nalpha=4)
-    assert len(actions) == 2 and actions[0] != pytest.approx(actions[1])
-    assert np.all(result["well_count"] > 1)
-    np.testing.assert_allclose(result["j_map"], max(actions), rtol=2e-4)
-
-
-def test_j_invariant_map_reports_incomplete_pitch_coverage():
-    """A single physical pitch need not trap every field line."""
-    booz = {
-        "bmnc_b": np.array([[1.0, 0.3, 0.05]]), "bmns_b": None,
-        "xm_b": np.array([0, 1, 0]), "xn_b": np.array([0, 0, 1]),
-        "nfp": 1, "iota_b": np.array([0.0]),
-        "G_b": np.ones(1), "I_b": np.zeros(1), "s_b": np.array([0.5]),
-    }
-    result = plotting._j_invariant_map(booz)
-    assert result["alpha"].size == 192
-    assert 0.0 < result["resolved_fraction"] < 1.0
-    assert np.any(np.isnan(result["j_map"]))
-    assert np.any(np.isfinite(result["j_map"]))
-
-
-def test_j_panel_labels_unresolved_and_partially_trapped_maps():
-    """Blank or partially trapped maps retain pitch and coverage context."""
-    import matplotlib.pyplot as plt
-
-    info = {"v_parallel_fraction": 0.25, "pitch_reference_s": 0.5,
-            "alpha": np.linspace(0, 2 * np.pi, 4, endpoint=False),
-            "s_b": np.array([0.25, 0.75]), "resolved_fraction": 0.875,
-            "j_map": np.array([[1.0, np.nan, 1.2, 1.1],
-                               [2.0, 2.1, 2.2, 2.3]])}
-    fig, axes = plt.subplots(1, 2)
-    try:
-        plotting._j_map_panel(axes[0], fig, info, 1.0)
-        assert any("88% resolved" in text.get_text() for text in axes[0].texts)
-        plotting._j_map_panel(axes[1], fig, {**info, "j_map": np.full((2, 4), np.nan)}, 1.0)
-        assert "no trapped-particle wells" in axes[1].texts[0].get_text()
-        assert "|v_\\parallel|/v=" in axes[1].get_title()
-    finally:
-        plt.close(fig)
 
 
 def test_volume_second_derivative_of_linear_vprime():

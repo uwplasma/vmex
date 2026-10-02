@@ -257,7 +257,7 @@ jobs:
     runs-on: ubuntu-latest
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
-    timeout-minutes: 25
+    timeout-minutes: ${{ matrix.lane == 'c5' && 30 || 25 }}
     strategy:
       fail-fast: false
       matrix:

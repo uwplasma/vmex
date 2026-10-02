@@ -63,9 +63,7 @@ $x=s\cos\alpha$, $y=s\sin\alpha$. The title gives $|v_\parallel|/v$
 at the reference field minimum; physical $\lambda$ stays fixed across the disk.
 Blank regions have no complete trapped well. The panel displays the largest
 complete-well $J$: concentric contours describe that branch, not every orbit.
-It samples 192 field-line angles and 512 points per period; well-branch changes
-can remain visible after refinement. `|B|` in Boozer
-coordinates appears at mid radius and on
+`|B|` in Boozer coordinates appears at mid radius and on
 the LCFS as unfilled jet contours with a field line of slope iota. The Boozer
 transform runs in-process, so `--plot` needs no separate `--booz` pass;
 `--booz` is for writing a reusable `boozmn_*.nc`. The plotted $D_R$ comes from
