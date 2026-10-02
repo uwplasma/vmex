@@ -327,3 +327,46 @@ def test_cli_trace_names_the_upgrade_for_an_outdated_essos(solovev_wout, tmp_pat
     assert rc != 0
     assert 'pip install -U "essos>=999.0"' in buffer.getvalue()
     assert "MISSING OR OUTDATED OPTIONAL DEPENDENCY" in buffer.getvalue()
+
+
+def _catalog_birth_field(case, polarity=1):
+    from essos.boozer import BoozerField
+
+    # Eight native rows and 32 modes from actual ITER/NCSX/QHS46/LHD tables.
+    # The fixture embeds input/table hashes, retained indices and converged
+    # independent SciPy/NumPy quadrature; it is not a dynamics equilibrium.
+    with np.load(Path(__file__).parent / "data" / "boozer_birth_measures.npz") as data:
+        args = [data[f"{case}_{key}"] for key in
+                ("s", "bmnc", "xm", "xn", "iota", "G", "I", "psi0", "nfp")]
+    for k in (5, 6, 7):
+        args[k] = polarity * args[k]
+    return BoozerField.from_booz(*args, mode_tolerance=0)
+
+
+@pytest.mark.parametrize("case", ["iter", "ncsx", "qhs46", "lhd"])
+@pytest.mark.parametrize("birth", ["surface", "volume"])
+def test_real_equilibrium_birth_sign_seed_and_quadrature(case, birth):
+    from vmex.core.tracing import sample_births
+
+    positive = sample_births(_catalog_birth_field(case), 2048, birth=birth, seed=29)
+    negative = sample_births(_catalog_birth_field(case, -1), 2048, birth=birth, seed=29)
+    np.testing.assert_array_equal(positive, negative)
+    ss, theta, zeta, pitch = positive.T
+    field = _catalog_birth_field(case)
+    basis = np.column_stack([ss, ss**2, np.cos(theta), np.sin(theta),
+                             np.cos(field.nfp * zeta), np.sin(field.nfp * zeta)])
+    with np.load(Path(__file__).parent / "data" / "boozer_birth_measures.npz") as data:
+        expected = data[f"{case}_{birth}_moments"]
+    error = 6 * basis.std(axis=0, ddof=1) / np.sqrt(len(ss)) + 2e-5
+    assert np.all(abs(basis.mean(axis=0) - expected) <= error)
+    assert np.all(abs(pitch) <= 1)
+    # This large-batch regression does not certify the batch-dependent
+    # rejection envelope on arbitrary rare support (separate issue #531).
+
+
+def test_birth_sampling_with_near_degenerate_positive_measure():
+    from vmex.core.tracing import sample_births
+
+    ordinary = sample_births(_BirthField(current=0), 64, seed=4)
+    tiny = sample_births(_BirthField(G=2.0**-900, current=0), 64, seed=4)
+    np.testing.assert_array_equal(tiny, ordinary)
