@@ -40,14 +40,8 @@ dependencies = [
   "packaging",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
-  # 0.4.0 fixes the host Booz_xform class (run_booz_xform, the Boozer plots
-  # and the Boozer-spectrum objective use it): cached mode lists/grids are
-  # rebuilt when mboz/nboz/nfp/asym change, register_surfaces actually
-  # selects, and __version__ is correct (0.1.1-0.3.0 report "0.1.0"). The
-  # jittable jax_api kernel is byte-identical to 0.3.0 (magnetic_only for QI,
-  # asymmetric spectra, guarded zero-mode derivatives). 0.4.1 adds its own jax
-  # floor.
-  "booz_xform_jax>=0.4.1",
+  # Boozer spectra and differentiable geometry, including asymmetric fields.
+  "booz_xform_jax>=0.4.3",
   # 0.21.0 is the first release whose tridiagonal_solve/tridiagonal_solve_checked
   # (the radial preconditioner's solves) run their Thomas sweeps through the
   # accelerator-batched scan (unroll=2 off CPU; the CPU sweep is unchanged).
@@ -83,7 +77,7 @@ optimizers = [
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
 neoclassical = [
-  "neo-jax>=1.0.2",
+  "neo-jax>=1.0.4",
 ]
 # Differentiable virtual casing on a specified boundary; this is not a NESTOR
 # equilibrium adjoint. 0.0.8 keeps the a-priori (per-derivative-order) error

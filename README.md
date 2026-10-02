@@ -74,7 +74,7 @@ or pick what you need:
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.19.2` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.2` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.4` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
 | `pip install "vmex[turbulence]"` | `gkx>=2.4.2` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -84,10 +84,10 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
-| `booz_xform_jax` | 0.4.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.1"` |
+| `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
 | `essos` | 0.19.2 | `vmex[coils]` | `pip install "essos>=0.19.2"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
-| `neo-jax` | 1.0.2 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.2"` |
+| `neo-jax` | 1.0.4 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.4"` |
 | `gkx` | 2.4.2 | `vmex[turbulence]` | `pip install "gkx>=2.4.2"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 

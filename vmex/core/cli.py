@@ -276,6 +276,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sampling seed for births and collisions (default: 42).",
     )
     p.add_argument(
+        "--trace-compact", action=argparse.BooleanOptionalAction, default=None,
+        help="Compact early losses when supported (default: on; --no-trace-compact disables it).",
+    )
+    p.add_argument(
         "--trace-timestep", type=float, default=None,
         help=(
             "RK4 step in seconds (default: the converged 1.25e-7 times "
@@ -1051,6 +1055,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             s=float(args.trace_s),
             seed=int(args.trace_seed),
             timestep=args.trace_timestep,
+            compact=args.trace_compact,
             times_to_trace=int(args.trace_times),
             scale=scale,
             birth=args.trace_birth,
