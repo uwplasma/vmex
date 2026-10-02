@@ -48,5 +48,6 @@
       "LASYM tokamak": 6.41e-06
     }
   },
-  "vmex_commit": "ba7e02cc"
+  "vmex_commit": "ba7e02cc",
+  "j_map_sha256": "60ab30ee5e5066abf5e741b6661b1c3ad7c8bd63007c1430998a65eea94e5d59"
 }
