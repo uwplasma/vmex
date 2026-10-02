@@ -33,6 +33,8 @@ def installed_version(name):
 
 def spectrum(bx):
     bm = np.asarray(bx.bmnc_b)
+    if bool(getattr(bx, "asym", False)):
+        bm = bm + 1j * np.asarray(bx.bmns_b)
     m, n = np.asarray(bx.xm_b), np.asarray(bx.xn_b)
     amplitude = np.abs(bm).max(axis=1)
     base = amplitude.max()
@@ -46,17 +48,17 @@ def spectrum(bx):
         a, da = spline(radius), spline(radius, 1)
         coeff = np.where(m > 0, radius * a, a)
         radial = np.where(m > 0, a + radius * da, da)
-        angular = (m * m + n * n) * coeff**2
+        angular = (m * m + n * n) * np.abs(coeff)**2
         norm = [max(float(np.sqrt(np.sum(weight * values))), 1e-30)
-                for values in (coeff**2, radial**2, angular)]
+                for values in (np.abs(coeff)**2, np.abs(radial)**2, angular)]
         row = {"s": float(radius**2), "cuts": {}}
         for cut in CUTS:
             keep = amplitude > cut * base
             omit = ~keep
             row["cuts"][str(cut)] = {
                 "modes": int(keep.sum()),
-                "B_rms_rel": float(np.sqrt(np.sum(weight[omit] * coeff[omit] ** 2)) / norm[0]),
-                "radial_derivative_rms_rel": float(np.sqrt(np.sum(weight[omit] * radial[omit] ** 2)) / norm[1]),
+                "B_rms_rel": float(np.sqrt(np.sum(weight[omit] * np.abs(coeff[omit]) ** 2)) / norm[0]),
+                "radial_derivative_rms_rel": float(np.sqrt(np.sum(weight[omit] * np.abs(radial[omit]) ** 2)) / norm[1]),
                 "angle_gradient_rms_rel": float(np.sqrt(np.sum(weight[omit] * angular[omit])) / norm[2]),
             }
         rows.append(row)
@@ -68,10 +70,11 @@ def scaled_field(bx, wout, b, r, cut):
 
     # Ideal-MHD scaling leaves Boozer angles and iota unchanged; transform
     # the tables directly so older VMEC WOUTs need no rewriting/re-transform.
+    sine = {"bmns": b * np.asarray(bx.bmns_b)} if bool(bx.asym) else {}
     return BoozerField.from_booz(
         bx.s_b, b * np.asarray(bx.bmnc_b), bx.xm_b, bx.xn_b, bx.iota,
         b * r * np.asarray(bx.Boozer_G), b * r * np.asarray(bx.Boozer_I),
-        -float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), int(bx.nfp), cut)
+        -float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), int(bx.nfp), cut, **sine)
 
 
 def orbits(path, bx, cuts, particles, tmax, repeats, save_times, birth_cut, step_factor,

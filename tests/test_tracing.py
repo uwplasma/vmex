@@ -45,7 +45,8 @@ TRACE_KWARGS = dict(
 )
 
 
-def test_mode_cut_spectrum_uses_physical_boozer_angular_derivatives():
+@pytest.mark.parametrize("phase", [0.0, 0.7, np.pi / 2])
+def test_mode_cut_spectrum_uses_physical_boozer_angular_derivatives(phase):
     from types import SimpleNamespace
 
     from benchmarks.trace_mode_cut import spectrum
@@ -55,6 +56,10 @@ def test_mode_cut_spectrum_uses_physical_boozer_angular_derivatives():
                          xn_b=np.array([0, 1, 0]),
                          bmnc_b=np.array([np.ones(4), np.full(4, 0.02),
                                           5e-4 * np.sqrt(s)]))
+    bx.asym = phase != 0
+    bx.bmns_b = np.zeros_like(bx.bmnc_b)
+    bx.bmns_b[1:] = bx.bmnc_b[1:] * np.sin(phase)
+    bx.bmnc_b[1:] *= np.cos(phase)
     cut = spectrum(bx)[0]["cuts"]
     assert cut["0.0001"]["modes"] == 3
     assert cut["0.001"]["modes"] == 2
@@ -383,3 +388,17 @@ def test_cli_trace_names_the_upgrade_for_an_outdated_essos(solovev_wout, tmp_pat
     assert rc != 0
     assert 'pip install -U "essos>=999.0"' in buffer.getvalue()
     assert "MISSING OR OUTDATED OPTIONAL DEPENDENCY" in buffer.getvalue()
+
+
+def test_mode_cut_scaling_preserves_sine_spectra(monkeypatch):
+    from types import SimpleNamespace
+    from essos.boozer import BoozerField
+    from benchmarks.trace_mode_cut import scaled_field
+
+    bx = SimpleNamespace(asym=True, s_b=np.array([0.1, 0.9]), nfp=2,
+                         bmnc_b=np.ones((1, 2)), bmns_b=np.full((1, 2), 0.2),
+                         xm_b=np.array([0]), xn_b=np.array([0]), iota=np.ones(2),
+                         Boozer_G=np.ones(2), Boozer_I=np.zeros(2))
+    monkeypatch.setattr(BoozerField, "from_booz", lambda *a, **kw: kw)
+    result = scaled_field(bx, SimpleNamespace(phi=np.array([0, 1.])), 3, 2, 1e-4)
+    np.testing.assert_array_equal(result["bmns"], 3 * bx.bmns_b)
