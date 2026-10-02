@@ -130,6 +130,61 @@ def test_volume_births_follow_the_fusion_profile(solovev_wout):
     assert dt_reactivity(10.0) == pytest.approx(1.136e-22, rel=2e-3)  # Bosch & Hale 1992
 
 
+class _BirthField:
+    nfp = 4
+
+    def __init__(self, orientation=1.0, B=1.0, G=1.0, current=0.2):
+        self.orientation, self.B, self.G, self.current = orientation, B, G, current
+
+    def modB(self, s, theta, zeta):
+        import jax.numpy as jnp
+
+        return self.B * (1 + 0.2 * jnp.cos(theta) + 0.1 * jnp.cos(self.nfp * zeta))
+
+    def profiles(self, s):
+        import jax.numpy as jnp
+
+        values = jnp.stack([0.7 + 0.1 * s, self.orientation * self.G * (1 + 0.1 * s),
+                            self.orientation * self.current * s], axis=-1)
+        return values, jnp.zeros_like(values)
+
+
+@pytest.mark.parametrize("birth", ["surface", "volume"])
+def test_birth_measure_is_independent_of_chart_orientation(birth):
+    from vmex.core.tracing import sample_births
+
+    positive = sample_births(_BirthField(), 64, birth=birth, seed=9)
+    negative = sample_births(_BirthField(orientation=-1), 64, birth=birth, seed=9)
+    np.testing.assert_array_equal(positive, negative)
+    assert np.all((positive[:, 0] >= 0) & (positive[:, 0] <= 1))
+    assert np.all((positive[:, 1] >= 0) & (positive[:, 1] < 2 * np.pi))
+    assert np.all((positive[:, 2] >= 0) & (positive[:, 2] < 2 * np.pi / 4))
+    assert np.all(np.abs(positive[:, 3]) <= 1)
+
+
+@pytest.mark.parametrize("B", [0.0, -1.0, np.inf, np.nan])
+def test_birth_sampling_rejects_invalid_field_strength(B):
+    from vmex.core.tracing import sample_births
+
+    with pytest.raises(ValueError, match="finite positive"):
+        sample_births(_BirthField(B=B), 2)
+
+
+@pytest.mark.parametrize("G", [0.0, np.inf, np.nan])
+def test_birth_sampling_rejects_invalid_jacobian_measure(G):
+    from vmex.core.tracing import sample_births
+
+    with pytest.raises(ValueError, match="positive support"):
+        sample_births(_BirthField(G=G, current=0), 2)
+
+
+def test_volume_birth_sampling_rejects_zero_source():
+    from vmex.core.tracing import sample_births
+
+    with pytest.raises(ValueError, match="positive support"):
+        sample_births(_BirthField(), 2, birth="volume", ne0=0)
+
+
 def test_essos_field_handoff_matches_the_file_route(solovev_wout):
     """The field seam itself: both sources build the same ESSOS field."""
     from_file = essos_vmec_field(solovev_wout)

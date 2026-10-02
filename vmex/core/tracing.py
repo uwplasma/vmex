@@ -18,7 +18,7 @@ A particle is lost when it reaches ``s = 1``.
 Births: on one surface ``s`` (default) or through the volume in proportion
 to the D-T fusion rate (``birth="volume"``), uniform in pitch ``v_par/v`` over
 ``[-1, 1)`` and distributed over the angles with the Boozer Jacobian
-``(G + iota I) / B^2``.  The plasma profiles, for volume births and for
+``abs(G + iota I) / B^2``.  The plasma profiles, for volume births and for
 ``collisions=True``, are those of Landreman, Buller & Drevlak, PoP 29, 082501
 (2022): ``n_D = n_T = n_e / 2 = (n_e0 / 2)(1 - s^5)`` and
 ``T = T_0 (1 - s)`` with ``n_e0 = 4e20 m^-3`` and ``T_0 = 12 keV``, and the
@@ -235,12 +235,17 @@ def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
         th = rng.uniform(0.0, 2 * np.pi, m)
         ze = rng.uniform(0.0, 2 * np.pi / field.nfp, m)
         B = np.asarray(modB(jnp.asarray(ss), jnp.asarray(th), jnp.asarray(ze)))
+        if not np.all(np.isfinite(B) & (B > 0)):
+            raise ValueError("birth sampling requires finite positive |B|")
         iota, G, current = field.profiles(jnp.asarray(ss))[0].T
-        weight = np.asarray(G + iota * current) / B**2
+        # Chart orientation changes the Jacobian's sign, not the birth measure.
+        weight = np.abs(np.asarray(G + iota * current)) / B**2
         if birth == "volume":
             weight = weight * (ne0 / 2 * (1 - ss**5)) ** 2 * dt_reactivity(T0_keV * (1 - ss))
         elif birth != "surface":
             raise ValueError(f"birth must be 'surface' or 'volume', got {birth!r}")
+        if not np.all(np.isfinite(weight) & (weight >= 0)) or not np.any(weight > 0):
+            raise ValueError("birth sampling requires finite nonnegative weights with positive support")
         keep = rng.uniform(0.0, weight.max(), m) < weight
         out.append(np.stack([ss, th, ze, rng.uniform(-1.0, 1.0, m)], axis=1)[keep])
     return np.concatenate(out)[:n]
