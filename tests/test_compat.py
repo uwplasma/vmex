@@ -804,3 +804,49 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
     explicit = tmp_path / "explicit"
     env["JAX_COMPILATION_CACHE_DIR"] = str(explicit)
     assert pathlib.Path(_import_cache_dir(env)) == explicit / fingerprint
+
+
+@pytest.mark.parametrize("value,enabled", [
+    ("1", True), ("true", True), ("TRUE", True), ("t", True),
+    ("yes", True), ("y", True), ("on", True),
+    ("0", False), ("false", False), ("FALSE", False), ("f", False),
+    ("no", False), ("n", False), ("off", False),
+])
+def test_jax_precision_environment_uses_jax_boolean_spellings(monkeypatch, value, enabled):
+    import jax
+
+    previous = jax.config.x64_enabled
+    try:
+        monkeypatch.setenv("JAX_ENABLE_X64", value)
+        _compat._configure_jax_environment()
+        assert jax.config.x64_enabled is enabled
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_jax_precision_keeps_existing_runtime_without_env(monkeypatch, enabled):
+    import jax
+
+    previous = jax.config.x64_enabled
+    try:
+        jax.config.update("jax_enable_x64", enabled)
+        monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
+        _compat._configure_jax_environment()
+        assert jax.config.x64_enabled is enabled
+        assert "JAX_ENABLE_X64" not in _compat.os.environ
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+def test_invalid_precision_override_does_not_demote_runtime(monkeypatch):
+    import jax
+
+    previous = jax.config.x64_enabled
+    try:
+        jax.config.update("jax_enable_x64", True)
+        monkeypatch.setenv("JAX_ENABLE_X64", "invalid")
+        _compat._configure_jax_environment()
+        assert jax.config.x64_enabled
+    finally:
+        jax.config.update("jax_enable_x64", previous)
