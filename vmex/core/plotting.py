@@ -2525,6 +2525,10 @@ def _boozer_boundary_xyz(boozer: dict, theta, zeta):
     R = np.cos(phase) @ boozer["rmnc_b"]
     Z = np.sin(phase) @ boozer["zmns_b"]
     phi = np.asarray(zeta) - np.sin(phase) @ boozer["numns_b"]  # zeta_B = phi + nu
+    if boozer.get("asym", False):
+        R += np.sin(phase) @ boozer["rmns_b"]
+        Z += np.cos(phase) @ boozer["zmnc_b"]
+        phi -= np.cos(phase) @ boozer["numnc_b"]
     return R * np.cos(phi), R * np.sin(phi), Z
 
 

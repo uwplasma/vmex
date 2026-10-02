@@ -2132,7 +2132,9 @@ def _host_anchor_factors(cfg: ImplicitConfig, params_np, status) -> Any:
             if refined[0] != key or mask is None:
                 return zeros()
             mask = _device_pin(cfg, jax.tree.map(jnp.asarray, mask))
-            state = refined[1]
+            # The cached root can live elsewhere than this host callback's parameters.
+            params, state, mask = jax.device_put(
+                (params, refined[1], mask), _params_committed_device(params))
             factors = _refine_block_factors(
                 cfg, params, state, mask, _dof_projector(cfg, mask)(state))
             hit = (key, factors)
