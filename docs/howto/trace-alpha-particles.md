@@ -27,6 +27,7 @@ its binomial error:
 |---|---|---|---|
 | `--trace-particles N` | 500 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
+| `--trace-compact`, `--no-trace-compact` | on when supported | compact early losses | loss dependent |
 | `--trace-timestep DT` | converged step (below) | RK4 step in seconds | `1 / DT` |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
 | `--trace-s S` | 0.25 | birth surface `s = psi / psi_b` | none |

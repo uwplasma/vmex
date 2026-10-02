@@ -272,3 +272,39 @@ def test_cli_trace_names_the_upgrade_for_an_outdated_essos(solovev_wout, tmp_pat
     assert rc != 0
     assert 'pip install -U "essos>=999.0"' in buffer.getvalue()
     assert "MISSING OR OUTDATED OPTIONAL DEPENDENCY" in buffer.getvalue()
+
+
+def test_compaction_dispatch_preserves_released_interfaces(solovev_wout, tmp_path, monkeypatch):
+    import essos.boozer
+    from inspect import signature
+
+    original = essos.boozer.trace_boozer
+    def released(*args, **kwargs):
+        assert "compact" not in kwargs
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", released)
+    assert trace_alphas(solovev_wout, **TRACE_KWARGS).metadata["compact"] is False
+    with pytest.raises(ImportError, match="Compaction requires ESSOS"):
+        trace_alphas(solovev_wout, compact=True, **TRACE_KWARGS)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = cli.main([str(solovev_wout), "--trace", "--quiet", "--trace-compact",
+                       "--outdir", str(tmp_path)])
+    assert rc != 0 and "Compaction requires ESSOS" in buffer.getvalue()
+
+    dispatched = []
+    def supported(*args, compact, **kwargs):
+        dispatched.append(compact)
+        if "compact" in signature(original).parameters:
+            kwargs["compact"] = compact
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", supported)
+    default = trace_alphas(solovev_wout, **TRACE_KWARGS)
+    disabled = trace_alphas(solovev_wout, compact=False, **TRACE_KWARGS)
+    assert dispatched == [True, False]
+    assert default.metadata["compact"] is True and disabled.metadata["compact"] is False
+    np.testing.assert_array_equal(default.trajectories, disabled.trajectories)
+    parser = cli.build_parser()
+    assert parser.parse_args([str(solovev_wout), "--no-trace-compact"]).trace_compact is False

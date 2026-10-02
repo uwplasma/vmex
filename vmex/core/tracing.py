@@ -254,6 +254,7 @@ def trace_alphas(
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,
+    compact: bool | None = None,
     times_to_trace: int = 1000,
     scale: str | None = "volavgB",
     birth: str = "surface",
@@ -287,6 +288,8 @@ def trace_alphas(
         birth profile).
     mboz, nboz, mode_tolerance:
         Boozer resolution and the relative amplitude of dropped modes.
+    compact:
+        Enable survivor compaction when supported; ``False`` disables it.
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
@@ -296,6 +299,14 @@ def trace_alphas(
     require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
+    from inspect import signature
+
+    trace_kwargs = {}
+    if "compact" in signature(trace_boozer).parameters:
+        trace_kwargs["compact"] = compact is None or bool(compact)
+    elif compact:
+        raise ImportError("Compaction requires ESSOS with trace_boozer(compact=...); upgrade ESSOS")
+    compact = trace_kwargs.get("compact", False)
 
     from .scaling import SCALE_TARGETS, aries_cs_scales, scale_wout
     from .wout import read_wout
@@ -320,7 +331,8 @@ def trace_alphas(
         field, *births.T, speed=float(np.sqrt(2 * energy / mass)), mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
-        species=background_species(ne0, T0_keV) if collisions else None, progress=progress)
+        species=background_species(ne0, T0_keV) if collisions else None,
+        progress=progress, **trace_kwargs)
     wall = time.perf_counter() - start
     times = np.linspace(0.0, float(tmax), int(times_to_trace))
     lost = trace.loss_times >= 0
@@ -343,7 +355,7 @@ def trace_alphas(
     result.metadata.update(
         tmax=float(tmax), timestep=float(timestep), s=float(s), seed=int(seed),
         birth=birth, collisions=bool(collisions), ne0=float(ne0), T0_keV=float(T0_keV),
-        integrator="RK4 (Boozer guiding centre)", boozer_modes=int(field.xm.size),
+        compact=bool(compact), integrator="RK4 (Boozer guiding centre)", boozer_modes=int(field.xm.size),
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
