@@ -440,6 +440,51 @@ instead, so call the objective eagerly to keep it. ``device="auto"`` uses the CP
 for this response on accelerator hosts; an explicit ``device="gpu"`` or
 process-wide JAX placement overrides that measured lower-memory default.
 
+:class:`vmex.core.freeboundary_problem.FreeBoundaryProblem` packages the same
+coil-only path for host optimizers that step from an accepted equilibrium
+(``examples/coil-constraints-benchmarks`` runs it with coil constraints)::
+
+   from dataclasses import replace
+
+   import numpy as np
+   from essos.coils import Coils
+   import vmex as vj
+   from vmex import optimize as opt
+
+   inp = vj.VmecInput.from_file("input.rotating_ellipse")
+   seed = opt.solve_equilibrium(inp).state   # fixed-boundary seed state
+   inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field")
+   qs = opt.QuasisymmetryRatioResidual(np.linspace(0.1, 1.0, 10), 1, 0)
+   chart = opt.CoilParameters.from_coils(Coils.from_json("coils.json"), current_dofs=())
+   problem = opt.FreeBoundaryProblem.from_loss(
+       inp, lambda state, rt, coils: qs.total_state(state, rt),
+       quantities=(opt.min_abs_iota, opt.aspect_ratio),
+       parameterization=chart, restart_from=seed)
+   problem.enable_root_polishing()   # optional Newton polish of each root
+   problem.enable_matrix_free(dense_derivatives=True)   # seed LU of the accepted root
+   problem.enable_newton_correction()   # optional Newton correction of predicted trials
+   result = opt.minimize(problem, method="SLSQP",
+       constraints=problem.nonlinear_constraint([0.41, 4.9], [np.inf, 5.1]))
+   problem.close()
+
+Every trial starts from a tangent prediction at the accepted root, is solved
+with strict edge convergence and freshly certified before its value is used.
+``opt.minimize`` supports SLSQP for problems, promotes only the iterates SciPy
+accepts, and a rejected trial (:class:`~vmex.core.errors.TrialRejected`) never
+changes the accepted root; the result's ``stop_reason`` says why a run
+stopped. ``quantities`` are ``function(state, rt)`` constraint rows;
+``coil_quantities`` also receive the coils, so their derivatives include both
+the explicit coil term and the equilibrium response. The problem uses the
+``forward_dense_jax`` adjoint. After the first dense factorization,
+matrix-free solves use that LU as a GMRES preconditioner, with one dense retry
+on failure; ``refresh_horizon`` rebuilds the LU when warm solves slow down,
+and ``dense_derivatives=True`` instead solves every derivative densely and
+makes each accepted root's LU the new seed. ``enable_newton_correction``
+Newton-corrects each predicted trial on that seed before falling back to the
+ordinary solve. ``equilibrium_from_x`` returns an
+:class:`~vmex.core.optimize.Equilibrium` whose WOUT uses the exact
+fixed-geometry vacuum of that point.
+
 Use :class:`vmex.core.monitoring.EquilibriumReporter` for the compact physics
 summary shared by the examples.  Each entry accepts either VMEX's
 ``function(equilibrium_state, solver_context)`` convention or a host

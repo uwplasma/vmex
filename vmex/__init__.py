@@ -81,6 +81,9 @@ links to the module that documents it.
   :class:`~vmex.core.problem.FunctionProblem` /
   :class:`~vmex.core.problem.Evaluation` — optimizer-neutral value,
   residual, and derivative callables
+- :class:`~vmex.core.freeboundary_problem.FreeBoundaryProblem` /
+  :class:`~vmex.core.freeboundary_problem.CoilParameters` — scalar free-boundary
+  coil optimization from the accepted equilibrium
 - :class:`~vmex.core.monitoring.OptimizationMonitor` /
   :class:`~vmex.core.monitoring.OptimizationRecord` — accepted iterations;
   :class:`~vmex.core.monitoring.EquilibriumReporter` — compact diagnostics
@@ -301,6 +304,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # optimizer-neutral problem callables
     "Evaluation": (".core.problem", "Evaluation"),
     "FunctionProblem": (".core.problem", "FunctionProblem"),
+    "FreeBoundaryProblem": (".core.freeboundary_problem", "FreeBoundaryProblem"),
+    "CoilParameters": (".core.freeboundary_problem", "CoilParameters"),
     "VmecProblem": (".core.problem", "VmecProblem"),
     "EquilibriumReporter": (".core.monitoring", "EquilibriumReporter"),
     "OptimizationMonitor": (".core.monitoring", "OptimizationMonitor"),

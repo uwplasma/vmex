@@ -10,8 +10,9 @@ One home for the small private helpers that :mod:`~vmex.core.optimize`,
 - :func:`_iotas_half` / :func:`_iotas_half_from_fields` — the ``ncurr``-aware
   half-mesh rotational transform (``add_fluxes.f90`` conventions);
 - the **canonical wout-parity scalar targets**:
-  :func:`aspect_ratio` / :func:`volume` (``aspectratio.f`` boundary
-  quadrature, equal to the wout ``aspect``/``volume_p`` scalars) and
+  :func:`aspect_ratio` / :func:`major_radius` / :func:`volume`
+  (``aspectratio.f`` boundary quadrature, equal to the wout
+  ``aspect``/``Rmajor_p``/``volume_p`` scalars) and
   :func:`mean_iota` / :func:`edge_iota` (wout ``iotas``/``iotaf[-1]``
   conventions), re-exported unchanged by :mod:`~vmex.core.optimize`.
   :func:`elongation_profile` / :func:`max_elongation` evaluate the boundary
@@ -181,6 +182,16 @@ def aspect_ratio(state: SpectralState, rt: SolverRuntime) -> Array:
     historical shoelace-quadrature variant of the same scalar (see there).
     """
     return _aspect_scalars(state, rt)[2]
+
+
+def major_radius(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Major radius ``Rmajor_p`` [m] (wout convention, boundary quadrature).
+
+    ``volume_p / (2 pi <cross-section area>)``, equal to the wout
+    ``Rmajor_p`` scalar of the same state; re-exported as
+    ``vmex.core.optimize.major_radius``.
+    """
+    return _aspect_scalars(state, rt)[1]
 
 
 def volume(state: SpectralState, rt: SolverRuntime) -> Array:

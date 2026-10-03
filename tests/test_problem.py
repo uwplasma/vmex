@@ -969,6 +969,74 @@ def test_vmec_subproblem_needs_a_recorded_deck_for_a_max_mode_stage():
         problem.subproblem(max_mode=1)
 
 
+@pytest.mark.parametrize("bounded", [False, True])
+def test_shared_minimize_uses_physical_coordinates(bounded):
+    from vmex import optimize as opt
+    from scipy.optimize import Bounds
+
+    target = np.array([2., -3.])
+    problem = opt.FunctionProblem.from_functions(np.array([1., 1.]), scales=np.array([.2, 4.]),
+        value_and_grad=lambda x: (float(np.sum((x-target)**2)), 2*(x-target)))
+    points = []
+    bounds = Bounds([-5., -5.], [5., 5.]) if bounded else None
+    result = opt.minimize(problem, method="SLSQP", bounds=bounds, callback=lambda x: points.append(x.copy()),
+                          options={"maxiter": 100, "ftol": 1e-12})
+    assert result.success and points
+    np.testing.assert_allclose(result.x, target, atol=1e-5)
+    np.testing.assert_allclose(result.jac, 2*(result.x-target), atol=1e-10)
+    np.testing.assert_array_equal(points[-1], result.x)
+
+
+def test_shared_minimize_scales_physical_constraints_and_rejects_unsupported_method():
+    from scipy.optimize import NonlinearConstraint
+    from vmex import optimize as opt
+
+    problem = opt.FunctionProblem.from_functions(np.array([.2, .2]), scales=np.array([.1, 2.]),
+        value_and_grad=lambda x: (float(np.sum((x-2.)**2)), 2*(x-2.)))
+    constraint = NonlinearConstraint(lambda x: np.array([x.sum()]), -np.inf, 1.,
+                                     jac=lambda x: np.ones((1, 2)))
+    result = opt.minimize(problem, method="SLSQP", constraints=constraint,
+                          options={"maxiter": 50, "ftol": 1e-12})
+    assert result.success
+    np.testing.assert_allclose(result.x, [.5, .5], atol=1e-6)
+    for method in ("L-BFGS-B", "BFGS"):
+        with pytest.raises(ValueError, match="only method='SLSQP'"):
+            opt.minimize(problem, method=method, constraints=constraint)
+    with pytest.raises(ValueError, match="only method='SLSQP'"):
+        opt.minimize(problem)  # the scalarized-VMEC default is not supported here
+
+
+def test_shared_minimize_callback_stop_keeps_last_reported_point():
+    from vmex import optimize as opt
+
+    p = opt.FunctionProblem.from_functions(np.array([5.]), scales=np.array([.3]),
+        value_and_grad=lambda x: (float(x@x), 2*x))
+    seen = []
+    def callback(intermediate_result):
+        seen.append(intermediate_result.x.copy())
+        raise StopIteration
+    result = opt.minimize(p, method="SLSQP", callback=callback)
+    assert not result.success and result.stop_reason == "callback_stopped"
+    np.testing.assert_array_equal(result.x, seen[0])
+    np.testing.assert_allclose(result.fun, result.x@result.x)
+
+
+@pytest.mark.parametrize("sparse", [False, True])
+def test_shared_minimize_offsets_linear_constraints(sparse):
+    from scipy.optimize import LinearConstraint
+    from scipy.sparse import csr_matrix
+    from vmex import optimize as opt
+    p = FunctionProblem.from_functions([3., 4.], scales=[.3, 2.],
+        value_and_grad=lambda x: (float(x@x), 2*x))
+    matrix = np.array([[1., 1.]])
+    constraint = LinearConstraint(csr_matrix(matrix) if sparse else matrix, 1., 1.)
+    result = opt.minimize(p, method="SLSQP", constraints=constraint, options=dict(ftol=1e-12))
+    assert result.success
+    np.testing.assert_allclose(result.x, [.5, .5], atol=1e-6)
+    with pytest.raises(TypeError, match="when building"):
+        opt.minimize(p, forward_ftol=1e-11)
+
+
 def test_status_branch_is_python_when_concrete_and_cond_when_traced(monkeypatch):
     """A concrete status picks its branch in Python; a traced one keeps lax.cond."""
     import jax

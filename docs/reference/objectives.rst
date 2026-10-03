@@ -102,6 +102,8 @@ and composable with both gradient modes:
 
 - :func:`~vmex.core.optimize.aspect_ratio` — the VMEC/simsopt effective
   aspect ratio;
+- :func:`~vmex.core.optimize.major_radius` — the wout ``Rmajor_p`` major
+  radius, in metres;
 - :func:`~vmex.core.optimize.volume` — plasma volume;
 - :func:`~vmex.core.optimize.min_abs_iota` — the smallest ``|iota|`` over the
   half-mesh surfaces, and the default transform floor in the shipped

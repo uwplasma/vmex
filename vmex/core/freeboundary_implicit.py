@@ -53,8 +53,10 @@ Array = Any
 #: ``coupled_gcrot`` is the certified default; ``boundary_schur`` eliminates
 #: the radial bulk and assembles the edge system column by column;
 #: ``edge_response`` iterates the coupled transpose on a dense model of
-#: NESTOR.
-_ADJOINT_SOLVERS = ("boundary_schur", "coupled_gcrot", "edge_response")
+#: NESTOR; ``forward_dense_jax`` LU-factors the active Jacobian and serves
+#: only :func:`free_boundary_state_pullback_multi_rhs`.
+_ADJOINT_SOLVERS = ("boundary_schur", "coupled_gcrot", "edge_response",
+                    "forward_dense_jax")
 
 
 @dataclass(frozen=True, eq=False)
@@ -70,8 +72,13 @@ class FreeBoundaryImplicitConfig:
     field_from_parameters: Callable[[Any], Any]
     adjoint_solver: str = "coupled_gcrot"
     adjoint_fail: str = "error"
+    adjoint_residual_rtol: float | None = None
+    include_edge_in_convergence: bool = False
+    edge_force_tolerance: float | None = None
     schur_probe_chunk_size: int = 1
     vacuum_program: Any = None
+    adjoint_dense_batch_size: int = 4
+    adjoint_dense_max_dofs: int = 4096
 
     @property
     def resolution(self):
@@ -92,7 +99,12 @@ def make_free_boundary_config(
     adjoint_gcrot_k: int = 5,
     adjoint_solver: str = "coupled_gcrot",
     adjoint_fail: str = "error",
+    adjoint_residual_rtol: float | None = None,
+    include_edge_in_convergence: bool = False,
+    edge_force_tolerance: float | None = None,
     schur_probe_chunk_size: int = 1,
+    adjoint_dense_batch_size: int = 4,
+    adjoint_dense_max_dofs: int = 4096,
     field_from_parameters: Callable[[Any], Any] | None = None,
     device: Any = AUTO,
     max_fsq_ratio: float = 1.0,
@@ -107,7 +119,15 @@ def make_free_boundary_config(
     ``device="auto"`` uses the CPU for the coupled implicit response on an
     accelerator host unless the process already pins JAX placement; pass an
     explicit device to override that measured lower-memory default.
-    ``adjoint_solver="coupled_gcrot"`` is the certified default;
+    ``adjoint_solver="coupled_gcrot"`` is the default host Krylov path;
+    ``"forward_dense_jax"`` assembles the active Jacobian with forward JVPs
+    and solves its transpose with LU; it serves only the float64 host-eager
+    :func:`free_boundary_state_pullback_multi_rhs` (used by
+    :class:`~vmex.core.freeboundary_problem.FreeBoundaryProblem`), sized by
+    ``adjoint_dense_batch_size`` (JVP probes per batch) and
+    ``adjoint_dense_max_dofs`` (largest active dimension), and certified with
+    ``adjoint_residual_rtol`` (relative full-residual gate; ``None`` uses the
+    shared ``adjoint_tol`` acceptance) when given.
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
     Krylov solve stalls.  ``"edge_response"`` is the coupled Krylov solve
@@ -120,6 +140,11 @@ def make_free_boundary_config(
     Krylov solution with a warning instead of raising, so one bad trial in an
     optimization is a poor search direction the line search rejects rather
     than a dead run; a non-finite adjoint always raises.
+
+    ``include_edge_in_convergence=True`` makes every forward solve also
+    require the spectral edge force ``fedge`` to reach
+    ``edge_force_tolerance`` (default ``ftol``); see
+    :func:`~vmex.core.freeboundary.solve_free_boundary`.
 
     ``max_fsq_ratio`` is the largest ``(fsqr + fsqz + fsql) / ftol`` at which
     :func:`solve_free_boundary_implicit_status` still certifies a solve that
@@ -139,6 +164,14 @@ def make_free_boundary_config(
     solve the anchor cannot land is status 3.  ``inf`` skips the anchor and
     restores the unanchored behaviour.
     """
+    if adjoint_residual_rtol is not None:
+        if not np.isfinite(adjoint_residual_rtol) or adjoint_residual_rtol <= 0:
+            raise ValueError("adjoint_residual_rtol must be finite and positive")
+    if type(include_edge_in_convergence) is not bool:
+        raise TypeError("include_edge_in_convergence must be bool")
+    if edge_force_tolerance is not None and (not include_edge_in_convergence or
+            not np.isfinite(edge_force_tolerance) or edge_force_tolerance <= 0):
+        raise ValueError("edge tolerance requires enabled edge convergence and a positive finite value")
     if not inp.lfreeb:
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
     resolution = free_boundary_resolution(inp, external_field, ns=ns)
@@ -158,15 +191,26 @@ def make_free_boundary_config(
                 repr(name) for name in sorted(_ADJOINT_SOLVERS)))
     if adjoint_fail not in {"error", "best_effort"}:
         raise ValueError("adjoint_fail must be 'error' or 'best_effort'")
+    if adjoint_residual_rtol is not None and adjoint_solver != "forward_dense_jax":
+        raise ValueError("adjoint_residual_rtol applies only to adjoint_solver='forward_dense_jax'")
     if schur_probe_chunk_size < 1:
         raise ValueError("schur_probe_chunk_size must be positive")
+    for name, value in (("adjoint_dense_batch_size", adjoint_dense_batch_size),
+                        ("adjoint_dense_max_dofs", adjoint_dense_max_dofs)):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
     config = FreeBoundaryImplicitConfig(
         implicit=cfg,
         field_from_parameters=(lambda value: value) if field_from_parameters is None
         else field_from_parameters,
         adjoint_solver=adjoint_solver,
         adjoint_fail=adjoint_fail,
+        adjoint_residual_rtol=adjoint_residual_rtol,
+        include_edge_in_convergence=include_edge_in_convergence,
+        edge_force_tolerance=edge_force_tolerance,
         schur_probe_chunk_size=int(schur_probe_chunk_size),
+        adjoint_dense_batch_size=int(adjoint_dense_batch_size),
+        adjoint_dense_max_dofs=int(adjoint_dense_max_dofs),
     )
     return dataclasses.replace(config, vacuum_program=_vacuum_program(config))
 
@@ -438,7 +482,9 @@ def _host_solve_and_mask_impl(
         _solve_free_boundary_stage, inp, external_field=field,
         resolution=icfg.resolution, ftol=icfg.ftol,
         max_iterations=icfg.max_iterations,
-        error_on_no_convergence=error_on_no_convergence, use_fft=False)
+        error_on_no_convergence=error_on_no_convergence, use_fft=False,
+        include_edge_in_convergence=getattr(cfg, "include_edge_in_convergence", False),
+        edge_force_tolerance=getattr(cfg, "edge_force_tolerance", None))
     reference = _FREE_HOT_CACHE.get(cfg)
     if reference is None:
         reference = _FREE_HOT_CACHE[cfg] = _cold_reference(solve, icfg, inp, field)
@@ -701,6 +747,11 @@ def _solve_bwd(cfg, saved, state_bar):
 
 def _solve_bwd_impl(cfg, saved, state_bar):
     params, field_parameters, state, mask, rcon0, zcon0 = saved
+    if cfg.adjoint_solver == "forward_dense_jax":
+        raise ValueError(
+            "adjoint_solver='forward_dense_jax' serves only the host-eager "
+            "free_boundary_state_pullback_multi_rhs; use coupled_gcrot, "
+            "boundary_schur or edge_response for the scalar implicit gradient")
     frozen = jax.lax.stop_gradient(state)
     project = im._dof_projector(cfg.implicit, mask)
     residual = _projected_residual(cfg, mask)
@@ -1626,6 +1677,18 @@ def _transpose_matvec(value, pullback, template):
     return ravel_pytree(pullback(unravel(value))[0])[0]
 
 
+@functools.partial(jax.jit, static_argnames=("residual",))
+def _prepare_linearized_transpose(z, p, field, base, rcon, zcon, *, residual):
+    """Prepare the transpose used by seed-LU GMRES.
+
+    Keep numerical tape leaves dynamic, including the frozen state and
+    constraint baselines, so executable reuse cannot reuse an old root.
+    """
+    _, tangent = jax.linearize(
+        lambda zz: residual(zz, p, field, base, rcon, zcon), z)
+    return jax.linear_transpose(tangent, z)
+
+
 def _host_adjoint(
     residual, z_star, params, field_parameters, frozen, rcon0, zcon0, rhs, cfg,
     *, x0=None, fail="error", pullback=None, certify=False,
@@ -1653,7 +1716,7 @@ def _host_adjoint(
             residual=residual)
 
     def matvec(value):
-        return _transpose_matvec(value, pullback, z_star)
+        return _transpose_matvec(value, pullback, rhs)
 
     matvec(rhs_flat).block_until_ready()
     dtype = np.asarray(rhs_flat).dtype
@@ -1711,6 +1774,132 @@ def _host_adjoint(
     return unravel(jnp.asarray(solution, dtype=rhs_flat.dtype))
 
 
+@functools.partial(jax.jit, static_argnames=("residual",))
+def _prepare_parameter_pullback(z, p, field, base, rcon, zcon, *, residual):
+    return jax.vjp(
+        lambda prm, external: residual(z, prm, external, base, rcon, zcon),
+        p, field,
+    )[1]
+
+
+@jax.jit
+def _apply_parameter_pullback(adjoint, pullback):
+    return pullback(jax.tree.map(jnp.negative, adjoint))
+
+
+def free_boundary_state_pullback_multi_rhs(
+    params, field_parameters, cfg: FreeBoundaryImplicitConfig,
+    state: SpectralState, dof_mask: SpectralState,
+    state_cotangents: SpectralState, *, rcon0, zcon0,
+    root_residual_atol: float = 1e-5,
+    diagnostics: list | None = None,
+    return_linearization: bool = False,
+    preconditioner=None,
+):
+    """Pull back several state cotangents at one accepted free-boundary root.
+
+    Host-eager and dense only: requires ``adjoint_solver="forward_dense_jax"``,
+    which assembles the active raw Jacobian once per batch, factors it with
+    LU and certifies every row against the full operator. The scalar implicit
+    gradient (:func:`solve_free_boundary_implicit`) keeps the Krylov solvers.
+
+    Parameters
+    ----------
+    params, field_parameters:
+        Profile parameters and field parameters of the root.
+    cfg:
+        A :func:`make_free_boundary_config` result with
+        ``adjoint_solver="forward_dense_jax"``.
+    state, dof_mask, rcon0, zcon0:
+        The root, its structural DOF mask and constraint baselines; all must
+        come from the same solve.
+    state_cotangents:
+        State pytree whose leaves have shape ``(n_rhs,) + state_leaf.shape``.
+    root_residual_atol:
+        Bound on the norm of the projected preconditioned root residual,
+        checked before any solve. It is a numerical check, not a physical
+        accuracy certificate.
+    diagnostics:
+        Optional list; one residual report per row is appended.
+    return_linearization:
+        Also return the root's retained LU and a checked tangent solver.
+        Requires ``adjoint_fail="error"``.
+    preconditioner:
+        Optional seed LU (:class:`~vmex.core._freeboundary_dense.SeedLU`) that
+        replaces dense reassembly by a matrix-free GMRES solve on the current
+        root; the seed never changes automatically. Requires
+        ``adjoint_fail="error"``.
+
+    Returns
+    -------
+    tuple
+        ``(params_bar, field_parameters_bar)`` with the leading RHS axis, or
+        ``((params_bar, field_parameters_bar), linearization)`` with
+        ``return_linearization=True``. These are implicit state contributions
+        only: callers add any explicit dependence on profiles or field
+        parameters.
+    """
+    if return_linearization and (cfg.adjoint_solver != 'forward_dense_jax' or cfg.adjoint_fail != 'error'):
+        raise ValueError('retained linearization requires forward_dense_jax with adjoint_fail=error')
+    if preconditioner is not None and (cfg.adjoint_solver != 'forward_dense_jax' or cfg.adjoint_fail != 'error'):
+        raise ValueError('seed LU requires forward_dense_jax with adjoint_fail=error')
+    if cfg.adjoint_solver != "forward_dense_jax":
+        raise ValueError("multi-RHS state pullback requires adjoint_solver='forward_dense_jax'")
+    if not np.isfinite(root_residual_atol) or root_residual_atol <= 0:
+        raise ValueError("root_residual_atol must be finite and positive")
+    values = (params, field_parameters, state, dof_mask, state_cotangents, rcon0, zcon0)
+    if any(isinstance(value, jax.core.Tracer) for value in jax.tree.leaves(values)):
+        raise ValueError("multi-RHS state pullback requires host-eager inputs")
+    if jax.tree.structure(state_cotangents) != jax.tree.structure(state):
+        raise ValueError("state_cotangents must have the state pytree structure")
+    leaves = jax.tree.leaves(state_cotangents)
+    count = leaves[0].shape[0] if leaves and leaves[0].ndim else 0
+    if count < 1 or any(
+        row.shape != (count,) + reference.shape
+        for row, reference in zip(leaves, jax.tree.leaves(state))
+    ):
+        raise ValueError("state_cotangents require a nonempty consistent leading RHS axis")
+    from ._freeboundary_dense import solve_dense_adjoint, solve_matrixfree_adjoint
+
+    icfg = cfg.implicit
+    with im._device_context(icfg):
+        params, field_parameters, state, dof_mask, state_cotangents, rcon0, zcon0 = im._device_pin(icfg, values)
+        # A deserialized root can enter without a preceding forward callback.
+        # Populate runtime/boundary-table caches outside JAX transformations.
+        im.runtime_from_params(params, icfg)
+        frozen = jax.lax.stop_gradient(state)
+        project = im._dof_projector(icfg, dof_mask)
+        z_star = project(state)
+        residual = _projected_residual(cfg, dof_mask)
+        root = residual(z_star, params, field_parameters, frozen, rcon0, zcon0)
+        root_norm = float(jnp.linalg.norm(ravel_pytree(root)[0]))
+        if not np.isfinite(root_norm) or root_norm > root_residual_atol:
+            raise ValueError(
+                f"multi-RHS root residual {root_norm:.3e} exceeds {root_residual_atol:.3e}")
+        # The raw coupled Jacobian is banded in radius, so the dense backend
+        # assembles it by colored probes. At the certified root its adjoint,
+        # parameter pullback and tangent equal the preconditioned ones.
+        residual = _projected_residual(cfg, dof_mask, formulation="raw")
+        solve_adjoint = solve_dense_adjoint
+        options = {}
+        if preconditioner is not None:
+            solve_adjoint = solve_matrixfree_adjoint
+            options['preconditioner'] = preconditioner
+        result = solve_adjoint(
+            residual,z_star,params,field_parameters,frozen,rcon0,zcon0,
+            jax.vmap(project)(state_cotangents),dof_mask,cfg,diagnostics=diagnostics,
+            **options,
+            **({'return_linearization': True} if return_linearization else {}))
+        adjoints, linearization = result if return_linearization else (result, None)
+        parameter_pullback = _prepare_parameter_pullback(
+            z_star,params,field_parameters,frozen,rcon0,zcon0,residual=residual)
+        rows = [_apply_parameter_pullback(
+            jax.tree.map(lambda value:value[index],adjoints),parameter_pullback)
+            for index in range(count)]
+        bars = jax.tree.map(lambda *values:jnp.stack(values),*rows)
+        return (bars, linearization) if return_linearization else bars
+
+
 @functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
 def phiedge_root(residual: Callable, params: im.ImplicitParams,
                  field_parameters: Any) -> Array:
@@ -1753,4 +1942,5 @@ __all__ = [
     "phiedge_root",
     "solve_free_boundary_implicit",
     "solve_free_boundary_implicit_status",
+    "free_boundary_state_pullback_multi_rhs",
 ]

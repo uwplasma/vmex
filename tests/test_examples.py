@@ -129,6 +129,10 @@ UNTESTED_EXAMPLES = {
     "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
+    "examples/coil-constraints-benchmarks/free_boundary_single_stage_optimization.py": "GPU benchmark; FreeBoundaryProblem is covered by tests/test_freeboundary_problem.py",
+    "examples/coil-constraints-benchmarks/single_stage_optimization.py": "GPU benchmark; the fixed-boundary single-stage example is tested",
+    "examples/coil-constraints-benchmarks/parameters.py": "shared case constants imported by the two benchmarks",
+    "examples/coil-constraints-benchmarks/postprocess.py": "post-processes a finished GPU benchmark run",
 }
 
 

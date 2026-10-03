@@ -2339,6 +2339,19 @@ def _adjoint_acceptance(cfg: ImplicitConfig, b_norm, rtol=None):
     return _ADJOINT_RESIDUAL_SLACK * tol * b_norm
 
 
+def _adjoint_diagnostic(cfg, *, residual_norm, rhs_norm, iterations, backend,
+                        row=None, residual_rtol=None, finite=True, **details):
+    """Describe a host-eager true-residual check using the shared acceptance rule."""
+    norm, rhs_norm = float(residual_norm), float(rhs_norm)
+    tolerance = float(_adjoint_acceptance(cfg, rhs_norm) if residual_rtol is None
+                      else residual_rtol * rhs_norm)
+    return dict(row=row, residual_norm=norm, rhs_norm=rhs_norm,
+        relative_residual=norm/rhs_norm if rhs_norm else (0.0 if norm == 0 else float("inf")),
+        tolerance=tolerance, iterations=int(iterations), backend=backend,
+        accepted=bool(finite and np.isfinite(norm) and np.isfinite(rhs_norm) and norm <= tolerance),
+        **details)
+
+
 def _raise_adjoint_unconverged(cfg: ImplicitConfig, *, iterations: int,
                                residual_norm: float, tolerance: float,
                                method: str | None = None):
