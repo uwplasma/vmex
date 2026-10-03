@@ -120,6 +120,285 @@ def test_volume_births_follow_the_fusion_profile(solovev_wout):
     assert dt_reactivity(10.0) == pytest.approx(1.136e-22, rel=2e-3)  # Bosch & Hale 1992
 
 
+def _birth_field(orientation=1.0, B=1.0, G=1.0, current=0.2, *, cosine=0.2,
+                 sine=0.0, second=0.1, toroidal=False):
+    from essos.boozer import BoozerField
+
+    r, s = np.array([0.2, 0.65, 0.85]), np.array([0.1, 0.55, 0.9])
+    b, profiles = np.zeros((2, 3, 4)), np.zeros((2, 3, 4))
+    b[:, :, 3] = B * np.array([1, cosine, second])
+    profiles[:, 0, 2], profiles[:, 0, 3] = 0.1, 0.7 + 0.1 * s[:-1]
+    profiles[:, 1, 2], profiles[:, 1, 3] = orientation * G * 0.1, orientation * G * (1 + 0.1 * s[:-1])
+    profiles[:, 2, 2], profiles[:, 2, 3] = orientation * current, orientation * current * s[:-1]
+    bs = np.zeros_like(b)
+    bs[:, 1, 3] = B * sine
+    values = [r, b, s, profiles, [0, 0, 0] if toroidal else [0, 1, 2], [0, 4, 8]]
+    return BoozerField(*map(jax.numpy.asarray, values), -1.0, 4,
+                       None if sine == 0 else jax.numpy.asarray(bs))
+
+
+@pytest.mark.parametrize("birth", ["surface", "volume"])
+def test_birth_measure_is_independent_of_chart_orientation(birth):
+    from vmex.core.tracing import sample_births
+
+    positive = sample_births(_birth_field(), 64, birth=birth, seed=9)
+    negative = sample_births(_birth_field(orientation=-1), 64, birth=birth, seed=9)
+    np.testing.assert_array_equal(positive, negative)
+    assert np.all((positive[:, 0] >= 0) & (positive[:, 0] <= 1))
+    assert np.all((positive[:, 1] >= 0) & (positive[:, 1] < 2 * np.pi))
+    assert np.all((positive[:, 2] >= 0) & (positive[:, 2] < 2 * np.pi / 4))
+    assert np.all(np.abs(positive[:, 3]) <= 1)
+
+
+@pytest.mark.parametrize("B", [0.0, -1.0, np.inf, np.nan])
+def test_birth_sampling_rejects_invalid_field_strength(B):
+    from vmex.core.tracing import sample_births
+
+    with pytest.raises(ValueError, match="finite positive"):
+        sample_births(_birth_field(B=B), 2)
+
+
+@pytest.mark.parametrize("G", [0.0, np.inf, np.nan])
+def test_birth_sampling_rejects_invalid_jacobian_measure(G):
+    from vmex.core.tracing import sample_births
+
+    with pytest.raises(ValueError, match="positive support"):
+        sample_births(_birth_field(G=G, current=0), 2)
+
+
+def test_volume_birth_sampling_rejects_zero_source():
+    from vmex.core.tracing import sample_births
+
+    with pytest.raises(ValueError, match="positive support"):
+        sample_births(_birth_field(), 2, birth="volume", ne0=0)
+
+
+@pytest.mark.parametrize("birth", ["surface", "volume"])
+def test_birth_bounds_does_not_depend_on_a_small_proposal_batch(monkeypatch, birth):
+    """A batch missing the high-weight region must not accept its local maximum."""
+    from vmex.core.tracing import sample_births
+
+    class Proposals:
+        theta_batches = 0
+        draws = 0
+
+        def uniform(self, low, high, size):
+            position = self.draws % (5 if birth == "volume" else 4)
+            self.draws += 1
+            if birth == "volume" and position == 0:
+                return np.full(size, 0.8 if self.theta_batches == 0 else 0.0)
+            if high == 2 * np.pi:
+                self.theta_batches += 1
+                return np.full(size, 0.0 if self.theta_batches == 1 else np.pi)
+            if high == np.pi / 2 or low == -1:
+                return np.zeros(size)
+            return np.full(size, high * 0.05)
+
+    rng = Proposals()
+    monkeypatch.setattr(np.random, "default_rng", lambda _seed: rng)
+    field = _birth_field(cosine=0 if birth == "volume" else 0.9, second=0)
+    births = sample_births(field, 1, s=0.81, birth=birth)
+    assert rng.theta_batches == 2
+    column, expected = (0, 0.0) if birth == "volume" else (1, np.pi)
+    assert births[0, column] == expected
+
+
+@pytest.mark.parametrize("sign", [1, -1])
+def test_surface_births_sample_the_cosine_and_sine_jacobian(sign):
+    from vmex.core.tracing import sample_births
+
+    n, s = 4096, 0.64
+    field = _birth_field(cosine=0.6, sine=0.4, orientation=sign, second=0)
+    births = sample_births(field, n, s=s, seed=17)
+    phase = births[:, 1] - 4 * births[:, 2]
+    # For B=1+a*cos(phase)+b*sin(phase), density proportional to B^-2 gives <cos>=-a, <sin>=-b.
+    assert abs(np.cos(phase).mean() + 0.6 * np.sqrt(s)) < 6 / np.sqrt(n)
+    assert abs(np.sin(phase).mean() + 0.4 * np.sqrt(s)) < 6 / np.sqrt(n)
+    assert abs(births[:, 3].mean()) < 6 / np.sqrt(3 * n)
+    np.testing.assert_array_equal(births, sample_births(field, n, s=s, seed=17))
+
+
+def test_volume_births_match_radial_fusion_and_asymmetric_angle_moments():
+    from scipy.integrate import quad
+    from vmex.core.tracing import dt_reactivity, sample_births
+
+    n, T0 = 4096, 12.0
+    field = _birth_field(cosine=0, sine=0.4, second=0, toroidal=True)
+    births = sample_births(field, n, birth="volume", seed=29, T0_keV=T0)
+
+    def source(s):
+        return (1 + 0.24 * s + 0.02 * s**2) * (1 - s**5)**2 * dt_reactivity(T0 * (1 - s)) / dt_reactivity(T0)
+
+    moments = [quad(lambda s: s**k * source(s), 0, 1, epsabs=1e-10)[0] for k in range(3)]
+    mean, variance = moments[1] / moments[0], moments[2] / moments[0] - (moments[1] / moments[0])**2
+    assert abs(births[:, 0].mean() - mean) < 6 * np.sqrt(variance / n)
+    assert abs(np.sin(4 * births[:, 2]).mean() - 0.4) < 6 / np.sqrt(n)
+    # Density scale and Jacobian orientation cancel in the normalized birth measure.
+    flipped = _birth_field(cosine=0, sine=0.4, second=0, toroidal=True, orientation=-1)
+    np.testing.assert_array_equal(births, sample_births(flipped, n, birth="volume", seed=29, ne0=1e250))
+
+
+@pytest.mark.parametrize("volume", [False, True])
+def test_birth_bound_covers_positive_fields_with_nonpositive_fourier_l1_bound(volume):
+    from vmex.core.tracing import _birth_bounds
+
+    field = _birth_field(cosine=0.95, second=0.45)
+    lower, upper = _birth_bounds(field, 1.0, volume)
+    # At r=1, B=0.55+0.95*u+0.9*u² has a positive minimum despite sum(amplitudes)>1.
+    minimum = 0.55 - 0.95**2 / 3.6
+    assert 0 < lower <= minimum and upper >= 1.26
+
+
+def test_birth_bounds_include_axis_and_boundary_spline_extrapolation():
+    import dataclasses
+    from vmex.core.tracing import _birth_bounds
+
+    field = _birth_field(cosine=0, second=0)
+    coefficient = np.zeros_like(field.b_coef)
+    r0 = np.asarray(field.r_knots)[:-1]
+    coefficient[:, 0, :] = np.stack([np.full(2, 0.2), 0.6 * r0, 0.6 * r0**2,
+                                    0.5 + 0.2 * r0**3], axis=1)
+    field = dataclasses.replace(field, b_coef=jax.numpy.asarray(coefficient))
+    lower, upper = _birth_bounds(field, 0.0, False)
+    assert 0 < lower <= 0.5 and upper >= 1.0
+    lower, upper = _birth_bounds(field, 1.0, False)
+    assert 0 < lower <= 0.7 and upper >= 1.26
+    lower, upper = _birth_bounds(field, 0.25, True)
+    assert 0 < lower <= 0.5 and upper >= 1.26
+
+
+@pytest.mark.parametrize("temperature", [1e-3, 0.1, 1.0, 12.0, 100.0, 1e6])
+def test_fusion_envelope_covers_the_complete_temperature_profile(temperature):
+    from vmex.core.tracing import _fusion_envelope, dt_reactivity
+
+    bound = _fusion_envelope(temperature)
+    temperatures = np.geomspace(1e-3, max(1e-3, temperature), 1001)
+    assert bound > 0 and np.isfinite(bound)
+    assert np.all(dt_reactivity(temperatures) <= bound)
+
+
+@pytest.mark.parametrize("kwargs", [dict(n=0), dict(n=1.5), dict(s=-0.1), dict(s=np.nan),
+    dict(birth="line"), dict(birth="volume", ne0=np.inf),
+    dict(birth="volume", T0_keV=-1), dict(birth="volume", T0_keV=np.nan)])
+def test_birth_sampling_rejects_invalid_parameters(kwargs):
+    from vmex.core.tracing import sample_births
+
+    with pytest.raises(ValueError, match="Birth sampling|Volume births"):
+        sample_births(_birth_field(), **{**dict(n=1), **kwargs})
+
+
+def test_birth_spline_bound_keeps_the_correct_adjacent_float_piece():
+    from vmex.core.tracing import _spline_range
+
+    lo = np.nextafter(0.5, 1.0)
+    hi = np.nextafter(lo, 1.0)
+    assert (lo + hi) / 2 == hi
+    knots = np.array([0.0, lo, hi, 1.0])
+    coefficient = np.zeros((3, 1, 4))
+    coefficient[:, 0, 3] = [2, 2, 3]
+    coefficient[1, 0, 2] = 1 / (hi - lo)
+    bounds = _spline_range(knots, coefficient, np.array([lo]), np.array([hi]))
+    assert bounds[0, 0, 0] <= 2 and 3 <= bounds[0, 0, 1] < 4
+
+
+def test_birth_sampling_preserves_float32_runtime_with_steep_radial_splines(monkeypatch):
+    from vmex.core.tracing import sample_births
+
+    import dataclasses
+    from essos.boozer import BoozerField
+
+    dtypes, original = set(), BoozerField.modB
+    def observe(field, s, theta, zeta):
+        dtypes.add(s.dtype)
+        return original(field, s, theta, zeta)
+    monkeypatch.setattr(BoozerField, "modB", observe)
+    previous = bool(jax.config.jax_enable_x64)
+    jax.config.update("jax_enable_x64", False)
+    try:
+        surface = 0.3
+        field = _birth_field(cosine=0.6, sine=0.4, second=0)
+        coefficient = np.asarray(field.b_coef).copy()
+        coefficient[:, 1, 2] = 1e4
+        coefficient[:, 1, 3] = 0.6 + 1e4 * (np.asarray(field.r_knots, float)[:-1] - np.sqrt(surface))
+        field = dataclasses.replace(field, b_coef=jax.numpy.asarray(coefficient))
+        assert field.b_coef.dtype == jax.numpy.float32
+        births = sample_births(field, 512, s=surface, seed=17)
+        assert not jax.config.jax_enable_x64 and dtypes == {jax.numpy.dtype("float64")}
+        np.testing.assert_array_equal(field.b_coef, coefficient)
+        phase = births[:, 1] - 4 * births[:, 2]
+        assert np.isfinite(births).all() and births.shape == (512, 4)
+        assert abs(np.cos(phase).mean() + 0.6 * np.sqrt(surface)) < 6 / np.sqrt(512)
+        assert abs(np.sin(phase).mean() + 0.4 * np.sqrt(surface)) < 6 / np.sqrt(512)
+        with pytest.raises(ValueError, match="finite positive"):
+            sample_births(_birth_field(B=0), 1)
+        assert not jax.config.jax_enable_x64
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+def test_volume_birth_sampling_accepts_a_floored_temperature_with_small_n(monkeypatch):
+    from vmex.core import tracing
+
+    monkeypatch.setattr(tracing, "_BIRTH_MAX_BATCHES", 3)
+    births = tracing.sample_births(_birth_field(cosine=0, second=0), 1,
+                                   birth="volume", T0_keV=1e-3)
+    assert births.shape == (1, 4)
+
+
+def test_birth_sampling_rejects_invalid_fields_and_bounds(monkeypatch):
+    import dataclasses
+    from vmex.core import tracing
+
+    field = _birth_field(cosine=0, second=0)
+    invalid = dataclasses.replace(field, sine_coef=jax.numpy.full_like(field.b_coef, np.nan))
+    with pytest.raises(ValueError, match="finite"):
+        tracing.sample_births(invalid, 1)
+    with pytest.raises(ValueError, match="positive n/nfp"):
+        tracing.sample_births(dataclasses.replace(field, nfp=0), 1)
+    negative = np.asarray(field.b_coef).copy()
+    negative[:, 0, 3] = -1
+    with pytest.raises(ValueError, match="positive Boozer"):
+        tracing.sample_births(dataclasses.replace(field, b_coef=jax.numpy.asarray(negative)), 1)
+    zero = dataclasses.replace(field, profile_coef=jax.numpy.zeros_like(field.profile_coef))
+    for birth in ("surface", "volume"):
+        with pytest.raises(ValueError, match="positive support"):
+            tracing.sample_births(zero, 1, birth=birth)
+    monkeypatch.setattr(tracing, "_birth_bounds", lambda *_args: (10, 1))
+    with pytest.raises(ValueError, match="envelope violation"):
+        tracing.sample_births(field, 1)
+
+
+@pytest.mark.parametrize("name,value,match", [
+    ("xm", [1, 2, 3], "constant mode"),
+    ("r_knots", [0.2, 1.1, 1.2], "radial knots"),
+    ("s_knots", [0.1, 1.1, 1.2], "profile knots"),
+    ("b_coef", np.zeros((2, 3, 3)), "finite cubic"),
+], ids=["constant-mode", "radial-knots", "profile-knots", "cubic-shape"])
+def test_birth_sampling_rejects_malformed_boozer_tables(name, value, match):
+    import dataclasses
+    from vmex.core.tracing import sample_births
+
+    field = dataclasses.replace(_birth_field(cosine=0, second=0), **{name: jax.numpy.asarray(value)})
+    with pytest.raises(ValueError, match=match):
+        sample_births(field, 1, birth="volume")
+
+
+def test_birth_sampling_stops_with_no_partial_result_at_the_proposal_limit(monkeypatch):
+    from vmex.core import tracing
+
+    field = _birth_field(cosine=0, second=0)
+
+    class Rejections:
+        def uniform(self, low, high, size):
+            return np.full(size, high / 2)
+
+    monkeypatch.setattr(np.random, "default_rng", lambda _seed: Rejections())
+    monkeypatch.setattr(tracing, "_birth_bounds", lambda *_args: (1e-5, 1))
+    monkeypatch.setattr(tracing, "_BIRTH_MAX_BATCHES", 3)
+    with pytest.raises(ValueError, match="proposal limit"):
+        tracing.sample_births(field, 1)
+
+
 def test_essos_field_handoff_matches_the_file_route(solovev_wout):
     """The field seam itself: both sources build the same ESSOS field."""
     from_file = essos_vmec_field(solovev_wout)
@@ -265,6 +544,48 @@ def test_cli_trace_names_the_upgrade_for_an_outdated_essos(solovev_wout, tmp_pat
     assert "MISSING OR OUTDATED OPTIONAL DEPENDENCY" in buffer.getvalue()
 
 
+def _catalog_birth_field(case, polarity=1):
+    from essos.boozer import BoozerField
+
+    # Eight native rows and 32 modes from actual ITER/NCSX/QHS46/LHD tables.
+    # The fixture embeds input/table hashes, retained indices and converged
+    # independent SciPy/NumPy quadrature; it is not a dynamics equilibrium.
+    with np.load(Path(__file__).parent / "data" / "boozer_birth_measures.npz") as data:
+        args = [data[f"{case}_{key}"] for key in
+                ("s", "bmnc", "xm", "xn", "iota", "G", "I", "psi0", "nfp")]
+    for k in (5, 6, 7):
+        args[k] = polarity * args[k]
+    return BoozerField.from_booz(*args, mode_tolerance=0)
+
+
+@pytest.mark.parametrize("case", ["iter", "ncsx", "qhs46", "lhd"])
+@pytest.mark.parametrize("birth", ["surface", "volume"])
+def test_real_equilibrium_birth_sign_seed_and_quadrature(case, birth):
+    from vmex.core.tracing import sample_births
+
+    positive = sample_births(_catalog_birth_field(case), 2048, birth=birth, seed=29)
+    negative = sample_births(_catalog_birth_field(case, -1), 2048, birth=birth, seed=29)
+    np.testing.assert_array_equal(positive, negative)
+    ss, theta, zeta, pitch = positive.T
+    field = _catalog_birth_field(case)
+    basis = np.column_stack([ss, ss**2, np.cos(theta), np.sin(theta),
+                             np.cos(field.nfp * zeta), np.sin(field.nfp * zeta)])
+    with np.load(Path(__file__).parent / "data" / "boozer_birth_measures.npz") as data:
+        expected = data[f"{case}_{birth}_moments"]
+    error = 6 * basis.std(axis=0, ddof=1) / np.sqrt(len(ss)) + 2e-5
+    assert np.all(abs(basis.mean(axis=0) - expected) <= error)
+    assert np.all(abs(pitch) <= 1)
+
+
+@pytest.mark.parametrize("B", [1.0, 1e-200, 1e200])
+def test_birth_sampling_with_near_degenerate_positive_measure(B):
+    from vmex.core.tracing import sample_births
+
+    ordinary = sample_births(_birth_field(current=0), 64, seed=4)
+    tiny = sample_births(_birth_field(B=B, G=2.0**-900, current=0), 64, seed=4)
+    np.testing.assert_array_equal(tiny, ordinary)
+
+
 @pytest.mark.parametrize("method", ["dopri5", "dopri8"])
 def test_optional_solver_cli_writes_method_and_energy(solovev_wout, tmp_path, method):
     import inspect
@@ -350,6 +671,7 @@ def test_orbit_failure_is_separate_from_energy_drift(solovev_wout, monkeypatch, 
     else:
         with pytest.raises(ValueError, match="loss fraction is undefined"):
             trace_alphas(solovev_wout, **TRACE_KWARGS)
+
 
 def test_compaction_dispatch_preserves_released_interfaces(solovev_wout, tmp_path, monkeypatch):
     import essos.boozer
