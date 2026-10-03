@@ -105,9 +105,9 @@ turbulence = [
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
 ]
-# Coil geometry and full asymmetric VMEC/Boozer tracing require ESSOS 0.19.3.
+# Coil geometry and VMEC/Boozer tracing, including fixed-step solver options.
 coils = [
-  "essos>=0.19.3",
+  "essos>=0.19.4",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.
