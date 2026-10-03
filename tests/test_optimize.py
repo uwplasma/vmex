@@ -650,18 +650,7 @@ def test_from_loss_honors_bound_scalar_method_literally():
 
 
 def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
-    """Certification refuses derivatives when the trial memo cannot vouch for x.
-
-    :func:`certified_trial` gates every scalar-lane derivative on the last
-    host solve belonging to exactly the requested ``x``.  Two failure modes
-    are forced here on both public lanes: the memo slot missing entirely
-    (writes dropped) and the memo belonging to different parameters (the
-    params key churned every call).  Either way the trial must fall onto the
-    smooth wall pair — ``max(10 * seed_cost, 1)`` with a zero gradient at
-    the seed — and count in ``holder["failed_trials"]``, never returning a
-    derivative of an uncertifiable state.  A malformed ``fun`` input takes
-    the flat 1e12 wall without solving.
-    """
+    """Reject uncertified derivatives and equilibria on both objective lanes."""
     import itertools
 
     from vmex.core import implicit as implicit_module
@@ -700,6 +689,8 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
         jacobian = problem.residual_jac(problem.x0)
         assert np.all(np.isfinite(jacobian))
         assert holder["last_jac_key"] == FunctionProblem._key(problem.x0)
+        with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+            problem.equilibrium_from_x(problem.x0)
 
     with monkeypatch.context() as m:
         nonce = itertools.count()
@@ -713,6 +704,8 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
         assert np.isclose(value, wall, rtol=1e-12, atol=0.0)
         np.testing.assert_array_equal(gradient, np.zeros_like(problem.x0))
         assert holder["failed_trials"] == failed_before + 1
+        with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+            problem.equilibrium_from_x(problem.x0)
 
     scalar = opt.VmecProblem.from_loss(
         inp,
@@ -731,6 +724,28 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
         assert np.isclose(value, swall, rtol=1e-12, atol=0.0)
         np.testing.assert_array_equal(gradient, np.zeros_like(scalar.x0))
         assert sholder["failed_trials"] == failed_before + 1
+        with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+            scalar.equilibrium_from_x(scalar.x0)
+
+    for lane in (problem, scalar):
+        lane.equilibrium_from_x(lane.x0)
+        cfg = lane.metadata["config"]
+        key, result = implicit_module._LAST_SOLVE[cfg]
+        for fsq in (np.inf, (cfg.max_fsq_ratio + 1) * cfg.ftol):
+            with monkeypatch.context() as m:
+                failed = dataclasses.replace(result, converged=False, fsqr=fsq, fsqz=0., fsql=0.)
+                m.setitem(implicit_module._LAST_SOLVE, cfg, (key, failed))
+                with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+                    lane.equilibrium_from_x(lane.x0)
+        with monkeypatch.context() as m:
+            usable = dataclasses.replace(result, converged=False, fsqr=cfg.ftol, fsqz=0., fsql=0.)
+            m.setitem(implicit_module._LAST_SOLVE, cfg, (key, usable))
+            assert not lane.equilibrium_from_x(lane.x0).result.converged
+        with monkeypatch.context() as m:
+            m.setitem(implicit_module._LAST_REFINED, cfg,
+                      (*implicit_module._LAST_REFINED[cfg][:2], True))
+            with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+                lane.equilibrium_from_x(lane.x0)
 
     # Malformed fun input: finite wall, no solve.
     assert scalar.fun(np.zeros(scalar.x0.size + 1)) == 1.0e12
