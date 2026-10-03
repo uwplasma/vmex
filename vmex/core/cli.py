@@ -276,13 +276,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sampling seed for births and collisions (default: 42).",
     )
     p.add_argument(
+        "--trace-method", choices=("rk4", "dopri5", "dopri8"), default="rk4",
+        help="Fixed-step orbit integrator (default: rk4; alternatives require ESSOS method support).",
+    )
+    p.add_argument(
         "--trace-compact", action=argparse.BooleanOptionalAction, default=None,
         help="Compact early losses when supported (default: on; --no-trace-compact disables it).",
     )
     p.add_argument(
         "--trace-timestep", type=float, default=None,
         help=(
-            "RK4 step in seconds (default: the converged 1.25e-7 times "
+            "Orbit step in seconds (default: 1.25e-7 times "
             "Aminor_p/1.7044 m; cost is inversely proportional)."
         ),
     )
@@ -1038,7 +1042,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
                  else f"s={float(args.trace_s):g}")
         emit(
             f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
-            f"guiding centre{', collisional' if args.collisional else ''}, "
+            f"guiding centre, {args.trace_method.upper()}{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
             f"{'unscaled' if scale is None else _scale_label(scale)}, "
             f"mode cut {mode_cut:g} of largest amplitude)"
@@ -1055,6 +1059,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             s=float(args.trace_s),
             seed=int(args.trace_seed),
             timestep=args.trace_timestep,
+            method=args.trace_method,
             compact=args.trace_compact,
             times_to_trace=int(args.trace_times),
             scale=scale,
