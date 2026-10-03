@@ -77,7 +77,7 @@ optimizers = [
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
 neoclassical = [
-  "neo-jax>=1.0.4",
+  "neo-jax>=1.0.5",
 ]
 # Differentiable virtual casing on a specified boundary; this is not a NESTOR
 # equilibrium adjoint. 0.0.8 keeps the a-priori (per-derivative-order) error
