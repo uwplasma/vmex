@@ -35,6 +35,9 @@ its binomial error:
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
 | `--trace-ne0 N0`, `--trace-te0 T0` | `4e20`, `12` | on-axis electron density [m^-3] and temperature [keV] | none |
 | `--trace-no-scale` | off | trace the equilibrium at its own size and field | none |
+| `--trace-energy-eV E` | alpha energy | kinetic energy [eV], positive and finite | through speed |
+| `--trace-mass-kg M` | alpha mass | particle mass [kg], positive and finite | through speed and drifts |
+| `--trace-charge-coulomb Q` | alpha charge | signed charge [C], finite and nonzero | through drifts and collisions |
 | `--scale-target axis` | `volavgB` | ARIES-CS convention of the in-memory scaling | none |
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
@@ -57,18 +60,40 @@ compare a 10 ms number against a 0.2 s table. For reference, Paul et al.
 (NF 62, 126054, 2022, Table 2) report 2470 of 10^4 ARIES-CS alphas born on
 s = 0.3 lost within 0.2 s.
 
+## Other charged particles
+
+For a controlled 20 keV proton probe at the equilibrium's physical size and
+field, specify all three parameters and a step appropriate to that speed:
+
+```console
+vmex wout_case.nc --trace --trace-no-scale --trace-birth surface \
+  --trace-energy-eV 20000 --trace-mass-kg 1.67262192369e-27 \
+  --trace-charge-coulomb 1.602176634e-19 \
+  --trace-timestep 2.5e-9 --trace-tmax 2e-4
+```
+
+A deuteron approximation uses twice the proton mass (`3.34524384738e-27 kg`)
+and the same charge and energy. These options set the nonrelativistic speed
+through `v = sqrt(2 E / m)` and the guiding-centre mass and signed charge.
+They preserve the existing surface/volume birth measure and electron/D/T
+collision background; they do not supply an NBI deposition distribution.
+Check timestep, spectrum and guiding-centre validity for the chosen case
+before interpreting loss fractions. The Python API accepts `energy_eV`,
+`mass` (kg) and `charge` (C) in `trace_alphas`; its legacy name is retained.
+
 ## What is traced
 
-- **Scale.** Loss fractions are physical only at reactor size, so the
-  equilibrium is first scaled in memory to ARIES-CS size: `<B> = 5.8646 T`
-  and `a = 1.7044 m` (the `--scale` rule, see {doc}`scale-a-configuration`).
+- **Scale.** The default alpha benchmark scales the equilibrium in memory
+  to ARIES-CS size: `<B> = 5.8646 T` and `a = 1.7044 m` (the `--scale`
+  rule, see {doc}`scale-a-configuration`). `--trace-no-scale` preserves
+  the supplied equilibrium's physical size and field.
 - **Field.** `booz_xform_jax` transforms every surface to Boozer coordinates.
   The cosine and sine `|B|` spectra are cut below `1e-4` of the largest
   combined amplitude and splined in `sqrt(s)`; `iota`, `G` and `I` are splined in `s`.
 - **Orbits.** The guiding-centre equations in Boozer coordinates (White; the
   `K = 0` form of SIMSOPT) are integrated with fixed-step RK4 in the chart
   `sqrt(s) (cos theta, sin theta)`, which is regular on the magnetic axis, so
-  no orbit stops there. An alpha is lost when it reaches `s = 1`.
+  no orbit stops there. A particle is lost when it reaches `s = 1`.
 - **Births.** Pitch `v_par / v` is uniform in `[-1, 1)`. The angles follow
   the Boozer Jacobian `(G + iota I) / B^2`. With `--trace-birth volume`, `s`
   follows the D-T rate `n_D n_T <sigma v>(T)`, weighted by the volume
