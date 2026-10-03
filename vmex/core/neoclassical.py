@@ -44,6 +44,32 @@ def diagnostic_neo_config():
     )
 
 
+def _require_asymmetric_neo():
+    _neo_imports()
+    from neo_jax import BoozerData
+
+    if "bmns" not in BoozerData.__dataclass_fields__:
+        raise NotImplementedError("LASYM requires NEO_JAX with sine spectra")
+
+
+def _neo_boozer_data(bx, indices):
+    """Share one mode-first Boozer transform with NEO, including sine partners."""
+    booz = {
+        "nfp_b": int(bx.nfp), "ns_b": len(indices), "mode_first": True,
+        "asym": bool(getattr(bx, "asym", False)),
+        "ixm_b": np.asarray(bx.xm_b), "ixn_b": np.asarray(bx.xn_b),
+        "iota_b": np.asarray(bx.iota)[indices],
+        "buco_b": np.asarray(bx.Boozer_I), "bvco_b": np.asarray(bx.Boozer_G),
+        "rmnc_b": np.asarray(bx.rmnc_b), "zmns_b": np.asarray(bx.zmns_b),
+        "pmns_b": -np.asarray(bx.numns_b), "bmnc_b": np.asarray(bx.bmnc_b),
+        "s_b": np.asarray(bx.s_b),
+    }
+    if booz["asym"]:
+        booz.update(rmns_b=np.asarray(bx.rmns_b), zmnc_b=np.asarray(bx.zmnc_b),
+                    pmnc_b=-np.asarray(bx.numnc_b), bmns_b=np.asarray(bx.bmns_b))
+    return booz
+
+
 def epsilon_effective_from_boozer(booz: Any, *, config=None):
     r"""Return ``(s, epsilon_eff**(3/2))`` from Boozer-coordinate data.
 
@@ -53,6 +79,9 @@ def epsilon_effective_from_boozer(booz: Any, *, config=None):
     JAX arrays remain differentiable when the mapping and selected NEO path
     are JAX-native.
     """
+    if isinstance(booz, dict) and booz.get(
+            "asym", booz.get("lasym", booz.get("bmns_b") is not None)):
+        _require_asymmetric_neo()
     NeoConfig, run_neo = _neo_imports()
     cfg = NeoConfig() if config is None else config
     result = run_neo(
@@ -80,19 +109,11 @@ def epsilon_effective_from_wout(
 ):
     """Compute ``epsilon_eff**(3/2)`` directly from an in-memory VMEX wout.
 
-    VMEX performs the Boozer transform in memory and passes its arrays to
-    NEO_JAX; no ``boozmn`` file is required. NEO_JAX currently represents the
-    stellarator-symmetric cosine/sine convention, so ``LASYM`` wouts are
-    rejected rather than silently dropping asymmetric harmonics. The default
-    is library-safe: a diagnostic call never clears the process-wide JAX
-    executable caches behind its caller's back. Pass ``clear_jax_caches=True``
-    to release completed executables before compiling NEO when peak memory
-    matters more than warm executables — the CLI does this itself after all
-    requested diagnostics instead (:mod:`vmex.core.cli`).
+    The same in-memory Boozer transform feeds NEO, including all LASYM
+    partners. Caches remain available unless ``clear_jax_caches=True``.
     """
     if bool(getattr(wout, "lasym", False)):
-        raise NotImplementedError(
-            "NEO_JAX's current BoozerData contract does not support LASYM harmonics")
+        _require_asymmetric_neo()
     if clear_jax_caches:
         import gc
 
@@ -107,13 +128,5 @@ def epsilon_effective_from_wout(
     indices = sorted({int(np.argmin(np.abs(s_in - float(s)))) for s in surfaces})
     bx.compute_surfs = indices
     bx.run()
-    booz = {
-        "nfp_b": int(bx.nfp), "ns_b": len(indices),
-        "ixm_b": np.asarray(bx.xm_b), "ixn_b": np.asarray(bx.xn_b),
-        "iota_b": np.asarray(bx.iota)[indices],
-        "buco_b": np.asarray(bx.Boozer_I), "bvco_b": np.asarray(bx.Boozer_G),
-        "rmnc_b": np.asarray(bx.rmnc_b), "zmns_b": np.asarray(bx.zmns_b),
-        "pmns_b": -np.asarray(bx.numns_b), "bmnc_b": np.asarray(bx.bmnc_b),
-        "s_b": np.asarray(bx.s_b),
-    }
+    booz = _neo_boozer_data(bx, indices)
     return epsilon_effective_from_boozer(booz, config=config)
