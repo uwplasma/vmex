@@ -81,7 +81,7 @@ def test_readme_install_floors_match_pyproject() -> None:
         assert match, requirement
         declared.setdefault(match.group(1), match.group(2) or "")
     readme = (ROOT / "README.md").read_text()
-    quoted = dict(re.findall(r'"([A-Za-z0-9_.-]+)>=([0-9][^"]*)"', readme))
+    quoted = dict(re.findall(r'[`"]([A-Za-z0-9_.-]+)>=([0-9][^`"]*)[`"]', readme))
     expected = {"solvax", "booz_xform_jax", "essos", "virtual-casing-jax", "neo-jax", "gkx"}
     assert expected <= set(quoted), sorted(expected - set(quoted))
     for name, floor in quoted.items():
