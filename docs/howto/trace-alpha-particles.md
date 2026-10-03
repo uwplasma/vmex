@@ -2,7 +2,7 @@
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
 reports the fraction lost through the last closed flux surface. It needs the
-`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.2 or later).
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.3 or later).
 
 ## Run it
 
@@ -13,7 +13,7 @@ vmex input.case --trace            # solve first, then trace
 
 The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
 stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
-(ESSOS 0.19.2 and later). It then prints the scaling factors, the step, the number of Boozer
+(ESSOS 0.19.3 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
@@ -27,6 +27,7 @@ its binomial error:
 |---|---|---|---|
 | `--trace-particles N` | 500 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
+| `--trace-compact`, `--no-trace-compact` | on when supported | compact early losses | loss dependent |
 | `--trace-timestep DT` | converged step (below) | RK4 step in seconds | `1 / DT` |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
 | `--trace-s S` | 0.25 | birth surface `s = psi / psi_b` | none |
@@ -37,7 +38,7 @@ its binomial error:
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
-| `--trace-mode-cut C` | `1e-4` | drop Boozer `|B|` modes below `C B00` | about `1 / C` in modes |
+| `--trace-mode-cut C` | `1e-4` | drop modes below `C` times the largest cosine/sine amplitude | about `1 / C` in modes |
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
 example, going from the default to 5000 alphas over 0.1 s costs 50 times the
@@ -61,8 +62,8 @@ s = 0.3 lost within 0.2 s.
   equilibrium is first scaled in memory to ARIES-CS size: `<B> = 5.8646 T`
   and `a = 1.7044 m` (the `--scale` rule, see {doc}`scale-a-configuration`).
 - **Field.** `booz_xform_jax` transforms every surface to Boozer coordinates.
-  The `|B|` spectrum, cut at modes below `1e-4` of the largest amplitude (`B00`), is
-  splined in `sqrt(s)`, and `iota`, `G` and `I` are splined in `s`.
+  The cosine and sine `|B|` spectra are cut below `1e-4` of the largest
+  combined amplitude and splined in `sqrt(s)`; `iota`, `G` and `I` are splined in `s`.
 - **Orbits.** The guiding-centre equations in Boozer coordinates (White; the
   `K = 0` form of SIMSOPT) are integrated with fixed-step RK4 in the chart
   `sqrt(s) (cos theta, sin theta)`, which is regular on the magnetic axis, so
