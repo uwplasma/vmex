@@ -585,34 +585,52 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     np.testing.assert_array_equal(bad_gradient, np.zeros_like(problem.x0))
 
 
-def test_equilibrium_from_x_is_the_state_the_objective_read():
-    """``equilibrium_from_x`` returns the refined state, not the host solve.
-
-    The objective reads the fixed-point-refined state.  On ``li383_low_res``
-    that state is 1.4e-2 from the host solve in one coefficient, and the
-    materialized equilibrium used to report a mean iota of 0.55449 against
-    the objective's 0.55359.  Materializing straight after construction,
-    before any objective evaluation, must give the same state too.
-    """
+@pytest.mark.parametrize("case", ["li383_low_res", "up_down_asymmetric_tokamak"])
+def test_equilibrium_from_x_is_the_state_the_objective_read(case, monkeypatch):
+    """Materialization preserves the objective state and reports its force residuals."""
+    from vmex.core import implicit as im, solver
     from vmex.core.statephysics import mean_iota
 
-    inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
+    inp = VmecInput.from_file(DATA_DIR / f"input.{case}")
+    if inp.lasym:
+        inp = dataclasses.replace(inp, ns_array=np.array([11]),
+            ftol_array=np.array([1e-12]), niter_array=np.array([4000]))
     problem = opt.make_problem(
         inp, objective_terms=[(opt.mean_iota, 0.0, 1.0)], max_mode=1)
+    cfg = problem.metadata["config"]
+    calls = []
+    def evaluate(state, runtime):
+        calls.append(state)
+        return solver.evaluate_forces(state, runtime)
+    monkeypatch.setattr(opt, "evaluate_forces", evaluate)
     before = problem.equilibrium_from_x(problem.x0)
+    assert len(calls) == 1
     objective = float(np.asarray(problem.residual(problem.x0))[0])
+    assert len(calls) == 1
     after = problem.equilibrium_from_x(problem.x0)
+    assert len(calls) == 2
+    names = ("fsqr", "fsqz", "fsql")
     for eq in (before, after):
+        assert eq.state is im._LAST_REFINED[cfg][1]
+        _, residuals, _ = solver.evaluate_forces(eq.state, eq.runtime)
+        reported = [getattr(eq.result, name) for name in names]
+        np.testing.assert_allclose(reported, [float(getattr(residuals, name)) for name in names],
+                                   rtol=1e-12, atol=0.0)
+        np.testing.assert_array_equal(reported, [getattr(eq.wout, name) for name in names])
         np.testing.assert_allclose(
             float(mean_iota(eq.state, eq.runtime)), objective, rtol=1e-12)
         np.testing.assert_allclose(
             float(np.mean(np.asarray(eq.wout.iotas)[1:])), objective, rtol=1e-12)
+    for a, b in zip(jax.tree.leaves(before.state), jax.tree.leaves(after.state)):
+        np.testing.assert_array_equal(a, b)
+    # One restart evaluation; the loose stopping threshold prevents an update.
+    restarted = solver.solve(before.inp, before.runtime.resolution, initial_state=before.state,
+        ftol=1.0, max_iterations=1, mode="jit", device=None, use_fft=False)
+    assert restarted.iterations == 1
+    np.testing.assert_allclose([getattr(before.result, name) for name in names],
+        [getattr(restarted, name) for name in names], rtol=1e-10, atol=1e-24)
 
-    # Without a refined state for this decision vector there is nothing
-    # certified to return, never the host solve in its place.
-    from vmex.core import implicit as im
-
-    cfg = problem.metadata["config"]
+    # A missing refined state remains uncertified.
     with pytest.MonkeyPatch.context() as patch:
         patch.delitem(im._LAST_REFINED, cfg)
         patch.setattr(im, "_host_solve_and_mask_status", lambda *args: None)
