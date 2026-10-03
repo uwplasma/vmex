@@ -368,6 +368,21 @@ def test_birth_sampling_rejects_invalid_fields_and_bounds(monkeypatch):
         tracing.sample_births(field, 1)
 
 
+@pytest.mark.parametrize("name,value,match", [
+    ("xm", [1, 2, 3], "constant mode"),
+    ("r_knots", [0.2, 1.1, 1.2], "radial knots"),
+    ("s_knots", [0.1, 1.1, 1.2], "profile knots"),
+    ("b_coef", np.zeros((2, 3, 3)), "finite cubic"),
+], ids=["constant-mode", "radial-knots", "profile-knots", "cubic-shape"])
+def test_birth_sampling_rejects_malformed_boozer_tables(name, value, match):
+    import dataclasses
+    from vmex.core.tracing import sample_births
+
+    field = dataclasses.replace(_birth_field(cosine=0, second=0), **{name: jax.numpy.asarray(value)})
+    with pytest.raises(ValueError, match=match):
+        sample_births(field, 1, birth="volume")
+
+
 def test_birth_sampling_stops_with_no_partial_result_at_the_proposal_limit(monkeypatch):
     from vmex.core import tracing
 
