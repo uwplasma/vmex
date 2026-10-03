@@ -2,7 +2,7 @@
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
 reports the fraction lost through the last closed flux surface. It needs the
-`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.3 or later).
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.4 or later).
 
 ## Run it
 
@@ -13,7 +13,7 @@ vmex input.case --trace            # solve first, then trace
 
 The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
 stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
-(ESSOS 0.19.3 and later). It then prints the scaling factors, the step, the number of Boozer
+(ESSOS 0.19.4 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
@@ -27,8 +27,9 @@ its binomial error:
 |---|---|---|---|
 | `--trace-particles N` | 500 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
+| `--trace-method rk4\|dopri5\|dopri8` | `rk4` | fixed-step integrator; alternatives require ESSOS method support | field dependent |
+| `--trace-timestep DT` | size-scaled step | orbit step in seconds | `1 / DT` |
 | `--trace-compact`, `--no-trace-compact` | on when supported | compact early losses | loss dependent |
-| `--trace-timestep DT` | converged step (below) | RK4 step in seconds | `1 / DT` |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
 | `--trace-s S` | 0.25 | birth surface `s = psi / psi_b` | none |
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
