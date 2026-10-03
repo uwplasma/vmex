@@ -267,6 +267,70 @@ def test_summary_style_constants():
     assert signature.parameters["ntheta"].default >= 120
 
 
+@pytest.mark.parametrize("zsort", ("average", "min", "max"))
+def test_surface_projection_cache_preserves_geometry_colors_and_camera(monkeypatch, zsort):
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    def rz(wout, *, s_index, theta, phi):
+        shape = (len(theta), len(phi))
+        return (np.broadcast_to(2 + .2 * np.cos(theta)[:, None], shape),
+                np.broadcast_to(.2 * np.sin(theta)[:, None], shape))
+
+    monkeypatch.setattr(plotting, "surface_rz", rz)
+    monkeypatch.setattr(plotting, "surface_modB", lambda wout, **kwargs: rz(wout, **kwargs)[0])
+    fig = plt.figure(figsize=(3, 3), dpi=60)
+    ax = fig.add_subplot(projection="3d")
+    plotting._boundary_3d_panel(ax, SimpleNamespace(ns=2), ntheta=8, nzeta=12)
+    artist = ax.collections[0]
+    artist.set_zsort(zsort)
+    depths = np.array([[-0.0] * 4, [1e16, 1.0, -1e16, 1.0]])
+    for row in (*depths, depths[0, :3]):
+        expected = Poly3DCollection._zsort_functions[zsort](row)
+        assert artist._zsortfunc(row).view(np.uint64) == expected.view(np.uint64)
+    masked = np.ma.array(depths, mask=depths < 0)
+    for values, axis in ((depths, -1), (depths, 0), (np.tile(depths, (2, 1)), None),
+                         (depths[0], -1), (depths[:, :3], -1), (depths[:0], -1),
+                         (masked, -1), (masked[1], None),
+                         (np.full(4, np.iinfo(np.int64).max, dtype=np.int64), None),
+                         (np.array([True, True, True, False]), None),
+                         (np.array([np.finfo(np.float32).smallest_subnormal, 0, 0, 0], dtype=np.float32), None)):
+        try:
+            expected = Poly3DCollection._zsort_functions[zsort](values, axis=axis)
+        except (ValueError, ZeroDivisionError) as exc:
+            with pytest.raises(type(exc)):
+                artist._zsortfunc(values, axis=axis)
+        else:
+            actual = artist._zsortfunc(values, axis=axis)
+            np.testing.assert_array_equal(actual, expected)
+            assert np.asarray(actual).dtype == np.asarray(expected).dtype
+    original, calls = Poly3DCollection.do_3d_projection, []
+
+    def project(self):
+        calls.append(1)
+        return original(self)
+
+    monkeypatch.setattr(Poly3DCollection, "do_3d_projection", project)
+    try:
+        for update in (lambda: None, lambda: ax.view_init(20, 40),
+                       lambda: artist.set_facecolor("red"),
+                       lambda: artist.set_verts([[[0, 0, 0], [1, 0, 0], [0, 1, 1]]]),
+                       lambda: ax.set_xlim(-1, 3)):
+            update()
+            fig.canvas.draw()
+            count = len(calls)
+            fig.canvas.draw()
+            assert len(calls) == count
+            pixels = np.asarray(fig.canvas.buffer_rgba()).copy()
+            with monkeypatch.context() as reference:
+                reference.setattr(type(artist), "do_3d_projection", original)
+                reference.setattr(artist, "_zsortfunc", Poly3DCollection._zsort_functions[zsort])
+                fig.canvas.draw()
+            np.testing.assert_array_equal(fig.canvas.buffer_rgba(), pixels)
+    finally:
+        plt.close(fig)
+
+
 def test_force_panel_reports_missing_data_deliberately():
     import matplotlib.pyplot as plt
 

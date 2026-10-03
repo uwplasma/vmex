@@ -145,7 +145,7 @@ def plot_optimization_objects(
             axis.set_box_aspect((1, 1, 1))
         axis.set_title(str(title))
     path = Path(path)
-    figure.tight_layout(); figure.savefig(path, dpi=int(dpi)); plt.close(figure)
+    figure.tight_layout(); _save_figure(figure, path, dpi=int(dpi)); plt.close(figure)
     return path
 
 
@@ -374,7 +374,7 @@ def plot_bootstrap_current(path: str | Path, equilibrium, mismatch, *, dpi: int 
                   transform=axis.transAxes, fontsize=9, va="top",
                   bbox={"facecolor": "white", "edgecolor": "0.8", "alpha": 0.85})
         axis.legend(frameon=True, loc="best")
-        figure.tight_layout(); path = Path(path); figure.savefig(path, dpi=int(dpi)); plt.close(figure)
+        figure.tight_layout(); path = Path(path); _save_figure(figure, path, dpi=int(dpi)); plt.close(figure)
     return path
 
 
@@ -418,6 +418,12 @@ def _rc_context():
     import matplotlib
 
     return matplotlib.rc_context(_publication_rc())
+
+
+def _save_figure(figure, path, **kwargs):
+    if Path(path).suffix.lower() == ".png":
+        kwargs["pil_kwargs"] = {"compress_level": 1}
+    figure.savefig(path, **kwargs)
 
 
 def _as_wout(wout):
@@ -1560,6 +1566,25 @@ def _boundary_3d_panel(ax, wout, *, ntheta: int, nzeta: int):
     import matplotlib
     from matplotlib import cm
     from matplotlib.colors import Normalize
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    class Surface(Poly3DCollection):
+        """Reuse unchanged projections during layout and rendering."""
+
+        # Match NumPy's summation order and positive-zero identity for quads.
+        _zsort_functions = dict(
+            Poly3DCollection._zsort_functions,
+            average=lambda z, axis=None: (z[0] + z[1] + z[2] + z[3] + 0.0) * 0.25
+            if axis is None and type(z) is np.ndarray and z.shape == (4,) and z.dtype == np.float64
+            else np.average(z, axis=axis))
+
+        def do_3d_projection(self):
+            cached = getattr(self, "_projection_cache", None)
+            if not self.stale and cached is not None and np.array_equal(self.axes.M, cached[0]):
+                return cached[1]
+            depth = super().do_3d_projection()
+            self._projection_cache = self.axes.M.copy(), depth
+            return depth
 
     cmap = matplotlib.colormaps[_CMAP_3D]
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
@@ -1569,10 +1594,17 @@ def _boundary_3d_panel(ax, wout, *, ntheta: int, nzeta: int):
     phi2d = np.meshgrid(phi, theta)[0]
     X, Y = R * np.cos(phi2d), R * np.sin(phi2d)
     norm = Normalize(float(B.min()), float(B.max()))
-    ax.plot_surface(
-        X, Y, Z, facecolors=cmap(norm(B)), rstride=1, cstride=1,
-        antialiased=False, linewidth=0.0, shade=False,
-    )
+    points = np.stack((X, Y, Z), axis=-1)
+    if np.isfinite(points).all():
+        vertices = np.stack((points[:-1, :-1], points[:-1, 1:],
+                             points[1:, 1:], points[1:, :-1]), axis=-2)
+        colors = cmap(norm(B[:-1, :-1])).reshape(-1, 4)
+        ax.add_collection3d(Surface(
+            vertices.reshape(-1, 4, 3), facecolors=colors, edgecolors=colors,
+            antialiased=False, linewidth=0.0))
+    else:
+        ax.plot_surface(X, Y, Z, facecolors=cmap(norm(B)), rstride=1, cstride=1,
+                        antialiased=False, linewidth=0.0, shade=False)
     scale = 0.7 * max(np.abs(X).max(), np.abs(Y).max())
     ax.auto_scale_xyz([-scale, scale], [-scale, scale], [-scale, scale])
     ax.set_box_aspect([1, 1, 1]); ax.set_axis_off()
@@ -1776,7 +1808,7 @@ def plot_summary(
     plt = _import_matplotlib()
     fig, _meta = _summary_figure(wout, s_plot_ignore=s_plot_ignore, j_pitch=j_pitch)
     out_path = Path(out_path)
-    fig.savefig(out_path, dpi=_DPI)
+    _save_figure(fig, out_path, dpi=_DPI)
     plt.close(fig)
     return out_path
 
@@ -1896,7 +1928,7 @@ def plot_stability(
         axes[1].set_ylabel("stability margin (>0 favorable)")
 
         out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
+        _save_figure(fig, out_path, dpi=_DPI)
         plt.close(fig)
     return out_path
 
@@ -1972,7 +2004,7 @@ def plot_surfaces(
         for iz in range(nzeta, flat.size):
             flat[iz].set_axis_off()
         out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
+        _save_figure(fig, out_path, dpi=_DPI)
         plt.close(fig)
     return out_path
 
@@ -2033,7 +2065,7 @@ def plot_modB(
             ax.set_ylabel(r"poloidal angle $\theta$")
             _pi_ticks(ax, "y")
         out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
+        _save_figure(fig, out_path, dpi=_DPI)
         plt.close(fig)
     return out_path
 
@@ -2088,7 +2120,7 @@ def plot_boundary_3d(
         cax = fig.add_axes([0.21, 0.86, 0.60, 0.03])
         fig.colorbar(sm, orientation="horizontal", cax=cax).set_label(r"$|B|$ [T]")
         out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI, bbox_inches="tight", pad_inches=0.05)
+        _save_figure(fig, out_path, dpi=_DPI, bbox_inches="tight", pad_inches=0.05)
         plt.close(fig)
     return out_path
 
@@ -2294,7 +2326,7 @@ def plot_boozmn_modB(
             ax.set_ylim(0, 2 * np.pi)
         fig.suptitle("Boozer-coordinate |B| contours")
         out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
+        _save_figure(fig, out_path, dpi=_DPI)
         plt.close(fig)
     return out_path
 
@@ -2361,7 +2393,7 @@ def plot_boozmn_mode_profiles(boozmn, out_path: str | Path, *, max_modes: int = 
             ax.set_xlim(float(s_b.min()), float(s_b.max()))
         ax.legend(loc="best")
         out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
+        _save_figure(fig, out_path, dpi=_DPI)
         plt.close(fig)
     return out_path
 
@@ -2429,7 +2461,7 @@ def plot_boozmn_spectrum(boozmn, out_path: str | Path, *, surface_index: int = -
         )
         ax.grid(True, axis="y", alpha=0.25)
         out_path = Path(out_path)
-        fig.savefig(out_path, dpi=_DPI)
+        _save_figure(fig, out_path, dpi=_DPI)
         plt.close(fig)
     return out_path
 
@@ -2501,6 +2533,10 @@ def _boozer_boundary_xyz(boozer: dict, theta, zeta):
     R = np.cos(phase) @ boozer["rmnc_b"]
     Z = np.sin(phase) @ boozer["zmns_b"]
     phi = np.asarray(zeta) - np.sin(phase) @ boozer["numns_b"]  # zeta_B = phi + nu
+    if boozer.get("asym", False):
+        R += np.sin(phase) @ boozer["rmns_b"]
+        Z += np.cos(phase) @ boozer["zmnc_b"]
+        phi -= np.cos(phase) @ boozer["numnc_b"]
     return R * np.cos(phi), R * np.sin(phi), Z
 
 
@@ -2588,7 +2624,7 @@ def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str
         a_i.set(xlabel="s", ylabel=r"$\iota$", title=r"$\iota(s)$ and rationals $nN_{fp}/m$")
         fig.suptitle(title, fontsize=11)
         path = outdir / f"{name}_trace.png"
-        fig.savefig(path, dpi=_DPI)
+        _save_figure(fig, path, dpi=_DPI)
         plt.close(fig)
         written["summary"] = path
 
@@ -2606,7 +2642,7 @@ def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str
         ax3.set_box_aspect((1, 1, 0.35))
         ax3.set_title(f"{name}: {int(lost.sum())} alpha loss locations")
         path = outdir / f"{name}_trace_3d.png"
-        fig.savefig(path, dpi=_DPI)
+        _save_figure(fig, path, dpi=_DPI)
         plt.close(fig)
         written["3d"] = path
     return written
