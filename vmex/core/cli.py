@@ -256,8 +256,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tracing horizon in seconds (default: 1e-2; cost is linear in it).",
     )
     p.add_argument(
-        "--trace-particles", type=int, default=500,
-        help="Number of alpha particles (default: 500; cost is linear, sigma ~ 1/sqrt(N)).",
+        "--trace-particles", type=int, default=1000,
+        help="Number of alpha particles (default: 1000; cost is linear, sigma ~ 1/sqrt(N)).",
     )
     p.add_argument(
         "--trace-no-scale", action="store_true",

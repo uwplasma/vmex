@@ -1,35 +1,9 @@
-"""The vmex-to-ESSOS field handoff, and alpha tracing on top of it.
+"""VMEX-to-ESSOS fields and fusion-alpha tracing.
 
-- :func:`essos_vmec_field` — hand a solved equilibrium (or a wout file) to
-  ESSOS as an ``essos.fields.Vmec``, ready for ESSOS tracing, surfaces and
-  field queries.  An ESSOS coil field entering a vmex free-boundary solve goes
-  the other way through :meth:`~vmex.core.mgrid.MgridField.from_coils`.
-- :func:`trace_alphas` — trace fusion-born alpha particles and return the
-  loss diagnostics as an :class:`AlphaTracingResult` (``vmex --trace``).
-
-Tracing runs in Boozer coordinates: ``booz_xform_jax`` transforms the
-equilibrium, and ``essos.boozer`` integrates the guiding-centre equations
-(White; the ``K = 0`` form of SIMSOPT ``GuidingCenterNoKBoozerRHS``) with
-fixed-step RK4 over a spline of the ``|B|`` spectrum, in a chart that is
-regular on the magnetic axis.  One right-hand side costs about 1 µs per
-particle, against 8-10 µs for the VMEC-coordinate field.
-A particle is lost when it reaches ``s = 1``.
-
-Births: on one surface ``s`` (default) or through the volume in proportion
-to the D-T fusion rate (``birth="volume"``), uniform in pitch ``v_par/v`` over
-``[-1, 1)`` and distributed over the angles with the Boozer Jacobian
-``(G + iota I) / B^2``.  The plasma profiles, for volume births and for
-``collisions=True``, are those of Landreman, Buller & Drevlak, PoP 29, 082501
-(2022): ``n_D = n_T = n_e / 2 = (n_e0 / 2)(1 - s^5)`` and
-``T = T_0 (1 - s)`` with ``n_e0 = 4e20 m^-3`` and ``T_0 = 12 keV``, and the
-Bosch-Hale D-T reactivity.  With collisions the Monte Carlo operator of
-``essos.boozer`` (pitch-angle scattering, slowing down and energy diffusion
-on electrons, D and T) acts after every step, and an alpha whose energy falls
-below 1.5 times the local temperature is thermalised (confined).
-
-By default the equilibrium is first scaled in memory to ARIES-CS size
-(:func:`~vmex.core.scaling.aries_cs_scales`, ``scale="volavgB"``), because
-alpha orbit widths, and hence losses, depend on the absolute field and size.
+``trace_alphas`` scales a WOUT to reactor size, transforms it to Boozer
+coordinates and integrates ESSOS guiding centres. Births use the Boozer
+volume measure on one surface or a D-T-weighted volume; loss occurs at ``s=1``.
+See the alpha-tracing guide for profiles, collisions and convergence limits.
 """
 
 from __future__ import annotations
@@ -202,7 +176,7 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
 
 def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
                   seed: int = 42, ne0: float = NE0, T0_keV: float = T0_KEV):
-    """Birth ``(s, theta_B, zeta_B, v_par/v)`` for ``n`` alphas (module notes)."""
+    """Sample physical Boozer births on a surface or through the D-T volume."""
     import jax
     import jax.numpy as jnp
 
@@ -216,11 +190,13 @@ def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
         ze = rng.uniform(0.0, 2 * np.pi / field.nfp, m)
         B = np.asarray(modB(jnp.asarray(ss), jnp.asarray(th), jnp.asarray(ze)))
         iota, G, current = field.profiles(jnp.asarray(ss))[0].T
-        weight = np.asarray(G + iota * current) / B**2
+        weight = np.abs(np.asarray(G + iota * current)) / B**2
         if birth == "volume":
             weight = weight * (ne0 / 2 * (1 - ss**5)) ** 2 * dt_reactivity(T0_keV * (1 - ss))
         elif birth != "surface":
             raise ValueError(f"birth must be 'surface' or 'volume', got {birth!r}")
+        if not np.isfinite(weight).all() or weight.max() <= 0:
+            raise ValueError("birth density requires a positive finite Boozer volume measure")
         keep = rng.uniform(0.0, weight.max(), m) < weight
         out.append(np.stack([ss, th, ze, rng.uniform(-1.0, 1.0, m)], axis=1)[keep])
     return np.concatenate(out)[:n]
@@ -230,7 +206,7 @@ def trace_alphas(
     source: Any,
     *,
     tmax: float = 1e-2,
-    nparticles: int = 500,
+    nparticles: int = 1000,
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,
@@ -249,33 +225,11 @@ def trace_alphas(
 ) -> AlphaTracingResult:
     """Trace fusion alphas through a wout file or in-memory equilibrium.
 
-    Parameters
-    ----------
-    source:
-        Path to a ``wout_*.nc`` file, or an in-memory
-        :class:`~vmex.core.wout.WoutData`.
-    tmax, timestep, times_to_trace:
-        Horizon [s]; RK4 step [s] (``None``: :data:`TIMESTEP` times
-        ``Aminor_p / 1.7044 m``); samples of the loss-fraction curve.
-    nparticles, s, seed, birth:
-        Ensemble size, launch surface (``birth="surface"``) and seed;
-        ``birth="volume"`` samples the D-T birth profile instead.
-    scale:
-        :data:`~vmex.core.scaling.SCALE_TARGETS` convention to scale the
-        equilibrium to ARIES-CS size in memory first, or ``None``.
-    collisions, ne0, T0_keV:
-        Monte Carlo collisions on the default background, with on-axis
-        electron density [m^-3] and temperature [keV] (also the volume
-        birth profile).
-    mboz, nboz, mode_tolerance:
-        Boozer resolution and the relative amplitude of dropped modes.
-    method:
-        Fixed-step ``"rk4"`` (default), ``"dopri5"`` or ``"dopri8"``.
-    compact:
-        Enable survivor compaction when supported; ``False`` disables it.
-    progress:
-        ``None``, or ``progress(done, total)``, called as the horizon advances
-        (ESSOS runs it in host-side chunks; the orbits are unchanged).
+    The default scales to ARIES-CS size and launches at ``s=0.25``; use
+    ``birth="volume"`` for D-T-weighted births. ``timestep=None`` scales the
+    step with minor radius. ``method`` selects RK4 (default), Dopri5 or Dopri8;
+    ``compact=False`` disables survivor compaction.
+    ``progress(done, total)`` receives completed intervals.
     """
     import jax
 
@@ -333,7 +287,7 @@ def trace_alphas(
     if failed.any():
         raise ValueError(f"{failed.sum()} alpha trajectories failed; loss fraction is undefined. "
                          "Reduce the timestep or inspect the field")
-    loss_fractions = np.array([(trace.loss_times[lost] <= t).sum() for t in times]) / nparticles
+    loss_fractions = np.searchsorted(np.sort(trace.loss_times[lost]), times, side="right") / nparticles
     last = -1
     keys = ("rmnc_b", "zmns_b", "numns_b")
     if bool(bx.asym):

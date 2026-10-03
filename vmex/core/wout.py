@@ -229,8 +229,8 @@ class WoutData:
     am: np.ndarray                   # (21,) pressure polynomial
     ac: np.ndarray                   # (21,) current polynomial
     ai: np.ndarray                   # (21,) iota polynomial
-    am_aux_s: np.ndarray             # (101,) spline knots (-1 fill)
-    am_aux_f: np.ndarray             # (101,) spline values (0 fill)
+    am_aux_s: np.ndarray             # (ndfmax,) spline knots (-1 fill)
+    am_aux_f: np.ndarray             # (ndfmax,) spline values (0 fill)
     ai_aux_s: np.ndarray
     ai_aux_f: np.ndarray
     ac_aux_s: np.ndarray
@@ -427,8 +427,8 @@ def write_wout(path: str | Path, data: WoutData, *, overwrite: bool = True) -> P
             ("dim_00001", 1),
             (_DIM_MN, int(np.asarray(d.xm).size)),
             (_DIM_MN_NYQ, int(np.asarray(d.xm_nyq).size)),
-            ("n_tor", int(d.ntor) + 1), ("preset", _PRESET),
-            ("ndfmax", _NDFMAX), (_DIM_RADIUS, int(d.ns)),
+            ("n_tor", int(d.ntor) + 1), ("preset", np.size(d.am)),
+            ("ndfmax", np.size(d.am_aux_s)), (_DIM_RADIUS, int(d.ns)),
             (_DIM_TIME, int(np.asarray(d.fsqt).size)),
         ):
             ds.createDimension(name, size)
@@ -487,7 +487,8 @@ def write_wout(path: str | Path, data: WoutData, *, overwrite: bool = True) -> P
         for name, dim in _PROFILE_1D:
             _put(ds, name, (dim,), np.asarray(getattr(d, name), float))
         for name in _RADIUS_1D:
-            _put(ds, name, (_DIM_RADIUS,), np.asarray(getattr(d, name), float))
+            if getattr(d, name) is not None:
+                _put(ds, name, (_DIM_RADIUS,), getattr(d, name))
         _put(ds, "fsqt", (_DIM_TIME,), np.asarray(d.fsqt, float))
         _put(ds, "wdot", (_DIM_TIME,), np.asarray(d.wdot, float))
         if lfreeb:

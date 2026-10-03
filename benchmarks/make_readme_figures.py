@@ -1,31 +1,8 @@
 #!/usr/bin/env python3
-"""Regenerate the small set of benchmark figures used by the documentation.
+"""Generate documentation figures from committed benchmark records.
 
-Produces (into ``docs/_static/figures/``):
-
-- ``readme_runtime_compare.webp``      — VMEC2000 vs vmex (cold/warm CPU,
-  GPU where comparable) vs VMEC++, from
-  ``benchmarks/baseline.json`` and
-  ``benchmarks/gpu_baseline.json``.  Run ``benchmarks/run_baseline.py`` first.
-- ``readme_convergence.webp``          — force residual vs iteration for one
-  representative case (nfp4_QH_warm_start at ns=51) in vmex, VMEC2000
-  (NSTEP=1 stdout trace), and VMEC++ (wout
-  ``fsqt``).  Traces are cached in
-  ``benchmarks/convergence_nfp4_ns51.json``; delete it to re-run the codes.
-- ``readme_precond.webp``              — 2D block vs 1D radial preconditioner
-  iteration counts on stiff cases (R10.2 measurements).
-- ``readme_equilibrium_showcase.webp`` — flux surfaces, 3-D boundary geometry
-  coloured by ``|B|``, and ``|B|`` in Boozer coordinates on the LCFS (jet),
-  for the bundled quick-start case (solves it in-process).
-Usage:
-    python benchmarks/make_readme_figures.py
-        [--only runtime,convergence,precond,showcase]
-        [--outdir docs/_static/figures]
-
-Figures are written straight to lossless WebP, so re-running this script
-reproduces the committed bytes for any figure whose inputs have not changed.
-Their provenance rows are in ``docs/_static/figures/figures.json``; refresh
-them with ``python tools/update_figure_manifest.py`` after regenerating.
+Run with --only runtime,convergence,precond,showcase,trace (showcase solves
+its equilibrium). Refresh provenance with tools/update_figure_manifest.py.
 """
 
 from __future__ import annotations
@@ -39,6 +16,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from PIL import Image
 
 REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "examples" / "data"
@@ -488,7 +466,32 @@ def make_showcase_figure(out: Path) -> None:
     print("wrote", out)
 
 
-# --------------------------------------------------------------------------
+def make_trace_comparison_figure(out: Path) -> None:
+    record = json.loads((REPO / "benchmarks/trace_accuracy.json").read_text())["long_gpu"]
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3.1), layout="constrained")
+    curve = record["loss_curve"]
+    for name, color in [("ESSOS", BLUE), ("CATAPULT", "#d89039")]:
+        f = np.asarray(curve[name + "_lost"]) / record["particles"]
+        error = np.sqrt(f * (1-f) / record["particles"])
+        axes[0].plot(1e6*np.asarray(curve["times_s"]), 100*f, label=name, color=color)
+        axes[0].fill_between(1e6*np.asarray(curve["times_s"]), 100*(f-error), 100*(f+error), color=color, alpha=.2)
+    axes[0].set(xlabel="Time [µs]", ylabel="Lost [%]", title="8,192 births; 20 ms horizon")
+    axes[0].legend(fontsize=8)
+    rows = [record["results"][1], record["results"][2]]
+    for offset, column, color, label in [(-.18, 3, BLUE_LIGHT, "Cold"), (.18, 4, BLUE, "Warm")]:
+        bars = axes[1].barh(np.arange(2)+offset, [row[column] for row in rows], height=.34, color=color, label=label)
+        axes[1].bar_label(bars, fmt="%.1f", padding=3, fontsize=8)
+    axes[1].set(yticks=[0,1], yticklabels=["ESSOS", "CATAPULT"], xlabel="Trace time [s]", title="8,192 births, 20 ms; RTX A4000", xlim=(0, 62))
+    axes[1].invert_yaxis()
+    axes[1].legend(fontsize=8)
+    for ax in axes:
+        ax.spines[["top", "right"]].set_visible(False)
+    fig.savefig(out, dpi=130, pil_kwargs={"lossless": True})
+    plt.close(fig)
+    with Image.open(out) as image:
+        image.convert("RGB").quantize(colors=64).convert("RGB").save(out, lossless=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="runtime,convergence,precond,showcase")
@@ -506,6 +509,8 @@ def main() -> None:
         make_precond_figure(outdir / "readme_precond.webp")
     if "showcase" in which:
         make_showcase_figure(outdir / "readme_equilibrium_showcase.webp")
+    if "trace" in which:
+        make_trace_comparison_figure(outdir / "readme_trace_benchmark.webp")
 
 
 if __name__ == "__main__":

@@ -134,26 +134,24 @@ vmex wout_my_case.nc --to-input    # writes input.my_case
 ```
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
-by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
-10 ms in Boozer coordinates (under a minute on 10 CPU cores, faster than a GPU at this size). It writes the loss fraction and a figure set:
+by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 1,000 fusion alphas for
+10 ms in Boozer coordinates. It writes the loss fraction and a figure set:
 loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
 `--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
 birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 ([guide](docs/howto/trace-alpha-particles.md)).
+The shaded loss-curve band is the pointwise binomial standard error,
+`f(t) ± sqrt(f(t) [1 - f(t)] / N)`, where `f(t)` is the fraction of `N`
+births lost by time `t`. It describes sampling uncertainty, not orbit or
+field error; use more births for small loss fractions.
 
-![vmex --trace output: loss against time, loss map, pitch and loss-time distributions, iota](docs/_static/figures/readme_trace_output.webp)
+**Particle tracing comparisons.** 8,192 common 3.52 MeV alpha births are traced for 20 ms through a reactor-scale vacuum equilibrium without collisions.
 
-**`--trace` against SIMPLE and SIMSOPT.** The same 1000 ARIES-CS alphas (positions, pitches, energy) were traced for 10 ms by each code on the same 8 CPU
-cores. Runtimes exclude compilation and field set-up ([benchmark](benchmarks/trace_cross_code.py),
-[details](docs/howto/trace-alpha-particles.md#against-simple-and-simsopt)). The loss fractions agree within 0.6σ.
+![Matched loss curves and cold/warm GPU tracing runtimes](docs/_static/figures/readme_trace_benchmark.webp)
 
-| code | loss fraction | runtime |
-|---|---|---|
-| VMEX `--trace` | 12.8 % ± 1.1 % | 146 s |
-| [SIMPLE](https://github.com/itpplasma/SIMPLE) | 12.4 % ± 1.0 % | 556 s |
-| SIMSOPT | 11.9 % ± 1.0 % | 1079 s |
+ESSOS and CATAPULT lose 6,572 and 6,573 particles; 8,191 labels agree. Alpha mass is `6.6446573450e-27 kg`; timings use an RTX A4000 and exclude field setup. Energy drift is `2.14e-5` at every ESSOS step and `1.36e-5` at saved confined CATAPULT states. [Controls, field checks and CPU/DESC/SIMPLE/SIMSOPT comparisons](docs/explanation/validation.md#cross-code-alpha-tracing).
 
-![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT](docs/_static/figures/readme_trace_benchmark.webp)
+Shaded loss bands use `f(t) ± sqrt(f(t)[1-f(t)]/N)`, the pointwise binomial sampling error. Timestep and spectrum convergence are checked separately.
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
