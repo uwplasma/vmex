@@ -295,8 +295,8 @@
     },
     {
       "path": "docs/_static/figures/readme_optimization.webp",
-      "sha256": "983b489832720171162462cf5ce314f4b0d8520cd972b8755d2e39b65d608056",
-      "bytes": 297724,
+      "sha256": "7e763e1b60e72d302b29571659d71a0a62397b99fec841643f7b54e6a37bbc26",
+      "bytes": 193504,
       "generator": "examples/plot_optimized_families.py",
       "command": "python examples/plot_optimized_families.py",
       "inputs": [],
@@ -308,7 +308,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Reads input.QA_optimized / input.QH_optimized / input.QP_optimized from the working directory. Those decks are the output of examples/optimization/{QA,QH,QP}_optimization.py and are not committed, so the figure cannot be regenerated from a clean checkout alone."
+      "note": "Reads input.QA_optimized / input.QH_optimized / input.QP_optimized from the working directory. Those decks are the output of examples/optimization/{QA,QH,QP}_optimization.py and are not committed, so the figure cannot be regenerated from a clean checkout alone. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
     },
     {
       "path": "docs/_static/figures/readme_polish_before_after.webp",
@@ -331,8 +331,8 @@
     },
     {
       "path": "docs/_static/figures/readme_polish_plot.webp",
-      "sha256": "ae6b19e47a95752b5c949df095d5adb71fbc8e5d79ca6b7a1d4ca44682889c6d",
-      "bytes": 273940,
+      "sha256": "e9c4604f1f301134f71b7114a80db5837842afbd8b2e302b79d5b2be868eb46c",
+      "bytes": 108972,
       "generator": "examples/force_balance_polishing.py",
       "command": "python examples/force_balance_polishing.py",
       "inputs": [
@@ -346,7 +346,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "vmex --plot summaries of the unpolished and polished WOUT files side by side; the force panel is the WOUT finite-difference reconstruction."
+      "note": "vmex --plot summaries of the unpolished and polished WOUT files side by side; the force panel is the WOUT finite-difference reconstruction. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
     },
     {
       "path": "docs/_static/figures/readme_precond.webp",
@@ -371,8 +371,8 @@
     },
     {
       "path": "docs/_static/figures/readme_qi.webp",
-      "sha256": "493a17ffc3fe32dfa1a8eadf01b245f9605023f400a86d0fc4a0328d6ce55079",
-      "bytes": 538774,
+      "sha256": "37b4f448a9a41c23b55fd6a730fd96a75e34102ef0c5062752f5021144c2d457",
+      "bytes": 291042,
       "generator": "examples/plot_optimized_families.py",
       "command": "python examples/plot_optimized_families.py",
       "inputs": [
@@ -389,7 +389,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Unlike the sibling optimization figure, every QI deck it draws is bundled, so one command rebuilds it. Not re-rendered here (four solves), so its committed bytes predate the lossless-WebP change to the generator."
+      "note": "Unlike the sibling optimization figure, every QI deck it draws is bundled, so one command rebuilds it. Not re-rendered here (four solves), so its committed bytes predate the lossless-WebP change to the generator. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
     },
     {
       "path": "docs/_static/figures/readme_runtime_compare.webp",
@@ -473,8 +473,8 @@
     },
     {
       "path": "docs/_static/figures/stellarator_mirror_hybrid.webp",
-      "sha256": "143928dbdaae7432bab69e78c544bde4292275ba38905bf6786b2feb6cbe7aa0",
-      "bytes": 159326,
+      "sha256": "78f29025f23ceeed8dd60ac6810c7f247ef62418b6e3bd0d8cbe3b73d779dce6",
+      "bytes": 93312,
       "generator": "examples/mirror/stellarator_mirror_hybrid.py",
       "command": "python examples/mirror/stellarator_mirror_hybrid.py && cp results/stellarator_mirror_hybrid/stellarator_mirror_hybrid.webp docs/_static/figures/",
       "inputs": [],
@@ -482,12 +482,12 @@
       "generated": "2026-09-05",
       "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
       "reproducible": "command",
-      "bytes_verified": true,
+      "bytes_verified": false,
       "used_in": [
         "README.md",
         "docs/explanation/mirror-geometry.rst"
       ],
-      "note": "The periodic B-spline racetrack is built from constants inside the example. The example calls vmex.mirror.output.plot_stellarator_mirror_hybrid with image_format=\"webp\", which writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
+      "note": "The periodic B-spline racetrack is built from constants inside the example. The example calls vmex.mirror.output.plot_stellarator_mirror_hybrid with image_format=\"webp\", which writes this file as lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1 redirects it to results/. Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
     },
     {
       "path": "docs/_static/figures/readme_trace_benchmark.webp",

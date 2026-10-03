@@ -1,44 +1,9 @@
 #!/usr/bin/env python3
-"""CPU-vs-GPU benchmark matrix for vmex (§7.8).
+"""Measure CPU/GPU solve, size-scan and tridiagonal timings in fresh processes.
 
-Runs, one cell at a time (the machine may be shared):
-
-  {decks + synthetic nfp4_QH size scan} x {device=cpu, device=gpu}
-      x {solve_multigrid, solver.solve(mode="jit")}
-
-recording cold wall (first in-process solve, includes compile), warm wall
-(second in-process solve, compile cache hot), compile-vs-run split
-(cold - warm), per-iteration step time (warm / iterations), and peak device
-memory (``jax.local_devices()[0].memory_stats()`` on GPU).
-
-Plus two microbenchmarks of ``vmex.core.preconditioner.tridiagonal_solve``
-(hypotheses c/d of §7.8.3): CPU-vs-GPU across (ns, ncols) at fp64, and
-fp32-vs-fp64 on GPU.
-
-Every cell is a fresh subprocess and selects hardware through VMEX's public
-``device=`` API.  No JAX platform environment variable is required.
-
-Usage (orchestrator):
-    python benchmarks/run_gpu_matrix.py [--out benchmarks/gpu_baseline.json]
-        [--only substr] [--timeout 1800] [--skip-tridiag]
-
-Office decision sweep (one command; produces every CPU-vs-GPU crossover
-curve: fixed-boundary per-iteration marginals on the ns x mnmax grid, the
-free-boundary NS sweep, the >512-mode FFT probe, and the fixed/free/gradient
-workflow profiles via ``profile_resources.py``):
-
-    python benchmarks/run_gpu_matrix.py --office \
-        --out benchmarks/gpu_office.json
-
-Repeat with ``--xla-flags "--xla_gpu_enable_command_buffer=FUSION,CUSTOM_CALL"``
-and a different ``--out`` for the CUDA-graph A/B; the flags are recorded in
-``meta`` and applied to every child process.
-
-Internal worker modes (spawned by the orchestrator):
-    --worker solve  --deck PATH --lane {multigrid,single_cli,single_jit}
-        --device {cpu,gpu}
-    --worker stepscan --deck150 PATH --deck450 PATH --lane ... --device ...
-    --worker tridiag --dtype {f32,f64} --device {cpu,gpu}
+Record first-call and warm wall time, iterations and peak device memory.
+Use ``--reference-grid`` for the fixed/free-boundary calibration sweep.
+``--xla-flags`` applies one XLA setting to every child process.
 """
 
 from __future__ import annotations
@@ -71,16 +36,12 @@ SYNTH_NS = [35, 75, 151]
 SYNTH_MODES = [(2, 2), (4, 4)]
 SYNTH_NITER = 150  # fixed iteration budget -> exact per-iteration throughput
 
-# --office decision grid: production radial range x mnmax 8..288 (the
-# device-policy calibration range), production CLI lane included, plus a
-# free-boundary NS sweep (vacuum steady lane / NESTOR cost per iteration)
-# and one >512-mode probe where the GPU default switches to the separable
-# FFT synthesis (device policy currently routes that regime to CPU).
-OFFICE_NS = [51, 101, 201]
-OFFICE_MODES = [(2, 2), (8, 8), (12, 12)]     # mnmax 8, 128, 288
-OFFICE_LANES = ("multigrid", "single_cli")
-OFFICE_FREE_NS = [15, 25, 51]
-OFFICE_HIGH_MODE = (51, 19, 14)               # mnmax 537 > GPU_MAX_SPECTRAL_MODES
+# Reference grid covers fixed/free-boundary sweeps and a >512-mode probe.
+REFERENCE_NS = [51, 101, 201]
+REFERENCE_MODES = [(2, 2), (8, 8), (12, 12)]     # mnmax 8, 128, 288
+REFERENCE_LANES = ("multigrid", "single_cli")
+REFERENCE_FREE_NS = [15, 25, 51]
+REFERENCE_HIGH_MODE = (51, 19, 14)               # mnmax 537 > GPU_MAX_SPECTRAL_MODES
 
 TRIDIAG_NS = [16, 35, 75, 151, 301, 601]
 TRIDIAG_NCOLS = [30, 150, 600, 2400]
@@ -325,7 +286,7 @@ def main() -> None:
     ap.add_argument("--timeout", type=int, default=1800)
     ap.add_argument("--skip-tridiag", action="store_true")
     ap.add_argument("--skip-matrix", action="store_true")
-    ap.add_argument("--office", action="store_true",
+    ap.add_argument("--reference-grid", action="store_true",
                     help="one-command decision sweep: ns x mnmax stepscan grid "
                          "(production CLI lane), free-boundary NS sweep, "
                          ">512-mode probe, and profile_resources workflows")
@@ -367,9 +328,9 @@ def main() -> None:
                        "date": time.strftime("%Y-%m-%d %H:%M"),
                        "synth_niter": SYNTH_NITER,
                        "xla_flags": args.xla_flags or os.environ.get("XLA_FLAGS"),
-                       "office": bool(args.office)}
+                       "reference_grid": bool(args.reference_grid)}
     for name, deck in cases:
-        if args.skip_matrix or args.office:
+        if args.skip_matrix or args.reference_grid:
             break
         if args.only and args.only not in name:
             continue
@@ -405,9 +366,9 @@ def main() -> None:
     # overstate iteration cost; see worker_stepscan.
     results.setdefault("stepscan", {})
     if not args.only:
-        ns_grid = OFFICE_NS if args.office else SYNTH_NS
-        mode_grid = OFFICE_MODES if args.office else SYNTH_MODES
-        lanes = OFFICE_LANES if args.office else ("multigrid", "single_jit")
+        ns_grid = REFERENCE_NS if args.reference_grid else SYNTH_NS
+        mode_grid = REFERENCE_MODES if args.reference_grid else SYNTH_MODES
+        lanes = REFERENCE_LANES if args.reference_grid else ("multigrid", "single_jit")
         for ns in ns_grid:
             for mpol, ntor in mode_grid:
                 d150 = make_synth_deck(ns, mpol, ntor, synth_dir, niter=150)
@@ -417,10 +378,10 @@ def main() -> None:
                         stepscan_cell(f"ns{ns}_mpol{mpol}_ntor{ntor}",
                                       d150, d450, device, lane)
 
-    if args.office and not args.only:
+    if args.reference_grid and not args.only:
         # Free-boundary NS sweep: steady vacuum-lane iteration cost
         # (children run from DATA so the relative MGRID_FILE resolves).
-        for ns in OFFICE_FREE_NS:
+        for ns in REFERENCE_FREE_NS:
             d150 = make_synth_free_deck(ns, synth_dir, niter=150)
             d450 = make_synth_free_deck(ns, synth_dir, niter=450)
             for device in ("cpu", "gpu"):
@@ -428,7 +389,7 @@ def main() -> None:
                               "multigrid", cwd=DATA)
         # >512-mode probe: GPU default switches to FFT synthesis here and
         # the auto device policy routes this regime to CPU — measure both.
-        ns, mpol, ntor = OFFICE_HIGH_MODE
+        ns, mpol, ntor = REFERENCE_HIGH_MODE
         d150 = make_synth_deck(ns, mpol, ntor, synth_dir, niter=150)
         d450 = make_synth_deck(ns, mpol, ntor, synth_dir, niter=450)
         for device in ("cpu", "gpu"):
@@ -454,7 +415,7 @@ def main() -> None:
                     "ok": False, "error": (proc.stderr or proc.stdout)[-2000:]}
             Path(args.out).write_text(json.dumps(results, indent=1))
 
-    if not args.skip_tridiag and not args.only and not args.office:
+    if not args.skip_tridiag and not args.only and not args.reference_grid:
         for device, dtype in [("cpu", "f64"), ("gpu", "f64"), ("gpu", "f32")]:
             key = f"{device}/{dtype}"
             print(f"=== tridiag microbench [{key}] ===", flush=True)

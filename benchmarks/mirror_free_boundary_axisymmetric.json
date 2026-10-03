@@ -119,7 +119,7 @@
   "beta_50_force_and_observables": false
  },
  "fine_grid_promotion": {
-  "note": "Fine-grid confirmation of the 25% beta continuation with the size-scaled Krylov span (office CPU, ns=11 nxi=21 elements=11 exterior_ntheta=20). Every beta point converges (~43 Newton-GMRES iterations, no restart starvation) with bulk minor-radius force far below the 0.05 promotion gate.",
+  "note": "Fine-grid confirmation of the 25% beta continuation with the size-scaled Krylov span (CPU, ns=11 nxi=21 elements=11 exterior_ntheta=20). Every beta point converges (~43 Newton-GMRES iterations, no restart starvation) with bulk minor-radius force far below the 0.05 promotion gate.",
   "grid": {
    "ns": 11,
    "nxi": 21,

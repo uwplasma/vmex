@@ -22,6 +22,8 @@ pytest.importorskip("netCDF4")
 import vmex as vj  # noqa: E402
 from vmex.core.wout import wout_from_result, wout_from_state  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
+
 REPO = Path(__file__).resolve().parents[1]
 DATA = REPO / "examples" / "data"
 

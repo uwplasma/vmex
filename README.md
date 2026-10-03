@@ -56,17 +56,34 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.19.2` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.19.3` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.2` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
 | `pip install "vmex[turbulence]"` | `gkx>=2.4.2` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
 
-Core dependencies include `solvax>=0.27.0` and `booz_xform_jax>=0.4.1`.
-Keep DESC versions that require `jax<0.10` in a separate environment from
-`vmex[turbulence]` or `vmex[all]`, which require `jax>=0.10.1`.
-NESTOR free boundary from an MGRID table needs no extra.
+The same packages can be installed by name; the floors are the ones in `pyproject.toml`:
+
+| Package | Minimum | Installed by | Command |
+|---|---|---|---|
+| `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
+| `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
+| `essos` | 0.19.3 | `vmex[coils]` | `pip install "essos>=0.19.3"` |
+| `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
+| `neo-jax` | 1.0.5 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.5"` |
+| `gkx` | 2.4.2 | `vmex[turbulence]` | `pip install "gkx>=2.4.2"` |
+| `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
+
+Installing into an environment that already holds older packages is supported: every floor above
+(and the floors those packages declare, such as solvax's `equinox>=0.13.3`) upgrades an older copy
+instead of keeping it, and a nightly CI lane installs `vmex[all]` over a stale environment to keep it
+so. DESC (`desc-opt`, which requires `jax<0.10`) and other packages that cap JAX below 0.10 need
+their own environment: `vmex[turbulence]` and `vmex[all]` require `jax>=0.10.1`, so pip either
+upgrades JAX past their cap (and warns) or cannot resolve.
+
+NESTOR free boundary from an MGRID table needs no extra. A feature whose package is missing raises
+an `ImportError` that names the package to install; the core solver never imports them.
 
 ### GPU, conda-forge and source installs
 

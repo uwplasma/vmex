@@ -40,14 +40,8 @@ dependencies = [
   "packaging",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
-  # 0.4.0 fixes the host Booz_xform class (run_booz_xform, the Boozer plots
-  # and the Boozer-spectrum objective use it): cached mode lists/grids are
-  # rebuilt when mboz/nboz/nfp/asym change, register_surfaces actually
-  # selects, and __version__ is correct (0.1.1-0.3.0 report "0.1.0"). The
-  # jittable jax_api kernel is byte-identical to 0.3.0 (magnetic_only for QI,
-  # asymmetric spectra, guarded zero-mode derivatives). 0.4.1 adds its own jax
-  # floor.
-  "booz_xform_jax>=0.4.1",
+  # Boozer spectra and differentiable geometry, including asymmetric fields.
+  "booz_xform_jax>=0.4.3",
   # 0.21.0 is the first release whose tridiagonal_solve/tridiagonal_solve_checked
   # (the radial preconditioner's solves) run their Thomas sweeps through the
   # accelerator-batched scan (unroll=2 off CPU; the CPU sweep is unchanged).
@@ -83,7 +77,7 @@ optimizers = [
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
 neoclassical = [
-  "neo-jax>=1.0.2",
+  "neo-jax>=1.0.5",
 ]
 # Differentiable virtual casing on a specified boundary; this is not a NESTOR
 # equilibrium adjoint. 0.0.8 keeps the a-priori (per-derivative-order) error
@@ -111,16 +105,9 @@ turbulence = [
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
 ]
-# 0.17 is the first release carrying uwplasma/ESSOS#58: Coils.from_json,
-# Coils.with_dofs, the coil-separation and coil-surface-distance losses,
-# surfacerzfourier_from_boundary and LevelsetStoppingCriterion. Every coil
-# example uses that API, so 0.16 is not enough and there is no longer any
-# reason to install ESSOS from git. 0.19 adds essos.boozer, which --trace
-# uses; since 0.18.1 ESSOS declares equinox>=0.13.3 and diffrax>=0.7.0 (0.17
-# kept diffrax 0.6 and equinox 0.11 already in an environment). 0.19.2 ships
-# the Boozer tracing guide and the Boozer-vs-VMEC tracing example --trace cites.
+# Coil geometry and full asymmetric VMEC/Boozer tracing require ESSOS 0.19.3.
 coils = [
-  "essos>=0.19.2",
+  "essos>=0.19.3",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.

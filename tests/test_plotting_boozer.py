@@ -29,9 +29,8 @@ from vmex.core.plotting import plot_boozmn, plot_wout  # noqa: E402
 from tests.conftest import resolve_golden_dir
 
 GOLDEN_DIR = resolve_golden_dir()
-pytestmark = pytest.mark.skipif(
-    GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)"
-)
+pytestmark = [pytest.mark.usefixtures("_module_jit_enabled"), pytest.mark.skipif(
+    GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)")]
 
 MAX_FIGURE_BYTES = 2 * 1024 * 1024  # >= 200 dpi publication PNGs
 WOUT_KEYS = (

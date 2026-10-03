@@ -631,3 +631,46 @@ def test_free_boundary_backward_traces_like_the_forward_solve(monkeypatch):
         fbi._solve_bwd(cfg, saved, state_bar)
     assert seen["mesh"] == forward
     assert seen["committed"]
+
+
+@pytest.mark.usefixtures("_module_jit_enabled")
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("home", [None, "callback", "root"])
+def test_host_anchor_factors_rehomes_the_cached_root(monkeypatch, reverse, home):
+    from vmex.core import implicit as im
+
+    devices = jax.devices("cpu")
+    if len(devices) < 2:
+        devices = [devices[0], next((d for d in jax.devices() if d.platform != "cpu"), devices[0])]
+    callback_device, root_device = devices[:2]
+    if callback_device == root_device:
+        pytest.skip("requires two devices")
+    if reverse:
+        callback_device, root_device = root_device, callback_device
+    target = root_device if home == "root" else callback_device
+    cfg = im.make_config(VmecInput.from_file(DATA / "input.solovev"),
+                         device=None if home is None else target)
+    params_np = jax.device_put(np.array([0.3, 0.7]), callback_device)
+    cached_state = jax.device_put(np.array([0.2, -0.4]), root_device)
+    key = im._params_key(params_np)
+    monkeypatch.setattr(im, "_LAST_REFINED", {cfg: (key, cached_state, False)})
+    monkeypatch.setattr(im, "_LAST_ANCHOR_FACTORS", {})
+    monkeypatch.setattr(im, "_MASK_CACHE", {im._mask_cache_key(cfg): np.ones(2)})
+    monkeypatch.setattr(im, "_factor_struct", lambda cfg: jax.ShapeDtypeStruct((2,), jnp.float64))
+    monkeypatch.setattr(im, "_dof_projector", lambda cfg, mask: lambda state: mask * state)
+    monkeypatch.setattr(im, "_count", lambda *args, **kwargs: None)
+    core = jax.jit(lambda z, params, frozen, mask: z**2 + params + frozen * mask)
+    seen = []
+    def factors(cfg, params, frozen, mask, z):
+        seen.append([leaf.devices() for leaf in jax.tree.leaves((params, frozen, mask, z))])
+        return core(z, params, frozen, mask)
+    monkeypatch.setattr(im, "_refine_block_factors", factors)
+    with jax.default_device(callback_device):
+        first = im._host_anchor_factors(cfg, params_np, np.int32(0))
+        second = im._host_anchor_factors(cfg, params_np, np.int32(0))
+    expected = np.asarray(params_np) + np.array([0.2, -0.4]) + np.array([0.2, -0.4])**2
+    np.testing.assert_allclose(first, expected, atol=1e-15)
+    np.testing.assert_array_equal(second, first)
+    assert seen == [[{target}] * 4]
+    assert im._LAST_REFINED[cfg][1] is cached_state
+    assert cached_state.devices() == {root_device}

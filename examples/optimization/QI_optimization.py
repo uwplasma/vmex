@@ -27,7 +27,7 @@ from vmex.core.qi import ConstructedQIResidual
 
 # The seed deck. This nfp = 2 boundary already scores constructed QI 5e-3,
 # where a perturbed circular seed scores 1.3
-# (benchmarks/qi_optimization_profile_office.json):
+# (benchmarks/qi_optimization_profile_cpu.json):
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
 
 # Radial grid every optimizer trial is solved on:
