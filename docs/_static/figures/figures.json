@@ -134,22 +134,22 @@
     },
     {
       "path": "docs/_static/figures/readme_diagnostics_qa.webp",
-      "sha256": "9ada42344111615999772c48508a8fc7fa5cfd1cfce5c96c66b96705038920a9",
-      "bytes": 133764,
+      "sha256": "b6f935341123816789ea77a6152e0fd1fd8f7b88501d37cc2be9fcbd1850efef",
+      "bytes": 89940,
       "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "inputs": [
         "examples/data/input.nfp2_QA_finite_beta"
       ],
       "record": "docs/_static/figures/readme_diagnostics.json",
-      "generated": "2026-09-23",
-      "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
-      "reproducible": "command",
-      "bytes_verified": true,
+      "generated": "2026-09-30",
+      "hardware": "Apple M2, CPU",
+      "reproducible": "manual",
+      "bytes_verified": false,
       "used_in": [
         "README.md"
       ],
-      "note": "The `vmex examples/data/input.nfp2_QA_finite_beta --plot` summary panel, rendered with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple) and the DESC-normalized force panel (bootstrap <J.B> on its right axis), and downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-09-23 after <J.B> moved from the iota panel to the force panel; a second run reproduced the bytes."
+      "note": "Finite-pressure QA summary with fixed physical pitch and largest complete-well J; 1400 px, WebP quality 60."
     },
     {
       "path": "docs/_static/figures/readme_diagnostics_summary.webp",
@@ -169,7 +169,7 @@
         "README.md",
         "docs/explanation/validation.md"
       ],
-      "note": "Regenerated from a bundled deck in 2026-09; the figure it replaced had no generator and no recorded input. Re-rendered on 2026-09-14 as the `vmex examples/data/input.nfp4_QI_finite_beta --plot` summary panel with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple), the DESC-normalized force panel (bootstrap <J.B> on its right axis) and D_R reconstructed on the solver grid, downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars the validation page quotes, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-09-23 after <J.B> moved from the iota panel to the force panel; a second run reproduced the bytes."
+      "note": "Finite-pressure QI summary with fixed physical pitch and largest complete-well J; 1760 px WebP."
     },
     {
       "path": "docs/_static/figures/readme_equilibrium_showcase.webp",
@@ -526,6 +526,25 @@
         "README.md"
       ],
       "note": "The six-panel *_trace.png of plot_tracing for the VMEX run of benchmarks/trace_cross_code.json, re-traced deterministically from the recorded settings (the generator checks the lost count against the record; the title shows the recorded wall time), downsized to 1200 px WebP. Needs wout_n3are_R7.75B5.7.nc from the ESSOS or SIMSOPT test files. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
+    },
+    {
+      "path": "docs/_static/figures/readme_j_compare.webp",
+      "sha256": "a9f1be5cedc360601df3f35abb75b577cc3b985446cfbedd1d67546d6aaa5ff8",
+      "bytes": 16176,
+      "generator": "benchmarks/make_readme_figures.py",
+      "command": "python benchmarks/make_readme_figures.py --only j",
+      "inputs": [
+        "benchmarks/plot_diagnostics.json"
+      ],
+      "record": "benchmarks/plot_diagnostics.json",
+      "generated": "2026-09-30",
+      "hardware": "Apple M2, CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Largest complete-well bounce action against independent quadrature over 72 checks; cold and repeated J map evaluations. Settings and WOUT hashes are in the record."
     }
   ]
 }

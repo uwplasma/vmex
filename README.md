@@ -163,6 +163,10 @@ cores. Runtimes exclude compilation and field set-up ([benchmark](benchmarks/tra
 ![vmex --plot summary of the bundled finite-beta NFP=2 QA equilibrium](docs/_static/figures/readme_diagnostics_qa.webp)
 ![vmex --plot summary of the bundled finite-beta NFP=4 QI equilibrium](docs/_static/figures/readme_diagnostics_summary.webp)
 
+The J map holds physical pitch fixed, labels $|v_\parallel|/v$ at the reference field minimum, and displays the largest complete well. Independent BAD quadrature checks cover six geometries and four trapping depths ([settings](benchmarks/plot_diagnostics.json)).
+
+![Bounce-action accuracy and J evaluation times](docs/_static/figures/readme_j_compare.webp)
+
 VMEX follows the deck's `NS_ARRAY`, `FTOL_ARRAY` and `NITER_ARRAY`. In Python:
 
 ```python

@@ -1,0 +1,53 @@
+{
+  "hardware": "Apple M2, CPU",
+  "date": "2026-09-30",
+  "python": "3.11.14",
+  "vmex_source_commit": "ba7e02cc",
+  "vmex_dirty": true,
+  "persistent_cache": "disabled",
+  "blas_threads": 1,
+  "method": "J map, including field-line sampling and bounce integration; one cold and one repeated call per case.",
+  "cases": [
+    {
+      "case": "Landreman-Paul QA",
+      "source": "https://github.com/hiddenSymmetries/simsopt/tree/d32e5a69082958c5a0a4c1037050b71938854636/tests/test_files",
+      "wout_sha256": "4d301a3c32aa6b12f0c13f2c440d223427275fb00862fac3e64e52dc8421c23c",
+      "cold_j_s": 0.58,
+      "warm_j_s": 0.53
+    },
+    {
+      "case": "W7-X standard",
+      "source": "https://github.com/landreman/vmec_equilibria/tree/41fcf8beb9fb743f0ee6e9c1397981e7ac7b29aa",
+      "wout_sha256": "681aa2a94e4e55d88b91d8130ae6181cdd432154396db11e2d215693908e4131",
+      "cold_j_s": 0.803,
+      "warm_j_s": 0.801
+    }
+  ],
+  "bad_reference": {
+    "source": "https://github.com/RalfMackenbach/BAD",
+    "pitch_fraction": [
+      0.1,
+      0.2,
+      0.5,
+      0.9
+    ],
+    "alpha_grid_size": 12,
+    "alpha_indices": [
+      1,
+      4,
+      8
+    ],
+    "method": "Exact Fourier B, refined roots, 200-point sine-mapped Gauss-Legendre; largest complete-well action at s nearest 0.5.",
+    "well_count_differences": 0,
+    "max_relative_j_error": {
+      "QA": 6.531e-07,
+      "QH": 8.117e-06,
+      "QI": 6.391e-05,
+      "W7-X": 5.903e-05,
+      "NCSX": 2.913e-06,
+      "LASYM tokamak": 6.41e-06
+    }
+  },
+  "vmex_commit": "ba7e02cc",
+  "j_map_sha256": "60ab30ee5e5066abf5e741b6661b1c3ad7c8bd63007c1430998a65eea94e5d59"
+}
