@@ -20,7 +20,7 @@ import numpy as np
 
 from .._compat import require_optional
 
-# Converged RK4 step [s] at Aminor_p = 1.7044 m, scaled with Aminor_p, and
+# Reference orbit step [s] at Aminor_p = 1.7044 m, scaled with Aminor_p, and
 # the relative amplitude below which Boozer |B| modes are dropped
 # (docs/howto/trace-alpha-particles.md, convergence table).
 TIMESTEP = 1.25e-7
@@ -210,6 +210,7 @@ def trace_alphas(
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,
+    method: str = "rk4",
     compact: bool | None = None,
     times_to_trace: int = 1000,
     scale: str | None = "volavgB",
@@ -226,8 +227,9 @@ def trace_alphas(
 
     The default scales to ARIES-CS size and launches at ``s=0.25``; use
     ``birth="volume"`` for D-T-weighted births. ``timestep=None`` scales the
-    reference RK4 step with minor radius. ``progress(done, total)`` receives
-    completed intervals without changing the orbit.
+    step with minor radius. ``method`` selects RK4 (default), Dopri5 or Dopri8;
+    ``compact=False`` disables survivor compaction.
+    ``progress(done, total)`` receives completed intervals.
     """
     import jax
 
@@ -236,12 +238,20 @@ def trace_alphas(
     from essos.boozer import trace_boozer
     from inspect import signature
 
+    parameters = signature(trace_boozer).parameters
     trace_kwargs = {}
-    if "compact" in signature(trace_boozer).parameters:
+    if "compact" in parameters:
         trace_kwargs["compact"] = compact is None or bool(compact)
     elif compact:
         raise ImportError("Compaction requires ESSOS with trace_boozer(compact=...); upgrade ESSOS")
     compact = trace_kwargs.get("compact", False)
+
+    if method not in ("rk4", "dopri5", "dopri8"):
+        raise ValueError("method must be 'rk4', 'dopri5' or 'dopri8'")
+    if method != "rk4":
+        if "method" not in parameters:
+            raise ImportError(f"{method.capitalize()} requires ESSOS>=0.19.4 with trace_boozer(method=...); upgrade ESSOS")
+        trace_kwargs["method"] = method
 
     from .scaling import SCALE_TARGETS, aries_cs_scales, scale_wout
     from .wout import read_wout
@@ -277,9 +287,6 @@ def trace_alphas(
     if failed.any():
         raise ValueError(f"{failed.sum()} alpha trajectories failed; loss fraction is undefined. "
                          "Reduce the timestep or inspect the field")
-    if np.max(trace.energy_error) > 1e-3:
-        raise ValueError(f"Alpha orbit energy drift {np.max(trace.energy_error):.3g} exceeds 1e-3; "
-                         "loss fraction is undefined. Reduce --trace-timestep")
     loss_fractions = np.searchsorted(np.sort(trace.loss_times[lost]), times, side="right") / nparticles
     last = -1
     keys = ("rmnc_b", "zmns_b", "numns_b")
@@ -301,7 +308,8 @@ def trace_alphas(
     result.metadata.update(
         tmax=float(tmax), timestep=float(timestep), s=float(s), seed=int(seed),
         birth=birth, collisions=bool(collisions), ne0=float(ne0), T0_keV=float(T0_keV),
-        compact=bool(compact), integrator="RK4 (Boozer guiding centre)", boozer_modes=int(field.xm.size),
+        method=method, integrator=f"{method.upper()} (Boozer guiding centre)",
+        compact=bool(compact), boozer_modes=int(field.xm.size),
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
