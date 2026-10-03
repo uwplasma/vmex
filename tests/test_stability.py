@@ -33,6 +33,65 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 FAST = dict(npoints=81, nturns=3.0)
 
 
+@pytest.mark.parametrize("lasym", [False, True])
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+@pytest.mark.parametrize("theta,phi", [
+    (0.4, 0.2),
+    (0.4, np.array([0.2, 1.1, 2.3])),
+    (np.array([[0.4], [1.7]]), np.array([[0.2, 1.1, 2.3]])),
+])
+def test_pest_newton_loop_preserves_broadcast_precision_and_derivatives(
+    lasym, dtype, theta, phi,
+):
+    theta, phi = jnp.asarray(theta, dtype), jnp.asarray(phi, jnp.float64)
+    m, xn = jnp.array([1, 2, 3]), jnp.array([0, 2, -2])
+    coeff = jnp.array([0.06, -0.02, 0.01, 0.03, 0.01, -0.02])
+    direction = jnp.array([0.02, -0.03, 0.01, -0.02, 0.01, 0.03])
+
+    def invert(c, theta=theta, phi=phi):
+        return stab._theta_vmec_from_pest(
+            theta, phi, c[:3], m, xn, c[3:] if lasym else None)
+
+    expected = theta
+    for _ in range(12):
+        angle = expected[..., None] * m - phi[..., None] * xn
+        sine, cosine = jnp.sin(angle), jnp.cos(angle)
+        lam, dlam = sine @ coeff[:3], cosine @ (m * coeff[:3])
+        if lasym:
+            lam, dlam = lam + cosine @ coeff[3:], dlam - sine @ (m * coeff[3:])
+        expected = expected - (expected + lam - theta) / (1 + dlam)
+
+    theta_direction, phi_direction = jnp.full_like(theta, 0.02), jnp.full_like(phi, -0.01)
+    value, tangent = jax.jvp(jax.jit(invert), (coeff, theta, phi),
+                             (direction, theta_direction, phi_direction))
+    assert value.shape == np.broadcast_shapes(theta.shape, phi.shape)
+    assert value.dtype == expected.dtype == jnp.float64
+    np.testing.assert_allclose(value, expected, rtol=2e-14, atol=2e-14)
+    np.testing.assert_allclose(invert(jnp.zeros_like(coeff)),
+                               jnp.broadcast_to(theta, value.shape), atol=2e-14)
+    angle = value[..., None] * m - phi[..., None] * xn
+    sine, cosine = jnp.sin(angle), jnp.cos(angle)
+    lam, dlam = sine @ coeff[:3], cosine @ (m * coeff[:3])
+    phi_derivative = -(cosine * xn) @ coeff[:3]
+    if lasym:
+        lam, dlam = lam + cosine @ coeff[3:], dlam - sine @ (m * coeff[3:])
+        phi_derivative = phi_derivative + (sine * xn) @ coeff[3:]
+    np.testing.assert_allclose(value + lam, theta + jnp.zeros_like(value),
+                               rtol=2e-14, atol=2e-14)
+    basis = jnp.concatenate([sine, cosine if lasym else jnp.zeros_like(cosine)], -1)
+    derivative = -basis / (1 + dlam[..., None])
+    expected_tangent = (theta_direction - phi_direction * phi_derivative) / (1 + dlam)
+    np.testing.assert_allclose(tangent, expected_tangent + derivative @ direction,
+                               rtol=2e-13, atol=2e-14)
+    reverse = jax.grad(lambda c: jnp.sum(invert(c)))(coeff)
+    np.testing.assert_allclose(reverse, jnp.sum(derivative, tuple(range(value.ndim))),
+                               rtol=2e-13, atol=2e-14)
+    h = 1e-5
+    np.testing.assert_allclose(derivative @ direction, (invert(coeff + h * direction)
+                                       - invert(coeff - h * direction)) / (2 * h),
+                               rtol=2e-8, atol=2e-10)
+
+
 @pytest.fixture(scope="module")
 def vacuum_eq():
     """Zero-pressure circular tokamak (AM = 0): the ballooning-stable limit."""
