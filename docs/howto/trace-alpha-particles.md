@@ -1,7 +1,8 @@
 # Trace alpha particles
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
-reports losses through the last closed flux surface. Install `vmex[coils]` (ESSOS ≥0.19.2).
+reports the fraction lost through the last closed flux surface. It needs the
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.3 or later).
 
 ## Run it
 
@@ -23,7 +24,8 @@ binomial sampling error:
 |---|---|---|---|
 | `--trace-particles N` | 1000 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
-| `--trace-timestep DT` | size-scaled step | RK4 step in seconds | `1 / DT` |
+| `--trace-compact`, `--no-trace-compact` | on when supported | compact early losses | loss dependent |
+| `--trace-timestep DT` | converged step (below) | RK4 step in seconds | `1 / DT` |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
 | `--trace-s S` | 0.25 | birth surface `s = psi / psi_b` | none |
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
@@ -33,7 +35,7 @@ binomial sampling error:
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
-| `--trace-mode-cut C` | `1e-4` | drop Boozer `|B|` modes below `C B00` | about `1 / C` in modes |
+| `--trace-mode-cut C` | `1e-4` | drop modes below `C` times the largest cosine/sine amplitude | about `1 / C` in modes |
 
 Cost grows with `particles × tmax / timestep`; use a GPU for large ensembles.
 

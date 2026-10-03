@@ -276,6 +276,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sampling seed for births and collisions (default: 42).",
     )
     p.add_argument(
+        "--trace-compact", action=argparse.BooleanOptionalAction, default=None,
+        help="Compact early losses when supported (default: on; --no-trace-compact disables it).",
+    )
+    p.add_argument(
         "--trace-timestep", type=float, default=None,
         help=(
             "RK4 step in seconds (default: the converged 1.25e-7 times "
@@ -288,7 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--trace-mode-cut", type=float, default=None,
-        help="Drop Boozer |B| modes below this fraction of B00 (default: 1e-4; "
+        help="Drop Boozer |B| modes below this fraction of the largest amplitude (default: 1e-4; "
              "1e-3 misses losses in precise quasisymmetry).",
     )
     p.add_argument(
@@ -1037,7 +1041,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             f"guiding centre{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
             f"{'unscaled' if scale is None else _scale_label(scale)}, "
-            f"mode cut {mode_cut:g} of B00)"
+            f"mode cut {mode_cut:g} of largest amplitude)"
         )
         emit(
             "   Change with --trace-particles N, --trace-tmax T [s], --trace-s S, "
@@ -1051,6 +1055,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             s=float(args.trace_s),
             seed=int(args.trace_seed),
             timestep=args.trace_timestep,
+            compact=args.trace_compact,
             times_to_trace=int(args.trace_times),
             scale=scale,
             birth=args.trace_birth,

@@ -76,9 +76,10 @@ class AlphaTracingResult:
     ``initial_conditions`` holds the births ``(s, theta_B, zeta_B, v_par/v)``;
     ``final_states`` holds ``(s, theta_B, zeta_B, v_par, v)`` at the loss,
     thermalisation or final time; ``lost_times`` and ``thermalized_times`` are
-    ``-1`` for particles without that outcome. ``energy_error`` is the maximum
-    relative numerical energy drift: accumulated from birth without collisions,
-    or per orbit step before each collision kick.
+    ``-1`` for particles without that outcome. Collisionless ``energy_error``
+    is the maximum ``|E/E_initial - 1|`` over accepted steps, per particle.
+    With collisions, the reference resets after each collision kick, so the
+    metric measures orbital step error separately from collisional changes.
     """
 
     nparticles: int
@@ -131,20 +132,14 @@ class AlphaTracingResult:
 
 
 def essos_vmec_field(source: Any, **kwargs: Any) -> Any:
-    """Return the ``essos.fields.Vmec`` field for an equilibrium or wout file.
+    """Build an ESSOS VMEC field from a wout path or :class:`WoutData`.
 
-    An in-memory WOUT crosses a temporary file, so this diagnostic handoff
-    does not preserve gradients. ``kwargs`` pass to ESSOS unchanged. Released
-    ESSOS accepts stellarator-symmetric WOUTs only.
+    In-memory data use a temporary wout loaded eagerly by ESSOS; this
+    diagnostic handoff severs gradients. Constructor ``kwargs`` pass through.
     """
     _, _, fields = _essos_imports()
 
     if hasattr(source, "rmnc") and hasattr(source, "xm"):  # WoutData
-        if bool(source.lasym):
-            raise ValueError(
-                "released ESSOS reads stellarator-symmetric wout tables only; "
-                "the lasym partner tables would be silently dropped"
-            )
         from .wout import write_wout
 
         with tempfile.TemporaryDirectory(prefix="vmex_essos_") as tmp:
@@ -152,16 +147,7 @@ def essos_vmec_field(source: Any, **kwargs: Any) -> Any:
             write_wout(wout_path, source)
             return fields.Vmec(str(wout_path), **kwargs)
 
-    wout_path = Path(source)
-    import netCDF4
-
-    with netCDF4.Dataset(str(wout_path)) as ds:
-        if bool(int(ds.variables["lasym__logical__"][()])):
-            raise ValueError(
-                "released ESSOS reads stellarator-symmetric wout tables only; "
-                f"{wout_path.name} is an lasym equilibrium"
-            )
-    return fields.Vmec(str(wout_path), **kwargs)
+    return fields.Vmec(str(Path(source)), **kwargs)
 
 
 def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE):
@@ -173,7 +159,10 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     from .wout import write_wout
 
     if bool(wout.lasym):
-        raise ValueError("--trace supports stellarator-symmetric equilibria only")
+        from inspect import signature
+
+        if "bmns" not in signature(BoozerField.from_booz).parameters:
+            raise ImportError("Non-symmetric tracing requires ESSOS sine-spectrum support; upgrade ESSOS")
     bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
     with tempfile.TemporaryDirectory(prefix="vmex_booz_") as tmp:
         path = Path(tmp) / "wout_trace.nc"
@@ -221,6 +210,7 @@ def trace_alphas(
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,
+    compact: bool | None = None,
     times_to_trace: int = 1000,
     scale: str | None = "volavgB",
     birth: str = "surface",
@@ -244,6 +234,14 @@ def trace_alphas(
     require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
+    from inspect import signature
+
+    trace_kwargs = {}
+    if "compact" in signature(trace_boozer).parameters:
+        trace_kwargs["compact"] = compact is None or bool(compact)
+    elif compact:
+        raise ImportError("Compaction requires ESSOS with trace_boozer(compact=...); upgrade ESSOS")
+    compact = trace_kwargs.get("compact", False)
 
     from .scaling import SCALE_TARGETS, aries_cs_scales, scale_wout
     from .wout import read_wout
@@ -268,7 +266,8 @@ def trace_alphas(
         field, *births.T, speed=float(np.sqrt(2 * energy / mass)), mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
-        species=background_species(ne0, T0_keV) if collisions else None, progress=progress)
+        species=background_species(ne0, T0_keV) if collisions else None,
+        progress=progress, **trace_kwargs)
     wall = time.perf_counter() - start
     times = np.linspace(0.0, float(tmax), int(times_to_trace))
     lost = trace.loss_times >= 0
@@ -283,7 +282,10 @@ def trace_alphas(
                          "loss fraction is undefined. Reduce --trace-timestep")
     loss_fractions = np.searchsorted(np.sort(trace.loss_times[lost]), times, side="right") / nparticles
     last = -1
-    boundary = {key: np.asarray(getattr(bx, key))[:, last] for key in ("rmnc_b", "zmns_b", "numns_b")}
+    keys = ("rmnc_b", "zmns_b", "numns_b")
+    if bool(bx.asym):
+        keys += ("rmns_b", "zmnc_b", "numnc_b")
+    boundary = {key: np.asarray(getattr(bx, key))[:, last] for key in keys}
     result = AlphaTracingResult(
         nparticles=int(nparticles), loss_fraction=float(lost.mean()),
         particles_lost=int(lost.sum()),
@@ -294,12 +296,12 @@ def trace_alphas(
         initial_conditions=births, final_states=trace.states[:, -1],
         energy_error=trace.energy_error, trajectories=trace.states,
         boozer=dict(boundary, xm_b=np.asarray(bx.xm_b), xn_b=np.asarray(bx.xn_b),
-                    nfp=int(bx.nfp), s=np.asarray(bx.s_b), iota=np.asarray(bx.iota)),
+                    nfp=int(bx.nfp), asym=bool(bx.asym), s=np.asarray(bx.s_b), iota=np.asarray(bx.iota)),
     )
     result.metadata.update(
         tmax=float(tmax), timestep=float(timestep), s=float(s), seed=int(seed),
         birth=birth, collisions=bool(collisions), ne0=float(ne0), T0_keV=float(T0_keV),
-        integrator="RK4 (Boozer guiding centre)", boozer_modes=int(field.xm.size),
+        compact=bool(compact), integrator="RK4 (Boozer guiding centre)", boozer_modes=int(field.xm.size),
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
