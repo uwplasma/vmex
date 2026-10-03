@@ -102,8 +102,10 @@ class AlphaTracingResult:
     ``initial_conditions`` holds the births ``(s, theta_B, zeta_B, v_par/v)``;
     ``final_states`` holds ``(s, theta_B, zeta_B, v_par, v)`` at the loss,
     thermalisation or final time; ``lost_times`` and ``thermalized_times`` are
-    ``-1`` for particles without that outcome.  ``energy_error`` is the largest
-    relative change of the orbit energy over one step, per particle.
+    ``-1`` for particles without that outcome. Collisionless ``energy_error``
+    is the maximum ``|E/E_initial - 1|`` over accepted steps, per particle.
+    With collisions, the reference resets after each collision kick, so the
+    metric measures orbital step error separately from collisional changes.
     """
 
     nparticles: int

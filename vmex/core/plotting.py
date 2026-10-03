@@ -1578,6 +1578,24 @@ def _boundary_3d_panel(ax, wout, *, ntheta: int, nzeta: int):
     from matplotlib.colors import Normalize
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
+    class Surface(Poly3DCollection):
+        """Reuse unchanged projections during layout and rendering."""
+
+        # Match NumPy's summation order and positive-zero identity for quads.
+        _zsort_functions = dict(
+            Poly3DCollection._zsort_functions,
+            average=lambda z, axis=None: (z[0] + z[1] + z[2] + z[3] + 0.0) * 0.25
+            if axis is None and type(z) is np.ndarray and z.shape == (4,) and z.dtype == np.float64
+            else np.average(z, axis=axis))
+
+        def do_3d_projection(self):
+            cached = getattr(self, "_projection_cache", None)
+            if not self.stale and cached is not None and np.array_equal(self.axes.M, cached[0]):
+                return cached[1]
+            depth = super().do_3d_projection()
+            self._projection_cache = self.axes.M.copy(), depth
+            return depth
+
     cmap = matplotlib.colormaps[_CMAP_3D]
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
     phi = np.linspace(0.0, 2.0 * np.pi, int(nzeta))
@@ -1591,7 +1609,7 @@ def _boundary_3d_panel(ax, wout, *, ntheta: int, nzeta: int):
         vertices = np.stack((points[:-1, :-1], points[:-1, 1:],
                              points[1:, 1:], points[1:, :-1]), axis=-2)
         colors = cmap(norm(B[:-1, :-1])).reshape(-1, 4)
-        ax.add_collection3d(Poly3DCollection(
+        ax.add_collection3d(Surface(
             vertices.reshape(-1, 4, 3), facecolors=colors, edgecolors=colors,
             antialiased=False, linewidth=0.0))
     else:
