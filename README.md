@@ -392,9 +392,13 @@ and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/us
 
 The equilibrium exposes Cartesian `B()` and its first three derivatives, with VJPs, anywhere inside
 the plasma (`set_points_xyz`, `set_points_flux`); it reads the current 10 to 70 times more
-accurately than the WOUT file. Outside, `vj.VmecExtender.from_file("wout_my_case.nc",
-external_field=coils.B)` adds the plasma's virtual-casing field to the coils, accurate to about 1e-12
-down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `MgridField`
+accurately than the WOUT file in the tested analytic fixtures. Outside,
+`vj.VmecExtender.from_file("wout_my_case.nc", external_field=coils.B)` adds the plasma's
+virtual-casing field to the coils. Target-graded quadrature agrees with a reference using the
+same surface data to about 1e-12 down to 0.01 minor radii in the tested QA case; this does not
+bound equilibrium, coil or surface-data error. Select `near_surface="graded"` for near-boundary
+queries under JIT; `"auto"` selects quadrature only during eager evaluation.
+Coil and MGRID fields enter free-boundary solves as `MgridField`
 (trilinear or tricubic).
 
 ![Poincare sections of the extended field around finite-beta free-boundary QA equilibria, one with an iota = 1/2 island chain](docs/_static/figures/readme_extender_islands.webp)
@@ -407,6 +411,11 @@ outside the plasma: an island chain about 0.9 cm wide opens from the LCFS, close
 surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX from `examples/data` alone
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+
+Comparison with [HINT3D's maintained `current` branch](https://github.com/yasuhiro-suzuki/HINT3D/tree/current)
+is underway for the existing finite-beta QA cases at nominal volume beta 0.5% and 2.5%.
+A converged matched equilibrium comparison and VMEX/HINT runtime ratio are not yet established;
+the 1.0% figure above is a separate VMEX case.
 
 ## Accuracy and optional polishing
 
