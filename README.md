@@ -224,6 +224,22 @@ to JAX optimizers, and `problem.evaluate(x)` reports solve effort and derivative
 [optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html) cover
 convergence checks, constraints, scaling and finite-difference verification.
 
+Run `python examples/optimization/alpha_particle_optimization.py` after installing
+`vmex[coils]`. VMEX derivatives optimize ESSOS orbit risk and aspect ratio without
+a symmetry stage; hard 2 ms losses select the iterate.
+
+The example differentiates smooth escaped residence through physical trajectories
+and checks fresh particles over longer times. Three steps from the NFP=2 seed,
+with 64 training births over 0.25 ms and 1,024 independent physical holdout births over 5 ms:
+
+| Configuration | Alphas lost at 5 ms | Aspect ratio | Unscaled minor radius [m] | Max. relative energy drift |
+| --- | ---: | ---: | ---: | ---: |
+| Seed | 79.9% | 5.976 | 0.1673 | 5.4e−6 |
+| Optimized | 74.7% | 5.987 | 0.1670 | 5.2e−6 |
+
+Shaded bands are pointwise 95% Wilson intervals from lost/born counts. Tracing uses
+ARIES-CS scaling; mirror ratio is reported and unconstrained.
+
 ## How VMEX works
 
 1. **Energy principle.** VMEX finds a stationary point of `W = ∫ (B²/2μ₀ + p/(γ−1)) dV` over
