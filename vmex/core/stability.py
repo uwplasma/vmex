@@ -765,15 +765,15 @@ def _theta_vmec_from_pest(theta_star: Array, phi: Array, lmns0: Array,
     """Invert ``θ* = θ + λ(θ, φ)`` for the VMEC poloidal angle (Newton).
 
     The straight-field-line (PEST) angle map of ``vmec_fieldlines``; a fixed
-    unrolled Newton iteration (``1 + λ_θ > 0`` on nested surfaces, which holds
+    static Newton iteration (``1 + λ_θ > 0`` on nested surfaces, which holds
     for asymmetric states too) keeps the solve reverse-mode differentiable.
     ``lmnc0`` adds the cos-parity ``λ`` of an asymmetric state, as in
     COBRAVMEC's ``obtain_theta.f``.
     """
     ml = m * lmns0
     mc = None if lmnc0 is None else m * lmnc0
-    theta = theta_star
-    for _ in range(_NEWTON_ITERATIONS):
+
+    def step(_, theta):
         ang = theta[..., None] * m - phi[..., None] * xn
         sin_ang, cos_ang = jnp.sin(ang), jnp.cos(ang)
         lam = sin_ang @ lmns0
@@ -781,8 +781,11 @@ def _theta_vmec_from_pest(theta_star: Array, phi: Array, lmns0: Array,
         if mc is not None:
             lam = lam + cos_ang @ lmnc0
             dlam = dlam - sin_ang @ mc
-        theta = theta - (theta + lam - theta_star) / (1.0 + dlam)
-    return theta
+        return theta - (theta + lam - theta_star) / (1.0 + dlam)
+
+    # The first step establishes the broadcast shape and promoted dtype.
+    return jax.lax.fori_loop(
+        1, _NEWTON_ITERATIONS, step, step(0, theta_star))
 
 
 # ---------------------------------------------------------------------------
