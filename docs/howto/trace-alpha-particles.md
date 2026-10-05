@@ -2,7 +2,7 @@
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
 reports the fraction lost through the last closed flux surface. It needs the
-`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.4 or later).
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.5 or later).
 
 ## Run it
 
@@ -13,7 +13,7 @@ vmex input.case --trace            # solve first, then trace
 
 The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
 stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
-(ESSOS 0.19.4 and later). It then prints the scaling factors, the step, the number of Boozer
+(ESSOS 0.19.5 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
