@@ -3269,7 +3269,9 @@ def _least_squares_implicit(
         placed = _place(x)
         params_np = jax.tree.map(np.asarray, params_of(placed))
         state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
-        return evaluate(placed, jax.tree.map(_place, state), status)
+        state = jax.tree.map(_place, state)
+        holder["solved"] = (FunctionProblem._key(np.asarray(x, dtype=float)), state)
+        return evaluate(placed, state, status)
 
     def fun(x: np.ndarray) -> np.ndarray:
         lin = holder["lin"]
@@ -3340,8 +3342,11 @@ def _least_squares_implicit(
             # The jitted Jacobians take the solved state as an argument: an
             # in-graph pure_callback solve makes JAX refuse to write the
             # executable to the persistent cache, so every process paid the
-            # full (~50 s) Jacobian compile.  Same memoized host solve the
-            # callback would run.
+            # full (~50 s) Jacobian compile.  The trial evaluation at this
+            # point already holds the state the callback would return.
+            solved = holder.get("solved")
+            if solved is not None and solved[0] == x_key:
+                return solved[1]
             state, _ = imp._host_solve_and_mask(cfg, params_np)
             return jax.tree.map(_place, state)
 
