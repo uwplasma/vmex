@@ -240,6 +240,12 @@ bound, so a large workload keeps its own working set.  Set
 ``VMEX_CACHE_MAX_ENTRIES`` to change the bound, or to ``0`` to disable
 trimming.
 
+JAX never writes a program that contains a host callback to the cache.  The
+fixed-boundary optimization Jacobians (block and per-column GMRES) therefore
+take the host-solved equilibrium as an argument instead of calling the solve
+inside the compiled graph, so a second process reloads them instead of
+recompiling.  The reverse-adjoint Jacobian still calls the solve in its graph.
+
 With jaxlib < 0.10 the cache defaults to off, because those releases crash
 deserializing large cached CPU executables; ``VMEX_COMPILATION_CACHE=1``
 forces it on.
