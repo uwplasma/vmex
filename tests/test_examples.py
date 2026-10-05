@@ -160,6 +160,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QA_optimization_alpha_losses.py",
     "examples/optimization/QA_optimization_ballooning.py",
     "examples/optimization/QA_optimization_bootstrap.py",
+    "examples/optimization/QA_optimization_low_bootstrap.py",
     "examples/optimization/QA_optimization_finite_beta.py",
     "examples/optimization/QA_optimization_finite_beta_scalar.py",
     "examples/optimization/QA_optimization_scalar.py",
@@ -172,11 +173,13 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_maxJ_continuation.py",
     "examples/optimization/QI_optimization.py",
     "examples/optimization/QI_optimization_bootstrap.py",
+    "examples/optimization/QI_optimization_bootstrap_dkx.py",
     "examples/optimization/QI_optimization_jaxopt.py",
     "examples/optimization/QI_optimization_optax.py",
     "examples/optimization/QI_optimization_scipy.py",
     "examples/optimization/QP_optimization.py",
     "examples/optimization/omnigenity_epsilon_gammac_maxj.py",
+    "examples/optimization/optimize_bootstrap_current.py",
     "examples/optimization/single_stage_free_boundary_optimization.py",
     "examples/optimization/single_stage_free_boundary_optimization_finite_beta.py",
     "examples/optimization/single_stage_optimization.py",
@@ -1126,6 +1129,30 @@ def test_bootstrap_optimization_examples(case, figure_of_merit, tmp_path):
     assert (tmp_path / f"input.{case}_bootstrap_optimized").exists()
     assert (tmp_path / f"wout_{case}_bootstrap_optimized.nc").exists()
     assert (tmp_path / f"{case}_bootstrap_current.png").exists()
+
+
+@pytest.mark.full  # nightly: Picard seed + one exact finite-beta stage, low bootstrap
+@pytest.mark.parametrize(("script_name", "output", "dependency"), [
+    ("QA_optimization_low_bootstrap.py", "QA_low_bootstrap_optimized", None),
+    ("optimize_bootstrap_current.py", "bootstrap_current_optimized", "booz_xform_jax"),
+    ("QI_optimization_bootstrap_dkx.py", "QI_bootstrap_dkx_optimized", "dkx"),
+])
+def test_low_bootstrap_optimization_examples(script_name, output, dependency, tmp_path):
+    if dependency == "dkx":
+        pytest.importorskip("booz_xform_jax")
+    if dependency is not None:
+        pytest.importorskip(dependency)
+    out = _run_example(EXAMPLES / "optimization" / script_name, tmp_path, timeout=1800)
+    costs = re.search(r"cost: initial ([0-9.eE+-]+) -> final ([0-9.eE+-]+)", out)
+    assert costs is not None and float(costs.group(2)) < float(costs.group(1)), out[-2000:]
+    assert "self-consistent seed" in out and "[final]" in out
+    assert (tmp_path / f"wout_{output}.nc").exists()
+    assert (tmp_path / f"{output}_current.png").exists()
+    if script_name == "optimize_bootstrap_current.py":
+        assert "trend toward QI:" in out
+        assert (tmp_path / f"{output}_boozer_modB.png").exists()
+    if dependency == "dkx":
+        assert "Redl" in out and "DKX" in out
 
 
 @pytest.mark.full  # nightly: optional optimizer interoperability, cold JAX compilation

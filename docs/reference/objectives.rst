@@ -427,7 +427,11 @@ equilibrium's current profile self-consistent with it (reproducing the workflow 
 
 The complete runnable workflows are
 ``examples/optimization/QA_optimization_bootstrap.py``,
-``QH_optimization_bootstrap.py`` and ``QI_optimization_bootstrap.py``.  Their
+``QH_optimization_bootstrap.py`` and ``QI_optimization_bootstrap.py``;
+``QA_optimization_low_bootstrap.py`` and ``optimize_bootstrap_current.py`` add a
+row on the Redl ``<J.B>`` itself (target 0), and
+``QI_optimization_bootstrap_dkx.py`` replaces the Redl mismatch row with DKX's
+kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``).  Their
 setup has two distinct steps:
 
 1. ``KineticProfiles`` describes the density and temperature seen by the
