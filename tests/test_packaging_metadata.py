@@ -134,8 +134,8 @@ def test_optional_floors_match_pyproject() -> None:
 
 
 @pytest.mark.parametrize("found, message", [
-    (None, 'essos>=0.19.5; run: pip install "essos>=0.19.5"'),
-    ("0.19.2", 'essos>=0.19.5 (found 0.19.2); run: pip install -U "essos>=0.19.5"'),
+    (None, 'essos>=0.20.0; run: pip install "essos>=0.20.0"'),
+    ("0.19.2", 'essos>=0.20.0 (found 0.19.2); run: pip install -U "essos>=0.20.0"'),
 ])
 def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
     from vmex import _compat

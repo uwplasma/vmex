@@ -277,8 +277,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sampling seed for births and collisions (default: 42).",
     )
     p.add_argument(
-        "--trace-method", choices=("rk4", "dopri5", "dopri8"), default="rk4",
-        help="Fixed-step orbit integrator (default: rk4; alternatives require ESSOS method support).",
+        "--trace-method", choices=("adaptive8", "adaptive", "rk4", "dopri5", "dopri8"), default="adaptive8",
+        help="Orbit integrator (default: adaptive8, error-controlled Dopri8; adaptive is Dopri5; "
+             "rk4, dopri5 and dopri8 take fixed steps of --trace-timestep).",
+    )
+    p.add_argument(
+        "--trace-tolerance", type=float, default=None,
+        help="Embedded-error tolerance of the adaptive integrators (default: 1e-7).",
     )
     p.add_argument(
         "--trace-compact", action=argparse.BooleanOptionalAction, default=None,
@@ -287,8 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--trace-timestep", type=float, default=None,
         help=(
-            "Orbit step in seconds (default: 1.25e-7 times "
-            "Aminor_p/1.7044 m; cost is inversely proportional)."
+            "Fixed-step methods: the orbit step in seconds (default: 1.25e-7 times "
+            "Aminor_p/1.7044 m). Adaptive methods: only the first trial step."
         ),
     )
     p.add_argument(
@@ -1065,16 +1070,19 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
     import numpy as np
 
     from .plotting import plot_tracing
-    from .tracing import ENERGY_TOLERANCE, MODE_TOLERANCE, trace_alphas
+    from .tracing import ENERGY_TOLERANCE, MODE_TOLERANCE, TOLERANCE, trace_alphas
 
     scale = None if args.trace_no_scale else args.scale_target
     mode_cut = MODE_TOLERANCE if args.trace_mode_cut is None else float(args.trace_mode_cut)
+    tolerance = TOLERANCE if args.trace_tolerance is None else float(args.trace_tolerance)
+    integrator = (f"adaptive {'Dopri8' if args.trace_method == 'adaptive8' else 'Dopri5'} at tolerance {tolerance:g}"
+                  if args.trace_method.startswith("adaptive") else args.trace_method.upper())
     if not quiet:
         birth = ("volume" if args.trace_birth == "volume"
                  else f"s={float(args.trace_s):g}")
         emit(
             f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
-            f"guiding centre, {args.trace_method.upper()}{', collisional' if args.collisional else ''}, "
+            f"guiding centre, {integrator}{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
             f"{'unscaled' if scale is None else _scale_label(scale)}, "
             f"mode cut {mode_cut:g} of largest amplitude)"
@@ -1092,6 +1100,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             seed=int(args.trace_seed),
             timestep=args.trace_timestep,
             method=args.trace_method,
+            tolerance=tolerance,
             compact=args.trace_compact,
             times_to_trace=int(args.trace_times),
             scale=scale,
@@ -1137,8 +1146,11 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
         if energy <= ENERGY_TOLERANCE:
             emit(f" Max energy error: {energy:.1e} (converged, below {ENERGY_TOLERANCE:g})")
         else:
+            tighter = (f"--trace-tolerance {0.1 * result.metadata['tolerance']:.0e}"
+                       if result.metadata.get("tolerance") else
+                       f"--trace-timestep {0.5 * result.metadata['timestep']:.3g}")
             emit(f" Max energy error: {energy:.1e}, above {ENERGY_TOLERANCE:g}: the orbits are not converged. "
-                 f"Rerun with --trace-timestep {0.5 * result.metadata['timestep']:.3g}")
+                 f"Rerun with {tighter}")
     label = wout_path.stem.removeprefix("wout_")
     outdir.mkdir(parents=True, exist_ok=True)
     written = dict(zip(("json", "npz"), result.save(outdir / label)))
@@ -1540,8 +1552,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if (args.collisional or args.trace_birth != "surface"
-            or args.trace_mode_cut is not None) and not args.trace:
-        parser.error("--collisional, --trace-birth and --trace-mode-cut require --trace")
+            or args.trace_mode_cut is not None or args.trace_tolerance is not None) and not args.trace:
+        parser.error("--collisional, --trace-birth, --trace-mode-cut and --trace-tolerance require --trace")
     if bool(args.trace):
         _split_host_devices()
     # Flushing sink: with stdout redirected to a file (cluster batch logs),

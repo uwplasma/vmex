@@ -108,7 +108,7 @@ turbulence = [
 ]
 # Coil geometry and VMEC/Boozer tracing, including fixed-step solver options.
 coils = [
-  "essos>=0.19.5",
+  "essos>=0.20.0",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.

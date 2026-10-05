@@ -453,7 +453,7 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     assert summary["volavgB"] == pytest.approx(5.8646)
     assert summary["Aminor_p"] == pytest.approx(1.7044)
     assert summary["timestep"] == pytest.approx(1.25e-7)
-    assert summary["method"] == "rk4"
+    assert summary["method"] == "adaptive8"
     assert summary["nparticles"] == 8 and summary["scale_target"] == "volavgB"
     assert summary["collisions"] is True
     assert {"loss_fraction_sigma", "compile_time_s", "devices", "versions"} <= set(summary)
@@ -616,41 +616,6 @@ def test_optional_solver_cli_writes_method_and_energy(solovev_wout, tmp_path, me
                                rtol=1e-6, atol=1e-6)
 
 
-def test_dopri8_requires_support_without_changing_rk4(solovev_wout, tmp_path, monkeypatch):
-    import essos.boozer
-
-    original = essos.boozer.trace_boozer
-
-    def released_trace(*args, **kwargs):
-        assert "method" not in kwargs
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", released_trace)
-    reference = trace_alphas(solovev_wout, **TRACE_KWARGS)
-    assert reference.metadata["method"] == "rk4"
-    with pytest.raises(ValueError, match="method must be"):
-        trace_alphas(None, method="unknown")
-    with pytest.raises(ImportError, match="Dopri8 requires ESSOS>=0.19.4"):
-        trace_alphas(solovev_wout, method="dopri8", **TRACE_KWARGS)
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        rc = cli.main([str(solovev_wout), "--trace", "--quiet", "--outdir", str(tmp_path),
-                       "--trace-method", "dopri8"])
-    assert rc != 0 and "Dopri8 requires ESSOS>=0.19.4" in buffer.getvalue()
-    assert not (tmp_path / "solovev_trace.json").exists()
-
-    # Check keyword dispatch independently of the installed integrator version.
-    def supported_trace(*args, method, **kwargs):
-        assert method == "dopri8"
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", supported_trace)
-    result = trace_alphas(solovev_wout, method="dopri8", **TRACE_KWARGS)
-    assert result.metadata["integrator"].startswith("DOPRI8")
-    np.testing.assert_array_equal(result.initial_conditions, reference.initial_conditions)
-    np.testing.assert_array_equal(result.final_states, reference.final_states)
-
-
 @pytest.mark.parametrize("failure_source", ["status", "energy", "drift"])
 def test_orbit_failure_is_separate_from_energy_drift(solovev_wout, monkeypatch, failure_source):
     from types import SimpleNamespace
@@ -673,42 +638,6 @@ def test_orbit_failure_is_separate_from_energy_drift(solovev_wout, monkeypatch, 
     else:
         with pytest.raises(ValueError, match="loss fraction is undefined"):
             trace_alphas(solovev_wout, **TRACE_KWARGS)
-
-
-def test_compaction_dispatch_preserves_released_interfaces(solovev_wout, tmp_path, monkeypatch):
-    import essos.boozer
-    from inspect import signature
-
-    original = essos.boozer.trace_boozer
-    def released(*args, **kwargs):
-        assert "compact" not in kwargs
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", released)
-    assert trace_alphas(solovev_wout, **TRACE_KWARGS).metadata["compact"] is False
-    with pytest.raises(ImportError, match="Compaction requires ESSOS"):
-        trace_alphas(solovev_wout, compact=True, **TRACE_KWARGS)
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        rc = cli.main([str(solovev_wout), "--trace", "--quiet", "--trace-compact",
-                       "--outdir", str(tmp_path)])
-    assert rc != 0 and "Compaction requires ESSOS" in buffer.getvalue()
-
-    dispatched = []
-    def supported(*args, compact, **kwargs):
-        dispatched.append(compact)
-        if "compact" in signature(original).parameters:
-            kwargs["compact"] = compact
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", supported)
-    default = trace_alphas(solovev_wout, **TRACE_KWARGS)
-    disabled = trace_alphas(solovev_wout, compact=False, **TRACE_KWARGS)
-    assert dispatched == [True, False]
-    assert default.metadata["compact"] is True and disabled.metadata["compact"] is False
-    np.testing.assert_array_equal(default.trajectories, disabled.trajectories)
-    parser = cli.build_parser()
-    assert parser.parse_args([str(solovev_wout), "--no-trace-compact"]).trace_compact is False
 
 
 def test_asymmetric_trace_requires_complete_backend(solovev_wout, monkeypatch):
@@ -784,7 +713,7 @@ def test_asymmetric_boundary_cartesian_coordinates():
 
 
 @pytest.mark.parametrize("energy, expected", [(1e-6, "(converged, below 0.001)"),
-                                              (5e-2, "the orbits are not converged. Rerun with --trace-timestep")])
+                                              (5e-2, "the orbits are not converged. Rerun with --trace-tolerance 1e-08")])
 def test_cli_reports_whether_the_orbits_converged(solovev_wout, tmp_path, monkeypatch, energy, expected):
     """The energy check names the step to rerun with when the orbits are not converged."""
     from vmex.core import tracing
@@ -801,3 +730,29 @@ def test_cli_reports_whether_the_orbits_converged(solovev_wout, tmp_path, monkey
         rc = cli.main([str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--trace-particles", "4",
                        "--trace-tmax", "1e-6", "--mbooz", "8", "--nbooz", "8"])
     assert rc == 0 and expected in buffer.getvalue()
+
+
+def test_integrator_keywords_reach_essos(solovev_wout, monkeypatch):
+    """Adaptive Dopri8 at TOLERANCE by default; fixed methods get no tolerance; compaction passes through."""
+    import essos.boozer
+
+    from vmex.core.tracing import TOLERANCE
+
+    original, seen = essos.boozer.trace_boozer, []
+
+    def recording(*args, **kwargs):
+        seen.append({k: kwargs.get(k) for k in ("method", "tolerance", "compact")})
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", recording)
+    kwargs = {k: v for k, v in TRACE_KWARGS.items() if k != "method"}
+    default = trace_alphas(solovev_wout, **kwargs)
+    trace_alphas(solovev_wout, **kwargs, method="rk4", compact=False)
+    assert seen == [dict(method="adaptive8", tolerance=TOLERANCE, compact=True),
+                    dict(method="rk4", tolerance=None, compact=False)]
+    assert default.metadata["integrator"].startswith("adaptive Dopri8, tolerance")
+    with pytest.raises(ValueError, match="method must be one of"):
+        trace_alphas(None, method="unknown")
+    with pytest.raises(ValueError, match="tolerance must be positive"):
+        trace_alphas(solovev_wout, **kwargs, tolerance=0.0)
+
