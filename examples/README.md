@@ -116,7 +116,8 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   an iota floor, a small self-consistent bootstrap current and the aspect
   ratio, and reports, without targeting, the constructed-QI residual, the QA
   and QH ratios and Boozer `|B|` before and after, to ask whether a
-  low-current optimum drifts toward QI; at its short budget it does not.
+  low-current optimum drifts toward QI; at its default budget it leaves
+  quasisymmetry (QA and QH ratios up fivefold) without becoming QI.
   `QI_optimization_bootstrap_dkx.py` (`pip install "dkx>=2.8.0"`) is the QI
   bootstrap example with DKX's kinetic mismatch row in place of Redl's after a
   Redl Picard seed, and prints Redl and DKX `<j.B>` side by side. `single_stage_optimization_finite_beta.py` *(preview)* adds virtual

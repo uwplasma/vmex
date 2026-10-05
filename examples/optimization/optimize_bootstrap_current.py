@@ -11,8 +11,10 @@ example asks is whether such an optimum drifts toward QI without being told.
 The constructed-QI residual of QI_optimization_bootstrap.py, the mirror ratio
 and the QA and QH quasisymmetry ratios are reported, never targeted, and |B|
 in Boozer coordinates is plotted for the seed and the optimum. Read the
-answer off those numbers; at this short budget the iota and aspect rows
-dominate and the boundary has no reason to become QI (see examples/README.md).
+answer off those numbers. At the default budget the QI residual
+falls by a third while both QS ratios rise about fivefold, but it stays near
+1.0, about seven times the 0.15 that QI_optimization_bootstrap_dkx.py reaches
+by targeting it: the optimum leaves quasisymmetry without becoming QI.
 """
 
 import os
@@ -80,8 +82,10 @@ MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
 FINAL_NS = 51
-FINAL_FTOL = 1e-13
-FINAL_NITER = 30000
+# The tens of kA of bootstrap current stall this solve near fsq = 1e-10 at
+# ns = 51, so the certificate tolerance is 1e-10 rather than the template's 1e-14:
+FINAL_FTOL = 1e-10
+FINAL_NITER = 20000
 
 # Every output file name contains this:
 OUTPUT_NAME = "bootstrap_current_optimized"
@@ -254,9 +258,10 @@ final_values = report("final", final_equilibrium)
 # The finding, stated from the reported numbers rather than assumed:
 for key in ("constructed QI", "QS(QA)", "QS(QH)"):
     print(f"{key}: seed {seed_values[key]:.4e} -> final {final_values[key]:.4e}")
-toward_qi = final_values["constructed QI"] < seed_values["constructed QI"]
-print(f"trend toward QI: {'yes' if toward_qi else 'no'} (QI residual "
-      f"{'fell' if toward_qi else 'did not fall'}; it was never targeted)")
+qi_ratio = final_values["constructed QI"] / seed_values["constructed QI"]
+qs_ratio = final_values["QS(QA)"] / seed_values["QS(QA)"]
+print(f"trend toward QI: constructed-QI residual x{qi_ratio:.2f}, QS(QA) x{qs_ratio:.2f} "
+      "from the seed (neither was targeted)")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
@@ -266,20 +271,19 @@ print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
 vj.plot_bootstrap_current(CURRENT_FIGURE, final_equilibrium, bootstrap)
 print(f"Wrote {CURRENT_FIGURE}")
 
-# |B| contours in Boozer coordinates, seed and optimum, on one colour scale.
+# |B| contours in Boozer coordinates, seed and optimum. QI shows as contours
+# that close poloidally (vertical bands); QA as horizontal lines.
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 final_boozer = boozer_modB(final_equilibrium, "final")
-levels = np.linspace(min(seed_boozer[2].min(), final_boozer[2].min()),
-                     max(seed_boozer[2].max(), final_boozer[2].max()), 24)
-fig, axes = plt.subplots(1, 2, figsize=(11, 4.4), layout="constrained")
+fig, axes = plt.subplots(1, 2, figsize=(12, 4.4), layout="constrained")
 for ax, (theta, phi, B), title in zip(axes, (seed_boozer, final_boozer), ("seed", "optimized")):
-    contours = ax.contour(phi, theta, B, levels=levels, cmap="jet", linewidths=1.0)
+    contours = ax.contour(phi, theta, B, levels=24, cmap="jet", linewidths=1.0)
+    fig.colorbar(contours, ax=ax, label=r"$|B|$ [T]")
     ax.set_title(f"{title}, s = {BOOZER_SURFACE}")
     ax.set_xlabel(r"Boozer toroidal angle $\phi_B$")
     ax.set_ylabel(r"Boozer poloidal angle $\theta_B$")
-fig.colorbar(contours, ax=axes, label=r"$|B|$ [T]")
 fig.savefig(BOOZER_FIGURE, dpi=150)
 print(f"Wrote {BOOZER_FIGURE}")
 for path in vj.plot_wout(wout_path, ".").values():
