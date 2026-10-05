@@ -39,7 +39,7 @@ its binomial error:
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
-| `--trace-mode-cut C` | `1e-4` | drop modes below `C` times the largest cosine/sine amplitude | about `1 / C` in modes |
+| `--trace-mode-cut C` | `2e-4` | drop modes below `C` times the largest cosine/sine amplitude | about `1 / C` in modes |
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
 example, going from the default to 5000 alphas over 0.1 s costs 50 times the
@@ -63,7 +63,7 @@ s = 0.3 lost within 0.2 s.
   equilibrium is first scaled in memory to ARIES-CS size: `<B> = 5.8646 T`
   and `a = 1.7044 m` (the `--scale` rule, see {doc}`scale-a-configuration`).
 - **Field.** `booz_xform_jax` transforms every surface to Boozer coordinates.
-  The cosine and sine `|B|` spectra are cut below `1e-4` of the largest
+  The cosine and sine `|B|` spectra are cut below `2e-4` of the largest
   combined amplitude and splined in `sqrt(s)`; `iota`, `G` and `I` are splined in `s`.
 - **Orbits.** The guiding-centre equations in Boozer coordinates (White; the
   `K = 0` form of SIMSOPT) are integrated with fixed-step RK4 in the chart
@@ -110,7 +110,7 @@ On an Apple M3 Max laptop (10 performance cores, load average 6-9), the
 default ARIES-CS run (`wout_n3are_R7.75B5.7.nc`, 1000 alphas, 10 ms, 41
 Boozer modes) takes 28 s: 25 s of tracing, of which 1.9 s is compilation.
 It loses 12.3 % ± 1.0 %. The defaults are now 500 alphas (± 1.5 %) and a
-mode cut of 1e-4 (see the convergence section). `--trace` gives JAX one CPU
+mode cut of 2e-4 (see the convergence section). `--trace` gives JAX one CPU
 device per usable core (on Linux, the cores the process may run on). On Apple
 silicon it uses only the performance cores unless there are at least as many
 efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
@@ -157,12 +157,12 @@ reactor scale, CTH-like and nfp2_QA_omnigenity (which loses everything).
 - **Mode cut.** 1e-4 and 2e-4 stay within 1.7σ of the reference everywhere.
   3e-4 misses the reactor-scale Landreman–Paul QA (−2.4σ): its few
   symmetry-breaking modes sit between `2e-4` and `3e-4` of `B00`. The default
-  is 1e-4; `--trace-mode-cut 2e-4` is safe on all twenty.
+  is 2e-4, the coarsest cut that is safe on all twenty.
 - **Timestep.** The default RK4 step (`1.25e-7 s × a / 1.7044 m`) is the larger
   error. The energy error exceeds `1e-3` in six cases (bold), up to 27 % in the
   three-period QI, and halving the step moves the nfp4 QI loss fraction by
-  −3.5σ. Check `max_energy_error` in `*_trace.json`; when it exceeds `1e-3`,
-  rerun with `--trace-timestep` halved or `--trace-method dopri5`.
+  −3.5σ. `--trace` prints the largest energy error after every run and, above
+  `1e-3`, says the orbits are not converged and gives the halved step to rerun with.
 - **The `K = 0` equations.** `--trace` drops the radial covariant field
   `K`, which is nonzero only at finite pressure. SIMSOPT traces both forms
   (`gc` with `K`, `gc_noK` without), and on 512 identical births over 5 ms the

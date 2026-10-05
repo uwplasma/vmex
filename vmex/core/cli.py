@@ -297,7 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--trace-mode-cut", type=float, default=None,
-        help="Drop Boozer |B| modes below this fraction of the largest amplitude (default: 1e-4; "
+        help="Drop Boozer |B| modes below this fraction of the largest amplitude (default: 2e-4; "
              "1e-3 misses losses in precise quasisymmetry).",
     )
     p.add_argument(
@@ -1062,8 +1062,10 @@ class _TraceProgress:
 
 def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
     """Alpha-particle tracing driver for ``--trace`` (requires ESSOS)."""
+    import numpy as np
+
     from .plotting import plot_tracing
-    from .tracing import MODE_TOLERANCE, trace_alphas
+    from .tracing import ENERGY_TOLERANCE, MODE_TOLERANCE, trace_alphas
 
     scale = None if args.trace_no_scale else args.scale_target
     mode_cut = MODE_TOLERANCE if args.trace_mode_cut is None else float(args.trace_mode_cut)
@@ -1131,6 +1133,12 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
         if args.collisional:
             emit(f" Thermalized: {result.particles_thermalized}")
         emit(f" Solver failures: {result.particles_failed}")
+        energy = float(np.max(result.energy_error, initial=0.0))
+        if energy <= ENERGY_TOLERANCE:
+            emit(f" Max energy error: {energy:.1e} (converged, below {ENERGY_TOLERANCE:g})")
+        else:
+            emit(f" Max energy error: {energy:.1e}, above {ENERGY_TOLERANCE:g}: the orbits are not converged. "
+                 f"Rerun with --trace-timestep {0.5 * result.metadata['timestep']:.3g}")
     label = wout_path.stem.removeprefix("wout_")
     outdir.mkdir(parents=True, exist_ok=True)
     written = dict(zip(("json", "npz"), result.save(outdir / label)))

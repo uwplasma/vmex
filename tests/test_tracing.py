@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import io
 from pathlib import Path
@@ -439,7 +440,8 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     assert rc == 0, stdout
     for line in ("Loss fraction:", "Thermalized:", "Solver failures:",
                  "Scaling: B_scale=", "compile", "volavgB=5.8646 T, Aminor_p=1.7044 m",
-                 "mode cut 0.001 of largest amplitude", "Change with --trace-particles N"):
+                 "mode cut 0.001 of largest amplitude", "Change with --trace-particles N",
+                 "Max energy error:"):
         assert line in stdout, line
     assert "traced 100% of tmax" in progress.getvalue()
     for suffix in ("trace.png", "trace_3d.png", "trace.npz"):
@@ -779,3 +781,23 @@ def test_asymmetric_boundary_cartesian_coordinates():
     expected = (radius*np.cos(phi), radius*np.sin(phi),
                 0.2*np.sin(angle) + 0.05*np.cos(angle))
     np.testing.assert_allclose(_boozer_boundary_xyz(bz, theta, zeta), expected, atol=1e-14)
+
+
+@pytest.mark.parametrize("energy, expected", [(1e-6, "(converged, below 0.001)"),
+                                              (5e-2, "the orbits are not converged. Rerun with --trace-timestep")])
+def test_cli_reports_whether_the_orbits_converged(solovev_wout, tmp_path, monkeypatch, energy, expected):
+    """The energy check names the step to rerun with when the orbits are not converged."""
+    from vmex.core import tracing
+
+    real = tracing.trace_alphas
+
+    def traced(*args, **kwargs):
+        result = real(*args, **kwargs)
+        return dataclasses.replace(result, energy_error=np.full_like(result.energy_error, energy))
+
+    monkeypatch.setattr(tracing, "trace_alphas", traced)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = cli.main([str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--trace-particles", "4",
+                       "--trace-tmax", "1e-6", "--mbooz", "8", "--nbooz", "8"])
+    assert rc == 0 and expected in buffer.getvalue()
