@@ -163,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  vmex --plot boozmn_*.nc— Boozer contour/spectrum plots\n"
             "  vmex --trace wout_*.nc — trace alpha particles (ESSOS), plot losses\n"
             "  vmex --turbulence input.X — solve, then GKX linear + nonlinear turbulence\n"
+            "  vmex --neoclassical wout_*.nc — DKX neoclassical transport, plot panels\n"
             "  vmex --scale input.X [B R] — scale an input or WOUT\n"
             "  vmex --to-input wout_*.nc — reconstruct input.* from a WOUT\n"
             "  vmex --doctor          — installation and JAX backend diagnostics\n"
@@ -447,6 +448,33 @@ def build_parser() -> argparse.ArgumentParser:
             "instead of a standalone mgrid file (pairs with MGRID_FILE = "
             "'DIRECT_COILS'; requires ESSOS)."
         ),
+    )
+    p.add_argument(
+        "--neoclassical",
+        action="store_true",
+        help=(
+            "Neoclassical transport with DKX after solving an input file, or "
+            "from a wout_*.nc file: monoenergetic D11/D31/D33, ambipolar Er, "
+            "bootstrap <j.B> against the equilibrium's, species fluxes and |B|; "
+            "writes *_neoclassical.png and *_neoclassical.h5 (requires dkx)."
+        ),
+    )
+    p.add_argument(
+        "--nc-preset", choices=("quick", "default", "full"), default="default",
+        help="--neoclassical resolution: quick (smoke, not reportable), default, full.",
+    )
+    p.add_argument(
+        "--nc-profiles", metavar="JSON", default=None,
+        help=(
+            "--neoclassical kinetic profiles: JSON with ne_coeffs [m^-3], Te_coeffs, "
+            "Ti_coeffs [eV] (polynomials in s, lowest order first) and optional "
+            "helicity_n (0 QA, +/-1 QH). Also draws the Redl <j.B>. Default: DKX "
+            "splits the WOUT pressure with T_i = T_e."
+        ),
+    )
+    p.add_argument(
+        "--nc-er", type=float, default=None, metavar="KV_PER_M",
+        help="--neoclassical radial electric field [kV/m] (default: the ambipolar root).",
     )
     p.add_argument(
         "--doctor",
@@ -951,6 +979,8 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
         _run_trace(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
     if bool(args.turbulence):
         _run_turbulence(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
+    if bool(args.neoclassical):
+        _run_neoclassical(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
     if not bool(result.converged):  # NITER exhaustion: wout kept, distinct code
         return int(result.ier_flag) or 1
     return 0
@@ -1023,6 +1053,53 @@ def _run_booz(wout_path: Path, args, outdir: Path, *, plot: bool, emit, quiet: b
     if plot:
         _plot_boozmn_file(boozmn_path, outdir, emit=emit, quiet=quiet)
     return boozmn_path
+
+
+def _run_neoclassical(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Path:
+    """``--neoclassical``: DKX's representative run (figure + HDF5) on one wout.
+
+    With ``--nc-profiles`` DKX solves with those n and T profiles instead of its
+    own split of the pressure, and VMEX's Redl ``<j.B>`` on the same profiles
+    is drawn beside DKX's.  A DKX older than ``OPTIONAL_MINIMUMS['dkx']`` runs
+    without them and says so.
+    """
+    import inspect
+
+    from .._compat import OPTIONAL_MINIMUMS
+
+    pin = f'"dkx>={OPTIONAL_MINIMUMS["dkx"]}"'
+    try:
+        from dkx.representative import run_representative
+    except ImportError as exc:
+        raise VmecInputError("MISSING OR OUTDATED OPTIONAL DEPENDENCY",
+                             hint=f"--neoclassical needs {pin}; run: pip install {pin}") from exc
+    extra: dict[str, object] = {} if args.nc_er is None else {"er": float(args.nc_er)}
+    if args.nc_profiles:
+        import json
+
+        import numpy as np
+
+        from .bootstrap import KineticProfiles, j_dot_B_redl, redl_geometry_from_wout
+
+        spec = json.loads(Path(args.nc_profiles).read_text())
+        profiles = KineticProfiles(*(np.asarray(spec[k], dtype=float)
+                                     for k in ("ne_coeffs", "Te_coeffs", "Ti_coeffs")))
+        s = np.linspace(0.05, 0.95, 19)
+        jdotb, _ = j_dot_B_redl(profiles, redl_geometry_from_wout(wout_path, s),
+                                int(spec.get("helicity_n", 0)))
+        extra.update(profiles=profiles, redl_jdotb=(s, np.asarray(jdotb)))
+    if extra and "profiles" not in inspect.signature(run_representative).parameters:
+        emit(f" NOTE : this dkx ignores --nc-profiles and --nc-er; run: pip install -U {pin}")
+        extra = {}
+    out = outdir / f"{wout_path.stem.removeprefix('wout_')}_neoclassical.png"
+    if not quiet:
+        emit(f" DKX neoclassical transport ({args.nc_preset} preset): {wout_path.name}")
+    figure = run_representative(
+        wout_path, out_path=out, quick=args.nc_preset == "quick",
+        full=args.nc_preset == "full", emit=None if quiet else emit, **extra)
+    if not quiet:
+        emit(f" Wrote neoclassical figure: {figure}")
+    return figure
 
 
 def _scale_label(scale: str) -> str:
@@ -1426,7 +1503,8 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
     quiet = bool(args.quiet)
 
     if args.to_input:
-        if not _is_wout_path(input_path) or plot_requested or args.booz or args.trace or args.scale:
+        if (not _is_wout_path(input_path) or plot_requested or args.booz or args.trace
+                or args.neoclassical or args.scale):
             parser.error("--to-input requires a WOUT path and no other operation")
         from .input import VmecInput
 
@@ -1446,13 +1524,14 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
         return 0
 
     if bool(args.scale):
-        if plot_requested or bool(args.booz) or bool(args.trace) or bool(args.test):
-            parser.error("--scale cannot be combined with --plot, --booz, --trace, or --test")
+        if plot_requested or args.booz or args.trace or args.neoclassical or args.test:
+            parser.error("--scale cannot be combined with --plot, --booz, --trace, "
+                         "--neoclassical, or --test")
         return _scale_file(args, input_path, outdir, emit=emit)
 
+    if (_is_boozmn_path(input_path) or _is_mout_path(input_path)) and (args.trace or args.neoclassical):
+        parser.error("--trace and --neoclassical require toroidal wout_*.nc inputs")
     if _is_boozmn_path(input_path):
-        if bool(args.trace):
-            parser.error("particle tracing requires toroidal wout_*.nc inputs")
         if not plot_requested:
             parser.error("boozmn_*.nc inputs are plot-only; use --plot boozmn_*.nc")
         _plot_boozmn_file(input_path, plot_outdir, emit=emit, quiet=quiet)
@@ -1463,14 +1542,13 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             parser.error("mout_*.nc inputs are plot-only; use --plot mout_*.nc")
         if bool(args.booz):
             parser.error("Boozer transforms require toroidal wout_*.nc inputs")
-        if bool(args.trace):
-            parser.error("particle tracing requires toroidal wout_*.nc inputs")
         _plot_mout_file(input_path, plot_outdir, emit=emit, quiet=quiet)
         return 0
 
     if _is_wout_path(input_path):
-        if not (plot_requested or args.booz or args.trace or args.turbulence):
-            parser.error("wout_*.nc inputs require --plot, --booz, --trace, and/or --turbulence")
+        if not (plot_requested or args.booz or args.trace or args.turbulence or args.neoclassical):
+            parser.error("wout_*.nc inputs require --plot, --booz, --trace, --turbulence, "
+                         "and/or --neoclassical")
         if plot_requested:
             _plot_wout_file(input_path, plot_outdir, emit=emit, quiet=quiet)
         if bool(args.booz):
@@ -1479,13 +1557,15 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             _run_trace(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         if bool(args.turbulence):
             _run_turbulence(input_path, args, plot_outdir, emit=emit, quiet=quiet)
+        if bool(args.neoclassical):
+            _run_neoclassical(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         return 0
 
     from vmex.mirror.free_boundary import is_mirror_input
 
     if is_mirror_input(input_path):
-        if bool(args.booz) or bool(args.trace):
-            parser.error("--booz and --trace require toroidal inputs, not &MIRROR decks")
+        if args.booz or args.trace or args.neoclassical:
+            parser.error("--booz, --trace and --neoclassical require toroidal inputs, not &MIRROR decks")
         return _solve_mirror_file(input_path, outdir, plot=plot_requested, emit=emit, quiet=quiet)
 
     from .desc import is_desc_file, write_desc_input

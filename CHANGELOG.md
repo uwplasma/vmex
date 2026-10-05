@@ -5,6 +5,15 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## Unreleased
+
+- `vmex --neoclassical` runs DKX neoclassical transport on a WOUT, or after a
+  solve, and writes `*_neoclassical.png` and `*_neoclassical.h5`;
+  `--nc-preset quick|default|full` sets the resolution, `--nc-profiles` takes
+  the n and T profiles (and draws VMEX's Redl `<j.B>` on them) and `--nc-er`
+  fixes `E_r`. The `neoclassical` extra now installs `dkx>=2.8.0`; an older
+  DKX runs without the profiles and says so.
+
 ## 0.11.8 - 2026-10-06
 
 - **`vmex --trace` converges without a step to choose.** The default

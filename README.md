@@ -74,7 +74,7 @@ or pick what you need:
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.20.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.5.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -88,6 +88,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `essos` | 0.20.0 | `vmex[coils]` | `pip install "essos>=0.20.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.5 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.5"` |
+| `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
 | `gkx` | 2.5.0 | `vmex[turbulence]` | `pip install "gkx>=2.5.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
@@ -130,6 +131,7 @@ vmex --booz wout_my_case.nc
 vmex --scale wout_my_case.nc
 vmex --trace wout_my_case.nc
 vmex input.my_case --turbulence
+vmex --neoclassical wout_my_case.nc --nc-profiles profiles.json
 vmex input.nearby --restart wout_my_case.nc
 vmex wout_my_case.nc --to-input    # writes input.my_case
 ```
@@ -156,6 +158,15 @@ summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `
 ([guide](docs/howto/turbulence.md)). The defaults are a few-minute survey and are not converged.
 
 ![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
+
+`--neoclassical` (needs `vmex[neoclassical]`) runs [DKX](https://github.com/uwplasma/DKX) on the WOUT:
+monoenergetic `D11`, `D31`, `D33` against collisionality, the ambipolar `E_r` on each surface, the bootstrap
+`<j·B>` at that root against the equilibrium's own, species particle and heat fluxes, and Boozer `|B|`. It writes
+`*_neoclassical.png` and `*_neoclassical.h5`. `--nc-profiles profiles.json` supplies `n_e`, `T_e`, `T_i`
+(polynomials in `s`, the `KineticProfiles` convention) and adds VMEX's Redl `<j·B>` on the same profiles;
+without it DKX splits the WOUT pressure with `T_i = T_e`. `--nc-preset quick|default|full` sets the resolution ([guide](docs/howto/neoclassical-transport.md)).
+
+![vmex --neoclassical output: monoenergetic coefficients, ambipolar Er, bootstrap current, fluxes and |B|](docs/_static/figures/readme_neoclassical_output.webp)
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,

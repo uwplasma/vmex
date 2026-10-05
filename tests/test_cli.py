@@ -211,6 +211,43 @@ def test_booz_and_plot_boozmn_smoke(solovev_cli, tmp_path):
     assert (tmp_path / "boozmn_solovev_modB.png").exists()
 
 
+def test_neoclassical_calls_dkx_with_the_preset(solovev_cli, tmp_path, monkeypatch):
+    """``--neoclassical`` hands the wout, profiles and Redl curve to DKX; old or missing DKX is named."""
+    import sys
+    import types
+
+    _, _, wout_path = solovev_cli
+    profiles = tmp_path / "profiles.json"
+    profiles.write_text('{"ne_coeffs": [1e20, -1e20], "Te_coeffs": [2e3, -2e3], "Ti_coeffs": [2e3, -2e3]}')
+    argv = [str(wout_path), "--neoclassical", "--nc-preset", "quick", "--nc-profiles", str(profiles),
+            "--nc-er", "-5", "--outdir", str(tmp_path), "--quiet"]
+    monkeypatch.setitem(sys.modules, "dkx.representative", None)
+    rc, stdout = _run_cli(argv)
+    assert rc != 0 and 'pip install "dkx>=' in stdout
+    calls = []
+
+    def run_representative(path, *, out_path, quick, full, emit, er=None, profiles=None, redl_jdotb=None):
+        calls.append((path, out_path, quick, er, profiles, redl_jdotb))
+        return out_path
+
+    fake = types.ModuleType("dkx.representative")
+    fake.run_representative = run_representative
+    monkeypatch.setitem(sys.modules, "dkx", types.ModuleType("dkx"))
+    monkeypatch.setitem(sys.modules, "dkx.representative", fake)
+    assert _run_cli(argv)[0] == 0
+    path, out, quick, er, kinetic, (s, jdotb) = calls.pop()
+    assert (path, out, quick, er) == (wout_path, tmp_path / "solovev_neoclassical.png", True, -5.0)
+    assert float(kinetic.ne_coeffs[0]) == 1e20 and s.shape == jdotb.shape and np.all(np.isfinite(jdotb))
+    fake.run_representative = lambda path, **kw: calls.append((path, kw)) or kw["out_path"]  # dkx<2.8
+    rc, stdout = _run_cli([str(SOLOVEV_DECK), *argv[1:-1]])  # solve first, not quiet
+    assert rc == 0 and "ignores --nc-profiles" in stdout and "Wrote neoclassical figure" in stdout
+    ((path, kw),) = calls
+    assert path == tmp_path / "wout_solovev.nc" and kw["quick"] and "profiles" not in kw
+    (tmp_path / "boozmn_solovev.nc").touch()
+    with pytest.raises(SystemExit):
+        _run_cli([str(tmp_path / "boozmn_solovev.nc"), "--neoclassical"])
+
+
 # ---------------------------------------------------------------------------
 # VMEC++-style JSON input
 # ---------------------------------------------------------------------------

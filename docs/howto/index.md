@@ -17,6 +17,7 @@ match-phiedge
 use-essos-fields-and-coils
 trace-alpha-particles
 turbulence
+neoclassical-transport
 profiles
 scale-a-configuration
 ```
