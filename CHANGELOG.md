@@ -5,6 +5,22 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## 0.11.8 - 2026-10-06
+
+- **`vmex --trace` converges without a step to choose.** The default
+  integrator is per-particle error-controlled Dopri8 at tolerance `3e-7`
+  (ESSOS 0.20 adaptive stepping); `--trace-tolerance` sets it and
+  `--trace-timestep` becomes the first trial step. On twenty-one equilibria
+  the worst energy error is `1.7e-4`, against up to `0.27` for the earlier
+  fixed RK4 step, at about 2.6 times its cost (#554).
+- The default Boozer mode cut is `2e-4`, safe on twenty equilibria, and every
+  run reports its largest energy error and how to tighten it above `1e-3`
+  (#553). The trace guide gives the mode-cut, timestep, `K` and integrator
+  studies on the corrected tracer (#552).
+- The optimization Jacobian is cached persistently (#549). New examples:
+  low-bootstrap QA, a QI drift study and a DKX-bootstrap QI (#550).
+- Floor `essos>=0.20.0`.
+
 ## 0.11.7 - 2026-10-05
 
 - **Alpha tracing physics corrections; results traced with earlier releases
