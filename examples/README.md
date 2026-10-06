@@ -94,8 +94,8 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   self-contained: the scalarized loss, the L-BFGS-B call and the monitor wiring
   are in the file beside its physical targets, resolution and save names, so a
   reader never has to open a second file to follow one run.
-  The scalar lane trades objective progress per evaluation (roughly 3x higher
-  objective at a matched budget on the QA workflow) for a cheaper cold start and
+  The scalar lane trades objective progress per evaluation (measured: QA
+  final QS 2.7x above least squares with 40 mode-2 iterations, QI 17x) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
