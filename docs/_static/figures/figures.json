@@ -504,7 +504,7 @@
       "reproducible": "external-data",
       "bytes_verified": false,
       "used_in": [
-        "README.md"
+        "docs/howto/trace-alpha-particles.md"
       ],
       "note": "Plots the three-code record written by benchmarks/trace_cross_code.py (VMEX --trace, SIMPLE, SIMSOPT on the same 1000 ARIES-CS alphas). The equilibrium wout_n3are_R7.75B5.7.nc is not in the tree (ESSOS and SIMSOPT test files); rebuilding the record also needs a SIMPLE build and simsopt. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
     },
@@ -526,6 +526,26 @@
         "README.md"
       ],
       "note": "The six-panel *_trace.png of plot_tracing for the VMEX run of benchmarks/trace_cross_code.json, re-traced deterministically from the recorded settings (the generator checks the lost count against the record; the title shows the recorded wall time), downsized to 1200 px WebP. Needs wout_n3are_R7.75B5.7.nc from the ESSOS or SIMSOPT test files. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
+    },
+    {
+      "path": "docs/_static/figures/readme_turbulence.webp",
+      "sha256": "7463387ba29e32b295eb42418743671469ee023cff8609315c1e1a8e509643ba",
+      "bytes": 66868,
+      "generator": "vmex/core/gk_run.py",
+      "command": "vmex examples/data/input.LandremanPaul2021_QA_lowres --turbulence",
+      "inputs": [
+        "examples/data/input.LandremanPaul2021_QA_lowres"
+      ],
+      "record": null,
+      "generated": "2026-10-04",
+      "hardware": "x86_64 Linux workstation, one NVIDIA RTX A4000",
+      "reproducible": "manual",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md",
+        "docs/howto/turbulence.md"
+      ],
+      "note": "The *_turbulence.png summary of plot_turbulence for the default vmex --turbulence run (GKX 2.5.0, JAX 0.11.2, GPU), downsized to 1200 px WebP with Pillow. The GPU CFL step sequence differs from CPU, so a CPU rerun gives a statistically consistent but not byte-identical figure."
     }
   ]
 }

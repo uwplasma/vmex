@@ -691,8 +691,8 @@ _configure_jax_environment()
 # Floors of the optional extras, equal to pyproject.toml (a test pins them).
 # Checked where each is first used, so that an environment left behind by
 # `git pull` over an editable install fails with the fix, not a TypeError.
-OPTIONAL_MINIMUMS = {"essos": "0.19.4", "virtual-casing-jax": "0.0.9",
-                     "neo-jax": "1.0.5", "gkx": "2.4.2"}
+OPTIONAL_MINIMUMS = {"essos": "0.19.5", "virtual-casing-jax": "0.0.9",
+                     "neo-jax": "1.0.5", "gkx": "2.5.0"}
 
 
 def require_optional(name: str, feature: str) -> None:

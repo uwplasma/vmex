@@ -18,7 +18,7 @@ A particle is lost when it reaches ``s = 1``.
 Births: on one surface ``s`` (default) or through the volume in proportion
 to the D-T fusion rate (``birth="volume"``), uniform in pitch ``v_par/v`` over
 ``[-1, 1)`` and distributed over the angles with the Boozer Jacobian
-``(G + iota I) / B^2``.  The plasma profiles, for volume births and for
+``abs(G + iota I) / B^2``.  The plasma profiles, for volume births and for
 ``collisions=True``, are those of Landreman, Buller & Drevlak, PoP 29, 082501
 (2022): ``n_D = n_T = n_e / 2 = (n_e0 / 2)(1 - s^5)`` and
 ``T = T_0 (1 - s)`` with ``n_e0 = 4e20 m^-3`` and ``T_0 = 12 keV``, and the
@@ -53,6 +53,8 @@ TIMESTEP = 1.25e-7
 MODE_TOLERANCE = 1e-4
 # Landreman, Buller & Drevlak (2022) profiles: n_e0 [m^-3], T_0 [keV].
 NE0, T0_KEV = 4e20, 12.0
+_DT_COEFFICIENTS = (1.17302e-9, 1.51361e-2, 7.51886e-2, 4.60643e-3, 1.35e-2, -1.0675e-4, 1.366e-5)
+_BIRTH_MAX_BATCHES = 1000
 _COMPILE_S = [0.0, 0.0]  # compile seconds, listener registered
 
 
@@ -75,7 +77,7 @@ def _essos_imports():
 def dt_reactivity(T_keV):
     """Bosch & Hale (NF 32, 611, 1992) D-T ``<sigma v>`` [m^3/s] at ``T`` [keV]."""
     T = np.maximum(np.asarray(T_keV, float), 1e-3)
-    c = (1.17302e-9, 1.51361e-2, 7.51886e-2, 4.60643e-3, 1.35e-2, -1.0675e-4, 1.366e-5)
+    c = _DT_COEFFICIENTS
     theta = T / (1 - T * (c[1] + T * (c[3] + T * c[5])) / (1 + T * (c[2] + T * (c[4] + T * c[6]))))
     xi = (34.3827**2 / (4 * theta)) ** (1 / 3)
     return 1e-6 * c[0] * theta * np.sqrt(xi / (1124656.0 * T**3)) * np.exp(-3 * xi)
@@ -200,30 +202,224 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     return BoozerField.from_booz_xform(bx, psi0, mode_tolerance), bx
 
 
+def _interval_product(a, b):
+    products = a[..., :, None] * b[..., None, :]
+    return np.stack([np.nextafter(products.min(axis=(-2, -1)), -np.inf),
+                     np.nextafter(products.max(axis=(-2, -1)), np.inf)], axis=-1)
+
+
+def _interval_sum(a, b):
+    return np.stack([np.nextafter(a[..., 0] + b[..., 0], -np.inf),
+                     np.nextafter(a[..., 1] + b[..., 1], np.inf)], axis=-1)
+
+
+def _spline_range(knots, coefficients, lo, hi, *, derivative=False):
+    """Outward-rounded Bernstein enclosure, including extrapolated end pieces."""
+    from math import comb
+
+    knots, coefficients = np.asarray(knots, float), np.asarray(coefficients, float)
+    if (knots.ndim != 1 or len(knots) < 2 or np.any(np.diff(knots) <= 0)
+            or coefficients.ndim != 3 or coefficients.shape[0] != len(knots) - 1
+            or coefficients.shape[-1] != 4 or not np.isfinite(knots).all()
+            or not np.isfinite(coefficients).all()):
+        raise ValueError("Birth sampling requires finite cubic Boozer splines")
+    index = np.clip(np.searchsorted(knots, lo, side="right") - 1, 0, len(knots) - 2)
+    c = np.stack([coefficients[index, :, ::-1]] * 2, axis=-1)
+    if derivative:
+        c = _interval_product(c[..., 1:, :], np.stack([np.arange(1, 4)] * 2, axis=-1))
+    degree = c.shape[-2] - 1
+    left = np.stack([np.nextafter(lo - knots[index], -np.inf),
+                     np.nextafter(lo - knots[index], np.inf)], axis=-1)[:, None, :]
+    width = np.stack([np.nextafter(hi - lo, -np.inf),
+                      np.nextafter(hi - lo, np.inf)], axis=-1)[:, None, :]
+    powers_l, powers_w = [np.ones_like(left)], [np.ones_like(width)]
+    for _ in range(degree):
+        powers_l.append(_interval_product(powers_l[-1], left))
+        powers_w.append(_interval_product(powers_w[-1], width))
+    power = []
+    for k in range(degree + 1):
+        value = np.zeros_like(c[..., 0, :])
+        for j in range(k, degree + 1):
+            term = _interval_product(c[..., j, :], powers_l[j - k])
+            value = _interval_sum(value, _interval_product(term, np.array([comb(j, k)] * 2)))
+        power.append(_interval_product(value, powers_w[k]))
+    bernstein = []
+    for j in range(degree + 1):
+        value = np.zeros_like(power[0])
+        for k in range(j + 1):
+            ratio = comb(j, k) / comb(degree, k)
+            factor = np.array([np.nextafter(ratio, -np.inf), np.nextafter(ratio, np.inf)])
+            value = _interval_sum(value, _interval_product(power[k], factor))
+        bernstein.append(value)
+    values = np.stack(bernstein)
+    if not np.isfinite(values).all():
+        raise ValueError("Birth spline bounds must be finite")
+    return np.stack([values[..., 0].min(axis=0), values[..., 1].max(axis=0)], axis=-1)
+
+
+def _birth_bounds(field, s, volume):
+    """Conservative |B| lower and |G+iota I| upper bounds for the stored splines."""
+    from essos.boozer import BoozerField
+
+    if not isinstance(field, BoozerField):
+        raise TypeError("Birth sampling requires an ESSOS BoozerField")
+    xm, xn = np.asarray(field.xm), np.asarray(field.xn)
+    zero = (xm == 0) & (xn == 0)
+    if (xm.ndim != 1 or xm.shape != xn.shape or not zero.any()
+            or not np.isfinite(xm).all() or not np.isfinite(xn).all()):
+        raise ValueError("Birth sampling requires finite Boozer modes and a constant mode")
+    if not np.isfinite(field.b_coef).all() or (field.sine_coef is not None and not np.isfinite(field.sine_coef).all()):
+        raise ValueError("Birth sampling requires finite positive |B| splines")
+    edges = np.r_[0.0, np.asarray(field.r_knots)[1:-1], 1.0] if volume else np.array([np.sqrt(s)] * 2)
+    if volume and (np.any(np.diff(edges) <= 0) or edges[0] != 0 or edges[-1] != 1):
+        raise ValueError("Boozer radial knots must lie within the plasma")
+    eps = np.finfo(np.asarray(field.b_coef).dtype).eps
+    if field.sine_coef is not None:
+        eps = max(eps, np.finfo(np.asarray(field.sine_coef).dtype).eps)
+    for refinement in range(6):
+        lo, hi = edges[:-1], edges[1:]
+        if len(lo) * len(xm) > 1_000_000:
+            raise ValueError("Cannot bound a finite positive Boozer |B| within the birth-bound work limit")
+        cosine = _spline_range(field.r_knots, field.b_coef, lo, hi)
+        sine = (np.zeros_like(cosine) if field.sine_coef is None
+                else _spline_range(field.r_knots, field.sine_coef, lo, hi))
+        radial = np.stack([lo, hi], axis=-1)[:, None, :]
+        scale = np.where((xm > 0)[None, :, None], radial, 1.0)
+        c, t = _interval_product(cosine, scale), _interval_product(sine, scale)
+        amplitude = np.hypot(np.abs(c).max(axis=-1), np.abs(t).max(axis=-1))
+        rounding = 128 * (len(xm) + 1 + np.abs(xm).max() + np.abs(xn).max() / field.nfp) * eps * amplitude.sum(axis=1)
+        lower = c[:, zero, 0].sum(axis=1) - amplitude[:, ~zero].sum(axis=1) - rounding
+        if np.all(lower > 0):
+            break
+        # Derivative bounds cover the radial and angular gaps between grid points.
+        dc = _spline_range(field.r_knots, field.b_coef, lo, hi, derivative=True)
+        ds = (np.zeros_like(dc) if field.sine_coef is None
+              else _spline_range(field.r_knots, field.sine_coef, lo, hi, derivative=True))
+        dc = np.where((xm > 0)[None, :, None], _interval_sum(cosine, _interval_product(radial, dc)), dc)
+        ds = np.where((xm > 0)[None, :, None], _interval_sum(sine, _interval_product(radial, ds)), ds)
+        dr = np.hypot(np.abs(dc).max(axis=-1), np.abs(ds).max(axis=-1)).sum(axis=1)
+        nt = 1 if np.all(xm == 0) else 16 << refinement
+        nz = 1 if np.all(xn == 0) else 16 << refinement
+        if len(lo) * len(xm) * nt * nz > 100_000_000:
+            raise ValueError("Cannot bound a finite positive Boozer |B| within the birth-bound work limit")
+        theta, zeta = np.meshgrid((np.arange(nt) + 0.5) * 2 * np.pi / nt,
+                                  (np.arange(nz) + 0.5) * 2 * np.pi / (field.nfp * nz))
+        mid = (lo + hi) / 2
+        # The same polynomial at a point gives a narrow, rounded value enclosure.
+        cm = _spline_range(field.r_knots, field.b_coef, mid, mid)
+        sm = (np.zeros_like(cm) if field.sine_coef is None
+              else _spline_range(field.r_knots, field.sine_coef, mid, mid))
+        point_scale = np.stack([np.where(xm > 0, mid[:, None], 1)] * 2, axis=-1)
+        cm, sm = _interval_product(cm, point_scale), _interval_product(sm, point_scale)
+        point_error = np.diff(cm, axis=-1).sum(axis=(1, 2)) + np.diff(sm, axis=-1).sum(axis=(1, 2))
+        grid_min = np.full(len(mid), np.inf)
+        chunk = max(1, min(512, 1_000_000 // len(xm)))
+        for start in range(0, theta.size, chunk):
+            phase = xm[:, None] * theta.ravel()[None, start:start + chunk] - xn[:, None] * zeta.ravel()[None, start:start + chunk]
+            grid_min = np.minimum(grid_min, (cm[..., 0] @ np.cos(phase) + sm[..., 0] @ np.sin(phase)).min(axis=1))
+        grid_bound = (grid_min - dr * np.maximum(mid - lo, hi - mid) - rounding - point_error
+                      - np.pi * (amplitude @ np.abs(xm) / nt + amplitude @ np.abs(xn) / (field.nfp * nz)))
+        lower = np.maximum(lower, grid_bound)
+        if np.all(lower > 0):
+            break
+        if volume:
+            edges = np.sort(np.r_[edges, mid])
+    else:
+        raise ValueError("Cannot bound a finite positive Boozer |B|; inspect the field or radial resolution")
+    knots, coefficients = np.asarray(field.s_knots), np.asarray(field.profile_coef)
+    if not np.isfinite(coefficients).all():
+        raise ValueError("Birth sampling requires finite weights with positive support")
+    if volume:
+        edges = np.r_[0.0, knots[1:-1], 1.0]
+        if np.any(np.diff(edges) <= 0):
+            raise ValueError("Boozer profile knots must lie within the plasma")
+        lo, hi = edges[:-1], edges[1:]
+    else:
+        lo = hi = np.array([s])
+    profiles = _spline_range(knots, coefficients, lo, hi)
+    jacobian = _interval_sum(profiles[:, 1], _interval_product(profiles[:, 0], profiles[:, 2]))
+    numerator = np.abs(jacobian).max()
+    magnitude = np.abs(profiles[:, 1]).max() + np.abs(profiles[:, 0]).max() * np.abs(profiles[:, 2]).max()
+    numerator += 128 * np.finfo(coefficients.dtype).eps * magnitude
+    if volume:
+        if not coefficients[:, 1].any() and (not coefficients[:, 0].any() or not coefficients[:, 2].any()):
+            numerator = 0.0
+    else:
+        index = np.clip(np.searchsorted(knots, s, side="right") - 1, 0, len(knots) - 2)
+        c, d = coefficients[index], s - knots[index]
+        iota, G, current = ((c[:, 0] * d + c[:, 1]) * d + c[:, 2]) * d + c[:, 3]
+        if G + iota * current == 0:
+            numerator = 0.0
+    if not np.isfinite(numerator) or numerator <= 0:
+        raise ValueError("Birth sampling requires finite weights with positive support")
+    return lower.min(), np.nextafter(numerator, np.inf)
+
+
+def _fusion_envelope(T0_keV):
+    """Bound Bosch–Hale reactivity over the floored radial temperature profile."""
+    c = _DT_COEFFICIENTS
+    # theta/T is a convex combination of these positive polynomial coefficient ratios.
+    ratio = max(1.0, c[2] / (c[2] - c[1]), c[4] / (c[4] - c[3]), c[6] / (c[6] - c[5]))
+    temperature = max(T0_keV, 1e-3)
+    ratio = min(ratio, 1 + temperature * (c[1] + temperature * c[3]))
+    ratio *= 1 + 64 * np.finfo(float).eps
+    k = 34.3827**2 / 4
+    x = max(2 / 3, np.exp((np.log(k) - np.log(temperature) - np.log(ratio)) / 3)
+            * (1 - 64 * np.finfo(float).eps))
+    # x^2 exp(-3x) decreases for x >= 2/3; the density factor (1-s^5)^2 <= 1.
+    bound = 1e-6 * c[0] * ratio**1.5 * x**2 * np.exp(-3 * x) / np.sqrt(1124656.0 * k)
+    return np.nextafter(bound * (1 + 64 * np.finfo(float).eps), np.inf)
+
+
 def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
                   seed: int = 42, ne0: float = NE0, T0_keV: float = T0_KEV):
-    """Birth ``(s, theta_B, zeta_B, v_par/v)`` for ``n`` alphas (module notes)."""
+    """Sample with a fixed conservative bound and 64-bit birth probabilities.
+
+    The caller's runtime precision is restored; tracing precision is unchanged.
+    """
     import jax
     import jax.numpy as jnp
 
-    rng = np.random.default_rng(int(seed))
-    modB = jax.jit(jax.vmap(field.modB))
-    out: list[np.ndarray] = []
-    while sum(o.shape[0] for o in out) < n:
-        m = 4 * n
-        ss = np.full(m, float(s)) if birth == "surface" else rng.uniform(0.0, 1.0, m)
-        th = rng.uniform(0.0, 2 * np.pi, m)
-        ze = rng.uniform(0.0, 2 * np.pi / field.nfp, m)
-        B = np.asarray(modB(jnp.asarray(ss), jnp.asarray(th), jnp.asarray(ze)))
-        iota, G, current = field.profiles(jnp.asarray(ss))[0].T
-        weight = np.asarray(G + iota * current) / B**2
-        if birth == "volume":
-            weight = weight * (ne0 / 2 * (1 - ss**5)) ** 2 * dt_reactivity(T0_keV * (1 - ss))
-        elif birth != "surface":
-            raise ValueError(f"birth must be 'surface' or 'volume', got {birth!r}")
-        keep = rng.uniform(0.0, weight.max(), m) < weight
-        out.append(np.stack([ss, th, ze, rng.uniform(-1.0, 1.0, m)], axis=1)[keep])
-    return np.concatenate(out)[:n]
+    with jax.enable_x64(True):
+        if (not isinstance(n, (int, np.integer)) or n < 1 or birth not in ("surface", "volume")
+                or not np.isfinite(s) or not 0 <= s <= 1 or not isinstance(field.nfp, (int, np.integer))
+                or field.nfp < 1):
+            raise ValueError("Birth sampling requires positive n/nfp, s in [0,1], and birth='surface' or 'volume'")
+        volume = birth == "volume"
+        if volume and (not np.isfinite(ne0) or ne0 <= 0 or not np.isfinite(T0_keV) or T0_keV <= 0):
+            raise ValueError("Volume births require finite positive density and temperature for positive support")
+        B_lower, jacobian_bound = _birth_bounds(field, s, volume)
+        source_bound = _fusion_envelope(T0_keV) if volume else 1.0
+        if not np.isfinite(source_bound) or source_bound <= 0:
+            raise ValueError("Volume births require a finite, positive fusion envelope")
+        rng = np.random.default_rng(int(seed))
+        modB = jax.jit(jax.vmap(field.modB))
+        out: list[np.ndarray] = []
+        accepted = 0
+        m = min(65_536, max(64, 4 * int(n)), max(1, 1_000_000 // field.xm.size))
+        for _ in range(_BIRTH_MAX_BATCHES):
+            ss = np.full(m, float(s)) if birth == "surface" else rng.uniform(0.0, 1.0, m)
+            th = rng.uniform(0.0, 2 * np.pi, m)
+            ze = rng.uniform(0.0, 2 * np.pi / field.nfp, m)
+            B = np.asarray(modB(jnp.asarray(ss), jnp.asarray(th), jnp.asarray(ze)))
+            if not np.isfinite(B).all() or np.any(B <= 0):
+                raise ValueError("Birth sampling requires finite positive |B|")
+            iota, G, current = field.profiles(jnp.asarray(ss))[0].T
+            # Normalize before squaring: field strength and Jacobian scales cancel.
+            weight = np.abs(np.asarray(G + iota * current)) / jacobian_bound * (B_lower / B)**2
+            if volume:
+                # The constant density scale cancels from the normalized distribution.
+                weight *= (1 - ss**5) ** 2 * dt_reactivity(T0_keV * (1 - ss)) / source_bound
+            if not np.isfinite(weight).all() or np.any(weight < 0) or np.any(weight > 1):
+                raise ValueError("Invalid birth weight or rejection envelope violation")
+            keep = rng.uniform(0.0, 1.0, m) < weight
+            out.append(np.stack([ss, th, ze, rng.uniform(-1.0, 1.0, m)], axis=1)[keep])
+            accepted += int(keep.sum())
+            if accepted >= n:
+                break
+        else:
+            raise ValueError("Birth sampling exceeded its proposal limit; inspect the field and acceptance rate")
+        return np.concatenate(out)[:n]
 
 
 def trace_alphas(

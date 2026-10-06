@@ -47,8 +47,8 @@ two layers:
    Traceability is validated in ``tests/test_turbulence.py``.
 
 The heavy dependency is optional: only the objective wrappers import
-``gkx`` (>= 2.4.2; ``pip install 'vmex[turbulence]'`` or
-``pip install 'gkx>=2.4.2'``; its ``solvax`` pin is satisfied API-wise by
+``gkx`` (>= 2.5.0; ``pip install 'vmex[turbulence]'`` or
+``pip install 'gkx>=2.5.0'``; its ``solvax`` pin is satisfied API-wise by
 the in-house solvax's ``gmres``/``tridiagonal_solve``/``chunked_jacfwd``).
 The geometry adapter works without it.
 
@@ -155,8 +155,8 @@ def _gkx():
     except ImportError as err:  # pragma: no cover - exercised via message test
         raise ImportError(
             "the turbulence objectives need the optional dependency "
-            "gkx >= 2.4.2 (github.com/uwplasma/GKX): pip install 'vmex[turbulence]' "
-            "or pip install 'gkx>=2.4.2'.  The geometry adapter "
+            "gkx >= 2.5.0 (github.com/uwplasma/GKX): pip install 'vmex[turbulence]' "
+            "or pip install 'gkx>=2.5.0'.  The geometry adapter "
             "gk_fieldline_geometry works without it.") from err
 
 

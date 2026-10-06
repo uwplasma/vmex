@@ -2,7 +2,7 @@
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
 reports the fraction lost through the last closed flux surface. It needs the
-`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.4 or later).
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.5 or later).
 
 ## Run it
 
@@ -13,7 +13,7 @@ vmex input.case --trace            # solve first, then trace
 
 The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
 stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
-(ESSOS 0.19.4 and later). It then prints the scaling factors, the step, the number of Boozer
+(ESSOS 0.19.5 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
@@ -117,65 +117,71 @@ efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
 performance cores. A device count in `XLA_FLAGS` or `JAX_NUM_CPU_DEVICES`
 wins. The Boozer transform takes about 2 s.
 
-**CPU or GPU.** At the default size a laptop CPU is faster than a GPU. The
-CPU cost grows linearly with the number of alphas. An RTX A4000 took 70-130 s
-at any count from 250 to 8000 alphas (1e-3 cut): the 80 000 RK4 steps run one
-after another, and each step is too little work to fill the GPU. It beat the
-M4 only from about 4000 alphas (89 s against 193 s). Use a GPU for
-`--trace-particles 5000` and up.
+**CPU or GPU.** Since ESSOS 0.19.3 (parallel spline lookup and compaction of
+lost alphas) a GPU is the faster choice for large ensembles: 1,024 alphas over
+2 ms take 2.4 s warm on an RTX A4000 against 18 s on eight CPU devices
+(uwplasma/ESSOS#98). On a laptop CPU the default 500-alpha run takes under a
+minute.
 
 ## Convergence of the defaults
 
-These runs use ARIES-CS (`wout_n3are_R7.75B5.7.nc`) at reactor scale, with
-the same alphas launched from s = 0.25 and traced for 10 ms.
+Twenty equilibria, 1,000 alphas each from `s = 0.25`, traced for 10 ms on
+one RTX A4000 with VMEX 0.11.7 and ESSOS 0.19.5 (after the flux-sign and
+alpha-mass corrections). Every run uses the same births, so each cut and the
+halved timestep are compared alpha by alpha with the reference (`1e-5`, default
+step): σ is `(gained - dropped) / sqrt(gained + dropped)` over the alphas whose
+label changes.
 
-| alphas | step [s] | mode cut | modes | lost | vs reference (σ) |
-|---|---|---|---|---|---|
-| 4000 | 6.25e-8 | 1e-4 | 135 | 501 (12.5 %) | reference |
-| 4000 | 1.25e-7 | 1e-3 | 41 | 489 (12.2 %) | -0.6 |
-| 4000 | 2.5e-7 | 1e-3 | 41 | 501 | 0.0 |
-| 1000 | 6.25e-8 | 1e-4 | 135 | 121 | reference |
-| 1000 | 6.25e-8 | 1e-5 | 382 | 131 | +1.0 |
-| 1000 | 1.25e-7 | 1e-4 | 135 | 115 | -0.6 |
-| 1000 | 1.25e-7 | 1e-3 | 41 | 125 | +0.4 |
-| 1000 | 2.5e-7 | 1e-3 | 41 | 132 | +1.1 |
-
-Halving the default step (and refining the mode cut tenfold) changes the
-loss fraction by 0.6σ at 4000 alphas. That is within the 1σ gate G4 of plan
-section T. So is refining the cut a further hundredfold at 1000 alphas. At
-2.5e-7 s the loss fraction still agrees, but the RK4 energy error grows from
-1e-3 to 2e-2, so the default keeps 1.25e-7 s. The per-particle
-lost/confined labels agree only 90-92 % between any two of these runs.
-Over 10 ms these orbits are chaotic, so the fraction converges while
-individual orbits do not. Over 2 ms, 2000 alphas give 54 and 55 losses at
-6.25e-8 s and 3.125e-8 s, 2.7 %. The earlier VMEC-coordinate tracer gave
-2.5 % ± 1.1 % at its converged step.
-
-### The mode cut across geometries
-
-ARIES-CS alone does not settle the cut. These runs trace 1000 alphas for
-10 ms through six equilibria at cuts of 1e-3 and 1e-4, with the same births
-at both. The cut is relative to the largest `|B|` amplitude, which is `B00` in
-every case.
-
-| equilibrium | modes at 1e-3 / 1e-4 | lost at 1e-3 / 1e-4 | difference | same label |
+| equilibrium | modes 1e-5 / 1e-4 / 2e-4 / 3e-4 | lost % ref / 1e-4 / 2e-4 / 3e-4 / half step | σ 1e-4 / 2e-4 / 3e-4 / half step | energy error |
 |---|---|---|---|---|
-| ARIES-CS | 41 / 135 | 12.3 / 12.3 % | 0.0σ | 91 % |
-| Landreman-Paul QA | 3 / 16 | **0.0 / 0.7 %** | **-2.7σ** | 99 % |
-| Landreman-Paul QH | 4 / 14 | 0.0 / 0.0 % | | 100 % |
-| HSX | 40 / 159 | **9.6 / 12.7 %** | **-2.2σ** | 86 % |
-| W7-X (d23p4_tm, beta 5 %) | 29 / 78 | 1.9 / 2.1 % | -0.3σ | 99 % |
-| QI, 2 field periods | 30 / 172 | 3.2 / 2.9 % | +0.4σ | 98 % |
+| ARIES-CS | 382 / 135 / 101 / 77 | 12.5 / 13.3 / 12.2 / 14.7 / 11.5 | +0.6 / −0.2 / +1.5 / −1.1 | 2.3e-3 |
+| Landreman–Paul QA, reactor scale | 96 / 16 / 7 / 3 | 0.6 / 0.8 / 0.4 / **0.0** / 0.6 | +0.5 / −0.6 / **−2.4** / 0.0 | 1.7e-4 |
+| Landreman–Paul QA, β 2.5 % | 179 / 50 / 22 / 15 | 0.1 / 0.0 / 0.1 / 0.0 / 0.0 | −1.0 / 0.0 / −1.0 / −1.0 | 8.4e-5 |
+| HSX | 342 / 159 / 115 / 93 | 11.4 / 13.0 / 11.8 / 11.9 / 10.1 | +1.1 / +0.3 / +0.4 / −1.9 | **2.5e-2** |
+| W7-X, β 5 % | 229 / 78 / 54 / 45 | 1.8 / 1.7 / 2.0 / 1.8 / 2.0 | −0.4 / +0.7 / 0.0 / +0.7 | 8.8e-4 |
+| li383 | 198 / 120 / 92 / 81 | 28.2 / 28.4 / 28.5 / 28.5 / 28.4 | +0.8 / +0.5 / +0.1 / +1.0 | **2.9e-2** |
+| Nührenberg–Zille QHS | 235 / 87 / 68 / 54 | 4.6 / 4.5 / 4.7 / 4.6 / 4.7 | −0.1 / +0.1 / 0.0 / +0.3 | 2.6e-4 |
+| nfp1_QI | 332 / 139 / 88 / 73 | 7.5 / 5.9 / 5.7 / 5.8 / 7.3 | −1.4 / −1.6 / −1.5 / −0.6 | 2.1e-4 |
+| nfp2_QI | 184 / 92 / 74 / 65 | 3.7 / 4.0 / 4.0 / 3.9 / 3.7 | +1.7 / +1.3 / +0.3 / 0.0 | 6.1e-4 |
+| QI, 2 periods, fixed resolution | 458 / 172 / 111 / 83 | 2.4 / 2.9 / 2.9 / 2.8 / 2.0 | +0.7 / +0.7 / +0.6 / −1.6 | **9.8e-3** |
+| QI, 3 periods, fixed resolution | 857 / 360 / 247 / 190 | 1.4 / 1.1 / 1.4 / 2.1 / 1.0 | −0.6 / 0.0 / +1.2 / −0.9 | **2.7e-1** |
+| nfp4_QI, β 2.5 % | 546 / 169 / 126 / 100 | 3.7 / 3.3 / 3.3 / 3.1 / 2.3 | −0.5 / −0.5 / −0.7 / **−3.5** | **5.9e-2** |
+| nfp4_QH, β 2.5 % | 380 / 132 / 90 / 72 | 7.4 / 8.2 / 8.1 / 8.5 / 7.1 | +0.7 / +0.6 / +0.9 / −1.3 | **1.6e-2** |
+| nfp4_QH warm start | 133 / 61 / 50 / 43 | 1.5 / 1.4 / 1.3 / 1.7 / 1.6 | −0.2 / −0.4 / +0.4 / +0.3 | 9.2e-4 |
+| nfp2_QA_highres | 56 / 30 / 23 / 22 | 20.1 / 19.2 / 19.5 / 20.1 / 19.8 | −1.7 / −0.5 / 0.0 / −0.7 | 8.3e-6 |
+| QI_stel_seed_3127 | 103 / 53 / 42 / 37 | 31.1 / 31.0 / 31.1 / 31.1 / 31.1 | −1.0 / 0.0 / 0.0 / 0.0 | 7.9e-4 |
 
-A cut of 1e-3 misses the losses in the precise QA and in HSX. A good
-quasisymmetric field has all of its symmetry-breaking modes below `1e-3 B00`,
-and those are the modes that lose alphas. At 1e-5, Landreman-Paul QA still
-loses 0.7 % (96 modes) and HSX 12.0 % (342 modes, within 1σ of 1e-4). The
-default is therefore 1e-4, which takes about 3 times as long as 1e-3 on
-ARIES-CS. `--trace-mode-cut 1e-3` is a quick look for configurations far from
-quasisymmetry.
+Four more lose nothing at every setting: Landreman–Paul QA lowres and QH
+reactor scale, CTH-like and nfp2_QA_omnigenity (which loses everything).
+
+- **Mode cut.** 1e-4 and 2e-4 stay within 1.7σ of the reference everywhere.
+  3e-4 misses the reactor-scale Landreman–Paul QA (−2.4σ): its few
+  symmetry-breaking modes sit between `2e-4` and `3e-4` of `B00`. The default
+  is 1e-4; `--trace-mode-cut 2e-4` is safe on all twenty.
+- **Timestep.** The default RK4 step (`1.25e-7 s × a / 1.7044 m`) is the larger
+  error. The energy error exceeds `1e-3` in six cases (bold), up to 27 % in the
+  three-period QI, and halving the step moves the nfp4 QI loss fraction by
+  −3.5σ. Check `max_energy_error` in `*_trace.json`; when it exceeds `1e-3`,
+  rerun with `--trace-timestep` halved or `--trace-method dopri5`.
+- **The `K = 0` equations.** `--trace` drops the radial covariant field
+  `K`, which is nonzero only at finite pressure. SIMSOPT traces both forms
+  (`gc` with `K`, `gc_noK` without), and on 512 identical births over 5 ms the
+  loss labels are unchanged on W7-X at β = 4.5 % (3 and 3 lost). On a QA at
+  β = 2.7 % 4 of 512 labels change (9 against 11 lost, −1.0σ), and on a
+  Landreman–Paul QA at β = 2.5 % and a vacuum QH nothing is lost either way.
+  At these β the `K` term is below the sampling error of prompt losses.
+- Over 10 ms the orbits are chaotic, so individual labels change between any
+  two settings; the fraction converges, the labels do not.
 
 ## Against SIMPLE and SIMSOPT
+
+This comparison was measured with VMEX 0.11.4, before the toroidal-flux sign
+and alpha-mass corrections of 0.11.7, and has not been rerun. The totals
+agreed, but individual orbits differ. After the corrections, ESSOS,
+FIRM3D/CATAPULT and SIMPLE agree on all 512 loss labels of a matched
+5 ms case (uwplasma/vmex#516).
+
+![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT, before the 0.11.7 corrections](../_static/figures/readme_trace_benchmark.webp)
 
 `benchmarks/trace_cross_code.py` traces the same 1000 alphas with three
 codes. The equilibrium is ARIES-CS (`wout_n3are_R7.75B5.7.nc`, unscaled).

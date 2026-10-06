@@ -90,7 +90,7 @@ def test_plain_install_includes_plotting_and_qi_dependencies() -> None:
     assert "packaging" in dependency_names
     assert "numpy" in dependency_names
     assert "solvax>=0.27.0" in project_dependencies
-    assert "gkx>=2.4.2" in optional_dependencies["turbulence"]
+    assert "gkx>=2.5.0" in optional_dependencies["turbulence"]
     assert "virtual-casing-jax>=0.0.9" in optional_dependencies["freeb"]
     assert "plots" not in optional_dependencies
     assert "plot" not in optional_dependencies
@@ -134,8 +134,8 @@ def test_optional_floors_match_pyproject() -> None:
 
 
 @pytest.mark.parametrize("found, message", [
-    (None, 'essos>=0.19.4; run: pip install "essos>=0.19.4"'),
-    ("0.19.2", 'essos>=0.19.4 (found 0.19.2); run: pip install -U "essos>=0.19.4"'),
+    (None, 'essos>=0.19.5; run: pip install "essos>=0.19.5"'),
+    ("0.19.2", 'essos>=0.19.5 (found 0.19.2); run: pip install -U "essos>=0.19.5"'),
 ])
 def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
     from vmex import _compat

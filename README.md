@@ -17,8 +17,8 @@ stability diagnostics and open-mirror models support the wider workflow.
 - **Design with gradients:** implicit scalar adjoints and residual Jacobians for SciPy, JAXopt or
   Optax, with quasisymmetry, quasi-isodynamic, Mercier, ballooning, bootstrap and maximum-`J` objectives.
 - **Inspect the physics:** Boozer transforms, the magnetic field and its first three spatial
-  derivatives, effective ripple, the `--plot` diagnostic summary, `--scale` to reactor size and
-  `--trace` alpha-particle losses.
+  derivatives, effective ripple, the `--plot` diagnostic summary, `--scale` to reactor size,
+  `--trace` alpha-particle losses and `--turbulence` gyrokinetic runs.
 - **Choose the hardware:** CPU or GPU equilibrium solves (optimization gradients default to CPU),
   reusable compilation and independent-case ensembles.
 - **Connect coils:** ESSOS coil fields, NESTOR free boundary from an MGRID table or coils, and the
@@ -56,10 +56,10 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.19.4` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.19.5` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`) and the `--plot` ripple panel |
-| `pip install "vmex[turbulence]"` | `gkx>=2.4.2` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) |
+| `pip install "vmex[turbulence]"` | `gkx>=2.5.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
 
@@ -69,10 +69,10 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
-| `essos` | 0.19.4 | `vmex[coils]` | `pip install "essos>=0.19.4"` |
+| `essos` | 0.19.5 | `vmex[coils]` | `pip install "essos>=0.19.5"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.5 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.5"` |
-| `gkx` | 2.4.2 | `vmex[turbulence]` | `pip install "gkx>=2.4.2"` |
+| `gkx` | 2.5.0 | `vmex[turbulence]` | `pip install "gkx>=2.5.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
 Installing into an environment that already holds older packages is supported: every floor above
@@ -110,13 +110,14 @@ vmex --plot wout_my_case.nc
 vmex --booz wout_my_case.nc
 vmex --scale wout_my_case.nc
 vmex --trace wout_my_case.nc
+vmex input.my_case --turbulence
 vmex input.nearby --restart wout_my_case.nc
 vmex wout_my_case.nc --to-input    # writes input.my_case
 ```
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
 by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
-10 ms in Boozer coordinates (under a minute on 10 CPU cores, faster than a GPU at this size). It writes the loss fraction and a figure set:
+10 ms in Boozer coordinates (under a minute on 10 CPU cores; a GPU is faster for large ensembles). It writes the loss fraction and a figure set:
 loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
 `--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
 birth profile, and `--collisional` adds slowing down and pitch-angle scattering
@@ -124,17 +125,18 @@ birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 
 ![vmex --trace output: loss against time, loss map, pitch and loss-time distributions, iota](docs/_static/figures/readme_trace_output.webp)
 
-**`--trace` against SIMPLE and SIMSOPT.** The same 1000 ARIES-CS alphas (positions, pitches, energy) were traced for 10 ms by each code on the same 8 CPU
-cores. Runtimes exclude compilation and field set-up ([benchmark](benchmarks/trace_cross_code.py),
-[details](docs/howto/trace-alpha-particles.md#against-simple-and-simsopt)). The loss fractions agree within 0.6σ.
+`--trace` is compared with SIMPLE and SIMSOPT on matched alphas, and its mode cut and timestep are
+checked on twenty equilibria ([guide](docs/howto/trace-alpha-particles.md#convergence-of-the-defaults)).
 
-| code | loss fraction | runtime |
-|---|---|---|
-| VMEX `--trace` | 12.8 % ± 1.1 % | 146 s |
-| [SIMPLE](https://github.com/itpplasma/SIMPLE) | 12.4 % ± 1.0 % | 556 s |
-| SIMSOPT | 11.9 % ± 1.0 % | 1079 s |
+`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.5.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
+[GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing `k_y`,
+and a short nonlinear ITG simulation (`a/L_T = 3`, `a/L_n = 1`, adiabatic electrons). The terminal shows each
+stage with an estimate of the time left. The run writes the saturated heat flux with its standard error, a
+summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `-alpha`, `-ky`, `-grid`,
+`-moments`, `-tmax`, `-gradients` and `--turbulence-kinetic-electrons` change the run
+([guide](docs/howto/turbulence.md)). The defaults are a few-minute survey and are not converged.
 
-![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT](docs/_static/figures/readme_trace_benchmark.webp)
+![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
 
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,

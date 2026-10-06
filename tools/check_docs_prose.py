@@ -96,6 +96,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_qi.webp",
     "figures/readme_single_stage_fixed_boundary.webp",
     "figures/readme_single_stage_free_boundary.webp",
+    "figures/readme_turbulence.webp",
     "figures/stellarator_mirror_hybrid.webp",
 }
 

@@ -896,6 +896,16 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
 
     ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
                             jac_solver="gmres", max_nfev=1)
+    # The compiled Jacobian takes the host-solved state as an argument: an
+    # in-graph pure_callback makes JAX skip the persistent cache.
+    jac_calls = []
+    problem_jit = opt._problem_jit
+
+    def spy_problem_jit(key, slot, build):
+        fn = problem_jit(key, slot, build)
+        return (lambda *a: jac_calls.append((fn, a)) or fn(*a)) if slot == "jac" else fn
+
+    monkeypatch.setattr(opt, "_problem_jit", spy_problem_jit)
     # The public problem uses cost weights: weight=4 scales residuals and
     # their Jacobian by sqrt(4)=2.  It exposes the same block engine the
     # compatibility driver used to keep private.
@@ -907,6 +917,9 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
         use_ess=False,
     )
     residual, weighted_jac = problem.residual_and_jac(problem.x0)
+    monkeypatch.undo()
+    jac_jit, jac_args = jac_calls[0]
+    assert "callback" not in jac_jit.lower(*jac_args).as_text()
     compiled = problem.compile_residual_and_jacobian(progress=False)
     got_jac = weighted_jac[0] / 2.0
     reverse = opt.least_squares(obj, inp, max_mode=1, jac="implicit",

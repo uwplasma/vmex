@@ -3000,8 +3000,8 @@ def _least_squares_implicit(
             "jac_chunk_size must be None, a positive int, or 'auto', "
             f"got {jac_chunk_size!r}")
 
-    def _jac_parts(x: jnp.ndarray):
-        """Shared per-x setup of the implicit-Jacobian maps.
+    def _jac_parts(x: jnp.ndarray, state):
+        """Shared per-x setup of the implicit-Jacobian maps at solved ``state``.
 
         At the fixed point, ``dz_j = -(dF/dz)^{-1} dF/dp t_j`` per boundary
         dof tangent ``t_j`` (F's linearization is plain JAX, so forward mode
@@ -3014,7 +3014,7 @@ def _least_squares_implicit(
         residual formulation there).
         """
         params = params_of(x)
-        frozen = jax.lax.stop_gradient(imp.solve_implicit(params, cfg))
+        frozen = jax.lax.stop_gradient(state)
         P = imp._dof_projector(cfg, mask_const)
         edge = imp._edge_mask(cfg)
         F = imp.residual_fn(cfg, frozen, mask_const)
@@ -3055,7 +3055,7 @@ def _least_squares_implicit(
     certify_rtol = float(cfg.jacobian_adjoint_tol)
     certify_maxiter = int(cfg.jacobian_adjoint_maxiter)
 
-    def jacobian_rows(x: jnp.ndarray):
+    def jacobian_rows(x: jnp.ndarray, state):
         """Exact residual Jacobian by *forward* implicit differentiation.
 
         One batched preconditioned GMRES per boundary dof (see
@@ -3067,7 +3067,7 @@ def _least_squares_implicit(
         ``ndof``): they are the R25.4 perturbation warm-start linearization,
         already paid for by the column solves.
         """
-        Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x)
+        Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x, state)
 
         def column(tp_stack):
             tp = tangent_of(tp_stack)
@@ -3106,7 +3106,7 @@ def _least_squares_implicit(
     else:
         probe_chunk = chunk
 
-    def jacobian_rows_block(x: jnp.ndarray):
+    def jacobian_rows_block(x: jnp.ndarray, state):
         """``jacobian_rows`` via one block-tridiagonal factorization (R25.2).
 
         Same Jacobian as the default path to ``cfg.adjoint_tol`` (the GMRES
@@ -3117,7 +3117,7 @@ def _least_squares_implicit(
         ``jacobian_rows``).
         """
         _, tangent_of, _, column_of, (params, frozen, _, _) = \
-            _jac_parts(x)
+            _jac_parts(x, state)
         tangent_batch = jax.vmap(tangent_of)(tangent_stack)
         tangent_chunk = ndof if chunk is None else chunk
         dz0, report = imp._implicit_evolved_tangent_multi_rhs(
@@ -3269,7 +3269,9 @@ def _least_squares_implicit(
         placed = _place(x)
         params_np = jax.tree.map(np.asarray, params_of(placed))
         state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
-        return evaluate(placed, jax.tree.map(_place, state), status)
+        state = jax.tree.map(_place, state)
+        holder["solved"] = (FunctionProblem._key(np.asarray(x, dtype=float)), state)
+        return evaluate(placed, state, status)
 
     def fun(x: np.ndarray) -> np.ndarray:
         lin = holder["lin"]
@@ -3336,6 +3338,18 @@ def _least_squares_implicit(
             holder["lin"] = None
             return failure_jacobian(x)
 
+        def solved_state():
+            # The jitted Jacobians take the solved state as an argument: an
+            # in-graph pure_callback solve makes JAX refuse to write the
+            # executable to the persistent cache, so every process paid the
+            # full (~50 s) Jacobian compile.  The trial evaluation at this
+            # point already holds the state the callback would return.
+            solved = holder.get("solved")
+            if solved is not None and solved[0] == x_key:
+                return solved[1]
+            state, _ = imp._host_solve_and_mask(cfg, params_np)
+            return jax.tree.map(_place, state)
+
         def reverse_candidate() -> np.ndarray:
             candidate = np.asarray(
                 jax.device_get(reverse_jit(_place(x))), dtype=float
@@ -3357,7 +3371,7 @@ def _least_squares_implicit(
             if reverse:
                 jac = reverse_candidate()
             else:
-                rows, dz_cols, summary = jac_jit(_place(x))
+                rows, dz_cols, summary = jac_jit(_place(x), solved_state())
                 jac = np.asarray(jax.device_get(rows), dtype=float)
                 _record_linear_response(holder, summary, cfg)
                 jac, used_reverse = _select_host_jacobian(
@@ -3381,7 +3395,7 @@ def _least_squares_implicit(
         if jac is None or not np.all(np.isfinite(jac)):
             if jac_solver in ("auto", "block"):
                 try:
-                    rows, dz_cols, summary = gmres_jit(_place(x))
+                    rows, dz_cols, summary = gmres_jit(_place(x), solved_state())
                     candidate = np.asarray(jax.device_get(rows), dtype=float)
                     _record_linear_response(holder, summary, cfg)
                     candidate, used_reverse = _select_host_jacobian(
@@ -3632,7 +3646,7 @@ def _least_squares_implicit(
         )
         if reverse:
             return reverse_jit(x)
-        rows, _dz_cols, summary = jac_jit(x)
+        rows, _dz_cols, summary = jac_jit(x, imp.solve_implicit(params_of(x), cfg))
         # A transformed JAX function cannot raise the host-side typed error
         # used by an explicitly forced solver. Preserve exactness by falling
         # back to the certified reverse graph inside the compiled program.
@@ -3664,7 +3678,8 @@ def _least_squares_implicit(
             if reverse:
                 gradient = pulled_back()
             else:
-                jacobian, _dz_cols, summary = jac_jit(x)
+                jacobian, _dz_cols, summary = jac_jit(
+                    x, imp.solve_implicit(params, cfg))
                 gradient = _select_jax_jacobian(
                     jacobian.T @ rows, summary, pulled_back)
             return 0.5 * jnp.vdot(rows, rows), gradient

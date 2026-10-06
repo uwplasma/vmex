@@ -177,6 +177,9 @@ that the objective modules share live in one place and are re-exported by
 .. automodule:: vmex.core.turbulence
    :members:
 
+.. automodule:: vmex.core.gk_run
+   :members:
+
 Outputs
 -------
 

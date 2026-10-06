@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.11.6"
+version = "0.11.7"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -98,16 +98,17 @@ freeb = [
 # heat-flux window compiles once per shape and bounds its adjoint memory,
 # which the turbulence optimization examples rely on; 2.4.1 adds
 # solvax>=0.27.0 and booz_xform_jax>=0.4.1; 2.4.2 differentiates its dense
-# eigen-objectives in forward mode (the implicit least-squares Jacobian).
+# eigen-objectives in forward mode (the implicit least-squares Jacobian);
+# 2.5.0 is the release `vmex --turbulence` is built and timed against.
 turbulence = [
-  "gkx>=2.4.2",
+  "gkx>=2.5.0",
   # gkx's own jax floor.
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
 ]
 # Coil geometry and VMEC/Boozer tracing, including fixed-step solver options.
 coils = [
-  "essos>=0.19.4",
+  "essos>=0.19.5",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.
@@ -160,11 +161,12 @@ markers = [
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is
 # exercised by the optional-integrations CI lane. turbulence.py is
-# likewise gated on the optional ``turbulence`` extra (gkx).
-omit = ["*/virtual_casing.py", "*/turbulence.py"]
+# likewise gated on the optional ``turbulence`` extra (gkx), as is gk_run.py
+# (the ``vmex --turbulence`` driver).
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
 
 [tool.coverage.report]
-omit = ["*/virtual_casing.py", "*/turbulence.py"]
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
 
 [tool.ruff]
 line-length = 120

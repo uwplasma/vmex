@@ -118,6 +118,7 @@
     ["tests/test_trace_budgets.py", "infrastructure", "unit", "medium", "cpu", "none", "golden", ["pr-parity-c2", "full-core-t-z"]],
     ["tests/test_tracing.py", "diagnostics", "integration", "medium", "cpu", "none", "analytic", ["pr-parity-c2", "optional", "full-core-t-z"]],
     ["tests/test_turbulence.py", "diagnostics", "oracle", "slow", "cpu-gpu", "reference-nc", "external", ["pr-parity-c4", "optional", "full-core-t-z"]],
+    ["tests/test_turbulence_cli.py", "interface", "integration", "medium", "cpu", "none", "analytic", ["pr-parity-c1", "optional", "full-core-t-z"]],
     ["tests/test_vacuum_analytic_recurrence.py", "free-boundary", "oracle", "slow", "cpu-gpu", "none", "analytic", ["pr-parity-c5", "full-core-t-z"]],
     ["tests/test_validation_guards.py", "diagnostics", "unit", "fast", "cpu", "none", "none", ["pr-parity-c2", "full-core-t-z"]],
     ["tests/test_vmec2000_feature_stress.py", "equilibrium", "oracle", "medium", "cpu", "generated", "vmec2000", ["pr-parity-c2", "full-core-t-z"]],

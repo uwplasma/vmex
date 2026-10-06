@@ -10,7 +10,7 @@ and differentiability (reverse and forward AD vs central FD, finite state
 gradient, the two-positional objective-term contract, and the
 eigenvector-weighted proxies in both modes).
 
-gkx is optional (``pip install 'gkx>=2.4.2'``; the legacy ``spectraxgk``
+gkx is optional (``pip install 'gkx>=2.5.0'``; the legacy ``spectraxgk``
 name is not supported) — dependent lanes skip cleanly without it.
 """
 

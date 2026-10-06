@@ -5,6 +5,27 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## 0.11.7 - 2026-10-05
+
+- **Alpha tracing physics corrections; results traced with earlier releases
+  change.** The Boozer toroidal flux is passed with the sign the
+  guiding-centre equations expect (#517). With ESSOS >= 0.19.5: the CODATA
+  alpha mass (0.76 % lighter), the pitch-angle scattering rate without its
+  spurious factor of two, and finite collision coefficients at small speed.
+- Birth sampling uses `|G + iota I| / B^2` with a fixed rejection bound, so
+  equilibria with negative toroidal flux (CTH-like, HSX, LHD) trace (#529).
+- Non-stellarator-symmetric equilibria trace, keeping their sine spectra
+  (#524, #539). Optional fixed-step `--trace-method` integrators (#520).
+  Stopped alphas are compacted out of the batch by default (#521).
+- `vmex --turbulence`: GKX linear scan and nonlinear ITG run (#547).
+- VMEC input decks reconstructed from WOUT files (#512).
+- Optimizers refuse to start from, or cache, an uncertified equilibrium
+  (#498, #541). The optimization examples print whether their targets are
+  met (#500, #502, #503, #506, #507). `QA_optimization_alpha_losses.py`
+  (#492).
+- Floors: `essos>=0.19.5`, `booz_xform_jax>=0.4.3`, `neo-jax>=1.0.5`
+  (#523, #538).
+
 ## 0.11.6 - 2026-09-28
 
 - `vmex --trace` defaults to a Boozer mode cut of 1e-4, the cut the

@@ -16,6 +16,7 @@ free-boundary
 match-phiedge
 use-essos-fields-and-coils
 trace-alpha-particles
+turbulence
 profiles
 scale-a-configuration
 ```
