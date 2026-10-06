@@ -239,9 +239,10 @@ def test_functional_current_ampere_radial_derivative_and_independent_curl(orient
 def test_current_mode_blocks_and_geometry_derivatives():
     state, inp = _current_torus()
     plan = polish.make_variational_plan(state, radial_order=3, ntheta=8, nzeta=6)
+    current_plan = polish.make_variational_plan(state, radial_order=3, ntheta=12, nzeta=10)
     layout = polish.make_native_correction_layout(state)
     scale = 1e-3 * polish.native_coordinate_scales(state, layout, plan)
-    jets = jax.jit(lambda geometry: polish.prescribed_current_flux_jets(geometry, plan, inp))
+    jets = jax.jit(lambda geometry: polish.prescribed_current_flux_jets(geometry, current_plan, inp))
     def residual(x):
         geometry = polish.apply_high_order_correction(state, layout.unpack(scale * x))
         samples = polish._current_force_samples(geometry, plan, jets(geometry))
