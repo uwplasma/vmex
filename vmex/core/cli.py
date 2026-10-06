@@ -283,7 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--trace-tolerance", type=float, default=None,
-        help="Embedded-error tolerance of the adaptive integrators (default: 1e-7).",
+        help="Embedded-error tolerance of the adaptive integrators (default: 3e-7).",
     )
     p.add_argument(
         "--trace-compact", action=argparse.BooleanOptionalAction, default=None,

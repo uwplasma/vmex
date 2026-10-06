@@ -713,7 +713,7 @@ def test_asymmetric_boundary_cartesian_coordinates():
 
 
 @pytest.mark.parametrize("energy, expected", [(1e-6, "(converged, below 0.001)"),
-                                              (5e-2, "the orbits are not converged. Rerun with --trace-tolerance 1e-08")])
+                                              (5e-2, "the orbits are not converged. Rerun with --trace-tolerance 3e-08")])
 def test_cli_reports_whether_the_orbits_converged(solovev_wout, tmp_path, monkeypatch, energy, expected):
     """The energy check names the step to rerun with when the orbits are not converged."""
     from vmex.core import tracing

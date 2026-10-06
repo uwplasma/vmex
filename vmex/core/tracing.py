@@ -54,9 +54,9 @@ MODE_TOLERANCE = 2e-4
 # largest relative energy error of converged collisionless orbits
 ENERGY_TOLERANCE = 1e-3
 # default integrator: per-particle error-controlled Dopri8(7) at this tolerance
-# (eight hard equilibria: worst energy error 4e-5, 2.6x the fixed RK4 cost)
+# (21 equilibria: worst energy error 1.7e-4, six times below ENERGY_TOLERANCE)
 METHOD = "adaptive8"
-TOLERANCE = 1e-7
+TOLERANCE = 3e-7
 METHODS = ("adaptive8", "adaptive", "rk4", "dopri5", "dopri8")
 # Landreman, Buller & Drevlak (2022) profiles: n_e0 [m^-3], T_0 [keV].
 NE0, T0_KEV = 4e20, 12.0

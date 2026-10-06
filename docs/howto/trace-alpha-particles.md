@@ -28,7 +28,7 @@ its binomial error:
 | `--trace-particles N` | 500 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
 | `--trace-method adaptive8\|adaptive\|rk4\|dopri5\|dopri8` | `adaptive8` | error-controlled Dopri8 (or Dopri5), or a fixed-step method | field dependent |
-| `--trace-tolerance TOL` | `1e-7` | embedded-error tolerance of the adaptive methods | about `TOL^(-1/8)` |
+| `--trace-tolerance TOL` | `3e-7` | embedded-error tolerance of the adaptive methods | about `TOL^(-1/8)` |
 | `--trace-timestep DT` | size-scaled step | fixed methods: the step; adaptive: only the first trial step | fixed: `1 / DT` |
 | `--trace-compact`, `--no-trace-compact` | on when supported | compact early losses | loss dependent |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
@@ -70,7 +70,7 @@ s = 0.3 lost within 0.2 s.
   `K = 0` form of SIMSOPT) are integrated by adaptive Dopri8 in the chart
   `sqrt(s) (cos theta, sin theta)`, which is regular on the magnetic axis, so
   no orbit stops there. Each alpha's step is controlled so the embedded error
-  stays below `1e-7` (no step to choose). An alpha is lost when it reaches `s = 1`.
+  stays below `3e-7` (no step to choose). An alpha is lost when it reaches `s = 1`.
 - **Births.** Pitch `v_par / v` is uniform in `[-1, 1)`. The angles follow
   the Boozer Jacobian `(G + iota I) / B^2`. With `--trace-birth volume`, `s`
   follows the D-T rate `n_D n_T <sigma v>(T)`, weighted by the volume
@@ -189,16 +189,29 @@ RTX A4000, common births, against adaptive Dopri5 at `1e-10`:
 | fixed RK4, quarter step | 360 s | 4e-4 | within 1.0σ |
 | fixed Dopri8, default step | 256 s | 2e-3 | within 1.4σ |
 | adaptive Dopri5, `1e-8` | 341 s | 3e-5 | within 1.0σ |
-| **adaptive Dopri8, `1e-7` (default)** | **237 s** | **4e-5** | within 1.4σ |
+| adaptive Dopri8, `1e-7` | 237 s | 4e-5 | within 1.4σ |
 | adaptive Dopri8, `1e-9` | 589 s | 3e-7 | within 1.0σ |
 
-The adaptive default meets the `1e-3` energy gate everywhere with a 25-fold
-margin, at 2.6 times the cost of the unconverged fixed step and 1.5 times
-cheaper than the fixed step that converges. It is what FIRM3D and CATAPULT do
+Adaptive Dopri8 meets the `1e-3` energy gate everywhere, at 2.6 times the
+cost of the unconverged fixed step (at `1e-7`) and 1.5 times cheaper than the
+fixed step that converges. It is what FIRM3D and CATAPULT do
 (adaptive Dormand–Prince). Implicit and IMEX schemes buy nothing on these
 non-stiff equations; a symplectic scheme (SIMPLE, FIRM3D's option) bounds the
-long-time energy error, which a `1e-7` tolerance already keeps far below the
+long-time energy error, which these tolerances already keep far below the
 gate over these horizons.
+
+The default tolerance, `3e-7`, comes from all twenty-one equilibria of the
+convergence section (500 alphas, 5 ms, against adaptive Dopri8 at `1e-9`):
+
+| tolerance | total time | worst energy error | worst loss shift |
+|---|---|---|---|
+| `1e-6` | 590 s | 6e-4 | 1.0σ |
+| **`3e-7` (default)** | **671 s** | **1.7e-4** | **1.4σ** |
+| `1e-7` | 791 s | 5e-5 | 1.0σ |
+
+All three pass the `1e-3` gate; `3e-7` keeps a sixfold margin. Loosening the
+tolerance tenfold saves only a quarter of the time, because an eighth-order
+method's step count grows as `tolerance^(-1/8)`.
 
 ## Against SIMPLE and SIMSOPT
 
@@ -210,27 +223,11 @@ FIRM3D/CATAPULT and SIMPLE agree on all 512 loss labels of a matched
 
 ![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT, before the 0.11.7 corrections](../_static/figures/readme_trace_benchmark.webp)
 
-`benchmarks/trace_cross_code.py` traces the same 1000 alphas with three
-codes. The equilibrium is ARIES-CS (`wout_n3are_R7.75B5.7.nc`, unscaled).
-The alphas are born on s = 0.247 with the `--trace` births, and all three
-codes get the same positions, pitches and 3.52 MeV energy. Each code runs
-for 10 ms on the same 8 cores (`taskset`) of a shared 36-core x86_64
-workstation, under a load average of 28-50 from other jobs. The runtime
-leaves out JAX compilation (35 s), the field set-up of SIMPLE and the
-interpolation tables of SIMSOPT.
-
-| code | integrator | lost | loss fraction | runtime |
-|---|---|---|---|---|
-| VMEX `--trace` (ESSOS Boozer) | RK4, 1.25e-7 s | 128 | 12.8 % ± 1.1 % | 146 s |
-| SIMPLE | symplectic Euler, defaults, all orbits traced | 124 | 12.4 % ± 1.0 % | 556 s |
-| SIMSOPT `trace_particles_boozer` | RK45, tol 1e-9, `gc_noK` | 119 | 11.9 % ± 1.0 % | 1079 s |
-
-The three loss fractions agree within 0.6σ. SIMSOPT uses a `booz_xform`
-field with the same 32 × 32 resolution. SIMPLE reads its starts in VMEC
-angles. The Boozer births are mapped with `nu` and `lambda`, and the
-mapping agrees to 0.13 mm in `R, Z` and 0.2 % in SIMPLE's own `|B|`.
-`docs/_static/figures/sources/make_trace_figures.py` plots the record
-(`benchmarks/trace_cross_code.json`).
+`benchmarks/trace_cross_code.py` traced the same 1,000 ARIES-CS alphas (s = 0.247,
+10 ms) with VMEX (RK4), SIMPLE (symplectic Euler) and SIMSOPT (RK45, `gc_noK`) on
+the same 8 cores: 12.8, 12.4 and 11.9 % lost (each ± 1.0 %) in 146, 556 and
+1079 s, without compilation and field set-up. The record is
+`benchmarks/trace_cross_code.json`.
 
 ## From Python
 
