@@ -159,15 +159,6 @@ summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `
 
 ![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
 
-`--neoclassical` (needs `vmex[neoclassical]`) runs [DKX](https://github.com/uwplasma/DKX) on the WOUT:
-monoenergetic `D11`, `D31`, `D33` against collisionality, the ambipolar `E_r` on each surface, the bootstrap
-`<j·B>` at that root against the equilibrium's own, species particle and heat fluxes, and Boozer `|B|`. It writes
-`*_neoclassical.png` and `*_neoclassical.h5`. `--nc-profiles profiles.json` supplies `n_e`, `T_e`, `T_i`
-(polynomials in `s`, the `KineticProfiles` convention) and adds VMEX's Redl `<j·B>` on the same profiles;
-without it DKX splits the WOUT pressure with `T_i = T_e`. `--nc-preset quick|default|full` sets the resolution ([guide](docs/howto/neoclassical-transport.md)).
-
-![vmex --neoclassical output: monoenergetic coefficients, ambipolar Er, bootstrap current, fluxes and |B|](docs/_static/figures/readme_neoclassical_output.webp)
-
 `--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
 `|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
 `D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
@@ -201,6 +192,31 @@ If `input.my_case` exists, the CLI writes `input.my_case_from_wout` instead.
 
 `vmex equilibrium.h5` reads DESC text inputs and HDF5/pickle outputs without installing DESC, using the final stage or equilibrium; it writes `input.equilibrium` and solves it to write `wout_equilibrium.nc`.
 `--desc-tol 0` retains all boundary modes. The default 1% boundary tolerance does not guarantee magnetic-field accuracy. WOUT iota has the opposite sign to DESC.
+
+## Neoclassical transport
+
+A stellarator's confinement is set as much by neoclassical transport as by its shape. Collisions and drifts in the 3-D
+field fix the radial electric field, the bootstrap current that changes the rotational transform, and a 1/ν
+loss channel that tokamaks do not have. `vmex --neoclassical` (needs `vmex[neoclassical]`) runs the drift-kinetic solver
+[DKX](https://github.com/uwplasma/DKX) on a solved equilibrium and returns all three:
+- the monoenergetic coefficients `D11*`, `D31*`, `D33*` against collisionality;
+- the ambipolar root `E_r(r)`;
+- the particle and heat fluxes of each species at that root;
+- the bootstrap `<j·B>`, set against VMEX's Redl formula on the same profiles and the equilibrium's own current.
+
+The `--nc-profiles` file holds `n_e`, `T_e` and `T_i` as polynomials in `s`
+([guide](docs/howto/neoclassical-transport.md)). On the bundled QA, β = 2.5 % deck:
+
+```console
+vmex wout_LandremanPaul2021_QA_beta2p5_bootstrap.nc --neoclassical \
+     --nc-profiles examples/data/kinetic_profiles.LandremanPaul2021_QA_beta2p5_bootstrap.json
+```
+
+It writes `*_neoclassical.png` and `*_neoclassical.h5`. The figure below is drawn from that `.h5`
+([script](docs/_static/figures/sources/make_neoclassical_figure.py)). Runtime: 6.5 min on 4 CPU cores,
+compilation included.
+
+![vmex --neoclassical: monoenergetic D11, D31, D33, |B|, ambipolar Er, bootstrap current from DKX, Redl and the equilibrium, particle and heat fluxes](docs/_static/figures/readme_neoclassical_output.webp)
 
 ## Differentiate and optimize
 

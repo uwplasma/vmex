@@ -21,19 +21,22 @@ or in `--outdir`, and prints each stage with its wall time.
 | panel | quantity | reference |
 |---|---|---|
 | top row | monoenergetic `D11`, `D31`, `D33` against `ν'` at three `E*` | Beidler et al., Nucl. Fusion 51, 076001 (2011) |
-| bottom left | `|B|` on a flux surface | |
-| bottom centre | ambipolar `E_r` per surface; bootstrap `<j·B>` at that root against the equilibrium's and, with `--nc-profiles`, VMEX's Redl formula on the same profiles | Hastings et al., Nucl. Fusion 25, 445 (1985); Redl et al., Phys. Plasmas 28, 022502 (2021); Landreman, Buller and Drevlak, Phys. Plasmas 29, 082501 (2022) |
-| bottom right | particle and heat fluxes per species at the root | Beidler et al., Nature 596, 221 (2021) |
+| middle left | `|B|` on the `r/a = 0.5` surface | |
+| middle centre | ambipolar `E_r` per surface; bootstrap `<j·B>` at that root against the equilibrium's and, with `--nc-profiles`, VMEX's Redl formula on the same profiles | Redl et al., Phys. Plasmas 28, 022502 (2021); Landreman, Buller and Drevlak, Phys. Plasmas 29, 082501 (2022) |
+| middle right | particle and heat fluxes per species at the root | Beidler et al., Nature 596, 221 (2021) |
+| bottom | radial current `J_r(E_r)` on each surface, with each root labelled ion, unstable or electron | Hastings et al., Nucl. Fusion 25, 445 (1985) |
 
-The HDF5 file holds every number in the figure, including the radial current
-`J_r(E_r)` scanned on each surface.
+The HDF5 file holds the numbers behind the figure: the monoenergetic scan, `|B|`,
+and per surface `E_r`, the three `<j·B>` and the species fluxes. The README
+figure is redrawn from it by
+`docs/_static/figures/sources/make_neoclassical_figure.py`.
 
 ## Presets and cost
 
 | `--nc-preset` | surfaces | use | wall time |
 |---|---|---|---|
 | `quick` | 2 | smoke run; the numbers are not reportable | 5 min |
-| `default` | 5 | the figure above | 6 min |
+| `default` | 5 | the README figure | 6.5 min |
 | `full` | 5 | wider monoenergetic grid, finer profile solves | longer |
 
 Times are for the bundled `input.LandremanPaul2021_QA_beta2p5_bootstrap` WOUT
