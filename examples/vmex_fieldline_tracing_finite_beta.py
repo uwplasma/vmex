@@ -172,11 +172,19 @@ for plane in half_planes:
     signed_distance[on_plane] = np.where(lcfs.contains_points(rz), distance, -distance)
 plasma_B = np.full_like(nodes, np.nan)
 exterior.near_surface, exterior.accuracy_check = "auto", "off"  # graded only where the direct rule misses
-for label, index in (("outside", np.flatnonzero(signed_distance < -TABLE_GAP)),
-                     ("inside", np.flatnonzero(signed_distance > TABLE_GAP))):
-    for chunk in np.array_split(index, max(1, len(index) // 4096)):
+# Only a shell about the LCFS is evaluated: exterior lines stop
+# MAX_SURFACE_DISTANCE out, and the tricubic stencil reaches two nodes in.
+equilibrium.field.newton_iterations = 40
+for label, index in (("outside", np.flatnonzero((signed_distance < -TABLE_GAP)
+                                                & (signed_distance > -TABLE_MARGIN))),
+                     ("inside", np.flatnonzero((signed_distance > TABLE_GAP)
+                                               & (signed_distance < 3 * TABLE_SPACING)))):
+    for chunk in np.array_split(index, max(1, len(index) // 1024)):
         points = jnp.asarray(nodes[chunk])
-        total = exterior.B(points) if label == "outside" else equilibrium.field.B(points)
+        try:
+            total = exterior.B(points) if label == "outside" else equilibrium.field.B(points)
+        except vj.VmecNumericalError:  # an unconverged inversion: continue these nodes
+            continue
         plasma_B[chunk] = np.asarray(total) - np.asarray(coil_field(points))
     print(f"Tabulated the plasma-current field at {len(index)} nodes {label} the LCFS")
 plasma_B = plasma_B.reshape(*pp.shape, 3)
