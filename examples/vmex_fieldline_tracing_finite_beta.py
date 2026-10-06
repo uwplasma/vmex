@@ -17,7 +17,7 @@ the committed one in ``docs/_static/figures`` reproduces those bytes.
 
 from dataclasses import replace
 import os
-from pathlib import Path
+import pathlib
 
 import jax
 import jax.numpy as jnp
@@ -25,20 +25,22 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.path import Path
 from matplotlib.transforms import Bbox
 import numpy as np
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core import virtual_casing as vc
 from vmex.core.extender import VmecExtender
+from vmex.core.mgrid import MgridData, MgridField
 
 from essos.coils import Coils
 from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
 from essos.fields import BiotSavart
 from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
 
-DATA = Path(__file__).resolve().parent / "data"
-README_FIGURE = Path("readme_extender_exterior_islands.webp")
+DATA = pathlib.Path(__file__).resolve().parent / "data"
+README_FIGURE = pathlib.Path("readme_extender_exterior_islands.webp")
 N_FIELDLINES, N_TOROIDAL_TURNS, TRACE_LENGTH, N_SAMPLES = 14, 400, 3000.0, 25000
 # Cartesian coil/exterior traces use arclength, so rescaling B does not change coverage.
 TRACE_TOLERANCE, OUTSIDE_OFFSET = 1.0e-7, 0.005
@@ -48,13 +50,26 @@ TRACE_TOLERANCE, OUTSIDE_OFFSET = 1.0e-7, 0.005
 MAX_SURFACE_DISTANCE = 0.055
 NPHI, NTHETA, VC_DIGITS = 24, 24, 4
 GRADED_NODES = (64, 256)
+# Exterior traces read the plasma-current field from a table built once:
+# node spacing [m], margin past the LCFS [m], planes per period, and the gap
+# [m] around the LCFS whose nodes are continued from their neighbours.
+TABLE_SPACING, TABLE_MARGIN, TABLE_KP, TABLE_GAP = 0.01, MAX_SURFACE_DISTANCE + 0.04, 24, 0.002
 TRACE_PROGRESS = True
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
+
+
+def _cartesian_table_B(table, xyz):
+    """Cartesian components of a cylindrical MgridField at points ``(n, 3)``."""
+    r, phi = jnp.hypot(xyz[:, 0], xyz[:, 1]), jnp.arctan2(xyz[:, 1], xyz[:, 0])
+    b_r, b_phi, b_z = table.b_cyl(r, phi, xyz[:, 2])
+    return (b_r * jnp.cos(phi) - b_phi * jnp.sin(phi), b_r * jnp.sin(phi) + b_phi * jnp.cos(phi), b_z)
+
 if ci_smoke:
     N_FIELDLINES, N_TOROIDAL_TURNS, N_SAMPLES, TRACE_TOLERANCE = 3, 2, 120, 1.0e-6
     TRACE_LENGTH = 20.0
     NPHI, NTHETA, VC_DIGITS = 8, 8, 3
     TRACE_PROGRESS = False
+    TABLE_SPACING, TABLE_KP = 0.03, 8
 
 print("Solving the finite-beta QA equilibrium and loading its matched ESSOS coils...")
 inp = vj.VmecInput.from_file(DATA / "input.LandremanPaul2021_QA_beta0p5_bootstrap")
@@ -113,7 +128,7 @@ print(f"Near-LCFS plasma-field fraction: median = {100 * float(jnp.median(plasma
       f"median = {float(jnp.median(direction_difference)):.3f} deg, "
       f"max = {float(jnp.max(direction_difference)):.3f} deg")
 del interface, precision, B_surface, Bmag_surface, Bn_over_B
-jax.clear_caches()  # the equilibrium and on-surface diagnostic are not evaluated again
+jax.clear_caches()  # the on-surface diagnostic is not evaluated again
 escape = None
 vmex_inside = trace_field_lines(equilibrium.field_in_flux_coordinates(), flux_seeds,
     toroidal_turns=N_TOROIDAL_TURNS, samples=N_SAMPLES, tolerance=TRACE_TOLERANCE,
@@ -127,9 +142,88 @@ escape = LevelsetStoppingCriterion(classifier, maximum_distance=MAX_SURFACE_DIST
 coil_trace = trace_field_lines(biot_savart, xyz_seeds, length=TRACE_LENGTH,
     samples=N_SAMPLES, tolerance=TRACE_TOLERANCE, stopping_criteria=escape,
     progress=TRACE_PROGRESS, label="ESSOS coil-only field from the same seed line")
-vmex_outside = trace_field_lines(exterior, outside_xyz, length=TRACE_LENGTH,
+# Tracing through the virtual-casing quadrature costs milliseconds per field
+# call, and an exterior line takes tens of thousands of calls. Tabulate the
+# plasma-current part B_total - B_coils once instead, on a cylindrical grid
+# over half a field period (stellarator symmetry fills the rest), and read it
+# through a tricubic MgridField; the coil field stays an exact Biot-Savart sum.
+# Inside the LCFS the table holds the VMEX field minus the coils, so the
+# interpolant is continuous across the boundary rather than extrapolated.
+grid_r = np.hypot(np.asarray(classifier_surface.gamma[..., 0]), np.asarray(classifier_surface.gamma[..., 1]))
+grid_z = np.abs(np.asarray(classifier_surface.gamma[..., 2])).max() + TABLE_MARGIN
+table_rmin, table_rmax = grid_r.min() - TABLE_MARGIN, grid_r.max() + TABLE_MARGIN
+table_ir = int(np.ceil((table_rmax - table_rmin) / TABLE_SPACING)) + 1
+table_jz = int(np.ceil(2 * grid_z / TABLE_SPACING)) + 1
+half_planes = np.arange(TABLE_KP // 2 + 1) * 2 * np.pi / (inp.nfp * TABLE_KP)
+pp, zz, rr = np.meshgrid(half_planes, np.linspace(-grid_z, grid_z, table_jz),
+                         np.linspace(table_rmin, table_rmax, table_ir), indexing="ij")
+nodes = np.stack((rr * np.cos(pp), rr * np.sin(pp), zz), -1).reshape(-1, 3)
+# Signed distance of each node to its plane's LCFS cross-section (positive inside).
+theta = np.linspace(0.0, 2 * np.pi, 720, endpoint=False)
+m, n = np.arange(inp.rbc.shape[1]), np.arange(inp.rbc.shape[0]) - inp.ntor
+signed_distance = np.empty(len(nodes))
+node_phi, node_r, node_z = pp.ravel(), rr.ravel(), zz.ravel()
+for plane in half_planes:
+    angle = m[None, None, :] * theta[:, None, None] - n[None, :, None] * inp.nfp * plane
+    lcfs = Path(np.stack(((inp.rbc * np.cos(angle)).sum((1, 2)), (inp.zbs * np.sin(angle)).sum((1, 2))), 1))
+    on_plane = np.flatnonzero(node_phi == plane)
+    rz = np.stack((node_r[on_plane], node_z[on_plane]), 1)
+    distance = np.min(np.linalg.norm(rz[:, None] - lcfs.vertices[None], axis=2), axis=1)
+    signed_distance[on_plane] = np.where(lcfs.contains_points(rz), distance, -distance)
+plasma_B = np.full_like(nodes, np.nan)
+exterior.near_surface, exterior.accuracy_check = "auto", "off"  # graded only where the direct rule misses
+for label, index in (("outside", np.flatnonzero(signed_distance < -TABLE_GAP)),
+                     ("inside", np.flatnonzero(signed_distance > TABLE_GAP))):
+    for chunk in np.array_split(index, max(1, len(index) // 4096)):
+        points = jnp.asarray(nodes[chunk])
+        total = exterior.B(points) if label == "outside" else equilibrium.field.B(points)
+        plasma_B[chunk] = np.asarray(total) - np.asarray(coil_field(points))
+    print(f"Tabulated the plasma-current field at {len(index)} nodes {label} the LCFS")
+plasma_B = plasma_B.reshape(*pp.shape, 3)
+# Nodes within TABLE_GAP of the LCFS (and any the inversion rejected) are
+# filled from their neighbours; the field is continuous there.
+while np.isnan(plasma_B).any():
+    padded = np.pad(plasma_B, ((0, 0), (1, 1), (1, 1), (0, 0)), constant_values=np.nan)
+    ring = np.stack((padded[:, :-2, 1:-1], padded[:, 2:, 1:-1], padded[:, 1:-1, :-2], padded[:, 1:-1, 2:]))
+    with np.errstate(all="ignore"):
+        plasma_B = np.where(np.isnan(plasma_B), np.nanmean(ring, axis=0), plasma_B)
+cos_p, sin_p = np.cos(pp), np.sin(pp)
+half_period = (plasma_B[..., 0] * cos_p + plasma_B[..., 1] * sin_p,
+               -plasma_B[..., 0] * sin_p + plasma_B[..., 1] * cos_p, plasma_B[..., 2])
+# Plane KP - k is plane -k: (B_R, B_phi, B_Z)(R, -phi, -Z) = (-B_R, B_phi, B_Z)(R, phi, Z).
+mirror = np.arange(TABLE_KP // 2 - 1, 0, -1)
+br, bp, bz = (np.concatenate((c, sign * c[mirror, ::-1])) for c, sign in zip(half_period, (-1, 1, 1)))
+plasma_table = MgridField.from_mgrid_data(MgridData(
+    rmin=table_rmin, rmax=table_rmax, zmin=-grid_z, zmax=grid_z, ir=table_ir, jz=table_jz,
+    kp=TABLE_KP, nfp=int(inp.nfp), nextcur=1, mgrid_mode="S", coil_groups=("vmex_plasma_current",),
+    raw_coil_cur=(1.0,), br=br[None], bp=bp[None], bz=bz[None]), order=3)
+table_check = coil_field(outside_xyz) + jnp.stack(
+    _cartesian_table_B(plasma_table, outside_xyz), axis=-1)
+print(f"Tabulated exterior field vs graded quadrature at the exterior seeds: max relative difference "
+      f"{float(jnp.max(jnp.linalg.norm(table_check - total_B_outside, axis=1) / jnp.linalg.norm(total_B_outside, axis=1))):.1e}")
+del exterior
+jax.clear_caches()
+
+
+class TabulatedTotalField:
+    """Coils (exact Biot-Savart) + tabulated plasma-current field, in ESSOS's Cartesian field interface."""
+
+    def B_contravariant(self, x):
+        return biot_savart.B(x) + jnp.stack(_cartesian_table_B(plasma_table, x[None])).reshape(3)
+
+    def B(self, x):
+        return self.B_contravariant(x)
+
+    def AbsB(self, x):
+        return jnp.linalg.norm(self.B_contravariant(x))
+
+    def to_xyz(self, x):
+        return x
+
+
+vmex_outside = trace_field_lines(TabulatedTotalField(), outside_xyz, length=TRACE_LENGTH,
     samples=N_SAMPLES, tolerance=TRACE_TOLERANCE, stopping_criteria=escape,
-    progress=TRACE_PROGRESS, label="VMEX coil + virtual-casing field outside")
+    progress=TRACE_PROGRESS, label="VMEX coil + tabulated virtual-casing field outside")
 
 print("Plotting 3D trajectories and the phi=0 Poincare comparison...")
 surface = surfacerzfourier_from_boundary(inp.rbc, inp.zbs, inp.nfp, nphi=60, ntheta=60)
