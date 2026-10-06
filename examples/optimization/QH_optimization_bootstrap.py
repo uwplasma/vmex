@@ -63,8 +63,7 @@ ASPECT_TARGET = 6.0
 # grid (the first interior surface of the 71-surface grid reads -1.3e3 while
 # its neighbours read +65 and +27), so rows and reported extrema both start at
 # STABILITY_MIN_S:
-STABILITY_WEIGHTS = [1.0, 30.0]     # per stage: a mode-1 boundary cannot
-                                  # fix the seed's interior, only trade beta for it
+STABILITY_WEIGHT = 30.0
 STABILITY_MARGIN = 2.0e-3
 STABILITY_MIN_S = 0.1
 
@@ -198,8 +197,7 @@ monitor = opt.OptimizationMonitor()
 ### Run the optimization ######################################################
 
 report("self-consistent seed", equilibrium)
-for max_mode, max_nfev, n_spline, weight in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE,
-                                                STABILITY_WEIGHTS):
+for max_mode, max_nfev, n_spline in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE):
     print(f"\n===== QH bootstrap stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
     inp = inp.change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6,
@@ -208,8 +206,8 @@ for max_mode, max_nfev, n_spline, weight in zip(MAX_MODES, MAX_NFEV, N_CURRENT_S
     # A RuntimeWarning about uncertified Jacobian columns is expected once the
     # optimizer leaves the seed and needs no action; see examples/README.md.
     problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms + [(mercier_rows, 0.0, weight),
-                                         (resistive_rows, 0.0, weight)],
+        inp, objective_function_terms + [(mercier_rows, 0.0, STABILITY_WEIGHT),
+                                         (resistive_rows, 0.0, STABILITY_WEIGHT)],
         max_mode=max_mode,
         current_dofs=n_spline - 1, vary_major_radius=VARY_MAJOR_RADIUS,
         use_ess=True, restart_from=equilibrium, progress=not ci_smoke)
