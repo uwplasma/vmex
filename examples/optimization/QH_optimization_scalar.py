@@ -9,9 +9,9 @@ a residual vector and its full Jacobian.
 
 L-BFGS-B builds its curvature model from gradients alone, so it needs more
 iterations than Gauss-Newton per stage: the mode-2 stage gets 40. Measured on
-the QA problem, the final QS total is 3.7e-3 against 1.35e-3 for
-QA_optimization.py, a 2.7x gap, at the same aspect ratio (6.001 vs 6.001);
-with 15 mode-2 iterations it was 1.25e-2, a 9x gap.
+QA_optimization_scalar.py, which shares this ladder, the final QS total is
+3.7e-3 against 1.35e-3 for least squares, a 2.7x gap; with 15 mode-2
+iterations it was 9x.
 """
 
 import os
