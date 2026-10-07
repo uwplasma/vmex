@@ -244,15 +244,6 @@ final_input = replace(inp, ns_array=np.array([FINAL_NS]),
 final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium.solution,
     verbose=not ci_smoke, raise_on_max_iterations=True)
 
-### Check the result ##########################################################
-
-# The optimizer's grid is not the certificate: re-solve the optimized boundary
-# on a finer radial grid to a tighter tolerance and quote that.
-final_input = replace(inp, ns_array=np.array([FINAL_NS]),
-    ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
-final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium.solution,
-    verbose=not ci_smoke, raise_on_max_iterations=True)
-
 ### Print, plot and save ######################################################
 
 print(f"cost: initial {costs[0]:.6e} -> final {costs[-1]:.6e}")
