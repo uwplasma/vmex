@@ -144,6 +144,7 @@ def mercier_rows(state, runtime):
 
 
 def minimum_mercier(state, runtime):
+    """Least stable PHIEDGE**2 DMerc in the window, reported not targeted."""
     return jnp.min(mercier_window(state, runtime))
 
 
