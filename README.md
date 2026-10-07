@@ -112,10 +112,13 @@ before choosing a device. `conda install --channel conda-forge vmex` installs th
 feedstock may lag PyPI, and the extras above come from pip. For development:
 
 ```console
-git clone https://github.com/uwplasma/vmex
+git clone --filter=blob:none https://github.com/uwplasma/vmex
 cd vmex
 pip install -e ".[all,dev]"
 ```
+
+`--filter=blob:none` fetches old file versions only on demand, so the clone is
+about 8.5 MB instead of 45 MB with the full history still available.
 
 The [installation guide](https://vmex.readthedocs.io/en/latest/installation.html) covers float64,
 WSL2 and dependency details.
@@ -389,7 +392,7 @@ which lanes are validated: [mirror guide](https://vmex.readthedocs.io/en/latest/
 The examples live in the repository, not in the wheel. From a clone:
 
 ```console
-git clone https://github.com/uwplasma/vmex
+git clone --filter=blob:none https://github.com/uwplasma/vmex
 cd vmex
 pip install -e ".[all]"
 vmex examples/data/input.circular_tokamak --plot
