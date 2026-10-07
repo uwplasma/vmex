@@ -61,7 +61,7 @@ EXTERIOR_ORDER = 6
 EXTERIOR_SPECTRAL_SIDE_DENSITY = True
 
 # Force tolerance and iteration budget per point:
-FTOL = 1.0e-12
+FTOL = 1.0e-10                    # research: 1.0e-12
 MAX_ITERATIONS = 2000
 
 # Axial extent of the modelled grid [m]:

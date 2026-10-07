@@ -41,7 +41,7 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [2, 2]
-MAX_NFEV = [10, 10]
+MAX_NFEV = [12, 14]
 
 # Targets:
 ASPECT_TARGET = 5.0
@@ -62,7 +62,7 @@ STABILITY_MARGIN = 1.0e-3
 # it is polished on, and the residual evaluations each may spend. Skipped in
 # the smoke pass:
 CERTIFICATE_RESOLUTIONS = [31]
-CERTIFICATE_MAX_NFEV = [6]
+CERTIFICATE_MAX_NFEV = [10]
 CERTIFICATE_MARGIN = 5e-4
 CERTIFICATE_SMOOTHING = 1e-5
 CERTIFICATE_WEIGHT = 5.0

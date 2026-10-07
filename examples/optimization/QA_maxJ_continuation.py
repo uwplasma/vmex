@@ -6,7 +6,10 @@ this does not chase it there. A vacuum QA ladder shapes the boundary, the
 Landreman-Buller-Drevlak profiles and a Picard loop make the current
 self-consistent, and a second ladder then adds the maximum-J residual on the
 outer surfaces only, where pressure can reverse the trapped-particle
-precession.
+precession. Forming that QA and its self-consistent current from the minimal
+seed takes about 9 minutes on a laptop, so by default the maximum-J stages
+start from the bundled self-consistent beta = 2.5 % QA instead;
+FROM_MINIMAL_SEED = True runs the whole walk.
 
 One physical lambda must describe the same trapped particles on every radius
 and field-line label, so the pitch grid is selected once and held fixed across
@@ -43,11 +46,15 @@ SURFACES = np.array([0.6, 0.7, 0.8, 0.9])
 # Vacuum QA ladder, then the maximum-J ladder: highest boundary mode number
 # varied in each stage, and the residual evaluations each stage may spend:
 QA_MAX_MODES = [1, 2]
-QA_MAX_NFEV = [6, 8]
+QA_MAX_NFEV = [10, 15]
 MAXJ_MAX_MODES = [2]
-MAXJ_MAX_NFEV = [5]
-# Research budget (about 9 min on a laptop, over the 5-minute default):
-#   QA_MAX_NFEV, MAXJ_MAX_NFEV, FINAL_NS = [10, 15], [10], 71
+MAXJ_MAX_NFEV = [8]
+
+# Start from the minimal seed (research, about 9 min on a laptop) or from the
+# bundled self-consistent finite-beta QA (default, under 5 min):
+FROM_MINIMAL_SEED = False
+SEED_STATE_FILE = (Path(__file__).resolve().parents[1] / "data"
+                   / "input.LandremanPaul2021_QA_beta2p5_bootstrap")
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -91,7 +98,7 @@ STAGE_MAX_ITERATIONS = 3000       # forward solve cap inside an optimizer trial
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 51
+FINAL_NS = 51                     # research: 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 
@@ -99,13 +106,12 @@ FINAL_NITER = 20000
 OUTPUT_NAME = "QA_maxJ_optimized"
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs. It keeps the
-# minimal-seed QA wiring above but swaps in a bundled self-consistent
-# finite-beta state before the maximum-J stages, rather than spending minutes
-# forming matched wells to test one AD step.
+# minimal-seed QA wiring above but swaps in SEED_STATE_FILE before the
+# maximum-J stages, rather than spending minutes forming matched wells to test
+# one AD step.
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
-SMOKE_INPUT_FILE = (Path(__file__).resolve().parents[1] / "data"
-                    / "input.LandremanPaul2021_QA_beta2p5_bootstrap")
 if ci_smoke:
+    FROM_MINIMAL_SEED = True
     QA_SURFACES, MINIMUM_MPOL = np.linspace(0.2, 0.8, 4), 3
     QA_MAX_MODES, QA_MAX_NFEV = [1], [2]
     MAXJ_MAX_MODES, MAXJ_MAX_NFEV = [1], [2]
@@ -156,7 +162,7 @@ monitor = opt.OptimizationMonitor()
 
 # A RuntimeWarning about uncertified Jacobian columns is expected once the
 # optimizer leaves the seed and needs no action; see examples/README.md.
-for max_mode, max_nfev in zip(QA_MAX_MODES, QA_MAX_NFEV):
+for max_mode, max_nfev in zip(QA_MAX_MODES, QA_MAX_NFEV) if FROM_MINIMAL_SEED else ():
     print(f"\n===== vacuum QA seed stage, max_mode = {max_mode} =====")
     mpol, ntor = max(inp.mpol, max_mode + 2, MINIMUM_MPOL), max(inp.ntor, max_mode + 2)
     inp = replace(inp, delt=0.5).change_resolution(
@@ -175,8 +181,8 @@ for max_mode, max_nfev in zip(QA_MAX_MODES, QA_MAX_NFEV):
     inp, equilibrium = problem.input_from_x(result.x), problem.equilibrium_from_x(result.x)
     report(f"QA mode {max_mode}", equilibrium)
 
-if ci_smoke:
-    inp = vj.VmecInput.from_file(SMOKE_INPUT_FILE)
+if ci_smoke or not FROM_MINIMAL_SEED:
+    inp = vj.VmecInput.from_file(SEED_STATE_FILE)
     equilibrium = opt.solve_equilibrium(inp)
 
 # Add the Landreman--Buller--Drevlak pressure profiles to the optimized QA
@@ -185,7 +191,7 @@ n0 = 3.0e20 * (TARGET_BETA / 0.05) ** (1 / 3)
 T0 = 15.0e3 * (TARGET_BETA / 0.05) ** (2 / 3)
 profiles = KineticProfiles(n0 * np.array([1, 0, 0, 0, 0, -1]),
                            T0 * np.array([1, -1]), T0 * np.array([1, -1]))
-if not ci_smoke:
+if FROM_MINIMAL_SEED and not ci_smoke:
     am = np.zeros(21); am[[0, 1, 5, 6]] = [1.0, -1.0, -1.0, 1.0]
     ac = np.zeros(21); ac[0] = 1.0
     inp = replace(inp, pmass_type="power_series", am=am,
