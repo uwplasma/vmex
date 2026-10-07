@@ -298,14 +298,15 @@ def plasma_values(equilibrium_state):
             "max |iota|": float(max_abs_iota(equilibrium_state, solver_context))}
 
 
-state0, status0, _, _ = vj.solve_free_boundary_implicit_status(
-    params, jnp.zeros_like(x0), config)
-if int(status0) != 0:
-    raise SystemExit("The fitted coils do not hold a converged free boundary "
-                     f"(status {int(status0)}); raise COIL_FIT_MAXITER.")
-free_seed = boundary_surface(state0)
-boundary_shift = float(jnp.max(jnp.linalg.norm(free_seed.gamma - surface_seed.gamma, axis=-1)))
-seed_values = plasma_values(state0)
+with vj.heartbeat("Solving the seed free boundary"):
+    state0, status0, _, _ = vj.solve_free_boundary_implicit_status(
+        params, jnp.zeros_like(x0), config)
+    if int(status0) != 0:
+        raise SystemExit("The fitted coils do not hold a converged free boundary "
+                         f"(status {int(status0)}); raise COIL_FIT_MAXITER.")
+    free_seed = boundary_surface(state0)
+    boundary_shift = float(jnp.max(jnp.linalg.norm(free_seed.gamma - surface_seed.gamma, axis=-1)))
+    seed_values = plasma_values(state0)
 print("[seed] " + ", ".join(f"{k} = {v:.4g}" for k, v in seed_values.items())
       + f"; free boundary within {boundary_shift:.4f} m of the fitted seed")
 
