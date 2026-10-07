@@ -182,7 +182,8 @@ def saturate(equilibrium, seeds, label):
     """Run every tube to an accepted saturated state (outside the derivative)."""
     states = []
     for tube, seed in zip(TUBES, seeds):
-        geometry = tube_geometry(equilibrium.state, equilibrium.runtime, tube)
+        with vj.heartbeat(f"Flux-tube geometry for s={tube[0]}, alpha={tube[1]}"):
+            geometry = tube_geometry(equilibrium.state, equilibrium.runtime, tube)
         state, fluxes, start = seed, [], time.perf_counter()
         last_print = start
         for chunk in range(MAX_SATURATION_STEPS // SAMPLE_STEPS):
@@ -289,7 +290,8 @@ for max_mode, maxiter in zip(MAX_MODES, MAXITER):
     result = minimize(
         value_and_gradient, np.zeros_like(x0), jac=True, method="L-BFGS-B",
         bounds=[(-MAX_PARAMETER_CHANGE, MAX_PARAMETER_CHANGE)] * x0.size,
-        callback=record, options={"maxiter": maxiter, "maxls": 10})
+        callback=record, options={"maxiter": maxiter, "maxls": 10,
+                                  "maxfun": 3 * maxiter})  # research runs stay under this
     print(f"optimizer scalar cost: {initial_value:.12e} -> {float(result.fun):.12e}")
     print(f"stage wall time {time.perf_counter() - start:.0f} s for "
           f"{result.nfev + 1} value-and-gradient evaluations")

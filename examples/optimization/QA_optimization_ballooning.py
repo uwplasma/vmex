@@ -37,7 +37,7 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # residual evaluations each stage may spend. The default fits a 5-minute
 # laptop budget; the research budget is MAX_NFEV = [8, 12]:
 MAX_MODES = [1, 2]
-MAX_NFEV = [6, 9]
+MAX_NFEV = [5, 8]
 
 # Ballooning field lines and surfaces. lambda is least stable at a
 # configuration-dependent zeta0 (Gaur et al. 2023, footnote 2), so zeta0 is
