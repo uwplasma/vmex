@@ -46,6 +46,7 @@ ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
     EXAMPLES / "optimization" / "QA_optimization_alpha_losses.py",
+    EXAMPLES / "optimization" / "alpha_particle_optimization.py",
 )
 
 
@@ -158,6 +159,7 @@ EXECUTED_EXAMPLES = {
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
     "examples/optimization/QA_optimization.py",
     "examples/optimization/QA_optimization_alpha_losses.py",
+    "examples/optimization/alpha_particle_optimization.py",
     "examples/optimization/QA_optimization_ballooning.py",
     "examples/optimization/QA_optimization_bootstrap.py",
     "examples/optimization/QA_optimization_low_bootstrap.py",
@@ -844,6 +846,149 @@ def test_qa_alpha_losses_optimization(tmp_path):
     for name in ("wout_QA_alpha_losses_optimized.nc", "QA_alpha_losses_optimized_losses.png",
                  "QA_alpha_losses_optimized_trace.png"):
         assert (tmp_path / name).exists(), name
+
+
+@pytest.mark.full  # nightly: direct alpha-loss optimization (smoke pass)
+def test_alpha_particle_optimization(tmp_path):
+    pytest.importorskip("essos")
+    out = _run_example(EXAMPLES / "optimization" / "alpha_particle_optimization.py",
+                       tmp_path, timeout=1200)
+    assert "Direct alpha-orbit autodiff optimization" in out
+    assert "smooth cost" in out
+    losses = dict(re.findall(r"^(seed|optimized): \d+ alphas for [0-9.]+ ms lose "
+                             r"([0-9.]+)%", out, re.M))
+    assert set(losses) == {"seed", "optimized"}, out
+    assert all(0.0 <= float(value) <= 100.0 for value in losses.values())
+    for name in ("input.alpha_particle_optimized", "wout_alpha_particle_optimized.nc",
+                 "alpha_particle_optimized_losses.png"):
+        assert (tmp_path / name).exists(), name
+
+
+def _alpha_objective_functions(**namespace):
+    from solvax import checkpointed_fori_loop
+
+    namespace["checkpointed_fori_loop"] = checkpointed_fori_loop
+    path = EXAMPLES / "optimization" / "alpha_particle_optimization.py"
+    functions = [node for node in ast.parse(path.read_text()).body
+                 if isinstance(node, ast.FunctionDef)
+                 and node.name in {"cubic", "field_from_state", "orbit_risk", "heartbeat", "value_grad"}]
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"), namespace)
+    return namespace
+
+
+@pytest.mark.parametrize("asym", [False, True])
+def test_alpha_live_sine_spectrum_preserves_coefficient_gradients(asym):
+    import jax
+    import jax.numpy as jnp
+    from types import SimpleNamespace
+
+    BoozerField = pytest.importorskip("essos.boozer").BoozerField
+    if asym and not hasattr(BoozerField, "sine_coef"):
+        pytest.skip("Requires ESSOS asymmetric Boozer support")
+    jax.config.update("jax_enable_x64", True)
+    s = jnp.array([0.05, 0.35, 0.65, 0.95])
+    def spectrum(amplitude, rt, **kwargs):
+        return dict(s_b=s, xm_b=np.array([0, 1]), xn_b=np.array([0, 2]), nfp=2,
+                    bmnc_b=jnp.stack((5 * jnp.ones_like(s), jnp.zeros_like(s)), axis=1),
+                    bmns_b=jnp.stack((jnp.zeros_like(s), amplitude * jnp.sqrt(s)), axis=1),
+                    iota_b=0.4 * jnp.ones_like(s), G_b=jnp.ones_like(s), I_b=jnp.zeros_like(s), psi_edge=1.0)
+    f = _alpha_objective_functions(jax=jax, jnp=jnp, BoozerField=BoozerField,
+                                   SURFACES=s, boozer_spectrum_state=spectrum)["field_from_state"]
+    rt = SimpleNamespace(setup=SimpleNamespace(lasym=asym))
+    expected = np.sqrt(0.4) * np.sin(0.7 - 2 * 0.2) if asym else 0.0
+    value_grad = jax.jit(jax.value_and_grad(lambda a: f(a, rt, 1.0, 1.0).modB(0.4, 0.7, 0.2)))
+    for amplitude in (0.0, 0.2):
+        field = f(amplitude, rt, 1.0, 1.0)
+        assert (getattr(field, "sine_coef", None) is not None) == asym
+        with jax.disable_jit(False):
+            value, gradient = value_grad(amplitude)
+        assert float(value) == pytest.approx(5 + amplitude * expected)
+        assert float(gradient) == pytest.approx(expected, abs=1e-12)
+
+
+def test_alpha_asymmetric_field_requires_sine_backend():
+    from types import SimpleNamespace
+
+    field = _alpha_objective_functions(BoozerField=object)["field_from_state"]
+    with pytest.raises(ImportError, match="Upgrade ESSOS"):
+        field(None, SimpleNamespace(setup=SimpleNamespace(lasym=True)), 1.0, 1.0)
+
+
+@pytest.mark.parametrize("component,rate", [(0, 0.0), (0, 2.0),
+                                           (0, np.nan), (0, np.inf),
+                                           (3, np.nan), (3, np.inf)])
+def test_alpha_orbit_risk_preserves_exits_and_rejects_failed_states(component, rate):
+    import jax
+    import jax.numpy as jnp
+    from types import SimpleNamespace
+
+    field = SimpleNamespace(modB=lambda *args: jnp.array(1.0),
+                            profiles=lambda s: (jnp.ones((s.size, 3)), None))
+    functions = _alpha_objective_functions(
+        jax=jax, jnp=jnp, T=1.0, STEPS=2, RISK_START=0.6,
+        constants=SimpleNamespace(FUSION_ALPHA_PARTICLE_ENERGY=0.5,
+                                  ALPHA_PARTICLE_MASS=1.0, ALPHA_PARTICLE_CHARGE=1.0),
+        guiding_center_rhs=lambda field, y, *args: jnp.zeros_like(y).at[component].set(rate),
+    )
+    risk = functions["orbit_risk"](field, jnp.array([[0.3, 0.0, 0.0, 0.0]]), jnp.ones(1))
+    if np.isfinite(rate):
+        assert float(risk) == pytest.approx(0.0 if rate == 0 else 0.75)
+        derivative = jax.grad(lambda s: functions["orbit_risk"](
+            field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1)))(0.3)
+        assert float(derivative) == pytest.approx(0.0, abs=1e-7)
+    else:
+        assert np.isnan(risk)
+
+
+def test_alpha_residence_gradients_and_exit_ordering():
+    """The transition has analytic gradients; earlier exits incur higher cost."""
+    import jax
+    import jax.numpy as jnp
+    from types import SimpleNamespace
+
+    jax.config.update("jax_enable_x64", True)
+    field = SimpleNamespace(modB=lambda *args: jnp.array(1.0),
+                            profiles=lambda s: (jnp.ones((s.size, 3)), None))
+    functions = _alpha_objective_functions(
+        jax=jax, jnp=jnp, T=1.0, STEPS=16, RISK_START=0.6,
+        constants=SimpleNamespace(FUSION_ALPHA_PARTICLE_ENERGY=0.5,
+                                  ALPHA_PARTICLE_MASS=1.0, ALPHA_PARTICLE_CHARGE=1.0),
+        guiding_center_rhs=lambda field, y, *args: jnp.zeros_like(y),
+    )
+    def objective(s):
+        return functions["orbit_risk"](field, jnp.array([[s, 0.0, 0.0, 0.0]]), jnp.ones(1))
+    assert float(objective(0.8)) == pytest.approx(0.5)
+    assert float(jax.grad(objective)(0.8)) == pytest.approx(1.875 / 0.4)
+    for s in (0.6, 1.0):
+        assert float(jax.grad(objective)(s)) == pytest.approx(0.0, abs=1e-7)
+    scores = []
+    for rate in (0.55, 0.8):
+        functions["guiding_center_rhs"] = lambda field, y, *args: jnp.zeros_like(y).at[0].set(rate)
+        def f(start):
+            return functions["orbit_risk"](field, jnp.array([[start, 0.0, 0.0, 0.0]]), jnp.ones(1))
+        scores.append(float(f(0.3)))
+        finite_difference = (float(f(0.300001)) - float(f(0.299999))) / 2e-6
+        assert float(jax.grad(f)(0.3)) == pytest.approx(finite_difference, rel=1e-5)
+    assert 0 < scores[0] < scores[1] < 1
+
+
+@pytest.mark.parametrize("value,gradient", [(2.0, [3.0]), (np.nan, [1.0]),
+                                           (np.inf, [1.0]), (0.0, [np.nan]), (0.0, [np.inf])])
+def test_alpha_optimizer_accepts_only_finite_value_and_gradient(value, gradient):
+    from types import SimpleNamespace
+
+    functions = _alpha_objective_functions(
+        np=np, time=SimpleNamespace(perf_counter=lambda: 0.0), x0=np.zeros(1),
+        step=0.02, basis=np.eye(1),
+        problem=SimpleNamespace(value_and_grad=lambda x: (value, np.asarray(gradient))),
+    )
+    if np.isfinite(value) and np.isfinite(gradient).all():
+        result, derivative = functions["value_grad"](np.zeros(1))
+        assert result == value
+        np.testing.assert_array_equal(derivative, 0.02 * np.asarray(gradient))
+    else:
+        with pytest.raises(ValueError, match="nonfinite alpha objective or gradient"):
+            functions["value_grad"](np.zeros(1))
 
 
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)
