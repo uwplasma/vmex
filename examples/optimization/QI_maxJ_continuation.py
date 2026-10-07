@@ -53,7 +53,7 @@ SURFACES = np.array([0.20, 0.35, 0.50, 0.65, 0.80, 0.90])
 #   ACTION_OPTIONS = [COARSE_ACTION, COARSE_ACTION, RESOLVED_ACTION]
 #   FINAL_NS = 71
 MAX_MODES = [3]
-MAX_NFEV = [4]
+MAX_NFEV = [3]
 MAXIMUM_J_TARGETS = [-0.002]
 MAXIMUM_J_WEIGHTS = [2.0e3]
 QI_INVARIANCE_WEIGHTS = [5.0e3]
@@ -216,8 +216,9 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
     inp = problem.input_from_x(result.x)
     equilibrium = problem.equilibrium_from_x(result.x)
     report(f"mode {max_mode}", equilibrium)
-    stage_maxj = qi_maxj.compute_state(
-        equilibrium.solution, equilibrium.solver_context)["maximum_j"]
+    with vj.heartbeat("Actual-field maximum-J on the stage result"):
+        stage_maxj = qi_maxj.compute_state(
+            equilibrium.solution, equilibrium.solver_context)["maximum_j"]
     print(f"actual-field maximum-J fraction = "
           f"{float(stage_maxj['maximum_j_fraction']):.1%}")
 
