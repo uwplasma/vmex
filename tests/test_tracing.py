@@ -64,6 +64,83 @@ def test_counts_are_consistent(traced):
     assert np.all(np.diff(traced.loss_fractions) >= 0.0)  # cumulative
 
 
+@pytest.mark.parametrize("name,bad", [
+    ("energy_eV", 0), ("energy_eV", -1), ("energy_eV", np.nan),
+    ("energy_eV", np.inf), ("energy_eV", [20000]),
+    ("mass", 0), ("mass", -1), ("mass", -np.inf), ("mass", 1j),
+    ("charge", 0), ("charge", np.nan), ("charge", [1e-19]),
+])
+def test_particle_parameters_reject_nonphysical_values_before_io(name, bad):
+    with pytest.raises(ValueError, match=name):
+        trace_alphas("missing_wout.nc", **{name: bad})
+
+
+def test_particle_parameters_reject_nonfinite_speed_before_io():
+    with pytest.raises(ValueError, match="speed"):
+        trace_alphas("missing_wout.nc", energy_eV=1e308, mass=1e-308)
+
+
+@pytest.mark.parametrize("mass_factor,charge_sign", [(1, 1), (2, 1), (1, -1)])
+def test_particle_parameters_reach_released_integrator(solovev_wout, monkeypatch,
+                                                       mass_factor, charge_sign):
+    """Physical eV/kg/C conversion and H/D speed ratio, through actual RK4."""
+    import essos.boozer
+    from essos import constants as c
+    original = essos.boozer.trace_boozer
+    captured = []
+    def integrate(*args, **kwargs):
+        captured.append(kwargs)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(essos.boozer, "trace_boozer", integrate)
+    mass, charge = mass_factor * c.PROTON_MASS, charge_sign * c.ELEMENTARY_CHARGE
+    result = trace_alphas(solovev_wout, energy_eV=20000, mass=mass, charge=charge,
+                          scale=None, nparticles=2, tmax=1e-6, timestep=1e-8,
+                          times_to_trace=8, mboz=8, nboz=8)
+    call, = captured
+    assert call["mass"] == mass and call["charge"] == charge
+    assert 0.5 * mass * call["speed"]**2 == pytest.approx(20000 * c.ELEMENTARY_CHARGE)
+    assert call["speed"] == pytest.approx(np.sqrt(2 * 20000 * c.ELEMENTARY_CHARGE / c.PROTON_MASS) / np.sqrt(mass_factor))
+    assert result.metadata["particle_energy_eV"] == pytest.approx(20000)
+    assert result.metadata["particle_mass_kg"] == mass
+    assert result.metadata["particle_charge_C"] == charge
+    assert np.isfinite(result.trajectories).all() and result.energy_error.max() < 1e-5
+
+
+def test_particle_parameters_preserve_alpha_defaults(solovev_wout, traced):
+    from essos import constants as c
+    explicit = trace_alphas(solovev_wout, **TRACE_KWARGS,
+                            energy_eV=c.FUSION_ALPHA_PARTICLE_ENERGY / c.ELEMENTARY_CHARGE,
+                            mass=c.ALPHA_PARTICLE_MASS, charge=c.ALPHA_PARTICLE_CHARGE)
+    np.testing.assert_array_equal(explicit.initial_conditions, traced.initial_conditions)
+    np.testing.assert_allclose(explicit.trajectories, traced.trajectories, rtol=1e-14, atol=1e-14)
+    assert traced.metadata["particle_mass_kg"] == c.ALPHA_PARTICLE_MASS
+    assert traced.metadata["particle_charge_C"] == c.ALPHA_PARTICLE_CHARGE
+
+
+def test_cli_particle_parameters_require_trace_and_forward_units(solovev_wout, tmp_path):
+    import json
+    from essos import constants as c
+    parser = cli.build_parser()
+    defaults = parser.parse_args([str(solovev_wout)])
+    assert defaults.trace_energy_eV is defaults.trace_mass_kg is defaults.trace_charge_coulomb is None
+    for flag, value in [("--trace-energy-eV", "20000"), ("--trace-mass-kg", str(c.PROTON_MASS)),
+                        ("--trace-charge-coulomb", str(c.ELEMENTARY_CHARGE))]:
+        with pytest.raises(SystemExit) as exc:
+            cli.main([str(solovev_wout), flag, value, "--quiet"])
+        assert exc.value.code == 2
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        rc = cli.main([str(solovev_wout), "--trace", "--trace-no-scale", "--quiet",
+                       "--trace-energy-eV", "20000", "--trace-mass-kg", str(2*c.PROTON_MASS),
+                       "--trace-charge-coulomb", str(c.ELEMENTARY_CHARGE), "--trace-particles", "2",
+                       "--trace-tmax", "1e-6", "--trace-timestep", "1e-8", "--trace-times", "8",
+                       "--mbooz", "8", "--nbooz", "8", "--outdir", str(tmp_path)])
+    assert rc == 0
+    summary = json.loads((tmp_path / "solovev_trace.json").read_text())
+    assert summary["particle_energy_eV"] == 20000
+    assert summary["particle_mass_kg"] == 2*c.PROTON_MASS
+    assert summary["particle_charge_C"] == c.ELEMENTARY_CHARGE
+
+
 def test_shapes_births_and_energy(traced):
     assert traced.initial_conditions.shape == (8, 4)
     np.testing.assert_allclose(traced.initial_conditions[:, 0], 0.25)
