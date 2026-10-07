@@ -871,7 +871,7 @@ def _alpha_objective_functions(**namespace):
     path = EXAMPLES / "optimization" / "alpha_particle_optimization.py"
     functions = [node for node in ast.parse(path.read_text()).body
                  if isinstance(node, ast.FunctionDef)
-                 and node.name in {"cubic", "field_from_state", "orbit_risk", "heartbeat", "value_grad"}]
+                 and node.name in {"cubic", "field_from_state", "orbit_risk", "value_grad"}]
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"), namespace)
     return namespace
 

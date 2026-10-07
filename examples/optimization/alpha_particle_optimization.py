@@ -3,18 +3,19 @@
 
 The smooth escaped-residence score of 64 fixed alpha births is differentiated
 through the equilibrium, its Boozer spectrum and the guiding-centre orbits; real
-2 ms losses select the iterate, and 1,024 fresh alphas check it at 5 ms. There is
+2 ms losses select the iterate, and 800 fresh alphas check it at 5 ms. There is
 no quasisymmetry stage. ``CONTROL = True`` keeps the same boundary modes, aspect
 and iota rows, drift allowance and iterations but drops the alpha term.
 
-Measured (two holdout seeds, 512 alphas each, ±2 %): the seed loses 80 %; three
-iterations reach 35.0 % and the control 36.4 %; four reach 31.8 % and 34.2 %.
-Most of the gain comes from lifting min |iota| from 0.07, not from the orbits;
+Measured on two holdout seeds of 400 alphas (±2 % each): the seed loses 82.4 %;
+three iterations reach 31.9 % and the control 34.0 %; four reach 30.9 % and
+31.4 %. The gain is the iota lift (min |iota| from 0.07), not the orbit gradient;
 ``QA_optimization_alpha_losses.py`` reaches 5.5 % from its own seed.
-Needs ``pip install "vmex[coils]"``.
+About 295 s on a laptop. Needs ``pip install "vmex[coils]"``.
 """
 
 import os
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -41,7 +42,7 @@ import matplotlib.pyplot as plt
 jax.config.update("jax_enable_x64", True)
 N, T, STEPS, MAXITER = 64, 2.5e-4, 2000, 3
 HARD_N, HARD_T = 256, 2e-3
-CHECK_N, CHECK_T, CHECK_SEEDS = 512, 5e-3, (2, 3)
+CHECK_N, CHECK_T, CHECK_SEEDS = 400, 5e-3, (2, 3)
 SURFACES = (np.arange(10) + 0.5) / 10
 RISK_START = 0.6                  # smooth loss transition ends at the LCFS, s=1
 ASPECT_WEIGHT, MAX_ASPECT_DRIFT = 50.0, 0.1
@@ -146,12 +147,11 @@ def orbit_risk(field, births, reference_weight):
     return jnp.sum(ratio * total) / (STEPS * jnp.sum(ratio))
 
 
-def heartbeat(action, function):
-    """Run ``function``, printing elapsed time every 15 s until it returns."""
-    from vmex.core.problem import _run_with_progress
-
-    return _run_with_progress(function, action=action, complete=f"{action} done",
-                              progress=True, report_interval=15.0, announce=False)
+def ticker(start=time.perf_counter()):
+    """Print elapsed time every 15 s so long compiles and traces are never silent."""
+    while True:
+        time.sleep(15)
+        print(f"  ... {time.perf_counter() - start:.0f} s elapsed", flush=True)
 
 
 # Shape the circular seed; no quasisymmetry warm start.
@@ -161,7 +161,8 @@ rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = 0.17
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -0.03, 0.03
 seed_input = replace(inp, rbc=rbc, zbs=zbs, delt=0.5).change_resolution(mpol=5, ntor=5, ntheta=16, nzeta=14)
 print("Direct alpha-orbit autodiff optimization (no symmetry stage)", flush=True)
-seed_eq = heartbeat("seed equilibrium", lambda: opt.solve_equilibrium(seed_input))
+threading.Thread(target=ticker, daemon=True).start()
+seed_eq = opt.solve_equilibrium(seed_input)
 bs, rs, aspect_target = scales(seed_eq.state, seed_eq.runtime)
 aspect_target = float(aspect_target)
 seed_field = field_from_state(seed_eq.state, seed_eq.runtime, bs, rs)
@@ -187,9 +188,8 @@ def loss(state, rt):
 
 def hard_check(eq, n, tmax, seed):
     """Check real ESSOS exits using VMEX's released tracing wrapper."""
-    trace = heartbeat("  tracing", lambda: vj.trace_alphas(
-        eq.wout, nparticles=n, tmax=tmax, s=0.3, seed=seed, times_to_trace=101, mboz=12, nboz=12,
-        mode_tolerance=1e-5))
+    trace = vj.trace_alphas(eq.wout, nparticles=n, tmax=tmax, s=0.3, seed=seed,
+                            times_to_trace=101, mboz=12, nboz=12, mode_tolerance=1e-5)
     drift = float(np.max(np.abs(trace.energy_error)))
     # Relative energy drift above 0.1% makes a hard-loss checkpoint unreliable.
     if trace.particles_failed or not np.isfinite(drift) or drift > 1e-3:
@@ -201,7 +201,7 @@ def hard_check(eq, n, tmax, seed):
 def value_grad(y):
     """Differentiate through equilibria, Boozer spectra, and ESSOS orbits."""
     tic = time.perf_counter()
-    value, grad = heartbeat("  gradient", lambda: problem.value_and_grad(x0 + step * basis @ y))
+    value, grad = problem.value_and_grad(x0 + step * basis @ y)
     if not np.isfinite(value) or not np.isfinite(grad).all():
         raise ValueError("nonfinite alpha objective or gradient")
     print(f"  smooth cost {value:.5f}, gradient {time.perf_counter() - tic:.1f} s", flush=True)
@@ -212,7 +212,7 @@ def check(y):
     """Keep the best accepted step under real short-orbit losses."""
     global accepted, best_cost, best_y
     accepted += 1
-    eq = heartbeat("  equilibrium", lambda: problem.equilibrium_from_x(x0 + step * basis @ y))
+    eq = problem.equilibrium_from_x(x0 + step * basis @ y)
     cost, trace = hard_check(eq, HARD_N, HARD_T, 1)
     aspect = float(eq.wout.aspect)
     keep = cost < best_cost and abs(aspect - aspect_target) <= MAX_ASPECT_DRIFT

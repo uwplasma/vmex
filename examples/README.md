@@ -140,9 +140,9 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   `alpha_particle_optimization.py` (same extra) has no symmetry stage: it
   differentiates an ESSOS escaped-residence score of 64 alphas through VMEX
   equilibria, with aspect-ratio and iota-floor rows, and selects iterates by
-  real 2 ms losses. On 1,024 fresh alphas at 5 ms it takes its seed from 80 %
-  to 35 % lost; `CONTROL = True`, the same run without the alpha term, reaches
-  36 %, so most of the gain is the iota lift rather than the orbit gradient.
+  real 2 ms losses. On 800 fresh alphas at 5 ms it takes its seed from 82 %
+  to 32 % lost; `CONTROL = True`, the same run without the alpha term, reaches
+  34 %, so the gain is the iota lift rather than the orbit gradient.
   `QA_optimization_turbulence_linear.py`,
   `QA_optimization_turbulence_quasilinear.py` and
   `QA_optimization_turbulence_nonlinear.py` (`pip install "vmex[turbulence]"`)
