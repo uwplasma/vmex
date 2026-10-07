@@ -75,9 +75,9 @@ WELL_WEIGHT = 10.0
 TRAPPING_DEPTHS = (0.4, 0.8)
 ACTION_NALPHA = 7
 ACTION_POINTS = 32
-ACTION_PERIODS = 8
+ACTION_PERIODS = 6                # research: 8
 ACTION_MAX_WELLS = 20
-ACTION_QUADRATURE = 24
+ACTION_QUADRATURE = 16            # research: 24
 ACTION_MBOZ = 10
 
 # Picard loop that makes the seed current self-consistent:
@@ -134,7 +134,7 @@ if ci_smoke:
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
 inp = replace(inp, rbc=rbc, zbs=zbs)
-equilibrium = opt.solve_equilibrium(inp)
+equilibrium = opt.solve_equilibrium(inp) if FROM_MINIMAL_SEED else None
 
 ### Set up the objective ######################################################
 
@@ -184,6 +184,9 @@ for max_mode, max_nfev in zip(QA_MAX_MODES, QA_MAX_NFEV) if FROM_MINIMAL_SEED el
 if ci_smoke or not FROM_MINIMAL_SEED:
     inp = vj.VmecInput.from_file(SEED_STATE_FILE)
     equilibrium = opt.solve_equilibrium(inp)
+    # Guard the bundled state's transform rather than push it to the floor.
+    IOTA_FLOOR = min(IOTA_FLOOR, 0.95 * float(
+        opt.min_abs_iota(equilibrium.solution, equilibrium.solver_context)))
 
 # Add the Landreman--Buller--Drevlak pressure profiles to the optimized QA
 # boundary, then alternate hot-started VMEX solves and Redl current updates.
@@ -217,10 +220,11 @@ finite_beta_terms = [(qs, 0.0, QA_WEIGHT), (bootstrap, 0.0, BOOTSTRAP_WEIGHT),
 
 # One physical lambda must represent the same particles on every radius and
 # field-line label. Keep these pitches fixed throughout the maximum-J stages.
-pitch = np.asarray(common_trapped_pitches_state(
-    equilibrium.solution, equilibrium.solver_context, SURFACES, TRAPPING_DEPTHS,
-    nalpha=ACTION_NALPHA, points_per_period=ACTION_POINTS,
-    num_periods=ACTION_PERIODS))
+with vj.heartbeat("Selecting the common trapped pitches"):
+    pitch = np.asarray(common_trapped_pitches_state(
+        equilibrium.solution, equilibrium.solver_context, SURFACES, TRAPPING_DEPTHS,
+        nalpha=ACTION_NALPHA, points_per_period=ACTION_POINTS,
+        num_periods=ACTION_PERIODS))
 maximum_j = MaximumJResidual(SURFACES, pitch, mboz=ACTION_MBOZ, nboz=ACTION_MBOZ,
     nalpha=ACTION_NALPHA, points_per_period=ACTION_POINTS,
     num_periods=ACTION_PERIODS, max_wells=ACTION_MAX_WELLS,
@@ -256,8 +260,9 @@ final_input = replace(inp, ns_array=np.array([FINAL_NS]),
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution, verbose=not ci_smoke,
     raise_on_max_iterations=True)
-diagnostics = maximum_j.compute_state(final_equilibrium.solution,
-                                      final_equilibrium.solver_context)
+with vj.heartbeat("Maximum-J certificate on the final grid"):
+    diagnostics = maximum_j.compute_state(final_equilibrium.solution,
+                                          final_equilibrium.solver_context)
 
 ### Print, plot and save ######################################################
 
