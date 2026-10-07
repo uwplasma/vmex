@@ -941,14 +941,39 @@ def _selected_tridiagonal_jvp(primals, tangents):
         return current, current
     _, pivots = jax.lax.scan(pivot, shift-d[0], (shift-d[1:], positive))
     spd = (shift-d[0] > 0) & jnp.all(pivots > 0)
-    def step(_, u):
-        u = tridiagonal_solve(lower, shift-d, upper, u)
-        return u / jnp.linalg.norm(u)
-    u = signs * jax.lax.fori_loop(0, 8, step, jnp.ones_like(d)/jnp.sqrt(n))
-    residual = (d-root)*u + jnp.pad(e*u[1:], (0,1)) + jnp.pad(e*u[:-1], (1,0))
     second = jax.scipy.linalg.eigh_tridiagonal(d,e,eigvals_only=True,
                                               select="i", select_range=(n-2,n-2))[0]
-    good = spd & (root-second > 256*epsilon) & (jnp.linalg.norm(residual) < 1024*epsilon)
+    gap = root - second
+    resolved = spd & (gap > 256*epsilon)
+    angle_tolerance = jnp.sqrt(epsilon) / 8
+
+    def rayleigh_residual(u):
+        # Subtract root before the band action to avoid cancellation from
+        # a large diagonal offset. Remove the Rayleigh shift: native-root
+        # error must not be confused with eigenvector error.
+        residual = ((d-root)*u + jnp.pad(positive*u[1:], (0,1))
+                    + jnp.pad(positive*u[:-1], (1,0)))
+        return residual - u*jnp.dot(u,residual)
+
+    def needs_iteration(carry):
+        iteration, u = carry
+        relative_residual = jnp.linalg.norm(rayleigh_residual(u)) / jnp.maximum(gap, epsilon)
+        return resolved & (iteration < 32) & (relative_residual > angle_tolerance)
+
+    def step(carry):
+        iteration, u = carry
+        u = tridiagonal_solve(lower, shift-d, upper, u)
+        return iteration+1, u / jnp.linalg.norm(u)
+    _, unsigned = jax.lax.while_loop(needs_iteration, step,
+                                    (0, jnp.ones_like(d)/jnp.sqrt(n)))
+    angle_error = jnp.linalg.norm(rayleigh_residual(unsigned)) / jnp.maximum(gap, epsilon)
+    u = signs * unsigned
+    residual = (d-root)*u + jnp.pad(e*u[1:], (0,1)) + jnp.pad(e*u[:-1], (1,0))
+    # For an isolated top eigenvalue, the Rayleigh residual/gap controls
+    # eigenvector angle (conditional on native root/gap accuracy). The
+    # absolute root residual separately checks index/root consistency.
+    good = (resolved & (angle_error <= angle_tolerance)
+            & (jnp.linalg.norm(residual) < 1024*epsilon))
     weights_d = jnp.where(good, u*u, jnp.nan)
     weights_e = jnp.where(good, 2*u[:-1]*u[1:], jnp.nan)
     return value, jnp.sum(weights_d*dd) + jnp.sum(weights_e*de)
@@ -1097,7 +1122,10 @@ def ballooning_lambda(
         ``"dense"`` preserves the established default. ``"selected"`` uses
         tridiagonal storage and a first-order Hellmann--Feynman JVP/VJP.
         Its derivative is NaN for unresolved largest-mode gaps or failed
-        eigenvector residual checks. Higher derivatives are unsupported.
+        eigenvector residual checks. Bounded inverse iteration qualifies the
+        Rayleigh residual/gap at ``sqrt(eps)/8``; unresolved first derivatives
+        return NaN. These floating-point checks are not interval certificates.
+        Higher derivatives are unsupported.
     npoints, nturns:
         Field-line grid: ``npoints`` points over ``θ* ∈ α ± nturns·π``
         (COBRA-style domain; Gaur et al. use ``5π``, 3 turns is adequate for

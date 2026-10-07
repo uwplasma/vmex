@@ -1006,3 +1006,22 @@ def test_selected_rejects_nested_derivatives():
     d=jnp.array([1.,2.,3.,4.]);e=jnp.array([.2,.3,.4])
     with pytest.raises(NotImplementedError,match="first derivatives"):
         jax.hessian(lambda d:stab._selected_tridiagonal_value(d,e))(d)
+
+
+@pytest.mark.parametrize('n', [4, 32, 128])
+@pytest.mark.parametrize('coupling_eps', [0., .25, 1., 4.])
+def test_selected_near_threshold_gap_qualifies_vector(n, coupling_eps):
+    """Absolute residual alone accepts a wrong deflated near-cluster HF rule."""
+    eps=np.finfo(float).eps
+    d=np.ones(n);d[-1]+=260*eps
+    e=np.zeros(n-1);e[-1]=coupling_eps*eps
+    de=np.zeros(n-1);de[-1]=1.
+    # Exact two-by-two oracle: the remaining diagonal blocks are deflated.
+    expected=2*e[-1]/np.hypot(d[-1]-d[-2],2*e[-1])
+    value,tangent=jax.jit(lambda d,e:jax.jvp(
+        stab._selected_tridiagonal_value,(d,e),
+        (jnp.zeros_like(d),jnp.asarray(de))))(jnp.asarray(d),jnp.asarray(e))
+    np.testing.assert_allclose(value,1.+260*eps,atol=8*eps,rtol=0.)
+    # Numerically unresolved vectors may return NaN, never a bad finite rule.
+    if np.isfinite(tangent):
+        np.testing.assert_allclose(tangent,expected,atol=np.sqrt(eps),rtol=0.)
