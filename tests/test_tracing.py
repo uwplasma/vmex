@@ -756,3 +756,96 @@ def test_integrator_keywords_reach_essos(solovev_wout, monkeypatch):
     with pytest.raises(ValueError, match="tolerance must be positive"):
         trace_alphas(solovev_wout, **kwargs, tolerance=0.0)
 
+
+
+pytest.mark.parametrize("phase", [0.0, 0.7, np.pi / 2])
+@pytest.mark.parametrize("phase", [0.0, 0.7, np.pi / 2])
+def test_mode_cut_spectrum_uses_physical_boozer_angular_derivatives(phase):
+    from types import SimpleNamespace
+
+    from benchmarks.trace_mode_cut import spectrum
+
+    s = np.array([0.04, 0.25, 0.64, 1.0])
+    bx = SimpleNamespace(s_b=s, xm_b=np.array([0, 0, 1]),
+                         xn_b=np.array([0, 1, 0]),
+                         bmnc_b=np.array([np.ones(4), np.full(4, 0.02),
+                                          5e-4 * np.sqrt(s)]))
+    bx.asym = phase != 0
+    bx.bmns_b = np.zeros_like(bx.bmnc_b)
+    bx.bmns_b[1:] = bx.bmnc_b[1:] * np.sin(phase)
+    bx.bmnc_b[1:] *= np.cos(phase)
+    cut = spectrum(bx)[0]["cuts"]
+    assert cut["0.0001"]["modes"] == 3
+    assert cut["0.001"]["modes"] == 2
+    expected = 2.5e-4 / np.hypot(0.02, 2.5e-4)
+    assert cut["0.001"]["angle_gradient_rms_rel"] == pytest.approx(expected)
+
+
+def test_cut_audit_scales_boozer_tables_without_retransform(solovev_wout, tmp_path):
+    from booz_xform_jax import Booz_xform
+    from essos.boozer import BoozerField
+
+    from benchmarks.trace_mode_cut import scaled_field
+    from vmex.core.scaling import scale_wout
+    from vmex.core.wout import write_wout
+
+    wout = read_wout(solovev_wout)
+    b, r = 2.3, 1.7
+    scaled_path = tmp_path / "wout_scaled.nc"
+    write_wout(scaled_path, scale_wout(wout, b_scale=b, r_scale=r))
+    bx = []
+    for path in (solovev_wout, scaled_path):
+        transform = Booz_xform(verbose=0, mboz=8, nboz=8)
+        transform.read_wout(str(path), flux=False)
+        transform.run()
+        bx.append(transform)
+    direct = scaled_field(bx[0], wout, b, r, 1e-4)
+    reference = BoozerField.from_booz_xform(
+        bx[1], -float(np.asarray(wout.phi)[-1]) * b * r**2 / (2 * np.pi), 1e-4)
+    np.testing.assert_allclose(direct.b_coef, reference.b_coef, rtol=1e-8, atol=5e-11)
+    np.testing.assert_allclose(direct.profile_coef, reference.profile_coef, rtol=1e-8, atol=5e-11)
+    assert direct.psi0 == pytest.approx(reference.psi0)
+
+
+def test_cut_audit_records_common_births_and_individual_losses(solovev_wout):
+    from booz_xform_jax import Booz_xform
+    from benchmarks.trace_mode_cut import orbits
+
+    bx = Booz_xform(verbose=0, mboz=8, nboz=8)
+    bx.read_wout(str(solovev_wout), flux=False)
+    bx.run()
+    result = orbits(solovev_wout, bx, [6e-5, 1e-4], 8, 1e-5, 1, 3, 1e-4, 1,
+                    s=0.25, birth_samples=16)
+    assert result["reference_cut"] == 6e-5
+    assert len(result["birth_sha256"]) == 64
+    for row in result["cuts"].values():
+        assert row["lost_indices"] == np.flatnonzero(np.array(row["loss_times"]) >= 0).tolist()
+        assert row["lost"] == len(row["lost_indices"])
+
+
+def test_cut_audit_exits_nonzero_after_writing_case_error(tmp_path, monkeypatch):
+    import json
+    import sys
+
+    from benchmarks.trace_mode_cut import main
+
+    target = tmp_path / "cuts.json"
+    monkeypatch.setattr(sys, "argv", ["trace_mode_cut.py", str(tmp_path / "wout_missing.nc"),
+                                      "--out", str(target)])
+    with pytest.raises(SystemExit, match="one or more WOUT audits failed"):
+        main()
+    assert "traceback" in json.loads(target.read_text())["cases"][0]
+
+
+def test_mode_cut_scaling_preserves_sine_spectra(monkeypatch):
+    from types import SimpleNamespace
+    from essos.boozer import BoozerField
+    from benchmarks.trace_mode_cut import scaled_field
+
+    bx = SimpleNamespace(asym=True, s_b=np.array([0.1, 0.9]), nfp=2,
+                         bmnc_b=np.ones((1, 2)), bmns_b=np.full((1, 2), 0.2),
+                         xm_b=np.array([0]), xn_b=np.array([0]), iota=np.ones(2),
+                         Boozer_G=np.ones(2), Boozer_I=np.zeros(2))
+    monkeypatch.setattr(BoozerField, "from_booz", lambda *a, **kw: kw)
+    result = scaled_field(bx, SimpleNamespace(phi=np.array([0, 1.])), 3, 2, 1e-4)
+    np.testing.assert_array_equal(result["bmns"], 3 * bx.bmns_b)

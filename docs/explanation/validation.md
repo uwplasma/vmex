@@ -328,6 +328,99 @@ The ESSOS and `neo_jax` tests are `importorskip`-gated, so they run in the
 nightly optional-integrations lane and silently skip in the dependency-minimal
 core lane. A green core run is not evidence that they passed.
 
+## Alpha tracing accuracy
+
+The spectral audit covers 34 equilibria and 102 surfaces at `mboz=nboz=32`.
+Errors use the ESSOS radial spline and compare retained modes with the full spectrum.
+
+| cut | median modes | median `|B|` error | median radial derivative error | median angular derivative error |
+|---|---:|---:|---:|---:|
+| `1e-5` | 245 | 0.0010% | 0.06% | 0.19% |
+| `6e-5` | 140 | 0.0061% | 0.28% | 0.85% |
+| `8e-5` | 126 | 0.0082% | 0.35% | 1.05% |
+| `1e-4` | 115.5 | 0.0099% | 0.43% | 1.25% |
+| `2e-4` | 90 | 0.0201% | 0.80% | 2.32% |
+| `3e-4` | 73 | 0.0326% | 1.10% | 3.34% |
+| `5e-4` | 57.5 | 0.0529% | 1.60% | 4.97% |
+| `6e-4` | 53 | 0.0590% | 1.79% | 5.41% |
+| `8e-4` | 44.5 | 0.0778% | 2.24% | 6.82% |
+| `1e-3` | 37 | 0.1022% | 2.61% | 7.58% |
+
+Field derivatives are more sensitive than `|B|`; these errors do not bound loss fractions.
+The W7-X study in [`trace_accuracy.json`](../../benchmarks/trace_accuracy.json) records all ten cuts,
+individual loss-label differences and cold/warm runtimes.
+
+| equilibrium | checked horizon | finding |
+|---|---:|---|
+| W7-X standard / high mirror | 5 ms | `6e-5` and `8e-5` do not consistently improve labels relative to `1e-5` |
+| Landreman-Paul QA | 10 ms | larger cuts remove losses; matching counts can hide substituted loss IDs |
+| ARIES-CS | 2 ms | timestep refinement changes labels despite energy drift below `6.6e-7` |
+| HSX | 0.5 ms | `1e-4` and `1e-5` both lose 23/500, but share only 15 loss IDs |
+| QH | 10 ms | zero observed losses cannot rank cutoff accuracy |
+
+The audit uses `vmec_equilibria` at `41fcf8b`, Landreman-Paul QA/QH and two
+matched shaped-tokamak WOUTs. LASYM tracing is excluded by the supported interface.
+To reproduce field errors and optional orbit checks:
+
+```console
+python benchmarks/trace_mode_cut.py EQUILIBRIA_DIR examples/data --out cuts.json
+python benchmarks/trace_mode_cut.py WOUT --particles 500 --tmax 0.0005 --step-factor 0.125 --repeats 3 --out orbits.json
+```
+
+## Cross-code alpha tracing
+
+Common births and collisionless guiding centres are compared on a reactor-scale vacuum seed.
+
+| code | device | particles / horizon | lost / resolved | maximum relative energy drift |
+|---|---|---|---:|---:|
+| ESSOS | CPU | 512 / 5 ms | 403 / 512 | `4.80e-6`, every step |
+| FIRM3D / CATAPULT | RTX A4000 | 512 / 5 ms | 403 / 512 | `2.46e-6`, saved inside-domain states |
+| SIMPLE | CPU | 512 / 5 ms | 403 / 512 | `7.18e-4`, native momentum at macrosteps |
+| SIMSOPT | CPU | 512 / 5 ms | 391 / 486 | `2.76e-3`, resolved saved states |
+
+ESSOS, CATAPULT and SIMPLE agree on all 512 loss labels. The 26 SIMSOPT axis stops
+remain unresolved; its energy drift exceeds the `1e-3` gate. DESC's fitted field differs
+by up to 0.405% at births; its full CPU/GPU runs did not finish within the test budgets.
+SIMPLE's energy check uses its native momentum, not a reconstructed common field.
+
+ESSOS takes 9.31 s for the first trace and 7.62 s for a repeat on an Apple M2,
+with four workers, disabled compilation cache and 1.13 s of separate field setup.
+Contested CATAPULT/SIMPLE timings and unqualified SIMSOPT timings are recorded,
+and excluded from speed comparisons.
+
+For 8,192 births over 20 ms, ESSOS and CATAPULT lose 6,572 and 6,573 particles;
+8,191 labels agree. Full-spectrum ESSOS refinement reproduces the remaining
+CATAPULT exit near 115 µs at three timesteps. This checks one birth's spectrum
+sensitivity; it does not establish ensemble convergence.
+
+| code | cold trace | warm trace | maximum relative energy drift |
+|---|---:|---:|---:|
+| ESSOS | 49.29 s | 37.42 s | `2.14e-5`, every step |
+| FIRM3D / CATAPULT | 36.69 s | 37.04 s | `1.36e-5`, saved confined states |
+
+Both workloads use alpha mass `6.6446573450e-27 kg`. The large ensemble uses an
+RTX A4000 and JAX 0.9.2; timings exclude field setup. Setup adds 1.30 s from saved
+ESSOS tables versus 8.70 s including CATAPULT's transform and GPU table.
+ESSOS returns 101 states per birth; CATAPULT stops lost paths.
+
+Dense-path checks exposed CATAPULT's save-clock overshoot issue, fixed in
+[FIRM3D #93](https://github.com/ColumbiaStellaratorTheory/firm3d/pull/93).
+Four births now give identical first exits with single-launch, 12.5 µs and
+125 ns saves, without post-exit rows. Six of the 512 coarse paths contained
+one post-exit row; first exits are reconstructed from the first boundary state.
+The 8,192-birth benchmark contains no post-exit paths.
+
+For one reflected birth, restoring the full spectrum reduces the maximum
+`|Δv_parallel|/v` against CATAPULT from 12.25% to 0.154%, and bounce-phase
+differences from 2.6 µs to 35 ns. Halving the timestep changes full-spectrum
+bounce times by 0.25 ns. Energy conservation and matching loss labels alone
+do not certify orbit accuracy; native table and saved-output errors remain combined.
+
+Source revisions, settings and output hashes are recorded in
+[`trace_accuracy.json`](../../benchmarks/trace_accuracy.json).
+Loss bands use `f(t) ± sqrt(f(t)[1-f(t)]/N)`, the pointwise binomial standard error.
+No cross-code collisional benchmark is claimed.
+
 ## Device and lane consistency
 
 Float64 is required and enforced at solver import. Across devices the
