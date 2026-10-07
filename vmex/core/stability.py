@@ -70,6 +70,7 @@ import numpy as np
 
 import jax
 import jax.numpy as jnp
+from solvax import tridiagonal_solve
 
 from .solver import SolverRuntime, SpectralState, _physical_coefficients
 from .statephysics import _field_chain, _iotas_half_from_fields
@@ -889,19 +890,90 @@ def _make_point_fn(m: Array, xn: Array, tabs: dict, iota: Array,
 # ---------------------------------------------------------------------------
 
 
-def _max_eigenvalue_tridiag(g: Array, c: Array, f: Array, h: Array) -> Array:
+@jax.custom_jvp
+def _first_order_coefficients(values):
+    """Keep coefficients live for the first derivative; reject nested AD."""
+    return values
+
+
+@_first_order_coefficients.defjvp
+def _reject_second_order(primals, tangents):
+    raise NotImplementedError("selected ballooning eigenvalues support first derivatives only")
+
+
+@jax.custom_jvp
+def _selected_tridiagonal_value(d, e):
+    """Largest real symmetric tridiagonal root, with a qualified first JVP."""
+    n = d.shape[0]
+    if n == 1:
+        return d[0]
+    scale = jnp.maximum(jnp.max(jnp.abs(d)), jnp.max(jnp.abs(e)))
+    scale = jnp.where(scale > 0, scale, 1.)
+    return scale * jax.scipy.linalg.eigh_tridiagonal(
+        d/scale, e/scale, eigvals_only=True, select="i", select_range=(n-1, n-1))[0]
+
+
+@_selected_tridiagonal_value.defjvp
+def _selected_tridiagonal_jvp(primals, tangents):
+    d, e = _first_order_coefficients(primals)
+    dd, de = tangents
+    n = d.shape[0]
+    value = _selected_tridiagonal_value(d, e)
+    if n == 1:
+        return value, dd[0]
+    scale = jnp.maximum(jnp.max(jnp.abs(d)), jnp.max(jnp.abs(e)))
+    scale = jnp.where(scale > 0, scale, 1.)
+    d, e, root = d/scale, e/scale, value/scale
+    epsilon = jnp.finfo(d.dtype).eps
+    # Native normalized bisection uses tol <= 3 eps and at most nmant+1
+    # steps from a Gershgorin interval of width <= 6+O(n eps). 64 eps
+    # covers the final bracket width for these small lines, conditional on
+    # accurate Sturm counts. Also check every shifted LDL pivot below;
+    # these float checks are numerical qualification, not interval proofs.
+    shift = root + 64 * epsilon
+    signs = jnp.concatenate([jnp.ones(1, d.dtype), jnp.cumprod(jnp.where(e < 0, -1., 1.))])
+    positive = jnp.abs(e)
+    lower = jnp.concatenate([jnp.zeros(1, d.dtype), -positive])
+    upper = jnp.concatenate([-positive, jnp.zeros(1, d.dtype)])
+    def pivot(previous, pair):
+        diagonal, off = pair
+        current = diagonal - off**2/previous
+        return current, current
+    _, pivots = jax.lax.scan(pivot, shift-d[0], (shift-d[1:], positive))
+    spd = (shift-d[0] > 0) & jnp.all(pivots > 0)
+    def step(_, u):
+        u = tridiagonal_solve(lower, shift-d, upper, u)
+        return u / jnp.linalg.norm(u)
+    u = signs * jax.lax.fori_loop(0, 8, step, jnp.ones_like(d)/jnp.sqrt(n))
+    residual = (d-root)*u + jnp.pad(e*u[1:], (0,1)) + jnp.pad(e*u[:-1], (1,0))
+    second = jax.scipy.linalg.eigh_tridiagonal(d,e,eigvals_only=True,
+                                              select="i", select_range=(n-2,n-2))[0]
+    good = spd & (root-second > 256*epsilon) & (jnp.linalg.norm(residual) < 1024*epsilon)
+    weights_d = jnp.where(good, u*u, jnp.nan)
+    weights_e = jnp.where(good, 2*u[:-1]*u[1:], jnp.nan)
+    return value, jnp.sum(weights_d*dd) + jnp.sum(weights_e*de)
+
+
+def _max_eigenvalue_tridiag(g: Array, c: Array, f: Array, h: Array, *, eigensolver="dense") -> Array:
     """Most-unstable eigenvalue of ``d/dη(g X')' + cX = λ fX``, ``X(±η_b)=0``.
 
     Central-difference stencil on the uniform η grid (COBRA/DESC/Gaur
     discretization), symmetrized to standard form with the ``f^{-1/2}``
-    similarity transform (``f > 0``), then a batched dense
-    ``jnp.linalg.eigvalsh``.  Leading axes of ``g/c/f`` are batch axes.
+    similarity transform (``f > 0``). The default is batched dense
+    ``jnp.linalg.eigvalsh``; the optional selected path keeps only the bands.
+    Leading axes of ``g/c/f`` are batch axes.
     """
     g_half = 0.5 * (g[..., 1:] + g[..., :-1]) / (h * h)
     f_in = f[..., 1:-1]
     diag = (c[..., 1:-1] - g_half[..., 1:] - g_half[..., :-1]) / f_in
     off = g_half[..., 1:-1] / jnp.sqrt(f_in[..., :-1] * f_in[..., 1:])
     n = diag.shape[-1]
+    if eigensolver == "selected":
+        values = jax.vmap(_selected_tridiagonal_value)(
+            diag.reshape(-1, n), off.reshape(-1, n-1))
+        return values.reshape(diag.shape[:-1])
+    if eigensolver != "dense":
+        raise ValueError("eigensolver must be 'dense' or 'selected'")
     pad = jnp.concatenate([off, jnp.zeros_like(off[..., :1])], axis=-1)
     matrix = (jnp.eye(n) * diag[..., :, None]
               + jnp.eye(n, k=1) * pad[..., :, None]
@@ -909,9 +981,9 @@ def _max_eigenvalue_tridiag(g: Array, c: Array, f: Array, h: Array) -> Array:
     return jnp.linalg.eigvalsh(matrix)[..., -1]
 
 
-def _surface_lambda(ctx: dict, j: int, alphas: Array, zeta0s: Array,
-                    npoints: int, nturns: float) -> Array:
-    """Ballooning eigenvalues on full-mesh surface ``j`` -> ``(nalpha, nzeta0)``."""
+def _surface_coefficients(ctx: dict, j: int, alphas: Array, zeta0s: Array,
+                          npoints: int, nturns: float) -> tuple:
+    """Return unchanged ballooning coefficients and uniform PEST spacing."""
     hs = ctx["hs"]
     s_j = ctx["s"][j]
     sqrt_s = jnp.sqrt(s_j)
@@ -951,7 +1023,15 @@ def _surface_lambda(ctx: dict, j: int, alphas: Array, zeta0s: Array,
     g = gradpar * gds2 / bmag
     c = -dp_drho * cvdrift / (gradpar * bmag)
     f = gds2 / (bmag ** 3 * gradpar)
-    return _max_eigenvalue_tridiag(g, c, f, h).reshape(alphas.shape[0], zeta0s.shape[0])
+    return g, c, f, h
+
+
+def _surface_lambda(ctx: dict, j: int, alphas: Array, zeta0s: Array,
+                    npoints: int, nturns: float, eigensolver="dense") -> Array:
+    """Ballooning eigenvalues on full-mesh surface ``j`` -> ``(nalpha, nzeta0)``."""
+    coefficients = _surface_coefficients(ctx, j, alphas, zeta0s, npoints, nturns)
+    return _max_eigenvalue_tridiag(*coefficients, eigensolver=eigensolver).reshape(
+        alphas.shape[0], zeta0s.shape[0])
 
 
 # ---------------------------------------------------------------------------
@@ -986,6 +1066,7 @@ def ballooning_lambda(
     zeta0s: Sequence[float] = (0.0,),
     npoints: int = 121,
     nturns: float = 3.0,
+    eigensolver: str = "dense",
 ) -> jnp.ndarray:
     """Most-unstable ideal-ballooning eigenvalue per field line (traceable).
 
@@ -1012,6 +1093,11 @@ def ballooning_lambda(
         configuration-dependent ``ζ0`` (Gaur et al. 2023, footnote 2), so a
         single value under-reports ``max λ`` on three-dimensional states; scan
         it, and over both signs when the state is asymmetric.
+    eigensolver:
+        ``"dense"`` preserves the established default. ``"selected"`` uses
+        tridiagonal storage and a first-order Hellmann--Feynman JVP/VJP.
+        Its derivative is NaN for unresolved largest-mode gaps or failed
+        eigenvector residual checks. Higher derivatives are unsupported.
     npoints, nturns:
         Field-line grid: ``npoints`` points over ``θ* ∈ α ± nturns·π``
         (COBRA-style domain; Gaur et al. use ``5π``, 3 turns is adequate for
@@ -1033,7 +1119,7 @@ def ballooning_lambda(
     if int(npoints) < 7:
         raise ValueError("npoints must be >= 7")
     return jnp.stack([
-        _surface_lambda(ctx, j, alphas_arr, zeta0_arr, int(npoints), float(nturns))
+        _surface_lambda(ctx, j, alphas_arr, zeta0_arr, int(npoints), float(nturns), eigensolver)
         for j in js
     ])
 
