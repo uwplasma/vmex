@@ -112,33 +112,13 @@ revision it was measured at, and the pages that cite it.
 
 ## 0.11.3 - 2026-09-27
 
-- `vmex --trace`: 1000 alphas over 1e-2 s at ARIES-CS size by default (scaled
-  in memory; `--trace-no-scale` opts out), traced in Boozer coordinates
-  (`essos.boozer`, ESSOS 0.19) in about 30 s on a 10-core laptop, with a
-  converged step. New flags: `--trace-birth volume`, `--collisional`,
-  `--trace-ne0` and `--trace-te0`. Output: `*_trace.json`/`.npz`, a summary
-  figure and a 3-D loss map. Guide: `docs/howto/trace-alpha-particles.md`.
-- `--scale` now targets the ARIES-CS wout's own `volavgB = 5.8646 T` and
-  `Aminor_p = 1.7044 m` (was `|b0| = 5.7 T`, `1.7 m`, which matches no
-  published convention and put the reference reactor-scale wouts 7-10 % high
-  in field). `--scale-target axis` keeps Landreman & Paul (2022), Boozer
-  `B00 = 5.7 T` on the axis and `a = 1.7 m` (`vmex.core.scaling.b00_axis`).
-
-- The implicit fixed-boundary solve rehomes the forward state beside the
-  parameters before refining it. On a GPU host with `JAX_PLATFORMS` set, the
-  forward solve ran on the GPU while the callback's parameters stayed on the
-  CPU, and every gradient failed with "Received incompatible devices".
-- `vmex.solve_phiedge` finds the PHIEDGE whose free-boundary LCFS meets a
-  target outboard radius, volume or user metric (bracketed secant over
-  warm-started solves); example `examples/free_boundary_phiedge.py`, guide
-  `docs/howto/match-phiedge.md`. `vmex.phiedge_root` attaches the
-  implicit-function-theorem derivative of that PHIEDGE with respect to
-  plasma and coil parameters, from one adjoint gradient.
-
-- Long CPU runs no longer abort with "Failed to materialize symbols": vmex
-  releases compiled executables before the process reaches
-  `vm.max_map_count`. The compilation cache is one directory per machine, and
-  `VMEX_COMPILATION_CACHE=disabled` overrides every cache variable.
+- `vmex --trace` at ARIES-CS size in Boozer coordinates (ESSOS 0.19), with
+  volume births, `--collisional` and summary figures; `--scale` targets the
+  ARIES-CS `volavgB = 5.8646 T`, `Aminor_p = 1.7044 m`.
+- `vmex.solve_phiedge` and `vmex.phiedge_root` match a free-boundary target
+  through PHIEDGE, with its implicit derivative.
+- Fixes: GPU-host implicit solves rehome the forward state beside the
+  parameters; long CPU runs release executables before `vm.max_map_count`.
 
 ## 0.11.2 - 2026-09-24
 
