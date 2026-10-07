@@ -56,12 +56,12 @@ NXI = 13
 SPLINE_ELEMENTS = 7
 
 # Exterior (vacuum) boundary-integral resolution:
-EXTERIOR_NTHETA = 12
+EXTERIOR_NTHETA = 10               # research: 12
 EXTERIOR_ORDER = 6
 EXTERIOR_SPECTRAL_SIDE_DENSITY = True
 
 # Force tolerance and iteration budget per point:
-FTOL = 1.0e-10                    # research: 1.0e-12
+FTOL = 1.0e-12
 MAX_ITERATIONS = 2000
 
 # Axial extent of the modelled grid [m]:

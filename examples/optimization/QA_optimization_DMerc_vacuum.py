@@ -9,8 +9,9 @@ without solving at finite pressure.
 
 A vacuum DMerc is only the formal zero-pressure limit, so outside the smoke
 pass the script then adds 0.1 % pressure and polishes the actual finite-beta
-DMerc and DR from coarse to resolved radial grids.  That resolved solve, not
-the proxy, is the stability certificate.
+DMerc and DR (on NS = 31 by default; the research settings step from coarse
+to resolved radial grids).  That solve, not the proxy, is the stability
+certificate; the five-minute default does not meet every target.
 
 Outputs are named ``QA_DMerc_*`` so they do not overwrite the ones
 ``QA_optimization.py`` writes with the same working directory.

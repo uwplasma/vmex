@@ -55,7 +55,7 @@ KINETIC_RESOLUTION = None
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
 MAX_MODES = [2]
-MAX_NFEV = [5]
+MAX_NFEV = [3]
 N_CURRENT_SPLINE = [6]
 # Research ladder (over the 5-minute laptop default):
 #   MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE = [1, 2], [6, 6], [6, 8]
