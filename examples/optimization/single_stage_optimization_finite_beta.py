@@ -127,8 +127,8 @@ PARAMETER_BOUND = 3.0
 # Budgets. One trial is one equilibrium solve, one virtual-casing evaluation
 # and one adjoint. The script's own end-of-run check passes at iterations 12,
 # 14, 16 and 20 and fails at 10 (aspect 6.002), measured; 14 iterations took 19
-# trials. Raise MAXITER to go further.
-MAXITER = 14
+# trials. 12 keeps a laptop run under 5 minutes; raise MAXITER to go further.
+MAXITER = 12
 MAX_TRIALS = 35
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
@@ -238,11 +238,12 @@ def coil_fit_objective(u_coils):
 
 print("Running single_stage_optimization_finite_beta.py")
 coil_fit_value_and_grad = jax.jit(jax.value_and_grad(coil_fit_objective))
-coil_fit = minimize(
-    lambda u: tuple(map(np.asarray, coil_fit_value_and_grad(jnp.asarray(u)))),
-    np.zeros_like(x_coils_circular), jac=True, method="L-BFGS-B",
-    bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils_circular.size,
-    options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
+with vj.heartbeat("Coil-only pre-fit (no equilibrium solves)"):
+    coil_fit = minimize(
+        lambda u: tuple(map(np.asarray, coil_fit_value_and_grad(jnp.asarray(u)))),
+        np.zeros_like(x_coils_circular), jac=True, method="L-BFGS-B",
+        bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils_circular.size,
+        options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
 x_coils0 = x_coils_circular + coil_scales * coil_fit.x
 coils0 = coils_from_dofs(jnp.asarray(x_coils0))
 print(f"[coil fit] {coil_fit.nit} L-BFGS-B iterations, no equilibrium solves: B.n/B RMS "

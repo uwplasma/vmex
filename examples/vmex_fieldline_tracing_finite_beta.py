@@ -47,12 +47,18 @@ TRACE_TOLERANCE, OUTSIDE_OFFSET = 1.0e-7, 0.005
 # point. The traces stop 55 mm out, where the coil field dominates.
 MAX_SURFACE_DISTANCE = 0.055
 NPHI, NTHETA, VC_DIGITS = 24, 24, 4
-GRADED_NODES = (64, 256)
+# Each exterior step pays a near-surface quadrature, so the default traces the
+# exterior lines for OUTSIDE_TRACE_LENGTH metres, about two toroidal transits,
+# on a coarser graded rule; that fits a 5-minute laptop run. The README figure
+# uses the research settings, more than a day on a laptop:
+#   GRADED_NODES, OUTSIDE_TRACE_LENGTH = (64, 256), TRACE_LENGTH
+GRADED_NODES = (32, 128)
+OUTSIDE_TRACE_LENGTH = 15.0
 TRACE_PROGRESS = True
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     N_FIELDLINES, N_TOROIDAL_TURNS, N_SAMPLES, TRACE_TOLERANCE = 3, 2, 120, 1.0e-6
-    TRACE_LENGTH = 20.0
+    TRACE_LENGTH = OUTSIDE_TRACE_LENGTH = 20.0
     NPHI, NTHETA, VC_DIGITS = 8, 8, 3
     TRACE_PROGRESS = False
 
@@ -69,35 +75,35 @@ biot_savart = BiotSavart(coils)
 coil_field = jax.jit(lambda points: jax.vmap(biot_savart.B)(
     points.reshape(-1, 3)).reshape(points.shape))
 
-print("Building the self-consistent coil + plasma-current exterior field...")
-# A prescribed-interface virtual-casing calculation separates the converged
-# total field into plasma-current and coil parts; no free boundary is solved.
-surface_data = vc.surface_field_data_from_state(
-    inp, equilibrium.solution, runtime=equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
-exterior = VmecExtender.from_surface_data(
-    surface_data, external_field=coil_field, digits=VC_DIGITS)
-equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
-axis, edge = equilibrium.field.get_points_cart()
-# VMEX regularizes the physical field at the coordinate-degenerate axis. Sample
-# the whole minor radius, then resolve the shorter exterior interval densely.
-edge_radius = jnp.linalg.norm(edge - axis)
-n_outside = max(1, N_FIELDLINES // 4); n_inside = N_FIELDLINES - n_outside
-seed_fractions = jnp.concatenate((jnp.linspace(0.0, 1.0, n_inside),
-    1.0 + jnp.linspace(1.0 / n_outside, 1.0, n_outside) * OUTSIDE_OFFSET / edge_radius))
-xyz_seeds = axis + seed_fractions[:, None] * (edge - axis)
-inside = seed_fractions <= 1.0
-inside_xyz, outside_xyz = xyz_seeds[inside], xyz_seeds[~inside]
-equilibrium.set_points_xyz(inside_xyz); flux_seeds = equilibrium.field.get_points_flux()
+with vj.heartbeat("Building the self-consistent coil + plasma-current exterior field"):
+    # A prescribed-interface virtual-casing calculation separates the converged
+    # total field into plasma-current and coil parts; no free boundary is solved.
+    surface_data = vc.surface_field_data_from_state(
+        inp, equilibrium.solution, runtime=equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
+    exterior = VmecExtender.from_surface_data(
+        surface_data, external_field=coil_field, digits=VC_DIGITS)
+    equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    axis, edge = equilibrium.field.get_points_cart()
+    # VMEX regularizes the physical field at the coordinate-degenerate axis. Sample
+    # the whole minor radius, then resolve the shorter exterior interval densely.
+    edge_radius = jnp.linalg.norm(edge - axis)
+    n_outside = max(1, N_FIELDLINES // 4); n_inside = N_FIELDLINES - n_outside
+    seed_fractions = jnp.concatenate((jnp.linspace(0.0, 1.0, n_inside),
+        1.0 + jnp.linspace(1.0 / n_outside, 1.0, n_outside) * OUTSIDE_OFFSET / edge_radius))
+    xyz_seeds = axis + seed_fractions[:, None] * (edge - axis)
+    inside = seed_fractions <= 1.0
+    inside_xyz, outside_xyz = xyz_seeds[inside], xyz_seeds[~inside]
+    equilibrium.set_points_xyz(inside_xyz); flux_seeds = equilibrium.field.get_points_flux()
 
-precision = exterior.plasma_field.plan_surface_precision(digits=VC_DIGITS)
-interface = vc.PlasmaVacuumInterface.from_surface_data(
-    surface_data, digits=VC_DIGITS, precision=precision,
-    virtual_casing_field=exterior.plasma_field)
-B_surface = interface.total_B_out(coil_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
-Bn_over_B = jnp.abs(interface.bnormal_residual(coil_field)) / Bmag_surface
-alignment = (jnp.sum(interface.weights * jnp.sum(B_surface * surface_data.B_total, axis=0))
-             / jnp.sqrt(jnp.sum(interface.weights * Bmag_surface**2)
-                        * jnp.sum(interface.weights * jnp.sum(surface_data.B_total**2, axis=0))))
+    precision = exterior.plasma_field.plan_surface_precision(digits=VC_DIGITS)
+    interface = vc.PlasmaVacuumInterface.from_surface_data(
+        surface_data, digits=VC_DIGITS, precision=precision,
+        virtual_casing_field=exterior.plasma_field)
+    B_surface = interface.total_B_out(coil_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
+    Bn_over_B = jnp.abs(interface.bnormal_residual(coil_field)) / Bmag_surface
+    alignment = (jnp.sum(interface.weights * jnp.sum(B_surface * surface_data.B_total, axis=0))
+                 / jnp.sqrt(jnp.sum(interface.weights * Bmag_surface**2)
+                            * jnp.sum(interface.weights * jnp.sum(surface_data.B_total**2, axis=0))))
 print(f"True boundary B.n/B: mean = {100 * float(jnp.sum(interface.weights * Bn_over_B)):.3f}%, "
       f"max = {100 * float(jnp.max(Bn_over_B)):.3f}%")
 print(f"Boundary field alignment = {float(alignment):.6f}")
@@ -127,7 +133,7 @@ escape = LevelsetStoppingCriterion(classifier, maximum_distance=MAX_SURFACE_DIST
 coil_trace = trace_field_lines(biot_savart, xyz_seeds, length=TRACE_LENGTH,
     samples=N_SAMPLES, tolerance=TRACE_TOLERANCE, stopping_criteria=escape,
     progress=TRACE_PROGRESS, label="ESSOS coil-only field from the same seed line")
-vmex_outside = trace_field_lines(exterior, outside_xyz, length=TRACE_LENGTH,
+vmex_outside = trace_field_lines(exterior, outside_xyz, length=OUTSIDE_TRACE_LENGTH,
     samples=N_SAMPLES, tolerance=TRACE_TOLERANCE, stopping_criteria=escape,
     progress=TRACE_PROGRESS, label="VMEX coil + virtual-casing field outside")
 

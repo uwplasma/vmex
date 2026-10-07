@@ -41,8 +41,11 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed
 SEED_PERTURBATION = 0.05
 
 # Pressure the profiles are calibrated to, and the weight of the beta residual,
-# which is relative because the target is small:
-TARGET_BETA = 0.025
+# which is relative because the target is small. As in
+# QI_optimization_bootstrap_dkx.py, the bootstrap current of beta = 2.5% leaves
+# the first stage's seed solve stalled near fsq = 3e-8 on every grid tried,
+# above the 100 x ftol seed check; 1.5% converges:
+TARGET_BETA = 0.015
 BETA_WEIGHT = 1.0 / TARGET_BETA**2
 
 # Flux surfaces the QI and bootstrap residuals are evaluated on:
@@ -50,9 +53,12 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
-MAX_MODES = [2, 3]
-MAX_NFEV = [15, 30]
-N_CURRENT_SPLINE = [6, 8]
+MAX_MODES = [2]
+MAX_NFEV = [8]
+N_CURRENT_SPLINE = [6]
+# Research ladder (over the 5-minute laptop default):
+#   MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE = [2, 3], [15, 30], [6, 8]
+#   FINAL_NS = 101
 
 # Boozer resolution the QI residual is evaluated on:
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
@@ -87,7 +93,7 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 51
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 

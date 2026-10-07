@@ -54,9 +54,11 @@ KINETIC_RESOLUTION = None
 
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
-MAX_MODES = [1, 2]
-MAX_NFEV = [6, 6]
-N_CURRENT_SPLINE = [6, 8]
+MAX_MODES = [2]
+MAX_NFEV = [5]
+N_CURRENT_SPLINE = [6]
+# Research ladder (over the 5-minute laptop default):
+#   MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE = [1, 2], [6, 6], [6, 8]
 
 # Boozer resolution the QI residual is evaluated on:
 QI_OPTIONS = dict(mboz=10, nboz=10, nphi=41, nalpha=12, n_bounce=13)

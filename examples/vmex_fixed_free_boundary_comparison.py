@@ -138,62 +138,63 @@ fixed_input = replace(free_input, lfreeb=False, mgrid_file="NONE", rbc=rbc, zbs=
 print(f"Solving the restricted fixed boundary at s_free={S_FIXED:.2f}...")
 fixed_equilibrium = opt.solve_equilibrium(fixed_input, verbose=True)
 
-print("Refitting the four independent ESSOS coil currents with virtual casing...")
-surface_data = vc.surface_field_data_from_state(fixed_input, fixed_equilibrium.solution,
-    runtime=fixed_equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
-precision = vc.plan_vc_precision(surface_data, digits=VC_DIGITS)
-interface = vc.PlasmaVacuumInterface.from_surface_data(
-    surface_data, digits=VC_DIGITS, precision=precision)
-B_scale = jnp.sqrt(jnp.sum(interface.weights * jnp.sum(surface_data.B_total**2, axis=0)))
-all_dofs0 = jnp.asarray(coils0.dofs); n_current = coils0.dofs_currents.size
-current_dofs0 = all_dofs0[-n_current:]
+with vj.heartbeat("Refitting the four independent ESSOS coil currents with virtual casing"):
+    surface_data = vc.surface_field_data_from_state(fixed_input, fixed_equilibrium.solution,
+        runtime=fixed_equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
+    precision = vc.plan_vc_precision(surface_data, digits=VC_DIGITS)
+    interface = vc.PlasmaVacuumInterface.from_surface_data(
+        surface_data, digits=VC_DIGITS, precision=precision)
+    B_scale = jnp.sqrt(jnp.sum(interface.weights * jnp.sum(surface_data.B_total**2, axis=0)))
+    all_dofs0 = jnp.asarray(coils0.dofs); n_current = coils0.dofs_currents.size
+    current_dofs0 = all_dofs0[-n_current:]
 
-def coils_from_u(u):
-    dofs = all_dofs0.at[-n_current:].set(current_dofs0 + CURRENT_SCALE * jnp.asarray(u))
-    return coils0.with_dofs(dofs)
+    def coils_from_u(u):
+        dofs = all_dofs0.at[-n_current:].set(current_dofs0 + CURRENT_SCALE * jnp.asarray(u))
+        return coils0.with_dofs(dofs)
 
-def coil_objective(u):
-    external = coil_field(coils_from_u(u))
-    normal = jnp.sqrt(interface.weights) * interface.bnormal_residual(external) / B_scale
-    pressure_jump = (jnp.sqrt(interface.weights) * interface.pressure_balance_residual(external)
-                     / B_scale**2)
-    return (0.5 * NORMAL_WEIGHT * jnp.vdot(normal, normal)
-            + 0.5 * PRESSURE_WEIGHT * jnp.vdot(pressure_jump, pressure_jump)
-            + 0.5 * CURRENT_REGULARIZATION * jnp.vdot(u, u))
+    def coil_objective(u):
+        external = coil_field(coils_from_u(u))
+        normal = jnp.sqrt(interface.weights) * interface.bnormal_residual(external) / B_scale
+        pressure_jump = (jnp.sqrt(interface.weights) * interface.pressure_balance_residual(external)
+                         / B_scale**2)
+        return (0.5 * NORMAL_WEIGHT * jnp.vdot(normal, normal)
+                + 0.5 * PRESSURE_WEIGHT * jnp.vdot(pressure_jump, pressure_jump)
+                + 0.5 * CURRENT_REGULARIZATION * jnp.vdot(u, u))
 
-coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective))
-u0 = np.zeros(n_current); initial_coil_cost = float(coil_objective(u0))
-coil_result = minimize(coil_value_and_grad, u0, jac=True, method="L-BFGS-B",
-    bounds=[(-CURRENT_BOUND, CURRENT_BOUND)] * n_current,
-    options={"maxiter": COIL_MAXITER, "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
-coils = coils_from_u(coil_result.x); external_field = jax.jit(coil_field(coils))
-B_surface = interface.total_B_out(external_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
-Bn_over_B = interface.bnormal_residual(external_field) / Bmag_surface
+    coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective))
+    u0 = np.zeros(n_current); initial_coil_cost = float(coil_objective(u0))
+    coil_result = minimize(coil_value_and_grad, u0, jac=True, method="L-BFGS-B",
+        bounds=[(-CURRENT_BOUND, CURRENT_BOUND)] * n_current,
+        options={"maxiter": COIL_MAXITER, "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
+    coils = coils_from_u(coil_result.x); external_field = jax.jit(coil_field(coils))
+    B_surface = interface.total_B_out(external_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
+    Bn_over_B = interface.bnormal_residual(external_field) / Bmag_surface
 print(f"Coil-current cost {initial_coil_cost:.3e} -> {float(coil_result.fun):.3e}; "
       f"B.n/B RMS={100 * float(jnp.sqrt(jnp.sum(interface.weights * Bn_over_B**2))):.3f}%, "
       f"max={100 * float(jnp.max(jnp.abs(Bn_over_B))):.3f}%")
 
 # The parent solution is the total field in the outer plasma-filled region. The
 # restricted solution is its fixed interior plus virtual casing and refitted coils.
-free_runtime = prepare_runtime(free_input, resolution_from_input(free_input, ns=NS))
-free_field = VmecInteriorField.from_state(free_input, free_result.state, runtime=free_runtime)
-sample_s = jnp.linspace(0.0, 1.0, 21)
-sample_theta = jnp.linspace(0.0, 2 * jnp.pi, 13)[:-1]
-sample_phi = jnp.array([0.0, jnp.pi / (2 * free_input.nfp)])
-flux_points = jnp.array([[s, theta, phi] for s in sample_s
-                         for phi in sample_phi for theta in sample_theta])
-free_field.set_points_flux(flux_points); xyz = free_field.get_points_cart(); B_free = free_field.B()
-points_per_surface = len(sample_theta) * len(sample_phi)
-inner_s = sample_s[sample_s <= S_FIXED]
-fixed_flux_points = jnp.array([[s / S_FIXED, theta, phi] for s in inner_s
-                               for phi in sample_phi for theta in sample_theta])
-fixed_equilibrium.set_points_flux(fixed_flux_points)
-B_fixed_inside = fixed_equilibrium.B()
-fixed_exterior = fixed_equilibrium.exterior_field(external_field=external_field,
-    nphi=NPHI, ntheta=NTHETA, digits=VC_DIGITS)
-# Eager queries switch each point the direct quadrature cannot resolve to the
-# target-graded near-surface rule (near_surface="auto", the default).
-outer_xyz = xyz[len(inner_s) * points_per_surface:]
+with vj.heartbeat("Sampling the parent field and building the restricted exterior"):
+    free_runtime = prepare_runtime(free_input, resolution_from_input(free_input, ns=NS))
+    free_field = VmecInteriorField.from_state(free_input, free_result.state, runtime=free_runtime)
+    sample_s = jnp.linspace(0.0, 1.0, 21)
+    sample_theta = jnp.linspace(0.0, 2 * jnp.pi, 13)[:-1]
+    sample_phi = jnp.array([0.0, jnp.pi / (2 * free_input.nfp)])
+    flux_points = jnp.array([[s, theta, phi] for s in sample_s
+                             for phi in sample_phi for theta in sample_theta])
+    free_field.set_points_flux(flux_points); xyz = free_field.get_points_cart(); B_free = free_field.B()
+    points_per_surface = len(sample_theta) * len(sample_phi)
+    inner_s = sample_s[sample_s <= S_FIXED]
+    fixed_flux_points = jnp.array([[s / S_FIXED, theta, phi] for s in inner_s
+                                   for phi in sample_phi for theta in sample_theta])
+    fixed_equilibrium.set_points_flux(fixed_flux_points)
+    B_fixed_inside = fixed_equilibrium.B()
+    fixed_exterior = fixed_equilibrium.exterior_field(external_field=external_field,
+        nphi=NPHI, ntheta=NTHETA, digits=VC_DIGITS)
+    # Eager queries switch each point the direct quadrature cannot resolve to the
+    # target-graded near-surface rule (near_surface="auto", the default).
+    outer_xyz = xyz[len(inner_s) * points_per_surface:]
 print("Evaluating the virtual-casing field through the outer region...")
 B_fixed_exterior = fixed_exterior.B(outer_xyz)
 B_comparison = jnp.concatenate((B_fixed_inside, B_fixed_exterior))

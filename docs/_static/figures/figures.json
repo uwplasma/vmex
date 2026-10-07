@@ -258,7 +258,7 @@
       "sha256": "ed6e1b55a4d5f0244e5fca83b9f917c137ec990ed23b132e70ba2a4c8658d5d2",
       "bytes": 113576,
       "generator": "examples/vmex_fieldline_tracing_finite_beta.py",
-      "command": "python examples/vmex_fieldline_tracing_finite_beta.py && cp readme_extender_exterior_islands.webp docs/_static/figures/",
+      "command": "python examples/vmex_fieldline_tracing_finite_beta.py (with its research GRADED_NODES and OUTSIDE_TRACE_LENGTH) && cp readme_extender_exterior_islands.webp docs/_static/figures/",
       "inputs": [
         "examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap",
         "examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json"
