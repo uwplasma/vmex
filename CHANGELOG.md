@@ -14,6 +14,17 @@ revision it was measured at, and the pages that cite it.
   fixes `E_r`. The `neoclassical` extra now installs `dkx>=2.8.0`; an older
   DKX runs without the profiles and says so.
 
+## 0.11.9 - 2026-10-07
+
+- On a GPU, every fused run of kernels is captured into a CUDA graph
+  (`--xla_gpu_graph_min_graph_size=1` unless `XLA_FLAGS` is set): 8-11 %
+  faster per solver iteration on an RTX A4000, results unchanged (#563).
+- `vmex --neoclassical`: DKX neoclassical transport (#548).
+- Optimization examples: dimensionless Mercier and resistive hinges for the
+  bootstrap examples, a DESC-style ballooning hinge with a COBRAVMEC 3-D
+  gate, and larger mode-2 budgets for the scalar and SciPy lanes
+  (#555, #556, #557, #560).
+
 ## 0.11.8 - 2026-10-06
 
 - **`vmex --trace` converges without a step to choose.** The default
