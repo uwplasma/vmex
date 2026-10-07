@@ -61,7 +61,15 @@ IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 # cancellation of DWell and DGeod, each O(1e3) there, and its sign follows the
 # grid (the first interior surface of the 71-surface grid reads -1.3e3 while
 # its neighbours read +65 and +27), so rows and reported extrema both start at
-# STABILITY_MIN_S:
+# STABILITY_MIN_S. Reported extrema are the same dimensionless quantities.
+# At the other end the criterion is resolved and genuinely negative in a thin
+# layer: on the optimized boundary PHIEDGE**2 DMerc crosses zero at s = 0.977
+# and reaches -9e-4 at s = 0.986, and NS = 51, 71, 101 and 141 agree on the
+# crossing to 0.003, so it is not a finite-difference artifact. There p' -> 0
+# and the well term (Mercier's D_W) falls faster than the current terms
+# (Greene, Comments Plasma Phys. Control. Fusion 17 (1997) 389). The stage grid
+# (NS = 31) ends at s = 0.967 and does not see the layer; adding the edge
+# extrapolation as a row (weights 30 and 100) did not remove it either:
 STABILITY_WEIGHT = 30.0
 STABILITY_MARGIN = 2.0e-3
 STABILITY_MIN_S = 0.1
@@ -171,13 +179,13 @@ def resistive_rows(equilibrium_state, solver_context):
 
 
 def minimum_dmerc(equilibrium_state, solver_context):
-    """Minimum of the Mercier criterion over the stability window."""
-    return stability_window(opt.d_merc_state(equilibrium_state, solver_context)).min()
+    """Minimum of PHIEDGE**2 DMerc over the stability window."""
+    return stability_window(PHIEDGE**2 * opt.d_merc_state(equilibrium_state, solver_context)).min()
 
 
 def maximum_dr(equilibrium_state, solver_context):
-    """Maximum of the resistive-interchange criterion over the stability window."""
-    return stability_window(opt.glasser_d_r_state(equilibrium_state, solver_context)).max()
+    """Maximum of PHIEDGE**2 D_R over the stability window."""
+    return stability_window(PHIEDGE**2 * opt.glasser_d_r_state(equilibrium_state, solver_context)).max()
 
 
 PHIEDGE = float(inp.phiedge)
