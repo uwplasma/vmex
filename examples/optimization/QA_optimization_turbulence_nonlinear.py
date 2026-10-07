@@ -25,8 +25,10 @@ receives a value and a gradient from one reverse sweep through the
 checkpointed window and one reverse equilibrium adjoint. Needs
 ``pip install 'vmex[turbulence]'``.
 
-Measured on a shared 36-core Xeon host (CPU only, 12 cores, load ~60 from
-other jobs, JAX 0.10.2, GKX 2.4.0), default settings: 70 min end to end,
+The five-minute default saturates the seed and takes one short L-BFGS-B step;
+it shows the pipeline, not a transport reduction. Measured with the research
+settings on a shared 36-core Xeon host (CPU only, 12 cores, load ~60 from
+other jobs, JAX 0.10.2, GKX 2.4.0): 70 min end to end,
 5.5 GB peak memory. The cold saturation of the seed took 35,696 steps
 (1,083 s); the warm restarts after each stage 2,480 and 6,296 steps (99 s,
 136 s). One value and gradient took 69 s in stage 1 (22 evaluations, 1,527 s)
@@ -68,7 +70,7 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # L-BFGS-B iterations each stage may spend:
 MAX_MODES = [1]
-MAXITER = [2]
+MAXITER = [1]
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -100,6 +102,7 @@ WINDOW_STEPS = 256
 # below (70 min on a shared host) are:
 #   MAX_MODES, MAXITER = [1, 2], [8, 8]
 #   SATURATION_REL_SEM, WINDOW_STEPS = 0.05, 512
+#   MAX_PARAMETER_CHANGE = 5.0
 
 # Weight of the heat-flux term, relative to its seed value (1 makes the
 # seed's term cost 0.5, against 15 for the seed's aspect-ratio error):
@@ -107,7 +110,7 @@ FLUX_WEIGHT = 10.0
 
 # Step control, as in QA_optimization_scalar.py:
 PARAMETER_STEP = 0.02
-MAX_PARAMETER_CHANGE = 5.0
+MAX_PARAMETER_CHANGE = 1.0         # one short step stays near the seed
 ESS_ALPHA = 1.2
 
 # Equilibrium resolution: mode numbers max_mode + 2, never below MINIMUM_MPOL:
