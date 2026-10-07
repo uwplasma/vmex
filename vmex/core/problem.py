@@ -293,10 +293,10 @@ class FunctionProblem:
     evaluation_progress:
         Print an elapsed-time heartbeat around long evaluations.  It stays
         silent until a call outlives the first interval, so fast calls
-        print nothing.  It wraps the standalone :meth:`residual`,
-        :meth:`residual_jac`, :meth:`jax_residual` and
-        :meth:`jax_residual_jac` calls only, which is where a production deck
-        spends minutes; the combined and scalar lanes are unaffected.
+        print nothing.  It wraps :meth:`residual`, :meth:`residual_jac`,
+        :meth:`jax_residual`, :meth:`jax_residual_jac`, :meth:`fun` and
+        :meth:`value_and_grad`, which is where a production deck spends
+        minutes.
     report_interval:
         Seconds between heartbeat lines.  Must be positive.
     """
@@ -392,7 +392,8 @@ class FunctionProblem:
                 value, gradient = self._vg_cache[1]
                 return value, gradient.copy()
             if self._value_and_grad is not None:
-                value, gradient = self._value_and_grad(xh)
+                value, gradient = self._timed(
+                    "value and gradient", lambda: self._value_and_grad(xh))
             elif self._fun is not None and self._grad is not None:
                 value, gradient = self._fun(xh), self._grad(xh)
             elif self._residual_and_jac is not None:
@@ -414,7 +415,7 @@ class FunctionProblem:
     def fun(self, x: Array) -> float:
         """Return the scalar objective value."""
         if self._fun is not None:
-            return float(np.asarray(self._fun(self._x(x))))
+            return float(np.asarray(self._timed("value", lambda: self._fun(self._x(x)))))
         if self._value_and_grad is not None or self._grad is not None:
             return self.value_and_grad(x)[0]
         residual = self.residual(x)
@@ -782,7 +783,12 @@ class FunctionProblem:
         xh = self.x0.copy() if x is None else self._x(x).copy()
 
         def compile_callables() -> Evaluation:
-            value, gradient = self.value_and_grad(xh)
+            # This heartbeat replaces the per-evaluation one, not doubles it.
+            quiet, self.evaluation_progress = self.evaluation_progress, False
+            try:
+                value, gradient = self.value_and_grad(xh)
+            finally:
+                self.evaluation_progress = quiet
             return Evaluation(x=xh, value=value, gradient=gradient)
 
         return _run_with_progress(
