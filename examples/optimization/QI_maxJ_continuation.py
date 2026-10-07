@@ -182,8 +182,9 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
         qi_options=action_options, qi_weight=qi_weight,
         maxj_weight=maxj_weight,
         maxj_options={**action_options, "target": maxj_target})
-    maxj_diagnostics = qi_maxj.compute_state(
-        equilibrium.solution, equilibrium.solver_context)["maximum_j"]
+    with vj.heartbeat("Checking the trapped wells (first call compiles the bounce action)"):
+        maxj_diagnostics = qi_maxj.compute_state(
+            equilibrium.solution, equilibrium.solver_context)["maximum_j"]
     if not bool(jnp.all(maxj_diagnostics["valid_pitch_pair"])):
         raise RuntimeError(
             "the equilibrium no longer has usable trapped wells on every sampled "

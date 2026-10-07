@@ -88,13 +88,15 @@ autodiff = jnp.vdot(gradient, direction)
 # 1.6e-02 apart, and the central difference below read 0 at the smoke-test
 # settings; it now agrees with both to 1.1e-04 and 1.1e-05, the difference
 # quotient's own truncation at this step.
-schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
+with vj.heartbeat("Second adjoint (edge Schur) for the certificate"):
+    schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
 schur = jnp.vdot(schur_gradient, direction)
 disagreement = jnp.abs(autodiff - schur) / jnp.abs(schur)
 
 step = 1.0e-1
-finite_difference = (aspect_from_coils(parameters + step * direction)
-                     - aspect_from_coils(parameters - step * direction)) / (2 * step)
+with vj.heartbeat("Central difference over two re-solves"):
+    finite_difference = (aspect_from_coils(parameters + step * direction)
+                         - aspect_from_coils(parameters - step * direction)) / (2 * step)
 
 print(f"aspect = {float(aspect):.6f}")
 print(f"directional d(aspect)/d(coils): coupled GCROT = {float(autodiff):.8e}, "
