@@ -391,9 +391,9 @@ class FunctionProblem:
             if self._vg_cache is not None and self._vg_cache[0] == key:
                 value, gradient = self._vg_cache[1]
                 return value, gradient.copy()
-            if self._value_and_grad is not None:
+            if (value_and_grad := self._value_and_grad) is not None:
                 value, gradient = self._timed(
-                    "value and gradient", lambda: self._value_and_grad(xh))
+                    "value and gradient", lambda: value_and_grad(xh))
             elif self._fun is not None and self._grad is not None:
                 value, gradient = self._fun(xh), self._grad(xh)
             elif self._residual_and_jac is not None:
@@ -414,8 +414,8 @@ class FunctionProblem:
 
     def fun(self, x: Array) -> float:
         """Return the scalar objective value."""
-        if self._fun is not None:
-            return float(np.asarray(self._timed("value", lambda: self._fun(self._x(x)))))
+        if (fun := self._fun) is not None:
+            return float(np.asarray(self._timed("value", lambda: fun(self._x(x)))))
         if self._value_and_grad is not None or self._grad is not None:
             return self.value_and_grad(x)[0]
         residual = self.residual(x)
@@ -509,15 +509,15 @@ class FunctionProblem:
 
     def jax_residual(self, x: Array) -> Array:
         """Return the traceable residual vector."""
-        if self._jax_residual is None:
+        if (function := self._jax_residual) is None:
             raise AttributeError("this problem does not provide JAX residuals")
-        return self._timed("residual", lambda: self._jax_residual(x))
+        return self._timed("residual", lambda: function(x))
 
     def jax_residual_jac(self, x: Array) -> Array:
         """Return the traceable residual Jacobian."""
-        if self._jax_residual_jac is None:
+        if (function := self._jax_residual_jac) is None:
             raise AttributeError("this problem does not provide a JAX residual Jacobian")
-        return self._timed("Jacobian", lambda: self._jax_residual_jac(x))
+        return self._timed("Jacobian", lambda: function(x))
 
     def evaluate(self, x: Array, *, derivatives: bool = True) -> Evaluation:
         """Evaluate available scalar and residual quantities at ``x``."""
