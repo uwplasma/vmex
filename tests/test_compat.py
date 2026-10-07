@@ -509,7 +509,8 @@ def test_configure_jax_environment_idempotent_and_respects_user_env(monkeypatch)
 
 
 def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
-    """The large-graph linker guard is macOS/CPU-only and never overrides users."""
+    """The large-graph linker guard is macOS/CPU-only, the CUDA-graph flag is
+    always set, and neither overrides users."""
     import os
 
     monkeypatch.delenv("XLA_FLAGS", raising=False)
@@ -518,7 +519,8 @@ def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
     _compat._configure_jax_environment()
-    assert os.environ["XLA_FLAGS"] == "--xla_cpu_parallel_codegen_split_count=128"
+    assert os.environ["XLA_FLAGS"] == ("--xla_gpu_graph_min_graph_size=1 "
+                                       "--xla_cpu_parallel_codegen_split_count=128")
 
     monkeypatch.setenv("XLA_FLAGS", "--user_set_flag")
     _compat._configure_jax_environment()
@@ -534,7 +536,7 @@ def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
     monkeypatch.delenv("VMEX_FAST_COMPILE")
     monkeypatch.setenv("JAX_PLATFORMS", "cuda,cpu")
     _compat._configure_jax_environment()
-    assert "XLA_FLAGS" not in os.environ
+    assert os.environ["XLA_FLAGS"] == "--xla_gpu_graph_min_graph_size=1"
 
 
 def test_machine_fingerprint_is_stable_and_platform_scoped(monkeypatch):

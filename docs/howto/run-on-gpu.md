@@ -100,6 +100,18 @@ does pay off — the single-stage finite-beta value-and-gradient is 1.3–1.6 s 
 on the GPU against 2.15 s on that machine's CPU.
 ```
 
+## CUDA graphs
+
+A solver iteration is many small kernels, so on a GPU it is launch-bound
+(about 2 ms per iteration at `ns = 16` on an RTX A4000, rising only to 8 ms at
+`ns = 101`). Unless you set `XLA_FLAGS` yourself, VMEX passes
+`--xla_gpu_graph_min_graph_size=1`, so XLA captures every fused run of kernels
+into a CUDA graph rather than only runs of five or more: 8-11 % faster per
+iteration on an A4000 from `ns = 16` to `101`. Turning command buffers off
+(`--xla_gpu_enable_command_buffer=`) makes the same iterations about twice as
+slow. Capturing `while` loops crashed and capturing conditionals was slower,
+so VMEX leaves both out.
+
 ## CPU placement and optimization defaults
 
 - **Ensembles.** Multi-solve ensembles are CPU-threaded
