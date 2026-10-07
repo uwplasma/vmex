@@ -48,7 +48,7 @@ EPS_SURFACES = (0.25, 0.5, 0.75)
 
 # Highest boundary Fourier mode number varied, and the L-BFGS-B iterations:
 MAX_MODE = 2
-MAXITER = 6                        # research: 20 (about 7 min on a laptop)
+MAXITER = 3                        # 5-minute laptop default; research below
 
 # Weights of the three seed-normalized confinement terms:
 W_EPS = 1.0
@@ -63,7 +63,7 @@ TRAPPING_DEPTHS = (0.4, 0.8)
 
 # Gamma_c surrogate temperature and quadrature, and the bounce-ACTION plan:
 GC_TEMPERATURE = 0.15
-GC_BUDGET = dict(nalpha=7, num_transit=3, points_per_transit=64,
+GC_BUDGET = dict(nalpha=5, num_transit=3, points_per_transit=64,
                  num_pitch=24, quadrature_order=32)
 ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
               max_wells=20, quadrature_order=24)
