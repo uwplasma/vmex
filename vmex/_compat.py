@@ -639,21 +639,25 @@ def _configure_jax_environment() -> None:
             any(a in f"{_accel_req} {_accel_reqs}" for a in ("cuda", "gpu", "tpu", "rocm"))
             or (_cuda_vis not in ("", "-1"))
         )
-        if "XLA_FLAGS" not in os.environ and not _on_accel:
-            _xla_flags = []
-            # Large differentiated single-stage graphs can exhaust the small
-            # macOS worker-thread stack while LLVM links its default 32 object
-            # partitions.  Finer partitioning bounds linker recursion without
-            # changing the executable's numerical operations.
-            if platform.system() == "Darwin":
-                _xla_flags.append("--xla_cpu_parallel_codegen_split_count=128")
-            if _fast_compile not in ("0", "false", "no", "off"):
-                _xla_flags.extend((
-                    "--xla_backend_optimization_level=1",
-                    "--xla_llvm_disable_expensive_passes=true",
-                ))
-            if _xla_flags:
-                os.environ["XLA_FLAGS"] = " ".join(_xla_flags)
+        if "XLA_FLAGS" not in os.environ:
+            # A solver iteration is many small kernels, so on a GPU it is
+            # launch-bound: let XLA capture every fused run into a CUDA graph,
+            # not only runs of five or more kernels (8-11 % per iteration on
+            # an RTX A4000, ns 16-101).  The CPU backend ignores GPU flags.
+            _xla_flags = ["--xla_gpu_graph_min_graph_size=1"]
+            if not _on_accel:
+                # Large differentiated single-stage graphs can exhaust the small
+                # macOS worker-thread stack while LLVM links its default 32 object
+                # partitions.  Finer partitioning bounds linker recursion without
+                # changing the executable's numerical operations.
+                if platform.system() == "Darwin":
+                    _xla_flags.append("--xla_cpu_parallel_codegen_split_count=128")
+                if _fast_compile not in ("0", "false", "no", "off"):
+                    _xla_flags.extend((
+                        "--xla_backend_optimization_level=1",
+                        "--xla_llvm_disable_expensive_passes=true",
+                    ))
+            os.environ["XLA_FLAGS"] = " ".join(_xla_flags)
 
         import jax
 
