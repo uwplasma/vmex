@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 import inspect
 from pathlib import Path
+import subprocess
 import sys
 from threading import Event, Thread
 import time
@@ -19,6 +20,16 @@ from .problem import FunctionProblem, _run_with_progress
 _DEFAULT_STREAM = object()
 
 
+# Ticks from a child process, so they keep coming while a compiled call holds
+# the GIL (a long XLA lowering does); the child exits when its stdin closes.
+_TICKER = """import sys, threading, time
+interval, started, done = float(sys.argv[1]), time.perf_counter(), threading.Event()
+threading.Thread(target=lambda: (sys.stdin.read(), done.set()), daemon=True).start()
+while not done.wait(interval):
+    print(f"  {time.perf_counter() - started:.1f} s elapsed.", flush=True)
+"""
+
+
 @contextmanager
 def heartbeat(action: str, *, report_interval: float = 10.0,
               stream: TextIO | None = None) -> Iterator[None]:
@@ -29,11 +40,27 @@ def heartbeat(action: str, *, report_interval: float = 10.0,
 
         with vmex.heartbeat("Solving the mirror"):
             result = solve_mirror(inp)
+
+    When ``stream`` is a real file the lines come from a child process, so they
+    keep coming while a compiled call holds the interpreter lock; any other
+    stream is written by a thread.
     """
     if report_interval <= 0.0:
         raise ValueError("report_interval must be positive")
     stream = sys.stdout if stream is None else stream
     print(f"{action}...", file=stream, flush=True)
+    try:
+        descriptor = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        descriptor = None
+    if descriptor is not None:
+        ticker = subprocess.Popen([sys.executable, "-c", _TICKER, str(report_interval)],
+                                  stdin=subprocess.PIPE, stdout=descriptor)
+        try:
+            yield
+        finally:
+            ticker.communicate()
+        return
     started, finished = time.perf_counter(), Event()
 
     def beat() -> None:

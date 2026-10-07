@@ -48,7 +48,7 @@ EPS_SURFACES = (0.25, 0.5, 0.75)
 
 # Highest boundary Fourier mode number varied, and the L-BFGS-B iterations:
 MAX_MODE = 2
-MAXITER = 12                       # research: 20 (about 7 min on a laptop)
+MAXITER = 6                        # research: 20 (about 7 min on a laptop)
 
 # Weights of the three seed-normalized confinement terms:
 W_EPS = 1.0

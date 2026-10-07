@@ -506,3 +506,12 @@ def test_heartbeat_prints_elapsed_time():
         time.sleep(0.07)
     assert stream.getvalue().startswith("Solving...\n")
     assert "s elapsed." in stream.getvalue()
+
+
+def test_heartbeat_ticks_while_a_call_holds_the_interpreter_lock(capfd):
+    """On a real file the ticks come from a child process, so the GIL cannot stop them."""
+    import re
+
+    with heartbeat("Busy", report_interval=0.05):
+        re.match(r"(a+)+$", "a" * 25 + "b")  # one C call that never releases the GIL
+    assert "s elapsed." in capfd.readouterr().out
