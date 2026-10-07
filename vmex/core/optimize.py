@@ -1861,7 +1861,7 @@ def make_problem(
     warm_start: str | None = "perturbation",
     use_ess: bool = True,
     ess_alpha: float = 1.2,
-    evaluation_progress: bool = False,
+    evaluation_progress: bool | None = None,
     bounds: Any = None,
     device: Any = AUTO,
     solve_kwargs: dict | None = None,
@@ -1912,6 +1912,8 @@ def make_problem(
 
     Set ``progress=True`` to report elapsed-time heartbeats while validating
     the seed equilibrium and building resolution-dependent solver data.
+    ``evaluation_progress`` (default: ``progress``) adds the same heartbeat to
+    any later residual or Jacobian call that outlives ``report_interval``.
     :meth:`VmecProblem.compile_residual_and_jacobian` or
     :meth:`VmecProblem.compile_value_and_gradient` provides the same
     visibility for the first derivative evaluation after this factory returns.
@@ -2022,7 +2024,8 @@ def make_problem(
             vary_major_radius=bool(vary_major_radius),
             x0=x0,
             current_dofs=current_dofs,
-            evaluation_progress=evaluation_progress,
+            evaluation_progress=(progress if evaluation_progress is None
+                                 else evaluation_progress),
             jac_chunk_size=jacobian_batch_size,
             jac_solver=jac_solver,
             adjoint_tol=adjoint_tol,

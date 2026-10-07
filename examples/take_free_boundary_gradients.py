@@ -68,9 +68,9 @@ def configured(**overrides):
 
 aspect_from_coils = configured()
 
-print("Solving the free boundary and its implicit adjoint...")
 parameters = jnp.zeros(base_dofs.size)
-aspect, gradient = jax.value_and_grad(aspect_from_coils)(parameters)
+with vj.heartbeat("Solving the free boundary and its implicit adjoint"):
+    aspect, gradient = jax.value_and_grad(aspect_from_coils)(parameters)
 # One normalized direction changes a curve Fourier coefficient and all base
 # currents. Independent re-solves therefore certify both ESSOS derivative paths.
 direction = jnp.zeros_like(parameters).at[2].set(0.1)

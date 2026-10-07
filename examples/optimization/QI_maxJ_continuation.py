@@ -39,14 +39,25 @@ STAGE_NS, STAGE_FTOL, STAGE_NITER = 31, 1e-11, 4000
 # Flux surfaces every residual is evaluated on:
 SURFACES = np.array([0.20, 0.35, 0.50, 0.65, 0.80, 0.90])
 
-# Maximum-J ladder, one entry per stage:
-MAX_MODES = [3, 3, 3]
-MAX_NFEV = [4, 4, 8]
-MAXIMUM_J_TARGETS = [0.0, -0.002, -0.005]
-MAXIMUM_J_WEIGHTS = [500.0, 2.0e3, 5.0e3]
-QI_INVARIANCE_WEIGHTS = [1.0e3, 5.0e3, 1.0e4]
-CONSTRUCTED_QI_WEIGHTS = [1.0e4, 1.0e4, 1.0e4]
-MAGNETIC_WELL_WEIGHTS = [100.0, 1.0e3, 1.0e3]
+# Maximum-J ladder, one entry per stage. The default is a weak stage and the
+# final one, sized for a 5-minute laptop run; the research ladder (about
+# 11 min) inserts a middle stage and spends more evaluations:
+#   MAX_MODES, MAX_NFEV = [3, 3, 3], [4, 4, 8]
+#   MAXIMUM_J_TARGETS = [0.0, -0.002, -0.005]
+#   MAXIMUM_J_WEIGHTS = [500.0, 2.0e3, 5.0e3]
+#   QI_INVARIANCE_WEIGHTS = [1.0e3, 5.0e3, 1.0e4]
+#   CONSTRUCTED_QI_WEIGHTS = [1.0e4, 1.0e4, 1.0e4]
+#   MAGNETIC_WELL_WEIGHTS = [100.0, 1.0e3, 1.0e3]
+#   ACTION_MBOZ = [8, 8, 10]
+#   ACTION_OPTIONS = [COARSE_ACTION, COARSE_ACTION, RESOLVED_ACTION]
+#   FINAL_NS = 71
+MAX_MODES = [3, 3]
+MAX_NFEV = [3, 5]
+MAXIMUM_J_TARGETS = [0.0, -0.005]
+MAXIMUM_J_WEIGHTS = [500.0, 5.0e3]
+QI_INVARIANCE_WEIGHTS = [1.0e3, 1.0e4]
+CONSTRUCTED_QI_WEIGHTS = [1.0e4, 1.0e4]
+MAGNETIC_WELL_WEIGHTS = [100.0, 1.0e3]
 MAXJ_ESS_ALPHA = 0.7
 
 # Targets and limits (the aspect ratio is held at the seed's):
@@ -64,8 +75,8 @@ COARSE_ACTION = dict(nalpha=5, points_per_period=24, num_periods=6,
                      max_wells=16, quadrature_order=16)
 RESOLVED_ACTION = dict(nalpha=9, points_per_period=32, num_periods=10,
                        max_wells=24, quadrature_order=24)
-ACTION_MBOZ = [8, 8, 10]
-ACTION_OPTIONS = [COARSE_ACTION, COARSE_ACTION, RESOLVED_ACTION]
+ACTION_MBOZ = [8, 10]
+ACTION_OPTIONS = [COARSE_ACTION, RESOLVED_ACTION]
 
 # Field strengths that trap the same particles on every sampled line:
 TRAPPING_DEPTHS = (0.35, 0.55, 0.75)
@@ -78,7 +89,7 @@ MAXJ_FORWARD_ITERATIONS = 800
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 71
+FINAL_NS = 51
 FINAL_FTOL = 1e-14
 FINAL_NITER = 8000
 

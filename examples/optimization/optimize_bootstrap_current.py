@@ -53,8 +53,9 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
 MAX_MODES = [1, 2]
-MAX_NFEV = [8, 8]
+MAX_NFEV = [6, 6]
 N_CURRENT_SPLINE = [6, 8]
+# Research budget (over the 5-minute laptop default): MAX_NFEV = [8, 8]
 
 # Boozer resolution the QI residual is evaluated on:
 QI_OPTIONS = dict(mboz=10, nboz=10, nphi=41, nalpha=12, n_bounce=13)

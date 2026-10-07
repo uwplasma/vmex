@@ -34,9 +34,11 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA_finit
 SURFACES = np.linspace(0.1, 1.0, 6)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend:
-MAX_MODES = [1, 2]
-MAX_NFEV = [8, 12]
+# residual evaluations each stage may spend. The default fits a 5-minute
+# laptop budget; the research ladder (about 7 min) adds a max_mode = 1 stage
+# first: MAX_MODES, MAX_NFEV = [1, 2], [8, 12]
+MAX_MODES = [2]
+MAX_NFEV = [12]
 
 # Ballooning field lines and surfaces. lambda is least stable at a
 # configuration-dependent zeta0 (Gaur et al. 2023, footnote 2), so zeta0 is
@@ -176,7 +178,8 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
         mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
     problem = opt.VmecProblem.from_tuples(
         inp, objective_function_terms, max_mode=max_mode, use_ess=True,
-        ess_alpha=ESS_ALPHA, restart_from=equilibrium)
+        ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+        progress=True)
     monitor.problem = problem
     step = PARAMETER_STEP * problem.scales
     result = least_squares(

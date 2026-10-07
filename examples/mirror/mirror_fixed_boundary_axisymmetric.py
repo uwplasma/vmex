@@ -17,6 +17,7 @@ from pathlib import Path
 import jax
 import numpy as np
 
+from vmex import heartbeat
 from vmex.mirror import MirrorInput, plot_mout, solve_mirror
 from vmex.mirror.analytic import AxisymmetricPolynomialMirror
 
@@ -74,7 +75,8 @@ inp = MirrorInput(
 
 ### Solve the equilibrium #####################################################
 
-solution = solve_mirror(inp)
+with heartbeat("Solving the axisymmetric mirror"):
+    solution = solve_mirror(inp)
 summary = solution.summary()
 
 ### Compare with the exact field ##############################################

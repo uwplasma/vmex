@@ -2,18 +2,51 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import inspect
 from pathlib import Path
 import sys
-from typing import Any, Callable, cast, Mapping, Sequence, TextIO
+from threading import Event, Thread
+import time
+from typing import Any, Callable, cast, Iterator, Mapping, Sequence, TextIO
 
 import numpy as np
 
-from .problem import FunctionProblem
+from .problem import FunctionProblem, _run_with_progress
 
 
 _DEFAULT_STREAM = object()
+
+
+@contextmanager
+def heartbeat(action: str, *, report_interval: float = 10.0,
+              stream: TextIO | None = None) -> Iterator[None]:
+    """Print ``action...`` and then an elapsed-time line every ``report_interval`` s.
+
+    Wrap a long call that prints nothing of its own (a first compilation, a
+    solver without per-iteration output) so a script never looks hung::
+
+        with vmex.heartbeat("Solving the mirror"):
+            result = solve_mirror(inp)
+    """
+    if report_interval <= 0.0:
+        raise ValueError("report_interval must be positive")
+    stream = sys.stdout if stream is None else stream
+    print(f"{action}...", file=stream, flush=True)
+    started, finished = time.perf_counter(), Event()
+
+    def beat() -> None:
+        while not finished.wait(report_interval):
+            print(f"  {time.perf_counter() - started:.1f} s elapsed.", file=stream, flush=True)
+
+    reporter = Thread(target=beat, name="vmex-heartbeat", daemon=True)
+    reporter.start()
+    try:
+        yield
+    finally:
+        finished.set()
+        reporter.join()
 
 
 class EquilibriumReporter:
@@ -40,6 +73,8 @@ class EquilibriumReporter:
     stream:
         Where the report line is written.  The default is ``sys.stdout``;
         pass ``None`` to compute and return the values without printing.
+        An evaluation that outlives 10 s (first-call compilation) also
+        prints elapsed-time heartbeats there, so it never looks hung.
     separator:
         Text placed between the ``label = value`` fields of the printed
         line.
@@ -99,8 +134,13 @@ class EquilibriumReporter:
         Mapping from each configured label to its float value, in the order
         the quantities were given.
         """
-        values = {name: self._value(function, equilibrium)
-                  for name, function, _format in self.quantities}
+        values = _run_with_progress(
+            lambda: {name: self._value(function, equilibrium)
+                     for name, function, _format in self.quantities},
+            action=f"Evaluating [{label}] diagnostics",
+            complete=f"[{label}] diagnostics ready",
+            progress=self.stream is not None, report_interval=10.0,
+            stream=self.stream, announce=False)
         if self.stream is not None:
             fields = [f"{name} = {format(values[name], format_spec)}"
                       for name, _function, format_spec in self.quantities]

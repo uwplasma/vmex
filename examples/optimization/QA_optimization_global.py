@@ -36,8 +36,9 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 MAX_MODE = 2
 
 # Global phase: hops, and the L-BFGS-B iterations each hop may spend:
-N_BASINS = 3
+N_BASINS = 2
 LOCAL_MAXITER = 6
+# Research budget (over the 5-minute laptop default): N_BASINS = 3
 
 # Basin-hopping acceptance temperature, perturbation size, and the random
 # seed that makes the walk reproducible:
@@ -129,7 +130,9 @@ def x_from_y(y):
 
 
 def value_and_gradient(y):
+    """Value and gradient in y; prints one line per call so a hop never looks hung."""
     value, gradient = problem.value_and_grad(x_from_y(y))
+    print(f"  cost = {value:.6e}", flush=True)
     return value, scales * gradient
 
 

@@ -43,9 +43,11 @@ SURFACES = np.array([0.6, 0.7, 0.8, 0.9])
 # Vacuum QA ladder, then the maximum-J ladder: highest boundary mode number
 # varied in each stage, and the residual evaluations each stage may spend:
 QA_MAX_MODES = [1, 2]
-QA_MAX_NFEV = [10, 15]
+QA_MAX_NFEV = [6, 8]
 MAXJ_MAX_MODES = [2]
-MAXJ_MAX_NFEV = [10]
+MAXJ_MAX_NFEV = [5]
+# Research budget (about 9 min on a laptop, over the 5-minute default):
+#   QA_MAX_NFEV, MAXJ_MAX_NFEV, FINAL_NS = [10, 15], [10], 71
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -89,7 +91,7 @@ STAGE_MAX_ITERATIONS = 3000       # forward solve cap inside an optimizer trial
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 71
+FINAL_NS = 51
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 

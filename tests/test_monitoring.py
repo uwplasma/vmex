@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import io
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from vmex.core.monitoring import EquilibriumReporter, OptimizationMonitor
+from vmex.core.monitoring import EquilibriumReporter, OptimizationMonitor, heartbeat
 from vmex.core.problem import FunctionProblem
 
 
@@ -496,3 +497,12 @@ def test_trace_prints_one_line_per_evaluation():
         silent.cache_evaluation(np.array([float(index)]), cost, np.array([cost]))
     assert "trial" not in quiet.getvalue()
 
+
+
+def test_heartbeat_prints_elapsed_time():
+    """A long silent block prints its action and elapsed-time lines."""
+    stream = io.StringIO()
+    with heartbeat("Solving", report_interval=0.02, stream=stream):
+        time.sleep(0.07)
+    assert stream.getvalue().startswith("Solving...\n")
+    assert "s elapsed." in stream.getvalue()

@@ -32,8 +32,10 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [2, 4]
-MAX_NFEV = [20, 45]
+MAX_MODES = [2, 3]
+MAX_NFEV = [8, 12]
+# Research budget (over the 5-minute laptop default):
+#   MAX_MODES, MAX_NFEV = [2, 4], [20, 45], FINAL_NS = 101
 
 # Targets:
 TARGET_BETA = 0.01
@@ -70,7 +72,7 @@ MINIMUM_MPOL = 5
 PRES_SCALE = 5.0e2
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 101
+FINAL_NS = 51
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 

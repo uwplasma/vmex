@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from vmex import heartbeat
 from vmex.mirror import (
     MirrorBoundary,
     MirrorConfig,
@@ -167,16 +168,17 @@ for case in CASES:
             )
             if case == "straight_field_line":
                 axial_flux_derivative = initialized.axial_flux_derivative
-        spline_result = solve_fixed_boundary(
-            coefficient_state,
-            final_boundary,
-            discretization,
-            config,
-            axial_flux_derivative=axial_flux_derivative,
-            solve_lambda=True,
-            gradient_tolerance=FTOL,
-            require_convergence=True,
-        )
+        with heartbeat(f"Solving {case} at shape stage {stage:g}"):
+            spline_result = solve_fixed_boundary(
+                coefficient_state,
+                final_boundary,
+                discretization,
+                config,
+                axial_flux_derivative=axial_flux_derivative,
+                solve_lambda=True,
+                gradient_tolerance=FTOL,
+                require_convergence=True,
+            )
         coefficient_state = spline_result.coefficient_state
         previous_boundary = final_boundary
         result = spline_result.evaluated
@@ -200,14 +202,15 @@ for case in CASES:
             final_boundary,
             axial_flux_derivative=axial_flux_derivative,
         )
-        adjoint = spline_fixed_boundary_adjoint(
-            spline_result,
-            parameters,
-            discretization,
-            lambda _state, energy: energy.geometry.volume,
-            solve_lambda=True,
-            rtol=1.0e-9,
-        )
+        with heartbeat("Adjoint volume gradient"):
+            adjoint = spline_fixed_boundary_adjoint(
+                spline_result,
+                parameters,
+                discretization,
+                lambda _state, energy: energy.geometry.volume,
+                solve_lambda=True,
+                rtol=1.0e-9,
+            )
         direction = jnp.zeros_like(final_boundary.radius_coefficients)
         direction = direction.at[:, direction.shape[1] // 2].set(1.0e-3)
         predicted = float(jnp.vdot(adjoint.gradient.boundary_coefficients, direction))
@@ -216,20 +219,21 @@ for case in CASES:
             varied_boundary = SplineMirrorBoundary(
                 final_boundary.radius_coefficients + sign * FINITE_DIFFERENCE_STEP * direction
             )
-            varied = solve_fixed_boundary(
-                discretization.transfer_boundary(
-                    spline_result.coefficient_state,
-                    final_boundary,
+            with heartbeat(f"Finite-difference re-solve {sign:+g}"):
+                varied = solve_fixed_boundary(
+                    discretization.transfer_boundary(
+                        spline_result.coefficient_state,
+                        final_boundary,
+                        varied_boundary,
+                    ),
                     varied_boundary,
-                ),
-                varied_boundary,
-                discretization,
-                config,
-                axial_flux_derivative=axial_flux_derivative,
-                solve_lambda=True,
-                gradient_tolerance=FTOL,
-                require_convergence=True,
-            )
+                    discretization,
+                    config,
+                    axial_flux_derivative=axial_flux_derivative,
+                    solve_lambda=True,
+                    gradient_tolerance=FTOL,
+                    require_convergence=True,
+                )
             values.append(float(varied.evaluated.energy.geometry.volume))
         finite_difference = (values[1] - values[0]) / (2.0 * FINITE_DIFFERENCE_STEP)
         validation["boundary_gradient_adjoint"] = predicted
@@ -287,15 +291,16 @@ axisymmetric_fixture = AxisymmetricPolynomialMirror(
     half_length=1.0,
     mirror_strength=AXISYMMETRIC_MIRROR_STRENGTH,
 )
-axisymmetric = solve_mirror(
-    MirrorInput(
-        ns=NS,
-        elements=SPLINE_ELEMENTS,
-        phiedge=2.0 * np.pi * float(axisymmetric_fixture.poloidal_flux(AXISYMMETRIC_RADIUS, 0.0)),
-        ftol=FTOL,
-        niter=MAX_ITERATIONS,
-    ).with_boundary(lambda _theta, z: axisymmetric_fixture.boundary_radius(AXISYMMETRIC_RADIUS, z))
-)
+with heartbeat("Solving the axisymmetric comparison mirror"):
+    axisymmetric = solve_mirror(
+        MirrorInput(
+            ns=NS,
+            elements=SPLINE_ELEMENTS,
+            phiedge=2.0 * np.pi * float(axisymmetric_fixture.poloidal_flux(AXISYMMETRIC_RADIUS, 0.0)),
+            ftol=FTOL,
+            niter=MAX_ITERATIONS,
+        ).with_boundary(lambda _theta, z: axisymmetric_fixture.boundary_radius(AXISYMMETRIC_RADIUS, z))
+    )
 axisymmetric_mout = axisymmetric.write_mout(OUTPUT_DIR / "mout_axisymmetric.nc")
 plot_mout(axisymmetric_mout, OUTPUT_DIR, name="axisymmetric")
 summaries["axisymmetric"] = {"status": "supported"} | axisymmetric.summary() | {

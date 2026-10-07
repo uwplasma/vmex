@@ -293,8 +293,9 @@ class FunctionProblem:
     evaluation_progress:
         Print an elapsed-time heartbeat around long evaluations.  It stays
         silent until a call outlives the first interval, so fast calls
-        print nothing.  It wraps the standalone :meth:`residual` and
-        :meth:`residual_jac` calls only, which is where a production deck
+        print nothing.  It wraps the standalone :meth:`residual`,
+        :meth:`residual_jac`, :meth:`jax_residual` and
+        :meth:`jax_residual_jac` calls only, which is where a production deck
         spends minutes; the combined and scalar lanes are unaffected.
     report_interval:
         Seconds between heartbeat lines.  Must be positive.
@@ -509,13 +510,13 @@ class FunctionProblem:
         """Return the traceable residual vector."""
         if self._jax_residual is None:
             raise AttributeError("this problem does not provide JAX residuals")
-        return self._jax_residual(x)
+        return self._timed("residual", lambda: self._jax_residual(x))
 
     def jax_residual_jac(self, x: Array) -> Array:
         """Return the traceable residual Jacobian."""
         if self._jax_residual_jac is None:
             raise AttributeError("this problem does not provide a JAX residual Jacobian")
-        return self._jax_residual_jac(x)
+        return self._timed("Jacobian", lambda: self._jax_residual_jac(x))
 
     def evaluate(self, x: Array, *, derivatives: bool = True) -> Evaluation:
         """Evaluate available scalar and residual quantities at ``x``."""

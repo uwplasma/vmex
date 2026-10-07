@@ -79,7 +79,7 @@
       "sha256": "39a9589620d0ae0b62930bd5a435f3238360c5c523504916ff9c1bfa9d8cbcd2",
       "bytes": 163938,
       "generator": "examples/mirror/mirror_free_boundary_beta_scan.py",
-      "command": "python examples/mirror/mirror_free_boundary_beta_scan.py && cp results/mirror_free_boundary_beta_scan/mirror_free_boundary_beta_scan.webp docs/_static/figures/",
+      "command": "python examples/mirror/mirror_free_boundary_beta_scan.py (BETAS set to its research scan, 0/10/50/80 %) && cp results/mirror_free_boundary_beta_scan/mirror_free_boundary_beta_scan.webp docs/_static/figures/",
       "inputs": [],
       "record": "benchmarks/mirror_free_boundary_axisymmetric.json",
       "generated": "2026-09-23",
