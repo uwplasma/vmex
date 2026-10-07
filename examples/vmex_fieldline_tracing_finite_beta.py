@@ -50,14 +50,14 @@ TRACE_TOLERANCE, OUTSIDE_OFFSET = 1.0e-7, 0.005
 MAX_SURFACE_DISTANCE = 0.055
 NPHI, NTHETA, VC_DIGITS = 24, 24, 4
 # Each exterior step pays a near-surface quadrature, so the default traces the
-# exterior lines for OUTSIDE_TRACE_LENGTH metres (about two toroidal transits)
+# exterior lines for OUTSIDE_TRACE_LENGTH metres (about 16 toroidal transits)
 # with the direct quadrature at OUTSIDE_TOLERANCE; that fits a 5-minute laptop
 # run. The README figure uses the research settings, days on a laptop:
 #   USE_GRADED_QUADRATURE, OUTSIDE_TRACE_LENGTH = True, TRACE_LENGTH
 #   OUTSIDE_TOLERANCE = TRACE_TOLERANCE
 USE_GRADED_QUADRATURE = False
 GRADED_NODES = (64, 256)
-OUTSIDE_TRACE_LENGTH, OUTSIDE_TOLERANCE = 15.0, 1.0e-5
+OUTSIDE_TRACE_LENGTH, OUTSIDE_TOLERANCE = 100.0, 1.0e-5
 TRACE_PROGRESS = True
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:

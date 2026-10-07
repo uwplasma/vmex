@@ -182,13 +182,17 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
         qi_options=action_options, qi_weight=qi_weight,
         maxj_weight=maxj_weight,
         maxj_options={**action_options, "target": maxj_target})
-    with vj.heartbeat("Checking the trapped wells (first call compiles the bounce action)"):
-        maxj_diagnostics = qi_maxj.compute_state(
-            equilibrium.solution, equilibrium.solver_context)["maximum_j"]
-    if not bool(jnp.all(maxj_diagnostics["valid_pitch_pair"])):
-        raise RuntimeError(
-            "the equilibrium no longer has usable trapped wells on every sampled "
-            "surface; reduce BOUNDARY_STEP or the maximum-J weights")
+    # The seed's wells were just used to pick the pitches; a later stage's
+    # incoming equilibrium is checked (a lost well also makes the first
+    # objective non-finite, which the problem build refuses).
+    if stage > 0:
+        with vj.heartbeat("Checking the trapped wells"):
+            maxj_diagnostics = qi_maxj.compute_state(
+                equilibrium.solution, equilibrium.solver_context)["maximum_j"]
+        if not bool(jnp.all(maxj_diagnostics["valid_pitch_pair"])):
+            raise RuntimeError(
+                "the equilibrium no longer has usable trapped wells on every sampled "
+                "surface; reduce BOUNDARY_STEP or the maximum-J weights")
     stage_shape_terms = [
         (qi, 0.0, constructed_weight),
         (opt.aspect_ratio, ASPECT_TARGET, 1.0),

@@ -47,8 +47,8 @@ SURFACES = np.array([0.6, 0.7, 0.8, 0.9])
 # varied in each stage, and the residual evaluations each stage may spend:
 QA_MAX_MODES = [1, 2]
 QA_MAX_NFEV = [10, 15]
-MAXJ_MAX_MODES = [2]
-MAXJ_MAX_NFEV = [8]
+MAXJ_MAX_MODES = [1]              # research: [2]
+MAXJ_MAX_NFEV = [6]               # research: [10]
 
 # Start from the minimal seed (research, about 9 min on a laptop) or from the
 # bundled self-consistent finite-beta QA (default, under 5 min):
@@ -75,9 +75,9 @@ WELL_WEIGHT = 10.0
 TRAPPING_DEPTHS = (0.4, 0.8)
 ACTION_NALPHA = 7
 ACTION_POINTS = 32
-ACTION_PERIODS = 6                # research: 8
+ACTION_PERIODS = 8
 ACTION_MAX_WELLS = 20
-ACTION_QUADRATURE = 16            # research: 24
+ACTION_QUADRATURE = 24
 ACTION_MBOZ = 10
 
 # Picard loop that makes the seed current self-consistent:
@@ -98,7 +98,7 @@ STAGE_MAX_ITERATIONS = 3000       # forward solve cap inside an optimizer trial
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
-FINAL_NS = 51                     # research: 71
+FINAL_NS = 31                     # research: 71
 FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 
