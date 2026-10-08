@@ -472,6 +472,14 @@ The same two files through `vmex --plot`: the summary's `⟨|F|⟩/⟨|∇(B²/2
 7.7e-6. See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 and the [validation record](docs/explanation/validation.md).
 
+`python examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with
+[MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces, starting from the
+VMEX ns = 65 field (about 4 minutes, `pip install mrx`). Traced iota, the enclosed current and the
+pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.176, 0.166 at
+ρ = 0.1 for ns = 65, 129, 257, against 0.166 from DESC).
+
+![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
+
 ## Performance and parallel execution
 
 JAX compiles each solve once per array structure and reuses the executable for matching shapes, so
