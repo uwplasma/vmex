@@ -1404,18 +1404,18 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
 
 
 def test_vmex_mrx_comparison_example(tmp_path):
-    """The MRX comparison solves a small VMEX case and runs without MRX installed.
+    """The MRX comparison exits cleanly without MRX installed.
 
-    No CI lane installs ``mrx``, so there the script stops after the solve with
-    the install command.  Where MRX is present the smoke pass takes one Newton
-    step on a coarse mesh (several minutes, all of it compilation) and draws
-    the figure.
+    No CI lane installs ``mrx``, so there the script prints the install
+    command and stops before solving (seconds).  Where MRX is present the smoke
+    pass solves a 9/17-surface case, takes one Newton step on a coarse mesh
+    and draws the figure.
     """
     out = _run_example(EXAMPLES / "vmex_mrx_comparison.py", tmp_path, timeout=1200)
-    assert "VMEX: iota axis/edge" in out
     if "MRX is not installed" in out:
         assert "pip install mrx" in out
         return
+    assert "VMEX: iota axis/edge" in out
     assert "force residual" in out and "|B| difference" in out
     figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
     assert figure.stat().st_size > 10_000

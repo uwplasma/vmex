@@ -10,7 +10,9 @@ traced field lines. Agreement between the two is a check on both.
 The deck is the 2.5 % beta Landreman-Paul QA with a bootstrap current. Near
 the magnetic axis VMEX needs many radial surfaces at this beta: iota at
 rho = 0.1 moves 0.200 -> 0.188 -> 0.176 -> 0.166 for ns = 33, 65, 129, 257,
-where DESC gives 0.166. MRX starts from the ns = 257 field.
+where DESC gives 0.166. To keep the run short this example stops at ns = 65
+and MRX starts from that field, inheriting its near-axis iota; extend
+NS_ARRAY to 129 or 257 to see iota near the axis move toward DESC.
 
 The figure shows (a-c) VMEX flux surfaces and MRX Poincare points at three
 toroidal angles, (d) iota, (e) the enclosed toroidal current, and (f) the
@@ -18,12 +20,12 @@ pressure. MRX normalizes its field to unit energy; its amplitude is fixed by
 matching the VMEX toroidal flux, which sets every other quantity in SI units.
 
 MRX is optional: ``pip install mrx`` (Python >= 3.11). Without it the script
-solves the VMEX equilibrium, prints the install command, and exits. A full
-run takes about 13 minutes on a laptop CPU, most of it the ns = 257 solve and
-the 20 Newton steps; the solve and the MRX field are kept in OUTPUT_DIR so a
-second run only redraws the figure.
+prints the install command and exits. A full run takes about 4 minutes on a
+laptop CPU from a cold cache; the solve and the MRX field are kept in
+OUTPUT_DIR so a second run only redraws the figure.
 """
 
+import importlib.util
 import os
 import sys
 from dataclasses import replace
@@ -39,11 +41,11 @@ import vmex as vj
 INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.LandremanPaul2021_QA_beta2p5_bootstrap"
 
 # VMEX radial grids, the last of which MRX starts from:
-NS_ARRAY, FTOL_ARRAY, NITER_ARRAY = [17, 33, 65, 129, 257], [1e-13] * 5, [20000] * 5
+NS_ARRAY, FTOL_ARRAY, NITER_ARRAY = [17, 33, 65], [1e-13] * 3, [20000] * 3
 # MRX splines per (r, theta, zeta), spline degree, and Newton steps:
-MRX_RESOLUTION, MRX_DEGREE, NEWTON_STEPS = (12, 16, 16), 3, 20
+MRX_RESOLUTION, MRX_DEGREE, NEWTON_STEPS = (12, 16, 16), 3, 10
 # Field lines and field periods traced for the Poincare sections:
-POINCARE_LINES, POINCARE_PERIODS = 24, 300
+POINCARE_LINES, POINCARE_PERIODS = 20, 150
 # Reuse the wout and the relaxed MRX field found in OUTPUT_DIR:
 REUSE_OUTPUTS = True
 OUTPUT_DIR = Path("output_vmex_mrx_comparison")
@@ -58,6 +60,10 @@ if ci_smoke:
 ###############################################################################
 # End of input parameters.
 ###############################################################################
+
+if importlib.util.find_spec("mrx") is None:
+    print("MRX is not installed; pip install mrx (Python >= 3.11) to run the comparison.")
+    sys.exit(0)
 
 MU0 = 4e-7 * np.pi
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -111,9 +117,8 @@ try:
     from mrx.relaxation.initial_conditions import initial_field
     from mrx.relaxation.loop import initial_state, relax
     from mrx.relaxation.physics import beta_vol, compute_force, weak_pressure
-except ImportError:
-    print("MRX is not installed; pip install mrx (Python >= 3.11) to run the comparison.")
-    sys.exit(0)
+except ImportError as error:
+    sys.exit(f"MRX is installed but could not be imported: {error}")
 
 cfg = RelaxConfig(
     geometry=Geometry(path=str(wout_path), resolution=MRX_RESOLUTION, spline_degree=MRX_DEGREE,
@@ -238,10 +243,16 @@ ax.set_title("(f) pressure")
 ax.legend(fontsize=9)
 
 fig.suptitle(f"QA, 2.5% beta with bootstrap current: VMEX (ns={ns}) and MRX "
-             f"({MRX_RESOLUTION}, p={MRX_DEGREE}, {NEWTON_STEPS} Newton steps)")
+             f"({MRX_RESOLUTION}, p={MRX_DEGREE}, {NEWTON_STEPS} Newton steps)\n"
+             "VMEX near-axis iota converges slowly with ns: 0.188, 0.176, 0.166 at rho = 0.1 "
+             "for ns = 65, 129, 257 (DESC 0.166)", fontsize=11)
 figure_path = OUTPUT_DIR / "vmex_mrx_comparison.png"
 fig.savefig(figure_path, dpi=150)
 print(f"Wrote {figure_path}")
+if not ci_smoke:
+    # The docs copy: docs/_static/figures/readme_vmex_mrx_comparison.webp.
+    fig.savefig(OUTPUT_DIR / "readme_vmex_mrx_comparison.webp", dpi=90,
+                pil_kwargs=dict(quality=70, method=6))
 
 core = rho >= 0.3
 print(f"MRX: iota at seed r = {rho_mrx.min():.2f}/{rho_mrx.max():.2f}: "
