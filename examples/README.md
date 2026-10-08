@@ -69,6 +69,11 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
     from a VMEX equilibrium and ESSOS coils to a wall with
     `vj.essos_tracing_fields`, tabulated exterior field (ESSOS
     `InterpolatedField.around`, needs uwplasma/ESSOS#135, #159) against direct.
+  - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
+    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    assume nested surfaces, and compare Poincare sections, iota, the toroidal
+    current, and the pressure with VMEX at ns = 65. Without MRX it exits after
+    printing the install command.
   - `vmex_fixed_free_boundary_comparison.py` *(preview)* — compare a parent
     free boundary with an `s=0.5` fixed-boundary solve and its exterior field.
 - `optimization/`: compact QA/QH/QP/QI scripts using `(function, target,
