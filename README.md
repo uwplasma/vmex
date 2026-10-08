@@ -112,10 +112,13 @@ before choosing a device. `conda install --channel conda-forge vmex` installs th
 feedstock may lag PyPI, and the extras above come from pip. For development:
 
 ```console
-git clone https://github.com/uwplasma/vmex
+git clone --filter=blob:none https://github.com/uwplasma/vmex
 cd vmex
 pip install -e ".[all,dev]"
 ```
+
+`--filter=blob:none` fetches old file versions only on demand, so the clone is
+about 8.5 MB instead of 45 MB with the full history still available.
 
 The [installation guide](https://vmex.readthedocs.io/en/latest/installation.html) covers float64,
 WSL2 and dependency details.
@@ -389,7 +392,7 @@ which lanes are validated: [mirror guide](https://vmex.readthedocs.io/en/latest/
 The examples live in the repository, not in the wheel. From a clone:
 
 ```console
-git clone https://github.com/uwplasma/vmex
+git clone --filter=blob:none https://github.com/uwplasma/vmex
 cd vmex
 pip install -e ".[all]"
 vmex examples/data/input.circular_tokamak --plot
@@ -468,6 +471,14 @@ at the edge; the written file reproduces the native certificate.
 The same two files through `vmex --plot`: the summary's `⟨|F|⟩/⟨|∇(B²/2μ₀)|⟩` falls from 3.9e-4 to
 7.7e-6. See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 and the [validation record](docs/explanation/validation.md).
+
+`python examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with
+[MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces, starting from the
+VMEX ns = 65 field (about 4 minutes, `pip install mrx`). Traced iota, the enclosed current and the
+pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.176, 0.166 at
+ρ = 0.1 for ns = 65, 129, 257, against 0.166 from DESC).
+
+![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
 
 ## Performance and parallel execution
 

@@ -1434,6 +1434,11 @@ class VmecExtender(MagneticField):
     graded_nodes:
         ``(poloidal, toroidal)`` node counts of the graded rule over the full
         torus, default :data:`~vmex.core.virtual_casing.GRADED_NODES`.
+    graded_target_batch_size:
+        Optional positive integer bounding simultaneous graded target rules.
+        ``None`` keeps the serial default. Larger batches can improve throughput
+        at higher memory cost; direct-path chunk settings do not affect this
+        rule. The attribute may also be set after construction.
     """
 
     def __init__(
@@ -1441,6 +1446,7 @@ class VmecExtender(MagneticField):
         accuracy_check: AccuracyCheck = "warn",
         near_surface: NearSurface = "auto",
         graded_nodes: tuple[int, int] | None = None,
+        graded_target_batch_size: int | None = None,
     ) -> None:
         if external_field is None and plasma_field is None:
             raise ValueError("at least one external or plasma field is required")
@@ -1456,6 +1462,7 @@ class VmecExtender(MagneticField):
             return self._field(0, points)
 
         super().__init__(B_fn)
+        self.graded_target_batch_size = graded_target_batch_size
 
     # -- configuration -----------------------------------------------------
 
@@ -1491,6 +1498,21 @@ class VmecExtender(MagneticField):
         return self._graded_nodes
 
     @property
+    def graded_target_batch_size(self) -> int | None:
+        """Simultaneous graded targets; None uses the serial map."""
+        return self._graded_target_batch_size
+
+    @graded_target_batch_size.setter
+    def graded_target_batch_size(self, size: int | None) -> None:
+        """Set a static target batch and discard configuration-dependent caches."""
+        from . import virtual_casing as vc
+
+        self._graded_target_batch_size = vc._graded_target_batch_size(size)
+        self._kernels.clear()
+        self._spatial_fns.clear()
+        self._data_pullbacks.clear()
+
+    @property
     def uses_virtual_casing(self) -> bool:
         """Whether plasma-current virtual casing contributes to the field."""
         return self.plasma_field is not None
@@ -1516,6 +1538,8 @@ class VmecExtender(MagneticField):
         if nodes is not None:
             other._graded_nodes = (int(nodes[0]), int(nodes[1]))
         other.near_surface = "graded"
+        if hasattr(other, "_B_from_data_factory"):
+            other._B_from_data = other._B_from_data_factory(other)
         return other
 
     # -- evaluation ----------------------------------------------------------
@@ -1592,12 +1616,15 @@ class VmecExtender(MagneticField):
         from . import virtual_casing as vc
 
         nodes = self._graded_nodes if nodes is None else nodes
+        batch_size = self._graded_target_batch_size
         series = self._series()
         if isinstance(series["coefficients"], jax.core.Tracer) or isinstance(
                 xyz, jax.core.Tracer):
-            return vc._graded_field(series, xyz, order, nodes)[order]
-        function = self._kernel(("graded", order, nodes), lambda: jax.jit(
-            lambda s, p: vc._graded_field(s, p, order, nodes)[order]))
+            return vc._graded_field(series, xyz, order, nodes,
+                                    target_batch_size=batch_size)[order]
+        function = self._kernel(("graded", order, nodes, batch_size), lambda: jax.jit(
+            lambda s, p: vc._graded_field(s, p, order, nodes,
+                                         target_batch_size=batch_size)[order]))
         return function(series, xyz)
 
     def _graded_estimate(self, order: int, xyz: Array) -> Array:
@@ -1759,6 +1786,7 @@ class VmecExtender(MagneticField):
         accuracy_check: AccuracyCheck = "warn",
         near_surface: NearSurface = "auto",
         graded_nodes: tuple[int, int] | None = None,
+        graded_target_batch_size: int | None = None,
     ) -> "VmecExtender":
         """Construct the finite-beta path from traceable VMEX surface data.
 
@@ -1774,7 +1802,8 @@ class VmecExtender(MagneticField):
         of 64 over the whole torus -- 13 per period.
 
         ``near_surface`` and ``graded_nodes`` choose the quadrature near the
-        surface; see the class documentation.
+        surface. ``graded_target_batch_size`` controls its target scheduling;
+        see the class documentation.
         """
         from . import virtual_casing as vc
 
@@ -1798,7 +1827,8 @@ class VmecExtender(MagneticField):
         )
         plasma_field = vc.VirtualCasingExteriorField(surface_data, config)
         return cls(external_field, plasma_field, accuracy_check=accuracy_check,
-                   near_surface=near_surface, graded_nodes=graded_nodes)
+                   near_surface=near_surface, graded_nodes=graded_nodes,
+                   graded_target_batch_size=graded_target_batch_size)
 
     @classmethod
     def from_parameterized_surface_data(
@@ -1816,6 +1846,9 @@ class VmecExtender(MagneticField):
         target_chunk_size: int | str = "auto",
         dof_names: tuple[str, ...] = (),
         accuracy_check: AccuracyCheck = "warn",
+        near_surface: NearSurface = "auto",
+        graded_nodes: tuple[int, int] | None = None,
+        graded_target_batch_size: int | None = None,
     ) -> "VmecExtender":
         """Construct a virtual-casing field with VJPs in ``parameters``.
 
@@ -1866,7 +1899,7 @@ class VmecExtender(MagneticField):
             data = surface_data_fn(plasma_parameters)
             return data.gamma, data.B_total, data.normal, data.area_vector, external_dofs
 
-        def B_from_surface_arrays(arrays: tuple[Array, ...], points: Array) -> Array:
+        def B_from_surface_arrays(owner, arrays: tuple[Array, ...], points: Array) -> Array:
             from dataclasses import replace
 
             gamma, B_total, normal, area_vector, external_dofs = arrays
@@ -1879,16 +1912,25 @@ class VmecExtender(MagneticField):
                 data, external_field=live_external_field, digits=digits,
                 levels=levels, chunk_size=chunk_size,
                 target_chunk_size=target_chunk_size,
-                near_surface=field.near_surface,
-                graded_nodes=field.graded_nodes).B(points)
+                near_surface=owner.near_surface,
+                graded_nodes=owner.graded_nodes,
+                graded_target_batch_size=owner.graded_target_batch_size).B(points)
+
+        def pullback_field(owner):
+            # A copied facade owns its quadrature settings too: binding the
+            # original instance here would differentiate a different field.
+            return lambda arrays, points: B_from_surface_arrays(owner, arrays, points)
 
         field = cls.from_surface_data(
             initial_surface_data, external_field=initial_external_field,
             digits=digits, levels=levels, chunk_size=chunk_size,
-            target_chunk_size=target_chunk_size, accuracy_check=accuracy_check)
+            target_chunk_size=target_chunk_size, accuracy_check=accuracy_check,
+            near_surface=near_surface, graded_nodes=graded_nodes,
+            graded_target_batch_size=graded_target_batch_size)
         field._parameters = all_parameters
         field._parameter_data_fn = differentiable_surface_data
-        field._B_from_data = B_from_surface_arrays
+        field._B_from_data_factory = pullback_field
+        field._B_from_data = pullback_field(field)
         field.dof_names = tuple(dof_names) + tuple(external_dof_names)
         return field
 
