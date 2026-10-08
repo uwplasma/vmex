@@ -7,6 +7,10 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `vmex --trace` runs on one GPU when several are visible. Each adaptive step
+  waits on every device, so two A4000s took 2-3 times longer than one;
+  `trace_alphas(devices=jax.devices())` still splits over all of them. CPU
+  runs are unchanged.
 - `vmex --neoclassical` runs DKX neoclassical transport on a WOUT, or after a
   solve, and writes `*_neoclassical.png` and `*_neoclassical.h5`;
   `--nc-preset quick|default|full` sets the resolution, `--nc-profiles` takes
