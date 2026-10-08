@@ -150,3 +150,74 @@ def test_multigrid_carries_the_control_across_rungs() -> None:
     assert plain.position_control is None and ctl is not None
     assert ctl.target[0] == pytest.approx(r_plain + 0.01) and ctl.bz.shape == (1,) and ctl.br.shape == (0,)
     assert np.isfinite(ctl.history).all() and np.diff(ctl.history[:, 0]).min() < 0   # iteration restarts on rung 2
+
+
+### Input-deck option (LPOSITION_CONTROL) ####################################
+
+DATA = REPO / "examples" / "data"
+CONTROL_DECK = DATA / "input.DIII-D_position_control"
+CONTROL_MGRID = DATA / "mgrid_d3d_vertical_deficit.nc"
+
+
+def test_deck_parameters_round_trip_and_default_off(tmp_path) -> None:
+    from vmex.core.input import VmecInput
+
+    deck = VmecInput.from_file(CONTROL_DECK)
+    assert deck.lposition_control and deck.position_target == pytest.approx(1.7199)
+    assert (deck.position_interval, deck.position_gain, deck.position_nmax) == (20, 4.0, 0)
+    for writer, name in ((deck.to_indata, "input.rt"), (deck.to_json, "input.rt.json")):
+        out = writer(tmp_path / name)
+        again = VmecInput.from_file(out)
+        assert again.lposition_control and again.position_target == deck.position_target
+        assert again.position_interval == 20 and again.position_gain == 4.0
+    ctl = PositionControl.from_input(deck)
+    assert ctl.target == pytest.approx(1.7199) and ctl.gain == 4.0
+    assert ctl.integral_gain == pytest.approx(0.01) and ctl.derivative_gain == pytest.approx(200.0)
+    # a deck without the flag writes none of the keys and requests no control
+    plain = VmecInput.from_file(DATA / "input.DIII-D_lasym_false")
+    assert not plain.lposition_control and PositionControl.from_input(plain) is None
+    plain.to_indata(tmp_path / "input.plain")
+    assert "POSITION" not in (tmp_path / "input.plain").read_text()
+    from vmex.core.position_control import resolve_position_control
+    explicit = PositionControl(gain=1.0)
+    assert resolve_position_control(explicit, deck) is explicit      # explicit argument wins
+    assert resolve_position_control(False, deck) is None             # False forces it off
+    assert resolve_position_control(None, plain) is None
+
+
+@pytest.mark.parametrize("key, value", [("POSITION_INTERVAL", "0"), ("POSITION_GAIN", "-1.0"),
+                                        ("POSITION_NMAX", "3")])
+def test_deck_parameters_are_validated(tmp_path, key, value) -> None:
+    from vmex.core.input import VmecInput
+
+    text = CONTROL_DECK.read_text()
+    bad = tmp_path / "input.bad"
+    bad.write_text("\n".join(f"  {key} = {value}" if line.strip().startswith(key) else line
+                             for line in text.splitlines()))
+    with pytest.raises(ValueError, match="POSITION"):
+        VmecInput.from_file(bad)
+
+
+def test_deck_with_vertical_field_deficit_needs_and_gets_the_control() -> None:
+    """The 40 mT deficit defeats the plain solve; the deck's control converges and recovers it."""
+    from vmex.core.input import VmecInput
+
+    inp = VmecInput.from_file(CONTROL_DECK)
+    off = solve_free_boundary_multigrid(inp, mgrid_path=CONTROL_MGRID, position_control=False,
+                                        raise_on_max_iterations=False)
+    assert not off.converged and off.position_control is None
+    on = solve_free_boundary_multigrid(inp, mgrid_path=CONTROL_MGRID)
+    assert on.converged and on.position_control is not None
+    assert on.position_control.vertical_field == pytest.approx(0.040, abs=0.002)
+    assert abs(on.position_control.measured[0] - 1.7199) < 5e-3
+
+
+def test_cli_runs_the_control_deck(tmp_path, capsys) -> None:
+    import shutil
+    from vmex.core import cli
+
+    for src in (CONTROL_DECK, CONTROL_MGRID):
+        shutil.copy(src, tmp_path / src.name)
+    rc = cli.main([str(tmp_path / CONTROL_DECK.name)])
+    out = capsys.readouterr().out
+    assert rc == 0 and "POSITION CONTROL: B_Z^ctrl = 39." in out

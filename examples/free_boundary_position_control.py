@@ -51,6 +51,8 @@ NITER, FTOL = 8000, 1e-10
 CONTROL_GAINS = dict(interval=20)   # default PID gains, target = the nominal axis
 
 FIGURE_PATH = Path("readme_position_control.webp")
+DECK_FIGURE_PATH = Path("readme_position_control_deck.webp")
+DECK_FILE = DATA_DIR / "input.DIII-D_position_control"   # the same -40 mT case as an input deck
 MAKE_FIGURE = True
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs: the single
@@ -174,3 +176,37 @@ if MAKE_FIGURE:
     fig.tight_layout()
     fig.savefig(FIGURE_PATH, pil_kwargs={"lossless": True})
     print(f"Wrote {FIGURE_PATH}")
+
+### The same case as an input deck: `vmex examples/data/input.DIII-D_position_control` ###
+
+if MAKE_FIGURE:
+    deck = vj.VmecInput.from_file(DECK_FILE)           # LPOSITION_CONTROL = T in the deck
+    mgrid = DATA_DIR / deck.mgrid_file
+    # PositionControl with zero gains records the uncontrolled trajectory without acting
+    # (the run is bitwise identical to position_control=False):
+    still = vj.solve_free_boundary_multigrid(
+        deck, mgrid_path=mgrid, raise_on_max_iterations=False,
+        position_control=vj.PositionControl(gain=0.0, integral_gain=0.0, derivative_gain=0.0,
+                                            target=deck.position_target))
+    held = vj.solve_free_boundary_multigrid(deck, mgrid_path=mgrid)   # the deck's own control
+    hs, hh = still.position_control.history, held.position_control.history
+    print(f"deck: uncontrolled converged={still.converged}; controlled converged={held.converged}, "
+          f"B_Z^ctrl = {1e3 * held.position_control.vertical_field:.2f} mT")
+    fig, axs = plt.subplots(1, 3, figsize=(10.0, 3.2), dpi=80)
+    axs[0].plot(hs[:, 0], hs[:, -1], color="#b5503c", label="no control")
+    axs[0].plot(hh[:, 0], hh[:, -1], color="#2e6da4", label="position control")
+    axs[0].axhline(deck.position_target, color="0.6", lw=0.8, ls="--")
+    axs[0].set(xlabel="iteration", ylabel="magnetic axis R [m]", title="Axis position")
+    axs[0].legend(frameon=False)
+    axs[1].plot(hh[:, 0], 1e3 * hh[:, 2], color="#2e6da4")
+    axs[1].axhline(40.0, color="0.6", lw=0.8, ls="--")
+    axs[1].set(xlabel="iteration", ylabel="$B_Z^{ctrl}$ [mT]", title="Feedback vertical field")
+    axs[2].semilogy(hs[:, 0], hs[:, 1], color="#b5503c", label="no control")
+    axs[2].semilogy(hh[:, 0], hh[:, 1], color="#2e6da4", label="position control")
+    axs[2].set(xlabel="iteration", ylabel="force residual", title="Convergence")
+    for a in axs:
+        a.grid(alpha=0.25, lw=0.5)
+    fig.suptitle("DIII-D-like tokamak with a 40 mT vertical-field deficit (input.DIII-D_position_control)")
+    fig.tight_layout()
+    fig.savefig(DECK_FIGURE_PATH, pil_kwargs={"lossless": True})
+    print(f"Wrote {DECK_FIGURE_PATH}")

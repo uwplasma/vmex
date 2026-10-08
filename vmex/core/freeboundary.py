@@ -71,7 +71,7 @@ from .input import VmecInput
 from .mgrid import MgridField
 from .position_control import (
     ControlledField, PositionControl, PositionControlResult, initial_control,
-    gain_scale, measure_position, update_control, wrap_field,
+    gain_scale, measure_position, resolve_position_control, update_control, wrap_field,
 )
 from .preconditioner_2d import Prec2DConfig
 from .printing import (
@@ -2317,7 +2317,7 @@ def solve_free_boundary(
     prec2d: Prec2DConfig | None = None,
     jacobian_retries: int = 2,
     use_fft: bool | None = None,
-    position_control: PositionControl | None = None,
+    position_control: PositionControl | bool | None = None,
 ) -> SolveResult:
     """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
 
@@ -2335,8 +2335,8 @@ def solve_free_boundary(
     ``result.vacuum`` contains the final NESTOR potential modes and surface
     fields, without internal matrix caches.
 
-    ``position_control`` (a :class:`~vmex.core.position_control.PositionControl`,
-    default ``None`` = off) adds a feedback-controlled uniform vertical field to
+    ``position_control`` (a :class:`~vmex.core.position_control.PositionControl`;
+    ``None`` follows the deck's ``LPOSITION_CONTROL``, ``False`` forces it off) adds a feedback-controlled uniform vertical field to
     the external field so a current-carrying plasma stays at a target radius
     when the coil field is radially unstable; the converged correction is
     ``result.position_control``.
@@ -2349,6 +2349,7 @@ def solve_free_boundary(
         if external_field is None:
             external_field = _external_field_from_input(inp, mgrid_path)
         resolution = free_boundary_resolution(inp, external_field)
+    position_control = resolve_position_control(position_control, inp)
     target = _placement_device(device, resolution)
     external_field = _put_numeric_leaves(external_field, target)
     initial_state = _put_numeric_leaves(initial_state, target)

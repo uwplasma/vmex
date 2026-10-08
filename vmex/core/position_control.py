@@ -75,6 +75,21 @@ class PositionControl:
     deadband: float = 0.0
     current_sign: float | None = None
 
+    @classmethod
+    def from_input(cls, inp: Any) -> "PositionControl | None":
+        """The control a deck requests (``LPOSITION_CONTROL``), else ``None``.
+
+        ``POSITION_GAIN`` sets the proportional gain; the integral and
+        derivative gains keep the default ratios to it.
+        """
+        if not bool(getattr(inp, "lposition_control", False)):
+            return None
+        gain = float(inp.position_gain)
+        target = float(inp.position_target)
+        return cls(target=target if target > 0.0 else None, nmax=int(inp.position_nmax),
+                   gain=gain, integral_gain=gain * 0.0025, derivative_gain=gain * 50.0,
+                   interval=int(inp.position_interval))
+
     def __post_init__(self) -> None:
         if self.measure not in ("axis", "boundary"):
             raise ValueError("measure must be 'axis' or 'boundary'")
@@ -218,3 +233,10 @@ def gain_scale(curtor: float, r0: float) -> float:
     """``g0 = mu0 |I| / (4 pi R0^2)`` [T/m]; ``0.1`` for a current-free deck."""
     g0 = 1.0e-7 * abs(float(curtor)) / float(r0) ** 2
     return g0 if g0 > 0.0 else 0.1
+
+
+def resolve_position_control(requested: Any, inp: Any) -> "PositionControl | None":
+    """An explicit control wins; ``None`` follows the deck; ``False`` disables it."""
+    if requested is None:
+        return PositionControl.from_input(inp)
+    return None if requested is False else requested

@@ -686,8 +686,8 @@ def solve_free_boundary_multigrid(
     The final stage's publishable potential and surface fields are retained in
     ``result.vacuum``; internal NESTOR matrix caches are not exposed.
 
-    ``position_control`` (a :class:`~vmex.core.position_control.PositionControl`,
-    default ``None`` = off) adds a feedback-controlled uniform vertical field
+    ``position_control`` (a :class:`~vmex.core.position_control.PositionControl`;
+    ``None`` follows the deck's ``LPOSITION_CONTROL``, ``False`` forces it off) adds a feedback-controlled uniform vertical field
     that holds the plasma at a target radius; the control state carries across
     rungs and the final correction is ``result.position_control``.
 
@@ -709,6 +709,8 @@ def solve_free_boundary_multigrid(
     """
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary_multigrid requires an LFREEB=T input")
+    from .position_control import resolve_position_control
+    position_control = resolve_position_control(position_control, inp)
 
     ns_arr = _vmec_ns_prefix(inp.ns_array if ns_array is None else ns_array)
     if ns_arr.size == 0:

@@ -139,12 +139,33 @@ coil_field = vj.MgridField.from_coils(coils, order=3)   # ESSOS coils
 
 ## Position control for radially unstable coil sets
 
-A plasma carrying net toroidal current has no stable radial position in a
-vertical field whose decay index `n = -(R/B_Z) dB_Z/dR` exceeds 3/2, and
-strongly sheared current-driven equilibria can also bend the plasma column
-helically. The free-boundary iteration then drifts until a Jacobian reset and
-never settles; tokamak codes cure this with feedback on a vertical-field
-coil. VMEX offers the same as an opt-in:
+A plasma carrying net toroidal current has no stable position in a vertical
+field that is the wrong size or has too steep a decay index; the iteration then
+drifts and never settles. Tokamak codes close the loop with a vertical-field
+coil, and VMEX does the same as an opt-in, from the deck or from Python
+({doc}`/explanation/position-control` has the physics and the equations).
+
+From a deck, with no Python:
+
+```fortran
+  LPOSITION_CONTROL = T     ! VMEX extension; VMEC2000 ignores it
+  POSITION_TARGET   = 1.7199   ! axis radius to hold [m]; <= 0 keeps the initial axis
+```
+
+```bash
+vmex examples/data/input.DIII-D_position_control
+```
+
+That deck is the DIII-D-like tokamak whose coil field is 40 mT short of
+vertical field. Without control the solve fails (fsq 1.1e-5 after 8000
+iterations, axis 23 cm inboard); with `LPOSITION_CONTROL = T` it converges in
+3875 iterations and the log reports `B_Z^ctrl = 39.8 mT`. The deck keys are
+`LPOSITION_CONTROL` (default `F`), `POSITION_TARGET` (default `0`),
+`POSITION_INTERVAL` (default `20`), `POSITION_GAIN` (default `4`) and
+`POSITION_NMAX` (default `0`); see {doc}`/reference/vmec2000-compatibility`.
+
+From Python the call is the same, and an explicit argument wins over the deck
+(`position_control=False` turns a deck's control off):
 
 ```python
 from vmex import PositionControl
@@ -155,38 +176,29 @@ result = vj.solve_free_boundary_multigrid(
 print(result.position_control.vertical_field)         # the converged B_Z correction [T]
 ```
 
-Every `interval` iterations the steady-state vacuum loop exits, a PID law
-on the error between the measured axis radius (or the edge radius,
-`measure="boundary"`) and `target` updates a uniform vertical field
-`B_Z^ctrl`, and the loop resumes, so the cost is one host round trip per
-update. The field is axisymmetric, curl-free and compatible with `nfp` and
-stellarator symmetry. `nmax >= 1` adds the helical vacuum harmonics
-`B_Z ~ (R/R0)^k cos(k phi)` and `B_R ~ (R/R0)^(k-1) sin(k phi)` with
-`k = n nfp`, driven by the axis coefficients `R_0n` and `Z_0n`. The gains are
-multiples of `mu0 |I| / (4 pi R0^2)`, so the defaults transfer between
-machines, and `result.position_control` holds the amplitudes, targets and
-the per-update history (`iteration, fsq, bz..., br..., measured...`).
+```{image} /_static/figures/position_control_deck.webp
+:alt: Axis position, feedback vertical field and force residual with and without position control on the 40 mT deficit deck
+```
+
+`PositionControl` also takes `integral_gain`, `derivative_gain`, `max_step`,
+`deadband` and `measure="boundary"`. `nmax >= 1` adds helical vacuum
+harmonics driven by the axis coefficients `R_0n` and `Z_0n`; treat them as
+experimental. `result.position_control` holds the amplitudes, targets and the
+per-update history (`iteration, fsq, bz..., br..., measured...`).
 
 ```{image} /_static/figures/position_control.webp
 :alt: Axis position, convergence and recovered vertical field with and without position control
 ```
 
-`examples/free_boundary_position_control.py` shows the benefit on the DIII-D-like
-fixture with a mis-set vertical field: a 40 mT deficit makes the uncontrolled
-solve fail (fsq 1e-5 after 8000 iterations, axis 23 cm inboard) and a 40 mT
-excess carries the axis 58 cm outboard, while with control the axis stays
-within 3.5 mm of its target, every solve converges, and `B_Z^ctrl` reports the
-missing field to 0.7 mT.
+`examples/free_boundary_position_control.py` sweeps the offset: a 40 mT
+deficit makes the uncontrolled solve fail and a 40 mT excess carries the axis
+58 cm outboard, while with control the axis stays within 3.5 mm of its target,
+every solve converges, and `B_Z^ctrl` reports the missing field to 0.7 mT.
 
-The default is off: without `position_control` the code path and results are
-unchanged. On the stable DIII-D-like regression fixture a 2 cm outward
-target converges to `fsq = 1.1e-10` with `B_Z^ctrl = +4 mT`; the converged
-correction is the quantity to report. A coil set that needs a large
-correction is a poor coil set, not a solved one. The feedback damps the
-drift of the Landreman sheared-iota analytic equilibria driven by ESSOS coils
-(residual 1.8e-4 uncontrolled, about 1e-7 controlled) but the helical
-modes there are not stabilised to the `ftol = 1e-10` level, so treat
-`nmax >= 1` as experimental.
+The default is off: without the deck flag or the argument the code path and
+results are unchanged, and with all gains zero a controlled run is bitwise
+identical to the plain one. A coil set that needs a large correction is a
+poor coil set, not a solved one.
 
 ## Convergence differences from fixed boundary
 

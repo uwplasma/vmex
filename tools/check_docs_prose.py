@@ -64,7 +64,7 @@ BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
-BUDGET_TOTAL = 620 * 1024  # 550 KB + the README --neoclassical figure (#548) + the position-control figure
+BUDGET_TOTAL = 650 * 1024  # 620 KB + the position-control deck figure
 BUDGET_FILE = 150 * 1024
 
 # Frozen: files consumed by the top-level README.md and fetched reference

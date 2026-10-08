@@ -586,6 +586,27 @@
         "docs/howto/free-boundary.md"
       ],
       "note": "Five uniform vertical-field offsets, each solved with and without position control. Written to the working directory as lossless WebP (the figure block is skipped under VMEX_EXAMPLES_CI=1); copy it over the committed one to reproduce."
+    },
+    {
+      "path": "docs/_static/figures/position_control_deck.webp",
+      "sha256": "3b7b0434336f188f6f307a466700f2df328297edfe4df92f0250668a8653e525",
+      "bytes": 30496,
+      "generator": "examples/free_boundary_position_control.py",
+      "command": "python examples/free_boundary_position_control.py && cp readme_position_control_deck.webp docs/_static/figures/position_control_deck.webp",
+      "inputs": [
+        "examples/data/input.DIII-D_position_control",
+        "examples/data/mgrid_d3d_vertical_deficit.nc"
+      ],
+      "record": null,
+      "generated": "2026-10-08",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md",
+        "docs/howto/free-boundary.md"
+      ],
+      "note": "The 40 mT vertical-field deficit deck solved without control (zero-gain PositionControl, which records the trajectory and is bitwise identical to a plain run) and with the deck's own control: axis radius, feedback vertical field and force residual against iteration. The figure block is skipped under VMEX_EXAMPLES_CI=1."
     }
   ]
 }
