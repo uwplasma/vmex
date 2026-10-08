@@ -514,8 +514,9 @@ def test_progress_leaves_the_trace_unchanged(traced, solovev_wout):
     calls = []
     reported = trace_alphas(solovev_wout, **TRACE_KWARGS, progress=lambda d, n: calls.append((d, n)))
     assert calls[-1][0] == calls[-1][1] and len(calls) > 1
-    np.testing.assert_array_equal(reported.lost_times, traced.lost_times)
-    np.testing.assert_array_equal(reported.trajectories, traced.trajectories)
+    # Chunks change how ESSOS groups the particles over CPU devices, which can move the last bit of a sum.
+    np.testing.assert_allclose(reported.lost_times, traced.lost_times, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(reported.trajectories, traced.trajectories, rtol=1e-12, atol=0)
 
 
 @pytest.mark.parametrize("tty", [True, False])
@@ -756,3 +757,26 @@ def test_integrator_keywords_reach_essos(solovev_wout, monkeypatch):
     with pytest.raises(ValueError, match="tolerance must be positive"):
         trace_alphas(solovev_wout, **kwargs, tolerance=0.0)
 
+
+
+def test_trace_devices_default_to_every_cpu_or_one_gpu(solovev_wout, monkeypatch):
+    """CPU runs split over every device, GPU runs keep one; an explicit list wins."""
+    import essos.boozer
+    import jax
+
+    original, seen = essos.boozer.trace_boozer, []
+
+    def recording(*args, **kwargs):
+        seen.append(kwargs["devices"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", recording)
+    cpu = trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert seen[-1] == jax.devices() and cpu.metadata["devices"] == len(jax.devices())
+    explicit = trace_alphas(solovev_wout, **TRACE_KWARGS, devices=jax.devices()[:1])
+    assert seen[-1] == jax.devices()[:1] and explicit.metadata["devices"] == 1
+    gpus = [jax.devices()[0]] * 2
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(jax, "devices", lambda: gpus)
+    trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert seen[-1] == gpus[:1]
