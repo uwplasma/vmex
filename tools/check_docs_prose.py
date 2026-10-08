@@ -11,7 +11,7 @@ Mechanical checks on the Diátaxis docs tree:
 4.  No TODO/FIXME markers in any docs page.
 5.  Media budget: files under ``docs/_static`` outside the frozen
     grandfather list (README-embedded figures and their committed input
-    data) must total <= 660 KB with no single file over 150 KB.
+    data) must total <= 662 KB with no single file over 150 KB.
 
 Exit 0 when clean; exit 1 listing ``file:line: problem`` otherwise.
 """
@@ -64,7 +64,7 @@ BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
-BUDGET_TOTAL = 660 * 1024  # 550 KB + the README --neoclassical (#548) and VMEX/MRX (#569) figures
+BUDGET_TOTAL = 662 * 1024  # 550 KB + the README --neoclassical (#548) and VMEX/MRX (#569) figures, HINT manifest rows (#545)
 BUDGET_FILE = 150 * 1024
 
 # Frozen: files consumed by the top-level README.md and fetched reference
@@ -87,6 +87,9 @@ GRANDFATHERED_FILES = {
     "figures/readme_diagnostics_summary.webp",
     "figures/readme_equilibrium_showcase.webp",
     "figures/readme_essos_beta_scan.webp",
+    "figures/readme_hint_comparison.webp",
+    "figures/readme_hint_relaxation.webp",
+    "figures/sources/make_hint_comparison_figure.py",
     "figures/readme_interior_field.webp",
     "figures/readme_optimization.webp",
     "figures/readme_polish_before_after.webp",

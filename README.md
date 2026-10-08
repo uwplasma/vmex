@@ -422,23 +422,30 @@ and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/us
 
 ## Fields, coils and free boundary
 
-The equilibrium exposes Cartesian `B()` and its first three derivatives, with VJPs, anywhere inside
-the plasma (`set_points_xyz`, `set_points_flux`); it reads the current 10 to 70 times more
-accurately than the WOUT file. Outside, `vj.VmecExtender.from_file("wout_my_case.nc",
-external_field=coils.B)` adds the plasma's virtual-casing field to the coils, accurate to about 1e-12
-down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `MgridField`
-(trilinear or tricubic).
+Inside the plasma, `B()` and its first three spatial derivatives support VJPs
+(`set_points_xyz`, `set_points_flux`). Outside,
+`vj.VmecExtender.from_file("wout_my_case.nc", external_field=coils.B)` adds the plasma's
+virtual-casing field to the coils. Use `near_surface="graded"` for near-boundary queries under
+JIT; `"auto"` selects quadrature during eager evaluation. Free-boundary
+solves accept coil and MGRID fields through `MgridField` (trilinear or tricubic).
 
 ![Poincare sections of the extended field around finite-beta free-boundary QA equilibria, one with an iota = 1/2 island chain](docs/_static/figures/readme_extender_islands.webp)
 
-The Landreman-Paul QA held by its coils as a free boundary at 1.0% beta, and the field lines of
-the extended field (coils plus the plasma's virtual-casing field) launched outside it. Without net
-current (left) closed surfaces continue 3.1 cm past the LCFS, then the lines open. A 4 kA toroidal
-current (middle, and unrolled on the right) lifts the edge iota to 0.514, so iota = 1/2 falls just
-outside the plasma: an island chain about 0.9 cm wide opens from the LCFS, closed surfaces
-surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX from `examples/data` alone
-(`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
-are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+VMEX free-boundary QA at 1.0% beta: exterior field lines form closed surfaces (left).
+Adding 4 kA toroidal current lifts the edge iota to 0.514 and produces an exterior iota = 1/2
+island chain (middle, unrolled at right). [Reproduce the figure](docs/_static/figures/sources/make_extender_islands_figure.py)
+or read the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+
+![HINT crossings, VMEX flux surfaces and VMEX exterior-field crossings at two toroidal cuts](docs/_static/figures/readme_hint_comparison.webp)
+
+![HINT relative force residual and plasma-field change over saved outer iterations](docs/_static/figures/readme_hint_relaxation.webp)
+
+![HINT relaxation through every saved outer iteration](https://github.com/user-attachments/assets/96a22f58-ddcf-40df-a20f-e915806e3604)
+
+Nominal 0.5% Landreman–Buller–Drevlak QA: [HINT3D (`current`)](https://github.com/yasuhiro-suzuki/HINT3D/tree/current)
+against VMEX fixed-boundary surfaces and exterior-field crossings, stopped at mask/grid limits. The dashed line marks added response viscosity.
+HINT is still relaxing; final profiles and boundary formulations are not matched, so no accuracy or runtime claim is made.
+[Movie](https://github.com/user-attachments/assets/3462b7bd-fbe3-4615-8e8c-8e82ae547392) · [Reproduce the figures](docs/_static/figures/sources/make_hint_comparison_figure.py).
 
 ## Accuracy and optional polishing
 
