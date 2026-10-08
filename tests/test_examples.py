@@ -147,6 +147,7 @@ EXECUTED_EXAMPLES = {
     "examples/finite_beta_scan.py",
     "examples/fixed_boundary_run.py",
     "examples/force_balance_polishing.py",
+    "examples/prescribed_current_polishing.py",
     "examples/free_boundary_beta_scan.py",
     "examples/free_boundary_essos_coils.py",
     "examples/free_boundary_mgrid.py",
@@ -440,6 +441,14 @@ def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None
     for field in ("initial_normalized_l2", "final_normalized_l2",
                   "nonlinear_iterations", "termination_reason"):
         assert field in source
+
+
+def test_prescribed_current_polishing_example(tmp_path):
+    out = _run_example(EXAMPLES / "prescribed_current_polishing.py", tmp_path, timeout=600)
+    assert "Forward result only" in out
+    for label in ("axis", "bulk", "edge"):
+        match = re.search(label + r" force/pressure-gradient RMS: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+        assert match and np.isfinite([float(v) for v in match.groups()]).all(), out
 
 
 @pytest.mark.full  # nightly: ordinary solve + native strong-force polish (~3 min)
