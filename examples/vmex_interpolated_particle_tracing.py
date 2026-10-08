@@ -10,7 +10,7 @@ every coil segment.  Guiding-centre and full-orbit ensembles are traced
 through both fields and compared: final-position deviation, loss fraction,
 energy error and wall time.
 
-Requires ESSOS with ``essos.fields.InterpolatedField`` (uwplasma/ESSOS#135).
+Requires ESSOS with ``InterpolatedField.around`` (uwplasma/ESSOS#135, #159).
 """
 
 from dataclasses import replace
@@ -30,12 +30,12 @@ from vmex import optimize as opt
 import essos.fields
 from essos.coils import Coils
 from essos.dynamics import Particles, Tracing
-from essos.fields import BiotSavart, MagneticField
+from essos.fields import BiotSavart, ExternalField
 from essos.surfaces import SurfaceClassifier, surfacerzfourier_from_boundary
 
-if not hasattr(essos.fields, "InterpolatedField"):
-    raise SystemExit("This example needs essos.fields.InterpolatedField: install an ESSOS "
-                     "release that includes uwplasma/ESSOS#135 (newer than 0.20.0)")
+if not hasattr(getattr(essos.fields, "InterpolatedField", None), "around"):
+    raise SystemExit("This example needs essos.fields.InterpolatedField.around: install an ESSOS "
+                     "release that includes uwplasma/ESSOS#135 and #159 (newer than 0.20.1)")
 InterpolatedField = essos.fields.InterpolatedField
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -53,38 +53,11 @@ coils = BiotSavart(Coils.from_json(str(DATA / "ESSOS_biot_savart_LandremanPaulQA
 exterior = equilibrium.exterior_field(
     external_field=lambda xyz: jax.vmap(coils.B)(xyz.reshape(-1, 3)).reshape(xyz.shape), plasma="vacuum")
 
-
-@jax.tree_util.register_pytree_node_class
-class VmexField(MagneticField):
-    """The VMEX exterior field as a one-point ESSOS field."""
-
-    def B(self, point):
-        return exterior.B(point[None])[0]
-
-    def sqrtg(self, point):
-        return 1.0
-
-    def to_xyz(self, point):
-        return point
-
-    def tree_flatten(self):
-        return (), None
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls()
-
-
-field = VmexField()
-equilibrium.set_points_flux(np.stack([np.ones(256), np.linspace(0, 2 * np.pi, 256), np.repeat(
-    np.linspace(0, np.pi / inp.nfp, 16), 16)], 1))
-lcfs = np.asarray(equilibrium.field.get_points_cart()); R_lcfs = np.hypot(lcfs[:, 0], lcfs[:, 1])
-margin = 0.05  # the spline stencil of the boundary cells reaches this far out
+field = ExternalField(exterior)  # the batched VMEX field, one point at a time
+lcfs = surfacerzfourier_from_boundary(inp.rbc, inp.zbs, inp.nfp, nphi=32, ntheta=32)
 start = perf_counter()
-interpolated = InterpolatedField(
-    field, R=(R_lcfs.min() - margin, R_lcfs.max() + margin), Z=(-np.abs(lcfs[:, 2]).max() - margin,
-    np.abs(lcfs[:, 2]).max() + margin), nr=GRID, nz=GRID, nphi=2 * GRID, nfp=inp.nfp, stellsym=True,
-    chunk_size=4096)
+# margin: the spline stencil of the boundary cells reaches this far out
+interpolated = InterpolatedField.around(field, lcfs, margin=0.05, n=GRID, stellsym=True, chunk_size=4096)
 interpolated.coefficients.block_until_ready()
 print(f"Tabulated {GRID}x{GRID}x{GRID + 1} nodes in {perf_counter() - start:.1f} s")
 equilibrium.set_points_flux(np.stack([np.full(64, 0.5), np.linspace(0, 2 * np.pi, 64),
@@ -97,7 +70,7 @@ print(f"Interpolation error at s = 0.5: max |dB|/|B| = "
 equilibrium.set_points_flux(np.stack([np.full(NPARTICLES, 0.25), np.linspace(0, 2 * np.pi, NPARTICLES,
                                       endpoint=False), np.zeros(NPARTICLES)], 1))
 births = jnp.asarray(equilibrium.field.get_points_cart())
-classifier = SurfaceClassifier(surfacerzfourier_from_boundary(inp.rbc, inp.zbs, inp.nfp, nphi=32, ntheta=32), h=0.02)
+classifier = SurfaceClassifier(lcfs, h=0.02)
 results = {}
 for model, tmax in (("GuidingCenterAdaptative", TMAX_GC), ("FullOrbitAdaptative", TMAX_FO)):
     for name, f in (("direct", field), ("interpolated", interpolated)):
