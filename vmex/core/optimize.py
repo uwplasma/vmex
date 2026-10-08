@@ -85,6 +85,7 @@ from .solver import (
     SolveResult,
     SolverRuntime,
     SpectralState,
+    evaluate_forces,
     prepare_runtime,
     resolution_from_input,
 )
@@ -3586,6 +3587,10 @@ def _least_squares_implicit(
             result_input,
             resolution_from_input(result_input, ns=ns),
         )
+        _, residuals, _ = evaluate_forces(result.state, runtime)
+        result = dataclasses.replace(
+            result, fsqr=float(residuals.fsqr), fsqz=float(residuals.fsqz),
+            fsql=float(residuals.fsql))
 
         def exterior_field_factory(**kwargs):
             from . import virtual_casing as vc
