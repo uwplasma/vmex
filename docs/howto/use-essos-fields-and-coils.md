@@ -117,6 +117,23 @@ tabulated domain. The exterior field-line example
 field; a finite trace does not by itself establish magnetic topology. See
 {doc}`/explanation/nestor-vacuum` for the derivation.
 
+Graded quadrature evaluates one target rule at a time by default. To trade
+memory for throughput, set a static positive `graded_target_batch_size`:
+
+```python
+field = vj.VmecExtender.from_file(
+    "wout_my_case.nc", external_field=coils.B
+).with_graded_quadrature()
+field.graded_target_batch_size = 8
+```
+
+Use `None` to restore serial evaluation. This setting batches targets without
+changing nodes, formulas or accuracy checks; source and target chunk settings
+for direct quadrature do not control it. Benchmark synchronized calls at your
+node counts and derivative order, since larger batches increase the working
+set and may be slower on a particular device. Choose the setting before
+compiling an enclosing objective with `jax.jit`.
+
 ![Poincare sections of the extended field around finite-beta free-boundary QA equilibria, one with an iota = 1/2 island chain](../_static/figures/readme_extender_islands.webp)
 
 The README figure is built by VMEX alone from inputs in `examples/data`.

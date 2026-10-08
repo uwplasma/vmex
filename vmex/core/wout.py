@@ -485,9 +485,18 @@ def write_wout(path: str | Path, data: WoutData, *, overwrite: bool = True) -> P
             _put(ds, "raxis_cs", ("n_tor",), d.raxis_cs)
             _put(ds, "zaxis_cc", ("n_tor",), d.zaxis_cc)
         for name, dim in _PROFILE_1D:
-            _put(ds, name, (dim,), np.asarray(getattr(d, name), float))
+            value = getattr(d, name)
+            if value is None:
+                continue
+            value = np.asarray(value, float)
+            if value.size != len(ds.dimensions[dim]):
+                dim = f"{name}_size"
+                ds.createDimension(dim, value.size)
+            _put(ds, name, (dim,), value)
         for name in _RADIUS_1D:
-            _put(ds, name, (_DIM_RADIUS,), np.asarray(getattr(d, name), float))
+            value = getattr(d, name)
+            if value is not None:
+                _put(ds, name, (_DIM_RADIUS,), np.asarray(value, float))
         _put(ds, "fsqt", (_DIM_TIME,), np.asarray(d.fsqt, float))
         _put(ds, "wdot", (_DIM_TIME,), np.asarray(d.wdot, float))
         if lfreeb:
@@ -1070,4 +1079,3 @@ def wout_from_state(
         vmex_diagnostics_schema=1,
         vmex_trapped_fraction=np.asarray(trapped_fraction, dtype=float),
     )
-

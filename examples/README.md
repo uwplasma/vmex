@@ -65,6 +65,11 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
     stop after leaving the LCFS neighborhood.
     The finite-beta coil fixture is reproduced by ESSOS
     `examples/coil_optimization/optimize_coils_finite_beta_vmex.py`.
+  - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
+    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    assume nested surfaces, and compare Poincare sections, iota, the toroidal
+    current, and the pressure with VMEX at ns = 65. Without MRX it exits after
+    printing the install command.
   - `vmex_fixed_free_boundary_comparison.py` *(preview)* — compare a parent
     free boundary with an `s=0.5` fixed-boundary solve and its exterior field.
 - `optimization/`: compact QA/QH/QP/QI scripts using `(function, target,
