@@ -68,7 +68,6 @@ def configured(**overrides):
 
 aspect_from_coils = configured()
 
-print("Solving the free boundary and its implicit adjoint...")
 parameters = jnp.zeros(base_dofs.size)
 aspect, gradient = jax.value_and_grad(aspect_from_coils)(parameters)
 # One normalized direction changes a curve Fourier coefficient and all base

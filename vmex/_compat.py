@@ -24,6 +24,8 @@ import hashlib
 import re
 from importlib import metadata as importlib_metadata
 import sys
+import threading
+import time
 
 import os
 import platform
@@ -697,6 +699,59 @@ def _configure_jax_environment() -> None:
 
 
 _configure_jax_environment()
+
+
+class _Watched:
+    """Stand-in for ``sys.stdout``/``sys.stderr`` that records the last write."""
+
+    last = 0.0
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        _Watched.last = time.monotonic()
+        return self._stream.write(text)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+def _watch_for_silence() -> None:
+    """In a script, print the elapsed time whenever the output stays quiet.
+
+    A first compilation or a solve without per-iteration output then never
+    looks hung, and no script has to wrap its calls for that.
+    ``VMEX_HEARTBEAT`` sets the quiet interval in seconds (default 15; ``0``
+    turns it off).  Interactive sessions and pytest are left alone unless it
+    is set.
+    """
+    setting = _env("HEARTBEAT").strip()
+    scripted = getattr(sys.modules.get("__main__"), "__file__", None) and "pytest" not in sys.modules
+    if not (setting or scripted) or isinstance(sys.stdout, _Watched):
+        return
+    try:
+        interval = float(setting or 15)
+    except ValueError:
+        interval = 0.0 if setting.lower() in _OFF else 15.0
+    if interval <= 0 or sys.stdout is None:
+        return
+    stream = sys.stdout = _Watched(sys.stdout)
+    if sys.stderr is not None:  # progress bars write here
+        sys.stderr = _Watched(sys.stderr)
+    started = _Watched.last = time.monotonic()
+
+    def watch() -> None:
+        while sys.stdout is stream:  # stops once the stream is replaced
+            time.sleep(min(1.0, interval))
+            if (now := time.monotonic()) - _Watched.last >= interval:
+                minutes, seconds = divmod(int(now - started), 60)
+                stream.write(f"  ... still running, {minutes}m{seconds:02d}s elapsed\n")
+                stream.flush()
+
+    threading.Thread(target=watch, name="vmex-heartbeat", daemon=True).start()
+
+_watch_for_silence()
 
 
 # Floors of the optional extras, equal to pyproject.toml (a test pins them).

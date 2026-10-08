@@ -19,9 +19,9 @@ The mixing-length rule is a model of saturation with an uncalibrated
 amplitude; ``QA_optimization_turbulence_nonlinear.py`` optimizes the heat flux
 of the saturated nonlinear state instead.
 
-Measured on a shared 36-core Xeon host (CPU only, 12 cores, load 50-80 from
-other jobs, JAX 0.10.2, GKX main ahead of 2.4.2), default settings: 19 min end
-to end, 6.1 GB peak memory. Compiling the residual and Jacobian took 318 s;
+The default single stage is sized for a 5-minute laptop run. Measured with the
+research ladder on a shared 36-core Xeon host (CPU only, 12 cores, load 50-80
+from other jobs, JAX 0.10.2, GKX main ahead of 2.4.2): 19 min end to end, 6.1 GB peak memory. Compiling the residual and Jacobian took 318 s;
 stage 1 then took 227 s for 5 Jacobian and 10 residual evaluations (45 s per
 Jacobian), stage 2 317 s for 6 and 15 (53 s). The quasilinear heat flux at
 s = 0.5 went 2.57 -> 0.94 while the aspect ratio came from 11.5 to 7.7 and the
@@ -57,9 +57,10 @@ SEED_PERTURBATION = 0.05
 SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend:
-MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]
+# residual evaluations each stage may spend. One stage fits the 5-minute
+# laptop budget; the research ladder is MAX_MODES, MAX_NFEV = [1, 2], [10, 15]:
+MAX_MODES = [2]
+MAX_NFEV = [12]
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -199,7 +200,8 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
         problem = opt.VmecProblem.from_tuples(
             inp, objective_function_terms, max_mode=group_max_mode[max_mode],
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
-            ess_alpha=ESS_ALPHA, restart_from=equilibrium)
+            ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+            progress=True)
         x = problem.x0
         monitor.problem = problem
         if not ci_smoke:

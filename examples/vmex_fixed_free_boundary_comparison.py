@@ -138,7 +138,6 @@ fixed_input = replace(free_input, lfreeb=False, mgrid_file="NONE", rbc=rbc, zbs=
 print(f"Solving the restricted fixed boundary at s_free={S_FIXED:.2f}...")
 fixed_equilibrium = opt.solve_equilibrium(fixed_input, verbose=True)
 
-print("Refitting the four independent ESSOS coil currents with virtual casing...")
 surface_data = vc.surface_field_data_from_state(fixed_input, fixed_equilibrium.solution,
     runtime=fixed_equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
 precision = vc.plan_vc_precision(surface_data, digits=VC_DIGITS)

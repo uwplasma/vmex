@@ -48,7 +48,7 @@ EPS_SURFACES = (0.25, 0.5, 0.75)
 
 # Highest boundary Fourier mode number varied, and the L-BFGS-B iterations:
 MAX_MODE = 2
-MAXITER = 20
+MAXITER = 3                        # 5-minute laptop default; research below
 
 # Weights of the three seed-normalized confinement terms:
 W_EPS = 1.0
@@ -63,7 +63,7 @@ TRAPPING_DEPTHS = (0.4, 0.8)
 
 # Gamma_c surrogate temperature and quadrature, and the bounce-ACTION plan:
 GC_TEMPERATURE = 0.15
-GC_BUDGET = dict(nalpha=7, num_transit=3, points_per_transit=64,
+GC_BUDGET = dict(nalpha=5, num_transit=3, points_per_transit=64,
                  num_pitch=24, quadrature_order=32)
 ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
               max_wells=20, quadrature_order=24)
@@ -227,7 +227,7 @@ before = hard_confinement(equilibrium)
 problem = opt.VmecProblem.from_loss(
     inp, loss, max_mode=MAX_MODE, use_ess=True, ess_alpha=ESS_ALPHA,
     restart_from=equilibrium,
-    forward_max_iterations=STAGE_MAX_ITERATIONS)
+    forward_max_iterations=STAGE_MAX_ITERATIONS, progress=True)
 print(f"dof_names = {problem.dof_names}")
 monitor.problem = problem
 problem.compile_value_and_gradient()

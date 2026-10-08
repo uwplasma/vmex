@@ -29,11 +29,11 @@ with the normal-field limit applied to the total field. Self-consistent
 bootstrap current and current-profile optimization are not part of this
 example.
 
-Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
-JAX cache and a load average near 10: 199 s, of which 80 s is JAX compilation.
-It takes 14 L-BFGS-B iterations and 19 trials, and every target is met. The
-minimum |iota| rises from 0.407 to 0.430 and beta ends at 0.502%. The
-optimization moves the boundary by up to 8 mm and the coils by up to 11 mm.
+Measured end to end on an Apple M3 Max laptop with a cold JAX cache: about
+290 s. It takes 12 L-BFGS-B iterations and 16 trials, and every target is met:
+the minimum |iota| rises from 0.407 to 0.430 and beta ends at 0.498%. (At an
+earlier commit, 14 iterations took 19 trials, reached 0.430 and 0.502%, and
+moved the boundary by up to 8 mm and the coils by up to 11 mm.)
 
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
@@ -127,8 +127,8 @@ PARAMETER_BOUND = 3.0
 # Budgets. One trial is one equilibrium solve, one virtual-casing evaluation
 # and one adjoint. The script's own end-of-run check passes at iterations 12,
 # 14, 16 and 20 and fails at 10 (aspect 6.002), measured; 14 iterations took 19
-# trials. Raise MAXITER to go further.
-MAXITER = 14
+# trials. 12 keeps a laptop run under 5 minutes; raise MAXITER to go further.
+MAXITER = 12
 MAX_TRIALS = 35
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 

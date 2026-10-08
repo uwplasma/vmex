@@ -49,8 +49,9 @@ SURFACES = np.linspace(0.2, 0.8, 4)
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
 MAX_MODES = [1, 2]
-MAX_NFEV = [8, 8]
+MAX_NFEV = [6, 6]
 N_CURRENT_SPLINE = [5, 5]
+# Research budget (over the 5-minute laptop default): MAX_NFEV = [8, 8]
 
 # Targets:
 ASPECT_TARGET = 6.0

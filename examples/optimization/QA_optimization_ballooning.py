@@ -34,9 +34,10 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA_finit
 SURFACES = np.linspace(0.1, 1.0, 6)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend:
+# residual evaluations each stage may spend. The default fits a 5-minute
+# laptop budget; the research budget is MAX_NFEV = [8, 12]:
 MAX_MODES = [1, 2]
-MAX_NFEV = [8, 12]
+MAX_NFEV = [5, 8]
 
 # Ballooning field lines and surfaces. lambda is least stable at a
 # configuration-dependent zeta0 (Gaur et al. 2023, footnote 2), so zeta0 is
@@ -169,23 +170,28 @@ monitor = opt.OptimizationMonitor()
 equilibrium = opt.solve_equilibrium(inp, verbose=not ci_smoke)
 seed = report("seed", equilibrium)
 
+# Every stage shares one resolution (MINIMUM_MPOL), so the residual and
+# Jacobian are compiled once, at the largest max_mode, and each stage frees
+# its own modes of that problem (problem.subproblem), as in QA_optimization.py.
+mpol = max(max(MAX_MODES) + 2, MINIMUM_MPOL)
+inp = replace(inp, delt=0.5).change_resolution(
+    mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+problem = opt.VmecProblem.from_tuples(
+    inp, objective_function_terms, max_mode=max(MAX_MODES), use_ess=True,
+    ess_alpha=ESS_ALPHA, restart_from=equilibrium, progress=True)
+monitor.problem, x = problem, problem.x0
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA + ballooning stage, max_mode = {max_mode} =====")
-    mpol = max(max_mode + 2, MINIMUM_MPOL)
-    inp = replace(inp, delt=0.5).change_resolution(
-        mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-    problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms, max_mode=max_mode, use_ess=True,
-        ess_alpha=ESS_ALPHA, restart_from=equilibrium)
-    monitor.problem = problem
-    step = PARAMETER_STEP * problem.scales
+    stage = problem.subproblem(max_mode=max_mode, x=x)
+    step = PARAMETER_STEP * stage.scales
     result = least_squares(
-        problem.residual, problem.x0, jac=problem.residual_jac, x_scale=step,
-        bounds=(problem.x0 - MAX_PARAMETER_CHANGE * step,
-                problem.x0 + MAX_PARAMETER_CHANGE * step),
+        stage.residual, stage.x0, jac=stage.residual_jac, x_scale=step,
+        bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
+                stage.x0 + MAX_PARAMETER_CHANGE * step),
         max_nfev=max_nfev, ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
-    inp = problem.input_from_x(result.x)
-    equilibrium = problem.equilibrium_from_x(result.x)
+    x = stage.embed(result.x)
+    inp = problem.input_from_x(x)
+    equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)
 
 ### Check the result ##########################################################

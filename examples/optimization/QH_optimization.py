@@ -160,7 +160,8 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
         # examples/README.md.
         problem = opt.VmecProblem.from_tuples(inp, stage_terms, max_mode=group,
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
-            restart_from=equilibrium)
+            restart_from=equilibrium,
+            progress=True)
         x = problem.x0
         monitor.problem = problem
         if not ci_smoke:

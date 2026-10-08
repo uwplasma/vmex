@@ -877,3 +877,24 @@ def test_fresh_jax_environment_default_in_process(monkeypatch):
         assert jax.config.x64_enabled
     finally:
         jax.config.update("jax_enable_x64", previous)
+
+
+@pytest.mark.parametrize("setting,expected", [
+    ("", None), ("0", None), ("off", None), ("60", False), ("0.2", True), ("soon", False)])
+def test_quiet_output_reports_elapsed_time(monkeypatch, setting, expected):
+    """A quiet stretch prints the elapsed time unless the heartbeat is off or longer."""
+    import io
+    import time
+
+    out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    monkeypatch.setenv("VMEX_HEARTBEAT", setting)
+    _compat._watch_for_silence()
+    _compat._watch_for_silence()  # never wraps twice
+    assert isinstance(sys.stdout, _compat._Watched) is (expected is not None)
+    print("start")
+    sys.stderr.write("bar\n")
+    time.sleep(1.5)
+    assert out.getvalue().startswith("start\n") and err.getvalue() == "bar\n"
+    assert ("still running" in out.getvalue()) is bool(expected)

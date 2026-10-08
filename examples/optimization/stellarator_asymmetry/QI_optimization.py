@@ -40,7 +40,9 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [8, 12]
+MAX_NFEV = [5, 8]
+# Research budget (over the 5-minute laptop default):
+#   MAX_MODES, MAX_NFEV = [1, 2], [8, 12]
 
 # Targets and limits:
 ASPECT_TARGET = 8.0               # as the symmetric QI example; 5 was not reached (12.4)

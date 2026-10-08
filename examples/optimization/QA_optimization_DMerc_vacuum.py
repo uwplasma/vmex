@@ -9,8 +9,9 @@ without solving at finite pressure.
 
 A vacuum DMerc is only the formal zero-pressure limit, so outside the smoke
 pass the script then adds 0.1 % pressure and polishes the actual finite-beta
-DMerc and DR from coarse to resolved radial grids.  That resolved solve, not
-the proxy, is the stability certificate.
+DMerc and DR (on NS = 31 by default; the research settings step from coarse
+to resolved radial grids).  That solve, not the proxy, is the stability
+certificate; the five-minute default does not meet every target.
 
 Outputs are named ``QA_DMerc_*`` so they do not overwrite the ones
 ``QA_optimization.py`` writes with the same working directory.
@@ -40,8 +41,8 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [2, 4, 4, 4]
-MAX_NFEV = [15, 35, 25, 60]
+MAX_MODES = [2, 2]
+MAX_NFEV = [12, 14]
 
 # Targets:
 ASPECT_TARGET = 5.0
@@ -61,15 +62,15 @@ STABILITY_MARGIN = 1.0e-3
 # The finite-pressure certificate that follows the vacuum ladder: radial grids
 # it is polished on, and the residual evaluations each may spend. Skipped in
 # the smoke pass:
-CERTIFICATE_RESOLUTIONS = [31, 51, 101]
-CERTIFICATE_MAX_NFEV = [30, 35, 80]
+CERTIFICATE_RESOLUTIONS = [31]
+CERTIFICATE_MAX_NFEV = [10]
 CERTIFICATE_MARGIN = 5e-4
 CERTIFICATE_SMOOTHING = 1e-5
 CERTIFICATE_WEIGHT = 5.0
 CERTIFICATE_STEP = 0.01
 CERTIFICATE_MAX_CHANGE = 8.0
 CALIBRATION_PRES_SCALE = 10.0     # arbitrary; one solve rescales it to TRIAL_BETA
-CONTINUATION_FRACTIONS = np.linspace(0.25, 1.0, 4)
+CONTINUATION_FRACTIONS = np.linspace(0.5, 1.0, 2)
 SHEAR_EPSILON = 1e-8
 
 # Step control. One scaled variable moves a low-order coefficient by
@@ -84,7 +85,14 @@ VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 MINIMUM_MPOL = 5
 
 # Verification solve of the optimized vacuum boundary:
-FINAL_NS = 101
+FINAL_NS = 51
+
+# The budgets above fit a 5-minute laptop run. The research settings (over
+# 30 min) climb to max_mode = 4 and polish the certificate up to NS = 101:
+#   MAX_MODES, MAX_NFEV = [2, 4, 4, 4], [15, 35, 25, 60]
+#   CERTIFICATE_RESOLUTIONS, CERTIFICATE_MAX_NFEV = [31, 51, 101], [30, 35, 80]
+#   CONTINUATION_FRACTIONS = np.linspace(0.25, 1.0, 4)
+#   FINAL_NS = 101
 FINAL_FTOL = 1.0e-14
 FINAL_NITER = 8000
 
@@ -184,7 +192,7 @@ for stage, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
     # optimizer leaves the seed and needs no action; see examples/README.md.
     problem = opt.VmecProblem.from_tuples(inp, stage_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
-        restart_from=equilibrium)
+        restart_from=equilibrium, progress=True)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:

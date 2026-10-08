@@ -8,6 +8,12 @@ or `pip install "vmex[all]"` for everything the examples use.
 `data/mgrid_cth_like.nc`, a release asset rather than a tracked file; install it
 once from the repository root with `python tools/fetch_assets.py --bundle reference-nc`.
 
+With its default settings every script finishes in under five minutes on a
+14-core laptop with a cold JAX cache, and prints progress the whole time
+(optimizer monitors and solver iterations; when a script goes quiet for 15 s,
+vmex itself prints the elapsed time, and `VMEX_HEARTBEAT=0` turns that off). Where a longer run gives a better answer, the script keeps
+that research budget as one commented set of constants next to the default.
+
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.
