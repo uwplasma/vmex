@@ -441,6 +441,8 @@ def test_essos_tracing_fields_from_axis_to_wall(solovev_wout):
     assert set(setup) == {"field", "wall", "exterior_field"}
     point = jnp.asarray(setup["wall"].gamma[0, 0])
     np.testing.assert_allclose(setup["exterior_field"].B(point), toroidal(point[None])[0], rtol=1e-3, atol=1e-3)
+    direct = essos_tracing_fields(solovev_wout, toroidal, wall=0.05, n=None, plasma="vacuum", ntheta=16, nphi=8)
+    np.testing.assert_allclose(direct["exterior_field"].B(point[None])[0], toroidal(point[None])[0], rtol=1e-10)
 
 
 def test_in_memory_equilibrium_matches_the_file_route(traced, solovev_wout):

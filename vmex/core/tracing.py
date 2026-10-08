@@ -182,7 +182,7 @@ def essos_vmec_field(source: Any, **kwargs: Any) -> Any:
                                    **kwargs, **partners)
 
 
-def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0.03, n: int = 48,
+def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0.03, n: int | None = 48,
                          plasma: str = "auto", ntheta: int = 64, nphi: int = 128) -> dict[str, Any]:
     """Keyword arguments for ``essos.dynamics.Tracing`` from axis to wall.
 
@@ -191,7 +191,8 @@ def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0
     plasma to ``coils`` (ESSOS ``Coils``/field, :class:`MgridField` or an
     ``xyz -> B`` callable; by default the wout's mgrid) and ESSOS
     ``InterpolatedField`` tabulates it on ``n`` x ``n`` x ``2n`` nodes around
-    a ``wall`` surface ``wall`` metres outside the LCFS.  Without an exterior
+    a ``wall`` surface ``wall`` metres outside the LCFS (``n=None`` keeps the
+    direct field).  Without an exterior
     field (``wall=None`` or a fixed-boundary wout without coils) orbits stop
     at the LCFS.  Use as ``Tracing(**essos_tracing_fields(wout, coils), ...)``.
     """
@@ -207,8 +208,9 @@ def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0
         return {"field": field}
     surface = SurfaceRZFourier.from_vmec(field, ntheta=ntheta, nphi=nphi, offset=wall)
     exterior = VmecExtender.from_wout(wout, external_field=coils, plasma=plasma)
-    return {"field": field, "wall": surface,
-            "exterior_field": InterpolatedField.around(exterior, surface, n=n, stellsym=not bool(wout.lasym))}
+    if n:
+        exterior = InterpolatedField.around(exterior, surface, n=n, stellsym=not bool(wout.lasym))
+    return {"field": field, "wall": surface, "exterior_field": exterior}
 
 
 def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE):
