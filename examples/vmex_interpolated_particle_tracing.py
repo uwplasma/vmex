@@ -66,8 +66,8 @@ for name, n in (("interpolated", GRID), ("direct", None)):
 direct, interp = results["direct"], results["interpolated"]
 both = direct.wall_hits & interp.wall_hits
 print(f"Wall strikes in both fields: {both.sum()}; strike-time difference "
-      f"max {np.abs(direct.wall_times - interp.wall_times)[both].max(initial=0.0):.2e} s, strike-position "
-      f"difference max {np.linalg.norm(direct.wall_positions - interp.wall_positions, axis=1)[both].max(initial=0.0):.2e} m")
+      f"max {np.abs(direct.wall_times[both] - interp.wall_times[both]).max(initial=0.0):.2e} s, strike-position "
+      f"difference max {np.linalg.norm(direct.wall_positions[both] - interp.wall_positions[both], axis=1).max(initial=0.0):.2e} m")
 
 wall = setup["wall"]
 figure = plt.figure(figsize=(6, 5))
