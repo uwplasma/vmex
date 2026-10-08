@@ -288,9 +288,10 @@ def test_raw_block_probe_chunking_preserves_exact_factors():
         )
 
 
-@pytest.mark.parametrize("deck,ns,ntor", [
-    ("solovev", 5, 0), ("solovev", 3, 0),  # every surface its own color
-    ("li383_low_res", 6, 1), ("up_down_asymmetric_tokamak", 4, 0),
+@pytest.mark.parametrize("deck,ns,ntor", [("solovev", 5, 0)] + [
+    pytest.param(*case, marks=pytest.mark.full)  # ~40 s each
+    for case in [("solovev", 3, 0),  # every surface its own color
+                 ("li383_low_res", 6, 1), ("up_down_asymmetric_tokamak", 4, 0)]
 ])
 def test_colored_bands_match_the_per_row_build(monkeypatch, deck, ns, ntor):
     """Three-colored forward probes give the per-row reverse blocks to round-off."""
