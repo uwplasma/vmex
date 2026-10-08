@@ -809,16 +809,22 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
     assert pathlib.Path(_import_cache_dir(env)) == explicit / fingerprint
 
 
-@pytest.mark.parametrize("setting,expected", [("1", True), ("0", False), ("off", False), ("60", False)])
-def test_scripts_report_elapsed_time_when_quiet(tmp_path, setting, expected):
-    """A script that goes quiet hears from vmex unless the heartbeat is off or longer."""
-    import subprocess
+@pytest.mark.parametrize("setting,expected", [
+    ("", None), ("0", None), ("off", None), ("60", False), ("0.2", True), ("soon", False)])
+def test_quiet_output_reports_elapsed_time(monkeypatch, setting, expected):
+    """A quiet stretch prints the elapsed time unless the heartbeat is off or longer."""
+    import io
+    import time
 
-    script = tmp_path / "quiet.py"
-    script.write_text("import sys, time, vmex\nprint('start')\ntime.sleep(2.5)\n"
-                      "sys.stderr.write('bar\\n')\nprint('done')\n")
-    root = os.path.dirname(os.path.dirname(_compat.__file__))
-    out = subprocess.run([sys.executable, "-u", str(script)], capture_output=True, text=True, check=True,
-                         env={**os.environ, "VMEX_HEARTBEAT": setting, "PYTHONPATH": root}).stdout
-    assert out.startswith("start\n") and out.endswith("done\n")
-    assert ("still running" in out) is expected
+    out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    monkeypatch.setenv("VMEX_HEARTBEAT", setting)
+    _compat._watch_for_silence()
+    _compat._watch_for_silence()  # never wraps twice
+    assert isinstance(sys.stdout, _compat._Watched) is (expected is not None)
+    print("start")
+    sys.stderr.write("bar\n")
+    time.sleep(1.5)
+    assert out.getvalue().startswith("start\n") and err.getvalue() == "bar\n"
+    assert ("still running" in out.getvalue()) is bool(expected)

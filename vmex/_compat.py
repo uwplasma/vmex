@@ -729,20 +729,20 @@ def _watch_for_silence() -> None:
         interval = 0.0 if setting.lower() in _OFF else 15.0
     if interval <= 0 or sys.stdout is None:
         return
-    sys.stdout = _Watched(sys.stdout)
+    stream = sys.stdout = _Watched(sys.stdout)
     if sys.stderr is not None:  # progress bars write here
         sys.stderr = _Watched(sys.stderr)
     started = _Watched.last = time.monotonic()
 
     def watch() -> None:
-        while True:
+        while sys.stdout is stream:  # stops once the stream is replaced
             time.sleep(min(1.0, interval))
             if (now := time.monotonic()) - _Watched.last >= interval:
                 minutes, seconds = divmod(int(now - started), 60)
-                print(f"  ... still running, {minutes}m{seconds:02d}s elapsed", flush=True)
+                stream.write(f"  ... still running, {minutes}m{seconds:02d}s elapsed\n")
+                stream.flush()
 
     threading.Thread(target=watch, name="vmex-heartbeat", daemon=True).start()
-
 
 _watch_for_silence()
 
