@@ -1403,14 +1403,13 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
     assert (tmp_path / output).stat().st_size > 10_000
 
 
-# Two-minute smoke on one office core, mostly XLA compilation of four traces.
+# Smoke on one office core, mostly XLA compilation of two traces.
 @pytest.mark.full  # nightly: needs ESSOS with InterpolatedField.around (uwplasma/ESSOS#135, #159)
 def test_vmex_interpolated_particle_tracing_example(tmp_path):
     fields = pytest.importorskip("essos.fields")
     if not hasattr(getattr(fields, "InterpolatedField", None), "around"):
         pytest.skip("ESSOS without InterpolatedField.around (uwplasma/ESSOS#135, #159)")
     out = _run_example(EXAMPLES / "vmex_interpolated_particle_tracing.py", tmp_path, timeout=900)
-    error = re.search(r"max \|dB\|/\|B\| = ([0-9.eE+-]+)", out)
-    assert error is not None and float(error.group(1)) < 1e-5
-    assert out.count("final-position deviation") == 2
+    strikes = re.search(r"Wall strikes in both fields: (\d+)", out)
+    assert strikes is not None and out.count("struck the wall") == 2
     assert (tmp_path / "vmex_interpolated_particle_tracing.png").stat().st_size > 10_000

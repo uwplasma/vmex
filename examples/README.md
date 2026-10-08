@@ -65,9 +65,10 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
     stop after leaving the LCFS neighborhood.
     The finite-beta coil fixture is reproduced by ESSOS
     `examples/coil_optimization/optimize_coils_finite_beta_vmex.py`.
-  - `vmex_interpolated_particle_tracing.py` *(preview)* — tabulate the VMEX
-    field with ESSOS `InterpolatedField.around` (needs uwplasma/ESSOS#135, #159) and compare
-    guiding-centre and full-orbit traces against direct evaluation.
+  - `vmex_interpolated_particle_tracing.py` *(preview)* — guiding centres
+    from a VMEX equilibrium and ESSOS coils to a wall with
+    `vj.essos_tracing_fields`, tabulated exterior field (ESSOS
+    `InterpolatedField.around`, needs uwplasma/ESSOS#135, #159) against direct.
   - `vmex_fixed_free_boundary_comparison.py` *(preview)* — compare a parent
     free boundary with an `s=0.5` fixed-boundary solve and its exterior field.
 - `optimization/`: compact QA/QH/QP/QI scripts using `(function, target,
