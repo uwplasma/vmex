@@ -2671,6 +2671,42 @@ def _resolved_chunk_sizes(
     return probe, response
 
 
+# Forward-mode probes vectorized together per surface in the colored band build:
+# 4096 // ns probes (132 at ns = 31, 40 at ns = 101) bounds the batch's memory.
+_COLORED_PROBE_BUDGET = 4096
+
+
+def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk):
+    """``(lower, diagonal, upper)`` of a nearest-neighbor block-tridiagonal operator.
+
+    Three-coloring of the radial index: perturbing component ``q`` on every
+    surface ``k`` with ``k % 3 == c`` leaves each output row ``i`` excited by
+    exactly one of its neighbors ``i - 1, i, i + 1``, so ``3 * block_size``
+    forward-mode probes of the full operator recover every block, in place of
+    ``ns * block_size`` sequential reverse sweeps of the local kernel.  Inactive
+    columns get the identity, as in the per-row build.
+    """
+    surfaces = jnp.arange(ns)
+
+    def probe(index):
+        color, q = index // block_size, index % block_size
+        mask = (surfaces % 3 == color).astype(dtype)
+        delta = mask[:, None] * jax.nn.one_hot(q, block_size, dtype=dtype)[None, :]
+        tangent = project(unpack(delta))
+        return pack(project(operator(tangent))) + delta - pack(tangent)
+
+    responses = jax.lax.map(probe, jnp.arange(3 * block_size), batch_size=int(chunk))
+    responses = responses.reshape(3, block_size, ns, block_size)  # color, input, row, output
+
+    def band(offset):
+        neighbor = jnp.clip(surfaces + offset, 0, ns - 1)
+        columns = responses[neighbor % 3][surfaces, :, surfaces, :]  # row, input, output
+        return jnp.swapaxes(columns, 1, 2)
+
+    lower, diagonal, upper = band(-1), band(0), band(1)
+    return lower.at[0].set(0.0), diagonal, upper.at[-1].set(0.0)
+
+
 def _raw_block_system(
     params: ImplicitParams,
     cfg: ImplicitConfig,
@@ -2705,6 +2741,12 @@ def _raw_block_system(
     block_size = n_active * mn
     project = _dof_projector(cfg, dof_mask)
     z_star = project(frozen) if z_star is None else project(z_star)
+    # The default fixed-boundary system is built by colored forward-mode
+    # probes of the full operator; callers that freeze part of the physics
+    # (free boundary: NESTOR's edge pressure, the edge row) keep the per-row
+    # local kernel, which is what defines their blocks.
+    colored = (residual is None and runtime is None and physical_state is None
+               and not include_edge)
     residual = (residual_fn(cfg, frozen, dof_mask, formulation="raw")
                 if residual is None else residual)
 
@@ -2789,28 +2831,34 @@ def _raw_block_system(
             chunk_size=min(int(probe_chunk_size), block_size),
         )
 
-    # Rows 0 and 1 depend on VMEC's lambda-axis closure. All later rows share
-    # one ordinary local kernel; lax.map keeps the compile graph bounded in ns.
-    axis_rows = jnp.arange(min(2, ns))
-    axis_jacobians = jax.lax.map(
-        lambda row: row_jacobian(row, axis_closure=True), axis_rows)
-    ordinary_rows = jnp.arange(2, ns)
-    ordinary_jacobians = jax.lax.map(
-        lambda row: row_jacobian(row, axis_closure=False), ordinary_rows)
-    jacobians = jnp.concatenate((axis_jacobians, ordinary_jacobians), axis=0)
-    rows = jnp.arange(ns); starts = jnp.clip(rows - 1, 0, ns - 3)
+    if colored:
+        lower, diagonal, upper = _colored_bands(
+            operator, pack, unpack, project, ns, block_size, dtype,
+            # each probe carries a full-operator tangent; bound the batch by ns
+            min(block_size, max(8, _COLORED_PROBE_BUDGET // ns)))
+    else:
+        # Rows 0 and 1 depend on VMEC's lambda-axis closure. All later rows share
+        # one ordinary local kernel; lax.map keeps the compile graph bounded in ns.
+        axis_rows = jnp.arange(min(2, ns))
+        axis_jacobians = jax.lax.map(
+            lambda row: row_jacobian(row, axis_closure=True), axis_rows)
+        ordinary_rows = jnp.arange(2, ns)
+        ordinary_jacobians = jax.lax.map(
+            lambda row: row_jacobian(row, axis_closure=False), ordinary_rows)
+        jacobians = jnp.concatenate((axis_jacobians, ordinary_jacobians), axis=0)
+        rows = jnp.arange(ns); starts = jnp.clip(rows - 1, 0, ns - 3)
 
-    def select(jacobian, local_column):
-        return jax.lax.dynamic_index_in_dim(
-            jacobian, local_column, axis=1, keepdims=False)
+        def select(jacobian, local_column):
+            return jax.lax.dynamic_index_in_dim(
+                jacobian, local_column, axis=1, keepdims=False)
 
-    diagonal = jax.vmap(select)(jacobians, rows - starts)
-    lower = jnp.zeros_like(diagonal).at[1:].set(jax.vmap(select)(
-        jacobians[1:], rows[1:] - 1 - starts[1:]))
-    upper = jnp.zeros_like(diagonal).at[:-1].set(jax.vmap(select)(
-        jacobians[:-1], rows[:-1] + 1 - starts[:-1]))
-    lower = lower.at[0].set(jnp.zeros_like(lower[0]))
-    upper = upper.at[-1].set(jnp.zeros_like(upper[-1]))
+        diagonal = jax.vmap(select)(jacobians, rows - starts)
+        lower = jnp.zeros_like(diagonal).at[1:].set(jax.vmap(select)(
+            jacobians[1:], rows[1:] - 1 - starts[1:]))
+        upper = jnp.zeros_like(diagonal).at[:-1].set(jax.vmap(select)(
+            jacobians[:-1], rows[:-1] + 1 - starts[:-1]))
+        lower = lower.at[0].set(jnp.zeros_like(lower[0]))
+        upper = upper.at[-1].set(jnp.zeros_like(upper[-1]))
     tiny = jnp.finfo(dtype).tiny
     row_norm = jnp.maximum(
         jnp.max(jnp.abs(diagonal), axis=-1),

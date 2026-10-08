@@ -566,6 +566,26 @@
         "README.md"
       ],
       "note": "Solves the bundled Landreman-Paul QA beta = 2.5 % bootstrap deck, runs the README command vmex --neoclassical --nc-profiles (default preset, DKX 2.8.0 from PyPI) with the deck's published n and T profiles, and draws the *_neoclassical.h5 it writes in eight panels: D11*, D31*, D33* against nu', |B| at r/a = 0.5, the ambipolar E_r, the bootstrap <j.B> from DKX, VMEX's Redl formula and the equilibrium, and the species particle and heat fluxes. 1100 px WebP, quality 40. Rendered twice on the recording host with byte-identical output."
+    },
+    {
+      "path": "docs/_static/figures/readme_vmex_mrx_comparison.webp",
+      "sha256": "72c46ff8f0b4932babc4aeaf55ecf319a465ec96ddefb410a738f4a645ce37c7",
+      "bytes": 72158,
+      "generator": "examples/vmex_mrx_comparison.py",
+      "command": "python examples/vmex_mrx_comparison.py && cp output_vmex_mrx_comparison/readme_vmex_mrx_comparison.webp docs/_static/figures/",
+      "inputs": [
+        "examples/data/input.LandremanPaul2021_QA_beta2p5_bootstrap"
+      ],
+      "record": null,
+      "generated": "2026-10-08",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md",
+        "docs/explanation/validation.md"
+      ],
+      "note": "Needs the optional mrx package (pip install mrx). VMEX solves the deck to ns = 65 and MRX relaxes that field with 10 Newton steps on (12, 16, 16), p = 3; the example writes this WebP beside its PNG. The bytes come from one run and were not re-derived."
     }
   ]
 }
