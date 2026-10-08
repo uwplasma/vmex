@@ -566,6 +566,26 @@
         "README.md"
       ],
       "note": "Solves the bundled Landreman-Paul QA beta = 2.5 % bootstrap deck, runs the README command vmex --neoclassical --nc-profiles (default preset, DKX 2.8.0 from PyPI) with the deck's published n and T profiles, and draws the *_neoclassical.h5 it writes in eight panels: D11*, D31*, D33* against nu', |B| at r/a = 0.5, the ambipolar E_r, the bootstrap <j.B> from DKX, VMEX's Redl formula and the equilibrium, and the species particle and heat fluxes. 1100 px WebP, quality 40. Rendered twice on the recording host with byte-identical output."
+    },
+    {
+      "path": "docs/_static/figures/position_control.webp",
+      "sha256": "869bebed5d9cc6f84c259d6e4828ae7af8d657bdbf9a2d22f41936a0a72eb43b",
+      "bytes": 28954,
+      "generator": "examples/free_boundary_position_control.py",
+      "command": "python examples/free_boundary_position_control.py && cp readme_position_control.webp docs/_static/figures/position_control.webp",
+      "inputs": [
+        "examples/data/input.DIII-D_lasym_false",
+        "examples/data/d3d_chebyshev_field.npz"
+      ],
+      "record": null,
+      "generated": "2026-10-08",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "docs/howto/free-boundary.md"
+      ],
+      "note": "Five uniform vertical-field offsets, each solved with and without position control. Written to the working directory as lossless WebP (the figure block is skipped under VMEX_EXAMPLES_CI=1); copy it over the committed one to reproduce."
     }
   ]
 }

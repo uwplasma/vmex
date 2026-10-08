@@ -167,6 +167,17 @@ multiples of `mu0 |I| / (4 pi R0^2)`, so the defaults transfer between
 machines, and `result.position_control` holds the amplitudes, targets and
 the per-update history (`iteration, fsq, bz..., br..., measured...`).
 
+```{image} /_static/figures/position_control.webp
+:alt: Axis position, convergence and recovered vertical field with and without position control
+```
+
+`examples/free_boundary_position_control.py` shows the benefit on the DIII-D-like
+fixture with a mis-set vertical field: a 40 mT deficit makes the uncontrolled
+solve fail (fsq 1e-5 after 8000 iterations, axis 23 cm inboard) and a 40 mT
+excess carries the axis 58 cm outboard, while with control the axis stays
+within 3.5 mm of its target, every solve converges, and `B_Z^ctrl` reports the
+missing field to 0.7 mT.
+
 The default is off: without `position_control` the code path and results are
 unchanged. On the stable DIII-D-like regression fixture a 2 cm outward
 target converges to `fsq = 1.1e-10` with `B_Z^ctrl = +4 mT`; the converged
