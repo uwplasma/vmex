@@ -7,20 +7,10 @@
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
 [![Docs](https://img.shields.io/readthedocs/vmex/latest?label=docs)](https://vmex.readthedocs.io/en/latest/)
 
-VMEX is a JAX reimplementation of VMEC2000, the standard code for
-three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads
-VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum
-field driven by an MGRID table or coils), reproduces VMEC2000's iteration
-and writes standard `wout_*.nc` files. Because the solver is written in JAX,
-VMEX also differentiates the converged equilibrium through the implicit
-function theorem, so boundary, profile and coil parameters can be optimized
-with derivatives of the discrete equilibrium equations.
-
-The goal is fast, differentiable and VMEC2000-compatible equilibria for
-stellarator optimization, including single-stage design, in which the plasma
-boundary and the coils are optimized together. VMEX also computes Boozer
-transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
-and stability diagnostics, and has a separate lane for open mirrors.
+VMEX solves VMEC2000-compatible fixed- and free-boundary ideal-MHD equilibria in JAX,
+reads VMEC inputs and writes standard `wout_*.nc` files. Implicit derivatives
+support boundary, profile and coil optimization; Boozer transforms, fields,
+stability diagnostics and open-mirror models support the wider workflow.
 
 - **Use existing workflows:** VMEC input decks and `wout_*.nc` output, `NS_ARRAY` multigrid
   continuation, hot restart from a saved WOUT, and DESC inputs and outputs read without DESC.
@@ -48,21 +38,15 @@ vmex --doctor
 vmex --test
 ```
 
-`pip install vmex` is enough to solve, plot, restart, compute Boozer spectra and optimize with SciPy.
-Its required dependencies include JAX (CPU), SciPy, netCDF4 and h5py, and two uwplasma packages that
-the solver itself calls: [`solvax`](https://pypi.org/project/solvax/) for the linear solvers (the
-radial preconditioner, polishing least squares, GMRES) and
-[`booz_xform_jax`](https://pypi.org/project/booz_xform_jax/) for the Boozer transform. `vmex --doctor`
-prints the interpreter, package versions and JAX devices; `vmex --test` solves a bundled QH deck
-end to end and writes its figures to `./vmex_test/`.
+The core install solves, plots, restarts and optimizes with SciPy. `vmex --doctor`
+reports dependencies and devices; `vmex --test` solves a bundled QH case.
 
 Python 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, so a 3.11 environment
 resolves an older JAX; 3.12 or newer is recommended.
 
 ### Optional packages for the full capabilities
 
-Each extra installs one more package from PyPI and turns on the features that need it. Install all
-of them with
+Install every optional feature with
 
 ```console
 pip install "vmex[all]"
@@ -104,12 +88,9 @@ an `ImportError` that names the package to install; the core solver never import
 
 ### GPU, conda-forge and source installs
 
-VMEX does not force a GPU build of JAX, because the right wheel depends on the platform and the
-CUDA or ROCm version. Install VMEX, then JAX for the accelerator following the
-[JAX installation guide](https://docs.jax.dev/en/latest/installation.html) (for example
-`pip install -U "jax[cuda13]"`), and read the [VMEX GPU guide](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html)
-before choosing a device. `conda install --channel conda-forge vmex` installs the core package; its
-feedstock may lag PyPI, and the extras above come from pip. For development:
+Install accelerator support through the [JAX guide](https://docs.jax.dev/en/latest/installation.html)
+and select a device using the [VMEX GPU guide](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html).
+`conda install --channel conda-forge vmex` installs the core package. For development:
 
 ```console
 git clone --filter=blob:none https://github.com/uwplasma/vmex
@@ -258,56 +239,33 @@ convergence checks, constraints, scaling and finite-difference verification.
 
 ## How VMEX works
 
-1. **Energy principle.** VMEX finds a stationary point of `W = ∫ (B²/2μ₀ + p/(γ−1)) dV` over
-   nested flux surfaces, where `J × B = ∇p`. As in VMEC, the unknowns are the surface shapes `R`, `Z`
-   and the angle function `λ`: Fourier series in both angles, finite differences in radius.
-2. **Spectral force iteration.** Each iteration evaluates the Fourier-projected forces and takes a
-   damped second-order Richardson step with VMEC2000's time-step control and restarts, in its
-   order. A radial tridiagonal preconditioner per Fourier mode makes the step effective (a 2-D block
-   preconditioner is opt-in), and `NS_ARRAY` runs a coarse-to-fine radial multigrid ladder. The
-   solve has converged when `FSQR`, `FSQZ` and `FSQL` fall below `FTOL`.
-3. **Free boundary.** NESTOR solves the exterior Neumann problem for the vacuum potential with
-   Merkel's Green's-function method, driven by an MGRID table or a coil field; pressure balance
-   across the boundary moves the plasma surface.
-4. **Implicit derivatives.** At a root `F(x, p) = 0` of the force residual, `dx/dp = −(∂F/∂x)⁻¹ ∂F/∂p`.
-   A scalar objective needs one adjoint linear solve for all parameters, and least-squares
-   Jacobians factor the block-tridiagonal radial operator once. The forward iterations are not
-   recorded, so memory does not grow with their number. The derivative assumes that the state is a
-   root (on a fixed boundary VMEX first Newton-refines it to `refine_tol = 1e-10`), that `∂F/∂x` is
-   invertible there, and that perturbed solves stay on the same branch. It is the derivative of the
-   discrete equations, not of the continuum problem.
-5. **Virtual casing.** `VmecExtender` adds the plasma currents' field, a surface integral over
-   the boundary field, to the coil field outside the plasma; its error grows near the surface.
+VMEX finds a stationary point of MHD energy on nested flux surfaces and differentiates the converged
+discrete force equations. The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.html)
+give the derivations and assumptions.
 
-The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.html) derive each step.
+| Step | Method |
+|---|---|
+| Equilibrium | Fourier modes in both angles, radial finite differences, VMEC2000-style force iteration and `NS_ARRAY` continuation |
+| Free boundary | NESTOR vacuum solve driven by an MGRID table or coils; pressure balance moves the boundary |
+| Gradients | Implicit adjoints at a converged root; one linear solve gives a scalar gradient over all parameters |
+| Exterior field | `VmecExtender` adds the plasma's virtual-casing field to the coil field |
 
-## Results
+## VMEX Highlights
 
-- **VMEC2000 parity.** CI solves six decks against stored VMEC2000 output and requires `wb` within
-  `1e-7` relative, `iota` and `R`, `Z` harmonics on three surfaces within `1e-5`, and iteration
-  counts within ±25%. On six decks never run before (ITER, W7-X, HSX, ARIES-CS, ESTELL,
-  Nührenberg–Zille), the worst relative difference from VMEC2000 was `2.5e-10`, and the iteration
-  counts were identical on five and one apart on the sixth
-  ([record](benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md), VMEX 0.8.1).
-- **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
-  wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
-  mostly XLA compilation, which a repeated solve in one process skips. In the older
-  [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
-  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
-  shipped deck or problem size ran faster than on the CPU.
-- **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
-  gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
-  value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
-  ([record](benchmarks/qa_optimization_startup_least_squares_m4.json), VMEX 0.7.0).
-- **Validation record.** The [validation record](docs/explanation/validation.md) lists every
-  gate, tolerance and benchmark record, with the measured accuracy of each lane.
+| Result | Measured scope |
+|---|---|
+| VMEC2000 parity | Six CI decks test energy within `1e-7` and selected harmonics within `1e-5`; six [fresh decks](benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md) reached `2.5e-10` worst measured relative difference. |
+| Solve time | On those fresh decks, warm-cache VMEX/VMEC2000 wall-time ratios were 0.50–1.34 on an Apple M4 CPU; [cold and larger-case results](https://vmex.readthedocs.io/en/latest/reference/performance.html) differ. |
+| Derivatives | CI agrees with central differences to `1e-6` on Solov'ev cases and `2e-4` on a 3-D boundary gradient; a [48-parameter QA evaluation](benchmarks/qa_optimization_startup_least_squares_m4.json) took 16.6 s warm. |
+
+The [validation record](docs/explanation/validation.md) lists test limits and benchmark inputs.
 
 ![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
 
 The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
 (`python benchmarks/make_readme_figures.py --only convergence`).
 
-## What you can build
+## Stellarator optimization
 
 Every figure below is regenerated by the script named beside it, from decks in this repository.
 
@@ -347,46 +305,6 @@ against one weighted objective, solving the equilibrium implicitly at every step
 print final plasma and coil metrics. Each free-boundary trial is Newton-refined onto the root of the
 coupled plasma-vacuum residual, where its gradient is exact.
 
-### Open mirrors and stellarator-mirror hybrids
-
-The same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, solved by
-minimizing the MHD energy. What changes is the coordinate system. A tokamak or stellarator has one
-non-periodic coordinate (the flux label `s`) and two periodic angles. An open mirror uses
-`(s, theta, xi)`: two non-periodic coordinates, the flux label `s` in `[0, 1]` and the axial
-coordinate `xi` in `[-1, 1]` between two end cuts, and one periodic angle `theta`. So `theta` keeps
-Fourier modes, `xi` gets clamped cubic B-splines instead of toroidal modes, and the end cuts
-`xi = ±1` become boundary conditions: their nested surfaces are prescribed and flux passes through
-them, while the free boundary couples the side surface `s = 1` to an open exterior vacuum problem.
-The field is divergence-free by construction, `sqrt(g) B^theta = I'(s) - d(lambda)/d(xi)`,
-`sqrt(g) B^xi = Psi'(s) + d(lambda)/d(theta)`, `B^s = 0`, which is the Clebsch form
-`B = grad Psi x grad alpha` with field-line label `alpha = theta + lambda/Psi' - (I'/Psi') xi`
-([mirror geometry](https://vmex.readthedocs.io/en/latest/explanation/mirror-geometry.html)). A
-stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns and uses a
-periodic spline along its length.
-
-```console
-vmex examples/data/input.mirror_two_coil_free_boundary --plot   # a &MIRROR deck, writes mout_*.nc
-```
-
-```python
-from vmex.mirror import MirrorInput, solve_mirror
-solution = solve_mirror(MirrorInput.from_file("examples/data/input.mirror_two_coil_free_boundary"))
-```
-
-You give the boundary (or the coils), flux and pressure; `solve_mirror` builds the spline grid,
-initial state and exterior grid.
-
-![VMEX against Pleiades on a two-coil free-boundary mirror](docs/_static/figures/readme_mirror_pleiades.webp)
-
-Benchmarked against the independent Pleiades Green-function code on the two-coil mirror from vacuum to
-10% beta: the on-axis field agrees to 7.5e-4 or better on the finer VMEX grid, the difference halves
-under refinement, and what remains is the size of Pleiades' own grid error
-(`docs/_static/figures/sources/make_mirror_pleiades_figure.py`). More mirror and hybrid examples, and
-which lanes are validated: [mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html).
-
-![Fixed-boundary non-axisymmetric mirror](docs/_static/figures/mirror_fixed_boundary_3d.webp)
-![Stellarator-mirror hybrid](docs/_static/figures/stellarator_mirror_hybrid.webp)
-
 ### Running the examples
 
 The examples live in the repository, not in the wheel. From a clone:
@@ -422,55 +340,50 @@ and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/us
 
 ## Fields, coils and free boundary
 
-The equilibrium exposes Cartesian `B()` and its first three derivatives, with VJPs, anywhere inside
-the plasma (`set_points_xyz`, `set_points_flux`); it reads the current 10 to 70 times more
-accurately than the WOUT file. Outside, `vj.VmecExtender.from_file("wout_my_case.nc",
-external_field=coils.B)` adds the plasma's virtual-casing field to the coils, accurate to about 1e-12
-down to 0.01 minor radii. Coil and MGRID fields enter free-boundary solves as `MgridField`
-(trilinear or tricubic).
+The equilibrium provides Cartesian `B()` and three spatial derivatives inside the plasma.
+`VmecExtender` adds the plasma's virtual-casing field to coils outside it;
+coil and MGRID fields also drive free-boundary solves.
 
 ![Poincare sections of the extended field around finite-beta free-boundary QA equilibria, one with an iota = 1/2 island chain](docs/_static/figures/readme_extender_islands.webp)
 
-The Landreman-Paul QA held by its coils as a free boundary at 1.0% beta, and the field lines of
-the extended field (coils plus the plasma's virtual-casing field) launched outside it. Without net
-current (left) closed surfaces continue 3.1 cm past the LCFS, then the lines open. A 4 kA toroidal
-current (middle, and unrolled on the right) lifts the edge iota to 0.514, so iota = 1/2 falls just
-outside the plasma: an island chain about 0.9 cm wide opens from the LCFS, closed surfaces
-surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX from `examples/data` alone
-(`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
-are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+At 1% beta, the coil-held QA case develops a 0.9 cm exterior island chain when
+4 kA of toroidal current raises edge iota to 0.514. The
+[figure source](docs/_static/figures/sources/make_extender_islands_figure.py)
+and [fields guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html)
+give the construction and vacuum comparison.
 
 ## Accuracy and optional polishing
 
-A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged; it does not bound the continuous
-force error `J × B − ∇p`. Optional polishing (`--polish`, or `polish=True`) re-solves that force on
-a native quintic-spline representation — constrained Gauss–Newton steps with force-driven knot
-insertion, then one exact-Hessian Newton step — and certifies it with an independent oracle. To
-request it from a deck, put this line at the top of the INDATA file (VMEC2000 reads it as a
-comment; VMEX runs the native polish after the solve):
+Small `FSQR/FSQZ/FSQL` values certify the discrete solve, not the continuous
+force error `J × B − ∇p`. Optional `--polish` reduces that error on a quintic-spline
+representation and checks it independently. An input deck can request polishing with:
 
 ```fortran
 ! VMEX: POLISH_FORCE_BALANCE = .TRUE.
 ```
 
-It currently applies to axisymmetric fixed-boundary decks with prescribed pressure and iota
-(`NCURR = 0`, `GAMMA = 0`, `LASYM = F`); any other deck with the directive stops with an input
-error. Non-axisymmetric polishing is a research lane.
+The supported lane is axisymmetric fixed boundary with prescribed pressure and
+iota (`NCURR = 0`, `GAMMA = 0`, `LASYM = F`).
+
+`vmex examples/data/input.shaped_tokamak_pressure --polish --plot --outdir polish_run` writes one polished
+WOUT and its diagnostic plots. To reproduce the before-and-after figures below, run
+`python examples/force_balance_polishing.py` from the repository root; it writes the
+ordinary and polished WOUTs on the same 370-surface mesh before plotting them.
+`examples/data/input.shaped_tokamak_pressure_polished` is a different, current-constrained
+benchmark with a smaller boundary and different profiles; it is not the figure source.
 
 ![Force error of a shaped finite-pressure tokamak before and after polishing](docs/_static/figures/readme_polish_before_after.webp)
 
-`python examples/force_balance_polishing.py` (about a minute with a warm compilation cache) polishes
-`input.shaped_tokamak_pressure` to an RMS force of 7e-6 of `volavgB²/(μ₀ Aminor_p)` with projected
-stationarity 1e-10. Read back from WOUT files on the same 370-surface mesh, the RMS force falls from
-2.0e5 to 42 N m⁻³ over the volume, from 9.8e5 to 190 near the axis (`ρ < 0.2`) and from 3.2e3 to 23
-at the edge; the written file reproduces the native certificate.
-`eps_F` is bounded above by 2 by construction and saturates in vacuum; read the dimensional metrics with it.
+On matching 370-surface WOUTs, the whole-volume RMS force falls from
+`2.0e5` to `42 N m⁻³`; near-axis RMS falls from `9.8e5` to `190 N m⁻³`.
+The [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
+defines the dimensional force and normalized `eps_F` metrics.
+`eps_F` is bounded above by 2 by construction; report it with dimensional force.
 
 ![vmex --plot of the unpolished and polished WOUT files](docs/_static/figures/readme_polish_plot.webp)
 
-The same two files through `vmex --plot`: the summary's `⟨|F|⟩/⟨|∇(B²/2μ₀)|⟩` falls from 3.9e-4 to
-7.7e-6. See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
-and the [validation record](docs/explanation/validation.md).
+The same files give a `--plot` normalized force ratio of `3.9e-4` versus
+`7.7e-6`; see the [validation record](docs/explanation/validation.md).
 
 `python examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with
 [MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces, starting from the
@@ -504,3 +417,32 @@ then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
 `pip install -e ".[dev]"` and `python tools/preflight.py --static`. Report issues with the input deck
 and `vmex --doctor` output. See [contributing](CONTRIBUTING.md), [citation](CITATION.cff),
 [license](LICENSE) and the [archived plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md).
+
+## Open mirrors and stellarator-mirror hybrids
+
+The open-mirror model uses axial splines and poloidal Fourier modes between
+prescribed end cuts, with a free side boundary. Stellarator-mirror hybrids
+join straight mirror legs with curved returns; the
+[mirror geometry guide](https://vmex.readthedocs.io/en/latest/explanation/mirror-geometry.html)
+gives the coordinates and field equations.
+
+```console
+vmex examples/data/input.mirror_two_coil_free_boundary --plot   # a &MIRROR deck, writes mout_*.nc
+```
+
+```python
+from vmex.mirror import MirrorInput, solve_mirror
+solution = solve_mirror(MirrorInput.from_file("examples/data/input.mirror_two_coil_free_boundary"))
+```
+
+Specify the boundary or coils, flux and pressure; `solve_mirror` builds the grids.
+
+![VMEX against Pleiades on a two-coil free-boundary mirror](docs/_static/figures/readme_mirror_pleiades.webp)
+
+From vacuum to 10% beta, the two-coil on-axis field agrees with Pleiades to
+`7.5e-4` or better on the finer grid. See the
+[figure source](docs/_static/figures/sources/make_mirror_pleiades_figure.py)
+and [mirror guide](https://vmex.readthedocs.io/en/latest/howto/mirror-machines.html).
+
+![Fixed-boundary non-axisymmetric mirror](docs/_static/figures/mirror_fixed_boundary_3d.webp)
+![Stellarator-mirror hybrid](docs/_static/figures/stellarator_mirror_hybrid.webp)
