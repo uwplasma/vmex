@@ -218,7 +218,8 @@ def _oracle_points():
 
 
 @pytest.mark.full  # nightly: one solovev solve plus two field evaluations
-def test_native_form_matches_the_fitted_field_on_a_solved_equilibrium():
+@pytest.mark.parametrize("deck", ["solovev", "up_down_asymmetric_tokamak"])
+def test_native_form_matches_the_fitted_field_on_a_solved_equilibrium(deck):
     """Every VMEC convention the native form depends on, pinned at once.
 
     The fitted path is independent of all of them: it reads ``B^u``/``B^v``
@@ -227,18 +228,22 @@ def test_native_form_matches_the_fitted_field_on_a_solved_equilibrium():
     ``phip = signgs * phipf_wout / (2 pi)``, and that ``chips`` was moved off
     the half mesh — together, in one number.  They agree to 5.8e-4 here, which
     is the fitted path's own radial accuracy; a wrong convention is a factor,
-    not a fraction of a per cent.
+    not a fraction of a per cent.  Without stellarator symmetry the same
+    comparison pins the sine partners: ``lmnc`` on the native side, the
+    ``B^u``/``B^v`` sine tables on the fitted one.
     """
     import vmex as vj
     from vmex import optimize as opt
 
     equilibrium = opt.solve_equilibrium(
-        vj.VmecInput.from_file(DATA / "input.solovev"), verbose=False)
+        vj.VmecInput.from_file(DATA / f"input.{deck}"), verbose=False)
     spectra = equilibrium.field.spectra
     assert ext._has_native_form(spectra), sorted(spectra)
+    asymmetric = ("rmns", "zmnc", "lmnc", "bsupu_s", "bsupv_s")
+    assert all((spectra[key] is not None) == spectra["lasym"] for key in asymmetric)
 
     fitted = {key: value for key, value in spectra.items()
-              if key not in ("lmns", "phipf", "chipf")}
+              if key not in ("lmns", "lmnc", "phipf", "chipf")}
     points = ext._flux_coordinates_to_xyz(
         spectra, jnp.array([[0.25, 0.6, 0.0], [0.5, 2.0, 0.4], [0.8, 4.0, 1.1]]))
     native_B = np.asarray(ext.VmecInteriorField(spectra).B(points))
@@ -351,3 +356,35 @@ def test_fitted_fallback_keeps_its_measured_accuracy():
         assert columns[name][0] > 10.0 * columns[name][-1], (name, columns[name])
     for name in ("gradgradB", "gradgradgradB"):
         assert columns[name][0] < 2.0 * columns[name][-1], (name, columns[name])
+
+
+def test_sine_partners_add_nothing_when_zero():
+    """Zero sine families leave every symmetric value bit for bit."""
+    import vmex as vj
+    from vmex import optimize as opt
+
+    spectra = opt.solve_equilibrium(
+        vj.VmecInput.from_file(DATA / "input.solovev"), verbose=False).field.spectra
+    padded = dict(spectra, rmns=0 * spectra["rmnc"], zmnc=0 * spectra["zmns"],
+                  lmnc=0 * spectra["lmns"], bsupu_s=0 * spectra["bsupu"],
+                  bsupv_s=0 * spectra["bsupv"])
+    points = ext._flux_coordinates_to_xyz(spectra, jnp.array([[0.3, 0.4, 0.2], [0.7, 3.0, 1.0]]))
+    np.testing.assert_array_equal(ext._flux_coordinates_to_xyz(padded, jnp.array([[0.3, 0.4, 0.2]])),
+                                  points[:1])
+    for field in (spectra, {k: v for k, v in spectra.items() if k not in ("lmns", "phipf", "chipf")}):
+        twin = dict(padded, **{k: None for k in ("lmns", "phipf", "chipf") if k not in field})
+        np.testing.assert_allclose(ext.VmecInteriorField(twin).gradB(points),
+                                   ext.VmecInteriorField(field).gradB(points), rtol=1e-13, atol=0)
+
+
+def test_traceable_sine_analysis_is_wrout():
+    """The traceable sine analysis is ``wrout_sin_coeffs`` on any field."""
+    from vmex.core.fourier import Resolution, mode_table, trig_tables
+    from vmex.core.nyquist import wrout_sin_coeffs
+    from vmex.core.virtual_casing import _wrout_cos_coeffs_jax
+
+    trig = trig_tables(Resolution(mpol=5, ntor=3, ntheta=16, nzeta=8, nfp=2, lasym=True, ns=3))
+    modes = mode_table(5, 3)
+    f = np.random.default_rng(3).normal(size=(3, int(trig.ntheta3), 8))
+    np.testing.assert_allclose(_wrout_cos_coeffs_jax(f, modes, trig, sine=True),
+                               wrout_sin_coeffs(f=f, modes=modes, trig=trig), rtol=1e-13, atol=1e-15)
