@@ -756,3 +756,26 @@ def test_integrator_keywords_reach_essos(solovev_wout, monkeypatch):
     with pytest.raises(ValueError, match="tolerance must be positive"):
         trace_alphas(solovev_wout, **kwargs, tolerance=0.0)
 
+
+
+def test_trace_devices_default_to_every_cpu_or_one_gpu(solovev_wout, monkeypatch):
+    """CPU runs split over every device, GPU runs keep one; an explicit list wins."""
+    import essos.boozer
+    import jax
+
+    original, seen = essos.boozer.trace_boozer, []
+
+    def recording(*args, **kwargs):
+        seen.append(kwargs["devices"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", recording)
+    cpu = trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert seen[-1] == jax.devices() and cpu.metadata["devices"] == len(jax.devices())
+    explicit = trace_alphas(solovev_wout, **TRACE_KWARGS, devices=jax.devices()[:1])
+    assert seen[-1] == jax.devices()[:1] and explicit.metadata["devices"] == 1
+    gpus = [jax.devices()[0]] * 2
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(jax, "devices", lambda: gpus)
+    trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert seen[-1] == gpus[:1]
