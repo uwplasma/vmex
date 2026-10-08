@@ -269,6 +269,32 @@ Multigrid ladder and stepping
      - Hot restart from the named ``wout_*.nc`` (relative to the deck unless
        absolute); the CLI ``--restart`` flag overrides it.  See
        :doc:`/howto/restart-from-previous-run`.
+   * - ``LPOSITION_CONTROL``
+     - ``F``
+     - VMEX extension
+     - Free boundary only.  Holds the magnetic axis at ``POSITION_TARGET`` with
+       a feedback vertical field and reports it in the run log and
+       ``result.position_control``.  An explicit ``position_control=``
+       argument overrides it.  See :doc:`/explanation/position-control`.
+   * - ``POSITION_TARGET``
+     - ``0``
+     - VMEX extension
+     - Axis radius to hold [m]; a value of zero or less keeps the initial axis.
+   * - ``POSITION_INTERVAL``
+     - ``20``
+     - VMEX extension
+     - Iterations between control updates (a positive integer).
+   * - ``POSITION_GAIN``
+     - ``4``
+     - VMEX extension
+     - Proportional gain in units of ``mu0 |CURTOR| / (4 pi R0^2)``; the
+       integral and derivative gains keep fixed ratios to it.  Raise it for
+       strongly unstable coil sets.
+   * - ``POSITION_NMAX``
+     - ``0``
+     - VMEX extension
+     - Highest helical harmonic controlled (``0`` is the uniform vertical field
+       only; at most ``NTOR``).  Experimental.
    * - ``PRE_NITER``
      - —
      - rejected when active with 2-D GMRES

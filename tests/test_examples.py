@@ -151,6 +151,7 @@ EXECUTED_EXAMPLES = {
     "examples/free_boundary_essos_coils.py",
     "examples/free_boundary_mgrid.py",
     "examples/free_boundary_phiedge.py",
+    "examples/free_boundary_position_control.py",
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
@@ -864,6 +865,18 @@ def test_free_boundary_essos_coils(tmp_path):
     assert abs(actual - nominal) <= 0.15, (
         f"actual betatotal {actual}% not calibrated to nominal {nominal}%")
     assert fsq < 1e-7, f"free-boundary point should converge, fsq={fsq}"
+
+
+def test_free_boundary_position_control(tmp_path):
+    # CI mode solves only the -40 mT vertical-field deficit, without and with control.
+    out = _run_example(EXAMPLES / "free_boundary_position_control.py", tmp_path, timeout=600)
+    row = re.search(r"^\s*-40\.0 \|\s+(\w+)\s+\d+\s+([0-9.eE+-]+)\s+[0-9.]+\s+-?[0-9.]+ \|"
+                    r"\s+(\w+)\s+\d+\s+([0-9.eE+-]+)\s+[0-9.]+\s+(-?[0-9.]+)\s+(-?[0-9.]+)", out, re.M)
+    assert row, out
+    assert row.group(1) == "NO" and float(row.group(2)) > 1e-8, out   # uncontrolled fails
+    assert row.group(3) == "yes" and float(row.group(4)) < 1e-9, out  # controlled converges
+    assert abs(float(row.group(5))) < 1.0, out                        # axis within 1 cm
+    assert abs(float(row.group(6)) - 40.0) < 2.0, out                 # recovers the 40 mT
 
 
 @pytest.mark.full  # nightly: PHIEDGE root solve on the ESSOS QA coils

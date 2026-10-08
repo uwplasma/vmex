@@ -586,6 +586,47 @@
         "docs/explanation/validation.md"
       ],
       "note": "Needs the optional mrx package (pip install mrx). VMEX solves the deck to ns = 65 and MRX relaxes that field with 10 Newton steps on (12, 16, 16), p = 3; the example writes this WebP beside its PNG. The bytes come from one run and were not re-derived."
+    },
+    {
+      "path": "docs/_static/figures/position_control.webp",
+      "sha256": "869bebed5d9cc6f84c259d6e4828ae7af8d657bdbf9a2d22f41936a0a72eb43b",
+      "bytes": 28954,
+      "generator": "examples/free_boundary_position_control.py",
+      "command": "python examples/free_boundary_position_control.py && cp readme_position_control.webp docs/_static/figures/position_control.webp",
+      "inputs": [
+        "examples/data/input.DIII-D_lasym_false",
+        "examples/data/d3d_chebyshev_field.npz"
+      ],
+      "record": null,
+      "generated": "2026-10-08",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "docs/howto/free-boundary.md"
+      ],
+      "note": "Five uniform vertical-field offsets, each solved with and without position control. Written to the working directory as lossless WebP (the figure block is skipped under VMEX_EXAMPLES_CI=1); copy it over the committed one to reproduce."
+    },
+    {
+      "path": "docs/_static/figures/position_control_deck.webp",
+      "sha256": "3b7b0434336f188f6f307a466700f2df328297edfe4df92f0250668a8653e525",
+      "bytes": 30496,
+      "generator": "examples/free_boundary_position_control.py",
+      "command": "python examples/free_boundary_position_control.py && cp readme_position_control_deck.webp docs/_static/figures/position_control_deck.webp",
+      "inputs": [
+        "examples/data/input.DIII-D_position_control",
+        "examples/data/mgrid_d3d_vertical_deficit.nc"
+      ],
+      "record": null,
+      "generated": "2026-10-08",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md",
+        "docs/howto/free-boundary.md"
+      ],
+      "note": "The 40 mT vertical-field deficit deck solved without control (zero-gain PositionControl, which records the trajectory and is bitwise identical to a plain run) and with the deck's own control: axis radius, feedback vertical field and force residual against iteration. The figure block is skipped under VMEX_EXAMPLES_CI=1."
     }
   ]
 }

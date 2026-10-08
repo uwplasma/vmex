@@ -333,6 +333,39 @@ NESTOR free boundary driven by ESSOS coils (or an MGRID table), ramping beta and
 Shafranov shift: `python examples/free_boundary_essos_coils.py`. The exterior field is described
 [below](#fields-coils-and-free-boundary).
 
+### Position control for current-carrying plasmas
+
+![Axis position, feedback vertical field and force residual with and without position control](docs/_static/figures/position_control_deck.webp)
+
+A plasma carrying a toroidal current `I` needs a vertical field of about
+`B_V = mu0 I / (4 pi R) [ln(8R/a) + beta_p + l_i/2 - 3/2]` to stay at radius `R`
+(Shafranov), and its radial position is stable only for a field decay index
+`n = -(R/B_Z) dB_Z/dR` below 3/2. A coil set that is off in either way leaves
+the free-boundary iteration drifting, so tokamaks close the loop with a
+vertical-field coil. VMEX does the same: every `POSITION_INTERVAL` iterations a
+PID law on the error between the magnetic-axis radius and a target sets a
+uniform, curl-free `B_Z^ctrl = -sign(I) g0 [kp e + ki sum(e) dt + kd de/dt]`,
+with `g0 = mu0 |I| / (4 pi R0^2)`, and the converged `B_Z^ctrl` is the vertical
+field the coils were missing. The figure is a DIII-D-like tokamak whose coil
+field is 40 mT short: without control the axis slides to 1.49 m and the solve
+never converges; with control it converges to `fsq = 1.1e-10` and reports
+`B_Z^ctrl = 39.8 mT`.
+
+```bash
+vmex examples/data/input.DIII-D_position_control        # LPOSITION_CONTROL = T in the deck
+```
+
+```python
+result = vj.solve_free_boundary_multigrid(inp, external_field=field,
+                                          position_control=vj.PositionControl(target=1.72))
+print(result.position_control.vertical_field)   # the converged correction [T]
+```
+
+The deck keys are `LPOSITION_CONTROL`, `POSITION_TARGET`, `POSITION_INTERVAL`,
+`POSITION_GAIN` and `POSITION_NMAX`; the physics and equations are in
+[the explanation page](docs/explanation/position-control.md), and
+`python examples/free_boundary_position_control.py` sweeps the offset.
+
 ### Single-stage plasma and coil design
 
 ![Fixed-boundary vacuum single-stage optimization: boundary and coils at each accepted iterate](docs/_static/figures/readme_single_stage_fixed_boundary.webp)

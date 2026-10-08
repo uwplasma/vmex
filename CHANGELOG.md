@@ -7,6 +7,12 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- Free-boundary position control. `solve_free_boundary` and
+  `solve_free_boundary_multigrid` take `position_control=PositionControl(...)`,
+  which adds a feedback-controlled uniform vertical field (and optional
+  helical vacuum harmonics) so a plasma in a radially unstable coil field
+  stays at a target radius; the converged correction is
+  `result.position_control`. Off by default, so existing runs are unchanged.
 - `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
   from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
   toroidal current, pressure). MRX is optional.

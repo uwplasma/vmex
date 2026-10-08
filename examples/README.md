@@ -41,6 +41,11 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   - `free_boundary_essos_coils.py` — free-boundary beta scan directly from
     ESSOS coils (tabulated to a temporary mgrid); `PRES_SCALE` is calibrated per point so the
     *actual* wout `betatotal` hits 0/1/2/3 %.
+  - `free_boundary_position_control.py` — a DIII-D-like free-boundary tokamak
+    with a mis-set vertical field, solved with and without
+    `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
+    for a field deficit) while the controlled one is held and reports the
+    missing `B_Z`.
   - `free_boundary_phiedge.py` — find the PHIEDGE whose free-boundary LCFS
     passes through a target outboard-midplane radius (`vj.solve_phiedge`), for
     comparing with codes pinned by an edge point instead of a flux.

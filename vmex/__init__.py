@@ -111,6 +111,9 @@ links to the module that documents it.
   / :func:`~vmex.core.mgrid.read_mgrid` / :func:`~vmex.core.mgrid.write_mgrid`
   / :func:`~vmex.core.mgrid.tabulate_cartesian_field` — mgrid or tabulated
   direct field (``MgridField.from_coils`` tabulates an ESSOS coil set)
+- :class:`~vmex.core.position_control.PositionControl` — opt-in feedback on a
+  vertical field that holds a plasma at a target radius in a free-boundary
+  solve (``position_control=`` of the free-boundary solvers)
 - :class:`~vmex.core.extender.MagneticField` — base JAX field with explicit
   and stored-point evaluation;
   :class:`~vmex.core.extender.VmecInteriorField` — field inside the plasma;
@@ -316,6 +319,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # external fields
     "MgridData": (".core.mgrid", "MgridData"),
     "MgridField": (".core.mgrid", "MgridField"),
+    "PositionControl": (".core.position_control", "PositionControl"),
     "read_mgrid": (".core.mgrid", "read_mgrid"),
     "tabulate_cartesian_field": (".core.mgrid", "tabulate_cartesian_field"),
     "write_mgrid": (".core.mgrid", "write_mgrid"),

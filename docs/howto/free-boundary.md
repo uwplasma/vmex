@@ -137,6 +137,69 @@ coil_field = vj.MgridField.from_coils(coils, order=3)   # ESSOS coils
   rebuilds the axis filament and NESTOR structures before continuing
   ({doc}`troubleshoot`).
 
+## Position control for radially unstable coil sets
+
+A plasma carrying net toroidal current has no stable position in a vertical
+field that is the wrong size or has too steep a decay index; the iteration then
+drifts and never settles. Tokamak codes close the loop with a vertical-field
+coil, and VMEX does the same as an opt-in, from the deck or from Python
+({doc}`/explanation/position-control` has the physics and the equations).
+
+From a deck, with no Python:
+
+```fortran
+  LPOSITION_CONTROL = T     ! VMEX extension; VMEC2000 ignores it
+  POSITION_TARGET   = 1.7199   ! axis radius to hold [m]; <= 0 keeps the initial axis
+```
+
+```bash
+vmex examples/data/input.DIII-D_position_control
+```
+
+That deck is the DIII-D-like tokamak whose coil field is 40 mT short of
+vertical field. Without control the solve fails (fsq 1.1e-5 after 8000
+iterations, axis 23 cm inboard); with `LPOSITION_CONTROL = T` it converges in
+3875 iterations and the log reports `B_Z^ctrl = 39.8 mT`. The deck keys are
+`LPOSITION_CONTROL` (default `F`), `POSITION_TARGET` (default `0`),
+`POSITION_INTERVAL` (default `20`), `POSITION_GAIN` (default `4`) and
+`POSITION_NMAX` (default `0`); see {doc}`/reference/vmec2000-compatibility`.
+
+From Python the call is the same, and an explicit argument wins over the deck
+(`position_control=False` turns a deck's control off):
+
+```python
+from vmex import PositionControl
+
+result = vj.solve_free_boundary_multigrid(
+    inp, external_field=field,
+    position_control=PositionControl(target=0.98))   # metres; None keeps the initial axis
+print(result.position_control.vertical_field)         # the converged B_Z correction [T]
+```
+
+```{image} /_static/figures/position_control_deck.webp
+:alt: Axis position, feedback vertical field and force residual with and without position control on the 40 mT deficit deck
+```
+
+`PositionControl` also takes `integral_gain`, `derivative_gain`, `max_step`,
+`deadband` and `measure="boundary"`. `nmax >= 1` adds helical vacuum
+harmonics driven by the axis coefficients `R_0n` and `Z_0n`; treat them as
+experimental. `result.position_control` holds the amplitudes, targets and the
+per-update history (`iteration, fsq, bz..., br..., measured...`).
+
+```{image} /_static/figures/position_control.webp
+:alt: Axis position, convergence and recovered vertical field with and without position control
+```
+
+`examples/free_boundary_position_control.py` sweeps the offset: a 40 mT
+deficit makes the uncontrolled solve fail and a 40 mT excess carries the axis
+58 cm outboard, while with control the axis stays within 3.5 mm of its target,
+every solve converges, and `B_Z^ctrl` reports the missing field to 0.7 mT.
+
+The default is off: without the deck flag or the argument the code path and
+results are unchanged, and with all gains zero a controlled run is bitwise
+identical to the plain one. A coil set that needs a large correction is a
+poor coil set, not a solved one.
+
 ## Convergence differences from fixed boundary
 
 The vacuum solve activates only once `fsqr + fsqz <= 1e-3`, so early

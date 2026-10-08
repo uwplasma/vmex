@@ -903,6 +903,10 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             jacobian_retries=int(args.jacobian_retries),
             **freeb_plan.solver_kwargs,
         )
+        ctl = getattr(result, "position_control", None)
+        if ctl is not None:
+            emit(f" POSITION CONTROL: B_Z^ctrl = {1e3 * ctl.vertical_field:.3f} mT, "
+                 f"axis R = {ctl.measured[0]:.4f} m (target {ctl.target[0]:.4f} m)")
     else:
         from .multigrid import solve_multigrid
 

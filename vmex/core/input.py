@@ -138,6 +138,9 @@ _KNOWN_INDATA_NAMES = {
     "LBOOZ", "MBOOZ", "NBOOZ", "BOOZ_SURFACES",
     # VMEX extension: hot restart from a wout file (no VMEC2000 equivalent).
     "RESTART_WOUT",
+    # VMEX extension: free-boundary position control (see core/position_control.py).
+    "LPOSITION_CONTROL", "POSITION_TARGET", "POSITION_INTERVAL",
+    "POSITION_GAIN", "POSITION_NMAX",
 }
 
 def _strip_fortran_comments(line: str) -> str:
@@ -763,6 +766,13 @@ class VmecInput:
     # -- VMEX extension: hot restart (no VMEC2000 equivalent) --
     restart_wout: str = ""       #: wout path to seed the solve from ('' = cold)
 
+    # -- VMEX extension: free-boundary position control (no VMEC2000 equivalent) --
+    lposition_control: bool = False  #: hold the plasma at a target radius with a vertical field
+    position_target: float = 0.0     #: target axis radius [m]; <= 0 keeps the initial axis
+    position_interval: int = 20      #: iterations between control updates
+    position_gain: float = 4.0       #: proportional gain, in units of mu0 I / (4 pi R0^2)
+    position_nmax: int = 0           #: highest helical harmonic controlled (0 = uniform B_Z only)
+
     def __post_init__(self) -> None:
         set_ = object.__setattr__
         set_(self, "lasym", bool(self.lasym))
@@ -781,6 +791,17 @@ class VmecInput:
         set_(self, "precon_type", str(self.precon_type).strip())
         set_(self, "mgrid_file", str(self.mgrid_file).strip())
         set_(self, "restart_wout", str(self.restart_wout).strip())
+        set_(self, "lposition_control", bool(self.lposition_control))
+        set_(self, "position_target", float(self.position_target))
+        set_(self, "position_interval", int(self.position_interval))
+        set_(self, "position_gain", float(self.position_gain))
+        set_(self, "position_nmax", int(self.position_nmax))
+        if self.position_interval < 1:
+            raise ValueError("POSITION_INTERVAL must be a positive iteration count")
+        if self.position_gain <= 0.0:
+            raise ValueError("POSITION_GAIN must be positive")
+        if not 0 <= self.position_nmax <= max(int(self.ntor), 0):
+            raise ValueError("POSITION_NMAX must lie between 0 and NTOR")
 
         # readin.f stops at the first nonpositive or decreasing entry; later
         # values are outside multi_ns_grid and never reach runvmec.f.
@@ -1240,6 +1261,11 @@ class VmecInput:
             precon_type=str(get("PRECON_TYPE", "NONE")),
             prec2d_threshold=float(get("PREC2D_THRESHOLD", 1e-30)),
             restart_wout=str(get("RESTART_WOUT", "")),
+            lposition_control=bool(get("LPOSITION_CONTROL", False)),
+            position_target=float(get("POSITION_TARGET", 0.0)),
+            position_interval=int(get("POSITION_INTERVAL", 20)),
+            position_gain=float(get("POSITION_GAIN", 4.0)),
+            position_nmax=int(get("POSITION_NMAX", 0)),
         )
 
     @classmethod
@@ -1391,6 +1417,12 @@ class VmecInput:
         put("PREC2D_THRESHOLD", self.prec2d_threshold)
         if self.restart_wout:
             put("RESTART_WOUT", self.restart_wout)
+        if self.lposition_control:
+            put("LPOSITION_CONTROL", True)
+            put("POSITION_TARGET", self.position_target)
+            put("POSITION_INTERVAL", self.position_interval)
+            put("POSITION_GAIN", self.position_gain)
+            put("POSITION_NMAX", self.position_nmax)
         put("RAXIS_CC", self.raxis_c)
         put("ZAXIS_CS", self.zaxis_s)
         if self.lasym or np.any(self.raxis_s) or np.any(self.zaxis_c):
