@@ -90,7 +90,7 @@ def mirror_excess(equilibrium_state, solver_context):
 
 objective_function_terms = [
     (qs, 0.0, 1.0),
-    (opt.aspect_ratio, ASPECT_TARGET, 0.01),
+    (opt.aspect_ratio, ASPECT_TARGET, 1.0),  # a summed scalar drowns 0.01
     (iota_floor, 0.0, 10.0),
     (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0),

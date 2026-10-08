@@ -2,7 +2,7 @@
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
 reports the fraction lost through the last closed flux surface. It needs the
-`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.19.5 or later).
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.20.0 or later).
 
 ## Run it
 
@@ -13,7 +13,7 @@ vmex input.case --trace            # solve first, then trace
 
 The default run takes under a minute on a 10-core laptop (see Cost below). While it runs it reports, on
 stderr, the share of `tmax` traced, the elapsed time and an estimate of the time left
-(ESSOS 0.19.5 and later). It then prints the scaling factors, the step, the number of Boozer
+(ESSOS 0.20.0 and later). It then prints the scaling factors, the step, the number of Boozer
 modes, the wall time split into compile and run, and the loss fraction with
 its binomial error:
 
@@ -27,8 +27,9 @@ its binomial error:
 |---|---|---|---|
 | `--trace-particles N` | 500 | ensemble size; the error is `sqrt(f (1 - f) / N)` | linear in `N` |
 | `--trace-tmax T` | `1e-2` | horizon in seconds | linear in `T` |
-| `--trace-method rk4\|dopri5\|dopri8` | `rk4` | fixed-step integrator; alternatives require ESSOS method support | field dependent |
-| `--trace-timestep DT` | size-scaled step | orbit step in seconds | `1 / DT` |
+| `--trace-method adaptive8\|adaptive\|rk4\|dopri5\|dopri8` | `adaptive8` | error-controlled Dopri8 (or Dopri5), or a fixed-step method | field dependent |
+| `--trace-tolerance TOL` | `3e-7` | embedded-error tolerance of the adaptive methods | about `TOL^(-1/8)` |
+| `--trace-timestep DT` | size-scaled step | fixed methods: the step; adaptive: only the first trial step | fixed: `1 / DT` |
 | `--trace-compact`, `--no-trace-compact` | on when supported | compact early losses | loss dependent |
 | `--trace-birth surface\|volume` | `surface` | births on `--trace-s` or through the volume at the D-T fusion rate | none |
 | `--trace-s S` | 0.25 | birth surface `s = psi / psi_b` | none |
@@ -39,7 +40,7 @@ its binomial error:
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
-| `--trace-mode-cut C` | `1e-4` | drop modes below `C` times the largest cosine/sine amplitude | about `1 / C` in modes |
+| `--trace-mode-cut C` | `2e-4` | drop modes below `C` times the largest cosine/sine amplitude | about `1 / C` in modes |
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
 example, going from the default to 5000 alphas over 0.1 s costs 50 times the
@@ -63,12 +64,13 @@ s = 0.3 lost within 0.2 s.
   equilibrium is first scaled in memory to ARIES-CS size: `<B> = 5.8646 T`
   and `a = 1.7044 m` (the `--scale` rule, see {doc}`scale-a-configuration`).
 - **Field.** `booz_xform_jax` transforms every surface to Boozer coordinates.
-  The cosine and sine `|B|` spectra are cut below `1e-4` of the largest
+  The cosine and sine `|B|` spectra are cut below `2e-4` of the largest
   combined amplitude and splined in `sqrt(s)`; `iota`, `G` and `I` are splined in `s`.
 - **Orbits.** The guiding-centre equations in Boozer coordinates (White; the
-  `K = 0` form of SIMSOPT) are integrated with fixed-step RK4 in the chart
+  `K = 0` form of SIMSOPT) are integrated by adaptive Dopri8 in the chart
   `sqrt(s) (cos theta, sin theta)`, which is regular on the magnetic axis, so
-  no orbit stops there. An alpha is lost when it reaches `s = 1`.
+  no orbit stops there. Each alpha's step is controlled so the embedded error
+  stays below `3e-7` (no step to choose). An alpha is lost when it reaches `s = 1`.
 - **Births.** Pitch `v_par / v` is uniform in `[-1, 1)`. The angles follow
   the Boozer Jacobian `(G + iota I) / B^2`. With `--trace-birth volume`, `s`
   follows the D-T rate `n_D n_T <sigma v>(T)`, weighted by the volume
@@ -110,7 +112,7 @@ On an Apple M3 Max laptop (10 performance cores, load average 6-9), the
 default ARIES-CS run (`wout_n3are_R7.75B5.7.nc`, 1000 alphas, 10 ms, 41
 Boozer modes) takes 28 s: 25 s of tracing, of which 1.9 s is compilation.
 It loses 12.3 % ± 1.0 %. The defaults are now 500 alphas (± 1.5 %) and a
-mode cut of 1e-4 (see the convergence section). `--trace` gives JAX one CPU
+mode cut of 2e-4 (see the convergence section). `--trace` gives JAX one CPU
 device per usable core (on Linux, the cores the process may run on). On Apple
 silicon it uses only the performance cores unless there are at least as many
 efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
@@ -126,7 +128,7 @@ minute.
 ## Convergence of the defaults
 
 Twenty equilibria, 1,000 alphas each from `s = 0.25`, traced for 10 ms on
-one RTX A4000 with VMEX 0.11.7 and ESSOS 0.19.5 (after the flux-sign and
+one RTX A4000 with VMEX 0.11.7 and ESSOS 0.20.0 (after the flux-sign and
 alpha-mass corrections). Every run uses the same births, so each cut and the
 halved timestep are compared alpha by alpha with the reference (`1e-5`, default
 step): σ is `(gained - dropped) / sqrt(gained + dropped)` over the alphas whose
@@ -157,12 +159,14 @@ reactor scale, CTH-like and nfp2_QA_omnigenity (which loses everything).
 - **Mode cut.** 1e-4 and 2e-4 stay within 1.7σ of the reference everywhere.
   3e-4 misses the reactor-scale Landreman–Paul QA (−2.4σ): its few
   symmetry-breaking modes sit between `2e-4` and `3e-4` of `B00`. The default
-  is 1e-4; `--trace-mode-cut 2e-4` is safe on all twenty.
-- **Timestep.** The default RK4 step (`1.25e-7 s × a / 1.7044 m`) is the larger
-  error. The energy error exceeds `1e-3` in six cases (bold), up to 27 % in the
-  three-period QI, and halving the step moves the nfp4 QI loss fraction by
-  −3.5σ. Check `max_energy_error` in `*_trace.json`; when it exceeds `1e-3`,
-  rerun with `--trace-timestep` halved or `--trace-method dopri5`.
+  is 2e-4, the coarsest cut that is safe on all twenty.
+- **Timestep.** This table used the earlier fixed RK4 step
+  (`1.25e-7 s × a / 1.7044 m`), which is the larger error: the energy error
+  exceeds `1e-3` in six cases (bold), up to 27 % in the three-period QI, and
+  halving the step moves the nfp4 QI loss fraction by −3.5σ. The default is
+  now adaptive (next section). `--trace` prints the largest energy error after
+  every run and, above `1e-3`, says the orbits are not converged and how to
+  tighten the run.
 - **The `K = 0` equations.** `--trace` drops the radial covariant field
   `K`, which is nonzero only at finite pressure. SIMSOPT traces both forms
   (`gc` with `K`, `gc_noK` without), and on 512 identical births over 5 ms the
@@ -172,6 +176,42 @@ reactor scale, CTH-like and nfp2_QA_omnigenity (which loses everything).
   At these β the `K` term is below the sampling error of prompt losses.
 - Over 10 ms the orbits are chaotic, so individual labels change between any
   two settings; the fraction converges, the labels do not.
+
+### Choice of integrator
+
+Eight of the hardest equilibria above (nfp3 and nfp4 QI, HSX, li383, nfp4 QH
+β 2.5 %, ARIES-CS, W7-X β 5 %, Landreman–Paul QA), 500 alphas, 5 ms, one
+RTX A4000, common births, against adaptive Dopri5 at `1e-10`:
+
+| integrator | total time (8 cases) | worst energy error | loss fraction vs reference |
+|---|---|---|---|
+| fixed RK4, earlier default step | 90 s | 2e-1 | within 2.0σ |
+| fixed RK4, quarter step | 360 s | 4e-4 | within 1.0σ |
+| fixed Dopri8, default step | 256 s | 2e-3 | within 1.4σ |
+| adaptive Dopri5, `1e-8` | 341 s | 3e-5 | within 1.0σ |
+| adaptive Dopri8, `1e-7` | 237 s | 4e-5 | within 1.4σ |
+| adaptive Dopri8, `1e-9` | 589 s | 3e-7 | within 1.0σ |
+
+Adaptive Dopri8 meets the `1e-3` energy gate everywhere, at 2.6 times the
+cost of the unconverged fixed step (at `1e-7`) and 1.5 times cheaper than the
+fixed step that converges. It is what FIRM3D and CATAPULT do
+(adaptive Dormand–Prince). Implicit and IMEX schemes buy nothing on these
+non-stiff equations; a symplectic scheme (SIMPLE, FIRM3D's option) bounds the
+long-time energy error, which these tolerances already keep far below the
+gate over these horizons.
+
+The default tolerance, `3e-7`, comes from all twenty-one equilibria of the
+convergence section (500 alphas, 5 ms, against adaptive Dopri8 at `1e-9`):
+
+| tolerance | total time | worst energy error | worst loss shift |
+|---|---|---|---|
+| `1e-6` | 590 s | 6e-4 | 1.0σ |
+| **`3e-7` (default)** | **671 s** | **1.7e-4** | **1.4σ** |
+| `1e-7` | 791 s | 5e-5 | 1.0σ |
+
+All three pass the `1e-3` gate; `3e-7` keeps a sixfold margin. Loosening the
+tolerance tenfold saves only a quarter of the time, because an eighth-order
+method's step count grows as `tolerance^(-1/8)`.
 
 ## Against SIMPLE and SIMSOPT
 
@@ -183,27 +223,11 @@ FIRM3D/CATAPULT and SIMPLE agree on all 512 loss labels of a matched
 
 ![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT, before the 0.11.7 corrections](../_static/figures/readme_trace_benchmark.webp)
 
-`benchmarks/trace_cross_code.py` traces the same 1000 alphas with three
-codes. The equilibrium is ARIES-CS (`wout_n3are_R7.75B5.7.nc`, unscaled).
-The alphas are born on s = 0.247 with the `--trace` births, and all three
-codes get the same positions, pitches and 3.52 MeV energy. Each code runs
-for 10 ms on the same 8 cores (`taskset`) of a shared 36-core x86_64
-workstation, under a load average of 28-50 from other jobs. The runtime
-leaves out JAX compilation (35 s), the field set-up of SIMPLE and the
-interpolation tables of SIMSOPT.
-
-| code | integrator | lost | loss fraction | runtime |
-|---|---|---|---|---|
-| VMEX `--trace` (ESSOS Boozer) | RK4, 1.25e-7 s | 128 | 12.8 % ± 1.1 % | 146 s |
-| SIMPLE | symplectic Euler, defaults, all orbits traced | 124 | 12.4 % ± 1.0 % | 556 s |
-| SIMSOPT `trace_particles_boozer` | RK45, tol 1e-9, `gc_noK` | 119 | 11.9 % ± 1.0 % | 1079 s |
-
-The three loss fractions agree within 0.6σ. SIMSOPT uses a `booz_xform`
-field with the same 32 × 32 resolution. SIMPLE reads its starts in VMEC
-angles. The Boozer births are mapped with `nu` and `lambda`, and the
-mapping agrees to 0.13 mm in `R, Z` and 0.2 % in SIMPLE's own `|B|`.
-`docs/_static/figures/sources/make_trace_figures.py` plots the record
-(`benchmarks/trace_cross_code.json`).
+`benchmarks/trace_cross_code.py` traced the same 1,000 ARIES-CS alphas (s = 0.247,
+10 ms) with VMEX (RK4), SIMPLE (symplectic Euler) and SIMSOPT (RK45, `gc_noK`) on
+the same 8 cores: 12.8, 12.4 and 11.9 % lost (each ± 1.0 %) in 146, 556 and
+1079 s, without compilation and field set-up. The record is
+`benchmarks/trace_cross_code.json`.
 
 ## From Python
 

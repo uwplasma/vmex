@@ -124,3 +124,19 @@ def test_surface_field_from_a_live_state_takes_the_state_spectra():
     B = np.asarray(surface.B_total)
     assert B.shape == (3, 4, 5)
     assert np.all(np.isfinite(B)) and np.max(np.abs(B)) > 0.0
+
+
+def test_graded_target_batch_size_rejects_invalid_static_sizes():
+    import numpy as np
+    import pytest
+
+    from vmex.core.extender import VmecExtender
+
+    field = VmecExtender(lambda points: points)
+    assert field.graded_target_batch_size is None
+    field.graded_target_batch_size = np.int64(3)
+    assert field.graded_target_batch_size == 3
+    for size in (0, -1, True, np.bool_(True), 1.5, "2"):
+        with pytest.raises(ValueError, match="positive integer"):
+            field.graded_target_batch_size = size
+        assert field.graded_target_batch_size == 3

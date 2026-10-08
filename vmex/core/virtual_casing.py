@@ -51,6 +51,7 @@ remains available without it; virtual-casing solver paths raise a clear error.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import operator
 from typing import Any
 
 import numpy as np
@@ -972,7 +973,20 @@ def _graded_sources(series, center, distance, nodes):
             jnp.sum(area * B, axis=-1).reshape(-1))
 
 
-def _graded_field(series, points, order: int, nodes):
+def _graded_target_batch_size(value):
+    """Validate a static target batch; None retains the serial map."""
+    if value is None:
+        return None
+    try:
+        size = operator.index(value)
+    except TypeError as error:
+        raise ValueError("target_batch_size must be None or a positive integer") from error
+    if isinstance(value, (bool, np.bool_)) or size <= 0:
+        raise ValueError("target_batch_size must be None or a positive integer")
+    return size
+
+
+def _graded_field(series, points, order: int, nodes, *, target_batch_size=None):
     """Graded-rule ``B`` and its derivatives up to ``order`` at each point."""
     from virtual_casing_jax.derivative_kernels import layer_derivatives
 
@@ -982,10 +996,12 @@ def _graded_field(series, points, order: int, nodes):
         sources = _graded_sources(series, center, distance, nodes)
         return tuple(v[0] for v in layer_derivatives(point[None], *sources, order=int(order)))
 
-    return jax.lax.map(one, jnp.asarray(points))
+    return jax.lax.map(one, jnp.asarray(points),
+                       batch_size=_graded_target_batch_size(target_batch_size))
 
 
-def graded_plasma_field(surface_data, points, *, order: int = 0, nodes=GRADED_NODES):
+def graded_plasma_field(surface_data, points, *, order: int = 0, nodes=GRADED_NODES,
+                        target_batch_size=None):
     """Internal-branch plasma field near the surface, by a target-graded rule.
 
     Off the surface the periodic trapezoid rule loses accuracy as
@@ -1010,9 +1026,13 @@ def graded_plasma_field(surface_data, points, *, order: int = 0, nodes=GRADED_NO
     Returns a tuple of ``order + 1`` arrays shaped like ``points`` with one
     more ``3`` axis per order.  Traceable and differentiable in the points and
     the surface data; the grading centre is held fixed under differentiation.
+    ``target_batch_size`` optionally evaluates that many target rules together;
+    ``None`` keeps the serial, memory-bounded default. Larger batches increase
+    the working set; they change scheduling, not the quadrature or its accuracy.
     """
     _require_vcj()
-    return _graded_field(_graded_series(surface_data), points, order, nodes)
+    return _graded_field(_graded_series(surface_data), points, order, nodes,
+                         target_batch_size=target_batch_size)
 
 
 # ---------------------------------------------------------------------------

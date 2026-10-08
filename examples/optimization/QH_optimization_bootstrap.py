@@ -5,7 +5,9 @@ The current profile is not prescribed and then forgotten: a Picard loop
 alternates hot-restarted VMEC solves with Redl bootstrap fits until the two
 agree, and the optimization that follows varies a stage-refined current spline
 alongside the boundary, with the Redl mismatch as a residual row. Mercier and
-resistive-interchange rows carry a radially graded weight.
+resistive-interchange rows act on the dimensionless criteria
+PHIEDGE**2 DMerc and PHIEDGE**2 D_R over the window s >= STABILITY_MIN_S, and
+the reported extrema are taken over that same window on every radial grid.
 
 The quasi-helical class shifts the Redl isomorphism: both the Picard loop and
 the mismatch residual take helicity -1 here, where the QA script takes 0.
@@ -19,6 +21,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -46,18 +49,23 @@ SURFACES = np.linspace(0.1, 0.9, 8)
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
 MAX_MODES = [1, 2]
-MAX_NFEV = [6, 10]
+MAX_NFEV = [6, 16]
 N_CURRENT_SPLINE = [6, 8]
 
 # Targets:
 ASPECT_TARGET = 6.0
 
-# Stability rows. VMEC's dimensional DMerc/DR values are O(1e2-1e3) for this
-# seed, so the weight is small; Mercier coordinates are unreliable near the
-# axis, so the weight is zero below STABILITY_MIN_S and rises toward the edge:
-STABILITY_WEIGHT = 1.0e-6
-EDGE_WEIGHT_FACTOR = 10.0
-STABILITY_MIN_S = 0.2
+# Stability rows. VMEC's DMerc and D_R are per unit toroidal flux squared, so
+# PHIEDGE**2 * DMerc is the dimensionless criterion in s, O(1e-2) here; the
+# weight and margin below act on that form. Each row is a hinge, zero on a
+# stable surface. Below STABILITY_MIN_S the finite-difference DMerc is a
+# cancellation of DWell and DGeod, each O(1e3) there, and its sign follows the
+# grid (the first interior surface of the 71-surface grid reads -1.3e3 while
+# its neighbours read +65 and +27), so rows and reported extrema both start at
+# STABILITY_MIN_S:
+STABILITY_WEIGHT = 30.0
+STABILITY_MARGIN = 2.0e-3
+STABILITY_MIN_S = 0.1
 
 # Redl isomorphism helicity of this symmetry class:
 REDL_HELICITY = -1
@@ -138,20 +146,36 @@ inp, equilibrium = picard.input, picard.equilibrium
 
 ### Set up the objective ######################################################
 
+def stability_window(profile):
+    """Interior surfaces with s >= STABILITY_MIN_S, on any radial grid."""
+    s = np.linspace(0.0, 1.0, profile.shape[0])
+    return profile[(s >= STABILITY_MIN_S) & (s < s[-1])]
+
+
+def mercier_rows(equilibrium_state, solver_context):
+    """Hinge on PHIEDGE**2 DMerc below the margin (DMerc > 0 is stable)."""
+    dmerc = PHIEDGE**2 * opt.d_merc_state(equilibrium_state, solver_context)
+    return jnp.maximum(STABILITY_MARGIN - stability_window(dmerc), 0.0)
+
+
+def resistive_rows(equilibrium_state, solver_context):
+    """Hinge on PHIEDGE**2 D_R above minus the margin (D_R < 0 is stable)."""
+    d_r = PHIEDGE**2 * opt.glasser_d_r_state(
+        equilibrium_state, solver_context, shear_epsilon=1.0e-8)
+    return jnp.maximum(stability_window(d_r) + STABILITY_MARGIN, 0.0)
+
+
 def minimum_dmerc(equilibrium_state, solver_context):
-    """Interior minimum of the Mercier criterion, reported not targeted."""
-    return opt.d_merc_state(equilibrium_state, solver_context)[2:-1].min()
+    """Minimum of the Mercier criterion over the stability window."""
+    return stability_window(opt.d_merc_state(equilibrium_state, solver_context)).min()
 
 
 def maximum_dr(equilibrium_state, solver_context):
-    """Interior maximum of the resistive-interchange criterion, reported not targeted."""
-    return opt.glasser_d_r_state(equilibrium_state, solver_context)[2:-1].max()
+    """Maximum of the resistive-interchange criterion over the stability window."""
+    return stability_window(opt.glasser_d_r_state(equilibrium_state, solver_context)).max()
 
 
-# Zero weight below STABILITY_MIN_S, rising smoothly toward the edge.
-stability_s = np.linspace(0.0, 1.0, int(inp.ns_array[-1]))[2:-1]
-stability_weights = np.where(stability_s >= STABILITY_MIN_S,
-    STABILITY_WEIGHT * (1.0 + (EDGE_WEIGHT_FACTOR - 1.0) * stability_s**4), 0.0)
+PHIEDGE = float(inp.phiedge)
 
 # Each term is (function, target, weight).
 bootstrap = RedlBootstrapMismatch(profiles, helicity_n=REDL_HELICITY, surfaces=SURFACES,
@@ -161,8 +185,6 @@ objective_function_terms = [
     (qs, 0.0, 1.0), (bootstrap, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
-    (opt.mercier_stability_residual, 0.0, stability_weights),
-    (opt.glasser_stability_residual, 0.0, stability_weights),
 ]
 
 report = opt.EquilibriumReporter(
@@ -184,7 +206,9 @@ for max_mode, max_nfev, n_spline in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE):
     # A RuntimeWarning about uncertified Jacobian columns is expected once the
     # optimizer leaves the seed and needs no action; see examples/README.md.
     problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms, max_mode=max_mode,
+        inp, objective_function_terms + [(mercier_rows, 0.0, STABILITY_WEIGHT),
+                                         (resistive_rows, 0.0, STABILITY_WEIGHT)],
+        max_mode=max_mode,
         current_dofs=n_spline - 1, vary_major_radius=VARY_MAJOR_RADIUS,
         use_ess=True, restart_from=equilibrium, progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")

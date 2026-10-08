@@ -5,6 +5,49 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## Unreleased
+
+- `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
+  from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
+  toroidal current, pressure). MRX is optional.
+- `vmex --trace` runs on one GPU when several are visible. Each adaptive step
+  waits on every device, so two A4000s took 2-3 times longer than one;
+  `trace_alphas(devices=jax.devices())` still splits over all of them. CPU
+  runs are unchanged.
+- `vmex --neoclassical` runs DKX neoclassical transport on a WOUT, or after a
+  solve, and writes `*_neoclassical.png` and `*_neoclassical.h5`;
+  `--nc-preset quick|default|full` sets the resolution, `--nc-profiles` takes
+  the n and T profiles (and draws VMEX's Redl `<j.B>` on them) and `--nc-er`
+  fixes `E_r`. The `neoclassical` extra now installs `dkx>=2.8.0`; an older
+  DKX runs without the profiles and says so.
+
+## 0.11.9 - 2026-10-07
+
+- On a GPU, every fused run of kernels is captured into a CUDA graph
+  (`--xla_gpu_graph_min_graph_size=1` unless `XLA_FLAGS` is set): 8-11 %
+  faster per solver iteration on an RTX A4000, results unchanged (#563).
+- `vmex --neoclassical`: DKX neoclassical transport (#548).
+- Optimization examples: dimensionless Mercier and resistive hinges for the
+  bootstrap examples, a DESC-style ballooning hinge with a COBRAVMEC 3-D
+  gate, and larger mode-2 budgets for the scalar and SciPy lanes
+  (#555, #556, #557, #560).
+
+## 0.11.8 - 2026-10-06
+
+- **`vmex --trace` converges without a step to choose.** The default
+  integrator is per-particle error-controlled Dopri8 at tolerance `3e-7`
+  (ESSOS 0.20 adaptive stepping); `--trace-tolerance` sets it and
+  `--trace-timestep` becomes the first trial step. On twenty-one equilibria
+  the worst energy error is `1.7e-4`, against up to `0.27` for the earlier
+  fixed RK4 step, at about 2.6 times its cost (#554).
+- The default Boozer mode cut is `2e-4`, safe on twenty equilibria, and every
+  run reports its largest energy error and how to tighten it above `1e-3`
+  (#553). The trace guide gives the mode-cut, timestep, `K` and integrator
+  studies on the corrected tracer (#552).
+- The optimization Jacobian is cached persistently (#549). New examples:
+  low-bootstrap QA, a QI drift study and a DKX-bootstrap QI (#550).
+- Floor `essos>=0.20.0`.
+
 ## 0.11.7 - 2026-10-05
 
 - **Alpha tracing physics corrections; results traced with earlier releases
@@ -76,33 +119,13 @@ revision it was measured at, and the pages that cite it.
 
 ## 0.11.3 - 2026-09-27
 
-- `vmex --trace`: 1000 alphas over 1e-2 s at ARIES-CS size by default (scaled
-  in memory; `--trace-no-scale` opts out), traced in Boozer coordinates
-  (`essos.boozer`, ESSOS 0.19) in about 30 s on a 10-core laptop, with a
-  converged step. New flags: `--trace-birth volume`, `--collisional`,
-  `--trace-ne0` and `--trace-te0`. Output: `*_trace.json`/`.npz`, a summary
-  figure and a 3-D loss map. Guide: `docs/howto/trace-alpha-particles.md`.
-- `--scale` now targets the ARIES-CS wout's own `volavgB = 5.8646 T` and
-  `Aminor_p = 1.7044 m` (was `|b0| = 5.7 T`, `1.7 m`, which matches no
-  published convention and put the reference reactor-scale wouts 7-10 % high
-  in field). `--scale-target axis` keeps Landreman & Paul (2022), Boozer
-  `B00 = 5.7 T` on the axis and `a = 1.7 m` (`vmex.core.scaling.b00_axis`).
-
-- The implicit fixed-boundary solve rehomes the forward state beside the
-  parameters before refining it. On a GPU host with `JAX_PLATFORMS` set, the
-  forward solve ran on the GPU while the callback's parameters stayed on the
-  CPU, and every gradient failed with "Received incompatible devices".
-- `vmex.solve_phiedge` finds the PHIEDGE whose free-boundary LCFS meets a
-  target outboard radius, volume or user metric (bracketed secant over
-  warm-started solves); example `examples/free_boundary_phiedge.py`, guide
-  `docs/howto/match-phiedge.md`. `vmex.phiedge_root` attaches the
-  implicit-function-theorem derivative of that PHIEDGE with respect to
-  plasma and coil parameters, from one adjoint gradient.
-
-- Long CPU runs no longer abort with "Failed to materialize symbols": vmex
-  releases compiled executables before the process reaches
-  `vm.max_map_count`. The compilation cache is one directory per machine, and
-  `VMEX_COMPILATION_CACHE=disabled` overrides every cache variable.
+- `vmex --trace` at ARIES-CS size in Boozer coordinates (ESSOS 0.19), with
+  volume births, `--collisional` and summary figures; `--scale` targets the
+  ARIES-CS `volavgB = 5.8646 T`, `Aminor_p = 1.7044 m`.
+- `vmex.solve_phiedge` and `vmex.phiedge_root` match a free-boundary target
+  through PHIEDGE, with its implicit derivative.
+- Fixes: GPU-host implicit solves rehome the forward state beside the
+  parameters; long CPU runs release executables before `vm.max_map_count`.
 
 ## 0.11.2 - 2026-09-24
 

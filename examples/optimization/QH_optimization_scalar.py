@@ -7,10 +7,11 @@ are summed into one scalar before implicit differentiation, so SciPy L-BFGS-B
 receives a value and a gradient from one reverse equilibrium adjoint instead of
 a residual vector and its full Jacobian.
 
-The scalar form trades objective progress per evaluation for a cheaper cold
-start and lower peak memory: at a matched evaluation budget the least-squares
-driver reached roughly a 3x lower objective on the same problem, so it remains
-the default for objective progress.
+L-BFGS-B builds its curvature model from gradients alone, so it needs more
+iterations than Gauss-Newton per stage: the mode-2 stage gets 40. Measured on
+QA_optimization_scalar.py, which shares this ladder, the final QS total is
+3.7e-3 against 1.35e-3 for least squares, a 2.7x gap; with 15 mode-2
+iterations it was 9x.
 """
 
 import os
@@ -27,7 +28,7 @@ from vmex import optimize as opt
 NFP = 4
 SURFACES = np.linspace(0.1, 1.0, 10)
 MAX_MODES = [1, 2]
-MAXITER = [10, 15]
+MAXITER = [10, 40]
 ASPECT_TARGET = 6.0
 USE_TRIAL_STABILITY = False
 TRIAL_BETA = 0.025

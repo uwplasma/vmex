@@ -50,7 +50,14 @@ from .._compat import require_optional
 # the relative amplitude below which Boozer |B| modes are dropped
 # (docs/howto/trace-alpha-particles.md, convergence table).
 TIMESTEP = 1.25e-7
-MODE_TOLERANCE = 1e-4
+MODE_TOLERANCE = 2e-4
+# largest relative energy error of converged collisionless orbits
+ENERGY_TOLERANCE = 1e-3
+# default integrator: per-particle error-controlled Dopri8(7) at this tolerance
+# (21 equilibria: worst energy error 1.7e-4, six times below ENERGY_TOLERANCE)
+METHOD = "adaptive8"
+TOLERANCE = 3e-7
+METHODS = ("adaptive8", "adaptive", "rk4", "dopri5", "dopri8")
 # Landreman, Buller & Drevlak (2022) profiles: n_e0 [m^-3], T_0 [keV].
 NE0, T0_KEV = 4e20, 12.0
 _DT_COEFFICIENTS = (1.17302e-9, 1.51361e-2, 7.51886e-2, 4.60643e-3, 1.35e-2, -1.0675e-4, 1.366e-5)
@@ -430,7 +437,8 @@ def trace_alphas(
     s: float = 0.25,
     seed: int = 42,
     timestep: float | None = None,
-    method: str = "rk4",
+    method: str = METHOD,
+    tolerance: float = TOLERANCE,
     compact: bool | None = None,
     times_to_trace: int = 1000,
     scale: str | None = "volavgB",
@@ -442,6 +450,7 @@ def trace_alphas(
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
     progress: Any = None,
+    devices: Any = None,
 ) -> AlphaTracingResult:
     """Trace fusion alphas through a wout file or in-memory equilibrium.
 
@@ -465,35 +474,42 @@ def trace_alphas(
         birth profile).
     mboz, nboz, mode_tolerance:
         Boozer resolution and the relative amplitude of dropped modes.
-    method:
-        Fixed-step ``"rk4"`` (default), ``"dopri5"`` or ``"dopri8"``.
+    method, tolerance:
+        ``"adaptive8"`` (default) and ``"adaptive"`` control each particle's
+        Dopri8 or Dopri5 step to the embedded-error ``tolerance``, so
+        ``timestep`` is only the first trial step; ``"rk4"``, ``"dopri5"`` and
+        ``"dopri8"`` take fixed steps of ``timestep``.
     compact:
         Enable survivor compaction when supported; ``False`` disables it.
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
+    devices:
+        JAX devices the particles are split over.  ``None`` uses every CPU
+        device but only the first GPU: each adaptive step ends with a
+        cross-device check, which costs little between CPU cores but made
+        two A4000s 3x slower than one.  Pass ``jax.devices()`` to split
+        over every GPU anyway.
     """
     import jax
 
     require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
-    from inspect import signature
 
-    parameters = signature(trace_boozer).parameters
-    trace_kwargs = {}
-    if "compact" in parameters:
-        trace_kwargs["compact"] = compact is None or bool(compact)
-    elif compact:
-        raise ImportError("Compaction requires ESSOS with trace_boozer(compact=...); upgrade ESSOS")
-    compact = trace_kwargs.get("compact", False)
-
-    if method not in ("rk4", "dopri5", "dopri8"):
-        raise ValueError("method must be 'rk4', 'dopri5' or 'dopri8'")
-    if method != "rk4":
-        if "method" not in parameters:
-            raise ImportError(f"{method.capitalize()} requires ESSOS>=0.19.4 with trace_boozer(method=...); upgrade ESSOS")
-        trace_kwargs["method"] = method
+    if method not in METHODS:
+        raise ValueError(f"method must be one of {', '.join(METHODS)}")
+    if not (np.isfinite(tolerance) and tolerance > 0):
+        raise ValueError("tolerance must be positive and finite")
+    compact = compact is None or bool(compact)
+    if devices is None:
+        devices = jax.devices()
+        if jax.default_backend() != "cpu":
+            devices = devices[:1]
+    devices = list(devices)
+    trace_kwargs = dict(compact=compact, method=method)
+    if method.startswith("adaptive"):
+        trace_kwargs["tolerance"] = float(tolerance)
 
     from .scaling import SCALE_TARGETS, aries_cs_scales, scale_wout
     from .wout import read_wout
@@ -519,7 +535,7 @@ def trace_alphas(
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
         species=background_species(ne0, T0_keV) if collisions else None,
-        progress=progress, **trace_kwargs)
+        progress=progress, devices=devices, **trace_kwargs)
     wall = time.perf_counter() - start
     times = np.linspace(0.0, float(tmax), int(times_to_trace))
     lost = trace.loss_times >= 0
@@ -550,13 +566,15 @@ def trace_alphas(
     result.metadata.update(
         tmax=float(tmax), timestep=float(timestep), s=float(s), seed=int(seed),
         birth=birth, collisions=bool(collisions), ne0=float(ne0), T0_keV=float(T0_keV),
-        method=method, integrator=f"{method.upper()} (Boozer guiding centre)",
+        method=method, tolerance=float(tolerance) if method.startswith("adaptive") else None,
+        integrator=(f"adaptive {'Dopri8' if method == 'adaptive8' else 'Dopri5'}, tolerance {tolerance:g}"
+                    if method.startswith("adaptive") else f"{method.upper()}") + " (Boozer guiding centre)",
         compact=bool(compact), boozer_modes=int(field.xm.size),
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
         compile_time_s=_COMPILE_S[0] - compile_start,
-        devices=len(jax.devices()), platform=jax.default_backend(),
+        devices=len(devices), platform=devices[0].platform,
         versions={name: version(name) for name in ("vmex", "essos", "jax", "booz_xform_jax")},
     )
     return result

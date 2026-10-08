@@ -2568,6 +2568,7 @@ def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str
     meta, bz = result.metadata, result.boozer
     lost = np.asarray(result.lost_times) >= 0
     t_loss = np.asarray(result.lost_times)[lost]
+    positive_losses = t_loss.size and np.all(t_loss > 0)
     birth = np.asarray(result.initial_conditions)
     final = np.asarray(result.final_states)
     nfp = int(bz["nfp"])
@@ -2604,7 +2605,8 @@ def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str
         a_p.set(xlabel=r"birth pitch $v_\parallel/v$", ylabel="density")
         a_p.legend()
         a_tp.scatter(birth[lost, 3], t_loss, s=10)
-        a_tp.set(yscale="log", xlim=(-1, 1), xlabel=r"birth pitch $v_\parallel/v$", ylabel="loss time [s]")
+        a_tp.set(yscale="log" if positive_losses else "linear", xlim=(-1, 1),
+                 xlabel=r"birth pitch $v_\parallel/v$", ylabel="loss time [s]")
         if meta.get("birth") == "volume":
             edges = np.linspace(0, 1, 11)
             idx = np.clip(np.digitize(birth[:, 0], edges) - 1, 0, 9)
@@ -2615,9 +2617,11 @@ def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str
             a_b.errorbar(mid, frac, yerr=err, fmt="o-")
             a_b.set(xlabel="birth s", ylabel="loss fraction", title="loss vs birth radius")
         else:
-            tb = np.logspace(np.log10(max(t[0], 1e-7)), np.log10(t[-1]), 30)
+            tb = (np.geomspace(min(t[0], t_loss.min()) / 2, t[-1], 30)
+                  if positive_losses else np.linspace(0, t[-1], 30))
             a_b.hist(t_loss, bins=tb)
-            a_b.set(xscale="log", xlabel="loss time [s]", ylabel="lost alphas", title="loss-time histogram")
+            a_b.set(xscale="log" if positive_losses else "linear", xlabel="loss time [s]",
+                    ylabel="lost alphas", title="loss-time histogram")
         s_b, iota = np.asarray(bz["s"]), np.asarray(bz["iota"])
         a_i.plot(s_b, iota, "-", color="0.2")
         lo, hi = float(np.min(iota)), float(np.max(iota))
@@ -2646,8 +2650,10 @@ def plot_tracing(result, outdir: str | Path, *, name: str = "trace") -> dict[str
                          color="0.8", alpha=0.25, linewidth=0)
         if lost.any():
             x, y, z = _boozer_boundary_xyz(bz, final[lost, 1], final[lost, 2])
-            sc = ax3.scatter(x, y, z, s=6, c=np.log10(t_loss), cmap="viridis", depthshade=False)
-            fig.colorbar(sc, ax=ax3, shrink=0.5, label="log10 loss time [s]")
+            sc = ax3.scatter(x, y, z, s=6, c=np.log10(t_loss) if positive_losses else t_loss,
+                             cmap="viridis", depthshade=False)
+            fig.colorbar(sc, ax=ax3, shrink=0.5,
+                         label="log10 loss time [s]" if positive_losses else "loss time [s]")
         ax3.set_axis_off()
         ax3.set_box_aspect((1, 1, 0.35))
         ax3.set_title(f"{name}: {int(lost.sum())} alpha loss locations")

@@ -1,28 +1,31 @@
 #!/usr/bin/env python
-"""Optimize a quasi-axisymmetric boundary against the infinite-n ballooning bound.
+"""Optimize a quasi-axisymmetric boundary to ideal-ballooning stability at fixed beta.
 
-The seed (``input.nfp2_QA_finite_beta``, beta = 2.7 %) is Mercier-STABLE and
-ballooning-UNSTABLE, which is the case a ballooning objective is for: the
-interchange criteria see nothing to fix.
+The seed (``input.nfp2_QA_finite_beta``, beta = 2.7 %, aspect 5.0) is
+Mercier-stable and ballooning-unstable on its outer surfaces, s >= 0.85, which
+is the case a ballooning objective is for: the interchange criteria see nothing
+to fix.
 
-The optimized quantity is ``ballooning_growth_rate``, a smooth softmax upper
-bound on the growth rate over the sampled field lines, so driving it below zero
-is a sufficient condition for every sampled line to be stable. The hard maximum
-is what gets reported. The bound sits above the hard maximum by at most
-TEMPERATURE * log(number of lines).
+The objective follows DESC's ``BallooningStability`` (Gaur et al., J. Plasma
+Phys. 89 (2023), doi:10.1017/S0022377823000107): every sampled field line whose growth rate
+exceeds a threshold contributes its excess, and a stable line contributes
+nothing, so the optimizer spends its steps on the lines that are unstable
+instead of on the mean. Pressure, current and toroidal flux are held as in
+DESC's example; beta, aspect ratio and Mercier stability are held by their own
+rows, so ballooning cannot be bought by lowering beta or by changing the device.
 """
 
 import os
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.stability import ballooning_growth_rate, ballooning_lambda
+from vmex.core.stability import ballooning_lambda
 
 # The finite-beta seed deck:
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA_finite_beta"
@@ -35,26 +38,35 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 MAX_MODES = [1, 2]
 MAX_NFEV = [8, 12]
 
-# Ballooning field lines. lambda is least stable at a configuration-dependent
-# zeta0 (Gaur et al., J. Plasma Phys. 89 (2023), footnote 2): on this seed the
-# single-point default misses 26 % of it, 3.27e-3 at zeta0 = 0 against 4.42e-3
-# over the scan, so a zeta0 = 0 objective would optimize the wrong bound:
+# Ballooning field lines and surfaces. lambda is least stable at a
+# configuration-dependent zeta0 (Gaur et al. 2023, footnote 2), so zeta0 is
+# scanned as in DESC. The surfaces span the stable core and the unstable edge,
+# and the certificate reads the same normalized radii on the finer grid:
 ZETA0S = np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5)
 LINES = dict(npoints=97, nturns=3.0, zeta0s=ZETA0S)
+BALLOONING_S = [0.3, 0.5, 0.7, 0.8, 0.9, 0.95]
 
-# Softmax temperature of the bound, and the target and weight of its residual:
-TEMPERATURE = 0.002
-BALLOONING_TARGET = 0.0
-BALLOONING_WEIGHT = 200.0
+# A line contributes max(lambda - BALLOONING_THRESHOLD, 0). The threshold sits
+# below zero because lambda on the optimizer's grid under-reads the resolved one
+# (4.0e-3 at NS = 25, 6.2e-3 at NS = 41 and 7.0e-3 at NS = 71 on the seed):
+BALLOONING_THRESHOLD = -5.0e-4
+BALLOONING_WEIGHT = 30.0
 
-# Targets:
-ASPECT_TARGET = 6.0
+# Held quantities. The aspect ratio and beta are the seed's own; a mismatched
+# aspect target moves the minor radius and, at fixed flux and pressure, beta
+# with it. Mercier rows act on the dimensionless PHIEDGE**2 DMerc over
+# s >= MERCIER_MIN_S (nearer the axis the finite-difference DMerc is a
+# cancellation of much larger terms):
+ASPECT_TARGET = 5.0
+BETA_TARGET = 0.027
+BETA_WEIGHT = 1.0 / BETA_TARGET
+MERCIER_MARGIN = 5.0e-3
+MERCIER_WEIGHT = 10.0
+MERCIER_MIN_S = 0.1
 
 # Radial grid the optimizer trials are solved on, and the finer one the
-# certificate is solved on. The difference is not small: a full run reaches
-# max lambda 2.2e-4 on the stage grid and 9.1e-4 when the same boundary is
-# re-solved at FINAL_NS, so quote the resolved number:
-STAGE_NS = 25
+# certificate is solved on:
+STAGE_NS = 41
 STAGE_FTOL = 1.0e-11
 STAGE_NITER = 4000
 FINAL_NS = 71
@@ -80,7 +92,7 @@ OUTPUT_NAME = "QA_ballooning_optimized"
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAX_MODES, MAX_NFEV = [1], [3]
-    STAGE_NS, FINAL_NS = 15, 15
+    STAGE_NS, FINAL_NS = 21, 21
     FINAL_FTOL = 1.0e-11
 
 ###############################################################################
@@ -95,14 +107,45 @@ inp = replace(vj.VmecInput.from_file(INPUT_FILE),
 
 ### Set up the objective ######################################################
 
-# The optimizable: a smooth upper bound on max lambda over all sampled lines.
-ballooning = partial(ballooning_growth_rate, temperature=TEMPERATURE, **LINES)
+PHIEDGE = float(inp.phiedge)
 
 
-def worst_lambda(equilibrium):
-    """Hard max lambda over the sampled lines -- the number worth quoting."""
-    growth = ballooning_lambda(equilibrium.solution, equilibrium.solver_context, **LINES)
-    return float(np.max(np.asarray(growth)))
+def surface_indices(ns):
+    """Full-mesh indices of BALLOONING_S on an ns-surface grid."""
+    return [min(max(int(round(s * (ns - 1))), 2), ns - 2) for s in BALLOONING_S]
+
+
+def lambdas(state, runtime):
+    """Growth rate of every sampled line, shaped (surface, alpha, zeta0)."""
+    ns = int(runtime.setup.s_full.shape[0])
+    return ballooning_lambda(state, runtime, s_indices=surface_indices(ns), **LINES)
+
+
+def ballooning_excess(state, runtime):
+    """One row per line: its growth rate above the threshold, zero when below."""
+    return jnp.maximum(lambdas(state, runtime) - BALLOONING_THRESHOLD, 0.0).ravel()
+
+
+def worst_lambda(state, runtime):
+    """Hard max lambda over the sampled lines, the number worth quoting."""
+    return jnp.max(lambdas(state, runtime))
+
+
+def mercier_window(state, runtime):
+    """PHIEDGE**2 DMerc on the interior surfaces with s >= MERCIER_MIN_S."""
+    dmerc = PHIEDGE**2 * opt.d_merc_state(state, runtime)
+    s = np.linspace(0.0, 1.0, dmerc.shape[0])
+    return dmerc[(s >= MERCIER_MIN_S) & (s < 1.0)]
+
+
+def mercier_rows(state, runtime):
+    """Hinge on the Mercier criterion below its margin (positive is stable)."""
+    return jnp.maximum(MERCIER_MARGIN - mercier_window(state, runtime), 0.0)
+
+
+def minimum_mercier(state, runtime):
+    """Least stable PHIEDGE**2 DMerc in the window, reported not targeted."""
+    return jnp.min(mercier_window(state, runtime))
 
 
 # Each term is (function, target, weight).
@@ -110,23 +153,21 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (ballooning, BALLOONING_TARGET, BALLOONING_WEIGHT),
+    (opt.volume_average_beta, BETA_TARGET, BETA_WEIGHT),
+    (mercier_rows, 0.0, MERCIER_WEIGHT),
+    (ballooning_excess, 0.0, BALLOONING_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(
-    ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
-    ("mean iota", opt.mean_iota, ".4f"),
-    ("ballooning bound", ballooning, ".4e"))
+    ("QS total", qs.total, ".4e"), ("aspect", opt.aspect_ratio, ".4f"),
+    ("beta", opt.volume_average_beta, ".3%"), ("mean iota", opt.mean_iota, ".4f"),
+    ("max lambda", worst_lambda, "+.3e"), ("min PHIEDGE^2 DMerc", minimum_mercier, "+.3e"))
 monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 
 equilibrium = opt.solve_equilibrium(inp, verbose=not ci_smoke)
-seed_lambda = worst_lambda(equilibrium)
-seed_dmerc = float(np.min(np.asarray(equilibrium.wout.DMerc)[2:-1]))
-print(f"\nseed: beta = {float(equilibrium.wout.betatotal):.3%}, "
-      f"max lambda = {seed_lambda:+.4e} (unstable), "
-      f"min DMerc = {seed_dmerc:+.3e} (Mercier-stable)")
+seed = report("seed", equilibrium)
 
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA + ballooning stage, max_mode = {max_mode} =====")
@@ -146,29 +187,28 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     inp = problem.input_from_x(result.x)
     equilibrium = problem.equilibrium_from_x(result.x)
     report(f"mode {max_mode}", equilibrium)
-    print(f"max lambda = {worst_lambda(equilibrium):+.4e}")
 
 ### Check the result ##########################################################
 
 # The physics certificate is the resolved solve, not the optimizer's grid:
-# ballooning is radially stiff, and the optimizer's number is optimistic by a
-# factor of four here.  Add a stage at FINAL_NS if you need the margin.
+# ballooning is radially stiff, so the same normalized radii are re-read at
+# FINAL_NS.
 final_input = replace(inp, ns_array=np.array([FINAL_NS]),
                       ftol_array=np.array([FINAL_FTOL]),
                       niter_array=np.array([FINAL_NITER]))
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution, verbose=not ci_smoke,
     raise_on_max_iterations=True)
-final_lambda = worst_lambda(final_equilibrium)
-final_dmerc = float(np.min(np.asarray(final_equilibrium.wout.DMerc)[2:-1]))
 
 ### Print, plot and save ######################################################
 
-report("final", final_equilibrium)
+final = report("final", final_equilibrium)
+seed_lambda, final_lambda = seed["max lambda"], final["max lambda"]
 print(f"\nmax lambda {seed_lambda:+.4e} -> {final_lambda:+.4e} "
       f"({'stable' if final_lambda < 0.0 else 'still unstable'}) at NS = {FINAL_NS}\n"
-      f"min DMerc {seed_dmerc:+.3e} -> {final_dmerc:+.3e}, "
-      f"beta {float(final_equilibrium.wout.betatotal):.3%}")
+      f"min PHIEDGE^2 DMerc {seed['min PHIEDGE^2 DMerc']:+.3e} -> "
+      f"{final['min PHIEDGE^2 DMerc']:+.3e}, "
+      f"beta {seed['beta']:.3%} -> {final['beta']:.3%}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)

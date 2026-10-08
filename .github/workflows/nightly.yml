@@ -86,7 +86,7 @@ jobs:
           python -m pip install ".[coils,turbulence,freeb,neoclassical]" pytest pytest-cov \
             jax==0.10.1 jaxlib==0.10.1 scipy==1.16.0 solvax==0.27.0 equinox==0.13.3 \
             booz_xform_jax==0.4.3 virtual-casing-jax==0.0.9 \
-            essos==0.19.5 diffrax==0.7.0 neo-jax==1.0.5 gkx==2.5.0
+            essos==0.20.0 diffrax==0.7.0 neo-jax==1.0.5 gkx==2.5.0 dkx==2.8.0
       - name: Seed old dependencies, then install vmex[all] over them
         if: matrix.install == 'stale'
         run: |

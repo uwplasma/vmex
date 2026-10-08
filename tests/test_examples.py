@@ -81,7 +81,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
-    assert coils == ["essos>=0.19.5"], coils
+    assert coils == ["essos>=0.20.0"], coils
 
     for script in ESSOS_COIL_EXAMPLES:
         text = script.read_text()
@@ -202,6 +202,7 @@ EXECUTED_EXAMPLES = {
     "examples/vmex_fixed_free_boundary_comparison.py",
     "examples/vmex_get_B_gradB.py",
     "examples/vmex_get_B_outside_plasma.py",
+    "examples/vmex_mrx_comparison.py",
 }
 
 
@@ -1042,14 +1043,18 @@ def test_qa_ballooning_optimization_example(tmp_path):
     script = EXAMPLES / "optimization" / "QA_optimization_ballooning.py"
     out = _run_example(script, tmp_path, timeout=1800)
     _assert_cost_decreased(out, "QA-ballooning")
-    seed = re.search(r"max lambda = ([0-9.eE+-]+) \(unstable\)", out)
     final = re.search(r"max lambda ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
-    assert seed is not None and final is not None
+    mercier = re.search(r"min PHIEDGE\^2 DMerc ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+    beta = re.search(r"beta ([0-9.]+)% -> ([0-9.]+)%", out)
+    assert final is not None and mercier is not None and beta is not None
     # The seed must be the case the objective is for: ballooning-unstable while
     # Mercier says nothing is wrong.  Otherwise the example proves nothing.
-    assert float(seed.group(1)) > 0.0
-    assert re.search(r"min DMerc = \+[0-9.eE+-]+ \(Mercier-stable\)", out)
+    assert float(final.group(1)) > 0.0
+    assert float(mercier.group(1)) > 0.0
+    # Ballooning improves without buying it with Mercier or beta.
     assert float(final.group(2)) < float(final.group(1))
+    assert float(mercier.group(2)) > 0.0
+    assert abs(float(beta.group(2)) - float(beta.group(1))) < 0.1
     assert (tmp_path / "input.QA_ballooning_optimized").exists()
     assert (tmp_path / "wout_QA_ballooning_optimized.nc").exists()
     assert (tmp_path / "QA_ballooning_optimized_stability.png").stat().st_size > 10_000
@@ -1396,3 +1401,21 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
         bounded = re.search(r"Exterior trace QA: (\d+)/(\d+) lines remained", out)
         assert bounded is not None and int(bounded.group(1)) > 0
     assert (tmp_path / output).stat().st_size > 10_000
+
+
+def test_vmex_mrx_comparison_example(tmp_path):
+    """The MRX comparison exits cleanly without MRX installed.
+
+    No CI lane installs ``mrx``, so there the script prints the install
+    command and stops before solving (seconds).  Where MRX is present the smoke
+    pass solves a 9/17-surface case, takes one Newton step on a coarse mesh
+    and draws the figure.
+    """
+    out = _run_example(EXAMPLES / "vmex_mrx_comparison.py", tmp_path, timeout=1200)
+    if "MRX is not installed" in out:
+        assert "pip install mrx" in out
+        return
+    assert "VMEX: iota axis/edge" in out
+    assert "force residual" in out and "|B| difference" in out
+    figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
+    assert figure.stat().st_size > 10_000
