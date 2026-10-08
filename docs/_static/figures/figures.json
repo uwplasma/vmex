@@ -604,6 +604,26 @@
         "README.md"
       ],
       "note": "All saved outer iterations, including force growth and the viscosity restart. Force uses positive-pressure support; field changes use the computational wall. HINT is unconverged. Lossless WebP."
+    },
+    {
+      "path": "docs/_static/figures/readme_vmex_mrx_comparison.webp",
+      "sha256": "72c46ff8f0b4932babc4aeaf55ecf319a465ec96ddefb410a738f4a645ce37c7",
+      "bytes": 72158,
+      "generator": "examples/vmex_mrx_comparison.py",
+      "command": "python examples/vmex_mrx_comparison.py && cp output_vmex_mrx_comparison/readme_vmex_mrx_comparison.webp docs/_static/figures/",
+      "inputs": [
+        "examples/data/input.LandremanPaul2021_QA_beta2p5_bootstrap"
+      ],
+      "record": null,
+      "generated": "2026-10-08",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md",
+        "docs/explanation/validation.md"
+      ],
+      "note": "Needs the optional mrx package (pip install mrx). VMEX solves the deck to ns = 65 and MRX relaxes that field with 10 Newton steps on (12, 16, 16), p = 3; the example writes this WebP beside its PNG. The bytes come from one run and were not re-derived."
     }
   ]
 }

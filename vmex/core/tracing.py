@@ -450,6 +450,7 @@ def trace_alphas(
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
     progress: Any = None,
+    devices: Any = None,
 ) -> AlphaTracingResult:
     """Trace fusion alphas through a wout file or in-memory equilibrium.
 
@@ -483,6 +484,12 @@ def trace_alphas(
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
+    devices:
+        JAX devices the particles are split over.  ``None`` uses every CPU
+        device but only the first GPU: each adaptive step ends with a
+        cross-device check, which costs little between CPU cores but made
+        two A4000s 3x slower than one.  Pass ``jax.devices()`` to split
+        over every GPU anyway.
     """
     import jax
 
@@ -495,6 +502,11 @@ def trace_alphas(
     if not (np.isfinite(tolerance) and tolerance > 0):
         raise ValueError("tolerance must be positive and finite")
     compact = compact is None or bool(compact)
+    if devices is None:
+        devices = jax.devices()
+        if jax.default_backend() != "cpu":
+            devices = devices[:1]
+    devices = list(devices)
     trace_kwargs = dict(compact=compact, method=method)
     if method.startswith("adaptive"):
         trace_kwargs["tolerance"] = float(tolerance)
@@ -523,7 +535,7 @@ def trace_alphas(
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
         species=background_species(ne0, T0_keV) if collisions else None,
-        progress=progress, **trace_kwargs)
+        progress=progress, devices=devices, **trace_kwargs)
     wall = time.perf_counter() - start
     times = np.linspace(0.0, float(tmax), int(times_to_trace))
     lost = trace.loss_times >= 0
@@ -562,7 +574,7 @@ def trace_alphas(
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
         compile_time_s=_COMPILE_S[0] - compile_start,
-        devices=len(jax.devices()), platform=jax.default_backend(),
+        devices=len(devices), platform=devices[0].platform,
         versions={name: version(name) for name in ("vmex", "essos", "jax", "booz_xform_jax")},
     )
     return result
