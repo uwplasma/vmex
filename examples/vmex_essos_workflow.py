@@ -76,9 +76,8 @@ def solve_and_export(inp, external_field=None):
     if external_field is None:
         res = vj.solve_multigrid(inp, raise_on_max_iterations=False)
     else:
-        with vj.heartbeat("Solving the free boundary"):
-            res = vj.solve_free_boundary_multigrid(
-                inp, external_field=external_field, raise_on_max_iterations=False)
+        res = vj.solve_free_boundary_multigrid(
+            inp, external_field=external_field, raise_on_max_iterations=False)
     wout = vj.wout_from_state(
         inp=inp, state=res.state, fsqr=float(res.fsqr), fsqz=float(res.fsqz),
         fsql=float(res.fsql), niter=int(res.iterations),

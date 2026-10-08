@@ -129,22 +129,21 @@ state0, rt0 = equilibrium.solution, equilibrium.solver_context
 # One physical lambda must describe the same trapped particles on every
 # surface and field-line label; select it once at the seed and keep the
 # pitch grid static for the whole stage.
-with vj.heartbeat("Selecting the trapped pitches and the seed normalizations"):
-    pitch = np.asarray(common_trapped_pitches_state(
-        state0, rt0, MAXJ_SURFACES, TRAPPING_DEPTHS,
-        mboz=ACTION_MBOZ, nboz=ACTION_MBOZ, nalpha=ACTION["nalpha"],
-        points_per_period=ACTION["points_per_period"],
-        num_periods=ACTION["num_periods"]))
+pitch = np.asarray(common_trapped_pitches_state(
+    state0, rt0, MAXJ_SURFACES, TRAPPING_DEPTHS,
+    mboz=ACTION_MBOZ, nboz=ACTION_MBOZ, nalpha=ACTION["nalpha"],
+    points_per_period=ACTION["points_per_period"],
+    num_periods=ACTION["num_periods"]))
 
-    qs = opt.QuasisymmetryRatioResidual(QS_SURFACES, helicity_m=1, helicity_n=0)
-    gamma_c_smooth = GammaCSmooth(GC_SURFACES, temperature=GC_TEMPERATURE, **GC_BUDGET)
-    gamma_c_hard = GammaC(GC_SURFACES, **GC_BUDGET)  # report-only, never differentiated
-    maximum_j = MaximumJResidual(MAXJ_SURFACES, pitch, mboz=ACTION_MBOZ,
-                                 nboz=ACTION_MBOZ, target=MAXJ_TARGET, **ACTION)
+qs = opt.QuasisymmetryRatioResidual(QS_SURFACES, helicity_m=1, helicity_n=0)
+gamma_c_smooth = GammaCSmooth(GC_SURFACES, temperature=GC_TEMPERATURE, **GC_BUDGET)
+gamma_c_hard = GammaC(GC_SURFACES, **GC_BUDGET)  # report-only, never differentiated
+maximum_j = MaximumJResidual(MAXJ_SURFACES, pitch, mboz=ACTION_MBOZ,
+                             nboz=ACTION_MBOZ, target=MAXJ_TARGET, **ACTION)
 
-    SCALES = {"QS": float(qs.total_state(state0, rt0)),
-              "GammaCSmooth": float(gamma_c_smooth.total_state(state0, rt0)),
-              "maxJ": float(maximum_j.total_state(state0, rt0))}
+SCALES = {"QS": float(qs.total_state(state0, rt0)),
+          "GammaCSmooth": float(gamma_c_smooth.total_state(state0, rt0)),
+          "maxJ": float(maximum_j.total_state(state0, rt0))}
 for name, scale in SCALES.items():
     if not np.isfinite(scale) or scale <= 0.0:
         raise RuntimeError(f"seed {name} total {scale} cannot normalize the objective")
@@ -221,8 +220,7 @@ report = opt.EquilibriumReporter(
 monitor = opt.OptimizationMonitor()
 report("seed", equilibrium)
 print_terms("seed", equilibrium)
-with vj.heartbeat("Hard Gamma_c, maximum-J and epsilon_eff at the seed"):
-    before = hard_confinement(equilibrium)
+before = hard_confinement(equilibrium)
 
 ### Run the optimization ######################################################
 
@@ -272,8 +270,7 @@ print_terms("final", final_equilibrium)
 ### Check the result ##########################################################
 
 # Hard before/after table, at the same radial and sampling resolution.
-with vj.heartbeat("Hard Gamma_c, maximum-J and epsilon_eff after the refinement"):
-    after = hard_confinement(final_equilibrium)
+after = hard_confinement(final_equilibrium)
 gc_before, gc_after = before["gamma_c"].mean(), after["gamma_c"].mean()
 print(f"\nhard confinement, before -> after (s = {list(GC_SURFACES)}):")
 print(f"hard Gamma_c per surface = {np.array2string(before['gamma_c'], precision=4)} -> "

@@ -111,8 +111,7 @@ print(f"PHIEDGE = {solved.phiedge:.6f} Wb after {len(iterates)} solves, {elapsed
 # which bounds how closely the cold check can reproduce the target.
 cold_input = replace(solved, ns_array=[NS // 3, 2 * NS // 3, NS],
                      ftol_array=[100 * FTOL, 10 * FTOL, FTOL], niter_array=[NITER] * 3)
-with vj.heartbeat("Cold re-solve at the returned PHIEDGE"):
-    cold = evaluate(cold_input, vj.solve_free_boundary_multigrid(cold_input, external_field=coil_field))
+cold = evaluate(cold_input, vj.solve_free_boundary_multigrid(cold_input, external_field=coil_field))
 print(f"cold re-solve: {METRIC} = {cold:.6f} (relative error {abs(cold / TARGET - 1):.1e})")
 wout = vj.wout_from_result(solved, result)
 

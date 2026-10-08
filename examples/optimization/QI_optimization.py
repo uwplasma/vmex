@@ -179,8 +179,7 @@ qi_final = report("final", final_equilibrium)["constructed QI"]
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
                    mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT)
 qi_validation = ConstructedQIResidual(SURFACES, **VALIDATION_OPTIONS)
-with vj.heartbeat("Independent fine-grid QI validation"):
-    qi_validation_total = float(qi_validation.total(final_equilibrium))
+qi_validation_total = float(qi_validation.total(final_equilibrium))
 print(f"\nQI total {qi_final:.3e}; independent fine-grid validation {qi_validation_total:.3e}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")

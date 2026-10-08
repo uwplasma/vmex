@@ -261,23 +261,20 @@ for controls in BSPLINE_CONTROLS:
 
 resolution = MirrorResolution(ns=MIRROR_NS, mpol=MIRROR_MPOL, nxi=MIRROR_NXI)
 config = MirrorConfig(resolution=resolution, ftol=MIRROR_FTOL, max_iterations=MIRROR_MAX_ITER)
-with vj.heartbeat("Building the QI-mirror hybrid"):
-    setup = build_qi_mirror_hybrid(
-        axis_points, resolution, cut_indices=cut, straight_length=STRAIGHT_LENGTH,
-        section_radius=SECTION_RADIUS, coefficient_count=COEFFICIENT_COUNT,
-        axial_flux_derivative=AXIAL_FLUX_DERIVATIVE,
-    )
-with vj.heartbeat("Solving the QI-mirror hybrid"):
-    result = solve_fixed_boundary(
-        setup.initial_state, setup.boundary, setup.discretization, config,
-        axial_flux_derivative=AXIAL_FLUX_DERIVATIVE, current_derivative=CURRENT_DERIVATIVE,
-        solve_lambda=True, axis=setup.axis, require_convergence=False,
-    )
+setup = build_qi_mirror_hybrid(
+    axis_points, resolution, cut_indices=cut, straight_length=STRAIGHT_LENGTH,
+    section_radius=SECTION_RADIUS, coefficient_count=COEFFICIENT_COUNT,
+    axial_flux_derivative=AXIAL_FLUX_DERIVATIVE,
+)
+result = solve_fixed_boundary(
+    setup.initial_state, setup.boundary, setup.discretization, config,
+    axial_flux_derivative=AXIAL_FLUX_DERIVATIVE, current_derivative=CURRENT_DERIVATIVE,
+    solve_lambda=True, axis=setup.axis, require_convergence=False,
+)
 evaluated = result.evaluated
-with vj.heartbeat("Tracing the closed field line"):
-    field_line = trace_closed_field_line(
-        evaluated.energy.field, setup.discretization, radial_index=MIRROR_NS - 2, turns=2
-    )
+field_line = trace_closed_field_line(
+    evaluated.energy.field, setup.discretization, radial_index=MIRROR_NS - 2, turns=2
+)
 mod_b = np.sqrt(np.maximum(np.asarray(magnetic_field_squared(
     evaluated.energy.field, evaluated.energy.geometry)), 0.0))
 b_axis = float(mod_b[0].mean())

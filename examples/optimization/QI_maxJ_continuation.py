@@ -186,9 +186,8 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
     # incoming equilibrium is checked (a lost well also makes the first
     # objective non-finite, which the problem build refuses).
     if stage > 0:
-        with vj.heartbeat("Checking the trapped wells"):
-            maxj_diagnostics = qi_maxj.compute_state(
-                equilibrium.solution, equilibrium.solver_context)["maximum_j"]
+        maxj_diagnostics = qi_maxj.compute_state(
+            equilibrium.solution, equilibrium.solver_context)["maximum_j"]
         if not bool(jnp.all(maxj_diagnostics["valid_pitch_pair"])):
             raise RuntimeError(
                 "the equilibrium no longer has usable trapped wells on every sampled "
@@ -216,9 +215,8 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
     inp = problem.input_from_x(result.x)
     equilibrium = problem.equilibrium_from_x(result.x)
     report(f"mode {max_mode}", equilibrium)
-    with vj.heartbeat("Actual-field maximum-J on the stage result"):
-        stage_maxj = qi_maxj.compute_state(
-            equilibrium.solution, equilibrium.solver_context)["maximum_j"]
+    stage_maxj = qi_maxj.compute_state(
+        equilibrium.solution, equilibrium.solver_context)["maximum_j"]
     print(f"actual-field maximum-J fraction = "
           f"{float(stage_maxj['maximum_j_fraction']):.1%}")
 

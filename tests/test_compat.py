@@ -10,6 +10,7 @@ Item I.8a dead-code prune — the core is JAX-only.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import types
@@ -804,3 +805,18 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
     explicit = tmp_path / "explicit"
     env["JAX_COMPILATION_CACHE_DIR"] = str(explicit)
     assert pathlib.Path(_import_cache_dir(env)) == explicit / fingerprint
+
+
+@pytest.mark.parametrize("setting,expected", [("1", True), ("0", False), ("off", False), ("60", False)])
+def test_scripts_report_elapsed_time_when_quiet(tmp_path, setting, expected):
+    """A script that goes quiet hears from vmex unless the heartbeat is off or longer."""
+    import subprocess
+
+    script = tmp_path / "quiet.py"
+    script.write_text("import sys, time, vmex\nprint('start')\ntime.sleep(2.5)\n"
+                      "sys.stderr.write('bar\\n')\nprint('done')\n")
+    root = os.path.dirname(os.path.dirname(_compat.__file__))
+    out = subprocess.run([sys.executable, "-u", str(script)], capture_output=True, text=True, check=True,
+                         env={**os.environ, "VMEX_HEARTBEAT": setting, "PYTHONPATH": root}).stdout
+    assert out.startswith("start\n") and out.endswith("done\n")
+    assert ("still running" in out) is expected

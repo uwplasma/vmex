@@ -134,9 +134,8 @@ for target in TARGET_BETAS:
     ps = target / SLOPE
     for attempt in range(CALIBRATION_ATTEMPTS):  # solve, read beta, rescale
         inp_i = replace(current, pres_scale=ps)
-        with vj.heartbeat(f"Solving the {target:g} % point (attempt {attempt + 1})"):
-            res = vj.solve_free_boundary(inp_i, external_field=coil_field,
-                                         error_on_no_convergence=False)
+        res = vj.solve_free_boundary(inp_i, external_field=coil_field,
+                                     error_on_no_convergence=False)
         wout = vj.wout_from_state(
             inp=inp_i, state=res.state, fsqr=float(res.fsqr), fsqz=float(res.fsqz),
             fsql=float(res.fsql), niter=int(res.iterations),

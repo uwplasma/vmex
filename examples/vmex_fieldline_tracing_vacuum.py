@@ -55,38 +55,36 @@ coils = Coils.from_json(str(DATA / "ESSOS_biot_savart_LandremanPaulQA.json"))
 biot_savart = BiotSavart(coils)
 coil_field = jax.jit(lambda points: jax.vmap(biot_savart.B)(
     points.reshape(-1, 3)).reshape(points.shape))
-with vj.heartbeat("Building the exterior field, the seeds and the stopping surface"):
-    exterior = equilibrium.exterior_field(external_field=coil_field, plasma="vacuum")
+exterior = equilibrium.exterior_field(external_field=coil_field, plasma="vacuum")
 
-    equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
-    axis, edge = equilibrium.field.get_points_cart()
-    # VMEX regularizes the physical field at the coordinate-degenerate axis. Sample
-    # the whole minor radius, then resolve the shorter exterior interval densely.
-    edge_radius = jnp.linalg.norm(edge - axis)
-    n_outside = max(1, N_FIELDLINES // 4); n_inside = N_FIELDLINES - n_outside
-    seed_fractions = jnp.concatenate((jnp.linspace(0.0, 1.0, n_inside),
-        1.0 + jnp.linspace(1.0 / n_outside, 1.0, n_outside) * OUTSIDE_OFFSET / edge_radius))
-    xyz_seeds = axis + seed_fractions[:, None] * (edge - axis)
-    inside = seed_fractions <= 1.0
-    inside_xyz, outside_xyz = xyz_seeds[inside], xyz_seeds[~inside]
-    equilibrium.set_points_xyz(inside_xyz); flux_seeds = equilibrium.field.get_points_flux()
+equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+axis, edge = equilibrium.field.get_points_cart()
+# VMEX regularizes the physical field at the coordinate-degenerate axis. Sample
+# the whole minor radius, then resolve the shorter exterior interval densely.
+edge_radius = jnp.linalg.norm(edge - axis)
+n_outside = max(1, N_FIELDLINES // 4); n_inside = N_FIELDLINES - n_outside
+seed_fractions = jnp.concatenate((jnp.linspace(0.0, 1.0, n_inside),
+    1.0 + jnp.linspace(1.0 / n_outside, 1.0, n_outside) * OUTSIDE_OFFSET / edge_radius))
+xyz_seeds = axis + seed_fractions[:, None] * (edge - axis)
+inside = seed_fractions <= 1.0
+inside_xyz, outside_xyz = xyz_seeds[inside], xyz_seeds[~inside]
+equilibrium.set_points_xyz(inside_xyz); flux_seeds = equilibrium.field.get_points_flux()
 
-    classifier_surface = surfacerzfourier_from_boundary(
-        inp.rbc, inp.zbs, inp.nfp, nphi=32, ntheta=32)
-    classifier = SurfaceClassifier(
-        classifier_surface, h=0.08, padding=MAX_SURFACE_DISTANCE + 0.03)
-    escape = LevelsetStoppingCriterion(classifier, maximum_distance=MAX_SURFACE_DISTANCE)
+classifier_surface = surfacerzfourier_from_boundary(
+    inp.rbc, inp.zbs, inp.nfp, nphi=32, ntheta=32)
+classifier = SurfaceClassifier(
+    classifier_surface, h=0.08, padding=MAX_SURFACE_DISTANCE + 0.03)
+escape = LevelsetStoppingCriterion(classifier, maximum_distance=MAX_SURFACE_DISTANCE)
 
 # The prescribed-interface API supplies an independent B.n/B check against
 # the ESSOS coils here; it does not run a free-boundary equilibrium.
-with vj.heartbeat("Virtual-casing check of B.n/B against the coils"):
-    surface_data = vc.surface_field_data_from_state(
-        inp, equilibrium.solution, runtime=equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
-    precision = vc.plan_vc_precision(surface_data, digits=VC_DIGITS)
-    interface = vc.PlasmaVacuumInterface.from_surface_data(
-        surface_data, digits=VC_DIGITS, precision=precision)
-    B_surface = interface.total_B_out(coil_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
-    Bn_over_B = jnp.abs(interface.bnormal_residual(coil_field)) / Bmag_surface
+surface_data = vc.surface_field_data_from_state(
+    inp, equilibrium.solution, runtime=equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
+precision = vc.plan_vc_precision(surface_data, digits=VC_DIGITS)
+interface = vc.PlasmaVacuumInterface.from_surface_data(
+    surface_data, digits=VC_DIGITS, precision=precision)
+B_surface = interface.total_B_out(coil_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
+Bn_over_B = jnp.abs(interface.bnormal_residual(coil_field)) / Bmag_surface
 alignment = (jnp.sum(interface.weights * jnp.sum(B_surface * surface_data.B_total, axis=0))
              / jnp.sqrt(jnp.sum(interface.weights * Bmag_surface**2)
                         * jnp.sum(interface.weights * jnp.sum(surface_data.B_total**2, axis=0))))

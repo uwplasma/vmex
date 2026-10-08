@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import io
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from vmex.core.monitoring import EquilibriumReporter, OptimizationMonitor, heartbeat
+from vmex.core.monitoring import EquilibriumReporter, OptimizationMonitor
 from vmex.core.problem import FunctionProblem
 
 
@@ -497,21 +496,3 @@ def test_trace_prints_one_line_per_evaluation():
         silent.cache_evaluation(np.array([float(index)]), cost, np.array([cost]))
     assert "trial" not in quiet.getvalue()
 
-
-
-def test_heartbeat_prints_elapsed_time():
-    """A long silent block prints its action and elapsed-time lines."""
-    stream = io.StringIO()
-    with heartbeat("Solving", report_interval=0.02, stream=stream):
-        time.sleep(0.07)
-    assert stream.getvalue().startswith("Solving...\n")
-    assert "s elapsed." in stream.getvalue()
-
-
-def test_heartbeat_ticks_while_a_call_holds_the_interpreter_lock(capfd):
-    """On a real file the ticks come from a child process, so the GIL cannot stop them."""
-    import re
-
-    with heartbeat("Busy", report_interval=0.05):
-        re.match(r"(a+)+$", "a" * 25 + "b")  # one C call that never releases the GIL
-    assert "s elapsed." in capfd.readouterr().out

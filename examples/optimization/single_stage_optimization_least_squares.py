@@ -330,19 +330,17 @@ def coil_fit_value_and_grad(u):
 # equal bounds. Circular coils leave B.n/B near 20% RMS; this costs no
 # equilibrium solve and keeps the normal-field term from dominating the joint
 # solve that follows.
-with vj.heartbeat("Coil-only pre-fit (no equilibrium solves)"):
-    coil_fit = minimize(
-        coil_fit_value_and_grad, np.zeros_like(x0), jac=True, method="L-BFGS-B",
-        bounds=[(0.0, 0.0)] * n_boundary
-               + [(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils0.size,
-        options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
+coil_fit = minimize(
+    coil_fit_value_and_grad, np.zeros_like(x0), jac=True, method="L-BFGS-B",
+    bounds=[(0.0, 0.0)] * n_boundary
+           + [(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils0.size,
+    options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
 surface_seed, coils_fit = objects_from_x(jnp.asarray(x0 + scales * coil_fit.x))
 print(f"[coil fit] {coil_fit.nit} L-BFGS-B iterations, no equilibrium solves: B.n/B RMS "
       f"= {100 * float(normal_field_rms(coils_fit, surface_seed)):.3f}% on the seed")
 
 u = coil_fit.x
-with vj.heartbeat("First residual and Jacobian (compiles the joint problem)"):
-    initial_residual, _ = residual_and_jacobian(u)
+initial_residual, _ = residual_and_jacobian(u)
 initial_value = 0.5 * float(initial_residual @ initial_residual)
 # TRF because it takes the same bounds L-BFGS-B does, and they are active here.
 result = least_squares(

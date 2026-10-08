@@ -26,7 +26,6 @@ from pathlib import Path
 import jax
 import numpy as np
 
-from vmex import heartbeat
 from vmex.mirror import (
     CircularCoils,
     MirrorInput,
@@ -132,8 +131,7 @@ restart = None
 if RESTART_FROM is not None:
     discretization = SplineMirrorDiscretization.build_cgl(inp.config, elements=SPLINE_ELEMENTS)
     restart = load_free_boundary_restart(RESTART_FROM, discretization)
-with heartbeat("Solving the beta scan"):
-    solutions = solve_mirror_beta_scan(inp, BETAS, initial_restart=restart, verbose=True)
+solutions = solve_mirror_beta_scan(inp, BETAS, initial_restart=restart, verbose=True)
 results = [solution.result for solution in solutions]
 grid = solutions[0].discretization.grid
 vacuum_axis_field = np.asarray(coils.axis_field(grid.z))

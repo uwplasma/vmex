@@ -238,12 +238,11 @@ def coil_fit_objective(u_coils):
 
 print("Running single_stage_optimization_finite_beta.py")
 coil_fit_value_and_grad = jax.jit(jax.value_and_grad(coil_fit_objective))
-with vj.heartbeat("Coil-only pre-fit (no equilibrium solves)"):
-    coil_fit = minimize(
-        lambda u: tuple(map(np.asarray, coil_fit_value_and_grad(jnp.asarray(u)))),
-        np.zeros_like(x_coils_circular), jac=True, method="L-BFGS-B",
-        bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils_circular.size,
-        options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
+coil_fit = minimize(
+    lambda u: tuple(map(np.asarray, coil_fit_value_and_grad(jnp.asarray(u)))),
+    np.zeros_like(x_coils_circular), jac=True, method="L-BFGS-B",
+    bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils_circular.size,
+    options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
 x_coils0 = x_coils_circular + coil_scales * coil_fit.x
 coils0 = coils_from_dofs(jnp.asarray(x_coils0))
 print(f"[coil fit] {coil_fit.nit} L-BFGS-B iterations, no equilibrium solves: B.n/B RMS "
@@ -313,11 +312,10 @@ def objects_from_x(x):
 
 # Virtual casing picks its quadrature once, on the concrete seed, so that the
 # plasma field stays differentiable in the boundary on every trial.
-with vj.heartbeat("Seed equilibrium and virtual-casing plan"):
-    seed_equilibrium = plasma_problem.equilibrium_from_x(x_boundary0)
-    precision = vc.plan_vc_precision(vc.surface_field_data_from_state(
-        inp, seed_equilibrium.solution, runtime=seed_equilibrium.solver_context,
-        nphi=NPHI, ntheta=NTHETA), digits=VC_DIGITS)
+seed_equilibrium = plasma_problem.equilibrium_from_x(x_boundary0)
+precision = vc.plan_vc_precision(vc.surface_field_data_from_state(
+    inp, seed_equilibrium.solution, runtime=seed_equilibrium.solver_context,
+    nphi=NPHI, ntheta=NTHETA), digits=VC_DIGITS)
 
 
 def total_normal_field(input_, coils, equilibrium_state, solver_context, nphi, ntheta,
@@ -444,13 +442,12 @@ surface_final = surfacerzfourier_from_boundary(
     jnp.asarray(final_input.rbc), jnp.asarray(final_input.zbs), NFP, nphi=61, ntheta=64)
 # The total field's normal component, with virtual casing replanned on the
 # finer grid of the optimized boundary.
-with vj.heartbeat("Virtual-casing B.n check on the final grid"):
-    final_data = vc.surface_field_data_from_state(
-        final_input, final_equilibrium.solution, runtime=final_equilibrium.solver_context,
-        nphi=61, ntheta=64)
-    normal_field, area = map(np.asarray, total_normal_field(
-        final_input, coils_final, final_equilibrium.solution, final_equilibrium.solver_context,
-        61, 64, vc.plan_vc_precision(final_data, digits=VC_DIGITS)))
+final_data = vc.surface_field_data_from_state(
+    final_input, final_equilibrium.solution, runtime=final_equilibrium.solver_context,
+    nphi=61, ntheta=64)
+normal_field, area = map(np.asarray, total_normal_field(
+    final_input, coils_final, final_equilibrium.solution, final_equilibrium.solver_context,
+    61, 64, vc.plan_vc_precision(final_data, digits=VC_DIGITS)))
 normal_field_rms_final = float(np.sqrt(np.sum(area * normal_field**2)))
 normal_field_max = float(np.max(np.abs(normal_field)))
 gamma = np.asarray(coils_final.gamma)

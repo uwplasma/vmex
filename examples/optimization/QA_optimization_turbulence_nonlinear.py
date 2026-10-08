@@ -39,7 +39,6 @@ ratio 11.5 -> 6.0. That is one tube, one seed and no held-out check: it shows
 the pipeline works, not a certified transport reduction.
 """
 
-from contextlib import nullcontext
 import os
 import time
 from dataclasses import replace
@@ -185,15 +184,13 @@ def saturate(equilibrium, seeds, label):
     """Run every tube to an accepted saturated state (outside the derivative)."""
     states = []
     for tube, seed in zip(TUBES, seeds):
-        with vj.heartbeat(f"Flux-tube geometry for s={tube[0]}, alpha={tube[1]}"):
-            geometry = tube_geometry(equilibrium.state, equilibrium.runtime, tube)
+        geometry = tube_geometry(equilibrium.state, equilibrium.runtime, tube)
         state, fluxes, start = seed, [], time.perf_counter()
         last_print = start
         for chunk in range(MAX_SATURATION_STEPS // SAMPLE_STEPS):
-            with vj.heartbeat(f"First GKX steps on tube s={tube[0]}") if chunk == 0 else nullcontext():
-                state = gkx.integrate_nonlinear(
-                    state, grid, geometry, gk_parameters(geometry), DT, SAMPLE_STEPS,
-                    method="rk3", terms=terms, return_fields=False)
+            state = gkx.integrate_nonlinear(
+                state, grid, geometry, gk_parameters(geometry), DT, SAMPLE_STEPS,
+                method="rk3", terms=terms, return_fields=False)
             fluxes.append(float(window_flux(state, geometry, 1)))
             times = DT * SAMPLE_STEPS * np.arange(1, len(fluxes) + 1)
             decision = saturation_stop_decision(

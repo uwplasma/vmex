@@ -39,8 +39,7 @@ PLOT_FIGURE = FIGURES / ("polish_plot.webp" if FIGURES == OUTPUT_DIR else "readm
 ### Solve and polish ##########################################################
 
 inp = vj.VmecInput.from_file(INPUT_FILE)
-with vj.heartbeat("Solving and polishing"):
-    result = vj.solve_file(INPUT_FILE, polish=True, write_wout=True, outdir=OUTPUT_DIR, verbose=True)
+result = vj.solve_file(INPUT_FILE, polish=True, write_wout=True, outdir=OUTPUT_DIR, verbose=True)
 if result.polished_state is None or result.polish_report is None:
     raise RuntimeError("the solve did not run force-balance polishing")
 report = result.polish_report
@@ -76,20 +75,19 @@ print(f"polish work: {report.nonlinear_iterations} nonlinear iterations, "
 native = result.native_equilibrium
 run = dict(fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
            niter=int(result.iterations), converged=bool(result.converged))
-with vj.heartbeat("Exporting and certifying both WOUT files"):
-    legacy = vj.high_order_state_from_wout(vj.wout_from_state(inp=inp, state=result.state, **run), inp=inp)
-    polished_path = OUTPUT_DIR / f"wout_{INPUT_FILE.name.removeprefix('input.')}.nc"
-    ns = int(vj.read_wout(polished_path).ns)
-    legacy_path = vj.write_wout(
-        OUTPUT_DIR / f"wout_{BEFORE_NAME}.nc",
-        vj.wout_from_state(inp=inp, state=polished_wout_state(legacy, inp, solve_ns=ns), **run),
-    )
-    files = {"VMEC solve": (legacy_path, inp), "polished": (polished_path, polished_wout_input(native, inp))}
-    certificates = {
-        label: vj.certify_strong_force(
-            vj.high_order_state_from_wout(path, inp=deck, radial_basis=native.radial_basis))
-        for label, (path, deck) in files.items()
-    }
+legacy = vj.high_order_state_from_wout(vj.wout_from_state(inp=inp, state=result.state, **run), inp=inp)
+polished_path = OUTPUT_DIR / f"wout_{INPUT_FILE.name.removeprefix('input.')}.nc"
+ns = int(vj.read_wout(polished_path).ns)
+legacy_path = vj.write_wout(
+    OUTPUT_DIR / f"wout_{BEFORE_NAME}.nc",
+    vj.wout_from_state(inp=inp, state=polished_wout_state(legacy, inp, solve_ns=ns), **run),
+)
+files = {"VMEC solve": (legacy_path, inp), "polished": (polished_path, polished_wout_input(native, inp))}
+certificates = {
+    label: vj.certify_strong_force(
+        vj.high_order_state_from_wout(path, inp=deck, radial_basis=native.radial_basis))
+    for label, (path, deck) in files.items()
+}
 before, after = certificates.values()
 print(f"\nboth WOUT files on ns = {ns}, read back and certified the same way:")
 for label, field in (("RMS |F|, whole volume  [N m^-3]", "absolute_l2"),

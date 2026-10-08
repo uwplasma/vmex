@@ -83,8 +83,7 @@ links to the module that documents it.
   residual, and derivative callables
 - :class:`~vmex.core.monitoring.OptimizationMonitor` /
   :class:`~vmex.core.monitoring.OptimizationRecord` — accepted iterations;
-  :class:`~vmex.core.monitoring.EquilibriumReporter` — compact diagnostics;
-  :func:`~vmex.core.monitoring.heartbeat` — elapsed-time lines for a long call
+  :class:`~vmex.core.monitoring.EquilibriumReporter` — compact diagnostics
 
 **Post-processing and plotting**
 
@@ -304,7 +303,6 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "FunctionProblem": (".core.problem", "FunctionProblem"),
     "VmecProblem": (".core.problem", "VmecProblem"),
     "EquilibriumReporter": (".core.monitoring", "EquilibriumReporter"),
-    "heartbeat": (".core.monitoring", "heartbeat"),
     "OptimizationMonitor": (".core.monitoring", "OptimizationMonitor"),
     "OptimizationRecord": (".core.monitoring", "OptimizationRecord"),
     # high-order strong-force polishing

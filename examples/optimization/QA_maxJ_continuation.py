@@ -220,11 +220,10 @@ finite_beta_terms = [(qs, 0.0, QA_WEIGHT), (bootstrap, 0.0, BOOTSTRAP_WEIGHT),
 
 # One physical lambda must represent the same particles on every radius and
 # field-line label. Keep these pitches fixed throughout the maximum-J stages.
-with vj.heartbeat("Selecting the common trapped pitches"):
-    pitch = np.asarray(common_trapped_pitches_state(
-        equilibrium.solution, equilibrium.solver_context, SURFACES, TRAPPING_DEPTHS,
-        nalpha=ACTION_NALPHA, points_per_period=ACTION_POINTS,
-        num_periods=ACTION_PERIODS))
+pitch = np.asarray(common_trapped_pitches_state(
+    equilibrium.solution, equilibrium.solver_context, SURFACES, TRAPPING_DEPTHS,
+    nalpha=ACTION_NALPHA, points_per_period=ACTION_POINTS,
+    num_periods=ACTION_PERIODS))
 maximum_j = MaximumJResidual(SURFACES, pitch, mboz=ACTION_MBOZ, nboz=ACTION_MBOZ,
     nalpha=ACTION_NALPHA, points_per_period=ACTION_POINTS,
     num_periods=ACTION_PERIODS, max_wells=ACTION_MAX_WELLS,
@@ -260,9 +259,8 @@ final_input = replace(inp, ns_array=np.array([FINAL_NS]),
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution, verbose=not ci_smoke,
     raise_on_max_iterations=True)
-with vj.heartbeat("Maximum-J certificate on the final grid"):
-    diagnostics = maximum_j.compute_state(final_equilibrium.solution,
-                                          final_equilibrium.solver_context)
+diagnostics = maximum_j.compute_state(final_equilibrium.solution,
+                                      final_equilibrium.solver_context)
 
 ### Print, plot and save ######################################################
 

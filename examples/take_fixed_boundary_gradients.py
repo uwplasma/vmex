@@ -62,10 +62,8 @@ def scalar(params, name):
 
 # Each jax.grad is one forward solve and one adjoint solve. The aspect ratio
 # depends strongly on the m = 1 boundary mode, the magnetic energy on phiedge.
-with vj.heartbeat("Adjoint gradient of the aspect ratio (first call compiles)"):
-    aspect, gradient_aspect = jax.value_and_grad(lambda p: scalar(p, "aspect"))(p0)
-with vj.heartbeat("Adjoint gradient of the magnetic energy"):
-    wb, gradient_wb = jax.value_and_grad(lambda p: scalar(p, "wb"))(p0)
+aspect, gradient_aspect = jax.value_and_grad(lambda p: scalar(p, "aspect"))(p0)
+wb, gradient_wb = jax.value_and_grad(lambda p: scalar(p, "wb"))(p0)
 print(f"solovev ns={int(inp.ns_array[-1])}, ftol={FTOL:g}:  "
       f"aspect = {float(aspect):.8f}   wb = {float(wb):.8e}")
 adjoint_rbc = float(np.asarray(gradient_aspect.rbc)[ntor, 1])

@@ -19,7 +19,6 @@ from pathlib import Path
 
 import jax
 
-from vmex import heartbeat
 from vmex.mirror import (
     MirrorConfig,
     MirrorResolution,
@@ -77,33 +76,31 @@ config = MirrorConfig(
     ftol=FTOL,
     max_iterations=MAX_ITERATIONS,
 )
-with heartbeat("Building the stellarator-mirror hybrid"):
-    setup = build_stellarator_mirror_hybrid(
-        resolution,
-        coefficient_count=SPLINE_COEFFICIENTS,
-        straight_length=STRAIGHT_LENGTH,
-        return_radius=RETURN_RADIUS,
-        semi_major=SEMI_MAJOR,
-        semi_minor=SEMI_MINOR,
-        section_turns=SECTION_TURNS,
-        axial_flux_derivative=AXIAL_FLUX_DERIVATIVE,
-        quadrature_order=SPLINE_QUADRATURE_ORDER,
-    )
+setup = build_stellarator_mirror_hybrid(
+    resolution,
+    coefficient_count=SPLINE_COEFFICIENTS,
+    straight_length=STRAIGHT_LENGTH,
+    return_radius=RETURN_RADIUS,
+    semi_major=SEMI_MAJOR,
+    semi_minor=SEMI_MINOR,
+    section_turns=SECTION_TURNS,
+    axial_flux_derivative=AXIAL_FLUX_DERIVATIVE,
+    quadrature_order=SPLINE_QUADRATURE_ORDER,
+)
 
 ### Solve the equilibrium #####################################################
 
-with heartbeat("Solving the stellarator-mirror hybrid"):
-    result = solve_fixed_boundary(
-        setup.initial_state,
-        setup.boundary,
-        setup.discretization,
-        config,
-        axial_flux_derivative=AXIAL_FLUX_DERIVATIVE,
-        current_derivative=CURRENT_DERIVATIVE,
-        solve_lambda=True,
-        axis=setup.axis,
-        require_convergence=True,
-    )
+result = solve_fixed_boundary(
+    setup.initial_state,
+    setup.boundary,
+    setup.discretization,
+    config,
+    axial_flux_derivative=AXIAL_FLUX_DERIVATIVE,
+    current_derivative=CURRENT_DERIVATIVE,
+    solve_lambda=True,
+    axis=setup.axis,
+    require_convergence=True,
+)
 
 ### Plot, trace and save ######################################################
 

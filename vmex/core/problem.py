@@ -293,10 +293,9 @@ class FunctionProblem:
     evaluation_progress:
         Print an elapsed-time heartbeat around long evaluations.  It stays
         silent until a call outlives the first interval, so fast calls
-        print nothing.  It wraps :meth:`residual`, :meth:`residual_jac`,
-        :meth:`jax_residual`, :meth:`jax_residual_jac`, :meth:`fun` and
-        :meth:`value_and_grad`, which is where a production deck spends
-        minutes.
+        print nothing.  It wraps the standalone :meth:`residual` and
+        :meth:`residual_jac` calls only, which is where a production deck
+        spends minutes; the combined and scalar lanes are unaffected.
     report_interval:
         Seconds between heartbeat lines.  Must be positive.
     """
@@ -391,9 +390,8 @@ class FunctionProblem:
             if self._vg_cache is not None and self._vg_cache[0] == key:
                 value, gradient = self._vg_cache[1]
                 return value, gradient.copy()
-            if (value_and_grad := self._value_and_grad) is not None:
-                value, gradient = self._timed(
-                    "value and gradient", lambda: value_and_grad(xh))
+            if self._value_and_grad is not None:
+                value, gradient = self._value_and_grad(xh)
             elif self._fun is not None and self._grad is not None:
                 value, gradient = self._fun(xh), self._grad(xh)
             elif self._residual_and_jac is not None:
@@ -414,8 +412,8 @@ class FunctionProblem:
 
     def fun(self, x: Array) -> float:
         """Return the scalar objective value."""
-        if (fun := self._fun) is not None:
-            return float(np.asarray(self._timed("value", lambda: fun(self._x(x)))))
+        if self._fun is not None:
+            return float(np.asarray(self._fun(self._x(x))))
         if self._value_and_grad is not None or self._grad is not None:
             return self.value_and_grad(x)[0]
         residual = self.residual(x)
@@ -509,15 +507,15 @@ class FunctionProblem:
 
     def jax_residual(self, x: Array) -> Array:
         """Return the traceable residual vector."""
-        if (function := self._jax_residual) is None:
+        if self._jax_residual is None:
             raise AttributeError("this problem does not provide JAX residuals")
-        return self._timed("residual", lambda: function(x))
+        return self._jax_residual(x)
 
     def jax_residual_jac(self, x: Array) -> Array:
         """Return the traceable residual Jacobian."""
-        if (function := self._jax_residual_jac) is None:
+        if self._jax_residual_jac is None:
             raise AttributeError("this problem does not provide a JAX residual Jacobian")
-        return self._timed("Jacobian", lambda: function(x))
+        return self._jax_residual_jac(x)
 
     def evaluate(self, x: Array, *, derivatives: bool = True) -> Evaluation:
         """Evaluate available scalar and residual quantities at ``x``."""
@@ -783,12 +781,7 @@ class FunctionProblem:
         xh = self.x0.copy() if x is None else self._x(x).copy()
 
         def compile_callables() -> Evaluation:
-            # This heartbeat replaces the per-evaluation one, not doubles it.
-            quiet, self.evaluation_progress = self.evaluation_progress, False
-            try:
-                value, gradient = self.value_and_grad(xh)
-            finally:
-                self.evaluation_progress = quiet
+            value, gradient = self.value_and_grad(xh)
             return Evaluation(x=xh, value=value, gradient=gradient)
 
         return _run_with_progress(

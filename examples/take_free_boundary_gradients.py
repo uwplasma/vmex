@@ -69,8 +69,7 @@ def configured(**overrides):
 aspect_from_coils = configured()
 
 parameters = jnp.zeros(base_dofs.size)
-with vj.heartbeat("Solving the free boundary and its implicit adjoint"):
-    aspect, gradient = jax.value_and_grad(aspect_from_coils)(parameters)
+aspect, gradient = jax.value_and_grad(aspect_from_coils)(parameters)
 # One normalized direction changes a curve Fourier coefficient and all base
 # currents. Independent re-solves therefore certify both ESSOS derivative paths.
 direction = jnp.zeros_like(parameters).at[2].set(0.1)
@@ -88,15 +87,13 @@ autodiff = jnp.vdot(gradient, direction)
 # 1.6e-02 apart, and the central difference below read 0 at the smoke-test
 # settings; it now agrees with both to 1.1e-04 and 1.1e-05, the difference
 # quotient's own truncation at this step.
-with vj.heartbeat("Second adjoint (edge Schur) for the certificate"):
-    schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
+schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
 schur = jnp.vdot(schur_gradient, direction)
 disagreement = jnp.abs(autodiff - schur) / jnp.abs(schur)
 
 step = 1.0e-1
-with vj.heartbeat("Central difference over two re-solves"):
-    finite_difference = (aspect_from_coils(parameters + step * direction)
-                         - aspect_from_coils(parameters - step * direction)) / (2 * step)
+finite_difference = (aspect_from_coils(parameters + step * direction)
+                     - aspect_from_coils(parameters - step * direction)) / (2 * step)
 
 print(f"aspect = {float(aspect):.6f}")
 print(f"directional d(aspect)/d(coils): coupled GCROT = {float(autodiff):.8e}, "

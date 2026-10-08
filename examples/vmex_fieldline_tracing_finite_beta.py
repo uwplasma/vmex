@@ -80,35 +80,34 @@ biot_savart = BiotSavart(coils)
 coil_field = jax.jit(lambda points: jax.vmap(biot_savart.B)(
     points.reshape(-1, 3)).reshape(points.shape))
 
-with vj.heartbeat("Building the self-consistent coil + plasma-current exterior field"):
-    # A prescribed-interface virtual-casing calculation separates the converged
-    # total field into plasma-current and coil parts; no free boundary is solved.
-    surface_data = vc.surface_field_data_from_state(
-        inp, equilibrium.solution, runtime=equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
-    exterior = VmecExtender.from_surface_data(
-        surface_data, external_field=coil_field, digits=VC_DIGITS)
-    equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
-    axis, edge = equilibrium.field.get_points_cart()
-    # VMEX regularizes the physical field at the coordinate-degenerate axis. Sample
-    # the whole minor radius, then resolve the shorter exterior interval densely.
-    edge_radius = jnp.linalg.norm(edge - axis)
-    n_outside = max(1, N_FIELDLINES // 4); n_inside = N_FIELDLINES - n_outside
-    seed_fractions = jnp.concatenate((jnp.linspace(0.0, 1.0, n_inside),
-        1.0 + jnp.linspace(1.0 / n_outside, 1.0, n_outside) * OUTSIDE_OFFSET / edge_radius))
-    xyz_seeds = axis + seed_fractions[:, None] * (edge - axis)
-    inside = seed_fractions <= 1.0
-    inside_xyz, outside_xyz = xyz_seeds[inside], xyz_seeds[~inside]
-    equilibrium.set_points_xyz(inside_xyz); flux_seeds = equilibrium.field.get_points_flux()
+# A prescribed-interface virtual-casing calculation separates the converged
+# total field into plasma-current and coil parts; no free boundary is solved.
+surface_data = vc.surface_field_data_from_state(
+    inp, equilibrium.solution, runtime=equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
+exterior = VmecExtender.from_surface_data(
+    surface_data, external_field=coil_field, digits=VC_DIGITS)
+equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+axis, edge = equilibrium.field.get_points_cart()
+# VMEX regularizes the physical field at the coordinate-degenerate axis. Sample
+# the whole minor radius, then resolve the shorter exterior interval densely.
+edge_radius = jnp.linalg.norm(edge - axis)
+n_outside = max(1, N_FIELDLINES // 4); n_inside = N_FIELDLINES - n_outside
+seed_fractions = jnp.concatenate((jnp.linspace(0.0, 1.0, n_inside),
+    1.0 + jnp.linspace(1.0 / n_outside, 1.0, n_outside) * OUTSIDE_OFFSET / edge_radius))
+xyz_seeds = axis + seed_fractions[:, None] * (edge - axis)
+inside = seed_fractions <= 1.0
+inside_xyz, outside_xyz = xyz_seeds[inside], xyz_seeds[~inside]
+equilibrium.set_points_xyz(inside_xyz); flux_seeds = equilibrium.field.get_points_flux()
 
-    precision = exterior.plasma_field.plan_surface_precision(digits=VC_DIGITS)
-    interface = vc.PlasmaVacuumInterface.from_surface_data(
-        surface_data, digits=VC_DIGITS, precision=precision,
-        virtual_casing_field=exterior.plasma_field)
-    B_surface = interface.total_B_out(coil_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
-    Bn_over_B = jnp.abs(interface.bnormal_residual(coil_field)) / Bmag_surface
-    alignment = (jnp.sum(interface.weights * jnp.sum(B_surface * surface_data.B_total, axis=0))
-                 / jnp.sqrt(jnp.sum(interface.weights * Bmag_surface**2)
-                            * jnp.sum(interface.weights * jnp.sum(surface_data.B_total**2, axis=0))))
+precision = exterior.plasma_field.plan_surface_precision(digits=VC_DIGITS)
+interface = vc.PlasmaVacuumInterface.from_surface_data(
+    surface_data, digits=VC_DIGITS, precision=precision,
+    virtual_casing_field=exterior.plasma_field)
+B_surface = interface.total_B_out(coil_field); Bmag_surface = jnp.linalg.norm(B_surface, axis=0)
+Bn_over_B = jnp.abs(interface.bnormal_residual(coil_field)) / Bmag_surface
+alignment = (jnp.sum(interface.weights * jnp.sum(B_surface * surface_data.B_total, axis=0))
+             / jnp.sqrt(jnp.sum(interface.weights * Bmag_surface**2)
+                        * jnp.sum(interface.weights * jnp.sum(surface_data.B_total**2, axis=0))))
 print(f"True boundary B.n/B: mean = {100 * float(jnp.sum(interface.weights * Bn_over_B)):.3f}%, "
       f"max = {100 * float(jnp.max(Bn_over_B)):.3f}%")
 print(f"Boundary field alignment = {float(alignment):.6f}")

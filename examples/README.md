@@ -10,8 +10,8 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
 
 With its default settings every script finishes in under five minutes on a
 14-core laptop with a cold JAX cache, and prints progress the whole time
-(optimizer monitors, solver iterations, or elapsed-time heartbeats from
-`vmex.heartbeat`). Where a longer run gives a better answer, the script keeps
+(optimizer monitors and solver iterations; when a script goes quiet for 15 s,
+vmex itself prints the elapsed time, and `VMEX_HEARTBEAT=0` turns that off). Where a longer run gives a better answer, the script keeps
 that research budget as one commented set of constants next to the default.
 
 - Top-level scripts demonstrate common workflows (start with

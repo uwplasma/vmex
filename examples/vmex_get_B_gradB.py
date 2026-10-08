@@ -22,10 +22,9 @@ inp = replace(inp, phiedge=-0.025, pmass_type="power_series", am=am, pres_scale=
 # its named boundary modes. It solves the same equilibrium as solve_equilibrium;
 # no optimization or quasisymmetry objective is involved here.
 problem = opt.VmecProblem.from_input(inp, max_mode=1, use_ess=True, progress=True)
-with vj.heartbeat("Solving the equilibrium and locating the point"):
-    final_equilibrium = problem.equilibrium_from_x(problem.x0)
-    final_equilibrium.set_points_flux([[0.5, 0.0, 0.0]])
-    xyz = final_equilibrium.field.get_points_cart()
+final_equilibrium = problem.equilibrium_from_x(problem.x0)
+final_equilibrium.set_points_flux([[0.5, 0.0, 0.0]])
+xyz = final_equilibrium.field.get_points_cart()
 
 # Points can be supplied as VMEC (s, theta, phi) or Cartesian (x, y, z).
 # B and every spatial derivative below use Cartesian components and Cartesian
@@ -34,20 +33,18 @@ print("flux point (s, theta, phi) =", final_equilibrium.field.get_points_flux())
 print("Cartesian point (x, y, z) =", xyz)
 final_equilibrium.set_points_xyz(xyz)
 
-with vj.heartbeat("Evaluating B and its spatial derivatives"):
-    B = final_equilibrium.B()
-    absB = final_equilibrium.absB()
-    gradB = final_equilibrium.gradB()
-    gradgradB = final_equilibrium.gradgradB()
-    gradgradgradB = final_equilibrium.gradgradgradB()
+B = final_equilibrium.B()
+absB = final_equilibrium.absB()
+gradB = final_equilibrium.gradB()
+gradgradB = final_equilibrium.gradgradB()
+gradgradgradB = final_equilibrium.gradgradgradB()
 print("Evaluating B VJP...")
 dBdx = final_equilibrium.B_vjp(jnp.ones_like(B))
 print("Evaluating gradB VJP...")
 dgradBdx = final_equilibrium.gradB_vjp(jnp.ones_like(gradB))
 print("Evaluating gradgradB VJP...")
 d2Bdx = final_equilibrium.gradgradB_vjp(jnp.ones_like(gradgradB))
-with vj.heartbeat("Evaluating gradgradgradB VJP (the most expensive derivative)"):
-    d3Bdx = final_equilibrium.gradgradgradB_vjp(jnp.ones_like(gradgradgradB))
+d3Bdx = final_equilibrium.gradgradgradB_vjp(jnp.ones_like(gradgradgradB))
 
 print("B [T] =", B)
 print("|B| [T] =", absB)
