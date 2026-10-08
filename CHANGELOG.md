@@ -13,6 +13,9 @@ revision it was measured at, and the pages that cite it.
   helical vacuum harmonics) so a plasma in a radially unstable coil field
   stays at a target radius; the converged correction is
   `result.position_control`. Off by default, so existing runs are unchanged.
+- `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
+  from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
+  toroidal current, pressure). MRX is optional.
 - `vmex --trace` runs on one GPU when several are visible. Each adaptive step
   waits on every device, so two A4000s took 2-3 times longer than one;
   `trace_alphas(devices=jax.devices())` still splits over all of them. CPU

@@ -588,8 +588,10 @@ def _configure_jax_environment() -> None:
     default uses ``setdefault``: an explicit user environment always wins.
     """
     try:
-        # Enable x64 by default for VMEC parity unless the user opted out.
-        os.environ.setdefault("JAX_ENABLE_X64", "1")
+        # Default fresh JAX to x64; preserve an existing runtime precision
+        # choice when the caller has not supplied an environment override.
+        if "jax" not in sys.modules:
+            os.environ.setdefault("JAX_ENABLE_X64", "1")
         # VMEC/JAX optimization callbacks immediately materialize most results
         # on the host (SciPy residuals/Jacobians, history, wout writing).  On
         # CPU, asynchronous dispatch can leave completed XLA/PjRt work and
@@ -662,7 +664,12 @@ def _configure_jax_environment() -> None:
         import jax
 
         try:
-            jax.config.update("jax_enable_x64", os.environ.get("JAX_ENABLE_X64", "0") == "1")
+            if "JAX_ENABLE_X64" in os.environ:
+                # JAX's own boolean spellings; anything else keeps the runtime.
+                value = os.environ["JAX_ENABLE_X64"].lower()
+                truthy = ("y", "yes", "t", "true", "on", "1")
+                if value in truthy or value in ("n", "no", "f", "false", "off", "0"):
+                    jax.config.update("jax_enable_x64", value in truthy)
         except Exception:
             pass
         try:
