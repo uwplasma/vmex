@@ -202,6 +202,7 @@ EXECUTED_EXAMPLES = {
     "examples/vmex_fixed_free_boundary_comparison.py",
     "examples/vmex_get_B_gradB.py",
     "examples/vmex_get_B_outside_plasma.py",
+    "examples/vmex_mrx_comparison.py",
 }
 
 
@@ -1400,3 +1401,21 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
         bounded = re.search(r"Exterior trace QA: (\d+)/(\d+) lines remained", out)
         assert bounded is not None and int(bounded.group(1)) > 0
     assert (tmp_path / output).stat().st_size > 10_000
+
+
+def test_vmex_mrx_comparison_example(tmp_path):
+    """The MRX comparison solves a small VMEX case and runs without MRX installed.
+
+    No CI lane installs ``mrx``, so there the script stops after the solve with
+    the install command.  Where MRX is present the smoke pass takes one Newton
+    step on a coarse mesh (several minutes, all of it compilation) and draws
+    the figure.
+    """
+    out = _run_example(EXAMPLES / "vmex_mrx_comparison.py", tmp_path, timeout=1200)
+    assert "VMEX: iota axis/edge" in out
+    if "MRX is not installed" in out:
+        assert "pip install mrx" in out
+        return
+    assert "force residual" in out and "|B| difference" in out
+    figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
+    assert figure.stat().st_size > 10_000
