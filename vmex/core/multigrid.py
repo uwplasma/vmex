@@ -639,6 +639,7 @@ def solve_free_boundary_multigrid(
     use_fft: bool | None = None,
     release_stage_cache: bool = False,
     prefetch_compile: bool = False,
+    position_control: Any = None,
 ) -> SolveResult:
     """Free-boundary solve over the VMEC2000 ``NS_ARRAY`` ladder.
 
@@ -684,6 +685,11 @@ def solve_free_boundary_multigrid(
     ``None`` leaves placement to JAX.
     The final stage's publishable potential and surface fields are retained in
     ``result.vacuum``; internal NESTOR matrix caches are not exposed.
+
+    ``position_control`` (a :class:`~vmex.core.position_control.PositionControl`,
+    default ``None`` = off) adds a feedback-controlled uniform vertical field
+    that holds the plasma at a target radius; the control state carries across
+    rungs and the final correction is ``result.position_control``.
 
     ``prefetch_compile=True`` (False by default, exactly like
     :func:`solve_multigrid`: a library call must not spawn background
@@ -882,6 +888,10 @@ def solve_free_boundary_multigrid(
                     emit_legend=(igrid == 0),
                     prefetch_compile=prefetch_compile,
                     prefetch_device=stage_device,
+                    position_control=position_control,
+                    position_control_state=(
+                        None if stage_result is None or position_control is None
+                        else stage_result.result.position_control),
                 )
         except VmecJacobianError as exc:
             if prefetch_handle is not None:
@@ -933,6 +943,7 @@ def solve_free_boundary_multigrid(
                     use_fft=use_fft,
                     release_stage_cache=release_stage_cache,
                     prefetch_compile=prefetch_compile,
+                    position_control=position_control,
                 )
             raise
         except BaseException:

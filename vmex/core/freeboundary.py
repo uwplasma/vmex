@@ -69,6 +69,10 @@ from .fourier import ModeTable
 from .geometry import half_mesh_jacobian
 from .input import VmecInput
 from .mgrid import MgridField
+from .position_control import (
+    ControlledField, PositionControl, PositionControlResult, initial_control,
+    gain_scale, measure_position, update_control, wrap_field,
+)
 from .preconditioner_2d import Prec2DConfig
 from .printing import (
     emit_flushed,
@@ -1587,9 +1591,14 @@ def _make_vacuum_lane(fused: FusedVacuum, *, use_fft: bool = False):
         )
 
     def _lane(vc: _VacuumLoopCarry, rt: SolverRuntime, field) -> _VacuumLoopCarry:
-        return lax.while_loop(
-            lambda v: jnp.logical_not(v.carry.done),
-            lambda v: _pass(v, rt, field), vc)
+        # A position-controlled field carries an iteration ``stop`` so the host
+        # can update the control field; plain fields keep the unbounded loop.
+        stop = getattr(field, "stop", None)
+
+        def _running(v):
+            live = jnp.logical_not(v.carry.done)
+            return live if stop is None else live & (v.carry.iteration < stop)
+        return lax.while_loop(_running, lambda v: _pass(v, rt, field), vc)
 
     return jax.jit(_lane)
 
@@ -1631,6 +1640,8 @@ def _solve_free_boundary_stage(
     ) = None,
     prefetch_compile: bool = False,
     prefetch_device: Any = None,
+    position_control: PositionControl | None = None,
+    position_control_state: PositionControlResult | None = None,
 ) -> _FreeBoundaryStageResult:
     """Internal single-grid free-boundary stage with multigrid continuation.
 
@@ -1660,9 +1671,11 @@ def _solve_free_boundary_stage(
         raise ValueError("solve_free_boundary requires an LFREEB=T input")
     if external_field is None:
         external_field = _external_field_from_input(inp, mgrid_path)
+    base_field = (external_field.base if isinstance(external_field, ControlledField)
+                  else external_field)
 
     if resolution is None:
-        resolution = free_boundary_resolution(inp, external_field)
+        resolution = free_boundary_resolution(inp, base_field)
     else:
         # A supplied resolution must still satisfy VMEC2000's angular
         # compatibility rule against a tabulated field — never let an
@@ -1723,6 +1736,17 @@ def _solve_free_boundary_stage(
                 zcon0=jnp.zeros_like(rt.zcon0))
         else:
             rt = runtime_with_baselines(rt, _init_state, use_fft=use_fft)
+    ctl = None
+    ctl_sign = 1.0
+    if position_control is not None:
+        ctl = position_control_state
+        if ctl is None:
+            ctl = initial_control(position_control, _init_state, rt.modes)
+        ctl_sign = (position_control.current_sign
+                    if position_control.current_sign is not None
+                    else (1.0 if float(inp.curtor) >= 0.0 else -1.0))
+        ctl_scale = gain_scale(inp.curtor, ctl.r0)
+        external_field = wrap_field(base_field, ctl)
     _initial_ijacob = 0
     # ``eqsolve.f`` retries a supplied axis when the first Jacobian changes
     # sign.  The fixed-boundary driver already did this in ``_solve_stage``;
@@ -2064,10 +2088,21 @@ def _solve_free_boundary_stage(
                     vacuum_calls=jnp.asarray(fb.vacuum_calls, dtype=int_dtype),
                     full_updates=jnp.asarray(fb.full_updates, dtype=int_dtype),
                 )
+                if ctl is not None:
+                    external_field = wrap_field(
+                        base_field, ctl,
+                        int(carry.iteration) + int(position_control.interval))
                 vc = _call_lane(("fb_vac", fused_vac.cache_key), vacuum_lane,
                                 (vc, rt_freeb, external_field),
                                 notice=_lane_notice("steady vacuum loop"))
                 carry = vc.carry
+                if ctl is not None and not bool(carry.done):
+                    ctl = update_control(
+                        position_control, ctl,
+                        measure_position(carry.state, rt.modes, position_control),
+                        int(carry.iteration), ctl_sign,
+                        float(carry.fsqr) + float(carry.fsqz),
+                        ctl_scale)
                 rt_freeb = replace(rt_freeb, rcon0=vc.rcon0, zcon0=vc.zcon0,
                                    bsqvac_edge=vc.bsqvac)
                 fb.ivac = int(vc.ivac)
@@ -2218,28 +2253,37 @@ def _solve_free_boundary_stage(
                 residual_continuation=(carry.fsqr, carry.fsqz, carry.fsql),
                 prefetch_compile=prefetch_compile,
                 prefetch_device=prefetch_device,
+                position_control=position_control,
+                position_control_state=ctl,
             )
+        def _final_control(res):
+            if ctl is None:
+                return res
+            now = measure_position(carry.state, rt.modes, position_control)
+            return replace(res, position_control=replace(ctl, measured=now))
+
         if ier == MORE_ITER_FLAG and not error_on_no_convergence:
             result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
             return _FreeBoundaryStageResult(
-                replace(result, converged=False, ier_flag=MORE_ITER_FLAG,
-                        vacuum=_vacuum_output(fb, basis)), fb,
+                _final_control(replace(
+                    result, converged=False, ier_flag=MORE_ITER_FLAG,
+                    vacuum=_vacuum_output(fb, basis))), fb,
                 carry.xstore, rt_freeb.rcon0 if fb.turned_on else rt_fixed.rcon0,
                 rt_freeb.zcon0 if fb.turned_on else rt_fixed.zcon0)
         if ier == SUCCESSFUL_TERM_FLAG:
             return _FreeBoundaryStageResult(
-                replace(
+                _final_control(replace(
                     _result_from_carry(
                         carry, rt_freeb if fb.turned_on else rt_fixed),
                     vacuum=_vacuum_output(fb, basis),
-                ), fb,
+                )), fb,
                 carry.xstore, rt_freeb.rcon0 if fb.turned_on else rt_fixed.rcon0,
                 rt_freeb.zcon0 if fb.turned_on else rt_fixed.zcon0)
         return _FreeBoundaryStageResult(
-            replace(
+            _final_control(replace(
                 _finalize(carry, rt_freeb if fb.turned_on else rt_fixed),
                 vacuum=_vacuum_output(fb, basis),
-            ), fb,
+            )), fb,
             carry.xstore, rt_freeb.rcon0 if fb.turned_on else rt_fixed.rcon0,
             rt_freeb.zcon0 if fb.turned_on else rt_fixed.zcon0)
     finally:
@@ -2273,6 +2317,7 @@ def solve_free_boundary(
     prec2d: Prec2DConfig | None = None,
     jacobian_retries: int = 2,
     use_fft: bool | None = None,
+    position_control: PositionControl | None = None,
 ) -> SolveResult:
     """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
 
@@ -2289,6 +2334,12 @@ def solve_free_boundary(
     recovery mirror :func:`vmex.core.solver.solve`. The returned
     ``result.vacuum`` contains the final NESTOR potential modes and surface
     fields, without internal matrix caches.
+
+    ``position_control`` (a :class:`~vmex.core.position_control.PositionControl`,
+    default ``None`` = off) adds a feedback-controlled uniform vertical field to
+    the external field so a current-carrying plasma stays at a target radius
+    when the coil field is radially unstable; the converged correction is
+    ``result.position_control``.
     """
     if resolution is None:
         # The angular grid depends on the field table (VMEC2000's NZETA
@@ -2315,6 +2366,7 @@ def solve_free_boundary(
             jacobian_retries=jacobian_retries,
             constraint_continuation=None, reuse_vacuum_cache=False,
             use_fft=_resolve_use_fft(use_fft, device, resolution),
+            position_control=position_control,
         )
     return stage.result
 
