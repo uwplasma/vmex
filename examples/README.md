@@ -142,6 +142,12 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   5.5 % after the QA stage; the alpha stage lowers its own 1 ms ensemble from
   2.5 % to 1.6 %, but on the independent check it reads 5.7 %, within the
   0.7 % noise of the QA stage.
+  `alpha_particle_optimization.py` (same extra) has no symmetry stage: it
+  differentiates an ESSOS escaped-residence score of 64 alphas through VMEX
+  equilibria, with aspect-ratio and iota-floor rows, and selects iterates by
+  real 2 ms losses. On 800 fresh alphas at 5 ms it takes its seed from 82 %
+  to 32 % lost; `CONTROL = True`, the same run without the alpha term, reaches
+  34 %, so the gain is the iota lift rather than the orbit gradient.
   `QA_optimization_turbulence_linear.py`,
   `QA_optimization_turbulence_quasilinear.py` and
   `QA_optimization_turbulence_nonlinear.py` (`pip install "vmex[turbulence]"`)
