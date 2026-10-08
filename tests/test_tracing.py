@@ -514,8 +514,9 @@ def test_progress_leaves_the_trace_unchanged(traced, solovev_wout):
     calls = []
     reported = trace_alphas(solovev_wout, **TRACE_KWARGS, progress=lambda d, n: calls.append((d, n)))
     assert calls[-1][0] == calls[-1][1] and len(calls) > 1
-    np.testing.assert_array_equal(reported.lost_times, traced.lost_times)
-    np.testing.assert_array_equal(reported.trajectories, traced.trajectories)
+    # Chunks change how ESSOS groups the particles over CPU devices, which can move the last bit of a sum.
+    np.testing.assert_allclose(reported.lost_times, traced.lost_times, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(reported.trajectories, traced.trajectories, rtol=1e-12, atol=0)
 
 
 @pytest.mark.parametrize("tty", [True, False])
