@@ -24,10 +24,10 @@
       "deck_sha256": "90de9afb5a70e764f1f31a56223df8606787c971ce27aa3297c0e4b1986fd405",
       "cli_equivalent": "vmex examples/data/input.nfp2_QA_finite_beta --plot",
       "figure": "docs/_static/figures/readme_diagnostics_qa.webp",
-      "figure_sha256": "9ada42344111615999772c48508a8fc7fa5cfd1cfce5c96c66b96705038920a9",
+      "figure_sha256": "b6f935341123816789ea77a6152e0fd1fd8f7b88501d37cc2be9fcbd1850efef",
       "figure_pixels": [
-        1760,
-        1349
+        1400,
+        1073
       ],
       "iterations": 757,
       "scalars": {
@@ -35,6 +35,14 @@
         "aspect": 5.001606209166846,
         "volume_p": 1069.5583204374832,
         "ns": 45
+      },
+      "compression": {
+        "date": "2026-09-30",
+        "source_commit": "71db204b",
+        "width": 1400,
+        "quality": 60,
+        "method": 6,
+        "note": "Reencoded existing figure; numerical data unchanged."
       }
     },
     {

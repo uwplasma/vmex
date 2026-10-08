@@ -1168,103 +1168,129 @@ def _j_invariant_map(
     booz: dict[str, Any],
     *,
     pitch: float | None = None,
-    pitch_fraction: float = 0.5,
-    nalpha: int = 96,
-    points_per_period: int = 64,
-    quadrature_order: int = 32,
+    pitch_fraction: float = 0.2,
+    nalpha: int = 192,
+    points_per_period: int = 512,
 ) -> dict[str, Any]:
     """Second adiabatic invariant ``J(alpha, s)`` at one physical pitch.
 
-    The polar presentation and pitch convention follow Fig. 10 of Rodríguez,
-    Helander & Goodman, J. Plasma Phys. 90, 905900212 (2024): on each surface,
-    the same physical ``lambda`` must be followed radially to diagnose
-    ``partial J / partial psi``. By default, we choose ``1/lambda`` inside the
-    trapping interval common to every plotted surface; ``pitch`` can instead
-    select the physical ``lambda`` used by an optimization. Omnigenity makes ``J``
-    independent of ``alpha``, so its contours in ``x=s*cos(alpha)``,
-    ``y=s*sin(alpha)`` become concentric circles; maximum-J additionally makes
-    ``J`` decrease radially. ``J`` is normalized to ``J/(v R0)`` and the
-    bounce integrals reuse the differentiable sine-mapped Gauss-Legendre
-    kernel of :func:`vmex.core.bounce.bounce_action`, also used by DESC.
+    One physical ``lambda`` is held fixed radially. The default lies one
+    fifth into the common trapping band; ``pitch`` supplies another lambda.
+    Return the largest complete-well ``J/v`` from root-aware, piecewise-linear
+    samples and midpoint ``dl/dzeta``. Missing wells remain NaN. The panel
+    normalizes by ``R0``; one displayed well cannot certify omnigenity.
+    Differentiable objectives use :func:`vmex.core.bounce.bounce_action`.
     """
-    import jax
-    from .bounce import bounce_action_from_boozer
-
-    bounce_action_from_boozer = jax.jit(
-        bounce_action_from_boozer,
-        static_argnames=("nfp", "points_per_period", "num_periods",
-                         "max_wells", "quadrature_order"))
-
     bmnc_b = booz["bmnc_b"]
     nsurf = int(bmnc_b.shape[0])
     nfp = int(booz["nfp"])
     iota_b = booz["iota_b"]
 
-    # A surface-local normalized pitch changes the physical particle while
-    # moving radially and cannot diagnose maximum-J. Select one physical pitch
-    # from the overlap of every surface's trapping interval instead.
-    theta = np.linspace(0.0, 2.0 * np.pi, 61)
-    zeta = np.linspace(0.0, 2.0 * np.pi / nfp, 61)
-    b_all = np.stack([_boozer_surface_modB(booz, k, theta, zeta) for k in range(nsurf)])
-    b_min = b_all.min(axis=(1, 2)); b_max = b_all.max(axis=(1, 2))
+    if not 0.0 < pitch_fraction < 1.0:
+        raise ValueError("pitch_fraction must lie strictly between zero and one")
+    if nalpha < 4 or points_per_period < 8:
+        raise ValueError("nalpha must be >= 4 and points_per_period >= 8")
+
+    # A fixed lambda is essential for radial comparisons. Trace the actual
+    # field lines before choosing it: surface-wide extrema can imply a well
+    # that is absent on most of the plotted field lines.
+    iota_typical = float(np.median(np.abs(iota_b)))
+    num_periods = int(min(40, max(2, np.ceil(1.2 * nfp * (1.0 + 1.0 / max(iota_typical, 0.2))))))
+    alpha = np.linspace(0.0, 2.0 * np.pi, int(nalpha), endpoint=False)
+    zeta = np.linspace(0.0, 2.0 * np.pi * num_periods / nfp,
+                       int(points_per_period) * num_periods + 1)
+    xm = np.asarray(booz["xm_b"])
+    xn = np.asarray(booz["xn_b"])
+    order = np.argsort(xm, kind="stable")
+    poloidal, starts = np.unique(xm[order], return_index=True)
+    cos_alpha = np.cos(alpha[:, None] * poloidal)
+    sin_alpha = np.sin(alpha[:, None] * poloidal)
+    fields = []
+    for k in range(nsurf):
+        phase = (xm * iota_b[k] - xn)[:, None] * zeta
+        cp, sp = np.cos(phase), np.sin(phase)
+        c = bmnc_b[k][:, None]
+        s = (np.zeros_like(c) if booz["bmns_b"] is None
+             else booz["bmns_b"][k][:, None])
+        # Sum toroidal harmonics before sampling alpha; only distinct m
+        # values enter the two matrix products.
+        cosine = np.add.reduceat((c * cp + s * sp)[order], starts, axis=0)
+        sine = np.add.reduceat((s * cp - c * sp)[order], starts, axis=0)
+        fields.append(cos_alpha @ cosine + sin_alpha @ sine)
+    line_min = np.stack([b.min(axis=1) for b in fields])
+    line_max = np.stack([b.max(axis=1) for b in fields])
+    b_min = line_min.min(axis=1); b_max = line_max.max(axis=1)
     if (not np.all(np.isfinite(b_min)) or not np.all(np.isfinite(b_max))
             or np.any(b_min <= 0.0) or np.any(b_max <= b_min)):
         raise ValueError("Boozer |B| range is degenerate; cannot choose a pitch")
-    common_min, common_max = float(np.max(b_min)), float(np.min(b_max))
-    if not common_max > common_min:
-        raise ValueError("Boozer surfaces have no common trapped-particle pitch")
     if pitch is None:
-        b_star = common_min + float(pitch_fraction) * (common_max - common_min)
-        pitch_array = np.array([1.0 / b_star])
-        trapped_surface = np.ones(nsurf, dtype=bool)
+        common_min, common_max = float(line_min.max()), float(line_max.min())
+        if common_max > common_min:
+            b_star = common_min + float(pitch_fraction) * (common_max - common_min)
+        else:
+            # Some geometries have no pitch trapped on every line. Choose
+            # the broadest field-strength interval with maximal line coverage
+            # and leave nontrapped lines blank rather than showing passing J.
+            edges = np.unique(np.r_[line_min.ravel(), line_max.ravel()])
+            centers = 0.5 * (edges[:-1] + edges[1:])
+            coverage = np.sum((line_min[..., None] < centers)
+                              & (centers < line_max[..., None]), axis=(0, 1))
+            widths = np.diff(edges)
+            best = int(np.argmax(np.where(coverage == coverage.max(), widths, -np.inf)))
+            b_star = edges[best] + float(pitch_fraction) * widths[best]
     else:
-        pitch_array = np.array([float(pitch)])
-        if not np.isfinite(pitch_array[0]) or pitch_array[0] <= 0.0:
+        if not np.isfinite(pitch) or pitch <= 0.0:
             raise ValueError("pitch must be finite and positive")
-        b_star = 1.0 / pitch_array[0]
-        trapped_surface = (b_min < b_star) & (b_star < b_max)
-        if not np.any(trapped_surface):
+        b_star = 1.0 / float(pitch)
+        if not np.any((line_min < b_star) & (b_star < line_max)):
             raise ValueError("pitch is not trapped on any plotted Boozer surface")
-
-    # Trace enough field periods to close at least one poloidal transit even
-    # for small-iota / axisymmetric-boundary decks (well length ~ 2*pi/iota).
-    iota_typical = float(np.median(np.abs(iota_b)))
-    num_periods = int(min(40, max(2, np.ceil(1.2 * nfp * (1.0 + 1.0 / max(iota_typical, 0.2))))))
-    # The interval can contain roughly one well per field period.  An
-    # undersized static buffer marks otherwise valid wells as overflow and
-    # would make the complete polar map appear empty.
-    max_wells = max(8, 2 * num_periods)
-
-    alpha = np.linspace(0.0, 2.0 * np.pi, int(nalpha), endpoint=False)
+    trapped_surface = np.any((line_min < b_star) & (b_star < line_max), axis=1)
     j_map = np.full((nsurf, alpha.size), np.nan)
-    for k in range(nsurf):  # per-surface loop keeps the phase tables small
-        if not trapped_surface[k]:
-            continue
-        out = bounce_action_from_boozer(
-            bmnc_b=bmnc_b[k : k + 1],
-            xm_b=booz["xm_b"], xn_b=booz["xn_b"],
-            iota_b=iota_b[k : k + 1],
-            G_b=booz["G_b"][k : k + 1], I_b=booz["I_b"][k : k + 1],
-            nfp=nfp, alpha=alpha, pitch=pitch_array,
-            points_per_period=int(points_per_period),
-            num_periods=num_periods,
-            max_wells=max_wells,
-            bmns_b=None if booz["bmns_b"] is None else booz["bmns_b"][k : k + 1],
-            quadrature_order=int(quadrature_order),
-        )
-        action = np.asarray(out["action"])[0, :, 0, :]       # (nalpha, nwells)
-        usable = np.asarray(out["usable_mask"])[0, :, 0, :]
-        count = usable.sum(axis=-1)
-        total = np.where(usable, np.where(np.isfinite(action), action, 0.0), 0.0).sum(axis=-1)
-        j_map[k] = np.where(count > 0, total / np.maximum(count, 1), np.nan)
+    well_count = np.zeros_like(j_map, dtype=int)
+    dzeta = zeta[1] - zeta[0]
+    for k, b in enumerate(fields):
+        f = 1.0 - b / b_star
+        left, right = f[:, :-1], f[:, 1:]
+        a, c = np.sqrt(np.maximum(left, 0.0)), np.sqrt(np.maximum(right, 0.0))
+        # Integrate sqrt(linear f) exactly over each positive piece, including
+        # root-crossing segments; keep distinct wells as in BAD's diagnostics.
+        root_sum = a + c
+        root_mean = np.divide(2.0 * (a * a + a * c + c * c), 3.0 * root_sum,
+                              out=np.zeros_like(a), where=root_sum > 0.0)
+        crossing = (left < 0.0) ^ (right < 0.0)
+        positive = np.maximum(left, right)
+        fraction = np.divide(positive, np.abs(right - left),
+                             out=np.zeros_like(positive), where=crossing)
+        root_mean = np.where(crossing, root_mean * fraction, root_mean)
+        bmid = 0.5 * (np.minimum(b[:, :-1], b_star)
+                      + np.minimum(b[:, 1:], b_star))
+        scale = 2.0 * abs(float(booz["G_b"][k] + iota_b[k] * booz["I_b"][k]))
+        segment = scale * dzeta * root_mean / bmid
+        for ia, (fr, values) in enumerate(zip(f, segment)):
+            starts = np.flatnonzero((fr[:-1] <= 0.0) & (fr[1:] > 0.0))
+            ends = np.flatnonzero((fr[:-1] > 0.0) & (fr[1:] <= 0.0))
+            matching = np.searchsorted(ends, starts, side="right")
+            starts = starts[matching < ends.size]
+            matching = matching[matching < ends.size]
+            if starts.size:
+                prefix = np.r_[0.0, np.cumsum(values)]
+                action = prefix[ends[matching] + 1] - prefix[starts]
+                j_map[k, ia] = action.max()
+                well_count[k, ia] = action.size
+    ref = int(np.argmin(np.where(trapped_surface,
+                                 np.abs(np.asarray(booz["s_b"]) - 0.5), np.inf)))
     return {
         "alpha": alpha,
         "s_b": booz["s_b"],
         "j_map": j_map,
-        "pitch": float(pitch_array[0]),
+        "pitch": 1.0 / b_star,
         "pitch_inverse": float(b_star),
+        "v_parallel_fraction": float(np.sqrt(max(0.0, 1.0 - b_min[ref] / b_star))),
+        "pitch_reference_s": float(booz["s_b"][ref]),
         "pitch_fraction": float(pitch_fraction),
         "trapped_surface": trapped_surface,
+        "well_count": well_count,
+        "resolved_fraction": float(np.isfinite(j_map).mean()),
         "b_min": b_min,
         "b_max": b_max,
     }
@@ -1348,6 +1374,10 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
 
 def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     """Velasco-style polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``."""
+    pitch_title = (
+        "second adiabatic invariant (largest well)\n"
+        rf"$|v_\parallel|/v={j_info['v_parallel_fraction']:.3f}$ "
+        rf"at $B_\min(s={j_info['pitch_reference_s']:.2f})$")
     length_scale = abs(float(r_major))
     if not np.isfinite(length_scale) or length_scale <= np.finfo(float).tiny:
         length_scale = 1.0
@@ -1358,7 +1388,7 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
             0.5, 0.5, "no trapped-particle wells\nresolved at this pitch",
             ha="center", va="center", transform=ax.transAxes,
         )
-        ax.set_title("second adiabatic invariant")
+        ax.set_title(pitch_title)
         ax.set_xlabel(r"$s\cos\alpha$")
         ax.set_ylabel(r"$s\sin\alpha$")
         return
@@ -1369,16 +1399,19 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     levels = np.linspace(float(periodic.min()), float(periodic.max()), 15)
     filled = ax.contourf(x, y, periodic, levels=levels, cmap=_CMAP_J, extend="both")
     ax.contour(x, y, periodic, levels=levels, colors="0.25", linewidths=0.35, alpha=0.65)
-    fig.colorbar(filled, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
+    fig.colorbar(filled, ax=ax, pad=0.02,
+                 label=r"$\max_{\mathrm{well}} J\,/\,(v R_0)$")
     radius = max(1.0, float(np.max(j_info["s_b"])))
     ax.axhline(0.0, color="white", linewidth=0.6, alpha=0.75)
     ax.axvline(0.0, color="white", linewidth=0.6, alpha=0.75)
     ax.set_xlim(-radius, radius); ax.set_ylim(-radius, radius)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(r"$s\cos\alpha$"); ax.set_ylabel(r"$s\sin\alpha$")
-    ax.set_title(
-        "second adiabatic invariant\n"
-        rf"$1/\lambda={j_info['pitch_inverse']:.3g}$ T")
+    ax.set_title(pitch_title)
+    if j_info["resolved_fraction"] < 1.0:
+        ax.text(0.02, 0.02, f"{j_info['resolved_fraction']:.0%} resolved",
+                transform=ax.transAxes, fontsize=11, color="0.2",
+                bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"})
 
 
 def _boozer_modB_panel(ax, fig, booz: dict[str, Any], k: int, *, title: str) -> None:
@@ -1760,60 +1793,13 @@ def plot_summary(
     wout, out_path: str | Path, *, s_plot_ignore: float = 0.2,
     j_pitch: float | None = None,
 ) -> Path:
-    """Write the 3x3 publication summary figure of one equilibrium.
+    """Write the 3x3 equilibrium summary at 200 dpi and return its path.
 
-    The panels, row by row on a 15.0 by 11.5 inch canvas:
-
-    1. rotational transform ``iota`` (full mesh, dimensionless) against
-       ``s = psi/psi_edge``;
-    2. pressure ``presf`` in kPa, with the dimensionless confinement
-       diagnostics ``eps_eff^(3/2)`` and ``Gamma_c`` sharing one right axis
-       (see :func:`confinement_summary`; an unavailable diagnostic is named,
-       never drawn as zero);
-    3. force error against ``rho = sqrt(s)`` on a log axis: the surface
-       average of ``|J x B - grad p|`` over the volume average of
-       ``|grad(B^2/2mu0)|`` on ``0.1 <= s <= 0.99`` (DESC's normalization;
-       the scalar card gives the volume average), on interior surfaces,
-       with the flux-surface-averaged bootstrap current ``<J.B>`` in
-       kA T m^-2 on a coloured right axis;
-    4. Mercier ``DMerc`` and the Glasser-Greene-Johnson ``D_R`` against ``s``,
-       with the physical ``d2V/ds2`` on the right axis;
-    5. the 3-D last closed flux surface coloured by ``|B|`` in T;
-    6. the second adiabatic invariant as a polar map of ``J/(v R0)`` in
-       ``x = s cos(alpha)``, ``y = s sin(alpha)`` — concentric contours mean
-       omnigenity, contours shrinking outward mean maximum-J;
-    7. a scalar card of threed1-style global quantities;
-    8. and 9. ``|B|`` line contours in Boozer angles at mid radius and on the
-       LCFS.
-
-    One Boozer transform (``booz_xform_jax``, in process) feeds panels 6, 8, 9
-    and the effective ripple of panel 2, so ``vmex --plot`` needs no separate
-    ``--booz`` pass.  If that transform or the ``J`` map fails, the affected
-    panel carries the reason as text and the rest of the figure is still
-    written — this function does not raise for a missing diagnostic.
-
-    Parameters
-    ----------
-    wout:
-        Path to a ``wout_*.nc`` or a :class:`~vmex.core.wout.WoutData`.
-    out_path:
-        Destination image file.
-    s_plot_ignore:
-        Fraction of the radial grid to drop near the axis in the stability
-        panel, where the Mercier terms diverge; the panel starts at row
-        ``max(2, round(s_plot_ignore * ns))`` and always drops the last row.
-        It affects only panel 4.
-    j_pitch:
-        Physical pitch ``lambda = 1/B*`` in T^-1 for the ``J`` map.  Following
-        one physical ``lambda`` radially is what makes ``dJ/dpsi`` meaningful,
-        so pass the pitch an optimization targeted to certify it at the same
-        value.  By default a ``B*`` halfway into the trapping band common to
-        every plotted surface is chosen automatically.
-
-    Returns
-    -------
-    The written ``out_path`` as a :class:`~pathlib.Path`.  Saved at 200 dpi on
-    the Agg backend and closed; nothing is displayed.
+    Includes profiles, confinement, force balance, stability, boundary,
+    Boozer fields and the largest complete-well J at fixed physical pitch.
+    ``s_plot_ignore`` omits inner surfaces from the stability panel.
+    ``j_pitch`` sets lambda=1/B*; the default selects B* one fifth into the
+    common trapping band, or the interval with greatest field-line coverage.
     """
     plt = _import_matplotlib()
     fig, _meta = _summary_figure(wout, s_plot_ignore=s_plot_ignore, j_pitch=j_pitch)

@@ -489,6 +489,31 @@ def make_showcase_figure(out: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+
+def make_j_figure(out: Path) -> None:
+    record = json.loads((REPO / "benchmarks/plot_diagnostics.json").read_text())
+    cases = record["cases"]
+    fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.3), layout="constrained")
+    errors = record["bad_reference"]["max_relative_j_error"]
+    axes[0].scatter(list(errors), list(errors.values()), color="#315f95", s=45)
+    axes[0].set(yscale="log", ylabel="Maximum relative J error", title="VMEX vs BAD quadrature")
+    axes[0].tick_params(axis="x", labelrotation=25, labelsize=9)
+    x = np.arange(len(cases))
+    for offset, key, label, color in [
+        (-.18, "cold_j_s", "Cold", "#315f95"), (.18, "warm_j_s", "Warm", "#d89039"),
+    ]:
+        bars = axes[1].bar(x + offset, [c[key] for c in cases], .36, label=label, color=color)
+        axes[1].bar_label(bars, fmt="%.2f", fontsize=9, padding=3)
+    axes[1].set_xticks(x, ["QA", "W7-X"], fontsize=9)
+    axes[1].set(ylabel="Wall time [s]", title="J map calculation", ylim=(0, 1.05))
+    for ax in axes:
+        ax.spines[["top", "right"]].set_visible(False)
+    axes[1].legend(frameon=False)
+    fig.suptitle("72 bounce-action checks · Apple M2 CPU", fontsize=11)
+    fig.savefig(out, dpi=140)
+    plt.close(fig)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="runtime,convergence,precond,showcase")
@@ -502,6 +527,8 @@ def main() -> None:
         make_runtime_figure(outdir / "readme_runtime_compare.webp")
     if "convergence" in which:
         make_convergence_figure(outdir / "readme_convergence.webp")
+    if "j" in which:
+        make_j_figure(outdir / "readme_j_compare.webp")
     if "precond" in which:
         make_precond_figure(outdir / "readme_precond.webp")
     if "showcase" in which:
