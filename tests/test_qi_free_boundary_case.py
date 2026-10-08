@@ -33,8 +33,9 @@ COIL_MAJOR = 1.0
 COIL_MINOR = 0.55
 #: Filament discretisation for the Biot-Savart sum.
 COIL_SEGMENTS = 96
-#: Net current per filament [A]; scaled to give a field of order 1 T on axis.
-COIL_CURRENT = 7.0e5
+#: Net current per filament [A]; scaled to give a field of order 1 T on axis.  Negative so the
+#: toroidal field has the sign of the deck's PHIEDGE (vacuum.f stops on the opposite sign).
+COIL_CURRENT = -7.0e5
 
 #: Cylindrical tabulation grid bracketing the plasma.
 GRID = dict(rmin=0.45, rmax=1.55, zmin=-0.55, zmax=0.55, ir=48, jz=48, kp=24)
