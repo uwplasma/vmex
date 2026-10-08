@@ -224,6 +224,17 @@ figures and solve provenance are recorded in
 
 ![Finite-beta QI equilibrium diagnostics](../_static/figures/readme_diagnostics_summary.webp)
 
+## Cross-check with MRX
+
+`examples/vmex_mrx_comparison.py` relaxes the VMEX ns = 65 field of the 2.5 % beta QA deck with
+[MRX](https://github.com/ToBlick/mrx), a finite-element code that does not assume nested surfaces.
+After 10 Newton steps the MRX force residual is 1.4e-8, its Poincare sections follow the VMEX
+surfaces, and its iota, enclosed current and pressure match the VMEX profiles; `|B|` agrees to
+2e-3 rms for ρ ≥ 0.3. MRX starts from the VMEX field, so this checks consistency, not near-axis
+convergence: on this deck VMEX iota at ρ = 0.1 is 0.188, 0.176 and 0.166 for ns = 65, 129 and 257.
+
+![VMEX and MRX on the 2.5% beta QA deck](../_static/figures/readme_vmex_mrx_comparison.webp)
+
 ## Derivative certificates
 
 Implicit gradients describe a converged discrete equilibrium. Their validity
