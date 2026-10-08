@@ -177,3 +177,31 @@ def test_vmec2000_wout_geometry_and_input_roundtrip(case, tmp_path):
         assert deck.ncurr == 1
     if wout.lfreeb:
         np.testing.assert_array_equal(deck.extcur, wout.extcur[:wout.nextcur])
+
+
+@pytest.mark.parametrize("size", [1, 3, 17, 101, 137])
+def test_writer_preserves_legacy_profile_lengths(size, tmp_path):
+    base = read_wout(_golden("solovev"))
+    wout = replace(base, am_aux_s=np.linspace(0, 1, size),
+                   am_aux_f=np.linspace(1e4, 0, size),
+                   ai=np.arange(3, dtype=float), ac=np.arange(17, dtype=float))
+    path = write_wout(tmp_path / "wout_legacy.nc", wout)
+    reread = read_wout(path)
+    for name in ("am_aux_s", "am_aux_f", "ai", "ac", "phi", "rmnc", "zmns"):
+        np.testing.assert_array_equal(getattr(reread, name), getattr(wout, name))
+    assert reread.ns == base.ns
+
+
+def test_writer_preserves_missing_optional_legacy_profiles(tmp_path):
+    import netCDF4
+
+    base = read_wout(_golden("solovev"))
+    missing = ("am_aux_s", "am_aux_f", "bdotb")
+    wout = replace(base, **dict.fromkeys(missing))
+    path = write_wout(tmp_path / "wout_missing.nc", wout)
+    with netCDF4.Dataset(path) as ds:
+        assert not set(missing).intersection(ds.variables)
+    reread = read_wout(path)
+    assert all(getattr(reread, name) is None for name in missing)
+    np.testing.assert_array_equal(reread.phi, base.phi)
+    np.testing.assert_array_equal(reread.rmnc, base.rmnc)

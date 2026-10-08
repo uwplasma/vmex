@@ -779,3 +779,98 @@ def test_exterior_field_parameter_derivative_is_exact_on_the_frozen_path():
         assert max(info["newton_res"]) < 1e-10
         assert abs(implicit - frozen) <= tolerance * abs(frozen), (implicit, frozen)
 
+
+
+@pytest.mark.full
+@pytest.mark.parametrize("order", [0, 1, 2, 3])
+def test_graded_target_batches_preserve_derivatives_and_pullbacks(order):
+    """Five targets exercise both a remainder and a batch larger than the list.
+
+    This is scheduling parity on a synthetic surface, not a quadrature accuracy
+    assertion. Both layer densities and point/source pullbacks are exercised.
+    """
+    series = VC._graded_series(_two_source_torus(12, 12))
+    points = jnp.asarray(_torus_points(0.08, count=5, seed=7))
+    nodes = (16, 32)
+
+    def evaluate(data, xyz, batch):
+        return VC._graded_field(data, xyz, order, nodes,
+                                target_batch_size=batch)[order]
+
+    reference = jax.jit(lambda data, xyz: evaluate(data, xyz, None))(series, points)
+    weights = jnp.cos(jnp.arange(reference.size)).reshape(reference.shape)
+
+    def objective(data, xyz, batch):
+        return jnp.vdot(evaluate(data, xyz, batch), weights)
+
+    reference_point = jax.jit(jax.grad(lambda data, xyz: objective(data, xyz, None),
+                                      argnums=1))(series, points)
+    reference_source = jax.jit(jax.grad(lambda data, xyz: objective(data, xyz, None),
+                                       argnums=0))(series, points)["coefficients"]
+    for batch in (2, 8):
+        value = jax.jit(lambda data, xyz: evaluate(data, xyz, batch))(series, points)
+        point_vjp = jax.jit(jax.grad(lambda data, xyz: objective(data, xyz, batch),
+                                    argnums=1))(series, points)
+        source_vjp = jax.jit(jax.grad(lambda data, xyz: objective(data, xyz, batch),
+                                     argnums=0))(series, points)["coefficients"]
+        for got, want in ((value, reference), (point_vjp, reference_point),
+                          (source_vjp, reference_source)):
+            delta = np.linalg.norm(np.asarray(got - want))
+            scale = max(np.linalg.norm(np.asarray(want)), 1e-30)
+            assert delta / scale < 1e-10
+
+
+def test_extender_graded_target_batch_configuration_preserves_public_fields():
+    surface = _two_source_torus(12, 12)
+    points = jnp.asarray(_torus_points(0.08, count=5, seed=7))
+    field = VmecExtender.from_surface_data(
+        surface, near_surface="graded", graded_nodes=(16, 32),
+        graded_target_batch_size=2, accuracy_check="off")
+    batch_value = field.B(points)
+    batch_gradient = field.gradB(points)
+    assert field.graded_target_batch_size == 2
+    other = field.with_graded_quadrature()
+    assert other.graded_target_batch_size == 2
+    field.graded_target_batch_size = None
+    assert other.graded_target_batch_size == 2
+    np.testing.assert_allclose(field.B(points), batch_value, rtol=1e-11, atol=1e-11)
+    np.testing.assert_allclose(field.gradB(points), batch_gradient, rtol=1e-11, atol=1e-11)
+    public = VC.graded_plasma_field(surface, points, nodes=(16, 32),
+                                    target_batch_size=8)[0]
+    np.testing.assert_allclose(public, batch_value, rtol=1e-11, atol=1e-11)
+
+
+def test_parameterized_graded_batches_preserve_public_parameter_vjp():
+    surface = _two_source_torus(12, 12)
+    points = jnp.asarray(_torus_points(0.08, count=5, seed=7))
+    field = VmecExtender.from_parameterized_surface_data(
+        lambda params: replace(surface, B_total=params[0] * surface.B_total),
+        jnp.array([1.0]), near_surface="graded", graded_nodes=(16, 32),
+        graded_target_batch_size=2, accuracy_check="off")
+    field.set_points(points)
+    values = field.B()
+    weights = jnp.cos(jnp.arange(values.size)).reshape(values.shape)
+    batch_vjp = field.B_vjp(weights)
+    field.graded_target_batch_size = None
+    serial_vjp = field.B_vjp(weights)
+    np.testing.assert_allclose(batch_vjp, serial_vjp, rtol=1e-11, atol=1e-11)
+    # Linear scaling provides an independent objective derivative.
+    np.testing.assert_allclose(serial_vjp, jnp.vdot(values, weights),
+                               rtol=1e-11, atol=1e-11)
+
+
+def test_parameterized_graded_copy_uses_its_own_configuration():
+    surface = _two_source_torus(12, 12)
+    points = jnp.asarray(_torus_points(0.08, count=5, seed=7))
+    original = VmecExtender.from_parameterized_surface_data(
+        lambda params: replace(surface, B_total=params[0] * surface.B_total),
+        jnp.array([1.0]), accuracy_check="off")
+    field = original.with_graded_quadrature(nodes=(16, 32))
+    field.graded_target_batch_size = 2
+    field.set_points(points)
+    values = field.B()
+    weights = jnp.cos(jnp.arange(values.size)).reshape(values.shape)
+    np.testing.assert_allclose(field.B_vjp(weights), jnp.vdot(values, weights),
+                               rtol=1e-11, atol=1e-11)
+    assert original.near_surface == "auto"
+    assert original.graded_target_batch_size is None
