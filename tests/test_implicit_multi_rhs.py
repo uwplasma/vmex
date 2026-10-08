@@ -288,10 +288,21 @@ def test_raw_block_probe_chunking_preserves_exact_factors():
         )
 
 
-def test_colored_bands_match_the_per_row_build(monkeypatch):
+@pytest.mark.parametrize("deck,ns,ntor", [
+    ("solovev", 5, 0), ("solovev", 3, 0),  # every surface its own color
+    ("li383_low_res", 6, 1), ("up_down_asymmetric_tokamak", 4, 0),
+])
+def test_colored_bands_match_the_per_row_build(monkeypatch, deck, ns, ntor):
     """Three-colored forward probes give the per-row reverse blocks to round-off."""
 
-    _, cfg, params = _small_solovev_setup()
+    inp = VmecInput.from_file(str(DATA / f"input.{deck}"))
+    inp = dataclasses.replace(
+        inp.change_resolution(mpol=3, ntor=ntor, ntheta=12, nzeta=4 * ntor + 4),
+        ns_array=np.asarray([ns]), ftol_array=np.asarray([1.0e-6]),
+        niter_array=np.asarray([500]),
+    )
+    cfg = im.make_config(inp, ftol=1.0e-6, max_iterations=500)  # any state will do
+    params = im.params_from_input(inp)
     state, mask = im.solve_implicit_with_aux(params, cfg)
     active = im._active_state_fields(cfg)
     per_row = im._raw_block_system(
