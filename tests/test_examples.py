@@ -202,6 +202,7 @@ EXECUTED_EXAMPLES = {
     "examples/vmex_fixed_free_boundary_comparison.py",
     "examples/vmex_get_B_gradB.py",
     "examples/vmex_get_B_outside_plasma.py",
+    "examples/vmex_interpolated_particle_tracing.py",
 }
 
 
@@ -1400,3 +1401,16 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
         bounded = re.search(r"Exterior trace QA: (\d+)/(\d+) lines remained", out)
         assert bounded is not None and int(bounded.group(1)) > 0
     assert (tmp_path / output).stat().st_size > 10_000
+
+
+# Two-minute smoke on one office core, mostly XLA compilation of four traces.
+@pytest.mark.full  # nightly: needs ESSOS with InterpolatedField (uwplasma/ESSOS#135)
+def test_vmex_interpolated_particle_tracing_example(tmp_path):
+    fields = pytest.importorskip("essos.fields")
+    if not hasattr(fields, "InterpolatedField"):
+        pytest.skip("ESSOS without InterpolatedField (uwplasma/ESSOS#135)")
+    out = _run_example(EXAMPLES / "vmex_interpolated_particle_tracing.py", tmp_path, timeout=900)
+    error = re.search(r"max \|dB\|/\|B\| = ([0-9.eE+-]+)", out)
+    assert error is not None and float(error.group(1)) < 1e-5
+    assert out.count("final-position deviation") == 2
+    assert (tmp_path / "vmex_interpolated_particle_tracing.png").stat().st_size > 10_000
