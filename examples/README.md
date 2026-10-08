@@ -65,6 +65,11 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
     stop after leaving the LCFS neighborhood.
     The finite-beta coil fixture is reproduced by ESSOS
     `examples/coil_optimization/optimize_coils_finite_beta_vmex.py`.
+  - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
+    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    assume nested surfaces, and compare Poincare sections, iota, the toroidal
+    current, and the pressure with VMEX at ns = 65. Without MRX it exits after
+    printing the install command.
   - `vmex_fixed_free_boundary_comparison.py` *(preview)* — compare a parent
     free boundary with an `s=0.5` fixed-boundary solve and its exterior field.
 - `optimization/`: compact QA/QH/QP/QI scripts using `(function, target,
@@ -94,8 +99,8 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   self-contained: the scalarized loss, the L-BFGS-B call and the monitor wiring
   are in the file beside its physical targets, resolution and save names, so a
   reader never has to open a second file to follow one run.
-  The scalar lane trades objective progress per evaluation (roughly 3x higher
-  objective at a matched budget on the QA workflow) for a cheaper cold start and
+  The scalar lane trades objective progress per evaluation (measured: QA
+  final QS 2.7x above least squares with 40 mode-2 iterations, QI 17x) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every

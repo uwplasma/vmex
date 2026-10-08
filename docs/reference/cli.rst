@@ -74,6 +74,22 @@ Options
        orbits, ``v_par/v``, energy error). Works on a ``wout_*.nc`` input
        or after solving an input file (requires ESSOS, ``pip install
        essos``). See :doc:`/howto/use-essos-fields-and-coils`.
+   * - ``--neoclassical``
+     - Neoclassical transport with DKX on a ``wout_*.nc`` input or after
+       solving an input file: monoenergetic ``D11/D31/D33``, ambipolar
+       ``E_r`` per surface, bootstrap ``<j.B>`` against the equilibrium's,
+       species fluxes and ``|B|``. Writes ``*_neoclassical.png`` and
+       ``*_neoclassical.h5`` (requires ``pip install "vmex[neoclassical]"``).
+       See :doc:`/howto/neoclassical-transport`.
+   * - ``--nc-preset quick|default|full``
+     - ``--neoclassical`` resolution (default ``default``; ``quick`` is a
+       smoke run whose numbers are not reportable).
+   * - ``--nc-profiles JSON``
+     - Kinetic profiles for ``--neoclassical``: ``ne_coeffs`` [m^-3],
+       ``Te_coeffs``, ``Ti_coeffs`` [eV] as polynomials in ``s`` (lowest
+       order first), optional ``helicity_n``. Adds the Redl ``<j.B>`` curve.
+   * - ``--nc-er X``
+     - ``E_r`` [kV/m] for ``--neoclassical`` (default: the ambipolar root).
    * - ``--trace-no-scale``
      - Trace the equilibrium as given.
    * - ``--trace-tmax X`` / ``--trace-timestep X``

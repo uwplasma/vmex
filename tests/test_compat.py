@@ -509,7 +509,8 @@ def test_configure_jax_environment_idempotent_and_respects_user_env(monkeypatch)
 
 
 def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
-    """The large-graph linker guard is macOS/CPU-only and never overrides users."""
+    """The large-graph linker guard is macOS/CPU-only, the CUDA-graph flag is
+    always set, and neither overrides users."""
     import os
 
     monkeypatch.delenv("XLA_FLAGS", raising=False)
@@ -518,7 +519,8 @@ def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
     _compat._configure_jax_environment()
-    assert os.environ["XLA_FLAGS"] == "--xla_cpu_parallel_codegen_split_count=128"
+    assert os.environ["XLA_FLAGS"] == ("--xla_gpu_graph_min_graph_size=1 "
+                                       "--xla_cpu_parallel_codegen_split_count=128")
 
     monkeypatch.setenv("XLA_FLAGS", "--user_set_flag")
     _compat._configure_jax_environment()
@@ -534,7 +536,7 @@ def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
     monkeypatch.delenv("VMEX_FAST_COMPILE")
     monkeypatch.setenv("JAX_PLATFORMS", "cuda,cpu")
     _compat._configure_jax_environment()
-    assert "XLA_FLAGS" not in os.environ
+    assert os.environ["XLA_FLAGS"] == "--xla_gpu_graph_min_graph_size=1"
 
 
 def test_machine_fingerprint_is_stable_and_platform_scoped(monkeypatch):
@@ -804,3 +806,74 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
     explicit = tmp_path / "explicit"
     env["JAX_COMPILATION_CACHE_DIR"] = str(explicit)
     assert pathlib.Path(_import_cache_dir(env)) == explicit / fingerprint
+
+
+@pytest.mark.parametrize("value,enabled", [
+    ("1", True), ("true", True), ("TRUE", True), ("t", True),
+    ("yes", True), ("y", True), ("on", True),
+    ("0", False), ("false", False), ("FALSE", False), ("f", False),
+    ("no", False), ("n", False), ("off", False),
+])
+def test_jax_precision_environment_uses_jax_boolean_spellings(monkeypatch, value, enabled):
+    import jax
+
+    previous = jax.config.x64_enabled
+    try:
+        monkeypatch.setenv("JAX_ENABLE_X64", value)
+        _compat._configure_jax_environment()
+        assert jax.config.x64_enabled is enabled
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_jax_precision_keeps_existing_runtime_without_env(monkeypatch, enabled):
+    import jax
+
+    previous = jax.config.x64_enabled
+    try:
+        jax.config.update("jax_enable_x64", enabled)
+        monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
+        _compat._configure_jax_environment()
+        assert jax.config.x64_enabled is enabled
+        assert "JAX_ENABLE_X64" not in _compat.os.environ
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+def test_invalid_precision_override_does_not_demote_runtime(monkeypatch):
+    import jax
+
+    previous = jax.config.x64_enabled
+    try:
+        jax.config.update("jax_enable_x64", True)
+        monkeypatch.setenv("JAX_ENABLE_X64", "invalid")
+        _compat._configure_jax_environment()
+        assert jax.config.x64_enabled
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+def test_fresh_jax_import_defaults_to_float64(monkeypatch):
+    import subprocess
+
+    monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
+    subprocess.run([sys.executable, "-c",
+                    "import vmex, jax; assert jax.config.x64_enabled"], check=True)
+
+
+def test_fresh_jax_environment_default_in_process(monkeypatch):
+    import jax
+
+    previous = jax.config.x64_enabled
+    startup = types.SimpleNamespace(**vars(sys))
+    startup.modules = {name:module for name,module in sys.modules.items() if name != "jax"}
+    monkeypatch.setattr(_compat, "sys", startup)
+    monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
+    try:
+        jax.config.update("jax_enable_x64", False)
+        _compat._configure_jax_environment()
+        assert _compat.os.environ["JAX_ENABLE_X64"] == "1"
+        assert jax.config.x64_enabled
+    finally:
+        jax.config.update("jax_enable_x64", previous)

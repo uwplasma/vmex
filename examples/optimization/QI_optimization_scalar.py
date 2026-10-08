@@ -7,10 +7,11 @@ are summed into one scalar before implicit differentiation, so SciPy L-BFGS-B
 receives a value and a gradient from one reverse equilibrium adjoint instead of
 a residual vector and its full Jacobian.
 
-The scalar form trades objective progress per evaluation for a cheaper cold
-start and lower peak memory: at a matched evaluation budget the least-squares
-driver reached roughly a 3x lower objective on the same problem, so it remains
-the default for objective progress.
+The aspect row carries weight 1 here, not the 0.01 of QI_optimization.py:
+Gauss-Newton sees that row's own Jacobian and holds the target at 0.01, while
+the summed scalar lets QI drown it (aspect 12.6 at 0.01; 8.15 at 1, target 8).
+The QI residual stays far behind least squares: 5.1e-2 against 3.0e-3, 17x,
+so use QI_optimization.py when the QI value matters.
 """
 
 import os
@@ -88,7 +89,7 @@ def elongation_excess(state, runtime):
 
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_terms = [
-    (qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
+    (qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 10.0),
     (elongation_excess, 0.0, 10.0)]
 

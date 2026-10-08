@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import io
 from pathlib import Path
@@ -439,7 +440,8 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     assert rc == 0, stdout
     for line in ("Loss fraction:", "Thermalized:", "Solver failures:",
                  "Scaling: B_scale=", "compile", "volavgB=5.8646 T, Aminor_p=1.7044 m",
-                 "mode cut 0.001 of largest amplitude", "Change with --trace-particles N"):
+                 "mode cut 0.001 of largest amplitude", "Change with --trace-particles N",
+                 "Max energy error:"):
         assert line in stdout, line
     assert "traced 100% of tmax" in progress.getvalue()
     for suffix in ("trace.png", "trace_3d.png", "trace.npz"):
@@ -451,7 +453,7 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     assert summary["volavgB"] == pytest.approx(5.8646)
     assert summary["Aminor_p"] == pytest.approx(1.7044)
     assert summary["timestep"] == pytest.approx(1.25e-7)
-    assert summary["method"] == "rk4"
+    assert summary["method"] == "adaptive8"
     assert summary["nparticles"] == 8 and summary["scale_target"] == "volavgB"
     assert summary["collisions"] is True
     assert {"loss_fraction_sigma", "compile_time_s", "devices", "versions"} <= set(summary)
@@ -512,8 +514,9 @@ def test_progress_leaves_the_trace_unchanged(traced, solovev_wout):
     calls = []
     reported = trace_alphas(solovev_wout, **TRACE_KWARGS, progress=lambda d, n: calls.append((d, n)))
     assert calls[-1][0] == calls[-1][1] and len(calls) > 1
-    np.testing.assert_array_equal(reported.lost_times, traced.lost_times)
-    np.testing.assert_array_equal(reported.trajectories, traced.trajectories)
+    # Chunks change how ESSOS groups the particles over CPU devices, which can move the last bit of a sum.
+    np.testing.assert_allclose(reported.lost_times, traced.lost_times, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(reported.trajectories, traced.trajectories, rtol=1e-12, atol=0)
 
 
 @pytest.mark.parametrize("tty", [True, False])
@@ -614,41 +617,6 @@ def test_optional_solver_cli_writes_method_and_energy(solovev_wout, tmp_path, me
                                rtol=1e-6, atol=1e-6)
 
 
-def test_dopri8_requires_support_without_changing_rk4(solovev_wout, tmp_path, monkeypatch):
-    import essos.boozer
-
-    original = essos.boozer.trace_boozer
-
-    def released_trace(*args, **kwargs):
-        assert "method" not in kwargs
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", released_trace)
-    reference = trace_alphas(solovev_wout, **TRACE_KWARGS)
-    assert reference.metadata["method"] == "rk4"
-    with pytest.raises(ValueError, match="method must be"):
-        trace_alphas(None, method="unknown")
-    with pytest.raises(ImportError, match="Dopri8 requires ESSOS>=0.19.4"):
-        trace_alphas(solovev_wout, method="dopri8", **TRACE_KWARGS)
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        rc = cli.main([str(solovev_wout), "--trace", "--quiet", "--outdir", str(tmp_path),
-                       "--trace-method", "dopri8"])
-    assert rc != 0 and "Dopri8 requires ESSOS>=0.19.4" in buffer.getvalue()
-    assert not (tmp_path / "solovev_trace.json").exists()
-
-    # Check keyword dispatch independently of the installed integrator version.
-    def supported_trace(*args, method, **kwargs):
-        assert method == "dopri8"
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", supported_trace)
-    result = trace_alphas(solovev_wout, method="dopri8", **TRACE_KWARGS)
-    assert result.metadata["integrator"].startswith("DOPRI8")
-    np.testing.assert_array_equal(result.initial_conditions, reference.initial_conditions)
-    np.testing.assert_array_equal(result.final_states, reference.final_states)
-
-
 @pytest.mark.parametrize("failure_source", ["status", "energy", "drift"])
 def test_orbit_failure_is_separate_from_energy_drift(solovev_wout, monkeypatch, failure_source):
     from types import SimpleNamespace
@@ -673,40 +641,28 @@ def test_orbit_failure_is_separate_from_energy_drift(solovev_wout, monkeypatch, 
             trace_alphas(solovev_wout, **TRACE_KWARGS)
 
 
-def test_compaction_dispatch_preserves_released_interfaces(solovev_wout, tmp_path, monkeypatch):
-    import essos.boozer
-    from inspect import signature
+@pytest.mark.parametrize("horizon,losses", [
+    (5e-8, [2.4e-8, 3.3e-8]), (1e-7, [2.4e-8, 1e-7]),
+    (1e-5, [2.4e-8, 5e-6]), (5e-8, [0.0, 5e-8]), (5e-8, []),
+])
+def test_loss_histogram_keeps_all_events_at_short_horizons(traced, tmp_path, monkeypatch, horizon, losses):
+    from dataclasses import replace
+    from vmex.core import plotting
 
-    original = essos.boozer.trace_boozer
-    def released(*args, **kwargs):
-        assert "compact" not in kwargs
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", released)
-    assert trace_alphas(solovev_wout, **TRACE_KWARGS).metadata["compact"] is False
-    with pytest.raises(ImportError, match="Compaction requires ESSOS"):
-        trace_alphas(solovev_wout, compact=True, **TRACE_KWARGS)
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        rc = cli.main([str(solovev_wout), "--trace", "--quiet", "--trace-compact",
-                       "--outdir", str(tmp_path)])
-    assert rc != 0 and "Compaction requires ESSOS" in buffer.getvalue()
-
-    dispatched = []
-    def supported(*args, compact, **kwargs):
-        dispatched.append(compact)
-        if "compact" in signature(original).parameters:
-            kwargs["compact"] = compact
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(essos.boozer, "trace_boozer", supported)
-    default = trace_alphas(solovev_wout, **TRACE_KWARGS)
-    disabled = trace_alphas(solovev_wout, compact=False, **TRACE_KWARGS)
-    assert dispatched == [True, False]
-    assert default.metadata["compact"] is True and disabled.metadata["compact"] is False
-    np.testing.assert_array_equal(default.trajectories, disabled.trajectories)
-    parser = cli.build_parser()
-    assert parser.parse_args([str(solovev_wout), "--no-trace-compact"]).trace_compact is False
+    counts = []
+    def capture(fig, *_args, **_kwargs):
+        if len(fig.axes) >= 6:
+            axis = fig.axes[4]
+            counts.append(sum(p.get_height() for p in axis.patches))
+            assert axis.get_xscale() == ("log" if losses and min(losses) > 0 else "linear")
+    monkeypatch.setattr(plotting, "_save_figure", capture)
+    lost_times = np.full(traced.nparticles, -1.0)
+    lost_times[:len(losses)] = losses
+    result = replace(traced, lost_times=lost_times, times=np.array([0., horizon]),
+                     loss_fractions=np.array([0., len(losses) / traced.nparticles]),
+                     metadata={**traced.metadata, "birth": "surface"})
+    plotting.plot_tracing(result, tmp_path)
+    assert counts == [len(losses)]
 
 
 def test_asymmetric_trace_requires_complete_backend(solovev_wout, monkeypatch):
@@ -779,3 +735,72 @@ def test_asymmetric_boundary_cartesian_coordinates():
     expected = (radius*np.cos(phi), radius*np.sin(phi),
                 0.2*np.sin(angle) + 0.05*np.cos(angle))
     np.testing.assert_allclose(_boozer_boundary_xyz(bz, theta, zeta), expected, atol=1e-14)
+
+
+@pytest.mark.parametrize("energy, expected", [(1e-6, "(converged, below 0.001)"),
+                                              (5e-2, "the orbits are not converged. Rerun with --trace-tolerance 3e-08")])
+def test_cli_reports_whether_the_orbits_converged(solovev_wout, tmp_path, monkeypatch, energy, expected):
+    """The energy check names the step to rerun with when the orbits are not converged."""
+    from vmex.core import tracing
+
+    real = tracing.trace_alphas
+
+    def traced(*args, **kwargs):
+        result = real(*args, **kwargs)
+        return dataclasses.replace(result, energy_error=np.full_like(result.energy_error, energy))
+
+    monkeypatch.setattr(tracing, "trace_alphas", traced)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = cli.main([str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--trace-particles", "4",
+                       "--trace-tmax", "1e-6", "--mbooz", "8", "--nbooz", "8"])
+    assert rc == 0 and expected in buffer.getvalue()
+
+
+def test_integrator_keywords_reach_essos(solovev_wout, monkeypatch):
+    """Adaptive Dopri8 at TOLERANCE by default; fixed methods get no tolerance; compaction passes through."""
+    import essos.boozer
+
+    from vmex.core.tracing import TOLERANCE
+
+    original, seen = essos.boozer.trace_boozer, []
+
+    def recording(*args, **kwargs):
+        seen.append({k: kwargs.get(k) for k in ("method", "tolerance", "compact")})
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", recording)
+    kwargs = {k: v for k, v in TRACE_KWARGS.items() if k != "method"}
+    default = trace_alphas(solovev_wout, **kwargs)
+    trace_alphas(solovev_wout, **kwargs, method="rk4", compact=False)
+    assert seen == [dict(method="adaptive8", tolerance=TOLERANCE, compact=True),
+                    dict(method="rk4", tolerance=None, compact=False)]
+    assert default.metadata["integrator"].startswith("adaptive Dopri8, tolerance")
+    with pytest.raises(ValueError, match="method must be one of"):
+        trace_alphas(None, method="unknown")
+    with pytest.raises(ValueError, match="tolerance must be positive"):
+        trace_alphas(solovev_wout, **kwargs, tolerance=0.0)
+
+
+
+def test_trace_devices_default_to_every_cpu_or_one_gpu(solovev_wout, monkeypatch):
+    """CPU runs split over every device, GPU runs keep one; an explicit list wins."""
+    import essos.boozer
+    import jax
+
+    original, seen = essos.boozer.trace_boozer, []
+
+    def recording(*args, **kwargs):
+        seen.append(kwargs["devices"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(essos.boozer, "trace_boozer", recording)
+    cpu = trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert seen[-1] == jax.devices() and cpu.metadata["devices"] == len(jax.devices())
+    explicit = trace_alphas(solovev_wout, **TRACE_KWARGS, devices=jax.devices()[:1])
+    assert seen[-1] == jax.devices()[:1] and explicit.metadata["devices"] == 1
+    gpus = [jax.devices()[0]] * 2
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(jax, "devices", lambda: gpus)
+    trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert seen[-1] == gpus[:1]
