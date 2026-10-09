@@ -133,6 +133,9 @@ Free boundary
 .. automodule:: vmex.core.freeboundary_implicit
    :members:
 
+.. automodule:: vmex.core.newton
+   :members:
+
 .. automodule:: vmex.core.virtual_casing
    :members:
 
