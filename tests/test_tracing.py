@@ -426,11 +426,11 @@ def test_essos_field_handoff_is_differentiable(solovev_wout):
 
 
 def test_essos_tracing_fields_from_axis_to_wall(solovev_wout):
+    import essos.fields
     import jax.numpy as jnp
-    from essos.fields import InterpolatedField
     from vmex.core.tracing import essos_tracing_fields
 
-    if not hasattr(InterpolatedField, "around"):
+    if not hasattr(getattr(essos.fields, "InterpolatedField", None), "around"):
         pytest.skip("needs ESSOS with InterpolatedField.around")
 
     def toroidal(xyz):  # B_phi = 1 T m / R
