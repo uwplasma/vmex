@@ -490,7 +490,7 @@ def test_confinement_guards_report_failures_and_skip_cache(
     monkeypatch.setattr(neoclassical, "epsilon_effective_from_boozer", _raises)
     plotting._CONFINEMENT_CACHE.clear()
     conf = plotting.confinement_summary(wout, booz)
-    assert conf.notes["epsilon_effective"] == "NEO evaluation failed: RuntimeError"
+    assert conf.notes["epsilon_effective"] == "NEO evaluation failed: RuntimeError: synthetic NEO failure"
 
     monkeypatch.setattr(
         neoclassical, "epsilon_effective_from_boozer",
