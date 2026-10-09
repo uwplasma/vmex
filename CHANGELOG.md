@@ -7,6 +7,10 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `vmex.solve_free_boundary_newton` is an opt-in Newton solve of free-boundary
+  equilibria. It reaches `|F| ~ 1e-13`, converges current-carrying cases where
+  descent drifts, and counts the ideal-MHD unstable directions from the
+  negative eigenvalues of the force Jacobian. Descent stays the default.
 - `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
   from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
   toroidal current, pressure). MRX is optional.
