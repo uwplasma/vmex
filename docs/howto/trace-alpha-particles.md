@@ -63,24 +63,17 @@ s = 0.3 lost within 0.2 s.
 
 ## Other charged particles
 
-For a controlled 20 keV proton probe at the equilibrium's physical size and
-field, specify all three parameters and a step appropriate to that speed:
+`--trace-energy-eV`, `--trace-mass-kg` and `--trace-charge-coulomb` (Python:
+`energy_eV`, `mass`, `charge` in `trace_alphas`) trace any guiding centre with
+the same births and collision background; they set `v = sqrt(2 E / m)` and do
+not model an NBI deposition. A 20 keV proton at the equilibrium's own size:
 
 ```console
-vmex wout_case.nc --trace --trace-no-scale --trace-birth surface \
-  --trace-energy-eV 20000 --trace-mass-kg 1.67262192369e-27 \
-  --trace-charge-coulomb 1.602176634e-19 \
-  --trace-timestep 2.5e-9 --trace-tmax 2e-4
+vmex wout_case.nc --trace --trace-no-scale --trace-energy-eV 20000 \
+  --trace-mass-kg 1.67262192369e-27 --trace-charge-coulomb 1.602176634e-19
 ```
 
-A deuteron approximation uses twice the proton mass (`3.34524384738e-27 kg`)
-and the same charge and energy. These options set the nonrelativistic speed
-through `v = sqrt(2 E / m)` and the guiding-centre mass and signed charge.
-They preserve the existing surface/volume birth measure and electron/D/T
-collision background; they do not supply an NBI deposition distribution.
-Check timestep, spectrum and guiding-centre validity for the chosen case
-before interpreting loss fractions. The Python API accepts `energy_eV`,
-`mass` (kg) and `charge` (C) in `trace_alphas`; its legacy name is retained.
+Check the step, spectrum and guiding-centre validity before reading losses.
 
 ## What is traced
 
@@ -119,36 +112,27 @@ Next to the input (or in `--outdir`):
 - `*_trace.npz` holds the loss-fraction curve, the loss and thermalisation
   times, the births `(s, theta_B, zeta_B, v_par/v)` and the final states.
   This is enough to replot or compare runs.
-- `*_trace.png` has six panels:
-  - the cumulative loss fraction against log time, with its 1σ band;
-  - a heatmap of the loss locations on the boundary in `(zeta_B, theta_B)`;
-  - the birth pitch of lost and confined alphas;
-  - loss time against birth pitch;
-  - loss fraction against birth `s` (volume births), or a loss-time
-    histogram (surface births);
-  - `iota(s)` with the low-order rationals `n N_fp / m`, where orbit
-    resonances sit.
+- `*_trace.png` has six panels: the cumulative loss fraction against log
+  time with its 1σ band; the loss locations in `(zeta_B, theta_B)`; the birth
+  pitch of lost and confined alphas; loss time against birth pitch; loss
+  against birth `s` (volume births) or a loss-time histogram (surface births);
+  and `iota(s)` with the low-order rationals `n N_fp / m`, where resonances sit.
 - `*_trace_3d.png` shows the loss locations on the 3-D boundary, coloured by
   loss time.
 
 ## Cost
 
-On an Apple M3 Max laptop (10 performance cores, load average 6-9), the
-default ARIES-CS run (`wout_n3are_R7.75B5.7.nc`, 1000 alphas, 10 ms, 41
-Boozer modes) takes 28 s: 25 s of tracing, of which 1.9 s is compilation.
-It loses 12.3 % ± 1.0 %. The defaults are now 500 alphas (± 1.5 %) and a
-mode cut of 2e-4 (see the convergence section). `--trace` gives JAX one CPU
-device per usable core (on Linux, the cores the process may run on). On Apple
-silicon it uses only the performance cores unless there are at least as many
-efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
-performance cores. A device count in `XLA_FLAGS` or `JAX_NUM_CPU_DEVICES`
-wins. The Boozer transform takes about 2 s.
+On an Apple M3 Max laptop (10 performance cores, load 6-9), ARIES-CS
+(`wout_n3are_R7.75B5.7.nc`, 1000 alphas, 10 ms, 41 Boozer modes) takes 28 s,
+25 s of it tracing (1.9 s compilation), and loses 12.3 % ± 1.0 %; the Boozer
+transform takes about 2 s. `--trace` gives JAX one CPU device per usable core
+(on Apple silicon, the performance cores unless efficiency cores are at least
+as many; all 10 of an M4 trace 1.7x faster than its 4 performance cores); a
+device count in `XLA_FLAGS` or `JAX_NUM_CPU_DEVICES` wins.
 
-**CPU or GPU.** Since ESSOS 0.19.3 (parallel spline lookup and compaction of
-lost alphas) a GPU is the faster choice for large ensembles: 1,024 alphas over
-2 ms take 2.4 s warm on an RTX A4000 against 18 s on eight CPU devices
-(uwplasma/ESSOS#98). On a laptop CPU the default 500-alpha run takes under a
-minute.
+**CPU or GPU.** Since ESSOS 0.19.3 a GPU is faster for large ensembles: 1,024
+alphas over 2 ms take 2.4 s warm on an RTX A4000 against 18 s on eight CPU
+devices (uwplasma/ESSOS#98); the default 500-alpha run takes under a minute on a laptop.
 
 ## Convergence of the defaults
 
@@ -192,13 +176,11 @@ reactor scale, CTH-like and nfp2_QA_omnigenity (which loses everything).
   now adaptive (next section). `--trace` prints the largest energy error after
   every run and, above `1e-3`, says the orbits are not converged and how to
   tighten the run.
-- **The `K = 0` equations.** `--trace` drops the radial covariant field
-  `K`, which is nonzero only at finite pressure. SIMSOPT traces both forms
-  (`gc` with `K`, `gc_noK` without), and on 512 identical births over 5 ms the
-  loss labels are unchanged on W7-X at β = 4.5 % (3 and 3 lost). On a QA at
-  β = 2.7 % 4 of 512 labels change (9 against 11 lost, −1.0σ), and on a
-  Landreman–Paul QA at β = 2.5 % and a vacuum QH nothing is lost either way.
-  At these β the `K` term is below the sampling error of prompt losses.
+- **The `K = 0` equations.** `--trace` drops the radial covariant field `K`
+  (nonzero only at finite pressure). SIMSOPT's `gc` and `gc_noK` on 512 births
+  over 5 ms: W7-X at β = 4.5 % loses 3 and 3; a QA at β = 2.7 % 9 and 11
+  (−1.0σ); a Landreman–Paul QA at β = 2.5 % and a vacuum QH lose none either
+  way. At these β the `K` term is below the sampling error of prompt losses.
 - Over 10 ms the orbits are chaotic, so individual labels change between any
   two settings; the fraction converges, the labels do not.
 
@@ -217,13 +199,11 @@ RTX A4000, common births, against adaptive Dopri5 at `1e-10`:
 | adaptive Dopri8, `1e-7` | 237 s | 4e-5 | within 1.4σ |
 | adaptive Dopri8, `1e-9` | 589 s | 3e-7 | within 1.0σ |
 
-Adaptive Dopri8 meets the `1e-3` energy gate everywhere, at 2.6 times the
-cost of the unconverged fixed step (at `1e-7`) and 1.5 times cheaper than the
-fixed step that converges. It is what FIRM3D and CATAPULT do
-(adaptive Dormand–Prince). Implicit and IMEX schemes buy nothing on these
-non-stiff equations; a symplectic scheme (SIMPLE, FIRM3D's option) bounds the
-long-time energy error, which these tolerances already keep far below the
-gate over these horizons.
+Adaptive Dopri8 meets the `1e-3` energy gate everywhere, at 2.6 times the cost
+of the unconverged fixed step (at `1e-7`) and 1.5 times cheaper than the fixed
+step that converges; FIRM3D and CATAPULT also use adaptive Dormand–Prince.
+Implicit schemes buy nothing on these non-stiff equations, and the symplectic
+bound on long-time energy error (SIMPLE) is not needed at these tolerances.
 
 The default tolerance, `3e-7`, comes from all twenty-one equilibria of the
 convergence section (500 alphas, 5 ms, against adaptive Dopri8 at `1e-9`):
@@ -240,11 +220,9 @@ method's step count grows as `tolerance^(-1/8)`.
 
 ## Against SIMPLE and SIMSOPT
 
-This comparison was measured with VMEX 0.11.4, before the toroidal-flux sign
-and alpha-mass corrections of 0.11.7, and has not been rerun. The totals
-agreed, but individual orbits differ. After the corrections, ESSOS,
-FIRM3D/CATAPULT and SIMPLE agree on all 512 loss labels of a matched
-5 ms case (uwplasma/vmex#516).
+Measured with VMEX 0.11.4, before the flux-sign and alpha-mass corrections of
+0.11.7, and not rerun. Since then ESSOS, FIRM3D/CATAPULT and SIMPLE agree on all
+512 loss labels of a matched 5 ms case (uwplasma/vmex#516).
 
 ![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT, before the 0.11.7 corrections](../_static/figures/readme_trace_benchmark.webp)
 
