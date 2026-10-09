@@ -684,6 +684,8 @@ def test_stellarator_asymmetry_vacuum_examples_run(case, tmp_path):
     assert (tmp_path / f"input.{case}_LASYM_optimized").exists()
     assert (tmp_path / f"wout_{case}_LASYM_optimized.nc").exists()
     assert (tmp_path / f"{case}_LASYM_optimized_objectives.png").exists()
+    if case == "QI":  # NEO on the asymmetric Boozer spectrum, or the stated reason
+        assert "optimized epsilon_eff^(3/2)" in out or "epsilon_eff skipped" in out
 
 
 def test_qa_maxj_example_states_its_physical_scope():
