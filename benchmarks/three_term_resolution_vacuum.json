@@ -1,0 +1,3419 @@
+{
+ "case": "examples/data/input.LandremanPaul2021_QA_lowres",
+ "ns": 51,
+ "truth_modes": 12,
+ "start_scale": 0.97,
+ "vc_grid": 48,
+ "field": {
+  "fit_rms_bn_over_B": 1.8961789146015516e-05,
+  "fit_modes": 362,
+  "sources": 8192,
+  "seconds": 43.4,
+  "compile_seconds": 28.8,
+  "peak_gpu_gib": 9.55,
+  "device": "cuda:0"
+ },
+ "rows": [
+  {
+   "method": "desc",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.362829138778274e-13,
+   "bn": 0.0002616131180766405,
+   "pressure_balance": 0.0001842371473583682,
+   "sheet_current": 0.0003336634074185642,
+   "qa": 3.5688750689724854e-05,
+   "iota_axis": 0.4209888405501808,
+   "iota_edge": 0.4153672448446125,
+   "aspect": 6.0003518894652625,
+   "volume_m3": 0.5647454749218485,
+   "lcfs_mm_vs_truth": 1.626,
+   "seconds": 427.8,
+   "total_seconds": 475.9,
+   "peak_gpu_gib": 1.03,
+   "device": "cuda:0",
+   "nfev": 105,
+   "message": "Maximum number of iterations has been exceeded.",
+   "own_residual_rms": [
+    1.3677256043496638e-05,
+    2.0032601372149134e-05,
+    2.146975780592557e-05
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     4.946,
+     1.787
+    ],
+    "0.3": [
+     3.546,
+     1.211
+    ],
+    "0.5": [
+     3.064,
+     0.911
+    ],
+    "0.7": [
+     3.172,
+     0.807
+    ],
+    "0.9": [
+     3.083,
+     0.725
+    ],
+    "1": [
+     2.876,
+     0.657
+    ]
+   },
+   "poincare_mm_max": 2.876,
+   "poincare_mm_rms": 0.657,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.678,
+   "axis_mm": 2.669,
+   "coil_bn_max": 0.0006906938458760277,
+   "coil_bn_rms": 0.0002478758273769349,
+   "resonant_bn": [
+    3,
+    2,
+    0.0002722038754878182,
+    -0.753
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.7598608811665318e-13,
+   "bn": 0.0013573319245912604,
+   "pressure_balance": 0.00026126828250725304,
+   "sheet_current": 0.0013669604834886117,
+   "qa": 5.712613751744826e-05,
+   "iota_axis": 0.4140750387673161,
+   "iota_edge": 0.4103817263533821,
+   "aspect": 6.02126553307973,
+   "volume_m3": 0.5684176410232251,
+   "lcfs_mm_vs_truth": 12.32,
+   "seconds": 159.5,
+   "total_seconds": 205.9,
+   "peak_gpu_gib": 1.02,
+   "device": "cuda:0",
+   "nfev": 32,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    2.968488655513984e-05,
+    6.404525211987275e-05,
+    4.796907696224063e-05
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     26.054,
+     9.344
+    ],
+    "0.3": [
+     24.438,
+     8.667
+    ],
+    "0.5": [
+     22.922,
+     7.909
+    ],
+    "0.7": [
+     21.45,
+     7.113
+    ],
+    "0.9": [
+     20.39,
+     6.31
+    ],
+    "1": [
+     19.896,
+     5.913
+    ]
+   },
+   "poincare_mm_max": 19.896,
+   "poincare_mm_rms": 5.913,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 12.546,
+   "axis_mm": 11.658,
+   "coil_bn_max": 0.003492487856011867,
+   "coil_bn_rms": 0.001335903205476949,
+   "resonant_bn": [
+    1,
+    0,
+    0.0014409180956359321,
+    0.4157
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.749009318925875e-13,
+   "bn": 0.00040150651969052633,
+   "pressure_balance": 0.0003031029281024027,
+   "sheet_current": 0.0005225306391995449,
+   "qa": 5.496108083471691e-05,
+   "iota_axis": 0.42304221768089356,
+   "iota_edge": 0.41587173662094645,
+   "aspect": 6.000119138748071,
+   "volume_m3": 0.5647202228110362,
+   "lcfs_mm_vs_truth": 1.621,
+   "free_fsq": 2.3291097131330117e-13,
+   "iterations": 1668,
+   "converged": true,
+   "seconds": 74.2,
+   "compile_seconds": 49.9,
+   "peak_gpu_gib": 0.05,
+   "device": "cuda:0",
+   "poincare_mm_max": 4.096,
+   "poincare_mm_rms": 0.98,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.97,
+     0.2
+    ],
+    "0.3": [
+     1.367,
+     0.321
+    ],
+    "0.5": [
+     2.169,
+     0.493
+    ],
+    "0.7": [
+     2.91,
+     0.687
+    ],
+    "0.9": [
+     3.643,
+     0.882
+    ],
+    "1": [
+     4.096,
+     0.98
+    ]
+   },
+   "lcfs_mm_vs_target": 2.274,
+   "axis_mm": 0.371,
+   "coil_bn_max": 0.0023707995343867417,
+   "coil_bn_rms": 0.0004744007560160318,
+   "resonant_bn": [
+    4,
+    2,
+    0.00023186217227508048,
+    -0.3365
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.7911864378768546e-13,
+   "bn": 0.0004064847422764714,
+   "pressure_balance": 0.0003181520269818081,
+   "sheet_current": 0.0005378848365192142,
+   "qa": 8.218624720993638e-05,
+   "iota_axis": 0.4230455671200546,
+   "iota_edge": 0.4158396454654223,
+   "aspect": 6.00012669800967,
+   "volume_m3": 0.5647214491092499,
+   "lcfs_mm_vs_truth": 1.694,
+   "free_fsq": 2.405090171143484e-13,
+   "iterations": 1758,
+   "converged": true,
+   "seconds": 69.8,
+   "compile_seconds": 51.2,
+   "peak_gpu_gib": 0.13,
+   "device": "cuda:0",
+   "poincare_mm_max": 4.177,
+   "poincare_mm_rms": 1.005,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     1.037,
+     0.21
+    ],
+    "0.3": [
+     1.423,
+     0.336
+    ],
+    "0.5": [
+     2.25,
+     0.507
+    ],
+    "0.7": [
+     2.962,
+     0.704
+    ],
+    "0.9": [
+     3.71,
+     0.904
+    ],
+    "1": [
+     4.177,
+     1.005
+    ]
+   },
+   "lcfs_mm_vs_target": 2.321,
+   "axis_mm": 0.373,
+   "coil_bn_max": 0.0025176531325034235,
+   "coil_bn_rms": 0.0004834457222105874,
+   "resonant_bn": [
+    4,
+    2,
+    0.00024112231014554084,
+    -0.3366
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.5810801549241483e-13,
+   "bn": 0.0015861004305540124,
+   "pressure_balance": 0.055467628009303355,
+   "sheet_current": 0.05714849455429794,
+   "qa": 0.0005281631094968277,
+   "iota_axis": 0.42698818393448185,
+   "iota_edge": 0.4152521379066314,
+   "aspect": 6.18392010187795,
+   "volume_m3": 0.531198400532078,
+   "lcfs_mm_vs_truth": 10.711,
+   "lcfs_mm_vs_target": 10.708
+  },
+  {
+   "method": "target",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.4897289270118585e-13,
+   "bn": 0.0011179522706081235,
+   "pressure_balance": 0.0010348397435361364,
+   "sheet_current": 0.0017301173840955635,
+   "qa": 0.0005325333010609644,
+   "iota_axis": 0.42617794935669623,
+   "iota_edge": 0.4158322657123197,
+   "aspect": 6.000034085002673,
+   "volume_m3": 0.5647177046766583,
+   "lcfs_mm_vs_truth": 0.812,
+   "seconds": 13.1,
+   "compile_seconds": 5.4,
+   "peak_gpu_gib": 0.02,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.355995361061587e-13,
+   "bn": 0.00018587151572030744,
+   "pressure_balance": 0.00016634147118744857,
+   "sheet_current": 0.00024216271955644368,
+   "qa": 5.154182440681267e-05,
+   "iota_axis": 0.42253374124596443,
+   "iota_edge": 0.4153028445941591,
+   "aspect": 5.9999936534585805,
+   "volume_m3": 0.5646828993483093,
+   "lcfs_mm_vs_truth": 1.672,
+   "nfev": 10,
+   "njev": 7,
+   "cost": 1.01555605258544e-07,
+   "seconds": 260.5,
+   "compile_seconds": 185.3,
+   "peak_gpu_gib": 1.88,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.83,
+   "poincare_surfaces": {
+    "0.1": [
+     0.525,
+     0.113
+    ],
+    "0.3": [
+     0.562,
+     0.138
+    ],
+    "0.5": [
+     0.781,
+     0.189
+    ],
+    "0.7": [
+     0.98,
+     0.227
+    ],
+    "0.9": [
+     1.35,
+     0.308
+    ],
+    "1": [
+     1.555,
+     0.38
+    ]
+   },
+   "poincare_mm_max": 1.555,
+   "poincare_mm_rms": 0.38,
+   "poincare_lost": 0,
+   "axis_mm": 0.346,
+   "coil_bn_max": 0.001010945280317498,
+   "coil_bn_rms": 0.00024157828197599558,
+   "resonant_bn": [
+    4,
+    2,
+    6.18962874631149e-05,
+    -0.3388
+   ]
+  },
+  {
+   "method": "vmec2000",
+   "modes": 4,
+   "ns": 51,
+   "force_fsq": 1.702215835364574e-13,
+   "bn": 0.0004169204514746057,
+   "pressure_balance": 0.00031880914027156637,
+   "sheet_current": 0.0005497859807805854,
+   "qa": 8.875194628363507e-05,
+   "iota_axis": 0.42303992935152235,
+   "iota_edge": 0.41583433545600706,
+   "aspect": 6.000141796877304,
+   "volume_m3": 0.5647237360042457,
+   "lcfs_mm_vs_truth": 1.707,
+   "seconds": 2825.4,
+   "device": "cpu (mpirun --allow-run-as-root -np 4 /root/autodl-tmp/vmec2000/build/build/bin/xvmec)",
+   "converged": true,
+   "exit_code": 1,
+   "free_fsq": 2.337206662526589e-13,
+   "poincare_mm_max": 4.109,
+   "poincare_mm_rms": 0.997,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     1.098,
+     0.217
+    ],
+    "0.3": [
+     1.43,
+     0.342
+    ],
+    "0.5": [
+     2.266,
+     0.509
+    ],
+    "0.7": [
+     2.938,
+     0.701
+    ],
+    "0.9": [
+     3.651,
+     0.897
+    ],
+    "1": [
+     4.109,
+     0.997
+    ]
+   },
+   "lcfs_mm_vs_target": 2.304,
+   "axis_mm": 0.374,
+   "coil_bn_max": 0.0026679679888728324,
+   "coil_bn_rms": 0.000509906935576026,
+   "resonant_bn": [
+    4,
+    2,
+    0.00024123662176872747,
+    -0.3367
+   ]
+  },
+  {
+   "method": "desc",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 1.59371634145475e-13,
+   "bn": 9.715478036678936e-05,
+   "pressure_balance": 0.00010894524797255476,
+   "sheet_current": 0.0001369593971314138,
+   "qa": 7.076234128839775e-06,
+   "iota_axis": 0.42233826437796784,
+   "iota_edge": 0.4155443214028902,
+   "aspect": 5.999674217372026,
+   "volume_m3": 0.5646377939274472,
+   "lcfs_mm_vs_truth": 1.604,
+   "seconds": 260.6,
+   "total_seconds": 315.1,
+   "peak_gpu_gib": 1.06,
+   "device": "cuda:0",
+   "nfev": 42,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    4.387028805308385e-06,
+    8.858518076926883e-06,
+    6.067287734682795e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.173,
+     0.046
+    ],
+    "0.3": [
+     0.613,
+     0.126
+    ],
+    "0.5": [
+     1.076,
+     0.212
+    ],
+    "0.7": [
+     1.508,
+     0.295
+    ],
+    "0.9": [
+     1.686,
+     0.368
+    ],
+    "1": [
+     2.06,
+     0.403
+    ]
+   },
+   "poincare_mm_max": 2.06,
+   "poincare_mm_rms": 0.403,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.6,
+   "axis_mm": 0.029,
+   "coil_bn_max": 0.0001517048134870232,
+   "coil_bn_rms": 5.010790069940368e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.8863670998584684e-05,
+    0.0786
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 2.1223953855003526e-13,
+   "bn": 0.00019009339868345833,
+   "pressure_balance": 0.00025938379597122645,
+   "sheet_current": 0.0003236146922367198,
+   "qa": 1.2860264635777243e-05,
+   "iota_axis": 0.42252155099245314,
+   "iota_edge": 0.41510609491157013,
+   "aspect": 6.00234352392061,
+   "volume_m3": 0.5650909096918426,
+   "lcfs_mm_vs_truth": 1.87,
+   "seconds": 200.3,
+   "total_seconds": 244.8,
+   "peak_gpu_gib": 1.04,
+   "device": "cuda:0",
+   "nfev": 39,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    8.832952239783696e-06,
+    1.5112171011046846e-05,
+    1.2157240239075824e-05
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     3.191,
+     0.808
+    ],
+    "0.3": [
+     3.493,
+     0.805
+    ],
+    "0.5": [
+     3.751,
+     0.793
+    ],
+    "0.7": [
+     4.109,
+     0.829
+    ],
+    "0.9": [
+     4.851,
+     0.957
+    ],
+    "1": [
+     5.345,
+     1.064
+    ]
+   },
+   "poincare_mm_max": 5.345,
+   "poincare_mm_rms": 1.064,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.833,
+   "axis_mm": 0.69,
+   "coil_bn_max": 0.0004650992582798755,
+   "coil_bn_rms": 0.00019250376227597038,
+   "resonant_bn": [
+    1,
+    0,
+    0.00015925992636397357,
+    0.4159
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 2.3891882579656537e-13,
+   "bn": 0.0008713678339834397,
+   "pressure_balance": 0.0015995332698256802,
+   "sheet_current": 0.0018692643143713725,
+   "qa": 0.0012158528704106426,
+   "iota_axis": 0.4306589166024757,
+   "iota_edge": 0.4163773916844755,
+   "aspect": 6.000335040855658,
+   "volume_m3": 0.5647197435158575,
+   "lcfs_mm_vs_truth": 5.728,
+   "free_fsq": 2.1986302132276083e-13,
+   "iterations": 3177,
+   "converged": true,
+   "seconds": 96.1,
+   "compile_seconds": 53.8,
+   "peak_gpu_gib": 0.05,
+   "device": "cuda:0",
+   "poincare_mm_max": 11.531,
+   "poincare_mm_rms": 2.756,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     4.59,
+     0.826
+    ],
+    "0.3": [
+     4.444,
+     0.869
+    ],
+    "0.5": [
+     4.854,
+     1.095
+    ],
+    "0.7": [
+     7.64,
+     1.596
+    ],
+    "0.9": [
+     10.278,
+     2.319
+    ],
+    "1": [
+     11.531,
+     2.756
+    ]
+   },
+   "lcfs_mm_vs_target": 5.622,
+   "axis_mm": 0.888,
+   "coil_bn_max": 0.005056665495893188,
+   "coil_bn_rms": 0.0011711004968393184,
+   "resonant_bn": [
+    5,
+    2,
+    0.0001280749325198831,
+    0.0819
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 2.467029641162673e-13,
+   "bn": 0.0008724715005713996,
+   "pressure_balance": 0.0016014977875352032,
+   "sheet_current": 0.0018708205315838375,
+   "qa": 0.001239904616239702,
+   "iota_axis": 0.430796445753311,
+   "iota_edge": 0.4164168492917215,
+   "aspect": 6.0003718484537965,
+   "volume_m3": 0.5647277837328896,
+   "lcfs_mm_vs_truth": 5.778,
+   "free_fsq": 2.1402638164618503e-13,
+   "iterations": 3227,
+   "converged": true,
+   "seconds": 78.3,
+   "compile_seconds": 43.6,
+   "peak_gpu_gib": 0.13,
+   "device": "cuda:0",
+   "poincare_mm_max": 11.453,
+   "poincare_mm_rms": 2.761,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     4.624,
+     0.84
+    ],
+    "0.3": [
+     4.458,
+     0.907
+    ],
+    "0.5": [
+     4.953,
+     1.12
+    ],
+    "0.7": [
+     7.635,
+     1.6
+    ],
+    "0.9": [
+     10.216,
+     2.321
+    ],
+    "1": [
+     11.453,
+     2.761
+    ]
+   },
+   "lcfs_mm_vs_target": 5.672,
+   "axis_mm": 0.892,
+   "coil_bn_max": 0.005062326506420231,
+   "coil_bn_rms": 0.001171434122887519,
+   "resonant_bn": [
+    5,
+    2,
+    0.0001275212078745177,
+    0.0821
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 1.5032357517468635e-13,
+   "bn": 0.0016056631299352256,
+   "pressure_balance": 0.05547739443700317,
+   "sheet_current": 0.05716316434771051,
+   "qa": 4.474835613656461e-05,
+   "iota_axis": 0.42330901614332495,
+   "iota_edge": 0.4153236895879991,
+   "aspect": 6.183899362837802,
+   "volume_m3": 0.5311935779174486,
+   "lcfs_mm_vs_truth": 10.778,
+   "lcfs_mm_vs_target": 10.705
+  },
+  {
+   "method": "target",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 1.467506491141143e-13,
+   "bn": 0.00013283656051168337,
+   "pressure_balance": 0.00021392514751769742,
+   "sheet_current": 0.00025049633648201034,
+   "qa": 2.4705051674142146e-05,
+   "iota_axis": 0.4227173317407537,
+   "iota_edge": 0.4158812834380736,
+   "aspect": 6.0000128808950155,
+   "volume_m3": 0.5647124759345034,
+   "lcfs_mm_vs_truth": 0.121,
+   "seconds": 12.7,
+   "compile_seconds": 5.5,
+   "peak_gpu_gib": 0.02,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 6.609609796738735e-22,
+   "bn": 4.201173806913135e-05,
+   "pressure_balance": 2.472455446072421e-05,
+   "sheet_current": 4.7097160677158996e-05,
+   "qa": 3.01204603170591e-06,
+   "iota_axis": 0.42172149605535825,
+   "iota_edge": 0.4156913239729991,
+   "aspect": 5.999999853858015,
+   "volume_m3": 0.5647009117101295,
+   "lcfs_mm_vs_truth": 1.611,
+   "nfev": 9,
+   "njev": 7,
+   "cost": 7.868406477960565e-09,
+   "seconds": 294.8,
+   "compile_seconds": 200.3,
+   "peak_gpu_gib": 1.93,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.64,
+   "poincare_surfaces": {
+    "0.1": [
+     0.455,
+     0.1
+    ],
+    "0.3": [
+     0.198,
+     0.051
+    ],
+    "0.5": [
+     0.139,
+     0.048
+    ],
+    "0.7": [
+     0.244,
+     0.057
+    ],
+    "0.9": [
+     0.609,
+     0.121
+    ],
+    "1": [
+     0.829,
+     0.166
+    ]
+   },
+   "poincare_mm_max": 0.829,
+   "poincare_mm_rms": 0.166,
+   "poincare_lost": 0,
+   "axis_mm": 0.388,
+   "coil_bn_max": 0.00019655234999777182,
+   "coil_bn_rms": 4.845937580516512e-05,
+   "resonant_bn": [
+    6,
+    2,
+    1.912084586266741e-05,
+    0.4941
+   ]
+  },
+  {
+   "method": "vmec2000",
+   "modes": 5,
+   "ns": 51,
+   "force_fsq": 2.3148741851422735e-13,
+   "bn": 0.0008774201373270084,
+   "pressure_balance": 0.0016048809019737322,
+   "sheet_current": 0.0018769741755421865,
+   "qa": 0.00123283436234223,
+   "iota_axis": 0.4307232606513568,
+   "iota_edge": 0.41639828642644283,
+   "aspect": 6.000331865790955,
+   "volume_m3": 0.5647204800213356,
+   "lcfs_mm_vs_truth": 5.693,
+   "seconds": 4809.1,
+   "device": "cpu (mpirun --allow-run-as-root -np 4 /root/autodl-tmp/vmec2000/build/build/bin/xvmec)",
+   "converged": true,
+   "exit_code": 1,
+   "free_fsq": 2.1987834211546066e-13,
+   "poincare_surfaces": {
+    "0.1": [
+     4.533,
+     0.815
+    ],
+    "0.3": [
+     4.394,
+     0.871
+    ],
+    "0.5": [
+     4.964,
+     1.108
+    ],
+    "0.7": [
+     7.738,
+     1.608
+    ],
+    "0.9": [
+     10.345,
+     2.327
+    ],
+    "1": [
+     11.581,
+     2.766
+    ]
+   },
+   "poincare_mm_max": 11.581,
+   "poincare_mm_rms": 2.766,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 5.587,
+   "axis_mm": 0.884,
+   "coil_bn_max": 0.005142436176758569,
+   "coil_bn_rms": 0.0011825015638358986,
+   "resonant_bn": [
+    5,
+    2,
+    0.00012917893726359736,
+    0.082
+   ]
+  },
+  {
+   "method": "desc",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 2.1604854454914623e-13,
+   "bn": 9.24124050370384e-05,
+   "pressure_balance": 0.00010647633994010439,
+   "sheet_current": 0.00014075137952598564,
+   "qa": 1.8630030089685446e-05,
+   "iota_axis": 0.4232769408991692,
+   "iota_edge": 0.4160750037527727,
+   "aspect": 5.999645492210729,
+   "volume_m3": 0.5646463798126977,
+   "lcfs_mm_vs_truth": 1.487,
+   "seconds": 389.1,
+   "total_seconds": 476.8,
+   "peak_gpu_gib": 1.63,
+   "device": "cuda:0",
+   "nfev": 33,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    3.538705502967026e-06,
+    6.327708478037451e-06,
+    4.781360034947717e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.376,
+     0.127
+    ],
+    "0.3": [
+     0.383,
+     0.106
+    ],
+    "0.5": [
+     0.626,
+     0.163
+    ],
+    "0.7": [
+     0.815,
+     0.202
+    ],
+    "0.9": [
+     0.82,
+     0.251
+    ],
+    "1": [
+     1.297,
+     0.327
+    ]
+   },
+   "poincare_mm_max": 1.297,
+   "poincare_mm_rms": 0.327,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.487,
+   "axis_mm": 0.258,
+   "coil_bn_max": 0.00020715188852482875,
+   "coil_bn_rms": 6.924420716770937e-05,
+   "resonant_bn": [
+    5,
+    2,
+    7.922585071460993e-06,
+    0.0788
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 1.9613708643998932e-13,
+   "bn": 0.00017067433720898507,
+   "pressure_balance": 6.28271576809867e-05,
+   "sheet_current": 0.0001880363466772685,
+   "qa": 6.906298753524492e-06,
+   "iota_axis": 0.4240505170735891,
+   "iota_edge": 0.41653275220936414,
+   "aspect": 5.998416327759676,
+   "volume_m3": 0.5644211521486467,
+   "lcfs_mm_vs_truth": 1.677,
+   "seconds": 443.0,
+   "total_seconds": 490.3,
+   "peak_gpu_gib": 1.06,
+   "device": "cuda:0",
+   "nfev": 84,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    5.109329321042165e-06,
+    9.142896148361022e-06,
+    7.020822113742118e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.739,
+     0.151
+    ],
+    "0.3": [
+     1.055,
+     0.305
+    ],
+    "0.5": [
+     1.443,
+     0.445
+    ],
+    "0.7": [
+     2.017,
+     0.568
+    ],
+    "0.9": [
+     2.563,
+     0.674
+    ],
+    "1": [
+     3.311,
+     0.732
+    ]
+   },
+   "poincare_mm_max": 3.311,
+   "poincare_mm_rms": 0.732,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.677,
+   "axis_mm": 0.103,
+   "coil_bn_max": 0.0005539535636651643,
+   "coil_bn_rms": 0.00018550899298251666,
+   "resonant_bn": [
+    1,
+    0,
+    0.00014149362233556738,
+    0.4156
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 2.414171791016799e-13,
+   "bn": 0.00014700812845696784,
+   "pressure_balance": 0.00025372021507770204,
+   "sheet_current": 0.00029987947193026377,
+   "qa": 3.960513091568e-05,
+   "iota_axis": 0.42284785747994474,
+   "iota_edge": 0.41607739064116056,
+   "aspect": 6.000091635877281,
+   "volume_m3": 0.5647070662421986,
+   "lcfs_mm_vs_truth": 1.685,
+   "free_fsq": 2.23041522704699e-13,
+   "iterations": 2762,
+   "converged": true,
+   "seconds": 92.0,
+   "compile_seconds": 64.7,
+   "peak_gpu_gib": 0.06,
+   "device": "cuda:0",
+   "poincare_mm_max": 1.656,
+   "poincare_mm_rms": 0.347,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.458,
+     0.112
+    ],
+    "0.3": [
+     0.648,
+     0.154
+    ],
+    "0.5": [
+     0.824,
+     0.162
+    ],
+    "0.7": [
+     0.951,
+     0.214
+    ],
+    "0.9": [
+     1.419,
+     0.3
+    ],
+    "1": [
+     1.656,
+     0.347
+    ]
+   },
+   "lcfs_mm_vs_target": 1.685,
+   "axis_mm": 0.318,
+   "coil_bn_max": 0.0006548371211743582,
+   "coil_bn_rms": 0.00018736631015035845,
+   "resonant_bn": [
+    5,
+    2,
+    1.3429645144472966e-05,
+    0.0804
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 2.401056194621192e-13,
+   "bn": 0.00015676311901522655,
+   "pressure_balance": 0.00025576135203027317,
+   "sheet_current": 0.0003049263928627373,
+   "qa": 3.88861430543812e-05,
+   "iota_axis": 0.4228643680059162,
+   "iota_edge": 0.416047446009626,
+   "aspect": 6.000080675999277,
+   "volume_m3": 0.564705627039108,
+   "lcfs_mm_vs_truth": 1.691,
+   "free_fsq": 2.0723823650265654e-13,
+   "iterations": 2743,
+   "converged": true,
+   "seconds": 96.4,
+   "compile_seconds": 64.3,
+   "peak_gpu_gib": 0.13,
+   "device": "cuda:0",
+   "poincare_mm_max": 1.829,
+   "poincare_mm_rms": 0.393,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.455,
+     0.115
+    ],
+    "0.3": [
+     0.682,
+     0.155
+    ],
+    "0.5": [
+     0.915,
+     0.177
+    ],
+    "0.7": [
+     1.124,
+     0.25
+    ],
+    "0.9": [
+     1.576,
+     0.345
+    ],
+    "1": [
+     1.829,
+     0.393
+    ]
+   },
+   "lcfs_mm_vs_target": 1.691,
+   "axis_mm": 0.318,
+   "coil_bn_max": 0.0007270851737744734,
+   "coil_bn_rms": 0.00019822281618890012,
+   "resonant_bn": [
+    5,
+    2,
+    1.7122914106898126e-05,
+    0.0802
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 2.1877475337318473e-13,
+   "bn": 0.001604618495505402,
+   "pressure_balance": 0.055476502616249056,
+   "sheet_current": 0.05716201165504938,
+   "qa": 2.2957048961383834e-05,
+   "iota_axis": 0.4232845845024449,
+   "iota_edge": 0.41516294721018154,
+   "aspect": 6.18389423132915,
+   "volume_m3": 0.5311934813055345,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 2.1582353767246648e-13,
+   "bn": 7.022418363148885e-05,
+   "pressure_balance": 0.00011933195038397386,
+   "sheet_current": 0.00013583907179840022,
+   "qa": 3.422957707135886e-06,
+   "iota_axis": 0.4226903966782248,
+   "iota_edge": 0.41572209234455393,
+   "aspect": 6.0000077935895275,
+   "volume_m3": 0.564712363024844,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 14.2,
+   "compile_seconds": 5.7,
+   "peak_gpu_gib": 0.02,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 6.964016924445119e-22,
+   "bn": 2.7427016637597438e-05,
+   "pressure_balance": 1.592494664403578e-05,
+   "sheet_current": 2.7644352172693766e-05,
+   "qa": 2.2328826443280028e-07,
+   "iota_axis": 0.4225634520372835,
+   "iota_edge": 0.4158169506105002,
+   "aspect": 6.000069611692062,
+   "volume_m3": 0.5647177930621993,
+   "lcfs_mm_vs_truth": 1.629,
+   "nfev": 9,
+   "njev": 7,
+   "cost": 5.808109342942561e-09,
+   "seconds": 320.8,
+   "compile_seconds": 197.0,
+   "peak_gpu_gib": 2.02,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.629,
+   "poincare_surfaces": {
+    "0.1": [
+     0.45,
+     0.132
+    ],
+    "0.3": [
+     0.521,
+     0.114
+    ],
+    "0.5": [
+     0.57,
+     0.131
+    ],
+    "0.7": [
+     0.683,
+     0.156
+    ],
+    "0.9": [
+     0.789,
+     0.197
+    ],
+    "1": [
+     0.997,
+     0.229
+    ]
+   },
+   "poincare_mm_max": 0.997,
+   "poincare_mm_rms": 0.229,
+   "poincare_lost": 0,
+   "axis_mm": 0.382,
+   "coil_bn_max": 9.371777040828858e-05,
+   "coil_bn_rms": 2.938465834652707e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.3246968349033839e-05,
+    0.0791
+   ]
+  },
+  {
+   "method": "vmec2000",
+   "modes": 6,
+   "ns": 51,
+   "force_fsq": 2.401106812922304e-13,
+   "bn": 0.000156763115742358,
+   "pressure_balance": 0.00025576134908936974,
+   "sheet_current": 0.0003049263887914655,
+   "qa": 3.8886142409736706e-05,
+   "iota_axis": 0.42286436806162575,
+   "iota_edge": 0.4160474459698973,
+   "aspect": 6.000080675992532,
+   "volume_m3": 0.56470562703801,
+   "lcfs_mm_vs_truth": 1.691,
+   "seconds": 6390.9,
+   "device": "cpu (mpirun --allow-run-as-root -np 4 /root/autodl-tmp/vmec2000/build/build/bin/xvmec)",
+   "converged": true,
+   "exit_code": 1,
+   "free_fsq": 2.0725754392287188e-13,
+   "lcfs_mm_vs_target": 1.691,
+   "poincare_surfaces": {
+    "0.1": [
+     0.455,
+     0.115
+    ],
+    "0.3": [
+     0.682,
+     0.155
+    ],
+    "0.5": [
+     0.915,
+     0.177
+    ],
+    "0.7": [
+     1.124,
+     0.25
+    ],
+    "0.9": [
+     1.576,
+     0.345
+    ],
+    "1": [
+     1.829,
+     0.393
+    ]
+   },
+   "poincare_mm_max": 1.829,
+   "poincare_mm_rms": 0.393,
+   "poincare_lost": 0,
+   "axis_mm": 0.318,
+   "coil_bn_max": 0.0007270851672235417,
+   "coil_bn_rms": 0.00019822281147256722,
+   "resonant_bn": [
+    5,
+    2,
+    1.712290073332027e-05,
+    0.0802
+   ]
+  },
+  {
+   "method": "desc",
+   "modes": 7,
+   "ns": 51,
+   "force_fsq": 1.9634429940554391e-13,
+   "bn": 8.011479068750002e-05,
+   "pressure_balance": 3.9913861003284025e-05,
+   "sheet_current": 8.681636762646034e-05,
+   "qa": 2.387386084200666e-06,
+   "iota_axis": 0.4231219959545107,
+   "iota_edge": 0.415651975751693,
+   "aspect": 5.999552989667886,
+   "volume_m3": 0.5646186309119166,
+   "lcfs_mm_vs_truth": 1.647,
+   "seconds": 1241.1,
+   "total_seconds": 1382.2,
+   "peak_gpu_gib": 3.73,
+   "device": "cuda:0",
+   "nfev": 31,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    4.543144319112525e-06,
+    6.035361213089406e-06,
+    5.246605213239982e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.291,
+     0.081
+    ],
+    "0.3": [
+     0.795,
+     0.158
+    ],
+    "0.5": [
+     1.387,
+     0.275
+    ],
+    "0.7": [
+     2.108,
+     0.434
+    ],
+    "0.9": [
+     2.653,
+     0.627
+    ],
+    "1": [
+     3.418,
+     0.74
+    ]
+   },
+   "poincare_mm_max": 3.418,
+   "poincare_mm_rms": 0.74,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.647,
+   "axis_mm": 0.05,
+   "coil_bn_max": 0.00021743098482583287,
+   "coil_bn_rms": 7.488662513326735e-05,
+   "resonant_bn": [
+    5,
+    2,
+    4.196209814257739e-05,
+    0.0789
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 7,
+   "ns": 51,
+   "force_fsq": 1.7869872097051087e-13,
+   "bn": 6.216706219945384e-05,
+   "pressure_balance": 4.675018162723488e-05,
+   "sheet_current": 7.598717789802243e-05,
+   "qa": 8.263521026625146e-06,
+   "iota_axis": 0.42382968312121383,
+   "iota_edge": 0.4160602190193306,
+   "aspect": 5.999756365852473,
+   "volume_m3": 0.5646614373106932,
+   "lcfs_mm_vs_truth": 1.643,
+   "seconds": 596.7,
+   "total_seconds": 656.4,
+   "peak_gpu_gib": 1.12,
+   "device": "cuda:0",
+   "nfev": 82,
+   "message": "Optimization terminated successfully.\n`ftol` condition satisfied. (ftol=1.00e-08)\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    2.020978347456764e-06,
+    3.6476566062635807e-06,
+    2.7662194559661692e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.432,
+     0.092
+    ],
+    "0.3": [
+     0.138,
+     0.05
+    ],
+    "0.5": [
+     0.4,
+     0.108
+    ],
+    "0.7": [
+     0.56,
+     0.192
+    ],
+    "0.9": [
+     1.073,
+     0.305
+    ],
+    "1": [
+     1.498,
+     0.383
+    ]
+   },
+   "poincare_mm_max": 1.498,
+   "poincare_mm_rms": 0.383,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.643,
+   "axis_mm": 0.138,
+   "coil_bn_max": 0.00015345592932152456,
+   "coil_bn_rms": 5.5669796540551235e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.0255507409977834e-05,
+    0.0789
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 7,
+   "ns": 51,
+   "force_fsq": 2.338323700013593e-13,
+   "bn": 0.0003932616879061503,
+   "pressure_balance": 0.001021783998415402,
+   "sheet_current": 0.0011113886989119587,
+   "qa": 0.0008929069638640556,
+   "iota_axis": 0.4199969611258012,
+   "iota_edge": 0.4153411268334686,
+   "aspect": 6.000211787583898,
+   "volume_m3": 0.5647150644411872,
+   "lcfs_mm_vs_truth": 3.957,
+   "free_fsq": 2.175272164628406e-13,
+   "iterations": 2436,
+   "converged": true,
+   "seconds": 98.9,
+   "compile_seconds": 72.2,
+   "peak_gpu_gib": 0.06,
+   "device": "cuda:0",
+   "poincare_mm_max": 8.715,
+   "poincare_mm_rms": 1.937,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     2.758,
+     0.49
+    ],
+    "0.3": [
+     5.009,
+     0.929
+    ],
+    "0.5": [
+     7.125,
+     1.46
+    ],
+    "0.7": [
+     8.144,
+     1.867
+    ],
+    "0.9": [
+     8.824,
+     1.969
+    ],
+    "1": [
+     8.715,
+     1.937
+    ]
+   },
+   "lcfs_mm_vs_target": 3.957,
+   "axis_mm": 0.422,
+   "coil_bn_max": 0.0023785157255501884,
+   "coil_bn_rms": 0.0005478074707012822,
+   "resonant_bn": [
+    5,
+    2,
+    0.0001290704517803357,
+    0.0767
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 7,
+   "ns": 51,
+   "force_fsq": 2.368386867392465e-13,
+   "bn": 0.00039067704278444523,
+   "pressure_balance": 0.001021256930344224,
+   "sheet_current": 0.0011095197401263337,
+   "qa": 0.0009041179175784178,
+   "iota_axis": 0.4200758635646042,
+   "iota_edge": 0.4152845379357246,
+   "aspect": 6.000207006877928,
+   "volume_m3": 0.5647144610282184,
+   "lcfs_mm_vs_truth": 4.06,
+   "free_fsq": 2.186172533411072e-13,
+   "iterations": 2411,
+   "converged": true,
+   "seconds": 97.8,
+   "compile_seconds": 70.7,
+   "peak_gpu_gib": 0.13,
+   "device": "cuda:0",
+   "poincare_mm_max": 8.941,
+   "poincare_mm_rms": 1.986,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     2.753,
+     0.488
+    ],
+    "0.3": [
+     4.961,
+     0.916
+    ],
+    "0.5": [
+     7.076,
+     1.454
+    ],
+    "0.7": [
+     8.149,
+     1.882
+    ],
+    "0.9": [
+     8.993,
+     2.008
+    ],
+    "1": [
+     8.941,
+     1.986
+    ]
+   },
+   "lcfs_mm_vs_target": 4.06,
+   "axis_mm": 0.418,
+   "coil_bn_max": 0.002338323446570637,
+   "coil_bn_rms": 0.0005467832276627243,
+   "resonant_bn": [
+    5,
+    2,
+    0.0001345441534642443,
+    0.0764
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 7,
+   "ns": 51,
+   "force_fsq": 2.088602790123634e-13,
+   "bn": 0.0016068692521612098,
+   "pressure_balance": 0.0554762694852117,
+   "sheet_current": 0.057162115632497935,
+   "qa": 2.3149057706700958e-05,
+   "iota_axis": 0.42354108911049604,
+   "iota_edge": 0.415252497824621,
+   "aspect": 6.183894231329152,
+   "volume_m3": 0.5311934813055339,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 7,
+   "ns": 51,
+   "force_fsq": 2.1378909259864034e-13,
+   "bn": 3.800836341709836e-05,
+   "pressure_balance": 4.1704490866154614e-05,
+   "sheet_current": 4.98630996400271e-05,
+   "qa": 3.391492613143947e-06,
+   "iota_axis": 0.42295423640258445,
+   "iota_edge": 0.41580841875405217,
+   "aspect": 6.0000077935895355,
+   "volume_m3": 0.564712363024844,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 13.4,
+   "compile_seconds": 5.4,
+   "peak_gpu_gib": 0.02,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 7,
+   "ns": 51,
+   "force_fsq": 1.5501596358973587e-21,
+   "bn": 2.536971629482687e-05,
+   "pressure_balance": 2.751811049654535e-05,
+   "sheet_current": 3.458655599886058e-05,
+   "qa": 1.0606449311774497e-06,
+   "iota_axis": 0.42307411666594297,
+   "iota_edge": 0.4158077666464853,
+   "aspect": 6.000049382569067,
+   "volume_m3": 0.5647136020002299,
+   "lcfs_mm_vs_truth": 1.626,
+   "nfev": 12,
+   "njev": 9,
+   "cost": 4.36220505787193e-09,
+   "seconds": 420.2,
+   "compile_seconds": 222.6,
+   "peak_gpu_gib": 2.15,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.626,
+   "poincare_surfaces": {
+    "0.1": [
+     0.402,
+     0.124
+    ],
+    "0.3": [
+     0.384,
+     0.088
+    ],
+    "0.5": [
+     0.485,
+     0.113
+    ],
+    "0.7": [
+     0.765,
+     0.172
+    ],
+    "0.9": [
+     1.067,
+     0.253
+    ],
+    "1": [
+     1.33,
+     0.306
+    ]
+   },
+   "poincare_mm_max": 1.33,
+   "poincare_mm_rms": 0.306,
+   "poincare_lost": 0,
+   "axis_mm": 0.382,
+   "coil_bn_max": 9.245188917043609e-05,
+   "coil_bn_rms": 2.6796419262075706e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.8587934230872862e-05,
+    0.079
+   ]
+  },
+  {
+   "method": "desc",
+   "modes": 8,
+   "ns": 51,
+   "force_fsq": 2.2057920534936364e-13,
+   "bn": 5.5298674772207305e-05,
+   "pressure_balance": 5.121045092922426e-05,
+   "sheet_current": 7.427071236654698e-05,
+   "qa": 6.695648052378468e-06,
+   "iota_axis": 0.4231384358766246,
+   "iota_edge": 0.4158197544356199,
+   "aspect": 5.999949387135255,
+   "volume_m3": 0.5646940527752731,
+   "lcfs_mm_vs_truth": 1.543,
+   "seconds": 3341.3,
+   "total_seconds": 3604.6,
+   "peak_gpu_gib": 9.0,
+   "device": "cuda:0",
+   "nfev": 32,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    1.6839002816815328e-06,
+    2.3025799908796185e-06,
+    2.117572118094399e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.274,
+     0.077
+    ],
+    "0.3": [
+     0.868,
+     0.197
+    ],
+    "0.5": [
+     1.392,
+     0.312
+    ],
+    "0.7": [
+     1.539,
+     0.357
+    ],
+    "0.9": [
+     1.298,
+     0.327
+    ],
+    "1": [
+     1.187,
+     0.294
+    ]
+   },
+   "poincare_mm_max": 1.187,
+   "poincare_mm_rms": 0.294,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.543,
+   "axis_mm": 0.032,
+   "coil_bn_max": 0.0001318233857794692,
+   "coil_bn_rms": 5.169005405003244e-05,
+   "resonant_bn": [
+    4,
+    2,
+    6.151332080742955e-05,
+    -0.3368
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 8,
+   "ns": 51,
+   "force_fsq": 2.3340066052762254e-13,
+   "bn": 5.773657397379208e-05,
+   "pressure_balance": 3.641914706662595e-05,
+   "sheet_current": 7.256721762244623e-05,
+   "qa": 5.556199543175042e-06,
+   "iota_axis": 0.4234055419905895,
+   "iota_edge": 0.41568788589337247,
+   "aspect": 5.999921826503629,
+   "volume_m3": 0.5646835318120186,
+   "lcfs_mm_vs_truth": 1.627,
+   "seconds": 387.6,
+   "total_seconds": 473.0,
+   "peak_gpu_gib": 2.3,
+   "device": "cuda:0",
+   "nfev": 38,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    2.082893738273111e-06,
+    4.183440296787899e-06,
+    2.9543599305653197e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.539,
+     0.168
+    ],
+    "0.3": [
+     0.504,
+     0.13
+    ],
+    "0.5": [
+     1.039,
+     0.229
+    ],
+    "0.7": [
+     1.588,
+     0.374
+    ],
+    "0.9": [
+     2.309,
+     0.527
+    ],
+    "1": [
+     2.724,
+     0.61
+    ]
+   },
+   "poincare_mm_max": 2.724,
+   "poincare_mm_rms": 0.61,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.627,
+   "axis_mm": 0.257,
+   "coil_bn_max": 0.00015935654504019555,
+   "coil_bn_rms": 6.0766043390515757e-05,
+   "resonant_bn": [
+    5,
+    2,
+    2.927940531860495e-05,
+    0.0789
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 8,
+   "ns": 51,
+   "force_fsq": 2.3839019453428e-13,
+   "bn": 0.00024279179721206767,
+   "pressure_balance": 0.0005404070708308794,
+   "sheet_current": 0.0005973673815787488,
+   "qa": 0.0002238066904351554,
+   "iota_axis": 0.42321282913640434,
+   "iota_edge": 0.416101833526547,
+   "aspect": 6.0001169637197815,
+   "volume_m3": 0.5647086591067247,
+   "lcfs_mm_vs_truth": 1.652,
+   "free_fsq": 1.8194303556376983e-13,
+   "iterations": 2836,
+   "converged": true,
+   "seconds": 93.0,
+   "compile_seconds": 63.2,
+   "peak_gpu_gib": 0.07,
+   "device": "cuda:0",
+   "poincare_mm_max": 2.428,
+   "poincare_mm_rms": 0.617,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.522,
+     0.141
+    ],
+    "0.3": [
+     1.334,
+     0.283
+    ],
+    "0.5": [
+     1.81,
+     0.366
+    ],
+    "0.7": [
+     1.721,
+     0.388
+    ],
+    "0.9": [
+     1.512,
+     0.432
+    ],
+    "1": [
+     2.428,
+     0.617
+    ]
+   },
+   "lcfs_mm_vs_target": 1.652,
+   "axis_mm": 0.355,
+   "coil_bn_max": 0.0014551968933763228,
+   "coil_bn_rms": 0.0002558468501381166,
+   "resonant_bn": [
+    5,
+    2,
+    5.628216230130119e-05,
+    0.0805
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 8,
+   "ns": 51,
+   "force_fsq": 2.3298184571081764e-13,
+   "bn": 0.00023211525040413102,
+   "pressure_balance": 0.0005393423781714513,
+   "sheet_current": 0.0005923076390598747,
+   "qa": 0.00021620602682009677,
+   "iota_axis": 0.4232749994097569,
+   "iota_edge": 0.41609487683247603,
+   "aspect": 6.00010726135134,
+   "volume_m3": 0.5647080225800076,
+   "lcfs_mm_vs_truth": 1.637,
+   "free_fsq": 1.819239012879408e-13,
+   "iterations": 2894,
+   "converged": true,
+   "seconds": 99.4,
+   "compile_seconds": 66.0,
+   "peak_gpu_gib": 0.13,
+   "device": "cuda:0",
+   "poincare_mm_max": 2.167,
+   "poincare_mm_rms": 0.556,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.532,
+     0.143
+    ],
+    "0.3": [
+     1.335,
+     0.291
+    ],
+    "0.5": [
+     1.822,
+     0.374
+    ],
+    "0.7": [
+     1.741,
+     0.391
+    ],
+    "0.9": [
+     1.569,
+     0.404
+    ],
+    "1": [
+     2.167,
+     0.556
+    ]
+   },
+   "lcfs_mm_vs_target": 1.637,
+   "axis_mm": 0.348,
+   "coil_bn_max": 0.0012653120703754303,
+   "coil_bn_rms": 0.00024222276175620987,
+   "resonant_bn": [
+    5,
+    2,
+    5.129244183897458e-05,
+    0.0805
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 8,
+   "ns": 51,
+   "force_fsq": 2.4103921694472466e-13,
+   "bn": 0.001603605320738312,
+   "pressure_balance": 0.05547648164447124,
+   "sheet_current": 0.05716217260796185,
+   "qa": 1.9944207289046656e-05,
+   "iota_axis": 0.42357501413275367,
+   "iota_edge": 0.41521999726137976,
+   "aspect": 6.1838942313291545,
+   "volume_m3": 0.5311934813055341,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 8,
+   "ns": 51,
+   "force_fsq": 2.3993256518121713e-13,
+   "bn": 3.2832460083314735e-05,
+   "pressure_balance": 2.0956850672695185e-05,
+   "sheet_current": 2.946657569546563e-05,
+   "qa": 3.1865167780285595e-07,
+   "iota_axis": 0.42297468736713056,
+   "iota_edge": 0.41577971677169423,
+   "aspect": 6.00000779358954,
+   "volume_m3": 0.5647123630248443,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 16.0,
+   "compile_seconds": 5.7,
+   "peak_gpu_gib": 0.02,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 8,
+   "ns": 51,
+   "force_fsq": 2.2068305434104483e-21,
+   "bn": 1.8567547427085203e-05,
+   "pressure_balance": 1.5936777872737954e-05,
+   "sheet_current": 2.2283908487980557e-05,
+   "qa": 4.3863957479651866e-07,
+   "iota_axis": 0.42327456410174835,
+   "iota_edge": 0.4158421764745944,
+   "aspect": 6.000061135202644,
+   "volume_m3": 0.5647170419681677,
+   "lcfs_mm_vs_truth": 1.623,
+   "nfev": 14,
+   "njev": 11,
+   "cost": 2.7531399067382913e-09,
+   "seconds": 378.5,
+   "compile_seconds": 59.9,
+   "peak_gpu_gib": 2.32,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.623,
+   "poincare_surfaces": {
+    "0.1": [
+     0.443,
+     0.128
+    ],
+    "0.3": [
+     0.58,
+     0.126
+    ],
+    "0.5": [
+     0.788,
+     0.177
+    ],
+    "0.7": [
+     0.945,
+     0.223
+    ],
+    "0.9": [
+     1.071,
+     0.258
+    ],
+    "1": [
+     1.186,
+     0.277
+    ]
+   },
+   "poincare_mm_max": 1.186,
+   "poincare_mm_rms": 0.277,
+   "poincare_lost": 0,
+   "axis_mm": 0.407,
+   "coil_bn_max": 9.024135841219563e-05,
+   "coil_bn_rms": 2.756325310413075e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.909064396654795e-05,
+    0.0792
+   ]
+  },
+  {
+   "method": "desc",
+   "modes": 9,
+   "ns": 51,
+   "force_fsq": 2.1954457635605872e-13,
+   "bn": 5.0544411839643025e-05,
+   "pressure_balance": 2.7396702434276845e-05,
+   "sheet_current": 5.3980130001022833e-05,
+   "qa": 2.989180785250719e-06,
+   "iota_axis": 0.42248292104204177,
+   "iota_edge": 0.4157744516227605,
+   "aspect": 5.999955388124389,
+   "volume_m3": 0.5646950000165271,
+   "lcfs_mm_vs_truth": 1.626,
+   "seconds": 5368.2,
+   "total_seconds": 5849.9,
+   "peak_gpu_gib": 17.37,
+   "device": "cuda:0",
+   "nfev": 55,
+   "message": "`gtol` condition satisfied. (gtol=1.00e-08)",
+   "own_residual_rms": [
+    1.2027443809743869e-06,
+    1.5429905075411489e-06,
+    1.7204596986036893e-06
+   ],
+   "lcfs_mm_vs_target": 1.626,
+   "poincare_surfaces": {
+    "0.1": [
+     0.123,
+     0.036
+    ],
+    "0.3": [
+     0.407,
+     0.105
+    ],
+    "0.5": [
+     0.77,
+     0.213
+    ],
+    "0.7": [
+     0.934,
+     0.265
+    ],
+    "0.9": [
+     0.764,
+     0.229
+    ],
+    "1": [
+     0.63,
+     0.185
+    ]
+   },
+   "poincare_mm_max": 0.63,
+   "poincare_mm_rms": 0.185,
+   "poincare_lost": 0,
+   "axis_mm": 0.02,
+   "coil_bn_max": 0.00012042918031059086,
+   "coil_bn_rms": 4.3568081035672435e-05,
+   "resonant_bn": [
+    4,
+    2,
+    4.448296738018534e-05,
+    -0.3369
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 9,
+   "ns": 51,
+   "force_fsq": 2.387334916126532e-13,
+   "bn": 7.307701289935345e-05,
+   "pressure_balance": 5.364537663710465e-05,
+   "sheet_current": 9.098445337856049e-05,
+   "qa": 9.924725505901119e-06,
+   "iota_axis": 0.42296622547782775,
+   "iota_edge": 0.4157725519705835,
+   "aspect": 5.999519349041482,
+   "volume_m3": 0.5646169129394932,
+   "lcfs_mm_vs_truth": 1.631,
+   "seconds": 526.2,
+   "total_seconds": 629.1,
+   "peak_gpu_gib": 4.19,
+   "device": "cuda:0",
+   "nfev": 39,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    1.3941567930069436e-06,
+    2.6803056017135934e-06,
+    2.0582949436116232e-06
+   ],
+   "poincare_surfaces": {
+    "0.1": [
+     0.315,
+     0.098
+    ],
+    "0.3": [
+     0.693,
+     0.158
+    ],
+    "0.5": [
+     1.087,
+     0.221
+    ],
+    "0.7": [
+     1.484,
+     0.307
+    ],
+    "0.9": [
+     1.87,
+     0.419
+    ],
+    "1": [
+     2.273,
+     0.49
+    ]
+   },
+   "poincare_mm_max": 2.273,
+   "poincare_mm_rms": 0.49,
+   "poincare_lost": 0,
+   "lcfs_mm_vs_target": 1.631,
+   "axis_mm": 0.105,
+   "coil_bn_max": 0.00019682685462072468,
+   "coil_bn_rms": 6.584231321088099e-05,
+   "resonant_bn": [
+    5,
+    2,
+    2.2521862526666318e-05,
+    0.0788
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 9,
+   "ns": 51,
+   "force_fsq": 1.9588954112693737e-13,
+   "bn": 0.00017951671025050883,
+   "pressure_balance": 0.0004004573990898124,
+   "sheet_current": 0.0004420907865666169,
+   "qa": 0.0002500794008921212,
+   "iota_axis": 0.4223629159126377,
+   "iota_edge": 0.41547110053945124,
+   "aspect": 6.000108766606783,
+   "volume_m3": 0.5647089583662429,
+   "lcfs_mm_vs_truth": 3.644,
+   "free_fsq": 2.295004996710527e-13,
+   "iterations": 2311,
+   "converged": true,
+   "seconds": 88.7,
+   "compile_seconds": 62.1,
+   "peak_gpu_gib": 0.07,
+   "device": "cuda:0",
+   "poincare_mm_max": 8.323,
+   "poincare_mm_rms": 1.769,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.972,
+     0.196
+    ],
+    "0.3": [
+     2.176,
+     0.495
+    ],
+    "0.5": [
+     4.281,
+     0.961
+    ],
+    "0.7": [
+     6.325,
+     1.386
+    ],
+    "0.9": [
+     7.707,
+     1.665
+    ],
+    "1": [
+     8.323,
+     1.769
+    ]
+   },
+   "lcfs_mm_vs_target": 3.644,
+   "axis_mm": 0.454,
+   "coil_bn_max": 0.0008622134302744738,
+   "coil_bn_rms": 0.00022174861075391832,
+   "resonant_bn": [
+    5,
+    2,
+    0.000109881567787143,
+    0.0774
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 9,
+   "ns": 51,
+   "force_fsq": 1.9720487672583156e-13,
+   "bn": 0.0001785726815627508,
+   "pressure_balance": 0.00039912898944690923,
+   "sheet_current": 0.00044034509470291595,
+   "qa": 0.0002494330854676306,
+   "iota_axis": 0.42238688584443806,
+   "iota_edge": 0.415472508226365,
+   "aspect": 6.000097206839997,
+   "volume_m3": 0.5647078637167606,
+   "lcfs_mm_vs_truth": 3.726,
+   "free_fsq": 2.1636746088313662e-13,
+   "iterations": 2443,
+   "converged": true,
+   "seconds": 73.0,
+   "compile_seconds": 45.0,
+   "peak_gpu_gib": 0.13,
+   "device": "cuda:0",
+   "poincare_mm_max": 8.596,
+   "poincare_mm_rms": 1.818,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.978,
+     0.197
+    ],
+    "0.3": [
+     2.195,
+     0.498
+    ],
+    "0.5": [
+     4.339,
+     0.972
+    ],
+    "0.7": [
+     6.456,
+     1.41
+    ],
+    "0.9": [
+     7.927,
+     1.705
+    ],
+    "1": [
+     8.596,
+     1.818
+    ]
+   },
+   "lcfs_mm_vs_target": 3.726,
+   "axis_mm": 0.453,
+   "coil_bn_max": 0.0008702496585578795,
+   "coil_bn_rms": 0.0002234548898313736,
+   "resonant_bn": [
+    5,
+    2,
+    0.00011399010488427649,
+    0.0774
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 9,
+   "ns": 51,
+   "force_fsq": 2.3703374542990784e-13,
+   "bn": 0.001604813182085169,
+   "pressure_balance": 0.05547649296319693,
+   "sheet_current": 0.057162230359117105,
+   "qa": 2.9943070399075107e-05,
+   "iota_axis": 0.4235808586974726,
+   "iota_edge": 0.4152320355277038,
+   "aspect": 6.183894231329136,
+   "volume_m3": 0.5311934813055341,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 9,
+   "ns": 51,
+   "force_fsq": 2.4431175978410917e-13,
+   "bn": 4.298532110722198e-05,
+   "pressure_balance": 4.22198770251782e-05,
+   "sheet_current": 4.7543976623909085e-05,
+   "qa": 1.0367727733968351e-05,
+   "iota_axis": 0.42297788586680396,
+   "iota_edge": 0.415790427896776,
+   "aspect": 6.000007793589543,
+   "volume_m3": 0.5647123630248445,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 17.1,
+   "compile_seconds": 6.8,
+   "peak_gpu_gib": 0.02,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 9,
+   "ns": 51,
+   "force_fsq": 1.8700737440289177e-13,
+   "bn": 1.640665496405865e-05,
+   "pressure_balance": 1.8111541325018495e-05,
+   "sheet_current": 2.309063594989061e-05,
+   "qa": 4.244391912747849e-06,
+   "iota_axis": 0.423242244530156,
+   "iota_edge": 0.4158274449063687,
+   "aspect": 6.000055557683789,
+   "volume_m3": 0.5647160882995944,
+   "lcfs_mm_vs_truth": 1.623,
+   "nfev": 15,
+   "njev": 10,
+   "cost": 2.454419156408779e-09,
+   "seconds": 598.1,
+   "compile_seconds": 200.9,
+   "peak_gpu_gib": 1.99,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.623,
+   "poincare_surfaces": {
+    "0.1": [
+     0.46,
+     0.126
+    ],
+    "0.3": [
+     0.441,
+     0.101
+    ],
+    "0.5": [
+     0.67,
+     0.148
+    ],
+    "0.7": [
+     0.853,
+     0.196
+    ],
+    "0.9": [
+     0.895,
+     0.209
+    ],
+    "1": [
+     0.872,
+     0.203
+    ]
+   },
+   "poincare_mm_max": 0.872,
+   "poincare_mm_rms": 0.203,
+   "poincare_lost": 0,
+   "axis_mm": 0.397,
+   "coil_bn_max": 9.287791648489801e-05,
+   "coil_bn_rms": 2.8883204274752354e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.4417244441057594e-05,
+    0.0791
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 10,
+   "ns": 51,
+   "force_fsq": 2.3875451530014203e-13,
+   "bn": 6.280774672988407e-05,
+   "pressure_balance": 2.997096973321582e-05,
+   "sheet_current": 6.985752106558574e-05,
+   "qa": 3.8074849664219023e-06,
+   "iota_axis": 0.4230104243614208,
+   "iota_edge": 0.41610764702625225,
+   "aspect": 5.999817813742711,
+   "volume_m3": 0.5646731216218798,
+   "lcfs_mm_vs_truth": 1.637,
+   "seconds": 1280.2,
+   "total_seconds": 1416.9,
+   "peak_gpu_gib": 7.51,
+   "device": "cuda:0",
+   "nfev": 68,
+   "message": "Optimization terminated successfully.\n`ftol` condition satisfied. (ftol=1.00e-08)\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    3.962378978470044e-06,
+    2.350822161590883e-06,
+    7.575426670491281e-06
+   ],
+   "lcfs_mm_vs_target": 1.637,
+   "poincare_surfaces": {
+    "0.1": [
+     0.421,
+     0.137
+    ],
+    "0.3": [
+     0.308,
+     0.073
+    ],
+    "0.5": [
+     0.54,
+     0.097
+    ],
+    "0.7": [
+     0.963,
+     0.17
+    ],
+    "0.9": [
+     1.098,
+     0.195
+    ],
+    "1": [
+     0.899,
+     0.152
+    ]
+   },
+   "poincare_mm_max": 0.899,
+   "poincare_mm_rms": 0.152,
+   "poincare_lost": 0,
+   "axis_mm": 0.292,
+   "coil_bn_max": 0.00020788582650161966,
+   "coil_bn_rms": 6.081122945597175e-05,
+   "resonant_bn": [
+    5,
+    2,
+    9.74453336922439e-06,
+    0.0784
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 10,
+   "ns": 51,
+   "force_fsq": 2.2036748501224705e-13,
+   "bn": 0.00022045705795806762,
+   "pressure_balance": 0.0004721773704235311,
+   "sheet_current": 0.0005262395170284304,
+   "qa": 0.0002709800177796808,
+   "iota_axis": 0.42154659481233425,
+   "iota_edge": 0.4157885079102728,
+   "aspect": 6.000113360643929,
+   "volume_m3": 0.564708844507017,
+   "lcfs_mm_vs_truth": 1.953,
+   "free_fsq": 2.2173864333170975e-13,
+   "iterations": 3798,
+   "converged": true,
+   "seconds": 115.8,
+   "compile_seconds": 69.4,
+   "peak_gpu_gib": 0.08,
+   "device": "cuda:0",
+   "poincare_mm_max": 5.284,
+   "poincare_mm_rms": 1.291,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     1.047,
+     0.175
+    ],
+    "0.3": [
+     1.392,
+     0.25
+    ],
+    "0.5": [
+     2.278,
+     0.414
+    ],
+    "0.7": [
+     3.355,
+     0.668
+    ],
+    "0.9": [
+     4.556,
+     1.038
+    ],
+    "1": [
+     5.284,
+     1.291
+    ]
+   },
+   "lcfs_mm_vs_target": 1.953,
+   "axis_mm": 0.433,
+   "coil_bn_max": 0.0013480555912322454,
+   "coil_bn_rms": 0.0002365768067099002,
+   "resonant_bn": [
+    5,
+    2,
+    9.636289991887156e-05,
+    0.0789
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 10,
+   "ns": 51,
+   "force_fsq": 2.2141491238455923e-13,
+   "bn": 0.00021657635443690496,
+   "pressure_balance": 0.0004720731020145368,
+   "sheet_current": 0.0005246666462505083,
+   "qa": 0.0002704339781098715,
+   "iota_axis": 0.4215699893683008,
+   "iota_edge": 0.41575129527637045,
+   "aspect": 6.000107301676677,
+   "volume_m3": 0.5647082598483909,
+   "lcfs_mm_vs_truth": 1.876,
+   "free_fsq": 2.2488090310307513e-13,
+   "iterations": 3752,
+   "converged": true,
+   "seconds": 119.9,
+   "compile_seconds": 65.3,
+   "peak_gpu_gib": 0.14,
+   "device": "cuda:0",
+   "poincare_mm_max": 5.127,
+   "poincare_mm_rms": 1.237,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     1.049,
+     0.176
+    ],
+    "0.3": [
+     1.374,
+     0.247
+    ],
+    "0.5": [
+     2.217,
+     0.403
+    ],
+    "0.7": [
+     3.247,
+     0.644
+    ],
+    "0.9": [
+     4.384,
+     0.996
+    ],
+    "1": [
+     5.127,
+     1.237
+    ]
+   },
+   "lcfs_mm_vs_target": 1.876,
+   "axis_mm": 0.43,
+   "coil_bn_max": 0.001241383887088385,
+   "coil_bn_rms": 0.00023220919983887718,
+   "resonant_bn": [
+    5,
+    2,
+    9.247213383115305e-05,
+    0.0788
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 10,
+   "ns": 51,
+   "force_fsq": 2.2583998952495712e-13,
+   "bn": 0.0016040266837977779,
+   "pressure_balance": 0.05547646877221493,
+   "sheet_current": 0.05716219427373524,
+   "qa": 2.0967854814816073e-05,
+   "iota_axis": 0.4235642888038249,
+   "iota_edge": 0.4152239389772633,
+   "aspect": 6.183894231329157,
+   "volume_m3": 0.5311934813055345,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 10,
+   "ns": 51,
+   "force_fsq": 2.2533361212006018e-13,
+   "bn": 3.234564943443056e-05,
+   "pressure_balance": 2.2894090744029944e-05,
+   "sheet_current": 2.928764458624862e-05,
+   "qa": 1.3417788807812465e-06,
+   "iota_axis": 0.4229644392280714,
+   "iota_edge": 0.4157820683055762,
+   "aspect": 6.000007793589545,
+   "volume_m3": 0.564712363024844,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 17.5,
+   "compile_seconds": 6.0,
+   "peak_gpu_gib": 0.03,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 10,
+   "ns": 51,
+   "force_fsq": 1.4700393011521112e-13,
+   "bn": 1.3546352700464858e-05,
+   "pressure_balance": 1.5869008208648205e-05,
+   "sheet_current": 2.0224188176467913e-05,
+   "qa": 1.2503300309927711e-06,
+   "iota_axis": 0.4231376698814649,
+   "iota_edge": 0.4158394160931622,
+   "aspect": 6.000057871935627,
+   "volume_m3": 0.5647168132871351,
+   "lcfs_mm_vs_truth": 1.637,
+   "nfev": 18,
+   "njev": 13,
+   "cost": 1.8155647851577493e-09,
+   "seconds": 819.1,
+   "compile_seconds": 182.5,
+   "peak_gpu_gib": 2.33,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.637,
+   "poincare_surfaces": {
+    "0.1": [
+     0.45,
+     0.136
+    ],
+    "0.3": [
+     0.603,
+     0.135
+    ],
+    "0.5": [
+     0.931,
+     0.207
+    ],
+    "0.7": [
+     1.1,
+     0.26
+    ],
+    "0.9": [
+     1.141,
+     0.269
+    ],
+    "1": [
+     1.145,
+     0.262
+    ]
+   },
+   "poincare_mm_max": 1.145,
+   "poincare_mm_rms": 0.262,
+   "poincare_lost": 0,
+   "axis_mm": 0.409,
+   "coil_bn_max": 8.561595158155485e-05,
+   "coil_bn_rms": 2.6251141789437094e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.644411064932813e-05,
+    0.0792
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 11,
+   "ns": 51,
+   "force_fsq": 2.32695780390266e-13,
+   "bn": 4.0727918190371586e-05,
+   "pressure_balance": 1.5847750802224214e-05,
+   "sheet_current": 4.531466558670596e-05,
+   "qa": 1.712198951577097e-06,
+   "iota_axis": 0.423124098840443,
+   "iota_edge": 0.4158494982577954,
+   "aspect": 5.999831864684585,
+   "volume_m3": 0.5646697161542367,
+   "lcfs_mm_vs_truth": 1.604,
+   "seconds": 1562.3,
+   "total_seconds": 1816.8,
+   "peak_gpu_gib": 11.78,
+   "device": "cuda:0",
+   "nfev": 45,
+   "message": "`gtol` condition satisfied. (gtol=1.00e-08)",
+   "own_residual_rms": [
+    1.0320465646148987e-06,
+    1.4327227875859385e-06,
+    1.4173874672585135e-06
+   ],
+   "lcfs_mm_vs_target": 1.604,
+   "poincare_surfaces": {
+    "0.1": [
+     0.248,
+     0.08
+    ],
+    "0.3": [
+     0.312,
+     0.064
+    ],
+    "0.5": [
+     0.518,
+     0.105
+    ],
+    "0.7": [
+     0.682,
+     0.149
+    ],
+    "0.9": [
+     0.789,
+     0.173
+    ],
+    "1": [
+     0.82,
+     0.177
+    ]
+   },
+   "poincare_mm_max": 0.82,
+   "poincare_mm_rms": 0.177,
+   "poincare_lost": 0,
+   "axis_mm": 0.171,
+   "coil_bn_max": 0.0001499840382719299,
+   "coil_bn_rms": 3.912049595085297e-05,
+   "resonant_bn": [
+    5,
+    2,
+    7.066391265008595e-06,
+    0.0788
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 11,
+   "ns": 51,
+   "force_fsq": 2.122162679112691e-13,
+   "bn": 7.158046065857769e-05,
+   "pressure_balance": 7.997383172731158e-05,
+   "sheet_current": 0.00010584424673440192,
+   "qa": 3.200143232787525e-05,
+   "iota_axis": 0.4222897416961395,
+   "iota_edge": 0.4154418952165483,
+   "aspect": 6.000080063020726,
+   "volume_m3": 0.5647059534666018,
+   "lcfs_mm_vs_truth": 2.165,
+   "free_fsq": 2.1948667682649207e-13,
+   "iterations": 2096,
+   "converged": true,
+   "seconds": 103.6,
+   "compile_seconds": 73.2,
+   "peak_gpu_gib": 0.09,
+   "device": "cuda:0",
+   "poincare_mm_max": 5.146,
+   "poincare_mm_rms": 1.105,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     1.164,
+     0.159
+    ],
+    "0.3": [
+     2.151,
+     0.39
+    ],
+    "0.5": [
+     3.455,
+     0.747
+    ],
+    "0.7": [
+     4.466,
+     1.035
+    ],
+    "0.9": [
+     4.996,
+     1.132
+    ],
+    "1": [
+     5.146,
+     1.105
+    ]
+   },
+   "lcfs_mm_vs_target": 2.165,
+   "axis_mm": 0.43,
+   "coil_bn_max": 0.00040960560293936386,
+   "coil_bn_rms": 9.754708196673466e-05,
+   "resonant_bn": [
+    5,
+    2,
+    6.184215354560984e-05,
+    0.0772
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 11,
+   "ns": 51,
+   "force_fsq": 2.11804608812756e-13,
+   "bn": 7.48829862621957e-05,
+   "pressure_balance": 8.41032761073352e-05,
+   "sheet_current": 0.00011054564315991703,
+   "qa": 3.2473431237219164e-05,
+   "iota_axis": 0.4223078826958073,
+   "iota_edge": 0.41542961841516224,
+   "aspect": 6.000080754655463,
+   "volume_m3": 0.564706872326673,
+   "lcfs_mm_vs_truth": 2.019,
+   "free_fsq": 2.0368313311240428e-13,
+   "iterations": 2025,
+   "converged": true,
+   "seconds": 111.8,
+   "compile_seconds": 71.6,
+   "peak_gpu_gib": 0.15,
+   "device": "cuda:0",
+   "poincare_mm_max": 4.781,
+   "poincare_mm_rms": 1.01,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     1.167,
+     0.16
+    ],
+    "0.3": [
+     2.12,
+     0.381
+    ],
+    "0.5": [
+     3.362,
+     0.721
+    ],
+    "0.7": [
+     4.284,
+     0.987
+    ],
+    "0.9": [
+     4.656,
+     1.055
+    ],
+    "1": [
+     4.781,
+     1.01
+    ]
+   },
+   "lcfs_mm_vs_target": 2.019,
+   "axis_mm": 0.43,
+   "coil_bn_max": 0.00043983024296084474,
+   "coil_bn_rms": 0.00010046251724573355,
+   "resonant_bn": [
+    5,
+    2,
+    5.434681700928294e-05,
+    0.0771
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 11,
+   "ns": 51,
+   "force_fsq": 2.3361113516450467e-13,
+   "bn": 0.001603715197050513,
+   "pressure_balance": 0.05547649472784404,
+   "sheet_current": 0.05716221016011982,
+   "qa": 2.3323341367365507e-05,
+   "iota_axis": 0.42349040620934464,
+   "iota_edge": 0.4152233470749468,
+   "aspect": 6.18389423132915,
+   "volume_m3": 0.5311934813055345,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 11,
+   "ns": 51,
+   "force_fsq": 2.349807920333989e-13,
+   "bn": 3.266094074748779e-05,
+   "pressure_balance": 2.5095710317210676e-05,
+   "sheet_current": 3.0615328470878885e-05,
+   "qa": 3.8023045145781915e-06,
+   "iota_axis": 0.42289946155601443,
+   "iota_edge": 0.4157840412676008,
+   "aspect": 6.000007793589545,
+   "volume_m3": 0.564712363024844,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 17.9,
+   "compile_seconds": 6.6,
+   "peak_gpu_gib": 0.03,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 11,
+   "ns": 51,
+   "force_fsq": 1.3627816826936884e-13,
+   "bn": 1.1675313660171108e-05,
+   "pressure_balance": 1.6243796830534156e-05,
+   "sheet_current": 1.9728048806956613e-05,
+   "qa": 2.2381394548365653e-06,
+   "iota_axis": 0.4230339745137411,
+   "iota_edge": 0.41583275749408166,
+   "aspect": 6.000055641813608,
+   "volume_m3": 0.5647163108165555,
+   "lcfs_mm_vs_truth": 1.658,
+   "nfev": 19,
+   "njev": 14,
+   "cost": 1.7246467834348935e-09,
+   "seconds": 1244.3,
+   "compile_seconds": 229.6,
+   "peak_gpu_gib": 2.95,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.658,
+   "poincare_surfaces": {
+    "0.1": [
+     0.425,
+     0.13
+    ],
+    "0.3": [
+     0.254,
+     0.08
+    ],
+    "0.5": [
+     0.452,
+     0.106
+    ],
+    "0.7": [
+     0.646,
+     0.154
+    ],
+    "0.9": [
+     0.844,
+     0.181
+    ],
+    "1": [
+     0.878,
+     0.183
+    ]
+   },
+   "poincare_mm_max": 0.878,
+   "poincare_mm_rms": 0.183,
+   "poincare_lost": 0,
+   "axis_mm": 0.402,
+   "coil_bn_max": 9.214691652589241e-05,
+   "coil_bn_rms": 2.433953386688745e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.1470986270087857e-05,
+    0.0792
+   ]
+  },
+  {
+   "method": "vmec2000",
+   "modes": 11,
+   "ns": 51,
+   "force_fsq": 2.1445379062061505e-13,
+   "bn": 7.052713644682806e-05,
+   "pressure_balance": 7.688587934389781e-05,
+   "sheet_current": 0.00010268455686142807,
+   "qa": 3.105279989951651e-05,
+   "iota_axis": 0.42230652007166086,
+   "iota_edge": 0.4154498272758339,
+   "aspect": 6.00008446953224,
+   "volume_m3": 0.5647078772690886,
+   "lcfs_mm_vs_truth": 2.321,
+   "seconds": 6288.5,
+   "device": "cpu (mpirun --allow-run-as-root -np 4 /root/autodl-tmp/vmec2000/build/build/bin/xvmec)",
+   "converged": true,
+   "exit_code": 1,
+   "free_fsq": 2.1608564566271072e-13,
+   "lcfs_mm_vs_target": 2.321,
+   "poincare_surfaces": {
+    "0.1": [
+     1.182,
+     0.164
+    ],
+    "0.3": [
+     2.176,
+     0.398
+    ],
+    "0.5": [
+     3.522,
+     0.769
+    ],
+    "0.7": [
+     4.645,
+     1.079
+    ],
+    "0.9": [
+     5.27,
+     1.201
+    ],
+    "1": [
+     5.524,
+     1.188
+    ]
+   },
+   "poincare_mm_max": 5.524,
+   "poincare_mm_rms": 1.188,
+   "poincare_lost": 0,
+   "axis_mm": 0.435,
+   "coil_bn_max": 0.0003785631177668412,
+   "coil_bn_rms": 9.764858295396538e-05,
+   "resonant_bn": [
+    5,
+    2,
+    6.801702041957922e-05,
+    0.0772
+   ]
+  },
+  {
+   "method": "desc_lm",
+   "modes": 12,
+   "ns": 51,
+   "force_fsq": 2.430576574025551e-13,
+   "bn": 5.122208545226939e-05,
+   "pressure_balance": 1.681947416741415e-05,
+   "sheet_current": 5.4907784364771655e-05,
+   "qa": 1.0910653124501478e-06,
+   "iota_axis": 0.4228177733964017,
+   "iota_edge": 0.41588321428674385,
+   "aspect": 5.999947438108168,
+   "volume_m3": 0.5646938838583273,
+   "lcfs_mm_vs_truth": 1.544,
+   "seconds": 1643.2,
+   "total_seconds": 2026.6,
+   "peak_gpu_gib": 19.04,
+   "device": "cuda:0",
+   "nfev": 44,
+   "message": "Optimization terminated successfully.\n`xtol` condition satisfied. (xtol=1.00e-10)",
+   "own_residual_rms": [
+    8.263904729881914e-07,
+    1.20580075338481e-06,
+    1.0988437016666547e-06
+   ],
+   "lcfs_mm_vs_target": 1.544,
+   "poincare_surfaces": {
+    "0.1": [
+     0.152,
+     0.034
+    ],
+    "0.3": [
+     0.435,
+     0.09
+    ],
+    "0.5": [
+     0.667,
+     0.143
+    ],
+    "0.7": [
+     0.659,
+     0.167
+    ],
+    "0.9": [
+     0.597,
+     0.161
+    ],
+    "1": [
+     0.603,
+     0.146
+    ]
+   },
+   "poincare_mm_max": 0.603,
+   "poincare_mm_rms": 0.146,
+   "poincare_lost": 0,
+   "axis_mm": 0.054,
+   "coil_bn_max": 0.00017018705761286926,
+   "coil_bn_rms": 4.7406615792024915e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.1731302340424069e-05,
+    0.0789
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 12,
+   "ns": 51,
+   "force_fsq": 1.7365951139386566e-13,
+   "bn": 0.00016139549448538986,
+   "pressure_balance": 0.00029395618143796855,
+   "sheet_current": 0.0003386311349635056,
+   "qa": 0.0001623583917496507,
+   "iota_axis": 0.4219322986764896,
+   "iota_edge": 0.4155450324261848,
+   "aspect": 6.000098263419715,
+   "volume_m3": 0.5647079478598155,
+   "lcfs_mm_vs_truth": 2.55,
+   "free_fsq": 2.037984260191993e-13,
+   "iterations": 2931,
+   "converged": true,
+   "seconds": 115.8,
+   "compile_seconds": 74.5,
+   "peak_gpu_gib": 0.09,
+   "device": "cuda:0",
+   "poincare_mm_max": 6.468,
+   "poincare_mm_rms": 1.407,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.713,
+     0.167
+    ],
+    "0.3": [
+     1.632,
+     0.396
+    ],
+    "0.5": [
+     3.455,
+     0.8
+    ],
+    "0.7": [
+     5.118,
+     1.137
+    ],
+    "0.9": [
+     6.267,
+     1.344
+    ],
+    "1": [
+     6.468,
+     1.407
+    ]
+   },
+   "lcfs_mm_vs_target": 2.55,
+   "axis_mm": 0.457,
+   "coil_bn_max": 0.0008809082376528449,
+   "coil_bn_rms": 0.00016474376465155265,
+   "resonant_bn": [
+    5,
+    2,
+    8.298111900040106e-05,
+    0.0777
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 12,
+   "ns": 51,
+   "force_fsq": 1.738813723894964e-13,
+   "bn": 0.00016062744931704214,
+   "pressure_balance": 0.0002936460993804808,
+   "sheet_current": 0.0003379152443093695,
+   "qa": 0.00016219273644469377,
+   "iota_axis": 0.4219566882679774,
+   "iota_edge": 0.41553544602753256,
+   "aspect": 6.000081908294469,
+   "volume_m3": 0.5647056973548691,
+   "lcfs_mm_vs_truth": 2.596,
+   "free_fsq": 2.0473503076052476e-13,
+   "iterations": 2906,
+   "converged": true,
+   "seconds": 134.1,
+   "compile_seconds": 81.0,
+   "peak_gpu_gib": 0.15,
+   "device": "cuda:0",
+   "poincare_mm_max": 6.571,
+   "poincare_mm_rms": 1.431,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.713,
+     0.167
+    ],
+    "0.3": [
+     1.648,
+     0.399
+    ],
+    "0.5": [
+     3.484,
+     0.807
+    ],
+    "0.7": [
+     5.169,
+     1.15
+    ],
+    "0.9": [
+     6.349,
+     1.363
+    ],
+    "1": [
+     6.571,
+     1.431
+    ]
+   },
+   "lcfs_mm_vs_target": 2.596,
+   "axis_mm": 0.454,
+   "coil_bn_max": 0.0008011810666698508,
+   "coil_bn_rms": 0.000164398344836277,
+   "resonant_bn": [
+    5,
+    2,
+    8.503212392552565e-05,
+    0.0777
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 12,
+   "ns": 51,
+   "force_fsq": 2.3443929017973737e-13,
+   "bn": 0.0016035526607275897,
+   "pressure_balance": 0.05547648866816819,
+   "sheet_current": 0.05716218286672101,
+   "qa": 2.0419202627958854e-05,
+   "iota_axis": 0.4234667773822678,
+   "iota_edge": 0.41522160486893844,
+   "aspect": 6.183894231329136,
+   "volume_m3": 0.5311934813055341,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 12,
+   "ns": 51,
+   "force_fsq": 2.372571735819773e-13,
+   "bn": 2.974206858255111e-05,
+   "pressure_balance": 1.9501919121634676e-05,
+   "sheet_current": 2.516946651988935e-05,
+   "qa": 8.090748311434755e-07,
+   "iota_axis": 0.42287558150423155,
+   "iota_edge": 0.4157805609993034,
+   "aspect": 6.000007793589526,
+   "volume_m3": 0.5647123630248437,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 13.2,
+   "compile_seconds": 1.8,
+   "peak_gpu_gib": 0.04,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 12,
+   "ns": 51,
+   "force_fsq": 9.485117238420474e-14,
+   "bn": 1.029751431980275e-05,
+   "pressure_balance": 1.5695019310011433e-05,
+   "sheet_current": 1.8765813908718313e-05,
+   "qa": 1.155719909003086e-06,
+   "iota_axis": 0.4230974930269241,
+   "iota_edge": 0.4158359033416874,
+   "aspect": 6.00005533208974,
+   "volume_m3": 0.564716364266391,
+   "lcfs_mm_vs_truth": 1.616,
+   "nfev": 18,
+   "njev": 13,
+   "cost": 1.4507806493598278e-09,
+   "seconds": 1374.4,
+   "compile_seconds": 237.8,
+   "peak_gpu_gib": 4.11,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.616,
+   "poincare_surfaces": {
+    "0.1": [
+     0.451,
+     0.136
+    ],
+    "0.3": [
+     0.62,
+     0.131
+    ],
+    "0.5": [
+     0.939,
+     0.2
+    ],
+    "0.7": [
+     1.126,
+     0.251
+    ],
+    "0.9": [
+     1.153,
+     0.251
+    ],
+    "1": [
+     1.099,
+     0.235
+    ]
+   },
+   "poincare_mm_max": 1.099,
+   "poincare_mm_rms": 0.235,
+   "poincare_lost": 0,
+   "axis_mm": 0.411,
+   "coil_bn_max": 7.14212553405726e-05,
+   "coil_bn_rms": 2.3579138284554366e-05,
+   "resonant_bn": [
+    5,
+    2,
+    1.4096607753081061e-05,
+    0.0792
+   ]
+  },
+  {
+   "method": "nestor",
+   "modes": 13,
+   "ns": 51,
+   "force_fsq": 2.4395571934704816e-13,
+   "bn": 6.438575489593554e-05,
+   "pressure_balance": 7.39904664292476e-05,
+   "sheet_current": 9.745515226869595e-05,
+   "qa": 9.31826085725908e-06,
+   "iota_axis": 0.42213373044532554,
+   "iota_edge": 0.41545848449943906,
+   "aspect": 6.000088265964234,
+   "volume_m3": 0.5647068018839703,
+   "lcfs_mm_vs_truth": 1.642,
+   "free_fsq": 2.0359474152752473e-13,
+   "iterations": 2640,
+   "converged": true,
+   "seconds": 112.4,
+   "compile_seconds": 68.1,
+   "peak_gpu_gib": 0.1,
+   "device": "cuda:0",
+   "poincare_mm_max": 3.836,
+   "poincare_mm_rms": 0.821,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.747,
+     0.139
+    ],
+    "0.3": [
+     1.191,
+     0.244
+    ],
+    "0.5": [
+     2.186,
+     0.497
+    ],
+    "0.7": [
+     3.079,
+     0.717
+    ],
+    "0.9": [
+     3.508,
+     0.811
+    ],
+    "1": [
+     3.836,
+     0.821
+    ]
+   },
+   "lcfs_mm_vs_target": 1.642,
+   "axis_mm": 0.427,
+   "coil_bn_max": 0.00023477699566322414,
+   "coil_bn_rms": 6.668136905518632e-05,
+   "resonant_bn": [
+    5,
+    2,
+    4.8108069415345726e-05,
+    0.0773
+   ]
+  },
+  {
+   "method": "nestor_mgrid",
+   "modes": 13,
+   "ns": 51,
+   "force_fsq": 2.312825541649826e-13,
+   "bn": 6.48145116416053e-05,
+   "pressure_balance": 7.425073789515445e-05,
+   "sheet_current": 9.774426458330462e-05,
+   "qa": 9.062263199854917e-06,
+   "iota_axis": 0.42216013934337326,
+   "iota_edge": 0.4154593588148876,
+   "aspect": 6.000081686168745,
+   "volume_m3": 0.5647066718447239,
+   "lcfs_mm_vs_truth": 1.64,
+   "free_fsq": 2.044423409315603e-13,
+   "iterations": 2650,
+   "converged": true,
+   "seconds": 117.9,
+   "compile_seconds": 71.1,
+   "peak_gpu_gib": 0.16,
+   "device": "cuda:0",
+   "poincare_mm_max": 3.853,
+   "poincare_mm_rms": 0.824,
+   "poincare_lost": 0,
+   "poincare_surfaces": {
+    "0.1": [
+     0.749,
+     0.139
+    ],
+    "0.3": [
+     1.181,
+     0.241
+    ],
+    "0.5": [
+     2.166,
+     0.492
+    ],
+    "0.7": [
+     3.065,
+     0.712
+    ],
+    "0.9": [
+     3.515,
+     0.811
+    ],
+    "1": [
+     3.853,
+     0.824
+    ]
+   },
+   "lcfs_mm_vs_target": 1.64,
+   "axis_mm": 0.424,
+   "coil_bn_max": 0.00023974466660931388,
+   "coil_bn_rms": 6.745635502667237e-05,
+   "resonant_bn": [
+    5,
+    2,
+    4.8610343594275885e-05,
+    0.0773
+   ]
+  },
+  {
+   "method": "start",
+   "modes": 13,
+   "ns": 51,
+   "force_fsq": 2.391599062366012e-13,
+   "bn": 0.0016036552734984314,
+   "pressure_balance": 0.055476504314474775,
+   "sheet_current": 0.05716221657570412,
+   "qa": 2.6635963399763355e-05,
+   "iota_axis": 0.4234333814660609,
+   "iota_edge": 0.4152221138198182,
+   "aspect": 6.183894231329157,
+   "volume_m3": 0.5311934813055345,
+   "lcfs_mm_vs_truth": 10.707,
+   "lcfs_mm_vs_target": 10.707
+  },
+  {
+   "method": "target",
+   "modes": 13,
+   "ns": 51,
+   "force_fsq": 2.3884146223346014e-13,
+   "bn": 3.422125164437944e-05,
+   "pressure_balance": 2.714747828612002e-05,
+   "sheet_current": 3.1984848785423664e-05,
+   "qa": 6.9522944081601286e-06,
+   "iota_axis": 0.42284408556159947,
+   "iota_edge": 0.41578316114701963,
+   "aspect": 6.000007793589545,
+   "volume_m3": 0.564712363024844,
+   "lcfs_mm_vs_truth": 0.0,
+   "seconds": 17.9,
+   "compile_seconds": 6.3,
+   "peak_gpu_gib": 0.04,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 0.0
+  },
+  {
+   "method": "three_term",
+   "modes": 13,
+   "ns": 51,
+   "force_fsq": 4.0574584807073645e-14,
+   "bn": 9.448565267349191e-06,
+   "pressure_balance": 1.5493485622914076e-05,
+   "sheet_current": 1.8374886841550016e-05,
+   "qa": 3.730401690121192e-06,
+   "iota_axis": 0.4230533543471797,
+   "iota_edge": 0.4158351287261137,
+   "aspect": 6.000055405260374,
+   "volume_m3": 0.5647163316699081,
+   "lcfs_mm_vs_truth": 1.609,
+   "nfev": 19,
+   "njev": 14,
+   "cost": 1.4085348719221951e-09,
+   "seconds": 1698.2,
+   "compile_seconds": 239.8,
+   "peak_gpu_gib": 5.59,
+   "device": "cuda:0",
+   "lcfs_mm_vs_target": 1.609,
+   "poincare_surfaces": {
+    "0.1": [
+     0.472,
+     0.13
+    ],
+    "0.3": [
+     0.31,
+     0.073
+    ],
+    "0.5": [
+     0.238,
+     0.063
+    ],
+    "0.7": [
+     0.395,
+     0.089
+    ],
+    "0.9": [
+     0.584,
+     0.119
+    ],
+    "1": [
+     0.648,
+     0.131
+    ]
+   },
+   "poincare_mm_max": 0.648,
+   "poincare_mm_rms": 0.131,
+   "poincare_lost": 0,
+   "axis_mm": 0.399,
+   "coil_bn_max": 9.270622850895407e-05,
+   "coil_bn_rms": 2.3664252098410817e-05,
+   "resonant_bn": [
+    5,
+    2,
+    8.398384992675799e-06,
+    0.0792
+   ]
+  }
+ ]
+}

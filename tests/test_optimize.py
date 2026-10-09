@@ -139,6 +139,8 @@ def test_scalar_targets_match_own_wout(solovev_eq):
                                float(w.aspect), rtol=1e-8)
     np.testing.assert_allclose(float(opt.volume(eq.state, eq.runtime)),
                                float(w.volume_p), rtol=1e-8)
+    np.testing.assert_allclose(float(opt.major_radius(eq.state, eq.runtime)),
+                               float(w.Rmajor_p), rtol=1e-8)
     np.testing.assert_allclose(float(opt.mean_iota(eq.state, eq.runtime)),
                                float(np.mean(np.asarray(w.iotas)[1:])), rtol=1e-8)
     np.testing.assert_allclose(float(opt.min_abs_iota(eq.state, eq.runtime)),

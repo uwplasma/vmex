@@ -7,6 +7,17 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `boundary_condition="three_term"` (Python, CLI, deck `BOUNDARY_CONDITION` or `FreeBoundaryProblem.from_loss`)
+  solves, or optimizes coils and plasma parameters on, the free boundary with B.n, pressure balance and no
+  sheet current; `ThreeTermFreeBoundaryModel` gives its Jacobian for any field. A finite-beta QA step: 265 to
+  74 s (one-pass on-surface virtual casing, one tangent solve per Jacobian, reused Jacobians, per-row pullbacks).
+- `FreeBoundaryProblem.from_loss(..., field_from_parameters=, plasma_from_parameters=)` optimizes the external field
+  (PHIEDGE, current profile) from certified roots; `opt.minimize(method="SLSQP")` drives it.
+- Free-boundary derivatives: dense LU (`adjoint_solver="forward_dense_jax"`) or O(ns) block factors (`structured`,
+  15.4 to 7.8 GiB at 8x8, NS 51), reused for GMRES, root polishing and trials, accepted by backward error.
+- `solve_free_boundary(include_edge_in_convergence=True)` converges the edge force too; `opt.axis_iota`,
+  `opt.axis_field_strength`, `VmecProblem.from_tuples(vary_phiedge=True)`, `opt.major_radius`,
+  `plot_optimization_movie(frame_labels=)`.
 - `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
   from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
   toroidal current, pressure). MRX is optional.
@@ -157,8 +168,7 @@ odd-`m` coefficient, which put `li383_low_res` surfaces 1.2 cm (R) and 5.9 cm
 (Z) off at mid-radius; it now reproduces the wout table to 6.7e-16 m and all
 126 adjacent surface pairs nest. Points well outside the plasma return NaN
 instead of raising, the inversion starts from the best of three seeds, and a
-query on the magnetic axis no longer returns NaN. Full notes in the GitHub
-release.
+query on the magnetic axis no longer returns NaN. Full notes in the release.
 
 ## 0.9.1 - 2026-09-16
 
@@ -181,12 +191,8 @@ every evaluation carries counters, and the CLI reads DESC inputs. It does not
 close cold compile (median wall per case 23.1 s against VMEC++'s 3.35 s in the
 independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
 
-The PRs behind it and the full notes are in the GitHub release: #300, #310,
-#311, #312, #333, #344 and the rest of the 36 merged since 0.8.1.
+PRs and full notes: the GitHub release (#300-#344, 36 merged since 0.8.1).
 
 ## 0.8.1 - 2026-09-02
 
-The cold-start performance release: cold CLI, Python and optimization runs
-faster than every previous release on every deck measured, from 773 XLA
-programs at QA resolution to 343 (#227-#234). Full notes in the GitHub
-release.
+The cold-start performance release (#227-#234). Full notes in the release.

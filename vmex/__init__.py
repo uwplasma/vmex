@@ -21,6 +21,14 @@ links to the module that documents it.
   (directives honored, ``wout_<case>.nc`` written)
 - :func:`~vmex.core.freeboundary.solve_free_boundary` — NESTOR free boundary
 - :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
+- :func:`~vmex.core.freeboundary_vc.solve_free_boundary_three_term` /
+  :func:`~vmex.core.freeboundary_vc.boundary_residual` — free boundary from
+  the three virtual-casing interface conditions (no sheet current);
+  :class:`~vmex.core.freeboundary_vc.ThreeTermFreeBoundaryModel` — its residual,
+  Jacobian and gradients for any coils without recompiling (optimizers);
+  :class:`~vmex.core.freeboundary_vc.ThreeTermFreeBoundaryProblem`
+  (``FreeBoundaryProblem.from_loss(..., boundary_condition="three_term")``) —
+  single-stage optimization on it
 - :func:`~vmex.core.freeboundary.solve_phiedge` — PHIEDGE whose free-boundary
   LCFS meets a target outboard radius or volume
 - :func:`~vmex.core.freeboundary_implicit.phiedge_root` — that PHIEDGE with
@@ -81,6 +89,8 @@ links to the module that documents it.
   :class:`~vmex.core.problem.FunctionProblem` /
   :class:`~vmex.core.problem.Evaluation` — optimizer-neutral value,
   residual, and derivative callables
+- :class:`~vmex.core.freeboundary_problem.FreeBoundaryProblem` — scalar
+  free-boundary optimization of the external field from the accepted equilibrium
 - :class:`~vmex.core.monitoring.OptimizationMonitor` /
   :class:`~vmex.core.monitoring.OptimizationRecord` — accepted iterations;
   :class:`~vmex.core.monitoring.EquilibriumReporter` — compact diagnostics
@@ -238,6 +248,11 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.multigrid", "solve_free_boundary_multigrid"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     "solve_phiedge": (".core.freeboundary", "solve_phiedge"),
+    "solve_free_boundary_three_term": (
+        ".core.freeboundary_vc", "solve_free_boundary_three_term"),
+    "boundary_residual": (".core.freeboundary_vc", "boundary_residual"),
+    "ThreeTermFreeBoundaryModel": (".core.freeboundary_vc", "ThreeTermFreeBoundaryModel"),
+    "ThreeTermFreeBoundaryProblem": (".core.freeboundary_vc", "ThreeTermFreeBoundaryProblem"),
     "phiedge_root": (".core.freeboundary_implicit", "phiedge_root"),
     "make_free_boundary_config": (
         ".core.freeboundary_implicit", "make_free_boundary_config"),
@@ -301,6 +316,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # optimizer-neutral problem callables
     "Evaluation": (".core.problem", "Evaluation"),
     "FunctionProblem": (".core.problem", "FunctionProblem"),
+    "FreeBoundaryProblem": (".core.freeboundary_problem", "FreeBoundaryProblem"),
     "VmecProblem": (".core.problem", "VmecProblem"),
     "EquilibriumReporter": (".core.monitoring", "EquilibriumReporter"),
     "OptimizationMonitor": (".core.monitoring", "OptimizationMonitor"),

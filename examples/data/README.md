@@ -15,6 +15,13 @@ examples, tests, and documentation.
   used for exterior field-line tracing and fixed/free comparison. Its coils
   are reproduced by ESSOS `optimize_coils_finite_beta_vmex.py` from an
   independent vacuum seed and align with the VMEX toroidal-field direction.
+- `input.rotating_ellipse_nfp2` and `ESSOS_coils_<case>.json`: the seed deck
+  (nfp 2 rotating ellipse, R0 = 1 m, aspect 5) and the stage-two coils of
+  the coil-constraint single-stage examples
+  (`../optimization/single_stage_*_coil_constraints.py` and
+  `single_stage_free_boundary_optimization_three_term.py`), one coil file per
+  `COIL_CASE` with `-` written `_`; `ESSOS_coils_ellipse5.json` is the default
+  case's. The coils were fitted by `benchmarks/coil_constraints_fit_coils.py`.
 - `input.ncsx_c09r00_free_lowres` + `mgrid_ncsx_c09r00_small.nc`: second
   free-boundary geometry family (NCSX c09r00, nfp=3, the li383-class plasma of
   `input.li383_low_res`).  The deck is the published c09r00 free-boundary

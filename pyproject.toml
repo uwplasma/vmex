@@ -111,10 +111,18 @@ turbulence = [
 coils = [
   "essos>=0.20.0",
 ]
+# Drift-kinetic bootstrap current (DKX, uwplasma's JAX SFINCS,
+# https://github.com/uwplasma/DKX) for the quasi-isodynamic coil-constraint
+# benchmark cases, where the Redl formula (quasisymmetry only) does not apply.
+# dkx.bootstrap.KineticBootstrapMismatch (2.7.0) is traced through VMEX; the
+# floor is the neoclassical extra's, which needs 2.8.0.
+kinetic = [
+  "dkx>=2.8.0",
+]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.
 all = [
-  "vmex[coils,freeb,neoclassical,optimizers,turbulence]",
+  "vmex[coils,freeb,kinetic,neoclassical,optimizers,turbulence]",
 ]
 docs = [
   "sphinx",
@@ -161,13 +169,14 @@ markers = [
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is
-# exercised by the optional-integrations CI lane. turbulence.py is
-# likewise gated on the optional ``turbulence`` extra (gkx), as is gk_run.py
-# (the ``vmex --turbulence`` driver).
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+# exercised by the optional-integrations CI lane, as is freeboundary_vc.py,
+# the free boundary built on it. turbulence.py is likewise gated on the
+# optional ``turbulence`` extra (gkx), as is gk_run.py (the ``vmex
+# --turbulence`` driver).
+omit = ["*/virtual_casing.py", "*/freeboundary_vc.py", "*/turbulence.py", "*/gk_run.py"]
 
 [tool.coverage.report]
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+omit = ["*/virtual_casing.py", "*/freeboundary_vc.py", "*/turbulence.py", "*/gk_run.py"]
 
 [tool.ruff]
 line-length = 120

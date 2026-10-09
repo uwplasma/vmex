@@ -59,6 +59,12 @@ own.
 .. automodule:: vmex.core.monitoring
    :members:
 
+.. automodule:: vmex.core.freeboundary_problem
+   :members:
+
+.. automodule:: vmex.core.freeboundary_vc
+   :members:
+
 .. automodule:: vmex.core.parallel
    :members:
 

@@ -13,17 +13,30 @@ real): each retry must restart the recorded best finite checkpoint (never
 a reconstructed cold state), reduce ``DELT`` before the next update, keep
 the iteration-1 axis transfer disabled, and never replay the identical
 (state, time-step) attempt.
+
+The last section covers the strict free-boundary edge convergence
+(``include_edge_in_convergence``): the edge-force gate, the fresh force
+normalization, and the vacuum turn-on pass that cannot converge by itself
+and re-seeds the growth reference.  It runs with jit enabled, as the
+free-boundary module it came from did.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import math
+from pathlib import Path
+from types import SimpleNamespace
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from vmex.core import step
+from vmex.core import solver, step
+from vmex.core.errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
+from vmex.core.input import VmecInput
+from vmex.core.residuals import ForceResiduals, PreconditionedResiduals
 
 
 def test_parity_constants():
@@ -379,3 +392,169 @@ def test_jac75_retry_rebinds_baselines_with_the_stage_use_fft(monkeypatch) -> No
     assert int(carry.ier) == SUCCESSFUL_TERM_FLAG
     assert len(calls) == 2
     assert rebinds == [True]
+
+# -- Strict free-boundary edge convergence and its turn-on handling ----------
+
+
+@pytest.fixture
+def _jit_enabled():
+    prev = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    yield
+    jax.config.update("jax_disable_jit", prev)
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+@pytest.mark.parametrize("edge",[1.1e-14,-1.,float('nan'),float('inf')])
+def test_strict_edge_gate_rejects_without_changing_default(edge):
+    args=(jnp.array(1e-16),jnp.array(1e-16),jnp.array(1e-16),jnp.array(edge),1e-14)
+    assert bool(solver._force_convergence(*args))
+    assert not bool(solver._force_convergence(*args,edge_tolerance=1e-14))
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_strict_edge_gate_requires_vacuum_and_interior_channels():
+    for i in range(3):
+        channels=[1e-16]*3;channels[i]=2e-14
+        assert not bool(solver._force_convergence(*channels,jnp.array(1e-16),1e-14,edge_tolerance=1e-14))
+    assert not bool(solver._force_convergence(0.,0.,0.,jnp.array(0.),1e-14,edge_tolerance=1e-14,vacuum_active=False))
+    assert bool(solver._force_convergence(1e-14,1e-14,1e-14,jnp.array(1e-14),1e-14,edge_tolerance=1e-14))
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_strict_force_evaluation_discards_stale_normalization():
+    inp = VmecInput.from_file(Path(__file__).resolve().parents[1]/'examples/data/input.QI_stel_seed_3127')
+    inp = dataclasses.replace(inp, ns_array=np.array([4]))
+    rt = solver.prepare_runtime(inp, solver.resolution_from_input(inp))
+    rt = dataclasses.replace(rt, lfreeb=True, jmax=4, presf_ns_scale=1.,
+        bsqvac_edge=jnp.zeros((rt.resolution.ntheta3,rt.resolution.nzeta)))
+    state = solver._initial_state(rt.setup)
+    _, reference, diagnostics = solver.evaluate_forces(state, rt, iteration=2)
+    assert not bool(diagnostics.jacobian_sign_changed)
+    stale = dataclasses.replace(diagnostics.cache,
+        fnorm=diagnostics.cache.fnorm*.5, fnormL=diagnostics.cache.fnormL*.5)
+    _, default, _ = solver.evaluate_forces(state, rt, cache=stale, iteration=2)
+    _, strict, _ = solver.evaluate_forces(state, dataclasses.replace(rt, include_edge_in_convergence=True),
+        cache=stale, iteration=2)
+    for name in ('fsqr', 'fsqz', 'fsql', 'fedge'):
+        np.testing.assert_allclose(getattr(strict,name), getattr(reference,name), rtol=1e-12, atol=1e-30)
+    assert float(default.fedge) != float(reference.fedge)
+
+
+def _turnon_model(monkeypatch, strict, max_iterations=8):
+    # The returned/restored state fails; the pre-restart evaluation state passes.
+    state = solver.SpectralState(*(jnp.zeros((3, 1)) for _ in range(6)))
+    passing = dataclasses.replace(state, R_cos=jnp.ones((3, 1)))
+    runtime = SimpleNamespace(ftol=1e-10, max_iterations=max_iterations,
+        gamma=0., lfreeb=True, include_edge_in_convergence=strict,
+        edge_force_tolerance=1e-10, lmove_axis=False,
+        resolution=SimpleNamespace(ns=3), prec2d=None)
+    fields = {f.name: jnp.asarray(0.) for f in dataclasses.fields(solver._LoopCarry)}
+    fields.update(state=state, xstore=state, xcdot=state, cache=jnp.asarray(0.),
+        time_step=jnp.asarray(.1), inv_tau=jnp.ones(solver.NDAMP),
+        iteration=jnp.asarray(2), iter1=jnp.asarray(2), ijacob=jnp.asarray(1),
+        done=jnp.asarray(False), ier=jnp.asarray(0),
+        res0=jnp.asarray(jnp.inf), res1=jnp.asarray(jnp.inf),
+        trajectory=jnp.zeros((max_iterations, solver._TRAJ_COLS)))
+    carry = solver._LoopCarry(**fields)
+    pipeline = solver.ForcePipelineHealth(**{
+        f.name:jnp.asarray(True) for f in dataclasses.fields(solver.ForcePipelineHealth)})
+    health = solver.NumericalHealth(**{
+        f.name:pipeline if f.name=='pipeline' else jnp.asarray(True)
+        for f in dataclasses.fields(solver.NumericalHealth)})
+    def evaluate(current, cache, *args, **kwargs):
+        edge = jnp.where(current.R_cos[0,0] > .5, 8e-11, 2e-10)
+        zero = jnp.asarray(0.)
+        return solver._EvalResult(gc=state,
+            residuals=ForceResiduals(zero,zero,zero,edge,zero,zero,zero),
+            pre=PreconditionedResiduals(zero,zero,zero),
+            wb=zero,wp=zero,r00=zero,z00=zero,
+            jacobian_sign_changed=jnp.asarray(False),cache=cache,health=health)
+    monkeypatch.setattr(solver, '_evaluate', evaluate)
+    return runtime,carry,passing
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+@pytest.mark.parametrize('compiled', [False, True])
+@pytest.mark.parametrize('hoisted', [False, True])
+def test_strict_turnon_waits_for_returned_state_evaluation(monkeypatch, compiled, hoisted):
+    rt,carry,passing = _turnon_model(monkeypatch, True)
+    body=solver._make_body(rt,evaluation_state=passing,
+        evaluation_synthesis=() if hoisted else None)
+    with jax.disable_jit(not compiled):
+        result=jax.jit(body)(carry) if compiled else body(carry)
+        # A passing residual at the other state must not finish this solve.
+        assert not bool(result.done)
+        assert int(result.iteration)==3
+        normal=solver._make_body(rt)
+        failing=normal(result)
+        assert not bool(failing.done)
+        assert float(failing.fedge)>rt.edge_force_tolerance
+        # A later ordinary pass can finish once the actual state passes.
+        accepted=normal(dataclasses.replace(failing,state=passing))
+        assert bool(accepted.done) and int(accepted.ier)==SUCCESSFUL_TERM_FLAG
+        assert float(accepted.fedge)<=rt.edge_force_tolerance
+        np.testing.assert_array_equal(accepted.state.R_cos,passing.R_cos)
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_turnon_at_iteration_budget_is_not_success(monkeypatch):
+    rt,carry,passing=_turnon_model(monkeypatch,True,max_iterations=2)
+    result=solver._make_body(rt,evaluation_state=passing)(carry)
+    assert bool(result.done) and int(result.ier)==MORE_ITER_FLAG
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_legacy_turnon_behavior_is_unchanged(monkeypatch):
+    rt,carry,passing=_turnon_model(monkeypatch,False)
+    result=solver._make_body(rt,evaluation_state=passing)(carry)
+    assert bool(result.done) and int(result.ier)==SUCCESSFUL_TERM_FLAG
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+@pytest.mark.parametrize('strict', [False, True])
+@pytest.mark.parametrize('compiled', [False, True])
+def test_turnon_rebases_growth_history_but_keeps_real_growth_protection(monkeypatch, strict, compiled):
+    rt, carry, _ = _turnon_model(monkeypatch, strict, max_iterations=30)
+    carry = dataclasses.replace(carry, fsq=jnp.asarray(1e-14))
+    original = solver._evaluate
+
+    def evaluate(state, cache, iteration, *args, **kwargs):
+        e = original(state, cache, iteration, *args, **kwargs)
+        # A healthy, changed operator, followed by actual divergent growth.
+        pre = jnp.where(iteration >= 15, 1e-2, 1e-8)
+        raw = jnp.asarray(1e-6)
+        return dataclasses.replace(e,
+            gc=jax.tree.map(lambda x: jnp.ones_like(x) * .01, state),
+            residuals=ForceResiduals(raw, raw, raw, raw, raw, raw, raw),
+            pre=PreconditionedResiduals(pre, pre, pre))
+
+    monkeypatch.setattr(solver, '_evaluate', evaluate)
+    turnon = solver._make_body(rt, evaluation_state=carry.state)
+    normal = solver._make_body(rt)
+    if compiled:
+        turnon, normal = jax.jit(turnon), jax.jit(normal)
+    with jax.disable_jit(not compiled):
+        result = turnon(carry)
+        np.testing.assert_allclose(float(result.res0), 3e-8 if strict else 1e-14, rtol=1e-6, atol=0)
+        while int(result.iteration) < 15:
+            result = normal(result)
+        if strict:
+            # The finite activation jump causes no backoff or lost progress.
+            np.testing.assert_allclose(result.time_step, carry.time_step)
+            assert np.max(np.abs(np.asarray(result.state.R_cos))) > 0
+            result = normal(result)  # records the new, genuinely large residual
+            result = normal(result)  # growth detection uses the previous residual
+            np.testing.assert_allclose(result.time_step, carry.time_step / 1.03)
+            assert int(result.iter1) == 16
+        else:
+            # Preserve the legacy VMEC-compatible turn-on behavior.
+            assert float(result.time_step) < float(carry.time_step)
+
+
+@pytest.mark.usefixtures("_jit_enabled")
+def test_ordinary_fixed_boundary_restart_reference_is_unchanged(monkeypatch):
+    rt, carry, _ = _turnon_model(monkeypatch, True)
+    carry = dataclasses.replace(carry, fsq=jnp.asarray(1e-14))
+    result = solver._make_body(rt)(carry)
+    np.testing.assert_allclose(result.res0, 1e-14, atol=0, rtol=1e-6)

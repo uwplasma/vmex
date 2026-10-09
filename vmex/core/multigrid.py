@@ -639,6 +639,9 @@ def solve_free_boundary_multigrid(
     use_fft: bool | None = None,
     release_stage_cache: bool = False,
     prefetch_compile: bool = False,
+    boundary_condition: str = "nestor",
+    three_term_options: dict | None = None,
+    report_boundary_residual: bool = False,
 ) -> SolveResult:
     """Free-boundary solve over the VMEC2000 ``NS_ARRAY`` ladder.
 
@@ -700,9 +703,47 @@ def solve_free_boundary_multigrid(
     results are bit-identical, any prefetch failure falls back silently to
     on-demand compilation, and background threads are joined before the
     ``release_stage_cache`` point exactly like the fixed-boundary ladder.
+
+    ``boundary_condition="three_term"`` replaces NESTOR's vacuum pressure
+    by all three plasma-vacuum interface conditions (``B . n = 0``, pressure
+    balance and no sheet current) with the plasma field from virtual casing:
+    the boundary is solved for by
+    :func:`~vmex.core.freeboundary_vc.solve_free_boundary_three_term`
+    (keywords in ``three_term_options``) starting from the deck boundary,
+    and the result is the fixed-boundary ladder's final stage on that boundary,
+    with ``result.boundary_residual`` set and ``result.vacuum = None``.  Only
+    the ladder, external-field, ``verbose``/``emit`` and ``device`` arguments
+    apply to it.
+
+    ``report_boundary_residual=True`` also evaluates the three interface
+    conditions on a NESTOR solution (virtual casing on a 48 x 48 boundary grid)
+    and sets ``result.boundary_residual``.  NESTOR enforces ``B . n = 0`` and
+    pressure balance but not the field direction, so a large ``sheet_current``
+    there flags a free boundary that carries an edge sheet current.
     """
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary_multigrid requires an LFREEB=T input")
+    if boundary_condition == "three_term":
+        if initial_state is not None or restart_from is not None:
+            raise NotImplementedError(
+                "boundary_condition='three_term' starts from the deck boundary; "
+                "set it on inp instead of passing initial_state/restart_from")
+        from .freeboundary_vc import solve_free_boundary_three_term
+
+        ladder = replace(inp, ns_array=np.asarray(inp.ns_array if ns_array is None else ns_array),
+                         ftol_array=np.asarray(inp.ftol_array if ftol_array is None else ftol_array),
+                         niter_array=np.asarray(inp.niter_array if niter_array is None else niter_array))
+        fit = solve_free_boundary_three_term(
+            ladder, external_field=external_field, mgrid_path=mgrid_path,
+            **(three_term_options or {}))
+        ns_final = int(np.asarray(fit.equilibrium.solution.R_cos).shape[0])
+        result = solve_multigrid(
+            fit.input, ns_array=[ns_final], ftol_array=[float(np.atleast_1d(fit.input.ftol_array)[-1])],
+            niter_array=[int(np.atleast_1d(fit.input.niter_array)[-1])],
+            initial_state=fit.equilibrium.solution, verbose=verbose, emit=emit, device=device)
+        return replace(result, boundary_residual=fit.boundary_residual)
+    if boundary_condition != "nestor":
+        raise ValueError(f"boundary_condition must be 'nestor' or 'three_term', got {boundary_condition!r}")
 
     ns_arr = _vmec_ns_prefix(inp.ns_array if ns_array is None else ns_array)
     if ns_arr.size == 0:
@@ -933,6 +974,7 @@ def solve_free_boundary_multigrid(
                     use_fft=use_fft,
                     release_stage_cache=release_stage_cache,
                     prefetch_compile=prefetch_compile,
+                    report_boundary_residual=report_boundary_residual,
                 )
             raise
         except BaseException:
@@ -987,7 +1029,13 @@ def solve_free_boundary_multigrid(
 
     if stage_result is None:  # defensive; positive ns_arr guarantees a stage
         raise ValueError("ns_array has no executable stages")
-    return stage_result.result
+    result = stage_result.result
+    if report_boundary_residual:
+        from .freeboundary_vc import boundary_residual, summarize_boundary_residual
+
+        result = replace(result, boundary_residual=summarize_boundary_residual(*boundary_residual(
+            inp, result.state, external_field, nphi=48, ntheta=48)))
+    return result
 
 
 def solve_file(
@@ -996,6 +1044,7 @@ def solve_file(
     polish: bool | str | None = None,
     polish_config: Any = None,
     polish_fail: str | None = None,
+    boundary_condition: str | None = None,
     write_wout: bool = True,
     outdir=None,
     **solve_kwargs,
@@ -1012,6 +1061,9 @@ def solve_file(
     does the same and emits a :class:`RuntimeWarning`, with the documented
     precedence ``CLI flag > Python keyword > file directive > package
     default``; an explicit ``polish_config`` wins over ``polish_fail``.
+    ``boundary_condition`` (``"nestor"`` or ``"three_term"``) overrides the
+    deck's ``!@VMEX BOUNDARY_CONDITION`` for an ``LFREEB = T`` deck (see
+    :func:`solve_free_boundary_multigrid`).
 
     ``write_wout=True`` writes ``wout_<case>.nc`` beside the input (or into
     ``outdir``) — the same output contract as ``vmex <input>``.  When
@@ -1037,7 +1089,7 @@ def solve_file(
         return solve_mirror_file(path, write_mout=write_wout, outdir=outdir, **solve_kwargs)
     request = read_input_request(path)
     options, sources = resolve_run_options(
-        request.options, polish=polish, polish_fail=polish_fail,
+        request.options, polish=polish, polish_fail=polish_fail, boundary_condition=boundary_condition,
     )
     config = polish_config_from_options(options, polish_config)
     inp = request.input
@@ -1070,7 +1122,8 @@ def solve_file(
                 f"the polish request came from the {sources['polish']}"
             )
         plan_kwargs = {} if freeb_plan is None else freeb_plan.solver_kwargs
-        result = solve_free_boundary_multigrid(inp, **{**plan_kwargs, **solve_kwargs})
+        result = solve_free_boundary_multigrid(
+            inp, **{**plan_kwargs, "boundary_condition": options.boundary_condition, **solve_kwargs})
     else:
         if bool(solve_kwargs.get("verbose")) and options.polish is not False:
             print(f"polish = {options.polish!r} (from {sources['polish']})")

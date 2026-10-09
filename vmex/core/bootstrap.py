@@ -161,7 +161,47 @@ jax.tree_util.register_dataclass(
 # ===========================================================================
 
 
-def compute_trapped_fraction(modB: Array, sqrtg: Array, *, n_lambda: int = N_LAMBDA):
+def _interpolant_extremum(modB: Array, sign: float, *, newton_steps: int = 4) -> Array:
+    """``sign * max(sign * B)`` per surface, of the trigonometric interpolant of the grid values ``modB``.
+
+    ``modB`` is ``(nsurf, ntheta, nzeta)`` on a uniform periodic grid.  Newton steps on the interpolant
+    from the grid extremum find the continuous one; its location is held fixed when differentiating, so
+    the derivative is that of the interpolant's extremum (envelope theorem) -- continuous where the
+    grid extremum jumps between points, unlike a hard grid ``max``.
+    """
+    nsurf, nt, nz = modB.shape
+    F = jnp.fft.fft2(modB, axes=(1, 2)) / (nt * nz)
+    kt = jnp.asarray(np.fft.fftfreq(nt, 1.0 / nt), dtype=modB.dtype)[:, None]
+    kz = jnp.asarray(np.fft.fftfreq(nz, 1.0 / nz), dtype=modB.dtype)[None, :]
+    cell = jnp.asarray([2 * np.pi / nt, 2 * np.pi / nz], dtype=modB.dtype)
+
+    def value_grad_hess(Fs, t, z):
+        terms = Fs * jnp.exp(1j * (kt * t + kz * z))
+        b = jnp.real(jnp.sum(terms))
+        g = jnp.real(jnp.stack([jnp.sum(1j * kt * terms), jnp.sum(1j * kz * terms)]))
+        h = -jnp.real(jnp.array([[jnp.sum(kt * kt * terms), jnp.sum(kt * kz * terms)],
+                                 [jnp.sum(kt * kz * terms), jnp.sum(kz * kz * terms)]]))
+        return b, g, h
+
+    def locate(Fs, Bs):
+        idx = jnp.argmax(sign * Bs)
+        t = 2 * jnp.pi * (idx // nz) / nt
+        z = 2 * jnp.pi * (idx % nz) / nz
+        for _ in range(newton_steps):
+            _, g, h = value_grad_hess(Fs, t, z)
+            step = -jnp.linalg.solve(h, g)
+            ok = jnp.all(jnp.isfinite(step)) & (jnp.linalg.det(h) > 0) & (sign * h[0, 0] < 0)
+            step = jnp.where(ok, jnp.clip(step, -cell, cell), 0.0)
+            t, z = t + step[0], z + step[1]
+        return t, z
+
+    t, z = jax.vmap(locate)(jax.lax.stop_gradient(F), jax.lax.stop_gradient(modB.reshape(nsurf, -1)))
+    value = jax.vmap(lambda Fs, a, b: value_grad_hess(Fs, a, b)[0])(F, t, z)
+    grid = sign * jnp.max(sign * modB.reshape(nsurf, -1), axis=1)
+    return sign * jnp.maximum(sign * value, sign * grid)  # never inside the grid extremum
+
+
+def compute_trapped_fraction(modB: Array, sqrtg: Array, *, n_lambda: int = N_LAMBDA, refine_extrema: bool = False):
     r"""Effective trapped fraction and flux-surface averages per surface.
 
     ``f_t = 1 - (3/4) <B^2> \int_0^{1/Bmax} lambda dlambda / <sqrt(1 - lambda B)>``
@@ -181,6 +221,11 @@ def compute_trapped_fraction(modB: Array, sqrtg: Array, *, n_lambda: int = N_LAM
         length ``nsurf`` (same tuple as simsopt).  ``Bmin/Bmax`` are hard grid
         extrema: piecewise-smooth gradients, adequate for trust-region least
         squares (same stance as :func:`vmex.core.optimize.mirror_ratio`).
+        ``refine_extrema`` takes them from the grid's trigonometric
+        interpolant instead (:func:`_interpolant_extremum`): continuous
+        derivatives, which a Newton solve of per-surface rows needs near the
+        axis, where ``|B|`` barely varies on a surface and the grid extremum
+        jumps between points.
     """
     modB = jnp.asarray(modB)
     sqrtg = jnp.asarray(sqrtg)
@@ -191,8 +236,11 @@ def compute_trapped_fraction(modB: Array, sqrtg: Array, *, n_lambda: int = N_LAM
     Vp = jnp.mean(w, axis=(1, 2))
     fsa_B2 = jnp.mean(modB * modB * w, axis=(1, 2)) / Vp
     fsa_1overB = jnp.mean(w / modB, axis=(1, 2)) / Vp
-    Bmax = jnp.max(modB, axis=(1, 2))
-    Bmin = jnp.min(modB, axis=(1, 2))
+    if refine_extrema:
+        Bmax, Bmin = _interpolant_extremum(modB, 1.0), _interpolant_extremum(modB, -1.0)
+    else:
+        Bmax = jnp.max(modB, axis=(1, 2))
+        Bmin = jnp.min(modB, axis=(1, 2))
     epsilon = (Bmax - Bmin) / (Bmax + Bmin)
 
     # Gauss-Legendre nodes/weights on [0, 1] (host constants, order is static).
@@ -468,7 +516,8 @@ def _half_mesh_fields(state: SpectralState, rt: SolverRuntime) -> _HalfMeshField
         nfp=nfp)
 
 
-def _geometry_from_half(hm: _HalfMeshFields, surfaces, *, n_lambda: int) -> RedlGeometry:
+def _geometry_from_half(hm: _HalfMeshFields, surfaces, *, n_lambda: int,
+                        refine_extrema: bool = False) -> RedlGeometry:
     """Interpolate half-mesh fields onto ``surfaces`` -> :class:`RedlGeometry`."""
     iota = _interp_half_grid(hm.iota, surfaces, hm.s_half)
     G = _interp_half_grid(hm.G, surfaces, hm.s_half)
@@ -477,7 +526,7 @@ def _geometry_from_half(hm: _HalfMeshFields, surfaces, *, n_lambda: int) -> Redl
     sqrtg = _interp_half_grid(hm.w, surfaces, hm.s_half)
 
     Bmin, Bmax, epsilon, fsa_B2, fsa_1overB, f_t = compute_trapped_fraction(
-        modB, sqrtg, n_lambda=n_lambda)
+        modB, sqrtg, n_lambda=n_lambda, refine_extrema=refine_extrema)
     R = (G + iota * I) * fsa_1overB
     return RedlGeometry(
         surfaces=surfaces, iota=iota, G=G, I=I, R=R, epsilon=epsilon, f_t=f_t,
@@ -697,6 +746,148 @@ def _jv_from_half(hm: _HalfMeshFields, surfaces) -> Array:
     jv_half = hm.signgs * (fsa_B2 * _dds_half(hm.I, hs)
                            + hm.I * _dds_half(hm.p_int, hs)) / (MU0 * hm.phi_edge)
     return _interp_half_grid(jv_half, surfaces, hm.s_half)
+
+
+def redl_current_derivative(profiles: KineticProfiles, helicity_n: int, state: SpectralState, rt: SolverRuntime,
+                            *, n_lambda: int = N_LAMBDA) -> tuple[Array, Array]:
+    """``(s, dI/ds)`` on the half mesh: the enclosed-current derivative [A] that makes ``<J.B>`` Redl's.
+
+    The identity of :func:`vmec_j_dot_B`, ``<B^2> dI/ds + I dp/ds = mu0 Phi_a <J.B>`` (``I`` the Boozer
+    ``buco``, ``p`` in ``mu0`` Pa), solved for ``dI/ds`` with Redl's ``<J.B>`` and the state's own ``I``,
+    then converted to the toroidal current in A.  A current profile with this derivative at every
+    half-mesh surface is self-consistent with Redl there; unlike ``<J.B>_vmec - <J.B>_Redl``, the
+    difference of two such derivatives also sees a current that alternates from surface to surface.
+    Traceable in ``(state, rt)``, with continuous derivatives (``|B|`` extrema of
+    the angular interpolant, ``compute_trapped_fraction(refine_extrema=True)``).
+    """
+    return _redl_current_derivative(profiles, helicity_n, state, rt, n_lambda=n_lambda)[:2]
+
+
+def _redl_current_derivative(profiles, helicity_n, state, rt, *, n_lambda=N_LAMBDA):
+    """:func:`redl_current_derivative`'s ``(s, dI/ds)``, with the Redl geometry and ``<J.B>`` behind them."""
+    hm = _half_mesh_fields(state, rt)
+    geom = _geometry_from_half(hm, hm.s_half, n_lambda=n_lambda, refine_extrema=True)
+    jr, _ = j_dot_B_redl(profiles, geom, helicity_n)
+    return hm.s_half, _current_derivative(hm, jr), geom, jr
+
+
+def near_axis_redl_ratio(profiles: KineticProfiles, helicity_n: int, geom: RedlGeometry, j_dot_b, x) -> Array:
+    """Redl's ``<J.B>`` at ``s = x s_1`` over its value at ``s_1`` (``x < 1``), inside the first surface.
+
+    The geometry is ``geom``'s at ``s_1`` (its first surface; ``j_dot_b`` Redl's ``<J.B>`` there) continued
+    to the axis: ``eps ~ s^(1/2)`` and ``f_t ~ s^(1/4)`` (``f_t ~ eps^(1/2)``), ``iota``, ``G``, ``R`` and the
+    flux-surface averages at their ``s_1`` values, while the kinetic profiles are evaluated at ``s``.  The
+    banana-regime current follows ``s^(1/4)`` until the electron collisionality ``nu*_e ~ eps^(-3/2)``
+    turns it into a collisional decay towards the axis.
+    """
+    x = jnp.asarray(x)
+
+    def first(a):
+        return jnp.broadcast_to(jnp.asarray(a)[0], x.shape)
+
+    near = dataclasses.replace(
+        geom, surfaces=first(geom.surfaces) * x, iota=first(geom.iota), G=first(geom.G), I=first(geom.I),
+        R=first(geom.R), epsilon=first(geom.epsilon) * jnp.sqrt(x), f_t=first(geom.f_t) * x**0.25,
+        fsa_B2=first(geom.fsa_B2), fsa_1overB=first(geom.fsa_1overB), Bmin=first(geom.Bmin), Bmax=first(geom.Bmax))
+    return j_dot_B_redl(profiles, near, helicity_n)[0] / jnp.asarray(j_dot_b)[0]
+
+
+def current_derivative(j_dot_b, state: SpectralState, rt: SolverRuntime) -> tuple[Array, Array]:
+    """``(s, dI/ds)`` on the half mesh that makes ``<J.B>`` equal ``j_dot_b`` [A T/m^2] there.
+
+    :func:`redl_current_derivative` for any bootstrap model, e.g. a kinetic ``<J.B>``
+    interpolated onto the half-mesh surfaces.  Traceable in ``(state, rt)``.
+    """
+    hm = _half_mesh_fields(state, rt)
+    return hm.s_half, _current_derivative(hm, jnp.asarray(j_dot_b))
+
+
+def _current_derivative(hm: _HalfMeshFields, j_dot_b: Array) -> Array:
+    """dI/ds [A] solving ``<B^2> dI/ds + I dp/ds = mu0 Phi_a <J.B>`` on the half mesh (Boozer ``I``)."""
+    w = jnp.abs(hm.w)  # |sqrt(g)|: the surface-average weight for either Jacobian sign (signgs)
+    fsa_B2 = jnp.mean(hm.bmag * hm.bmag * w, axis=(1, 2)) / jnp.mean(w, axis=(1, 2))
+    hs = hm.s_half[1] - hm.s_half[0]
+    dI_boozer = (j_dot_b * MU0 * hm.phi_edge / hm.signgs - hm.I * _dds_half(hm.p_int, hs)) / fsa_B2
+    return dI_boozer * 2.0 * jnp.pi / (MU0 * hm.signgs)
+
+
+class HalfMeshCurrent:
+    """A current profile with a value on every half-mesh surface, solved to be Redl's bootstrap current.
+
+    ``I'(s)`` is a line-segment profile (``line_segment_ip``) with a knot on every half-mesh surface
+    ``s_j = (j - 1/2) / (ns - 1)``.  Its values there (A per unit ``s``) are the unknowns, and each surface
+    has the row ``weight (I'(s_j) - I'_Redl(s_j)) / I'_ref / sqrt(ns - 1)``
+    (:func:`redl_current_derivative`; ``I'_ref`` the largest starting value): a square block, so the
+    current is Redl's wherever the equilibrium is.  The three-term free boundary solves it together with
+    the boundary (``ThreeTermFreeBoundaryModel(bootstrap=)``), :func:`self_consistent_bootstrap` with
+    ``profile="half_mesh"`` by fixed-point iteration at a fixed boundary.
+
+    ``I'(0) = 0`` -- a quasisymmetric bootstrap current density vanishes on the axis with the trapped
+    fraction -- and inside ``s_1`` knots at ``s_1 / 64, s_1 / 16, s_1 / 4`` carry Redl's current on the
+    near-axis continuation of the ``s_1`` geometry, ``I'_Redl(s_1)`` times :func:`near_axis_redl_ratio`
+    (``s^(1/4)`` in the banana regime, decaying where the collisionality diverges): unknowns with a row
+    each, ahead of the half-mesh ones.  The edge knot continues the last two linearly (it only enters
+    CURTOR), and CURTOR is the profile's integral.  ``deck`` is the input on this profile, starting from
+    its own current's derivative.  ``weight`` is the model's ``bootstrap_weight``.
+    """
+
+    SUB = (1 / 64, 1 / 16, 1 / 4)
+
+    def __init__(self, deck, profiles, helicity_n, weight=1.0):
+        from .profiles import current
+        from .wout import _NDFMAX
+
+        if int(deck.ncurr) != 1:
+            raise ValueError("a bootstrap current needs a prescribed current profile (ncurr = 1)")
+        ns = int(np.asarray(deck.ns_array)[-1])
+        if ns - 1 + len(self.SUB) + 2 > _NDFMAX:
+            raise ValueError("a bootstrap current has a knot per half-mesh surface: "
+                             f"ns <= {_NDFMAX - len(self.SUB) - 1}")
+        s_half = (np.arange(1, ns) - 0.5) / (ns - 1)
+        self.knots = np.r_[0.0, s_half[0] * np.asarray(self.SUB), s_half, 1.0]
+        self.current = functools.partial(current, "line_segment_ip", deck.ac, self.knots)  # (values, s) -> I(s)
+        enclosed = functools.partial(current, deck.pcurr_type, deck.ac, deck.ac_aux_s, deck.ac_aux_f,
+                                     bloat=deck.bloat)
+        edge = float(enclosed(jnp.asarray(1.0)))
+        slope = np.asarray(jax.vmap(jax.grad(enclosed))(jnp.asarray(self.knots[1:-1])))
+        self.x0 = float(deck.curtor) / edge * slope if edge else np.zeros(slope.size)  # the deck's current, in A
+        self.ref = float(np.max(np.abs(self.x0))) or 1e4
+        self.x_scale = np.full(slope.size, self.ref)
+        self.weight = float(weight) / np.sqrt(ns - 1)
+        self.profiles, self.helicity_n = profiles, int(helicity_n)
+        values = self.values(self.x0)  # knots and values in one replace: VmecInput trims them to a common length
+        self.deck = dataclasses.replace(deck, pcurr_type="line_segment_ip", ac_aux_s=self.knots,
+                                        ac_aux_f=np.asarray(values), curtor=float(self.current(values, 1.0)))
+
+    def values(self, v):
+        """Every knot value from the unknowns ``v`` (the sub-axis knots', then the half-mesh ones)."""
+        v = jnp.asarray(v)
+        return jnp.concatenate([jnp.zeros(1, v.dtype), v, (2 * v[-1] - v[-2])[None]])
+
+    def deck_with(self, deck, v):
+        """``deck`` with the knot values ``v``."""
+        values = self.values(v)
+        return dataclasses.replace(deck, ac_aux_f=np.asarray(values), curtor=float(self.current(values, 1.0)))
+
+    def apply(self, params, v):
+        """``ImplicitParams`` with the knot values ``v`` and their CURTOR (traceable)."""
+        values = self.values(v)
+        return dataclasses.replace(params, ac_aux_f=values, curtor=self.current(values, 1.0))
+
+    def target(self, state, runtime):
+        """``I'_Redl`` at the sub-axis knots and the half-mesh surfaces (traceable)."""
+        _, target, geom, jr = _redl_current_derivative(self.profiles, self.helicity_n, state, runtime)
+        ratio = near_axis_redl_ratio(self.profiles, self.helicity_n, geom, jr, jnp.asarray(self.SUB))
+        return jnp.concatenate([target[0] * ratio, target])
+
+    def mismatch(self, state, runtime, params):
+        """``(I' - I'_Redl, I'_Redl)`` at the sub-axis knots and the half-mesh surfaces."""
+        target = self.target(state, runtime)
+        return params.ac_aux_f[1 : 1 + target.size] - target, target
+
+    def rows(self, state, runtime, params):
+        """The self-consistency rows ``weight (I' - I'_Redl) / I'_ref / sqrt(ns - 1)`` (traceable)."""
+        return self.weight * self.mismatch(state, runtime, params)[0] / self.ref
 
 
 def vmec_j_dot_B(
@@ -938,6 +1129,30 @@ class RedlBootstrapMismatch:
 # ===========================================================================
 
 
+def _half_mesh_picard(inp, profiles, helicity_n, mismatch, *, n_iter, tol, relax, solve_kwargs, verbose):
+    """:func:`self_consistent_bootstrap` on a :class:`HalfMeshCurrent` profile: ``I' <- I'_Redl`` per surface."""
+    from . import optimize as opt
+
+    block = HalfMeshCurrent(inp, profiles, helicity_n)
+    inp, v = block.deck, block.x0
+    history, state, eq, converged = [], None, None, False
+    for it in range(int(n_iter)):
+        eq = opt.solve_equilibrium(inp, initial_state=state, **solve_kwargs)
+        state = eq.state
+        target = np.asarray(block.target(eq.solution, eq.solver_context))
+        delta = float(np.max(np.abs(target - v)) / np.max(np.abs(target)))
+        history.append(dict(curtor=float(inp.curtor), delta=delta, f_boot=float(mismatch.total(eq.wout))))
+        if verbose:
+            print(f"[self_consistent_bootstrap] it {it}: curtor={inp.curtor:.6e} delta={delta:.3e}", flush=True)
+        if delta <= float(tol):
+            converged = True
+            break
+        v = (1.0 - relax) * v + relax * target
+        inp = block.deck_with(inp, v)
+    return BootstrapPicardResult(input=inp, equilibrium=eq, converged=converged, iterations=len(history),
+                                 history=tuple(history))
+
+
 @dataclass(frozen=True)
 class BootstrapPicardResult:
     """Outcome of :func:`self_consistent_bootstrap`.
@@ -988,6 +1203,7 @@ def self_consistent_bootstrap(
     s_eval=None,
     solve_kwargs: dict | None = None,
     verbose: bool = False,
+    profile: str = "power_series",
 ) -> BootstrapPicardResult:
     """Fixed-boundary Picard iteration to a bootstrap-consistent current profile.
 
@@ -1017,6 +1233,13 @@ def self_consistent_bootstrap(
     stable.  ``degree`` is clipped to ``ns - 2``.  The first solve uses
     ``inp``'s own current settings (any ``pcurr_type``); every refit
     switches to ``ncurr=1`` + ``power_series``.
+
+    ``profile="half_mesh"`` instead iterates a :class:`HalfMeshCurrent`
+    (a knot on every half-mesh surface, ``I'(0) = 0``): each step sets
+    ``I'`` there to :func:`redl_current_derivative` of the last equilibrium
+    (under-relaxed), with no fit and no ``s_eval``; ``delta`` is the same
+    relative error, on the half-mesh surfaces.  ``input`` is then on that
+    ``line_segment_ip`` profile.
     """
     from . import optimize as opt
 
@@ -1027,9 +1250,14 @@ def self_consistent_bootstrap(
     relax = float(relax)
     if not 0.0 < relax <= 1.0:
         raise ValueError(f"relax must be in (0, 1], got {relax}")
+    if profile not in ("power_series", "half_mesh"):
+        raise ValueError(f"profile must be 'power_series' or 'half_mesh', got {profile!r}")
 
     mismatch = RedlBootstrapMismatch(profiles, helicity_n,
                                      surfaces=np.clip(s_eval, 0.05, 0.95))
+    if profile == "half_mesh":
+        return _half_mesh_picard(inp, profiles, helicity_n, mismatch, n_iter=n_iter, tol=tol, relax=relax,
+                                 solve_kwargs=solve_kwargs, verbose=verbose)
     history: list[dict] = []
     state = None
     dIds_applied = None   # I'(s_full) currently driving the equilibrium

@@ -404,11 +404,14 @@ transpose still takes about one to two minutes to compile on the reference
 CPU and is not yet a practical GPU path. Its ``device="auto"`` policy therefore
 uses the CPU on an accelerator host unless the process already pins JAX
 placement, while retaining an explicit per-call GPU override.
-Three transpose solvers are available through ``adjoint_solver``:
-``"coupled_gcrot"`` (the certified default), ``"edge_response"``, which
-iterates the coupled transpose on a dense model of NESTOR's edge response
-built once per gradient, and ``"boundary_schur"``, the boundary-Schur
-transpose. The boundary-Schur solver
+Three transpose solvers serve this scalar gradient through
+``adjoint_solver``: ``"coupled_gcrot"`` (the certified default),
+``"edge_response"``, which iterates the coupled transpose on a dense model of
+NESTOR's edge response built once per gradient, and ``"boundary_schur"``, the
+boundary-Schur transpose. A fourth, ``"forward_dense_jax"``, assembles and LU
+factors the active Jacobian and serves only the multi-RHS pullback of
+:class:`~vmex.core.freeboundary_problem.FreeBoundaryProblem`. The
+boundary-Schur solver
 differentiates one three-surface force row at a time, retains every terminal
 radial stencil coupling in the bulk, isolates the one evolved edge row that
 contains NESTOR's response, and eliminates the radial bulk with a

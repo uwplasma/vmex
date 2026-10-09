@@ -304,6 +304,89 @@ Rung 5 is tier 5 evidence: those CSVs, and
 that **no test asserts on**. They are provenance for a campaign that was
 run, not gates that would fail if the physics regressed. Read them as such.
 
+### Three-term free boundary against VMEC + NESTOR and DESC
+
+`benchmarks/run_three_term_resolution.py` builds a free boundary whose answer is
+known. A coil field (a winding-surface current at 1.2 minor radii) is fitted to
+cancel the plasma's normal field on the 12 x 12 fixed-boundary QA equilibrium
+of `input.LandremanPaul2021_QA_beta2p5_bootstrap` (beta 2.5%, ns 51), so that
+equilibrium is the free boundary without a sheet current. `--case vacuum` does
+the same for the vacuum `input.LandremanPaul2021_QA_lowres`. Every method starts
+from the same boundary, the target's with its minor radius scaled by 0.97
+(11 mm away), and every result is scored the same way: the boundary is
+re-solved as a fixed-boundary equilibrium, and the three conditions are
+evaluated on a 48 x 48 virtual-casing grid with the singular quadrature
+(4 nfp 48, 96). The records are `benchmarks/three_term_resolution.json` (beta)
+and `benchmarks/three_term_resolution_vacuum.json`;
+`benchmarks/plot_three_term_resolution.py` draws them (boundary, interior
+surfaces and iota), and `benchmarks/three_term_resolution_poincare.py` traces
+the vacuum field lines. DESC (`FixSheetCurrent`, not a VMEX dependency) was run
+outside VMEX and its wouts scored the same way, re-solved with all of their
+modes (DESC's M includes m = M).
+Columns are the largest LCFS distance to the target, the sheet current
+`mu0 |K| / |B|`, wall time with compilation, and peak GPU memory (one RTX 5090).
+NESTOR runs on the exact field and on the same field tabulated as an mgrid
+(301 x 301 x 48):
+
+| M = N | three-term: mm / K / s / GiB | DESC (L = 2M): mm / K / s / GiB | DESC (L = M): mm / K | VMEX + NESTOR: mm / K / converged | NESTOR on the mgrid: mm |
+| --- | --- | --- | --- | --- | --- |
+| 4 | 5.8 / 1.2e-03 / 429 / 1.9 | 16.1 / 3.8e-03 / 700 / 1.0 | 7.9 / 3.4e-03 | 24.0 / 7.5e-03 / yes | 22.9 |
+| 5 | 5.4 / 6.1e-04 / 523 / 1.9 | 10.1 / 2.1e-03 / 771 / 1.1 | 8.5 / 2.7e-03 | 12.4 / 3.0e-03 / yes | 8.1 |
+| 6 | 3.9 / 3.7e-04 / 482 / 2.0 | 5.4 / 1.0e-03 / 1002 / 1.6 | 14.5 / 3.0e-03 | 6.9 / 2.6e-03 / yes | 21.3 |
+| 7 | 3.0 / 2.2e-04 / 543 / 2.1 | 4.0 / 7.6e-04 / 1421 / 3.7 | 7.5 / 1.6e-03 | 13.6 / 1.7e-03 / no | 10.6 |
+| 8 | 2.6 / 1.5e-04 / 689 / 2.3 | 4.0 / 1.0e-03 / 2874 / 9.0 | 4.6 / 9.3e-04 | 35.6 / 8.2e-03 / no | 31.2 |
+| 9 | 2.1 / 1.2e-04 / 803 / 2.0 | 4.3 / 7.4e-04 / 5673 / 17.4 | 5.5 / 1.2e-03 | 20.9 / 3.5e-03 / no | 28.9 |
+| 10 | 2.0 / 8.9e-05 / 1046 / 2.3 | | 5.8 / 7.8e-04 | 17.3 / 2.5e-03 / yes | 19.6 |
+| 11 | 2.1 / 5.2e-05 / 1538 / 3.0 | | 4.9 / 7.9e-04 | 34.8 / 5.9e-03 / no | 53.0 |
+| 12 | 2.0 / 3.7e-05 / 2279 / 4.1 | | 4.1 / 6.0e-04 | 22.6 / 3.4e-03 / no | 38.7 |
+| 13 | 2.0 / 3.7e-05 / 2544 / 5.6 | | | 33.1 / 5.4e-03 / no | 30.1 |
+
+NESTOR stops 7 to 53 mm away with a sheet current of 2e-3 to 1e-2, whether it
+converges or reaches its 40,000 iterations, on the exact field or the mgrid.
+VMEC2000 + NESTOR on the same mgrid agrees with VMEX + NESTOR (24.1, 20.9 and
+19.4 mm at 4, 6 and 10). DESC stops 4.0 to 16 mm away with a sheet current of
+6e-4 to 4e-3; its dense force Jacobian exceeds a 32 GB GPU from M = 10 at
+L = 2M and at M = 13 at L = M. The three-term boundary settles 2 mm
+from the target with all three conditions at 2e-5 to 4e-5, below the target's
+own 4e-5, 1.3e-4 and 1.4e-4 (the field cancels `B.n` on the target only), so
+the last 2 mm is at least partly the target's error.
+
+In vacuum the coils make the whole field, so field lines are the ground truth.
+From 32 points on each of a method's surfaces s = 0.1, 0.3, ..., 0.9, 1 the
+lines are traced 30 transits (RK4, 128 steps per field period; halving the step
+or tracing 100 transits changes nothing). The second number below is the RMS
+distance of their crossings from the surface they started on, averaged over
+the six surfaces, in mm; the first is the LCFS distance to the target; the
+third is the largest distance over a field period of the run's magnetic axis
+from the field's closed field line (Newton on the field-period map), in mm.
+The target itself scores 0.24 (its field cancels `B.n` to 1.2e-5) and 0.42:
+VMEC's axis error at ns 51, which halves with each doubling of ns, while
+DESC's polynomial basis reaches 0.02 to 0.05 mm:
+
+| M = N | three-term: mm / field lines / axis / K | DESC (L = 2M) | DESC (L = M) | VMEX + NESTOR |
+| --- | --- | --- | --- | --- |
+| 4 | 1.7 / 0.23 / 0.35 / 2.4e-04 | 1.6 / 1.02 / 2.67 | 12.3 / 7.54 / 11.66 | 1.6 / 0.59 / 0.37 |
+| 5 | 1.6 / 0.09 / 0.39 / 4.7e-05 | 1.6 / 0.24 / 0.03 | 1.9 / 0.88 / 0.69 | 5.7 / 1.58 / 0.89 |
+| 6 | 1.6 / 0.16 / 0.38 / 2.8e-05 | 1.5 / 0.20 / 0.26 | 1.7 / 0.48 / 0.10 | 1.7 / 0.21 / 0.32 |
+| 7 | 1.6 / 0.18 / 0.38 / 3.5e-05 | 1.6 / 0.39 / 0.05 | 1.6 / 0.19 / 0.14 | 4.0 / 1.44 / 0.42 |
+| 8 | 1.6 / 0.20 / 0.41 / 2.2e-05 | 1.5 / 0.26 / 0.03 | 1.6 / 0.34 / 0.26 | 1.7 / 0.37 / 0.35 |
+| 9 | 1.6 / 0.16 / 0.40 / 2.3e-05 | 1.6 / 0.17 / 0.02 | 1.6 / 0.28 / 0.10 | 3.6 / 1.08 / 0.45 |
+| 10 | 1.6 / 0.21 / 0.41 / 2.0e-05 | | 1.6 / 0.14 / 0.29 | 2.0 / 0.64 / 0.43 |
+| 11 | 1.7 / 0.14 / 0.40 / 2.0e-05 | | 1.6 / 0.12 / 0.17 | 2.2 / 0.76 / 0.43 |
+| 12 | 1.6 / 0.20 / 0.41 / 1.9e-05 | | 1.5 / 0.12 / 0.05 | 2.5 / 0.88 / 0.46 |
+| 13 | 1.6 / 0.10 / 0.40 / 1.8e-05 | | | 1.6 / 0.54 / 0.43 |
+
+Every three-term solution holds its field lines at least as well as the target,
+so its LCFS 1.6 mm away is the field's flux surface more closely than the
+target is. DESC does as well from 9 modes (0.12 to 0.17). Field-line quality
+follows the near-resonant `B.n` harmonic (m, n) = (5, 2) (5 iota - 2 = 0.08),
+recorded as `resonant_bn`, not the RMS of `B.n` (`coil_bn_rms`): NESTOR's swings
+between resolutions are swings of that harmonic. With the singular quadrature
+(4 nfp 48, 48) the tangential plasma field carried a 3e-4 error, the pressure
+jump and sheet current read 2.4e-4 on the exact vacuum target, and the fit
+absorbed it: (5, 2) grew to 5e-5 to 9e-5 and field lines left the LCFS by
+4 to 7 mm. Doubling `quad_np` removes it at the same memory.
+
 ## Mirror geometry: analytic limits
 
 The mirror module is the one place where the answer is known in closed form,

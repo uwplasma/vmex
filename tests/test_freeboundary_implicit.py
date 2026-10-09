@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import gc
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from vmex.core.freeboundary_implicit import (
     solve_free_boundary_implicit,
     solve_free_boundary_implicit_status,
 )
+from vmex.core import _freeboundary_dense as dense
 from vmex.core import freeboundary_implicit as fbi
 from vmex.core.errors import (
     AdjointSolveError, VmecConvergenceError, VmecJacobianError)
@@ -32,6 +34,16 @@ from vmex.core.errors import (
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
+
+
+def _dense_cfg(*, adjoint_tol=1e-11, **overrides):
+    """A minimal ``forward_dense_jax`` configuration for unit-level dense tests."""
+    implicit = SimpleNamespace(device=None, lconm1=False, adjoint_tol=adjoint_tol,
+                               adjoint_gcrot_m=3, adjoint_gcrot_k=1, adjoint_maxiter=10)
+    options = dict(implicit=implicit, adjoint_solver="forward_dense_jax", adjoint_fail="error",
+                   adjoint_dense_batch_size=2, adjoint_dense_max_dofs=100,
+                   adjoint_residual_rtol=None)
+    return SimpleNamespace(**{**options, **overrides})
 
 
 def test_free_boundary_status_callback_turns_trial_error_into_status(monkeypatch):
@@ -403,6 +415,40 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
     np.testing.assert_allclose(forced, elimination, rtol=1.0e-6, atol=0.0)
 
 
+def test_plasma_from_parameters_sets_plasma_parameters_inside_the_residual():
+    """A design-dependent PHIEDGE enters the residual lane and its derivatives."""
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(mpol=3, ntor=0, ntheta=10, nzeta=4),
+        ns_array=np.array([5]), ftol_array=np.array([1.0e-6]), niter_array=np.array([400]))
+    field, params = lasym_free_field(), im.params_from_input(inp)
+    current0 = jnp.asarray(field.extcur)
+
+    def configure(plasma_from_parameters=None):
+        return make_free_boundary_config(
+            inp, field, ns=5, ftol=1.0e-6, max_iterations=400,
+            field_from_parameters=lambda current: dataclasses.replace(field, extcur=current),
+            plasma_from_parameters=plasma_from_parameters, device="cpu")
+
+    cfg = configure()
+    _, saved = fbi._solve_status_fwd(params, current0, cfg)
+    _, _, state, mask, rcon, zcon = saved[:6]
+    scaled = configure(lambda p, current: dataclasses.replace(
+        p, phiedge=p.phiedge * jnp.sum(current) / jnp.sum(current0)))
+    residual = fbi._projected_residual(scaled, mask)
+
+    def flat(value, current, p=params):
+        return ravel_pytree(value(state, p, current, state, rcon, zcon))[0]
+
+    current = current0 * 1.02
+    moved = dataclasses.replace(params, phiedge=params.phiedge * 1.02)
+    np.testing.assert_allclose(flat(residual, current), flat(fbi._projected_residual(cfg, mask), current, moved),
+                               rtol=1e-12, atol=1e-14)
+    direction, step = current0 * 0.3, 1e-4
+    _, derivative = jax.jvp(lambda c: flat(residual, c), (current0,), (direction,))
+    difference = (flat(residual, current0 + step * direction) - flat(residual, current0 - step * direction)) / (2 * step)
+    np.testing.assert_allclose(derivative, difference, rtol=1e-5, atol=1e-8 * float(jnp.max(jnp.abs(derivative))))
+
+
 def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
     """Under an outer jax.jit the pullback is taken at the root, then staged GCROT."""
     def residual(z, p, field, *_args):
@@ -511,6 +557,78 @@ def test_host_adjoint_best_effort_warns_instead_of_raising(monkeypatch):
     with pytest.warns(RuntimeWarning, match="best_effort"):
         solution = call(fail="best_effort")
     np.testing.assert_allclose(np.asarray(solution), np.zeros(4))
+
+
+def test_prepared_operators_track_changed_root_data():
+    """Executable reuse must not reuse a previous root's numerical tape."""
+    matrix = jnp.array([[4.0, 0.3, -0.2], [0.1, 3.0, 0.4], [0.2, -0.1, 5.0]])
+
+    def residual(z, params, field, base, rcon, zcon):
+        coefficient = params + field + base + rcon + zcon
+        return matrix @ z + 0.5 * coefficient * z**2
+
+    cfg = SimpleNamespace(adjoint_tol=1.0e-11, adjoint_maxiter=10,
+                          adjoint_gcrot_m=3, adjoint_gcrot_k=1)
+    values = [jnp.array([0.2, 0.3, 0.4]) + 0.1 * i for i in range(6)]
+    rhs = jnp.array([0.4, -0.7, 1.2])
+    reference = None
+    # Change each dynamic input independently, keeping all shapes unchanged.
+    for changed in (None, 0, 1, 2, 3, 4, 5):
+        args = list(values)
+        if changed is not None:
+            args[changed] = args[changed] + 0.25
+        z, params, field, base, rcon, zcon = args
+        jacobian = matrix + jnp.diag((params + field + base + rcon + zcon) * z)
+        expected = np.linalg.solve(np.asarray(jacobian.T), np.asarray(rhs))
+        result = fbi._host_adjoint(residual, *args, rhs, cfg)
+        np.testing.assert_allclose(result, expected, rtol=1e-9, atol=1e-11)
+        if changed is None:
+            reference = expected
+        else:
+            assert np.linalg.norm(expected - reference) > 1e-4
+
+
+@pytest.mark.parametrize('cotangents', [jnp.zeros((0,3)), jnp.zeros((2,4)), jnp.zeros(3)])
+def test_multi_rhs_pullback_rejects_bad_batch_shape(cotangents):
+    cfg = SimpleNamespace(adjoint_solver='forward_dense_jax')
+    with pytest.raises(ValueError, match='leading RHS axis'):
+        fbi.free_boundary_state_pullback_multi_rhs(None,None,cfg,jnp.zeros(3),
+            jnp.ones(3),cotangents,rcon0=None,zcon0=None)
+
+
+def test_multi_rhs_public_projection_and_root_gate(monkeypatch):
+    cfg = _dense_cfg()
+    def residual(z, p, field, *_):
+        return 2*z-p-field
+    monkeypatch.setattr(fbi, '_projected_residual', lambda *_, **__:residual)
+    monkeypatch.setattr(im, '_dof_projector', lambda _,mask:lambda value:value*mask)
+    monkeypatch.setattr(im, 'runtime_from_params', lambda *_:None)
+    zero, mask, rhs = jnp.zeros(3), jnp.array([1.,0.,1.]), jnp.eye(3)
+    pb, fb = fbi.free_boundary_state_pullback_multi_rhs(zero,zero,cfg,zero,mask,rhs,rcon0=None,zcon0=None)
+    np.testing.assert_allclose(pb,np.asarray(rhs*mask/2),atol=1e-12)
+    np.testing.assert_allclose(fb,np.asarray(rhs*mask/2),atol=1e-12)
+    with pytest.raises(ValueError, match='root residual'):
+        fbi.free_boundary_state_pullback_multi_rhs(zero,zero,cfg,jnp.ones(3),mask,rhs,rcon0=None,zcon0=None)
+
+
+@pytest.mark.parametrize("backend", ["coupled_gcrot", "boundary_schur", "edge_response"])
+def test_multi_rhs_pullback_is_dense_only(backend):
+    cfg = _dense_cfg(adjoint_solver=backend)
+    with pytest.raises(ValueError, match="requires adjoint_solver='forward_dense_jax'"):
+        fbi.free_boundary_state_pullback_multi_rhs(None, None, cfg, jnp.zeros(3),
+            jnp.ones(3), jnp.eye(3), rcon0=None, zcon0=None)
+
+
+def test_scalar_implicit_gradient_rejects_dense_adjoint():
+    zero = jnp.zeros(2)
+    with pytest.raises(ValueError, match="free_boundary_state_pullback_multi_rhs"):
+        fbi._solve_bwd_impl(_dense_cfg(), (zero,) * 3 + (None,) * 3, zero)
+
+
+def test_adjoint_residual_rtol_requires_dense_adjoint():
+    with pytest.raises(ValueError, match="adjoint_residual_rtol applies only"):
+        make_free_boundary_config(lasym_free_input(DATA), lasym_free_field(),
+                                  adjoint_solver="coupled_gcrot", adjoint_residual_rtol=1e-9)
 
 
 def test_cold_start_ladders_only_when_one_rung_cannot_converge(monkeypatch):
@@ -941,6 +1059,104 @@ def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
                                 state, mask, runtime.rcon0, runtime.zcon0)
 
     return run, state, mask, cfg, root, calls
+
+
+def test_structured_inverse_is_exact_for_block_tridiagonal_plus_low_rank():
+    """``_structured_inverse`` against a dense inverse, forward and transposed."""
+    rng = np.random.default_rng(7)
+    ns, block, rank = 4, 3, 2
+    lower, diagonal, upper = (rng.standard_normal((ns, block, block)) for _ in range(3))
+    diagonal += 6 * np.eye(block)
+    row_scale, column_scale = rng.uniform(.5, 2., (ns, block)), rng.uniform(.5, 2., (ns, block))
+    dense_a = np.zeros((ns * block, ns * block))
+    for k in range(ns):
+        dense_a[k*block:(k+1)*block, k*block:(k+1)*block] = diagonal[k]
+        if k:
+            dense_a[k*block:(k+1)*block, (k-1)*block:k*block] = lower[k]
+        if k + 1 < ns:
+            dense_a[k*block:(k+1)*block, (k+1)*block:(k+2)*block] = upper[k]
+    p_cols, q_rows = rng.standard_normal((ns * block, rank)), rng.standard_normal((rank, ns * block))
+    blocks = fbi._anchor_factor(*(jnp.asarray(x) for x in (lower, diagonal, upper, row_scale, column_scale)))
+    # The factors invert the two-sided scaling, so A^-1 = diag(cs) T^-1 diag(rs) with T their matrix.
+    a_inverse = (np.diag(column_scale.ravel()) @ np.linalg.inv(
+        np.diag(row_scale.ravel()) @ dense_a @ np.diag(column_scale.ravel())) @ np.diag(row_scale.ravel()))
+    bulk_p = a_inverse @ p_cols
+    lu = jax.scipy.linalg.lu_factor(jnp.eye(rank) + q_rows @ bulk_p)
+    factors = dense.StructuredFactors(blocks, jnp.asarray(bulk_p), jnp.asarray(q_rows), lu,
+                                      jnp.asarray(row_scale), jnp.asarray(column_scale), fields=("R_cos",))
+    exact = np.linalg.inv(dense_a + p_cols @ q_rows)
+    vector = rng.standard_normal(ns * block)
+    for transpose, expected in ((False, exact @ vector), (True, exact.T @ vector)):
+        np.testing.assert_allclose(np.asarray(dense._structured_inverse(factors, jnp.asarray(vector), transpose)),
+                                   expected, rtol=1e-11, atol=1e-12)
+
+
+def test_structured_factorization_requires_the_dense_backend():
+    inp, field = lasym_free_input(DATA), lasym_free_field()
+    with pytest.raises(ValueError, match="'dense' or 'structured'"):
+        make_free_boundary_config(inp, field, adjoint_factorization="banded")
+    with pytest.raises(ValueError, match="structured factors require"):
+        make_free_boundary_config(inp, field, adjoint_factorization="structured")
+    with pytest.raises(ValueError, match="adjoint_factor_dtype"):
+        make_free_boundary_config(inp, field, adjoint_solver="forward_dense_jax", adjoint_factor_dtype=jnp.float32)
+    cfg = make_free_boundary_config(inp, field, adjoint_solver="forward_dense_jax",
+                                    adjoint_factorization="structured", adjoint_factor_dtype=jnp.float32)
+    assert cfg.adjoint_factorization == "structured" and cfg.adjoint_factor_dtype == np.float32
+    assert dense._max_dofs(cfg) == np.inf
+
+
+@pytest.mark.parametrize("factor_dtype", [None, jnp.float32])
+def test_structured_pullback_matches_dense_on_a_small_deck(factor_dtype):
+    """Structured factors give the dense pullback, tangent and seed at a real root.
+
+    Same deck as the anchor test: the rows are GMRES solves preconditioned by
+    the block-tridiagonal + Woodbury inverse built at this root, each certified
+    by the full-operator gate; float32 factors only cost iterations.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(mpol=3, ntor=0, ntheta=10, nzeta=4),
+        ns_array=np.array([5]), ftol_array=np.array([1.0e-6]), niter_array=np.array([400]))
+    field = lasym_free_field()
+    params = im.params_from_input(inp)
+
+    def configure(**options):
+        return make_free_boundary_config(
+            inp, field, ns=5, ftol=1.0e-6, max_iterations=400, adjoint_solver="forward_dense_jax",
+            adjoint_residual_rtol=1e-9, field_from_parameters=lambda current: dataclasses.replace(
+                field, extcur=current), device="cpu", **options)
+
+    dense_cfg = configure()
+    structured_cfg = configure(adjoint_factorization="structured", adjoint_factor_dtype=factor_dtype)
+    current = jnp.asarray(field.extcur)
+    state, mask, rcon0, zcon0, *_ = fbi._host_solve_and_mask_status(dense_cfg, params, current)
+    state, mask = (jax.tree.map(jnp.asarray, tree) for tree in (state, mask))
+    rcon0, zcon0 = jnp.asarray(rcon0), jnp.asarray(zcon0)
+    rng = np.random.default_rng(11)
+    cotangents = jax.tree.map(lambda leaf: jnp.asarray(rng.standard_normal((2,) + leaf.shape)), state)
+
+    def pullback(cfg, reports):
+        return fbi.free_boundary_state_pullback_multi_rhs(
+            params, current, cfg, state, mask, cotangents, rcon0=rcon0, zcon0=zcon0,
+            # Both lanes solve the same linear system at this state; its root quality does not matter here.
+            root_residual_atol=1.0, diagnostics=reports, return_linearization=True)
+
+    dense_reports, structured_reports = [], []
+    (_, dense_bar), dense_root = pullback(dense_cfg, dense_reports)
+    (_, structured_bar), structured_root = pullback(structured_cfg, structured_reports)
+    try:
+        np.testing.assert_allclose(np.asarray(structured_bar), np.asarray(dense_bar), rtol=1e-8, atol=0.0)
+        assert all(r["accepted"] and r["backend"] == "matrixfree_seed_lu" for r in structured_reports)
+        assert isinstance(structured_root.factors, dense.StructuredFactors) and structured_root.fresh_factors
+        direction = np.asarray(rng.standard_normal(current.shape))
+        np.testing.assert_allclose(
+            _flat(structured_root.tangent(direction)), _flat(dense_root.tangent(direction)), rtol=1e-8, atol=1e-14)
+        seed = dense.SeedLU.from_root(structured_root)
+        assert isinstance(seed.factors, dense.StructuredFactors)
+        assert all(not leaf.flags.writeable for leaf in jax.tree.leaves(seed.factors))
+        seed.close()
+    finally:
+        dense_root.close()
+        structured_root.close()
 
 
 def test_newton_anchor_lands_on_the_root_and_reports_what_it_did(
@@ -1648,6 +1864,238 @@ def test_free_boundary_root_is_a_function_of_the_parameters():
         gap = float(jnp.linalg.norm(_flat(
             jax.tree.map(jnp.subtract, first, other))))
         assert gap / scale == 0.0, (label, gap / scale)
+
+
+@pytest.mark.parametrize("compiled", [False,True])
+def test_dense_adjoint_dynamic_nonsymmetric_and_shared_factorization(compiled, monkeypatch):
+    matrix = jnp.array([[4., .3, -.2], [.1, 3., .4], [.2, -.1, 5.]])
+    cfg = _dense_cfg()
+    def residual(z,p,f,base,rc,zc):return matrix@z+.5*(p+f+base+rc+zc)*z**2
+    if compiled:
+        residual=jax.jit(residual)
+    values = [jnp.array([.2,.3,.4])+.1*i for i in range(6)]
+    rhs=jnp.array([[1.,0.,0.],[.1,.5,1.],[0.,0.,0.]])
+    native=dense._factor_solve;calls=[]
+    def measured(*args, **kwargs):calls.append(1);return native(*args, **kwargs)
+    monkeypatch.setattr(dense,'_factor_solve',measured)
+    for changed in (None,0,1,2,3,4,5):
+        args=list(values)
+        if changed is not None:
+            args[changed]=args[changed]+.25
+        z,p,f,base,rc,zc=args
+        jac=matrix+jnp.diag((p+f+base+rc+zc)*z)
+        actual=dense.solve_dense_adjoint(residual,*args,rhs,jnp.ones(3),cfg)
+        expected=np.linalg.solve(np.asarray(jac.T),np.asarray(rhs).T).T
+        np.testing.assert_allclose(actual,expected,rtol=1e-10,atol=1e-12)
+    assert len(calls)==7  # One factorization per root, not per RHS.
+
+
+@pytest.mark.parametrize("lasym", [False,True])
+def test_dense_active_basis_matches_dof_projector_and_pair_signs(monkeypatch,lasym):
+    from vmex.core.solver import SpectralState
+    cfg=SimpleNamespace(lconm1=True,resolution=SimpleNamespace(ntor=1,lasym=lasym))
+    monkeypatch.setattr(im,'_m1_pair_columns',lambda _:(np.array([1]),np.array([2])))
+    leaves=[jnp.ones((2,3)) for _ in range(6)]
+    leaves[0]=leaves[0].at[0,0].set(0)
+    mask=SpectralState(*leaves)
+    space=dense._active_space(cfg,mask,100)
+    _,unravel=jax.flatten_util.ravel_pytree(mask)
+    vector=unravel(jnp.arange(36,dtype=jnp.float64))
+    compressed=dense._compress(vector,space)
+    expanded=dense._expand(compressed,mask,space)
+    expected=im._dof_projector(cfg,mask)(vector)
+    for a,b in zip(jax.tree.leaves(expanded),jax.tree.leaves(expected)):
+        np.testing.assert_allclose(a,b,rtol=1e-14,atol=1e-14)
+    np.testing.assert_allclose(dense._compress(expanded,space),compressed,rtol=1e-14,atol=1e-14)
+    assert space.left.size==35-(4 if lasym else 2)
+    bad=dataclasses.replace(mask,Z_sin=mask.Z_sin.at[0,1].set(0))
+    with pytest.raises(ValueError,match='unequal'):
+        dense._active_space(cfg,bad,100)
+
+
+@pytest.mark.parametrize("failure", ['singular','false_success','nonfinite'])
+def test_dense_failure_policy(failure,monkeypatch):
+    cfg = _dense_cfg()
+    def residual(z,*args):return (0. if failure=='singular' else 2.)*z
+    if failure!='singular':
+        monkeypatch.setattr(dense,'_factor_solve',lambda matrix,rhs,**kw:
+                            (jnp.full_like(rhs,jnp.nan if failure=='nonfinite' else 0.), None))
+        # A persistently broken solve must still fail after bounded correction.
+        monkeypatch.setattr(dense.jsl, 'lu_solve', lambda factors,rhs,**kw: jnp.zeros_like(rhs))
+    def call():return dense.solve_dense_adjoint(residual,jnp.zeros(3),None,None,None,None,None,
+                                              jnp.ones((2,3)),jnp.ones(3),cfg)
+    with pytest.raises(AdjointSolveError):
+        call()
+    cfg.adjoint_fail='best_effort'
+    if failure=='false_success':
+        with pytest.warns(RuntimeWarning,match='best-effort'):
+            call()
+    else:
+        with pytest.raises(AdjointSolveError):
+            call()
+
+
+def test_dense_dimension_and_mask_guards():
+    cfg=SimpleNamespace(lconm1=False)
+    for mask in (jnp.zeros(3),jnp.ones(4)):
+        with pytest.raises(ValueError,match='active dimension'):
+            dense._active_space(cfg,mask,3)
+    with pytest.raises(ValueError,match='binary'):
+        dense._active_space(cfg,jnp.array([1.,.5]),3)
+
+
+@pytest.mark.parametrize("name", ['adjoint_dense_batch_size','adjoint_dense_max_dofs'])
+@pytest.mark.parametrize("value", [0,True,1.5])
+def test_dense_config_rejects_invalid_controls(name,value):
+    with pytest.raises(ValueError,match=name):
+        make_free_boundary_config(lasym_free_input(DATA),lasym_free_field(),**{name:value})
+
+
+def test_dense_explicit_residual_gate_and_diagnostics(monkeypatch):
+    cfg = _dense_cfg(adjoint_tol=1e-5)
+    monkeypatch.setattr(dense,'_factor_solve',lambda matrix,rhs,**kw:(rhs/2+1e-7,None))
+    monkeypatch.setattr(dense.jsl, 'lu_solve', lambda factors,rhs,**kw: jnp.zeros_like(rhs))
+    def residual(z,*args):return 2*z
+    def call(records):return dense.solve_dense_adjoint(residual,jnp.zeros(3),None,None,None,None,None,
+        jnp.ones((2,3)),jnp.ones(3),cfg,diagnostics=records)
+    diagnostics=[];call(diagnostics)
+    assert len(diagnostics)==2 and all(d['accepted'] for d in diagnostics)
+    cfg.adjoint_residual_rtol=1e-9;diagnostics=[]
+    with pytest.raises(AdjointSolveError):
+        call(diagnostics)
+    assert len(diagnostics)==1 and diagnostics[0]['accepted'] is False
+    # Backward-error gate: 1e-9 (||b|| + ||A|| ||x||) with A = 2 I, b = 1 and x ~ b/2.
+    np.testing.assert_allclose(diagnostics[0]['tolerance'],1e-9*2*np.sqrt(3.),rtol=1e-6)
+    np.testing.assert_allclose(diagnostics[0]['operator_norm'],2.,rtol=1e-12)
+    actual=make_free_boundary_config(lasym_free_input(DATA),lasym_free_field(),
+        adjoint_solver='forward_dense_jax',adjoint_residual_rtol=1e-9)
+    assert actual.adjoint_residual_rtol==1e-9
+
+
+def test_dense_gate_is_a_normwise_backward_error_bound(monkeypatch):
+    """A residual at the rounding floor of ||A|| ||x|| passes although it fails the
+    relative 1e-9 ||b|| test; an unconverged solve (residual 1e-4 ||b||) still fails."""
+    cfg = _dense_cfg(adjoint_residual_rtol=1e-9)
+    matrix = jnp.diag(jnp.array([1e4, 1., 1.]))
+    rhs = jnp.array([[1e-2, 0., 0.], [0., 1e-2, 0.]])
+    exact = np.linalg.solve(np.asarray(matrix), np.asarray(rhs).T).T
+    # Row 0: residual 1.5e-11, above 1e-9 ||b|| = 1e-11 but below 1e-9 (||b|| + ||A|| ||x||) = 2e-11.
+    # Row 1: residual 1e-6, far above 1e-9 (||b|| + ||A|| ||x||) = 1e-7.
+    offset = np.array([[1.5e-15, 0., 0.], [0., 1e-6, 0.]])
+    monkeypatch.setattr(dense, '_factor_solve', lambda m, b, **kw: (jnp.asarray(exact + offset), None))
+    monkeypatch.setattr(dense.jsl, 'lu_solve', lambda factors, b, **kw: jnp.zeros_like(b))
+    reports = []
+    with pytest.raises(AdjointSolveError, match='row 1'):
+        dense.solve_dense_adjoint(lambda z, *_: matrix @ z, jnp.zeros(3), None, None, None, None, None,
+                                  rhs, jnp.ones(3), cfg, diagnostics=reports)
+    row0, row1 = reports
+    np.testing.assert_allclose(row0['operator_norm'], 1e4, rtol=1e-12)
+    assert row0['relative_residual'] > 1e-9 and row0['accepted'] and row0['backward_error'] < 1e-9
+    assert row1['backward_error'] > 1e-9 and not row1['accepted']
+
+
+@pytest.mark.parametrize('retained', [False, True])
+def test_dense_defect_correction_reuses_lu_and_preserves_passed_rows(retained, monkeypatch):
+    matrix = jnp.array([[3., 1., -.2], [-.1, 4., .3], [.5, -.4, 2.]])
+    rhs = jnp.array([[1., 2., -1.], [.1, -.2, .5], [0., 0., 0.]])
+    cfg = _dense_cfg(adjoint_residual_rtol=1e-12)
+    factor = dense._factor_solve
+    original = []
+
+    def inaccurate_row(*args, **kwargs):
+        answer, factors = factor(*args, **kwargs)
+        original.append(np.asarray(answer).copy())
+        answer = jnp.asarray(answer).at[1, 0].add(1e-6)
+        return answer, factors
+
+    monkeypatch.setattr(dense, '_factor_solve', inaccurate_row)
+    reports = []
+    result = dense.solve_dense_adjoint(lambda z,*_: matrix @ z,
+        jnp.zeros(3), None, None, None, None, None, rhs, jnp.ones(3), cfg,
+        diagnostics=reports, return_linearization=retained)
+    answer = result[0] if retained else result
+    np.testing.assert_allclose(answer, np.linalg.solve(np.asarray(matrix.T), np.asarray(rhs.T)).T,
+                               rtol=1e-12, atol=1e-14)
+    np.testing.assert_array_equal(np.asarray(answer)[[0, 2]], original[0][[0, 2]])
+    assert len(original) == 1
+    assert [r['refinement_steps'] for r in reports] == [0, 1, 0]
+    assert all(r['accepted'] for r in reports)
+    assert reports[1]['initial_residual_norm'] > reports[1]['tolerance']
+    if retained:
+        result[1].close()
+
+
+def test_dense_correction_budget_fails_closed(monkeypatch):
+    cfg = _dense_cfg(adjoint_residual_rtol=1e-12)
+    module = dense.jsl
+    solve, calls = module.lu_solve, []
+
+    def inaccurate(*args, **kwargs):
+        calls.append(1)
+        return .5 * solve(*args, **kwargs)
+
+    monkeypatch.setattr(module, 'lu_solve', inaccurate)
+    records = []
+    with pytest.raises(AdjointSolveError):
+        dense.solve_dense_adjoint(lambda z,*_: 2*z, jnp.zeros(3), None, None, None, None, None,
+            jnp.ones((1, 3)), jnp.ones(3), cfg, diagnostics=records)
+    assert len(calls) == 4  # Initial solve and at most three same-factor corrections.
+    assert records[0]['refinement_steps'] == 3 and not records[0]['accepted']
+    assert records[0]['residual_norm'] > records[0]['tolerance']
+
+
+@pytest.mark.parametrize("banded", [True, "edge_axis", False])
+def test_colored_assembly_is_exact_for_radial_bands_and_falls_back_otherwise(banded, monkeypatch):
+    """Colored probes recover a radially banded Jacobian, also with an edge-axis block
+    (a prescribed plasma current); a dense one is caught and rebuilt."""
+    monkeypatch.setattr(dense, "_EDGE_AXIS_LAYOUT", {})
+    from vmex.core.solver import SpectralState
+    ns, mnmax = 12, 3
+    rng = np.random.default_rng(3)
+    template = SpectralState(*(jnp.asarray(rng.normal(size=(ns, mnmax))) for _ in range(6)))
+    mask = SpectralState(*(jnp.ones((ns, mnmax)) for _ in range(6)))
+    space = jax.tree.map(jnp.asarray, dense._active_space(SimpleNamespace(lconm1=False), mask, 10**6))
+    flat, unravel = jax.flatten_util.ravel_pytree(template)
+    surface = (np.arange(flat.size) % (ns * mnmax)) // mnmax
+    reach = np.abs(surface[:, None] - surface[None, :]) <= (2 if banded else ns)
+    if banded == "edge_axis":
+        reach |= (surface[:, None] == ns - 1) & (surface[None, :] == 0)  # edge equations see the axis unknowns
+    matrix = jnp.asarray(rng.normal(size=(flat.size, flat.size)) * reach)
+
+    def residual(z, *args):
+        return unravel(matrix @ jax.flatten_util.ravel_pytree(z)[0])
+
+    tangent = dense._prepare_tangent(template, None, None, None, None, None, residual=residual)
+    full = dense._assemble_device(tangent, template, space, batch_size=8)
+    if banded:
+        seeds, _, _ = dense._radial_probes(template, space, edge_axis=banded == "edge_axis")
+        assert seeds.shape[0] == (5 + (banded == "edge_axis")) * 6 * mnmax  # colors x coordinates per surface
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            np.testing.assert_allclose(dense._assemble(tangent, template, space, batch_size=8), full,
+                                       rtol=0, atol=1e-13)
+        assert dense._EDGE_AXIS_LAYOUT == {(ns, mnmax, flat.size): banded == "edge_axis"}
+    else:
+        with pytest.warns(RuntimeWarning, match="colored Jacobian assembly mismatch"):
+            rebuilt = dense._assemble(tangent, template, space, batch_size=8)
+        np.testing.assert_allclose(rebuilt, full, rtol=0, atol=1e-13)
+
+
+def test_dense_invalid_gpu_pivots_refactor_on_host(monkeypatch):
+    """Sentinel pivot buffers never reach lu_solve; the same matrix is refactored.
+
+    The matrix is the Jacobian transpose, so the solve is ``matrix @ x = rhs``.
+    """
+    matrix = jnp.array([[3., 1., -.2], [-.1, 4., .3], [.5, -.4, 2.]])
+    rhs = jnp.array([[1., 2., -1.], [.1, -.2, .5]])
+    native = dense.jsl.lu_factor
+    monkeypatch.setattr(dense.jsl, 'lu_factor',
+                        lambda a: (native(a)[0], jnp.full(a.shape[0], -2, dtype=jnp.int32)))
+    with pytest.warns(RuntimeWarning, match='invalid pivot'):
+        solution, factors = dense._factor_solve(matrix, rhs)
+    np.testing.assert_allclose(solution, np.linalg.solve(np.asarray(matrix), np.asarray(rhs.T)).T,
+                               rtol=1e-12, atol=1e-14)
+    assert np.all(np.asarray(factors[1]) >= 0)
 
 
 @pytest.mark.full

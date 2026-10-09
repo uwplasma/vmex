@@ -1787,7 +1787,10 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
         return best_z, best
 
     if initial_correction is not None:
-        candidate = jax.tree.map(jnp.add, z0, P(initial_correction))
+        # The memo outlives the problem that stored it: another problem on
+        # the same canonical config may run on a different device.
+        home = jax.tree.leaves(z0)[0].sharding
+        candidate = jax.tree.map(jnp.add, z0, P(jax.device_put(initial_correction, home)))
         candidate_f = F(candidate, params)
         candidate_residual = float(_tree_norm(candidate_f))
         if np.isfinite(candidate_residual) and candidate_residual < base:
@@ -2337,6 +2340,19 @@ def _adjoint_acceptance(cfg: ImplicitConfig, b_norm, rtol=None):
     """Largest acceptable true residual for an adjoint solve of RHS norm."""
     tol = cfg.adjoint_tol if rtol is None else float(rtol)
     return _ADJOINT_RESIDUAL_SLACK * tol * b_norm
+
+
+def _adjoint_diagnostic(cfg, *, residual_norm, rhs_norm, iterations, backend,
+                        row=None, residual_rtol=None, finite=True, **details):
+    """Describe a host-eager true-residual check using the shared acceptance rule."""
+    norm, rhs_norm = float(residual_norm), float(rhs_norm)
+    tolerance = float(_adjoint_acceptance(cfg, rhs_norm) if residual_rtol is None
+                      else residual_rtol * rhs_norm)
+    return dict(row=row, residual_norm=norm, rhs_norm=rhs_norm,
+        relative_residual=norm/rhs_norm if rhs_norm else (0.0 if norm == 0 else float("inf")),
+        tolerance=tolerance, iterations=int(iterations), backend=backend,
+        accepted=bool(finite and np.isfinite(norm) and np.isfinite(rhs_norm) and norm <= tolerance),
+        **details)
 
 
 def _raise_adjoint_unconverged(cfg: ImplicitConfig, *, iterations: int,
@@ -3017,8 +3033,13 @@ def _implicit_evolved_tangent_multi_rhs(
         )[1]
         return jax.tree.map(jnp.negative, value)
 
+    # The right-hand sides in chunks too: one batch of every direction holds a
+    # force linearization per direction at once (14.6 GiB for 255 at 8 x 8).
     initial, _ = _raw_block_solve(
-        system, jax.vmap(raw_rhs)(tangent_batch), cfg
+        system,
+        chunk_map(raw_rhs, tangent_batch,
+                  chunk_size=max(1, int(response_chunk_size))),
+        cfg,
     )
 
     def correct(args):

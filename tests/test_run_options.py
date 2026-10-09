@@ -89,8 +89,22 @@ def test_quoted_exclamation_marks_do_not_become_directives():
     assert "!@VMEX" in inp.mgrid_file
 
 
+def test_boundary_condition_directive_and_json_key():
+    for token in ("THREE_TERM", "three-term", "'three_term'"):
+        options = parse_indata_run_options(f"!@VMEX BOUNDARY_CONDITION = {token}\n&INDATA\n/\n")
+        assert options == RunOptions(boundary_condition="three_term")
+    _, options = strip_vmex_json({"mpol": 4, "_vmex": {"boundary_condition": "Three-Term"}})
+    assert options.boundary_condition == "three_term"
+    with pytest.raises(VmecInputError, match="BOUNDARY_CONDITION must be one of"):
+        parse_indata_run_options("!@VMEX BOUNDARY_CONDITION = sheet\n&INDATA\n/\n")
+    resolved, sources = resolve_run_options(RunOptions(boundary_condition="three_term"))
+    assert resolved.boundary_condition == "three_term" and sources["boundary_condition"] == "file"
+    resolved, sources = resolve_run_options(resolved, boundary_condition="nestor")
+    assert resolved.boundary_condition == "nestor" and sources["boundary_condition"] == "python"
+
+
 def test_directive_round_trip_through_format():
-    options = RunOptions(polish="auto", polish_fail="warn")
+    options = RunOptions(polish="auto", polish_fail="warn", boundary_condition="three_term")
     text = format_indata_directives(options) + "&INDATA\nMPOL = 3\n/\n"
     assert parse_indata_run_options(text) == options
     assert format_indata_directives(RunOptions()) == ""
@@ -289,6 +303,26 @@ def test_solve_file_resolves_mgrid_beside_the_deck(tmp_path, monkeypatch):
     # An explicit keyword still wins over the deck's MGRID_FILE.
     vj.solve_file(deck, polish=False, write_wout=False, mgrid_path="elsewhere.nc")
     assert driver.call_args.kwargs["mgrid_path"] == "elsewhere.nc"
+
+
+def test_solve_file_routes_the_boundary_condition_directive(tmp_path, monkeypatch):
+    """``!@VMEX BOUNDARY_CONDITION`` reaches the free-boundary driver; a Python keyword overrides it."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import vmex as vj
+    from vmex.core import multigrid
+
+    driver = Mock(return_value=SimpleNamespace(polish_report=None))
+    monkeypatch.setattr(multigrid, "solve_free_boundary_multigrid", driver)
+    source = DATA / "input.cth_like_free_bdy_lasym_small"
+    deck = tmp_path / source.name
+    deck.write_text("!@VMEX BOUNDARY_CONDITION = THREE_TERM\n" + source.read_text(), encoding="utf-8")
+    (tmp_path / "mgrid_cth_like_lasym_small.nc").symlink_to(source.parent / "mgrid_cth_like_lasym_small.nc")
+    vj.solve_file(deck, write_wout=False)
+    assert driver.call_args.kwargs["boundary_condition"] == "three_term"
+    vj.solve_file(deck, write_wout=False, boundary_condition="nestor")
+    assert driver.call_args.kwargs["boundary_condition"] == "nestor"
 
 
 def test_solve_file_missing_mgrid_falls_back_to_fixed_boundary(tmp_path, monkeypatch):

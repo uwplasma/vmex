@@ -437,6 +437,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--boundary-condition",
+        choices=("nestor", "three-term"),
+        default=None,
+        help=(
+            "Plasma-vacuum interface condition of an LFREEB = T deck: NESTOR's "
+            "vacuum pressure (default) or the three-term free boundary: B.n = 0, "
+            "pressure balance and no sheet current (plasma field by virtual casing), solved for the "
+            "boundary from the deck's (requires virtual-casing-jax). Overrides "
+            "the deck's !@VMEX BOUNDARY_CONDITION directive."
+        ),
+    )
+    p.add_argument(
         "--coils",
         metavar="PATH",
         type=str,
@@ -606,18 +618,21 @@ def _read_request(input_path: Path):
 
 
 def _resolve_polish_cli(args, file_options):
-    """CLI flags > file directive > default, with the source recorded."""
+    """Run options (polish, boundary condition): CLI flags > file directive > default, with the source recorded."""
     from .run_options import resolve_run_options
 
     polish = None
     if args.polish is not None:
         polish = {"auto": "auto", "true": True, "false": False}[args.polish]
+    boundary_condition = getattr(args, "boundary_condition", None)
     options, sources = resolve_run_options(
         file_options,
         polish=polish,
         polish_fail=args.polish_fail,
+        boundary_condition=boundary_condition,
     )
-    cli_supplied = {"polish": args.polish, "polish_fail": args.polish_fail}
+    cli_supplied = {"polish": args.polish, "polish_fail": args.polish_fail,
+                    "boundary_condition": boundary_condition}
     sources = {name: ("cli" if cli_supplied[name] is not None else origin)
                for name, origin in sources.items()}
     return options, sources
@@ -901,6 +916,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             # Opt-in cold-run overlap; the library default is also False.
             prefetch_compile=bool(args.prefetch_compile),
             jacobian_retries=int(args.jacobian_retries),
+            boundary_condition=polish_options.boundary_condition,
             **freeb_plan.solver_kwargs,
         )
     else:

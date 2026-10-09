@@ -141,6 +141,11 @@ Options
      - Retry a stage from its best finite checkpoint after the VMEC2000
        75-Jacobian-reset condition, using a reduced ``DELT`` (default 2).
        Use 0 to preserve VMEC2000's immediate fatal-stop behavior.
+   * - ``--boundary-condition {nestor,virtual-casing}``
+     - Plasma-vacuum interface condition of an ``LFREEB = T`` deck: NESTOR's
+       vacuum pressure (default), or the three virtual-casing conditions
+       ``B.n = 0``, pressure balance and no sheet current, solved for the
+       boundary starting from the deck's. See :doc:`/howto/free-boundary`.
    * - ``--coils PATH``
      - ESSOS-style coils file (``.json`` or ``.npz`` with ``dofs_curves``,
        ``dofs_currents``, ``n_segments``, ``nfp``, ``stellsym``) supplying

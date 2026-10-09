@@ -38,6 +38,7 @@ import dataclasses
 import json
 import tempfile
 import time
+from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -575,6 +576,8 @@ def trace_alphas(
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
         compile_time_s=_COMPILE_S[0] - compile_start,
         devices=len(devices), platform=devices[0].platform,
-        versions={name: version(name) for name in ("vmex", "essos", "jax", "booz_xform_jax")},
+        # vmex's own version also covers a source tree without installed package metadata.
+        versions={"vmex": import_module("vmex").__version__,
+                  **{name: version(name) for name in ("essos", "jax", "booz_xform_jax")}},
     )
     return result
