@@ -386,5 +386,7 @@ def test_traceable_sine_analysis_is_wrout():
     trig = trig_tables(Resolution(mpol=5, ntor=3, ntheta=16, nzeta=8, nfp=2, lasym=True, ns=3))
     modes = mode_table(5, 3)
     f = np.random.default_rng(3).normal(size=(3, int(trig.ntheta3), 8))
-    np.testing.assert_allclose(_wrout_cos_coeffs_jax(f, modes, trig, sine=True),
-                               wrout_sin_coeffs(f=f, modes=modes, trig=trig), rtol=1e-13, atol=1e-15)
+    traced = _wrout_cos_coeffs_jax(f, modes, trig, sine=True)
+    eps = float(np.finfo(traced.dtype).eps)  # 2e-16 under the CI's x64, 1e-7 otherwise
+    np.testing.assert_allclose(traced, wrout_sin_coeffs(f=f, modes=modes, trig=trig),
+                               rtol=500 * eps, atol=10 * eps)

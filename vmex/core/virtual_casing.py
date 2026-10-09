@@ -431,7 +431,7 @@ def _state_field_spectra(inp, state, runtime=None):
         half_mesh_jacobian,
         real_space_geometry,
     )
-    from .nyquist import nyquist_limits
+    from .nyquist import nyquist_limits, symoutput_split
     from .residuals import m1_constrained_to_physical
     from .setup import boundary_from_input, flux_profiles, radial_grids
     from .solver import resolution_from_input
@@ -487,12 +487,9 @@ def _state_field_spectra(inp, state, runtime=None):
         """Cosine table and, without stellarator symmetry, the sine table (wrout.f symoutput)."""
         if not lasym:
             return _wrout_cos_coeffs_jax(f, nyq_modes, trig), None
-        nt2, nt1, nzeta_f = int(trig.ntheta2), int(trig.ntheta1), int(f.shape[2])
-        i0 = np.arange(nt2)
-        mirrored = jnp.asarray(f)[:, np.where(i0 == 0, 0, nt1 - i0)][:, :, (nzeta_f - np.arange(nzeta_f)) % nzeta_f]
-        half = jnp.asarray(f)[:, :nt2]
-        return (_wrout_cos_coeffs_jax(0.5 * (half + mirrored), nyq_modes, trig),
-                _wrout_cos_coeffs_jax(0.5 * (half - mirrored), nyq_modes, trig, sine=True))
+        even, odd = symoutput_split(f=jnp.asarray(f), trig=trig)
+        return (_wrout_cos_coeffs_jax(even, nyq_modes, trig),
+                _wrout_cos_coeffs_jax(odd, nyq_modes, trig, sine=True))
 
     bsupumnc, bsupumns = analysed(fields.bsupu)
     bsupvmnc, bsupvmns = analysed(fields.bsupv)
@@ -547,8 +544,8 @@ def surface_field_data_from_state(
     Unlike :func:`surface_field_data_from_wout`, this rebuilds boundary
     geometry and contravariant-``B`` spectra without leaving the device.  Pass
     the matching ``runtime`` when profiles are differentiated so current and
-    pressure parameters remain in the graph.  Stellarator symmetry is the
-    currently validated live-state path.
+    pressure parameters remain in the graph; ``LASYM`` states carry their sine
+    partners.
     """
     # The live-state spectra also carry lambda and the flux derivatives, which
     # the interior field's native form needs and the surface assembly does not.
