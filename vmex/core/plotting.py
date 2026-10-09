@@ -1022,7 +1022,7 @@ def _epsilon_effective_profile(booz: dict[str, Any] | None, note: str):
     except ImportError:
         return None, None, "effective ripple requires NEO_JAX (vmex[neoclassical])"
     except Exception as exc:  # noqa: BLE001 - summary stays usable without NEO
-        return None, None, f"NEO evaluation failed: {type(exc).__name__}"
+        return None, None, f"NEO evaluation failed: {type(exc).__name__}: {exc}"
     surfaces = np.asarray(surfaces, dtype=float)
     values = np.asarray(values, dtype=float)
     keep = np.isfinite(values) & (values > 0.0)

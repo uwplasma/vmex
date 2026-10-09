@@ -79,8 +79,8 @@ def epsilon_effective_from_boozer(booz: Any, *, config=None):
     JAX arrays remain differentiable when the mapping and selected NEO path
     are JAX-native.
     """
-    if isinstance(booz, dict) and booz.get(
-            "asym", booz.get("lasym", booz.get("bmns_b") is not None)):
+    get = booz.get if isinstance(booz, dict) else lambda key, default=None: getattr(booz, key, default)
+    if get("asym", get("lasym", get("bmns_b") is not None)):
         _require_asymmetric_neo()
     NeoConfig, run_neo = _neo_imports()
     cfg = NeoConfig() if config is None else config

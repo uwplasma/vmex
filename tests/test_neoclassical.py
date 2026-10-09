@@ -56,13 +56,15 @@ def test_epsilon_effective_reads_both_neo_result_and_surface_conventions(monkeyp
     np.testing.assert_allclose(surfaces, [0.0, 1.0])
 
 
-@pytest.mark.parametrize("from_wout", [False, True])
+@pytest.mark.parametrize("from_wout", [False, True, "object"])
 def test_epsilon_effective_rejects_lasym_with_an_old_backend(monkeypatch, from_wout):
     monkeypatch.setattr(neoclassical, "_neo_imports", lambda: (dict, None))
     monkeypatch.setitem(sys.modules, "neo_jax", SimpleNamespace(
         BoozerData=SimpleNamespace(__dataclass_fields__={})))
     with pytest.raises(NotImplementedError, match="LASYM"):
-        if from_wout:
+        if from_wout == "object":  # any Boozer object carrying sine tables, not only a dict
+            neoclassical.epsilon_effective_from_boozer(SimpleNamespace(bmns_b=np.ones((2, 3))))
+        elif from_wout:
             neoclassical.epsilon_effective_from_wout(SimpleNamespace(lasym=True))
         else:
             neoclassical.epsilon_effective_from_boozer({"bmns_b": np.ones((2, 3))})
