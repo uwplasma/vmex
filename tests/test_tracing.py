@@ -804,3 +804,49 @@ def test_trace_devices_default_to_every_cpu_or_one_gpu(solovev_wout, monkeypatch
     monkeypatch.setattr(jax, "devices", lambda: gpus)
     trace_alphas(solovev_wout, **TRACE_KWARGS)
     assert seen[-1] == gpus[:1]
+
+
+def _spectrum(decay, *, mpol=4, ntor=2, nfp=3, lasym=False):
+    from types import SimpleNamespace
+
+    modes = [(m, n) for m in range(mpol) for n in range(-ntor, ntor + 1) if m or n >= 0]
+    xm = np.array([m for m, _ in modes])
+    xn = np.array([n * nfp for _, n in modes])
+    amplitude = np.where((xm == 0) & (xn == 0), 10.0, decay ** (xm + np.abs(xn) // nfp))
+    rmnc = np.vstack([0.5 * amplitude, amplitude])
+    wout = SimpleNamespace(xm=xm, xn=xn, nfp=nfp, lasym=lasym, rmnc=rmnc, zmns=np.zeros_like(rmnc))
+    if lasym:
+        wout.rmns, wout.zmnc = np.zeros_like(rmnc), rmnc.copy()
+    return wout
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_spectral_truncation_reads_the_lcfs_tail_relative_to_m1(lasym):
+    from vmex.core.tracing import RESOLUTION_TOLERANCE, spectral_truncation
+
+    # m = 1, n = 0 has amplitude decay; the edge peaks at m = 0, |n| = 2 with decay^2
+    for decay, expected in ((1e-3, 1e-3), (0.3, 0.3)):
+        value = spectral_truncation(_spectrum(decay, lasym=lasym))
+        assert value == pytest.approx(expected, rel=1e-12)
+    assert spectral_truncation(_spectrum(1e-3)) < RESOLUTION_TOLERANCE < spectral_truncation(_spectrum(0.3))
+    # without toroidal modes only the poloidal edge counts
+    assert spectral_truncation(_spectrum(0.1, ntor=0)) == pytest.approx(0.1 ** 2, rel=1e-12)
+
+
+def test_spectral_truncation_is_undefined_without_an_m1_mode():
+    from vmex.core.tracing import spectral_truncation
+
+    wout = _spectrum(0.1)
+    wout.rmnc[:, wout.xm == 1] = 0.0
+    assert np.isnan(spectral_truncation(wout))
+
+
+def test_trace_reports_and_warns_on_a_truncated_spectrum(solovev_wout, traced, monkeypatch):
+    import vmex.core.tracing as tracing
+
+    value = traced.metadata["spectral_truncation"]
+    assert value == pytest.approx(tracing.spectral_truncation(read_wout(solovev_wout)))
+    assert np.isfinite(value) and value >= 0
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    with pytest.warns(RuntimeWarning, match="spectrum is truncated"):
+        trace_alphas(solovev_wout, **TRACE_KWARGS)

@@ -7,6 +7,11 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `trace_alphas` and `vmex --trace` record `spectral_truncation`, the LCFS
+  Fourier amplitude at `m = mpol - 1` or `|n| = ntor` relative to `m = 1`, and
+  warn above 3e-3: on the Landreman-Paul QA coils an mpol = ntor = 5
+  free-boundary WOUT loses 6.9 % of its alphas against 0.7-0.9 % in the coil
+  field, and mpol = ntor = 6 (1.4e-3) loses 0.7-1.1 %.
 - `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
   from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
   toroidal current, pressure). MRX is optional.
