@@ -227,3 +227,46 @@ def test_neo_summary_subset_keeps_all_sine_partners():
     assert subset["ns_b"] == 3 and subset["mode_first"] and subset["asym"]
     for key in keys:
         np.testing.assert_array_equal(subset[key], data[key][:, [0, 2, 4]])
+
+
+# Under the stellarator reflection (theta, zeta, Z) -> (-theta, -zeta, -Z) the
+# sine partner of a cosine-led table and the cosine partner of a sine-led one
+# change sign; the mirrored equilibrium has the same effective ripple.
+_MIRROR = ("rmns", "zmnc", "lmnc", "bmns", "bsubumns", "bsubvmns")
+
+
+@pytest.mark.full  # nightly: two solves, four NEO evaluations
+def test_epsilon_effective_lasym_identities():
+    """End to end through booz_xform_jax and NEO_JAX with every sine partner.
+
+    Zero sine tables reproduce the symmetric profile, and the mirror image of a
+    genuinely asymmetric equilibrium gives the same ripple; NEO traces the
+    mirrored field line backwards, so the two agree to its line-length error
+    (3e-3 measured), not to round-off.
+    """
+    import dataclasses
+
+    neo_jax = pytest.importorskip("neo_jax")
+    if "bmns" not in neo_jax.BoozerData.__dataclass_fields__:
+        pytest.skip("NEO_JAX without sine Boozer spectra")
+    import vmex as vj
+    from vmex import optimize as opt
+
+    def ripple(wout):
+        return neoclassical.epsilon_effective_from_wout(
+            wout, surfaces=[0.25, 0.5, 0.8], config=neoclassical.diagnostic_neo_config())[1]
+
+    def solved(deck):
+        return opt.solve_equilibrium(vj.VmecInput.from_file(DATA_DIR / f"input.{deck}"), verbose=False).wout
+
+    symmetric = solved("LandremanPaul2021_QA_lowres")
+    padded = dataclasses.replace(symmetric, lasym=True, **{
+        name: 0 * np.asarray(getattr(symmetric, partner)) for name, partner in zip(
+            _MIRROR, ("rmnc", "zmns", "lmns", "bmnc", "bsubumnc", "bsubvmnc"))})
+    np.testing.assert_allclose(ripple(padded), ripple(symmetric), rtol=1e-8)
+
+    asymmetric = solved("LandremanSenguptaPlunk_section5p3_low_res")
+    assert asymmetric.lasym and np.max(np.abs(asymmetric.rmns)) > 1e-3
+    mirrored = dataclasses.replace(asymmetric, **{
+        name: -np.asarray(getattr(asymmetric, name)) for name in _MIRROR})
+    np.testing.assert_allclose(ripple(mirrored), ripple(asymmetric), rtol=1e-2)
