@@ -7,6 +7,11 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `VmecInteriorField` and the live-state field spectra work without stellarator
+  symmetry (`LASYM = T`): the sine families `rmns`, `zmnc`, `lmnc` and the
+  `B^u`/`B^v` sine tables are evaluated, and symmetric results are unchanged
+  bit for bit. On the exact up-down asymmetric Solov'ev equilibrium at ns = 65
+  the field gives B to 2e-7 and J to 3e-6-2e-5 at mid radius (4e-4 from WOUT).
 - `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
   from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
   toroidal current, pressure). MRX is optional.
