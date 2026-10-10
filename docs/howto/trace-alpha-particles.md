@@ -222,18 +222,10 @@ symmetry-breaking `|B|` components of order 1e-3, the same size as the error of
 an under-resolved Fourier spectrum. `trace_alphas` records
 `metadata["spectral_truncation"]`, the largest LCFS `R, Z` amplitude at
 `m = mpol - 1` or `|n| = ntor` relative to the `m = 1, n = 0` amplitude, and
-warns above `RESOLUTION_TOLERANCE = 3e-3`:
-
-```text
-Equilibrium spectrum truncated: edge modes (m = mpol - 1 or |n| = ntor) are 1.0e-02
-of m = 1 (threshold 0.003); alpha loss fractions can be several times too high.
-Re-solve with larger mpol and ntor (try mpol = ntor >= 6) and check that the loss
-fraction changes by less than its Monte Carlo error, or pass
---trace-no-resolution-check to silence.
-```
-
-In Python the warning is a `RuntimeWarning` and `check_resolution=False`
-silences it.
+warns above `RESOLUTION_TOLERANCE = 3e-3` with the value, the fix (re-solve
+with larger `mpol` and `ntor`, e.g. 6, until the loss fraction moves by less
+than its Monte Carlo error) and the switch that silences it
+(`--trace-no-resolution-check`, or `check_resolution=False` in Python).
 
 The Landreman-Paul QA coils (ESSOS), a VMEX free-boundary vacuum equilibrium
 scaled to ARIES-CS (`volavgB`), 1,000 alphas from `s = 0.25`, 10 ms, the same
