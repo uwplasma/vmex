@@ -1409,7 +1409,7 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
 def test_vmex_essos_tracing_to_wall_example(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(EXAMPLES / "vmex_essos_tracing_to_wall.py", tmp_path, timeout=900)
-    assert out.count("struck the wall") == 2 and "Strikes in both fields:" in out
+    assert "max |dB|/|B|" in out and "strike the wall" in out
     assert re.search(r"stay inside +\d+ of 8", out)
     assert (tmp_path / "vmex_essos_tracing_to_wall.webp").stat().st_size > 10_000
 

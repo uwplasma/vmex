@@ -6,8 +6,8 @@ VMEX solves the vacuum Landreman-Paul QA equilibrium of the ESSOS coils.
 the VMEC field inside (in memory), the field from the LCFS out to the wall
 (``VmecExtender`` on the coils, tabulated by ESSOS ``InterpolatedField``) and
 the wall, 3 cm outside the LCFS.  Each orbit then stays inside, crosses the
-LCFS and comes back, or strikes the wall.  The same births traced through the
-direct (untabulated) exterior field check the table.
+LCFS and comes back, or strikes the wall.  The table is checked against the
+direct exterior field between the LCFS and the wall.
 """
 
 from dataclasses import replace
@@ -28,6 +28,7 @@ from vmex import optimize as opt
 from essos.coils import Coils
 from essos.constants import ONE_EV, PROTON_MASS, ELEMENTARY_CHARGE
 from essos.dynamics import Particles, Tracing
+from essos.fields import ExternalField
 from essos.surfaces import SurfaceRZFourier
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -51,27 +52,28 @@ births = jnp.stack([jax.random.uniform(k[0], (NPARTICLES,), minval=0.7, maxval=0
 particles = Particles(initial_xyz=births, mass=PROTON_MASS, charge=ELEMENTARY_CHARGE, energy=ENERGY_EV * ONE_EV,
                       initial_vparallel_over_v=jax.random.uniform(k[3], (NPARTICLES,), minval=-1, maxval=1))
 
-# 3. Trace from the axis to the wall, through the tabulated and the direct exterior field
-traces = {}
-for name, n in (("interpolated", GRID), ("direct", None)):
-    start = perf_counter()
-    setup = vj.essos_tracing_fields(wout, coils, wall=WALL, n=n, plasma="vacuum")
-    traces[name] = Tracing(**setup, model="GuidingCenterAdaptative", particles=particles, maxtime=TMAX,
-                           times_to_trace=1000, atol=1e-9, rtol=1e-9)
-    traces[name].trajectories.block_until_ready()
-    print(f"{name:12s} {perf_counter() - start:6.1f} s, struck the wall {traces[name].wall_hits.mean():.3f}")
-trace, direct = traces["interpolated"], traces["direct"]
+# 3. Fields and wall; the tabulated exterior field against the direct one between the LCFS and the wall
+setup = vj.essos_tracing_fields(wout, coils, wall=WALL, n=GRID, plasma="vacuum")
+direct = ExternalField(vj.essos_tracing_fields(wout, coils, wall=WALL, n=None, plasma="vacuum")["exterior_field"])
+points = jnp.asarray(np.asarray(SurfaceRZFourier.from_vmec(setup["field"], ntheta=16, nphi=32,
+                                                           offset=WALL / 2).gamma).reshape(-1, 3))
+exact = jax.vmap(direct.B)(points)
+error = np.linalg.norm(jax.vmap(setup["exterior_field"].B)(points) - exact, axis=1) / np.linalg.norm(exact, axis=1)
+print(f"Tabulated exterior field, {GRID}x{GRID}x{2 * GRID} nodes: max |dB|/|B| {error.max():.1e} midway to the wall")
 
+# 4. Trace from inside the LCFS to the wall
+start = perf_counter()
+trace = Tracing(**setup, model="GuidingCenterAdaptative", particles=particles, maxtime=TMAX,
+                times_to_trace=1000, atol=1e-9, rtol=1e-9)
+trace.trajectories.block_until_ready()
+print(f"Traced {NPARTICLES} protons for {TMAX:.0e} s in {perf_counter() - start:.1f} s")
 crossed, struck = np.isfinite(trace.lcfs_times), np.asarray(trace.wall_hits)
 fates = {"stay inside": ~crossed, "cross and return": crossed & ~struck & (trace.returns > 0),
          "strike the wall": struck}
 for label, mask in fates.items():
     print(f"{label:17s} {mask.sum():3d} of {NPARTICLES}")
-both = struck & direct.wall_hits
-gap = np.linalg.norm(trace.wall_positions[both] - direct.wall_positions[both], axis=1)
-print(f"Strikes in both fields: {both.sum()}, largest strike-point distance {gap.max(initial=0.0):.1e} m")
 
-# 4. Orbits in 3D, and their points near phi = 0 in the R, Z plane
+# 5. Orbits in 3D, and their points near phi = 0 in the R, Z plane
 colors = {"stay inside": "#3b6fb6", "cross and return": "#e08a1e", "strike the wall": "#c0392b"}
 vmec, wall = setup["field"], setup["wall"]
 lcfs = SurfaceRZFourier.from_vmec(vmec, ntheta=48, nphi=96)

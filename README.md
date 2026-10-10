@@ -440,6 +440,25 @@ surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX fr
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
+## Tracing from the axis to the wall
+
+Orbits do not end at the LCFS. With ESSOS (`vmex[coils]`), guiding centres move in VMEC coordinates
+inside, cross the LCFS at a root-found time, and continue in the field outside (coils or mgrid plus the
+plasma's virtual-casing field, tabulated once) until they strike a wall, come back in, or reach the end
+time. Below, 3 keV protons in the vacuum Landreman-Paul QA equilibrium, with a wall 3 cm outside the LCFS
+(`examples/vmex_essos_tracing_to_wall.py`).
+
+```python
+setup = vj.essos_tracing_fields(wout, coils, wall=0.03)     # field, exterior_field, wall
+trace = essos.dynamics.Tracing(**setup, model="GuidingCenterAdaptative", particles=particles, maxtime=4e-5)
+trace.wall_hits, trace.wall_positions, trace.returns
+```
+
+![Guiding centres that stay inside, cross the LCFS and return, or strike a wall 3 cm out](docs/_static/figures/readme_wall_tracing.webp)
+
+The equations, the exterior-field options, the interpolation error and the outputs are in the
+[wall-tracing guide](https://vmex.readthedocs.io/en/latest/howto/trace-to-the-wall.html).
+
 ## Accuracy and optional polishing
 
 A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged; it does not bound the continuous
