@@ -930,3 +930,98 @@ def test_ballooning_matches_frozen_cobravmec_on_3d_qa_seed():
         zeta0s=[0.0], npoints=801, nturns=3.75))[0, :, 0]
     np.testing.assert_allclose(lam[0], 5.284e-3, rtol=1e-2)
     assert lam[1] < 0.0
+
+
+@pytest.mark.parametrize('n', [1, 2, 4, 31])
+def test_selected_tridiagonal_value_and_nonuniform_derivatives(n):
+    """Independent dense HF oracle includes both coefficient directions."""
+    rng = np.random.default_rng(927+n)
+    d, e = jnp.asarray(rng.normal(size=n)), jnp.asarray(rng.normal(size=n-1))
+    dd, de = jnp.asarray(rng.normal(size=n)), jnp.asarray(rng.normal(size=n-1))
+    values, vectors = np.linalg.eigh(np.diag(d)+np.diag(e,1)+np.diag(e,-1))
+    u = vectors[:, -1]
+    expected = np.sum(u*u*dd)+2*np.sum(u[:-1]*u[1:]*de)
+    fun = stab._selected_tridiagonal_value
+    value, tangent = jax.jit(lambda d,e: jax.jvp(fun,(d,e),(dd,de)))(d,e)
+    np.testing.assert_allclose(value, values[-1], rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(tangent, expected, rtol=1e-10, atol=1e-12)
+    grad_d, grad_e = jax.jit(jax.grad(fun,argnums=(0,1)))(d,e)
+    np.testing.assert_allclose(grad_d, u*u, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(grad_e, 2*u[:-1]*u[1:], rtol=1e-10, atol=1e-12)
+    for step in [1e-3, 1e-4, 1e-5]:
+        fd = (fun(d+step*dd,e+step*de)-fun(d-step*dd,e-step*de))/(2*step)
+        np.testing.assert_allclose(fd,expected,rtol=1e-5,atol=1e-7)
+
+
+def test_selected_ballooning_stencil_batch_and_limits():
+    """Exact constant-coefficient sine spectrum, batch and scaling contracts."""
+    h = .125
+    g=jnp.ones((2,33))*jnp.array([.7,1.3])[:,None]
+    f=jnp.ones_like(g)*1.1
+    c=jnp.zeros_like(g)
+    exact=-4*g[:,0]/f[:,0]/h**2*jnp.sin(jnp.pi/64)**2
+    def selected(g,c,f,h):
+        return stab._max_eigenvalue_tridiag(g,c,f,h,eigensolver='selected')
+    actual=jax.jit(selected)(g,c,f,h)
+    np.testing.assert_allclose(actual,exact,rtol=1e-11)
+    np.testing.assert_allclose(actual,stab._max_eigenvalue_tridiag(g,c,f,h),rtol=1e-11)
+    np.testing.assert_allclose(selected(7*g,7*c,7*f,h),actual,rtol=1e-11)
+    np.testing.assert_allclose(jax.vmap(selected,in_axes=(0,0,0,None))(g,c,f,h),actual,rtol=1e-11)
+    with pytest.raises(ValueError,match='eigensolver'):
+        stab._max_eigenvalue_tridiag(g,c,f,h,eigensolver='invalid')
+
+
+def test_selected_reducible_and_cluster_derivative_status():
+    """A repeated maximum has no silently manufactured derivative."""
+    fun=stab._selected_tridiagonal_value
+    d=jnp.array([1.,3.,2.,3.]);e=jnp.zeros(3)
+    np.testing.assert_allclose(fun(d,e),3.,atol=1e-13)
+    assert np.isnan(jax.jvp(fun,(d,e),(jnp.arange(4.),jnp.ones(3)))[1])
+    d=jnp.array([1.,3.,2.,2.5])
+    np.testing.assert_allclose(jax.grad(fun)(d,e),[0.,1.,0.,0.],atol=1e-11)
+
+
+@pytest.mark.parametrize("scale", [1e-150, 1., 1e150])
+def test_selected_extreme_scale_and_negative_off_diagonal(scale):
+    d=jnp.array([1.,2.,3.,4.])*scale
+    e=jnp.array([-.2,-.3,-.4])*scale
+    dd=jnp.array([.2,-.7,.1,.5])*scale
+    value,tangent=jax.jvp(stab._selected_tridiagonal_value,(d,e),(dd,jnp.zeros_like(e)))
+    w,u=np.linalg.eigh(np.diag(d/scale)+np.diag(e/scale,1)+np.diag(e/scale,-1))
+    np.testing.assert_allclose(value/scale,w[-1],rtol=1e-12)
+    np.testing.assert_allclose(tangent/scale,np.sum(u[:,-1]**2*dd/scale),rtol=1e-10)
+
+
+def test_selected_resolved_and_unresolved_small_gap():
+    e=jnp.zeros(3)
+    for gap,finite in [(1e-8,True),(1e-15,False)]:
+        d=jnp.array([1.,2.,3.,3.+gap])
+        tangent=jax.jvp(stab._selected_tridiagonal_value,(d,e),(jnp.arange(4.),e))[1]
+        assert bool(jnp.isfinite(tangent)) == finite
+        if finite:
+            np.testing.assert_allclose(tangent,3.,rtol=1e-10)
+
+
+def test_selected_rejects_nested_derivatives():
+    d=jnp.array([1.,2.,3.,4.]);e=jnp.array([.2,.3,.4])
+    with pytest.raises(NotImplementedError,match="first derivatives"):
+        jax.hessian(lambda d:stab._selected_tridiagonal_value(d,e))(d)
+
+
+@pytest.mark.parametrize('n', [4, 32, 128])
+@pytest.mark.parametrize('coupling_eps', [0., .25, 1., 4.])
+def test_selected_near_threshold_gap_qualifies_vector(n, coupling_eps):
+    """Absolute residual alone accepts a wrong deflated near-cluster HF rule."""
+    eps=np.finfo(float).eps
+    d=np.ones(n);d[-1]+=260*eps
+    e=np.zeros(n-1);e[-1]=coupling_eps*eps
+    de=np.zeros(n-1);de[-1]=1.
+    # Exact two-by-two oracle: the remaining diagonal blocks are deflated.
+    expected=2*e[-1]/np.hypot(d[-1]-d[-2],2*e[-1])
+    value,tangent=jax.jit(lambda d,e:jax.jvp(
+        stab._selected_tridiagonal_value,(d,e),
+        (jnp.zeros_like(d),jnp.asarray(de))))(jnp.asarray(d),jnp.asarray(e))
+    np.testing.assert_allclose(value,1.+260*eps,atol=8*eps,rtol=0.)
+    # Numerically unresolved vectors may return NaN, never a bad finite rule.
+    if np.isfinite(tangent):
+        np.testing.assert_allclose(tangent,expected,atol=np.sqrt(eps),rtol=0.)
