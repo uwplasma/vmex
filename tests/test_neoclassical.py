@@ -56,9 +56,18 @@ def test_epsilon_effective_reads_both_neo_result_and_surface_conventions(monkeyp
     np.testing.assert_allclose(surfaces, [0.0, 1.0])
 
 
-def test_epsilon_effective_rejects_lasym_before_importing_optional_backend():
-    with np.testing.assert_raises_regex(NotImplementedError, "LASYM"):
-        neoclassical.epsilon_effective_from_wout(SimpleNamespace(lasym=True))
+@pytest.mark.parametrize("from_wout", [False, True, "object"])
+def test_epsilon_effective_rejects_lasym_with_an_old_backend(monkeypatch, from_wout):
+    monkeypatch.setattr(neoclassical, "_neo_imports", lambda: (dict, None))
+    monkeypatch.setitem(sys.modules, "neo_jax", SimpleNamespace(
+        BoozerData=SimpleNamespace(__dataclass_fields__={})))
+    with pytest.raises(NotImplementedError, match="LASYM"):
+        if from_wout == "object":  # any Boozer object carrying sine tables, not only a dict
+            neoclassical.epsilon_effective_from_boozer(SimpleNamespace(bmns_b=np.ones((2, 3))))
+        elif from_wout:
+            neoclassical.epsilon_effective_from_wout(SimpleNamespace(lasym=True))
+        else:
+            neoclassical.epsilon_effective_from_boozer({"bmns_b": np.ones((2, 3))})
 
 
 def test_epsilon_effective_default_is_library_safe():
@@ -109,8 +118,9 @@ def test_diagnostic_config_matches_converged_neo_on_the_qi_deck():
     np.testing.assert_allclose(values, [5.239e-4, 4.838e-4, 4.557e-4], rtol=0.05)
 
 
+@pytest.mark.parametrize("lasym", [False, True])
 def test_epsilon_effective_from_wout_snaps_surfaces_and_negates_the_nu_table(
-    monkeypatch,
+    monkeypatch, lasym,
 ):
     """The in-memory adapter is a pure relabelling of a booz_xform run.
 
@@ -125,6 +135,9 @@ def test_epsilon_effective_from_wout_snaps_surfaces_and_negates_the_nu_table(
     captured = {}
 
     class FakeBoozXform:
+        asym = lasym
+        rmns_b = zmnc_b = bmns_b = np.full((2, 2), .03)
+        numnc_b = numns
         s_in = np.linspace(0.05, 0.95, 10)
         nfp = 3
         xm_b, xn_b = np.array([0, 1]), np.array([0, 3])
@@ -150,7 +163,8 @@ def test_epsilon_effective_from_wout_snaps_surfaces_and_negates_the_nu_table(
     monkeypatch.setattr(booz_xform_jax, "Booz_xform", FakeBoozXform)
     monkeypatch.setattr(neoclassical, "_neo_imports", lambda: (dict, run_neo))
 
-    wout = SimpleNamespace(lasym=False)
+    monkeypatch.setattr(neoclassical, "_require_asymmetric_neo", lambda: None)
+    wout = SimpleNamespace(lasym=lasym)
     s, values = neoclassical.epsilon_effective_from_wout(
         wout, surfaces=(0.24, 0.26, 0.77), mboz=8, nboz=6)
 
@@ -160,6 +174,11 @@ def test_epsilon_effective_from_wout_snaps_surfaces_and_negates_the_nu_table(
     assert captured["surfs"] == [2, 7]
     booz = captured["booz"]
     assert booz["ns_b"] == 2 and booz["nfp_b"] == 3
+    assert booz["mode_first"] is True and booz["asym"] is lasym
+    if lasym:
+        np.testing.assert_allclose(booz["pmnc_b"], -numns)
+        for key in ("rmns_b", "zmnc_b", "bmns_b"):
+            np.testing.assert_allclose(booz[key], .03)
     np.testing.assert_allclose(booz["pmns_b"], -numns)
     np.testing.assert_allclose(booz["iota_b"], FakeBoozXform.iota[[2, 7]])
     np.testing.assert_allclose(s, FakeBoozXform.s_b)
@@ -192,3 +211,63 @@ print(json.dumps([list(map(float, s)), list(map(float, values))]))
     np.testing.assert_allclose(s, [0.19387755, 0.5, 0.80612245], rtol=0, atol=1e-7)
     np.testing.assert_allclose(
         values, [1.90173919e-8, 1.09848947e-8, 1.84568599e-8], rtol=5e-5)
+
+
+def test_neo_summary_subset_keeps_all_sine_partners():
+    from vmex.core.plotting import _neo_surface_subset
+
+    data = {"ns_b": 5, "asym": True, "mode_first": True}
+    for key in ("iota_b", "buco_b", "bvco_b", "s_b"):
+        data[key] = np.arange(5)
+    keys = ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b",
+            "rmns_b", "zmnc_b", "pmnc_b", "bmns_b")
+    for key in keys:
+        data[key] = np.arange(10).reshape(2, 5)
+    subset = _neo_surface_subset(data)
+    assert subset["ns_b"] == 3 and subset["mode_first"] and subset["asym"]
+    for key in keys:
+        np.testing.assert_array_equal(subset[key], data[key][:, [0, 2, 4]])
+
+
+# Under the stellarator reflection (theta, zeta, Z) -> (-theta, -zeta, -Z) the
+# sine partner of a cosine-led table and the cosine partner of a sine-led one
+# change sign; the mirrored equilibrium has the same effective ripple.
+_MIRROR = ("rmns", "zmnc", "lmnc", "bmns", "bsubumns", "bsubvmns")
+
+
+@pytest.mark.full  # nightly: two solves, five NEO evaluations
+def test_epsilon_effective_lasym_identities():
+    """End to end through booz_xform_jax and NEO_JAX with every sine partner.
+
+    NEO's field-line integration at the diagnostic accuracy turns round-off in
+    the Boozer tables into ~1 % changes, so identities hold to 3 %; the
+    asymmetry itself moves the ripple 45x (measured), far outside that.
+    """
+    import dataclasses
+    import re
+
+    neo_jax = pytest.importorskip("neo_jax")
+    if "bmns" not in neo_jax.BoozerData.__dataclass_fields__:
+        pytest.skip("NEO_JAX without sine Boozer spectra")
+    import vmex as vj
+    from vmex import optimize as opt
+
+    def ripple(wout):
+        return neoclassical.epsilon_effective_from_wout(
+            wout, surfaces=[0.25, 0.5, 0.8], config=neoclassical.diagnostic_neo_config())[1]
+
+    text = (DATA_DIR / "input.LandremanPaul2021_QA_lowres").read_text()
+    symmetric = opt.solve_equilibrium(vj.VmecInput.from_indata_text(text), verbose=False).wout
+    padded = dataclasses.replace(symmetric, lasym=True, **{
+        name: 0 * np.asarray(getattr(symmetric, partner)) for name, partner in zip(
+            _MIRROR, ("rmnc", "zmns", "lmns", "bmnc", "bsubumnc", "bsubvmnc"))})
+    np.testing.assert_allclose(ripple(padded), ripple(symmetric), rtol=3e-2)
+
+    text = re.sub(r"LASYM\s*=\s*\S+", "", text, flags=re.I).replace(
+        "&INDATA", "&INDATA\n  LASYM = T\n  RBS(1,1) = 0.02\n  ZBC(1,1) = 0.02\n  RBS(0,1) = 0.01", 1)
+    asymmetric = opt.solve_equilibrium(vj.VmecInput.from_indata_text(text), verbose=False).wout
+    mirrored = dataclasses.replace(asymmetric, **{
+        name: -np.asarray(getattr(asymmetric, name)) for name in _MIRROR})
+    reference = ripple(asymmetric)
+    np.testing.assert_allclose(ripple(mirrored), reference, rtol=3e-2)
+    assert np.all(reference > 10 * ripple(dataclasses.replace(asymmetric, lasym=False)))
