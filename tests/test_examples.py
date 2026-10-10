@@ -202,6 +202,7 @@ EXECUTED_EXAMPLES = {
     "examples/vmex_fixed_free_boundary_comparison.py",
     "examples/vmex_get_B_gradB.py",
     "examples/vmex_get_B_outside_plasma.py",
+    "examples/vmex_interpolated_particle_tracing.py",
     "examples/vmex_mrx_comparison.py",
 }
 
@@ -1401,6 +1402,18 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
         bounded = re.search(r"Exterior trace QA: (\d+)/(\d+) lines remained", out)
         assert bounded is not None and int(bounded.group(1)) > 0
     assert (tmp_path / output).stat().st_size > 10_000
+
+
+# Smoke on one office core, mostly XLA compilation of two traces.
+@pytest.mark.full  # nightly: needs ESSOS with InterpolatedField.around (uwplasma/ESSOS#135, #159)
+def test_vmex_interpolated_particle_tracing_example(tmp_path):
+    fields = pytest.importorskip("essos.fields")
+    if not hasattr(getattr(fields, "InterpolatedField", None), "around"):
+        pytest.skip("ESSOS without InterpolatedField.around (uwplasma/ESSOS#135, #159)")
+    out = _run_example(EXAMPLES / "vmex_interpolated_particle_tracing.py", tmp_path, timeout=900)
+    strikes = re.search(r"Wall strikes in both fields: (\d+)", out)
+    assert strikes is not None and out.count("struck the wall") == 2
+    assert (tmp_path / "vmex_interpolated_particle_tracing.png").stat().st_size > 10_000
 
 
 def test_vmex_mrx_comparison_example(tmp_path):

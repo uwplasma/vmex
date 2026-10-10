@@ -65,6 +65,10 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
     stop after leaving the LCFS neighborhood.
     The finite-beta coil fixture is reproduced by ESSOS
     `examples/coil_optimization/optimize_coils_finite_beta_vmex.py`.
+  - `vmex_interpolated_particle_tracing.py` *(preview)* — guiding centres
+    from a VMEX equilibrium and ESSOS coils to a wall with
+    `vj.essos_tracing_fields`, tabulated exterior field (ESSOS
+    `InterpolatedField.around`, needs uwplasma/ESSOS#135, #159) against direct.
   - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
     [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
     assume nested surfaces, and compare Poincare sections, iota, the toroidal
