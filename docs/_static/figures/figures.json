@@ -586,6 +586,25 @@
         "docs/explanation/validation.md"
       ],
       "note": "Needs the optional mrx package (pip install mrx). VMEX solves the deck to ns = 65 and MRX relaxes that field with 10 Newton steps on (12, 16, 16), p = 3; the example writes this WebP beside its PNG. The bytes come from one run and were not re-derived."
+    },
+    {
+      "path": "docs/_static/figures/readme_exact_equilibria.webp",
+      "sha256": "0afa0dd3a586d9475af8355b8531dbb77497b437a5936cf8ce8f8d2457b69baa",
+      "bytes": 65622,
+      "generator": "https://github.com/rogeriojorge/vmex-benchmark-analytical/blob/main/benchmarks/plot_figures.py",
+      "command": "python benchmarks/plot_figures.py (vmex-benchmark-analytical), then a lossless WebP of figures/vmex_readme.png",
+      "inputs": [
+        "https://github.com/rogeriojorge/vmex-benchmark-analytical/blob/main/results/asymmetric/summary.json"
+      ],
+      "record": null,
+      "generated": "2026-10-10",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Drawn from vmex-benchmark-analytical records only; the VMEX runs are seeded from the exact geometry (project_integer_vmex.py --solve, ftol 1e-11). Lossless WebP."
     }
   ]
 }
