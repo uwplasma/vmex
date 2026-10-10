@@ -7,9 +7,9 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
-- Floor `essos>=0.20.1`: collisional `vmex --trace` now uses the per-pair
-  Coulomb logarithms of ESSOS #128 (0.20.0 used the electron one for every
-  pair). The nightly floor lane installs essos 0.20.1 with diffrax 0.7.2.
+- Floor `essos>=0.20.2` (0.20.1 brought per-pair Coulomb logarithms to collisional
+  `--trace`). `vj.essos_tracing_fields(wout, coils, wall=0.03)` gives ESSOS `Tracing`
+  the VMEC field, tabulated exterior field and wall (`examples/vmex_essos_tracing_to_wall.py`).
 - `VmecInteriorField` and the live-state field spectra work without stellarator
   symmetry (`LASYM = T`): the sine families `rmns`, `zmnc`, `lmnc` and the
   `B^u`/`B^v` sine tables are evaluated, and symmetric results are unchanged
