@@ -429,6 +429,22 @@ def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
         return np.concatenate(out)[:n]
 
 
+def _particle_parameters(energy_eV, mass, charge):
+    values = []
+    for name, value in (("energy_eV", energy_eV), ("mass", mass), ("charge", charge)):
+        if value is not None:
+            if np.ndim(value) != 0:
+                raise ValueError(f"{name} must be a finite scalar")
+            try:
+                value = float(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(f"{name} must be a finite scalar") from exc
+            if not np.isfinite(value) or (value == 0 if name == "charge" else value <= 0):
+                raise ValueError(f"{name} must be finite and {'nonzero' if name == 'charge' else 'positive'}")
+        values.append(value)
+    return tuple(values)
+
+
 def trace_alphas(
     source: Any,
     *,
@@ -449,10 +465,13 @@ def trace_alphas(
     mboz: int = 32,
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
+    energy_eV: float | None = None,
+    mass: float | None = None,
+    charge: float | None = None,
     progress: Any = None,
     devices: Any = None,
 ) -> AlphaTracingResult:
-    """Trace fusion alphas through a wout file or in-memory equilibrium.
+    """Trace charged guiding centers; defaults remain fusion-born alphas.
 
     Parameters
     ----------
@@ -481,6 +500,10 @@ def trace_alphas(
         ``"dopri8"`` take fixed steps of ``timestep``.
     compact:
         Enable survivor compaction when supported; ``False`` disables it.
+    energy_eV, mass, charge:
+        Optional kinetic energy [eV], mass [kg] and signed charge [C].
+        Each omitted value retains its fusion-alpha default. This does not
+        change the birth measure or the default collisional background.
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
@@ -491,11 +514,19 @@ def trace_alphas(
         two A4000s 3x slower than one.  Pass ``jax.devices()`` to split
         over every GPU anyway.
     """
+    energy_eV, mass, charge = _particle_parameters(energy_eV, mass, charge)
     import jax
 
     require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
+
+    mass = constants.ALPHA_PARTICLE_MASS if mass is None else mass
+    charge = constants.ALPHA_PARTICLE_CHARGE if charge is None else charge
+    energy = constants.FUSION_ALPHA_PARTICLE_ENERGY if energy_eV is None else energy_eV * constants.ELEMENTARY_CHARGE
+    speed = float(np.sqrt(2 * energy / mass))
+    if not np.isfinite(speed) or speed <= 0:
+        raise ValueError("energy and mass must produce a finite positive speed")
 
     if method not in METHODS:
         raise ValueError(f"method must be one of {', '.join(METHODS)}")
@@ -527,11 +558,9 @@ def trace_alphas(
     compile_start = _COMPILE_S[0]
     field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance)
     births = sample_births(field, nparticles, s=s, birth=birth, seed=seed, ne0=ne0, T0_keV=T0_keV)
-    mass, charge = constants.ALPHA_PARTICLE_MASS, constants.ALPHA_PARTICLE_CHARGE
-    energy = constants.FUSION_ALPHA_PARTICLE_ENERGY
     start = time.perf_counter()
     trace = trace_boozer(
-        field, *births.T, speed=float(np.sqrt(2 * energy / mass)), mass=mass,
+        field, *births.T, speed=speed, mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
         species=background_species(ne0, T0_keV) if collisions else None,
@@ -576,5 +605,7 @@ def trace_alphas(
         compile_time_s=_COMPILE_S[0] - compile_start,
         devices=len(devices), platform=devices[0].platform,
         versions={name: version(name) for name in ("vmex", "essos", "jax", "booz_xform_jax")},
+        particle_mass_kg=float(mass), particle_charge_C=float(charge),
+        particle_energy_eV=float(energy / constants.ELEMENTARY_CHARGE),
     )
     return result
