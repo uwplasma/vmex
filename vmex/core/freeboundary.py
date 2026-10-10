@@ -59,10 +59,12 @@ from .errors import (
     JAC75_FLAG,
     MORE_ITER_FLAG,
     NORM_TERM_FLAG,
+    PHIEDGE_ERROR_FLAG,
     SUCCESSFUL_TERM_FLAG,
     VmecConvergenceError,
     VmecError,
     VmecInputError,
+    WERROR_MESSAGES,
 )
 from .fields import magnetic_fields, metric_elements
 from .fourier import ModeTable
@@ -1092,6 +1094,12 @@ def _vacuum_step(
     if fb.ivac == 0:
         # vacuum.f first-call block: promote ivac and print grid/current info.
         fb.ivac = 1
+        if fb.rbtor * float(out["bsubvvac"]) < 0.0:  # vacuum.f: rbtor*bsubvvac < 0
+            raise VmecError(
+                WERROR_MESSAGES[PHIEDGE_ERROR_FLAG],
+                hint=(f"R * BTOR(plasma) = {fb.rbtor:.3e} opposes R * BTOR(vac) = "
+                      f"{float(out['bsubvvac']):.3e}: flip the sign of PHIEDGE"),
+                ier_flag=PHIEDGE_ERROR_FLAG)
         if verbose:
             emit(
                 f"\n  In VACUUM, np = {basis.nfp:2d}  mf = {basis.mf:2d}  nf = {basis.nf:2d}"
