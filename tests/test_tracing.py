@@ -848,5 +848,42 @@ def test_trace_reports_and_warns_on_a_truncated_spectrum(solovev_wout, traced, m
     assert value == pytest.approx(tracing.spectral_truncation(read_wout(solovev_wout)))
     assert np.isfinite(value) and value >= 0
     monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
-    with pytest.warns(RuntimeWarning, match="spectrum is truncated"):
+    with pytest.warns(RuntimeWarning, match="Equilibrium spectrum truncated"):
         trace_alphas(solovev_wout, **TRACE_KWARGS)
+
+
+def test_truncation_message_names_the_value_the_fix_and_the_switch():
+    from vmex.core.tracing import truncation_message
+
+    text = truncation_message(1.0e-2, "--trace-no-resolution-check")
+    assert "1.0e-02 of m = 1" in text and "mpol = ntor >= 6" in text
+    assert "Monte Carlo error" in text and text.endswith("pass --trace-no-resolution-check to silence.")
+
+
+def test_trace_resolution_check_can_be_silenced(solovev_wout, monkeypatch):
+    import warnings
+
+    import vmex.core.tracing as tracing
+
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        trace_alphas(solovev_wout, check_resolution=False, **TRACE_KWARGS)
+
+
+@pytest.mark.parametrize("silenced", [False, True])
+def test_cli_trace_prints_the_truncation_warning_once(solovev_wout, tmp_path, monkeypatch, silenced):
+    import warnings
+
+    import vmex.core.tracing as tracing
+
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    argv = [str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--trace-particles", "4",
+            "--trace-tmax", "1e-6", "--trace-times", "4", "--mbooz", "8", "--nbooz", "8"]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(io.StringIO()), warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        rc = cli.main(argv + ["--trace-no-resolution-check"] * silenced)
+    assert rc == 0
+    assert buffer.getvalue().count("Equilibrium spectrum truncated") == (0 if silenced else 1)
+    assert silenced or "pass --trace-no-resolution-check to silence." in buffer.getvalue()

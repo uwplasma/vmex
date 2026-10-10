@@ -217,6 +217,14 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     return BoozerField.from_booz_xform(bx, psi0, mode_tolerance), bx
 
 
+def truncation_message(truncation: float, silence: str) -> str:
+    """The warning for a spectrum whose :func:`spectral_truncation` is ``truncation``."""
+    return (f"Equilibrium spectrum truncated: edge modes (m = mpol - 1 or |n| = ntor) are {truncation:.1e} "
+            f"of m = 1 (threshold {RESOLUTION_TOLERANCE:g}); alpha loss fractions can be several times too "
+            "high. Re-solve with larger mpol and ntor (try mpol = ntor >= 6) and check that the loss fraction "
+            f"changes by less than its Monte Carlo error, or pass {silence} to silence.")
+
+
 def spectral_truncation(wout) -> float:
     """Largest LCFS ``R, Z`` amplitude on the truncation edge of ``wout``.
 
@@ -481,6 +489,7 @@ def trace_alphas(
     mode_tolerance: float = MODE_TOLERANCE,
     progress: Any = None,
     devices: Any = None,
+    check_resolution: bool = True,
 ) -> AlphaTracingResult:
     """Trace fusion alphas through a wout file or in-memory equilibrium.
 
@@ -520,6 +529,9 @@ def trace_alphas(
         cross-device check, which costs little between CPU cores but made
         two A4000s 3x slower than one.  Pass ``jax.devices()`` to split
         over every GPU anyway.
+    check_resolution:
+        Warn when :func:`spectral_truncation` exceeds
+        :data:`RESOLUTION_TOLERANCE` (see :func:`truncation_message`).
     """
     import jax
 
@@ -550,12 +562,8 @@ def trace_alphas(
         b_scale, r_scale = aries_cs_scales(wout, scale)
         wout = scale_wout(wout, b_scale=b_scale, r_scale=r_scale)
     truncation = spectral_truncation(wout)
-    if truncation > RESOLUTION_TOLERANCE:
-        warnings.warn(
-            "the equilibrium's Fourier spectrum is truncated: its LCFS modes at m = mpol - 1 or |n| = ntor "
-            f"reach {truncation:.1e} of the m = 1 amplitude (above {RESOLUTION_TOLERANCE:g}), so the alpha "
-            "loss fraction may be set by the truncation rather than by the field; raise mpol and ntor until "
-            "it stops changing", RuntimeWarning, stacklevel=2)
+    if check_resolution and truncation > RESOLUTION_TOLERANCE:
+        warnings.warn(truncation_message(truncation, "check_resolution=False"), RuntimeWarning, stacklevel=2)
     if timestep is None:
         timestep = TIMESTEP * float(wout.Aminor_p) / SCALE_TARGETS["volavgB"][1]
     if not _COMPILE_S[1]:
