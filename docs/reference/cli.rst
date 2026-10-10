@@ -92,6 +92,9 @@ Options
      - ``E_r`` [kV/m] for ``--neoclassical`` (default: the ambipolar root).
    * - ``--trace-no-scale``
      - Trace the equilibrium as given.
+   * - ``--trace-no-resolution-check``
+     - Do not warn on a truncated equilibrium spectrum (edge modes above
+       ``3e-3`` of ``m = 1``).
    * - ``--trace-tmax X`` / ``--trace-timestep X``
      - Tracing horizon / integrator step in seconds (defaults ``1e-2`` /
        ``2.5e-7`` times ``Aminor_p / 1.7044 m``).

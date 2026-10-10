@@ -804,3 +804,86 @@ def test_trace_devices_default_to_every_cpu_or_one_gpu(solovev_wout, monkeypatch
     monkeypatch.setattr(jax, "devices", lambda: gpus)
     trace_alphas(solovev_wout, **TRACE_KWARGS)
     assert seen[-1] == gpus[:1]
+
+
+def _spectrum(decay, *, mpol=4, ntor=2, nfp=3, lasym=False):
+    from types import SimpleNamespace
+
+    modes = [(m, n) for m in range(mpol) for n in range(-ntor, ntor + 1) if m or n >= 0]
+    xm = np.array([m for m, _ in modes])
+    xn = np.array([n * nfp for _, n in modes])
+    amplitude = np.where((xm == 0) & (xn == 0), 10.0, decay ** (xm + np.abs(xn) // nfp))
+    rmnc = np.vstack([0.5 * amplitude, amplitude])
+    wout = SimpleNamespace(xm=xm, xn=xn, nfp=nfp, lasym=lasym, rmnc=rmnc, zmns=np.zeros_like(rmnc))
+    if lasym:
+        wout.rmns, wout.zmnc = np.zeros_like(rmnc), rmnc.copy()
+    return wout
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_spectral_truncation_reads_the_lcfs_tail_relative_to_m1(lasym):
+    from vmex.core.tracing import RESOLUTION_TOLERANCE, spectral_truncation
+
+    # m = 1, n = 0 has amplitude decay; the edge peaks at m = 0, |n| = 2 with decay^2
+    for decay, expected in ((1e-3, 1e-3), (0.3, 0.3)):
+        value = spectral_truncation(_spectrum(decay, lasym=lasym))
+        assert value == pytest.approx(expected, rel=1e-12)
+    assert spectral_truncation(_spectrum(1e-3)) < RESOLUTION_TOLERANCE < spectral_truncation(_spectrum(0.3))
+    # without toroidal modes only the poloidal edge counts
+    assert spectral_truncation(_spectrum(0.1, ntor=0)) == pytest.approx(0.1 ** 2, rel=1e-12)
+
+
+def test_spectral_truncation_is_undefined_without_an_m1_mode():
+    from vmex.core.tracing import spectral_truncation
+
+    wout = _spectrum(0.1)
+    wout.rmnc[:, wout.xm == 1] = 0.0
+    assert np.isnan(spectral_truncation(wout))
+
+
+def test_trace_reports_and_warns_on_a_truncated_spectrum(solovev_wout, traced, monkeypatch):
+    import vmex.core.tracing as tracing
+
+    value = traced.metadata["spectral_truncation"]
+    assert value == pytest.approx(tracing.spectral_truncation(read_wout(solovev_wout)))
+    assert np.isfinite(value) and value >= 0
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    with pytest.warns(RuntimeWarning, match="Equilibrium spectrum truncated"):
+        trace_alphas(solovev_wout, **TRACE_KWARGS)
+
+
+def test_truncation_message_names_the_value_the_fix_and_the_switch():
+    from vmex.core.tracing import truncation_message
+
+    text = truncation_message(1.0e-2, "--trace-no-resolution-check")
+    assert "1.0e-02 of m = 1" in text and "mpol = ntor >= 6" in text
+    assert "Monte Carlo error" in text and text.endswith("pass --trace-no-resolution-check to silence.")
+
+
+def test_trace_resolution_check_can_be_silenced(solovev_wout, monkeypatch):
+    import warnings
+
+    import vmex.core.tracing as tracing
+
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        trace_alphas(solovev_wout, check_resolution=False, **TRACE_KWARGS)
+
+
+@pytest.mark.parametrize("silenced", [False, True])
+def test_cli_trace_prints_the_truncation_warning_once(solovev_wout, tmp_path, monkeypatch, silenced):
+    import warnings
+
+    import vmex.core.tracing as tracing
+
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    argv = [str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--trace-particles", "4",
+            "--trace-tmax", "1e-6", "--trace-times", "4", "--mbooz", "8", "--nbooz", "8"]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(io.StringIO()), warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        rc = cli.main(argv + ["--trace-no-resolution-check"] * silenced)
+    assert rc == 0
+    assert buffer.getvalue().count("Equilibrium spectrum truncated") == (0 if silenced else 1)
+    assert silenced or "pass --trace-no-resolution-check to silence." in buffer.getvalue()

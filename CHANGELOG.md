@@ -7,6 +7,12 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `trace_alphas` and `vmex --trace` record `spectral_truncation`, the LCFS
+  Fourier amplitude at `m = mpol - 1` or `|n| = ntor` relative to `m = 1`, and
+  warn above 3e-3: on the Landreman-Paul QA coils an mpol = ntor = 5
+  free-boundary WOUT loses 6.9 % of its alphas against 0.7-0.9 % in the coil
+  field, and mpol = ntor = 6 (1.4e-3) loses 0.7-1.1 %. `--trace-no-resolution-check`
+  (`check_resolution=False`) silences the warning.
 - Floor `essos>=0.20.1`: collisional `vmex --trace` now uses the per-pair
   Coulomb logarithms of ESSOS #128 (0.20.0 used the electron one for every
   pair). The nightly floor lane installs essos 0.20.1 with diffrax 0.7.2.

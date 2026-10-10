@@ -36,6 +36,7 @@ its binomial error:
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
 | `--trace-ne0 N0`, `--trace-te0 T0` | `4e20`, `12` | on-axis electron density [m^-3] and temperature [keV] | none |
 | `--trace-no-scale` | off | trace the equilibrium at its own size and field | none |
+| `--trace-no-resolution-check` | off | skip the truncated-spectrum warning | none |
 | `--scale-target axis` | `volavgB` | ARIES-CS convention of the in-memory scaling | none |
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
@@ -212,6 +213,37 @@ convergence section (500 alphas, 5 ms, against adaptive Dopri8 at `1e-9`):
 All three pass the `1e-3` gate; `3e-7` keeps a sixfold margin. Loosening the
 tolerance tenfold saves only a quarter of the time, because an eighth-order
 method's step count grows as `tolerance^(-1/8)`.
+
+## Equilibrium resolution
+
+The tracer follows the field of the WOUT, so it is only as accurate as the
+equilibrium. Alpha losses from a nearly quasi-symmetric field are set by
+symmetry-breaking `|B|` components of order 1e-3, the same size as the error of
+an under-resolved Fourier spectrum. `trace_alphas` records
+`metadata["spectral_truncation"]`, the largest LCFS `R, Z` amplitude at
+`m = mpol - 1` or `|n| = ntor` relative to the `m = 1, n = 0` amplitude, and
+warns above `RESOLUTION_TOLERANCE = 3e-3` with the value, the fix (re-solve
+with larger `mpol` and `ntor`, e.g. 6, until the loss fraction moves by less
+than its Monte Carlo error) and the switch that silences it
+(`--trace-no-resolution-check`, or `check_resolution=False` in Python).
+
+The Landreman-Paul QA coils (ESSOS), a VMEX free-boundary vacuum equilibrium
+scaled to ARIES-CS (`volavgB`), 1,000 alphas from `s = 0.25`, 10 ms, the same
+births in every row:
+
+| field | truncation | `\|B\|` error vs coils at `s = 0.25` (max) | lost % |
+|---|---|---|---|
+| WOUT, mpol = ntor = 5, ns = 31 (Boozer, ESSOS VMEC, SIMPLE, FIRM3D) | 1.0e-2 | 2.8e-3 | 6.9 / 7.1 / 5.6 / 6.9 |
+| WOUT, mpol = ntor = 5, ns = 101 | 1.1e-2 | 2.8e-3 | (field unchanged) |
+| WOUT, mpol = ntor = 6, ns = 31 (Boozer, ESSOS VMEC, SIMPLE, FIRM3D) | 1.4e-3 | 8.2e-4 | 0.9 / 1.1 / 1.1 / 1.1 |
+| WOUT, mpol = ntor = 6, ns = 51 (Boozer) | | | 0.7 |
+| coils, Cartesian guiding centre, tricubic grid 64 / 96 | | 7.7e-8 | 0.7 / 0.9 |
+
+Every code agrees on a given WOUT (the mpol = 5 losses include all seven coil
+losses), and neither the mode cut (`2e-4` to `0`: 6.9 to 7.7 %), the Boozer
+resolution (32 to 64), the integrator (fixed RK4, adaptive Dopri8 from `3e-7`
+to `1e-10`: 6.2-7.1 %) nor `ns` moves the mpol = 5 result. Raise `mpol` and
+`ntor` until the loss fraction stops changing.
 
 ## Against SIMPLE and SIMSOPT
 
