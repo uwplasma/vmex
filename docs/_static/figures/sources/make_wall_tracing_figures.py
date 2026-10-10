@@ -7,12 +7,11 @@
 - ``wall_tracing_strikes.webp``: where the strikes land on the wall, unrolled
   in toroidal and poloidal angle, coloured by strike time.
 - ``wall_tracing_interpolation.webp``: error of the tabulated exterior field
-  between the LCFS and the wall against the grid size, and the cost of a trace
-  through each table against the direct field.
+  between the LCFS and the wall against the grid size.
 
 The setup is ``examples/vmex_essos_tracing_to_wall.py``: the vacuum
 Landreman-Paul QA equilibrium, its ESSOS coils, 3 keV protons and a wall 3 cm
-outside the LCFS.  About 10 minutes on 8 CPU cores.
+outside the LCFS.  About 30 minutes on an idle 36-core workstation.
 
 Usage::
 
@@ -23,7 +22,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from time import perf_counter
 
 import jax
 import jax.numpy as jnp
@@ -67,12 +65,11 @@ def _particles(n: int, seed: int = 0) -> Particles:
                      initial_vparallel_over_v=jax.random.uniform(k[3], (n,), minval=-1, maxval=1))
 
 
-def _trace(setup: dict, particles: Particles) -> tuple[Tracing, float]:
-    start = perf_counter()
+def _trace(setup: dict, particles: Particles) -> Tracing:
     trace = Tracing(**setup, model="GuidingCenterAdaptative", particles=particles, maxtime=TMAX,
                     times_to_trace=1000, atol=1e-9, rtol=1e-9)
     trace.trajectories.block_until_ready()
-    return trace, perf_counter() - start
+    return trace
 
 
 def main() -> None:
@@ -85,48 +82,33 @@ def main() -> None:
     vmec, wall = direct["field"], direct["wall"]
     lcfs = SurfaceRZFourier.from_vmec(vmec, ntheta=64, nphi=128)
 
-    # Interpolation error between the LCFS and the wall, and trace cost
+    # Interpolation error between the LCFS and the wall
     exterior = ExternalField(direct["exterior_field"])
     shells = [np.asarray(SurfaceRZFourier.from_vmec(vmec, ntheta=24, nphi=48, offset=d).gamma).reshape(-1, 3)
               for d in np.linspace(0.003, WALL, 6)]
     points = jnp.asarray(np.concatenate(shells))
     exact = jax.vmap(exterior.B)(points)
-    errors, tabulate, timing = [], [], []
-    few = _particles(32, seed=1)
-    _, direct_time = _trace(direct, few)
-    _, direct_time = _trace(direct, few)  # warm
+    errors = []
     for n in GRIDS:
-        start = perf_counter()
         table = InterpolatedField.around(direct["exterior_field"], wall, n=n, stellsym=True)
-        jax.block_until_ready(table.coefficients)
-        tabulate.append(perf_counter() - start)
         rel = np.linalg.norm(jax.vmap(table.B)(points) - exact, axis=1) / np.linalg.norm(exact, axis=1)
         errors.append((np.median(rel), rel.max()))
-        setup = dict(direct, exterior_field=table)
-        _trace(setup, few)
-        timing.append(_trace(setup, few)[1])
-        print(f"n = {n}: median {errors[-1][0]:.1e}, max {errors[-1][1]:.1e}, tabulation {tabulate[-1]:.1f} s, "
-              f"trace {timing[-1]:.1f} s (direct {direct_time:.1f} s)")
+        print(f"n = {n}: median {errors[-1][0]:.1e}, max {errors[-1][1]:.1e}")
     errors = np.array(errors)
-    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    ax0.loglog(GRIDS, errors[:, 1], "o-", color="#c0392b", label="max")
-    ax0.loglog(GRIDS, errors[:, 0], "s-", color="#3b6fb6", label="median")
-    ax0.set(xlabel="grid n (n x n x 2n nodes)", ylabel=r"$|\Delta B| / |B|$",
-            title="tabulated vs direct, LCFS to wall")
-    ax1.plot(GRIDS, timing, "o-", color="#3b6fb6", label="tabulated")
-    ax1.axhline(direct_time, color="k", ls="--", lw=1, label="direct (VmecExtender)")
-    ax1.set(xlabel="grid n", ylabel="trace wall time [s]", ylim=(0, None),
-            title=f"32 protons, {TMAX * 1e6:.0f} $\\mu$s, after compilation")
-    for ax in (ax0, ax1):
-        ax.set_xticks(GRIDS, [str(n) for n in GRIDS])
-        ax.minorticks_off()
-        ax.grid(alpha=0.25, lw=0.5)
-        ax.legend(frameon=False, fontsize=8)
+    fig, ax = plt.subplots(figsize=(4.2, 3.4))
+    ax.loglog(GRIDS, errors[:, 1], "o-", color="#c0392b", label="max")
+    ax.loglog(GRIDS, errors[:, 0], "s-", color="#3b6fb6", label="median")
+    ax.set(xlabel="grid n (n x n x 2n nodes)", ylabel=r"$|\Delta B| / |B|$",
+           title="tabulated vs direct, LCFS to wall")
+    ax.set_xticks(GRIDS, [str(n) for n in GRIDS])
+    ax.minorticks_off()
+    ax.grid(alpha=0.25, lw=0.5)
+    ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
     _save(fig, "wall_tracing_interpolation.webp")
 
     # One ensemble through the n = 48 table
-    trace, _ = _trace(vj.essos_tracing_fields(wout, coils, wall=WALL, n=48, plasma="vacuum"),
+    trace = _trace(vj.essos_tracing_fields(wout, coils, wall=WALL, n=48, plasma="vacuum"),
                       _particles(NPARTICLES))
     crossed, struck = np.isfinite(trace.lcfs_times), np.asarray(trace.wall_hits)
     fates = {"stays inside": ~crossed, "crosses and returns": crossed & ~struck & (trace.returns > 0),

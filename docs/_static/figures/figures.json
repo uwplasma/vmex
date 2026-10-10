@@ -586,6 +586,87 @@
         "docs/explanation/validation.md"
       ],
       "note": "Needs the optional mrx package (pip install mrx). VMEX solves the deck to ns = 65 and MRX relaxes that field with 10 Newton steps on (12, 16, 16), p = 3; the example writes this WebP beside its PNG. The bytes come from one run and were not re-derived."
+    },
+    {
+      "path": "docs/_static/figures/readme_wall_tracing.webp",
+      "generator": "examples/vmex_essos_tracing_to_wall.py",
+      "command": "python examples/vmex_essos_tracing_to_wall.py && cp vmex_essos_tracing_to_wall.webp docs/_static/figures/readme_wall_tracing.webp",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "note": "64 protons at 3 keV in the vacuum Landreman-Paul QA equilibrium of the ESSOS coils, traced from inside the LCFS to a wall 3 cm out with essos_tracing_fields (n = 48 table). Needs ESSOS >= 0.20.2. 64-color lossless WebP written by the example.",
+      "inputs": [
+        "examples/data/ESSOS_biot_savart_LandremanPaulQA.json",
+        "examples/data/input.LandremanPaul2021_QA_lowres"
+      ],
+      "record": null,
+      "generated": "2026-10-10",
+      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "sha256": "875c48c15002da80f41131c95dfa9a4f6e6f714b7d2d1e8d92e40089eb48469e",
+      "bytes": 31540,
+      "used_in": [
+        "README.md",
+        "docs/howto/trace-to-the-wall.md"
+      ]
+    },
+    {
+      "path": "docs/_static/figures/wall_tracing_interpolation.webp",
+      "generator": "docs/_static/figures/sources/make_wall_tracing_figures.py",
+      "command": "python docs/_static/figures/sources/make_wall_tracing_figures.py",
+      "reproducible": "manual",
+      "bytes_verified": false,
+      "note": "Maximum and median |dB|/|B| of the tabulated exterior field against the direct VmecExtender field on six surfaces between the LCFS and the wall, n = 16 to 64. The committed image is the left panel of a two-panel run that also plotted trace wall times; those timings were taken under heavy shared load and were dropped, and the script now draws the error panel alone.",
+      "inputs": [
+        "examples/data/ESSOS_biot_savart_LandremanPaulQA.json",
+        "examples/data/input.LandremanPaul2021_QA_lowres"
+      ],
+      "record": null,
+      "generated": "2026-10-10",
+      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "sha256": "50b1dde28605b8b96a1230d6bc0dd24691bc5bb6e2ea3922d4cb7ee8fbc748c9",
+      "bytes": 6126,
+      "used_in": [
+        "docs/howto/trace-to-the-wall.md"
+      ]
+    },
+    {
+      "path": "docs/_static/figures/wall_tracing_reentry.webp",
+      "generator": "docs/_static/figures/sources/make_wall_tracing_figures.py",
+      "command": "python docs/_static/figures/sources/make_wall_tracing_figures.py",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "note": "Signed distance to the LCFS against time for one orbit of each fate, from 256 protons through the n = 48 table. Needs ESSOS >= 0.20.2.",
+      "inputs": [
+        "examples/data/ESSOS_biot_savart_LandremanPaulQA.json",
+        "examples/data/input.LandremanPaul2021_QA_lowres"
+      ],
+      "record": null,
+      "generated": "2026-10-10",
+      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "sha256": "f5718a23298da8e75bbd52d86507f3412f09f92d9ede4374e44adc764b47c764",
+      "bytes": 10174,
+      "used_in": [
+        "docs/howto/trace-to-the-wall.md"
+      ]
+    },
+    {
+      "path": "docs/_static/figures/wall_tracing_strikes.webp",
+      "generator": "docs/_static/figures/sources/make_wall_tracing_figures.py",
+      "command": "python docs/_static/figures/sources/make_wall_tracing_figures.py",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "note": "Strike points of 256 protons on the wall, unrolled in toroidal and geometric poloidal angle, coloured by strike time.",
+      "inputs": [
+        "examples/data/ESSOS_biot_savart_LandremanPaulQA.json",
+        "examples/data/input.LandremanPaul2021_QA_lowres"
+      ],
+      "record": null,
+      "generated": "2026-10-10",
+      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "sha256": "8bc8f9aaf49a5bd7c6e449c8261cde50da6df9d861987010476330e5d5bec87a",
+      "bytes": 9738,
+      "used_in": [
+        "docs/howto/trace-to-the-wall.md"
+      ]
     }
   ]
 }

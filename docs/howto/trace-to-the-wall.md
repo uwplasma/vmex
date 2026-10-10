@@ -79,9 +79,9 @@ leg:
 
 ![Distance outside the LCFS against time for three orbits](../_static/figures/wall_tracing_reentry.webp)
 
-The orange orbit leaves the LCFS on the outboard side, drifts up to
-RE_DEPTH cm out and comes back RE_COUNT times; the red one leaves and reaches
-the wall.
+The orange orbit leaves the LCFS by about 3 mm near 3 μs, comes back, and
+touches it again near 23 μs; the red one leaves and reaches the wall at
+9 μs; the blue one never crosses.
 
 ## The field outside the plasma
 
@@ -113,13 +113,17 @@ folded in. `n=None` keeps the direct field.
 
 ![Interpolation error between the LCFS and the wall, and trace cost, against the grid size](../_static/figures/wall_tracing_interpolation.webp)
 
-INTERP_SENTENCE
+Between the LCFS and the wall the error falls from 8e-3 at `n = 16` to
+3e-6 at `n = 32` and 4e-7 at the default `n = 48` (maximum over 6912 points
+on six offset surfaces). Tabulating at `n = 48` takes seconds. On the
+example's 64 protons, the `n = 48` table and the direct field give the same
+44 strikes, but single strike points differ by up to 12 cm: orbits that
+graze the LCFS amplify small field differences, so compare statistics (strike
+fraction, strike map), not single orbits.
 
-Use the table for ensembles and scans. Use the direct field to check a
-result, or when the orbits of interest stay within a few millimetres of the
-LCFS, where the plasma field changes fastest. Check a table against the
-direct field on the same births: the example prints the largest strike-point
-distance between the two.
+Use the table for ensembles and scans, and the direct field to check a
+result on a subset of births. The example prints the table's largest error
+midway between the LCFS and the wall.
 
 ## Wall surfaces
 
@@ -144,7 +148,10 @@ spacing at worst, and the exterior field must cover the whole wall.
 
 ![Strike points on the wall, coloured by strike time](../_static/figures/wall_tracing_strikes.webp)
 
-STRIKE_SENTENCE
+Of 256 protons born between `s = 0.7` and `0.95`, 150 strike the wall in
+40 μs, 20 cross the LCFS and come back, and 79 stay inside. The strikes
+gather in two helical bands near the bottom of the wall (geometric poloidal
+angle near 3π/2), most within 10 μs.
 
 ## Limits
 
