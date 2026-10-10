@@ -406,7 +406,7 @@ def test_confinement_cache_is_bounded_and_weakly_keyed(solved_case, monkeypatch)
 
 
 def test_confinement_missing_neo_and_lasym_notes(solved_case, monkeypatch):
-    """Missing NEO_JAX and symmetric-only Boozer tables give stated reasons."""
+    """Missing NEO_JAX or Boozer tables give stated reasons."""
     from vmex.core import neoclassical
 
     _, wout = solved_case
@@ -425,7 +425,7 @@ def test_confinement_missing_neo_and_lasym_notes(solved_case, monkeypatch):
     plotting._CONFINEMENT_CACHE.clear()
     conf = plotting.confinement_summary(wout, {**booz, "neo_booz": None})
     assert not conf.validity["epsilon_effective"]
-    assert "symmetric-only" in conf.notes["epsilon_effective"]
+    assert "tables unavailable" in conf.notes["epsilon_effective"]
 
 
 def test_confinement_one_valid_one_invalid_and_never_zero(
@@ -490,7 +490,7 @@ def test_confinement_guards_report_failures_and_skip_cache(
     monkeypatch.setattr(neoclassical, "epsilon_effective_from_boozer", _raises)
     plotting._CONFINEMENT_CACHE.clear()
     conf = plotting.confinement_summary(wout, booz)
-    assert conf.notes["epsilon_effective"] == "NEO evaluation failed: RuntimeError"
+    assert conf.notes["epsilon_effective"] == "NEO evaluation failed: RuntimeError: synthetic NEO failure"
 
     monkeypatch.setattr(
         neoclassical, "epsilon_effective_from_boozer",

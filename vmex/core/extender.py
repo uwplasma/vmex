@@ -552,34 +552,45 @@ def _prepared(spectra: dict[str, Array]) -> dict[str, Any]:
     # second derivative up to ns = 82 and the third up to ns = 147 - the range
     # real wouts are written at.  So the interpolant follows the form.
     native = _has_native_form(spectra)
-    tables = {
-        "rmnc": _radial_table(spectra["rmnc"], xm, native),
-        "zmns": _radial_table(spectra["zmns"], xm, native),
-        "bsupu": _radial_table(
-            _full_mesh_contravariant(spectra["bsupu"], xmn), xmn, native),
-        "bsupv": _radial_table(
-            _full_mesh_contravariant(spectra["bsupv"], xmn), xmn, native),
-    }
+    present = lambda *names: [name for name in names if spectra.get(name) is not None]  # noqa: E731
+    tables = {name: _radial_table(spectra[name], xm, native)
+              for name in present("rmnc", "zmns", "rmns", "zmnc")}
+    tables.update({name: _radial_table(_full_mesh_contravariant(spectra[name], xmn), xmn, native)
+                   for name in present("bsupu", "bsupv", "bsupu_s", "bsupv_s")})
     if native:
-        tables["lmns"] = _radial_table(spectra["lmns"], xm)
+        tables.update({name: _radial_table(spectra[name], xm) for name in present("lmns", "lmnc")})
         for name in ("phipf", "chipf"):
             tables[name] = _radial_table(
                 jnp.reshape(jnp.asarray(spectra[name]), (-1, 1)), None)
     return dict(spectra, _tables=tables)
 
 
+def _cos_sin(a: Array | None, b: Array | None, cosine: Array, sine: Array) -> Array:
+    """``sum(a cos + b sin)`` over the last axis; a missing family adds nothing."""
+    dot = lambda x, y: jnp.vdot(x, y) if x.ndim == 1 else jnp.sum(x * y, axis=-1)  # noqa: E731
+    value = dot(a, cosine) if a is not None else 0.0
+    return value + dot(b, sine) if b is not None else value
+
+
+def _scaled(coefficients: Array | None, factor: Array) -> Array | None:
+    return None if coefficients is None else factor * coefficients
+
+
+def _radial_series(spectra, s, modes, *names):
+    """Radial values of the named prepared tables at ``s`` (``None`` if absent)."""
+    tables = spectra["_tables"]
+    return [None if name not in tables else jax.vmap(lambda value: _radial_value_and_derivative(
+        None, value, modes, tables[name])[0])(s) for name in names]
+
+
 def _flux_coordinates_to_xyz(spectra: dict[str, Array], points: Array) -> Array:
     """Map VMEC ``(s, theta, phi)`` coordinates to Cartesian points."""
     spectra = _prepared(spectra)
     s, theta, phi = _check_points(points, "flux coordinates").T
-    tables = spectra["_tables"]
-    radial_r = jax.vmap(lambda value: _radial_value_and_derivative(
-        None, value, spectra["xm"], tables["rmnc"])[0])(s)
-    radial_z = jax.vmap(lambda value: _radial_value_and_derivative(
-        None, value, spectra["xm"], tables["zmns"])[0])(s)
+    rc, zs, rs, zc = _radial_series(spectra, s, spectra["xm"], "rmnc", "zmns", "rmns", "zmnc")
     phase = spectra["xm"][None, :] * theta[:, None] - spectra["xn"][None, :] * phi[:, None]
-    radius = jnp.sum(radial_r * jnp.cos(phase), axis=1)
-    z = jnp.sum(radial_z * jnp.sin(phase), axis=1)
+    cosine, sine = jnp.cos(phase), jnp.sin(phase)
+    radius, z = _cos_sin(rc, rs, cosine, sine), _cos_sin(zc, zs, cosine, sine)
     return jnp.stack((radius * jnp.cos(phi), radius * jnp.sin(phi), z), axis=1)
 
 
@@ -590,14 +601,12 @@ def _B_contravariant_flux(spectra: dict[str, Array], points: Array) -> Array:
     # The prepared tables, so every entry point shares one interpolant: these
     # helpers building their own disagreed with the field by 6e-4 once the
     # interpolant started following the form.
-    tables = spectra["_tables"]
-    bu_coeff = jax.vmap(lambda value: _radial_value_and_derivative(
-        None, value, spectra["xmn"], tables["bsupu"])[0])(s)
-    bv_coeff = jax.vmap(lambda value: _radial_value_and_derivative(
-        None, value, spectra["xmn"], tables["bsupv"])[0])(s)
+    bu, bv, bu_s, bv_s = _radial_series(spectra, s, spectra["xmn"], "bsupu", "bsupv",
+                                        "bsupu_s", "bsupv_s")
     phase = spectra["xmn"][None, :] * theta[:, None] - spectra["xnn"][None, :] * phi[:, None]
-    return jnp.stack((jnp.zeros_like(s), jnp.sum(bu_coeff * jnp.cos(phase), axis=1),
-                      jnp.sum(bv_coeff * jnp.cos(phase), axis=1)), axis=1)
+    cosine, sine = jnp.cos(phase), jnp.sin(phase)
+    return jnp.stack((jnp.zeros_like(s), _cos_sin(bu, bu_s, cosine, sine),
+                      _cos_sin(bv, bv_s, cosine, sine)), axis=1)
 
 
 class _VmecFluxCoordinateField:
@@ -655,14 +664,18 @@ def _half_to_full_profile(profile: Array) -> Array:
 def _geometry(spectra: dict[str, Array], s: Array, theta: Array, phi: Array):
     """Return ``R, Z`` and their ``s``, ``theta`` and ``phi`` derivatives at one point."""
     xm, xn = spectra["xm"], spectra["xn"]
-    rc, rcs = _radial_value_and_derivative(spectra["rmnc"], s, xm)
-    zs, zss = _radial_value_and_derivative(spectra["zmns"], s, xm)
+    radial = lambda name: ((None, None) if spectra.get(name) is None  # noqa: E731
+                           else _radial_value_and_derivative(spectra[name], s, xm))
+    (rc, rcs), (zs, zss), (rs, rss), (zc, zcs) = map(radial, ("rmnc", "zmns", "rmns", "zmnc"))
     phase = xm * theta - xn * phi
     cosine, sine = jnp.cos(phase), jnp.sin(phase)
-    R, Z = jnp.vdot(rc, cosine), jnp.vdot(zs, sine)
-    Rs, Zs = jnp.vdot(rcs, cosine), jnp.vdot(zss, sine)
-    Rt, Zt = jnp.vdot(-xm * rc, sine), jnp.vdot(xm * zs, cosine)
-    Rp, Zp = jnp.vdot(xn * rc, sine), jnp.vdot(-xn * zs, cosine)
+    # d/dtheta of (a cos + b sin) is (m b) cos + (-m a) sin; d/dphi swaps m for -n.
+    R, Z = _cos_sin(rc, rs, cosine, sine), _cos_sin(zc, zs, cosine, sine)
+    Rs, Zs = _cos_sin(rcs, rss, cosine, sine), _cos_sin(zcs, zss, cosine, sine)
+    Rt = _cos_sin(_scaled(rs, xm), _scaled(rc, -xm), cosine, sine)
+    Zt = _cos_sin(_scaled(zs, xm), _scaled(zc, -xm), cosine, sine)
+    Rp = _cos_sin(_scaled(rs, -xn), _scaled(rc, xn), cosine, sine)
+    Zp = _cos_sin(_scaled(zs, -xn), _scaled(zc, xn), cosine, sine)
     return R, Z, Rs, Zs, Rt, Zt, Rp, Zp
 
 
@@ -690,11 +703,13 @@ def _contravariant_native(spectra, s, theta, phi, Rs, Zs, Rt, Zt, R):
     """
     tables = spectra["_tables"]
     xm, xn = spectra["xm"], spectra["xn"]
-    lmns, _ = _radial_value_and_derivative(None, s, xm, tables["lmns"])
+    lmns, lmnc = (None if name not in tables else
+                  _radial_value_and_derivative(None, s, xm, tables[name])[0]
+                  for name in ("lmns", "lmnc"))
     phase = xm * theta - xn * phi
-    cosine = jnp.cos(phase)
-    lambda_theta = jnp.vdot(lmns * xm, cosine)
-    lambda_phi = jnp.vdot(lmns * -xn, cosine)
+    cosine, sine = jnp.cos(phase), jnp.sin(phase)
+    lambda_theta = _cos_sin(_scaled(lmns, xm), _scaled(lmnc, -xm), cosine, sine)
+    lambda_phi = _cos_sin(_scaled(lmns, -xn), _scaled(lmnc, xn), cosine, sine)
     phip, _ = _radial_value_and_derivative(None, s, None, tables["phipf"])
     chip, _ = _radial_value_and_derivative(None, s, None, tables["chipf"])
     # VMEC's jacobian.f assembles tau as ru12*zs - rs*zu12, so sqrt(g) is
@@ -715,11 +730,13 @@ def _position_and_field(spectra: dict[str, Array], coordinates: Array) -> tuple[
         # d(rho)/ds carries the chain rule: _geometry differentiates in s.
         bu, bv = _contravariant_native(spectra, s, theta, phi, Rs, Zs, Rt, Zt, R)
     else:
-        bu_coeff, _ = _radial_value_and_derivative(None, s, xmn, tables["bsupu"])
-        bv_coeff, _ = _radial_value_and_derivative(None, s, xmn, tables["bsupv"])
+        bu_c, bv_c, bu_s, bv_s = (
+            None if name not in tables else
+            _radial_value_and_derivative(None, s, xmn, tables[name])[0]
+            for name in ("bsupu", "bsupv", "bsupu_s", "bsupv_s"))
         nyquist_phase = xmn * theta - xnn * phi
-        bu = jnp.vdot(bu_coeff, jnp.cos(nyquist_phase))
-        bv = jnp.vdot(bv_coeff, jnp.cos(nyquist_phase))
+        cosine, sine = jnp.cos(nyquist_phase), jnp.sin(nyquist_phase)
+        bu, bv = _cos_sin(bu_c, bu_s, cosine, sine), _cos_sin(bv_c, bv_s, cosine, sine)
     cphi, sphi = jnp.cos(phi), jnp.sin(phi)
     e_theta = jnp.array((Rt * cphi, Rt * sphi, Zt))
     e_phi = jnp.array((Rp * cphi - R * sphi, Rp * sphi + R * cphi, Zp))
@@ -988,8 +1005,9 @@ class VmecInteriorField(MagneticField):
         contravariant field cosine coefficients ``B^theta`` and ``B^phi``
         in T/m of shape ``(ns, mnmax_nyq)`` on the VMEC half mesh with row 0
         the unused axis row; and their Nyquist mode numbers ``xmn`` and
-        ``xnn``, shape ``(mnmax_nyq,)``.  Only the stellarator-symmetric
-        (``lasym = False``) families are evaluated.  Values may be JAX
+        ``xnn``, shape ``(mnmax_nyq,)``.  Without stellarator symmetry the
+        sine partners ``rmns``, ``zmnc``, ``lmnc``, ``bsupu_s`` and ``bsupv_s``
+        are added wherever present.  Values may be JAX
         tracers, which is what makes the whole field differentiable.
     newton_iterations:
         Largest number of Newton steps taken to invert ``(R, Z) -> (s,
