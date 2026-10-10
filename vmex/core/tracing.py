@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import tempfile
 import time
 from importlib.metadata import version
 from pathlib import Path
@@ -169,20 +168,49 @@ class AlphaTracingResult:
 def essos_vmec_field(source: Any, **kwargs: Any) -> Any:
     """Build an ESSOS VMEC field from a wout path or :class:`WoutData`.
 
-    In-memory data use a temporary wout loaded eagerly by ESSOS; this
-    diagnostic handoff severs gradients. Constructor ``kwargs`` pass through.
+    In-memory data go straight to ``essos.fields.Vmec.from_arrays``: no file
+    is written and gradients flow. Constructor ``kwargs`` pass through.
     """
     _, _, fields = _essos_imports()
+    if not hasattr(source, "rmnc"):
+        return fields.Vmec(str(Path(source)), **kwargs)
+    partners = {}
+    if bool(source.lasym):
+        partners = {name: getattr(source, name) for name in fields.VMEC_WOUT_PARTNERS.values()
+                    if getattr(source, name, None) is not None}
+    return fields.Vmec.from_arrays(source.nfp, source.ns, *(getattr(source, name) for name in fields.VMEC_WOUT_ARRAYS),
+                                   **kwargs, **partners)
 
-    if hasattr(source, "rmnc") and hasattr(source, "xm"):  # WoutData
-        from .wout import write_wout
 
-        with tempfile.TemporaryDirectory(prefix="vmex_essos_") as tmp:
-            wout_path = Path(tmp) / "wout_equilibrium.nc"
-            write_wout(wout_path, source)
-            return fields.Vmec(str(wout_path), **kwargs)
+def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0.03, n: int | None = 48,
+                         plasma: str = "auto", ntheta: int = 64, nphi: int = 128) -> dict[str, Any]:
+    """Keyword arguments for ``essos.dynamics.Tracing`` from axis to wall.
 
-    return fields.Vmec(str(Path(source)), **kwargs)
+    ``field`` is the ESSOS VMEC field of ``wout`` (path or :class:`WoutData`).
+    Outside the LCFS, :class:`~vmex.core.extender.VmecExtender` adds the
+    plasma to ``coils`` (ESSOS ``Coils``/field, :class:`MgridField` or an
+    ``xyz -> B`` callable; by default the wout's mgrid) and ESSOS
+    ``InterpolatedField`` tabulates it on ``n`` x ``n`` x ``2n`` nodes around
+    a ``wall`` surface ``wall`` metres outside the LCFS (``n=None`` keeps the
+    direct field).  Without an exterior
+    field (``wall=None`` or a fixed-boundary wout without coils) orbits stop
+    at the LCFS.  Use as ``Tracing(**essos_tracing_fields(wout, coils), ...)``.
+    """
+    from essos.fields import InterpolatedField
+    from essos.surfaces import SurfaceRZFourier
+
+    from .extender import VmecExtender
+    from .wout import read_wout
+
+    wout = wout if hasattr(wout, "rmnc") else read_wout(wout)
+    field = essos_vmec_field(wout)
+    if wall is None or (coils is None and not bool(wout.lfreeb)):
+        return {"field": field}
+    surface = SurfaceRZFourier.from_vmec(field, ntheta=ntheta, nphi=nphi, offset=wall)
+    exterior = VmecExtender.from_wout(wout, external_field=coils, plasma=plasma)
+    if n:
+        exterior = InterpolatedField.around(exterior, surface, n=n, stellsym=not bool(wout.lasym))
+    return {"field": field, "wall": surface, "exterior_field": exterior}
 
 
 def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE):
@@ -191,18 +219,13 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     from booz_xform_jax import Booz_xform
     from essos.boozer import BoozerField
 
-    from .wout import write_wout
-
     if bool(wout.lasym):
         from inspect import signature
 
         if "bmns" not in signature(BoozerField.from_booz).parameters:
             raise ImportError("Non-symmetric tracing requires ESSOS sine-spectrum support; upgrade ESSOS")
     bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
-    with tempfile.TemporaryDirectory(prefix="vmex_booz_") as tmp:
-        path = Path(tmp) / "wout_trace.nc"
-        write_wout(path, wout)
-        bx.read_wout(str(path), flux=False)
+    bx.read_wout_data(wout, flux=False)
     bx.run()
     # Boozer guiding-centre equations use psi = -Phi_tor/(2 pi) for VMEC's phi.
     psi0 = -float(np.asarray(wout.phi)[-1]) / (2 * np.pi)

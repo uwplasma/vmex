@@ -24,25 +24,17 @@ print(field.nfp, field.AbsB([0.5, 0.0, 0.0]), field.surface.gamma.shape)
 ```
 
 `essos_vmec_field` takes either an in-memory
-{class}`~vmex.core.wout.WoutData` or a path to a `wout_*.nc`. Released ESSOS
-reads a wout *file*, so an in-memory equilibrium is written to a temporary
-wout; ESSOS loads every table eagerly in its constructor, so the file is
-gone by the time the field is returned. Keyword arguments pass through to
-`essos.fields.Vmec` (`ntheta`, `nphi`, `close`, `range_torus`), which set the
-resolution of the `field.surface` ESSOS builds alongside the field.
+{class}`~vmex.core.wout.WoutData` or a path to a `wout_*.nc`. An in-memory
+equilibrium goes straight to `essos.fields.Vmec.from_arrays`: no file is
+written, and gradients flow through the handoff. Keyword arguments pass
+through to `essos.fields.Vmec` (`ntheta`, `nphi`, `close`, `range_torus`),
+which set the resolution of the `field.surface` ESSOS builds alongside the
+field. Non-symmetric (`lasym`) equilibria carry their sine tables across.
 
-Three consequences worth knowing before you build on this:
-
-- **The write severs the gradient.** This seam is a diagnostic route, not a
-  differentiable one. A differentiable alpha-loss objective needs the ESSOS
-  array constructor (uwplasma/ESSOS#61) and is not available here.
-- **Stellarator symmetry only.** Released ESSOS reads the symmetric wout
-  tables, so an `lasym` equilibrium is rejected rather than silently
-  half-transferred.
-- **Radial resolution is yours to choose.** ESSOS interpolates the half-mesh
-  tables linearly in `s`, so its two independent `|B|` channels (`AbsB` from
-  `bmnc`, and `norm(B)` built from `bsub*`, `gmnc` and the geometry) agree
-  better on finer radial grids. Solve on the grid your diagnostic needs.
+ESSOS interpolates the half-mesh tables linearly in `s`, so its two
+independent `|B|` channels (`AbsB` from `bmnc`, and `norm(B)` built from
+`bsub*`, `gmnc` and the geometry) agree better on finer radial grids. Solve
+on the radial grid your diagnostic needs.
 
 The tables themselves cross unchanged: `tests/test_tracing.py` requires the
 file and in-memory routes to give identical fields.
@@ -203,6 +195,8 @@ exterior field with coils and virtual casing.
 `vmex --trace` and {func}`~vmex.core.tracing.trace_alphas` trace fusion alphas
 in Boozer coordinates with `essos.boozer`; see {doc}`trace-alpha-particles`.
 
-For anything else ESSOS does with an equilibrium (field lines, surfaces,
-`|B|` queries), use the bare `essos.fields.Vmec` from
+To trace past the LCFS to a wall, {func}`~vmex.core.tracing.essos_tracing_fields`
+returns the VMEC field, the exterior field and the wall in one call; see
+{doc}`trace-to-the-wall`. For anything else ESSOS does with an equilibrium
+(field lines, surfaces, `|B|` queries), use the bare `essos.fields.Vmec` from
 {func}`~vmex.core.tracing.essos_vmec_field` above.

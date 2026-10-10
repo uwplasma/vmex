@@ -64,7 +64,7 @@ BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
-BUDGET_TOTAL = 660 * 1024  # 550 KB + the README --neoclassical (#548) and VMEX/MRX (#569) figures
+BUDGET_TOTAL = 700 * 1024  # 550 KB + the README --neoclassical (#548), VMEX/MRX (#569) and wall-tracing (#572) figures
 BUDGET_FILE = 150 * 1024
 
 # Frozen: files consumed by the top-level README.md and fetched reference
@@ -97,6 +97,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_single_stage_fixed_boundary.webp",
     "figures/readme_single_stage_free_boundary.webp",
     "figures/readme_turbulence.webp",
+    "figures/readme_wall_tracing.webp",
     "figures/stellarator_mirror_hybrid.webp",
 }
 

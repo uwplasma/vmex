@@ -408,13 +408,38 @@ def test_essos_field_handoff_matches_the_file_route(solovev_wout):
     assert int(from_memory.ns) == int(from_file.ns)
     points = np.array([[0.3, 0.4, 0.1], [0.7, 2.2, 0.9], [0.9, 5.0, 3.0]])
     for point in points:
-        # The temporary wout is already deleted here; ESSOS read its tables
-        # eagerly, so the field stays usable.
         np.testing.assert_allclose(
             float(from_memory.AbsB(point)), float(from_file.AbsB(point)), rtol=0.0)
         np.testing.assert_allclose(
             np.asarray(from_memory.to_xyz(point)),
             np.asarray(from_file.to_xyz(point)), rtol=0.0)
+
+
+def test_essos_field_handoff_is_differentiable(solovev_wout):
+    import jax
+    from dataclasses import replace
+
+    wout = read_wout(solovev_wout)
+    point = np.array([0.7, 2.2, 0.9])
+    grad = jax.grad(lambda scale: essos_vmec_field(replace(wout, bmnc=scale * wout.bmnc)).AbsB(point))(1.0)
+    np.testing.assert_allclose(float(grad), float(essos_vmec_field(wout).AbsB(point)), rtol=1e-12)
+
+
+def test_essos_tracing_fields_from_axis_to_wall(solovev_wout):
+    pytest.importorskip("essos")
+    import jax.numpy as jnp
+    from vmex.core.tracing import essos_tracing_fields
+
+    def toroidal(xyz):  # B_phi = 1 T m / R
+        return jnp.stack((-xyz[:, 1], xyz[:, 0], 0 * xyz[:, 2]), -1) / (xyz[:, 0] ** 2 + xyz[:, 1] ** 2)[:, None]
+
+    assert set(essos_tracing_fields(solovev_wout)) == {"field"}  # fixed boundary, no coils: stop at the LCFS
+    setup = essos_tracing_fields(solovev_wout, toroidal, wall=0.05, n=8, plasma="vacuum", ntheta=16, nphi=8)
+    assert set(setup) == {"field", "wall", "exterior_field"}
+    point = jnp.asarray(setup["wall"].gamma[0, 0])
+    np.testing.assert_allclose(setup["exterior_field"].B(point), toroidal(point[None])[0], rtol=1e-3, atol=1e-3)
+    direct = essos_tracing_fields(solovev_wout, toroidal, wall=0.05, n=None, plasma="vacuum", ntheta=16, nphi=8)
+    np.testing.assert_allclose(direct["exterior_field"].B(point[None])[0], toroidal(point[None])[0], rtol=1e-10)
 
 
 def test_in_memory_equilibrium_matches_the_file_route(traced, solovev_wout):

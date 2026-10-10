@@ -72,7 +72,7 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.20.1` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.20.2` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.5.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
@@ -85,7 +85,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
-| `essos` | 0.20.1 | `vmex[coils]` | `pip install "essos>=0.20.1"` |
+| `essos` | 0.20.2 | `vmex[coils]` | `pip install "essos>=0.20.2"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.5 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.5"` |
 | `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
@@ -439,6 +439,25 @@ outside the plasma: an island chain about 0.9 cm wide opens from the LCFS, close
 surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX from `examples/data` alone
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+
+## Tracing from the axis to the wall
+
+Orbits do not end at the LCFS. With ESSOS (`vmex[coils]`), guiding centres move in VMEC coordinates
+inside, cross the LCFS at a root-found time, and continue in the field outside (coils or mgrid plus the
+plasma's virtual-casing field, tabulated once) until they strike a wall, come back in, or reach the end
+time. Below, 3 keV protons in the vacuum Landreman-Paul QA equilibrium, with a wall 3 cm outside the LCFS
+(`examples/vmex_essos_tracing_to_wall.py`).
+
+```python
+setup = vj.essos_tracing_fields(wout, coils, wall=0.03)     # field, exterior_field, wall
+trace = essos.dynamics.Tracing(**setup, model="GuidingCenterAdaptative", particles=particles, maxtime=4e-5)
+trace.wall_hits, trace.wall_positions, trace.returns
+```
+
+![Guiding centres that stay inside, cross the LCFS and return, or strike a wall 3 cm out](docs/_static/figures/readme_wall_tracing.webp)
+
+The equations, the exterior-field options, the interpolation error and the outputs are in the
+[wall-tracing guide](https://vmex.readthedocs.io/en/latest/howto/trace-to-the-wall.html).
 
 ## Accuracy and optional polishing
 

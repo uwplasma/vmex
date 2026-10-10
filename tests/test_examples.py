@@ -81,7 +81,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
-    assert coils == ["essos>=0.20.1"], coils
+    assert coils == ["essos>=0.20.2"], coils
 
     for script in ESSOS_COIL_EXAMPLES:
         text = script.read_text()
@@ -202,6 +202,7 @@ EXECUTED_EXAMPLES = {
     "examples/vmex_fixed_free_boundary_comparison.py",
     "examples/vmex_get_B_gradB.py",
     "examples/vmex_get_B_outside_plasma.py",
+    "examples/vmex_essos_tracing_to_wall.py",
     "examples/vmex_mrx_comparison.py",
 }
 
@@ -1401,6 +1402,16 @@ def test_vmex_fieldline_tracing_examples(script, message, output, tmp_path):
         bounded = re.search(r"Exterior trace QA: (\d+)/(\d+) lines remained", out)
         assert bounded is not None and int(bounded.group(1)) > 0
     assert (tmp_path / output).stat().st_size > 10_000
+
+
+# Smoke on one office core, mostly XLA compilation of two traces.
+@pytest.mark.full
+def test_vmex_essos_tracing_to_wall_example(tmp_path):
+    pytest.importorskip("essos")
+    out = _run_example(EXAMPLES / "vmex_essos_tracing_to_wall.py", tmp_path, timeout=900)
+    assert "max |dB|/|B|" in out and "strike the wall" in out
+    assert re.search(r"stay inside +\d+ of 8", out)
+    assert (tmp_path / "vmex_essos_tracing_to_wall.webp").stat().st_size > 10_000
 
 
 def test_vmex_mrx_comparison_example(tmp_path):
