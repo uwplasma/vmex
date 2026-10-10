@@ -236,6 +236,7 @@ _MIRROR = ("rmns", "zmnc", "lmnc", "bmns", "bsubumns", "bsubvmns")
 
 
 @pytest.mark.full  # nightly: two solves, five NEO evaluations
+@pytest.mark.usefixtures("_module_jit_enabled")  # solves: 5-40x faster jitted
 def test_epsilon_effective_lasym_identities():
     """End to end through booz_xform_jax and NEO_JAX with every sine partner.
 

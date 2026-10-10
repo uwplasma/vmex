@@ -218,6 +218,7 @@ def _oracle_points():
 
 
 @pytest.mark.full  # nightly: one solovev solve plus two field evaluations
+@pytest.mark.usefixtures("_module_jit_enabled")  # solves: 5-40x faster jitted
 @pytest.mark.parametrize("deck", ["solovev", "up_down_asymmetric_tokamak"])
 def test_native_form_matches_the_fitted_field_on_a_solved_equilibrium(deck):
     """Every VMEC convention the native form depends on, pinned at once.
@@ -358,6 +359,7 @@ def test_fitted_fallback_keeps_its_measured_accuracy():
         assert columns[name][0] < 2.0 * columns[name][-1], (name, columns[name])
 
 
+@pytest.mark.usefixtures("_module_jit_enabled")  # solves: 5-40x faster jitted
 def test_sine_partners_add_nothing_when_zero():
     """Zero sine families leave every symmetric value bit for bit."""
     import vmex as vj
