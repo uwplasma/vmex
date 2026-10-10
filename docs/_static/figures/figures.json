@@ -600,7 +600,7 @@
       ],
       "record": null,
       "generated": "2026-10-10",
-      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "hardware": "Linux x86_64 workstation (36 cores), CPU, shared and heavily loaded",
       "sha256": "875c48c15002da80f41131c95dfa9a4f6e6f714b7d2d1e8d92e40089eb48469e",
       "bytes": 31540,
       "used_in": [
@@ -621,7 +621,7 @@
       ],
       "record": null,
       "generated": "2026-10-10",
-      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "hardware": "Linux x86_64 workstation (36 cores), CPU, shared and heavily loaded",
       "sha256": "50b1dde28605b8b96a1230d6bc0dd24691bc5bb6e2ea3922d4cb7ee8fbc748c9",
       "bytes": 6126,
       "used_in": [
@@ -641,7 +641,7 @@
       ],
       "record": null,
       "generated": "2026-10-10",
-      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "hardware": "Linux x86_64 workstation (36 cores), CPU, shared and heavily loaded",
       "sha256": "f5718a23298da8e75bbd52d86507f3412f09f92d9ede4374e44adc764b47c764",
       "bytes": 10174,
       "used_in": [
@@ -661,7 +661,7 @@
       ],
       "record": null,
       "generated": "2026-10-10",
-      "hardware": "office workstation (36-core x86_64 Linux), CPU, shared and heavily loaded",
+      "hardware": "Linux x86_64 workstation (36 cores), CPU, shared and heavily loaded",
       "sha256": "8bc8f9aaf49a5bd7c6e449c8261cde50da6df9d861987010476330e5d5bec87a",
       "bytes": 9738,
       "used_in": [
