@@ -108,8 +108,10 @@ turbulence = [
   "jaxlib>=0.10.1",
 ]
 # Coil geometry and VMEC/Boozer tracing, including fixed-step solver options.
+# 0.20.1: per-pair Coulomb logarithms in the collision rates that collisional
+# `vmex --trace` uses (ESSOS #128); needs Python 3.11 and diffrax 0.7.2.
 coils = [
-  "essos>=0.20.0",
+  "essos>=0.20.1",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.

@@ -2,7 +2,7 @@
 
 `vmex --trace` follows fusion-born 3.52 MeV alphas through an equilibrium and
 reports the fraction lost through the last closed flux surface. It needs the
-`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.20.0 or later).
+`coils` extra (`pip install "vmex[coils]"`, ESSOS 0.20.1 or later).
 
 ## Run it
 
