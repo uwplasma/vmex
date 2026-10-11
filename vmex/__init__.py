@@ -94,7 +94,9 @@ links to the module that documents it.
 - :func:`~vmex.core.gammac.gamma_c_from_wout` — fast-ion ``Gamma_c`` profile
   from any compatible wout, without a solve
 - :func:`~vmex.core.tracing.essos_vmec_field` — hand a solved equilibrium to
-  ESSOS as an ``essos.fields.Vmec`` (optional ESSOS dependency)
+  ESSOS as an ``essos.fields.Vmec`` (optional ESSOS dependency);
+  :func:`~vmex.core.tracing.essos_tracing_fields` adds the exterior field and
+  wall for ``essos.dynamics.Tracing``
 - :func:`~vmex.core.tracing.trace_alphas` →
   :class:`~vmex.core.tracing.AlphaTracingResult` /
   :func:`~vmex.core.plotting.plot_tracing` — optional alpha-particle
@@ -296,6 +298,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # alpha-particle tracing (ESSOS)
     "AlphaTracingResult": (".core.tracing", "AlphaTracingResult"),
     "essos_vmec_field": (".core.tracing", "essos_vmec_field"),
+    "essos_tracing_fields": (".core.tracing", "essos_tracing_fields"),
     "trace_alphas": (".core.tracing", "trace_alphas"),
     "plot_tracing": (".core.plotting", "plot_tracing"),
     # optimizer-neutral problem callables
