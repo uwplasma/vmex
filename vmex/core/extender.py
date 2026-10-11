@@ -109,6 +109,12 @@ def _field_cartesian(field: Any, points: Array) -> Array:
         return jnp.stack(
             (br * cphi - bphi * sphi, br * sphi + bphi * cphi, bz), axis=-1
         )
+    if hasattr(field, "dofs_curves"):  # ESSOS Coils
+        from essos.fields import BiotSavart
+
+        field = BiotSavart(field)
+    if hasattr(field, "B") and not callable(field):  # an ESSOS field, B one point at a time
+        return jax.vmap(field.B)(points)
     if callable(field):
         value = jnp.asarray(field(points))
         if value.shape != points.shape:
@@ -116,7 +122,7 @@ def _field_cartesian(field: Any, points: Array) -> Array:
                 f"external field returned shape {value.shape}, expected {points.shape}"
             )
         return value
-    raise TypeError("external_field must be callable or provide b_cyl(r, phi, z)")
+    raise TypeError("external_field must be callable, ESSOS coils or a field, or provide b_cyl(r, phi, z)")
 
 
 class MagneticField:

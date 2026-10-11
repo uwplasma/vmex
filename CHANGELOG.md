@@ -7,6 +7,11 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
+- `trace_alphas` and `vmex --trace` warn when the WOUT spectrum looks truncated
+  (`spectral_truncation` > 3e-3; see the trace how-to for what to do about it).
+- Floor `essos>=0.20.2` (0.20.1 brought per-pair Coulomb logarithms to collisional
+  `--trace`). `vj.essos_tracing_fields(wout, coils, wall=0.03)` gives ESSOS `Tracing`
+  the VMEC field, tabulated exterior field and wall (`examples/vmex_essos_tracing_to_wall.py`).
 - `VmecInteriorField` and the live-state field spectra work without stellarator
   symmetry (`LASYM = T`): the sine families `rmns`, `zmnc`, `lmnc` and the
   `B^u`/`B^v` sine tables are evaluated, and symmetric results are unchanged
@@ -15,10 +20,8 @@ revision it was measured at, and the pages that cite it.
 - `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
   from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
   toroidal current, pressure). MRX is optional.
-- `vmex --trace` runs on one GPU when several are visible. Each adaptive step
-  waits on every device, so two A4000s took 2-3 times longer than one;
-  `trace_alphas(devices=jax.devices())` still splits over all of them. CPU
-  runs are unchanged.
+- `vmex --trace` runs on one GPU when several are visible (two A4000s took 2-3
+  times longer than one); `trace_alphas(devices=jax.devices())` still splits.
 - `vmex --neoclassical` runs DKX neoclassical transport on a WOUT, or after a
   solve, and writes `*_neoclassical.png` and `*_neoclassical.h5`;
   `--nc-preset quick|default|full` sets the resolution, `--nc-profiles` takes
