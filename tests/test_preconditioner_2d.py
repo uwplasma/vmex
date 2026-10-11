@@ -169,7 +169,6 @@ def test_precon_none_keeps_vmec2000_radial_preconditioner(monkeypatch) -> None:
 
 
 @pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_2d_fewer_iterations_same_equilibrium():
     """2D preconditioner: same equilibrium as 1D, strictly fewer iterations.
 

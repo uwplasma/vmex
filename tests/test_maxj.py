@@ -17,10 +17,6 @@ from vmex.core import maxj
 from vmex.core import qi
 from vmex.core import implicit as im
 from vmex.core.input import VmecInput
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
-
 def _boozer(outer_mean=1.02, *, psi=(0.25, 0.75)):
     return {
         "bmnc_b": jnp.array([[1.0, 0.2], [outer_mean, 0.2]]),

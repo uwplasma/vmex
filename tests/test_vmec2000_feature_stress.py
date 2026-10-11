@@ -120,7 +120,6 @@ def test_public_stress_parser_and_first_force_diagnostic(
 
 
 @pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_public_238_mode_lforbal_solve_matches_vmec2000() -> None:
     """The difficult fixed-boundary proxy converges to the VMEC2000 result."""
     inp = VmecInput.from_indata_text(public_feature_stress_text())
@@ -159,7 +158,6 @@ def test_public_238_mode_lforbal_solve_matches_vmec2000() -> None:
 
 
 @pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_public_238_mode_full_ladder_matches_vmec2000_trajectory() -> None:
     """All four radial stages reproduce the public VMEC2000 trajectory."""
     inp = VmecInput.from_indata_text(public_feature_stress_text())

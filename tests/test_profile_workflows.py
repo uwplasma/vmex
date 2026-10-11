@@ -28,9 +28,6 @@ _SPEC.loader.exec_module(profile_workflows)
 
 # Compilation is what these tests measure, and the suite conftest disables jit
 # globally; without this the records would describe eager primitives.
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
-
 def test_registry_rows_are_well_formed():
     assert profile_workflows.WORKFLOWS
     for ident, workflow in profile_workflows.WORKFLOWS.items():

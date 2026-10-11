@@ -1120,9 +1120,7 @@ _SHIPPED_CERTIFICATE_ARRAYS = (
 def _eager_lane():
     """Force the jit-disabled lane the committed baseline was measured on.
 
-    ``tests/conftest.py`` disables jit globally, but under xdist a previous
-    module's ``_module_jit_enabled`` fixture can still be live on this
-    worker, and jit changes these reductions in the last few ulps.
+    jit changes these reductions in the last few ulps.
     """
 
     previous = bool(jax.config.jax_disable_jit)

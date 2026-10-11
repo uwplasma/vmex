@@ -26,9 +26,6 @@ import pytest
 from tools import force_oracle
 from vmex.core.input import VmecInput
 from vmex.core.multigrid import solve_multigrid
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "examples" / "data"
 GOLDEN = ROOT / "tests" / "data" / "force_oracle_solovev.json"

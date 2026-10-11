@@ -23,7 +23,6 @@ from vmex.core.wout import read_wout
 # Skip per test, not at import: a module that collects nothing breaks the
 # manifest ownership check wherever ESSOS is not installed.
 pytestmark = [
-    pytest.mark.usefixtures("_module_jit_enabled"),
     pytest.mark.skipif(importlib.util.find_spec("essos") is None, reason="requires ESSOS"),
 ]
 

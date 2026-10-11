@@ -51,9 +51,6 @@ from vmex.core.errors import (
 from vmex.core.fourier import mode_table
 from vmex.core.input import VmecInput
 from vmex.core.multigrid import solve_multigrid
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_BOUNDARY = (
     ROOT / "examples" / "data"
