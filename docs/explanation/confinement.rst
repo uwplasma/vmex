@@ -672,8 +672,8 @@ not an optimization objective.  The planned objective lane will connect the
 traceable VMEX state transform directly to NEO_JAX, use its supported
 forward-mode sensitivities, and certify them against reconverged finite
 differences and STELLOPT NEO before exposing the result in objective tuples.
-LASYM is rejected until NEO_JAX carries the asymmetric Boozer harmonics rather
-than silently dropping them.
+LASYM equilibria pass their sine Boozer harmonics; a NEO_JAX without them is
+rejected rather than allowed to drop them silently.
 
 Fast-ion confinement proxy
 --------------------------
