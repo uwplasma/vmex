@@ -453,7 +453,7 @@ def test_batched_point_sweep_matches_flat_vmap_values_and_gradients():
     np.testing.assert_allclose(np.asarray(plain_samples.force), np.asarray(batched_samples.force),
                                rtol=1.0e-12, atol=1.0e-11 * scale)
     # Same kernel, different summation order under jit fusion.
-    np.testing.assert_allclose(plain_value, batched_value, rtol=1.0e-12)
+    np.testing.assert_allclose(plain_value, batched_value, rtol=1.0e-11)
     np.testing.assert_allclose(plain_grad, batched_grad, rtol=1.0e-11)
 
     # Batching changes the fusion XLA picks, so the two sweeps agree to
@@ -471,7 +471,7 @@ def test_batched_point_sweep_matches_flat_vmap_values_and_gradients():
             atol=1.0e-11 * max(scale, 1.0),
             err_msg=name,
         )
-    np.testing.assert_allclose(batched_value, flat_value, rtol=1.0e-12)
+    np.testing.assert_allclose(batched_value, flat_value, rtol=1.0e-11)  # sums 1e-11-accurate points
     np.testing.assert_allclose(batched_grad, flat_grad, rtol=1.0e-11)
     assert float(np.abs(np.asarray(flat_grad))) > 0.0
 
