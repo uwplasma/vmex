@@ -21,6 +21,8 @@ its binomial error:
  Loss fraction: 12.30% ± 1.04% (123 of 1000 particles lost)
 ```
 
+A WOUT whose spectrum looks truncated (`spectral_truncation > 3e-3`) triggers a warning: at mpol = ntor = 5 a QA loses 7 % of its alphas against 0.7 % in its coil field ({doc}`trace-resolution`).
+
 ## Production runs: particles, time and other flags
 
 | flag | default | what it sets | cost |
@@ -36,6 +38,7 @@ its binomial error:
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
 | `--trace-ne0 N0`, `--trace-te0 T0` | `4e20`, `12` | on-axis electron density [m^-3] and temperature [keV] | none |
 | `--trace-no-scale` | off | trace the equilibrium at its own size and field | none |
+| `--trace-no-resolution-check` | off | skip the truncated-spectrum warning ({doc}`trace-resolution`) | none |
 | `--scale-target axis` | `volavgB` | ARIES-CS convention of the in-memory scaling | none |
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
