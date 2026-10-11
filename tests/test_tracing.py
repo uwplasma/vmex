@@ -408,13 +408,38 @@ def test_essos_field_handoff_matches_the_file_route(solovev_wout):
     assert int(from_memory.ns) == int(from_file.ns)
     points = np.array([[0.3, 0.4, 0.1], [0.7, 2.2, 0.9], [0.9, 5.0, 3.0]])
     for point in points:
-        # The temporary wout is already deleted here; ESSOS read its tables
-        # eagerly, so the field stays usable.
         np.testing.assert_allclose(
             float(from_memory.AbsB(point)), float(from_file.AbsB(point)), rtol=0.0)
         np.testing.assert_allclose(
             np.asarray(from_memory.to_xyz(point)),
             np.asarray(from_file.to_xyz(point)), rtol=0.0)
+
+
+def test_essos_field_handoff_is_differentiable(solovev_wout):
+    import jax
+    from dataclasses import replace
+
+    wout = read_wout(solovev_wout)
+    point = np.array([0.7, 2.2, 0.9])
+    grad = jax.grad(lambda scale: essos_vmec_field(replace(wout, bmnc=scale * wout.bmnc)).AbsB(point))(1.0)
+    np.testing.assert_allclose(float(grad), float(essos_vmec_field(wout).AbsB(point)), rtol=1e-12)
+
+
+def test_essos_tracing_fields_from_axis_to_wall(solovev_wout):
+    pytest.importorskip("essos")
+    import jax.numpy as jnp
+    from vmex.core.tracing import essos_tracing_fields
+
+    def toroidal(xyz):  # B_phi = 1 T m / R
+        return jnp.stack((-xyz[:, 1], xyz[:, 0], 0 * xyz[:, 2]), -1) / (xyz[:, 0] ** 2 + xyz[:, 1] ** 2)[:, None]
+
+    assert set(essos_tracing_fields(solovev_wout)) == {"field"}  # fixed boundary, no coils: stop at the LCFS
+    setup = essos_tracing_fields(solovev_wout, toroidal, wall=0.05, n=8, plasma="vacuum", ntheta=16, nphi=8)
+    assert set(setup) == {"field", "wall", "exterior_field"}
+    point = jnp.asarray(setup["wall"].gamma[0, 0])
+    np.testing.assert_allclose(setup["exterior_field"].B(point), toroidal(point[None])[0], rtol=1e-3, atol=1e-3)
+    direct = essos_tracing_fields(solovev_wout, toroidal, wall=0.05, n=None, plasma="vacuum", ntheta=16, nphi=8)
+    np.testing.assert_allclose(direct["exterior_field"].B(point[None])[0], toroidal(point[None])[0], rtol=1e-10)
 
 
 def test_in_memory_equilibrium_matches_the_file_route(traced, solovev_wout):
@@ -804,3 +829,86 @@ def test_trace_devices_default_to_every_cpu_or_one_gpu(solovev_wout, monkeypatch
     monkeypatch.setattr(jax, "devices", lambda: gpus)
     trace_alphas(solovev_wout, **TRACE_KWARGS)
     assert seen[-1] == gpus[:1]
+
+
+def _spectrum(decay, *, mpol=4, ntor=2, nfp=3, lasym=False):
+    from types import SimpleNamespace
+
+    modes = [(m, n) for m in range(mpol) for n in range(-ntor, ntor + 1) if m or n >= 0]
+    xm = np.array([m for m, _ in modes])
+    xn = np.array([n * nfp for _, n in modes])
+    amplitude = np.where((xm == 0) & (xn == 0), 10.0, decay ** (xm + np.abs(xn) // nfp))
+    rmnc = np.vstack([0.5 * amplitude, amplitude])
+    wout = SimpleNamespace(xm=xm, xn=xn, nfp=nfp, lasym=lasym, rmnc=rmnc, zmns=np.zeros_like(rmnc))
+    if lasym:
+        wout.rmns, wout.zmnc = np.zeros_like(rmnc), rmnc.copy()
+    return wout
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_spectral_truncation_reads_the_lcfs_tail_relative_to_m1(lasym):
+    from vmex.core.tracing import RESOLUTION_TOLERANCE, spectral_truncation
+
+    # m = 1, n = 0 has amplitude decay; the edge peaks at m = 0, |n| = 2 with decay^2
+    for decay, expected in ((1e-3, 1e-3), (0.3, 0.3)):
+        value = spectral_truncation(_spectrum(decay, lasym=lasym))
+        assert value == pytest.approx(expected, rel=1e-12)
+    assert spectral_truncation(_spectrum(1e-3)) < RESOLUTION_TOLERANCE < spectral_truncation(_spectrum(0.3))
+    # without toroidal modes only the poloidal edge counts
+    assert spectral_truncation(_spectrum(0.1, ntor=0)) == pytest.approx(0.1 ** 2, rel=1e-12)
+
+
+def test_spectral_truncation_is_undefined_without_an_m1_mode():
+    from vmex.core.tracing import spectral_truncation
+
+    wout = _spectrum(0.1)
+    wout.rmnc[:, wout.xm == 1] = 0.0
+    assert np.isnan(spectral_truncation(wout))
+
+
+def test_trace_reports_and_warns_on_a_truncated_spectrum(solovev_wout, traced, monkeypatch):
+    import vmex.core.tracing as tracing
+
+    value = traced.metadata["spectral_truncation"]
+    assert value == pytest.approx(tracing.spectral_truncation(read_wout(solovev_wout)))
+    assert np.isfinite(value) and value >= 0
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    with pytest.warns(RuntimeWarning, match="Equilibrium spectrum truncated"):
+        trace_alphas(solovev_wout, **TRACE_KWARGS)
+
+
+def test_truncation_message_names_the_value_the_fix_and_the_switch():
+    from vmex.core.tracing import truncation_message
+
+    text = truncation_message(1.0e-2, "--trace-no-resolution-check")
+    assert "1.0e-02 of m = 1" in text and "mpol = ntor >= 6" in text
+    assert "Monte Carlo error" in text and text.endswith("pass --trace-no-resolution-check to silence.")
+
+
+def test_trace_resolution_check_can_be_silenced(solovev_wout, monkeypatch):
+    import warnings
+
+    import vmex.core.tracing as tracing
+
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        trace_alphas(solovev_wout, check_resolution=False, **TRACE_KWARGS)
+
+
+@pytest.mark.parametrize("silenced", [False, True])
+def test_cli_trace_prints_the_truncation_warning_once(solovev_wout, tmp_path, monkeypatch, silenced):
+    import warnings
+
+    import vmex.core.tracing as tracing
+
+    monkeypatch.setattr(tracing, "RESOLUTION_TOLERANCE", -1.0)
+    argv = [str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--trace-particles", "4",
+            "--trace-tmax", "1e-6", "--trace-times", "4", "--mbooz", "8", "--nbooz", "8"]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(io.StringIO()), warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        rc = cli.main(argv + ["--trace-no-resolution-check"] * silenced)
+    assert rc == 0
+    assert buffer.getvalue().count("Equilibrium spectrum truncated") == (0 if silenced else 1)
+    assert silenced or "pass --trace-no-resolution-check to silence." in buffer.getvalue()

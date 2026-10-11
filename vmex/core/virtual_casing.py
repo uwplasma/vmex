@@ -397,11 +397,11 @@ def _assemble_surface_field_data(
     )
 
 
-def _wrout_cos_coeffs_jax(f, modes, trig):
-    """Traceable clone of :func:`nyquist.wrout_cos_coeffs`.
+def _wrout_cos_coeffs_jax(f, modes, trig, sine=False):
+    """Traceable clone of :func:`nyquist.wrout_cos_coeffs` (``sine``: ``wrout_sin_coeffs``).
 
-    Identical wrout.f Nyquist cosine analysis (``(ns, mnmax)`` coefficients),
-    but with ``jnp`` einsums so the field ``f`` may be a jax tracer; the trig
+    Identical wrout.f Nyquist analysis (``(ns, mnmax)`` coefficients), but
+    with ``jnp`` einsums so the field ``f`` may be a jax tracer; the trig
     weight tables depend only on ``trig``/``modes`` and stay static numpy.
     """
     from .nyquist import _wrout_dmult, _wrout_theta_tables, _wrout_zeta_tables
@@ -411,21 +411,19 @@ def _wrout_cos_coeffs_jax(f, modes, trig):
     cosmui, sinmui = _wrout_theta_tables(trig)
     cosnv, sinnv = _wrout_zeta_tables(trig)
     fj = jnp.asarray(f)[:, : int(trig.ntheta2), :]
+    if sine:
+        cosmui, sinmui = sinmui, cosmui
     f_theta_cos = jnp.einsum("sik,im->smk", fj, jnp.asarray(cosmui))
     f_theta_sin = jnp.einsum("sik,im->smk", fj, jnp.asarray(sinmui))
     cos_zeta = jnp.einsum("smk,kn->smn", f_theta_cos, jnp.asarray(cosnv))
     sin_zeta = jnp.einsum("smk,kn->smn", f_theta_sin, jnp.asarray(sinnv))
-    sgn = np.where(n < 0, -1.0, 1.0)
+    sgn = np.where(n < 0, -1.0, 1.0) * (-1.0 if sine else 1.0)
     coeff = cos_zeta[:, m, np.abs(n)] + sgn[None, :] * sin_zeta[:, m, np.abs(n)]
     return coeff * jnp.asarray(_wrout_dmult(modes, trig))[None, :]
 
 
 def _state_field_spectra(inp, state, runtime=None):
     """Traceable geometry and contravariant-field spectra for a live state."""
-    if bool(inp.lasym):
-        raise NotImplementedError(
-            "live-state field evaluation supports lasym = False only"
-        )
     from .fields import magnetic_fields, metric_elements
     from .fourier import Resolution, mode_table, trig_tables
     from .geometry import (
@@ -433,7 +431,7 @@ def _state_field_spectra(inp, state, runtime=None):
         half_mesh_jacobian,
         real_space_geometry,
     )
-    from .nyquist import nyquist_limits
+    from .nyquist import nyquist_limits, symoutput_split
     from .residuals import m1_constrained_to_physical
     from .setup import boundary_from_input, flux_profiles, radial_grids
     from .solver import resolution_from_input
@@ -485,8 +483,16 @@ def _state_field_spectra(inp, state, runtime=None):
     nyq_modes = mode_table(max(mnyq, max(mpol - 1, 0)) + 1, max(nnyq, ntor))
     xm_nyq = jnp.asarray(nyq_modes.m, dtype=float)
     xn_nyq = jnp.asarray(nyq_modes.n, dtype=float) * float(nfp)
-    bsupumnc = _wrout_cos_coeffs_jax(fields.bsupu, nyq_modes, trig)
-    bsupvmnc = _wrout_cos_coeffs_jax(fields.bsupv, nyq_modes, trig)
+    def analysed(f):
+        """Cosine table and, without stellarator symmetry, the sine table (wrout.f symoutput)."""
+        if not lasym:
+            return _wrout_cos_coeffs_jax(f, nyq_modes, trig), None
+        even, odd = symoutput_split(f=jnp.asarray(f), trig=trig)
+        return (_wrout_cos_coeffs_jax(even, nyq_modes, trig),
+                _wrout_cos_coeffs_jax(odd, nyq_modes, trig, sine=True))
+
+    bsupumnc, bsupumns = analysed(fields.bsupu)
+    bsupvmnc, bsupvmns = analysed(fields.bsupv)
 
     # These are the wout geometry coefficients and must be built exactly as
     # wout_from_state builds them: m1_constrained_to_physical has already
@@ -514,8 +520,10 @@ def _state_field_spectra(inp, state, runtime=None):
     return dict(
         nfp=nfp, ns=ns, xm=xm, xn=xn, xmn=xm_nyq, xnn=xn_nyq,
         rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc,
-        bsupu=bsupumnc, bsupv=bsupvmnc, bsupu_s=None, bsupv_s=None,
-        lmns=lmns, phipf=jnp.asarray(prof["phipf"]),
+        bsupu=bsupumnc, bsupv=bsupvmnc, bsupu_s=bsupumns, bsupv_s=bsupvmns,
+        lmns=lmns, lmnc=(apply_lambda_axis_closure(state.L_cos, modes=modes, ntor=ntor)
+                         * jnp.asarray(fields.lamscale) * mode_scale[None, :] if lasym else None),
+        phipf=jnp.asarray(prof["phipf"]),
         chipf=_half_to_full_profile(fields.chips),
         lasym=lasym, signgs=signgs)
 
@@ -536,13 +544,13 @@ def surface_field_data_from_state(
     Unlike :func:`surface_field_data_from_wout`, this rebuilds boundary
     geometry and contravariant-``B`` spectra without leaving the device.  Pass
     the matching ``runtime`` when profiles are differentiated so current and
-    pressure parameters remain in the graph.  Stellarator symmetry is the
-    currently validated live-state path.
+    pressure parameters remain in the graph; ``LASYM`` states carry their sine
+    partners.
     """
     # The live-state spectra also carry lambda and the flux derivatives, which
     # the interior field's native form needs and the surface assembly does not.
     spectra = {key: value for key, value in _state_field_spectra(inp, state, runtime).items()
-               if key not in ("lmns", "phipf", "chipf")}
+               if key not in ("lmns", "lmnc", "phipf", "chipf")}
     return _assemble_surface_field_data(
         **spectra, j=int(s_index % spectra["ns"]), use_stellsym=use_stellsym,
         nphi=nphi, ntheta=ntheta, source_convention="vmex_state",
