@@ -1305,3 +1305,16 @@ def test_from_coils_batches_the_essos_single_point_biot_savart() -> None:
     generic = MgridField.from_cartesian_field(
         biot_savart, nfp=int(coils.nfp), **bounds)
     np.testing.assert_array_equal(np.asarray(generic.br), np.asarray(batched.br))
+
+
+def test_external_field_accepts_essos_coils_and_fields():
+    pytest.importorskip("essos")
+    import jax
+    from essos.coils import Coils
+    from essos.fields import BiotSavart
+
+    coils = Coils.from_json(str(Path(__file__).parents[1] / "examples" / "data" / "ESSOS_biot_savart_LandremanPaulQA.json"))
+    points = jnp.array([[1.0, 0.1, 0.05], [0.9, -0.2, 0.0]])
+    expected = jax.vmap(BiotSavart(coils).B)(points)
+    for source in (coils, BiotSavart(coils)):
+        np.testing.assert_allclose(ext._field_cartesian(source, points), expected, rtol=1e-12)
