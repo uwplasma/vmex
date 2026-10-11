@@ -264,7 +264,7 @@ def test_workflow_selects_manifest_lanes() -> None:
 
 
 def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
-    """Exercise real module setup/teardown in one worker, where leaks matter."""
+    """Exercise real module setup/teardown in one worker: none may leave jit disabled."""
     plugin = tmp_path / "jit_restoration_probe.py"
     plugin.write_text(
         "import jax, pytest\n"
@@ -272,7 +272,7 @@ def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
         "def pytest_runtest_teardown(item, nextitem):\n"
         "    result = yield\n"
         "    if nextitem is None or nextitem.module is not item.module:\n"
-        "        assert jax.config.jax_disable_jit, item.nodeid\n"
+        "        assert not jax.config.jax_disable_jit, item.nodeid\n"
         "    return result\n"
     )
     env = os.environ.copy()

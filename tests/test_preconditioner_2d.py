@@ -74,12 +74,15 @@ def _tiny_reduced_map(case: str = "circular_tokamak", ns: int = 6):
 
 
 def test_reduced_map_reproduces_solver_force():
-    """The frozen-cache force map's primal equals the solver's ``gc`` exactly."""
+    """The frozen-cache force map's primal equals the solver's ``gc`` to round-off.
+
+    Both are jitted with different fusion, so the sums agree to the last bits only.
+    """
     g_reduced, x0, gc = _tiny_reduced_map()
     g0 = g_reduced(x0)
     for c in g0:
         np.testing.assert_allclose(
-            np.asarray(g0[c]), np.asarray(getattr(gc, c)), rtol=0, atol=0,
+            np.asarray(g0[c]), np.asarray(getattr(gc, c)), rtol=1e-13, atol=0,
             err_msg=f"channel {c}",
         )
 

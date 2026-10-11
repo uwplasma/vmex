@@ -117,7 +117,8 @@ def test_constant_toroidal_field_matches_analytic_current_and_force():
     # noise in components whose analytic value is zero.
     # atol: rounding of the ~8e4 A/m^2 current (de Boor point evaluation).
     np.testing.assert_allclose(result.J, expected_J, rtol=2e-11, atol=5e-7)
-    np.testing.assert_allclose(result.force, expected_force, rtol=2e-11, atol=2e-7)
+    # atol: the analytic zero is J x B with |J| ~ 8e4, so 1e-6 is 1e-11 of it.
+    np.testing.assert_allclose(result.force, expected_force, rtol=2e-11, atol=1e-6)
     assert np.all(np.isfinite(result.force_rho))
     assert np.all(np.isfinite(result.force_helical))
 
@@ -448,7 +449,9 @@ def test_batched_point_sweep_matches_flat_vmap_values_and_gradients():
     with sf.force_sweep_measurement(sf.ForceSweepPolicy(min_batch=8, max_batch=8, checkpoint=False)):
         plain_samples = sf.evaluate_strong_force(state, rho, theta, zeta)
         plain_value, plain_grad = jax.value_and_grad(objective)(0.0)
-    np.testing.assert_array_equal(np.asarray(plain_samples.force), np.asarray(batched_samples.force))
+    scale = float(np.max(np.abs(np.asarray(batched_samples.force))))
+    np.testing.assert_allclose(np.asarray(plain_samples.force), np.asarray(batched_samples.force),
+                               rtol=1.0e-12, atol=1.0e-11 * scale)
     # Same kernel, different summation order under jit fusion.
     np.testing.assert_allclose(plain_value, batched_value, rtol=3.0e-13)
     np.testing.assert_allclose(plain_grad, batched_grad, rtol=1.0e-11)
