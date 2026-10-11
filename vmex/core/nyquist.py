@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import jax
 import numpy as np
 
 from .fourier import ModeTable, TrigTables, mode_table
@@ -123,9 +124,9 @@ def symoutput_split(*, f: np.ndarray, trig: TrigTables, reversed_sym: bool = Fal
 
     The stellarator reflection is ``(theta, zeta) -> (2*pi - theta, -zeta)``;
     ``reversed_sym`` selects the odd-under-reflection kernels (``bsubs``).
-    Returns two ``(ns, ntheta2, nzeta)`` arrays.
+    Returns two ``(ns, ntheta2, nzeta)`` arrays; a JAX array stays traceable.
     """
-    f = np.asarray(f, dtype=float)
+    f = f if isinstance(f, jax.Array) else np.asarray(f, dtype=float)
     nt2, nt1 = int(trig.ntheta2), int(trig.ntheta1)
     nzeta = int(f.shape[2])
     i0 = np.arange(nt2, dtype=int)

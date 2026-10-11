@@ -36,8 +36,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import tempfile
 import time
+import warnings
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -53,6 +53,13 @@ TIMESTEP = 1.25e-7
 MODE_TOLERANCE = 2e-4
 # largest relative energy error of converged collisionless orbits
 ENERGY_TOLERANCE = 1e-3
+# largest LCFS Fourier amplitude on the truncation edge (m = mpol - 1 or
+# |n| = ntor), relative to the m = 1, n = 0 amplitude, of an equilibrium whose
+# alpha losses are resolved (docs/howto/trace-alpha-particles.md, "Equilibrium
+# resolution"): a coil-driven Landreman-Paul QA at mpol = ntor = 5 sits at 1e-2
+# and loses 6-8 % of its alphas; at mpol = ntor = 6 it sits at 1.4e-3 and
+# loses 0.9-1.1 %, against 0.7-0.8 % in the coil field itself.
+RESOLUTION_TOLERANCE = 3e-3
 # default integrator: per-particle error-controlled Dopri8(7) at this tolerance
 # (21 equilibria: worst energy error 1.7e-4, six times below ENERGY_TOLERANCE)
 METHOD = "adaptive8"
@@ -169,20 +176,49 @@ class AlphaTracingResult:
 def essos_vmec_field(source: Any, **kwargs: Any) -> Any:
     """Build an ESSOS VMEC field from a wout path or :class:`WoutData`.
 
-    In-memory data use a temporary wout loaded eagerly by ESSOS; this
-    diagnostic handoff severs gradients. Constructor ``kwargs`` pass through.
+    In-memory data go straight to ``essos.fields.Vmec.from_arrays``: no file
+    is written and gradients flow. Constructor ``kwargs`` pass through.
     """
     _, _, fields = _essos_imports()
+    if not hasattr(source, "rmnc"):
+        return fields.Vmec(str(Path(source)), **kwargs)
+    partners = {}
+    if bool(source.lasym):
+        partners = {name: getattr(source, name) for name in fields.VMEC_WOUT_PARTNERS.values()
+                    if getattr(source, name, None) is not None}
+    return fields.Vmec.from_arrays(source.nfp, source.ns, *(getattr(source, name) for name in fields.VMEC_WOUT_ARRAYS),
+                                   **kwargs, **partners)
 
-    if hasattr(source, "rmnc") and hasattr(source, "xm"):  # WoutData
-        from .wout import write_wout
 
-        with tempfile.TemporaryDirectory(prefix="vmex_essos_") as tmp:
-            wout_path = Path(tmp) / "wout_equilibrium.nc"
-            write_wout(wout_path, source)
-            return fields.Vmec(str(wout_path), **kwargs)
+def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0.03, n: int | None = 48,
+                         plasma: str = "auto", ntheta: int = 64, nphi: int = 128) -> dict[str, Any]:
+    """Keyword arguments for ``essos.dynamics.Tracing`` from axis to wall.
 
-    return fields.Vmec(str(Path(source)), **kwargs)
+    ``field`` is the ESSOS VMEC field of ``wout`` (path or :class:`WoutData`).
+    Outside the LCFS, :class:`~vmex.core.extender.VmecExtender` adds the
+    plasma to ``coils`` (ESSOS ``Coils``/field, :class:`MgridField` or an
+    ``xyz -> B`` callable; by default the wout's mgrid) and ESSOS
+    ``InterpolatedField`` tabulates it on ``n`` x ``n`` x ``2n`` nodes around
+    a ``wall`` surface ``wall`` metres outside the LCFS (``n=None`` keeps the
+    direct field).  Without an exterior
+    field (``wall=None`` or a fixed-boundary wout without coils) orbits stop
+    at the LCFS.  Use as ``Tracing(**essos_tracing_fields(wout, coils), ...)``.
+    """
+    from essos.fields import InterpolatedField
+    from essos.surfaces import SurfaceRZFourier
+
+    from .extender import VmecExtender
+    from .wout import read_wout
+
+    wout = wout if hasattr(wout, "rmnc") else read_wout(wout)
+    field = essos_vmec_field(wout)
+    if wall is None or (coils is None and not bool(wout.lfreeb)):
+        return {"field": field}
+    surface = SurfaceRZFourier.from_vmec(field, ntheta=ntheta, nphi=nphi, offset=wall)
+    exterior = VmecExtender.from_wout(wout, external_field=coils, plasma=plasma)
+    if n:
+        exterior = InterpolatedField.around(exterior, surface, n=n, stellsym=not bool(wout.lasym))
+    return {"field": field, "wall": surface, "exterior_field": exterior}
 
 
 def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE):
@@ -191,22 +227,47 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     from booz_xform_jax import Booz_xform
     from essos.boozer import BoozerField
 
-    from .wout import write_wout
-
     if bool(wout.lasym):
         from inspect import signature
 
         if "bmns" not in signature(BoozerField.from_booz).parameters:
             raise ImportError("Non-symmetric tracing requires ESSOS sine-spectrum support; upgrade ESSOS")
     bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
-    with tempfile.TemporaryDirectory(prefix="vmex_booz_") as tmp:
-        path = Path(tmp) / "wout_trace.nc"
-        write_wout(path, wout)
-        bx.read_wout(str(path), flux=False)
+    bx.read_wout_data(wout, flux=False)
     bx.run()
     # Boozer guiding-centre equations use psi = -Phi_tor/(2 pi) for VMEC's phi.
     psi0 = -float(np.asarray(wout.phi)[-1]) / (2 * np.pi)
     return BoozerField.from_booz_xform(bx, psi0, mode_tolerance), bx
+
+
+def truncation_message(truncation: float, silence: str) -> str:
+    """The warning for a spectrum whose :func:`spectral_truncation` is ``truncation``."""
+    return (f"Equilibrium spectrum truncated: edge modes (m = mpol - 1 or |n| = ntor) are {truncation:.1e} "
+            f"of m = 1 (threshold {RESOLUTION_TOLERANCE:g}); alpha loss fractions can be several times too "
+            "high. Re-solve with larger mpol and ntor (try mpol = ntor >= 6) and check that the loss fraction "
+            f"changes by less than its Monte Carlo error, or pass {silence} to silence.")
+
+
+def spectral_truncation(wout) -> float:
+    """Largest LCFS ``R, Z`` amplitude on the truncation edge of ``wout``.
+
+    The amplitude of the modes with ``m = mpol - 1`` or ``|n| = ntor``,
+    relative to the ``m = 1, n = 0`` amplitude. Alpha losses from a nearly
+    quasi-symmetric field are set by ``|B|`` errors of order 1e-3, so a
+    spectrum that has not decayed to that level at its edge carries spurious
+    symmetry breaking (see :data:`RESOLUTION_TOLERANCE`).
+    """
+    xm = np.asarray(wout.xm, dtype=int)
+    n = np.abs(np.rint(np.asarray(wout.xn, dtype=float) / int(wout.nfp)).astype(int))
+    tables = [wout.rmnc, wout.zmns]
+    if bool(wout.lasym):
+        tables += [getattr(wout, "rmns", None), getattr(wout, "zmnc", None)]
+    edge = np.sqrt(sum(np.asarray(t, dtype=float)[-1] ** 2 for t in tables if t is not None))
+    reference = edge[(xm == 1) & (n == 0)]
+    if not reference.size or reference.max() <= 0:
+        return float("nan")
+    tail = (xm == xm.max()) | ((n == n.max()) & (n.max() > 0))
+    return float(edge[tail].max() / reference.max())
 
 
 def _interval_product(a, b):
@@ -451,6 +512,7 @@ def trace_alphas(
     mode_tolerance: float = MODE_TOLERANCE,
     progress: Any = None,
     devices: Any = None,
+    check_resolution: bool = True,
 ) -> AlphaTracingResult:
     """Trace fusion alphas through a wout file or in-memory equilibrium.
 
@@ -490,6 +552,9 @@ def trace_alphas(
         cross-device check, which costs little between CPU cores but made
         two A4000s 3x slower than one.  Pass ``jax.devices()`` to split
         over every GPU anyway.
+    check_resolution:
+        Warn when :func:`spectral_truncation` exceeds
+        :data:`RESOLUTION_TOLERANCE` (see :func:`truncation_message`).
     """
     import jax
 
@@ -519,6 +584,9 @@ def trace_alphas(
     if scale is not None:
         b_scale, r_scale = aries_cs_scales(wout, scale)
         wout = scale_wout(wout, b_scale=b_scale, r_scale=r_scale)
+    truncation = spectral_truncation(wout)
+    if check_resolution and truncation > RESOLUTION_TOLERANCE:
+        warnings.warn(truncation_message(truncation, "check_resolution=False"), RuntimeWarning, stacklevel=2)
     if timestep is None:
         timestep = TIMESTEP * float(wout.Aminor_p) / SCALE_TARGETS["volavgB"][1]
     if not _COMPILE_S[1]:
@@ -569,7 +637,7 @@ def trace_alphas(
         method=method, tolerance=float(tolerance) if method.startswith("adaptive") else None,
         integrator=(f"adaptive {'Dopri8' if method == 'adaptive8' else 'Dopri5'}, tolerance {tolerance:g}"
                     if method.startswith("adaptive") else f"{method.upper()}") + " (Boozer guiding centre)",
-        compact=bool(compact), boozer_modes=int(field.xm.size),
+        compact=bool(compact), boozer_modes=int(field.xm.size), spectral_truncation=truncation,
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
