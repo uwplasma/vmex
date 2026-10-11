@@ -302,6 +302,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Samples of the loss-fraction curve (default: 1000).",
     )
     p.add_argument(
+        "--trace-no-resolution-check", action="store_true",
+        help="Do not warn when the equilibrium spectrum is truncated (edge modes above 3e-3 of m = 1).",
+    )
+    p.add_argument(
         "--trace-mode-cut", type=float, default=None,
         help="Drop Boozer |B| modes below this fraction of the largest amplitude (default: 2e-4; "
              "1e-3 misses losses in precise quasisymmetry).",
@@ -1147,7 +1151,8 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
     import numpy as np
 
     from .plotting import plot_tracing
-    from .tracing import ENERGY_TOLERANCE, MODE_TOLERANCE, TOLERANCE, trace_alphas
+    from .tracing import (ENERGY_TOLERANCE, MODE_TOLERANCE, RESOLUTION_TOLERANCE, TOLERANCE, trace_alphas,
+                          truncation_message)
 
     scale = None if args.trace_no_scale else args.scale_target
     mode_cut = MODE_TOLERANCE if args.trace_mode_cut is None else float(args.trace_mode_cut)
@@ -1189,6 +1194,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             mode_tolerance=mode_cut,
             nboz=int(args.nbooz),
             progress=None if quiet else _TraceProgress(),
+            check_resolution=False,
         )
     except ImportError as exc:
         raise VmecInputError(
@@ -1200,6 +1206,8 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             WERROR_MESSAGES[INPUT_ERROR_FLAG], hint=str(exc)
         ) from exc
     meta = result.metadata
+    if not args.trace_no_resolution_check and meta["spectral_truncation"] > RESOLUTION_TOLERANCE:
+        emit(f" WARNING: {truncation_message(meta['spectral_truncation'], '--trace-no-resolution-check')}")
     if not quiet:
         emit(
             f" Scaling: B_scale={meta['b_scale']:.6g}, R_scale={meta['r_scale']:.6g} "
