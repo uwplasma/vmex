@@ -78,6 +78,9 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/review_*.json", ""),
     # Measured by the external analytical benchmark; the record names its commit.
     ("benchmarks/interior_field_vs_wout.json", ""),
+    # Written by ESSOS examples/cross_code_benchmark/benchmark.py (uwplasma/ESSOS#162).
+    ("benchmarks/essos_cross_code.json", ""),
+    ("benchmarks/make_essos_cross_code_figures.py", ""),
     ("benchmarks/*.md", ""),
 )
 
