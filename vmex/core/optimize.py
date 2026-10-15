@@ -2561,6 +2561,25 @@ def _require_certified_seed(memo, ftol: float, ratio: float) -> None:
         ftol=float(ftol))
 
 
+def _trial_wall(x, x0, wall, xp=jnp):
+    """Smooth scalar-lane trial wall ``wall * (1 + d)**2`` and its exact gradient.
+
+    ``d`` is the distance from the seed ``x0`` scaled by ``max(|x0|, 1e-2)``.
+    A wall of at least ten seed costs is never accepted by a Wolfe line
+    search, yet stays commensurate with the objective: against the 1e6-row
+    least-squares magnitude (a ~1e15 cliff) the dcsrch interpolation collapsed
+    its step to machine zero on the QI example instead of backtracking.
+    ``xp`` is ``numpy`` for the host lane and ``jax.numpy`` inside graphs.
+    """
+    scale = xp.maximum(xp.abs(x0), 1.0e-2)
+    delta = (x - x0) / scale
+    distance = xp.linalg.norm(delta)
+    growth = 1.0 + distance
+    slope = xp.where(distance == 0.0, 0.0,
+                     2.0 * wall * growth / xp.where(distance == 0.0, 1.0, distance))
+    return wall * growth ** 2, slope * delta / scale
+
+
 def _least_squares_implicit(
     objective_terms: Sequence[tuple[Callable, float, Any]],
     inp: VmecInput,
@@ -2785,9 +2804,12 @@ def _least_squares_implicit(
     # The initial point is strict: it must solve and define a finite residual
     # shape before any optimizer is entered.  Later trial points use the
     # exception-free status callback below.
-    params0_np = jax.tree.map(
-        lambda a: np.asarray(a, dtype=np.float64),
-        params_of(_place(x0), problem_data))
+    def host_params(x):
+        """``params_of(x)`` as host float64 arrays (the solve-memo key)."""
+        return jax.tree.map(lambda a: np.asarray(a, dtype=np.float64),
+                            params_of(_place(x), problem_data))
+
+    params0_np = host_params(x0)
     # ``refine=False``: the preflight validates the seed solve and the
     # residual shape but never differentiates this state, so it does not pay
     # for the fixed-point anchor here.  The first derivative evaluation
@@ -2845,51 +2867,16 @@ def _least_squares_implicit(
         row = gradient / np.sqrt(float(residual_size))
         return np.broadcast_to(row, (residual_size, ndof)).copy()
 
-    # Scalar-lane trial wall.  Any certified value of a descending run stays
-    # at or below the seed cost, so a wall of at least ten seed costs is
-    # never accepted by a Wolfe line search — while remaining commensurate
-    # with the objective scale.  The least-squares 1e6-row magnitude must NOT
-    # be reused here: against a ~1e15 cliff the dcsrch interpolation
-    # collapses its step to machine zero (measured |dy| ~ 1e-20 on the QI
-    # example) instead of backtracking geometrically into the basin.
     def failure_value_and_gradient(x: np.ndarray) -> tuple[float, np.ndarray]:
-        """Exact scalar pair of the smooth scalar-lane trial wall.
-
-        ``value = base * (1 + d)**2`` with ``d`` the scaled distance from
-        the seed and its exact derivative as the gradient, so a scalar line
-        search always sees a consistent, smooth, bounded (value, slope)
-        pair at rejected trials — never a stale gradient from a different
-        point.  A non-finite or malformed ``x`` gets the flat 1e12 /
-        zero-gradient fallback.
-        """
+        """Host :func:`_trial_wall`; a malformed or non-finite ``x`` gets 1e12, 0."""
         x = np.asarray(x, dtype=float)
-        if x.shape != x0.shape:
+        if x.shape != x0.shape or not np.all(np.isfinite(x)):
             return 1.0e12, np.zeros(ndof)
-        delta = (x - x0) / x_penalty_scale_host
-        distance = float(np.linalg.norm(delta))
-        if not np.isfinite(distance):
-            return 1.0e12, np.zeros(ndof)
-        growth = 1.0 + distance
-        gradient = (
-            np.zeros(ndof)
-            if distance == 0.0
-            else (2.0 * scalar_wall_base * growth / distance)
-            * delta / x_penalty_scale_host
-        )
-        return scalar_wall_base * growth ** 2, gradient
+        value, gradient = _trial_wall(x, x0, scalar_wall_base, np)
+        return float(value), gradient
 
-    def failure_value_and_gradient_jax(
-            x: jnp.ndarray, data) -> tuple[jnp.ndarray, jnp.ndarray]:
-        scale = jnp.maximum(jnp.abs(data["x0"]), 1.0e-2)
-        delta = (x - data["x0"]) / scale
-        distance = jnp.linalg.norm(delta)
-        growth = 1.0 + distance
-        gradient = jnp.where(
-            distance == 0.0,
-            jnp.zeros_like(x),
-            (2.0 * data["wall"] * growth / distance) * delta / scale,
-        )
-        return data["wall"] * growth ** 2, gradient
+    def failure_value_and_gradient_jax(x: jnp.ndarray, data):
+        return _trial_wall(x, data["x0"], data["wall"])
 
     def certified_trial(x: np.ndarray) -> bool:
         """Whether the memoized solve at ``x`` is a usable fixed point.
@@ -2906,9 +2893,7 @@ def _least_squares_implicit(
         hit = imp._LAST_SOLVE.get(cfg)
         if hit is None:
             return False
-        params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64),
-            params_of(_place(x), problem_data))
+        params_np = host_params(x)
         if hit[0] != imp._params_key(params_np):
             return False
         result = hit[1]
@@ -2982,36 +2967,10 @@ def _least_squares_implicit(
 
     # One-hot dof tangents in ImplicitParams space, stacked over dofs
     # (leading axis ndof) so chunk_map can process them in fixed-size chunks:
-    # boundary rbc/zbs (and, for lasym, rbs/zbc) rows first, then the scaled
-    # AC/CURTOR rows.
-    t_rbc = np.zeros((ndof,) + np.shape(params0.rbc))
-    t_zbs = np.zeros((ndof,) + np.shape(params0.zbs))
-    t_rbs = np.zeros((ndof,) + np.shape(params0.rbs))
-    t_zbc = np.zeros((ndof,) + np.shape(params0.zbc))
-    t_ac = np.zeros((ndof,) + np.shape(params0.ac))
-    t_ac_aux_f = np.zeros((ndof,) + np.shape(params0.ac_aux_f))
-    t_curtor = np.zeros((ndof,))
-    for j in range(nm):
-        t_rbc[j, row_idx[j], col_idx[j]] = 1.0
-        t_zbs[nm + j, row_idx[j], col_idx[j]] = 1.0
-        if lasym:
-            t_rbs[2 * nm + j, row_idx[j], col_idx[j]] = 1.0
-            t_zbc[3 * nm + j, row_idx[j], col_idx[j]] = 1.0
-    if vary_major_radius:
-        t_rbc[nfam * nm, ntor, 0] = 1.0
-    for j in range(k_cur):
-        target = t_ac_aux_f if _current_uses_spline(inp) else t_ac
-        target[nboundary + j, j] = ac_scale
-    if k_cur:
-        t_curtor[nboundary + k_cur] = _CURTOR_SCALE
-    zerop = jax.tree.map(lambda a: _place(np.zeros(a.shape)), params0)
-    if lasym:
-        tangent_stack = tuple(map(
-            _place, (t_rbc, t_zbs, t_rbs, t_zbc, t_ac, t_ac_aux_f, t_curtor)
-        ))
-    else:
-        tangent_stack = tuple(map(
-            _place, (t_rbc, t_zbs, t_ac, t_ac_aux_f, t_curtor)))
+    # the exact forward derivative of params_of (entries 1, the AC scale and
+    # the CURTOR scale).
+    tangent_stack = jax.tree.map(lambda a: jnp.moveaxis(a, -1, 0),
+                                 jax.jacfwd(params_of)(_place(x0), problem_data))
 
     # R17.1 memory knob: chunk_size None == one full-width batch, while an int
     # / "auto" caps peak Jacobian memory at that many dofs at a time.  Route
@@ -3056,14 +3015,7 @@ def _least_squares_implicit(
             return jax.jvp(lambda z: F(z, params), (z_star,), (dz,))[1]
 
         def tangent_of(tp):
-            if lasym:
-                return dataclasses.replace(zerop, rbc=tp[0], zbs=tp[1],
-                                           rbs=tp[2], zbc=tp[3],
-                                           ac=tp[4], ac_aux_f=tp[5],
-                                           curtor=tp[6])
-            return dataclasses.replace(zerop, rbc=tp[0], zbs=tp[1],
-                                       ac=tp[2], ac_aux_f=tp[3],
-                                       curtor=tp[4])
+            return tp
 
         def rhs_of(tp):
             b = jax.jvp(lambda prm: F(z_star, prm), (params,), (tp,))[1]
@@ -3243,6 +3195,7 @@ def _least_squares_implicit(
     # The strict seed preflight above already evaluated and validated every
     # residual row.  Carry that known shape instead of compiling ``rows_jit``
     # eagerly while the public factory is still returning.
+    use_reverse = jac_solver == "reverse" or (jac_solver == "auto" and residual_size == 1)
     holder: dict[str, Any] = {
         "nres": residual_size,
         "lin": None,
@@ -3285,8 +3238,7 @@ def _least_squares_implicit(
     def _stash_linearization(x: np.ndarray, dz_cols) -> None:
         """Record ``(x_ref, converged state, dz columns)`` for trial seeding."""
         hit = imp._LAST_SOLVE.get(cfg)
-        params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64),
-                                 params_of(_place(x), problem_data))
+        params_np = host_params(x)
         if hit is not None and hit[0] == imp._params_key(params_np):
             holder["lin"] = (np.array(x, dtype=float), hit[1].state, dz_cols)
         else:  # unexpected call pattern: better no seed than a wrong one
@@ -3351,9 +3303,7 @@ def _least_squares_implicit(
         # unless the exact-key solve memo already proves it usable.
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
-        params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64),
-            params_of(_place(x), problem_data))
+        params_np = host_params(x)
         hit = imp._LAST_SOLVE.get(cfg)
         if (
             hit is None
@@ -3394,11 +3344,7 @@ def _least_squares_implicit(
 
         primary_error = None
         try:
-            reverse = (
-                jac_solver == "reverse"
-                or (jac_solver == "auto" and holder["nres"] == 1)
-            )
-            if reverse:
+            if use_reverse:
                 jac = reverse_candidate()
             else:
                 state = solved_state()
@@ -3583,9 +3529,7 @@ def _least_squares_implicit(
             VmecExtender, VmecInteriorField, _source_nphi_for_digits)
 
         x = np.asarray(x, dtype=float)
-        params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64),
-            params_of(_place(x), problem_data))
+        params_np = host_params(x)
         hit = imp._LAST_SOLVE.get(cfg)
         if (
             hit is None
@@ -3680,11 +3624,7 @@ def _least_squares_implicit(
         )
 
     def jax_residual_jacobian(x: jnp.ndarray) -> jnp.ndarray:
-        reverse = (
-            jac_solver == "reverse"
-            or (jac_solver == "auto" and holder["nres"] == 1)
-        )
-        if reverse:
+        if use_reverse:
             return reverse_jit(x, problem_data)
         rows, _dz_cols, summary = jac_jit(
             x, imp.solve_implicit(params_of(x, problem_data), cfg), problem_data)
@@ -3706,10 +3646,6 @@ def _least_squares_implicit(
         params = params_of(x, data)
         state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
-        reverse = (
-            jac_solver == "reverse"
-            or (jac_solver == "auto" and holder["nres"] == 1)
-        )
 
         def accepted(_):
             rows = term_rows(state, runtime, data)
@@ -3717,7 +3653,7 @@ def _least_squares_implicit(
             def pulled_back():
                 return reverse_pullback(x, state, status, lambda _: rows, 1, data)[0]
 
-            if reverse:
+            if use_reverse:
                 gradient = pulled_back()
             else:
                 jacobian, _dz_cols, summary = jac_jit(
