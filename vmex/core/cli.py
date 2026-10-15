@@ -249,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
             "scaled in memory to ARIES-CS size: print the loss fraction, write "
             "*_trace.json/.npz, *_trace.png and *_trace_3d.png. Works on a "
             "wout_*.nc input or after solving an input file. The defaults "
-            "(1000 alphas, 1e-2 s) take about 30 s on 10 CPU cores; cost "
+            "(500 alphas, 1e-2 s) take about a minute on 10 CPU cores; cost "
             "scales as particles x tmax / timestep."
         ),
     )
