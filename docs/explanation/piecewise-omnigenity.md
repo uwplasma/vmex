@@ -90,7 +90,7 @@ favorable zero. Pure kernels support JIT, JVP and VJP. The equilibrium chain
 uses the solver's supported first-order implicit derivative; this does not
 promise arbitrary nested or forward-mode differentiation through a VJP solver.
 The implicit linearization holds the released m=1 gauge at its converged value.
-Use `frozen_path_directional_fd` to check that derivative. Cold re-solves can
+Use `frozen_path_directional_fd` to check that derivative. Independent host re-solves can
 follow a different gauge at finite resolution; report that discrepancy and
 resolution dependence separately from agreement on the frozen path.
 
