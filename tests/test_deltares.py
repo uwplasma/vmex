@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from scipy.integrate import quad
-from deltares_reference import (helical_angles, normalized_bump, paper_average,
+from vmex.core.deltares import (helical_angles, normalized_bump, paper_average,
                                resonance_pairs, stabilized_power)
 
 
@@ -23,7 +23,8 @@ def test_alias_guard(n, q):
 
 
 def test_zero_signal_gradient():
-    f = lambda x: jnp.sum(stabilized_power(x, 4))
+    def f(x):
+        return jnp.sum(stabilized_power(x, 4))
     x = jnp.zeros(32)
     assert float(f(x)) == 0
     np.testing.assert_array_equal(jax.grad(f)(x), 0)
@@ -81,7 +82,8 @@ def test_helical_chart(M, N, nfp, iota):
 
 
 def test_iota_chain_rule():
-    f = lambda i: helical_angles(.7, .9, i, 2, 1, 0)[1]
+    def f(i):
+        return helical_angles(.7, .9, i, 2, 1, 0)[1]
     np.testing.assert_allclose(jax.grad(f)(.6), -.7 / .6**2, rtol=1e-13)
     assert np.isnan(helical_angles(.7, .9, 0., 2, 1, 0)[0])
 
@@ -101,7 +103,8 @@ def test_gradient_and_transpose():
     def rows(x):
         return stabilized_power(x[0] * jnp.sin(eta) + x[1] * jnp.cos(2 * eta), 4) * normalized_bump(.01 + .03 * x[0], .09)
     x, v, cotangent = jnp.array([.12, -.2]), jnp.array([.4, .6]), jnp.arange(1., 5.)
-    scalar = lambda z: jnp.sum(rows(z))
+    def scalar(z):
+        return jnp.sum(rows(z))
     h = 1e-5
     fd = (scalar(x + h * v) - scalar(x - h * v)) / (2 * h)
     np.testing.assert_allclose(jax.grad(scalar)(x) @ v, fd, rtol=2e-8)
@@ -148,3 +151,78 @@ def test_bounce_cancellation_before_squaring():
     derivative = np.sin(2 * np.pi * np.arange(128) / 128 + .31)
     assert np.mean(derivative)**2 < 1e-28
     np.testing.assert_allclose(np.mean(derivative**2), .5, rtol=1e-13)
+
+
+@pytest.mark.parametrize('omega,expected', [
+    ([-1., 1.], [.5, .5]), ([1., -1.], [.5, .5]),
+    ([-1., 0., 1.], [0., 1., 0.]), ([0., .2, 1.], [1., 0., 0.]),
+    ([-1., -.2, 0.], [0., 0., 1.]), ([-1., 1., -1.], [.5, 1., .5]),
+    ([-2., -1.], [0., 0.]), ([.2, .2], [0., 0.]),
+])
+def test_crossing_deposition(omega, expected):
+    from vmex.core.deltares import linear_crossing_weights
+    got = jax.jit(linear_crossing_weights)(jnp.array(omega), jnp.array([0.]))
+    np.testing.assert_allclose(got[:, 0], expected)
+
+
+@pytest.mark.parametrize('omega', [[0., 0.], [-1., 0., -1.], [1., 0., 1.], [0., np.nan]])
+def test_degenerate_crossing_is_not_zero(omega):
+    from vmex.core.deltares import linear_crossing_weights
+    assert np.isnan(linear_crossing_weights(jnp.array(omega), jnp.array([0.]))).all()
+
+
+def test_crossing_gaps_shapes_and_multiple_families():
+    from vmex.core.deltares import linear_crossing_weights
+    omega = jnp.array([[-1., -.2], [np.nan, .6], [1., 1.]])
+    valid = jnp.isfinite(omega)
+    got = linear_crossing_weights(omega, jnp.array([0.]), valid)
+    np.testing.assert_allclose(got[..., 0], [[0., .75], [0., .25], [0., 0.]])
+    assert np.isnan(linear_crossing_weights(jnp.array([0., 1.]), jnp.array([0.]),
+                                          jnp.array([True, False]))).all()
+    assert np.isnan(linear_crossing_weights(jnp.array([0., 1.]), jnp.array([np.nan]))).all()
+    for om, res, mask in [(jnp.ones(1), jnp.ones(1), None),
+                          (jnp.ones(2), jnp.ones((1, 1)), None),
+                          (jnp.ones(2), jnp.ones(1), jnp.ones(3))]:
+        with pytest.raises(ValueError):
+            linear_crossing_weights(om, res, mask)
+
+
+def _maps(amplitude=.02):
+    eta = jnp.arange(24) * (2 * jnp.pi / 24)
+    ds = jnp.broadcast_to(amplitude * jnp.sin(eta)[None, :, None, None], (3, 24, 1, 1))
+    de = jnp.broadcast_to(2 * jnp.pi * jnp.array([-.11, .14, .31])[:, None, None, None], ds.shape)
+    return ds, de, jnp.ones_like(ds) * 2, jnp.array([1.]), jnp.array([.2]), jnp.ones(3)
+
+
+def test_maps_reduction_and_gradient():
+    from vmex.core.deltares import deltares_from_maps
+    def loss(a):
+        return deltares_from_maps(*_maps(a), p_max=0, q_max=2)['loss']
+    out = jax.jit(lambda a: deltares_from_maps(*_maps(a), p_max=0, q_max=2))(.02)
+    strength = 64 * .02**2 / np.pi**2
+    expected = strength * .2 * np.array([.56, .44, 0.])
+    assert out['valid']
+    np.testing.assert_allclose(out['delta_res'], expected, rtol=1e-13)
+    np.testing.assert_allclose(out['loss'], .5 * np.sum(expected**2), rtol=1e-13)
+    np.testing.assert_allclose(jax.grad(loss)(.02), 4 * loss(.02) / .02, rtol=1e-13)
+    np.testing.assert_allclose(jax.grad(loss)(.02), (loss(.020001) - loss(.019999)) / .000002, rtol=1e-8)
+    assert loss(0.) == 0 and jax.grad(loss)(0.) == 0
+
+
+def test_maps_rotation_zero_precession_and_rejection():
+    from vmex.core.deltares import deltares_from_maps
+    ds, de, tau, *rest = _maps()
+    tau = tau.at[:, ::2].set(4.)
+    de = de.at[:, ::2].set(0.)
+    ratio = deltares_from_maps(ds, de, tau, *rest, p_max=0, q_max=2)
+    mean = deltares_from_maps(ds, de, tau, *rest, p_max=0, q_max=2, rotation='mean_map')
+    np.testing.assert_allclose(ratio['omega'], mean['omega'] * 4 / 3)
+    for bad_tau in [tau.at[0, 0, 0, 0].set(0.), tau * np.nan]:
+        out = deltares_from_maps(ds, de, bad_tau, *rest, p_max=0, q_max=2)
+        assert not out['valid'] and np.isnan(out['loss'])
+    with pytest.raises(ValueError):
+        deltares_from_maps(ds[0], de, tau, *rest)
+    with pytest.raises(ValueError):
+        deltares_from_maps(ds, de, tau, *rest, rotation='unknown')
+    with pytest.raises(ValueError):
+        resonance_pairs(-1, 2)

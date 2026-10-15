@@ -760,3 +760,31 @@ the hard one (the smoothing deliberately cannot see structure below
 :math:`\delta` — the near-omnigenous QA ripple most of all) and anneals
 toward it as ``temperature`` decreases with a correspondingly finer
 budget.  Optimize the surrogate, report the hard value.
+
+DeltaRes supplied-map reduction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:mod:`vmex.core.deltares` implements the shear-cancelled harmonic strength and
+published phase-space reduction of Labbate, Paul and Chambliss
+(`arXiv:2609.01890v1 <https://arxiv.org/abs/2609.01890>`_).
+:func:`~vmex.core.deltares.deltares_from_maps` accepts complete, matched
+full-bounce displacements and speed-normalized periods. It does not yet supply
+a qualified equilibrium-to-map adapter. Do not use these algebra tests as
+validation of an equilibrium optimization or particle-loss prediction.
+
+The radial deposition counts every crossing, including both contributions
+when two crossings share a node. Exact node crossings are counted once.
+Rational plateaus, resolved tangencies and isolated rational nodes return
+NaN. The lower-level deposition accepts known-absence masks and never bridges
+gaps; the combined reduction requires complete coverage. Numerical failure
+must not be relabeled as known absence. The caller must establish well
+identity, physical pitch, flux orientation, full-bounce factors and a matched
+spatial domain for the numerator and denominator.
+
+``frequency_ratio`` retains the archive's ratio of mean precession to mean
+bounce frequency, while retaining physical zero precession. ``mean_map`` is an
+explicit alternative. The default scalar is half the squared norm of the
+reduced radial rows, with zero target and unit weights. It retains the
+paper's denominator factor two, which is not automatically a probability
+normalization. Neither a smaller reduction nor a passing coefficient gradient
+check qualifies a production boundary derivative or independent confinement.
