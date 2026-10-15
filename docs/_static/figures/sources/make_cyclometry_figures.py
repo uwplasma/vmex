@@ -21,6 +21,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.ticker import FormatStrFormatter  # noqa: E402
+from matplotlib.cm import ScalarMappable  # noqa: E402
+from matplotlib.colors import Normalize  # noqa: E402
+from matplotlib.transforms import Bbox  # noqa: E402
 
 PHASE_COLORS = ['#0072B2', '#D55E00', '#009E73', '#CC79A7',
                 '#6A51A3', '#A6761D', '#008F95', '#AF3150']
@@ -92,6 +95,42 @@ def render(sections, markers, radii, chi, hamiltonian, action_meta, energy_ev):
     return fig
 
 
+def render_rational_surface(data):
+    """Draw saved geometry and closed coordinate curves, not particle orbits."""
+    xyz, field = data['rational_surface_xyz'], data['rational_surface_B']
+    fig = plt.figure(figsize=(9.6, 6.4))
+    ax = fig.add_axes([.015, .11, .81, .88], projection='3d')
+    norm = Normalize(float(field.min()), float(field.max()))
+    ax.plot_surface(*np.moveaxis(xyz, -1, 0), facecolors=plt.cm.viridis(norm(field)),
+                    rstride=1, cstride=1, linewidth=0, alpha=.90, shade=False,
+                    antialiased=True, rasterized=True)
+    colors = ('#171717', '#B51955')
+    for k, color in enumerate(colors):
+        ax.plot(*data[f'rational_fieldline_{k}'].T, color=color, lw=2.2)
+    ax.view_init(elev=28, azim=-52)
+    ax.set_proj_type('ortho')
+    extent = np.ptp(xyz, axis=(0, 1))
+    center = (xyz.max(axis=(0, 1)) + xyz.min(axis=(0, 1))) / 2
+    for setter, c, e in zip((ax.set_xlim, ax.set_ylim, ax.set_zlim), center, extent):
+        setter(c-.54*e, c+.54*e)
+    ax.set_box_aspect(extent)
+    ax.set_xlabel('$X$ [m]', labelpad=9)
+    ax.set_ylabel('$Y$ [m]', labelpad=9)
+    ax.set_zlabel('$Z$ [m]', labelpad=7)
+    ax.tick_params(labelsize=10, pad=0)
+    ax.grid(False)
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.pane.fill = False
+        axis.pane.set_edgecolor((1, 1, 1, 0))
+    colorbar = fig.colorbar(ScalarMappable(norm=norm, cmap='viridis'),
+                           cax=fig.add_axes([.865, .31, .022, .44]))
+    colorbar.set_label('$|B|$ [T]', labelpad=11)
+    fig.legend(handles=[Line2D([], [], color=c, lw=2, label=label)
+                        for c, label in zip(colors, (r'$\chi=0$', r'$\chi=\pi$'))],
+               loc='lower center', bbox_to_anchor=(.46, .14), frameon=False, ncol=2)
+    return fig
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     here = Path(__file__).resolve().parent
@@ -120,6 +159,16 @@ def main():
                     options['metadata'] = {'Author': 'rogeriojorge'}
                 path = args.output_dir / (filename + '.' + ext)
                 fig.savefig(path, dpi=args.dpi, **options)
+                print(path)
+            plt.close(fig)
+        with plt.rc_context({'font.size': 12, 'axes.labelsize': 13, 'pdf.fonttype': 42}):
+            fig = render_rational_surface(data)
+            for ext in args.format:
+                options = {'pil_kwargs': {'quality': 90, 'method': 6}} if ext == 'webp' else {}
+                if ext == 'pdf':
+                    options['metadata'] = {'Author': 'rogeriojorge'}
+                path = args.output_dir / ('readme_cyclometry_surface.' + ext)
+                fig.savefig(path, dpi=args.dpi, bbox_inches=Bbox.from_extents(.15, .70, 9.3, 5.6), **options)
                 print(path)
             plt.close(fig)
 

@@ -86,6 +86,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_convergence.webp",
     "figures/readme_cyclometry_low_energy.webp",
     "figures/readme_cyclometry_alpha.webp",
+    "figures/readme_cyclometry_surface.webp",
     "figures/sources/make_cyclometry_figures.py",
     "figures/readme_diagnostics_summary.webp",
     "figures/readme_equilibrium_showcase.webp",

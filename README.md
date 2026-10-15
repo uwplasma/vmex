@@ -479,6 +479,13 @@ and their derivatives at a moving rational surface. These are ingredients for a 
 passing-particle objective; optimization and a finite-time confinement bound remain under
 validation ([model and numerical limits](docs/explanation/confinement.rst)).
 
+![Three-dimensional rational surface colored by field strength](docs/_static/figures/readme_cyclometry_surface.webp)
+
+The li383 ι = 3/5 reference surface, colored by retained |B|. The χ = 0 and π
+coordinate curves close after five toroidal turns in the Boozer representation.
+They show the geometry sampled by the transit action; they are not particle orbits.
+Full-VMEC field alignment retains a measured representation discrepancy.
+
 ![Passing helium sections near the three-fifths rational surface](docs/_static/figures/readme_cyclometry_low_energy.webp)
 
 **Low-energy reference.** In the li383 equilibrium, 48 selected 100 eV helium markers
@@ -506,11 +513,12 @@ scaled field is not a separately solved reactor equilibrium. Both plots use dire
 spectral evaluation without mode pruning or angular tables; alpha resolution and
 full-field comparisons remain open.
 
-The kernels pass 69 focused tests. The full equilibrium → Boozer → moving-root
-objective derivative passes 15 frozen-family comparisons (maximum relative error
-2.37×10⁻⁶); ordinary equilibrium re-solves still disagree by up to 17.8%. A consistent
-forward equilibrium family, resolved discretization errors and a corrected invariant
-are required before promoting optimization. The [figure source](docs/_static/figures/sources/make_cyclometry_figures.py)
+The kernels pass 69 focused tests. The public `frozen_reference` option now keeps
+values, gradients and materialized equilibria on one discrete family. Its complete
+equilibrium → Boozer → moving-root objective passes 30 directional comparisons at
+the reference and a displaced boundary (maximum relative error 2.37e-06).
+Ordinary re-solves can still select a different family; resolved discretization and
+model errors and a corrected invariant remain required before physical optimization. The [figure source](docs/_static/figures/sources/make_cyclometry_figures.py)
 replots the saved sections and contours with their provenance; it does not rerun orbits.
 
 ## Tracing from the axis to the wall
