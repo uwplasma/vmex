@@ -100,7 +100,7 @@ jobs:
           uv pip install ".[dev]"
       - name: Check source, package, and docs
         run: |
-          ruff check vmex tests examples benchmarks tools
+          ruff check vmex tests examples tools
           mypy vmex
           python -m build
           python tools/check_docs_prose.py

@@ -201,7 +201,6 @@ ignore = ["E402", "E501", "E702"]
 # The docstring contract is on the package's public surface only.
 "tests/**" = ["D"]
 "examples/**" = ["D"]
-"benchmarks/**" = ["D"]
 "tools/**" = ["D"]
 "docs/**" = ["D"]
 
