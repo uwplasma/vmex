@@ -15,11 +15,11 @@ VMEC2000 counterparts
 
 Structure
 ---------
-Production geometry synthesis can use a batched toroidal FFT followed by a
-poloidal contraction (with a dense-DFT fallback for undersampled grids).
-The solver selects it on measured winning hardware; the public dense synthesis
-is retained for x86 CPUs and high-column implicit AD. Force projection uses the
-reverse two-stage order. All paths are pure ``jax.numpy``, have no host
+Synthesis is separable, as in ``totzsps``: a toroidal stage per poloidal mode
+(one real matmul, or an inverse real FFT when ``use_fft``), then a poloidal
+contraction restricted to the requested parity planes.  Force projection
+uses the reverse order, with each poloidal-parity plane contracted against
+its own modes only.  All paths are pure ``jax.numpy``, have no host
 round-trips, and are jit-friendly.
 
 Naming: variables use physical names with the VMEC2000 Fortran name recorded
@@ -35,6 +35,7 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, fields as dataclass_fields
 from typing import Any, Sequence
 
@@ -61,6 +62,8 @@ __all__ = [
 Array = Any
 
 _DERIVATIVES = ("value", "dtheta", "dzeta")
+# totzsps parity planes: even m, m = 1, odd m >= 3 (jmin1 axis rules).
+_PARITY_PLANES = (slice(0, None, 2), slice(1, 2), slice(3, None, 2))
 
 
 def register_pytree_dataclass(cls, *, meta: tuple[str, ...] = (),
@@ -170,10 +173,29 @@ def _phase_pair(modes: ModeTable, trig: TrigTables, derivative: str) -> tuple[np
     theta/physical-zeta derivatives), assembled from the ``fixaray`` tables via
     the angle-addition identities with the sign of ``n`` handled explicitly
     (tables only store ``n >= 0`` columns).  Built with NumPy: these are static
-    trace-time constants.
+    trace-time constants, cached on the mode list and the grid that fully
+    determine them (:func:`~vmex.core.fourier.trig_tables`).
     """
-    m_idx = np.asarray(modes.m, dtype=np.int64)
-    n_idx = np.asarray(modes.n, dtype=np.int64)
+    return _cached_phase_pair(
+        np.asarray(modes.m, dtype=np.int64).tobytes(),
+        np.asarray(modes.n, dtype=np.int64).tobytes(),
+        int(trig.ntheta1), bool(trig.lasym), int(trig.nfp),
+        tuple(np.shape(trig.cosmu)), tuple(np.shape(trig.cosnv)), derivative,
+    )
+
+
+@functools.lru_cache(maxsize=32)
+def _cached_phase_pair(m_bytes: bytes, n_bytes: bytes, ntheta1: int, lasym: bool,
+                       nfp: int, theta_shape: tuple, zeta_shape: tuple,
+                       derivative: str) -> tuple[np.ndarray, np.ndarray]:
+    from .fourier import Resolution, trig_tables
+
+    trig = trig_tables(Resolution(
+        mpol=theta_shape[1], ntor=zeta_shape[1] - 1, ntheta=ntheta1,
+        nzeta=zeta_shape[0], nfp=nfp, lasym=lasym, ns=1,
+    ))
+    m_idx = np.frombuffer(m_bytes, dtype=np.int64)
+    n_idx = np.frombuffer(n_bytes, dtype=np.int64)
     n_abs = np.abs(n_idx)
     sign_n = np.where(n_idx < 0, -1.0, 1.0)[:, None, None]
 
@@ -251,77 +273,54 @@ def _packed_toroidal_coefficients(
     )
 
 
-def _toroidal_synthesis(
-    coefficient_cos: Array, coefficient_sin: Array, trig: TrigTables
+def _toroidal_stage(
+    coefficient_cos: Array, coefficient_sin: Array, trig: TrigTables,
+    *, dzeta: bool, use_fft: bool,
 ) -> Array:
-    """Evaluate one real toroidal Fourier series, using an FFT when unaliased."""
-    nzeta = int(np.shape(trig.cosnv)[0])
+    """Sum ``c_n cos(n zeta) + s_n sin(n zeta)`` (``nscale`` included) over n.
+
+    ``dzeta`` returns the physical toroidal derivative.  The sum is a single
+    real matmul against the ``fixaray`` tables, or an inverse real FFT when
+    ``use_fft`` and the grid resolves every toroidal mode.
+    """
     n_modes = int(coefficient_cos.shape[-1])
-    ntor = n_modes - 1
-    if ntor <= (nzeta - 1) // 2:
-        factors = jnp.full((n_modes,), nzeta / 2, dtype=coefficient_cos.dtype)
-        factors = factors.at[0].set(nzeta)
-        spectrum = (
-            factors * jnp.asarray(trig.nscale[:n_modes])
-            * (coefficient_cos - 1j * coefficient_sin)
+    if dzeta:
+        frequency = np.arange(n_modes, dtype=float) * float(trig.nfp)
+        coefficient_cos, coefficient_sin = (
+            frequency * coefficient_sin, -frequency * coefficient_cos
         )
-        spectrum = jnp.pad(
-            spectrum,
-            [(0, 0)] * (spectrum.ndim - 1)
-            + [(0, nzeta // 2 + 1 - n_modes)],
+    nzeta = int(np.shape(trig.cosnv)[0])
+    if use_fft and n_modes - 1 <= (nzeta - 1) // 2:
+        factors = np.full((n_modes,), nzeta / 2.0)
+        factors[0] = nzeta
+        spectrum = (factors * np.asarray(trig.nscale[:n_modes])) * (
+            coefficient_cos - 1j * coefficient_sin
         )
-        return jnp.fft.irfft(spectrum, n=nzeta, axis=-1)
-    return (
-        _einsum("...mn,kn->...mk", coefficient_cos, trig.cosnv[:, :n_modes])
-        + _einsum("...mn,kn->...mk", coefficient_sin, trig.sinnv[:, :n_modes])
+        pad = [(0, 0)] * (spectrum.ndim - 1) + [(0, nzeta // 2 + 1 - n_modes)]
+        return jnp.fft.irfft(jnp.pad(spectrum, pad), n=nzeta, axis=-1)
+    table = np.concatenate(
+        [trig.cosnv[:, :n_modes], trig.sinnv[:, :n_modes]], axis=1
+    )
+    return _einsum(
+        "...mn,kn->...mk",
+        jnp.concatenate([coefficient_cos, coefficient_sin], axis=-1),
+        jnp.asarray(table, dtype=coefficient_cos.dtype),
     )
 
 
-def _fast_synthesis(
-    coefficient_cos: Array,
-    coefficient_sin: Array,
-    modes: ModeTable,
-    trig: TrigTables,
-    derivatives: tuple[str, ...],
-) -> tuple[Array, ...]:
-    """Use separable FFT synthesis without expanding mode-stacked phases."""
-    a_cos, a_sin, b_cos, b_sin = _packed_toroidal_coefficients(
-        coefficient_cos, coefficient_sin, modes
-    )
-    a = _toroidal_synthesis(a_cos, a_sin, trig)
-    b = _toroidal_synthesis(b_cos, b_sin, trig)
+def _theta_stage(a: Array, b: Array, trig: TrigTables, *, dtheta: bool,
+                 m_slice: slice) -> Array:
+    """Contract ``a cos(m theta) + b sin(m theta)`` over the m in ``m_slice``."""
     mpol = int(a.shape[-2])
-    theta = {
-        "value": (trig.cosmu[:, :mpol], trig.sinmu[:, :mpol]),
-        "dtheta": (trig.sinmum[:, :mpol], trig.cosmum[:, :mpol]),
-    }
-    fields: list[Array] = []
-    for derivative in derivatives:
-        if derivative == "dzeta":
-            frequency = (
-                jnp.arange(a_cos.shape[-1], dtype=coefficient_cos.dtype)
-                * float(trig.nfp)
-            )
-            a_d = _toroidal_synthesis(frequency * a_sin, -frequency * a_cos, trig)
-            b_d = _toroidal_synthesis(frequency * b_sin, -frequency * b_cos, trig)
-            cosmu, sinmu = trig.cosmu[:, :mpol], trig.sinmu[:, :mpol]
-        elif derivative in theta:
-            a_d, b_d = a, b
-            cosmu, sinmu = theta[derivative]
-        else:
-            raise ValueError(
-                f"Unknown derivative {derivative!r}; expected one of {_DERIVATIVES}"
-            )
-        fields.append(
-            _einsum("...mk,im->...ik", a_d, cosmu)
-            + _einsum("...mk,im->...ik", b_d, sinmu)
-        )
-    return tuple(fields)
-
-
-# ---------------------------------------------------------------------------
-# Fourier -> real space (totzsps/totzspa)
-# ---------------------------------------------------------------------------
+    cos_table, sin_table = (
+        (trig.sinmum, trig.cosmum) if dtheta else (trig.cosmu, trig.sinmu)
+    )
+    table = np.concatenate(
+        [cos_table[:, :mpol][:, m_slice], sin_table[:, :mpol][:, m_slice]],
+        axis=1,
+    )
+    ab = jnp.concatenate([a[..., m_slice, :], b[..., m_slice, :]], axis=-2)
+    return _einsum("...mk,im->...ik", ab, jnp.asarray(table, dtype=ab.dtype))
 
 
 def fourier_to_real(
@@ -335,6 +334,8 @@ def fourier_to_real(
     odd_m_sqrt_s: bool = False,
     odd_m_scaling: Array | None = None,
     s: Array | None = None,
+    use_fft: bool = False,
+    m_slices: Sequence[slice] | None = None,
 ) -> tuple[Array, ...]:
     """Synthesize real-space fields on the VMEC internal angular grid.
 
@@ -348,6 +349,11 @@ def fourier_to_real(
 
         f(s, theta, zeta) = sum_k [ c_cos_k cos(m_k theta - n_k zeta)
                                   + c_sin_k sin(m_k theta - n_k zeta) ]
+
+    The sum is evaluated separably, as in ``totzsps``: a toroidal stage per
+    poloidal mode (matmul, or inverse real FFT with ``use_fft``), then a
+    poloidal contraction.  This costs ``O(mpol (ntor + ntheta))`` per grid
+    point instead of ``O(mpol ntor)`` for the mode-stacked phase sum.
 
     Parameters
     ----------
@@ -370,11 +376,17 @@ def fourier_to_real(
         global radial scaling when synthesizing a local segment.
     s:
         Radial grid for ``odd_m_sqrt_s`` (defaults to a uniform [0, 1] grid).
+    use_fft:
+        Evaluate the toroidal stage with an inverse real FFT (when unaliased).
+    m_slices:
+        Optional poloidal-mode subsets (slices of ``m = 0 .. mpol-1``), e.g.
+        the even/odd parity planes of ``totzsps``.  Each output then gains a
+        leading axis, one entry per subset, at no extra poloidal cost.
 
     Returns
     -------
     tuple of arrays, one per requested derivative, each of shape
-    ``(..., ns, ntheta3, nzeta)``.
+    ``(..., ns, ntheta3, nzeta)`` (``(len(m_slices), ...)`` with subsets).
     """
     coeff_cos = jnp.asarray(coefficient_cos)
     coeff_sin = jnp.asarray(coefficient_sin)
@@ -387,7 +399,6 @@ def fourier_to_real(
 
     if not internal_coeffs:
         scale = jnp.asarray(physical_to_internal_scale(modes, trig), dtype=coeff_cos.dtype)
-        scale = scale.reshape((1,) * (coeff_cos.ndim - 1) + (modes.mnmax,))
         coeff_cos = coeff_cos * scale
         coeff_sin = coeff_sin * scale
     if odd_m_sqrt_s:
@@ -400,66 +411,33 @@ def fourier_to_real(
             if odd_m_scaling is None else jnp.asarray(odd_m_scaling)
         ).astype(coeff_cos.dtype)
         scalxc_mn = scalxc[:, np.asarray(modes.m, dtype=np.int64)]
-        scalxc_mn = scalxc_mn.reshape((1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape)
         coeff_cos = coeff_cos * scalxc_mn
         coeff_sin = coeff_sin * scalxc_mn
 
-    coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
-    fields = []
-    for derivative in derivatives:
-        cos_phase, sin_phase = _phase_pair(modes, trig, derivative)
-        phase = jnp.asarray(np.concatenate([cos_phase, sin_phase], axis=0))
-        fields.append(_einsum("...k,kij->...ij", coeff, phase))
-    return tuple(fields)
-
-
-def _fourier_to_real_fft(
-    coefficient_cos: Array,
-    coefficient_sin: Array,
-    *,
-    modes: ModeTable,
-    trig: TrigTables,
-    derivatives: Sequence[str] = _DERIVATIVES,
-    internal_coeffs: bool = False,
-    odd_m_sqrt_s: bool = False,
-    odd_m_scaling: Array | None = None,
-    s: Array | None = None,
-) -> tuple[Array, ...]:
-    """Internal separable-FFT variant of :func:`fourier_to_real`."""
-    coeff_cos = jnp.asarray(coefficient_cos)
-    coeff_sin = jnp.asarray(coefficient_sin)
-    if coeff_cos.ndim < 2 or coeff_sin.ndim < 2:
-        raise ValueError("Expected coefficient arrays with shape (..., ns, mnmax)")
-    if coeff_cos.shape != coeff_sin.shape:
-        raise ValueError("coefficient_cos and coefficient_sin must have the same shape")
-    if int(coeff_cos.shape[-1]) != modes.mnmax:
-        raise ValueError("Mode count mismatch between coefficients and mode table")
-
-    if not internal_coeffs:
-        scale = jnp.asarray(
-            physical_to_internal_scale(modes, trig), dtype=coeff_cos.dtype
-        )
-        scale = scale.reshape((1,) * (coeff_cos.ndim - 1) + (modes.mnmax,))
-        coeff_cos = coeff_cos * scale
-        coeff_sin = coeff_sin * scale
-    if odd_m_sqrt_s:
-        ns = int(coeff_cos.shape[-2])
-        if s is None:
-            s = _default_radial_grid(ns, coeff_cos.dtype)
-        mpol = int(np.max(np.asarray(modes.m))) + 1
-        scalxc = (
-            odd_m_sqrt_s_scaling(s, mpol)
-            if odd_m_scaling is None else jnp.asarray(odd_m_scaling)
-        ).astype(coeff_cos.dtype)
-        scalxc_mn = scalxc[:, np.asarray(modes.m, dtype=np.int64)]
-        scalxc_mn = scalxc_mn.reshape(
-            (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
-        )
-        coeff_cos = coeff_cos * scalxc_mn
-        coeff_sin = coeff_sin * scalxc_mn
-    return _fast_synthesis(
-        coeff_cos, coeff_sin, modes, trig, tuple(derivatives)
+    a_cos, a_sin, b_cos, b_sin = _packed_toroidal_coefficients(
+        coeff_cos, coeff_sin, modes
     )
+    slices = (slice(None),) if m_slices is None else tuple(m_slices)
+    toroidal: dict[bool, tuple[Array, Array]] = {}
+    fields: list[Array] = []
+    for derivative in derivatives:
+        if derivative not in _DERIVATIVES:
+            raise ValueError(
+                f"Unknown derivative {derivative!r}; expected one of {_DERIVATIVES}"
+            )
+        dzeta = derivative == "dzeta"
+        if dzeta not in toroidal:
+            toroidal[dzeta] = tuple(
+                _toroidal_stage(c, s_, trig, dzeta=dzeta, use_fft=use_fft)
+                for c, s_ in ((a_cos, a_sin), (b_cos, b_sin))
+            )
+        a, b = toroidal[dzeta]
+        planes = [
+            _theta_stage(a, b, trig, dtheta=derivative == "dtheta", m_slice=sl)
+            for sl in slices
+        ]
+        fields.append(planes[0] if m_slices is None else jnp.stack(planes))
+    return tuple(fields)
 
 
 def real_to_fourier(
@@ -666,10 +644,21 @@ def _tomnsp_theta_stage(
     cosmumi = jnp.asarray(trig.cosmumi[:n_theta2, :mpol])
     sinmumi = jnp.asarray(trig.sinmumi[:n_theta2, :mpol])
 
-    plain_cos = _einsum("cpsik,im->cpsmk", stack_plain, cosmui)
-    plain_sin = _einsum("cpsik,im->cpsmk", stack_plain, sinmui)
-    dtheta_sin = _einsum("cpsik,im->cpsmk", stack_dtheta, sinmumi)
-    dtheta_cos = _einsum("cpsik,im->cpsmk", stack_dtheta, cosmumi)
+    def project(stack: Array, table: Array) -> Array:
+        # Even-m modes read the even plane and odd-m modes the odd plane
+        # (VMEC mparity = mod(m, 2)): contract each plane with its own
+        # columns only, then interleave back to m = 0 .. mpol-1.
+        even = _einsum("csik,im->csmk", stack[:, 0], table[:, 0::2])
+        odd = _einsum("csik,im->csmk", stack[:, 1], table[:, 1::2])
+        if mpol % 2:
+            odd = jnp.pad(odd, [(0, 0), (0, 0), (0, 1), (0, 0)])
+        merged = jnp.stack([even, odd], axis=-2)
+        return merged.reshape(*even.shape[:2], -1, even.shape[-1])[:, :, :mpol]
+
+    plain_cos = project(stack_plain, cosmui)
+    plain_sin = project(stack_plain, sinmui)
+    dtheta_sin = project(stack_dtheta, sinmumi)
+    dtheta_cos = project(stack_dtheta, cosmumi)
 
     (fR_cos, fRdv_cos, fZ_cos, fZdv_cos, conR_cos, conZ_cos, fLdv_cos) = plain_cos
     (fR_sin, fRdv_sin, fZ_sin, fZdv_sin, conR_sin, conZ_sin, fLdv_sin) = plain_sin
@@ -679,9 +668,9 @@ def _tomnsp_theta_stage(
     # Spectral-condensation constraint multiplier xmpq(m, 1) = m*(m-1)
     # (fixaray.f); weights the arcon/azcon channels.
     m_values = np.arange(mpol, dtype=float)
-    xmpq1 = jnp.asarray((m_values * (m_values - 1.0))[None, None, :, None])
+    xmpq1 = jnp.asarray((m_values * (m_values - 1.0))[None, :, None])
 
-    # work1 arrays (tomnsp_mod.f numbering), shape (2, ns, mpol, nzeta).
+    # work1 arrays (tomnsp_mod.f numbering), shape (ns, mpol, nzeta).
     w1 = fR_cos + fRdu_sin + xmpq1 * conR_cos
     w2 = -fRdv_cos
     w3 = fR_sin + fRdu_cos + xmpq1 * conR_sin
@@ -695,14 +684,7 @@ def _tomnsp_theta_stage(
     w11 = fLdu_cos
     w12 = -fLdv_sin
 
-    # Select per-m parity: even-m modes read the even plane, odd-m the odd
-    # plane (VMEC mparity = mod(m, 2)).
-    m_even = jnp.asarray(((np.arange(mpol) % 2) == 0))[None, :, None]
-
-    def select(w: Array) -> Array:
-        return jnp.where(m_even, w[0], w[1])
-
-    return tuple(select(w) for w in (w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12))
+    return (w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12)
 
 
 def _tomnsp_zeta_stage(

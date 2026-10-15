@@ -59,7 +59,7 @@ from .fourier import ModeTable, TrigTables
 from .geometry import HalfMeshJacobian, RealSpaceGeometry, sqrt_s_half_mesh
 from .transforms import (
     SpectralForce,
-    _fourier_to_real_fft,
+    _PARITY_PLANES,
     _reflect_stellarator,
     _reflect_zeta,
     fourier_to_real,
@@ -658,43 +658,18 @@ def constraint_force(
 
     m = np.asarray(modes.m, dtype=int)
     xmpq1 = jnp.asarray((m * (m - 1)).astype(float), dtype=dtype)
-    mask_even = jnp.asarray((m % 2) == 0, dtype=dtype)
-    mask_m1 = jnp.asarray(m == 1, dtype=dtype)
-    mask_odd_rest = jnp.asarray((m % 2 == 1) & (m != 1), dtype=dtype)
-
-    coeff_cos = jnp.stack(
-        [
-            R_cos * xmpq1 * mask_even,
-            Z_cos * xmpq1 * mask_even,
-            R_cos * xmpq1 * mask_m1,
-            R_cos * xmpq1 * mask_odd_rest,
-            Z_cos * xmpq1 * mask_m1,
-            Z_cos * xmpq1 * mask_odd_rest,
-        ],
-        axis=0,
-    )
-    coeff_sin = jnp.stack(
-        [
-            R_sin * xmpq1 * mask_even,
-            Z_sin * xmpq1 * mask_even,
-            R_sin * xmpq1 * mask_m1,
-            R_sin * xmpq1 * mask_odd_rest,
-            Z_sin * xmpq1 * mask_m1,
-            Z_sin * xmpq1 * mask_odd_rest,
-        ],
-        axis=0,
-    )
-    synthesize = _fourier_to_real_fft if use_fft else fourier_to_real
-    (value,) = synthesize(
-        coeff_cos,
-        coeff_sin,
+    (value,) = fourier_to_real(
+        jnp.stack([R_cos * xmpq1, Z_cos * xmpq1]),
+        jnp.stack([R_sin * xmpq1, Z_sin * xmpq1]),
         modes=modes,
         trig=trig,
         derivatives=("value",),
         internal_coeffs=True,
         odd_m_sqrt_s=False,
+        use_fft=use_fft,
+        m_slices=_PARITY_PLANES,
     )
-    rcon_even, zcon_even, rcon_m1, rcon_rest, zcon_m1, zcon_rest = value
+    (rcon_even, zcon_even), (rcon_m1, zcon_m1), (rcon_rest, zcon_rest) = value
 
     sqrt_s = jnp.sqrt(jnp.maximum(s, 0.0))[:, None, None]
     rcon = rcon_even + sqrt_s * _internal_odd_channel(rcon_m1, rcon_rest, s)
