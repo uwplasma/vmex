@@ -171,7 +171,7 @@ def test_summary_combines_stability_and_well(summary_figure):
 def test_summary_combines_force_current_and_confinement(
     solved_case, summary_figure,
 ):
-    """Force balance carries bootstrap <J.B>; iota stands alone; pressure carries confinement."""
+    """Force balance carries the equilibrium <J.B>; iota stands alone; pressure carries confinement."""
     _, meta = summary_figure
     iota = meta["axes"]["iota"]
     assert len(iota.lines) == 1 and iota.get_legend() is None
@@ -181,7 +181,7 @@ def test_summary_combines_force_current_and_confinement(
     current = meta["current_axis"]
     assert len(current.lines) == 1
     assert current.get_shared_x_axes().joined(current, force)
-    assert current.get_ylabel().startswith(r"Bootstrap $\langle \mathbf{J}")
+    assert current.get_ylabel().startswith(r"$\langle \mathbf{J}")   # total, not bootstrap
     assert current.get_ylabel().endswith("[kA T/m$^2$]")
     labels = [text.get_text() for text in force.get_legend().get_texts()]
     assert "force error" in labels
