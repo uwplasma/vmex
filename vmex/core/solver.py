@@ -139,7 +139,8 @@ from .geometry import apply_lambda_axis_closure, half_mesh_jacobian, real_space_
 from .input import VmecInput
 from .preconditioner import (
     RadialPreconditionerCoefficients, TridiagonalMatrices,
-    angular_integration_weights, lamcal, precondn, scalfor_matrices,
+    angular_integration_weights, lamcal, lamcal_m0_radial, precondn,
+    scalfor_matrices,
 )
 from .preconditioner_2d import Prec2DConfig, newton_direction
 from .printing import (
@@ -220,7 +221,8 @@ class PreconditionerCache:
     ``tcon`` (constraint scaling), the residual norms ``fnorm/fnormL/fnorm1``,
     the :func:`precondn` coefficients and assembled :func:`scalfor_matrices`
     for the R and Z force families, the ``LFORBAL`` ``rzu_fac/rru_fac``
-    factors, and the ``lamcal`` diagonal ``faclam``.
+    factors, the ``lamcal`` diagonal ``faclam`` and the ``m = 0`` lambda
+    radial block :func:`lamcal_m0_radial` (zeros when disabled).
     """
 
     tcon: Array
@@ -234,6 +236,7 @@ class PreconditionerCache:
     matrices_R: TridiagonalMatrices
     matrices_Z: TridiagonalMatrices
     faclam: Array
+    lambda_m0: TridiagonalMatrices
 
 
 @dataclass(frozen=True)
@@ -432,6 +435,9 @@ class SolverRuntime:
     prec2d: Any = None
     #: trajectory buffer rows (static); 0 means ``max_iterations``.
     trajectory_rows: int = 0
+    #: floor of the m = 0 lambda radial preconditioner
+    #: (:func:`lamcal_m0_radial`); None keeps VMEC2000's diagonal ``faclam``.
+    lambda_m0_floor: float | None = None
 
     # -- trace-time-static tables, derived from the meta resolution ---------
     @property
@@ -475,8 +481,13 @@ class SolverRuntime:
 _register(SolverRuntime, meta=(
     "resolution", "gamma", "tcon0",
     "jmax", "lforbal", "lmove_axis",
-    "lfreeb", "prec2d", "trajectory_rows",
+    "lfreeb", "prec2d", "trajectory_rows", "lambda_m0_floor",
 ))
+
+
+def _lambda_m0_active(rt: SolverRuntime) -> bool:
+    """Static: use the m = 0 lambda radial block (3D runs only)."""
+    return rt.lambda_m0_floor is not None and rt.resolution.ntor > 0
 
 
 def _trajectory_rows(rt: SolverRuntime) -> int:
@@ -691,6 +702,7 @@ def prepare_runtime(
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
     use_fft: bool = False,
+    lambda_m0_floor: float | None = None,
 ) -> SolverRuntime:
     """Build the static solver context from an input file or a RunSetup.
 
@@ -710,6 +722,10 @@ def prepare_runtime(
     :class:`~vmex.core.preconditioner_2d.Prec2DConfig`) switch on the
     optional 2D block preconditioner (``precon2d.f``); ``None``/``"NONE"``
     (the default) leaves the VMEC2000 1-D radial/lambda path unchanged.
+    ``lambda_m0_floor`` sets the m = 0 lambda radial block
+    (:func:`~vmex.core.preconditioner.lamcal_m0_radial`); ``None`` restores
+    VMEC2000's diagonal lambda preconditioner (the default, which keeps
+    iteration-for-iteration VMEC2000 parity); ``1e-3`` enables it.
     """
     if isinstance(source, RunSetup):
         if resolution is None:
@@ -762,6 +778,7 @@ def prepare_runtime(
         lmove_axis=bool(defaults["lmove_axis"]),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
+        lambda_m0_floor=lambda_m0_floor,
     )
     rcon0, zcon0 = _constraint_baselines(
         _initial_state(setup), rt, use_fft=use_fft
@@ -937,6 +954,7 @@ def _zero_cache(rt: SolverRuntime) -> PreconditionerCache:
         coefficients_R=coeffs, coefficients_Z=coeffs,
         force_balance_R=z((ns,)), force_balance_Z=z((ns,)),
         matrices_R=mats, matrices_Z=mats, faclam=z((ns, mpol, nr)),
+        lambda_m0=TridiagonalMatrices(ax=z((ns, nr)), bx=z((ns, nr)), dx=z((ns, nr))),
     )
 
 
@@ -1066,7 +1084,10 @@ def _force_pipeline(
         return_safe=True,
     )
     radial_solve_finite = _all_finite(solved) if collect_health else passing
-    preconditioned = apply_lambda_preconditioner(solved, cache.faclam)
+    preconditioned = apply_lambda_preconditioner(
+        solved, cache.faclam,
+        cache.lambda_m0 if _lambda_m0_active(rt) else None,
+    )
     health = ForcePipelineHealth(
         real_space_finite=real_space_finite,
         spectral_finite=spectral_finite,
@@ -1297,6 +1318,14 @@ def _evaluate(
             mpol=res.mpol, ntor=res.ntor, nfp=res.nfp,
             lthreed=setup.lthreed,
         )
+        lambda_m0_new = (
+            lamcal_m0_radial(
+                guu_half=metrics_b.guu, sqrt_g_half=jacobian_b.sqrt_g,
+                lamscale=fields_b.lamscale, angular_weight=rt.weights,
+                ntor=res.ntor, nfp=res.nfp, floor=float(rt.lambda_m0_floor),
+            )
+            if _lambda_m0_active(rt) else cache_b.lambda_m0
+        )
         fnorm1_new = preconditioned_force_norm(
             R_cos=state_b.R_cos, Z_sin=state_b.Z_sin, modes=rt.modes,
             R_sin=state_b.R_sin if setup.lasym else None,
@@ -1308,7 +1337,7 @@ def _evaluate(
             coefficients_Z=coefficients_Z,
             force_balance_R=force_balance_R,
             force_balance_Z=force_balance_Z, matrices_R=matrices_R,
-            matrices_Z=matrices_Z, faclam=faclam_new,
+            matrices_Z=matrices_Z, faclam=faclam_new, lambda_m0=lambda_m0_new,
         )
         # scalfor_matrices returns the n-independent ax/bx with a length-1
         # trailing axis; the old compute-then-where build broadcast them into

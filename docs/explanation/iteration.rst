@@ -209,6 +209,35 @@ with :math:`b_\lambda = \langle g_{uu}/\sqrt{g}\rangle`,
 :math:`d_\lambda = \langle g_{uv}/\sqrt{g}\rangle` (the :math:`\sqrt{s}`
 damping only bites for :math:`m > 16`).
 
+For :math:`m = 0`, :math:`n \ge 1` the diagonal is not the whole story.
+:math:`\lambda` enters :math:`B^\theta` only through the half-mesh average
+:math:`P\lambda = (\lambda_{j-1} + \lambda_j)/2`, so the exact block of the
+energy Hessian is
+
+.. math::
+
+   M = P^{\mathsf T}\,\mathrm{diag}(A_h)\,P, \qquad
+   A_h = (n\,\mathrm{NFP})^2 \langle g_{uu}/\sqrt{g}\rangle_h ,
+
+a radial tridiagonal matrix with off-diagonals :math:`A/4` and diagonal
+:math:`(A_\mathrm{in} + A_\mathrm{out})/4`. ``faclam`` keeps only its value
+on smooth profiles, :math:`(A_\mathrm{in} + A_\mathrm{out})/2`. On the radial
+checkerboard :math:`(-1)^j` the true eigenvalue is
+:math:`A\cos^2(k\Delta s/2) = O(A/\mathrm{ns}^2)`, so that mode relaxes last and
+shows up as surface-to-surface sign flips in :math:`\langle\mathbf J\cdot
+\mathbf B\rangle`. VMEX solves the tridiagonal block instead
+(:func:`~vmex.core.preconditioner.lamcal_m0_radial`), with
+:math:`10^{-3}` of the diagonal added so the checkerboard step is at most
+:math:`10^3` times the ``faclam`` step. The axis copy
+:math:`\lambda_0 = \lambda_1` of ``totzsps`` adds :math:`A_{1/2}/4` to the
+first row. It is opt-in, ``prepare_runtime(..., lambda_m0_floor=1e-3)``, so
+the default keeps VMEC2000 iteration parity. ``tests/test_preconditioner.py`` checks that with a zero
+floor the preconditioned force Jacobian on these columns is the identity to
+1%, against eigenvalues from 0.003 to 2 for the diagonal.
+
+This term was introduced by VMEC++ (``lambda_precondition_checkerboard_terms``,
+v0.9.0); VMEC2000 and PARVMEC use the diagonal only.
+
 The matrices are refreshed on the ``ns4 = 25`` cadence above.
 
 2D block preconditioner (``precon2d.f``)
