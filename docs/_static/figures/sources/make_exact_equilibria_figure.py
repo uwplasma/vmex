@@ -10,7 +10,7 @@ error of J (native field and WOUT) and the flux-label error on each surface.
 
 Usage::
 
-    python benchmarks/make_exact_equilibria_figure.py
+    python docs/_static/figures/sources/make_exact_equilibria_figure.py
 """
 
 import json
@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from PIL import Image  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[4]
 RECORD = REPO / "benchmarks" / "exact_equilibria.json"
 OUT = REPO / "docs" / "_static" / "figures" / "readme_exact_equilibria.webp"
 SYM, ASYM = "#6b6b68", "#2a78d6"
