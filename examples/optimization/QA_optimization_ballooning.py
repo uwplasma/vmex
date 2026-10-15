@@ -2,30 +2,32 @@
 """Optimize a quasi-axisymmetric boundary to ideal-ballooning stability at fixed beta.
 
 The seed (``input.nfp2_QA_finite_beta``, beta = 2.7 %, aspect 5.0) is
-Mercier-stable and ballooning-unstable on its outer surfaces, s >= 0.85, which
+Mercier-stable and ballooning-unstable on its outer surfaces, s >= 0.8, which
 is the case a ballooning objective is for: the interchange criteria see nothing
 to fix.
 
-The objective follows DESC's ``BallooningStability`` (Gaur et al., J. Plasma
-Phys. 89 (2023), doi:10.1017/S0022377823000107): every sampled field line whose growth rate
-exceeds a threshold contributes its excess, and a stable line contributes
-nothing, so the optimizer spends its steps on the lines that are unstable
-instead of on the mean. Pressure, current and toroidal flux are held as in
-DESC's example; beta, aspect ratio and Mercier stability are held by their own
-rows, so ballooning cannot be bought by lowering beta or by changing the device.
+The objective follows Gaur et al., Plasma Phys. Control. Fusion 67, 125015
+(2025) and DESC's ``BallooningStability``: every sampled field line whose
+growth rate exceeds the threshold contributes its excess as one residual row,
+and a stable line contributes nothing, so the optimizer spends its steps on
+the lines that are unstable. Pressure, current and toroidal flux are held;
+beta, aspect ratio and Mercier stability are held by their own rows, so
+ballooning cannot be bought by lowering beta or by changing the device.
 """
 
 import os
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.stability import ballooning_lambda
+from vmex.core.stability import ballooning_lambda, ballooning_residual
 
 # The finite-beta seed deck:
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA_finite_beta"
@@ -38,19 +40,28 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 MAX_MODES = [1, 2]
 MAX_NFEV = [8, 12]
 
-# Ballooning field lines and surfaces. lambda is least stable at a
-# configuration-dependent zeta0 (Gaur et al. 2023, footnote 2), so zeta0 is
-# scanned as in DESC. The surfaces span the stable core and the unstable edge,
-# and the certificate reads the same normalized radii on the finer grid:
-ZETA0S = np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5)
-LINES = dict(npoints=97, nturns=3.0, zeta0s=ZETA0S)
-BALLOONING_S = [0.3, 0.5, 0.7, 0.8, 0.9, 0.95]
+# Ballooning field lines: surfaces by normalized flux s (the same surfaces on
+# every radial grid), field-line labels over the symmetric half [0, pi], and
+# the ballooning parameter zeta0, at which lambda peaks in a
+# configuration-dependent place (Gaur et al. 2023, footnote 2). The line grid
+# keeps 128 points per poloidal turn, enough to resolve the toroidal harmonics
+# for the Richardson step; three turns hold an unstable mode, and the
+# certificate below reads five:
+BALLOONING_S = [0.7, 0.8, 0.85, 0.9, 0.95]
+LINES = dict(surfaces=BALLOONING_S, alphas=np.linspace(0.0, np.pi, 8),
+             zeta0s=np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5),
+             npoints=385, nturns=3.0)
 
-# A line contributes max(lambda - BALLOONING_THRESHOLD, 0). The threshold sits
-# below zero because lambda on the optimizer's grid under-reads the resolved one
-# (4.0e-3 at NS = 25, 6.2e-3 at NS = 41 and 7.0e-3 at NS = 71 on the seed):
-BALLOONING_THRESHOLD = -5.0e-4
+# A line contributes max(lambda - BALLOONING_THRESHOLD, 0). Stable lines tend
+# to lambda -> 0- as the line lengthens, so the threshold is zero, not a margin:
+BALLOONING_THRESHOLD = 0.0
 BALLOONING_WEIGHT = 30.0
+
+# The certificate re-reads lambda on a denser set of lines and surfaces:
+CHECK_LINES = dict(surfaces=np.linspace(0.5, 0.98, 17),
+                   alphas=np.linspace(0.0, np.pi, 17),
+                   zeta0s=np.linspace(-0.5 * np.pi, 0.5 * np.pi, 9),
+                   npoints=641, nturns=5.0)
 
 # Held quantities. The aspect ratio and beta are the seed's own; a mismatched
 # aspect target moves the minor radius and, at fixed flux and pressure, beta
@@ -94,6 +105,8 @@ if ci_smoke:
     MAX_MODES, MAX_NFEV = [1], [3]
     STAGE_NS, FINAL_NS = 21, 21
     FINAL_FTOL = 1.0e-11
+    LINES = dict(LINES, alphas=np.linspace(0.0, np.pi, 4), npoints=321)
+    CHECK_LINES = dict(LINES, surfaces=[0.8, 0.9, 0.95])
 
 ###############################################################################
 # End of input parameters.
@@ -108,27 +121,12 @@ inp = replace(vj.VmecInput.from_file(INPUT_FILE),
 ### Set up the objective ######################################################
 
 PHIEDGE = float(inp.phiedge)
-
-
-def surface_indices(ns):
-    """Full-mesh indices of BALLOONING_S on an ns-surface grid."""
-    return [min(max(int(round(s * (ns - 1))), 2), ns - 2) for s in BALLOONING_S]
-
-
-def lambdas(state, runtime):
-    """Growth rate of every sampled line, shaped (surface, alpha, zeta0)."""
-    ns = int(runtime.setup.s_full.shape[0])
-    return ballooning_lambda(state, runtime, s_indices=surface_indices(ns), **LINES)
-
-
-def ballooning_excess(state, runtime):
-    """One row per line: its growth rate above the threshold, zero when below."""
-    return jnp.maximum(lambdas(state, runtime) - BALLOONING_THRESHOLD, 0.0).ravel()
+ballooning_rows = partial(ballooning_residual, threshold=BALLOONING_THRESHOLD, **LINES)
 
 
 def worst_lambda(state, runtime):
-    """Hard max lambda over the sampled lines, the number worth quoting."""
-    return jnp.max(lambdas(state, runtime))
+    """Hard max lambda over the optimizer's lines, the number worth quoting."""
+    return jnp.max(ballooning_lambda(state, runtime, **LINES))
 
 
 def mercier_window(state, runtime):
@@ -155,7 +153,7 @@ objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.volume_average_beta, BETA_TARGET, BETA_WEIGHT),
     (mercier_rows, 0.0, MERCIER_WEIGHT),
-    (ballooning_excess, 0.0, BALLOONING_WEIGHT),
+    (ballooning_rows, 0.0, BALLOONING_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(
@@ -167,6 +165,7 @@ monitor = opt.OptimizationMonitor()
 ### Run the optimization ######################################################
 
 equilibrium = opt.solve_equilibrium(inp, verbose=not ci_smoke)
+seed_equilibrium = equilibrium
 seed = report("seed", equilibrium)
 
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
@@ -191,24 +190,47 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
 ### Check the result ##########################################################
 
 # The physics certificate is the resolved solve, not the optimizer's grid:
-# ballooning is radially stiff, so the same normalized radii are re-read at
-# FINAL_NS.
+# the seed and the optimized boundary are both re-solved at FINAL_NS and read
+# on the denser CHECK_LINES.
+def resolved(equilibrium_input, initial):
+    """Solve at FINAL_NS from a converged stage solution."""
+    return opt.solve_equilibrium(
+        replace(equilibrium_input, ns_array=np.array([FINAL_NS]),
+                ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER])),
+        initial_state=initial.solution, verbose=not ci_smoke, raise_on_max_iterations=True)
+
+
 final_input = replace(inp, ns_array=np.array([FINAL_NS]),
-                      ftol_array=np.array([FINAL_FTOL]),
-                      niter_array=np.array([FINAL_NITER]))
-final_equilibrium = opt.solve_equilibrium(
-    final_input, initial_state=equilibrium.solution, verbose=not ci_smoke,
-    raise_on_max_iterations=True)
+                      ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
+final_equilibrium = resolved(inp, equilibrium)
+seed_resolved = resolved(seed_equilibrium.inp, seed_equilibrium)
+maps = {name: np.asarray(ballooning_lambda(eq.state, eq.runtime, **CHECK_LINES)).max(axis=2)
+        for name, eq in (("seed", seed_resolved), ("final", final_equilibrium))}
 
 ### Print, plot and save ######################################################
 
 final = report("final", final_equilibrium)
-seed_lambda, final_lambda = seed["max lambda"], final["max lambda"]
-print(f"\nmax lambda {seed_lambda:+.4e} -> {final_lambda:+.4e} "
-      f"({'stable' if final_lambda < 0.0 else 'still unstable'}) at NS = {FINAL_NS}\n"
-      f"min PHIEDGE^2 DMerc {seed['min PHIEDGE^2 DMerc']:+.3e} -> "
+seed_check = report("seed", seed_resolved)
+print(f"\nmax lambda {maps['seed'].max():+.4e} -> {maps['final'].max():+.4e} "
+      f"({'stable' if maps['final'].max() < 0.0 else 'still unstable'}) at NS = {FINAL_NS} "
+      f"on {np.size(maps['final']) * len(CHECK_LINES['zeta0s'])} lines\n"
+      f"min PHIEDGE^2 DMerc {seed_check['min PHIEDGE^2 DMerc']:+.3e} -> "
       f"{final['min PHIEDGE^2 DMerc']:+.3e}, "
-      f"beta {seed['beta']:.3%} -> {final['beta']:.3%}")
+      f"beta {seed_check['beta']:.3%} -> {final['beta']:.3%}, "
+      f"aspect {seed_check['aspect']:.3f} -> {final['aspect']:.3f}")
+
+fig, axes = plt.subplots(1, 2, figsize=(9.0, 3.6), sharey=True, layout="constrained")
+limit = float(np.max(np.abs(maps["seed"])))
+for ax, name in zip(axes, ("seed", "final")):
+    image = ax.pcolormesh(CHECK_LINES["alphas"], CHECK_LINES["surfaces"], maps[name],
+                          cmap="RdBu_r", vmin=-limit, vmax=limit, shading="nearest")
+    ax.contour(CHECK_LINES["alphas"], CHECK_LINES["surfaces"], maps[name], [0.0], colors="k")
+    ax.set(title=f"{name}: max lambda = {maps[name].max():+.2e}", xlabel="field line alpha")
+axes[0].set_ylabel("normalized flux s")
+fig.colorbar(image, ax=axes, label="max over zeta0 of lambda (> 0 unstable)")
+fig.savefig(f"{OUTPUT_NAME}_lambda.png", dpi=150)
+np.savez(f"{OUTPUT_NAME}_lambda.npz", **maps, **{k: np.asarray(v) for k, v in CHECK_LINES.items()})
+print(f"Wrote {OUTPUT_NAME}_lambda.png and {OUTPUT_NAME}_lambda.npz")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
