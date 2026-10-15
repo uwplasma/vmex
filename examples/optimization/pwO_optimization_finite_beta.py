@@ -12,7 +12,10 @@ seed solve for each beta rung, then fixed during that rung; the actual beta is
 constrained and reported. This is not a self-consistent bootstrap calculation.
 """
 
-from pwO_optimization import run
+if __package__:
+    from .pwO_optimization import run
+else:
+    from pwO_optimization import run
 
 BETA_TARGETS = (0.0, 0.0025, 0.005)
 

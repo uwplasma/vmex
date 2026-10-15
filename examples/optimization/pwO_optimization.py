@@ -245,6 +245,10 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     if beta_targets[-1] > 0:
         checks["beta held"] = abs(metrics["beta"] / beta_targets[-1] - 1) <= BETA_TOLERANCE
     unmet = [name for name, met in checks.items() if not met]
+    construction_diagnostics = {
+        name: np.asarray(final_score[name]).tolist()
+        for name in ("eta_fraction", "mapped_area_fraction", "jacobian_lower_bound", "corner_margin", "width")
+        if name in final_score}
     summary = dict(family=FAMILY, method=METHOD, smoke=ci_smoke, seconds=time.perf_counter() - started,
                    stages=stages, metrics=metrics, actual_s=np.asarray(final_score["s_b"]).tolist(),
                    target=dict(bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref, surface_field_ref_T=surface_field_ref.tolist(), iota_sign=iota_sign,
@@ -252,7 +256,8 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                                a=0.3, b=0.0, c=-2.0, eta_min=2.8),
                    phiedge_Wb=float(inp.phiedge), pres_scale_Pa=float(inp.pres_scale),
                    pressure="p(s)=PRES_SCALE*(1-s)", current="zero enclosed toroidal current",
-                   checks=checks, unmet=unmet, research_validation_complete=False)
+                   checks=checks, unmet=unmet, construction_diagnostics=construction_diagnostics,
+                   research_validation_complete=False)
     # JSON rejects nonfinite diagnostic values instead of writing a misleading result.
     Path(f"{output_name}_summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     final_input.to_indata(f"input.{output_name}")
