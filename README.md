@@ -357,6 +357,19 @@ Quasi-isodynamic designs at four field-period counts: the `|B|` contours close p
 rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
 maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
+### Piecewise-omnigenous targets in development
+
+The [pwO examples](docs/explanation/piecewise-omnigenity.md) optimize a smooth
+canonical target or mapped-coordinate variance. Controlled vacuum runs reduced
+their independently refined target residuals by 23.4% and 9.1%, respectively.
+The canonical target matches the seed mean and mirror; its final mirror falls
+19.4%. The mapped fit preserves the seed mirror within 0.1%. Neither result certifies
+bounce-action invariance, transport, alpha retention or coil feasibility.
+[Measured records](benchmarks/pwo_development.json) preserve the numerical controls,
+source hashes, final input decks and spectra used below.
+
+![Measured vacuum pwO target fits](docs/_static/figures/pwo_development.webp)
+
 ### Free boundary with coils
 
 ![Free-boundary beta ramp and Shafranov shift](docs/_static/figures/readme_essos_beta_scan.webp)

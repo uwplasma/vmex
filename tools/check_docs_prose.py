@@ -82,6 +82,7 @@ GRANDFATHERED_FILES = {
     "figures/mirror_fixed_boundary_3d.webp",
     "figures/mirror_free_boundary_beta_scan.webp",
     "figures/pr20_wout_parity_summary.json",
+    "figures/pwo_development.webp",
     "figures/qi_mirror_hybrid.webp",
     "figures/readme_convergence.webp",
     "figures/readme_diagnostics_summary.webp",

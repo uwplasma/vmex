@@ -133,10 +133,67 @@ and rescore at independently refined resolution. The examples cover vacuum
 stage 1, finite-beta stage 1, and simultaneous plasma-coil optimization. A
 short example run and a research validation campaign have different budgets.
 
-At finite beta, fixed-boundary coil matching uses the normal component of the
-**total** field, including the virtual-casing plasma contribution. The later
+At finite beta, fixed-boundary coil matching uses the full boundary vector of
+the **total** field, including the virtual-casing plasma contribution once. The later
 coil-driven free-boundary check must recover the intended confinement region.
 An unconverged equilibrium is a rejected trial, never an inexpensive optimum.
+
+## Measured development runs
+
+The [development record](../../benchmarks/pwo_development.json) retains the
+initial and controlled runs, their final input decks and both Fourier
+parities of the controlled vacuum spectra. Each used mode budgets 8/8/12 per pressure stage,
+then independently solved the
+candidate and seed at NS=32, MPOL=7, force tolerance `1e-13`, and rescored with
+Boozer band 14 and a 39-by-39 target grid. The optimizer exhausted its budgets;
+these are improved candidates, not optimality certificates.
+
+| Target | Actual beta (%) | Refined seed residual | Refined final residual | Final local mirror |
+| --- | ---: | ---: | ---: | ---: |
+| Canonical | 0 | 0.149449 | 0.112917 | 0.200623 |
+| Mapped | 0 | 0.0193582 | 0.00192533 | 0.0797320 |
+| Canonical | 0.497447 | 0.149439 | 0.133604 | 0.228884 |
+| Mapped | 0.500153 | 0.0193501 | 0.00231872 | 0.115951 |
+
+The two objectives have different definitions, so their magnitudes cannot rank
+the constructions. The mapped residual falls 90.1%, but gamma variance divided
+by the squared local field range falls only 9.6%; gamma variance divided by
+total mapped-field variance increases from 0.726 to 0.981. Most of this raw
+improvement follows weaker modulation.
+The initial canonical calibration also leaves its target mean near 6.76 T while
+holding the equilibrium near 8.2 T, preventing exact matching under the mean-field
+constraint.
+
+The current canonical driver calibrates positive target bounds to the seed-grid
+mean and mirror, then holds those bounds and the selected phase (zero) fixed.
+The mapped driver adds a local-mirror equality residual with a fixed training-seed
+denominator and a final 10% tolerance. Controlled vacuum runs give:
+
+| Target | Refined seed residual | Refined final residual | Improvement | Final local mirror |
+| --- | ---: | ---: | ---: | ---: |
+| Canonical, calibrated, phase zero | 0.0279069 | 0.0213671 | 23.4% | 0.185481 |
+| Mapped, fixed mirror | 0.0193582 | 0.0176004 | 9.1% | 0.230596 |
+
+The canonical mean conflict is removed, but its mirror falls 19.4%; centered
+field error divided by target variance improves 15.9%, whereas division by the
+actual field range squared worsens 32.5%. The mapped mirror changes only 0.066%;
+range-normalized gamma variance improves 9.2%, while gamma variance divided by
+total variance rises slightly (0.7263 to 0.7353). Angular grids 39, 57 and 96
+retain these conclusions. These are modest target-fit improvements with explicit
+amplitude diagnostics, not evidence of family-resolved action invariance.
+
+The exact public driver also reproduces the controlled canonical vacuum
+trajectory within the finite-beta continuation. Its beta=0.50014% endpoint
+reduces the independently refined residual from 0.0279032 to 0.0246551 (11.6%),
+with local mirror 0.265748. The corrected mapped beta=0.49969% endpoint
+reduces its refined residual from 0.0193501 to 0.0178247 (7.9%), with mirror
+0.230680 versus seed 0.230449. Both pass the driver checks.
+This pressure sequence prescribes zero enclosed
+current; it is not a bootstrap-consistent equilibrium sequence.
+
+Full derivative and resolution qualification, family-resolved actions,
+transport and particle retention remain separate gates. The shared-host wall
+times in the record are observations, not a controlled speed comparison.
 
 ## Validation contract
 

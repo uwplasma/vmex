@@ -12,8 +12,8 @@ uncited records are reachable through git history: link them with a
 permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
-35 committed artifacts: 30 standalone records and 1 grouped directory holding
-5 files. 31 of the 31 entries below are cited by a page, a test or another
+36 committed artifacts: 31 standalone records and 1 grouped directory holding
+5 files. 32 of the 32 entries below are cited by a page, a test or another
 script; 0 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -47,6 +47,7 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-boundary-conditions.md`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/pleiades_two_coil_mirror.json` | `docs/_static/figures/sources/make_mirror_pleiades_figure.py` |  | 2026-09-28 | `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst` |
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/explanation/iteration.rst`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
+| `benchmarks/pwo_development.json` |  |  | 2026-10-15 | `README.md`, `docs/_static/figures/figures.json`, `docs/_static/figures/sources/make_pwo_figure.py`, `docs/explanation/piecewise-omnigenity.md` |
 | `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `README.md`, `docs/reference/optimization.rst` |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
 | `benchmarks/qi_optimization_profile_cpu.json` | `benchmarks/qi_optimization_profile.py` | `3ee6ca58` | 2026-09-14 | `docs/reference/objectives.rst`, `examples/optimization/QI_optimization.py` |
