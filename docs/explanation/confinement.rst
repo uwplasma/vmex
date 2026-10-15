@@ -820,3 +820,27 @@ lost-marker recall and integration failures as well as total losses: a high
 fraction of matching labels can hide errors in a small lost population.
 Cyclometry alone does not imply energy-selective helium confinement. That
 question also requires electric-field, collision and slowing-down models.
+
+Moving rational surfaces
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+:func:`~vmex.core.cyclometry.moving_rational_surface` evaluates the spectrum
+at a moving root of ``iota(s)=N/M``. First transform a fixed set of surfaces
+and capture their actual returned ``s_b`` values outside differentiation.
+Use these sorted, unique radii and a fixed bracket throughout a stage. The
+adapter interpolates all radial fields consistently and uses SOLVAX's implicit
+root derivative. Differentiating a nearest-row selection would omit this motion.
+
+The initial adapter uses piecewise-linear radial interpolation. It rejects
+endpoint roots, inadequate or changing shear sign within the bracket, and
+roots at interior interpolation knots where that derivative is ambiguous.
+Invalid traced trials return NaN. Refine the radial table and compare complete
+equilibrium directional derivatives before using this sampled objective in an
+optimization. The checks certify a branch of the interpolant, not a root or
+confinement bound for the continuum equilibrium.
+
+Here ``iota_shear`` differentiates with respect to the table coordinate ``s``.
+With a nonidentity ``APHI`` flux map, convert this derivative using ``dpsi/ds``
+before applying a physical island-width formula. Also check the signed flux
+orientation against the orbit model. The first comparisons should use the
+identity flux map and explicit, matched conventions.

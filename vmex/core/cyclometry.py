@@ -10,6 +10,121 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.scipy.special import logsumexp
+from solvax import root_solve
+
+
+def moving_rational_surface(booz, numerator, denominator, *, radii, bracket,
+                            minimum_shear=1e-6, root_tolerance=1e-12):
+    """Interpolate a moving rational surface of a fixed Boozer radial table.
+
+    ``radii`` must be the static, sorted, unique *returned* ``s_b`` values of
+    :func:`~vmex.core.omnigenity.boozer_spectrum_state`, captured outside AD.
+    Request those actual half-grid radii in every equilibrium evaluation.
+    ``bracket`` is fixed inside their span. Shapes and Fourier modes must stay
+    fixed throughout a stage. All radial data use the same piecewise-linear
+    interpolant; this introduces radial error requiring separate refinement.
+    The table coordinate ``s_b`` need not equal normalized toroidal flux for
+    nonidentity APHI; interpolate ``psi_b`` separately when flux is needed.
+
+    SOLVAX differentiates the root implicitly, not through bisection. Every
+    interval intersecting the bracket must have the same shear sign and
+    magnitude >= ``minimum_shear``. Roots within ``root_tolerance`` in iota
+    of a bracket endpoint or interior interpolation knot are rejected:
+    the latter have no unique radial derivative in this interpolation model.
+    These guards establish an isolated branch of the interpolant only, not
+    existence/uniqueness in the continuum equilibrium or a confinement bound.
+
+    Returns a Boozer dictionary with length-one radial axes, plus scalar
+    ``root_s``, ``iota_shear`` (d iota/d table coordinate s), and
+    ``root_residual``. Invalid eager
+    calls raise ValueError; invalid traced trials return NaN radial values.
+    """
+    if (not isinstance(numerator, (int, np.integer))
+            or not isinstance(denominator, (int, np.integer))
+            or denominator <= 0 or gcd(abs(numerator), denominator) != 1):
+        raise ValueError("rational indices must be reduced integers with denominator > 0")
+    nodes = np.asarray(radii, dtype=float)
+    bounds = np.asarray(bracket, dtype=float)
+    if (nodes.ndim != 1 or nodes.size < 2 or not np.all(np.isfinite(nodes))
+            or np.any(np.diff(nodes) <= 0) or nodes[0] <= 0 or nodes[-1] >= 1):
+        raise ValueError("radii must be static, sorted, unique interior half-grid radii")
+    if (bounds.shape != (2,) or not np.all(np.isfinite(bounds))
+            or not nodes[0] <= bounds[0] < bounds[1] <= nodes[-1]):
+        raise ValueError("bracket must be ordered and within the returned radii")
+    if (not np.isfinite(minimum_shear) or minimum_shear <= 0
+            or not np.isfinite(root_tolerance) or root_tolerance <= 0):
+        raise ValueError("minimum_shear and root_tolerance must be finite and positive")
+    nodes = jnp.asarray(nodes, dtype=jnp.float64)
+    sampled = jnp.asarray(booz["s_b"], dtype=nodes.dtype)
+    if sampled.shape != nodes.shape:
+        raise ValueError("s_b must match the static returned radii")
+    valid = jnp.all(jnp.isfinite(sampled) & (sampled == nodes))
+    fields = {}
+    for name in ("iota_b", "G_b", "I_b", "bmnc_b", "bmns_b", "psi_b"):
+        if name in ("bmns_b", "psi_b") and name not in booz:
+            continue
+        values = jnp.asarray(booz[name], dtype=nodes.dtype)
+        expected_ndim = 2 if name in ("bmnc_b", "bmns_b") else 1
+        if (values.ndim != expected_ndim or values.shape[0] != nodes.size
+                or values.size == 0):
+            raise ValueError(f"{name} has an incompatible radial table shape")
+        fields[name] = values
+        valid = valid & jnp.all(jnp.isfinite(values))
+    if "bmns_b" in fields and fields["bmns_b"].shape != fields["bmnc_b"].shape:
+        raise ValueError("bmns_b must have the same shape as bmnc_b")
+    if "psi_edge" in booz:
+        valid = valid & jnp.all(jnp.isfinite(booz["psi_edge"]))
+
+    def interpolate(values, s):
+        index = jnp.clip(jnp.searchsorted(nodes, s, side="right") - 1, 0, nodes.size - 2)
+        weight = (s - nodes[index]) / (nodes[index + 1] - nodes[index])
+        return values[index] + weight * (values[index + 1] - values[index])
+
+    target = numerator / denominator
+
+    def residual(s):
+        return interpolate(fields["iota_b"], s) - target
+
+    low, high = jnp.asarray(bounds, dtype=nodes.dtype)
+    f_low, f_high = residual(low), residual(high)
+    valid = (valid & (jnp.abs(f_low) > root_tolerance) & (jnp.abs(f_high) > root_tolerance)
+             & (jnp.signbit(f_low) != jnp.signbit(f_high)))
+    slopes = jnp.diff(fields["iota_b"]) / jnp.diff(nodes)
+    active = (nodes[:-1] < high) & (nodes[1:] > low)
+    direction = jnp.where(f_high > f_low, 1., -1.)
+    valid = valid & jnp.all(~active | (jnp.isfinite(slopes) & (direction * slopes >= minimum_shear)))
+
+    def bisect(f, _):
+        def step(_, endpoints):
+            lo, hi = endpoints
+            mid = lo + (hi - lo) / 2
+            left = jnp.signbit(f(lo)) != jnp.signbit(f(mid))
+            # Keep exact midpoint roots, including a root on a rejected knot.
+            exact = f(mid) == 0
+            return jnp.where(left | exact, lo, mid), jnp.where(left | exact, mid, hi)
+        lo, hi = jax.lax.fori_loop(0, 64, step, (low, high))
+        return lo + (hi - lo) / 2
+
+    root = root_solve(residual, (low + high) / 2, bisect)
+    shear = jax.grad(lambda s: interpolate(fields["iota_b"], s))(root)
+    defect = residual(root)
+    at_knot = jnp.any((nodes[1:-1] > low) & (nodes[1:-1] < high)
+                      & (jnp.abs(fields["iota_b"][1:-1] - target) <= root_tolerance))
+    valid = (valid & jnp.isfinite(root) & (root > low) & (root < high)
+             & jnp.isfinite(shear) & (jnp.abs(shear) >= minimum_shear)
+             & jnp.isfinite(defect) & (jnp.abs(defect) <= root_tolerance) & ~at_knot)
+    evaluated = {name: interpolate(values, root)[None] for name, values in fields.items()}
+    for values in evaluated.values():
+        valid = valid & jnp.all(jnp.isfinite(values))
+    if not isinstance(valid, jax.core.Tracer) and not bool(valid):
+        raise ValueError("invalid rational branch: check returned radii, finite tables, bracket, shear and knots")
+    result = dict(booz)
+    result.update({name: jnp.where(valid, values, jnp.nan) for name, values in evaluated.items()})
+    result.update(s_b=jnp.where(valid, root[None], jnp.nan),
+                  root_s=jnp.where(valid, root, jnp.nan),
+                  iota_shear=jnp.where(valid, shear, jnp.nan),
+                  root_residual=jnp.where(valid, defect, jnp.nan))
+    return result
 
 
 def transit_basis(m, n, numerator, denominator, *, nphase=64, ntransit=512):
