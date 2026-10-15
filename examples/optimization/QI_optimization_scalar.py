@@ -9,11 +9,10 @@ a residual vector and its full Jacobian.
 
 Seed, weights, radial grid and number of equilibrium solves are those of
 QI_optimization.py. On that equal footing (laptop, 2026-10-15) this run ends
-at constructed QI 2.0e-3 (fine-grid 1.85e-3) against 3.0e-3 (2.76e-3) for
+at constructed QI 2.0e-3 (fine-grid 1.97e-3) against 3.0e-3 (2.76e-3) for
 least squares; the earlier 17x gap came from a different seed and weights.
 The summed scalar holds the aspect row more loosely: 9.7 against 8.8 (target
-8). The QI wells start at a softmin minimum (argmin_softness), which keeps
-the residual continuous for the line search.
+8).
 """
 
 import os
@@ -48,7 +47,11 @@ FINAL_NITER = 8000
 
 # Every output file name contains this:
 OUTPUT_NAME = "QI_scalar_optimized"
-QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21, argmin_softness=1e-2)
+# 1e-2 starts the wells at a softmin minimum, which keeps the residual
+# continuous: fine-grid QI 1.85e-3 instead of 1.97e-3 (6 %) at 1.7x the time.
+ARGMIN_SOFTNESS = 0.0
+QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21,
+                  argmin_softness=ARGMIN_SOFTNESS)
 VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
