@@ -2969,8 +2969,9 @@ def _least_squares_implicit(
     # (leading axis ndof) so chunk_map can process them in fixed-size chunks:
     # the exact forward derivative of params_of (entries 1, the AC scale and
     # the CURTOR scale).
-    tangent_stack = jax.tree.map(lambda a: jnp.moveaxis(a, -1, 0),
-                                 jax.jacfwd(params_of)(_place(x0), problem_data))
+    tangent_stack = jax.jit(lambda x, data: jax.tree.map(
+        lambda a: jnp.moveaxis(a, -1, 0), jax.jacfwd(params_of)(x, data)))(
+            _place(x0), problem_data)
 
     # R17.1 memory knob: chunk_size None == one full-width batch, while an int
     # / "auto" caps peak Jacobian memory at that many dofs at a time.  Route
