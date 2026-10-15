@@ -2,8 +2,8 @@
 
 VMEC2000 counterparts: ``LIBSTELL/Sources/Modules/vmec_input.f``
 (``read_indata_namelist``: variable set and defaults) and ``readin.f``
-(post-read normalizations).  The JSON schema follows VMEC++
-(``vmecpp.VmecInput``): identical key names, boundary coefficients as sparse
+(post-read normalizations).  The JSON schema follows a C++ VMEC reimplementation
+(the structured JSON layout): identical key names, boundary coefficients as sparse
 ``{"m": int, "n": int, "value": float}`` lists, dense axis arrays, and
 ``adiabatic_index`` accepted as an alias for ``gamma``.
 
@@ -1244,11 +1244,11 @@ class VmecInput:
 
     @classmethod
     def from_json_text(cls, text: str) -> "VmecInput":
-        """Build from structured JSON text (vmecpp.VmecInput layout).
+        """Build from structured JSON text (sparse boundary-coefficient layout).
 
         Same key names as the dataclass fields; ``adiabatic_index`` is
         accepted as an alias for ``gamma``; ``rbc/zbs/rbs/zbc`` are sparse
-        ``{"m", "n", "value"}`` lists; axis arrays are dense.  The VMEC++
+        ``{"m", "n", "value"}`` lists; axis arrays are dense.  That layout
         ``free_boundary_method="nestor"`` spelling is accepted.  Other
         free-boundary methods and unknown keys fail explicitly instead of
         being silently ignored.
@@ -1256,7 +1256,7 @@ class VmecInput:
         data = json.loads(text)
         # Reserved execution-metadata section: run controls, never physics.
         # ``vmex.core.run_options`` validates and consumes it; the physics
-        # schema stays VMEC++ compatible once it is removed.
+        # schema stays plain structured JSON once it is removed.
         data.pop("_vmex", None)
         _validate_json_modes(data)
         if "adiabatic_index" in data and "gamma" not in data:
@@ -1288,13 +1288,13 @@ class VmecInput:
         kwargs["mpol"] = mpol
         kwargs["ntor"] = ntor
         if "lfreeb" not in kwargs:
-            kwargs["lfreeb"] = False  # VMEC++ default (vmecpp.VmecInput)
+            kwargs["lfreeb"] = False  # a C++ VMEC reimplementation default
         return cls(**kwargs)
 
     # -- writers --------------------------------------------------------------
 
     def to_json(self, path: str | Path) -> Path:
-        """Write VMEC++-schema JSON that round-trips through :meth:`from_file`.
+        """Write structured JSON that round-trips through :meth:`from_file`.
 
         Boundary coefficients are written as sparse ``{"m","n","value"}``
         lists (nonzero entries only); axis and profile arrays are dense.

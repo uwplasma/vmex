@@ -22,7 +22,7 @@ body:
     attributes:
       label: Expected behaviour
       description: >-
-        What you expected, and the VMEC2000 or VMEC++ result if you have one.
+        What you expected, and the VMEC2000 result if you have one.
     validations:
       required: true
   - type: textarea

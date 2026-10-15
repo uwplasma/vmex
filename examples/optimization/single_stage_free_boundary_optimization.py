@@ -404,7 +404,7 @@ optimization_seconds = time.perf_counter() - started
 # A vacuum free boundary exists only where the coil field has a nested flux
 # surface enclosing PHIEDGE. Without IOTA_CEILING the optimizer pushed the edge
 # onto the 4/9 island chain; there the solve limit-cycles near fsq ~1e-8 at any
-# ns, in VMEX, VMEC2000 and VMEC++ alike.
+# ns, in VMEX and VMEC2000 alike.
 coils_final = coils_from_x(jnp.asarray(x0 + scales * u))
 field_final = BiotSavart(coils_final)
 final_ns = [NS] if ci_smoke else [16, 51]

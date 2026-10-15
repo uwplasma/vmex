@@ -85,7 +85,7 @@ interior evaluation points.
 
 This interior field is also the most accurate way to read an equilibrium. Against an exact
 finite-pressure solution, it gives the current 10 to 70 times more accurately than the WOUT file
-between s = 0.25 and 0.75, for equilibria from VMEX, VMEC2000 or VMEC++ alike (any WOUT can be
+between s = 0.25 and 0.75, for equilibria from VMEX and VMEC2000 alike (any WOUT can be
 loaded with `vmex.state_from_wout`). Within the first few surfaces of the axis the WOUT current
 is better. See {doc}`/explanation/interior-field`.
 

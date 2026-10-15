@@ -1,6 +1,6 @@
 """Hot restart from a previous equilibrium (``wout`` file, state, or result).
 
-VMEC++ hot restart seeds a run from a previous ``OutputQuantities`` object,
+A C++ VMEC reimplementation hot restart seeds a run from a previous ``OutputQuantities`` object,
 but requires matching ``mpol/ntor/ns``, drops lambda when the source is a
 Fortran wout, and never seeds asymmetric geometry.  This module makes the
 restart source a first-class input:
@@ -238,7 +238,7 @@ def restart_state(
 def skip_ladder_rungs(ns_arr: np.ndarray, seed_ns: int) -> int:
     """First multigrid rung to execute when restarting at ``seed_ns``.
 
-    VMEC++ hot restart requires the first ``ns_array`` entry to equal the
+    A C++ VMEC reimplementation hot restart requires the first ``ns_array`` entry to equal the
     source resolution; VMEX instead **skips** every leading rung whose radial
     resolution the restart source already meets or exceeds — those rungs only
     exist to build a seed the caller already has.  Rungs at or above

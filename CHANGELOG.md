@@ -181,7 +181,7 @@ trial pays is a Newton finish through one block factorization, the implicit
 adjoint is solved exactly through that same factorization, and the compiled
 lanes stopped recompiling. The exterior field reports the accuracy it achieved,
 every evaluation carries counters, and the CLI reads DESC inputs. It does not
-close cold compile (median wall per case 23.1 s against VMEC++'s 3.35 s in the
+close cold compile (median wall per case 23.1 s against 3.35 s for a C++ VMEC reimplementation in the
 independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
 
 The PRs behind it and the full notes are in the GitHub release: #300, #310,

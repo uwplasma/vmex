@@ -341,7 +341,7 @@ If a first requested grid remains invalid after ``guess_axis``, the fixed- or
 free-boundary driver retries the ladder once with an ``ns=3``, ``ftol=1e-4``
 stage prepended.  The coarse equilibrium is then interpolated to the user's
 first grid; free-boundary vacuum activation restarts cleanly.  This narrow
-recovery follows the current VMEC++ driver; it fires only for
+recovery follows the driver of a recent C++ VMEC reimplementation; it fires only for
 ``bad_jacobian_flag`` and does not hide convergence, non-finite, or input
 failures.  ``coarse_grid_retry=False`` disables it for strict failure studies.
 
