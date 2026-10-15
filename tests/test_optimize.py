@@ -1778,3 +1778,27 @@ def test_report_targets_prints_one_verdict_line(capsys, monkeypatch):
     out = capsys.readouterr().out.splitlines()
     assert out == ["Targets met.", "Targets NOT met: beta 0.02 below 0.025.",
                    "Targets NOT met: aspect 6.5 above 6.3; min |iota| 0.4 below 0.42."]
+
+
+def test_qi_residual_is_continuous_with_a_soft_minimum():
+    """The grid argmin makes the constructed-QI residual jump; the softmin does not.
+
+    A sine harmonic slides the well minimum along the field line.  With the
+    grid argmin the total jumps by ~2e-4, 200x its median step, each time the
+    minimum crosses a grid cell or a branch crossing reaches the period end;
+    with ``argmin_softness`` the largest step is ~10x the median, the
+    curvature of a continuous function sampled at 2.5e-3.
+    """
+    xm, xn = np.array([0, 0, 1]), np.array([0, 2, 2])
+
+    def total(t, softness):
+        return float(opt.quasi_isodynamic_residual(
+            bmnc_b=np.array([[1.0, 0.15, 0.04]]), bmns_b=np.array([[0.0, 0.15 * t, 0.0]]),
+            xm_b=xm, xn_b=xn, iota_b=np.array([0.6]), nfp=2, nphi=31, nalpha=5,
+            n_bounce=9, argmin_softness=softness)["total"])
+
+    ts = np.linspace(0.0, 0.3, 121)
+    hard = np.abs(np.diff([total(t, 0.0) for t in ts]))
+    soft = np.abs(np.diff([total(t, 1.0e-2) for t in ts]))
+    assert hard.max() > 50.0 * np.median(hard)
+    assert soft.max() < 15.0 * np.median(soft)
