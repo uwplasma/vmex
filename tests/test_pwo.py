@@ -278,3 +278,13 @@ def test_lc_shape_parameter_derivatives_against_independent_map():
                     b=values[2], c=values[3], nfp=3)[1]
     finite = (oracle(x+step*direction)-oracle(x-step*direction))/(2*step)
     np.testing.assert_allclose(tangent, finite, rtol=1e-7, atol=1e-10)
+
+
+def test_locally_nonfolding_map_with_global_overlap_is_rejected():
+    eta_min = np.pi-.5+1e-6
+    # At gamma=0 both boundary shape terms increase the toroidal span.
+    _, left = _map(np.array([0.]), np.array([eta_min]), b=0.)
+    _, right = _map(np.array([0.]), np.array([2*np.pi-eta_min]), b=0.)
+    assert float(right[0]-left[0]) > 2*np.pi/3
+    with pytest.raises(ValueError):
+        mapped_pwo_residual_from_boozer(**_spectrum(), b_ref=1.5, eta_min=eta_min)
