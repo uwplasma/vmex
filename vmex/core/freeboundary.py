@@ -542,6 +542,8 @@ def free_boundary_resolution(
     file planes by stride.  An incompatible pair must therefore never reach
     iteration one:
 
+    * a deck ``NFP`` other than the table's ``nfp`` -> typed
+      :class:`VmecInputError` (``nfper0 /= nfp -> ier_flag = 9``);
     * explicit incompatible ``NZETA`` -> typed :class:`VmecInputError`
       (VMEC2000 rejects the same deck before solving);
     * automatic resolution (``NZETA = 0``) -> the smallest divisor of the
@@ -553,6 +555,12 @@ def free_boundary_resolution(
     """
     resolution = resolution_from_input(inp, ns=ns)
     kp = _mgrid_planes(external_field)
+    if kp is not None and int(getattr(external_field, "nfp", inp.nfp)) != int(inp.nfp):
+        raise VmecInputError(
+            f"the deck's NFP = {int(inp.nfp)} differs from the mgrid table's "
+            f"nfp = {int(external_field.nfp)}; VMEC2000 rejects this pairing "
+            "before solving (mgrid_mod.f ier=9)",
+            hint="use the mgrid generated for this deck's field periods")
     if kp is None or int(inp.ntor) == 0:
         return resolution
     if int(inp.nzeta) > 0:
