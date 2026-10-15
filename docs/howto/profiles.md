@@ -60,7 +60,7 @@ spline profiles and shows they agree:
 - **`SPRES_PED`** — pressure pedestal location: pressure is held constant
   for `s > SPRES_PED`. The default 1.0 disables it; a stale value from a
   copied deck silently flattens your edge pressure.
-- **`BLOAT`** — expands the current/iota profile domain; nonzero values
+- **`BLOAT`** — expands the pressure and current profile domain (`x = min(|s BLOAT|, 1)`; iota is not affected, as in VMEC2000); nonzero values
   change where profiles are evaluated. Leave at 1.0 unless you are matching
   a VMEC2000 run that used it.
 - **Ascending coefficients.** `AM/AC/AI` are ascending powers of `s`

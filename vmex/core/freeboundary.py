@@ -44,6 +44,7 @@ from typing import Any
 
 import functools
 import threading
+import warnings
 
 import numpy as np
 
@@ -212,6 +213,32 @@ def _edge_fourier(state: SpectralState, rt: SolverRuntime):
     else:
         rmns = zmnc = None
     return rmnc, zmns, rmns, zmnc
+
+
+def _warn_outside_grid(state: SpectralState, rt: SolverRuntime, field: Any) -> None:
+    """VMEC2000 ``becoil.f`` warning when the boundary leaves the mgrid box.
+
+    Interpolation clamps R and Z to the table, so a boundary outside it sees
+    a constant edge field; VMEC2000 says so ("Plasma Boundary exceeded Vacuum
+    Grid Size" with the offending extremes), and so does VMEX.
+    """
+    if not all(hasattr(field, k) for k in ("rmin", "rmax", "zmin", "zmax")):
+        return
+    rmnc, zmns, rmns, zmnc = _edge_fourier(state, rt)
+    theta = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+    zeta = np.linspace(0.0, 2.0 * np.pi, 32, endpoint=False)
+    angle = (np.asarray(rt.modes.m)[:, None, None] * theta[None, :, None]
+             - np.asarray(rt.modes.n)[:, None, None] * zeta[None, None, :])
+    cos, sin = np.cos(angle), np.sin(angle)
+    R = np.tensordot(rmnc, cos, 1) + (0.0 if rmns is None else np.tensordot(rmns, sin, 1))
+    Z = np.tensordot(zmns, sin, 1) + (0.0 if zmnc is None else np.tensordot(zmnc, cos, 1))
+    out = [f"{name} = {value:.6g}" for name, value, bad in (
+        ("rmin", R.min(), R.min() < field.rmin), ("rmax", R.max(), R.max() > field.rmax),
+        ("zmin", Z.min(), Z.min() < field.zmin), ("zmax", Z.max(), Z.max() > field.zmax)) if bad]
+    if out:
+        warnings.warn("Plasma Boundary exceeded Vacuum Grid Size: " + ", ".join(out)
+                      + f" (table R in [{field.rmin:.6g}, {field.rmax:.6g}], "
+                      f"Z in [{field.zmin:.6g}, {field.zmax:.6g}])", stacklevel=2)
 
 
 # ---------------------------------------------------------------------------
@@ -2219,6 +2246,7 @@ def _solve_free_boundary_stage(
                 prefetch_compile=prefetch_compile,
                 prefetch_device=prefetch_device,
             )
+        _warn_outside_grid(carry.state, rt_freeb if fb.turned_on else rt_fixed, external_field)
         if ier == MORE_ITER_FLAG and not error_on_no_convergence:
             result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
             return _FreeBoundaryStageResult(
