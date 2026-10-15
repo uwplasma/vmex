@@ -136,6 +136,22 @@ preconditioning problem: the vacuum response of an edge displacement adds a
 stiffness $\sim (\mathbf k\cdot\mathbf B)^2/|\mathbf k_\perp|$ per mode that
 the edge rows of $M$ do not contain.
 
+## Pallas kernels on GPU
+
+Measured on one RTX A4000 with JAX 0.11.2:
+
+- **Batched radial tridiagonal solve.** A Pallas Thomas kernel, one program
+  per block of columns sweeping rows in registers, is 2–5 times faster than
+  cuSPARSE and the scan Thomas from about $10^4$ columns. Ensembles and
+  high-resolution decks reach that size. At a single VMEC solve's few hundred
+  columns cuSPARSE wins: 0.17 against 0.24 ms at `ns = 51` in float64.
+  The kernel is an opt-in SOLVAX method.
+- **NESTOR Green's function assembly.** A tiled Pallas kernel loses to XLA
+  on a 32 × 32 surface grid. On 64 × 64 it wins only at `mf = nf = 12`
+  (18 against 30 ms) and loses at `mf = nf = 8` (22 against 14 ms).
+- **Fourier synthesis and projection** are small batched matmuls that XLA
+  already fuses. A Pallas fusion was not attempted.
+
 ## Candidate preconditioner
 
 Average the metric coefficients over $\zeta$ only, not over $\theta$. The
