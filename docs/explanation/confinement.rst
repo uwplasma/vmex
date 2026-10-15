@@ -761,16 +761,17 @@ the hard one (the smoothing deliberately cannot see structure below
 toward it as ``temperature`` decreases with a correspondingly finer
 budget.  Optimize the surrogate, report the hard value.
 
-DeltaRes supplied-map reduction
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+DeltaRes map reductions
+~~~~~~~~~~~~~~~~~~~~~~~
 
 :mod:`vmex.core.deltares` implements the shear-cancelled harmonic strength and
 published phase-space reduction of Labbate, Paul and Chambliss
 (`arXiv:2609.01890v1 <https://arxiv.org/abs/2609.01890>`_).
 :func:`~vmex.core.deltares.deltares_from_maps` accepts complete, matched
-full-bounce displacements and speed-normalized periods. It does not yet supply
-a qualified equilibrium-to-map adapter. Do not use these algebra tests as
-validation of an equilibrium optimization or particle-loss prediction.
+full-bounce displacements and speed-normalized periods. The restricted action
+primitive below constructs a finite-cell diagnostic, but does not supply a
+full-population equilibrium objective. These tests do not validate a particle-loss
+prediction or a production equilibrium derivative.
 
 The radial deposition counts every crossing, including both contributions
 when two crossings share a node. Exact node crossings are counted once.
@@ -788,3 +789,47 @@ reduced radial rows, with zero target and unit weights. It retains the
 paper's denominator factor two, which is not automatically a probability
 normalization. Neither a smaller reduction nor a passing coefficient gradient
 check qualifies a production boundary derivative or independent confinement.
+
+:func:`~vmex.core.deltares.restricted_action_deltares_from_boozer` reuses
+:func:`~vmex.core.bounce.bounce_action` for one complete well per eta and
+physical pitch node on a bounded native field-line cell. It retains both
+spectral parities, live roots and line elements. A local three-point stencil
+on actual physical flux coordinates differentiates the full-bounce action
+at fixed eta and physical pitch. Action harmonics supply the stabilized
+power directly; no numerical angular derivative or shear division is needed.
+Its default ``mean_map`` rotation differs explicitly from the supplied-map
+reducer's archive-compatible ``frequency_ratio`` default; both are selectable.
+
+This primitive always returns ``full_population=False``. Its fixed pitch band
+and finite-cell denominator define a restricted diagnostic. It rejects extra,
+cut, unresolved and discontinuously matched wells; it does not fill missing
+populations with zeros. ``paper_pitch_band_mass`` is the unit-score integral
+with the same paper convention, not a full-domain coverage fraction. Spectral
+root residuals, slopes, forbidden boundary margins and family continuity
+certificates supplement the bounce kernel's topology masks. Integer mode and
+Nyquist checks reject aliased spectra. A Fourier bound on the second trace
+derivative certifies that each sampled interval either has constant sign
+relative to the pitch level or is strictly monotonic; this rules out hidden
+wells along each sampled eta line. The same bound checks continuous field
+positivity, rather than positivity only at the knots. Continuation between eta samples still
+requires refinement. These checks require resolution studies, especially near a separatrix where action
+can be accurate while the bounce period is unresolved.
+
+The canonical flux sign is explicit: VMEX's ESSOS adapter uses
+``psi0=-Phi_edge/(2*pi)``. Reversing this sign reverses rotation but leaves
+harmonic power invariant. At finite equilibrium force error, a direct drift
+comparison must retain actual curvature independently of grad-B drift.
+Their radial coefficients differ by ``mu0*J.dot(grad(s))/B**2``; substituting
+one for the other assumes a current tangent to the flux surfaces. A small
+force residual alone does not bound this error relative to a small drift.
+
+The retained outer square also has an intrinsic grid-phase effect. An
+isolated unit crossing a fraction ``t`` across a radial cell deposits rows
+``(1-t,t)`` and gives ``loss=((1-t)**2+t**2)/2``, ranging from one quarter to
+one half with unchanged physical strength. Refining the grid does not remove
+this factor. Compare radial action derivatives at common physical surfaces;
+do not mistake convergence of those derivatives for convergence of the
+squared deposited loss. Any alternative aggregation changes the functional
+and must be evaluated as an explicit ablation. Optimization additionally
+requires derivatives checked against ordinary converged equilibrium re-solves
+and held-out physical orbit comparisons at matched field and size.
