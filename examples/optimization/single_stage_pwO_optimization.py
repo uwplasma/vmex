@@ -87,14 +87,17 @@ def run():
     minor_ref = float(seed.wout.Aminor_p)
     aspect_ref = float(seed.wout.aspect)
     target = MappedPwOResidual([0.5], b_ref=field_ref, **PWO_OPTIONS)
-    local_mean_ref = float(jnp.mean(target.compute_state(seed.state, seed.runtime)["B_mapped"]))
+    seed_sample = target.compute_state(seed.state, seed.runtime)
+    local_mean_ref = float(jnp.mean(seed_sample["B_mapped"]))
+    local_mirror_ref = float(jnp.min(seed_sample["mirror"]))
 
     def plasma_loss(state, runtime):
         sample = target.compute_state(state, runtime)
         mirror = jnp.min(sample["mirror"])
         limits = [jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0) / IOTA_FLOOR,
                   (opt.aspect_ratio(state, runtime) / aspect_ref - 1) / 0.03,
-                  jnp.maximum(MIRROR_FLOOR - mirror, 0) / MIRROR_FLOOR]
+                  jnp.maximum(MIRROR_FLOOR - mirror, 0) / MIRROR_FLOOR,
+                  (mirror / local_mirror_ref - 1) / 0.10]
         limits.append((jnp.mean(sample["B_mapped"]) / local_mean_ref - 1) / 0.05)
         if TARGET_BETA:
             limits.append((opt.volume_average_beta(state, runtime) / TARGET_BETA - 1) / 0.1)
@@ -232,6 +235,7 @@ def run():
                       physical_objective_improved=metrics["pwo"] < float(seed_score["total"]),
                       iota=metrics["min_abs_iota"] >= IOTA_FLOOR,
                       local_mirror=metrics["local_mirror"] >= MIRROR_FLOOR,
+                      local_mirror_held=abs(metrics["local_mirror"]/local_mirror_ref-1) <= 0.10,
                       local_field=abs(metrics["local_mean_T"]/fine_mean_ref-1) <= 0.05,
                       aspect=abs(metrics["aspect"]/aspect_ref-1) <= 0.03,
                       major_radius=abs(metrics["major_radius_m"]/radius-1) <= 0.03,
@@ -270,6 +274,7 @@ def run():
     summary = dict(initial=initial, final=best["value"], optimizer_status=int(result.status),
                    seconds=time.perf_counter() - started, metrics=metrics, checks=checks, trials=history,
                    scale_target="volavgB", local_mean_ref_T=local_mean_ref,
+                   local_mirror_ref=local_mirror_ref, seed_fine_mirror=float(jnp.min(seed_score["mirror"])),
                    self_local_arc_exclusion_m=SELF_LOCAL_ARC, coil_quadrature_shift=0.5,
                    coil_driven=dict(completed=False, reason="smoke budget" if ci_smoke else "not completed"),
                    geometric_proxies_only=True, research_validation_complete=False)
