@@ -3945,18 +3945,20 @@ def frozen_path_directional_fd(
     that path variation is an O(1) contribution that can inflate or even
     sign-flip the finite difference (measured on ``li383_low_res``:
     ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the adjoint, but the naive
-    central FD reads ``+0.045`` -- wrong sign).
+    central FD reads ``+0.045`` -- opposite signs on different families).
 
     The implicit adjoint deliberately does *not* differentiate through that
     logic: it linearizes the fixed point of the **frozen** residual ``F`` (the
     preconditioner / mask / branch captured once at ``params``; see the module
-    docstring), which is the stable, physical gradient.  This helper reproduces
-    exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
+    docstring), which defines the chosen discrete-family gradient.  This helper
+    reproduces exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
     ``F(z, params +/- h*tangent) = 0`` (matrix-free, the same linearization the
     adjoint uses) from the converged ``z*`` before central-differencing
     ``metric_fn``.  The result therefore equals :func:`jax.grad` of the metric
     contracted with ``tangent`` to solver accuracy -- the gradient check a naive
-    re-solve FD cannot provide for these metrics.
+    re-solve FD cannot provide for these metrics.  Agreement does not bound
+    discretization error or remove the coordinate-family sensitivity of
+    independent re-solves.
 
     The Newton steps go through the recycling GCROT solve rather than plain
     restarted GMRES: from a warm start already at the root the step's RHS

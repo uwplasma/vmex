@@ -472,6 +472,47 @@ surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX fr
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
+## Cyclometry: passing-particle diagnostics
+
+The cyclometry kernels evaluate closed-transit action, a finite-moment upper envelope,
+and their derivatives at a moving rational surface. These are ingredients for a cheap
+passing-particle objective; optimization and a finite-time confinement bound remain under
+validation ([model and numerical limits](docs/explanation/confinement.rst)).
+
+![Passing helium sections near the three-fifths rational surface](docs/_static/figures/readme_cyclometry_low_energy.webp)
+
+**Low-energy reference.** In the li383 equilibrium, 48 selected 100 eV helium markers
+show passing drift islands near rotational transform ι = 3/5. Panels separate the signs
+of parallel velocity; points are ESSOS sections after each five toroidal turns, colored
+by initial resonant phase. Gray contours show the leading transit-action Hamiltonian
+H₀; the dotted line marks its phase-averaged radial minimum. Here s is normalized
+toroidal flux and χ = 5θ − 3ζ in Boozer angles. The calculation uses 31 radial surfaces,
+Boozer bounds 8/8, zero magnetic moment, and 86.4 ms of collisionless K=0 guiding-center
+tracing (the radial covariant magnetic-field component is omitted).
+Independent periodic-orbit shooting confirms elliptic and hyperbolic points in both
+directions. Refinement preserves the island topology, but long-time phase remains
+sensitive to spectral resolution.
+
+![Scaled alpha sections compared with the leading transit-action Hamiltonian](docs/_static/figures/readme_cyclometry_alpha.webp)
+
+**Alpha diagnostic.** Ten selected 3.5 MeV markers are traced for 4.43 ms after scaling
+length by 6 and magnetic field by 4 (major radius 8.52 m, mean field 6.38 T).
+The pitch parameter μB★/E = 0.6 uses B★ = 9.533 T, an upper bound for the retained
+spectrum; Boozer bounds are 12/12. All ten survive with relative energy error below
+7.9×10⁻⁹, but H₀ varies along the sampled sections by as much as 1.13 times the
+rational-surface potential oscillation. Its displaced contours expose the need for an
+invariant correction. These selected markers do not estimate a loss fraction, and the
+scaled field is not a separately solved reactor equilibrium. Both plots use direct
+spectral evaluation without mode pruning or angular tables; alpha resolution and
+full-field comparisons remain open.
+
+The kernels pass 69 focused tests. The full equilibrium → Boozer → moving-root
+objective derivative passes 15 frozen-family comparisons (maximum relative error
+2.37×10⁻⁶); ordinary equilibrium re-solves still disagree by up to 17.8%. A consistent
+forward equilibrium family, resolved discretization errors and a corrected invariant
+are required before promoting optimization. The [figure source](docs/_static/figures/sources/make_cyclometry_figures.py)
+replots the saved sections and contours with their provenance; it does not rerun orbits.
+
 ## Tracing from the axis to the wall
 
 Orbits do not end at the LCFS. With ESSOS (`vmex[coils]`), guiding centres move in VMEC coordinates
