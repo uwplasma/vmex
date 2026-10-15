@@ -366,9 +366,6 @@ def test_solver_dataclass_unchanged():
     """The public surface is untouched: same signature, same closures."""
     fields = {f.name for f in dataclasses.fields(V.VacuumSolver)}
     assert fields == {"basis", "signgs", "full", "skip", "assemble"}
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 @pytest.mark.parametrize("include_kernel", [False, True])
 def test_analytic_mode_projection_boundary_derivative(cth_vacuum_inputs, include_kernel):
     """Signed Fourier projection retains the boundary response in both lanes."""

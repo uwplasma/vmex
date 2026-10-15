@@ -25,9 +25,6 @@ from vmex.core.run_options import (
     resolve_run_options,
     strip_vmex_json,
 )
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 

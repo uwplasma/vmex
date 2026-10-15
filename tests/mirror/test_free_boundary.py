@@ -272,7 +272,7 @@ def test_exterior_vacuum_has_no_azimuthal_field_while_a_net_current_adds_one() -
 
 
 @pytest.mark.full
-def test_unbounded_exterior_free_boundary_beta_scan_converges(_module_jit_enabled) -> None:
+def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
     config, source_grid, discretization, plasma_grid, on_axis, center, flux, initial_boundary = _free_case(5, 7, 4, 200)
     betas = jnp.asarray([0.0, 0.10, 0.50, 0.80])
     results = solve_beta_scan(
@@ -341,7 +341,7 @@ def test_unbounded_exterior_free_boundary_beta_scan_converges(_module_jit_enable
 
 @pytest.mark.full
 @pytest.mark.weekly
-def test_unbounded_exterior_beta_observables_converge_with_resolution(_module_jit_enabled) -> None:
+def test_unbounded_exterior_beta_observables_converge_with_resolution() -> None:
     observables = []
     compatibility = []
     # The coarse scan above certifies the full 0--80% continuation.  This

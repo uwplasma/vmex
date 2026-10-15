@@ -31,7 +31,6 @@ from vmex.core import optimize as opt  # noqa: E402
 from tests.conftest import resolve_golden_dir  # noqa: E402
 
 GOLDEN_DIR = resolve_golden_dir()
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmex_test_cache_optimize")
 
