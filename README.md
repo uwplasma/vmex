@@ -484,7 +484,7 @@ validation ([model and numerical limits](docs/explanation/confinement.rst)).
 The li383 ι = 3/5 reference surface, colored by retained |B|. The χ = 0 and π
 coordinate curves close after five toroidal turns in the Boozer representation.
 They show the geometry sampled by the transit action; they are not particle orbits.
-Full-VMEC field alignment retains a measured representation discrepancy.
+Finite angular reconstruction errors are measured separately from this geometry.
 
 ![Passing helium sections near the three-fifths rational surface](docs/_static/figures/readme_cyclometry_low_energy.webp)
 
@@ -510,8 +510,9 @@ spectrum; Boozer bounds are 12/12. All ten survive with relative energy error be
 rational-surface potential oscillation. Its displaced contours expose the need for an
 invariant correction. These selected markers do not estimate a loss fraction, and the
 scaled field is not a separately solved reactor equilibrium. Both plots use direct
-spectral evaluation without mode pruning or angular tables; alpha resolution and
-full-field comparisons remain open.
+spectral evaluation without mode pruning or angular tables. A tighter-tolerance run
+changes one selected marker from bounded to circulating resonant phase despite small
+energy error; alpha classification and full-field trajectory validation remain open.
 
 The kernels pass 69 focused tests. The public `frozen_reference` option now keeps
 values, gradients and materialized equilibria on one discrete family. Its complete

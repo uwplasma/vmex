@@ -603,6 +603,14 @@ def _flux_coordinates_to_xyz(spectra: dict[str, Array], points: Array) -> Array:
 def _B_contravariant_flux(spectra: dict[str, Array], points: Array) -> Array:
     """Return ``(B^s, B^theta, B^phi)`` at VMEC flux coordinates."""
     spectra = _prepared(spectra)
+    if _has_native_form(spectra):
+        def native(point):
+            s, theta, phi = point
+            R, _, Rs, Zs, Rt, Zt, _, _ = _geometry(spectra, s, theta, phi)
+            bu, bv = _contravariant_native(spectra, s, theta, phi, Rs, Zs, Rt, Zt, R)
+            return jnp.stack((jnp.zeros_like(bu), bu, bv))
+
+        return jax.vmap(native)(_check_points(points, "flux coordinates"))
     s, theta, phi = _check_points(points, "flux coordinates").T
     # The prepared tables, so every entry point shares one interpolant: these
     # helpers building their own disagreed with the field by 6e-4 once the
@@ -670,8 +678,10 @@ def _half_to_full_profile(profile: Array) -> Array:
 def _geometry(spectra: dict[str, Array], s: Array, theta: Array, phi: Array):
     """Return ``R, Z`` and their ``s``, ``theta`` and ``phi`` derivatives at one point."""
     xm, xn = spectra["xm"], spectra["xn"]
+    tables = spectra.get("_tables", {})
     radial = lambda name: ((None, None) if spectra.get(name) is None  # noqa: E731
-                           else _radial_value_and_derivative(spectra[name], s, xm))
+                           else _radial_value_and_derivative(
+                               spectra[name], s, xm, tables.get(name)))
     (rc, rcs), (zs, zss), (rs, rss), (zc, zcs) = map(radial, ("rmnc", "zmns", "rmns", "zmnc"))
     phase = xm * theta - xn * phi
     cosine, sine = jnp.cos(phase), jnp.sin(phase)
