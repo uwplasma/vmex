@@ -1,4 +1,4 @@
-"""Focused current-density regressions for VMEC/VMEC++ WOUT parity."""
+"""Focused current-density regressions for VMEC WOUT parity."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from vmex.core.postprocess import MU0, compute_currents
 
 
 def test_lasym_odd_m_uses_inner_half_mesh_sqrt_s() -> None:
-    """Pin the VMEC++ 0.7.1/PARVMEC correction for ``currvmns``.
+    """Pin the PARVMEC correction for ``currvmns``.
 
     The historical asymmetric ``read_wout_mod.f90`` branch divided the
     inner ``bsubumns`` value by the *outer* half-mesh sqrt(s).  That makes
     the two neighboring terms use the same denominator.  The physical
-    radial derivative, and VMEC++'s PARVMEC-calibrated implementation, use
+    radial derivative, and PARVMEC, use
     the corresponding inner and outer denominators.
     """
     ns = 5

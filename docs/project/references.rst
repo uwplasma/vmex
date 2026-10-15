@@ -17,12 +17,10 @@ Background and canonical references for VMEC and related equilibrium methods:
 4. VMEC2000 reference documentation and ``wout`` file format notes (VMEC/LIBSTELL
    distribution and Princeton VMEC resources).
 
-5. VMEC++ numerics notes, ``docs/the_numerics_of_vmecpp.pdf`` in the VMEC++
-   repository, https://github.com/proximafusion/vmecpp (published as
+5. Numerics notes of a recent C++ VMEC reimplementation (published as
    reference 16).
 
-6. VMEC++ Fourier basis implementation note,
-   ``docs/fourier_basis_implementation.md`` in the VMEC++ repository.
+6. Fourier basis implementation note of the same code.
 
 7. VMEC2000 solver core (residuals, bcovar, preconditioner):
    ``VMEC2000/Sources/General/funct3d.f`` and
@@ -45,12 +43,11 @@ Background and canonical references for VMEC and related equilibrium methods:
     stellarators near the magnetic axis,” *Journal of Plasma Physics* 86(5),
     905860510 (2020), arXiv:2006.14881.
 
-12. VMEC++ solver/restart structure and parity-relevant control flow:
-    ``src/vmecpp/cpp/vmecpp/vmec/vmec/vmec.cc`` in the VMEC++ repository.
+12. Solver/restart structure and parity-relevant control flow of the same
+    code (reference 16).
 
-13. VMEC++ output-quantity and near-axis extrapolation notes:
-    ``src/vmecpp/cpp/vmecpp/vmec/output_quantities/output_quantities.cc`` in
-    the VMEC++ repository.
+13. Output-quantity and near-axis extrapolation of the same code
+    (reference 16).
 
 14. P. Kim, R. Jorge, and W. Dorland, “The On-Axis Magnetic Well and
     Mercier's Criterion for Arbitrary Stellarator Geometries,” *Journal of
@@ -60,7 +57,7 @@ Background and canonical references for VMEC and related equilibrium methods:
     properties of the Infinity Two fusion pilot plant,” *Journal of Plasma
     Physics* 90(6), 905900615 (2024), Appendix B.
 
-16. J. Schilling et al., “VMEC++: The Numerics of VMEC,” arXiv:2502.04374 —
+16. J. Schilling et al., “The Numerics of VMEC,” arXiv:2502.04374 —
     hot restart, JSON input schema, zero-crash policy, and the wout
     validation methodology adopted here.
 

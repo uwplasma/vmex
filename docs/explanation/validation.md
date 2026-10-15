@@ -88,7 +88,7 @@ then a verified download. Tests that do need a live binary are marked
 `vmec2000_live` and run only under `--run-vmec2000`.
 
 ```{figure} /_static/figures/readme_convergence.webp
-:alt: force-residual traces for VMEX, VMEC2000 and VMEC++ on the NFP=4 QH case
+:alt: force-residual traces for VMEX, VMEC2000 and a C++ VMEC on the NFP=4 QH case
 :align: center
 :width: 90%
 
@@ -174,7 +174,7 @@ after each output has been sampled to WOUT and reconstructed by VMEX:
 |---|---|---|
 | VMEX | 0.00179 | 0.52590 |
 | VMEC2000 | 0.01711 | 0.52518 |
-| VMEC++ | 0.01711 | 0.52518 |
+| C++ VMEC | 0.01711 | 0.52518 |
 | DESC | 0.02962 | 0.87926 |
 
 These are **reconstruction measurements, not a ranking of native solvers**.
@@ -416,7 +416,7 @@ a claim exists elsewhere.
 - **Zero-beta free boundaries that meet an island chain.** VMEC's model needs
   a nested flux surface that encloses PHIEDGE. When the coil field has an
   island chain or stochastic layer at that flux, no such equilibrium exists.
-  VMEX, VMEC2000 and VMEC++ then limit-cycle instead of converging. One
+  VMEX and VMEC2000 then limit-cycle instead of converging. One
   optimized single-stage coil set had a 4/9 chain at the boundary, confirmed
   by field-line tracing. Nothing in VMEX detects this yet. Check it by
   field-line tracing, or by whether the coil-field B.n/B on the boundary falls

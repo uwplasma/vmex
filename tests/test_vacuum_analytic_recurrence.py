@@ -6,8 +6,8 @@ a FORWARD three-term recurrence whose homogeneous modes grow like
 around mpol/ntor ~ 12) the forward pass returns garbage.  VMEC2000 computes
 the SAME wrong integrals, so two-code parity cannot see the defect; these
 tests pin the fixed ``vmex.core.vacuum._tl_stable`` (per-point
-forward/backward selection following vmecpp's singular_integrals.cc, commit
-f5dbf76, re-dimensioned threshold + Miller tail) against an independent
+forward/backward selection as in a recent C++ VMEC reimplementation,
+re-dimensioned threshold + Miller tail) against an independent
 reference: ``scipy.integrate.quad`` (epsrel 1e-13, epsabs 0), whose
 self-reported error stays under 1e-11 relative — beyond the 1e-10 gates.
 """

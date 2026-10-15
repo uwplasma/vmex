@@ -100,7 +100,7 @@ On a GPU free-boundary run, the plasma iteration, mgrid interpolation, cached
 vacuum arrays, and final state remain on the accelerator. The dense NESTOR
 assembly/factor/solve is explicitly placed on CPU and its small boundary
 inputs/outputs are bridged inside the jitted cadence loop. This follows the
-VMEC++ accelerator decomposition and avoids the alternate LASYM branch seen
+accelerator decomposition of a recent C++ VMEC reimplementation and avoids the alternate LASYM branch seen
 with accelerator dense linear algebra. An explicitly requested GPU LASYM
 multigrid ladder therefore seeds only its coarsest rung on CPU, then transfers
 the converged branch to all finer GPU rungs.
@@ -394,7 +394,7 @@ the value belongs to a nearby unanchored state. A zero-beta, zero-current
 free boundary exists only when a nested flux surface of the coil field
 encloses PHIEDGE. When an island chain or stochastic layer sits at that flux
 (a 4/9 chain in one optimized coil set, confirmed by field-line tracing),
-VMEX, VMEC2000 and VMEC++ limit-cycle instead of converging. Small beta does
+VMEX and VMEC2000 limit-cycle instead of converging. Small beta does
 not regularize it. Keep the transform away from the resonance, or reduce
 PHIEDGE inside the good surfaces.
 

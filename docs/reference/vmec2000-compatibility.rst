@@ -685,7 +685,7 @@ LASYM currvmns
 The legacy ``read_wout_mod.f90::Compute_Currents`` asymmetric odd-``m``
 branch divides the inner ``bsubumns`` coefficient by the outer half-mesh
 ``sqrt(s)``.  VMEX uses the inner half-mesh denominator, matching the
-PARVMEC-calibrated correction in VMEC++ 0.7.1.  Only the derived asymmetric
+PARVMEC-calibrated correction in a recent C++ VMEC reimplementation.  Only the derived asymmetric
 current-density WOUT channel changes, not the force iteration.
 
 LASYM constraint scaling (``tcon``)
@@ -706,7 +706,7 @@ PARVMEC ``master`` set ``dnorm = 1/(nzeta*(ntheta2-1))`` unconditionally —
 correct, because ``symforce.f`` gives the kernel a definite parity first, so
 the endpoint-half-weighted reduced integral already equals the full-grid
 average — and comment out the ``tcon`` halving in both ``bcovar`` routines.
-VMEC++ 0.5.3 independently implements the same convention
+A recent C++ VMEC reimplementation independently implements the same convention
 (``intNorm = 1/(nZeta*(nThetaReduced-1))`` with no ``LASYM`` branch, and only
 the ``tcon(ns) = 0.5*tcon(ns-1)`` edge rule).
 

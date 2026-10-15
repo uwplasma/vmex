@@ -88,7 +88,7 @@ current comparison.
      - VMEC2000
      - vmex cold
      - vmex warm
-     - VMEC++
+     - C++ VMEC
    * - li383_low_res
      - 0.86
      - 3.36
@@ -168,7 +168,7 @@ marks an aborted run and ``n/a`` an unsupported configuration.
 
 .. end generated-baseline-table
 
-VMEC++ ran through its Python API in a fresh process on the same host; its
+The C++ VMEC reimplementation ran through its Python API in a fresh process on the same host; its
 ``failed`` rows aborted during the first iterations.  The record also carries
 each run's iteration count and peak RSS.
 
@@ -193,12 +193,12 @@ path) and asserts ``wb`` within 1e-7 relative and ``rmnc/zmns`` and
 
 The figure plots the total force residual ``fsqr + fsqz + fsql`` per
 iteration for ``nfp4_QH_warm_start`` on a single grid at ``ns=51``: 502
-iterations for VMEX and VMEC2000, 501 for VMEC++.  The traces are in
+iterations for VMEX and VMEC2000, 501 for the C++ code.  The traces are in
 ``benchmarks/convergence_nfp4_ns51.json``, last written on 2026-07-29 (PR
 #80); host and JAX version were not recorded.
 
 .. figure:: /_static/figures/readme_convergence.webp
-   :alt: force residual vs iteration for VMEX, VMEC2000, and VMEC++
+   :alt: force residual vs iteration for VMEX, VMEC2000, and a C++ VMEC
    :align: center
    :width: 95%
 

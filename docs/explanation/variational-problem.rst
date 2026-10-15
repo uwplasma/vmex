@@ -385,8 +385,8 @@ angle. Nothing downstream multiplies or divides by ``NFP`` again.
 
 VMEX uses these tables in ``tomnsps`` so that the Fourier-space force
 arrays exactly match VMEC2000. See References [4-6] in
-:doc:`/project/references` for the original VMEC2000 tables and the VMEC++
-DFT/basis discussion.
+:doc:`/project/references` for the original VMEC2000 tables and the
+DFT/basis discussion of a recent C++ VMEC reimplementation.
 
 Two-stage DFT for ``tomnsps``
 -----------------------------
@@ -424,8 +424,7 @@ preserving VMEC2000 parity exactly.
 Implementation detail: the theta contractions for multiple force kernels are
 **stacked** into a single batched ``dot_general`` call (GEMM), and the zeta
 contractions are likewise stacked by basis type (cosine vs sine). This follows
-the separable product identities (see Eqs. 5.55–5.56 in the VMEC++ numerics
-notes) while keeping the VMEC2000 normalization and parity masks intact.
+the separable product identities (see Eqs. 5.55–5.56 in reference 5) while keeping the VMEC2000 normalization and parity masks intact.
 
 Geometry, metric, and Jacobian
 ------------------------------
@@ -462,8 +461,8 @@ and the signed Jacobian is:
 VMEC stores a sign convention ``signgs`` such that ``signgs*sqrtg`` is positive
 away from the axis. It is not a free parameter: VMEC2000 ``readin.f`` sets
 ``signgs = -1`` unconditionally and, when the boundary's ``m=1`` row has the
-opposite orientation, flips theta instead (``lflip``, ``flip_theta``). VMEC++
-fixes the same value as the compile-time constant ``kSignOfJacobian = -1``, and
+opposite orientation, flips theta instead (``lflip``, ``flip_theta``). A recent C++ VMEC
+reimplementation fixes the same value as the compile-time constant ``kSignOfJacobian = -1``, and
 VMEX follows both (:mod:`vmex.core.setup`). Code that reads ``signgs`` from a
 ``wout`` file should still honor the stored value.
 
@@ -691,4 +690,4 @@ Source references
 
 - VMEC2000 source in ``STELLOPT/VMEC2000/Sources``; every :mod:`vmex.core`
   module docstring names the file it follows.
-- Bibliography, including the VMEC++ numerics notes: :doc:`/project/references`.
+- Bibliography: :doc:`/project/references`.

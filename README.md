@@ -302,7 +302,7 @@ The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.
   wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
   mostly XLA compilation, which a repeated solve in one process skips. In the older
   [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
-  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
+  a recent C++ VMEC reimplementation was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
   shipped deck or problem size ran faster than on the CPU.
 - **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
@@ -311,7 +311,7 @@ The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.
 - **Validation record.** The [validation record](docs/explanation/validation.md) lists every
   gate, tolerance and benchmark record, with the measured accuracy of each lane.
 
-![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
+![Force-residual traces for VMEX, VMEC2000 and a recent C++ VMEC reimplementation](docs/_static/figures/readme_convergence.webp)
 
 The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
 (`python benchmarks/make_readme_figures.py --only convergence`).
