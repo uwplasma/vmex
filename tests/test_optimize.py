@@ -1232,7 +1232,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     monkeypatch.setattr(opt.jax, "device_get", fail_device_get)
     scalar._vg_cache = None
     failed_value, failed_gradient = scalar.value_and_grad(scalar.x0)
-    assert failed_value == wall
+    np.testing.assert_allclose(failed_value, wall, rtol=1e-14)  # jitted seed cost
     np.testing.assert_array_equal(failed_gradient, np.zeros_like(scalar.x0))
     assert scalar.fun(scalar.x0) == failed_value
     holder["scalar_certified"] = False
@@ -1252,7 +1252,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     holder["scalar_certified"] = True
     scalar._vg_cache = None
     failed_value, failed_gradient = scalar.value_and_grad(scalar.x0)
-    assert failed_value == wall
+    np.testing.assert_allclose(failed_value, wall, rtol=1e-14)  # jitted seed cost
     np.testing.assert_array_equal(failed_gradient, np.zeros_like(scalar.x0))
     monkeypatch.setattr(opt.jax, "device_get", real_device_get)
 
