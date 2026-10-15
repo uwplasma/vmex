@@ -3,8 +3,7 @@
 Labbate, Paul and Chambliss, arXiv:2609.01890v1, equations (2.8),
 (3.5)-(3.10). Inputs must already use matched, complete magnetic wells.
 The shear-cancelled spectrum is evaluated without a singular division.
-Run this file for synthetic reduction timings; these exclude field geometry,
-bounce integration, equilibrium solves and their adjoints.
+Timings exclude field geometry, bounce integration and equilibrium adjoints.
 """
 from __future__ import annotations
 
@@ -20,11 +19,11 @@ import numpy as np
 
 
 def stabilized_power(delta_s, q_max: int):
-    """Return 256 |f_q|^2 / (pi q)^2 for q=1..q_max.
+    """Return 256 |f_q|^2 / (pi q)^2, with eta on the last axis.
 
-    The last axis samples eta=2*pi*j/n, without a duplicate endpoint.
-    This returns harmonic strengths, not the resonance-weighted objective.
-    q_max is static. No square root, shear division or amplitude floor occurs.
+    Samples use eta=2*pi*j/n without the duplicate endpoint. q_max is static.
+    No square root, shear division or amplitude floor occurs. Resonance
+    weights, phase-space integration and the outer loss are separate.
     """
     delta_s = jnp.asarray(delta_s)
     if delta_s.ndim < 1 or q_max < 1 or delta_s.shape[-1] <= 2 * q_max:
@@ -44,11 +43,11 @@ def resonance_pairs(p_max: int, q_max: int, lower=-4.0, upper=4.0):
 
 
 def normalized_bump(distance, half_width):
-    """Appendix B bump density in Omega, not a radial deposition weight.
+    """Appendix B density in Omega, not a radial deposition weight.
 
-    All inactive exponential branches are finite. A nonpositive/nonfinite
-    width returns NaN, not a favorable zero. Width selection is the caller's
-    responsibility; it must be held fixed for a fixed-functional FD test.
+    Inactive exponential branches are finite. A nonpositive or nonfinite
+    width returns NaN, not a favorable zero. A fixed-functional FD test
+    must hold width fixed, or include its derivative in both evaluations.
     """
     distance, half_width = jnp.asarray(distance), jnp.asarray(half_width)
     valid = jnp.isfinite(half_width) & (half_width > 0)
@@ -56,19 +55,17 @@ def normalized_bump(distance, half_width):
     x = distance / width
     inside = jnp.isfinite(x) & (jnp.abs(x) < 1)
     x_safe = jnp.where(inside, x, 0.0)
-    denominator = 1 - x_safe**2
-    value = 71.12518788738504 / width * jnp.exp(-4.0 / denominator)
+    value = 71.12518788738504 / width * jnp.exp(-4.0 / (1 - x_safe**2))
     return jnp.where(valid & jnp.isfinite(distance), jnp.where(inside, value, 0.0), jnp.nan)
 
 
 def paper_average(score, v_tau, bcrit, bcrit_weight, line_length):
     """Equation (3.10), preserving the paper's factor two.
 
-    Shapes: score=(surface,pitch,well), v_tau=(surface,alpha,pitch,well),
+    score=(surface,pitch,well), v_tau=(surface,alpha,pitch,well),
     shared bcrit and dBcrit weights=(pitch,), line_length=(surface,).
-    line_length is mean_alpha integral dl/B over the matching spatial domain.
-    Arrays must be finite: known absent padding may be zero, unresolved wells
-    may not. Geometry/topology and domain coverage are checked by the caller.
+    line_length is mean_alpha integral dl/B over the matching domain.
+    Finite zero padding means known absence, never unresolved topology.
     This is not automatically a probability-normalized phase-space average.
     """
     score, v_tau, bcrit, bcrit_weight, line_length = map(
@@ -86,7 +83,7 @@ def paper_average(score, v_tau, bcrit, bcrit_weight, line_length):
              & jnp.all(jnp.isfinite(line_length)) & jnp.all(line_length > 0))
     safe_b = jnp.where(bcrit > 0, bcrit, 1.0)
     safe_length = jnp.where(line_length > 0, line_length, 1.0)
-    weights = bcrit_weight / safe_b**2  # d lambda = |d Bcrit| / Bcrit**2
+    weights = bcrit_weight / safe_b**2
     numerator = jnp.sum(v_tau * score[:, None] * weights[None, None, :, None], axis=(1, 2, 3))
     return jnp.where(valid, numerator / (2 * v_tau.shape[1] * safe_length), jnp.nan)
 
@@ -94,8 +91,8 @@ def paper_average(score, v_tau, bcrit, bcrit_weight, line_length):
 def helical_angles(chi, eta, iota, nfp: int, M: int, N: int):
     """Invert chi=M*theta-N*zeta, eta=nfp*(theta-iota*zeta)/(N-M*iota).
 
-    N is physical, not divided by nfp. This is a coordinate identity only:
-    periodic eta does not imply a periodic chi trace or a matched well family.
+    N is physical, not divided by nfp. Periodic eta does not imply a
+    periodic chi trace or a correctly matched well family.
     """
     D = M * jnp.asarray(iota) - N
     safe = jnp.where(D != 0, D, 1.0)
@@ -105,33 +102,29 @@ def helical_angles(chi, eta, iota, nfp: int, M: int, N: int):
 
 
 def benchmark(repeats=9):
-    """Synchronized timings for synthetic map reductions only, in seconds."""
+    """Synchronized synthetic-reduction timings; input map remains dynamic."""
     if not jax.config.jax_enable_x64:
         raise RuntimeError("Run the reference in x64")
-    eta = jnp.arange(40) * (2 * jnp.pi / 40)
-    base = jnp.broadcast_to(jnp.sin(eta), (8, 9, 1, 40))
-    perturbation = jnp.cos(3 * eta)
-
-    def scalar(amplitude):
-        return jnp.sum(stabilized_power(base + amplitude * perturbation, 8))
-
+    rng = np.random.default_rng(421)
+    inputs = jnp.asarray(rng.normal(size=(8, 9, 1, 40)))
+    scalar = lambda data: jnp.sum(stabilized_power(data, 8))
     timings = {}
     for name, function in (("value", scalar), ("value_and_grad", jax.value_and_grad(scalar))):
         compiled = jax.jit(function)
         start = time.perf_counter()
-        jax.block_until_ready(compiled(jnp.asarray(0.07)))
+        jax.block_until_ready(compiled(inputs))
         first = time.perf_counter() - start
         samples = []
         for _ in range(repeats):
             start = time.perf_counter()
-            jax.block_until_ready(compiled(jnp.asarray(0.07)))
+            jax.block_until_ready(compiled(inputs))
             samples.append(time.perf_counter() - start)
         timings[name] = {"first_call_s": first, "warm_median_s": float(np.median(samples))}
     return {"scope": "synthetic reduction only; no equilibrium, bounce or orbit solve",
             "python": platform.python_version(), "jax": jax.__version__,
             "devices": [str(d) for d in jax.devices()], "x64": True,
             "xla_flags": os.environ.get("XLA_FLAGS", ""), "numpy": np.__version__,
-            "map_shape": list(base.shape), "q_max": 8, "repeats": repeats, "timings": timings}
+            "map_shape": list(inputs.shape), "q_max": 8, "repeats": repeats, "timings": timings}
 
 
 if __name__ == "__main__":
