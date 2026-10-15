@@ -273,8 +273,13 @@ def run():
                    self_local_arc_exclusion_m=SELF_LOCAL_ARC, coil_quadrature_shift=0.5,
                    coil_driven=dict(completed=False, reason="smoke budget" if ci_smoke else "not completed"),
                    geometric_proxies_only=True, research_validation_complete=False)
+    failed_checks = ", ".join(name for name, passed in checks.items() if not passed)
+    if not ci_smoke and failed_checks:
+        summary["coil_driven"]["reason"] = f"Fixed-boundary validation failed: {failed_checks}"
     Path("single_stage_pwO_summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     if not ci_smoke:
+        if failed_checks:
+            raise SystemExit(summary["coil_driven"]["reason"])
         free_input = replace(deck, lfreeb=True, mgrid_file="direct ESSOS field")
         field = BiotSavart(coils)
         free = vj.solve_free_boundary_multigrid(
