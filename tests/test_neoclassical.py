@@ -96,9 +96,6 @@ def test_diagnostic_config_is_the_bounded_summary_resolution(monkeypatch):
     assert (config.theta_n, config.phi_n, config.npart) == (32, 32, 24)
     assert (config.nstep_per, config.nstep_min, config.nstep_max) == (20, 200, 500)
     assert config.acc_req == 0.02
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_diagnostic_config_matches_converged_neo_on_the_qi_deck():
     """The ``--plot`` resolution reproduces converged NEO without aliasing dips.
 

@@ -24,9 +24,6 @@ from vmex.core.polish import (
     sample_high_order_state,
 )
 from vmex.core.strong_force import append_high_order_state_modes, certify_strong_force, lift_high_order_state
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 

@@ -223,9 +223,6 @@ def test_block_response_forward_transpose_and_fd():
         np.testing.assert_allclose(
             directional, finite_difference, rtol=2e-5, atol=2e-8
         )
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeypatch):
     """A column the corrector leaves uncertified is refined through the block factors.
 

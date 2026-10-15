@@ -6,7 +6,6 @@ import dataclasses
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 import jax
 
@@ -17,9 +16,6 @@ from vmex.core.input import VmecInput
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_implicit_least_squares_honors_multigrid_solve_kwargs():
     """Implicit and FD lanes must see the same requested radial ladder.
 

@@ -26,9 +26,6 @@ from vmex.core.scaling import (
     scale_wout,
 )
 from vmex.core.wout import _preset_array, read_wout, wout_from_state, write_wout
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 

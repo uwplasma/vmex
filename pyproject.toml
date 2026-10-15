@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.11.9"
+version = "0.11.10"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -112,8 +112,10 @@ turbulence = [
 # `vmex --trace` uses (ESSOS #128); needs Python 3.11 and diffrax 0.7.2.
 # 0.20.2: InterpolatedField.around, surface walls and in-memory Vmec, which
 # essos_tracing_fields needs (ESSOS #159).
+# 0.21.0: Boozer |B| from an angle table and stopped particles dropped across
+# devices, which `vmex --trace` relies on for its speed (ESSOS #165).
 coils = [
-  "essos>=0.20.2",
+  "essos>=0.21.0",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.

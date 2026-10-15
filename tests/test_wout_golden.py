@@ -41,7 +41,6 @@ pytestmark_golden = pytest.mark.skipif(
 )
 pytestmark = [
     pytestmark_golden,
-    pytest.mark.usefixtures("_module_jit_enabled"),  # full solves: run jitted
 ]
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
