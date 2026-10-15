@@ -1056,7 +1056,7 @@ def test_pwo_stage1_example(tmp_path, family, finite_beta):
     assert summary["checks"]["converged"] and summary["checks"]["valid target/map"]
     assert summary["actual_s"] == [0.5]
     assert summary["metrics"]["fine"] < summary["metrics"]["initial_fine"]
-    assert all(np.isfinite(value) for value in summary["metrics"].values())
+    assert all(np.all(np.isfinite(value)) for value in summary["metrics"].values())
     assert not summary["research_validation_complete"]
     assert (tmp_path / f"wout_{stem}.nc").exists()
 
@@ -1068,7 +1068,7 @@ def test_pwo_single_stage_example(tmp_path):
     summary = json.loads((tmp_path / "single_stage_pwO_summary.json").read_text())
     assert summary["final"] < summary["initial"]
     assert summary["geometric_proxies_only"] and not summary["research_validation_complete"]
-    assert all(np.isfinite(value) for value in summary["metrics"].values())
+    assert all(np.all(np.isfinite(value)) for value in summary["metrics"].values())
     assert (tmp_path / "coils_single_stage_pwO.json").exists()
 
 
