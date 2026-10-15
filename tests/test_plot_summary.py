@@ -823,6 +823,16 @@ def test_vacuum_stability_panel_is_labeled_as_a_limit():
     plt.close(figure)
 
 
+def test_stability_panel_accepts_the_minimum_three_surfaces():
+    """NS = 3 is VMEC's smallest grid; V'' needs four surfaces, so it is skipped."""
+    import matplotlib.pyplot as plt
+
+    wout = SimpleNamespace(ns=3, DMerc=np.ones(3), betatotal=0.01, vp=np.arange(3, dtype=float))
+    figure, axis = plt.subplots()
+    plotting._stability_panel(axis, wout, {"valid": False, "note": "n/a"}, s_plot_ignore=0.2)
+    plt.close(figure)
+
+
 def test_summary_survives_boozer_failure(solved_case, monkeypatch):
     """Boozer-transform failure leaves annotated placeholder panels."""
     import matplotlib.pyplot as plt
