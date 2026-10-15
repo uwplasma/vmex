@@ -73,7 +73,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     seed, then held fixed during each optimization rung. The actual beta is
     constrained and measured; no bootstrap-current closure is implied.
     Boundary derivatives use VMEX's fixed-point convention with its released
-    m=1 gauge held fixed; cold re-solve differences require a separate audit.
+    m=1 gauge held fixed; independent host re-solve differences require a separate audit.
     """
     if FAMILY not in ("canonical", "mapped") or METHOD not in ("scalar", "least_squares"):
         raise ValueError("require canonical|mapped family and scalar|least_squares method")
@@ -82,6 +82,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
             not np.isfinite(beta) or beta < 0 for beta in beta_targets) or any(
                 right < left for left, right in zip(beta_targets, beta_targets[1:])):
         raise ValueError("beta_targets must start at vacuum and increase through finite nonnegative values")
+    print(f"Starting {FAMILY} pwO stage 1 ({METHOD}); beta ladder {beta_targets}", flush=True)
     started = time.perf_counter()
     am = np.zeros(21); am[:2] = [1.0, -1.0]
     seed_input = replace(
@@ -136,6 +137,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     monitor = opt.OptimizationMonitor()
     stages = []
     for beta_target in beta_targets:
+        print(f"Building operating point beta={beta_target:.3%}, modes={MAX_MODES}", flush=True)
         inp = replace(inp, pres_scale=0.0 if beta_target == 0 else beta_target / unit_beta)
 
         def constraints(state, runtime):
