@@ -27,9 +27,6 @@ jax = pytest.importorskip("jax")
 jax.config.update("jax_enable_x64", True)
 
 from vmex.core import cli
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 #: deck name -> extra CLI args (reduced budgets keep the ordinary lane cheap).

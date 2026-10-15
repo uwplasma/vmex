@@ -17,9 +17,6 @@ from vmex.core.wout import wout_from_state
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 DECK = DATA / "input.near_degenerate_vacuum_nfp3"
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
-
 def test_current_free_vacuum_nonconvergence_suggests_lforbal():
     carry = SimpleNamespace(
         ier=MORE_ITER_FLAG,

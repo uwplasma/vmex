@@ -49,9 +49,6 @@ from vmex.core.mgrid import MgridField, read_mgrid  # noqa: E402
 from vmex.core.multigrid import solve_free_boundary_multigrid  # noqa: E402
 from vmex.core.solver import resolution_from_input  # noqa: E402
 from vmex.core.wout import wout_from_state  # noqa: E402
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 DECK = DATA / "input.ncsx_c09r00_free_lowres"
 MGRID = DATA / "mgrid_ncsx_c09r00_small.nc"

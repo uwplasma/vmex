@@ -20,8 +20,6 @@ from vmex.core.errors import VmecConvergenceError  # noqa: E402
 from vmex.core.freeboundary import _phiedge_metric, solve_phiedge  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # free-boundary solves: run jitted
-
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 

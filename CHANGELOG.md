@@ -5,28 +5,24 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
-## Unreleased
+## 0.11.10 - 2026-10-13
 
-- Opt-in `vmex.solve_free_boundary_newton`: `|F| ~ 1e-13`, converges current-carrying cases where
-  descent drifts, and counts ideal-MHD unstable directions; descent stays the default.
+- **`vmex --trace` is about twice as fast** on large spectra with ESSOS 0.21:
+  ARIES-CS, 500 alphas over 10 ms on 10 M4 cores, 111 s to 53 s (#581).
 - `trace_alphas` and `vmex --trace` warn when the WOUT spectrum looks truncated
   (`spectral_truncation` > 3e-3; see the trace how-to for what to do about it).
-- Floor `essos>=0.20.2` (0.20.1 brought per-pair Coulomb logarithms to collisional
-  `--trace`). `vj.essos_tracing_fields(wout, coils, wall=0.03)` gives ESSOS `Tracing`
+- Floor `essos>=0.21.0` (0.20.1 brought per-pair Coulomb logarithms). `vj.essos_tracing_fields(wout, coils, wall=0.03)` gives ESSOS `Tracing`
   the VMEC field, tabulated exterior field and wall (`examples/vmex_essos_tracing_to_wall.py`).
-- `VmecInteriorField` works without stellarator symmetry (`LASYM = T`), symmetric results unchanged
-  bit for bit; on the exact asymmetric Solov'ev case (ns 65) B to 2e-7, J to 3e-6-2e-5 (WOUT: 4e-4).
+- `VmecInteriorField` and the live-state field spectra work without stellarator
+  symmetry (`LASYM = T`): the sine families `rmns`, `zmnc`, `lmnc` and the
+  `B^u`/`B^v` sine tables are evaluated, and symmetric results are unchanged
+  bit for bit. On the exact up-down asymmetric Solov'ev equilibrium at ns = 65
+  the field gives B to 2e-7 and J to 3e-6-2e-5 at mid radius (4e-4 from WOUT).
 - `examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with MRX
   from the VMEX ns = 65 field and compares the two (Poincare sections, iota,
   toroidal current, pressure). MRX is optional.
 - `vmex --trace` runs on one GPU when several are visible (two A4000s took 2-3
   times longer than one); `trace_alphas(devices=jax.devices())` still splits.
-- `vmex --neoclassical` runs DKX neoclassical transport on a WOUT, or after a
-  solve, and writes `*_neoclassical.png` and `*_neoclassical.h5`;
-  `--nc-preset quick|default|full` sets the resolution, `--nc-profiles` takes
-  the n and T profiles (and draws VMEX's Redl `<j.B>` on them) and `--nc-er`
-  fixes `E_r`. The `neoclassical` extra now installs `dkx>=2.8.0`; an older
-  DKX runs without the profiles and says so.
 
 ## 0.11.9 - 2026-10-07
 

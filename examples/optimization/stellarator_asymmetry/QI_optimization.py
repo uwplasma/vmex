@@ -11,6 +11,11 @@ stationary subspace with it.
 A stage costs roughly twice its stellarator-symmetric equivalent, and the
 asymmetric boundary norm printed at the end is what shows the optimizer stayed
 off the symmetric subspace.
+
+The effective ripple epsilon_eff^(3/2) of the seed and of the optimized
+boundary is printed last, through NEO_JAX on the asymmetric Boozer spectrum
+(sine partners included). It is a diagnostic, not an objective term; it needs
+the optional ``neoclassical`` extra and is skipped with the reason otherwise.
 """
 
 import os
@@ -71,6 +76,13 @@ MINIMUM_MPOL = 5
 FINAL_NS = 51
 FINAL_FTOL = 1e-12
 FINAL_NITER = 20000
+
+# Flux surfaces and NEO controls of the closing epsilon_eff diagnostic, the
+# compact set of examples/epsilon_effective.py:
+EPS_EFF_SURFACES = np.array([0.25, 0.5, 0.75])
+NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
+                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
+                       max_rational_field_periods=100000)
 
 # Every output file name contains this; each stage also writes its own
 # boundary as input.<STAGE_NAME>_max_mode_NNN:
@@ -135,7 +147,7 @@ monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 
-equilibrium = opt.solve_equilibrium(inp)
+equilibrium = seed_equilibrium = opt.solve_equilibrium(inp)
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== LASYM QI stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
@@ -176,6 +188,16 @@ print(f"asymmetric boundary norm = "
 report("final", final_equilibrium)
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
                    mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT)
+
+try:
+    from neo_jax import NeoConfig
+    for label, eq in (("seed", seed_equilibrium), ("optimized", final_equilibrium)):
+        s, eps = vj.epsilon_effective_from_wout(eq.wout, surfaces=EPS_EFF_SURFACES,
+                                                config=NeoConfig(**NEO_CONFIG_ARGS))
+        print(f"{label} epsilon_eff^(3/2) at s = {np.round(np.asarray(s), 3)}: "
+              f"{np.array2string(np.asarray(eps), precision=4)}")
+except (ImportError, NotImplementedError) as error:
+    print(f"epsilon_eff skipped: {error}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)

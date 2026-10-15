@@ -24,8 +24,6 @@ from vmex.core import optimize as opt  # noqa: E402
 from vmex.core.errors import VmecJacobianError  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 OBJECTIVE = [(opt.aspect_ratio, 4.0, 1.0)]
 
