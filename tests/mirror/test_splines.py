@@ -248,7 +248,6 @@ def test_stellarator_mirror_builder_has_positive_nested_spline_geometry() -> Non
 
 
 @pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_closed_circular_limit_reaches_ftol_with_independent_strong_force() -> None:
     resolution = MirrorResolution(ns=5, mpol=1, nxi=4)
     config = MirrorConfig(resolution=resolution, ftol=1.0e-12, max_iterations=1000)
@@ -300,7 +299,6 @@ def test_closed_circular_limit_reaches_ftol_with_independent_strong_force() -> N
 
 
 @pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_stellarator_mirror_fixed_boundary_reaches_ftol() -> None:
     resolution = MirrorResolution(ns=5, mpol=2, nxi=4)
     config = MirrorConfig(resolution=resolution, ftol=1.0e-12, max_iterations=1000)
@@ -341,7 +339,6 @@ def test_stellarator_mirror_fixed_boundary_reaches_ftol() -> None:
 
 
 @pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_stellarator_mirror_toroidal_rotation_raises_transform() -> None:
     """A toroidally rotating ellipse solves and lifts iota above return-only.
 
@@ -438,7 +435,6 @@ def test_stellarator_mirror_junction_freeze_fixes_axis_geometry() -> None:
 
 
 @pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_stellarator_mirror_frozen_junction_force_ladder_converges() -> None:
     """The frozen-junction circular-section hybrid passes the promotion gate.
 
@@ -965,7 +961,7 @@ def test_supplied_field_initializer_recovers_straight_field_line_mirror() -> Non
 
 
 @pytest.mark.full
-def test_equal_end_axisymmetric_mirror_is_independent_of_cut_location(_module_jit_enabled) -> None:
+def test_equal_end_axisymmetric_mirror_is_independent_of_cut_location() -> None:
     from vmex.mirror.analytic import AxisymmetricPolynomialMirror
 
     fixture = AxisymmetricPolynomialMirror(mirror_strength=0.5)
@@ -1062,7 +1058,7 @@ def test_spline_preconditioners_are_traceable_and_locally_exact() -> None:
 
 
 @pytest.mark.full
-def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner(_module_jit_enabled) -> None:
+def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner() -> None:
     config = MirrorConfig(
         resolution=MirrorResolution(ns=29, mpol=1, nxi=25),
         z_min=-1.2,
@@ -1092,7 +1088,7 @@ def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner(_module_
 
 
 @pytest.mark.full
-def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue(_module_jit_enabled) -> None:
+def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue() -> None:
     from vmex.mirror.analytic import RotatingEllipseParaxial
 
     config = MirrorConfig(
