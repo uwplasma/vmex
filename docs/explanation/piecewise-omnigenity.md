@@ -51,6 +51,9 @@ For `p >= 2`, the default two image shells make the field seams negligible at
 float64 precision. Derivative tests include the wrapped seams and patch center.
 The union preserves the upper and lower bounds; its finite tails generally
 make the attained minimum greater than `Bmin`.
+Finite `p` rounds the corners and can introduce additional accessible winding
+families. It does not preserve exact sharp-limit action invariance. Check
+within-family actions, including corner-near wells, before interpreting a fit.
 
 `CanonicalPwOResidual` fits the signed relative difference `(B-Btarget)/Btarget`
 on a uniform Boozer grid. Surface and angular weights sum to one. The width
@@ -126,7 +129,7 @@ from the differentiable target fit.
 
 Follow the existing optimization examples: a short constants block, explicit
 objective terms, spectral continuation, progress reporting, and a final solve
-and rescore at independently refined resolution. Planned examples cover vacuum
+and rescore at independently refined resolution. The examples cover vacuum
 stage 1, finite-beta stage 1, and simultaneous plasma-coil optimization. A
 short example run and a research validation campaign have different budgets.
 
