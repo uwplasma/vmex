@@ -5,6 +5,11 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## Unreleased
+
+- Opt-in `vmex.solve_free_boundary_newton`: Krylov Newton anchoring of a free-boundary state
+  on the coupled root (`|F| ~ 1e-13`); restarts from a wout or state land on the same root.
+
 ## 0.11.10 - 2026-10-13
 
 - **`vmex --trace` is about twice as fast** on large spectra with ESSOS 0.21:

@@ -31,7 +31,7 @@ links to the module that documents it.
   — coupled NESTOR/VMEC implicit derivative
 - :func:`~vmex.core.newton.solve_free_boundary_newton` →
   :class:`~vmex.core.newton.NewtonResult` — opt-in Newton polish of a
-  free-boundary equilibrium with an ideal-MHD unstable-mode count
+  free-boundary equilibrium on its coupled root
 - :func:`~vmex.core.restart.state_from_wout` /
   :func:`~vmex.core.restart.restart_state` — hot restart from any wout
   (also ``solve*(..., restart_from=...)``)
