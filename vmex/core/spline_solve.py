@@ -470,7 +470,7 @@ def solve_spline_ladder(inp: Any, spans: tuple[int, ...] = (2, 4, 8), *, degree:
 
     state = initial_spline_state(inp, BSplineBasis.clamped(np.linspace(0.0, 1.0, spans[0] + 1), degree=degree))
     icurv = current_profile(inp, state.jacobian_sign) if int(inp.ncurr) == 1 else None
-    levels, full = [], None
+    levels, full, plan = [], None, None
     for index, count in enumerate(spans):
         if index:
             previous = unpack_state(state, plan, full)
