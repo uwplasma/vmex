@@ -497,8 +497,8 @@ toroidal flux and χ = 5θ − 3ζ in Boozer angles. The calculation uses 31 rad
 Boozer bounds 8/8, zero magnetic moment, and 86.4 ms of collisionless K=0 guiding-center
 tracing (the radial covariant magnetic-field component is omitted).
 Independent periodic-orbit shooting confirms elliptic and hyperbolic points in both
-directions. Refinement preserves the island topology, but long-time phase remains
-sensitive to spectral resolution.
+directions within this numerical model. Integrator and Boozer refinement preserve its
+island topology; equilibrium resolution remains a separate limitation, measured below.
 
 ![Scaled alpha sections compared with the leading transit-action Hamiltonian](docs/_static/figures/readme_cyclometry_alpha.webp)
 
@@ -513,6 +513,18 @@ scaled field is not a separately solved reactor equilibrium. Both plots use dire
 spectral evaluation without mode pruning or angular tables. A tighter-tolerance run
 changes one selected marker from bounded to circulating resonant phase despite small
 energy error; alpha classification and full-field trajectory validation remain open.
+
+![Fixed-boundary equilibrium resolution study](docs/_static/figures/readme_cyclometry_convergence.webp)
+
+**Resolution matters.** With the boundary, profiles and flux unchanged, increasing
+(Mpol, Ntor) from (4, 3) to (12, 11) at 31 radial points changes the sampled normalized
+action variation from 0.03115 to 0.001759. This is a discretization effect, not an
+optimization gain. At (8, 7), increasing radial points from 61 to 121 still changes it
+by 4.8%; two cold-start checks differ from warm starts by up to 2.2%.
+Tightening both high-mode states to 10⁻¹⁴ leaves a 1.9% action difference.
+The plot uses Boozer bounds 16/16, fixed B★=3 T, 41 pitches through μB★/E=0.95,
+and 128×2048 closed-transit quadrature. All discrete force residuals are below 10⁻¹²;
+that tolerance does not establish continuum field accuracy or physical island widths.
 
 The kernels pass 69 focused tests. The public `frozen_reference` option now keeps
 values, gradients and materialized equilibria on one discrete family. Its complete

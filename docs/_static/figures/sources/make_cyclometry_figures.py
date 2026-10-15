@@ -131,6 +131,31 @@ def render_rational_surface(data):
     return fig
 
 
+def render_convergence(rows):
+    """Show equilibrium resolution changes at a fixed physical boundary."""
+    with plt.rc_context({'font.family': 'DejaVu Sans', 'font.size': 11,
+                         'axes.spines.top': False, 'axes.spines.right': False,
+                         'pdf.fonttype': 42}):
+        fig, axes = plt.subplots(1, 2, figsize=(10.6, 3.7))
+        for ns, color, marker in [(31, '#0072B2', 'o'), (61, '#D55E00', 's'),
+                                  (121, '#009E73', '^')]:
+            selected = [row for row in rows if row['ns'] == ns]
+            x = [row['mpol'] for row in selected]
+            axes[0].semilogy(x, [row['action_osc'] for row in selected],
+                marker + '-', color=color, label=fr'$n_s={ns}$', lw=1.5, ms=6)
+            axes[1].plot(x, [row['root_s'] for row in selected],
+                marker + '-', color=color, lw=1.5, ms=6)
+        axes[0].set_ylabel(r'Sampled action variation $\max_\lambda\,\mathrm{osc}_\chi A$')
+        axes[1].set_ylabel(r'Rational-surface location $s_r$ ($\iota=3/5$)')
+        axes[0].legend(frameon=False)
+        for ax in axes:
+            ax.set_xlabel(r'Equilibrium $M_{\rm pol}$ ($N_{\rm tor}=M_{\rm pol}-1$)')
+            ax.set_xticks([4, 6, 8, 10, 12])
+            ax.grid(alpha=.18)
+        fig.tight_layout(w_pad=2)
+    return fig
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     here = Path(__file__).resolve().parent
@@ -171,6 +196,15 @@ def main():
                 fig.savefig(path, dpi=args.dpi, bbox_inches=Bbox.from_extents(.15, .70, 9.3, 5.6), **options)
                 print(path)
             plt.close(fig)
+        fig = render_convergence(metadata['spectral_refinement']['rows'])
+        for ext in args.format:
+            options = {'pil_kwargs': {'quality': 90, 'method': 6}} if ext == 'webp' else {}
+            if ext == 'pdf':
+                options['metadata'] = {'Author': 'rogeriojorge'}
+            path = args.output_dir / ('readme_cyclometry_convergence.' + ext)
+            fig.savefig(path, dpi=args.dpi, **options)
+            print(path)
+        plt.close(fig)
 
 
 if __name__ == '__main__':

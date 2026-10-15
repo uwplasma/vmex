@@ -736,13 +736,13 @@
       ],
       "record": "benchmarks/li383_readme_sections.npz",
       "generated": "2026-10-15",
-      "hardware": "macOS arm64 CPU; renderer only",
+      "hardware": "macOS",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
         "README.md"
       ],
-      "note": "Renders committed sampled geometry, sections and leading-invariant contours; embedded metadata records original simulations and source revisions. This command does not rerun equilibria or trajectories. Alpha convergence and physical confinement remain unresolved."
+      "note": "Saved geometry and orbits; see input metadata."
     },
     {
       "path": "docs/_static/figures/readme_cyclometry_alpha.webp",
@@ -755,13 +755,13 @@
       ],
       "record": "benchmarks/li383_readme_sections.npz",
       "generated": "2026-10-15",
-      "hardware": "macOS arm64 CPU; renderer only",
+      "hardware": "macOS",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
         "README.md"
       ],
-      "note": "Renders committed sampled geometry, sections and leading-invariant contours; embedded metadata records original simulations and source revisions. This command does not rerun equilibria or trajectories. Alpha convergence and physical confinement remain unresolved."
+      "note": "Saved geometry and orbits; see input metadata."
     },
     {
       "path": "docs/_static/figures/readme_cyclometry_surface.webp",
@@ -774,13 +774,32 @@
       ],
       "record": "benchmarks/li383_readme_sections.npz",
       "generated": "2026-10-15",
-      "hardware": "macOS arm64 CPU; renderer only",
+      "hardware": "macOS",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
         "README.md"
       ],
-      "note": "Renders committed sampled geometry, sections and leading-invariant contours; embedded metadata records original simulations and source revisions. This command does not rerun equilibria or trajectories. Alpha convergence and physical confinement remain unresolved."
+      "note": "Saved geometry and orbits; see input metadata."
+    },
+    {
+      "path": "docs/_static/figures/readme_cyclometry_convergence.webp",
+      "sha256": "2d2cd8c4d49cc964f609a51964902f41a38c94c6feb0248442bb9e948ed3c4c6",
+      "bytes": 51270,
+      "generator": "docs/_static/figures/sources/make_cyclometry_figures.py",
+      "command": "python docs/_static/figures/sources/make_cyclometry_figures.py",
+      "inputs": [
+        "benchmarks/li383_readme_sections.npz"
+      ],
+      "record": "benchmarks/li383_readme_sections.npz",
+      "generated": "2026-10-15",
+      "hardware": "macOS",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Fixed-boundary refinement; no continuum accuracy claim."
     }
   ]
 }
