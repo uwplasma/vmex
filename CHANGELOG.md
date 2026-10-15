@@ -7,9 +7,8 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
-- Free-boundary position control: `position_control=PositionControl(...)` adds a feedback vertical
-  field (and optional helical harmonics) holding the plasma at a target radius in a radially
-  unstable coil field; the correction is `result.position_control`. Off by default.
+- Opt-in free-boundary position control (`PositionControl`, deck `LPOSITION_CONTROL`): a feedback
+  vertical field holds the axis at a target radius and reports the missing field.
 
 ## 0.11.10 - 2026-10-13
 

@@ -71,7 +71,7 @@ from .input import VmecInput
 from .mgrid import MgridField
 from .position_control import (
     ControlledField, PositionControl, PositionControlResult, initial_control,
-    gain_scale, measure_position, resolve_position_control, update_control, wrap_field,
+    measure_position, resolve_position_control, update_control, wrap_field,
 )
 from .preconditioner_2d import Prec2DConfig
 from .printing import (
@@ -1737,15 +1737,10 @@ def _solve_free_boundary_stage(
         else:
             rt = runtime_with_baselines(rt, _init_state, use_fft=use_fft)
     ctl = None
-    ctl_sign = 1.0
     if position_control is not None:
         ctl = position_control_state
         if ctl is None:
             ctl = initial_control(position_control, _init_state, rt.modes)
-        ctl_sign = (position_control.current_sign
-                    if position_control.current_sign is not None
-                    else (1.0 if float(inp.curtor) >= 0.0 else -1.0))
-        ctl_scale = gain_scale(inp.curtor, ctl.r0)
         external_field = wrap_field(base_field, ctl)
     _initial_ijacob = 0
     # ``eqsolve.f`` retries a supplied axis when the first Jacobian changes
@@ -2100,9 +2095,8 @@ def _solve_free_boundary_stage(
                     ctl = update_control(
                         position_control, ctl,
                         measure_position(carry.state, rt.modes, position_control),
-                        int(carry.iteration), ctl_sign,
-                        float(carry.fsqr) + float(carry.fsqz),
-                        ctl_scale)
+                        int(carry.iteration), float(vc.ctor) / MU0,
+                        float(carry.fsqr) + float(carry.fsqz))
                 rt_freeb = replace(rt_freeb, rcon0=vc.rcon0, zcon0=vc.zcon0,
                                    bsqvac_edge=vc.bsqvac)
                 fb.ivac = int(vc.ivac)

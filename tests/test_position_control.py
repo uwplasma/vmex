@@ -23,8 +23,6 @@ from vmex.core.solver import SpectralState  # noqa: E402
 
 from tests.test_lasym_free_case import lasym_free_field, lasym_free_input  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -73,19 +71,39 @@ def test_harmonic_channels_are_curl_and_divergence_free() -> None:
     assert np.linalg.norm(jac) > 0.1
 
 
+# 1e7 A at R0 = 1 m makes the gain unit g0 = mu0 I / (4 pi R0^2) exactly 1 T/m.
+AMPS = 1.0e7
+
+
 def test_update_law_sign_clip_deadband_and_history() -> None:
     cfg = PositionControl(gain=2.0, integral_gain=0.0, derivative_gain=0.0, max_field=1.0, max_step=1.0)
     ctl = _control(0)
     ctl = PositionControlResult(**{**ctl.__dict__, "target": np.array([1.0])})
-    out = update_control(cfg, ctl, np.array([1.1]), 10, sign=+1.0, fsq=3.0)   # too far out: push inward
+    out = update_control(cfg, ctl, np.array([1.1]), 10, AMPS, fsq=3.0)   # too far out: push inward
     np.testing.assert_allclose(out.bz, [-0.2])
-    assert update_control(cfg, ctl, np.array([1.1]), 10, sign=-1.0).bz[0] > 0
-    assert update_control(cfg, ctl, np.array([5.0]), 10, sign=+1.0).bz[0] == -1.0
+    assert update_control(cfg, ctl, np.array([1.1]), 10, -AMPS).bz[0] > 0
+    assert update_control(cfg, ctl, np.array([1.1]), 10, -AMPS / 2).bz[0] == pytest.approx(0.1)
+    assert update_control(cfg, ctl, np.array([5.0]), 10, AMPS).bz[0] == -1.0
     np.testing.assert_allclose(out.history[0, :3], [10, 3.0, -0.2])
-    held = update_control(PositionControl(gain=2.0, deadband=0.5), ctl, np.array([1.1]), 10, sign=+1.0)
+    held = update_control(PositionControl(gain=2.0, deadband=0.5), ctl, np.array([1.1]), 10, AMPS)
     assert held.bz[0] == 0.0                                                    # inside the dead band
-    slewed = update_control(PositionControl(gain=2.0, max_step=0.05), ctl, np.array([1.1]), 10, sign=+1.0)
+    slewed = update_control(PositionControl(gain=2.0, max_step=0.05), ctl, np.array([1.1]), 10, AMPS)
     assert slewed.bz[0] == pytest.approx(-0.05)
+    assert update_control(cfg, ctl, np.array([1.1]), 10, 0.0).bz[0] == 0.0    # no current: no lever
+    forced = PositionControl(gain=2.0, integral_gain=0.0, derivative_gain=0.0, current_sign=1.0)
+    assert update_control(forced, ctl, np.array([1.1]), 10, -AMPS).bz[0] < 0   # explicit sign wins
+
+
+def test_derivative_step_survives_an_iteration_restart() -> None:
+    """A new rung restarts the iteration count; the derivative must use the nominal interval."""
+    cfg = PositionControl(gain=0.0, integral_gain=0.0, derivative_gain=1.0, interval=20,
+                          max_field=1.0, max_step=1.0)
+    ctl = PositionControlResult(**{**_control(0).__dict__, "target": np.array([1.0])})
+    ctl = update_control(cfg, ctl, np.array([1.0]), 500, AMPS)
+    steady = update_control(cfg, ctl, np.array([1.02]), 520, AMPS)      # 20 iterations later
+    restart = update_control(cfg, ctl, np.array([1.02]), 3, AMPS)       # new rung, count restarted
+    np.testing.assert_allclose(steady.bz, [-0.02 / 20])
+    np.testing.assert_allclose(restart.bz, steady.bz)
 
 
 def test_measurement_reads_axis_and_edge_coefficients() -> None:
@@ -111,17 +129,23 @@ def test_invalid_configuration_is_rejected() -> None:
         PositionControl(nmax=-1)
 
 
-def test_solver_converges_with_a_displaced_target_and_is_off_by_default() -> None:
-    """Tokamak fixture: a 2 cm outward target converges with a few mT of vertical field."""
+@pytest.mark.parametrize("ncurr, curtor_sign", [(1, 1.0), (0, -1.0)])
+def test_solver_converges_with_a_displaced_target_and_is_off_by_default(ncurr, curtor_sign) -> None:
+    """Tokamak fixture: a 2 cm outward target converges with a few mT of vertical field.
+
+    With NCURR = 0 the current follows from the iota profile and CURTOR is
+    ignored, so a CURTOR of the wrong sign must not steer the feedback.
+    """
+    base = lasym_free_input(REPO / "examples" / "data")
     inp = dataclasses.replace(
-        lasym_free_input(REPO / "examples" / "data"), ns_array=np.asarray([16]),
-        ftol_array=np.asarray([1.0e-10]), niter_array=np.asarray([2500]))
+        base, ns_array=np.asarray([16]), ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([4000]), ncurr=ncurr, curtor=curtor_sign * base.curtor)
     field = lasym_free_field()
-    plain = FB.solve_free_boundary(inp, external_field=field, max_iterations=2500)
+    plain = FB.solve_free_boundary(inp, external_field=field, max_iterations=4000)
     assert plain.position_control is None
     r_plain = measure_position(plain.state, mode_table(int(inp.mpol), int(inp.ntor)), PositionControl())[0]
     run = FB.solve_free_boundary(
-        inp, external_field=field, max_iterations=2500,
+        inp, external_field=field, max_iterations=4000,
         position_control=PositionControl(target=float(r_plain) + 0.02))
     ctl = run.position_control
     assert run.converged and ctl.history.shape[0] > 0
@@ -156,7 +180,17 @@ def test_multigrid_carries_the_control_across_rungs() -> None:
 
 DATA = REPO / "examples" / "data"
 CONTROL_DECK = DATA / "input.DIII-D_position_control"
-CONTROL_MGRID = DATA / "mgrid_d3d_vertical_deficit.nc"
+
+
+@pytest.fixture(scope="module")
+def control_mgrid(tmp_path_factory) -> Path:
+    """The deck's mgrid: the compressed DIII-D field 40 mT short of vertical field."""
+    from vmex.core.mgrid import write_mgrid
+    from tests.test_lasym_free_case import lasym_free_mgrid_data
+
+    path = tmp_path_factory.mktemp("mgrid") / "mgrid_d3d_vertical_deficit.nc"
+    write_mgrid(path, lasym_free_mgrid_data(dbz=-0.040))
+    return path
 
 
 def test_deck_parameters_round_trip_and_default_off(tmp_path) -> None:
@@ -198,25 +232,25 @@ def test_deck_parameters_are_validated(tmp_path, key, value) -> None:
         VmecInput.from_file(bad)
 
 
-def test_deck_with_vertical_field_deficit_needs_and_gets_the_control() -> None:
+def test_deck_with_vertical_field_deficit_needs_and_gets_the_control(control_mgrid) -> None:
     """The 40 mT deficit defeats the plain solve; the deck's control converges and recovers it."""
     from vmex.core.input import VmecInput
 
     inp = VmecInput.from_file(CONTROL_DECK)
-    off = solve_free_boundary_multigrid(inp, mgrid_path=CONTROL_MGRID, position_control=False,
+    off = solve_free_boundary_multigrid(inp, mgrid_path=control_mgrid, position_control=False,
                                         raise_on_max_iterations=False)
     assert not off.converged and off.position_control is None
-    on = solve_free_boundary_multigrid(inp, mgrid_path=CONTROL_MGRID)
+    on = solve_free_boundary_multigrid(inp, mgrid_path=control_mgrid)
     assert on.converged and on.position_control is not None
     assert on.position_control.vertical_field == pytest.approx(0.040, abs=0.002)
     assert abs(on.position_control.measured[0] - 1.7199) < 5e-3
 
 
-def test_cli_runs_the_control_deck(tmp_path, capsys) -> None:
+def test_cli_runs_the_control_deck(tmp_path, capsys, control_mgrid) -> None:
     import shutil
     from vmex.core import cli
 
-    for src in (CONTROL_DECK, CONTROL_MGRID):
+    for src in (CONTROL_DECK, control_mgrid):
         shutil.copy(src, tmp_path / src.name)
     rc = cli.main([str(tmp_path / CONTROL_DECK.name)])
     out = capsys.readouterr().out

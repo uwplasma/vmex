@@ -708,8 +708,8 @@
     },
     {
       "path": "docs/_static/figures/position_control.webp",
-      "sha256": "869bebed5d9cc6f84c259d6e4828ae7af8d657bdbf9a2d22f41936a0a72eb43b",
-      "bytes": 28954,
+      "sha256": "9e1a171ef961008c90d5950bcba5ae268621798425d887c42eb4df6647c5a3c1",
+      "bytes": 17078,
       "generator": "examples/free_boundary_position_control.py",
       "command": "python examples/free_boundary_position_control.py && cp readme_position_control.webp docs/_static/figures/position_control.webp",
       "inputs": [
@@ -717,27 +717,27 @@
         "examples/data/d3d_chebyshev_field.npz"
       ],
       "record": null,
-      "generated": "2026-10-08",
+      "generated": "2026-10-15",
       "hardware": "Apple M3 Max (arm64), macOS, CPU",
       "reproducible": "command",
       "bytes_verified": false,
       "used_in": [
         "docs/howto/free-boundary.md"
       ],
-      "note": "Five uniform vertical-field offsets, each solved with and without position control. Written to the working directory as lossless WebP (the figure block is skipped under VMEX_EXAMPLES_CI=1); copy it over the committed one to reproduce."
+      "note": "Five uniform vertical-field offsets, each solved with a zero-gain control (records the trajectory) and with position control. 32-color lossless WebP written to the working directory; copy it over the committed one to reproduce."
     },
     {
       "path": "docs/_static/figures/position_control_deck.webp",
-      "sha256": "3b7b0434336f188f6f307a466700f2df328297edfe4df92f0250668a8653e525",
-      "bytes": 30496,
+      "sha256": "f65ce020828b021d740e8ed8147a12704614aa19345dc034d3fa4b13bf082ae9",
+      "bytes": 14930,
       "generator": "examples/free_boundary_position_control.py",
       "command": "python examples/free_boundary_position_control.py && cp readme_position_control_deck.webp docs/_static/figures/position_control_deck.webp",
       "inputs": [
-        "examples/data/input.DIII-D_position_control",
-        "examples/data/mgrid_d3d_vertical_deficit.nc"
+        "examples/data/input.DIII-D_lasym_false",
+        "examples/data/d3d_chebyshev_field.npz"
       ],
       "record": null,
-      "generated": "2026-10-08",
+      "generated": "2026-10-15",
       "hardware": "Apple M3 Max (arm64), macOS, CPU",
       "reproducible": "command",
       "bytes_verified": false,
@@ -745,7 +745,7 @@
         "README.md",
         "docs/howto/free-boundary.md"
       ],
-      "note": "The 40 mT vertical-field deficit deck solved without control (zero-gain PositionControl, which records the trajectory and is bitwise identical to a plain run) and with the deck's own control: axis radius, feedback vertical field and force residual against iteration. The figure block is skipped under VMEX_EXAMPLES_CI=1."
+      "note": "The 40 mT deficit case of the same sweep against iteration: axis radius, feedback vertical field and force residual. 32-color lossless WebP written to the working directory; copy it over the committed one to reproduce."
     }
   ]
 }

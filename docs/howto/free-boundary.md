@@ -148,18 +148,19 @@ coil, and VMEX does the same as an opt-in, from the deck or from Python
 From a deck, with no Python:
 
 ```fortran
-  LPOSITION_CONTROL = T     ! VMEX extension; VMEC2000 ignores it
+  LPOSITION_CONTROL = T     ! VMEX extension; VMEC2000 rejects unknown keys
   POSITION_TARGET   = 1.7199   ! axis radius to hold [m]; <= 0 keeps the initial axis
 ```
 
 ```bash
-vmex examples/data/input.DIII-D_position_control
+python examples/free_boundary_position_control.py   # writes the deck's mgrid
+vmex output_position_control/input.DIII-D_position_control
 ```
 
 That deck is the DIII-D-like tokamak whose coil field is 40 mT short of
 vertical field. Without control the solve fails (fsq 1.1e-5 after 8000
 iterations, axis 23 cm inboard); with `LPOSITION_CONTROL = T` it converges in
-3875 iterations and the log reports `B_Z^ctrl = 39.8 mT`. The deck keys are
+3855 iterations and the log reports `B_Z^ctrl = 39.8 mT`. The deck keys are
 `LPOSITION_CONTROL` (default `F`), `POSITION_TARGET` (default `0`),
 `POSITION_INTERVAL` (default `20`), `POSITION_GAIN` (default `4`) and
 `POSITION_NMAX` (default `0`); see {doc}`/reference/vmec2000-compatibility`.

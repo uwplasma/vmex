@@ -57,8 +57,12 @@ B_Z^{\rm ctrl} = -\sigma\, g_0\left[k_p\, e + k_i \sum e\,\Delta t + k_d\,\frac{
 \qquad g_0 = \frac{\mu_0 |I|}{4\pi R_0^2},
 $$
 
-where `sigma` is the sign of the plasma current, `Delta t` is the number of
-iterations between updates and `g_0` is a field gradient in T/m. The gains are
+where `sigma` and `I` are the sign and size of the plasma's net toroidal
+current, read from the equilibrium at every update (so NCURR = 0 works as
+NCURR = 1 does), `Delta t` is the number of iterations since the previous
+update (the nominal interval when a new multigrid rung or a restart resets
+the count) and `g_0` is a field gradient in T/m. With no current the field
+has no lever on the plasma and the amplitudes are held. The gains are
 dimensionless multiples of `g_0`, which lets one setting transfer between
 machines. The deck gain `POSITION_GAIN` is `k_p`; the integral and derivative
 gains keep the ratios `k_i = 0.0025 k_p` and `k_d = 50 k_p` (the derivative

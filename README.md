@@ -361,7 +361,8 @@ never converges; with control it converges to `fsq = 1.1e-10` and reports
 `B_Z^ctrl = 39.8 mT`.
 
 ```bash
-vmex examples/data/input.DIII-D_position_control        # LPOSITION_CONTROL = T in the deck
+python examples/free_boundary_position_control.py      # writes the deck's mgrid
+vmex output_position_control/input.DIII-D_position_control   # LPOSITION_CONTROL = T
 ```
 
 ```python

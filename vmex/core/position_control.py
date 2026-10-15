@@ -58,9 +58,10 @@ class PositionControl:
     iterations between updates, ``max_field`` clips each amplitude [T] and
     ``max_step`` limits its change per update [T] (a power-supply slew rate;
     it also keeps one-off jumps of the measurement after a solver restart from
-    kicking the plasma).  Inside ``deadband`` (metres, per coefficient) an amplitude
-    is held, so a converged run is not disturbed by the feedback.  ``current_sign`` is the sign of the toroidal current
-    (``None`` reads it from ``curtor``).
+    kicking the plasma).  Inside ``deadband`` (metres, per coefficient) an
+    amplitude is held, so a converged run is not disturbed by the feedback.
+    ``current_sign`` overrides the sign of the toroidal current (``None``
+    reads it from the equilibrium at every update).
     """
 
     measure: str = "axis"
@@ -205,34 +206,37 @@ def initial_control(cfg: PositionControl, state: Any, modes: Any) -> PositionCon
 
 
 def update_control(cfg: PositionControl, ctl: PositionControlResult, measured: np.ndarray,
-                   iteration: int, sign: float, fsq: float = 0.0,
-                   scale: float = 1.0) -> PositionControlResult:
+                   iteration: int, current: float, fsq: float = 0.0) -> PositionControlResult:
     """One PID update of every amplitude from the measured axis coefficients.
 
-    ``scale`` is the gain unit ``g0`` [T/m] (see :class:`PositionControl`)."""
+    ``current`` is the plasma's net toroidal current [A] at this iteration
+    (``ctor / mu0`` of the free-boundary loop), so the sign and the gain unit
+    ``g0 = mu0 |I| / (4 pi R0^2)`` follow the equilibrium for NCURR = 0 and 1
+    alike.  With no current the field exerts no net force on the plasma and
+    every amplitude is held.  The time step is the iteration count since the
+    previous update; when the count restarts (a new multigrid rung or a
+    Jacobian restart) it is the nominal ``interval``, so the derivative term
+    is not amplified by an artificial one-iteration step.
+    """
     nmax = int(cfg.nmax)
     first = ctl.history.shape[0] == 0
-    dt = float(cfg.interval) if first else max(1.0, float(iteration) - float(ctl.history[-1, 0]))
+    last = None if first else float(ctl.history[-1, 0])
+    dt = float(iteration) - last if last is not None and iteration > last else float(cfg.interval)
+    sign = float(np.sign(current)) if cfg.current_sign is None else float(cfg.current_sign)
+    scale = 1.0e-7 * abs(float(current)) / ctl.r0**2
     err = np.asarray(measured) - ctl.target
     integral = ctl.integral + err * dt
     deriv = np.zeros_like(err) if first else (err - ctl.error) / dt
     pid = scale * (cfg.gain * err + cfg.integral_gain * integral + cfg.derivative_gain * deriv)
-    held = np.abs(err) < cfg.deadband
-    new = np.concatenate([-sign * pid[: nmax + 1], -sign * pid[nmax + 1:]])
+    held = (np.abs(err) < cfg.deadband) | (scale == 0.0)
     old = np.concatenate([ctl.bz, ctl.br])
-    new = np.clip(np.clip(new, old - cfg.max_step, old + cfg.max_step), -cfg.max_field, cfg.max_field)
+    new = np.clip(np.clip(-sign * pid, old - cfg.max_step, old + cfg.max_step), -cfg.max_field, cfg.max_field)
     new = np.where(held, old, new)
     integral = np.where(held, ctl.integral, integral)
     row = np.concatenate([[iteration, fsq], new, np.asarray(measured)])
     hist = row[None] if first else np.vstack([ctl.history, row])
     return replace(ctl, bz=new[: nmax + 1], br=new[nmax + 1:], measured=np.asarray(measured),
                    integral=integral, error=err, history=hist)
-
-
-def gain_scale(curtor: float, r0: float) -> float:
-    """``g0 = mu0 |I| / (4 pi R0^2)`` [T/m]; ``0.1`` for a current-free deck."""
-    g0 = 1.0e-7 * abs(float(curtor)) / float(r0) ** 2
-    return g0 if g0 > 0.0 else 0.1
 
 
 def resolve_position_control(requested: Any, inp: Any) -> "PositionControl | None":

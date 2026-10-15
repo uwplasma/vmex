@@ -287,7 +287,8 @@ Multigrid ladder and stepping
    * - ``POSITION_GAIN``
      - ``4``
      - VMEX extension
-     - Proportional gain in units of ``mu0 |CURTOR| / (4 pi R0^2)``; the
+     - Proportional gain in units of ``mu0 |I| / (4 pi R0^2)``, ``I`` the plasma's
+       net toroidal current (NCURR = 0 or 1); the
        integral and derivative gains keep fixed ratios to it.  Raise it for
        strongly unstable coil sets.
    * - ``POSITION_NMAX``

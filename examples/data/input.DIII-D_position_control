@@ -1,9 +1,11 @@
 ! DIII-D-like free-boundary tokamak whose vertical field is 40 mT short.
-! The coil field (examples/data/mgrid_d3d_vertical_deficit.nc) is the compressed DIII-D
-! table of examples/data/d3d_chebyshev_field.npz with a uniform B_Z of -40 mT added.
+! The coil field (mgrid_d3d_vertical_deficit.nc, written next to a copy of this deck by
+! examples/free_boundary_position_control.py) is the compressed DIII-D table of
+! examples/data/d3d_chebyshev_field.npz with a uniform B_Z of -40 mT added.
 ! Without position control the plasma slides inboard and the solve never converges;
-! LPOSITION_CONTROL (a VMEX extension, ignored by VMEC2000) holds the magnetic axis at
-! POSITION_TARGET with a feedback vertical field and reports the missing field.
+! LPOSITION_CONTROL holds the magnetic axis at POSITION_TARGET with a feedback vertical
+! field and reports the missing field. The five POSITION keys are VMEX extensions:
+! VMEC2000 stops on unknown INDATA names, so delete them to run this deck there.
 &INDATA
   LASYM = .TRUE.
   NFP = 1
