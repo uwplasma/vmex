@@ -2,6 +2,7 @@
   "schema": "vmex.test-manifest/1",
   "fields": ["path", "owner", "primary", "duration", "device", "asset", "oracle", "lanes"],
   "records": [
+    ["tests/test_cyclometry.py", "diagnostics", "ad", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c2", "full-core-a-c"]],
     ["tests/mirror/test_analytic.py", "mirror", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-mirror-spline", "full-mirror-spline"]],
     ["tests/mirror/test_boundary_conditions.py", "mirror", "oracle", "slow", "cpu-gpu", "none", "analytic", ["pr-mirror-equilibrium", "full-mirror-equilibrium"]],
     ["tests/mirror/test_exterior.py", "mirror", "integration", "medium", "cpu-gpu", "none", "analytic", ["pr-mirror-field", "full-mirror-field"]],

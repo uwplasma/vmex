@@ -760,3 +760,49 @@ the hard one (the smoothing deliberately cannot see structure below
 :math:`\delta` — the near-omnigenous QA ripple most of all) and anneals
 toward it as ``temperature`` decreases with a correspondingly finer
 budget.  Optimize the surrogate, report the hard value.
+
+Passing particles near rational surfaces
+---------------------------------------
+
+Cyclometry concerns the distribution of field strength over a complete closed
+rational transit, sampled uniformly in Boozer toroidal angle. It differs from
+the trapped-particle objectives above. At iota = N/M in lowest terms, the
+transit spans ``2*pi*M`` and the field-line label is ``chi=M*eta``.
+:mod:`vmex.core.cyclometry` supplies three small building blocks: static
+sine/cosine transit tables, the sampled action, and a finite-moment upper
+bound uniform over a prescribed pitch interval. Enable JAX float64 before
+constructing the tables.
+
+For a fixed normalization with ``0 < b=B/B_star <= 1``, the action is
+``mean(sqrt(1-lambda*b)/b)`` and ``lambda=mu*B_star/E``. The moment bound uses
+powers ``-1, 1, ..., K-1``, positive binomial weights and a one-sided tail.
+The optional smooth oscillation is an unnormalized log-sum-exp, so it stays
+above the sampled maximum minus minimum. ``oscillation_error`` adds one
+nonnegative error allowance per moment. Without these allowances the result
+bounds the sampled measures, not the continuous field. Invalid eager inputs
+raise; invalid traced fields or error budgets return NaN for trial rejection.
+
+.. code-block:: python
+
+   import jax
+   import jax.numpy as jnp
+   from vmex.core.cyclometry import transit_basis, transit_action, moment_bound
+
+   jax.config.update("jax_enable_x64", True)
+   cosine, sine = transit_basis([0, 1, 1], [0, 0, 1], 1, 2)
+   b = cosine @ jnp.array([0.75, 0.07, 0.07])
+   action = transit_action(b, jnp.linspace(0, 0.95, 33))
+   sampled_envelope = moment_bound(b, order=64, softness=1e-5)
+
+This scalar field has no nonconstant resonant field harmonic, yet its action
+at zero pitch parameter is ``1/sqrt(0.75**2-4*0.07**2*cos(eta)**2)`` and varies
+with the field-line label. Removing only resonant field modes misses nonlinear
+mixing in the action. This is an analytic kernel check, not an MHD equilibrium.
+
+The transit invariant and leading island-width scaling are due to
+`Foster et al. <https://arxiv.org/abs/2512.03165>`_. A physical optimization
+must still verify the moving rational surface derivative, matched field,
+size and shear, quadrature and representation errors, and independent orbit
+convergence. A finite-time confinement claim additionally needs a uniform
+bound on the invariant's Lie derivative inside a strictly passing tube.
+A small moment objective alone does not establish that claim.
