@@ -844,3 +844,11 @@ With a nonidentity ``APHI`` flux map, convert this derivative using ``dpsi/ds``
 before applying a physical island-width formula. Also check the signed flux
 orientation against the orbit model. The first comparisons should use the
 identity flux map and explicit, matched conventions.
+
+For solver-sensitive Boozer objectives, distinguish ordinary equilibrium
+re-solves from a fixed-coordinate-family derivative check. VMEX's
+:func:`~vmex.core.implicit.frozen_path_directional_fd` holds the same internal
+coordinate choices as its adjoint and reports Newton residuals for both
+perturbations. Agreement on that path validates that derivative; it does not
+remove sensitivity to coordinate choices made by independent re-solves.
+Quantify both before promoting an optimization result.
