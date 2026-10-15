@@ -72,6 +72,8 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     Its pressure scale is estimated from a unit-pressure solve of the original
     seed, then held fixed during each optimization rung. The actual beta is
     constrained and measured; no bootstrap-current closure is implied.
+    Boundary derivatives use VMEX's fixed-point convention with its released
+    m=1 gauge held fixed; cold re-solve differences require a separate audit.
     """
     if FAMILY not in ("canonical", "mapped") or METHOD not in ("scalar", "least_squares"):
         raise ValueError("require canonical|mapped family and scalar|least_squares method")
@@ -161,7 +163,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         problem = factory(
             inp, loss if METHOD == "scalar" else terms, max_mode=max(MAX_MODES),
             vary_major_radius=False, restart_from=equilibrium, max_fsq_ratio=1.0,
-            adjoint_tol=1e-7, progress=not ci_smoke, evaluation_progress=not ci_smoke,
+            adjoint_tol=1e-8, progress=not ci_smoke, evaluation_progress=not ci_smoke,
             jacobian_batch_size=1)
         full_x = problem.x0.copy()
         for max_mode, budget in zip(MAX_MODES, MAXITER):
@@ -251,9 +253,15 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         if name in final_score}
     summary = dict(family=FAMILY, method=METHOD, smoke=ci_smoke, seconds=time.perf_counter() - started,
                    stages=stages, metrics=metrics, actual_s=np.asarray(final_score["s_b"]).tolist(),
-                   target=dict(bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref, surface_field_ref_T=surface_field_ref.tolist(), iota_sign=iota_sign,
+                   target=dict(p=2, bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref,
+                               surface_field_ref_T=surface_field_ref.tolist(), iota_sign=iota_sign,
                                t1=-0.3 * iota_sign, t2=3.0 * iota_sign,
                                a=0.3, b=0.0, c=-2.0, eta_min=2.8),
+                   settings=dict(stage_ns=STAGE_NS, stage_ftol=STAGE_FTOL, mpol=MPOL,
+                                 final_ns=FINAL_NS, final_ftol=FINAL_FTOL, final_mpol=FINAL_MPOL,
+                                 niter=NITER, grid=GRID, validation_grid=VALIDATION_GRID,
+                                 transform=PWO_OPTIONS, validation_transform=VALIDATION_OPTIONS,
+                                 mode_ladder=MAX_MODES, iteration_budgets=MAXITER),
                    phiedge_Wb=float(inp.phiedge), pres_scale_Pa=float(inp.pres_scale),
                    pressure="p(s)=PRES_SCALE*(1-s)", current="zero enclosed toroidal current",
                    checks=checks, unmet=unmet, construction_diagnostics=construction_diagnostics,
@@ -262,6 +270,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     Path(f"{output_name}_summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     final_input.to_indata(f"input.{output_name}")
     vj.write_wout(f"wout_{output_name}.nc", final_equilibrium.wout)
+    vj.write_wout(f"wout_{output_name}_seed.nc", reference_equilibrium.wout)
     monitor.save(f"{output_name}_objectives.csv")
     print(json.dumps(metrics, indent=2))
     print("Unmet checks: " + (", ".join(unmet) if unmet else "none"))
