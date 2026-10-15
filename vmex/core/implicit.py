@@ -1907,7 +1907,7 @@ def _host_solve_and_mask(cfg: ImplicitConfig, params_np, *,
 
 
 def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
-                              refine: bool = True) -> tuple:
+                              refine: bool | str = True) -> tuple:
     _HOST_ERROR.clear()  # fresh callback: drop any stale relayed error
     # The callback payload arrives committed to the runtime's LOCAL CPU
     # regardless of ``cfg.device``, and ``jnp.asarray`` preserves an existing
@@ -1954,7 +1954,11 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # differentiates: it skips the (expensive) anchor so the first user
     # output is not held behind it, and the first derivative evaluation —
     # which memo-hits this solve — computes the identical refinement then.
-    if not refine:
+    # ``refine="certified"`` (the optimizer status lane) also skips it for a
+    # trial past ``max_fsq_ratio``: that trial is rejected whatever the
+    # anchor does, and the anchor was most of its cost.
+    if not refine or (refine == "certified" and not (
+            bool(result.converged) or _fsq(result) <= cfg.max_fsq_ratio * cfg.ftol)):
         return as_np(result.state), mask
     # The forward solve picks its own device (AUTO), so rehome its state
     # beside the parameters before refining: on cfg.device, or where the
@@ -1981,7 +1985,7 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         _HOST_ERROR.clear()
         error = None
         try:
-            state, mask = _host_solve_and_mask_impl(cfg, params_np)
+            state, mask = _host_solve_and_mask_impl(cfg, params_np, refine="certified")
         except VmecError as exc:
             # Direct host calls preserve the typed exception; pure_callback
             # wraps the same error in the relayed sentinel handled below.
