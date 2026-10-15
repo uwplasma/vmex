@@ -35,6 +35,8 @@ dependencies = [
   # SciPy 1.16 needs Python 3.11, hence requires-python.
   "scipy>=1.16",
   "netCDF4",
+  # 1.7.5 ships macOS 15 wheels only; drop once older-macOS wheels appear.
+  "netCDF4<1.7.5; sys_platform == 'darwin'",
   "h5py",
   "matplotlib",
   "packaging",
