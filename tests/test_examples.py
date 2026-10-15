@@ -178,6 +178,9 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_optimization_optax.py",
     "examples/optimization/QI_optimization_scipy.py",
     "examples/optimization/QP_optimization.py",
+    "examples/optimization/pwO_optimization.py",
+    "examples/optimization/pwO_optimization_finite_beta.py",
+    "examples/optimization/single_stage_pwO_optimization.py",
     "examples/optimization/omnigenity_epsilon_gammac_maxj.py",
     "examples/optimization/optimize_bootstrap_current.py",
     "examples/optimization/single_stage_free_boundary_optimization.py",
@@ -1038,6 +1041,35 @@ def test_qi_optimization_example(tmp_path):
     assert totals is not None
     assert all(np.isfinite(float(value)) for value in totals.groups())
     assert (tmp_path / "wout_QI_optimized.nc").exists()
+
+
+@pytest.mark.full
+@pytest.mark.parametrize("family", ["canonical", "mapped"])
+@pytest.mark.parametrize("finite_beta", [False, True])
+def test_pwo_stage1_example(tmp_path, family, finite_beta):
+    suffix = "_finite_beta" if finite_beta else ""
+    _run_example(EXAMPLES / "optimization" / f"pwO_optimization{suffix}.py", tmp_path,
+                 VMEX_PWO_FAMILY=family)
+    stem = f"pwO{suffix}_optimized"
+    summary = json.loads((tmp_path / f"{stem}_summary.json").read_text())
+    assert summary["family"] == family
+    assert summary["checks"]["converged"] and summary["checks"]["valid target/map"]
+    assert summary["actual_s"] == [0.5]
+    assert summary["metrics"]["fine"] < summary["metrics"]["initial_fine"]
+    assert all(np.isfinite(value) for value in summary["metrics"].values())
+    assert not summary["research_validation_complete"]
+    assert (tmp_path / f"wout_{stem}.nc").exists()
+
+
+@pytest.mark.full
+def test_pwo_single_stage_example(tmp_path):
+    pytest.importorskip("essos")
+    _run_example(EXAMPLES / "optimization" / "single_stage_pwO_optimization.py", tmp_path)
+    summary = json.loads((tmp_path / "single_stage_pwO_summary.json").read_text())
+    assert summary["final"] < summary["initial"]
+    assert summary["geometric_proxies_only"] and not summary["research_validation_complete"]
+    assert all(np.isfinite(value) for value in summary["metrics"].values())
+    assert (tmp_path / "coils_single_stage_pwO.json").exists()
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve

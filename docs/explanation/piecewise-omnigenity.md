@@ -1,7 +1,9 @@
 # Piecewise-omnigenous optimization
 
-**Development status:** this page defines the implementation and validation
-contract. It does not yet provide a pwO objective or report an optimized result.
+**Development status:** the array objectives and optimization drivers are
+implemented. Full equilibrium derivatives, resolved optimization results,
+transport, alpha retention and coil realization require separate qualification.
+No low-loss configuration is certified by the target fit alone.
 
 ## Physical target
 
@@ -27,6 +29,88 @@ The ideal construction, its finite-bandwidth approximation, and a fitted MHD
 equilibrium must remain separate objects in both tests and reporting.
 
 ## Implementation boundary
+
+### Canonical target and periodic completion
+
+For signed rotational transform `iota`, define
+
+```text
+w1 = pi*iota*(1-t1*t2)/(NFP*(iota+t2)), w2 = pi
+u = (zeta-zeta_c+t1*(theta-theta_c))/w1
+v = (theta-theta_c+t2*(zeta-zeta_c))/w2
+g = exp(-u^(2p)-v^(2p)).
+```
+
+`canonical_pwo_field` completes the fundamental patch by a bounded lattice
+union, `Bmin + (Bmax-Bmin)*(1-product(1-g_kl))`, over angular images.
+This is an explicit extension, not an exact reproduction of the uncompleted
+fundamental-domain formula in the CIEMAT-pw1 DESC source. The implementation
+reports overlap and corner clearance. It requires the sharp parallelogram to
+fit inside its centered angular cell, which bounds the omitted image tails.
+For `p >= 2`, the default two image shells make the field seams negligible at
+float64 precision. Derivative tests include the wrapped seams and patch center.
+The union preserves the upper and lower bounds; its finite tails generally
+make the attained minimum greater than `Bmin`.
+
+`CanonicalPwOResidual` fits the signed relative difference `(B-Btarget)/Btarget`
+on a uniform Boozer grid. Surface and angular weights sum to one. The width
+depends on the live signed transform. Reflect both tilt signs when reflecting
+the transform; taking its absolute value would change the construction.
+Target strengths and tilts are fixed in the initial drivers. The pure-array
+kernel accepts array parameters for explicit JVP/VJP calculations.
+
+### Squeezed mapping
+
+`MappedPwOResidual` evaluates the LC mapping from Liu et al. (2026), using
+`S(x,y)=a*x*sin(y+b*sin(y))` and `D(x)=c*x*x-(1+c*pi)*x+pi`.
+The mapped coordinate `gamma` is distinct from the field-line label.
+It computes gamma variance at each eta, divided by a fixed Tesla `b_ref`.
+Discrete Parseval in gamma makes this equivalent to the nonconstant gamma
+Fourier power with the same quadrature, including sine content.
+
+Eta midpoint quadrature covers the fixed interval
+`[eta_min, 2*pi-eta_min]`; no periodic extension in this cut direction is
+assumed. The published optimization's `eta_min=2.8` differs from the
+root `pi+1/c` at `c=-2`. A conservative analytic lower bound on the mapping
+Jacobian certifies the entire interior, including between sampled nodes.
+The diagnostics include that bound and the mapped area fraction.
+This residual constrains the mapped region only. A pure-QI limit can also
+score well; the unmapped high-field pwO families need independent checks.
+
+### Interfaces and examples
+
+Both classes implement `compute_state`, `residuals_state`, `total_state`,
+`residuals(eq)` and `total(eq)`. `compute_state` returns the actual Boozer
+half-mesh radii `s_b`, both Fourier parities, sampled fields and validity.
+Eager invalid inputs raise; invalid traced states produce NaNs, never a
+favorable zero. Pure kernels support JIT, JVP and VJP. The equilibrium chain
+uses the solver's supported first-order implicit derivative; this does not
+promise arbitrary nested or forward-mode differentiation through a VJP solver.
+The implicit linearization holds the released m=1 gauge at its converged value.
+Use `frozen_path_directional_fd` to check that derivative. Cold re-solves can
+follow a different gauge at finite resolution; report that discrepancy and
+resolution dependence separately from agreement on the frozen path.
+
+```bash
+VMEX_PWO_FAMILY=canonical python examples/optimization/pwO_optimization.py
+VMEX_PWO_FAMILY=mapped python examples/optimization/pwO_optimization_finite_beta.py
+python examples/optimization/single_stage_pwO_optimization.py
+```
+
+Stage 1 fixes flux and major radius, constrains transform and nonzero mirror
+content, and checks physical size and field after a refined solve. The
+finite-beta wrapper calls the same side-effect-free driver with a pressure
+continuation ladder and zero prescribed enclosed current. Set
+`VMEX_PWO_METHOD=least_squares` to compare its residual-Jacobian route with
+the default scalar adjoint using the same cost. Smoke budgets exercise wiring
+and report unmet checks; they do not establish the research criteria below.
+
+The single-stage driver reads the saved stage-1 input, scales it with the
+existing `volavgB` ARIES-CS convention, prefits coils, and varies boundary and
+coil coefficients jointly. Full boundary-vector matching fixes amplitude and
+direction; at finite beta the existing virtual-casing plasma field is included
+once. Rejected solve statuses cannot enter its best-valid checkpoint. Its
+geometric limits describe filaments, not conductor packs or a mechanical design.
 
 Reuse the live `boozer_spectrum_state` transform, `bounce_action`, and
 `VmecProblem` objective interface. Do not add another equilibrium solver, Boozer
