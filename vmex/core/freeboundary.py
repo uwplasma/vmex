@@ -119,234 +119,6 @@ def _resume_for_vacuum(carry, ivac: int):
 
 
 # ---------------------------------------------------------------------------
-# Boundary surface synthesis (NESTOR surface.f)
-# ---------------------------------------------------------------------------
-
-
-def boundary_from_coefficients(
-    *,
-    rmnc: np.ndarray,
-    zmns: np.ndarray,
-    rmns: np.ndarray | None,
-    zmnc: np.ndarray | None,
-    modes: ModeTable,
-    basis: VacuumBasis,
-) -> VacuumBoundary:
-    """Sample the boundary surface on the NESTOR grid (``surface.f``).
-
-    ``rmnc``... are wout-convention edge coefficients over the signed
-    ``modes`` table.  Angles: ``theta/zeta`` from ``basis`` (per-period
-    ``zeta``); ``xn = n*nfp`` so all v-derivatives are geometric-phi
-    derivatives, exactly as ``surface.f``.
-    """
-    xm = np.asarray(modes.m, dtype=float)
-    xn = np.asarray(modes.n, dtype=float) * float(basis.nfp)
-    th = np.asarray(basis.theta, dtype=float)[:, None]
-    # ``basis.zeta`` spans [0, 2*pi) per field period; the geometric toroidal
-    # angle is ``phi = zeta * onp`` (onp = 1/nfp; matches surface.f and the
-    # ``onp`` folding in ``vacuum.py``/``external_field_channels``).  Using
-    # ``zeta`` directly here double-counts nfp and mis-places every n != 0
-    # harmonic toroidally.
-    ze = np.asarray(basis.zeta, dtype=float)[:, None] * float(basis.onp)
-    arg = th * xm[None, :] - ze * xn[None, :]
-    cosmn = np.cos(arg)
-    sinmn = np.sin(arg)
-
-    rc = np.asarray(rmnc, dtype=float)
-    zs = np.asarray(zmns, dtype=float)
-    R = cosmn @ rc
-    Z = sinmn @ zs
-    Ru = -(sinmn * xm[None, :]) @ rc
-    Rv = (sinmn * xn[None, :]) @ rc
-    Zu = (cosmn * xm[None, :]) @ zs
-    Zv = -(cosmn * xn[None, :]) @ zs
-    ruu = -(cosmn * (xm * xm)[None, :]) @ rc
-    ruv = (cosmn * (xm * xn)[None, :]) @ rc
-    rvv = -(cosmn * (xn * xn)[None, :]) @ rc
-    zuu = -(sinmn * (xm * xm)[None, :]) @ zs
-    zuv = (sinmn * (xm * xn)[None, :]) @ zs
-    zvv = -(sinmn * (xn * xn)[None, :]) @ zs
-    if rmns is not None and zmnc is not None:
-        rs = np.asarray(rmns, dtype=float)
-        zc = np.asarray(zmnc, dtype=float)
-        R = R + sinmn @ rs
-        Z = Z + cosmn @ zc
-        Ru = Ru + (cosmn * xm[None, :]) @ rs
-        Rv = Rv - (cosmn * xn[None, :]) @ rs
-        Zu = Zu - (sinmn * xm[None, :]) @ zc
-        Zv = Zv + (sinmn * xn[None, :]) @ zc
-        ruu = ruu - (sinmn * (xm * xm)[None, :]) @ rs
-        ruv = ruv + (sinmn * (xm * xn)[None, :]) @ rs
-        rvv = rvv - (sinmn * (xn * xn)[None, :]) @ rs
-        zuu = zuu - (cosmn * (xm * xm)[None, :]) @ zc
-        zuv = zuv + (cosmn * (xm * xn)[None, :]) @ zc
-        zvv = zvv - (cosmn * (xn * xn)[None, :]) @ zc
-
-    shape = (int(basis.ntheta3), int(basis.nzeta))
-    return VacuumBoundary(
-        R=R.reshape(shape), Z=Z.reshape(shape),
-        Ru=Ru.reshape(shape), Zu=Zu.reshape(shape),
-        Rv=Rv.reshape(shape), Zv=Zv.reshape(shape),
-        ruu=ruu.reshape(shape), ruv=ruv.reshape(shape), rvv=rvv.reshape(shape),
-        zuu=zuu.reshape(shape), zuv=zuv.reshape(shape), zvv=zvv.reshape(shape),
-    )
-
-
-def _edge_fourier(state: SpectralState, rt: SolverRuntime):
-    """Edge-row wout-convention coefficients (``convert.f`` before vacuum)."""
-    from .residuals import m1_constrained_to_physical
-    from .transforms import physical_to_internal_scale
-
-    setup = rt.setup
-    R_cos, Z_sin, R_sin, Z_cos = m1_constrained_to_physical(
-        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
-        modes=rt.modes, lthreed=setup.lthreed, lasym=setup.lasym,
-        lconm1=setup.lconm1,
-    )
-    scale = 1.0 / physical_to_internal_scale(rt.modes, rt.trig)
-    rmnc = np.asarray(R_cos)[-1] * scale
-    zmns = np.asarray(Z_sin)[-1] * scale
-    if setup.lasym:
-        rmns = np.asarray(R_sin)[-1] * scale
-        zmnc = np.asarray(Z_cos)[-1] * scale
-    else:
-        rmns = zmnc = None
-    return rmnc, zmns, rmns, zmnc
-
-
-# ---------------------------------------------------------------------------
-# Axis-filament plasma-current field (tolicu.f + belicu.f)
-# ---------------------------------------------------------------------------
-
-
-def axis_current_field(
-    *,
-    R: np.ndarray,
-    Z: np.ndarray,
-    axis_r: np.ndarray,
-    axis_z: np.ndarray,
-    nfp: int,
-    plascur: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Biot-Savart field of the net toroidal current on the magnetic axis.
-
-    Port of the legacy parity-proven ``axis_current_field_vmec_filament``
-    (VMEC ``tolicu.f`` axis filament across field periods + LIBSTELL
-    ``bsc_b`` segment kernel with ``eps_sq`` regularization).  ``plascur``
-    is VMEC's ``ctor`` (mu0*A, ``bcovar.f`` sign convention); the filament
-    current is ``+plascur/mu0`` exactly as ``tolicu.f`` (the legacy port
-    used the opposite sign because its ``plascur_edge_from_bcovar`` carried
-    ``-signgs`` instead of ``bcovar.f``'s ``+signgs``).
-    """
-    R = np.asarray(R, dtype=float)
-    Z = np.asarray(Z, dtype=float)
-    axis_r = np.asarray(axis_r, dtype=float).reshape(-1)
-    axis_z = np.asarray(axis_z, dtype=float).reshape(-1)
-    ntheta, nv = R.shape
-    current = float(plascur) / MU0
-    if (not np.isfinite(current)) or current == 0.0:
-        z = np.zeros_like(R)
-        return z, z, z
-
-    nfper = max(1, int(nfp))
-    nvper = 64 if nv == 1 else nfper
-    alvp = (2.0 * np.pi / float(max(1, nv))) / float(nfper)
-    cosuv = np.cos(alvp * np.arange(nv, dtype=float))
-    sinuv = np.sin(alvp * np.arange(nv, dtype=float))
-    alp_per = 2.0 * np.pi / float(nvper)
-    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
-    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
-
-    # tolicu.f: axis points over all periods (loop closed below).
-    x0 = axis_r[None, :] * cosuv[None, :]
-    y0 = axis_r[None, :] * sinuv[None, :]
-    xpts = np.zeros((3, nvper * nv), dtype=float)
-    for kper in range(nvper):
-        sl = slice(kper * nv, (kper + 1) * nv)
-        xpts[0, sl] = cosper[kper] * x0 - sinper[kper] * y0
-        xpts[1, sl] = sinper[kper] * x0 + cosper[kper] * y0
-        xpts[2, sl] = axis_z
-    # bsc_construct('fil_loop'): drop zero-length segments, close the loop.
-    keep = [0]
-    for i in range(1, xpts.shape[1]):
-        d = xpts[:, keep[-1]] - xpts[:, i]
-        if float(d @ d) != 0.0:
-            keep.append(i)
-    xnod = xpts[:, keep]
-    if float((xnod[:, -1] - xpts[:, 0]) @ (xnod[:, -1] - xpts[:, 0])) != 0.0:
-        xnod = np.concatenate([xnod, xpts[:, :1]], axis=1)
-    if xnod.shape[1] < 2:
-        z = np.zeros_like(R)
-        return z, z, z
-
-    dxnod = xnod[:, 1:] - xnod[:, :-1]
-    lsqnod = np.sum(dxnod * dxnod, axis=0)
-    eps_sq = max(np.finfo(float).eps * float(np.min(lsqnod[lsqnod > 0.0])), np.finfo(float).tiny)
-
-    cos1 = np.broadcast_to(cosuv[None, :], (ntheta, nv)).reshape(-1)
-    sin1 = np.broadcast_to(sinuv[None, :], (ntheta, nv)).reshape(-1)
-    rp = R.reshape(-1)
-    xobs = np.stack([rp * cos1, rp * sin1, Z.reshape(-1)], axis=1)
-
-    capRv = xobs[:, None, :] - xnod.T[None, :, :]
-    capR = np.sqrt(np.maximum(eps_sq, np.sum(capRv * capRv, axis=2)))
-    R1p2 = capR[:, :-1] + capR[:, 1:]
-    denom = np.maximum(R1p2 * R1p2 - lsqnod[None, :], eps_sq)
-    Rfactor = 2.0 * R1p2 / (capR[:, :-1] * capR[:, 1:] * denom)
-    crossv = np.cross(dxnod.T[None, :, :], capRv[:, :-1, :])
-    bxyz = (current * 1.0e-7) * np.sum(crossv * Rfactor[:, :, None], axis=1)
-
-    br = cos1 * bxyz[:, 0] + sin1 * bxyz[:, 1]
-    bp = -sin1 * bxyz[:, 0] + cos1 * bxyz[:, 1]
-    return br.reshape((ntheta, nv)), bp.reshape((ntheta, nv)), bxyz[:, 2].reshape((ntheta, nv))
-
-
-# ---------------------------------------------------------------------------
-# External-field projection (bextern.f)
-# ---------------------------------------------------------------------------
-
-
-def external_field_channels(
-    *,
-    boundary: VacuumBoundary,
-    br: np.ndarray,
-    bp: np.ndarray,
-    bz: np.ndarray,
-    basis: VacuumBasis,
-    signgs: int,
-) -> dict[str, np.ndarray]:
-    """``bextern.f``: covariant components, normal source, and metric.
-
-    Returns ``bexu/bexv`` (covariant, geometric-phi convention), ``bexni``
-    (the weighted normal source ``-B.n * wint * (2*pi)^2``), and the
-    physical surface metric ``guu/guv/gvv``.
-    """
-    R = np.asarray(boundary.R, dtype=float)
-    Ru = np.asarray(boundary.Ru, dtype=float)
-    Zu = np.asarray(boundary.Zu, dtype=float)
-    Rv = np.asarray(boundary.Rv, dtype=float)
-    Zv = np.asarray(boundary.Zv, dtype=float)
-    sgn = float(int(signgs))
-    snr = sgn * R * Zu
-    snv = sgn * (Ru * Zv - Rv * Zu)
-    snz = -sgn * R * Ru
-    bexu = Ru * br + Zu * bz
-    bexv = Rv * br + Zv * bz + R * bp
-    bexn = -(br * snr + bp * snv + bz * snz)
-    wint2 = np.asarray(basis.wint, dtype=float).reshape(R.shape)
-    bexni = bexn * wint2 * ((2.0 * np.pi) ** 2)
-    return {
-        "bexu": bexu,
-        "bexv": bexv,
-        "bexn": bexn,
-        "bexni": bexni,
-        "guu": Ru * Ru + Zu * Zu,
-        "guv": Ru * Rv + Zu * Zv,
-        "gvv": R * R + Rv * Rv + Zv * Zv,
-    }
-
-
-# ---------------------------------------------------------------------------
 # Per-iteration plasma scalars (bcovar.f tails consumed by vacuum)
 # ---------------------------------------------------------------------------
 
@@ -579,20 +351,15 @@ def free_boundary_resolution(
 
 
 # ---------------------------------------------------------------------------
-# Fused on-device vacuum update (JAX ports of the host-assembly functions)
+# On-device vacuum source: surface.f, tolicu.f + belicu.f, bextern.f
 # ---------------------------------------------------------------------------
 #
-# The NumPy functions above (``_edge_fourier``, ``boundary_from_coefficients``,
-# ``axis_current_field``, ``external_field_channels``) remain the parity-proven
-# reference used by the operator tests.  The ``*_jax`` mirrors below are their
-# pure-``jnp`` equivalents so the whole per-iteration vacuum update can run as
-# ONE jitted program (``_make_fused_vacuum``) with no NumPy<->JAX round-trips
-# (``tests/test_freeboundary.py::test_fused_vacuum_matches_reference``
-# A/B-locks them to the NumPy path at machine precision).
+# Pure-``jnp`` so the whole per-iteration vacuum update runs as ONE jitted
+# program (``_make_fused_vacuum``) with no NumPy<->JAX round-trips.
 
 
-def _edge_fourier_jax(state: SpectralState, rt: SolverRuntime):
-    """On-device edge wout-convention coefficients (JAX ``_edge_fourier``)."""
+def _edge_fourier(state: SpectralState, rt: SolverRuntime):
+    """Edge-row wout-convention coefficients (``convert.f`` before vacuum)."""
     from .residuals import m1_constrained_to_physical
     from .transforms import physical_to_internal_scale
 
@@ -610,9 +377,16 @@ def _edge_fourier_jax(state: SpectralState, rt: SolverRuntime):
     return rmnc, zmns, None, None
 
 
-def _boundary_from_coefficients_jax(rmnc, zmns, rmns, zmnc, *, modes: ModeTable,
-                                    basis: VacuumBasis) -> VacuumBoundary:
-    """On-device boundary synthesis (JAX ``boundary_from_coefficients``)."""
+def boundary_from_coefficients(rmnc, zmns, rmns, zmnc, *, modes: ModeTable,
+                               basis: VacuumBasis) -> VacuumBoundary:
+    """Sample the boundary surface on the NESTOR grid (``surface.f``).
+
+    ``rmnc``... are wout-convention edge coefficients over the signed
+    ``modes`` table (``rmns``/``zmnc`` may be ``None`` without LASYM).
+    ``xn = n*nfp`` and the geometric toroidal angle is ``phi = zeta*onp``,
+    so all v-derivatives are geometric-phi derivatives, exactly as
+    ``surface.f``; using ``zeta`` directly would double-count nfp.
+    """
     xm = jnp.asarray(np.asarray(modes.m, dtype=float))
     xn = jnp.asarray(np.asarray(modes.n, dtype=float) * float(basis.nfp))
     th = jnp.asarray(np.asarray(basis.theta, dtype=float))[:, None]
@@ -659,24 +433,21 @@ def _boundary_from_coefficients_jax(rmnc, zmns, rmns, zmnc, *, modes: ModeTable,
     )
 
 
-def _axis_current_tables(basis: VacuumBasis) -> dict[str, Any]:
-    """Static filament tables for :func:`_axis_current_field_jax` (``tolicu.f``).
-
-    For a non-degenerate axis every replicated node is distinct, so the
-    ``tolicu.f`` ``bsc_construct`` keep-filtering is a no-op and the closed-loop
-    node count is static (``nvper*nzeta + 1``) — verified at build time in
-    :func:`_make_fused_vacuum`.  Returns the geometry-independent period/segment
-    trig tables (device arrays) shared across every iteration.
-    """
+def _filament_trig(basis: VacuumBasis):
+    """``tolicu.f`` per-period and segment trig tables (NumPy)."""
     nv = int(basis.nzeta)
     nfp = max(1, int(basis.nfp))
     nvper = 64 if nv == 1 else nfp
     alvp = (2.0 * np.pi / float(max(1, nv))) / float(nfp)
-    cosuv = np.cos(alvp * np.arange(nv, dtype=float))
-    sinuv = np.sin(alvp * np.arange(nv, dtype=float))
     alp_per = 2.0 * np.pi / float(nvper)
-    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
-    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
+    k, p = np.arange(nv, dtype=float), np.arange(nvper, dtype=float)
+    return (nv, nvper, np.cos(alvp * k), np.sin(alvp * k),
+            np.cos(alp_per * p), np.sin(alp_per * p))
+
+
+def _axis_current_tables(basis: VacuumBasis) -> dict[str, Any]:
+    """Static filament tables for :func:`_axis_current_field` (``tolicu.f``)."""
+    nv, nvper, cosuv, sinuv, cosper, sinper = _filament_trig(basis)
     return {
         "nv": nv, "nvper": nvper,
         "cosuv": jnp.asarray(cosuv), "sinuv": jnp.asarray(sinuv),
@@ -684,14 +455,14 @@ def _axis_current_tables(basis: VacuumBasis) -> dict[str, Any]:
     }
 
 
-def _axis_current_field_jax(R, Z, axis_r, axis_z, current, tables: dict[str, Any]):
-    """On-device axis-filament Biot-Savart (JAX ``tolicu.f`` + ``belicu.f``).
+def _axis_current_field(R, Z, axis_r, axis_z, current, tables: dict[str, Any]):
+    """Biot-Savart field of the net toroidal current on the axis (``tolicu.f`` + ``belicu.f``).
 
-    Static-topology port of :func:`axis_current_field`: the ``nvper*nzeta``
-    replicated nodes are all distinct (non-degenerate axis) and the loop is
+    The ``nvper*nzeta`` replicated nodes are all distinct (non-degenerate
+    axis, checked by :func:`_assert_static_filament_topology`) and the loop is
     closed by appending the first node; ``eps_sq`` regularizes the LIBSTELL
-    ``bsc_b`` segment kernel exactly as the NumPy reference.  ``current`` is the
-    filament current ``ctor / mu0``.
+    ``bsc_b`` segment kernel.  ``current`` is the filament current
+    ``ctor / mu0`` (``bcovar.f`` sign convention, as ``tolicu.f``).
     """
     nv = int(tables["nv"])
     nvper = int(tables["nvper"])
@@ -731,9 +502,14 @@ def _axis_current_field_jax(R, Z, axis_r, axis_z, current, tables: dict[str, Any
             bxyz[:, 2].reshape((ntheta, nv)))
 
 
-def _external_field_channels_jax(boundary: VacuumBoundary, br, bp, bz, *,
+def _external_field_channels(boundary: VacuumBoundary, br, bp, bz, *,
                                  basis: VacuumBasis, signgs: int):
-    """On-device ``bextern.f`` channels (JAX ``external_field_channels``)."""
+    """``bextern.f``: covariant components, normal source, and metric.
+
+    Returns ``bexu/bexv`` (covariant, geometric-phi convention), ``bexni``
+    (the weighted normal source ``-B.n * wint * (2*pi)^2``), and the
+    physical surface metric ``guu/guv/gvv``.
+    """
     R = boundary.R
     Ru = boundary.Ru
     Zu = boundary.Zu
@@ -827,10 +603,10 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
 
     def _pipeline(field, boundary, ctor, axis_r, axis_z):
         br_c, bp_c, bz_c = field.b_cyl(boundary.R, phi_geom, boundary.Z)
-        br_a, bp_a, bz_a = _axis_current_field_jax(
+        br_a, bp_a, bz_a = _axis_current_field(
             boundary.R, boundary.Z, axis_r, axis_z, ctor / MU0, axis_tb
         )
-        ext = _external_field_channels_jax(
+        ext = _external_field_channels(
             boundary, br_c + br_a, bp_c + bp_a, bz_c + bz_a,
             basis=basis, signgs=signgs,
         )
@@ -846,8 +622,8 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
 
     def _full(state: SpectralState, rt: SolverRuntime, field: MgridField):
         ctor, rbtor, axis_r, axis_z, bsq3, pres_ns = _vacuum_scalars(state, rt)
-        rmnc, zmns, rmns, zmnc = _edge_fourier_jax(state, rt)
-        boundary = _boundary_from_coefficients_jax(
+        rmnc, zmns, rmns, zmnc = _edge_fourier(state, rt)
+        boundary = boundary_from_coefficients(
             rmnc, zmns, rmns, zmnc, modes=modes, basis=basis
         )
         ext = _pipeline(field, boundary, ctor, axis_r, axis_z)
@@ -876,8 +652,8 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
     def _skip(state: SpectralState, rt: SolverRuntime, field: MgridField,
               bvec_nonsing, mode_factor, mode_pivots):
         ctor, rbtor, axis_r, axis_z, bsq3, pres_ns = _vacuum_scalars(state, rt)
-        rmnc, zmns, rmns, zmnc = _edge_fourier_jax(state, rt)
-        boundary = _boundary_from_coefficients_jax(
+        rmnc, zmns, rmns, zmnc = _edge_fourier(state, rt)
+        boundary = boundary_from_coefficients(
             rmnc, zmns, rmns, zmnc, modes=modes, basis=basis
         )
         ext = _pipeline(field, boundary, ctor, axis_r, axis_z)
@@ -909,7 +685,7 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         map lets the implicit adjoint build one dense response to those few
         inputs and replace every later NESTOR reverse sweep by a multiply.
         """
-        boundary = _boundary_from_coefficients_jax(
+        boundary = boundary_from_coefficients(
             rmnc, zmns, rmns, zmnc, modes=modes, basis=basis
         )
         ext = _pipeline(field, boundary, ctor, axis_r, axis_z)
@@ -922,7 +698,7 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
     def _bsq(state: SpectralState, rt: SolverRuntime, field: MgridField):
         """Only the converged edge ``0.5|B|²`` needed by implicit AD."""
         ctor, _, axis_r, axis_z, _, _ = _vacuum_scalars(state, rt)
-        rmnc, zmns, rmns, zmnc = _edge_fourier_jax(state, rt)
+        rmnc, zmns, rmns, zmnc = _edge_fourier(state, rt)
         return _bsq_edge(rmnc, zmns, rmns, zmnc, ctor, axis_r, axis_z, field)
 
     return FusedVacuum(
@@ -932,43 +708,30 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
 
 
 def _assert_static_filament_topology(basis: VacuumBasis, axis_r0, axis_z0) -> None:
-    """Guard the static-topology assumption of :func:`_axis_current_field_jax`.
+    """Guard the static-topology assumption of :func:`_axis_current_field`.
 
-    Replays ``tolicu.f``'s ``bsc_construct`` keep-filtering on the initial axis;
-    the fused path assumes every replicated node is distinct and the loop closes
-    (true for any non-degenerate axis on ``nzeta > 1``).  Raises if a deck ever
-    violates it, rather than silently diverging from the NumPy reference.
+    ``tolicu.f``'s ``bsc_construct`` drops a node equal to the last kept one
+    and closes the loop; the fused path assumes every replicated node is kept
+    and the loop needs closing (true for any non-degenerate axis on
+    ``nzeta > 1``).  Raises if a deck ever violates it.
     """
+    _nv, nvper, cosuv, sinuv, cosper, sinper = _filament_trig(basis)
     ar = np.asarray(axis_r0, dtype=float).reshape(-1)
     az = np.asarray(axis_z0, dtype=float).reshape(-1)
-    nv = int(basis.nzeta)
-    nfp = max(1, int(basis.nfp))
-    nvper = 64 if nv == 1 else nfp
-    alvp = (2.0 * np.pi / float(max(1, nv))) / float(nfp)
-    cosuv = np.cos(alvp * np.arange(nv, dtype=float))
-    sinuv = np.sin(alvp * np.arange(nv, dtype=float))
-    alp_per = 2.0 * np.pi / float(nvper)
-    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
-    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
-    x0 = ar * cosuv
-    y0 = ar * sinuv
-    xpts = np.zeros((3, nvper * nv), dtype=float)
-    for kper in range(nvper):
-        sl = slice(kper * nv, (kper + 1) * nv)
-        xpts[0, sl] = cosper[kper] * x0 - sinper[kper] * y0
-        xpts[1, sl] = sinper[kper] * x0 + cosper[kper] * y0
-        xpts[2, sl] = az
-    keep = [0]
-    for i in range(1, xpts.shape[1]):
-        d = xpts[:, keep[-1]] - xpts[:, i]
-        if float(d @ d) != 0.0:
-            keep.append(i)
-    closed = float((xpts[:, keep[-1]] - xpts[:, 0]) @ (xpts[:, keep[-1]] - xpts[:, 0])) != 0.0
-    if len(keep) != xpts.shape[1] or not closed:
+    x0, y0 = ar * cosuv, ar * sinuv
+    xpts = np.stack([
+        (cosper[:, None] * x0 - sinper[:, None] * y0).reshape(-1),
+        (sinper[:, None] * x0 + cosper[:, None] * y0).reshape(-1),
+        np.broadcast_to(az, (nvper, az.size)).reshape(-1),
+    ])
+    step = np.diff(xpts, axis=1)
+    kept = 1 + int(np.count_nonzero(np.sum(step * step, axis=0)))
+    gap = xpts[:, -1] - xpts[:, 0]
+    closed = float(gap @ gap) != 0.0
+    if kept != xpts.shape[1] or not closed:
         raise NotImplementedError(
             "fused axis-current filament requires a non-degenerate axis "
-            f"(kept {len(keep)}/{xpts.shape[1]} nodes, closed={closed}); "
-            "this deck needs the NumPy axis_current_field path"
+            f"(kept {kept}/{xpts.shape[1]} nodes, closed={closed})"
         )
 
 

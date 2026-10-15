@@ -121,7 +121,7 @@ def test_import_guard_floors_match_pyproject() -> None:
 
 
 def test_optional_floors_match_pyproject() -> None:
-    from vmex._compat import OPTIONAL_MINIMUMS
+    from vmex._jax_env import OPTIONAL_MINIMUMS
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text())
     floors = {}
@@ -138,16 +138,16 @@ def test_optional_floors_match_pyproject() -> None:
     ("0.19.2", 'essos>=0.21.0 (found 0.19.2); run: pip install -U "essos>=0.21.0"'),
 ])
 def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
-    from vmex import _compat
+    from vmex import _jax_env
 
     def version(name):
         if found is None:
-            raise _compat.importlib_metadata.PackageNotFoundError(name)
+            raise _jax_env.importlib_metadata.PackageNotFoundError(name)
         return found
 
-    monkeypatch.setattr(_compat.importlib_metadata, "version", version)
+    monkeypatch.setattr(_jax_env.importlib_metadata, "version", version)
     with pytest.raises(ImportError, match=re.escape("alpha-particle tracing needs " + message)):
-        _compat.require_optional("essos", "alpha-particle tracing")
+        _jax_env.require_optional("essos", "alpha-particle tracing")
 
 
 def test_import_guard_names_found_required_and_fix(monkeypatch) -> None:

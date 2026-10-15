@@ -290,17 +290,17 @@ def test_compilation_cache_line_reports_each_cache_state(monkeypatch, tmp_path):
     the line must name the bound and flag it, and it must never raise when the
     directory is absent or the feature is switched off.
     """
-    from vmex import _compat
+    from vmex import _jax_env
 
-    monkeypatch.setattr(_compat, "_default_compilation_cache_dir", lambda: "")
+    monkeypatch.setattr(_jax_env, "_default_compilation_cache_dir", lambda: "")
     assert doctor._compilation_cache_line().endswith("disabled")
 
     missing = tmp_path / "absent"
-    monkeypatch.setattr(_compat, "_default_compilation_cache_dir", lambda: str(missing))
+    monkeypatch.setattr(_jax_env, "_default_compilation_cache_dir", lambda: str(missing))
     assert "not yet created" in doctor._compilation_cache_line()
 
-    monkeypatch.setattr(_compat, "_default_compilation_cache_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(_jax_env, "_default_compilation_cache_dir", lambda: str(tmp_path))
     (tmp_path / "entry.bin").write_bytes(b"x" * 4096)
-    monkeypatch.setattr(_compat, "_default_cache_max_size", lambda _dir: 4096.0)
+    monkeypatch.setattr(_jax_env, "_default_cache_max_size", lambda _dir: 4096.0)
     line = doctor._compilation_cache_line()
     assert "GiB" in line and "at the bound" in line

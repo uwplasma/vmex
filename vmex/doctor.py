@@ -154,7 +154,7 @@ def _compilation_cache_line() -> str:
     A cache sitting at its bound is the visible symptom of eviction churn:
     every run then recompiles what the previous one stored.
     """
-    from ._compat import _default_cache_max_size, _default_compilation_cache_dir
+    from ._jax_env import _default_cache_max_size, _default_compilation_cache_dir
 
     directory = _default_compilation_cache_dir()
     if not directory:

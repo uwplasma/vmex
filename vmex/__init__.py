@@ -175,7 +175,7 @@ def _check_supported_versions() -> None:
 
 _check_supported_versions()
 
-from ._compat import _apply_compilation_cache_policy
+from ._jax_env import _apply_compilation_cache_policy
 
 
 def _source_tree_version() -> str | None:
@@ -200,7 +200,7 @@ try:
 except _PackageNotFoundError:  # pragma: no cover - source tree without installed metadata.
     __version__ = "0+unknown"
 
-# Suppress noisy XLA/PjRt C++ logs (see _compat._configure_jax_environment).
+# Suppress noisy XLA/PjRt C++ logs (see _jax_env._configure_jax_environment).
 # Must be set before *any* ``import jax`` in the process; setdefault keeps
 # user overrides working.
 _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
@@ -208,7 +208,7 @@ _os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("GLOG_minloglevel", "2")
 
 # Enable the JAX persistent XLA compilation cache in a machine-scoped
-# directory per the _compat policy (see _default_compilation_cache_dir).
+# directory per the _jax_env policy (see _default_compilation_cache_dir).
 # ``core.solver._harden_compilation_cache`` re-applies this policy on every
 # solve path in case this module never ran (namespace-package shadowing).
 import jax as _jax
@@ -358,16 +358,26 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
 __all__ = ["__version__", *sorted(_LAZY_ATTRS)]
 
 
-def __getattr__(name: str):
-    entry = _LAZY_ATTRS.get(name)
-    if entry is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attribute = entry
-    module = _import_module(module_name, __name__)
-    value = module if attribute is None else getattr(module, attribute)
-    globals()[name] = value
-    return value
+def _lazy_exports(package: str, table: dict, namespace: dict):
+    """PEP 562 ``(__getattr__, __dir__)`` resolving ``table`` on first access.
+
+    ``table`` maps a public name to ``(relative module, attribute)``; an
+    attribute of ``None`` exports the module itself.  Resolved values are
+    cached in ``namespace`` so later lookups bypass ``__getattr__``.
+    """
+
+    def __getattr__(name: str):
+        entry = table.get(name)
+        if entry is None:
+            raise AttributeError(f"module {package!r} has no attribute {name!r}")
+        module = _import_module(entry[0], package)
+        namespace[name] = value = module if entry[1] is None else getattr(module, entry[1])
+        return value
+
+    def __dir__():
+        return sorted(set(namespace) | set(table))
+
+    return __getattr__, __dir__
 
 
-def __dir__():
-    return sorted(set(globals()) | set(_LAZY_ATTRS))
+__getattr__, __dir__ = _lazy_exports(__name__, _LAZY_ATTRS, globals())

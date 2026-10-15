@@ -560,9 +560,9 @@ def test_trace_progress_estimates_after_the_first_chunk(monkeypatch, tty):
 
 def test_cli_trace_names_the_upgrade_for_an_outdated_essos(solovev_wout, tmp_path, monkeypatch):
     """A stale environment gets the pip command, not a TypeError."""
-    from vmex import _compat
+    from vmex import _jax_env
 
-    monkeypatch.setitem(_compat.OPTIONAL_MINIMUMS, "essos", "999.0")
+    monkeypatch.setitem(_jax_env.OPTIONAL_MINIMUMS, "essos", "999.0")
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         rc = cli.main([str(solovev_wout), "--trace", "--outdir", str(tmp_path), "--quiet"])

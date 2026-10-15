@@ -660,7 +660,7 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     """
     import numpy as np
 
-    from .._compat import require_optional
+    from .._jax_env import require_optional
 
     try:
         require_optional("essos", "--coils")
@@ -1069,7 +1069,7 @@ def _run_neoclassical(wout_path: Path, args, outdir: Path, *, emit, quiet: bool)
     """
     import inspect
 
-    from .._compat import OPTIONAL_MINIMUMS
+    from .._jax_env import OPTIONAL_MINIMUMS
 
     pin = f'"dkx>={OPTIONAL_MINIMUMS["dkx"]}"'
     try:
@@ -1633,7 +1633,7 @@ def main(argv: list[str] | None = None) -> int:
     :func:`vmex.core.multigrid.solve_multigrid`).  SECONDARY to that, the
     persistent XLA compilation cache — enabled package-wide on import in
     the machine-fingerprinted ``~/.cache/vmex/jax_cache/<fingerprint>``
-    directory (``vmex._compat``, knobs ``VMEX_COMPILATION_CACHE*`` /
+    directory (``vmex._jax_env``, knobs ``VMEX_COMPILATION_CACHE*`` /
     ``JAX_COMPILATION_CACHE_DIR``) — makes repeat processes of the same
     configuration skip compilation entirely.
     """

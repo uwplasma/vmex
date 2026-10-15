@@ -160,13 +160,10 @@ def test_vmex_polish_directive_is_execution_metadata_not_physics(
 
     ``VmecInput.from_file`` ignores execution metadata while preserving all
     physics, and ``to_indata`` writes physics only.  The directive still
-    round-trips through :func:`vmex.core.run_options.read_input_request` and
-    :func:`~vmex.core.run_options.format_indata_directives`, which is the
-    contract the CLI and ``solve_file`` use.
+    is read back by :func:`vmex.core.run_options.read_input_request`, which is
+    the contract the CLI and ``solve_file`` use.
     """
-    from vmex.core.run_options import (
-        RunOptions, format_indata_directives, read_input_request,
-    )
+    from vmex.core.run_options import read_input_request
 
     text = "! VMEX: POLISH_FORCE_BALANCE = .TRUE.\n&INDATA\nMPOL = 3\n/\n"
     inp = VmecInput.from_indata_text(text)
@@ -182,10 +179,9 @@ def test_vmex_polish_directive_is_execution_metadata_not_physics(
     written = inp.to_indata(tmp_path / "input.physics_only")
     assert "POLISH" not in written.read_text(encoding="utf-8")
 
-    directives = format_indata_directives(RunOptions(polish=True))
     rewritten = tmp_path / "input.rewritten"
     rewritten.write_text(
-        directives + written.read_text(encoding="utf-8"), encoding="utf-8")
+        "!@VMEX POLISH = .TRUE.\n" + written.read_text(encoding="utf-8"), encoding="utf-8")
     assert read_input_request(rewritten).options.polish is True
 
 
