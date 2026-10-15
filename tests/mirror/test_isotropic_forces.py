@@ -41,16 +41,6 @@ from vmex.mirror.solver import (  # noqa: E402
 from vmex.mirror.model import project_fixed_boundary_state  # noqa: E402
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _enable_solver_jit():
-    """Exercise nonlinear solver tests in their production execution mode."""
-
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", previous)
-
-
 def _cylinder(*, ns: int = 11, nxi: int = 21, radius: float = 0.3, half_length: float = 1.2):
     grid = MirrorConfig(
         resolution=MirrorResolution(ns=ns, mpol=0, nxi=nxi),

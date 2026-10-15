@@ -204,7 +204,6 @@ def test_spatial_derivatives_compile_once_per_order():
     Before the per-order cache the expanded third-derivative graph was
     dispatched primitive by primitive: over a thousand XLA compilations for a
     single point, which is what made the field examples exceed their budgets.
-    The suite runs with ``jax_disable_jit``, so enable jit explicitly here.
     """
     parameters = jnp.array([1.2, -0.7])
     points = jnp.array([[0.4, -0.2, 0.3]])
@@ -565,7 +564,7 @@ def test_flux_coordinates_compile_once_and_repeat_for_free():
     Both used to run primitive by primitive: 468 compilations for three points
     here, and over a minute on the HSX wout (858 modes, 501 points, 88 of them
     outside the plasma).  Three kernels and a few element-wise bookkeeping ops
-    remain.  The suite runs with ``jax_disable_jit``, so enable jit here.
+    remain.
     """
     ns, major_radius, minor_radius = 7, 1.0, 0.3
     s_mesh = jnp.linspace(0.0, 1.0, ns)

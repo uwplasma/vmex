@@ -15,7 +15,6 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
-import jax
 import numpy as np
 import pytest
 
@@ -25,14 +24,6 @@ from vmex.core.solver import solve
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
-
-@pytest.fixture(autouse=True)
-def _enable_jit():
-    """Full solves need JIT (the repo conftest disables it for unit tests)."""
-    was_disabled = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", was_disabled)
 
 # A varied, deliberately SMALL ensemble (single grid, modest ns) so the test is
 # CI-cheap: solovev (2D ncurr=0), circular_tokamak (2D, more modes) and

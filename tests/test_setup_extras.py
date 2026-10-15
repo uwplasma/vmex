@@ -93,17 +93,6 @@ def test_lasym_delta_rotation_aligns_m1_modes():
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def _jit_enabled():
-    """The repo conftest disables jit globally; the lane needs it on."""
-    import jax
-
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", previous)
-
-
 def _solovev_input():
     from pathlib import Path
 
@@ -113,14 +102,12 @@ def _solovev_input():
     return VmecInput.from_file(str(root / "examples" / "data" / "input.solovev"))
 
 
-def test_setup_lane_is_reused_across_rungs_and_compiles_once(_jit_enabled):
+def test_setup_lane_is_reused_across_rungs_and_compiles_once():
     """Every radial rung of one deck hits the same lane executable.
 
     The lane exists to replace ~110 single-op XLA programs per rung with
     one, which only pays off if the second rung reuses the first rung's
-    executable.  Counted from JAX's own compile events, with jit enabled,
-    because the suite otherwise runs with ``jax_disable_jit`` and would
-    never execute the compiled path at all.
+    executable.  Counted from JAX's own compile events.
     """
     import jax
     from jax import monitoring
@@ -195,7 +182,7 @@ def _dispatched_one_op_at_a_time(inp, resolution, *, lconm1=True):
     return expected
 
 
-def test_setup_lane_matches_the_eager_dispatch_bit_for_bit(_jit_enabled):
+def test_setup_lane_matches_the_eager_dispatch_bit_for_bit():
     """The lane must reproduce op-at-a-time dispatch exactly, not closely.
 
     Compiled at the default XLA optimization level the lane's arithmetic is
@@ -220,7 +207,7 @@ def test_setup_lane_matches_the_eager_dispatch_bit_for_bit(_jit_enabled):
             f"(max |delta| {np.max(np.abs(got - want)) if got.size else 0})")
 
 
-def test_zero_carry_constants_are_transfers_not_programs(_jit_enabled):
+def test_zero_carry_constants_are_transfers_not_programs():
     """Host-built zeros compile nothing, and the carry copy is one program."""
     import jax
     from jax import monitoring
