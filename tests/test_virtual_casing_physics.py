@@ -35,7 +35,6 @@ from vmex.core.wout import read_wout  # noqa: E402
 
 # jit-enable the whole module: virtual casing is far too slow interpreted.
 pytestmark = [
-    pytest.mark.usefixtures("_module_jit_enabled"),
     pytest.mark.skipif(
         not VC.have_virtual_casing_jax(),
         reason="requires virtual_casing_jax",

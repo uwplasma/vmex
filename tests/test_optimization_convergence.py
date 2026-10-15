@@ -10,8 +10,6 @@ import pytest
 
 pytest.importorskip("jax")
 pytest.importorskip("scipy")
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 from scipy.optimize import least_squares, minimize  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 

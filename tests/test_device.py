@@ -587,9 +587,6 @@ def test_host_callback_is_not_pinned_across_platforms():
     same = im._callback_sharding(
         dataclasses.replace(cfg, device=jax.devices(here)[0]))
     assert isinstance(same, jax.sharding.SingleDeviceSharding)
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_host_callback_reuses_main_thread_executables():
     """A lane traced on the main thread is not traced again in a callback.
 
@@ -631,9 +628,6 @@ def test_free_boundary_backward_traces_like_the_forward_solve(monkeypatch):
         fbi._solve_bwd(cfg, saved, state_bar)
     assert seen["mesh"] == forward
     assert seen["committed"]
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("home", [None, "callback", "root"])
 def test_host_anchor_factors_rehomes_the_cached_root(monkeypatch, reverse, home):

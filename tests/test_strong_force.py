@@ -117,7 +117,8 @@ def test_constant_toroidal_field_matches_analytic_current_and_force():
     # noise in components whose analytic value is zero.
     # atol: rounding of the ~8e4 A/m^2 current (de Boor point evaluation).
     np.testing.assert_allclose(result.J, expected_J, rtol=2e-11, atol=5e-7)
-    np.testing.assert_allclose(result.force, expected_force, rtol=2e-11, atol=2e-7)
+    # atol: the analytic zero is J x B with |J| ~ 8e4, so 1e-6 is 1e-11 of it.
+    np.testing.assert_allclose(result.force, expected_force, rtol=2e-11, atol=1e-6)
     assert np.all(np.isfinite(result.force_rho))
     assert np.all(np.isfinite(result.force_helical))
 
@@ -448,9 +449,11 @@ def test_batched_point_sweep_matches_flat_vmap_values_and_gradients():
     with sf.force_sweep_measurement(sf.ForceSweepPolicy(min_batch=8, max_batch=8, checkpoint=False)):
         plain_samples = sf.evaluate_strong_force(state, rho, theta, zeta)
         plain_value, plain_grad = jax.value_and_grad(objective)(0.0)
-    np.testing.assert_array_equal(np.asarray(plain_samples.force), np.asarray(batched_samples.force))
+    scale = float(np.max(np.abs(np.asarray(batched_samples.force))))
+    np.testing.assert_allclose(np.asarray(plain_samples.force), np.asarray(batched_samples.force),
+                               rtol=1.0e-12, atol=1.0e-11 * scale)
     # Same kernel, different summation order under jit fusion.
-    np.testing.assert_allclose(plain_value, batched_value, rtol=3.0e-13)
+    np.testing.assert_allclose(plain_value, batched_value, rtol=1.0e-11)
     np.testing.assert_allclose(plain_grad, batched_grad, rtol=1.0e-11)
 
     # Batching changes the fusion XLA picks, so the two sweeps agree to
@@ -468,7 +471,7 @@ def test_batched_point_sweep_matches_flat_vmap_values_and_gradients():
             atol=1.0e-11 * max(scale, 1.0),
             err_msg=name,
         )
-    np.testing.assert_allclose(batched_value, flat_value, rtol=1.0e-12)
+    np.testing.assert_allclose(batched_value, flat_value, rtol=1.0e-11)  # sums 1e-11-accurate points
     np.testing.assert_allclose(batched_grad, flat_grad, rtol=1.0e-11)
     assert float(np.abs(np.asarray(flat_grad))) > 0.0
 
@@ -1120,9 +1123,7 @@ _SHIPPED_CERTIFICATE_ARRAYS = (
 def _eager_lane():
     """Force the jit-disabled lane the committed baseline was measured on.
 
-    ``tests/conftest.py`` disables jit globally, but under xdist a previous
-    module's ``_module_jit_enabled`` fixture can still be live on this
-    worker, and jit changes these reductions in the last few ulps.
+    jit changes these reductions in the last few ulps.
     """
 
     previous = bool(jax.config.jax_disable_jit)

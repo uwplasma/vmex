@@ -31,9 +31,6 @@ from vmex.core.errors import (
 
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
-
 def test_free_boundary_status_callback_turns_trial_error_into_status(monkeypatch):
     """An invalid optimizer trial returns status 1 instead of crossing JAX."""
     inp = dataclasses.replace(

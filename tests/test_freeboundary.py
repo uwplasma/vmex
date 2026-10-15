@@ -40,8 +40,6 @@ from tests.test_lasym_free_case import (  # noqa: E402
     lasym_free_field, lasym_free_input,
 )
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # vacuum solves: run jitted
-
 REPO = Path(__file__).resolve().parents[1]
 DECK = REPO / "examples" / "data" / "input.cth_like_free_bdy_lasym_small"
 MGRID = REPO / "examples" / "data" / "mgrid_cth_like_lasym_small.nc"

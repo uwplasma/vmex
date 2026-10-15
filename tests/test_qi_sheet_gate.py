@@ -46,8 +46,6 @@ jax = pytest.importorskip("jax")
 
 # jit required: unjitted, the fixture alone takes ~24 min and its
 # Biot-Savart loops exhaust memory.
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 ROOT = Path(__file__).resolve().parents[1]
 # Spelled as a path, not a sys.path search: the builder is a hard dependency
 # of this gate, and an import name alone reads as an optional one (it was
