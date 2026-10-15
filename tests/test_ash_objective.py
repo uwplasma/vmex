@@ -1,4 +1,7 @@
 """VMEX composition tests; manufactured coefficients are not design results."""
+import sys
+from types import ModuleType, SimpleNamespace
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -29,6 +32,85 @@ def test_scope_and_callback_are_explicit():
         HeliumAshObjective(response, 1.0, "")
     with pytest.raises(TypeError, match="callable"):
         HeliumAshObjective(None, 1.0, "coefficient-only")
+
+
+@pytest.fixture
+def supplied_radial_result(monkeypatch):
+    """Test the adapter contract without substituting for the radial solver."""
+    package = ModuleType("essos")
+    package.__path__ = []
+    module = ModuleType("essos.ash")
+    monkeypatch.setitem(sys.modules, "essos", package)
+    monkeypatch.setitem(sys.modules, "essos.ash", module)
+
+    def supply(occupation, valid=True):
+        result = SimpleNamespace(
+            mean_occupation_s=jnp.asarray(occupation), valid=jnp.asarray(valid),
+        )
+        calls = []
+
+        def evaluate(**kwargs):
+            calls.append(kwargs)
+            return result
+
+        module.evaluate_helium_residence = evaluate
+        return result, calls
+
+    return supply
+
+
+def test_adapter_forwards_callback_arguments_and_preserves_result(supplied_radial_result):
+    result, calls = supplied_radial_result(3.0)
+    state, runtime, coefficients = object(), object(), {"supplied_coefficients": object()}
+    callback_calls = []
+
+    def transport(given_state, given_runtime):
+        callback_calls.append((given_state, given_runtime))
+        return coefficients
+
+    objective = HeliumAshObjective(transport, 2.0, "supplied response contract")
+    assert objective.evaluate_state(state, runtime) is result
+    assert callback_calls == [(state, runtime)]
+    assert calls == [coefficients]
+
+
+def test_adapter_normalizes_scalar_and_exposes_lazy_objective(supplied_radial_result):
+    supplied_radial_result(3.0)
+    from vmex import optimize as opt
+
+    assert opt.HeliumAshObjective is HeliumAshObjective
+    objective = opt.HeliumAshObjective(lambda state, runtime: {}, 2.0, "supplied scalar")
+    np.testing.assert_allclose(objective.total_state(None, None), 1.5)
+    rows = objective.residuals_state(None, None)
+    assert rows.shape == (1,)
+    np.testing.assert_allclose(rows**2, [1.5])
+    np.testing.assert_array_equal(objective(None, None), rows)
+
+
+@pytest.mark.parametrize("occupation,valid", [
+    (3.0, False), (0.0, True), (-1.0, True), (np.nan, True), (np.inf, True),
+])
+def test_adapter_rejects_invalid_supplied_occupation(supplied_radial_result, occupation, valid):
+    supplied_radial_result(occupation, valid)
+    objective = HeliumAshObjective(lambda state, runtime: {}, 2.0, "supplied scalar")
+    assert np.isnan(objective.total_state(None, None))
+    assert np.all(np.isnan(objective.residuals_state(None, None)))
+
+
+def test_adapter_rejects_nonscalar_occupation(supplied_radial_result):
+    supplied_radial_result([1.0, 2.0])
+    objective = HeliumAshObjective(lambda state, runtime: {}, 2.0, "supplied vector")
+    with pytest.raises(ValueError, match="mean_occupation_s must be scalar"):
+        objective.total_state(None, None)
+
+
+def test_missing_optional_dependency_has_actionable_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "essos", None)
+    monkeypatch.setitem(sys.modules, "essos.ash", None)
+    objective = HeliumAshObjective(lambda state, runtime: {}, 2.0, "dependency contract")
+    with pytest.raises(ImportError, match="requires ESSOS with essos.ash") as error:
+        objective.evaluate_state(None, None)
+    assert isinstance(error.value.__cause__, ImportError)
 
 
 def test_positive_cost_and_vmex_residual_composition():
