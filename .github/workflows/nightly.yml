@@ -111,7 +111,7 @@ jobs:
           ls wout_solovev.nc solovev_summary.png
       - name: Check real integration calls and derivatives
         run: |
-          pytest -q -o addopts= -o usefixtures=_module_jit_enabled \
+          pytest -q -o addopts= \
             tests/test_virtual_casing_api.py \
             tests/test_virtual_casing_physics.py::test_synthetic_surface_gradient_fd_validates \
             tests/test_neoclassical.py::test_diagnostic_config_matches_converged_neo_on_the_qi_deck \
