@@ -38,7 +38,10 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [8, 12]
+MAX_NFEV = [4, 6]
+# Research setting (the README result; hours on 8 cores):
+# MAX_MODES = [1, 2, 3]
+# MAX_NFEV = [15, 25, 25]
 
 # Ballooning field lines: surfaces by normalized flux s (the same surfaces on
 # every radial grid), field-line labels over the symmetric half [0, pi], and
