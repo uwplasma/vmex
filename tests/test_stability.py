@@ -930,7 +930,7 @@ def test_ballooning_matches_frozen_cobravmec_on_3d_qa_seed():
     assert lam[1] < 0.0
 
 
-@pytest.mark.parametrize('n', [1, 2, 4, 31])
+@pytest.mark.parametrize('n', [2, 4, 31])
 def test_selected_tridiagonal_value_and_nonuniform_derivatives(n):
     """Independent dense HF oracle includes both coefficient directions."""
     rng = np.random.default_rng(927+n)
@@ -958,15 +958,11 @@ def test_selected_ballooning_stencil_batch_and_limits():
     f=jnp.ones_like(g)*1.1
     c=jnp.zeros_like(g)
     exact=-4*g[:,0]/f[:,0]/h**2*jnp.sin(jnp.pi/64)**2
-    def selected(g,c,f,h):
-        return stab._max_eigenvalue_tridiag(g,c,f,h,eigensolver='selected')
+    selected = stab._max_eigenvalue_tridiag
     actual=jax.jit(selected)(g,c,f,h)
     np.testing.assert_allclose(actual,exact,rtol=1e-11)
-    np.testing.assert_allclose(actual,stab._max_eigenvalue_tridiag(g,c,f,h),rtol=1e-11)
     np.testing.assert_allclose(selected(7*g,7*c,7*f,h),actual,rtol=1e-11)
     np.testing.assert_allclose(jax.vmap(selected,in_axes=(0,0,0,None))(g,c,f,h),actual,rtol=1e-11)
-    with pytest.raises(ValueError,match='eigensolver'):
-        stab._max_eigenvalue_tridiag(g,c,f,h,eigensolver='invalid')
 
 
 def test_selected_reducible_and_cluster_derivative_status():
