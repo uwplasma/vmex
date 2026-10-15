@@ -361,8 +361,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="cli",
         choices=("cli", "jit"),
         help=(
-            "Solver lane: 'cli' (jitted blocks with host residual checks, live "
-            "printing, exact-ftol exit) or 'jit' (single lax.while_loop)."
+            "Fixed-boundary solver lane: 'cli' (jitted blocks with host residual "
+            "checks, live printing, exact-ftol exit) or 'jit' (single "
+            "lax.while_loop). Free-boundary and mirror decks always run the 'cli' lane."
         ),
     )
     p.add_argument(
