@@ -762,7 +762,7 @@ toward it as ``temperature`` decreases with a correspondingly finer
 budget.  Optimize the surrogate, report the hard value.
 
 Passing particles near rational surfaces
----------------------------------------
+----------------------------------------
 
 Cyclometry concerns the distribution of field strength over a complete closed
 rational transit, sampled uniformly in Boozer toroidal angle. It differs from
@@ -806,3 +806,17 @@ size and shear, quadrature and representation errors, and independent orbit
 convergence. A finite-time confinement claim additionally needs a uniform
 bound on the invariant's Lie derivative inside a strictly passing tube.
 A small moment objective alone does not establish that claim.
+
+For a combined trapped/passing objective, use trapped action variation across
+field-line labels, or its derivative ``partial_alpha J``, together with the
+passing envelope. The radial derivative ``partial_psi J`` controls tangential
+precession; minimizing its square is not a substitute for suppressing radial
+drift. Reuse :class:`~vmex.core.qi.JInvariantQIResidual` on compatible complete
+wells and monitor precession and well topology separately. Existing smoothed
+trapped objectives still need resolved validation as their smoothing is reduced.
+
+Reserve independent trajectories for validation after optimization. Compare
+lost-marker recall and integration failures as well as total losses: a high
+fraction of matching labels can hide errors in a small lost population.
+Cyclometry alone does not imply energy-selective helium confinement. That
+question also requires electric-field, collision and slowing-down models.
