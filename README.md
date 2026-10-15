@@ -72,7 +72,7 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.20.2` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.21.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.5.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
@@ -85,7 +85,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
-| `essos` | 0.20.2 | `vmex[coils]` | `pip install "essos>=0.20.2"` |
+| `essos` | 0.21.0 | `vmex[coils]` | `pip install "essos>=0.21.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.5 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.5"` |
 | `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
@@ -151,6 +151,15 @@ birth profile, and `--collisional` adds slowing down and pitch-angle scattering
 
 `--trace` is compared with SIMPLE and SIMSOPT on matched alphas, and its mode cut and timestep are
 checked on twenty equilibria ([guide](docs/howto/trace-alpha-particles.md#convergence-of-the-defaults)).
+
+The ESSOS tracer behind `--trace` (here with ESSOS's fixed-step Dopri8 defaults; `--trace` controls
+the step adaptively) against SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas from
+`s = 0.5` over 10 ms (DESC: the first 32), on 8 Apple M4 cores
+([record](benchmarks/essos_cross_code.json), from uwplasma/ESSOS#162):
+
+![Alpha losses against time for ESSOS, SIMPLE, FIRM3D, SIMSOPT and DESC in three equilibria](docs/_static/figures/cross_code_losses.webp)
+
+![Run time, energy error and agreement of loss labels with SIMPLE and FIRM3D](docs/_static/figures/cross_code_bars.webp)
 
 `--turbulence` (needs `vmex[turbulence]`, GKX >= 2.5.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
 [GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing `k_y`,
@@ -314,14 +323,14 @@ every VMEC-type code, shares. [Landreman (2026)](https://arxiv.org/abs/2609.2674
 equilibria with finite pressure and nested surfaces in closed form, and
 [Issan et al. (2026)](https://arxiv.org/abs/2610.07304) broke their stellarator symmetry with one
 parameter `tau` (`tau` and `-tau` are mirror images). [vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical) scores
-VMEX, VMEC2000, VMEC++ and DESC against them point by point, including at the axis.
+VMEX, VMEC2000 and DESC against them point by point, including at the axis.
 
 ![Exact boundaries, and VMEX current and flux-surface errors against the exact solution](docs/_static/figures/readme_exact_equilibria.webp)
 
 - The exact solutions found two VMEX defects that resolution studies missed, both fixed: the field
   at the axis (#452) and refinement before derivatives (#453).
-- VMEX's continuous field gives the current 10-70 times more accurately than the WOUT file
-  (middle panel), symmetric or not; B is right to 1e-5.
+- At mid-radius VMEX's continuous field gives the current 23-450 times more accurately than the
+  WOUT file (middle panel), symmetric or not; B is right to 1e-5.
 - Without stellarator symmetry the full-basis path adds no error: the `tau = 0` equilibrium solved in
   the full basis is the symmetric one to every digit, and mirror pairs agree to 1e-9. The Boozer
   transform, effective ripple and virtual casing were checked against the exact fields as well.

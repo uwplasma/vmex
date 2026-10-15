@@ -27,8 +27,6 @@ from vmex.core import optimize as opt
 from vmex.core import stability as stab
 from vmex.core.input import VmecInput
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 FAST = dict(npoints=81, nturns=3.0)
 

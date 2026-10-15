@@ -43,7 +43,7 @@ A WOUT whose spectrum looks truncated (`spectral_truncation > 3e-3`) triggers a 
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
 | `--trace-seed K` | 42 | births and collision noise | none |
 | `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
-| `--trace-mode-cut C` | `2e-4` | drop modes below `C` times the largest cosine/sine amplitude | about `1 / C` in modes |
+| `--trace-mode-cut C` | `2e-4` | drop modes below `C` times the largest cosine/sine amplitude | grows with the modes up to 48, then flat (ESSOS sums them once onto an angle table) |
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
 example, going from the default to 5000 alphas over 0.1 s costs 50 times the
@@ -125,8 +125,8 @@ wins. The Boozer transform takes about 2 s.
 **CPU or GPU.** Since ESSOS 0.19.3 (parallel spline lookup and compaction of
 lost alphas) a GPU is the faster choice for large ensembles: 1,024 alphas over
 2 ms take 2.4 s warm on an RTX A4000 against 18 s on eight CPU devices
-(uwplasma/ESSOS#98). On a laptop CPU the default 500-alpha run takes under a
-minute.
+(uwplasma/ESSOS#98). ESSOS 0.21 (angle table, lost alphas dropped) cut the
+default ARIES-CS run on 10 M4 cores from 111 s to 53 s and QA from 11 s to 7 s.
 
 ## Convergence of the defaults
 

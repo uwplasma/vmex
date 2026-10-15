@@ -41,9 +41,6 @@ def test_ky_scan_points_sit_on_the_gkx_grid(tmp_path):
                                            nonlinear=True).read_text())
     assert [s["name"] for s in deck["species"]] == ["ion", "electron"]
     assert deck["physics"]["nonlinear"] is True and deck["physics"]["adiabatic_electrons"] is False
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")  # solve + GKX: run jitted
 def test_turbulence_cli_smoke(tmp_path, capsys):
     pytest.importorskip("gkx", minversion="2.5.0")
     import vmex
@@ -65,9 +62,6 @@ def test_turbulence_cli_smoke(tmp_path, capsys):
     assert np.all(np.isfinite(summary["gamma"])) and np.all(np.isfinite(summary["heat_flux"]))
     for suffix in ("", "_geometry", "_fluxes"):
         assert (tmp_path / f"smoke_turbulence{suffix}.png").stat().st_size > 10_000
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_turbulence_flag_runs_after_a_solve_and_reports_missing_gkx(tmp_path, monkeypatch):
     """The solve path hands its WOUT to the driver; an ImportError becomes the dependency message."""
     from vmex.core import cli

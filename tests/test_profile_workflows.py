@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import jax
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,9 +27,10 @@ profile_workflows = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = profile_workflows
 _SPEC.loader.exec_module(profile_workflows)
 
-# Compilation is what these tests measure, and the suite conftest disables jit
-# globally; without this the records would describe eager primitives.
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
+@pytest.fixture(autouse=True)
+def _cold_compilation():
+    """Compilation is what these tests count; earlier tests may have compiled the same code."""
+    jax.clear_caches()
 
 
 def test_registry_rows_are_well_formed():

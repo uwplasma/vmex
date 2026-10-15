@@ -73,8 +73,8 @@ scheduled runs; they do not weaken assertions. Run either tier locally::
   VMEX_COMPILATION_CACHE=disabled pytest -q -m "not full and not weekly" tests/test_polish.py
   RUN_FULL=1 VMEX_COMPILATION_CACHE=disabled pytest -q tests/test_polish.py
 
-Use the restoring ``_module_jit_enabled`` fixture when a module needs compiled
-solves; an unscoped ``jax.config.update`` can change later tests. Directive
+Tests run jitted. A test that needs the eager lane sets ``jax_disable_jit`` and
+restores the previous value; an unscoped ``jax.config.update`` changes later tests. Directive
 parsing and precedence use a mocked driver; one real unpolished solve/export
 check remains in PR CI and the polished file workflow runs in Nightly.
 

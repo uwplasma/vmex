@@ -237,7 +237,7 @@ convergence: on this deck VMEX iota at ρ = 0.1 is 0.188, 0.176 and 0.166 for ns
 
 ## Exact equilibria
 
-[vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical) compares VMEX, VMEC2000, VMEC++ and DESC with closed-form
+[vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical) compares VMEX, VMEC2000 and DESC with closed-form
 equilibria: Landreman's integer-transform and sheared families (arXiv:2609.26742), two Solov'ev
 tokamaks, and the non-stellarator-symmetric extensions of Issan et al. (arXiv:2610.07304). Every
 exact case passes force balance and divergence to round-off; the Issan closed forms reproduce the
@@ -249,6 +249,9 @@ paper's volume, beta and transform. Each WOUT is scored by one script for every 
 | flux-label error, `tau0 = 0.5` | 8.4e-4 | 8.3e-4 |
 | J error at `s = 0.5`, native field / WOUT, `tau0 = 0` | 3.2e-5 / 6.8e-3 | 7.8e-6 / 3.5e-3 |
 | J error at `s = 0.5`, native field / WOUT, `tau0 = 0.5` | 1.9e-4 / 5.9e-3 | 1.3e-4 / 3.0e-3 |
+
+At mid-radius the native field gives J 23-450 times more accurately than the WOUT file. The record
+behind these numbers and the README figure is `benchmarks/exact_equilibria.json`.
 
 - **Full basis.** The `tau0 = 0` deck solved with `LASYM = T` reproduces the symmetric solve to every
   printed digit; `tau0 = 0.5` and `-0.5` agree to 1e-9.
@@ -262,8 +265,8 @@ paper's volume, beta and transform. Each WOUT is scored by one script for every 
   exact sheared family is the same for `tau1 = +-0.4` to 1e-4 (real-space reference); NEO_JAX
   reproduces the mirror identity to its line-length error (3e-3). virtual_casing_jax converges to the
   Biot-Savart field of the exact current at the symmetric rate.
-- **Not validated.** The sheared families (symmetric or not) do not converge in VMEX, VMEC2000 or
-  VMEC++, from a cold start or from the exact geometry (VMEX stalls at 1e-7); DESC solves them.
+- **Not validated.** The sheared families (symmetric or not) do not converge in VMEX or VMEC2000,
+  from a cold start or from the exact geometry (VMEX stalls at 1e-7); DESC solves them.
 
 ## Derivative certificates
 

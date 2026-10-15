@@ -31,8 +31,6 @@ from vmex.core.input import VmecInput  # noqa: E402
 from vmex.core import implicit as im  # noqa: E402
 from vmex.core import optimize as opt  # noqa: E402
 
-pytestmark = [pytest.mark.usefixtures("_module_jit_enabled")]  # full solves: jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmex_test_cache_lgradb")
 
