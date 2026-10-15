@@ -34,8 +34,6 @@ from vmex.core import turbulence as turb  # noqa: E402
 from vmex.core.statephysics import aspect_ratio  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 LINE = dict(s_index=7, alpha=0.3)          # one interior field line, off-symmetry
 GK = dict(s_index=7, ntheta=16)            # modest solver budget for the proxies

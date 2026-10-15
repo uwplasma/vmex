@@ -15,9 +15,6 @@ from tools.diagnose_input import diagnose
 
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_zero_effective_toroidal_flux_fails_on_first_iteration() -> None:
     """Zero PHIEDGE used to print NaNs until NITER was exhausted."""
     inp = VmecInput.from_file(DATA / "input.nfp2_QI")

@@ -170,7 +170,9 @@ that research budget as one commented set of constants next to the default.
   stellarator-symmetric stationary subspace. Each has a finite-beta companion
   that adds Mercier and resistive-interchange rows on a radially graded weight.
   The asymmetric boundary doubles the decision variables, so a stage costs
-  roughly twice its symmetric equivalent.
+  roughly twice its symmetric equivalent. The vacuum QI script closes with the
+  NEO_JAX effective ripple of the seed and the optimized boundary, computed on
+  the asymmetric Boozer spectrum.
 - `optimization/QA_maxJ_continuation.py` and `QI_maxJ_continuation.py` walk the
   constructed maximum-J target into the resolved certificate; the QA script
   states where maximum-J and quasisymmetry conflict near the axis.

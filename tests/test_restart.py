@@ -44,9 +44,6 @@ from vmex.core.restart import (  # noqa: E402
 )
 from vmex.core.wout import read_wout, wout_from_state, write_wout  # noqa: E402
 from tests.conftest import resolve_golden_dir  # noqa: E402
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 FB_DECK = DATA / "input.cth_like_free_bdy_lasym_small"
 FB_MGRID = DATA / "mgrid_cth_like_lasym_small.nc"

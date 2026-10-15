@@ -68,7 +68,6 @@ def _paraxial_mirror_field(center_field, curvature, points):
 
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.usefixtures("_module_jit_enabled"),
 ]
 
 # Per-test hardware gating (a module-level skip would also veto the CUDA-free

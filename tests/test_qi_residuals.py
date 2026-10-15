@@ -15,10 +15,6 @@ import jax.numpy as jnp
 from vmex.core import qi
 from vmex.core import implicit as im
 from vmex.core.input import VmecInput
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
-
 def _boozer(perturbation=0.0):
     return {
         "bmnc_b": jnp.array([[1.0, 0.2, perturbation]]),
