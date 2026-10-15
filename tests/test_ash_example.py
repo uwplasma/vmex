@@ -25,8 +25,22 @@ def test_gate_rejects_missing_and_truthy_non_boolean_evidence(example):
     assert "kinetic_response" in example.checked_verification(gates)["failed"]
 
 
-def test_unqualified_real_response_records_failure_before_optimizer(example, monkeypatch, tmp_path):
+@pytest.mark.parametrize("missing_metadata", [False, True])
+def test_unqualified_real_response_records_failure_before_optimizer(
+    example, monkeypatch, tmp_path, missing_metadata,
+):
     """A coarse negative-D kinetic response is a rejection, not a zero cost."""
+    if missing_metadata:
+        from importlib.metadata import PackageNotFoundError
+
+        installed_version = example.version
+
+        def version(name):
+            if name in ("essos", "dkx", "solvax"):
+                raise PackageNotFoundError(name)
+            return installed_version(name)
+
+        monkeypatch.setattr(example, "version", version)
     def transport(eq):
         raise ValueError("unqualified DKX helium diffusion: D=-0.219829 m^2/s; refine grid")
     provider = SimpleNamespace(transport=transport)
@@ -49,6 +63,8 @@ def test_unqualified_real_response_records_failure_before_optimizer(example, mon
     assert report["status"] == "rejected_seed"
     assert "D=-0.219829" in report["error"]
     assert len(report["input_sha256"]) >= 3
+    if missing_metadata:
+        assert all(report["versions"][name] is None for name in ("essos", "dkx", "solvax"))
 
 
 def test_feasible_seed_is_not_reported_as_ash_improvement(example):

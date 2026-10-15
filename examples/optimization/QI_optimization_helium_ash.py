@@ -29,7 +29,7 @@ from dataclasses import replace
 import importlib
 import hashlib
 import inspect
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -113,8 +113,15 @@ def main(argv=None):
     started = time.perf_counter()
     hashes = {str(path.resolve()): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in (args.input, args.profile, args.restart_wout) if path is not None}
+    versions = {}
+    for name in ("vmex", "essos", "dkx", "jax", "solvax"):
+        try:
+            versions[name] = version(name)
+        except PackageNotFoundError:
+            # Optional distribution metadata must not hide a physical rejection.
+            versions[name] = None
     ledger = dict(input_sha256=hashes,
-                  versions={name: version(name) for name in ("vmex", "essos", "dkx", "jax", "solvax")},
+                  versions=versions,
                   checkpoint_seed=args.checkpoint_seed, holdout_seed=args.holdout_seed,
                   objective=args.objective, budget=args.budget, status="unqualified")
 
