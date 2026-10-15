@@ -852,3 +852,48 @@ coordinate choices as its adjoint and reports Newton residuals for both
 perturbations. Agreement on that path validates that derivative; it does not
 remove sensitivity to coordinate choices made by independent re-solves.
 Quantify both before promoting an optimization result.
+
+Persistent equilibrium reference for scalar losses
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a scalar boundary objective, ``VmecProblem.from_loss`` can keep one
+explicit discrete coordinate family throughout a stage. Pass a compatible
+converged :class:`~vmex.core.optimize.Equilibrium` as ``frozen_reference``.
+VMEX copies its state and evolved-coordinate mask, refines the reference at
+its own parameters, and preserves the non-evolved complement for every trial.
+Ordinary host states predict the evolved coordinates without recapturing that
+complement. Values, gradients and ``equilibrium_from_x`` use the same admitted
+family root.
+
+Given a converged ``seed``, this minimal scalar example uses edge iota; replace
+``iota_edge`` with the traceable moving-surface loss for a cyclometry stage:
+
+.. code-block:: python
+
+   from vmex import optimize as opt
+   from vmex.core.implicit import iota_edge
+
+   problem = opt.VmecProblem.from_loss(
+       seed.inp, iota_edge, frozen_reference=seed,
+       max_mode=1, use_ess=False,
+       refine_tol=1e-11, adjoint_tol=1e-9)
+   value, gradient = problem.value_and_grad(problem.x0)
+   equilibrium = problem.equilibrium_from_x(problem.x0)
+
+Both the existing host convergence/FSQ admission and a finite fixed-family
+residual norm at or below ``refine_tol`` are required. A small family residual
+alone cannot admit a trial. Failed Newton refinement rejects the trial through
+the existing scalar rejection wall, and materialization refuses it.
+``refine_tol=numpy.inf`` is therefore unavailable for this option. Resolution,
+mode, constraint and static-profile mismatches are rejected rather than
+remapping the reference.
+
+This option is restricted to implicit scalar losses. Without it, existing
+solver behavior is unchanged. ``restart_from`` and ``warm_start`` select
+initial guesses; they do not establish this persistent family contract.
+Compare directional derivatives at the reference and displaced trial points,
+and inspect ``frozen_reference_residual`` in ``problem.evaluate(x).diagnostics``.
+Agreement validates the derivative of this discrete family; it does not
+establish a unique root across arbitrary trial histories, continuum MHD
+accuracy, or a confinement certificate. The independent field, orbit and
+uniform-remainder checks above remain necessary.

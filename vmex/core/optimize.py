@@ -1867,6 +1867,7 @@ def make_problem(
     device: Any = AUTO,
     solve_kwargs: dict | None = None,
     restart_from: Any = None,
+    frozen_reference: Equilibrium | None = None,
     progress: bool = False,
     report_interval: float = 10.0,
     progress_stream: Any = None,
@@ -1943,6 +1944,14 @@ def make_problem(
     implicit differentiation. The default preserves strict gradients;
     ``numpy.inf`` explicitly disables refinement for legacy comparisons.
 
+    ``frozen_reference`` accepts a compatible converged :class:`Equilibrium`
+    for the implicit scalar ``loss`` lane. Its copied reference and evolved
+    mask define one immutable discrete family for every value, gradient and
+    materialized equilibrium. Trials require both existing host convergence/FSQ
+    admission and Newton refinement to finite ``refine_tol``. The host state
+    predicts evolved coordinates; resolution/mode/constraint/static profile mismatches are rejected.
+    This specifies the discrete family; it does not certify continuum accuracy.
+
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
     stage changes ``mpol``, ``ntor``, or radial resolution: trial hot restarts
@@ -1951,6 +1960,8 @@ def make_problem(
     """
     if (objective_terms is None) == (loss is None):
         raise ValueError("provide exactly one of objective_terms or loss")
+    if frozen_reference is not None and (loss is None or derivative_method != "implicit"):
+        raise ValueError("frozen_reference requires an implicit scalar loss problem")
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
     initial_state = None
     if restart_from is not None:
@@ -2035,6 +2046,7 @@ def make_problem(
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
+            frozen_reference=frozen_reference,
             device=device,
             return_problem=True,
             problem_class=problem_class,
@@ -2578,6 +2590,7 @@ def _least_squares_implicit(
     problem_bounds: Any = None,
     problem_scales: np.ndarray | None = None,
     initial_state: SpectralState | None = None,
+    frozen_reference: Equilibrium | None = None,
     **scipy_kwargs,
 ):
     """Single-stage boundary least squares with implicit-gradient Jacobians.
@@ -2695,8 +2708,12 @@ def _least_squares_implicit(
     # cache (_template_runtime, the residual lane, _LAST_SOLVE) on repeated
     # problem construction with identical content.
     cfg = imp._canonical_config(dataclasses.replace(cfg, device=jac_device))
+    if frozen_reference is not None:
+        cfg = imp._with_frozen_reference(cfg, frozen_reference)
     if initial_state is not None:
         imp._HOT_CACHE[cfg] = initial_state
+    elif frozen_reference is not None:
+        imp._HOT_CACHE[cfg] = cfg.frozen_reference.state
 
     def _place(x: np.ndarray) -> jnp.ndarray:
         if jac_device is None:
@@ -2897,6 +2914,15 @@ def _least_squares_implicit(
         if hit[0] != imp._params_key(params_np):
             return False
         result = hit[1]
+        if cfg.frozen_reference is not None:
+            refined = imp._LAST_REFINED.get(cfg)
+            if refined is None or refined[0] != hit[0] or refined[2]:
+                return False
+            try:
+                imp._check_frozen_root(cfg, params_np, refined[1],
+                                       cfg.frozen_reference.state, cfg.frozen_reference.mask)
+            except VmecConvergenceError:
+                return False
         if bool(result.converged):
             return True
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
@@ -3587,10 +3613,36 @@ def _least_squares_implicit(
             result_input,
             resolution_from_input(result_input, ns=ns),
         )
-        _, residuals, _ = evaluate_forces(result.state, runtime)
+        if cfg.frozen_reference is not None:
+            runtime = imp.runtime_from_params(
+                imp._device_pin(cfg, jax.tree.map(jnp.asarray, params_np)), cfg)
+        _, residuals, diagnostics = evaluate_forces(result.state, runtime)
         result = dataclasses.replace(
             result, fsqr=float(residuals.fsqr), fsqz=float(residuals.fsqz),
             fsql=float(residuals.fsql))
+        if cfg.frozen_reference is not None:
+            # SolveResult also exposes host-derived arrays. Rebuild those
+            # from the admitted family root, just as WOUT reads that state.
+            from .solver import _physical_coefficients
+            from .transforms import physical_to_internal_scale
+            rc, rs, zc, zs = _physical_coefficients(
+                result.state, modes=runtime.modes,
+                lthreed=runtime.setup.lthreed, lasym=runtime.setup.lasym,
+                lconm1=runtime.setup.lconm1)
+            scale = np.asarray(1.0 / physical_to_internal_scale(runtime.modes, runtime.trig))
+            wb, wp = float(diagnostics.wb), float(diagnostics.wp)
+            converged = all(np.isfinite(v) and v <= cfg.ftol for v in
+                            (result.fsqr, result.fsqz, result.fsql))
+            result = dataclasses.replace(
+                result, converged=converged, ier_flag=11 if converged else 2,
+                wb=wb, wp=wp,
+                wmhd=(wb + wp / (runtime.gamma - 1.0)) * (2.0 * np.pi) ** 2,
+                r00=float(diagnostics.r00),
+                rmnc=np.asarray(rc) * scale, zmns=np.asarray(zs) * scale,
+                rmns=np.asarray(rs) * scale if runtime.setup.lasym else None,
+                zmnc=np.asarray(zc) * scale if runtime.setup.lasym else None,
+                iotaf=np.asarray(imp.iota_profile(result.state, runtime)),
+            )
 
         def exterior_field_factory(**kwargs):
             from . import virtual_casing as vc
@@ -3719,6 +3771,9 @@ def _least_squares_implicit(
         """
         params = imp._device_pin(cfg, jax.tree.map(
             jnp.asarray, params_of(jnp.asarray(x, dtype=float))))
+        if cfg.frozen_reference is not None:
+            state, _ = imp._host_solve_and_mask(cfg, params)
+            return jax.tree.map(jnp.asarray, state), imp.runtime_from_params(params, cfg)
         return (imp._host_solve(cfg, params).state,
                 imp.runtime_from_params(params, cfg))
 
@@ -3799,6 +3854,8 @@ def _least_squares_implicit(
                 "vary_major_radius": vary_major_radius,
                 "term_slices": term_slices,
                 "config": cfg,
+                "forward_family": ("frozen_reference" if cfg.frozen_reference is not None
+                                   else "solver_selected"),
                 "holder": holder,
                 "input": inp,
                 "jax_state_runtime": jax_state_runtime,

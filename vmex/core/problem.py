@@ -952,7 +952,12 @@ class VmecProblem(FunctionProblem):
             written — an object's ``residuals_state`` is never substituted
             for it.
         **kwargs:
-            As for :meth:`from_tuples`.
+            As for :meth:`from_tuples`. ``frozen_reference=equilibrium``
+            opts into one immutable discrete family, copied from a compatible
+            converged equilibrium. Values, gradients and materialization use
+            that same family. Both host convergence/FSQ and strict finite Newton residual
+            admission are required, with finite ``refine_tol`` and implicit derivatives;
+            incompatible resolution/modes/constraints are rejected.
 
         Returns
         -------
@@ -1369,6 +1374,15 @@ class VmecProblem(FunctionProblem):
             result = equilibrium.result
             fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
             ratio = fsq / float(cfg.ftol)
+            if getattr(cfg, "frozen_reference", None) is not None:
+                family = cfg.frozen_reference
+                params = imp.params_from_input(equilibrium.inp, device=cfg.device)
+                diagnostics.update(
+                    forward_family="frozen_reference",
+                    frozen_reference_residual=imp._check_frozen_root(
+                        cfg, params, equilibrium.state, family.state, family.mask),
+                    frozen_reference_tolerance=float(cfg.refine_tol),
+                )
             diagnostics.update(
                 fsq=fsq,
                 fsq_ratio=ratio,

@@ -171,7 +171,7 @@ from solvax import (
 from .device import (
     AUTO, _put_numeric_leaves, commit_to_single_device, resolve_implicit_device,
 )
-from .errors import AdjointSolveError, VmecError
+from .errors import AdjointSolveError, VmecConvergenceError, VmecError
 from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
 from .geometry import (
@@ -300,6 +300,14 @@ def input_with_params(inp: VmecInput, params: ImplicitParams) -> VmecInput:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _FrozenReference:
+    """Immutable, content-keyed definition of one discrete forward family."""
+
+    state: SpectralState
+    mask: SpectralState
+
+
 @dataclass(frozen=True, eq=False)
 class ImplicitConfig:
     """Static (non-differentiable) context of one implicit solve."""
@@ -371,6 +379,9 @@ class ImplicitConfig:
     #: gradient evaluated outside such a context creates its constants on
     #: JAX's default device and mixes devices with the committed state.
     device: Any = None
+    #: Explicit persistent family; its immutable arrays enter config identity
+    #: and therefore every solve/refinement/compiled-objective cache key.
+    frozen_reference: _FrozenReference | None = None
 
 
 def make_config(
@@ -483,6 +494,83 @@ def _canonical_config(cfg: ImplicitConfig) -> ImplicitConfig:
     while len(_CONFIG_CANON) > _CONFIG_CANON_MAX:
         _CONFIG_CANON.popitem(last=False)
     return cfg
+
+
+def _with_frozen_reference(cfg: ImplicitConfig, reference: Any) -> ImplicitConfig:
+    """Capture and refine a compatible explicit equilibrium exactly once.
+
+    No host solve or mutable solve cache chooses the complement.  Arrays are
+    copied onto immutable JAX storage before canonicalizing the family.
+    """
+    if not np.isfinite(cfg.refine_tol) or cfg.refine_tol <= 0.0:
+        raise ValueError("frozen_reference requires finite positive refine_tol")
+    if not all(hasattr(reference, name) for name in ("inp", "runtime", "state", "result")):
+        raise TypeError("frozen_reference must be a converged Equilibrium")
+    rt = reference.runtime
+    if bool(cfg.inp.lfreeb) or bool(reference.inp.lfreeb):
+        raise ValueError("frozen_reference requires a fixed-boundary equilibrium")
+    if (rt.resolution != cfg.resolution
+            or resolution_from_input(reference.inp, ns=cfg.resolution.ns) != cfg.resolution):
+        raise ValueError("frozen_reference resolution/mode mismatch")
+    if (bool(rt.setup.lconm1) != cfg.lconm1
+            or int(rt.setup.ncurr) != int(cfg.inp.ncurr)):
+        raise ValueError("frozen_reference constraint mismatch (lconm1/ncurr)")
+    # These static profile/force controls are baked into the runtime rather
+    # than carried by ImplicitParams.  Silently changing them reinterprets
+    # the supplied reference instead of capturing its equilibrium family.
+    for name in ("tcon0", "lforbal", "spres_ped", "bloat", "gamma", "pmass_type", "piota_type", "pcurr_type",
+                 "aphi", "am_aux_s", "am_aux_f", "ai_aux_s", "ai_aux_f", "ac_aux_s",
+                 "raxis_c", "raxis_s", "zaxis_c", "zaxis_s"):
+        if _content_token(getattr(reference.inp, name, None)) != _content_token(
+                getattr(cfg.inp, name, None)):
+            raise ValueError(f"frozen_reference static input mismatch: {name}")
+    if not bool(reference.result.converged) or not np.isfinite(_fsq(reference.result)):
+        raise ValueError("frozen_reference must be a finite converged equilibrium")
+    with _device_context(cfg):
+        template = _template_runtime(cfg)
+        if (bool(rt.setup.lflip) != bool(template.setup.lflip)
+                or int(rt.setup.signgs) != int(template.setup.signgs)):
+            raise ValueError("frozen_reference boundary orientation mismatch")
+        if any(getattr(rt, name) != getattr(template, name)
+               for name in ("tcon0", "gamma", "lforbal", "lfreeb", "jmax")):
+            raise ValueError("frozen_reference runtime constraint mismatch")
+        if (not np.array_equal(reference.result.xm, np.asarray(template.modes.m))
+                or not np.array_equal(reference.result.xn,
+                                      np.asarray(template.modes.n) * cfg.resolution.nfp)):
+            raise ValueError("frozen_reference mode-table mismatch")
+        mask = _device_pin(cfg, _fixed_boundary_dof_mask(cfg))
+        state = _device_pin(cfg, jax.tree.map(
+            lambda a: jnp.asarray(np.array(a, dtype=np.float64, copy=True)), reference.state))
+        if any(a.shape != b.shape for a, b in zip(
+                jax.tree.leaves(state), jax.tree.leaves(mask), strict=True)):
+            raise ValueError("frozen_reference state shape mismatch")
+        if not all(np.all(np.isfinite(a)) for a in jax.tree.leaves(state)):
+            raise ValueError("frozen_reference state must be finite")
+        params = params_from_input(reference.inp, device=cfg.device)
+        _boundary_pack_tables(cfg)
+        try:
+            state = _refined_state(cfg, params, state, mask)
+            _check_frozen_root(cfg, params, state, state, mask)
+        finally:
+            # Capture does not use the trial-refinement memo/factor handoff.
+            _BLOCK_FACTORS_BUILT.pop(id(cfg), None)
+            _ANCHOR_STALLED.pop(id(cfg), None)
+        return _canonical_config(dataclasses.replace(
+            cfg, frozen_reference=_FrozenReference(state, mask)))
+
+
+def _check_frozen_root(cfg: ImplicitConfig, params: ImplicitParams,
+                       state: SpectralState, frozen: SpectralState,
+                       mask: SpectralState) -> float:
+    """Reject every nonfinite or insufficiently converged family root."""
+    project = _dof_projector(cfg, mask)
+    residual = float(_tree_norm(residual_fn(cfg, frozen, mask)(project(state), params)))
+    if (not all(np.all(np.isfinite(a)) for a in jax.tree.leaves(state))
+            or not np.isfinite(residual) or residual > cfg.refine_tol):
+        raise VmecConvergenceError(
+            f"frozen_reference residual {residual:.3e} exceeds refine_tol {cfg.refine_tol:.3e}",
+            ftol=cfg.ftol)
+    return residual
 
 
 def _device_context(cfg: ImplicitConfig):
@@ -1865,7 +1953,15 @@ def _host_solve_and_mask(cfg: ImplicitConfig, params_np, *,
     # explicitly placed state (observed as NaN diagnostics / zero gradients
     # on a non-default GPU).
     with _device_context(cfg):
-        return _host_solve_and_mask_impl(cfg, params_np, refine=refine)
+        try:
+            return _host_solve_and_mask_impl(cfg, params_np, refine=refine)
+        except VmecError as exc:
+            # Strict frozen-root rejection uses the same short typed-error
+            # relay as ordinary predictor failures in the callback lane.
+            _HOST_ERROR.append(exc)
+            raise RuntimeError(
+                f"host equilibrium solve failed with {type(exc).__name__} "
+                "(re-raised typed at the pure_callback call site)") from None
 
 
 def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
@@ -1916,16 +2012,24 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # differentiates: it skips the (expensive) anchor so the first user
     # output is not held behind it, and the first derivative evaluation —
     # which memo-hits this solve — computes the identical refinement then.
-    if not refine:
+    if not refine and cfg.frozen_reference is None:
         return as_np(result.state), mask
     # The forward solve picks its own device (AUTO), so rehome its state
     # beside the parameters before refining: on cfg.device, or where the
     # callback payload is committed when no device is carried.
     home = cfg.device if cfg.device is not None else _params_committed_device(params)
+    predictor = result.state if home is None else jax.device_put(result.state, home)
+    if cfg.frozen_reference is not None:
+        family = cfg.frozen_reference
+        mask = family.mask
+        project = _dof_projector(cfg, mask)
+        predictor = _assemble(project(predictor), runtime_from_params(params, cfg),
+                              family.state, project, _edge_mask(cfg))
     state = _refine_fixed_point(
-        cfg, params, result.state if home is None else jax.device_put(result.state, home),
-        _device_pin(cfg, jax.tree.map(jnp.asarray, mask)))
-    return as_np(state), mask
+        cfg, params, predictor, _device_pin(cfg, jax.tree.map(jnp.asarray, mask)))
+    if cfg.frozen_reference is not None:
+        _check_frozen_root(cfg, params, state, cfg.frozen_reference.state, mask)
+    return as_np(state), as_np(mask)
 
 
 def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
