@@ -98,6 +98,8 @@ GRANDFATHERED_FILES = {
     "figures/readme_single_stage_free_boundary.webp",
     "figures/readme_turbulence.webp",
     "figures/readme_wall_tracing.webp",
+    "figures/cross_code_bars.webp",
+    "figures/cross_code_losses.webp",
     "figures/stellarator_mirror_hybrid.webp",
 }
 

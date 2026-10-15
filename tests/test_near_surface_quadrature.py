@@ -29,7 +29,6 @@ from vmex.core import virtual_casing as VC  # noqa: E402
 from vmex.core.extender import ExteriorFieldAccuracyError, VmecExtender  # noqa: E402
 
 pytestmark = [
-    pytest.mark.usefixtures("_module_jit_enabled"),
     pytest.mark.skipif(not VC.have_virtual_casing_jax(), reason="requires virtual_casing_jax"),
 ]
 

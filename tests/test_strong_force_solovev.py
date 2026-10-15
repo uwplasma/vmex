@@ -100,9 +100,6 @@ from vmex.core.strong_force import (
 
 # Every evaluation here is a compiled reduction over tens of thousands of
 # shifted quadrature points: ~7 s jitted against ~20-30 s interpreted.
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
-# ---------------------------------------------------------------------------
 # closed-form Solov'ev equilibrium
 # ---------------------------------------------------------------------------
 

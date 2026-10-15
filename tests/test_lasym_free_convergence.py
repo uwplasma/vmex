@@ -14,7 +14,6 @@ from tests.test_lasym_free_case import lasym_free_field, lasym_free_input
 
 pytestmark = [
     pytest.mark.full,
-    pytest.mark.usefixtures("_module_jit_enabled"),
 ]
 
 

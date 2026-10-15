@@ -559,9 +559,6 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
         parameterized.B_vjp(weight), expected_vjp, rtol=2e-10, atol=2e-10)
     with pytest.raises(ValueError, match="cotangent has shape"):
         parameterized.B_vjp(jnp.ones(weight.shape + (3,)))
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")  # one solve, 200 s interpreted
 def test_flux_coordinates_compile_once_and_repeat_for_free():
     """``flux_coordinates`` and its exterior-point check run as compiled kernels.
 

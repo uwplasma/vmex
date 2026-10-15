@@ -43,8 +43,6 @@ from vmex.core import multigrid, solver
 from vmex.core.errors import BAD_JACOBIAN_FLAG, VmecJacobianError
 from vmex.core.input import VmecInput
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmex_ladder_cache")
 

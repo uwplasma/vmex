@@ -160,9 +160,6 @@ def test_lamcal_axis_row_convention(case):
     assert np.all(new_np[0, 1:, :] == 0.0)
     assert np.all(new_np[0, 0, 1:] == 0.0)
     assert new_np[0, 0, 0] != 0.0
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 @pytest.mark.parametrize("free_boundary", [False, True])
 def test_radial_matrix_transpose_with_half_mesh_padding(free_boundary):
     """The compiled matrix pullback supports the extra free-boundary row."""

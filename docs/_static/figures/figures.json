@@ -669,6 +669,44 @@
       ]
     },
     {
+      "path": "docs/_static/figures/cross_code_losses.webp",
+      "sha256": "b044cfb477b442715cadedf1613ada31eb3b143b33b0cddb72f3c6ec88bfd552",
+      "bytes": 10708,
+      "generator": "benchmarks/make_essos_cross_code_figures.py",
+      "command": "python benchmarks/make_essos_cross_code_figures.py",
+      "inputs": [
+        "benchmarks/essos_cross_code.json"
+      ],
+      "record": "benchmarks/essos_cross_code.json",
+      "generated": "2026-10-11",
+      "hardware": "Apple M4 (10 cores, 8 used), CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Loss fraction against time for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 32-color lossless WebP."
+    },
+    {
+      "path": "docs/_static/figures/cross_code_bars.webp",
+      "sha256": "afadd2ddd0c8e5703d789ce96c0385b50ee364f2de4498d6203311d2cc61dab8",
+      "bytes": 6448,
+      "generator": "benchmarks/make_essos_cross_code_figures.py",
+      "command": "python benchmarks/make_essos_cross_code_figures.py",
+      "inputs": [
+        "benchmarks/essos_cross_code.json"
+      ],
+      "record": "benchmarks/essos_cross_code.json",
+      "generated": "2026-10-11",
+      "hardware": "Apple M4 (10 cores, 8 used), CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Run time, max energy error and fate agreement with SIMPLE and FIRM3D for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 32-color lossless WebP."
+    },
+    {
       "path": "docs/_static/figures/position_control.webp",
       "sha256": "869bebed5d9cc6f84c259d6e4828ae7af8d657bdbf9a2d22f41936a0a72eb43b",
       "bytes": 28954,

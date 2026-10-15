@@ -340,13 +340,9 @@ def _first_iteration_row(stdout: str) -> list[float]:
 def _run_vmex_cli(deck: Path, outdir: Path) -> str:
     from vmex.core import cli
 
-    jax.config.update("jax_disable_jit", False)
-    try:
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            cli.main([str(deck), "--outdir", str(outdir)])
-    finally:
-        jax.config.update("jax_disable_jit", True)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        cli.main([str(deck), "--outdir", str(outdir)])
     return buffer.getvalue()
 
 

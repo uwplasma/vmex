@@ -25,9 +25,6 @@ from vmex.core.multigrid import (  # noqa: E402
 )
 from vmex.core.preconditioner_2d import Prec2DConfig  # noqa: E402
 from vmex.core.solver import SpectralState, resolution_from_input  # noqa: E402
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 REPO = Path(__file__).resolve().parents[1]
 DECK = REPO / "examples" / "data" / "input.cth_like_free_bdy_lasym_small"
 MGRID = REPO / "examples" / "data" / "mgrid_cth_like_lasym_small.nc"
