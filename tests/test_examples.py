@@ -444,6 +444,7 @@ def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None
         assert field in source
 
 
+@pytest.mark.full  # nightly: discrete solve + prescribed-current polish
 def test_prescribed_current_polishing_example(tmp_path):
     out = _run_example(EXAMPLES / "prescribed_current_polishing.py", tmp_path, timeout=600)
     assert "Forward result only" in out

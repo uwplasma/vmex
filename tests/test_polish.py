@@ -292,3 +292,11 @@ def test_current_polish_reduces_force_preserves_constraints_and_retains_scope():
     inverted = dataclasses.replace(state, jacobian_sign=1)
     with pytest.raises(ValueError, match="Jacobian"):
         polish.polish_prescribed_current(inverted, inp)
+
+
+def test_current_mode_blocks_need_whole_spans():
+    """The per-span block assembly slices nodes span by span."""
+    from vmex.core.polish import _current_mode_blocks
+    base = SimpleNamespace(radial_basis=SimpleNamespace(breakpoints=np.linspace(0, 1, 4)))
+    with pytest.raises(ValueError, match="split evenly"):
+        _current_mode_blocks(base, SimpleNamespace(rho=np.zeros(10)), None, None, None, None, None)

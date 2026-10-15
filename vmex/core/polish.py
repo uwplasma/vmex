@@ -1321,6 +1321,10 @@ def _current_mode_blocks(base, plan, layout, scale, flux_jets, force_scale, volu
     JVPs/VJPs keep setup memory independent of a global geometry Jacobian;
     each span contributes only to overlapping spline coefficients.
     """
+    spans = len(base.radial_basis.breakpoints) - 1
+    if plan.rho.size % spans:
+        raise ValueError(f"{plan.rho.size} radial nodes do not split evenly over {spans} spline spans")
+
     def state_from(x):
         return apply_high_order_correction(base, layout.unpack(scale * x))
 
@@ -1354,7 +1358,6 @@ def _current_mode_blocks(base, plan, layout, scale, flux_jets, force_scale, volu
     width = max(map(len, groups))
     indices = np.full((len(groups), width), layout.size, dtype=int)
     blocks = np.zeros((len(groups), width, width))
-    spans = len(base.radial_basis.breakpoints) - 1
     order = nr // spans
     support = (radial[0] != 0) | (radial[1] != 0) | (radial[2] != 0)
     for group, columns in enumerate(groups):
@@ -1385,7 +1388,13 @@ def _current_mode_blocks(base, plan, layout, scale, flux_jets, force_scale, volu
 
 @dataclass(frozen=True)
 class CurrentPolishResult:
-    """Forward optimization result, without a stationarity/adjoint certificate.
+    """Forward optimization result. There is no stationarity certificate.
+
+    The axisymmetric path certifies its result against an independent
+    oracle; this one does not.  ``optimizer_converged`` and ``gradient_norm``
+    report only L-BFGS termination on the discrete cost, which says nothing
+    about held-out force, quadrature or knot refinement, and no adjoint or
+    implicit derivative is qualified for the result.
 
     ``geometry`` contains the polished R/Z/lambda and unchanged pressure and
     toroidal flux. Its ``chipf`` is a placeholder: use :meth:`samples` for the
