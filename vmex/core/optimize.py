@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import functools
 import inspect
 import warnings
 from dataclasses import dataclass
@@ -2718,32 +2719,30 @@ def _least_squares_implicit(
             x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
     x0 = np.asarray(x0, dtype=float)
 
-    # Content key of every degree of freedom the jitted closures below bake
-    # in: the canonical config identity (input deck, resolution, tolerances,
-    # device), the term/loss identities with resolved targets/weights, the
-    # dof layout, the seed point (penalty-wall center), and the Jacobian
-    # routing knobs.  Repeated problem construction with equal content then
-    # reuses the earlier jitted callables through _problem_jit instead of
-    # re-tracing every graph.
+    # Structural key of the jitted closures below: the canonical config
+    # (structure only, see implicit._canonical_config), the term/loss
+    # identities, the dof layout and the Jacobian routing knobs.  The numbers
+    # of one problem -- its seed boundary and profiles, seed point, targets,
+    # weights and scalar wall -- are the traced argument ``data``, so a
+    # problem rebuilt at a new seed point (the next optimizer stage) or with
+    # new targets and weights reuses every executable instead of recompiling.
     problem_jit_key = (
         id(cfg),
-        tuple(
-            (_problem_callable_token(f_orig), float(t_res),
-             np.asarray(w_res).tobytes())
-            for (f_orig, _t, _w), (_f, t_res, w_res)
-            in zip(objective_terms, terms)
-        ),
+        tuple((_problem_callable_token(f_orig), np.shape(w_res))
+              for (f_orig, _t, _w), (_f, _t_res, w_res)
+              in zip(objective_terms, terms)),
         (None if scalar_objective is None
          else _problem_callable_token(scalar_objective)),
         int(max_mode), bool(vary_major_radius),
         None if current_dofs is None else int(current_dofs),
-        x0.shape, x0.tobytes(),
+        x0.shape,
         (jac_chunk_size if jac_chunk_size is None
          or isinstance(jac_chunk_size, int) else str(jac_chunk_size)),
         str(jac_solver),
     )
 
-    def params_of(x: jnp.ndarray):
+    def params_of(x: jnp.ndarray, data):
+        params0 = data["params0"]
         repl = dict(rbc=params0.rbc.at[row_idx, col_idx].set(x[:nm]),
                     zbs=params0.zbs.at[row_idx, col_idx].set(x[nm:2 * nm]))
         if lasym:  # non-symmetric families [rbs..., zbc...] (see pack_boundary)
@@ -2764,19 +2763,26 @@ def _least_squares_implicit(
                     curtor=x[nboundary + k_cur] * _CURTOR_SCALE)
         return params
 
-    def term_rows(state, rt) -> jnp.ndarray:
+    def term_rows(state, rt, data) -> jnp.ndarray:
         if traceable_scalar is not None:
             return jnp.atleast_1d(jnp.asarray(traceable_scalar(state, rt))).ravel()
         return jnp.concatenate([
             jnp.atleast_1d(w * (jnp.asarray(f(state, rt)) - t)).ravel()
-            for (f, t, w) in terms])
+            for (f, _, _), t, w in zip(terms, data["targets"], data["weights"])])
+
+    problem_data = {
+        "params0": params0, "x0": _place(x0),
+        "targets": tuple(_place(np.asarray(t)) for _, t, _ in terms),
+        "weights": tuple(_place(np.asarray(w)) for _, _, w in terms),
+        "wall": _place(np.asarray(1.0)),  # set from the seed cost below
+    }
 
     # The initial point is strict: it must solve and define a finite residual
     # shape before any optimizer is entered.  Later trial points use the
     # exception-free status callback below.
     params0_np = jax.tree.map(
-        lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x0))
-    )
+        lambda a: np.asarray(a, dtype=np.float64),
+        params_of(_place(x0), problem_data))
     # ``refine=False``: the preflight validates the seed solve and the
     # residual shape but never differentiates this state, so it does not pay
     # for the fixed-point anchor here.  The first derivative evaluation
@@ -2787,9 +2793,9 @@ def _least_squares_implicit(
     state0 = jax.tree.map(_place, state0_np)
 
     def term_blocks(x, state):
-        rt = imp.runtime_from_params(params_of(x), cfg)
+        rt = imp.runtime_from_params(params_of(x, problem_data), cfg)
         if traceable_scalar is not None:
-            return [term_rows(state, rt)]
+            return [term_rows(state, rt, problem_data)]
         return [jnp.atleast_1d(w * (jnp.asarray(f(state, rt)) - t)).ravel()
                 for f, t, w in terms]
 
@@ -2815,12 +2821,11 @@ def _least_squares_implicit(
         )
     else:
         term_slices = ()
-    x0_device = _place(x0)
-    x_penalty_scale = jnp.maximum(jnp.abs(x0_device), 1.0e-2)
     x_penalty_scale_host = np.maximum(np.abs(x0), 1.0e-2)
 
-    def failure_magnitude(x: jnp.ndarray) -> jnp.ndarray:
-        distance = jnp.linalg.norm((x - x0_device) / x_penalty_scale)
+    def failure_magnitude(x: jnp.ndarray, data) -> jnp.ndarray:
+        x_ref = data["x0"]
+        distance = jnp.linalg.norm((x - x_ref) / jnp.maximum(jnp.abs(x_ref), 1.0e-2))
         return jnp.asarray(1.0e6) * (1.0 + distance)
 
     def failure_jacobian(x: np.ndarray) -> np.ndarray:
@@ -2868,16 +2873,18 @@ def _least_squares_implicit(
         )
         return scalar_wall_base * growth ** 2, gradient
 
-    def failure_value_and_gradient_jax(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        delta = (x - x0_device) / x_penalty_scale
+    def failure_value_and_gradient_jax(
+            x: jnp.ndarray, data) -> tuple[jnp.ndarray, jnp.ndarray]:
+        scale = jnp.maximum(jnp.abs(data["x0"]), 1.0e-2)
+        delta = (x - data["x0"]) / scale
         distance = jnp.linalg.norm(delta)
         growth = 1.0 + distance
         gradient = jnp.where(
             distance == 0.0,
             jnp.zeros_like(x),
-            (2.0 * scalar_wall_base * growth / distance) * delta / x_penalty_scale,
+            (2.0 * data["wall"] * growth / distance) * delta / scale,
         )
-        return scalar_wall_base * growth ** 2, gradient
+        return data["wall"] * growth ** 2, gradient
 
     def certified_trial(x: np.ndarray) -> bool:
         """Whether the memoized solve at ``x`` is a usable fixed point.
@@ -2895,8 +2902,8 @@ def _least_squares_implicit(
         if hit is None:
             return False
         params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x))
-        )
+            lambda a: np.asarray(a, dtype=np.float64),
+            params_of(_place(x), problem_data))
         if hit[0] != imp._params_key(params_np):
             return False
         result = hit[1]
@@ -2905,28 +2912,29 @@ def _least_squares_implicit(
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         return bool(np.isfinite(fsq) and fsq <= cfg.max_fsq_ratio * cfg.ftol)
 
-    def rows_at_state(x, state, status):
-        params = params_of(x)
+    def rows_at_state(x, state, status, data):
+        params = params_of(x, data)
         runtime = imp.runtime_from_params(params, cfg)
         return jax.lax.cond(
             status == 0,
-            lambda _: term_rows(state, runtime),
+            lambda _: term_rows(state, runtime, data),
             lambda _: jnp.full(
                 (residual_size,),
-                failure_magnitude(x) / jnp.sqrt(float(residual_size)),
+                failure_magnitude(x, data) / jnp.sqrt(float(residual_size)),
                 dtype=jnp.float64,
             ),
             operand=None,
         )
 
-    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
-        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
-        return rows_at_state(x, state, status)
+    def residual_rows(x: jnp.ndarray, data) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
+        return rows_at_state(x, state, status, data)
 
     host_rows_jit = _problem_jit(
         problem_jit_key, "host_rows", lambda: jax.jit(rows_at_state))
     initial_rows = np.asarray(jax.device_get(
-        host_rows_jit(x0_device, state0, np.int32(0))), dtype=float)
+        host_rows_jit(problem_data["x0"], state0, np.int32(0), problem_data)),
+        dtype=float)
     if not np.all(np.isfinite(initial_rows)):
         raise FloatingPointError("non-finite or empty objective at the initial point")
     seed_cost = (
@@ -2935,25 +2943,26 @@ def _least_squares_implicit(
         else float(initial_rows[0])
     )
     scalar_wall_base = max(10.0 * abs(seed_cost), 1.0)
+    problem_data["wall"] = _place(np.asarray(scalar_wall_base))
     rows_jit = _problem_jit(
         problem_jit_key, "rows", lambda: jax.jit(residual_rows))
 
-    def scalar_at_state(x, state, status):
-        params = params_of(x)
+    def scalar_at_state(x, state, status, data):
+        params = params_of(x, data)
         runtime = imp.runtime_from_params(params, cfg)
         def accepted(_):
-            rows = term_rows(state, runtime)
+            rows = term_rows(state, runtime, data)
             return 0.5 * jnp.vdot(rows, rows) if traceable_scalar is None else jnp.asarray(traceable_scalar(state, runtime))
         return jax.lax.cond(
             status == 0,
             accepted,
-            lambda _: failure_value_and_gradient_jax(x)[0],
+            lambda _: failure_value_and_gradient_jax(x, data)[0],
             operand=None,
         )
 
-    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
-        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
-        return scalar_at_state(x, state, status)
+    def scalar_loss(x: jnp.ndarray, data) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
+        return scalar_at_state(x, state, status, data)
 
     host_scalar_jit = _problem_jit(
         problem_jit_key, "host_scalar", lambda: jax.jit(scalar_at_state))
@@ -3014,7 +3023,7 @@ def _least_squares_implicit(
             "jac_chunk_size must be None, a positive int, or 'auto', "
             f"got {jac_chunk_size!r}")
 
-    def _jac_parts(x: jnp.ndarray, state):
+    def _jac_parts(x: jnp.ndarray, state, data):
         """Shared per-x setup of the implicit-Jacobian maps at solved ``state``.
 
         At the fixed point, ``dz_j = -(dF/dz)^{-1} dF/dp t_j`` per boundary
@@ -3027,7 +3036,7 @@ def _least_squares_implicit(
         linearization point (the block variant re-linearizes the *raw*
         residual formulation there).
         """
-        params = params_of(x)
+        params = params_of(x, data)
         frozen = jax.lax.stop_gradient(state)
         P = imp._dof_projector(cfg, mask_const)
         edge = imp._edge_mask(cfg)
@@ -3036,7 +3045,7 @@ def _least_squares_implicit(
 
         def G(z, prm):
             rt_p = imp.runtime_from_params(prm, cfg)
-            return term_rows(imp._assemble(z, rt_p, frozen, P, edge), rt_p)
+            return term_rows(imp._assemble(z, rt_p, frozen, P, edge), rt_p, data)
 
         def Fz(dz):
             return jax.jvp(lambda z: F(z, params), (z_star,), (dz,))[1]
@@ -3069,7 +3078,7 @@ def _least_squares_implicit(
     certify_rtol = float(cfg.jacobian_adjoint_tol)
     certify_maxiter = int(cfg.jacobian_adjoint_maxiter)
 
-    def jacobian_rows(x: jnp.ndarray, state):
+    def jacobian_rows(x: jnp.ndarray, state, data, bands=None):
         """Exact residual Jacobian by *forward* implicit differentiation.
 
         One batched preconditioned GMRES per boundary dof (see
@@ -3081,7 +3090,7 @@ def _least_squares_implicit(
         ``ndof``): they are the R25.4 perturbation warm-start linearization,
         already paid for by the column solves.
         """
-        Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x, state)
+        Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x, state, data)
 
         def column(tp_stack):
             tp = tangent_of(tp_stack)
@@ -3120,7 +3129,7 @@ def _least_squares_implicit(
     else:
         probe_chunk = chunk
 
-    def jacobian_rows_block(x: jnp.ndarray, state):
+    def jacobian_rows_block(x: jnp.ndarray, state, data, bands=None):
         """``jacobian_rows`` via one block-tridiagonal factorization (R25.2).
 
         Same Jacobian as the default path to ``cfg.adjoint_tol`` (the GMRES
@@ -3128,17 +3137,19 @@ def _least_squares_implicit(
         cost that does not grow with the boundary-dof count.  Returns the
         certified per-dof responses ``dz_j`` alongside the rows (the R25.4
         perturbation warm-start linearization, same contract as
-        ``jacobian_rows``).
+        ``jacobian_rows``).  ``bands`` are the config's shared block
+        factorization at ``state`` (``imp._block_bands``); a traced caller
+        omits them and the graph builds its own.
         """
         _, tangent_of, _, column_of, (params, frozen, _, _) = \
-            _jac_parts(x, state)
+            _jac_parts(x, state, data)
         tangent_batch = jax.vmap(tangent_of)(tangent_stack)
         tangent_chunk = ndof if chunk is None else chunk
         dz0, report = imp._implicit_evolved_tangent_multi_rhs(
             params, cfg, frozen, mask_const, tangent_batch,
             active_fields=active_fields, probe_chunk_size=probe_chunk,
             response_chunk_size=tangent_chunk, certify_rtol=certify_rtol,
-            certify_maxiter=certify_maxiter,
+            certify_maxiter=certify_maxiter, bands=bands,
         )
 
         def column(args):
@@ -3165,7 +3176,7 @@ def _least_squares_implicit(
         problem_jit_key, "jac_gmres", lambda: jax.jit(jacobian_rows))
     reverse_width = ndof if chunk is None else chunk
 
-    def reverse_pullback(x, state, status, cotangent_of, count):
+    def reverse_pullback(x, state, status, cotangent_of, count, data):
         """Rows ``cotangent_of(i)^T J`` for ``i < count`` at one solved state.
 
         Each row is pulled back to the state and the direct ``x`` path, the
@@ -3182,14 +3193,14 @@ def _least_squares_implicit(
         """
         frozen = jax.lax.stop_gradient(state)
         _, direct = jax.vjp(
-            lambda point, solved: rows_at_state(point, solved, status),
+            lambda point, solved: rows_at_state(point, solved, status, data),
             x, frozen)
-        _, boundary = jax.vjp(params_of, x)
+        _, boundary = jax.vjp(lambda point: params_of(point, data), x)
         indices = jnp.arange(count)
 
         def converged(_):
             pullback = imp._block_state_pullback(
-                params_of(x), cfg, frozen, mask_const,
+                params_of(x, data), cfg, frozen, mask_const,
                 active_fields=active_fields, probe_chunk_size=probe_chunk)
 
             def row(i):
@@ -3205,21 +3216,21 @@ def _least_squares_implicit(
 
         return jax.lax.cond(status == 0, converged, failed, operand=None)
 
-    def jacobian_rows_reverse(x: jnp.ndarray) -> jnp.ndarray:
+    def jacobian_rows_reverse(x: jnp.ndarray, data) -> jnp.ndarray:
         """Reverse Jacobian from one solve and one block factorization."""
-        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
         return reverse_pullback(
             x, state, status,
             lambda i: jax.nn.one_hot(i, residual_size, dtype=jnp.float64),
-            residual_size)
+            residual_size, data)
 
     reverse_jit = _problem_jit(
         problem_jit_key, "jac_reverse", lambda: jax.jit(jacobian_rows_reverse))
 
-    def reverse_gradient(x: jnp.ndarray, rows: jnp.ndarray) -> jnp.ndarray:
+    def reverse_gradient(x: jnp.ndarray, rows: jnp.ndarray, data) -> jnp.ndarray:
         """``J^T rows`` from one pullback: the reverse lane's scalar gradient."""
-        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
-        return reverse_pullback(x, state, status, lambda _: rows, 1)[0]
+        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
+        return reverse_pullback(x, state, status, lambda _: rows, 1, data)[0]
 
     reverse_gradient_jit = _problem_jit(
         problem_jit_key, "gradient_reverse", lambda: jax.jit(reverse_gradient))
@@ -3247,7 +3258,7 @@ def _least_squares_implicit(
     P_seed = imp._dof_projector(cfg, mask_const)
     edge_seed = imp._edge_mask(cfg)
 
-    def predicted_state(x_trial, x_ref, frozen, dz_cols):
+    def predicted_state(x_trial, x_ref, frozen, dz_cols, data):
         """First-order trial-state prediction around the stashed jac point.
 
         ``x_pred = frozen + P(sum_j (x_trial - x_ref)_j dz_j) +
@@ -3256,7 +3267,7 @@ def _least_squares_implicit(
         exactly on the trial boundary (the solver's ``hot_restart_state``
         boundary shift becomes a no-op) and frozen directions stay frozen.
         """
-        rt_p = imp.runtime_from_params(params_of(x_trial), cfg)
+        rt_p = imp.runtime_from_params(params_of(x_trial, data), cfg)
         dz = jax.tree.map(
             lambda d: jnp.tensordot(x_trial - x_ref, d, axes=1), dz_cols)
         z = jax.tree.map(jnp.add, P_seed(frozen), dz)
@@ -3270,7 +3281,7 @@ def _least_squares_implicit(
         """Record ``(x_ref, converged state, dz columns)`` for trial seeding."""
         hit = imp._LAST_SOLVE.get(cfg)
         params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64),
-                                 params_of(_place(x)))
+                                 params_of(_place(x), problem_data))
         if hit is not None and hit[0] == imp._params_key(params_np):
             holder["lin"] = (np.array(x, dtype=float), hit[1].state, dz_cols)
         else:  # unexpected call pattern: better no seed than a wrong one
@@ -3281,11 +3292,11 @@ def _least_squares_implicit(
         # inside a running GPU pure_callback can deadlock. The host optimizer
         # owns this solve; stage only the objective evaluation on its result.
         placed = _place(x)
-        params_np = jax.tree.map(np.asarray, params_of(placed))
+        params_np = jax.tree.map(np.asarray, params_of(placed, problem_data))
         state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
         state = jax.tree.map(_place, state)
         holder["solved"] = (FunctionProblem._key(np.asarray(x, dtype=float)), state)
-        return evaluate(placed, state, status)
+        return evaluate(placed, state, status, problem_data)
 
     def fun(x: np.ndarray) -> np.ndarray:
         lin = holder["lin"]
@@ -3293,7 +3304,7 @@ def _least_squares_implicit(
             seed = jax.tree.map(
                 lambda a: np.asarray(a, dtype=np.float64),
                 jax.device_get(predicted_state(*commit_to_single_device(
-                    (_place(x), _place(lin[0]), lin[1], lin[2])))))
+                    (_place(x), _place(lin[0]), lin[1], lin[2], problem_data)))))
             if all(np.all(np.isfinite(a)) for a in jax.tree.leaves(seed)):
                 imp._PERTURB_SEED[cfg] = seed
         try:
@@ -3336,8 +3347,8 @@ def _least_squares_implicit(
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
         params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x))
-        )
+            lambda a: np.asarray(a, dtype=np.float64),
+            params_of(_place(x), problem_data))
         hit = imp._LAST_SOLVE.get(cfg)
         if (
             hit is None
@@ -3366,7 +3377,7 @@ def _least_squares_implicit(
 
         def reverse_candidate() -> np.ndarray:
             candidate = np.asarray(
-                jax.device_get(reverse_jit(_place(x))), dtype=float
+                jax.device_get(reverse_jit(_place(x), problem_data)), dtype=float
             )
             if not np.all(np.isfinite(candidate)):
                 raise AdjointSolveError(
@@ -3385,7 +3396,12 @@ def _least_squares_implicit(
             if reverse:
                 jac = reverse_candidate()
             else:
-                rows, dz_cols, summary = jac_jit(_place(x), solved_state())
+                state = solved_state()
+                bands = (imp._block_bands(
+                    cfg, jax.tree.map(_place, params_np), state, mask_const)
+                    if jac_impl is jacobian_rows_block else None)
+                rows, dz_cols, summary = jac_jit(
+                    _place(x), state, problem_data, bands)
                 jac = np.asarray(jax.device_get(rows), dtype=float)
                 _record_linear_response(holder, summary, cfg)
                 jac, used_reverse = _select_host_jacobian(
@@ -3409,7 +3425,8 @@ def _least_squares_implicit(
         if jac is None or not np.all(np.isfinite(jac)):
             if jac_solver in ("auto", "block"):
                 try:
-                    rows, dz_cols, summary = gmres_jit(_place(x), solved_state())
+                    rows, dz_cols, summary = gmres_jit(
+                        _place(x), solved_state(), problem_data)
                     candidate = np.asarray(jax.device_get(rows), dtype=float)
                     _record_linear_response(holder, summary, cfg)
                     candidate, used_reverse = _select_host_jacobian(
@@ -3471,7 +3488,7 @@ def _least_squares_implicit(
                     # non-finite result goes through the Jacobian lane below,
                     # which owns the retries and the typed errors.
                     gradient = np.asarray(jax.device_get(reverse_gradient_jit(
-                        _place(xh), _place(residual))), dtype=float)
+                        _place(xh), _place(residual), problem_data)), dtype=float)
                     if np.isfinite(value) and np.all(np.isfinite(gradient)):
                         holder["lin"] = None
                         holder["scalar_certified"] = True
@@ -3492,7 +3509,7 @@ def _least_squares_implicit(
             holder["failed_trials"] += 1
             return failure_value_and_gradient(xh)
         try:
-            value, grad = value_grad_jit(_place(xh))
+            value, grad = value_grad_jit(_place(xh), problem_data)
             value = float(jax.device_get(value))
             grad = np.asarray(jax.device_get(grad), dtype=float)
         except Exception:
@@ -3562,8 +3579,8 @@ def _least_squares_implicit(
 
         x = np.asarray(x, dtype=float)
         params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x))
-        )
+            lambda a: np.asarray(a, dtype=np.float64),
+            params_of(_place(x), problem_data))
         hit = imp._LAST_SOLVE.get(cfg)
         if (
             hit is None
@@ -3663,23 +3680,25 @@ def _least_squares_implicit(
             or (jac_solver == "auto" and holder["nres"] == 1)
         )
         if reverse:
-            return reverse_jit(x)
-        rows, _dz_cols, summary = jac_jit(x, imp.solve_implicit(params_of(x), cfg))
+            return reverse_jit(x, problem_data)
+        rows, _dz_cols, summary = jac_jit(
+            x, imp.solve_implicit(params_of(x, problem_data), cfg), problem_data)
         # A transformed JAX function cannot raise the host-side typed error
         # used by an explicitly forced solver. Preserve exactness by falling
         # back to the certified reverse graph inside the compiled program.
         return _select_jax_jacobian(
-            rows, summary, lambda: reverse_jit(x)
+            rows, summary, lambda: reverse_jit(x, problem_data)
         )
 
-    def residual_value_and_gradient(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def residual_value_and_gradient(
+            x: jnp.ndarray, data) -> tuple[jnp.ndarray, jnp.ndarray]:
         """JAX scalar pair from the same certified residual/Jacobian lane.
 
         The gradient is ``J^T r``.  The reverse lane, and the block lane when
         its Jacobian misses the certificate, pull back the one cotangent
         ``r`` instead of assembling the reverse Jacobian row by row.
         """
-        params = params_of(x)
+        params = params_of(x, data)
         state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         reverse = (
@@ -3688,23 +3707,23 @@ def _least_squares_implicit(
         )
 
         def accepted(_):
-            rows = term_rows(state, runtime)
+            rows = term_rows(state, runtime, data)
 
             def pulled_back():
-                return reverse_pullback(x, state, status, lambda _: rows, 1)[0]
+                return reverse_pullback(x, state, status, lambda _: rows, 1, data)[0]
 
             if reverse:
                 gradient = pulled_back()
             else:
                 jacobian, _dz_cols, summary = jac_jit(
-                    x, imp.solve_implicit(params, cfg))
+                    x, imp.solve_implicit(params, cfg), data)
                 gradient = _select_jax_jacobian(
                     jacobian.T @ rows, summary, pulled_back)
             return 0.5 * jnp.vdot(rows, rows), gradient
 
         return jax.lax.cond(
             status == 0, accepted,
-            lambda _: failure_value_and_gradient_jax(x), operand=None,
+            lambda _: failure_value_and_gradient_jax(x, data), operand=None,
         )
 
     residual_value_grad_jit = _problem_jit(
@@ -3714,13 +3733,13 @@ def _least_squares_implicit(
     def residual_value_grad(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Concrete calls reuse the host lane's executables; traces inline."""
         if isinstance(x, jax.core.Tracer):
-            return residual_value_grad_jit(x)
+            return residual_value_grad_jit(x, problem_data)
         value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
         return _place(np.asarray(value)), _place(gradient)
 
     def jax_state_runtime(x: jnp.ndarray):
         """Converged implicit state/runtime pair for differentiable field APIs."""
-        params = params_of(x)
+        params = params_of(x, problem_data)
         return imp.solve_implicit(params, cfg), imp.runtime_from_params(params, cfg)
 
     def host_state_runtime(x):
@@ -3731,20 +3750,20 @@ def _least_squares_implicit(
         the single-stage movie the anchor was 83% of each frame's cost.
         """
         params = imp._device_pin(cfg, jax.tree.map(
-            jnp.asarray, params_of(jnp.asarray(x, dtype=float))))
+            jnp.asarray, params_of(jnp.asarray(x, dtype=float), problem_data)))
         return (imp._host_solve(cfg, params).state,
                 imp.runtime_from_params(params, cfg))
 
     def jax_state_runtime_status(x: jnp.ndarray):
         """Exception-free state/runtime/status triple for composite objectives."""
-        params = params_of(x)
+        params = params_of(x, problem_data)
         state, status, _, _ = imp.solve_implicit_status(params, cfg)
         return state, imp.runtime_from_params(params, cfg), status
 
     @jax.custom_vjp
     def residual_scalar_public(x: jnp.ndarray) -> jnp.ndarray:
         """Scalar residual cost with the certified ``J.T @ r`` pullback."""
-        return scalar_loss_jit(x)
+        return scalar_loss_jit(x, problem_data)
 
     def residual_scalar_public_fwd(x):
         value, gradient = residual_value_grad(x)
@@ -3777,14 +3796,15 @@ def _least_squares_implicit(
             residual=residual_fun,
             residual_jac=residual_jac_fun,
             jax_fun=(
-                scalar_loss_jit if traceable_scalar is not None
-                else residual_scalar_public
+                functools.partial(scalar_loss_jit, data=problem_data)
+                if traceable_scalar is not None else residual_scalar_public
             ),
             jax_value_and_grad=(
-                value_grad_jit if traceable_scalar is not None
-                else residual_value_grad
+                functools.partial(value_grad_jit, data=problem_data)
+                if traceable_scalar is not None else residual_value_grad
             ),
-            jax_residual=(None if traceable_scalar is not None else rows_jit),
+            jax_residual=(None if traceable_scalar is not None
+                          else functools.partial(rows_jit, data=problem_data)),
             jax_residual_jac=(None if traceable_scalar is not None else jax_jac_public),
             names=names,
             bounds=problem_bounds,
@@ -3817,8 +3837,10 @@ def _least_squares_implicit(
                 "jax_state_runtime": jax_state_runtime,
                 "jax_state_runtime_status": jax_state_runtime_status,
                 "host_state_runtime": host_state_runtime,
-                "jax_residual_from_state": term_rows,
-                "jax_failure_value": lambda x: failure_value_and_gradient_jax(x)[0],
+                "jax_residual_from_state": functools.partial(
+                    term_rows, data=problem_data),
+                "jax_failure_value": lambda x: failure_value_and_gradient_jax(
+                    x, problem_data)[0],
                 "residual_size": residual_size,
             },
         )

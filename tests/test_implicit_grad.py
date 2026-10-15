@@ -541,6 +541,10 @@ def test_make_config_canonicalizes_equal_content(solovev):
     cfg_a = im.make_config(inp, **CASES[name])
     cfg_b = im.make_config(inp, **CASES[name])
     assert cfg_a is cfg_b
+    # Boundary and profile values reach every lane as traced parameters: a
+    # moved boundary (the next optimizer stage) shares the instance.
+    moved = dataclasses.replace(inp, rbc=inp.rbc * 1.01, phiedge=2.0 * inp.phiedge)
+    assert im.make_config(moved, **CASES[name]) is cfg_a
     cfg_c = im.make_config(inp, ftol=CASES[name]["ftol"] * 0.5,
                            max_iterations=CASES[name]["max_iterations"])
     assert cfg_c is not cfg_a
