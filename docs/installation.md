@@ -84,17 +84,30 @@ cd vmex
 pip install -e .          # editable install, recommended for development
 ```
 
-## Float64 (required)
+## Float64 and other JAX settings
 
-VMEC's numerics require double precision. VMEX enables JAX x64 mode itself
-when you use the CLI or the core solver entry points; if you drive JAX
-directly in your own scripts, set:
+VMEC's numerics require double precision. `import vmex` changes no
+`jax.config` setting. VMEX's settings are applied in one place,
+`vmex.configure()`:
 
-```console
-export JAX_ENABLE_X64=1
+- float64 (`jax_enable_x64`);
+- the machine-scoped persistent compilation cache;
+- synchronous CPU dispatch;
+- JAX logging at `ERROR`.
+
+The `vmex` command calls it. In Python it runs on first use of `vmex.core`
+or `vmex.mirror`, unless you called it first or set `JAX_ENABLE_X64`
+yourself. Call it explicitly to choose:
+
+```python
+import vmex
+
+vmex.configure()                          # the defaults above
+vmex.configure(compilation_cache=False)   # float64, no persistent cache
 ```
 
-or `jax.config.update("jax_enable_x64", True)` before solving.
+The solver refuses to run in float32 (`vmex.configure(x64=False)` or
+`JAX_ENABLE_X64=0`) and says how to fix it.
 
 ## GPU support
 
