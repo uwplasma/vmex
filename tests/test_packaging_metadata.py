@@ -194,7 +194,7 @@ def test_nightly_floors_lane_pins_the_declared_floors() -> None:
     for dep in [*project["dependencies"], *(r for name in
                 ("coils", "freeb", "neoclassical", "turbulence") for r in extras[name])]:
         requirement = Requirement(dep)
-        for spec in requirement.specifier:
+        for spec in (s for s in requirement.specifier if s.operator == ">="):
             floors[requirement.name] = max(floors.get(requirement.name, spec.version),
                                            spec.version, key=Version)
     workflow = (ROOT / ".github/workflows/nightly.yml").read_text()
