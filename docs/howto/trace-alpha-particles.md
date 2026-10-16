@@ -38,11 +38,11 @@ A WOUT whose spectrum looks truncated (`spectral_truncation > 3e-3`) triggers a 
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
 | `--trace-ne0 N0`, `--trace-te0 T0` | `4e20`, `12` | on-axis electron density [m^-3] and temperature [keV] | none |
 | `--trace-no-scale` | off | trace the equilibrium at its own size and field | none |
+| `--trace-energy-eV E`, `--trace-mass-kg M`, `--trace-charge-coulomb Q` | alpha | kinetic energy [eV], mass [kg] and signed charge [C] of another species; with `--collisional`, a particle below 1.5 T is thermalised, so low-energy ions stop at once | through speed and drifts |
 | `--trace-no-resolution-check` | off | skip the truncated-spectrum warning ({doc}`trace-resolution`) | none |
 | `--scale-target axis` | `volavgB` | ARIES-CS convention of the in-memory scaling | none |
 | `--mbooz M`, `--nbooz N` | 32, 32 | Boozer resolution of the traced field | small |
-| `--trace-seed K` | 42 | births and collision noise | none |
-| `--trace-times K` | 1000 | samples of the loss-fraction curve | none |
+| `--trace-seed K`, `--trace-times K` | 42, 1000 | births and collision noise; samples of the loss-fraction curve | none |
 | `--trace-mode-cut C` | `2e-4` | drop modes below `C` times the largest cosine/sine amplitude | grows with the modes up to 48, then flat (ESSOS sums them once onto an angle table) |
 
 The wall time is `particles × tmax / timestep` times a per-step cost. For
