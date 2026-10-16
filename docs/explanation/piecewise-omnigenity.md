@@ -202,6 +202,12 @@ period counts remain nonnegative and no rational approximation is used.
 The target-fit improvement therefore does not establish improved effective
 ripple, and this proxy alone does not certify transport or bootstrap current.
 
+The corrected canonical vacuum pair evaluated at that same finest NEO setting
+has a lower proxy: candidate/seed ratios span 0.218–0.759 across the five surfaces.
+This is one matched setting, without a canonical convergence sweep. Its 19.4%
+mirror reduction also prevents attributing the change solely to improved pwO
+structure. Neither this result nor the mapped comparison establishes alpha retention.
+
 Full derivative and resolution qualification, family-resolved actions,
 transport and particle retention remain separate gates. The shared-host wall
 times in the record are observations, not a controlled speed comparison.

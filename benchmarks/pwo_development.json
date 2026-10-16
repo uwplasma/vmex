@@ -1522,5 +1522,82 @@
     },
     "negative_result": "The optimized candidate has larger epsilon_eff^(3/2) than its matched seed at every sampled surface in the measured rungs.",
     "raw_comparison_sha256": "da8cac2730b8c22d6c1d4675390e7d84934436f41886b0ba591fed3c64732370"
+  },
+  "canonical_independent_ripple": {
+    "scope": "Corrected canonical calibrated phase0 vacuum, one matched NEO setting",
+    "quantity": "epsilon_eff^(3/2)",
+    "units": "dimensionless",
+    "research_validation_complete": false,
+    "convergence_assessed": false,
+    "heldouts_run": false,
+    "convergence_note": "No canonical numerical sweep; mapped-case stability is not transferred.",
+    "script_sha256": "dad98e108163d115dee038d98cc3477f7c832784f157076e6c43fc3e8e7d815c",
+    "patch": {
+      "commit": "76eebbce2f035e825a6fed34b9407ebea228e8d3",
+      "integrate_sha256": "36b1679ca6b4cb6343ae5cebec694c60a2817d574b12fd23338a0456eef51d31"
+    },
+    "harness_sha256": "7555d52045daea82b5ed1b651c5bdb92ddda9c73e460be580806a0732cc9dc05",
+    "settings": {
+      "surfaces": null,
+      "theta_n": 96,
+      "phi_n": 96,
+      "max_m_mode": 0,
+      "max_n_mode": 0,
+      "npart": 160,
+      "multra": 2,
+      "acc_req": 0.02,
+      "no_bins": 50,
+      "nstep_per": 80,
+      "nstep_min": 800,
+      "nstep_max": 2000,
+      "calc_nstep_max": 0,
+      "max_rational_field_periods": 100000,
+      "rational_surface_policy": "error",
+      "ref_swi": 2,
+      "write_progress": false,
+      "write_diagnostic": false,
+      "mboz": 32,
+      "nboz": 32,
+      "jax_surface_scan": false
+    },
+    "requested_surfaces": [0.1,0.25,0.5,0.75,0.9],
+    "actual_surfaces": [0.11290322580645161,0.24193548387096775,0.5,0.7580645161290323,0.8870967741935484],
+    "wout_sha256": {
+      "seed": "fb35265df37821d6750bc460b8da911a4dd4d7b383bf902b49ba27cce7dd883b",
+      "optimized": "b7312288ae9dd2b8bcc91a134b70d8311bd31d49bd99841cfb9ed2c0f5e9c4db"
+    },
+    "optimized_over_seed": [0.2180066898699186,0.41074192580249136,0.6612591930934131,0.7502201191262786,0.7587433014303009],
+    "epsilon_eff_three_halves": {
+      "seed": [0.00010734361015323006,0.00013058774851976577,0.00019672120452152663,0.00030327704644814634,0.0003728185298895999],
+      "optimized": [2.340162512819267e-05,5.363786331322003e-05,0.00013008370496626898,0.00022752454191459428,0.00028287356220282634]
+    },
+    "signed_iota": {
+      "seed": [-0.5793646054425281,-0.5690701473250501,-0.5479044834183701,-0.5273715038876412,-0.5173843907322337],
+      "optimized": [-0.5828023219857449,-0.5736427071232088,-0.5552039391837469,-0.5372892495130627,-0.5284883553687908]
+    },
+    "period_certificates": {
+      "seed": {
+        "all_signed_iota_preserved": true,
+        "all_required_counts_present": true,
+        "all_period_counts_nonnegative": true,
+        "any_approximation_used": false,
+        "all_finite_nonnegative": true,
+        "rational_closure_surfaces": 3,
+        "nfp_rat_range": [0,719],
+        "final_n_range": [504,1940]
+      },
+      "optimized": {
+        "all_signed_iota_preserved": true,
+        "all_required_counts_present": true,
+        "all_period_counts_nonnegative": true,
+        "any_approximation_used": false,
+        "all_finite_nonnegative": true,
+        "rational_closure_surfaces": 3,
+        "nfp_rat_range": [0,628],
+        "final_n_range": [516,1256]
+      }
+    },
+    "caveats": ["One canonical numerical setting only; mapped convergence results are not transferred.","The canonical candidate has approximately 19.5% lower sampled local mirror; this pair does not isolate geometry from amplitude.","epsilon_eff^(3/2) is a proxy; no DKE, bootstrap-current, alpha-confinement or action-invariance claim."],
+    "construction_summary_sha256": "69f46e2d156dd95ead2351ca6326d75e47cfe2139198f9b6efdf0b126f27376b"
   }
 }
