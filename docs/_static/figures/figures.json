@@ -784,8 +784,8 @@
     },
     {
       "path": "docs/_static/figures/readme_cyclometry_convergence.webp",
-      "sha256": "2d2cd8c4d49cc964f609a51964902f41a38c94c6feb0248442bb9e948ed3c4c6",
-      "bytes": 51270,
+      "sha256": "92d8f1c1a55b609d034f6aaf9ea5ff64ce759b480c35d1bab715511c49ec4bcf",
+      "bytes": 49460,
       "generator": "docs/_static/figures/sources/make_cyclometry_figures.py",
       "command": "python docs/_static/figures/sources/make_cyclometry_figures.py",
       "inputs": [
@@ -799,7 +799,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Fixed-boundary refinement; no continuum accuracy claim."
+      "note": "Fixed-boundary action and native force refinement; separate axisymmetric control. No uniform accuracy bound."
     }
   ]
 }

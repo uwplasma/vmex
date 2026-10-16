@@ -516,15 +516,21 @@ energy error; alpha classification and full-field trajectory validation remain o
 
 ![Fixed-boundary equilibrium resolution study](docs/_static/figures/readme_cyclometry_convergence.webp)
 
-**Resolution matters.** With the boundary, profiles and flux unchanged, increasing
-(Mpol, Ntor) from (4, 3) to (12, 11) at 31 radial points changes the sampled normalized
-action variation from 0.03115 to 0.001759. This is a discretization effect, not an
-optimization gain. At (8, 7), increasing radial points from 61 to 121 still changes it
-by 4.8%; two cold-start checks differ from warm starts by up to 2.2%.
-Tightening both high-mode states to 10⁻¹⁴ leaves a 1.9% action difference.
-The plot uses Boozer bounds 16/16, fixed B★=3 T, 41 pitches through μB★/E=0.95,
-and 128×2048 closed-transit quadrature. All discrete force residuals are below 10⁻¹²;
-that tolerance does not establish continuum field accuracy or physical island widths.
+**Resolution matters.** Earlier angular refinement at 31 radial points changed
+sampled action variation from 0.03115 at (Mpol,Ntor)=(4,3) to 0.001759 at (12,11).
+That was a discretization effect, not an optimization gain. The plot extends the
+study with joint radial/angular refinement, fixed B★=3 T, 41 pitches through
+μB★/E=0.95, and 128×2048 transit quadrature.
+
+**Continuous-field checks.** At (Mpol, Ntor)=(16,15), increasing radial points
+from 121 to 241 reduces the maximum sampled action variation by 14.2%. At 241
+points, Boozer 20/20→24/24 changes that variation by only 0.030%. The left panel fixes the physical inputs and solver tolerance
+10⁻¹³. The right evaluates curl(B)/μ₀ × B − ∇p in the native continuous field,
+using volume-weighted mean magnitudes on s∈[0.45,0.85] and quadrature split at
+radial spline knots. The separate axisymmetric control converges much faster.
+At 64 identical physical points, the (16,15) radial refinement changes B by
+0.0166% RMS but its Cartesian derivative by 19.8% RMS. Small field-strength
+errors and solver residuals therefore do not establish orbit-model accuracy.
 
 The kernels pass 69 focused tests. The public `frozen_reference` option now keeps
 values, gradients and materialized equilibria on one discrete family. Its complete

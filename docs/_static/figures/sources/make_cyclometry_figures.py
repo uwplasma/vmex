@@ -156,6 +156,34 @@ def render_convergence(rows):
     return fig
 
 
+def render_joint_refinement(data):
+    """Separate equilibrium and continuous-field resolution diagnostics."""
+    with plt.rc_context({'font.family': 'DejaVu Sans', 'font.size': 10,
+                         'axes.spines.top': False, 'axes.spines.right': False}):
+        fig, axes = plt.subplots(1, 2, figsize=(10.6, 3.7), layout='constrained')
+        for m in (10, 12, 16):
+            rows = sorted((r for r in data['action_rows'] if r['mpol'] == m),
+                          key=lambda r: r['ns'])
+            axes[0].plot([r['ns'] for r in rows], [r['action_osc'] for r in rows],
+                         'o-', label=f'M={m}, N={m-1}')
+        for family, label in [('stellarator12', 'Stellarator M=12'),
+                              ('stellarator16', 'Stellarator M=16'),
+                              ('axisymmetric', 'Axisymmetric control')]:
+            rows = sorted((r for r in data['force_rows'] if r['family'] == family),
+                          key=lambda r: r['ns'])
+            axes[1].semilogy([r['ns'] for r in rows],
+                            [100*r['relative_pressure'] for r in rows], 'o-', label=label)
+        axes[0].set_ylabel('Maximum sampled action variation')
+        axes[0].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+        axes[1].set_ylabel('Mean force / mean pressure gradient (%)')
+        for ax in axes:
+            ax.set_xlabel('Radial grid points')
+            ax.set_xticks([31, 61, 121, 241])
+            ax.grid(alpha=.18)
+            ax.legend(frameon=False, fontsize=8)
+    return fig
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     here = Path(__file__).resolve().parent
@@ -196,7 +224,9 @@ def main():
                 fig.savefig(path, dpi=args.dpi, bbox_inches=Bbox.from_extents(.15, .70, 9.3, 5.6), **options)
                 print(path)
             plt.close(fig)
-        fig = render_convergence(metadata['spectral_refinement']['rows'])
+        fig = (render_joint_refinement(metadata['joint_refinement'])
+               if 'joint_refinement' in metadata
+               else render_convergence(metadata['spectral_refinement']['rows']))
         for ext in args.format:
             options = {'pil_kwargs': {'quality': 90, 'method': 6}} if ext == 'webp' else {}
             if ext == 'pdf':
