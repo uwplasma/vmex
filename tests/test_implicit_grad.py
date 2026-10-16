@@ -655,7 +655,9 @@ def test_adjoint_gmres_preconditioner_value(solovev):
 
     budgets = {}
     for formulation in ("preconditioned", "raw"):
-        A = im.adjoint_matvec(cfg, p0, x_star, mask, formulation=formulation)
+        F = im.residual_fn(cfg, x_star, mask, formulation=formulation)
+        _, vjp_z = jax.vjp(lambda z: F(z, p0), P(x_star))
+        A = lambda v, vjp_z=vjp_z: vjp_z(v)[0]  # noqa: E731
         lam, _ = jax.scipy.sparse.linalg.gmres(
             A, b, tol=1e-13, atol=0.0, restart=30, maxiter=10,
             solve_method="incremental",

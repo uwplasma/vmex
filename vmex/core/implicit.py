@@ -208,7 +208,7 @@ __all__ = [
     "implicit_state_tangent_multi_rhs", "implicit_state_pullback_multi_rhs", "run",
     "measured_chunk_size",
     "mhd_energy", "plasma_volume", "aspect_ratio", "iota_profile",
-    "iota_axis", "iota_edge", "edge_iota", "residual_fn", "adjoint_matvec",
+    "iota_axis", "iota_edge", "edge_iota", "residual_fn",
     "frozen_path_directional_fd",
 ]
 
@@ -3609,17 +3609,6 @@ def _implicit_state_pullback_multi_rhs_impl(
     g1_batch = jax.vmap(lambda lam: vjp_p(jax.tree.map(jnp.negative, lam))[0])(lam_batch)
     g2_batch = jax.vmap(lambda gbar: vjp_p2(gbar)[0])(gbar_batch)
     return jax.tree.map(jnp.add, g1_batch, g2_batch)
-
-
-def adjoint_matvec(cfg: ImplicitConfig, params: ImplicitParams,
-                   x_star: SpectralState, dof_mask: SpectralState,
-                   formulation: str = "preconditioned") -> Callable:
-    """``v -> (dF/dz)^T v`` for tests/diagnostics (both formulations)."""
-    frozen = jax.lax.stop_gradient(x_star)
-    F = residual_fn(cfg, frozen, dof_mask, formulation=formulation)
-    z_star = _dof_projector(cfg, dof_mask)(x_star)
-    _, vjp_z = jax.vjp(lambda z: F(z, params), z_star)
-    return lambda v: vjp_z(v)[0]
 
 
 # ---------------------------------------------------------------------------
