@@ -1078,13 +1078,11 @@ def test_qa_turbulence_optimization_examples(tmp_path, kind):
 def test_ballooning_example_scans_the_ballooning_parameter():
     """The example must not optimize a bound taken at a single zeta0.
 
-    ``lambda`` peaks at a configuration-dependent ``zeta0``; on this seed the
-    single-point default reports 3.27e-3 where the scan reports 4.42e-3, so a
-    ``zeta0 = 0`` objective would drive the wrong quantity to zero.
+    ``lambda`` peaks at a configuration-dependent ``zeta0``, so a ``zeta0 = 0``
+    objective would drive the wrong quantity to zero.
     """
     source = (EXAMPLES / "optimization" / "QA_optimization_ballooning.py").read_text()
-    assert "ZETA0S = np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5)" in source
-    assert "zeta0s=ZETA0S" in source
+    assert "zeta0s=np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5)" in source
 
 
 def test_vacuum_qs_examples_expose_trial_pressure_terms():
