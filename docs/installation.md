@@ -106,6 +106,18 @@ vmex.configure()                          # the defaults above
 vmex.configure(compilation_cache=False)   # float64, no persistent cache
 ```
 
+Only these environment defaults are still set at `import vmex`, because XLA
+reads them once, before its backend starts (an explicit value always wins):
+`XLA_FLAGS` additions for CPU, `TF_CPP_MIN_LOG_LEVEL`, `ABSL_MIN_LOG_LEVEL` and
+`GLOG_minloglevel`. Child processes inherit them.
+
+| `configure()` argument | Default | Overridden by |
+|---|---|---|
+| `x64` | `True` | `JAX_ENABLE_X64` (when VMEX configures itself) |
+| `compilation_cache` | `True` (machine-scoped directory) | `VMEX_COMPILATION_CACHE`, `JAX_COMPILATION_CACHE_DIR` |
+| `cpu_async_dispatch` | `False` | `JAX_CPU_ENABLE_ASYNC_DISPATCH` |
+| `logging_level` | `ERROR` | `VMEX_JAX_LOGGING_LEVEL`, `JAX_LOGGING_LEVEL` (`INHERIT` leaves it) |
+
 The solver refuses to run in float32 (`vmex.configure(x64=False)` or
 `JAX_ENABLE_X64=0`) and says how to fix it.
 
