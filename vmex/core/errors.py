@@ -275,7 +275,7 @@ class MgridNotFoundError(VmecError):
     """A free-boundary run referenced an mgrid file that cannot be read.
 
     The solver catches this and falls back to a fixed-boundary solve with a
-    warning (behavior VMEC2000 has and VMEC++ dropped — §2.5); it is
+    warning (behavior VMEC2000 has and a C++ VMEC reimplementation dropped — §2.5); it is
     re-raised only when the caller explicitly requires free-boundary.
 
     Raised by :func:`vmex.core.mgrid.read_mgrid` in two cases: the resolved

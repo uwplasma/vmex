@@ -85,7 +85,7 @@ interior evaluation points.
 
 This interior field is also the most accurate way to read an equilibrium. Against an exact
 finite-pressure solution, it gives the current 10 to 70 times more accurately than the WOUT file
-between s = 0.25 and 0.75, for equilibria from VMEX, VMEC2000 or VMEC++ alike (any WOUT can be
+between s = 0.25 and 0.75, for equilibria from VMEX and VMEC2000 alike (any WOUT can be
 loaded with `vmex.state_from_wout`). Within the first few surfaces of the axis the WOUT current
 is better. See {doc}`/explanation/interior-field`.
 
@@ -200,3 +200,14 @@ returns the VMEC field, the exterior field and the wall in one call; see
 {doc}`trace-to-the-wall`. For anything else ESSOS does with an equilibrium
 (field lines, surfaces, `|B|` queries), use the bare `essos.fields.Vmec` from
 {func}`~vmex.core.tracing.essos_vmec_field` above.
+
+## Model and references
+
+The field outside a finite-beta plasma is the coil field plus the field of the plasma currents. By the
+virtual-casing principle the latter equals the field of a surface current
+$\mathbf{K} = \mathbf{n}\times\mathbf{B}/\mu_0$ on the plasma boundary, evaluated with a Biot–Savart
+surface integral, so no volume integral over the plasma is needed. The integral is singular as the
+evaluation point approaches the surface, which is why accuracy falls close to the boundary.
+
+- V. D. Shafranov and L. E. Zakharov, *Nucl. Fusion* 12, 599 (1972): the virtual-casing principle.
+- S. A. Lazerson, *Plasma Phys. Control. Fusion* 54, 122002 (2012): virtual casing for 3-D toroidal systems.
