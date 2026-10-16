@@ -787,5 +787,5 @@ def test_boundary_outside_the_mgrid_box_warns_as_becoil_does():
         FB._warn_outside_grid(state, rt, field)            # inside: silent
         FB._warn_outside_grid(state, rt, object())         # untabulated field: no box
     small = replace(field, rmax=float(field.rmin) + 0.01)
-    with pytest.warns(UserWarning, match="Plasma Boundary exceeded Vacuum Grid Size.*rmax"):
+    with pytest.warns(UserWarning, match=r"Plasma Boundary exceeded Vacuum Grid Size: R .* above Rmax"):
         FB._warn_outside_grid(state, rt, small)

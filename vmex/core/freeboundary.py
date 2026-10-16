@@ -232,13 +232,18 @@ def _warn_outside_grid(state: SpectralState, rt: SolverRuntime, field: Any) -> N
     cos, sin = np.cos(angle), np.sin(angle)
     R = np.tensordot(rmnc, cos, 1) + (0.0 if rmns is None else np.tensordot(rmns, sin, 1))
     Z = np.tensordot(zmns, sin, 1) + (0.0 if zmnc is None else np.tensordot(zmnc, cos, 1))
-    out = [f"{name} = {value:.6g}" for name, value, bad in (
-        ("rmin", R.min(), R.min() < field.rmin), ("rmax", R.max(), R.max() > field.rmax),
-        ("zmin", Z.min(), Z.min() < field.zmin), ("zmax", Z.max(), Z.max() > field.zmax)) if bad]
+    out = [f"{name} {value:.4g} m is {abs(value - edge):.3g} m {side} {name}{'min' if side == 'below' else 'max'} = {edge:.4g} m"
+           for name, value, edge, side in (("R", R.min(), field.rmin, "below"), ("R", R.max(), field.rmax, "above"),
+                                           ("Z", Z.min(), field.zmin, "below"), ("Z", Z.max(), field.zmax, "above"))
+           if (value < edge if side == "below" else value > edge)]
     if out:
-        warnings.warn("Plasma Boundary exceeded Vacuum Grid Size: " + ", ".join(out)
-                      + f" (table R in [{field.rmin:.6g}, {field.rmax:.6g}], "
-                      f"Z in [{field.zmin:.6g}, {field.zmax:.6g}])", stacklevel=2)
+        warnings.warn(
+            "Plasma Boundary exceeded Vacuum Grid Size: " + "; ".join(out)
+            + f". The mgrid spans R in [{field.rmin:.4g}, {field.rmax:.4g}] m, Z in "
+            f"[{field.zmin:.4g}, {field.zmax:.4g}] m and is clamped at its edge outside "
+            "(VMEC2000 becoil.f), so the vacuum field there is wrong. Regenerate the mgrid "
+            "with a larger box, or check EXTCUR and PHIEDGE if the plasma grew unexpectedly.",
+            stacklevel=2)
 
 
 # ---------------------------------------------------------------------------
