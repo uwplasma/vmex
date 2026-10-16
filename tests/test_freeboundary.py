@@ -789,3 +789,20 @@ def test_boundary_outside_the_mgrid_box_warns_as_becoil_does():
     small = replace(field, rmax=float(field.rmin) + 0.01)
     with pytest.warns(UserWarning, match=r"Plasma Boundary exceeded Vacuum Grid Size: R .* above Rmax"):
         FB._warn_outside_grid(state, rt, small)
+
+
+def test_deck_nfp_must_match_the_mgrid_nfp():
+    """VMEC2000 ``read_mgrid`` stops with ier_flag 9 when ``nfper0 /= nfp``.
+
+    The table is periodic in its own ``2 pi / nfp``; a deck with another NFP
+    samples only part of a field period and solves a different problem.
+    """
+    from dataclasses import replace
+
+    from vmex.core.errors import VmecInputError
+
+    inp = VmecInput.from_file(DECK)
+    field = FB._external_field_from_input(inp, MGRID)
+    FB.free_boundary_resolution(inp, field)
+    with pytest.raises(VmecInputError, match="NFP"):
+        FB.free_boundary_resolution(replace(inp, nfp=2 * int(inp.nfp)), field)
