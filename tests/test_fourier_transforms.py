@@ -3,7 +3,7 @@
 Covers the transform algebra that the (deleted) legacy A/B suite proved
 during the port:
 
-- ``real_to_fourier(fourier_to_real(x)) == x`` on band-limited data,
+- separable synthesis equals the direct mode sum,
 - ``tomnsps`` is the exact inverse of the ``totzsps``-style synthesis
   (fixaray.f dnorm normalization, including the lasym lane),
 - ``symforce_split`` recovers pure reflection parities exactly.
@@ -27,10 +27,7 @@ from vmex.core.nyquist import (
 )
 from vmex.core.transforms import (
     _PARITY_PLANES,
-    _phase_pair,
     fourier_to_real,
-    physical_to_internal_scale,
-    real_to_fourier,
     symforce_split,
     tomnsps,
 )
@@ -57,50 +54,6 @@ def _resolution(case) -> Resolution:
 
 def _seed(case) -> int:
     return sum((i + 1) * int(value) for i, value in enumerate(case))
-
-
-@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
-def test_synthesis_analysis_roundtrip(case):
-    """real_to_fourier(fourier_to_real(x)) == x on band-limited data.
-
-    On the reduced symmetric theta grid the cos and sin families are each
-    internally orthogonal (but not mutually), so the round trip is exact per
-    parity block; on the full lasym grid it is exact for both blocks jointly.
-    """
-    mpol, ntor, *_ = case
-    lasym = case[5]
-    res = _resolution(case)
-    trig = trig_tables(res)
-    modes = mode_table(mpol, ntor)
-
-    rng = np.random.default_rng(_seed(case) + 3)
-    coeff_cos = rng.standard_normal((NS, modes.mnmax))
-    coeff_sin = rng.standard_normal((NS, modes.mnmax))
-    # sin(m*theta - n*zeta) is identically zero for (m, n) = (0, 0).
-    coeff_sin[:, (modes.m == 0) & (modes.n == 0)] = 0.0
-
-    if lasym:
-        (field,) = fourier_to_real(
-            coeff_cos, coeff_sin, modes=modes, trig=trig, derivatives=("value",)
-        )
-        back_cos, back_sin = real_to_fourier(field, modes=modes, trig=trig, parity="both")
-        np.testing.assert_allclose(np.asarray(back_cos), coeff_cos, rtol=RTOL, atol=1e-12)
-        np.testing.assert_allclose(np.asarray(back_sin), coeff_sin, rtol=RTOL, atol=1e-12)
-    else:
-        zero = np.zeros_like(coeff_cos)
-        (field_cos,) = fourier_to_real(
-            coeff_cos, zero, modes=modes, trig=trig, derivatives=("value",)
-        )
-        back_cos, back_sin = real_to_fourier(field_cos, modes=modes, trig=trig, parity="cos")
-        np.testing.assert_allclose(np.asarray(back_cos), coeff_cos, rtol=RTOL, atol=1e-12)
-        assert not np.any(np.asarray(back_sin))
-
-        (field_sin,) = fourier_to_real(
-            zero, coeff_sin, modes=modes, trig=trig, derivatives=("value",)
-        )
-        back_cos, back_sin = real_to_fourier(field_sin, modes=modes, trig=trig, parity="sin")
-        np.testing.assert_allclose(np.asarray(back_sin), coeff_sin, rtol=RTOL, atol=1e-12)
-        assert not np.any(np.asarray(back_cos))
 
 
 def test_lasym_nestor_surface_analysis_preserves_mode_signs():
@@ -156,15 +109,21 @@ def test_separable_synthesis_matches_mode_sum_and_parity_planes(case):
     trig = trig_tables(resolution)
     rng = np.random.default_rng(_seed(case))
     coeff = rng.standard_normal((2, 2, NS, modes.mnmax))
-    internal = coeff * physical_to_internal_scale(modes, trig)
+    theta = 2 * np.pi * np.arange(trig.ntheta3) / trig.ntheta1
+    zeta = 2 * np.pi * np.arange(trig.cosnv.shape[0]) / (trig.cosnv.shape[0] * trig.nfp)
+    arg = (modes.m[:, None, None] * theta[None, :, None]
+           - modes.n[:, None, None] * trig.nfp * zeta[None, None, :])
+    c, s = np.cos(arg), np.sin(arg)
+    m, n = modes.m[:, None, None], (modes.n * trig.nfp)[:, None, None]
+    basis = {"value": (c, s), "dtheta": (-m * s, m * c), "dzeta": (n * s, -n * c)}
     for use_fft in (False, True):
         fields = fourier_to_real(*coeff, modes=modes, trig=trig, use_fft=use_fft)
         planes = fourier_to_real(*coeff, modes=modes, trig=trig, use_fft=use_fft,
                                  m_slices=_PARITY_PLANES)
         for derivative, field, plane in zip(("value", "dtheta", "dzeta"), fields, planes):
-            phase = np.concatenate(_phase_pair(modes, trig, derivative))
-            expected = np.einsum("...k,kij->...ij",
-                                 np.concatenate(internal, axis=-1), phase)
+            bc, bs = basis[derivative]
+            expected = (np.einsum("...k,kij->...ij", coeff[0], bc)
+                        + np.einsum("...k,kij->...ij", coeff[1], bs))
             np.testing.assert_allclose(field, expected, rtol=RTOL, atol=1e-11)
             np.testing.assert_allclose(plane.sum(0), field, rtol=RTOL, atol=1e-11)
 

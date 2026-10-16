@@ -35,7 +35,6 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 
 from __future__ import annotations
 
-import functools
 from dataclasses import dataclass, fields as dataclass_fields
 from typing import Any, Sequence
 
@@ -51,7 +50,6 @@ __all__ = [
     "register_pytree_dataclass",
     "SpectralForce",
     "fourier_to_real",
-    "real_to_fourier",
     "tomnsps",
     "tomnspa",
     "symforce_split",
@@ -159,70 +157,6 @@ def _default_radial_grid(ns: int, dtype: Any) -> Array:
     if ns < 2:
         return jnp.asarray([0.0], dtype=dtype)
     return jnp.linspace(0.0, 1.0, ns, dtype=dtype)
-
-
-# ---------------------------------------------------------------------------
-# Phase tables (mode-stacked trig products) for synthesis/analysis
-# ---------------------------------------------------------------------------
-
-
-def _phase_pair(modes: ModeTable, trig: TrigTables, derivative: str) -> tuple[np.ndarray, np.ndarray]:
-    """Return ``(cos_phase, sin_phase)`` tables, each ``(mnmax, ntheta3, nzeta)``.
-
-    ``cos_phase_k = mscale*nscale * cos(m_k*theta - n_k*zeta)`` (and its
-    theta/physical-zeta derivatives), assembled from the ``fixaray`` tables via
-    the angle-addition identities with the sign of ``n`` handled explicitly
-    (tables only store ``n >= 0`` columns).  Built with NumPy: these are static
-    trace-time constants, cached on the mode list and the grid that fully
-    determine them (:func:`~vmex.core.fourier.trig_tables`).
-    """
-    return _cached_phase_pair(
-        np.asarray(modes.m, dtype=np.int64).tobytes(),
-        np.asarray(modes.n, dtype=np.int64).tobytes(),
-        int(trig.ntheta1), bool(trig.lasym), int(trig.nfp),
-        tuple(np.shape(trig.cosmu)), tuple(np.shape(trig.cosnv)), derivative,
-    )
-
-
-@functools.lru_cache(maxsize=32)
-def _cached_phase_pair(m_bytes: bytes, n_bytes: bytes, ntheta1: int, lasym: bool,
-                       nfp: int, theta_shape: tuple, zeta_shape: tuple,
-                       derivative: str) -> tuple[np.ndarray, np.ndarray]:
-    from .fourier import Resolution, trig_tables
-
-    trig = trig_tables(Resolution(
-        mpol=theta_shape[1], ntor=zeta_shape[1] - 1, ntheta=ntheta1,
-        nzeta=zeta_shape[0], nfp=nfp, lasym=lasym, ns=1,
-    ))
-    m_idx = np.frombuffer(m_bytes, dtype=np.int64)
-    n_idx = np.frombuffer(n_bytes, dtype=np.int64)
-    n_abs = np.abs(n_idx)
-    sign_n = np.where(n_idx < 0, -1.0, 1.0)[:, None, None]
-
-    def theta_cols(table: np.ndarray) -> np.ndarray:
-        return np.asarray(table)[:, m_idx].T[:, :, None]  # (mnmax, ntheta3, 1)
-
-    def zeta_cols(table: np.ndarray) -> np.ndarray:
-        return np.asarray(table)[:, n_abs].T[:, None, :]  # (mnmax, 1, nzeta)
-
-    if derivative == "value":
-        cos_mu, sin_mu = theta_cols(trig.cosmu), theta_cols(trig.sinmu)
-        cos_nv, sin_nv = zeta_cols(trig.cosnv), zeta_cols(trig.sinnv)
-        cos_phase = cos_mu * cos_nv + sign_n * sin_mu * sin_nv
-        sin_phase = sin_mu * cos_nv - sign_n * cos_mu * sin_nv
-    elif derivative == "dtheta":
-        cos_mum, sin_mum = theta_cols(trig.cosmum), theta_cols(trig.sinmum)
-        cos_nv, sin_nv = zeta_cols(trig.cosnv), zeta_cols(trig.sinnv)
-        cos_phase = sin_mum * cos_nv + sign_n * cos_mum * sin_nv
-        sin_phase = cos_mum * cos_nv - sign_n * sin_mum * sin_nv
-    elif derivative == "dzeta":
-        cos_mu, sin_mu = theta_cols(trig.cosmu), theta_cols(trig.sinmu)
-        cos_nvn, sin_nvn = zeta_cols(trig.cosnvn), zeta_cols(trig.sinnvn)
-        cos_phase = cos_mu * sin_nvn + sign_n * sin_mu * cos_nvn
-        sin_phase = sin_mu * sin_nvn - sign_n * cos_mu * cos_nvn
-    else:
-        raise ValueError(f"Unknown derivative {derivative!r}; expected one of {_DERIVATIVES}")
-    return cos_phase, sin_phase
 
 
 def _packed_toroidal_coefficients(
@@ -438,89 +372,6 @@ def fourier_to_real(
         ]
         fields.append(planes[0] if m_slices is None else jnp.stack(planes))
     return tuple(fields)
-
-
-def real_to_fourier(
-    field: Array,
-    *,
-    modes: ModeTable,
-    trig: TrigTables,
-    parity: str = "both",
-) -> tuple[Array, Array]:
-    """Project a real-space field on the VMEC internal grid onto Fourier modes.
-
-    The grid-quadrature inverse of :func:`fourier_to_real` (physical/wout
-    coefficient convention).  VMEC2000 has no single subroutine for this
-    (``tomnsps`` projects *forces*, with extra kernels/masks); this is the
-    plain analysis using the same ``fixaray`` integration weights:
-    ``dnorm``-normalized full-grid sums for ``lasym=True`` and the
-    endpoint-half-weighted reduced grid ``[0, pi]`` for ``lasym=False``.
-
-    On the reduced symmetric grid the cos and sin families are each internally
-    orthogonal but *not* mutually orthogonal (cross-talk), so a definite
-    ``parity`` should be requested for symmetric fields:
-
-    - ``"cos"``: keep cos coefficients, zero the sin block (R-like fields);
-    - ``"sin"``: keep sin coefficients, zero the cos block (Z/lambda-like);
-    - ``"both"``: keep both (exact only on the full ``lasym`` grid).
-
-    Returns ``(coefficient_cos, coefficient_sin)``, each ``(ns, mnmax)``.
-    """
-    f = jnp.asarray(field)
-    if f.ndim != 3:
-        raise ValueError(f"Expected field with shape (ns, ntheta, nzeta), got {f.shape}")
-    if int(f.shape[2]) != int(trig.cosnv.shape[0]):
-        raise ValueError("Field zeta grid does not match trig tables")
-
-    m_idx = np.asarray(modes.m, dtype=np.int64)
-    n_idx = np.asarray(modes.n, dtype=np.int64)
-
-    use_full_theta = int(trig.ntheta3) != int(trig.ntheta2)
-    if use_full_theta:
-        # lasym=True: uniform weights on the full [0, 2*pi) grid.
-        n_theta = int(trig.ntheta3)
-        if int(f.shape[1]) < n_theta:
-            raise ValueError("Field theta grid is smaller than VMEC ntheta3")
-        weights = np.full((n_theta,), float(trig.dnorm3))
-    else:
-        # lasym=False: reduced [0, pi] grid with endpoint half-weights.
-        n_theta = int(trig.ntheta2)
-        if int(f.shape[1]) < n_theta:
-            raise ValueError("Field theta grid is smaller than VMEC ntheta2")
-        weights = np.full((n_theta,), float(trig.dnorm))
-        weights[0] *= 0.5
-        weights[n_theta - 1] *= 0.5
-    f_weighted = f[:, :n_theta, :] * jnp.asarray(weights, dtype=f.dtype)[None, :, None]
-
-    cos_phase, sin_phase = _phase_pair(modes, trig, "value")
-    cos_phase = cos_phase[:, :n_theta, :]
-    sin_phase = sin_phase[:, :n_theta, :]
-
-    # Strip mscale*nscale to obtain the unscaled helical basis functions
-    # cos(m*theta - n*zeta), sin(m*theta - n*zeta).
-    mode_norm = (np.asarray(trig.mscale)[m_idx] * np.asarray(trig.nscale)[np.abs(n_idx)])
-    cos_unscaled = jnp.asarray(cos_phase / mode_norm[:, None, None])
-    sin_unscaled = jnp.asarray(sin_phase / mode_norm[:, None, None])
-
-    inner_cos = _einsum("sij,kij->sk", f_weighted, cos_unscaled)
-    inner_sin = _einsum("sij,kij->sk", f_weighted, sin_unscaled)
-
-    # Grid norms of the unscaled basis: 1 for (m, n) = (0, 0), 1/2 otherwise.
-    is_00 = (m_idx == 0) & (n_idx == 0)
-    basis_norm = jnp.asarray(np.where(is_00, 1.0, 0.5))
-    coeff_cos = inner_cos / basis_norm[None, :]
-    coeff_sin = inner_sin / basis_norm[None, :]
-    # sin(m*theta - n*zeta) vanishes identically for (m, n) = (0, 0).
-    coeff_sin = jnp.where(jnp.asarray(is_00)[None, :], 0.0, coeff_sin)
-
-    parity = str(parity).lower()
-    if parity == "cos":
-        coeff_sin = jnp.zeros_like(coeff_sin)
-    elif parity == "sin":
-        coeff_cos = jnp.zeros_like(coeff_cos)
-    elif parity != "both":
-        raise ValueError("parity must be one of {'cos', 'sin', 'both'}")
-    return coeff_cos, coeff_sin
 
 
 # ---------------------------------------------------------------------------

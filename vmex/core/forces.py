@@ -54,7 +54,7 @@ import numpy as np
 import jax.numpy as jnp
 from jax import lax
 
-from .fields import MagneticFields, MetricElements
+from .fields import MagneticFields, MetricElements, _with_axis_zero
 from .fourier import ModeTable, TrigTables
 from .geometry import HalfMeshJacobian, RealSpaceGeometry, sqrt_s_half_mesh
 from .transforms import (
@@ -101,13 +101,6 @@ def _einsum(expr: str, *operands: Array) -> Array:
 # ---------------------------------------------------------------------------
 # Radial staggering primitives (forces.f forward operations along s)
 # ---------------------------------------------------------------------------
-
-
-def _with_axis_zero(a: Array) -> Array:
-    a = jnp.asarray(a)
-    if a.shape[0] == 0:
-        return a
-    return jnp.concatenate([jnp.zeros_like(a[:1]), a[1:]], axis=0)
 
 
 def _forward_average_half(a: Array) -> Array:
