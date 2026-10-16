@@ -132,9 +132,10 @@ def run():
     field0 = jax.vmap(BiotSavart(coils0).B)(points0)
     desired = jnp.moveaxis(data0.B_total - plasma0, 0, -1).reshape(-1, 3)
     # Linear projection selects both the physical amplitude and winding sign.
-    current *= float(jnp.vdot(field0, desired) / jnp.vdot(field0, field0))
+    area0 = jnp.linalg.norm(data0.area_vector, axis=0).ravel()[:, None]
+    current *= float(jnp.sum(area0 * field0 * desired) / jnp.sum(area0 * field0**2))
     if not np.isfinite(current) or current == 0:
-        raise RuntimeError("Circular coils cannot initialize the seed field")
+        raise RuntimeError("Initial coils cannot initialize the seed field")
     coils0 = Coils(curves, np.full(N_COILS, current))
     nb = problem.x0.size
     x0 = jnp.concatenate((jnp.asarray(problem.x0), coils0.dofs))
