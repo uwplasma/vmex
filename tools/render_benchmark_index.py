@@ -69,6 +69,7 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/strong_force_m4.json", "benchmarks/strong_force.py"),
     ("benchmarks/strong_force_cases_m4.json", "benchmarks/make_strong_force_comparison.py"),
     ("benchmarks/strong_force_comparison_m4.json", "benchmarks/make_strong_force_comparison.py"),
+    ("benchmarks/regression_matrix.json", "benchmarks/regression_matrix.py"),
     # Hand-recorded records: no script in the tree writes them.  They are
     # status and narrative records gated by tests or quoted by docs.
     ("benchmarks/mirror_*.json", ""),
@@ -80,6 +81,8 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/interior_field_vs_wout.json", ""),
     # Written by ESSOS examples/cross_code_benchmark/benchmark.py (uwplasma/ESSOS#162).
     ("benchmarks/essos_cross_code.json", ""),
+    # Measured with an out-of-tree cross-code driver; the record lists every run.
+    ("benchmarks/desc_protocol.json", ""),
     ("benchmarks/make_essos_cross_code_figures.py", ""),
     # Taken from the exact-equilibrium benchmark; the record names its commit.
     ("benchmarks/exact_equilibria.json", ""),

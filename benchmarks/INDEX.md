@@ -12,8 +12,8 @@ uncited records are reachable through git history: link them with a
 permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
-35 committed artifacts: 30 standalone records and 1 grouped directory holding
-5 files. 31 of the 31 entries below are cited by a page, a test or another
+37 committed artifacts: 32 standalone records and 1 grouped directory holding
+5 files. 33 of the 33 entries below are cited by a page, a test or another
 script; 0 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -30,6 +30,7 @@ hand rather than by a script in this tree.
 | `benchmarks/capabilities.json` | `tools/render_capabilities.py` |  |  | `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `docs/reference/index.md` |
 | `benchmarks/convergence_nfp4_ns51.json` | `benchmarks/make_readme_figures.py` | `40e7899f` | 2026-07-29 | `docs/_static/figures/figures.json`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/desc_native_vs_lifted_2026-09-03.json` |  | `82a424da` | 2026-09-03 | `docs/explanation/validation.md`, `tests/test_profile_workflows.py` |
+| `benchmarks/desc_protocol.json` |  | `5655fc49` | 2026-10-15 | `benchmarks/make_desc_protocol_figure.py`, `docs/_static/figures/figures.json`, `docs/reference/benchmarks.md` |
 | `benchmarks/device_cache_reload_m4.json` | `benchmarks/device_cache_reload.py` | `a9a11a3b` | 2026-08-29 | `docs/howto/run-on-gpu.md` |
 | `benchmarks/essos_cross_code.json` |  |  | 2026-10-11 | `README.md`, `benchmarks/make_essos_cross_code_figures.py`, `docs/_static/figures/figures.json` |
 | `benchmarks/exact_equilibria.json` |  |  | 2026-10-10 | `benchmarks/make_exact_equilibria_figure.py`, `docs/_static/figures/figures.json`, `docs/explanation/validation.md` |
@@ -50,6 +51,7 @@ hand rather than by a script in this tree.
 | `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `README.md`, `docs/reference/optimization.rst` |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
 | `benchmarks/qi_optimization_profile_cpu.json` | `benchmarks/qi_optimization_profile.py` | `3ee6ca58` | 2026-09-14 | `docs/reference/objectives.rst`, `examples/optimization/QI_optimization.py` |
+| `benchmarks/regression_matrix.json` | `benchmarks/regression_matrix.py` | `5655fc49` | 2026-10-15 | `docs/reference/benchmarks.md` |
 | `benchmarks/review_20260913.json` |  | `f09288b3` | 2026-09-13 | `benchmarks/review_20260913_equilibrium.py`, `benchmarks/review_20260913_exterior.py`, `docs/explanation/nestor-vacuum.rst` |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |

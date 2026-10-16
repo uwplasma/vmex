@@ -1,0 +1,438 @@
+{
+ "_provenance": {
+  "measurement_date": "2026-10-15",
+  "measurement_commit": "5655fc49",
+  "input_data_embedded": false,
+  "host": "Linux x86_64 workstation (36 cores), CPU, shared; 'load' is the 1-min load average at the start of each run",
+  "threads": "DSHAPE: 8 cores per run (VMEX/DESC XLA threads, C++ VMEC threads, VMEC2000 MPI ranks); QA: 1 core per run",
+  "versions": {
+   "vmex": "0.11.10 (jax 0.11.2)",
+   "desc": "0.17.3 (jax 0.9.2: desc-opt 0.17.3 requires jax<0.10)",
+   "cpp_vmec": "0.9.1",
+   "vmec2000": "hiddenSymmetries/VMEC2000 70c637a",
+   "gvec": "1.5.0 (not scored, see open)"
+  },
+  "driver": "out-of-tree; each code solves the deck as written with NS_ARRAY, MPOL, NTOR, FTOL replaced"
+ },
+ "protocol": {
+  "reference": "Panici et al. 2023, J. Plasma Phys. 89, 955890303",
+  "metric": "f_norm = <|F|>_vol / <|grad p|>_vol computed by DESC on each code's output loaded through desc.vmec.VMECIO (L = 2(mpol-1), lambda moved to the full mesh); f_norm_core is the same ratio over 0.2 <= rho <= 0.9",
+  "wall_s": "VMEX and DESC: second solve in the same process (compiled); C++ VMEC and VMEC2000: one solve; VMEX cold_s includes compilation"
+ },
+ "force_vs_time": {
+  "DSHAPE": {
+   "vmex": [
+    {
+     "ns": 51,
+     "mpol": 4,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 0.338,
+     "cold_s": 9.16,
+     "iterations": 350,
+     "f_norm": 1.89,
+     "f_norm_core": 0.864,
+     "iota_0.1": 0.9933,
+     "load": 23.98
+    },
+    {
+     "ns": 51,
+     "mpol": 6,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 0.432,
+     "cold_s": 9.06,
+     "iterations": 420,
+     "f_norm": 0.3959,
+     "f_norm_core": 0.1254,
+     "iota_0.1": 0.9933,
+     "load": 23.02
+    },
+    {
+     "ns": 51,
+     "mpol": 8,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 0.938,
+     "cold_s": 10.78,
+     "iterations": 529,
+     "f_norm": 0.2421,
+     "f_norm_core": 0.07978,
+     "iota_0.1": 0.9933,
+     "load": 23.41
+    },
+    {
+     "ns": 51,
+     "mpol": 10,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 0.652,
+     "cold_s": 9.92,
+     "iterations": 572,
+     "f_norm": 0.1499,
+     "f_norm_core": 0.04902,
+     "iota_0.1": 0.9933,
+     "load": 23.93
+    },
+    {
+     "ns": 51,
+     "mpol": 12,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 0.86,
+     "cold_s": 11.95,
+     "iterations": 590,
+     "f_norm": 0.1156,
+     "f_norm_core": 0.04565,
+     "iota_0.1": 0.9933,
+     "load": 22.94
+    }
+   ],
+   "cpp_vmec": [
+    {
+     "ns": 51,
+     "mpol": 4,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 1.811,
+     "iterations": 351,
+     "f_norm": 1.89,
+     "f_norm_core": 0.864,
+     "iota_0.1": 0.9933,
+     "load": 21.85
+    },
+    {
+     "ns": 51,
+     "mpol": 6,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 10.61,
+     "iterations": 421,
+     "f_norm": 0.3959,
+     "f_norm_core": 0.1254,
+     "iota_0.1": 0.9933,
+     "load": 21.85
+    },
+    {
+     "ns": 51,
+     "mpol": 8,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 2.169,
+     "iterations": 530,
+     "f_norm": 0.2421,
+     "f_norm_core": 0.07978,
+     "iota_0.1": 0.9933,
+     "load": 22.94
+    },
+    {
+     "ns": 51,
+     "mpol": 10,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 1.663,
+     "iterations": 573,
+     "f_norm": 0.1499,
+     "f_norm_core": 0.04902,
+     "iota_0.1": 0.9933,
+     "load": 21.79
+    },
+    {
+     "ns": 51,
+     "mpol": 12,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 0.27,
+     "iterations": 591,
+     "f_norm": 0.1156,
+     "f_norm_core": 0.04565,
+     "iota_0.1": 0.9933,
+     "load": 21.48
+    }
+   ],
+   "vmec2000": [
+    {
+     "ns": 51,
+     "mpol": 4,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 2.987,
+     "iterations": 351,
+     "f_norm": 1.89,
+     "f_norm_core": 0.864,
+     "iota_0.1": 0.9933,
+     "load": 22.76
+    },
+    {
+     "ns": 51,
+     "mpol": 6,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 2.618,
+     "iterations": 421,
+     "f_norm": 0.3959,
+     "f_norm_core": 0.1254,
+     "iota_0.1": 0.9933,
+     "load": 22.78
+    },
+    {
+     "ns": 51,
+     "mpol": 8,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 9.875,
+     "iterations": 530,
+     "f_norm": 0.2421,
+     "f_norm_core": 0.07978,
+     "iota_0.1": 0.9933,
+     "load": 21.64
+    },
+    {
+     "ns": 51,
+     "mpol": 10,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 6.705,
+     "iterations": 573,
+     "f_norm": 0.1499,
+     "f_norm_core": 0.04902,
+     "iota_0.1": 0.9933,
+     "load": 22.78
+    },
+    {
+     "ns": 51,
+     "mpol": 12,
+     "ntor": 0,
+     "ftol": 1e-12,
+     "wall_s": 3.756,
+     "iterations": 591,
+     "f_norm": 0.1156,
+     "f_norm_core": 0.04565,
+     "iota_0.1": 0.9933,
+     "load": 21.66
+    }
+   ],
+   "desc": [
+    {
+     "ns": 51,
+     "mpol": 4,
+     "ntor": 0,
+     "ftol": 1e-10,
+     "wall_s": 2.512,
+     "cold_s": 70.59,
+     "f_norm": 0.03667,
+     "f_norm_core": 0.02433,
+     "load": 18.09
+    },
+    {
+     "ns": 51,
+     "mpol": 6,
+     "ntor": 0,
+     "ftol": 1e-10,
+     "wall_s": 3.752,
+     "cold_s": 75.61,
+     "f_norm": 0.005928,
+     "f_norm_core": 0.003283,
+     "load": 16.78
+    },
+    {
+     "ns": 51,
+     "mpol": 8,
+     "ntor": 0,
+     "ftol": 1e-10,
+     "wall_s": 12.907,
+     "cold_s": 88.37,
+     "f_norm": 0.0004791,
+     "f_norm_core": 0.0002272,
+     "load": 15.23
+    },
+    {
+     "ns": 51,
+     "mpol": 10,
+     "ntor": 0,
+     "ftol": 1e-10,
+     "wall_s": 167.898,
+     "cold_s": 217.39,
+     "f_norm": 2.973e-05,
+     "f_norm_core": 1.357e-05,
+     "load": 16.03
+    }
+   ]
+  },
+  "LandremanPaul2021_QA_beta2p5_bootstrap": {
+   "vmex": [
+    {
+     "ns": 65,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 33.061,
+     "cold_s": 78.39,
+     "iterations": 1808,
+     "f_norm": 1.787,
+     "f_norm_core": 0.7551,
+     "iota_0.1": 0.1880609,
+     "load": 44.9
+    },
+    {
+     "ns": 129,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 132.493,
+     "cold_s": 165.78,
+     "iterations": 2916,
+     "f_norm": 2.327,
+     "f_norm_core": 0.9912,
+     "iota_0.1": 0.1768912,
+     "load": 44.13
+    },
+    {
+     "ns": 257,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 380.375,
+     "cold_s": 567.95,
+     "iterations": 4500,
+     "f_norm": 3.293,
+     "f_norm_core": 1.365,
+     "iota_0.1": 0.166882,
+     "load": 40.45
+    }
+   ],
+   "cpp_vmec": [
+    {
+     "ns": 65,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 11.419,
+     "iterations": 1870,
+     "f_norm": 1.789,
+     "f_norm_core": 0.7556,
+     "iota_0.1": 0.1880391,
+     "load": 29.76
+    },
+    {
+     "ns": 129,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 40.329,
+     "iterations": 3183,
+     "f_norm": 2.355,
+     "f_norm_core": 1.003,
+     "iota_0.1": 0.1767775,
+     "load": 30.91
+    },
+    {
+     "ns": 257,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 136.77,
+     "iterations": 5076,
+     "f_norm": 3.314,
+     "f_norm_core": 1.374,
+     "iota_0.1": 0.1668157,
+     "load": 29.32
+    }
+   ],
+   "vmec2000": [
+    {
+     "ns": 65,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 14.556,
+     "iterations": 1809,
+     "f_norm": 1.787,
+     "f_norm_core": 0.7551,
+     "iota_0.1": 0.1880609,
+     "load": 27.71
+    },
+    {
+     "ns": 129,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 47.646,
+     "iterations": 2917,
+     "f_norm": 2.327,
+     "f_norm_core": 0.9912,
+     "iota_0.1": 0.1768912,
+     "load": 27.51
+    },
+    {
+     "ns": 257,
+     "mpol": 7,
+     "ntor": 6,
+     "ftol": 1e-12,
+     "wall_s": 158.605,
+     "iterations": 4501,
+     "f_norm": 3.293,
+     "f_norm_core": 1.365,
+     "iota_0.1": 0.166882,
+     "load": 27.35
+    }
+   ]
+  }
+ },
+ "near_axis_iota": {
+  "deck": "examples/data/input.LandremanPaul2021_QA_beta2p5_bootstrap",
+  "mpol": 7,
+  "ntor": 6,
+  "ftol": 1e-12,
+  "codes": {
+   "vmex": {
+    "ns": [
+     65,
+     129,
+     257
+    ],
+    "iota_0_1": [
+     0.18806,
+     0.17689,
+     0.16688
+    ],
+    "observed_order": 0.16
+   },
+   "cpp_vmec": {
+    "ns": [
+     65,
+     129,
+     257
+    ],
+    "iota_0_1": [
+     0.18804,
+     0.17678,
+     0.16682
+    ],
+    "observed_order": 0.18
+   },
+   "vmec2000": {
+    "ns": [
+     65,
+     129,
+     257
+    ],
+    "iota_0_1": [
+     0.18806,
+     0.17689,
+     0.16688
+    ],
+    "observed_order": 0.16
+   }
+  },
+  "observed_order": "p = log2(|i65 - i129| / |i129 - i257|) in h = 1/ns",
+  "desc_reference": 0.166,
+  "desc_reference_note": "DESC value from the earlier documented solve of this deck; the re-solve here failed (automatic continuation did not nest surfaces at M = 6 and timed out after 50 min at M = 8)"
+ },
+ "open": [
+  "GVEC 1.5.0 writes no wout, so it cannot be scored through VMECIO; not run",
+  "DESC on the 3-D QA deck did not converge with automatic continuation",
+  "DSHAPE DESC mpol 12 exceeded the 25 min budget",
+  "timings were taken on a loaded shared host; the 8-core DSHAPE C++ VMEC and VMEC2000 rows scatter by up to 10x"
+ ]
+}
