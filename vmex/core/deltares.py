@@ -78,7 +78,8 @@ def paper_average(score, v_tau, bcrit, bcrit_weight, line_length):
     safe_length = jnp.where(line_length > 0, line_length, 1.0)
     weights = bcrit_weight / safe_b**2
     numerator = jnp.sum(v_tau * score[:, None] * weights[None, None, :, None], axis=(1, 2, 3))
-    return jnp.where(valid, numerator / (2 * v_tau.shape[1] * safe_length), jnp.nan)
+    result = numerator / (2 * v_tau.shape[1] * safe_length)
+    return jnp.where(valid & jnp.isfinite(result), result, jnp.nan)
 
 
 def helical_angles(chi, eta, iota, nfp: int, M: int, N: int):
@@ -92,6 +93,48 @@ def helical_angles(chi, eta, iota, nfp: int, M: int, N: int):
     theta = iota * chi / safe + N * eta / nfp
     zeta = chi / safe + M * eta / nfp
     return jnp.where(D != 0, theta, jnp.nan), jnp.where(D != 0, zeta, jnp.nan)
+
+
+def pitch_band_phase_space_mass(bmag, spatial_weight, bcrit_lower, bcrit_upper):
+    """Analytically integrate the unit-score pitch measure before space.
+
+    The last axis contains spatial quadrature nodes and ``spatial_weight``
+    contains their nonnegative ``dl/B`` weights on the same domain. Positive
+    scalar physical bounds integrate ``dBcrit/Bcrit**2``. The result preserves
+    :func:`paper_average`'s factor two and is not a probability.
+
+    Fubini's theorem gives ``2 <sqrt((1-B/U)+)-sqrt((1-B/L)+)>``.
+    This counts *all accessible segments*, including cut wells and passing
+    segments in a bounded trace; it does not certify trapped-family coverage.
+    Complete wells alone give this result only when the spatial domain and
+    pitch band have no cut or passing components. This independent measure
+    avoids bounce roots and the integrable pitch-separatrix singularity.
+    AD is finite away from a quadrature node coinciding with a band endpoint;
+    that coincidence is nondifferentiable (the inactive branch selects zero).
+    Spatial quadrature convergence and physical-field positivity still need
+    independent certification. Invalid data returns NaN, never zero mass.
+    """
+    b, weight, lower, upper = map(jnp.asarray,
+                                (bmag, spatial_weight, bcrit_lower, bcrit_upper))
+    if b.ndim < 1 or b.shape[-1] < 1 or lower.ndim or upper.ndim:
+        raise ValueError("Require a spatial node axis and scalar physical pitch bounds")
+    weight = jnp.broadcast_to(weight, b.shape)
+    valid = (jnp.all(jnp.isfinite(b) & (b > 0), axis=-1)
+             & jnp.all(jnp.isfinite(weight) & (weight >= 0), axis=-1)
+             & (jnp.sum(weight, axis=-1) > 0)
+             & jnp.isfinite(lower) & jnp.isfinite(upper)
+             & (lower > 0) & (upper > lower))
+    lo, hi = jnp.where(lower > 0, lower, 1.), jnp.where(upper > 0, upper, 1.)
+    def positive_sqrt(x):
+        active = x > 0
+        return jnp.where(active, jnp.sqrt(jnp.where(active, x, 1.)), 0.)
+    density = 2 * (positive_sqrt(1 - b / hi) - positive_sqrt(1 - b / lo))
+    scale = jnp.max(weight, axis=-1, keepdims=True)
+    normalized = weight / jnp.where(jnp.isfinite(scale) & (scale > 0), scale, 1.)
+    denominator = jnp.sum(normalized, axis=-1)
+    mass = jnp.sum(normalized * density, axis=-1) / jnp.where(denominator > 0, denominator, 1.)
+    return jnp.where(valid & jnp.isfinite(denominator) & (denominator > 0)
+                     & jnp.isfinite(mass), mass, jnp.nan)
 
 
 def linear_crossing_weights(omega, resonances, valid=None):
@@ -164,9 +207,10 @@ def deltares_from_maps(delta_s, delta_eta, v_tau, bcrit, bcrit_weight,
     weights = linear_crossing_weights(omega, pairs[:, 0] / pairs[:, 1])
     score = jnp.sum(power[..., pairs[:, 1] - 1] * weights, axis=-1)
     rows = paper_average(score, tau, bcrit, bcrit_weight, line_length)
-    valid &= jnp.all(jnp.isfinite(rows))
+    loss = 0.5 * jnp.sum(rows**2)
+    valid &= jnp.all(jnp.isfinite(rows)) & jnp.isfinite(loss)
     rows = jnp.where(valid, rows, jnp.nan)
-    return {"delta_res": rows, "loss": 0.5 * jnp.sum(rows**2), "omega": omega,
+    return {"delta_res": rows, "loss": jnp.where(valid, loss, jnp.nan), "omega": omega,
             "harmonic_power": power, "weights": weights, "valid": valid}
 
 
@@ -360,9 +404,10 @@ def restricted_action_deltares_from_boozer(
     line_length = jnp.mean(jnp.trapezoid(dl[:, :-1] / B[:, :-1], t, axis=-1), axis=1)
     rows = paper_average(score, tu, bc, wb, line_length)
     pitch_mass = paper_average(jnp.ones_like(score), tu, bc, wb, line_length)
-    valid &= jnp.all(jnp.isfinite(rows))
+    loss = .5 * jnp.sum(rows**2)
+    valid &= jnp.all(jnp.isfinite(rows)) & jnp.all(jnp.isfinite(pitch_mass)) & jnp.isfinite(loss)
     rows = jnp.where(valid, rows, jnp.nan)
-    return {"delta_res": rows, "loss": .5 * jnp.sum(rows**2), "valid": valid, "full_population": False,
+    return {"delta_res": rows, "loss": jnp.where(valid, loss, jnp.nan), "valid": valid, "full_population": False,
             "action": A, "action_s": A_s, "v_tau": tau, "delta_eta": delta_eta, "omega": omega,
             "harmonic_power": power, "weights": weights, "paper_pitch_band_mass": pitch_mass,
             "t": t, "eta": eta, "well_left": roots[..., :1], "well_right": roots[..., 1:],
@@ -375,3 +420,43 @@ def restricted_action_deltares_from_boozer(
             "max_trace_phase_step": max_trace_phase_step, "max_eta_harmonic": max_eta_harmonic,
             "family_eta_valid": family_eta_valid,
             "family_radial_valid": family_radial_valid, "closure_valid": closure_valid, "hard_status": hard_status}
+
+
+def streamed_restricted_action_deltares_from_boozer(*, bcrit, bcrit_weight, **kwargs):
+    """Compose the restricted diagnostic with bounded-memory pitch execution.
+
+    Arguments and certificates retain the restricted primitive's semantics.
+    Physical pitch nodes and weights are live arrays, shared by every surface
+    and eta. A checkpointed one-pitch ``lax.scan`` sums radial rows *before*
+    the outer square. Any failed pitch invalidates the whole band; no failed
+    population is discarded. Rematerializing the scan body avoids retaining
+    the large bounce intermediates for all pitches in a reverse-mode solve.
+    This changes execution only, not coverage, normalization or the functional.
+    """
+    import jax
+    bc, wb = jnp.asarray(bcrit), jnp.asarray(bcrit_weight)
+    if bc.ndim != 1 or bc.size < 1 or wb.shape != bc.shape:
+        raise ValueError("Require matching nonempty physical pitch nodes and weights")
+    # Match the primitive's explicit promotion, including mixed-precision
+    # coefficients/pitch. A scan carry must not change dtype on its first step.
+    coefficients = jnp.asarray(kwargs["bmnc_b"], dtype=jnp.float64)
+    def body(carry, pitch):
+        rows, mass, valid = carry
+        # Zero quadrature weight is legal padding, not absent geometry. Check
+        # that pitch's complete well with a unit weight, then apply its live
+        # physical quadrature weight outside the primitive's scalar guard.
+        out = restricted_action_deltares_from_boozer(
+            bcrit=pitch[0][None], bcrit_weight=jnp.ones((1,), dtype=wb.dtype), **kwargs)
+        return (rows + pitch[1] * out["delta_res"], mass + pitch[1] * out["paper_pitch_band_mass"],
+                valid & out["valid"]), out["valid"]
+    zero = jnp.zeros(coefficients.shape[0], dtype=coefficients.dtype)
+    weights_valid = jnp.all(jnp.isfinite(wb) & (wb >= 0)) & jnp.any(wb > 0)
+    (rows, mass, valid), pitch_valid = jax.lax.scan(
+        jax.checkpoint(body),
+        (zero, zero, weights_valid), (bc, wb))
+    loss = .5 * jnp.sum(rows**2)
+    valid &= jnp.all(jnp.isfinite(rows)) & jnp.all(jnp.isfinite(mass)) & jnp.isfinite(loss)
+    rows = jnp.where(valid, rows, jnp.nan)
+    return {"delta_res": rows, "loss": jnp.where(valid, loss, jnp.nan), "valid": valid,
+            "pitch_valid": pitch_valid, "paper_pitch_band_mass": jnp.where(valid, mass, jnp.nan),
+            "full_population": False}

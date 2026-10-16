@@ -799,6 +799,12 @@ at fixed eta and physical pitch. Action harmonics supply the stabilized
 power directly; no numerical angular derivative or shear division is needed.
 Its default ``mean_map`` rotation differs explicitly from the supplied-map
 reducer's archive-compatible ``frequency_ratio`` default; both are selectable.
+:func:`~vmex.core.deltares.streamed_restricted_action_deltares_from_boozer`
+executes the same physical pitch quadrature through a checkpointed one-pitch
+scan. It sums the reduced radial rows before applying the outer square and
+invalidates the complete band if any pitch fails. This permits composing the
+same restricted functional with a state/implicit-solve derivative without
+retaining every pitch's bounce intermediates at once.
 
 This primitive always returns ``full_population=False``. Its fixed pitch band
 and finite-cell denominator define a restricted diagnostic. It rejects extra,
@@ -814,6 +820,40 @@ wells along each sampled eta line. The same bound checks continuous field
 positivity, rather than positivity only at the knots. Continuation between eta samples still
 requires refinement. These checks require resolution studies, especially near a separatrix where action
 can be accurate while the bounce period is unresolved.
+
+:func:`~vmex.core.deltares.pitch_band_phase_space_mass` provides an independent
+unit-score population audit by integrating physical pitch analytically before
+the spatial quadrature. For a positive band ``[L,U]`` it returns
+``2 <sqrt((1-B/U)+)-sqrt((1-B/L)+)>``, with the supplied ``dl/B`` spatial
+weights. It counts all accessible segments, including cut or passing
+components in a finite trace. Thus agreement with a sum of complete-well
+periods is a useful domain-counting check only when those components are
+absent. The factor two is retained; this mass is not a probability. The
+analytic pitch integral avoids root pairing and the integrable separatrix
+singularity, but still requires converged spatial quadrature. Its derivative
+is not defined when a quadrature field value equals a pitch endpoint.
+
+For a bounded trace, the largest complete-well level at position ``x`` is
+``H(x)=min(max_left B,max_right B)``. Replacing ``U`` by ``min(U,H(x))``
+in the local density separates complete and cut population without dropping
+any well. Sampled prefix and suffix maxima and a Fourier curvature bound
+can bracket this measure. This establishes population accounting, not
+continuation of bounce maps through births or separatrices. Near a
+nondegenerate minimum the action is linear in pitch depth and the period
+has a finite oscillator limit. Near a nondegenerate maximum the period
+diverges logarithmically; an excluded pitch tail has mass of order
+``depth*log(1/depth)``. Small omitted population does not bound missing
+resonance power or derivatives of the action.
+
+A fixed physical band chosen from geometry can therefore define a conditional
+experiment if its exclusion is reported and the full objective and ordinary
+equilibrium derivative are independently qualified on that band. Full
+population requires matching all connected well branches and resolving their
+birth, merge and boundary-transition cells. An absent-to-present radial edge
+cannot be set to zero: a resonance can occur between the branch birth and
+the first sampled present node. A whole-torus maximum defines a common trapped
+threshold for dense irrational field lines; a rational field line can have a
+different, label-dependent maximum.
 
 The canonical flux sign is explicit: VMEX's ESSOS adapter uses
 ``psi0=-Phi_edge/(2*pi)``. Reversing this sign reverses rotation but leaves

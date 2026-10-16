@@ -245,7 +245,7 @@ class Equilibrium:
         """Full wout dataset of this state (``vmex.core.wout``, cached)."""
         r = self.result
         return wout_from_state(
-            inp=self.inp, state=self.state,
+            inp=self.inp, state=_state_for_wout(self.state, self.runtime),
             fsqr=float(r.fsqr), fsqz=float(r.fsqz), fsql=float(r.fsql),
             niter=int(r.iterations), converged=bool(r.converged),
         )
@@ -481,7 +481,11 @@ def solve_equilibrium(
         else result.state
     )
     ns = int(np.shape(state.R_cos)[0])
-    runtime = prepare_runtime(inp, resolution_from_input(inp, ns=ns))
+    runtime = prepare_runtime(
+        inp, resolution_from_input(inp, ns=ns),
+        lconm1=solve_kwargs.get("lconm1", True),
+        m1_gauge=solve_kwargs.get("m1_gauge"),
+    )
     return Equilibrium(inp=inp, state=state, runtime=runtime, result=result)
 
 
@@ -2635,6 +2639,9 @@ def _least_squares_implicit(
     if ladder_fields:
         inp = dataclasses.replace(inp, **ladder_fields)
 
+    if solve_kwargs.get("m1_gauge") is not None and solve_kwargs.get("polish_force_balance", False) is not False:
+        raise ValueError("m1_gauge cannot be combined with force-balance polishing")
+
     lasym = bool(inp.lasym)
     # The 4-family traceable map, the dof plumbing below, and the
     # forward+adjoint path are dimension-general; 3D lasym is FD-validated
@@ -2675,6 +2682,8 @@ def _least_squares_implicit(
     cfg = imp.make_config(
         inp,
         multigrid=True,
+        lconm1=solve_kwargs.get("lconm1", True),
+        m1_gauge=solve_kwargs.get("m1_gauge"),
         hot_restart=(warm_start is not None),
         adjoint_tol=adjoint_tol,
         jacobian_adjoint_tol=jacobian_adjoint_tol,
@@ -3586,6 +3595,7 @@ def _least_squares_implicit(
         runtime = prepare_runtime(
             result_input,
             resolution_from_input(result_input, ns=ns),
+            lconm1=cfg.lconm1, m1_gauge=cfg.m1_gauge,
         )
         _, residuals, _ = evaluate_forces(result.state, runtime)
         result = dataclasses.replace(
@@ -3882,3 +3892,19 @@ def _configure_scipy_monitor(
     monitor = OptimizationMonitor(problem)
     scipy_kwargs["callback"] = monitor
     return monitor
+
+
+def _state_for_wout(state: SpectralState, runtime: SolverRuntime) -> SpectralState:
+    """Give the existing exporter its constrained basis without rescaling."""
+    if runtime.setup.lconm1:
+        return state
+    from .residuals import m1_physical_to_constrained
+
+    # All mixed entries have the same m and |n|: internal mode and radial
+    # factors commute with this basis rotation. Lambda is unchanged.
+    rc, zs, rs, zc = m1_physical_to_constrained(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
+        modes=runtime.modes, lthreed=runtime.setup.lthreed,
+        lasym=runtime.setup.lasym,
+    )
+    return dataclasses.replace(state, R_cos=rc, Z_sin=zs, R_sin=rs, Z_cos=zc)

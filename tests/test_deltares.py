@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.integrate import quad
 from vmex.core.deltares import (helical_angles, normalized_bump, paper_average,
-                               resonance_pairs, stabilized_power)
+                               pitch_band_phase_space_mass, resonance_pairs, stabilized_power)
 
 
 def test_fourier_normalization():
@@ -145,6 +145,53 @@ def test_published_normalization_complete_single_well():
     published = float(paper_average(np.ones((1, 160, 1)), vtau[None, None, :, None],
                                     bcrit, wb, np.array([L]))[0])
     np.testing.assert_allclose(published, 2 * ft, rtol=3e-5)
+
+
+def test_pitch_integrated_population_multiwell_and_cut_domain():
+    # Two complete wells, then a subdomain cutting both. The spatial identity
+    # counts cut segments too, whereas summing only complete bounce slots cannot.
+    from vmex.core.bounce import bounce_action
+    nodes, weights = np.polynomial.legendre.leggauss(128)
+    bc, wb = 1 + .2 * nodes, .2 * weights
+    t = 2 * np.pi * np.arange(4096) / 4096
+    b = 1 - .2 * np.cos(2 * t)
+    out = bounce_action(b, 1 / bc, length=2 * np.pi, periodic=True,
+                        max_wells=2, quadrature_order=96, drift_integrands={})
+    tau = np.asarray(out['bounce_time'])
+    length = np.sum(1 / b) * 2 * np.pi / t.size
+    by_wells = np.sum(tau * (wb / bc**2)[:, None]) / (2 * length)
+    identity = pitch_band_phase_space_mass(b, 1 / b, .8, 1.2)
+    np.testing.assert_allclose(identity, by_wells, rtol=6e-5)
+    cut_b = np.array([.9, .95, 1., .95, .9])
+    assert float(pitch_band_phase_space_mass(cut_b, 1 / cut_b, 1.1, 1.2)) > 0
+    cut = bounce_action(cut_b, 1 / np.array([1.15]), periodic=False,
+                        max_wells=2, drift_integrands={})
+    assert bool(cut['truncated'][0]) and not np.any(cut['well_mask'])
+
+
+def test_pitch_integrated_population_invalid_and_replication():
+    b, weight = jnp.array([[.9, 1., 1.1]]), jnp.ones((1, 3))
+    mass = jax.jit(pitch_band_phase_space_mass)(b, weight, .8, 1.2)
+    np.testing.assert_allclose(pitch_band_phase_space_mass(jnp.tile(b, (1, 2)),
+                                jnp.tile(weight, (1, 2)), .8, 1.2), mass)
+    assert np.isnan(pitch_band_phase_space_mass(b, weight, 1.2, .8)).all()
+    assert np.isnan(pitch_band_phase_space_mass(b, weight * 0, .8, 1.2)).all()
+    assert np.isnan(pitch_band_phase_space_mass(-b, weight, .8, 1.2)).all()
+    assert float(pitch_band_phase_space_mass(b, weight, .1, .2)[0]) == 0
+    # Extreme reciprocal scaling can flush to zero on XLA: reject that
+    # unrepresentable quadrature instead of returning a favorable zero mass.
+    assert np.isnan(pitch_band_phase_space_mass(b,weight*1e308,.8,1.2)).all()
+
+
+def test_pitch_integrated_population_live_geometry_and_weight_derivative():
+    b = jnp.array([.7, .9, 1.1, 1.3])  # Includes both inactive square roots.
+    w = jnp.array([1., 2., 3., 4.])
+    def f(x):
+        return pitch_band_phase_space_mass(b + x * jnp.array([.1, -.2, .3, -.1]),
+                                           w * (1 + x * jnp.array([.2, -.1, .1, .3])), .8, 1.2)
+    ad = jax.jit(jax.grad(f))(0.)
+    assert np.isfinite(ad)
+    np.testing.assert_allclose(ad, (f(1e-5) - f(-1e-5)) / 2e-5, rtol=1e-8)
 
 
 def test_bounce_cancellation_before_squaring():
@@ -318,6 +365,57 @@ def test_restricted_live_coefficient_gradient_parity_and_flux_sign():
     ratio = evaluate(**dict(_restricted_input(x), rotation='frequency_ratio'))
     assert ratio['valid']
     assert np.max(np.abs(np.asarray(ratio['omega'] - out['omega']))) > 1e-6
+
+
+def test_streamed_pitch_rows_and_reverse_derivative_match_batched_primitive():
+    from vmex.core.deltares import (restricted_action_deltares_from_boozer as batched,
+                                   streamed_restricted_action_deltares_from_boozer as streamed)
+    def evaluate(x, weights, pitch, fn):
+        return fn(**dict(_restricted_input(x), bcrit=pitch, bcrit_weight=weights))
+    x = jnp.array([0., .002, .001])
+    weight, pitch = jnp.array([.01, .02, .01]), jnp.array([1.01, 1.02, 1.03])
+    values=[]; gradients=[]
+    for fn in (batched, streamed):
+        out = jax.jit(lambda z,w,p:evaluate(z,w,p,fn))(x,weight,pitch)
+        assert out['valid'] and not out['full_population']
+        values.append(np.asarray(out['delta_res']))
+        gradients.append(jax.jit(jax.grad(lambda z,w,p:evaluate(z,w,p,fn)['loss'],
+                                         argnums=(0,1,2)))(x,weight,pitch))
+    np.testing.assert_allclose(values[0],values[1],rtol=2e-13,atol=1e-25)
+    for a,b in zip(*gradients):
+        np.testing.assert_allclose(a,b,rtol=2e-11,atol=1e-25)
+    invalid = streamed(**dict(_restricted_input(), bcrit=jnp.array([1.02, .1]),
+                             bcrit_weight=jnp.array([.02, .02])))
+    assert not invalid['valid'] and np.isnan(invalid['loss'])
+    np.testing.assert_array_equal(invalid['pitch_valid'], [True,False])
+    mixed = dict(_restricted_input(), bcrit=pitch, bcrit_weight=weight)
+    mixed['bmnc_b'] = mixed['bmnc_b'].astype(jnp.float32)
+    promoted = jax.jit(lambda c:streamed(**dict(mixed,bmnc_b=c)))(mixed['bmnc_b'])
+    reference = jax.jit(lambda c:batched(**dict(mixed,bmnc_b=c)))(mixed['bmnc_b'])
+    assert promoted['delta_res'].dtype == jnp.float64
+    np.testing.assert_allclose(promoted['delta_res'],reference['delta_res'],rtol=2e-12)
+    np.testing.assert_allclose(promoted['paper_pitch_band_mass'],
+                               reference['paper_pitch_band_mass'],rtol=2e-13)
+
+
+def test_streamed_pitch_weight_padding_and_invalid_accumulation():
+    from vmex.core.deltares import (restricted_action_deltares_from_boozer as batched,
+                                   streamed_restricted_action_deltares_from_boozer as streamed)
+    settings=dict(_restricted_input(), bcrit=jnp.array([1.01, 1.02, 1.03]))
+    def evaluate(weights, mass=1.):
+        kwargs=dict(settings,bcrit_weight=weights,mass=mass)
+        return batched(**kwargs),streamed(**kwargs)
+    reference,out=jax.jit(evaluate)(jnp.array([.01,0.,.01]))
+    assert reference['valid'] and out['valid']
+    np.testing.assert_array_equal(out['pitch_valid'],True)
+    np.testing.assert_allclose(out['delta_res'],reference['delta_res'],rtol=2e-12)
+    for weight in (jnp.zeros(3),jnp.array([.01,-.01,.02])):
+        reference,out=jax.jit(evaluate)(weight)
+        assert not reference['valid'] and not out['valid'] and np.isnan(out['loss'])
+    reference,out=jax.jit(evaluate)(jnp.full(3,1e200),jnp.array(1e100))
+    assert not reference['valid'] and not out['valid'] and np.isnan(out['loss'])
+    reference,out=jax.jit(evaluate)(jnp.array([.01,.02,.01]),jnp.array(1e90))
+    assert not reference['valid'] and not out['valid'] and np.isnan(out['loss'])
 
 
 @pytest.mark.parametrize('patch,certificate', [

@@ -79,13 +79,23 @@ independent structural-zero oracle and handles coupled free-boundary maps.
 
 Gradient checking solver-sensitive metrics
 ------------------------------------------
-The adjoint gradient is the derivative of the fixed point of the *frozen*
-residual ``F`` — the preconditioner/``tcon``/m=1 branch/dof mask are captured
-once at the base parameters, not re-derived.  For solver-sensitive metrics
-(``iota`` at ``ncurr=1``, mirror ratio, magnetic well, Boozer/QI residual) a
-naive re-solve FD is *not* a valid reference — it can sign-flip; use
-:func:`frozen_path_directional_fd`, which reproduces the adjoint to solver
-accuracy (full rationale on that function; ``tests/test_implicit_grad.py``).
+The adjoint gradient holds the released m=1 coordinate family fixed.
+Preconditioning and ``tcon`` are recomputed by the residual. Ordinary native
+re-solves can select a different released family during their early
+iterations, so their finite difference includes a response absent from this
+adjoint. :func:`frozen_path_directional_fd` diagnoses the fixed-family
+linearization; it does not qualify derivatives of that ordinary solve map.
+
+For an explicit production coordinate contract, ``m1_gauge=reference_state``
+prescribes only the released interior m=1 Z family in both the native solve
+and its implicit derivative. Supply the same reference to independent cold
+and warm re-solves (public scalar problems accept it in ``solve_kwargs``).
+Keep the reference fixed across trials; replacing it changes the forward
+map and adds a reference derivative absent from this adjoint. This opt-in
+path currently requires a single radial resolution. It leaves
+the full boundary parameter dependence live and does not alter default
+VMEC continuation. Ordinary re-solve finite differences remain necessary to
+qualify any solver-sensitive objective on the selected forward contract.
 
 At a tight ``ftol``, with the state anchored as above, the difference that
 remains between the adjoint and a cold re-solve FD is the released m=1
@@ -189,6 +199,7 @@ from .solver import (
     _force_to_state, _initial_state, _physical_coefficients,
     _static_tables, evaluate_forces, prepare_runtime, resolution_from_input,
     solve,
+    _validated_m1_gauge,
 )
 from .fields import constraint_scaling
 from .forces import mhd_forces, spectral_mhd_forces
@@ -311,6 +322,7 @@ class ImplicitConfig:
     mode: str = "cli"
     multigrid: bool = False
     lconm1: bool = True
+    m1_gauge: SpectralState | None = None
     adjoint_tol: float = 1e-11
     #: Tolerance for certifying the *columns* of an implicit residual
     #: Jacobian, kept separate from ``adjoint_tol`` because the two feed
@@ -382,6 +394,7 @@ def make_config(
     mode: str = "cli",
     multigrid: bool = False,
     lconm1: bool = True,
+    m1_gauge: SpectralState | None = None,
     adjoint_tol: float = 1e-11,
     jacobian_adjoint_tol: float = 1e-4,
     jacobian_adjoint_maxiter: int = 10,
@@ -405,6 +418,11 @@ def make_config(
     :func:`vmex.core.device.resolve_implicit_device`, not a policy string) —
     see :class:`ImplicitConfig.device`.
     """
+    if m1_gauge is not None:
+        if bool(inp.lfreeb):
+            raise ValueError("m1_gauge is supported only for fixed-boundary solves")
+        if multigrid and np.count_nonzero(np.asarray(inp.ns_array) > 0) != 1:
+            raise ValueError("m1_gauge currently requires a single-resolution solve")
     if multigrid and ns is None:
         ns = int(np.max(np.asarray(inp.ns_array)))
     resolution = resolution_from_input(inp, ns=ns)
@@ -421,6 +439,7 @@ def make_config(
         inp=inp, resolution=resolution, ftol=float(ftol),
         max_iterations=int(max_iterations), mode=str(mode),
         multigrid=bool(multigrid), lconm1=bool(lconm1),
+        m1_gauge=_validated_m1_gauge(m1_gauge, resolution),
         adjoint_tol=float(adjoint_tol),
         jacobian_adjoint_tol=float(jacobian_adjoint_tol),
         jacobian_adjoint_maxiter=int(jacobian_adjoint_maxiter),
@@ -568,6 +587,7 @@ def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
         return _device_pin(cfg, prepare_runtime(
             cfg.inp, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, lconm1=cfg.lconm1,
+            m1_gauge=getattr(cfg, "m1_gauge", None),
             use_fft=False,
         ))
 
@@ -924,10 +944,10 @@ def _fixed_boundary_dof_mask(cfg: ImplicitConfig) -> SpectralState:
 
     all_modes = np.ones(m.shape, dtype=bool)
     z_cos = all_modes.copy() if not symmetric else np.zeros_like(all_modes)
-    # In the converged lconm1 branch force_Z_cc(m=1,n=0) is released.  The
+    # At convergence force_Z_cc(m=1,n=0) is released for either lconm1.  The
     # 3-D +/-n combinations are handled by the symmetric projector below;
     # their individual support remains active.
-    if cfg.lconm1 and not symmetric:
+    if not symmetric:
         z_cos &= ~((m == 1) & (n == 0))
     asymmetric = nonconstant if not symmetric else np.zeros_like(all_modes)
     return SpectralState(
@@ -943,7 +963,7 @@ def _fixed_boundary_dof_mask(cfg: ImplicitConfig) -> SpectralState:
 def _dof_projector(cfg: ImplicitConfig, dof_mask: SpectralState) -> Callable:
     """Symmetric idempotent projector onto the evolved-dof subspace.
 
-    Elementwise ``dof_mask`` plus, for ``lconm1`` runs, the m=1 pair
+    Elementwise ``dof_mask`` plus the released m=1 pair
     symmetrization: in the signed packing the released constrained Z force
     obeys ``gc(m=1, +n) = gc(m=1, -n)`` exactly (``force_Z_cs`` zeroed at
     convergence, so both entries gather ``sc/2``) — the *antisymmetric*
@@ -953,16 +973,17 @@ def _dof_projector(cfg: ImplicitConfig, dof_mask: SpectralState) -> Callable:
     the gather is ``(cc +/- ss)/2``).  The mask is pre-equalized on the pair
     columns (see :func:`_dof_mask`), so ``P`` is symmetric and idempotent.
     """
-    lconm1 = bool(cfg.lconm1)
+    # VMEC2000 constrain_m1 releases gcz for BOTH values of lconm1;
+    # lconm1 changes the coefficient basis, not this force nullspace.
     lthreed = int(cfg.resolution.ntor) > 0
     lasym = bool(cfg.resolution.lasym)
-    pos, neg = (_m1_pair_columns(cfg) if (lconm1 and lthreed)
+    pos, neg = (_m1_pair_columns(cfg) if lthreed
                 else (np.zeros(0, int), np.zeros(0, int)))
 
     def P(t: SpectralState) -> SpectralState:
         out = {name: getattr(dof_mask, name) * getattr(t, name)
                for name in _STATE_FIELDS}
-        if lconm1 and lthreed and pos.size:
+        if lthreed and pos.size:
             v = out["Z_sin"]
             sym = 0.5 * (v[:, pos] + v[:, neg])
             out["Z_sin"] = v.at[:, pos].set(sym).at[:, neg].set(sym)
@@ -1256,7 +1277,7 @@ def _dof_mask(x_star: SpectralState, rt: SolverRuntime,
     # Equalize the m=1 pair columns so the pair projector commutes with the
     # mask (see _dof_projector); the pairs share one force value, so their
     # supports coincide structurally anyway.
-    if cfg.lconm1 and int(cfg.resolution.ntor) > 0:
+    if int(cfg.resolution.ntor) > 0:
         pos, neg = _m1_pair_columns(cfg)
         for name in ("Z_sin",) + (("Z_cos",) if cfg.resolution.lasym else ()):
             arr = getattr(mask_np, name)
@@ -1427,14 +1448,14 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
         # (VMEC2000 behaves the same way).
         run = lambda init: solve_multigrid(  # noqa: E731
             inp2, ns_array=ns_arr, ftol_array=ftol_arr, mode=cfg.mode,
-            lconm1=cfg.lconm1, raise_on_max_iterations=False,
+            lconm1=cfg.lconm1, m1_gauge=getattr(cfg, "m1_gauge", None), raise_on_max_iterations=False,
             initial_state=init, use_fft=False,
                 device=solver_device)
     else:
         run = lambda init: solve(  # noqa: E731
             inp2, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, mode=cfg.mode,
-            lconm1=cfg.lconm1, initial_state=init, use_fft=False,
+            lconm1=cfg.lconm1, m1_gauge=getattr(cfg, "m1_gauge", None), initial_state=init, use_fft=False,
                 device=solver_device)
     # Seed ladder: perturbation prediction -> plain hot restart -> cold.
     # A bad warm seed must not fail the trial (only the initial guess is at
