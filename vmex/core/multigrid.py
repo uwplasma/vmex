@@ -3,8 +3,8 @@
 VMEC2000: ``Sources/TimeStep/interp.f`` — when the ``NS_ARRAY`` ladder moves
 to the next radial resolution, the converged spectral coefficients ``xc`` are
 interpolated linearly in radius onto the new grid with a VMEC-specific
-convention (VMEC++ performs the same linear interpolation of the spectral
-coefficients over the ``sqrt(s)``-scaled internal representation):
+convention (linear interpolation of the spectral coefficients over the
+``sqrt(s)``-scaled internal representation):
 
 1. scale the coefficients by ``scalxc`` (``profil3d.f``) so odd-m harmonics
    enter in VMEC's internal ``1/sqrt(s)`` representation — linear in
@@ -316,8 +316,7 @@ def solve_multigrid(
     exist only to build a seed the caller already has; rungs above the seed
     resolution still run from the ``interp.f`` interpolant of the seed, and
     a seed finer than the whole ladder runs only the final rung (resampled
-    down).  VMEC++ instead requires ``ns_array[0]`` to equal the source
-    resolution.
+    down).
     ``precon_type``, ``prec2d_threshold``, and ``prec2d`` override the input's
     optional 2D-preconditioner configuration at every stage.
     ``jacobian_retries`` applies the same bounded best-checkpoint/``DELT``
@@ -325,8 +324,7 @@ def solve_multigrid(
     zero preserves VMEC2000's immediate fatal stop after 75 resets.
     If the first requested grid still has an invalid initial Jacobian after
     its magnetic-axis re-guess, ``coarse_grid_retry=True`` retries the ladder
-    once with an automatic ``ns=3``, ``ftol=1e-4`` stage prepended.  This is
-    the current VMEC++ driver recovery: it supplies a coarse equilibrium for
+    once with an automatic ``ns=3``, ``ftol=1e-4`` stage prepended.  It supplies a coarse equilibrium for
     interpolation without changing the user's requested stages.  Set it to
     false to expose the original typed failure directly.
 

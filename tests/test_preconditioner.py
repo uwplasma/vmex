@@ -392,3 +392,40 @@ def test_jit_compatibility_lamcal():
         lthreed=bool(cfg.lthreed),
     )
     _allclose(got, eager, rtol=RTOL, atol=1e-14)
+
+
+def test_lambda_m0_radial_block_inverts_the_force_jacobian():
+    """The m = 0 lambda block is P^T diag(A) P (half-mesh averaging): with a
+    zero floor the preconditioned Jacobian is the identity on those columns,
+    while VMEC2000's diagonal faclam leaves the radial checkerboard nearly
+    unpreconditioned (eigenvalue ~ (pi/(2 ns))^2)."""
+    from dataclasses import replace
+
+    import vmex as vj
+    import vmex.core.solver as S
+
+    inp = vj.VmecInput.from_file("examples/data/input.li383_low_res")
+    inp = replace(inp, ns_array=(12,), ftol_array=(1e-8,), niter_array=(2000,))
+    state = vj.solve_multigrid(inp, verbose=False).state
+    base = S.prepare_runtime(inp, S.resolution_from_input(inp, ns=12))  # default: diagonal
+    column = int(np.flatnonzero((base.modes.m == 0) & (base.modes.n == 1))[0])
+    spectra = {}
+    for floor in (None, 0.0):
+        rt = replace(base, lambda_m0_floor=floor)
+        cache = S.evaluate_forces(state, rt)[2].cache
+
+        @jax.jit
+        def response(direction, rt=rt, cache=cache):
+            def gc(lam):
+                return S._preconditioned_force_signed(
+                    replace(state, L_sin=lam), cache, rt, iteration=jnp.asarray(30),
+                    fsqz_previous=jnp.asarray(1.0)).L_sin[1:, column]
+            return jax.jvp(gc, (state.L_sin,), (direction,))[1]
+
+        jac = -np.stack([
+            response(jnp.zeros_like(state.L_sin).at[j, column].set(1.0))
+            for j in range(1, 12)
+        ], axis=1)
+        spectra[floor] = np.sort(np.linalg.eigvals(jac / np.median(np.diag(jac))).real)
+    assert spectra[None][0] < 0.01 and spectra[None][-1] > 1.9
+    np.testing.assert_allclose(spectra[0.0], 1.0, atol=1e-2)
