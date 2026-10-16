@@ -642,3 +642,13 @@ def test_iota_ignores_bloat_as_vmec2000_piota_does():
     s = np.linspace(0.0, 1.0, 11)
     np.testing.assert_array_equal(np.asarray(iota("power_series", [1.0, 0.5], [], [], s, bloat=0.5)),
                                   1.0 + 0.5 * s)
+
+
+def test_bloat_needs_prescribed_current_as_in_vmec2000():
+    """initialize_vmec_arrays.f: ``bloat /= 1 .and. ncurr /= 1`` -> ier_flag 3."""
+    from vmex.core.errors import VmecInputError
+    from vmex.core.solver import prepare_runtime, resolution_from_input
+
+    inp = replace(VmecInput.from_file(Path(__file__).parents[1] / "examples" / "data" / "input.DSHAPE"), bloat=1.6)
+    with pytest.raises(VmecInputError, match="NCURR = 1"):
+        prepare_runtime(inp, resolution_from_input(inp))

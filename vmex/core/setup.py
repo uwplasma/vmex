@@ -1267,6 +1267,11 @@ def run_setup(
         inp, modes=mode_table(resolution.mpol, resolution.ntor),
         trig=trig_tables(resolution),
     )
+    if float(inp.bloat) not in (0.0, 1.0) and int(inp.ncurr) != 1:
+        raise VmecInputError(
+            f"BLOAT = {float(inp.bloat):g} needs NCURR = 1 (found NCURR = {int(inp.ncurr)}); "
+            "VMEC2000 stops on this deck (initialize_vmec_arrays.f, ier_flag 3)",
+            hint="set BLOAT = 1, or prescribe the current profile (NCURR = 1)")
     key = _SetupLaneKey(
         resolution=resolution, lconm1=bool(lconm1), lflip=lflip, signgs=-1,
         piota_type=str(inp.piota_type), pcurr_type=str(inp.pcurr_type),
