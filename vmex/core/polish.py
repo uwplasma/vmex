@@ -45,7 +45,7 @@ from scipy.sparse import linalg as sparse_linalg
 from .errors import StrongForceCertificationError, VmecInputError
 from .printing import emit_flushed, polish_certificate_summary
 from .profiles import MU0
-from .radial_basis import _basis_levels
+from .radial_basis import _basis_levels, _span_quadrature
 from .residuals import m1_physical_to_constrained
 from .solver import SpectralState
 from .strong_force import (
@@ -456,16 +456,6 @@ class NativeGaugePlan:
         return int(self.row_modes.size)
 
 
-def _span_quadrature(breakpoints: np.ndarray, order: int) -> tuple[np.ndarray, np.ndarray]:
-    nodes, weights = np.polynomial.legendre.leggauss(int(order))
-    centers = 0.5 * (breakpoints[:-1] + breakpoints[1:])
-    scales = 0.5 * np.diff(breakpoints)
-    return (
-        (centers[:, None] + scales[:, None] * nodes[None]).reshape(-1),
-        (scales[:, None] * weights[None]).reshape(-1),
-    )
-
-
 def make_variational_plan(
     state: HighOrderEquilibriumState,
     *,
@@ -485,7 +475,7 @@ def make_variational_plan(
     order = degree + 3 if radial_order is None else int(radial_order)
     if order < 2:
         raise ValueError("radial_order must be at least two")
-    s, weights_s = _span_quadrature(np.asarray(state.radial_basis.breakpoints, dtype=float), order)
+    s, weights_s = _span_quadrature(np.asarray(state.radial_basis.breakpoints, dtype=float), int(order))
     rho = np.sqrt(s)
     # The radial quadrature is constructed in s, while sqrt_g is the
     # Jacobian of (rho, theta, zeta): d rho = ds / (2 rho).

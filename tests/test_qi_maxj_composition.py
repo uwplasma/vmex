@@ -10,6 +10,7 @@ import pytest
 import jax.numpy as jnp
 
 from vmex.core import maxj as maxj_mod
+from vmex.core import omnigenity as omnigenity_mod
 from vmex.core import qi as qi_mod
 
 
@@ -42,6 +43,7 @@ def _counting_boozer(monkeypatch):
 
     monkeypatch.setattr(qi_mod, "boozer_spectrum_state", fake)
     monkeypatch.setattr(maxj_mod, "boozer_spectrum_state", fake)
+    monkeypatch.setattr(omnigenity_mod, "boozer_spectrum_state", fake)
     return calls
 
 

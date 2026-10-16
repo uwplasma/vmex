@@ -44,7 +44,7 @@ from typing import Any
 
 import numpy as np
 
-from .._compat import require_optional
+from .._jax_env import require_optional
 
 # Reference orbit step [s] at Aminor_p = 1.7044 m, scaled with Aminor_p, and
 # the relative amplitude below which Boozer |B| modes are dropped

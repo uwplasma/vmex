@@ -65,7 +65,7 @@ def ab_inputs():
     )
     rmnc, zmns, rmns, zmnc = FB._edge_fourier(state, rt)
     boundary = FB.boundary_from_coefficients(
-        rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc, modes=rt.modes, basis=basis
+        rmnc, zmns, rmns, zmnc, modes=rt.modes, basis=basis
     )
     ctor, _rbtor, axis_r, axis_z, _bsq3, _pres = FB._vacuum_scalars(state, rt)
     field = MgridField.from_mgrid_data(
@@ -74,15 +74,12 @@ def ab_inputs():
     )
     phi = (np.asarray(basis.zeta) * basis.onp).reshape(basis.ntheta3, basis.nzeta)
     br_c, bp_c, bz_c = field.b_cyl(np.asarray(boundary.R), phi, np.asarray(boundary.Z))
-    br_a, bp_a, bz_a = FB.axis_current_field(
-        R=np.asarray(boundary.R), Z=np.asarray(boundary.Z),
-        axis_r=np.asarray(axis_r), axis_z=np.asarray(axis_z),
-        nfp=res.nfp, plascur=float(ctor),
+    br_a, bp_a, bz_a = FB._axis_current_field(
+        boundary.R, boundary.Z, axis_r, axis_z, ctor / FB.MU0,
+        FB._axis_current_tables(basis),
     )
-    ext = FB.external_field_channels(
-        boundary=boundary,
-        br=np.asarray(br_c) + br_a, bp=np.asarray(bp_c) + bp_a,
-        bz=np.asarray(bz_c) + bz_a,
+    ext = FB._external_field_channels(
+        boundary, br_c + br_a, bp_c + bp_a, bz_c + bz_a,
         basis=basis, signgs=int(rt.setup.signgs),
     )
     return dict(inp=inp, res=res, rt=rt, basis=basis, boundary=boundary,
@@ -161,7 +158,7 @@ def test_live_nestor_residual_differentiates_a_tabulated_coil_control():
             vertical_field, control, rmin=1.0, rmax=3.0,
             zmin=-0.8, zmax=0.8, ir=3, jz=3, kp=4, nfp=1)
         br, bp, bz = field.b_cyl(boundary0.R, phi_geom, boundary0.Z)
-        bexni_control = FB._external_field_channels_jax(
+        bexni_control = FB._external_field_channels(
             boundary0, br, bp, bz, basis=basis, signgs=-1)["bexni"]
         matrix, rhs, *_ = solver.assemble(boundary0, bexni_control)
         return matrix @ q0 - rhs
@@ -233,18 +230,16 @@ def test_fused_vacuum_matches_reference(ab_inputs):
     ctor, _rb, axis_r, axis_z, _b3, _pr = FB._vacuum_scalars(state, rt_freeb)
     rmnc, zmns, rmns, zmnc = FB._edge_fourier(state, rt_freeb)
     boundary = FB.boundary_from_coefficients(
-        rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc, modes=rt.modes, basis=basis
+        rmnc, zmns, rmns, zmnc, modes=rt.modes, basis=basis
     )
     phi = (np.asarray(basis.zeta) * basis.onp).reshape(basis.ntheta3, basis.nzeta)
     br_c, bp_c, bz_c = field.b_cyl(np.asarray(boundary.R), phi, np.asarray(boundary.Z))
-    br_a, bp_a, bz_a = FB.axis_current_field(
-        R=np.asarray(boundary.R), Z=np.asarray(boundary.Z),
-        axis_r=np.asarray(axis_r), axis_z=np.asarray(axis_z),
-        nfp=basis.nfp, plascur=float(ctor),
+    br_a, bp_a, bz_a = FB._axis_current_field(
+        boundary.R, boundary.Z, axis_r, axis_z, ctor / FB.MU0,
+        FB._axis_current_tables(basis),
     )
-    ext = FB.external_field_channels(
-        boundary=boundary, br=np.asarray(br_c) + br_a, bp=np.asarray(bp_c) + bp_a,
-        bz=np.asarray(bz_c) + bz_a, basis=basis, signgs=signgs,
+    ext = FB._external_field_channels(
+        boundary, br_c + br_a, bp_c + bp_a, bz_c + bz_a, basis=basis, signgs=signgs,
     )
     potvac_r, mm_r, bv_r, *_ = solver.full(boundary, jnp.asarray(ext["bexni"]))
     bsqvac_r, *_ = V.vacuum_channels(

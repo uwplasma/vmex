@@ -30,7 +30,7 @@ MGRID = DATA / "mgrid_cth_like.nc"
 NP = NT = 16
 SOLVE = dict(ftol=1e-10, max_iterations=1500)
 pytestmark = pytest.mark.skipif(
-    not FBD.have_virtual_casing_jax(),
+    not FBD._HAVE_VCJ,
     reason="requires virtual_casing_jax",
 )
 

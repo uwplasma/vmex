@@ -13,8 +13,6 @@ Every Fourier amplitude is represented as ``rho**abs(m) q(s)``.
 from __future__ import annotations
 
 import functools
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -700,6 +698,21 @@ def _point_force(state: HighOrderEquilibriumState, x: Array) -> tuple[Array, ...
     )
 
 
+def _carries_asymmetric_harmonics(state) -> bool:
+    """True when a high-order state has non-zero stellarator-asymmetric families.
+
+    Consumers that integrate over a half period when symmetric (the Boozer
+    transform, the virtual-casing surface data) must not take the caller's
+    symmetric declaration for a state that carries ``R_sin``/``Z_cos``.
+    Traced arrays cannot be inspected, so there the declaration stands.
+    """
+    for family in (state.R_sin, state.Z_cos):
+        array = jnp.asarray(family)
+        if not isinstance(array, jax.core.Tracer) and bool(np.any(np.asarray(array) != 0.0)):
+            return True
+    return False
+
+
 def _magnetic_pressure(state: HighOrderEquilibriumState, x: Array) -> Array:
     """Return the magnetic pressure ``B^2 / (2 mu0)`` at one point."""
 
@@ -715,32 +728,30 @@ def _point_magnetic_pressure_gradient(state: HighOrderEquilibriumState, x: Array
     return jnp.linalg.solve(basis_vectors.T, partials)
 
 
-_point_magnetic_pressure_gradient_checkpoint = jax.checkpoint(_point_magnetic_pressure_gradient)
+@functools.partial(jax.jit, static_argnames=("kernel", "batch_size"))
+def _point_sweep(kernel, state: HighOrderEquilibriumState, rho: Array, theta: Array,
+                 zeta: Array, *, batch_size: int):
+    """Map a per-point ``kernel(state, point)`` over broadcast points.
 
-
-@functools.partial(jax.jit, static_argnames=("batch_size", "checkpoint"))
-def _evaluate_magnetic_pressure_gradient(
-    state: HighOrderEquilibriumState,
-    rho: Array,
-    theta: Array,
-    zeta: Array,
-    *,
-    batch_size: int,
-    checkpoint: bool,
-) -> Array:
+    ``batch_size <= 0`` is one flat ``vmap``; otherwise ``lax.map`` batches
+    behind a remat boundary, so reverse passes replay the per-point kernel
+    instead of storing the whole grid's linearization residuals (~40 GB for
+    the W7-X polish chart probes).  Returns the broadcast ``(rho, theta,
+    zeta)`` and the flat per-point values.
+    """
     rho, theta, zeta = jnp.broadcast_arrays(rho, theta, zeta)
-    shape = rho.shape
     points = jnp.stack((rho.reshape(-1), theta.reshape(-1), zeta.reshape(-1)), axis=-1)
     if batch_size <= 0:
-        values = jax.vmap(lambda point: _point_magnetic_pressure_gradient(state, point))(points)
+        values = jax.vmap(lambda point: kernel(state, point))(points)
     else:
-        kernel = _point_magnetic_pressure_gradient_checkpoint if checkpoint else _point_magnetic_pressure_gradient
-        values = jax.lax.map(
-            lambda point: kernel(state, point),
-            points,
-            batch_size=batch_size,
-        )
-    return values.reshape(shape + (3,))
+        checkpointed = jax.checkpoint(kernel)
+        values = jax.lax.map(lambda point: checkpointed(state, point), points, batch_size=batch_size)
+    return rho, theta, zeta, values
+
+
+def _sweep_batch(state: HighOrderEquilibriumState, rho: Array, theta: Array, zeta: Array) -> int:
+    shape = np.broadcast_shapes(jnp.shape(rho), jnp.shape(theta), jnp.shape(zeta))
+    return force_sweep_batch(state, int(np.prod(shape, dtype=np.int64)) if shape else 1)
 
 
 def evaluate_magnetic_pressure_gradient(
@@ -752,23 +763,14 @@ def evaluate_magnetic_pressure_gradient(
     """Evaluate ``grad(B^2 / 2 mu0)`` on broadcast-compatible points.
 
     This independent vacuum-safe diagnostic uses the same fixed-working-set
-    scheduling policy as :func:`evaluate_strong_force`.  Keeping the
-    companion sweep on that policy prevents certificate construction from
-    reintroducing one all-grid ``vmap`` after the force sweep was batched.
-    The node set and point evaluator are unchanged.
+    scheduling as :func:`evaluate_strong_force`, so certificate construction
+    never reintroduces one all-grid ``vmap`` after the force sweep was
+    batched.
     """
 
-    shape = np.broadcast_shapes(jnp.shape(rho), jnp.shape(theta), jnp.shape(zeta))
-    count = int(np.prod(shape, dtype=np.int64)) if shape else 1
-    batch_size = force_sweep_batch(state, count)
-    return _evaluate_magnetic_pressure_gradient(
-        state,
-        rho,
-        theta,
-        zeta,
-        batch_size=batch_size,
-        checkpoint=bool(_FORCE_SWEEP_POLICY.checkpoint),
-    )
+    rho, _, _, values = _point_sweep(_point_magnetic_pressure_gradient, state, rho, theta, zeta,
+                                     batch_size=_sweep_batch(state, rho, theta, zeta))
+    return values.reshape(rho.shape + (3,))
 
 
 @jax.jit
@@ -891,69 +893,7 @@ _FORCE_SWEEP_MIN_BATCH = 128
 _FORCE_SWEEP_MAX_BATCH = 4096
 
 
-@dataclass(frozen=True)
-class ForceSweepPolicy:
-    """How the strong-force point sweep trades memory against speed.
-
-    ``batch`` False restores the single flat ``vmap`` over every point — the
-    pre-0.8.2 sweep, kept only so a benchmark can measure what the batching
-    fixed.  ``checkpoint`` False batches the sweep but drops the remat
-    boundary, isolating the reverse-mode half of the same problem.
-    Production always uses the defaults.
-    """
-
-    working_set_bytes: int = _FORCE_SWEEP_WORKING_SET_BYTES
-    min_batch: int = _FORCE_SWEEP_MIN_BATCH
-    max_batch: int = _FORCE_SWEEP_MAX_BATCH
-    batch: bool = True
-    checkpoint: bool = True
-
-
-_FORCE_SWEEP_POLICY = ForceSweepPolicy()
-
-#: The batched sweep carries a remat boundary around the per-point kernel.
-#: ``jax.linearize``/``jax.vjp`` through the sweep otherwise store the whole
-#: grid's linearization residuals — ~40 GB for the W7-X polish setup's
-#: 6.8e4-point chart probes, the second half of the same OOM.  With the
-#: checkpoint, reverse passes replay the per-point force kernel instead of
-#: storing its intermediates: memory falls to per-batch scale for one extra
-#: forward evaluation per backward pass.  The flat small-grid path is
-#: untouched, so optimization-loop gradients keep their exact cost.
-_point_force_checkpoint = jax.checkpoint(_point_force)
-
-
-def force_sweep_policy() -> ForceSweepPolicy:
-    """Return the sweep policy the next force evaluation will use."""
-
-    return _FORCE_SWEEP_POLICY
-
-
-@contextmanager
-def force_sweep_measurement(policy: ForceSweepPolicy) -> Iterator[ForceSweepPolicy]:
-    """Run a block under a non-default sweep policy (measurement only).
-
-    The policy is read while tracing, so already-compiled executables would
-    otherwise keep the previous plan.  Entering and leaving therefore clears
-    the JAX compilation caches: correct, and far too expensive for anything
-    but a benchmark deliberately comparing sweep strategies.
-    """
-
-    global _FORCE_SWEEP_POLICY
-    previous = _FORCE_SWEEP_POLICY
-    jax.clear_caches()
-    _FORCE_SWEEP_POLICY = policy
-    try:
-        yield policy
-    finally:
-        _FORCE_SWEEP_POLICY = previous
-        jax.clear_caches()
-
-
-def force_sweep_batch(
-    state: HighOrderEquilibriumState,
-    point_count: int,
-    policy: ForceSweepPolicy | None = None,
-) -> int:
+def force_sweep_batch(state: HighOrderEquilibriumState, point_count: int) -> int:
     """Points per sweep batch for this problem size; 0 means one flat sweep.
 
     The batch is whatever holds one batch's spectral working set at
@@ -962,63 +902,12 @@ def force_sweep_batch(
     optimization-loop gradients are untouched.
     """
 
-    policy = _FORCE_SWEEP_POLICY if policy is None else policy
-    if not policy.batch:
-        return 0
     modes = int(np.asarray(state.m).size)
     basis = int(state.radial_basis.size)
     per_point = max(_FORCE_POINT_BYTES_PER_MODE_BASIS * modes * basis, 1)
-    batch = int(policy.working_set_bytes) // per_point
-    batch = min(max(batch, int(policy.min_batch)), int(policy.max_batch))
+    batch = _FORCE_SWEEP_WORKING_SET_BYTES // per_point
+    batch = min(max(batch, _FORCE_SWEEP_MIN_BATCH), _FORCE_SWEEP_MAX_BATCH)
     return 0 if int(point_count) <= batch else batch
-
-
-@functools.partial(jax.jit, static_argnames=("batch_size", "checkpoint"))
-def _evaluate_strong_force(
-    state: HighOrderEquilibriumState,
-    rho: Array,
-    theta: Array,
-    zeta: Array,
-    *,
-    batch_size: int,
-    checkpoint: bool,
-) -> StrongForceSamples:
-    rho, theta, zeta = jnp.broadcast_arrays(rho, theta, zeta)
-    shape = rho.shape
-    points = jnp.stack((rho.reshape(-1), theta.reshape(-1), zeta.reshape(-1)), axis=-1)
-    if batch_size <= 0:
-        values = jax.vmap(lambda point: _point_force(state, point))(points)
-    else:
-        kernel = _point_force_checkpoint if checkpoint else _point_force
-        values = jax.lax.map(
-            lambda point: kernel(state, point),
-            points,
-            batch_size=batch_size,
-        )
-
-    def reshape_scalar(value: Array) -> Array:
-        return value.reshape(shape)
-
-    def reshape_vector(value: Array) -> Array:
-        return value.reshape(shape + (3,))
-
-    return StrongForceSamples(
-        rho=rho,
-        theta=theta,
-        zeta=zeta,
-        sqrt_g=reshape_scalar(values[0]),
-        B=reshape_vector(values[1]),
-        J=reshape_vector(values[2]),
-        force=reshape_vector(values[3]),
-        force_rho=reshape_scalar(values[4]),
-        force_helical=reshape_scalar(values[5]),
-        radial_force_density=reshape_scalar(values[6]),
-        helical_force_density=reshape_scalar(values[7]),
-        signed_radial_force_density=reshape_scalar(values[8]),
-        signed_helical_force_density=reshape_scalar(values[9]),
-        lorentz_norm=reshape_scalar(values[10]),
-        grad_pressure_norm=reshape_scalar(values[11]),
-    )
 
 
 def evaluate_strong_force(
@@ -1037,16 +926,32 @@ def evaluate_strong_force(
     derivatives do not depend on it.
     """
 
-    shape = np.broadcast_shapes(jnp.shape(rho), jnp.shape(theta), jnp.shape(zeta))
-    count = int(np.prod(shape, dtype=np.int64)) if shape else 1
-    batch_size = force_sweep_batch(state, count)
-    return _evaluate_strong_force(
-        state,
-        rho,
-        theta,
-        zeta,
-        batch_size=batch_size,
-        checkpoint=bool(_FORCE_SWEEP_POLICY.checkpoint),
+    rho, theta, zeta, values = _point_sweep(_point_force, state, rho, theta, zeta,
+                                            batch_size=_sweep_batch(state, rho, theta, zeta))
+    shape = rho.shape
+
+    def scalar(index: int) -> Array:
+        return values[index].reshape(shape)
+
+    def vector(index: int) -> Array:
+        return values[index].reshape(shape + (3,))
+
+    return StrongForceSamples(
+        rho=rho,
+        theta=theta,
+        zeta=zeta,
+        sqrt_g=scalar(0),
+        B=vector(1),
+        J=vector(2),
+        force=vector(3),
+        force_rho=scalar(4),
+        force_helical=scalar(5),
+        radial_force_density=scalar(6),
+        helical_force_density=scalar(7),
+        signed_radial_force_density=scalar(8),
+        signed_helical_force_density=scalar(9),
+        lorentz_norm=scalar(10),
+        grad_pressure_norm=scalar(11),
     )
 
 
@@ -1843,51 +1748,6 @@ def force_error_measures(
     return tuple(zip(FORCE_ERROR_MEASURE_LABELS, before, after, strict=True))
 
 
-def force_error_record(report: StrongForceReport) -> dict[str, Any]:
-    """Serialize a certificate's normalizations for a committed artifact.
-
-    Both the saturating pointwise ``eps_F`` block and the volume-averaged
-    normalizations are written, together with the ``saturation`` disclosure,
-    so a JSON reader sees the bound at the same time as the number.
-    """
-
-    def block(normalizations: ForceErrorNormalizations) -> dict[str, Any]:
-        return {
-            "volume_average_force": float(normalizations.volume_average_force),
-            "volume_average_grad_pressure": float(normalizations.volume_average_grad_pressure),
-            "volume_average_magnetic_pressure_gradient": float(
-                normalizations.volume_average_magnetic_pressure_gradient
-            ),
-            "relative_force_error": float(normalizations.relative_force_error),
-            "magnetic_relative_force_error": float(normalizations.magnetic_relative_force_error),
-            "magnetic_normalized_l2": float(normalizations.magnetic_normalized_l2),
-            "magnetic_normalized_linf": float(normalizations.magnetic_normalized_linf),
-            "node_count": int(normalizations.node_count),
-            "s_min": float(normalizations.s_min),
-            "s_max": float(normalizations.s_max),
-        }
-
-    return {
-        "normalization": report.normalization,
-        "saturation": report.saturation,
-        "pointwise_eps_f": {
-            "normalized_l2": float(report.normalized_l2),
-            "normalized_p99": float(report.normalized_p99),
-            "normalized_linf": float(report.normalized_linf),
-        },
-        "absolute": {
-            "l2": float(report.absolute_l2),
-            "p99": float(report.absolute_p99),
-            "linf": float(report.absolute_linf),
-            "near_axis_l2": float(report.near_axis_l2),
-            "bulk_l2": float(report.bulk_l2),
-            "edge_l2": float(report.edge_l2),
-        },
-        "global_normalizations": block(report.global_normalizations),
-        "window_normalizations": block(report.window_normalizations),
-    }
-
-
 def plot_strong_force_report(
     reports: StrongForceReport | dict[str, StrongForceReport],
     *,
@@ -1974,7 +1834,6 @@ def plot_strong_force_report(
 __all__ = [
     "FORCE_ERROR_MEASURE_LABELS",
     "ForceErrorNormalizations",
-    "ForceSweepPolicy",
     "HighOrderEquilibriumState",
     "HighOrderFieldSamples",
     "HighOrderSurfaceSamples",
@@ -1982,14 +1841,11 @@ __all__ = [
     "StrongForceSamples",
     "certify_strong_force",
     "force_sweep_batch",
-    "force_sweep_measurement",
-    "force_sweep_policy",
     "evaluate_high_order_fields",
     "evaluate_high_order_surface",
     "evaluate_magnetic_pressure_gradient",
     "evaluate_strong_force",
     "force_error_measures",
-    "force_error_record",
     "append_high_order_state_modes",
     "high_order_state_from_wout",
     "insert_high_order_state_knots",

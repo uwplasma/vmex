@@ -28,7 +28,7 @@
     ["tests/test_cli_device.py", "interface", "unit", "fast", "cpu-gpu", "none", "none", ["pr-parity-c1", "full-core-a-c"]],
     ["tests/test_cli_freeboundary.py", "interface", "integration", "medium", "cpu-gpu", "generated", "analytic", ["pr-parity-a1", "full-core-a-c"]],
     ["tests/test_cli_summary_wout.py", "interface", "integration", "medium", "cpu", "golden", "golden", ["pr-parity-c1", "full-core-a-c"]],
-    ["tests/test_compat.py", "interface", "unit", "fast", "cpu", "none", "none", ["pr-parity-c1", "pr-fast", "full-core-a-c"]],
+    ["tests/test_jax_env.py", "interface", "unit", "fast", "cpu", "none", "none", ["pr-parity-c1", "pr-fast", "full-core-a-c"]],
     ["tests/test_coverage_margin.py", "infrastructure", "unit", "fast", "cpu", "none", "none", ["pr-parity-c1", "full-core-a-c"]],
     ["tests/test_device.py", "infrastructure", "unit", "fast", "cpu-gpu", "none", "none", ["pr-parity-c1", "pr-fast", "gpu-smoke", "full-core-d-f0"]],
     ["tests/test_device_parity_tool.py", "infrastructure", "integration", "medium", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "full-core-d-f0"]],
