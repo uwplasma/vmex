@@ -87,7 +87,7 @@ current comparison.
      - VMEC2000
      - vmex cold
      - vmex warm
-     - VMEC++
+     - C++ VMEC
    * - li383_low_res
      - 0.86
      - 3.36
