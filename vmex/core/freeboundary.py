@@ -1097,8 +1097,10 @@ def _vacuum_step(
         if fb.rbtor * float(out["bsubvvac"]) < 0.0:  # vacuum.f: rbtor*bsubvvac < 0
             raise VmecError(
                 WERROR_MESSAGES[PHIEDGE_ERROR_FLAG],
-                hint=(f"R * BTOR(plasma) = {fb.rbtor:.3e} opposes R * BTOR(vac) = "
-                      f"{float(out['bsubvvac']):.3e}: flip the sign of PHIEDGE"),
+                hint=(f"R * BTOR(plasma) = {fb.rbtor:.3e} (set by the sign of PHIEDGE) opposes "
+                      f"R * BTOR(vac) = {float(out['bsubvvac']):.3e} from the coils, so the plasma "
+                      "toroidal flux points against the coil field (VMEC2000 vacuum.f, ier_flag 7). "
+                      "Flip the sign of PHIEDGE, or of the toroidal-field coil currents in EXTCUR"),
                 ier_flag=PHIEDGE_ERROR_FLAG)
         if verbose:
             emit(
