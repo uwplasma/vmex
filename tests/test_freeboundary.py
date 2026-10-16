@@ -773,6 +773,18 @@ def test_cli_missing_mgrid_fallback_warns(tmp_path):
     assert any("mgrid file not found" in msg for msg in messages)
 
 
+def test_phiedge_with_wrong_sign_raises():
+    """vacuum.f: a PHIEDGE opposing the external toroidal field stops the run (ier_flag 7)."""
+    from vmex.core.errors import PHIEDGE_ERROR_FLAG, VmecError
+
+    base = lasym_free_input(REPO / "examples" / "data")
+    inp = dataclasses.replace(base, phiedge=-base.phiedge, ns_array=np.asarray([16]),
+                              niter_array=np.asarray([400]))
+    with pytest.raises(VmecError) as exc:
+        FB.solve_free_boundary(inp, external_field=lasym_free_field(), max_iterations=400)
+    assert exc.value.ier_flag == PHIEDGE_ERROR_FLAG
+
+
 def test_deck_nfp_must_match_the_mgrid_nfp():
     """VMEC2000 ``read_mgrid`` stops with ier_flag 9 when ``nfper0 /= nfp``.
 
