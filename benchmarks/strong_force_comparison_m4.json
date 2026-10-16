@@ -5,22 +5,22 @@
         "DESC": {
           "normalized_l2": 0.879259,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
-        },
-        "VMEC++": {
-          "normalized_l2": 0.525183,
-          "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
         },
         "VMEC2000": {
           "normalized_l2": 0.525183,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
         },
         "VMEX": {
           "normalized_l2": 0.525896,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
+        },
+        "cpp_vmec": {
+          "normalized_l2": 0.525183,
+          "path": "benchmarks/strong_force_cases_m4.json",
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
         }
       }
     },
@@ -29,28 +29,28 @@
         "DESC": {
           "normalized_l2": 0.0296234,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
-        },
-        "VMEC++": {
-          "normalized_l2": 0.0171071,
-          "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
         },
         "VMEC2000": {
           "normalized_l2": 0.0171071,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
         },
         "VMEX": {
           "normalized_l2": 0.00179367,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
+        },
+        "cpp_vmec": {
+          "normalized_l2": 0.0171071,
+          "path": "benchmarks/strong_force_cases_m4.json",
+          "sha256": "510efc492a03861887392a33aa53aafaacbbb62bce612564ed2c48a13fc45808"
         }
       }
     }
   },
   "figure": "docs/_static/figures/readme_strong_force_comparison.webp",
-  "figure_sha256": "d713f07ebdd893c6b292eb77b92442cc718a06bff264697f751146003d5fd5f8",
+  "figure_sha256": "149b78a524520a7650097131749b96398494b7c1824ef4ccf132e9447c490c9f",
   "schema": "vmex.strong-force-readme-figure/4",
   "timing_note": "Accuracy only, and only rows where certified polishing beats the legacy codes on the independent force certificate, per the README figure policy (accuracy only). All errors from one shared independent oracle on each code's exported equilibrium (VMEX: the certified polished state). The stellarator row returns when the 3-D production polish is tractable."
 }

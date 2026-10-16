@@ -24,8 +24,8 @@
     },
     {
       "path": "docs/_static/figures/readme_interior_field.webp",
-      "sha256": "f82420e6197a074138619ce9347ec3f2e24316efaded098959b623dc71bac816",
-      "bytes": 34822,
+      "sha256": "10bf2bd2408ec3c8bcfe52bee6c72dbf405fd4445f57ec24d829557883b7442a",
+      "bytes": 35606,
       "generator": "docs/_static/figures/sources/make_interior_field_figure.py",
       "command": "python docs/_static/figures/sources/make_interior_field_figure.py",
       "inputs": [
@@ -97,8 +97,8 @@
     },
     {
       "path": "docs/_static/figures/readme_convergence.webp",
-      "sha256": "e3d16a8a0b411842746d05e735627cd6ccb193ee65f84e0b587d8c29162a2663",
-      "bytes": 40820,
+      "sha256": "34071e2e47efb7156f0971b75660c6019ef131f5cf482a7b15b489f9bd3a28a5",
+      "bytes": 33446,
       "generator": "docs/_static/figures/sources/make_readme_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_figures.py --only convergence",
       "inputs": [
@@ -110,7 +110,7 @@
       "hardware": null,
       "reproducible": "command",
       "bytes_verified": true,
-      "note": "Plots the cached three-code trace, which dates from 2026-07-10; the `generated` date is the render. On a cache miss the generator re-solves and shells out to VMEC2000 and VMEC++, discovered locally or via VMEX_XVMEC2000 / VMEX_VMECPP_PY. Re-rendered in 2026-09 so the committed bytes match what the command produces.",
+      "note": "Plots the VMEX and VMEC2000 traces from the cache, which dates from 2026-07-10; the `generated` date is the render. On a cache miss the generator re-solves and shells out to VMEC2000, discovered locally or via VMEX_XVMEC2000. Re-rendered in 2026-09 so the committed bytes match what the command produces.",
       "used_in": [
         "README.md",
         "docs/explanation/validation.md",
@@ -360,8 +360,8 @@
     },
     {
       "path": "docs/_static/figures/readme_runtime_compare.webp",
-      "sha256": "45a8bc36b9cd9a79cfdb658545a4cb293ecf285023bb5c88f401e1cf34a1efff",
-      "bytes": 38466,
+      "sha256": "baf19af6f692152a16e6bdab16748b05bd1514bfbdfe1825104617391b67013c",
+      "bytes": 43906,
       "generator": "docs/_static/figures/sources/make_readme_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_figures.py --only runtime",
       "inputs": [
@@ -420,8 +420,8 @@
     },
     {
       "path": "docs/_static/figures/readme_strong_force_comparison.webp",
-      "sha256": "d713f07ebdd893c6b292eb77b92442cc718a06bff264697f751146003d5fd5f8",
-      "bytes": 48288,
+      "sha256": "149b78a524520a7650097131749b96398494b7c1824ef4ccf132e9447c490c9f",
+      "bytes": 58558,
       "generator": "docs/_static/figures/sources/make_strong_force_comparison.py",
       "command": "python docs/_static/figures/sources/make_strong_force_comparison.py",
       "inputs": [

@@ -35,7 +35,6 @@ EDGE = "#d5d3ce"
 COLORS = {
     "VMEX": "#1674d1",
     "VMEC2000": "#333333",
-    "VMEC++": "#e49c00",
     "DESC": "#7357b8",
 }
 
@@ -117,7 +116,6 @@ def _render_row(
     line_styles = {
         "VMEX": "-",
         "VMEC2000": (0, (5, 2)),
-        "VMEC++": (0, (1, 1)),
         "DESC": "-.",
     }
     ax = axes[0]
@@ -167,7 +165,6 @@ def _render_row(
     ax.set_xticks(positions)
     labels = {
         "VMEC2000": "VMEC\n2000",
-        "VMEC++": "VMEC++",
     }
     ax.set_xticklabels([labels.get(name, name) for name in names])
     ax.set_ylabel("relative force error, volume L2")

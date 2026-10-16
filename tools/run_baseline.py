@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Baseline benchmark harness: VMEC2000 vs vmex vs VMEC++.
+"""Baseline benchmark harness: VMEC2000 vs vmex vs C++ VMEC.
 
 Runs a fixed suite of input decks (from ``examples/data``) through each
 available solver and records wall time, peak RSS, iteration counts, and
@@ -9,16 +9,16 @@ source for the README performance figure; re-run it after performance work
 
 Usage:
     python tools/run_baseline.py [--out baseline.json] [--cases a,b,...]
-        [--timeout 600] [--skip vmecpp]
+        [--timeout 600] [--skip cpp_vmec]
         [--xvmec2000 /path/to/xvmec2000]
-        [--vmecpp-python /path/to/python] [--vmecpp-threads 10]
+        [--cpp-vmec-module NAME] [--cpp-vmec-python /path/to/python] [--cpp-vmec-threads 10]
 
 Solvers exercised per case:
 - ``vmec2000``       — ``VMEX_XVMEC2000``, ``PATH``, or a local STELLOPT checkout
 - ``vmex_cold``  — fresh ``vmec`` CLI subprocess (includes JAX/XLA setup)
 - ``vmex_warm``  — second in-process core solve (structural executable
   cache hot; same ``vmex.core`` route as the CLI)
-- ``vmecpp``         — ``VMEX_VMECPP_PY`` or the active Python environment
+- ``cpp_vmec``         — ``--cpp-vmec-module`` (skipped when unset), run by ``VMEX_CPP_VMEC_PY`` or the active Python
 
 Every benchmark row runs at ``ns >= RAMP_NS`` (201): decks whose finest
 NS_ARRAY stage is below that get a generated variant with the final stage
@@ -37,7 +37,6 @@ additionally run with a generated coarse->fine NS_ARRAY ladder ending at
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -65,10 +64,11 @@ XVMEC2000 = Path(os.environ.get(
     "VMEX_XVMEC2000",
     shutil.which("xvmec2000") or Path.home() / "local/STELLOPT/VMEC2000/Release/xvmec2000"))
 VMEX_PY = Path(sys.executable)
-VMECPP_PY = Path(os.environ.get(
-    "VMEX_VMECPP_PY",
-    sys.executable if importlib.util.find_spec("vmecpp") else Path.home() / ".venvs/vmecpp/bin/python"))
-VMECPP_THREADS = 10
+# The external C++ VMEC reimplementation is optional; name its Python package
+# and interpreter explicitly (flags or VMEX_CPP_VMEC_MODULE / VMEX_CPP_VMEC_PY).
+CPP_VMEC_MODULE = os.environ.get("VMEX_CPP_VMEC_MODULE", "")
+CPP_VMEC_PY = Path(os.environ.get("VMEX_CPP_VMEC_PY", sys.executable))
+CPP_VMEC_THREADS = 10
 
 # (case name, aux files to copy alongside the deck)
 CASES: dict[str, list[str]] = {
@@ -311,22 +311,24 @@ def run_vmex_warm(deck: Path, aux: list[str], timeout: int) -> dict:
         return {"ok": True, **json.loads(line)}
 
 
-VMECPP_SNIPPET = r"""
-import importlib.metadata, json, sys, time, resource
-import vmecpp
-inp = vmecpp.VmecInput.from_file(sys.argv[1])
+CPP_VMEC_SNIPPET = r"""
+import importlib, importlib.metadata, json, sys, time, resource
+cpp_vmec = importlib.import_module(sys.argv[3])
+inp = cpp_vmec.VmecInput.from_file(sys.argv[1])
 t0 = time.time()
-out = vmecpp.run(inp, max_threads=int(sys.argv[2]), verbose=False)
+out = cpp_vmec.run(inp, max_threads=int(sys.argv[2]), verbose=False)
 wall = time.time() - t0
 rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20
 print(json.dumps({"wall_s": round(wall,3), "peak_rss_mb": round(rss,1),
                   "iterations": int(out.wout.niter), "converged": True,
-                  "version": importlib.metadata.version("vmecpp"),
+                  "version": importlib.metadata.version(sys.argv[3]),
                   "max_threads": int(sys.argv[2])}))
 """
 
 
-def run_vmecpp(deck: Path, aux: list[str], timeout: int) -> dict:
+def run_cpp_vmec(deck: Path, aux: list[str], timeout: int) -> dict:
+    if not CPP_VMEC_MODULE:
+        return {"ok": False, "error": "no --cpp-vmec-module given"}
     with tempfile.TemporaryDirectory() as td:
         wd = Path(td)
         shutil.copy(deck, wd)
@@ -335,8 +337,8 @@ def run_vmecpp(deck: Path, aux: list[str], timeout: int) -> dict:
         try:
             proc = subprocess.run(
                 [
-                    str(VMECPP_PY), "-c", VMECPP_SNIPPET, deck.name,
-                    str(VMECPP_THREADS),
+                    str(CPP_VMEC_PY), "-c", CPP_VMEC_SNIPPET, deck.name,
+                    str(CPP_VMEC_THREADS), CPP_VMEC_MODULE,
                 ],
                 cwd=wd,
                 capture_output=True,
@@ -351,7 +353,7 @@ def run_vmecpp(deck: Path, aux: list[str], timeout: int) -> dict:
 
 
 def main() -> None:
-    global XVMEC2000, VMECPP_PY, VMECPP_THREADS
+    global XVMEC2000, CPP_VMEC_MODULE, CPP_VMEC_PY, CPP_VMEC_THREADS
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(REPO / "benchmarks" / "baseline.json"))
@@ -363,16 +365,19 @@ def main() -> None:
         help="VMEC2000 executable (default: %(default)s)",
     )
     ap.add_argument(
-        "--vmecpp-python", type=Path, default=VMECPP_PY,
-        help="Python containing VMEC++ (default: %(default)s)",
+        "--cpp-vmec-python", type=Path, default=CPP_VMEC_PY,
+        help="Python containing C++ VMEC (default: %(default)s)",
     )
-    ap.add_argument("--vmecpp-threads", type=int, default=10)
+    ap.add_argument("--cpp-vmec-module", default=CPP_VMEC_MODULE,
+                    help="Python package of the external C++ VMEC code")
+    ap.add_argument("--cpp-vmec-threads", type=int, default=10)
     args = ap.parse_args()
     XVMEC2000 = args.xvmec2000
-    VMECPP_PY = args.vmecpp_python
-    VMECPP_THREADS = int(args.vmecpp_threads)
-    if VMECPP_THREADS < 1:
-        ap.error("--vmecpp-threads must be positive")
+    CPP_VMEC_MODULE = args.cpp_vmec_module
+    CPP_VMEC_PY = args.cpp_vmec_python
+    CPP_VMEC_THREADS = int(args.cpp_vmec_threads)
+    if CPP_VMEC_THREADS < 1:
+        ap.error("--cpp-vmec-threads must be positive")
 
     cases = args.cases.split(",") if args.cases else list(CASES)
     skip = set(args.skip.split(",")) if args.skip else set()
@@ -386,10 +391,10 @@ def main() -> None:
         "vmex_version": vmex.__version__,
         "vmex_module": VMEX_MODULE,
         "vmec2000_executable_sha256": (file_sha256(XVMEC2000) if XVMEC2000.is_file() else None),
-        "vmecpp_python_sha256": (
-            file_sha256(VMECPP_PY) if VMECPP_PY.is_file() else None
+        "cpp_vmec_python_sha256": (
+            file_sha256(CPP_VMEC_PY) if CPP_VMEC_PY.is_file() else None
         ),
-        "vmecpp_threads": VMECPP_THREADS,
+        "cpp_vmec_threads": CPP_VMEC_THREADS,
     }
 
     for name in cases:
@@ -413,7 +418,7 @@ def main() -> None:
                 ("vmec2000", run_vmec2000),
                 ("vmex_cold", run_vmex_cold),
                 ("vmex_warm", run_vmex_warm),
-                ("vmecpp", run_vmecpp),
+                ("cpp_vmec", run_cpp_vmec),
             ]:
                 if solver in skip:
                     continue

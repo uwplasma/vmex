@@ -4,13 +4,12 @@
 Produces (into ``docs/_static/figures/``):
 
 - ``readme_runtime_compare.webp``      — VMEC2000 vs vmex (cold/warm CPU,
-  GPU where comparable) vs VMEC++, from
+  GPU where comparable), from
   ``benchmarks/baseline.json`` and
   ``benchmarks/gpu_baseline.json``.  Run ``tools/run_baseline.py`` first.
 - ``readme_convergence.webp``          — force residual vs iteration for one
-  representative case (nfp4_QH_warm_start at ns=51) in vmex, VMEC2000
-  (NSTEP=1 stdout trace), and VMEC++ (wout
-  ``fsqt``).  Traces are cached in
+  representative case (nfp4_QH_warm_start at ns=51) in vmex and VMEC2000
+  (NSTEP=1 stdout trace).  Traces are cached in
   ``benchmarks/convergence_nfp4_ns51.json``; delete it to re-run the codes.
 - ``readme_precond.webp``              — 2D block vs 1D radial preconditioner
   iteration counts on stiff cases (R10.2 measurements).
@@ -56,7 +55,6 @@ GRID = "#e1e0d9"
 BASELINE = "#c3c2b7"
 BLUE = "#2a78d6"        # vmex warm (the hero series)
 BLUE_LIGHT = "#86b6ef"  # vmex cold (same hue, lighter step)
-YELLOW = "#eda100"      # VMEC++
 VIOLET = "#4a3aa7"      # GPU
 RED = "#e34948"
 GREEN_TEXT = "#006300"
@@ -113,7 +111,7 @@ def make_runtime_figure(out: Path) -> None:
             continue
         case, grid = key[:-1].split("[")
         v2k, cold = r.get("vmec2000", {}), r.get("vmex_cold", {})
-        warm, vpp = r.get("vmex_warm", {}), r.get("vmecpp", {})
+        warm = r.get("vmex_warm", {})
         if not (v2k.get("ok") and warm.get("ok")):
             continue
         label = CASE_LABELS.get(case, case)
@@ -125,7 +123,6 @@ def make_runtime_figure(out: Path) -> None:
                 gr = gpu_rows[case]["warm_wall_s"]
         rows.append(dict(label=label, ns=r.get("ns"), v2k=v2k.get("wall_s"),
                          cold=cold.get("wall_s"), warm=warm.get("warm_s"),
-                         vpp=vpp.get("wall_s") if vpp.get("ok") else None,
                          gpu=gr))
     rows.sort(key=lambda r: r["v2k"])
 
@@ -138,7 +135,7 @@ def make_runtime_figure(out: Path) -> None:
     for y, r in zip(ys, rows):
         if y % 2 == 0:
             ax.axhspan(y - 0.5, y + 0.5, color="#f4f3ef", zorder=0)
-        xs = [v for v in (r["v2k"], r["cold"], r["warm"], r["vpp"], r["gpu"]) if v]
+        xs = [v for v in (r["v2k"], r["cold"], r["warm"], r["gpu"]) if v]
         ax.hlines(y, min(xs), max(xs), color=BASELINE, lw=2.2, zorder=1,
                   capstyle="round")
 
@@ -146,9 +143,6 @@ def make_runtime_figure(out: Path) -> None:
     mk = dict(s=120, zorder=3, linewidths=1.8, edgecolors="white")
     ax.scatter([r["cold"] for r in rows], list(ys), color=BLUE_LIGHT,
                label="vmex cold (fresh CLI process)", **mk)
-    vpp_pts = [(r["vpp"], y) for y, r in zip(ys, rows) if r["vpp"]]
-    ax.scatter([p[0] for p in vpp_pts], [p[1] for p in vpp_pts],
-               color=YELLOW, label="VMEC++", **mk)
     gpu_pts = [(r["gpu"], y) for y, r in zip(ys, rows) if r["gpu"]]
     if gpu_pts:
         ax.scatter([p[0] for p in gpu_pts], [p[1] for p in gpu_pts],
@@ -160,7 +154,7 @@ def make_runtime_figure(out: Path) -> None:
                s=120, linewidths=1.8, edgecolors="white",
                label="vmex warm (in-process)")
 
-    xmax = max(max(v for v in (r["v2k"], r["cold"], r["vpp"] or 0, r["gpu"] or 0))
+    xmax = max(max(v for v in (r["v2k"], r["cold"], r["gpu"] or 0))
                for r in rows)
     tr = ax.get_yaxis_transform()  # x in axes fraction, y in data
     for y, r in zip(ys, rows):
@@ -194,7 +188,7 @@ def make_runtime_figure(out: Path) -> None:
         title += f"  (all cases ns={next(iter(ns_set))})"
     ax.set_title(title, loc="left", pad=54, fontsize=14, color=INK)
     handles, labels = ax.get_legend_handles_labels()
-    order = ["VMEC2000 (Fortran)", "VMEC++",
+    order = ["VMEC2000 (Fortran)",
              "vmex warm (in-process)", "vmex cold (fresh CLI process)",
              "vmex warm (GPU)"]
     pairs = sorted(zip(handles, labels), key=lambda hl: order.index(hl[1]))
@@ -208,31 +202,20 @@ def make_runtime_figure(out: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 2. Convergence trace: force residual vs iteration, three codes
+# 2. Convergence trace: force residual vs iteration, VMEX vs VMEC2000
 # --------------------------------------------------------------------------
 
 CONV_CASE = "nfp4_QH_warm_start"
 CONV_NS = 51
 CONV_CACHE = REPO / "benchmarks" / "convergence_nfp4_ns51.json"
 
-VMECPP_TRACE_SNIPPET = r"""
-import json, sys
-import numpy as np
-import vmecpp
-out = vmecpp.run(vmecpp.VmecInput.from_file(sys.argv[1]), verbose=0)
-# wout.fsqt is the per-iteration fsqr+fsqz+fsql trace (len == itfsq)
-print(json.dumps({"niter": int(out.wout.niter),
-                  "fsqt": np.asarray(out.wout.fsqt).tolist()}))
-"""
-
 
 def collect_convergence() -> dict:
-    """Per-iteration total force residual (fsqr+fsqz+fsql) from all codes.
+    """Per-iteration total force residual (fsqr+fsqz+fsql) from VMEX and VMEC2000.
 
     - vmex: ``SolveResult.fsq_history`` (recorded every iteration).
     - VMEC2000: stdout iteration table with NSTEP=1 (one row per iteration).
-    - VMEC++: ``wout.fsqt`` (stored per iteration).
-    Cached in CONV_CACHE; delete the file to re-run all three codes.
+    Cached in CONV_CACHE; delete the file to re-run both codes.
     """
     if CONV_CACHE.exists():
         return json.loads(CONV_CACHE.read_text())
@@ -243,7 +226,7 @@ def collect_convergence() -> dict:
     import tempfile
 
     sys.path.insert(0, str(REPO / "tools"))
-    from run_baseline import XVMEC2000, VMECPP_PY, make_ramped_deck
+    from run_baseline import XVMEC2000, make_ramped_deck
 
     from vmex.core.input import VmecInput
     from vmex.core import solver
@@ -268,30 +251,23 @@ def collect_convergence() -> dict:
             proc.stdout, re.M)
         v2k_fsq = [float(r[1]) + float(r[2]) + float(r[3]) for r in rows]
 
-        # VMEC++: fsqt array from the wout payload.
-        proc = subprocess.run([str(VMECPP_PY), "-c", VMECPP_TRACE_SNIPPET,
-                               deck.name], cwd=td, capture_output=True,
-                              text=True, timeout=900)
-        vpp = json.loads(proc.stdout.strip().splitlines()[-1])
 
     data = {"case": CONV_CASE, "ns": CONV_NS,
             "ftol": 1e-13,  # deck FTOL_ARRAY final stage
-            "vmex": jax_fsq, "vmec2000": v2k_fsq, "vmecpp": vpp["fsqt"]}
+            "vmex": jax_fsq, "vmec2000": v2k_fsq}
     CONV_CACHE.write_text(json.dumps(data))
     return data
 
 
 def make_convergence_figure(out: Path) -> None:
     d = collect_convergence()
-    jax_t, v2k_t, vpp_t = d["vmex"], d["vmec2000"], d["vmecpp"]
+    jax_t, v2k_t = d["vmex"], d["vmec2000"]
 
     fig, ax = plt.subplots(figsize=(8.6, 3.7), dpi=160)
-    # Widest underneath, hero (blue) on top: the three traces coincide.
+    # Widest underneath, hero (blue) on top: the traces coincide.
     ax.semilogy(range(1, len(v2k_t) + 1), v2k_t, color=INK2, lw=3.6,
                 alpha=0.5, solid_capstyle="round",
                 label=f"VMEC2000 (Fortran), {len(v2k_t)} iterations")
-    ax.semilogy(range(1, len(vpp_t) + 1), vpp_t, color=YELLOW, lw=2.2,
-                alpha=0.9, label=f"VMEC++, {len(vpp_t)} iterations")
     ax.semilogy(range(1, len(jax_t) + 1), jax_t, color=BLUE, lw=1.1,
                 label=f"VMEX, {len(jax_t)} iterations")
 
@@ -309,7 +285,7 @@ def make_convergence_figure(out: Path) -> None:
 
     ax.set_xlabel("iteration")
     ax.set_ylabel("force residual  fsqr + fsqz + fsql")
-    ax.set_xlim(0, max(len(jax_t), len(v2k_t), len(vpp_t)) * 1.02)
+    ax.set_xlim(0, max(len(jax_t), len(v2k_t)) * 1.02)
     ax.yaxis.grid(True)
     ax.set_axisbelow(True)
     for s in ("top", "right"):
