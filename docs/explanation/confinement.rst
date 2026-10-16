@@ -349,15 +349,15 @@ the published :math:`g_J`: it establishes a favorable direction without
 asking a local optimizer to cross actual-well topology changes. The final
 :class:`~vmex.core.maxj.MaximumJResidual` remains the physical certificate.
 
-``QI_maxJ_continuation.py`` starts from a minimal vacuum seed, retains a
-magnetic-well target, first creates matched QI wells, uses the constructed
-field to establish the maximum-J direction, and only then ramps a negative
-slope margin in the actual field. It recomputes a common physical pitch once
-after the weak stage and freezes it throughout the remaining stages; the
-script raises if the incoming wells cannot be resolved at that pitch. The
-final stage lengthens the field-line trace and increases the number of
-field-line labels, preventing a short trace from aliasing a visibly
-non-omnigenous result.
+``QI_maxJ_continuation.py`` starts from the bundled ``nfp = 3`` QI
+equilibrium, retains a magnetic-well target, and ramps a negative slope
+margin in the actual field. Its research ladder recomputes a common physical
+pitch once after the weak stage and freezes it throughout the remaining
+stages, and its final stage lengthens the field-line trace and increases the
+number of field-line labels, preventing a short trace from aliasing a visibly
+non-omnigenous result; the five-minute default runs the middle stage alone at
+the seed's pitch. The script raises if the incoming wells cannot be resolved
+at that pitch.
 The final ``plot_wout(..., j_pitch=pitch)`` call passes that same pitch to the
 polar :math:`J(\alpha,s)` panel, making it a direct visual certificate of the
 optimized trapped-particle population.

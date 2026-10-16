@@ -79,7 +79,7 @@
       "sha256": "39a9589620d0ae0b62930bd5a435f3238360c5c523504916ff9c1bfa9d8cbcd2",
       "bytes": 163938,
       "generator": "examples/mirror/mirror_free_boundary_beta_scan.py",
-      "command": "python examples/mirror/mirror_free_boundary_beta_scan.py && cp results/mirror_free_boundary_beta_scan/mirror_free_boundary_beta_scan.webp docs/_static/figures/",
+      "command": "python examples/mirror/mirror_free_boundary_beta_scan.py (BETAS set to its research scan, 0/10/50/80 %) && cp results/mirror_free_boundary_beta_scan/mirror_free_boundary_beta_scan.webp docs/_static/figures/",
       "inputs": [],
       "record": "benchmarks/mirror_free_boundary_axisymmetric.json",
       "generated": "2026-09-23",
@@ -258,7 +258,7 @@
       "sha256": "ed6e1b55a4d5f0244e5fca83b9f917c137ec990ed23b132e70ba2a4c8658d5d2",
       "bytes": 113576,
       "generator": "examples/vmex_fieldline_tracing_finite_beta.py",
-      "command": "python examples/vmex_fieldline_tracing_finite_beta.py && cp readme_extender_exterior_islands.webp docs/_static/figures/",
+      "command": "python examples/vmex_fieldline_tracing_finite_beta.py (with its research USE_GRADED_QUADRATURE, OUTSIDE_TRACE_LENGTH and OUTSIDE_TOLERANCE) && cp readme_extender_exterior_islands.webp docs/_static/figures/",
       "inputs": [
         "examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap",
         "examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json"
