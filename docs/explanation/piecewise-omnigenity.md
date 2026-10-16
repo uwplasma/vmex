@@ -208,6 +208,11 @@ This is one matched setting, without a canonical convergence sweep. Its 19.4%
 mirror reduction also prevents attributing the change solely to improved pwO
 structure. Neither this result nor the mapped comparison establishes alpha retention.
 
+The measured plots use unfilled contours in a centered periodic cell so that
+closed extrema and wrapping contours remain visible. The current development
+fits retain predominantly poloidally wrapping structure rather than the target
+parallelogram. Reduced fit error alone must not be labeled a distinct pwO result.
+
 Full derivative and resolution qualification, family-resolved actions,
 transport and particle retention remain separate gates. The shared-host wall
 times in the record are observations, not a controlled speed comparison.

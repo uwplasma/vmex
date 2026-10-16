@@ -737,9 +737,9 @@
       "hardware": "CPU; measured solver runs on shared 18-core host",
       "reproducible": "command",
       "bytes_verified": true,
-      "note": "Reconstructs measured stored spectra at s=0.5, not fresh optimization. The record includes final input decks, source hashes and resolution. No action, confinement or engineering certification.",
-      "sha256": "134b6bb722db54155bcdc8f1fb5117973414793d2086cbac085d4f25cacf4399",
-      "bytes": 39588,
+      "note": "Unfilled physical-B contours reconstructed from measured stored spectra at s=0.5 in a centered periodic cell. These QI-like development fits do not establish a distinct pwO region or action/confinement/engineering qualification.",
+      "sha256": "efe0b953a37a9674a970a88af740a3434d799c256bf6b1c63ab65fe497b59bdf",
+      "bytes": 201050,
       "used_in": [
         "README.md"
       ]

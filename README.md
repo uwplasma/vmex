@@ -373,6 +373,8 @@ The canonical vacuum mirror falls 19.4%; the mapped fit preserves it within 0.1%
 Despite its better fit, the mapped vacuum candidate has a 2.84–3.35 times worse
 independent effective-ripple proxy at the finest tested settings. Neither target
 fit certifies bounce-action invariance, transport, alpha retention or coil feasibility.
+The unfilled contours below remain predominantly QI-like; a distinct pwO region
+has not been established.
 [Measured records](benchmarks/pwo_development.json) retain controls, source hashes,
 final input decks and the spectra used below. Run the examples with:
 

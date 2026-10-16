@@ -1,8 +1,4 @@
-"""Render measured development fields from benchmarks/pwo_development.json.
-
-Run from the repository root: python docs/_static/figures/sources/make_pwo_figure.py
-This reconstructs stored spectra; it does not rerun the equilibrium optimization.
-"""
+"""Reconstruct unfilled measured contours from the committed benchmark spectra."""
 
 import json
 from pathlib import Path
@@ -22,7 +18,7 @@ def main():
     spectra = [cases["canonical-vacuum"]["spectra"]["seed"],
                cases["canonical-vacuum"]["spectra"]["final"],
                cases["mapped-vacuum"]["spectra"]["final"]]
-    angle = 2 * np.pi * np.arange(96) / 96
+    angle = np.linspace(-np.pi, np.pi, 129)
     fields = []
     for spectrum in spectra:
         theta, zeta = np.meshgrid(angle, angle / spectrum["nfp"], indexing="ij")
@@ -30,11 +26,11 @@ def main():
                  - zeta[..., None] * np.asarray(spectrum["xn_b"]))
         fields.append(np.cos(phase) @ np.asarray(spectrum["bmnc_b"])[0]
                       + np.sin(phase) @ np.asarray(spectrum["bmns_b"])[0])
-    levels = np.linspace(np.min(fields), np.max(fields), 30)
+    levels = np.linspace(np.min(fields), np.max(fields), 17)
     fig, axes = plt.subplots(1, 3, figsize=(10, 3.5), layout="constrained")
     for ax, field, title in zip(axes, fields, ["Seed", "Canonical fit", "Mapped fit"]):
-        image = ax.contourf(angle / (2*np.pi), angle / (2*np.pi), field,
-                            levels=levels, cmap="viridis")
+        image = ax.contour(angle / (2*np.pi), angle / (2*np.pi), field,
+                            levels=levels, cmap="viridis", linewidths=0.8)
         ax.set(xlabel=r"$N_{fp}\zeta_B/(2\pi)$", ylabel=r"$\theta_B/(2\pi)$", title=title)
     fig.colorbar(image, ax=list(axes), label="B [T]")
     fig.supxlabel("Vacuum, s=0.5; independently refined equilibria. "
