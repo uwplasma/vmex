@@ -45,10 +45,11 @@ g = exp(-u^(2p)-v^(2p)).
 union, `Bmin + (Bmax-Bmin)*(1-product(1-g_kl))`, over angular images.
 This is an explicit extension, not an exact reproduction of the uncompleted
 fundamental-domain formula in the CIEMAT-pw1 DESC source. The implementation
-reports overlap and corner clearance. It requires the sharp parallelogram to
-fit inside its centered angular cell, which bounds the omitted image tails.
-For `p >= 2`, the default two image shells make the field seams negligible at
-float64 precision. Derivative tests include the wrapped seams and patch center.
+reports overlap, centered-cell clearance and separation from periodic copies.
+A parallelogram may cross a coordinate cut if its periodic copies remain
+separated and the omitted image bound is below `1e-30`. The residual requires
+`minimum_lattice_margin=0.05`; explicit `minimum_corner_margin` restores the
+older containment restriction. Derivative tests cover seams and patch centers.
 The union preserves the upper and lower bounds; its finite tails generally
 make the attained minimum greater than `Bmin`.
 Finite `p` rounds the corners and can introduce additional accessible winding
