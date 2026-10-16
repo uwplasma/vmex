@@ -191,6 +191,17 @@ reduces its refined residual from 0.0193501 to 0.0178247 (7.9%), with mirror
 This pressure sequence prescribes zero enclosed
 current; it is not a bootstrap-consistent equilibrium sequence.
 
+An independent NEO_JAX evaluation of the corrected mapped vacuum pair gives
+an unfavorable result. At the finest settings, the candidate's
+`epsilon_eff^(3/2)` is 2.84–3.35 times
+its seed value across five matched half-mesh surfaces. The negative-iota
+period-count correction in [NEO_JAX PR #17](https://github.com/uwplasma/NEO_JAX/pull/17)
+is applied without changing signed field-line winding. The finer pitch and
+field-line controls change individual values by at most 2.02% and 1.42%; all
+period counts remain nonnegative and no rational approximation is used.
+The target-fit improvement therefore does not establish improved effective
+ripple, and this proxy alone does not certify transport or bootstrap current.
+
 Full derivative and resolution qualification, family-resolved actions,
 transport and particle retention remain separate gates. The shared-host wall
 times in the record are observations, not a controlled speed comparison.
