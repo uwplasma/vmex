@@ -1624,8 +1624,10 @@ def test_subproblem_ladder_compiles_once():
             # compile once per process on first use; whether an earlier test
             # on the same xdist worker already paid them is order-dependent.
             name = re.match(r"Compiling jit\((\w+)\)", record.getMessage())
+            # Private jnp helpers (jit(_where), jit(_power)) are the same.
+            op = name[1].lstrip("_") if name else ""
             self.count += bool(name) and not (
-                hasattr(jax.numpy, name[1]) or hasattr(jax.lax, name[1]))
+                hasattr(jax.numpy, op) or hasattr(jax.lax, op))
 
     inp = _ladder_input()
     terms = [(opt.aspect_ratio, 4.0, 1.0)]
