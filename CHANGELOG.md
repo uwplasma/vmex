@@ -5,6 +5,11 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## Unreleased
+
+- Opt-in free-boundary position control (`PositionControl`, deck `LPOSITION_CONTROL`): a feedback
+  vertical field holds the axis at a target radius and reports the missing field.
+
 ## 0.11.10 - 2026-10-13
 
 - **`vmex --trace` is about twice as fast** on large spectra with ESSOS 0.21:

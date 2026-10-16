@@ -105,10 +105,13 @@ def _cartesian_field(points):
     )
 
 
-def lasym_free_mgrid_data() -> MgridData:
-    """Generate the shared compact one-group DIII-D regression mgrid."""
+def lasym_free_mgrid_data(dbz: float = 0.0) -> MgridData:
+    """Generate the shared compact one-group DIII-D regression mgrid.
+
+    ``dbz`` adds a uniform vertical field [T] (a mis-set vertical-field coil).
+    """
     return tabulate_cartesian_field(
-        _cartesian_field,
+        lambda points: _cartesian_field(points) + np.array([0.0, 0.0, dbz]),
         rmin=0.75,
         rmax=2.75,
         zmin=-1.6,
