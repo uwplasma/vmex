@@ -100,18 +100,18 @@
      },
      "vmex_module": "vmex/__init__.py"
     },
-    "VMEC++": {
+    "C++ VMEC": {
      "angular_multiplier": 2,
      "case": "nfp2_QA_finite_beta",
      "certificate_seconds": 6.3367,
-     "command": "strong_certificate.py --input examples/data/input.nfp2_QA_finite_beta --wout wout_nfp2_QA_finite_beta.nc --source-provenance qa_vmecpp_report.json --degree 5 --radial-spans 24 --output qa_vmecpp_cert.json",
+     "command": "strong_certificate.py --input examples/data/input.nfp2_QA_finite_beta --wout wout_nfp2_QA_finite_beta.nc --source-provenance qa_cpp_vmec_report.json --degree 5 --radial-spans 24 --output qa_cpp_vmec_cert.json",
      "coordinate_convention": "rho=sqrt(s), theta poloidal, zeta field-period; physical phi=zeta/nfp",
      "degree": 5,
      "external_source": {
       "controls": {
        "max_threads": 1
       },
-      "engine": "vmecpp",
+      "engine": "cpp_vmec",
       "fsql": 1.18759e-13,
       "fsqr": 1.72832e-13,
       "fsqz": 4.86686e-13,
@@ -133,7 +133,7 @@
        "total": 0.4812
       },
       "versions": {
-       "vmecpp": "0.7.4.dev9+g6d83563c2.d20260829"
+       "cpp_vmec": "0.7.4.dev9+g6d83563c2.d20260829"
       }
      },
      "input": "examples/data/input.nfp2_QA_finite_beta",
@@ -442,18 +442,18 @@
      },
      "vmex_module": "vmex/__init__.py"
     },
-    "VMEC++": {
+    "C++ VMEC": {
      "angular_multiplier": 2,
      "case": "shaped_tokamak_pressure_polished",
      "certificate_seconds": 3.80104,
-     "command": "strong_certificate.py --input examples/data/input.shaped_tokamak_pressure_polished --wout wout_shaped_tokamak_pressure_polished.nc --source-provenance tok_vmecpp_report.json --degree 3 --radial-spans 14 --output tok_vmecpp_cert.json",
+     "command": "strong_certificate.py --input examples/data/input.shaped_tokamak_pressure_polished --wout wout_shaped_tokamak_pressure_polished.nc --source-provenance tok_cpp_vmec_report.json --degree 3 --radial-spans 14 --output tok_cpp_vmec_cert.json",
      "coordinate_convention": "rho=sqrt(s), theta poloidal, zeta field-period; physical phi=zeta/nfp",
      "degree": 3,
      "external_source": {
       "controls": {
        "max_threads": 1
       },
-      "engine": "vmecpp",
+      "engine": "cpp_vmec",
       "fsql": 2.44078e-11,
       "fsqr": 9.37541e-11,
       "fsqz": 6.11985e-11,
@@ -475,7 +475,7 @@
        "total": 0.0322937
       },
       "versions": {
-       "vmecpp": "0.7.4.dev9+g6d83563c2.d20260829"
+       "cpp_vmec": "0.7.4.dev9+g6d83563c2.d20260829"
       }
      },
      "input": "examples/data/input.shaped_tokamak_pressure_polished",

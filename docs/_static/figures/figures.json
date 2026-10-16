@@ -110,7 +110,7 @@
       "hardware": null,
       "reproducible": "command",
       "bytes_verified": true,
-      "note": "Plots the cached three-code trace, which dates from 2026-07-10; the `generated` date is the render. On a cache miss the generator re-solves and shells out to VMEC2000 and VMEC++, discovered locally or via VMEX_XVMEC2000 / VMEX_VMECPP_PY. Re-rendered in 2026-09 so the committed bytes match what the command produces.",
+      "note": "Plots the cached three-code trace, which dates from 2026-07-10; the `generated` date is the render. On a cache miss the generator re-solves and shells out to VMEC2000 and C++ VMEC, discovered locally or via VMEX_XVMEC2000 / VMEX_CPP_VMEC_PY. Re-rendered in 2026-09 so the committed bytes match what the command produces.",
       "used_in": [
         "README.md",
         "docs/explanation/validation.md",

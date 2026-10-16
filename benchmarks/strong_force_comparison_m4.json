@@ -5,22 +5,22 @@
         "DESC": {
           "normalized_l2": 0.879259,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         },
-        "VMEC++": {
+        "C++ VMEC": {
           "normalized_l2": 0.525183,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         },
         "VMEC2000": {
           "normalized_l2": 0.525183,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         },
         "VMEX": {
           "normalized_l2": 0.525896,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         }
       }
     },
@@ -29,22 +29,22 @@
         "DESC": {
           "normalized_l2": 0.0296234,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         },
-        "VMEC++": {
+        "C++ VMEC": {
           "normalized_l2": 0.0171071,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         },
         "VMEC2000": {
           "normalized_l2": 0.0171071,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         },
         "VMEX": {
           "normalized_l2": 0.00179367,
           "path": "benchmarks/strong_force_cases_m4.json",
-          "sha256": "f8812d0e7bde4cd2851df09837eaa8911148408e71d26699f56737afbc55ec86"
+          "sha256": "9c3867d3da90b5aa7228c4e1bd04b1f26b04704d9c6b011042585a50bd0b53da"
         }
       }
     }
