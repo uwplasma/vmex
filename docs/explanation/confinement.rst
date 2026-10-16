@@ -576,6 +576,38 @@ exact implicit gradients and is a cheaper Mercier-adjacent target. Near-axis
 analytic context for both measures is in Landreman–Jorge (2020) and
 Kim–Jorge–Dorland (2021); see :doc:`/project/references`.
 
+**The edge layer.** Where :math:`p'\to0` at the boundary, the well term of
+:math:`D_{\mathrm{Merc}}` vanishes and the shear and current terms decide its
+sign (Greene, GA-A22135, 1998; Landreman & Jorge 2020). On the optimized
+boundary of ``QA_optimization_bootstrap.py`` the criterion
+:math:`\Phi_{\rm edge}^2 D_{\mathrm{Merc}}` turns negative in a thin outer
+layer, and the layer does not move with the radial grid:
+
+.. list-table::
+   :header-rows: 1
+
+   * - ns
+     - last positive row
+     - first negative row
+     - minimum
+   * - 51
+     - 0.960 (+1.3e-3)
+     - 0.980
+     - -9.2e-4 at 0.980
+   * - 71
+     - 0.971 (+3.6e-4)
+     - 0.986
+     - -1.2e-3 at 0.986
+   * - 101
+     - 0.970 (+5.6e-4)
+     - 0.980
+     - -1.6e-3 at 0.990
+
+It is physical, not a differencing artifact. Neither fitting the bootstrap
+current out to :math:`s=0.98` nor a hinge on an edge row built by
+extrapolating the shear, well and current terms separately removed it within
+the example's budget; both raised the quasisymmetry error tenfold.
+
 Ideal ballooning
 ~~~~~~~~~~~~~~~~~
 

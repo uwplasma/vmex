@@ -50,7 +50,7 @@ MAX_NFEV = [4, 6]
 # keeps 128 points per poloidal turn, enough to resolve the toroidal harmonics
 # for the Richardson step; three turns hold an unstable mode, and the
 # certificate below reads five:
-BALLOONING_S = [0.7, 0.8, 0.85, 0.9, 0.95]
+BALLOONING_S = [0.7, 0.8, 0.85, 0.9, 0.95, 0.98]
 LINES = dict(surfaces=BALLOONING_S, alphas=np.linspace(0.0, np.pi, 8),
              zeta0s=np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5),
              npoints=385, nturns=3.0)
