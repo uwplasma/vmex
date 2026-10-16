@@ -597,11 +597,11 @@ def _lasym_delta_rotation_traceable(rbc, rbs, zbc, zbs, cfg: ImplicitConfig,
     come from ``cfg.inp``.  At ``delta == 0`` the rotation is the identity in
     value while its derivative is not, so the body runs there too.
     """
-    r0, z0 = (np.asarray(getattr(cfg.inp, f), dtype=float)[ntor, 1:2]
-              for f in ("rbc", "zbs"))
-    s0, c0 = (np.asarray(getattr(cfg.inp, f), dtype=float)[ntor, 1:2]
-              for f in ("rbs", "zbc"))
-    if mpol < 2 or (float(r0 + z0) == 0.0 and float(s0 - c0) == 0.0):
+    if mpol < 2:
+        return rbc, rbs, zbc, zbs
+    r0, z0, s0, c0 = (float(np.asarray(getattr(cfg.inp, f), dtype=float)[ntor, 1])
+                      for f in ("rbc", "zbs", "rbs", "zbc"))
+    if r0 + z0 == 0.0 and s0 - c0 == 0.0:
         return rbc, rbs, zbc, zbs
     delta = jnp.arctan2(rbs[ntor, 1] - zbc[ntor, 1], rbc[ntor, 1] + zbs[ntor, 1])
     m = jnp.arange(mpol, dtype=rbc.dtype)[None, :]
