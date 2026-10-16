@@ -152,6 +152,16 @@ Measured on one RTX A4000 with JAX 0.11.2:
 - **Fourier synthesis and projection** are small batched matmuls that XLA
   already fuses. A Pallas fusion was not attempted.
 
+## Host-device sharding on CPU
+
+Splitting one equilibrium's radial axis over forced host devices
+(`--xla_force_host_platform_device_count`) slows a preconditioned force
+evaluation: 4.5, 9.3, 16.4 and 26.9 ms on 1, 2, 4 and 8 devices (`ns = 128`,
+128 modes, Apple M-series). XLA already multithreads one device, and the
+radial tridiagonal sweeps force gathers between shards. Parallelism across
+independent equilibria (`vmex.core.parallel`) remains the right use of
+cores.
+
 ## Candidate preconditioner
 
 Average the metric coefficients over $\zeta$ only, not over $\theta$. The
