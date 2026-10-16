@@ -77,6 +77,8 @@ def test_readme_install_floors_match_pyproject() -> None:
     for requirement in [*project["dependencies"], *(r for name in
                         ("coils", "freeb", "neoclassical", "turbulence", "optimizers")
                         for r in extras[name])]:
+        if ";" in requirement:  # platform-marked caps, not floors
+            continue
         match = re.fullmatch(r"([A-Za-z0-9_.-]+)(?:>=(\S+))?", requirement)
         assert match, requirement
         declared.setdefault(match.group(1), match.group(2) or "")
