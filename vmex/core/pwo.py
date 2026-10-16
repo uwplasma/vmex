@@ -9,11 +9,16 @@ The canonical construction uses the super-Gaussian of Velasco et al., PRL 133,
 fundamental-domain expression in Fernandez-Pacheco et al., arXiv:2601.14886v2
 and their DESC reference implementation (Zenodo 20390611, CC-BY-4.0).
 
-For a parallelogram contained in its centered cell, omitted lattice shells
-beyond ``images`` contribute at most ``sum(8*k*exp(-(2*k-1)**(2*p)))``. With
-p>=2 and images>=1 this is below 1e-33; the default images=2 gives <1e-269.
-Thus field values are periodic to float64 precision; parameter derivatives
-require the usual conditioning checks near a degenerate width.
+Parallelograms may cross a coordinate cut. Disjoint translated interiors are
+checked in their linear super-Gaussian coordinates: every nonzero lattice
+translation must have infinity norm greater than two. The static stencil
+also certifies that omitted translations cannot lower this minimum. If E is
+the largest parallelogram coordinate extent divided by its cell half-period,
+omitted shell k contributes at most ``8*k*exp(-((2*k-1)/E)**(2*p))``. A convexity
+bound on this sum must be below 1e-30, with first exponent at least 80.
+Field values are then periodic to float64 precision; parameter derivatives
+require the usual conditioning checks near a degenerate width. The retained
+``corner_margin`` measures centered-cell containment only, not torus overlap.
 Overlap diagnostics quantify the finite-p difference from an isolated patch;
 the sharp limit is the union of the published parallelograms. No exact finite-p
 pwO or exact reproduction of the published equilibrium is asserted.
@@ -61,22 +66,42 @@ def _canonical_images(theta, zeta, *, iota, nfp, bmin, bmax, t1, t2, p,
     extent_theta = (jnp.pi + jnp.abs(t2 * width)) / jnp.abs(determinant)
     extent_zeta = (jnp.abs(width) + jnp.pi * jnp.abs(t1)) / jnp.abs(determinant)
     margin = 1.0 - jnp.maximum(extent_theta / jnp.pi, extent_zeta * nfp / jnp.pi)
+    shifts = jnp.arange(-images, images+1)
+    poloidal_shift, toroidal_shift = jnp.meshgrid(shifts, shifts, indexing="ij")
+    lattice_shape = (-1,) + (1,)*width.ndim
+    j = poloidal_shift.reshape(lattice_shape)
+    k = toroidal_shift.reshape(lattice_shape)
+    separation = jnp.maximum(jnp.abs(2*jnp.pi*(t1*j+k/nfp)/width),
+                             jnp.abs(2*j+2*t2*k/nfp))
+    separation = jnp.min(jnp.where((j != 0) | (k != 0), separation, jnp.inf), axis=0)
+    extent = 1-margin
+    # If ||A*l||inf <= separation, |l_i| <= separation*rowsum(|A^-1|)_i.
+    # Thus a missing index >= images+1 cannot improve the enumerated minimum.
+    lattice_certified = separation*extent < 2*(images+1)
+    lattice_margin = 1-2/separation
+    q = 2*p
+    tail_exponent = jnp.minimum((2*images+1)/extent, 750.0**(1/q))**q
+    slope = 2*q*tail_exponent/(2*images+1)
+    decay = jnp.exp(-slope)
+    denominator_tail = -jnp.expm1(-slope)
+    log_tail_bound = (jnp.log(8.0)-tail_exponent
+                      + jnp.log((images+1)/denominator_tail+decay/denominator_tail**2))
     valid = (jnp.isfinite(width) & (jnp.abs(width) > 1e-12)
              & (jnp.abs(determinant) > 1e-12) & (jnp.abs(iota) > 1e-12)
              & jnp.isfinite(bmin) & jnp.isfinite(bmax) & (bmin > 0) & (bmax > bmin)
-             & jnp.isfinite(margin) & (margin >= 0))
+             & jnp.isfinite(margin) & lattice_certified & (lattice_margin > 0)
+             & (tail_exponent >= 80) & jnp.isfinite(log_tail_bound)
+             & (log_tail_bound < jnp.log(1e-30)))
     zeta_center = jnp.pi / nfp if zeta_center is None else zeta_center
     theta = jnp.asarray(theta, dtype=jnp.float64)
     zeta = jnp.asarray(zeta, dtype=jnp.float64)
     valid = (valid & jnp.isfinite(theta) & jnp.isfinite(zeta)
              & jnp.isfinite(theta_center) & jnp.isfinite(zeta_center))
-    _require(valid, "canonical target needs finite coordinates, positive distinct B bounds and a nondegenerate parallelogram inside its cell")
+    _require(valid, "canonical target needs finite coordinates, positive distinct B bounds, disjoint torus parallelograms and a certified image stencil")
     # Wrapping chooses a nearby stencil, not a single discontinuous patch.
     dt = jnp.mod(theta - theta_center + jnp.pi, 2*jnp.pi) - jnp.pi
     dz = jnp.mod(zeta - zeta_center + jnp.pi/nfp, 2*jnp.pi/nfp) - jnp.pi/nfp
     dt, dz, _ = jnp.broadcast_arrays(dt, dz, width)
-    shifts = jnp.arange(-images, images+1)
-    poloidal_shift, toroidal_shift = jnp.meshgrid(shifts, shifts, indexing="ij")
     shape = (-1,) + (1,)*dt.ndim
     t = dt + 2*jnp.pi*poloidal_shift.reshape(shape)
     z = dz + 2*jnp.pi*toroidal_shift.reshape(shape)/nfp
@@ -85,7 +110,7 @@ def _canonical_images(theta, zeta, *, iota, nfp, bmin, bmax, t1, t2, p,
     limit = 750.0**(1.0/(2*p))
     u = jnp.minimum(jnp.abs((z+t1*t)/width), limit)
     v = jnp.minimum(jnp.abs((t+t2*z)/jnp.pi), limit)
-    return jnp.exp(-u**(2*p)-v**(2*p)), width, margin, valid
+    return jnp.exp(-u**(2*p)-v**(2*p)), width, margin, lattice_margin, log_tail_bound, valid
 
 
 def canonical_pwo_field(theta, zeta, *, iota, nfp, bmin, bmax, t1, t2, p=2,
@@ -98,13 +123,14 @@ def canonical_pwo_field(theta, zeta, *, iota, nfp, bmin, bmax, t1, t2, p=2,
     ``valid=False`` and NaN field values. ``bmin`` is a lower bound: finite-p
     tails generally keep the actual minimum above it.
     """
-    patches, width, margin, valid = _canonical_images(
+    patches, width, margin, lattice_margin, log_tail_bound, valid = _canonical_images(
         theta, zeta, iota=iota, nfp=nfp, bmin=bmin, bmax=bmax, t1=t1, t2=t2,
         p=p, theta_center=theta_center, zeta_center=zeta_center, images=images)
     union = 1.0 - jnp.prod(1.0 - patches, axis=0)
     field = jnp.asarray(bmin) + (jnp.asarray(bmax)-jnp.asarray(bmin))*union
     return {"B_target": jnp.where(valid, field, jnp.nan), "width": width,
             "corner_margin": margin, "valid": valid,
+            "lattice_margin": lattice_margin, "omitted_image_log_bound": log_tail_bound,
             "overlap": jnp.sum(patches, axis=0)-jnp.max(patches, axis=0)}
 
 
@@ -185,16 +211,21 @@ def _finish(residual, B, valid, weight):
 
 def canonical_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
         bmin, bmax, bmns_b=None, t1=-0.3, t2=3.0, p=2, theta_center=0.0,
-        zeta_center=None, images=2, minimum_corner_margin=0.05, ntheta=32,
+        zeta_center=None, images=2, minimum_corner_margin=None, minimum_lattice_margin=0.05, ntheta=32,
         nzeta=32, weights=None):
     """Normalized pointwise target fit with live signed iota and both parities.
 
     Surface weights sum to one; angular quadrature is uniform and normalized.
     Returns sampled ``B``, ``B_target``, overlap, margins, validity and extrema.
+    ``minimum_lattice_margin`` prevents touching translated parallelograms.
+    ``minimum_corner_margin`` optionally restores the older centered-cell
+    containment restriction; by default a cut-crossing target is allowed.
     """
     _integer(ntheta, 4, "ntheta"); _integer(nzeta, 4, "nzeta")
-    if not 0 <= minimum_corner_margin < 1:
+    if minimum_corner_margin is not None and not 0 <= minimum_corner_margin < 1:
         raise ValueError("minimum_corner_margin must lie in [0,1)")
+    if not 0 <= minimum_lattice_margin < 1:
+        raise ValueError("minimum_lattice_margin must lie in [0,1)")
     cosine, sine, m, n, iota, weight, valid = _spectrum(bmnc_b, bmns_b, xm_b, xn_b, iota_b, nfp, weights)
     theta = 2*jnp.pi*jnp.arange(ntheta)[None, :, None]/ntheta
     zeta = 2*jnp.pi*jnp.arange(nzeta)[None, None, :]/(nfp*nzeta)
@@ -206,7 +237,9 @@ def canonical_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
         params["zeta_center"] = _surface(zeta_center, cosine.shape[0], "zeta_center")
     target = canonical_pwo_field(theta, zeta, iota=iota[:, None, None], nfp=nfp,
                                 p=p, images=images, **params)
-    valid = valid & jnp.all(target["valid"], axis=(1, 2)) & (target["corner_margin"][:, 0, 0] >= minimum_corner_margin)
+    valid = valid & jnp.all(target["valid"], axis=(1, 2)) & (target["lattice_margin"][:, 0, 0] >= minimum_lattice_margin)
+    if minimum_corner_margin is not None:
+        valid = valid & (target["corner_margin"][:, 0, 0] >= minimum_corner_margin)
     out = _finish((B-target["B_target"])/target["B_target"], B, valid, weight)
     out.update({**target, "valid": out["valid"], "B": B, "theta": theta[0, :, 0], "zeta": zeta[0, 0, :]})
     return out

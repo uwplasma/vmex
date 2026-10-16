@@ -288,3 +288,90 @@ def test_locally_nonfolding_map_with_global_overlap_is_rejected():
     assert float(right[0]-left[0]) > 2*np.pi/3
     with pytest.raises(ValueError):
         mapped_pwo_residual_from_boozer(**_spectrum(), b_ref=1.5, eta_min=eta_min)
+
+
+REFERENCE = dict(iota=-.9,nfp=5,bmin=1.1,bmax=1.9,t1=.441421356,t2=-3.141421356)
+
+
+def oracle(theta,zeta,iota=-.9,t1=.441421356,t2=-3.141421356,p=2):
+    width=np.pi*iota*(1-t1*t2)/(5*(iota+t2))
+    complement=np.ones(np.broadcast_shapes(np.shape(theta),np.shape(zeta)))
+    for j in range(-9,10):
+        for k in range(-9,10):
+            t,z=theta-2*np.pi*j,zeta-np.pi/5-2*np.pi*k/5
+            with np.errstate(over='ignore'):
+                exponent=((z+t1*t)/width)**(2*p)+((t+t2*z)/np.pi)**(2*p)
+            complement*=1-np.exp(-exponent)
+    return 1.1+.8*(1-complement)
+
+
+def test_published_initial_tilt_crosses_cut_without_overlap():
+    theta=np.linspace(-np.pi,np.pi,21)[:,None]+.013
+    zeta=np.linspace(-np.pi/5,np.pi/5,23)[None,:]-.017
+    out=canonical_pwo_field(theta,zeta,**REFERENCE)
+    assert out['corner_margin']<0
+    assert out['lattice_margin']>.45
+    assert out['omitted_image_log_bound']<np.log(1e-150)
+    np.testing.assert_allclose(out['B_target'],oracle(theta,zeta),atol=2e-14)
+    # Independently enumerate a much larger lattice in linear coordinates.
+    iota,t1,t2=REFERENCE['iota'],REFERENCE['t1'],REFERENCE['t2']
+    width=np.pi*iota*(1-t1*t2)/(5*(iota+t2))
+    distances=[max(abs(2*np.pi*(t1*j+k/5)/width),abs(2*j+2*t2*k/5))
+               for j in range(-20,21) for k in range(-20,21) if j or k]
+    assert float(out['lattice_margin'])==pytest.approx(1-2/min(distances))
+
+
+@pytest.mark.parametrize('p',[2,8,128])
+def test_crossing_field_periodicity_reflection_and_finite_ad(p):
+    theta,zeta=jnp.array([.31,-2.9,2.71]),jnp.array([.39,-.62,.53])
+    def field(x):
+        return canonical_pwo_field(theta,zeta,iota=x[0],t1=x[1],t2=x[2],
+                                   nfp=5,bmin=1.1,bmax=1.9,p=p)['B_target']
+    x=jnp.array([-.9,.441421356,-3.141421356]);direction=jnp.array([.1,.02,-.1])
+    value,tangent=jax.jit(lambda q:jax.jvp(field,(q,),(direction,)))(x)
+    _,pullback=jax.vjp(field,x)
+    cotangent=jnp.array([.3,-.4,.7])
+    assert np.all(np.isfinite(tangent))
+    tail_gradient=jax.grad(lambda q:canonical_pwo_field(.2,.3,iota=q,t1=REFERENCE['t1'],t2=REFERENCE['t2'],nfp=5,bmin=1.1,bmax=1.9,p=p)['omitted_image_log_bound'])(x[0])
+    assert np.isfinite(tail_gradient)
+    np.testing.assert_allclose(cotangent@tangent,pullback(cotangent)[0]@direction,atol=1e-12)
+    np.testing.assert_allclose(value,oracle(np.asarray(theta),np.asarray(zeta),p=p),atol=2e-14)
+    shifted=canonical_pwo_field(theta+2*np.pi,zeta+2*np.pi/5,p=p,**REFERENCE)['B_target']
+    np.testing.assert_allclose(shifted,value,atol=3e-14)
+    reflected=canonical_pwo_field(-theta,zeta,iota=.9,t1=-REFERENCE['t1'],t2=-REFERENCE['t2'],nfp=5,bmin=1.1,bmax=1.9,p=p)['B_target']
+    np.testing.assert_allclose(reflected,value,atol=2e-14)
+    if p==2:
+        h=1e-5
+        plus=oracle(np.asarray(theta),np.asarray(zeta),*(np.asarray(x+h*direction)))
+        minus=oracle(np.asarray(theta),np.asarray(zeta),*(np.asarray(x-h*direction)))
+        np.testing.assert_allclose(tangent,(plus-minus)/(2*h),atol=1e-8)
+
+
+def test_stencil_and_explicit_containment_rejections():
+    with pytest.raises(ValueError,match='stencil'):
+        canonical_pwo_field(.2,.3,images=1,**REFERENCE)
+    spec=dict(bmnc_b=np.array([[1.5,.1]]),xm_b=np.array([0,1]),xn_b=np.array([0,5]),iota_b=np.array([-.9]),nfp=5,bmin=1.1,bmax=1.9,t1=REFERENCE['t1'],t2=REFERENCE['t2'])
+    assert np.all(canonical_pwo_residual_from_boozer(**spec)['valid'])
+    with pytest.raises(ValueError):
+        canonical_pwo_residual_from_boozer(**spec,minimum_corner_margin=0.)
+    with pytest.raises(ValueError):
+        canonical_pwo_residual_from_boozer(**spec,minimum_lattice_margin=.9)
+
+
+def test_touching_sharp_translates_are_invalid_eager_and_traced():
+    # w2=pi and t1=0 make the j=1,k=0 translation touch at v=2.
+    params=dict(iota=.7,nfp=3,bmin=1.1,bmax=1.9,t1=0.,t2=3.)
+    with pytest.raises(ValueError):
+        canonical_pwo_field(.2,.3,**params)
+    out=jax.jit(lambda t:canonical_pwo_field(.2,.3,**{**params,'t1':t}))(jnp.array(0.))
+    assert not out['valid']
+    assert np.isnan(out['B_target'])
+
+
+def test_overlapping_lattice_translates_are_rejected():
+    params=dict(iota=.7,nfp=3,bmin=1.1,bmax=1.9,t1=-2.,t2=-2.5)
+    with pytest.raises(ValueError):
+        canonical_pwo_field(.2,.3,**params)
+    out=jax.jit(lambda t:canonical_pwo_field(.2,.3,**{**params,'t1':t}))(jnp.array(-2.))
+    assert out['lattice_margin']<0
+    assert not out['valid']
