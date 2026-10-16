@@ -84,6 +84,19 @@ class SplinePlan:
         return int(self.free.size)
 
 
+def _to_rho_basis(state: HighOrderEquilibriumState, rho_basis: BSplineBasis) -> HighOrderEquilibriumState:
+    """Geometry/lambda tables with q(rho) = q(s = rho^2), fitted at the collocation nodes of ``rho_basis``."""
+
+    nodes = rho_basis.collocation_nodes
+    fit = np.linalg.solve(np.asarray(rho_basis.basis_matrix(nodes)), np.asarray(state.radial_basis.basis_matrix(nodes**2)))
+    tables = {name: jnp.asarray(getattr(state, name)) @ fit.T for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")}
+    # The tables no longer match state.radial_basis, so skip its shape check:
+    # only _pack reads this copy.
+    new = object.__new__(type(state))
+    new.__dict__.update(state.__dict__, **tables)
+    return new
+
+
 def _pack(state: HighOrderEquilibriumState, chi_nodes: Array | None = None) -> Array:
     """Packed R_cos, Z_sin, L_sin and chi' (spline coefficients, or values ``chi_nodes @ chipf``)."""
 
@@ -98,15 +111,19 @@ def make_spline_plan(
     ntheta: int | None = None,
     nzeta: int | None = None,
     radial_order: int | None = None,
+    rho_basis: BSplineBasis | None = None,
 ) -> SplinePlan:
     """Tabulate the basis on the quadrature grid of ``state.radial_basis``.
 
     ``icurv`` is a callable ``s -> signgs mu0 I(s) / 2 pi`` for a prescribed
     current; ``None`` holds ``chi'`` (the iota profile) fixed.  The default
     angular grid integrates products of four mode sets without aliasing.
+    ``rho_basis`` (experimental) puts the geometry and lambda on
+    ``rho^|m| q(rho)``, which also admits odd powers of ``rho`` that the
+    regular ``rho^|m| q(s)`` excludes; profiles stay on ``state.radial_basis``.
     """
 
-    basis: BSplineBasis = state.radial_basis
+    basis: BSplineBasis = state.radial_basis if rho_basis is None else rho_basis
     m = np.asarray(state.m, dtype=int)
     n = np.asarray(state.n, dtype=int)
     ntheta = int(ntheta or 4 * int(m.max()) + 4)
@@ -115,15 +132,17 @@ def make_spline_plan(
     nodes, weights = np.polynomial.legendre.leggauss(order)
     breaks = basis.breakpoints
     centre, half = 0.5 * (breaks[:-1] + breaks[1:]), 0.5 * np.diff(breaks)
-    s = (centre[:, None] + half[:, None] * nodes).ravel()
-    ws = (half[:, None] * weights).ravel()
+    x = (centre[:, None] + half[:, None] * nodes).ravel()
+    wx = (half[:, None] * weights).ravel()
+    s, ws = (x, wx) if rho_basis is None else (x * x, 2.0 * x * wx)
     rho = np.sqrt(s)
-    B = np.asarray(basis.basis_matrix(s))
-    dB = np.asarray(basis.basis_matrix(s, derivative=1))
+    G = np.asarray(basis.basis_matrix(x))
+    dG = np.asarray(basis.basis_matrix(x, derivative=1)) * (2.0 * rho if rho_basis is None else np.ones_like(rho))[:, None]
+    B = np.asarray(state.radial_basis.basis_matrix(s))
     rm = rho[None, :, None] ** m[:, None, None]
-    value = rm * B[None]
-    drho = m[:, None, None] * rho[None, :, None] ** np.maximum(m - 1, 0)[:, None, None] * B[None] * (m > 0)[:, None, None]
-    drho = drho + 2.0 * rho[None, :, None] * rm * dB[None]
+    value = rm * G[None]
+    drho = m[:, None, None] * rho[None, :, None] ** np.maximum(m - 1, 0)[:, None, None] * G[None] * (m > 0)[:, None, None]
+    drho = drho + rm * dG[None]
     theta = 2 * np.pi * np.arange(ntheta) / ntheta
     zeta = 2 * np.pi * np.arange(nzeta) / nzeta
     phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * zeta[None, None, :]
@@ -144,7 +163,7 @@ def make_spline_plan(
         n=tuple(int(v) for v in n),
         nfp=int(state.nfp),
         jacobian_sign=int(state.jacobian_sign),
-        template=_pack(state, None if icurv is None else B),
+        template=_pack(state if rho_basis is None else _to_rho_basis(state, rho_basis), None if icurv is None else B),
         rho=rho,
         weight=ws,
         cell=area * int(state.nfp),
