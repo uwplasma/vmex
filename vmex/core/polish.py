@@ -1476,6 +1476,7 @@ def _stationarity(chart: _Chart, coordinates, force_scale, volume_scale, config:
     """Exact-Hessian constrained Newton on the stationarity equations."""
 
     gradient = jax.jit(jax.grad(lambda c: 0.5 * jnp.vdot(chart.force(c), chart.force(c))))
+    hessian = jax.jit(lambda c, v: jax.jvp(gradient, (c,), (v,))[1])  # traced once, not per step
     projector = _Projector(chart.constraint)
     n, q = chart.constraint.shape[1], chart.constraint.shape[0]
 
@@ -1492,11 +1493,10 @@ def _stationarity(chart: _Chart, coordinates, force_scale, volume_scale, config:
     for _ in range(config.max_newton_steps):
         if eta <= config.stationarity_tolerance:
             break
-        hessian = jax.jit(lambda v, c=coordinates: jax.jvp(gradient, (c,), (v,))[1])
         factor = _kkt_factor(normal, chart.constraint)
 
         def apply(z):
-            top = np.asarray(hessian(jnp.asarray(z[:n]))) + chart.constraint.T @ z[n:]
+            top = np.asarray(hessian(coordinates, jnp.asarray(z[:n]))) + chart.constraint.T @ z[n:]
             return np.concatenate((top, chart.constraint @ z[:n]))
 
         rhs = -np.concatenate((g, chart.constraint @ np.asarray(coordinates)))
