@@ -113,6 +113,26 @@ agree on the bundled QI deck to a measured :math:`1.7\times10^{-6}\,B_{00}`
 absolute and :math:`2\times10^{-5}` relative on the dominant modes.
 
 
+Field consistency for orbit comparisons
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A transformed strength spectrum does not by itself certify a coordinate change
+of the continuous vector field used by another tracer. Standard Boozer
+coordinates require the tangential magnetic covector to be closed, hence
+:math:`(\nabla\times\mathbf B)\cdot\nabla s=0`. A reconstructed numerical
+field can violate this condition despite a small discrete equilibrium residual.
+Refining the transform alone cannot remove that inconsistency.
+
+Before attributing orbit differences to omission of the radial covariant
+component, compare geometry, vector field and Cartesian field derivatives at
+identical physical points. Check the chart Jacobian and covariant components,
+then compare full and reduced dynamics on that same field. Deleting a radial
+component in an arbitrary native chart is coordinate dependent; it is not
+automatically the Boozer ``K=0`` approximation. A projection that restores
+Boozer compatibility changes the field: measure its derivative and current
+changes separately before transferring any confinement bound.
+
+
 Quasisymmetry
 -------------
 
