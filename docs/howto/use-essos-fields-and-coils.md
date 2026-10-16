@@ -200,3 +200,14 @@ returns the VMEC field, the exterior field and the wall in one call; see
 {doc}`trace-to-the-wall`. For anything else ESSOS does with an equilibrium
 (field lines, surfaces, `|B|` queries), use the bare `essos.fields.Vmec` from
 {func}`~vmex.core.tracing.essos_vmec_field` above.
+
+## Model and references
+
+The field outside a finite-beta plasma is the coil field plus the field of the plasma currents. By the
+virtual-casing principle the latter equals the field of a surface current
+$\mathbf{K} = \mathbf{n}\times\mathbf{B}/\mu_0$ on the plasma boundary, evaluated with a Biot–Savart
+surface integral, so no volume integral over the plasma is needed. The integral is singular as the
+evaluation point approaches the surface, which is why accuracy falls close to the boundary.
+
+- V. D. Shafranov and L. E. Zakharov, *Nucl. Fusion* 12, 599 (1972): the virtual-casing principle.
+- S. A. Lazerson, *Plasma Phys. Control. Fusion* 54, 122002 (2012): virtual casing for 3-D toroidal systems.
