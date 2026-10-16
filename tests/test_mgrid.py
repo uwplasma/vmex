@@ -948,6 +948,33 @@ def test_deck_extcur_multiplies_the_table_in_every_mgrid_mode(
     assert cubic.order == 3 and not np.any(cubic.extcur)
 
 
+def test_raw_current_table_reproduces_the_vmec2000_pairing(data: MgridData, tmp_path: Path) -> None:
+    """MAKEGRID raw mode: table times the currents, ``EXTCUR = 1``.
+
+    VMEC2000 (PARVMEC 9.0) on the full CTH-like deck gives the same wout for
+    the bundled table at ``EXTCUR = 4700, 1000`` and for that table times the
+    currents (``raw_coil_cur = 4700, 1000``, mode R) at ``EXTCUR = 1, 1``:
+    volume 0.306998 m^3, beta 1.872e-3, iota edge 0.86486.  VMEX matches both to
+    2e-5; before #591 it divided the second by the currents and diverged.
+    """
+    from vmex.core.cli import _mgrid_banner
+    from vmex.core.freeboundary import _external_field_from_input
+
+    cur = np.arange(1, data.nextcur + 1) * 4.7e3
+    raw = replace(data, mgrid_mode="R", raw_coil_cur=tuple(cur),
+                  br=data.br * cur[:, None, None, None], bp=data.bp * cur[:, None, None, None],
+                  bz=data.bz * cur[:, None, None, None])
+    write_mgrid(tmp_path / "raw.nc", raw)
+    write_mgrid(tmp_path / "ref.nc", data)
+    r, phi, z = _random_points(data, n=40, seed=5)
+    ref = _external_field_from_input(SimpleNamespace(extcur=list(cur), mgrid_file=str(tmp_path / "ref.nc")))
+    got = _external_field_from_input(SimpleNamespace(extcur=[1.0] * data.nextcur, mgrid_file=str(tmp_path / "raw.nc")))
+    for a, b in zip(got.b_cyl(r, phi, z), ref.b_cyl(r, phi, z)):
+        np.testing.assert_allclose(a, b, rtol=1e-12, atol=0.0)
+    assert "applied twice" not in _mgrid_banner(tmp_path / "raw.nc", raw, np.ones(data.nextcur))
+    assert "applied twice" in _mgrid_banner(tmp_path / "raw.nc", raw, cur)
+
+
 def test_sum_groups_reads_the_same_field_into_one_group(
         data: MgridData, tmp_path: Path) -> None:
     """Summing the groups while reading gives the per-group field at 1/nextcur the size.

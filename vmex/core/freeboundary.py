@@ -558,9 +558,11 @@ def free_boundary_resolution(
     if kp is not None and int(getattr(external_field, "nfp", inp.nfp)) != int(inp.nfp):
         raise VmecInputError(
             f"the deck's NFP = {int(inp.nfp)} differs from the mgrid table's "
-            f"nfp = {int(external_field.nfp)}; VMEC2000 rejects this pairing "
-            "before solving (mgrid_mod.f ier=9)",
-            hint="use the mgrid generated for this deck's field periods")
+            f"nfp = {int(external_field.nfp)}: the table is periodic in "
+            f"2*pi/{int(external_field.nfp)}, so the plasma would see a different "
+            "field. VMEC2000 stops here too (read_mgrid, ier_flag = 9)",
+            hint=f"set NFP = {int(external_field.nfp)} in the deck, or regenerate the "
+                 f"mgrid (MAKEGRID) with nfp = {int(inp.nfp)}")
     if kp is None or int(inp.ntor) == 0:
         return resolution
     if int(inp.nzeta) > 0:
