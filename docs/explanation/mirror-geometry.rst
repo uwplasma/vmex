@@ -193,10 +193,9 @@ retains both. Constrained-data regions -- the frozen end cuts and the
 regularized axis -- are therefore visible next to the unconstrained bulk.
 Promotion additionally requires refinement evidence:
 :func:`vmex.mirror.forces.refinement_convergence` reports per-step ratios and
-monotonicity for residuals from two or more resolutions, and
-:func:`vmex.mirror.forces.passes_promotion_gate` combines the absolute gate
-(``0.05`` in the examples and tests) on the finest rung with that
-monotone-decrease requirement.
+monotonicity for residuals from two or more resolutions; promotion combines
+the absolute gate (``0.05`` in the examples and tests) on the finest rung with
+that monotone-decrease requirement.
 
 Open fixed boundary
 -------------------

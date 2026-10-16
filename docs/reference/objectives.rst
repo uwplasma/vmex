@@ -589,11 +589,10 @@ JAX-native Hermite–Laguerre flux-tube solver, formerly SPECTRAX-GK;
   ``R/L_Ti = 6.9`` (aspect 2.643, so ``a/L_Ti = 2.611``): 0.184 ``v_th/L``
   against 8.9e-15 below the critical gradient, with reverse and forward AD
   gated against finite differences to 1e-5 relative;
-- :func:`~vmex.core.turbulence.quasilinear_flux_proxy` and
-  :func:`~vmex.core.turbulence.nonlinear_heat_flux_proxy` — the
-  mixing-length and saturation-rule heat-flux surrogates.  These weight the
+- :func:`~vmex.core.turbulence.quasilinear_flux_proxy` — the
+  mixing-length heat-flux surrogate.  It weights the
   dominant *eigenvector*; GKX's implicit eigenpair rule differentiates it in
-  both modes, so they take ``jac="implicit"`` like the growth rate.
+  both modes, so it takes ``jac="implicit"`` like the growth rate.
 
 .. code-block:: python
 
@@ -687,8 +686,7 @@ Which objectives differentiate how
      - no
      - host-NumPy Boozer tables (use
        :class:`~vmex.core.omnigenity.QIResidual` instead)
-   * - :func:`~vmex.core.turbulence.quasilinear_flux_proxy`,
-       :func:`~vmex.core.turbulence.nonlinear_heat_flux_proxy`
+   * - :func:`~vmex.core.turbulence.quasilinear_flux_proxy`
      - yes
      - yes
      - GKX implicit eigenpair rule (bordered tangent): JVP + VJP
