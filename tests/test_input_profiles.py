@@ -633,3 +633,12 @@ def test_indexed_legacy_axis_overlays_vmec_axis() -> None:
     )
     np.testing.assert_array_equal(inp.raxis_c, [2.0, 0.25])
     np.testing.assert_array_equal(inp.zaxis_s, [0.0, -0.5])
+
+
+def test_iota_ignores_bloat_as_vmec2000_piota_does():
+    """``piota(x)`` in profile_functions.f evaluates at ``x``: no BLOAT, unlike pmass/pcurr."""
+    from vmex.core.profiles import iota
+
+    s = np.linspace(0.0, 1.0, 11)
+    np.testing.assert_array_equal(np.asarray(iota("power_series", [1.0, 0.5], [], [], s, bloat=0.5)),
+                                  1.0 + 0.5 * s)
