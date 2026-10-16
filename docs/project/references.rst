@@ -112,9 +112,8 @@ Confinement objectives and optimization:
     stellarators with self-consistent bootstrap current and energetic particle
     confinement,” *Physics of Plasmas* 29, 082501 (2022), arXiv:2205.02914,
     doi:10.1063/5.0098166 —
-    the self-consistent bootstrap iteration reproduced in
-    ``benchmarks/*_bootstrap_selfconsistent.py``; the compact finite-beta
-    optimization workflows are ``examples/optimization/*_optimization_bootstrap.py``.
+    the compact finite-beta optimization workflows are
+    ``examples/optimization/*_optimization_bootstrap.py``.
 
 27. R. Jorge, A. Goodman, M. Landreman, J. Rodrigues, and F. Wechsung,
     “Single-stage stellarator optimization: combining coils with fixed

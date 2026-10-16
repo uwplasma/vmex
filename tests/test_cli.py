@@ -249,7 +249,7 @@ def test_neoclassical_calls_dkx_with_the_preset(solovev_cli, tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# VMEC++-style JSON input
+# C++ VMEC-style JSON input
 # ---------------------------------------------------------------------------
 
 

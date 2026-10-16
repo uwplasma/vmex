@@ -169,7 +169,7 @@ linkcheck_ignore = [
     r"https://downloads\.regulations\.gov/.*",  # S3 signed-URL host, 403 to bots
     # Generated evidence links into this repository 404 on a PR whose commit
     # is ahead of main; file existence is enforced locally by
-    # tests/test_capability_docs.py, which is stronger than a URL probe.
+    # tests/test_repo_consistency.py, which is stronger than a URL probe.
     r"https://github\.com/uwplasma/vmex/blob/main/.*",
 ]
 linkcheck_timeout = 30
