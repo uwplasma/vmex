@@ -1302,8 +1302,8 @@ def _dof_modes(inp: VmecInput, max_mode: int) -> list[tuple[int, int]]:
 def _n_boundary_families(inp: VmecInput) -> int:
     """Packed boundary Fourier families: 2 (``rbc``/``zbs``) for a
     stellarator-symmetric boundary, 4 (``rbc``/``zbs``/``rbs``/``zbc``) when
-    ``inp.lasym`` — the non-stellarator-symmetric families that simsopt 1.10.3
-    / VMEC++ 0.6.0 added for up-down-asymmetric tokamaks and reconstruction.
+    ``inp.lasym`` — the non-stellarator-symmetric families of up-down-asymmetric
+    tokamaks and reconstruction.
     """
     return 4 if bool(inp.lasym) else 2
 
@@ -1813,6 +1813,18 @@ def _make_finite_difference_problem(
     )
 
 
+def _restart_source(restart_from: Any, inp: VmecInput) -> Any:
+    """An :class:`Equilibrium`'s own state when its mode table matches ``inp``.
+
+    Its wout (dozens of eager op compiles) is built only to remap modes.
+    """
+    if not isinstance(restart_from, Equilibrium):
+        return restart_from
+    same = all(getattr(restart_from.inp, k) == getattr(inp, k)
+               for k in ("mpol", "ntor", "nfp", "lasym"))
+    return restart_from.state if same else restart_from.wout
+
+
 def _with_forward_controls(
     inp: VmecInput,
     ftol: float | None,
@@ -1955,14 +1967,7 @@ def make_problem(
     initial_state = None
     if restart_from is not None:
         from .restart import restart_state
-        source = restart_from
-        if isinstance(restart_from, Equilibrium):
-            # The equilibrium's own state when the mode table matches; its
-            # wout (dozens of eager op compiles) only to remap modes.
-            same = all(getattr(restart_from.inp, k) == getattr(inp, k)
-                       for k in ("mpol", "ntor", "nfp", "lasym"))
-            source = restart_from.state if same else restart_from.wout
-        initial_state = restart_state(source, inp)
+        initial_state = restart_state(_restart_source(restart_from, inp), inp)
     if derivative_method == "finite_difference":
         problem = _make_finite_difference_problem(
             inp,

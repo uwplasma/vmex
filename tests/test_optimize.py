@@ -1778,3 +1778,12 @@ def test_report_targets_prints_one_verdict_line(capsys, monkeypatch):
     out = capsys.readouterr().out.splitlines()
     assert out == ["Targets met.", "Targets NOT met: beta 0.02 below 0.025.",
                    "Targets NOT met: aspect 6.5 above 6.3; min |iota| 0.4 below 0.42."]
+
+
+def test_restart_source_prefers_the_equilibrium_state():
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    eq = opt.Equilibrium(inp=inp, state="state", runtime=None, result=None)
+    eq.__dict__["wout"] = "wout"  # cached_property slot: no wout is built
+    assert opt._restart_source(eq, inp) == "state"
+    assert opt._restart_source(eq, inp.change_resolution(mpol=inp.mpol + 1, ntor=inp.ntor)) == "wout"
+    assert opt._restart_source("path", inp) == "path"
