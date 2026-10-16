@@ -783,3 +783,20 @@ def test_phiedge_with_wrong_sign_raises():
     with pytest.raises(VmecError) as exc:
         FB.solve_free_boundary(inp, external_field=lasym_free_field(), max_iterations=400)
     assert exc.value.ier_flag == PHIEDGE_ERROR_FLAG
+
+
+def test_deck_nfp_must_match_the_mgrid_nfp():
+    """VMEC2000 ``read_mgrid`` stops with ier_flag 9 when ``nfper0 /= nfp``.
+
+    The table is periodic in its own ``2 pi / nfp``; a deck with another NFP
+    samples only part of a field period and solves a different problem.
+    """
+    from dataclasses import replace
+
+    from vmex.core.errors import VmecInputError
+
+    inp = VmecInput.from_file(DECK)
+    field = FB._external_field_from_input(inp, MGRID)
+    FB.free_boundary_resolution(inp, field)
+    with pytest.raises(VmecInputError, match="NFP"):
+        FB.free_boundary_resolution(replace(inp, nfp=2 * int(inp.nfp)), field)
