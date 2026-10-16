@@ -27,7 +27,7 @@ from vmex.core import virtual_casing as vc
 from vmex.core.pwo import MappedPwOResidual
 from vmex.core.restart import restart_state
 from vmex.core.scaling import aries_cs_scales
-from essos.coils import Coils, CreateEquallySpacedCurves
+from essos.coils import Coils, Curves, fit_dofs_from_coils
 from essos.fields import BiotSavart
 from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
 from essos.surfaces import surfacerzfourier_from_boundary
@@ -63,6 +63,20 @@ def nonlocal_self_distances(gamma):
     shorter = jnp.minimum(delta, jnp.sum(segment, axis=1)[:, None, None]-delta)
     distance = jnp.sqrt(jnp.sum((gamma[:, :, None]-gamma[:, None, :])**2, axis=-1)+1e-24)
     return jnp.where(shorter > SELF_LOCAL_ARC, distance, jnp.inf)
+
+
+
+def initial_coil_curves(inp):
+    """Offset actual local plasma sections outward, then fit existing ESSOS curves."""
+    boundary = surfacerzfourier_from_boundary(
+        inp.rbc, inp.zbs, inp.nfp, ntheta=N_SEGMENTS, nphi=8*inp.nfp*N_COILS)
+    orientation = float(np.sign(float(jnp.sum(boundary.gamma * boundary.normal))))
+    if not np.isfinite(orientation) or orientation == 0:
+        raise ValueError("Seed surface must enclose a finite nonzero signed volume")
+    # Factory coil planes phi=(k+1/2)*pi/(nfp*N_COILS); apply symmetries once.
+    sections = (boundary.gamma + 2*PLASMA_CLEARANCE*orientation*boundary.unitnormal)[2:4*N_COILS:4]
+    dofs, _ = fit_dofs_from_coils(sections, COIL_ORDER, N_SEGMENTS, assume_uniform=True)
+    return Curves(dofs, n_segments=N_SEGMENTS, nfp=inp.nfp, stellsym=True), orientation
 
 
 def run():
@@ -106,9 +120,7 @@ def run():
     problem = opt.VmecProblem.from_loss(inp, plasma_loss, max_mode=MAX_MODE,
                                        vary_major_radius=False, restart_from=seed,
                                        max_fsq_ratio=1.0, adjoint_tol=1e-7)
-    curves = CreateEquallySpacedCurves(N_COILS, COIL_ORDER, radius,
-                                      2.5 * float(seed.wout.Aminor_p),
-                                      n_segments=N_SEGMENTS, nfp=inp.nfp, stellsym=True)
+    curves, normal_orientation = initial_coil_curves(inp)
     current = field_ref * radius / (2e-7 * 2 * inp.nfp * N_COILS)
     coils0 = Coils(curves, np.full(N_COILS, current))
     data0 = vc.surface_field_data_from_state(inp, seed.state, runtime=seed.runtime,
@@ -275,6 +287,7 @@ def run():
                    seconds=time.perf_counter() - started, metrics=metrics, checks=checks, trials=history,
                    scale_target="volavgB", local_mean_ref_T=local_mean_ref,
                    local_mirror_ref=local_mirror_ref, seed_fine_mirror=float(jnp.min(seed_score["mirror"])),
+                   initial_coil_offset_m=2*PLASMA_CLEARANCE, initial_normal_orientation=normal_orientation,
                    self_local_arc_exclusion_m=SELF_LOCAL_ARC, coil_quadrature_shift=0.5,
                    coil_driven=dict(completed=False, reason="smoke budget" if ci_smoke else "not completed"),
                    geometric_proxies_only=True, research_validation_complete=False)
