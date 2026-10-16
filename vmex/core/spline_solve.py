@@ -69,7 +69,7 @@ class SplinePlan:
     cell: float  # angular cell area times nfp
     value: np.ndarray  # (mnmax, Nq, nbasis): rho^m B_k(s)
     drho: np.ndarray  # (mnmax, Nq, nbasis): d/drho of rho^m B_k(s)
-    basis: np.ndarray  # (Nq, nbasis): B_k(s) for the profiles
+    basis: np.ndarray  # (Nq, nchi): chi' synthesis; B_k(s), or the identity for node values
     cos: np.ndarray  # (mnmax, Nang)
     sin: np.ndarray  # (mnmax, Nang)
     phip: np.ndarray  # (Nq,)
@@ -84,8 +84,11 @@ class SplinePlan:
         return int(self.free.size)
 
 
-def _pack(state: HighOrderEquilibriumState) -> Array:
-    return jnp.concatenate([jnp.ravel(state.R_cos), jnp.ravel(state.Z_sin), jnp.ravel(state.L_sin), state.chipf])
+def _pack(state: HighOrderEquilibriumState, chi_nodes: Array | None = None) -> Array:
+    """Packed R_cos, Z_sin, L_sin and chi' (spline coefficients, or values ``chi_nodes @ chipf``)."""
+
+    chi = state.chipf if chi_nodes is None else jnp.asarray(chi_nodes) @ state.chipf
+    return jnp.concatenate([jnp.ravel(state.R_cos), jnp.ravel(state.Z_sin), jnp.ravel(state.L_sin), chi])
 
 
 def make_spline_plan(
@@ -130,19 +133,24 @@ def make_spline_plan(
     free = np.ones((3, mn, nb), dtype=bool)
     free[:2, :, -1] = False  # fixed boundary
     free[1:, (m == 0) & (n == 0)] = False  # sin(0) and the lambda gauge
-    free = np.concatenate([free.ravel(), np.full(nb, icurv is not None)])
+    # With a prescribed current, chi' takes one value per radial node: stationarity
+    # in each node value is the current constraint at that node (VMEC and DESC
+    # enforce it pointwise).  A spline chi' only enforces its projection, which
+    # misses the near-axis current by 15-90% inside the first span.
+    chi_basis = np.eye(s.size) if icurv is not None else B
+    free = np.concatenate([free.ravel(), np.full(chi_basis.shape[1], icurv is not None)])
     return SplinePlan(
         m=tuple(int(v) for v in m),
         n=tuple(int(v) for v in n),
         nfp=int(state.nfp),
         jacobian_sign=int(state.jacobian_sign),
-        template=_pack(state),
+        template=_pack(state, None if icurv is None else B),
         rho=rho,
         weight=ws,
         cell=area * int(state.nfp),
         value=value,
         drho=drho,
-        basis=B,
+        basis=chi_basis,
         cos=np.cos(phase).reshape(mn, -1),
         sin=np.sin(phase).reshape(mn, -1),
         phip=B @ np.asarray(state.phipf),
@@ -233,12 +241,12 @@ def spline_hessian(plan: SplinePlan, full: Array) -> Array:
     mn, nq, nb = plan.value.shape
     ones = (3, plan.basis[None], np.ones((1, plan.cos.shape[1])))  # chi': one mode, angle independent
     comps = _components(plan) + (ones,)
-    size = (3 * mn + 1) * nb
+    size = 3 * mn * nb + plan.basis.shape[1]
     H = jnp.zeros((size, size))
     for a, (fa, ra, aa) in enumerate(comps):
         for b, (fb, rb, ab) in enumerate(comps[a:], start=a):
             M = jnp.einsum("it,qt,jt->qij", aa, K[..., a, b], ab)
-            block = jnp.einsum("iqk,qij,jql->ikjl", ra, M, rb).reshape(ra.shape[0] * nb, rb.shape[0] * nb)
+            block = jnp.einsum("iqk,qij,jql->ikjl", ra, M, rb).reshape(ra.shape[0] * ra.shape[2], rb.shape[0] * rb.shape[2])
             sa, sb = fa * mn * nb, fb * mn * nb
             H = H.at[sa : sa + block.shape[0], sb : sb + block.shape[1]].add(block)
             if b != a:
@@ -251,7 +259,11 @@ def unpack_state(state: HighOrderEquilibriumState, plan: SplinePlan, full: Array
 
     mn, nb = plan.value.shape[0], plan.value.shape[2]
     blocks = full[: 3 * mn * nb].reshape(3, mn, nb)
-    return replace(state, R_cos=blocks[0], Z_sin=blocks[1], L_sin=blocks[2], chipf=full[3 * mn * nb :])
+    chi = full[3 * mn * nb :]
+    if chi.size != nb:  # node values: least-squares spline for the native state
+        nodes = np.asarray(state.radial_basis.basis_matrix(np.asarray(plan.rho) ** 2))
+        chi = jnp.linalg.lstsq(jnp.asarray(nodes), chi)[0]
+    return replace(state, R_cos=blocks[0], Z_sin=blocks[1], L_sin=blocks[2], chipf=chi)
 
 
 def initial_spline_state(inp: Any, basis: BSplineBasis, *, reguess_axis: bool = True) -> HighOrderEquilibriumState:
@@ -264,7 +276,7 @@ def initial_spline_state(inp: Any, basis: BSplineBasis, *, reguess_axis: bool = 
     from .solver import _initial_state, prepare_runtime, resolution_from_input, reguess_initial_axis
     from .strong_force import lift_high_order_state
 
-    ns = max(2 * basis.size + 1, 17)
+    ns = max(2 * basis.size + 1, 17, int(np.ceil(2.0 / np.diff(basis.breakpoints).min())) + 1)  # two samples per span
     runtime = prepare_runtime(inp, resolution_from_input(inp, ns=ns))
     state = _initial_state(runtime.setup)
     if reguess_axis:
@@ -477,7 +489,7 @@ def solve_spline_ladder(inp: Any, spans: tuple[int, ...] = (2, 4, 8), *, degree:
             new = np.setdiff1d(np.linspace(0.0, 1.0, count + 1), previous.radial_basis.breakpoints)
             state = insert_high_order_state_knots(previous, new)
         plan = make_spline_plan(state, icurv=icurv, **plan_options)
-        full, info = solve_spline(plan, _pack(state), verbose=verbose)
+        full, info = solve_spline(plan, verbose=verbose)
         levels.append((count, plan.size, info["iterations"], info["seconds"]))
         if verbose:
             print(f" spline ladder: {count} spans, {plan.size} unknowns, {info['iterations']} Newton steps, {info['seconds']:.2f} s")
