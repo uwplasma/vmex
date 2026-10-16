@@ -1454,11 +1454,9 @@ def _scale_file(args, input_path: Path, outdir: Path | None, *, emit) -> int:
 
 
 def _solve_mirror_file(input_path: Path, outdir: Path | None, *, plot: bool, emit, quiet: bool) -> int:
-    import jax
 
     from vmex.mirror.free_boundary import solve_mirror_file
 
-    jax.config.update("jax_enable_x64", True)
     directory = outdir if outdir is not None else input_path.parent
     solution = solve_mirror_file(input_path, outdir=directory)
     mout_path = directory / f"mout_{case_from_input(input_path)}.nc"
@@ -1637,6 +1635,9 @@ def main(argv: list[str] | None = None) -> int:
     ``JAX_COMPILATION_CACHE_DIR``) — makes repeat processes of the same
     configuration skip compilation entirely.
     """
+    from .._compat import configure
+
+    configure()  # the command's JAX settings: float64, cache, sync CPU dispatch
     parser = build_parser()
     args = parser.parse_args(argv)
     if (args.collisional or args.trace_birth != "surface"
