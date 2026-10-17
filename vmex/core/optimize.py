@@ -181,6 +181,7 @@ __all__ = [
     "resample_current_profile",
     "least_squares",
     "minimize",
+    "HeliumAshObjective",  # noqa: F822 - provided lazily by __getattr__ below
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
@@ -194,6 +195,9 @@ Array = Any
 def __getattr__(name: str):  # PEP 562 lazy re-export
     # bootstrap.py lazily imports this module inside self_consistent_bootstrap,
     # so the f_boot objective is re-exported lazily to keep the two decoupled.
+    if name == "HeliumAshObjective":
+        from .ash import HeliumAshObjective
+        return HeliumAshObjective
     if name == "RedlBootstrapMismatch":
         from .bootstrap import RedlBootstrapMismatch
         return RedlBootstrapMismatch

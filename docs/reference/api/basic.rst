@@ -74,6 +74,17 @@ Optional neoclassical diagnostics
 .. automodule:: vmex.core.neoclassical
    :members:
 
+Optional helium-ash objective
+------------------------------
+
+The source-weighted occupation objective delegates the radial solve to
+``essos.ash`` and requires explicit transport, source and boundary inputs.
+Its derivative scope follows the supplied coefficient response; physical
+kinetic, equilibrium and independent alpha acceptance remain separate gates.
+
+.. automodule:: vmex.core.ash
+   :members:
+
 Optional alpha-particle tracing
 -------------------------------
 
