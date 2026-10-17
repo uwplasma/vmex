@@ -245,7 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--trace",
         action="store_true",
         help=(
-            "Trace fusion alphas (guiding centre in Boozer coordinates, ESSOS), "
+            "Trace charged particles (fusion alphas by default; Boozer guiding centre, ESSOS), "
             "scaled in memory to ARIES-CS size: print the loss fraction, write "
             "*_trace.json/.npz, *_trace.png and *_trace_3d.png. Works on a "
             "wout_*.nc input or after solving an input file. The defaults "
@@ -259,8 +259,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--trace-particles", type=int, default=500,
-        help="Number of alpha particles (default: 500; cost is linear, sigma ~ 1/sqrt(N)).",
+        help="Number of particles (default: 500; cost is linear, sigma ~ 1/sqrt(N)).",
     )
+    p.add_argument("--trace-energy-eV", type=float, default=None, help="Kinetic energy [eV]; default fusion-alpha energy.")
+    p.add_argument("--trace-mass-kg", type=float, default=None, help="Particle mass [kg]; default alpha mass.")
+    p.add_argument("--trace-charge-coulomb", type=float, default=None, help="Signed nonzero charge [C]; default alpha charge.")
     p.add_argument(
         "--trace-no-scale", action="store_true",
         help="Trace the equilibrium as given instead of at ARIES-CS size.",
@@ -310,6 +313,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Drop Boozer |B| modes below this fraction of the largest amplitude (default: 2e-4; "
              "1e-3 misses losses in precise quasisymmetry).",
     )
+    p.add_argument("--trace-angle-grid", type=int, default=None,
+                   help="ESSOS angular table points per wavelength (default: 6); 0 uses the direct spectrum.")
     p.add_argument(
         "--collisional", action="store_true",
         help=(
@@ -1188,7 +1193,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
         birth = ("volume" if args.trace_birth == "volume"
                  else f"s={float(args.trace_s):g}")
         emit(
-            f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
+            f" Tracing {int(args.trace_particles)} charged particles ({birth}, Boozer "
             f"guiding centre, {integrator}{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
             f"{'unscaled' if scale is None else _scale_label(scale)}, "
@@ -1217,8 +1222,10 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             T0_keV=float(args.trace_te0),
             mboz=int(args.mbooz),
             mode_tolerance=mode_cut,
+            angle_grid=6 if args.trace_angle_grid is None else (args.trace_angle_grid or None),
             nboz=int(args.nbooz),
             progress=None if quiet else _TraceProgress(),
+            energy_eV=args.trace_energy_eV, mass=args.trace_mass_kg, charge=args.trace_charge_coulomb,
             check_resolution=False,
         )
     except ImportError as exc:
@@ -1665,8 +1672,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if (args.collisional or args.trace_birth != "surface"
-            or args.trace_mode_cut is not None or args.trace_tolerance is not None) and not args.trace:
-        parser.error("--collisional, --trace-birth, --trace-mode-cut and --trace-tolerance require --trace")
+            or args.trace_mode_cut is not None or args.trace_tolerance is not None or args.trace_angle_grid is not None
+            or any(v is not None for v in (args.trace_energy_eV, args.trace_mass_kg, args.trace_charge_coulomb))) and not args.trace:
+        parser.error("collision, birth, mode-cut, tolerance and particle-parameter options require --trace")
     if bool(args.trace):
         _split_host_devices()
     # Flushing sink: with stdout redirected to a file (cluster batch logs),

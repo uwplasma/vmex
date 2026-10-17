@@ -221,7 +221,8 @@ def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0
     return {"field": field, "wall": surface, "exterior_field": exterior}
 
 
-def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE):
+def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE,
+                 angle_grid: int | None = 6):
     """Run ``booz_xform_jax`` on every surface of ``wout`` and return
     ``(essos.boozer.BoozerField, Booz_xform)``."""
     from booz_xform_jax import Booz_xform
@@ -237,7 +238,7 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     bx.run()
     # Boozer guiding-centre equations use psi = -Phi_tor/(2 pi) for VMEC's phi.
     psi0 = -float(np.asarray(wout.phi)[-1]) / (2 * np.pi)
-    return BoozerField.from_booz_xform(bx, psi0, mode_tolerance), bx
+    return BoozerField.from_booz_xform(bx, psi0, mode_tolerance, angle_grid=angle_grid), bx
 
 
 def truncation_message(truncation: float, silence: str) -> str:
@@ -490,6 +491,21 @@ def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
         return np.concatenate(out)[:n]
 
 
+def _particle_parameters(energy_eV, mass, charge):
+    """Validate optional energy [eV], mass [kg] and signed charge [C]; None keeps the alpha value."""
+    out = []
+    for name, value in (("energy_eV", energy_eV), ("mass", mass), ("charge", charge)):
+        if value is not None:
+            try:
+                value = float(value) if np.ndim(value) == 0 else np.nan
+            except (TypeError, ValueError, OverflowError):
+                value = np.nan
+            if not np.isfinite(value) or (value == 0 if name == "charge" else value <= 0):
+                raise ValueError(f"{name} must be a finite {'nonzero' if name == 'charge' else 'positive'} scalar")
+        out.append(value)
+    return tuple(out)
+
+
 def trace_alphas(
     source: Any,
     *,
@@ -510,11 +526,15 @@ def trace_alphas(
     mboz: int = 32,
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
+    angle_grid: int | None = 6,
+    energy_eV: float | None = None,
+    mass: float | None = None,
+    charge: float | None = None,
     progress: Any = None,
     devices: Any = None,
     check_resolution: bool = True,
 ) -> AlphaTracingResult:
-    """Trace fusion alphas through a wout file or in-memory equilibrium.
+    """Trace charged guiding centers; defaults remain fusion-born alphas.
 
     Parameters
     ----------
@@ -536,6 +556,9 @@ def trace_alphas(
         birth profile).
     mboz, nboz, mode_tolerance:
         Boozer resolution and the relative amplitude of dropped modes.
+    angle_grid:
+        ESSOS angular table points per shortest wavelength (default 6);
+        ``None`` evaluates the retained Fourier spectrum directly.
     method, tolerance:
         ``"adaptive8"`` (default) and ``"adaptive"`` control each particle's
         Dopri8 or Dopri5 step to the embedded-error ``tolerance``, so
@@ -543,6 +566,13 @@ def trace_alphas(
         ``"dopri8"`` take fixed steps of ``timestep``.
     compact:
         Enable survivor compaction when supported; ``False`` disables it.
+    energy_eV, mass, charge:
+        Optional kinetic energy [eV], mass [kg] and signed charge [C].
+        Each omitted value retains its fusion-alpha default. This does not
+        change the birth measure or the collisional background; with
+        ``collisions=True`` any particle below 1.5 times the local temperature
+        is counted as thermalised, so low-energy ions (a few keV against
+        ``T0_keV``) thermalise almost at once.
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
@@ -556,16 +586,27 @@ def trace_alphas(
         Warn when :func:`spectral_truncation` exceeds
         :data:`RESOLUTION_TOLERANCE` (see :func:`truncation_message`).
     """
+    energy_eV, mass, charge = _particle_parameters(energy_eV, mass, charge)
     import jax
 
     require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
 
+    mass = constants.ALPHA_PARTICLE_MASS if mass is None else mass
+    charge = constants.ALPHA_PARTICLE_CHARGE if charge is None else charge
+    energy = constants.FUSION_ALPHA_PARTICLE_ENERGY if energy_eV is None else energy_eV * constants.ELEMENTARY_CHARGE
+    speed = float(np.sqrt(2 * energy / mass))
+    if not np.isfinite(speed) or speed <= 0:
+        raise ValueError("energy and mass must produce a finite positive speed")
+
     if method not in METHODS:
         raise ValueError(f"method must be one of {', '.join(METHODS)}")
     if not (np.isfinite(tolerance) and tolerance > 0):
         raise ValueError("tolerance must be positive and finite")
+    if angle_grid is not None and (isinstance(angle_grid, bool) or not isinstance(angle_grid, (int, np.integer))
+                                   or angle_grid < 1):
+        raise ValueError("angle_grid must be a positive integer or None")
     compact = compact is None or bool(compact)
     if devices is None:
         devices = jax.devices()
@@ -593,13 +634,12 @@ def trace_alphas(
         jax.monitoring.register_event_duration_secs_listener(_compile_listener)
         _COMPILE_S[1] = 1.0
     compile_start = _COMPILE_S[0]
-    field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance)
+    field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance,
+                             angle_grid=angle_grid)
     births = sample_births(field, nparticles, s=s, birth=birth, seed=seed, ne0=ne0, T0_keV=T0_keV)
-    mass, charge = constants.ALPHA_PARTICLE_MASS, constants.ALPHA_PARTICLE_CHARGE
-    energy = constants.FUSION_ALPHA_PARTICLE_ENERGY
     start = time.perf_counter()
     trace = trace_boozer(
-        field, *births.T, speed=float(np.sqrt(2 * energy / mass)), mass=mass,
+        field, *births.T, speed=speed, mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
         species=background_species(ne0, T0_keV) if collisions else None,
@@ -639,10 +679,13 @@ def trace_alphas(
                     if method.startswith("adaptive") else f"{method.upper()}") + " (Boozer guiding centre)",
         compact=bool(compact), boozer_modes=int(field.xm.size), spectral_truncation=truncation,
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
+        angle_grid=None if angle_grid is None else int(angle_grid),
+        angle_table=field.table is not None,
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
         compile_time_s=_COMPILE_S[0] - compile_start,
         devices=len(devices), platform=devices[0].platform,
         versions={name: version(name) for name in ("vmex", "essos", "jax", "booz_xform_jax")},
+        particle_mass_kg=float(mass), particle_charge_C=float(charge),
     )
     return result

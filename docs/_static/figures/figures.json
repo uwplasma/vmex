@@ -724,6 +724,25 @@
         "README.md"
       ],
       "note": "Plots the committed record, which is taken from the exact-equilibrium benchmark (rogeriojorge/vmex-benchmark-analytical, commit in the record): exact boundaries, and the J and flux-label errors of VMEX seeded from the exact geometry (ftol 1e-11). Rebuilding the record itself needs that repository. 64-color lossless WebP; rerunning the command reproduces these bytes."
+    },
+    {
+      "path": "docs/_static/figures/pwo_development.webp",
+      "generator": "docs/_static/figures/sources/make_pwo_figure.py",
+      "command": "python docs/_static/figures/sources/make_pwo_figure.py",
+      "inputs": [
+        "benchmarks/pwo_development.json"
+      ],
+      "record": "benchmarks/pwo_development.json",
+      "generated": "2026-10-15",
+      "hardware": "CPU; measured solver runs on shared 18-core host",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "note": "Unfilled physical-B contours reconstructed from measured stored spectra at s=0.5 in a centered periodic cell. These QI-like development fits do not establish a distinct pwO region or action/confinement/engineering qualification.",
+      "sha256": "efe0b953a37a9674a970a88af740a3434d799c256bf6b1c63ab65fe497b59bdf",
+      "bytes": 201050,
+      "used_in": [
+        "README.md"
+      ]
     }
   ]
 }

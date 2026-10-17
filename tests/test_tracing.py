@@ -63,6 +63,83 @@ def test_counts_are_consistent(traced):
     assert np.all(np.diff(traced.loss_fractions) >= 0.0)  # cumulative
 
 
+@pytest.mark.parametrize("name,bad", [
+    ("energy_eV", 0), ("energy_eV", -1), ("energy_eV", np.nan),
+    ("energy_eV", np.inf), ("energy_eV", [20000]),
+    ("mass", 0), ("mass", -1), ("mass", -np.inf), ("mass", 1j),
+    ("charge", 0), ("charge", np.nan), ("charge", [1e-19]),
+])
+def test_particle_parameters_reject_nonphysical_values_before_io(name, bad):
+    with pytest.raises(ValueError, match=name):
+        trace_alphas("missing_wout.nc", **{name: bad})
+
+
+def test_particle_parameters_reject_nonfinite_speed_before_io():
+    with pytest.raises(ValueError, match="speed"):
+        trace_alphas("missing_wout.nc", energy_eV=1e308, mass=1e-308)
+
+
+@pytest.mark.parametrize("mass_factor,charge_sign", [(1, 1), (2, 1), (1, -1)])
+def test_particle_parameters_reach_released_integrator(solovev_wout, monkeypatch,
+                                                       mass_factor, charge_sign):
+    """Physical eV/kg/C conversion and H/D speed ratio, through actual RK4."""
+    import essos.boozer
+    from essos import constants as c
+    original = essos.boozer.trace_boozer
+    captured = []
+    def integrate(*args, **kwargs):
+        captured.append(kwargs)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(essos.boozer, "trace_boozer", integrate)
+    mass, charge = mass_factor * c.PROTON_MASS, charge_sign * c.ELEMENTARY_CHARGE
+    result = trace_alphas(solovev_wout, energy_eV=20000, mass=mass, charge=charge,
+                          scale=None, nparticles=2, tmax=1e-6, timestep=1e-8,
+                          times_to_trace=8, mboz=8, nboz=8)
+    call, = captured
+    assert call["mass"] == mass and call["charge"] == charge
+    assert 0.5 * mass * call["speed"]**2 == pytest.approx(20000 * c.ELEMENTARY_CHARGE)
+    assert call["speed"] == pytest.approx(np.sqrt(2 * 20000 * c.ELEMENTARY_CHARGE / c.PROTON_MASS) / np.sqrt(mass_factor))
+    assert result.particle_energy == pytest.approx(20000 * c.ELEMENTARY_CHARGE)
+    assert result.metadata["particle_mass_kg"] == mass
+    assert result.metadata["particle_charge_C"] == charge
+    assert np.isfinite(result.trajectories).all() and result.energy_error.max() < 1e-5
+
+
+def test_particle_parameters_preserve_alpha_defaults(solovev_wout, traced):
+    from essos import constants as c
+    explicit = trace_alphas(solovev_wout, **TRACE_KWARGS,
+                            energy_eV=c.FUSION_ALPHA_PARTICLE_ENERGY / c.ELEMENTARY_CHARGE,
+                            mass=c.ALPHA_PARTICLE_MASS, charge=c.ALPHA_PARTICLE_CHARGE)
+    np.testing.assert_array_equal(explicit.initial_conditions, traced.initial_conditions)
+    np.testing.assert_allclose(explicit.trajectories, traced.trajectories, rtol=1e-14, atol=1e-14)
+    assert traced.metadata["particle_mass_kg"] == c.ALPHA_PARTICLE_MASS
+    assert traced.metadata["particle_charge_C"] == c.ALPHA_PARTICLE_CHARGE
+
+
+def test_cli_particle_parameters_require_trace_and_forward_units(solovev_wout, tmp_path):
+    import json
+    from essos import constants as c
+    parser = cli.build_parser()
+    defaults = parser.parse_args([str(solovev_wout)])
+    assert defaults.trace_energy_eV is defaults.trace_mass_kg is defaults.trace_charge_coulomb is None
+    for flag, value in [("--trace-energy-eV", "20000"), ("--trace-mass-kg", str(c.PROTON_MASS)),
+                        ("--trace-charge-coulomb", str(c.ELEMENTARY_CHARGE))]:
+        with pytest.raises(SystemExit) as exc:
+            cli.main([str(solovev_wout), flag, value, "--quiet"])
+        assert exc.value.code == 2
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        rc = cli.main([str(solovev_wout), "--trace", "--trace-no-scale", "--quiet",
+                       "--trace-energy-eV", "20000", "--trace-mass-kg", str(2*c.PROTON_MASS),
+                       "--trace-charge-coulomb", str(c.ELEMENTARY_CHARGE), "--trace-particles", "2",
+                       "--trace-tmax", "1e-6", "--trace-timestep", "1e-8", "--trace-times", "8",
+                       "--mbooz", "8", "--nbooz", "8", "--outdir", str(tmp_path)])
+    assert rc == 0
+    summary = json.loads((tmp_path / "solovev_trace.json").read_text())
+    assert summary["particle_energy_J"] == pytest.approx(20000 * c.ELEMENTARY_CHARGE)
+    assert summary["particle_mass_kg"] == 2*c.PROTON_MASS
+    assert summary["particle_charge_C"] == c.ELEMENTARY_CHARGE
+
+
 def test_shapes_births_and_energy(traced):
     assert traced.initial_conditions.shape == (8, 4)
     np.testing.assert_allclose(traced.initial_conditions[:, 0], 0.25)
@@ -911,3 +988,73 @@ def test_cli_trace_prints_the_truncation_warning_once(solovev_wout, tmp_path, mo
     assert rc == 0
     assert buffer.getvalue().count("Equilibrium spectrum truncated") == (0 if silenced else 1)
     assert silenced or "pass --trace-no-resolution-check to silence." in buffer.getvalue()
+
+
+@pytest.mark.parametrize("angle_grid", [None, 6, 9])
+def test_angular_table_control_is_forwarded_and_saved(monkeypatch, angle_grid, tmp_path):
+    """Acquisition metadata records the requested representation, including direct sums."""
+    from types import SimpleNamespace
+    from vmex.core import tracing
+    import essos.boozer
+    import booz_xform_jax
+
+    calls = {}
+    bx = SimpleNamespace(asym=False, xm_b=np.array([0]), xn_b=np.array([0]),
+                         nfp=1, s_b=np.array([0.25]), iota=np.array([0.6]),
+                         rmnc_b=np.ones((1, 1)), zmns_b=np.ones((1, 1)), numns_b=np.ones((1, 1)))
+    class Transform:
+        def __new__(cls, **kwargs):
+            return bx
+    bx.read_wout_data = lambda *args, **kwargs: None
+    bx.run = lambda: None
+    monkeypatch.setattr(booz_xform_jax, "Booz_xform", Transform)
+    def construct(booz, psi0, mode_tolerance, *, angle_grid):
+        calls["angle_grid"] = angle_grid
+        return SimpleNamespace(xm=np.array([0]), table=None if angle_grid is None else np.zeros(1))
+    monkeypatch.setattr(essos.boozer.BoozerField, "from_booz_xform", construct)
+    def trace(field, *args, **kwargs):
+        return SimpleNamespace(states=np.zeros((2, 2, 5)), energy_error=np.zeros(2),
+                               loss_times=np.full(2, -1), thermalized_times=np.full(2, -1),
+                               failed=np.zeros(2, dtype=bool))
+    monkeypatch.setattr(essos.boozer, "trace_boozer", trace)
+    monkeypatch.setattr(tracing, "sample_births", lambda *args, **kwargs: np.zeros((2, 4)))
+    monkeypatch.setattr(tracing, "spectral_truncation", lambda wout: 0.0)
+    wout = SimpleNamespace(rmnc=np.ones(1), lasym=False, phi=np.array([0, 1]), Aminor_p=1.7, volavgB=5.7)
+    result = tracing.trace_alphas(wout, scale=None, nparticles=2, angle_grid=angle_grid, times_to_trace=2)
+    assert calls["angle_grid"] == angle_grid
+    assert result.metadata["angle_grid"] == angle_grid
+    assert result.metadata["angle_table"] is (angle_grid is not None)
+    summary, _ = result.save(tmp_path / "representation")
+    import json
+    assert json.loads(summary.read_text())["angle_grid"] == angle_grid
+
+
+@pytest.mark.parametrize("angle_grid", [0, -1, True, 1.5, np.nan, (32, 32)])
+def test_invalid_angular_table_control_rejected_before_io(angle_grid):
+    with pytest.raises(ValueError, match="angle_grid"):
+        trace_alphas("missing_wout.nc", angle_grid=angle_grid)
+
+
+def test_cli_direct_spectrum_control_requires_trace():
+    parser = cli.build_parser()
+    assert parser.parse_args([str(SOLOVEV_DECK)]).trace_angle_grid is None
+    assert parser.parse_args([str(SOLOVEV_DECK), "--trace-angle-grid", "0"]).trace_angle_grid == 0
+    with pytest.raises(SystemExit):
+        cli.main([str(SOLOVEV_DECK), "--trace-angle-grid", "0", "--quiet"])
+
+
+@pytest.mark.parametrize("flag,expected", [(None, 6), ("0", None), ("9", 9)])
+def test_cli_angular_table_control_forwarded(monkeypatch, tmp_path, flag, expected):
+    from types import SimpleNamespace
+    from vmex.core import plotting, tracing
+
+    seen = {}
+    def trace(*args, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(metadata={"spectral_truncation": 0}, save=lambda path: (path, path))
+    monkeypatch.setattr(tracing, "trace_alphas", trace)
+    monkeypatch.setattr(plotting, "plot_tracing", lambda *args, **kwargs: {})
+    args = cli.build_parser().parse_args(["wout_fake.nc", "--trace"] +
+                                         ([] if flag is None else ["--trace-angle-grid", flag]))
+    cli._run_trace(Path("wout_fake.nc"), args, tmp_path, emit=lambda message: None, quiet=True)
+    assert seen["angle_grid"] == expected
