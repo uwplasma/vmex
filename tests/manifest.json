@@ -2,6 +2,7 @@
   "schema": "vmex.test-manifest/1",
   "fields": ["path", "owner", "primary", "duration", "device", "asset", "oracle", "lanes"],
   "records": [
+    ["tests/test_cyclometry.py", "diagnostics", "ad", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c2", "full-core-a-c"]],
     ["tests/mirror/test_analytic.py", "mirror", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-mirror-spline", "full-mirror-spline"]],
     ["tests/mirror/test_boundary_conditions.py", "mirror", "oracle", "slow", "cpu-gpu", "none", "analytic", ["pr-mirror-equilibrium", "full-mirror-equilibrium"]],
     ["tests/mirror/test_exterior.py", "mirror", "integration", "medium", "cpu-gpu", "none", "analytic", ["pr-mirror-field", "full-mirror-field"]],
@@ -55,6 +56,7 @@
     ["tests/test_high_mode_free_boundary_parity.py", "free-boundary", "campaign", "campaign", "cpu-gpu", "generated", "vmec2000", ["pr-parity-a1"]],
     ["tests/test_implicit_device.py", "ad", "ad", "medium", "cpu-gpu", "none", "fd", ["pr-parity-c3", "gpu-smoke", "full-core-i"]],
     ["tests/test_implicit_grad.py", "ad", "ad", "campaign", "cpu-gpu", "golden", "fd", ["pr-gradient", "full-core-i-grad"]],
+    ["tests/test_implicit_frozen_family.py", "ad", "ad", "slow", "cpu", "none", "fd", ["pr-gradient-fd", "full-core-i-grad"]],
     ["tests/test_implicit_grad_fd.py", "ad", "ad", "campaign", "cpu-gpu", "none", "fd", ["pr-gradient-fd", "full-core-i-grad"]],
     ["tests/test_implicit_multi_rhs.py", "ad", "ad", "medium", "cpu-gpu", "none", "analytic", ["pr-parity-c3", "full-core-i"]],
     ["tests/test_api_reference_completeness.py", "infrastructure", "unit", "fast", "cpu", "none", "none", ["pr-parity-c2", "pr-fast", "full-core-a-c"]],

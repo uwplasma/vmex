@@ -46,6 +46,7 @@ GUARD_TESTS = (
     "tests/test_api_reference_completeness.py",
     "tests/test_packaging_metadata.py",
     "tests/test_coverage_margin.py",
+    "tests/test_figure_provenance.py",
 )
 
 

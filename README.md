@@ -472,6 +472,74 @@ surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX fr
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
+## Cyclometry: passing-particle diagnostics
+
+The cyclometry kernels evaluate closed-transit action, a finite-moment upper envelope,
+and their derivatives at a moving rational surface. These are ingredients for a cheap
+passing-particle objective; optimization and a finite-time confinement bound remain under
+validation ([model and numerical limits](docs/explanation/confinement.rst)).
+
+![Three-dimensional rational surface colored by field strength](docs/_static/figures/readme_cyclometry_surface.webp)
+
+The li383 ι = 3/5 reference surface, colored by retained |B|. The χ = 0 and π
+coordinate curves close after five toroidal turns in the Boozer representation.
+They show the geometry sampled by the transit action; they are not particle orbits.
+Finite angular reconstruction errors are measured separately from this geometry.
+
+![Passing helium sections near the three-fifths rational surface](docs/_static/figures/readme_cyclometry_low_energy.webp)
+
+**Low-energy reference.** In the li383 equilibrium, 48 selected 100 eV helium markers
+show passing drift islands near rotational transform ι = 3/5. Panels separate the signs
+of parallel velocity; points are ESSOS sections after each five toroidal turns, colored
+by initial resonant phase. Gray contours show the leading transit-action Hamiltonian
+H₀; the dotted line marks its phase-averaged radial minimum. Here s is normalized
+toroidal flux and χ = 5θ − 3ζ in Boozer angles. The calculation uses 31 radial surfaces,
+Boozer bounds 8/8, zero magnetic moment, and 86.4 ms of collisionless K=0 guiding-center
+tracing (the radial covariant magnetic-field component is omitted).
+Independent periodic-orbit shooting confirms elliptic and hyperbolic points in both
+directions within this numerical model. Integrator and Boozer refinement preserve its
+island topology; equilibrium resolution remains a separate limitation, measured below.
+
+![Scaled alpha sections compared with the leading transit-action Hamiltonian](docs/_static/figures/readme_cyclometry_alpha.webp)
+
+**Alpha diagnostic.** Ten selected 3.5 MeV markers are traced for 4.43 ms after scaling
+length by 6 and magnetic field by 4 (major radius 8.52 m, mean field 6.38 T).
+The pitch parameter μB★/E = 0.6 uses B★ = 9.533 T, an upper bound for the retained
+spectrum; Boozer bounds are 12/12. All ten survive with relative energy error below
+7.9×10⁻⁹, but H₀ varies along the sampled sections by as much as 1.13 times the
+rational-surface potential oscillation. Its displaced contours expose the need for an
+invariant correction. These selected markers do not estimate a loss fraction, and the
+scaled field is not a separately solved reactor equilibrium. Both plots use direct
+spectral evaluation without mode pruning or angular tables. A tighter-tolerance run
+changes one selected marker from bounded to circulating resonant phase despite small
+energy error; alpha classification and full-field trajectory validation remain open.
+
+![Fixed-boundary equilibrium resolution study](docs/_static/figures/readme_cyclometry_convergence.webp)
+
+**Resolution matters.** Earlier angular refinement at 31 radial points changed
+sampled action variation from 0.03115 at (Mpol,Ntor)=(4,3) to 0.001759 at (12,11).
+That was a discretization effect, not an optimization gain. The plot extends the
+study with joint radial/angular refinement, fixed B★=3 T, 41 pitches through
+μB★/E=0.95, and 128×2048 transit quadrature.
+
+**Continuous-field checks.** At (Mpol, Ntor)=(16,15), increasing radial points
+from 121 to 241 reduces the maximum sampled action variation by 14.2%. At 241
+points, Boozer 20/20→24/24 changes that variation by only 0.030%. The left panel fixes the physical inputs and solver tolerance
+10⁻¹³. The right evaluates curl(B)/μ₀ × B − ∇p in the native continuous field,
+using volume-weighted mean magnitudes on s∈[0.45,0.85] and quadrature split at
+radial spline knots. The separate axisymmetric control converges much faster.
+At 64 identical physical points, the (16,15) radial refinement changes B by
+0.0166% RMS but its Cartesian derivative by 19.8% RMS. Small field-strength
+errors and solver residuals therefore do not establish orbit-model accuracy.
+
+The kernels pass 69 focused tests. The public `frozen_reference` option now keeps
+values, gradients and materialized equilibria on one discrete family. Its complete
+equilibrium → Boozer → moving-root objective passes 30 directional comparisons at
+the reference and a displaced boundary (maximum relative error 2.37e-06).
+Ordinary re-solves can still select a different family; resolved discretization and
+model errors and a corrected invariant remain required before physical optimization. The [figure source](docs/_static/figures/sources/make_cyclometry_figures.py)
+replots the saved sections and contours with their provenance; it does not rerun orbits.
+
 ## Tracing from the axis to the wall
 
 Orbits do not end at the LCFS. With ESSOS (`vmex[coils]`), guiding centres move in VMEC coordinates
