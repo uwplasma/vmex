@@ -62,6 +62,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass, replace
 from typing import Any, Callable
 
+import contextvars
 import functools
 import platform
 
@@ -2297,6 +2298,14 @@ def _release_used_lane_executables() -> None:
     _USED_LANE_KEYS.clear()
 
 
+#: Host predicate ``stop(carry) -> bool`` polled after every CLI block; True
+#: ends the solve as iteration-limited (``more_iter_flag``).  A context
+#: variable, not an argument, because only the implicit seed ladder
+#: (:func:`vmex.core.implicit._host_solve`) sets it, around one host solve.
+STOP_HOOK: contextvars.ContextVar[Callable | None] = contextvars.ContextVar(
+    "vmex_stop_hook", default=None)
+
+
 def _resolve_use_fft(
     use_fft: bool | None, device: Any, resolution: Resolution
 ) -> bool:
@@ -2373,6 +2382,7 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     emit_start = 1
     max_passes = int(rt.max_iterations) + 200
     lane = _block_lane_fft if use_fft else _block_lane
+    stop = STOP_HOOK.get()
     # Prefetched-executable consumption + compile attribution.  The
     # structural key selects a background-compiled standalone executable
     # when one exists (identical lowering — bit-identical iterations); a
@@ -2406,6 +2416,10 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         else:
             carry = step(lane, carry)
         done = bool(carry.done)
+        if not done and stop is not None and stop(carry):
+            carry = replace(carry, done=jnp.ones_like(carry.done),
+                            ier=jnp.full_like(carry.ier, MORE_ITER_FLAG))
+            done = True
         upto = int(carry.iteration) if done else int(carry.iteration) - 1
         # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
         # eqsolve before printout.f, so the discarded first pass has no row.
