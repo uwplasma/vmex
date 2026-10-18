@@ -27,7 +27,7 @@
   "notes": [
    "matrix: cold_wall_s = 1st in-process solve (incl. compile/cache-load); warm_wall_s = 2nd solve. warm still includes per-solve retrace overhead (~0.2-0.4s legacy, 1.7-4.7s core_jit) because solve() retraces per call.",
    "stepscan: per_iter_ms_marginal = (wall_NITER450 - wall_NITER150)/300 on synthetic nfp4_QH decks with FTOL=1e-30 -> pure iteration throughput; per_solve_overhead_s = fixed cost per solve call.",
-   "tridiag: best-of-N ms for core.preconditioner.tridiagonal_solve, jitted, block_until_ready. GPU time ~15us/ns-row, independent of ncols (lax.scan serialization, launch-latency bound); fp32==fp64 on GPU (latency- not FLOP-bound).",
+   "tridiag: best-of-N ms for solvax.tridiagonal_solve, jitted, block_until_ready. GPU time ~15us/ns-row, independent of ncols (lax.scan serialization, launch-latency bound); fp32==fp64 on GPU (latency- not FLOP-bound).",
    "pitfall: running python with cwd containing the repo checkout shadows vmec_jax as a namespace package -> __init__ never runs -> persistent compilation cache disabled -> every solve() pays full XLA recompile (~7s vs ~1.7s warm on cuda for solovev).",
    "core_jit runs only the first NS_ARRAY stage; legacy runs the full multigrid ladder -> cross-lane iteration counts differ (LandremanPaul, NuhrenbergZille)."
   ]
