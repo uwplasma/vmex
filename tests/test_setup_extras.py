@@ -57,7 +57,7 @@ def test_lasym_delta_rotation_guards():
     out = su._lasym_delta_rotation(rbc, rbs, zbc, zbs, mpol=1, ntor=ntor)
     assert out[0] is rbc
 
-    # degenerate m=1 content (denominator zero): unrotated
+    # no m=1 content: atan2(0, 0) = 0, unrotated
     rbc, rbs, zbc, zbs = _m1_arrays()
     out = su._lasym_delta_rotation(rbc, rbs, zbc, zbs, mpol=3, ntor=ntor)
     assert out[0] is rbc
@@ -86,6 +86,23 @@ def test_lasym_delta_rotation_aligns_m1_modes():
     inv0 = rbc[ntor, 1] ** 2 + rbs[ntor, 1] ** 2 + zbc[ntor, 1] ** 2 + zbs[ntor, 1] ** 2
     inv1 = rbc2[ntor, 1] ** 2 + rbs2[ntor, 1] ** 2 + zbc2[ntor, 1] ** 2 + zbs2[ntor, 1] ** 2
     assert inv1 == pytest.approx(inv0, rel=1e-12)
+
+
+@pytest.mark.parametrize("zbs01", [0.8, -0.8, -1.3])
+def test_lasym_delta_matches_vmec2000_atan2(zbs01):
+    """VMEC2000 readin.f: ``delta = ATAN2(rbs(0,1) - zbc(0,1), rbc(0,1) + zbs(0,1))``.
+
+    With ``rbc(0,1)`` and ``zbs(0,1)`` of opposite sign the former ``|.|``
+    denominator rotated by the wrong angle and left ``rbs != zbc``.
+    """
+    ntor = 1
+    rbc, rbs, zbc, zbs = _m1_arrays()
+    rbc[ntor, 1], zbs[ntor, 1], rbs[ntor, 1], zbc[ntor, 1] = 1.0, zbs01, 0.3, 0.1
+    delta = np.arctan2(0.3 - 0.1, 1.0 + zbs01)
+    rbc2, rbs2, zbc2, zbs2 = su._lasym_delta_rotation(
+        rbc, rbs, zbc, zbs, mpol=3, ntor=ntor)
+    assert rbc2[ntor, 1] == pytest.approx(np.cos(delta) + 0.3 * np.sin(delta), abs=1e-14)
+    assert rbs2[ntor, 1] == pytest.approx(zbc2[ntor, 1], abs=1e-14)
 
 
 # ---------------------------------------------------------------------------

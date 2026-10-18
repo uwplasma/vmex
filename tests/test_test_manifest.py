@@ -21,7 +21,7 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     entries = [
         {"lane": "a-free", "selector": "pr-parity-a1"},
         {"lane": "c2", "selector": "pr-parity-c2"},
-        {"lane": "core", "selector": "pr-physics-core"},
+        {"lane": "c4", "selector": "pr-parity-c4"},
     ]
     everything = ci_scope.select_lanes(["vmex/core/solver.py"], entries)
     assert everything == entries, "package code must keep every lane"
@@ -37,8 +37,8 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     assert "pr-parity-c4" in lanes
     assert ci_scope.needed_lanes(["tests/test_gammac.py"]) == lanes
     # A selector lane that runs nodes of a module it does not own runs on its
-    # changes too (test_monitoring.py is owned by parity-d, selected by field).
-    assert "pr-physics-field" in ci_scope.needed_lanes(["tests/test_monitoring.py"])
+    # changes too (test_device.py nodes are selected by pr-device).
+    assert "pr-device" in ci_scope.needed_lanes(["tests/test_device.py"])
 
     # Benchmarks and examples are attributed through the tests that name them.
     assert ci_scope.needed_lanes(["benchmarks/run_freeboundary_multigrid.py"])
@@ -171,7 +171,8 @@ def _invoked_lanes() -> set[str]:
     # the authority the narrowing reads, so it is the authority checked here.
     for declaration in re.findall(r"^\s*ALL:\s*'(\[.*\])'\s*$", text, re.M):
         for entry in json.loads(declaration):
-            invoked.update(str(entry.get("selector", "")).split())
+            for key in ("selector", "serial"):
+                invoked.update(str(entry.get(key, "")).split())
     # ``select full-${{ matrix.campaign }}`` over ``campaign: [opt-qi, ...]``.
     for path in (ROOT / ".github" / "workflows").glob("*.yml"):
         body = path.read_text()
@@ -255,7 +256,8 @@ def test_workflow_selects_manifest_lanes() -> None:
         assert "tools/test_manifest.py select" in workflows[name]
     assert "name: PR gate" in workflows["ci.yml"]
     nightly = workflows["nightly.yml"]
-    assert "campaign: [opt-qi, opt-qa, opt-qh, opt-qp]" in nightly
+    for campaign in ("opt-qi", "opt-qa", "opt-qh", "opt-qp"):
+        assert f"tools/test_manifest.py select full-{campaign})" in nightly
     assert "tools/test_manifest.py select optional" in nightly
     assert "--cov=vmex" not in nightly
     assert "timeout-minutes: 45" in nightly
@@ -293,7 +295,7 @@ def test_deferred_nonlinear_contracts_have_scheduled_jobs() -> None:
     for lane in ("full-polish-gn", "full-run-options", "full-free-boundary-adjoint"):
         assert test_manifest.select(lane)
         assert lane in _invoked_lanes()
-        assert f"selector: {lane}" in nightly
+        assert re.search(rf"selector: .*\b{lane}\b", nightly)
     assert 'RUN_FULL: "1"' in nightly
     bundles = json.loads((ROOT / "assets/manifest.json").read_text())["bundles"]
     ncsx = next(bundle["name"] for bundle in bundles
@@ -329,15 +331,15 @@ def _declared_lanes(job: str) -> set[str]:
     block = ci.split(f"- id: {job}", 1)[1]
     declaration = re.search(r"^\s*ALL:\s*'(\[.*\])'\s*$", block, re.M)
     assert declaration, f"the {job} matrix declaration is missing"
-    return {selector
+    return [selector
             for entry in json.loads(declaration.group(1))
-            for selector in str(entry.get("selector", "")).split()}
+            for key in ("selector", "serial")
+            for selector in str(entry.get(key, "")).split()]
 
 
-def test_mirror_primary_suite_runs_once_in_physics() -> None:
-    physics, parity = _declared_lanes("physics"), _declared_lanes("parity")
-    assert "pr-mirror-spline" in physics
-    assert "pr-mirror-spline" not in parity
-    assert not physics & parity, "a lane declared in both matrices runs twice"
+def test_every_pr_lane_runs_once() -> None:
+    lanes = _declared_lanes("parity")
+    assert "pr-mirror-spline" in lanes
+    assert len(lanes) == len(set(lanes)), "a lane declared twice runs twice"
     # The complete primary selector includes the former separate output job.
     assert "tests/mirror/test_output.py" in test_manifest.select("pr-mirror-spline")

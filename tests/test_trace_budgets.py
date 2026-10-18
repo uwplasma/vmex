@@ -146,8 +146,10 @@ _COMPILE_COUNT_SCRIPT = """\
 import logging
 import sys
 
-import vmex as vj  # must precede the handler: import configures JAX logging
+import vmex as vj
 import jax
+
+vj.configure()  # before the handler: configure() sets JAX logging
 
 
 class CompileCounter(logging.Handler):
