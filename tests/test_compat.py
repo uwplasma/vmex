@@ -10,6 +10,7 @@ Item I.8a dead-code prune — the core is JAX-only.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import types
@@ -502,10 +503,6 @@ def test_configure_jax_environment_idempotent_and_respects_user_env(monkeypatch)
     _compat._configure_jax_environment()  # must not raise (jax already imported)
     assert os.environ["XLA_FLAGS"] == "--user_set_flag"       # setdefault only
     assert os.environ["TF_CPP_MIN_LOG_LEVEL"] == "0"          # user wins
-    # the x64 default survives (VMEC parity: float64 mandatory)
-    import jax
-
-    assert jax.config.read("jax_enable_x64") is True
 
 
 def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
@@ -783,7 +780,7 @@ def test_machine_scoping_is_idempotent(tmp_path):
 def _import_cache_dir(env):
     import subprocess
 
-    code = "import jax, vmex; print(jax.config.jax_compilation_cache_dir)"
+    code = "import jax, vmex.core; print(jax.config.jax_compilation_cache_dir)"
     result = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True
     )
@@ -820,7 +817,8 @@ def test_jax_precision_environment_uses_jax_boolean_spellings(monkeypatch, value
     previous = jax.config.x64_enabled
     try:
         monkeypatch.setenv("JAX_ENABLE_X64", value)
-        _compat._configure_jax_environment()
+        monkeypatch.setattr(_compat, "_CONFIGURED", {})
+        _compat.ensure_configured()
         assert jax.config.x64_enabled is enabled
     finally:
         jax.config.update("jax_enable_x64", previous)
@@ -859,21 +857,33 @@ def test_fresh_jax_import_defaults_to_float64(monkeypatch):
 
     monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
     subprocess.run([sys.executable, "-c",
-                    "import vmex, jax; assert jax.config.x64_enabled"], check=True)
+                    "import vmex.core, jax; assert jax.config.x64_enabled"], check=True)
 
 
-def test_fresh_jax_environment_default_in_process(monkeypatch):
-    import jax
+def _fresh(code: str, **env: str) -> str:
+    import subprocess
+    import sys
 
-    previous = jax.config.x64_enabled
-    startup = types.SimpleNamespace(**vars(sys))
-    startup.modules = {name:module for name,module in sys.modules.items() if name != "jax"}
-    monkeypatch.setattr(_compat, "sys", startup)
-    monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
-    try:
-        jax.config.update("jax_enable_x64", False)
-        _compat._configure_jax_environment()
-        assert _compat.os.environ["JAX_ENABLE_X64"] == "1"
-        assert jax.config.x64_enabled
-    finally:
-        jax.config.update("jax_enable_x64", previous)
+    environ = {k: v for k, v in os.environ.items() if k not in ("JAX_ENABLE_X64",)}
+    environ.update(env)
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          env=environ, check=True).stdout.strip()
+
+
+def test_import_vmex_leaves_jax_config_alone():
+    """``import vmex`` changes no ``jax.config`` setting; using the core applies them."""
+    probe = ("import jax; before = (jax.config.jax_enable_x64, jax.config.jax_logging_level, "
+             "jax.config.jax_compilation_cache_dir); import vmex; "
+             "after = (jax.config.jax_enable_x64, jax.config.jax_logging_level, "
+             "jax.config.jax_compilation_cache_dir); print(before == after, after[0]); "
+             "import vmex.core.solver; print(jax.config.jax_enable_x64)")
+    assert _fresh(probe).splitlines() == ["True False", "True"]
+
+
+def test_explicit_float32_choice_is_respected_and_refused_by_the_solver():
+    probe = ("import vmex, jax; vmex.configure(x64=False); import vmex.core.solver as s\n"
+             "print(jax.config.jax_enable_x64)\n"
+             "try:\n    s.prepare_runtime(None)\nexcept RuntimeError as e:\n    print('float64' in str(e))")
+    assert _fresh(probe).splitlines() == ["False", "True"]
+    assert _fresh("import jax, vmex.core.solver; print(jax.config.jax_enable_x64)",
+                  JAX_ENABLE_X64="0") == "False"
