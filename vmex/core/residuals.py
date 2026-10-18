@@ -599,7 +599,7 @@ def apply_lambda_preconditioner(
     faclam = jnp.asarray(faclam)
     updates = _map_blocks(force, _LAMBDA_BLOCKS, lambda b: b * faclam.astype(b.dtype))
     if m0_radial is not None:
-        from .preconditioner import tridiagonal_solve
+        from solvax import tridiagonal_solve
 
         sup, sub, diag = (jnp.asarray(x)[:, 1:] for x in m0_radial)
         identity_axis = diag.at[0].set(1.0)
@@ -610,7 +610,7 @@ def apply_lambda_preconditioner(
             # totzsps copies lambda_1 into the symmetric axis row only.
             d = identity_axis.at[1].add(diag[0]) if axis_copy else identity_axis
             rhs = jnp.asarray(block)[:, 0, 1:].at[0].set(0.0)
-            x = tridiagonal_solve(sup, d, sub, rhs, method="thomas")
+            x = tridiagonal_solve(sub, d, sup, rhs, method="thomas")
             updates[name] = updates[name].at[:, 0, 1:].set(x.astype(block.dtype))
     return replace(force, **updates)
 
