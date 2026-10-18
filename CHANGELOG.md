@@ -5,6 +5,25 @@ in full. A number appears here only where a committed artifact backs it, and
 `benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
 revision it was measured at, and the pages that cite it.
 
+## 0.11.11 - 2026-10-18
+
+- **mgrid scaling matches VMEC2000.** EXTCUR multiplies every coil table; VMEX
+  no longer divides by the raw coil current, which gave 5e-5 of the field on a
+  raw mgrid. A deck NFP that differs from the mgrid NFP now stops the run (#591).
+- A free-boundary boundary that leaves the mgrid box warns as VMEC2000 does,
+  naming the side, the overshoot and the grid extents (#604). `piota` ignores
+  BLOAT, as in VMEC2000; BLOAT other than 1 requires NCURR = 1.
+- A PHIEDGE whose sign opposes the external toroidal field stops the run, as
+  VMEC2000's vacuum.f does (#571).
+- LASYM: the theta shift uses VMEC2000's `atan2` form (#606).
+- WOUT `phi` is correct for non-uniform APHI; the namelist reader accepts
+  `&END`, `$END` and a `/` before a comment; the summary plot works at NS = 3 (#593).
+- `import vmex` no longer changes `jax.config`. `vmex.configure()` sets x64,
+  the compilation cache and logging in one place; the CLI and the first core
+  import call it, and the solver refuses to run in float32 (#607).
+- CI runs in seven balanced lanes and the test suite runs jitted (#586, #580).
+- README: VMEX against exact equilibria, with and without stellarator symmetry (#578).
+
 ## 0.11.10 - 2026-10-13
 
 - **`vmex --trace` is about twice as fast** on large spectra with ESSOS 0.21:
