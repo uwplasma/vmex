@@ -1189,3 +1189,23 @@ def test_adjoint_debug_instrumentation_reports_stages(monkeypatch, capfd):
         assert f"[vmex adjoint] {stage}" in err, stage
     # the stage lines must localize the device: everything on the target
     assert "TFRT_CPU_1" in err or "cpu:1" in err
+
+
+@_requires_gpu
+def test_equilibrium_from_x_evaluates_forces_on_the_problems_device():
+    """``equilibrium_from_x`` reports the force residuals of the refined state on the problem's own device.
+
+    The implicit problem runs on ``cfg.device`` (the CPU by default for this launch-bound path) while JAX's
+    default device is the GPU; the runtime of the force evaluation used to be built on the default device, so
+    the evaluation mixed a CPU state with a GPU runtime ("incompatible devices", seen on GPU only).
+    """
+    inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
+    problem = optimize.make_problem(inp, objective_terms=[(optimize.mean_iota, 0.0, 1.0)], max_mode=1)
+    cfg = problem.metadata["config"]
+    eq = problem.equilibrium_from_x(problem.x0)
+    devices = {leaf.device for leaf in jax.tree.leaves(eq.state) if hasattr(leaf, "device")}
+    assert devices == {cfg.device} if cfg.device is not None else len(devices) == 1
+    _, residuals, _ = solver.evaluate_forces(eq.state, eq.runtime)
+    np.testing.assert_allclose([eq.result.fsqr, eq.result.fsqz, eq.result.fsql],
+                               [float(residuals.fsqr), float(residuals.fsqz), float(residuals.fsql)],
+                               rtol=1e-12, atol=0.0)

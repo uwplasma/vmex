@@ -249,6 +249,8 @@ def test_bootstrap_plot_and_small_optimization_movie(tmp_path, monkeypatch) -> N
         vj.plot_optimization_movie(tmp_path / "empty.gif", (), lambda x: x)
     with np.testing.assert_raises_regex(ValueError, "max_frames"):
         vj.plot_optimization_movie(tmp_path / "bad.gif", ([0.0],), Line, fps=0)
+    with np.testing.assert_raises_regex(ValueError, "one entry per x_history"):
+        vj.plot_optimization_movie(tmp_path / "bad.gif", ([0.0], [0.1]), Line, frame_labels=("step 0",))
     with np.testing.assert_raises_regex(TypeError, "gamma"):
         vj.plot_optimization_movie(tmp_path / "bad.gif", ([0.0],), lambda x: object())
     with np.testing.assert_raises_regex(ValueError, "surface colors"):
@@ -269,10 +271,11 @@ def test_bootstrap_plot_and_small_optimization_movie(tmp_path, monkeypatch) -> N
         tmp_path / "flat-colors.gif", ([0.0], [0.1]), lambda x: Surface(x[0]),
         color_factory=lambda x, objects: np.ones((4, 5)), fps=2, dpi=40)
     assert flat.is_file() and flat.stat().st_size > 0
-    # Uncolored surfaces fall back to a strided wireframe.
+    # Uncolored surfaces fall back to a strided wireframe; frames can carry
+    # their own titles (e.g. the optimizer step a checkpoint was saved at).
     wireframe = vj.plot_optimization_movie(
         tmp_path / "wireframe.gif", ([0.0], [0.1]),
-        lambda x: (Surface(x[0]), Coils(x[0])), fps=2, dpi=40)
+        lambda x: (Surface(x[0]), Coils(x[0])), fps=2, dpi=40, frame_labels=("step 0", "step 10"))
     assert wireframe.is_file() and wireframe.stat().st_size > 0
     with np.testing.assert_raises_regex(ValueError, "gif or .mp4"):
         vj.plot_optimization_movie(tmp_path / "bad.txt", ([0.0],), Line)

@@ -433,6 +433,26 @@ def test_block_stall_far_from_root_skips_krylov_and_rejects_the_trial(monkeypatc
     assert int(status) == 3 and im._LAST_REFINED[cfg][2]
 
 
+def test_certify_refined_rejects_a_refinement_that_stops_above_refine_tol(monkeypatch) -> None:
+    """With ``certify_refined`` a state whose refinement ends above refine_tol is status 4 (not the root); the
+    default keeps it at status 0, and a refinement that lands certifies under both."""
+    inp, _, p0 = _small_solovev_setup()
+    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
+    monkeypatch.setattr(im, "_refined_state", lambda cfg, params, state, mask, **kwargs: state)  # no refinement
+    for certify, expected in ((False, 0), (True, 4)):
+        cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-30, certify_refined=certify)
+        for memo in (im._LAST_SOLVE, im._LAST_REFINED):  # a config of the same content may be memoized already
+            memo.pop(cfg, None)
+        assert int(im._host_solve_and_mask_status(cfg, params_np)[2]) == expected
+        assert np.isfinite(im._LAST_REFINED[cfg][3]) == certify
+    monkeypatch.undo()
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, certify_refined=True)
+    for memo in (im._LAST_SOLVE, im._LAST_REFINED):
+        memo.pop(cfg, None)
+    assert int(im._host_solve_and_mask_status(cfg, params_np)[2]) == 0
+    assert im._LAST_REFINED[cfg][3] <= cfg.refine_tol
+
+
 def test_adjoint_reusing_anchor_factors_matches_the_fresh_block_adjoint() -> None:
     """The anchor's factorization preconditions the adjoint to the same multiplier."""
     inp, _, p0 = _small_solovev_setup()

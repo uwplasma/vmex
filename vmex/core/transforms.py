@@ -36,6 +36,7 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 from __future__ import annotations
 
 from dataclasses import dataclass, fields as dataclass_fields
+import functools
 from typing import Any, Sequence
 
 import numpy as np
@@ -201,6 +202,39 @@ def _phase_pair(modes: ModeTable, trig: TrigTables, derivative: str) -> tuple[np
     else:
         raise ValueError(f"Unknown derivative {derivative!r}; expected one of {_DERIVATIVES}")
     return cos_phase, sin_phase
+
+
+# The phase tables below are trace-time constants of every program that evaluates the geometry.  A traced
+# program captures a NumPy array as a constant and JAX lowers one constant per array object, so tables rebuilt
+# on each call put one copy per geometry evaluation into a program (dozens in a design gradient, megabytes
+# each).  They are built once per (modes, trig) pair -- both hash by identity -- and returned read-only.
+_PHASE_CACHE_SIZE = 64
+
+
+@functools.lru_cache(maxsize=_PHASE_CACHE_SIZE)
+def _stacked_phase(modes: ModeTable, trig: TrigTables, derivative: str) -> np.ndarray:
+    """``(cos_phase; sin_phase)`` of :func:`_phase_pair`, stacked along the mode axis."""
+    table = np.concatenate(_phase_pair(modes, trig, derivative), axis=0)
+    table.setflags(write=False)
+    return table
+
+
+@functools.lru_cache(maxsize=_PHASE_CACHE_SIZE)
+def _unscaled_phase(modes: ModeTable, trig: TrigTables, n_theta: int) -> tuple[np.ndarray, np.ndarray]:
+    """The unscaled helical basis ``cos(m theta - n zeta)``, ``sin(m theta - n zeta)`` on ``n_theta`` rows.
+
+    :func:`_phase_pair` without its ``mscale * nscale`` factor.
+    """
+    m_idx = np.asarray(modes.m, dtype=np.int64)
+    n_idx = np.asarray(modes.n, dtype=np.int64)
+    cos_phase, sin_phase = _phase_pair(modes, trig, "value")
+    cos_phase = cos_phase[:, :n_theta, :]
+    sin_phase = sin_phase[:, :n_theta, :]
+    mode_norm = (np.asarray(trig.mscale)[m_idx] * np.asarray(trig.nscale)[np.abs(n_idx)])
+    tables = (cos_phase / mode_norm[:, None, None], sin_phase / mode_norm[:, None, None])
+    for table in tables:
+        table.setflags(write=False)
+    return tables
 
 
 def _packed_toroidal_coefficients(
@@ -407,8 +441,7 @@ def fourier_to_real(
     coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
     fields = []
     for derivative in derivatives:
-        cos_phase, sin_phase = _phase_pair(modes, trig, derivative)
-        phase = jnp.asarray(np.concatenate([cos_phase, sin_phase], axis=0))
+        phase = jnp.asarray(_stacked_phase(modes, trig, derivative))
         fields.append(_einsum("...k,kij->...ij", coeff, phase))
     return tuple(fields)
 
@@ -514,15 +547,7 @@ def real_to_fourier(
         weights[n_theta - 1] *= 0.5
     f_weighted = f[:, :n_theta, :] * jnp.asarray(weights, dtype=f.dtype)[None, :, None]
 
-    cos_phase, sin_phase = _phase_pair(modes, trig, "value")
-    cos_phase = cos_phase[:, :n_theta, :]
-    sin_phase = sin_phase[:, :n_theta, :]
-
-    # Strip mscale*nscale to obtain the unscaled helical basis functions
-    # cos(m*theta - n*zeta), sin(m*theta - n*zeta).
-    mode_norm = (np.asarray(trig.mscale)[m_idx] * np.asarray(trig.nscale)[np.abs(n_idx)])
-    cos_unscaled = jnp.asarray(cos_phase / mode_norm[:, None, None])
-    sin_unscaled = jnp.asarray(sin_phase / mode_norm[:, None, None])
+    cos_unscaled, sin_unscaled = map(jnp.asarray, _unscaled_phase(modes, trig, n_theta))
 
     inner_cos = _einsum("sij,kij->sk", f_weighted, cos_unscaled)
     inner_sin = _einsum("sij,kij->sk", f_weighted, sin_unscaled)

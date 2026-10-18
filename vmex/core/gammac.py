@@ -96,6 +96,7 @@ import jax
 import jax.numpy as jnp
 
 from .bounce import bounce_action
+from .loops import map_columns
 from .solver import SolverRuntime, SpectralState
 from .stability import (
     _ballooning_context, _pest_lambda, _surface_closures, _surface_tables,
@@ -543,7 +544,7 @@ def _rows_from_context(
 
     # WOUT diagnostics favor one small compilation; live optimization retains
     # the unrolled rows and their faster repeated execution.
-    stacked = (jax.lax.map(row, jnp.asarray(rows)) if map_rows else
+    stacked = (map_columns(row, jnp.asarray(rows)) if map_rows else
                jax.tree.map(lambda *xs: jnp.stack(xs), *(row(j) for j in rows)))
     # The field-line map phi = x / iota is meaningless through iota ~ 0;
     # poison the result instead of returning a plausible number.

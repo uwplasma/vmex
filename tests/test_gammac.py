@@ -144,14 +144,36 @@ def test_gamma_c_tracks_effective_ripple_on_a_ripple_ray(qa_eq):
 
 
 def test_boundary_gradient_liveness():
-    """jax.grad through the implicit solve is finite, nonzero, FD-consistent.
+    """jax.grad through the implicit solve is finite, nonzero, and exact.
 
-    li383 at ns=13, GammaC([0.5]). What this test can honestly assert is
-    narrower than it once claimed. The gradient of the discretized objective
-    is exact — it agrees with a central difference of the same discretization
-    at fixed resolution — but it is **not a convergent quantity**. Measured
-    ladder of d/d rbc[n=0, m=1] over (nalpha, transits, points/transit,
-    pitch):
+    li383 at ns=13, GammaC([0.5]), d/d rbc[n=0, m=1]. What this test can
+    honestly assert is narrower than it once claimed. Two separate questions:
+
+    1. Is the implicit (adjoint) part exact? Yes, and that is what is
+       asserted. Along the solver-free path ``t -> GammaC(x0 + t dx/dp,
+       rt(p0 + t e))``, with ``dx/dp`` the re-solve tangent (central
+       difference of two re-solves at h = 1e-6; the fixed m=1 gauge makes the
+       re-solve map smooth, ``|x(t) - x0 - t dx/dp| = O(t^2)``, 6.6e-8 at
+       t = 1e-4), plain reverse-mode AD of GammaC gives +0.1265886 against
+       +0.1265885 through the implicit solve (rel 1e-6; asserted 1e-4).
+       The same split on the smooth objective agrees to 7 digits.
+
+    2. Is the gradient of the discretized GammaC the derivative of its value?
+       No, not even at fixed resolution, and not because of the solver.
+       A central difference along that same solver-free path is stable
+       to 6 digits for h = 1e-6..1e-8 (the path is locally smooth) and
+       converges to -0.18105, opposite in sign to the AD value +0.12659.
+       The gauge is not the cause: under VMEC2000's m=1 rule
+       (``freeze_m1=False``, the gauge this test was first measured with) the
+       same split gives AD -1.2512 against FD -0.6583 (ratio 1.9; an
+       earlier revision asserted a 3x band around a re-solve FD at h = 1e-4,
+       which that ratio happened to satisfy). The fixed gauge moves the
+       interior labelling, hence where the field-line samples land, and the
+       mismatch there is a sign flip. The hard lane's own derivative misses
+       part of the value's dependence; use GammaCSmooth for gradients.
+
+    It is also **not a convergent quantity**. Measured ladder over (nalpha,
+    transits, points/transit, pitch), VMEC2000 m=1 rule:
 
         (7, 3, 64, 24)    -1.254
         (7, 4, 96, 48)    +3.518
@@ -160,45 +182,54 @@ def test_boundary_gradient_liveness():
         (17, 8, 256, 96)  +0.180
 
     Three sign changes. Radial resolution does not help either: at fixed
-    sampling, ns = 13/25/49 gives -0.387, +0.175, -2.167. The same instability
-    is present before the symmetry fixes in this commit (-0.403, +0.582,
-    -0.554, -0.562, -0.111), so it is not a regression — an earlier revision
-    of this test asserted sign stability under one refinement step and was
-    passing on a lucky pair of configurations, not on a property.
-
-    The cause is structural: hard well detection and hard argmin selection
-    make the discretized Gamma_c piecewise in the boundary coefficients, with
+    sampling, ns = 13/25/49 gives -0.387, +0.175, -2.167. The cause is
+    structural: hard well detection and hard argmin selection make the
+    discretized Gamma_c piecewise in the boundary coefficients, with
     breakpoints that move when the grid moves, so refinement changes which
     function is being differentiated. Gamma_c is a value-level comparative
     proxy; do not drive a boundary optimization with this gradient.
 
-    So: finite, nonzero, and FD-consistent at fixed resolution. No claim of
-    magnitude stability, and none of sign stability.
+    So: finite, nonzero, and the implicit solve contributes no error. No
+    claim of FD consistency, magnitude stability, or sign stability.
     """
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
     params = im.params_from_input(inp, device=None)
     index = (int(inp.ntor), 1)
+    cfg = im.make_config(
+        inp, ns=13, ftol=1.0e-13, max_iterations=20000, adjoint_tol=1.0e-13)
 
-    def objective(p, nalpha=7, num_transit=3, ppt=64, npi=24):
-        term = gammac.GammaC(
+    def term(nalpha=7, num_transit=3, ppt=64, npi=24):
+        return gammac.GammaC(
             [0.5], nalpha=nalpha, num_transit=num_transit,
             points_per_transit=ppt, num_pitch=npi, quadrature_order=32)
+
+    def objective(p, *rung):
         solution = im.run(
             inp, p, ns=13, ftol=1.0e-13, max_iterations=20000,
             adjoint_tol=1.0e-13, device=None)
-        return term.total_state(solution.state, solution.runtime)
+        return term(*rung).total_state(solution.state, solution.runtime)
+
+    def shifted(t):
+        return dataclasses.replace(
+            params, rbc=jnp.asarray(params.rbc).at[index].add(t))
 
     base = float(np.asarray(jax.grad(objective)(params).rbc)[index])
-    step = 1.0e-4
-    values = [
-        float(objective(dataclasses.replace(
-            params, rbc=jnp.asarray(params.rbc).at[index].add(sign * step))))
-        for sign in (-1.0, 1.0)
-    ]
-    finite_difference = (values[1] - values[0]) / (2.0 * step)
     assert np.isfinite(base) and base != 0.0
-    assert np.sign(base) == np.sign(finite_difference)
-    assert 1.0 / 3.0 < base / finite_difference < 3.0
+
+    # The same derivative without the implicit solve: the re-solve tangent
+    # (two re-solves) composed with plain AD of GammaC along that line.
+    state0 = im.solve_implicit(params, cfg)
+    h = 1.0e-6
+    tangent = jax.tree.map(
+        lambda a, b: (a - b) / (2.0 * h),
+        im.solve_implicit(shifted(h), cfg), im.solve_implicit(shifted(-h), cfg))
+
+    def along_path(t):
+        state = jax.tree.map(lambda a, d: a + t * d, state0, tangent)
+        return term().total_state(state, im.runtime_from_params(shifted(t), cfg))
+
+    path = float(jax.grad(along_path)(0.0))
+    np.testing.assert_allclose(base, path, rtol=1.0e-4)
 
     refined = float(np.asarray(jax.grad(
         lambda p: objective(p, 13, 4, 96, 48))(params).rbc)[index])
@@ -281,15 +312,29 @@ def _smooth_ladder_objective(inp, p, nalpha, num_transit, ppt, npi):
 
 
 def test_smooth_boundary_gradient_is_fd_consistent():
-    """AD == central FD for the smooth objective at the base budget.
+    """AD ~= re-solve central FD for the smooth objective at the base budget.
 
-    Same deck, index, and step as :func:`test_boundary_gradient_liveness`;
-    the smooth lane must keep the fixed-resolution exactness the hard lane
-    has, on top of the refinement stability the hard lane lacks (the full
-    ladder is the nightly :func:`
+    Same deck and index as :func:`test_boundary_gradient_liveness`; the
+    smooth lane must keep a usable fixed-resolution gradient, which the hard
+    lane lacks, on top of the refinement stability the hard lane also lacks
+    (the full ladder is the nightly :func:`
     test_smooth_boundary_gradient_survives_the_refinement_ladder`).
-    Measured AD/FD ratio 1.09
-    (ad -0.0974, fd -0.0892 at step 1e-4).
+
+    Measured with the fixed m=1 gauge (the default): AD -0.092280, re-solve
+    FD -0.091265 at step 1e-5 (ratio 1.011, asserted within 1.25x). The FD
+    converges: -0.091194 for h = 1e-6..1e-8. The implicit solve adds no
+    error: AD along the solver-free path ``x0 + t dx/dp`` matches the implicit
+    AD to 7 digits. The remaining 1.2% is the surrogate's own AD-vs-value
+    mismatch (9% under VMEC2000's m=1 rule: AD -0.0974, FD -0.0894).
+
+    The step is 1e-5, not 1e-4. The discretized surrogate has a bump at
+    t = rbc - rbc0 in (+2e-5, +2e-4). Its values are 3.3857e-4 at +2e-5,
+    3.4110e-4 at +1e-4 and 3.3273e-4 at +2e-4, against 3.4040e-4 at 0. The
+    bump appears on the solver-free linearized path as well, so it belongs
+    to the discretization, not the solver. A 1e-4 central difference
+    samples the top of the bump and reads -0.0421 (ratio 2.19); a 1e-3 one
+    reads -0.0694. The bump moved there when the fixed gauge changed the
+    interior labelling, and with it where the field-line samples land.
     """
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
     params = im.params_from_input(inp, device=None)
@@ -297,7 +342,7 @@ def test_smooth_boundary_gradient_is_fd_consistent():
     base = float(np.asarray(jax.grad(
         lambda p: _smooth_ladder_objective(inp, p, 7, 3, 64, 24)
     )(params).rbc)[index])
-    step = 1.0e-4
+    step = 1.0e-5
     values = [
         float(_smooth_ladder_objective(inp, dataclasses.replace(
             params, rbc=jnp.asarray(params.rbc).at[index].add(sign * step)),
@@ -307,7 +352,7 @@ def test_smooth_boundary_gradient_is_fd_consistent():
     finite_difference = (values[1] - values[0]) / (2.0 * step)
     assert np.isfinite(base) and base != 0.0
     assert np.sign(base) == np.sign(finite_difference)
-    assert 1.0 / 2.0 < base / finite_difference < 2.0
+    assert 1.0 / 1.25 < base / finite_difference < 1.25
 
 
 @pytest.mark.full

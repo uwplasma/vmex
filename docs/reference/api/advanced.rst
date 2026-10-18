@@ -121,6 +121,9 @@ Solver
 .. automodule:: vmex.core.device
    :members:
 
+.. automodule:: vmex.core.loops
+   :members:
+
 Free boundary
 -------------
 

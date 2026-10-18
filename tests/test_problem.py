@@ -630,6 +630,51 @@ def test_direct_jaxopt_and_optax_contracts():
     assert float(problem.jax_fun(x)) < float(problem.jax_fun(problem.x0))
 
 
+def test_vary_phiedge_requires_implicit_derivatives():
+    from pathlib import Path
+
+    from vmex.core import optimize as opt
+    from vmex.core.input import VmecInput
+
+    inp = VmecInput.from_file(Path(__file__).resolve().parents[1] / "examples/data/input.solovev")
+    with pytest.raises(ValueError, match="vary_phiedge requires"):
+        opt.make_problem(inp, objective_terms=[(opt.volume_average_beta, 0.0, 1.0)], vary_phiedge=True,
+                         derivative_method="finite_difference")
+
+
+def test_vary_phiedge_appends_a_relative_phiedge_dof():
+    """vary_phiedge: a named trailing dof, round-tripped through the input,
+    whose implicit Jacobian column matches central differences of re-solves."""
+    _check_vary_phiedge()
+
+
+def _check_vary_phiedge():
+    import dataclasses
+    from pathlib import Path
+
+    from vmex.core import optimize as opt
+    from vmex.core.input import VmecInput
+
+    inp = VmecInput.from_file(
+        Path(__file__).resolve().parents[1] / "examples/data/input.solovev"
+    )
+    terms = [(opt.volume_average_beta, 0.0, 1.0)]
+    problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=1, vary_phiedge=True)
+    assert problem.names[-1] == "PHIEDGE/nominal" and problem.x0[-1] == 0.0
+    x = problem.x0.copy()
+    x[-1] = 0.1
+    assert np.isclose(problem.input_from_x(x).phiedge, 1.1 * inp.phiedge)
+    np.testing.assert_allclose(problem.x_from_input(problem.input_from_x(x)), x)
+
+    def beta(scale):
+        trial = dataclasses.replace(inp, phiedge=inp.phiedge * scale)
+        return float(np.ravel(opt._call_term(opt.volume_average_beta, opt.solve_equilibrium(trial)))[0])
+
+    step = 1e-4
+    difference = (beta(1 + step) - beta(1 - step)) / (2 * step)
+    np.testing.assert_allclose(problem.residual_jac(problem.x0)[0, -1], difference, rtol=1e-4)
+
+
 def test_vmec_finite_difference_factory_uses_parallel_provider(monkeypatch):
     """The VMEC factory composes tuples and differentiates opaque host terms."""
     from pathlib import Path
@@ -967,6 +1012,204 @@ def test_vmec_subproblem_needs_a_recorded_deck_for_a_max_mode_stage():
         names=("RBC(0,1)", "ZBS(0,1)"))
     with pytest.raises(AttributeError, match="does not record the input deck"):
         problem.subproblem(max_mode=1)
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+def test_shared_minimize_uses_physical_coordinates(bounded):
+    from vmex import optimize as opt
+    from scipy.optimize import Bounds
+
+    target = np.array([2., -3.])
+    problem = opt.FunctionProblem.from_functions(np.array([1., 1.]), scales=np.array([.2, 4.]),
+        value_and_grad=lambda x: (float(np.sum((x-target)**2)), 2*(x-target)))
+    points = []
+    bounds = Bounds([-5., -5.], [5., 5.]) if bounded else None
+    result = opt.minimize(problem, method="SLSQP", bounds=bounds, callback=lambda x: points.append(x.copy()),
+                          options={"maxiter": 100, "ftol": 1e-12})
+    assert result.success and points
+    np.testing.assert_allclose(result.x, target, atol=1e-5)
+    np.testing.assert_allclose(result.jac, 2*(result.x-target), atol=1e-10)
+    np.testing.assert_array_equal(points[-1], result.x)
+
+
+def test_shared_minimize_scales_physical_constraints_and_rejects_unsupported_method():
+    from scipy.optimize import NonlinearConstraint
+    from vmex import optimize as opt
+
+    problem = opt.FunctionProblem.from_functions(np.array([.2, .2]), scales=np.array([.1, 2.]),
+        value_and_grad=lambda x: (float(np.sum((x-2.)**2)), 2*(x-2.)))
+    constraint = NonlinearConstraint(lambda x: np.array([x.sum()]), -np.inf, 1.,
+                                     jac=lambda x: np.ones((1, 2)))
+    result = opt.minimize(problem, method="SLSQP", constraints=constraint,
+                          options={"maxiter": 50, "ftol": 1e-12})
+    assert result.success
+    np.testing.assert_allclose(result.x, [.5, .5], atol=1e-6)
+    for method in ("L-BFGS-B", "BFGS"):
+        with pytest.raises(ValueError, match="only method='SLSQP'"):
+            opt.minimize(problem, method=method, constraints=constraint)
+    with pytest.raises(ValueError, match="only method='SLSQP'"):
+        opt.minimize(problem)  # the scalarized-VMEC default is not supported here
+
+
+def test_shared_minimize_callback_stop_keeps_last_reported_point():
+    from vmex import optimize as opt
+
+    p = opt.FunctionProblem.from_functions(np.array([5.]), scales=np.array([.3]),
+        value_and_grad=lambda x: (float(x@x), 2*x))
+    seen = []
+    def callback(intermediate_result):
+        seen.append(intermediate_result.x.copy())
+        raise StopIteration
+    result = opt.minimize(p, method="SLSQP", callback=callback)
+    assert not result.success and result.stop_reason == "callback_stopped"
+    np.testing.assert_array_equal(result.x, seen[0])
+    np.testing.assert_allclose(result.fun, result.x@result.x)
+
+
+@pytest.mark.parametrize("sparse", [False, True])
+def test_shared_minimize_offsets_linear_constraints(sparse):
+    from scipy.optimize import LinearConstraint
+    from scipy.sparse import csr_matrix
+    from vmex import optimize as opt
+    p = FunctionProblem.from_functions([3., 4.], scales=[.3, 2.],
+        value_and_grad=lambda x: (float(x@x), 2*x))
+    matrix = np.array([[1., 1.]])
+    constraint = LinearConstraint(csr_matrix(matrix) if sparse else matrix, 1., 1.)
+    result = opt.minimize(p, method="SLSQP", constraints=constraint, options=dict(ftol=1e-12))
+    assert result.success
+    np.testing.assert_allclose(result.x, [.5, .5], atol=1e-6)
+    with pytest.raises(TypeError, match="when building"):
+        opt.minimize(p, forward_ftol=1e-11)
+
+
+def test_shared_minimize_open_bound_pairs_and_zero_step_budget():
+    """``None`` bound pairs are open; a stateful problem with no step budget returns its start."""
+    from vmex import optimize as opt
+
+    p = FunctionProblem.from_functions([3., 4.], scales=[.3, 2.], value_and_grad=lambda x: (float(x@x), 2*x))
+    result = opt.minimize(p, method="SLSQP", bounds=[(1., None), (None, None)], options=dict(ftol=1e-12))
+    assert result.success
+    np.testing.assert_allclose(result.x, [1., 0.], atol=1e-6)
+    p.accepted = SimpleNamespace(parameters=np.array([3., 4.]))
+    p.accept_x = lambda x: None
+    result = opt.minimize(p, method="SLSQP", options=dict(maxiter=0))
+    assert result.stop_reason == "accepted_step_budget_reached" and result.accepted_steps == 0
+    np.testing.assert_array_equal(result.x, [3., 4.])
+
+
+def test_augmented_lagrangian_reaches_the_constrained_minima():
+    """AUGLAG finds SLSQP's KKT points: an active inequality, two-sided rows from an infeasible start, and an
+    equality with a bound; a region whose trials are rejected only shrinks its trust region."""
+    from scipy.optimize import Bounds, LinearConstraint, NonlinearConstraint
+    from vmex import optimize as opt
+    from vmex.core.errors import TrialRejected
+
+    def rosenbrock(x):
+        return (float((1-x[0])**2 + 100*(x[1]-x[0]**2)**2),
+                np.array([-2*(1-x[0]) - 400*x[0]*(x[1]-x[0]**2), 200*(x[1]-x[0]**2)]))
+
+    disk = NonlinearConstraint(lambda x: np.array([x@x]), -np.inf, 1.5, jac=lambda x: 2*x[None])
+    found = {}
+    for method in ("SLSQP", "AUGLAG"):
+        p = opt.FunctionProblem.from_functions(np.array([-1.2, 1.]), scales=np.array([.5, 2.]), value_and_grad=rosenbrock)
+        found[method] = opt.minimize(p, method=method, constraints=disk,
+                                     options=dict(maxiter=300, **({"ftol": 1e-14} if method == "SLSQP" else {})))
+    result = found["AUGLAG"]
+    assert result.success and result.stop_reason is None and result.max_violation <= 1e-8
+    np.testing.assert_allclose(result.x, found["SLSQP"].x, atol=1e-6)
+    np.testing.assert_allclose(result.jac, rosenbrock(result.x)[1])
+
+    p = opt.FunctionProblem.from_functions(np.array([2., -1.]), value_and_grad=lambda x: (float(-x.sum()), -np.ones(2)))
+    rows = NonlinearConstraint(lambda x: np.array([x@x, x[0]-x[1]]), [0., -.1], [1., .1],
+                               jac=lambda x: np.vstack([2*x, [1., -1.]]))
+    seen = []
+    result = opt.minimize(p, method="AUGLAG", constraints=rows, callback=lambda intermediate_result: seen.append(
+        intermediate_result), options=dict(maxiter=300))
+    assert result.success and result.accepted_steps == len(seen)
+    np.testing.assert_allclose(result.x, [np.sqrt(.5)]*2, atol=1e-7)
+    assert {"penalty", "max_violation", "multipliers", "augmented_lagrangian"} <= set(seen[-1])
+
+    p = opt.FunctionProblem.from_functions(np.zeros(3), value_and_grad=lambda x: (
+        float(x[0]**2 + 2*x[1]**2 + x[2]), np.array([2*x[0], 4*x[1], 1.])))
+    result = opt.minimize(p, method="AUGLAG", bounds=Bounds([-np.inf, -np.inf, .5], [np.inf, np.inf, 3.]),
+                          constraints=LinearConstraint([[1., 1., 0.]], 1., 1.))
+    np.testing.assert_allclose(result.x, [2/3, 1/3, .5], atol=1e-8)
+
+    def guarded(x):
+        if x[0] > .6:
+            raise TrialRejected("outside the solvable region")
+        return float(np.sum((x-2)**2)), 2*(x-2)
+
+    p = opt.FunctionProblem.from_functions(np.array([.2, .2]), value_and_grad=guarded)
+    result = opt.minimize(p, method="AUGLAG",
+                          constraints=NonlinearConstraint(lambda x: np.array([x.sum()]), -np.inf, 1.,
+                                                          jac=lambda x: np.ones((1, 2))))
+    np.testing.assert_allclose(result.x, [.5, .5], atol=1e-8)
+    nonfinite = opt.FunctionProblem.from_functions(np.array([.2, .2]), value_and_grad=lambda x: (
+        float(np.sum((x-2)**2)) if x[0] <= .6 else float("nan"), 2*(x-2)))
+    result = opt.minimize(nonfinite, method="AUGLAG", constraints=NonlinearConstraint(
+        lambda x: np.array([x.sum()]), -np.inf, 1., jac=lambda x: np.ones((1, 2))))
+    np.testing.assert_allclose(result.x, [.5, .5], atol=1e-8)  # a nonfinite trial is a rejected one
+    result = opt.minimize(p, method="AUGLAG", options=dict(maxiter=2))
+    assert result.stop_reason == "accepted_step_budget_reached" and result.accepted_steps == 2
+    with pytest.raises(ValueError, match="AUGLAG takes only maxiter"):
+        opt.minimize(p, method="AUGLAG", options=dict(ftol=1e-12))
+
+
+def test_augmented_lagrangian_resume_continues_the_run():
+    """A run split into two calls, the second resumed from the first's state, is the one-call run."""
+    from scipy.optimize import NonlinearConstraint
+    from vmex import optimize as opt
+
+    def rosenbrock(x):
+        return (float((1-x[0])**2 + 100*(x[1]-x[0]**2)**2),
+                np.array([-2*(1-x[0]) - 400*x[0]*(x[1]-x[0]**2), 200*(x[1]-x[0]**2)]))
+
+    disk = NonlinearConstraint(lambda x: np.array([x@x]), -np.inf, 1.5, jac=lambda x: 2*x[None])
+    scales = np.array([.5, 2.])
+
+    def run(x0, steps, **resume):
+        p = opt.FunctionProblem.from_functions(x0, scales=scales, value_and_grad=rosenbrock)
+        return opt.minimize(p, method="AUGLAG", constraints=disk, options=dict(maxiter=steps, **resume))
+
+    whole = run(np.array([-1.2, 1.]), 24)
+    first = run(np.array([-1.2, 1.]), 13)
+    second = run(first.x, 11, resume=first.state)
+    assert first.state["row_keys"].size and first.state["outer"] >= 1
+    np.testing.assert_allclose(second.x, whole.x, rtol=1e-9, atol=1e-12)
+    assert second.penalty == whole.penalty
+    with pytest.raises(ValueError, match="resume state does not match"):
+        opt.minimize(opt.FunctionProblem.from_functions(np.zeros(3), value_and_grad=lambda x: (float(x@x), 2*x)),
+                     method="AUGLAG", constraints=NonlinearConstraint(lambda x: np.array([x.sum()]), 1., np.inf,
+                                                                       jac=lambda x: np.ones((1, 3))),
+                     options=dict(resume=first.state))
+
+
+def test_augmented_lagrangian_penalty_returns_once_feasible():
+    """A penalty far above what the violation needs (a resumed run's 1e6, raised by an infeasibility long gone)
+    returns toward its starting value once the run is feasible, and the run still ends at the constrained minimum;
+    a violation below ``feasibility`` never raises it."""
+    from scipy.optimize import NonlinearConstraint
+    from vmex import optimize as opt
+
+    def rosenbrock(x):
+        return (float((1-x[0])**2 + 100*(x[1]-x[0]**2)**2),
+                np.array([-2*(1-x[0]) - 400*x[0]*(x[1]-x[0]**2), 200*(x[1]-x[0]**2)]))
+
+    disk = NonlinearConstraint(lambda x: np.array([x@x]), -np.inf, 1.5, jac=lambda x: 2*x[None])
+
+    def run(x0, steps, **options):
+        p = opt.FunctionProblem.from_functions(x0, scales=np.array([.5, 2.]), value_and_grad=rosenbrock)
+        return opt.minimize(p, method="AUGLAG", constraints=disk, options=dict(maxiter=steps, **options))
+
+    reference = run(np.array([-1.2, 1.]), 300)
+    first = run(np.array([-1.2, 1.]), 8)  # mid-run, its penalty then raised as if by an earlier infeasibility
+    second = run(first.x, 300, resume=dict(first.state, penalty=1e6))
+    assert second.success and second.max_violation <= 1e-8 and second.penalty == 10.0
+    np.testing.assert_allclose(second.x, reference.x, atol=1e-6)
+    loose = run(np.array([-1.2, 1.]), 300, feasibility=1.0)  # every violation here is below 1: no growth
+    assert loose.success and loose.penalty <= 10.0
+    np.testing.assert_allclose(loose.x, reference.x, atol=1e-6)
 
 
 def test_status_branch_is_python_when_concrete_and_cond_when_traced(monkeypatch):

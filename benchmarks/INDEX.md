@@ -12,8 +12,8 @@ uncited records are reachable through git history: link them with a
 permalink (`https://github.com/uwplasma/vmex/blob/<commit>/benchmarks/...`)
 rather than keeping the file.
 
-35 committed artifacts: 30 standalone records and 1 grouped directory holding
-5 files. 31 of the 31 entries below are cited by a page, a test or another
+38 committed artifacts: 33 standalone records and 1 grouped directory holding
+5 files. 34 of the 34 entries below are cited by a page, a test or another
 script; 0 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
@@ -34,6 +34,7 @@ hand rather than by a script in this tree.
 | `benchmarks/essos_cross_code.json` |  |  | 2026-10-11 | `README.md`, `benchmarks/make_essos_cross_code_figures.py`, `docs/_static/figures/figures.json` |
 | `benchmarks/exact_equilibria.json` |  |  | 2026-10-10 | `benchmarks/make_exact_equilibria_figure.py`, `docs/_static/figures/figures.json`, `docs/explanation/validation.md` |
 | `benchmarks/extender_ab_20260923.json` | `benchmarks/extender_ab.py` |  | 2026-09-23 | `docs/explanation/nestor-vacuum.rst` |
+| `benchmarks/free_boundary_limits_2026-10-16.json` |  |  | 2026-10-16 | `docs/explanation/free-boundary-limits.md` |
 | `benchmarks/freeboundary_multigrid.json` | `benchmarks/run_freeboundary_multigrid.py` | `b0cc789e` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json` |  | `8ef81c44` | 2026-09-02 | `docs/explanation/validation.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md` |  |  |  | `README.md` |
@@ -54,6 +55,8 @@ hand rather than by a script in this tree.
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_m4.json` | `benchmarks/strong_force.py` | `9481f64a` |  | `docs/reference/performance.rst` |
+| `benchmarks/three_terms_resolution.json` | `benchmarks/run_three_terms_resolution.py` |  |  | `docs/explanation/validation.md` |
+| `benchmarks/three_terms_resolution_vacuum.json` | `benchmarks/run_three_terms_resolution.py` |  |  | `docs/explanation/validation.md` |
 | `benchmarks/trace_cross_code.json` | `benchmarks/trace_cross_code.py` |  | 2026-09-27 | `docs/_static/figures/figures.json`, `docs/_static/figures/sources/make_trace_figures.py`, `docs/howto/trace-alpha-particles.md` |
 
 ## Grouped directories

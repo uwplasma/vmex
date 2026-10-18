@@ -8,6 +8,8 @@ Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
   legacy ``quasisymmetry_ratio_residual_from_wout``).
 - practical scalar targets — :func:`aspect_ratio`, :func:`mean_iota`,
   :func:`edge_iota`, :func:`mirror_ratio`, :func:`volume`,
+  :func:`major_radius`, :func:`axis_iota` (from the :func:`geometric_iota`
+  profile), :func:`axis_field_strength`,
   :func:`magnetic_well`, :func:`max_elongation` — each a pure function of
   ``(SpectralState, SolverRuntime)``.
 - :func:`quasi_isodynamic_residual` — a distilled Goodman-style QI residual
@@ -74,11 +76,11 @@ import jax.numpy as jnp
 
 from solvax import (
     auto_chunk_size,
-    chunk_map,
 )
 
+from .loops import map_columns
 from .device import AUTO
-from .errors import AdjointSolveError, VmecConvergenceError
+from .errors import AdjointSolveError, TrialRejected, VmecConvergenceError
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .solver import (
@@ -118,9 +120,13 @@ from .statephysics import (
     _lgradb_state_tables,
     _mode_matrix,
     aspect_ratio,
+    axis_field_strength,
+    axis_iota,
     edge_iota,
     elongation_profile,
+    geometric_iota,
     iota_edge,
+    major_radius,
     max_elongation,
     mean_iota,
     min_abs_iota,
@@ -134,6 +140,8 @@ from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRe
 
 __all__ = [
     "report_targets",
+    "FreeBoundaryProblem",  # noqa: F822
+    "TrialRejected",
     "VmecProblem",
     "FunctionProblem",
     "Evaluation",
@@ -145,11 +153,15 @@ __all__ = [
     "solve_equilibrium",
     "QuasisymmetryRatioResidual",
     "aspect_ratio",
+    "major_radius",
     "mean_iota",
     "min_abs_iota",
     "soft_min_abs_iota",
     "edge_iota",
     "iota_edge",
+    "axis_iota",
+    "axis_field_strength",
+    "geometric_iota",
     "mirror_ratio",
     "volume",
     "volume_average_beta",
@@ -192,6 +204,9 @@ Array = Any
 
 
 def __getattr__(name: str):  # PEP 562 lazy re-export
+    if name == "FreeBoundaryProblem":
+        from .freeboundary_problem import FreeBoundaryProblem
+        return FreeBoundaryProblem
     # bootstrap.py lazily imports this module inside self_consistent_bootstrap,
     # so the f_boot objective is re-exported lazily to keep the two decoupled.
     if name == "RedlBootstrapMismatch":
@@ -332,8 +347,8 @@ class Equilibrium:
 def _auto_jac_chunk(dim: int) -> int:
     """Avoid a second remainder graph without expanding the memory budget."""
     bound = min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
-    # lax.map traces a separate vmap for the tail. Prefer a nearby divisor,
-    # but retain the original width when avoiding a tail would serialize it.
+    # map_columns pads an uneven last step. Prefer a nearby divisor, but
+    # retain the original width when avoiding padding would serialize it.
     widths = range(bound, (bound + 1) // 2 - 1, -1)
     return next((width for width in widths if dim % width == 0), bound)
 
@@ -443,7 +458,7 @@ def solve_equilibrium(
     inp: VmecInput,
     *,
     initial_state: SpectralState | None = None,
-    raise_on_max_iterations: bool = False,
+    raise_on_max_iterations: bool = True,
     verbose: bool = False,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
@@ -453,10 +468,11 @@ def solve_equilibrium(
     """Converge ``inp`` with the core multigrid solver -> :class:`Equilibrium`.
 
     ``verbose=True`` prints the VMEC iteration table, including the current
-    iteration count and force residuals.  ``raise_on_max_iterations=False``
-    by default: during optimization a
-    NITER-exhausted trial state is still a usable (penalized) sample —
-    VMEC2000 behaves the same way.  Extra keywords go to
+    iteration count and force residuals.  A ladder whose final stage stops
+    at its iteration cap short of its tolerance raises
+    (:class:`~vmex.core.errors.VmecConvergenceError`): an unconverged state is
+    never returned as an equilibrium.  ``raise_on_max_iterations=False`` is
+    the explicit opt-out for a caller that checks ``result`` itself.  Extra keywords go to
     :func:`vmex.core.multigrid.solve_multigrid`. ``forward_ftol`` and
     ``forward_max_iterations`` replace the input ladder's final tolerance and
     iteration cap, using the same names as the optimization problem API.
@@ -1426,7 +1442,9 @@ _CURTOR_SCALE = 1.0e6
 
 
 def _current_uses_spline(inp: VmecInput) -> bool:
-    return "spline" in str(inp.pcurr_type).strip().lower()
+    """Whether the current profile is given by knot values (``AC_AUX_F``: splines and line segments)."""
+    kind = str(inp.pcurr_type).strip().lower()
+    return "spline" in kind or "line_segment" in kind
 
 
 def _current_values(inp: VmecInput, k: int) -> np.ndarray:
@@ -1486,6 +1504,8 @@ def _current_dof_setup(inp: VmecInput, current_dofs: int | None) -> tuple[int, f
     Zenodo/self_consistent_bootstrap decks, O(1) for shape-normalized decks —
     is the right trust-region unit; the
     spec's ``|curtor|`` is the fallback when the seed AC block is all zero).
+    A line-segment profile frees its ``AC_AUX_F`` values as a spline does
+    (:func:`_current_uses_spline`).
     """
     if not current_dofs:
         return 0, 1.0
@@ -1494,11 +1514,6 @@ def _current_dof_setup(inp: VmecInput, current_dofs: int | None) -> tuple[int, f
         raise ValueError(f"current_dofs must be a positive int, got {current_dofs!r}")
     if int(inp.ncurr) != 1:
         raise ValueError("current_dofs requires ncurr = 1 (prescribed current)")
-    kind = str(inp.pcurr_type).strip().lower()
-    if "line_segment" in kind:
-        raise ValueError(
-            "current_dofs supports AC coefficients or spline knot values, "
-            f"not pcurr_type={inp.pcurr_type!r}")
     source = inp.ac_aux_f if _current_uses_spline(inp) else inp.ac
     size = int(np.asarray([] if source is None else source).size)
     if k > size:
@@ -1843,6 +1858,7 @@ def make_problem(
     vary_major_radius: bool = False,
     x0: np.ndarray | None = None,
     current_dofs: int | None = None,
+    vary_phiedge: bool = False,
     derivative_method: str = "implicit",
     fd_method: str = "3-point",
     fd_rel_step: float | None = None,
@@ -1943,6 +1959,11 @@ def make_problem(
     implicit differentiation. The default preserves strict gradients;
     ``numpy.inf`` explicitly disables refinement for legacy comparisons.
 
+    ``vary_phiedge=True`` (implicit derivatives only) appends a relative
+    toroidal-flux dof, ``PHIEDGE = PHIEDGE_0 (1 + x[-1])``, after the
+    boundary and current dofs; it matters when a beta or field-strength row
+    ties the flux to the boundary.
+
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
     stage changes ``mpol``, ``ntor``, or radial resolution: trial hot restarts
@@ -1957,6 +1978,8 @@ def make_problem(
         from .restart import restart_state
         source = restart_from.wout if isinstance(restart_from, Equilibrium) else restart_from
         initial_state = restart_state(source, inp)
+    if vary_phiedge and derivative_method != "implicit":
+        raise ValueError("vary_phiedge requires derivative_method='implicit'")
     if derivative_method == "finite_difference":
         problem = _make_finite_difference_problem(
             inp,
@@ -2015,6 +2038,8 @@ def make_problem(
     k_cur, _ = _current_dof_setup(inp, current_dofs)
     if scales is not None and k_cur:
         scales = np.concatenate([scales, np.ones(k_cur + 1)])
+    if scales is not None and vary_phiedge:
+        scales = np.concatenate([scales, [1.0]])
     problem = _run_with_progress(
         lambda: _least_squares_implicit(
             list(objective_terms or ()),
@@ -2023,6 +2048,7 @@ def make_problem(
             vary_major_radius=bool(vary_major_radius),
             x0=x0,
             current_dofs=current_dofs,
+            vary_phiedge=bool(vary_phiedge),
             evaluation_progress=evaluation_progress,
             jac_chunk_size=jacobian_batch_size,
             jac_solver=jac_solver,
@@ -2111,7 +2137,7 @@ def least_squares(
 
     ``current_dofs = k`` additionally frees the current profile: the first
     ``k`` ``AC`` coefficients, or the first ``k`` ``AC_AUX_F`` values for a
-    spline profile, plus ``CURTOR``.  For an ``n``-knot spline, use
+    spline or line-segment profile, plus ``CURTOR``.  For an ``n``-knot spline, use
     ``current_dofs=n-1``: the remaining fixed ordinate removes the profile's
     overall-scale null direction because ``CURTOR`` already sets that scale.
     The values are scaled by their frozen
@@ -2150,7 +2176,7 @@ def least_squares(
     The knobs below are inert for ``jac=None``.
 
     ``jac_chunk_size`` chunks the per-dof Jacobian columns via
-    :func:`solvax.chunk_map`: ``"auto"`` (default) caps SOLVAX's
+    :func:`vmex.core.loops.map_columns` (batches of at least two): ``"auto"`` (default) caps SOLVAX's
     device-aware width by a conservative square-root policy, so an
     accelerator memory report cannot expand the full probe batch; an ``int``
     fixes that many dofs at a time; ``None`` forces one wide batch. Automatic
@@ -2318,9 +2344,568 @@ def least_squares(
     return result
 
 
+#: Distance outside its bounds at which a constraint row is reported for a
+#: rejected SLSQP line-search probe, so the probe is refused without a
+#: fabricated Jacobian.
+_REJECTED_CONSTRAINT_OFFSET = 1e6
+
+
+# Augmented Lagrangian (method="AUGLAG" of minimize): fixed parameters, in scaled coordinates and row units.
+_AL_PENALTY = 10.0  # starting penalty: with F(start) = 1, a violation of one row unit costs five starting objectives
+_AL_RADIUS, _AL_MAX_RADIUS = 0.1, 100.0  # starting and largest trust radius
+_AL_MIN_RADIUS = 1e-8 * _AL_RADIUS  # a shorter step only resolves the evaluations' noise
+_AL_INNER_STEPS = 10  # accepted steps per multiplier update
+# The one constraint tolerance (row units): a point is feasible, for the stopping test and for the penalty schedule,
+# when its largest violation is at most this. The penalty grows only above it and returns to _AL_PENALTY below it:
+# rows that hold a limit at every point (a coil's curvature at each quadrature point) move their nearly active
+# neighbours across the limit as the active point moves, and a penalty driven up by that excursion that never came
+# back cut every later step short with its kinks (vacuum QA, 10-17: penalty 1e6, steps of 2e-4 for 300 steps).
+_AL_FEASIBILITY = 1e-6
+
+
+def _phr(v, multipliers, penalty, equality):
+    """Powell-Hestenes-Rockafellar terms of rows ``v`` (``v <= 0``, or ``v = 0`` where ``equality``) and their slopes.
+
+    The slope ``max(lambda + rho v, 0)`` (``lambda + rho v`` for an equality) is also the next multiplier.
+    """
+    slope = multipliers + penalty * v
+    slope = np.where(equality, slope, np.maximum(slope, 0.0))
+    terms = np.where(equality, multipliers * v + 0.5 * penalty * v * v,
+                     (slope * slope - multipliers * multipliers) / (2.0 * penalty))
+    return terms, slope
+
+
+def _damped_bfgs(H, d, y):
+    """``(H', damped)``: the BFGS update of ``H`` by the secant pair ``(d, y)``, Powell-damped to stay positive
+    definite."""
+    Hd = H @ d
+    dHd, dy = d @ Hd, d @ y
+    if dHd <= 0.0:  # H is zero along d: start from the pair's own curvature
+        return (np.outer(y, y) / dy, False) if dy > 0.0 else (H, False)
+    damped = dy < 0.2 * dHd
+    if damped:
+        theta = 0.8 * dHd / (dHd - dy)
+        y, dy = theta * y + (1.0 - theta) * Hd, 0.2 * dHd
+    return H + np.outer(y, y) / dy - np.outer(Hd, Hd) / dHd, damped
+
+
+def _augmented_lagrangian_step(B, gradient, A, v, multipliers, penalty, equality, radius, free):
+    """Step ``d`` with ``|d| <= radius`` minimizing the augmented Lagrangian model, and the model's decrease.
+
+    The model is ``g.d + d.B.d/2`` plus the PHR terms of the linearized rows ``v + A d``: piecewise quadratic and
+    convex. For a damping ``sigma`` an active-set iteration minimizes it plus ``sigma |d|^2 / 2`` (the penalty
+    curvature ``rho A_a^T A_a`` of the active rows is exact); ``sigma`` is bisected onto the trust radius. Only the
+    ``free`` coordinates move (the others sit on a bound the gradient pushes against).
+    """
+    def model(d):
+        return gradient @ d + 0.5 * d @ B @ d + _phr(v + A @ d, multipliers, penalty, equality)[0].sum()
+
+    factors = {}  # active set -> eigenpairs of the model Hessian on the free coordinates, and the model gradient
+
+    def solve(sigma):
+        active, best = equality | (multipliers + penalty * v > 0), None
+        for _ in range(20):
+            key = active.tobytes()
+            if key not in factors:
+                rows = A[active]
+                w, V = np.linalg.eigh((B + penalty * rows.T @ rows)[np.ix_(free, free)])
+                factors[key] = (w, V, (gradient + rows.T @ (multipliers[active] + penalty * v[active]))[free])
+            w, V, rhs = factors[key]
+            d = np.zeros_like(gradient)
+            d[free] = -V @ ((V.T @ rhs) / (w + sigma))
+            value = model(d) + 0.5 * sigma * d @ d
+            if best is None or value < best[0]:
+                best = (value, d)
+            changed = equality | (multipliers + penalty * (v + A @ d) > 0)
+            if np.array_equal(changed, active):
+                break
+            active = changed
+        return best[1]
+
+    d = solve(0.0)
+    if np.linalg.norm(d) > radius:
+        low, high = 0.0, 1.0
+        while np.linalg.norm(solve(high)) > radius:
+            low, high = high, 10.0 * high
+        for _ in range(60):
+            middle = 0.5 * (low + high) if low == 0.0 else np.sqrt(low * high)
+            trial = solve(middle)
+            if np.linalg.norm(trial) > radius:
+                low = middle
+            else:
+                high, d = middle, trial
+                if np.linalg.norm(trial) > 0.9 * radius:
+                    break
+        else:
+            d = solve(high)
+    return d, model(np.zeros_like(d)) - model(d)
+
+
+class _Rows:
+    """Constraint rows ``row_lower <= c <= row_upper`` as violations ``v <= 0`` (``v = 0`` for an equality).
+
+    ``v = sign * c[index] - offset``: ``c - target`` for an equality, ``lower - c`` and ``c - upper`` for the finite
+    sides of the others (a two-sided row is two violations).
+    """
+
+    def __init__(self, row_lower, row_upper):
+        equal = np.isfinite(row_lower) & (row_lower == row_upper)
+        low, high = np.isfinite(row_lower) & ~equal, np.isfinite(row_upper) & ~equal
+        self.index = np.r_[np.flatnonzero(equal), np.flatnonzero(low), np.flatnonzero(high)].astype(int)
+        self.sign = np.r_[np.ones(equal.sum()), -np.ones(low.sum()), np.ones(high.sum())]
+        self.offset = np.r_[row_lower[equal], -row_lower[low], row_upper[high]]
+        self.equality = np.r_[np.ones(equal.sum(), bool), np.zeros(low.sum() + high.sum(), bool)]
+
+    def values(self, c):
+        return self.sign * c[self.index] - self.offset
+
+    def jacobian(self, J):
+        return self.sign[:, None] * J[self.index]
+
+    def violation(self, v):
+        """The largest violation, 0 when feasible."""
+        return float(np.max(np.where(self.equality, np.abs(v), np.maximum(v, 0.0)), initial=0.0))
+
+
+@dataclass
+class _ALState:
+    """What an augmented-Lagrangian run carries between steps, and between calls (``resume``)."""
+
+    scale: float  # the objective's scale: F = scale * f, F(start) = 1
+    multipliers: np.ndarray
+    penalty: float
+    radius: float  # trust radius, scaled coordinates
+    B_f: np.ndarray | None  # BFGS curvature of the objective, None before the first step
+    B_rows: dict  # row -> BFGS curvature of that row, kept from its first nonzero multiplier on
+    previous: float  # the violation at the latest multiplier update
+    entry: float  # the violation at the start of the inner loop
+    tolerance: float | None = None  # the inner loop's projected-gradient tolerance, set by the first gradient
+    inner: int = 0  # accepted steps since the latest multiplier update
+    outer: int = 0  # multiplier updates
+    stalls: int = 0  # multiplier updates in a row without a step
+
+    def hessian(self, multipliers):
+        """The Lagrangian's curvature model ``B_f + sum_k max(lambda_k, 0) B_k``."""
+        return self.B_f + sum(max(multipliers[k], 0.0) * B_k for k, B_k in self.B_rows.items())
+
+    def to_resume(self):
+        """The state as arrays and numbers (``report["state"]``, ``options["resume"]``; saved with ``np.savez``)."""
+        keys = sorted(self.B_rows)
+        return dict(scale=self.scale, multipliers=self.multipliers.copy(), penalty=self.penalty,
+                    trust_radius=self.radius, B_f=np.zeros(0) if self.B_f is None else self.B_f,
+                    row_keys=np.asarray(keys, dtype=int), row_B=[self.B_rows[k] for k in keys],
+                    inner=self.inner, outer=self.outer, stalls=self.stalls, previous=self.previous, entry=self.entry,
+                    tolerance=np.inf if self.tolerance is None else self.tolerance)
+
+    @classmethod
+    def from_resume(cls, state, n_rows, n):
+        if (np.shape(state["multipliers"]) != (n_rows,)
+                or (np.size(state["B_f"]) and np.shape(state["B_f"]) != (n, n))):
+            raise ValueError("resume state does not match these rows and coordinates")
+        return cls(scale=float(state["scale"]), multipliers=np.asarray(state["multipliers"], dtype=float).copy(),
+                   penalty=float(state["penalty"]), radius=float(state["trust_radius"]),
+                   B_f=None if np.size(state["B_f"]) == 0 else np.asarray(state["B_f"], dtype=float).copy(),
+                   B_rows={int(k): np.asarray(m, dtype=float).copy() for k, m in zip(state["row_keys"], state["row_B"])},
+                   previous=float(state["previous"]), entry=float(state["entry"]),
+                   tolerance=None if not np.isfinite(state["tolerance"]) else float(state["tolerance"]),
+                   inner=int(state["inner"]), outer=int(state["outer"]), stalls=int(state["stalls"]))
+
+
+def _augmented_lagrangian(evaluate, linearize, accept, u, lower, upper, row_lower, row_upper, options, report):
+    """Minimize ``f(u)`` subject to ``row_lower <= c(u) <= row_upper`` and ``lower <= u <= upper`` by a PHR
+    augmented Lagrangian (Conn, Gould and Toint; Birgin and Martinez) with a trust-region quasi-Newton inner solver.
+
+    Outer iterations minimize ``F(u) + sum_k psi(v_k(u))`` approximately at fixed multipliers ``lambda`` and
+    penalty ``rho`` (``F = f / |f(start)|``, the scale clipped to 1e-12..1e12; ``v`` the rows' violations,
+    :class:`_Rows`; ``psi`` the PHR terms, :func:`_phr`), then set ``lambda = max(lambda + rho v, 0)``. The penalty
+    grows tenfold after an inner loop that moved unless the violation fell to half or to ``feasibility`` (option,
+    row units, default ``1e-6``, also the stopping test's), and returns to its starting value at the first
+    multiplier update at a feasible point, so a large penalty, whose kinks cut the steps short, does not outlive
+    the infeasibility that raised it.
+
+    An inner loop ends at a projected-gradient tolerance (a tenth of the previous loop's), after ten accepted
+    steps, when the trust radius collapses, or when the violation doubles past one row unit (a run-away, not the
+    small excursion of a nearly feasible start). Each step minimizes the model of
+    :func:`_augmented_lagrangian_step`: the Lagrangian curvature ``B_f + sum_k lambda_k B_k`` from damped BFGS
+    matrices of the objective and of every row that has had a multiplier (so a multiplier change rescales a row's
+    curvature at once), with the penalty curvature of the active rows exact. A step is accepted on a ratio of actual
+    to predicted decrease above 1e-4; the multipliers then become those of the model's step. A trial that raises
+    :class:`~vmex.core.errors.TrialRejected` (or does not decrease) shrinks the radius; a radius that collapses
+    without a step forces a multiplier update and restarts the radius and the curvature.
+
+    Parameters
+    ----------
+    evaluate:
+        ``evaluate(u) -> (f, c)`` at a trial point.
+    linearize:
+        ``linearize(u) -> (f, c, grad f, dc/du)``, only at accepted points (as SLSQP); its values (of a polished
+        point) replace the trial's.
+    accept:
+        ``accept(u, info)`` is told each accepted point; ``info`` is ``report`` plus the step's
+        ``augmented_lagrangian``, ``ratio``, ``rejected_trials``, ``step_norm``, ``predicted_decrease``,
+        ``objective_decrease``, ``penalty_decrease`` and ``damped`` (whether the objective's BFGS update was).
+    u, lower, upper, row_lower, row_upper:
+        Start and bounds (scaled coordinates); row bounds (row units, ``-inf``/``inf`` where open).
+    options:
+        ``maxiter`` (accepted steps, default 100), ``feasibility`` (see above) and ``resume``, the
+        ``report["state"]`` of an earlier call: the run
+        continues from its last accepted point with its scale, multipliers, penalty, radius, curvature and
+        counters, so a run split over several calls (allocations) is one run.
+    report:
+        A dict updated after every step with ``multipliers``, ``penalty``, ``max_violation``,
+        ``outer_iterations``, ``trust_radius`` and ``state``.
+
+    Returns
+    -------
+    ``(success, stop_reason, message)``. The run ends at its step budget (``"accepted_step_budget_reached"``) or
+    after three multiplier updates in a row without a step: stationary (success) if it is feasible and its trials
+    were solved, ``"no_progress"`` if no trial could be evaluated.
+    """
+    unknown = set(options) - {"maxiter", "resume", "feasibility"}
+    if unknown:
+        raise ValueError(f"AUGLAG takes only maxiter, feasibility and resume, not {sorted(unknown)}")
+    budget = int(options.get("maxiter", 100))
+    feasibility = float(options.get("feasibility", _AL_FEASIBILITY))
+    rows = _Rows(row_lower, row_upper)
+    f, c, gf, J = linearize(u)
+    v, A = rows.values(c), rows.jacobian(J)
+    if options.get("resume") is None:
+        # zero multipliers, not a least-squares fit: nearly parallel active rows (a limit at every point) inflate it
+        start = rows.violation(v)
+        s = _ALState(scale=1.0 if f == 0.0 else float(np.clip(1.0 / abs(f), 1e-12, 1e12)),
+                     multipliers=np.zeros(v.size), penalty=_AL_PENALTY, radius=_AL_RADIUS, B_f=None, B_rows={},
+                     previous=start, entry=start)
+    else:
+        s = _ALState.from_resume(options["resume"], v.size, u.size)
+    F, gF = s.scale * f, s.scale * gf
+    B = np.eye(u.size) if s.B_f is None else s.hessian(s.multipliers)  # the model's curvature
+    steps, rejected = 0, 0  # accepted steps of this call; rejected trials since the latest step
+    solved = False  # since the latest step a trial was solved, or the model foresaw no decrease
+
+    def note():
+        report.update(multipliers=s.multipliers.copy(), penalty=s.penalty, max_violation=rows.violation(v),
+                      outer_iterations=s.outer, trust_radius=s.radius, state=s.to_resume())
+
+    note()
+    while True:
+        terms, slope = _phr(v, s.multipliers, s.penalty, rows.equality)
+        gradient = gF + A.T @ slope
+        projected = np.max(np.abs(u - np.clip(u - gradient, lower, upper)), initial=0.0)
+        if s.tolerance is None:
+            s.tolerance = 0.1 * projected
+        if (projected <= s.tolerance or s.inner >= _AL_INNER_STEPS or s.radius < _AL_MIN_RADIUS
+                or (s.inner > 0 and rows.violation(v) > max(2.0 * s.entry, 1.0))):
+            # multiplier update; the penalty test is on the violation alone (a violation-complementarity measure
+            # seldom halves in ten steps and drove the penalty to 1e12 at feasible points)
+            measure = rows.violation(v)
+            if s.inner > 0 and measure > max(0.5 * s.previous, feasibility):
+                s.penalty = min(10.0 * s.penalty, 1e12)
+            elif measure <= feasibility:  # feasible: the penalty that is left only cuts steps short
+                s.penalty = _AL_PENALTY
+            s.multipliers = np.clip(slope, -1e12, 1e12)
+            s.stalls = s.stalls + 1 if s.inner == 0 and s.radius < _AL_MIN_RADIUS else 0
+            if s.stalls >= 3:  # no decrease at any radius from three fresh starts
+                note()
+                stationary = solved and rows.violation(v) <= feasibility
+                return stationary, None if stationary else "no_progress", "no decrease of the augmented Lagrangian found"
+            s.previous, s.tolerance, s.inner, s.outer = measure, 0.1 * s.tolerance, 0, s.outer + 1
+            s.entry = rows.violation(v)
+            if s.radius < _AL_MIN_RADIUS:  # collapsed: restart the radius and the curvature
+                s.radius, B, s.B_f, s.B_rows = _AL_RADIUS, np.eye(u.size), None, {}
+            note()
+            continue
+        free = ~(((u <= lower) & (gradient > 0)) | ((u >= upper) & (gradient < 0)))
+        d, _ = _augmented_lagrangian_step(B, gF, A, v, s.multipliers, s.penalty, rows.equality, s.radius, free)
+        d = np.clip(u + d, lower, upper) - u
+        predicted = (gF @ d + 0.5 * d @ B @ d + _phr(v + A @ d, s.multipliers, s.penalty, rows.equality)[0].sum()
+                     - terms.sum())
+        size = float(np.linalg.norm(d))
+        if not (np.isfinite(predicted) and predicted < 0.0) or size == 0.0:  # no model decrease: shrink
+            s.radius = 0.25 * min(s.radius, size) if size > 0 else 0.25 * s.radius
+            solved = True
+            continue
+        try:
+            f1, c1 = evaluate(u + d)
+            solved = True
+            terms1 = _phr(rows.values(c1), s.multipliers, s.penalty, rows.equality)[0]
+            ratio = (F + terms.sum() - s.scale * f1 - terms1.sum()) / -predicted
+            if not (np.isfinite(ratio) and ratio > 1e-4):
+                raise TrialRejected("no decrease of the augmented Lagrangian")
+            f1, c1, gf1, J1 = linearize(u + d)
+        except TrialRejected:
+            s.radius, rejected = 0.25 * size, rejected + 1
+            continue
+        # accepted: curvature updates, the model step's multipliers, the radius
+        v1, A1 = rows.values(c1), rows.jacobian(J1)
+        terms1 = _phr(v1, s.multipliers, s.penalty, rows.equality)[0]
+        step_multipliers = np.clip(_phr(v + A @ d, s.multipliers, s.penalty, rows.equality)[1], -1e12, 1e12)
+        y_f = s.scale * gf1 - gF
+        if s.B_f is None:  # scaled to the objective's mean curvature along the first step
+            s.B_f = max(d @ y_f / (d @ d), 1e-8) * np.eye(u.size) if d @ y_f > 0 else np.eye(u.size)
+        s.B_f, damped = _damped_bfgs(s.B_f, d, y_f)
+        for k in np.flatnonzero(step_multipliers != 0.0):
+            s.B_rows.setdefault(k, np.zeros((u.size, u.size)))
+        for k, B_k in s.B_rows.items():
+            y_k = A1[k] - A[k]
+            if d @ y_k > 0:  # a row's convex curvature only: B stays positive definite
+                s.B_rows[k] = _damped_bfgs(B_k, d, y_k)[0]
+        B = s.hessian(step_multipliers)
+        s.multipliers = step_multipliers
+        u, F_old = u + d, F
+        F, gF, v, A = s.scale * f1, s.scale * gf1, v1, A1
+        steps, s.inner = steps + 1, s.inner + 1
+        if ratio > 0.75 and size > 0.8 * s.radius:  # the step's bisection stops anywhere in (0.9, 1] radius
+            s.radius = min(2.0 * s.radius, _AL_MAX_RADIUS)
+        elif ratio < 0.25:
+            s.radius = 0.5 * size
+        note()
+        accept(u, dict(report, augmented_lagrangian=F + terms1.sum(), ratio=ratio, rejected_trials=rejected,
+                       step_norm=size, predicted_decrease=-predicted, objective_decrease=F_old - F,
+                       penalty_decrease=terms.sum() - terms1.sum(), damped=damped))
+        rejected, solved = 0, False
+        if steps >= budget:
+            return False, "accepted_step_budget_reached", "accepted_step_budget_reached"
+
+
+def _minimize_problem(problem, *, x0=None, method="SLSQP", bounds=None,
+                      constraints=(), callback=None, options=None, tol=None):
+    """Run SciPy SLSQP or the augmented Lagrangian on a :class:`FunctionProblem` in scaled coordinates.
+
+    SciPy iterates on ``u = (x - x0) / problem.scales``; bounds, constraints,
+    callbacks and the returned ``x``/``jac`` stay in the problem's units. A
+    problem exposing ``accept_x`` (a
+    :class:`~vmex.core.freeboundary_problem.FreeBoundaryProblem` or
+    :class:`~vmex.core.freeboundary_vc.ThreeTermsFreeBoundaryProblem`) must
+    start at its accepted point, and each SLSQP major iterate is promoted with
+    ``accept_x`` when its Jacobian is requested.
+
+    ``method="AUGLAG"`` minimizes a PHR augmented Lagrangian of the same
+    constraints instead (:func:`_augmented_lagrangian`): it may cross infeasible
+    designs, stops on first-order optimality and feasibility rather than on a
+    small objective change, and a rejected trial shrinks its trust region
+    instead of ending the call. Each accepted point is promoted as for SLSQP.
+
+    Parameters
+    ----------
+    problem:
+        The problem; ``problem.bounds`` is used when ``bounds`` is ``None``.
+    x0:
+        Start point (default ``problem.x0``).
+    method:
+        ``"SLSQP"`` or ``"AUGLAG"``.
+    bounds, constraints, tol:
+        As for :func:`scipy.optimize.minimize`; constraints are
+        :class:`~scipy.optimize.LinearConstraint` or
+        :class:`~scipy.optimize.NonlinearConstraint` with an analytic
+        Jacobian. A constraint value that raises :class:`~vmex.core.errors.TrialRejected`
+        reports a point far outside its bounds.
+    callback:
+        Called after each accepted step with ``x``, or with an
+        :class:`~scipy.optimize.OptimizeResult` if its only parameter is
+        named ``intermediate_result``; ``StopIteration`` stops the run.
+    options:
+        SciPy SLSQP options, or those of :func:`_augmented_lagrangian`;
+        ``maxiter`` (default 100) is the budget of accepted steps for a
+        stateful problem (for AUGLAG, for any problem).
+
+    Returns
+    -------
+    scipy.optimize.OptimizeResult
+        With ``x``, ``fun`` and ``jac`` at the last accepted point for a
+        stateful problem (or on success), plus ``accepted_steps`` and
+        ``stop_reason``: ``None`` when SciPy stopped on its own,
+        ``"accepted_step_budget_reached"``, ``"callback_stopped"`` or
+        ``"equilibrium_trial_rejected"``. The last three set
+        ``success=False`` and ``status=99``. AUGLAG adds ``multipliers``,
+        ``penalty``, ``max_violation`` (largest scaled row violation) and
+        ``outer_iterations``; a point where no step can be accepted ends the run (``success`` if it is feasible,
+        else ``"no_progress"``).
+    """
+    from scipy.optimize import Bounds, LinearConstraint, NonlinearConstraint, OptimizeResult
+    from scipy.optimize import minimize as scipy_minimize
+    from scipy.sparse import issparse
+
+    if method not in ("SLSQP", "AUGLAG"):
+        raise ValueError("minimize(FunctionProblem) supports only method='SLSQP' or method='AUGLAG'")
+    start = np.asarray(problem.x0 if x0 is None else x0, dtype=float).copy()
+    scales = np.asarray(problem.scales, dtype=float)
+    if (start.shape != scales.shape or start.ndim != 1 or not np.all(np.isfinite(start))
+            or not np.all(np.isfinite(scales) & (scales > 0))):
+        raise ValueError("x0 must be finite and match finite positive problem scales")
+    promote = getattr(problem, "accept_x", None)
+    if promote is not None and not np.array_equal(start, problem.accepted.parameters):
+        raise ValueError("stateful minimization must start at the accepted equilibrium")
+    options = dict(options or {})
+    budget = int(options.get("maxiter", 100))
+    if budget < 0:
+        raise ValueError("maxiter must be nonnegative")
+    if promote is not None and method == "SLSQP":
+        # The step budget is enforced by accept(); one spare SLSQP iteration
+        # lets the last accepted step request its Jacobian.
+        options["maxiter"] = budget + 1
+    if bounds is None:
+        bounds = problem.bounds
+        if isinstance(bounds, tuple) and len(bounds) == 2:
+            bounds = Bounds(*bounds)
+    if bounds is not None:
+        if not isinstance(bounds, Bounds):
+            pairs = [(float("-inf") if lo is None else lo,
+                      float("inf") if hi is None else hi) for lo, hi in bounds]
+            bounds = Bounds(*np.asarray(pairs).T)
+        bounds = Bounds((np.asarray(bounds.lb) - start) / scales, (np.asarray(bounds.ub) - start) / scales,
+                        keep_feasible=bounds.keep_feasible)
+    if isinstance(constraints, (LinearConstraint, NonlinearConstraint, dict)):
+        constraints = (constraints,)
+    scaled_constraints, blocks = [], []  # blocks: (values, Jacobian, lower, upper) in u, raising TrialRejected
+    for constraint in tuple(constraints):
+        if isinstance(constraint, (LinearConstraint, NonlinearConstraint)) and (
+                np.all(np.isneginf(constraint.lb)) and np.all(np.isposinf(constraint.ub))):
+            continue
+        if isinstance(constraint, LinearConstraint):
+            matrix = constraint.A.multiply(scales) if issparse(constraint.A) else constraint.A * scales
+            scaled_constraints.append(LinearConstraint(
+                matrix, constraint.lb - constraint.A @ start, constraint.ub - constraint.A @ start))
+            dense = matrix.toarray() if issparse(matrix) else np.asarray(matrix)
+            blocks.append((lambda u, a=dense: a @ u, lambda u, a=dense: a,
+                           scaled_constraints[-1].lb, scaled_constraints[-1].ub))
+        elif isinstance(constraint, NonlinearConstraint):
+            if not callable(constraint.jac):
+                raise ValueError("constraints require an analytic Jacobian")
+
+            def values(u, c=constraint):
+                try:
+                    return c.fun(start + scales * u)
+                except TrialRejected:
+                    lo, hi = np.broadcast_arrays(c.lb, c.ub)
+                    offset = _REJECTED_CONSTRAINT_OFFSET
+                    return np.where(np.isfinite(lo), lo - offset, np.where(np.isfinite(hi), hi + offset, 0.0))
+
+            scaled_constraints.append(NonlinearConstraint(
+                values, constraint.lb, constraint.ub,
+                jac=lambda u, c=constraint: np.asarray(c.jac(start + scales * u)) * scales))
+            blocks.append((lambda u, c=constraint: c.fun(start + scales * u), scaled_constraints[-1].jac,
+                           constraint.lb, constraint.ub))
+        else:
+            raise TypeError("use scipy LinearConstraint or NonlinearConstraint")
+
+    accepted = start.copy()
+    value, gradient = problem.value_and_grad(accepted)
+    accepted_value, accepted_gradient = value, np.asarray(gradient).copy()
+    accepted_steps = 0
+    nfev, njev = 1, 1
+    if promote is not None and budget == 0:
+        return OptimizeResult(
+            x=start, fun=value, jac=gradient, success=False, status=99, message="accepted_step_budget_reached",
+            stop_reason="accepted_step_budget_reached", accepted_steps=0, nit=0, nfev=1, njev=1)
+
+    class _Stop(Exception):
+        pass
+
+    wants_result = callback is not None and set(inspect.signature(callback).parameters) == {"intermediate_result"}
+
+    def accept(u, info=None):
+        nonlocal accepted, accepted_value, accepted_gradient, accepted_steps
+        x = start + np.asarray(u) * scales
+        if np.array_equal(x, accepted):
+            return
+        current_value, current_gradient = problem.value_and_grad(x)
+        if promote is not None:
+            promote(x)
+        accepted, accepted_value = x.copy(), current_value
+        accepted_gradient = np.asarray(current_gradient).copy()
+        accepted_steps += 1
+        if callback is not None:
+            try:
+                if wants_result:
+                    callback(intermediate_result=OptimizeResult(
+                        x=accepted.copy(), fun=accepted_value, nit=accepted_steps, **(info or {})))
+                else:
+                    callback(accepted.copy())
+            except StopIteration as error:
+                raise _Stop("callback_stopped") from error
+        if promote is not None and accepted_steps >= budget:
+            raise _Stop("accepted_step_budget_reached")
+
+    def fun(u):
+        nonlocal nfev
+        nfev += 1
+        try:
+            return problem.fun(start + scales * u)
+        except TrialRejected:
+            return np.inf
+
+    def jac(u):
+        nonlocal nfev, njev
+        nfev += 1
+        njev += 1
+        _, gradient = problem.value_and_grad(start + scales * u)
+        gradient = np.asarray(gradient) * scales
+        # SLSQP's major-iteration callback can precede backtracking. The next
+        # Jacobian request identifies its accepted line-search point instead.
+        accept(u)
+        return gradient
+
+    if method == "AUGLAG":
+        def evaluate(u):
+            nonlocal nfev
+            nfev += 1
+            value = problem.fun(start + scales * u)
+            rows = [np.atleast_1d(np.asarray(f(u), dtype=float)) for f, *_ in blocks]
+            rows = np.concatenate(rows) if rows else np.zeros(0)
+            if not (np.isfinite(value) and np.all(np.isfinite(rows))):
+                raise TrialRejected("nonfinite objective or constraint")
+            return float(value), rows
+
+        def linearize(u):
+            nonlocal njev
+            njev += 1
+            _, gradient = problem.value_and_grad(start + scales * u)  # then evaluate reads the polished point
+            rows = [np.atleast_2d(np.asarray(jacobian(u), dtype=float)) for _, jacobian, *_ in blocks]
+            return (*evaluate(u), np.asarray(gradient, dtype=float) * scales,
+                    np.vstack(rows) if rows else np.zeros((0, start.size)))
+
+        sizes = [np.size(f(np.zeros_like(start))) for f, *_ in blocks]
+        row_lower, row_upper = (np.concatenate([np.broadcast_to(np.asarray(b[k], dtype=float), (n,))
+                                                for b, n in zip(blocks, sizes)] or [np.zeros(0)]) for k in (2, 3))
+        lower = np.broadcast_to(-np.inf if bounds is None else np.asarray(bounds.lb, dtype=float), start.shape)
+        upper = np.broadcast_to(np.inf if bounds is None else np.asarray(bounds.ub, dtype=float), start.shape)
+        report = {}
+        try:
+            success, reason, message = _augmented_lagrangian(
+                evaluate, linearize, accept, np.zeros_like(start), lower, upper, row_lower, row_upper,
+                dict(options, maxiter=budget), report)
+            result = OptimizeResult(success=success, status=0 if success else 99, message=message,
+                                    stop_reason=reason, nit=accepted_steps, nfev=nfev, njev=njev)
+        except (_Stop, TrialRejected) as error:
+            reason = str(error) if isinstance(error, _Stop) else "equilibrium_trial_rejected"
+            result = OptimizeResult(success=False, status=99, message=str(error), stop_reason=reason,
+                                    nit=accepted_steps, nfev=nfev, njev=njev)
+        result.x, result.fun, result.jac = accepted.copy(), accepted_value, accepted_gradient.copy()
+        result.accepted_steps = accepted_steps
+        result.update(report)
+        return result
+    try:
+        result = scipy_minimize(fun, np.zeros_like(start), jac=jac, method="SLSQP", bounds=bounds,
+                                constraints=scaled_constraints, options=options, tol=tol)
+        if result.success:
+            accept(result.x)
+        result.x = start + np.asarray(result.x) * scales
+        if getattr(result, "jac", None) is not None:
+            result.jac = np.asarray(result.jac) / scales
+        result.stop_reason = None
+    except (_Stop, TrialRejected) as error:
+        reason = str(error) if isinstance(error, _Stop) else "equilibrium_trial_rejected"
+        result = OptimizeResult(success=False, status=99, message=str(error), stop_reason=reason,
+                                nit=accepted_steps, nfev=nfev, njev=njev)
+    if result.success or promote is not None or getattr(result, "stop_reason", None):
+        result.x, result.fun, result.jac = accepted.copy(), accepted_value, accepted_gradient.copy()
+    result.accepted_steps = accepted_steps
+    return result
+
+
 def minimize(
-    objective_terms: Sequence[tuple[Callable, float, Any]],
-    inp: VmecInput,
+    objective_terms: Sequence[tuple[Callable, float, Any]] | FunctionProblem,
+    inp: VmecInput | None = None,
     *,
     max_mode: int | Sequence[int] = 1,
     vary_major_radius: bool = False,
@@ -2339,7 +2924,26 @@ def minimize(
     forward_max_iterations: int | None = None,
     **scipy_kwargs,
 ):
-    """Minimize the scalarized residual norm with one adjoint per gradient.
+    """Minimize a FunctionProblem with SLSQP, or a scalarized residual norm with one adjoint per gradient.
+
+    ``minimize(problem, method="SLSQP", x0=..., bounds=..., constraints=...,
+    callback=..., options=..., tol=...)`` runs SciPy SLSQP on a
+    :class:`~vmex.core.problem.FunctionProblem` through its public
+    value/gradient interface (see :func:`_minimize_problem`). All coordinates,
+    bounds, constraints, callbacks and returned derivatives use the problem's
+    units; ``problem.scales`` conditions SciPy internally. A problem exposing
+    ``accept_x``, such as
+    :class:`~vmex.core.freeboundary_problem.FreeBoundaryProblem` or
+    :class:`~vmex.core.freeboundary_vc.ThreeTermsFreeBoundaryProblem`, promotes
+    only accepted iterates and ``options["maxiter"]`` counts accepted steps.
+    Besides SciPy's fields the result carries ``accepted_steps`` and
+    ``stop_reason`` (``None``, ``"accepted_step_budget_reached"``,
+    ``"callback_stopped"`` or ``"equilibrium_trial_rejected"``; the last
+    three with ``success=False`` and ``status=99``). The equilibrium and
+    adjoint keywords below belong to the problem and must stay at their
+    defaults.
+
+    The ``minimize(objective_terms, inp, ...)`` interface:
 
     The objective is exactly ``0.5 * sum(rows**2)``, with ``rows`` defined by
     :func:`least_squares`.  Unlike Gauss--Newton least squares, a reverse
@@ -2362,6 +2966,17 @@ def minimize(
     defaults are certified on the QI, QS, ``L_grad_B``, ``DMerc`` and ``D_R``
     objective lanes; an unconverged adjoint is never returned as a gradient.
     """
+    if isinstance(objective_terms, FunctionProblem):
+        if inp is not None:
+            raise TypeError("a FunctionProblem already owns its input")
+        if (not np.isscalar(max_mode) or max_mode != 1 or vary_major_radius or current_dofs is not None
+                or not hot_restart or device is not AUTO or solve_kwargs is not None or verbose != 0
+                or adjoint_tol != 1e-6 or adjoint_maxiter != 300 or max_fsq_ratio != 1e2
+                or refine_tol != 1e-10 or forward_ftol is not None or forward_max_iterations is not None):
+            raise TypeError("configure equilibrium, coordinates and adjoint controls when building the problem")
+        return _minimize_problem(objective_terms, x0=x0, method=method, **scipy_kwargs)
+    if inp is None:
+        raise TypeError("objective tuples require a VmecInput")
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
     modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
                       else [int(m) for m in max_mode])
@@ -2557,6 +3172,7 @@ def _least_squares_implicit(
     vary_major_radius: bool = False,
     x0: np.ndarray | None,
     current_dofs: int | None = None,
+    vary_phiedge: bool = False,
     evaluation_progress: bool = False,
     jac_chunk_size: int | str | None = "auto",
     jac_solver: str = "auto",
@@ -2662,7 +3278,11 @@ def _least_squares_implicit(
     # already traces both).
     k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
     nboundary = nfam * nm + int(vary_major_radius)
-    ndof = nboundary + (k_cur + 1 if k_cur else 0)
+    # Optional trailing PHIEDGE dof, relative: PHIEDGE = PHIEDGE_0 (1 + x[jp]).
+    # Zero-current fixed-boundary physics depends on it only through beta, so
+    # it matters when a beta or field-strength row ties it to the boundary.
+    jp = nboundary + (k_cur + 1 if k_cur else 0)
+    ndof = jp + int(vary_phiedge)
     # multigrid=True routes the host solve through solve_multigrid so
     # NITER-exhausted trials are penalized instead of raising (same trial
     # policy as the finite-difference path). Public problem/minimize defaults
@@ -2710,6 +3330,8 @@ def _least_squares_implicit(
         x0 = pack_boundary(inp, max_mode, vary_major_radius=vary_major_radius)
         if k_cur:
             x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
+        if vary_phiedge:
+            x0 = np.concatenate([x0, [0.0]])
     x0 = np.asarray(x0, dtype=float)
 
     # Content key of every degree of freedom the jitted closures below bake
@@ -2730,7 +3352,7 @@ def _least_squares_implicit(
         (None if scalar_objective is None
          else _problem_callable_token(scalar_objective)),
         int(max_mode), bool(vary_major_radius),
-        None if current_dofs is None else int(current_dofs),
+        None if current_dofs is None else int(current_dofs), bool(vary_phiedge),
         x0.shape, x0.tobytes(),
         (jac_chunk_size if jac_chunk_size is None
          or isinstance(jac_chunk_size, int) else str(jac_chunk_size)),
@@ -2756,6 +3378,8 @@ def _least_squares_implicit(
                 params = dataclasses.replace(
                     params, ac=params0.ac.at[:k_cur].set(values),
                     curtor=x[nboundary + k_cur] * _CURTOR_SCALE)
+        if vary_phiedge:
+            params = dataclasses.replace(params, phiedge=params0.phiedge * (1.0 + x[jp]))
         return params
 
     def term_rows(state, rt) -> jnp.ndarray:
@@ -2954,7 +3578,7 @@ def _least_squares_implicit(
     mask_const = jax.tree.map(_place, mask_np)
 
     # One-hot dof tangents in ImplicitParams space, stacked over dofs
-    # (leading axis ndof) so chunk_map can process them in fixed-size chunks:
+    # (leading axis ndof) so map_columns can process them in fixed-size chunks:
     # boundary rbc/zbs (and, for lasym, rbs/zbc) rows first, then the scaled
     # AC/CURTOR rows.
     t_rbc = np.zeros((ndof,) + np.shape(params0.rbc))
@@ -2964,6 +3588,9 @@ def _least_squares_implicit(
     t_ac = np.zeros((ndof,) + np.shape(params0.ac))
     t_ac_aux_f = np.zeros((ndof,) + np.shape(params0.ac_aux_f))
     t_curtor = np.zeros((ndof,))
+    t_phiedge = np.zeros((ndof,))
+    if vary_phiedge:
+        t_phiedge[jp] = float(np.asarray(params0.phiedge))
     for j in range(nm):
         t_rbc[j, row_idx[j], col_idx[j]] = 1.0
         t_zbs[nm + j, row_idx[j], col_idx[j]] = 1.0
@@ -2980,11 +3607,11 @@ def _least_squares_implicit(
     zerop = jax.tree.map(lambda a: _place(np.zeros(a.shape)), params0)
     if lasym:
         tangent_stack = tuple(map(
-            _place, (t_rbc, t_zbs, t_rbs, t_zbc, t_ac, t_ac_aux_f, t_curtor)
+            _place, (t_rbc, t_zbs, t_rbs, t_zbc, t_ac, t_ac_aux_f, t_curtor, t_phiedge)
         ))
     else:
         tangent_stack = tuple(map(
-            _place, (t_rbc, t_zbs, t_ac, t_ac_aux_f, t_curtor)))
+            _place, (t_rbc, t_zbs, t_ac, t_ac_aux_f, t_curtor, t_phiedge)))
 
     # R17.1 memory knob: chunk_size None == one full-width batch, while an int
     # / "auto" caps peak Jacobian memory at that many dofs at a time.  Route
@@ -3033,10 +3660,10 @@ def _least_squares_implicit(
                 return dataclasses.replace(zerop, rbc=tp[0], zbs=tp[1],
                                            rbs=tp[2], zbc=tp[3],
                                            ac=tp[4], ac_aux_f=tp[5],
-                                           curtor=tp[6])
+                                           curtor=tp[6], phiedge=tp[7])
             return dataclasses.replace(zerop, rbc=tp[0], zbs=tp[1],
                                        ac=tp[2], ac_aux_f=tp[3],
-                                       curtor=tp[4])
+                                       curtor=tp[4], phiedge=tp[5])
 
         def rhs_of(tp):
             b = jax.jvp(lambda prm: F(z_star, prm), (params,), (tp,))[1]
@@ -3081,8 +3708,8 @@ def _least_squares_implicit(
             return column_of(dz, tp), dz, report
 
         tangent_chunk = ndof if chunk is None else chunk
-        cols, dz_cols, krylov = chunk_map(
-            column, tangent_stack, chunk_size=tangent_chunk
+        cols, dz_cols, krylov = map_columns(
+            column, tangent_stack, batch_size=tangent_chunk
         )
         return jnp.transpose(cols), dz_cols, _linear_response_summary(krylov)
 
@@ -3133,8 +3760,8 @@ def _least_squares_implicit(
             tp = tangent_of(tp_stack)
             return column_of(dz, tp), dz
 
-        cols, dz_cols = chunk_map(
-            column, (tangent_stack, dz0), chunk_size=tangent_chunk
+        cols, dz_cols = map_columns(
+            column, (tangent_stack, dz0), batch_size=tangent_chunk
         )
         return jnp.transpose(cols), dz_cols, _linear_response_summary(report)
 
@@ -3184,11 +3811,11 @@ def _least_squares_implicit(
                 params_bar, _ = pullback(state_bar)
                 return x_bar + boundary(params_bar)[0]
 
-            return chunk_map(row, indices, chunk_size=reverse_width)
+            return map_columns(row, indices, batch_size=reverse_width)
 
         def failed(_):
-            return chunk_map(lambda i: direct(cotangent_of(i))[0], indices,
-                             chunk_size=reverse_width)
+            return map_columns(lambda i: direct(cotangent_of(i))[0], indices,
+                             batch_size=reverse_width)
 
         return jax.lax.cond(status == 0, converged, failed, operand=None)
 
@@ -3529,8 +4156,11 @@ def _least_squares_implicit(
             vary_major_radius=vary_major_radius)
         if k_cur:
             result_input = _apply_current(
-                result_input, np.asarray(x)[nboundary:], k_cur, ac_scale
+                result_input, np.asarray(x)[nboundary:jp], k_cur, ac_scale
             )
+        if vary_phiedge:
+            result_input = dataclasses.replace(
+                result_input, phiedge=float(inp.phiedge) * (1.0 + float(np.asarray(x)[jp])))
         return result_input
 
     def x_from_input(source: VmecInput) -> np.ndarray:
@@ -3538,6 +4168,8 @@ def _least_squares_implicit(
             source, max_mode, vary_major_radius=vary_major_radius)
         if k_cur:
             x = np.concatenate([x, _pack_current(source, k_cur, ac_scale)])
+        if vary_phiedge:
+            x = np.concatenate([x, [float(source.phiedge) / float(inp.phiedge) - 1.0]])
         return x
 
     def equilibrium_from_x(
@@ -3583,11 +4215,15 @@ def _least_squares_implicit(
         result_input = input_from_x(x)
         result = dataclasses.replace(hit[1], state=refined[1])
         ns = int(np.shape(result.state.R_cos)[0])
-        runtime = prepare_runtime(
-            result_input,
-            resolution_from_input(result_input, ns=ns),
-        )
-        _, residuals, _ = evaluate_forces(result.state, runtime)
+        # The refined state lives on the problem's device (cfg.device, the CPU by default for this launch-bound
+        # path); the runtime of its force evaluation must be built there too, not on JAX's default device (a GPU
+        # when one is present), or the evaluation mixes devices.
+        with imp._device_context(cfg):
+            runtime = prepare_runtime(
+                result_input,
+                resolution_from_input(result_input, ns=ns),
+            )
+            _, residuals, _ = evaluate_forces(result.state, runtime)
         result = dataclasses.replace(
             result, fsqr=float(residuals.fsqr), fsqz=float(residuals.fsqz),
             fsql=float(residuals.fsql))
@@ -3751,6 +4387,8 @@ def _least_squares_implicit(
             label = "AC_AUX_F" if _current_uses_spline(inp) else "AC"
             names.extend([f"{label}({j})/{ac_scale:.6g}" for j in range(k_cur)])
             names.append("CURTOR/1e6")
+        if vary_phiedge:
+            names.append("PHIEDGE/nominal")
         scales = (
             np.ones_like(np.asarray(x0, dtype=float))
             if problem_scales is None else np.asarray(problem_scales, dtype=float)
@@ -3797,6 +4435,7 @@ def _least_squares_implicit(
                 ),
                 "max_mode": max_mode,
                 "vary_major_radius": vary_major_radius,
+                "vary_phiedge": vary_phiedge,
                 "term_slices": term_slices,
                 "config": cfg,
                 "holder": holder,
@@ -3833,12 +4472,7 @@ def _least_squares_implicit(
         result.cost = float(result.fun)
         result.optimality = float(np.linalg.norm(result.jac, ord=np.inf))
         result.monitor = monitor
-    result.input = unpack_boundary(
-        inp, result.x[:nboundary], max_mode,
-        vary_major_radius=vary_major_radius)
-    if k_cur:
-        result.input = _apply_current(result.input, result.x[nboundary:],
-                                      k_cur, ac_scale)
+    result.input = input_from_x(result.x)
     stats = imp._SOLVE_STATS.get(cfg)
     result.solve_stats = None if stats is None else dict(stats)
     result.failed_trials = holder["failed_trials"]

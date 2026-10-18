@@ -1457,8 +1457,8 @@ class VmecExtender(MagneticField):
         torus, default :data:`~vmex.core.virtual_casing.GRADED_NODES`.
     graded_target_batch_size:
         Optional positive integer bounding simultaneous graded target rules.
-        ``None`` keeps the serial default. Larger batches can improve throughput
-        at higher memory cost; direct-path chunk settings do not affect this
+        ``None`` uses :data:`~vmex.core.virtual_casing.GRADED_TARGET_BATCH`
+        targets per step. Larger batches can improve throughput at higher memory cost; direct-path chunk settings do not affect this
         rule. The attribute may also be set after construction.
     """
 

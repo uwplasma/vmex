@@ -67,6 +67,7 @@ __all__ = [
     "m1_residue_rotation",
     "zero_m1_z_force",
     "m1_zero_condition",
+    "pin_m1_gauge",
     "edge_force_condition",
     "scalxc_scale_force",
     "force_residuals",
@@ -630,3 +631,51 @@ def preconditioned_residuals(
         fsqz1=fnorm1 * sum_sq(_Z_BLOCKS, slice(0, ns)),
         fsql1=jnp.asarray(delta_s) * sum_sq(_LAMBDA_BLOCKS, slice(1, ns)),
     )
+
+
+def pin_m1_gauge(Z_sin: Array, edge_Z_sin: Array, *, modes: ModeTable) -> Array:
+    """Put the constrained m=1 combination on its initial-guess profile.
+
+    With ``lconm1`` the evolved 3-D m=1 pairs ``zcs_int = (rss - zcs)/2`` (the
+    antisymmetric ``Z_sin(m=1, +/-n)`` columns of the signed packing) are angle
+    gauges: VMEC2000 zeroes their force once ``fsqz < 1e-6`` (``residue.f90``),
+    so a converged state keeps whatever values the solver's path left there, and
+    two solves of one boundary from different starts converge to different
+    states.  VMEX
+    fixes the gauge instead (``RunSetup.freeze_m1``, the default for
+    stellarator-symmetric fixed-boundary solves): the force stays zeroed from the
+    first iteration and the combinations are held at ``sqrt(s) * edge`` -- the
+    ``profil3d.f`` interior guess -- so every solve of one boundary lands on one
+    state.  Verified as a relabelling (gauges' surfaces, iota and Mercier terms
+    converge together under refinement) for ``lasym = False``; ``lasym`` runs keep
+    VMEC2000's rule.
+
+    Parameters
+    ----------
+    Z_sin:
+        ``(ns, mn)`` signed-packing ``Z_sin`` coefficients of a state.
+    edge_Z_sin:
+        ``(mn,)`` boundary row that sets the profile's edge value.
+    modes:
+        The state's mode table.
+
+    Returns
+    -------
+    Array
+        ``Z_sin`` with the constrained combinations on ``sqrt(s) * edge``
+        (``ntor > 0``: the columns exist only in 3-D); every other column is
+        untouched.
+    """
+    m = np.asarray(modes.m, dtype=int)
+    n = np.asarray(modes.n, dtype=int)
+    index = {(int(mm), int(nn)): k for k, (mm, nn) in enumerate(zip(m, n))}
+    ntor = int(np.max(np.abs(n))) if n.size else 0
+    Z_sin = jnp.asarray(Z_sin)
+    pos = np.asarray([index[(1, j)] for j in range(1, ntor + 1)], dtype=int)
+    neg = np.asarray([index[(1, -j)] for j in range(1, ntor + 1)], dtype=int)
+    ns = int(Z_sin.shape[0])
+    # a constant of the static ns: host numpy, so an eager call (the solver's stage setup) compiles no program
+    profile = jnp.asarray(np.sqrt(np.linspace(0.0, 1.0, ns)), dtype=Z_sin.dtype)[:, None]
+    edge = jnp.asarray(edge_Z_sin)
+    shift = profile * (0.5 * (edge[pos] - edge[neg]))[None, :] - 0.5 * (Z_sin[:, pos] - Z_sin[:, neg])
+    return Z_sin.at[:, pos].add(shift).at[:, neg].add(-shift)

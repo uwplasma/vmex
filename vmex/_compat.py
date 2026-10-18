@@ -29,9 +29,10 @@ import os
 import platform
 
 
-_CACHE_FORMAT_VERSION = "4"
+_CACHE_FORMAT_VERSION = "5"
 _CACHE_MAX_ENTRIES = 1024            # resident executables; see _prune_cache_entries
 _CACHE_RECENT_SECONDS = 24 * 3600    # entries used this recently survive the cap, up to 4x it
+_CACHE_STALE_SECONDS = 14 * 24 * 3600  # unused machine dirs go after two weeks (spans a paused project)
 _CACHE_SIZE_FLOOR = 2 << 30          # 2 GiB
 _CACHE_SIZE_CEILING = 20 << 30       # 20 GiB
 _CACHE_DISK_FRACTION = 0.10
@@ -62,7 +63,7 @@ def _default_cache_max_size(path: str | None = None) -> int:
     return int(min(_CACHE_SIZE_CEILING, max(_CACHE_SIZE_FLOOR, scaled)))
 
 
-def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
+def _prune_cache_entries(cache_dir: str, max_entries: int, max_bytes: int | None = None) -> int:
     """Drop the least recently used cache entries above ``max_entries``.
 
     JAX's LRU cache re-scans the whole cache directory on every *write*: each
@@ -88,6 +89,10 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
     1,024 (10.2 s, against 9.7 s with the plain cap); and the worst case, 4,026
     recent entries, costs 17.9 s, where a fixed 4,096 cap costs 19.0 s on any
     mature cache (a write scans 99 ms at 4,026 entries against 26 ms at 1,024).
+    ``max_bytes`` also bounds the entries' total size (oldest dropped
+    first), the bound JAX's own cache enforces on every write and vmex's
+    (:func:`_atomic_file_cache_class`) enforces here; temporary files that a
+    killed writer left behind are removed after an hour.
     Returns the number of entries removed.
     """
     try:
@@ -95,7 +100,19 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
 
         path = pathlib.Path(cache_dir)
         entries = list(path.glob(f"*{_CACHE_ENTRY_SUFFIX}"))
-        if len(entries) <= max_entries:
+        sizes: dict = {}
+        if max_bytes is not None and max_bytes > 0:
+            for entry in entries:
+                with contextlib.suppress(OSError):
+                    sizes[entry] = entry.stat().st_size
+            import time
+
+            for stale in path.glob(".*.tmp"):
+                with contextlib.suppress(OSError):
+                    if time.time() - stale.stat().st_mtime > 3600:
+                        stale.unlink()
+        over_size = bool(sizes) and sum(sizes.values()) > max_bytes
+        if len(entries) <= max_entries and not over_size:
             return 0
     except Exception:  # missing directory, unreadable filesystem
         return 0
@@ -128,6 +145,13 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
         recent_cutoff = time.time_ns() - _CACHE_RECENT_SECONDS * 1_000_000_000
         recent = sum(1 for entry in ordered if atimes[entry] >= recent_cutoff)
         keep = max(max_entries, min(recent, 4 * max_entries))
+        if over_size:
+            total = 0
+            for index, entry in enumerate(ordered[:keep]):
+                total += sizes.get(entry, 0)
+                if total > max_bytes:
+                    keep = index
+                    break
         for entry in ordered[keep:]:
             sidecar = entry.with_name(
                 entry.name[: -len(_CACHE_ENTRY_SUFFIX)] + _CACHE_ATIME_SUFFIX
@@ -255,39 +279,24 @@ def _jaxlib_backend_identity() -> list[str]:
     return parts
 
 
-def _host_identity() -> str:
-    """Stable name of this physical machine (one cache per machine).
-
-    Linux and Windows: the hostname, which on a cluster names the node.
-    macOS: the hardware UUID (``gethostuuid``), because a laptop's hostname
-    follows the network it joins; the hostname is the fallback.
-    """
-    if platform.system() == "Darwin":
-        import ctypes
-        import uuid
-
-        buf = ctypes.create_string_buffer(16)
-        with contextlib.suppress(Exception):
-            if ctypes.CDLL(None).gethostuuid(buf, (ctypes.c_long * 2)()) == 0:
-                return str(uuid.UUID(bytes=buf.raw))
-    return platform.node()
-
-
 def _cache_machine_fingerprint() -> str:
-    """Return the per-machine subdirectory name of the compilation cache.
+    """Return the per-machine-type subdirectory name of the compilation cache.
 
-    Persistent-cache entries are native XLA:CPU executables.  JAX keys them
-    on the host CPU it detects, but a cache on a shared home filesystem is
-    read by every node of a heterogeneous cluster, and a loader that meets
-    an entry built for other CPU features only logs "Target machine feature
-    ... is not supported on the host machine" and runs it anyway.  So one
-    directory per machine: the host identity (:func:`_host_identity`) never
-    lets two machines share an entry, and the OS, architecture, CPU model
-    and flags, Python and jaxlib build identity
-    (:func:`_jaxlib_backend_identity`) move the cache whenever the machine
-    or the compiler under it changes.  The price is one cold compile per
-    cluster node (and per container, whose hostname is new each run); a
-    workstation or laptop keeps one warm cache.
+    Persistent-cache entries are native XLA executables.  JAX keys them on
+    the device kind and its own version, but an XLA:CPU entry built for CPU
+    features the loading host lacks is only logged ("Target machine feature
+    ... is not supported on the host machine") and run anyway.  So the
+    directory is split by everything that decides whether an executable is
+    valid on this machine: the OS, architecture, CPU model and feature flags
+    (``/proc/cpuinfo``; ``sysctl`` on macOS), Python, and the jax/jaxlib
+    build identity (:func:`_jaxlib_backend_identity`).  The host name is
+    deliberately not part of it: the nodes of a cluster partition (same CPU,
+    same GPU, same software) share one warm cache on a shared filesystem
+    instead of each paying a cold compile -- a free-boundary solve compiles
+    for minutes -- and a container, whose host name is new on every run,
+    keeps its cache.  Two machines of the same type are interchangeable for
+    every entry (GPU entries are additionally keyed by JAX on the device
+    kind), so sharing is exact.
     """
 
     parts = [
@@ -295,7 +304,6 @@ def _cache_machine_fingerprint() -> str:
         platform.system(),
         platform.machine(),
         platform.processor(),
-        f"host={_host_identity()}",
         f"python={sys.version_info.major}.{sys.version_info.minor}",
     ]
     for package in ("jax", "jaxlib"):
@@ -413,6 +421,7 @@ def _apply_compilation_cache_policy(jax_module: Any) -> str | None:
         except OSError:  # unwritable: no cache rather than JAX's raw path
             cache_dir = None
         else:
+            _install_file_cache()
             _configure_compilation_cache(jax_module, cache_dir)
             _reset_jax_cache()
     if cache_dir is None and (current or enabled):
@@ -426,6 +435,94 @@ def _apply_compilation_cache_policy(jax_module: Any) -> str | None:
 _APPLIED: list[str | None] = [None]   # the directory this module last set
 
 
+def _atomic_file_cache_class():
+    """JAX's file cache without its per-write directory scan and lock.
+
+    JAX's ``LRUCache`` with eviction on (any finite
+    ``jax_compilation_cache_max_size``) takes a directory-wide file lock on
+    every read and write, and every write first globs the directory and
+    stats every entry and its atime sidecar to decide on eviction.  On a
+    parallel filesystem (Lustre ``$SCRATCH``, NFS ``$HOME``) that costs a
+    stat per resident entry, and a cold free-boundary solve writes hundreds
+    of entries.  This cache never scans: a write goes to a private temporary
+    file renamed into place (atomic on POSIX filesystems, so concurrent
+    writers of one key and readers never see a partial entry, without any
+    lock), a hit refreshes the atime sidecar :func:`_prune_cache_entries`
+    orders by, and the size and entry bounds are enforced once per process
+    by :func:`_prune_cache_entries`.  Same on-disk layout as JAX's.
+    """
+    from jax._src import lru_cache
+
+    class _AtomicFileCache(lru_cache.LRUCache):
+        def __init__(self, path: str):
+            super().__init__(path, max_size=-1)   # no per-call eviction, no lock
+
+        def _touch(self, key: str) -> None:
+            with contextlib.suppress(OSError):
+                import time
+
+                (self.path / f"{key}{_CACHE_ATIME_SUFFIX}").write_bytes(
+                    time.time_ns().to_bytes(8, "little"))
+
+        def get(self, key: str) -> bytes | None:
+            value = super().get(key)
+            if value is not None:
+                self._touch(key)
+            return value
+
+        def put(self, key: str, value: bytes) -> None:
+            if not key:
+                raise ValueError("key cannot be empty")
+            target = self.path / f"{key}{_CACHE_ENTRY_SUFFIX}"
+            if target.exists():
+                return
+            import uuid
+
+            temporary = self.path / f".{key}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+            try:
+                temporary.write_bytes(value)
+                os.replace(temporary, target)
+            finally:
+                with contextlib.suppress(OSError):
+                    temporary.unlink()
+            self._touch(key)
+
+    return _AtomicFileCache
+
+
+def _install_file_cache() -> bool:
+    """Route JAX's persistent cache through :func:`_atomic_file_cache_class`.
+
+    Wraps ``jax._src.compilation_cache.get_file_cache`` (consulted whenever
+    JAX opens its cache, including after :func:`_reset_jax_cache`) for local
+    paths; remote (``gs://``-style) paths keep JAX's own cache.  Returns
+    False, leaving JAX's cache in place, if JAX's internals are not the
+    expected ones.
+    """
+    try:
+        from jax._src import compilation_cache, lru_cache
+
+        original = compilation_cache.get_file_cache
+        if getattr(original, "_vmex_atomic", False):
+            return True
+        cache_class = _atomic_file_cache_class()
+        lru_cache._is_local_filesystem  # noqa: B018 -- the predicate the wrapper relies on
+    except Exception:
+        return False
+
+    def get_file_cache(path):
+        if not lru_cache._is_local_filesystem(str(path)):
+            return original(path)
+        cache = cache_class(path)
+        if compilation_cache.config.compilation_cache_check_contents.value:
+            return compilation_cache.VerificationCache(cache), path
+        return cache, path
+
+    get_file_cache._vmex_atomic = True
+    compilation_cache.get_file_cache = get_file_cache
+    return True
+
+
 def _reset_jax_cache() -> None:
     """Drop JAX's already-opened cache object so the new setting applies."""
     with contextlib.suppress(Exception):
@@ -434,16 +531,55 @@ def _reset_jax_cache() -> None:
         compilation_cache.reset_cache()
 
 
+def _prune_stale_machines(cache_dir: str, max_age: float = _CACHE_STALE_SECONDS) -> int:
+    """Remove the sibling machine directories of ``cache_dir`` unused for ``max_age`` seconds.
+
+    The entry bound (:func:`_prune_cache_entries`) holds per machine directory
+    only, and every new machine type or jax build opens a directory of its
+    own, so a shared cache root would grow without bound.  A directory whose modification time (an entry written or removed) is older
+    than ``max_age`` belongs to a machine or a jax build no longer in use and
+    is removed whole; one stat per sibling.  Only directories named like a
+    fingerprint are touched.  Returns the number removed.
+    """
+    import pathlib
+    import shutil
+    import time
+
+    path = pathlib.Path(cache_dir)
+    if not _FINGERPRINT_NAME.fullmatch(path.name):
+        return 0
+    removed = 0
+    cutoff = time.time() - max_age
+    try:
+        siblings = list(path.parent.iterdir())
+    except OSError:
+        return 0
+    for sibling in siblings:
+        if sibling == path or not _FINGERPRINT_NAME.fullmatch(sibling.name):
+            continue
+        try:
+            if not sibling.is_dir() or sibling.stat().st_mtime >= cutoff:
+                continue
+            shutil.rmtree(sibling)
+            removed += 1
+        except OSError:  # another process removed or is using it: leave it
+            continue
+    return removed
+
+
 def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None:
     """Apply vmex's persistent-cache defaults to an imported JAX module."""
     if cache_dir is None:
         return
+    with contextlib.suppress(Exception):
+        _prune_stale_machines(cache_dir)
     try:
         # Keep the directory small before anything writes to it: every write
         # re-scans it (see _prune_cache_entries).  0 disables the bound.
         max_entries = int(_env("CACHE_MAX_ENTRIES", str(_CACHE_MAX_ENTRIES)))
+        max_bytes = int(_env("COMPILATION_CACHE_MAX_SIZE", str(_default_cache_max_size(cache_dir))))
         if max_entries > 0:
-            _prune_cache_entries(cache_dir, max_entries)
+            _prune_cache_entries(cache_dir, max_entries, max_bytes if max_bytes > 0 else None)
     except Exception:
         pass
     try:
