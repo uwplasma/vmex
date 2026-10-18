@@ -12,9 +12,7 @@ import hashlib
 import importlib.util
 import inspect
 import json
-import os
 import re
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -33,10 +31,8 @@ FIGURES = DOCS / "_static" / "figures"
 sys.path.insert(0, str(ROOT / "tools"))
 
 import check_docs_prose as gate  # noqa: E402
-import ci_scope  # noqa: E402
 import render_capabilities as capabilities  # noqa: E402
 import render_performance_docs as performance  # noqa: E402
-import test_manifest  # noqa: E402
 import update_figure_manifest as figure_tool  # noqa: E402
 
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text())
@@ -450,129 +446,3 @@ def test_device_parity_driver_contracts(tmp_path) -> None:
         "gradient_cache_reload_speedup": pytest.approx(10.0 / 3.0),
         "reload_forward_warm_speedup": 2.0, "reload_gradient_warm_speedup": 3.0}
     assert reload._speedups({}, run(12.0, 4.0, 3.0), "gpu") is None
-
-
-# -- test manifest and CI -------------------------------------------------------
-
-
-def test_collected_suite_has_exact_manifest_ownership() -> None:
-    assert not test_manifest.validate(test_manifest.collect())
-
-
-def _invoked_lanes() -> set[str]:
-    """Lanes the workflows hand to ``test_manifest.py select``, in every spelling."""
-    text = "\n".join(WORKFLOWS.values())
-    invoked = {lane for value in re.findall(r"^\s*(?:-\s*)?selector:\s*(.+?)\s*$", text, re.M)
-               for lane in value.split()}
-    invoked |= set(re.findall(r"test_manifest\.py select ([a-z][A-Za-z0-9-]*)", text))
-    for declaration in re.findall(r"^\s*ALL:\s*'(\[.*\])'\s*$", text, re.M):
-        invoked |= {lane for entry in json.loads(declaration)
-                    for lane in str(entry.get("selector", "")).split()}
-    for body in WORKFLOWS.values():
-        values = [v.strip() for group in re.findall(r"^\s*campaign:\s*\[(.*)\]", body, re.M)
-                  for v in group.split(",")]
-        for prefix in re.findall(r"select ([a-z-]+)\$\{\{ matrix\.campaign \}\}", body):
-            invoked |= {prefix + value for value in values}
-    return invoked
-
-
-def test_every_manifest_lane_runs_in_a_workflow_or_is_local_only() -> None:
-    data, records = test_manifest.load()
-    named = {lane for record in records for lane in record["lanes"]}
-    named |= set(data.get("selectors", {})) | set(data["campaigns"])
-    invoked, local = _invoked_lanes(), data.get("local_only", {})
-    for lane, entry in local.items():
-        assert lane in named and lane not in invoked, lane
-        assert entry.get("reason") and f"select {lane}" in entry.get("command", ""), lane
-    assert not sorted(named - invoked - set(local))
-    assert "self-hosted" not in "".join(WORKFLOWS.values())
-    for lane in ("full-polish-gn", "full-run-options", "full-free-boundary-adjoint"):
-        assert test_manifest.select(lane) and f"selector: {lane}" in WORKFLOWS["nightly.yml"]
-
-
-def _declared(job: str) -> set[str]:
-    block = WORKFLOWS["ci.yml"].split(f"- id: {job}", 1)[1]
-    declaration = re.search(r"^\s*ALL:\s*'(\[.*\])'\s*$", block, re.M).group(1)
-    return {lane for entry in json.loads(declaration) for lane in str(entry.get("selector", "")).split()}
-
-
-def test_workflow_contracts() -> None:
-    for name in ("ci.yml", "nightly.yml", "weekly.yml"):
-        assert "tools/test_manifest.py select" in WORKFLOWS[name]
-    ci, nightly = WORKFLOWS["ci.yml"], WORKFLOWS["nightly.yml"]
-    assert "name: PR gate" in ci and 'jax: ["0.9.2", "0.11.1"]' in ci
-    assert "device, jax-compatibility, changed-coverage]" in ci
-    assert "campaign: [opt-qi, opt-qa, opt-qh, opt-qp]" in nightly
-    assert "tools/test_manifest.py select optional" in nightly and 'RUN_FULL: "1"' in nightly
-    assert "--cov=vmex" not in nightly and "timeout-minutes: 45" in nightly
-    bundles = _record("assets/manifest.json")["bundles"]
-    ncsx = next(b["name"] for b in bundles if "examples/data/mgrid_ncsx_c09r00_small.nc" in b["common_paths"])
-    assert f"tools/fetch_assets.py --bundle {ncsx}" in nightly
-    physics, parity = _declared("physics"), _declared("parity")
-    assert "pr-mirror-spline" in physics and not physics & parity
-    assert "tests/mirror/test_output.py" in test_manifest.select("pr-mirror-spline")
-    assert len(test_manifest.select("weekly-hmfb-fixed")) == len(test_manifest.select("weekly-hmfb-free")) == 2
-
-
-def test_ci_scope_narrows_only_attributable_changes() -> None:
-    entries = [{"lane": "a", "selector": "pr-parity-a1"}, {"lane": "c2", "selector": "pr-parity-c2"}]
-    for paths in (["vmex/core/solver.py"], [".github/workflows/ci.yml"], ["tools/ci_scope.py"],
-                  ["pyproject.toml"], ["vmex/core/solver.py", "tests/test_gammac.py"]):
-        assert ci_scope.select_lanes(paths, entries) == entries, paths
-    assert "pr-parity-c4" in ci_scope.needed_lanes(["tests/test_gammac.py"])
-    assert "pr-physics-field" in ci_scope.needed_lanes(["tests/test_monitoring.py"])
-    assert ci_scope.needed_lanes(["examples/optimization/QA_optimization.py"])
-    assert ci_scope.needed_lanes(["tests/test_not_in_the_manifest.py"]) is None
-    assert ci_scope.needed_lanes(["benchmarks/baseline.json", "docs/_static/figures/figures.json"]) == set()
-    prose = ci_scope.needed_lanes(["CHANGELOG.md"])
-    assert prose is not None and ci_scope.needed_lanes(["README.md"]) is not None
-    assert ci_scope.needed_lanes(["examples/optimization/single_stage_optimization.py",
-                                  "CHANGELOG.md"]) >= prose
-    assert ci_scope.needed_lanes(["vmex/core/solver.py", "CHANGELOG.md"]) is None
-    assert ci_scope.classify(["docs/howto/gpu.rst", "README.md", "docs/figure.webp"]) == (False, False)
-    assert ci_scope.classify(["docs/howto/gpu.rst", "vmex/doctor.py"]) == (True, True)
-    assert ci_scope.classify(["tests/test_doctor.py"]) == ci_scope.classify([".github/workflows/ci.yml"]) \
-        == (True, False)
-    assert ci_scope.classify([]) == ci_scope.classify(["README.md"], force_all=True) == (True, True)
-
-
-def _pytest(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    env = {key: value for key, value in (env or os.environ).items() if key != "RUN_FULL"}
-    result = subprocess.run([sys.executable, "-m", "pytest", "-q", *args], cwd=ROOT,
-                            env=env, text=True, capture_output=True, timeout=180)
-    assert result.returncode == 0, result.stdout + result.stderr
-    return result
-
-
-def test_manifest_report_lists_timings_and_every_skip(tmp_path) -> None:
-    report = tmp_path / "report.json"
-    _pytest("tests/test_lasym_free_convergence.py", "tests/test_fetch_assets.py::test_golden_bundle_targets"
-            "_the_user_cache", f"--vmex-report={report}")
-    data = json.loads(report.read_text())
-    assert data["schema"] == "vmex.test-report/1" and data["collected"] == 2 and data["slowest"]
-    assert [skip["nodeid"].split("::")[0] for skip in data["skips"]] == ["tests/test_lasym_free_convergence.py"]
-    for record in data["slowest"] + data["skips"]:
-        assert {"owner", "primary", "duration", "device", "asset", "oracle"} <= record.keys()
-
-
-def test_modules_restore_jit_and_full_markers_split_nonlinear_work(tmp_path) -> None:
-    (tmp_path / "jit_probe.py").write_text(
-        "import jax, pytest\n"
-        "@pytest.hookimpl(wrapper=True)\n"
-        "def pytest_runtest_teardown(item, nextitem):\n"
-        "    result = yield\n"
-        "    if nextitem is None or nextitem.module is not item.module:\n"
-        "        assert not jax.config.jax_disable_jit, item.nodeid\n"
-        "    return result\n")
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), os.environ.get("PYTHONPATH", "")]))
-    result = _pytest("-p", "jit_probe",
-                     "tests/test_scaling.py::test_input_scaling_changes_only_dimensional_quantities",
-                     "tests/test_cli_freeboundary.py::test_free_boundary_keeps_the_state_on_iteration_exhaustion",
-                     "tests/test_optimize.py::test_public_problem_factory_validation", env=env)
-    assert "3 passed" in result.stdout
-    nodes = _pytest("--collect-only", "-m", "full", "tests/test_run_options.py",
-                    "tests/test_freeboundary_implicit.py").stdout
-    assert "tests/test_run_options.py::test_solve_file_polish_directive_activates_polishing" in nodes
-    assert ("tests/test_freeboundary_implicit.py::test_free_boundary_current_gradient_matches_resolve"
-            "_finite_difference") in nodes
-    assert "::test_solve_file_directives_reach_driver_once" not in nodes

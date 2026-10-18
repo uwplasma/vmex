@@ -14,7 +14,7 @@
    "cuda": "cuda12"
   },
   "what_is_measured": "GPU matrix for the baseline decks (cold/warm wall and memory), the batched tridiagonal preconditioner solve across (ns, ncols) in f32 and f64, and a synthetic iteration-throughput scan. The per-block notes in 'meta' define each quantity.",
-  "regenerate": "python tools/run_gpu_matrix.py",
+  "regenerate": "python benchmarks/run_gpu_matrix.py",
   "limitation": "Historical artifact: the commit and dirty state of the checkout that produced it were not recorded, and the jax version is known only from the 'hardware' string, so those fields are null or derived rather than measured. Recorded on a different host from every CPU artifact in this directory, so the two are not directly comparable. Historical artifact: the commit is the one that committed the file, on the day named in meta.date; the measuring checkout, jaxlib version, CUDA driver, and CPU model were not recorded.",
   "jax_version": "0.6.2 (CUDA 12 plugin)",
   "jaxlib_version": "not recorded"
@@ -24,13 +24,21 @@
   "date": "2026-07-09 16:32",
   "synth_niter": 150,
   "hardware": "2x NVIDIA RTX A4000 16GB, jax 0.6.2 cuda12, python 3.10",
-  "notes": ["matrix: cold_wall_s = 1st in-process solve (incl. compile/cache-load); warm_wall_s = 2nd solve. warm still includes per-solve retrace overhead (~0.2-0.4s legacy, 1.7-4.7s core_jit) because solve() retraces per call.","stepscan: per_iter_ms_marginal = (wall_NITER450 - wall_NITER150)/300 on synthetic nfp4_QH decks with FTOL=1e-30 -> pure iteration throughput; per_solve_overhead_s = fixed cost per solve call.","tridiag: best-of-N ms for core.preconditioner.tridiagonal_solve, jitted, block_until_ready. GPU time ~15us/ns-row, independent of ncols (lax.scan serialization, launch-latency bound); fp32==fp64 on GPU (latency- not FLOP-bound).","pitfall: running python with cwd containing the repo checkout shadows vmec_jax as a namespace package -> __init__ never runs -> persistent compilation cache disabled -> every solve() pays full XLA recompile (~7s vs ~1.7s warm on cuda for solovev).","core_jit runs only the first NS_ARRAY stage; legacy runs the full multigrid ladder -> cross-lane iteration counts differ (LandremanPaul, NuhrenbergZille)."]
+  "notes": [
+   "matrix: cold_wall_s = 1st in-process solve (incl. compile/cache-load); warm_wall_s = 2nd solve. warm still includes per-solve retrace overhead (~0.2-0.4s legacy, 1.7-4.7s core_jit) because solve() retraces per call.",
+   "stepscan: per_iter_ms_marginal = (wall_NITER450 - wall_NITER150)/300 on synthetic nfp4_QH decks with FTOL=1e-30 -> pure iteration throughput; per_solve_overhead_s = fixed cost per solve call.",
+   "tridiag: best-of-N ms for solvax.tridiagonal_solve, jitted, block_until_ready. GPU time ~15us/ns-row, independent of ncols (lax.scan serialization, launch-latency bound); fp32==fp64 on GPU (latency- not FLOP-bound).",
+   "pitfall: running python with cwd containing the repo checkout shadows vmec_jax as a namespace package -> __init__ never runs -> persistent compilation cache disabled -> every solve() pays full XLA recompile (~7s vs ~1.7s warm on cuda for solovev).",
+   "core_jit runs only the first NS_ARRAY stage; legacy runs the full multigrid ladder -> cross-lane iteration counts differ (LandremanPaul, NuhrenbergZille)."
+  ]
  },
  "matrix": {
   "solovev": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.436,
     "cold_wall_s": 5.263,
     "warm_wall_s": 0.043,
@@ -44,7 +52,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.431,
     "cold_wall_s": 6.258,
     "warm_wall_s": 3.176,
@@ -58,7 +68,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.593,
     "cold_wall_s": 2.743,
     "warm_wall_s": 0.289,
@@ -72,7 +85,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.556,
     "cold_wall_s": 2.572,
     "warm_wall_s": 1.81,
@@ -88,7 +104,9 @@
   "cth_like_fixed_bdy": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.341,
     "cold_wall_s": 5.345,
     "warm_wall_s": 0.198,
@@ -102,7 +120,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.368,
     "cold_wall_s": 10.236,
     "warm_wall_s": 5.016,
@@ -116,7 +136,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.624,
     "cold_wall_s": 10.415,
     "warm_wall_s": 0.383,
@@ -130,7 +153,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.535,
     "cold_wall_s": 13.768,
     "warm_wall_s": 2.185,
@@ -146,7 +172,9 @@
   "nfp4_QH_warm_start": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.349,
     "cold_wall_s": 7.294,
     "warm_wall_s": 0.954,
@@ -160,7 +188,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.365,
     "cold_wall_s": 9.49,
     "warm_wall_s": 4.713,
@@ -174,7 +204,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.583,
     "cold_wall_s": 14.81,
     "warm_wall_s": 0.574,
@@ -188,7 +221,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.64,
     "cold_wall_s": 13.476,
     "warm_wall_s": 3.468,
@@ -204,7 +240,9 @@
   "LandremanPaul2021_QA_lowres": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.415,
     "cold_wall_s": 34.115,
     "warm_wall_s": 14.543,
@@ -218,7 +256,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.381,
     "cold_wall_s": 9.976,
     "warm_wall_s": 4.808,
@@ -232,7 +272,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.583,
     "cold_wall_s": 46.449,
     "warm_wall_s": 4.19,
@@ -246,7 +289,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.681,
     "cold_wall_s": 16.291,
     "warm_wall_s": 2.582,
@@ -262,7 +308,9 @@
   "NuhrenbergZille_1988_QHS": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.341,
     "cold_wall_s": 333.136,
     "warm_wall_s": 276.952,
@@ -276,7 +324,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.384,
     "cold_wall_s": 10.614,
     "warm_wall_s": 4.765,
@@ -290,7 +340,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.589,
     "cold_wall_s": 192.773,
     "warm_wall_s": 90.135,
@@ -304,7 +357,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.572,
     "cold_wall_s": 14.179,
     "warm_wall_s": 2.405,
@@ -320,7 +376,9 @@
   "synth_nfp4QH_ns35_mpol2_ntor2": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.353,
     "cold_wall_s": 6.771,
     "warm_wall_s": 0.3,
@@ -334,7 +392,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.371,
     "cold_wall_s": 7.231,
     "warm_wall_s": 4.163,
@@ -348,7 +408,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.605,
     "cold_wall_s": 10.371,
     "warm_wall_s": 0.328,
@@ -362,7 +425,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.553,
     "cold_wall_s": 11.294,
     "warm_wall_s": 2.35,
@@ -378,7 +444,9 @@
   "synth_nfp4QH_ns35_mpol4_ntor4": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.356,
     "cold_wall_s": 7.286,
     "warm_wall_s": 0.549,
@@ -392,7 +460,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.377,
     "cold_wall_s": 8.972,
     "warm_wall_s": 4.46,
@@ -406,7 +476,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.591,
     "cold_wall_s": 20.526,
     "warm_wall_s": 0.327,
@@ -420,7 +493,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.566,
     "cold_wall_s": 14.979,
     "warm_wall_s": 2.382,
@@ -436,7 +512,9 @@
   "synth_nfp4QH_ns75_mpol2_ntor2": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.36,
     "cold_wall_s": 6.911,
     "warm_wall_s": 0.485,
@@ -450,7 +528,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.373,
     "cold_wall_s": 8.866,
     "warm_wall_s": 4.419,
@@ -464,7 +544,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.626,
     "cold_wall_s": 17.408,
     "warm_wall_s": 0.434,
@@ -478,7 +561,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.58,
     "cold_wall_s": 14.044,
     "warm_wall_s": 2.773,
@@ -494,7 +580,9 @@
   "synth_nfp4QH_ns75_mpol4_ntor4": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.355,
     "cold_wall_s": 8.1,
     "warm_wall_s": 0.868,
@@ -508,7 +596,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.373,
     "cold_wall_s": 9.39,
     "warm_wall_s": 4.913,
@@ -522,7 +612,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.612,
     "cold_wall_s": 18.364,
     "warm_wall_s": 0.431,
@@ -536,7 +629,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.589,
     "cold_wall_s": 15.336,
     "warm_wall_s": 2.712,
@@ -552,7 +648,9 @@
   "synth_nfp4QH_ns151_mpol2_ntor2": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.355,
     "cold_wall_s": 7.724,
     "warm_wall_s": 0.768,
@@ -566,7 +664,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.369,
     "cold_wall_s": 8.772,
     "warm_wall_s": 4.454,
@@ -580,7 +680,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.603,
     "cold_wall_s": 18.324,
     "warm_wall_s": 0.558,
@@ -594,7 +697,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.564,
     "cold_wall_s": 16.265,
     "warm_wall_s": 3.612,
@@ -610,7 +716,9 @@
   "synth_nfp4QH_ns151_mpol4_ntor4": {
    "cpu/legacy": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.355,
     "cold_wall_s": 8.214,
     "warm_wall_s": 1.268,
@@ -624,7 +732,9 @@
    },
    "cpu/core_jit": {
     "backend": "cpu",
-    "devices": ["TFRT_CPU_0"],
+    "devices": [
+     "TFRT_CPU_0"
+    ],
     "import_s": 0.374,
     "cold_wall_s": 10.427,
     "warm_wall_s": 5.555,
@@ -638,7 +748,10 @@
    },
    "cuda/legacy": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.627,
     "cold_wall_s": 16.897,
     "warm_wall_s": 0.63,
@@ -652,7 +765,10 @@
    },
    "cuda/core_jit": {
     "backend": "gpu",
-    "devices": ["cuda:0","cuda:1"],
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
     "import_s": 0.573,
     "cold_wall_s": 15.416,
     "warm_wall_s": 3.564,
