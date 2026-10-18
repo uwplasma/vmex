@@ -118,6 +118,8 @@ CURVATURE_WEIGHT = 10.0
 COIL_DISTANCE_WEIGHT = 1.0e4
 COIL_SURFACE_DISTANCE_WEIGHT = 1.0e4
 CONSTRAINT_WEIGHT = 1.0e3
+# Cost of a trial without a certified equilibrium, in units of the seed cost:
+REJECTED_TRIAL_COST = 10.0
 
 # Bound on each scaled variable. They keep a trial boundary inside the range
 # the seed solve converges on; L-BFGS-B rather than BFGS because BFGS cannot
@@ -368,27 +370,46 @@ coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective, has_aux=True))
 # The monitor prints one row per evaluation and records the history for the
 # plot and the movie at the end.
 monitor = opt.OptimizationMonitor(plasma_problem)
-counts, cached = {"trials": 0}, {}
+counts, cached = {"trials": 0, "rejected": 0}, {}
 COIL_TERMS = ("coil length", "coil curvature", "coil separation", "coil-surface separation")
 n_qs_rows = plasma_problem.metadata["term_slices"][0][2]
 
 
 def value_and_grad(u):
-    """What SciPy calls: the two halves evaluated once and added."""
+    """What SciPy calls: the two halves evaluated once, added, and divided by the seed cost.
+
+    The seed cost is about 1e5 (coil and limit penalties); dividing by it puts
+    the seed at 1. A trial without a certified equilibrium comes back with
+    zero residual rows, and its built-in rejection cost is sized for the
+    quasisymmetry terms alone, far below 1e5, so a line search would accept
+    it. It gets REJECTED_TRIAL_COST * (1 + |u|)^2 instead, with its exact
+    gradient: above every accepted value, so it is never accepted.
+    """
     u = np.asarray(u, dtype=float)
     if cached.get("key") == u.tobytes():          # SciPy re-asks at the same point
         return cached["value"], cached["gradient"].copy()
     counts["trials"] += 1
     (plasma_value, (rows, plasma_penalty)), plasma_gradient = \
         plasma_value_and_grad(jnp.asarray(u))
-    (coil_value, coil_costs_), coil_gradient = coil_value_and_grad(jnp.asarray(u))
     rows = np.asarray(rows)
+    if not np.any(rows) and "scale" in cached:
+        counts["rejected"] += 1
+        distance = float(np.linalg.norm(u))
+        value = REJECTED_TRIAL_COST * (1.0 + distance) ** 2
+        gradient = 2.0 * REJECTED_TRIAL_COST * (1.0 + distance) * u / max(distance, 1e-300)
+        print(f"  trial {counts['trials']}: no certified equilibrium, rejected", flush=True)
+        cached.update(key=u.tobytes(), value=value, gradient=gradient)
+        return value, gradient.copy()
+    (coil_value, coil_costs_), coil_gradient = coil_value_and_grad(jnp.asarray(u))
+    cached.setdefault("scale", 1.0 / float(plasma_value + coil_value))
+    scale = cached["scale"]
     terms = {"quasisymmetry": 0.5 * float(rows[:n_qs_rows] @ rows[:n_qs_rows]),
              "beta": 0.5 * float(rows[n_qs_rows:] @ rows[n_qs_rows:]),
              "iota/aspect/B.n penalty": float(np.asarray(plasma_penalty)[0])}
     terms.update(zip(COIL_TERMS, map(float, np.asarray(coil_costs_))))
     value, gradient = monitor.cache_evaluation(
-        u, plasma_value + coil_value, plasma_gradient + coil_gradient, terms)
+        u, scale * (plasma_value + coil_value), scale * (plasma_gradient + coil_gradient),
+        {name: scale * term for name, term in terms.items()})
     cached.update(key=u.tobytes(), value=value, gradient=gradient)
     return value, gradient.copy()
 
@@ -415,7 +436,8 @@ result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", callback=monit
                   options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
                            "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
 u, final_value = result.x, float(result.fun)
-print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials, "
+print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials "
+      f"({counts['rejected']} rejected), "
       f"status {result.status}: {result.message}", flush=True)
 optimization_seconds = time.perf_counter() - started
 
