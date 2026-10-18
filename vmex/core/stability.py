@@ -72,7 +72,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .preconditioner import tridiagonal_solve
+from solvax import tridiagonal_solve
 from .solver import SolverRuntime, SpectralState, _physical_coefficients
 from .statephysics import _field_chain, _iotas_half_from_fields
 from .transforms import physical_to_internal_scale
@@ -964,8 +964,8 @@ def _selected_tridiagonal_jvp(primals, tangents):
 
     def step(carry):
         iteration, u = carry
-        # (super, diag, sub) of shift - |A|; the sign pattern is restored below.
-        u = tridiagonal_solve(jnp.pad(-positive, (0, 1)), shift - d, jnp.pad(-positive, (1, 0)),
+        # (sub, diag, super) of shift - |A|; the sign pattern is restored below.
+        u = tridiagonal_solve(jnp.pad(-positive, (1, 0)), shift - d, jnp.pad(-positive, (0, 1)),
                               u[:, None])[:, 0]
         return iteration + 1, u / jnp.linalg.norm(u)
     _, unsigned = jax.lax.while_loop(
