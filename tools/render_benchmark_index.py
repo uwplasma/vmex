@@ -62,6 +62,8 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/capabilities.json", "tools/render_capabilities.py"),
     ("benchmarks/pleiades_two_coil_mirror.json", "docs/_static/figures/sources/make_mirror_pleiades_figure.py"),
     ("benchmarks/trace_cross_code.json", "benchmarks/trace_cross_code.py"),
+    ("benchmarks/three_terms_resolution.json", "benchmarks/run_three_terms_resolution.py"),
+    ("benchmarks/three_terms_resolution_vacuum.json", "benchmarks/run_three_terms_resolution.py"),
     ("benchmarks/device_cache_reload_m4.json", "benchmarks/device_cache_reload.py"),
     ("benchmarks/qa_optimization_startup_*.json", "benchmarks/qa_optimization_startup.py"),
     ("benchmarks/single_stage_profile_*.json", "benchmarks/single_stage_profile.py"),
@@ -74,6 +76,7 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     ("benchmarks/mirror_*.json", ""),
     ("benchmarks/cache_entry_scaling_*.json", ""),
     ("benchmarks/desc_native_vs_lifted_*.json", ""),
+    ("benchmarks/free_boundary_limits_*.json", ""),
     ("benchmarks/fresh_decks_vs_vmec2000_*.json", ""),
     ("benchmarks/review_*.json", ""),
     # Measured by the external analytical benchmark; the record names its commit.

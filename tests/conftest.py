@@ -26,6 +26,26 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+# The suite never reads or writes the user's compilation cache: a shared
+# cache (a cluster's, often tens of GB on a parallel filesystem) costs every
+# worker its prune scan and every compile a remote write, and tests that
+# change the machine fingerprint (test_compat's macOS paths) would leave
+# directories in it.  Each pytest process gets a private, local cache
+# instead, removed at exit; CI's restored cache (below) still takes over.
+# JAX read ``JAX_COMPILATION_CACHE_DIR`` at the import above, so its config
+# is pointed at the private cache too (vmex keeps a directory it did not set).
+if not os.environ.get("VMEX_CI_COMPILATION_CACHE"):  # pragma: no cover - environment set-up
+    import atexit
+    import shutil
+    import tempfile
+
+    _PRIVATE_CACHE = tempfile.mkdtemp(prefix="vmex-test-cache-")
+    atexit.register(shutil.rmtree, _PRIVATE_CACHE, True)
+    os.environ["VMEX_COMPILATION_CACHE_DIR"] = _PRIVATE_CACHE
+    os.environ["JAX_COMPILATION_CACHE_DIR"] = _PRIVATE_CACHE
+    jax.config.update("jax_compilation_cache_dir", _PRIVATE_CACHE)
+
+
 def _open_ci_compilation_cache(root: Path) -> None:
     """Give this pytest process a private copy of CI's restored XLA cache.
 

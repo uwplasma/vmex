@@ -232,7 +232,8 @@ def case(request, tmp_path_factory):
         # raise_on_max_iterations=False: the up_down deck exhausts NITER
         # before FTOL — exactly like the golden VMEC2000 run, which simply
         # wrote its last (NITER-exhausted) state to the wout file.
-        result = solve_multigrid(inp, verbose=False,
+        # freeze_m1=False: VMEC2000's m=1 rule, so the solve follows the golden run's path bit for bit
+        result = solve_multigrid(inp, verbose=False, freeze_m1=False,
                                  raise_on_max_iterations=False)
         # fsqt history (wrout.f nstore_seq subsampling of fsqr + fsqz).
         history = np.asarray(result.fsq_history, dtype=float)

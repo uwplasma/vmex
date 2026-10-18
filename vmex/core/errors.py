@@ -296,3 +296,20 @@ class MgridNotFoundError(VmecError):
 
     ier_flag: int = INPUT_ERROR_FLAG
     path: str = ""
+
+
+@dataclass
+class TrialRejected(VmecError):
+    """An optimizer trial point could not be solved or certified.
+
+    Raised by :class:`~vmex.core.freeboundary_problem.FreeBoundaryProblem`
+    for an expected numerical rejection of a trial: a step beyond the
+    continuation budget, an ordinary solve that does not converge, or a
+    failed certification or polish (the wrapped :class:`VmecError` is the
+    ``__cause__``).  The accepted equilibrium is unchanged, so a backtracking
+    caller may try a smaller step; :func:`vmex.core.optimize.minimize` stops
+    at the accepted point with ``stop_reason="equilibrium_trial_rejected"``.
+
+    It adds no attributes of its own; the ``message`` says why the trial was
+    rejected.
+    """

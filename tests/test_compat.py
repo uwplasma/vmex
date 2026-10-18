@@ -116,18 +116,14 @@ def test_machine_scoped_never_nests_machines():
     assert _compat._machine_scoped(f"/shared/c/{other}") == f"/shared/c/{fingerprint}"
 
 
-def test_fingerprint_separates_hosts(monkeypatch):
-    """Two cluster nodes never share a cache directory, whatever their
-    /proc/cpuinfo says: XLA:CPU loads an entry built for other CPU features
-    after only logging the mismatch."""
-    real = _compat._host_identity()
-    assert real and real == _compat._host_identity()
-    monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
-    assert _compat._host_identity()        # hardware UUID, or the hostname
-    monkeypatch.undo()
-    monkeypatch.setattr(_compat, "_host_identity", lambda: "node001")
+def test_fingerprint_shared_by_hosts_of_one_machine_type(monkeypatch):
+    """The cache directory names the machine type, not the host: nodes of
+    one cluster partition share a warm cache, while other CPU features
+    (XLA:CPU entries are not portable across them) get their own."""
     first = _compat._cache_machine_fingerprint()
-    monkeypatch.setattr(_compat, "_host_identity", lambda: "node002")
+    monkeypatch.setattr(_compat.platform, "node", lambda: "node002")
+    assert _compat._cache_machine_fingerprint() == first
+    monkeypatch.setattr(_compat.platform, "processor", lambda: "another-cpu")
     assert _compat._cache_machine_fingerprint() != first
 
 
@@ -639,6 +635,45 @@ def _seed_cache(path, count):
         (path / f"k{i}-atime").write_bytes(i.to_bytes(8, "little"))
 
 
+def test_stale_machine_directories_are_removed_from_a_shared_root(tmp_path, monkeypatch):
+    """Sibling machine directories unused for two weeks go; this machine's, recent ones and foreign names stay."""
+    import os
+    import time
+
+    root = tmp_path / "jax_cache"
+    mine, recent, stale = (root / f"linux-x86_64-{n:016x}" for n in (1, 2, 3))
+    foreign = root / "keep-me"
+    stale_file = root / "darwin-arm64-00000000000000ff"
+    for directory in (mine, recent, stale, foreign):
+        directory.mkdir(parents=True)
+        (directory / "entry-cache").write_bytes(b"x")
+    stale_file.write_bytes(b"not a directory")
+    old = time.time() - _compat._CACHE_STALE_SECONDS - 60
+    for path in (mine, stale, foreign, stale_file):
+        os.utime(path, (old, old))
+    assert _compat._prune_stale_machines(str(mine)) == 1
+    assert sorted(p.name for p in root.iterdir()) == sorted(p.name for p in (mine, recent, foreign, stale_file))
+    # not a machine directory: nothing to judge its siblings by
+    assert _compat._prune_stale_machines(str(foreign)) == 0
+    assert _compat._prune_stale_machines(str(tmp_path / "absent" / mine.name)) == 0
+
+    def refuse(path):
+        raise OSError("busy")
+
+    os.utime(recent, (old, old))
+    monkeypatch.setattr("shutil.rmtree", refuse)
+    assert _compat._prune_stale_machines(str(mine)) == 0 and recent.exists()
+
+
+def test_configuring_a_cache_prunes_stale_machines(tmp_path, monkeypatch):
+    """_configure_compilation_cache runs the sibling prune, and a failure there does not stop the set-up."""
+    seen = []
+    monkeypatch.setattr(_compat, "_prune_stale_machines", lambda path: seen.append(path) or 1 / 0)
+    config = types.SimpleNamespace(update=lambda *args: None)
+    _compat._configure_compilation_cache(types.SimpleNamespace(config=config), str(tmp_path))
+    assert seen == [str(tmp_path)]
+
+
 def test_prune_cache_entries_keeps_the_most_recently_used(tmp_path):
     _seed_cache(tmp_path, 50)
     assert _compat._prune_cache_entries(str(tmp_path), 10) == 40
@@ -877,3 +912,77 @@ def test_fresh_jax_environment_default_in_process(monkeypatch):
         assert jax.config.x64_enabled
     finally:
         jax.config.update("jax_enable_x64", previous)
+
+
+def test_prune_cache_entries_bounds_bytes(tmp_path):
+    """The byte bound drops the least recently used entries first."""
+    for i in range(6):
+        (tmp_path / f"k{i}-cache").write_bytes(b"x" * 100)
+        (tmp_path / f"k{i}-atime").write_bytes((1000 + i).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 100, max_bytes=350) == 3
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == ["k3-cache", "k4-cache", "k5-cache"]
+    assert _compat._prune_cache_entries(str(tmp_path), 100, max_bytes=350) == 0
+
+
+def test_atomic_file_cache_roundtrip(tmp_path):
+    """vmex's file cache: atomic writes, first writer wins, hits touch the atime sidecar."""
+    import time
+
+    assert _compat._install_file_cache()
+    from jax._src import compilation_cache
+
+    cache, path = compilation_cache.get_file_cache(str(tmp_path))
+    assert not getattr(cache, "eviction_enabled", True)
+    assert cache.get("abc") is None
+    cache.put("abc", b"one")
+    cache.put("abc", b"two")
+    assert cache.get("abc") == b"one"
+    assert not list(tmp_path.glob(".*.tmp"))
+    stamp = int.from_bytes((tmp_path / "abc-atime").read_bytes(), "little")
+    assert abs(stamp - time.time_ns()) < 60e9
+
+
+def test_prune_cache_entries_removes_stale_temporaries(tmp_path):
+    """A writer killed between write and rename leaves a temporary file; it goes after an hour."""
+    import os
+    import time
+
+    stale, fresh = tmp_path / ".k.1.ab.tmp", tmp_path / ".k.2.cd.tmp"
+    stale.write_bytes(b"x")
+    fresh.write_bytes(b"x")
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+    (tmp_path / "k-cache").write_bytes(b"x")
+    assert _compat._prune_cache_entries(str(tmp_path), 10, max_bytes=100) == 0
+    assert not stale.exists() and fresh.exists()
+
+
+def test_atomic_file_cache_contract(tmp_path, monkeypatch):
+    """Empty keys are refused; remote paths keep JAX's own cache; content checking wraps vmex's."""
+    import pytest
+
+    assert _compat._install_file_cache()
+    assert _compat._install_file_cache()  # idempotent
+    from jax._src import compilation_cache
+
+    cache, _ = compilation_cache.get_file_cache(str(tmp_path))
+    with pytest.raises(ValueError):
+        cache.put("", b"x")
+    monkeypatch.setattr(compilation_cache.config, "compilation_cache_check_contents",
+                        types.SimpleNamespace(value=True))
+    wrapped, _ = compilation_cache.get_file_cache(str(tmp_path))
+    assert isinstance(wrapped, compilation_cache.VerificationCache)
+    monkeypatch.undo()
+    from jax._src import lru_cache
+
+    monkeypatch.setattr(lru_cache, "_is_local_filesystem", lambda path: False)
+    monkeypatch.setattr(compilation_cache, "LRUCache", lambda path, max_size: "jax's own")
+    remote, _ = compilation_cache.get_file_cache("gs://bucket/cache")
+    assert remote == "jax's own"
+
+
+def test_install_file_cache_leaves_unexpected_jax_internals_alone(monkeypatch):
+    from jax._src import compilation_cache
+
+    monkeypatch.delattr(compilation_cache, "get_file_cache")
+    assert _compat._install_file_cache() is False

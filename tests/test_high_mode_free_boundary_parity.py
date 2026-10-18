@@ -396,6 +396,7 @@ def test_mgrid_nzeta_policy_matches_vmec2000() -> None:
     assert int(free_boundary_resolution(bad, _Analytic(), ns=21).nzeta) == 22
 
 
+@pytest.mark.full  # ~7 min on a 2-CPU runner: compiles every free lane of a two-rung QI ladder
 def test_use_fft_reaches_every_free_boundary_lane(tmp_path, monkeypatch):
     """``use_fft=True`` must reach the traced body of EVERY free lane (the
     lanes once silently fell back to the dense default); a ``_make_body``

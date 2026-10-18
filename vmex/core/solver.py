@@ -150,7 +150,7 @@ from .residuals import (
     ForceResiduals, PreconditionedResiduals, apply_lambda_preconditioner,
     apply_radial_preconditioner, edge_force_condition, force_residuals,
     m1_constrained_to_physical, m1_residue_rotation, m1_zero_condition,
-    preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
+    pin_m1_gauge, preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
     zero_m1_z_force,
 )
 from .setup import GUESS_AXIS_GRID_POINTS, RunSetup, guess_axis, interior_guess, run_setup
@@ -168,7 +168,7 @@ __all__ = [
     "NS4", "SpectralState", "PreconditionerCache", "FunctDiagnostics",
     "SolverRuntime", "SolveResult", "Prec2DConfig", "resolution_from_input",
     "prepare_runtime", "evaluate_forces", "solve",
-    "hot_restart_state", "runtime_with_baselines",
+    "hot_restart_state", "runtime_with_baselines", "EarlyStop",
 ]
 
 Array = Any
@@ -184,6 +184,59 @@ BLOCK_SIZE = 10
 _TRAJ_COLS = 11
 
 _TWO_PI_SQ = (2.0 * np.pi) ** 2
+
+
+@dataclass(frozen=True)
+class EarlyStop:
+    """Stop a solve whose force residual cannot reach ``target`` within its iteration budget.
+
+    The CLI lane checks the best ``fsqr + fsqz + fsql`` so far, ``f(k)``, after every block from iteration
+    ``2 * window`` on.  Its decrease over the last ``window`` iterations is the rate
+    ``r = log(f(k - window) / f(k)) / window``; the solve stops when reaching ``target`` at that rate would take
+    more than ``margin`` times the iterations left, or when ``f`` did not decrease over the window.  A stopped
+    solve ends as one that exhausted its budget (``MORE_ITER_FLAG``).  A solve that reaches ``target`` within its
+    budget is stopped only if its rate later grows by more than ``margin``.
+
+    Parameters
+    ----------
+    target : float
+        Residual ``fsqr + fsqz + fsql`` that counts as reached.
+    window : int
+        Iterations over which the rate is measured.
+    margin : float
+        Factor on the iterations left that the projected iterations must exceed.
+    """
+
+    target: float
+    window: int = 1000
+    margin: float = 2.0
+
+    def exhausts_budget(self, iterations, best, max_iterations: int) -> bool:
+        """Whether the solve should stop.
+
+        Parameters
+        ----------
+        iterations : sequence of int
+            Increasing iteration counts of the checks so far, the last one the current iteration.
+        best : sequence of float
+            The best residual up to each of ``iterations``.
+        max_iterations : int
+            The iteration budget.
+
+        Returns
+        -------
+        bool
+            ``True`` if ``target`` is out of reach within the budget.
+        """
+        k, f = int(iterations[-1]), float(best[-1])
+        if k < 2 * self.window or f <= self.target:
+            return False
+        earlier = max(int(np.searchsorted(iterations, k - self.window, side="right")) - 1, 0)
+        decrease = np.log(float(best[earlier]) / f)
+        if not decrease > 0.0:
+            return True
+        needed = np.log(f / self.target) * (k - int(iterations[earlier])) / decrease
+        return bool(needed > self.margin * (int(max_iterations) - k))
 
 
 def _select(mask: Array, new, old):
@@ -327,7 +380,7 @@ class _LoopCarry:
     state: SpectralState; xcdot: SpectralState; xstore: SpectralState
     cache: PreconditionerCache
     time_step: Array; inv_tau: Array; fsq: Array; res0: Array; res1: Array
-    fsqr: Array; fsqz: Array; fsql: Array
+    fsqr: Array; fsqz: Array; fsql: Array; fedge: Array
     fsqr1: Array; fsqz1: Array; fsql1: Array
     wb: Array; wp: Array; r00: Array
     iteration: Array; iter1: Array; ijacob: Array
@@ -421,6 +474,8 @@ class SolverRuntime:
     # retrace).  `presf_ns_scale` is the static funct3d.f edge-pressure
     # factor pmass(1)/pmass(hs*(ns-1.5)) applied to pres(ns).
     lfreeb: bool = False
+    include_edge_in_convergence: bool = False
+    edge_force_tolerance: float = 0.0
     bsqvac_edge: Array | None = None
     presf_ns_scale: Array | None = None
 
@@ -475,7 +530,7 @@ class SolverRuntime:
 _register(SolverRuntime, meta=(
     "resolution", "gamma", "tcon0",
     "jmax", "lforbal", "lmove_axis",
-    "lfreeb", "prec2d", "trajectory_rows",
+    "lfreeb", "prec2d", "trajectory_rows", "include_edge_in_convergence", "edge_force_tolerance",
 ))
 
 
@@ -687,6 +742,7 @@ def prepare_runtime(
     tcon0: float | None = None,
     gamma: float | None = None,
     lconm1: bool = True, lforbal: bool | None = None,
+    freeze_m1: bool | None = None,
     setup: RunSetup | None = None,
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
@@ -703,6 +759,17 @@ def prepare_runtime(
     (``funct3d.f``) are computed once here from the initial state — the edge
     spectral row never evolves in fixed-boundary mode, so they are constants
     of the run.
+
+    ``freeze_m1`` (default for stellarator-symmetric fixed-boundary inputs;
+    ``None`` picks ``not (inp.lfreeb or lasym)``, so VMEC + NESTOR free boundary
+    and ``lasym`` keep VMEC2000's rule; ``True`` with ``lasym`` is an error)
+    fixes the angle gauge of the constrained m=1 combination: its force stays zeroed from the first iteration and every
+    stage starts with it on the ``profil3d.f`` profile
+    (:func:`~vmex.core.residuals.pin_m1_gauge`), so the converged state is a
+    single-valued function of the input whatever the starting state.
+    ``freeze_m1=False`` is VMEC2000's rule (force released until
+    ``fsqz < 1e-6``, then zeroed): bit-compatible with VMEC2000, but solves of
+    one input from different starts differ along that combination.
 
     ``lforbal`` overrides the input's non-variational ``(m=1,n=0)`` force
     replacement when supplied (a prebuilt :class:`RunSetup` defaults it to
@@ -744,6 +811,13 @@ def prepare_runtime(
     # still performs its first evolve/funct3d pass before ``iter2 >= niter``
     # terminates the stage, so the effective trajectory capacity is one.
     effective_iterations = max(1, requested_iterations)
+    if freeze_m1 is None:  # fixed boundary: fixed gauge; VMEC + NESTOR free boundary and lasym: VMEC2000's rule
+        freeze_m1 = not (isinstance(source, VmecInput) and bool(source.lfreeb)) and not bool(setup.lasym)
+    if freeze_m1 and bool(setup.lasym):
+        raise ValueError("the fixed m=1 gauge (freeze_m1) is verified for stellarator-symmetric runs only; "
+                         "lasym runs keep VMEC2000's m=1 rule")
+    if bool(setup.freeze_m1) != bool(freeze_m1):
+        setup = replace(setup, freeze_m1=bool(freeze_m1))
     rt = SolverRuntime(
         resolution=resolution, setup=setup,
         gamma=float(defaults["gamma"] if gamma is None else gamma),
@@ -1043,7 +1117,8 @@ def _force_pipeline(
 
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
-    zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
+    zero_gate = (jnp.asarray(True) if setup.freeze_m1 else
+                 m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration))
     released = zero_m1_z_force(rotated, zero_gate)
     spectral_finite = (
         _all_finite((spectral, rotated, released)) if collect_health else passing
@@ -1318,7 +1393,10 @@ def _evaluate(
                 jnp.asarray(new), jnp.shape(old)), fresh, cache_b,
         )
 
-    refresh = (((iteration - iter_last_reset) % NS4) == 0) & (~jac_changed)
+    # Strict acceptance uses current-state normalization and constraint
+    # scaling, matching an independent evaluate_forces(cache=None) call.
+    refresh = ((((iteration - iter_last_reset) % NS4) == 0)
+               | rt.include_edge_in_convergence) & (~jac_changed)
     cache = lax.cond(
         refresh, _fresh_cache, lambda operand: operand[1],
         (state, cache, geometry, jacobian, metrics, fields, energies),
@@ -1645,6 +1723,16 @@ def reguess_initial_axis(
 # -- Iteration body (evolve.f + TimeStepControl + the eqsolve.f checks) ----------------------------------------------
 
 
+def _force_convergence(fsqr, fsqz, fsql, fedge, ftol, *,
+                       edge_tolerance=None, vacuum_active=True):
+    """Ordinary stopping rule with an opt-in finite spectral edge gate."""
+    interior = (fsqr <= ftol) & (fsqz <= ftol) & (fsql <= ftol)
+    if edge_tolerance is None:
+        return interior
+    return (interior & vacuum_active & jnp.isfinite(fedge) &
+            (fedge >= 0) & (fedge <= edge_tolerance))
+
+
 def _make_body(
     rt: SolverRuntime,
     *,
@@ -1690,11 +1778,20 @@ def _make_body(
             fsqr_c = jnp.where(jac1, carry.fsqr, e1.residuals.fsqr)
             fsqz_c = jnp.where(jac1, carry.fsqz, e1.residuals.fsqz)
             fsql_c = jnp.where(jac1, carry.fsql, e1.residuals.fsql)
+            fedge_c = jnp.where(jac1, carry.fedge, e1.residuals.fedge)
             fsq0 = fsqr_c + fsqz_c + fsql_c
 
-            converged = (
-                (~jac1) & (fsqr_c <= ftol) & (fsqz_c <= ftol) & (fsql_c <= ftol)
-            )
+            converged = (~jac1) & _force_convergence(
+                fsqr_c, fsqz_c, fsql_c, fedge_c, ftol,
+                edge_tolerance=rt.edge_force_tolerance if rt.include_edge_in_convergence else None,
+                vacuum_active=rt.lfreeb)
+            # Vacuum activation evaluates pre-restart geometry while carry.state
+            # contains the restored state. Its residual cannot certify that
+            # returned state. Strict solves must reach the next ordinary pass,
+            # which rebuilds the vacuum and evaluates the actual evolving state.
+            # Preserve VMEC2000's turn-on ordering in the compatibility lane.
+            if evaluation_state is not None and rt.include_edge_in_convergence:
+                converged = jnp.zeros_like(converged)
             bad_init = jac1 & (it == 1)
             # funct3d.f/eqsolve.f: LMOVE_AXIS=T and a finite first raw-force
             # sum above 1e2 set irst=4 and return to guess_axis before
@@ -1719,6 +1816,18 @@ def _make_body(
             # ---- TimeStepControl (evolve.f) --------------------------------
             first = it == carry.iter1
             fsq_prev = carry.fsq
+            if evaluation_state is not None and rt.include_edge_in_convergence:
+                # Vacuum activation changes the force operator.  A converged
+                # warm start can have a tiny fixed-boundary residual; retaining
+                # it as the growth reference repeatedly restores the old state
+                # even when the new free-boundary residual is decreasing.
+                # Seed strict turn-on control from the newly evaluated operator.
+                # The first-step damping window is reset independently below.
+                fsq_prev = jnp.where(
+                    (~jac1) & (~nonfinite1),
+                    e1.pre.fsqr1 + e1.pre.fsqz1 + e1.pre.fsql1,
+                    fsq_prev,
+                )
             res0_f = jnp.where(first, fsq_prev, carry.res0)
             res1_f = jnp.where(first, fsq0, carry.res1)
             record_low = (fsq_prev <= res0_f) & (fsq0 <= res1_f)
@@ -1948,6 +2057,7 @@ def _make_body(
             fsqr=gate(running, fsqr_f, carry.fsqr),
             fsqz=gate(running, fsqz_f, carry.fsqz),
             fsql=gate(running, fsql_f, carry.fsql),
+            fedge=gate(running, jnp.where(restart, e2.residuals.fedge, e1.residuals.fedge), carry.fedge),
             fsqr1=gate(running, fsqr1_f, carry.fsqr1),
             fsqz1=gate(running, fsqz1_f, carry.fsqz1),
             fsql1=gate(running, fsql1_f, carry.fsql1),
@@ -2010,7 +2120,7 @@ def _initial_carry(
             / np.asarray(float(time_step0), dtype=dtype)
         ),
         fsq=one, res0=inf, res1=inf,
-        fsqr=fsqr0, fsqz=fsqz0, fsql=fsql0,
+        fsqr=fsqr0, fsqz=fsqz0, fsql=fsql0, fedge=one,
         fsqr1=one, fsqz1=one, fsql1=one,
         wb=zero, wp=zero, r00=zero,
         iteration=int_(1), iter1=int_(1),
@@ -2052,7 +2162,12 @@ class SolveResult:
     ``(fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1)``.  ``wmhd`` is the printed
     ``WMHD = (wb + wp/(gamma-1)) * (2 pi)^2``.  ``vacuum`` is ``None`` for
     fixed-boundary solves.  The five polish fields are ``None`` on the
-    unchanged default path.
+    unchanged default path.  ``fedge`` is the final spectral edge force, the
+    quantity the strict free-boundary acceptance
+    (``include_edge_in_convergence``) bounds.  ``boundary_residual`` is the
+    :class:`~vmex.core.freeboundary_vc.BoundaryResidual` of a free boundary
+    solved with ``boundary_condition="three_terms"`` or reported with
+    ``report_boundary_residual=True``, else ``None``.
     """
 
     converged: bool; iterations: int; ier_flag: int
@@ -2069,6 +2184,8 @@ class SolveResult:
     native_equilibrium: Any = None
     strong_force: Any = None
     polish_report: Any = None
+    fedge: float = 0.0
+    boundary_residual: Any = None
 
 
 def _result_from_carry(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
@@ -2111,6 +2228,7 @@ def _result_from_carry(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
         iterations=iterations,
         ier_flag=int(carry.ier),
         fsqr=float(carry.fsqr), fsqz=float(carry.fsqz), fsql=float(carry.fsql),
+        fedge=float(carry.fedge),
         wb=wb, wp=wp, wmhd=float((wb + wp / (gamma - 1.0)) * _TWO_PI_SQ),
         r00=float(carry.r00),
         time_step=float(carry.time_step),
@@ -2325,7 +2443,8 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
               initial_xcdot: SpectralState | None = None,
               initial_residuals: (
                   tuple[float | Array, float | Array, float | Array] | None
-              ) = None) -> _LoopCarry:
+              ) = None,
+              early_stop: EarlyStop | None = None) -> _LoopCarry:
     """Run the iteration loop in the requested lane; return the final carry.
 
     ``emit_legend=False`` suppresses the ``BEGIN FORCE ITERATIONS`` legend
@@ -2334,6 +2453,8 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     ``time_step0``/``nstep`` are the host loop-driver scalars
     (:func:`_loop_driver_config`) — kept out of ``rt`` so they never key a
     lane recompile.
+    ``early_stop`` (CLI lane only) ends a solve that cannot converge within its
+    budget (:class:`EarlyStop`).
     """
     carry = _initial_carry(
         state0, rt, ijacob=ijacob, time_step0=time_step0,
@@ -2370,6 +2491,8 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         emit(screen_header(lasym=rt.resolution.lasym, lfreeb=False), end="")
 
     printed: set[int] = set()
+    checked: list[int] = []
+    best: list[float] = []
     emit_start = 1
     max_passes = int(rt.max_iterations) + 200
     lane = _block_lane_fft if use_fft else _block_lane
@@ -2424,7 +2547,27 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
                                      emit, nstep=nstep, start=emit_start)
         if done:
             break
+        if early_stop is not None:
+            fsq = float(carry.fsqr) + float(carry.fsqz) + float(carry.fsql)
+            checked.append(int(carry.iteration) - 1)
+            best.append(min(fsq, best[-1]) if best else fsq)
+            if early_stop.exhausts_budget(checked, best, int(rt.max_iterations)):
+                # the last completed iteration, as at the end of a budget
+                return replace(carry, iteration=carry.iteration - 1,
+                               done=jnp.asarray(True, dtype=carry.done.dtype),
+                               ier=jnp.asarray(MORE_ITER_FLAG, dtype=carry.ier.dtype))
     return carry
+
+
+def _gauge_fixed(rt: SolverRuntime, state: SpectralState | None) -> SpectralState | None:
+    """``state`` with the constrained m=1 combination on its fixed-gauge profile
+    (``RunSetup.freeze_m1``; a cold start is already on it)."""
+    setup = rt.setup
+    if state is None or not (setup.freeze_m1 and setup.lconm1 and setup.lthreed):
+        return state
+    # the state's own edge row: the boundary's labelling sets the profile
+    z_sin = jnp.asarray(state.Z_sin)
+    return replace(state, Z_sin=pin_m1_gauge(z_sin, z_sin[-1], modes=rt.modes))
 
 
 def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
@@ -2436,7 +2579,8 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
                  emit_legend: bool = True,
                  residual_continuation: (
                      tuple[float | Array, float | Array, float | Array] | None
-                 ) = None) -> _LoopCarry:
+                 ) = None,
+                 early_stop: EarlyStop | None = None) -> _LoopCarry:
     """Run one solve at a fixed runtime, with the eqsolve.f axis-retry.
 
     ``state0=None`` starts from the runtime's ``profil3d.f`` interior guess.
@@ -2450,11 +2594,13 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
     zero velocity and half the preceding initial step, capped at 0.5.  The
     equilibrium equations and convergence test are unchanged; setting
     ``jacobian_retries=0`` preserves the exact VMEC2000 fatal-stop policy.
+    ``early_stop`` is passed to every loop (:func:`_run_loop`).
     Returns the final carry; the caller maps ``carry.ier`` to
     results/exceptions (:func:`_finalize`).
     """
     if int(jacobian_retries) < 0:
         raise ValueError("jacobian_retries must be non-negative")
+    state0 = _gauge_fixed(rt, state0)
 
     def run_attempt(
         attempt_rt: SolverRuntime,
@@ -2481,7 +2627,7 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
             verbose=verbose, emit=emit, use_fft=use_fft,
             time_step0=attempt_time_step0, nstep=nstep,
             emit_banner=emit_banner, emit_legend=emit_legend,
-            initial_residuals=attempt_residuals,
+            initial_residuals=attempt_residuals, early_stop=early_stop,
         )
 
         # eqsolve.f: on a first-iteration Jacobian sign change with
@@ -2518,6 +2664,7 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
                 initial_residuals=(
                     carry.fsqr, carry.fsqz, carry.fsql
                 ),
+                early_stop=early_stop,
             )
         return carry, attempt_rt
 
@@ -2570,7 +2717,7 @@ def _solve_stage_traced(rt: SolverRuntime, state0: SpectralState | None, *,
     host: they change the static ``lmove_axis``, so a traced solve returns
     that flag instead.
     """
-    state0 = _initial_state(rt.setup) if state0 is None else state0
+    state0 = _initial_state(rt.setup) if state0 is None else _gauge_fixed(rt, state0)
     zeros = jax.tree.map(jnp.zeros_like, state0)
     one = jnp.ones((), dtype=rt.setup.s_full.dtype)
     start = jax.tree.map(jnp.array, _initial_carry(state0, rt, ijacob=0, time_step0=time_step0))
@@ -2727,6 +2874,7 @@ def solve(
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
     lconm1: bool = True, verbose: bool = False, emit=emit_flushed,
+    freeze_m1: bool | None = None,
     initial_state: SpectralState | None = None,
     restart_from: Any = None,
     device: Any = AUTO,
@@ -2850,7 +2998,7 @@ def solve(
         rt = prepare_runtime(
             source, resolution, ftol=ftol, max_iterations=max_iterations,
             tcon0=tcon0, gamma=gamma,
-            lconm1=lconm1, precon_type=precon_type,
+            lconm1=lconm1, freeze_m1=freeze_m1, precon_type=precon_type,
             prec2d_threshold=prec2d_threshold, prec2d=prec2d,
             use_fft=use_fft_resolved,
         )

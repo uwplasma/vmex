@@ -55,7 +55,7 @@ from .preconditioner_2d import Prec2DConfig
 from .printing import emit_flushed
 from .restart import restart_state, skip_ladder_rungs
 from .solver import (
-    SolveResult, SpectralState, _finalize, _loop_driver_config,
+    EarlyStop, SolveResult, SpectralState, _finalize, _loop_driver_config,
     _prefetch_block_lane,
     _polish_solve_result, _release_used_lane_executables, _result_from_carry,
     _resolve_force_balance_polish, _solve_stage, _resolve_use_fft,
@@ -216,7 +216,7 @@ _PREFETCH_ATTEMPTED: set = set()
 
 def _launch_lane_prefetch(
     inp: VmecInput, *, ns_next: int, ftol_next: float, niter_next: int,
-    lconm1: bool, time_step, tcon0, gamma, nstep, precon_type,
+    lconm1: bool, freeze_m1, time_step, tcon0, gamma, nstep, precon_type,
     prec2d_threshold, prec2d, use_fft, device,
 ) -> threading.Thread:
     """Start compiling the NEXT rung's block-lane executable in the background.
@@ -238,7 +238,7 @@ def _launch_lane_prefetch(
             with device_context(device, resolution):
                 rt = prepare_runtime(
                     inp, resolution, ftol=float(ftol_next),
-                    max_iterations=int(niter_next), lconm1=lconm1,
+                    max_iterations=int(niter_next), lconm1=lconm1, freeze_m1=freeze_m1,
                     tcon0=tcon0, gamma=gamma,
                     precon_type=precon_type,
                     prec2d_threshold=prec2d_threshold, prec2d=prec2d,
@@ -264,6 +264,7 @@ def solve_multigrid(
     *,
     mode: str = "cli",
     lconm1: bool = True,
+    freeze_m1: bool | None = None,
     verbose: bool = False,
     emit=emit_flushed,
     initial_state: SpectralState | None = None,
@@ -282,6 +283,7 @@ def solve_multigrid(
     prefetch_compile: bool = False,
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
+    early_stop: EarlyStop | None = None,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
 
@@ -323,6 +325,10 @@ def solve_multigrid(
     ``jacobian_retries`` applies the same bounded best-checkpoint/``DELT``
     recovery as :func:`vmex.core.solver.solve` independently at each stage;
     zero preserves VMEC2000's immediate fatal stop after 75 resets.
+    ``early_stop`` (:class:`~vmex.core.solver.EarlyStop`) ends the final stage
+    once it cannot converge within its ``NITER``; the earlier stages always
+    run to their own tolerance or budget, so the seed of the final stage does
+    not depend on it.
     If the first requested grid still has an invalid initial Jacobian after
     its magnetic-axis re-guess, ``coarse_grid_retry=True`` retries the ladder
     once with an automatic ``ns=3``, ``ftol=1e-4`` stage prepended.  This is
@@ -425,20 +431,26 @@ def solve_multigrid(
     first_executed = True
     residual_continuation = None
     carry = rt = None
-    prefetch_thread: threading.Thread | None = None
+    # Prefetch threads of later rungs, by rung index: every remaining rung's
+    # lane compiles at once (in parallel, XLA releases the GIL), and each rung
+    # joins its own thread before it starts, so it never compiles twice.
+    prefetch_threads: dict[int, threading.Thread] = {}
     # runvmec.f resets DELT to the input value at every stage; the loop-driver
     # scalars are host config shared by all rungs (never pytree structure).
     time_step0, nstep_cadence = _loop_driver_config(
         inp, time_step=time_step, nstep=nstep
     )
     for igrid in range(n_stages):
+        own = prefetch_threads.pop(igrid, None)
+        if own is not None:
+            own.join()
         nsval = int(ns_arr[igrid])
         resolution = resolution_from_input(inp, ns=nsval)
         stage_use_fft = _resolve_use_fft(use_fft, device, resolution)
         with device_context(device, resolution):
             rt = prepare_runtime(
                 inp, resolution, ftol=float(ftol_arr[igrid]),
-                max_iterations=int(niter_arr[igrid]), lconm1=lconm1,
+                max_iterations=int(niter_arr[igrid]), lconm1=lconm1, freeze_m1=freeze_m1,
                 tcon0=tcon0, gamma=gamma,
                 precon_type=precon_type, prec2d_threshold=prec2d_threshold,
                 prec2d=prec2d, use_fft=stage_use_fft,
@@ -466,33 +478,34 @@ def solve_multigrid(
         # iterations finish.  Equal-structure next rungs reuse this rung's
         # executable directly, so nothing needs prefetching (ftol is pytree
         # DATA — a tolerance-only change is not a new structure).
-        if (
-            prefetch_compile
-            and mode == "cli"
-            and igrid + 1 < n_stages
-            and not jax.config.jax_disable_jit
-            and (
-                int(ns_arr[igrid + 1]) != nsval
-                or int(niter_arr[igrid + 1]) != int(niter_arr[igrid])
-            )
-        ):
-            ns_next = int(ns_arr[igrid + 1])
-            use_fft_next = _resolve_use_fft(
-                use_fft, device, resolution_from_input(inp, ns=ns_next))
-            attempt_key = (
-                ns_next, float(ftol_arr[igrid + 1]), int(niter_arr[igrid + 1]),
-                bool(use_fft_next), int(inp.mpol), int(inp.ntor),
-                int(inp.nfp), bool(inp.lasym), bool(lconm1), time_step, tcon0,
-                gamma, nstep, precon_type, prec2d_threshold, prec2d is None,
-                str(device),
-            )
-            if attempt_key not in _PREFETCH_ATTEMPTED:
+        # Overlapped compilation (see the docstring): start building every
+        # later rung's executable now, all at once, so each is (mostly) ready
+        # when its rung begins.  Equal-structure rungs reuse an earlier rung's
+        # executable directly, so nothing needs prefetching for them (ftol is
+        # pytree DATA -- a tolerance-only change is not a new structure).
+        if prefetch_compile and mode == "cli" and not jax.config.jax_disable_jit:
+            for later in range(igrid + 1, n_stages):
+                ns_next = int(ns_arr[later])
+                if any(int(ns_arr[j]) == ns_next and int(niter_arr[j]) == int(niter_arr[later])
+                       for j in range(igrid, later)):
+                    continue
+                use_fft_next = _resolve_use_fft(
+                    use_fft, device, resolution_from_input(inp, ns=ns_next))
+                attempt_key = (
+                    ns_next, float(ftol_arr[later]), int(niter_arr[later]),
+                    bool(use_fft_next), int(inp.mpol), int(inp.ntor),
+                    int(inp.nfp), bool(inp.lasym), bool(lconm1), freeze_m1, time_step, tcon0,
+                    gamma, nstep, precon_type, prec2d_threshold, prec2d is None,
+                    str(device),
+                )
+                if attempt_key in _PREFETCH_ATTEMPTED:
+                    continue
                 _PREFETCH_ATTEMPTED.add(attempt_key)
-                prefetch_thread = _launch_lane_prefetch(
+                prefetch_threads[later] = _launch_lane_prefetch(
                     inp, ns_next=ns_next,
-                    ftol_next=float(ftol_arr[igrid + 1]),
-                    niter_next=int(niter_arr[igrid + 1]),
-                    lconm1=lconm1, time_step=time_step, tcon0=tcon0,
+                    ftol_next=float(ftol_arr[later]),
+                    niter_next=int(niter_arr[later]),
+                    lconm1=lconm1, freeze_m1=freeze_m1, time_step=time_step, tcon0=tcon0,
                     gamma=gamma, nstep=nstep, precon_type=precon_type,
                     prec2d_threshold=prec2d_threshold, prec2d=prec2d,
                     use_fft=use_fft_next,
@@ -510,13 +523,15 @@ def solve_multigrid(
                 residual_continuation=residual_continuation,
                 use_fft=stage_use_fft,
                 emit_legend=first_executed,
+                early_stop=None if np.any(ns_arr[igrid + 1:] >= nsval) else early_stop,
             )
-        # Join the prefetch before any cache release below: a mid-compile
+        # Join the prefetches before any cache release below: a mid-compile
         # jax.clear_caches() on another thread is the one interaction the
         # overlap must never have.
-        if prefetch_thread is not None:
-            prefetch_thread.join()
-            prefetch_thread = None
+        if release_stage_cache or igrid + 1 == n_stages:
+            for thread in prefetch_threads.values():
+                thread.join()
+            prefetch_threads.clear()
         first_executed = False
         ier = int(carry.ier)
         if (
@@ -541,7 +556,7 @@ def solve_multigrid(
                     [np.asarray([niter_arr[0]], dtype=niter_arr.dtype), niter_arr]
                 ),
                 mode=mode,
-                lconm1=lconm1,
+                lconm1=lconm1, freeze_m1=freeze_m1,
                 verbose=verbose,
                 emit=emit,
                 initial_state=initial_state,
@@ -561,6 +576,7 @@ def solve_multigrid(
                 prefetch_compile=prefetch_compile,
                 polish_force_balance=polish,
                 polish_config=polish_config,
+                early_stop=early_stop,
             )
         last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
         if ier not in (SUCCESSFUL_TERM_FLAG, MORE_ITER_FLAG) or (
@@ -639,6 +655,9 @@ def solve_free_boundary_multigrid(
     use_fft: bool | None = None,
     release_stage_cache: bool = False,
     prefetch_compile: bool = False,
+    boundary_condition: str = "nestor",
+    three_terms_options: dict | None = None,
+    report_boundary_residual: bool = False,
 ) -> SolveResult:
     """Free-boundary solve over the VMEC2000 ``NS_ARRAY`` ladder.
 
@@ -700,9 +719,47 @@ def solve_free_boundary_multigrid(
     results are bit-identical, any prefetch failure falls back silently to
     on-demand compilation, and background threads are joined before the
     ``release_stage_cache`` point exactly like the fixed-boundary ladder.
+
+    ``boundary_condition="three_terms"`` replaces NESTOR's vacuum pressure
+    by all three plasma-vacuum interface conditions (``B . n = 0``, pressure
+    balance and no sheet current) with the plasma field from virtual casing:
+    the boundary is solved for by
+    :func:`~vmex.core.freeboundary_vc.solve_free_boundary_three_terms`
+    (keywords in ``three_terms_options``) starting from the deck boundary,
+    and the result is the fixed-boundary ladder's final stage on that boundary,
+    with ``result.boundary_residual`` set and ``result.vacuum = None``.  Only
+    the ladder, external-field, ``verbose``/``emit`` and ``device`` arguments
+    apply to it.
+
+    ``report_boundary_residual=True`` also evaluates the three interface
+    conditions on a NESTOR solution (virtual casing on a 48 x 48 boundary grid)
+    and sets ``result.boundary_residual``.  NESTOR enforces ``B . n = 0`` and
+    pressure balance but not the field direction, so a large ``sheet_current``
+    there flags a free boundary that carries an edge sheet current.
     """
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary_multigrid requires an LFREEB=T input")
+    if boundary_condition == "three_terms":
+        if initial_state is not None or restart_from is not None:
+            raise NotImplementedError(
+                "boundary_condition='three_terms' starts from the deck boundary; "
+                "set it on inp instead of passing initial_state/restart_from")
+        from .freeboundary_vc import solve_free_boundary_three_terms
+
+        ladder = replace(inp, ns_array=np.asarray(inp.ns_array if ns_array is None else ns_array),
+                         ftol_array=np.asarray(inp.ftol_array if ftol_array is None else ftol_array),
+                         niter_array=np.asarray(inp.niter_array if niter_array is None else niter_array))
+        fit = solve_free_boundary_three_terms(
+            ladder, external_field=external_field, mgrid_path=mgrid_path,
+            **(three_terms_options or {}))
+        ns_final = int(np.asarray(fit.equilibrium.solution.R_cos).shape[0])
+        result = solve_multigrid(
+            fit.input, ns_array=[ns_final], ftol_array=[float(np.atleast_1d(fit.input.ftol_array)[-1])],
+            niter_array=[int(np.atleast_1d(fit.input.niter_array)[-1])],
+            initial_state=fit.equilibrium.solution, verbose=verbose, emit=emit, device=device)
+        return replace(result, boundary_residual=fit.boundary_residual)
+    if boundary_condition != "nestor":
+        raise ValueError(f"boundary_condition must be 'nestor' or 'three_terms', got {boundary_condition!r}")
 
     ns_arr = _vmec_ns_prefix(inp.ns_array if ns_array is None else ns_array)
     if ns_arr.size == 0:
@@ -933,6 +990,7 @@ def solve_free_boundary_multigrid(
                     use_fft=use_fft,
                     release_stage_cache=release_stage_cache,
                     prefetch_compile=prefetch_compile,
+                    report_boundary_residual=report_boundary_residual,
                 )
             raise
         except BaseException:
@@ -987,7 +1045,13 @@ def solve_free_boundary_multigrid(
 
     if stage_result is None:  # defensive; positive ns_arr guarantees a stage
         raise ValueError("ns_array has no executable stages")
-    return stage_result.result
+    result = stage_result.result
+    if report_boundary_residual:
+        from .freeboundary_vc import boundary_residual, summarize_boundary_residual
+
+        result = replace(result, boundary_residual=summarize_boundary_residual(*boundary_residual(
+            inp, result.state, external_field, nphi=48, ntheta=48)))
+    return result
 
 
 def solve_file(
@@ -996,6 +1060,7 @@ def solve_file(
     polish: bool | str | None = None,
     polish_config: Any = None,
     polish_fail: str | None = None,
+    boundary_condition: str | None = None,
     write_wout: bool = True,
     outdir=None,
     **solve_kwargs,
@@ -1012,6 +1077,9 @@ def solve_file(
     does the same and emits a :class:`RuntimeWarning`, with the documented
     precedence ``CLI flag > Python keyword > file directive > package
     default``; an explicit ``polish_config`` wins over ``polish_fail``.
+    ``boundary_condition`` (``"nestor"`` or ``"three_terms"``) overrides the
+    deck's ``!@VMEX BOUNDARY_CONDITION`` for an ``LFREEB = T`` deck (see
+    :func:`solve_free_boundary_multigrid`).
 
     ``write_wout=True`` writes ``wout_<case>.nc`` beside the input (or into
     ``outdir``) — the same output contract as ``vmex <input>``.  When
@@ -1037,7 +1105,7 @@ def solve_file(
         return solve_mirror_file(path, write_mout=write_wout, outdir=outdir, **solve_kwargs)
     request = read_input_request(path)
     options, sources = resolve_run_options(
-        request.options, polish=polish, polish_fail=polish_fail,
+        request.options, polish=polish, polish_fail=polish_fail, boundary_condition=boundary_condition,
     )
     config = polish_config_from_options(options, polish_config)
     inp = request.input
@@ -1070,7 +1138,8 @@ def solve_file(
                 f"the polish request came from the {sources['polish']}"
             )
         plan_kwargs = {} if freeb_plan is None else freeb_plan.solver_kwargs
-        result = solve_free_boundary_multigrid(inp, **{**plan_kwargs, **solve_kwargs})
+        result = solve_free_boundary_multigrid(
+            inp, **{**plan_kwargs, "boundary_condition": options.boundary_condition, **solve_kwargs})
     else:
         if bool(solve_kwargs.get("verbose")) and options.polish is not False:
             print(f"polish = {options.polish!r} (from {sources['polish']})")

@@ -472,7 +472,7 @@ def lasym_eq():
     fixture's contract; carrying ``bmns``/``gmns`` is.
     """
     equilibrium = opt.solve_equilibrium(
-        VmecInput.from_file(DATA_DIR / "input.up_down_asymmetric_tokamak"))
+        VmecInput.from_file(DATA_DIR / "input.up_down_asymmetric_tokamak"), raise_on_max_iterations=False)
     assert bool(equilibrium.wout.lasym)
     return equilibrium
 
@@ -758,8 +758,11 @@ def test_current_dof_packing_and_validation():
         opt._current_dof_setup(dataclasses.replace(inp, ncurr=0), 2)
     with pytest.raises(ValueError, match="positive int"):
         opt._current_dof_setup(inp, -1)
-    with pytest.raises(ValueError, match="line_segment"):
-        opt._current_dof_setup(dataclasses.replace(inp, pcurr_type="line_segment"), 2)
+    # knot values of a line-segment profile, as of a spline (a value on every half-mesh surface)
+    segments = dataclasses.replace(inp, pcurr_type="line_segment_ip", ac_aux_s=np.linspace(0.0, 1.0, 5),
+                                   ac_aux_f=np.array([1.0, 2.0, 3.0, 2.0, 0.5]))
+    assert opt._current_dof_setup(segments, 4) == (4, 3.0)
+    np.testing.assert_allclose(opt._pack_current(segments, 4, 3.0)[:4], [1 / 3, 2 / 3, 1.0, 2 / 3])
     with pytest.raises(ValueError, match="current-spline knot"):
         opt._current_dof_setup(
             dataclasses.replace(inp, pcurr_type="cubic_spline_ip"), 2)
@@ -902,3 +905,147 @@ def test_filter_bsubuv_lasym_halves_the_self_conjugate_nyquist_modes():
     assert out_u.shape == bsubu.shape and out_v.shape == bsubv.shape
     assert np.all(np.isfinite(out_u)) and np.all(np.isfinite(out_v))
     assert float(np.max(np.abs(out_u - bsubu))) > 1e-3
+
+
+def test_half_mesh_picard_makes_the_current_redls():
+    """Fixed boundary, LP QA at 0.5% beta: I' on every half-mesh surface iterated to Redl's, the first segment
+    carrying Redl's near-axis enclosed current."""
+    inp = VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_beta0p5_bootstrap").change_resolution(
+        mpol=3, ntor=3, ntheta=12, nzeta=12)
+    inp = dataclasses.replace(inp, ns_array=np.array([25]), ftol_array=np.array([1e-12]),
+                              niter_array=np.array([10000]))
+    n0 = 1.5e20
+    T0 = float(inp.am[0]) / (2 * bs.ELEMENTARY_CHARGE * n0)
+    profiles = _paper_profiles(n0, T0)
+    result = bs.self_consistent_bootstrap(inp, profiles, 0, n_iter=30, tol=1e-4, relax=0.5, profile="half_mesh")
+    assert result.converged and result.input.pcurr_type == "line_segment_ip"
+    assert np.size(result.input.ac_aux_s) == 24 + 2
+    state, rt = result.equilibrium.solution, result.equilibrium.solver_context
+    # independently of the inversion: VMEC's finite-difference <J.B> is Redl's away from the ends (Redl on the
+    # quasi-symmetric part of |B|, the rows' geometry; this coarse QA is 7 % from it on the full field)
+    hm = bs._half_mesh_fields(state, rt)
+    jr = np.asarray(bs.j_dot_B_redl(profiles, bs._qs_profile_geometry(state, rt, 0, hm, n_lambda=bs.N_LAMBDA),
+                                    0)[0])
+    jv = np.asarray(bs._jv_from_half(hm, hm.s_half))
+    s = np.asarray(hm.s_half)
+    inner = (s > 0.1) & (s < 0.9)
+    assert np.max(np.abs(jv - jr)[inner]) < 0.05 * np.max(np.abs(jr))
+
+
+def test_current_derivative_of_any_jdotb_is_redls_for_redl(eq):
+    """``current_derivative`` (any <J.B>, e.g. DKX's) inverts the same identity as ``redl_current_derivative``."""
+    profiles = _paper_profiles(1e20, 2e3)
+    s, redl = bs.redl_current_derivative(profiles, 0, eq.state, eq.runtime)
+    hm = bs._half_mesh_fields(eq.state, eq.runtime)
+    jr = bs.j_dot_B_redl(profiles, bs._qs_profile_geometry(eq.state, eq.runtime, 0, hm, n_lambda=bs.N_LAMBDA), 0)[0]
+    s2, generic = bs.current_derivative(jr, eq.state, eq.runtime)
+    np.testing.assert_array_equal(np.asarray(s), np.asarray(s2))
+    np.testing.assert_allclose(np.asarray(generic), np.asarray(redl), rtol=1e-12, atol=1e-9 * np.max(np.abs(redl)))
+
+
+def test_near_axis_redl_ratio_is_banana_or_collisional():
+    """Inside s_1 the ratio is Redl's <J.B> on the s_1 geometry continued to the axis (eps ~ s^(1/2), f_t ~ s^(1/4)):
+    about s^(1/4) at low collisionality, far smaller where nu*_e ~ eps^(-3/2) is large."""
+    geom = bs.RedlGeometry(
+        surfaces=jnp.array([0.01]), iota=jnp.array([0.4]), G=jnp.array([6.0]), I=jnp.array([0.0]),
+        R=jnp.array([6.0]), epsilon=jnp.array([1e-4]), f_t=jnp.array([0.0146]), fsa_B2=jnp.array([1.0]),
+        fsa_1overB=jnp.array([1.0]), Bmin=jnp.array([0.98]), Bmax=jnp.array([1.02]), psi_edge=jnp.asarray(-0.5),
+        nfp=2)
+    x = np.array([1 / 64, 1 / 16, 1 / 4, 1.0])
+
+    def ratio(n0, T0):
+        profiles = _paper_profiles(n0, T0)
+        jr, details = bs.j_dot_B_redl(profiles, geom, 0)
+        direct = [float(bs.j_dot_B_redl(profiles, dataclasses.replace(
+            geom, surfaces=geom.surfaces * xi, epsilon=geom.epsilon * np.sqrt(xi), f_t=geom.f_t * xi ** 0.25), 0)[0][0])
+            for xi in x]
+        got = np.asarray(bs.near_axis_redl_ratio(profiles, 0, geom, jr, jnp.asarray(x)))
+        np.testing.assert_allclose(got, np.asarray(direct) / float(jr[0]), rtol=1e-12)
+        return got, float(details["nu_e_star"][0])
+
+    banana, nu = ratio(1e12, 1e6)
+    assert nu < 1e-3 and np.all(np.diff(banana) > 0)
+    # the electron and ion gradient terms nearly cancel, so the sum departs from f_t ~ s^(1/4) by up to ~30%
+    assert np.all((0.7 * x ** 0.25 < banana) & (banana < 1.4 * x ** 0.25))
+    collisional, nu = ratio(1e21, 1e3)
+    assert nu > 10 and collisional[-1] == pytest.approx(1.0)
+    assert np.all(np.diff(collisional) > 0) and np.all(collisional[:-1] < 0.5 * x[:-1] ** 0.25)
+
+
+def test_self_consistent_bootstrap_rejects_unknown_profile():
+    """An unknown current representation fails before any equilibrium is solved."""
+    with pytest.raises(ValueError, match="profile must be"):
+        bs.self_consistent_bootstrap(None, None, 0, profile="spline")
+
+
+def test_near_axis_redl_mean_is_the_converged_integral_of_the_ratio():
+    """The mean of the near-axis ratio over 0 < s < s_1 (the first segment's enclosed current): N_AXIS nodes in
+    t = x^(1/4) agree with 256 to 1e-10 in both regimes; about 4/5 (the mean of s^(1/4)) in the banana regime."""
+    geom = bs.RedlGeometry(
+        surfaces=jnp.array([0.01]), iota=jnp.array([0.4]), G=jnp.array([6.0]), I=jnp.array([0.0]),
+        R=jnp.array([6.0]), epsilon=jnp.array([1e-4]), f_t=jnp.array([0.0146]), fsa_B2=jnp.array([1.0]),
+        fsa_1overB=jnp.array([1.0]), Bmin=jnp.array([0.98]), Bmax=jnp.array([1.02]), psi_edge=jnp.asarray(-0.5),
+        nfp=2)
+    for n0, T0, low, high in ((1e12, 1e6, 0.7 * 0.8, 1.4 * 0.8), (1e21, 1e3, 0.0, 0.7 * 0.8)):
+        profiles = _paper_profiles(n0, T0)
+        jr = bs.j_dot_B_redl(profiles, geom, 0)[0]
+        mean = float(bs.near_axis_redl_mean(profiles, 0, geom, jr))
+        assert mean == pytest.approx(float(bs.near_axis_redl_mean(profiles, 0, geom, jr, 256)), abs=1e-10)
+        assert low < mean < high
+
+
+@pytest.mark.parametrize("helicity_n", [None, 2, -2, 0.5, True])
+def test_redl_refuses_a_field_that_is_not_qa_or_qh(helicity_n):
+    """Redl's model is for quasi-symmetric fields: helicity 0 (QA) or +/-1 (QH), required; a QI field (no
+    helicity) or any other value is refused, by the formula and by the in-solve current block alike."""
+    geom = bs.RedlGeometry(
+        surfaces=jnp.array([0.25]), iota=jnp.array([0.4]), G=jnp.array([6.0]), I=jnp.array([0.0]),
+        R=jnp.array([6.0]), epsilon=jnp.array([0.1]), f_t=jnp.array([0.3]), fsa_B2=jnp.array([1.0]),
+        fsa_1overB=jnp.array([1.0]), Bmin=jnp.array([0.9]), Bmax=jnp.array([1.1]), psi_edge=jnp.asarray(-0.5), nfp=2)
+    profiles = _paper_profiles(1e20, 2e3)
+    with pytest.raises(ValueError, match="QA .*QH|QI"):
+        bs.j_dot_B_redl(profiles, geom, helicity_n)
+    with pytest.raises(ValueError, match="QA .*QH|QI"):
+        bs.HalfMeshCurrent(None, profiles, helicity_n)  # refused before the deck is read
+    for ok in bs.REDL_HELICITIES:
+        assert np.all(np.isfinite(np.asarray(bs.j_dot_B_redl(profiles, geom, ok)[0])))
+
+
+def test_quasi_symmetric_geometry_of_an_axisymmetric_field_is_the_full_fields(eq):
+    """Axisymmetric (Solovev): all of |B| is quasi-symmetric (n = 0 in Boozer angles), so the Redl geometry from
+    the Boozer-angle profile (:func:`bs._qs_profile_geometry`) is the full field's on the solver grid: f_t,
+    <B^2>, <1/B>, B_max and B_min are coordinate invariants of the surface's |B| distribution."""
+    hm = bs._half_mesh_fields(eq.state, eq.runtime)
+    qs = bs._qs_profile_geometry(eq.state, eq.runtime, 0, hm, n_lambda=bs.N_LAMBDA)
+    full = bs._geometry_from_half(hm, hm.s_half, n_lambda=bs.N_LAMBDA)
+    # the reference is the full field on the solver's own grid (Solovev: 18 poloidal points), accurate to ~1e-5
+    # in the averages and 1e-4 in the edge B_min of its interpolant
+    for name, rtol in (("f_t", 5e-5), ("fsa_B2", 2e-5), ("fsa_1overB", 2e-5), ("R", 2e-5), ("Bmax", 1e-5),
+                       ("Bmin", 3e-4)):
+        np.testing.assert_allclose(np.asarray(getattr(qs, name)), np.asarray(getattr(full, name)), rtol=rtol,
+                                   err_msg=name)
+    c, sn, m = bs._qs_boozer_harmonics(eq.state, eq.runtime, 0, hm)
+    assert float(np.max(np.abs(np.asarray(sn)))) < 1e-12 * float(np.max(np.abs(np.asarray(c))))  # symmetric
+
+
+def test_quasi_symmetric_redl_current_derivative_is_smooth(eq):
+    """The Redl rows' derivative (forward mode, two tangents a program) against central differences of the
+    rows along the same state directions: the quasi-symmetric profile's extrema are refined and unique."""
+    profiles = _paper_profiles(1e20, 2e3)
+    state, rt = eq.state, eq.runtime
+
+    def rows(st):
+        return bs.redl_current_derivative(profiles, 0, st, rt)[1]
+
+    leaves, tree = jax.tree_util.tree_flatten(state)
+    rng = np.random.default_rng(3)
+    tangents = [jax.tree_util.tree_unflatten(tree, [jnp.asarray(rng.standard_normal(np.shape(a)) * 1e-3 * (
+        np.max(np.abs(np.asarray(a))) + 1e-30)) for a in leaves]) for _ in range(2)]
+    stacked = jax.tree_util.tree_map(lambda *a: jnp.stack(a), *tangents)
+    jvps = np.asarray(jax.vmap(lambda t: jax.jvp(rows, (state,), (t,))[1])(stacked))
+    h = 1e-5  # central differences: the edge row's error is ~1.4e3 h^2 of the largest row (its curvature)
+    for t, jvp in zip(tangents, jvps):
+        plus = rows(jax.tree_util.tree_map(lambda a, b: a + h * b, state, t))
+        minus = rows(jax.tree_util.tree_map(lambda a, b: a - h * b, state, t))
+        fd = (np.asarray(plus) - np.asarray(minus)) / (2 * h)
+        np.testing.assert_allclose(jvp, fd, rtol=1e-5, atol=1e-6 * np.max(np.abs(fd)))

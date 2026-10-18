@@ -635,6 +635,38 @@ def test_indexed_legacy_axis_overlays_vmec_axis() -> None:
     np.testing.assert_array_equal(inp.zaxis_s, [0.0, -0.5])
 
 
+def test_profiles_longer_than_ndatafmax_are_refit_only_where_vmec2000_reads_them(tmp_path: Path) -> None:
+    """A profile with more than VMEC2000's 101 knots (a current on every half-mesh surface of ns >= 99) is held
+    whole by VmecInput; an INDATA namelist and a WOUT echo get a 101-knot subset of its knots, with a warning."""
+    from vmex.core.input import NDATAFMAX, fit_aux_knots
+    from vmex.core.wout import _aux_echo
+
+    s = np.r_[0.0, (np.arange(1, 200) - 0.5) / 199, 1.0]
+    f = np.where(s < 0.4, s, 0.4 + 2.0 * (s - 0.4)) + 1e-3 * np.sin(40 * s)  # a kink and a ripple
+    assert fit_aux_knots(s[:NDATAFMAX], f[:NDATAFMAX])[0].size == NDATAFMAX  # within the limit: unchanged
+    with pytest.warns(RuntimeWarning, match="refit to VMEC2000's 101"):
+        ks, kf = fit_aux_knots(s, f, "AC_AUX_S/F")
+    assert ks.size == NDATAFMAX and ks[0] == 0.0 and ks[-1] == 1.0 and np.all(np.diff(ks) > 0)
+    np.testing.assert_array_equal(kf, f[np.searchsorted(s, ks)])  # values kept at the kept knots
+    assert np.max(np.abs(np.interp(s, ks, kf) - f)) < 2e-4 * np.max(np.abs(f))
+    # piecewise linear on few breakpoints: the subset reproduces it exactly
+    exact = np.interp(s, [0.0, 0.3, 0.7, 1.0], [0.0, 1.0, -0.5, 2.0])
+    with pytest.warns(RuntimeWarning):
+        es, ef = fit_aux_knots(s, exact)
+    np.testing.assert_allclose(np.interp(s, es, ef), exact, atol=1e-14)
+
+    inp = VmecInput(mpol=2, ntor=0, ncurr=1, pcurr_type="line_segment_ip", ac_aux_s=s, ac_aux_f=f, curtor=1e3)
+    assert inp.ac_aux_s.size == s.size  # VMEX's own profile keeps every knot
+    with pytest.warns(RuntimeWarning, match="AC_AUX_S/F"):
+        reread = VmecInput.from_file(inp.to_indata(tmp_path / "input.knots"))
+    np.testing.assert_array_equal(reread.ac_aux_s, ks)
+    np.testing.assert_array_equal(reread.ac_aux_f, kf)
+    with pytest.warns(RuntimeWarning, match="ac_aux_s/f"):
+        echo = _aux_echo(inp)
+    np.testing.assert_array_equal(echo["ac_aux_s"], ks)
+    assert echo["am_aux_s"].size == NDATAFMAX and np.all(echo["am_aux_s"] == -1.0)
+
+
 @pytest.mark.parametrize("ending", [
     "\n/\n", "\n/", " /\n", " / ! end of INDATA\n", "\n&END\n", "\n $end\n",
     " ! a comment with a / slash\n/\n",

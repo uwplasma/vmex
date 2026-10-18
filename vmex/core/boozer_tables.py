@@ -29,6 +29,8 @@ Public API
 
 from __future__ import annotations
 
+import functools
+
 import jax.numpy as jnp
 import numpy as np
 
@@ -37,6 +39,55 @@ from .geometry import half_mesh_jacobian
 from .solver import SolverRuntime, SpectralState, _geometry
 
 __all__ = ["boozer_input_tables", "high_order_boozer_input_tables"]
+
+
+@functools.lru_cache(maxsize=8)
+def _projection_tables(ntheta1: int, nzeta: int, nfp: int):
+    """The uniform-grid Fourier projection of :func:`boozer_input_tables`: ``xm, xn, w, cos_t, sin_t``.
+
+    One set per grid, built once and returned as the same read-only arrays on every call: a traced program
+    captures a NumPy array as a constant, and JAX lowers one constant per array object, so tables rebuilt per
+    surface and per field (``(ntheta1, nzeta, modes)`` each, 69 MB on a 64 x 64 grid) put a hundred copies
+    of the same values into one program (gigabytes of constants, minutes of compilation).
+    """
+    theta = 2.0 * np.pi * np.arange(ntheta1) / ntheta1
+    zeta = 2.0 * np.pi * np.arange(nzeta) / (nfp * nzeta)
+    # VMEC sizes the wout Nyquist table from the grid itself (wrout.f:
+    # mnyq = ntheta1/2, nnyq = nzeta/2), so the closing row and column belong
+    # to the projection; on a coarse deck they carry a few percent of
+    # bmnc/bmns.
+    m_max, n_max = ntheta1 // 2, nzeta // 2
+    ml, nl = [], []
+    for m in range(0, m_max + 1):
+        for n in range(-n_max, n_max + 1):
+            if m == 0 and n < 0:
+                continue
+            ml.append(m)
+            nl.append(n * nfp)
+    xm, xn = np.asarray(ml), np.asarray(nl)
+    ang = theta[:, None, None] * xm[None, None, :] - zeta[None, :, None] * xn[None, None, :]
+    cos_t, sin_t = np.cos(ang), np.sin(ang)
+    # The factor of two is the real-basis DFT norm for modes strictly inside
+    # the band.  On an even grid the closing m = ntheta1/2 row and the
+    # n = nzeta/2 column are self-conjugate — exp(i*(ntheta1/2)*theta_i)
+    # equals its own reflection — so (m, n) and (m, -n) share a single grid
+    # basis function and each carries half the amplitude.  That is wrout.f's
+    # ``cosmui(:,mnyq) *= 0.5`` / ``cosnv(:,nnyq) *= 0.5`` half-weight; odd
+    # ntheta1/nzeta have no exact Nyquist mode and keep the plain factor.
+    m_folds = (ntheta1 % 2 == 0) & (xm == ntheta1 // 2)
+    n_folds = (nzeta % 2 == 0) & (np.abs(xn) == (nzeta // 2) * nfp)
+    w = 2.0 / (ntheta1 * nzeta) * np.where(m_folds, 0.5, 1.0) * np.where(n_folds, 0.5, 1.0)
+    w[(xm == 0) & (xn == 0)] = 1.0 / (ntheta1 * nzeta)
+    # Where both angles fold — m in {0, ntheta1/2} and |n| in {0, nzeta/2} —
+    # the mode is real on the grid and has no sine partner at all.  Zero those
+    # columns so round-off in sin(pi*i) cannot emit a spurious sine table
+    # entry where VMEC writes an exact zero.
+    sine_free = ((xm == 0) | m_folds) & ((xn == 0) | n_folds)
+    sin_t = np.where(sine_free[None, None, :], 0.0, sin_t)
+    tables = (xm, xn, w, cos_t, sin_t)
+    for table in tables:
+        table.setflags(write=False)
+    return tables
 
 
 def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict:
@@ -131,41 +182,8 @@ def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict
         return out if parity == "even" else out * jnp.asarray(sign_odd)
 
     # uniform-grid Fourier projection onto the grid-representable modes
-    theta = 2.0 * np.pi * np.arange(ntheta1) / ntheta1
-    zeta = 2.0 * np.pi * np.arange(nzeta) / (nfp * nzeta)
-    # VMEC sizes the wout Nyquist table from the grid itself (wrout.f:
-    # mnyq = ntheta1/2, nnyq = nzeta/2), so the closing row and column belong
-    # to the projection; on a coarse deck they carry a few percent of
-    # bmnc/bmns.
-    m_max, n_max = ntheta1 // 2, nzeta // 2
-    ml, nl = [], []
-    for m in range(0, m_max + 1):
-        for n in range(-n_max, n_max + 1):
-            if m == 0 and n < 0:
-                continue
-            ml.append(m)
-            nl.append(n * nfp)
-    xm, xn = np.asarray(ml), np.asarray(nl)
-    ang = theta[:, None, None] * xm[None, None, :] - zeta[None, :, None] * xn[None, None, :]
-    cos_t, sin_t = jnp.asarray(np.cos(ang)), jnp.asarray(np.sin(ang))
-    # The factor of two is the real-basis DFT norm for modes strictly inside
-    # the band.  On an even grid the closing m = ntheta1/2 row and the
-    # n = nzeta/2 column are self-conjugate — exp(i*(ntheta1/2)*theta_i)
-    # equals its own reflection — so (m, n) and (m, -n) share a single grid
-    # basis function and each carries half the amplitude.  That is wrout.f's
-    # ``cosmui(:,mnyq) *= 0.5`` / ``cosnv(:,nnyq) *= 0.5`` half-weight; odd
-    # ntheta1/nzeta have no exact Nyquist mode and keep the plain factor.
-    m_folds = (ntheta1 % 2 == 0) & (xm == ntheta1 // 2)
-    n_folds = (nzeta % 2 == 0) & (np.abs(xn) == (nzeta // 2) * nfp)
-    w = 2.0 / (ntheta1 * nzeta) * np.where(m_folds, 0.5, 1.0) * np.where(n_folds, 0.5, 1.0)
-    w[(xm == 0) & (xn == 0)] = 1.0 / (ntheta1 * nzeta)
-    w = jnp.asarray(w)
-    # Where both angles fold — m in {0, ntheta1/2} and |n| in {0, nzeta/2} —
-    # the mode is real on the grid and has no sine partner at all.  Zero those
-    # columns so round-off in sin(pi*i) cannot emit a spurious sine table
-    # entry where VMEC writes an exact zero.
-    sine_free = ((xm == 0) | m_folds) & ((xn == 0) | n_folds)
-    sin_t = jnp.where(jnp.asarray(sine_free)[None, None, :], 0.0, sin_t)
+    xm, xn, w, cos_t, sin_t = _projection_tables(ntheta1, nzeta, nfp)
+    w, cos_t, sin_t = jnp.asarray(w), jnp.asarray(cos_t), jnp.asarray(sin_t)
 
     def project(f, parity):
         return w * jnp.einsum("tz,tzm->m", f, cos_t if parity == "cos" else sin_t)

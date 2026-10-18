@@ -160,6 +160,7 @@ def plot_optimization_movie(
     fps: int = 10,
     max_frames: int = 50,
     dpi: int = 100,
+    frame_labels: Sequence[str] | None = None,
 ) -> Path:
     """Animate accepted surface and coil geometries from an optimization.
 
@@ -205,6 +206,10 @@ def plot_optimization_movie(
     dpi:
         Output resolution, default 100 — deliberately below the still-figure
         default, since every frame is rendered.
+    frame_labels:
+        Optional title for each entry of ``x_history`` (for example the
+        optimizer step a checkpoint was saved at); the default titles a frame
+        with its index into ``x_history``.
 
     Returns
     -------
@@ -213,6 +218,8 @@ def plot_optimization_movie(
     """
     if not x_history:
         raise ValueError("x_history must contain at least one accepted point")
+    if frame_labels is not None and len(frame_labels) != len(x_history):
+        raise ValueError("frame_labels must have one entry per x_history point")
     if fps < 1 or max_frames < 2 or dpi < 1:
         raise ValueError("fps and dpi must be positive and max_frames at least 2")
     path = Path(path)
@@ -304,7 +311,9 @@ def plot_optimization_movie(
         axis.set_xlim(center[0] - span / 2, center[0] + span / 2)
         axis.set_ylim(center[1] - span / 2, center[1] + span / 2)
         axis.set_zlim(center[2] - span / 2, center[2] + span / 2)
-        axis.set_box_aspect((1, 1, 1)); axis.set_title(f"accepted iteration {indices[frame_index]}")
+        axis.set_box_aspect((1, 1, 1)); axis.set_title(
+            f"accepted iteration {indices[frame_index]}" if frame_labels is None
+            else str(frame_labels[indices[frame_index]]))
         return (*axis.lines, *axis.collections)
 
     animation = FuncAnimation(figure, draw, frames=len(indices), interval=1000 / fps)

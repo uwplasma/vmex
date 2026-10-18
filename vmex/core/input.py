@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 
-__all__ = ["UnsupportedInputModeError", "VmecInput"]
+__all__ = ["NDATAFMAX", "UnsupportedInputModeError", "VmecInput", "fit_aux_knots"]
 
 Scalar = Union[str, bool, int, float]
 IndexComponent = Union[int, slice]
@@ -552,6 +552,46 @@ def _trim_aux(aux_s, aux_f) -> tuple[np.ndarray, np.ndarray]:
             n_valid = idx
             break
     return s[:n_valid].copy(), f[:n_valid].copy()
+
+
+#: VMEC2000's ``ndatafmax`` (vmec_input.f): the length of the ``*_AUX_S`` / ``*_AUX_F`` knot arrays of an INDATA
+#: namelist and of a WOUT's profile echo.  VMEX's own profiles are not bound by it.
+NDATAFMAX = 101
+
+
+def fit_aux_knots(aux_s, aux_f, name: str = "profile") -> tuple[np.ndarray, np.ndarray]:
+    """``(aux_s, aux_f)`` with at most :data:`NDATAFMAX` knots, for an INDATA namelist or a WOUT.
+
+    A profile with more knots (a current solved on every half-mesh surface of a fine radial grid,
+    :class:`~vmex.core.bootstrap.HalfMeshCurrent`) keeps a subset of its own knots, both ends and then, one at
+    a time, the knot where the piecewise-linear interpolant of the kept ones is furthest from the profile's
+    value (values unchanged at the kept knots).  It warns with the largest deviation at a dropped knot, relative
+    to the largest value.  A profile within the limit is returned as it is.
+
+    Parameters
+    ----------
+    aux_s, aux_f:
+        The knots and their values.
+    name:
+        The profile's name in the warning.
+
+    Returns
+    -------
+    tuple
+        ``(aux_s, aux_f)`` with at most :data:`NDATAFMAX` entries.
+    """
+    s, f = np.asarray(aux_s, dtype=float), np.asarray(aux_f, dtype=float)
+    if s.size <= NDATAFMAX:
+        return s, f
+    chosen = [0, s.size - 1]
+    for _ in range(NDATAFMAX - 2):
+        error = np.abs(f - np.interp(s, s[chosen], f[chosen]))
+        error[chosen] = 0.0
+        chosen = sorted(chosen + [int(np.argmax(error))])
+    deviation = float(np.max(np.abs(f - np.interp(s, s[chosen], f[chosen]))) / max(np.max(np.abs(f)), 1e-300))
+    warnings.warn(f"{name}: {s.size} knots refit to VMEC2000's {NDATAFMAX} (ndatafmax), largest change "
+                  f"{deviation:.1e} of its largest value", RuntimeWarning, stacklevel=2)
+    return s[chosen], f[chosen]
 
 
 def _indata_values(
@@ -1396,18 +1436,21 @@ class VmecInput:
         put("PRES_SCALE", self.pres_scale)
         put("PMASS_TYPE", self.pmass_type)
         put("AM", self.am)
-        put("AM_AUX_S", self.am_aux_s)
-        put("AM_AUX_F", self.am_aux_f)
+        am_s, am_f = fit_aux_knots(self.am_aux_s, self.am_aux_f, "AM_AUX_S/F")
+        put("AM_AUX_S", am_s)
+        put("AM_AUX_F", am_f)
         put("NCURR", self.ncurr)
         put("CURTOR", self.curtor)
         put("PCURR_TYPE", self.pcurr_type)
         put("AC", self.ac)
-        put("AC_AUX_S", self.ac_aux_s)
-        put("AC_AUX_F", self.ac_aux_f)
+        ac_s, ac_f = fit_aux_knots(self.ac_aux_s, self.ac_aux_f, "AC_AUX_S/F")
+        put("AC_AUX_S", ac_s)
+        put("AC_AUX_F", ac_f)
         put("PIOTA_TYPE", self.piota_type)
         put("AI", self.ai)
-        put("AI_AUX_S", self.ai_aux_s)
-        put("AI_AUX_F", self.ai_aux_f)
+        ai_s, ai_f = fit_aux_knots(self.ai_aux_s, self.ai_aux_f, "AI_AUX_S/F")
+        put("AI_AUX_S", ai_s)
+        put("AI_AUX_F", ai_f)
         put("BLOAT", self.bloat)
         put("LFREEB", self.lfreeb)
         put("MGRID_FILE", self.mgrid_file)

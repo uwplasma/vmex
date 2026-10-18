@@ -140,3 +140,54 @@ def test_graded_target_batch_size_rejects_invalid_static_sizes():
         with pytest.raises(ValueError, match="positive integer"):
             field.graded_target_batch_size = size
         assert field.graded_target_batch_size == 3
+
+
+def test_checkpointed_far_field_is_the_packages_sum_with_a_small_reverse_pass():
+    """The direct far-field quadratures VMEX swaps in while it traces a virtual-casing evaluation give the
+    package's values and gradients (the same per-target summation order) for every chunking, the reverse pass of
+    the interface rows no longer stores the dense source-target kernel (22 GiB at 8 x 8 VC48 for LP QA; past
+    40 GB for QH and QI), and the package's functions are back after the context, also when nested."""
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+    import pytest
+
+    pytest.importorskip("virtual_casing_jax")
+    from virtual_casing_jax import integrals
+
+    jax.config.update("jax_enable_x64", True)
+    rng = np.random.default_rng(0)
+    Xs = jnp.asarray(rng.standard_normal((3, 37, 11)))
+    Xt = jnp.asarray(rng.standard_normal((3, 5, 7)) + 5.0)
+    density, area = jnp.asarray(rng.standard_normal((37, 11))), jnp.asarray(rng.random((37, 11)))
+    normal = jnp.asarray(rng.standard_normal((3, 37, 11)))
+    for chunk, block in ((64, 8), (100, None), (0, 0), (1024, 16)):
+        options = dict(chunk_size=chunk, target_chunk_size=block)
+        np.testing.assert_allclose(virtual_casing._laplace_fxd_u_eval(Xs, Xt, density, area, **options),
+                                   integrals.laplace_fxd_u_eval(Xs, Xt, density, area, **options), rtol=1e-14,
+                                   atol=1e-16)
+        np.testing.assert_allclose(virtual_casing._laplace_dx_u_eval(Xs, normal, Xt, density, area, **options),
+                                   integrals.laplace_dx_u_eval(Xs, normal, Xt, density, area, **options), rtol=1e-14,
+                                   atol=1e-16)
+
+        def loss(f, X):
+            return jnp.sum(f(X, Xt, density, area, **options) ** 2)
+
+        np.testing.assert_allclose(jax.grad(lambda X: loss(virtual_casing._laplace_fxd_u_eval, X))(Xs),
+                                   jax.grad(lambda X: loss(integrals.laplace_fxd_u_eval, X))(Xs), rtol=1e-13,
+                                   atol=1e-16)
+    package = (integrals.laplace_fxd_u_eval, integrals.laplace_dx_u_eval)
+    with virtual_casing._checkpointed_far_field():
+        with virtual_casing._checkpointed_far_field():
+            assert integrals.laplace_fxd_u_eval is virtual_casing._laplace_fxd_u_eval
+        assert integrals.laplace_dx_u_eval is virtual_casing._laplace_dx_u_eval
+    assert (integrals.laplace_fxd_u_eval, integrals.laplace_dx_u_eval) == package
+    # the reverse pass of a 2048-source, 512-target sum: the dense kernel alone would be 2048 x 512 x 3 doubles
+    big_src, big_trg = jnp.asarray(rng.standard_normal((3, 2048))), jnp.asarray(rng.standard_normal((3, 512)) + 9.0)
+    w = jnp.ones(2048)
+
+    def temp(f):
+        program = jax.jit(jax.grad(lambda X: jnp.sum(f(X, big_trg, w, w, chunk_size=256, target_chunk_size=64))))
+        return program.lower(big_src).compile().memory_analysis().temp_size_in_bytes
+
+    assert temp(virtual_casing._laplace_fxd_u_eval) < 2048 * 512 * 3 * 8 / 4

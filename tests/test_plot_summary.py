@@ -247,7 +247,7 @@ def test_force_error_resolves_vacuum_convergence(niter, low, high):
         VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres"),
         ns_array=[16], niter_array=[niter], ftol_array=[1e-12],
     )
-    wout = wout_from_state(inp=inp, state=opt.solve_equilibrium(inp).state, fsqr=0.0, fsqz=0.0, fsql=0.0)
+    wout = wout_from_state(inp=inp, state=opt.solve_equilibrium(inp, raise_on_max_iterations=False).state, fsqr=0.0, fsqz=0.0, fsql=0.0)
     np.testing.assert_allclose(np.abs(wout.equif[1:-1]), 1.0, atol=1e-6)
     rho, profile, average = plotting._relative_force_error_profile(wout)
     assert rho.size == 14 and np.all(profile > 0.0)

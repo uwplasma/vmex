@@ -138,6 +138,8 @@ def test_scalar_targets_match_own_wout(solovev_eq):
                                float(w.aspect), rtol=1e-8)
     np.testing.assert_allclose(float(opt.volume(eq.state, eq.runtime)),
                                float(w.volume_p), rtol=1e-8)
+    np.testing.assert_allclose(float(opt.major_radius(eq.state, eq.runtime)),
+                               float(w.Rmajor_p), rtol=1e-8)
     np.testing.assert_allclose(float(opt.mean_iota(eq.state, eq.runtime)),
                                float(np.mean(np.asarray(w.iotas)[1:])), rtol=1e-8)
     np.testing.assert_allclose(float(opt.min_abs_iota(eq.state, eq.runtime)),
@@ -760,7 +762,7 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
             assert not lane.equilibrium_from_x(lane.x0).result.converged
         with monkeypatch.context() as m:
             m.setitem(implicit_module._LAST_REFINED, cfg,
-                      (*implicit_module._LAST_REFINED[cfg][:2], True))
+                      (*implicit_module._LAST_REFINED[cfg][:2], True, np.nan))
             with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
                 lane.equilibrium_from_x(lane.x0)
 
@@ -1624,6 +1626,9 @@ def test_subproblem_ladder_compiles_once():
             # compile once per process on first use; whether an earlier test
             # on the same xdist worker already paid them is order-dependent.
             name = re.match(r"Compiling jit\((\w+)\)", record.getMessage())
+            self.names = getattr(self, "names", [])
+            if name and not (hasattr(jax.numpy, name[1]) or hasattr(jax.lax, name[1])):
+                self.names.append(name[1])
             self.count += bool(name) and not (
                 hasattr(jax.numpy, name[1]) or hasattr(jax.lax, name[1]))
 
@@ -1652,7 +1657,7 @@ def test_subproblem_ladder_compiles_once():
 
     assert compiles_after_second_rung == compiles_after_first_rung, (
         "the second ladder rung recompiled: "
-        f"{compiles_after_second_rung - compiles_after_first_rung} programs")
+        f"{compiles_after_second_rung - compiles_after_first_rung} programs: {counter.names}")
 
 
 def test_eager_state_objective_gradient_compiles_once():
@@ -1759,7 +1764,7 @@ def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
         __hash__ = object.__hash__
 
     cfg = Config(inp=None, hot_restart=True, multigrid=False, resolution=None,
-                 ftol=1e-12, max_iterations=10, mode=None, lconm1=True)
+                 ftol=1e-12, max_iterations=10, mode=None, lconm1=True, freeze_m1=True)
     im._HOT_CACHE[cfg] = "warm"
     result = im._host_solve(cfg, {"leaf": np.zeros(1)})
     assert calls == ["warm", None] and result.converged
@@ -1778,3 +1783,18 @@ def test_report_targets_prints_one_verdict_line(capsys, monkeypatch):
     out = capsys.readouterr().out.splitlines()
     assert out == ["Targets met.", "Targets NOT met: beta 0.02 below 0.025.",
                    "Targets NOT met: aspect 6.5 above 6.3; min |iota| 0.4 below 0.42."]
+
+
+def test_solve_equilibrium_raises_at_its_iteration_cap():
+    """An equilibrium is never returned unconverged by default: a ladder whose last stage stops at NITER short of
+    FTOL raises; ``raise_on_max_iterations=False`` is the explicit opt-out (the result then says it did not
+    converge)."""
+    from vmex.core.errors import VmecConvergenceError
+
+    path = Path(__file__).resolve().parents[1] / "examples" / "data" / "input.solovev"
+    inp = dataclasses.replace(VmecInput.from_file(path), ns_array=np.array([11]), ftol_array=np.array([1e-30]),
+                              niter_array=np.array([30]))
+    with pytest.raises(VmecConvergenceError):
+        opt.solve_equilibrium(inp)
+    eq = opt.solve_equilibrium(inp, raise_on_max_iterations=False)
+    assert float(eq.wout.fsqr + eq.wout.fsqz + eq.wout.fsql) > 1e-30

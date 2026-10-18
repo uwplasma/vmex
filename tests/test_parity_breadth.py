@@ -149,12 +149,13 @@ def _solve_case(name: str) -> dict:
         if spec["niter"] is not None:
             niter_arr = np.resize(np.asarray(inp.niter_array, int), n_stages)
             niter_arr[-1] = spec["niter"]
+        # freeze_m1=False: VMEC2000's m=1 rule (bit parity with the reference runs)
         result = solve_multigrid(
-            inp, ftol_array=ftol_arr, niter_array=niter_arr, mode="cli"
+            inp, ftol_array=ftol_arr, niter_array=niter_arr, mode="cli", freeze_m1=False
         )
     else:
         result = solver.solve(
-            inp, ftol=spec["ftol"], max_iterations=spec["niter"], mode="cli"
+            inp, ftol=spec["ftol"], max_iterations=spec["niter"], mode="cli", freeze_m1=False
         )
 
     out = {}

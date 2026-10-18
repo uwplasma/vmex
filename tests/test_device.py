@@ -63,16 +63,23 @@ def test_none_leaves_placement_to_jax(monkeypatch):
     assert dev.resolve_mirror_device(None) is None
 
 
+def _no_user_placement(monkeypatch):
+    """No JAX placement selected by the user.  jax reads ``JAX_PLATFORMS`` once, at import, into
+    ``jax.config``; deleting the variable afterwards changes nothing, so a run with ``JAX_PLATFORMS=cpu``
+    (CPU-only nodes, CI) would otherwise see a user selection here."""
+    monkeypatch.setattr(dev, "_user_selected_placement", lambda: False)
+
+
 def test_omitted_device_uses_auto_policy(monkeypatch):
     seen = []
-    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
-    monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
+    _no_user_placement(monkeypatch)
     monkeypatch.setattr(dev, "recommended_device", lambda res: seen.append(res) or "cpu")
     dev.resolve_device(resolution=_res(ns=11, mpol=6, ntor=0))
     assert len(seen) == 1
 
 
-def test_auto_without_resolution_has_a_clear_error():
+def test_auto_without_resolution_has_a_clear_error(monkeypatch):
+    _no_user_placement(monkeypatch)
     with pytest.raises(ValueError, match="resolution is required"):
         dev.resolve_device()
     with pytest.raises(ValueError, match="resolution is required"):
@@ -90,8 +97,7 @@ def test_default_device_context_is_never_overridden(monkeypatch):
 
 
 def test_auto_cpu_recommendation_is_a_noop_on_cpu(monkeypatch):
-    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
-    monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
+    _no_user_placement(monkeypatch)
     # CPU-recommended + default backend already CPU -> nothing to place.
     if jax.default_backend() == "cpu":
         assert dev.resolve_device(dev.AUTO, _res(ns=11, mpol=6, ntor=0)) is None

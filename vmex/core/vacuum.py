@@ -597,7 +597,7 @@ def _tl_forward(
     A: Array, B: Array, cma: Array, sqrtc: Array, sqrta: Array, t0: Array,
     lmax: int,
 ) -> Array:
-    """Forward three-term recurrence for ``T_l``, ``l = 0..lmax``.
+    """Forward three-terms recurrence for ``T_l``, ``l = 0..lmax``.
 
     ``T_l = int_{-1}^{1} x^l / sqrt(A x^2 + 2 cma x + B) dx`` satisfies
 
@@ -633,7 +633,7 @@ def _tl_backward(
     """Backward (Miller) recurrence for ``T_l``, normalized to the analytic
     ``T_0`` (vmecpp ``singular_integrals.cc`` backward branch).
 
-    Runs the same three-term recurrence downward from a zero seed at
+    Runs the same three-terms recurrence downward from a zero seed at
     ``l = lmax + _tl_backward_tail(lmax)``; the homogeneous modes (which
     grow forward like ``(B/A)^{l/2}``) decay in this direction, so the seed
     error is damped over the tail and the final scaling to the analytic

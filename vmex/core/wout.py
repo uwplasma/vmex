@@ -48,6 +48,7 @@ import jax
 from . import postprocess as _pp
 from ._netcdf import assign_array
 from .fields import energies_and_force_norms, magnetic_fields, metric_elements
+from .input import NDATAFMAX, fit_aux_knots
 from .fourier import Resolution, mode_table, trig_tables
 from .geometry import (
     apply_lambda_axis_closure,
@@ -66,7 +67,7 @@ _DIM_RADIUS = "radius"
 _DIM_MN = "mn_mode"
 _DIM_MN_NYQ = "mn_mode_nyq"
 _DIM_TIME = "time"
-_NDFMAX = 101   # spline aux-array length (vmec_input.f ndatafmax)
+_NDFMAX = NDATAFMAX  # spline aux-array length (vmec_input.f ndatafmax)
 _PRESET = 21    # am/ac/ai polynomial storage (0:20)
 _NSTORE = 100   # fsqt/wdot history length (nstore_seq)
 
@@ -618,6 +619,18 @@ def read_wout(path: str | Path) -> WoutData:
 # wout construction from a solved fixed-boundary state
 # ==========================================================================
 
+def _aux_echo(inp) -> dict:
+    """The profile knot arrays of ``inp`` as WOUT echoes them: ``ndfmax`` wide, refit when longer
+    (:func:`~vmex.core.input.fit_aux_knots`)."""
+    out = {}
+    for pre in ("am", "ai", "ac"):
+        s, f = getattr(inp, f"{pre}_aux_s"), getattr(inp, f"{pre}_aux_f")
+        if s is not None and f is not None and np.size(s) > _NDFMAX:
+            s, f = fit_aux_knots(s, f, f"{pre}_aux_s/f")
+        out[f"{pre}_aux_s"], out[f"{pre}_aux_f"] = _preset_array(s, _NDFMAX, -1.0), _preset_array(f, _NDFMAX, 0.0)
+    return out
+
+
 def _preset_array(values, size: int = _PRESET, fill: float = 0.0) -> np.ndarray:
     """Fixed-width profile array from an input entry (wrout.f preset dims)."""
     out = np.full((size,), float(fill), dtype=float)
@@ -1027,12 +1040,7 @@ def wout_from_state(
         raxis_cc=raxis_cc, zaxis_cs=zaxis_cs,
         am=_preset_array(inp.am), ac=_preset_array(inp.ac),
         ai=_preset_array(inp.ai),
-        am_aux_s=_preset_array(inp.am_aux_s, _NDFMAX, -1.0),
-        am_aux_f=_preset_array(inp.am_aux_f, _NDFMAX, 0.0),
-        ai_aux_s=_preset_array(inp.ai_aux_s, _NDFMAX, -1.0),
-        ai_aux_f=_preset_array(inp.ai_aux_f, _NDFMAX, 0.0),
-        ac_aux_s=_preset_array(inp.ac_aux_s, _NDFMAX, -1.0),
-        ac_aux_f=_preset_array(inp.ac_aux_f, _NDFMAX, 0.0),
+        **_aux_echo(inp),
         iotaf=iotaf, q_factor=q_factor,
         presf=presf_pa, phi=phi,
         phipf=phipf_out, chi=chi, chipf=chipf_out,

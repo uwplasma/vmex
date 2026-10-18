@@ -235,6 +235,101 @@ convergence: on this deck VMEX iota at ρ = 0.1 is 0.188, 0.176 and 0.166 for ns
 
 ![VMEX and MRX on the 2.5% beta QA deck](../_static/figures/readme_vmex_mrx_comparison.webp)
 
+## The m=1 angle gauge: one equilibrium per boundary
+
+With `lconm1`, VMEC2000 evolves the m=1 pair `zcs_int = (rss - zcs)/2` (the
+antisymmetric `Z_sin(m=1, ±n)` columns). This combination is an angle gauge. `residue.f90` releases
+its force until `fsqz < 1e-6` and zeroes it afterwards, so the converged state
+keeps whatever value the solver's path left there.
+
+**What goes wrong under VMEC2000's rule.** Two solves of one boundary from
+different starts converge (fsq ~1e-17) to different states.
+- Vacuum: 1e-4 to 1e-3 apart.
+- Finite beta: up to 6 % apart in lambda.
+- The implicit linearization holds the combination fixed, so it is not the
+  derivative of the map a re-solve follows.
+
+**What VMEX does instead.** Stellarator-symmetric fixed-boundary solves fix the
+gauge (`freeze_m1`, the default). The force stays zeroed from the first iteration. At every stage
+start (cold start, seed, hot restart, multigrid interpolation) the combination
+is put on `sqrt(s) * edge`, the `profil3d.f` interior guess
+(`residuals.pin_m1_gauge`). `implicit._assemble` carries that profile's
+boundary dependence. `freeze_m1=False` reproduces VMEC2000 bit for bit.
+VMEX + NESTOR free boundary keeps VMEC2000's rule (see below), and so do `lasym`
+runs (see "Relabelling, not new physics" below).
+
+**The test.** Each deck below is solved at 6 modes with its own multigrid
+ladder. One solve starts cold. The other starts from a seed perturbed along
+every frozen combination, with lambda ×1.05 and R ×1.001; the seed column is
+the largest relative difference between the two converged states. The gradient
+column is the largest relative difference between the implicit derivative of a
+state functional and a central finite difference of cold re-solves, over two
+boundary directions.
+
+| Deck | Gauge | Seed difference | Gradient error | Iterations (cold / seeded) |
+| --- | --- | --- | --- | --- |
+| LP QA vacuum | VMEC2000 rule | 5.5e-2 | 2.5e-1 | 1364 / 1157 |
+| LP QA vacuum | fixed | 5.5e-13 | 1.6e-8 | 1378 / 1165 |
+| LP QA beta 2.5 % | VMEC2000 rule | 6.3e-2 | 2.7e-1 | 1337 / 1324 |
+| LP QA beta 2.5 % | fixed | 1.6e-13 | 2.9e-8 | 1319 / 1338 |
+| LP QA beta 0.5 % | fixed | 3.9e-13 | 7.1e-8 | 1390 / 818 |
+| li383 | VMEC2000 rule | 5.7e-2 | 4.1e-1 | 659 / 690 |
+| li383 | fixed | 6.8e-14 | 8.7e-9 | 663 / 417 |
+| nfp4 QH, finite beta | fixed | 3.8e-13 | 1.2e-9 | 2348 / 2348 |
+| nfp4 QI, finite beta | fixed | 2.9e-13 | 8.0e-9 | 4609 / 1888 |
+| nfp1 QI | fixed | 3.8e-12 | 4.8e-8 | 10306 / 3132 |
+| Nuhrenberg-Zille QHS | fixed | 3.9e-12 | 1.0e-8 | 5813 / 5812 |
+| CTH-like | fixed | 4.6e-14 | 1.4e-8 | 475 / 392 |
+| DSHAPE | fixed | 3.0e-14 | 1.4e-10 | 1328 / 1328 |
+
+**Relabelling, not new physics.** The fixed gauge must give VMEC2000's
+equilibrium in another poloidal labelling, so the two rules' answers must
+converge together under refinement. Fixed-boundary solves (ftol 1e-14) under both
+rules, compared at s = 1/4, 1/2, 3/4: the gauge gap against the
+discretization error (VMEC2000's rule at that resolution against its finest),
+both relative. "Surfaces" is the distance between the flux-surface curves as
+point sets, in minor radii; iota is absolute.
+
+| Deck | (ns, mpol) | Surfaces gap / disc. | iota gap / disc. | DMerc gap / disc. |
+| --- | --- | --- | --- | --- |
+| LP QA beta 2.5 % | (13, 5) | 1.3e-3 / 1.9e-2 | 8.2e-5 / 3.8e-3 | 1.3e-2 / 4.9e-1 |
+| | (25, 8) | 1.3e-4 / 1.3e-2 | 2.1e-6 / 1.1e-3 | 2.4e-4 / 1.1e-1 |
+| | (49, 12) | 5.7e-5 / finest | 1.6e-6 / finest | 8.2e-4 / finest |
+| LP QH reactor scale, vacuum | (13, 5) | 2.8e-3 / 5.5e-3 | 6.7e-4 / 2.2e-3 | vacuum |
+| | (25, 8) | 1.3e-3 / 2.7e-3 | 1.1e-4 / 6.8e-4 | |
+| | (49, 12) | 4.7e-4 / finest | 7.6e-5 / finest | |
+| P30A QA, vacuum | (25, 8) | 8.6e-5 / 2.0e-3 | 5.0e-6 / 6.1e-5 | vacuum |
+| | (49, 12) | 2.5e-5 / 6.3e-4 | 5.1e-7 / 2.9e-5 | |
+| | (97, 16) | 2.7e-5 / finest | 6.2e-7 / finest | |
+| shaped up-down-symmetric tokamak | all | 0 | 0 | 0 |
+| up-down asymmetric tokamak (lasym) | (13, 5) | 8.9e-4 / 2.7e-2 | prescribed | 9.8e-3 / 6.4e-1 |
+| | (25, 8) | 2.3e-4 / 8.1e-3 | | 4.1e-3 / 1.9e-1 |
+| | (49, 12) | 8.5e-5 / 2.2e-3 | | 7.2e-4 / 3.4e-2 |
+| | (97, 12) | 3.0e-5 / finest | | 1.4e-4 / finest |
+
+In the symmetric cases the gap shrinks with resolution and stays 2-200x below
+the discretization error; on P30A it levels off at 3e-5 minor radii from
+(49, 12), still 20x below that level's error. The axisymmetric tokamak has no
+m=1 gauge column. The asymmetric tokamak passes the same test, but on a 3-D
+non-stellarator-symmetric deck (`input.basic_non_stellsym_pressure`) the
+fixed-gauge solve did not converge at (25, 8) and (49, 12) where VMEC2000's
+rule did (at (25, 8)), so `lasym` runs keep VMEC2000's rule; `freeze_m1=True`
+with `lasym` is an error. Vacuum Mercier terms and the QS ratio of these
+near-symmetric decks are round-off level, so their relative gaps carry no
+information.
+
+On a 12 x 12, ns 51 vacuum single-stage case, the three-terms rows at one
+boundary from a seeded and a cold solve agree:
+- cost to 2.7e-9 (67 % apart under VMEC2000's rule);
+- state to 5e-12 (1.3e-3).
+
+**VMEX + NESTOR keeps VMEC2000's rule.** Its two-start spread on the same
+coils is 0.11-0.12 mm (QS 0.02-0.06 %) under either rule. That spread is 12 x
+12 truncation of different labellings, far below NESTOR's own error: its
+surface sits 4-5 mm from the coils' flux surface, with B.n/|B| = 1.2e-4
+against 1.6e-5 for the three-terms surface. Forcing a canonical edge gauge
+there is not a pure relabelling: it moved the surface 0.26 mm.
+
 ## Exact equilibria
 
 [vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical) compares VMEX, VMEC2000 and DESC with closed-form
@@ -336,6 +431,159 @@ Rung 5 is tier 5 evidence: those CSVs, and
 `docs/_static/figures/pr20_wout_parity_summary.json`, are committed records
 that **no test asserts on**. They are provenance for a campaign that was
 run, not gates that would fail if the physics regressed. Read them as such.
+
+### Three-terms free boundary against VMEC + NESTOR and DESC
+
+`benchmarks/run_three_terms_resolution.py` builds a free boundary whose answer is
+known. A coil field (a winding-surface current at 1.2 minor radii) is fitted to
+cancel the plasma's normal field on the 12 x 12 fixed-boundary QA equilibrium
+of `input.LandremanPaul2021_QA_beta2p5_bootstrap` (beta 2.5%, ns 51), so that
+equilibrium is the free boundary without a sheet current. `--case vacuum` does
+the same for the vacuum `input.LandremanPaul2021_QA_lowres`. Every method starts
+from the same boundary, the target's with its minor radius scaled by 0.97
+(11 mm away), and every result is scored the same way: the boundary is
+re-solved as a fixed-boundary equilibrium, and the three conditions are
+evaluated on a 48 x 48 virtual-casing grid with the singular quadrature
+(4 nfp 48, 96). The records are `benchmarks/three_terms_resolution.json` (beta)
+and `benchmarks/three_terms_resolution_vacuum.json`;
+`benchmarks/plot_three_terms_resolution.py` draws them (boundary, interior
+surfaces and iota), and `benchmarks/three_terms_resolution_poincare.py` traces
+the vacuum field lines. DESC (`FixSheetCurrent`, not a VMEX dependency) was run
+outside VMEX and its wouts scored the same way, re-solved with all of their
+modes (DESC's M includes m = M).
+Columns are the largest LCFS distance to the target, the sheet current
+`mu0 |K| / |B|`, wall time with compilation, and peak GPU memory (one RTX 5090).
+NESTOR runs on the exact field and on the same field tabulated as an mgrid
+(301 x 301 x 48):
+
+| M = N | three-terms: mm / K / s / GiB | DESC (L = 2M): mm / K / s / GiB | DESC (L = M): mm / K | VMEX + NESTOR: mm / K / converged | NESTOR on the mgrid: mm |
+| --- | --- | --- | --- | --- | --- |
+| 4 | 5.9 / 5.9e-03 / 626 / 9.1 | 16.1 / 3.8e-03 / 700 / 1.0 | 7.9 / 3.4e-03 | 24.0 / 7.5e-03 / yes | 22.9 |
+| 5 | 2.1 / 2.8e-03 / 606 / 3.0 | 10.1 / 2.1e-03 / 771 / 1.1 | 8.5 / 2.7e-03 | 12.4 / 3.0e-03 / yes | 8.1 |
+| 6 | 8.3 / 1.6e-03 / 630 / 3.0 | 5.4 / 1.0e-03 / 1002 / 1.6 | 14.5 / 3.0e-03 | 6.9 / 2.6e-03 / yes | 21.3 |
+| 7 | 6.7 / 1.4e-03 / 909 / 3.1 (stalled) | 4.0 / 7.6e-04 / 1421 / 3.7 | 7.5 / 1.6e-03 | 13.6 / 1.7e-03 / no | 10.6 |
+| 8 | 7.3 / 1.6e-03 / 512 / 3.2 | 4.0 / 1.0e-03 / 2874 / 9.0 | 4.6 / 9.3e-04 | 35.6 / 8.2e-03 / no | 31.2 |
+| 9 | 3.0 / 4.0e-04 / 1166 / 1.6 | 4.3 / 7.4e-04 / 5673 / 17.4 | 5.5 / 1.2e-03 | 20.9 / 3.5e-03 / no | 28.9 |
+| 10 | 2.8 / 4.3e-04 / 841 / 2.2 | | 5.8 / 7.8e-04 | 17.3 / 2.5e-03 / yes | 19.6 |
+| 11 | 1.9 / 2.8e-04 / 809 / 2.6 | | 4.9 / 7.9e-04 | 34.8 / 5.9e-03 / no | 53.0 |
+| 12 | 2.0 / 3.3e-04 / 720 / 3.8 (stalled) | | 4.1 / 6.0e-04 | 22.6 / 3.4e-03 / no | 38.7 |
+| 13 | 5.2 / 8.0e-04 / 846 / 4.9 (stalled) | | | 33.1 / 5.4e-03 / no | 30.1 |
+
+NESTOR stops 7 to 53 mm away with a sheet current of 2e-3 to 1e-2, whether it
+converges or reaches its 40,000 iterations, on the exact field or the mgrid.
+VMEC2000 + NESTOR on the same mgrid agrees with VMEX + NESTOR (24.1, 20.9 and
+19.4 mm at 4, 6 and 10). DESC stops 4.0 to 16 mm away with a sheet current of
+6e-4 to 4e-3; its dense force Jacobian exceeds a 32 GB GPU from M = 10 at
+L = 2M and at M = 13 at L = M. The three-terms boundary (measured with plain
+B.n moments as the finite-beta rows, before the transported test functions of
+the next section; two modes fewer than the interior, the deck as labelling
+reference) comes within
+2 to 3 mm from 9 modes, with a sheet current of 3e-4 to 4e-4, and 6 to 8 mm
+away at 6 to 8 modes (1.5e-3), where the deck, 11 mm from the target, labels a
+boundary of only 4 to 6 modes. (stalled): Newton stopped where the rows'
+evaluation noise (the deck's force tolerance 1e-13) exceeds its predicted
+step, 1e-12 to 1e-9 in cost. The least-squares solver this replaced reached
+2.0 mm and 4e-5 at 9 to 13 modes, in two to three times the wall time.
+
+In vacuum the coils make the whole field, so field lines are the ground truth.
+From 32 points on each of a method's surfaces s = 0.1, 0.3, ..., 0.9, 1 the
+lines are traced 30 transits (RK4, 128 steps per field period; halving the step
+or tracing 100 transits changes nothing). The second number below is the RMS
+distance of their crossings from the surface they started on, averaged over
+the six surfaces, in mm; the first is the LCFS distance to the target; the
+third is the largest distance over a field period of the run's magnetic axis
+from the field's closed field line (Newton on the field-period map), in mm.
+The target itself scores 0.24 (its field cancels `B.n` to 1.2e-5) and 0.42:
+VMEC's axis error at ns 51, which halves with each doubling of ns, while
+DESC's polynomial basis reaches 0.02 to 0.05 mm:
+
+| M = N | three-terms: mm / field lines / axis / K | DESC (L = 2M) | DESC (L = M) | VMEX + NESTOR |
+| --- | --- | --- | --- | --- |
+| 4 | 1.7 / 0.52 / 0.51 / 1.3e-03 | 1.6 / 1.02 / 2.67 | 12.3 / 7.54 / 11.66 | 1.6 / 0.59 / 0.37 |
+| 5 | 1.6 / 0.37 / 0.19 / 3.1e-04 | 1.6 / 0.24 / 0.03 | 1.9 / 0.88 / 0.69 | 5.7 / 1.58 / 0.89 |
+| 6 | 1.5 / 0.20 / 0.36 / 1.2e-04 | 1.5 / 0.20 / 0.26 | 1.7 / 0.48 / 0.10 | 1.7 / 0.21 / 0.32 |
+| 7 | 1.5 / 0.18 / 0.37 / 1.1e-04 | 1.6 / 0.39 / 0.05 | 1.6 / 0.19 / 0.14 | 4.0 / 1.44 / 0.42 |
+| 8 | 1.5 / 0.10 / 0.38 / 3.2e-05 | 1.5 / 0.26 / 0.03 | 1.6 / 0.34 / 0.26 | 1.7 / 0.37 / 0.35 |
+| 9 | 1.5 / 0.07 / 0.37 / 5.3e-05 | 1.6 / 0.17 / 0.02 | 1.6 / 0.28 / 0.10 | 3.6 / 1.08 / 0.45 |
+| 10 | 1.5 / 0.06 / 0.38 / 2.4e-05 | | 1.6 / 0.14 / 0.29 | 2.0 / 0.64 / 0.43 |
+| 11 | 1.5 / 0.10 / 0.38 / 3.9e-05 | | 1.6 / 0.12 / 0.17 | 2.2 / 0.76 / 0.43 |
+| 12 | 1.5 / 0.05 / 0.38 / 2.3e-05 | | 1.5 / 0.12 / 0.05 | 2.5 / 0.88 / 0.46 |
+| 13 | 1.6 / 0.06 / 0.38 / 2.8e-05 | | | 1.6 / 0.54 / 0.43 |
+
+From 6 modes the three-terms solution holds its field lines better than the
+target (0.05 to 0.20 against 0.24), so its LCFS 1.5 mm away is the field's flux
+surface more closely than the target is; DESC does as well from 9 modes (0.12
+to 0.17). From 8 modes it is below the least-squares solver this replaced
+(0.09 to 0.21, which let the labelling relax toward the start's); at 4 and 5
+modes the deck's labelling (transported 11 mm from the scaled start) still
+limits the truncated boundary (0.52 and 0.37 against 0.23 and 0.09). Without
+the vacuum unknowns' harmonic m = mpol the B.n that the top modes left at
+m = mpol was out of the rows' reach: 0.25 to 0.79 at 4, 6, 8 and 10 modes. Field-line quality
+follows the near-resonant `B.n` harmonic (m, n) = (5, 2) (5 iota - 2 = 0.08),
+recorded as `resonant_bn`, not the RMS of `B.n` (`coil_bn_rms`): NESTOR's swings
+between resolutions are swings of that harmonic. With the singular quadrature
+(4 nfp 48, 48) the tangential plasma field carried a 3e-4 error, the pressure
+jump and sheet current read 2.4e-4 on the exact vacuum target, and the fit
+absorbed it: (5, 2) grew to 5e-5 to 9e-5 and field lines left the LCFS by
+4 to 7 mm. Doubling `quad_np` removes it at the same memory.
+
+### Three-terms free boundary across configurations
+
+The vacuum rows are the least-squares stationarity of `B_coil . n` in the
+displacement `h` (module docstring of `vmex.core.freeboundary_vc`); an earlier
+revision projected `B . n` onto the boundary modes instead, which zeroes the
+in-band harmonics and leaves the rest uncontrolled. Each case below was solved
+from the deck and from perturbed starts (`r1`, `r4`: random mode noise of 0.5
+and 1 %; `y`: another optimizer step's boundary), at a final force residual of
+1e-17; the starts agree to the last digit printed (boundary coefficients to
+5e-12 m in vacuum, 2e-9 m at finite beta, where the rows' own noise sets the stop). B.n,
+pressure jump and sheet current are RMS over `|B|` on a 48 x 48 grid; the
+field-line columns are the LCFS's largest and RMS crossing distance (mm, 32
+lines, 30 transits). In vacuum the three terms use the coil field itself; the
+before column (the projected rows) used virtual casing, whose quadrature adds
+about 1e-5 (QI: 1.5e-4).
+
+| case (modes) | starts | B.n / pressure / K | field lines mm | before: B.n / field lines |
+| --- | --- | --- | --- | --- |
+| LP QA + P30A coils, vacuum (8) | deck, r1, y | 4.7e-05 / 5.3e-05 / 6.1e-05 | 0.085 / 0.018 | 5.9e-05 / 0.061 / 0.014 |
+| LP QH reactor scale, vacuum (8) | deck | 1.3e-04 / 1.2e-04 / 1.6e-04 | 2.27 / 0.55 | 1.4e-04 / 2.69 / 0.73 |
+| LP QH reactor scale, vacuum (12) | deck, r4 | 4.2e-05 / 3.7e-05 / 7.5e-05 | 1.22 / 0.27 | 4.9e-04 / 21.3 / 5.0 (r4 failed) |
+| nfp 2 QI, fitted coils, vacuum (8) | deck, r1 | 7.8e-05 / 1.6e-04 / 2.2e-04 | 0.84 / 0.18 | 2.3e-04 / 0.64 / 0.16 |
+| LP QA beta 2.5 %, fitted coils (8) | deck | 5.0e-04 / 4.1e-04 / 6.0e-04 | | 5.4e-04 (moments) |
+| LP QA beta 2.5 %, fitted coils (12) | deck, r1 | 2.4e-04 / 2.9e-04 / 3.8e-04 | | 3.4e-04 (moments) |
+
+The projection's leak was largest on LP QH at 12 modes, where it ended above
+the deck's own B.n (1.8e-4); least squares cannot. Where both did well the
+field lines differ by a few hundredths of a millimetre either way. At finite
+beta the rows weigh `B_out . n` with the field-line transport of each boundary
+mode, `B_out . grad cos(m theta - n nfp phi)`, the least-squares stationarity
+without the plasma's own response; plain sine moments were the earlier rows
+("moments"). An independent evaluation of the 12-mode answer at 16 modes (VMEX
+re-solve) reads 2.8e-4 / 9.9e-5 / 2.8e-4 (moments: 4.1e-4 / 1.1e-4 / 4.1e-4),
+DESC's own free boundary at 12 modes 4.8e-4 / 6.8e-5 / 4.4e-4: lower B.n and
+sheet current, a higher pressure jump. DESC's force-converged evaluation at 16
+modes ranks DESC's answer first: 4.0e-4 / 1.2e-4 / 4.4e-4 against 3.7e-4 /
+6.2e-5 / 3.9e-4 (moments: 4.9e-4 / 1.6e-4 / 5.3e-4). From the r1 start Newton
+on the transported rows needs damping at its second step; a cold solve then
+leads with the plain moments from the start and finishes on the transported
+rows (8.6 minutes against 6 from the deck, the same boundary to 1e-9 mm; when
+the plain moments led in only after a stall, 28 minutes). More
+interior headroom (16 interior modes, boundary 12) lowers the self-evaluated
+terms to 1.2e-4 / 1.1e-4 / 1.6e-4, but DESC's 16-mode evaluation reads
+5.9e-4 / 9.8e-5 / 6.1e-4: only the pressure jump improves there. Neither row set controls `B . n`
+outside the boundary's modes: on LP QA at 0.5 % beta with its bundled coils
+(deck B.n 6.0e-3 at mpol 4, 1.2e-3 at mpol 6) the answer keeps the deck's B.n
+(`test_finite_beta_free_boundary_removes_the_sheet_current` records it as an
+expected failure; the solve warns and reports `normal_outside_modes`). The deck fixes the poloidal labelling, and at low resolution it
+matters: at mpol = 4 the LP QA case of `test_vacuum_free_boundary_agrees_with_nestor`
+ends at B.n 7.4e-4 with the LP deck's labelling (truncated from 8 modes) and at
+5.2e-4 with the labelling VMEC + NESTOR leaves (NESTOR's own: 5.9e-4). The
+vacuum unknowns include the poloidal harmonic m = mpol (module docstring of
+`vmex.core.freeboundary_vc`); without it these were 9.7e-4 and 5.4e-4. The
+labelling's effect shrinks with resolution like the discretization error:
+relabelling LP QA's deck by theta -> theta + 0.1 sin(theta) moves the vacuum
+answer 0.008 mm at 12 modes, where going from 8 to 12 modes moves it 0.04 mm;
+at 2.5 % beta the same relabelling moves it 0.45 mm and 8 to 12 modes 3.0 mm.
 
 ## Mirror geometry: analytic limits
 
