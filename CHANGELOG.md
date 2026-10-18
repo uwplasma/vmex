@@ -10,6 +10,25 @@ revision it was measured at, and the pages that cite it.
 - Opt-in `vmex.solve_free_boundary_newton`: Krylov Newton anchoring of a free-boundary state
   on the coupled root (`|F| ~ 1e-13`); restarts from a wout or state land on the same root.
 
+## 0.11.11 - 2026-10-18
+
+- **mgrid scaling matches VMEC2000.** EXTCUR multiplies every coil table; VMEX
+  no longer divides by the raw coil current, which gave 5e-5 of the field on a
+  raw mgrid. A deck NFP that differs from the mgrid NFP now stops the run (#591).
+- A free-boundary boundary that leaves the mgrid box warns as VMEC2000 does,
+  naming the side, the overshoot and the grid extents (#604). `piota` ignores
+  BLOAT, as in VMEC2000; BLOAT other than 1 requires NCURR = 1.
+- A PHIEDGE whose sign opposes the external toroidal field stops the run, as
+  VMEC2000's vacuum.f does (#571).
+- LASYM: the theta shift uses VMEC2000's `atan2` form (#606).
+- WOUT `phi` is correct for non-uniform APHI; the namelist reader accepts
+  `&END`, `$END` and a `/` before a comment; the summary plot works at NS = 3 (#593).
+- `import vmex` no longer changes `jax.config`. `vmex.configure()` sets x64,
+  the compilation cache and logging in one place; the CLI and the first core
+  import call it, and the solver refuses to run in float32 (#607).
+- CI runs in seven balanced lanes and the test suite runs jitted (#586, #580).
+- README: VMEX against exact equilibria, with and without stellarator symmetry (#578).
+
 ## 0.11.10 - 2026-10-13
 
 - **`vmex --trace` is about twice as fast** on large spectra with ESSOS 0.21:
@@ -177,24 +196,6 @@ install from PyPI (`essos>=0.17`, new `all` extra), `max_fsq_ratio` defaults to
 one minor radius out on the QA wout, against 2.46e-02 before). Full notes in
 the GitHub release.
 
-## 0.9.0 - 2026-09-15
+## 0.9.0 and earlier
 
-The optimization release. The two workflows users reported as slow and
-inconclusive — quasi-isodynamic boundary design and single-stage plasma-and-coil
-design — now converge and meet the targets they print: the refinement every
-trial pays is a Newton finish through one block factorization, the implicit
-adjoint is solved exactly through that same factorization, and the compiled
-lanes stopped recompiling. The exterior field reports the accuracy it achieved,
-every evaluation carries counters, and the CLI reads DESC inputs. It does not
-close cold compile (median wall per case 23.1 s against VMEC++'s 3.35 s in the
-independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
-
-The PRs behind it and the full notes are in the GitHub release: #300, #310,
-#311, #312, #333, #344 and the rest of the 36 merged since 0.8.1.
-
-## 0.8.1 - 2026-09-02
-
-The cold-start performance release: cold CLI, Python and optimization runs
-faster than every previous release on every deck measured, from 773 XLA
-programs at QA resolution to 343 (#227-#234). Full notes in the GitHub
-release.
+See the [GitHub releases](https://github.com/uwplasma/vmex/releases).
