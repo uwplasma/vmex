@@ -86,7 +86,6 @@ import numpy as np
 import jax.numpy as jnp
 
 from solvax import (
-    tridiagonal_solve as _sx_tridiagonal_solve,
     tridiagonal_solve_checked as _sx_tridiagonal_solve_checked,
 )
 
@@ -100,7 +99,6 @@ __all__ = [
     "LAMBDA_M0_FLOOR",
     "scalfor_matrices",
     "scalfor",
-    "tridiagonal_solve",
 ]
 
 Array = Any
@@ -659,43 +657,6 @@ def scalfor_matrices(
             dx = dx.at[edge, 0, 0].multiply((1.0 - mult_fac) / (1.0 + edge_pedestal))
 
     return TridiagonalMatrices(ax=ax, bx=bx, dx=dx)
-
-
-def tridiagonal_solve(
-    superdiagonal: Array,
-    diagonal: Array,
-    subdiagonal: Array,
-    rhs: Array,
-    *,
-    method: str = "auto",
-) -> Array:
-    """Radial tridiagonal solve vectorized over all (m,n) columns and fields.
-
-    VMEC2000: ``serial_tridslv`` (in ``scalfor.f``): solve, along the leading
-    (radial) axis, ``sub[j]*x[j-1] + diag[j]*x[j] + super[j]*x[j+1] = rhs[j]``
-    for every trailing-column element simultaneously.  ``sub[0]`` and
-    ``super[-1]`` are ignored.  ``rhs`` may carry extra trailing axes (stacked
-    force fields) beyond the shape of ``diagonal``; they are solved in one
-    pass.
-
-    Thin arg-order adapter over :func:`solvax.tridiagonal_solve`: SOLVAX uses
-    the ``(lower, diag, upper)`` band convention, so the sub-/super-diagonals
-    are swapped here to preserve vmex's ``(super, diag, sub)`` signature.
-    Numerics unchanged — SOLVAX's Thomas backend is the verbatim port of the
-    legacy parity-proven sweep (same ``eps = 1e-12``), so ``method`` still
-    selects it bit-for-bit:
-
-    - ``"thomas"``: two ``lax.scan`` Thomas sweeps (jit-friendly, no host
-      round-trips); the CPU path, **bitwise** identical to the pinned A/B tests.
-    - ``"lax"``: XLA's fused batched solver ``jax.lax.linalg.tridiagonal_solve``
-      (cuSPARSE ``gtsv2`` on CUDA, LAPACK ``gtsv`` on CPU); the accelerator fast
-      path (numerically equivalent, not bit-identical to Thomas).
-    - ``"auto"`` (default): Thomas when lowering for CPU (bit parity), the fused
-      solver elsewhere, chosen with ``jax.lax.platform_dependent``.  Systems
-      with fewer than 3 radial rows always use Thomas.
-    """
-    # solvax: tridiagonal_solve(lower=sub, diag, upper=super); swap to keep our API.
-    return _sx_tridiagonal_solve(subdiagonal, diagonal, superdiagonal, rhs, method=method)
 
 
 def scalfor(

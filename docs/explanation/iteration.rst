@@ -186,10 +186,8 @@ system with the :math:`m^2` and :math:`(n\,\mathrm{NFP})^2` weights, the
 ``scalfor.f``, and the ``jmin`` axis-row rules is
 :func:`~vmex.core.preconditioner.scalfor_matrices`; the application is
 :func:`~vmex.core.preconditioner.scalfor`. The solve is a Thomas
-algorithm vectorized over all spectral columns simultaneously
-(:func:`vmex.core.preconditioner.tridiagonal_solve`, a thin arg-order
-adapter over ``solvax.tridiagonal_solve`` — the shared SOLVAX linear-solver
-package). Production application uses ``solvax.tridiagonal_solve_checked``:
+algorithm vectorized over all spectral columns simultaneously, from the
+shared SOLVAX linear-solver package. Production application uses ``solvax.tridiagonal_solve_checked``:
 the unregularized Thomas pivots must pass VMEC2000's
 ``abs(pivot) > 1e-8*abs(diagonal)`` condition and a backward-residual check.
 Rejected columns receive an identity preconditioner action and a typed

@@ -268,16 +268,14 @@ def radial_grids(ns: int, *, dtype=jnp.float64) -> RadialGrids:
 def _lasym_delta_rotation(rbc, rbs, zbc, zbs, *, mpol: int, ntor: int):
     """``readin.f`` lasym normalization: rotate theta so ``RBS(0,1) = ZBC(0,1)``.
 
-    ``delta = atan((rbs(0,1) - zbc(0,1)) / (|rbc(0,1)| + |zbs(0,1)|))``; every
-    (n, m) pair is rotated by ``m*delta`` (cos/sin mixing).  A denominator of
-    zero (degenerate m=1 content) keeps the input unrotated.
+    ``delta = atan2(rbs(0,1) - zbc(0,1), rbc(0,1) + zbs(0,1))`` (VMEC2000
+    readin.f since 2021; the earlier ``atan`` over ``|rbc| + |zbs|`` misses
+    the alignment when ``rbc(0,1)`` and ``zbs(0,1)`` differ in sign); every
+    (n, m) pair is rotated by ``m*delta`` (cos/sin mixing).
     """
     if mpol < 2:
         return rbc, rbs, zbc, zbs
-    denom = abs(rbc[ntor, 1]) + abs(zbs[ntor, 1])
-    if denom == 0.0:
-        return rbc, rbs, zbc, zbs
-    delta = float(np.arctan((rbs[ntor, 1] - zbc[ntor, 1]) / denom))
+    delta = float(np.arctan2(rbs[ntor, 1] - zbc[ntor, 1], rbc[ntor, 1] + zbs[ntor, 1]))
     if delta == 0.0:
         return rbc, rbs, zbc, zbs
     m = np.arange(mpol, dtype=float)[None, :]
@@ -1267,6 +1265,11 @@ def run_setup(
         inp, modes=mode_table(resolution.mpol, resolution.ntor),
         trig=trig_tables(resolution),
     )
+    if float(inp.bloat) not in (0.0, 1.0) and int(inp.ncurr) != 1:
+        raise VmecInputError(
+            f"BLOAT = {float(inp.bloat):g} needs NCURR = 1 (found NCURR = {int(inp.ncurr)}); "
+            "VMEC2000 stops on this deck (initialize_vmec_arrays.f, ier_flag 3)",
+            hint="set BLOAT = 1, or prescribe the current profile (NCURR = 1)")
     key = _SetupLaneKey(
         resolution=resolution, lconm1=bool(lconm1), lflip=lflip, signgs=-1,
         piota_type=str(inp.piota_type), pcurr_type=str(inp.pcurr_type),

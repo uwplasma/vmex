@@ -231,16 +231,11 @@ def scale_mgrid(
     - ``raw_coil_cur``, the currents the file was computed with (A):
       ``b_scale * r_scale``, matching the ``extcur`` factor of
       :func:`scale_input`.
-    - ``br``, ``bp``, ``bz``, each of shape ``(nextcur, kp, jz, ir)``: the
-      factor depends on ``mgrid_mode``.  A per-ampere table
-      (``mgrid_mode`` starting with ``"S"``, units T/A) scales as
-      ``1 / r_scale``, because the field it will be multiplied by scales as
-      ``b_scale`` while the current scales as ``b_scale * r_scale``.  A raw
-      table (``"R"`` or ``"N"``, units T, coil currents already baked in)
-      scales as ``b_scale``; VMEC then divides ``extcur`` by
-      ``raw_coil_cur``, and both were scaled by the same
-      ``b_scale * r_scale``, so the physical field again ends up at
-      ``b_scale``.
+    - ``br``, ``bp``, ``bz``, each of shape ``(nextcur, kp, jz, ir)``:
+      ``1 / r_scale`` in every ``mgrid_mode``.  VMEC2000 multiplies each
+      table by its ``EXTCUR`` whatever the mode, and :func:`scale_input`
+      scales ``EXTCUR`` by ``b_scale * r_scale``, so the physical field ends
+      up at ``b_scale``.
 
     ``nfp``, ``nextcur``, ``mgrid_mode``, and ``coil_groups`` are metadata and
     pass through unchanged.
@@ -262,7 +257,7 @@ def scale_mgrid(
     """
     b, r = _scales(b_scale, r_scale)
     raw = np.asarray(data.raw_coil_cur) * b * r
-    field_scale = 1.0 / r if data.mgrid_mode.upper().startswith("S") else b
+    field_scale = 1.0 / r
     return replace(
         data,
         rmin=data.rmin * r,

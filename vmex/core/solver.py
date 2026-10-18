@@ -69,7 +69,8 @@ import numpy as np
 
 import jax
 
-jax.config.update("jax_enable_x64", True)  # float64 mandatory (§7.7)
+# float64 is mandatory (§7.7): ``vmex.core`` import applies ``vmex.configure``
+# unless the caller chose first, and ``prepare_runtime`` checks it.
 
 
 def _harden_compilation_cache() -> None:
@@ -706,6 +707,8 @@ def prepare_runtime(
 ) -> SolverRuntime:
     """Build the static solver context from an input file or a RunSetup.
 
+    Raises ``RuntimeError`` when JAX is not in float64 (see :func:`vmex.configure`).
+
     Defaults come from the input (``tcon0``, ``gamma``, ``ftol_array(1)``,
     ``niter_array(1)``); explicit keywords override.  The host loop-driver
     scalars (initial ``DELT``, ``NSTEP`` print cadence) are resolved by
@@ -727,6 +730,9 @@ def prepare_runtime(
     VMEC2000's diagonal lambda preconditioner (the default, which keeps
     iteration-for-iteration VMEC2000 parity); ``1e-3`` enables it.
     """
+    from .._compat import require_x64
+
+    require_x64()
     if isinstance(source, RunSetup):
         if resolution is None:
             raise ValueError("prepare_runtime(RunSetup) requires a Resolution")

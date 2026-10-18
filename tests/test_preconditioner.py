@@ -1,11 +1,12 @@
 """Tests for ``vmex.core.preconditioner``: ``precondn`` / ``lamcal`` /
-``scalfor_matrices`` / ``scalfor`` / ``tridiagonal_solve``.
+``scalfor_matrices`` / ``scalfor``.
 
 The full A/B against the legacy scalfor.f/precondn.f/lamcal.f90 port
 (matrix elements, assembly, solved forces at rtol 1e-12 on synthetic and
 real solver states) retired with the legacy tree; kept here are the
 VMEC2000 convention pins (edge pedestal, ZC(0,0) stabilization, lamcal axis
-row), the tridiagonal solver vs dense references, and jit equivalence.
+row), the checked radial solve, and jit equivalence. SOLVAX's own suite pins
+the Thomas solve against dense references.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import solvax
 
 from vmex.core import preconditioner as newp
 
@@ -219,56 +221,6 @@ def test_edge_pedestal_and_zc00_values():
     assert np.allclose(ped[2:, :], 1.10, rtol=1e-12)
 
 
-# ---------------------------------------------------------------------------
-# Tridiagonal solver vs dense reference
-# ---------------------------------------------------------------------------
-
-
-def test_tridiagonal_solve_matches_dense_numpy():
-    rng = np.random.default_rng(42)
-    ns, mpol, nrange, nrhs = 17, 8, 5, 3
-    shape = (ns, mpol, nrange)
-    superd = rng.uniform(-0.5, 0.5, size=shape)
-    subd = rng.uniform(-0.5, 0.5, size=shape)
-    diag = 3.0 + rng.uniform(0.0, 1.0, size=shape)  # diagonally dominant
-    rhs = rng.standard_normal(size=shape + (nrhs,))
-
-    solution = np.asarray(
-        newp.tridiagonal_solve(
-            jnp.asarray(superd), jnp.asarray(diag), jnp.asarray(subd), jnp.asarray(rhs)
-        )
-    )
-    assert solution.shape == rhs.shape
-
-    for m in range(mpol):
-        for n in range(nrange):
-            dense = (
-                np.diag(diag[:, m, n])
-                + np.diag(superd[:-1, m, n], k=1)
-                + np.diag(subd[1:, m, n], k=-1)
-            )
-            expected = np.linalg.solve(dense, rhs[:, m, n, :])
-            np.testing.assert_allclose(solution[:, m, n, :], expected, rtol=1e-11, atol=1e-12)
-
-
-def test_tridiagonal_solve_broadcast_rank():
-    """Shared (per-column) coefficients with extra trailing RHS axes."""
-    rng = np.random.default_rng(3)
-    ns, ncol = 9, 4
-    superd = rng.uniform(-0.4, 0.4, size=(ns, ncol))
-    subd = rng.uniform(-0.4, 0.4, size=(ns, ncol))
-    diag = 2.5 + rng.uniform(0.0, 1.0, size=(ns, ncol))
-    rhs = rng.standard_normal(size=(ns, ncol, 6))
-    got = np.asarray(newp.tridiagonal_solve(superd, diag, subd, rhs))
-    for c in range(ncol):
-        dense = (
-            np.diag(diag[:, c]) + np.diag(superd[:-1, c], k=1) + np.diag(subd[1:, c], k=-1)
-        )
-        np.testing.assert_allclose(
-            got[:, c, :], np.linalg.solve(dense, rhs[:, c, :]), rtol=1e-11, atol=1e-12
-        )
-
-
 @pytest.mark.parametrize("ns", [6, 16, 257])
 def test_scalfor_checked_solve_reports_well_conditioned_system(ns) -> None:
     """The production solve accepts a stable radial system without fallback."""
@@ -283,16 +235,16 @@ def test_scalfor_checked_solve_reports_well_conditioned_system(ns) -> None:
     )
     solved, safe = newp.scalfor(force, matrices, jmax=ns, return_safe=True)
     reference = np.asarray(force).copy()
-    reference[:, 0] = np.asarray(newp.tridiagonal_solve(
-        matrices.ax[:, 0],
-        matrices.dx[:, 0],
+    reference[:, 0] = np.asarray(solvax.tridiagonal_solve(
         matrices.bx[:, 0],
+        matrices.dx[:, 0],
+        matrices.ax[:, 0],
         force[:, 0],
     ))
-    reference[1:, 1] = np.asarray(newp.tridiagonal_solve(
-        matrices.ax[1:, 1],
-        matrices.dx[1:, 1],
+    reference[1:, 1] = np.asarray(solvax.tridiagonal_solve(
         matrices.bx[1:, 1],
+        matrices.dx[1:, 1],
+        matrices.ax[1:, 1],
         force[1:, 1],
     ))
     reference[0, 1] = 0.0

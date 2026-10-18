@@ -902,16 +902,15 @@ def iota(piota_type: str, ai, ai_aux_s, ai_aux_f, s, *, bloat=1.0, lrfp=False):
     ``lrfp=True`` the ``ai`` coefficients parameterize the safety factor
     ``q = 1/iota`` and the reciprocal is returned (infinite where q = 0).
 
-    Note: VMEC2000's ``piota`` does not apply the ``bloat`` clamp internally;
-    this port applies it uniformly (identical for the default ``bloat = 1``).
+    As in VMEC2000's ``piota``, ``bloat`` is not applied (only ``pmass`` and
+    ``pcurr`` use it); the argument is kept for call-site symmetry.
     """
     kind = str(piota_type).strip().lower()
     if kind not in _PIOTA_KINDS:
         raise NotImplementedError(
             f"piota_type={piota_type!r} not implemented "
             f"(supported: {sorted(_PIOTA_KINDS)})")
-    x = _bloated(s, bloat)
-    value = evaluate_profile(kind, ai, ai_aux_s, ai_aux_f, x)
+    value = evaluate_profile(kind, ai, ai_aux_s, ai_aux_f, jnp.asarray(s))
     if lrfp:
         value = jnp.where(value != 0.0, 1.0 / value, jnp.asarray(jnp.inf, dtype=value.dtype))
     return value
