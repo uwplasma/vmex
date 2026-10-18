@@ -31,8 +31,6 @@ from vmex.core import omnigenity as omn
 from vmex.core import optimize as opt
 from vmex.core.input import VmecInput
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SURFACES = (0.25, 0.5, 0.75)
 FAST = dict(mboz=10, nboz=10, nphi=61, nalpha=13, n_levels=8)

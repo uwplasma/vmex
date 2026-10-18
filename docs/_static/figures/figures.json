@@ -667,6 +667,63 @@
       "used_in": [
         "docs/howto/trace-to-the-wall.md"
       ]
+    },
+    {
+      "path": "docs/_static/figures/cross_code_losses.webp",
+      "sha256": "b044cfb477b442715cadedf1613ada31eb3b143b33b0cddb72f3c6ec88bfd552",
+      "bytes": 10708,
+      "generator": "benchmarks/make_essos_cross_code_figures.py",
+      "command": "python benchmarks/make_essos_cross_code_figures.py",
+      "inputs": [
+        "benchmarks/essos_cross_code.json"
+      ],
+      "record": "benchmarks/essos_cross_code.json",
+      "generated": "2026-10-11",
+      "hardware": "Apple M4 (10 cores, 8 used), CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Loss fraction against time for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 32-color lossless WebP."
+    },
+    {
+      "path": "docs/_static/figures/cross_code_bars.webp",
+      "sha256": "afadd2ddd0c8e5703d789ce96c0385b50ee364f2de4498d6203311d2cc61dab8",
+      "bytes": 6448,
+      "generator": "benchmarks/make_essos_cross_code_figures.py",
+      "command": "python benchmarks/make_essos_cross_code_figures.py",
+      "inputs": [
+        "benchmarks/essos_cross_code.json"
+      ],
+      "record": "benchmarks/essos_cross_code.json",
+      "generated": "2026-10-11",
+      "hardware": "Apple M4 (10 cores, 8 used), CPU",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Run time, max energy error and fate agreement with SIMPLE and FIRM3D for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 32-color lossless WebP."
+    },
+    {
+      "path": "docs/_static/figures/readme_exact_equilibria.webp",
+      "sha256": "15d2dd16485274d4c240e9dea8bf6f372d792affa03924ba4445cfe62e5dc8e3",
+      "bytes": 22944,
+      "generator": "benchmarks/make_exact_equilibria_figure.py",
+      "command": "python benchmarks/make_exact_equilibria_figure.py",
+      "inputs": [
+        "benchmarks/exact_equilibria.json"
+      ],
+      "record": "benchmarks/exact_equilibria.json",
+      "generated": "2026-10-15",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Plots the committed record, which is taken from the exact-equilibrium benchmark (rogeriojorge/vmex-benchmark-analytical, commit in the record): exact boundaries, and the J and flux-label errors of VMEX seeded from the exact geometry (ftol 1e-11). Rebuilding the record itself needs that repository. 64-color lossless WebP; rerunning the command reproduces these bytes."
     }
   ]
 }

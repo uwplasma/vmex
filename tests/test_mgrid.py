@@ -559,9 +559,6 @@ def test_interior_field_inverts_flux_coordinates_and_recovers_B():
         parameterized.B_vjp(weight), expected_vjp, rtol=2e-10, atol=2e-10)
     with pytest.raises(ValueError, match="cotangent has shape"):
         parameterized.B_vjp(jnp.ones(weight.shape + (3,)))
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")  # one solve, 200 s interpreted
 def test_flux_coordinates_compile_once_and_repeat_for_free():
     """``flux_coordinates`` and its exterior-point check run as compiled kernels.
 
@@ -787,7 +784,7 @@ def test_field_api_validation_and_constructor_routing(monkeypatch, tmp_path):
                            mgrid_file="mgrid.nc", extcur=[10.0])
     mgrid_field = VmecExtender.from_wout(wout, base_dir=tmp_path)
     assert mgrid_field.B(points).shape == points.shape
-    np.testing.assert_allclose(captured["extcur"], [5.0, 0.0])
+    np.testing.assert_allclose(captured["extcur"], [10.0, 0.0])   # EXTCUR as is
     # A free-boundary wout written without its coil currents (nextcur = 0, as
     # solve_file writes one) used to extend with an identically zero coil field.
     for missing in ([0.0], [], [0.0, 0.0]):
@@ -920,31 +917,62 @@ def test_extcur_scaling_is_linear(data: MgridData) -> None:
         np.testing.assert_allclose(3.0 * np.asarray(a), np.asarray(b), rtol=1e-13, atol=0.0)
 
 
-def test_default_extcur_is_the_file_field_in_every_mgrid_mode(
+def test_deck_extcur_multiplies_the_table_in_every_mgrid_mode(
         data: MgridData, tmp_path: Path) -> None:
-    """A mode-R/N table carries its currents; only a mode-S table is per ampere.
+    """A deck's field is ``sum_g EXTCUR[g] * B_g`` whatever ``mgrid_mode`` says.
 
-    The default must equal the deck-aware loader at ``EXTCUR = raw_coil_cur``,
-    the currents the file was computed with.  Multiplying a raw table by its
-    own currents gave ``-B`` for the HSX mgrid (mode R, raw current -1 A).
+    VMEC2000 reads ``raw_coil_cur`` and ``mgrid_mode`` but never uses them:
+    ``read_mgrid_nc`` adds ``extcur(ig) * B_g`` for every group
+    (``LIBSTELL mgrid_mod.f``, ``sum_bfield``).  Dividing ``EXTCUR`` by
+    ``raw_coil_cur`` for mode-R files scaled a MAKEGRID raw table (``EXTCUR =
+    1``, ``raw_coil_cur`` the coil current in A) down by that current.  The
+    default with no deck stays the file's own field: ``raw_coil_cur`` times a
+    mode-S table, one times a mode-R/N table.
     """
     from vmex.core.freeboundary import _external_field_from_input
 
     r, phi, z = _random_points(data, n=40, seed=11)
     table = MgridField.from_mgrid_data(data, extcur=np.ones(data.nextcur)).b_cyl(r, phi, z)
-    raw = tuple(-2.5 for _ in range(data.nextcur))
-    for mode, factor in (("S", -2.5), ("R", 1.0), ("N", 1.0)):
+    raw = tuple(2.0e4 for _ in range(data.nextcur))
+    for mode, factor in (("S", 2.0e4), ("R", 1.0), ("N", 1.0)):
         variant = replace(data, mgrid_mode=mode, raw_coil_cur=raw)
         default = MgridField.from_mgrid_data(variant).b_cyl(r, phi, z)
         path = tmp_path / f"mgrid_{mode}.nc"
         write_mgrid(path, variant)
-        deck = SimpleNamespace(extcur=list(raw), mgrid_file=str(path))
+        deck = SimpleNamespace(extcur=[-1.5] * data.nextcur, mgrid_file=str(path))
         solver = _external_field_from_input(deck).b_cyl(r, phi, z)
         for got, want, loaded in zip(default, table, solver):
             np.testing.assert_allclose(got, factor * np.asarray(want), rtol=1e-14, atol=0.0)
-            np.testing.assert_allclose(got, loaded, rtol=1e-14, atol=0.0)
+            np.testing.assert_allclose(loaded, -1.5 * np.asarray(want), rtol=1e-14, atol=0.0)
     cubic = MgridField.from_input(SimpleNamespace(extcur=None, mgrid_file="unused"), path, order=3)
     assert cubic.order == 3 and not np.any(cubic.extcur)
+
+
+def test_raw_current_table_reproduces_the_vmec2000_pairing(data: MgridData, tmp_path: Path) -> None:
+    """MAKEGRID raw mode: table times the currents, ``EXTCUR = 1``.
+
+    VMEC2000 (PARVMEC 9.0) on the full CTH-like deck gives the same wout for
+    the bundled table at ``EXTCUR = 4700, 1000`` and for that table times the
+    currents (``raw_coil_cur = 4700, 1000``, mode R) at ``EXTCUR = 1, 1``:
+    volume 0.306998 m^3, beta 1.872e-3, iota edge 0.86486.  VMEX matches both to
+    2e-5; before #591 it divided the second by the currents and diverged.
+    """
+    from vmex.core.cli import _mgrid_banner
+    from vmex.core.freeboundary import _external_field_from_input
+
+    cur = np.arange(1, data.nextcur + 1) * 4.7e3
+    raw = replace(data, mgrid_mode="R", raw_coil_cur=tuple(cur),
+                  br=data.br * cur[:, None, None, None], bp=data.bp * cur[:, None, None, None],
+                  bz=data.bz * cur[:, None, None, None])
+    write_mgrid(tmp_path / "raw.nc", raw)
+    write_mgrid(tmp_path / "ref.nc", data)
+    r, phi, z = _random_points(data, n=40, seed=5)
+    ref = _external_field_from_input(SimpleNamespace(extcur=list(cur), mgrid_file=str(tmp_path / "ref.nc")))
+    got = _external_field_from_input(SimpleNamespace(extcur=[1.0] * data.nextcur, mgrid_file=str(tmp_path / "raw.nc")))
+    for a, b in zip(got.b_cyl(r, phi, z), ref.b_cyl(r, phi, z)):
+        np.testing.assert_allclose(a, b, rtol=1e-12, atol=0.0)
+    assert "applied twice" not in _mgrid_banner(tmp_path / "raw.nc", raw, np.ones(data.nextcur))
+    assert "applied twice" in _mgrid_banner(tmp_path / "raw.nc", raw, cur)
 
 
 def test_sum_groups_reads_the_same_field_into_one_group(

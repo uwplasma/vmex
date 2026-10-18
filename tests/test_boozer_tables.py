@@ -30,8 +30,6 @@ from vmex.core.omnigenity import boozer_spectrum_high_order, boozer_spectrum_sta
 from vmex.core.strong_force import lift_high_order_state
 from vmex.core.wout import wout_from_state
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solve: run jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 

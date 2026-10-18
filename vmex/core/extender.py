@@ -1320,9 +1320,6 @@ def _mgrid_from_wout(wout: Any, base_dir: Path | None) -> MgridField | None:
     data = read_mgrid(path)
     scaled = np.zeros((data.nextcur,), dtype=float)
     scaled[: min(extcur.size, data.nextcur)] = extcur[: data.nextcur]
-    if str(data.mgrid_mode).upper().startswith(("R", "N")):
-        raw = np.asarray(data.raw_coil_cur, dtype=float)
-        scaled = np.divide(scaled, raw, out=scaled, where=raw != 0.0)
     return MgridField.from_mgrid_data(data, extcur=scaled)
 
 

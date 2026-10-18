@@ -227,9 +227,6 @@ def test_cli_missing_input_is_zero_crash(capsys):
     assert rc != 0
     out = capsys.readouterr().out
     assert "HINT" in out and "not found" in out
-
-
-@pytest.mark.usefixtures("_module_jit_enabled")
 def test_cli_bundled_test_verbose(tmp_path, capsys):
     """--test without --quiet prints the guided walkthrough (README quickstart)."""
     pytest.importorskip("matplotlib")

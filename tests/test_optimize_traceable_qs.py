@@ -27,8 +27,6 @@ import jax.numpy as jnp
 from vmex.core import optimize as opt
 from vmex.core.input import VmecInput
 
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solve: run jitted
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SURFACES = [0.25, 0.5, 0.75, 1.0]
 

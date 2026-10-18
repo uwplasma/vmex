@@ -21,9 +21,6 @@ pytest.importorskip("netCDF4")
 
 import vmex as vj  # noqa: E402
 from vmex.core.wout import wout_from_result, wout_from_state  # noqa: E402
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 REPO = Path(__file__).resolve().parents[1]
 DATA = REPO / "examples" / "data"
 
@@ -106,3 +103,22 @@ def test_overrides_win_over_the_values_taken_from_the_result():
     assert produced.input_extension == "override_case"
     # converged=False is the VMEC2000 "more iterations needed" flag, not 0
     assert int(produced.ier_flag) == 2
+
+
+def test_toroidal_flux_follows_fileout_for_a_nonuniform_aphi():
+    """``phi`` is fileout.f's midpoint sum of the half-mesh ``phips``.
+
+    ``phi(js) = signgs*twopi*hs*sum(phip(2:js))``.  With APHI = 0.5 0.5 the
+    normalized flux is ``0.5 s + 0.5 s^2``, whose derivative is linear, so the
+    midpoint sum is exact; a right-endpoint sum of the full-mesh ``phipf``
+    overshoots by ``PHIEDGE * 0.5 / (ns - 1)`` (5 % at ns = 11).
+    """
+    from vmex.core.solver import _initial_state, prepare_runtime, resolution_from_input
+
+    aphi = np.zeros(20)
+    aphi[:2] = 0.5
+    inp = dataclasses.replace(vj.VmecInput.from_file(DATA / "input.circular_tokamak"), aphi=aphi, ns_array=np.array([11]))
+    state = _initial_state(prepare_runtime(inp, resolution_from_input(inp)).setup)
+    wout = wout_from_state(inp=inp, state=state, fsqr=1.0, fsqz=1.0, fsql=1.0, converged=False)
+    s = np.linspace(0.0, 1.0, 11)
+    np.testing.assert_allclose(wout.phi, inp.phiedge * (0.5 * s + 0.5 * s**2), rtol=1e-13, atol=1e-15)

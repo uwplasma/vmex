@@ -26,9 +26,6 @@ from vmex.core.scaling import (
     scale_wout,
 )
 from vmex.core.wout import _preset_array, read_wout, wout_from_state, write_wout
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
@@ -106,7 +103,7 @@ def test_free_boundary_probe_refines_without_full_ladder(monkeypatch):
     assert probe.field_relative_change == pytest.approx(0.11 / 2.31)
 
 
-def test_mgrid_scaling_distinguishes_per_ampere_and_raw_tables():
+def test_mgrid_scaling_scales_the_deck_field_by_b_in_every_mode():
     data = MgridData(
         rmin=1.0, rmax=2.0, zmin=-0.5, zmax=0.5,
         ir=2, jz=2, kp=2, nfp=1, nextcur=1,
@@ -122,12 +119,14 @@ def test_mgrid_scaling_distinguishes_per_ampere_and_raw_tables():
     assert scaled.raw_coil_cur == (60.0,)
     np.testing.assert_allclose(scaled.br, data.br / 2.0)
 
+    # The deck field is EXTCUR * table in every mode (VMEC2000), and
+    # scale_input multiplies EXTCUR by b * r, so the table scales as 1 / r.
     raw = scale_mgrid(
         dataclasses.replace(data, mgrid_mode="R"),
         b_scale=3.0,
         r_scale=2.0,
     )
-    np.testing.assert_allclose(raw.br, 3.0 * data.br)
+    np.testing.assert_allclose((3.0 * 2.0) * raw.br, 3.0 * data.br)
 
 
 @pytest.fixture(scope="module")

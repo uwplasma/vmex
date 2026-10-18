@@ -33,9 +33,6 @@ import jax.numpy as jnp
 from vmex.core import bootstrap as bs
 from vmex.core import optimize as opt
 from vmex.core.input import VmecInput
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 ZENODO = Path(os.environ.get(
     "VMEX_ZENODO_2205_02914", "__external_zenodo_dataset_not_configured__"))

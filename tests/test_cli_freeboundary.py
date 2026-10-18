@@ -33,9 +33,6 @@ from vmex.core.errors import (
 )
 from vmex.core.mgrid import read_mgrid
 from vmex.core.wout import read_wout
-
-pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 DECK = DATA_DIR / "input.cth_like_free_bdy_lasym_small"
 MGRID = DATA_DIR / "mgrid_cth_like_lasym_small.nc"
