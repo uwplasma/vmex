@@ -549,7 +549,7 @@ def test_direct_scipy_minimize_and_least_squares_use_same_problem():
 
 def test_vmex_jax_logging_default_and_override() -> None:
     """The default removes PjRt chatter without preventing an opt-in."""
-    code = "import vmex, jax; print(jax.config.jax_logging_level)"
+    code = "import vmex.core, jax; print(jax.config.jax_logging_level)"
     env = os.environ.copy()
     env.pop("VMEX_JAX_LOGGING_LEVEL", None)
     env.pop("JAX_LOGGING_LEVEL", None)
