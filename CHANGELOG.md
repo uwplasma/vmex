@@ -191,24 +191,6 @@ install from PyPI (`essos>=0.17`, new `all` extra), `max_fsq_ratio` defaults to
 one minor radius out on the QA wout, against 2.46e-02 before). Full notes in
 the GitHub release.
 
-## 0.9.0 - 2026-09-15
+## 0.9.0 and earlier
 
-The optimization release. The two workflows users reported as slow and
-inconclusive — quasi-isodynamic boundary design and single-stage plasma-and-coil
-design — now converge and meet the targets they print: the refinement every
-trial pays is a Newton finish through one block factorization, the implicit
-adjoint is solved exactly through that same factorization, and the compiled
-lanes stopped recompiling. The exterior field reports the accuracy it achieved,
-every evaluation carries counters, and the CLI reads DESC inputs. It does not
-close cold compile (median wall per case 23.1 s against VMEC++'s 3.35 s in the
-independent `itpplasma/benchmark_vmec` corpus) or block-Jacobian assembly.
-
-The PRs behind it and the full notes are in the GitHub release: #300, #310,
-#311, #312, #333, #344 and the rest of the 36 merged since 0.8.1.
-
-## 0.8.1 - 2026-09-02
-
-The cold-start performance release: cold CLI, Python and optimization runs
-faster than every previous release on every deck measured, from 773 XLA
-programs at QA resolution to 343 (#227-#234). Full notes in the GitHub
-release.
+See the [GitHub releases](https://github.com/uwplasma/vmex/releases).
