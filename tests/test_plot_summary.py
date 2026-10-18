@@ -171,7 +171,7 @@ def test_summary_combines_stability_and_well(summary_figure):
 def test_summary_combines_force_current_and_confinement(
     solved_case, summary_figure,
 ):
-    """Force balance carries bootstrap <J.B>; iota stands alone; pressure carries confinement."""
+    """Force balance carries the equilibrium <J.B>; iota stands alone; pressure carries confinement."""
     _, meta = summary_figure
     iota = meta["axes"]["iota"]
     assert len(iota.lines) == 1 and iota.get_legend() is None
@@ -181,7 +181,7 @@ def test_summary_combines_force_current_and_confinement(
     current = meta["current_axis"]
     assert len(current.lines) == 1
     assert current.get_shared_x_axes().joined(current, force)
-    assert current.get_ylabel().startswith(r"Bootstrap $\langle \mathbf{J}")
+    assert current.get_ylabel().startswith(r"$\langle \mathbf{J}")   # total, not bootstrap
     assert current.get_ylabel().endswith("[kA T/m$^2$]")
     labels = [text.get_text() for text in force.get_legend().get_texts()]
     assert "force error" in labels
@@ -820,6 +820,16 @@ def test_vacuum_stability_panel_is_labeled_as_a_limit():
         axis, wout, {"valid": False, "note": "not sampled"}, s_plot_ignore=0.0)
     assert "vacuum-limit" in axis.lines[0].get_label()
     assert "not finite-pressure" in axis.get_title()
+    plt.close(figure)
+
+
+def test_stability_panel_accepts_the_minimum_three_surfaces():
+    """NS = 3 is VMEC's smallest grid; V'' needs four surfaces, so it is skipped."""
+    import matplotlib.pyplot as plt
+
+    wout = SimpleNamespace(ns=3, DMerc=np.ones(3), betatotal=0.01, vp=np.arange(3, dtype=float))
+    figure, axis = plt.subplots()
+    plotting._stability_panel(axis, wout, {"valid": False, "note": "n/a"}, s_plot_ignore=0.2)
     plt.close(figure)
 
 
