@@ -7,7 +7,7 @@ Self-contained matplotlib (Agg) figure set read from a ``wout_*.nc`` file
   mesh), pressure with the confinement diagnostics ``eps_eff^(3/2)`` (NEO_JAX) and
   ``Gamma_c`` sharing one right axis (bounded-resolution radial trends,
   cached per in-memory WOUT — see :class:`ConfinementSummary`), relative
-  radial force error with the bootstrap current ``<J.B>`` on its right
+  radial force error with the equilibrium's parallel current ``<J.B>`` on its right
   axis, Mercier ``DMerc``
   and Glasser ``D_R`` with ``V''(s)`` on the right axis, a 3-D LCFS,
   a Velasco-style polar second-adiabatic-invariant map ``J(alpha, s)``, ``|B|``
@@ -1308,7 +1308,8 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
     ax.set_xlim(0.0, 1.0)
 
     well_ax = ax.twinx()
-    s_vpp, vpp = _volume_second_derivative(wout)
+    # V'' needs four surfaces; at NS = 3 the plotted slice is empty anyway.
+    s_vpp, vpp = _volume_second_derivative(wout) if ns >= 4 else (s, np.full(ns, np.nan))
     finite_vpp = vpp[sl][np.isfinite(vpp[sl])]
     peak_vpp = max(float(np.max(np.abs(finite_vpp))) if finite_vpp.size else 1.0,
                    np.finfo(float).tiny)
@@ -1664,7 +1665,8 @@ def _summary_figure(
         )
 
         # Force error normalized by the magnetic pressure gradient (DESC),
-        # with the bootstrap <J.B> against the same rho on its right axis.
+        # with the equilibrium's total <J.B> (all current, not only bootstrap)
+        # against the same rho on its right axis.
         meta["force_error"] = _relative_force_error_panel(axes[0, 2], wout)
         current_axis = axes[0, 2].twinx(); meta["current_axis"] = current_axis
         current_line = current_axis.plot(
@@ -1672,7 +1674,7 @@ def _summary_figure(
             color=_LINE_COLORS[2], label=r"$\langle\mathbf{J}\cdot\mathbf{B}\rangle$",
         )[0]
         current_axis.set_ylabel(
-            r"Bootstrap $\langle \mathbf{J}\cdot\mathbf{B} \rangle$ [kA T/m$^2$]",
+            r"$\langle \mathbf{J}\cdot\mathbf{B} \rangle$ [kA T/m$^2$]",
             color=_LINE_COLORS[2],
         )
         current_axis.tick_params(axis="y", colors=_LINE_COLORS[2])
@@ -1764,7 +1766,8 @@ def plot_summary(
        average of ``|J x B - grad p|`` over the volume average of
        ``|grad(B^2/2mu0)|`` on ``0.1 <= s <= 0.99`` (DESC's normalization;
        the scalar card gives the volume average), on interior surfaces,
-       with the flux-surface-averaged bootstrap current ``<J.B>`` in
+       with the flux-surface-averaged parallel current ``<J.B>`` (the
+       equilibrium's total, not a bootstrap model) in
        kA T m^-2 on a coloured right axis;
     4. Mercier ``DMerc`` and the Glasser-Greene-Johnson ``D_R`` against ``s``,
        with the physical ``d2V/ds2`` on the right axis;
