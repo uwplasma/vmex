@@ -181,7 +181,7 @@ def worker_tridiag(dtype: str, device: str) -> dict:
     import numpy as np
     import jax
     import jax.numpy as jnp
-    from vmex.core.preconditioner import tridiagonal_solve
+    from solvax import tridiagonal_solve
 
     dt = jnp.float32 if dtype == "f32" else jnp.float64
     target = jax.devices(device)[0]

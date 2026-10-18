@@ -517,17 +517,16 @@ def chipf_from_chips(chips):
     return full_mesh_from_half(chips)
 
 
-def toroidal_flux_profile(*, phipf_out, s):
-    """``phi`` [Wb] on the full mesh: rectangle-rule integral of ``phipf``.
+def toroidal_flux_profile(*, phips, signgs):
+    """``phi`` [Wb] on the full mesh (``fileout.f``).
 
-    ``phi[i] = sum_{j<=i} phipf_out[j]*(s[j]-s[j-1])`` with ``phi[0] = 0``
-    (``phipf_out`` in file convention, i.e. including ``2*pi*signgs``).
+    ``phi(js) = signgs*twopi*hs*sum(phips(2:js))`` with ``phi(axis) = 0``:
+    the midpoint sum of the half-mesh internal ``phips``, so ``phi[-1]`` is
+    ``PHIEDGE`` for any APHI.
     """
-    y = np.asarray(phipf_out, dtype=float)
-    s = np.asarray(s, dtype=float)
-    out = np.zeros_like(y)
-    if y.shape[0] >= 2:
-        out[1:] = np.cumsum(y[1:] * (s[1:] - s[:-1]))
+    phips = np.asarray(phips, dtype=float)
+    out = np.zeros_like(phips)
+    out[1:] = (2.0 * np.pi * float(signgs) / (phips.shape[0] - 1)) * np.cumsum(phips[1:])
     return out
 
 

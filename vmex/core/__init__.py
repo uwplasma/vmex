@@ -34,3 +34,7 @@ parity-proven implementation in ``tests/``; the solve loop is
 validated end-to-end against VMEC2000 golden runs
 (``tests/test_solver_end_to_end.py``).
 """
+
+from .._compat import ensure_configured as _ensure_configured
+
+_ensure_configured()
