@@ -200,7 +200,10 @@ Multigrid ladder and stepping
      - 1e-10
      - implemented
      - Single-grid tolerance when ``FTOL_ARRAY(1)=0`` and the final target
-       of the generated ladder.
+       of the generated ladder.  Deliberate difference: a deck that sets
+       ``FTOL`` and no ``FTOL_ARRAY`` runs at ``FTOL`` in VMEX.  VMEC2000
+       copies ``FTOL`` into ``FTOL_ARRAY(1)`` before reading the namelist
+       (``vmec_input.f``), so it runs that deck at ``1e-10``.
    * - ``NITER_ARRAY`` / ``NITER``
      - ``[100]``
      - implemented
@@ -352,7 +355,11 @@ Profiles
    * - ``BLOAT``
      - 1.0
      - implemented
-     - Profile-argument expansion factor.
+     - Profile-argument expansion factor of ``pmass`` and ``pcurr``;
+       ``piota`` ignores it, as in VMEC2000.  ``BLOAT != 1`` with
+       ``NCURR != 1`` is rejected, as VMEC2000 does (ier_flag 3).
+       Deliberate difference: VMEC2000 also multiplies ``PHIEDGE`` by
+       ``BLOAT`` (``readin.f``); VMEX uses ``PHIEDGE`` as written.
    * - ``NCURR``
      - 0
      - implemented

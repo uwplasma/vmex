@@ -120,6 +120,14 @@ pip install -e ".[all,dev]"
 `--filter=blob:none` fetches old file versions only on demand, so the clone is
 about 8.5 MB instead of 45 MB with the full history still available.
 
+### JAX settings
+
+`import vmex` does not change `jax.config`. VMEX's settings (float64, a persistent compilation
+cache, synchronous CPU dispatch, quiet JAX logging) are applied by `vmex.configure()`. The `vmex`
+command calls it, and so does the first import of `vmex.core` or `vmex.mirror`, unless you called it
+first or set `JAX_ENABLE_X64` yourself. The solver needs float64 and stops with a message if it is
+off. In a script that also runs other JAX code, call `vmex.configure()` once at the top.
+
 The [installation guide](https://vmex.readthedocs.io/en/latest/installation.html) covers float64,
 WSL2 and dependency details.
 

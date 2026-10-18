@@ -105,7 +105,8 @@ Every tabulated field ({meth}`~vmex.core.mgrid.MgridField.from_file`,
 {meth}`~vmex.core.mgrid.MgridField.from_input`) takes `order=1` (trilinear,
 the default) or `order=3` (tricubic, C1). The table itself is the same.
 `MgridField.from_input(inp, mgrid_path=None, *, order=1)` builds a deck's
-field with the solver's `EXTCUR` / `raw_coil_cur` scaling, so it is the way
+field with the deck's `EXTCUR` (each coil group's table times its current, as
+VMEC2000 does in every `mgrid_mode`), so it is the way
 to get the tricubic version of the field a deck would use.
 
 Trilinear stays the default because it is the VMEC2000 parity kernel that
