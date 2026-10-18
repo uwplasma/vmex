@@ -421,6 +421,33 @@ def _find_assignments(text: str) -> List[re.Match[str]]:
     return matches
 
 
+_LEGACY_END_RE = re.compile(r"[&$]\s*END\b", flags=re.IGNORECASE)
+
+
+def _namelist_end(text: str, start: int) -> int | None:
+    """Index of the first unquoted ``/`` (or legacy ``&END``/``$END``) after ``start``.
+
+    Fortran ends a namelist group there, also mid-line after the last value;
+    ``!`` comments and quoted strings are skipped.
+    """
+    i, quote = start, None
+    while i < len(text):
+        ch = text[i]
+        if quote is not None:
+            quote = None if ch == quote else quote
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "!":
+            newline = text.find("\n", i)
+            if newline < 0:
+                return None
+            i = newline
+        elif ch == "/" or (ch in "&$" and _LEGACY_END_RE.match(text, i)):
+            return i
+        i += 1
+    return None
+
+
 def _read_indata_text(text: str) -> tuple[Dict[str, List[Scalar]], Dict[str, Dict[Tuple[int, ...], Scalar]]]:
     """Parse and sequentially replay the ``&INDATA`` block.
 
@@ -429,13 +456,14 @@ def _read_indata_text(text: str) -> tuple[Dict[str, List[Scalar]], Dict[str, Dic
     explicitly assigned array element.  Replaying assignments in source order
     reproduces Fortran overlay semantics for repeated dense/indexed writes.
     """
-    m_start = re.search(r"&\s*INDATA", text, flags=re.IGNORECASE)
+    # The group name opens a line; "&INDATA" inside a "!" comment does not count.
+    m_start = re.search(r"^[ \t]*&\s*INDATA\b", text, flags=re.IGNORECASE | re.MULTILINE)
     if not m_start:
         raise ValueError("no &INDATA namelist found")
-    m_end = re.search(r"\n\s*/\s*\n|\n\s*/\s*$", text[m_start.end():], flags=re.MULTILINE)
-    if not m_end:
+    end = _namelist_end(text, m_start.end())
+    if end is None:
         raise ValueError("no terminating '/' for &INDATA")
-    block = text[m_start.end(): m_start.end() + m_end.start()]
+    block = text[m_start.end(): end]
     cleaned = "\n".join(_strip_fortran_comments(ln) for ln in block.splitlines())
 
     scalars: Dict[str, List[Scalar]] = {}
