@@ -8,6 +8,10 @@ Numerical kernels remain available from their owning submodules.
 
 from importlib import import_module as _import_module
 
+from .._compat import ensure_configured as _ensure_configured
+
+_ensure_configured()
+
 
 # Public names are lazy so importing ``vmex.mirror`` does not initialize
 # every exterior-vacuum and solver dependency.
