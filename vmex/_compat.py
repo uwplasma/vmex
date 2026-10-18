@@ -588,18 +588,6 @@ def _configure_jax_environment() -> None:
     default uses ``setdefault``: an explicit user environment always wins.
     """
     try:
-        # Default fresh JAX to x64; preserve an existing runtime precision
-        # choice when the caller has not supplied an environment override.
-        if "jax" not in sys.modules:
-            os.environ.setdefault("JAX_ENABLE_X64", "1")
-        # VMEC/JAX optimization callbacks immediately materialize most results
-        # on the host (SciPy residuals/Jacobians, history, wout writing).  On
-        # CPU, asynchronous dispatch can leave completed XLA/PjRt work and
-        # executable state queued across many exact-Jacobian callbacks in one
-        # long-lived process.  Default CPU dispatch to synchronous execution so
-        # memory is reclaimed at callback boundaries; users can still override
-        # this before import with JAX_CPU_ENABLE_ASYNC_DISPATCH=true.
-        os.environ.setdefault("JAX_CPU_ENABLE_ASYNC_DISPATCH", "false")
         # Suppress harmless informational C++ logs from XLA/PjRt.  Level
         # 0=INFO, 1=WARNING, 2=ERROR — default to ERROR-only so genuine errors
         # still surface.  JAX/jaxlib 0.9.1-0.9.2 can nevertheless print a
@@ -661,29 +649,7 @@ def _configure_jax_environment() -> None:
                     ))
             os.environ["XLA_FLAGS"] = " ".join(_xla_flags)
 
-        import jax
 
-        try:
-            if "JAX_ENABLE_X64" in os.environ:
-                # JAX's own boolean spellings; anything else keeps the runtime.
-                value = os.environ["JAX_ENABLE_X64"].lower()
-                truthy = ("y", "yes", "t", "true", "on", "1")
-                if value in truthy or value in ("n", "no", "f", "false", "off", "0"):
-                    jax.config.update("jax_enable_x64", value in truthy)
-        except Exception:
-            pass
-        try:
-            _cpu_async = os.environ.get("JAX_CPU_ENABLE_ASYNC_DISPATCH", "true")
-            jax.config.update(
-                "jax_cpu_enable_async_dispatch",
-                _cpu_async.strip().lower() not in ("0", "false", "no", "off"),
-            )
-        except Exception:
-            pass
-
-        # The persistent cache is configured through jax.config only, never
-        # exported: a job launched from this process may run on another node.
-        _apply_compilation_cache_policy(jax)
         if os.path.exists(_MAP_LIMIT_FILE) and not _MAP_STATE.get("listening"):
             from jax import monitoring
 
@@ -697,6 +663,71 @@ def _configure_jax_environment() -> None:
 
 
 _configure_jax_environment()
+
+# ``None`` until :func:`configure` runs; then the x64 choice it applied.
+_CONFIGURED: dict[str, bool] = {}
+
+
+def configure(*, x64: bool = True, compilation_cache: bool = True,
+              cpu_async_dispatch: bool | None = None,
+              logging_level: str | None = None) -> None:
+    """Apply VMEX's JAX settings to this process, explicitly.
+
+    ``import vmex`` leaves ``jax.config`` alone.  The settings below are
+    applied here, by the ``vmex`` command, and on first use of
+    :mod:`vmex.core` or :mod:`vmex.mirror` when this was not called before.
+
+    - ``x64``: float64 (``jax_enable_x64``).  The solver needs it, and
+      :func:`require_x64` refuses to solve without it.
+    - ``compilation_cache``: the machine-scoped persistent XLA cache
+      (``VMEX_COMPILATION_CACHE`` and friends).
+    - ``cpu_async_dispatch``: CPU dispatch mode.  The default is synchronous
+      (``JAX_CPU_ENABLE_ASYNC_DISPATCH`` overrides), so memory is reclaimed
+      at the host callbacks of exact-Jacobian optimizations.  It takes effect
+      only before JAX first runs a computation.
+    - ``logging_level``: ``jax_logging_level``, default ``ERROR``
+      (``VMEX_JAX_LOGGING_LEVEL`` or ``JAX_LOGGING_LEVEL`` overrides;
+      ``INHERIT`` leaves it).
+    """
+    import jax
+
+    jax.config.update("jax_enable_x64", bool(x64))
+    if cpu_async_dispatch is None:
+        cpu_async_dispatch = os.environ.get("JAX_CPU_ENABLE_ASYNC_DISPATCH", "false").strip().lower() \
+            not in ("0", "false", "no", "off")
+    try:
+        jax.config.update("jax_cpu_enable_async_dispatch", bool(cpu_async_dispatch))
+    except Exception:  # pragma: no cover - option absent in this jaxlib
+        pass
+    level = logging_level or os.environ.get("VMEX_JAX_LOGGING_LEVEL") or os.environ.get(
+        "JAX_LOGGING_LEVEL", "ERROR")
+    if level.strip().upper() not in ("", "INHERIT"):
+        jax.config.update("jax_logging_level", level.strip().upper())
+    if compilation_cache:
+        _apply_compilation_cache_policy(jax)
+    _CONFIGURED["x64"] = bool(x64)
+
+
+def ensure_configured() -> None:
+    """Apply :func:`configure` defaults once, unless the caller already chose.
+
+    An explicit ``JAX_ENABLE_X64`` in the environment is respected.
+    """
+    if _CONFIGURED:
+        return
+    value = os.environ.get("JAX_ENABLE_X64", "").strip().lower()
+    configure(x64=value not in ("0", "false", "no", "off", "n", "f"))
+
+
+def require_x64() -> None:
+    """Raise when JAX is not in float64: VMEX's solver is float64 only."""
+    import jax
+
+    if not jax.config.jax_enable_x64:
+        raise RuntimeError(
+            "VMEX solves in float64, but jax_enable_x64 is off. Call "
+            "vmex.configure() (or jax.config.update('jax_enable_x64', True)) "
+            "before solving.")
 
 
 # Floors of the optional extras, equal to pyproject.toml (a test pins them).

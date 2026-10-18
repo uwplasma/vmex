@@ -81,6 +81,9 @@ GENERATORS: tuple[tuple[str, str], ...] = (
     # Written by ESSOS examples/cross_code_benchmark/benchmark.py (uwplasma/ESSOS#162).
     ("benchmarks/essos_cross_code.json", ""),
     ("benchmarks/make_essos_cross_code_figures.py", ""),
+    # Taken from the exact-equilibrium benchmark; the record names its commit.
+    ("benchmarks/exact_equilibria.json", ""),
+    ("benchmarks/make_exact_equilibria_figure.py", ""),
     ("benchmarks/*.md", ""),
 )
 
