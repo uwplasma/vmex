@@ -270,9 +270,7 @@ Inspect the policy instead of guessing:
 
 Diagnostics include ``fsq``, ``fsq_ratio``, ``max_fsq_ratio``,
 ``derivative_certified``, solve/iteration totals, rejected trials, and
-derivative fallbacks. ``benchmarks/optimization.py`` profiles the QI, QA, QH,
-QP, and scalar contracts over NFP 1--5 and accepts ``--max-fsq-ratio`` without
-turning machine-specific results into a package default.
+derivative fallbacks.
 
 SciPy
 -----

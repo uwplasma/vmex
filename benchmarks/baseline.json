@@ -31,7 +31,7 @@
    "iterations": 850,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 0.845,
    "peak_rss_mb": 69.7,
@@ -65,7 +65,7 @@
    "iterations": 1103,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 1.869,
    "peak_rss_mb": 73.8,
@@ -99,7 +99,7 @@
    "iterations": 1062,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 1.259,
    "peak_rss_mb": 71.2,
@@ -133,7 +133,7 @@
    "iterations": 857,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": false,
    "converged": false,
    "error": "undary is poorly shaped or if it isn't spectrally condensed enough.Thread 1:\n\tFATAL ERROR in thread=1. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 6:\n\tFATAL ERROR in thread=6. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 2:\n\tFATAL ERROR in thread=2. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 5:\n\tFATAL ERROR in thread=5. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.\n"
@@ -165,7 +165,7 @@
    "iterations": 880,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": false,
    "converged": false,
    "error": "undary is poorly shaped or if it isn't spectrally condensed enough.Thread 4:\n\tFATAL ERROR in thread=4. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 5:\n\tFATAL ERROR in thread=5. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 6:\n\tFATAL ERROR in thread=6. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 1:\n\tFATAL ERROR in thread=1. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.\n"
@@ -197,7 +197,7 @@
    "iterations": 198,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 0.341,
    "peak_rss_mb": 95.3,
@@ -231,7 +231,7 @@
    "iterations": 2785,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 12.175,
    "peak_rss_mb": 142.6,
@@ -265,7 +265,7 @@
    "iterations": 4425,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 16.455,
    "peak_rss_mb": 157.4,
@@ -299,10 +299,10 @@
    "iterations": 5239,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": false,
    "converged": false,
-   "error": "vmecpp indata2json exited with status 5"
+   "error": "cpp_vmec indata2json exited with status 5"
   }
  },
  "nfp4_QH_warm_start[ns201]": {
@@ -331,7 +331,7 @@
    "iterations": 672,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 0.782,
    "peak_rss_mb": 83.2,
@@ -365,7 +365,7 @@
    "iterations": 617,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 1.055,
    "peak_rss_mb": 89.5,
@@ -399,7 +399,7 @@
    "iterations": 2829,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 45.688,
    "peak_rss_mb": 187.1,
@@ -433,7 +433,7 @@
    "iterations": 1518,
    "converged": true
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": true,
    "wall_s": 6.363,
    "peak_rss_mb": 178.8,
@@ -467,7 +467,7 @@
    "iterations": 10000,
    "converged": false
   },
-  "vmecpp": {
+  "cpp_vmec": {
    "ok": false,
    "error": "lasym unsupported"
   }
