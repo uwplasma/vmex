@@ -910,7 +910,7 @@ def _run_cold(ident: str, regime: str, cache_dir: Path) -> dict[str, Any]:
         # run one unrecorded cold child to fill it.
         _run_cold(ident, "cold", cache_dir)
     # JAX_COMPILATION_CACHE_DIR outranks VMEX_COMPILATION_CACHE_DIR, and
-    # ``import vmex`` exports it (``_configure_jax_environment``).  A parent
+    # ``import vmex`` exports it (``_configure_compatironment``).  A parent
     # that imported vmex would therefore hand the child its own default cache,
     # so "cold" would start warm and nothing would land in ``cache_dir``.  Set
     # the name that wins, and drop the one it would shadow.

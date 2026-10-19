@@ -139,7 +139,7 @@ def _gkx():
     the objective wrappers import ``gkx.objectives`` submodules directly,
     so a pre-rename ``spectraxgk`` install can never satisfy them.
     """
-    from .._jax_env import require_optional
+    from .._compat import require_optional
 
     require_optional("gkx", "the turbulence objectives")
     try:

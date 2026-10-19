@@ -218,7 +218,7 @@ def _gkx_warnings(emit):
 
 
 def _gkx():
-    from .._jax_env import require_optional
+    from .._compat import require_optional
 
     require_optional("gkx", "vmex --turbulence")
     import gkx

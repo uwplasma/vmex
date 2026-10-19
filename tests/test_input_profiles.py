@@ -629,3 +629,40 @@ def test_indexed_legacy_axis_overlays_vmec_axis() -> None:
     )
     np.testing.assert_array_equal(inp.raxis_c, [2.0, 0.25])
     np.testing.assert_array_equal(inp.zaxis_s, [0.0, -0.5])
+
+
+def test_iota_ignores_bloat_as_vmec2000_piota_does():
+    """``piota(x)`` in profile_functions.f evaluates at ``x``: no BLOAT, unlike pmass/pcurr."""
+    from vmex.core.profiles import iota
+
+    s = np.linspace(0.0, 1.0, 11)
+    np.testing.assert_array_equal(np.asarray(iota("power_series", [1.0, 0.5], [], [], s, bloat=0.5)),
+                                  1.0 + 0.5 * s)
+
+
+def test_bloat_needs_prescribed_current_as_in_vmec2000():
+    """initialize_vmec_arrays.f: ``bloat /= 1 .and. ncurr /= 1`` -> ier_flag 3."""
+    from vmex.core.errors import VmecInputError
+    from vmex.core.solver import prepare_runtime, resolution_from_input
+
+    inp = replace(VmecInput.from_file(Path(__file__).parents[1] / "examples" / "data" / "input.DSHAPE"), bloat=1.6)
+    with pytest.raises(VmecInputError, match="NCURR = 1"):
+        prepare_runtime(inp, resolution_from_input(inp))
+
+
+@pytest.mark.parametrize("ending", [
+    "\n/\n", "\n/", " /\n", " / ! end of INDATA\n", "\n&END\n", "\n $end\n",
+    " ! a comment with a / slash\n/\n",
+])
+def test_every_fortran_namelist_terminator_ends_indata(ending):
+    """A namelist ends at the first unquoted ``/`` (or legacy ``&END``/``$END``).
+
+    The slash may close a value line, and a comment may follow it; a ``/``
+    inside a comment or a quoted string does not end the group, and
+    ``&INDATA`` inside a comment does not open it.  The next
+    namelist must not be read into INDATA.
+    """
+    head = "! this &INDATA was written by a/b tools\n&INDATA\n MPOL = 2\n NFP = 3\n MGRID_FILE = 'path/to/mgrid.nc'\n AM = 1.0 2.0"
+    inp = VmecInput.from_indata_text(head + ending + "\n&BOOTIN\n NFP = 7\n/\n")
+    assert (inp.mpol, inp.nfp, inp.mgrid_file) == (2, 3, "path/to/mgrid.nc")
+    np.testing.assert_array_equal(np.asarray(inp.am)[:3], [1.0, 2.0, 0.0])

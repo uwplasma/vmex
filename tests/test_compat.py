@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`vmex._jax_env` (JAX environment + cache policy).
+"""Unit tests for :mod:`vmex._compat` (JAX environment + cache policy).
 
 Covers the machine-scoped compilation-cache policy (env-var precedence table
 in ``_default_compilation_cache_dir``), the cache wiring against a recording
@@ -10,13 +10,14 @@ Item I.8a dead-code prune — the core is JAX-only.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import types
 
 import pytest
 
-from vmex import _jax_env
+from vmex import _compat
 
 
 # ---------------------------------------------------------------------------
@@ -41,41 +42,41 @@ def test_cache_dir_env_precedence(clean_cache_env):
     mp = clean_cache_env
     # pin the host-dependent deserialize gate open so the precedence table
     # is exercised identically on every platform/jaxlib combination
-    mp.setattr(_jax_env, "_cache_deserialize_unsafe", lambda: False)
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
     # default on every backend now (R26c cold-start fix): CPU gets a
     # machine-scoped cache under ~/.cache with no env var required.
-    path = _jax_env._default_compilation_cache_dir()
+    path = _compat._default_compilation_cache_dir()
     assert path is not None and "vmex" in path and "jax_cache" in path
 
     # explicit JAX var wins verbatim; 'disabled' turns it off
-    fingerprint = _jax_env._cache_machine_fingerprint()
+    fingerprint = _compat._cache_machine_fingerprint()
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
-    assert _jax_env._default_compilation_cache_dir() == f"/tmp/jaxcache/{fingerprint}"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/jaxcache/{fingerprint}"
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "disabled")
-    assert _jax_env._default_compilation_cache_dir() is None
+    assert _compat._default_compilation_cache_dir() is None
     mp.delenv("JAX_COMPILATION_CACHE_DIR")
 
     # vmec-specific dir override
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmeccache")
-    assert _jax_env._default_compilation_cache_dir() == f"/tmp/vmeccache/{fingerprint}"
+    assert _compat._default_compilation_cache_dir() == f"/tmp/vmeccache/{fingerprint}"
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "no")
-    assert _jax_env._default_compilation_cache_dir() is None
+    assert _compat._default_compilation_cache_dir() is None
     mp.delenv("VMEX_COMPILATION_CACHE_DIR")
 
     # forced on CPU -> machine-scoped default under ~/.cache
     mp.setenv("VMEX_COMPILATION_CACHE", "1")
-    path = _jax_env._default_compilation_cache_dir()
+    path = _compat._default_compilation_cache_dir()
     assert path is not None and "vmex" in path and "jax_cache" in path
     mp.setenv("VMEX_COMPILATION_CACHE", "off")
-    assert _jax_env._default_compilation_cache_dir() is None
+    assert _compat._default_compilation_cache_dir() is None
     mp.delenv("VMEX_COMPILATION_CACHE")
 
     # accelerator request enables the default cache
     mp.setenv("JAX_PLATFORMS", "cuda,cpu")
-    assert _jax_env._default_compilation_cache_dir() is not None
+    assert _compat._default_compilation_cache_dir() is not None
     mp.delenv("JAX_PLATFORMS")
     mp.setenv("JAX_PLATFORM_NAME", "tpu")
-    assert _jax_env._default_compilation_cache_dir() is not None
+    assert _compat._default_compilation_cache_dir() is not None
 
 
 def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
@@ -86,49 +87,49 @@ def test_cache_default_off_when_deserialize_unsafe(clean_cache_env):
     cache path alone -- often exported by a cluster module -- is not that
     request."""
     mp = clean_cache_env
-    mp.setattr(_jax_env, "_cache_deserialize_unsafe", lambda: True)
-    assert _jax_env._default_compilation_cache_dir() is None
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: True)
+    assert _compat._default_compilation_cache_dir() is None
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmexcache")
-    assert _jax_env._default_compilation_cache_dir() is None
+    assert _compat._default_compilation_cache_dir() is None
 
     mp.setenv("VMEX_COMPILATION_CACHE", "1")
-    fingerprint = _jax_env._cache_machine_fingerprint()
-    assert _jax_env._default_compilation_cache_dir() == f"/tmp/vmexcache/{fingerprint}"
+    fingerprint = _compat._cache_machine_fingerprint()
+    assert _compat._default_compilation_cache_dir() == f"/tmp/vmexcache/{fingerprint}"
 
 
 def test_disabled_wins_over_every_cache_path(clean_cache_env):
     mp = clean_cache_env
-    mp.setattr(_jax_env, "_cache_deserialize_unsafe", lambda: False)
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", "/tmp/vmexcache")
     mp.setenv("VMEX_COMPILATION_CACHE", "disabled")
-    assert _jax_env._default_compilation_cache_dir() is None
+    assert _compat._default_compilation_cache_dir() is None
 
 
 def test_machine_scoped_never_nests_machines():
     """A path inherited from a job launched on another node (its last
     component another machine's fingerprint) is re-rooted, not nested."""
-    fingerprint = _jax_env._cache_machine_fingerprint()
+    fingerprint = _compat._cache_machine_fingerprint()
     other = "linux-x86_64-0123456789abcdef"
-    assert _jax_env._machine_scoped("/shared/c") == f"/shared/c/{fingerprint}"
-    assert _jax_env._machine_scoped(f"/shared/c/{fingerprint}") == f"/shared/c/{fingerprint}"
-    assert _jax_env._machine_scoped(f"/shared/c/{other}") == f"/shared/c/{fingerprint}"
+    assert _compat._machine_scoped("/shared/c") == f"/shared/c/{fingerprint}"
+    assert _compat._machine_scoped(f"/shared/c/{fingerprint}") == f"/shared/c/{fingerprint}"
+    assert _compat._machine_scoped(f"/shared/c/{other}") == f"/shared/c/{fingerprint}"
 
 
 def test_fingerprint_separates_hosts(monkeypatch):
     """Two cluster nodes never share a cache directory, whatever their
     /proc/cpuinfo says: XLA:CPU loads an entry built for other CPU features
     after only logging the mismatch."""
-    real = _jax_env._host_identity()
-    assert real and real == _jax_env._host_identity()
-    monkeypatch.setattr(_jax_env.platform, "system", lambda: "Darwin")
-    assert _jax_env._host_identity()        # hardware UUID, or the hostname
+    real = _compat._host_identity()
+    assert real and real == _compat._host_identity()
+    monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
+    assert _compat._host_identity()        # hardware UUID, or the hostname
     monkeypatch.undo()
-    monkeypatch.setattr(_jax_env, "_host_identity", lambda: "node001")
-    first = _jax_env._cache_machine_fingerprint()
-    monkeypatch.setattr(_jax_env, "_host_identity", lambda: "node002")
-    assert _jax_env._cache_machine_fingerprint() != first
+    monkeypatch.setattr(_compat, "_host_identity", lambda: "node001")
+    first = _compat._cache_machine_fingerprint()
+    monkeypatch.setattr(_compat, "_host_identity", lambda: "node002")
+    assert _compat._cache_machine_fingerprint() != first
 
 
 class _PolicyConfig:
@@ -149,50 +150,50 @@ def test_policy_overrides_jax_env_cache(clean_cache_env, tmp_path):
     that raw path per machine, switch it off when disabled, and be a no-op
     once applied (the solver re-applies it on import)."""
     mp = clean_cache_env
-    mp.setattr(_jax_env, "_cache_deserialize_unsafe", lambda: False)
-    mp.setattr(_jax_env, "_APPLIED", [None])
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    mp.setattr(_compat, "_APPLIED", [None])
     raw = str(tmp_path / "shared")
     mp.setenv("JAX_COMPILATION_CACHE_DIR", raw)
     fake = types.SimpleNamespace(config=_PolicyConfig(raw))
-    scoped = f"{raw}/{_jax_env._cache_machine_fingerprint()}"
-    assert _jax_env._apply_compilation_cache_policy(fake) == scoped
+    scoped = f"{raw}/{_compat._cache_machine_fingerprint()}"
+    assert _compat._apply_compilation_cache_policy(fake) == scoped
     assert fake.config.jax_compilation_cache_dir == scoped
     fake.config.updates.clear()
-    assert _jax_env._apply_compilation_cache_policy(fake) == scoped
+    assert _compat._apply_compilation_cache_policy(fake) == scoped
     assert fake.config.updates == []                      # idempotent
 
     mp.setenv("VMEX_COMPILATION_CACHE", "disabled")
-    assert _jax_env._apply_compilation_cache_policy(fake) is None
+    assert _compat._apply_compilation_cache_policy(fake) is None
     assert fake.config.jax_compilation_cache_dir is None
     assert fake.config.jax_enable_compilation_cache is False
 
     # jaxlib < 0.10 with only a path: JAX's own env-driven cache goes off
     mp.delenv("VMEX_COMPILATION_CACHE")
-    mp.setattr(_jax_env, "_cache_deserialize_unsafe", lambda: True)
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: True)
     fake = types.SimpleNamespace(config=_PolicyConfig(raw))
-    assert _jax_env._apply_compilation_cache_policy(fake) is None
+    assert _compat._apply_compilation_cache_policy(fake) is None
     assert fake.config.jax_enable_compilation_cache is False
 
 
 def test_unwritable_cache_dir_turns_the_cache_off(clean_cache_env, tmp_path):
     mp = clean_cache_env
-    mp.setattr(_jax_env, "_cache_deserialize_unsafe", lambda: False)
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
     (tmp_path / "file").write_text("")
     mp.setenv("VMEX_COMPILATION_CACHE_DIR", str(tmp_path / "file" / "cache"))
     fake = types.SimpleNamespace(config=_PolicyConfig(None))
-    assert _jax_env._apply_compilation_cache_policy(fake) is None
+    assert _compat._apply_compilation_cache_policy(fake) is None
     assert fake.config.jax_enable_compilation_cache is False
 
 
 def test_policy_leaves_a_programmatic_cache_dir_alone(clean_cache_env, tmp_path):
     """A directory the program set through jax.config is its own choice."""
     mp = clean_cache_env
-    mp.setattr(_jax_env, "_APPLIED", [None])
+    mp.setattr(_compat, "_APPLIED", [None])
     chosen = str(tmp_path / "mine")
     for flag in ("1", "disabled"):
         mp.setenv("VMEX_COMPILATION_CACHE", flag)
         fake = types.SimpleNamespace(config=_PolicyConfig(chosen))
-        assert _jax_env._apply_compilation_cache_policy(fake) == chosen
+        assert _compat._apply_compilation_cache_policy(fake) == chosen
         assert fake.config.updates == []
 
 
@@ -203,7 +204,7 @@ def test_solver_import_scopes_an_env_derived_cache(clean_cache_env, tmp_path):
     from vmex.core import solver
 
     mp = clean_cache_env
-    mp.setattr(_jax_env, "_cache_deserialize_unsafe", lambda: False)
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
     raw = str(tmp_path / "raw")
     mp.setenv("JAX_COMPILATION_CACHE_DIR", raw)
     before = (jax.config.jax_compilation_cache_dir,
@@ -212,32 +213,32 @@ def test_solver_import_scopes_an_env_derived_cache(clean_cache_env, tmp_path):
         jax.config.update("jax_compilation_cache_dir", raw)
         solver._harden_compilation_cache()
         assert jax.config.jax_compilation_cache_dir == (
-            f"{raw}/{_jax_env._cache_machine_fingerprint()}")
+            f"{raw}/{_compat._cache_machine_fingerprint()}")
     finally:
         jax.config.update("jax_compilation_cache_dir", before[0])
         jax.config.update("jax_enable_compilation_cache", before[1])
-        _jax_env._APPLIED[0] = before[0]
-        _jax_env._reset_jax_cache()
+        _compat._APPLIED[0] = before[0]
+        _compat._reset_jax_cache()
 
 
 def test_import_does_not_export_a_machine_cache_path(clean_cache_env):
     """A job launched from this process may run on another node."""
     import os
 
-    _jax_env._configure_jax_environment()
+    _compat._configure_jax_environment()
     assert "JAX_COMPILATION_CACHE_DIR" not in os.environ
 
 
 @pytest.mark.parametrize("system", ["Linux", "Darwin"])
 def test_cache_deserialize_unsafe_is_jaxlib_scoped_on_every_platform(
         monkeypatch, system):
-    monkeypatch.setattr(_jax_env.platform, "system", lambda: system)
-    monkeypatch.setattr(_jax_env, "_jaxlib_version_tuple", lambda: (0, 9, 2))
-    assert _jax_env._cache_deserialize_unsafe() is True   # affected jaxlib
-    monkeypatch.setattr(_jax_env, "_jaxlib_version_tuple", lambda: (0, 10, 0))
-    assert _jax_env._cache_deserialize_unsafe() is False  # fixed in 0.10
-    monkeypatch.setattr(_jax_env, "_jaxlib_version_tuple", lambda: None)
-    assert _jax_env._cache_deserialize_unsafe() is True   # unknown = unsafe
+    monkeypatch.setattr(_compat.platform, "system", lambda: system)
+    monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 9, 2))
+    assert _compat._cache_deserialize_unsafe() is True   # affected jaxlib
+    monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: (0, 10, 0))
+    assert _compat._cache_deserialize_unsafe() is False  # fixed in 0.10
+    monkeypatch.setattr(_compat, "_jaxlib_version_tuple", lambda: None)
+    assert _compat._cache_deserialize_unsafe() is True   # unknown = unsafe
 
 
 def test_jaxlib_version_tuple_parses_release_and_dev(monkeypatch):
@@ -247,7 +248,7 @@ def test_jaxlib_version_tuple_parses_release_and_dev(monkeypatch):
         recorded["package"] = package
         return fake_version.value  # type: ignore[attr-defined]
 
-    monkeypatch.setattr(_jax_env.importlib_metadata, "version", fake_version)
+    monkeypatch.setattr(_compat.importlib_metadata, "version", fake_version)
     monkeypatch.setitem(sys.modules, "jaxlib.version", None)  # metadata fallback
     for raw, expected in [
         ("0.9.2", (0, 9, 2)),
@@ -257,24 +258,24 @@ def test_jaxlib_version_tuple_parses_release_and_dev(monkeypatch):
         ("nightly", None),
     ]:
         fake_version.value = raw  # type: ignore[attr-defined]
-        assert _jax_env._jaxlib_version_tuple() == expected, raw
+        assert _compat._jaxlib_version_tuple() == expected, raw
     assert recorded["package"] == "jaxlib"
 
     def missing(package):
-        raise _jax_env.importlib_metadata.PackageNotFoundError(package)
+        raise _compat.importlib_metadata.PackageNotFoundError(package)
 
-    monkeypatch.setattr(_jax_env.importlib_metadata, "version", missing)
-    assert _jax_env._jaxlib_version_tuple() is None
+    monkeypatch.setattr(_compat.importlib_metadata, "version", missing)
+    assert _compat._jaxlib_version_tuple() is None
 
 
 def test_runtime_jaxlib_version_wins_over_metadata(monkeypatch):
     """A shadowed or stale install reports one version and imports another;
     the deserialize gate must judge the jaxlib that actually runs."""
     jaxlib_version = pytest.importorskip("jaxlib.version")
-    monkeypatch.setattr(_jax_env.importlib_metadata, "version", lambda _: "0.11.2")
+    monkeypatch.setattr(_compat.importlib_metadata, "version", lambda _: "0.11.2")
     monkeypatch.setattr(jaxlib_version, "__version__", "0.9.2")
-    assert _jax_env._jaxlib_version_tuple() == (0, 9, 2)
-    assert _jax_env._cache_deserialize_unsafe() is True
+    assert _compat._jaxlib_version_tuple() == (0, 9, 2)
+    assert _compat._cache_deserialize_unsafe() is True
 
 
 def test_map_pressure_releases_executables_once_per_headroom(monkeypatch, tmp_path):
@@ -286,78 +287,78 @@ def test_map_pressure_releases_executables_once_per_headroom(monkeypatch, tmp_pa
 
     limit = tmp_path / "max_map_count"
     limit.write_text("1000\n")
-    monkeypatch.setattr(_jax_env, "_MAP_LIMIT_FILE", str(limit))
-    monkeypatch.setattr(_jax_env, "_MAP_STATE", {"floor": 0, "warned": False})
+    monkeypatch.setattr(_compat, "_MAP_LIMIT_FILE", str(limit))
+    monkeypatch.setattr(_compat, "_MAP_STATE", {"floor": 0, "warned": False})
     counts = []
-    monkeypatch.setattr(_jax_env, "_map_count", lambda: counts.pop(0))
+    monkeypatch.setattr(_compat, "_map_count", lambda: counts.pop(0))
     cleared = []
     fake = types.SimpleNamespace(clear_caches=lambda: cleared.append(1))
 
     counts[:] = [400]
-    assert _jax_env._relieve_map_pressure(fake) is False          # below half
+    assert _compat._relieve_map_pressure(fake) is False          # below half
     counts[:] = [600, 300]                                       # before, after
     with pytest.warns(RuntimeWarning, match="max_map_count=1000"):
-        assert _jax_env._relieve_map_pressure(fake) is True
+        assert _compat._relieve_map_pressure(fake) is True
     counts[:] = [540]
-    assert _jax_env._relieve_map_pressure(fake) is False          # < 300 + 250
+    assert _compat._relieve_map_pressure(fake) is False          # < 300 + 250
     stop = threading.Event()
     prefetch = threading.Thread(target=stop.wait, name="vmex-lane-prefetch")
     prefetch.start()
     try:
         counts[:] = [900]
-        assert _jax_env._relieve_map_pressure(fake) is False      # compile in flight
+        assert _compat._relieve_map_pressure(fake) is False      # compile in flight
     finally:
         stop.set()
         prefetch.join()
     counts[:] = [900, 200]
     with warnings.catch_warnings():
         warnings.simplefilter("error")                           # warned once only
-        assert _jax_env._relieve_map_pressure(fake) is True
+        assert _compat._relieve_map_pressure(fake) is True
     assert len(cleared) == 2
 
-    monkeypatch.setattr(_jax_env, "_MAP_LIMIT_FILE", str(tmp_path / "absent"))
-    assert _jax_env._relieve_map_pressure(fake) is False          # not Linux
+    monkeypatch.setattr(_compat, "_MAP_LIMIT_FILE", str(tmp_path / "absent"))
+    assert _compat._relieve_map_pressure(fake) is False          # not Linux
 
 
 def test_map_count_reads_this_process_and_every_compile_checks_it(monkeypatch):
     """On Linux the guard runs after every XLA compilation, registered once."""
     import jax
 
-    monkeypatch.setattr(_jax_env, "_MAPS_FILE", "/no/such/maps")
-    assert _jax_env._map_count() is None
+    monkeypatch.setattr(_compat, "_MAPS_FILE", "/no/such/maps")
+    assert _compat._map_count() is None
     monkeypatch.undo()
-    count = _jax_env._map_count()
+    count = _compat._map_count()
     if not sys.platform.startswith("linux"):
         assert count is None
         return
     assert count > 10
     calls = []
-    monkeypatch.setattr(_jax_env, "_relieve_map_pressure", calls.append)
-    monkeypatch.setitem(_jax_env._MAP_STATE, "checked", -1.0)
-    _jax_env._configure_jax_environment()                     # idempotent
+    monkeypatch.setattr(_compat, "_relieve_map_pressure", calls.append)
+    monkeypatch.setitem(_compat._MAP_STATE, "checked", -1.0)
+    _compat._configure_jax_environment()                     # idempotent
     jax.jit(lambda x: x * 3.0 + 7.0).lower(1.0).compile()
     jax.jit(lambda x: x * 5.0 + 7.0).lower(1.0).compile()  # within the second
     assert len(calls) == 1
 
 
 def test_cache_machine_fingerprint_shape_and_stability():
-    fp = _jax_env._cache_machine_fingerprint()
+    fp = _compat._cache_machine_fingerprint()
     assert re.fullmatch(r"[a-z0-9_]+-[a-z0-9_]+-[0-9a-f]{16}", fp)
-    assert fp == _jax_env._cache_machine_fingerprint()
+    assert fp == _compat._cache_machine_fingerprint()
 
 
 def test_cache_machine_fingerprint_changes_with_jaxlib(monkeypatch):
-    real_version = _jax_env.importlib_metadata.version
+    real_version = _compat.importlib_metadata.version
     selected = {"jax": "0.9.2", "jaxlib": "0.9.2"}
 
     def version(name):
         return selected.get(name, real_version(name))
 
-    monkeypatch.setattr(_jax_env.importlib_metadata, "version", version)
-    old = _jax_env._cache_machine_fingerprint()
+    monkeypatch.setattr(_compat.importlib_metadata, "version", version)
+    old = _compat._cache_machine_fingerprint()
     selected["jax"] = "0.10.1"
     selected["jaxlib"] = "0.10.1"
-    new = _jax_env._cache_machine_fingerprint()
+    new = _compat._cache_machine_fingerprint()
     assert old != new
 
 
@@ -371,16 +372,16 @@ def test_cache_machine_fingerprint_tracks_runtime_jaxlib(monkeypatch):
     fingerprint must follow the runtime module, not the metadata.
     """
     jaxlib_version = pytest.importorskip("jaxlib.version")
-    real_version = _jax_env.importlib_metadata.version
+    real_version = _compat.importlib_metadata.version
 
     def stale(name):
         return "1.0.0" if name in ("jax", "jaxlib") else real_version(name)
 
-    monkeypatch.setattr(_jax_env.importlib_metadata, "version", stale)
+    monkeypatch.setattr(_compat.importlib_metadata, "version", stale)
     monkeypatch.setattr(jaxlib_version, "__version__", "0.11.1")
-    old = _jax_env._cache_machine_fingerprint()
+    old = _compat._cache_machine_fingerprint()
     monkeypatch.setattr(jaxlib_version, "__version__", "0.9.2")
-    new = _jax_env._cache_machine_fingerprint()
+    new = _compat._cache_machine_fingerprint()
     assert old != new
 
 
@@ -392,9 +393,9 @@ def test_jaxlib_backend_identity_tracks_native_extension(tmp_path, monkeypatch):
     ext = tmp_path / "_jax.so"
 
     ext.write_bytes(b"one" * 100)
-    first = _jax_env._jaxlib_backend_identity()
+    first = _compat._jaxlib_backend_identity()
     ext.write_bytes(b"two" * 100)
-    second = _jax_env._jaxlib_backend_identity()
+    second = _compat._jaxlib_backend_identity()
 
     assert any(part.startswith("jaxlib-runtime=") for part in first)
     assert any(part.startswith("jaxlib-ext=") for part in first)
@@ -406,11 +407,11 @@ def test_jaxlib_backend_identity_degrades_gracefully(monkeypatch):
     jaxlib = pytest.importorskip("jaxlib")
     # An unreadable package path drops only the extension digest.
     monkeypatch.setattr(jaxlib, "__file__", None)
-    parts = _jax_env._jaxlib_backend_identity()
+    parts = _compat._jaxlib_backend_identity()
     assert parts and all(part.startswith("jaxlib-runtime=") for part in parts)
     # An unimportable jaxlib.version yields no parts at all.
     monkeypatch.setitem(sys.modules, "jaxlib.version", None)
-    assert _jax_env._jaxlib_backend_identity() == []
+    assert _compat._jaxlib_backend_identity() == []
 
 
 class _FakeConfig:
@@ -435,7 +436,7 @@ def test_configure_compilation_cache_wiring(monkeypatch):
     monkeypatch.setenv("VMEX_EXPLAIN_CACHE_MISSES", "1")
     monkeypatch.setenv("VMEX_PERSISTENT_CACHE_XLA_CACHES", "all")
 
-    _jax_env._configure_compilation_cache(fake, "/tmp/cachedir")
+    _compat._configure_compilation_cache(fake, "/tmp/cachedir")
     ups = fake.config.updates
     assert ups["jax_enable_compilation_cache"] is True
     assert ups["jax_compilation_cache_dir"] == "/tmp/cachedir"
@@ -447,11 +448,11 @@ def test_configure_compilation_cache_wiring(monkeypatch):
 
     # cache_dir=None is a no-op; failing config keys are tolerated
     fake2 = types.SimpleNamespace(config=_FakeConfig())
-    _jax_env._configure_compilation_cache(fake2, None)
+    _compat._configure_compilation_cache(fake2, None)
     assert fake2.config.updates == {}
     fake3 = types.SimpleNamespace(
         config=_FakeConfig(fail_keys={"jax_enable_compilation_cache"}))
-    _jax_env._configure_compilation_cache(fake3, "/tmp/x")  # must not raise
+    _compat._configure_compilation_cache(fake3, "/tmp/x")  # must not raise
     assert fake3.config.updates["jax_compilation_cache_dir"] == "/tmp/x"
 
 
@@ -461,7 +462,7 @@ def test_compilation_cache_defaults_are_bounded_and_selective(monkeypatch):
     monkeypatch.delenv("VMEX_COMPILATION_CACHE_MAX_SIZE", raising=False)
     monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", raising=False)
     fake = types.SimpleNamespace(config=_FakeConfig())
-    _jax_env._configure_compilation_cache(fake, "/tmp/cachedir")
+    _compat._configure_compilation_cache(fake, "/tmp/cachedir")
     # Floor 0: storing the polish path's many sub-second programs halves the
     # CLI rerun (60.6 s -> 31.6 s measured); the eviction bound below keeps
     # the disk cost finite.
@@ -470,10 +471,10 @@ def test_compilation_cache_defaults_are_bounded_and_selective(monkeypatch):
     # but scales with the disk: the old fixed 1 GiB sat at its cap and evicted
     # the executables the next optimization stage asked for.
     bound = fake.config.updates["jax_compilation_cache_max_size"]
-    assert _jax_env._CACHE_SIZE_FLOOR <= bound <= _jax_env._CACHE_SIZE_CEILING
-    assert bound == _jax_env._default_cache_max_size("/tmp/cachedir")
-    assert _jax_env._default_cache_max_size("/no/such/path") == \
-        _jax_env._CACHE_SIZE_FLOOR
+    assert _compat._CACHE_SIZE_FLOOR <= bound <= _compat._CACHE_SIZE_CEILING
+    assert bound == _compat._default_cache_max_size("/tmp/cachedir")
+    assert _compat._default_cache_max_size("/no/such/path") == \
+        _compat._CACHE_SIZE_FLOOR
 
 
 def test_configure_compilation_cache_gpu_autotune_default(monkeypatch):
@@ -482,7 +483,7 @@ def test_configure_compilation_cache_gpu_autotune_default(monkeypatch):
     monkeypatch.setenv("JAX_PLATFORMS", "cuda")
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     fake = types.SimpleNamespace(config=_FakeConfig())
-    _jax_env._configure_compilation_cache(fake, "/tmp/cachedir")
+    _compat._configure_compilation_cache(fake, "/tmp/cachedir")
     assert (fake.config.updates["jax_persistent_cache_enable_xla_caches"]
             == "xla_gpu_per_fusion_autotune_cache_dir")
 
@@ -499,13 +500,9 @@ def test_configure_jax_environment_idempotent_and_respects_user_env(monkeypatch)
     monkeypatch.setenv("XLA_FLAGS", "--user_set_flag")
     monkeypatch.setenv("JAX_ENABLE_X64", "1")
     monkeypatch.setenv("TF_CPP_MIN_LOG_LEVEL", "0")
-    _jax_env._configure_jax_environment()  # must not raise (jax already imported)
+    _compat._configure_jax_environment()  # must not raise (jax already imported)
     assert os.environ["XLA_FLAGS"] == "--user_set_flag"       # setdefault only
     assert os.environ["TF_CPP_MIN_LOG_LEVEL"] == "0"          # user wins
-    # the x64 default survives (VMEC parity: float64 mandatory)
-    import jax
-
-    assert jax.config.read("jax_enable_x64") is True
 
 
 def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
@@ -517,25 +514,25 @@ def test_macos_cpu_codegen_split_default_respects_backend_and_user(monkeypatch):
     monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
     monkeypatch.delenv("JAX_PLATFORMS", raising=False)
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
-    monkeypatch.setattr(_jax_env.platform, "system", lambda: "Darwin")
-    _jax_env._configure_jax_environment()
+    monkeypatch.setattr(_compat.platform, "system", lambda: "Darwin")
+    _compat._configure_jax_environment()
     assert os.environ["XLA_FLAGS"] == ("--xla_gpu_graph_min_graph_size=1 "
                                        "--xla_cpu_parallel_codegen_split_count=128")
 
     monkeypatch.setenv("XLA_FLAGS", "--user_set_flag")
-    _jax_env._configure_jax_environment()
+    _compat._configure_jax_environment()
     assert os.environ["XLA_FLAGS"] == "--user_set_flag"
 
     monkeypatch.delenv("XLA_FLAGS")
     monkeypatch.setenv("VMEX_FAST_COMPILE", "1")
-    _jax_env._configure_jax_environment()
+    _compat._configure_jax_environment()
     assert "--xla_cpu_parallel_codegen_split_count=128" in os.environ["XLA_FLAGS"]
     assert "--xla_backend_optimization_level=1" in os.environ["XLA_FLAGS"]
 
     monkeypatch.delenv("XLA_FLAGS")
     monkeypatch.delenv("VMEX_FAST_COMPILE")
     monkeypatch.setenv("JAX_PLATFORMS", "cuda,cpu")
-    _jax_env._configure_jax_environment()
+    _compat._configure_jax_environment()
     assert os.environ["XLA_FLAGS"] == "--xla_gpu_graph_min_graph_size=1"
 
 
@@ -547,10 +544,10 @@ def test_machine_fingerprint_is_stable_and_platform_scoped(monkeypatch):
     them; drive both branches explicitly so a silent fingerprint
     collision between hosts cannot regress.
     """
-    from vmex import _jax_env
+    from vmex import _compat
 
-    fp1 = _jax_env._cache_machine_fingerprint()
-    fp2 = _jax_env._cache_machine_fingerprint()
+    fp1 = _compat._cache_machine_fingerprint()
+    fp2 = _compat._cache_machine_fingerprint()
     assert fp1 == fp2
     system = __import__("platform").system().lower()
     machine = __import__("platform").machine().lower()
@@ -566,14 +563,14 @@ def test_machine_fingerprint_is_stable_and_platform_scoped(monkeypatch):
         raise OSError("sysctl unavailable")
 
     monkeypatch.setattr(sp, "run", boom)
-    fp3 = _jax_env._cache_machine_fingerprint()
+    fp3 = _compat._cache_machine_fingerprint()
     assert fp3.startswith(f"{system}-{machine}-")
 
 
 def test_configure_compilation_cache_applies_and_survives_failures(monkeypatch):
     """Every cache knob is applied to a healthy config and every failing
     knob is swallowed (the import path must never break over tuning)."""
-    from vmex import _jax_env
+    from vmex import _compat
 
     class Config:
         def __init__(self, fail_keys=()):
@@ -591,13 +588,13 @@ def test_configure_compilation_cache_applies_and_survives_failures(monkeypatch):
 
     # None cache dir: nothing applied.
     jx = Jax()
-    _jax_env._configure_compilation_cache(jx, None)
+    _compat._configure_compilation_cache(jx, None)
     assert jx.updates == {} if hasattr(jx, "updates") else True
     assert jx.config.updates == {}
 
     # Healthy path applies the core knobs.
     jx = Jax()
-    _jax_env._configure_compilation_cache(jx, "/tmp/vmex-cache-test")
+    _compat._configure_compilation_cache(jx, "/tmp/vmex-cache-test")
     ups = jx.config.updates
     assert ups.get("jax_enable_compilation_cache") is True
     assert ups.get("jax_compilation_cache_dir") == "/tmp/vmex-cache-test"
@@ -609,7 +606,7 @@ def test_configure_compilation_cache_applies_and_survives_failures(monkeypatch):
     monkeypatch.setenv("VMEX_EXPLAIN_CACHE_MISSES", "1")
     monkeypatch.setenv("VMEX_PERSISTENT_CACHE_XLA_CACHES", "all")
     jx = Jax()
-    _jax_env._configure_compilation_cache(jx, "/tmp/vmex-cache-test")
+    _compat._configure_compilation_cache(jx, "/tmp/vmex-cache-test")
     ups = jx.config.updates
     assert ups.get("jax_compilation_cache_max_size") == 123456
     assert ups.get("jax_explain_cache_misses") is True
@@ -623,7 +620,7 @@ def test_configure_compilation_cache_applies_and_survives_failures(monkeypatch):
         "jax_persistent_cache_enable_xla_caches",
         "jax_compilation_cache_max_size", "jax_explain_cache_misses",
     })
-    _jax_env._configure_compilation_cache(jx, "/tmp/vmex-cache-test")
+    _compat._configure_compilation_cache(jx, "/tmp/vmex-cache-test")
     assert jx.config.updates == {}
 
 
@@ -641,14 +638,14 @@ def _seed_cache(path, count):
 
 def test_prune_cache_entries_keeps_the_most_recently_used(tmp_path):
     _seed_cache(tmp_path, 50)
-    assert _jax_env._prune_cache_entries(str(tmp_path), 10) == 40
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 40
     kept = sorted(int(p.name[1:-6]) for p in tmp_path.glob("*-cache"))
     assert kept == list(range(40, 50))
     # the atime sidecars go with their entries, so the directory does not
     # accumulate orphans that the next scan would still have to stat
     assert len(list(tmp_path.glob("*-atime"))) == 10
     # already inside the bound: no work, no deletions
-    assert _jax_env._prune_cache_entries(str(tmp_path), 10) == 0
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 0
 
 
 def test_prune_cache_entries_keeps_recent_entries_up_to_four_times_the_cap(tmp_path):
@@ -660,42 +657,42 @@ def test_prune_cache_entries_keeps_recent_entries_up_to_four_times_the_cap(tmp_p
     for i in range(25):
         (tmp_path / f"r{i}-cache").write_bytes(b"x")
         (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
-    assert _jax_env._prune_cache_entries(str(tmp_path), 10) == 30
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 30
     assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(25))
 
     # a workload's recent entries are still bounded, at four times the cap
     for i in range(25, 50):
         (tmp_path / f"r{i}-cache").write_bytes(b"x")
         (tmp_path / f"r{i}-atime").write_bytes((now - i * 1_000_000_000).to_bytes(8, "little"))
-    assert _jax_env._prune_cache_entries(str(tmp_path), 10) == 10
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 10
     assert sorted(p.name for p in tmp_path.glob("*-cache")) == sorted(f"r{i}-cache" for i in range(40))
 
 
 def test_prune_cache_entries_survives_a_hostile_directory(tmp_path):
     _seed_cache(tmp_path, 5)
     (tmp_path / "k2-atime").unlink()  # entry with no atime sidecar
-    assert _jax_env._prune_cache_entries(str(tmp_path), 2) == 3
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 3
     assert len(list(tmp_path.glob("*-cache"))) == 2
     # a missing directory is not an error: the cache may not exist yet
-    assert _jax_env._prune_cache_entries(str(tmp_path / "absent"), 1) == 0
+    assert _compat._prune_cache_entries(str(tmp_path / "absent"), 1) == 0
 
 
 def test_configure_compilation_cache_bounds_resident_entries(tmp_path, monkeypatch):
     monkeypatch.delenv("VMEX_CACHE_MAX_ENTRIES", raising=False)
     monkeypatch.delenv("VMEC_JAX_CACHE_MAX_ENTRIES", raising=False)
-    _seed_cache(tmp_path, _jax_env._CACHE_MAX_ENTRIES + 7)
+    _seed_cache(tmp_path, _compat._CACHE_MAX_ENTRIES + 7)
     fake = types.SimpleNamespace(config=_FakeConfig())
-    _jax_env._configure_compilation_cache(fake, str(tmp_path))
-    assert len(list(tmp_path.glob("*-cache"))) == _jax_env._CACHE_MAX_ENTRIES
+    _compat._configure_compilation_cache(fake, str(tmp_path))
+    assert len(list(tmp_path.glob("*-cache"))) == _compat._CACHE_MAX_ENTRIES
 
     # the bound is tunable, and 0 turns it off
     monkeypatch.setenv("VMEX_CACHE_MAX_ENTRIES", "3")
-    _jax_env._configure_compilation_cache(fake, str(tmp_path))
+    _compat._configure_compilation_cache(fake, str(tmp_path))
     assert len(list(tmp_path.glob("*-cache"))) == 3
     monkeypatch.setenv("VMEX_CACHE_MAX_ENTRIES", "0")
     _seed_cache(tmp_path, 20)
     before = len(list(tmp_path.glob("*-cache")))
-    _jax_env._configure_compilation_cache(fake, str(tmp_path))
+    _compat._configure_compilation_cache(fake, str(tmp_path))
     assert len(list(tmp_path.glob("*-cache"))) == before
 
 
@@ -714,7 +711,7 @@ def test_prune_cache_entries_gives_up_quietly_on_every_failure(tmp_path, monkeyp
 
     # an unreadable directory (glob itself fails) is not an error
     monkeypatch.setattr(pathlib.Path, "glob", lambda self, pattern: (_ for _ in ()).throw(OSError("unreadable")))
-    assert _jax_env._prune_cache_entries(str(tmp_path), 2) == 0
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 0
     monkeypatch.undo()
 
     # a lock held elsewhere means someone else is pruning: leave it to them
@@ -722,7 +719,7 @@ def test_prune_cache_entries_gives_up_quietly_on_every_failure(tmp_path, monkeyp
         raise filelock.Timeout(str(self.lock_file))
 
     monkeypatch.setattr(filelock.FileLock, "acquire", _busy)
-    assert _jax_env._prune_cache_entries(str(tmp_path), 2) == 0
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 0
     assert len(list(tmp_path.glob("*-cache"))) == 6
     monkeypatch.undo()
 
@@ -737,7 +734,7 @@ def test_prune_cache_entries_gives_up_quietly_on_every_failure(tmp_path, monkeyp
         return real_unlink(self, *args, **kwargs)
 
     monkeypatch.setattr(pathlib.Path, "unlink", _stubborn)
-    removed = _jax_env._prune_cache_entries(str(tmp_path), 2)
+    removed = _compat._prune_cache_entries(str(tmp_path), 2)
     monkeypatch.undo()
     assert removed == 3
     assert (tmp_path / "k1-cache").exists()
@@ -748,7 +745,7 @@ def test_configure_compilation_cache_ignores_an_unparseable_entry_bound(tmp_path
     monkeypatch.setenv("VMEX_CACHE_MAX_ENTRIES", "many")
     _seed_cache(tmp_path, 4)
     fake = types.SimpleNamespace(config=_FakeConfig())
-    _jax_env._configure_compilation_cache(fake, str(tmp_path))
+    _compat._configure_compilation_cache(fake, str(tmp_path))
     # the bound is skipped, the rest of the configuration still lands
     assert len(list(tmp_path.glob("*-cache"))) == 4
     assert fake.config.updates["jax_compilation_cache_dir"] == str(tmp_path)
@@ -765,25 +762,25 @@ def test_explicit_cache_dir_is_split_by_machine(clean_cache_env):
     """
     mp = clean_cache_env
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/shared/jax")
-    mp.setattr(_jax_env, "_cache_machine_fingerprint", lambda: "linux-x86_64-aaaa")
-    first = _jax_env._default_compilation_cache_dir()
-    mp.setattr(_jax_env, "_cache_machine_fingerprint", lambda: "linux-x86_64-bbbb")
-    second = _jax_env._default_compilation_cache_dir()
+    mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-aaaa")
+    first = _compat._default_compilation_cache_dir()
+    mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-bbbb")
+    second = _compat._default_compilation_cache_dir()
     assert first == "/shared/jax/linux-x86_64-aaaa"
     assert second == "/shared/jax/linux-x86_64-bbbb"
 
 
 def test_machine_scoping_is_idempotent(tmp_path):
-    fingerprint = _jax_env._cache_machine_fingerprint()
-    once = _jax_env._machine_scoped(str(tmp_path))
+    fingerprint = _compat._cache_machine_fingerprint()
+    once = _compat._machine_scoped(str(tmp_path))
     assert once == str(tmp_path / fingerprint)
-    assert _jax_env._machine_scoped(once) == once
+    assert _compat._machine_scoped(once) == once
 
 
 def _import_cache_dir(env):
     import subprocess
 
-    code = "import jax, vmex; print(jax.config.jax_compilation_cache_dir)"
+    code = "import jax, vmex.core; print(jax.config.jax_compilation_cache_dir)"
     result = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True
     )
@@ -800,7 +797,7 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
         if "COMPILATION_CACHE" not in key and not key.startswith("VMEX_")
     }
     env["HOME"] = str(tmp_path)
-    fingerprint = _jax_env._cache_machine_fingerprint()
+    fingerprint = _compat._cache_machine_fingerprint()
     expected = tmp_path / ".cache" / "vmex" / "jax_cache" / fingerprint
     assert pathlib.Path(_import_cache_dir(env)) == expected
     explicit = tmp_path / "explicit"
@@ -820,7 +817,8 @@ def test_jax_precision_environment_uses_jax_boolean_spellings(monkeypatch, value
     previous = jax.config.x64_enabled
     try:
         monkeypatch.setenv("JAX_ENABLE_X64", value)
-        _jax_env._configure_jax_environment()
+        monkeypatch.setattr(_compat, "_CONFIGURED", {})
+        _compat.ensure_configured()
         assert jax.config.x64_enabled is enabled
     finally:
         jax.config.update("jax_enable_x64", previous)
@@ -834,9 +832,9 @@ def test_jax_precision_keeps_existing_runtime_without_env(monkeypatch, enabled):
     try:
         jax.config.update("jax_enable_x64", enabled)
         monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
-        _jax_env._configure_jax_environment()
+        _compat._configure_jax_environment()
         assert jax.config.x64_enabled is enabled
-        assert "JAX_ENABLE_X64" not in _jax_env.os.environ
+        assert "JAX_ENABLE_X64" not in _compat.os.environ
     finally:
         jax.config.update("jax_enable_x64", previous)
 
@@ -848,7 +846,7 @@ def test_invalid_precision_override_does_not_demote_runtime(monkeypatch):
     try:
         jax.config.update("jax_enable_x64", True)
         monkeypatch.setenv("JAX_ENABLE_X64", "invalid")
-        _jax_env._configure_jax_environment()
+        _compat._configure_jax_environment()
         assert jax.config.x64_enabled
     finally:
         jax.config.update("jax_enable_x64", previous)
@@ -859,21 +857,33 @@ def test_fresh_jax_import_defaults_to_float64(monkeypatch):
 
     monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
     subprocess.run([sys.executable, "-c",
-                    "import vmex, jax; assert jax.config.x64_enabled"], check=True)
+                    "import vmex.core, jax; assert jax.config.x64_enabled"], check=True)
 
 
-def test_fresh_jax_environment_default_in_process(monkeypatch):
-    import jax
+def _fresh(code: str, **env: str) -> str:
+    import subprocess
+    import sys
 
-    previous = jax.config.x64_enabled
-    startup = types.SimpleNamespace(**vars(sys))
-    startup.modules = {name:module for name,module in sys.modules.items() if name != "jax"}
-    monkeypatch.setattr(_jax_env, "sys", startup)
-    monkeypatch.delenv("JAX_ENABLE_X64", raising=False)
-    try:
-        jax.config.update("jax_enable_x64", False)
-        _jax_env._configure_jax_environment()
-        assert _jax_env.os.environ["JAX_ENABLE_X64"] == "1"
-        assert jax.config.x64_enabled
-    finally:
-        jax.config.update("jax_enable_x64", previous)
+    environ = {k: v for k, v in os.environ.items() if k not in ("JAX_ENABLE_X64",)}
+    environ.update(env)
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          env=environ, check=True).stdout.strip()
+
+
+def test_import_vmex_leaves_jax_config_alone():
+    """``import vmex`` changes no ``jax.config`` setting; using the core applies them."""
+    probe = ("import jax; before = (jax.config.jax_enable_x64, jax.config.jax_logging_level, "
+             "jax.config.jax_compilation_cache_dir); import vmex; "
+             "after = (jax.config.jax_enable_x64, jax.config.jax_logging_level, "
+             "jax.config.jax_compilation_cache_dir); print(before == after, after[0]); "
+             "import vmex.core.solver; print(jax.config.jax_enable_x64)")
+    assert _fresh(probe).splitlines() == ["True False", "True"]
+
+
+def test_explicit_float32_choice_is_respected_and_refused_by_the_solver():
+    probe = ("import vmex, jax; vmex.configure(x64=False); import vmex.core.solver as s\n"
+             "print(jax.config.jax_enable_x64)\n"
+             "try:\n    s.prepare_runtime(None)\nexcept RuntimeError as e:\n    print('float64' in str(e))")
+    assert _fresh(probe).splitlines() == ["False", "True"]
+    assert _fresh("import jax, vmex.core.solver; print(jax.config.jax_enable_x64)",
+                  JAX_ENABLE_X64="0") == "False"

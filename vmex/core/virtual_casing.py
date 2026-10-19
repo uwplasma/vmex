@@ -119,7 +119,7 @@ __all__ = [
 
 def _require_vcj() -> None:
     if _HAVE_VCJ:
-        from .._jax_env import require_optional
+        from .._compat import require_optional
 
         require_optional("virtual-casing-jax", "the virtual-casing exterior field")
     if not _HAVE_VCJ:  # pragma: no cover - dependency-guard branch
