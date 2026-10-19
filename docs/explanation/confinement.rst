@@ -364,8 +364,8 @@ final stage lengthens the field-line trace and increases the number of
 field-line labels, preventing a short trace from aliasing a visibly
 non-omnigenous result.
 The final ``plot_wout(..., j_pitch=pitch)`` call passes that same pitch to the
-polar :math:`J(\alpha,s)` panel, making it a direct visual certificate of the
-optimized trapped-particle population.
+polar :math:`J(\alpha,s)` panel, providing a visual diagnostic of :math:`J`
+on the sampled pitch, surfaces, and field-line labels.
 
 .. _confinement-qi-fidelity:
 
