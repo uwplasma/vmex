@@ -309,7 +309,7 @@ def test_alias_lasym_gcon_matches_index_map_reference(shape):
 # ``IF (lasym) tcon = p5*tcon`` in ``bcovar.f``.  Upstream retired BOTH
 # together (STELLOPT v6.5.0-42-g9177f58c and PARVMEC master: ``dnorm =
 # 1/(nzeta*(ntheta2-1))`` unconditionally, the ``tcon`` halving commented
-# out); VMEC++ 0.5.3 implements the same pair-free convention.  VMEX follows
+# out); C++ VMEC 0.5.3 implements the same pair-free convention.  VMEX follows
 # the retired-pair convention, so both the analysis weight and ``tcon`` are
 # LASYM-independent and the two tests below pin that as an exact symmetric
 # limit.  Reinstating either factor alone breaks these by exactly 2x.  See

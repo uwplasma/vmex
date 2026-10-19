@@ -152,7 +152,7 @@ proxy :math:`w = \mathrm{ns} \times \mathrm{mnmax} \times \mathrm{nznt}`
 :data:`~vmex.core.device.GPU_MAX_SPECTRAL_MODES` (``512``) modes, and GPU in
 between. That rule was calibrated on the July 2026 record
 ``benchmarks/gpu_baseline.json``. The later re-measurement on two RTX A4000
-GPUs (``benchmarks/gpu_a4000_2026-09-16.json``, VMEX 0.9.1) found no deck or
+GPUs (VMEX 0.9.1, 2026-09-16) found no deck or
 problem size where the GPU was faster, so the thresholds do not transfer
 between machines; measure on your own hardware (:doc:`/howto/run-on-gpu`).
 
