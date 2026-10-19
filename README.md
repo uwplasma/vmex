@@ -238,6 +238,36 @@ compilation included.
 
 ![vmex --neoclassical: monoenergetic D11, D31, D33, |B|, ambipolar Er, bootstrap current from DKX, Redl and the equilibrium, particle and heat fluxes](docs/_static/figures/readme_neoclassical_output.webp)
 
+## Ballooning stability
+
+The infinite-n ideal ballooning mode ([Dewar and Glasser 1983](https://doi.org/10.1063/1.864113),
+[Gaur et al. 2023](https://arxiv.org/abs/2302.07673)) is the eigenproblem along a field line,
+
+$$\frac{d}{d\eta}\Big(g\,\frac{dX}{d\eta}\Big) + c\,X = \lambda\,f\,X,\qquad X(\pm\eta_b)=0,$$
+
+with line bending `g`, pressure and curvature drive `c` and inertia `f > 0`. A line is unstable
+when its largest eigenvalue `λ = (γ a_N/v_A)²` is positive. VMEX discretizes it with finite
+differences, takes the largest eigenvalue of the resulting tridiagonal matrix with a Richardson
+step in the grid spacing, and differentiates it with Hellmann–Feynman, `dλ = vᵀ dA v`, so
+`ballooning_residual` works as an implicit least-squares target.
+
+![Ballooning eigenvalue map, comparison with COBRAVMEC and field-line convergence for the finite-beta QA seed](docs/_static/figures/readme_ballooning.webp)
+
+Finite-beta QA seed (`input.nfp2_QA_finite_beta`, ns = 71)
+([script](docs/_static/figures/sources/make_ballooning_figure.py), about 3 minutes on a laptop):
+
+- **COBRAVMEC parity:** with COBRA's three-point radial stencil, four lines agree within 1.7%
+  (`tests/test_stability.py`). The default five-point stencil reads 2–6% higher and is closer to
+  the converged value.
+- **Field-line grid:** the Richardson step from 128 points per poloidal turn is within 0.05% of
+  the converged eigenvalue; the plain three-point result is 1% low.
+- **Radial grid:** the maximum over 16 field lines and 9 ballooning parameters agrees within 5%
+  between ns = 41 and 101, while `λ(s)` on one line is rough and changes sign twice between
+  s = 0.80 and 0.83.
+
+Details and the optimization recipe: [stability theory](docs/explanation/confinement.rst) and
+[objectives](docs/reference/objectives.rst).
+
 ## Differentiate and optimize
 
 Compute a boundary/profile derivative without differentiating through every forward iteration:
@@ -326,25 +356,23 @@ The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2
 
 ## Against exact equilibria
 
-Convergence studies and code-to-code comparisons cannot see an error that every resolution, or
-every VMEC-type code, shares. [Landreman (2026)](https://arxiv.org/abs/2609.26742) found 3-D MHD
-equilibria with finite pressure and nested surfaces in closed form, and
+Resolution studies and code comparisons cannot see an error that every resolution or every
+VMEC-type code shares. [Landreman (2026)](https://arxiv.org/abs/2609.26742) found closed-form 3-D
+equilibria with finite pressure and nested surfaces, and
 [Issan et al. (2026)](https://arxiv.org/abs/2610.07304) broke their stellarator symmetry with one
-parameter `tau` (`tau` and `-tau` are mirror images). [vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical) scores
-VMEX, VMEC2000 and DESC against them point by point, including at the axis.
+parameter `tau`. [vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical)
+scores VMEX, VMEC2000 and DESC against them.
 
 ![Exact boundaries, and VMEX current and flux-surface errors against the exact solution](docs/_static/figures/readme_exact_equilibria.webp)
 
-- The exact solutions found two VMEX defects that resolution studies missed, both fixed: the field
-  at the axis (#452) and refinement before derivatives (#453).
-- At mid-radius VMEX's continuous field gives the current 23-450 times more accurately than the
-  WOUT file (middle panel), symmetric or not; B is right to 1e-5.
-- Without stellarator symmetry the full-basis path adds no error: the `tau = 0` equilibrium solved in
-  the full basis is the symmetric one to every digit, and mirror pairs agree to 1e-9. The Boozer
-  transform, effective ripple and virtual casing were checked against the exact fields as well.
-- With `tau != 0` the `iota = 2` family is degenerate: VMEX converges to a neighbouring equilibrium
-  that differs only in harmonics resonant with `iota = 2`, by 8e-4 at every resolution (right panel).
-  The sheared families converge in DESC but not in any VMEC-type code. Details are in the
+- The exact solutions exposed two VMEX defects that resolution studies missed, both fixed: the
+  field at the axis (#452) and refinement before derivatives (#453).
+- At mid-radius the continuous field gives the current 23–450 times more accurately than the
+  WOUT file; B is right to 1e-5.
+- Without stellarator symmetry the full basis adds no error: `tau = 0` reproduces the symmetric
+  solution to every digit, and mirror pairs agree to 1e-9.
+- With `tau != 0` the `iota = 2` family is degenerate: VMEX converges to a neighbouring
+  equilibrium that differs by 8e-4 at every resolution. See the
   [validation record](docs/explanation/validation.md#exact-equilibria).
 
 ## What you can build
@@ -499,45 +527,52 @@ trace.wall_hits, trace.wall_positions, trace.returns
 The equations, the exterior-field options, the interpolation error and the outputs are in the
 [wall-tracing guide](https://vmex.readthedocs.io/en/latest/howto/trace-to-the-wall.html).
 
-## Accuracy and optional polishing
+## Force-balance polishing
 
-A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged; it does not bound the continuous
-force error `J × B − ∇p`. Optional polishing (`--polish`, or `polish=True`) re-solves that force on
-a native quintic-spline representation — constrained Gauss–Newton steps with force-driven knot
-insertion, then one exact-Hessian Newton step — and certifies it with an independent oracle. To
-request it from a deck, put this line at the top of the INDATA file (VMEC2000 reads it as a
-comment; VMEX runs the native polish after the solve):
+A small VMEC `FSQR/FSQZ/FSQL` means the discrete solve converged, not that the continuous force
+`J × B − ∇p` is small. Polishing (`polish=True` or `--polish`) re-solves that force on a quintic
+spline and, for the axisymmetric case, certifies it with an independent oracle. To request it
+from a deck, add one comment line at the top of the INDATA file (VMEC2000 ignores it):
 
 ```fortran
 ! VMEX: POLISH_FORCE_BALANCE = .TRUE.
 ```
 
-It currently applies to axisymmetric fixed-boundary decks with prescribed pressure and iota
-(`NCURR = 0`, `GAMMA = 0`, `LASYM = F`); any other deck with the directive stops with an input
-error. Non-axisymmetric polishing is a research lane.
+**Tokamak** (certified; `NCURR = 0`, `GAMMA = 0`, `LASYM = F`). `python examples/force_balance_polishing.py`
+takes about a minute.
 
 ![Force error of a shaped finite-pressure tokamak before and after polishing](docs/_static/figures/readme_polish_before_after.webp)
 
-`python examples/force_balance_polishing.py` (about a minute with a warm compilation cache) polishes
-`input.shaped_tokamak_pressure` to an RMS force of 7e-6 of `volavgB²/(μ₀ Aminor_p)` with projected
-stationarity 1e-10. Read back from WOUT files on the same 370-surface mesh, the RMS force falls from
-2.0e5 to 42 N m⁻³ over the volume, from 9.8e5 to 190 near the axis (`ρ < 0.2`) and from 3.2e3 to 23
-at the edge; the written file reproduces the native certificate.
-`eps_F` is bounded above by 2 by construction and saturates in vacuum; read the dimensional metrics with it.
+- RMS force over the volume falls from 2.0e5 to 42 N m⁻³, near the axis from 9.8e5 to 190, at the
+  edge from 3.2e3 to 23.
+- Projected stationarity is 1e-10, and the written WOUT reproduces the native certificate.
+- `eps_F` is bounded above by 2 by construction and saturates in vacuum; read the dimensional
+  metrics with it.
 
-![vmex --plot of the unpolished and polished WOUT files](docs/_static/figures/readme_polish_plot.webp)
+**Stellarator** (finite-beta QA, prescribed toroidal current, no certificate yet).
+`python examples/prescribed_current_polishing.py` takes 46 s on a laptop (9 s for the solve, 16 s
+for the polish).
 
-The same two files through `vmex --plot`: the summary's `⟨|F|⟩/⟨|∇(B²/2μ₀)|⟩` falls from 3.9e-4 to
-7.7e-6. See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
+![Force over pressure gradient of the finite-beta QA stellarator before and after polishing](docs/_static/figures/readme_polish_stellarator.webp)
+
+- The RMS force relative to the pressure gradient falls 12× near the axis, 9× in the bulk and
+  20× at the edge on a held-out grid.
+- L-BFGS stops at |grad| = 4.6e-4 after 150 iterations: a forward result, not a converged one.
+
+See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 and the [validation record](docs/explanation/validation.md).
 
-`python examples/vmex_mrx_comparison.py` relaxes the 2.5 % beta QA deck with
-[MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces, starting from the
-VMEX ns = 65 field (about 4 minutes, `pip install mrx`). Traced iota, the enclosed current and the
-pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.176, 0.166 at
-ρ = 0.1 for ns = 65, 129, 257, against 0.166 from DESC).
+## Comparison with MRX
+
+`python examples/vmex_mrx_comparison.py` (about 4 minutes, `pip install mrx`) relaxes the 2.5 %
+beta QA deck with [MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces,
+starting from the VMEX ns = 65 field.
 
 ![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
+
+- Traced iota, enclosed current and pressure agree with VMEX.
+- Near the axis VMEX iota still moves with ns: 0.188, 0.176, 0.166 at ρ = 0.1 for ns = 65, 129,
+  257, against 0.166 from DESC.
 
 ## Performance and parallel execution
 

@@ -311,7 +311,7 @@
       "reproducible": "command",
       "bytes_verified": false,
       "used_in": [
-        "README.md"
+        "docs/explanation/high-order-force-balance.rst"
       ],
       "note": "vmex --plot summaries of the unpolished and polished WOUT files side by side; the force panel is the WOUT finite-difference reconstruction. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged. The committed bytes are a 1600 px wide lossy WebP (q80) re-encode of the generated image."
     },
@@ -691,6 +691,44 @@
         "README.md"
       ],
       "note": "Plots the committed record, which is taken from the exact-equilibrium benchmark (rogeriojorge/vmex-benchmark-analytical, commit in the record): exact boundaries, and the J and flux-label errors of VMEX seeded from the exact geometry (ftol 1e-11). Rebuilding the record itself needs that repository. 64-color lossless WebP; rerunning the command reproduces these bytes."
+    },
+    {
+      "path": "docs/_static/figures/readme_ballooning.webp",
+      "bytes": 23592,
+      "sha256": "162a01b88294269d69d03f8e4e508b24ccf747c5cb3eee7f18abc9ad771c88d7",
+      "generator": "docs/_static/figures/sources/make_ballooning_figure.py",
+      "command": "python docs/_static/figures/sources/make_ballooning_figure.py",
+      "inputs": [
+        "examples/data/input.nfp2_QA_finite_beta"
+      ],
+      "record": null,
+      "generated": "2026-10-19",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Finite-beta QA seed at ns = 71: lambda(s, alpha) at zeta0 = 0, the alpha = 0 line against the COBRAVMEC values frozen in tests/test_stability.py, and eigenvalue error against field-line resolution with and without the Richardson step. 256-color lossless WebP; rerunning the command reproduces these bytes."
+    },
+    {
+      "path": "docs/_static/figures/readme_polish_stellarator.webp",
+      "bytes": 8254,
+      "sha256": "02382ccc3853933a206a97b1b57e6c1156907bd46e85f7a6250bd3bc50e4cc8a",
+      "generator": "examples/prescribed_current_polishing.py",
+      "command": "python examples/prescribed_current_polishing.py",
+      "inputs": [
+        "examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap"
+      ],
+      "record": null,
+      "generated": "2026-10-19",
+      "hardware": "Apple M3 Max (arm64), macOS, CPU",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "RMS force over RMS pressure gradient by region on a held-out grid, before and after the prescribed-current polish of the finite-beta QA (laptop defaults: mpol 5, ntor 4, ns 51, 150 L-BFGS iterations). Lossless WebP; rerunning the command reproduces these bytes."
     }
   ]
 }

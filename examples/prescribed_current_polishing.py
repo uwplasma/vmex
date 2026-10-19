@@ -32,6 +32,9 @@ from vmex.core.strong_force import lift_high_order_state
 
 INPUT_FILE = Path(__file__).parent / "data" / "input.LandremanPaul2021_QA_beta0p5_bootstrap"
 OUTPUT_DIR = Path("output_prescribed_current_polishing")
+FIGURES = Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
+if os.environ.get("VMEX_EXAMPLES_CI") == "1":
+    FIGURES = OUTPUT_DIR
 # Laptop defaults.  The research settings are
 #   MPOL, NTOR, NTHETA, NZETA = 9, 6, 80, 32
 #   NS, SPANS, STEPS = 241, 8, 3000
@@ -106,6 +109,6 @@ axis.set_yscale("log")
 axis.set_xticks(x, [f"{name}\n$s\\in[{lo},{hi}]$" for name, lo, hi in regions])
 axis.set_ylabel(r"RMS $|\mathbf{J}\times\mathbf{B}-\nabla p|$ / RMS $|\nabla p|$")
 axis.legend(frameon=False)
-figure_path = OUTPUT_DIR / "prescribed_current_polishing.png"
-figure.savefig(figure_path, dpi=150)
+figure_path = FIGURES / ("prescribed_current_polishing.webp" if FIGURES == OUTPUT_DIR else "readme_polish_stellarator.webp")
+figure.savefig(figure_path, dpi=150, pil_kwargs={"lossless": True})
 print(f"Wrote {figure_path}")
