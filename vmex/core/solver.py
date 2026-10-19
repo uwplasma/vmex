@@ -2045,7 +2045,7 @@ class VacuumOutput:
     bsubv: np.ndarray
     bsupu: np.ndarray
     bsupv: np.ndarray
-    #: VMEC's DEL-BSQ: mean |pressure jump| across the edge over the mean
+    #: VMEC's DEL-BSQ: mean absolute pressure jump across the edge over the mean
     #: vacuum pressure, from the last NESTOR update (0 is exact balance).
     delbsq: float = float("nan")
 
