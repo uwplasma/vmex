@@ -513,3 +513,16 @@ def test_singular_boundary_green_identity_converges_for_axial_harmonic() -> None
 
     assert errors[1] < errors[0]
     assert errors[1] < 2.0e-3
+
+
+def test_mgrid_external_field_is_differentiable_on_the_axis() -> None:
+    """Cap points sit on x = y = 0, where sqrt and arctan2 have no derivative."""
+    import jax
+    from types import SimpleNamespace
+
+    from vmex.mirror.exterior import _external_field_xyz
+
+    source = SimpleNamespace(b_cyl=lambda r, phi, z: (r * z, 0.0 * r, z))
+    point = jnp.array([0.0, 0.0, 0.5])
+    np.testing.assert_allclose(_external_field_xyz(source, point), [0.0, 0.0, 0.5], atol=1e-14)
+    assert np.all(np.isfinite(np.asarray(jax.jacfwd(lambda p: _external_field_xyz(source, p))(point))))
