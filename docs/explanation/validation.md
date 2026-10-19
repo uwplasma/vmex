@@ -391,9 +391,8 @@ is `rtol=1e-7`, recorded in every output JSON it writes.
 Lane consistency — jit against eager, and the traced against the stepped
 lane — is checked where it matters rather than in one suite: the Boozer
 tables, the setup and geometry chains, the mgrid path and the bootstrap
-state-versus-wout lanes each carry their own comparison. Note that the test
-session disables JIT globally and solver-heavy modules opt back in, so a
-module without that fixture is exercising the interpreted path.
+state-versus-wout lanes each carry their own comparison. The test session runs
+jitted, as users do; those comparisons turn jit off locally for the eager side.
 
 ## What is NOT validated
 
