@@ -288,7 +288,7 @@ def test_ladder_forwards_explicit_2d_preconditioner(monkeypatch):
 def test_initial_bad_jacobian_retries_once_through_ns3(
     monkeypatch, capsys,
 ) -> None:
-    """The VMEC++ coarse-axis recovery prepends one bounded stage."""
+    """The C++ VMEC coarse-axis recovery prepends one bounded stage."""
     original = multigrid.solve_multigrid
     monkeypatch.setattr(
         multigrid,
