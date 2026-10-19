@@ -7,8 +7,7 @@ revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
-- Opt-in free-boundary position control (`PositionControl`, deck `LPOSITION_CONTROL`): a feedback
-  vertical field holds the axis at a target radius and reports the missing field.
+- Opt-in free-boundary `PositionControl` (deck `LPOSITION_CONTROL`): feedback vertical field holds the axis radius.
 
 ## 0.11.11 - 2026-10-18
 
