@@ -48,16 +48,6 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache.pkl"
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _jit_enabled():
-    """conftest disables jit globally; these full solves are ~40x slower
-    interpreted (105-160 s/test in CI) — run them jitted."""
-    prev = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", prev)
-
-
 @pytest.fixture(autouse=True)
 def _release_jax_caches_in_full_matrix():
     """Full-lane sweeps accumulate executable caches until the hosted CI
@@ -435,25 +425,20 @@ def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
         for tree in (x_star, p0))
     P = im._dof_projector(cfg, mask)
     z_star, b = P(x_star), P(cotangent)
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)  # the suite default is eager
-    try:
-        mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg)
-        raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
-        pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
-        defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
-        gradient = jax.jit(lambda p: jax.vjp(
-            lambda q: im.solve_implicit(q, cfg), p)[1](cotangent)[0])(p0)
-        system = im._raw_block_system(p0, cfg, x_star, mask, im._active_state_fields(cfg), 4)
-        rhs = jax.tree.map(jnp.negative, jax.jvp(lambda q: raw(z_star, q), (p0,), (direction,))[1])
-        dz = im._raw_block_apply(system, rhs)  # the band, refined once on the full raw JVP
-        dz = jax.tree.map(jnp.add, dz, im._raw_block_apply(system, jax.tree.map(
-            jnp.subtract, rhs, jax.jvp(lambda z: raw(z, p0), (z_star,), (dz,))[1])))
-        tangent = jax.jvp(
-            lambda z, q: im._assemble(z, im.runtime_from_params(q, cfg), x_star, P, im._edge_mask(cfg)),
-            (z_star, p0), (P(dz), direction))[1]
-    finally:
-        jax.config.update("jax_disable_jit", previous)
+    mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg)
+    raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
+    pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
+    defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
+    gradient = jax.jit(lambda p: jax.vjp(
+        lambda q: im.solve_implicit(q, cfg), p)[1](cotangent)[0])(p0)
+    system = im._raw_block_system(p0, cfg, x_star, mask, im._active_state_fields(cfg), 4)
+    rhs = jax.tree.map(jnp.negative, jax.jvp(lambda q: raw(z_star, q), (p0,), (direction,))[1])
+    dz = im._raw_block_apply(system, rhs)  # the band, refined once on the full raw JVP
+    dz = jax.tree.map(jnp.add, dz, im._raw_block_apply(system, jax.tree.map(
+        jnp.subtract, rhs, jax.jvp(lambda z: raw(z, p0), (z_star,), (dz,))[1])))
+    tangent = jax.jvp(
+        lambda z, q: im._assemble(z, im.runtime_from_params(q, cfg), x_star, P, im._edge_mask(cfg)),
+        (z_star, p0), (P(dz), direction))[1]
     assert bool(stats.converged) and defect <= 1e-10
     reverse = sum(float(jnp.vdot(g, t)) for g, t in
                   zip(jax.tree.leaves(gradient), jax.tree.leaves(direction)))

@@ -32,7 +32,7 @@ def main() -> None:
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.3))
     panels = (
         (axes[0], "B_wout_vmec2000", "B_interior_field", "Magnetic field B",
-         "WOUT (VMEX, VMEC2000, VMEC++)"),
+         "WOUT (VMEX, VMEC2000, external C++)"),
         (axes[1], "J_wout_vmec2000", "J_interior_field", "Current density J",
          "WOUT (VMEX, VMEC2000)"),
     )

@@ -226,7 +226,7 @@ FIRM3D/CATAPULT and SIMPLE agree on all 512 loss labels of a matched
 
 ![Loss fraction against time and runtime for VMEX, SIMPLE and SIMSOPT, before the 0.11.7 corrections](../_static/figures/readme_trace_benchmark.webp)
 
-`benchmarks/trace_cross_code.py` traced the same 1,000 ARIES-CS alphas (s = 0.247,
+`tools/trace_cross_code.py` traced the same 1,000 ARIES-CS alphas (s = 0.247,
 10 ms) with VMEX (RK4), SIMPLE (symplectic Euler) and SIMSOPT (RK45, `gc_noK`) on
 the same 8 cores: 12.8, 12.4 and 11.9 % lost (each ± 1.0 %) in 146, 556 and
 1079 s, without compilation and field set-up. The record is

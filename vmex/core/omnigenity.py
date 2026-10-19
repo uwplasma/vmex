@@ -145,7 +145,12 @@ def _refine_booz_grids(constants, grids, oversample, nfp):
     )
 
 
-def _boozer_kernel_state(state, rt, *, rows, s_half, mboz, nboz, oversample):
+_BOOZER_GEOMETRY = ("rmnc_b", "rmns_b", "zmnc_b", "zmns_b", "pmnc_b", "pmns_b",
+                    "gmnc_b", "gmns_b")
+
+
+def _boozer_kernel_state(state, rt, *, rows, s_half, mboz, nboz, oversample,
+                         geometry=False):
     """State tables through booz_xform_jax's validated full transform.
 
     One code path for both parities: symmetric states pass only the cosine
@@ -180,7 +185,8 @@ def _boozer_kernel_state(state, rt, *, rows, s_half, mboz, nboz, oversample):
             constants, grids, oversample, rt.resolution.nfp)
         xm_b = np.asarray(grids.xm_b, dtype=float)
         xn_b = np.asarray(grids.xn_b, dtype=float)
-    magnetic_only = "magnetic_only" in inspect.signature(booz_xform_jax_impl).parameters
+    magnetic_only = not geometry and (
+        "magnetic_only" in inspect.signature(booz_xform_jax_impl).parameters)
     out = booz_xform_jax_impl(
         **({"magnetic_only": True} if magnetic_only else {}),
         rmnc=stack("rmnc"), zmns=stack("zmns"), lmns=stack("lmns"),
@@ -193,7 +199,8 @@ def _boozer_kernel_state(state, rt, *, rows, s_half, mboz, nboz, oversample):
                 bsubvmns=stack("bsubvmns")) if lasym else {}),
     )
     setup = rt.setup
-    return {
+    extra = {key: out[key] for key in _BOOZER_GEOMETRY} if geometry else {}
+    return extra | {
         "bmnc_b": out["bmnc_b"], "bmns_b": out["bmns_b"],
         "xm_b": xm_b, "xn_b": xn_b,
         "iota_b": stack("iota"), "G_b": stack("G"), "I_b": stack("I"),
@@ -378,6 +385,7 @@ def boozer_spectrum_state(
     mboz: int = 16,
     nboz: int = 16,
     oversample: int = 2,
+    geometry: bool = False,
 ) -> dict[str, Array]:
     """Boozer ``|B|`` spectrum of selected surfaces, fully traceable.
 
@@ -404,6 +412,12 @@ def boozer_spectrum_state(
     ``bmnc_b/xm_b/xn_b/iota_b/G_b/I_b/nfp`` are the inputs of
     :func:`omnigenity_residual` and of
     :func:`vmex.core.optimize.quasi_isodynamic_residual`.
+
+    ``geometry=True`` also returns the geometry of the same transform in
+    booz_xform's ``boozmn`` names: ``rmnc_b``, ``rmns_b``, ``zmnc_b``,
+    ``zmns_b``, ``pmnc_b``, ``pmns_b`` (``phi - zeta_B``) and the Jacobian
+    ``gmnc_b``, ``gmns_b``. Downstream codes call this instead of stacking
+    :func:`~vmex.core.boozer_tables.boozer_input_tables` themselves.
     """
     setup = rt.setup
     if int(oversample) < 1:
@@ -417,7 +431,7 @@ def boozer_spectrum_state(
     s_half_np, rows = _nearest_half_mesh_rows(ns, surfaces)
     return _boozer_kernel_state(
         state, rt, rows=rows, s_half=s_half_np, mboz=mboz, nboz=nboz,
-        oversample=oversample)
+        oversample=oversample, geometry=geometry)
 
 
 # ---------------------------------------------------------------------------
