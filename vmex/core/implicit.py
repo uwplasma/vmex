@@ -1434,7 +1434,7 @@ _LAST_REFINED: weakref.WeakKeyDictionary[
 # cfg -> (params key, evolved iterate, bands) of the latest block factorization
 # (see _BANDS_REUSE_TOL).
 _LAST_BANDS: weakref.WeakKeyDictionary[
-    ImplicitConfig, tuple[bytes, SpectralState, tuple]] = weakref.WeakKeyDictionary()
+    ImplicitConfig, tuple[bytes, np.ndarray, tuple]] = weakref.WeakKeyDictionary()
 
 # cfg -> whether its latest _refined_state call stopped at _REFINE_FAR_STALL.
 _ANCHOR_STALLED: dict[int, bool] = {}
@@ -1731,7 +1731,7 @@ def _refine_block_factors(cfg: ImplicitConfig, params: ImplicitParams,
 _BANDS_REUSE_TOL = 1.0e-2
 
 #: Relative residual the Jacobian's backsolve iterates to on supplied bands.
-_STALE_BANDS_RTOL = 1.0e-9
+_STALE_BANDS_RTOL = 1.0e-12
 
 
 def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
@@ -1747,13 +1747,14 @@ def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
     arguments = commit_to_single_device(tuple(
         _pin_concrete(cfg, tree)
         for tree in (frozen if z is None else z, params, frozen, dof_mask)))
-    key, project = _params_key(params), _dof_projector(cfg, dof_mask)
-    zp = project(arguments[0])
+    key = _params_key(params)
+    # Host arithmetic: an eager jnp op here would add compiled programs.
+    zp = np.concatenate([np.ravel(np.asarray(a) * np.asarray(m)) for a, m in zip(
+        jax.tree.leaves(arguments[0]), jax.tree.leaves(arguments[3]))])
     hit = _LAST_BANDS.get(cfg)
-    if z is None and hit is not None and hit[0] == key:
-        delta = _tree_norm(jax.tree.map(jnp.subtract, zp, hit[1]))
-        if float(delta) <= _BANDS_REUSE_TOL * float(_tree_norm(zp)):
-            return hit[2]
+    if z is None and hit is not None and hit[0] == key and (
+            np.linalg.norm(zp - hit[1]) <= _BANDS_REUSE_TOL * np.linalg.norm(zp)):
+        return hit[2]
     bands = _refine_block_factor_core(*arguments, cfg)
     _LAST_BANDS[cfg] = (key, zp, bands)
     return bands
