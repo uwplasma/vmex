@@ -79,6 +79,31 @@ def test_feasible_seed_is_not_reported_as_ash_improvement(example):
     assert example.candidate_status(radial, 2.0, passed)["status"] == "rejected_candidate"
 
 
+def test_zero_cost_seed_records_rejection_before_normalization(example, monkeypatch, tmp_path):
+    pytest.importorskip("essos.ash")
+    # Zero cell cost is a valid radial solve, but cannot normalize an objective.
+    provider = SimpleNamespace(transport=lambda eq: dict(
+        radial_edges_m=[0., .5, 1.], cell_volume_m3=[.5, .5],
+        volume_derivative_m2=[1., 1., 1.], diffusion_m2_s=[1., 1., 1.],
+        convection_m_s=[0., 0., 0.], source_m3_s=[1., 1.],
+        boundary_kappa_m_s=float("inf"), core_cost=[0., 0.],
+    ))
+    monkeypatch.setattr(example, "load_provider", lambda spec, profile: provider)
+    monkeypatch.setattr(example.vj.VmecInput, "from_file", lambda path: object())
+    monkeypatch.setattr(example.vj, "read_wout", lambda path: object())
+    for name in ("input", "profile", "wout"):
+        (tmp_path / name).write_text("fixture\n")
+    output = tmp_path / "result"
+    assert example.main([
+        "--input", str(tmp_path / "input"), "--profile", str(tmp_path / "profile"),
+        "--restart-wout", str(tmp_path / "wout"), "--response", "unused:factory",
+        "--evaluate-wout-only", "--output", str(output),
+    ]) == 1
+    report = json.loads((output / "report.json").read_text())
+    assert report["status"] == "rejected_seed"
+    assert "finite and positive" in report["error"]
+
+
 @pytest.mark.parametrize("valid,cost", [(False, 1.0), (True, float("nan")), (True, -1.0)])
 def test_invalid_candidate_never_receives_acceptance(example, valid, cost):
     radial = SimpleNamespace(valid=valid, mean_occupation_s=cost)

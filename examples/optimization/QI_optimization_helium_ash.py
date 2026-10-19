@@ -154,6 +154,8 @@ def main(argv=None):
         if not bool(radial.valid):
             raise ValueError("seed radial response invalid; inspect D, source, geometry and sink")
         reference_cost = float(radial.mean_occupation_s)
+        if not np.isfinite(reference_cost) or reference_cost <= 0:
+            raise ValueError("seed occupation must be finite and positive for normalization")
         ledger.update(reference_occupation_s=reference_cost,
                       reference_residence_s=float(radial.mean_residence_s))
         initial_checks = checked_verification(provider.verify(
