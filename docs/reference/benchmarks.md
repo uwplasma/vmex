@@ -1,8 +1,8 @@
 # Cross-code benchmarks
 
 Two records sit behind this page. `benchmarks/regression_matrix.json` is a
-VMEX-only release check; `benchmarks/desc_protocol.json` compares VMEX with
-DESC, VMEC2000 and a recent C++ VMEC reimplementation under one metric.
+VMEX-only release check; the DESC comparison below scores VMEX, VMEC2000 and
+VMEC++ under one metric.
 
 ## Release regression matrix
 
@@ -28,11 +28,9 @@ computed by DESC on every `wout` read through `desc.vmec.VMECIO` (radial
 fit order L = 2(mpol − 1), lambda moved to the full mesh), over
 0.2 ≤ ρ ≤ 0.9 to keep the axis and edge fits out.
 
-![Force error against wall time and near-axis iota against ns](../_static/figures/desc_protocol.webp)
-
 **Force error against time (DSHAPE, ns = 51).** mpol 4 to 12, 8 cores each.
 
-| mpol | VMEX f | VMEX warm [s] | VMEC2000 [s] | C++ VMEC [s] | DESC f | DESC warm [s] |
+| mpol | VMEX f | VMEX warm [s] | VMEC2000 [s] | VMEC++ [s] | DESC f | DESC warm [s] |
 |---:|---:|---:|---:|---:|---:|---:|
 | 4 | 0.86 | 0.34 | 3.0 | 1.8 | 2.4e-2 | 2.5 |
 | 6 | 0.13 | 0.43 | 2.6 | 10.6 | 3.3e-3 | 3.8 |
@@ -55,20 +53,19 @@ converge on this deck with automatic continuation.
 **Near-axis iota (`input.LandremanPaul2021_QA_beta2p5_bootstrap`).** mpol 7,
 ntor 6, ftol 1e-12, one core each.
 
-| ns | VMEX | VMEC2000 | C++ VMEC | VMEX warm [s] |
+| ns | VMEX | VMEC2000 | VMEC++ | VMEX warm [s] |
 |---:|---:|---:|---:|---:|
 | 65 | 0.18806 | 0.18806 | 0.18804 | 33 |
 | 129 | 0.17689 | 0.17689 | 0.17678 | 132 |
 | 257 | 0.16688 | 0.16688 | 0.16682 | 380 |
 
 The successive differences give an observed order p = 0.16 in h = 1/ns
-(0.18 for the C++ code): ι(0.1) is not in its asymptotic range at these ns.
+(0.18 for VMEC++): ι(0.1) is not in its asymptotic range at these ns.
 VMEX matches VMEC2000 to five digits. The DESC value of this deck, 0.166, is
 reached only at ns = 257.
 
 ## Versions and limits
 
 VMEX 0.11.10 on JAX 0.11.2; DESC 0.17.3 on JAX 0.9.2 (DESC requires
-`jax<0.10`); C++ VMEC 0.9.1; VMEC2000 at hiddenSymmetries `70c637a`. GVEC 1.5.0
-writes no `wout`, so it is not scored. The driver is out of tree; the record
-lists every run with its load average.
+`jax<0.10`); VMEC++ 0.9.1; VMEC2000 at hiddenSymmetries `70c637a`. GVEC 1.5.0
+writes no `wout`, so it is not scored. The cross-code driver is out of tree.

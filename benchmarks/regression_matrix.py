@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import subprocess
 import sys
 import tempfile
 import time
@@ -34,7 +35,6 @@ sys.path.insert(0, str(REPO))
 import jax  # noqa: E402
 
 import vmex  # noqa: E402
-from benchmarks._provenance import git_state  # noqa: E402
 from vmex.core.wout import read_wout  # noqa: E402
 
 DATA = REPO / "examples" / "data"
@@ -109,7 +109,9 @@ def main() -> int:
                   f"cold={rows[name]['cold_s']:7.2f}s warm={rows[name]['warm_s']:7.3f}s "
                   f"beta={rows[name]['betatotal']:.4e} iota(0.5)={rows[name]['iota_0.5']:.6f}", flush=True)
     record = dict(
-        _provenance=dict(**git_state(REPO), measurement_date=date.today().isoformat(),
+        _provenance=dict(measurement_commit=subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True,
+                                                   text=True).stdout.strip(),
+                         measurement_date=date.today().isoformat(),
                          vmex=vmex.__version__, jax=jax.__version__, device=jax.devices()[0].platform,
                          machine=platform.machine(), system=platform.system(),
                          command="python benchmarks/regression_matrix.py"),

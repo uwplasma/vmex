@@ -20,7 +20,7 @@
       "used_in": [
         "docs/howto/match-phiedge.md"
       ],
-      "note": "PHIEDGE root solve on the ESSOS Landreman-Paul QA coils; the example writes this 8-color lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1. Needs the ESSOS optional dependency. Two back-to-back runs reproduced the bytes."
+      "note": "PHIEDGE root solve on the ESSOS Landreman-Paul QA coils; the example writes this 32-color lossless WebP straight into docs/_static/figures unless VMEX_EXAMPLES_CI=1. Needs the ESSOS optional dependency. Two back-to-back runs reproduced the bytes."
     },
     {
       "path": "docs/_static/figures/readme_interior_field.webp",
@@ -652,7 +652,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Loss fraction against time for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 8-color lossless WebP."
+      "note": "Loss fraction against time for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 32-color lossless WebP."
     },
     {
       "path": "docs/_static/figures/cross_code_bars.webp",
@@ -671,7 +671,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Run time, max energy error and fate agreement with SIMPLE and FIRM3D for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 8-color lossless WebP."
+      "note": "Run time, max energy error and fate agreement with SIMPLE and FIRM3D for ESSOS trace_boozer, SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas (DESC: the first 32) in the Landreman-Paul QA, ARIES-CS and scaled W7-X. The record is ESSOS's examples/cross_code_benchmark/cross_code_benchmark.json (uwplasma/ESSOS#162); rebuilding it needs SIMPLE, FIRM3D, SIMSOPT and DESC. 32-color lossless WebP."
     },
     {
       "path": "docs/_static/figures/readme_exact_equilibria.webp",
@@ -691,25 +691,6 @@
         "README.md"
       ],
       "note": "Plots the committed record, which is taken from the exact-equilibrium benchmark (rogeriojorge/vmex-benchmark-analytical, commit in the record): exact boundaries, and the J and flux-label errors of VMEX seeded from the exact geometry (ftol 1e-11). Rebuilding the record itself needs that repository. 64-color lossless WebP; rerunning the command reproduces these bytes."
-    },
-    {
-      "path": "docs/_static/figures/desc_protocol.webp",
-      "sha256": "6f7b90018d85028b2316a2c814cb350229d20fe519fa6835189372fd488e9cfd",
-      "bytes": 5654,
-      "generator": "benchmarks/make_desc_protocol_figure.py",
-      "command": "python benchmarks/make_desc_protocol_figure.py",
-      "inputs": [
-        "benchmarks/desc_protocol.json"
-      ],
-      "record": "benchmarks/desc_protocol.json",
-      "generated": "2026-10-15",
-      "hardware": "Linux x86_64 workstation (36 cores), CPU, shared and loaded",
-      "reproducible": "command",
-      "bytes_verified": true,
-      "used_in": [
-        "docs/reference/benchmarks.md"
-      ],
-      "note": "DESC-normalized force error against wall time on DSHAPE and near-axis iota against ns on the 2.5% beta QA deck, after Panici et al. (2023). The record needs DESC, VMEC2000 and a C++ VMEC to rebuild; the figure rebuilds from the record alone. 8-color lossless WebP."
     }
   ]
 }
