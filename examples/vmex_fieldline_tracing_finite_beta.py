@@ -13,8 +13,7 @@ the exterior islands. The exterior traces still end at a stopping distance,
 and a finite trace does not by itself establish magnetic topology.
 
 Outside the CI smoke run, the phi=0 Poincare panel pair is
-also written to the working directory as lossless WebP; copying it over
-the committed one in ``docs/_static/figures`` reproduces those bytes.
+also written to the working directory as lossless WebP.
 """
 
 from dataclasses import replace

@@ -48,16 +48,6 @@ from vmex.mirror.splines import (  # noqa: E402
 )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _enable_solver_jit():
-    """Exercise the solve-backed tests in their production execution mode."""
-
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", previous)
-
-
 def _generic_state(grid):
     """Non-equilibrium 3D state exercising every term of the energy."""
 
