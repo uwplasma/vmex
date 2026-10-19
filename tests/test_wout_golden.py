@@ -183,7 +183,7 @@ _LASYM_DIAG_DRIFT = {
 }
 # The legacy VMEC2000/LIBSTELL Compute_Currents branch used shalf(js+1)
 # for both neighboring bsubumns coefficients.  VMEX follows the corrected
-# PARVMEC-calibrated VMEC++ 0.7.1 formula, so the old golden's currvmns is
+# PARVMEC-calibrated C++ VMEC 0.7.1 formula, so the old golden's currvmns is
 # useful only as a finite/shape check.  tests/test_postprocess_currents.py
 # pins the corrected formula directly.
 _LASYM_CORRECTED_LEGACY_OUTPUT = {"currvmns"}
