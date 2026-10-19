@@ -1943,11 +1943,13 @@ def _solve_free_boundary_stage(
             nonlocal emit_start
             if not verbose:
                 return
-            upto = int(carry.iteration) if bool(carry.done) or final else int(carry.iteration) - 1
+            iteration, done = (int(v) for v in jax.device_get((carry.iteration, carry.done)))
+            upto = iteration if done or final else iteration - 1
             if not _due_rows_pending(
                     emit_start, upto, nstep=nstep_cadence, final=final):
                 return
-            trajectory = np.asarray(carry.trajectory[: max(upto, 0)])
+            # Transfer, then slice: a device slice compiles one program per upto.
+            trajectory = np.asarray(carry.trajectory)[: max(upto, 0)]
             advancing = True
             resume = max(1, emit_start)
             for it_p in range(resume, upto + 1):
