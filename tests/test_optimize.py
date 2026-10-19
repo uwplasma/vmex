@@ -1753,7 +1753,8 @@ def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
         calls.append(initial_state)
         warm = initial_state is not None
         return SimpleNamespace(converged=not warm, fsqr=1e-6 if warm else 1e-13,
-                               fsqz=0.0, fsql=0.0, iterations=10, state=None)
+                               fsqz=0.0, fsql=0.0, iterations=10, state=None,
+                               fsq_history=np.full((10, 6), 1e-6))
 
     monkeypatch.setattr(im, "solve", fake_solve)
     monkeypatch.setattr(im, "input_with_params", lambda inp, params: inp)
@@ -1765,6 +1766,31 @@ def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
     im._HOT_CACHE[cfg] = "warm"
     result = im._host_solve(cfg, {"leaf": np.zeros(1)})
     assert calls == ["warm", None] and result.converged
+    # Two budget-limited warm rungs agree: the cold rung is skipped.
+    calls.clear()
+    im._LAST_SOLVE.pop(cfg, None)
+    im._HOT_CACHE[cfg], im._PERTURB_SEED[cfg] = "warm", "perturb"
+    assert not im._host_solve(cfg, {"leaf": np.ones(1)}).converged
+    assert calls == ["perturb", "warm"]
+    assert im._SOLVE_STATS[cfg]["abandoned_rungs"] == 1
+
+
+def test_rung_probe_abandons_a_rung_that_retraces_an_exhausted_one():
+    from types import SimpleNamespace
+
+    from vmex.core import implicit as im
+
+    reference = np.logspace(-2, -8, 100)  # best fsq of an exhausted rung
+    stop = im._rung_probe(reference)
+
+    def carry(iteration, fsq):
+        trajectory = np.zeros((100, 11))
+        trajectory[:, 1] = fsq
+        return SimpleNamespace(iteration=iteration, trajectory=trajectory)
+
+    assert not stop(carry(19, reference))  # before the probe point
+    assert stop(carry(20, reference))  # retraces the exhausted rung
+    assert not stop(carry(20, reference / 100.0))  # clearly ahead: keep going
 def test_report_targets_prints_one_verdict_line(capsys, monkeypatch):
     from types import SimpleNamespace
 
