@@ -305,7 +305,7 @@ The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.
   counts within ±25%. On six decks never run before (ITER, W7-X, HSX, ARIES-CS, ESTELL,
   Nührenberg–Zille), the worst relative difference from VMEC2000 was `2.5e-10`, and the iteration
   counts were identical on five and one apart on the sixth
-  ([record](benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md), VMEX 0.8.1).
+  ([performance records](docs/reference/performance.rst), VMEX 0.8.1).
 - **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
   wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
   mostly XLA compilation, which a repeated solve in one process skips. In the older
@@ -322,7 +322,7 @@ The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.
 ![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
 
 The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
-(`python benchmarks/make_readme_figures.py --only convergence`).
+(`python docs/_static/figures/sources/make_readme_figures.py --only convergence`).
 
 ## Against exact equilibria
 
@@ -545,7 +545,7 @@ JAX compiles each solve once per array structure and reuses the executable for m
 measure first-call, cache-reload and warm costs separately, including refinement and gradients for
 optimization. CPU and GPU performance depend on resolution and workload; the dated measurements are
 in the [performance reference](https://vmex.readthedocs.io/en/latest/reference/performance.html)
-and the [benchmark records](benchmarks/INDEX.md).
+and the [benchmark records](benchmarks/).
 
 `vj.parallel.solve_ensemble(inputs, workers=None)` solves independent cases concurrently and returns
 results in input order, each identical to solving that input alone; `workers=1` is the serial
