@@ -203,7 +203,7 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
     problem = opt.VmecProblem.from_tuples(inp, objective_function_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=MAXJ_ESS_ALPHA,
         restart_from=equilibrium, forward_ftol=MAXJ_FORWARD_FTOL,
-        forward_max_iterations=MAXJ_FORWARD_ITERATIONS, progress=not ci_smoke)
+        forward_max_iterations=MAXJ_FORWARD_ITERATIONS, progress=not ci_smoke, evaluation_progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     step = BOUNDARY_STEP * problem.scales

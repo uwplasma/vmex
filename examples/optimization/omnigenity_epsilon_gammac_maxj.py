@@ -227,7 +227,7 @@ before = hard_confinement(equilibrium)
 problem = opt.VmecProblem.from_loss(
     inp, loss, max_mode=MAX_MODE, use_ess=True, ess_alpha=ESS_ALPHA,
     restart_from=equilibrium,
-    forward_max_iterations=STAGE_MAX_ITERATIONS, progress=True)
+    forward_max_iterations=STAGE_MAX_ITERATIONS, progress=True, evaluation_progress=True)
 print(f"dof_names = {problem.dof_names}")
 monitor.problem = problem
 problem.compile_value_and_gradient()

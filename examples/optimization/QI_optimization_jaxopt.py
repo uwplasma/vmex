@@ -157,10 +157,12 @@ else:
     )
 
 params = jnp.zeros_like(x0)
+print("Evaluating the seed (first call compiles)...", flush=True)
 state = solver.init_state(params)
 monitor = OptimizationMonitor(problem)
 monitor.record(x_from_y(params), cost=float(state.value), optimality=optimality(state), terms={})
 for iteration in range(1, BUDGET + 1):
+    print(f"JAXopt step {iteration} of at most {BUDGET}...", flush=True)
     params, state = solver.update(params, state)
     monitor.record(x_from_y(params), cost=float(state.value), optimality=optimality(state),
                    iteration=iteration, terms={})

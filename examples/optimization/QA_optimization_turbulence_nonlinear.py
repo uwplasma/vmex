@@ -50,8 +50,11 @@ import numpy as np
 from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
 
-import gkx
-from gkx.diagnostics.saturation import SaturationStopConfig, saturation_stop_decision
+try:
+    import gkx
+    from gkx.diagnostics.saturation import SaturationStopConfig, saturation_stop_decision
+except ImportError:
+    raise SystemExit("This example needs GKX: pip install 'vmex[turbulence]'")
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core.turbulence import flux_tube_geometry

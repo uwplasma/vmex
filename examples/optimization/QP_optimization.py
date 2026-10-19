@@ -143,7 +143,7 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     problem = opt.VmecProblem.from_tuples(
         inp, objective_function_terms, max_mode=max_mode,
         vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
-        progress=True)
+        progress=True, evaluation_progress=True)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     if not ci_smoke:

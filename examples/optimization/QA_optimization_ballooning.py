@@ -178,7 +178,7 @@ inp = replace(inp, delt=0.5).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 problem = opt.VmecProblem.from_tuples(
     inp, objective_function_terms, max_mode=max(MAX_MODES), use_ess=True,
-    ess_alpha=ESS_ALPHA, restart_from=equilibrium, progress=True)
+    ess_alpha=ESS_ALPHA, restart_from=equilibrium, progress=True, evaluation_progress=True)
 monitor.problem, x = problem, problem.x0
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA + ballooning stage, max_mode = {max_mode} =====")

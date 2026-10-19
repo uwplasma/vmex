@@ -45,7 +45,7 @@ LOCAL_MAXITER = 4
 # seed that makes the walk reproducible:
 BASIN_TEMPERATURE = 0.05
 BASIN_STEPSIZE = 0.25
-BASIN_SEED = 7
+BASIN_SEED = 3
 
 # Local finish: residual evaluations the polishing least squares may spend:
 POLISH_NFEV = 10
