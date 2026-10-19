@@ -681,20 +681,17 @@ def _lasym_delta_rotation_traceable(rbc, rbs, zbc, zbs, cfg: ImplicitConfig,
 
     ``delta`` and the ``cos(m*delta)/sin(m*delta)`` mixing are smooth in the
     ``(0, 1)`` coefficients, so both are traced; only the structural ``mpol <
-    2`` and zero-denominator cases come from ``cfg.inp``.  At ``delta == 0``
-    the rotation is the identity in value while its derivative is not, since
-    ``d(delta)/d(RBS(0, 1)) = -d(delta)/d(ZBC(0, 1)) = 1/denom`` carries a
-    rank-one term along ``RBS(0, 1) - ZBC(0, 1)``, so the body runs there too.
+    2`` case and an all-zero m = 1 seed (where ``atan2`` has no derivative)
+    come from ``cfg.inp``.  At ``delta == 0`` the rotation is the identity in
+    value while its derivative is not, so the body runs there too.
     """
-    r0 = np.asarray(cfg.inp.rbc, dtype=float)
-    z0 = np.asarray(cfg.inp.zbs, dtype=float)
     if mpol < 2:
         return rbc, rbs, zbc, zbs
-    denom0 = abs(r0[ntor, 1]) + abs(z0[ntor, 1])
-    if denom0 == 0.0:
+    r0, z0, s0, c0 = (float(np.asarray(getattr(cfg.inp, f), dtype=float)[ntor, 1])
+                      for f in ("rbc", "zbs", "rbs", "zbc"))
+    if r0 + z0 == 0.0 and s0 - c0 == 0.0:
         return rbc, rbs, zbc, zbs
-    denom = jnp.abs(rbc[ntor, 1]) + jnp.abs(zbs[ntor, 1])
-    delta = jnp.arctan((rbs[ntor, 1] - zbc[ntor, 1]) / denom)
+    delta = jnp.arctan2(rbs[ntor, 1] - zbc[ntor, 1], rbc[ntor, 1] + zbs[ntor, 1])
     m = jnp.arange(mpol, dtype=rbc.dtype)[None, :]
     cos_md, sin_md = jnp.cos(m * delta), jnp.sin(m * delta)
     rbc_new = rbc * cos_md + rbs * sin_md
