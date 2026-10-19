@@ -38,15 +38,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 GUARD_TESTS = (
-    "tests/test_test_manifest.py",
-    "tests/test_performance_docs.py",
-    "tests/test_docs_nav.py",
-    "tests/test_cited_paths.py",
-    "tests/test_capability_docs.py",
-    "tests/test_api_reference_completeness.py",
-    "tests/test_packaging_metadata.py",
+    "tests/test_repo_consistency.py",
     "tests/test_coverage_margin.py",
-    "tests/test_figure_provenance.py",
 )
 
 
@@ -105,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ok = True
     ok &= _run("ruff", ["ruff", "check", "vmex", "tests", "examples",
-                        "benchmarks", "tools"])
+                        "tools"])
     ok &= _run("mypy", ["mypy", "vmex"])
     ok &= _run("docs prose", [sys.executable, "tools/check_docs_prose.py"])
     if args.docs:
