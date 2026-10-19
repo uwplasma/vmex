@@ -425,7 +425,7 @@ def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
         for tree in (x_star, p0))
     P = im._dof_projector(cfg, mask)
     z_star, b = P(x_star), P(cotangent)
-    mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg)
+    mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg.adjoint_tol, cfg)
     raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
     pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
     defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
@@ -445,6 +445,22 @@ def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
     forward = sum(float(jnp.vdot(c, s)) for c, s in
                   zip(jax.tree.leaves(cotangent), jax.tree.leaves(tangent)))
     assert abs(reverse - forward) <= 1e-10 * abs(forward)
+
+
+def test_adjoint_tolerance_change_reuses_every_executable(solovev):
+    """The adjoint tolerance is a traced argument: a tolerance-only config
+    compares equal, compiles nothing, and still sets the acceptance bound."""
+    _name, inp, cfg, p0, x_star, _rt, mask = solovev
+    other = im._canonical_config(dataclasses.replace(cfg, adjoint_tol=1e-6))
+    assert other is not cfg and other == cfg and hash(other) == hash(cfg)
+    P = im._dof_projector(cfg, mask)
+    b = P(jax.tree.map(jnp.ones_like, x_star))
+    mu, tight = im._adjoint_block_core(p0, P(x_star), x_star, mask, b, 1e-11, cfg)
+    compiled = im._adjoint_block_core._cache_size()
+    mu2, loose = im._adjoint_block_core(p0, P(x_star), x_star, mask, b, 1e-6, other)
+    assert im._adjoint_block_core._cache_size() == compiled
+    assert float(loose.tolerance) == pytest.approx(1e5 * float(tight.tolerance))
+    np.testing.assert_array_equal(jax.tree.leaves(mu2)[0], jax.tree.leaves(mu)[0])
 
 
 def test_block_adjoint_certificate_failure_falls_back_to_krylov(monkeypatch, solovev):

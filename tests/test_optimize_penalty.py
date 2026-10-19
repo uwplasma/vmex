@@ -32,7 +32,7 @@ OBJECTIVE = [(opt.aspect_ratio, 4.0, 1.0)]
 # module's first host solves into memo hits and shift the call counts the
 # failure injection keys on. Each test starts from empty memos.
 _PER_CONFIG_MEMOS = ("_HOT_CACHE", "_LAST_SOLVE", "_PERTURB_SEED", "_LAST_STATUS_ERROR",
-                     "_LAST_REFINED", "_LAST_ANCHOR_FACTORS", "_LAST_REFINEMENT_CORRECTION")
+                     "_LAST_REFINED", "_LAST_REFINEMENT_CORRECTION")
 
 
 @pytest.fixture(autouse=True)
