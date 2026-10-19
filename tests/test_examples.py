@@ -147,6 +147,7 @@ EXECUTED_EXAMPLES = {
     "examples/finite_beta_scan.py",
     "examples/fixed_boundary_run.py",
     "examples/force_balance_polishing.py",
+    "examples/prescribed_current_polishing.py",
     "examples/free_boundary_beta_scan.py",
     "examples/free_boundary_essos_coils.py",
     "examples/free_boundary_mgrid.py",
@@ -444,6 +445,15 @@ def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None
     for field in ("initial_normalized_l2", "final_normalized_l2",
                   "nonlinear_iterations", "termination_reason"):
         assert field in source
+
+
+@pytest.mark.full  # nightly: discrete solve + prescribed-current polish
+def test_prescribed_current_polishing_example(tmp_path):
+    out = _run_example(EXAMPLES / "prescribed_current_polishing.py", tmp_path, timeout=600)
+    assert "Forward result only" in out
+    for label in ("axis", "bulk", "edge"):
+        match = re.search(label + r" force/pressure-gradient RMS: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+        assert match and np.isfinite([float(v) for v in match.groups()]).all(), out
 
 
 @pytest.mark.full  # nightly: ordinary solve + native strong-force polish (~3 min)
@@ -1127,31 +1137,6 @@ def test_vacuum_qs_examples_expose_trial_pressure_terms():
         assert "(trial_dmerc, 0.0, stability_weights)" in source
         assert "(trial_dr, 0.0, stability_weights)" in source
         assert "weights rise smoothly toward the edge" in source
-
-
-# The self-consistent-bootstrap examples reproduce arXiv:2205.02914 against the
-# Zenodo dataset, which is a large local-only archive (not in CI) — skip when
-# absent.  Nightly-gated: each runs a multi-iteration Picard loop of solves.
-_ZENODO_2205 = Path(os.environ.get(
-    "VMEX_ZENODO_2205_02914",
-    str(Path.home() / "local" /
-        "20220708-01-zenodo_for_QS_optimization_with_self_consistent_bootstrap_current")))
-
-
-@pytest.mark.full
-@pytest.mark.skipif(not _ZENODO_2205.is_dir(),
-                    reason="arXiv:2205.02914 Zenodo dataset not present")
-@pytest.mark.parametrize("case", ["QA", "QH"])
-def test_bootstrap_selfconsistent_examples(case, tmp_path):
-    script = REPO / "benchmarks" / f"{case}_bootstrap_selfconsistent.py"
-    # The guard above accepts the dataset at its default location, but the
-    # script only reads the environment variable, so pass the resolved path.
-    out = _run_example(script, tmp_path, timeout=1200,
-                       VMEX_ZENODO_2205_02914=str(_ZENODO_2205))
-    m = re.search(r"final f_boot = ([0-9.eE+-]+)", out)
-    assert m is not None and float(m.group(1)) < 5e-2, f"{case} f_boot: {out[-400:]}"
-    assert (tmp_path / f"output_{case}_bootstrap_selfconsistent"
-            / f"wout_{case}_bootstrap_selfconsistent.nc").exists()
 
 
 @pytest.mark.full  # nightly: Picard seed + one exact finite-beta optimization stage

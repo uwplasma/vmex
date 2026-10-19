@@ -48,7 +48,15 @@ This directory contains developer-facing tools, not end-user examples.
   ```
 
 Hardware parity across forward solves and boundary gradients is audited by
-`benchmarks/device_parity.py`; use `--quick` for its reduced-grid smoke mode.
+`tools/device_parity.py`; use `--quick` for its reduced-grid smoke mode.
+
+Benchmark drivers write the compact records under `benchmarks/`, each with
+its own provenance block: `run_baseline.py` (`baseline.json`, the
+performance table), `run_gpu_matrix.py` (`gpu_baseline.json`),
+`run_freeboundary_multigrid.py`, `preconditioner_2d_stiff.py`,
+`device_cache_reload.py` and `trace_cross_code.py`. `_provenance.py` holds
+their shared commit/hash helpers. Figure generators live in
+`docs/_static/figures/sources/`.
 
 - `force_oracle.py`: staged force oracle along the `funct3d.f` chain. Replays
   the production iteration body and records staged internals (state/axis,

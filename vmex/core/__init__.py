@@ -4,7 +4,7 @@ Module map (each header docstring names its VMEC2000 counterpart):
 
 - ``errors``          typed zero-crash exceptions + werror table
 - ``printing``        VMEC2000-format console output (byte-exact)
-- ``input``           VmecInput: INDATA + VMEC++-JSON parsing, round-trip writers
+- ``input``           VmecInput: INDATA + JSON parsing, round-trip writers
 - ``profiles``        pressure/iota/current parameterizations (pure jnp)
 - ``radial_basis``    local high-order splines + rho^|m| axis regularity
 - ``strong_force``    continuous reconstruction + independent JxB-grad(p) oracle
@@ -34,3 +34,7 @@ parity-proven implementation in ``tests/``; the solve loop is
 validated end-to-end against VMEC2000 golden runs
 (``tests/test_solver_end_to_end.py``).
 """
+
+from .._compat import ensure_configured as _ensure_configured
+
+_ensure_configured()
