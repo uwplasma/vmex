@@ -344,22 +344,18 @@ def test_cth_fixture_below_onset_and_bit_identical(cth_vacuum_inputs, monkeypatc
         jax.config.update("jax_disable_jit", prev_disable_jit)
 
     # 3. jitted: reordering-level agreement only (documented above)
-    jax.config.update("jax_disable_jit", False)
-    try:
-        new_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
-        with monkeypatch.context() as mp:
-            mp.setattr(V, "_tl_stable", forward_only)
-            old_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
-        for name, a, b in zip(names, new_j, old_j, strict=True):
-            a = np.asarray(a)
-            b = np.asarray(b)
-            scale = float(np.max(np.abs(b)))
-            diff = float(np.max(np.abs(a - b)))
-            assert diff <= 1e-11 * scale, (
-                f"jit {name}: {diff:.3e} vs scale {scale:.3e}"
-            )
-    finally:
-        jax.config.update("jax_disable_jit", prev_disable_jit)
+    new_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
+    with monkeypatch.context() as mp:
+        mp.setattr(V, "_tl_stable", forward_only)
+        old_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
+    for name, a, b in zip(names, new_j, old_j, strict=True):
+        a = np.asarray(a)
+        b = np.asarray(b)
+        scale = float(np.max(np.abs(b)))
+        diff = float(np.max(np.abs(a - b)))
+        assert diff <= 1e-11 * scale, (
+            f"jit {name}: {diff:.3e} vs scale {scale:.3e}"
+        )
 
 
 def test_solver_dataclass_unchanged():

@@ -1776,7 +1776,7 @@ def _make_body(
 
             (e_final, _, _, ctx), _ = lax.scan(
                 substep,
-                (e_zero, jnp.asarray(True), args0, ctx_zero),
+                (e_zero, running, args0, ctx_zero),
                 jnp.arange(2),
             )
             # When no restart happened trip 1 passed e1 through, so the
@@ -2355,11 +2355,13 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
                 carry = step(lane, carry)
         else:
             carry = step(lane, carry)
-        done = bool(carry.done)
-        upto = int(carry.iteration) if done else int(carry.iteration) - 1
+        # One host transfer per block for the three loop scalars.
+        done, iteration, ier = (int(v) for v in jax.device_get(
+            (carry.done, carry.iteration, carry.ier)))
+        upto = iteration if done else iteration - 1
         # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
         # eqsolve before printout.f, so the discarded first pass has no row.
-        retry_transfer = done and int(carry.ier) in (
+        retry_transfer = done and ier in (
             AXIS_REGUESS_FLAG, BAD_JACOBIAN_FLAG,
         )
         if verbose and not retry_transfer and _due_rows_pending(
