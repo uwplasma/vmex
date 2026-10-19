@@ -475,8 +475,9 @@ pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.
   ([record](benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md), VMEX 0.8.1).
 - **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
   wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
-  mostly XLA compilation, which a repeated solve in one process skips. Older dated tables are in the
-  [performance reference](https://vmex.readthedocs.io/en/latest/reference/performance.html). On two RTX A4000 GPUs no
+  mostly XLA compilation, which a repeated solve in one process skips. In the older
+  [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
+  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
   shipped deck or problem size ran faster than on the CPU.
 - **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
@@ -485,9 +486,9 @@ pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.
 - **Validation record.** The [validation record](docs/explanation/validation.md) lists every
   gate, tolerance and benchmark record, with the measured accuracy of each lane.
 
-![Force-residual traces for VMEX and VMEC2000](docs/_static/figures/readme_convergence.webp)
+![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
 
-The NFP=4 QH deck at ns = 51 in VMEX and VMEC2000, from a trace recorded in July 2026
+The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
 (`python benchmarks/make_readme_figures.py --only convergence`).
 
 ### Against exact equilibria

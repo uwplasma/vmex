@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help=(
-            "VMEC input file (input.* namelist or structured .json), DESC text/HDF5/pickle file to solve, or a "
+            "VMEC input file (input.* namelist or VMEC++ .json), DESC text/HDF5/pickle file to solve, or a "
             "wout_*.nc/mout_*.nc/boozmn_*.nc file for --plot/--booz."
         ),
     )

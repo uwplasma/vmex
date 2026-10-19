@@ -164,7 +164,7 @@ def _current_terms(bs, bu, bv, xm_nyq, xn_nyq, *, shalf, sfull, ohs, ns):
     Both stellarator-symmetric and asymmetric blocks use the inner
     half-mesh ``sqrt(s)`` for the inner covariant coefficient.  A historical
     ``read_wout_mod.f90`` asymmetric branch used the outer value for both
-    terms; a C++ VMEC reimplementation corrected that indexing defect against PARVMEC in v0.7.1.
+    terms; VMEC++ corrected that indexing defect against PARVMEC in v0.7.1.
     """
     mn = bs.shape[1]
     t1 = np.zeros((ns, mn))

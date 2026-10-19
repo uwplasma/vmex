@@ -126,12 +126,12 @@ template for each; include the input file and the output of `vmex --doctor`.
 first. Contributions follow {doc}`project/contributing`.
 
 ```{figure} /_static/figures/readme_runtime_compare.webp
-:alt: Runtime comparison of VMEX against VMEC2000
+:alt: Runtime comparison of VMEX against VMEC2000 and VMEC++
 :width: 95%
 
 Benchmark-suite runtimes at ns = 201 from `benchmarks/baseline.json`
 (Apple-Silicon CPU, VMEX 0.3.0, July 2026): VMEX cold and warm against
-VMEC2000. Warm solves reuse the compiled program, as in
+VMEC2000 and VMEC++. Warm solves reuse the compiled program, as in
 optimization loops; the table is in {doc}`reference/performance`.
 ```
 

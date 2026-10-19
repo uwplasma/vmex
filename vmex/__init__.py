@@ -7,7 +7,7 @@ links to the module that documents it.
 
 **Inputs and run controls**
 
-- :class:`~vmex.core.input.VmecInput` — INDATA / structured JSON input pytree
+- :class:`~vmex.core.input.VmecInput` — INDATA / VMEC++-JSON input pytree
 - :class:`~vmex.core.run_options.RunOptions` /
   :class:`~vmex.core.run_options.InputRequest` /
   :func:`~vmex.core.run_options.read_input_request` — ``!@VMEX`` directives

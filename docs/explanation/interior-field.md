@@ -2,7 +2,7 @@
 
 {class}`~vmex.core.extender.VmecInteriorField` gives B, and its first to third
 Cartesian derivatives, at any point inside the plasma. This page explains what
-it evaluates, how to use it on a VMEX and VMEC2000 equilibrium, and how
+it evaluates, how to use it on a VMEX, VMEC2000 or VMEC++ equilibrium, and how
 accurate it is against an exact solution.
 
 ## What it evaluates
@@ -34,7 +34,7 @@ import numpy as np
 import vmex
 
 inp = vmex.VmecInput.from_file("input.my_case")
-wout = vmex.read_wout("wout_my_case.nc")          # written by VMEX and VMEC2000
+wout = vmex.read_wout("wout_my_case.nc")          # written by VMEX, VMEC2000 or VMEC++
 field = vmex.VmecInteriorField.from_state(inp, vmex.state_from_wout(wout, inp=inp))
 
 points = np.array([[1.05, 0.0, 0.02]])            # Cartesian, inside the plasma
@@ -48,8 +48,8 @@ The figure compares the two ways of reading one equilibrium: the fields
 stored in the WOUT file, and `VmecInteriorField` built from that file. The
 equilibrium is an exact, finite-pressure solution from the integer family of
 [Landreman (2026)](https://arxiv.org/abs/2609.26742), solved on 129 radial
-surfaces. VMEX and VMEC2000 produce the same WOUT for it, so the WOUT
-curves hold for all three (a C++ VMEC reimplementation writes no current harmonics, so only B is
+surfaces. VMEX, VMEC2000 and VMEC++ produce the same WOUT for it, so the WOUT
+curves hold for all three (VMEC++ writes no current harmonics, so only B is
 available from its file). Errors are measured at the same points of the
 native flux surfaces against the exact B and J.
 
@@ -72,5 +72,5 @@ VMEC2000 so that existing tools keep working. For accurate B, J or field
 derivatives inside the plasma, use `VmecInteriorField`.
 
 The data and the scoring code are in the [analytical benchmark](https://github.com/rogeriojorge/vmex-benchmark-analytical),
-which also compares VMEX, VMEC2000 and DESC on further exact cases.
+which also compares VMEX, VMEC2000, VMEC++ and DESC on further exact cases.
 The plotted numbers are in `benchmarks/interior_field_vs_wout.json`.

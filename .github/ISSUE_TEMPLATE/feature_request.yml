@@ -34,7 +34,7 @@ body:
     attributes:
       label: References
       description: >-
-        Papers, VMEC2000 behaviour, or other codes that already do
+        Papers, VMEC2000 or VMEC++ behaviour, or other codes that already do
         this.
     validations:
       required: false

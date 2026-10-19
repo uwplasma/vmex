@@ -574,7 +574,7 @@ def _nonsingular_terms(
 #: ``T^{+/-}_l`` recurrence: forward iteration is kept while the spurious-
 #: mode growth ``(B/A)^(mf+nf)`` stays below ``1e7`` of the particular
 #: solution (rounding then amplifies to at most ~1e-16 * sqrt(1e7) * O(mf+nf)
-#: ~ 1e-11 relative).  Same criterion form as a C++ VMEC reimplementation
+#: ~ 1e-11 relative).  Same criterion form as vmecpp
 #: ``singular_integrals.cc`` (which uses ``ln(1e10)``); tightened here, with
 #: the Miller tail below sized to match, so both branches stay ~1e-11 or
 #: better on their own side of the switch even at ``mf + nf = 45``.
@@ -582,12 +582,12 @@ _TL_LOG_GROWTH_THRESHOLD = 7.0 * 2.30258509299
 
 
 def _tl_backward_tail(lmax: int) -> int:
-    """Extra backward (Miller) steps beyond ``l = lmax`` (a C++ VMEC reimplementation
+    """Extra backward (Miller) steps beyond ``l = lmax`` (vmecpp
     ``kTailExtra``, made ``lmax``-aware).
 
     The zero-seed contamination decays like ``(B/A)^(-tail/2)`` and is worst
     at the switch ratio ``B/A = exp(threshold / lmax)``, giving
-    ``exp(-1.75 * threshold) ~ 3e-13`` for ``tail = 3.5 * lmax`` — a C++ VMEC reimplementation's
+    ``exp(-1.75 * threshold) ~ 3e-13`` for ``tail = 3.5 * lmax`` — vmecpp's
     fixed 50 is enough only for ``lmax`` up to ~20.
     """
     return max(50, -(-7 * lmax // 2))  # ceil(3.5 * lmax)
@@ -631,7 +631,7 @@ def _tl_backward(
     lmax: int,
 ) -> Array:
     """Backward (Miller) recurrence for ``T_l``, normalized to the analytic
-    ``T_0`` (a C++ VMEC reimplementation ``singular_integrals.cc`` backward branch).
+    ``T_0`` (vmecpp ``singular_integrals.cc`` backward branch).
 
     Runs the same three-term recurrence downward from a zero seed at
     ``l = lmax + _tl_backward_tail(lmax)``; the homogeneous modes (which
@@ -672,13 +672,13 @@ def _tl_stable(
     ``sqrt(B/A)``), which grow like ``(B/A)^{l/2}`` and destroy double
     precision once ``(mf + nf) * ln(B/A)`` exceeds ``ln(1e10)`` — the
     free-boundary onset sits around ``mpol``/``ntor`` ~ 12.  Following
-    A C++ VMEC reimplementation (``free_boundary/singular_integrals/singular_integrals.cc``,
+    vmecpp (``free_boundary/singular_integrals/singular_integrals.cc``,
     commit f5dbf76), each evaluation point selects between the forward
     recurrence (kept while spurious growth stays bounded, where the
     zero-seed backward pass would misconverge) and the backward Miller
     recurrence (stable exactly where forward is not); see
     ``_TL_LOG_GROWTH_THRESHOLD`` / ``_tl_backward_tail`` for the constants,
-    tightened relative to a C++ VMEC reimplementation's so both branches hold ~1e-11 relative
+    tightened relative to vmecpp's so both branches hold ~1e-11 relative
     accuracy through the switch at any practical ``mf + nf``.
 
     Both directions are evaluated unconditionally with static shapes (jit/

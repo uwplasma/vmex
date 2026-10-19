@@ -1,5 +1,5 @@
 ! Analytical Solov'ev equilibrium from Hirshman & Whitson (1983).
-! Public comparison deck mirrored from the MIT-licensed test data of a C++ VMEC reimplementation.
+! Public comparison deck mirrored from the MIT-licensed VMEC++ test data.
 &INDATA
   MPOL = 13
   NS_ARRAY = 31
