@@ -280,10 +280,15 @@ VMEX keeps the three QI formulations separate:
   objective; its call signature and defaults are unchanged.
 * :class:`~vmex.core.qi.ConstructedQIResidual` applies the fuller smooth
   squash-and-shuffle construction to the same traceable Boozer spectrum.
-* :class:`~vmex.core.qi.JInvariantQIResidual` directly minimizes variation of
-  :math:`\mathcal J_\parallel` over complete wells. Its pitch array is supplied
-  in inverse tesla and is shared across surfaces; it is never renormalized
-  independently on each field line.
+* :class:`~vmex.core.qi.JInvariantQIResidual` minimizes the normalized
+  dispersion of :math:`\mathcal J_\parallel` pooled over all complete wells,
+  field lines, and traced periods at each surface and pitch. Its pitch array
+  is supplied in inverse tesla and is shared across surfaces; it is never
+  renormalized independently on each field line. Wells are not matched into
+  families: two different wells can have distinct actions and produce a
+  positive residual even when both actions are independent of :math:`\alpha`.
+  Thus this objective alone does not measure within-family omnigenity or
+  establish radial drift suppression in a multiwell field.
 
 The action residual excludes cut edge wells but retains complete wells inside
 the bounded trace. A pitch block with no complete well on even one sampled field

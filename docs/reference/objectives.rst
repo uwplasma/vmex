@@ -303,10 +303,14 @@ certification grid.
    resolved value against the wout/Boozer implementation.  See
    :ref:`confinement-qi-fidelity`.
 
-For a direct action-based target, supply physical pitch values explicitly and
-compose the QI and maximum-J terms like any other residuals.  This objective
-is a complementary orbit diagnostic, not a drop-in normalization-equivalent
-replacement for the Goodman residual:
+For an action-based target, supply physical pitch values explicitly and
+compose the QI and maximum-J terms like any other residuals.
+``JInvariantQIResidual`` pools the actions of all complete wells at each
+surface and pitch, without matching well families across field lines. Its
+value can be positive in an :math:`\alpha`-independent field with distinct
+well actions; it does not by itself quantify within-family omnigenity or
+radial drift. It is a complementary orbit diagnostic, not a normalization-
+equivalent replacement for the Goodman residual:
 
 .. code-block:: python
 
@@ -631,7 +635,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.qi.JInvariantQIResidual`
      - yes
      - yes
-     - physical-pitch action variation over complete wells
+     - pooled physical-pitch action dispersion over complete wells
    * - :class:`~vmex.core.maxj.MaximumJResidual`
      - yes
      - yes
@@ -639,7 +643,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes
-     - shared-transform J-invariance and maximum-J rows
+     - shared-transform pooled action dispersion and maximum-J rows
    * - :class:`~vmex.core.gammac.GammaC`
      - yes
      - yes

@@ -69,6 +69,26 @@ def test_action_residual_zero_and_non_qi_ordering():
     assert abs(totals[1] - totals[2]) < abs(totals[0] - totals[2])
 
 
+def test_action_residual_pools_distinct_alpha_independent_well_families():
+    # B(phi) = 2 + 0.4 cos(2 phi) + 0.15 sin(phi) has two distinct trapped
+    # wells per period and no alpha dependence (all Fourier modes have m=0).
+    out = qi.j_invariant_qi_residual_from_boozer(
+        bmnc_b=[[2.0, 0.4, 0.0]], bmns_b=[[0.0, 0.0, 0.15]],
+        xm_b=[0.0, 0.0, 0.0], xn_b=[0.0, -2.0, -1.0],
+        iota_b=[0.4], G_b=[2.0], I_b=[0.0], nfp=1,
+        pitch=[0.5], nalpha=3, num_periods=1,
+        points_per_period=128, max_wells=2, quadrature_order=32)
+
+    action = np.asarray(out["action"])[0, :, 0, :]
+    assert np.asarray(out["valid_pitch"])[0, 0]
+    assert np.asarray(out["usable_mask"])[0, :, 0, :].all()
+    np.testing.assert_allclose(action - action[0], 0.0, atol=1.0e-12)
+    assert abs(action[0, 0] - action[0, 1]) > 0.5
+    expected_pooled_variance = ((action[0, 0] - action[0, 1]) / action[0].sum()) ** 2
+    assert float(out["total"]) == pytest.approx(expected_pooled_variance)
+    assert float(out["total"]) > 0.1
+
+
 def test_action_residual_ad_matches_finite_difference():
     def objective(amplitude):
         return _action_residual(amplitude)["total"]

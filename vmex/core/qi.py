@@ -40,11 +40,17 @@ def j_invariant_qi_residual_from_boozer(
     max_wells: int | None = None,
     quadrature_order: int = 64,
 ) -> dict[str, Array]:
-    """Measure variation of bounce action at shared physical pitch.
+    """Measure pooled complete-well action dispersion at shared physical pitch.
 
-    Complete wells from all field lines and periods are compared on each
-    surface. Edge-cut wells are excluded, while marginal, merged, overflow,
-    or absent pitch blocks return NaN instead of a plausible zero.
+    For each surface and pitch, ``action_mean`` pools every usable well across
+    field lines and periods. ``total`` sums the surface-weighted, mean-normalized
+    variance about that pooled mean over pitches. Distinct well families can
+    therefore give a positive residual even when each family's action is
+    independent of the field-line label; this is not a matched-well measure of
+    omnigenity or radial drift.
+
+    Edge-cut wells are excluded, while marginal, merged, overflow, or absent
+    pitch blocks return NaN instead of a plausible zero.
     """
     bmnc_b = jnp.asarray(bmnc_b, dtype=jnp.float64)
     if bmnc_b.ndim != 2:
@@ -144,7 +150,12 @@ class ConstructedQIResidual(_QIResidualTerm):
 
 
 class JInvariantQIResidual(_QIResidualTerm):
-    """Bounce-action invariance residual at caller-supplied physical pitch."""
+    """Pooled complete-well action dispersion at supplied physical pitch.
+
+    Wells are pooled across field lines and periods at each surface and pitch,
+    without matching well families. See
+    :func:`j_invariant_qi_residual_from_boozer` for its interpretation.
+    """
 
     name = "j_invariant_qi"
 
