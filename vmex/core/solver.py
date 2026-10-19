@@ -2647,6 +2647,7 @@ def solve(
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
     use_fft: bool | None = None,
+    lambda_m0_floor: float | None = None,
     jacobian_retries: int = 2,
     polish: bool | str | None = None,
     polish_force_balance: bool | str = False,
@@ -2699,6 +2700,10 @@ def solve(
     (default) to apply the measured small-work-to-CPU policy, or ``None`` to
     follow JAX placement.  The automatic policy never overrides an active
     ``jax.default_device`` context or user-pinned JAX platform.
+
+    ``lambda_m0_floor=None`` (default) keeps VMEC2000's diagonal lambda
+    preconditioner; ``1e-3`` adds the radial ``m = 0`` block
+    (:func:`~vmex.core.preconditioner.lamcal_m0_radial`).
 
     ``use_fft=None`` (default) selects separable FFT only above 512 modes on
     accelerators and ARM CPUs; smaller problems and x86 CPUs retain the dense
@@ -2766,7 +2771,7 @@ def solve(
             tcon0=tcon0, gamma=gamma,
             lconm1=lconm1, precon_type=precon_type,
             prec2d_threshold=prec2d_threshold, prec2d=prec2d,
-            use_fft=use_fft_resolved,
+            use_fft=use_fft_resolved, lambda_m0_floor=lambda_m0_floor,
         )
     with device_context(device, rt.resolution):
         if initial_state is not None:

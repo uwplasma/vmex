@@ -381,3 +381,22 @@ def test_lambda_m0_radial_block_inverts_the_force_jacobian():
         spectra[floor] = np.sort(np.linalg.eigvals(jac / np.median(np.diag(jac))).real)
     assert spectra[None][0] < 0.01 and spectra[None][-1] > 1.9
     np.testing.assert_allclose(spectra[0.0], 1.0, atol=1e-2)
+
+
+def test_lambda_m0_floor_reaches_the_ladder_solver():
+    """``solve_multigrid(lambda_m0_floor=...)`` changes the 3-D iteration and
+    stays finite; the default leaves VMEC2000's diagonal lambda step."""
+    from dataclasses import replace
+
+    import vmex as vj
+
+    inp = vj.VmecInput.from_file("examples/data/input.li383_low_res")
+    inp = replace(inp, ns_array=(8,), ftol_array=(1e-30,), niter_array=(30,))
+
+    def run(**kw):
+        return vj.solve_multigrid(
+            inp, verbose=False, raise_on_max_iterations=False, **kw)
+
+    base, floored = run(), run(lambda_m0_floor=1e-3)
+    assert np.isfinite(float(floored.fsql)) and float(floored.fsql) != float(base.fsql)
+    assert float(run(lambda_m0_floor=None).fsql) == float(base.fsql)

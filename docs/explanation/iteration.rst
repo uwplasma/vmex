@@ -228,10 +228,43 @@ shows up as surface-to-surface sign flips in :math:`\langle\mathbf J\cdot
 :math:`10^{-3}` of the diagonal added so the checkerboard step is at most
 :math:`10^3` times the ``faclam`` step. The axis copy
 :math:`\lambda_0 = \lambda_1` of ``totzsps`` adds :math:`A_{1/2}/4` to the
-first row. It is opt-in, ``prepare_runtime(..., lambda_m0_floor=1e-3)``, so
-the default keeps VMEC2000 iteration parity. ``tests/test_preconditioner.py`` checks that with a zero
-floor the preconditioned force Jacobian on these columns is the identity to
-1%, against eigenvalues from 0.003 to 2 for the diagonal.
+first row. It is opt-in (``lambda_m0_floor=1e-3`` in
+:func:`~vmex.core.multigrid.solve_multigrid`, :func:`~vmex.core.solver.solve`
+and ``prepare_runtime``), so the default keeps VMEC2000 iteration parity.
+``tests/test_preconditioner.py`` checks that with a zero floor the
+preconditioned force Jacobian on these columns is the identity to 1%, against
+eigenvalues from 0.003 to 2 for the diagonal.
+
+Measured effect (warm wall time per solve is equal within 5% in every row):
+
+.. list-table::
+   :header-rows: 1
+
+   * - Deck
+     - Iterations off / on
+   * - ``LandremanPaul2021_QA_lowres``, ftol 1e-8, 1e-11, 1e-13
+     - 1115 / 1017
+   * - ``nfp3_QI_fixed_resolution_final``
+     - 5636 / 5570
+   * - ``nfp2_QA``, ``nfp2_QA_finite_beta``, ``li383_low_res``, ``nfp2_QA_highres``
+     - equal (648, 757, 123, 1253 / 1254)
+   * - ``nfp2_QA`` ladder 9, 17, 35; ``li383_low_res`` at ``ns`` = 99
+     - equal (1513; 817)
+   * - ``nfp4_QH_warm_start``
+     - 450 / 454
+   * - ``nfp4_QH_finite_beta``
+     - 1785 / 1912
+   * - ``cth_like_free_bdy``, ladder 7, 15 (free boundary)
+     - 308 / 311
+
+Use it for a fixed-boundary stellarator run to a very small ``ftol`` that shows
+surface-to-surface sign flips of :math:`\langle\mathbf J\cdot\mathbf B\rangle`
+or ``DMerc``: the checkerboard amplitude halves. It does not reduce the
+iteration count in general (no 3-D deck gained more than 9%, one lost 7%), and
+the floor does not change that: 0.1 to 0 on ``nfp4_QH_finite_beta`` gives 1813
+to 1929 iterations. Switched on, it moves the trajectory, so the tests pinned
+to VMEC2000 iterates after a fixed number of iterations, or to a converged
+state to 5e-12, no longer hold. That is why it is not the default.
 
 This term was introduced by VMEC++ (``lambda_precondition_checkerboard_terms``,
 v0.9.0); VMEC2000 and PARVMEC use the diagonal only.

@@ -553,6 +553,8 @@ baseline. Set worker and device budgets with the
 [ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
 kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
 
+For fixed-boundary stellarators converged to a very small `ftol`, `solve_multigrid(inp, lambda_m0_floor=1e-3)` adds a radial preconditioner for the $m=0$ $\lambda$ force ([when it helps](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
+
 ## Documentation, development and citation
 
 Start with [your first equilibrium](https://vmex.readthedocs.io/en/latest/tutorials/first-equilibrium.html)
