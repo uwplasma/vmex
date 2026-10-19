@@ -281,7 +281,12 @@ def test_block_finish_lowering_is_shared_across_trial_points() -> None:
     factor_a = im._refine_block_factor_core.lower(z0, p0, state, mask, cfg=cfg).as_text()
     factor_b = im._refine_block_factor_core.lower(z1, p1, state, mask, cfg=cfg).as_text()
     assert factor_a == factor_b
-    factors = im._refine_block_factor_core(z0, p0, state, mask, cfg)
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        factors = im._refine_block_factor_core(z0, p0, state, mask, cfg)[:3]
+    finally:
+        jax.config.update("jax_disable_jit", previous)
     step_a = im._refine_block_step_core.lower(z0, p0, state, mask, factors, cfg=cfg).as_text()
     step_b = im._refine_block_step_core.lower(z1, p1, state, mask, factors, cfg=cfg).as_text()
     assert step_a == step_b

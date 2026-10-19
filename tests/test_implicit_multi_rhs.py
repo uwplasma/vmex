@@ -223,13 +223,14 @@ def test_block_response_forward_transpose_and_fd():
         np.testing.assert_allclose(
             directional, finite_difference, rtol=2e-5, atol=2e-8
         )
-def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeypatch):
-    """A column the corrector leaves uncertified is refined through the block factors.
+def test_block_preconditioned_corrector_recovers_a_poor_direct_solve(monkeypatch):
+    """A column the direct block solve misses is certified by the corrector.
 
-    Before refinement, one such column sent the automatic optimizer Jacobian to the
-    reverse lane, which maps a pullback over every residual row (655 s instead of
-    27 s for 17,716 rows and 48 columns). A stalled corrector is simulated here: it
-    returns a perturbed warm start with a non-converged report.
+    The corrector is GMRES on the raw operator, right-preconditioned by the
+    same block factors, so a perturbed direct solve converges back to the
+    reference in one preconditioned iteration instead of sending the optimizer Jacobian
+    to the reverse lane (655 s instead of 27 s for 17,716 rows and 48
+    columns on the stage that motivated block refinement).
     """
     inp, cfg, p0 = _small_solovev_setup()
     state, mask = im.solve_implicit_with_aux(p0, cfg)
@@ -246,21 +247,12 @@ def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeyp
 
     reference, report = respond()
     assert np.all(np.asarray(report.converged))
-
-    def stalled(A, b, cfg, *, x0=None, max_restarts=None, rtol=None):
-        return jax.tree.map(lambda value: 1.001 * value, x0), im.LinearResponseReport(
-            residual_norm=jnp.asarray(1.0e30), tolerance=jnp.asarray(0.0),
-            iterations=jnp.asarray(1, jnp.int32), converged=jnp.asarray(False))
-
-    monkeypatch.setattr(im, "_adjoint_solve", stalled)
-    passes = im._BLOCK_REFINEMENT_PASSES
-    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", 0)
-    _, unrefined = respond()
-    assert not np.any(np.asarray(unrefined.converged))
-    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", passes)
-    refined, report = respond()
+    direct = im._raw_block_solve
+    monkeypatch.setattr(im, "_raw_block_solve", lambda *a, **k: (
+        jax.tree.map(lambda value: 1.001 * value, direct(*a, **k)[0]), None))
+    corrected, report = respond()
     assert np.all(np.asarray(report.converged))
-    assert _relative_difference(refined, reference) < 1e-8
+    assert _relative_difference(corrected, reference) < 1e-7
 
 
 def test_raw_block_probe_chunking_preserves_exact_factors():

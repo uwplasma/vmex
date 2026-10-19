@@ -183,7 +183,8 @@ from .residuals import (
     m1_physical_to_constrained, m1_residue_rotation, scalxc_scale_force,
     zero_m1_z_force,
 )
-from .setup import RadialGrids, flux_profiles, interior_guess
+from .setup import (
+    RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess)
 from .solver import (
     SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
     _force_to_state, _initial_state, _physical_coefficients,
@@ -207,7 +208,7 @@ __all__ = [
     "implicit_state_tangent_multi_rhs", "implicit_state_pullback_multi_rhs", "run",
     "measured_chunk_size",
     "mhd_energy", "plasma_volume", "aspect_ratio", "iota_profile",
-    "iota_axis", "iota_edge", "edge_iota", "residual_fn", "adjoint_matvec",
+    "iota_axis", "iota_edge", "edge_iota", "residual_fn",
     "frozen_path_directional_fd",
 ]
 
@@ -462,19 +463,47 @@ _CONFIG_CANON: "collections.OrderedDict[Any, ImplicitConfig]" =     collections.
 _CONFIG_CANON_MAX = 16
 
 
+#: ``VmecInput`` fields every implicit lane reads through the traced
+#: :class:`ImplicitParams`, never from ``cfg.inp`` (the host solve overwrites
+#: them with :func:`input_with_params`).
+_PARAM_FIELDS = tuple(f.name for f in dataclasses.fields(ImplicitParams))
+
+
+def _structural_token(cfg: ImplicitConfig) -> Any:
+    """Content token of ``cfg`` with the parameter values of its input left out.
+
+    Only their shapes and the two discrete decisions frozen from the input
+    boundary (the ``readin.f`` theta flip and the lasym rotation's zero
+    denominator) remain, so configs that differ only in boundary or profile
+    values share one canonical instance and every executable keyed on it.
+    """
+    inp = cfg.inp
+    fields = tuple(
+        (f.name, ("shape", np.shape(getattr(inp, f.name)))
+         if f.name in _PARAM_FIELDS else _content_token(getattr(inp, f.name)))
+        for f in dataclasses.fields(inp))
+    rbc, zbs = np.asarray(inp.rbc, dtype=float), np.asarray(inp.zbs, dtype=float)
+    rotation = (bool(inp.lasym) and int(inp.mpol) >= 2
+                and abs(rbc[int(inp.ntor), 1]) + abs(zbs[int(inp.ntor), 1]) == 0.0)
+    return (fields, _internal_blocks_from_input(inp)[1], rotation, tuple(
+        (f.name, _content_token(getattr(cfg, f.name)))
+        for f in dataclasses.fields(cfg) if f.name != "inp"))
+
+
 def _canonical_config(cfg: ImplicitConfig) -> ImplicitConfig:
-    """One shared instance per config *content* (``ImplicitConfig`` is
+    """One shared instance per config *structure* (``ImplicitConfig`` is
     ``eq=False``, so every identity-keyed cache — the residual lane's static
     argument, ``_LAST_SOLVE``, the template-runtime cache — would otherwise
     miss across the fresh configs :func:`make_config`/:func:`run` mint on
     every objective evaluation: the F4 baseline recompiled the residual lane
-    fourteen times per warm repeat on identical content). Equal content means
-    identical behaviour, so sharing is exact, and the registry stays small:
-    one entry per distinct deck/resolution/knob set per process. Callers
-    treat ``VmecInput`` arrays as frozen (the ``dataclasses.replace`` idiom
-    throughout); mutating them in place was already unsupported.
+    fourteen times per warm repeat on identical content).  The key is
+    :func:`_structural_token`: boundary and profile values reach every lane
+    as traced :class:`ImplicitParams`, so a config for a moved boundary (the
+    next optimizer stage) behaves identically to the canonical one and
+    reuses its executables.  Callers treat ``VmecInput`` arrays as frozen
+    (the ``dataclasses.replace`` idiom throughout).
     """
-    key = _content_token(cfg)
+    key = _structural_token(cfg)
     hit = _CONFIG_CANON.get(key)
     if hit is not None:
         _CONFIG_CANON.move_to_end(key)
@@ -1619,11 +1648,16 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
 def _refine_block_factor_core(z: SpectralState, params: ImplicitParams,
                               frozen: SpectralState, dof_mask: SpectralState,
                               cfg: ImplicitConfig):
-    """Raw block factors linearized at the iterate ``z``."""
+    """Raw block factors, scales and bands linearized at the iterate ``z``.
+
+    The one compiled block factorization of a config: the anchor's Newton
+    steps, the Jacobian and the adjoint all consume its output.
+    """
     fields = _active_state_fields(cfg)
     probe = int(np.ceil(np.sqrt(len(fields) * int(dof_mask.R_cos.shape[1]))))
     system = _raw_block_system(params, cfg, frozen, dof_mask, fields, probe, z_star=z)
-    return system.factors, system.row_scale, system.column_scale
+    return (system.factors, system.row_scale, system.column_scale,
+            system.lower, system.diagonal, system.upper)
 
 
 @functools.partial(jax.jit, static_argnames=("cfg",))
@@ -1666,12 +1700,20 @@ def _refine_block_factors(cfg: ImplicitConfig, params: ImplicitParams,
                           frozen: SpectralState, dof_mask: SpectralState,
                           z: SpectralState):
     """Raw block factors at ``z`` through the staged per-config executable."""
-    arguments = commit_to_single_device(tuple(
-        _pin_concrete(cfg, tree) for tree in (z, params, frozen, dof_mask)))
-    factors = _refine_block_factor_core(*arguments, cfg)
+    factors = _block_bands(cfg, params, frozen, dof_mask, z)[:3]
     _count(cfg, refinement_factorizations=1)
     _BLOCK_FACTORS_BUILT[id(cfg)] = factors
     return factors
+
+
+def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
+                 frozen: SpectralState, dof_mask: SpectralState,
+                 z: SpectralState | None = None) -> tuple:
+    """:func:`_refine_block_factor_core` output at ``z`` (default ``frozen``)."""
+    arguments = commit_to_single_device(tuple(
+        _pin_concrete(cfg, tree)
+        for tree in (frozen if z is None else z, params, frozen, dof_mask)))
+    return _refine_block_factor_core(*arguments, cfg)
 
 
 def _refine_block_step(cfg: ImplicitConfig, params: ImplicitParams,
@@ -2365,12 +2407,6 @@ def _tree_norm(tree):
     ))
 
 
-def _raw_certified_report(report: LinearResponseReport, raw_ok):
-    """Mark a column converged when the raw-operator residual accepts it."""
-    return report._replace(
-        converged=jnp.logical_or(report.converged, raw_ok))
-
-
 def _linear_response_report(sol, rhs, cfg: ImplicitConfig, rtol=None):
     b_norm = _tree_norm(rhs)
     tolerance = _adjoint_acceptance(cfg, b_norm, rtol)
@@ -2410,7 +2446,7 @@ def _checked_adjoint_x(sol, b_flat, cfg: ImplicitConfig):
 
 
 def _adjoint_solve(A, b, cfg: ImplicitConfig, *, x0=None, max_restarts=None,
-                   rtol=None):
+                   rtol=None, precond=None):
     """Adjoint linear solve ``(dF/dz)^T lambda = b`` via ``solvax.gmres``.
 
     ``solvax.gmres`` operates on flat ``(n,)`` vectors, so the pytree ``b``
@@ -2423,7 +2459,8 @@ def _adjoint_solve(A, b, cfg: ImplicitConfig, *, x0=None, max_restarts=None,
     residual before the first Arnoldi cycle, so a warm start already at
     tolerance costs exactly one matvec (the corrector pass over the
     block-tridiagonal direct solve).  ``max_restarts`` overrides
-    ``cfg.adjoint_maxiter`` for such short corrector budgets.
+    ``cfg.adjoint_maxiter`` for such short corrector budgets.  ``precond``
+    (pytree to pytree) right-preconditions the iteration.
 
     Runs bound to ``cfg.device`` (RHS/x0 pinned, solver call inside the
     config's device context) — see the adjoint execution-site note above.
@@ -2438,10 +2475,12 @@ def _adjoint_solve(A, b, cfg: ImplicitConfig, *, x0=None, max_restarts=None,
     def matvec(v):
         return ravel_pytree(A(unravel(v)))[0]
 
+    extra = {} if precond is None else {
+        "precond": lambda v: ravel_pytree(precond(unravel(v)))[0]}
     with _device_context(cfg):
         sol = _solvax_gmres(
             matvec, b_flat,
-            x0=x0_flat,
+            x0=x0_flat, **extra,
             rtol=(cfg.adjoint_tol if rtol is None else float(rtol)),
             atol=0.0, restart=cfg.adjoint_restart,
             max_restarts=(cfg.adjoint_maxiter if max_restarts is None
@@ -2718,6 +2757,7 @@ def _raw_block_system(
     physical_state: SpectralState | None = None,
     include_edge: bool = False,
     factor: bool = True,
+    bands: tuple | None = None,
 ) -> _RawBlockSystem:
     """Factor an exactly nearest-neighbor raw-force Jacobian once.
 
@@ -2727,6 +2767,9 @@ def _raw_block_system(
     certify the blocks. The optional runtime/state arguments let free boundary
     freeze only NESTOR's converged edge pressure while retaining its evolved
     edge row. The default remains the fixed-boundary raw residual.
+    ``bands`` takes ``(factors, row_scale, column_scale, lower, diagonal,
+    upper)`` already built at this point by :func:`_block_bands`, so a graph
+    that only consumes the system does not compile its assembly again.
     """
     if not active_fields:
         raise ValueError("implicit response has no active state fields")
@@ -2768,116 +2811,119 @@ def _raw_block_system(
 
     _, pullback = jax.vjp(lambda z: residual(z, params), z_star)
     operator_t = lambda cotangent: pullback(cotangent)[0]  # noqa: E731
-    dtype = frozen.R_cos.dtype
-    rt = runtime_from_params(params, cfg) if runtime is None else runtime
-    if physical_state is None:
-        physical_state = _assemble(
-            z_star, rt, frozen, project, _edge_mask(cfg))
-    zeros = jnp.zeros((3, block_size), dtype=dtype)
-
-    def local_unpack(matrix):
-        parts = dict(zip(active_fields, jnp.split(matrix, n_active, axis=1)))
-        return SpectralState(**{
-            name: parts.get(name, jnp.zeros((3, mn), matrix.dtype))
-            for name in _STATE_FIELDS
-        })
-
-    def local_pack(tree):
-        return jnp.concatenate(
-            [getattr(tree, name) for name in active_fields], axis=1)
-
-    def row_jacobian(row, *, axis_closure):
-        start = jnp.clip(row - 1, 0, ns - 3)
-        base = jax.tree.map(
-            lambda value: jax.lax.dynamic_slice_in_dim(value, start, 3),
-            physical_state,
-        )
-        local_mask = jax.tree.map(
-            lambda value: jax.lax.dynamic_slice_in_dim(value, start, 3),
-            dof_mask,
-        )
-        local_project = _dof_projector(cfg, local_mask)
-
-        def row_residual(delta):
-            unpacked = local_unpack(delta)
-            tangent = local_project(unpacked)
-            trial = jax.tree.map(jnp.add, base, tangent)
-            force = _raw_residual_segment(
-                trial, rt, start, axis_closure=axis_closure,
-                include_edge=include_edge,
-            )
-            # Inactive columns receive an identity equation so every radial
-            # block remains nonsingular; projected callers never excite them.
-            regularized = jax.tree.map(
-                lambda value, raw, active: value + raw - active,
-                local_project(force), unpacked, tangent,
-            )
-            return local_pack(regularized)[row - start]
-
-        # This local Jacobian is wide (block_size outputs, three block_size
-        # inputs), so reverse mode needs one third as many linear sweeps as
-        # forward mode while retaining only a three-surface tape.  Apply the
-        # output cotangent basis in bounded chunks: a bare jacrev vmaps all
-        # block_size rows and made the QA startup graph retain gigabytes of
-        # batched intermediates despite this otherwise-local construction.
-        _, pullback = jax.vjp(row_residual, zeros)
-        basis = jnp.eye(block_size, dtype=dtype)
-        return chunk_map(
-            lambda cotangent: pullback(cotangent)[0],
-            basis,
-            chunk_size=min(int(probe_chunk_size), block_size),
-        )
-
-    if colored:
-        lower, diagonal, upper = _colored_bands(
-            operator, pack, unpack, project, ns, block_size, dtype,
-            # each probe carries a full-operator tangent; bound the batch by ns
-            min(block_size, max(8, _COLORED_PROBE_BUDGET // ns)))
+    if bands is not None:
+        factors, row_scale, column_scale, lower, diagonal, upper = bands
     else:
-        # Rows 0 and 1 depend on VMEC's lambda-axis closure. All later rows share
-        # one ordinary local kernel; lax.map keeps the compile graph bounded in ns.
-        axis_rows = jnp.arange(min(2, ns))
-        axis_jacobians = jax.lax.map(
-            lambda row: row_jacobian(row, axis_closure=True), axis_rows)
-        ordinary_rows = jnp.arange(2, ns)
-        ordinary_jacobians = jax.lax.map(
-            lambda row: row_jacobian(row, axis_closure=False), ordinary_rows)
-        jacobians = jnp.concatenate((axis_jacobians, ordinary_jacobians), axis=0)
-        rows = jnp.arange(ns); starts = jnp.clip(rows - 1, 0, ns - 3)
+        dtype = frozen.R_cos.dtype
+        rt = runtime_from_params(params, cfg) if runtime is None else runtime
+        if physical_state is None:
+            physical_state = _assemble(
+                z_star, rt, frozen, project, _edge_mask(cfg))
+        zeros = jnp.zeros((3, block_size), dtype=dtype)
 
-        def select(jacobian, local_column):
-            return jax.lax.dynamic_index_in_dim(
-                jacobian, local_column, axis=1, keepdims=False)
+        def local_unpack(matrix):
+            parts = dict(zip(active_fields, jnp.split(matrix, n_active, axis=1)))
+            return SpectralState(**{
+                name: parts.get(name, jnp.zeros((3, mn), matrix.dtype))
+                for name in _STATE_FIELDS
+            })
 
-        diagonal = jax.vmap(select)(jacobians, rows - starts)
-        lower = jnp.zeros_like(diagonal).at[1:].set(jax.vmap(select)(
-            jacobians[1:], rows[1:] - 1 - starts[1:]))
-        upper = jnp.zeros_like(diagonal).at[:-1].set(jax.vmap(select)(
-            jacobians[:-1], rows[:-1] + 1 - starts[:-1]))
-        lower = lower.at[0].set(jnp.zeros_like(lower[0]))
-        upper = upper.at[-1].set(jnp.zeros_like(upper[-1]))
-    tiny = jnp.finfo(dtype).tiny
-    row_norm = jnp.maximum(
-        jnp.max(jnp.abs(diagonal), axis=-1),
-        jnp.maximum(jnp.max(jnp.abs(lower), axis=-1),
-                    jnp.max(jnp.abs(upper), axis=-1)))
-    row_scale = 1.0 / jnp.maximum(row_norm, tiny)
-    lower_r = row_scale[:, :, None] * lower
-    diagonal_r = row_scale[:, :, None] * diagonal
-    upper_r = row_scale[:, :, None] * upper
-    column_norm = jnp.max(jnp.abs(diagonal_r), axis=-2)
-    column_norm = column_norm.at[:-1].max(
-        jnp.max(jnp.abs(lower_r[1:]), axis=-2))
-    column_norm = column_norm.at[1:].max(
-        jnp.max(jnp.abs(upper_r[:-1]), axis=-2))
-    column_scale = 1.0 / jnp.maximum(column_norm, tiny)
-    lower_scaled = lower_r * column_scale[jnp.maximum(
-        jnp.arange(ns) - 1, 0)][:, None, :]
-    diagonal_scaled = diagonal_r * column_scale[:, None, :]
-    upper_scaled = upper_r * column_scale[jnp.minimum(
-        jnp.arange(ns) + 1, ns - 1)][:, None, :]
-    factors = (block_thomas_factor(lower_scaled, diagonal_scaled, upper_scaled)
-               if factor else None)
+        def local_pack(tree):
+            return jnp.concatenate(
+                [getattr(tree, name) for name in active_fields], axis=1)
+
+        def row_jacobian(row, *, axis_closure):
+            start = jnp.clip(row - 1, 0, ns - 3)
+            base = jax.tree.map(
+                lambda value: jax.lax.dynamic_slice_in_dim(value, start, 3),
+                physical_state,
+            )
+            local_mask = jax.tree.map(
+                lambda value: jax.lax.dynamic_slice_in_dim(value, start, 3),
+                dof_mask,
+            )
+            local_project = _dof_projector(cfg, local_mask)
+
+            def row_residual(delta):
+                unpacked = local_unpack(delta)
+                tangent = local_project(unpacked)
+                trial = jax.tree.map(jnp.add, base, tangent)
+                force = _raw_residual_segment(
+                    trial, rt, start, axis_closure=axis_closure,
+                    include_edge=include_edge,
+                )
+                # Inactive columns receive an identity equation so every radial
+                # block remains nonsingular; projected callers never excite them.
+                regularized = jax.tree.map(
+                    lambda value, raw, active: value + raw - active,
+                    local_project(force), unpacked, tangent,
+                )
+                return local_pack(regularized)[row - start]
+
+            # This local Jacobian is wide (block_size outputs, three block_size
+            # inputs), so reverse mode needs one third as many linear sweeps as
+            # forward mode while retaining only a three-surface tape.  Apply the
+            # output cotangent basis in bounded chunks: a bare jacrev vmaps all
+            # block_size rows and made the QA startup graph retain gigabytes of
+            # batched intermediates despite this otherwise-local construction.
+            _, pullback = jax.vjp(row_residual, zeros)
+            basis = jnp.eye(block_size, dtype=dtype)
+            return chunk_map(
+                lambda cotangent: pullback(cotangent)[0],
+                basis,
+                chunk_size=min(int(probe_chunk_size), block_size),
+            )
+
+        if colored:
+            lower, diagonal, upper = _colored_bands(
+                operator, pack, unpack, project, ns, block_size, dtype,
+                # each probe carries a full-operator tangent; bound the batch by ns
+                min(block_size, max(8, _COLORED_PROBE_BUDGET // ns)))
+        else:
+            # Rows 0 and 1 depend on VMEC's lambda-axis closure. All later rows share
+            # one ordinary local kernel; lax.map keeps the compile graph bounded in ns.
+            axis_rows = jnp.arange(min(2, ns))
+            axis_jacobians = jax.lax.map(
+                lambda row: row_jacobian(row, axis_closure=True), axis_rows)
+            ordinary_rows = jnp.arange(2, ns)
+            ordinary_jacobians = jax.lax.map(
+                lambda row: row_jacobian(row, axis_closure=False), ordinary_rows)
+            jacobians = jnp.concatenate((axis_jacobians, ordinary_jacobians), axis=0)
+            rows = jnp.arange(ns); starts = jnp.clip(rows - 1, 0, ns - 3)
+
+            def select(jacobian, local_column):
+                return jax.lax.dynamic_index_in_dim(
+                    jacobian, local_column, axis=1, keepdims=False)
+
+            diagonal = jax.vmap(select)(jacobians, rows - starts)
+            lower = jnp.zeros_like(diagonal).at[1:].set(jax.vmap(select)(
+                jacobians[1:], rows[1:] - 1 - starts[1:]))
+            upper = jnp.zeros_like(diagonal).at[:-1].set(jax.vmap(select)(
+                jacobians[:-1], rows[:-1] + 1 - starts[:-1]))
+            lower = lower.at[0].set(jnp.zeros_like(lower[0]))
+            upper = upper.at[-1].set(jnp.zeros_like(upper[-1]))
+        tiny = jnp.finfo(dtype).tiny
+        row_norm = jnp.maximum(
+            jnp.max(jnp.abs(diagonal), axis=-1),
+            jnp.maximum(jnp.max(jnp.abs(lower), axis=-1),
+                        jnp.max(jnp.abs(upper), axis=-1)))
+        row_scale = 1.0 / jnp.maximum(row_norm, tiny)
+        lower_r = row_scale[:, :, None] * lower
+        diagonal_r = row_scale[:, :, None] * diagonal
+        upper_r = row_scale[:, :, None] * upper
+        column_norm = jnp.max(jnp.abs(diagonal_r), axis=-2)
+        column_norm = column_norm.at[:-1].max(
+            jnp.max(jnp.abs(lower_r[1:]), axis=-2))
+        column_norm = column_norm.at[1:].max(
+            jnp.max(jnp.abs(upper_r[:-1]), axis=-2))
+        column_scale = 1.0 / jnp.maximum(column_norm, tiny)
+        lower_scaled = lower_r * column_scale[jnp.maximum(
+            jnp.arange(ns) - 1, 0)][:, None, :]
+        diagonal_scaled = diagonal_r * column_scale[:, None, :]
+        upper_scaled = upper_r * column_scale[jnp.minimum(
+            jnp.arange(ns) + 1, ns - 1)][:, None, :]
+        factors = (block_thomas_factor(lower_scaled, diagonal_scaled, upper_scaled)
+                   if factor else None)
 
     def band_operator(tangent):
         response = block_tridiag_matvec(
@@ -2981,11 +3027,6 @@ def _raw_block_apply(
         system.row_scale, system.column_scale, rhs, transpose=transpose)
 
 
-#: Raw-block refinement passes for a response column the corrector left
-#: uncertified (fixed, so a hard point can never loop).
-_BLOCK_REFINEMENT_PASSES = 2
-
-
 def _implicit_evolved_tangent_multi_rhs(
     params: ImplicitParams,
     cfg: ImplicitConfig,
@@ -2998,92 +3039,45 @@ def _implicit_evolved_tangent_multi_rhs(
     response_chunk_size: int,
     certify_rtol: float | None = None,
     certify_maxiter: int | None = None,
+    bands: tuple | None = None,
 ) -> tuple[SpectralState, LinearResponseReport]:
+    """State responses ``dz_j = -(dF/dz)^{-1} dF/dp t_j`` of every tangent.
+
+    One raw block factorization backsolves every right-hand side, and a
+    warm-started GMRES on the same raw operator, right-preconditioned by
+    those factors, certifies each column to ``certify_rtol``.  A column the
+    direct solve already lands costs one matvec; one it misses converges in
+    a few preconditioned iterations.  The raw operator is the one the columns
+    are consumed through, so the certificate needs no second formulation.
+    """
     frozen = jax.lax.stop_gradient(x_star)
     system = _raw_block_system(
-        params, cfg, frozen, dof_mask, active_fields, probe_chunk_size
-    )
+        params, cfg, frozen, dof_mask, active_fields, probe_chunk_size,
+        bands=bands)
     z_star = system.project(x_star)
-    raw_residual = residual_fn(
-        cfg, frozen, dof_mask, formulation="raw"
-    )
-    residual = residual_fn(cfg, frozen, dof_mask)
+    raw_residual = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+
     def raw_rhs(tangent):
         value = jax.jvp(
-            lambda prm: raw_residual(z_star, prm), (params,), (tangent,)
-        )[1]
+            lambda prm: raw_residual(z_star, prm), (params,), (tangent,))[1]
         return jax.tree.map(jnp.negative, value)
 
-    initial, _ = _raw_block_solve(
-        system, jax.vmap(raw_rhs)(tangent_batch), cfg
-    )
+    rhs_batch = jax.vmap(raw_rhs)(tangent_batch)
+    initial, _ = _raw_block_solve(system, rhs_batch, cfg)
 
     def correct(args):
-        tangent, x0 = args
-        rhs = jax.tree.map(
-            jnp.negative,
-            jax.jvp(
-                lambda prm: residual(z_star, prm),
-                (params,), (tangent,),
-            )[1],
-        )
+        rhs, x0 = args
         solution, krylov = _adjoint_solve(
-            lambda value: jax.jvp(
-                lambda z: residual(z, params),
-                (z_star,), (value,),
-            )[1],
-            rhs, cfg, x0=x0, rtol=certify_rtol,
+            system.operator, rhs, cfg, x0=x0, rtol=certify_rtol,
             max_restarts=certify_maxiter,
-        )
-        # Certify on the raw operator the columns are consumed through.  The
-        # corrector iterates on the preconditioned system; the two share a
-        # solution but not a norm, so measuring there can reject an accurate
-        # response or accept an inaccurate one.
-        raw_defect = jax.tree.map(
-            jnp.subtract, raw_rhs(tangent), system.operator(solution))
-        raw_norm = _tree_norm(raw_rhs(tangent))
-        raw_ok = _tree_norm(raw_defect) <= _adjoint_acceptance(
-            cfg, raw_norm, certify_rtol)
-        return solution, _raw_certified_report(_linear_response_report(
-            krylov, rhs, cfg, rtol=certify_rtol), raw_ok)
+            precond=lambda r: _raw_block_apply(system, r))
+        return solution, _linear_response_report(
+            krylov, rhs, cfg, rtol=certify_rtol)
 
-    solution, report = chunk_map(
-        correct, (tangent_batch, initial),
-        chunk_size=max(1, int(response_chunk_size)),
-    )
-
-    def refine(args):
-        # Iterative refinement through the stored raw block factors, as the
-        # block adjoint does, for a column the corrector left uncertified.
-        tangent, x, converged = args
-        b = raw_rhs(tangent)
-        for _ in range(_BLOCK_REFINEMENT_PASSES):
-            defect = jax.tree.map(jnp.subtract, b, system.operator(x))
-            x = jax.tree.map(jnp.add, x, _raw_block_apply(system, defect))
-        ok = _tree_norm(jax.tree.map(jnp.subtract, b, system.operator(x))) <= \
-            _adjoint_acceptance(cfg, _tree_norm(b), certify_rtol)
-        return x, jnp.logical_and(ok, jnp.logical_not(converged))
-
-    def refine_uncertified(_):
-        refined, gained = chunk_map(
-            refine, (tangent_batch, solution, report.converged),
-            chunk_size=max(1, int(response_chunk_size)),
-        )
-        kept = jax.tree.map(
-            lambda new, old: jnp.where(
-                gained.reshape((-1,) + (1,) * (new.ndim - 1)), new, old),
-            refined, solution)
-        return kept, report._replace(
-            converged=jnp.logical_or(report.converged, gained))
-
-    # Paid only when a column misses: a fixed number of passes, so a hard
-    # point costs a few block solves instead of the reverse lane's row map.
-    solution, report = jax.lax.cond(
-        jnp.all(report.converged), lambda _: (solution, report),
-        refine_uncertified, operand=None)
     # The caller decides how to handle a missed certificate. Public optimizer
     # lanes never expose such a response as an exact derivative.
-    return solution, report
+    return chunk_map(correct, (rhs_batch, initial),
+                     chunk_size=max(1, int(response_chunk_size)))
 
 
 def implicit_state_tangent_multi_rhs(
@@ -3612,17 +3606,6 @@ def _implicit_state_pullback_multi_rhs_impl(
     g1_batch = jax.vmap(lambda lam: vjp_p(jax.tree.map(jnp.negative, lam))[0])(lam_batch)
     g2_batch = jax.vmap(lambda gbar: vjp_p2(gbar)[0])(gbar_batch)
     return jax.tree.map(jnp.add, g1_batch, g2_batch)
-
-
-def adjoint_matvec(cfg: ImplicitConfig, params: ImplicitParams,
-                   x_star: SpectralState, dof_mask: SpectralState,
-                   formulation: str = "preconditioned") -> Callable:
-    """``v -> (dF/dz)^T v`` for tests/diagnostics (both formulations)."""
-    frozen = jax.lax.stop_gradient(x_star)
-    F = residual_fn(cfg, frozen, dof_mask, formulation=formulation)
-    z_star = _dof_projector(cfg, dof_mask)(x_star)
-    _, vjp_z = jax.vjp(lambda z: F(z, params), z_star)
-    return lambda v: vjp_z(v)[0]
 
 
 # ---------------------------------------------------------------------------
