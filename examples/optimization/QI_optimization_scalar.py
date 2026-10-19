@@ -47,8 +47,7 @@ FINAL_NITER = 8000
 
 # Every output file name contains this:
 OUTPUT_NAME = "QI_scalar_optimized"
-# 1e-2 starts the wells at a softmin minimum, which keeps the residual
-# continuous: fine-grid QI 1.85e-3 instead of 1.97e-3 (6 %) at 1.7x the time.
+# Set to 1e-2 to use the softmin, which replaces the grid argmin with a smooth minimum; slower, lower objective.
 ARGMIN_SOFTNESS = 0.0
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21,
                   argmin_softness=ARGMIN_SOFTNESS)

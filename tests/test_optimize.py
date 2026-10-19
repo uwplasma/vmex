@@ -1232,7 +1232,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     monkeypatch.setattr(opt.jax, "device_get", fail_device_get)
     scalar._vg_cache = None
     failed_value, failed_gradient = scalar.value_and_grad(scalar.x0)
-    assert failed_value == wall
+    np.testing.assert_allclose(failed_value, wall, rtol=1e-14)  # jitted seed cost
     np.testing.assert_array_equal(failed_gradient, np.zeros_like(scalar.x0))
     assert scalar.fun(scalar.x0) == failed_value
     holder["scalar_certified"] = False
@@ -1252,7 +1252,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     holder["scalar_certified"] = True
     scalar._vg_cache = None
     failed_value, failed_gradient = scalar.value_and_grad(scalar.x0)
-    assert failed_value == wall
+    np.testing.assert_allclose(failed_value, wall, rtol=1e-14)  # jitted seed cost
     np.testing.assert_array_equal(failed_gradient, np.zeros_like(scalar.x0))
     monkeypatch.setattr(opt.jax, "device_get", real_device_get)
 
@@ -1624,8 +1624,10 @@ def test_subproblem_ladder_compiles_once():
             # compile once per process on first use; whether an earlier test
             # on the same xdist worker already paid them is order-dependent.
             name = re.match(r"Compiling jit\((\w+)\)", record.getMessage())
+            # Private jnp helpers (jit(_where), jit(_power)) are the same.
+            op = name[1].lstrip("_") if name else ""
             self.count += bool(name) and not (
-                hasattr(jax.numpy, name[1]) or hasattr(jax.lax, name[1]))
+                hasattr(jax.numpy, op) or hasattr(jax.lax, op))
 
     inp = _ladder_input()
     terms = [(opt.aspect_ratio, 4.0, 1.0)]
@@ -1802,3 +1804,12 @@ def test_qi_residual_is_continuous_with_a_soft_minimum():
     soft = np.abs(np.diff([total(t, 1.0e-2) for t in ts]))
     assert hard.max() > 50.0 * np.median(hard)
     assert soft.max() < 15.0 * np.median(soft)
+
+
+def test_restart_source_prefers_the_equilibrium_state():
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    eq = opt.Equilibrium(inp=inp, state="state", runtime=None, result=None)
+    eq.__dict__["wout"] = "wout"  # cached_property slot: no wout is built
+    assert opt._restart_source(eq, inp) == "state"
+    assert opt._restart_source(eq, inp.change_resolution(mpol=inp.mpol + 1, ntor=inp.ntor)) == "wout"
+    assert opt._restart_source("path", inp) == "path"

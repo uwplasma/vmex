@@ -600,11 +600,43 @@ field-line ODE eigenproblem
 along the straight-field-line angle :math:`\eta`, where :math:`g` is the
 line-bending term, :math:`c` the pressure/curvature drive, and :math:`f>0` the
 inertia; :math:`\lambda = (\gamma a_N/v_A)^2 > 0` flags instability.
-:func:`~vmex.core.stability.ballooning_growth_rate` reduces the batched
-eigenvalues to a smooth ``softmax`` scalar built to be driven negative as a
-stable-by-construction constraint. The full coefficient definitions are in the
-:mod:`~vmex.core.stability` module docstring and the usage recipe in
-:doc:`/reference/objectives`.
+**Discretization.** The three-point stencil on a uniform grid of step
+:math:`h` turns the ODE into a symmetric tridiagonal eigenproblem whose
+largest eigenvalue has error :math:`a h^2 + O(h^4)`. VMEX solves it on the
+grid and on its every-other-point subgrid and returns
+:math:`(4\lambda_h - \lambda_{2h})/3`, the Richardson step COBRA also takes
+(Sanchez *et al.* 2000). The coefficients oscillate along the line with the
+toroidal harmonics, about :math:`n_{fp} N/\iota` times per poloidal turn,
+so the extrapolation needs the grid to resolve them: on the bundled QA seed
+(:math:`n_{fp}=2`, :math:`\iota\approx0.42`) 32 points per turn read
+:math:`\lambda` 13 % low and 64 points 3 % low, while the extrapolation from
+128 points per turn is within 0.4 % of the converged value. The default is
+641 points over :math:`\eta\in[-5\pi,5\pi]`. An unstable mode is localized
+and converged in domain within three turns; a stable line tends to
+:math:`\lambda\to0^-` as the domain grows, so thresholds should not sit just
+below zero.
+
+**Radial derivatives.** Geometry spectra live on the full radial mesh,
+:math:`\iota` and :math:`p` on the half mesh. Each is read at the requested
+:math:`s` from the degree-4 polynomial through its five nearest nodes, so
+any :math:`s\in(0,1)` can be evaluated and the same surface is compared
+across radial grids. The second radial derivative enters :math:`\nabla|B|`,
+and :math:`\lambda` is sensitive to it: with three-point differences, as in
+COBRA, the eigenvalue on the QA seed at ``ns = 71`` is 2–6 % low, and the
+three-point value extrapolated from stencils :math:`h_s` and
+:math:`2h_s` agrees with the five-point value to 0.3 %.
+
+**Reductions.** At fixed :math:`(\alpha,\zeta_0)`, :math:`\lambda(s)` is
+rough: as :math:`\iota` changes, a long field line samples the field
+periods at different phases, and on the QA seed :math:`\lambda` at
+:math:`\alpha=0` changes sign twice between :math:`s=0.80` and
+:math:`0.83`. The maximum over a dense set of lines and ballooning
+parameters is the smooth, convergent quantity: it agrees within 5 % between
+``ns = 41`` and ``101``. :func:`~vmex.core.stability.ballooning_residual`
+returns one row :math:`\max(\lambda-\lambda_0,0)` per line (Gaur *et al.*
+2025; DESC's ``BallooningStability``), and
+:func:`~vmex.core.stability.ballooning_growth_rate` the hard maximum. The
+usage recipe is in :doc:`/reference/objectives`.
 
 
 Bootstrap current (Redl)

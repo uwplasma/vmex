@@ -1356,8 +1356,8 @@ def _dof_modes(inp: VmecInput, max_mode: int) -> list[tuple[int, int]]:
 def _n_boundary_families(inp: VmecInput) -> int:
     """Packed boundary Fourier families: 2 (``rbc``/``zbs``) for a
     stellarator-symmetric boundary, 4 (``rbc``/``zbs``/``rbs``/``zbc``) when
-    ``inp.lasym`` — the non-stellarator-symmetric families that simsopt 1.10.3
-    / VMEC++ 0.6.0 added for up-down-asymmetric tokamaks and reconstruction.
+    ``inp.lasym`` — the non-stellarator-symmetric families of up-down-asymmetric
+    tokamaks and reconstruction.
     """
     return 4 if bool(inp.lasym) else 2
 
@@ -1867,6 +1867,18 @@ def _make_finite_difference_problem(
     )
 
 
+def _restart_source(restart_from: Any, inp: VmecInput) -> Any:
+    """An :class:`Equilibrium`'s own state when its mode table matches ``inp``.
+
+    Its wout (dozens of eager op compiles) is built only to remap modes.
+    """
+    if not isinstance(restart_from, Equilibrium):
+        return restart_from
+    same = all(getattr(restart_from.inp, k) == getattr(inp, k)
+               for k in ("mpol", "ntor", "nfp", "lasym"))
+    return restart_from.state if same else restart_from.wout
+
+
 def _with_forward_controls(
     inp: VmecInput,
     ftol: float | None,
@@ -2009,8 +2021,7 @@ def make_problem(
     initial_state = None
     if restart_from is not None:
         from .restart import restart_state
-        source = restart_from.wout if isinstance(restart_from, Equilibrium) else restart_from
-        initial_state = restart_state(source, inp)
+        initial_state = restart_state(_restart_source(restart_from, inp), inp)
     if derivative_method == "finite_difference":
         problem = _make_finite_difference_problem(
             inp,
@@ -2833,14 +2844,21 @@ def _least_squares_implicit(
     state0_np, mask_np = imp._host_solve_and_mask(cfg, params0_np, refine=False)
     _require_certified_seed(imp._LAST_SOLVE.get(cfg), cfg.ftol, cfg.max_fsq_ratio)
     state0 = jax.tree.map(_place, state0_np)
-    params_at_x0 = params_of(_place(x0))
-    runtime0 = imp.runtime_from_params(params_at_x0, cfg)
-    initial_rows = np.asarray(
-        jax.device_get(term_rows(state0, runtime0)), dtype=float
-    ).ravel()
-    if initial_rows.size == 0 or not np.all(np.isfinite(initial_rows)):
+
+    def term_blocks(x, state):
+        rt = imp.runtime_from_params(params_of(x), cfg)
+        if traceable_scalar is not None:
+            return [term_rows(state, rt)]
+        return [jnp.atleast_1d(w * (jnp.asarray(f(state, rt)) - t)).ravel()
+                for f, t, w in terms]
+
+    # Row counts from shapes alone: evaluating the terms eagerly here cost
+    # ~200 one-off op compiles; the values come from the jitted rows below.
+    sizes = [int(np.prod(block.shape)) for block in
+             jax.eval_shape(term_blocks, _place(x0), state0)]
+    residual_size = int(sum(sizes))
+    if residual_size == 0:
         raise FloatingPointError("non-finite or empty objective at the initial point")
-    residual_size = int(initial_rows.size)
     if traceable_scalar is not None and residual_size != 1:
         raise ValueError(
             f"loss returned {residual_size} values at the initial point; "
@@ -2849,9 +2867,6 @@ def _least_squares_implicit(
             "least_squares, or reduce them: "
             "lambda state, runtime: jnp.sum(term.residuals_state(state, runtime)**2).")
     if traceable_scalar is None:
-        sizes = [int(np.asarray(jax.device_get(
-            jnp.atleast_1d(w * (jnp.asarray(f(state0, runtime0)) - t)).ravel()
-        )).size) for f, t, w in terms]
         starts = np.cumsum([0] + sizes)
         term_slices = tuple(
             (_term_name(function), int(starts[j]), int(starts[j + 1]))
@@ -2886,13 +2901,6 @@ def _least_squares_implicit(
     # be reused here: against a ~1e15 cliff the dcsrch interpolation
     # collapses its step to machine zero (measured |dy| ~ 1e-20 on the QI
     # example) instead of backtracking geometrically into the basin.
-    seed_cost = (
-        0.5 * float(initial_rows @ initial_rows)
-        if traceable_scalar is None
-        else float(initial_rows[0])
-    )
-    scalar_wall_base = max(10.0 * abs(seed_cost), 1.0)
-
     def failure_value_and_gradient(x: np.ndarray) -> tuple[float, np.ndarray]:
         """Exact scalar pair of the smooth scalar-lane trial wall.
 
@@ -2976,6 +2984,16 @@ def _least_squares_implicit(
 
     host_rows_jit = _problem_jit(
         problem_jit_key, "host_rows", lambda: jax.jit(rows_at_state))
+    initial_rows = np.asarray(jax.device_get(
+        host_rows_jit(x0_device, state0, np.int32(0))), dtype=float)
+    if not np.all(np.isfinite(initial_rows)):
+        raise FloatingPointError("non-finite or empty objective at the initial point")
+    seed_cost = (
+        0.5 * float(initial_rows @ initial_rows)
+        if traceable_scalar is None
+        else float(initial_rows[0])
+    )
+    scalar_wall_base = max(10.0 * abs(seed_cost), 1.0)
     rows_jit = _problem_jit(
         problem_jit_key, "rows", lambda: jax.jit(residual_rows))
 

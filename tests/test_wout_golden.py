@@ -222,8 +222,6 @@ def case(request, tmp_path_factory):
     if not deck.exists():
         pytest.skip(f"missing input deck {deck}")
     if name not in _RUN_CACHE:
-        # conftest disables JIT for unit tests; full solves need it.
-        jax.config.update("jax_disable_jit", False)
         os.environ.setdefault("VMEX_TOMNSPS_FFT", "0")
         from vmex.core.input import VmecInput
         from vmex.core.multigrid import solve_multigrid
