@@ -69,7 +69,8 @@ import numpy as np
 
 import jax
 
-jax.config.update("jax_enable_x64", True)  # float64 mandatory (§7.7)
+# float64 is mandatory (§7.7): ``vmex.core`` import applies ``vmex.configure``
+# unless the caller chose first, and ``prepare_runtime`` checks it.
 
 
 def _harden_compilation_cache() -> None:
@@ -694,6 +695,8 @@ def prepare_runtime(
 ) -> SolverRuntime:
     """Build the static solver context from an input file or a RunSetup.
 
+    Raises ``RuntimeError`` when JAX is not in float64 (see :func:`vmex.configure`).
+
     Defaults come from the input (``tcon0``, ``gamma``, ``ftol_array(1)``,
     ``niter_array(1)``); explicit keywords override.  The host loop-driver
     scalars (initial ``DELT``, ``NSTEP`` print cadence) are resolved by
@@ -711,6 +714,9 @@ def prepare_runtime(
     optional 2D block preconditioner (``precon2d.f``); ``None``/``"NONE"``
     (the default) leaves the VMEC2000 1-D radial/lambda path unchanged.
     """
+    from .._compat import require_x64
+
+    require_x64()
     if isinstance(source, RunSetup):
         if resolution is None:
             raise ValueError("prepare_runtime(RunSetup) requires a Resolution")
@@ -1826,7 +1832,7 @@ def _make_body(
 
             (e_final, _, _, ctx), _ = lax.scan(
                 substep,
-                (e_zero, jnp.asarray(True), args0, ctx_zero),
+                (e_zero, running, args0, ctx_zero),
                 jnp.arange(2),
             )
             # When no restart happened trip 1 passed e1 through, so the
@@ -2405,11 +2411,13 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
                 carry = step(lane, carry)
         else:
             carry = step(lane, carry)
-        done = bool(carry.done)
-        upto = int(carry.iteration) if done else int(carry.iteration) - 1
+        # One host transfer per block for the three loop scalars.
+        done, iteration, ier = (int(v) for v in jax.device_get(
+            (carry.done, carry.iteration, carry.ier)))
+        upto = iteration if done else iteration - 1
         # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
         # eqsolve before printout.f, so the discarded first pass has no row.
-        retry_transfer = done and int(carry.ier) in (
+        retry_transfer = done and ier in (
             AXIS_REGUESS_FLAG, BAD_JACOBIAN_FLAG,
         )
         if verbose and not retry_transfer and _due_rows_pending(

@@ -37,13 +37,6 @@ GOLDEN_DIR = resolve_golden_dir()
 _ITER_ROW = re.compile(r"^\d\.\d{2}E[+-]\d{2}$")
 
 
-@pytest.fixture(autouse=True)
-def _enable_jit():
-    """Full solves need JIT (the repo conftest disables it for unit tests)."""
-    jax.config.update("jax_disable_jit", False)
-    yield
-
-
 def _run_cli(argv: list[str]) -> tuple[int, str]:
     """Run ``cli.main`` in-process, capturing stdout."""
     buffer = io.StringIO()
@@ -69,7 +62,6 @@ def _line_containing(text: str, pattern: str) -> str | None:
 @pytest.fixture(scope="module")
 def solovev_cli(tmp_path_factory) -> tuple[int, str, Path]:
     """One CLI solve of the solovev deck, shared by the checks below."""
-    jax.config.update("jax_disable_jit", False)
     outdir = tmp_path_factory.mktemp("solovev_cli")
     rc, stdout = _run_cli([str(SOLOVEV_DECK), "--outdir", str(outdir)])
     return rc, stdout, outdir / "wout_solovev.nc"
@@ -249,7 +241,7 @@ def test_neoclassical_calls_dkx_with_the_preset(solovev_cli, tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# VMEC++-style JSON input
+# C++ VMEC-style JSON input
 # ---------------------------------------------------------------------------
 
 

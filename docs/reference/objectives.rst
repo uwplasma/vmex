@@ -517,36 +517,38 @@ symmetric-tridiagonal ``eigvalsh`` solve:
 - :func:`~vmex.core.stability.ballooning_lambda` — the most-unstable
   eigenvalue per (surface, field line, ballooning parameter); ``λ > 0`` is
   unstable, with ``λ = (γ a_N/v_A)²``;
-- :func:`~vmex.core.stability.ballooning_growth_rate` — a smooth
-  scalar reduction (``softmax`` upper bound of λ over all lines), built to
-  be *driven negative* as a stable-by-construction constraint.
+- :func:`~vmex.core.stability.ballooning_residual` — one hinge row
+  ``max(λ - threshold, 0)`` per line, the least-squares form of Gaur
+  *et al.* (2025) and DESC's ``BallooningStability``;
+- :func:`~vmex.core.stability.ballooning_growth_rate` — the largest ``λ``
+  over all lines (``reduction="softmax"`` gives the bound
+  ``T log Σ exp(λ/T)``, within ``T log N`` above it).
 
 .. code-block:: python
 
-   from vmex.core.stability import ballooning_growth_rate
+   from functools import partial
+   from vmex.core.stability import ballooning_residual
 
-   terms = [(qs, 0.0, 1.0),
-            (ballooning_growth_rate, -0.01, 5.0)]   # keep λ_max below zero
-   result = opt.least_squares(terms, inp, max_mode=4, jac="implicit")
+   rows = partial(ballooning_residual, surfaces=[0.6, 0.8, 0.9, 0.95],
+                  zeta0s=np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5))
+   terms = [(qs, 0.0, 1.0), (rows, 0.0, 30.0)]
+   result = opt.least_squares(terms, inp, max_mode=2)
 
 ``examples/optimization/QA_optimization_ballooning.py`` runs this end to end
 on a seed that is Mercier-stable and ballooning-unstable — the case the
 objective exists for, since the interchange criteria see nothing to fix.
 
-Two defaults are worth setting deliberately rather than inheriting:
+Three choices are worth making deliberately:
 
 - **Scan** ``zeta0``.  ``λ`` peaks at a configuration-dependent ballooning
   parameter (Gaur *et al.* 2023, footnote 2), and the single-point default
-  ``zeta0s=(0.0,)`` under-reports it — by 26 % on that example's seed
-  (3.27e-3 at ``zeta0 = 0`` against 4.42e-3 over a five-point scan).  A
-  ``zeta0``-blind objective drives the wrong quantity to zero.
-- **Read the softmax as the bound it is.**  ``ballooning_growth_rate`` sits
-  above ``max λ`` by up to ``temperature × log(n_lines)``, which at the
-  default ``temperature=0.05`` over 12 lines is 0.12 — larger than published
-  ``λ_max`` values.  Target the bound (below zero is then sufficient for
-  stability) and report
-  :func:`~vmex.core.stability.ballooning_lambda`'s hard maximum, or lower the
-  temperature and accept a sharper gradient.
+  ``zeta0s=(0.0,)`` under-reports it on three-dimensional states.
+- **Resolve the line.**  Keep about 128 points per poloidal turn (the
+  default 641 over five turns); fewer read ``λ`` low.  Raise it for
+  configurations with many field periods or toroidal modes.
+- **Name surfaces by** ``s``.  ``surfaces=`` evaluates the same flux surface
+  on every radial grid; ``s_indices=`` picks grid nodes, which move when
+  ``ns`` changes.
 
 Asymmetric (``lasym``) states are supported: the sine-parity ``R``/``Z``/``λ``
 spectra carry through the PEST angle map and the field-line geometry.  An
@@ -650,10 +652,10 @@ Which objectives differentiate how
      - yes
      - yes
      - dual lane (wout parity / traceable)
-   * - :func:`~vmex.core.stability.ballooning_growth_rate`
+   * - :func:`~vmex.core.stability.ballooning_residual`
      - yes
      - yes
-     - all-JAX eigenproblem, softmax reduction
+     - all-JAX eigenproblem, one hinge row per field line
    * - :func:`~vmex.core.turbulence.turbulent_growth_rate`
      - yes
      - yes
