@@ -1071,18 +1071,9 @@ def _host_boundary_schur_adjoint(
 
     base = sparse_inverse(rhs, transpose=True)
     edge_rhs = np.asarray(_edge_rows_of_tree(base, mask, edge_basis, cfg=cfg))
-    calls = 0
-
-    def apply(value):
-        nonlocal calls
-        calls += 1
-        return probe(np.atleast_2d(value), edge_pullback)[0]
-
-    apply(edge_rhs)
 
     identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
     schur = probe(identity, edge_pullback).T
-    calls += nedge
     solve_reduced, condition = _balanced_dense_solver(schur)
     edge_solution = solve_reduced(edge_rhs)
     # Dense iterative refinement is cheap at edge size and recovers the
