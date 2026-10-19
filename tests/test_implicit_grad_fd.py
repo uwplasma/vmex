@@ -26,7 +26,6 @@ from vmex.core.statephysics import mean_iota
 
 # Shared fixtures register here by name.  Assignment rather than import keeps
 # the test parameters that request them from shadowing an imported name.
-_jit_enabled = _base._jit_enabled
 _release_jax_caches_in_full_matrix = _base._release_jax_caches_in_full_matrix
 solovev = _base.solovev
 

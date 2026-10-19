@@ -267,8 +267,7 @@ Condition by condition:
   globalization, so a migration would change the convergence contract, not
   only the algebra.
 - **Cold and warm cost** — moving GMRES into JAX would add compilations to
-  one-shot solves that cannot amortize them (the mirror workflows are
-  profiled as M1--M3 in `benchmarks/profile_workflows.py`). The recorded
+  one-shot solves that cannot amortize them. The recorded
   backend audit for the closed adjoint reached the same decision
   (`linear_backend_audit_20260716` in
   `benchmarks/mirror_hybrid_fixed_boundary.json`).

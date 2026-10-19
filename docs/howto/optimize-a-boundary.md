@@ -92,7 +92,7 @@ problem = opt.VmecProblem.from_tuples(
     max_fsq_ratio=1e2)
 ```
 
-`max_fsq_ratio` is the largest iteration-limited `FSQ / ftol` that VMEX will differentiate. Inspect `problem.evaluate(x).diagnostics` and calibrate stricter values on the intended NFP, objective family, and resolution. `benchmarks/optimization.py` provides a reproducible profiler for QI, QA, QH, QP, SciPy/JAX agreement, and finite differences.
+`max_fsq_ratio` is the largest iteration-limited `FSQ / ftol` that VMEX will differentiate. Inspect `problem.evaluate(x).diagnostics` and calibrate stricter values on the intended NFP, objective family, and resolution.
 
 ## Refine and save the result
 

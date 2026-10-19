@@ -40,14 +40,13 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     # changes too (test_device.py nodes are selected by pr-device).
     assert "pr-device" in ci_scope.needed_lanes(["tests/test_device.py"])
 
-    # Benchmarks and examples are attributed through the tests that name them.
-    assert ci_scope.needed_lanes(["benchmarks/run_freeboundary_multigrid.py"])
+    # Examples are attributed through the tests that name them.
     assert ci_scope.needed_lanes(["examples/optimization/QA_optimization.py"])
 
     # A new benchmark nothing names still inherits the lanes of every test that
     # imports the package, which is the safe direction to err in.
     assert ci_scope.needed_lanes(["benchmarks/_brand_new_probe.py"]) == ci_scope.needed_lanes(
-        ["benchmarks/run_freeboundary_multigrid.py"]
+        ["benchmarks/_another_new_probe.py"]
     )
     # A module the manifest does not own gives no ownership to narrow by.
     assert ci_scope.needed_lanes(["tests/test_not_in_the_manifest.py"]) is None
@@ -129,7 +128,7 @@ def test_manifest_report_lists_timings_and_every_skip(tmp_path: Path) -> None:
             "-m",
             "pytest",
             "-q",
-            "tests/test_capability_docs.py",
+            "tests/test_fetch_assets.py::test_golden_bundle_targets_the_user_cache",
             "tests/test_lasym_free_convergence.py",
             f"--vmex-report={report}",
         ],
@@ -142,7 +141,7 @@ def test_manifest_report_lists_timings_and_every_skip(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     data = json.loads(report.read_text())
     assert data["schema"] == "vmex.test-report/1"
-    assert data["collected"] == 5
+    assert data["collected"] == 2
     assert data["slowest"]
     assert len(data["skips"]) == 1
     assert data["skips"][0]["nodeid"].startswith(
