@@ -404,12 +404,38 @@ jobs:
         if: github.event_name == 'pull_request'
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
 
+  install:
+    name: pip install (${{ matrix.os }}, Python ${{ matrix.python }}, ${{ matrix.extra }})
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.13"]
+        extra: ["", "[all]"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Plain pip install
+        shell: bash
+        run: python -m pip install ".${{ matrix.extra }}"
+      - name: Import and run the CLI
+        shell: bash
+        run: |
+          python -c "import vmex; vmex.configure(); print(vmex.__version__)"
+          vmex --help
+
   pr-gate:
     name: PR gate
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [changes, quality, fast, parity, desc, device, jax-compatibility, changed-coverage]
+    needs: [changes, quality, fast, parity, desc, device, jax-compatibility, install, changed-coverage]
     steps:
       - name: Require every review gate
         env:
