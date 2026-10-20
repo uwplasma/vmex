@@ -106,7 +106,10 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   penalize aspect, local mean field, and local mirror only outside their final
   acceptance intervals; `equality` is the default. Both families now hold local
   mirror within 10% of the seed, so a canonical fit cannot improve by removing
-  most of its field variation. These switches also apply to
+  most of its field variation. The canonical target chooses its angular
+  origin once from the seed, comparing all four half-period shifts of the
+  poloidal and toroidal angles, and holds that choice fixed during optimization
+  and validation. These switches also apply to
   `pwO_optimization_finite_beta.py`.
 
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta

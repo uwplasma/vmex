@@ -37,8 +37,8 @@ QS_INPUT = os.environ.get("VMEX_PWO_QS_INPUT")  # saved QP boundary skips precon
 SEED_PERTURBATION = 0.005  # each added Fourier coefficient is 5% of a=0.1 m
 QS_MAX_MODES, QS_MAXITER = [1, 2, 3], [20, 20, 20]
 QS_ASPECT_TARGET = 6.0
-QS_IOTA_TARGET, QS_MIRROR_TARGET = 0.42, 0.34  # interior margins for the independent gate
-QS_IOTA_TOLERANCE, QS_MIRROR_TOLERANCE = 0.02, 0.03
+QS_IOTA_TARGET, QS_IOTA_TOLERANCE = 0.42, 0.02
+MIRROR_TRAIN_TARGET, MIRROR_TRAIN_TOLERANCE = 0.34, 0.03  # margin for the independent gate
 QS_PARAMETER_STEP, QS_PARAMETER_BOUND = 0.02, 5.0
 FAMILY = os.environ.get("VMEX_PWO_FAMILY", "canonical")
 METHOD = os.environ.get("VMEX_PWO_METHOD", "scalar")
@@ -68,17 +68,28 @@ if ci_smoke:
 
 
 
-def make_target(surfaces, *, family, bmin, bmax, b_ref, options, grid, iota_sign=1.0):
+def make_target(surfaces, *, family, bmin, bmax, b_ref, options, grid, iota_sign=1.0, theta_center=0.0, zeta_center=0.0):
     """Build the fixed physical target shared by the stage-1 and coil examples."""
     if iota_sign not in (-1.0, 1.0):
         raise ValueError("iota_sign must be fixed at +1 or -1 from the seed")
     if family == "canonical":
         return CanonicalPwOResidual(surfaces, bmin=bmin, bmax=bmax, t1=-0.3 * iota_sign,
-                                    t2=3.0 * iota_sign, zeta_center=0.0, p=2, ntheta=grid, nzeta=grid, **options)
+                                    t2=3.0 * iota_sign, theta_center=theta_center, zeta_center=zeta_center, p=2, ntheta=grid, nzeta=grid, **options)
     if family == "mapped":
         return MappedPwOResidual(surfaces, b_ref=b_ref, a=0.3, b=0.0, c=-2.0,
                                  eta_min=2.8, ngamma=grid, neta=grid, **options)
     raise ValueError("family must be canonical or mapped")
+
+
+def canonical_seed_phase(field, target, nfp):
+    """Choose once among the four stellarator-symmetric angular origins."""
+    if any(size % 2 for size in target.shape[-2:]):
+        raise ValueError("seed phase selection requires even angular grids")
+    shifts = [(i * target.shape[-2] // 2, j * target.shape[-1] // 2) for i in range(2) for j in range(2)]
+    candidates = [np.roll(target, shift, axis=(-2, -1)) for shift in shifts]
+    costs = [float(np.mean(((field - candidate) / candidate)**2)) for candidate in candidates]
+    chosen = int(np.argmin(costs))
+    return float((chosen // 2) * np.pi), float((chosen % 2) * np.pi / nfp), costs
 
 
 def hold_ratio(value, reference, tolerance, penalty):
@@ -183,8 +194,8 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                 dict(source=QS_INPUT or "near_circular", perturbation_m=SEED_PERTURBATION,
                      helicity_m=0, helicity_n=1, stages=qs_stages,
                      settings=dict(aspect_target=QS_ASPECT_TARGET, iota_target=QS_IOTA_TARGET,
-                                   mirror_target=QS_MIRROR_TARGET, iota_tolerance=QS_IOTA_TOLERANCE,
-                                   mirror_tolerance=QS_MIRROR_TOLERANCE,
+                                   mirror_target=MIRROR_TRAIN_TARGET, iota_tolerance=QS_IOTA_TOLERANCE,
+                                   mirror_tolerance=MIRROR_TRAIN_TOLERANCE,
                                    parameter_step=QS_PARAMETER_STEP, parameter_bound=QS_PARAMETER_BOUND),
                      raw_metrics=qs_raw_metrics, training_metrics=training_metrics,
                      metrics=refined_metrics, status=status, unmet=unmet), indent=2, allow_nan=False) + "\n")
@@ -209,8 +220,8 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                 return jnp.stack([
                     (opt.aspect_ratio(state, runtime) / QS_ASPECT_TARGET - 1) / ASPECT_TOLERANCE,
                     jnp.maximum(QS_IOTA_TARGET - opt.min_abs_iota(state, runtime), 0) / QS_IOTA_TOLERANCE,
-                    jnp.maximum(MIRROR_FLOOR - mirror, 0) / QS_MIRROR_TOLERANCE,
-                    jnp.maximum(mirror - QS_MIRROR_TARGET, 0) / QS_MIRROR_TOLERANCE,
+                    jnp.maximum(MIRROR_FLOOR - mirror, 0) / MIRROR_TRAIN_TOLERANCE,
+                    jnp.maximum(mirror - MIRROR_TRAIN_TARGET, 0) / MIRROR_TRAIN_TOLERANCE,
                     jnp.maximum(opt.max_elongation(state, runtime) - ELONGATION_LIMIT, 0)
                     / ELONGATION_LIMIT])
 
@@ -276,7 +287,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     probe_data = probe.compute_state(equilibrium.state, equilibrium.runtime)
     sampled = np.asarray(probe_data["B"])
     bmin, bmax, b_ref = float(sampled.min()), float(sampled.max()), float(sampled.mean())
-    calibration = None
+    calibration, theta_center, zeta_center = None, 0.0, 0.0
     if FAMILY == "canonical":
         unit_shape = np.asarray(probe_data["B_target"]) - 1.0
         shape_mean = float(unit_shape.mean())
@@ -290,14 +301,18 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                 abs(calibrated.mean() / b_ref - 1) < 1e-12 and
                 abs(attained_mirror / mirror_ref - 1) < 1e-12):
             raise RuntimeError("Canonical fixed mean/mirror calibration failed")
+        theta_center, zeta_center, phase_costs = canonical_seed_phase(sampled, calibrated, seed_input.nfp)
         calibration = dict(shape_mean=shape_mean, seed_mean_T=b_ref, seed_mirror=mirror_ref,
+                           phase_candidates_rad=[[float(i * np.pi), float(j * np.pi / seed_input.nfp)]
+                                                 for i in range(2) for j in range(2)], seed_phase_costs=phase_costs,
                            raw_bounds_T=raw_bounds, target_mean_T=float(calibrated.mean()),
                            attained_mirror=attained_mirror, unit_min=float(unit_shape.min()),
                            unit_max=float(unit_shape.max()))
 
     def construction(options, grid, surfaces=SURFACES):
         return make_target(surfaces, family=FAMILY, bmin=bmin, bmax=bmax,
-                           b_ref=b_ref, options=options, grid=grid, iota_sign=iota_sign)
+                           b_ref=b_ref, options=options, grid=grid, iota_sign=iota_sign,
+                           theta_center=theta_center, zeta_center=zeta_center)
 
     target = construction(PWO_OPTIONS, GRID)
     field_key = "B" if FAMILY == "canonical" else "B_mapped"
@@ -339,7 +354,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                 jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0) / IOTA_FLOOR,
                 jnp.maximum(IOTA_FLOOR - iota_sign * opt.mean_iota(state, runtime), 0) / IOTA_FLOOR,
                 jnp.maximum(MIRROR_FLOOR - mirror, 0) / MIRROR_FLOOR,
-                jnp.maximum(mirror - MIRROR_LIMIT, 0) / MIRROR_LIMIT,
+                jnp.maximum(mirror - MIRROR_TRAIN_TARGET, 0) / MIRROR_TRAIN_TOLERANCE,
                 jnp.maximum(opt.max_elongation(state, runtime) - ELONGATION_LIMIT, 0)
                 / ELONGATION_LIMIT]
             if beta_target > 0:
@@ -450,13 +465,14 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                                          training_metrics=qs_training_metrics,
                                          metrics=qs_metrics)),
                    stages=stages, metrics=metrics, actual_s=np.asarray(final_score["s_b"]).tolist(),
-                   target=dict(calibration=calibration, zeta_center_rad=0.0, p=2, bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref,
+                   target=dict(calibration=calibration, theta_center_rad=theta_center, zeta_center_rad=zeta_center, p=2, bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref,
                                surface_field_ref_T=surface_field_ref.tolist(), iota_sign=iota_sign,
                                surface_mirror_ref=surface_mirror_ref.tolist(),
                                t1=-0.3 * iota_sign, t2=3.0 * iota_sign,
                                a=0.3, b=0.0, c=-2.0, eta_min=2.8),
                    settings=dict(stage_ns=STAGE_NS, stage_ftol=STAGE_FTOL, mpol=MPOL,
-                                 penalty=PENALTY,
+                                 penalty=PENALTY, mirror_train_target=MIRROR_TRAIN_TARGET,
+                                 mirror_train_tolerance=MIRROR_TRAIN_TOLERANCE,
                                  final_ns=FINAL_NS, final_ftol=FINAL_FTOL, final_mpol=FINAL_MPOL,
                                  niter=NITER, grid=GRID, validation_grid=VALIDATION_GRID,
                                  transform=PWO_OPTIONS, validation_transform=VALIDATION_OPTIONS,

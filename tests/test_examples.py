@@ -1071,6 +1071,42 @@ def test_pwo_stage1_example(tmp_path, family, finite_beta):
     assert (tmp_path / f"wout_{stem}.nc").exists()
 
 
+@pytest.mark.parametrize("theta_shift,zeta_shift", [(0, 0), (0, 1), (1, 0), (1, 1)])
+@pytest.mark.parametrize("nfp,iota,t1,t2", [(2, -0.42, 0.3, -3.0),
+                                            (5, -0.9, 0.441421356, -3.141421356)])
+def test_pwo_canonical_seed_phase_matches_periodic_field(nfp, iota, t1, t2, theta_shift, zeta_shift):
+    import runpy
+    from vmex.core.pwo import canonical_pwo_field
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    theta = 2 * np.pi * np.arange(24)[None, :, None] / 24
+    zeta = 2 * np.pi * np.arange(24)[None, None, :] / (24 * nfp)
+    params = dict(iota=iota, nfp=nfp, bmin=1.0, bmax=2.0, t1=t1, t2=t2)
+    original = canonical_pwo_field(theta, zeta, zeta_center=0.0, **params)
+    selected_theta, selected_zeta = theta_shift * np.pi, zeta_shift * np.pi / nfp
+    shifted = canonical_pwo_field(theta, zeta, theta_center=selected_theta,
+                                  zeta_center=selected_zeta, **params)["B_target"]
+    rolled = np.roll(original["B_target"], (theta_shift * 12, zeta_shift * 12), axis=(-2, -1))
+    np.testing.assert_allclose(rolled, shifted, atol=2e-14, rtol=2e-14)
+    if nfp == 5:
+        assert np.min(original["corner_margin"]) < 0  # valid patch crosses the centered cell
+    theta_phase, zeta_phase, costs = example["canonical_seed_phase"](shifted, np.asarray(original["B_target"]), nfp)
+    assert (theta_phase, zeta_phase) == pytest.approx((selected_theta, selected_zeta))
+    assert costs[2 * theta_shift + zeta_shift] == pytest.approx(0.0, abs=1e-25)
+    with pytest.raises(ValueError, match="even angular grids"):
+        example["canonical_seed_phase"](shifted[..., :-1], np.asarray(original["B_target"])[..., :-1], nfp)
+
+    target = example["make_target"]([0.5], family="canonical", bmin=1.0, bmax=2.0,
+                                     b_ref=1.5, options={}, grid=39, iota_sign=-1.0,
+                                     theta_center=theta_phase, zeta_center=zeta_phase)
+    score = target.kernel(bmnc_b=np.array([[1.5]]), xm_b=np.array([0]), xn_b=np.array([0]),
+                          iota_b=np.array([iota]), nfp=nfp, **target.options)
+    expected = canonical_pwo_field(score["theta"][None, :, None], score["zeta"][None, None, :],
+                                   **{**params, "t1": 0.3, "t2": -3.0,
+                                      "theta_center": theta_phase, "zeta_center": zeta_phase})
+    np.testing.assert_allclose(score["B_target"], expected["B_target"], atol=2e-14, rtol=2e-14)
+
+
 def test_pwo_qp_gate_and_penalty_controls():
     import runpy
 
@@ -1165,8 +1201,10 @@ def test_pwo_qp_gate_preserves_checkpoints_before_target_calibration(tmp_path, m
 
 @pytest.mark.parametrize("family", ["canonical", "mapped"])
 @pytest.mark.parametrize("penalty, expected", [("equality", 31.25), ("interval", 11.25)])
-def test_pwo_mirror_control_uses_the_same_acceptance_interval(family, penalty, expected, monkeypatch):
-    """A 25% mirror drop incurs a cost even when the fit residual is zero."""
+@pytest.mark.parametrize("edge_mirror, margin_cost", [(0.1, 0.0), (0.35, 5 / 9)])
+def test_pwo_mirror_controls_penalize_collapse_and_limit_approach(
+        family, penalty, expected, edge_mirror, margin_cost, monkeypatch):
+    """Zero fit residual cannot hide local collapse or a weak edge-mirror margin."""
     import runpy
     from types import SimpleNamespace
 
@@ -1178,7 +1216,7 @@ def test_pwo_mirror_control_uses_the_same_acceptance_interval(family, penalty, e
     monkeypatch.setattr(opt, "solve_equilibrium", lambda deck, **kwargs:
                         SimpleNamespace(state=deck, runtime=None, wout=wout))
     for name, value in (("aspect_ratio", 6.0), ("min_abs_iota", 0.42), ("mean_iota", 0.42),
-                        ("mirror_ratio", 0.1), ("max_elongation", 2.0)):
+                        ("mirror_ratio", edge_mirror), ("max_elongation", 2.0)):
         monkeypatch.setattr(opt, name, lambda state, runtime, value=value: value)
     shape = np.array([[[0.0, 1.0], [1.0, 0.0]]])
     trial = False
@@ -1199,7 +1237,7 @@ def test_pwo_mirror_control_uses_the_same_acceptance_interval(family, penalty, e
     def inspect_loss(deck, loss, **kwargs):
         nonlocal trial
         trial = True
-        assert float(loss(deck, None)) == pytest.approx(expected)
+        assert float(loss(deck, None)) == pytest.approx(expected + margin_cost)
         raise EvaluatedRows
 
     monkeypatch.setattr(opt.VmecProblem, "from_loss", inspect_loss)

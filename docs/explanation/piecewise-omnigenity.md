@@ -165,8 +165,11 @@ The initial canonical calibration also leaves its target mean near 6.76 T while
 holding the equilibrium near 8.2 T, preventing exact matching under the mean-field
 constraint.
 
-The canonical driver calibrates positive target bounds to the seed-grid
-mean and mirror, then holds those bounds and the selected phase (zero) fixed.
+The canonical driver calibrates positive target bounds to the seed-grid mean
+and mirror. It compares the four combinations of poloidal origins zero and pi
+and toroidal origins zero and half a field period using only the seed fit, then
+holds the bounds and selected origins fixed during optimization and refined
+validation.
 Both stage-1 families now include a local-mirror equality residual with a fixed
 training-seed denominator and a final 10% tolerance. The following historical
 controlled vacuum runs, pinned in the development record, applied that mirror
