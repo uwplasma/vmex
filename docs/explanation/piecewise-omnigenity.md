@@ -233,7 +233,7 @@ NS=32, MPOL=7, Boozer-band-14, 39-by-39 rescoring:
 | Aligned canonical fit | 0.0101653 | 0.435864 | 0.342802 |
 
 The residual falls 42.1%; final aspect is 6.03316. The resumed driver takes
-245.2 s on the shared office CPU, separately from the 559.7 s near-circle,
+245.2 s on a shared CPU, separately from the 559.7 s near-circle,
 QP-conditioning and phase-zero baseline, which fails its mirror check.
 QP conditioning is not a symmetry certificate: its QP-breaking spectral RMS
 remains 0.1148 times B00. The action audit remains adverse, and neither
