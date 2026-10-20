@@ -36,6 +36,27 @@ SETTINGS = dict(
     quadrature_order=32)
 
 
+@pytest.mark.parametrize("radial", [-1., 0., 1.])
+@pytest.mark.parametrize("tangential", [-1e-8, 0., 1e-8])
+def test_hard_drift_angle_radial_limit(radial, tangential):
+    """Constant drift kernels give an analytic ratio in a complete cosine well."""
+    x = jnp.linspace(0., 2*jnp.pi, 129)
+    bmag = (1. + .2*jnp.cos(x))[None, :]
+    out = gammac.gamma_c_from_fieldlines(
+        bmag=bmag, radial_drift=jnp.full_like(bmag, radial),
+        radial_gradient=jnp.full_like(bmag, tangential),
+        drift_correction=jnp.zeros_like(bmag), tangency=jnp.ones_like(bmag),
+        dl_dx=jnp.ones_like(bmag), length=2*jnp.pi,
+        pitch=jnp.array([1.]), pitch_weights=jnp.array([1.]), max_wells=2)
+    keep = np.asarray(out["well_mask"])
+    assert keep.sum() == 1 and float(out["overflow_fraction"]) == 0.
+    expected = (2/np.pi*np.arctan(radial/tangential)
+                if tangential else np.sign(radial))
+    np.testing.assert_allclose(np.asarray(out["gamma_per_well"])[keep], expected, atol=1e-12)
+    assert np.isfinite(float(out["gamma_c"]))
+    assert (float(out["gamma_c"]) > 0.) == (radial != 0.)
+
+
 @pytest.fixture(scope="module")
 def tokamak_eq():
     eq = opt.solve_equilibrium(

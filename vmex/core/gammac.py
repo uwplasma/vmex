@@ -293,8 +293,10 @@ def _wells_assembly(
         masked("drift_gradient") + masked("parallel_correction"))
     if corner_floor is None:
         safe = jnp.where(denominator != 0.0, denominator, 1.0)
-        gamma = (2.0 / jnp.pi) * jnp.arctan(
-            jnp.where(denominator != 0.0, numerator / safe, 0.0))
+        # Pure radial drift has |gamma|=1; only a zero drift vector gets zero.
+        gamma = jnp.where(denominator != 0.0,
+                         (2.0 / jnp.pi) * jnp.arctan(numerator / safe),
+                         jnp.sign(numerator))
     else:
         # Superbanana corners: where the radial AND tangential bounce-drift
         # integrals vanish together, d(arctan(N/D))/dp ~ 1/|(N, D)|, and a
