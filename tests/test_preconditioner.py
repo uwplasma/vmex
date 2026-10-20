@@ -1,11 +1,12 @@
 """Tests for ``vmex.core.preconditioner``: ``precondn`` / ``lamcal`` /
-``scalfor_matrices`` / ``scalfor`` / ``tridiagonal_solve``.
+``scalfor_matrices`` / ``scalfor``.
 
 The full A/B against the legacy scalfor.f/precondn.f/lamcal.f90 port
 (matrix elements, assembly, solved forces at rtol 1e-12 on synthetic and
 real solver states) retired with the legacy tree; kept here are the
 VMEC2000 convention pins (edge pedestal, ZC(0,0) stabilization, lamcal axis
-row), the tridiagonal solver vs dense references, and jit equivalence.
+row), the checked radial solve, and jit equivalence. SOLVAX's own suite pins
+the Thomas solve against dense references.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import solvax
 
 from vmex.core import preconditioner as newp
 
@@ -219,56 +221,6 @@ def test_edge_pedestal_and_zc00_values():
     assert np.allclose(ped[2:, :], 1.10, rtol=1e-12)
 
 
-# ---------------------------------------------------------------------------
-# Tridiagonal solver vs dense reference
-# ---------------------------------------------------------------------------
-
-
-def test_tridiagonal_solve_matches_dense_numpy():
-    rng = np.random.default_rng(42)
-    ns, mpol, nrange, nrhs = 17, 8, 5, 3
-    shape = (ns, mpol, nrange)
-    superd = rng.uniform(-0.5, 0.5, size=shape)
-    subd = rng.uniform(-0.5, 0.5, size=shape)
-    diag = 3.0 + rng.uniform(0.0, 1.0, size=shape)  # diagonally dominant
-    rhs = rng.standard_normal(size=shape + (nrhs,))
-
-    solution = np.asarray(
-        newp.tridiagonal_solve(
-            jnp.asarray(superd), jnp.asarray(diag), jnp.asarray(subd), jnp.asarray(rhs)
-        )
-    )
-    assert solution.shape == rhs.shape
-
-    for m in range(mpol):
-        for n in range(nrange):
-            dense = (
-                np.diag(diag[:, m, n])
-                + np.diag(superd[:-1, m, n], k=1)
-                + np.diag(subd[1:, m, n], k=-1)
-            )
-            expected = np.linalg.solve(dense, rhs[:, m, n, :])
-            np.testing.assert_allclose(solution[:, m, n, :], expected, rtol=1e-11, atol=1e-12)
-
-
-def test_tridiagonal_solve_broadcast_rank():
-    """Shared (per-column) coefficients with extra trailing RHS axes."""
-    rng = np.random.default_rng(3)
-    ns, ncol = 9, 4
-    superd = rng.uniform(-0.4, 0.4, size=(ns, ncol))
-    subd = rng.uniform(-0.4, 0.4, size=(ns, ncol))
-    diag = 2.5 + rng.uniform(0.0, 1.0, size=(ns, ncol))
-    rhs = rng.standard_normal(size=(ns, ncol, 6))
-    got = np.asarray(newp.tridiagonal_solve(superd, diag, subd, rhs))
-    for c in range(ncol):
-        dense = (
-            np.diag(diag[:, c]) + np.diag(superd[:-1, c], k=1) + np.diag(subd[1:, c], k=-1)
-        )
-        np.testing.assert_allclose(
-            got[:, c, :], np.linalg.solve(dense, rhs[:, c, :]), rtol=1e-11, atol=1e-12
-        )
-
-
 @pytest.mark.parametrize("ns", [6, 16, 257])
 def test_scalfor_checked_solve_reports_well_conditioned_system(ns) -> None:
     """The production solve accepts a stable radial system without fallback."""
@@ -283,16 +235,16 @@ def test_scalfor_checked_solve_reports_well_conditioned_system(ns) -> None:
     )
     solved, safe = newp.scalfor(force, matrices, jmax=ns, return_safe=True)
     reference = np.asarray(force).copy()
-    reference[:, 0] = np.asarray(newp.tridiagonal_solve(
-        matrices.ax[:, 0],
-        matrices.dx[:, 0],
+    reference[:, 0] = np.asarray(solvax.tridiagonal_solve(
         matrices.bx[:, 0],
+        matrices.dx[:, 0],
+        matrices.ax[:, 0],
         force[:, 0],
     ))
-    reference[1:, 1] = np.asarray(newp.tridiagonal_solve(
-        matrices.ax[1:, 1],
-        matrices.dx[1:, 1],
+    reference[1:, 1] = np.asarray(solvax.tridiagonal_solve(
         matrices.bx[1:, 1],
+        matrices.dx[1:, 1],
+        matrices.ax[1:, 1],
         force[1:, 1],
     ))
     reference[0, 1] = 0.0
@@ -392,3 +344,59 @@ def test_jit_compatibility_lamcal():
         lthreed=bool(cfg.lthreed),
     )
     _allclose(got, eager, rtol=RTOL, atol=1e-14)
+
+
+def test_lambda_m0_radial_block_inverts_the_force_jacobian():
+    """The m = 0 lambda block is P^T diag(A) P (half-mesh averaging): with a
+    zero floor the preconditioned Jacobian is the identity on those columns,
+    while VMEC2000's diagonal faclam leaves the radial checkerboard nearly
+    unpreconditioned (eigenvalue ~ (pi/(2 ns))^2)."""
+    from dataclasses import replace
+
+    import vmex as vj
+    import vmex.core.solver as S
+
+    inp = vj.VmecInput.from_file("examples/data/input.li383_low_res")
+    inp = replace(inp, ns_array=(12,), ftol_array=(1e-8,), niter_array=(2000,))
+    state = vj.solve_multigrid(inp, verbose=False).state
+    base = S.prepare_runtime(inp, S.resolution_from_input(inp, ns=12))  # default: diagonal
+    column = int(np.flatnonzero((base.modes.m == 0) & (base.modes.n == 1))[0])
+    spectra = {}
+    for floor in (None, 0.0):
+        rt = replace(base, lambda_m0_floor=floor)
+        cache = S.evaluate_forces(state, rt)[2].cache
+
+        @jax.jit
+        def response(direction, rt=rt, cache=cache):
+            def gc(lam):
+                return S._preconditioned_force_signed(
+                    replace(state, L_sin=lam), cache, rt, iteration=jnp.asarray(30),
+                    fsqz_previous=jnp.asarray(1.0)).L_sin[1:, column]
+            return jax.jvp(gc, (state.L_sin,), (direction,))[1]
+
+        jac = -np.stack([
+            response(jnp.zeros_like(state.L_sin).at[j, column].set(1.0))
+            for j in range(1, 12)
+        ], axis=1)
+        spectra[floor] = np.sort(np.linalg.eigvals(jac / np.median(np.diag(jac))).real)
+    assert spectra[None][0] < 0.01 and spectra[None][-1] > 1.9
+    np.testing.assert_allclose(spectra[0.0], 1.0, atol=1e-2)
+
+
+def test_lambda_m0_floor_reaches_the_ladder_solver():
+    """``solve_multigrid(lambda_m0_floor=...)`` changes the 3-D iteration and
+    stays finite; the default leaves VMEC2000's diagonal lambda step."""
+    from dataclasses import replace
+
+    import vmex as vj
+
+    inp = vj.VmecInput.from_file("examples/data/input.li383_low_res")
+    inp = replace(inp, ns_array=(8,), ftol_array=(1e-30,), niter_array=(30,))
+
+    def run(**kw):
+        return vj.solve_multigrid(
+            inp, verbose=False, raise_on_max_iterations=False, **kw)
+
+    base, floored = run(), run(lambda_m0_floor=1e-3)
+    assert np.isfinite(float(floored.fsql)) and float(floored.fsql) != float(base.fsql)
+    assert float(run(lambda_m0_floor=None).fsql) == float(base.fsql)

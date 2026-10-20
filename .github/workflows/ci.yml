@@ -35,7 +35,7 @@ jobs:
     outputs:
       run_tests: ${{ steps.scope.outputs.run_tests }}
       run_coverage: ${{ steps.scope.outputs.run_coverage }}
-      physics: ${{ steps.physics.outputs.matrix }}
+      packaging: ${{ steps.packaging.outputs.changed }}
       parity: ${{ steps.parity.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -51,21 +51,18 @@ jobs:
           else
             python tools/ci_scope.py --all </dev/null >> "$GITHUB_OUTPUT"
           fi
-      - id: physics
-        # Narrowing reuses the manifest ownership the lanes are built from.
-        # Anything it cannot attribute returns every lane, so a miss costs
-        # runner time and never coverage.
-        name: Select the physics lanes this change needs
+      - id: packaging
+        # Installs break on packaging edits or new upstream releases, not on
+        # ordinary code changes; the weekly workflow covers upstream releases.
+        name: Detect packaging changes
         shell: bash
-        env:
-          ALL: '[{"lane":"core","selector":"pr-physics-core","parallel":"-n 2"},{"lane":"implicit-response-a","selector":"pr-implicit-response-a","parallel":""},{"lane":"implicit-response-b","selector":"pr-implicit-response-b","parallel":""},{"lane":"free-boundary-adjoint","selector":"pr-free-boundary-adjoint","parallel":""},{"lane":"field-api","selector":"pr-physics-field","parallel":"-n 2"},{"lane":"mirror-equilibrium","selector":"pr-mirror-equilibrium","parallel":""},{"lane":"mirror-field","selector":"pr-mirror-field","parallel":""},{"lane":"mirror-spline","selector":"pr-mirror-spline","parallel":""}]'
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
-              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
-          else
-            python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          changed=false
+          if [[ "${{ github.event_name }}" == "pull_request" ]] &&
+             git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" | grep -qE '^(pyproject\.toml|MANIFEST\.in)$'; then
+            changed=true
           fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
       - id: parity
         # Narrowing reuses the manifest ownership the lanes are built from.
         # Anything it cannot attribute returns every lane, so a miss costs
@@ -73,7 +70,7 @@ jobs:
         name: Select the parity lanes this change needs
         shell: bash
         env:
-          ALL: '[{"lane":"a-free","selector":"pr-parity-a1","parallel":"-n 2"},{"lane":"a-core","selector":"pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c1","selector":"pr-parity-c1","parallel":"-n 4"},{"lane":"c3","selector":"pr-parity-c3","parallel":"-n 4"},{"lane":"d","selector":"pr-parity-d","parallel":"-n 4"},{"lane":"e-polish","selector":"pr-parity-e","parallel":"-n 4"},{"lane":"f-options","selector":"pr-parity-f","parallel":"-n 4"},{"lane":"c2","selector":"pr-parity-c2","parallel":"-n 4"},{"lane":"c4","selector":"pr-parity-c4","parallel":"-n 4"},{"lane":"c5","selector":"pr-parity-c5","parallel":"-n 4"},{"lane":"c6","selector":"pr-parity-c6","parallel":"-n 4"},{"lane":"c7","selector":"pr-parity-c7","parallel":"-n 4"},{"lane":"gradient","selector":"pr-gradient","parallel":"-n 4"},{"lane":"misc","selector":"pr-examples pr-external pr-full-only pr-gradient-fd","parallel":"-n 4"}]'
+          ALL: '[{"lane":"c2-mirror-eq","selector":"pr-parity-c2","parallel":"-n 4","serial":"pr-mirror-equilibrium","serial_parallel":""},{"lane":"misc-a-core","selector":"pr-examples pr-external pr-full-only pr-gradient-fd pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c6-gradient","selector":"pr-parity-c6 pr-gradient","parallel":"-n 4"},{"lane":"c3-c7","selector":"pr-parity-c3 pr-parity-c7","parallel":"-n 4"},{"lane":"a-free-c5","selector":"pr-parity-c5 pr-parity-e","parallel":"-n 4","serial":"pr-parity-a1","serial_parallel":"-n 2"},{"lane":"c4-mirror-spline","selector":"pr-parity-c4 pr-parity-f","parallel":"-n 4","serial":"pr-mirror-spline","serial_parallel":""},{"lane":"c1-d-mirror-field","selector":"pr-parity-c1 pr-parity-d","parallel":"-n 4","serial":"pr-mirror-field","serial_parallel":""}]'
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
@@ -100,7 +97,7 @@ jobs:
           uv pip install ".[dev]"
       - name: Check source, package, and docs
         run: |
-          ruff check vmex tests examples benchmarks tools
+          ruff check vmex tests examples tools
           mypy vmex
           python -m build
           python tools/check_docs_prose.py
@@ -189,65 +186,6 @@ jobs:
           path: coverage.fast
           retention-days: 3
 
-  physics:
-    name: Representative ${{ matrix.lane }} physics
-    needs: changes
-    if: >-
-      needs.changes.outputs.run_tests == 'true' &&
-      needs.changes.outputs.physics != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.changes.outputs.physics) }}
-    env:
-      XLA_LANE: physics-${{ matrix.lane }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          enable-cache: false
-      - name: Install
-        run: |
-          uv pip install ".[coils,turbulence,freeb]" pytest pytest-cov pytest-xdist
-      - name: Add XLA compile headroom
-        run: |
-          sudo fallocate -l 12G /mnt/vmex-swap
-          sudo chmod 600 /mnt/vmex-swap
-          sudo mkswap /mnt/vmex-swap
-          sudo swapon /mnt/vmex-swap
-      - name: Fetch the core parity fixture
-        if: matrix.selector == 'pr-physics-core'
-        # golden-v1 only (2 MB): every pull-request lane now runs on git-tracked
-        # decks, generated fixtures, and the golden digests.  The released
-        # netCDF bundle stays a nightly/weekly dependency.
-        run: python tools/fetch_assets.py --bundle golden-v1
-      - *xla-key
-      - *xla-restore
-      - *xla-prepare
-      - name: Run representative physics
-        env:
-          JAX_ENABLE_X64: "1"
-        run: |
-          FILES="$(python tools/test_manifest.py select ${{ matrix.selector }})"
-          pytest -q ${{ matrix.parallel }} -m "not full and not weekly" \
-            $FILES --durations=20 --cov=vmex --cov-report=term
-      - *xla-collect
-      - *xla-save
-      - name: Stash coverage
-        run: mv .coverage coverage.physics-${{ matrix.lane }}
-      - uses: actions/upload-artifact@v7.0.1
-        with:
-          name: coverage-physics-${{ matrix.lane }}
-          path: coverage.physics-${{ matrix.lane }}
-          retention-days: 3
-
   parity:
     name: Manifest parity lane (${{ matrix.lane }})
     needs: changes
@@ -257,7 +195,9 @@ jobs:
     runs-on: ubuntu-latest
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
-    timeout-minutes: ${{ matrix.lane == 'c5' && 30 || 25 }}
+    # Seven lanes of 10-12 warm minutes each (2026-10-15); a cold compilation
+    # cache roughly doubles a lane.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -291,15 +231,19 @@ jobs:
       - name: Run the manifest lanes
         env:
           JAX_ENABLE_X64: "1"
+        # ``serial`` lanes are memory-heavy and run after the others with
+        # their own worker count, appending to the same coverage file.
         run: |
-          FILES=""
-          for LANE in ${{ matrix.selector }}; do
-            FILES="$FILES $(python tools/test_manifest.py select "$LANE")"
-          done
-          # Lanes overlap, and a module selected twice would run twice.
-          FILES="$(printf '%s\n' $FILES | sort -u | tr '\n' ' ')"
+          files() {
+            for LANE in "$@"; do python tools/test_manifest.py select "$LANE"; done |
+              tr ' ' '\n' | sort -u | tr '\n' ' '
+          }
           pytest -q ${{ matrix.parallel }} -m "not full and not weekly" \
-            $FILES --durations=20 --cov=vmex --cov-report=term
+            $(files ${{ matrix.selector }}) --durations=20 --cov=vmex --cov-report=term
+          if [[ -n "${{ matrix.serial }}" ]]; then
+            pytest -q ${{ matrix.serial_parallel }} -m "not full and not weekly" \
+              $(files ${{ matrix.serial }}) --durations=20 --cov=vmex --cov-append --cov-report=term
+          fi
       - *xla-collect
       - *xla-save
       - name: Stash coverage
@@ -424,7 +368,7 @@ jobs:
     name: Changed executable lines (>= 95%)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [changes, fast, physics, parity, device, desc]
+    needs: [changes, fast, parity, device, desc]
     permissions:
       contents: read
       id-token: write
@@ -432,7 +376,6 @@ jobs:
       always() &&
       needs.changes.outputs.run_coverage == 'true' &&
       needs.fast.result == 'success' &&
-      needs.physics.result == 'success' &&
       needs.parity.result == 'success' &&
       needs.device.result == 'success' &&
       needs.desc.result == 'success'
@@ -453,7 +396,7 @@ jobs:
           merge-multiple: true
       - name: Combine coverage and enforce the mirror floor
         run: |
-          coverage combine coverage.device coverage.desc coverage.fast coverage.physics-* coverage.parity-*
+          coverage combine coverage.device coverage.desc coverage.fast coverage.parity-*
           coverage report --include='*/vmex/mirror/*' --fail-under=90
           coverage xml
       - name: Publish combined coverage
@@ -474,12 +417,38 @@ jobs:
         if: github.event_name == 'pull_request'
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
 
+  install:
+    # One cheap Linux cell plus the two platforms CI never otherwise touches.
+    name: pip install (${{ matrix.os }}, Python ${{ matrix.python }}${{ matrix.extra }})
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.11", extra: ""}
+          - {os: macos-latest, python: "3.13", extra: "[all]"}
+          - {os: windows-latest, python: "3.13", extra: "[all]"}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install, import and run the CLI
+        shell: bash
+        run: |
+          python -m pip install ".${{ matrix.extra }}"
+          python -c "import vmex; vmex.configure(); print(vmex.__version__)"
+          vmex --help > /dev/null
+
   pr-gate:
     name: PR gate
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [changes, quality, fast, physics, parity, desc, device, jax-compatibility, changed-coverage]
+    needs: [changes, quality, fast, parity, desc, device, jax-compatibility, install, changed-coverage]
     steps:
       - name: Require every review gate
         env:

@@ -267,8 +267,7 @@ Condition by condition:
   globalization, so a migration would change the convergence contract, not
   only the algebra.
 - **Cold and warm cost** — moving GMRES into JAX would add compilations to
-  one-shot solves that cannot amortize them (the mirror workflows are
-  profiled as M1--M3 in `benchmarks/profile_workflows.py`). The recorded
+  one-shot solves that cannot amortize them. The recorded
   backend audit for the closed adjoint reached the same decision
   (`linear_backend_audit_20260716` in
   `benchmarks/mirror_hybrid_fixed_boundary.json`).
@@ -282,6 +281,51 @@ the lane's tolerances follow is the same SOLVAX implements (Eisenstat and
 Walker 1996; Kelley and Keyes 1998). Migration is deferred until a measured
 comparison at production size shows equal-or-better cost under the same
 contract.
+
+## Admission bar for a solved equilibrium
+
+A mirror or hybrid solve is admitted as converged when:
+
+| Diagnostic | Bar | What it measures |
+|---|---|---|
+| `variational.maximum` | $\le$ `ftol` | the energy gradient the solver drives to zero |
+| `staggered_weak_force.maximum` | $\le$ `ftol` | the same first variation, assembled independently on the staggered mesh |
+| `normalized_divergence_rms` | $< 10^{-12}$ | $\nabla\cdot\mathbf{B}$; the field is divergence-free by construction, so more is a defect |
+| `force.normalized_rms` | reported, not gated | the strong-form force $\mathbf{J}\times\mathbf{B}-\nabla p$ |
+
+The first three are properties of the discrete equations and reach round-off
+on any converged solve. The strong-form force is monitored, but it is not an
+admission test, because it carries a truncation error of its own that does
+not go to zero at fixed `ns`.
+
+**Where the strong-force floor comes from.**
+{func}`~vmex.mirror.forces.isotropic_force_residual` (`vmex/mirror/forces.py`)
+rebuilds the force from the solved state. The covariant field and the
+pressure are evaluated on the radial half mesh. The current
+$\mu_0\sqrt{g}\,\mathbf{J}$ and the pressure gradient are radial differences
+of those half-mesh values over $\Delta s = 1/(n_s-1)$, placed on the interior
+full surfaces as in VMEC's `jxbforce`. The axis and boundary rows copy the
+nearest interior row. The $\theta$ and $\xi$ derivatives are spectral and
+spline derivatives. The residual is therefore set by the radial step and by
+the near-axis rows. Refining `mpol` or the longitudinal control count leaves
+it almost unchanged; only `ns` reduces it. Its size depends on the geometry.
+The closed circular limit reaches $1.6\times10^{-4}$ at `ns=5`
+(`test_closed_circular_limit_reaches_ftol_with_independent_strong_force`).
+Leg-return junctions and a rotating section raise it, as the beta-zero
+ablation in {doc}`/explanation/mirror-geometry` shows. For the rotating-ellipse
+racetrack, the `h1_20260716` record in
+`benchmarks/mirror_hybrid_fixed_boundary.json` (device normalized) goes
+`0.356 -> 0.333` from 32 to 64 controls, and `0.333 -> 0.227` when
+`(ns, mpol)` goes from `(5, 3)` to `(7, 4)`.
+
+**How to quote it.** Admit a solve on the three gated rows. Report
+`force.normalized_rms` together with its `ns`. Before using it as a
+convergence claim, show an `ns` ladder at fixed `mpol` and control count:
+{func}`~vmex.mirror.forces.refinement_convergence` checks that the ladder
+decreases monotonically, and {func}`~vmex.mirror.forces.passes_promotion_gate`
+applies the absolute gate on the finest rung. The `1.6e-4` bound in the
+circular-limit test is a regression bound for that smooth fixture. It is not
+a threshold for other geometries.
 
 ## Validation suite map
 

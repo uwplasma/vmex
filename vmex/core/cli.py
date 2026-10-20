@@ -245,11 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--trace",
         action="store_true",
         help=(
-            "Trace fusion alphas (guiding centre in Boozer coordinates, ESSOS), "
+            "Trace charged particles (fusion alphas by default; Boozer guiding centre, ESSOS), "
             "scaled in memory to ARIES-CS size: print the loss fraction, write "
             "*_trace.json/.npz, *_trace.png and *_trace_3d.png. Works on a "
             "wout_*.nc input or after solving an input file. The defaults "
-            "(1000 alphas, 1e-2 s) take about 30 s on 10 CPU cores; cost "
+            "(500 alphas, 1e-2 s) take about a minute on 10 CPU cores; cost "
             "scales as particles x tmax / timestep."
         ),
     )
@@ -259,8 +259,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--trace-particles", type=int, default=500,
-        help="Number of alpha particles (default: 500; cost is linear, sigma ~ 1/sqrt(N)).",
+        help="Number of particles (default: 500; cost is linear, sigma ~ 1/sqrt(N)).",
     )
+    p.add_argument("--trace-energy-eV", type=float, default=None, help="Kinetic energy [eV]; default fusion-alpha energy.")
+    p.add_argument("--trace-mass-kg", type=float, default=None, help="Particle mass [kg]; default alpha mass.")
+    p.add_argument("--trace-charge-coulomb", type=float, default=None, help="Signed nonzero charge [C]; default alpha charge.")
     p.add_argument(
         "--trace-no-scale", action="store_true",
         help="Trace the equilibrium as given instead of at ARIES-CS size.",
@@ -361,8 +364,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="cli",
         choices=("cli", "jit"),
         help=(
-            "Solver lane: 'cli' (jitted blocks with host residual checks, live "
-            "printing, exact-ftol exit) or 'jit' (single lax.while_loop)."
+            "Fixed-boundary solver lane: 'cli' (jitted blocks with host residual "
+            "checks, live printing, exact-ftol exit) or 'jit' (single "
+            "lax.while_loop). Free-boundary and mirror decks always run the 'cli' lane."
         ),
     )
     p.add_argument(
@@ -635,8 +639,9 @@ class _FreeBoundaryPlan:
     """Resolved free-boundary routing: solver kwargs + wout metadata."""
 
     def __init__(self, *, solver_kwargs, nextcur=0, extcur=None,
-                 mgrid_mode="", curlabel=None):
+                 mgrid_mode="", curlabel=None, banner=""):
         self.solver_kwargs = dict(solver_kwargs)
+        self.banner = banner
         self.nextcur = int(nextcur)
         self.extcur = extcur
         self.mgrid_mode = str(mgrid_mode)
@@ -765,7 +770,28 @@ def _free_boundary_plan(args, inp, input_path: Path, *, emit):
         solver_kwargs={"mgrid_path": mgrid},
         nextcur=int(data.nextcur), extcur=extcur,
         mgrid_mode=str(data.mgrid_mode), curlabel=tuple(data.coil_groups),
+        banner=_mgrid_banner(mgrid, data, extcur),
     )
+
+
+def _mgrid_banner(path: Path, data, extcur) -> str:
+    """Startup summary of the vacuum table and the currents applied to it."""
+    import numpy as np
+
+    fmt = lambda v: ", ".join(f"{x:.6g}" for x in np.ravel(v))  # noqa: E731
+    raw = np.asarray(data.raw_coil_cur, dtype=float)
+    groups = ", ".join(str(g).strip() for g in data.coil_groups) or "unnamed"
+    text = (f"  Opening vacuum field file: {path.name}\n"
+            f"  mgrid: NFP = {data.nfp}, mode {data.mgrid_mode}, {data.nextcur} coil groups ({groups}),"
+            f" R in [{data.rmin:.6g}, {data.rmax:.6g}] m, Z in [{data.zmin:.6g}, {data.zmax:.6g}] m,"
+            f" {data.ir} x {data.jz} x {data.kp} (R x Z x phi)\n"
+            f"  B = sum EXTCUR * table (VMEC2000, every mode), EXTCUR = {fmt(extcur)};"
+            f" file currents raw_coil_cur = {fmt(raw)} A\n")
+    if (str(data.mgrid_mode).upper()[:1] in "RN" and np.any(np.abs(raw) != 1.0)
+            and np.allclose(extcur, raw)):
+        text += ("  WARNING: EXTCUR equals raw_coil_cur on a mode-R table, which already carries those"
+                 " currents; the coil field is applied twice. MAKEGRID raw tables expect EXTCUR near 1.\n")
+    return text
 
 
 def _stage_overrides(inp, *, ftol: float | None, max_iter: int | None):
@@ -866,6 +892,8 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
         emit(f" RESTART : seeding from {restart_source}")
 
     freeb_plan = _free_boundary_plan(args, inp, input_path, emit=emit)
+    if verbose and freeb_plan is not None and freeb_plan.banner:
+        emit(freeb_plan.banner, end="")
     # VMEC2000 turns off LFREEB when the requested mgrid cannot be opened.
     # Use that effective mode in setup and WOUT metadata, not merely in CLI
     # routing; otherwise a fixed-boundary fallback is mislabeled free-boundary.
@@ -1163,7 +1191,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
         birth = ("volume" if args.trace_birth == "volume"
                  else f"s={float(args.trace_s):g}")
         emit(
-            f" Tracing {int(args.trace_particles)} alpha particles ({birth}, Boozer "
+            f" Tracing {int(args.trace_particles)} charged particles ({birth}, Boozer "
             f"guiding centre, {integrator}{', collisional' if args.collisional else ''}, "
             f"tmax={float(args.trace_tmax):.3g} s, "
             f"{'unscaled' if scale is None else _scale_label(scale)}, "
@@ -1194,6 +1222,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             mode_tolerance=mode_cut,
             nboz=int(args.nbooz),
             progress=None if quiet else _TraceProgress(),
+            energy_eV=args.trace_energy_eV, mass=args.trace_mass_kg, charge=args.trace_charge_coulomb,
             check_resolution=False,
         )
     except ImportError as exc:
@@ -1454,11 +1483,9 @@ def _scale_file(args, input_path: Path, outdir: Path | None, *, emit) -> int:
 
 
 def _solve_mirror_file(input_path: Path, outdir: Path | None, *, plot: bool, emit, quiet: bool) -> int:
-    import jax
 
     from vmex.mirror.free_boundary import solve_mirror_file
 
-    jax.config.update("jax_enable_x64", True)
     directory = outdir if outdir is not None else input_path.parent
     solution = solve_mirror_file(input_path, outdir=directory)
     mout_path = directory / f"mout_{case_from_input(input_path)}.nc"
@@ -1637,11 +1664,15 @@ def main(argv: list[str] | None = None) -> int:
     ``JAX_COMPILATION_CACHE_DIR``) — makes repeat processes of the same
     configuration skip compilation entirely.
     """
+    from .._compat import configure
+
+    configure()  # the command's JAX settings: float64, cache, sync CPU dispatch
     parser = build_parser()
     args = parser.parse_args(argv)
     if (args.collisional or args.trace_birth != "surface"
-            or args.trace_mode_cut is not None or args.trace_tolerance is not None) and not args.trace:
-        parser.error("--collisional, --trace-birth, --trace-mode-cut and --trace-tolerance require --trace")
+            or args.trace_mode_cut is not None or args.trace_tolerance is not None
+            or any(v is not None for v in (args.trace_energy_eV, args.trace_mass_kg, args.trace_charge_coulomb))) and not args.trace:
+        parser.error("collision, birth, mode-cut, tolerance and particle-parameter options require --trace")
     if bool(args.trace):
         _split_host_devices()
     # Flushing sink: with stdout redirected to a file (cluster batch logs),

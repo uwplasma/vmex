@@ -99,15 +99,6 @@ _SECOND_TRIAL_NEW_PROGRAM_CEILING = 1
 _STEADY_TRIAL_NEW_PROGRAMS = 0
 
 
-@pytest.fixture(autouse=True)
-def _enable_jit():
-    """Lane lowering needs JIT (the repo conftest disables it globally)."""
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", previous)
-
-
 @pytest.fixture(scope="module")
 def _lane_operands():
     """The exact ``lane(carry, rt)`` operands a solovev CLI solve dispatches."""
@@ -155,8 +146,10 @@ _COMPILE_COUNT_SCRIPT = """\
 import logging
 import sys
 
-import vmex as vj  # must precede the handler: import configures JAX logging
+import vmex as vj
 import jax
+
+vj.configure()  # before the handler: configure() sets JAX logging
 
 
 class CompileCounter(logging.Handler):

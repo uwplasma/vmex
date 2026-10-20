@@ -105,7 +105,8 @@ Every tabulated field ({meth}`~vmex.core.mgrid.MgridField.from_file`,
 {meth}`~vmex.core.mgrid.MgridField.from_input`) takes `order=1` (trilinear,
 the default) or `order=3` (tricubic, C1). The table itself is the same.
 `MgridField.from_input(inp, mgrid_path=None, *, order=1)` builds a deck's
-field with the solver's `EXTCUR` / `raw_coil_cur` scaling, so it is the way
+field with the deck's `EXTCUR` (each coil group's table times its current, as
+VMEC2000 does in every `mgrid_mode`), so it is the way
 to get the tricubic version of the field a deck would use.
 
 Trilinear stays the default because it is the VMEC2000 parity kernel that
@@ -157,3 +158,14 @@ default `device="auto"` it runs on the CPU even on a GPU host.
 Its coil examples need ESSOS (`pip install "vmex[coils]"`). Scope is in
 {doc}`/reference/capabilities` and the mechanism in
 {doc}`/explanation/nestor-vacuum`.
+
+## Model and references
+
+Outside the plasma the field is $\mathbf{B} = \mathbf{B}_{\rm ext} + \nabla\Phi$ with $\nabla^2\Phi = 0$
+and $\mathbf{B}\cdot\mathbf{n} = 0$ on the plasma boundary. NESTOR solves this Neumann problem with a
+Green's-function integral equation on the boundary, and the pressure balance
+$[\![\,B^2/2\mu_0 + p\,]\!] = 0$ across the boundary moves the plasma surface. Derivation and the
+numerical choices: {doc}`/explanation/nestor-vacuum`.
+
+- P. Merkel, *J. Comput. Phys.* 66, 83 (1986): the Green's-function method for the vacuum field.
+- S. P. Hirshman, W. I. van Rij and P. Merkel, *Comput. Phys. Commun.* 43, 143 (1986).

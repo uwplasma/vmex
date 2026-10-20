@@ -86,7 +86,6 @@ import numpy as np
 import jax.numpy as jnp
 
 from solvax import (
-    tridiagonal_solve as _sx_tridiagonal_solve,
     tridiagonal_solve_checked as _sx_tridiagonal_solve_checked,
 )
 
@@ -96,12 +95,17 @@ __all__ = [
     "angular_integration_weights",
     "precondn",
     "lamcal",
+    "lamcal_m0_radial",
+    "LAMBDA_M0_FLOOR",
     "scalfor_matrices",
     "scalfor",
-    "tridiagonal_solve",
 ]
 
 Array = Any
+
+#: Default floor of :func:`lamcal_m0_radial`: caps the step of the m = 0
+#: lambda radial checkerboard at 1000 times the diagonal ``faclam`` step.
+LAMBDA_M0_FLOOR = 1.0e-3
 
 #: VMEC2000 ``scalfor.f``: relative stiffening of the edge diagonal.
 EDGE_PEDESTAL = 0.05
@@ -465,6 +469,56 @@ def lamcal(
     return faclam
 
 
+def lamcal_m0_radial(
+    *,
+    guu_half: Array,
+    sqrt_g_half: Array,
+    lamscale: Array,
+    angular_weight: Array,
+    ntor: int,
+    nfp: int,
+    floor: float,
+    damping_factor: float = 2.0,
+) -> TridiagonalMatrices:
+    """Radial tridiagonal preconditioner of the ``m = 0, n >= 1`` lambda force.
+
+    lambda enters ``B^theta`` on the half mesh as the average
+    ``(lambda_{j-1} + lambda_j)/2``, so the exact ``m = 0`` block of the
+    energy Hessian is ``P^T diag(A) P`` with ``A_h = (n nfp)^2 <g_uu/sqrt g>_h``
+    and ``P`` the full-to-half average: off-diagonals ``A/4`` and diagonal
+    ``(A_in + A_out)/4``.  :func:`lamcal` keeps only the smooth-mode value
+    ``(A_in + A_out)/2`` of that block, under which the radial checkerboard
+    ``(-1)^j`` is ``O(1/ns^2)`` too stiff and relaxes last; it appears as
+    surface-to-surface sign flips of ``<J.B>`` and ``DMerc`` at small ftol.
+    Here the full block, plus ``floor`` times the diagonal guess (which caps
+    the checkerboard step at ``1/floor`` times the diagonal step), is
+    inverted, scaled so that smooth modes keep the ``lamcal`` step.  The axis
+    row is inactive; the axis copy of ``lambda_1`` (``totzsps``) adds
+    ``A_{1/2}/4`` to row 1 of the symmetric block, returned as ``dx[0]``.
+
+    Returns ``TridiagonalMatrices(ax=super, bx=sub, dx=diag)`` of shape
+    ``(ns, ntor+1)``; column ``n = 0`` (the iota channel) is unused.
+    """
+    w3 = _weight_bcast(angular_weight)
+    sqrt_g = jnp.asarray(sqrt_g_half)
+    a_half = jnp.sum(jnp.asarray(guu_half) / jnp.where(sqrt_g != 0.0, sqrt_g, 1.0) * w3,
+                     axis=(1, 2))
+    dtype = a_half.dtype
+    a_half = a_half.at[0].set(0.0)  # no half cell inside the axis
+    a_out = jnp.concatenate([a_half[1:], jnp.zeros((1,), dtype)])  # none past the edge
+    lamscale = jnp.asarray(lamscale, dtype=dtype)
+    p_factor = float(damping_factor) / (4.0 * lamscale * lamscale)
+    tnn = (jnp.arange(int(ntor) + 1, dtype=dtype) * float(nfp)) ** 2 / p_factor
+    sub = 0.25 * a_half[:, None] * tnn
+    sup = 0.25 * a_out[:, None] * tnn
+    diag = (0.25 + 0.5 * float(floor)) * (a_half + a_out)[:, None] * tnn
+    # Axis row: identity with zero right-hand side; row 1 decoupled from it.
+    sub = sub.at[:2].set(0.0)
+    sup = sup.at[0].set(0.0)
+    diag = diag.at[0].set(0.25 * a_half[1] * tnn)
+    return TridiagonalMatrices(ax=sup, bx=sub, dx=diag)
+
+
 # ---------------------------------------------------------------------------
 # scalfor (scalfor.f) + tridslv
 # ---------------------------------------------------------------------------
@@ -603,43 +657,6 @@ def scalfor_matrices(
             dx = dx.at[edge, 0, 0].multiply((1.0 - mult_fac) / (1.0 + edge_pedestal))
 
     return TridiagonalMatrices(ax=ax, bx=bx, dx=dx)
-
-
-def tridiagonal_solve(
-    superdiagonal: Array,
-    diagonal: Array,
-    subdiagonal: Array,
-    rhs: Array,
-    *,
-    method: str = "auto",
-) -> Array:
-    """Radial tridiagonal solve vectorized over all (m,n) columns and fields.
-
-    VMEC2000: ``serial_tridslv`` (in ``scalfor.f``): solve, along the leading
-    (radial) axis, ``sub[j]*x[j-1] + diag[j]*x[j] + super[j]*x[j+1] = rhs[j]``
-    for every trailing-column element simultaneously.  ``sub[0]`` and
-    ``super[-1]`` are ignored.  ``rhs`` may carry extra trailing axes (stacked
-    force fields) beyond the shape of ``diagonal``; they are solved in one
-    pass.
-
-    Thin arg-order adapter over :func:`solvax.tridiagonal_solve`: SOLVAX uses
-    the ``(lower, diag, upper)`` band convention, so the sub-/super-diagonals
-    are swapped here to preserve vmex's ``(super, diag, sub)`` signature.
-    Numerics unchanged — SOLVAX's Thomas backend is the verbatim port of the
-    legacy parity-proven sweep (same ``eps = 1e-12``), so ``method`` still
-    selects it bit-for-bit:
-
-    - ``"thomas"``: two ``lax.scan`` Thomas sweeps (jit-friendly, no host
-      round-trips); the CPU path, **bitwise** identical to the pinned A/B tests.
-    - ``"lax"``: XLA's fused batched solver ``jax.lax.linalg.tridiagonal_solve``
-      (cuSPARSE ``gtsv2`` on CUDA, LAPACK ``gtsv`` on CPU); the accelerator fast
-      path (numerically equivalent, not bit-identical to Thomas).
-    - ``"auto"`` (default): Thomas when lowering for CPU (bit parity), the fused
-      solver elsewhere, chosen with ``jax.lax.platform_dependent``.  Systems
-      with fewer than 3 radial rows always use Thomas.
-    """
-    # solvax: tridiagonal_solve(lower=sub, diag, upper=super); swap to keep our API.
-    return _sx_tridiagonal_solve(subdiagonal, diagonal, superdiagonal, rhs, method=method)
 
 
 def scalfor(

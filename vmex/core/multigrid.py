@@ -3,8 +3,8 @@
 VMEC2000: ``Sources/TimeStep/interp.f`` — when the ``NS_ARRAY`` ladder moves
 to the next radial resolution, the converged spectral coefficients ``xc`` are
 interpolated linearly in radius onto the new grid with a VMEC-specific
-convention (VMEC++ performs the same linear interpolation of the spectral
-coefficients over the ``sqrt(s)``-scaled internal representation):
+convention (linear interpolation of the spectral coefficients over the
+``sqrt(s)``-scaled internal representation):
 
 1. scale the coefficients by ``scalxc`` (``profil3d.f``) so odd-m harmonics
    enter in VMEC's internal ``1/sqrt(s)`` representation — linear in
@@ -217,7 +217,7 @@ _PREFETCH_ATTEMPTED: set = set()
 def _launch_lane_prefetch(
     inp: VmecInput, *, ns_next: int, ftol_next: float, niter_next: int,
     lconm1: bool, time_step, tcon0, gamma, nstep, precon_type,
-    prec2d_threshold, prec2d, use_fft, device,
+    prec2d_threshold, prec2d, use_fft, device, lambda_m0_floor=None,
 ) -> threading.Thread:
     """Start compiling the NEXT rung's block-lane executable in the background.
 
@@ -242,7 +242,7 @@ def _launch_lane_prefetch(
                     tcon0=tcon0, gamma=gamma,
                     precon_type=precon_type,
                     prec2d_threshold=prec2d_threshold, prec2d=prec2d,
-                    use_fft=use_fft,
+                    use_fft=use_fft, lambda_m0_floor=lambda_m0_floor,
                 )
                 _prefetch_block_lane(
                     rt, use_fft=use_fft, time_step0=time_step0
@@ -283,6 +283,7 @@ def solve_multigrid(
     prefetch_compile: bool = False,
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
+    lambda_m0_floor: float | None = None,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
 
@@ -317,8 +318,7 @@ def solve_multigrid(
     exist only to build a seed the caller already has; rungs above the seed
     resolution still run from the ``interp.f`` interpolant of the seed, and
     a seed finer than the whole ladder runs only the final rung (resampled
-    down).  VMEC++ instead requires ``ns_array[0]`` to equal the source
-    resolution.
+    down).
     ``precon_type``, ``prec2d_threshold``, and ``prec2d`` override the input's
     optional 2D-preconditioner configuration at every stage.
     ``jacobian_retries`` applies the same bounded best-checkpoint/``DELT``
@@ -326,8 +326,7 @@ def solve_multigrid(
     zero preserves VMEC2000's immediate fatal stop after 75 resets.
     If the first requested grid still has an invalid initial Jacobian after
     its magnetic-axis re-guess, ``coarse_grid_retry=True`` retries the ladder
-    once with an automatic ``ns=3``, ``ftol=1e-4`` stage prepended.  This is
-    the current VMEC++ driver recovery: it supplies a coarse equilibrium for
+    once with an automatic ``ns=3``, ``ftol=1e-4`` stage prepended.  It supplies a coarse equilibrium for
     interpolation without changing the user's requested stages.  Set it to
     false to expose the original typed failure directly.
 
@@ -357,6 +356,9 @@ def solve_multigrid(
     follows JAX placement.  Auto never overrides an active JAX device or
     platform selection.
 
+    ``lambda_m0_floor`` (default ``None``, VMEC2000's diagonal ``faclam``) turns on
+    the radial ``m = 0`` lambda preconditioner, e.g. ``1e-3``
+    (:func:`~vmex.core.preconditioner.lamcal_m0_radial`); 3-D decks only.
     ``use_fft`` has the same measured-hardware default and implicit-AD role as in
     :func:`vmex.core.solver.solve`.
 
@@ -449,6 +451,7 @@ def solve_multigrid(
                 tcon0=tcon0, gamma=gamma,
                 precon_type=precon_type, prec2d_threshold=prec2d_threshold,
                 prec2d=prec2d, use_fft=stage_use_fft,
+                lambda_m0_floor=lambda_m0_floor,
             )
             target = _placement_device(device, resolution)
             state = _put_numeric_leaves(state, target)
@@ -502,8 +505,8 @@ def solve_multigrid(
                     lconm1=lconm1, time_step=time_step, tcon0=tcon0,
                     gamma=gamma, nstep=nstep, precon_type=precon_type,
                     prec2d_threshold=prec2d_threshold, prec2d=prec2d,
-                    use_fft=use_fft_next,
-                    device=device,
+                    use_fft=use_fft_next, device=device,
+                    lambda_m0_floor=lambda_m0_floor,
                 )
         with device_context(device, resolution):
             carry = _solve_stage(
@@ -569,6 +572,7 @@ def solve_multigrid(
                 prefetch_compile=prefetch_compile,
                 polish_force_balance=polish,
                 polish_config=polish_config,
+                lambda_m0_floor=lambda_m0_floor,
             )
         last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
         if ier not in (SUCCESSFUL_TERM_FLAG, MORE_ITER_FLAG) or (

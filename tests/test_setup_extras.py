@@ -57,7 +57,7 @@ def test_lasym_delta_rotation_guards():
     out = su._lasym_delta_rotation(rbc, rbs, zbc, zbs, mpol=1, ntor=ntor)
     assert out[0] is rbc
 
-    # degenerate m=1 content (denominator zero): unrotated
+    # no m=1 content: atan2(0, 0) = 0, unrotated
     rbc, rbs, zbc, zbs = _m1_arrays()
     out = su._lasym_delta_rotation(rbc, rbs, zbc, zbs, mpol=3, ntor=ntor)
     assert out[0] is rbc
@@ -88,20 +88,26 @@ def test_lasym_delta_rotation_aligns_m1_modes():
     assert inv1 == pytest.approx(inv0, rel=1e-12)
 
 
+@pytest.mark.parametrize("zbs01", [0.8, -0.8, -1.3])
+def test_lasym_delta_matches_vmec2000_atan2(zbs01):
+    """VMEC2000 readin.f: ``delta = ATAN2(rbs(0,1) - zbc(0,1), rbc(0,1) + zbs(0,1))``.
+
+    With ``rbc(0,1)`` and ``zbs(0,1)`` of opposite sign the former ``|.|``
+    denominator rotated by the wrong angle and left ``rbs != zbc``.
+    """
+    ntor = 1
+    rbc, rbs, zbc, zbs = _m1_arrays()
+    rbc[ntor, 1], zbs[ntor, 1], rbs[ntor, 1], zbc[ntor, 1] = 1.0, zbs01, 0.3, 0.1
+    delta = np.arctan2(0.3 - 0.1, 1.0 + zbs01)
+    rbc2, rbs2, zbc2, zbs2 = su._lasym_delta_rotation(
+        rbc, rbs, zbc, zbs, mpol=3, ntor=ntor)
+    assert rbc2[ntor, 1] == pytest.approx(np.cos(delta) + 0.3 * np.sin(delta), abs=1e-14)
+    assert rbs2[ntor, 1] == pytest.approx(zbc2[ntor, 1], abs=1e-14)
+
+
 # ---------------------------------------------------------------------------
 # The jitted setup lane (one XLA program per rung instead of ~110)
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def _jit_enabled():
-    """The repo conftest disables jit globally; the lane needs it on."""
-    import jax
-
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", previous)
 
 
 def _solovev_input():
@@ -113,14 +119,12 @@ def _solovev_input():
     return VmecInput.from_file(str(root / "examples" / "data" / "input.solovev"))
 
 
-def test_setup_lane_is_reused_across_rungs_and_compiles_once(_jit_enabled):
+def test_setup_lane_is_reused_across_rungs_and_compiles_once():
     """Every radial rung of one deck hits the same lane executable.
 
     The lane exists to replace ~110 single-op XLA programs per rung with
     one, which only pays off if the second rung reuses the first rung's
-    executable.  Counted from JAX's own compile events, with jit enabled,
-    because the suite otherwise runs with ``jax_disable_jit`` and would
-    never execute the compiled path at all.
+    executable.  Counted from JAX's own compile events.
     """
     import jax
     from jax import monitoring
@@ -195,7 +199,7 @@ def _dispatched_one_op_at_a_time(inp, resolution, *, lconm1=True):
     return expected
 
 
-def test_setup_lane_matches_the_eager_dispatch_bit_for_bit(_jit_enabled):
+def test_setup_lane_matches_the_eager_dispatch_bit_for_bit():
     """The lane must reproduce op-at-a-time dispatch exactly, not closely.
 
     Compiled at the default XLA optimization level the lane's arithmetic is
@@ -220,7 +224,7 @@ def test_setup_lane_matches_the_eager_dispatch_bit_for_bit(_jit_enabled):
             f"(max |delta| {np.max(np.abs(got - want)) if got.size else 0})")
 
 
-def test_zero_carry_constants_are_transfers_not_programs(_jit_enabled):
+def test_zero_carry_constants_are_transfers_not_programs():
     """Host-built zeros compile nothing, and the carry copy is one program."""
     import jax
     from jax import monitoring

@@ -47,7 +47,7 @@ can reproduce each step yourself.
 |---|---|---|
 | `vmex[coils]` | `essos>=0.21.0` | coil fields, free boundary from coils, single-stage examples, alpha tracing |
 | `vmex[freeb]` | `virtual-casing-jax>=0.0.9` | virtual-casing exterior fields (`VmecExtender`) |
-| `vmex[neoclassical]` | `neo-jax>=1.0.5` | effective ripple |
+| `vmex[neoclassical]` | `neo-jax>=1.0.6` | effective ripple |
 | `vmex[turbulence]` | `gkx>=2.5.0` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
 | `vmex[optimizers]` | `jaxopt`, `optax` | the JAXopt and Optax example drivers |
 | `vmex[all]` | all of the above | every example |
@@ -84,17 +84,42 @@ cd vmex
 pip install -e .          # editable install, recommended for development
 ```
 
-## Float64 (required)
+## Float64 and other JAX settings
 
-VMEC's numerics require double precision. VMEX enables JAX x64 mode itself
-when you use the CLI or the core solver entry points; if you drive JAX
-directly in your own scripts, set:
+VMEC's numerics require double precision. `import vmex` changes no
+`jax.config` setting. VMEX's settings are applied in one place,
+`vmex.configure()`:
 
-```console
-export JAX_ENABLE_X64=1
+- float64 (`jax_enable_x64`);
+- the machine-scoped persistent compilation cache;
+- synchronous CPU dispatch;
+- JAX logging at `ERROR`.
+
+The `vmex` command calls it. In Python it runs on first use of `vmex.core`
+or `vmex.mirror`, unless you called it first or set `JAX_ENABLE_X64`
+yourself. Call it explicitly to choose:
+
+```python
+import vmex
+
+vmex.configure()                          # the defaults above
+vmex.configure(compilation_cache=False)   # float64, no persistent cache
 ```
 
-or `jax.config.update("jax_enable_x64", True)` before solving.
+Only these environment defaults are still set at `import vmex`, because XLA
+reads them once, before its backend starts (an explicit value always wins):
+`XLA_FLAGS` additions for CPU, `TF_CPP_MIN_LOG_LEVEL`, `ABSL_MIN_LOG_LEVEL` and
+`GLOG_minloglevel`. Child processes inherit them.
+
+| `configure()` argument | Default | Overridden by |
+|---|---|---|
+| `x64` | `True` | `JAX_ENABLE_X64` (when VMEX configures itself) |
+| `compilation_cache` | `True` (machine-scoped directory) | `VMEX_COMPILATION_CACHE`, `JAX_COMPILATION_CACHE_DIR` |
+| `cpu_async_dispatch` | `False` | `JAX_CPU_ENABLE_ASYNC_DISPATCH` |
+| `logging_level` | `ERROR` | `VMEX_JAX_LOGGING_LEVEL`, `JAX_LOGGING_LEVEL` (`INHERIT` leaves it) |
+
+The solver refuses to run in float32 (`vmex.configure(x64=False)` or
+`JAX_ENABLE_X64=0`) and says how to fix it.
 
 ## GPU support
 

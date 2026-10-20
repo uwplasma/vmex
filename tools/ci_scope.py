@@ -61,7 +61,7 @@ def classify(paths: Iterable[str], *, force_all: bool = False) -> tuple[bool, bo
 
 ROOT = Path(__file__).resolve().parents[1]
 NARROWABLE_PREFIXES = ("tests/", "benchmarks/", "examples/", "docs/")
-_IMPORTS = re.compile(r"^\s*(?:from|import)\s+(benchmarks|examples)\b", re.MULTILINE)
+_IMPORTS = re.compile(r"^\s*(?:from|import)\s+(examples)\b", re.MULTILINE)
 
 
 def _is_narrowable(path: str) -> bool:
@@ -85,7 +85,7 @@ def _owning_lanes(modules: Iterable[str], manifest: dict) -> set[str]:
         path, lane_list = record[0], record[-1]
         if path in wanted:
             lanes |= {lane for lane in lane_list if lane.startswith("pr-")}
-    # A selector lane (``pr-implicit-response-a`` and the like) runs nodes of
+    # A selector lane (``pr-device`` and the like) runs nodes of
     # modules it does not own; a change to such a module must run it too.
     for lane, selectors in manifest.get("selectors", {}).items():
         if lane.startswith("pr-") and any(
@@ -97,8 +97,8 @@ def _owning_lanes(modules: Iterable[str], manifest: dict) -> set[str]:
 def _tests_referencing(paths: Iterable[str], root: Path) -> set[str]:
     """Test modules that import or name any of ``paths``.
 
-    Tests reach benchmark and example code both ways: ``from benchmarks...``
-    for helpers, and a literal path for scripts they execute. Missing either
+    Tests reach example code both ways: an import for helpers, and a
+    literal path for scripts they execute. Missing either
     would silently drop a lane, so both are matched.
     """
     targets = list(paths)
@@ -132,7 +132,7 @@ def needed_lanes(paths: Iterable[str], *, manifest=None, root=None) -> set[str] 
 
     modules = {path for path in changed if path.startswith("tests/") and path.endswith(".py")}
     scripts = [path for path in changed
-               if path.startswith(("benchmarks/", "examples/")) and path.endswith(".py")]
+               if path.startswith("examples/") and path.endswith(".py")]
     documents = [path for path in changed
                  if any(path.lower().endswith(suffix) for suffix in DOCUMENTATION_SUFFIXES)]
     modules |= _tests_referencing(scripts + documents, root)
@@ -154,8 +154,8 @@ def select_lanes(paths: Iterable[str], entries, *, manifest=None, root=None) -> 
     lanes = needed_lanes(paths, manifest=manifest, root=root)
     if lanes is None:
         return list(entries)
-    return [entry for entry in entries
-            if any(one in lanes for one in str(entry.get("selector", "")).split())]
+    return [entry for entry in entries if any(
+        one in lanes for key in ("selector", "serial") for one in str(entry.get(key, "")).split())]
 
 
 def main(argv: list[str] | None = None) -> int:

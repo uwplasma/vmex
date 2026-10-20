@@ -20,6 +20,7 @@ iteration
 interior-field
 nestor-vacuum
 high-order-force-balance
+solver-landscape
 ```
 
 ## Derivatives

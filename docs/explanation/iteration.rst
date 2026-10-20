@@ -186,10 +186,8 @@ system with the :math:`m^2` and :math:`(n\,\mathrm{NFP})^2` weights, the
 ``scalfor.f``, and the ``jmin`` axis-row rules is
 :func:`~vmex.core.preconditioner.scalfor_matrices`; the application is
 :func:`~vmex.core.preconditioner.scalfor`. The solve is a Thomas
-algorithm vectorized over all spectral columns simultaneously
-(:func:`vmex.core.preconditioner.tridiagonal_solve`, a thin arg-order
-adapter over ``solvax.tridiagonal_solve`` — the shared SOLVAX linear-solver
-package). Production application uses ``solvax.tridiagonal_solve_checked``:
+algorithm vectorized over all spectral columns simultaneously, from the
+shared SOLVAX linear-solver package. Production application uses ``solvax.tridiagonal_solve_checked``:
 the unregularized Thomas pivots must pass VMEC2000's
 ``abs(pivot) > 1e-8*abs(diagonal)`` condition and a backward-residual check.
 Rejected columns receive an identity preconditioner action and a typed
@@ -208,6 +206,68 @@ with :math:`b_\lambda = \langle g_{uu}/\sqrt{g}\rangle`,
 :math:`c_\lambda = \langle g_{vv}/\sqrt{g}\rangle`,
 :math:`d_\lambda = \langle g_{uv}/\sqrt{g}\rangle` (the :math:`\sqrt{s}`
 damping only bites for :math:`m > 16`).
+
+For :math:`m = 0`, :math:`n \ge 1` the diagonal is not the whole story.
+:math:`\lambda` enters :math:`B^\theta` only through the half-mesh average
+:math:`P\lambda = (\lambda_{j-1} + \lambda_j)/2`, so the exact block of the
+energy Hessian is
+
+.. math::
+
+   M = P^{\mathsf T}\,\mathrm{diag}(A_h)\,P, \qquad
+   A_h = (n\,\mathrm{NFP})^2 \langle g_{uu}/\sqrt{g}\rangle_h ,
+
+a radial tridiagonal matrix with off-diagonals :math:`A/4` and diagonal
+:math:`(A_\mathrm{in} + A_\mathrm{out})/4`. ``faclam`` keeps only its value
+on smooth profiles, :math:`(A_\mathrm{in} + A_\mathrm{out})/2`. On the radial
+checkerboard :math:`(-1)^j` the true eigenvalue is
+:math:`A\cos^2(k\Delta s/2) = O(A/\mathrm{ns}^2)`, so that mode relaxes last and
+shows up as surface-to-surface sign flips in :math:`\langle\mathbf J\cdot
+\mathbf B\rangle`. VMEX solves the tridiagonal block instead
+(:func:`~vmex.core.preconditioner.lamcal_m0_radial`), with
+:math:`10^{-3}` of the diagonal added so the checkerboard step is at most
+:math:`10^3` times the ``faclam`` step. The axis copy
+:math:`\lambda_0 = \lambda_1` of ``totzsps`` adds :math:`A_{1/2}/4` to the
+first row. It is opt-in (``lambda_m0_floor=1e-3`` in
+:func:`~vmex.core.multigrid.solve_multigrid`, :func:`~vmex.core.solver.solve`
+and ``prepare_runtime``), so the default keeps VMEC2000 iteration parity.
+``tests/test_preconditioner.py`` checks that with a zero floor the
+preconditioned force Jacobian on these columns is the identity to 1%, against
+eigenvalues from 0.003 to 2 for the diagonal.
+
+Measured effect (warm wall time per solve is equal within 5% in every row):
+
+.. list-table::
+   :header-rows: 1
+
+   * - Deck
+     - Iterations off / on
+   * - ``LandremanPaul2021_QA_lowres``, ftol 1e-8, 1e-11, 1e-13
+     - 1115 / 1017
+   * - ``nfp3_QI_fixed_resolution_final``
+     - 5636 / 5570
+   * - ``nfp2_QA``, ``nfp2_QA_finite_beta``, ``li383_low_res``, ``nfp2_QA_highres``
+     - equal (648, 757, 123, 1253 / 1254)
+   * - ``nfp2_QA`` ladder 9, 17, 35; ``li383_low_res`` at ``ns`` = 99
+     - equal (1513; 817)
+   * - ``nfp4_QH_warm_start``
+     - 450 / 454
+   * - ``nfp4_QH_finite_beta``
+     - 1785 / 1912
+   * - ``cth_like_free_bdy``, ladder 7, 15 (free boundary)
+     - 308 / 311
+
+Use it for a fixed-boundary stellarator run to a very small ``ftol`` that shows
+surface-to-surface sign flips of :math:`\langle\mathbf J\cdot\mathbf B\rangle`
+or ``DMerc``: the checkerboard amplitude halves. It does not reduce the
+iteration count in general (no 3-D deck gained more than 9%, one lost 7%), and
+the floor does not change that: 0.1 to 0 on ``nfp4_QH_finite_beta`` gives 1813
+to 1929 iterations. Switched on, it moves the trajectory, so the tests pinned
+to VMEC2000 iterates after a fixed number of iterations, or to a converged
+state to 5e-12, no longer hold. That is why it is not the default.
+
+This term was introduced by VMEC++ (``lambda_precondition_checkerboard_terms``,
+v0.9.0); VMEC2000 and PARVMEC use the diagonal only.
 
 The matrices are refreshed on the ``ns4 = 25`` cadence above.
 

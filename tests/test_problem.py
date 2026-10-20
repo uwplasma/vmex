@@ -549,7 +549,7 @@ def test_direct_scipy_minimize_and_least_squares_use_same_problem():
 
 def test_vmex_jax_logging_default_and_override() -> None:
     """The default removes PjRt chatter without preventing an opt-in."""
-    code = "import vmex, jax; print(jax.config.jax_logging_level)"
+    code = "import vmex.core, jax; print(jax.config.jax_logging_level)"
     env = os.environ.copy()
     env.pop("VMEX_JAX_LOGGING_LEVEL", None)
     env.pop("JAX_LOGGING_LEVEL", None)
@@ -1002,7 +1002,8 @@ def test_status_branch_is_python_when_concrete_and_cond_when_traced(monkeypatch)
     monkeypatch.setattr(imp, "_solve_implicit_bwd_impl", lambda *a: pytest.fail(
         "a failed trial must not run the adjoint"))
     params = {"rbc": jnp.ones(3)}
-    (gradient,) = imp._solve_implicit_status_bwd(
-        SimpleNamespace(device=None), (params, None, None, jnp.int32(2), None),
+    gradient, _ = imp._solve_implicit_status_bwd(
+        SimpleNamespace(device=None),
+        (params, None, None, jnp.int32(2), jnp.asarray(1e-11)),
         (jnp.ones(2), None, None, None))
     np.testing.assert_array_equal(np.asarray(gradient["rbc"]), np.zeros(3))

@@ -44,14 +44,6 @@ def diagnostic_neo_config():
     )
 
 
-def _require_asymmetric_neo():
-    _neo_imports()
-    from neo_jax import BoozerData
-
-    if "bmns" not in BoozerData.__dataclass_fields__:
-        raise NotImplementedError("LASYM requires NEO_JAX with sine spectra")
-
-
 def _neo_boozer_data(bx, indices):
     """Share one mode-first Boozer transform with NEO, including sine partners."""
     booz = {
@@ -79,9 +71,6 @@ def epsilon_effective_from_boozer(booz: Any, *, config=None):
     JAX arrays remain differentiable when the mapping and selected NEO path
     are JAX-native.
     """
-    get = booz.get if isinstance(booz, dict) else lambda key, default=None: getattr(booz, key, default)
-    if get("asym", get("lasym", get("bmns_b") is not None)):
-        _require_asymmetric_neo()
     NeoConfig, run_neo = _neo_imports()
     cfg = NeoConfig() if config is None else config
     result = run_neo(
@@ -112,8 +101,6 @@ def epsilon_effective_from_wout(
     The same in-memory Boozer transform feeds NEO, including all LASYM
     partners. Caches remain available unless ``clear_jax_caches=True``.
     """
-    if bool(getattr(wout, "lasym", False)):
-        _require_asymmetric_neo()
     if clear_jax_caches:
         import gc
 
