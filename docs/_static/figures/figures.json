@@ -1,22 +1,7 @@
 {
   "schema": "vmex.figure-provenance/1",
-  "note": "Provenance for every figure under docs/_static/figures. One row per committed image. `sha256`, `bytes` and `used_in` are recomputed by `python tools/update_figure_manifest.py`; everything else is authored. `tests/test_figure_provenance.py` fails when a figure changes without its row, when a row names a generator or input that does not exist, or when a figure is added or removed without updating this file. Two fields are deliberately honest. `reproducible` says what it takes to rebuild the figure: `command` means the listed command rebuilds it from the repository alone, `manual` means a script produces the pixels but a rename, crop or format conversion is done by hand, and `external-data` means it also needs data that is not in the tree. `bytes_verified` says whether the committed bytes were actually re-derived and compared, which is a stronger claim: a `command` figure with `bytes_verified` false can be rebuilt, but its committed pixels predate the current renderer.",
+  "note": "Provenance for every figure under docs/_static/figures. One row per committed image. `sha256`, `bytes` and `used_in` are recomputed by `python tools/update_figure_manifest.py`; everything else is authored. `tests/test_repo_consistency.py` fails when a figure changes without its row, when a row names a generator or input that does not exist, or when a figure is added or removed without updating this file. Two fields are deliberately honest. `reproducible` says what it takes to rebuild the figure: `command` means the listed command rebuilds it from the repository alone, `manual` means a script produces the pixels but a rename, crop or format conversion is done by hand, and `external-data` means it also needs data that is not in the tree. `bytes_verified` says whether the committed bytes were actually re-derived and compared, which is a stronger claim: a `command` figure with `bytes_verified` false can be rebuilt, but its committed pixels predate the current renderer.",
   "figures": [
-    {
-      "path": "docs/_static/figures/ess_x_scale.webp",
-      "sha256": "eb61149f25f68af8ec105b14ba2e54d93c75fbf6fd50400384ef04a39316b130",
-      "bytes": 18448,
-      "generator": "docs/_static/figures/sources/make_optimization_docs_figures.py",
-      "command": "python docs/_static/figures/sources/make_optimization_docs_figures.py",
-      "inputs": [],
-      "record": null,
-      "generated": "2026-09-03",
-      "hardware": null,
-      "reproducible": "command",
-      "bytes_verified": true,
-      "used_in": [],
-      "note": "Closed-form plot of the exponential spectral scaling exp(-alpha*max(|m|,|n|)); it solves nothing and reads nothing, so there is no hardware to record. No docs page currently embeds it \u2014 it is kept as a generated asset for the objectives pages, and the empty used_in below records that honestly."
-    },
     {
       "path": "docs/_static/figures/free_boundary_phiedge.webp",
       "sha256": "454ce4db6bae9eadd506ac0d731b89b5fd54cd1629f5a7224779293f34758448",
@@ -39,8 +24,8 @@
     },
     {
       "path": "docs/_static/figures/readme_interior_field.webp",
-      "sha256": "f82420e6197a074138619ce9347ec3f2e24316efaded098959b623dc71bac816",
-      "bytes": 34822,
+      "sha256": "10bf2bd2408ec3c8bcfe52bee6c72dbf405fd4445f57ec24d829557883b7442a",
+      "bytes": 35606,
       "generator": "docs/_static/figures/sources/make_interior_field_figure.py",
       "command": "python docs/_static/figures/sources/make_interior_field_figure.py",
       "inputs": [
@@ -112,10 +97,10 @@
     },
     {
       "path": "docs/_static/figures/readme_convergence.webp",
-      "sha256": "e3d16a8a0b411842746d05e735627cd6ccb193ee65f84e0b587d8c29162a2663",
-      "bytes": 40820,
-      "generator": "benchmarks/make_readme_figures.py",
-      "command": "python benchmarks/make_readme_figures.py --only convergence",
+      "sha256": "34071e2e47efb7156f0971b75660c6019ef131f5cf482a7b15b489f9bd3a28a5",
+      "bytes": 33446,
+      "generator": "docs/_static/figures/sources/make_readme_figures.py",
+      "command": "python docs/_static/figures/sources/make_readme_figures.py --only convergence",
       "inputs": [
         "benchmarks/convergence_nfp4_ns51.json",
         "examples/data/input.nfp4_QH_warm_start"
@@ -125,7 +110,7 @@
       "hardware": null,
       "reproducible": "command",
       "bytes_verified": true,
-      "note": "Plots the cached three-code trace, which dates from 2026-07-10; the `generated` date is the render. On a cache miss the generator re-solves and shells out to VMEC2000 and VMEC++, discovered locally or via VMEX_XVMEC2000 / VMEX_VMECPP_PY. Re-rendered in 2026-09 so the committed bytes match what the command produces.",
+      "note": "Plots the VMEX and VMEC2000 traces from the cache, which dates from 2026-07-10; the `generated` date is the render. On a cache miss the generator re-solves and shells out to VMEC2000, discovered locally or via VMEX_XVMEC2000. Re-rendered in 2026-09 so the committed bytes match what the command produces.",
       "used_in": [
         "README.md",
         "docs/explanation/validation.md",
@@ -175,8 +160,8 @@
       "path": "docs/_static/figures/readme_equilibrium_showcase.webp",
       "sha256": "b9a8966bd5784bbe8f4bf9ce6cba29c2ea3d829db5793503c010158937c83fe9",
       "bytes": 93274,
-      "generator": "benchmarks/make_readme_figures.py",
-      "command": "python benchmarks/make_readme_figures.py --only showcase",
+      "generator": "docs/_static/figures/sources/make_readme_figures.py",
+      "command": "python docs/_static/figures/sources/make_readme_figures.py --only showcase",
       "inputs": [
         "examples/data/input.nfp4_QH_warm_start"
       ],
@@ -254,24 +239,6 @@
       "note": "Drawn from benchmarks/extender_islands_sections.npz, which the same script writes with --record using only VMEX, ESSOS and inputs in examples/data: the Landreman-Paul QA deck solved as a free boundary at fixed ESSOS coil currents (p = PRES_SCALE (1 - s), PRES_SCALE = 0 here), where the extended field is the coil field, and field lines launched 4 mm to 4.5 cm outside the LCFS at phi = 0 traced for 1500 m. The record was computed on a Linux x86_64 CPU; rerunning the command without --record reproduces these bytes."
     },
     {
-      "path": "docs/_static/figures/readme_extender_exterior_islands.webp",
-      "sha256": "ed6e1b55a4d5f0244e5fca83b9f917c137ec990ed23b132e70ba2a4c8658d5d2",
-      "bytes": 113576,
-      "generator": "examples/vmex_fieldline_tracing_finite_beta.py",
-      "command": "python examples/vmex_fieldline_tracing_finite_beta.py && cp readme_extender_exterior_islands.webp docs/_static/figures/",
-      "inputs": [
-        "examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap",
-        "examples/data/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json"
-      ],
-      "record": null,
-      "generated": "2026-09-05",
-      "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
-      "reproducible": "command",
-      "bytes_verified": true,
-      "used_in": [],
-      "note": "The example writes its three-panel vmex_fieldline_tracing_finite_beta.png to the working directory and, outside the CI smoke run, crops the phi=0 Poincare panel pair from the same render into this file as lossless WebP, so the crop is no longer done by hand. Needs ESSOS >= 0.17 (uwplasma/ESSOS#58; run here at that PR's merge commit 1b3210c, before the release carried it). Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
-    },
-    {
       "path": "docs/_static/figures/readme_mirror_pleiades.webp",
       "sha256": "38636a13a42d5d2d47e9f24d285249904b3d44e76e38a84170e065ca8ee08243",
       "bytes": 26448,
@@ -331,8 +298,8 @@
     },
     {
       "path": "docs/_static/figures/readme_polish_plot.webp",
-      "sha256": "e9c4604f1f301134f71b7114a80db5837842afbd8b2e302b79d5b2be868eb46c",
-      "bytes": 108972,
+      "sha256": "4ce5d535844dd9eaa01fed0cb316d40fe8593b4889ca7bc33e948d66bdf5d3f3",
+      "bytes": 87180,
       "generator": "examples/force_balance_polishing.py",
       "command": "python examples/force_balance_polishing.py",
       "inputs": [
@@ -346,14 +313,14 @@
       "used_in": [
         "README.md"
       ],
-      "note": "vmex --plot summaries of the unpolished and polished WOUT files side by side; the force panel is the WOUT finite-difference reconstruction. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
+      "note": "vmex --plot summaries of the unpolished and polished WOUT files side by side; the force panel is the WOUT finite-difference reconstruction. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged. The committed bytes are a 1600 px wide lossy WebP (q80) re-encode of the generated image."
     },
     {
       "path": "docs/_static/figures/readme_precond.webp",
       "sha256": "cf700ce61da2f5eb92d7e5e73e7cabddb5051d97ff29701fee80a03efbc58843",
       "bytes": 16768,
-      "generator": "benchmarks/make_readme_figures.py",
-      "command": "python benchmarks/preconditioner_2d_stiff.py && python benchmarks/make_readme_figures.py --only precond",
+      "generator": "docs/_static/figures/sources/make_readme_figures.py",
+      "command": "python tools/preconditioner_2d_stiff.py && python docs/_static/figures/sources/make_readme_figures.py --only precond",
       "inputs": [
         "benchmarks/preconditioner_2d_stiff_cases.json",
         "examples/data/input.circular_tokamak_aspect_100",
@@ -371,8 +338,8 @@
     },
     {
       "path": "docs/_static/figures/readme_qi.webp",
-      "sha256": "37b4f448a9a41c23b55fd6a730fd96a75e34102ef0c5062752f5021144c2d457",
-      "bytes": 291042,
+      "sha256": "19121dff4ef7d131a02b3a2c3a561a18eda7bd6b6b3e59712dc3d34ca18be635",
+      "bytes": 185468,
       "generator": "examples/plot_optimized_families.py",
       "command": "python examples/plot_optimized_families.py",
       "inputs": [
@@ -389,14 +356,14 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Unlike the sibling optimization figure, every QI deck it draws is bundled, so one command rebuilds it. Not re-rendered here (four solves), so its committed bytes predate the lossless-WebP change to the generator. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
+      "note": "Unlike the sibling optimization figure, every QI deck it draws is bundled, so one command rebuilds it. Not re-rendered here (four solves), so its committed bytes predate the lossless-WebP change to the generator. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged. The committed bytes are a 1600 px wide lossy WebP (q80) re-encode of the generated image."
     },
     {
       "path": "docs/_static/figures/readme_runtime_compare.webp",
-      "sha256": "45a8bc36b9cd9a79cfdb658545a4cb293ecf285023bb5c88f401e1cf34a1efff",
-      "bytes": 38466,
-      "generator": "benchmarks/make_readme_figures.py",
-      "command": "python benchmarks/make_readme_figures.py --only runtime",
+      "sha256": "baf19af6f692152a16e6bdab16748b05bd1514bfbdfe1825104617391b67013c",
+      "bytes": 43906,
+      "generator": "docs/_static/figures/sources/make_readme_figures.py",
+      "command": "python docs/_static/figures/sources/make_readme_figures.py --only runtime",
       "inputs": [
         "benchmarks/baseline.json",
         "benchmarks/gpu_baseline.json"
@@ -453,10 +420,10 @@
     },
     {
       "path": "docs/_static/figures/readme_strong_force_comparison.webp",
-      "sha256": "c2b3887070661a750488c2e69a09ec9ee66d86a3aa8d51e1204eec82e5bd98e6",
-      "bytes": 69182,
-      "generator": "benchmarks/make_strong_force_comparison.py",
-      "command": "python benchmarks/make_strong_force_comparison.py",
+      "sha256": "149b78a524520a7650097131749b96398494b7c1824ef4ccf132e9447c490c9f",
+      "bytes": 58558,
+      "generator": "docs/_static/figures/sources/make_strong_force_comparison.py",
+      "command": "python docs/_static/figures/sources/make_strong_force_comparison.py",
       "inputs": [
         "benchmarks/strong_force_cases_m4.json",
         "benchmarks/strong_force_comparison_m4.json"
@@ -469,7 +436,7 @@
       "used_in": [
         "docs/explanation/validation.md"
       ],
-      "note": "The renderer refuses to draw a source measured from a dirty tree or a failed external solve. tests/test_performance_docs.py already guards this figure's sha256 and every source hash."
+      "note": "The renderer refuses to draw a source measured from a dirty tree or a failed external solve. tests/test_repo_consistency.py already guards this figure's sha256 and every source hash. The committed bytes are a 1600 px wide lossy WebP (q80) re-encode of the generated image."
     },
     {
       "path": "docs/_static/figures/stellarator_mirror_hybrid.webp",
@@ -506,7 +473,7 @@
       "used_in": [
         "docs/howto/trace-alpha-particles.md"
       ],
-      "note": "Plots the three-code record written by benchmarks/trace_cross_code.py (VMEX --trace, SIMPLE, SIMSOPT on the same 1000 ARIES-CS alphas). The equilibrium wout_n3are_R7.75B5.7.nc is not in the tree (ESSOS and SIMSOPT test files); rebuilding the record also needs a SIMPLE build and simsopt. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
+      "note": "Plots the three-code record written by tools/trace_cross_code.py (VMEX --trace, SIMPLE, SIMSOPT on the same 1000 ARIES-CS alphas). The equilibrium wout_n3are_R7.75B5.7.nc is not in the tree (ESSOS and SIMSOPT test files); rebuilding the record also needs a SIMPLE build and simsopt. Rendered twice on the recording host with byte-identical output; not re-derived elsewhere."
     },
     {
       "path": "docs/_static/figures/readme_trace_output.webp",
@@ -672,8 +639,8 @@
       "path": "docs/_static/figures/cross_code_losses.webp",
       "sha256": "b044cfb477b442715cadedf1613ada31eb3b143b33b0cddb72f3c6ec88bfd552",
       "bytes": 10708,
-      "generator": "benchmarks/make_essos_cross_code_figures.py",
-      "command": "python benchmarks/make_essos_cross_code_figures.py",
+      "generator": "docs/_static/figures/sources/make_essos_cross_code_figures.py",
+      "command": "python docs/_static/figures/sources/make_essos_cross_code_figures.py",
       "inputs": [
         "benchmarks/essos_cross_code.json"
       ],
@@ -691,8 +658,8 @@
       "path": "docs/_static/figures/cross_code_bars.webp",
       "sha256": "afadd2ddd0c8e5703d789ce96c0385b50ee364f2de4498d6203311d2cc61dab8",
       "bytes": 6448,
-      "generator": "benchmarks/make_essos_cross_code_figures.py",
-      "command": "python benchmarks/make_essos_cross_code_figures.py",
+      "generator": "docs/_static/figures/sources/make_essos_cross_code_figures.py",
+      "command": "python docs/_static/figures/sources/make_essos_cross_code_figures.py",
       "inputs": [
         "benchmarks/essos_cross_code.json"
       ],
@@ -710,8 +677,8 @@
       "path": "docs/_static/figures/readme_exact_equilibria.webp",
       "sha256": "15d2dd16485274d4c240e9dea8bf6f372d792affa03924ba4445cfe62e5dc8e3",
       "bytes": 22944,
-      "generator": "benchmarks/make_exact_equilibria_figure.py",
-      "command": "python benchmarks/make_exact_equilibria_figure.py",
+      "generator": "docs/_static/figures/sources/make_exact_equilibria_figure.py",
+      "command": "python docs/_static/figures/sources/make_exact_equilibria_figure.py",
       "inputs": [
         "benchmarks/exact_equilibria.json"
       ],
