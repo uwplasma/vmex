@@ -201,6 +201,23 @@ uses `essos.ash.evaluate_helium_residence`; install the ESSOS helium-residence
 feature with its `ash` extra. Until that feature is released, use the matching
 ESSOS feature checkout explicitly. No radial solver is duplicated in VMEX.
 
+For review of [ESSOS #167](https://github.com/uwplasma/ESSOS/pull/167), the
+validated source revision is installed explicitly:
+
+```bash
+python -m pip install "essos[ash] @ git+https://github.com/uwplasma/ESSOS.git@93f99cfd08b545cf7fc75a928362aef198735bf9"
+python -m pytest -q tests/test_ash_objective.py tests/test_ash_example.py
+```
+
+These 28 cases comprise 21 contract checks and seven integration cases using
+the real ESSOS radial evaluator. All 28 pass with that revision; without
+`essos.ash`, the seven integration cases skip. Base VMEX intentionally keeps
+ESSOS optional, so a green base CI run does not establish this integration.
+Merge ESSOS #167 first, make its API available through a supported ESSOS
+installation, then merge the VMEX adapter after the dependency-enabled parity
+lane exercises all seven integration cases. The review pin above is not a
+published release requirement.
+
 A kinetic provider is explicit because a boundary/WOUT does not specify
 profiles, helium source, Er, or the edge sink. Its factory accepts a profile
 JSON path and returns the `transport` and `verify` methods documented in the
