@@ -844,6 +844,13 @@ invalidates the complete band if any pitch fails. This permits composing the
 same restricted functional with a state/implicit-solve derivative without
 retaining every pitch's bounce intermediates at once.
 
+Both action primitives require ``canonical_flux_sign`` explicitly. Use ``+1``
+for :func:`~vmex.core.omnigenity.boozer_spectrum_state` output, which already
+contains canonical signed flux, and ``-1`` to convert raw VMEC ``Phi/(2*pi)``.
+Negative canonical flux must remain negative. A second sign flip reverses the
+rotation and resonance labels but can leave a scalar summing symmetric signed
+resonances unchanged; scalar and gradient checks alone cannot certify this sign.
+
 This primitive always returns ``full_population=False``. Its fixed pitch band
 and finite-cell denominator define a restricted diagnostic. It rejects extra,
 cut, unresolved and discontinuously matched wells; it does not fill missing

@@ -354,10 +354,20 @@ def test_restricted_live_coefficient_gradient_parity_and_flux_sign():
     errors = [abs(float((scalar(x + h * direction) - scalar(x - h * direction)) / (2 * h)) / expected - 1)
               for h in (1e-5, 3e-6, 1e-6)]
     assert min(errors) < 3e-5
-    out = evaluate(**_restricted_input(x))
-    reversed_sign = evaluate(**dict(_restricted_input(x), canonical_flux_sign=-1))
+    inputs = _restricted_input(x)
+    out = evaluate(**inputs)
+    reversed_sign = evaluate(**dict(inputs, canonical_flux_sign=-1))
     np.testing.assert_allclose(reversed_sign['omega'], -out['omega'], atol=1e-13)
     np.testing.assert_allclose(reversed_sign['harmonic_power'], out['harmonic_power'], atol=1e-13)
+    np.testing.assert_allclose(reversed_sign['loss'], out['loss'], rtol=1e-13)
+    reversed_gradient = jax.jit(jax.grad(
+        lambda x: evaluate(**dict(_restricted_input(x), canonical_flux_sign=-1))['loss']))(x)
+    np.testing.assert_allclose(reversed_gradient, gradient, rtol=1e-12, atol=1e-13)
+    # The same physical flux supplied in the opposite input convention must
+    # preserve signed rotation; positivity is not the canonical convention.
+    converted = evaluate(**dict(inputs, psi_b=-inputs['psi_b'],
+                                psi_edge=-inputs['psi_edge'], canonical_flux_sign=-1))
+    np.testing.assert_allclose(converted['omega'], out['omega'], atol=1e-13)
     mirrored = evaluate(**_restricted_input(x.at[1].set(-x[1])))
     np.testing.assert_allclose(mirrored['action'][:, ::-1], out['action'], rtol=1e-13)
     assert out['valid'] and not out['full_population']
@@ -365,6 +375,16 @@ def test_restricted_live_coefficient_gradient_parity_and_flux_sign():
     ratio = evaluate(**dict(_restricted_input(x), rotation='frequency_ratio'))
     assert ratio['valid']
     assert np.max(np.abs(np.asarray(ratio['omega'] - out['omega']))) > 1e-6
+
+
+def test_restricted_requires_explicit_flux_convention():
+    from vmex.core.deltares import (restricted_action_deltares_from_boozer,
+                                   streamed_restricted_action_deltares_from_boozer)
+    kwargs = _restricted_input()
+    kwargs.pop('canonical_flux_sign')
+    for evaluate in (restricted_action_deltares_from_boozer, streamed_restricted_action_deltares_from_boozer):
+        with pytest.raises(TypeError, match='canonical_flux_sign'):
+            evaluate(**kwargs)
 
 
 def test_streamed_pitch_rows_and_reverse_derivative_match_batched_primitive():

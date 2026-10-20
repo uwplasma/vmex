@@ -237,8 +237,8 @@ def _physical_flux_derivative(values, psi, psi_edge):
 
 def restricted_action_deltares_from_boozer(
     *, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp, psi_b, psi_edge,
-    bcrit, bcrit_weight, mass, speed, charge, bmns_b=None, M=1, N=0,
-    canonical_flux_sign=-1, n_eta=65, n_t=513, t_bounds=(-5.5, 5.5),
+    bcrit, bcrit_weight, mass, speed, charge, canonical_flux_sign, bmns_b=None, M=1, N=0,
+    n_eta=65, n_t=513, t_bounds=(-5.5, 5.5),
     quadrature_order=96, p_max=2, q_max=4, rotation="mean_map",
     endpoint_limit=1.5, log_action_limit=.35, log_period_limit=.35,
     chart_floor=1e-4, root_residual_limit=.005,
@@ -249,9 +249,12 @@ def restricted_action_deltares_from_boozer(
     ``bmnc_b``/``bmns_b`` are surface-by-mode spectra in tesla; ``xn_b`` and
     helicity ``N`` are physical toroidal indices. At least three distinct,
     outward ordered physical toroidal-flux-per-radian rows ``psi_b`` are
-    required, with ``0 <= psi_b/psi_edge <= 1``. ``psi_edge`` has the same convention and units. The default
-    canonical sign follows VMEX's ESSOS adapter, ``psi0=-Phi/(2*pi)``; callers
-    with already canonical spectra must explicitly choose ``+1``.
+    required, with ``0 <= psi_b/psi_edge <= 1``. ``psi_edge`` has the same
+    convention and units. The required ``canonical_flux_sign`` converts the
+    supplied flux to canonical flux: use ``+1`` for already canonical
+    :func:`~vmex.core.omnigenity.boozer_spectrum_state` output, including
+    negative flux, and ``-1`` for raw VMEC ``Phi/(2*pi)``. It must not be
+    chosen merely to make the flux positive.
 
     This evaluates exactly one complete well at every eta and shared physical
     ``bcrit`` node on the fixed bounded cell ``t=zeta-M*eta/nfp``. Both parities,
@@ -422,7 +425,7 @@ def restricted_action_deltares_from_boozer(
             "family_radial_valid": family_radial_valid, "closure_valid": closure_valid, "hard_status": hard_status}
 
 
-def streamed_restricted_action_deltares_from_boozer(*, bcrit, bcrit_weight, **kwargs):
+def streamed_restricted_action_deltares_from_boozer(*, bcrit, bcrit_weight, canonical_flux_sign, **kwargs):
     """Compose the restricted diagnostic with bounded-memory pitch execution.
 
     Arguments and certificates retain the restricted primitive's semantics.
@@ -446,7 +449,8 @@ def streamed_restricted_action_deltares_from_boozer(*, bcrit, bcrit_weight, **kw
         # that pitch's complete well with a unit weight, then apply its live
         # physical quadrature weight outside the primitive's scalar guard.
         out = restricted_action_deltares_from_boozer(
-            bcrit=pitch[0][None], bcrit_weight=jnp.ones((1,), dtype=wb.dtype), **kwargs)
+            bcrit=pitch[0][None], bcrit_weight=jnp.ones((1,), dtype=wb.dtype),
+            canonical_flux_sign=canonical_flux_sign, **kwargs)
         return (rows + pitch[1] * out["delta_res"], mass + pitch[1] * out["paper_pitch_band_mass"],
                 valid & out["valid"]), out["valid"]
     zero = jnp.zeros(coefficients.shape[0], dtype=coefficients.dtype)
