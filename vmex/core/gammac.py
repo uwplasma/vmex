@@ -71,17 +71,11 @@ the proxy is traceable and differentiable end to end.  Stellarator-symmetric
 states with ``iota != 0`` on the target surfaces only, inherited from the
 field-line parameterization.
 
-Two derivative semantics, named explicitly rather than switched by options:
-:class:`GammaC` is the hard physical diagnostic — its *value* is the number
-to report, but its sampled boundary derivative is not convergent
-under grid refinement (branch noise; the measured ladder is pinned in
-``tests/test_gammac.py``) — and :class:`GammaCSmooth` is the optimization
-surrogate: the same wells and quadrature with the two measured noise
-structures (separatrix bounce-time curvature and superbanana drift-angle
-corners) regularized on a fixed, annealable ``temperature`` scale, giving a
-boundary derivative measured to stabilize on that refinement control.
-Normalized pitch-grid shape derivatives remain approximate. A matched-topology tracked variant
-(``GammaCTracked``) can join them without changing either meaning.
+:class:`GammaC` supplies the hard diagnostic; its sampled boundary derivative
+can change sign under refinement. :class:`GammaCSmooth` regularizes
+separatrix bounce-time curvature and superbanana drift-angle corners with an
+annealable ``temperature``. Both omit normalized pitch-grid shape derivatives,
+so check actual forward descent before optimizing a new configuration.
 """
 
 from __future__ import annotations
@@ -446,23 +440,11 @@ def _sampling_grids(dtype, nalpha: int, num_transit: int,
 def _pitch_grid(bmag, level_nodes, num_pitch: int):
     """``(pitch, pitch_weights)`` across the trapped range of ``bmag``.
 
-    The pitch nodes are a quadrature grid, not an observable, and the
-    ``|B|`` extrema over a reflection-closed set of lines are attained at
-    mirror-image PAIRS of points.  Differentiating through jnp.min/max
-    sends the whole cotangent to one member of each pair, which breaks a
-    symmetry Gamma_c has exactly: on a stellarator-symmetric state
-    d(Gamma_c)/d(sine spectra) must vanish, and it came out at 17% of
-    the physical gradient.  Worse, that term does not converge -- over
-    num_pitch = 12/24/48/96 the violation ran 1.7e-1, 1.8e-1, 6.0e-3,
-    1.6e-1, so it is an erratic subgradient with no limit, not a
-    discretization term.  Holding the normalized grid shape fixed restores
-    this reflection identity.  Keep its common field-strength scale live:
-    under B -> c B and flux -> c flux, the drift ingredients are unchanged,
-    while pitch weights and the line normalizer both scale as 1/c, so
-    Gamma_c is invariant.  Freezing the absolute extrema loses that
-    cancellation and gives a spurious scale gradient.  Extrema-shape
-    derivatives remain omitted; this is still a quadrature approximation,
-    not an exact derivative of every re-pitched finite-grid evaluation.
+    Freeze the normalized extrema to preserve stellarator-reflection
+    gradients, but retain the common field scale: under B -> c B and
+    flux -> c flux, pitch weights and the line normalizer scale as 1/c,
+    leaving Gamma_c invariant. Shape derivatives of this adaptive
+    quadrature remain approximate.
     """
     mean_b = jnp.mean(bmag)
     b_min = mean_b * jax.lax.stop_gradient(jnp.min(bmag) / mean_b)
@@ -780,18 +762,10 @@ def gamma_c_smooth_state(
 ) -> dict[str, Array]:
     """Smooth ``Gamma_c`` surrogate with approximate pitch-grid derivatives.
 
-    Same sampling contract, arguments, and outputs as :func:`gamma_c_state`
-    — the surfaces, field lines, pitch grid, wells, and Nemov drift
-    ingredients are identical — with the hard-branch derivative-noise
-    sources regularized on the resolution-tied scale of
-    :func:`gamma_c_smooth_from_fieldlines` (returned per surface as
-    ``epsilon``).  Approaching the hard value requires grid refinement
-    together with temperature annealing.
-
-    This is the **optimization** lane, with regularization measured on the
-    :class:`GammaCSmooth` refinement control.  The normalized pitch-grid
-    shape is frozen under AD, so validate actual forward descent for a new
-    configuration.  Report the independent hard value.
+    Same sampling and outputs as :func:`gamma_c_state`, with the smoothing
+    scale of :func:`gamma_c_smooth_from_fieldlines` returned as ``epsilon``.
+    Approach the hard value by refining the grid and annealing temperature;
+    validate forward descent and report the independent hard value.
     """
     _validate_settings(nalpha, num_transit, points_per_transit, num_pitch)
     if not float(temperature) > 0.0:
@@ -901,31 +875,13 @@ class GammaC:
 class GammaCSmooth(GammaC):
     """Smooth optimization surrogate of :class:`GammaC`.
 
-    Same rows, weights, and least-squares contract as :class:`GammaC`, but
-    ``compute_state`` evaluates :func:`gamma_c_smooth_state`: the same wells
-    and bounce quadrature with the branch-noise sources of the boundary
-    derivative regularized and tested on the documented refinement ladder.
-    Frozen normalized pitch-grid shape derivatives remain approximate;
-    check actual forward descent before optimizing a new configuration.
-    The surrogate value is
-    systematically below the hard one: by a factor 2-3 on multi-well 3-D
-    fields and by orders of magnitude on near-omnigenous fields whose
-    ripple wells are shallower than the floor (measured smooth/hard ratios
-    at ``temperature = 0.15`` in ``tests/test_gammac.py``: 0.42 on li383,
-    0.004 on the QA, 0.02 on the tokamak).  It preserves the tokamak << QA
-    << unoptimized-3D ordering and anneals toward the hard value as
-    ``temperature`` drops, but it is a gradient objective only, never a
-    reported number: use this class inside the optimizer and always
-    recompute the hard :class:`GammaC` value on the accepted result.
-
-    The three derivative semantics are thus explicit in the class
-    name: :class:`GammaC` is the hard value (no derivative promise
-    across topology events), ``GammaCSmooth`` is the smooth annealed
-    surrogate, and a matched-topology tracked variant can join them later
-    without changing either meaning.  ``temperature`` multiplies the
-    resolution-tied smoothing scales (see
-    :func:`gamma_c_smooth_from_fieldlines`); annealing = optimizing stages
-    at decreasing ``temperature``.
+    Same rows, weights, and least-squares contract as :class:`GammaC`, using
+    :func:`gamma_c_smooth_state`. Frozen pitch-grid shape derivatives remain
+    approximate: check forward descent for each new configuration.
+    ``temperature`` controls the smoothing scale; refine the grid while
+    annealing it. The surrogate can substantially underestimate hard GammaC,
+    especially for shallow ripple wells, so recompute :class:`GammaC` on
+    accepted results.
     """
 
     name = "gamma_c_smooth"
