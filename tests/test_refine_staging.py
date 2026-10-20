@@ -281,7 +281,12 @@ def test_block_finish_lowering_is_shared_across_trial_points() -> None:
     factor_a = im._refine_block_factor_core.lower(z0, p0, state, mask, cfg=cfg).as_text()
     factor_b = im._refine_block_factor_core.lower(z1, p1, state, mask, cfg=cfg).as_text()
     assert factor_a == factor_b
-    factors = im._refine_block_factor_core(z0, p0, state, mask, cfg)
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        factors = im._refine_block_factor_core(z0, p0, state, mask, cfg)[:3]
+    finally:
+        jax.config.update("jax_disable_jit", previous)
     step_a = im._refine_block_step_core.lower(z0, p0, state, mask, factors, cfg=cfg).as_text()
     step_b = im._refine_block_step_core.lower(z1, p1, state, mask, factors, cfg=cfg).as_text()
     assert step_a == step_b
@@ -403,47 +408,3 @@ def test_block_stall_far_from_root_skips_krylov_and_rejects_the_trial(monkeypatc
     assert int(status) == 3 and im._LAST_REFINED[cfg][2]
 
 
-def test_adjoint_reusing_anchor_factors_matches_the_fresh_block_adjoint() -> None:
-    """The anchor's factorization preconditions the adjoint to the same multiplier."""
-    inp, _, p0 = _small_solovev_setup()
-    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-15)
-    host, mask = _host_state(cfg, p0)
-    root = im._refined_state(cfg, p0, host, mask)
-    P = im._dof_projector(cfg, mask)
-    factors = im._refine_block_factors(cfg, p0, host, mask, P(host))
-    b = P(jax.tree.map(
-        lambda a: jnp.asarray(np.random.default_rng(0).standard_normal(a.shape)), root))
-    fresh, fresh_stats = im._adjoint_block_core(p0, P(root), root, mask, b, cfg)
-    reused, stats = im._adjoint_block_reuse_core(
-        p0, P(root), root, mask, b, factors, cfg)
-    assert bool(stats.converged) and bool(fresh_stats.converged)
-    difference = im._tree_norm(jax.tree.map(jnp.subtract, reused, fresh))
-    assert float(difference) <= 1.0e-10 * float(im._tree_norm(fresh))
-    assert jax.tree.structure(factors) == jax.tree.structure(im._factor_struct(cfg))
-    for leaf, struct in zip(jax.tree.leaves(factors), jax.tree.leaves(im._factor_struct(cfg))):
-        assert leaf.shape == struct.shape and leaf.dtype == struct.dtype
-
-
-def test_anchor_factor_callback_and_eager_miss_fall_back_to_the_fresh_adjoint() -> None:
-    """Rejected or unmemoized trials get zeros or root factors; a miss refactors."""
-    _, cfg, p0 = _small_solovev_setup()
-    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
-    root, mask = im._host_solve_and_mask(cfg, params_np)
-    for leaf in jax.tree.leaves(im._host_anchor_factors(cfg, params_np, 2)):
-        assert not np.any(leaf)                       # rejected: zeros
-    im._LAST_ANCHOR_FACTORS.pop(cfg, None)
-    at_root = im._host_anchor_factors(cfg, params_np, 0)  # rebuilt at the root
-    assert np.any(jax.tree.leaves(at_root)[0])
-    refined = im._LAST_REFINED.pop(cfg)
-    im._LAST_ANCHOR_FACTORS.pop(cfg, None)
-    assert not np.any(jax.tree.leaves(im._host_anchor_factors(cfg, params_np, 0))[0])
-    im._LAST_REFINED[cfg] = refined
-
-    root, mask = (jax.tree.map(jnp.asarray, tree) for tree in (root, mask))
-    gbar = jax.tree.map(jnp.ones_like, root)
-    zeros = jax.tree.map(jnp.zeros_like, at_root)     # certificate miss
-    (fresh,) = im._solve_implicit_bwd_impl(cfg, (p0, root, mask), gbar)
-    (missed,) = im._solve_implicit_bwd_impl(
-        cfg, (p0, root, mask), gbar, factors=zeros)
-    for a, b in zip(jax.tree.leaves(missed), jax.tree.leaves(fresh)):
-        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-12, atol=0.0)

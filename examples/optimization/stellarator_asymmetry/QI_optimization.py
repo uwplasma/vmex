@@ -198,7 +198,7 @@ try:
                                                 config=NeoConfig(**NEO_CONFIG_ARGS))
         print(f"{label} epsilon_eff^(3/2) at s = {np.round(np.asarray(s), 3)}: "
               f"{np.array2string(np.asarray(eps), precision=4)}")
-except (ImportError, NotImplementedError) as error:
+except ImportError as error:
     print(f"epsilon_eff skipped: {error}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
