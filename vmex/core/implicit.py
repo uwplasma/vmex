@@ -186,7 +186,7 @@ from .residuals import (
 from .setup import (
     RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess)
 from .solver import (
-    SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
+    STOP_HOOK, SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
     _force_to_state, _initial_state, _physical_coefficients,
     _static_tables, evaluate_forces, prepare_runtime, resolution_from_input,
     solve,
@@ -1377,7 +1377,7 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "adjoint_krylov_iterations", "adjoint_seconds",
              "adjoint_certificate_fallbacks", "anchors", "anchor_steps",
              "anchor_krylov_iterations", "anchor_factorizations",
-             "anchor_seconds")
+             "anchor_seconds", "abandoned_rungs")
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []
@@ -1488,11 +1488,17 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
     # A bad warm seed must not fail the trial (only the initial guess is at
     # stake — every rung converges to the same fixed point), whether it
     # raises or merely exhausts the iteration budget; the least-residual
-    # attempt is kept.
+    # attempt is kept.  Once a rung has exhausted its budget, a later rung
+    # must clearly outpace it (_rung_probe) or is abandoned, and two
+    # budget-limited rungs end the ladder: they agree the trial is slow, not
+    # badly seeded, and the cold rung would retrace the same path.
     attempts = [s for s in (perturb, hot) if s is not None] + [None]
-    result = None
+    result = reference = None
+    limited = 0
     with _timed(cfg, "solve"):
         for k, init in enumerate(attempts):
+            token = STOP_HOOK.set(
+                None if reference is None else _rung_probe(reference))
             try:
                 trial = run(init)
             except VmecError:
@@ -1500,15 +1506,47 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
                     _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
                     raise
                 continue
+            finally:
+                STOP_HOOK.reset(token)
             if result is None or _fsq(trial) < _fsq(result):
                 result = trial
             if bool(result.converged):
+                break
+            history = np.asarray(trial.fsq_history)[:, :3].sum(axis=1)
+            if reference is None and history.size:
+                reference = np.fmin.accumulate(history)
+            limited += 1
+            if limited == 2:
+                _count(cfg, abandoned_rungs=len(attempts) - k - 1)
                 break
         if cfg.hot_restart and bool(result.converged):
             _HOT_CACHE[cfg] = result.state
         _LAST_SOLVE[cfg] = (key, result)
         _count(cfg, solves=1, iterations=int(result.iterations))
     return result
+
+
+#: Probe of a later seed-ladder rung after one exhausted its budget: by this
+#: fraction of the budget it must have reached a best ``fsqr + fsqz + fsql``
+#: _RUNG_PROBE_GAIN below the exhausted rung's best at the same iteration,
+#: or it stops.  On 60 QA trials (mpol = ntor = 5, ns = 31) no later rung
+#: rescued a trial whose first rung exhausted 5500 iterations: hot and cold
+#: rungs retraced it to 0.1 decade, and a rejected trial cost three budgets.
+_RUNG_PROBE_FRACTION = 0.2
+_RUNG_PROBE_GAIN = 10.0
+
+
+def _rung_probe(reference: np.ndarray):
+    """``STOP_HOOK`` predicate abandoning a rung that trails ``reference``."""
+    at = max(1, int(_RUNG_PROBE_FRACTION * reference.size))
+
+    def stop(carry) -> bool:
+        if int(carry.iteration) < at or carry.trajectory.shape[0] != reference.size:
+            return False
+        best = np.asarray(carry.trajectory)[:at, 1:4].sum(axis=1).min()
+        return not best * _RUNG_PROBE_GAIN < reference[at - 1]
+
+    return stop
 
 
 #: Newton budget for :func:`_refined_state`.  The first step recovers only the
@@ -1952,7 +1990,7 @@ def _host_solve_and_mask(cfg: ImplicitConfig, params_np, *,
 
 
 def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
-                              refine: bool = True) -> tuple:
+                              refine: bool | str = True) -> tuple:
     _HOST_ERROR.clear()  # fresh callback: drop any stale relayed error
     # The callback payload arrives committed to the runtime's LOCAL CPU
     # regardless of ``cfg.device``, and ``jnp.asarray`` preserves an existing
@@ -1999,7 +2037,11 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # differentiates: it skips the (expensive) anchor so the first user
     # output is not held behind it, and the first derivative evaluation —
     # which memo-hits this solve — computes the identical refinement then.
-    if not refine:
+    # ``refine="certified"`` (the optimizer status lane) also skips it for a
+    # trial past ``max_fsq_ratio``: that trial is rejected whatever the
+    # anchor does, and the anchor was most of its cost.
+    if not refine or (refine == "certified" and not (
+            bool(result.converged) or _fsq(result) <= cfg.max_fsq_ratio * cfg.ftol)):
         return as_np(result.state), mask
     # The forward solve picks its own device (AUTO), so rehome its state
     # beside the parameters before refining: on cfg.device, or where the
@@ -2026,7 +2068,7 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         _HOST_ERROR.clear()
         error = None
         try:
-            state, mask = _host_solve_and_mask_impl(cfg, params_np)
+            state, mask = _host_solve_and_mask_impl(cfg, params_np, refine="certified")
         except VmecError as exc:
             # Direct host calls preserve the typed exception; pure_callback
             # wraps the same error in the relayed sentinel handled below.
