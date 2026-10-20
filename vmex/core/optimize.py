@@ -2786,7 +2786,7 @@ def _least_squares_implicit(
     # problem rebuilt at a new seed point (the next optimizer stage) or with
     # new targets and weights reuses every executable instead of recompiling.
     problem_jit_key = (
-        id(cfg),
+        cfg,
         tuple((_problem_callable_token(f_orig), np.shape(w_res))
               for (f_orig, _t, _w), (_f, _t_res, w_res)
               in zip(objective_terms, terms)),
@@ -2834,6 +2834,9 @@ def _least_squares_implicit(
         "targets": tuple(_place(np.asarray(t)) for _, t, _ in terms),
         "weights": tuple(_place(np.asarray(w)) for _, _, w in terms),
         "wall": _place(np.asarray(1.0)),  # set from the seed cost below
+        # Adjoint tolerances are traced, so changing them never recompiles:
+        "adjoint_tol": _place(np.asarray(cfg.adjoint_tol)),
+        "jac_tol": _place(np.asarray(cfg.jacobian_adjoint_tol)),
     }
 
     # The initial point is strict: it must solve and define a finite residual
@@ -2986,7 +2989,8 @@ def _least_squares_implicit(
         )
 
     def residual_rows(x: jnp.ndarray, data) -> jnp.ndarray:
-        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
+        state, status, _, _ = imp.solve_implicit_status(
+            params_of(x, data), cfg, data["adjoint_tol"])
         return rows_at_state(x, state, status, data)
 
     host_rows_jit = _problem_jit(
@@ -3020,7 +3024,8 @@ def _least_squares_implicit(
         )
 
     def scalar_loss(x: jnp.ndarray, data) -> jnp.ndarray:
-        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
+        state, status, _, _ = imp.solve_implicit_status(
+            params_of(x, data), cfg, data["adjoint_tol"])
         return scalar_at_state(x, state, status, data)
 
     host_scalar_jit = _problem_jit(
@@ -3134,7 +3139,6 @@ def _least_squares_implicit(
     # it accumulates.  Passed as a value, never as a replacement config: a
     # second config identity misses the caches keyed on this one and forces a
     # runtime rebuild inside the traced Jacobian.
-    certify_rtol = float(cfg.jacobian_adjoint_tol)
     certify_maxiter = int(cfg.jacobian_adjoint_maxiter)
 
     def jacobian_rows(x: jnp.ndarray, state, data, bands=None):
@@ -3155,10 +3159,10 @@ def _least_squares_implicit(
             tp = tangent_of(tp_stack)
             rhs = rhs_of(tp)
             dz, krylov = imp._adjoint_solve(
-                Fz, rhs, cfg, rtol=certify_rtol,
+                Fz, rhs, cfg, rtol=data["jac_tol"],
                 max_restarts=certify_maxiter)
             report = imp._linear_response_report(
-                krylov, rhs, cfg, rtol=certify_rtol)
+                krylov, rhs, cfg, rtol=data["jac_tol"])
             return column_of(dz, tp), dz, report
 
         tangent_chunk = ndof if chunk is None else chunk
@@ -3207,7 +3211,7 @@ def _least_squares_implicit(
         dz0, report = imp._implicit_evolved_tangent_multi_rhs(
             params, cfg, frozen, mask_const, tangent_batch,
             active_fields=active_fields, probe_chunk_size=probe_chunk,
-            response_chunk_size=tangent_chunk, certify_rtol=certify_rtol,
+            response_chunk_size=tangent_chunk, certify_rtol=data["jac_tol"],
             certify_maxiter=certify_maxiter, bands=bands,
         )
 
@@ -3260,7 +3264,7 @@ def _least_squares_implicit(
         def converged(_):
             pullback = imp._block_state_pullback(
                 params_of(x, data), cfg, frozen, mask_const,
-                active_fields=active_fields, probe_chunk_size=probe_chunk)
+                active_fields=active_fields, probe_chunk_size=probe_chunk, tol=data["adjoint_tol"])
 
             def row(i):
                 x_bar, state_bar = direct(cotangent_of(i))
@@ -3277,7 +3281,8 @@ def _least_squares_implicit(
 
     def jacobian_rows_reverse(x: jnp.ndarray, data) -> jnp.ndarray:
         """Reverse Jacobian from one solve and one block factorization."""
-        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
+        state, status, _, _ = imp.solve_implicit_status(
+            params_of(x, data), cfg, data["adjoint_tol"])
         return reverse_pullback(
             x, state, status,
             lambda i: jax.nn.one_hot(i, residual_size, dtype=jnp.float64),
@@ -3288,7 +3293,8 @@ def _least_squares_implicit(
 
     def reverse_gradient(x: jnp.ndarray, rows: jnp.ndarray, data) -> jnp.ndarray:
         """``J^T rows`` from one pullback: the reverse lane's scalar gradient."""
-        state, status, _, _ = imp.solve_implicit_status(params_of(x, data), cfg)
+        state, status, _, _ = imp.solve_implicit_status(
+            params_of(x, data), cfg, data["adjoint_tol"])
         return reverse_pullback(x, state, status, lambda _: rows, 1, data)[0]
 
     reverse_gradient_jit = _problem_jit(
