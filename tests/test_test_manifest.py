@@ -303,7 +303,7 @@ def test_deferred_nonlinear_contracts_have_scheduled_jobs() -> None:
     assert "test -f examples/data/mgrid_ncsx_c09r00_small.nc" in nightly
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     assert 'jax: ["0.9.2", "0.11.1"]' in ci
-    assert "device, jax-compatibility, changed-coverage]" in ci
+    assert "device, jax-compatibility, install, changed-coverage]" in ci
 
 
 def test_nonlinear_integrations_are_full_but_linear_contracts_remain_in_pr() -> None:

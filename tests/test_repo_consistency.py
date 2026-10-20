@@ -89,7 +89,7 @@ def _floors(*extras: str) -> dict[str, str]:
     floors: dict[str, str] = {}
     for dep in [*PROJECT["dependencies"], *(r for name in extras for r in EXTRAS[name])]:
         requirement = Requirement(dep)
-        for spec in requirement.specifier:
+        for spec in (s for s in requirement.specifier if s.operator == ">="):
             floors[requirement.name] = max(floors.get(requirement.name, spec.version),
                                            spec.version, key=Version)
     return floors
