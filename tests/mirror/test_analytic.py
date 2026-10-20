@@ -208,3 +208,5 @@ def test_circular_coils_match_biot_savart_and_the_on_axis_formula() -> None:
     np.testing.assert_allclose(float(coils.axis_field(0.5)), expected[1, 2], rtol=1.0e-13)
     divergence = jnp.trace(jax.jacfwd(coils)(jnp.array([0.1, 0.2, 0.3])))
     assert abs(float(divergence)) < 1.0e-12
+    # On the axis the Jacobian must stay finite (the free-boundary solve differentiates there).
+    assert np.all(np.isfinite(np.asarray(jax.jacfwd(coils)(jnp.array([0.0, 0.0, 0.5])))))

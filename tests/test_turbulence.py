@@ -80,7 +80,7 @@ def test_geometry_matches_stability_conventions(shaped_eq):
                                 iota, diota, ctx["phipf"][j])
     x = jnp.asarray(mapping["theta"])
     phi = x / iota
-    lmns0 = stab._parabola(ctx["lmns"], j, hs)[0]
+    lmns0 = stab._surface_tables(ctx, j)["ltab"][0]
     theta_v = stab._theta_vmec_from_pest(LINE["alpha"] + x, phi, lmns0, ctx["m"], ctx["xn"])
     q = jnp.stack([jnp.zeros_like(theta_v), theta_v, phi], axis=-1)
     modB, b_sup_phi, gaa, bxgb_ga = jax.vmap(point)(q, phi)
