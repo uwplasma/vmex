@@ -562,7 +562,6 @@ python examples/take_fixed_boundary_gradients.py
 The optimization scripts expose resolutions, objective weights and iteration budgets near the top.
 Inspect those settings before a research run; advanced coil examples need the optional dependencies
 and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
-
 ## Documentation, development and citation
 
 Start with [your first equilibrium](https://vmex.readthedocs.io/en/latest/tutorials/first-equilibrium.html)
