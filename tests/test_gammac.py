@@ -57,6 +57,34 @@ def test_hard_drift_angle_radial_limit(radial, tangential):
     assert (float(out["gamma_c"]) > 0.) == (radial != 0.)
 
 
+@pytest.mark.parametrize("radial", [-1., 0., 1.])
+def test_smooth_field_strength_scale_invariance(radial):
+    """B and toroidal flux scale together; the drift ingredients stay fixed."""
+    x = jnp.linspace(0., 2*jnp.pi, 129)
+    field = (1. + .2*jnp.cos(x))[None, :]
+    nodes = (jnp.arange(32) + .5)/32
+
+    def value(scale):
+        bmag = scale*field
+        pitch, weights = gammac._pitch_grid(bmag, nodes, 32)
+        return gammac.gamma_c_smooth_from_fieldlines(
+            bmag=bmag, radial_drift=jnp.full_like(bmag, radial),
+            radial_gradient=jnp.full_like(bmag, .3),
+            drift_correction=jnp.zeros_like(bmag), tangency=jnp.ones_like(bmag),
+            dl_dx=jnp.ones_like(bmag), length=2*jnp.pi,
+            pitch=pitch, pitch_weights=weights, max_wells=2,
+            temperature=.2)["gamma_c"]
+
+    baseline, derivative = jax.jit(jax.value_and_grad(value))(1.)
+    assert np.isfinite(float(baseline)) and (float(baseline) > 0.) == (radial != 0.)
+    for scale in [.8, 1.2]:
+        np.testing.assert_allclose(value(scale), baseline, rtol=1e-12, atol=1e-14)
+    h = 1e-4
+    fd = (value(1+h)-value(1-h))/(2*h)
+    np.testing.assert_allclose(fd, 0., atol=1e-9)
+    np.testing.assert_allclose(derivative, fd, atol=1e-9)
+
+
 @pytest.fixture(scope="module")
 def tokamak_eq():
     eq = opt.solve_equilibrium(
@@ -168,10 +196,10 @@ def test_boundary_gradient_liveness():
     """jax.grad through the implicit solve is finite, nonzero, FD-consistent.
 
     li383 at ns=13, GammaC([0.5]). What this test can honestly assert is
-    narrower than it once claimed. The gradient of the discretized objective
-    is exact — it agrees with a central difference of the same discretization
-    at fixed resolution — but it is **not a convergent quantity**. Measured
-    ladder of d/d rbc[n=0, m=1] over (nalpha, transits, points/transit,
+    narrower than it once claimed. The sampled gradient agrees in sign and
+    rough magnitude with a central difference here, but it is **not a
+    convergent quantity**. Historical pre-scale-fix ladder of
+    d/d rbc[n=0, m=1] over (nalpha, transits, points/transit,
     pitch):
 
         (7, 3, 64, 24)    -1.254
@@ -302,14 +330,14 @@ def _smooth_ladder_objective(inp, p, nalpha, num_transit, ppt, npi):
 
 
 def test_smooth_boundary_gradient_is_fd_consistent():
-    """AD == central FD for the smooth objective at the base budget.
+    """AD and central FD agree in direction and magnitude for this control.
 
     Same deck, index, and step as :func:`test_boundary_gradient_liveness`;
-    the smooth lane must keep the fixed-resolution exactness the hard lane
-    has, on top of the refinement stability the hard lane lacks (the full
-    ladder is the nightly :func:`
-    test_smooth_boundary_gradient_survives_the_refinement_ladder`).
-    Measured AD/FD ratio 1.09
+    freezing the normalized pitch-grid shape makes AD approximate, so this
+    checks sign and factor-two magnitude agreement rather than exactness.
+    The full ladder is the nightly :func:`
+    test_smooth_boundary_gradient_survives_the_refinement_ladder`.
+    The original calibration gave AD/FD ratio 1.09
     (ad -0.0974, fd -0.0892 at step 1e-4).
     """
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
@@ -338,9 +366,9 @@ def test_smooth_boundary_gradient_survives_the_refinement_ladder():
     li383 at ns=13, GammaCSmooth([0.5], temperature=0.15).total through the
     implicit solve, d/d rbc[n=0, m=1] — the same objective, deck, and rungs
     whose hard gradient is documented sign-erratic in
-    :func:`test_boundary_gradient_liveness` (re-measured for this commit:
+    :func:`test_boundary_gradient_liveness` (historical pre-scale-fix values:
     -1.2542, +3.5180, -0.3869, -0.9879, +0.1799 — three sign changes).
-    Measured smooth ladder (identical to six figures between a CUDA GPU
+    Historical pre-scale-fix smooth ladder (identical to six figures between a CUDA GPU
     run and an Apple-silicon CPU run):
 
         (7, 3, 64, 24)    -0.097353
@@ -487,7 +515,7 @@ def test_gamma_c_respects_the_stellarator_reflection():
       pitch grid fixed under differentiation took the violation to 6.6e-11 and
       moved the physical gradient by 1.8e-4.
 
-    Measured here: ratio 5.8e-11 against a physical ``d/dR_cos`` of 2.6e+03.
+    Historical pre-scale-fix ratio: 5.8e-11 against ``d/dR_cos`` of 2.6e+03.
     """
     inp = dataclasses.replace(
         VmecInput.from_file(DATA_DIR / "input.li383_low_res"), lasym=True)
@@ -513,7 +541,7 @@ def test_gamma_c_respects_the_stellarator_reflection():
     # The smooth surrogate must hold the same identity: its floors are
     # built from reflection-even quantities through *soft* extrema and L1
     # bounce integrals, so their live derivatives keep the pair symmetry
-    # that hard min/max breaks.  Measured ratio 4.3e-12.
+    # that hard min/max breaks.  Historical pre-scale-fix ratio 4.3e-12.
     def total_smooth(spectral):
         return gammac.gamma_c_smooth_state(
             spectral, rt, surfaces=(0.5,), nalpha=6, num_transit=3,
