@@ -424,8 +424,7 @@ preserving VMEC2000 parity exactly.
 Implementation detail: the theta contractions for multiple force kernels are
 **stacked** into a single batched ``dot_general`` call (GEMM), and the zeta
 contractions are likewise stacked by basis type (cosine vs sine). This follows
-the separable product identities (see Eqs. 5.55–5.56 in the VMEC++ numerics
-notes) while keeping the VMEC2000 normalization and parity masks intact.
+the separable product identities of ``tomnsps`` while keeping the VMEC2000 normalization and parity masks intact.
 
 Geometry, metric, and Jacobian
 ------------------------------
