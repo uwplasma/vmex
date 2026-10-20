@@ -279,7 +279,13 @@ VMEX keeps the three QI formulations separate:
 * :class:`~vmex.core.omnigenity.QIResidual` is the existing compact level-set
   objective; its call signature and defaults are unchanged.
 * :class:`~vmex.core.qi.ConstructedQIResidual` applies the fuller smooth
-  squash-and-shuffle construction to the same traceable Boozer spectrum.
+  squash-and-shuffle construction to the same traceable Boozer spectrum. Each well starts at its
+  :math:`|B|` minimum; the grid argmin jumps a whole cell as the field moves,
+  so the residual is discontinuous there. ``argmin_softness`` replaces it by
+  the softmin centroid :math:`\sum_i i\,w_i`,
+  :math:`w_i\propto e^{-(b_i-\min b)/\tau}` (circular on a periodic line),
+  and reads the branches by linear interpolation, which makes the residual
+  continuous; an exactly QI field is still a zero.
 * :class:`~vmex.core.qi.JInvariantQIResidual` minimizes the normalized
   dispersion of :math:`\mathcal J_\parallel` pooled over all complete wells,
   field lines, and traced periods at each surface and pitch. Its pitch array

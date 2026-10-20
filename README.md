@@ -74,7 +74,7 @@ or pick what you need:
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.21.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.6`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.5.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -87,7 +87,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
 | `essos` | 0.21.0 | `vmex[coils]` | `pip install "essos>=0.21.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
-| `neo-jax` | 1.0.5 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.5"` |
+| `neo-jax` | 1.0.6 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.6"` |
 | `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
 | `gkx` | 2.5.0 | `vmex[turbulence]` | `pip install "gkx>=2.5.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
@@ -131,7 +131,7 @@ off. In a script that also runs other JAX code, call `vmex.configure()` once at 
 The [installation guide](https://vmex.readthedocs.io/en/latest/installation.html) covers float64,
 WSL2 and dependency details.
 
-## Solve, plot and restart
+## Quick start
 
 With your own VMEC input file:
 
@@ -148,44 +148,7 @@ vmex wout_my_case.nc --to-input    # writes input.my_case
 ```
 
 `--scale` writes `*_scaled` at ARIES-CS size (a = 1.7044 m, ⟨B⟩ = 5.8646 T); two factors `B R` scale
-by hand. `--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
-10 ms in Boozer coordinates (under a minute on 10 CPU cores; a GPU is faster for large ensembles). It writes the loss fraction and a figure set:
-loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
-`--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
-birth profile, and `--collisional` adds slowing down and pitch-angle scattering
-([guide](docs/howto/trace-alpha-particles.md)).
-
-![vmex --trace output: loss against time, loss map, pitch and loss-time distributions, iota](docs/_static/figures/readme_trace_output.webp)
-
-`--trace` is compared with SIMPLE and SIMSOPT on matched alphas, and its mode cut and timestep are
-checked on twenty equilibria ([guide](docs/howto/trace-alpha-particles.md#convergence-of-the-defaults)).
-
-The ESSOS tracer behind `--trace` (here with ESSOS's fixed-step Dopri8 defaults; `--trace` controls
-the step adaptively) against SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas from
-`s = 0.5` over 10 ms (DESC: the first 32), on 8 Apple M4 cores
-([record](benchmarks/essos_cross_code.json), from uwplasma/ESSOS#162):
-
-![Alpha losses against time for ESSOS, SIMPLE, FIRM3D, SIMSOPT and DESC in three equilibria](docs/_static/figures/cross_code_losses.webp)
-
-![Run time, energy error and agreement of loss labels with SIMPLE and FIRM3D](docs/_static/figures/cross_code_bars.webp)
-
-`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.5.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
-[GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing `k_y`,
-and a short nonlinear ITG simulation (`a/L_T = 3`, `a/L_n = 1`, adiabatic electrons). The terminal shows each
-stage with an estimate of the time left. The run writes the saturated heat flux with its standard error, a
-summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `-alpha`, `-ky`, `-grid`,
-`-moments`, `-tmax`, `-gradients` and `--turbulence-kinetic-electrons` change the run
-([guide](docs/howto/turbulence.md)). The defaults are a few-minute survey and are not converged.
-
-![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
-
-`--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
-`|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
-`D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
-`vmex examples/data/input.nfp2_QA_finite_beta --plot` and `vmex examples/data/input.nfp4_QI_finite_beta --plot`.
-
-![vmex --plot summary of the bundled finite-beta NFP=2 QA equilibrium](docs/_static/figures/readme_diagnostics_qa.webp)
-![vmex --plot summary of the bundled finite-beta NFP=4 QI equilibrium](docs/_static/figures/readme_diagnostics_summary.webp)
+by hand.
 
 VMEX follows the deck's `NS_ARRAY`, `FTOL_ARRAY` and `NITER_ARRAY`. In Python:
 
@@ -213,30 +176,15 @@ If `input.my_case` exists, the CLI writes `input.my_case_from_wout` instead.
 `vmex equilibrium.h5` reads DESC text inputs and HDF5/pickle outputs without installing DESC, using the final stage or equilibrium; it writes `input.equilibrium` and solves it to write `wout_equilibrium.nc`.
 `--desc-tol 0` retains all boundary modes. The default 1% boundary tolerance does not guarantee magnetic-field accuracy. WOUT iota has the opposite sign to DESC.
 
-## Neoclassical transport
+## Diagnostic plots
 
-A stellarator's confinement is set as much by neoclassical transport as by its shape. Collisions and drifts in the 3-D
-field fix the radial electric field, the bootstrap current that changes the rotational transform, and a 1/ν
-loss channel that tokamaks do not have. `vmex --neoclassical` (needs `vmex[neoclassical]`) runs the drift-kinetic solver
-[DKX](https://github.com/uwplasma/DKX) on a solved equilibrium and returns all three:
-- the monoenergetic coefficients `D11*`, `D31*`, `D33*` against collisionality;
-- the ambipolar root `E_r(r)`;
-- the particle and heat fluxes of each species at that root;
-- the bootstrap `<j·B>`, set against VMEX's Redl formula on the same profiles and the equilibrium's own current.
+`--plot` writes five PNGs beside the input or in `--outdir`: the summary below, flux-surface cross-sections,
+`|B|` in VMEC angles, Mercier stability and the 3-D LCFS. The summary adds Boozer `|B|`, a `J` map,
+`D_R` and the DESC-normalized force balance (effective ripple needs `vmex[neoclassical]`). The QA and QI panels are
+`vmex examples/data/input.nfp2_QA_finite_beta --plot` and `vmex examples/data/input.nfp4_QI_finite_beta --plot`.
 
-The `--nc-profiles` file holds `n_e`, `T_e` and `T_i` as polynomials in `s`
-([guide](docs/howto/neoclassical-transport.md)). On the bundled QA, β = 2.5 % deck:
-
-```console
-vmex wout_LandremanPaul2021_QA_beta2p5_bootstrap.nc --neoclassical \
-     --nc-profiles examples/data/kinetic_profiles.LandremanPaul2021_QA_beta2p5_bootstrap.json
-```
-
-It writes `*_neoclassical.png` and `*_neoclassical.h5`. The figure below is drawn from that `.h5`
-([script](docs/_static/figures/sources/make_neoclassical_figure.py)). Runtime: 6.5 min on 4 CPU cores,
-compilation included.
-
-![vmex --neoclassical: monoenergetic D11, D31, D33, |B|, ambipolar Er, bootstrap current from DKX, Redl and the equilibrium, particle and heat fluxes](docs/_static/figures/readme_neoclassical_output.webp)
+![vmex --plot summary of the bundled finite-beta NFP=2 QA equilibrium](docs/_static/figures/readme_diagnostics_qa.webp)
+![vmex --plot summary of the bundled finite-beta NFP=4 QI equilibrium](docs/_static/figures/readme_diagnostics_summary.webp)
 
 ## Differentiate and optimize
 
@@ -272,80 +220,6 @@ to JAX optimizers, and `problem.evaluate(x)` reports solve effort and derivative
 [gradient tutorial](https://vmex.readthedocs.io/en/latest/tutorials/first-gradient.html) and
 [optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html) cover
 convergence checks, constraints, scaling and finite-difference verification.
-
-## How VMEX works
-
-1. **Energy principle.** VMEX finds a stationary point of `W = ∫ (B²/2μ₀ + p/(γ−1)) dV` over
-   nested flux surfaces, where `J × B = ∇p`. As in VMEC, the unknowns are the surface shapes `R`, `Z`
-   and the angle function `λ`: Fourier series in both angles, finite differences in radius.
-2. **Spectral force iteration.** Each iteration evaluates the Fourier-projected forces and takes a
-   damped second-order Richardson step with VMEC2000's time-step control and restarts, in its
-   order. A radial tridiagonal preconditioner per Fourier mode makes the step effective (a 2-D block
-   preconditioner is opt-in), and `NS_ARRAY` runs a coarse-to-fine radial multigrid ladder. The
-   solve has converged when `FSQR`, `FSQZ` and `FSQL` fall below `FTOL`.
-3. **Free boundary.** NESTOR solves the exterior Neumann problem for the vacuum potential with
-   Merkel's Green's-function method, driven by an MGRID table or a coil field; pressure balance
-   across the boundary moves the plasma surface.
-4. **Implicit derivatives.** At a root `F(x, p) = 0` of the force residual, `dx/dp = −(∂F/∂x)⁻¹ ∂F/∂p`.
-   A scalar objective needs one adjoint linear solve for all parameters, and least-squares
-   Jacobians factor the block-tridiagonal radial operator once. The forward iterations are not
-   recorded, so memory does not grow with their number. The derivative assumes that the state is a
-   root (on a fixed boundary VMEX first Newton-refines it to `refine_tol = 1e-10`), that `∂F/∂x` is
-   invertible there, and that perturbed solves stay on the same branch. It is the derivative of the
-   discrete equations, not of the continuum problem.
-5. **Virtual casing.** `VmecExtender` adds the plasma currents' field, a surface integral over
-   the boundary field, to the coil field outside the plasma; its error grows near the surface.
-
-The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.html) derive each step.
-
-## Results
-
-- **VMEC2000 parity.** CI solves six decks against stored VMEC2000 output and requires `wb` within
-  `1e-7` relative, `iota` and `R`, `Z` harmonics on three surfaces within `1e-5`, and iteration
-  counts within ±25%. On six decks never run before (ITER, W7-X, HSX, ARIES-CS, ESTELL,
-  Nührenberg–Zille), the worst relative difference from VMEC2000 was `2.5e-10`, and the iteration
-  counts were identical on five and one apart on the sixth
-  ([performance records](docs/reference/performance.rst), VMEX 0.8.1).
-- **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
-  wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
-  mostly XLA compilation, which a repeated solve in one process skips. In the older
-  [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
-  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
-  shipped deck or problem size ran faster than on the CPU.
-- **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
-  gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
-  value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
-  ([record](benchmarks/qa_optimization_startup_least_squares_m4.json), VMEX 0.7.0).
-- **Validation record.** The [validation record](docs/explanation/validation.md) lists every
-  gate, tolerance and benchmark record, with the measured accuracy of each lane.
-
-![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
-
-The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
-(`python docs/_static/figures/sources/make_readme_figures.py --only convergence`).
-
-## Against exact equilibria
-
-Convergence studies and code-to-code comparisons cannot see an error that every resolution, or
-every VMEC-type code, shares. [Landreman (2026)](https://arxiv.org/abs/2609.26742) found 3-D MHD
-equilibria with finite pressure and nested surfaces in closed form, and
-[Issan et al. (2026)](https://arxiv.org/abs/2610.07304) broke their stellarator symmetry with one
-parameter `tau` (`tau` and `-tau` are mirror images). [vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical) scores
-VMEX, VMEC2000 and DESC against them point by point, including at the axis.
-
-![Exact boundaries, and VMEX current and flux-surface errors against the exact solution](docs/_static/figures/readme_exact_equilibria.webp)
-
-- The exact solutions found two VMEX defects that resolution studies missed, both fixed: the field
-  at the axis (#452) and refinement before derivatives (#453).
-- At mid-radius VMEX's continuous field gives the current 23-450 times more accurately than the
-  WOUT file (middle panel), symmetric or not; B is right to 1e-5.
-- Without stellarator symmetry the full-basis path adds no error: the `tau = 0` equilibrium solved in
-  the full basis is the symmetric one to every digit, and mirror pairs agree to 1e-9. The Boozer
-  transform, effective ripple and virtual casing were checked against the exact fields as well.
-- With `tau != 0` the `iota = 2` family is degenerate: VMEX converges to a neighbouring equilibrium
-  that differs only in harmonics resonant with `iota = 2`, by 8e-4 at every resolution (right panel).
-  The sheared families converge in DESC but not in any VMEC-type code. Details are in the
-  [validation record](docs/explanation/validation.md#exact-equilibria).
 
 ## What you can build
 
@@ -387,7 +261,7 @@ against one weighted objective, solving the equilibrium implicitly at every step
 print final plasma and coil metrics. Each free-boundary trial is Newton-refined onto the root of the
 coupled plasma-vacuum residual, where its gradient is exact.
 
-### Open mirrors and stellarator-mirror hybrids
+## Open mirrors and stellarator-mirror hybrids
 
 The same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, solved by
 minimizing the MHD energy. What changes is the coordinate system. A tokamak or stellarator has one
@@ -427,39 +301,6 @@ which lanes are validated: [mirror guide](https://vmex.readthedocs.io/en/latest/
 ![Fixed-boundary non-axisymmetric mirror](docs/_static/figures/mirror_fixed_boundary_3d.webp)
 ![Stellarator-mirror hybrid](docs/_static/figures/stellarator_mirror_hybrid.webp)
 
-### Running the examples
-
-The examples live in the repository, not in the wheel. From a clone:
-
-```console
-git clone --filter=blob:none https://github.com/uwplasma/vmex
-cd vmex
-pip install -e ".[all]"
-vmex examples/data/input.circular_tokamak --plot
-python examples/take_fixed_boundary_gradients.py
-```
-
-| Application | Runnable starting point | Needs |
-|---|---|---|
-| Tokamak or stellarator equilibrium | `vmex examples/data/input.circular_tokamak --plot`; other decks in [examples/data](examples/data/) | core |
-| QA, QH, QP or QI boundary design | [examples/optimization](examples/optimization/), including bootstrap, ballooning, Mercier and maximum-`J` variants | core |
-| JAXopt and Optax drivers | `QI_optimization_jaxopt.py`, `QI_optimization_optax.py` | `vmex[optimizers]` |
-| Asymmetric boundary design | [stellarator_asymmetry](examples/optimization/stellarator_asymmetry/) vacuum and finite-beta scripts | core |
-| Single-stage plasma and coils | `single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` | `vmex[coils]` |
-| Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` | core |
-| Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
-| ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
-| Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
-| Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
-| Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
-| Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
-| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
-| Research force-balance polishing | `python examples/force_balance_polishing.py` | core |
-
-The optimization scripts expose resolutions, objective weights and iteration budgets near the top.
-Inspect those settings before a research run; advanced coil examples need the optional dependencies
-and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
-
 ## Fields, coils and free boundary
 
 The equilibrium exposes Cartesian `B()` and its first three derivatives, with VJPs, anywhere inside
@@ -498,6 +339,91 @@ trace.wall_hits, trace.wall_positions, trace.returns
 
 The equations, the exterior-field options, the interpolation error and the outputs are in the
 [wall-tracing guide](https://vmex.readthedocs.io/en/latest/howto/trace-to-the-wall.html).
+
+## Alpha-particle losses
+
+`--trace` (needs `vmex[coils]`) scales the same way in memory and traces 500 fusion alphas for
+10 ms in Boozer coordinates (under a minute on 10 CPU cores; a GPU is faster for large ensembles). It writes the loss fraction and a figure set:
+loss against time, loss maps on the boundary, and pitch and loss-time distributions. Production runs set
+`--trace-particles N` and `--trace-tmax T`; cost grows as `N x T`. `--trace-birth volume` samples the D-T
+birth profile, and `--collisional` adds slowing down and pitch-angle scattering
+([guide](docs/howto/trace-alpha-particles.md)).
+
+![vmex --trace output: loss against time, loss map, pitch and loss-time distributions, iota](docs/_static/figures/readme_trace_output.webp)
+
+`--trace` is compared with SIMPLE and SIMSOPT on matched alphas, and its mode cut and timestep are
+checked on twenty equilibria ([guide](docs/howto/trace-alpha-particles.md#convergence-of-the-defaults)).
+
+The ESSOS tracer behind `--trace` (here with ESSOS's fixed-step Dopri8 defaults; `--trace` controls
+the step adaptively) against SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5 MeV alphas from
+`s = 0.5` over 10 ms (DESC: the first 32), on 8 Apple M4 cores
+([record](benchmarks/essos_cross_code.json), from uwplasma/ESSOS#162):
+
+![Alpha losses against time for ESSOS, SIMPLE, FIRM3D, SIMSOPT and DESC in three equilibria](docs/_static/figures/cross_code_losses.webp)
+
+![Run time, energy error and agreement of loss labels with SIMPLE and FIRM3D](docs/_static/figures/cross_code_bars.webp)
+
+## Neoclassical transport
+
+A stellarator's confinement is set as much by neoclassical transport as by its shape. Collisions and drifts in the 3-D
+field fix the radial electric field, the bootstrap current that changes the rotational transform, and a 1/ν
+loss channel that tokamaks do not have. `vmex --neoclassical` (needs `vmex[neoclassical]`) runs the drift-kinetic solver
+[DKX](https://github.com/uwplasma/DKX) on a solved equilibrium and returns all three:
+- the monoenergetic coefficients `D11*`, `D31*`, `D33*` against collisionality;
+- the ambipolar root `E_r(r)`;
+- the particle and heat fluxes of each species at that root;
+- the bootstrap `<j·B>`, set against VMEX's Redl formula on the same profiles and the equilibrium's own current.
+
+The `--nc-profiles` file holds `n_e`, `T_e` and `T_i` as polynomials in `s`
+([guide](docs/howto/neoclassical-transport.md)). On the bundled QA, β = 2.5 % deck:
+
+```console
+vmex wout_LandremanPaul2021_QA_beta2p5_bootstrap.nc --neoclassical \
+     --nc-profiles examples/data/kinetic_profiles.LandremanPaul2021_QA_beta2p5_bootstrap.json
+```
+
+It writes `*_neoclassical.png` and `*_neoclassical.h5`. The figure below is drawn from that `.h5`
+([script](docs/_static/figures/sources/make_neoclassical_figure.py)). Runtime: 6.5 min on 4 CPU cores,
+compilation included.
+
+![vmex --neoclassical: monoenergetic D11, D31, D33, |B|, ambipolar Er, bootstrap current from DKX, Redl and the equilibrium, particle and heat fluxes](docs/_static/figures/readme_neoclassical_output.webp)
+
+## Turbulence
+
+`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.5.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
+[GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing `k_y`,
+and a short nonlinear ITG simulation (`a/L_T = 3`, `a/L_n = 1`, adiabatic electrons). The terminal shows each
+stage with an estimate of the time left. The run writes the saturated heat flux with its standard error, a
+summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `-alpha`, `-ky`, `-grid`,
+`-moments`, `-tmax`, `-gradients` and `--turbulence-kinetic-electrons` change the run
+([guide](docs/howto/turbulence.md)). The defaults are a few-minute survey and are not converged.
+
+![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
+
+## How VMEX works
+
+1. **Energy principle.** VMEX finds a stationary point of `W = ∫ (B²/2μ₀ + p/(γ−1)) dV` over
+   nested flux surfaces, where `J × B = ∇p`. As in VMEC, the unknowns are the surface shapes `R`, `Z`
+   and the angle function `λ`: Fourier series in both angles, finite differences in radius.
+2. **Spectral force iteration.** Each iteration evaluates the Fourier-projected forces and takes a
+   damped second-order Richardson step with VMEC2000's time-step control and restarts, in its
+   order. A radial tridiagonal preconditioner per Fourier mode makes the step effective (a 2-D block
+   preconditioner is opt-in), and `NS_ARRAY` runs a coarse-to-fine radial multigrid ladder. The
+   solve has converged when `FSQR`, `FSQZ` and `FSQL` fall below `FTOL`.
+3. **Free boundary.** NESTOR solves the exterior Neumann problem for the vacuum potential with
+   Merkel's Green's-function method, driven by an MGRID table or a coil field; pressure balance
+   across the boundary moves the plasma surface.
+4. **Implicit derivatives.** At a root `F(x, p) = 0` of the force residual, `dx/dp = −(∂F/∂x)⁻¹ ∂F/∂p`.
+   A scalar objective needs one adjoint linear solve for all parameters, and least-squares
+   Jacobians factor the block-tridiagonal radial operator once. The forward iterations are not
+   recorded, so memory does not grow with their number. The derivative assumes that the state is a
+   root (on a fixed boundary VMEX first Newton-refines it to `refine_tol = 1e-10`), that `∂F/∂x` is
+   invertible there, and that perturbed solves stay on the same branch. It is the derivative of the
+   discrete equations, not of the continuum problem.
+5. **Virtual casing.** `VmecExtender` adds the plasma currents' field, a surface integral over
+   the boundary field, to the coil field outside the plasma; its error grows near the surface.
+
+The [explanation pages](https://vmex.readthedocs.io/en/latest/explanation/index.html) derive each step.
 
 ## Accuracy and optional polishing
 
@@ -539,6 +465,55 @@ pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.
 
 ![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
 
+## Validation and speed
+
+- **VMEC2000 parity.** CI solves six decks against stored VMEC2000 output and requires `wb` within
+  `1e-7` relative, `iota` and `R`, `Z` harmonics on three surfaces within `1e-5`, and iteration
+  counts within ±25%. On six decks never run before (ITER, W7-X, HSX, ARIES-CS, ESTELL,
+  Nührenberg–Zille), the worst relative difference from VMEC2000 was `2.5e-10`, and the iteration
+  counts were identical on five and one apart on the sixth
+  ([performance records](docs/reference/performance.rst), VMEX 0.8.1).
+- **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
+  wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
+  mostly XLA compilation, which a repeated solve in one process skips. In the older
+  [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
+  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
+  shipped deck or problem size ran faster than on the CPU.
+- **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
+  gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
+  value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
+  ([record](benchmarks/qa_optimization_startup_least_squares_m4.json), VMEX 0.7.0).
+- **Validation record.** The [validation record](docs/explanation/validation.md) lists every
+  gate, tolerance and benchmark record, with the measured accuracy of each lane.
+
+![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
+
+The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
+(`python docs/_static/figures/sources/make_readme_figures.py --only convergence`).
+
+### Against exact equilibria
+
+Convergence studies and code-to-code comparisons cannot see an error that every resolution, or
+every VMEC-type code, shares. [Landreman (2026)](https://arxiv.org/abs/2609.26742) found 3-D MHD
+equilibria with finite pressure and nested surfaces in closed form, and
+[Issan et al. (2026)](https://arxiv.org/abs/2610.07304) broke their stellarator symmetry with one
+parameter `tau` (`tau` and `-tau` are mirror images). [vmex-benchmark-analytical](https://github.com/rogeriojorge/vmex-benchmark-analytical) scores
+VMEX, VMEC2000 and DESC against them point by point, including at the axis.
+
+![Exact boundaries, and VMEX current and flux-surface errors against the exact solution](docs/_static/figures/readme_exact_equilibria.webp)
+
+- The exact solutions found two VMEX defects that resolution studies missed, both fixed: the field
+  at the axis (#452) and refinement before derivatives (#453).
+- At mid-radius VMEX's continuous field gives the current 23-450 times more accurately than the
+  WOUT file (middle panel), symmetric or not; B is right to 1e-5.
+- Without stellarator symmetry the full-basis path adds no error: the `tau = 0` equilibrium solved in
+  the full basis is the symmetric one to every digit, and mirror pairs agree to 1e-9. The Boozer
+  transform, effective ripple and virtual casing were checked against the exact fields as well.
+- With `tau != 0` the `iota = 2` family is degenerate: VMEX converges to a neighbouring equilibrium
+  that differs only in harmonics resonant with `iota = 2`, by 8e-4 at every resolution (right panel).
+  The sheared families converge in DESC but not in any VMEC-type code. Details are in the
+  [validation record](docs/explanation/validation.md#exact-equilibria).
+
 ## Performance and parallel execution
 
 JAX compiles each solve once per array structure and reuses the executable for matching shapes, so
@@ -553,6 +528,40 @@ baseline. Set worker and device budgets with the
 [ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
 kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
 
+For fixed-boundary stellarators converged to a very small `ftol`, `solve_multigrid(inp, lambda_m0_floor=1e-3)` adds a radial preconditioner for the $m=0$ $\lambda$ force ([when it helps](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
+
+## Running the examples
+
+The examples live in the repository, not in the wheel. From a clone:
+
+```console
+git clone --filter=blob:none https://github.com/uwplasma/vmex
+cd vmex
+pip install -e ".[all]"
+vmex examples/data/input.circular_tokamak --plot
+python examples/take_fixed_boundary_gradients.py
+```
+
+| Application | Runnable starting point | Needs |
+|---|---|---|
+| Tokamak or stellarator equilibrium | `vmex examples/data/input.circular_tokamak --plot`; other decks in [examples/data](examples/data/) | core |
+| QA, QH, QP or QI boundary design | [examples/optimization](examples/optimization/), including bootstrap, ballooning, Mercier and maximum-`J` variants | core |
+| JAXopt and Optax drivers | `QI_optimization_jaxopt.py`, `QI_optimization_optax.py` | `vmex[optimizers]` |
+| Asymmetric boundary design | [stellarator_asymmetry](examples/optimization/stellarator_asymmetry/) vacuum and finite-beta scripts | core |
+| Single-stage plasma and coils | `single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` | `vmex[coils]` |
+| Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` | core |
+| Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
+| ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
+| Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
+| Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
+| Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
+| Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
+| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
+| Research force-balance polishing | `python examples/force_balance_polishing.py` | core |
+
+The optimization scripts expose resolutions, objective weights and iteration budgets near the top.
+Inspect those settings before a research run; advanced coil examples need the optional dependencies
+and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 ## Documentation, development and citation
 
 Start with [your first equilibrium](https://vmex.readthedocs.io/en/latest/tutorials/first-equilibrium.html)

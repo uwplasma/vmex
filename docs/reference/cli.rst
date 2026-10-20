@@ -99,9 +99,24 @@ Options
      - Tracing horizon / integrator step in seconds (defaults ``1e-2`` /
        ``2.5e-7`` times ``Aminor_p / 1.7044 m``).
    * - ``--trace-particles N`` / ``--trace-times N``
-     - Ensemble size / saved samples per orbit (defaults 1000 / 1000).
+     - Ensemble size / saved samples per orbit (defaults 500 / 1000).
    * - ``--trace-s X`` / ``--trace-seed N``
      - Launch surface ``s`` (default 0.25) and sampling seed (default 42).
+   * - ``--trace-energy-eV E`` / ``--trace-mass-kg M`` / ``--trace-charge-coulomb Q``
+     - Kinetic energy [eV], mass [kg] and signed nonzero charge [C] of the
+       traced particle (defaults: the 3.52 MeV fusion alpha). Require
+       ``--trace``.
+   * - ``--trace-method M`` / ``--trace-tolerance TOL`` / ``--no-trace-compact``
+     - Integrator (``adaptive8`` default, ``adaptive``, ``rk4``, ``dopri5``,
+       ``dopri8``), its error tolerance, and compaction of early losses.
+   * - ``--trace-birth {surface,volume}``
+     - Birth on ``--trace-s`` or through the volume at the D-T fusion rate.
+   * - ``--collisional`` / ``--trace-ne0 N`` / ``--trace-te0 T``
+     - Monte Carlo collisions with on-axis density [m^-3] and temperature
+       [keV] (defaults ``4e20`` / ``12``).
+   * - ``--trace-mode-cut C``
+     - Drop Boozer modes below ``C`` times the largest amplitude. Every
+       ``--trace-*`` option and its cost: :doc:`/howto/trace-alpha-particles`.
    * - ``--outdir DIR``
      - Directory for wout/boozmn/figure output (default: alongside the
        input).
