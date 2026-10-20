@@ -1011,6 +1011,51 @@ def _qi_grid(bmnc_b, xm_b, xn_b, iota_b, *, bmns_b=None, nfp: int, weights, nphi
     return weights_arr, phi0, phi1, phi, alpha, bmag, bnorm, levels, eps
 
 
+def _minimum_position(b, softness: float, *, periodic: bool):
+    """Index-space position of the minimum of ``b`` along its last axis.
+
+    ``softness = 0`` is the grid argmin.  A positive value is the softmin
+    centroid with weights ``exp(-(b - min b)/softness)`` (circular for a
+    periodic line), which moves continuously as ``b`` changes and tends to
+    the argmin as ``softness -> 0``.
+    """
+    n = b.shape[-1]
+    if softness <= 0.0:
+        return jnp.argmin(b, axis=-1).astype(b.dtype)
+    weights = jax.nn.softmax(-(b - jnp.min(b, axis=-1, keepdims=True)) / softness, axis=-1)
+    index = jnp.arange(n, dtype=b.dtype)
+    if not periodic:
+        return jnp.sum(weights * index, axis=-1)
+    angle = 2.0 * jnp.pi * index / n
+    centre = jnp.arctan2(jnp.sum(weights * jnp.sin(angle), axis=-1),
+                         jnp.sum(weights * jnp.cos(angle), axis=-1))
+    return jnp.mod(centre * n / (2.0 * jnp.pi), n)
+
+
+def _sample(b, position, *, periodic: bool):
+    """Linear interpolation of ``b`` at fractional index ``position``.
+
+    Integer positions return the samples exactly.  A non-periodic line reads
+    the normalized maximum 1 one step beyond either end and is clamped there,
+    so a branch that leaves the field period ends on the well's wall.
+    """
+    n = b.shape[-1]
+    if not periodic:
+        one = jnp.ones(b.shape[:-1] + (1,), dtype=b.dtype)
+        b = jnp.concatenate([one, b, one], axis=-1)
+        position = jnp.clip(position + 1.0, 0.0, float(n + 1))
+    lower = jnp.floor(position)
+    frac = position - lower
+    lower = lower.astype(jnp.int32)
+    upper = lower + 1
+    if periodic:
+        lower, upper = jnp.mod(lower, n), jnp.mod(upper, n)
+    else:
+        upper = jnp.minimum(upper, n + 1)
+    return ((1.0 - frac) * jnp.take_along_axis(b, lower, axis=-1)
+            + frac * jnp.take_along_axis(b, upper, axis=-1))
+
+
 def quasi_isodynamic_residual(
     *,
     bmnc_b,
@@ -1031,6 +1076,7 @@ def quasi_isodynamic_residual(
     profile_weight: float = 0.1,
     shuffle_profile_weight: float = 1.0,
     shuffle_profile_softness: float = 2.0e-2,
+    argmin_softness: float = 0.0,
     phimin: float = 0.0,
 ) -> dict[str, Array]:
     """Smooth Goodman-style quasi-isodynamic residual from Boozer ``|B|`` modes.
@@ -1061,6 +1107,15 @@ def quasi_isodynamic_residual(
       reinterpolated onto the original grid and compared pointwise to the
       original ``bnorm`` (the closest smooth analogue of Goodman et al.'s
       construction of the nearest omnigenous field).
+
+    Both branch terms start each well at its ``|B|`` minimum.  With the
+    default ``argmin_softness = 0`` that is the grid argmin, which jumps a
+    whole grid cell as the field moves, so the residual is discontinuous
+    there.  A positive ``argmin_softness`` (in units of the normalized
+    ``|B|``) uses the softmin centroid and reads the branches by linear
+    interpolation, and drops the two period-end samples of the shuffle
+    comparison, which sit on the constructed well's wall; the residual is
+    then continuous in the field.
 
     Legacy port (``quasi_isodynamic_residual_from_boozer_modes``) with the
     unused ``aligned_profile_*`` / ``weighted_shuffle_*`` /
@@ -1096,11 +1151,10 @@ def quasi_isodynamic_residual(
         bper = jnp.swapaxes(bnorm[:, :-1, :], 1, 2)           # periodic, (nsurf, nalpha, nper)
         nper = nphi_ - 1
         offs = jnp.arange(max(1, nper // 2) + 1, dtype=jnp.int32)
-        imin = jnp.argmin(bper, axis=-1)
-        left = jnp.maximum.accumulate(
-            jnp.take_along_axis(bper, jnp.mod(imin[:, :, None] - offs[None, None, :], nper), axis=-1), axis=-1)
-        right = jnp.maximum.accumulate(
-            jnp.take_along_axis(bper, jnp.mod(imin[:, :, None] + offs[None, None, :], nper), axis=-1), axis=-1)
+        pmin = _minimum_position(bper, float(argmin_softness), periodic=True)[:, :, None]
+        offs_p = jnp.asarray(offs, dtype=dtype)[None, None, :]
+        left = jnp.maximum.accumulate(_sample(bper, pmin - offs_p, periodic=True), axis=-1)
+        right = jnp.maximum.accumulate(_sample(bper, pmin + offs_p, periodic=True), axis=-1)
         left = (left - left[..., :1]) / jnp.maximum(left[..., -1:] - left[..., :1], tiny)
         right = (right - right[..., :1]) / jnp.maximum(right[..., -1:] - right[..., :1], tiny)
         distance = jnp.asarray(offs, dtype=dtype) / jnp.asarray(nper, dtype=dtype)
@@ -1125,15 +1179,11 @@ def quasi_isodynamic_residual(
         offs_f = jnp.asarray(offs, dtype=dtype)
         dphi = (phi1 - phi0) / jnp.asarray(nphi_ - 1, dtype=dtype)
         period = phi1 - phi0
-        imin = jnp.argmin(b_alpha, axis=-1)
-        li_raw = imin[:, :, None] - offs[None, None, :]
-        ri_raw = imin[:, :, None] + offs[None, None, :]
-        lvalid, rvalid = li_raw >= 0, ri_raw < nphi_
-        lraw = jnp.take_along_axis(b_alpha, jnp.clip(li_raw, 0, nphi_ - 1), axis=-1)
-        rraw = jnp.take_along_axis(b_alpha, jnp.clip(ri_raw, 0, nphi_ - 1), axis=-1)
-        one = jnp.asarray(1.0, dtype=dtype)
-        left = jnp.maximum.accumulate(jnp.where(lvalid, lraw, one), axis=-1)
-        right = jnp.maximum.accumulate(jnp.where(rvalid, rraw, one), axis=-1)
+        imin = _minimum_position(b_alpha, float(argmin_softness), periodic=False)
+        left = jnp.maximum.accumulate(
+            _sample(b_alpha, imin[:, :, None] - offs_f[None, None, :], periodic=False), axis=-1)
+        right = jnp.maximum.accumulate(
+            _sample(b_alpha, imin[:, :, None] + offs_f[None, None, :], periodic=False), axis=-1)
 
         seps = jnp.maximum(jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
                            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
@@ -1147,10 +1197,10 @@ def quasi_isodynamic_residual(
         bw = lcross + rcross
         bw_mean = jnp.mean(bw, axis=1, keepdims=True)
 
-        min_phi = phi0 + jnp.asarray(imin, dtype=dtype) * dphi
+        min_phi = phi0 + imin * dphi
         lend = jnp.maximum(min_phi - phi0, 0.0)
         rend = jnp.maximum(phi1 - min_phi, 0.0)
-        signed_phi = (offs_f[None, None, :] - jnp.asarray(imin[:, :, None], dtype=dtype)) * dphi
+        signed_phi = (offs_f[None, None, :] - imin[:, :, None]) * dphi
 
         level_full = jnp.concatenate([jnp.zeros((1,), dtype=dtype), levels,
                                       jnp.ones((1,), dtype=dtype)])
@@ -1176,6 +1226,10 @@ def quasi_isodynamic_residual(
             x_target, signed_phi)
         constructed_bnorm = shuffled
         shuffle_res = (shuffled - b_alpha) * sqrt_w * shuffle_profile_weight
+        if float(argmin_softness) > 0.0:
+            # The period ends sit on the constructed wall, where the target
+            # jumps to 1 as a branch crossing reaches the end: drop them.
+            shuffle_res = shuffle_res[..., 1:-1]
         pieces.append(jnp.ravel(shuffle_res)
                       / jnp.sqrt(jnp.asarray(nalpha_ * nphi_, dtype=dtype)))
 

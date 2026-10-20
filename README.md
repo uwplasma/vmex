@@ -74,7 +74,7 @@ or pick what you need:
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.21.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.5`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.6`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.5.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -87,7 +87,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
 | `essos` | 0.21.0 | `vmex[coils]` | `pip install "essos>=0.21.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
-| `neo-jax` | 1.0.5 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.5"` |
+| `neo-jax` | 1.0.6 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.6"` |
 | `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
 | `gkx` | 2.5.0 | `vmex[turbulence]` | `pip install "gkx>=2.5.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
@@ -472,7 +472,7 @@ pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.
   counts within ±25%. On six decks never run before (ITER, W7-X, HSX, ARIES-CS, ESTELL,
   Nührenberg–Zille), the worst relative difference from VMEC2000 was `2.5e-10`, and the iteration
   counts were identical on five and one apart on the sixth
-  ([record](benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md), VMEX 0.8.1).
+  ([performance records](docs/reference/performance.rst), VMEX 0.8.1).
 - **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
   wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
   mostly XLA compilation, which a repeated solve in one process skips. In the older
@@ -489,7 +489,7 @@ pressure agree with VMEX; near the axis VMEX iota still moves with ns (0.188, 0.
 ![Force-residual traces for VMEX, VMEC2000 and VMEC++](docs/_static/figures/readme_convergence.webp)
 
 The NFP=4 QH deck at ns = 51 in all three codes, from a trace recorded in July 2026
-(`python benchmarks/make_readme_figures.py --only convergence`).
+(`python docs/_static/figures/sources/make_readme_figures.py --only convergence`).
 
 ### Against exact equilibria
 
@@ -520,13 +520,15 @@ JAX compiles each solve once per array structure and reuses the executable for m
 measure first-call, cache-reload and warm costs separately, including refinement and gradients for
 optimization. CPU and GPU performance depend on resolution and workload; the dated measurements are
 in the [performance reference](https://vmex.readthedocs.io/en/latest/reference/performance.html)
-and the [benchmark records](benchmarks/INDEX.md).
+and the [benchmark records](benchmarks/).
 
 `vj.parallel.solve_ensemble(inputs, workers=None)` solves independent cases concurrently and returns
 results in input order, each identical to solving that input alone; `workers=1` is the serial
 baseline. Set worker and device budgets with the
 [ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
 kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
+
+For fixed-boundary stellarators converged to a very small `ftol`, `solve_multigrid(inp, lambda_m0_floor=1e-3)` adds a radial preconditioner for the $m=0$ $\lambda$ force ([when it helps](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
 
 ## Running the examples
 

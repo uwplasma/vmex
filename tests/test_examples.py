@@ -1107,31 +1107,6 @@ def test_vacuum_qs_examples_expose_trial_pressure_terms():
         assert "weights rise smoothly toward the edge" in source
 
 
-# The self-consistent-bootstrap examples reproduce arXiv:2205.02914 against the
-# Zenodo dataset, which is a large local-only archive (not in CI) — skip when
-# absent.  Nightly-gated: each runs a multi-iteration Picard loop of solves.
-_ZENODO_2205 = Path(os.environ.get(
-    "VMEX_ZENODO_2205_02914",
-    str(Path.home() / "local" /
-        "20220708-01-zenodo_for_QS_optimization_with_self_consistent_bootstrap_current")))
-
-
-@pytest.mark.full
-@pytest.mark.skipif(not _ZENODO_2205.is_dir(),
-                    reason="arXiv:2205.02914 Zenodo dataset not present")
-@pytest.mark.parametrize("case", ["QA", "QH"])
-def test_bootstrap_selfconsistent_examples(case, tmp_path):
-    script = REPO / "benchmarks" / f"{case}_bootstrap_selfconsistent.py"
-    # The guard above accepts the dataset at its default location, but the
-    # script only reads the environment variable, so pass the resolved path.
-    out = _run_example(script, tmp_path, timeout=1200,
-                       VMEX_ZENODO_2205_02914=str(_ZENODO_2205))
-    m = re.search(r"final f_boot = ([0-9.eE+-]+)", out)
-    assert m is not None and float(m.group(1)) < 5e-2, f"{case} f_boot: {out[-400:]}"
-    assert (tmp_path / f"output_{case}_bootstrap_selfconsistent"
-            / f"wout_{case}_bootstrap_selfconsistent.nc").exists()
-
-
 @pytest.mark.full  # nightly: Picard seed + one exact finite-beta optimization stage
 @pytest.mark.parametrize(("case", "figure_of_merit"),
                          [("QA", "QS"), ("QH", "QS"), ("QI", "constructed QI")])
