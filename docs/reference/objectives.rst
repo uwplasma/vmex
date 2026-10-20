@@ -325,6 +325,18 @@ equivalent replacement for the Goodman residual:
        [(qi_action, 0.0, 1.0), (maximum_j, 0.0, 1.0)],
        inp, max_mode=6, jac="implicit")
 
+For local within-well label dependence, use
+:func:`~vmex.core.qi.j_invariant_alpha_derivative_from_boozer` with explicit
+``alpha`` labels and the same Boozer spectrum and physical pitches as the
+bounce kernel. Its ``action_alpha_derivative`` differentiates each well's
+action, including moving turning points and the line element, at fixed
+pitch. Distinct wells with unequal but label-independent actions have zero
+derivative. No matching between different labels or scalar population
+weight is imposed. Invalid sampled topology gives NaN; complete interior
+wells remain usable when the bounded trace cuts other wells. Check spatial,
+label, trace-length, and pitch convergence separately; near a separatrix
+the derivative can be ill-conditioned beyond the sampled topology guard.
+
 The two classes do not impose a shared weight. ``MaximumJResidual`` evaluates
 the outward slope ``dJ/ds`` at common pitch using matched wells;
 invalid topology is NaN rather than a favorable zero. See

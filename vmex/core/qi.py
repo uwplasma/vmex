@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 from .bounce import bounce_action_from_boozer
@@ -18,8 +19,47 @@ Array = Any
 __all__ = [
     "ConstructedQIResidual",
     "JInvariantQIResidual",
+    "j_invariant_alpha_derivative_from_boozer",
     "j_invariant_qi_residual_from_boozer",
 ]
+
+
+def j_invariant_alpha_derivative_from_boozer(*, alpha, **bounce_options):
+    """Return the local action derivative at fixed physical pitch.
+
+    ``alpha`` is a scalar or nonempty one-dimensional array of Boozer
+    field-line labels in radians. Other arguments are those of
+    :func:`~vmex.core.bounce.bounce_action_from_boozer`. The returned bounce
+    diagnostics gain ``action_alpha_derivative`` with the same shape as
+    ``action``. A JVP shifts each independent line's label infinitesimally,
+    differentiating the sampled field, line element, and turning points;
+    no wells are paired between distinct labels.
+
+    Derivatives are local to unchanged sampled topology and invalid wells
+    contain NaN. Further parameter differentiation assumes usable branches
+    with unchanged topology and interpolation cells; exclude NaN slots from
+    downstream objectives. Derivatives of the piecewise-linear interpolant
+    can jump when crossings or quadrature nodes change interpolation cells.
+    Complete wells inside a bounded trace remain usable when
+    other wells are cut by its edges (``truncated``). Resolution, label,
+    trace-length, and pitch convergence still require checking. Derivatives
+    near a separatrix can be ill-conditioned even outside the kernel's
+    sampled marginal/merged tolerance. This supplies no population weights
+    or scalar transport measure.
+    """
+    alpha = jnp.atleast_1d(jnp.asarray(alpha, dtype=jnp.float64))
+    if alpha.ndim != 1 or alpha.size == 0:
+        raise ValueError("alpha must be scalar or nonempty one-dimensional")
+
+    def actions(labels):
+        out = bounce_action_from_boozer(alpha=labels, **bounce_options)
+        return out["action"], out
+
+    _, derivative, out = jax.jvp(
+        actions, (alpha,), (jnp.ones_like(alpha),), has_aux=True)
+    out["action_alpha_derivative"] = jnp.where(
+        out["usable_mask"], derivative, jnp.nan)
+    return out
 
 
 def j_invariant_qi_residual_from_boozer(
