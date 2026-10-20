@@ -35,6 +35,8 @@ dependencies = [
   # SciPy 1.16 needs Python 3.11, hence requires-python.
   "scipy>=1.16",
   "netCDF4",
+  # 1.7.5 ships macOS 15 wheels only; drop once older-macOS wheels appear.
+  "netCDF4<1.7.5; sys_platform == 'darwin'",
   "h5py",
   "matplotlib",
   "packaging",
@@ -76,16 +78,19 @@ optimizers = [
 ]
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
+# 1.0.6 is the first release that keeps the sine Boozer spectra, so LASYM
+# equilibria get an effective ripple (NEO_JAX #7).
 neoclassical = [
-  "neo-jax>=1.0.5",
+  "neo-jax>=1.0.6",
   "dkx>=2.8.0",
 ]
 # Differentiable virtual casing on a specified boundary; this is not a NESTOR
-# equilibrium adjoint. 0.0.8 keeps the a-priori (per-derivative-order) error
-# estimate finite for targets far from the surface; 0.0.7 returned NaN there,
-# with hundreds of NumPy warnings, and the eager derivative accuracy check of
-# VmecExtender reported an error "up to inf" where the field is exact. The
-# other APIs vmex calls (ExteriorFieldConfig, VirtualCasingExteriorField,
+# equilibrium adjoint. 0.0.9 is the first release that declares its jax and
+# jaxlib floors (virtual_casing_jax #17). 0.0.8 kept the a-priori
+# (per-derivative-order) error estimate finite for targets far from the
+# surface; 0.0.7 returned NaN there, with hundreds of NumPy warnings, and the
+# eager derivative accuracy check of VmecExtender reported an error "up to
+# inf" where the field is exact. The other APIs vmex calls (ExteriorFieldConfig, VirtualCasingExteriorField,
 # VmecSurfaceFieldData, error_estimate's kst_error_estimate/
 # boundary_series_from_gamma/density_magnitude_from_surface) are unchanged.
 freeb = [
