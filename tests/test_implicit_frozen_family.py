@@ -193,6 +193,36 @@ def test_failed_newton_is_rejected_even_if_host_converged(family, monkeypatch):
         im.solve_implicit(params, cfg)
 
 
+def test_rejected_host_trial_skips_frozen_refinement(family, monkeypatch):
+    """A rejected host predictor never pays for or admits frozen Newton work."""
+    seed, problem = family
+    cfg = problem.metadata["config"]
+    params = im.params_from_input(seed.inp, device=cfg.device)
+    rejected = dataclasses.replace(seed.result, converged=False, fsqr=1.0)
+
+    def host(config, values):
+        im._LAST_SOLVE[config] = (im._params_key(values), rejected)
+        return rejected
+
+    def unexpected_refinement(*_args, **_kwargs):
+        raise AssertionError("rejected trial reached frozen refinement")
+
+    monkeypatch.setattr(im, "_host_solve", host)
+    monkeypatch.setattr(im, "_refine_fixed_point", unexpected_refinement)
+    try:
+        _, _, status, _, ratio = im._host_solve_and_mask_status(cfg, params)
+        assert int(status) == 2
+        assert float(ratio) > cfg.max_fsq_ratio
+        with pytest.raises(RuntimeError, match="usable VMEC equilibrium"):
+            problem.metadata["host_state_runtime"](problem.x0)
+        with pytest.raises(VmecConvergenceError, match="frozen_reference host solve"):
+            im.solve_implicit(params, cfg)
+        with pytest.raises(VmecConvergenceError, match="frozen_reference host solve"):
+            problem.metadata["jax_state_runtime"](problem.x0)
+    finally:
+        im._LAST_SOLVE.pop(cfg, None)
+
+
 def test_nonfinite_fixed_family_residual_is_rejected(family, monkeypatch):
     seed, problem = family
     cfg = problem.metadata["config"]
