@@ -35,6 +35,7 @@ jobs:
     outputs:
       run_tests: ${{ steps.scope.outputs.run_tests }}
       run_coverage: ${{ steps.scope.outputs.run_coverage }}
+      packaging: ${{ steps.packaging.outputs.changed }}
       parity: ${{ steps.parity.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -50,6 +51,18 @@ jobs:
           else
             python tools/ci_scope.py --all </dev/null >> "$GITHUB_OUTPUT"
           fi
+      - id: packaging
+        # Installs break on packaging edits or new upstream releases, not on
+        # ordinary code changes; the weekly workflow covers upstream releases.
+        name: Detect packaging changes
+        shell: bash
+        run: |
+          changed=false
+          if [[ "${{ github.event_name }}" == "pull_request" ]] &&
+             git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" | grep -qE '^(pyproject\.toml|MANIFEST\.in)$'; then
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
       - id: parity
         # Narrowing reuses the manifest ownership the lanes are built from.
         # Anything it cannot attribute returns every lane, so a miss costs
@@ -404,12 +417,38 @@ jobs:
         if: github.event_name == 'pull_request'
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
 
+  install:
+    # One cheap Linux cell plus the two platforms CI never otherwise touches.
+    name: pip install (${{ matrix.os }}, Python ${{ matrix.python }}${{ matrix.extra }})
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.11", extra: ""}
+          - {os: macos-latest, python: "3.13", extra: "[all]"}
+          - {os: windows-latest, python: "3.13", extra: "[all]"}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install, import and run the CLI
+        shell: bash
+        run: |
+          python -m pip install ".${{ matrix.extra }}"
+          python -c "import vmex; vmex.configure(); print(vmex.__version__)"
+          vmex --help > /dev/null
+
   pr-gate:
     name: PR gate
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [changes, quality, fast, parity, desc, device, jax-compatibility, changed-coverage]
+    needs: [changes, quality, fast, parity, desc, device, jax-compatibility, install, changed-coverage]
     steps:
       - name: Require every review gate
         env:
