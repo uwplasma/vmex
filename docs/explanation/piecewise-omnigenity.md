@@ -216,9 +216,29 @@ mirror reduction also prevents attributing the change solely to improved pwO
 structure. Neither this result nor the mapped comparison establishes alpha retention.
 
 The measured plots use unfilled contours in a centered periodic cell so that
-closed extrema and wrapping contours remain visible. The current development
+closed extrema and wrapping contours remain visible. These recorded development
 fits retain predominantly poloidally wrapping structure rather than the target
 parallelogram. Reduced fit error alone must not be labeled a distinct pwO result.
+
+A separate NFP=2 vacuum run starts from the near-circular boundary and applies
+QP-targeted conditioning before canonical fitting. The resumed fit at
+[source e1ed2978](https://github.com/uwplasma/vmex/commit/e1ed2978161e7402d6f4375786fe3fb2387d79cf),
+before the subsequent main-branch implicit-solver updates, selects its angular
+origin once from the seed and passes all 14 driver checks after independent
+NS=32, MPOL=7, Boozer-band-14, 39-by-39 rescoring:
+
+| State | Refined target residual | Minimum absolute iota | Global mirror |
+| --- | ---: | ---: | ---: |
+| QP-targeted seed | 0.0175490 | 0.418801 | 0.341712 |
+| Aligned canonical fit | 0.0101653 | 0.435864 | 0.342802 |
+
+The residual falls 42.1%; final aspect is 6.03316. The resumed driver takes
+245.2 s on the shared office CPU, separately from the 559.7 s near-circle,
+QP-conditioning and phase-zero baseline, which fails its mirror check.
+QP conditioning is not a symmetry certificate: its QP-breaking spectral RMS
+remains 0.1148 times B00. The action audit remains adverse, and neither
+invariant orbit families, distinct pwO structure, confinement nor coil
+realization is qualified by this target-fit result.
 
 Full derivative and resolution qualification, family-resolved actions,
 transport and particle retention remain separate gates. The shared-host wall

@@ -244,8 +244,7 @@ print(result.loss_fraction, result.loss_fraction_sigma)
 vj.plot_tracing(result, "figs", name="case")
 ```
 
-`trace_alphas` accepts a path or an in-memory
-{class}`~vmex.core.wout.WoutData` and returns an
+`trace_alphas` accepts a path or an in-memory {class}`~vmex.core.wout.WoutData` and returns an
 {class}`~vmex.core.tracing.AlphaTracingResult`. The exact loss fraction is
 piecewise constant in the boundary, so use it to certify a design, not as an
 optimization objective.
