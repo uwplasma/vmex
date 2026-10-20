@@ -60,4 +60,21 @@ solver-sensitive outputs (iota, mirror ratio, magnetic well) a naive
 re-solving finite difference is not a valid reference — the frozen-path
 check in {doc}`/explanation/adjoint-gradients` is.
 
+## Model and references
+
+At a converged state $x$ the force residual vanishes, $F(x, p) = 0$, so for any parameter $p$
+(boundary or profile coefficient)
+
+$$\frac{dx}{dp} = -\left(\frac{\partial F}{\partial x}\right)^{-1}\frac{\partial F}{\partial p}, \qquad
+\frac{df}{dp} = \frac{\partial f}{\partial p} - \lambda^{\mathsf T}\frac{\partial F}{\partial p}, \quad
+\left(\frac{\partial F}{\partial x}\right)^{\mathsf T}\lambda = \frac{\partial f}{\partial x}.$$
+
+One adjoint solve for $\lambda$ gives the gradient of a scalar $f$ with respect to every parameter, and
+memory does not grow with the number of forward iterations. VMEX uses this rather than differentiating
+through the iteration because the iteration count varies and its history would have to be stored.
+Assumptions and checks: {doc}`/explanation/adjoint-gradients`.
+
+- T. M. Antonsen, E. J. Paul and M. Landreman, *J. Plasma Phys.* 85, 905850207 (2019): adjoint shape gradients for 3-D equilibria.
+- S. G. Krantz and H. R. Parks, *The Implicit Function Theorem* (Birkhäuser, 2002).
+
 Next: {doc}`first-optimization` puts the gradient to work.
