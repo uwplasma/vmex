@@ -633,8 +633,10 @@ def _external_field_xyz(source: Any, points_xyz: Array) -> Array:
 
     if hasattr(source, "b_cyl"):
         x, y, z = jnp.moveaxis(points_xyz, -1, 0)
-        radius = jnp.sqrt(x**2 + y**2)
-        phi = jnp.arctan2(y, x)
+        # Axis points (x = y = 0) get radius 0, phi 0 and a finite derivative.
+        off_axis = x**2 + y**2 > 0.0
+        radius = jnp.where(off_axis, jnp.sqrt(jnp.where(off_axis, x**2 + y**2, 1.0)), 0.0)
+        phi = jnp.arctan2(jnp.where(off_axis, y, 0.0), jnp.where(off_axis, x, 1.0))
         b_r, b_phi, b_z = source.b_cyl(radius, phi, z)
         cosine, sine = jnp.cos(phi), jnp.sin(phi)
         return jnp.stack(
