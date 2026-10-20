@@ -79,8 +79,8 @@ grows. Boundary moves of 1e-4 to 1e-2 on the low-resolution QA deck took
 per point, because at zero pressure with a prescribed transform a PHIEDGE
 scan does not move the geometry. Because VMEX caches one
 compiled executable per solver structure, points after the first compile
-nothing at fixed resolution: the new-parameter warm run in
-`benchmarks/baselines/m4/F1_warm_newparams.json` records zero compiles.
+nothing at fixed resolution: a same-shape warm run with new parameters
+compiles nothing.
 
 ### The hot-restart scan pattern
 

@@ -1503,14 +1503,6 @@ def test_stable_plan_pytree_round_trip_and_split_force_equivalence():
 
 
 
-@pytest.fixture
-def _jit_enabled():
-    """Run one test compiled (this suite disables jit globally)."""
-
-    with jax.disable_jit(False):
-        yield
-
-
 def _native_chart(degree=3):
     from vmex.core import polish
 
@@ -1518,7 +1510,6 @@ def _native_chart(degree=3):
     return polish, state, polish._chart(state, 1.0e3, 10.0)
 
 
-@pytest.mark.usefixtures("_jit_enabled")
 def test_native_normal_system_matches_the_dense_gauss_newton_reference():
     """Span-local compressed assembly reproduces A^T A and A^T r exactly."""
 
@@ -1532,7 +1523,6 @@ def test_native_normal_system_matches_the_dense_gauss_newton_reference():
     np.testing.assert_allclose(gradient, dense.T @ residual, rtol=1.0e-10, atol=1.0e-14)
 
 
-@pytest.mark.usefixtures("_jit_enabled")
 def test_native_projector_is_the_orthogonal_projector_onto_the_gauge_kernel():
     native, _, chart = _native_chart()
     constraint = chart.constraint.toarray()
@@ -1542,7 +1532,6 @@ def test_native_projector_is_the_orthogonal_projector_onto_the_gauge_kernel():
     np.testing.assert_allclose(projector(vector), expected, rtol=1.0e-10, atol=1.0e-12)
 
 
-@pytest.mark.usefixtures("_jit_enabled")
 def test_native_polish_reduces_force_and_stays_feasible():
     """One refined chart plus the Newton step: monotone force, exact gauge."""
 
@@ -1561,7 +1550,6 @@ def test_native_polish_reduces_force_and_stays_feasible():
     assert float(minimum_signed_jacobian(result.state, make_variational_plan(result.state))) > 0.0
 
 
-@pytest.mark.usefixtures("_jit_enabled")
 def test_native_polish_scope_and_physical_scales():
     from types import SimpleNamespace
 

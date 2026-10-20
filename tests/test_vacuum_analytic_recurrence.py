@@ -6,7 +6,7 @@ a FORWARD three-term recurrence whose homogeneous modes grow like
 around mpol/ntor ~ 12) the forward pass returns garbage.  VMEC2000 computes
 the SAME wrong integrals, so two-code parity cannot see the defect; these
 tests pin the fixed ``vmex.core.vacuum._tl_stable`` (per-point
-forward/backward selection following vmecpp's singular_integrals.cc, commit
+forward/backward selection following the C++ reimplementation's singular_integrals.cc, commit
 f5dbf76, re-dimensioned threshold + Miller tail) against an independent
 reference: ``scipy.integrate.quad`` (epsrel 1e-13, epsabs 0), whose
 self-reported error stays under 1e-11 relative — beyond the 1e-10 gates.
@@ -341,22 +341,18 @@ def test_cth_fixture_below_onset_and_bit_identical(cth_vacuum_inputs, monkeypatc
         jax.config.update("jax_disable_jit", prev_disable_jit)
 
     # 3. jitted: reordering-level agreement only (documented above)
-    jax.config.update("jax_disable_jit", False)
-    try:
-        new_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
-        with monkeypatch.context() as mp:
-            mp.setattr(V, "_tl_stable", forward_only)
-            old_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
-        for name, a, b in zip(names, new_j, old_j, strict=True):
-            a = np.asarray(a)
-            b = np.asarray(b)
-            scale = float(np.max(np.abs(b)))
-            diff = float(np.max(np.abs(a - b)))
-            assert diff <= 1e-11 * scale, (
-                f"jit {name}: {diff:.3e} vs scale {scale:.3e}"
-            )
-    finally:
-        jax.config.update("jax_disable_jit", prev_disable_jit)
+    new_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
+    with monkeypatch.context() as mp:
+        mp.setattr(V, "_tl_stable", forward_only)
+        old_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
+    for name, a, b in zip(names, new_j, old_j, strict=True):
+        a = np.asarray(a)
+        b = np.asarray(b)
+        scale = float(np.max(np.abs(b)))
+        diff = float(np.max(np.abs(a - b)))
+        assert diff <= 1e-11 * scale, (
+            f"jit {name}: {diff:.3e} vs scale {scale:.3e}"
+        )
 
 
 def test_solver_dataclass_unchanged():

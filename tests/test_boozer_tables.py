@@ -689,3 +689,29 @@ def test_lambda_defines_straight_field_lines_on_native_half_mesh(deck):
     value, tangent = jax.jvp(defect, (jnp.asarray(0.7),), (jnp.asarray(1.),))
     np.testing.assert_allclose(value, 0., atol=2e-12)
     np.testing.assert_allclose(tangent, 0., atol=2e-11)
+
+
+def test_boozer_geometry_preserves_the_major_radius_range(lasym_solved):
+    """``geometry=True`` adds R, Z, nu and the Jacobian without changing |B|.
+
+    R on a surface is invariant under the Boozer relabelling, so the extrema
+    of the synthesized ``rmnc_b``/``rmns_b`` must match the wout geometry
+    interpolated to the same half-mesh surface (booz_xform convention).
+    """
+    from vmex.core import omnigenity as omn
+
+    eq = lasym_solved
+    plain = omn.boozer_spectrum_state(eq.state, eq.runtime, surfaces=[0.5], mboz=6, nboz=6)
+    booz = omn.boozer_spectrum_state(eq.state, eq.runtime, surfaces=[0.5], mboz=6, nboz=6,
+                                     geometry=True)
+    np.testing.assert_allclose(booz["bmnc_b"], plain["bmnc_b"], rtol=1e-10, atol=1e-12)
+    assert {"zmns_b", "zmnc_b", "pmns_b", "pmnc_b", "gmnc_b", "gmns_b"} <= set(booz)
+    row, _ = _boozer_range_matches_wout(eq, booz)
+    wout, nfp = eq.wout, int(eq.runtime.resolution.nfp)
+    half = lambda a: 0.5 * (np.asarray(a)[row - 1] + np.asarray(a)[row])  # noqa: E731
+    reference = _synthesize(half(wout.rmnc), half(wout.rmns), wout.xm, wout.xn, nfp)
+    boozer = _synthesize(np.asarray(booz["rmnc_b"])[0], np.asarray(booz["rmns_b"])[0],
+                         booz["xm_b"], booz["xn_b"], nfp)
+    span = float(reference.max() - reference.min())
+    assert abs(boozer.min() - reference.min()) < 0.05 * span
+    assert abs(boozer.max() - reference.max()) < 0.05 * span

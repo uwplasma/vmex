@@ -33,9 +33,9 @@ request. Modules declaring `asset: "reference-nc"` belong to nightly/weekly.
 `--vmec2000-executable PATH`; they are never part of ordinary offline CI. The
 live lane includes fixed-boundary current/Mercier profiles and a converged
 LASYM free-boundary DIII-D regression with generated compact mgrid data and
-all NESTOR WOUT potential/surface-field tables. The
-root `tests/conftest.py` disables jit globally for speed; tests that exercise
-the jit lane re-enable it explicitly.
+all NESTOR WOUT potential/surface-field tables. Tests
+run jitted, as users do; the few that compare against the eager path turn jit
+off locally and restore it.
 
 Pass `--vmex-report=PATH` to pytest to save the 50 slowest collected tests and
 every skip reason with inherited manifest metadata.
