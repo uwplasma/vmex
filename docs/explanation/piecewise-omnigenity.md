@@ -165,10 +165,12 @@ The initial canonical calibration also leaves its target mean near 6.76 T while
 holding the equilibrium near 8.2 T, preventing exact matching under the mean-field
 constraint.
 
-The current canonical driver calibrates positive target bounds to the seed-grid
+The canonical driver calibrates positive target bounds to the seed-grid
 mean and mirror, then holds those bounds and the selected phase (zero) fixed.
-The mapped driver adds a local-mirror equality residual with a fixed training-seed
-denominator and a final 10% tolerance. Controlled vacuum runs give:
+Both stage-1 families now include a local-mirror equality residual with a fixed
+training-seed denominator and a final 10% tolerance. The following historical
+controlled vacuum runs, pinned in the development record, applied that mirror
+control only to the mapped family:
 
 | Target | Refined seed residual | Refined final residual | Improvement | Final local mirror |
 | --- | ---: | ---: | ---: | ---: |
@@ -183,12 +185,13 @@ total variance rises slightly (0.7263 to 0.7353). Angular grids 39, 57 and 96
 retain these conclusions. These are modest target-fit improvements with explicit
 amplitude diagnostics, not evidence of family-resolved action invariance.
 
-The exact public driver also reproduces the controlled canonical vacuum
-trajectory within the finite-beta continuation. Its beta=0.50014% endpoint
+At the recorded source revisions, the public driver also reproduced the controlled
+canonical vacuum trajectory within the finite-beta continuation. Its beta=0.50014% endpoint
 reduces the independently refined residual from 0.0279032 to 0.0246551 (11.6%),
 with local mirror 0.265748. The corrected mapped beta=0.49969% endpoint
 reduces its refined residual from 0.0193501 to 0.0178247 (7.9%), with mirror
-0.230680 versus seed 0.230449. Both pass the driver checks.
+0.230680 versus seed 0.230449. Both passed the driver checks then in force;
+these measurements predate the canonical mirror control now required by default.
 This pressure sequence prescribes zero enclosed
 current; it is not a bootstrap-consistent equilibrium sequence.
 

@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 """Stage-1 vacuum fitting to canonical or squeezed-mapping pwO constructions.
 
-Set VMEX_PWO_FAMILY=canonical or mapped. The fixed target/map is a shaping
+Set VMEX_PWO_SEED=near_circular for the QP preconditioning route and
+VMEX_PWO_FAMILY=canonical or mapped. The fixed target/map is a shaping
 objective, not a certificate of branchwise action invariance or alpha retention.
 The canonical periodic completion is documented by vmex.core.pwo; this example
-starts from the bundled QI seed and is not a published-equilibrium reproduction.
+normally starts from the bundled QI seed. The optional near-circular nfp=2
+route preconditions for quasi-poloidal symmetry (QP) before pwO fitting.
+Neither route is a published-equilibrium reproduction.
 
 The scalar and least-squares methods minimize the same residuals. Scalar is the
 low-memory default. A final finer equilibrium and angular grid rescore both the
 original seed and the optimized boundary at the same physical surface s=0.5.
-Canonical bounds match the seed mean field and mirror. Mapped fitting also holds
-the seed mirror within 10%; both calibrations stay fixed during optimization.
+Canonical bounds match the seed mean field and mirror. Both families also hold
+the local seed mirror within 10%; all calibrations stay fixed during optimization.
 """
 
 import json
@@ -28,9 +31,18 @@ from vmex import optimize as opt
 from vmex.core.pwo import CanonicalPwOResidual, MappedPwOResidual
 from vmex.core.restart import restart_state
 
-INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+SEED = os.environ.get("VMEX_PWO_SEED", "qi")
+QS_INPUT = os.environ.get("VMEX_PWO_QS_INPUT")  # saved QP boundary skips preconditioning
+SEED_PERTURBATION = 0.005  # each added Fourier coefficient is 5% of a=0.1 m
+QS_MAX_MODES, QS_MAXITER = [1, 2, 3], [20, 20, 20]
+QS_ASPECT_TARGET = 6.0
+QS_IOTA_TARGET, QS_MIRROR_TARGET = 0.42, 0.34  # interior margins for the independent gate
+QS_IOTA_TOLERANCE, QS_MIRROR_TOLERANCE = 0.02, 0.03
+QS_PARAMETER_STEP, QS_PARAMETER_BOUND = 0.02, 5.0
 FAMILY = os.environ.get("VMEX_PWO_FAMILY", "canonical")
 METHOD = os.environ.get("VMEX_PWO_METHOD", "scalar")
+PENALTY = os.environ.get("VMEX_PWO_PENALTY", "equality")
 SURFACES = [0.5]
 MAX_MODES, MAXITER = [1, 2, 3], [8, 8, 12]
 STAGE_NS, FINAL_NS = 16, 32  # even ns puts s=0.5 on both half meshes
@@ -47,6 +59,7 @@ MIRROR_RELATIVE_TOLERANCE = 0.10
 PARAMETER_STEP, PARAMETER_BOUND = 0.01, 3.0
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
+    QS_MAX_MODES, QS_MAXITER = [1], [1]
     MAX_MODES, MAXITER = [1], [1]
     PWO_OPTIONS = dict(mboz=4, nboz=4, oversample=1)
     VALIDATION_OPTIONS = dict(mboz=5, nboz=5, oversample=2)
@@ -68,6 +81,37 @@ def make_target(surfaces, *, family, bmin, bmax, b_ref, options, grid, iota_sign
     raise ValueError("family must be canonical or mapped")
 
 
+def hold_ratio(value, reference, tolerance, penalty):
+    """Use the same physical tolerance for an equality or interval penalty."""
+    deviation = value / reference - 1
+    if penalty == "interval":
+        deviation = jnp.maximum(jnp.abs(deviation) - tolerance, 0)
+    return deviation / tolerance
+
+
+def save_seed_checkpoint(deck, equilibrium, output_name, label):
+    """Save each independently solved boundary before a later stage can fail."""
+    deck.to_indata(f"input.{output_name}_{label}")
+    vj.write_wout(f"wout_{output_name}_{label}.nc", equilibrium.wout)
+
+
+def qp_gate_failures(metrics):
+    """Check the refined QP boundary before pwO target calibration."""
+    failed = []
+    if not np.isfinite(metrics["qs_total"]):
+        failed.append("QP objective finite")
+    if (not np.isfinite(metrics["aspect"]) or
+            abs(metrics["aspect"] / QS_ASPECT_TARGET - 1) > ASPECT_TOLERANCE):
+        failed.append("aspect target")
+    if not np.isfinite(metrics["min_abs_iota"]) or metrics["min_abs_iota"] < IOTA_FLOOR:
+        failed.append("iota floor")
+    if not MIRROR_FLOOR <= metrics["mirror"] <= MIRROR_LIMIT:
+        failed.append("mirror interval")
+    if not np.isfinite(metrics["elongation"]) or metrics["elongation"] > ELONGATION_LIMIT:
+        failed.append("elongation limit")
+    return failed
+
+
 def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     """Optimize with fixed flux, R00, linear edge-zero pressure and zero current.
 
@@ -78,24 +122,146 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     Boundary derivatives use VMEX's fixed-point convention with its released
     m=1 gauge held fixed; independent host re-solve differences require a separate audit.
     """
-    if FAMILY not in ("canonical", "mapped") or METHOD not in ("scalar", "least_squares"):
-        raise ValueError("require canonical|mapped family and scalar|least_squares method")
+    if (FAMILY not in ("canonical", "mapped") or METHOD not in ("scalar", "least_squares")
+            or PENALTY not in ("equality", "interval")):
+        raise ValueError("require canonical|mapped family, scalar|least_squares method, and equality|interval penalty")
     beta_targets = tuple(float(beta) for beta in beta_targets)
     if not beta_targets or beta_targets[0] != 0 or any(
             not np.isfinite(beta) or beta < 0 for beta in beta_targets) or any(
                 right < left for left, right in zip(beta_targets, beta_targets[1:])):
         raise ValueError("beta_targets must start at vacuum and increase through finite nonnegative values")
-    print(f"Starting {FAMILY} pwO stage 1 ({METHOD}); beta ladder {beta_targets}", flush=True)
+    if SEED not in ("qi", "near_circular"):
+        raise ValueError("VMEX_PWO_SEED must be qi or near_circular")
+    seed_route = "near_circular" if QS_INPUT else SEED
+    print(f"Starting {seed_route} -> {FAMILY} pwO ({METHOD}); beta ladder {beta_targets}", flush=True)
     started = time.perf_counter()
     am = np.zeros(21); am[:2] = [1.0, -1.0]
-    seed_input = replace(
-        vj.VmecInput.from_file(INPUT_FILE), pres_scale=0.0, pmass_type="power_series", am=am,
-        ncurr=1, curtor=0.0, pcurr_type="power_series", ac=np.zeros(21), delt=0.5,
-        ns_array=np.array([STAGE_NS]), ftol_array=np.array([STAGE_FTOL]),
-        niter_array=np.array([NITER])).change_resolution(
-            mpol=MPOL, ntor=MPOL, ntheta=2 * MPOL + 6, nzeta=2 * MPOL + 4)
+
+    def prepare(deck):
+        return replace(
+            deck, pres_scale=0.0, pmass_type="power_series", am=am,
+            ncurr=1, curtor=0.0, pcurr_type="power_series", ac=np.zeros(21), delt=0.5,
+            ns_array=np.array([STAGE_NS]), ftol_array=np.array([STAGE_FTOL]),
+            niter_array=np.array([NITER])).change_resolution(
+                mpol=MPOL, ntor=MPOL, ntheta=2 * MPOL + 6, nzeta=2 * MPOL + 4)
+
+    def refined(deck, source):
+        deck = replace(deck, ns_array=np.array([FINAL_NS]), ftol_array=np.array([FINAL_FTOL]),
+                       niter_array=np.array([NITER])).change_resolution(
+                           mpol=FINAL_MPOL, ntor=FINAL_MPOL,
+                           ntheta=2 * FINAL_MPOL + 10, nzeta=2 * FINAL_MPOL + 8)
+        eq = opt.solve_equilibrium(deck, initial_state=restart_state(source.wout, deck),
+                                  raise_on_max_iterations=True, verbose=not ci_smoke)
+        return deck, eq
+
+    qs_stages, qs_metrics = [], None
+    if SEED == "qi" and not QS_INPUT:
+        seed_input = prepare(vj.VmecInput.from_file(DATA_DIR / "input.QI_nfp2_initial"))
+        equilibrium = opt.solve_equilibrium(seed_input, raise_on_max_iterations=True)
+    else:
+        near_circular_input = vj.VmecInput.from_file(DATA_DIR / "input.minimal_seed_nfp2")
+        rbc, zbs = near_circular_input.rbc.copy(), near_circular_input.zbs.copy()
+        rbc[near_circular_input.ntor - 1, 1] = -SEED_PERTURBATION
+        zbs[near_circular_input.ntor - 1, 1] = SEED_PERTURBATION
+        near_circular_input = replace(near_circular_input, rbc=rbc, zbs=zbs)
+        near_circular_input = prepare(near_circular_input)
+        qs = opt.QuasisymmetryRatioResidual([0.5, 0.7, 0.9], helicity_m=0, helicity_n=1)
+        qs_raw_metrics = None
+
+        def qp_metrics(eq):
+            return dict(qs_total=float(qs.total_state(eq.state, eq.runtime)),
+                        aspect=float(opt.aspect_ratio(eq.state, eq.runtime)),
+                        min_abs_iota=float(opt.min_abs_iota(eq.state, eq.runtime)),
+                        mirror=float(opt.mirror_ratio(eq.state, eq.runtime)),
+                        elongation=float(opt.max_elongation(eq.state, eq.runtime)),
+                        minor_radius_m=float(eq.wout.Aminor_p), volavgB_T=float(eq.wout.volavgB))
+
+        def save_qs_summary(training_metrics=None, refined_metrics=None):
+            unmet = None if refined_metrics is None else qp_gate_failures(refined_metrics)
+            status = "running" if unmet is None else ("failed" if unmet else "passed")
+            Path(f"{output_name}_qs_summary.json").write_text(json.dumps(
+                dict(source=QS_INPUT or "near_circular", perturbation_m=SEED_PERTURBATION,
+                     helicity_m=0, helicity_n=1, stages=qs_stages,
+                     settings=dict(aspect_target=QS_ASPECT_TARGET, iota_target=QS_IOTA_TARGET,
+                                   mirror_target=QS_MIRROR_TARGET, iota_tolerance=QS_IOTA_TOLERANCE,
+                                   mirror_tolerance=QS_MIRROR_TOLERANCE,
+                                   parameter_step=QS_PARAMETER_STEP, parameter_bound=QS_PARAMETER_BOUND),
+                     raw_metrics=qs_raw_metrics, training_metrics=training_metrics,
+                     metrics=refined_metrics, status=status, unmet=unmet), indent=2, allow_nan=False) + "\n")
+
+        if QS_INPUT:
+            seed_input = prepare(vj.VmecInput.from_file(Path(QS_INPUT)))
+            if (seed_input.nfp != near_circular_input.nfp or
+                    not np.isclose(seed_input.phiedge, near_circular_input.phiedge) or
+                    not np.isclose(seed_input.rbc[seed_input.ntor, 0],
+                                   near_circular_input.rbc[near_circular_input.ntor, 0])):
+                raise ValueError("QP input must retain nfp, toroidal flux and major radius")
+            equilibrium = opt.solve_equilibrium(seed_input, raise_on_max_iterations=True)
+        else:
+            seed_input = near_circular_input
+            equilibrium = opt.solve_equilibrium(seed_input, raise_on_max_iterations=True)
+            save_seed_checkpoint(seed_input, equilibrium, output_name, "near_circular")
+            qs_raw_metrics = qp_metrics(equilibrium)
+            save_qs_summary()
+
+            def qs_constraints(state, runtime):
+                mirror = opt.mirror_ratio(state, runtime)
+                return jnp.stack([
+                    (opt.aspect_ratio(state, runtime) / QS_ASPECT_TARGET - 1) / ASPECT_TOLERANCE,
+                    jnp.maximum(QS_IOTA_TARGET - opt.min_abs_iota(state, runtime), 0) / QS_IOTA_TOLERANCE,
+                    jnp.maximum(MIRROR_FLOOR - mirror, 0) / QS_MIRROR_TOLERANCE,
+                    jnp.maximum(mirror - QS_MIRROR_TARGET, 0) / QS_MIRROR_TOLERANCE,
+                    jnp.maximum(opt.max_elongation(state, runtime) - ELONGATION_LIMIT, 0)
+                    / ELONGATION_LIMIT])
+
+            qs_terms = [(qs, 0.0, 1.0), (qs_constraints, 0.0, 10.0)]
+
+            def qs_loss(state, runtime):
+                rows = opt.residuals_from_tuples(state, runtime, qs_terms)
+                return 0.5 * jnp.vdot(rows, rows)
+
+            qs_problem = opt.VmecProblem.from_loss(
+                seed_input, qs_loss, max_mode=max(QS_MAX_MODES), vary_major_radius=False,
+                restart_from=equilibrium, max_fsq_ratio=1.0, adjoint_tol=1e-8,
+                progress=not ci_smoke, evaluation_progress=not ci_smoke, jacobian_batch_size=1)
+            full_x = qs_problem.x0.copy()
+            for max_mode, budget in zip(QS_MAX_MODES, QS_MAXITER):
+                stage = qs_problem.subproblem(max_mode=max_mode, x=full_x)
+                x0, step = stage.x0, QS_PARAMETER_STEP * stage.scales
+
+                def qs_value_and_gradient(y):
+                    value, gradient = stage.value_and_grad(x0 + step * y)
+                    return value, step * gradient
+
+                def qs_record(intermediate_result):
+                    print(f"QP mode {max_mode}: accepted cost {intermediate_result.fun:.6e}", flush=True)
+
+                initial = float(qs_value_and_gradient(np.zeros_like(x0))[0])
+                result = minimize(
+                    qs_value_and_gradient, np.zeros_like(x0), jac=True, method="L-BFGS-B",
+                    bounds=[(-QS_PARAMETER_BOUND, QS_PARAMETER_BOUND)] * x0.size, callback=qs_record,
+                    options={"maxiter": budget, "maxfun": 5 * budget + 5, "maxls": 15,
+                             "ftol": 1e-12, "gtol": 1e-7})
+                x = x0 + step * result.x
+                seed_input = stage.input_from_x(x)
+                equilibrium = stage.equilibrium_from_x(x)
+                full_x = qs_problem.x_from_input(seed_input)
+                qs_stages.append(dict(mode=max_mode, initial_cost=initial,
+                                      final_cost=float(result.fun), status=int(result.status),
+                                      message=str(result.message)))
+                save_seed_checkpoint(seed_input, equilibrium, output_name, "qs")
+                save_qs_summary(training_metrics=qp_metrics(equilibrium))
+                print(f"QP mode {max_mode}: cost {initial:.6e} -> {result.fun:.6e}", flush=True)
+
+        qs_training_metrics = qp_metrics(equilibrium)
+        qs_refined_input, qs_refined_equilibrium = refined(seed_input, equilibrium)
+        save_seed_checkpoint(qs_refined_input, qs_refined_equilibrium, output_name, "qs_refined")
+        qs_metrics = qp_metrics(qs_refined_equilibrium)
+        save_qs_summary(qs_training_metrics, qs_metrics)
+        qs_failed = qp_gate_failures(qs_metrics)
+        if qs_failed:
+            raise RuntimeError("QP preconditioning failed " + ", ".join(qs_failed) + "; checkpoint saved")
     inp = seed_input
-    equilibrium = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
     seed_equilibrium = equilibrium
     aspect_ref = float(equilibrium.wout.aspect)
     radius_ref = float(equilibrium.wout.Aminor_p)
@@ -147,10 +313,10 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         local_mirror = (jnp.max(B, axis=(1, 2)) - jnp.min(B, axis=(1, 2))) / (
             jnp.max(B, axis=(1, 2)) + jnp.min(B, axis=(1, 2)))
         rows = [out["residuals1d"],
-            (local_mean / jnp.asarray(surface_field_ref) - 1) / FIELD_TOLERANCE,
+            hold_ratio(local_mean, jnp.asarray(surface_field_ref), FIELD_TOLERANCE, PENALTY),
             jnp.maximum(MIRROR_FLOOR - local_mirror, 0) / MIRROR_FLOOR]
-        if FAMILY == "mapped":
-            rows.append((local_mirror / jnp.asarray(surface_mirror_ref) - 1) / MIRROR_RELATIVE_TOLERANCE)
+        rows.append(hold_ratio(local_mirror, jnp.asarray(surface_mirror_ref),
+                               MIRROR_RELATIVE_TOLERANCE, PENALTY))
         return jnp.concatenate(rows)
 
     unit_beta = None
@@ -169,7 +335,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         def constraints(state, runtime):
             mirror = opt.mirror_ratio(state, runtime)
             rows = [
-                (opt.aspect_ratio(state, runtime) / aspect_ref - 1) / ASPECT_TOLERANCE,
+                hold_ratio(opt.aspect_ratio(state, runtime), aspect_ref, ASPECT_TOLERANCE, PENALTY),
                 jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0) / IOTA_FLOOR,
                 jnp.maximum(IOTA_FLOOR - iota_sign * opt.mean_iota(state, runtime), 0) / IOTA_FLOOR,
                 jnp.maximum(MIRROR_FLOOR - mirror, 0) / MIRROR_FLOOR,
@@ -228,15 +394,6 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                                final_cost=final, status=int(result.status), message=str(result.message)))
             print(f"beta {beta_target:.3%}, mode {max_mode}: cost {initial:.6e} -> {final:.6e}", flush=True)
 
-    def refined(deck, source):
-        deck = replace(deck, ns_array=np.array([FINAL_NS]), ftol_array=np.array([FINAL_FTOL]),
-                       niter_array=np.array([NITER])).change_resolution(
-                           mpol=FINAL_MPOL, ntor=FINAL_MPOL,
-                           ntheta=2 * FINAL_MPOL + 10, nzeta=2 * FINAL_MPOL + 8)
-        eq = opt.solve_equilibrium(deck, initial_state=restart_state(source.wout, deck),
-                                  raise_on_max_iterations=True, verbose=not ci_smoke)
-        return deck, eq
-
     final_input, final_equilibrium = refined(inp, equilibrium)
     reference_input = replace(seed_input, pres_scale=inp.pres_scale)
     _, reference_equilibrium = refined(reference_input, seed_equilibrium)
@@ -275,9 +432,8 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         "field held": abs(metrics["volavgB_T"] / field_ref - 1) <= FIELD_TOLERANCE,
         "converged": bool(np.all(np.asarray(final_equilibrium.result.converged))),
     }
-    if FAMILY == "mapped":
-        checks["training-surface mirror held"] = bool(np.all(
-            abs(local_mirror / surface_mirror_ref - 1) <= MIRROR_RELATIVE_TOLERANCE))
+    checks["training-surface mirror held"] = bool(np.all(
+        abs(local_mirror / surface_mirror_ref - 1) <= MIRROR_RELATIVE_TOLERANCE))
     if beta_targets[-1] > 0:
         checks["beta held"] = abs(metrics["beta"] / beta_targets[-1] - 1) <= BETA_TOLERANCE
     unmet = [name for name, met in checks.items() if not met]
@@ -286,6 +442,13 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         for name in ("eta_fraction", "mapped_area_fraction", "jacobian_lower_bound", "corner_margin", "width")
         if name in final_score}
     summary = dict(family=FAMILY, method=METHOD, smoke=ci_smoke, seconds=time.perf_counter() - started,
+                   seed_route=seed_route,
+                   preconditioning=(None if qs_metrics is None else
+                                    dict(branch="QP", source=QS_INPUT or "near_circular",
+                                         seed_perturbation_m=SEED_PERTURBATION,
+                                         stages=qs_stages, raw_metrics=qs_raw_metrics,
+                                         training_metrics=qs_training_metrics,
+                                         metrics=qs_metrics)),
                    stages=stages, metrics=metrics, actual_s=np.asarray(final_score["s_b"]).tolist(),
                    target=dict(calibration=calibration, zeta_center_rad=0.0, p=2, bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref,
                                surface_field_ref_T=surface_field_ref.tolist(), iota_sign=iota_sign,
@@ -293,11 +456,12 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
                                t1=-0.3 * iota_sign, t2=3.0 * iota_sign,
                                a=0.3, b=0.0, c=-2.0, eta_min=2.8),
                    settings=dict(stage_ns=STAGE_NS, stage_ftol=STAGE_FTOL, mpol=MPOL,
+                                 penalty=PENALTY,
                                  final_ns=FINAL_NS, final_ftol=FINAL_FTOL, final_mpol=FINAL_MPOL,
                                  niter=NITER, grid=GRID, validation_grid=VALIDATION_GRID,
                                  transform=PWO_OPTIONS, validation_transform=VALIDATION_OPTIONS,
                                  mode_ladder=MAX_MODES, iteration_budgets=MAXITER,
-                                 mapped_mirror_relative_tolerance=MIRROR_RELATIVE_TOLERANCE),
+                                 mirror_relative_tolerance=MIRROR_RELATIVE_TOLERANCE),
                    phiedge_Wb=float(inp.phiedge), pres_scale_Pa=float(inp.pres_scale),
                    pressure="p(s)=PRES_SCALE*(1-s)", current="zero enclosed toroidal current",
                    checks=checks, unmet=unmet, construction_diagnostics=construction_diagnostics,

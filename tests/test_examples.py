@@ -1071,6 +1071,142 @@ def test_pwo_stage1_example(tmp_path, family, finite_beta):
     assert (tmp_path / f"wout_{stem}.nc").exists()
 
 
+def test_pwo_qp_gate_and_penalty_controls():
+    import runpy
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    failures = example["qp_gate_failures"]
+    metrics = dict(qs_total=0.01, aspect=6.0, min_abs_iota=0.41, mirror=0.1, elongation=2.0)
+    assert failures(metrics) == []
+    for name, value, gate in (("qs_total", np.nan, "QP objective finite"),
+                              ("aspect", 6.3, "aspect target"),
+                              ("min_abs_iota", 0.39, "iota floor"),
+                              ("mirror", 0.04, "mirror interval"),
+                              ("mirror", 0.350018, "mirror interval"),
+                              ("elongation", 8.1, "elongation limit")):
+        assert gate in failures({**metrics, name: value})
+
+    hold = example["hold_ratio"]
+    assert float(hold(1.02, 1.0, 0.03, "interval")) == 0.0
+    assert float(hold(1.02, 1.0, 0.03, "equality")) == pytest.approx(2 / 3)
+    assert float(hold(0.96, 1.0, 0.03, "interval")) == pytest.approx(1 / 3)
+    example["run"].__globals__["PENALTY"] = "invalid"
+    with pytest.raises(ValueError, match="equality\\|interval"):
+        example["run"]()
+
+
+def test_pwo_qp_gate_preserves_checkpoints_before_target_calibration(tmp_path, monkeypatch):
+    """A failed independent re-solve cannot silently become the pwO reference."""
+    import runpy
+    from types import SimpleNamespace
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    run = example["run"]
+    run.__globals__.update(SEED="near_circular", QS_INPUT=None, QS_MAX_MODES=[1], QS_MAXITER=[1],
+                           FAMILY="canonical", METHOD="scalar", PENALTY="equality", FINAL_NS=32)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(run.__globals__, "restart_state", lambda wout, deck: None)
+
+    def solve(deck, **kwargs):
+        return SimpleNamespace(state=deck, runtime=None,
+                               wout=SimpleNamespace(ns=deck.ns_array[-1], Aminor_p=0.1, volavgB=1.0))
+
+    def write_wout(path, deck):
+        Path(path).write_text(str(int(deck.ns)))
+
+    opt = example["opt"]
+    monkeypatch.setattr(opt, "solve_equilibrium", solve)
+    monkeypatch.setattr(example["vj"], "write_wout", write_wout)
+    monkeypatch.setattr(opt, "QuasisymmetryRatioResidual", lambda *args, **kwargs:
+                        SimpleNamespace(total_state=lambda state, runtime: 0.01))
+    for name, value in (("aspect_ratio", 6.0), ("min_abs_iota", 0.3),
+                        ("mirror_ratio", 0.1), ("max_elongation", 2.0)):
+        monkeypatch.setattr(opt, name, lambda state, runtime, value=value: value)
+
+    class Problem:
+        x0 = np.zeros(1)
+        scales = np.ones(1)
+
+        def __init__(self, deck):
+            self.deck = deck
+
+        def subproblem(self, **kwargs):
+            return self
+
+        def value_and_grad(self, x):
+            return float(x @ x), 2 * x
+
+        def input_from_x(self, x):
+            from dataclasses import replace
+            rbc = self.deck.rbc.copy()
+            rbc[self.deck.ntor - 1, 1] = -0.02
+            return replace(self.deck, rbc=rbc)
+
+        def equilibrium_from_x(self, x):
+            return solve(self.input_from_x(x))
+
+        def x_from_input(self, deck):
+            return self.x0.copy()
+
+    monkeypatch.setattr(opt.VmecProblem, "from_loss", lambda deck, *args, **kwargs: Problem(deck))
+    with pytest.raises(RuntimeError, match="QP preconditioning failed iota floor"):
+        run()
+    raw = example["vj"].VmecInput.from_file(tmp_path / "input.pwO_optimized_near_circular")
+    trained = example["vj"].VmecInput.from_file(tmp_path / "input.pwO_optimized_qs")
+    assert raw.rbc[raw.ntor - 1, 1] == -0.005
+    assert trained.rbc[trained.ntor - 1, 1] == -0.02
+    assert (tmp_path / "wout_pwO_optimized_near_circular.nc").read_text() == "16"
+    assert (tmp_path / "wout_pwO_optimized_qs_refined.nc").read_text() == "32"
+    summary = json.loads((tmp_path / "pwO_optimized_qs_summary.json").read_text())
+    assert summary["metrics"]["min_abs_iota"] == 0.3
+    assert summary["status"] == "failed" and summary["unmet"] == ["iota floor"]
+    assert not (tmp_path / "input.pwO_optimized").exists()
+
+
+@pytest.mark.parametrize("family", ["canonical", "mapped"])
+@pytest.mark.parametrize("penalty, expected", [("equality", 31.25), ("interval", 11.25)])
+def test_pwo_mirror_control_uses_the_same_acceptance_interval(family, penalty, expected, monkeypatch):
+    """A 25% mirror drop incurs a cost even when the fit residual is zero."""
+    import runpy
+    from types import SimpleNamespace
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    run = example["run"]
+    run.__globals__.update(SEED="qi", QS_INPUT=None, FAMILY=family, METHOD="scalar", PENALTY=penalty)
+    opt = example["opt"]
+    wout = SimpleNamespace(aspect=6.0, Aminor_p=0.1, volavgB=1.0)
+    monkeypatch.setattr(opt, "solve_equilibrium", lambda deck, **kwargs:
+                        SimpleNamespace(state=deck, runtime=None, wout=wout))
+    for name, value in (("aspect_ratio", 6.0), ("min_abs_iota", 0.42), ("mean_iota", 0.42),
+                        ("mirror_ratio", 0.1), ("max_elongation", 2.0)):
+        monkeypatch.setattr(opt, name, lambda state, runtime, value=value: value)
+    shape = np.array([[[0.0, 1.0], [1.0, 0.0]]])
+    trial = False
+
+    class Target:
+        def compute_state(self, state, runtime):
+            mirror = 0.075 if trial else 0.1
+            B = 1 + mirror * (2 * shape - 1)
+            return dict(B=B, B_mapped=B, B_target=1 + shape,
+                        mirror=np.array([mirror]), residuals1d=np.zeros(1))
+
+    monkeypatch.setitem(run.__globals__, "CanonicalPwOResidual", lambda *args, **kwargs: Target())
+    monkeypatch.setitem(run.__globals__, "make_target", lambda *args, **kwargs: Target())
+
+    class EvaluatedRows(Exception):
+        pass
+
+    def inspect_loss(deck, loss, **kwargs):
+        nonlocal trial
+        trial = True
+        assert float(loss(deck, None)) == pytest.approx(expected)
+        raise EvaluatedRows
+
+    monkeypatch.setattr(opt.VmecProblem, "from_loss", inspect_loss)
+    with pytest.raises(EvaluatedRows):
+        run()
+
+
 @pytest.mark.full
 def test_pwo_single_stage_example(tmp_path):
     pytest.importorskip("essos")

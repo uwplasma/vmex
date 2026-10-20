@@ -91,6 +91,24 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
+  `pwO_optimization.py` defaults to the bundled QI seed. Set
+  `VMEX_PWO_SEED=near_circular` to start from the nfp=2 R=1 m, a=0.1 m
+  boundary with a 0.005 m rotating-ellipse perturbation, optimize QP first,
+  and then fit the selected pwO target. Both target constructions have a
+  poloidal orientation, which motivates the QP warm start; the measured QS
+  residual is reported without claiming that symmetry or pwO topology was
+  achieved. The script saves near-circular, QP,
+  and independently refined QP input/WOUT checkpoints; a failed QP gate stops
+  before target calibration. These checkpoints record scale changes made
+  during QP shaping; the pwO stage holds the QP reference scale.
+  `VMEX_PWO_QS_INPUT=input.pwO_optimized_qs` resumes
+  from a saved QP boundary. `VMEX_PWO_PENALTY=interval` makes the pwO stage
+  penalize aspect, local mean field, and local mirror only outside their final
+  acceptance intervals; `equality` is the default. Both families now hold local
+  mirror within 10% of the seed, so a canonical fit cannot improve by removing
+  most of its field variation. These switches also apply to
+  `pwO_optimization_finite_beta.py`.
+
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
   through the toroidal flux: at zero net current beta depends on PRES_SCALE /
   PHIEDGE^2 alone, so `PHIEDGE = pi a^2 sqrt(mu0 PRES_SCALE / TARGET_BETA)` with
