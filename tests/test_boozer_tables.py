@@ -618,7 +618,7 @@ def test_boozer_high_order_uses_the_symmetry_the_state_carries():
     """
     import numpy as np
 
-    from vmex.core.omnigenity import _tables_are_asymmetric
+    from vmex.core.strong_force import _carries_asymmetric_harmonics
 
     class _State:
         def __init__(self):
@@ -626,16 +626,16 @@ def test_boozer_high_order_uses_the_symmetry_the_state_carries():
             self.R_sin = np.zeros((3, 4))
             self.Z_cos = np.zeros((3, 4))
 
-    assert _tables_are_asymmetric(_State()) is False
+    assert _carries_asymmetric_harmonics(_State()) is False
 
     poloidal = _State()
     poloidal.R_sin[1, 2] = 1.0e-6
-    assert _tables_are_asymmetric(poloidal) is True
+    assert _carries_asymmetric_harmonics(poloidal) is True
 
     # either family is enough, at any magnitude
     vertical = _State()
     vertical.Z_cos[0, 0] = -2.0e-8
-    assert _tables_are_asymmetric(vertical) is True
+    assert _carries_asymmetric_harmonics(vertical) is True
 
 
 @pytest.mark.parametrize("deck", ["input.li383_low_res", "input.basic_non_stellsym_simsopt"])

@@ -170,16 +170,18 @@ monitor = opt.OptimizationMonitor()
 equilibrium = opt.solve_equilibrium(inp, verbose=not ci_smoke)
 seed = report("seed", equilibrium)
 
-# Every stage shares one resolution (MINIMUM_MPOL), so the residual and
-# Jacobian are compiled once, at the largest max_mode, and each stage frees
-# its own modes of that problem (problem.subproblem), as in QA_optimization.py.
+# Every stage shares one resolution, so one problem at the largest max_mode
+# serves them all: problem.subproblem() frees only the stage's harmonics and
+# every jitted residual and Jacobian is compiled once.
 mpol = max(max(MAX_MODES) + 2, MINIMUM_MPOL)
 inp = replace(inp, delt=0.5).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 problem = opt.VmecProblem.from_tuples(
     inp, objective_function_terms, max_mode=max(MAX_MODES), use_ess=True,
-    ess_alpha=ESS_ALPHA, restart_from=equilibrium, progress=True, evaluation_progress=True)
-monitor.problem, x = problem, problem.x0
+    ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+    progress=not ci_smoke, evaluation_progress=not ci_smoke)
+monitor.problem = problem
+x = problem.x0
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA + ballooning stage, max_mode = {max_mode} =====")
     stage = problem.subproblem(max_mode=max_mode, x=x)

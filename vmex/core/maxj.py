@@ -9,7 +9,7 @@ import numpy as np
 import jax.numpy as jnp
 
 from .bounce import bounce_action, bounce_action_from_boozer
-from .omnigenity import boozer_spectrum_state
+from .omnigenity import _ResidualTerm, boozer_spectrum_state
 from .optimize import quasi_isodynamic_residual
 from .qi import j_invariant_qi_residual_from_boozer
 from .statephysics import _as_1d
@@ -398,7 +398,7 @@ def qi_and_maximum_j_from_boozer(
     return {"boozer": booz, "qi": qi_out, "maximum_j": maxj_out}
 
 
-class JInvariantQIAndMaximumJResidual:
+class JInvariantQIAndMaximumJResidual(_ResidualTerm):
     """Joint J-invariance and maximum-J rows from one Boozer transform."""
 
     name = "j_invariant_qi_and_maximum_j"
@@ -448,30 +448,17 @@ class JInvariantQIAndMaximumJResidual:
             self.maxj_scale * out["maximum_j"]["residuals1d"],
         ])
 
-    def J(self, eq):
-        """Residual rows of a converged :class:`~vmex.core.optimize.Equilibrium`.
-
-        Also reachable as ``__call__`` and ``residuals``.
-        """
-        return self.residuals_state(eq.state, eq.runtime)
-
-    __call__ = J
-    residuals = J
-
-    def total(self, eq):
-        """Return the sum of squared residual rows of an equilibrium."""
-        rows = self(eq)
+    def total_state(self, state, rt):
+        """Return the sum of squared residual rows."""
+        rows = self.residuals_state(state, rt)
         return jnp.vdot(rows, rows)
 
 
-class ConstructedMaximumJResidual:
-    """Goodman constructed-field maximum-J continuation objective.
+class MaximumJResidual(_ResidualTerm):
+    """Composable maximum-J objective at fixed physical pitch."""
 
-    Use this smooth target to establish a favorable radial-action direction,
-    then certify the resulting actual field with :class:`MaximumJResidual`.
-    """
-
-    name = "constructed_maximum_j"
+    name = "maximum_j"
+    _from_boozer = staticmethod(maximum_j_residual_from_boozer)
 
     def __init__(
         self, surfaces, pitch, *, weights=None, mboz=16, nboz=16,
@@ -491,11 +478,9 @@ class ConstructedMaximumJResidual:
         self.residual_options = residual_options
 
     def compute_state(self, state, rt):
-        """Return constructed-field actions and radial-slope diagnostics."""
-        booz = boozer_spectrum_state(
-            state, rt, surfaces=self.surfaces, mboz=self.mboz,
-            nboz=self.nboz, oversample=self.oversample)
-        out = constructed_maximum_j_residual_from_boozer(
+        """Return the residuals, actions, and radial-slope diagnostics."""
+        booz = self._boozer(state, rt)
+        out = self._from_boozer(
             bmnc_b=booz["bmnc_b"], bmns_b=booz.get("bmns_b"),
             xm_b=booz["xm_b"], xn_b=booz["xn_b"],
             iota_b=booz["iota_b"], G_b=booz["G_b"], I_b=booz["I_b"],
@@ -504,85 +489,13 @@ class ConstructedMaximumJResidual:
         out.update(booz)
         return out
 
-    def residuals_state(self, state, rt):
-        """Return the 1-D residual rows of :meth:`compute_state`."""
-        return self.compute_state(state, rt)["residuals1d"]
 
-    def total_state(self, state, rt):
-        """Return the scalar ``total`` of :meth:`compute_state`."""
-        return self.compute_state(state, rt)["total"]
+class ConstructedMaximumJResidual(MaximumJResidual):
+    """Goodman constructed-field maximum-J continuation objective.
 
-    def J(self, eq):
-        """Residual rows of a converged :class:`~vmex.core.optimize.Equilibrium`.
+    Use this smooth target to establish a favorable radial-action direction,
+    then certify the resulting actual field with :class:`MaximumJResidual`.
+    """
 
-        Also reachable as ``__call__`` and ``residuals``.
-        """
-        return self.residuals_state(eq.state, eq.runtime)
-
-    __call__ = J
-    residuals = J
-
-    def total(self, eq):
-        """Scalar cost of a converged :class:`~vmex.core.optimize.Equilibrium`."""
-        return self.total_state(eq.state, eq.runtime)
-
-
-class MaximumJResidual:
-    """Composable maximum-J objective at fixed physical pitch."""
-
-    name = "maximum_j"
-
-    def __init__(
-        self, surfaces, pitch, *, weights=None, mboz=16, nboz=16,
-        oversample=2, **residual_options,
-    ):
-        self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
-        self.pitch = np.atleast_1d(np.asarray(pitch, dtype=float))
-        if (self.surfaces.size < 2 or np.any(np.diff(self.surfaces) <= 0.0)
-                or self.pitch.size == 0 or not np.all(np.isfinite(self.pitch))
-                or np.any(self.pitch <= 0.0)):
-            raise ValueError(
-                "increasing surfaces and positive finite physical pitch are required")
-        self.weights = None if weights is None else np.asarray(weights, dtype=float)
-        if self.weights is not None and self.weights.shape != self.surfaces.shape:
-            raise ValueError("weights must have the same length as surfaces")
-        self.mboz, self.nboz = int(mboz), int(nboz)
-        self.oversample = int(oversample)
-        self.residual_options = residual_options
-
-    def compute_state(self, state, rt):
-        """Return maximum-J residuals, actions, matches, and flux slopes."""
-        booz = boozer_spectrum_state(
-            state, rt, surfaces=self.surfaces, mboz=self.mboz,
-            nboz=self.nboz, oversample=self.oversample)
-        out = maximum_j_residual_from_boozer(
-            bmnc_b=booz["bmnc_b"], bmns_b=booz.get("bmns_b"),
-            xm_b=booz["xm_b"], xn_b=booz["xn_b"],
-            iota_b=booz["iota_b"], G_b=booz["G_b"], I_b=booz["I_b"],
-            nfp=booz["nfp"], psi_b=booz["psi_b"],
-            psi_edge=booz["psi_edge"], pitch=self.pitch,
-            weights=self.weights, **self.residual_options)
-        out.update(booz)
-        return out
-
-    def residuals_state(self, state, rt):
-        """Return the 1-D residual rows of :meth:`compute_state`."""
-        return self.compute_state(state, rt)["residuals1d"]
-
-    def total_state(self, state, rt):
-        """Return the scalar ``total`` of :meth:`compute_state`."""
-        return self.compute_state(state, rt)["total"]
-
-    def J(self, eq):
-        """Residual rows of a converged :class:`~vmex.core.optimize.Equilibrium`.
-
-        Also reachable as ``__call__`` and ``residuals``.
-        """
-        return self.residuals_state(eq.state, eq.runtime)
-
-    __call__ = J
-    residuals = J
-
-    def total(self, eq):
-        """Scalar cost of a converged :class:`~vmex.core.optimize.Equilibrium`."""
-        return self.total_state(eq.state, eq.runtime)
+    name = "constructed_maximum_j"
+    _from_boozer = staticmethod(constructed_maximum_j_residual_from_boozer)

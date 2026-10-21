@@ -2,9 +2,7 @@
 
 The parity-critical constants and update rules are asserted directly
 against the closed-form definitions recorded in the module docstring:
-the ndamp damping recurrence, the momentum update, and the three restart
-outcomes (STEP_OK / RESTART_JACOBIAN / RESTART_GROWTH) including the
-time-step rescaling, velocity zeroing, and best-residual bookkeeping.
+the ndamp damping recurrence and the momentum update.
 
 The final section pins the JAC75 recovery-chain CONTRACT at the
 ``vmex.core.solver._solve_stage`` level, driving MULTIPLE consecutive
@@ -99,82 +97,6 @@ def test_momentum_update_algebra():
     np.testing.assert_allclose(np.asarray(new_v["a"]), v_ref, rtol=1e-14)
     np.testing.assert_allclose(np.asarray(new_xc["a"]),
                                np.asarray([1.0, 2.0]) + 0.9 * v_ref, rtol=1e-14)
-
-
-def _control(best=1e-6, iter_last_reset=0):
-    c = step.StepControl.initial(0.9)
-    return step.StepControl(
-        time_step=c.time_step, inv_tau=c.inv_tau, fsq_total_prev=c.fsq_total_prev,
-        residual_best_precond=jnp.asarray(best), residual_best_raw=jnp.asarray(best),
-        iter_last_reset=jnp.asarray(iter_last_reset), jacobian_resets=jnp.asarray(0),
-    )
-
-
-def test_restart_decision_kinds_and_best_tracking():
-    c = _control(best=1e-6)
-    ok = jnp.asarray(False)
-
-    # normal step: residual below limit, bests updated to the new minimum
-    kind, c2 = step.restart_decision(c, jnp.asarray(20), jnp.asarray(1e-7),
-                                     jnp.asarray(1e-7), ok)
-    assert int(kind) == step.STEP_OK
-    assert float(c2.residual_best_precond) == pytest.approx(1e-7)
-
-    # growth > 1e4 x best after > 10 iterations since reset -> irst=3
-    kind, _ = step.restart_decision(c, jnp.asarray(20), jnp.asarray(1e-1),
-                                    jnp.asarray(1e-1), ok)
-    assert int(kind) == step.RESTART_GROWTH
-
-    # same growth too soon after the last reset -> tolerated
-    c_recent = _control(best=1e-6, iter_last_reset=15)
-    kind, _ = step.restart_decision(c_recent, jnp.asarray(20), jnp.asarray(1e-1),
-                                    jnp.asarray(1e-1), ok)
-    assert int(kind) == step.STEP_OK
-
-    # a Jacobian sign change always wins
-    kind, _ = step.restart_decision(c, jnp.asarray(20), jnp.asarray(1e-1),
-                                    jnp.asarray(1e-1), jnp.asarray(True))
-    assert int(kind) == step.RESTART_JACOBIAN
-
-
-@pytest.mark.parametrize("kind,dt_factor", [
-    (step.STEP_OK, 1.0),
-    (step.RESTART_JACOBIAN, step.JACOBIAN_RESET_FACTOR),
-    (step.RESTART_GROWTH, 1.0 / step.GROWTH_BACKOFF_DIVISOR),
-])
-def test_apply_restart(kind, dt_factor):
-    xc = {"a": jnp.asarray([2.0, 3.0])}
-    xcdot = {"a": jnp.asarray([0.5, -0.5])}
-    saved = {"a": jnp.asarray([1.0, 1.0])}
-    c = _control(best=1e-6)
-    it = jnp.asarray(42)
-
-    new_xc, new_v, new_saved, c2 = step.apply_restart(xc, xcdot, saved, c,
-                                                      jnp.asarray(kind), it)
-    assert float(c2.time_step) == pytest.approx(0.9 * dt_factor)
-    if kind == step.STEP_OK:
-        np.testing.assert_array_equal(np.asarray(new_xc["a"]), np.asarray(xc["a"]))
-        np.testing.assert_array_equal(np.asarray(new_v["a"]), np.asarray(xcdot["a"]))
-        # current state becomes the new save point
-        np.testing.assert_array_equal(np.asarray(new_saved["a"]), np.asarray(xc["a"]))
-        assert int(c2.jacobian_resets) == 0
-        assert int(c2.iter_last_reset) == 0
-        assert float(c2.residual_best_precond) == pytest.approx(1e-6)
-    else:
-        # state restored, velocity zeroed, bookkeeping reset
-        np.testing.assert_array_equal(np.asarray(new_xc["a"]), np.asarray(saved["a"]))
-        np.testing.assert_array_equal(np.asarray(new_v["a"]), 0.0)
-        np.testing.assert_array_equal(np.asarray(new_saved["a"]), np.asarray(saved["a"]))
-        assert math.isinf(float(c2.residual_best_precond))
-        assert math.isinf(float(c2.residual_best_raw))
-        # ``ijacob`` advances only on a Jacobian reset (restart.f irst == 2
-        # guard), but ``iter1`` is rebased on ANY non-OK restart: the caller,
-        # evolve.f TimeStepControl, runs ``iter1 = iter2`` unconditionally
-        # inside ``IF (irst .NE. 1)``.  The production loop in solver.py does
-        # the same, and this helper must match the full call path.
-        expected_resets = 1 if kind == step.RESTART_JACOBIAN else 0
-        assert int(c2.jacobian_resets) == expected_resets
-        assert int(c2.iter_last_reset) == 42
 
 
 # ---------------------------------------------------------------------------

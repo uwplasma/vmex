@@ -211,27 +211,6 @@ def _boozer_kernel_state(state, rt, *, rows, s_half, mboz, nboz, oversample,
     }
 
 
-def _tables_are_asymmetric(state) -> bool:
-    """True when a high-order state carries stellarator-asymmetric harmonics.
-
-    ``asym`` decides the poloidal integration range of the Boozer transform
-    (half period when symmetric, full when not), while the sine families are
-    handed to the kernel either way.  Requesting ``asym=False`` for a state
-    that carries them therefore integrates asymmetric geometry over a half
-    period and returns a spectrum for a plasma that does not exist.  Traced
-    arrays cannot be inspected, so there the caller's declaration stands.
-    """
-    import jax
-
-    for family in (state.R_sin, state.Z_cos):
-        array = jnp.asarray(family)
-        if isinstance(array, jax.core.Tracer):
-            continue
-        if bool(np.any(np.asarray(array) != 0.0)):
-            return True
-    return False
-
-
 def boozer_spectrum_high_order(
     state,
     *,
@@ -319,7 +298,9 @@ def boozer_spectrum_high_order(
     surface_values = np.atleast_1d(np.asarray(surfaces, dtype=float))
     if np.any((surface_values <= 0.0) | (surface_values > 1.0)):
         raise ValueError("surfaces must satisfy 0 < s <= 1")
-    asym = bool(asym) or _tables_are_asymmetric(state)
+    from .strong_force import _carries_asymmetric_harmonics
+
+    asym = bool(asym) or _carries_asymmetric_harmonics(state)
     tables = [
         high_order_boozer_input_tables(
             state,
@@ -618,7 +599,44 @@ def omnigenity_residual(
 # ---------------------------------------------------------------------------
 
 
-class QIResidual:
+class _ResidualTerm:
+    """Least-squares objective-term contract shared by the residual classes.
+
+    A subclass defines ``compute_state(state, rt)`` returning a dict with
+    ``"residuals1d"`` and ``"total"``, or overrides :meth:`residuals_state`
+    and :meth:`total_state`.  Boozer-spectrum terms set ``surfaces``,
+    ``mboz``, ``nboz`` and ``oversample`` and transform with ``_boozer``.
+    Used by :class:`QIResidual`, the maximum-J terms and ``GammaC``.
+    """
+
+    def _boozer(self, state, rt):
+        return boozer_spectrum_state(state, rt, surfaces=self.surfaces, mboz=self.mboz,
+                                     nboz=self.nboz, oversample=self.oversample)
+
+    def residuals_state(self, state, rt):
+        """Return the 1-D residual rows of ``compute_state``."""
+        return self.compute_state(state, rt)["residuals1d"]
+
+    def total_state(self, state, rt):
+        """Return the scalar ``total`` of ``compute_state``."""
+        return self.compute_state(state, rt)["total"]
+
+    def J(self, eq):
+        """Residual rows of a converged :class:`~vmex.core.optimize.Equilibrium`.
+
+        Also reachable as ``__call__`` and ``residuals``.
+        """
+        return self.residuals_state(eq.state, eq.runtime)
+
+    __call__ = J
+    residuals = J
+
+    def total(self, eq):
+        """Scalar cost of a converged :class:`~vmex.core.optimize.Equilibrium`."""
+        return self.total_state(eq.state, eq.runtime)
+
+
+class QIResidual(_ResidualTerm):
     """Traceable smooth quasi-isodynamic surrogate (module docstring).
 
     Composition of :func:`boozer_spectrum_state` (traceable Boozer ``|B|``
@@ -698,9 +716,7 @@ class QIResidual:
 
     def compute_state(self, state: SpectralState, rt: SolverRuntime) -> dict[str, Array]:
         """Full diagnostics dict (Boozer spectrum + residual pieces)."""
-        booz = boozer_spectrum_state(
-            state, rt, surfaces=self.surfaces, mboz=self.mboz, nboz=self.nboz,
-            oversample=self.oversample)
+        booz = self._boozer(state, rt)
         out = omnigenity_residual(
             bmnc_b=booz["bmnc_b"], bmns_b=booz.get("bmns_b"),
             xm_b=booz["xm_b"], xn_b=booz["xn_b"],
@@ -710,27 +726,3 @@ class QIResidual:
             extremum_weight=self.extremum_weight, squash_weight=self.squash_weight)
         out.update(booz)
         return out
-
-    def residuals_state(self, state: SpectralState, rt: SolverRuntime) -> jnp.ndarray:
-        """Traceable flat residual vector with ``sum(r**2) = total_state``."""
-        return self.compute_state(state, rt)["residuals1d"]
-
-    def total_state(self, state: SpectralState, rt: SolverRuntime) -> Array:
-        """Traceable scalar omnigenity objective ``sum(residuals**2)``."""
-        return self.compute_state(state, rt)["total"]
-
-    # -- Equilibrium entry points (jac=None objective term) -------------------
-
-    def J(self, eq) -> jnp.ndarray:
-        """Objective-term entry point for ``least_squares`` (residual vector)."""
-        return self.residuals_state(eq.state, eq.runtime)
-
-    __call__ = J
-
-    def residuals(self, eq) -> jnp.ndarray:
-        """Alias of :meth:`J` (simsopt-style vocabulary)."""
-        return self.J(eq)
-
-    def total(self, eq) -> Array:
-        """Scalar omnigenity objective of a converged equilibrium."""
-        return self.total_state(eq.state, eq.runtime)

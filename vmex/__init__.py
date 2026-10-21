@@ -29,6 +29,9 @@ links to the module that documents it.
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit` /
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit_status`
   — coupled NESTOR/VMEC implicit derivative
+- :func:`~vmex.core.newton.solve_free_boundary_newton` →
+  :class:`~vmex.core.newton.NewtonResult` — opt-in Newton polish of a
+  free-boundary equilibrium on its coupled root
 - :func:`~vmex.core.restart.state_from_wout` /
   :func:`~vmex.core.restart.restart_state` — hot restart from any wout
   (also ``solve*(..., restart_from=...)``)
@@ -223,6 +226,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     "solve_phiedge": (".core.freeboundary", "solve_phiedge"),
     "phiedge_root": (".core.freeboundary_implicit", "phiedge_root"),
+    "solve_free_boundary_newton": (".core.newton", "solve_free_boundary_newton"),
+    "NewtonResult": (".core.newton", "NewtonResult"),
     "make_free_boundary_config": (
         ".core.freeboundary_implicit", "make_free_boundary_config"),
     "solve_free_boundary_implicit": (
@@ -340,16 +345,26 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
 __all__ = ["__version__", *sorted(_LAZY_ATTRS)]
 
 
-def __getattr__(name: str):
-    entry = _LAZY_ATTRS.get(name)
-    if entry is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attribute = entry
-    module = _import_module(module_name, __name__)
-    value = module if attribute is None else getattr(module, attribute)
-    globals()[name] = value
-    return value
+def _lazy_exports(package: str, table: dict, namespace: dict):
+    """PEP 562 ``(__getattr__, __dir__)`` resolving ``table`` on first access.
+
+    ``table`` maps a public name to ``(relative module, attribute)``; an
+    attribute of ``None`` exports the module itself.  Resolved values are
+    cached in ``namespace`` so later lookups bypass ``__getattr__``.
+    """
+
+    def __getattr__(name: str):
+        entry = table.get(name)
+        if entry is None:
+            raise AttributeError(f"module {package!r} has no attribute {name!r}")
+        module = _import_module(entry[0], package)
+        namespace[name] = value = module if entry[1] is None else getattr(module, entry[1])
+        return value
+
+    def __dir__():
+        return sorted(set(namespace) | set(table))
+
+    return __getattr__, __dir__
 
 
-def __dir__():
-    return sorted(set(globals()) | set(_LAZY_ATTRS))
+__getattr__, __dir__ = _lazy_exports(__name__, _LAZY_ATTRS, globals())
