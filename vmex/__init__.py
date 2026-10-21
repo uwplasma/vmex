@@ -20,6 +20,7 @@ links to the module that documents it.
 - :func:`~vmex.core.multigrid.solve_file` — run a deck the way the CLI does
   (directives honored, ``wout_<case>.nc`` written)
 - :func:`~vmex.core.freeboundary.solve_free_boundary` — NESTOR free boundary
+- :func:`~vmex.core.freeboundary.relax_free_boundary_constraint` — remove the constraint bias of a free-boundary LCFS
 - :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
 - :func:`~vmex.core.freeboundary.solve_phiedge` — PHIEDGE whose free-boundary
   LCFS meets a target outboard radius or volume
