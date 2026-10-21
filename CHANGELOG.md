@@ -7,6 +7,7 @@ record under `benchmarks/` names the revision it was measured at.
 ## Unreleased
 
 - Opt-in free-boundary `PositionControl` (deck `LPOSITION_CONTROL`): feedback vertical field holds the axis radius.
+- Opt-in `vmex.solve_free_boundary_newton`: Krylov Newton anchoring on the coupled free-boundary root.
 
 ## 0.11.11 - 2026-10-18
 
