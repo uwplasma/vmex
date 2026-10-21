@@ -364,12 +364,16 @@ are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/
 
 Off by default, so VMEC2000 iteration parity is kept:
 
-- Newton anchoring puts a converged free-boundary state on the exact root of the coupled
-  plasma-vacuum residual ([how-to](https://vmex.readthedocs.io/en/latest/howto/free-boundary-newton.html)).
-- Position control (`LPOSITION_CONTROL`) adds a feedback vertical field that holds the magnetic axis at a
-  target radius ([explanation](https://vmex.readthedocs.io/en/latest/explanation/position-control.html)).
-- `lambda_m0_floor=1e-3` adds a radial preconditioner for the m = 0 lambda force and cuts iterations
-  by up to 9% ([iteration](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
+- Newton anchoring (`vmex.solve_free_boundary_newton`) puts a converged free-boundary state on the
+  exact root of the coupled plasma-vacuum residual
+  ([how-to](https://vmex.readthedocs.io/en/latest/howto/free-boundary-newton.html)).
+- Position control (`LPOSITION_CONTROL = T` or `position_control=vj.PositionControl(target=...)`) is a
+  PID law on the axis radius that sets a uniform vertical field to hold a current-carrying
+  free-boundary plasma in place. Example: `python examples/free_boundary_position_control.py`
+  ([explanation](https://vmex.readthedocs.io/en/latest/explanation/position-control.html)).
+- `solve_multigrid(inp, lambda_m0_floor=1e-3)` adds a radial preconditioner for the m = 0 lambda
+  force of fixed-boundary stellarators converged to a very small `ftol`; iterations fall by up to 9%
+  ([iteration](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
 
 ## Tracing from the axis to the wall
 
@@ -582,8 +586,6 @@ results in input order, each identical to solving that input alone; `workers=1` 
 baseline. Set worker and device budgets with the
 [ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
 kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
-
-For fixed-boundary stellarators converged to a very small `ftol`, `solve_multigrid(inp, lambda_m0_floor=1e-3)` adds a radial preconditioner for the $m=0$ $\lambda$ force ([when it helps](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
 
 ## Running the examples
 
