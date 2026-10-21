@@ -501,7 +501,7 @@ takes about a minute.
 `python examples/prescribed_current_polishing.py` takes 46 s on a laptop (9 s for the solve, 16 s
 for the polish).
 
-<img src="docs/_static/figures/readme_polish_stellarator.webp" width="560" alt="Force over pressure gradient of the finite-beta QA stellarator before and after polishing">
+<img src="docs/_static/figures/readme_polish_stellarator.webp" alt="Force over pressure gradient of the finite-beta QA stellarator before and after polishing">
 
 - The RMS force relative to the pressure gradient falls 12× near the axis, 9× in the bulk and
   20× at the edge on a held-out grid.

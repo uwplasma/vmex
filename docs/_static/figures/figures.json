@@ -713,8 +713,8 @@
     },
     {
       "path": "docs/_static/figures/readme_polish_stellarator.webp",
-      "bytes": 8254,
-      "sha256": "02382ccc3853933a206a97b1b57e6c1156907bd46e85f7a6250bd3bc50e4cc8a",
+      "bytes": 30648,
+      "sha256": "63582a134fd1c4aa27c63335fa8bc0c88b0fac2174e66186d5a9bd90b73ad61f",
       "generator": "examples/prescribed_current_polishing.py",
       "command": "python examples/prescribed_current_polishing.py",
       "inputs": [
