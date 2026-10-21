@@ -104,6 +104,7 @@ __all__ = [
     "FreeBoundaryState",
     "VacuumOutput",
     "boundary_from_coefficients",
+    "relax_free_boundary_constraint",
     "solve_free_boundary",
 ]
 
@@ -2183,6 +2184,37 @@ def solve_free_boundary(
             position_control=position_control,
         )
     return stage.result
+
+
+def relax_free_boundary_constraint(
+    inp: VmecInput,
+    result: SolveResult,
+    *,
+    external_field: MgridField | None = None,
+    mgrid_path: str | Path | None = None,
+    iterations: int = 5000,
+    **solve_kwargs: Any,
+) -> SolveResult:
+    """Continue a converged free-boundary solve with the spectral constraint off.
+
+    The spectral-condensation force (``tcon``, ``bcovar.f``) is tangential in
+    real space, but its ``m (m - 1)`` mode filter gives it a normal part, so a
+    converged free-boundary equilibrium balances a small constraint force
+    instead of the vacuum pressure, and its LCFS is not a flux surface of the
+    coil field.  VMEC2000 and VMEC++ share this.  On the Landreman-Paul QA
+    coils at ``ntor = 12``, the largest ``|B|`` error against Biot-Savart at
+    ``s = 0.25`` is 2.6e-4 (``mpol = 8``) and 1.3e-3 (``mpol = 7``), and it does
+    not fall with ``ns``, ``mpol``, the NESTOR grid or the mgrid.  Restarting
+    from ``result.state`` with ``tcon0 = 0`` for 5,000 iterations brings both
+    to 3e-5.  The force residual stays near 1e-10, since nothing fixes the
+    poloidal angle any more, so the result reports ``converged = False``;
+    judge it by the field, not by ``ftol``.  ``solve_kwargs`` go to
+    :func:`solve_free_boundary`.
+    """
+    return solve_free_boundary(
+        inp, mgrid_path=mgrid_path, external_field=external_field,
+        initial_state=result.state, tcon0=0.0, max_iterations=int(iterations),
+        error_on_no_convergence=False, **solve_kwargs)
 
 
 def _phiedge_metric(metric: Any):

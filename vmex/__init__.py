@@ -226,6 +226,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "solve_multigrid": (".core.multigrid", "solve_multigrid"),
     "solve_free_boundary_multigrid": (
         ".core.multigrid", "solve_free_boundary_multigrid"),
+    "relax_free_boundary_constraint": (".core.freeboundary", "relax_free_boundary_constraint"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     "solve_phiedge": (".core.freeboundary", "solve_phiedge"),
     "phiedge_root": (".core.freeboundary_implicit", "phiedge_root"),

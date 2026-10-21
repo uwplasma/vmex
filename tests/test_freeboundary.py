@@ -813,3 +813,22 @@ def test_deck_nfp_must_match_the_mgrid_nfp():
     FB.free_boundary_resolution(inp, field)
     with pytest.raises(VmecInputError, match="NFP"):
         FB.free_boundary_resolution(replace(inp, nfp=2 * int(inp.nfp)), field)
+
+
+def test_relax_free_boundary_constraint_restarts_without_the_constraint(monkeypatch):
+    """The relaxation hot-restarts the converged state with tcon0 = 0."""
+    calls = {}
+
+    def fake_solve(inp, **kwargs):
+        calls.update(kwargs, inp=inp)
+        return "relaxed"
+
+    monkeypatch.setattr(FB, "solve_free_boundary", fake_solve)
+    state, field = object(), object()
+    result = dataclasses.make_dataclass("R", ["state"])(state)
+    out = FB.relax_free_boundary_constraint("deck", result, external_field=field,
+                                            iterations=123, verbose=True)
+    assert out == "relaxed" and calls["inp"] == "deck"
+    assert calls["initial_state"] is state and calls["external_field"] is field
+    assert calls["tcon0"] == 0.0 and calls["max_iterations"] == 123
+    assert calls["error_on_no_convergence"] is False and calls["verbose"] is True

@@ -244,8 +244,9 @@ def truncation_message(truncation: float, silence: str) -> str:
     """The warning for a spectrum whose :func:`spectral_truncation` is ``truncation``."""
     return (f"Equilibrium spectrum truncated: edge modes (m = mpol - 1 or |n| = ntor) are {truncation:.1e} "
             f"of m = 1 (threshold {RESOLUTION_TOLERANCE:g}); alpha loss fractions can be several times too "
-            "high. Re-solve with larger mpol and ntor (try mpol = ntor >= 6) and check that the loss fraction "
-            f"changes by less than its Monte Carlo error, or pass {silence} to silence.")
+            "high. Re-solve with larger mpol and ntor (try mpol = ntor >= 6; ntor must also resolve the coil "
+            "ripple), relax a free-boundary solve with relax_free_boundary_constraint, and compare |B| with the "
+            f"coils (docs/howto/trace-resolution.md), or pass {silence} to silence.")
 
 
 def spectral_truncation(wout) -> float:
