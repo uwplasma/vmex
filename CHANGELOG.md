@@ -4,6 +4,10 @@ Release notes are mirrored from the GitHub releases, which carry each release
 in full. A number appears here only where a committed artifact backs it; each
 record under `benchmarks/` names the revision it was measured at.
 
+## Unreleased
+
+- Opt-in `vmex.solve_free_boundary_newton`: Krylov Newton anchoring on the coupled free-boundary root.
+
 ## 0.11.11 - 2026-10-18
 
 - **mgrid scaling matches VMEC2000.** EXTCUR multiplies every coil table; VMEX

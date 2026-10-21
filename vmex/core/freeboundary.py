@@ -277,6 +277,7 @@ def _vacuum_output(fb: FreeBoundaryState, basis: VacuumBasis) -> VacuumOutput | 
         bsubv=np.asarray(bsubv, dtype=float).reshape(shape).copy(),
         bsupu=np.asarray(bsupu, dtype=float).reshape(shape).copy(),
         bsupv=np.asarray(bsupv, dtype=float).reshape(shape).copy(),
+        delbsq=float(fb.delbsq),
     )
 
 

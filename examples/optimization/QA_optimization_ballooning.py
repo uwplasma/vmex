@@ -169,23 +169,29 @@ monitor = opt.OptimizationMonitor()
 equilibrium = opt.solve_equilibrium(inp, verbose=not ci_smoke)
 seed = report("seed", equilibrium)
 
+# Every stage shares one resolution, so one problem at the largest max_mode
+# serves them all: problem.subproblem() frees only the stage's harmonics and
+# every jitted residual and Jacobian is compiled once.
+mpol = max(max(MAX_MODES) + 2, MINIMUM_MPOL)
+inp = replace(inp, delt=0.5).change_resolution(
+    mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+problem = opt.VmecProblem.from_tuples(
+    inp, objective_function_terms, max_mode=max(MAX_MODES), use_ess=True,
+    ess_alpha=ESS_ALPHA, restart_from=equilibrium)
+monitor.problem = problem
+x = problem.x0
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QA + ballooning stage, max_mode = {max_mode} =====")
-    mpol = max(max_mode + 2, MINIMUM_MPOL)
-    inp = replace(inp, delt=0.5).change_resolution(
-        mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-    problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms, max_mode=max_mode, use_ess=True,
-        ess_alpha=ESS_ALPHA, restart_from=equilibrium)
-    monitor.problem = problem
-    step = PARAMETER_STEP * problem.scales
+    stage = problem.subproblem(max_mode=max_mode, x=x)
+    step = PARAMETER_STEP * stage.scales
     result = least_squares(
-        problem.residual, problem.x0, jac=problem.residual_jac, x_scale=step,
-        bounds=(problem.x0 - MAX_PARAMETER_CHANGE * step,
-                problem.x0 + MAX_PARAMETER_CHANGE * step),
+        stage.residual, stage.x0, jac=stage.residual_jac, x_scale=step,
+        bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
+                stage.x0 + MAX_PARAMETER_CHANGE * step),
         max_nfev=max_nfev, ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
-    inp = problem.input_from_x(result.x)
-    equilibrium = problem.equilibrium_from_x(result.x)
+    x = stage.embed(result.x)
+    inp = problem.input_from_x(x)
+    equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)
 
 ### Check the result ##########################################################
