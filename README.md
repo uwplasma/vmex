@@ -92,24 +92,28 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `gkx` | 2.5.0 | `vmex[turbulence]` | `pip install "gkx>=2.5.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
-Installing into an environment that already holds older packages is supported: every floor above
-(and the floors those packages declare, such as solvax's `equinox>=0.13.3`) upgrades an older copy
-instead of keeping it, and a nightly CI lane installs `vmex[all]` over a stale environment to keep it
-so. DESC (`desc-opt`, which requires `jax<0.10`) and other packages that cap JAX below 0.10 need
-their own environment: `vmex[turbulence]` and `vmex[all]` require `jax>=0.10.1`, so pip either
-upgrades JAX past their cap (and warns) or cannot resolve.
+### Existing environments
 
-NESTOR free boundary from an MGRID table needs no extra. A feature whose package is missing raises
-an `ImportError` that names the package to install; the core solver never imports them.
+- Installing over an environment with older packages is supported. Every floor above, and the
+  floors those packages declare (such as solvax's `equinox>=0.13.3`), upgrades an older copy. A
+  nightly CI lane installs `vmex[all]` over a stale environment to keep this true.
+- DESC (`desc-opt`) requires `jax<0.10`, so it needs its own environment. The same holds for other
+  packages that cap JAX below 0.10: `vmex[turbulence]` and `vmex[all]` require `jax>=0.10.1`, so pip
+  either upgrades JAX past their cap (with a warning) or cannot resolve.
+- NESTOR free boundary from an MGRID table needs no extra.
+- A feature whose package is missing raises an `ImportError` that names the package to install.
+  The core solver never imports the optional packages.
 
-### GPU, conda-forge and source installs
+### GPU and conda-forge
 
-VMEX does not force a GPU build of JAX, because the right wheel depends on the platform and the
-CUDA or ROCm version. Install VMEX, then JAX for the accelerator following the
-[JAX installation guide](https://docs.jax.dev/en/latest/installation.html) (for example
-`pip install -U "jax[cuda13]"`), and read the [VMEX GPU guide](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html)
-before choosing a device. `conda install --channel conda-forge vmex` installs the core package; its
-feedstock may lag PyPI, and the extras above come from pip. For development:
+- VMEX does not force a GPU build of JAX: the right wheel depends on the platform and the CUDA or
+  ROCm version. Install VMEX, then JAX for your accelerator, for example `pip install -U "jax[cuda13]"`.
+  See the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html) and the
+  [VMEX GPU guide](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html).
+- `conda install --channel conda-forge vmex` installs the core package. The feedstock may lag PyPI,
+  and the extras come from pip.
+
+### From source
 
 ```console
 git clone --filter=blob:none https://github.com/uwplasma/vmex
@@ -117,19 +121,19 @@ cd vmex
 pip install -e ".[all,dev]"
 ```
 
-`--filter=blob:none` fetches old file versions only on demand, so the clone is
-about 8.5 MB instead of 45 MB with the full history still available.
+`--filter=blob:none` fetches old file versions on demand: the clone is about 8.5 MB instead of
+45 MB, and the full history stays available.
 
 ### JAX settings
 
-`import vmex` does not change `jax.config`. VMEX's settings (float64, a persistent compilation
-cache, synchronous CPU dispatch, quiet JAX logging) are applied by `vmex.configure()`. The `vmex`
-command calls it, and so does the first import of `vmex.core` or `vmex.mirror`, unless you called it
-first or set `JAX_ENABLE_X64` yourself. The solver needs float64 and stops with a message if it is
-off. In a script that also runs other JAX code, call `vmex.configure()` once at the top.
+- `import vmex` does not change `jax.config`. `vmex.configure()` applies VMEX's settings: float64,
+  a persistent compilation cache, synchronous CPU dispatch and quiet JAX logging.
+- The `vmex` command calls it, and so does the first import of `vmex.core` or `vmex.mirror`, unless
+  you called it first or set `JAX_ENABLE_X64` yourself.
+- The solver needs float64 and stops with a message if it is off.
+- In a script that also runs other JAX code, call `vmex.configure()` once at the top.
 
-The [installation guide](https://vmex.readthedocs.io/en/latest/installation.html) covers float64,
-WSL2 and dependency details.
+More on float64, WSL2 and dependencies: [installation guide](https://vmex.readthedocs.io/en/latest/installation.html).
 
 ## Quick start
 
@@ -293,20 +297,25 @@ coupled plasma-vacuum residual, where its gradient is exact.
 
 ## Open mirrors and stellarator-mirror hybrids
 
-The same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, solved by
-minimizing the MHD energy. What changes is the coordinate system. A tokamak or stellarator has one
-non-periodic coordinate (the flux label `s`) and two periodic angles. An open mirror uses
-`(s, theta, xi)`: two non-periodic coordinates, the flux label `s` in `[0, 1]` and the axial
-coordinate `xi` in `[-1, 1]` between two end cuts, and one periodic angle `theta`. So `theta` keeps
-Fourier modes, `xi` gets clamped cubic B-splines instead of toroidal modes, and the end cuts
-`xi = ±1` become boundary conditions: their nested surfaces are prescribed and flux passes through
-them, while the free boundary couples the side surface `s = 1` to an open exterior vacuum problem.
-The field is divergence-free by construction, `sqrt(g) B^theta = I'(s) - d(lambda)/d(xi)`,
-`sqrt(g) B^xi = Psi'(s) + d(lambda)/d(theta)`, `B^s = 0`, which is the Clebsch form
-`B = grad Psi x grad alpha` with field-line label `alpha = theta + lambda/Psi' - (I'/Psi') xi`
-([mirror geometry](https://vmex.readthedocs.io/en/latest/explanation/mirror-geometry.html)). A
-stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns and uses a
-periodic spline along its length.
+VMEX solves the same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, by
+minimizing the MHD energy. Only the coordinates change.
+
+| | Tokamak or stellarator | Open mirror |
+|---|---|---|
+| Coordinates | `s` and two periodic angles | `(s, theta, xi)` |
+| Radial / axial | `s` in `[0, 1]` | `s` in `[0, 1]` and `xi` in `[-1, 1]` between two end cuts |
+| Periodic angle | two | one (`theta`, Fourier modes) |
+| Axial basis | toroidal Fourier modes | clamped cubic B-splines in `xi` |
+
+- The end cuts `xi = ±1` are boundary conditions: their nested surfaces are prescribed and flux
+  passes through them.
+- The free boundary couples the side surface `s = 1` to an open exterior vacuum problem.
+- The field is divergence-free by construction, `sqrt(g) B^theta = I'(s) - d(lambda)/d(xi)`,
+  `sqrt(g) B^xi = Psi'(s) + d(lambda)/d(theta)`, `B^s = 0`. This is the Clebsch form
+  `B = grad Psi x grad alpha` with `alpha = theta + lambda/Psi' - (I'/Psi') xi`
+  ([mirror geometry](https://vmex.readthedocs.io/en/latest/explanation/mirror-geometry.html)).
+- A stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns and
+  uses a periodic spline along its length.
 
 ```console
 vmex examples/data/input.mirror_two_coil_free_boundary --plot   # a &MIRROR deck, writes mout_*.nc
@@ -350,6 +359,17 @@ outside the plasma: an island chain about 0.9 cm wide opens from the LCFS, close
 surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX from `examples/data` alone
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+
+### Opt-in solver options
+
+Off by default, so VMEC2000 iteration parity is kept:
+
+- Newton anchoring puts a converged free-boundary state on the exact root of the coupled
+  plasma-vacuum residual ([how-to](https://vmex.readthedocs.io/en/latest/howto/free-boundary-newton.html)).
+- Position control (`LPOSITION_CONTROL`) adds a feedback vertical field that holds the magnetic axis at a
+  target radius ([explanation](https://vmex.readthedocs.io/en/latest/explanation/position-control.html)).
+- `lambda_m0_floor=1e-3` adds a radial preconditioner for the m = 0 lambda force and cuts iterations
+  by up to 9% ([iteration](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
 
 ## Tracing from the axis to the wall
 
@@ -481,7 +501,7 @@ takes about a minute.
 `python examples/prescribed_current_polishing.py` takes 46 s on a laptop (9 s for the solve, 16 s
 for the polish).
 
-![Force over pressure gradient of the finite-beta QA stellarator before and after polishing](docs/_static/figures/readme_polish_stellarator.webp)
+<img src="docs/_static/figures/readme_polish_stellarator.webp" width="560" alt="Force over pressure gradient of the finite-beta QA stellarator before and after polishing">
 
 - The RMS force relative to the pressure gradient falls 12× near the axis, 9× in the bulk and
   20× at the edge on a held-out grid.
