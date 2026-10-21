@@ -18,8 +18,7 @@ record under `benchmarks/` names the revision it was measured at.
 - A free-boundary boundary that leaves the mgrid box warns as VMEC2000 does,
   naming the side, the overshoot and the grid extents (#604). `piota` ignores
   BLOAT, as in VMEC2000; BLOAT other than 1 requires NCURR = 1.
-- A PHIEDGE whose sign opposes the external toroidal field stops the run, as
-  VMEC2000's vacuum.f does (#571).
+- A PHIEDGE whose sign opposes the external toroidal field stops the run, as VMEC2000's vacuum.f does (#571).
 - LASYM: the theta shift uses VMEC2000's `atan2` form (#606).
 - WOUT `phi` is correct for non-uniform APHI; the namelist reader accepts
   `&END`, `$END` and a `/` before a comment; the summary plot works at NS = 3 (#593).
