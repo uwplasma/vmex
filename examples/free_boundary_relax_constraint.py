@@ -27,16 +27,17 @@ INPUT_FILE = DATA_DIR / "input.LandremanPaul2021_QA_lowres"
 GRID = dict(rmin=0.45, rmax=1.55, zmin=-0.6, zmax=0.6, ir=96, jz=96, kp=32, order=3)
 
 # Plasma resolution.  NZETA divides the mgrid's kp; MPOL = 7 is the case whose
-# converged field is furthest from the coils:
-MPOL, NTOR, NZETA, NS = 7, 12, 32, 31
-NITER, FTOL = 20000, 1e-11
+# converged field is furthest from the coils.  NS = 31 and 5,000 relaxation
+# iterations take the s = 0.25 error from 1.4e-3 to 9.7e-5 (12 min):
+MPOL, NTOR, NZETA, NS = 7, 12, 32, 16
+NITER, FTOL = 20000, 1e-9
 PHIEDGE = -0.025                  # toroidal flux matching the coil field [Wb]
-RELAX_ITERATIONS = 5000
+RELAX_ITERATIONS = 2000
 SURFACES = (0.25, 0.5, 0.9)       # normalized toroidal flux of the checks
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 if os.environ.get("VMEX_EXAMPLES_CI") == "1":
-    NS, FTOL, RELAX_ITERATIONS = 16, 1e-9, 2000
+    NS, RELAX_ITERATIONS = 12, 1000
 
 ###############################################################################
 # End of input parameters.
@@ -99,9 +100,9 @@ def b_error(res):
     return errors
 
 
-converged = vj.solve_free_boundary(inp, external_field=field, error_on_no_convergence=False)
+converged = vj.solve_free_boundary(inp, external_field=field, error_on_no_convergence=False, verbose=True)
 relaxed = vj.relax_free_boundary_constraint(inp, converged, external_field=field,
-                                            iterations=RELAX_ITERATIONS)
+                                            iterations=RELAX_ITERATIONS, verbose=True)
 
 print(f"\nmax |B|/|B_coils| - 1 (MPOL = {MPOL}, NTOR = {NTOR}, NS = {NS})")
 print(f"{'':>10s} {'fsq':>8s} " + " ".join(f"{'s = ' + format(s, 'g'):>10s}" for s in SURFACES))

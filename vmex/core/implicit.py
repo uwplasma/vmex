@@ -1431,6 +1431,11 @@ _LAST_STATUS_ERROR: weakref.WeakKeyDictionary[ImplicitConfig, Exception] = \
 _LAST_REFINED: weakref.WeakKeyDictionary[
     ImplicitConfig, tuple[bytes, SpectralState, bool]] = weakref.WeakKeyDictionary()
 
+# cfg -> (params key, evolved iterate, bands) of the latest block factorization
+# (see _BANDS_REUSE_TOL).
+_LAST_BANDS: weakref.WeakKeyDictionary[
+    ImplicitConfig, tuple[bytes, np.ndarray, tuple]] = weakref.WeakKeyDictionary()
+
 # cfg -> whether its latest _refined_state call stopped at _REFINE_FAR_STALL.
 _ANCHOR_STALLED: dict[int, bool] = {}
 
@@ -1754,14 +1759,43 @@ def _refine_block_factors(cfg: ImplicitConfig, params: ImplicitParams,
     return factors
 
 
+#: Bands are reused at the same parameters while the evolved iterate moved by
+#: less than this fraction of its norm.  The anchor's Newton steps and the
+#: Jacobian's backsolve use them only as a preconditioner of the exact raw
+#: operator, which certifies the result, so a nearby factorization costs
+#: at most a few Krylov iterations.  The refinement moves the iterate by
+#: 3e-4..2e-3 (QA example) between the two factorizations it would otherwise
+#: pay (0.2 s each, 92% in the 3 * block_size colored JVP probes).
+_BANDS_REUSE_TOL = 1.0e-2
+
+#: Relative residual the Jacobian's backsolve iterates to on supplied bands.
+_STALE_BANDS_RTOL = 1.0e-12
+
+
 def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
                  frozen: SpectralState, dof_mask: SpectralState,
                  z: SpectralState | None = None) -> tuple:
-    """:func:`_refine_block_factor_core` output at ``z`` (default ``frozen``)."""
+    """:func:`_refine_block_factor_core` output at ``z`` (default ``frozen``).
+
+    A call at ``frozen`` itself (the Jacobian's) returns the previous
+    factorization of this config when the parameters are unchanged and
+    ``frozen`` is within :data:`_BANDS_REUSE_TOL` of its iterate; the
+    refinement's own steps always refactor.
+    """
     arguments = commit_to_single_device(tuple(
         _pin_concrete(cfg, tree)
         for tree in (frozen if z is None else z, params, frozen, dof_mask)))
-    return _refine_block_factor_core(*arguments, cfg)
+    key = _params_key(params)
+    # Host arithmetic: an eager jnp op here would add compiled programs.
+    zp = np.concatenate([np.ravel(np.asarray(a) * np.asarray(m)) for a, m in zip(
+        jax.tree.leaves(arguments[0]), jax.tree.leaves(arguments[3]))])
+    hit = _LAST_BANDS.get(cfg)
+    if z is None and hit is not None and hit[0] == key and (
+            np.linalg.norm(zp - hit[1]) <= _BANDS_REUSE_TOL * np.linalg.norm(zp)):
+        return hit[2]
+    bands = _refine_block_factor_core(*arguments, cfg)
+    _LAST_BANDS[cfg] = (key, zp, bands)
+    return bands
 
 
 def _refine_block_step(cfg: ImplicitConfig, params: ImplicitParams,
@@ -3075,10 +3109,16 @@ def _implicit_evolved_tangent_multi_rhs(
     rhs_batch = jax.vmap(raw_rhs)(tangent_batch)
     initial, _ = _raw_block_solve(system, rhs_batch, cfg)
 
+    # Supplied bands may be a nearby point's (see _BANDS_REUSE_TOL): their
+    # direct solve is then only a preconditioned guess, so iterate to a
+    # tighter tolerance than the certificate, a few matvecs.
+    solve_rtol = (certify_rtol if bands is None or certify_rtol is None
+                  else jnp.minimum(certify_rtol, _STALE_BANDS_RTOL))
+
     def correct(args):
         rhs, x0 = args
         solution, krylov = _adjoint_solve(
-            system.operator, rhs, cfg, x0=x0, rtol=certify_rtol,
+            system.operator, rhs, cfg, x0=x0, rtol=solve_rtol,
             max_restarts=certify_maxiter,
             precond=lambda r: _raw_block_apply(system, r))
         return solution, _linear_response_report(

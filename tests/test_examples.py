@@ -862,7 +862,7 @@ def test_qa_alpha_losses_optimization(tmp_path):
         assert (tmp_path / name).exists(), name
 
 
-@pytest.mark.full  # nightly: coarse free-boundary solve plus 2,000 relaxation iterations (~6 min)
+@pytest.mark.full  # nightly: coarse free-boundary solve plus 1,000 relaxation iterations (~2 min)
 def test_free_boundary_relax_constraint(tmp_path):
     pytest.importorskip("essos.fields")
     out = _run_example(EXAMPLES / "free_boundary_relax_constraint.py", tmp_path, timeout=1500)
