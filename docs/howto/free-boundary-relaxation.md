@@ -1,4 +1,4 @@
-# Relax a free-boundary equilibrium onto the coil field
+# Solve a free-boundary field that matches the coils
 
 A converged free-boundary equilibrium is not exactly in the coil field.
 VMEC fixes the poloidal angle with a spectral-condensation force. That force
