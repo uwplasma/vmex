@@ -246,6 +246,8 @@ maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 NESTOR free boundary driven by ESSOS coils (or an MGRID table), ramping beta and tracking the
 Shafranov shift: `python examples/free_boundary_essos_coils.py`. The exterior field is described
 [below](#fields-coils-and-free-boundary).
+A converged free-boundary field differs from the coils by 2e-4 to 1e-3 in `|B|`;
+`vmex.relax_free_boundary_constraint` brings it to 3e-5: `python examples/free_boundary_relax_constraint.py`.
 
 ### Position control for current-carrying plasmas
 
@@ -561,6 +563,7 @@ python examples/take_fixed_boundary_gradients.py
 | Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` | core |
 | Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
 | ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
+| Free-boundary field relaxed onto the coils | `python examples/free_boundary_relax_constraint.py` | `vmex[coils]` |
 | Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
 | Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
 | Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |

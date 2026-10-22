@@ -8,7 +8,7 @@ record under `benchmarks/` names the revision it was measured at.
 
 - Opt-in free-boundary `PositionControl` (deck `LPOSITION_CONTROL`): feedback vertical field holds the axis radius.
 - Opt-in `vmex.solve_free_boundary_newton`: Krylov Newton anchoring on the coupled free-boundary root.
-- `vmex.relax_free_boundary_constraint`: removes the spectral-constraint bias of a free-boundary LCFS (LP-QA `|B|` error 2.6e-4 to 2.6e-5).
+- `vmex.relax_free_boundary_constraint`: removes the spectral-constraint bias of a free-boundary LCFS (LP-QA `|B|` error 2.6e-4 to 2.6e-5); how-to and example.
 
 ## 0.11.11 - 2026-10-18
 

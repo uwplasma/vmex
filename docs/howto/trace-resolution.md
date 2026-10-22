@@ -16,29 +16,10 @@ warns above `RESOLUTION_TOLERANCE = 3e-3`. `--trace-no-resolution-check`
    at `n = 9-11` per period inside `s = 0.25`, so `ntor <= 8` leaves a 5e-4
    error even on a fixed boundary traced from the coils; `ntor = 12` brings
    it to 8e-5.
-2. Relax a free-boundary solve: `vmex.relax_free_boundary_constraint(inp,
-   result, external_field=field)` restarts the converged state with the
-   spectral constraint off (see below).
+2. Relax a free-boundary solve with `vmex.relax_free_boundary_constraint`
+   ({doc}`free-boundary-relaxation`).
 3. Compare `|B|` on a flux surface with the coil field: the loss fraction
    follows that error, not `mpol` itself.
-
-## Why a converged free-boundary field is off
-
-The spectral-condensation force that fixes the poloidal angle is tangential in
-real space, but its `m (m - 1)` mode filter gives it a normal part. A converged
-free-boundary equilibrium balances it against the vacuum pressure, so its LCFS
-is not a flux surface of the coils. VMEC++ gives the same fields to 1e-5.
-Largest `|B|` error against Biot-Savart at `s = 0.25`, ESSOS LP-QA coils,
-`ns = 51`, `ntor = 12` (`ns` 26-201, the NESTOR grid, `mf` and the mgrid
-order and spacing move none of these by more than 10%):
-
-| `mpol` | 6 | 7 | 8 | 9 | 10 | 12 | 14 |
-|---|---|---|---|---|---|---|---|
-| converged | 2.1e-4 | 1.3e-3 | 2.6e-4 | 6.7e-4 | 3.0e-4 | 2.5e-4 | 1.9e-4 |
-| relaxed, 5,000 iterations | | 3.3e-5 | 2.6e-5 | | | | |
-
-The relaxed state keeps a force residual near 1e-10, because nothing fixes
-the angle any more, and reports `converged = False`.
 
 ## Landreman-Paul QA coils
 
