@@ -423,9 +423,8 @@ def test_native_export_preserves_prescribed_iota_and_rational_surface(flipped, w
     q = jnp.array([.5, .7, .2])
     prepared = ext._prepared(spectra)
     x = jnp.array([jnp.sqrt(q[0]), q[1], q[2]])
-    position = lambda y: ext._position_and_field(prepared, y)[0]
     B = ext._position_and_field(prepared, x)[1]
-    contra = jnp.linalg.solve(jax.jacfwd(position)(x), B)
+    contra = jnp.linalg.solve(jax.jacfwd(lambda y: ext._position_and_field(prepared, y)[0])(x), B)
     np.testing.assert_allclose(contra[1] / contra[2], .5 if flipped else -.5,
                                rtol=2e-13, atol=2e-13)
 
