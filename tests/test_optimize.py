@@ -1762,7 +1762,7 @@ def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
         __hash__ = object.__hash__
 
     cfg = Config(inp=None, hot_restart=True, multigrid=False, resolution=None,
-                 ftol=1e-12, max_iterations=10, mode=None, lconm1=True)
+                 ftol=1e-12, max_iterations=10, mode=None, lconm1=True, m1_gauge=None)
     im._HOT_CACHE[cfg] = "warm"
     result = im._host_solve(cfg, {"leaf": np.zeros(1)})
     assert calls == ["warm", None] and result.converged
