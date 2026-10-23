@@ -1,9 +1,4 @@
-"""Source-weighted trace-helium occupation on supplied transport coefficients.
-
-The radial discretization and checked SOLVAX solves belong to ``essos.ash``.
-This module only adapts their physical cost to VMEX's objective interface.
-Core residence with a prescribed sink is not a pumped-exhaust prediction.
-"""
+"""Adapt ESSOS's source-weighted helium occupation to VMEX least squares."""
 
 from __future__ import annotations
 
@@ -16,28 +11,21 @@ import numpy as np
 
 @dataclass(frozen=True)
 class HeliumAshObjective:
-    """A positive occupation cost, with a fixed reference in seconds.
+    """Mean source-weighted occupation divided by a fixed positive reference.
 
-    ``transport_response(state, runtime)`` returns keyword arguments for
-    ``essos.ash.evaluate_helium_residence``: physical radial edges, cell
-    volumes, face volume derivatives, helium D/V, source, boundary kappa,
-    and optional cell cost. Geometry, source normalization, and Er derivatives
-    are included only if the callback computes them from traced inputs.
-    Record those choices in the required ``gradient_scope`` description.
+    ``transport_response(state, runtime)`` supplies SI keyword arguments to
+    ``essos.ash.evaluate_helium_residence``: geometry/volumes, D/V, source,
+    boundary sink and optional cell cost. Recompute them for each design.
+    ``gradient_scope`` must state traced dependencies and fixed inputs;
+    frozen tables and host files do not provide kinetic shape derivatives
+    or qualify an ambipolar branch.
 
-    The callback must recompute the physical response for each design; a
-    frozen coefficient table does not provide a kinetic shape derivative.
-    File readers and host kinetic preparation belong outside a claimed JAX
-    gradient. A prescribed-background/Er pilot is legitimate when declared.
-    Neither this class nor an implicit VMEX solve qualifies kinetic gradients
-    or an ambipolar branch automatically.
-
-    ``total_state`` returns mean source-weighted occupation / reference.
-    ``residuals_state`` returns its square root: with target 0 and weight 1,
-    VMEX's least-squares cost is half that positive ratio. Zero residence is
-    not asserted to be physically attainable. Invalid radial responses yield
-    NaN, never a favorable finite penalty. Equilibrium, kinetic convergence,
-    bulk transport and independent alpha holdouts are separate hard gates.
+    ``residuals_state`` is the square root of ``total_state``: target 0 and
+    weight 1 give a least-squares cost of half the normalized occupation.
+    Invalid responses yield NaN. Equilibrium/kinetic convergence, matched
+    source, bulk transport and independent alpha holdouts require separate
+    qualification. A prescribed boundary sink predicts core residence, not
+    pumped exhaust; zero residence is not a claimed attainable target.
     """
 
     transport_response: Callable[[Any, Any], Mapping[str, Any]]

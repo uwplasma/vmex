@@ -193,87 +193,11 @@ unless they are compact reviewed documentation artifacts.
 Published-equilibrium comparisons and reproducibility studies belong in
 `../benchmarks/`, not among the user-facing optimization examples.
 
-### Source-weighted helium residence pilot
+### Helium occupation objective
 
-`optimization/QI_optimization_helium_ash.py` adapts a qualified physical
-response to `VmecProblem`. The reusable `vmex.optimize.HeliumAshObjective`
-uses `essos.ash.evaluate_helium_residence`; install the ESSOS helium-residence
-feature with its `ash` extra. Until that feature is released, use the matching
-ESSOS feature checkout explicitly. No radial solver is duplicated in VMEX.
-
-For review of [ESSOS #167](https://github.com/uwplasma/ESSOS/pull/167), the
-validated source revision is installed explicitly:
-
-```bash
-python -m pip install "essos[ash] @ git+https://github.com/uwplasma/ESSOS.git@93f99cfd08b545cf7fc75a928362aef198735bf9"
-python -m pytest -q tests/test_ash_objective.py tests/test_ash_example.py
-```
-
-These 28 cases comprise 21 contract checks and seven integration cases using
-the real ESSOS radial evaluator. All 28 pass with that revision; without
-`essos.ash`, the seven integration cases skip. Base VMEX intentionally keeps
-ESSOS optional, so a green base CI run does not establish this integration.
-Merge ESSOS #167 first, make its API available through a supported ESSOS
-installation, then merge the VMEX adapter after the dependency-enabled parity
-lane exercises all seven integration cases. The review pin above is not a
-published release requirement.
-
-A kinetic provider is explicit because a boundary/WOUT does not specify
-profiles, helium source, Er, or the edge sink. Its factory accepts a profile
-JSON path and returns the `transport` and `verify` methods documented in the
-example. For example, with an installed campaign response module:
-
-```bash
-python examples/optimization/QI_optimization_helium_ash.py \
-  --input input.published_QI --restart-wout wout_published_QI.nc \
-  --profile helium_profiles.json --response campaign_response:build_response \
-  --evaluate-wout-only --output outputs/ash_seed
-```
-
-This evaluates the exact WOUT without a shape-gradient claim. Missing or failed
-transport/refinement/alpha evidence writes `rejected_seed` and prevents building
-an optimizer. After qualification, omit `--evaluate-wout-only` for the bounded
-pilot, or use `--qualify-only` for directional finite differences. The default
-uses eight low-order boundary coefficients, fixed major radius and profiles,
-40 optimizer residual calls (including SciPy's Jacobian probes), and a finite
-coefficient box. Qualification and final verification calls are separate.
-Use `--objective qi` and `--objective proxy` with the same physical definitions
-and declared budget for the controls; record elapsed cost too. The proxy
-provider must return an actual conventional transport/root objective.
-
-The native radial objective has coefficient-only JIT/AD tests. End-to-end
-kinetic/equilibrium derivatives remain conditional on the supplied response;
-file/host response providers use finite differences. The implicit option
-requires `native_transport` and rejects a failed directional FD check before
-optimization. A prescribed-Er/background result has that physical scope.
-The reference occupation normalization is fixed at the initial design.
-
-`verify` returns explicit booleans for all `REQUIRED_GATES` plus the measured
-values, uncertainties, tolerances, input identity and provenance supporting
-them. `kinetic_response` includes positive D, a third-drive affine test, a trace
-plateau and kinetic convergence. `radial_refinement` resolves the residence
-bottleneck. `source_matched` fixes total source and weighting definitions;
-`device_size_and_field` checks matched physical volume and magnetic field.
-`qi_and_shape` checks the declared QI/transform/mirror/shape/stability limits,
-and `bulk_heat_transport` bounds absolute electron and fuel heat transport.
-These limits must be fixed in the provider before a production comparison.
-
-The alpha gates require source/volume-weighted births mapped into each
-geometry, energy-weighted loss accounting, an absolute energy-loss upper
-bound and a one-sided 95% upper bound on candidate-minus-reference loss below
-the declared margin. Retain every failed/censored physical weight and resolve
-numerical refinement. The final holdout seed must differ from the checkpoint
-seed, and neither sample may be reused to tune the held-out candidate. The
-provider must return false for absent/unresolved evidence. The script performs
-an independent physical re-solve, saves the latest accepted iterate when the
-call budget expires, then labels it accepted only if all hard gates pass on
-the fresh holdout. A lower penalty cost is insufficient. Core residence with
-a prescribed boundary coefficient is not pumped exhaust.
-
-A physically feasible candidate with no demonstrated residence benefit is
-reported as `feasible_only`. `accepted` additionally requires a positive
-measured relative ash gain and the verifier's finite
-`ash_relative_gain_lower95` (a one-sided 95% lower confidence bound) above
-zero and no greater than the measured gain. Missing uncertainty evidence
-cannot establish an improvement. Candidate radial validity is checked again
-before any acceptance decision.
+`optimization/helium_ash_objective.py` minimizes manufactured slab residence
+over a bounded diffusion interval with `HeliumAshObjective`. It demonstrates
+the adapter and least-squares cost, with fixed geometry, source and edge sink.
+Run it with `python examples/optimization/helium_ash_objective.py` after installing
+the optional residence API from [ESSOS #167](https://github.com/uwplasma/ESSOS/pull/167).
+This coefficient example does not qualify kinetic shape gradients or a physical design.

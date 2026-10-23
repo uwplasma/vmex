@@ -154,3 +154,14 @@ def test_closed_boundary_does_not_return_finite_objective():
         return {**response(state, runtime), "boundary_kappa_m_s": 0.0}
     objective = HeliumAshObjective(closed, 1.0, "diffusion only")
     assert not np.isfinite(objective.total_state(jnp.asarray(1.0), None))
+
+
+def test_manufactured_example_reduces_occupation_within_diffusion_bounds():
+    pytest.importorskip("essos.ash")
+    import runpy
+    from pathlib import Path
+
+    example = Path(__file__).resolve().parents[1] / "examples/optimization/helium_ash_objective.py"
+    result, cost = runpy.run_path(str(example))["main"]()
+    assert result.success and 1.99 < result.x[0] <= 2.
+    assert cost == pytest.approx(.25, rel=.001)
