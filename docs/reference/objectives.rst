@@ -303,10 +303,14 @@ certification grid.
    resolved value against the wout/Boozer implementation.  See
    :ref:`confinement-qi-fidelity`.
 
-For a direct action-based target, supply physical pitch values explicitly and
-compose the QI and maximum-J terms like any other residuals.  This objective
-is a complementary orbit diagnostic, not a drop-in normalization-equivalent
-replacement for the Goodman residual:
+For an action-based target, supply physical pitch values explicitly and
+compose the QI and maximum-J terms like any other residuals.
+``JInvariantQIResidual`` pools the actions of all complete wells at each
+surface and pitch, without matching well families across field lines. Its
+value can be positive in an :math:`\alpha`-independent field with distinct
+well actions; it does not by itself quantify within-family omnigenity or
+radial drift. It is a complementary orbit diagnostic, not a normalization-
+equivalent replacement for the Goodman residual:
 
 .. code-block:: python
 
@@ -320,6 +324,15 @@ replacement for the Goodman residual:
    result = opt.least_squares(
        [(qi_action, 0.0, 1.0), (maximum_j, 0.0, 1.0)],
        inp, max_mode=6, jac="implicit")
+
+For local within-well label dependence,
+:func:`~vmex.core.qi.j_invariant_alpha_derivative_from_boozer` differentiates
+each action at fixed physical pitch, including moving turning points and the
+line element. Supply explicit ``alpha`` labels and the bounce-kernel inputs.
+It returns ``action_alpha_derivative`` without matching or weighting wells;
+unequal label-independent actions have zero derivative. Invalid wells give
+NaN; complete interior wells remain usable in a cut trace. See the function
+for topology, interpolation-cell, separatrix, and convergence limits.
 
 The two classes do not impose a shared weight. ``MaximumJResidual`` evaluates
 the outward slope ``dJ/ds`` at common pitch using matched wells;
@@ -630,7 +643,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.qi.JInvariantQIResidual`
      - yes
      - yes
-     - physical-pitch action variation over complete wells
+     - pooled physical-pitch action dispersion over complete wells
    * - :class:`~vmex.core.maxj.MaximumJResidual`
      - yes
      - yes
@@ -638,7 +651,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes
-     - shared-transform J-invariance and maximum-J rows
+     - shared-transform pooled action dispersion and maximum-J rows
    * - :class:`~vmex.core.gammac.GammaC`
      - yes
      - yes
