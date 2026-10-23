@@ -958,7 +958,7 @@ def test_truncation_message_names_the_value_the_fix_and_the_switch():
 
     text = truncation_message(1.0e-2, "--trace-no-resolution-check")
     assert "1.0e-02 of m = 1" in text and "mpol = ntor >= 6" in text
-    assert "Monte Carlo error" in text and text.endswith("pass --trace-no-resolution-check to silence.")
+    assert "relax_free_boundary_constraint" in text and text.endswith("pass --trace-no-resolution-check to silence.")
 
 
 def test_trace_resolution_check_can_be_silenced(solovev_wout, monkeypatch):

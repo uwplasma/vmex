@@ -18,7 +18,11 @@ record under `benchmarks/` names the revision it was measured at.
   maximum is the default and the Jacobian is 6x cheaper (#589).
 - **Free boundary:** opt-in Newton anchoring (`solve_free_boundary_newton`, #575),
   opt-in position control (`LPOSITION_CONTROL`, #570), a DEL-BSQ gate and a
-  coil-gradient test for single-stage runs (#614).
+  coil-gradient test for single-stage runs (#614);
+  `relax_free_boundary_constraint` removes the spectral-constraint bias of the LCFS
+  and returns the lowest-`fsq` iterate (LP-QA `|B|` error 1.4e-3 to 8.8e-5, alpha
+  losses 6.7% to 0.4%; W7-X 6.0e-4 to 6.2e-5 at `mpol = 12`, `ntor = 16`, NCSX
+  2.0e-4 to 6.8e-5; it needs `mpol` and `ntor` that resolve the coils; #626).
 - Opt-in radial preconditioner for the m = 0 lambda force,
   `lambda_m0_floor=1e-3` (#598). 3-D force polishing with prescribed current (#558).
 - `boozer_spectrum_state(..., geometry=True)` returns the Boozer R, Z, nu and
@@ -39,8 +43,7 @@ record under `benchmarks/` names the revision it was measured at.
 - A free-boundary boundary that leaves the mgrid box warns as VMEC2000 does,
   naming the side, the overshoot and the grid extents (#604). `piota` ignores
   BLOAT, as in VMEC2000; BLOAT other than 1 requires NCURR = 1.
-- A PHIEDGE whose sign opposes the external toroidal field stops the run, as
-  VMEC2000's vacuum.f does (#571).
+- A PHIEDGE whose sign opposes the external toroidal field stops the run, as VMEC2000's vacuum.f does (#571).
 - LASYM: the theta shift uses VMEC2000's `atan2` form (#606).
 - WOUT `phi` is correct for non-uniform APHI; the namelist reader accepts
   `&END`, `$END` and a `/` before a comment; the summary plot works at NS = 3 (#593).

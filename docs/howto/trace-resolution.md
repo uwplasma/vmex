@@ -11,10 +11,15 @@ warns above `RESOLUTION_TOLERANCE = 3e-3`. `--trace-no-resolution-check`
 
 ## What to do when it warns
 
-1. Re-solve at larger `mpol` and `ntor` (6, then 7) and trace the same births.
-2. Compare `|B|` on a flux surface with the coil field: the loss fraction
+1. Re-solve at larger `mpol` and `ntor`. `ntor` must resolve the coil ripple:
+   the eight Landreman-Paul QA coils per period put `|B|` harmonics of 1e-4
+   at `n = 9-11` per period inside `s = 0.25`, so `ntor <= 8` leaves a 5e-4
+   error even on a fixed boundary traced from the coils; `ntor = 12` brings
+   it to 8e-5.
+2. Relax a free-boundary solve with `vmex.relax_free_boundary_constraint`
+   ({doc}`free-boundary-relaxation`).
+3. Compare `|B|` on a flux surface with the coil field: the loss fraction
    follows that error, not `mpol` itself.
-3. Quote the coil-field loss when the WOUT losses do not settle.
 
 ## Landreman-Paul QA coils
 

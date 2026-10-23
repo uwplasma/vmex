@@ -211,6 +211,10 @@ ladders carry the active-vacuum state and adaptive `NVACSKIP` across
 `NS_ARRAY` stages ({doc}`/explanation/iteration`). On GPUs, the dense NESTOR
 factor runs on CPU by design ({doc}`run-on-gpu`).
 
+A converged LCFS carries a bias from the spectral-condensation force, 2e-4 to
+1e-3 in `|B|` against the coils (W7-X and NCSX included);
+{doc}`free-boundary-relaxation` removes it when `mpol` and `ntor` resolve the coils.
+
 ## Differentiability scope
 
 Coil/`extcur` gradients on a specified boundary use the virtual-casing

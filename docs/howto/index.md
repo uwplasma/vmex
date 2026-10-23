@@ -14,6 +14,7 @@ restart-from-previous-run
 run-on-gpu
 free-boundary
 free-boundary-newton
+free-boundary-relaxation
 match-phiedge
 use-essos-fields-and-coils
 trace-alpha-particles
