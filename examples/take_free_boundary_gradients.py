@@ -68,8 +68,8 @@ def configured(**overrides):
 
 aspect_from_coils = configured()
 
-print("Solving the free boundary and its implicit adjoint...")
 parameters = jnp.zeros(base_dofs.size)
+print("Solving the free-boundary equilibrium and its coupled adjoint (first call compiles)...", flush=True)
 aspect, gradient = jax.value_and_grad(aspect_from_coils)(parameters)
 # One normalized direction changes a curve Fourier coefficient and all base
 # currents. Independent re-solves therefore certify both ESSOS derivative paths.
@@ -78,6 +78,7 @@ direction = direction.at[-coils.curves.n_base_curves:].set(
     1.0 / coils.curves.n_base_curves)
 direction /= jnp.linalg.norm(direction)
 autodiff = jnp.vdot(gradient, direction)
+print(f"Coupled GCROT adjoint done (aspect {float(aspect):.6f}); running the edge Schur adjoint...", flush=True)
 
 # The certificate is the second adjoint. The coupled GCROT adjoint and the
 # edge Schur adjoint are independent solvers of the same linear system, so
@@ -92,6 +93,7 @@ schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameter
 schur = jnp.vdot(schur_gradient, direction)
 disagreement = jnp.abs(autodiff - schur) / jnp.abs(schur)
 
+print("Running the central finite difference (two re-solves)...", flush=True)
 step = 1.0e-1
 finite_difference = (aspect_from_coils(parameters + step * direction)
                      - aspect_from_coils(parameters - step * direction)) / (2 * step)

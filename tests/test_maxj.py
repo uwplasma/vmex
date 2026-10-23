@@ -14,6 +14,7 @@ import jax
 import jax.numpy as jnp
 
 from vmex.core import maxj
+from vmex.core import omnigenity
 from vmex.core import qi
 from vmex.core import implicit as im
 from vmex.core.input import VmecInput
@@ -122,6 +123,7 @@ def test_constructed_class_matches_the_functional_form_and_guards_inputs(monkeyp
     options = dict(max_wells=2, quadrature_order=32,
                    qi_options={"nphi": 65, "nalpha": 5, "n_bounce": 7})
     monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
     term = maxj.ConstructedMaximumJResidual(
         [0.25, 0.75], [1.0 / 1.1], mboz=2, nboz=2, **options)
     eq = SimpleNamespace(state=object(), runtime=object())
@@ -229,6 +231,7 @@ def test_maximum_j_jit_and_ad_match_finite_difference():
 def test_maximum_j_composable_interface(monkeypatch):
     booz = _boozer(0.98)
     monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
     term = maxj.MaximumJResidual(
         [0.25, 0.75], [1.0 / 1.1], mboz=2, nboz=2, nalpha=5,
         points_per_period=64, num_periods=4, max_wells=6)
@@ -292,6 +295,7 @@ def test_bounce_objectives_consume_the_boozer_sine_spectrum(name, monkeypatch):
 
     def rows(booz):
         monkeypatch.setattr(module, "boozer_spectrum_state", lambda *a, **k: booz)
+        monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *a, **k: booz)
         return np.asarray(term(eq))
 
     symmetric = rows(_asymmetric_boozer(0.0))
@@ -340,6 +344,7 @@ def test_common_trapped_pitches_use_one_field_strength_on_all_lines():
 def test_common_trapped_pitches_state_samples_boozer_lines(monkeypatch):
     booz = _boozer(1.02)
     monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
     pitch = maxj.common_trapped_pitches_state(
         object(), object(), [0.25, 0.75], [0.5],
         nalpha=5, points_per_period=32, num_periods=2)
