@@ -816,7 +816,7 @@ def test_deck_nfp_must_match_the_mgrid_nfp():
 
 
 def test_relax_free_boundary_constraint_restarts_without_the_constraint(monkeypatch):
-    """The relaxation hot-restarts the converged state with tcon0 = 0."""
+    """The relaxation hot-restarts the converged state with a weak constraint."""
     calls = {}
 
     def fake_solve(inp, **kwargs):
@@ -830,5 +830,5 @@ def test_relax_free_boundary_constraint_restarts_without_the_constraint(monkeypa
                                             iterations=123, verbose=True)
     assert out == "relaxed" and calls["inp"] == "deck"
     assert calls["initial_state"] is state and calls["external_field"] is field
-    assert calls["tcon0"] == 0.0 and calls["max_iterations"] == 123
+    assert calls["tcon0"] == 1e-3 and calls["max_iterations"] == 123
     assert calls["error_on_no_convergence"] is False and calls["verbose"] is True

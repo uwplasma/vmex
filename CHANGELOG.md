@@ -19,7 +19,8 @@ record under `benchmarks/` names the revision it was measured at.
 - **Free boundary:** opt-in Newton anchoring (`solve_free_boundary_newton`, #575),
   opt-in position control (`LPOSITION_CONTROL`, #570), a DEL-BSQ gate and a
   coil-gradient test for single-stage runs (#614);
-  `relax_free_boundary_constraint` removes the spectral-constraint bias of the LCFS (#626).
+  `relax_free_boundary_constraint` removes the spectral-constraint bias of the LCFS
+  (LP-QA `|B|` error 1.4e-3 to 8.8e-5, alpha losses 6.7% to 0.4%; #626).
 - Opt-in radial preconditioner for the m = 0 lambda force,
   `lambda_m0_floor=1e-3` (#598). 3-D force polishing with prescribed current (#558).
 - `boozer_spectrum_state(..., geometry=True)` returns the Boozer R, Z, nu and

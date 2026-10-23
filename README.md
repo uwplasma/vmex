@@ -281,7 +281,7 @@ NESTOR free boundary driven by ESSOS coils (or an MGRID table), ramping beta and
 Shafranov shift: `python examples/free_boundary_essos_coils.py`. The exterior field is described
 [below](#fields-coils-and-free-boundary).
 A converged free-boundary field differs from the coils by 2e-4 to 1e-3 in `|B|`;
-`vmex.relax_free_boundary_constraint` brings it to 3e-5: `python examples/free_boundary_relax_constraint.py`.
+`vmex.relax_free_boundary_constraint` brings it below 1e-4 (alpha losses 6.7% to 0.4%): `python examples/free_boundary_relax_constraint.py`.
 
 ### Single-stage plasma and coil design
 
