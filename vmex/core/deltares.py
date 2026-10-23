@@ -96,23 +96,14 @@ def helical_angles(chi, eta, iota, nfp: int, M: int, N: int):
 
 
 def pitch_band_phase_space_mass(bmag, spatial_weight, bcrit_lower, bcrit_upper):
-    """Analytically integrate the unit-score pitch measure before space.
+    """Integrate the unit-score pitch measure analytically before space.
 
-    The last axis contains spatial quadrature nodes and ``spatial_weight``
-    contains their nonnegative ``dl/B`` weights on the same domain. Positive
-    scalar physical bounds integrate ``dBcrit/Bcrit**2``. The result preserves
-    :func:`paper_average`'s factor two and is not a probability.
-
-    Fubini's theorem gives ``2 <sqrt((1-B/U)+)-sqrt((1-B/L)+)>``.
-    This counts *all accessible segments*, including cut wells and passing
-    segments in a bounded trace; it does not certify trapped-family coverage.
-    Complete wells alone give this result only when the spatial domain and
-    pitch band have no cut or passing components. This independent measure
-    avoids bounce roots and the integrable pitch-separatrix singularity.
-    AD is finite away from a quadrature node coinciding with a band endpoint;
-    that coincidence is nondifferentiable (the inactive branch selects zero).
-    Spatial quadrature convergence and physical-field positivity still need
-    independent certification. Invalid data returns NaN, never zero mass.
+    ``bmag`` has spatial nodes on its last axis; ``spatial_weight`` contains
+    nonnegative dl/B weights. Positive scalar bounds L,U give
+    ``2 <sqrt((1-B/U)+)-sqrt((1-B/L)+)>``, including cut and passing segments.
+    This retains :func:`paper_average`'s factor two, so it is not a probability.
+    AD is undefined when B equals a pitch endpoint. Invalid data returns NaN;
+    spatial quadrature and field positivity need independent checks.
     """
     b, weight, lower, upper = map(jnp.asarray,
                                 (bmag, spatial_weight, bcrit_lower, bcrit_upper))
@@ -223,16 +214,11 @@ def _physical_flux_derivative(values, psi, psi_edge):
     x = jnp.asarray(psi) / psi_edge
     if x.ndim != 1 or x.size < 3 or values.shape[0] != x.size:
         raise ValueError("Require at least three matching physical flux nodes")
-    rows = []
-    for i in range(x.size):
-        lo = min(max(i - 1, 0), x.size - 3)
-        indices = [lo, lo + 1, lo + 2]
-        weights = []
-        for j in indices:
-            a, b = [k for k in indices if k != j]
-            weights.append((2 * x[i] - x[a] - x[b]) / ((x[j] - x[a]) * (x[j] - x[b])))
-        rows.append(jnp.einsum("j,j...->...", jnp.stack(weights), values[jnp.asarray(indices)] - values[i]))
-    return jnp.stack(rows)
+    indices = jnp.clip(jnp.arange(x.size) - 1, 0, x.size - 3)[:, None] + jnp.arange(3)
+    nodes = x[indices]
+    a, b = nodes[:, [1, 0, 0]], nodes[:, [2, 2, 1]]
+    weights = (2 * x[:, None] - a - b) / ((nodes - a) * (nodes - b))
+    return jnp.einsum("ij,ij...->i...", weights, values[indices] - values[:, None])
 
 
 def restricted_action_deltares_from_boozer(
@@ -244,60 +230,38 @@ def restricted_action_deltares_from_boozer(
     chart_floor=1e-4, root_residual_limit=.005,
     boundary_forbidden_floor=.001, root_slope_floor=.005,
 ):
-    """Restricted single-family action diagnostic, **not** full-population DeltaRes.
+    """Compute DeltaRes for one complete well per eta and physical pitch node.
 
-    ``bmnc_b``/``bmns_b`` are surface-by-mode spectra in tesla; ``xn_b`` and
-    helicity ``N`` are physical toroidal indices. At least three distinct,
-    outward ordered physical toroidal-flux-per-radian rows ``psi_b`` are
-    required, with ``0 <= psi_b/psi_edge <= 1``. ``psi_edge`` has the same
-    convention and units. The required ``canonical_flux_sign`` converts the
-    supplied flux to canonical flux: use ``+1`` for already canonical
-    :func:`~vmex.core.omnigenity.boozer_spectrum_state` output, including
-    negative flux, and ``-1`` for raw VMEC ``Phi/(2*pi)``. It must not be
-    chosen merely to make the flux positive.
+    Spectra are surface-by-mode in tesla; ``xn_b`` and helicity ``N`` are
+    physical toroidal indices. ``psi_b`` needs at least three distinct,
+    outward-ordered flux-per-radian rows, with ``0 <= psi_b/psi_edge <= 1``.
+    Use ``canonical_flux_sign=+1`` for ``boozer_spectrum_state`` output and
+    ``-1`` for raw VMEC ``Phi/(2*pi)``. Keep negative canonical flux negative;
+    omit the spectrum's computational mesh label ``s_b``.
 
-    This evaluates exactly one complete well at every eta and shared physical
-    ``bcrit`` node on the fixed bounded cell ``t=zeta-M*eta/nfp``. Both parities,
-    roots, iota, line elements and actual fluxes remain live. Only grid, slot
-    and local three-point stencil indices are fixed. Adjacent endpoints,
-    action and period must satisfy the declared continuity limits and close
-    after one eta cycle. Extra, cut, marginal or unresolved wells invalidate
-    the entire result; no failed population is discarded or zero padded.
+    On the cell ``t=zeta-M*eta/nfp``, the full-bounce action is
+    ``A=2*integral sqrt(1-B/bcrit) dl``. With ``C=nfp/(N-M*iota)`` and
+    ``c=mass*speed/(charge*canonical_psi_edge)``, the local map is
+    ``Delta_eta=-c*C*A_s|eta``. A three-point quadratic on ``s=psi/psi_edge``
+    gives ``A_s``; action harmonics give power without shear division.
+    Particle constants use SI units; ``v_tau`` is speed times bounce period.
+    Spectra, roots, line elements, flux and pitch remain differentiable.
 
-    With ``A=2*integral sqrt(1-B/bcrit) dl`` in metres and
-    ``c=mass*speed/(charge*canonical_psi_edge)``, the leading local-bounce map
-    is ``Delta_eta=-c*C*A_s|eta``, ``C=nfp/(N-M*iota)``. The chain terms from
-    changing alpha to eta cancel. ``A_s`` differentiates a local quadratic
-    interpolant on actual ``s=psi/psi_edge``; it is not a continuum derivative
-    certificate. Action Fourier coefficients give the shear-cancelled power
-    directly, retaining bounce cancellation before squaring. Particle constants
-    use SI units; ``v_tau`` is speed times the full-bounce period in metres.
+    ``bcrit_weight`` integrates dBcrit, including its inverse-square Jacobian
+    in the reduction. The denominator is mean_eta integral_cell dl/B with
+    the paper's factor two. ``paper_pitch_band_mass`` is the unit-score
+    integral on this domain; ``full_population`` is always False.
 
-    ``bcrit_weight`` integrates dBcrit; the reduction includes its inverse-square
-    pitch Jacobian. Its denominator is mean_eta integral_cell dl/B over this
-    same finite cell, preserving the paper's factor two. Uniform eta's
-    fixed-surface alpha Jacobian cancels in this restricted ratio.
-    ``paper_pitch_band_mass`` is its unit-score integral, not full coverage or
-    a probability. ``full_population`` is always False. Invalid certificates
-    give NaN rows/loss and ``valid=False``. Grid refinement, production-state
-    derivatives and full-domain normalization require independent checks.
+    Extra, cut, marginal or unresolved wells return ``valid=False`` and NaN
+    rows/loss. Endpoint, log-action and log-period limits check family
+    continuity; eta endpoints must close. Integer physical modes, Nyquist
+    bounds and a Fourier curvature bound check sampling, continuous-t field
+    positivity and well counts at each eta. Eta and quadrature convergence
+    still require refinement. Grid, helicity and certificate limits are static.
 
-    Physical mode labels must have integer ``xm_b`` and ``xn_b/nfp``. A necessary
-    sampling check requires every supplied mode, including zero coefficients,
-    to satisfy ``max(abs(m*iota-n))*dt < pi`` and
-    ``max(abs((m*N-n*M)/nfp)) < n_eta/2``. A curvature bound additionally
-    certifies continuous-t well counts at the sampled eta values: every trace
-    interval must exclude a root by its interpolation-error bound or have a
-    provably monotone derivative. The same bound certifies continuous-t field
-    positivity at sampled eta. Equality and unresolved intervals invalidate
-    the result. This does not certify eta-family resolution or integral
-    accuracy; independent refinement remains required.
-
-    Static settings include nfp, helicity, grid sizes, bounds and certificate
-    limits. ``loss`` retains half the sum of squared deposited radial rows;
-    its radial grid-phase dependence is not cured by action convergence.
-    When using ``boozer_spectrum_state``, omit its computational mesh label
-    ``s_b`` and pass the named spectrum and physical flux entries above.
+    ``loss`` is half the sum of squared deposited rows. Its grid-alignment
+    dependence persists even when the action converges; see the confinement
+    documentation for normalization and validation requirements.
     """
     from math import isfinite
     from .bounce import bounce_action
@@ -426,15 +390,12 @@ def restricted_action_deltares_from_boozer(
 
 
 def streamed_restricted_action_deltares_from_boozer(*, bcrit, bcrit_weight, canonical_flux_sign, **kwargs):
-    """Compose the restricted diagnostic with bounded-memory pitch execution.
+    """Evaluate the restricted diagnostic with a checkpointed pitch scan.
 
-    Arguments and certificates retain the restricted primitive's semantics.
-    Physical pitch nodes and weights are live arrays, shared by every surface
-    and eta. A checkpointed one-pitch ``lax.scan`` sums radial rows *before*
-    the outer square. Any failed pitch invalidates the whole band; no failed
-    population is discarded. Rematerializing the scan body avoids retaining
-    the large bounce intermediates for all pitches in a reverse-mode solve.
-    This changes execution only, not coverage, normalization or the functional.
+    Pitch nodes and weights stay live. Sum radial rows before squaring;
+    invalidate the band if any pitch fails, including zero-weight padding.
+    Recompute bounce intermediates during reverse mode to reduce memory.
+    Arguments and outputs follow the batched primitive's conventions.
     """
     import jax
     bc, wb = jnp.asarray(bcrit), jnp.asarray(bcrit_weight)

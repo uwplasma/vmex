@@ -799,122 +799,46 @@ the hard one (the smoothing deliberately cannot see structure below
 toward it as ``temperature`` decreases with a correspondingly finer
 budget.  Optimize the surrogate, report the hard value.
 
-DeltaRes map reductions
-~~~~~~~~~~~~~~~~~~~~~~~
+DeltaRes
+~~~~~~~~
 
-:mod:`vmex.core.deltares` implements the shear-cancelled harmonic strength and
-published phase-space reduction of Labbate, Paul and Chambliss
-(`arXiv:2609.01890v1 <https://arxiv.org/abs/2609.01890>`_).
-:func:`~vmex.core.deltares.deltares_from_maps` accepts complete, matched
-full-bounce displacements and speed-normalized periods. The restricted action
-primitive below constructs a finite-cell diagnostic, but does not supply a
-full-population equilibrium objective. These tests do not validate a particle-loss
-prediction or a production equilibrium derivative.
+:mod:`vmex.core.deltares` implements the shear-cancelled harmonic strength
+and radial reduction of `Labbate, Paul and Chambliss
+<https://arxiv.org/abs/2609.01890>`_.
+:func:`~vmex.core.deltares.deltares_from_maps` takes complete, matched
+full-bounce displacements and speed-normalized periods. The caller supplies
+well identity, signed flux, physical pitch and a common integration domain.
+Its default rotation is ``frequency_ratio``; ``mean_map`` is also available.
 
-The radial deposition counts every crossing, including both contributions
-when two crossings share a node. Exact node crossings are counted once.
-Rational plateaus, resolved tangencies and isolated rational nodes return
-NaN. The lower-level deposition accepts known-absence masks and never bridges
-gaps; the combined reduction requires complete coverage. Numerical failure
-must not be relabeled as known absence. The caller must establish well
-identity, physical pitch, flux orientation, full-bounce factors and a matched
-spatial domain for the numerator and denominator.
+:func:`~vmex.core.deltares.restricted_action_deltares_from_boozer` computes
+these quantities from both parities of a Boozer spectrum, using one complete
+well per eta and physical pitch node in a bounded field-line cell. It uses
+live bounce roots and a three-point radial action derivative. Extra, cut or
+unresolved wells invalidate the result. Mode sampling, field positivity,
+root accuracy and family-continuity checks are returned with the result;
+eta and quadrature convergence still require refinement. The default rotation
+is ``mean_map``. ``full_population`` is always false.
 
-``frequency_ratio`` retains the archive's ratio of mean precession to mean
-bounce frequency, while retaining physical zero precession. ``mean_map`` is an
-explicit alternative. The default scalar is half the squared norm of the
-reduced radial rows, with zero target and unit weights. It retains the
-paper's denominator factor two, which is not automatically a probability
-normalization. Neither a smaller reduction nor a passing coefficient gradient
-check qualifies a production boundary derivative or independent confinement.
+Use ``canonical_flux_sign=+1`` with
+:func:`~vmex.core.omnigenity.boozer_spectrum_state`, whose flux is already
+canonical, and ``-1`` with raw VMEC ``Phi/(2*pi)``. Negative canonical flux
+stays negative. An extra sign flip reverses rotation but can leave a sum over
+symmetric signed resonances and its gradient unchanged.
 
-:func:`~vmex.core.deltares.restricted_action_deltares_from_boozer` reuses
-:func:`~vmex.core.bounce.bounce_action` for one complete well per eta and
-physical pitch node on a bounded native field-line cell. It retains both
-spectral parities, live roots and line elements. A local three-point stencil
-on actual physical flux coordinates differentiates the full-bounce action
-at fixed eta and physical pitch. Action harmonics supply the stabilized
-power directly; no numerical angular derivative or shear division is needed.
-Its default ``mean_map`` rotation differs explicitly from the supplied-map
-reducer's archive-compatible ``frequency_ratio`` default; both are selectable.
 :func:`~vmex.core.deltares.streamed_restricted_action_deltares_from_boozer`
-executes the same physical pitch quadrature through a checkpointed one-pitch
-scan. It sums the reduced radial rows before applying the outer square and
-invalidates the complete band if any pitch fails. This permits composing the
-same restricted functional with a state/implicit-solve derivative without
-retaining every pitch's bounce intermediates at once.
+uses a checkpointed pitch scan to reduce reverse-mode memory. It sums radial
+rows before squaring and rejects the whole band if any pitch fails.
+:func:`~vmex.core.deltares.pitch_band_phase_space_mass` independently integrates
+the unit-score pitch measure over all accessible segments, including cut and
+passing segments. Both reductions retain the paper's factor two; neither mass
+is a probability or a full-population coverage fraction.
 
-Both action primitives require ``canonical_flux_sign`` explicitly. Use ``+1``
-for :func:`~vmex.core.omnigenity.boozer_spectrum_state` output, which already
-contains canonical signed flux, and ``-1`` to convert raw VMEC ``Phi/(2*pi)``.
-Negative canonical flux must remain negative. A second sign flip reverses the
-rotation and resonance labels but can leave a scalar summing symmetric signed
-resonances unchanged; scalar and gradient checks alone cannot certify this sign.
-
-This primitive always returns ``full_population=False``. Its fixed pitch band
-and finite-cell denominator define a restricted diagnostic. It rejects extra,
-cut, unresolved and discontinuously matched wells; it does not fill missing
-populations with zeros. ``paper_pitch_band_mass`` is the unit-score integral
-with the same paper convention, not a full-domain coverage fraction. Spectral
-root residuals, slopes, forbidden boundary margins and family continuity
-certificates supplement the bounce kernel's topology masks. Integer mode and
-Nyquist checks reject aliased spectra. A Fourier bound on the second trace
-derivative certifies that each sampled interval either has constant sign
-relative to the pitch level or is strictly monotonic; this rules out hidden
-wells along each sampled eta line. The same bound checks continuous field
-positivity, rather than positivity only at the knots. Continuation between eta samples still
-requires refinement. These checks require resolution studies, especially near a separatrix where action
-can be accurate while the bounce period is unresolved.
-
-:func:`~vmex.core.deltares.pitch_band_phase_space_mass` provides an independent
-unit-score population audit by integrating physical pitch analytically before
-the spatial quadrature. For a positive band ``[L,U]`` it returns
-``2 <sqrt((1-B/U)+)-sqrt((1-B/L)+)>``, with the supplied ``dl/B`` spatial
-weights. It counts all accessible segments, including cut or passing
-components in a finite trace. Thus agreement with a sum of complete-well
-periods is a useful domain-counting check only when those components are
-absent. The factor two is retained; this mass is not a probability. The
-analytic pitch integral avoids root pairing and the integrable separatrix
-singularity, but still requires converged spatial quadrature. Its derivative
-is not defined when a quadrature field value equals a pitch endpoint.
-
-For a bounded trace, the largest complete-well level at position ``x`` is
-``H(x)=min(max_left B,max_right B)``. Replacing ``U`` by ``min(U,H(x))``
-in the local density separates complete and cut population without dropping
-any well. Sampled prefix and suffix maxima and a Fourier curvature bound
-can bracket this measure. This establishes population accounting, not
-continuation of bounce maps through births or separatrices. Near a
-nondegenerate minimum the action is linear in pitch depth and the period
-has a finite oscillator limit. Near a nondegenerate maximum the period
-diverges logarithmically; an excluded pitch tail has mass of order
-``depth*log(1/depth)``. Small omitted population does not bound missing
-resonance power or derivatives of the action.
-
-A fixed physical band chosen from geometry can therefore define a conditional
-experiment if its exclusion is reported and the full objective and ordinary
-equilibrium derivative are independently qualified on that band. Full
-population requires matching all connected well branches and resolving their
-birth, merge and boundary-transition cells. An absent-to-present radial edge
-cannot be set to zero: a resonance can occur between the branch birth and
-the first sampled present node. A whole-torus maximum defines a common trapped
-threshold for dense irrational field lines; a rational field line can have a
-different, label-dependent maximum.
-
-The canonical flux sign is explicit: VMEX's ESSOS adapter uses
-``psi0=-Phi_edge/(2*pi)``. Reversing this sign reverses rotation but leaves
-harmonic power invariant. At finite equilibrium force error, a direct drift
-comparison must retain actual curvature independently of grad-B drift.
-Their radial coefficients differ by ``mu0*J.dot(grad(s))/B**2``; substituting
-one for the other assumes a current tangent to the flux surfaces. A small
-force residual alone does not bound this error relative to a small drift.
-
-The retained outer square also has an intrinsic grid-phase effect. An
-isolated unit crossing a fraction ``t`` across a radial cell deposits rows
-``(1-t,t)`` and gives ``loss=((1-t)**2+t**2)/2``, ranging from one quarter to
-one half with unchanged physical strength. Refining the grid does not remove
-this factor. Compare radial action derivatives at common physical surfaces;
-do not mistake convergence of those derivatives for convergence of the
-squared deposited loss. Any alternative aggregation changes the functional
-and must be evaluated as an explicit ablation. Optimization additionally
-requires derivatives checked against ordinary converged equilibrium re-solves
-and held-out physical orbit comparisons at matched field and size.
+The loss is half the sum of squared deposited radial rows. An isolated unit
+crossing at cell fraction ``t`` gives ``((1-t)**2+t**2)/2``, so the loss varies
+between 1/4 and 1/2 with grid alignment even at fixed physical strength.
+Rational plateaus and resolved tangencies return NaN. Known-absent wells may
+be masked in the lower-level deposition; unresolved wells must not be masked.
+Boundary derivatives need ordinary converged equilibrium re-solves, and
+confinement predictions need independent orbit comparisons. For finite force
+error, those comparisons must retain actual curvature rather than infer it
+from grad-B drift.

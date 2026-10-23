@@ -280,6 +280,12 @@ def test_three_surface_raw_kernel_matches_global_nonlinear_rows(case):
 # ---------------------------------------------------------------------------
 
 
+def _m1_test_input(lasym):
+    inp = VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres")
+    inp = inp.change_resolution(mpol=3, ntor=2, ntheta=12, nzeta=10)
+    return dataclasses.replace(inp, lasym=lasym, ns_array=np.array([5]))
+
+
 @pytest.mark.parametrize("lasym", [False, True])
 @pytest.mark.parametrize("lconm1", [False, True])
 def test_released_m1_projector_matches_force_support(lasym, lconm1):
@@ -289,9 +295,7 @@ def test_released_m1_projector_matches_force_support(lasym, lconm1):
     project an actual fresh force, including the asymmetric n=0 Z equation.
     Boundary rows must still follow the full parameter-dependent boundary.
     """
-    inp = VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres")
-    inp = inp.change_resolution(mpol=3, ntor=2, ntheta=12, nzeta=10)
-    inp = dataclasses.replace(inp, lasym=lasym, ns_array=np.array([5]))
+    inp = _m1_test_input(lasym)
     cfg = im.make_config(inp, lconm1=lconm1)
     p = im.params_from_input(inp)
     from vmex.core.setup import run_setup
@@ -333,9 +337,7 @@ def test_released_m1_projector_matches_force_support(lasym, lconm1):
 
 @pytest.mark.parametrize("lasym", [False, True])
 def test_prescribed_m1_gauge_keeps_only_released_interior_family(lasym):
-    inp = VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres")
-    inp = inp.change_resolution(mpol=3, ntor=2, ntheta=12, nzeta=10)
-    inp = dataclasses.replace(inp, lasym=lasym, ns_array=np.array([5]))
+    inp = _m1_test_input(lasym)
     resolution = solver.resolution_from_input(inp)
     shape = (resolution.ns, solver._static_tables(resolution)[0].mnmax)
     rng = np.random.default_rng(42)
@@ -1452,9 +1454,7 @@ def test_equilibrium_wout_unconstrained_basis_matches_constrained(lasym):
     from vmex.core.residuals import m1_physical_to_constrained
     from vmex.core.transforms import physical_to_internal_scale
 
-    inp = VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres")
-    inp = inp.change_resolution(mpol=3, ntor=2, ntheta=12, nzeta=10)
-    inp = dataclasses.replace(inp, lasym=lasym, ns_array=np.array([5]))
+    inp = _m1_test_input(lasym)
     runtime = solver.prepare_runtime(inp, lconm1=False)
     modes = runtime.modes
     scale = physical_to_internal_scale(modes, runtime.trig)

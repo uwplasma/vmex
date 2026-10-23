@@ -5,8 +5,13 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from scipy.integrate import quad
-from vmex.core.deltares import (helical_angles, normalized_bump, paper_average,
-                               pitch_band_phase_space_mass, resonance_pairs, stabilized_power)
+from vmex.core.deltares import (
+    _physical_flux_derivative, deltares_from_maps, helical_angles,
+    linear_crossing_weights, normalized_bump, paper_average,
+    pitch_band_phase_space_mass, resonance_pairs, stabilized_power,
+    restricted_action_deltares_from_boozer as batched,
+    streamed_restricted_action_deltares_from_boozer as streamed,
+)
 
 
 def test_fourier_normalization():
@@ -120,15 +125,6 @@ def test_energy_strength_scaling():
                                    ratio * stabilized_power(jnp.sin(eta), 4), atol=1e-29)
 
 
-def test_ratio_of_means_not_mean_rotation():
-    tau, precession = np.array([1., 2.]), np.array([.2, .6])
-    assert abs(np.mean(precession * tau / (2 * np.pi)) - np.mean(precession) / np.mean(2 * np.pi / tau)) > .02
-
-
-def test_deposited_square_grid_phase():
-    assert 1.0**2 + 0.0**2 == 2 * (.5**2 + .5**2)
-
-
 def test_published_normalization_complete_single_well():
     eps, bmax = .2, 1.2
     nodes, weights = np.polynomial.legendre.leggauss(160)
@@ -194,12 +190,6 @@ def test_pitch_integrated_population_live_geometry_and_weight_derivative():
     np.testing.assert_allclose(ad, (f(1e-5) - f(-1e-5)) / 2e-5, rtol=1e-8)
 
 
-def test_bounce_cancellation_before_squaring():
-    derivative = np.sin(2 * np.pi * np.arange(128) / 128 + .31)
-    assert np.mean(derivative)**2 < 1e-28
-    np.testing.assert_allclose(np.mean(derivative**2), .5, rtol=1e-13)
-
-
 @pytest.mark.parametrize('omega,expected', [
     ([-1., 1.], [.5, .5]), ([1., -1.], [.5, .5]),
     ([-1., 0., 1.], [0., 1., 0.]), ([0., .2, 1.], [1., 0., 0.]),
@@ -207,19 +197,16 @@ def test_bounce_cancellation_before_squaring():
     ([-2., -1.], [0., 0.]), ([.2, .2], [0., 0.]),
 ])
 def test_crossing_deposition(omega, expected):
-    from vmex.core.deltares import linear_crossing_weights
     got = jax.jit(linear_crossing_weights)(jnp.array(omega), jnp.array([0.]))
     np.testing.assert_allclose(got[:, 0], expected)
 
 
 @pytest.mark.parametrize('omega', [[0., 0.], [-1., 0., -1.], [1., 0., 1.], [0., np.nan]])
 def test_degenerate_crossing_is_not_zero(omega):
-    from vmex.core.deltares import linear_crossing_weights
     assert np.isnan(linear_crossing_weights(jnp.array(omega), jnp.array([0.]))).all()
 
 
 def test_crossing_gaps_shapes_and_multiple_families():
-    from vmex.core.deltares import linear_crossing_weights
     omega = jnp.array([[-1., -.2], [np.nan, .6], [1., 1.]])
     valid = jnp.isfinite(omega)
     got = linear_crossing_weights(omega, jnp.array([0.]), valid)
@@ -242,7 +229,6 @@ def _maps(amplitude=.02):
 
 
 def test_maps_reduction_and_gradient():
-    from vmex.core.deltares import deltares_from_maps
     def loss(a):
         return deltares_from_maps(*_maps(a), p_max=0, q_max=2)['loss']
     out = jax.jit(lambda a: deltares_from_maps(*_maps(a), p_max=0, q_max=2))(.02)
@@ -257,7 +243,6 @@ def test_maps_reduction_and_gradient():
 
 
 def test_maps_rotation_zero_precession_and_rejection():
-    from vmex.core.deltares import deltares_from_maps
     ds, de, tau, *rest = _maps()
     tau = tau.at[:, ::2].set(4.)
     de = de.at[:, ::2].set(0.)
@@ -288,12 +273,19 @@ def _restricted_input(x=None):
                 canonical_flux_sign=1, n_eta=9, n_t=129, quadrature_order=24, q_max=2)
 
 
-def test_physical_flux_local_stencils():
-    from vmex.core.deltares import _physical_flux_derivative
-    s = jnp.array([.1, .17, .34, .58, .91])
+@pytest.mark.parametrize('count', [3, 5])
+def test_physical_flux_local_stencils(count):
+    s = jnp.array([.1, .17, .34, .58, .91])[:count]
     values = jnp.stack((1 + 3 * s + 4 * s**2, 2 - s), axis=1)
-    expected = np.column_stack((3 + 8 * s, -np.ones(5)))
+    expected = np.column_stack((3 + 8 * s, -np.ones(count)))
     np.testing.assert_allclose(_physical_flux_derivative(values, -2 * s, -2), expected, atol=2e-14)
+    def derivative(psi, edge):
+        x = psi / edge
+        return _physical_flux_derivative(jnp.stack((1 + 3 * x + 4 * x**2, 2 - x), axis=1), psi, edge)
+    direction = jnp.arange(1., count + 1)
+    tangent = jax.jvp(derivative, (-2 * s, -2.), (direction, .3))[1]
+    np.testing.assert_allclose(tangent[:, 0], 8 * (-direction / 2 + .15 * s), atol=2e-12)
+    np.testing.assert_allclose(tangent[:, 1], 0., atol=2e-12)
     for psi in (jnp.ones(2), jnp.ones((2, 2))):
         with pytest.raises(ValueError):
             _physical_flux_derivative(values, psi, 1.)
@@ -322,13 +314,12 @@ def _cosine_action_oracle(parameters, pitch):
 
 
 def test_restricted_cosine_independent_action_period_and_derivatives():
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
     parameters = jnp.array([1.01, .21, 2.03, .51])
     s = jnp.array([.3, .5, .7])
     slopes = jnp.array([.02, .01, .03, .02])
     def integrals(p):
         profile = p[None] + (s - .5)[:, None] * slopes
-        out = restricted_action_deltares_from_boozer(
+        out = batched(
             bmnc_b=jnp.stack((profile[:, 0], -profile[:, 1]), axis=1),
             xm_b=jnp.array([0, 1]), xn_b=jnp.array([0, 0]), iota_b=profile[:, 3],
             G_b=profile[:, 2], I_b=jnp.zeros(3), nfp=2, psi_b=2 * s, psi_edge=2.,
@@ -345,9 +336,8 @@ def test_restricted_cosine_independent_action_period_and_derivatives():
 
 
 def test_restricted_live_coefficient_gradient_parity_and_flux_sign():
-    from vmex.core.deltares import restricted_action_deltares_from_boozer as evaluate
     x, direction = jnp.array([0., .002, .001]), jnp.array([.4, .3, -.2])
-    scalar = jax.jit(lambda x: evaluate(**_restricted_input(x))['loss'])
+    scalar = jax.jit(lambda x: batched(**_restricted_input(x))['loss'])
     value, gradient = jax.jit(jax.value_and_grad(scalar))(x)
     assert np.isfinite(value) and value > 0
     expected = float(gradient @ direction)
@@ -355,41 +345,37 @@ def test_restricted_live_coefficient_gradient_parity_and_flux_sign():
               for h in (1e-5, 3e-6, 1e-6)]
     assert min(errors) < 3e-5
     inputs = _restricted_input(x)
-    out = evaluate(**inputs)
-    reversed_sign = evaluate(**dict(inputs, canonical_flux_sign=-1))
+    out = batched(**inputs)
+    reversed_sign = batched(**dict(inputs, canonical_flux_sign=-1))
     np.testing.assert_allclose(reversed_sign['omega'], -out['omega'], atol=1e-13)
     np.testing.assert_allclose(reversed_sign['harmonic_power'], out['harmonic_power'], atol=1e-13)
     np.testing.assert_allclose(reversed_sign['loss'], out['loss'], rtol=1e-13)
     reversed_gradient = jax.jit(jax.grad(
-        lambda x: evaluate(**dict(_restricted_input(x), canonical_flux_sign=-1))['loss']))(x)
+        lambda x: batched(**dict(_restricted_input(x), canonical_flux_sign=-1))['loss']))(x)
     np.testing.assert_allclose(reversed_gradient, gradient, rtol=1e-12, atol=1e-13)
     # The same physical flux supplied in the opposite input convention must
     # preserve signed rotation; positivity is not the canonical convention.
-    converted = evaluate(**dict(inputs, psi_b=-inputs['psi_b'],
+    converted = batched(**dict(inputs, psi_b=-inputs['psi_b'],
                                 psi_edge=-inputs['psi_edge'], canonical_flux_sign=-1))
     np.testing.assert_allclose(converted['omega'], out['omega'], atol=1e-13)
-    mirrored = evaluate(**_restricted_input(x.at[1].set(-x[1])))
+    mirrored = batched(**_restricted_input(x.at[1].set(-x[1])))
     np.testing.assert_allclose(mirrored['action'][:, ::-1], out['action'], rtol=1e-13)
     assert out['valid'] and not out['full_population']
     assert np.all(np.asarray(out['paper_pitch_band_mass']) > 0)
-    ratio = evaluate(**dict(_restricted_input(x), rotation='frequency_ratio'))
+    ratio = batched(**dict(_restricted_input(x), rotation='frequency_ratio'))
     assert ratio['valid']
     assert np.max(np.abs(np.asarray(ratio['omega'] - out['omega']))) > 1e-6
 
 
 def test_restricted_requires_explicit_flux_convention():
-    from vmex.core.deltares import (restricted_action_deltares_from_boozer,
-                                   streamed_restricted_action_deltares_from_boozer)
     kwargs = _restricted_input()
     kwargs.pop('canonical_flux_sign')
-    for evaluate in (restricted_action_deltares_from_boozer, streamed_restricted_action_deltares_from_boozer):
+    for evaluate in (batched, streamed):
         with pytest.raises(TypeError, match='canonical_flux_sign'):
             evaluate(**kwargs)
 
 
 def test_streamed_pitch_rows_and_reverse_derivative_match_batched_primitive():
-    from vmex.core.deltares import (restricted_action_deltares_from_boozer as batched,
-                                   streamed_restricted_action_deltares_from_boozer as streamed)
     def evaluate(x, weights, pitch, fn):
         return fn(**dict(_restricted_input(x), bcrit=pitch, bcrit_weight=weights))
     x = jnp.array([0., .002, .001])
@@ -419,8 +405,6 @@ def test_streamed_pitch_rows_and_reverse_derivative_match_batched_primitive():
 
 
 def test_streamed_pitch_weight_padding_and_invalid_accumulation():
-    from vmex.core.deltares import (restricted_action_deltares_from_boozer as batched,
-                                   streamed_restricted_action_deltares_from_boozer as streamed)
     settings=dict(_restricted_input(), bcrit=jnp.array([1.01, 1.02, 1.03]))
     def evaluate(weights, mass=1.):
         kwargs=dict(settings,bcrit_weight=weights,mass=mass)
@@ -450,8 +434,7 @@ def test_streamed_pitch_weight_padding_and_invalid_accumulation():
     ({'boundary_forbidden_floor': 1.}, None), ({'endpoint_limit': 1e-6}, 'family_eta_valid'),
 ])
 def test_restricted_invalid_physics_and_coverage(patch, certificate):
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
-    out = restricted_action_deltares_from_boozer(**dict(_restricted_input(), **patch))
+    out = batched(**dict(_restricted_input(), **patch))
     assert not out['valid'] and np.isnan(out['loss']) and not out['full_population']
     if certificate is not None:
         assert not out[certificate]
@@ -464,18 +447,16 @@ def test_restricted_invalid_physics_and_coverage(patch, certificate):
     {'mass': np.ones(2)}, {'speed': np.ones(2)}, {'charge': np.ones(2)},
 ])
 def test_restricted_static_settings_and_shapes(patch):
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
     with pytest.raises(ValueError):
-        restricted_action_deltares_from_boozer(**dict(_restricted_input(), **patch))
+        batched(**dict(_restricted_input(), **patch))
 
 
 def test_restricted_exact_zero_rotation_is_retained():
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
     kwargs = _restricted_input()
     kwargs.update(bmnc_b=jnp.tile(jnp.array([1., -.2, 0.]), (3, 1)),
                   bmns_b=jnp.zeros((3, 3)), iota_b=jnp.full(3, .5),
                   G_b=jnp.full(3, 2.), I_b=jnp.zeros(3))
-    out = restricted_action_deltares_from_boozer(**kwargs)
+    out = batched(**kwargs)
     np.testing.assert_array_equal(out['omega'], 0.)
     assert np.max(np.asarray(out['harmonic_power'])) < 1e-26
     assert np.all(np.asarray(out['v_tau']) > 0)
@@ -484,7 +465,6 @@ def test_restricted_exact_zero_rotation_is_retained():
 
 
 def test_fixed_grid_deposition_phase_factor():
-    from vmex.core.deltares import linear_crossing_weights
     for phase in (0., .25, .5, .75, 1.):
         weights = linear_crossing_weights(jnp.array([-phase, 1 - phase]), jnp.array([0.]))[:, 0]
         np.testing.assert_allclose(weights.sum(), 1.)
@@ -501,12 +481,11 @@ def _alias_input():
 
 @pytest.mark.parametrize('amplitude', [.1, 0.])
 def test_restricted_trace_alias_rejected_including_zero_modes(amplitude):
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
     # sin(512*t) vanishes on all 513 knots and at the cosine's roots. A small
     # spectral root residual cannot detect the omitted interior wells.
     t = np.linspace(-np.pi, np.pi, 513)
     np.testing.assert_allclose(np.sin(512 * t), 0., atol=4e-13)
-    out = restricted_action_deltares_from_boozer(
+    out = batched(
         bmnc_b=np.array([[2, -.5, 0], [2, -.51, 0], [2, -.52, 0]]),
         bmns_b=np.tile([0, 0, amplitude], (3, 1)),
         xm_b=np.array([0, 1, 512]), xn_b=np.zeros(3), **_alias_input())
@@ -517,11 +496,10 @@ def test_restricted_trace_alias_rejected_including_zero_modes(amplitude):
 
 
 def test_restricted_eta_alias_rejected_with_resolved_line_sampling():
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
     # n=nfp*n_eta has identical phases at every sampled eta, hiding its drive.
     eta = 2 * np.pi * np.arange(9) / 9
     np.testing.assert_allclose(np.sin(9 * eta), 0., atol=3e-14)
-    out = restricted_action_deltares_from_boozer(
+    out = batched(
         bmnc_b=np.array([[2, -.5, 0], [2, -.51, 0], [2, -.52, 0]]),
         bmns_b=np.tile([0, 0, .001], (3, 1)),
         xm_b=np.array([0, 1, 0]), xn_b=np.array([0, 0, 9]), **_alias_input())
@@ -531,8 +509,7 @@ def test_restricted_eta_alias_rejected_with_resolved_line_sampling():
 
 
 def test_restricted_physical_mode_periodicity():
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
-    out = restricted_action_deltares_from_boozer(
+    out = batched(
         bmnc_b=np.array([[2, -.5], [2.01, -.5], [2.02, -.5]]),
         xm_b=np.array([0, .5]), xn_b=np.zeros(2),
         **dict(_alias_input(), t_bounds=(-5.5, 5.5)))
@@ -540,7 +517,7 @@ def test_restricted_physical_mode_periodicity():
     assert not out['valid'] and np.isnan(out['loss'])
     # QI eta closure alone does not require n/nfp to be an integer. Even an
     # unused invalid mode label must fail the physical field-period contract.
-    out = restricted_action_deltares_from_boozer(
+    out = batched(
         bmnc_b=np.array([[2, -.5, 0], [2, -.51, 0], [2, -.52, 0]]),
         xm_b=np.zeros(3), xn_b=np.array([0, 2, 1]),
         **dict(_alias_input(), nfp=2, M=0, N=2, t_bounds=(-np.pi / 2, np.pi / 2)))
@@ -549,7 +526,6 @@ def test_restricted_physical_mode_periodicity():
 
 
 def test_restricted_subgrid_well_rejected_below_nyquist():
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
     # Two analytic minima at 0 and pi, separated by maxima at cos(t)=-1/12.
     # The shallow minimum at pi lies below Bcrit but between two above-level
     # knots, creating a hidden pair of roots even though both Nyquist tests pass.
@@ -561,7 +537,7 @@ def test_restricted_subgrid_well_rejected_below_nyquist():
     assert field(np.pi) < bcrit < min(field(t[bracket - 1]), field(t[bracket]))
     inside = field(t) < bcrit
     assert np.count_nonzero(~inside[:-1] & inside[1:]) == 1
-    out = restricted_action_deltares_from_boozer(
+    out = batched(
         bmnc_b=np.tile([2, -.3, -.1], (3, 1)), xm_b=np.array([0, 2, 1]), xn_b=np.zeros(3),
         **dict(_alias_input(), G_b=np.array([10., 10.1, 10.2]), bcrit=np.array([bcrit]),
                n_t=66, t_bounds=(-np.pi / 2, 3 * np.pi / 2)))
@@ -572,12 +548,11 @@ def test_restricted_subgrid_well_rejected_below_nyquist():
 
 
 def test_restricted_negative_subgrid_field_rejected():
-    from vmex.core.deltares import restricted_action_deltares_from_boozer
     t = np.linspace(-np.pi / 2, 3 * np.pi / 2, 66)
     # All sampled values are positive, but the analytic minimum is negative.
     assert np.min(1 + 1.000001 * np.cos(t)) > 0
     assert 1 + 1.000001 * np.cos(np.pi) < 0
-    out = restricted_action_deltares_from_boozer(
+    out = batched(
         bmnc_b=np.tile([1, 1.000001], (3, 1)), xm_b=np.array([0, 1]), xn_b=np.zeros(2),
         **dict(_alias_input(), G_b=np.array([10., 10.1, 10.2]), bcrit=np.array([.5]),
                n_t=66, t_bounds=(-np.pi / 2, 3 * np.pi / 2)))

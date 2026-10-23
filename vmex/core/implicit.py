@@ -86,16 +86,10 @@ iterations, so their finite difference includes a response absent from this
 adjoint. :func:`frozen_path_directional_fd` diagnoses the fixed-family
 linearization; it does not qualify derivatives of that ordinary solve map.
 
-For an explicit production coordinate contract, ``m1_gauge=reference_state``
-prescribes only the released interior m=1 Z family in both the native solve
-and its implicit derivative. Supply the same reference to independent cold
-and warm re-solves (public scalar problems accept it in ``solve_kwargs``).
-Keep the reference fixed across trials; replacing it changes the forward
-map and adds a reference derivative absent from this adjoint. This opt-in
-path currently requires a single radial resolution. It leaves
-the full boundary parameter dependence live and does not alter default
-VMEC continuation. Ordinary re-solve finite differences remain necessary to
-qualify any solver-sensitive objective on the selected forward contract.
+``m1_gauge=reference_state`` fixes the released interior family in both the
+native solve and its implicit derivative. Keep the same reference across
+trials and qualify gradients with independent cold and warm re-solves.
+See ``docs/explanation/adjoint-gradients.md`` for the contract and limits.
 
 At a tight ``ftol``, with the state anchored as above, the difference that
 remains between the adjoint and a cold re-solve FD is the released m=1
@@ -640,7 +634,7 @@ def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
         return _device_pin(cfg, prepare_runtime(
             cfg.inp, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, lconm1=cfg.lconm1,
-            m1_gauge=getattr(cfg, "m1_gauge", None),
+            m1_gauge=cfg.m1_gauge,
             use_fft=False,
         ))
 
@@ -1491,14 +1485,14 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
         # (VMEC2000 behaves the same way).
         run = lambda init: solve_multigrid(  # noqa: E731
             inp2, ns_array=ns_arr, ftol_array=ftol_arr, mode=cfg.mode,
-            lconm1=cfg.lconm1, m1_gauge=getattr(cfg, "m1_gauge", None), raise_on_max_iterations=False,
+            lconm1=cfg.lconm1, m1_gauge=cfg.m1_gauge, raise_on_max_iterations=False,
             initial_state=init, use_fft=False,
                 device=solver_device)
     else:
         run = lambda init: solve(  # noqa: E731
             inp2, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, mode=cfg.mode,
-            lconm1=cfg.lconm1, m1_gauge=getattr(cfg, "m1_gauge", None), initial_state=init, use_fft=False,
+            lconm1=cfg.lconm1, m1_gauge=cfg.m1_gauge, initial_state=init, use_fft=False,
                 device=solver_device)
     # Seed ladder: perturbation prediction -> plain hot restart -> cold.
     # A bad warm seed must not fail the trial (only the initial guess is at

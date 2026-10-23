@@ -730,8 +730,11 @@ def _prescribed_m1_gauge(state, rt, *, velocity=False):
     if rt.m1_gauge is None:
         return state
     gauge = _m1_gauge_component(state, rt.modes, lasym=rt.setup.lasym)
-    return jax.tree.map(lambda x, q, ref: x - q + (0 if velocity else ref),
-                        state, gauge, rt.m1_gauge)
+    return replace(
+        state,
+        Z_sin=state.Z_sin - gauge.Z_sin + (0 if velocity else rt.m1_gauge.Z_sin),
+        Z_cos=state.Z_cos - gauge.Z_cos + (0 if velocity else rt.m1_gauge.Z_cos),
+    )
 
 
 def prepare_runtime(

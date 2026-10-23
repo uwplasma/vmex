@@ -187,62 +187,28 @@ derivative with that gauge held fixed.
 `tests/test_implicit_grad_fd.py::test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family`
 checks the closure.
 
-### Prescribing the released coordinate family
+### Fixing the released coordinate family
 
-An optional `m1_gauge` reference makes this coordinate choice part of the
-forward map. Only the reference's released **interior m=1 Z combinations**
-are retained; its other spectral coefficients, axis and edge are ignored.
-Native initialization, momentum and restart updates preserve those interior
-combinations. The full R/Z boundary still follows each trial's parameters.
-The implicit residual and independent native solves then describe the same
-coordinate contract:
+Pass a fixed `m1_gauge` solution to hold its released interior m=1 Z
+combinations in both the native solve and implicit residual. The boundary
+still follows the trial parameters; other reference coefficients are ignored.
 
 ```python
-import dataclasses
-import numpy as np
-from vmex import optimize as opt
-
-# Explicit controls replace the whole ladder; example tolerances need qualification.
-ns = int(np.max(np.asarray(inp.ns_array)))  # ignores trailing zero ladder entries
-single = dataclasses.replace(
-    inp, ns_array=np.asarray([ns]), ftol_array=np.asarray([1e-20]),
-    niter_array=np.asarray([20000]),
-)
-reference = opt.solve_equilibrium(single, raise_on_max_iterations=True, use_fft=False)
 solve_kwargs = {"m1_gauge": reference.solution, "use_fft": False}
 problem = opt.VmecProblem.from_loss(
-    single, loss, restart_from=reference, solve_kwargs=solve_kwargs,
-    adjoint_tol=1e-8, max_fsq_ratio=1., refine_tol=1e-10,
+    inp, loss, restart_from=reference, solve_kwargs=solve_kwargs,
 )
-# Use exactly the same fixed reference for both signs of independent FD trials.
-trial = opt.solve_equilibrium(
-    problem.input_from_x(x_trial), raise_on_max_iterations=True, **solve_kwargs,
-)
+trial = opt.solve_equilibrium(problem.input_from_x(x_trial), **solve_kwargs)
 ```
 
-Keep that reference fixed throughout the stage. Replacing it at each trial
-changes the forward map and introduces a reference derivative that this
-adjoint does not include. The option currently rejects multirung radial
-continuation, free-boundary inputs and force-balance polishing. Default VMEC
-solves remain unchanged. This is an explicit finite-resolution coordinate
-choice, not a certificate of continuum force balance or discretization
-accuracy. Check those independently.
-
-Use a reference from the same radial/mode resolution and `lconm1` basis
-as the solve. `Equilibrium.wout` converts `lconm1=False` states for the
-constrained-basis exporter without changing the stored state. Raw
-`wout_from_state`, `wout_from_result` and WOUT restart helpers retain their
-existing constrained-state convention.
-
-With this contract, ordinary warm and cold native re-solves are the
-production derivative check; a frozen-residual Newton finite difference is
-still only an internal linearization control. Resolve a step-size plateau
-and tighten native stopping tolerances until warm/cold termination errors
-are below the derivative tolerance. On the small QA regression at `ns=9`,
-`mpol=ntor=3`, `ftol=1e-20`, four boundary directions and four steps
-`3e-4` through `1e-5` agree for mean iota within 0.064% in both native
-restart strategies. This measured scope does not qualify other observables
-or resolutions automatically.
+Use the same reference, radial/mode resolution and `lconm1` basis for every
+trial. Changing the reference introduces a derivative the adjoint omits.
+This option supports single-resolution fixed-boundary solves without force
+polishing. Compare derivatives against warm and cold native re-solves over
+several step sizes, with stopping errors below the derivative tolerance.
+`Equilibrium.wout` converts unconstrained m=1 states for export without
+mutating them; raw WOUT conversion and restart helpers require constrained
+states.
 
 For free-boundary solves, compare against re-solves anchored by Newton steps
 on the same projected coupled residual. A converged free-boundary solve at
