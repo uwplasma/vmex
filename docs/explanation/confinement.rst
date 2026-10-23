@@ -840,7 +840,7 @@ Refine radial and angular sampling when validating the objective.
 ``dpsi/ds`` for physical formulas with a nonidentity ``APHI`` flux map.
 
 Persistent reference for scalar objectives
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Pass a compatible converged equilibrium as ``frozen_reference`` to keep
 values, gradients and materialized equilibria on the same discrete family:
