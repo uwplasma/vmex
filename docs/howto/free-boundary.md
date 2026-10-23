@@ -130,7 +130,13 @@ coil_field = vj.MgridField.from_coils(coils, order=3)   # ESSOS coils
 
 ## Key knobs
 
-- `EXTCUR` — coil-group currents scaling the mgrid field.
+- `EXTCUR` — coil-group currents scaling the mgrid field. Entries missing
+  for the mgrid's coil groups count as zero, as in VMEC2000; a nonzero entry
+  beyond them (a deck written for another mgrid) stops the run, where
+  VMEC2000 would silently ignore it. When the first NESTOR update finds the
+  vacuum field's circulation differing from the toroidal current by more than
+  1 % of R*BTOR (VMEC++'s `I_TOR` check), VMEX warns: the boundary may enclose
+  a coil, or the table is not a pure vacuum field.
 - `NVACSKIP` — iterations between full NESTOR solves; between them, cheap
   incremental updates reuse the factored potential matrix, and the cadence
   adapts toward convergence ({doc}`/explanation/nestor-vacuum`).
