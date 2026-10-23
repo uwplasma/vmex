@@ -20,7 +20,9 @@ record under `benchmarks/` names the revision it was measured at.
   opt-in position control (`LPOSITION_CONTROL`, #570), a DEL-BSQ gate and a
   coil-gradient test for single-stage runs (#614);
   `relax_free_boundary_constraint` removes the spectral-constraint bias of the LCFS
-  (LP-QA `|B|` error 1.4e-3 to 8.8e-5, alpha losses 6.7% to 0.4%; #626).
+  and returns the lowest-`fsq` iterate (LP-QA `|B|` error 1.4e-3 to 8.8e-5, alpha
+  losses 6.7% to 0.4%; W7-X 6.0e-4 to 6.2e-5 at `mpol = 12`, `ntor = 16`, NCSX
+  2.0e-4 to 6.8e-5; it needs `mpol` and `ntor` that resolve the coils; #626).
 - Opt-in radial preconditioner for the m = 0 lambda force,
   `lambda_m0_floor=1e-3` (#598). 3-D force polishing with prescribed current (#558).
 - `boozer_spectrum_state(..., geometry=True)` returns the Boozer R, Z, nu and

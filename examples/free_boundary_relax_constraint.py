@@ -7,7 +7,8 @@ This solves a vacuum free-boundary equilibrium in the Landreman & Paul (2021)
 precise-QA coils from ESSOS, relaxes it with ``vj.relax_free_boundary_constraint``
 (the same state continued with a weak constraint), and prints the largest
 relative ``|B|`` error against the direct Biot-Savart field on three flux
-surfaces, before and after.  NTOR = 12 resolves the coil ripple; see
+surfaces, before and after.  NTOR = 12 resolves the coil ripple, and the call
+returns the lowest-fsq iterate of its continuation; see
 docs/howto/free-boundary-relaxation.md.
 """
 
@@ -109,3 +110,4 @@ print(f"{'':>10s} {'fsq':>8s} " + " ".join(f"{'s = ' + format(s, 'g'):>10s}" for
 for label, res in (("converged", converged), ("relaxed", relaxed)):
     fsq = float(res.fsqr) + float(res.fsqz) + float(res.fsql)
     print(f"{label:>10s} {fsq:8.1e} " + " ".join(f"{e:10.1e}" for e in b_error(res)))
+print(f"\nrelaxation kept iteration {relaxed.iterations} of {RELAX_ITERATIONS}")
