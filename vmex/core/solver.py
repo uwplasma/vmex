@@ -2304,6 +2304,10 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         residuals=initial_residuals,
     )
 
+    # Silent solves have no per-block host work (rows, stop hook): take the
+    # single-sync while lane, whose iterates are identical to the CLI blocks.
+    if mode == "cli" and not verbose and STOP_HOOK.get() is None:
+        mode = "jit"
     if mode == "jit":
         # The while lanes donate the carry; _initial_carry aliases some leaves
         # (xstore=state, shared cache zeros), so copy to distinct buffers —
