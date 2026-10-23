@@ -456,7 +456,9 @@ Free boundary
    * - ``EXTCUR``
      - —
      - implemented
-     - External coil-group currents [A].
+     - External coil-group currents [A].  Missing entries are zero, as in
+       VMEC2000; a nonzero entry beyond the mgrid's coil groups stops the run
+       (VMEC2000 drops it silently).
    * - ``NVACSKIP``
      - 1
      - implemented

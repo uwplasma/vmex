@@ -750,6 +750,62 @@ def test_call_lane_emits_notice_once_before_compile():
     assert len(notices) == 1, "eager passthrough must not notice"
 
 
+def test_itor_mismatch_check_follows_the_vmecpp_criterion():
+    """``|ctor - bsubuvac| / |rbtor| > 1e-2`` warns; anything else, or a degenerate input, is silent."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert not FB._warn_itor_mismatch(0.0500, 0.0549, -0.5)    # 0.98 %
+        assert not FB._warn_itor_mismatch(0.0500, 0.0500, -0.5)
+        assert not FB._warn_itor_mismatch(0.0500, 0.0900, 0.0)     # no R*BTOR: nothing to scale by
+        assert not FB._warn_itor_mismatch(float("nan"), 0.05, -0.5)
+    with pytest.warns(UserWarning, match=r"I_TOR MISMATCH.*4\.\d+e-02 MA.*TOROIDAL CURRENT.*by 1\.20%") as rec:
+        assert FB._warn_itor_mismatch(0.0500, 0.0560, -0.5)        # sign-independent, 1.20 %
+    assert "EXTCUR/CURTOR" in str(rec[0].message)
+    with pytest.warns(UserWarning, match="I_TOR MISMATCH"):
+        assert FB._warn_itor_mismatch(0.0560, 0.0500, 0.5)
+
+
+def _first_vacuum_step_warnings(ab_inputs, extcur_scale):
+    """Run the first (ivac = 0) NESTOR update on the bundled synthetic mgrid; return its warnings."""
+    import types
+    import warnings
+
+    inp, res, rt = ab_inputs["inp"], ab_inputs["res"], ab_inputs["rt"]
+    rt = dataclasses.replace(rt, presf_ns_scale=FB._presf_ns_scale(inp, int(res.ns)))
+    basis, fused, _lane = FB._vacuum_executables(
+        res, mf=int(inp.mpol) + 1, nf=int(inp.ntor),
+        signgs=int(rt.setup.signgs), wint=np.asarray(rt.trig.wint),
+        modes=rt.modes, axis_r0=jnp.asarray(ab_inputs["axis_r"]),
+        axis_z0=jnp.asarray(ab_inputs["axis_z"]),
+    )
+    field = dataclasses.replace(
+        ab_inputs["field"], extcur=extcur_scale * jnp.asarray(ab_inputs["field"].extcur))
+    fb = FB.FreeBoundaryState()
+    fb.ivac = 0
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        FB._vacuum_step(carry=types.SimpleNamespace(state=ab_inputs["state"]), rt=rt, fb=fb,
+                        basis=basis, fused_vac=fused, field=field, ivacskip=0,
+                        emit=lambda *a, **k: None, verbose=False)
+    return [str(w.message) for w in caught if "I_TOR MISMATCH" in str(w.message)]
+
+
+def test_first_vacuum_update_warns_when_the_mgrid_circulation_disagrees_with_ctor(ab_inputs):
+    """The bundled synthetic mgrid is not a vacuum field: its coil table carries circulation.
+
+    On the deck's initial surface the vacuum circulation exceeds the toroidal
+    current by 0.9 % of R*BTOR at the deck's EXTCUR (1.01 % once the solve has
+    moved the boundary: the printed 4.69e-2 MA against 4.32e-2 MA), at the
+    edge of VMEC++'s 1 % tolerance.  The excess scales with the coil currents,
+    so doubling them is a clear violation.
+    """
+    assert _first_vacuum_step_warnings(ab_inputs, 1.0) == []
+    doubled = _first_vacuum_step_warnings(ab_inputs, 2.0)
+    assert len(doubled) == 1 and "I_TOR MISMATCH" in doubled[0] and "TOROIDAL CURRENT" in doubled[0]
+
+
 def test_cli_missing_mgrid_fallback_warns(tmp_path):
     """CLI policy: missing mgrid -> fixed-boundary fallback warning (VMEC2000)."""
     import types
