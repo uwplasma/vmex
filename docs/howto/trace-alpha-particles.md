@@ -38,6 +38,7 @@ A WOUT whose spectrum looks truncated (`spectral_truncation > 3e-3`) triggers a 
 | `--collisional` | off | Monte Carlo collisions on electrons, D and T | about none |
 | `--trace-ne0 N0`, `--trace-te0 T0` | `4e20`, `12` | on-axis electron density [m^-3] and temperature [keV] | none |
 | `--trace-no-scale` | off | trace the equilibrium at its own size and field | none |
+| `--trace-angle-grid N` | 6 | angular table points per shortest wavelength; 0 evaluates the retained Fourier spectrum directly | table interpolation accuracy |
 | `--trace-energy-eV E`, `--trace-mass-kg M`, `--trace-charge-coulomb Q` | alpha | kinetic energy [eV], mass [kg] and signed charge [C] of another species; with `--collisional`, a particle below 1.5 T is thermalised, so low-energy ions stop at once | through speed and drifts |
 | `--trace-no-resolution-check` | off | skip the truncated-spectrum warning ({doc}`trace-resolution`) | none |
 | `--scale-target axis` | `volavgB` | ARIES-CS convention of the in-memory scaling | none |
@@ -243,8 +244,7 @@ print(result.loss_fraction, result.loss_fraction_sigma)
 vj.plot_tracing(result, "figs", name="case")
 ```
 
-`trace_alphas` accepts a path or an in-memory
-{class}`~vmex.core.wout.WoutData` and returns an
+`trace_alphas` accepts a path or an in-memory {class}`~vmex.core.wout.WoutData` and returns an
 {class}`~vmex.core.tracing.AlphaTracingResult`. The exact loss fraction is
 piecewise constant in the boundary, so use it to certify a design, not as an
 optimization objective.

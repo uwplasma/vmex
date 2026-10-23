@@ -168,6 +168,9 @@ that the objective modules share live in one place and are re-exported by
 .. automodule:: vmex.core.qi
    :members:
 
+.. automodule:: vmex.core.pwo
+   :members:
+
 .. automodule:: vmex.core.maxj
    :members:
 

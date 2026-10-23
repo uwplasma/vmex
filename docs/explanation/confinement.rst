@@ -240,6 +240,16 @@ Rodríguez, Helander & Goodman (2024). It plots
 has concentric circular contours. This display convention does not change the
 physical-pitch contract of the optimization objectives.
 
+Piecewise omnigenity
+~~~~~~~~~~~~~~~~~~~~
+
+Piecewise omnigenity allows distinct trapped-orbit families to have different
+constant bounce actions. Validate each family's action at fixed physical pitch;
+pooling wells can penalize allowed differences between families.
+:class:`~vmex.core.pwo.CanonicalPwOResidual` fits a smooth periodic field target;
+:class:`~vmex.core.pwo.MappedPwOResidual` penalizes mapped-field variance.
+Neither target residual establishes action invariance or confinement.
+
 The constructed-QI target
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

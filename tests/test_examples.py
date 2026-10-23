@@ -180,6 +180,9 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_optimization_optax.py",
     "examples/optimization/QI_optimization_scipy.py",
     "examples/optimization/QP_optimization.py",
+    "examples/optimization/pwO_optimization.py",
+    "examples/optimization/pwO_optimization_finite_beta.py",
+    "examples/optimization/single_stage_pwO_optimization.py",
     "examples/optimization/omnigenity_epsilon_gammac_maxj.py",
     "examples/optimization/optimize_bootstrap_current.py",
     "examples/optimization/single_stage_free_boundary_optimization.py",
@@ -1062,6 +1065,209 @@ def test_qi_optimization_example(tmp_path):
     assert totals is not None
     assert all(np.isfinite(float(value)) for value in totals.groups())
     assert (tmp_path / "wout_QI_optimized.nc").exists()
+
+
+@pytest.mark.full
+@pytest.mark.parametrize("family", ["canonical", "mapped"])
+@pytest.mark.parametrize("finite_beta", [False, True])
+def test_pwo_stage1_example(tmp_path, family, finite_beta):
+    suffix = "_finite_beta" if finite_beta else ""
+    _run_example(EXAMPLES / "optimization" / f"pwO_optimization{suffix}.py", tmp_path,
+                 VMEX_PWO_FAMILY=family)
+    stem = f"pwO{suffix}_optimized"
+    summary = json.loads((tmp_path / f"{stem}_summary.json").read_text())
+    assert summary["family"] == family
+    assert summary["checks"]["converged"] and summary["checks"]["valid target/map"]
+    assert summary["actual_s"] == [0.5]
+    assert summary["metrics"]["fine"] < summary["metrics"]["initial_fine"]
+    assert all(np.all(np.isfinite(value)) for value in summary["metrics"].values())
+    assert not summary["research_validation_complete"]
+    assert (tmp_path / f"wout_{stem}.nc").exists()
+
+
+@pytest.mark.parametrize("theta_shift,zeta_shift", [(0, 0), (0, 1), (1, 0), (1, 1)])
+@pytest.mark.parametrize("nfp,iota,t1,t2", [(2, -0.42, 0.3, -3.0),
+                                            (5, -0.9, 0.441421356, -3.141421356)])
+def test_pwo_canonical_seed_phase_matches_periodic_field(nfp, iota, t1, t2, theta_shift, zeta_shift):
+    import runpy
+    from vmex.core.pwo import canonical_pwo_field
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    theta = 2 * np.pi * np.arange(24)[None, :, None] / 24
+    zeta = 2 * np.pi * np.arange(24)[None, None, :] / (24 * nfp)
+    params = dict(iota=iota, nfp=nfp, bmin=1.0, bmax=2.0, t1=t1, t2=t2)
+    original = canonical_pwo_field(theta, zeta, zeta_center=0.0, **params)
+    selected_theta, selected_zeta = theta_shift * np.pi, zeta_shift * np.pi / nfp
+    shifted = canonical_pwo_field(theta, zeta, theta_center=selected_theta,
+                                  zeta_center=selected_zeta, **params)["B_target"]
+    rolled = np.roll(original["B_target"], (theta_shift * 12, zeta_shift * 12), axis=(-2, -1))
+    np.testing.assert_allclose(rolled, shifted, atol=2e-14, rtol=2e-14)
+    if nfp == 5:
+        assert np.min(original["corner_margin"]) < 0  # valid patch crosses the centered cell
+    theta_phase, zeta_phase, costs = example["canonical_seed_phase"](shifted, np.asarray(original["B_target"]), nfp)
+    assert (theta_phase, zeta_phase) == pytest.approx((selected_theta, selected_zeta))
+    assert costs[2 * theta_shift + zeta_shift] == pytest.approx(0.0, abs=1e-25)
+    with pytest.raises(ValueError, match="even angular grids"):
+        example["canonical_seed_phase"](shifted[..., :-1], np.asarray(original["B_target"])[..., :-1], nfp)
+
+    target = example["make_target"]([0.5], family="canonical", bmin=1.0, bmax=2.0,
+                                     b_ref=1.5, options={}, grid=39, iota_sign=-1.0,
+                                     theta_center=theta_phase, zeta_center=zeta_phase)
+    score = target.kernel(bmnc_b=np.array([[1.5]]), xm_b=np.array([0]), xn_b=np.array([0]),
+                          iota_b=np.array([iota]), nfp=nfp, **target.options)
+    expected = canonical_pwo_field(score["theta"][None, :, None], score["zeta"][None, None, :],
+                                   **{**params, "t1": 0.3, "t2": -3.0,
+                                      "theta_center": theta_phase, "zeta_center": zeta_phase})
+    np.testing.assert_allclose(score["B_target"], expected["B_target"], atol=2e-14, rtol=2e-14)
+
+
+def test_pwo_qp_gate_and_penalty_controls():
+    import runpy
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    failures = example["qp_gate_failures"]
+    metrics = dict(qs_total=0.01, aspect=6.0, min_abs_iota=0.41, mirror=0.1, elongation=2.0)
+    assert failures(metrics) == []
+    for name, value, gate in (("qs_total", np.nan, "QP objective finite"),
+                              ("aspect", 6.3, "aspect target"),
+                              ("min_abs_iota", 0.39, "iota floor"),
+                              ("mirror", 0.04, "mirror interval"),
+                              ("mirror", 0.350018, "mirror interval"),
+                              ("elongation", 8.1, "elongation limit")):
+        assert gate in failures({**metrics, name: value})
+
+    hold = example["hold_ratio"]
+    assert float(hold(1.02, 1.0, 0.03, "interval")) == 0.0
+    assert float(hold(1.02, 1.0, 0.03, "equality")) == pytest.approx(2 / 3)
+    assert float(hold(0.96, 1.0, 0.03, "interval")) == pytest.approx(1 / 3)
+    example["run"].__globals__["PENALTY"] = "invalid"
+    with pytest.raises(ValueError, match="equality\\|interval"):
+        example["run"]()
+
+
+def test_pwo_qp_gate_preserves_checkpoints_before_target_calibration(tmp_path, monkeypatch):
+    """A failed independent re-solve cannot silently become the pwO reference."""
+    import runpy
+    from types import SimpleNamespace
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    run = example["run"]
+    run.__globals__.update(SEED="near_circular", QS_INPUT=None, QS_MAX_MODES=[1], QS_MAXITER=[1],
+                           FAMILY="canonical", METHOD="scalar", PENALTY="equality", FINAL_NS=32)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(run.__globals__, "restart_state", lambda wout, deck: None)
+
+    def solve(deck, **kwargs):
+        return SimpleNamespace(state=deck, runtime=None,
+                               wout=SimpleNamespace(ns=deck.ns_array[-1], Aminor_p=0.1, volavgB=1.0))
+
+    def write_wout(path, deck):
+        Path(path).write_text(str(int(deck.ns)))
+
+    opt = example["opt"]
+    monkeypatch.setattr(opt, "solve_equilibrium", solve)
+    monkeypatch.setattr(example["vj"], "write_wout", write_wout)
+    monkeypatch.setattr(opt, "QuasisymmetryRatioResidual", lambda *args, **kwargs:
+                        SimpleNamespace(total_state=lambda state, runtime: 0.01))
+    for name, value in (("aspect_ratio", 6.0), ("min_abs_iota", 0.3),
+                        ("mirror_ratio", 0.1), ("max_elongation", 2.0)):
+        monkeypatch.setattr(opt, name, lambda state, runtime, value=value: value)
+
+    class Problem:
+        x0 = np.zeros(1)
+        scales = np.ones(1)
+
+        def __init__(self, deck):
+            self.deck = deck
+
+        def subproblem(self, **kwargs):
+            return self
+
+        def value_and_grad(self, x):
+            return float(x @ x), 2 * x
+
+        def input_from_x(self, x):
+            from dataclasses import replace
+            rbc = self.deck.rbc.copy()
+            rbc[self.deck.ntor - 1, 1] = -0.02
+            return replace(self.deck, rbc=rbc)
+
+        def equilibrium_from_x(self, x):
+            return solve(self.input_from_x(x))
+
+        def x_from_input(self, deck):
+            return self.x0.copy()
+
+    monkeypatch.setattr(opt.VmecProblem, "from_loss", lambda deck, *args, **kwargs: Problem(deck))
+    with pytest.raises(RuntimeError, match="QP preconditioning failed iota floor"):
+        run()
+    raw = example["vj"].VmecInput.from_file(tmp_path / "input.pwO_optimized_near_circular")
+    trained = example["vj"].VmecInput.from_file(tmp_path / "input.pwO_optimized_qs")
+    assert raw.rbc[raw.ntor - 1, 1] == -0.005
+    assert trained.rbc[trained.ntor - 1, 1] == -0.02
+    assert (tmp_path / "wout_pwO_optimized_near_circular.nc").read_text() == "16"
+    assert (tmp_path / "wout_pwO_optimized_qs_refined.nc").read_text() == "32"
+    summary = json.loads((tmp_path / "pwO_optimized_qs_summary.json").read_text())
+    assert summary["metrics"]["min_abs_iota"] == 0.3
+    assert summary["status"] == "failed" and summary["unmet"] == ["iota floor"]
+    assert not (tmp_path / "input.pwO_optimized").exists()
+
+
+@pytest.mark.parametrize("family", ["canonical", "mapped"])
+@pytest.mark.parametrize("penalty, expected", [("equality", 31.25), ("interval", 11.25)])
+@pytest.mark.parametrize("edge_mirror, margin_cost", [(0.1, 0.0), (0.35, 5 / 9)])
+def test_pwo_mirror_controls_penalize_collapse_and_limit_approach(
+        family, penalty, expected, edge_mirror, margin_cost, monkeypatch):
+    """Zero fit residual cannot hide local collapse or a weak edge-mirror margin."""
+    import runpy
+    from types import SimpleNamespace
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    run = example["run"]
+    run.__globals__.update(SEED="qi", QS_INPUT=None, FAMILY=family, METHOD="scalar", PENALTY=penalty)
+    opt = example["opt"]
+    wout = SimpleNamespace(aspect=6.0, Aminor_p=0.1, volavgB=1.0)
+    monkeypatch.setattr(opt, "solve_equilibrium", lambda deck, **kwargs:
+                        SimpleNamespace(state=deck, runtime=None, wout=wout))
+    for name, value in (("aspect_ratio", 6.0), ("min_abs_iota", 0.42), ("mean_iota", 0.42),
+                        ("mirror_ratio", edge_mirror), ("max_elongation", 2.0)):
+        monkeypatch.setattr(opt, name, lambda state, runtime, value=value: value)
+    shape = np.array([[[0.0, 1.0], [1.0, 0.0]]])
+    trial = False
+
+    class Target:
+        def compute_state(self, state, runtime):
+            mirror = 0.075 if trial else 0.1
+            B = 1 + mirror * (2 * shape - 1)
+            return dict(B=B, B_mapped=B, B_target=1 + shape,
+                        mirror=np.array([mirror]), residuals1d=np.zeros(1))
+
+    monkeypatch.setitem(run.__globals__, "CanonicalPwOResidual", lambda *args, **kwargs: Target())
+    monkeypatch.setitem(run.__globals__, "make_target", lambda *args, **kwargs: Target())
+
+    class EvaluatedRows(Exception):
+        pass
+
+    def inspect_loss(deck, loss, **kwargs):
+        nonlocal trial
+        trial = True
+        assert float(loss(deck, None)) == pytest.approx(expected + margin_cost)
+        raise EvaluatedRows
+
+    monkeypatch.setattr(opt.VmecProblem, "from_loss", inspect_loss)
+    with pytest.raises(EvaluatedRows):
+        run()
+
+
+@pytest.mark.full
+def test_pwo_single_stage_example(tmp_path):
+    pytest.importorskip("essos")
+    _run_example(EXAMPLES / "optimization" / "single_stage_pwO_optimization.py", tmp_path)
+    summary = json.loads((tmp_path / "single_stage_pwO_summary.json").read_text())
+    assert summary["final"] < summary["initial"]
+    assert summary["geometric_proxies_only"] and not summary["research_validation_complete"]
+    assert all(np.all(np.isfinite(value)) for value in summary["metrics"].values())
+    assert (tmp_path / "coils_single_stage_pwO.json").exists()
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve

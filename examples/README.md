@@ -102,6 +102,27 @@ that research budget as one commented set of constants next to the default.
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
+  The pwO examples fit canonical or mapped-field targets; a lower residual
+  does not establish piecewise action invariance or confinement.
+
+  ```bash
+  python examples/optimization/pwO_optimization.py
+  VMEX_PWO_SEED=near_circular python examples/optimization/pwO_optimization.py
+  python examples/optimization/pwO_optimization_finite_beta.py
+  python examples/optimization/single_stage_pwO_optimization.py
+  ```
+
+  Stage 1 starts from the bundled QI seed by default. `VMEX_PWO_SEED=near_circular`
+  starts from an nfp=2 perturbed circular torus and runs QP conditioning first.
+  Set `VMEX_PWO_QS_INPUT` to resume a saved QP boundary, `VMEX_PWO_FAMILY=mapped`
+  for the mapped target, or `VMEX_PWO_METHOD=least_squares` for a residual-Jacobian
+  solve instead of the scalar adjoint. `VMEX_PWO_PENALTY=interval` penalizes
+  aspect, local mean field and mirror only outside their acceptance intervals.
+  Final validation requires local mirror within 10% of the seed. Canonical target
+  bounds and angular origins are calibrated once and held fixed. The scripts
+  save input/WOUT checkpoints and rescore the result at higher resolution.
+  The coil example reads the stage-1 output and fits the mapped target.
+
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
   through the toroidal flux: at zero net current beta depends on PRES_SCALE /
   PHIEDGE^2 alone, so `PHIEDGE = pi a^2 sqrt(mu0 PRES_SCALE / TARGET_BETA)` with
