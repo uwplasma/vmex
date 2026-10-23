@@ -325,17 +325,14 @@ equivalent replacement for the Goodman residual:
        [(qi_action, 0.0, 1.0), (maximum_j, 0.0, 1.0)],
        inp, max_mode=6, jac="implicit")
 
-For local within-well label dependence, use
-:func:`~vmex.core.qi.j_invariant_alpha_derivative_from_boozer` with explicit
-``alpha`` labels and the same Boozer spectrum and physical pitches as the
-bounce kernel. Its ``action_alpha_derivative`` differentiates each well's
-action, including moving turning points and the line element, at fixed
-pitch. Distinct wells with unequal but label-independent actions have zero
-derivative. No matching between different labels or scalar population
-weight is imposed. Invalid sampled topology gives NaN; complete interior
-wells remain usable when the bounded trace cuts other wells. Check spatial,
-label, trace-length, and pitch convergence separately; near a separatrix
-the derivative can be ill-conditioned beyond the sampled topology guard.
+For local within-well label dependence,
+:func:`~vmex.core.qi.j_invariant_alpha_derivative_from_boozer` differentiates
+each action at fixed physical pitch, including moving turning points and the
+line element. Supply explicit ``alpha`` labels and the bounce-kernel inputs.
+It returns ``action_alpha_derivative`` without matching or weighting wells;
+unequal label-independent actions have zero derivative. Invalid wells give
+NaN; complete interior wells remain usable in a cut trace. See the function
+for topology, interpolation-cell, separatrix, and convergence limits.
 
 The two classes do not impose a shared weight. ``MaximumJResidual`` evaluates
 the outward slope ``dJ/ds`` at common pitch using matched wells;
@@ -607,11 +604,10 @@ JAX-native Hermite–Laguerre flux-tube solver, formerly SPECTRAX-GK;
   ``R/L_Ti = 6.9`` (aspect 2.643, so ``a/L_Ti = 2.611``): 0.184 ``v_th/L``
   against 8.9e-15 below the critical gradient, with reverse and forward AD
   gated against finite differences to 1e-5 relative;
-- :func:`~vmex.core.turbulence.quasilinear_flux_proxy` and
-  :func:`~vmex.core.turbulence.nonlinear_heat_flux_proxy` — the
-  mixing-length and saturation-rule heat-flux surrogates.  These weight the
+- :func:`~vmex.core.turbulence.quasilinear_flux_proxy` — the
+  mixing-length heat-flux surrogate.  It weights the
   dominant *eigenvector*; GKX's implicit eigenpair rule differentiates it in
-  both modes, so they take ``jac="implicit"`` like the growth rate.
+  both modes, so it takes ``jac="implicit"`` like the growth rate.
 
 .. code-block:: python
 
@@ -705,8 +701,7 @@ Which objectives differentiate how
      - no
      - host-NumPy Boozer tables (use
        :class:`~vmex.core.omnigenity.QIResidual` instead)
-   * - :func:`~vmex.core.turbulence.quasilinear_flux_proxy`,
-       :func:`~vmex.core.turbulence.nonlinear_heat_flux_proxy`
+   * - :func:`~vmex.core.turbulence.quasilinear_flux_proxy`
      - yes
      - yes
      - GKX implicit eigenpair rule (bordered tangent): JVP + VJP

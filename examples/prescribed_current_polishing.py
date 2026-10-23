@@ -19,11 +19,9 @@ from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import vmex
+from _polish_figure import polish_figure
 from vmex.core.polish import (
     evaluate_prescribed_current_force, make_variational_plan, polish_prescribed_current,
 )
@@ -32,6 +30,9 @@ from vmex.core.strong_force import lift_high_order_state
 
 INPUT_FILE = Path(__file__).parent / "data" / "input.LandremanPaul2021_QA_beta0p5_bootstrap"
 OUTPUT_DIR = Path("output_prescribed_current_polishing")
+FIGURES = Path(__file__).resolve().parents[1] / "docs" / "_static" / "figures"
+if os.environ.get("VMEX_EXAMPLES_CI") == "1":
+    FIGURES = OUTPUT_DIR
 # Laptop defaults.  The research settings are
 #   MPOL, NTOR, NTHETA, NZETA = 9, 6, 80, 32
 #   NS, SPANS, STEPS = 241, 8, 3000
@@ -98,14 +99,16 @@ print(f"Forward result only: no stationarity certificate (L-BFGS stopped at |gra
 ### Plot and save #############################################################
 
 OUTPUT_DIR.mkdir(exist_ok=True)
-figure, axis = plt.subplots(figsize=(5.5, 3.6), layout="constrained")
-x = np.arange(len(regions))
-for i, (label, color) in enumerate((("discrete solve", "#eda100"), ("polished", "#2a78d6"))):
-    axis.bar(x + (i - 0.5) * 0.4, ratios[i], 0.38, color=color, label=label)
-axis.set_yscale("log")
-axis.set_xticks(x, [f"{name}\n$s\\in[{lo},{hi}]$" for name, lo, hi in regions])
-axis.set_ylabel(r"RMS $|\mathbf{J}\times\mathbf{B}-\nabla p|$ / RMS $|\nabla p|$")
-axis.legend(frameon=False)
-figure_path = OUTPUT_DIR / "prescribed_current_polishing.png"
-figure.savefig(figure_path, dpi=150)
+rho = np.asarray(heldout.rho)
+profiles = {}
+for label, samples in (("VMEC solve", before), ("polished", after)):
+    weights = native.jacobian_sign * np.asarray(samples.sqrt_g) * heldout.quadrature_weights
+    force = np.sum(weights * np.sum(np.asarray(samples.force)**2, axis=-1), axis=(1, 2))
+    gradient = np.sum(weights * np.asarray(samples.grad_pressure_norm)**2, axis=(1, 2))
+    profiles[label] = (rho, np.sqrt(force / gradient))
+names = [f"{name}\n$s\\in[{lo},{hi}]$" for name, lo, hi in regions]
+figure_path = FIGURES / ("prescribed_current_polishing.webp" if FIGURES == OUTPUT_DIR else "readme_polish_stellarator.webp")
+ratio_label = r"RMS $|\mathbf{J}\times\mathbf{B}-\nabla p|$ / RMS $|\nabla p|$"
+polish_figure(figure_path, profiles, {"VMEC solve": ratios[0], "polished": ratios[1]}, names,
+              ratio_label, ratio_label, bar_format="%.2g", headroom=4.0)
 print(f"Wrote {figure_path}")

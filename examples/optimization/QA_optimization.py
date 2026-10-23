@@ -142,7 +142,8 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
         problem = opt.VmecProblem.from_tuples(
             inp, objective_function_terms, max_mode=group_max_mode[max_mode],
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
-            ess_alpha=ESS_ALPHA, restart_from=equilibrium)
+            ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+            progress=True)
         x = problem.x0
         monitor.problem = problem
         if not ci_smoke:

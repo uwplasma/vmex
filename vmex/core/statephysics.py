@@ -109,6 +109,35 @@ def _mode_matrix(wout, name: str, *, ns: int, mn: int, optional: bool = False) -
 # ---------------------------------------------------------------------------
 
 
+def _field_line_frame(pos_fn, lam_fn, modb_fn, q, *, iota, diota, phipf_j, phi_rel=0.0) -> dict:
+    """Covariant frame and field at ``q = (t, theta, phi)`` on one flux surface.
+
+    ``pos_fn``/``lam_fn``/``modb_fn`` are the per-surface closures of
+    :func:`vmex.core.stability._surface_closures`.  Returns ``J`` (columns
+    ``e_s, e_theta, e_phi``), its inverse ``dual`` (rows ``grad s, grad theta,
+    grad phi``), ``sqrt_g``, ``lam_g = grad lambda``,
+    ``B = phi'[(iota - lambda_phi) e_theta + (1 + lambda_theta) e_phi]/sqrt_g``,
+    ``modB``, ``dB = grad_(s,theta,phi)|B|``, ``grad_modB``, ``b_sup_phi`` and
+    ``grad_alpha`` for ``alpha = theta* - iota (phi - zeta0)`` with
+    ``phi_rel = phi - zeta0`` carrying the secular shear term.  The
+    ballooning, gyrokinetic and Gamma_c point tuples are built from it.
+    """
+    J = jax.jacfwd(pos_fn)(q)
+    sqrt_g = jnp.linalg.det(J)
+    dual = jnp.linalg.inv(J)
+    lam_g = jax.grad(lam_fn)(q)
+    iota_t = iota + diota * q[0]
+    B = phipf_j * ((iota_t - lam_g[2]) * J[:, 1] + (1.0 + lam_g[1]) * J[:, 2]) / sqrt_g
+    dB = jax.grad(modb_fn)(q)
+    alpha_cov = (lam_g[0] - phi_rel * diota, 1.0 + lam_g[1], lam_g[2] - iota_t)
+    return dict(
+        J=J, dual=dual, sqrt_g=sqrt_g, lam_g=lam_g, B=B, modB=jnp.linalg.norm(B), dB=dB,
+        grad_modB=dB[0] * dual[0] + dB[1] * dual[1] + dB[2] * dual[2],
+        grad_alpha=alpha_cov[0] * dual[0] + alpha_cov[1] * dual[1] + alpha_cov[2] * dual[2],
+        b_sup_phi=phipf_j * (1.0 + lam_g[1]) / sqrt_g,
+    )
+
+
 def _field_chain(state: SpectralState, rt: SolverRuntime):
     """Geometry -> Jacobian -> metric -> fields -> energies of a core state.
 

@@ -138,7 +138,7 @@ fixed_input = replace(free_input, lfreeb=False, mgrid_file="NONE", rbc=rbc, zbs=
 print(f"Solving the restricted fixed boundary at s_free={S_FIXED:.2f}...")
 fixed_equilibrium = opt.solve_equilibrium(fixed_input, verbose=True)
 
-print("Refitting the four independent ESSOS coil currents with virtual casing...")
+print("Building the virtual-casing interface...", flush=True)
 surface_data = vc.surface_field_data_from_state(fixed_input, fixed_equilibrium.solution,
     runtime=fixed_equilibrium.solver_context, nphi=NPHI, ntheta=NTHETA)
 precision = vc.plan_vc_precision(surface_data, digits=VC_DIGITS)
@@ -162,6 +162,7 @@ def coil_objective(u):
             + 0.5 * CURRENT_REGULARIZATION * jnp.vdot(u, u))
 
 coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective))
+print("Optimizing the coil currents (first call compiles)...", flush=True)
 u0 = np.zeros(n_current); initial_coil_cost = float(coil_objective(u0))
 coil_result = minimize(coil_value_and_grad, u0, jac=True, method="L-BFGS-B",
     bounds=[(-CURRENT_BOUND, CURRENT_BOUND)] * n_current,

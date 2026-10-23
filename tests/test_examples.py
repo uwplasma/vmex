@@ -152,6 +152,7 @@ EXECUTED_EXAMPLES = {
     "examples/free_boundary_essos_coils.py",
     "examples/free_boundary_mgrid.py",
     "examples/free_boundary_phiedge.py",
+    "examples/free_boundary_position_control.py",
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
@@ -877,6 +878,19 @@ def test_free_boundary_essos_coils(tmp_path):
     assert abs(actual - nominal) <= 0.15, (
         f"actual betatotal {actual}% not calibrated to nominal {nominal}%")
     assert fsq < 1e-7, f"free-boundary point should converge, fsq={fsq}"
+
+
+def test_free_boundary_position_control(tmp_path):
+    # Five vertical-field offsets, each without and with control (~1 min).
+    out = _run_example(EXAMPLES / "free_boundary_position_control.py", tmp_path, timeout=600)
+    rows = re.findall(r"^\s*(-?[0-9.]+) \|\s+(\w+)\s+\d+\s+\S+\s+\S+ \|"
+                      r"\s+(\w+)\s+\d+\s+\S+\s+(-?[0-9.]+)\s+(-?[0-9.]+)$", out, re.M)
+    assert len(rows) == 5, out
+    for offset, free, held, shift, bz in rows:
+        assert (free == "NO") == (float(offset) == -40.0), out   # only the deficit defeats it
+        assert held == "yes" and abs(float(shift)) < 1.0, out      # axis within 1 cm
+        assert abs(float(bz) + float(offset)) < 2.0, out           # recovers the offset
+    assert (tmp_path / "output_position_control" / "mgrid_d3d_vertical_deficit.nc").exists()
 
 
 @pytest.mark.full  # nightly: PHIEDGE root solve on the ESSOS QA coils

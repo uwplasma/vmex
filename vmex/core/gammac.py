@@ -97,6 +97,8 @@ import jax.numpy as jnp
 
 from .bounce import bounce_action
 from .solver import SolverRuntime, SpectralState
+from .omnigenity import _ResidualTerm
+from .statephysics import _field_line_frame
 from .stability import (
     _ballooning_context, _pest_lambda, _surface_closures, _surface_tables,
     _theta_vmec_from_pest,
@@ -364,31 +366,25 @@ def _make_gamma_point_fn(m: Array, xn: Array, tabs: dict, iota: Array,
     ``dtheta/ds = -lambda_s / (1 + lambda_theta)`` and the last entry is
     ``||e_alpha||`` at fixed ``(rho, phi)``.
     """
-    pos_fn, lam_fn, b_vector, modb_fn, bsupphi_fn = _surface_closures(
+    pos_fn, lam_fn, _, modb_fn, bsupphi_fn = _surface_closures(
         m, xn, tabs, iota, diota, phipf_j)
 
     def point(q: Array):
-        J = jax.jacfwd(pos_fn)(q)
-        dual = jnp.linalg.inv(J)                      # rows: grad s, grad th, grad ph
-        lam_g = jax.grad(lam_fn)(q)
-        B = b_vector(q)
-        modB = jnp.linalg.norm(B)
-        dB = jax.grad(modb_fn)(q)                     # (d/ds, d/dth, d/dph) at fixed VMEC angles
+        f = _field_line_frame(pos_fn, lam_fn, modb_fn, q, iota=iota, diota=diota, phipf_j=phipf_j)
+        dB, dual = f["dB"], f["dual"]                # dB at fixed VMEC angles
         dG = jax.grad(bsupphi_fn)(q)
-        grad_modB = dB[0] * dual[0] + dB[1] * dual[1] + dB[2] * dual[2]
-        one_lam = 1.0 + lam_g[1]
-        dtheta_ds = -lam_g[0] / one_lam               # fixed PEST angle, moving VMEC angle
+        one_lam = 1.0 + f["lam_g"][1]
+        dtheta_ds = -f["lam_g"][0] / one_lam          # fixed PEST angle, moving VMEC angle
         grad_s = dual[0]
-        b = B / modB
         return (
-            modB,
-            phipf_j * one_lam / jnp.linalg.det(J),
-            jnp.cross(B, grad_modB) @ grad_s,
+            f["modB"],
+            f["b_sup_phi"],
+            jnp.cross(f["B"], f["grad_modB"]) @ grad_s,
             dB[0] + dB[1] * dtheta_ds,
             dG[0] + dG[1] * dtheta_ds,
-            jnp.cross(grad_s, b) @ dual[2],
+            jnp.cross(grad_s, f["B"] / f["modB"]) @ dual[2],
             jnp.linalg.norm(grad_s),
-            jnp.linalg.norm(J[:, 1]) / one_lam,
+            jnp.linalg.norm(f["J"][:, 1]) / one_lam,
         )
 
     return point
@@ -799,7 +795,7 @@ def gamma_c_smooth_state(
     return {**out, "surface_rows": rows}
 
 
-class GammaC:
+class GammaC(_ResidualTerm):
     """Composable fast-ion confinement proxy, one ``Gamma_c`` row per surface.
 
     Nemov et al., Phys. Plasmas 15, 052501 (2008), eq. 61, organized as in
@@ -874,20 +870,6 @@ class GammaC:
         """Return the weighted sum of ``Gamma_c**2`` over the surfaces."""
         rows = self.residuals_state(state, rt)
         return jnp.vdot(rows, rows)
-
-    def J(self, eq) -> jnp.ndarray:
-        """Residual rows of a converged :class:`~vmex.core.optimize.Equilibrium`.
-
-        Also reachable as ``__call__`` and ``residuals``.
-        """
-        return self.residuals_state(eq.state, eq.runtime)
-
-    __call__ = J
-    residuals = J
-
-    def total(self, eq) -> Array:
-        """Scalar cost of a converged :class:`~vmex.core.optimize.Equilibrium`."""
-        return self.total_state(eq.state, eq.runtime)
 
 
 class GammaCSmooth(GammaC):

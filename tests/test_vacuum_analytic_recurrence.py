@@ -238,7 +238,7 @@ def cth_vacuum_inputs():
     )
     rmnc, zmns, rmns, zmnc = FB._edge_fourier(state, rt)
     boundary = FB.boundary_from_coefficients(
-        rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc, modes=rt.modes, basis=basis
+        rmnc, zmns, rmns, zmnc, modes=rt.modes, basis=basis
     )
     ctor, _rbtor, axis_r, axis_z, _bsq3, _pres = FB._vacuum_scalars(state, rt)
     mg = read_mgrid(mgrid_path)
@@ -247,15 +247,12 @@ def cth_vacuum_inputs():
     )
     phi = (np.asarray(basis.zeta) * basis.onp).reshape(basis.ntheta3, basis.nzeta)
     br_c, bp_c, bz_c = field.b_cyl(np.asarray(boundary.R), phi, np.asarray(boundary.Z))
-    br_a, bp_a, bz_a = FB.axis_current_field(
-        R=np.asarray(boundary.R), Z=np.asarray(boundary.Z),
-        axis_r=np.asarray(axis_r), axis_z=np.asarray(axis_z),
-        nfp=res.nfp, plascur=float(ctor),
+    br_a, bp_a, bz_a = FB._axis_current_field(
+        boundary.R, boundary.Z, axis_r, axis_z, ctor / FB.MU0,
+        FB._axis_current_tables(basis),
     )
-    ext = FB.external_field_channels(
-        boundary=boundary,
-        br=np.asarray(br_c) + br_a, bp=np.asarray(bp_c) + bp_a,
-        bz=np.asarray(bz_c) + bz_a,
+    ext = FB._external_field_channels(
+        boundary, br_c + br_a, bp_c + bp_a, bz_c + bz_a,
         basis=basis, signgs=int(rt.setup.signgs),
     )
     return dict(

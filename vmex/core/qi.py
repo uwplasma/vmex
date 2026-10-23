@@ -28,24 +28,20 @@ def j_invariant_alpha_derivative_from_boozer(*, alpha, **bounce_options):
     """Return the local action derivative at fixed physical pitch.
 
     ``alpha`` is a scalar or nonempty one-dimensional array of Boozer
-    field-line labels in radians. Other arguments are those of
-    :func:`~vmex.core.bounce.bounce_action_from_boozer`. The returned bounce
-    diagnostics gain ``action_alpha_derivative`` with the same shape as
-    ``action``. A JVP shifts each independent line's label infinitesimally,
-    differentiating the sampled field, line element, and turning points;
-    no wells are paired between distinct labels.
+    field-line labels in radians; remaining arguments go to
+    :func:`~vmex.core.bounce.bounce_action_from_boozer`. Its diagnostics gain
+    ``action_alpha_derivative`` with the shape of ``action``. A JVP shifts
+    each independent label, differentiating the sampled field, line element,
+    and turning points without pairing wells between labels.
 
-    Derivatives are local to unchanged sampled topology and invalid wells
-    contain NaN. Further parameter differentiation assumes usable branches
-    with unchanged topology and interpolation cells; exclude NaN slots from
-    downstream objectives. Derivatives of the piecewise-linear interpolant
-    can jump when crossings or quadrature nodes change interpolation cells.
-    Complete wells inside a bounded trace remain usable when
-    other wells are cut by its edges (``truncated``). Resolution, label,
-    trace-length, and pitch convergence still require checking. Derivatives
-    near a separatrix can be ill-conditioned even outside the kernel's
-    sampled marginal/merged tolerance. This supplies no population weights
-    or scalar transport measure.
+    Invalid wells contain NaN; exclude them from downstream objectives.
+    Complete interior wells remain usable in a cut trace (``truncated``).
+    Derivatives assume unchanged sampled topology; further parameter AD also
+    assumes unchanged interpolation cells. Crossings and quadrature nodes
+    changing cells can cause jumps, and near-separatrix derivatives can be
+    ill-conditioned beyond the sampled marginal/merged guard. Check spatial,
+    label, trace-length, and pitch convergence separately. This supplies no
+    population weights or scalar transport measure.
     """
     alpha = jnp.atleast_1d(jnp.asarray(alpha, dtype=jnp.float64))
     if alpha.ndim != 1 or alpha.size == 0:
@@ -192,9 +188,7 @@ class ConstructedQIResidual(_QIResidualTerm):
 class JInvariantQIResidual(_QIResidualTerm):
     """Pooled complete-well action dispersion at supplied physical pitch.
 
-    Wells are pooled across field lines and periods at each surface and pitch,
-    without matching well families. See
-    :func:`j_invariant_qi_residual_from_boozer` for its interpretation.
+    See :func:`j_invariant_qi_residual_from_boozer` for its interpretation.
     """
 
     name = "j_invariant_qi"
