@@ -113,26 +113,6 @@ agree on the bundled QI deck to a measured :math:`1.7\times10^{-6}\,B_{00}`
 absolute and :math:`2\times10^{-5}` relative on the dominant modes.
 
 
-Field consistency for orbit comparisons
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-A transformed strength spectrum does not by itself certify a coordinate change
-of the continuous vector field used by another tracer. Standard Boozer
-coordinates require the tangential magnetic covector to be closed, hence
-:math:`(\nabla\times\mathbf B)\cdot\nabla s=0`. A reconstructed numerical
-field can violate this condition despite a small discrete equilibrium residual.
-Refining the transform alone cannot remove that inconsistency.
-
-Before attributing orbit differences to omission of the radial covariant
-component, compare geometry, vector field and Cartesian field derivatives at
-identical physical points. Check the chart Jacobian and covariant components,
-then compare full and reduced dynamics on that same field. Deleting a radial
-component in an arbitrary native chart is coordinate dependent; it is not
-automatically the Boozer ``K=0`` approximation. A projection that restores
-Boozer compatibility changes the field: measure its derivative and current
-changes separately before transferring any confinement bound.
-
-
 Quasisymmetry
 -------------
 
@@ -819,26 +799,15 @@ the hard one (the smoothing deliberately cannot see structure below
 toward it as ``temperature`` decreases with a correspondingly finer
 budget.  Optimize the surrogate, report the hard value.
 
+
 Passing particles near rational surfaces
 ----------------------------------------
 
-Cyclometry concerns the distribution of field strength over a complete closed
-rational transit, sampled uniformly in Boozer toroidal angle. It differs from
-the trapped-particle objectives above. At iota = N/M in lowest terms, the
-transit spans ``2*pi*M`` and the field-line label is ``chi=M*eta``.
-:mod:`vmex.core.cyclometry` supplies three small building blocks: static
-sine/cosine transit tables, the sampled action, and a finite-moment upper
-bound uniform over a prescribed pitch interval. Enable JAX float64 before
-constructing the tables.
-
-For a fixed normalization with ``0 < b=B/B_star <= 1``, the action is
-``mean(sqrt(1-lambda*b)/b)`` and ``lambda=mu*B_star/E``. The moment bound uses
-powers ``-1, 1, ..., K-1``, positive binomial weights and a one-sided tail.
-The optional smooth oscillation is an unnormalized log-sum-exp, so it stays
-above the sampled maximum minus minimum. ``oscillation_error`` adds one
-nonnegative error allowance per moment. Without these allowances the result
-bounds the sampled measures, not the continuous field. Invalid eager inputs
-raise; invalid traced fields or error budgets return NaN for trial rejection.
+:mod:`vmex.core.cyclometry` evaluates closed-transit action and a moment bound
+on its field-line variation. For ``iota=N/M``, transit tables span ``2*pi*M``
+in Boozer toroidal angle; Fourier toroidal indices include ``nfp``.
+With ``b=B/B_star`` in ``(0, 1]`` and ``lambda=mu*B_star/E``, the action is
+``mean(sqrt(1-lambda*b)/b)``. Keep ``B_star`` fixed during optimization.
 
 .. code-block:: python
 
@@ -850,81 +819,30 @@ raise; invalid traced fields or error budgets return NaN for trial rejection.
    cosine, sine = transit_basis([0, 1, 1], [0, 0, 1], 1, 2)
    b = cosine @ jnp.array([0.75, 0.07, 0.07])
    action = transit_action(b, jnp.linspace(0, 0.95, 33))
-   sampled_envelope = moment_bound(b, order=64, softness=1e-5)
+   bound = moment_bound(b, order=64, softness=1e-5)
 
-This scalar field has no nonconstant resonant field harmonic, yet its action
-at zero pitch parameter is ``1/sqrt(0.75**2-4*0.07**2*cos(eta)**2)`` and varies
-with the field-line label. Removing only resonant field modes misses nonlinear
-mixing in the action. This is an analytic kernel check, not an MHD equilibrium.
+The bound applies to sampled transit measures. Supply ``oscillation_error``
+for known moment errors before interpreting it as a continuum bound.
+Invalid eager inputs raise; invalid traced trials return NaN for rejection.
+The transit invariant is due to `Foster et al.
+<https://arxiv.org/abs/2512.03165>`_. The action includes nonlinear harmonic
+coupling that a resonant-field-power objective omits. It does not bound losses.
+Compare field geometry and derivatives at matched physical points before
+interpreting differences between native and Boozer orbit models.
 
-The transit invariant and leading island-width scaling are due to
-`Foster et al. <https://arxiv.org/abs/2512.03165>`_. A physical optimization
-must still verify the moving rational surface derivative, matched field,
-size and shear, quadrature and representation errors, and independent orbit
-convergence. A finite-time confinement claim additionally needs a uniform
-bound on the invariant's Lie derivative inside a strictly passing tube.
-A small moment objective alone does not establish that claim.
+:func:`~vmex.core.cyclometry.moving_rational_surface` interpolates a fixed Boozer
+radial table at ``iota(s)=N/M`` and differentiates the root implicitly. Pass the
+actual returned ``s_b`` radii and keep the bracket fixed. Endpoint roots,
+interior-knot roots and insufficient or changing shear sign are rejected.
+Refine radial and angular sampling when validating the objective.
+``iota_shear`` is with respect to the table coordinate; convert using
+``dpsi/ds`` for physical formulas with a nonidentity ``APHI`` flux map.
 
-For a combined trapped/passing objective, use trapped action variation across
-field-line labels, or its derivative ``partial_alpha J``, together with the
-passing envelope. The radial derivative ``partial_psi J`` controls tangential
-precession; minimizing its square is not a substitute for suppressing radial
-drift. Reuse :class:`~vmex.core.qi.JInvariantQIResidual` on compatible complete
-wells and monitor precession and well topology separately. Existing smoothed
-trapped objectives still need resolved validation as their smoothing is reduced.
+Persistent reference for scalar objectives
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Reserve independent trajectories for validation after optimization. Compare
-lost-marker recall and integration failures as well as total losses: a high
-fraction of matching labels can hide errors in a small lost population.
-Cyclometry alone does not imply energy-selective helium confinement. That
-question also requires electric-field, collision and slowing-down models.
-
-Moving rational surfaces
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-:func:`~vmex.core.cyclometry.moving_rational_surface` evaluates the spectrum
-at a moving root of ``iota(s)=N/M``. First transform a fixed set of surfaces
-and capture their actual returned ``s_b`` values outside differentiation.
-Use these sorted, unique radii and a fixed bracket throughout a stage. The
-adapter interpolates all radial fields consistently and uses SOLVAX's implicit
-root derivative. Differentiating a nearest-row selection would omit this motion.
-
-The initial adapter uses piecewise-linear radial interpolation. It rejects
-endpoint roots, inadequate or changing shear sign within the bracket, and
-roots at interior interpolation knots where that derivative is ambiguous.
-Invalid traced trials return NaN. Refine the radial table and compare complete
-equilibrium directional derivatives before using this sampled objective in an
-optimization. The checks certify a branch of the interpolant, not a root or
-confinement bound for the continuum equilibrium.
-
-Here ``iota_shear`` differentiates with respect to the table coordinate ``s``.
-With a nonidentity ``APHI`` flux map, convert this derivative using ``dpsi/ds``
-before applying a physical island-width formula. Also check the signed flux
-orientation against the orbit model. The first comparisons should use the
-identity flux map and explicit, matched conventions.
-
-For solver-sensitive Boozer objectives, distinguish ordinary equilibrium
-re-solves from a fixed-coordinate-family derivative check. VMEX's
-:func:`~vmex.core.implicit.frozen_path_directional_fd` holds the same internal
-coordinate choices as its adjoint and reports Newton residuals for both
-perturbations. Agreement on that path validates that derivative; it does not
-remove sensitivity to coordinate choices made by independent re-solves.
-Quantify both before promoting an optimization result.
-
-Persistent equilibrium reference for scalar losses
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-For a scalar boundary objective, ``VmecProblem.from_loss`` can keep one
-explicit discrete coordinate family throughout a stage. Pass a compatible
-converged :class:`~vmex.core.optimize.Equilibrium` as ``frozen_reference``.
-VMEX copies its state and evolved-coordinate mask, refines the reference at
-its own parameters, and preserves the non-evolved complement for every trial.
-Ordinary host states predict the evolved coordinates without recapturing that
-complement. Values, gradients and ``equilibrium_from_x`` use the same admitted
-family root.
-
-Given a converged ``seed``, this minimal scalar example uses edge iota; replace
-``iota_edge`` with the traceable moving-surface loss for a cyclometry stage:
+Pass a compatible converged equilibrium as ``frozen_reference`` to keep
+values, gradients and materialized equilibria on the same discrete family:
 
 .. code-block:: python
 
@@ -932,26 +850,15 @@ Given a converged ``seed``, this minimal scalar example uses edge iota; replace
    from vmex.core.implicit import iota_edge
 
    problem = opt.VmecProblem.from_loss(
-       seed.inp, iota_edge, frozen_reference=seed,
-       max_mode=1, use_ess=False,
-       refine_tol=1e-11, adjoint_tol=1e-9)
+       seed.inp, iota_edge, frozen_reference=seed, max_mode=1,
+       use_ess=False, refine_tol=1e-11, adjoint_tol=1e-9)
    value, gradient = problem.value_and_grad(problem.x0)
    equilibrium = problem.equilibrium_from_x(problem.x0)
 
-Both the existing host convergence/FSQ admission and a finite fixed-family
-residual norm at or below ``refine_tol`` are required. A small family residual
-alone cannot admit a trial. Failed Newton refinement rejects the trial through
-the existing scalar rejection wall, and materialization refuses it.
-``refine_tol=numpy.inf`` is therefore unavailable for this option. Resolution,
-mode, constraint and static-profile mismatches are rejected rather than
-remapping the reference.
-
-This option is restricted to implicit scalar losses. Without it, existing
-solver behavior is unchanged. ``restart_from`` and ``warm_start`` select
-initial guesses; they do not establish this persistent family contract.
-Compare directional derivatives at the reference and displaced trial points,
-and inspect ``frozen_reference_residual`` in ``problem.evaluate(x).diagnostics``.
-Agreement validates the derivative of this discrete family; it does not
-establish a unique root across arbitrary trial histories, continuum MHD
-accuracy, or a confinement certificate. The independent field, orbit and
-uniform-remainder checks above remain necessary.
+The reference is copied. Trials must pass host convergence admission and a
+finite family residual tolerance. Incompatible references are rejected.
+Inspect ``frozen_reference_residual`` in ``problem.evaluate(x).diagnostics``.
+This option requires an implicit scalar loss; restart and warm-start options
+only select initial guesses. Check directional derivatives at both the
+reference and displaced boundaries. Agreement validates the discrete-family
+derivative; field-resolution and orbit-convergence checks remain separate.
