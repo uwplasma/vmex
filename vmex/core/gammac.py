@@ -795,15 +795,11 @@ class GammaC:
     linearly and validate ``Gamma_alpha`` as the predictor.
     Traceable in both gradient modes.
 
-    **This is the hard physical diagnostic — its value is the number to
-    report, but its boundary derivative is NOT a convergent quantity**: the
-    sampled gradient can flip sign under grid refinement,
-    because hard well detection and hard branch selection make the
-    discretized ``Gamma_c`` piecewise with grid-dependent breakpoints (the
-    measured ladder is in ``tests/test_gammac.py``).  Do not drive a
-    boundary optimization with this class; use :class:`GammaCSmooth`, whose
-    derivative is refinement-stable, and recompute this hard value to report
-    the result.
+    Hard well detection and branch selection make the sampled boundary
+    gradient sensitive to grid refinement; measured examples change sign.
+    Use :class:`GammaCSmooth` for optimization, checking forward descent
+    because its pitch-grid derivatives remain approximate. Recompute this
+    hard diagnostic on accepted results.
     """
 
     name = "gamma_c"
