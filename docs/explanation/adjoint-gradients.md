@@ -194,6 +194,9 @@ combinations in both the native solve and implicit residual. The boundary
 still follows the trial parameters; other reference coefficients are ignored.
 
 ```python
+from vmex import optimize as opt
+
+reference = opt.solve_equilibrium(inp, use_fft=False, raise_on_max_iterations=True)
 solve_kwargs = {"m1_gauge": reference.solution, "use_fft": False}
 problem = opt.VmecProblem.from_loss(
     inp, loss, restart_from=reference, solve_kwargs=solve_kwargs,
