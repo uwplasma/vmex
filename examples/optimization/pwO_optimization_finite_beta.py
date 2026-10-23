@@ -1,15 +1,9 @@
 #!/usr/bin/env python
-"""Stage-1 finite-beta pwO fitting with pressure continuation and zero current.
+"""Fit pwO targets with pressure continuation and zero enclosed current.
 
-The shared, side-effect-free driver in pwO_optimization supplies the seed,
-fixed-target canonical / squeezed-mapping selection, boundary mode continuation,
-constraints and final refined solve/rescore. Set VMEX_PWO_FAMILY=canonical or
-mapped and VMEX_PWO_METHOD=scalar or least_squares, as in the vacuum example.
-
-p(s)=PRES_SCALE*(1-s) vanishes at the edge. NCURR=1, CURTOR=0 and AC=0 specify
-zero enclosed toroidal current. PRES_SCALE is estimated from a unit-pressure
-seed solve for each beta rung, then fixed during that rung; the actual beta is
-constrained and reported. This is not a self-consistent bootstrap calculation.
+Uses the vacuum driver's settings and validation. Pressure follows
+p(s)=PRES_SCALE*(1-s); each stage fixes PRES_SCALE after seed calibration.
+The prescribed current is not bootstrap-consistent.
 """
 
 if __package__:

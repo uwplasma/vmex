@@ -1,19 +1,11 @@
 #!/usr/bin/env python
-"""Stage-1 vacuum fitting to canonical or squeezed-mapping pwO constructions.
+"""Fit canonical or mapped pwO targets, then rescore at higher resolution.
 
-Set VMEX_PWO_SEED=near_circular for the QP preconditioning route and
-VMEX_PWO_FAMILY=canonical or mapped. The fixed target/map is a shaping
-objective, not a certificate of branchwise action invariance or alpha retention.
-The canonical periodic completion is documented by vmex.core.pwo; this example
-normally starts from the bundled QI seed. The optional near-circular nfp=2
-route preconditions for quasi-poloidal symmetry (QP) before pwO fitting.
-Neither route is a published-equilibrium reproduction.
-
-The scalar and least-squares methods minimize the same residuals. Scalar is the
-low-memory default. A final finer equilibrium and angular grid rescore both the
-original seed and the optimized boundary at the same physical surface s=0.5.
-Canonical bounds match the seed mean field and mirror. Both families also hold
-the local seed mirror within 10%; all calibrations stay fixed during optimization.
+VMEX_PWO_SEED=near_circular runs QP conditioning before the fit; the default
+uses the bundled QI seed. VMEX_PWO_FAMILY selects canonical or mapped.
+Target calibration stays fixed; final validation requires local mirror within
+10% of the seed. Scalar and least-squares solvers minimize the same residuals.
+A lower target residual does not establish action invariance or confinement.
 """
 
 import json
@@ -65,7 +57,6 @@ if ci_smoke:
     VALIDATION_OPTIONS = dict(mboz=5, nboz=5, oversample=2)
     GRID, VALIDATION_GRID = 12, 17
     FINAL_NS, FINAL_MPOL, FINAL_FTOL = 16, 5, 1e-12
-
 
 
 def make_target(surfaces, *, family, bmin, bmax, b_ref, options, grid, iota_sign=1.0, theta_center=0.0, zeta_center=0.0):
@@ -127,11 +118,9 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
     """Optimize with fixed flux, R00, linear edge-zero pressure and zero current.
 
     beta_targets is a pressure-continuation ladder in volume-average beta.
-    Its pressure scale is estimated from a unit-pressure solve of the original
-    seed, then held fixed during each optimization rung. The actual beta is
-    constrained and measured; no bootstrap-current closure is implied.
-    Boundary derivatives use VMEX's fixed-point convention with its released
-    m=1 gauge held fixed; independent host re-solve differences require a separate audit.
+    Pressure is calibrated from a unit-pressure seed solve and held fixed per
+    stage. Current is prescribed, not bootstrap-consistent. Derivatives hold
+    the solver's released m=1 gauge fixed.
     """
     if (FAMILY not in ("canonical", "mapped") or METHOD not in ("scalar", "least_squares")
             or PENALTY not in ("equality", "interval")):
@@ -325,8 +314,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         out = target.compute_state(state, runtime)
         B = out[field_key]
         local_mean = jnp.mean(B, axis=(1, 2))
-        local_mirror = (jnp.max(B, axis=(1, 2)) - jnp.min(B, axis=(1, 2))) / (
-            jnp.max(B, axis=(1, 2)) + jnp.min(B, axis=(1, 2)))
+        local_mirror = out["mirror"]
         rows = [out["residuals1d"],
             hold_ratio(local_mean, jnp.asarray(surface_field_ref), FIELD_TOLERANCE, PENALTY),
             jnp.maximum(MIRROR_FLOOR - local_mirror, 0) / MIRROR_FLOOR]
@@ -423,8 +411,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         ("beta", opt.volume_average_beta, ".4%"))("final", final_equilibrium)
     local_B = np.asarray(final_score[field_key])
     local_mean = local_B.mean(axis=(1, 2))
-    local_mirror = (local_B.max(axis=(1, 2)) - local_B.min(axis=(1, 2))) / (
-        local_B.max(axis=(1, 2)) + local_B.min(axis=(1, 2)))
+    local_mirror = np.asarray(final_score["mirror"])
     metrics.update(local_mirror=local_mirror.tolist(), local_mean_T=local_mean.tolist(),
                    initial_local_mirror=np.asarray(initial_score["mirror"]).tolist(),
                    minor_radius_m=float(final_equilibrium.wout.Aminor_p),

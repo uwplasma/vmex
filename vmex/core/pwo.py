@@ -1,36 +1,18 @@
-"""Smooth piecewise-omnigenity targets and mapped-field residuals.
+"""Smooth pwO targets in Boozer radians; toroidal modes include NFP.
 
-No VMEC2000 counterpart: these are optimization objectives, not MHD equations.
-Angles are Boozer radians and ``xn_b`` contains physical toroidal mode numbers.
-The canonical construction uses the super-Gaussian of Velasco et al., PRL 133,
-185101 (2024), with the zero-bootstrap width of Calvo et al., PRE 112, L023201
-(2025). Its finite-p periodic completion is explicitly a bounded lattice union,
-``1 - product(1 - exp(-u**(2*p)-v**(2*p)))``. This differs from the uncompleted
-fundamental-domain expression in Fernandez-Pacheco et al., arXiv:2601.14886v2
-and their DESC reference implementation (Zenodo 20390611, CC-BY-4.0).
+The canonical target combines the super-Gaussian of Velasco et al. (2024,
+PRL 133, 185101) with the width of Calvo et al. (2025, PRE 112, L023201).
+Its bounded periodic union, 1-product(1-exp(-u**(2*p)-v**(2*p))), differs
+from the isolated fundamental-domain formula in Fernandez-Pacheco et al.,
+arXiv:2601.14886v2 (DESC reference: Zenodo 20390611, CC-BY-4.0). Translated
+interiors must be disjoint and omitted image tails below 1e-30. A finite-p fit
+does not establish piecewise action invariance.
 
-Parallelograms may cross a coordinate cut. Disjoint translated interiors are
-checked in their linear super-Gaussian coordinates: every nonzero lattice
-translation must have infinity norm greater than two. The static stencil
-also certifies that omitted translations cannot lower this minimum. If E is
-the largest parallelogram coordinate extent divided by its cell half-period,
-omitted shell k contributes at most ``8*k*exp(-((2*k-1)/E)**(2*p))``. A convexity
-bound on this sum must be below 1e-30, with first exponent at least 80.
-Field values are then periodic to float64 precision; parameter derivatives
-require the usual conditioning checks near a degenerate width. The retained
-``corner_margin`` measures centered-cell containment only, not torus overlap.
-Overlap diagnostics quantify the finite-p difference from an isolated patch;
-the sharp limit is the union of the published parallelograms. No exact finite-p
-pwO or exact reproduction of the published equilibrium is asserted.
-
-The mapped route implements Liu et al., arXiv:2603.12139v1, equations (2),
-(9), and (10), for poloidal omnigenity. ``gamma`` is their mapped alpha,
-not the field-line label theta-iota*zeta. A fixed cut eta interval is integrated
-with midpoint quadrature, without treating its endpoints as periodic. The
-residual is mapped gamma variance divided by a fixed physical B_ref. It tests
-the mapped region only; the unmapped high-field structure requires independent
-orbit-family validation. JIT/JVP/VJP are supported for the pure-array kernels;
-full-equilibrium differentiation follows the existing state's solver contract.
+The mapped target uses Liu et al., arXiv:2603.12139v1, equations (2), (9),
+and (10); gamma is mapped alpha, not theta-iota*zeta. Gamma variance is
+integrated over a fixed eta cut and divided by B_ref squared. It constrains
+only the mapped region. Kernel JIT/JVP/VJP support does not extend the
+equilibrium solver's differentiation contract.
 """
 from __future__ import annotations
 
@@ -84,6 +66,8 @@ def _canonical_images(theta, zeta, *, iota, nfp, bmin, bmax, t1, t2, p,
     slope = 2*q*tail_exponent/(2*images+1)
     decay = jnp.exp(-slope)
     denominator_tail = -jnp.expm1(-slope)
+    # Shell k contributes <= 8*k*exp(-((2*k-1)/extent)**q).
+    # Convexity bounds the exponent by a tangent; sum the geometric tail.
     log_tail_bound = (jnp.log(8.0)-tail_exponent
                       + jnp.log((images+1)/denominator_tail+decay/denominator_tail**2))
     valid = (jnp.isfinite(width) & (jnp.abs(width) > 1e-12)
@@ -121,7 +105,8 @@ def canonical_pwo_field(theta, zeta, *, iota, nfp, bmin, bmax, t1, t2, p=2,
     ``(nsurface,1,1)`` against angular meshes. ``nfp``, ``p``, and ``images``
     are static integers. Invalid eager data raise; traced invalid data return
     ``valid=False`` and NaN field values. ``bmin`` is a lower bound: finite-p
-    tails generally keep the actual minimum above it.
+    tails generally keep the actual minimum above it. ``corner_margin`` measures
+    centered-cell containment; ``lattice_margin`` measures torus separation.
     """
     patches, width, margin, lattice_margin, log_tail_bound, valid = _canonical_images(
         theta, zeta, iota=iota, nfp=nfp, bmin=bmin, bmax=bmax, t1=t1, t2=t2,
@@ -248,7 +233,7 @@ def canonical_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
 def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
         b_ref, bmns_b=None, a=0.3, b=0.0, c=-2.0, eta_min=2.8,
         ngamma=32, neta=32, weights=None):
-    """Fixed-domain mapped-gamma variance, not a global pwO certificate.
+    """Mapped-gamma variance over a fixed eta interval, divided by B_ref squared.
 
     Eta midpoint quadrature covers [eta_min,2*pi-eta_min]. Gamma is uniform
     and endpoint-free. Discrete Parseval in gamma makes this the power of all

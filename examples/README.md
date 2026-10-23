@@ -91,26 +91,26 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
-  `pwO_optimization.py` defaults to the bundled QI seed. Set
-  `VMEX_PWO_SEED=near_circular` to start from the nfp=2 R=1 m, a=0.1 m
-  boundary with a 0.005 m rotating-ellipse perturbation, optimize QP first,
-  and then fit the selected pwO target. Both target constructions have a
-  poloidal orientation, which motivates the QP warm start; the measured QS
-  residual is reported without claiming that symmetry or pwO topology was
-  achieved. The script saves near-circular, QP,
-  and independently refined QP input/WOUT checkpoints; a failed QP gate stops
-  before target calibration. These checkpoints record scale changes made
-  during QP shaping; the pwO stage holds the QP reference scale.
-  `VMEX_PWO_QS_INPUT=input.pwO_optimized_qs` resumes
-  from a saved QP boundary. `VMEX_PWO_PENALTY=interval` makes the pwO stage
-  penalize aspect, local mean field, and local mirror only outside their final
-  acceptance intervals; `equality` is the default. Both families now hold local
-  mirror within 10% of the seed, so a canonical fit cannot improve by removing
-  most of its field variation. The canonical target chooses its angular
-  origin once from the seed, comparing all four half-period shifts of the
-  poloidal and toroidal angles, and holds that choice fixed during optimization
-  and validation. These switches also apply to
-  `pwO_optimization_finite_beta.py`.
+  The pwO examples fit canonical or mapped-field targets; a lower residual
+  does not establish piecewise action invariance or confinement.
+
+  ```bash
+  python examples/optimization/pwO_optimization.py
+  VMEX_PWO_SEED=near_circular python examples/optimization/pwO_optimization.py
+  python examples/optimization/pwO_optimization_finite_beta.py
+  python examples/optimization/single_stage_pwO_optimization.py
+  ```
+
+  Stage 1 starts from the bundled QI seed by default. `VMEX_PWO_SEED=near_circular`
+  starts from an nfp=2 perturbed circular torus and runs QP conditioning first.
+  Set `VMEX_PWO_QS_INPUT` to resume a saved QP boundary, `VMEX_PWO_FAMILY=mapped`
+  for the mapped target, or `VMEX_PWO_METHOD=least_squares` for a residual-Jacobian
+  solve instead of the scalar adjoint. `VMEX_PWO_PENALTY=interval` penalizes
+  aspect, local mean field and mirror only outside their acceptance intervals.
+  Final validation requires local mirror within 10% of the seed. Canonical target
+  bounds and angular origins are calibrated once and held fixed. The scripts
+  save input/WOUT checkpoints and rescore the result at higher resolution.
+  The coil example reads the stage-1 output and fits the mapped target.
 
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
   through the toroidal flux: at zero net current beta depends on PRES_SCALE /

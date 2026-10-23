@@ -1,12 +1,10 @@
 #!/usr/bin/env python
-"""Fit coils, then jointly vary the plasma boundary and coils for mapped pwO.
+"""Fit coils, then optimize the plasma boundary and coils for mapped pwO.
 
-Run stage 1 first. Set TARGET_BETA to 0.005 to use its finite-beta output.
-The full boundary field is matched, including virtual casing at finite beta;
-this fixes the field amplitude as well as its normal component. Engineering
-limits below are filament geometry proxies at the declared ARIES-CS scale.
-The final coil-driven equilibrium is checked separately. Particle confinement,
-island topology, winding packs and fabrication errors require further campaigns.
+Reads the stage-1 output. TARGET_BETA selects vacuum or finite beta; the
+boundary-field match includes virtual casing at finite beta. Geometry limits
+apply to filaments at ARIES-CS scale. Validate the coil-driven equilibrium
+separately from particle confinement and engineering tolerances.
 """
 
 import json

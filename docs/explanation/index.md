@@ -37,7 +37,6 @@ adjoint-gradients
 :maxdepth: 1
 
 confinement
-piecewise-omnigenity
 ```
 
 ## Mirrors and the code base
