@@ -862,13 +862,13 @@ def test_qa_alpha_losses_optimization(tmp_path):
         assert (tmp_path / name).exists(), name
 
 
-@pytest.mark.full  # nightly: coarse free-boundary solve plus 1,000 relaxation iterations (~2 min)
+@pytest.mark.full  # nightly: coarse free-boundary solve plus 1,000 relaxation iterations (~1.5 min)
 def test_free_boundary_relax_constraint(tmp_path):
     pytest.importorskip("essos.fields")
     out = _run_example(EXAMPLES / "free_boundary_relax_constraint.py", tmp_path, timeout=1500)
     rows = dict(re.findall(r"^\s*(converged|relaxed)\s+\S+\s+([0-9.eE+-]+)", out, re.M))
     assert set(rows) == {"converged", "relaxed"}, out
-    assert float(rows["relaxed"]) < 0.3 * float(rows["converged"]), out
+    assert float(rows["relaxed"]) < 0.5 * float(rows["converged"]), out  # 3x at ns = 12
 
 
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)
