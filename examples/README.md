@@ -203,3 +203,12 @@ unless they are compact reviewed documentation artifacts.
 
 Published-equilibrium comparisons and reproducibility studies belong in
 `../benchmarks/`, not among the user-facing optimization examples.
+
+### Helium occupation objective
+
+`optimization/helium_ash_objective.py` minimizes manufactured slab residence
+over a bounded diffusion interval with `HeliumAshObjective`. It demonstrates
+the adapter and least-squares cost, with fixed geometry, source and edge sink.
+Run it with `python examples/optimization/helium_ash_objective.py` after installing
+the optional residence API from [ESSOS #167](https://github.com/uwplasma/ESSOS/pull/167).
+This coefficient example does not qualify kinetic shape gradients or a physical design.
