@@ -847,6 +847,36 @@ def test_lasym_fixed_boundary_mask_matches_vjp_oracle(lasym):
     assert _mask_bit_ident(mask, im._fixed_boundary_dof_mask(cfg)), name
 
 
+def test_lasym_config_key_separates_undefined_rotation_seed():
+    """Config reuse preserves the discrete atan2(0, 0) derivative gate."""
+    from vmex.core import setup as setup_mod
+
+    inp = VmecInput.from_file(str(DATA_DIR / "input.up_down_asymmetric_tokamak"))
+    inp = inp.change_resolution(mpol=3, ntor=0)
+    arrays = {name: np.array(getattr(inp, name), copy=True)
+              for name in ("rbc", "rbs", "zbc", "zbs")}
+    for values in arrays.values():
+        values[0, 1] = 0.0
+    undefined = dataclasses.replace(inp, **arrays)
+    active_rbs = arrays["rbs"].copy()
+    active_rbs[0, 1] = 0.1
+    active = dataclasses.replace(undefined, rbs=active_rbs)
+    # Both inputs take the same theta flip. Only the rotation's derivative
+    # gate differs; the old abs(rbc) + abs(zbs) key conflated them.
+    assert setup_mod._internal_blocks_from_input(undefined)[1] == (
+        setup_mod._internal_blocks_from_input(active)[1])
+    cfg_undefined = im.make_config(undefined)
+    cfg_active = im.make_config(active)
+    assert cfg_active is not cfg_undefined
+    assert cfg_active != cfg_undefined
+    blocks = tuple(getattr(active, name) for name in ("rbc", "rbs", "zbc", "zbs"))
+    expected = setup_mod._lasym_delta_rotation(*blocks, mpol=3, ntor=0)
+    actual = im._lasym_delta_rotation_traceable(
+        *(jnp.asarray(block) for block in blocks), cfg_active, mpol=3, ntor=0)
+    for got, want in zip(actual, expected, strict=True):
+        np.testing.assert_allclose(got, want, atol=1e-15)
+
+
 def test_lasym_delta_rotation_traceable():
     """The traceable delta rotation reproduces ``setup._lasym_delta_rotation``
     to ~1e-12 and stays differentiable in the (0,1) coefficients."""

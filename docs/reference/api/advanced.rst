@@ -159,6 +159,9 @@ that the objective modules share live in one place and are re-exported by
 .. automodule:: vmex.core.statephysics
    :members:
 
+.. automodule:: vmex.core.cyclometry
+   :members:
+
 .. automodule:: vmex.core.omnigenity
    :members:
 

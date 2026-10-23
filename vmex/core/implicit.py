@@ -171,7 +171,7 @@ from solvax import (
 from .device import (
     AUTO, _put_numeric_leaves, commit_to_single_device, resolve_implicit_device,
 )
-from .errors import AdjointSolveError, VmecError
+from .errors import AdjointSolveError, VmecConvergenceError, VmecError
 from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
 from .geometry import (
@@ -301,6 +301,14 @@ def input_with_params(inp: VmecInput, params: ImplicitParams) -> VmecInput:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _FrozenReference:
+    """Immutable, content-keyed definition of one discrete forward family."""
+
+    state: SpectralState
+    mask: SpectralState
+
+
 @dataclass(frozen=True, eq=False)
 class ImplicitConfig:
     """Static (non-differentiable) context of one implicit solve."""
@@ -372,6 +380,9 @@ class ImplicitConfig:
     #: gradient evaluated outside such a context creates its constants on
     #: JAX's default device and mixes devices with the committed state.
     device: Any = None
+    #: Explicit persistent family; its immutable arrays enter config identity
+    #: and therefore every solve/refinement/compiled-objective cache key.
+    frozen_reference: _FrozenReference | None = None
 
     def _structure(self) -> tuple:
         """Content token without the adjoint tolerances (cached)."""
@@ -497,8 +508,8 @@ def _structural_token(cfg: ImplicitConfig) -> Any:
     """Content token of ``cfg`` with the parameter values of its input left out.
 
     Only their shapes and the two discrete decisions frozen from the input
-    boundary (the ``readin.f`` theta flip and the lasym rotation's zero
-    denominator) remain, so configs that differ only in boundary or profile
+    boundary (the ``readin.f`` theta flip and the lasym rotation's undefined
+    ``atan2(0, 0)`` seed) remain, so configs that differ only in boundary or profile
     values share one canonical instance and every executable keyed on it.
     """
     inp = cfg.inp
@@ -506,9 +517,11 @@ def _structural_token(cfg: ImplicitConfig) -> Any:
         (f.name, ("shape", np.shape(getattr(inp, f.name)))
          if f.name in _PARAM_FIELDS else _content_token(getattr(inp, f.name)))
         for f in dataclasses.fields(inp))
-    rbc, zbs = np.asarray(inp.rbc, dtype=float), np.asarray(inp.zbs, dtype=float)
-    rotation = (bool(inp.lasym) and int(inp.mpol) >= 2
-                and abs(rbc[int(inp.ntor), 1]) + abs(zbs[int(inp.ntor), 1]) == 0.0)
+    rotation = False
+    if bool(inp.lasym) and int(inp.mpol) >= 2:
+        r0, z0, s0, c0 = (float(np.asarray(getattr(inp, name))[int(inp.ntor), 1])
+                          for name in ("rbc", "zbs", "rbs", "zbc"))
+        rotation = r0 + z0 == 0.0 and s0 - c0 == 0.0
     return (fields, _internal_blocks_from_input(inp)[1], rotation, tuple(
         (f.name, _content_token(getattr(cfg, f.name)))
         for f in dataclasses.fields(cfg) if f.name not in ("inp", *_TOLERANCES)))
@@ -536,6 +549,76 @@ def _canonical_config(cfg: ImplicitConfig) -> ImplicitConfig:
     while len(_CONFIG_CANON) > _CONFIG_CANON_MAX:
         _CONFIG_CANON.popitem(last=False)
     return cfg
+
+
+def _with_frozen_reference(cfg: ImplicitConfig, reference: Any) -> ImplicitConfig:
+    """Copy and refine a compatible equilibrium into an immutable family."""
+    if not np.isfinite(cfg.refine_tol) or cfg.refine_tol <= 0.0:
+        raise ValueError("frozen_reference requires finite positive refine_tol")
+    if not all(hasattr(reference, name) for name in ("inp", "runtime", "state", "result")):
+        raise TypeError("frozen_reference must be a converged Equilibrium")
+    rt = reference.runtime
+    if bool(cfg.inp.lfreeb) or bool(reference.inp.lfreeb):
+        raise ValueError("frozen_reference requires a fixed-boundary equilibrium")
+    if (rt.resolution != cfg.resolution
+            or resolution_from_input(reference.inp, ns=cfg.resolution.ns) != cfg.resolution):
+        raise ValueError("frozen_reference resolution/mode mismatch")
+    if (bool(rt.setup.lconm1) != cfg.lconm1
+            or int(rt.setup.ncurr) != int(cfg.inp.ncurr)):
+        raise ValueError("frozen_reference constraint mismatch (lconm1/ncurr)")
+    # Static runtime controls cannot change within the reference family.
+    for name in ("tcon0", "lforbal", "spres_ped", "bloat", "gamma", "pmass_type", "piota_type", "pcurr_type",
+                 "aphi", "am_aux_s", "am_aux_f", "ai_aux_s", "ai_aux_f", "ac_aux_s",
+                 "raxis_c", "raxis_s", "zaxis_c", "zaxis_s"):
+        if _content_token(getattr(reference.inp, name, None)) != _content_token(
+                getattr(cfg.inp, name, None)):
+            raise ValueError(f"frozen_reference static input mismatch: {name}")
+    if not bool(reference.result.converged) or not np.isfinite(_fsq(reference.result)):
+        raise ValueError("frozen_reference must be a finite converged equilibrium")
+    with _device_context(cfg):
+        template = _template_runtime(cfg)
+        if (bool(rt.setup.lflip) != bool(template.setup.lflip)
+                or int(rt.setup.signgs) != int(template.setup.signgs)):
+            raise ValueError("frozen_reference boundary orientation mismatch")
+        if any(getattr(rt, name) != getattr(template, name)
+               for name in ("tcon0", "gamma", "lforbal", "lfreeb", "jmax")):
+            raise ValueError("frozen_reference runtime constraint mismatch")
+        if (not np.array_equal(reference.result.xm, np.asarray(template.modes.m))
+                or not np.array_equal(reference.result.xn,
+                                      np.asarray(template.modes.n) * cfg.resolution.nfp)):
+            raise ValueError("frozen_reference mode-table mismatch")
+        mask = _device_pin(cfg, _fixed_boundary_dof_mask(cfg))
+        state = _device_pin(cfg, jax.tree.map(
+            lambda a: jnp.asarray(np.array(a, dtype=np.float64, copy=True)), reference.state))
+        if any(a.shape != b.shape for a, b in zip(
+                jax.tree.leaves(state), jax.tree.leaves(mask), strict=True)):
+            raise ValueError("frozen_reference state shape mismatch")
+        if not all(np.all(np.isfinite(a)) for a in jax.tree.leaves(state)):
+            raise ValueError("frozen_reference state must be finite")
+        params = params_from_input(reference.inp, device=cfg.device)
+        _boundary_pack_tables(cfg)
+        try:
+            state = _refined_state(cfg, params, state, mask)
+            _check_frozen_root(cfg, params, state, state, mask)
+        finally:
+            # Capture does not use the trial-refinement status memo.
+            _ANCHOR_STALLED.pop(id(cfg), None)
+        return _canonical_config(dataclasses.replace(
+            cfg, frozen_reference=_FrozenReference(state, mask)))
+
+
+def _check_frozen_root(cfg: ImplicitConfig, params: ImplicitParams,
+                       state: SpectralState, frozen: SpectralState,
+                       mask: SpectralState) -> float:
+    """Reject every nonfinite or insufficiently converged family root."""
+    project = _dof_projector(cfg, mask)
+    residual = float(_tree_norm(residual_fn(cfg, frozen, mask)(project(state), params)))
+    if (not all(np.all(np.isfinite(a)) for a in jax.tree.leaves(state))
+            or not np.isfinite(residual) or residual > cfg.refine_tol):
+        raise VmecConvergenceError(
+            f"frozen_reference residual {residual:.3e} exceeds refine_tol {cfg.refine_tol:.3e}",
+            ftol=cfg.ftol)
+    return residual
 
 
 def _device_context(cfg: ImplicitConfig):
@@ -1986,7 +2069,15 @@ def _host_solve_and_mask(cfg: ImplicitConfig, params_np, *,
     # explicitly placed state (observed as NaN diagnostics / zero gradients
     # on a non-default GPU).
     with _device_context(cfg):
-        return _host_solve_and_mask_impl(cfg, params_np, refine=refine)
+        try:
+            return _host_solve_and_mask_impl(cfg, params_np, refine=refine)
+        except VmecError as exc:
+            # Strict frozen-root rejection uses the same short typed-error
+            # relay as ordinary predictor failures in the callback lane.
+            _HOST_ERROR.append(exc)
+            raise RuntimeError(
+                f"host equilibrium solve failed with {type(exc).__name__} "
+                "(re-raised typed at the pure_callback call site)") from None
 
 
 def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
@@ -1999,17 +2090,15 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # template inside ``runtime_from_params``.  Explicit per-leaf device_put
     # rehomes them.
     params = _device_pin(cfg, jax.tree.map(jnp.asarray, params_np))
-    try:
-        result = _host_solve(cfg, params)
-    except VmecError as exc:
-        # Relay the typed exception (module docstring, "Zero-crash typed
-        # errors through the callback"): stash it and raise a SHORT sentinel
-        # — pure_callback would otherwise bury it in a multi-KB traceback
-        # dump with the typed class lost.
-        _HOST_ERROR.append(exc)
-        raise RuntimeError(
-            f"host equilibrium solve failed with {type(exc).__name__} "
-            "(re-raised typed at the pure_callback call site)") from None
+    result = _host_solve(cfg, params)
+    # Frozen families require both host admission and a refined root.
+    host_admitted = (bool(result.converged)
+                     or _fsq(result) <= cfg.max_fsq_ratio * cfg.ftol)
+    if cfg.frozen_reference is not None and not host_admitted and refine != "certified":
+        raise VmecConvergenceError(
+            "frozen_reference host solve failed convergence/FSQ admission",
+            ftol=cfg.ftol,
+            fsq=(float(result.fsqr), float(result.fsqz), float(result.fsql)))
     as_np = lambda t: jax.tree.map(  # noqa: E731
         lambda a: np.asarray(a, dtype=np.float64), t)
     # Prime the per-cfg-identity template *concretely* here (this host
@@ -2040,17 +2129,25 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # ``refine="certified"`` (the optimizer status lane) also skips it for a
     # trial past ``max_fsq_ratio``: that trial is rejected whatever the
     # anchor does, and the anchor was most of its cost.
-    if not refine or (refine == "certified" and not (
-            bool(result.converged) or _fsq(result) <= cfg.max_fsq_ratio * cfg.ftol)):
+    if ((not refine and cfg.frozen_reference is None)
+            or (refine == "certified" and not host_admitted)):
         return as_np(result.state), mask
     # The forward solve picks its own device (AUTO), so rehome its state
     # beside the parameters before refining: on cfg.device, or where the
     # callback payload is committed when no device is carried.
     home = cfg.device if cfg.device is not None else _params_committed_device(params)
+    predictor = result.state if home is None else jax.device_put(result.state, home)
+    if cfg.frozen_reference is not None:
+        family = cfg.frozen_reference
+        mask = family.mask
+        project = _dof_projector(cfg, mask)
+        predictor = _assemble(project(predictor), runtime_from_params(params, cfg),
+                              family.state, project, _edge_mask(cfg))
     state = _refine_fixed_point(
-        cfg, params, result.state if home is None else jax.device_put(result.state, home),
-        _device_pin(cfg, jax.tree.map(jnp.asarray, mask)))
-    return as_np(state), mask
+        cfg, params, predictor, _device_pin(cfg, jax.tree.map(jnp.asarray, mask)))
+    if cfg.frozen_reference is not None:
+        _check_frozen_root(cfg, params, state, cfg.frozen_reference.state, mask)
+    return as_np(state), as_np(mask)
 
 
 def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
@@ -2070,15 +2167,7 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         try:
             state, mask = _host_solve_and_mask_impl(cfg, params_np, refine="certified")
         except VmecError as exc:
-            # Direct host calls preserve the typed exception; pure_callback
-            # wraps the same error in the relayed sentinel handled below.
             error = exc
-        except Exception:
-            # Only the short sentinel paired with a relayed typed VmecError is
-            # an invalid optimizer trial. Never hide a programming error.
-            if not _HOST_ERROR:
-                raise
-            error = _HOST_ERROR.pop()
         if error is not None:
             _HOST_ERROR.clear()
             _LAST_STATUS_ERROR[cfg] = error
@@ -2256,7 +2345,9 @@ def solve_implicit(params: ImplicitParams, cfg: ImplicitConfig,
     docstring).  Compose with :func:`runtime_from_params` and the helpers
     (:func:`mhd_energy`, :func:`aspect_ratio`, ...) to build objectives, or
     use :func:`run`.  ``adjoint_tol`` (default ``cfg.adjoint_tol``) is a
-    traced argument: changing it never recompiles.
+    traced argument: changing it never recompiles. A ``frozen_reference``
+    config additionally requires host convergence/FSQ admission and a refined
+    family root, including when the caller only requests a forward state.
     """
     return _solve_implicit(params, _traced_tol(cfg, adjoint_tol), cfg)
 
@@ -3919,18 +4010,20 @@ def frozen_path_directional_fd(
     that path variation is an O(1) contribution that can inflate or even
     sign-flip the finite difference (measured on ``li383_low_res``:
     ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the adjoint, but the naive
-    central FD reads ``+0.045`` -- wrong sign).
+    central FD reads ``+0.045`` -- opposite signs on different families).
 
     The implicit adjoint deliberately does *not* differentiate through that
     logic: it linearizes the fixed point of the **frozen** residual ``F`` (the
     preconditioner / mask / branch captured once at ``params``; see the module
-    docstring), which is the stable, physical gradient.  This helper reproduces
-    exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
+    docstring), which defines the chosen discrete-family gradient.  This helper
+    reproduces exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
     ``F(z, params +/- h*tangent) = 0`` (matrix-free, the same linearization the
     adjoint uses) from the converged ``z*`` before central-differencing
     ``metric_fn``.  The result therefore equals :func:`jax.grad` of the metric
     contracted with ``tangent`` to solver accuracy -- the gradient check a naive
-    re-solve FD cannot provide for these metrics.
+    re-solve FD cannot provide for these metrics.  Agreement does not bound
+    discretization error or remove the coordinate-family sensitivity of
+    independent re-solves.
 
     The Newton steps go through the recycling GCROT solve rather than plain
     restarted GMRES: from a warm start already at the root the step's RHS

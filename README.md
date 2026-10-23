@@ -375,6 +375,36 @@ Off by default, so VMEC2000 iteration parity is kept:
   force of fixed-boundary stellarators converged to a very small `ftol`; iterations fall by up to 9%
   ([iteration](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
 
+## Cyclometry: passing particles
+
+VMEX evaluates closed-transit action and bounds its variation between field lines
+on a rational surface. The bound is differentiable through the moving surface for
+boundary optimization ([API and assumptions](docs/explanation/confinement.rst)).
+
+![Rational surface colored by field strength](docs/_static/figures/readme_cyclometry_surface.webp)
+
+The li383 ι = 3/5 surface, colored by |B|. The marked field lines close in five toroidal turns.
+
+![Passing helium sections for both parallel directions](docs/_static/figures/readme_cyclometry_low_energy.webp)
+
+ESSOS sections for 48 selected 100 eV helium ions over 86.4 ms, separated by parallel
+velocity sign. Gray contours show the leading transit-action Hamiltonian; s is normalized
+toroidal flux and χ = 5θ − 3ζ. This model uses zero magnetic moment, 31 radial surfaces,
+Boozer bounds 8/8 and omits the radial covariant field component (K=0).
+
+![Scaled-alpha sections and transit-action contours](docs/_static/figures/readme_cyclometry_alpha.webp)
+
+Ten selected 3.5 MeV ions over 4.43 ms in the field scaled by 6 in length and 4 in strength,
+with Boozer bounds 12/12, μB★/E = 0.6 and B★ = 9.533 T. The contour mismatch and tolerance-sensitive orbit
+classification require further invariant and orbit validation; these markers do not estimate losses.
+
+![Equilibrium and continuous-force refinement](docs/_static/figures/readme_cyclometry_convergence.webp)
+
+At fixed physical inputs and (Mpol, Ntor) = (16, 15), radial refinement from 121 to 241 points changes action variation
+by 14.2%, versus 0.030% under Boozer refinement. Continuous-force convergence also remains
+unresolved. These are discrete-model diagnostics, with no validated confinement gain.
+[Replot the saved data](docs/_static/figures/sources/make_cyclometry_figures.py).
+
 ## Tracing from the axis to the wall
 
 Orbits do not end at the LCFS. With ESSOS (`vmex[coils]`), guiding centres move in VMEC coordinates
