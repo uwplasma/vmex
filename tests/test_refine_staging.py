@@ -406,3 +406,5 @@ def test_block_stall_far_from_root_skips_krylov_and_rejects_the_trial(monkeypatc
     status = im._host_solve_and_mask_status(
         cfg, jax.tree.map(np.asarray, p0))[2]
     assert int(status) == 3 and im._LAST_REFINED[cfg][2]
+
+

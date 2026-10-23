@@ -2011,13 +2011,11 @@ def make_problem(
     implicit differentiation. The default preserves strict gradients;
     ``numpy.inf`` explicitly disables refinement for legacy comparisons.
 
-    ``frozen_reference`` accepts a compatible converged :class:`Equilibrium`
-    for the implicit scalar ``loss`` lane. Its copied reference and evolved
-    mask define one immutable discrete family for every value, gradient and
-    materialized equilibrium. Trials require both existing host convergence/FSQ
-    admission and Newton refinement to finite ``refine_tol``. The host state
-    predicts evolved coordinates; resolution/mode/constraint/static profile mismatches are rejected.
-    This specifies the discrete family; it does not certify continuum accuracy.
+    ``frozen_reference`` copies a compatible converged :class:`Equilibrium`
+    for implicit scalar ``loss`` problems. Its state and evolved mask define
+    the family used for values, gradients and materialization. Trials require
+    host convergence/FSQ admission and Newton refinement to finite ``refine_tol``;
+    resolution, mode, constraint and static profile mismatches are rejected.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation

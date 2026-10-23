@@ -831,8 +831,9 @@ Compare field geometry and derivatives at matched physical points before
 interpreting differences between native and Boozer orbit models.
 
 :func:`~vmex.core.cyclometry.moving_rational_surface` interpolates a fixed Boozer
-radial table at ``iota(s)=N/M`` and differentiates the root implicitly. Pass the
-actual returned ``s_b`` radii and keep the bracket fixed. Endpoint roots,
+radial table at ``iota(s)=N/M`` by solving the active affine interval directly.
+The root and interpolated fields remain differentiable. Pass the actual
+returned ``s_b`` radii and keep the bracket fixed. Endpoint roots,
 interior-knot roots and insufficient or changing shear sign are rejected.
 Refine radial and angular sampling when validating the objective.
 ``iota_shear`` is with respect to the table coordinate; convert using

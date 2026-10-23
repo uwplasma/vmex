@@ -953,11 +953,10 @@ class VmecProblem(FunctionProblem):
             for it.
         **kwargs:
             As for :meth:`from_tuples`. ``frozen_reference=equilibrium``
-            opts into one immutable discrete family, copied from a compatible
-            converged equilibrium. Values, gradients and materialization use
-            that same family. Both host convergence/FSQ and strict finite Newton residual
-            admission are required, with finite ``refine_tol`` and implicit derivatives;
-            incompatible resolution/modes/constraints are rejected.
+            copies a compatible converged equilibrium to define the family
+            for values, gradients and materialization. Requires implicit
+            derivatives, host convergence/FSQ admission and Newton refinement
+            to finite ``refine_tol``. Incompatible references are rejected.
 
         Returns
         -------

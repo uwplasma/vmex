@@ -395,12 +395,12 @@ Boozer bounds 8/8 and omits the radial covariant field component (K=0).
 ![Scaled-alpha sections and transit-action contours](docs/_static/figures/readme_cyclometry_alpha.webp)
 
 Ten selected 3.5 MeV ions over 4.43 ms in the field scaled by 6 in length and 4 in strength,
-at μB★/E = 0.6 with B★ = 9.533 T. The contour mismatch and tolerance-sensitive orbit
+with Boozer bounds 12/12, μB★/E = 0.6 and B★ = 9.533 T. The contour mismatch and tolerance-sensitive orbit
 classification require further invariant and orbit validation; these markers do not estimate losses.
 
 ![Equilibrium and continuous-force refinement](docs/_static/figures/readme_cyclometry_convergence.webp)
 
-At fixed physical inputs, radial refinement from 121 to 241 points changes action variation
+At fixed physical inputs and (Mpol, Ntor) = (16, 15), radial refinement from 121 to 241 points changes action variation
 by 14.2%, versus 0.030% under Boozer refinement. Continuous-force convergence also remains
 unresolved. These are discrete-model diagnostics, with no validated confinement gain.
 [Replot the saved data](docs/_static/figures/sources/make_cyclometry_figures.py).

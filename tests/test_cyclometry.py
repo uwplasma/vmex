@@ -188,6 +188,29 @@ def test_moving_surface_implicit_derivatives(sign):
             np.testing.assert_allclose(tangent, finite_difference, rtol=2e-6, atol=2e-9)
 
 
+@pytest.mark.parametrize('sign', [1., -1.])
+def test_moving_surface_uses_root_segment_and_ignores_outside_turns(sign):
+    # The bracket spans three unequal slopes; the first table interval lies
+    # outside it and turns in the opposite direction. Differentiate the
+    # interior affine root independently of the interpolation implementation.
+    radii = np.array([.1, .2, .4, .6, .9])
+    iota = jnp.array([.7, .2, .35, .65, .8])
+    iota = .5 + sign * (iota - .5)
+
+    def root(values):
+        table = dict(s_b=radii, iota_b=values, G_b=jnp.ones(5),
+                     I_b=jnp.zeros(5), bmnc_b=jnp.ones((5, 1)))
+        return moving_rational_surface(table, 1, 2, radii=radii,
+                                       bracket=(.25, .85))['root_s']
+
+    def exact(values):
+        return .4 + .2 * (.5 - values[2]) / (values[3] - values[2])
+
+    value, gradient = jax.jit(jax.value_and_grad(root))(iota)
+    np.testing.assert_allclose(value, exact(iota), atol=1e-15)
+    np.testing.assert_allclose(gradient, jax.grad(exact)(iota), atol=1e-14)
+
+
 @pytest.mark.parametrize('case', ['missing', 'zero_shear', 'small_shear', 'multiple_roots',
                                  'endpoint', 'knot', 'radii_mismatch', 'iota_b', 'bmnc_b',
                                  'bmns_b', 'G_b', 'I_b', 'psi_b', 'psi_edge'])

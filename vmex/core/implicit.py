@@ -552,11 +552,7 @@ def _canonical_config(cfg: ImplicitConfig) -> ImplicitConfig:
 
 
 def _with_frozen_reference(cfg: ImplicitConfig, reference: Any) -> ImplicitConfig:
-    """Capture and refine a compatible explicit equilibrium exactly once.
-
-    No host solve or mutable solve cache chooses the complement.  Arrays are
-    copied onto immutable JAX storage before canonicalizing the family.
-    """
+    """Copy and refine a compatible equilibrium into an immutable family."""
     if not np.isfinite(cfg.refine_tol) or cfg.refine_tol <= 0.0:
         raise ValueError("frozen_reference requires finite positive refine_tol")
     if not all(hasattr(reference, name) for name in ("inp", "runtime", "state", "result")):
@@ -570,9 +566,7 @@ def _with_frozen_reference(cfg: ImplicitConfig, reference: Any) -> ImplicitConfi
     if (bool(rt.setup.lconm1) != cfg.lconm1
             or int(rt.setup.ncurr) != int(cfg.inp.ncurr)):
         raise ValueError("frozen_reference constraint mismatch (lconm1/ncurr)")
-    # These static profile/force controls are baked into the runtime rather
-    # than carried by ImplicitParams.  Silently changing them reinterprets
-    # the supplied reference instead of capturing its equilibrium family.
+    # Static runtime controls cannot change within the reference family.
     for name in ("tcon0", "lforbal", "spres_ped", "bloat", "gamma", "pmass_type", "piota_type", "pcurr_type",
                  "aphi", "am_aux_s", "am_aux_f", "ai_aux_s", "ai_aux_f", "ac_aux_s",
                  "raxis_c", "raxis_s", "zaxis_c", "zaxis_s"):
@@ -2096,19 +2090,8 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # template inside ``runtime_from_params``.  Explicit per-leaf device_put
     # rehomes them.
     params = _device_pin(cfg, jax.tree.map(jnp.asarray, params_np))
-    try:
-        result = _host_solve(cfg, params)
-    except VmecError as exc:
-        # Relay the typed exception (module docstring, "Zero-crash typed
-        # errors through the callback"): stash it and raise a SHORT sentinel
-        # — pure_callback would otherwise bury it in a multi-KB traceback
-        # dump with the typed class lost.
-        _HOST_ERROR.append(exc)
-        raise RuntimeError(
-            f"host equilibrium solve failed with {type(exc).__name__} "
-            "(re-raised typed at the pure_callback call site)") from None
-    # The explicit family promises host admission as well as a refined root.
-    # Newton recovery alone does not satisfy that opt-in public contract.
+    result = _host_solve(cfg, params)
+    # Frozen families require both host admission and a refined root.
     host_admitted = (bool(result.converged)
                      or _fsq(result) <= cfg.max_fsq_ratio * cfg.ftol)
     if cfg.frozen_reference is not None and not host_admitted and refine != "certified":
@@ -2184,15 +2167,7 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         try:
             state, mask = _host_solve_and_mask_impl(cfg, params_np, refine="certified")
         except VmecError as exc:
-            # Direct host calls preserve the typed exception; pure_callback
-            # wraps the same error in the relayed sentinel handled below.
             error = exc
-        except Exception:
-            # Only the short sentinel paired with a relayed typed VmecError is
-            # an invalid optimizer trial. Never hide a programming error.
-            if not _HOST_ERROR:
-                raise
-            error = _HOST_ERROR.pop()
         if error is not None:
             _HOST_ERROR.clear()
             _LAST_STATUS_ERROR[cfg] = error

@@ -1,43 +1,28 @@
-"""Closed-transit action bounds for passing particles near rational surfaces.
-
-These pure kernels implement finite-moment bounds, not an orbit certificate.
-The caller supplies a fixed B_star, a resolved Boozer spectrum, and separately
-bounds angular, radial and field errors. No VMEC2000 equation is replaced.
-"""
+"""Differentiable passing-particle action and finite-moment oscillation bounds."""
 from math import comb, gcd
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.scipy.special import logsumexp
-from solvax import root_solve
 
 
 def moving_rational_surface(booz, numerator, denominator, *, radii, bracket,
                             minimum_shear=1e-6, root_tolerance=1e-12):
-    """Interpolate a moving rational surface of a fixed Boozer radial table.
+    """Evaluate a fixed Boozer radial table where iota = numerator/denominator.
 
-    ``radii`` must be the static, sorted, unique *returned* ``s_b`` values of
-    :func:`~vmex.core.omnigenity.boozer_spectrum_state`, captured outside AD.
-    Request those actual half-grid radii in every equilibrium evaluation.
-    ``bracket`` is fixed inside their span. Shapes and Fourier modes must stay
-    fixed throughout a stage. All radial data use the same piecewise-linear
-    interpolant; this introduces radial error requiring separate refinement.
-    The table coordinate ``s_b`` need not equal normalized toroidal flux for
-    nonidentity APHI; interpolate ``psi_b`` separately when flux is needed.
+    ``radii`` are the sorted, unique returned ``s_b`` values, captured outside
+    AD and requested in every equilibrium evaluation. Keep the bracket, shapes
+    and modes fixed throughout a stage. All fields use the same piecewise-linear
+    interpolant; its root is solved directly in the active affine interval.
+    Every interval intersecting the bracket must have a common shear sign and
+    magnitude >= ``minimum_shear``. Reject roots within ``root_tolerance`` in
+    iota of bracket endpoints or interior knots; knots have ambiguous derivatives.
 
-    SOLVAX differentiates the root implicitly, not through bisection. Every
-    interval intersecting the bracket must have the same shear sign and
-    magnitude >= ``minimum_shear``. Roots within ``root_tolerance`` in iota
-    of a bracket endpoint or interior interpolation knot are rejected:
-    the latter have no unique radial derivative in this interpolation model.
-    These guards establish an isolated branch of the interpolant only, not
-    existence/uniqueness in the continuum equilibrium or a confinement bound.
-
-    Returns a Boozer dictionary with length-one radial axes, plus scalar
-    ``root_s``, ``iota_shear`` (d iota/d table coordinate s), and
-    ``root_residual``. Invalid eager
-    calls raise ValueError; invalid traced trials return NaN radial values.
+    Returns a Boozer dictionary with length-one radial axes, scalar ``root_s``,
+    ``iota_shear`` (d iota/d table coordinate s), and ``root_residual``.
+    For nonidentity APHI, use ``psi_b`` to convert s to toroidal flux.
+    Invalid eager calls raise ValueError; traced trials return NaN radial values.
     """
     if (not isinstance(numerator, (int, np.integer))
             or not isinstance(denominator, (int, np.integer))
@@ -94,19 +79,13 @@ def moving_rational_surface(booz, numerator, denominator, *, radii, bracket,
     direction = jnp.where(f_high > f_low, 1., -1.)
     valid = valid & jnp.all(~active | (jnp.isfinite(slopes) & (direction * slopes >= minimum_shear)))
 
-    def bisect(f, _):
-        def step(_, endpoints):
-            lo, hi = endpoints
-            mid = lo + (hi - lo) / 2
-            left = jnp.signbit(f(lo)) != jnp.signbit(f(mid))
-            # Keep exact midpoint roots, including a root on a rejected knot.
-            exact = f(mid) == 0
-            return jnp.where(left | exact, lo, mid), jnp.where(left | exact, mid, hi)
-        lo, hi = jax.lax.fori_loop(0, 64, step, (low, high))
-        return lo + (hi - lo) / 2
-
-    root = root_solve(residual, (low + high) / 2, bisect)
-    shear = jax.grad(lambda s: interpolate(fields["iota_b"], s))(root)
+    # Monotonicity on the bracket isolates one affine segment. Solving it
+    # directly gives the same root derivative without an iterative solver.
+    crossing = jnp.signbit(fields["iota_b"][:-1] - target) != jnp.signbit(
+        fields["iota_b"][1:] - target)
+    index = jnp.argmax(active & crossing)
+    shear = slopes[index]
+    root = nodes[index] + (target - fields["iota_b"][index]) / shear
     defect = residual(root)
     at_knot = jnp.any((nodes[1:-1] > low) & (nodes[1:-1] < high)
                       & (jnp.abs(fields["iota_b"][1:-1] - target) <= root_tolerance))
