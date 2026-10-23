@@ -1553,11 +1553,6 @@ def _solve_free_boundary_stage(
         else:
             rt = runtime_with_baselines(rt, _init_state, use_fft=use_fft)
     ctl = None
-    if position_control is not None:
-        ctl = position_control_state
-        if ctl is None:
-            ctl = initial_control(position_control, _init_state, rt.modes)
-        external_field = wrap_field(base_field, ctl)
     _initial_ijacob = 0
     # ``eqsolve.f`` retries a supplied axis when the first Jacobian changes
     # sign.  The fixed-boundary driver already did this in ``_solve_stage``;
@@ -1590,6 +1585,14 @@ def _solve_free_boundary_stage(
                 ier_flag=BAD_JACOBIAN_FLAG, iteration=1,
                 jacobian_resets=1, fsq=(1.0, 1.0, 1.0),
             )
+    if position_control is not None:
+        # Read the targets after the axis re-guess: a deck with a zero
+        # RAXIS_CC/ZAXIS_CS guess has R_00 = 0 until ``reguess_initial_axis``
+        # runs, which made the default target (the initial axis) zero.
+        ctl = position_control_state
+        if ctl is None:
+            ctl = initial_control(position_control, _init_state, rt.modes)
+        external_field = wrap_field(base_field, ctl)
     _axis_r0, _axis_z0 = _vacuum_scalars(_init_state, rt)[2:4]
     basis, fused_vac, vacuum_lane = _vacuum_executables(
         resolution, mf=int(inp.mpol) + 1, nf=int(inp.ntor),
