@@ -14,7 +14,7 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
   oldest release CI tests), `scipy` (1.16 or newer: the optimization examples
   pass `least_squares(callback=...)`, which SciPy 1.16 introduced),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
-  `booz_xform_jax>=0.4.3` and `solvax>=0.27.0` (the linear solvers). `import
+  `booz_xform_jax>=0.4.3` and `solvax>=0.33.0` (the linear solvers). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to
   upgrade.
 
