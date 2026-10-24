@@ -349,13 +349,14 @@ scaling, and ``Gamma_c`` is a proxy rather than a loss law: Velasco et al.
 ``|gamma_c*|`` variant (eq. 21) more linearly, and validate ``Gamma_alpha``
 as the predictor.  **Use it as the reported value,
 never as the gradient objective**: its discretized boundary derivative is
-exact yet flips sign under grid refinement (the measured ladder is pinned
+approximate and can flip sign under grid refinement (the measured ladder is pinned
 in ``tests/test_gammac.py``).  For optimization use
 :class:`~vmex.core.gammac.GammaCSmooth` — the same wells and bounce
 quadrature with the two branch-noise structures regularized (separatrix
-kernel floor + superbanana corner floor), whose derivative holds sign and
-magnitude on the same refinement ladder — and recompute the hard value on
-the accepted result.  Physics, formula, and the numerical policy are on
+kernel floor + superbanana corner floor). Its normalized pitch-grid shape
+derivatives remain approximate: check actual forward descent and sampling
+refinement for each configuration, then recompute the hard value on the
+accepted result. Physics, formula, and the numerical policy are on
 :doc:`/explanation/confinement`:
 
 .. code-block:: python
@@ -647,7 +648,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.gammac.GammaCSmooth`
      - yes
      - yes
-     - refinement-stable derivative via separatrix and corner floors
+     - smooth drift surrogate; approximate pitch-grid shape derivatives
    * - :class:`~vmex.core.bootstrap.RedlBootstrapMismatch`
      - yes
      - yes

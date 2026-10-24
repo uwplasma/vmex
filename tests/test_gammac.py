@@ -85,6 +85,30 @@ def test_smooth_field_strength_scale_invariance(radial):
     np.testing.assert_allclose(derivative, fd, atol=1e-9)
 
 
+@pytest.mark.parametrize("smooth", [False, True])
+def test_well_overflow_cannot_report_zero_confinement_cost(smooth):
+    """Two complete wells require two slots in either diagnostic lane."""
+    x = jnp.linspace(0., 2*jnp.pi, 129)
+    bmag = (1. + .2*jnp.cos(2*x))[None, :]
+    one = jnp.ones_like(bmag)
+    evaluate = (gammac.gamma_c_smooth_from_fieldlines if smooth
+                else gammac.gamma_c_from_fieldlines)
+    inputs = dict(bmag=bmag, radial_drift=one, radial_gradient=.3*one,
+                  drift_correction=0.*one, tangency=one, dl_dx=one,
+                  length=2*jnp.pi, pitch=jnp.array([1.]),
+                  pitch_weights=jnp.array([1.]))
+    limited = evaluate(**inputs, max_wells=1)
+    assert float(limited["overflow_fraction"]) == 1.
+    assert np.isnan(float(limited["gamma_c"]))
+    complete = evaluate(**inputs, max_wells=2)
+    assert float(complete["overflow_fraction"]) == 0.
+    assert np.asarray(complete["well_mask"]).sum() == 2
+    assert np.isfinite(float(complete["gamma_c"]))
+    assert float(complete["gamma_c"]) > 0.
+    np.testing.assert_allclose(
+        complete["gamma_c"], evaluate(**inputs, max_wells=4)["gamma_c"], rtol=1e-12)
+
+
 @pytest.fixture(scope="module")
 def tokamak_eq():
     eq = opt.solve_equilibrium(

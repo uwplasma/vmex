@@ -67,9 +67,9 @@ Field lines are the PEST lines of :mod:`vmex.core.stability` /
 :mod:`vmex.core.turbulence`; every geometric ingredient is an exact spectral
 point evaluation with JAX AD, and the singular bounce integrals reuse the
 drift kernels of :func:`vmex.core.bounce.bounce_action`.  Everything is jnp:
-the proxy is traceable and differentiable end to end.  Stellarator-symmetric
-states with ``iota != 0`` on the target surfaces only, inherited from the
-field-line parameterization.
+the proxy is traceable end to end. Symmetric and asymmetric toroidal states
+use the same interior-flux-surface geometry; the field-line parameterization
+requires nonzero ``iota`` on the target surfaces.
 
 :class:`GammaC` supplies the hard diagnostic; its sampled boundary derivative
 can change sign under refinement. :class:`GammaCSmooth` regularizes
@@ -133,9 +133,10 @@ def gamma_c_from_fieldlines(
     ``dB/drho at fixed PEST angles / B``, ``drift_correction`` is ``K / B``,
     and ``tangency`` is ``|grad rho| ||e_alpha||``.  ``pitch`` and
     ``pitch_weights`` are quadrature nodes and weights of the lambda
-    integral.  All complete wells contribute; ``excluded_fraction`` reports
-    the measure lost to hard ``overflow`` exclusion so callers can reject
-    an under-provisioned ``max_wells``.
+    integral. Any well-slot overflow invalidates the surface's ``gamma_c``
+    with NaN rather than a falsely low cost. ``excluded_fraction`` and
+    ``overflow_fraction`` report the fraction of overflowing line/pitch
+    pairs; increase ``max_wells`` before using that surface.
     """
     return _wells_assembly(
         bmag=bmag, radial_drift=radial_drift,
@@ -160,14 +161,13 @@ def gamma_c_smooth_from_fieldlines(
     quadrature_order: int = 32,
     temperature: float = 0.15,
 ) -> dict[str, Array]:
-    """Derivative-safe smooth surrogate of :func:`gamma_c_from_fieldlines`.
+    """Smooth surrogate of :func:`gamma_c_from_fieldlines`.
 
     Same ingredient contract, well detection, and sine-mapped bounce
     quadrature as the hard diagnostic — including its exact per-well
     cancellations, so the axisymmetric limit stays at quadrature noise —
     with the hard-branch noise sources of the discretized boundary
-    derivative regularized on one scale ``delta`` (a quadrature parameter,
-    held fixed under differentiation like the pitch grid):
+    derivative regularized on a field-dependent scale ``delta``:
 
     - **capped bounce kernels**: the inverse parallel speed becomes
       ``1/sqrt(max(1 - lambda B, 0) + delta)`` (the ``kernel_floor`` of
@@ -176,8 +176,7 @@ def gamma_c_smooth_from_fieldlines(
       pitch node landing at distance ``d`` from a barrier top contributes a
       ``1/d`` derivative term whose sign depends on which side the node
       fell — the sign-flipping refinement ladder measured for the hard
-      gradient.  The floor caps that curvature at scale ``delta``, which
-      the pitch grid resolves, so the discretized derivative converges;
+      gradient. The floor regularizes that curvature at scale ``delta``;
     - the same floor also removes the hard **birth/death jump**: the exact
       bounce time of a well born at a quadratic ``|B|`` minimum starts at the
       finite oscillator period (amplitude-independent), so the hard value
@@ -192,15 +191,13 @@ def gamma_c_smooth_from_fieldlines(
     it under ``stop_gradient`` left the AD slope at 0.37x of the true FD
     slope of the objective, and the missing coherent term let branch noise
     set the through-the-solve sign).  Deliberately **not** tied to the grid
-    spacings: a per-resolution ``delta`` makes every refinement rung
-    differentiate a different functional, and the measured li383 ladder
-    stayed sign-erratic that way; a fixed fraction converges (the
-    regression test pins it).  The resolution must resolve the smoothing
-    instead: ``num_pitch * temperature >~ 4`` keeps the pitch spacing
-    inside ``delta`` (the default pairing 0.15 x 32 satisfies it).
-    Annealing = re-optimizing at a lower ``temperature`` with a
-    correspondingly finer budget; the surrogate converges to the hard
-    ``Gamma_c`` in that joint limit.
+    spacings: otherwise each refinement rung differentiates a different
+    functional. ``num_pitch * temperature >~ 4`` was a useful budget guide
+    on the tested li383 case, not a convergence guarantee. Normalized
+    pitch-grid shape derivatives remain frozen. Check actual forward
+    descent and independently refine field-line, pitch and bounce sampling
+    for each configuration; anneal ``temperature`` while comparing against
+    the hard diagnostic.
     """
     bmag = jnp.asarray(bmag)
     if temperature <= 0.0:
@@ -304,8 +301,8 @@ def _wells_assembly(
         # ~1/corner_floor, exactly the near-superbanana structure whose
         # drift angle the discretization cannot determine stably; every
         # drift-dominated cell keeps its hard value, and small wells are
-        # judged against their own scale, not a global one.  Stop-gradient
-        # as for every quadrature parameter.
+        # judged against their own scale. corner_floor is a quadrature
+        # parameter; the per-well magnitude keeps its field dependence.
         magnitude = masked("drift_absradial") + masked("argmin_tangency") * (
             masked("drift_absgradient") + masked("parallel_abscorrection"))
         sigma = corner_floor * magnitude
@@ -331,6 +328,7 @@ def _wells_assembly(
     gamma_c = (jnp.pi / (8.0 * jnp.sqrt(2.0))
                * jnp.sum(weights * jnp.mean(velocity_sum, axis=0))
                / jnp.mean(line_length))
+    gamma_c = jnp.where(jnp.any(out["overflow"]), jnp.nan, gamma_c)
     out.update({
         "gamma_c": gamma_c,
         "gamma_per_well": jnp.where(keep, gamma, jnp.nan),
@@ -727,8 +725,8 @@ def gamma_c_state(
     the normalized grid shape fixed while retaining its common field scale
     (see the node construction).  ``max_wells``
     defaults to ``16 * num_transit`` slots per pitch level;
-    ``overflow_fraction`` reports any spill.  Returns per-surface arrays led
-    by ``gamma_c``.
+    ``overflow_fraction`` reports any spill, which makes that surface's
+    ``gamma_c`` NaN. Returns per-surface arrays led by ``gamma_c``.
 
     The absolute value carries roughly 10-20 % scatter at these resolutions --
     it is a comparative proxy, and the resolution belongs in any quoted
