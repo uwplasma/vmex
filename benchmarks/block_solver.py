@@ -16,8 +16,12 @@ resolution group (``max_mode=2``, ``mpol=ntor=5``, 31 surfaces, block width
   pass and a repeated pass, with the implicit solver's effort counters.
 
     python benchmarks/block_solver.py --output block_solver.json
+    python benchmarks/block_solver.py --block-factor thomas   # or cyclic_reduction
     python benchmarks/block_solver.py --save-bands /tmp/vmex_qa_bands.npz
 
+``--device`` places the workflow (``auto`` pins implicit work to the CPU on a
+GPU host; stages always use the JAX default device).  ``--block-factor`` forces the factor backend (default ``auto``: cyclic
+reduction on a GPU, Thomas otherwise); the report records the resolved name.
 ``--save-bands`` writes the scaled bands for SOLVAX's
 ``benchmarks/benchmark_block_factors.py``; keep that file out of Git.
 """
@@ -46,6 +50,7 @@ import solvax  # noqa: E402
 import vmex  # noqa: E402
 from vmex import optimize as opt  # noqa: E402
 from vmex.core import implicit as im  # noqa: E402
+from vmex.core.device import resolve_block_factor  # noqa: E402
 
 MAX_MODE, MPOL, ASPECT = 2, 5, 6.0
 
@@ -85,8 +90,8 @@ def timed(fn, *args, repeats):
         "temp_bytes": None if memory is None else int(memory.temp_size_in_bytes)}
 
 
-def stage_timings(inp, repeats, save_bands):
-    cfg = im.make_config(inp)
+def stage_timings(inp, repeats, save_bands, block_factor):
+    cfg = im.make_config(inp, block_factor=block_factor)
     params = im.params_from_input(inp)
     state, mask = im.solve_implicit_with_aux(params, cfg)
     fields = im._active_state_fields(cfg)
@@ -106,7 +111,7 @@ def stage_timings(inp, repeats, save_bands):
     report = {}
     bands, report["assembly_and_scaling"] = timed(assemble, *args, repeats=repeats)
     factors, report["factor"] = timed(
-        lambda *b: solvax.block_thomas_factor(*b, normalized=True), *bands, repeats=repeats)
+        lambda *b: im._block_factor(*b, cfg), *bands, repeats=repeats)
     rng = np.random.default_rng(0)
     n, m = bands[1].shape[:2]
     vector = jnp.asarray(rng.standard_normal((n, m)))
@@ -128,11 +133,12 @@ def stage_timings(inp, repeats, save_bands):
             **report}
 
 
-def workflow_timings(inp, terms, n_points):
-    problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=MAX_MODE)
+def workflow_timings(inp, terms, n_points, block_factor, device):
+    problem = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=MAX_MODE, block_factor=block_factor, device=device)
     scalar = opt.VmecProblem.from_loss(
         inp, lambda s, r: opt.aspect_ratio(s, r) ** 2 + 1e3 * opt.magnetic_well(s, r) ** 2,
-        max_mode=MAX_MODE)
+        max_mode=MAX_MODE, block_factor=block_factor, device=device)
     rng = np.random.default_rng(1)
     steps = [np.zeros_like(problem.x0)] + [
         0.01 * problem.scales * rng.standard_normal(problem.x0.shape)
@@ -180,15 +186,23 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=20)
     parser.add_argument("--points", type=int, default=3)
     parser.add_argument("--skip-workflow", action="store_true")
+    parser.add_argument("--block-factor", default="auto",
+                        choices=("auto", "thomas", "cyclic_reduction"))
+    parser.add_argument("--device", default="auto",
+                        help="workflow placement: auto (CPU on a GPU host), cpu, gpu")
     parser.add_argument("--smoke", action="store_true", help="mpol=3, 9 surfaces")
     parser.add_argument("--save-bands", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     inp, terms = qa_problem(args.smoke)
+    resolved = resolve_block_factor(args.block_factor)
     result = {"benchmark": "vmex_block_solver", "case": "QA_optimization max_mode=2",
-              **metadata(), "stages": stage_timings(inp, args.repeats, args.save_bands)}
+              "block_factor": args.block_factor, "block_factor_resolved": resolved,
+              **metadata(), "stages": stage_timings(
+                  inp, args.repeats, args.save_bands, args.block_factor)}
     if not args.skip_workflow:
-        result["workflow"] = workflow_timings(inp, terms, args.points)
+        result["workflow"] = workflow_timings(
+            inp, terms, args.points, args.block_factor, args.device)
     rendered = json.dumps(result, indent=1) + "\n"
     if args.output is None:
         print(rendered, end="")

@@ -1923,6 +1923,7 @@ def make_problem(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    block_factor: str = AUTO,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2009,6 +2010,11 @@ def make_problem(
     ``refine_tol`` is the frozen fixed-point residual required before
     implicit differentiation. The default preserves strict gradients;
     ``numpy.inf`` explicitly disables refinement for legacy comparisons.
+
+    ``block_factor`` selects the backend factoring the ``"block"`` Jacobian
+    lane's block tridiagonal: ``"auto"`` (default) uses cyclic reduction when
+    the implicit work runs on a GPU and Thomas otherwise, ``"thomas"`` and
+    ``"cyclic_reduction"`` force one.  The solves agree to round-off.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
@@ -2097,7 +2103,7 @@ def make_problem(
             jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio,
-            refine_tol=refine_tol,
+            refine_tol=refine_tol, block_factor=block_factor,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
@@ -2150,6 +2156,7 @@ def least_squares(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    block_factor: str = AUTO,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2242,6 +2249,9 @@ def least_squares(
     is recomputed by reverse adjoint.  Forced host methods raise
     :class:`AdjointSolveError`; transformable JAX methods fall back to reverse
     so no compiled public path returns an uncertified matrix.
+    ``block_factor`` picks that factorization's backend: ``"auto"`` (default,
+    cyclic reduction on a GPU and Thomas otherwise), ``"thomas"`` or
+    ``"cyclic_reduction"``; the Jacobians agree to round-off.
 
     ``adjoint_tol`` and ``adjoint_maxiter`` control the certified linear
     response solves.  All public optimization paths allow 300 restarts by
@@ -2292,7 +2302,7 @@ def least_squares(
                 jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
                 adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
                 max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
-                hot_restart=hot_restart,
+                block_factor=block_factor, hot_restart=hot_restart,
                 warm_start=warm_start, use_ess=use_ess,
                 ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
                 verbose=verbose, **scipy_kwargs)
@@ -2321,6 +2331,7 @@ def least_squares(
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+            block_factor=block_factor,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             device=device, verbose=verbose, **scipy_kwargs)
@@ -2632,6 +2643,7 @@ def _least_squares_implicit(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    block_factor: str = AUTO,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
@@ -2748,6 +2760,7 @@ def _least_squares_implicit(
         adjoint_maxiter=adjoint_maxiter,
         max_fsq_ratio=max_fsq_ratio,
         refine_tol=refine_tol,
+        block_factor=block_factor,
     )
     # Pin the residual/Jacobian graphs to the fastest device for this
     # launch-bound path (CPU by default; explicit device= honored; None
