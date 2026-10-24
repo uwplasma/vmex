@@ -180,6 +180,9 @@ that the objective modules share live in one place and are re-exported by
 .. automodule:: vmex.core.stability
    :members:
 
+.. automodule:: vmex.core.agni
+   :members:
+
 .. automodule:: vmex.core.turbulence
    :members:
 

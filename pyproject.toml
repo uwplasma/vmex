@@ -122,6 +122,13 @@ turbulence = [
 coils = [
   "essos>=0.21.0",
 ]
+# Finite-n ideal-MHD stability through AGNI: ``vmex.core.agni`` maps a converged
+# state to an ``agnimhd.EquilibriumData``. It needs ``Basis(restrict=True)``,
+# which is newer than agnimhd's latest tag (v0.2.0), so no floor is declared
+# until a release carries it.
+agni = [
+  "agnimhd",
+]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.
 all = [
@@ -174,11 +181,12 @@ markers = [
 # so the module is excluded from the core >=95% coverage gate. It is
 # exercised by the optional-integrations CI lane. turbulence.py is
 # likewise gated on the optional ``turbulence`` extra (gkx), as is gk_run.py
-# (the ``vmex --turbulence`` driver).
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+# (the ``vmex --turbulence`` driver); agni.py is gated on the optional ``agni``
+# extra (agnimhd).
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py", "*/agni.py"]
 
 [tool.coverage.report]
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py", "*/agni.py"]
 
 [tool.ruff]
 line-length = 120
