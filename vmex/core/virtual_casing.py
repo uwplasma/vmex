@@ -114,14 +114,7 @@ __all__ = [
     "offsurface_error_estimate",
     "graded_plasma_field",
     "GRADED_NODES",
-    "have_virtual_casing_jax",
 ]
-
-
-def have_virtual_casing_jax() -> bool:
-    """Return ``True`` iff ``virtual_casing_jax`` is importable."""
-
-    return _HAVE_VCJ
 
 
 def _require_vcj() -> None:
@@ -557,21 +550,6 @@ def surface_field_data_from_state(
         project_current=bool(project_current))
 
 
-def _carries_asymmetric_harmonics(state) -> bool:
-    """True when a high-order state has non-zero stellarator-asymmetric families.
-
-    Returns ``False`` for traced arrays: the values are unavailable, so the
-    caller's declaration stands.
-    """
-    for family in (state.R_sin, state.Z_cos):
-        array = jnp.asarray(family)
-        if isinstance(array, jax.core.Tracer):
-            continue
-        if bool(np.any(np.asarray(array) != 0.0)):
-            return True
-    return False
-
-
 def surface_field_data_from_high_order(
     state,
     *,
@@ -634,7 +612,7 @@ def surface_field_data_from_high_order(
     two one-dimensional angle grids.
     """
 
-    from .strong_force import evaluate_high_order_surface
+    from .strong_force import _carries_asymmetric_harmonics, evaluate_high_order_surface
 
     surface = evaluate_high_order_surface(state, nphi=nphi, ntheta=ntheta)
     stellsym = bool(use_stellsym) and not _carries_asymmetric_harmonics(state)

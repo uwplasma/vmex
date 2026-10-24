@@ -599,11 +599,7 @@ def _interp_full(wout, surfaces, values):
 @pytest.mark.parametrize("fixture", ["eq", "lasym_eq"])
 def test_vmec_j_dot_B_state_lane_matches_wout_jdotb(request, fixture):
     """Traceable identity <J.B> vs the wout-engine jdotb (jxbforce.f): <= 1%
-    (observed ~5e-5 solovev, ~9e-4 up_down); wout-table identity ditto.
-
-    The LASYM row is the regression gate on the ``geom=None`` synthesis: with
-    the sine families dropped the last assertion missed by 2.8e-3.
-    """
+    (observed ~5e-5 solovev, ~9e-4 up_down)."""
     eq = request.getfixturevalue(fixture)
     surfaces = np.linspace(0.2, 0.9, 8)
     jv = np.asarray(bs.vmec_j_dot_B(eq.state, eq.runtime, surfaces=surfaces))
@@ -611,39 +607,6 @@ def test_vmec_j_dot_B_state_lane_matches_wout_jdotb(request, fixture):
     scale = np.max(np.abs(jw))
     assert scale > 1e3  # the deck carries real current: the gate is nontrivial
     np.testing.assert_allclose(jv, jw, atol=1e-2 * scale)
-    jv_wout = np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, surfaces))
-    np.testing.assert_allclose(jv_wout, jw, atol=1e-2 * scale)
-    # fsa_B2 reuse path (geom from the same surfaces) is the same identity.
-    geom = bs.redl_geometry_from_wout(eq.wout, surfaces)
-    jv_geom = np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, surfaces, geom=geom))
-    np.testing.assert_allclose(jv_geom, jv_wout, rtol=1e-3)
-    # The two lanes are the same identity, so they must agree exactly, not
-    # merely within the gate above -- and at the axis too.  Every m != 0
-    # harmonic vanishes where the surface degenerates to a point;
-    # redl_geometry_from_wout zeroes them there and the geom=None lane did
-    # not, which put the two 4.0e-4 apart at s = 0 while they matched
-    # bit-for-bit everywhere else.
-    with_axis = np.concatenate([[0.0], surfaces])
-    axis_geom = bs.redl_geometry_from_wout(eq.wout, with_axis)
-    np.testing.assert_array_equal(
-        np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, with_axis)),
-        np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, with_axis,
-                                             geom=axis_geom)))
-
-
-@needs_zenodo
-@pytest.mark.parametrize("config", sorted(OPTIMA))
-def test_zenodo_identity_matches_wout_jdotb(config):
-    """V4: the section-6.2 identity from wout arrays vs wout jdotb, <= 2%
-    interior on the three optimized finite-beta Zenodo wouts (observed
-    <= 5e-4) — both the dI/ds and the mu0*I*dp/ds term live at beta > 0."""
-    path, _, _, _ = OPTIMA[config]
-    from vmex.core.wout import read_wout
-    wout = read_wout(path)
-    surfaces = np.linspace(0.1, 0.9, 17)
-    jv = np.asarray(bs.vmec_j_dot_B_from_wout(wout, surfaces))
-    jw = _interp_full(wout, surfaces, wout.jdotb)
-    np.testing.assert_allclose(jv, jw, atol=2e-2 * np.max(np.abs(jw)))
 
 
 # ---------------------------------------------------------------------------

@@ -36,7 +36,7 @@ from solvax import gmres as _solvax_gmres
 from . import implicit as im
 from .device import AUTO, resolve_implicit_device
 from .freeboundary import (
-    _edge_fourier_jax,
+    _edge_fourier,
     _presf_ns_scale,
     _presf_ns_scale_traceable,
     _solve_free_boundary_stage,
@@ -198,7 +198,7 @@ def _vacuum_inputs(state: SpectralState, rt) -> tuple:
     short tuple, and reaching it from the state costs no NESTOR work.
     """
     ctor, _, axis_r, axis_z, _, _ = _vacuum_scalars(state, rt)
-    return (*_edge_fourier_jax(state, rt), ctor, axis_r, axis_z)
+    return (*_edge_fourier(state, rt), ctor, axis_r, axis_z)
 
 
 # Module scope with ``cfg`` the only static key: every per-gradient array is

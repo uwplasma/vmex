@@ -37,7 +37,6 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guard, typing only
 __all__ = [
     "InputRequest",
     "RunOptions",
-    "format_indata_directives",
     "parse_indata_run_options",
     "read_input_request",
     "resolve_run_options",
@@ -189,37 +188,6 @@ def strip_vmex_json(data: Mapping[str, Any]) -> tuple[dict[str, Any], RunOptions
     if isinstance(options.get("polish"), str):
         options["polish"] = _parse_polish(options["polish"], key="polish")
     return physics, RunOptions(**options)
-
-
-def format_indata_directives(options: RunOptions) -> str:
-    """Serialize non-default options as canonical directive lines.
-
-    Only the ``!@VMEX KEY = VALUE`` spelling is written; the legacy
-    ``! VMEX: POLISH_FORCE_BALANCE`` form is read but never emitted.  Round
-    trips through :func:`parse_indata_run_options`.
-
-    Parameters
-    ----------
-    options:
-        The options to serialize.  A field equal to its :class:`RunOptions`
-        default is omitted, so an unmodified ``RunOptions()`` produces
-        nothing.
-
-    Returns
-    -------
-    The directive lines as one string terminated by a newline, or the empty
-    string when every option is at its default.  Prepend it to ``&INDATA``
-    text: VMEC2000 reads the lines as comments.
-    """
-    lines = []
-    defaults = RunOptions()
-    if options.polish != defaults.polish:
-        token = "AUTO" if options.polish == "auto" else (
-            ".TRUE." if options.polish else ".FALSE.")
-        lines.append(f"!@VMEX POLISH = {token}")
-    if options.polish_fail != defaults.polish_fail:
-        lines.append(f"!@VMEX POLISH_FAIL = {options.polish_fail.upper()}")
-    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def read_input_request(path: str | Path) -> InputRequest:

@@ -101,7 +101,7 @@ for one. Hirshman and Whitson (1983) guarantee monotone decrease only for
 first-order (:math:`\ddot{\mathbf{x}} = 0`) descent; the second-order term
 trades that guarantee for a faster asymptotic rate. Every step is taken
 unconditionally, with no line search and no energy comparison; the only
-intervention is :func:`~vmex.core.step.restart_decision`, a residual test.
+intervention is the restart test in the solver loop, a residual test.
 
 Convergence is declared when the *physical* residuals satisfy
 ``fsqr, fsqz, fsql <= ftolv`` simultaneously; the residual norms and the m=1
@@ -111,10 +111,9 @@ Restart control (``restart.f``)
 -------------------------------
 
 The loop keeps a checkpoint of the best state and applies VMEC2000's exact
-back-off rules (:func:`~vmex.core.step.restart_decision` classifies the
-step as ``STEP_OK``/``RESTART_JACOBIAN``/``RESTART_GROWTH``;
-:func:`~vmex.core.step.apply_restart` restores the checkpoint, zeroes
-the velocity and rescales ``delt``):
+back-off rules (the loop in :mod:`vmex.core.solver` classifies each step as
+``STEP_OK``/``RESTART_JACOBIAN``/``RESTART_GROWTH`` and, on a restart,
+restores the checkpoint, zeroes the velocity and rescales ``delt``):
 
 - **bad Jacobian** (``irst = 2``): restore the checkpoint, zero the velocity,
   ``delt *= 0.90``; on the first bad Jacobian the axis guess is recomputed
