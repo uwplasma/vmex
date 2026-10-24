@@ -188,6 +188,24 @@ def test_growth_rate_gradient_matches_finite_differences(deck):
     assert ad_pressure == pytest.approx(float(fd_pressure), rel=1e-5)
 
 
+def test_jitted_value_and_grad_matches_finite_differences(deck):
+    """The map sits inside an optimization loop: its jitted reverse pass must be exact."""
+    inp, state, runtime, nodes, _ = deck
+    emap = agni.make_agni_map(runtime, nodes, inp=inp, radius_quadrature=(4, 8, 2))
+
+    def objective(pair):
+        eq = emap(pair)
+        return jnp.sum(eq.sqrtg * eq.p) + 1e-3 * jnp.sum(eq.sqrtg_r * eq.g_sup_rr) + jnp.sum(
+            eq.J_cross_grad_rho * eq.B_dot_grad_grad_rho) + eq.a
+
+    value, (grad_state, _) = jax.jit(jax.value_and_grad(objective, allow_int=True))((state, runtime))
+    shifted = lambda t: (dataclasses.replace(state, Z_sin=state.Z_sin * (1.0 + t)), runtime)  # noqa: E731
+    h = 1e-5
+    fd = (objective(shifted(h)) - objective(shifted(-h))) / (2.0 * h)
+    assert float(value) == pytest.approx(float(objective((state, runtime))), rel=1e-13)
+    assert float(jnp.vdot(grad_state.Z_sin, state.Z_sin)) == pytest.approx(float(fd), rel=1e-7)
+
+
 def test_unsupported_inputs_are_rejected(deck):
     inp, _, runtime, nodes, _ = deck
     with pytest.raises(NotImplementedError, match="APHI"):
