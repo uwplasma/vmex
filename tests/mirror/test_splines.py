@@ -21,7 +21,6 @@ from vmex.mirror.forces import (  # noqa: E402
     force_gate_zones,
     isotropic_force_residual,
     mirror_energy,
-    passes_promotion_gate,
     refinement_convergence,
 )
 from vmex.mirror.free_boundary import (  # noqa: E402
@@ -481,7 +480,7 @@ def test_stellarator_mirror_frozen_junction_force_ladder_converges() -> None:
     # Minor-radius bulk force converges monotonically below the promotion gate.
     bulk = refinement_convergence(bulk_ladder)
     assert bulk.monotone
-    assert passes_promotion_gate(bulk_ladder, absolute_gate=5.0e-2)
+    assert bulk_ladder[-1] <= 5.0e-2
     assert bulk_ladder[-1] < 2.0e-3
 
 

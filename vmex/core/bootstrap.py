@@ -26,7 +26,7 @@ Buller & Drevlak, Phys. Plasmas 29, 082501 (2022).
 - :func:`redl_geometry_from_state` — traceable lane on
   ``(SpectralState, SolverRuntime)`` using the solver's half-mesh internal
   grid; iota/G/I from ``_iotas_half``/``surface_currents``.
-- :func:`vmec_j_dot_B` / :func:`vmec_j_dot_B_from_wout` — equilibrium
+- :func:`vmec_j_dot_B` — equilibrium
   ``<J.B>`` via the MHD identity (validated against the Zenodo
   ``convertSfincsToVmecCurrentProfile`` script and the wout ``jdotb``):
 
@@ -88,7 +88,6 @@ __all__ = [
     "redl_geometry_from_state",
     "j_dot_B_redl",
     "vmec_j_dot_B",
-    "vmec_j_dot_B_from_wout",
     "RedlBootstrapMismatch",
     "BootstrapPicardResult",
     "self_consistent_bootstrap",
@@ -731,74 +730,6 @@ def vmec_j_dot_B(
         surfaces = np.linspace(0.05, 0.95, 16)
     return _jv_from_half(_half_mesh_fields(state, rt), _as_1d(surfaces))
 
-
-def vmec_j_dot_B_from_wout(wout, surfaces, *, geom: RedlGeometry | None = None,
-                           ntheta: int = 64, nphi: int = 65) -> Array:
-    """The section-6.2 identity evaluated from wout tables (parity lane).
-
-    Same formula as :func:`vmec_j_dot_B` with ``buco``/``pres``/``phi`` read
-    from the wout dataset and ``<B^2>`` synthesized from ``bmnc``/``gmnc``
-    (plus the ``bmns``/``gmns`` partners when ``lasym``) at the requested
-    ``surfaces``; pass ``geom`` (a :class:`RedlGeometry` from
-    :func:`redl_geometry_from_wout` at the *same* surfaces) to reuse its
-    ``fsa_B2`` instead.  This is the validation lane — the wout ``jdotb``
-    itself (jxbforce.f) is what :class:`RedlBootstrapMismatch` consumes.
-    """
-    if isinstance(wout, (str, Path)):
-        wout = read_wout(wout)
-    wout = getattr(wout, "wout", wout)
-    surfaces = _as_1d(surfaces)
-
-    ns = int(wout.ns)
-    s_full = jnp.linspace(0.0, 1.0, ns)
-    hs = s_full[1] - s_full[0]
-    s_half = _half_grid(ns, s_full.dtype)
-    buco = _as_1d(np.asarray(wout.buco, dtype=float))[1:]
-    p_int = MU0 * _as_1d(np.asarray(wout.pres, dtype=float))[1:]
-    phi_edge = _as_1d(np.asarray(wout.phi, dtype=float))[-1] / (2.0 * jnp.pi)
-    signgs = float(wout.signgs)
-
-    if geom is not None:
-        fsa_B2 = jnp.asarray(geom.fsa_B2)
-    else:
-        xm = _as_1d(np.asarray(wout.xm_nyq, dtype=float))
-        xn = _as_1d(np.asarray(wout.xn_nyq, dtype=float))
-        mn = int(xm.shape[0])
-
-        # Every m != 0 harmonic vanishes at the magnetic axis, where the
-        # surface degenerates to a point.  redl_geometry_from_wout zeroes them
-        # there; without the same treatment the two lanes disagreed by 4.0e-4
-        # at s = 0 while matching bit-for-bit everywhere else.
-        axis_modes = (np.asarray(surfaces) == 0.0)[:, None] & (xm != 0.0)[None, :]
-
-        def half(name):
-            values = _interp_half_grid(
-                _mode_matrix(wout, name, ns=ns, mn=mn)[1:], surfaces, s_half)
-            return jnp.where(axis_modes, 0.0, values)
-
-        theta1d = jnp.linspace(0.0, 2.0 * jnp.pi, int(ntheta), endpoint=False)
-        phi1d = jnp.linspace(0.0, 2.0 * jnp.pi / int(wout.nfp), int(nphi),
-                             endpoint=False)
-        angle = (theta1d[:, None, None] * xm[None, None, :]
-                 - phi1d[None, :, None] * xn[None, None, :])
-        cosangle = jnp.cos(angle)
-        modB = jnp.einsum("sm,tpm->stp", half("bmnc"), cosangle)
-        sqrtg = jnp.einsum("sm,tpm->stp", half("gmnc"), cosangle)
-        if bool(getattr(wout, "lasym", False)):
-            # On a LASYM wout the sine families carry the up-down-asymmetric
-            # half of |B| and sqrt(g); dropping them symmetrizes <B^2> (same
-            # synthesis as :func:`redl_geometry_from_wout`).
-            sinangle = jnp.sin(angle)
-            modB += jnp.einsum("sm,tpm->stp", half("bmns"), sinangle)
-            sqrtg += jnp.einsum("sm,tpm->stp", half("gmns"), sinangle)
-        sqrtg = jnp.abs(sqrtg)
-        fsa_B2 = (jnp.mean(modB * modB * sqrtg, axis=(1, 2))
-                  / jnp.mean(sqrtg, axis=(1, 2)))
-
-    dI = _interp_half_grid(_dds_half(buco, hs), surfaces, s_half)
-    dp = _interp_half_grid(_dds_half(p_int, hs), surfaces, s_half)
-    I = _interp_half_grid(buco, surfaces, s_half)  # noqa: E741 - Boozer I
-    return signgs * (fsa_B2 * dI + I * dp) / (MU0 * phi_edge)
 
 
 # ===========================================================================

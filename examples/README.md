@@ -8,6 +8,12 @@ or `pip install "vmex[all]"` for everything the examples use.
 `data/mgrid_cth_like.nc`, a release asset rather than a tracked file; install it
 once from the repository root with `python tools/fetch_assets.py --bundle reference-nc`.
 
+With its default settings every script finishes in under five minutes on a
+14-core laptop with a cold JAX cache, and prints progress the whole time
+(optimizer monitors, solver iterations, and `progress=True` elapsed-time lines
+around long compilations and solves). Where a longer run gives a better answer, the script keeps
+that research budget as one commented set of constants next to the default.
+
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.
@@ -41,6 +47,11 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   - `free_boundary_essos_coils.py` — free-boundary beta scan directly from
     ESSOS coils (tabulated to a temporary mgrid); `PRES_SCALE` is calibrated per point so the
     *actual* wout `betatotal` hits 0/1/2/3 %.
+  - `free_boundary_position_control.py` — a DIII-D-like free-boundary tokamak
+    with a mis-set vertical field, solved with and without
+    `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
+    for a field deficit) while the controlled one is held and reports the
+    missing `B_Z`.
   - `free_boundary_phiedge.py` — find the PHIEDGE whose free-boundary LCFS
     passes through a target outboard-midplane radius (`vj.solve_phiedge`), for
     comparing with codes pinned by an edge point instead of a flux.

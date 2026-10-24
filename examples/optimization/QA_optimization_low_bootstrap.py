@@ -49,8 +49,9 @@ SURFACES = np.linspace(0.2, 0.8, 4)
 # Mode ladder: highest boundary mode number varied in each stage, the residual
 # evaluations each stage may spend, and the optimized I'(s) spline knots:
 MAX_MODES = [1, 2]
-MAX_NFEV = [8, 8]
+MAX_NFEV = [6, 6]
 N_CURRENT_SPLINE = [5, 5]
+# Research budget (over the 5-minute laptop default): MAX_NFEV = [8, 8]
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -193,7 +194,7 @@ for max_mode, max_nfev, n_spline in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE):
     problem = opt.VmecProblem.from_tuples(
         inp, objective_function_terms, max_mode=max_mode,
         current_dofs=n_spline - 1, vary_major_radius=VARY_MAJOR_RADIUS,
-        use_ess=True, restart_from=equilibrium, progress=not ci_smoke)
+        use_ess=True, restart_from=equilibrium, progress=not ci_smoke, evaluation_progress=not ci_smoke)
     print(f"dof_names = {problem.dof_names}")
     monitor.problem = problem
     step = PARAMETER_STEP * problem.scales
