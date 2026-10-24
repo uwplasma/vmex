@@ -12,6 +12,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import solvax
 from jax.flatten_util import ravel_pytree
 from scipy.sparse.linalg import LinearOperator, gcrotmk
 
@@ -840,7 +841,7 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
         *lane[:5], mask, z, bsqvac, cfg=cfg,
         probe_chunk_size=fbi._bulk_probe_chunk(cfg, mask))
     factors = fbi._anchor_factor(lower, diagonal, upper, row_scale,
-                                 column_scale)
+                                 column_scale, cfg=cfg)
     response = fbi._edge_response(cfg, params, current, state, rcon0, zcon0)
     force = fbi._anchor_raw_residual(z, *lane, cfg=cfg)
     coupling = fbi._anchor_coupling(
@@ -870,6 +871,47 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
         float(fbi._anchor_norm(z, *lane, cfg=cfg)),
         float(im._tree_norm(fbi._projected_residual(cfg, mask)(z, *lane[:5]))),
         rtol=1.0e-12)
+
+
+@pytest.mark.parametrize("block_factor", ["thomas", "cyclic_reduction"])
+def test_anchor_factor_backends_invert_the_scaled_bulk_bands(block_factor):
+    """Both ``block_factor`` backends factor the anchor's scaled bands exactly.
+
+    Eleven surfaces make cutoff-8 cyclic reduction take a real level; the
+    solves are checked against a dense inverse, primal and transpose.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(
+            mpol=3, ntor=0, ntheta=10, nzeta=4),
+        ns_array=np.array([5]), ftol_array=np.array([1.0e-6]),
+        niter_array=np.array([400]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(
+        inp, field, ns=5, ftol=1.0e-6, max_iterations=400,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current), device="cpu", block_factor=block_factor)
+    n, m = 11, 6
+    rng = np.random.default_rng(3)
+    lower, diagonal, upper = (jnp.asarray(rng.standard_normal((n, m, m)))
+                              for _ in range(3))
+    diagonal = diagonal + 4.0 * jnp.eye(m)
+    ones = jnp.ones((n, m))
+    factors = fbi._anchor_factor(lower, diagonal, upper, ones, ones, cfg=cfg)
+    assert hasattr(factors, "levels") == (block_factor == "cyclic_reduction")
+    dense = np.zeros((n * m, n * m))
+    for k in range(n):
+        dense[k * m:(k + 1) * m, k * m:(k + 1) * m] = diagonal[k]
+        if k:
+            dense[k * m:(k + 1) * m, (k - 1) * m:k * m] = lower[k]
+        if k < n - 1:
+            dense[k * m:(k + 1) * m, (k + 1) * m:(k + 2) * m] = upper[k]
+    rhs = rng.standard_normal((n, m))
+    for transpose, matrix in ((False, dense), (True, dense.T)):
+        got = solvax.block_thomas_solve(
+            factors, jnp.asarray(rhs)[..., None], transpose=transpose)[..., 0]
+        np.testing.assert_allclose(
+            np.asarray(got).ravel(), np.linalg.solve(matrix, rhs.ravel()),
+            rtol=1.0e-10, atol=1.0e-12)
 
 
 def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
@@ -929,7 +971,7 @@ def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
                         lambda z, *_a, **_k: jnp.asarray(residual(z)))
     monkeypatch.setattr(fbi, "_anchor_linear_solve", solve)
     monkeypatch.setattr(fbi, "_frozen_bulk_blocks", factor)
-    monkeypatch.setattr(fbi, "_anchor_factor", lambda *_args: "factors")
+    monkeypatch.setattr(fbi, "_anchor_factor", lambda *_a, **_k: "factors")
     monkeypatch.setattr(fbi, "_anchor_coupling", lambda *_a, **_k: "coupling")
     monkeypatch.setattr(fbi, "_edge_response", response)
 

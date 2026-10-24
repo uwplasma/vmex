@@ -40,11 +40,13 @@ import numpy as np
 
 __all__ = [
     "AUTO",
+    "BLOCK_FACTORS",
     "GPU_MIN_ITERATION_WORK",
     "GPU_MAX_SPECTRAL_MODES",
     "iteration_work",
     "recommended_device",
     "resolve_device",
+    "resolve_block_factor",
     "resolve_implicit_device",
     "resolve_mirror_device",
     "device_context",
@@ -173,6 +175,32 @@ def resolve_implicit_device(device: Any = AUTO, resolution: Any = None):
         return jax.devices("cpu")[0]
     except RuntimeError:  # pragma: no cover - CPU device always present
         return None
+
+
+BLOCK_FACTORS = ("auto", "thomas", "cyclic_reduction")
+
+
+def resolve_block_factor(method: str = "auto", device: Any = None) -> str:
+    """Resolve the block-tridiagonal factor backend to a concrete name.
+
+    ``"thomas"`` (normalized-coupling Thomas sweep) and ``"cyclic_reduction"``
+    (block cyclic reduction down to 8 rows, then Thomas) are honored as given.
+    ``"auto"`` chooses by the platform the implicit work runs on: that of
+    ``device`` (``ImplicitConfig.device``, the placement the implicit lanes
+    commit to) when given, else of an active ``jax.default_device``, else
+    ``jax.default_backend()``.  GPUs get cyclic reduction, whose batched
+    levels shorten the dependency chain of the ``ns`` sequential Schur
+    steps (measured 0.4-0.6x factor time on an RTX A4000 at 150 blocks);
+    everything else keeps Thomas, which cyclic reduction trails by 1.3-1.6x
+    on CPU.  The result is a trace-time constant, never a traced branch.
+    """
+    if method not in BLOCK_FACTORS:
+        raise ValueError(f"block_factor must be one of {BLOCK_FACTORS}, got {method!r}")
+    if method != AUTO:
+        return method
+    device = device if device is not None else jax.config.jax_default_device
+    platform = getattr(device, "platform", device) or jax.default_backend()
+    return "cyclic_reduction" if str(platform) in ("gpu", "cuda", "rocm") else "thomas"
 
 
 def resolve_mirror_device(device: Any = AUTO):

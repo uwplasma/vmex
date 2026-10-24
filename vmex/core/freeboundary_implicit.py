@@ -30,7 +30,7 @@ import numpy as np
 from jax.flatten_util import ravel_pytree
 from scipy.sparse import bsr_matrix
 from scipy.sparse.linalg import LinearOperator, gcrotmk
-from solvax import SpluFactorization, block_thomas_factor, block_thomas_solve
+from solvax import SpluFactorization, block_thomas_solve
 from solvax import gmres as _solvax_gmres
 
 from . import implicit as im
@@ -97,6 +97,7 @@ def make_free_boundary_config(
     device: Any = AUTO,
     max_fsq_ratio: float = 1.0,
     refine_tol: float = 1.0e-10,
+    block_factor: str = AUTO,
 ) -> FreeBoundaryImplicitConfig:
     """Build a coupled free-boundary derivative configuration.
 
@@ -107,6 +108,9 @@ def make_free_boundary_config(
     ``device="auto"`` uses the CPU for the coupled implicit response on an
     accelerator host unless the process already pins JAX placement; pass an
     explicit device to override that measured lower-memory default.
+    ``block_factor`` selects the backend factoring the bulk block-tridiagonal
+    systems: ``"auto"`` (cyclic reduction on a GPU, Thomas elsewhere, from the
+    device above), ``"thomas"`` or ``"cyclic_reduction"``.
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
@@ -148,7 +152,7 @@ def make_free_boundary_config(
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
         adjoint_gcrot_m=adjoint_gcrot_m, adjoint_gcrot_k=adjoint_gcrot_k,
         device=solve_device, max_fsq_ratio=max_fsq_ratio,
-        refine_tol=refine_tol,
+        refine_tol=refine_tol, block_factor=block_factor,
     )
     if cfg.resolution != resolution:
         cfg = dataclasses.replace(cfg, resolution=resolution)
@@ -1175,8 +1179,8 @@ def _anchor_norm(z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
         None, cfg=cfg, formulation="preconditioned"))
 
 
-@jax.jit
-def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _anchor_factor(lower, diagonal, upper, row_scale, column_scale, *, cfg):
     """Block-Thomas factors of the scaled bulk block tridiagonal.
 
     The same two-sided scaling the Schur adjoint's sparse LU uses; here the
@@ -1187,11 +1191,11 @@ def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
     ns = diagonal.shape[0]
     previous = jnp.maximum(jnp.arange(ns) - 1, 0)
     following = jnp.minimum(jnp.arange(ns) + 1, ns - 1)
-    return block_thomas_factor(
+    return im._block_factor(
         row_scale[:, :, None] * lower * column_scale[previous][:, None, :],
         row_scale[:, :, None] * diagonal * column_scale[:, None, :],
         row_scale[:, :, None] * upper * column_scale[following][:, None, :],
-        normalized=True)
+        cfg.implicit)
 
 
 @functools.partial(jax.jit, static_argnames=("cfg",))
@@ -1388,7 +1392,7 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
                                          zcon0, mask, z_at, bsqvac)),
             cfg=cfg, probe_chunk_size=chunk)
         factors = _anchor_factor(lower, diagonal, upper, row_scale,
-                                 column_scale)
+                                 column_scale, cfg=cfg)
         coupling = (_anchor_coupling(
             z_at, params, field_parameters, state, rcon0, zcon0, mask,
             response_at, factors, row_scale, column_scale, cfg=cfg)

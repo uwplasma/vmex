@@ -122,6 +122,13 @@ so VMEX leaves both out.
   GPUs; low-level {func}`vmex.core.implicit.run` follows JAX placement when
   `device` is omitted, and accepts `device="gpu"` plus
   {func}`~vmex.core.device.device_scope` for explicit accelerator gradients.
+- **Block factor backend.** When implicit work does run on a GPU (explicit
+  `device="gpu"` or JAX placement), `block_factor="auto"` factors the radial
+  block tridiagonal by cyclic reduction instead of the sequential Thomas
+  sweep: 0.4-0.6x the factor time at 150-row blocks on an RTX A4000. On CPU
+  it stays on Thomas, which is 1.3-1.6x faster there. Force either with
+  `block_factor="thomas"` or `"cyclic_reduction"`
+  ({doc}`/reference/performance`).
 - **The dense NESTOR factor.** On a GPU free-boundary run the plasma
   iteration stays on the accelerator while the dense vacuum
   assembly/factor/solve is explicitly placed on CPU
