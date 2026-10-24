@@ -56,8 +56,9 @@ dependencies = [
   # (batching.NotMapped). The same holds for every uwplasma floor below: each
   # is the first release that declares floors for what it imports, so
   # installing into an environment with older packages upgrades them
-  # (nightly.yml "stale" lane).
-  "solvax>=0.27.0",
+  # (nightly.yml "stale" lane). 0.33.0 is the floor because the raw-force block
+  # factors use block_thomas_factor(normalized=True), first released there.
+  "solvax>=0.33.0",
 ]
 
 [project.scripts]
