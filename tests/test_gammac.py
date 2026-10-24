@@ -12,6 +12,7 @@ measured values recorded in the test docstrings, with stated headroom.
 from __future__ import annotations
 
 import dataclasses
+import gc
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -376,51 +377,25 @@ def test_smooth_boundary_gradient_is_fd_consistent():
 
 @pytest.mark.full
 def test_smooth_boundary_gradient_survives_the_refinement_ladder():
-    """The exact ladder that breaks the hard gradient: sign and magnitude.
+    """Check the smooth gradient on five li383 sampling budgets.
 
-    li383 at ns=13, GammaCSmooth([0.5], temperature=0.15).total through the
-    implicit solve, d/d rbc[n=0, m=1] — the same objective, deck, and rungs
-    whose hard gradient is documented sign-erratic in
-    :func:`test_boundary_gradient_liveness` (historical pre-scale-fix values:
-    -1.2542, +3.5180, -0.3869, -0.9879, +0.1799 — three sign changes).
-    Historical pre-scale-fix smooth ladder (identical to six figures between a CUDA GPU
-    run and an Apple-silicon CPU run):
-
-        (7, 3, 64, 24)    -0.097353
-        (7, 4, 96, 48)    -0.017064
-        (9, 5, 128, 48)   -0.037187
-        (13, 6, 192, 64)  -0.048634
-        (17, 8, 256, 96)  -0.044204
-
-    One sign everywhere — the qualitative property the hard gradient fails
-    — and the three rungs whose pitch grid resolves the floors
-    (``num_pitch >= 48``; the documented bound ``num_pitch * temperature
-    >~ 4`` puts the base rung's 24 x 0.15 = 3.6 just under it) sit in a
-    1.31x band (-0.0372, -0.0486, -0.0442).  The two coarse rungs carry
-    the residual under-resolution (overall band 5.7x, the base rung high
-    and the 7-line/4-transit rung low).  The floors act on the two
-    structures gradient decomposition identified: the near-separatrix
-    bounce-time level-curvature (kernel floor; a bare delta sweep of the
-    unfloored assembly showed +-4 gradient spikes on a total of ~0.3) and
-    the superbanana drift-angle corners (per-cell L1 corner floor).
-    Asserted: every rung finite, one sign, overall max/min <= 8
-    (measured 5.7), and the three resolved rungs within 2x (measured
-    1.31).  Five implicit-solve gradients make this the most expensive
-    test in the module — nightly ``full`` lane, with
-    :func:`test_smooth_boundary_gradient_is_fd_consistent` keeping a
-    single-budget sentinel in the PR lane.
+    Require finite nonzero gradients with one sign, an overall magnitude
+    band below 8x, and a band below 2x on the three finest grids. These
+    case-specific bounds do not establish general derivative convergence.
+    Clear compilation caches between grids to bound this nightly test's RAM.
     """
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
     params = im.params_from_input(inp, device=None)
     index = (int(inp.ntor), 1)
     ladder = [(7, 3, 64, 24), (7, 4, 96, 48), (9, 5, 128, 48),
               (13, 6, 192, 64), (17, 8, 256, 96)]
-    gradients = [
-        float(np.asarray(jax.grad(
+    gradients = []
+    for rung in ladder:
+        gradients.append(float(np.asarray(jax.grad(
             lambda p: _smooth_ladder_objective(inp, p, *rung)
-        )(params).rbc)[index])
-        for rung in ladder
-    ]
+        )(params).rbc)[index]))
+        jax.clear_caches()
+        gc.collect()
     assert all(np.isfinite(g) and g != 0.0 for g in gradients), gradients
     assert len({np.sign(g) for g in gradients}) == 1, (
         f"sign flip in smooth ladder: {gradients}")
