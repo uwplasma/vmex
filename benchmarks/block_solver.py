@@ -7,8 +7,8 @@ resolution group (``max_mode=2``, ``mpol=ntor=5``, 31 surfaces, block width
 
 * ``stages``: the compiled pieces of :func:`vmex.core.implicit._raw_block_system`
   at the seed root, each warm-timed with its numeric arrays as arguments --
-  colored assembly plus scaling, the SOLVAX factorization of the scaled
-  bands, one-vector, matrix and transposed applications, and the complete
+  colored assembly plus scaling, the normalized SOLVAX factorization of the
+  scaled bands, one-vector, matrix and transposed applications, and the complete
   ``_refine_block_factor_core`` executable the Newton refinement, Jacobian
   and adjoint consume.
 * ``workflow``: ``residual_and_jac`` and the scalar ``value_and_grad`` of the
@@ -105,7 +105,8 @@ def stage_timings(inp, repeats, save_bands):
     args = (state, params, state, mask)
     report = {}
     bands, report["assembly_and_scaling"] = timed(assemble, *args, repeats=repeats)
-    factors, report["factor"] = timed(solvax.block_thomas_factor, *bands, repeats=repeats)
+    factors, report["factor"] = timed(
+        lambda *b: solvax.block_thomas_factor(*b, normalized=True), *bands, repeats=repeats)
     rng = np.random.default_rng(0)
     n, m = bands[1].shape[:2]
     vector = jnp.asarray(rng.standard_normal((n, m)))

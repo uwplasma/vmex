@@ -1190,7 +1190,8 @@ def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
     return block_thomas_factor(
         row_scale[:, :, None] * lower * column_scale[previous][:, None, :],
         row_scale[:, :, None] * diagonal * column_scale[:, None, :],
-        row_scale[:, :, None] * upper * column_scale[following][:, None, :])
+        row_scale[:, :, None] * upper * column_scale[following][:, None, :],
+        normalized=True)
 
 
 @functools.partial(jax.jit, static_argnames=("cfg",))
