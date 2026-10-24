@@ -63,6 +63,37 @@ def test_counts_are_consistent(traced):
     assert np.all(np.diff(traced.loss_fractions) >= 0.0)  # cumulative
 
 
+def test_trace_timing_separates_setup_from_orbits(solovev_wout, traced, monkeypatch):
+    from types import SimpleNamespace
+    import essos.boozer
+    from vmex.core import tracing
+
+    field, bx = tracing.boozer_field(read_wout(solovev_wout), mboz=8, nboz=8)
+    clock = [0.]
+    monkeypatch.setattr(tracing.time, "perf_counter", lambda: clock[0])
+    monkeypatch.setattr(tracing, "_COMPILE_S", [0., 1.])
+
+    def stage(seconds, compilation, result):
+        def run(*args, **kwargs):
+            clock[0] += seconds
+            tracing._COMPILE_S[0] += compilation
+            return result
+        return run
+
+    monkeypatch.setattr(tracing, "boozer_field", stage(2., .5, (field, bx)))
+    monkeypatch.setattr(tracing, "sample_births", stage(3., .25, traced.initial_conditions))
+    trace = SimpleNamespace(states=traced.trajectories, loss_times=traced.lost_times,
+                            thermalized_times=traced.thermalized_times,
+                            energy_error=traced.energy_error)
+    monkeypatch.setattr(essos.boozer, "trace_boozer", stage(7., 1.25, trace))
+    result = trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert result.wall_time_s == 7.
+    assert result.metadata["setup_time_s"] == 5.
+    assert result.metadata["total_wall_time_s"] == 12.
+    assert result.metadata["compile_time_s"] == 2.
+    assert result.metadata["trace_compile_time_s"] == 1.25
+
+
 @pytest.mark.parametrize("name,bad", [
     ("energy_eV", 0), ("energy_eV", -1), ("energy_eV", np.nan),
     ("energy_eV", np.inf), ("energy_eV", [20000]),
@@ -557,7 +588,8 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     assert summary["method"] == "adaptive8"
     assert summary["nparticles"] == 8 and summary["scale_target"] == "volavgB"
     assert summary["collisions"] is True
-    assert {"loss_fraction_sigma", "compile_time_s", "devices", "versions"} <= set(summary)
+    assert {"loss_fraction_sigma", "compile_time_s", "trace_compile_time_s",
+            "setup_time_s", "total_wall_time_s", "devices", "versions"} <= set(summary)
     arrays = np.load(tmp_path / "solovev_trace.npz")
     assert arrays["initial_conditions"].shape == (8, 4)
     assert np.all((arrays["initial_conditions"][:, 0] > 0) & (arrays["initial_conditions"][:, 0] < 1))
