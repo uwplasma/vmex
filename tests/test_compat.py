@@ -887,3 +887,21 @@ def test_explicit_float32_choice_is_respected_and_refused_by_the_solver():
     assert _fresh(probe).splitlines() == ["False", "True"]
     assert _fresh("import jax, vmex.core.solver; print(jax.config.jax_enable_x64)",
                   JAX_ENABLE_X64="0") == "False"
+
+
+def test_prune_cache_entries_skips_the_rescan_of_a_recently_pruned_cache(tmp_path):
+    """Inside the 4x allowance, a cache pruned within the hour is not re-read."""
+    import time
+
+    now = time.time_ns()
+    for i in range(25):
+        (tmp_path / f"r{i}-cache").write_bytes(b"x")
+        (tmp_path / f"r{i}-atime").write_bytes((now - i).to_bytes(8, "little"))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 0     # all recent: kept
+    assert (tmp_path / ".pruned").exists()
+    for atime in tmp_path.glob("*-atime"):
+        atime.unlink()                      # a rescan would now see 25 stale entries
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 0
+    old = time.time() - 2 * _compat._CACHE_PRUNE_INTERVAL
+    os.utime(tmp_path / ".pruned", (old, old))
+    assert _compat._prune_cache_entries(str(tmp_path), 10) == 15

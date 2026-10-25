@@ -24,6 +24,7 @@ import hashlib
 import re
 from importlib import metadata as importlib_metadata
 import sys
+import time
 
 import os
 import platform
@@ -31,6 +32,7 @@ import platform
 
 _CACHE_FORMAT_VERSION = "4"
 _CACHE_MAX_ENTRIES = 1024            # resident executables; see _prune_cache_entries
+_CACHE_PRUNE_INTERVAL = 3600        # seconds between full prune scans of an oversized cache
 _CACHE_RECENT_SECONDS = 24 * 3600    # entries used this recently survive the cap, up to 4x it
 _CACHE_SIZE_FLOOR = 2 << 30          # 2 GiB
 _CACHE_SIZE_CEILING = 20 << 30       # 20 GiB
@@ -97,6 +99,13 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
         entries = list(path.glob(f"*{_CACHE_ENTRY_SUFFIX}"))
         if len(entries) <= max_entries:
             return 0
+        # Reading every atime sidecar costs ~0.17 ms per entry (0.55 s at 3,255
+        # entries) on each import; a cache that was pruned within the last
+        # hour and is still inside its recency allowance need not be rescanned.
+        stamp = path / ".pruned"
+        if (len(entries) <= 4 * max_entries and stamp.exists()
+                and time.time() - stamp.stat().st_mtime < _CACHE_PRUNE_INTERVAL):
+            return 0
     except Exception:  # missing directory, unreadable filesystem
         return 0
 
@@ -121,8 +130,6 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
             except Exception:
                 return 0
 
-        import time
-
         atimes = {entry: _atime(entry) for entry in entries}
         ordered = sorted(entries, key=atimes.__getitem__, reverse=True)
         recent_cutoff = time.time_ns() - _CACHE_RECENT_SECONDS * 1_000_000_000
@@ -143,6 +150,7 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
                 pass
     finally:
         try:
+            (path / ".pruned").touch()
             lock.release()
         except Exception:
             pass
@@ -734,7 +742,7 @@ def require_x64() -> None:
 # Checked where each is first used, so that an environment left behind by
 # `git pull` over an editable install fails with the fix, not a TypeError.
 OPTIONAL_MINIMUMS = {"essos": "0.21.0", "virtual-casing-jax": "0.0.9",
-                     "neo-jax": "1.0.6", "gkx": "2.6.0",
+                     "neo-jax": "1.0.6", "gkx": "2.5.0",
                      "dkx": "2.8.0"}
 
 
