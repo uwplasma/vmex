@@ -112,6 +112,7 @@ _harden_compilation_cache()
 import jax.numpy as jnp
 from jax import lax
 
+from .aot import aot_lane, compile_lane, release as aot_release
 from .device import (
     AUTO,
     GPU_MAX_SPECTRAL_MODES,
@@ -2158,7 +2159,7 @@ def _while_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
 
-@functools.partial(jax.jit, donate_argnums=(0,))
+@aot_lane(donate_argnums=(0,))
 def _block_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     """One ``BLOCK_SIZE``-iteration ``lax.scan`` block (CLI lane), structural.
 
@@ -2180,7 +2181,7 @@ def _while_lane_fft(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
 
-@functools.partial(jax.jit, donate_argnums=(0,))
+@aot_lane(donate_argnums=(0,))
 def _block_lane_fft(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     """Donated CLI block using separable Fourier synthesis."""
     body = _make_body(rt, use_fft=True)
@@ -2245,7 +2246,7 @@ def _prefetch_block_lane(
     key = _lane_signature(lane_name, carry, rt)
     if key in _LANE_EXECUTABLES or key in _USED_LANE_KEYS:
         return True
-    _LANE_EXECUTABLES[key] = lane.lower(carry, rt).compile()
+    _LANE_EXECUTABLES[key] = compile_lane(lane, carry, rt)
     return True
 
 
@@ -2257,6 +2258,7 @@ def _release_used_lane_executables() -> None:
     jit caches, while a just-prefetched — not yet used — executable for the
     NEXT rung survives the release.
     """
+    aot_release()
     for key in list(_LANE_EXECUTABLES):
         if key in _USED_LANE_KEYS:
             del _LANE_EXECUTABLES[key]

@@ -54,6 +54,7 @@ from jax import lax
 from jax.scipy import linalg as jsp_linalg
 
 from . import profiles as _profiles
+from .aot import AotLane, aot_lane, compile_lane
 from .device import AUTO, _placement_device, commit_to_single_device, _put_numeric_leaves, device_context
 from .errors import (
     AXIS_REGUESS_FLAG,
@@ -209,7 +210,7 @@ def _carried_edge_radius_lane(state: SpectralState, rt: SolverRuntime) -> Array:
     return geometry.R_even[-1] + geometry.R_odd[-1]
 
 
-@functools.partial(jax.jit, static_argnames=("use_fft",))
+@aot_lane(static_argnames=("use_fft",))
 def _step_lane(carry, rt: SolverRuntime, evaluation_state: SpectralState,
                until_activation, *, use_fft: bool = False):
     """The one eqsolve force-pass lane per runtime structure.
@@ -1238,7 +1239,7 @@ def _prefetch_stage_lane_set(
                 done = threading.Event()
                 _FB_INFLIGHT[key] = done
             try:
-                _LANE_EXECUTABLES[key] = lane.lower(*args, **static).compile()
+                _LANE_EXECUTABLES[key] = compile_lane(lane, *args, **static)
             finally:
                 done.set()
                 with _FB_LOCK:
@@ -1456,7 +1457,7 @@ def _make_vacuum_lane(fused: FusedVacuum, *, use_fft: bool = False):
             return live if stop is None else live & (v.carry.iteration < stop)
         return lax.while_loop(_running, lambda v: _pass(v, rt, field), vc)
 
-    return jax.jit(_lane)
+    return AotLane(_lane, identity=repr(fused.cache_key))
 
 
 # ---------------------------------------------------------------------------
