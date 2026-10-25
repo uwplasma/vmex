@@ -176,6 +176,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_optimization.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
+    "examples/optimization/QI_optimization_bootstrap_er.py",
     "examples/optimization/QI_optimization_jaxopt.py",
     "examples/optimization/QI_optimization_optax.py",
     "examples/optimization/QI_optimization_scipy.py",
@@ -1143,6 +1144,7 @@ def test_bootstrap_optimization_examples(case, figure_of_merit, tmp_path):
     ("QA_optimization_low_bootstrap.py", "QA_low_bootstrap_optimized", None),
     ("optimize_bootstrap_current.py", "bootstrap_current_optimized", "booz_xform_jax"),
     ("QI_optimization_bootstrap_dkx.py", "QI_bootstrap_dkx_optimized", "dkx"),
+    ("QI_optimization_bootstrap_er.py", "QI_bootstrap_er_optimized", "dkx"),
 ])
 def test_low_bootstrap_optimization_examples(script_name, output, dependency, tmp_path):
     if dependency == "dkx":

@@ -82,7 +82,7 @@ optimizers = [
 # equilibria get an effective ripple (NEO_JAX #7).
 neoclassical = [
   "neo-jax>=1.0.6",
-  "dkx>=2.8.0",
+  "dkx>=2.12.0",
 ]
 # Differentiable virtual casing on a specified boundary; this is not a NESTOR
 # equilibrium adjoint. 0.0.9 is the first release that declares its jax and

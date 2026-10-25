@@ -138,9 +138,12 @@ that research budget as one commented set of constants next to the default.
   and QH ratios and Boozer `|B|` before and after, to ask whether a
   low-current optimum drifts toward QI; at its default budget it leaves
   quasisymmetry (QA and QH ratios up fivefold) without becoming QI.
-  `QI_optimization_bootstrap_dkx.py` (`pip install "dkx>=2.8.0"`) is the QI
+  `QI_optimization_bootstrap_dkx.py` (`pip install "dkx>=2.12.0"`) is the QI
   bootstrap example with DKX's kinetic mismatch row in place of Redl's after a
-  Redl Picard seed, and prints Redl and DKX `<j.B>` side by side. `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
+  Redl Picard seed, and prints Redl and DKX `<j.B>` side by side.
+  `QI_optimization_bootstrap_er.py` (`pip install "dkx>=2.12.0"`) evaluates the
+  DKX row at each surface's ambipolar `E_r`, found inside the objective.
+  `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
   casing and coil derivatives. The free-boundary single-stage previews leave
   the LCFS implicit and vary only the coil shapes, through the coupled NESTOR
   adjoint. Each single-stage script runs in 2.1-4.6 min end to end on a laptop,

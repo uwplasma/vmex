@@ -4,6 +4,10 @@ Release notes are mirrored from the GitHub releases, which carry each release
 in full. A number appears here only where a committed artifact backs it; each
 record under `benchmarks/` names the revision it was measured at.
 
+## Unreleased
+
+- **Bootstrap at the ambipolar E_r.** `examples/optimization/QI_optimization_bootstrap_er.py` optimizes a finite-beta QI boundary against DKX's `<j.B>` evaluated at each surface's ambipolar `E_r` (`KineticBootstrapMismatch(ambipolar=True)`); the smoke pass asserts the objective falls. Needs `dkx>=2.12.0`, now the floor of the `dkx` extra.
+
 ## 0.12.0 - 2026-10-21
 
 - **Faster optimization.** Implicit executables are keyed on problem structure
