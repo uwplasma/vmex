@@ -371,6 +371,14 @@ Off by default, so VMEC2000 iteration parity is kept:
   PID law on the axis radius that sets a uniform vertical field to hold a current-carrying
   free-boundary plasma in place. Example: `python examples/free_boundary_position_control.py`
   ([explanation](https://vmex.readthedocs.io/en/latest/explanation/position-control.html)).
+- `vmex.relax_free_boundary_constraint` continues a converged free-boundary state with a weak
+  spectral constraint, removing the bias that makes the LCFS differ from the coil field by 1e-3 to
+  1e-2 in `|B|`. It helps on vacuum and well-resolved decks (`|B|` error 3-10x lower, force error
+  4-15x lower); check it against the coil field at low resolution, where it can be worse.
+  `result = vmex.solve_free_boundary(inp, external_field=field)`, then
+  `relaxed = vmex.relax_free_boundary_constraint(inp, result, external_field=field)`.
+  Example: `python examples/free_boundary_relax_constraint.py`
+  ([how-to](https://vmex.readthedocs.io/en/latest/howto/free-boundary.html)).
 - `solve_multigrid(inp, lambda_m0_floor=1e-3)` adds a radial preconditioner for the m = 0 lambda
   force of fixed-boundary stellarators converged to a very small `ftol`; iterations fall by up to 9%
   ([iteration](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).

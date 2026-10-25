@@ -153,6 +153,7 @@ jobs:
         run: |
           pytest -q tests/test_examples.py::test_free_boundary_essos_coils \
             tests/test_examples.py::test_free_boundary_phiedge \
+            tests/test_examples.py::test_free_boundary_relax_constraint \
             --vmex-report=test-report-coils.json
       # NEO_JAX is installed above and nowhere else, so this is the only job
       # that can run the effective-ripple example at all.  The test is marked
