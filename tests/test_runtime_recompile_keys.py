@@ -211,3 +211,17 @@ def test_silent_cpu_solve_keeps_block_lane(monkeypatch) -> None:
     result = solver.solve(
         VmecInput.from_file(str(DECK)), ftol=1e-8)
     assert not calls and result.iterations > 0
+
+
+def test_silent_gpu_solve_takes_while_lane_with_identical_iterates(monkeypatch) -> None:
+    """On a GPU backend silent solves use the while lane; iterates match blocks."""
+    inp = VmecInput.from_file(str(DECK))
+    block = solver.solve(inp, ftol=1e-8)
+    monkeypatch.setattr(solver, "_on_gpu", lambda tree: True)
+    calls = []
+    real = solver._while_lane
+    monkeypatch.setattr(solver, "_while_lane", lambda *a: calls.append(1) or real(*a))
+    loop = solver.solve(inp, ftol=1e-8)
+    assert calls
+    assert int(loop.iterations) == int(block.iterations)
+    np.testing.assert_allclose(float(loop.wb), float(block.wb), rtol=1e-12)
