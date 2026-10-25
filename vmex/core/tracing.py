@@ -221,7 +221,8 @@ def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0
     return {"field": field, "wall": surface, "exterior_field": exterior}
 
 
-def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE):
+def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE,
+                 angle_grid: int | None = 6):
     """Run ``booz_xform_jax`` on every surface of ``wout`` and return
     ``(essos.boozer.BoozerField, Booz_xform)``."""
     from booz_xform_jax import Booz_xform
@@ -237,7 +238,7 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     bx.run()
     # Boozer guiding-centre equations use psi = -Phi_tor/(2 pi) for VMEC's phi.
     psi0 = -float(np.asarray(wout.phi)[-1]) / (2 * np.pi)
-    return BoozerField.from_booz_xform(bx, psi0, mode_tolerance), bx
+    return BoozerField.from_booz_xform(bx, psi0, mode_tolerance, angle_grid=angle_grid), bx
 
 
 def truncation_message(truncation: float, silence: str) -> str:
@@ -525,6 +526,7 @@ def trace_alphas(
     mboz: int = 32,
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
+    angle_grid: int | None = 6,
     energy_eV: float | None = None,
     mass: float | None = None,
     charge: float | None = None,
@@ -554,6 +556,9 @@ def trace_alphas(
         birth profile).
     mboz, nboz, mode_tolerance:
         Boozer resolution and the relative amplitude of dropped modes.
+    angle_grid:
+        ESSOS angular table points per shortest wavelength (default 6);
+        ``None`` evaluates the retained Fourier spectrum directly.
     method, tolerance:
         ``"adaptive8"`` (default) and ``"adaptive"`` control each particle's
         Dopri8 or Dopri5 step to the embedded-error ``tolerance``, so
@@ -599,6 +604,9 @@ def trace_alphas(
         raise ValueError(f"method must be one of {', '.join(METHODS)}")
     if not (np.isfinite(tolerance) and tolerance > 0):
         raise ValueError("tolerance must be positive and finite")
+    if angle_grid is not None and (isinstance(angle_grid, bool) or not isinstance(angle_grid, (int, np.integer))
+                                   or angle_grid < 1):
+        raise ValueError("angle_grid must be a positive integer or None")
     compact = compact is None or bool(compact)
     if devices is None:
         devices = jax.devices()
@@ -626,7 +634,8 @@ def trace_alphas(
         jax.monitoring.register_event_duration_secs_listener(_compile_listener)
         _COMPILE_S[1] = 1.0
     compile_start = _COMPILE_S[0]
-    field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance)
+    field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance,
+                             angle_grid=angle_grid)
     births = sample_births(field, nparticles, s=s, birth=birth, seed=seed, ne0=ne0, T0_keV=T0_keV)
     start = time.perf_counter()
     trace = trace_boozer(
@@ -670,6 +679,8 @@ def trace_alphas(
                     if method.startswith("adaptive") else f"{method.upper()}") + " (Boozer guiding centre)",
         compact=bool(compact), boozer_modes=int(field.xm.size), spectral_truncation=truncation,
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
+        angle_grid=None if angle_grid is None else int(angle_grid),
+        angle_table=field.table is not None,
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
         compile_time_s=_COMPILE_S[0] - compile_start,
