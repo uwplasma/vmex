@@ -45,6 +45,7 @@
     ["tests/test_freeboundary_stress.py", "free-boundary", "integration", "medium", "cpu-gpu", "generated", "analytic", ["pr-parity-a1"]],
     ["tests/test_solve_phiedge.py", "free-boundary", "integration", "medium", "cpu-gpu", "generated", "analytic", ["pr-parity-f", "full-core-fb-a"]],
     ["tests/test_geometry_fields.py", "equilibrium", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "full-core-g-h"]],
+    ["tests/test_lasym_pressure_start.py", "equilibrium", "integration", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "full-core-g-h"]],
     ["tests/test_gammac.py", "diagnostics", "ad", "slow", "cpu-gpu", "none", "fd", ["pr-parity-c4", "full-core-g-h"]],
     ["tests/test_golden_digests.py", "equilibrium", "oracle", "slow", "cpu", "golden", "vmec2000", ["pr-parity-b", "full-core-g-h"]],
     ["tests/test_gpu_ci.py", "infrastructure", "gpu", "slow", "cpu-gpu", "generated", "fd", ["pr-parity-c1", "gpu-smoke", "full-core-g-h"]],

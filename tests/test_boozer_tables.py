@@ -49,7 +49,7 @@ def solved():
     ns = int(np.asarray(wout.iotas).shape[0])
     j = ns // 2
     tables = boozer_input_tables(result.state, rt, j)
-    return wout, tables, j
+    return wout, tables, j, boozer_input_tables(result.state, rt, 1)
 
 
 @pytest.fixture(scope="module")
@@ -116,7 +116,7 @@ def _match_wout_row(wout_xm, wout_xn, wout_2d, j, xm, xn):
 
 
 def test_bmnc_matches_wout_engine(solved):
-    wout, tables, j = solved
+    wout, tables, j, _ = solved
     ref, mask = _match_wout_row(wout.xm_nyq, wout.xn_nyq, wout.bmnc, j,
                                 tables["xm"], tables["xn"])
     got = np.asarray(tables["bmnc"])
@@ -125,7 +125,7 @@ def test_bmnc_matches_wout_engine(solved):
 
 
 def test_bsub_and_lmns_match_at_half_mesh_fd_level(solved):
-    wout, tables, j = solved
+    wout, tables, j, _ = solved
     scale = float(np.max(np.abs(np.asarray(wout.bmnc)[j])))
     for key, wout_xm, wout_xn, wout_arr in (
         ("bsubumnc", wout.xm_nyq, wout.xn_nyq, wout.bsubumnc),
@@ -141,7 +141,7 @@ def test_bsub_and_lmns_match_at_half_mesh_fd_level(solved):
 
 
 def test_iota_g_i_match_wout_rows(solved):
-    wout, tables, j = solved
+    wout, tables, j, _ = solved
     assert float(tables["iota"]) == pytest.approx(float(np.asarray(wout.iotas)[j]),
                                                   rel=1e-9)
     assert float(tables["G"]) == pytest.approx(float(np.asarray(wout.bvco)[j]),
@@ -150,9 +150,16 @@ def test_iota_g_i_match_wout_rows(solved):
                                                abs=1e-10 + 1e-6 * abs(float(np.asarray(wout.buco)[j])))
 
 
-def test_rz_tables_interpolate_full_mesh_parity(solved):
-    """rmnc/zmns are the sqrt(s)-parity half-mesh average of full-mesh rows."""
-    wout, tables, j = solved
+@pytest.mark.parametrize("axis", [False, True])
+def test_rz_tables_interpolate_full_mesh_parity(solved, axis):
+    """rmnc/zmns are the sqrt(s)-parity half-mesh average of full-mesh rows.
+
+    On the first half-mesh row (``axis``) the axis term is divided by 1, as in
+    booz_xform: dividing round-off by sqrt(0) gave R/Z tables of order 1e13.
+    """
+    wout, tables, j, axis_tables = solved
+    if axis:
+        tables, j = axis_tables, 1
     s_full = np.linspace(0.0, 1.0, np.asarray(wout.rmnc).shape[0])
     sqrt_s = np.sqrt(s_full)
     xm = np.asarray(tables["xm"])
@@ -164,7 +171,7 @@ def test_rz_tables_interpolate_full_mesh_parity(solved):
                                    tables["xm"], tables["xn"])
         even = 0.5 * (ref_jm1 + ref_j)
         # odd-m modes carry the sqrt(s) parity factor through the average
-        sq = 0.5 * (ref_jm1 / max(sqrt_s[j - 1], 1e-30) + ref_j / sqrt_s[j])
+        sq = 0.5 * (ref_jm1 / (sqrt_s[j - 1] or 1.0) + ref_j / sqrt_s[j])
         s_half = np.sqrt(0.5 * (s_full[j] + s_full[j - 1]))
         ref = np.where(xm % 2 == 1, sq * s_half, even)
         got = np.asarray(tables[key])
@@ -414,7 +421,7 @@ def test_lasym_boozer_transform_preserves_the_field_strength_range(lasym_solved)
 
 
 def test_tables_are_jittable(solved):
-    wout, tables, j = solved
+    wout, tables, j, _ = solved
     # re-derive the runtime pieces to jit the full construction
     inp = VmecInput.from_file(str(DATA_DIR / "input.solovev"))
     resolution = solver.resolution_from_input(inp)
