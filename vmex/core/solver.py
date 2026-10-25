@@ -1596,6 +1596,18 @@ def reguess_initial_axis(
 # -- Iteration body (evolve.f + TimeStepControl + the eqsolve.f checks) ----------------------------------------------
 
 
+@functools.partial(jax.jit, static_argnames="use_fft")
+def _eval_pass(args: tuple, rt: SolverRuntime, *, use_fft: bool) -> _EvalResult:
+    """One funct3d pass as a module-level ``jit``, so the body traces it once.
+
+    ``_make_body`` needs the pass's output structure (``jax.eval_shape``) and
+    then the pass itself inside the scan; with a per-call closure both traced
+    the whole force chain.  Keyed on avals, the second use hits the trace cache.
+    """
+    return _evaluate(args[0], args[1], args[2], args[3], args[4], rt, args[5],
+                     use_fft=use_fft)
+
+
 def _make_body(
     rt: SolverRuntime,
     *,
@@ -1743,8 +1755,7 @@ def _make_body(
             # values the old e2 call passed.  Runtime op sequence per trip is
             # unchanged.
             def eval_lane(args):
-                return _evaluate(args[0], args[1], args[2], args[3], args[4],
-                                 rt, args[5], use_fft=use_fft)
+                return _eval_pass(args, rt, use_fft=use_fft)
 
             args0 = (state_e1, carry.cache, it, carry.iter1, carry.fsqz,
                      carry.fsqr + carry.fsqz)
