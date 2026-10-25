@@ -48,7 +48,7 @@ can reproduce each step yourself.
 | `vmex[coils]` | `essos>=0.21.0` | coil fields, free boundary from coils, single-stage examples, alpha tracing |
 | `vmex[freeb]` | `virtual-casing-jax>=0.0.9` | virtual-casing exterior fields (`VmecExtender`) |
 | `vmex[neoclassical]` | `neo-jax>=1.0.6` | effective ripple |
-| `vmex[turbulence]` | `gkx>=2.5.0` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
+| `vmex[turbulence]` | `gkx>=2.6.0` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
 | `vmex[optimizers]` | `jaxopt`, `optax` | the JAXopt and Optax example drivers |
 | `vmex[all]` | all of the above | every example |
 
