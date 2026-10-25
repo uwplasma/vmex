@@ -1077,7 +1077,7 @@ def test_pwo_stage1_example(tmp_path, family, finite_beta):
     stem = f"pwO{suffix}_optimized"
     summary = json.loads((tmp_path / f"{stem}_summary.json").read_text())
     assert summary["family"] == family
-    assert summary["checks"]["converged"] and summary["checks"]["valid target/map"]
+    assert all(summary["checks"].values()), summary["unmet"]
     assert summary["actual_s"] == [0.5]
     assert summary["metrics"]["fine"] < summary["metrics"]["initial_fine"]
     assert all(np.all(np.isfinite(value)) for value in summary["metrics"].values())

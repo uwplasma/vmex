@@ -34,7 +34,7 @@ MIRROR_TRAIN_TARGET, MIRROR_TRAIN_TOLERANCE = 0.34, 0.03  # margin for the indep
 QS_PARAMETER_STEP, QS_PARAMETER_BOUND = 0.02, 5.0
 FAMILY = os.environ.get("VMEX_PWO_FAMILY", "canonical")
 METHOD = os.environ.get("VMEX_PWO_METHOD", "scalar")
-PENALTY = os.environ.get("VMEX_PWO_PENALTY", "equality")
+PENALTY = os.environ.get("VMEX_PWO_PENALTY", "interval")
 SURFACES = [0.5]
 MAX_MODES, MAXITER = [1, 2, 3], [8, 8, 12]
 STAGE_NS, FINAL_NS = 16, 32  # even ns puts s=0.5 on both half meshes

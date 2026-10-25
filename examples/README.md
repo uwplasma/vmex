@@ -116,8 +116,8 @@ that research budget as one commented set of constants next to the default.
   starts from an nfp=2 perturbed circular torus and runs QP conditioning first.
   Set `VMEX_PWO_QS_INPUT` to resume a saved QP boundary, `VMEX_PWO_FAMILY=mapped`
   for the mapped target, or `VMEX_PWO_METHOD=least_squares` for a residual-Jacobian
-  solve instead of the scalar adjoint. `VMEX_PWO_PENALTY=interval` penalizes
-  aspect, local mean field and mirror only outside their acceptance intervals.
+  solve instead of the scalar adjoint. Aspect, local mean field and mirror are
+  penalized outside their acceptance intervals; `VMEX_PWO_PENALTY=equality` pins seed values.
   Final validation requires local mirror within 10% of the seed. Canonical target
   bounds and angular origins are calibrated once and held fixed. The scripts
   save input/WOUT checkpoints and rescore the result at higher resolution.
