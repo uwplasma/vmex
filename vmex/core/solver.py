@@ -2313,6 +2313,7 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         # (xstore=state, shared cache zeros), so copy to distinct buffers —
         # same rationale as the CLI-lane copy below, values bit-for-bit
         # unchanged.
+        carry, rt = commit_to_single_device((carry, rt))
         carry = _distinct_buffers(carry)
         return (_while_lane_fft if use_fft else _while_lane)(carry, rt)
 
