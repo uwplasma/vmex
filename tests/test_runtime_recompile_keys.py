@@ -18,7 +18,6 @@ import dataclasses
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from vmex.core import solver
 from vmex.core.input import VmecInput
@@ -30,14 +29,6 @@ def _small_runtime(ftol: float = 1e-10) -> solver.SolverRuntime:
     inp = VmecInput.from_file(str(DECK))
     resolution = solver.resolution_from_input(inp, ns=5)
     return solver.prepare_runtime(inp, resolution, ftol=ftol, max_iterations=6)
-
-
-@pytest.fixture(autouse=True)
-def _cli_block_lane():
-    """A stop hook keeps silent solves on the CLI block lane under test."""
-    token = solver.STOP_HOOK.set(lambda carry: False)
-    yield
-    solver.STOP_HOOK.reset(token)
 
 
 def test_loop_driver_scalars_are_not_runtime_fields() -> None:
@@ -211,3 +202,12 @@ def test_mixed_named_sharding_is_not_normalized(monkeypatch):
         time_step0=0.9, nstep=200,
     )
     assert seen == [named]
+
+
+def test_silent_cpu_solve_keeps_block_lane(monkeypatch) -> None:
+    """The single-sync while lane is GPU-only: CPU solves stay on blocks."""
+    calls = []
+    monkeypatch.setattr(solver, "_while_lane", lambda *a: calls.append(1))
+    result = solver.solve(
+        VmecInput.from_file(str(DECK)), ftol=1e-8)
+    assert not calls and result.iterations > 0
