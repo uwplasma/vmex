@@ -446,12 +446,12 @@ def _state_field_spectra(inp, state, runtime=None):
         signgs = int(boundary.signgs)
         prof = flux_profiles(
             inp, grids, r00=boundary.r00, signgs=signgs, lflip=boundary.lflip)
-        gamma, ncurr = float(inp.gamma), int(inp.ncurr)
+        gamma, ncurr, lflip = float(inp.gamma), int(inp.ncurr), bool(boundary.lflip)
     else:
         grids, signgs = runtime.setup, int(runtime.setup.signgs)
         prof = {name: getattr(runtime.setup, name) for name in
-                ("phips", "phipf", "chips", "mass", "icurv")}
-        gamma, ncurr = float(runtime.gamma), int(runtime.setup.ncurr)
+                ("phips", "phipf", "chips", "chipf", "mass", "icurv")}
+        gamma, ncurr, lflip = float(runtime.gamma), int(runtime.setup.ncurr), bool(runtime.setup.lflip)
 
     R_cos_p, Z_sin_p, R_sin_p, Z_cos_p = m1_constrained_to_physical(
         state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
@@ -504,9 +504,10 @@ def _state_field_spectra(inp, state, runtime=None):
     # The native field form (extender._contravariant_native) builds B from
     # these rather than from the fitted B^u/B^v tables: ``lmns`` carries VMEC's
     # internal ``lamscale`` factor and the same mode scaling as ``rmnc``, and
-    # ``phipf``/``chipf`` are the internal flux derivatives.  ``chips`` lives on
-    # the half mesh, while the extender evaluates the Jacobian continuously in
-    # ``s``, so it is moved to the full mesh here.
+    # ``phipf``/``chipf`` are the internal flux derivatives. Preserve prescribed
+    # iota on the full mesh; remapping its half-mesh samples shifts rational
+    # surfaces. profil1d flips only half-mesh chips, so match that sign here.
+    # In current mode, iota is determined by the effective half-mesh chips.
     from .extender import _half_to_full_profile
 
     lmns = lambda_sin * jnp.asarray(fields.lamscale) * mode_scale[None, :]
@@ -517,7 +518,8 @@ def _state_field_spectra(inp, state, runtime=None):
         lmns=lmns, lmnc=(apply_lambda_axis_closure(state.L_cos, modes=modes, ntor=ntor)
                          * jnp.asarray(fields.lamscale) * mode_scale[None, :] if lasym else None),
         phipf=jnp.asarray(prof["phipf"]),
-        chipf=_half_to_full_profile(fields.chips),
+        chipf=(((-1.0 if lflip else 1.0) * jnp.asarray(prof["chipf"]))
+               if ncurr == 0 else _half_to_full_profile(fields.chips)),
         lasym=lasym, signgs=signgs)
 
 

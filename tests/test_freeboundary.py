@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import types
 from pathlib import Path
 
 import numpy as np
@@ -750,6 +751,62 @@ def test_call_lane_emits_notice_once_before_compile():
     assert len(notices) == 1, "eager passthrough must not notice"
 
 
+def test_itor_mismatch_check_follows_the_vmecpp_criterion():
+    """``|ctor - bsubuvac| / |rbtor| > 1e-2`` warns; anything else, or a degenerate input, is silent."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert not FB._warn_itor_mismatch(0.0500, 0.0549, -0.5)    # 0.98 %
+        assert not FB._warn_itor_mismatch(0.0500, 0.0500, -0.5)
+        assert not FB._warn_itor_mismatch(0.0500, 0.0900, 0.0)     # no R*BTOR: nothing to scale by
+        assert not FB._warn_itor_mismatch(float("nan"), 0.05, -0.5)
+    with pytest.warns(UserWarning, match=r"I_TOR MISMATCH.*4\.\d+e-02 MA.*TOROIDAL CURRENT.*by 1\.20%") as rec:
+        assert FB._warn_itor_mismatch(0.0500, 0.0560, -0.5)        # sign-independent, 1.20 %
+    assert "EXTCUR/CURTOR" in str(rec[0].message)
+    with pytest.warns(UserWarning, match="I_TOR MISMATCH"):
+        assert FB._warn_itor_mismatch(0.0560, 0.0500, 0.5)
+
+
+def _first_vacuum_step_warnings(ab_inputs, extcur_scale):
+    """Run the first (ivac = 0) NESTOR update on the bundled synthetic mgrid; return its warnings."""
+    import types
+    import warnings
+
+    inp, res, rt = ab_inputs["inp"], ab_inputs["res"], ab_inputs["rt"]
+    rt = dataclasses.replace(rt, presf_ns_scale=FB._presf_ns_scale(inp, int(res.ns)))
+    basis, fused, _lane = FB._vacuum_executables(
+        res, mf=int(inp.mpol) + 1, nf=int(inp.ntor),
+        signgs=int(rt.setup.signgs), wint=np.asarray(rt.trig.wint),
+        modes=rt.modes, axis_r0=jnp.asarray(ab_inputs["axis_r"]),
+        axis_z0=jnp.asarray(ab_inputs["axis_z"]),
+    )
+    field = dataclasses.replace(
+        ab_inputs["field"], extcur=extcur_scale * jnp.asarray(ab_inputs["field"].extcur))
+    fb = FB.FreeBoundaryState()
+    fb.ivac = 0
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        FB._vacuum_step(carry=types.SimpleNamespace(state=ab_inputs["state"]), rt=rt, fb=fb,
+                        basis=basis, fused_vac=fused, field=field, ivacskip=0,
+                        emit=lambda *a, **k: None, verbose=False)
+    return [str(w.message) for w in caught if "I_TOR MISMATCH" in str(w.message)]
+
+
+def test_first_vacuum_update_warns_when_the_mgrid_circulation_disagrees_with_ctor(ab_inputs):
+    """The bundled synthetic mgrid is not a vacuum field: its coil table carries circulation.
+
+    On the deck's initial surface the vacuum circulation exceeds the toroidal
+    current by 0.9 % of R*BTOR at the deck's EXTCUR (1.01 % once the solve has
+    moved the boundary: the printed 4.69e-2 MA against 4.32e-2 MA), at the
+    edge of VMEC++'s 1 % tolerance.  The excess scales with the coil currents,
+    so doubling them is a clear violation.
+    """
+    assert _first_vacuum_step_warnings(ab_inputs, 1.0) == []
+    doubled = _first_vacuum_step_warnings(ab_inputs, 2.0)
+    assert len(doubled) == 1 and "I_TOR MISMATCH" in doubled[0] and "TOROIDAL CURRENT" in doubled[0]
+
+
 def test_cli_missing_mgrid_fallback_warns(tmp_path):
     """CLI policy: missing mgrid -> fixed-boundary fallback warning (VMEC2000)."""
     import types
@@ -813,3 +870,53 @@ def test_deck_nfp_must_match_the_mgrid_nfp():
     FB.free_boundary_resolution(inp, field)
     with pytest.raises(VmecInputError, match="NFP"):
         FB.free_boundary_resolution(replace(inp, nfp=2 * int(inp.nfp)), field)
+
+
+def _fake_relaxation(monkeypatch, fsq, converged=False):
+    """Patch ``solve_free_boundary`` with a run whose ``fsqr`` trace is ``fsq``."""
+    calls = []
+
+    def fake_solve(inp, **kwargs):
+        calls.append(dict(kwargs, inp=inp))
+        history = np.zeros((min(kwargs["max_iterations"], len(fsq)), 6))
+        history[:, 0] = fsq[: len(history)]
+        return types.SimpleNamespace(converged=converged, iterations=len(history),
+                                     fsq_history=history, replayed=len(calls) > 1)
+
+    monkeypatch.setattr(FB, "solve_free_boundary", fake_solve)
+    return calls
+
+
+def test_relax_free_boundary_constraint_restarts_with_a_weak_constraint(monkeypatch):
+    """The relaxation hot-restarts the converged state with a weak constraint."""
+    calls = _fake_relaxation(monkeypatch, [3e-7, 2e-8, 1e-9, 1e-10])
+    state, field = object(), object()
+    result = dataclasses.make_dataclass("R", ["state"])(state)
+    out = FB.relax_free_boundary_constraint("deck", result, external_field=field,
+                                            iterations=123, verbose=True)
+    assert len(calls) == 1 and not out.replayed and out.iterations == 4
+    assert calls[0]["inp"] == "deck" and calls[0]["initial_state"] is state
+    assert calls[0]["external_field"] is field
+    assert calls[0]["tcon0"] == 1e-3 and calls[0]["max_iterations"] == 123
+    assert calls[0]["error_on_no_convergence"] is False and calls[0]["verbose"] is True
+
+
+def test_relax_free_boundary_constraint_returns_the_lowest_fsq_iterate(monkeypatch):
+    """A continuation whose force residual grows again is replayed to its minimum."""
+    calls = _fake_relaxation(monkeypatch, [1e-7, 1e-9, 8e-11, 2e-10, 5e-8, 2e-7])
+    result = dataclasses.make_dataclass("R", ["state"])(object())
+    out = FB.relax_free_boundary_constraint("deck", result, iterations=6, verbose=True)
+    assert [c["max_iterations"] for c in calls] == [6, 3]
+    assert out.replayed and out.iterations == 3
+    assert calls[1]["verbose"] is False and calls[1]["initial_state"] is result.state
+    assert calls[1]["tcon0"] == calls[0]["tcon0"]
+
+
+def test_relax_free_boundary_constraint_keeps_flat_converged_and_nan_traces(monkeypatch):
+    """Only a trace that ends a decade above its minimum is replayed."""
+    result = dataclasses.make_dataclass("R", ["state"])(object())
+    for fsq, converged in (([1e-7, 1e-9, 5e-10, 8e-10, 3e-9], False),
+                           ([1e-7, 1e-12, 1e-9], True), ([np.nan] * 3, False)):
+        calls = _fake_relaxation(monkeypatch, fsq, converged=converged)
+        out = FB.relax_free_boundary_constraint("deck", result, iterations=len(fsq))
+        assert len(calls) == 1 and out.iterations == len(fsq) and not out.replayed
