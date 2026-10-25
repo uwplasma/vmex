@@ -540,7 +540,7 @@ starting from the VMEX ns = 65 field.
   [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
   VMEC++ was faster than VMEX on the largest 3-D decks it completed. On one RTX A4000 (JAX 0.11.2,
   warm, shared node) against 8 CPU cores of a loaded 36-core host (load about 80), the GPU took
-  1.0x (`LandremanPaul2021_QA_lowres`, 3.1 s vs 3.7 s), 1.5x (`nfp2_QA_highres`, 1.0 s vs 1.6 s)
+  1.2x (`LandremanPaul2021_QA_lowres`, 3.1 s vs 3.7 s), 1.5x (`nfp2_QA_highres`, 1.0 s vs 1.6 s)
   and 2.8x less time (`serial2500170_surface_points_mpol12_ntor12`, 20 s vs 55 s); cold, compilation
   dominates both. Idle-CPU baselines are not yet measured; a loaded M-series laptop (0.7-1.4 s) was faster
   than the GPU (3.1 s) on `LandremanPaul2021_QA_lowres`.
