@@ -246,7 +246,7 @@ Numerical implementation:
     W. D. Dorland, “An adjoint-based method for optimizing MHD equilibria
     against the infinite-n, ideal ballooning mode,” *Journal of Plasma
     Physics* 89, 905890518 (2023), arXiv:2302.07673,
-    doi:10.1017/S0022377823000107 — the field-line eigenproblem in the PEST
+    doi:10.1017/S0022377823000995 — the field-line eigenproblem in the PEST
     angle and the per-surface hinge objective.
 
 51. R. Gaur et al., “Omnigenous stellarators with improved ideal and kinetic
