@@ -16,7 +16,15 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-agnimhd = pytest.importorskip("agnimhd")
+try:
+    import agnimhd
+except ImportError:  # optional dependency: collect the tests, skip them
+    agnimhd = None
+
+pytestmark = pytest.mark.skipif(
+    agnimhd is None or "restrict" not in agnimhd.Basis.__dataclass_fields__,
+    reason="needs agnimhd with Basis(restrict=True)",
+)
 
 import vmex as vj
 from vmex.core import agni
