@@ -145,6 +145,7 @@ UNTESTED_EXAMPLES = {
 EXECUTED_EXAMPLES = {
     "examples/epsilon_effective.py",
     "examples/finite_beta_scan.py",
+    "examples/finite_n_stability.py",
     "examples/fixed_boundary_run.py",
     "examples/force_balance_polishing.py",
     "examples/prescribed_current_polishing.py",
@@ -942,6 +943,23 @@ def test_finite_beta_scan(tmp_path):
     assert len(betas) == 3, f"expected 3 pressure points, got {rows}"
     assert betas[-1] > betas[0] and betas[-1] > 5e-3, "beta should rise into finite-beta"
     assert shafr[-1] > shafr[0], "magnetic axis should shift outward (Shafranov)"
+
+
+def test_finite_n_stability(tmp_path):
+    """Smoke only: the AGNI stability script runs and writes its outputs.
+
+    The tiny basis cannot resolve the physics, so the verdicts are not asserted;
+    the default-settings numbers are checked by running the example itself.
+    """
+    pytest.importorskip("agnimhd")
+    out = _run_example(EXAMPLES / "finite_n_stability.py", tmp_path, timeout=1800)
+    assert "PEST root residual" in out
+    outdir = tmp_path / "output_finite_n_stability"
+    assert (outdir / "finite_n_stability.png").exists()
+    families = json.loads((outdir / "finite_n_stability.json").read_text())["families"]
+    assert [row["family"] for row in families] == [0]
+    assert families[0]["verdict"] in {
+        "unstable", "unresolved", "no resolved instability in the checked space"}
 
 
 @pytest.mark.parametrize("case", [
