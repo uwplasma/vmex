@@ -542,8 +542,8 @@ starting from the VMEX ns = 65 field.
   warm, shared node) against 8 CPU cores of a loaded 36-core host (load about 80), the GPU took
   1.0x (`LandremanPaul2021_QA_lowres`, 3.1 s vs 3.7 s), 1.5x (`nfp2_QA_highres`, 1.0 s vs 1.6 s)
   and 2.8x less time (`serial2500170_surface_points_mpol12_ntor12`, 20 s vs 55 s); cold, compilation
-  dominates both. Idle-CPU baselines are not yet measured, and an idle M-series laptop was faster
-  than the GPU on the small decks.
+  dominates both. Idle-CPU baselines are not yet measured; a loaded M-series laptop (0.7-1.4 s) was faster
+  than the GPU (3.1 s) on `LandremanPaul2021_QA_lowres`.
 - **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
   value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
