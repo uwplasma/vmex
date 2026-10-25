@@ -130,7 +130,13 @@ coil_field = vj.MgridField.from_coils(coils, order=3)   # ESSOS coils
 
 ## Key knobs
 
-- `EXTCUR` — coil-group currents scaling the mgrid field.
+- `EXTCUR` — coil-group currents scaling the mgrid field. Entries missing
+  for the mgrid's coil groups count as zero, as in VMEC2000; a nonzero entry
+  beyond them (a deck written for another mgrid) stops the run, where
+  VMEC2000 would silently ignore it. When the first NESTOR update finds the
+  vacuum field's circulation differing from the toroidal current by more than
+  1 % of R*BTOR (VMEC++'s `I_TOR` check), VMEX warns: the boundary may enclose
+  a coil, or the table is not a pure vacuum field.
 - `NVACSKIP` — iterations between full NESTOR solves; between them, cheap
   incremental updates reuse the factored potential matrix, and the cadence
   adapts toward convergence ({doc}`/explanation/nestor-vacuum`).
@@ -210,6 +216,15 @@ change character at the `VACUUM PRESSURE TURNED ON` banner. Free-boundary
 ladders carry the active-vacuum state and adaptive `NVACSKIP` across
 `NS_ARRAY` stages ({doc}`/explanation/iteration`). On GPUs, the dense NESTOR
 factor runs on CPU by design ({doc}`run-on-gpu`).
+
+## Remove the constraint bias (opt-in)
+A converged LCFS balances VMEC's spectral-condensation force as well as the vacuum pressure, so `|B|` differs from the coil field by 1e-3 to 1e-2 in VMEC2000, VMEC++ and VMEX alike. `vmex.relax_free_boundary_constraint(inp, result, external_field=field)` restarts a converged state once with `tcon0 = 1e-3` and returns the lowest-`fsq` iterate (`converged = False`: judge it by the field; `examples/free_boundary_relax_constraint.py`). On vacuum mgrids of simsopt or ESSOS coils the largest `|B|` error against the table at `s = 0.25` falls 1.4e-3 to 1.5e-4 (LP-QA 7 / 12), 1.7e-3 to 5.5e-4 (W7-X 10 / 12) and 2.2e-3 to 5.7e-4 (NCSX 10 / 12), and the LCFS moves 1-8 mm. It stays opt-in: it gives up VMEC2000 parity and `ftol`, and needs `mpol` and `ntor` that resolve the coils. Rms force error `|J x B - grad p| / (B^2 / mu0 a)` from each wout alone at `s = 0.25 / 0.9`:
+
+| case (`mpol` / `ntor`) | VMEC2000 | VMEC++ | VMEX | VMEX relaxed |
+|---|---|---|---|---|
+| W7-X vacuum, 10 / 12 | 1.2e-2 / 1.7e-2 | 1.2e-2 / 1.8e-2 | 1.2e-2 / 1.7e-2 | 8.1e-4 / 4.5e-3 |
+| NCSX deck, 7 / 6 | 3.3e-2 / 6.0e-2 | 3.5e-2 / 6.8e-2 | 3.3e-2 / 6.0e-2 | 4.5e-3 / 2.7e-2 |
+| CTH-like deck, 5 / 4 (worse) | 3.3e-3 / 5.6e-3 | 3.2e-3 / 5.7e-3 | 3.3e-3 / 5.6e-3 | 3.6e-3 / 2.9e-2 |
 
 ## Differentiability scope
 
