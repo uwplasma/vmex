@@ -47,6 +47,9 @@ that research budget as one commented set of constants next to the default.
   - `free_boundary_essos_coils.py` — free-boundary beta scan directly from
     ESSOS coils (tabulated to a temporary mgrid); `PRES_SCALE` is calibrated per point so the
     *actual* wout `betatotal` hits 0/1/2/3 %.
+  - `free_boundary_relax_constraint.py` — relax a free-boundary equilibrium in
+    the ESSOS coils with the spectral constraint off; prints `|B|` against
+    Biot-Savart before and after.
   - `free_boundary_position_control.py` — a DIII-D-like free-boundary tokamak
     with a mis-set vertical field, solved with and without
     `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
