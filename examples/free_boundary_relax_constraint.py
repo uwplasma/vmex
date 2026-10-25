@@ -1,15 +1,10 @@
 #!/usr/bin/env python
 """Remove the spectral-constraint bias of a free-boundary equilibrium.
 
-A converged free-boundary LCFS balances VMEC's spectral-condensation force as
-well as the vacuum pressure, so it is not quite a flux surface of the coils.
-This solves a vacuum free-boundary equilibrium in the Landreman & Paul (2021)
-precise-QA coils from ESSOS, relaxes it with ``vj.relax_free_boundary_constraint``
-(the same state continued with a weak constraint), and prints the largest
-relative ``|B|`` error against the direct Biot-Savart field on three flux
-surfaces, before and after.  NTOR = 12 resolves the coil ripple, and the call
-returns the lowest-fsq iterate of its continuation; see
-docs/howto/free-boundary-relaxation.md.
+Solves a vacuum free-boundary equilibrium in the Landreman & Paul (2021) QA coils (ESSOS),
+relaxes it with ``vj.relax_free_boundary_constraint`` and prints the largest relative
+``|B|`` error against the direct Biot-Savart field on three flux surfaces, before and after.
+See docs/howto/free-boundary.md.
 """
 
 import os
@@ -27,9 +22,7 @@ INPUT_FILE = DATA_DIR / "input.LandremanPaul2021_QA_lowres"
 # Cylindrical grid the coil field is tabulated onto (tricubic interpolation):
 GRID = dict(rmin=0.45, rmax=1.55, zmin=-0.6, zmax=0.6, ir=96, jz=96, kp=32, order=3)
 
-# Plasma resolution.  NZETA divides the mgrid's kp; MPOL = 7 is the case whose
-# converged field is furthest from the coils.  At NS = 31 and FTOL = 1e-11 the
-# s = 0.25 error goes from 1.4e-3 to 8.8e-5 (72 s solve, 36 s relaxation):
+# Plasma resolution: NTOR = 12 resolves the coil ripple, NZETA = kp of the table.
 MPOL, NTOR, NZETA, NS = 7, 12, 32, 16
 NITER, FTOL = 20000, 1e-9
 PHIEDGE = -0.025                  # toroidal flux matching the coil field [Wb]

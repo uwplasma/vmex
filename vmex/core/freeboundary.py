@@ -2223,10 +2223,6 @@ def solve_free_boundary(
     return stage.result
 
 
-#: A relaxation whose final ``fsq`` exceeds its minimum by more than this factor has drifted.
-_RELAX_DRIFT = 10.0
-
-
 def relax_free_boundary_constraint(
     inp: VmecInput,
     result: SolveResult,
@@ -2239,63 +2235,30 @@ def relax_free_boundary_constraint(
 ) -> SolveResult:
     """Continue a converged free-boundary solve with a weak spectral constraint.
 
-    The spectral-condensation force (``tcon``, ``bcovar.f``) is tangential in
-    real space, but its ``m (m - 1)`` mode filter gives it a normal part, so a
-    converged free-boundary LCFS balances a small constraint force as well as
-    the vacuum pressure and is not a flux surface of the coils.  VMEC2000 and
-    VMEC++ share this.  One continuation from ``result.state`` at ``tcon0 =
-    1e-3`` for 2,000 iterations takes the largest ``|B|`` error against
-    Biot-Savart at ``s = 0.25`` on the Landreman-Paul QA coils from 1.4e-3 to
-    8.8e-5 (``mpol = 7``) and from 2.7e-4 to 4.0e-5 (``mpol = 8``), and on W7-X
-    from 6.0e-4 to 6.2e-5; see docs/howto/free-boundary-relaxation.md for the
-    study.  The force residual then sits near 1e-9 rather than ``ftol``, so the
-    result reports ``converged = False``; judge it by the field.
-
-    The weak-constraint continuation has a slowly growing mode: ``fsq`` can
-    bottom out after a few hundred iterations and then rise by orders of
-    magnitude (NCSX: 8e-11 at 590 iterations, 2e-7 at 2,000, where the error
-    is worse than before the relaxation).  When the final ``fsq`` is more than
-    a decade above the lowest one, the continuation is replayed (the solve is
-    deterministic and reuses the compiled lanes) and the state of the
-    lowest-``fsq`` iteration is returned; ``result.iterations`` is that
-    iteration and ``verbose`` output covers only the first pass.  A run that
-    ends within a decade of its minimum is returned as it stands.
-
-    Relax only when ``mpol`` and ``ntor`` resolve the LCFS and the coils: at
-    low resolution (CTH ``mpol = 5``, ``ntor = 4``) the continuation drifts
-    without improving the field.  ``tcon0 = 1e-2`` is slower to improve but
-    robust (no drift, neutral at low resolution); ``tcon0 = 0`` gains no more
-    and drifts in the poloidal angle.  Call it once on a converged state:
-    restarting it repeatedly with ``tcon0 = 0`` let ``fsq`` grow to 1e-4.
-    ``solve_kwargs`` go to :func:`solve_free_boundary`.
+    The ``m (m - 1)``-filtered spectral-condensation force (``tcon``, ``bcovar.f``)
+    has a normal part, so a converged free-boundary LCFS balances it as well as
+    the vacuum pressure and is not exactly a flux surface of the coils; VMEC2000
+    and VMEC++ share this.  This hot-restarts ``result.state`` at ``tcon0`` for
+    ``iterations`` iterations and returns the lowest-``fsq`` iterate (the weak
+    constraint has a slowly growing mode, so the final iterate can be far worse;
+    the continuation is replayed to the minimum when it ends a decade above it).
+    ``result.converged`` is then ``False``: judge the result by the field, not by
+    ``ftol``.  Opt-in; it needs ``mpol`` and ``ntor`` that resolve the coils
+    (docs/howto/free-boundary.md).  ``solve_kwargs`` go to :func:`solve_free_boundary`.
     """
     kwargs = dict(mgrid_path=mgrid_path, external_field=external_field,
                   initial_state=result.state, tcon0=float(tcon0),
                   error_on_no_convergence=False, **solve_kwargs)
     relaxed = solve_free_boundary(inp, max_iterations=int(iterations), **kwargs)
-    best = _drifted_iteration(relaxed)
-    if best >= int(relaxed.iterations):
+    history = np.asarray(relaxed.fsq_history, dtype=float)
+    if relaxed.converged or history.ndim != 2 or len(history) == 0:
+        return relaxed
+    fsq = np.nan_to_num(history[:, :3].sum(axis=1), nan=np.inf)
+    best = int(np.argmin(fsq)) + 1
+    if not fsq[-1] > 10.0 * fsq[best - 1]:
         return relaxed
     # ``max_iterations`` is a data field, so the replay reuses the compiled lanes.
-    kwargs["verbose"] = False
-    return solve_free_boundary(inp, max_iterations=best, **kwargs)
-
-
-def _drifted_iteration(result: SolveResult) -> int:
-    """The 1-based iteration of the lowest ``fsqr + fsqz + fsql`` once ``result`` has drifted.
-
-    ``result.iterations`` for a converged run, one with no finite history, or
-    one whose final ``fsq`` is within :data:`_RELAX_DRIFT` of its minimum.
-    """
-    history = np.asarray(result.fsq_history, dtype=float)
-    if result.converged or history.ndim != 2 or len(history) == 0:
-        return int(result.iterations)
-    fsq = history[:, :3].sum(axis=1)
-    fsq = np.where(np.isfinite(fsq), fsq, np.inf)
-    best = int(np.argmin(fsq))
-    if not np.isfinite(fsq[best]) or not fsq[-1] > _RELAX_DRIFT * fsq[best]:
-        return int(result.iterations)
-    return best + 1
+    return solve_free_boundary(inp, max_iterations=best, **{**kwargs, "verbose": False})
 
 
 def _phiedge_metric(metric: Any):

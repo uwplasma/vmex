@@ -912,18 +912,11 @@ def test_relax_free_boundary_constraint_returns_the_lowest_fsq_iterate(monkeypat
     assert calls[1]["tcon0"] == calls[0]["tcon0"]
 
 
-def test_relax_free_boundary_constraint_keeps_a_flat_trace(monkeypatch):
-    """A final ``fsq`` within a decade of the minimum is not replayed."""
-    calls = _fake_relaxation(monkeypatch, [1e-7, 1e-9, 5e-10, 8e-10, 3e-9])
+def test_relax_free_boundary_constraint_keeps_flat_converged_and_nan_traces(monkeypatch):
+    """Only a trace that ends a decade above its minimum is replayed."""
     result = dataclasses.make_dataclass("R", ["state"])(object())
-    out = FB.relax_free_boundary_constraint("deck", result, iterations=5)
-    assert len(calls) == 1 and out.iterations == 5
-
-
-def test_relax_free_boundary_constraint_keeps_a_converged_run(monkeypatch):
-    calls = _fake_relaxation(monkeypatch, [1e-7, 1e-12, 1e-9], converged=True)
-    result = dataclasses.make_dataclass("R", ["state"])(object())
-    out = FB.relax_free_boundary_constraint("deck", result, iterations=3)
-    assert len(calls) == 1 and not out.replayed
-    assert FB._drifted_iteration(types.SimpleNamespace(
-        converged=False, iterations=3, fsq_history=np.full((3, 6), np.nan))) == 3
+    for fsq, converged in (([1e-7, 1e-9, 5e-10, 8e-10, 3e-9], False),
+                           ([1e-7, 1e-12, 1e-9], True), ([np.nan] * 3, False)):
+        calls = _fake_relaxation(monkeypatch, fsq, converged=converged)
+        out = FB.relax_free_boundary_constraint("deck", result, iterations=len(fsq))
+        assert len(calls) == 1 and out.iterations == len(fsq) and not out.replayed
