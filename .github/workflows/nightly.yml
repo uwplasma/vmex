@@ -85,7 +85,7 @@ jobs:
           python -m pip install ".[coils,turbulence,freeb,neoclassical]" pytest pytest-cov \
             jax==0.10.1 jaxlib==0.10.1 scipy==1.16.0 solvax==0.27.0 equinox==0.13.3 \
             booz_xform_jax==0.4.3 virtual-casing-jax==0.0.9 \
-            essos==0.21.0 diffrax==0.7.2 neo-jax==1.0.6 gkx==2.5.0 dkx==2.8.0
+            essos==0.21.0 diffrax==0.7.2 neo-jax==1.0.6 gkx==2.6.0 dkx==2.8.0
       - name: Seed old dependencies, then install vmex[all] over them
         if: matrix.install == 'stale'
         run: |
@@ -153,6 +153,7 @@ jobs:
         run: |
           pytest -q tests/test_examples.py::test_free_boundary_essos_coils \
             tests/test_examples.py::test_free_boundary_phiedge \
+            tests/test_examples.py::test_free_boundary_relax_constraint \
             --vmex-report=test-report-coils.json
       # NEO_JAX is installed above and nowhere else, so this is the only job
       # that can run the effective-ripple example at all.  The test is marked
@@ -191,18 +192,32 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 3
       matrix:
         include:
           # polish-gn and run-options took 1 and 3 min as separate jobs.
           - name: full-polish-gn-run-options
             selector: full-polish-gn full-run-options
             jax: "0.11.1"
-          # 45-58 min serially against the 60-min cap (2026-10-12..14); two
-          # workers split its 36 tests, the longest of which is 7 min.
-          - name: full-free-boundary-adjoint
+          # 88 min of tests: 45-58 min serially against the 60-min cap
+          # (2026-10-12..14), then two xdist workers lost the runner at 30 min
+          # on 10-22 and 10-24 ("received a shutdown signal", exit 143, no
+          # timeout).  Four one-worker shards of about 25 min each.
+          - name: full-free-boundary-adjoint-1of4
             selector: full-free-boundary-adjoint
-            parallel: "-n 2"
+            shard: "1/4"
+            jax: "0.11.1"
+          - name: full-free-boundary-adjoint-2of4
+            selector: full-free-boundary-adjoint
+            shard: "2/4"
+            jax: "0.11.1"
+          - name: full-free-boundary-adjoint-3of4
+            selector: full-free-boundary-adjoint
+            shard: "3/4"
+            jax: "0.11.1"
+          - name: full-free-boundary-adjoint-4of4
+            selector: full-free-boundary-adjoint
+            shard: "4/4"
             jax: "0.11.1"
     steps:
       - uses: actions/checkout@v7.0.1
@@ -227,13 +242,20 @@ jobs:
         env:
           RUN_FULL: "1"
           JAX_PLATFORMS: cpu
+          SHARD: ${{ matrix.shard || '' }}
         run: |
           python -m pip freeze
           FILES=""
           for LANE in ${{ matrix.selector }}; do
             FILES="$FILES $(python tools/test_manifest.py select "$LANE")"
           done
-          pytest -q ${{ matrix.parallel }} $FILES --durations=20 --vmex-report=nonlinear-report.json
+          if [ -n "$SHARD" ]; then
+            mapfile -t NODES < <(pytest --collect-only -q -p no:warnings $FILES | grep '::' \
+              | awk -v i="${SHARD%/*}" -v n="${SHARD#*/}" 'NR % n == i % n')
+            (( ${#NODES[@]} )) || { echo "no nodes selected"; exit 1; }
+            FILES=""
+          fi
+          pytest -q ${{ matrix.parallel }} "${NODES[@]}" $FILES --durations=20 --vmex-report=nonlinear-report.json
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
