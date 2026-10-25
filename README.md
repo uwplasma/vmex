@@ -538,12 +538,21 @@ starting from the VMEX ns = 65 field.
   wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
   mostly XLA compilation, which a repeated solve in one process skips. In the older
   [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
-  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On one RTX A4000 (JAX 0.11.2,
-  warm, shared node) against 8 CPU cores of a loaded 36-core host (load about 80), the GPU took
-  1.2x (`LandremanPaul2021_QA_lowres`, 3.1 s vs 3.7 s), 1.5x (`nfp2_QA_highres`, 1.0 s vs 1.6 s)
-  and 2.8x less time (`serial2500170_surface_points_mpol12_ntor12`, 20 s vs 55 s); cold, compilation
-  dominates both. Idle-CPU baselines are not yet measured; a loaded M-series laptop (0.7-1.4 s) was faster
-  than the GPU (3.1 s) on `LandremanPaul2021_QA_lowres`.
+  VMEC++ was faster than VMEX on the largest 3-D decks it completed.
+
+  Warm solves of the same decks (ftol 1e-12; ns, mpol=ntor
+  = 50, 8; 151, 5; 45, 7), in seconds:
+
+  | deck | M3 Max, 10 P-cores (low load) | RTX A4000 | 8 cores of a 36-core Linux host (load about 80) |
+  |---|---|---|---|
+  | `LandremanPaul2021_QA_lowres` | 0.6 | 3.1 | 3.7 |
+  | `nfp2_QA_highres` | 0.28 | 1.0 | 1.6 |
+  | `serial2500170_surface_points_mpol12_ntor12` | 7.6 | 20 | 55 |
+
+  The GPU beats a busy 8-core Linux CPU by 1.2-2.8x but is 2.6-5x slower than the laptop CPU. Cold
+  (first solve), compilation dominates: 25-90 s on the GPU, 4-13 s on the laptop with its
+  persistent cache. The GPU runs used JAX 0.11.2 on a shared node; the laptop JAX 0.10.2. An
+  idle Linux server CPU is not yet measured.
 - **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
   value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
