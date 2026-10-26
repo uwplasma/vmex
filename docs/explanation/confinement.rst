@@ -778,7 +778,7 @@ Axisymmetry sends
 tests anchor together with the QA-versus-unoptimized ordering.
 
 **The hard value is not a gradient objective.** The discretized
-:class:`~vmex.core.gammac.GammaC` gradient is exact but not convergent:
+:class:`~vmex.core.gammac.GammaC` sampled gradient can change sign under refinement:
 hard well detection and hard branch selection make the discretized
 :math:`\Gamma_c` piecewise in the boundary coefficients with
 grid-dependent breakpoints, and the measured li383 refinement ladder flips
@@ -792,14 +792,13 @@ cancel simultaneously (a superbanana corner) contributes
 arbitrary sign.  :class:`~vmex.core.gammac.GammaCSmooth` regularizes
 exactly these two structures on the same wells and bounce quadrature — a
 kernel floor :math:`1/\sqrt{\max(1-\lambda B, 0) + \delta}` with
-:math:`\delta` a fixed, stop-gradiented fraction of the trapped range
+:math:`\delta` a field-dependent fraction of the trapped range with live derivatives
 (which also removes the birth/death jump of the well-connection graph of
 Ochs 2025, since a newborn well's floored bounce time starts at zero
 rather than the finite oscillator period), and a per-well corner floor
 that compares the drift cancellation against the well's own
-absolute-value bounce integrals.  Its boundary derivative holds one sign
-with bounded magnitude spread on the same ladder; its value sits below
-the hard one (the smoothing deliberately cannot see structure below
-:math:`\delta` — the near-omnigenous QA ripple most of all) and anneals
-toward it as ``temperature`` decreases with a correspondingly finer
-budget.  Optimize the surrogate, report the hard value.
+absolute-value bounce integrals. Both classes freeze normalized pitch-grid
+shape derivatives, so even the smooth gradient is approximate. Check actual
+forward descent and sampling refinement for each configuration. The surrogate
+can underestimate shallow ripple wells; anneal ``temperature`` with a finer
+budget and report the independent hard value.
