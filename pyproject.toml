@@ -107,7 +107,7 @@ freeb = [
 # eigen-objectives in forward mode (the implicit least-squares Jacobian);
 # 2.5.0 is the release `vmex --turbulence` is built and timed against.
 turbulence = [
-  "gkx>=2.5.0",
+  "gkx>=2.6.0",
   # gkx's own jax floor.
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
