@@ -1637,3 +1637,25 @@ def test_vmex_mrx_comparison_example(tmp_path):
     assert "force residual" in out and "|B| difference" in out
     figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
     assert figure.stat().st_size > 10_000
+
+
+def test_pwo_physical_rejection_preserves_accepted_checkpoint(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    run = example["run_physical_step"]
+    monkeypatch.chdir(tmp_path)
+    for name in ("input.accepted", "wout_accepted.nc"):
+        (tmp_path / name).write_text("previous accepted result")
+    def fail(*args, **kwargs):
+        raise RuntimeError("Unconverged equilibrium")
+    monkeypatch.setattr(example["opt"], "VmecProblem", SimpleNamespace(from_loss=fail))
+    monkeypatch.setitem(run.__globals__, "ci_smoke", False)
+    with pytest.raises(SystemExit, match="1"):
+        run(None, None, None, output_name="accepted", seed_route="qi")
+    result = json.loads((tmp_path / "accepted_summary.json").read_text())
+    assert not result["accepted"] and result["rejection"] == "Unconverged equilibrium"
+    assert result["search_evaluations"] == result["refinement_evaluations"] == 0
+    for name in ("input.accepted", "wout_accepted.nc"):
+        assert (tmp_path / name).read_text() == "previous accepted result"

@@ -10,6 +10,7 @@ from vmex.core.pwo import (
     canonical_pwo_field,
     canonical_pwo_residual_from_boozer,
     mapped_pwo_residual_from_boozer,
+    physical_pwo_action_from_boozer,
     squeezed_pwo_coordinates,
 )
 
@@ -367,3 +368,106 @@ def test_overlapping_lattice_translates_are_rejected():
     out=jax.jit(lambda t:canonical_pwo_field(.2,.3,**{**params,'t1':t}))(jnp.array(-2.))
     assert out['lattice_margin']<0
     assert not out['valid']
+
+
+def _action_spectrum(*, broken=False):
+    """A nonconstant QS field, optionally with a second independent helicity."""
+    return dict(bmnc_b=np.array([[1.5, .2, 0.]]),
+                bmns_b=np.array([[0., 0., .04 if broken else 0.]]),
+                xm_b=np.array([0, 1, 1]), xn_b=np.array([0, 0, 1]),
+                iota_b=np.array([.7]), G_b=np.array([2.]),
+                I_b=np.array([.3]), nfp=1)
+
+
+@pytest.mark.parametrize("current_sign", [-1., 1.])
+def test_physical_action_qs_limit_and_boozer_line_element(current_sign):
+    from scipy.integrate import quad
+
+    spectrum = _action_spectrum()
+    spectrum.update(G_b=current_sign*spectrum["G_b"], I_b=current_sign*spectrum["I_b"])
+    result = physical_pwo_action_from_boozer(
+        **spectrum, levels=[1.5], alphas=[.2, .5, .8], check_roots=True)
+    # Integrate in the QS angle independently of the root/coordinate mapping.
+    # Both legs give 2*|G+iota*I|, and dtheta/dzeta=iota.
+    integral = quad(lambda theta: np.sqrt(1-(1.5+.2*np.cos(theta))/1.5)
+                    /(1.5+.2*np.cos(theta)), np.pi/2, 3*np.pi/2,
+                    epsabs=1e-11, epsrel=1e-11)[0]
+    expected = 2*abs(2.+.7*.3)/.7*integral
+    assert result["counts"] == [[1], [1], [1]]
+    np.testing.assert_allclose([row["J"] for row in result["rows"]], expected, rtol=2e-9)
+    np.testing.assert_allclose([row["dJ"] for row in result["rows"]], 0., atol=2e-10)
+    assert result["components"]["raw_Jalpha2"] < 1e-19
+    assert len(result["root_checks"]) == 3
+    assert result["family_invariance_qualified"] is False
+
+
+def test_physical_action_broken_qs_derivative_matches_moving_bounce_difference():
+    spectrum = _action_spectrum(broken=True)
+    alpha, step = .4, 2e-5
+    options = dict(levels=[1.48, 1.55], alphas=[alpha])
+    result = physical_pwo_action_from_boozer(**spectrum, **options)
+    plus = physical_pwo_action_from_boozer(**spectrum, **dict(options, alphas=[alpha+step]))
+    minus = physical_pwo_action_from_boozer(**spectrum, **dict(options, alphas=[alpha-step]))
+    assert result["counts"] == plus["counts"] == minus["counts"] == [[1, 1]]
+    derivative = np.array([row["dJ"] for row in result["rows"]])
+    finite = (np.array([row["J"] for row in plus["rows"]])
+              - np.array([row["J"] for row in minus["rows"]]))/(2*step)
+    assert np.isfinite(derivative).all() and np.linalg.norm(derivative) > .01
+    np.testing.assert_allclose(derivative, finite, rtol=2e-6, atol=2e-8)
+    assert result["components"]["raw_Jalpha2"] == pytest.approx(np.mean(derivative**2))
+    matched = physical_pwo_action_from_boozer(**spectrum, **options, reference=result)
+    assert len(matched["matches"]) == 2
+
+
+def test_physical_action_stationary_roots_resolve_unsampled_narrow_barrier():
+    shift, level = .0023, 1.09999999
+    spectrum = dict(bmnc_b=[1., .1*np.cos(shift)],
+                    bmns_b=[0., -.1*np.sin(shift)], xm_b=[0, 0], xn_b=[0, 1],
+                    iota_b=.7, G_b=1., I_b=0., nfp=1)
+    grid = np.linspace(-8*np.pi, 16*np.pi, 12*1024+1)
+    sampled = 1.+.1*np.cos(grid-shift)
+    assert np.max(sampled) < level
+    assert not np.any((sampled[:-1]-level)*(sampled[1:]-level) < 0)
+    result = physical_pwo_action_from_boozer(
+        **spectrum, levels=[level], alphas=[0.], check_roots=True)
+    assert result["counts"] == [[1]]
+    row = result["rows"][0]
+    offset = np.arccos((level-1.)/.1)
+    np.testing.assert_allclose([row["left"], row["right"]],
+                               [shift+offset, shift+2*np.pi-offset], atol=2e-10)
+    assert np.isfinite(row["J"]) and row["J"] > 0.
+    assert row["dJ"] == 0.
+    assert result["root_checks"][0]["roots"] == 24
+
+
+@pytest.mark.parametrize("invalid", [dict(levels=[]), dict(levels=[np.nan]),
+    dict(alphas=[]), dict(G_b=[1., 2.]), dict(bmnc_b=[[1.5, .2, 0.], [1.5, .2, 0.]]),
+    dict(levels=[1.7]), dict(xn_b=[0, 0, .5]), dict(G_b=0., I_b=0.),
+    dict(bmnc_b=[[-1.5, .2, 0.]]), dict(levels=[2.])])
+def test_physical_action_rejects_invalid_or_tangent_inputs(invalid):
+    with pytest.raises(ValueError):
+        physical_pwo_action_from_boozer(
+            **(dict(_action_spectrum(), levels=[1.5], alphas=[.4]) | invalid))
+
+
+@pytest.mark.parametrize("mismatch", ["grid", "counts", "critical", "rows", "endpoints"])
+def test_physical_action_rejects_mismatched_reference(mismatch):
+    from copy import deepcopy
+
+    spectrum = _action_spectrum()
+    options = dict(levels=[1.5], alphas=[.4])
+    reference = deepcopy(physical_pwo_action_from_boozer(**spectrum, **options))
+    if mismatch == "grid":
+        reference["alphas"] = [.41]
+    elif mismatch == "counts":
+        reference["counts"] = [[2]]
+    elif mismatch == "critical":
+        reference["critical_census"][0]["count"] += 1
+    elif mismatch == "rows":
+        reference["rows"] = []
+    else:
+        # Preserve well counts while shifting both roots by >20% of the width.
+        spectrum["bmnc_b"][0, 1] = .2*np.cos(1.)
+        spectrum["bmns_b"][0, 1] = -.2*np.sin(1.)
+    with pytest.raises(ValueError):
+        physical_pwo_action_from_boozer(**spectrum, **options, reference=reference, match_critical_census=True)

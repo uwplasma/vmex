@@ -24,7 +24,7 @@ from .omnigenity import boozer_spectrum_state
 
 __all__ = ["canonical_pwo_field", "squeezed_pwo_coordinates",
            "canonical_pwo_residual_from_boozer", "mapped_pwo_residual_from_boozer",
-           "CanonicalPwOResidual", "MappedPwOResidual"]
+           "physical_pwo_action_from_boozer", "CanonicalPwOResidual", "MappedPwOResidual"]
 
 
 def _require(condition, message):
@@ -273,6 +273,141 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
                 "eta_fraction": 1-eta_min/jnp.pi,
                 "mapped_area_fraction": jnp.mean(coordinates["jacobian"], axis=(1, 2))*(2*jnp.pi-2*eta_min)*nfp/(2*jnp.pi)})
     return out
+
+
+def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
+        nfp, levels, alphas, bmns_b=None, reference=None, points_per_period=1024,
+        check_roots=False, match_critical_census=False):
+    """Host NumPy/SciPy fixed-alpha physical action and action-slope diagnostic.
+
+    Accept one surface, coefficient vectors or rows, scalar iota/G/I, physical
+    Tesla reflecting levels, and alpha=theta-iota*zeta in radians. Toroidal
+    modes include NFP. J=2|G+iota*I| integral sqrt(1-B/level)/B dzeta is in m;
+    dJ/dalpha is in m/rad. Components average squared slopes per well, then
+    equally across pitches; callers must freeze any normalization/weights.
+    Search [-4,8] field periods, selecting left bounces in [0,1) period.
+    Stationary points precede bounce isolation to retain narrow barriers.
+    Finite sign-change scans (optionally checked at half resolution) do not
+    prove exhaustive root isolation or within-family pwO invariance. This
+    forward diagnostic is not JAX differentiable. Reference matching requires
+    identical grids/counts and overlapping wells with endpoint shifts <20%.
+    """
+    from scipy.integrate import quad
+    from scipy.optimize import brentq, linear_sum_assignment
+
+    _integer(nfp, 1, "nfp"); _integer(points_per_period, 8, "points_per_period")
+    c, m, n = (np.asarray(v, dtype=float) for v in (bmnc_b, xm_b, xn_b))
+    if c.ndim == 2 and c.shape[0] == 1:
+        c = c[0]
+    s = np.zeros_like(c) if bmns_b is None else np.asarray(bmns_b, dtype=float)
+    if s.ndim == 2 and s.shape[0] == 1:
+        s = s[0]
+    if c.ndim != 1 or not c.size or any(v.shape != c.shape for v in (s, m, n)):
+        raise ValueError("one surface needs coefficient vectors or rows and matching mode vectors")
+    scalars = [np.asarray(v, dtype=float) for v in (iota_b, G_b, I_b)]
+    if any(v.shape not in ((), (1,)) for v in scalars):
+        raise ValueError("iota_b, G_b and I_b must each contain one surface value")
+    iota, current_G, current_I = (float(v.reshape(-1)[0]) for v in scalars)
+    levels, alphas = np.asarray(levels, dtype=float), np.asarray(alphas, dtype=float)
+    if any(v.ndim != 1 or not v.size or not np.all(np.isfinite(v)) for v in (levels, alphas)) or np.any(levels <= 0):
+        raise ValueError("levels and alphas must be finite nonempty vectors with positive levels")
+    factor = abs(current_G+iota*current_I); freq = m*iota-n; period = 2*np.pi/nfp
+    if (not all(np.all(np.isfinite(v)) for v in (c, s, m, n, *scalars, freq))
+            or np.any(m != np.round(m)) or np.any(n/nfp != np.round(n/nfp))
+            or not np.isfinite(factor) or factor <= 0):
+        raise ValueError("finite periodic spectra and nonzero |G+iota*I| are required")
+    def field(z, alpha):
+        phase = m*alpha+freq*z; co, si = np.cos(phase), np.sin(phase)
+        return float(c@co+s@si), float((-m*c)@si+(m*s)@co), float((-freq*c)@si+(freq*s)@co)
+    def root_sets(alpha, ppp):
+        z = np.linspace(-4*period, 8*period, 12*ppp+1); sample = np.zeros_like(z)
+        for k in range(0, len(c), 64):
+            phase = m[k:k+64, None]*alpha+freq[k:k+64, None]*z
+            sample += (-freq[k:k+64]*c[k:k+64])@np.sin(phase)+(freq[k:k+64]*s[k:k+64])@np.cos(phase)
+        idx = np.flatnonzero(sample[:-1]*sample[1:] < 0)
+        critical = np.unique([brentq(lambda x: field(x, alpha)[2], z[j], z[j+1], xtol=1e-13) for j in idx]+z[sample == 0].tolist())
+        boundaries = np.unique(np.r_[z[0], critical, z[-1]])
+        B = np.asarray([field(x, alpha)[0] for x in boundaries])
+        if not np.all(np.isfinite(B)) or np.any(B <= 0):
+            raise ValueError("B must remain finite and positive along the searched field line")
+        result = []
+        for level in levels:
+            if np.any(abs(B[1:-1]-level) < 1e-11):
+                raise ValueError("Reflecting level near a stationary-point tangency")
+            idx = np.flatnonzero((B[:-1]-level)*(B[1:]-level) < 0)
+            result.append(np.unique([brentq(lambda x: field(x, alpha)[0]-level, boundaries[j], boundaries[j+1], xtol=1e-13) for j in idx]+boundaries[B == level].tolist()))
+        return result, critical
+    def integral(alpha, left, right, level, derivative):
+        mid, width = .5*(left+right), .5*(right-left)
+        def fun(t):
+            B, Ba, _ = field(mid+width*np.sin(t), alpha); par = 1-B/level
+            if B <= 0 or par <= 0:
+                raise ValueError("Nonpositive interior field or parallel energy")
+            value = -Ba*(1-B/(2*level))/(B*B*np.sqrt(par)) if derivative else np.sqrt(par)/B
+            return 2*factor*value*width*np.cos(t)
+        out = quad(fun, -np.pi/2, np.pi/2, epsabs=1e-9, epsrel=1e-8, limit=150, full_output=1)
+        if len(out) > 3:
+            raise ValueError(out[3])
+        return out[:2]
+    rows, checks, critical_census = [], [], []
+    for ai, alpha in enumerate(alphas):
+        fine, critical = root_sets(alpha, points_per_period)
+        critical_census.append(dict(alpha_index=ai, count=len(critical), positions_rad=critical.tolist()))
+        if check_roots:
+            coarse, oldcritical = root_sets(alpha, points_per_period//2)
+            if len(oldcritical) != len(critical) or np.max(abs(oldcritical-critical), initial=0) > 1e-9:
+                raise ValueError(f"Critical-point refinement disagreement at {ai}")
+            critical_census[-1]["coarse_fine_maximum_discrepancy_rad"] = float(np.max(abs(oldcritical-critical), initial=0))
+            for ip, (a, b) in enumerate(zip(coarse, fine)):
+                if len(a) != len(b) or np.max(abs(a-b), initial=0) > 1e-9:
+                    raise ValueError(f"Root refinement disagreement at {(ai, ip)}")
+                checks.append(dict(alpha_index=ai, pitch_index=ip, roots=len(b), maximum_discrepancy_rad=float(np.max(abs(a-b), initial=0))))
+        for ip, (level, roots) in enumerate(zip(levels, fine)):
+            for j, left in enumerate(roots):
+                if not 0 <= left < period:
+                    continue
+                if j+1 == len(roots):
+                    raise ValueError(f"Selected left endpoint without full right bounce: {(ai, ip)}")
+                right = roots[j+1]
+                if field(.5*(left+right), alpha)[0] >= level:
+                    continue
+                if min(abs(field(z, alpha)[2]) for z in (left, right)) <= 1e-8:
+                    raise ValueError("Marginal bounce root")
+                J, Je = integral(alpha, left, right, level, False)
+                dJ, de = integral(alpha, left, right, level, True)
+                if not np.isfinite(J+dJ+Je+de) or J <= 0:
+                    raise ValueError("Invalid action or derivative")
+                rows.append(dict(alpha_index=ai, pitch_index=ip, left=left, right=right, J=J, dJ=dJ, J_error=Je, dJ_error=de))
+    counts = [[sum(r["alpha_index"] == ai and r["pitch_index"] == ip for r in rows) for ip in range(len(levels))] for ai in range(len(alphas))]
+    matches = []
+    if reference is not None:
+        if reference["levels"] != levels.tolist() or reference["alphas"] != alphas.tolist():
+            raise ValueError("Reference grid differs")
+        if match_critical_census and [r["count"] for r in reference["critical_census"]] != [r["count"] for r in critical_census]:
+            raise ValueError("Candidate stationary-point counts differ")
+        if reference["counts"] != counts:
+            raise ValueError("Candidate alpha/pitch well counts differ")
+        for ai in range(len(alphas)):
+            for ip in range(len(levels)):
+                aa, bb = ([r for r in rr if (r["alpha_index"], r["pitch_index"]) == (ai, ip)] for rr in (reference["rows"], rows))
+                if len(aa) != len(bb):
+                    raise ValueError("Reference rows disagree with well counts")
+                if not aa:
+                    continue
+                cost = np.array([[max(abs(x[k]-y[k]) for k in ("left", "right"))/min(x["right"]-x["left"], y["right"]-y["left"]) if min(x["right"], y["right"]) > max(x["left"], y["left"]) else 1e6 for y in bb] for x in aa])
+                for i, j in zip(*linear_sum_assignment(cost)):
+                    if cost[i, j] >= .2:
+                        raise ValueError(f"Unmatched candidate well at {(ai, ip)}")
+                    matches.append(dict(alpha_index=ai, pitch_index=ip, maximum_relative_endpoint_shift=float(cost[i, j])))
+    per_pitch = []
+    for ip in range(len(levels)):
+        rr = [r for r in rows if r["pitch_index"] == ip]
+        if not rr:
+            raise ValueError(f"No complete wells at pitch {ip}")
+        per_pitch.append(dict(pitch_index=ip, wells=len(rr), raw_Jalpha2=float(np.mean([r["dJ"]**2 for r in rr])), relative_Jalpha2=float(np.mean([(r["dJ"]/r["J"])**2 for r in rr]))))
+    return dict(levels=levels.tolist(), alphas=alphas.tolist(), rows=rows, counts=counts, per_pitch=per_pitch,
+                components={k: float(np.mean([p[k] for p in per_pitch])) for k in ("raw_Jalpha2", "relative_Jalpha2")},
+                root_checks=checks, critical_census=critical_census, matches=matches, family_invariance_qualified=False)
 
 
 class _PwOResidual:
