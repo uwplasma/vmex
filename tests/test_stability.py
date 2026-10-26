@@ -90,7 +90,7 @@ def lasym_finite_beta_eq():
 
 def test_zero_pressure_case_is_ballooning_stable(vacuum_eq):
     lam = np.asarray(stab.ballooning_lambda(vacuum_eq.state, vacuum_eq.runtime, **FAST))
-    assert lam.shape == (3, 4, 1)  # default surfaces x alphas x zeta0s
+    assert lam.shape == (3, 8, 1)  # default surfaces x alphas x zeta0s
     assert np.all(np.isfinite(lam))
     assert np.all(lam < 0.0)
 
@@ -580,7 +580,7 @@ def test_reductions_hard_and_smooth_max(highbeta_eq):
     assert hard == pytest.approx(np.max(lam), rel=1e-12)
     temperature = 0.01
     soft = float(stab.ballooning_growth_rate(highbeta_eq.state, highbeta_eq.runtime,
-                                             temperature=temperature, **FAST))
+                                             reduction="softmax", temperature=temperature, **FAST))
     assert np.max(lam) <= soft <= np.max(lam) + temperature * np.log(lam.size) + 1e-12
     with pytest.raises(ValueError):
         stab.ballooning_growth_rate(highbeta_eq.state, highbeta_eq.runtime,
@@ -594,7 +594,7 @@ def test_grad_wrt_pressure_scale_matches_finite_differences(highbeta_eq):
     def growth(scale):
         setup = dataclasses.replace(rt.setup, mass=rt.setup.mass * scale)
         return stab.ballooning_growth_rate(state, dataclasses.replace(rt, setup=setup),
-                                           temperature=0.01, **FAST)
+                                           reduction="softmax", temperature=0.01, **FAST)
 
     value, grad = jax.value_and_grad(growth)(1.0)
     assert np.isfinite(float(value)) and np.isfinite(float(grad))
@@ -718,8 +718,8 @@ def test_lasym_zero_sine_spectra_reproduce_the_symmetric_lane(highbeta_eq):
     alphas = jnp.asarray(np.linspace(0.0, np.pi, 4))
     zeta0s = jnp.asarray([0.0])
     for j in (4, 8):
-        symmetric = np.asarray(stab._surface_lambda(ctx, j, alphas, zeta0s, 81, 3.0))
-        asymmetric = np.asarray(stab._surface_lambda(lasym_ctx, j, alphas, zeta0s, 81, 3.0))
+        symmetric = np.asarray(stab._surface_lambda(ctx, j / (ctx["ns"] - 1), alphas, zeta0s, 81, 3.0, 4, True))
+        asymmetric = np.asarray(stab._surface_lambda(lasym_ctx, j / (ctx["ns"] - 1), alphas, zeta0s, 81, 3.0, 4, True))
         assert np.max(np.abs(symmetric)) > 1e-3   # not a degenerate comparison
         np.testing.assert_array_equal(asymmetric, symmetric)
 
@@ -751,7 +751,7 @@ def test_lasym_ballooning_is_finite_and_agrees_with_mercier(lasym_finite_beta_eq
     """Real asymmetric physics: stable deck, stable sign, asymmetry visible."""
     eq = lasym_finite_beta_eq
     lam = np.asarray(stab.ballooning_lambda(eq.state, eq.runtime, **FAST))
-    assert lam.shape == (3, 4, 1)
+    assert lam.shape == (3, 8, 1)
     assert np.all(np.isfinite(lam))
     assert np.all(lam < 0.0)
     assert np.all(np.asarray(eq.wout.DMerc)[2:-1] > 0.0)   # Mercier agrees
@@ -791,7 +791,7 @@ def test_lasym_growth_rate_gradient_matches_finite_differences(lasym_finite_beta
     def growth(scale):
         setup = dataclasses.replace(rt.setup, mass=rt.setup.mass * scale)
         return stab.ballooning_growth_rate(state, dataclasses.replace(rt, setup=setup),
-                                           temperature=0.01, **FAST)
+                                           reduction="softmax", temperature=0.01, **FAST)
 
     value, grad = jax.value_and_grad(growth)(1.0)
     step = 1e-4
@@ -884,7 +884,7 @@ def test_ballooning_matches_cobravmec(tmp_path):
     nturns = (2 * k_w - 1) / (2 * int(eq.wout.nfp))
     lam = np.asarray(stab.ballooning_lambda(
         eq.state, eq.runtime, s_indices=rows, alphas=[np.deg2rad(alpha_deg)],
-        zeta0s=[0.0], npoints=769, nturns=nturns)).ravel()
+        zeta0s=[0.0], npoints=769, nturns=nturns, radial_order=2)).ravel()
 
     ctx = stab._ballooning_context(eq.state, eq.runtime)
     r0 = 0.5 * (float(eq.wout.rmax_surf) + float(eq.wout.rmin_surf))
@@ -907,15 +907,17 @@ def test_ballooning_matches_cobravmec(tmp_path):
 def test_ballooning_matches_frozen_cobravmec_on_3d_qa_seed():
     """Three-dimensional anchor: the ballooning example's seed against COBRAVMEC.
 
-    The Solovev parity above is axisymmetric.  This is the stellarator case the
-    QA ballooning example optimizes: ``input.nfp2_QA_finite_beta`` at ns = 71,
-    full-mesh row 59 (s = 0.843), zeta0 = 0.  COBRAVMEC on the vmex wout
-    (``alpha_st`` = 0.001 deg, ``zeta_k`` = 0, row 60 one-based) returns the
-    signed growth rate 0.40616 at ``k_w`` = 4 and 0.40602 at ``k_w`` = 8, so
-    its domain is converged; the conversion of
+    ``input.nfp2_QA_finite_beta`` at ns = 71.  COBRAVMEC (STELLOPT build) on
+    the vmex wout, ``k_w`` = 8, ``zeta_k`` = 0, returned the signed growth
+    rates below on 2026-10-15 (``k_w`` = 4 agrees to 3e-4 on the alpha = 0
+    rows, so its domain is converged); the conversion of
     :func:`test_ballooning_matches_cobravmec` (factor 3.2030e-2 on this wout)
-    makes that lambda = 5.284e-3.  The alpha = pi/2 line is stable in both
-    (COBRAVMEC: -9.1e-5).  Frozen here so the gate runs without the binary.
+    turns them into lambda.  COBRA differentiates radially with three-point
+    differences, so the parity runs at ``radial_order=2`` and agrees within
+    1.7 %.  The default fourth-order stencil reads 2-6 % higher, and that is
+    the more accurate number: extrapolating the three-point result from
+    stencils hs and 2 hs to hs -> 0 reproduces it to 0.3 %.  Frozen here so
+    the gate runs without the binary.
     """
     inp = dataclasses.replace(
         VmecInput.from_file(DATA_DIR / "input.nfp2_QA_finite_beta"),
@@ -923,11 +925,45 @@ def test_ballooning_matches_frozen_cobravmec_on_3d_qa_seed():
         niter_array=np.array([20000]))
     eq = opt.solve_equilibrium(inp, verbose=False)
     assert eq.result.converged
-    lam = np.asarray(stab.ballooning_lambda(
-        eq.state, eq.runtime, s_indices=[59], alphas=[0.0, 0.5 * np.pi],
-        zeta0s=[0.0], npoints=801, nturns=3.75))[0, :, 0]
-    np.testing.assert_allclose(lam[0], 5.284e-3, rtol=1e-2)
-    assert lam[1] < 0.0
+    factor = 3.2030e-2
+    cobra = {(59, 0.0): 0.406020, (63, 0.0): 0.623218, (66, 0.0): 0.526767,
+             (59, 45.0): 0.108173}
+    for (row, alpha), grate in cobra.items():
+        line = dict(s_indices=[row], alphas=[np.deg2rad(alpha)], npoints=1281, nturns=5.0)
+        second = float(stab.ballooning_lambda(eq.state, eq.runtime, radial_order=2, **line)[0, 0, 0])
+        fourth = float(stab.ballooning_lambda(eq.state, eq.runtime, **line)[0, 0, 0])
+        assert second == pytest.approx(grate**2 * factor, rel=2e-2)
+        assert 1.0 < fourth / second < 1.07
+    # alpha = pi/2 on row 59 is stable in both (COBRAVMEC: -3.6e-2).
+    assert float(stab.ballooning_lambda(
+        eq.state, eq.runtime, s_indices=[59], alphas=[0.5 * np.pi])[0, 0, 0]) < 0.0
+
+
+def test_ballooning_numerics_converge_faster(highbeta_eq):
+    """Richardson in the field-line step and exact-s radial evaluation.
+
+    The three-point eigenvalue error is O(h^2) and the extrapolation from a
+    grid and its every-other-point subgrid is O(h^4) (COBRA does the same,
+    Sanchez et al. 2000): on this deck the raw error falls 4.0x per halving
+    and the extrapolated one 16x, so at 321 points it is 50x smaller.
+    A surface given by ``s`` equals the same surface given by its index.
+    """
+    state, rt = highbeta_eq.state, highbeta_eq.runtime
+    line = dict(s_indices=[6], alphas=[0.0], nturns=3.0)
+    ref = float(stab.ballooning_lambda(state, rt, npoints=1281, **line)[0, 0, 0])
+    rich = float(stab.ballooning_lambda(state, rt, npoints=161, **line)[0, 0, 0])
+    fine = float(stab.ballooning_lambda(state, rt, npoints=321, **line)[0, 0, 0])
+    raw = float(stab.ballooning_lambda(state, rt, npoints=321, richardson=False, **line)[0, 0, 0])
+    assert abs(fine - ref) < 0.1 * abs(raw - ref)
+    assert abs(rich - ref) > 8.0 * abs(fine - ref)
+    ns = int(rt.setup.s_full.shape[0])
+    by_s = stab.ballooning_lambda(state, rt, surfaces=[6 / (ns - 1)], alphas=[0.0],
+                                  npoints=161, nturns=3.0)
+    assert float(by_s[0, 0, 0]) == pytest.approx(rich, rel=1e-10)
+    rows = stab.ballooning_residual(state, rt, threshold=0.5 * rich, **line, npoints=161)
+    assert float(rows[0]) == pytest.approx(0.5 * rich, rel=1e-10)
+    with pytest.raises(ValueError, match="odd"):
+        stab.ballooning_lambda(state, rt, npoints=160, **line)
 
 
 @pytest.mark.parametrize('n', [2, 4, 31])

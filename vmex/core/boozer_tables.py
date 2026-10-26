@@ -229,7 +229,10 @@ def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict
         b = project(mirror(phys_row(even, odd, j), angular_parity), coefficient_parity)
         m_even = jnp.asarray(xm % 2 == 0)
         interp_even = 0.5 * (a + b)
-        interp_odd = 0.5 * (a / jnp.maximum(sqrt_s[j - 1], 1e-30) + b / sqrt_s[j]) * jnp.sqrt(s_half_j)
+        # booz_xform divides the axis row by 1, not sqrt(0): odd-m axis
+        # entries are zero up to round-off, which 1e-30 would amplify.
+        axis_safe = jnp.where(sqrt_s[j - 1] > 0, sqrt_s[j - 1], 1.0)
+        interp_odd = 0.5 * (a / axis_safe + b / sqrt_s[j]) * jnp.sqrt(s_half_j)
         return jnp.where(m_even, interp_even, interp_odd)
 
     rmnc = spectral_half(geometry.R_even, geometry.R_odd, "even", "cos")

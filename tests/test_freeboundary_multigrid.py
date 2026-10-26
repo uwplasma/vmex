@@ -28,6 +28,16 @@ from vmex.core.solver import SpectralState, resolution_from_input  # noqa: E402
 REPO = Path(__file__).resolve().parents[1]
 DECK = REPO / "examples" / "data" / "input.cth_like_free_bdy_lasym_small"
 MGRID = REPO / "examples" / "data" / "mgrid_cth_like_lasym_small.nc"
+
+
+def _driver():
+    """The benchmark driver ``tools/run_freeboundary_multigrid.py``."""
+    import sys
+
+    sys.path.insert(0, str(REPO / "tools"))
+    import run_freeboundary_multigrid
+
+    return run_freeboundary_multigrid
 CONV_DECK = REPO / "examples" / "data" / "input.cth_like_free_bdy"
 CONV_MGRID = REPO / "examples" / "data" / "mgrid_cth_like.nc"
 CONV_WOUT = REPO / "examples" / "data" / "single_grid" / "wout_cth_like_free_bdy.nc"
@@ -192,7 +202,7 @@ def test_initial_bad_jacobian_restarts_free_ladder_through_ns3(
 
 
 def test_vmec2000_niter_exhaustion_is_not_converged() -> None:
-    from benchmarks.run_freeboundary_multigrid import _vmec_converged
+    _vmec_converged = _driver()._vmec_converged
 
     stdout = """\
  Try increasing NITER or PRE_NITER if the preconditioner is on.
@@ -372,7 +382,7 @@ def test_converged_multigrid_final_state_matches_vmec2000_wout() -> None:
     if not CONV_MGRID.exists() or not CONV_WOUT.exists():
         pytest.skip("converged CTH mgrid/wout assets unavailable")
     from vmex.core.wout import read_wout
-    from benchmarks.run_freeboundary_multigrid import _stage_iterations
+    _stage_iterations = _driver()._stage_iterations
 
     inp = VmecInput.from_file(CONV_DECK)
     lines: list[str] = []
@@ -412,7 +422,7 @@ def test_converged_multigrid_final_state_matches_vmec2000_wout() -> None:
     # This packaged reference is ns=151, while the fast CI ladder ends at
     # ns=15; compare the common boundary and interpolated iota at the expected
     # radial-discretization scale.  The exact ns=15 VMEC2000 comparison is
-    # recorded by benchmarks/run_freeboundary_multigrid.py (<1e-3 here).
+    # recorded by tools/run_freeboundary_multigrid.py (<1e-3 here).
     assert rerr < 1e-2
     assert zerr < 1e-2
     assert ierr < 1.5e-2

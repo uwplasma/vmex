@@ -25,8 +25,10 @@ receives a value and a gradient from one reverse sweep through the
 checkpointed window and one reverse equilibrium adjoint. Needs
 ``pip install 'vmex[turbulence]'``.
 
-Measured on a shared 36-core Xeon host (CPU only, 12 cores, load ~60 from
-other jobs, JAX 0.10.2, GKX 2.4.0), default settings: 70 min end to end,
+The five-minute default saturates the seed and takes one short L-BFGS-B step;
+it shows the pipeline, not a transport reduction. Measured with the research
+settings on a shared 36-core Xeon host (CPU only, 12 cores, load ~60 from
+other jobs, JAX 0.10.2, GKX 2.4.0): 70 min end to end,
 5.5 GB peak memory. The cold saturation of the seed took 35,696 steps
 (1,083 s); the warm restarts after each stage 2,480 and 6,296 steps (99 s,
 136 s). One value and gradient took 69 s in stage 1 (22 evaluations, 1,527 s)
@@ -48,8 +50,11 @@ import numpy as np
 from jax.scipy.special import logsumexp
 from scipy.optimize import minimize
 
-import gkx
-from gkx.diagnostics.saturation import SaturationStopConfig, saturation_stop_decision
+try:
+    import gkx
+    from gkx.diagnostics.saturation import SaturationStopConfig, saturation_stop_decision
+except ImportError:
+    raise SystemExit("This example needs GKX: pip install 'vmex[turbulence]'")
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core.turbulence import flux_tube_geometry
@@ -66,8 +71,8 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # L-BFGS-B iterations each stage may spend:
-MAX_MODES = [1, 2]
-MAXITER = [8, 8]
+MAX_MODES = [1]
+MAXITER = [1]
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -90,10 +95,16 @@ DT = 0.05
 # error of the saturated mean the gate requires:
 SAMPLE_STEPS = 8
 MAX_SATURATION_STEPS = 60_000
-SATURATION_REL_SEM = 0.05
+SATURATION_REL_SEM = 0.1
 
 # Differentiated post-saturation window (below GKX's 1024-step divergence knee):
-WINDOW_STEPS = 512
+WINDOW_STEPS = 256
+
+# The default above fits a 5-minute laptop run. The research settings measured
+# below (70 min on a shared host) are:
+#   MAX_MODES, MAXITER = [1, 2], [8, 8]
+#   SATURATION_REL_SEM, WINDOW_STEPS = 0.05, 512
+#   MAX_PARAMETER_CHANGE = 5.0
 
 # Weight of the heat-flux term, relative to its seed value (1 makes the
 # seed's term cost 0.5, against 15 for the seed's aspect-ratio error):
@@ -101,7 +112,7 @@ FLUX_WEIGHT = 10.0
 
 # Step control, as in QA_optimization_scalar.py:
 PARAMETER_STEP = 0.02
-MAX_PARAMETER_CHANGE = 5.0
+MAX_PARAMETER_CHANGE = 1.0         # one short step stays near the seed
 ESS_ALPHA = 1.2
 
 # Equilibrium resolution: mode numbers max_mode + 2, never below MINIMUM_MPOL:
@@ -132,7 +143,8 @@ inp = replace(inp, rbc=rbc, zbs=zbs)
 ### Set up the gyrokinetic model ##############################################
 
 TUBES = [(s, alpha) for s in TUBE_S for alpha in TUBE_ALPHAS]
-grid = gkx.build_spectral_grid(gkx.GridConfig(Nx=NX, Ny=NY, Nz=NZ, Lx=LX, Ly=LY))
+grid = gkx.build_spectral_grid(gkx.GridConfig(Nx=NX, Ny=NY, Nz=NZ, Lx=LX, Ly=LY,
+                                                  ky_layout="full"))  # the state below holds both signs of ky
 terms = gkx.TermConfig(collisions=1.0, hypercollisions=1.0, hyperdiffusion=1.0,
                        end_damping=1.0, nonlinear=1.0, apar=0.0, bpar=0.0)
 
@@ -150,7 +162,7 @@ def gk_parameters(geometry):
         p_hyper_m=float(min(20, max(N_HERMITE // 2, 1))),
         hypercollisions_const=0.0, hypercollisions_kz=1.0,
         D_hyper=0.05, p_hyper_kperp=2.0,
-        damp_ends_amp=0.1, damp_ends_widthfrac=0.125)
+        damp_ends_widthfrac=0.125)
 
 
 def noise_seed():
@@ -178,6 +190,7 @@ def saturate(equilibrium, seeds, label):
     for tube, seed in zip(TUBES, seeds):
         geometry = tube_geometry(equilibrium.state, equilibrium.runtime, tube)
         state, fluxes, start = seed, [], time.perf_counter()
+        last_print = start
         for chunk in range(MAX_SATURATION_STEPS // SAMPLE_STEPS):
             state = gkx.integrate_nonlinear(
                 state, grid, geometry, gk_parameters(geometry), DT, SAMPLE_STEPS,
@@ -188,6 +201,10 @@ def saturate(equilibrium, seeds, label):
                 times, fluxes, config=SaturationStopConfig(rel_sem=SATURATION_REL_SEM))
             if decision["saturated"]:
                 break
+            if time.perf_counter() - last_print > 10.0:
+                last_print = time.perf_counter()
+                print(f"  saturating tube s={tube[0]}: step {(chunk + 1) * SAMPLE_STEPS}, "
+                      f"Q = {fluxes[-1]:.4g}", flush=True)
         steps = (chunk + 1) * SAMPLE_STEPS
         print(f"tube s={tube[0]}, alpha={tube[1]}: {steps} steps, "
               f"{time.perf_counter() - start:.1f} s, "
@@ -256,7 +273,8 @@ for max_mode, maxiter in zip(MAX_MODES, MAXITER):
         mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
     problem = opt.VmecProblem.from_loss(
         inp, loss, max_mode=max_mode, use_ess=True, ess_alpha=ESS_ALPHA,
-        restart_from=equilibrium)
+        restart_from=equilibrium, progress=True)
+    problem.compile_value_and_gradient()
     monitor.problem = problem
     x0 = problem.x0
     step = PARAMETER_STEP * problem.scales
@@ -276,7 +294,8 @@ for max_mode, maxiter in zip(MAX_MODES, MAXITER):
     result = minimize(
         value_and_gradient, np.zeros_like(x0), jac=True, method="L-BFGS-B",
         bounds=[(-MAX_PARAMETER_CHANGE, MAX_PARAMETER_CHANGE)] * x0.size,
-        callback=record, options={"maxiter": maxiter, "maxls": 10})
+        callback=record, options={"maxiter": maxiter, "maxls": 10,
+                                  "maxfun": 3 * maxiter})  # research runs stay under this
     print(f"optimizer scalar cost: {initial_value:.12e} -> {float(result.fun):.12e}")
     print(f"stage wall time {time.perf_counter() - start:.0f} s for "
           f"{result.nfev + 1} value-and-gradient evaluations")

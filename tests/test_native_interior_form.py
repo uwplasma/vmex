@@ -390,3 +390,70 @@ def test_traceable_sine_analysis_is_wrout():
     eps = float(np.finfo(traced.dtype).eps)  # 2e-16 under the CI's x64, 1e-7 otherwise
     np.testing.assert_allclose(traced, wrout_sin_coeffs(f=f, modes=modes, trig=trig),
                                rtol=500 * eps, atol=10 * eps)
+
+
+def _profile_export_case(*, flipped=False, ncurr=0):
+    from vmex.core.input import VmecInput
+    from vmex.core.solver import SpectralState, prepare_runtime, resolution_from_input
+
+    inp = VmecInput.from_indata_text(f"""&INDATA
+ NFP=1, MPOL=3, NTOR=0, NS_ARRAY=7, NCURR={ncurr}, PHIEDGE=1,
+ GAMMA=0, AM=0, AI=-.4,-.1,-.2, CURTOR=1000, AC=0,1,
+ RAXIS_CC=3, RBC(0,0)=3, RBC(0,1)=.4, ZBS(0,1)={-.4 if flipped else .4}
+ /""")
+    runtime = prepare_runtime(inp, resolution_from_input(inp, ns=7))
+    setup = runtime.setup
+    state = SpectralState(*(getattr(setup, name) for name in
+                            ("R_cos", "R_sin", "Z_cos", "Z_sin", "lambda_cos", "lambda_sin")))
+    return inp, state, runtime
+
+
+@pytest.mark.parametrize("flipped", [False, True])
+@pytest.mark.parametrize("with_runtime", [False, True])
+def test_native_export_preserves_prescribed_iota_and_rational_surface(flipped, with_runtime):
+    """A nonlinear prescribed profile must not move through half-mesh averaging."""
+    inp, state, runtime = _profile_export_case(flipped=flipped)
+    spectra = ext.VmecInteriorField.from_state(
+        inp, state, runtime=runtime if with_runtime else None).spectra
+    s = np.linspace(0., 1., 7)
+    expected = (-1 if flipped else 1) * (-.4 - .1*s - .2*s*s)
+    np.testing.assert_allclose(np.asarray(spectra["chipf"] / spectra["phipf"]),
+                               expected, rtol=2e-14, atol=2e-14)
+    # Native field-line rotation, not only a profile-array comparison.
+    q = jnp.array([.5, .7, .2])
+    prepared = ext._prepared(spectra)
+    x = jnp.array([jnp.sqrt(q[0]), q[1], q[2]])
+    B = ext._position_and_field(prepared, x)[1]
+    contra = jnp.linalg.solve(jax.jacfwd(lambda y: ext._position_and_field(prepared, y)[0])(x), B)
+    np.testing.assert_allclose(contra[1] / contra[2], .5 if flipped else -.5,
+                               rtol=2e-13, atol=2e-13)
+
+
+def test_native_current_mode_ignores_the_unused_iota_profile():
+    from dataclasses import replace
+
+    inp, state, runtime = _profile_export_case(ncurr=1)
+    changed = replace(inp, ai=np.array([.8, .4, -.3]))
+    first = ext.VmecInteriorField.from_state(inp, state, runtime=runtime).spectra
+    second = ext.VmecInteriorField.from_state(changed, state).spectra
+    np.testing.assert_allclose(first["chipf"], second["chipf"], rtol=2e-13, atol=2e-13)
+    assert np.max(np.abs(np.asarray(first["chipf"]))) > 0
+
+
+@pytest.mark.parametrize("flipped", [False, True])
+def test_prescribed_iota_export_retains_implicit_parameter_derivative(flipped):
+    from dataclasses import replace
+    from vmex.core import implicit as im
+
+    inp, state, _ = _profile_export_case(flipped=flipped)
+    config = im.make_config(inp, ns=7)
+    parameters = im.params_from_input(inp)
+
+    def exported_iota(quadratic):
+        p = replace(parameters, ai=parameters.ai.at[2].set(quadratic))
+        runtime = im.runtime_from_params(p, config)
+        spectra = ext.VmecInteriorField.from_state(inp, state, runtime=runtime).spectra
+        return spectra["chipf"][3] / spectra["phipf"][3]
+
+    np.testing.assert_allclose(jax.grad(exported_iota)(parameters.ai[2]),
+                               -.25 if flipped else .25, rtol=2e-13, atol=2e-13)

@@ -28,8 +28,8 @@ placement. Install notes for GPU wheels: {doc}`/installation`.
 ## When the GPU pays off
 
 The policy in {mod}`vmex.core.device` uses the historical measurements in
-`benchmarks/gpu_baseline.json` (regenerate with `benchmarks/device_parity.py`
-and the benchmark scripts). These motivated the thresholds below; the later
+`benchmarks/gpu_baseline.json` (regenerate with `tools/run_gpu_matrix.py`;
+`tools/device_parity.py` checks CPU/GPU agreement). These motivated the thresholds below; the later
 A4000 results show why they are not a portable performance guarantee:
 
 - Per-iteration throughput favors the GPU — up to 3x wall on
@@ -73,7 +73,7 @@ On the two shipped decks that prints `1632 100000` / `cpu` for
 **The crossover these thresholds encode does not transfer between machines.**
 They come from `benchmarks/gpu_baseline.json`, measured 2026-07-09. The same
 sweep re-run on 2026-09-16 on two RTX A4000s (JAX 0.11.1, driver 580.173,
-one process per cell — `benchmarks/gpu_a4000_2026-09-16.json`) found **no cell
+one process per cell, VMEX 0.9.1) found **no cell
 where the GPU wins**, warm wall in seconds:
 
 | case | CPU warm | GPU warm | GPU gain |
@@ -93,7 +93,7 @@ CPU and GPU cell (434, 2829, 125, 189), so the two ran the same physics. Peak
 device memory across every GPU cell was 4.8 to 113.5 MB.
 
 So treat `recommended_device` as a starting guess and time the deck you actually
-run: `python benchmarks/run_gpu_matrix.py --skip-tridiag --out my_gpu_matrix.json`
+run: `python tools/run_gpu_matrix.py --skip-tridiag --out my_gpu_matrix.json`
 reproduces the table above on your own hardware (without `--out` it overwrites
 the committed `benchmarks/gpu_baseline.json`). The implicit-gradient path is the exception that
 does pay off — the single-stage finite-beta value-and-gradient is 1.3–1.6 s warm
@@ -147,7 +147,7 @@ For a new GPU or a slow installation, run the cache-reload audit from a VMEX
 source checkout:
 
 ```console
-python benchmarks/device_cache_reload.py --devices cpu,gpu \
+python tools/device_cache_reload.py --devices cpu,gpu \
     --output vmex-device-cache-reload.json
 ```
 

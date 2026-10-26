@@ -48,16 +48,6 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache.pkl"
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _jit_enabled():
-    """conftest disables jit globally; these full solves are ~40x slower
-    interpreted (105-160 s/test in CI) — run them jitted."""
-    prev = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", prev)
-
-
 @pytest.fixture(autouse=True)
 def _release_jax_caches_in_full_matrix():
     """Full-lane sweeps accumulate executable caches until the hosted CI
@@ -435,31 +425,42 @@ def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
         for tree in (x_star, p0))
     P = im._dof_projector(cfg, mask)
     z_star, b = P(x_star), P(cotangent)
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)  # the suite default is eager
-    try:
-        mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg)
-        raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
-        pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
-        defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
-        gradient = jax.jit(lambda p: jax.vjp(
-            lambda q: im.solve_implicit(q, cfg), p)[1](cotangent)[0])(p0)
-        system = im._raw_block_system(p0, cfg, x_star, mask, im._active_state_fields(cfg), 4)
-        rhs = jax.tree.map(jnp.negative, jax.jvp(lambda q: raw(z_star, q), (p0,), (direction,))[1])
-        dz = im._raw_block_apply(system, rhs)  # the band, refined once on the full raw JVP
-        dz = jax.tree.map(jnp.add, dz, im._raw_block_apply(system, jax.tree.map(
-            jnp.subtract, rhs, jax.jvp(lambda z: raw(z, p0), (z_star,), (dz,))[1])))
-        tangent = jax.jvp(
-            lambda z, q: im._assemble(z, im.runtime_from_params(q, cfg), x_star, P, im._edge_mask(cfg)),
-            (z_star, p0), (P(dz), direction))[1]
-    finally:
-        jax.config.update("jax_disable_jit", previous)
+    mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg.adjoint_tol, cfg)
+    raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
+    pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
+    defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
+    gradient = jax.jit(lambda p: jax.vjp(
+        lambda q: im.solve_implicit(q, cfg), p)[1](cotangent)[0])(p0)
+    system = im._raw_block_system(p0, cfg, x_star, mask, im._active_state_fields(cfg), 4)
+    rhs = jax.tree.map(jnp.negative, jax.jvp(lambda q: raw(z_star, q), (p0,), (direction,))[1])
+    dz = im._raw_block_apply(system, rhs)  # the band, refined once on the full raw JVP
+    dz = jax.tree.map(jnp.add, dz, im._raw_block_apply(system, jax.tree.map(
+        jnp.subtract, rhs, jax.jvp(lambda z: raw(z, p0), (z_star,), (dz,))[1])))
+    tangent = jax.jvp(
+        lambda z, q: im._assemble(z, im.runtime_from_params(q, cfg), x_star, P, im._edge_mask(cfg)),
+        (z_star, p0), (P(dz), direction))[1]
     assert bool(stats.converged) and defect <= 1e-10
     reverse = sum(float(jnp.vdot(g, t)) for g, t in
                   zip(jax.tree.leaves(gradient), jax.tree.leaves(direction)))
     forward = sum(float(jnp.vdot(c, s)) for c, s in
                   zip(jax.tree.leaves(cotangent), jax.tree.leaves(tangent)))
     assert abs(reverse - forward) <= 1e-10 * abs(forward)
+
+
+def test_adjoint_tolerance_change_reuses_every_executable(solovev):
+    """The adjoint tolerance is a traced argument: a tolerance-only config
+    compares equal, compiles nothing, and still sets the acceptance bound."""
+    _name, inp, cfg, p0, x_star, _rt, mask = solovev
+    other = im._canonical_config(dataclasses.replace(cfg, adjoint_tol=1e-6))
+    assert other is not cfg and other == cfg and hash(other) == hash(cfg)
+    P = im._dof_projector(cfg, mask)
+    b = P(jax.tree.map(jnp.ones_like, x_star))
+    mu, tight = im._adjoint_block_core(p0, P(x_star), x_star, mask, b, 1e-11, cfg)
+    compiled = im._adjoint_block_core._cache_size()
+    mu2, loose = im._adjoint_block_core(p0, P(x_star), x_star, mask, b, 1e-6, other)
+    assert im._adjoint_block_core._cache_size() == compiled
+    assert float(loose.tolerance) == pytest.approx(1e5 * float(tight.tolerance))
+    np.testing.assert_array_equal(jax.tree.leaves(mu2)[0], jax.tree.leaves(mu)[0])
 
 
 def test_block_adjoint_certificate_failure_falls_back_to_krylov(monkeypatch, solovev):
@@ -541,6 +542,10 @@ def test_make_config_canonicalizes_equal_content(solovev):
     cfg_a = im.make_config(inp, **CASES[name])
     cfg_b = im.make_config(inp, **CASES[name])
     assert cfg_a is cfg_b
+    # Boundary and profile values reach every lane as traced parameters: a
+    # moved boundary (the next optimizer stage) shares the instance.
+    moved = dataclasses.replace(inp, rbc=inp.rbc * 1.01, phiedge=2.0 * inp.phiedge)
+    assert im.make_config(moved, **CASES[name]) is cfg_a
     cfg_c = im.make_config(inp, ftol=CASES[name]["ftol"] * 0.5,
                            max_iterations=CASES[name]["max_iterations"])
     assert cfg_c is not cfg_a
@@ -651,7 +656,9 @@ def test_adjoint_gmres_preconditioner_value(solovev):
 
     budgets = {}
     for formulation in ("preconditioned", "raw"):
-        A = im.adjoint_matvec(cfg, p0, x_star, mask, formulation=formulation)
+        F = im.residual_fn(cfg, x_star, mask, formulation=formulation)
+        _, vjp_z = jax.vjp(lambda z: F(z, p0), P(x_star))
+        A = lambda v, vjp_z=vjp_z: vjp_z(v)[0]  # noqa: E731
         lam, _ = jax.scipy.sparse.linalg.gmres(
             A, b, tol=1e-13, atol=0.0, restart=30, maxiter=10,
             solve_method="incremental",
@@ -677,6 +684,7 @@ def _assert_stability_gradients(
     include_profiles,
     metric_names=("DMerc",),
     direction_labels=None,
+    h=1.0e-4,
 ):
     name, inp, cfg, p0, _, _, _ = case
     ntor = int(inp.ntor)
@@ -738,7 +746,7 @@ def _assert_stability_gradients(
         for label, tangent in directions:
             ad = _tree_dot(grad, tangent)
             fd, info = im.frozen_path_directional_fd(
-                p0, cfg, metric, tangent, h=1.0e-4
+                p0, cfg, metric, tangent, h=h
             )
             residual = max(info["newton_res"])
             scale = max(abs(ad), abs(fd), 1.0e-12)
@@ -1290,4 +1298,8 @@ def test_lasym_3d_stability_gradients_vs_frozen_path_fd(lasym_3d):
     """LASYM Mercier/Glasser derivatives include the RBS/ZBC families."""
     _assert_stability_gradients(
         lasym_3d, include_profiles=False, metric_names=("DMerc", "D_R"),
-        direction_labels={"RBS(1,1)", "ZBC(1,1)"})
+        direction_labels={"RBS(1,1)", "ZBC(1,1)"},
+        # VMEC2000's atan2 shift turns this deck by pi/2 (rbc + zbs = 0); the
+        # central difference then converges as h^2 (measured DMerc/RBS(1,1)
+        # vs the adjoint: 2.2e-4 at 1e-4, 2.2e-6 at 1e-5), so h = 1e-5.
+        h=1.0e-5)

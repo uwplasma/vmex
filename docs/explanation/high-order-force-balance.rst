@@ -25,6 +25,14 @@ state undoes VMEX's ``m=1`` constrained variables and Fourier normalization,
 keeps the magnetic axis and the fixed boundary exact, and removes the lambda
 ``(0,0)`` gauge coefficient structurally.
 
+:func:`~vmex.core.strong_force.traced_lift` ``(runtime)`` returns the same lift
+as a JAX map ``lift(state, runtime)``.  At fixed grid, basis, mode table and
+endpoint rules the constrained fit is linear, so it is traceable and
+differentiable in the state and the live boundary, flux and profile arrays and
+can sit inside a differentiated objective, for example a force-balance
+certificate.  Geometry matches the host lift to round-off; profiles are fitted
+to their exact half-mesh samples.
+
 Independent certificate
 -----------------------
 
@@ -113,3 +121,9 @@ narrowest inserted span and widens ``MPOL`` to hold the padded modes, so the
 file carries the certified state.  Non-axisymmetric equilibria need a
 matrix-free Gauss--Newton on the same ``A = D S`` structure and are future
 work.
+
+The same two WOUT files through ``vmex --plot``. The summary's
+``<|F|>/<|grad(B^2/2mu0)|>`` falls from 3.9e-4 to 7.7e-6.
+
+.. image:: /_static/figures/readme_polish_plot.webp
+   :alt: vmex --plot of the unpolished and polished WOUT files

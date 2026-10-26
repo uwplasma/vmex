@@ -8,6 +8,12 @@ or `pip install "vmex[all]"` for everything the examples use.
 `data/mgrid_cth_like.nc`, a release asset rather than a tracked file; install it
 once from the repository root with `python tools/fetch_assets.py --bundle reference-nc`.
 
+With its default settings every script finishes in under five minutes on a
+14-core laptop with a cold JAX cache, and prints progress the whole time
+(optimizer monitors, solver iterations, and `progress=True` elapsed-time lines
+around long compilations and solves). Where a longer run gives a better answer, the script keeps
+that research budget as one commented set of constants next to the default.
+
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.
@@ -41,6 +47,14 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   - `free_boundary_essos_coils.py` — free-boundary beta scan directly from
     ESSOS coils (tabulated to a temporary mgrid); `PRES_SCALE` is calibrated per point so the
     *actual* wout `betatotal` hits 0/1/2/3 %.
+  - `free_boundary_relax_constraint.py` — relax a free-boundary equilibrium in
+    the ESSOS coils with the spectral constraint off; prints `|B|` against
+    Biot-Savart before and after.
+  - `free_boundary_position_control.py` — a DIII-D-like free-boundary tokamak
+    with a mis-set vertical field, solved with and without
+    `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
+    for a field deficit) while the controlled one is held and reports the
+    missing `B_Z`.
   - `free_boundary_phiedge.py` — find the PHIEDGE whose free-boundary LCFS
     passes through a target outboard-midplane radius (`vj.solve_phiedge`), for
     comparing with codes pinned by an edge point instead of a flux.
@@ -104,7 +118,7 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   are in the file beside its physical targets, resolution and save names, so a
   reader never has to open a second file to follow one run.
   The scalar lane trades objective progress per evaluation (measured: QA
-  final QS 2.7x above least squares with 40 mode-2 iterations, QI 17x) for a cheaper cold start and
+  final QS 2.7x above least squares with 40 mode-2 iterations; QI on an equal seed, weights and solve count ends 0.7x the least-squares value) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
@@ -172,7 +186,7 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   states where maximum-J and quasisymmetry conflict near the axis.
 - `optimization/omnigenity_epsilon_gammac_maxj.py` refines the finite-beta QA
   with one seed-normalized scalar objective — quasisymmetry ratio (effective
-  ripple proxy), the derivative-safe `GammaCSmooth` surrogate, and the
+  ripple proxy), the smooth `GammaCSmooth` surrogate, and the
   outer-volume maximum-J residual — then reports hard `Gamma_c` and NEO_JAX
   `epsilon_eff^(3/2)` before and after.
 - `epsilon_effective.py` computes the NEO_JAX effective ripple from a solved

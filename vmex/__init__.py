@@ -20,6 +20,7 @@ links to the module that documents it.
 - :func:`~vmex.core.multigrid.solve_file` — run a deck the way the CLI does
   (directives honored, ``wout_<case>.nc`` written)
 - :func:`~vmex.core.freeboundary.solve_free_boundary` — NESTOR free boundary
+- :func:`~vmex.core.freeboundary.relax_free_boundary_constraint` — remove the constraint bias of a free-boundary LCFS
 - :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
 - :func:`~vmex.core.freeboundary.solve_phiedge` — PHIEDGE whose free-boundary
   LCFS meets a target outboard radius or volume
@@ -29,6 +30,9 @@ links to the module that documents it.
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit` /
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit_status`
   — coupled NESTOR/VMEC implicit derivative
+- :func:`~vmex.core.newton.solve_free_boundary_newton` →
+  :class:`~vmex.core.newton.NewtonResult` — opt-in Newton polish of a
+  free-boundary equilibrium on its coupled root
 - :func:`~vmex.core.restart.state_from_wout` /
   :func:`~vmex.core.restart.restart_state` — hot restart from any wout
   (also ``solve*(..., restart_from=...)``)
@@ -49,6 +53,7 @@ links to the module that documents it.
   :func:`~vmex.core.strong_force.high_order_state_from_wout` /
   :func:`~vmex.core.strong_force.lift_high_order_state` — axis-regular
   continuous reconstruction
+  (:func:`~vmex.core.strong_force.traced_lift` is its traceable form)
 - :func:`~vmex.core.strong_force.evaluate_high_order_fields` →
   :class:`~vmex.core.strong_force.HighOrderFieldSamples`;
   :func:`~vmex.core.strong_force.evaluate_high_order_surface` →
@@ -113,6 +118,9 @@ links to the module that documents it.
   / :func:`~vmex.core.mgrid.read_mgrid` / :func:`~vmex.core.mgrid.write_mgrid`
   / :func:`~vmex.core.mgrid.tabulate_cartesian_field` — mgrid or tabulated
   direct field (``MgridField.from_coils`` tabulates an ESSOS coil set)
+- :class:`~vmex.core.position_control.PositionControl` — opt-in feedback on a
+  vertical field that holds a plasma at a target radius in a free-boundary
+  solve (``position_control=`` of the free-boundary solvers)
 - :class:`~vmex.core.extender.MagneticField` — base JAX field with explicit
   and stored-point evaluation;
   :class:`~vmex.core.extender.VmecInteriorField` — field inside the plasma;
@@ -220,9 +228,12 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "solve_multigrid": (".core.multigrid", "solve_multigrid"),
     "solve_free_boundary_multigrid": (
         ".core.multigrid", "solve_free_boundary_multigrid"),
+    "relax_free_boundary_constraint": (".core.freeboundary", "relax_free_boundary_constraint"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     "solve_phiedge": (".core.freeboundary", "solve_phiedge"),
     "phiedge_root": (".core.freeboundary_implicit", "phiedge_root"),
+    "solve_free_boundary_newton": (".core.newton", "solve_free_boundary_newton"),
+    "NewtonResult": (".core.newton", "NewtonResult"),
     "make_free_boundary_config": (
         ".core.freeboundary_implicit", "make_free_boundary_config"),
     "solve_free_boundary_implicit": (
@@ -301,6 +312,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # external fields
     "MgridData": (".core.mgrid", "MgridData"),
     "MgridField": (".core.mgrid", "MgridField"),
+    "PositionControl": (".core.position_control", "PositionControl"),
     "read_mgrid": (".core.mgrid", "read_mgrid"),
     "tabulate_cartesian_field": (".core.mgrid", "tabulate_cartesian_field"),
     "write_mgrid": (".core.mgrid", "write_mgrid"),
@@ -340,16 +352,26 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
 __all__ = ["__version__", *sorted(_LAZY_ATTRS)]
 
 
-def __getattr__(name: str):
-    entry = _LAZY_ATTRS.get(name)
-    if entry is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attribute = entry
-    module = _import_module(module_name, __name__)
-    value = module if attribute is None else getattr(module, attribute)
-    globals()[name] = value
-    return value
+def _lazy_exports(package: str, table: dict, namespace: dict):
+    """PEP 562 ``(__getattr__, __dir__)`` resolving ``table`` on first access.
+
+    ``table`` maps a public name to ``(relative module, attribute)``; an
+    attribute of ``None`` exports the module itself.  Resolved values are
+    cached in ``namespace`` so later lookups bypass ``__getattr__``.
+    """
+
+    def __getattr__(name: str):
+        entry = table.get(name)
+        if entry is None:
+            raise AttributeError(f"module {package!r} has no attribute {name!r}")
+        module = _import_module(entry[0], package)
+        namespace[name] = value = module if entry[1] is None else getattr(module, entry[1])
+        return value
+
+    def __dir__():
+        return sorted(set(namespace) | set(table))
+
+    return __getattr__, __dir__
 
 
-def __dir__():
-    return sorted(set(globals()) | set(_LAZY_ATTRS))
+__getattr__, __dir__ = _lazy_exports(__name__, _LAZY_ATTRS, globals())

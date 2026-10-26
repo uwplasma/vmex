@@ -27,6 +27,10 @@ result is certified with the independent oracle of
 
 Scope: fixed boundary, axisymmetric, prescribed pressure and iota
 (``NCURR = 0``, ``GAMMA = 0``), stellarator-symmetric.
+
+:func:`polish_prescribed_current` provides a separate experimental forward
+path for three-dimensional prescribed-current equilibria. It does not issue
+the stationarity or continuum certificate of the axisymmetric path.
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ from scipy.sparse import linalg as sparse_linalg
 from .errors import StrongForceCertificationError, VmecInputError
 from .printing import emit_flushed, polish_certificate_summary
 from .profiles import MU0
-from .radial_basis import _basis_levels
+from .radial_basis import _basis_levels, _span_quadrature
 from .residuals import m1_physical_to_constrained
 from .solver import SpectralState
 from .strong_force import (
@@ -456,16 +460,6 @@ class NativeGaugePlan:
         return int(self.row_modes.size)
 
 
-def _span_quadrature(breakpoints: np.ndarray, order: int) -> tuple[np.ndarray, np.ndarray]:
-    nodes, weights = np.polynomial.legendre.leggauss(int(order))
-    centers = 0.5 * (breakpoints[:-1] + breakpoints[1:])
-    scales = 0.5 * np.diff(breakpoints)
-    return (
-        (centers[:, None] + scales[:, None] * nodes[None]).reshape(-1),
-        (scales[:, None] * weights[None]).reshape(-1),
-    )
-
-
 def make_variational_plan(
     state: HighOrderEquilibriumState,
     *,
@@ -485,7 +479,7 @@ def make_variational_plan(
     order = degree + 3 if radial_order is None else int(radial_order)
     if order < 2:
         raise ValueError("radial_order must be at least two")
-    s, weights_s = _span_quadrature(np.asarray(state.radial_basis.breakpoints, dtype=float), order)
+    s, weights_s = _span_quadrature(np.asarray(state.radial_basis.breakpoints, dtype=float), int(order))
     rho = np.sqrt(s)
     # The radial quadrature is constructed in s, while sqrt_g is the
     # Jacobian of (rho, theta, zeta): d rho = ds / (2 rho).
@@ -1047,7 +1041,8 @@ def evaluate_tensorized_strong_force(
     return _samples_from_jets(channel("R_cos", "R_sin"), channel("Z_cos", "Z_sin"), channel("L_cos", "L_sin"), plan, state)
 
 
-def _samples_from_jets(R, Z, L, plan: VariationalPlan, state: HighOrderEquilibriumState) -> StrongForceSamples:
+def _samples_from_jets(R, Z, L, plan: VariationalPlan, state: HighOrderEquilibriumState,
+                       *, poloidal_flux_jets=None) -> StrongForceSamples:
     """Pointwise strong force from the R, Z, lambda second jets (10 arrays each).
 
     Each node's force depends only on that node's 30 jets; the Jacobian of the
@@ -1093,9 +1088,11 @@ def _samples_from_jets(R, Z, L, plan: VariationalPlan, state: HighOrderEquilibri
 
     rho = jnp.broadcast_to(jnp.asarray(plan.rho)[:, None], R[0].shape)
     phipf = jnp.asarray(plan.profile_basis) @ jnp.asarray(state.phipf)
-    chipf = jnp.asarray(plan.profile_basis) @ jnp.asarray(state.chipf)
     phipf_rho = jnp.asarray(plan.profile_derivative) @ jnp.asarray(state.phipf)
-    chipf_rho = jnp.asarray(plan.profile_derivative) @ jnp.asarray(state.chipf)
+    chipf, chipf_rho = (
+        (plan.profile_basis @ state.chipf, plan.profile_derivative @ state.chipf)
+        if poloidal_flux_jets is None else poloidal_flux_jets
+    )
     pressure_rho = jnp.asarray(plan.profile_derivative) @ jnp.asarray(state.pressure)
     phipf = jnp.broadcast_to(phipf[:, None], R[0].shape)
     chipf = jnp.broadcast_to(chipf[:, None], R[0].shape)
@@ -1225,6 +1222,273 @@ def minimum_signed_jacobian(
 
     fields = evaluate_variational_fields(state, plan)
     return jnp.min(float(plan.jacobian_sign) * fields.sqrt_g)
+
+
+def prescribed_current_flux_jets(state, plan, inp):
+    """Return ``(chi, dchi/drho)`` enforcing angular-mean Ampere current.
+
+    ``chi`` is the poloidal-flux derivative with respect to normalized
+    toroidal flux. It is a geometry-dependent function, not a fitted spline.
+    Current quadrature uses the supplied plan's angles; increase that grid
+    independently of the force grid to check its convergence. Radii must be
+    strictly positive. Geometry JVPs/VJPs include the current constraint.
+    """
+    from .profiles import current
+
+    def target(rho):
+        if float(inp.curtor) == 0.0:
+            return jnp.zeros_like(rho)
+        shape = current(inp.pcurr_type, inp.ac, inp.ac_aux_s, inp.ac_aux_f,
+                        rho**2, bloat=inp.bloat)
+        edge = current(inp.pcurr_type, inp.ac, inp.ac_aux_s, inp.ac_aux_f,
+                       1.0, bloat=inp.bloat)
+        return state.jacobian_sign * MU0 / (2 * jnp.pi) * inp.curtor * shape / edge
+
+    desired, desired_rho = jax.jvp(target, (plan.rho,), (jnp.ones_like(plan.rho),))
+    return _prescribed_current_flux_jets(state, plan, desired, desired_rho)
+
+
+@jax.jit
+def _prescribed_current_flux_jets(state, plan, desired, desired_rho):
+    jets = jnp.stack([jnp.stack(_channel_second(getattr(state, f + "_cos"),
+                                              getattr(state, f + "_sin"), plan))
+                      for f in ("R", "Z", "L")])
+    first = jets[:, :4]
+    derivative = jets[:, jnp.array([1, 4, 5, 6])]
+    phi = jnp.tile(plan.zeta, plan.theta.size) / state.nfp
+    cc, ss = jnp.cos(phi)[None], jnp.sin(phi)[None]
+
+    def profile(v, rho, flux, enclosed):
+        R, Z, L = v
+        er = jnp.stack((R[1] * cc, R[1] * ss, Z[1]), axis=-1)
+        et = jnp.stack((R[2] * cc, R[2] * ss, Z[2]), axis=-1)
+        ez = jnp.stack((R[3] * cc - R[0] * ss / state.nfp,
+                        R[3] * ss + R[0] * cc / state.nfp, Z[3]), axis=-1)
+        g = jnp.sum(er * jnp.cross(et, ez), axis=-1)
+        et2 = jnp.sum(et * et, axis=-1)
+        factor = 2 * rho[:, None] / g
+        offset = jnp.mean(factor * flux[:, None] * (
+            (1 + L[2]) * jnp.sum(et * ez, axis=-1) - L[3] * et2), axis=1)
+        slope = jnp.mean(factor * et2 / state.nfp, axis=1)
+        return (enclosed - offset) / slope
+
+    return jax.jvp(profile, (first, plan.rho, plan.profile_basis @ state.phipf, desired),
+                   (derivative, jnp.ones_like(plan.rho),
+                    plan.profile_derivative @ state.phipf, desired_rho))
+
+
+def _current_angular_plan(state, plan, ntheta, nzeta):
+    """Change only current quadrature angles, retaining the force radii."""
+    angles = make_variational_plan(state, radial_order=2, ntheta=ntheta, nzeta=nzeta)
+    names = ("theta", "zeta") + tuple(
+        parity + suffix for parity in ("cosine", "sine") for suffix in _JET_ANGULAR
+    )
+    return replace(plan, **{name: getattr(angles, name) for name in names})
+
+
+def evaluate_prescribed_current_force(state, plan, inp, *, current_plan=None):
+    """Evaluate B, curl-derived J and force with functional prescribed current.
+
+    ``current_plan``, if supplied, must share the force plan's radii and
+    radial tables. It may use a denser angular grid. ``state.chipf`` is ignored;
+    exporting that placeholder as the field would lose the current closure.
+    """
+    current_plan = plan if current_plan is None else current_plan
+    return _current_force_samples(state, plan, prescribed_current_flux_jets(state, current_plan, inp))
+
+
+@jax.jit
+def _current_force_samples(state, plan, flux_jets):
+    jets = [_channel_second(getattr(state, f + "_cos"), getattr(state, f + "_sin"), plan)
+            for f in ("R", "Z", "L")]
+    return _samples_from_jets(*jets, plan, state, poloidal_flux_jets=flux_jets)
+
+
+def _current_mode_blocks(base, plan, layout, scale, flux_jets, force_scale, volume):
+    """Assemble exact diagonal Fourier blocks of J^T J, including dchi/dx.
+
+    The chain is local geometry jets plus two radial current jets. Sequential
+    JVPs/VJPs keep setup memory independent of a global geometry Jacobian;
+    each span contributes only to overlapping spline coefficients.
+    """
+    spans = len(base.radial_basis.breakpoints) - 1
+    if plan.rho.size % spans:
+        raise ValueError(f"{plan.rho.size} radial nodes do not split evenly over {spans} spline spans")
+
+    def state_from(x):
+        return apply_high_order_correction(base, layout.unpack(scale * x))
+
+    zero = jnp.zeros(layout.size)
+    values, pullback = jax.vjp(lambda x: jnp.stack(flux_jets(state_from(x))), zero)
+    nr = plan.rho.size
+    C = np.asarray(jax.jit(lambda: jax.lax.map(
+        lambda row: pullback(row)[0], jnp.eye(2 * nr).reshape(2 * nr, 2, nr)))()).reshape(2, nr, layout.size)
+    stacked = jnp.stack([jnp.stack(_channel_second(getattr(base, f + "_cos"),
+                                                 getattr(base, f + "_sin"), plan))
+                         for f in ("R", "Z", "L")])
+
+    def local(jets, profiles):
+        samples = _samples_from_jets(*jets, plan, base, poloidal_flux_jets=profiles)
+        return _weighted_force(samples, plan, base.jacobian_sign, force_scale, volume)
+
+    def tangent(k):
+        direction = (jnp.arange(30) == k).reshape(3, 10, 1, 1) * jnp.ones_like(stacked)
+        return jax.jvp(lambda jets: local(jets, values), (stacked,), (direction,))[1]
+
+    D = np.asarray(jax.jit(lambda: jax.lax.map(tangent, jnp.arange(30)))()).reshape(3, 10, nr, -1, 3)
+    E = np.asarray(jax.jit(lambda: jax.lax.map(lambda k: jax.jvp(
+        lambda p: local(stacked, p), (values,),
+        ((jnp.arange(2) == k)[:, None] * jnp.ones_like(values),))[1], jnp.arange(2)))()).reshape(2, nr, -1, 3)
+    channel, rest = np.divmod(np.asarray(layout.active_indices), layout.mnmax * layout.nbasis)
+    mode, basis = np.divmod(rest, layout.nbasis)
+    radial = [np.asarray(t) for t in (plan.radial_value, plan.radial_derivative, plan.radial_second_derivative)]
+    angular = {p: [np.asarray(getattr(plan, p + suffix)) for suffix in _JET_ANGULAR]
+               for p in ("cosine", "sine")}
+    groups = [np.flatnonzero(mode == i) for i in np.unique(mode)]
+    width = max(map(len, groups))
+    indices = np.full((len(groups), width), layout.size, dtype=int)
+    blocks = np.zeros((len(groups), width, width))
+    order = nr // spans
+    support = (radial[0] != 0) | (radial[1] != 0) | (radial[2] != 0)
+    for group, columns in enumerate(groups):
+        indices[group, :len(columns)] = columns
+        for span in range(spans):
+            nodes = slice(span * order, (span + 1) * order)
+            where = np.flatnonzero(support[mode[columns], nodes, basis[columns]].any(axis=1))
+            pick = columns[where]
+            if not pick.size:
+                continue
+            block = np.zeros((order, D.shape[3], 3, pick.size))
+            for ch in np.unique(channel[pick]):
+                local_columns = np.flatnonzero(channel[pick] == ch)
+                k = pick[local_columns]
+                field, parity = divmod(int(ch), 2)
+                table = angular["sine" if parity else "cosine"]
+                synthesis = np.stack([
+                    radial[_JET_RADIAL[t]][mode[k], nodes, basis[k]][:, :, None]
+                    * table[t][mode[k]][:, None, :] for t in range(10)
+                ])
+                block[..., local_columns] = np.einsum(
+                    "krac,kjra->racj", D[field, :, nodes], synthesis, optimize=True) * np.asarray(scale)[k]
+            block += np.einsum("prac,prj->racj", E[:, nodes], C[:, nodes][:, :, pick], optimize=True)
+            matrix = block.reshape(-1, pick.size)
+            blocks[group][np.ix_(where, where)] += matrix.T @ matrix
+    return indices, (blocks + blocks.transpose(0, 2, 1)) / 2
+
+
+@dataclass(frozen=True)
+class CurrentPolishResult:
+    """Forward optimization result. There is no stationarity certificate.
+
+    The axisymmetric path certifies its result against an independent
+    oracle; this one does not.  ``optimizer_converged`` and ``gradient_norm``
+    report only L-BFGS termination on the discrete cost, which says nothing
+    about held-out force, quadrature or knot refinement, and no adjoint or
+    implicit derivative is qualified for the result.
+
+    ``geometry`` contains the polished R/Z/lambda and unchanged pressure and
+    toroidal flux. Its ``chipf`` is a placeholder: use :meth:`samples` for the
+    field with prescribed current. WOUT export and equilibrium implicit
+    derivatives are not qualified for this experimental path.
+    """
+    geometry: HighOrderEquilibriumState
+    inp: Any
+    current_ntheta: int
+    current_nzeta: int
+    initial_cost: float
+    final_cost: float
+    iterations: int
+    optimizer_converged: bool
+    gradient_norm: float
+    seconds: float
+
+    def samples(self, plan: VariationalPlan) -> StrongForceSamples:
+        """Evaluate the functional-current field on an independent force grid."""
+        cp = _current_angular_plan(self.geometry, plan, self.current_ntheta, self.current_nzeta)
+        return evaluate_prescribed_current_force(self.geometry, plan, self.inp, current_plan=cp)
+
+
+def polish_prescribed_current(state, inp, *, max_iterations=3000, radial_order=6,
+                              ntheta=None, nzeta=None, current_ntheta=64,
+                              current_nzeta=48, damping=1e-3, callback=None):
+    """Reduce continuous force in a fixed-boundary NCURR=1 native geometry.
+
+    This opt-in forward experiment supports stellarator symmetry and GAMMA=0.
+    It freezes pressure, toroidal flux and R/Z boundary coefficients, enforces
+    analytic input I(s) by angular-mean Ampere closure, and differentiates
+    chi(rho) analytically. L-BFGS uses a frozen Fourier-block metric assembled
+    without a global geometry Jacobian/normal matrix. Nonpositive-Jacobian
+    trials are rejected. ``damping`` regularizes the coordinate metric only.
+
+    Optimizer termination is not physical convergence. Check force on held-out
+    axis/bulk/edge grids, current quadrature, knot/angular refinement and
+    stationarity separately. The certified axisymmetric and implicit solve
+    APIs deliberately keep their existing scope. ``callback(geometry)`` runs
+    after each accepted optimizer iteration, allowing caller-owned checkpoints.
+    """
+    from .profiles import current
+    from scipy.optimize import minimize
+
+    if int(inp.ncurr) != 1 or inp.lfreeb or inp.lasym or float(inp.gamma) != 0.0:
+        raise VmecInputError("prescribed-current polish requires NCURR=1, fixed boundary, LASYM=F, GAMMA=0")
+    if max_iterations < 1 or not np.isfinite(damping) or damping <= 0:
+        raise ValueError("max_iterations and damping must be positive")
+    if float(inp.curtor) != 0.0:
+        edge = float(current(inp.pcurr_type, inp.ac, inp.ac_aux_s, inp.ac_aux_f, 1.0, bloat=inp.bloat))
+        if not np.isfinite(edge) or edge == 0.0:
+            raise ValueError("nonzero CURTOR requires a finite nonzero current profile at s=1")
+    start = perf_counter()
+    plan = make_variational_plan(state, radial_order=radial_order, ntheta=ntheta, nzeta=nzeta)
+    if float(minimum_signed_jacobian(state, plan)) <= 0:
+        raise ValueError("prescribed-current polish requires a positive signed Jacobian")
+    cp = _current_angular_plan(state, plan, current_ntheta, current_nzeta)
+    layout = make_native_correction_layout(state)
+    scale = 1e-3 * native_coordinate_scales(state, layout, plan)
+    force_scale, _ = physical_scales(state)
+    volume = float(jnp.sum(state.jacobian_sign * evaluate_variational_fields(state, plan).sqrt_g
+                           * plan.quadrature_weights))
+    flux_jets = jax.jit(lambda geometry: prescribed_current_flux_jets(geometry, cp, inp))
+    indices, blocks = _current_mode_blocks(state, plan, layout, scale, flux_jets, force_scale, volume)
+    w, vectors = np.linalg.eigh(blocks)
+    if not np.isfinite(w).all() or w.min() < -1e-8 * max(w.max(), 1.0):
+        raise ValueError("current-aware mode metric is not positive semidefinite")
+    inverse_root = jnp.asarray(1 / np.sqrt(np.maximum(w, 0) + damping))
+    vectors, indices = jnp.asarray(vectors), jnp.asarray(indices)
+
+    @jax.jit
+    def geometry_from(y):
+        values = jnp.append(y, 0.0)[indices]
+        rotated = jnp.einsum("bij,bi->bj", vectors, values) * inverse_root
+        solved = jnp.einsum("bij,bj->bi", vectors, rotated)
+        coordinates = jnp.zeros(layout.size + 1).at[indices.ravel()].add(solved.ravel())[:-1]
+        return apply_high_order_correction(state, layout.unpack(scale * coordinates))
+
+    @jax.jit
+    def cost(y):
+        geometry = geometry_from(y)
+        def valid_cost():
+            samples = _current_force_samples(geometry, plan, flux_jets(geometry))
+            residual = _weighted_force(samples, plan, state.jacobian_sign, force_scale, volume)
+            return 5e7 * jnp.sum(residual**2)
+        return jax.lax.cond(minimum_signed_jacobian(geometry, plan) > 0,
+                            valid_cost, lambda: 1e30 + jnp.vdot(y, y))
+
+    value_grad = jax.jit(jax.value_and_grad(cost))
+    def objective(y):
+        value, gradient = value_grad(jnp.asarray(y))
+        return float(value), np.asarray(gradient)
+
+    zero = np.zeros(layout.size)
+    initial = objective(zero)[0]
+    opt = minimize(objective, zero, jac=True, method="L-BFGS-B",
+                   callback=None if callback is None else lambda y: callback(geometry_from(jnp.asarray(y))),
+                   options=dict(maxiter=max_iterations, maxcor=30, maxls=40, ftol=1e-14, gtol=1e-10))
+    final = geometry_from(jnp.asarray(opt.x))
+    if not np.isfinite(opt.fun) or opt.fun > initial or float(minimum_signed_jacobian(final, plan)) <= 0:
+        raise RuntimeError("prescribed-current polish returned an invalid or worsening trial")
+    return CurrentPolishResult(final, inp, current_ntheta, current_nzeta,
+                               initial / 1e8, float(opt.fun) / 1e8, int(opt.nit), bool(opt.success),
+                               float(np.linalg.norm(opt.jac)) / 1e8, perf_counter() - start)
 
 @dataclass(frozen=True)
 class PolishConfig:
@@ -1476,6 +1740,7 @@ def _stationarity(chart: _Chart, coordinates, force_scale, volume_scale, config:
     """Exact-Hessian constrained Newton on the stationarity equations."""
 
     gradient = jax.jit(jax.grad(lambda c: 0.5 * jnp.vdot(chart.force(c), chart.force(c))))
+    hessian = jax.jit(lambda c, v: jax.jvp(gradient, (c,), (v,))[1])  # traced once, not per step
     projector = _Projector(chart.constraint)
     n, q = chart.constraint.shape[1], chart.constraint.shape[0]
 
@@ -1492,11 +1757,10 @@ def _stationarity(chart: _Chart, coordinates, force_scale, volume_scale, config:
     for _ in range(config.max_newton_steps):
         if eta <= config.stationarity_tolerance:
             break
-        hessian = jax.jit(lambda v, c=coordinates: jax.jvp(gradient, (c,), (v,))[1])
         factor = _kkt_factor(normal, chart.constraint)
 
         def apply(z):
-            top = np.asarray(hessian(jnp.asarray(z[:n]))) + chart.constraint.T @ z[n:]
+            top = np.asarray(hessian(coordinates, jnp.asarray(z[:n]))) + chart.constraint.T @ z[n:]
             return np.concatenate((top, chart.constraint @ z[:n]))
 
         rhs = -np.concatenate((g, chart.constraint @ np.asarray(coordinates)))

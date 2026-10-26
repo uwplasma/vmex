@@ -45,7 +45,9 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [8, 12]
+MAX_NFEV = [5, 8]
+# Research budget (over the 5-minute laptop default):
+#   MAX_MODES, MAX_NFEV = [1, 2], [8, 12]
 
 # Targets and limits:
 ASPECT_TARGET = 8.0               # as the symmetric QI example; 5 was not reached (12.4)
@@ -196,7 +198,7 @@ try:
                                                 config=NeoConfig(**NEO_CONFIG_ARGS))
         print(f"{label} epsilon_eff^(3/2) at s = {np.round(np.asarray(s), 3)}: "
               f"{np.array2string(np.asarray(eps), precision=4)}")
-except (ImportError, NotImplementedError) as error:
+except ImportError as error:
     print(f"epsilon_eff skipped: {error}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")

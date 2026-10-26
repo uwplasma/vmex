@@ -303,10 +303,14 @@ certification grid.
    resolved value against the wout/Boozer implementation.  See
    :ref:`confinement-qi-fidelity`.
 
-For a direct action-based target, supply physical pitch values explicitly and
-compose the QI and maximum-J terms like any other residuals.  This objective
-is a complementary orbit diagnostic, not a drop-in normalization-equivalent
-replacement for the Goodman residual:
+For an action-based target, supply physical pitch values explicitly and
+compose the QI and maximum-J terms like any other residuals.
+``JInvariantQIResidual`` pools the actions of all complete wells at each
+surface and pitch, without matching well families across field lines. Its
+value can be positive in an :math:`\alpha`-independent field with distinct
+well actions; it does not by itself quantify within-family omnigenity or
+radial drift. It is a complementary orbit diagnostic, not a normalization-
+equivalent replacement for the Goodman residual:
 
 .. code-block:: python
 
@@ -320,6 +324,15 @@ replacement for the Goodman residual:
    result = opt.least_squares(
        [(qi_action, 0.0, 1.0), (maximum_j, 0.0, 1.0)],
        inp, max_mode=6, jac="implicit")
+
+For local within-well label dependence,
+:func:`~vmex.core.qi.j_invariant_alpha_derivative_from_boozer` differentiates
+each action at fixed physical pitch, including moving turning points and the
+line element. Supply explicit ``alpha`` labels and the bounce-kernel inputs.
+It returns ``action_alpha_derivative`` without matching or weighting wells;
+unequal label-independent actions have zero derivative. Invalid wells give
+NaN; complete interior wells remain usable in a cut trace. See the function
+for topology, interpolation-cell, separatrix, and convergence limits.
 
 The two classes do not impose a shared weight. ``MaximumJResidual`` evaluates
 the outward slope ``dJ/ds`` at common pitch using matched wells;
@@ -349,13 +362,14 @@ scaling, and ``Gamma_c`` is a proxy rather than a loss law: Velasco et al.
 ``|gamma_c*|`` variant (eq. 21) more linearly, and validate ``Gamma_alpha``
 as the predictor.  **Use it as the reported value,
 never as the gradient objective**: its discretized boundary derivative is
-exact yet flips sign under grid refinement (the measured ladder is pinned
+approximate and can flip sign under grid refinement (the measured ladder is pinned
 in ``tests/test_gammac.py``).  For optimization use
 :class:`~vmex.core.gammac.GammaCSmooth` — the same wells and bounce
 quadrature with the two branch-noise structures regularized (separatrix
-kernel floor + superbanana corner floor), whose derivative holds sign and
-magnitude on the same refinement ladder — and recompute the hard value on
-the accepted result.  Physics, formula, and the numerical policy are on
+kernel floor + superbanana corner floor). Its normalized pitch-grid shape
+derivatives remain approximate: check actual forward descent and sampling
+refinement for each configuration, then recompute the hard value on the
+accepted result. Physics, formula, and the numerical policy are on
 :doc:`/explanation/confinement`:
 
 .. code-block:: python
@@ -512,41 +526,43 @@ objective, a JAX port of the COBRA eigenproblem in the Gaur
 *et al.* formulation (*Plasma Phys. Control. Fusion* **67**, 125015 (2025),
 arXiv:2410.04576), with field-line coefficients per simsopt's
 COBRA-validated ``vmec_fieldlines`` conventions and a batched
-symmetric-tridiagonal ``eigvalsh`` solve:
+banded symmetric-tridiagonal solve (bisection for the top root, Hellmann--Feynman first derivative):
 
 - :func:`~vmex.core.stability.ballooning_lambda` — the most-unstable
   eigenvalue per (surface, field line, ballooning parameter); ``λ > 0`` is
   unstable, with ``λ = (γ a_N/v_A)²``;
-- :func:`~vmex.core.stability.ballooning_growth_rate` — a smooth
-  scalar reduction (``softmax`` upper bound of λ over all lines), built to
-  be *driven negative* as a stable-by-construction constraint.
+- :func:`~vmex.core.stability.ballooning_residual` — one hinge row
+  ``max(λ - threshold, 0)`` per line, the least-squares form of Gaur
+  *et al.* (2025) and DESC's ``BallooningStability``;
+- :func:`~vmex.core.stability.ballooning_growth_rate` — the largest ``λ``
+  over all lines (``reduction="softmax"`` gives the bound
+  ``T log Σ exp(λ/T)``, within ``T log N`` above it).
 
 .. code-block:: python
 
-   from vmex.core.stability import ballooning_growth_rate
+   from functools import partial
+   from vmex.core.stability import ballooning_residual
 
-   terms = [(qs, 0.0, 1.0),
-            (ballooning_growth_rate, -0.01, 5.0)]   # keep λ_max below zero
-   result = opt.least_squares(terms, inp, max_mode=4, jac="implicit")
+   rows = partial(ballooning_residual, surfaces=[0.6, 0.8, 0.9, 0.95],
+                  zeta0s=np.linspace(-0.5 * np.pi, 0.5 * np.pi, 5))
+   terms = [(qs, 0.0, 1.0), (rows, 0.0, 30.0)]
+   result = opt.least_squares(terms, inp, max_mode=2)
 
 ``examples/optimization/QA_optimization_ballooning.py`` runs this end to end
 on a seed that is Mercier-stable and ballooning-unstable — the case the
 objective exists for, since the interchange criteria see nothing to fix.
 
-Two defaults are worth setting deliberately rather than inheriting:
+Three choices are worth making deliberately:
 
 - **Scan** ``zeta0``.  ``λ`` peaks at a configuration-dependent ballooning
   parameter (Gaur *et al.* 2023, footnote 2), and the single-point default
-  ``zeta0s=(0.0,)`` under-reports it — by 26 % on that example's seed
-  (3.27e-3 at ``zeta0 = 0`` against 4.42e-3 over a five-point scan).  A
-  ``zeta0``-blind objective drives the wrong quantity to zero.
-- **Read the softmax as the bound it is.**  ``ballooning_growth_rate`` sits
-  above ``max λ`` by up to ``temperature × log(n_lines)``, which at the
-  default ``temperature=0.05`` over 12 lines is 0.12 — larger than published
-  ``λ_max`` values.  Target the bound (below zero is then sufficient for
-  stability) and report
-  :func:`~vmex.core.stability.ballooning_lambda`'s hard maximum, or lower the
-  temperature and accept a sharper gradient.
+  ``zeta0s=(0.0,)`` under-reports it on three-dimensional states.
+- **Resolve the line.**  Keep about 128 points per poloidal turn (the
+  default 641 over five turns); fewer read ``λ`` low.  Raise it for
+  configurations with many field periods or toroidal modes.
+- **Name surfaces by** ``s``.  ``surfaces=`` evaluates the same flux surface
+  on every radial grid; ``s_indices=`` picks grid nodes, which move when
+  ``ns`` changes.
 
 Asymmetric (``lasym``) states are supported: the sine-parity ``R``/``Z``/``λ``
 spectra carry through the PEST angle map and the field-line geometry.  An
@@ -589,11 +605,10 @@ JAX-native Hermite–Laguerre flux-tube solver, formerly SPECTRAX-GK;
   ``R/L_Ti = 6.9`` (aspect 2.643, so ``a/L_Ti = 2.611``): 0.184 ``v_th/L``
   against 8.9e-15 below the critical gradient, with reverse and forward AD
   gated against finite differences to 1e-5 relative;
-- :func:`~vmex.core.turbulence.quasilinear_flux_proxy` and
-  :func:`~vmex.core.turbulence.nonlinear_heat_flux_proxy` — the
-  mixing-length and saturation-rule heat-flux surrogates.  These weight the
+- :func:`~vmex.core.turbulence.quasilinear_flux_proxy` — the
+  mixing-length heat-flux surrogate.  It weights the
   dominant *eigenvector*; GKX's implicit eigenpair rule differentiates it in
-  both modes, so they take ``jac="implicit"`` like the growth rate.
+  both modes, so it takes ``jac="implicit"`` like the growth rate.
 
 .. code-block:: python
 
@@ -629,7 +644,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.qi.JInvariantQIResidual`
      - yes
      - yes
-     - physical-pitch action variation over complete wells
+     - pooled physical-pitch action dispersion over complete wells
    * - :class:`~vmex.core.maxj.MaximumJResidual`
      - yes
      - yes
@@ -637,7 +652,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes
-     - shared-transform J-invariance and maximum-J rows
+     - shared-transform pooled action dispersion and maximum-J rows
    * - :class:`~vmex.core.gammac.GammaC`
      - yes
      - yes
@@ -645,15 +660,15 @@ Which objectives differentiate how
    * - :class:`~vmex.core.gammac.GammaCSmooth`
      - yes
      - yes
-     - refinement-stable derivative via separatrix and corner floors
+     - smooth drift surrogate; approximate pitch-grid shape derivatives
    * - :class:`~vmex.core.bootstrap.RedlBootstrapMismatch`
      - yes
      - yes
      - dual lane (wout parity / traceable)
-   * - :func:`~vmex.core.stability.ballooning_growth_rate`
+   * - :func:`~vmex.core.stability.ballooning_residual`
      - yes
      - yes
-     - all-JAX eigenproblem, softmax reduction
+     - all-JAX eigenproblem, one hinge row per field line
    * - :func:`~vmex.core.turbulence.turbulent_growth_rate`
      - yes
      - yes
@@ -687,8 +702,7 @@ Which objectives differentiate how
      - no
      - host-NumPy Boozer tables (use
        :class:`~vmex.core.omnigenity.QIResidual` instead)
-   * - :func:`~vmex.core.turbulence.quasilinear_flux_proxy`,
-       :func:`~vmex.core.turbulence.nonlinear_heat_flux_proxy`
+   * - :func:`~vmex.core.turbulence.quasilinear_flux_proxy`
      - yes
      - yes
      - GKX implicit eigenpair rule (bordered tangent): JVP + VJP
