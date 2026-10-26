@@ -22,6 +22,7 @@ import hashlib
 import os
 import pickle
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -31,6 +32,26 @@ from jax.experimental import serialize_executable as _se
 _LANES: list = []               #: every AotLane, for :func:`release`
 MAX_FILES = 64                  #: executables kept per cache directory
 _SOURCE_HASH: str | None = None
+_BUILD_LOCK = threading.Lock()
+
+
+def _compile(lower: Callable[[], Any]) -> Any:
+    """Compile ``lower()`` with the persistent compilation cache bypassed.
+
+    An executable served by that cache serializes into a blob which fails at
+    execution (``call_kernel not found``) once loaded, after its donated
+    inputs are already consumed.  A fresh compile serializes into a loadable
+    one; it happens once per source hash, after which the blob is reused.
+    """
+    from jax._src import compilation_cache as cc
+    with _BUILD_LOCK:
+        jax.config.update("jax_enable_compilation_cache", False)
+        cc.reset_cache()
+        try:
+            return lower().compile()
+        finally:
+            jax.config.update("jax_enable_compilation_cache", True)
+            cc.reset_cache()
 
 
 def _source_hash() -> str:
@@ -123,7 +144,7 @@ class AotLane:
         except Exception:                        # absent, stale or corrupt
             compiled = None
         if compiled is None:
-            compiled = self.jit.lower(*args, **static).compile()
+            compiled = _compile(lambda: self.jit.lower(*args, **static))
             self._store(directory, path, compiled)
         self._memory[text] = compiled
         return compiled
@@ -144,7 +165,13 @@ class AotLane:
             pass
 
     def __call__(self, *args: Any, **static: Any) -> Any:
-        """Run the cached executable, falling back to the jitted lane."""
+        """Run the cached executable, falling back to the jitted lane.
+
+        Argument checks precede donation, so a rejected call leaves the inputs
+        intact and the jitted lane may take over.  Once a donated buffer is
+        gone the jitted lane could only fail on it and mask the real error,
+        which is raised instead.
+        """
         try:
             compiled = self.executable(*args, **static)
         except Exception:
@@ -152,8 +179,10 @@ class AotLane:
         if compiled is not None:
             try:
                 return compiled(*args)
-            except Exception:    # placement drift; argument checks precede donation
-                pass
+            except Exception:
+                if any(getattr(leaf, "is_deleted", bool)()
+                       for leaf in jax.tree_util.tree_leaves(args)):
+                    raise
         return self.jit(*args, **static)
 
 
