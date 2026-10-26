@@ -1759,7 +1759,7 @@ def test_pwo_physical_family_step_checks_heldout_charts(tmp_path, monkeypatch, r
             def score(sp):
                 result = objective(sp)
                 if kwargs['charts'][0]['level_T'] == .805:
-                    result['value'] = 1/result['value']
+                    result['per_pitch'][0]['value'] = 1/result['per_pitch'][0]['value']
                 return result
             return score
         monkeypatch.setitem(env, 'PwOActionFamilies', scorer)

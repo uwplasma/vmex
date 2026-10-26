@@ -482,7 +482,7 @@ class PwOActionFamilies:
     numerical trust limits, not universal pwO constraints.
 
     Track those tangencies and bounce roots on trial spectra. Reference chart
-    weights, action means and length remain fixed. Returned variance and raw
+    weights, action means and length remain fixed. Aggregate/per-pitch variance and raw
     slopes describe these charts only: no automatic family discovery, global
     topology proof, JAX differentiation or pwO qualification is provided.
     """
@@ -611,7 +611,16 @@ class PwOActionFamilies:
             if any(y[0]-x[0] > 1e-6 and y[1] <= x[1] for x, y in zip(pairs, pairs[1:])):
                 raise ValueError("Tracked tangency ordering changed")
         weights = self.weights
-        return dict(value=float(weights@np.array([f["variance_m2"] for f in output]))/self.length**2,
+        variance = np.array([f["variance_m2"] for f in output])
+        levels = np.array([c["level_T"] for c in self.charts])
+        per_pitch = []
+        for level in np.unique(levels):
+            mask = levels == level
+            pitch_weights = np.array([c["weight"] for c in self.charts if c["level_T"] == level], dtype=float)
+            pitch_weights /= pitch_weights.sum()
+            per_pitch.append(dict(level_T=float(level),
+                value=float(pitch_weights@variance[mask])/self.length**2))
+        return dict(value=float(weights@variance)/self.length**2, per_pitch=per_pitch,
                     raw_Jalpha2=float(weights@np.array([f["raw_Jalpha2"] for f in output])),
                     fixed_relative_variance=float(weights@np.array([f["fixed_relative_variance"] for f in output])),
                     families=output, family_invariance_qualified=False, global_topology_proof=False)

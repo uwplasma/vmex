@@ -134,6 +134,7 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
     each with three PwOActionFamilies constructor dictionaries at s=.5,.25,.75.
     Reference spectra identify the actual half-mesh surfaces. Restarts reuse
     these charts and their normalization; family discovery is caller-supplied.
+    Require descent at each sampled pitch as a conservative numerical rule.
     """
     started = time.perf_counter()
     names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)", "ZBS(2,1)"]
@@ -205,7 +206,7 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
 
     def rows(scored):
         if objectives:
-            return np.array([s["value"] for s in scored])
+            return np.array([p["value"] for s in scored for p in s["per_pitch"]])
         # Keep middle-surface pitches separate; each additional radius adds its own constraints.
         return np.array([p[k] for p in scored[0]["per_pitch"]+[s["components"] for s in scored[1:]] for k in keys])
 

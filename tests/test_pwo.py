@@ -639,9 +639,18 @@ def test_action_families_keep_distinct_means_and_fixed_normalization():
     weights = np.array([first["weight"], second["weight"]]); weights /= weights.sum()
     assert initial["value"] == pytest.approx(sum(w*f["variance_m2"] for w, f in zip(weights, initial["families"]))/ .4**2)
     after = objective(dict(spectrum, G_b=2.))
+    assert [p['level_T'] for p in initial['per_pitch']] == [.805, .81]
+    for pitch, family in zip(initial['per_pitch'], reversed(initial['families'])):
+        assert pitch['value'] == pytest.approx(family['variance_m2']/.4**2)
+    for before, changed in zip(initial['per_pitch'], after['per_pitch']):
+        assert changed['value'] == pytest.approx(4*before['value'], rel=1e-10)
     for key in ("value", "raw_Jalpha2", "fixed_relative_variance"):
         assert after[key] == pytest.approx(4*initial[key], rel=1e-10)
     assert objective(spectrum)["value"] == initial["value"]
+    first['weight'], second['weight'] = 1e300, 1e-300
+    extreme = PwOActionFamilies(spectrum, [first, second], length=.4).initial
+    np.testing.assert_allclose([p['value'] for p in extreme['per_pitch']],
+                               [p['value'] for p in initial['per_pitch']], rtol=1e-10)
 
 
 @pytest.mark.parametrize("forbidden", [False, True])
