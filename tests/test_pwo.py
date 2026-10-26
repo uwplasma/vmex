@@ -668,3 +668,13 @@ def test_action_family_owns_reference_arrays_and_rejects_weight_overflow():
     chart["weight"] = 1e308
     with np.errstate(over="ignore"), pytest.raises(ValueError, match="total family weight"):
         PwOActionFamilies(saved, [chart, chart], length=.4)
+
+
+def test_action_family_allows_fourier_refinement_and_reordering():
+    spectrum, chart = _action_family()
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    refined = dict(spectrum, bmnc_b=[.02, 0., 1., .2], bmns_b=[0.]*4,
+                   xm_b=[1, 2, 0, 0], xn_b=[0, 3, 0, 1])
+    result = objective(refined)
+    for key in ('value', 'raw_Jalpha2', 'fixed_relative_variance'):
+        assert result[key] == pytest.approx(objective.initial[key], rel=1e-10)

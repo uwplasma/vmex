@@ -8,6 +8,7 @@ Target calibration stays fixed; final validation requires local mirror within
 VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step,
 using raw slopes and fixed-reference action normalization.
 VMEX_PWO_REFERENCE names an accepted summary to keep its grids and bounds fixed.
+VMEX_PWO_FAMILY_CHARTS supplies JSON orbit charts to optimize family variance.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -23,7 +24,7 @@ from scipy.optimize import least_squares, linprog, minimize
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.pwo import CanonicalPwOResidual, MappedPwOResidual, physical_pwo_action_from_boozer
+from vmex.core.pwo import CanonicalPwOResidual, MappedPwOResidual, PwOActionFamilies, physical_pwo_action_from_boozer
 from vmex.core.omnigenity import boozer_spectrum_state
 from vmex.core.restart import restart_state
 
@@ -125,8 +126,15 @@ def qp_gate_failures(metrics):
     return failed
 
 
-def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None, step_lengths=None):
-    """Try up to three decreasing step lengths along one seven-variable descent direction."""
+def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None, step_lengths=None,
+                      family_charts=None):
+    """Try up to three bounded steps using slopes or supplied family variance.
+
+    family_charts is a JSON-compatible list of two independent sampling groups,
+    each with three PwOActionFamilies constructor dictionaries at s=.5,.25,.75.
+    Reference spectra identify the actual half-mesh surfaces. Restarts reuse
+    these charts and their normalization; family discovery is caller-supplied.
+    """
     started = time.perf_counter()
     names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)", "ZBS(2,1)"]
     keys = ("raw_Jalpha2", "fixed_relative_Jalpha2")
@@ -188,17 +196,22 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
         scored = []
         for j, sp in enumerate(spectra):
             try:
-                scored.append(physical_pwo_action_from_boozer(**sp, levels=levels[group][j], alphas=alpha[group][j],
+                scored.append(objectives[group][j](dict(sp, s_b=[baseline["surfaces"][j]])) if objectives else
+                    physical_pwo_action_from_boozer(**sp, levels=levels[group][j], alphas=alpha[group][j],
                     reference=None if reference is None else reference[j], check_roots=True))
             except (ValueError, RuntimeError) as error:
                 raise ValueError(f"s={baseline['surfaces'][j]:.6g}, sampling group {group}: {error}") from error
         return scored
 
     def rows(scored):
+        if objectives:
+            return np.array([s["value"] for s in scored])
         # Keep middle-surface pitches separate; each additional radius adds its own constraints.
         return np.array([p[k] for p in scored[0]["per_pitch"]+[s["components"] for s in scored[1:]] for k in keys])
 
     def improves(before, after):
+        if objectives:
+            return bool(np.all(rows(after) < rows(before)))
         def worst(s):
             return max(abs(r["dJ"]/r["J"]) for r in s["rows"])
         return all(all(c["components"][k] < b["components"][k] for k in keys)
@@ -213,6 +226,17 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
         if reference is not None and (not reference.get("accepted") or
                 reference["physical_reference"]["identity"] != identity):
             raise ValueError("Reference must be an accepted step with the same NFP, flux and R00")
+        if reference is not None:
+            if family_charts is not None:
+                raise ValueError("A restart must reuse its saved family charts")
+            family_charts = reference["physical_reference"].get("family_charts")
+        objectives = None
+        if family_charts is not None:
+            if len(family_charts) != 2 or any(len(g) != 3 for g in family_charts):
+                raise ValueError("Family charts require two sampling groups on three surfaces")
+            objectives = [[PwOActionFamilies(**entry) for entry in group] for group in family_charts]
+            names[3] = "RBC(0,2)"
+        summary["action_objective"] = "family_variance" if objectives else "fixed_alpha_slopes"
         problem = opt.VmecProblem.from_loss(
             inp, opt.aspect_ratio, max_mode=2, vary_major_radius=False, restart_from=equilibrium,
             max_fsq_ratio=1., refine_tol=1e-13, forward_ftol=1e-13, progress=False)
@@ -227,6 +251,8 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
             fixed = dict(identity=identity, metrics=fine_metrics,
                          levels_T=[[v.tolist() for v in g] for g in levels],
                          alpha=[[v.tolist() for v in g] for g in alpha])
+            if objectives:
+                fixed["family_charts"] = family_charts
         else:
             fixed = reference["physical_reference"]
             levels, alpha = fixed["levels_T"], fixed["alpha"]
@@ -468,8 +494,11 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
     if METHOD == "physical":
         reference_path = os.environ.get("VMEX_PWO_REFERENCE")
         reference = None if reference_path is None else json.loads(Path(reference_path).read_text())
+        chart_path = os.environ.get("VMEX_PWO_FAMILY_CHARTS")
+        family_charts = None if chart_path is None else json.loads(Path(chart_path).read_text())
         return run_physical_step(seed_input, equilibrium, refined, output_name=output_name,
-                                 seed_route=seed_route, reference=reference, step_lengths=physical_steps)
+                                 seed_route=seed_route, reference=reference, step_lengths=physical_steps,
+                                 family_charts=family_charts)
     inp = seed_input
     seed_equilibrium = equilibrium
     aspect_ref = float(equilibrium.wout.aspect)

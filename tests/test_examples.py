@@ -1703,3 +1703,79 @@ def test_pwo_physical_rejects_invalid_step_lengths(tmp_path, monkeypatch, steps)
     result = json.loads((tmp_path / "invalid_summary.json").read_text())
     assert "step lengths" in result["rejection"]
     assert result["search_evaluations"] == result["refinement_evaluations"] == 0
+
+
+@pytest.mark.parametrize('charts,restart', [([], False), ([[{}]*3], False), ([[{}]*2]*2, False), ([], True)])
+def test_pwo_physical_rejects_invalid_family_configuration(tmp_path, monkeypatch, charts, restart):
+    import runpy
+    from types import SimpleNamespace
+    run = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['run_physical_step']
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(run.__globals__, 'ci_smoke', False)
+    inp = SimpleNamespace(nfp=2, phiedge=.1, ntor=0, rbc=np.array([[1.]]))
+    reference = dict(accepted=True, physical_reference=dict(identity=dict(nfp=2, phiedge=.1, R00=1.))) if restart else None
+    with pytest.raises(SystemExit):
+        run(inp, None, None, output_name='invalid', seed_route='qi', family_charts=charts, reference=reference)
+    result = json.loads((tmp_path / 'invalid_summary.json').read_text())
+    assert ('reuse its saved family charts' if restart else 'two sampling groups on three surfaces') in result['rejection']
+    assert result['search_evaluations'] == 0
+
+
+@pytest.mark.parametrize('reject_validation', [False, True])
+def test_pwo_physical_family_step_checks_heldout_charts(tmp_path, monkeypatch, reject_validation):
+    """Exercise search/acceptance with an analytic field and an equilibrium test double."""
+    import runpy
+    from types import SimpleNamespace as NS
+    example = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))
+    run = example['run_physical_step']; env = run.__globals__
+    monkeypatch.chdir(tmp_path); monkeypatch.setitem(env, 'ci_smoke', True)
+    names = ['RBC(1,1)', 'ZBS(0,1)', 'ZBS(-1,1)', 'RBC(0,2)', 'RBC(0,1)', 'ZBS(1,1)', 'ZBS(2,1)']
+    inp = NS(nfp=1, phiedge=.1, ntor=0, rbc=np.array([[1.]]), to_indata=lambda p: Path(p).touch())
+    def equilibrium(x):
+        return NS(state=x, runtime=None, result=NS(converged=True),
+                  wout=NS(aspect=6., Aminor_p=.2, volavgB=1.))
+    problem = NS(names=names, x0=np.zeros(7), equilibrium_from_x=equilibrium, input_from_x=lambda x: inp)
+    monkeypatch.setattr(example['opt'], 'VmecProblem', NS(from_loss=lambda *a, **k: problem))
+    for name, value in [('min_abs_iota', .5), ('mean_iota', .5), ('mirror_ratio', .2), ('max_elongation', 2.)]:
+        monkeypatch.setattr(example['opt'], name, lambda *a, v=value: v)
+    spectrum = dict(bmnc_b=[[1., .2, .02]], bmns_b=[[0.]*3], xm_b=[0, 0, 1], xn_b=[0, 1, 0],
+                    nfp=1, iota_b=[0.], G_b=[1.], I_b=[0.])
+    monkeypatch.setitem(env, 'boozer_spectrum_state', lambda x, runtime, surfaces, **k:
+                        dict(spectrum, s_b=surfaces, G_b=[1-float(np.sum(x))]))
+    monkeypatch.setattr(example['vj'], 'write_wout', lambda p, w: Path(p).touch())
+    groups = []
+    for level in (.81, .805):
+        lower = np.arccos((level-.8)/.02); nodes, weights = np.polynomial.legendre.leggauss(4); rows = []
+        for u, weight in zip((nodes+1)/2, weights/2):
+            alpha = lower+u*(2*np.pi-2*lower)
+            width = np.arccos((1+.02*np.cos(alpha)-level)/.2)
+            rows.append(dict(u=u, weight=weight, left=np.pi-width, right=np.pi+width))
+        chart = dict(level_T=level, weight=1., endpoints=[[lower, np.pi], [2*np.pi-lower, np.pi]], rows=rows)
+        groups.append([dict(reference=dict(spectrum, s_b=[s]), charts=[chart], length=.2) for s in (.5, .25, .75)])
+    if reject_validation:
+        original = env['PwOActionFamilies']
+        def scorer(**kwargs):
+            objective = original(**kwargs)
+            def score(sp):
+                result = objective(sp)
+                if kwargs['charts'][0]['level_T'] == .805:
+                    result['value'] = 1/result['value']
+                return result
+            return score
+        monkeypatch.setitem(env, 'PwOActionFamilies', scorer)
+    result = run(inp, None, lambda inp, eq: (inp, eq), output_name='family', seed_route='qi',
+                 family_charts=groups, step_lengths=[.001])
+    assert result['accepted'] != reject_validation
+    assert result['action_objective'] == 'family_variance'
+    assert result['parameters'] == names
+    assert result['physical_reference']['family_charts'] == groups
+    assert (tmp_path / 'wout_family.nc').exists() != reject_validation
+    if reject_validation:
+        assert 'descent checks' in result['trials'][0]['rejection']
+    else:
+        assert all(a['value'] < b['value'] for before, after in zip(result['refined_before'], result['refined_after'])
+                   for b, a in zip(before, after))
+        continued = run(inp, None, lambda inp, eq: (inp, eq), output_name='continued', seed_route='qi',
+                        reference=result, step_lengths=[.001])
+        assert continued['accepted']
+        assert continued['physical_reference'] == result['physical_reference']

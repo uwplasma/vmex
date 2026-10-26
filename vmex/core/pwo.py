@@ -543,8 +543,8 @@ class PwOActionFamilies:
         """Rescore the same families, or raise when local continuation is unresolved."""
         from scipy.optimize import brentq, root
         kernel = self._kernel(spectrum)
-        if any(not np.array_equal(spectrum.get(k), self.reference.get(k)) for k in ("nfp", "xm_b", "xn_b", "s_b")):
-            raise ValueError("Family continuation requires the same surface and Fourier basis")
+        if any(not np.array_equal(spectrum.get(k), self.reference.get(k)) for k in ("nfp", "s_b")):
+            raise ValueError("Family continuation requires the same surface and field period")
         field, output, ordering = kernel.field, [], {}
         for index, chart in enumerate(self.charts):
             level = chart["level_T"]; endpoints = []
