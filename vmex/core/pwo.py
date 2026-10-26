@@ -24,7 +24,7 @@ from .omnigenity import boozer_spectrum_state
 
 __all__ = ["canonical_pwo_field", "squeezed_pwo_coordinates",
            "canonical_pwo_residual_from_boozer", "mapped_pwo_residual_from_boozer",
-           "physical_pwo_action_from_boozer", "CanonicalPwOResidual", "MappedPwOResidual"]
+           "physical_pwo_action_from_boozer", "PwOActionFamilies", "CanonicalPwOResidual", "MappedPwOResidual"]
 
 
 def _require(condition, message):
@@ -275,6 +275,61 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     return out
 
 
+def _pwo_action_kernel(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp, bmns_b=None):
+    from types import SimpleNamespace
+    from scipy.integrate import quad
+
+    _integer(nfp, 1, "nfp")
+    c, m, n = (np.asarray(v, dtype=float) for v in (bmnc_b, xm_b, xn_b))
+    if c.ndim == 2 and c.shape[0] == 1:
+        c = c[0]
+    s = np.zeros_like(c) if bmns_b is None else np.asarray(bmns_b, dtype=float)
+    if s.ndim == 2 and s.shape[0] == 1:
+        s = s[0]
+    if c.ndim != 1 or not c.size or any(v.shape != c.shape for v in (s, m, n)):
+        raise ValueError("one surface needs coefficient vectors or rows and matching mode vectors")
+    scalars = [np.asarray(v, dtype=float) for v in (iota_b, G_b, I_b)]
+    if any(v.shape not in ((), (1,)) for v in scalars):
+        raise ValueError("iota_b, G_b and I_b must each contain one surface value")
+    iota, current_G, current_I = (float(v.reshape(-1)[0]) for v in scalars)
+    factor = abs(current_G+iota*current_I); freq = m*iota-n; period = 2*np.pi/nfp
+    if (not all(np.all(np.isfinite(v)) for v in (c, s, m, n, *scalars, freq))
+            or np.any(m != np.round(m)) or np.any(n/nfp != np.round(n/nfp))
+            or not np.isfinite(factor) or factor <= 0):
+        raise ValueError("finite periodic spectra and nonzero |G+iota*I| are required")
+    def field(z, alpha):
+        phase = m*alpha+freq*z; co, si = np.cos(phase), np.sin(phase)
+        return float(c@co+s@si), float((-m*c)@si+(m*s)@co), float((-freq*c)@si+(freq*s)@co)
+    def integral(alpha, left, right, level, derivative, extrema=()):
+        width = .5*(right-left)
+        phase = m*alpha+np.array([left, right])[:, None]*freq
+        co, si = np.cos(phase), np.sin(phase)
+        A, D = c*co+s*si, -c*si+s*co
+        residual = level-A.sum(axis=1)
+        mA, mD = m*A, m*D
+        def fun(t):
+            side = int(t > 0)
+            distance = (2*width*np.sin((t+np.pi/2)/2)**2 if side == 0
+                        else -2*width*np.sin((np.pi/2-t)/2)**2)
+            sh, ch = np.sin(freq*distance/2), np.cos(freq*distance/2)
+            # Retain the root residual; avoid subtracting nearly equal field values.
+            sn, cm1 = 2*sh*ch, -2*sh*sh
+            gap = residual[side]-A[side]@cm1-D[side]@sn
+            B = level-gap; par = gap/level
+            Ba = -mA[side]@sn+mD[side]@(1+cm1) if derivative else 0.
+            if B <= 0 or par <= 0:
+                raise ValueError("Nonpositive interior field or parallel energy")
+            value = -Ba*(1-B/(2*level))/(B*B*np.sqrt(par)) if derivative else np.sqrt(par)/B
+            return 2*factor*value*width*np.cos(t)
+        points = [np.arcsin((z-.5*(left+right))/width) for z in extrema if left < z < right]
+        out = quad(fun, -np.pi/2, np.pi/2, points=points, epsabs=1e-9, epsrel=1e-8, limit=150, full_output=1)
+        if len(out) > 3:
+            raise ValueError(out[3])
+        return out[:2]
+    return SimpleNamespace(field=field, integral=integral, coefficients=(c, s, m, n),
+                           iota=iota, frequency=freq, period=period)
+
+
 def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
         nfp, levels, alphas, bmns_b=None, reference=None, points_per_period=1024,
         check_roots=False, match_critical_census=False, max_periods=32):
@@ -298,34 +353,18 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     With a reference, follow its wells across the sampling seam; reject
     splitting or merging that changes the number of overlapping wells.
     """
-    from scipy.integrate import quad
     from scipy.optimize import brentq, linear_sum_assignment
 
     _integer(nfp, 1, "nfp"); _integer(points_per_period, 8, "points_per_period")
     _integer(max_periods, 8, "max_periods")
-    c, m, n = (np.asarray(v, dtype=float) for v in (bmnc_b, xm_b, xn_b))
-    if c.ndim == 2 and c.shape[0] == 1:
-        c = c[0]
-    s = np.zeros_like(c) if bmns_b is None else np.asarray(bmns_b, dtype=float)
-    if s.ndim == 2 and s.shape[0] == 1:
-        s = s[0]
-    if c.ndim != 1 or not c.size or any(v.shape != c.shape for v in (s, m, n)):
-        raise ValueError("one surface needs coefficient vectors or rows and matching mode vectors")
-    scalars = [np.asarray(v, dtype=float) for v in (iota_b, G_b, I_b)]
-    if any(v.shape not in ((), (1,)) for v in scalars):
-        raise ValueError("iota_b, G_b and I_b must each contain one surface value")
-    iota, current_G, current_I = (float(v.reshape(-1)[0]) for v in scalars)
+    kernel = _pwo_action_kernel(bmnc_b=bmnc_b, bmns_b=bmns_b, xm_b=xm_b, xn_b=xn_b,
+                               iota_b=iota_b, G_b=G_b, I_b=I_b, nfp=nfp)
+    c, s, m, n = kernel.coefficients
+    freq, period = kernel.frequency, kernel.period
+    field, integral = kernel.field, kernel.integral
     levels, alphas = np.asarray(levels, dtype=float), np.asarray(alphas, dtype=float)
     if any(v.ndim != 1 or not v.size or not np.all(np.isfinite(v)) for v in (levels, alphas)) or np.any(levels <= 0):
         raise ValueError("levels and alphas must be finite nonempty vectors with positive levels")
-    factor = abs(current_G+iota*current_I); freq = m*iota-n; period = 2*np.pi/nfp
-    if (not all(np.all(np.isfinite(v)) for v in (c, s, m, n, *scalars, freq))
-            or np.any(m != np.round(m)) or np.any(n/nfp != np.round(n/nfp))
-            or not np.isfinite(factor) or factor <= 0):
-        raise ValueError("finite periodic spectra and nonzero |G+iota*I| are required")
-    def field(z, alpha):
-        phase = m*alpha+freq*z; co, si = np.cos(phase), np.sin(phase)
-        return float(c@co+s@si), float((-m*c)@si+(m*s)@co), float((-freq*c)@si+(freq*s)@co)
     def root_sets(alpha, ppp, end, samples=None):
         if samples is None:
             z = np.linspace(-4*period, end*period, (end+4)*ppp+1); sample = np.zeros_like(z)
@@ -347,31 +386,6 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
             idx = np.flatnonzero((B[:-1]-level)*(B[1:]-level) < 0)
             result.append(np.unique([brentq(lambda x: field(x, alpha)[0]-level, boundaries[j], boundaries[j+1], xtol=1e-13) for j in idx]+boundaries[B == level].tolist()))
         return result, critical, (z, sample)
-    def integral(alpha, left, right, level, derivative):
-        width = .5*(right-left)
-        phase = m*alpha+np.array([left, right])[:, None]*freq
-        co, si = np.cos(phase), np.sin(phase)
-        A, D = c*co+s*si, -c*si+s*co
-        residual = level-A.sum(axis=1)
-        mA, mD = m*A, m*D
-        def fun(t):
-            side = int(t > 0)
-            distance = (2*width*np.sin((t+np.pi/2)/2)**2 if side == 0
-                        else -2*width*np.sin((np.pi/2-t)/2)**2)
-            sh, ch = np.sin(freq*distance/2), np.cos(freq*distance/2)
-            # Retain the root residual; avoid subtracting nearly equal field values.
-            sn, cm1 = 2*sh*ch, -2*sh*sh
-            gap = residual[side]-A[side]@cm1-D[side]@sn
-            B = level-gap; par = gap/level
-            Ba = -mA[side]@sn+mD[side]@(1+cm1) if derivative else 0.
-            if B <= 0 or par <= 0:
-                raise ValueError("Nonpositive interior field or parallel energy")
-            value = -Ba*(1-B/(2*level))/(B*B*np.sqrt(par)) if derivative else np.sqrt(par)/B
-            return 2*factor*value*width*np.cos(t)
-        out = quad(fun, -np.pi/2, np.pi/2, epsabs=1e-9, epsrel=1e-8, limit=150, full_output=1)
-        if len(out) > 3:
-            raise ValueError(out[3])
-        return out[:2]
     rows, checks, critical_census = [], [], []
     for ai, alpha in enumerate(alphas):
         tracked = [[r for r in reference["rows"] if (r["alpha_index"], r["pitch_index"]) == (ai, ip)]
@@ -412,8 +426,8 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
                     continue
                 if min(abs(field(z, alpha)[2]) for z in (left, right)) <= 1e-8:
                     raise ValueError("Marginal bounce root")
-                J, Je = integral(alpha, left, right, level, False)
-                dJ, de = integral(alpha, left, right, level, True)
+                J, Je = integral(alpha, left, right, level, False, extrema=critical)
+                dJ, de = integral(alpha, left, right, level, True, extrema=critical)
                 if not np.isfinite(J+dJ+Je+de) or J <= 0:
                     raise ValueError("Invalid action or derivative")
                 rows.append(dict(alpha_index=ai, pitch_index=ip, left=left, right=right, J=J, dJ=dJ, J_error=Je, dJ_error=de, reference_J=J))
@@ -452,6 +466,155 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     return dict(levels=levels.tolist(), alphas=alphas.tolist(), rows=rows, counts=counts, per_pitch=per_pitch,
                 components={k: float(np.mean([p[k] for p in per_pitch])) for k in ("raw_Jalpha2", "relative_Jalpha2", "fixed_relative_Jalpha2")},
                 root_checks=checks, critical_census=critical_census, matches=matches, family_invariance_qualified=False)
+
+
+class PwOActionFamilies:
+    """Local host-side action variance on explicitly supplied orbit charts.
+
+    Each chart supplies ``level_T``, two unwrapped ``endpoints`` [theta, zeta]
+    at nondegenerate tangencies, a positive fixed ``weight``, and ``rows``
+    containing u, weight, left and right. Nodes satisfy 0<u<1; their positive
+    weights sum to one. Chart weights include the reference alpha span and
+    pitch weight. Periodic copies must be resolved by the caller.
+
+    Event shifts are limited to 0.2 rad, span ratios to (0.25, 4), and
+    root brackets to 20% of each reference well width. These are local
+    numerical trust limits, not universal pwO constraints.
+
+    Track those tangencies and bounce roots on trial spectra. Reference chart
+    weights, action means and length remain fixed. Returned variance and raw
+    slopes describe these charts only: no automatic family discovery, global
+    topology proof, JAX differentiation or pwO qualification is provided.
+    """
+
+    def __init__(self, reference, charts, *, length):
+        from copy import deepcopy
+        self.reference, self.charts = deepcopy(reference), deepcopy(charts)
+        self.length = float(length)
+        self.base = self._kernel(self.reference)
+        if not np.isfinite(self.length) or self.length <= 0 or not self.charts:
+            raise ValueError("Positive reference length and nonempty orbit charts required")
+        for chart in self.charts:
+            q = np.asarray(chart["endpoints"], dtype=float)
+            level, weight = chart["level_T"], chart["weight"]
+            if q.shape != (2, 2) or not np.all(np.isfinite(q)) or not np.isfinite(level+weight) or min(level, weight) <= 0:
+                raise ValueError("Invalid chart endpoints, level or weight")
+            domain = q[:, 0]-self.base.iota*q[:, 1]
+            if domain[1] <= domain[0]:
+                raise ValueError("Chart endpoints must bound an increasing alpha interval")
+            chart["endpoints"], chart["reference_domain"] = q, domain
+            determinants = []
+            for point in q:
+                value, jac = self._event(self.base, level, point)
+                determinant = float(np.linalg.det(jac))
+                if np.linalg.norm(value) > 1e-8 or not np.isfinite(determinant) or abs(determinant) <= 1e-10:
+                    raise ValueError("Chart endpoint is not a regular tangency")
+                determinants.append(determinant)
+            chart["determinants"] = determinants
+            nodes = np.asarray([[r[k] for k in ("u", "weight", "left", "right")] for r in chart["rows"]], dtype=float)
+            if (nodes.ndim != 2 or nodes.shape[1:] != (4,) or len(nodes) < 3 or not np.all(np.isfinite(nodes))
+                    or np.any(nodes[:, :2] <= 0) or np.any(nodes[:, 0] >= 1)
+                    or np.any(np.diff(nodes[:, 0]) <= 0) or abs(nodes[:, 1].sum()-1) > 1e-12
+                    or np.any(nodes[:, 3] <= nodes[:, 2])):
+                raise ValueError("Invalid positive quadrature or reference wells")
+            chart["nodes"] = nodes
+        self.weights = np.array([c["weight"] for c in self.charts], dtype=float)
+        total = self.weights.sum()
+        if not np.isfinite(total):
+            raise ValueError("Nonfinite total family weight")
+        self.weights /= total
+        self.initial = self(self.reference)
+
+    @staticmethod
+    def _kernel(spectrum):
+        keys = ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b", "G_b", "I_b", "nfp")
+        return _pwo_action_kernel(**{k: spectrum[k] for k in keys if k in spectrum})
+
+    @staticmethod
+    def _event(kernel, level, q):
+        c, s, m, n = kernel.coefficients
+        phase = m*q[0]-n*q[1]; co, si = np.cos(phase), np.sin(phase)
+        derivative, curvature = -c*si+s*co, -c*co-s*si
+        f = kernel.frequency
+        return (np.array([c@co+s@si-level, f@derivative]),
+                np.array([[m@derivative, -n@derivative], [(f*m)@curvature, -(f*n)@curvature]]))
+
+    def __call__(self, spectrum):
+        """Rescore the same families, or raise when local continuation is unresolved."""
+        from scipy.optimize import brentq, root
+        kernel = self._kernel(spectrum)
+        if any(not np.array_equal(spectrum.get(k), self.reference.get(k)) for k in ("nfp", "xm_b", "xn_b", "s_b")):
+            raise ValueError("Family continuation requires the same surface and Fourier basis")
+        field, output, ordering = kernel.field, [], {}
+        for index, chart in enumerate(self.charts):
+            level = chart["level_T"]; endpoints = []
+            for old, determinant in zip(chart["endpoints"], chart["determinants"]):
+                fit = root(lambda q: self._event(kernel, level, q), old, jac=True, tol=1e-11)
+                residual, jac = self._event(kernel, level, fit.x)
+                newdet = float(np.linalg.det(jac))
+                if (not np.all(np.isfinite(fit.x)) or not np.isfinite(newdet) or np.linalg.norm(residual) > 1e-8
+                        or newdet*determinant <= 0 or abs(newdet) < .01*abs(determinant)
+                        or np.linalg.norm(fit.x-old) > .2):
+                    raise ValueError("Lost tangency or exceeded local event trust range")
+                endpoints.append(fit.x)
+            endpoints = np.asarray(endpoints)
+            a, b = endpoints[:, 0]-kernel.iota*endpoints[:, 1]
+            old_a, old_b = chart["reference_domain"]
+            if not .25 < (b-a)/(old_b-old_a) < 4:
+                raise ValueError("Family span left local trust range")
+            ordering.setdefault(level, []).extend(zip((old_a, old_b), (a, b)))
+            shifts = endpoints[:, 1]-chart["endpoints"][:, 1]
+            rows = []
+            for u, weight, left, right in chart["nodes"]:
+                alpha = a+(b-a)*u; old_alpha = old_a+(old_b-old_a)*u
+                width = right-left; predictor = (1-u)*shifts[0]+u*shifts[1]; roots = []
+                for z in (left, right):
+                    slope = self.base.field(z, old_alpha)[2]
+                    if abs(self.base.field(z, old_alpha)[0]-level) > 1e-9 or abs(slope) <= 1e-8:
+                        raise ValueError("Reference bounce is not regular")
+                    center = z+predictor; mismatch = field(center, alpha)[0]-level
+                    radius = min(.2*width, max(width*1e-5, 4*abs(mismatch/slope)))
+                    while True:
+                        grid = np.linspace(center-radius, center+radius, 33)
+                        values = np.array([field(v, alpha)[0]-level for v in grid])
+                        cross = np.flatnonzero(values[:-1]*values[1:] < 0)
+                        exact = grid[values == 0]
+                        if len(cross)+len(exact) == 1:
+                            z = float(exact[0]) if len(exact) else brentq(lambda v: field(v, alpha)[0]-level, grid[cross[0]], grid[cross[0]+1], xtol=1e-13)
+                            break
+                        if len(cross)+len(exact) > 1 or radius >= .2*width:
+                            raise ValueError("Ambiguous or lost family bounce root")
+                        radius = min(.2*width, 2*radius)
+                    roots.append(z)
+                left, right = roots
+                if right <= left or field(left, alpha)[2] >= -1e-8 or field(right, alpha)[2] <= 1e-8:
+                    raise ValueError("Invalid continued well orientation")
+                grid = np.linspace(left, right, max(65, int(np.ceil((right-left)*max(abs(kernel.frequency))*16/np.pi))))
+                slopes = np.array([field(z, alpha)[2] for z in grid])
+                cross = np.flatnonzero(slopes[:-1]*slopes[1:] < 0)
+                extrema = [brentq(lambda z: field(z, alpha)[2], grid[k], grid[k+1]) for k in cross]
+                if max(field(z, alpha)[0] for z in [(left+right)/2, *extrema]) >= level:
+                    raise ValueError("Interior reflecting barrier in continued family")
+                J, error = kernel.integral(alpha, left, right, level, False, extrema=extrema)
+                dJ, derivative_error = kernel.integral(alpha, left, right, level, True, extrema=extrema)
+                if not np.all(np.isfinite([J, dJ, error, derivative_error])) or J <= 0:
+                    raise ValueError("Invalid family action quadrature")
+                rows.append(dict(u=u, weight=weight, alpha=alpha, left=left, right=right, J=J, dJ=dJ))
+            weights = np.array([r["weight"] for r in rows]); actions = np.array([r["J"] for r in rows])
+            mean = float(weights@actions); variance = float(weights@((actions-mean)**2))
+            anchor = self.initial["families"][index]["mean_action_m"] if hasattr(self, "initial") else mean
+            output.append(dict(mean_action_m=mean, variance_m2=variance, fixed_relative_variance=variance/anchor**2,
+                               raw_Jalpha2=float(weights@np.array([r["dJ"]**2 for r in rows])),
+                               alpha_domain=[a, b], endpoints=endpoints.tolist(), rows=rows))
+        for pairs in ordering.values():
+            pairs.sort()
+            if any(y[0]-x[0] > 1e-6 and y[1] <= x[1] for x, y in zip(pairs, pairs[1:])):
+                raise ValueError("Tracked tangency ordering changed")
+        weights = self.weights
+        return dict(value=float(weights@np.array([f["variance_m2"] for f in output]))/self.length**2,
+                    raw_Jalpha2=float(weights@np.array([f["raw_Jalpha2"] for f in output])),
+                    fixed_relative_variance=float(weights@np.array([f["fixed_relative_variance"] for f in output])),
+                    families=output, family_invariance_qualified=False, global_topology_proof=False)
 
 
 class _PwOResidual:

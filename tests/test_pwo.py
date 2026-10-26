@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from vmex.core.pwo import (
+    PwOActionFamilies,
     canonical_pwo_field,
     canonical_pwo_residual_from_boozer,
     mapped_pwo_residual_from_boozer,
@@ -559,3 +560,111 @@ def test_physical_action_shallow_well_has_finite_harmonic_limit(alpha, depth):
     coefficient = np.pi/(np.sqrt(.1)*minimum**1.5)
     assert row["J"] == pytest.approx(coefficient*depth, rel=3e-6)
     assert row["dJ"] == pytest.approx(coefficient*.02*np.sin(alpha), rel=1e-6)
+
+
+def _action_family(level=.81):
+    spectrum = dict(bmnc_b=[1., .2, .02], bmns_b=[0., 0., 0.],
+                    xm_b=[0, 0, 1], xn_b=[0, 1, 0], iota_b=0., G_b=1., I_b=0., nfp=1)
+    nodes, weights = np.polynomial.legendre.leggauss(8)
+    rows = []
+    for u, weight in zip((nodes+1)/2, weights/2):
+        lower = np.arccos((level-.8)/.02)
+        alpha = lower+u*(2*np.pi-2*lower)
+        width = np.arccos((1+.02*np.cos(alpha)-level)/.2)
+        rows.append(dict(u=u, weight=weight, left=np.pi-width, right=np.pi+width))
+    chart = dict(level_T=level, weight=2*np.pi-2*lower,
+                 endpoints=[[lower, np.pi], [2*np.pi-lower, np.pi]], rows=rows)
+    return spectrum, chart
+
+
+def test_action_family_matches_independent_fixed_alpha_wells():
+    spectrum, chart = _action_family()
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    result = objective.initial
+    alphas = [r["alpha"] for r in result["families"][0]["rows"]]
+    independent = physical_pwo_action_from_boozer(**spectrum, alphas=alphas, levels=[.81])
+    J = np.array([r["J"] for r in independent["rows"]]); w = np.array([r["weight"] for r in chart["rows"]])
+    np.testing.assert_allclose([r["J"] for r in result["families"][0]["rows"]], J, rtol=1e-10)
+    assert result["value"] == pytest.approx(w@((J-w@J)**2)/.4**2, rel=1e-10)
+    assert not result["family_invariance_qualified"] and not result["global_topology_proof"]
+
+
+@pytest.mark.parametrize("angle", [.03, -.03])
+def test_action_family_tracks_translated_events_and_preserves_reference(angle):
+    from copy import deepcopy
+    spectrum, chart = _action_family()
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    before = deepcopy(objective.initial)
+    translated = dict(spectrum, bmnc_b=[1., .2*np.cos(angle), .02*np.cos(angle)],
+                      bmns_b=[0., -.2*np.sin(angle), .02*np.sin(angle)])
+    after = objective(translated)
+    for key in ("value", "raw_Jalpha2", "fixed_relative_variance"):
+        assert after[key] == pytest.approx(before[key], rel=1e-9, abs=1e-12)
+    np.testing.assert_allclose(after["families"][0]["endpoints"], np.array(chart["endpoints"])+angle, atol=1e-10)
+    assert objective.initial == before
+
+
+@pytest.mark.parametrize("problem", ["weight", "nodes", "root", "tangency", "length", "empty", "reversed"])
+def test_action_family_rejects_invalid_reference(problem):
+    spectrum, chart = _action_family()
+    if problem == "weight":
+        chart["weight"] = -1
+    if problem == "nodes":
+        chart["rows"][0]["u"] = 0
+    if problem == "root":
+        chart["rows"][0]["left"] += .1
+    if problem == "tangency":
+        chart["endpoints"][0][0] += .1
+    if problem == "reversed":
+        chart["endpoints"].reverse()
+    with pytest.raises(ValueError):
+        PwOActionFamilies(spectrum, [] if problem == "empty" else [chart], length=0 if problem == "length" else .4)
+
+
+@pytest.mark.parametrize("change", [{"nfp": 2}, {"bmnc_b": [1., .2, 0.]}, {"G_b": 0.}, {"s_b": [.5]}])
+def test_action_family_rejects_changed_geometry_or_surface(change):
+    spectrum, chart = _action_family()
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    with pytest.raises(ValueError):
+        objective(dict(spectrum, **change))
+
+
+def test_action_families_keep_distinct_means_and_fixed_normalization():
+    spectrum, first = _action_family(.81)
+    _, second = _action_family(.805)
+    objective = PwOActionFamilies(spectrum, [first, second], length=.4)
+    initial = objective.initial
+    means = [f["mean_action_m"] for f in initial["families"]]
+    assert abs(means[0]-means[1]) > .01
+    weights = np.array([first["weight"], second["weight"]]); weights /= weights.sum()
+    assert initial["value"] == pytest.approx(sum(w*f["variance_m2"] for w, f in zip(weights, initial["families"]))/ .4**2)
+    after = objective(dict(spectrum, G_b=2.))
+    for key in ("value", "raw_Jalpha2", "fixed_relative_variance"):
+        assert after[key] == pytest.approx(4*initial[key], rel=1e-10)
+    assert objective(spectrum)["value"] == initial["value"]
+
+
+@pytest.mark.parametrize("forbidden", [False, True])
+def test_action_family_rejects_intervals_that_are_not_one_allowed_well(forbidden):
+    spectrum, chart = _action_family()
+    for row in chart["rows"]:
+        left, right = row["left"], row["right"]
+        row["left"] = right if forbidden else left
+        row["right"] = (left if forbidden else right)+2*np.pi
+    with pytest.raises(ValueError, match="orientation|reflecting barrier"):
+        PwOActionFamilies(spectrum, [chart], length=.4)
+
+
+def test_action_family_owns_reference_arrays_and_rejects_weight_overflow():
+    from copy import deepcopy
+    spectrum, chart = _action_family()
+    spectrum["bmnc_b"] = np.array(spectrum["bmnc_b"])
+    saved = deepcopy(spectrum)
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    spectrum["bmnc_b"][:] = 0
+    chart["rows"][0]["left"] = 0
+    assert objective(saved)["value"] == objective.initial["value"]
+    _, chart = _action_family()
+    chart["weight"] = 1e308
+    with np.errstate(over="ignore"), pytest.raises(ValueError, match="total family weight"):
+        PwOActionFamilies(saved, [chart, chart], length=.4)
