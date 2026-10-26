@@ -42,7 +42,7 @@ def test_ky_scan_points_sit_on_the_gkx_grid(tmp_path):
     assert [s["name"] for s in deck["species"]] == ["ion", "electron"]
     assert deck["physics"]["nonlinear"] is True and deck["physics"]["adiabatic_electrons"] is False
 def test_turbulence_cli_smoke(tmp_path, capsys):
-    pytest.importorskip("gkx", minversion="2.5.0")
+    pytest.importorskip("gkx", minversion="2.6.0")
     import vmex
     from vmex.core import optimize as opt
     from vmex.core.input import VmecInput
@@ -73,7 +73,7 @@ def test_turbulence_flag_runs_after_a_solve_and_reports_missing_gkx(tmp_path, mo
     assert calls and calls[0][0].name.startswith("wout_") and calls[0][1].s == 0.3
 
     def missing(*args, **kwargs):
-        raise ImportError("vmex --turbulence needs gkx>=2.5.0")
+        raise ImportError("vmex --turbulence needs gkx>=2.6.0")
 
     monkeypatch.setattr(gk_run, "run_turbulence", missing)
     args = cli.build_parser().parse_args([str(calls[0][0]), "--turbulence"])

@@ -15,7 +15,7 @@ from __future__ import annotations
 import functools
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
@@ -1270,6 +1270,97 @@ def lift_high_order_state(
     )
 
 
+def traced_lift(
+    runtime: Any,
+    *,
+    radial_basis: BSplineBasis | None = None,
+    degree: int = 5,
+    max_spans: int = 32,
+) -> Callable[[Any, Any], HighOrderEquilibriumState]:
+    """Return ``lift(state, runtime)``: :func:`lift_high_order_state` as a JAX map.
+
+    At a fixed radial grid, basis, mode table and endpoint rule the constrained
+    fit is linear in its samples, so it is built here once, on the host, as one
+    projection matrix per poloidal order and applied to live arrays with
+    ``einsum``. The returned map is traceable and differentiable in ``state``
+    and in the live ``runtime`` arrays (boundary, flux, profiles); it performs
+    no solve. Geometry is fitted exactly as in :func:`lift_high_order_state`.
+    The flux and pressure profiles are fitted to their half-mesh samples, which
+    are exact values of the input profiles, instead of the extrapolated
+    full-mesh companions: on ``input.nfp2_QA_finite_beta`` the extrapolation
+    puts the edge ``dp/ds`` off by a factor of five.
+    """
+
+    from .residuals import m1_constrained_to_physical
+    from .geometry import apply_lambda_axis_closure
+    from .statephysics import _field_chain
+    from .transforms import physical_to_internal_scale
+
+    setup, modes = runtime.setup, runtime.modes
+    s = np.asarray(setup.s_full, dtype=float)
+    s_half = np.asarray(setup.s_half, dtype=float)[1:]
+    if radial_basis is None:
+        spans = max(1, min(int(max_spans), (max(1, s.size - int(degree)) + 1) // 2))
+        radial_basis = BSplineBasis.clamped(
+            np.linspace(0.0, 1.0, spans + 1), degree=degree, quadrature_order=degree + 3
+        )
+
+    def projector(nodes: np.ndarray, m: int | None, **endpoints: bool) -> np.ndarray:
+        unit = np.eye(nodes.size)
+        return np.stack(
+            [_constrained_spline_fit(radial_basis, unit[:, j], nodes, mode_m=m, **endpoints)
+             for j in range(nodes.size)],
+            axis=1,
+        )
+
+    m_values = np.asarray(modes.m, dtype=int)
+    n_values = np.asarray(modes.n, dtype=int)
+    tables = {
+        edge: {m: projector(s, m, fix_axis=m == 0, fix_edge=edge) for m in np.unique(m_values)}
+        for edge in (True, False)
+    }
+    fit_geometry, fit_lambda = (
+        jnp.asarray(np.stack([tables[edge][m] for m in m_values])) for edge in (True, False)
+    )
+    fit_profile = jnp.asarray(projector(s_half, None))
+    gauge = jnp.asarray((m_values == 0) & (n_values == 0))
+    mode_scale = jnp.asarray(1.0 / physical_to_internal_scale(modes, runtime.trig))
+
+    def lift(state: Any, runtime: Any) -> HighOrderEquilibriumState:
+        live = runtime.setup
+        blocks = m1_constrained_to_physical(
+            state.R_cos, state.Z_sin, state.R_sin, state.Z_cos, modes=runtime.modes,
+            lthreed=live.lthreed, lasym=live.lasym, lconm1=live.lconm1,
+        )
+        R_cos, Z_sin, R_sin, Z_cos = (jnp.asarray(b) * mode_scale for b in blocks)
+        _, _, _, fields, _ = _field_chain(state, runtime)
+        phipf = jnp.asarray(live.phipf)
+        lam_scale = mode_scale * jnp.asarray(live.lamscale) / jnp.where(phipf != 0.0, phipf, 1.0)[:, None]
+        L_sin = apply_lambda_axis_closure(state.L_sin, modes=runtime.modes, ntor=runtime.resolution.ntor)
+
+        def geometry(table: Array) -> Array:
+            return jnp.einsum("kbs,sk->kb", fit_geometry, table)
+
+        def angle(table: Array) -> Array:
+            return jnp.where(gauge[:, None], 0.0, jnp.einsum("kbs,sk->kb", fit_lambda, table * lam_scale))
+
+        def profile(values: Array) -> Array:
+            return fit_profile @ jnp.asarray(values)[1:]
+
+        return HighOrderEquilibriumState(
+            radial_basis=radial_basis, m=m_values, n=n_values, nfp=int(runtime.resolution.nfp),
+            R_cos=geometry(R_cos), R_sin=geometry(R_sin), Z_cos=geometry(Z_cos), Z_sin=geometry(Z_sin),
+            L_cos=angle(jnp.asarray(state.L_cos)), L_sin=angle(jnp.asarray(L_sin)),
+            phipf=profile(live.phips), chipf=profile(fields.chips),
+            pressure=profile(fields.pressure) / MU0,
+            jacobian_sign=int(live.signgs), source="VMEX traced lift",
+            boundary_R_cos=R_cos[-1], boundary_R_sin=R_sin[-1],
+            boundary_Z_cos=Z_cos[-1], boundary_Z_sin=Z_sin[-1],
+        )
+
+    return lift
+
+
 def high_order_state_from_wout(
     wout: Any,
     *,
@@ -1850,5 +1941,6 @@ __all__ = [
     "high_order_state_from_wout",
     "insert_high_order_state_knots",
     "lift_high_order_state",
+    "traced_lift",
     "plot_strong_force_report",
 ]
