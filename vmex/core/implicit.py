@@ -2779,8 +2779,13 @@ def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk
     responses = responses.reshape(3, block_size, ns, block_size)  # color, input, row, output
 
     def band(offset):
+        # Row ``i`` of the band reads the response of surface ``i + offset`` to
+        # the probe of that surface's color.  One joint gather picks exactly
+        # those (input, output) blocks; indexing the color first would
+        # materialize an ``(ns, block, ns, block)`` intermediate, quadratic in
+        # the radial count (30 GB per band at ns = 65, block = 939).
         neighbor = jnp.clip(surfaces + offset, 0, ns - 1)
-        columns = responses[neighbor % 3][surfaces, :, surfaces, :]  # row, input, output
+        columns = responses[neighbor % 3, :, surfaces, :]  # row, input, output
         return jnp.swapaxes(columns, 1, 2)
 
     lower, diagonal, upper = band(-1), band(0), band(1)
