@@ -29,7 +29,7 @@ import jax
 from jax.experimental import serialize_executable as _se
 
 _LANES: list = []               #: every AotLane, for :func:`release`
-MAX_FILES = 200                 #: executables kept per cache directory
+MAX_FILES = 64                  #: executables kept per cache directory
 _SOURCE_HASH: str | None = None
 
 
@@ -88,6 +88,15 @@ class AotLane:
     def __getattr__(self, name: str) -> Any:     # lower, eval_shape, ...
         return getattr(self.jit, name)
 
+    def _cache_size(self) -> int:
+        """Executables held in memory (jit cache plus AOT-loaded)."""
+        return self.jit._cache_size() + len(self._memory)
+
+    def clear_cache(self) -> None:
+        """Drop the jit cache and the in-memory AOT executables."""
+        self.jit.clear_cache()
+        self._memory.clear()
+
     def executable(self, *args: Any, **static: Any) -> Any:
         """Compiled lane for this call structure (memory, disk, then build).
 
@@ -135,6 +144,7 @@ class AotLane:
             pass
 
     def __call__(self, *args: Any, **static: Any) -> Any:
+        """Run the cached executable, falling back to the jitted lane."""
         try:
             compiled = self.executable(*args, **static)
         except Exception:
