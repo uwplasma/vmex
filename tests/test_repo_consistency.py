@@ -117,8 +117,8 @@ def test_declared_floors_match_every_copy() -> None:
 
 
 @pytest.mark.parametrize("found, message", [
-    (None, 'essos>=0.21.0; run: pip install "essos>=0.21.0"'),
-    ("0.19.2", 'essos>=0.21.0 (found 0.19.2); run: pip install -U "essos>=0.21.0"'),
+    (None, 'essos>=0.22.0; run: pip install "essos>=0.22.0"'),
+    ("0.19.2", 'essos>=0.22.0 (found 0.19.2); run: pip install -U "essos>=0.22.0"'),
 ])
 def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
     from vmex import _compat
