@@ -481,11 +481,7 @@ def _nonsingular_terms(
     sinm_asym = jnp.asarray(ft["sinm_asym"])
     cosm_asym = jnp.asarray(ft["cosm_asym"])
 
-    gstore0 = jnp.zeros((nuv_full,), dtype=Rf.dtype)
-    grpmn0 = jnp.zeros((mnpd2, nuv3), dtype=Rf.dtype)
-
-    def _ip_body(carry: tuple[Array, Array], ip: Array) -> tuple[tuple[Array, Array], None]:
-        gstore_acc, grpmn_acc = carry
+    def _ip_body(ip: Array) -> tuple[Array, ...]:
         ip = jnp.asarray(ip, dtype=jnp.int32)
         xip = rcosuv[ip]
         yip = rsinuv[ip]
@@ -534,39 +530,31 @@ def _nonsingular_terms(
             delgr = delgr * scale
             delgrp = delgrp * scale
 
-        gstore_next = gstore_acc + bex[ip] * delgr
         del_iuv = delgrp[iuv_grid]
         del_ref = delgrp[iref_grid]
-        ka_grid = del_iuv - del_ref
-        g1_sym = jnp.einsum("uv,fv->uf", ka_grid, cosv_modes)
-        g2_sym = jnp.einsum("uv,fv->uf", ka_grid, sinv_modes)
-        gcos = jnp.einsum("mu,uf->mf", sinm_sym, g1_sym)
-        gsin = jnp.einsum("mu,uf->mf", cosm_sym, g2_sym)
-        total_plus = jnp.reshape(gcos + gsin, (-1,))
-        total_minus = jnp.reshape(gcos - gsin, (-1,))
-        cols_p = jnp.full_like(idx_p_flat, ip)
-        cols_m = jnp.full_like(idx_m_negative, ip)
-        grpmn_next = grpmn_acc.at[(idx_p_flat, cols_p)].add(total_plus)
-        grpmn_next = grpmn_next.at[(idx_m_negative, cols_m)].add(total_minus[negative_positions])
 
+        def project(ka_grid, sin_m, cos_m):
+            g1 = jnp.einsum("uv,fv->uf", ka_grid, cosv_modes)
+            g2 = jnp.einsum("uv,fv->uf", ka_grid, sinv_modes)
+            gcos = jnp.einsum("mu,uf->mf", sin_m, g1)
+            gsin = jnp.einsum("mu,uf->mf", cos_m, g2)
+            return jnp.reshape(gcos + gsin, (-1,)), jnp.reshape(gcos - gsin, (-1,))
+
+        out = (bex[ip] * delgr, *project(del_iuv - del_ref, sinm_sym, cosm_sym))
         if lasym:
-            ks_grid = del_iuv + del_ref
-            g1_a = jnp.einsum("uv,fv->uf", ks_grid, cosv_modes)
-            g2_a = jnp.einsum("uv,fv->uf", ks_grid, sinv_modes)
-            gcos_a = jnp.einsum("mu,uf->mf", sinm_asym, g1_a)
-            gsin_a = jnp.einsum("mu,uf->mf", cosm_asym, g2_a)
-            plus_a = jnp.reshape(gcos_a + gsin_a, (-1,))
-            minus_a = jnp.reshape(gcos_a - gsin_a, (-1,))
-            grpmn_next = grpmn_next.at[(mnpd + idx_p_flat, cols_p)].add(plus_a)
-            grpmn_next = grpmn_next.at[(mnpd + idx_m_negative, cols_m)].add(
-                minus_a[negative_positions]
-            )
+            out += project(del_iuv + del_ref, sinm_asym, cosm_asym)
+        return out
 
-        return (gstore_next, grpmn_next), None
-
-    (gstore, grpmn), _ = jax.lax.scan(
-        _ip_body, (gstore0, grpmn0), jnp.arange(nuv3, dtype=jnp.int32)
-    )
+    # Primed points are independent: evaluate them in vectorized chunks
+    # (bounded memory) and scatter the mode columns once.
+    chunk = max(1, min(nuv3, (1 << 19) // max(1, nuv_full * nvper)))
+    res = jax.lax.map(_ip_body, jnp.arange(nuv3, dtype=jnp.int32), batch_size=chunk)
+    gstore = jnp.sum(res[0], axis=0)
+    grpmn = jnp.zeros((mnpd2, nuv3), dtype=Rf.dtype)
+    grpmn = grpmn.at[idx_p_flat].add(res[1].T).at[idx_m_negative].add(res[2][:, negative_positions].T)
+    if lasym:
+        grpmn = grpmn.at[mnpd + idx_p_flat].add(res[3].T)
+        grpmn = grpmn.at[mnpd + idx_m_negative].add(res[4][:, negative_positions].T)
     return gstore, grpmn
 
 
@@ -733,8 +721,6 @@ def _analytic_terms(
     onp = float(basis.onp)
     sign = float(int(signgs))
     npts = int(basis.nuv3)
-    theta = jnp.asarray(basis.theta)
-    zeta = jnp.asarray(basis.zeta)
     bex = jnp.reshape(jnp.asarray(bexni), (-1,))[:npts]
 
     Rf = jnp.reshape(jnp.asarray(b.R), (-1,))
@@ -800,10 +786,9 @@ def _analytic_terms(
         axis = jnp.asarray((m == 0) | (n == 0))[:, None]
         return jnp.where(axis, p + q, jnp.where(jnp.asarray(n > 0)[:, None], q, p))
 
-    phase = jnp.asarray(m)[:, None] * theta - jnp.asarray(n)[:, None] * zeta
-    trig = jnp.sin(phase)
+    trig = jnp.asarray(basis.sin_phase).T
     if lasym:
-        trig = jnp.concatenate((trig, jnp.cos(phase)), axis=0)
+        trig = jnp.concatenate((trig, jnp.asarray(basis.cos_phase).T), axis=0)
     integral = contract(tlp_all, tlm_all)
     if lasym:
         integral = jnp.concatenate((integral, integral), axis=0)
