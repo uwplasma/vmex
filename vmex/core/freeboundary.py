@@ -23,7 +23,7 @@ fixed-boundary iteration of :mod:`vmex.core.solver`:
 
 The iteration itself runs the *same* traced body as the fixed-boundary
 lanes.  Scheduling: the pre-activation fixed-boundary
-iterations run as one jitted ``lax.while_loop`` (:func:`_preactivation_lane`)
+iterations run as one jitted ``lax.while_loop`` (:func:`_step_lane`)
 and the whole post-turn-on steady state — vacuum cadence, constraint damping,
 ``bsqvac_edge`` refresh and the eqsolve iteration — as another
 (:func:`_make_vacuum_lane`); only the single turn-on pass is host-stepped,
@@ -54,7 +54,8 @@ from jax import lax
 from jax.scipy import linalg as jsp_linalg
 
 from . import profiles as _profiles
-from .device import AUTO, _placement_device, _put_numeric_leaves, device_context
+from .aot import AotLane, aot_lane, compile_lane
+from .device import AUTO, _placement_device, commit_to_single_device, _put_numeric_leaves, device_context
 from .errors import (
     AXIS_REGUESS_FLAG,
     JAC75_FLAG,
@@ -88,7 +89,7 @@ from .solver import (
     SolveResult, SolverRuntime, SpectralState, VacuumOutput,
     _LANE_EXECUTABLES, _USED_LANE_KEYS,
     _due_rows_pending,
-    _finalize, _geometry, _initial_carry, _initial_state, _leaf_signature,
+    _finalize, _geometry, _initial_carry, _select, _initial_state, _leaf_signature,
     _loop_driver_config, _make_body,
     _result_from_carry, _trajectory_rows, _zero_cache, prepare_runtime, resolution_from_input,
     reguess_initial_axis, runtime_with_baselines,
@@ -210,18 +211,39 @@ def _carried_edge_radius_lane(state: SpectralState, rt: SolverRuntime) -> Array:
     return geometry.R_even[-1] + geometry.R_odd[-1]
 
 
-@functools.partial(jax.jit, static_argnames=("use_fft",))
-def _iter_lane(carry, rt: SolverRuntime, *, use_fft: bool = False):
-    """One jitted eqsolve iteration (shared traced body; per-``rt`` lane)."""
-    return _make_body(rt, use_fft=use_fft)(carry)
+@aot_lane(static_argnames=("use_fft",))
+def _step_lane(carry, rt: SolverRuntime, evaluation_state: SpectralState,
+               until_activation, *, use_fft: bool = False):
+    """The one eqsolve force-pass lane per runtime structure.
+
+    ``until_activation`` false: exactly one iteration, whose force pass
+    evaluates ``evaluation_state`` (``carry.state`` normally; the pre-restart
+    state on the VMEC2000 turn-on pass, where ``carry.state`` still evolves).
+    True: iterate while the run is live and the funct3d.f activation test
+    (``iter2 > 1 and fsqr + fsqz <= 1e-3``) has not fired, so the returned
+    carry is the one the host driver held on entering the IVAC0 block.
+    """
+    def cond(loop):
+        k, c = loop
+        activate = (c.iteration > 1) & (c.fsqr + c.fsqz <= ACTIVATION_FSQ)
+        return jnp.where(until_activation, ~(c.done | activate), k == 0)
+
+    def step(loop):
+        k, c = loop
+        ev = _select(k == 0, evaluation_state, c.state)
+        return k + 1, _make_body(rt, evaluation_state=ev, use_fft=use_fft)(c)
+
+    return lax.while_loop(cond, step, (jnp.zeros((), jnp.int32), carry))[1]
 
 
-@functools.partial(jax.jit, static_argnames=("use_fft",))
-def _turnon_iter_lane(carry, rt: SolverRuntime, evaluation_state: SpectralState,
-                      *, use_fft: bool = False):
-    """VMEC2000 turn-on pass: old-geometry forces evolve restored ``xc``."""
-    return _make_body(rt, evaluation_state=evaluation_state,
-                      use_fft=use_fft)(carry)
+def _step_args(carry, rt, evaluation_state=None, *, until_activation=False):
+    """Arguments of :func:`_step_lane` (default: evaluate ``carry.state``).
+
+    Leaves are committed to one device: a fresh carry is uncommitted and a
+    returned one committed, and each variant lowers to its own HLO.
+    """
+    ev = carry.state if evaluation_state is None else evaluation_state
+    return (*commit_to_single_device((carry, rt, ev)), jnp.asarray(until_activation))
 
 
 # ---------------------------------------------------------------------------
@@ -1014,7 +1036,7 @@ def _presf_ns_scale_traceable(params, inp: VmecInput, ns: int):
 # ---------------------------------------------------------------------------
 #
 # A cold free-boundary rung pays a SERIAL chain of lane compiles: the first
-# force pass (``_iter_lane``), the pre-activation while-loop, the fused
+# force pass and pre-activation loop (both ``_step_lane``), the fused
 # NESTOR full update, the turn-on pass, and finally the steady-state vacuum
 # loop — each blocking iteration progress while it builds.  Every one of
 # those structures is known the moment the stage's runtimes exist (the
@@ -1192,18 +1214,18 @@ def _prefetch_stage_lane_set(
         jobs: list[tuple[Any, Any, tuple, dict[str, Any]]] = []
         if entry_lanes and vacuum_on is not True:
             jobs += [
-                (("fb_iter", use_fft), _iter_lane, (carry_fixed, rt_fixed), fft),
-                (("fb_preact", use_fft), _preactivation_lane,
-                 (carry_fixed, rt_fixed), fft),
+                (("fb_step", use_fft), _step_lane,
+                 _step_args(carry_fixed, rt_fixed), fft),
             ]
         if entry_lanes and vacuum_on is not False:
             jobs.append(
-                (("fb_iter", use_fft), _iter_lane, (carry_freeb, rt_freeb), fft))
+                (("fb_step", use_fft), _step_lane,
+                 _step_args(carry_freeb, rt_freeb), fft))
         jobs.append((("fb_vac", fused.cache_key), vacuum_lane,
                      (vc, rt_freeb, external_field), {}))
-        if vacuum_on is not True:
-            jobs.append((("fb_turnon", use_fft), _turnon_iter_lane,
-                         (carry_freeb, rt_freeb, state), fft))
+        if vacuum_on is not True:       # the turn-on pass shares the freeb step lane
+            jobs.append((("fb_step", use_fft), _step_lane,
+                         _step_args(carry_freeb, rt_freeb, state), fft))
         jobs.append((("fb_vacfull", fused.cache_key), fused.full,
                      (state, rt_freeb, external_field), {}))
 
@@ -1218,7 +1240,7 @@ def _prefetch_stage_lane_set(
                 done = threading.Event()
                 _FB_INFLIGHT[key] = done
             try:
-                _LANE_EXECUTABLES[key] = lane.lower(*args, **static).compile()
+                _LANE_EXECUTABLES[key] = compile_lane(lane, *args, **static)
             finally:
                 done.set()
                 with _FB_LOCK:
@@ -1282,7 +1304,7 @@ def _launch_free_lane_prefetch(
 # The two lanes below keep the per-pass host driver's scaffolding on-device
 # without touching the per-iteration numerics (same ops, same order):
 #
-# - :func:`_preactivation_lane` runs every fixed-boundary iteration BEFORE
+# - :func:`_step_lane` (``until_activation``) runs every fixed-boundary iteration BEFORE
 #   vacuum activation as one ``lax.while_loop``, exiting exactly where the
 #   host driver would enter the funct3d.f IVAC0 block.
 # - :func:`_make_vacuum_lane` runs the whole POST-turn-on steady state as one
@@ -1295,24 +1317,6 @@ def _launch_free_lane_prefetch(
 # Only the single turn-on pass (first vacuum call, ``In VACUUM`` block, soft
 # restart, ``VACUUM PRESSURE TURNED ON`` banner) stays host-stepped: it
 # mutates the carry/runtime once, between the two lanes.
-
-
-@functools.partial(jax.jit, static_argnames=("use_fft",))
-def _preactivation_lane(carry, rt: SolverRuntime, *, use_fft: bool = False):
-    """Fixed-boundary iterations up to vacuum activation, as one jitted loop.
-
-    Iterates the shared traced body while the run is live and the funct3d.f
-    activation condition (``iter2 > 1 and fsqr + fsqz <= 1e-3``) has not yet
-    fired; the returned carry is exactly the carry the per-pass host driver
-    held when it first entered the IVAC0 block (or finished the run).
-    """
-    body = _make_body(rt, use_fft=use_fft)
-
-    def cond(c):
-        activate = (c.iteration > 1) & (c.fsqr + c.fsqz <= ACTIVATION_FSQ)
-        return jnp.logical_not(c.done | activate)
-
-    return lax.while_loop(cond, body, carry)
 
 
 @dataclass(frozen=True)
@@ -1454,7 +1458,7 @@ def _make_vacuum_lane(fused: FusedVacuum, *, use_fft: bool = False):
             return live if stop is None else live & (v.carry.iteration < stop)
         return lax.while_loop(_running, lambda v: _pass(v, rt, field), vc)
 
-    return jax.jit(_lane)
+    return AotLane(_lane, identity=repr(fused.cache_key))
 
 
 # ---------------------------------------------------------------------------
@@ -1807,8 +1811,8 @@ def _solve_free_boundary_stage(
         # internal irst=4 transfer, rebuild both the plasma profiles and the
         # axis-dependent NESTOR filament/executables, then repeat iteration 1
         # once with ijacob=1.  The discarded triggering pass is not printed.
-        carry = _call_lane(("fb_iter", use_fft), _iter_lane,
-                           (carry, rt_initial), {"use_fft": use_fft},
+        carry = _call_lane(("fb_step", use_fft), _step_lane,
+                           _step_args(carry, rt_initial), {"use_fft": use_fft},
                            notice=_lane_notice("free-iteration"))
         if (allow_initial_axis_reguess
                 and int(carry.ier) == AXIS_REGUESS_FLAG
@@ -1876,8 +1880,8 @@ def _solve_free_boundary_stage(
                 xcdot=retry_xcdot,
                 residuals=(carry.fsqr, carry.fsqz, carry.fsql),
             )
-            carry = _call_lane(("fb_iter", use_fft), _iter_lane,
-                               (carry, rt_initial), {"use_fft": use_fft},
+            carry = _call_lane(("fb_step", use_fft), _step_lane,
+                           _step_args(carry, rt_initial), {"use_fft": use_fft},
                                notice=_lane_notice("free-iteration"))
         _emit_due(final=False)
 
@@ -1896,8 +1900,8 @@ def _solve_free_boundary_stage(
                 # Every fixed-boundary iteration before vacuum activation
                 # runs as ONE jitted while_loop; the lane exits precisely where
                 # the per-pass driver would have entered the IVAC0 block below.
-                carry = _call_lane(("fb_preact", use_fft), _preactivation_lane,
-                                   (carry, rt_fixed), {"use_fft": use_fft},
+                carry = _call_lane(("fb_step", use_fft), _step_lane,
+                                   _step_args(carry, rt_fixed, until_activation=True), {"use_fft": use_fft},
                                    notice=_lane_notice("pre-vacuum loop"))
                 _emit_due(final=False)
                 if bool(carry.done):
@@ -1909,8 +1913,8 @@ def _solve_free_boundary_stage(
                 # new radial grid, iteration 1 therefore uses the coarse stage's
                 # carried bsqvac once; iteration 2 performs the first full update
                 # against freshly selected resolution-specific NESTOR programs.
-                carry = _call_lane(("fb_iter", use_fft), _iter_lane,
-                                   (carry, rt_freeb), {"use_fft": use_fft},
+                carry = _call_lane(("fb_step", use_fft), _step_lane,
+                           _step_args(carry, rt_freeb), {"use_fft": use_fft},
                                    notice=_lane_notice("free-iteration"))
                 _emit_due(final=False)
                 continue
@@ -2035,13 +2039,13 @@ def _solve_free_boundary_stage(
                     rt_use = rt_freeb
 
             if turnon_evaluation_state is None:
-                carry = _call_lane(("fb_iter", use_fft), _iter_lane,
-                                   (carry, rt_use), {"use_fft": use_fft},
+                carry = _call_lane(("fb_step", use_fft), _step_lane,
+                           _step_args(carry, rt_use), {"use_fft": use_fft},
                                    notice=_lane_notice("free-iteration"))
             else:
                 carry = _call_lane(
-                    ("fb_turnon", use_fft), _turnon_iter_lane,
-                    (carry, rt_use, turnon_evaluation_state),
+                    ("fb_step", use_fft), _step_lane,
+                    _step_args(carry, rt_use, turnon_evaluation_state),
                     {"use_fft": use_fft},
                     notice=_lane_notice("vacuum turn-on"))
 
