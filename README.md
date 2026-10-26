@@ -273,6 +273,25 @@ Quasi-isodynamic designs at four field-period counts: the `|B|` contours close p
 rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
 maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
+### Quasi-isodynamic design with a self-consistent bootstrap current
+
+![Bootstrap current, ambipolar E_r and objective history of the QI optimization](docs/_static/figures/readme_qi_bootstrap_er.webp)
+
+At finite beta the bootstrap current of a quasi-isodynamic field depends strongly on the radial electric field.
+`QI_optimization_bootstrap_er.py` evaluates the [DKX](https://github.com/uwplasma/DKX) `<j·B>` of each kinetic surface at
+its own ambipolar ion root `E_r`, found inside the objective, and optimizes the boundary and a current spline against it
+(needs `vmex[neoclassical]`; see the [neoclassical guide](docs/howto/neoclassical-transport.md)):
+
+```console
+python examples/optimization/QI_optimization_bootstrap_er.py
+```
+
+Left to right: `<j·B>` on the two kinetic surfaces from the equilibrium, Redl and DKX, before (the Redl-consistent seed)
+and after; the `E_r` root; the objective history. In this short default run the objective falls from 16.6 to 3.5 and
+the constructed-QI residual from 1.60 to 0.33, while the equilibrium and DKX currents are not yet matched; the
+research ladder in the script spends more evaluations. Runtime: 15 min on 8 CPU cores, compilation included
+([script](docs/_static/figures/sources/make_qi_bootstrap_er_figure.py)).
+
 ### Free boundary with coils
 
 ![Free-boundary beta ramp and Shafranov shift](docs/_static/figures/readme_essos_beta_scan.webp)

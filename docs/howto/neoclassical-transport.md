@@ -2,7 +2,7 @@
 
 `vmex --neoclassical` runs [DKX](https://github.com/uwplasma/DKX), the JAX
 drift-kinetic solver, on a solved equilibrium. It needs the `neoclassical`
-extra (`pip install "vmex[neoclassical]"`, DKX 2.8.0 or later; an older DKX runs
+extra (`pip install "vmex[neoclassical]"`, DKX 2.12.0 or later; an older DKX runs
 without `--nc-profiles` and `--nc-er` and prints the upgrade command).
 
 ## Run it

@@ -5,7 +5,7 @@ QI_optimization_bootstrap.py with the drift-kinetic current in place of Redl.
 The seed is made self-consistent by the cheap Redl Picard loop; the
 optimization then varies the boundary and a current spline with DKX's kinetic
 mismatch row (dkx.bootstrap.KineticBootstrapMismatch, the Redl f_boot form
-with DKX's <j.B>; pip install "dkx>=2.8.0") on a few kinetic surfaces, so the
+with DKX's <j.B>; pip install "dkx>=2.12.0") on a few kinetic surfaces, so the
 current the optimizer certifies is the kinetic one. Redl and DKX <j.B> are
 printed side by side at the seed and the optimum.
 
