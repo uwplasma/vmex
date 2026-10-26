@@ -276,6 +276,7 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
 
 
 def _pwo_action_kernel(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp, bmns_b=None):
+    from math import fsum
     from types import SimpleNamespace
     from scipy.integrate import quad
 
@@ -301,27 +302,61 @@ def _pwo_action_kernel(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp, bmns_b=None
         phase = m*alpha+freq*z; co, si = np.cos(phase), np.sin(phase)
         return float(c@co+s@si), float((-m*c)@si+(m*s)@co), float((-freq*c)@si+(freq*s)@co)
     def integral(alpha, left, right, level, derivative, extrema=()):
-        width = .5*(right-left)
         phase = m*alpha+np.array([left, right])[:, None]*freq
         co, si = np.cos(phase), np.sin(phase)
         A, D = c*co+s*si, -c*si+s*co
-        residual = level-A.sum(axis=1)
+        residual = np.array([fsum((level, *(-row))) for row in A])
+        # A float bounce can lie just outside a shallow well. Polish the local
+        # Fourier representation without rounding its correction back into z.
+        eps = np.finfo(float).eps
+        amplitude = abs(c)+abs(s)
+        offsets = []
+        for side, z in enumerate((left, right)):
+            slope = float(freq@D[side])
+            # Conservative operation-count/phase budget, not a certified global
+            # Fourier error bound; 1e-13 and 4*eps match the bounce brentq call.
+            field_error = eps*((8*c.size+4)*amplitude.sum()
+                              + 4*amplitude@(abs(m*alpha)+abs(freq*z)))
+            if not np.isfinite(slope) or slope == 0:
+                raise ValueError("Unresolved bounce-root polishing")
+            budget = 1e-13+4*eps*abs(z)+field_error/abs(slope)
+            offset = 0.
+            for _ in range(8):
+                sh = np.sin(freq*offset/2)
+                sn, cm1 = 2*sh*np.cos(freq*offset/2), -2*sh*sh
+                a, d = float(A[side]@cm1), float(D[side]@sn)
+                gap = fsum((residual[side], -a, -d))
+                tolerance = 8*c.size*eps*(abs(residual[side])+abs(a)+abs(d))
+                if abs(gap) <= tolerance:
+                    break
+                current_slope = float(freq@(-A[side]*sn+D[side]*(1+cm1)))
+                if not np.isfinite(current_slope) or current_slope*slope <= 0:
+                    raise ValueError("Unresolved bounce-root polishing")
+                offset += gap/current_slope
+                if not np.isfinite(offset) or abs(offset) > min(budget, .2*(right-left)):
+                    raise ValueError("Bounce-root correction exceeds numerical uncertainty")
+            else:
+                raise ValueError("Bounce-root polishing did not converge")
+            offsets.append(offset)
+        width = .5*((right-left)+(offsets[1]-offsets[0]))
+        midpoint = fsum((.5*left, .5*right, .5*offsets[0], .5*offsets[1]))
         mA, mD = m*A, m*D
         def fun(t):
             side = int(t > 0)
             distance = (2*width*np.sin((t+np.pi/2)/2)**2 if side == 0
                         else -2*width*np.sin((np.pi/2-t)/2)**2)
-            sh, ch = np.sin(freq*distance/2), np.cos(freq*distance/2)
+            displacement = fsum((offsets[side], distance))
+            sh, ch = np.sin(freq*displacement/2), np.cos(freq*displacement/2)
             # Retain the root residual; avoid subtracting nearly equal field values.
             sn, cm1 = 2*sh*ch, -2*sh*sh
-            gap = residual[side]-A[side]@cm1-D[side]@sn
+            gap = fsum((residual[side], -float(A[side]@cm1), -float(D[side]@sn)))
             B = level-gap; par = gap/level
             Ba = -mA[side]@sn+mD[side]@(1+cm1) if derivative else 0.
             if B <= 0 or par <= 0:
                 raise ValueError("Nonpositive interior field or parallel energy")
             value = -Ba*(1-B/(2*level))/(B*B*np.sqrt(par)) if derivative else np.sqrt(par)/B
             return 2*factor*value*width*np.cos(t)
-        points = [np.arcsin((z-.5*(left+right))/width) for z in extrema if left < z < right]
+        points = [np.arcsin((z-midpoint)/width) for z in extrema if -width < z-midpoint < width]
         out = quad(fun, -np.pi/2, np.pi/2, points=points, epsabs=1e-9, epsrel=1e-8, limit=150, full_output=1)
         if len(out) > 3:
             raise ValueError(out[3])

@@ -363,7 +363,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
         raise ValueError("The bounded physical-action step currently requires a vacuum seed")
     if SEED not in ("qi", "near_circular"):
         raise ValueError("VMEX_PWO_SEED must be qi or near_circular")
-    seed_route = "near_circular" if QS_INPUT else SEED
+    seed_route = "saved_input" if QS_INPUT else SEED
     print(f"Starting {seed_route} -> {FAMILY} pwO ({METHOD}); beta ladder {beta_targets}", flush=True)
     started = time.perf_counter()
     am = np.zeros(21); am[:2] = [1.0, -1.0]

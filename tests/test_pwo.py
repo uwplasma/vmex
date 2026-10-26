@@ -562,6 +562,44 @@ def test_physical_action_shallow_well_has_finite_harmonic_limit(alpha, depth):
     assert row["dJ"] == pytest.approx(coefficient*.02*np.sin(alpha), rel=1e-6)
 
 
+@pytest.mark.parametrize("alpha", [-.7, .7])
+@pytest.mark.parametrize("depth", [1e-8, 1e-10])
+def test_action_kernel_polishes_shallow_bounces_without_clipping_energy(alpha, depth):
+    from math import fsum
+    from scipy.integrate import quad
+
+    amplitude = .2
+    level = .8+.02*np.cos(alpha)+depth
+    # B=1-0.2*cos(zeta)+0.02*cos(alpha). This independent sine-square
+    # substitution has exact finite transformed integrands at both bounces.
+    gap = fsum((level, -1., amplitude, -.02*np.cos(alpha)))
+    k = np.sqrt(gap/(2*amplitude))
+    half = 2*np.arcsin(k)
+    kernel = PwOActionFamilies._kernel(dict(bmnc_b=[1., -amplitude, .02],
+        xm_b=[0, 0, 1], xn_b=[0, 1, 0], iota_b=0., G_b=1., I_b=0., nfp=1))
+    # Represent root uncertainty from a few field-evaluation ulps, amplified
+    # by the small bounce slope. The original endpoint residual is retained.
+    error = 8*np.finfo(float).eps/abs(kernel.field(half, alpha)[2])
+    left, right = -half-error, half+error
+    def transformed(theta, derivative):
+        co, si = np.cos(theta), np.sin(theta)
+        B = level-gap*co*co
+        jacobian = 1/np.sqrt(1-k*k*si*si)
+        if derivative:
+            return 4*.02*np.sin(alpha)*k/np.sqrt(gap/level)*(1-B/(2*level))/B**2*jacobian
+        return 4*k*np.sqrt(gap/level)*co*co/B*jacobian
+    for derivative in (False, True):
+        expected = quad(lambda t: transformed(t, derivative), -np.pi/2, np.pi/2,
+                        epsabs=1e-12, epsrel=1e-12)[0]
+        actual = kernel.integral(alpha, left, right, level, derivative, extrema=[0.])[0]
+        assert actual == pytest.approx(expected, rel=3e-6)
+    with pytest.raises(ValueError, match="correction exceeds numerical uncertainty"):
+        kernel.integral(alpha, left-.01, right, level, False)
+    # At the well minimum the two bounces merge and the bounce slope vanishes.
+    with pytest.raises(ValueError, match="Unresolved bounce-root polishing"):
+        kernel.integral(alpha, 0., 2*np.pi, kernel.field(0., alpha)[0], False)
+
+
 def _action_family(level=.81):
     spectrum = dict(bmnc_b=[1., .2, .02], bmns_b=[0., 0., 0.],
                     xm_b=[0, 0, 1], xn_b=[0, 1, 0], iota_b=0., G_b=1., I_b=0., nfp=1)
