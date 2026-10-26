@@ -292,6 +292,8 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     prove exhaustive root isolation or within-family pwO invariance. This
     forward diagnostic is not JAX differentiable. Reference matching requires
     identical grids/counts and overlapping wells with endpoint shifts <20%.
+    With a reference, follow its wells across the sampling seam; reject
+    splitting or merging that changes the number of overlapping wells.
     """
     from scipy.integrate import quad
     from scipy.optimize import brentq, linear_sum_assignment
@@ -353,10 +355,17 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
         return out[:2]
     rows, checks, critical_census = [], [], []
     for ai, alpha in enumerate(alphas):
+        tracked = [[r for r in reference["rows"] if (r["alpha_index"], r["pitch_index"]) == (ai, ip)]
+                   for ip in range(len(levels))] if reference is not None else None
+        def selected(left, right, ip):
+            if tracked is None or not tracked[ip]:
+                return 0 <= left < period
+            return any(min(right, r["right"]) > max(left, r["left"]) for r in tracked[ip])
         end = 8
         while True:
             fine, critical = root_sets(alpha, points_per_period, end)
-            incomplete = any(len(r) and 0 <= r[-1] < period and field(r[-1], alpha)[2] < 0 for r in fine)
+            incomplete = any(len(r) and selected(r[-1], np.inf, ip) and field(r[-1], alpha)[2] < 0
+                             for ip, r in enumerate(fine))
             if not incomplete:
                 break
             if end == max_periods:
@@ -375,12 +384,10 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
                 checks.append(dict(alpha_index=ai, pitch_index=ip, roots=len(b), maximum_discrepancy_rad=float(np.max(abs(a-b), initial=0))))
         for ip, (level, roots) in enumerate(zip(levels, fine)):
             for j, left in enumerate(roots):
-                if not 0 <= left < period:
-                    continue
-                if field(left, alpha)[2] > 0:
+                if j+1 == len(roots) or field(left, alpha)[2] > 0:
                     continue
                 right = roots[j+1]
-                if field(.5*(left+right), alpha)[0] >= level:
+                if not selected(left, right, ip) or field(.5*(left+right), alpha)[0] >= level:
                     continue
                 if min(abs(field(z, alpha)[2]) for z in (left, right)) <= 1e-8:
                     raise ValueError("Marginal bounce root")

@@ -485,3 +485,32 @@ def test_physical_action_extends_long_well_without_truncation():
     assert abs(result["rows"][0]["dJ"]) < 1e-8
     with pytest.raises(ValueError, match="Incomplete well"):
         physical_pwo_action_from_boozer(**spectrum, **options, max_periods=8)
+
+
+@pytest.mark.parametrize("edge", [0., 2*np.pi])
+def test_physical_action_follows_reference_well_across_sampling_seam(edge):
+    spectrum = _action_spectrum()
+    sign = 1. if edge == 0 else -1.
+    options = dict(levels=[1.5], alphas=[np.pi/2-.7*(edge+sign*.001)])
+    before = physical_pwo_action_from_boozer(**spectrum, **options)
+    phase = sign*.0014
+    spectrum["bmnc_b"][0, 1] = .2*np.cos(phase)
+    spectrum["bmns_b"][0, 1] = -.2*np.sin(phase)
+    after = physical_pwo_action_from_boozer(**spectrum, **options, reference=before, check_roots=True)
+    assert before["counts"] == after["counts"] == [[1]]
+    np.testing.assert_allclose(after["rows"][0]["left"], edge-sign*.001, atol=1e-12)
+    np.testing.assert_allclose(after["rows"][0]["J"], before["rows"][0]["J"], rtol=1e-10)
+    with pytest.raises(ValueError, match="No complete wells"):
+        physical_pwo_action_from_boozer(**spectrum, **options)
+
+
+@pytest.mark.parametrize("merge", [False, True])
+def test_physical_action_rejects_reference_well_split_or_merge(merge):
+    spectrum = dict(bmnc_b=[1.5, .2, .3 if merge else 0.],
+                    xm_b=[0, 1, 2], xn_b=[0, 0, 0],
+                    iota_b=1., G_b=1., I_b=0., nfp=1)
+    options = dict(levels=[1.55], alphas=[0.])
+    reference = physical_pwo_action_from_boozer(**spectrum, **options)
+    spectrum["bmnc_b"][2] = 0. if merge else .3
+    with pytest.raises(ValueError, match="well counts differ"):
+        physical_pwo_action_from_boozer(**spectrum, **options, reference=reference)
