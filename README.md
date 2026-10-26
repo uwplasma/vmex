@@ -88,7 +88,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `essos` | 0.21.0 | `vmex[coils]` | `pip install "essos>=0.21.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.6 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.6"` |
-| `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.12.0"` |
+| `dkx` | 2.12.0 | `vmex[neoclassical]` | `pip install "dkx>=2.12.0"` |
 | `gkx` | 2.5.0 | `vmex[turbulence]` | `pip install "gkx>=2.5.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
