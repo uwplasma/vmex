@@ -1689,3 +1689,17 @@ def test_pwo_physical_restart_rejects_changed_invariants(tmp_path, monkeypatch, 
     result = json.loads((tmp_path / "restart_summary.json").read_text())
     assert "same NFP, flux and R00" in result["rejection"]
     assert result["search_evaluations"] == result["refinement_evaluations"] == 0
+
+
+@pytest.mark.parametrize("steps", [(), (0.,), (np.nan,), (.01, .1), (.3, .1, .03, .003)])
+def test_pwo_physical_rejects_invalid_step_lengths(tmp_path, monkeypatch, steps):
+    import runpy
+
+    run = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))["run_physical_step"]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(run.__globals__, "ci_smoke", False)
+    with pytest.raises(SystemExit, match="1"):
+        run(None, None, None, output_name="invalid", seed_route="qi", step_lengths=steps)
+    result = json.loads((tmp_path / "invalid_summary.json").read_text())
+    assert "step lengths" in result["rejection"]
+    assert result["search_evaluations"] == result["refinement_evaluations"] == 0

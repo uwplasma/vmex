@@ -124,8 +124,8 @@ def qp_gate_failures(metrics):
     return failed
 
 
-def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None):
-    """One six-variable forward step; physical action, not target fit, decides acceptance."""
+def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None, step_lengths=None):
+    """Try up to three decreasing step lengths along one six-variable descent direction."""
     started = time.perf_counter()
     names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)"]
     keys = ("raw_Jalpha2", "relative_Jalpha2")
@@ -184,9 +184,14 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
             raise ValueError("Physical checks failed: " + ", ".join(k for k, v in checks.items() if not v))
 
     def score(spectra, group, reference=None):
-        return [physical_pwo_action_from_boozer(**sp, levels=levels[group][j], alphas=alpha[group][j],
-                reference=None if reference is None else reference[j], check_roots=True)
-                for j, sp in enumerate(spectra)]
+        scored = []
+        for j, sp in enumerate(spectra):
+            try:
+                scored.append(physical_pwo_action_from_boozer(**sp, levels=levels[group][j], alphas=alpha[group][j],
+                    reference=None if reference is None else reference[j], check_roots=True))
+            except (ValueError, RuntimeError) as error:
+                raise ValueError(f"s={baseline['surfaces'][j]:.6g}, sampling group {group}: {error}") from error
+        return scored
 
     def rows(scored):
         # Keep middle-surface pitches separate; each additional radius adds its own constraints.
@@ -199,6 +204,10 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
                    and worst(c) <= worst(b) for b, c in zip(before, after))
 
     try:
+        steps = np.asarray((.003, .001, .0003) if step_lengths is None else step_lengths, dtype=float)
+        if (steps.ndim != 1 or not 1 <= len(steps) <= 3 or
+                np.any(~np.isfinite(steps) | (steps <= 0)) or np.any(np.diff(steps) >= 0)):
+            raise ValueError("Use one to three finite, positive, strictly decreasing step lengths")
         identity = dict(nfp=int(inp.nfp), phiedge=float(inp.phiedge), R00=float(inp.rbc[inp.ntor, 0]))
         if reference is not None and (not reference.get("accepted") or
                 reference["physical_reference"]["identity"] != identity):
@@ -209,8 +218,8 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
         indices = [list(problem.names).index(n) for n in names]
         x0 = problem.x0.copy()
         scale = PARAMETER_STEP*abs(float(inp.rbc[inp.ntor, 0]))
-        base_eq = problem.equilibrium_from_x(x0); search_calls += 1
-        _, reference_eq = refined(inp, base_eq); validation_calls += 1
+        search_calls += 1; base_eq = problem.equilibrium_from_x(x0)
+        validation_calls += 1; _, reference_eq = refined(inp, base_eq)
         fine_base, fine_metrics, bounds = state(reference_eq, VALIDATION_OPTIONS)
         if reference is None:
             levels = [[lo+f*(hi-lo) for (lo, hi), f in zip(bounds, group)] for group in fractions]
@@ -237,14 +246,14 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
 
         def evaluate(y):
             nonlocal search_calls
-            if search_calls >= 2*count+2:
+            if search_calls >= 2*count+1+len(steps):
                 raise RuntimeError("Search evaluation budget exhausted")
             x = x0.copy(); x[indices] += scale*y
-            eq = problem.equilibrium_from_x(x); search_calls += 1
+            search_calls += 1; eq = problem.equilibrium_from_x(x)
             sp, metrics, _ = state(eq, PWO_OPTIONS); check(eq, metrics, baseline)
             return x, eq, sp, score(sp, 0, base_scores[0])
 
-        h, step_length = 1e-4, .003
+        h = 1e-4
         gradient = np.empty((len(normalization), count))
         for j in range(count):
             direction = np.eye(count)[j]
@@ -259,20 +268,34 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
         if not result.success or result.x[-1] <= 1e-6:
             raise ValueError("No common descent in the selected boundary coefficients")
         direction = result.x[:count]/np.linalg.norm(result.x[:count])
-        x, candidate, sp, train = evaluate(step_length*direction)
-        trial_scores = [train, score(sp, 1, base_scores[1])]
-        summary.update(direction=direction.tolist(), step_length=step_length, trial_scores=trial_scores)
-        if not np.all(rows(train) < rows(base_scores[0])) or not all(
-                improves(b, c) for b, c in zip(base_scores, trial_scores)):
-            raise ValueError("Candidate failed physical action descent checks")
-        final_input, final_eq = refined(problem.input_from_x(x), candidate); validation_calls += 1
-        fine_sp, final_metrics, _ = state(final_eq, VALIDATION_OPTIONS)
-        check(final_eq, final_metrics, baseline)
-        after = [score(fine_sp, i, before[i]) for i in range(2)]
-        summary.update(refined_before=before, refined_after=after, final_metrics=final_metrics)
-        if not np.all(rows(after[0]) < rows(before[0])) or not all(
-                improves(b, c) for b, c in zip(before, after)):
-            raise ValueError("Candidate failed matched-refinement descent checks")
+        summary.update(direction=direction.tolist(), trials=[])
+        for step_length in steps:
+            trial = dict(step_length=float(step_length), accepted=False)
+            summary["trials"].append(trial)
+            try:
+                x, candidate, sp, train = evaluate(step_length*direction)
+                trial_scores = [train, score(sp, 1, base_scores[1])]
+                trial["scores"] = trial_scores
+                if not np.all(rows(train) < rows(base_scores[0])) or not all(
+                        improves(b, c) for b, c in zip(base_scores, trial_scores)):
+                    raise ValueError("Candidate failed physical action descent checks")
+                validation_calls += 1; final_input, final_eq = refined(problem.input_from_x(x), candidate)
+                fine_sp, final_metrics, _ = state(final_eq, VALIDATION_OPTIONS)
+                check(final_eq, final_metrics, baseline)
+                after = [score(fine_sp, i, before[i]) for i in range(2)]
+                trial.update(refined_after=after, final_metrics=final_metrics)
+                if not np.all(rows(after[0]) < rows(before[0])) or not all(
+                        improves(b, c) for b, c in zip(before, after)):
+                    raise ValueError("Candidate failed matched-refinement descent checks")
+            except (ValueError, RuntimeError) as error:
+                trial["rejection"] = str(error)
+                continue
+            trial["accepted"] = True
+            summary.update(step_length=float(step_length), trial_scores=trial_scores,
+                           refined_after=after, final_metrics=final_metrics)
+            break
+        else:
+            raise ValueError("No step passed physical action and refinement checks")
         summary["accepted"] = True
         final_input.to_indata(f"input.{output_name}")
         vj.write_wout(f"wout_{output_name}.nc", final_eq.wout)
@@ -291,10 +314,11 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
     return summary
 
 
-def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
+def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None):
     """Optimize with fixed flux, R00, linear edge-zero pressure and zero current.
 
     beta_targets is a pressure-continuation ladder in volume-average beta.
+    physical_steps optionally sets up to three decreasing trial lengths in physical mode.
     Pressure is calibrated from a unit-pressure seed solve and held fixed per
     stage. Current is prescribed, not bootstrap-consistent. Derivatives hold
     the solver's released m=1 gauge fixed.
@@ -444,7 +468,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         reference_path = os.environ.get("VMEX_PWO_REFERENCE")
         reference = None if reference_path is None else json.loads(Path(reference_path).read_text())
         return run_physical_step(seed_input, equilibrium, refined, output_name=output_name,
-                                 seed_route=seed_route, reference=reference)
+                                 seed_route=seed_route, reference=reference, step_lengths=physical_steps)
     inp = seed_input
     seed_equilibrium = equilibrium
     aspect_ref = float(equilibrium.wout.aspect)
