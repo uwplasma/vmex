@@ -72,10 +72,10 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.21.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.6`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
-| `pip install "vmex[turbulence]"` | `gkx>=2.5.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
+| `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
 
@@ -85,11 +85,11 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
-| `essos` | 0.21.0 | `vmex[coils]` | `pip install "essos>=0.21.0"` |
+| `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.6 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.6"` |
 | `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
-| `gkx` | 2.5.0 | `vmex[turbulence]` | `pip install "gkx>=2.5.0"` |
+| `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
 ### Existing environments
@@ -371,6 +371,14 @@ Off by default, so VMEC2000 iteration parity is kept:
   PID law on the axis radius that sets a uniform vertical field to hold a current-carrying
   free-boundary plasma in place. Example: `python examples/free_boundary_position_control.py`
   ([explanation](https://vmex.readthedocs.io/en/latest/explanation/position-control.html)).
+- `vmex.relax_free_boundary_constraint` continues a converged free-boundary state with a weak
+  spectral constraint, removing the bias that makes the LCFS differ from the coil field by 1e-3 to
+  1e-2 in `|B|`. It helps on vacuum and well-resolved decks (`|B|` error 3-10x lower, force error
+  4-15x lower); check it against the coil field at low resolution, where it can be worse.
+  `result = vmex.solve_free_boundary(inp, external_field=field)`, then
+  `relaxed = vmex.relax_free_boundary_constraint(inp, result, external_field=field)`.
+  Example: `python examples/free_boundary_relax_constraint.py`
+  ([how-to](https://vmex.readthedocs.io/en/latest/howto/free-boundary.html)).
 - `solve_multigrid(inp, lambda_m0_floor=1e-3)` adds a radial preconditioner for the m = 0 lambda
   force of fixed-boundary stellarators converged to a very small `ftol`; iterations fall by up to 9%
   ([iteration](https://vmex.readthedocs.io/en/latest/explanation/iteration.html)).
@@ -444,7 +452,7 @@ compilation included.
 
 ## Turbulence
 
-`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.5.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
+`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.6.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
 [GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing `k_y`,
 and a short nonlinear ITG simulation (`a/L_T = 3`, `a/L_n = 1`, adiabatic electrons). The terminal shows each
 stage with an estimate of the time left. The run writes the saturated heat flux with its standard error, a

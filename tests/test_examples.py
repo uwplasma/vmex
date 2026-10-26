@@ -81,7 +81,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
-    assert coils == ["essos>=0.21.0"], coils
+    assert coils == ["essos>=0.22.0"], coils
 
     for script in ESSOS_COIL_EXAMPLES:
         text = script.read_text()
@@ -153,6 +153,7 @@ EXECUTED_EXAMPLES = {
     "examples/free_boundary_mgrid.py",
     "examples/free_boundary_phiedge.py",
     "examples/free_boundary_position_control.py",
+    "examples/free_boundary_relax_constraint.py",
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
@@ -862,6 +863,15 @@ def test_qa_alpha_losses_optimization(tmp_path):
     for name in ("wout_QA_alpha_losses_optimized.nc", "QA_alpha_losses_optimized_losses.png",
                  "QA_alpha_losses_optimized_trace.png"):
         assert (tmp_path / name).exists(), name
+
+
+@pytest.mark.full  # nightly: coarse free-boundary solve plus 1,000 relaxation iterations (~1.5 min)
+def test_free_boundary_relax_constraint(tmp_path):
+    pytest.importorskip("essos.fields")
+    out = _run_example(EXAMPLES / "free_boundary_relax_constraint.py", tmp_path, timeout=1500)
+    rows = dict(re.findall(r"^\s*(converged|relaxed)\s+\S+\s+([0-9.eE+-]+)", out, re.M))
+    assert set(rows) == {"converged", "relaxed"}, out
+    assert float(rows["relaxed"]) < 0.5 * float(rows["converged"]), out  # 3x at ns = 12
 
 
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)

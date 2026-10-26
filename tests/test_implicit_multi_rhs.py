@@ -308,6 +308,50 @@ def test_colored_bands_match_the_per_row_build(monkeypatch, deck, ns, ntor):
         )
 
 
+def _jaxpr_array_sizes(jaxpr):
+    """Element counts of every array an equation of ``jaxpr`` (nested too) produces."""
+    sizes = []
+    for eqn in jaxpr.eqns:
+        sizes += [int(np.prod(v.aval.shape, dtype=np.int64)) for v in eqn.outvars
+                  if hasattr(v.aval, "shape")]
+        for value in eqn.params.values():
+            for inner in value if isinstance(value, (list, tuple)) else [value]:
+                inner = getattr(inner, "jaxpr", inner)
+                if hasattr(inner, "eqns"):
+                    sizes += _jaxpr_array_sizes(inner)
+    return sizes
+
+
+@pytest.mark.parametrize("ns,block", [(24, 3), (13, 4)])
+def test_colored_bands_recover_bands_without_a_quadratic_intermediate(ns, block):
+    """The band extraction stays linear in the radial count.
+
+    The colored build holds ``3 * block * ns * block`` responses.  Selecting
+    each row's color before its surface once built an
+    ``(ns, block, ns, block)`` array -- ``ns / 3`` times the responses, 30 GB
+    per band for the ns = 65 integer 3-D deck -- so no equation of the traced
+    build may exceed a small multiple of the responses, and the bands must
+    still equal the operator's blocks exactly.
+    """
+    rng = np.random.default_rng(ns)
+    lower, diagonal, upper = (jnp.asarray(rng.standard_normal((ns, block, block)))
+                              for _ in range(3))
+    lower, upper = lower.at[0].set(0.0), upper.at[-1].set(0.0)
+
+    def operator(tangent):
+        return im.block_tridiag_matvec(lower, diagonal, upper, tangent)
+
+    identity = lambda value: value  # noqa: E731
+    build = lambda: im._colored_bands(  # noqa: E731
+        operator, identity, identity, identity, ns, block, jnp.float64, 5)
+    got = build()
+    for name, mine, theirs in zip(("lower", "diagonal", "upper"), got,
+                                  (lower, diagonal, upper)):
+        np.testing.assert_allclose(mine, theirs, rtol=0, atol=1e-14, err_msg=name)
+    responses = 3 * block * ns * block
+    assert max(_jaxpr_array_sizes(jax.make_jaxpr(build)().jaxpr)) <= 2 * responses
+
+
 @pytest.mark.full
 def test_block_pullback_rejects_unconverged_response():
     """The opt-in transpose path cannot return an uncertified gradient."""
