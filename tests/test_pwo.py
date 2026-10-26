@@ -544,3 +544,18 @@ def test_physical_action_rejects_invalid_reference_normalization(anchor):
     reference["rows"][0]["reference_J"] = anchor
     with pytest.raises(ValueError, match="Reference actions"):
         physical_pwo_action_from_boozer(**spectrum, **options, reference=reference)
+
+
+@pytest.mark.parametrize("alpha", [-.7, .7])
+@pytest.mark.parametrize("depth", [1e-8, 1e-10])
+def test_physical_action_shallow_well_has_finite_harmonic_limit(alpha, depth):
+    # B=1+0.2*cos(zeta)+0.02*cos(alpha), with iota=0.
+    minimum = .8+.02*np.cos(alpha)
+    row = physical_pwo_action_from_boozer(
+        bmnc_b=[1., .2, .02], xm_b=[0, 0, 1], xn_b=[0, 1, 0],
+        iota_b=0., G_b=1., I_b=0., nfp=1,
+        levels=[minimum+depth], alphas=[alpha])["rows"][0]
+    # The local harmonic well gives J=C*depth and dJ/dalpha=-C*B_alpha.
+    coefficient = np.pi/(np.sqrt(.1)*minimum**1.5)
+    assert row["J"] == pytest.approx(coefficient*depth, rel=3e-6)
+    assert row["dJ"] == pytest.approx(coefficient*.02*np.sin(alpha), rel=1e-6)

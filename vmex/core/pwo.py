@@ -348,9 +348,22 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
             result.append(np.unique([brentq(lambda x: field(x, alpha)[0]-level, boundaries[j], boundaries[j+1], xtol=1e-13) for j in idx]+boundaries[B == level].tolist()))
         return result, critical, (z, sample)
     def integral(alpha, left, right, level, derivative):
-        mid, width = .5*(left+right), .5*(right-left)
+        width = .5*(right-left)
+        phase = m*alpha+np.array([left, right])[:, None]*freq
+        co, si = np.cos(phase), np.sin(phase)
+        A, D = c*co+s*si, -c*si+s*co
+        residual = level-A.sum(axis=1)
+        mA, mD = m*A, m*D
         def fun(t):
-            B, Ba, _ = field(mid+width*np.sin(t), alpha); par = 1-B/level
+            side = int(t > 0)
+            distance = (2*width*np.sin((t+np.pi/2)/2)**2 if side == 0
+                        else -2*width*np.sin((np.pi/2-t)/2)**2)
+            sh, ch = np.sin(freq*distance/2), np.cos(freq*distance/2)
+            # Retain the root residual; avoid subtracting nearly equal field values.
+            sn, cm1 = 2*sh*ch, -2*sh*sh
+            gap = residual[side]-A[side]@cm1-D[side]@sn
+            B = level-gap; par = gap/level
+            Ba = -mA[side]@sn+mD[side]@(1+cm1) if derivative else 0.
             if B <= 0 or par <= 0:
                 raise ValueError("Nonpositive interior field or parallel energy")
             value = -Ba*(1-B/(2*level))/(B*B*np.sqrt(par)) if derivative else np.sqrt(par)/B
