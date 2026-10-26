@@ -2126,14 +2126,16 @@ def _pwo_centered_case(tmp_path, monkeypatch, mode='descent'):
                 offsets -= weights@offsets
                 local = 1+t if mode == 'parent' and index == 0 else factor
                 actions = 10.+100*t+(index+1)*local*offsets
-                slopes = (1+t if mode == 'slope' else factor)*offsets
+                slopes = (1+t if mode == 'slope' or (mode == 'family_slope' and index == 0)
+                          else factor)*offsets
                 mean = weights@actions
                 family_rows = [dict(u=r['u'], weight=r['weight'], J=J, dJ=dJ)
                                for r, J, dJ in zip(chart['rows'], actions, slopes)]
                 if mode == 'quadrature':
                     family_rows[0]['weight'] += .01
                 families.append(dict(mean_action_m=float(mean),
-                    variance_m2=float(weights@((actions-mean)**2)), rows=family_rows))
+                    variance_m2=float(weights@((actions-mean)**2)),
+                    raw_Jalpha2=float(weights@(slopes**2)), rows=family_rows))
             value = sum(w*f['variance_m2'] for w, f in zip(self.weights, families))/self.length**2
             raw_q = sum(w*sum(r['weight']*r['dJ']**2 for r in f['rows'])
                         for w, f in zip(self.weights, families))
@@ -2253,7 +2255,7 @@ def test_pwo_centered_family_step_does_not_accept_unresolved_finite_gain(tmp_pat
 @pytest.mark.parametrize('change', ['field', 'nonfinite_field', 'half_step', 'trust_radius',
     'scales', 'ftol_check', 'surface', 'id', 'duplicate', 'level', 'weights', 'length',
     'validation_surface', 'nfp', 'float_nfp', 'fractional_nfp', 'bool_nfp',
-    'parent', 'guarded', 'empty_id', 'endpoints'])
+    'parent', 'family_guard', 'guarded', 'empty_id', 'endpoints'])
 def test_pwo_centered_family_policy_rejects_inconsistent_fixed_data(tmp_path, monkeypatch, change):
     run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
     if change in ('field', 'nonfinite_field'):
@@ -2287,6 +2289,8 @@ def test_pwo_centered_family_policy_rejects_inconsistent_fixed_data(tmp_path, mo
         policy['training']['reference']['nfp'] = dict(float_nfp=2., fractional_nfp=2.1, bool_nfp=True)[change]
     elif change == 'parent':
         policy['parent_families'] = ['absent-family']
+    elif change == 'family_guard':
+        policy['family_guards'] = ['absent-family']
     elif change == 'guarded':
         policy['guarded'] = 'false'
     elif change == 'empty_id':
@@ -2295,3 +2299,61 @@ def test_pwo_centered_family_policy_rejects_inconsistent_fixed_data(tmp_path, mo
     with pytest.raises(ValueError):
         run(policy, output_name='bad-policy')
     assert not calls.solves
+
+
+@pytest.mark.parametrize('step', [[.001]*7, [[.001]*4]*2, [np.nan]+[0.]*7,
+                                 [np.inf]+[0.]*7, [0.]*8, [.031]+[0.]*7])
+def test_pwo_centered_supplied_step_rejects_invalid_displacement_before_solves(tmp_path, monkeypatch, step):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    policy['proposed_step'] = step
+    with pytest.raises(ValueError, match='proposed_step'):
+        run(policy, output_name='invalid-step')
+    assert not calls.solves and not calls.reads
+
+
+@pytest.mark.parametrize('mode,guard_family,accepted', [
+    ('descent', False, True), ('half', False, False),
+    ('family_slope', False, True), ('family_slope', True, False),
+])
+def test_pwo_centered_supplied_step_has_one_independent_screen_without_fd(
+        tmp_path, monkeypatch, mode, guard_family, accepted):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch, mode)
+    step = np.zeros(8); step[1] = .03
+    policy['proposed_step'] = step.tolist()
+    if guard_family:
+        policy['family_guards'] = ['family-0']
+    def no_optimizer(*args, **kwargs):
+        raise AssertionError('Caller-supplied step must skip optimization')
+    monkeypatch.setitem(run.__globals__, 'minimize', no_optimizer)
+    result = run(policy, output_name='fixed-step')
+    assert result['accepted'] == accepted
+    assert result['proposal_source'] == 'caller_supplied'
+    assert result['model']['derivative_validated_by_driver'] is False
+    np.testing.assert_array_equal(result['model']['proposal'], step)
+    assert result['MHD_solves'] == len(calls.solves) == 4
+    assert len(calls.restarts) == len({id(s) for s in calls.restarts}) == 4
+    assert set(result['cases']) == {'center', 'check-center', 'full', 'check-full'}
+    assert len(result['trials']) == 1 and result['trials'][0]['fraction'] == 1.
+    for (y, tolerance), expected in zip(calls.solves, (np.zeros(8), np.zeros(8), step, step)):
+        np.testing.assert_allclose(y, expected, atol=1e-14)
+    if guard_family:
+        trial = result['trials'][0]
+        assert trial['checks']['Q']  # Aggregate improvement does not hide a family regression.
+        assert not trial['checks']['family-0_Q']
+        assert trial['assessment']['family-0_Q']['classification'] == 'increase_beyond_observed_changes'
+
+
+def test_pwo_centered_family_slope_guard_applies_to_optimizer_model(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch, 'family_slope')
+    policy['family_guards'] = ['family-0']
+    def infeasible_proposal(*args, **kwargs):
+        z = np.zeros(7); z[0] = 1.
+        margins = kwargs['constraints'][0]['fun'](z)
+        assert margins[-1] < 0  # The family Q guard rejects the aggregate-descent direction.
+        return SimpleNamespace(x=z, success=True, status=0, message='forced proposal', nit=1)
+    monkeypatch.setitem(run.__globals__, 'minimize', infeasible_proposal)
+    result = run(policy, output_name='guard-model')
+    assert not result['accepted'] and 'No feasible descending' in result['rejection']
+    assert result['MHD_solves'] == len(calls.solves) == 17 and not result['trials']

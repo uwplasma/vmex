@@ -446,6 +446,11 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     Charts retain IDs, endpoints, reflecting levels, normalized weights and
     length across resolutions; validation may refine their nodes. Optional parent_families
     IDs protect those variances when guarded=True also protects aggregate Q.
+    With guarded=True, family_guards IDs protect both variance and squared slope.
+    A proposed_step supplies eight scaled boundary displacements within the
+    trust radius, skips FD/optimization, and receives one finite trial through
+    the same screen, with no half-step fallback. The driver does not validate
+    derivatives of a caller-supplied step.
     Scales=.02 m, half_step=1e-4 and trust_radius=.03 are discretionary local
     defaults. All eight max_mode=1 coefficients vary with fixed R00 and flux.
     The deck's grid/FTOL are retained; ftol_check defaults to 100*deck FTOL,
@@ -469,6 +474,12 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     names = list(opt.boundary_dof_names(inp, 1, vary_major_radius=False))
     if len(names) != 8 or np.any(~np.isfinite(scale) | (scale <= 0)) or check_ftol <= ftol:
         raise ValueError("Require eight symmetric boundary modes, positive scales and a looser paired FTOL check")
+    supplied_step = None
+    if "proposed_step" in policy:
+        supplied_step = np.asarray(policy["proposed_step"], dtype=float)
+        if (supplied_step.shape != (8,) or not np.all(np.isfinite(supplied_step))
+                or not 0 < np.linalg.norm(supplied_step) <= radius):
+            raise ValueError("proposed_step requires eight finite, nonzero scaled displacements within trust_radius")
     x0 = opt.pack_boundary(inp, 1, vary_major_radius=False)
     scorers, transforms = [], []
     for key, band in (("training", 10), ("validation", 20)):
@@ -494,13 +505,15 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         raise ValueError("Training/validation require the same ordered IDs, endpoints, levels, weights, length, surface and NFP")
     ids = [c["id"] for c in first.charts]
     protected = list(policy.get("parent_families", []))
-    if any(fid not in ids for fid in protected):
+    family_guards = list(policy.get("family_guards", []))
+    if any(fid not in ids for fid in [*protected, *family_guards]):
         raise ValueError("Unknown protected family ID")
     guarded = policy.get("guarded", True)
     if not isinstance(guarded, bool) or any(not isinstance(fid, str) or not fid for fid in ids):
         raise ValueError("guarded must be boolean and chart IDs must be nonempty strings")
     summary = dict(method="centered_family_variance", accepted=False, pwO_qualified=False,
         research_validation_complete=False, policy=policy, parameters=names, cases={}, trials=[], MHD_solves=0,
+        proposal_source="caller_supplied" if supplied_step is not None else "centered_FD_Gauss_Newton",
         scope="Supplied families and pitches only; bounded local progress, no global or confinement claim.")
 
     def save_summary():
@@ -576,7 +589,9 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         def metrics(score):
             return dict(V=float(score["value"]), Q=float(score["raw_Jalpha2"]),
                 **{fid+"_V": float(f["variance_m2"])/second.length**2
-                   for fid, f in zip(ids, score["families"], strict=True)})
+                   for fid, f in zip(ids, score["families"], strict=True)},
+                **{fid+"_Q": float(f["raw_Jalpha2"])
+                   for fid, f in zip(ids, score["families"], strict=True) if fid in family_guards})
         grids = [{k: metrics(v) for k, v in grid.items()} for grid in
                  (before, before_check, after, after_check)]
         report = {}
@@ -603,56 +618,65 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         checks = dict(V=report["V"]["classification"] == "decrease_beyond_observed_changes")
         if guarded:
             checks.update({key: report[key]["classification"] != "increase_beyond_observed_changes"
-                           for key in ["Q", *[fid+"_V" for fid in protected]]})
+                           for key in ["Q", *[fid+"_V" for fid in [*protected, *family_guards]],
+                                       *[fid+"_Q" for fid in family_guards]]})
         return report, checks
 
     try:
         seed = vj.read_wout(seed)
         center_eq, center = solve(np.zeros(8), "center")
         v0, q0, blocks = rows(center, first)
-        A, C, amplitude = [], [], []
-        for j in range(8):
-            delta = np.eye(8)[j]*h
-            minus_eq, minus = solve(-delta, f"fd{j}-minus")
-            plus_eq, plus = solve(delta, f"fd{j}-plus")
-            vm, qm, _ = rows(minus, first); vp, qp, _ = rows(plus, first)
-            A.append((vp-vm)/(2*h)); C.append((qp-qm)/(2*h))
-            amplitude.append((float(plus_eq.wout.volavgB)-float(minus_eq.wout.volavgB))/(2*h*field))
-        A, C, amplitude = np.asarray(A).T, np.asarray(C).T, np.asarray(amplitude)
-        if (not all(np.all(np.isfinite(a)) for a in (A, C, amplitude)) or
-                np.linalg.norm(amplitude) <= 1e-12 or v0@v0 <= 0):
-            raise ValueError("Unresolved physical amplitude derivative or zero center variance")
-        N = np.linalg.svd(amplitude[None, :], full_matrices=True)[2][1:].T
-        D, E = radius*A@N, radius*C@N
-        guards = [(q0, E)] + [(v0[b], D[b]) for fid, b in zip(ids, blocks) if fid in protected]
-        if not guarded:
-            guards = []
-        def constraints(z):
-            return np.asarray([1-z@z] + [float(r@r-(r+M@z)@(r+M@z))/max(float(r@r), 1e-30) for r, M in guards])
-        def constraint_jac(z):
-            return np.asarray([-2*z] + [-2*M.T@(r+M@z)/max(float(r@r), 1e-30) for r, M in guards])
-        fit = minimize(lambda z: float((v0+D@z)@(v0+D@z)/(v0@v0)), np.zeros(7),
-            jac=lambda z: 2*D.T@(v0+D@z)/(v0@v0), method="SLSQP",
-            constraints=[dict(type="ineq", fun=constraints, jac=constraint_jac)], options=dict(maxiter=1000, ftol=1e-10))
-        z = np.asarray(fit.x)
-        if not np.all(np.isfinite(z)):
-            raise ValueError("Nonfinite Gauss-Newton proposal")
-        z *= min(1., (1-16*np.finfo(float).eps)/max(np.linalg.norm(z), 1e-30))
-        step = radius*N@z
-        summary["model"] = dict(centered_action_residual=v0.tolist(), centered_action_jacobian=A.tolist(),
-            slope_jacobian=C.tolist(), amplitude_gradient=amplitude.tolist(), proposal=step.tolist(),
-            predicted_V=float((v0+A@step)@(v0+A@step)), guarded=guarded, solver_success=bool(fit.success),
-            solver_status=int(fit.status), solver_message=str(fit.message), solver_iterations=int(fit.nit),
-            center_V=float(v0@v0), center_Q=float(q0@q0), x0=x0.tolist(), scales=scale.tolist(),
-            half_step=h, trust_radius=radius, step_norm=float(np.linalg.norm(step)),
-            amplitude_linear_relative_change=float(amplitude@step))
-        if not fit.success or np.min(constraints(z)) < -2e-8 or summary["model"]["predicted_V"] >= float(v0@v0):
-            raise ValueError("No feasible descending bounded Gauss-Newton proposal")
+        if supplied_step is None:
+            A, C, amplitude = [], [], []
+            for j in range(8):
+                delta = np.eye(8)[j]*h
+                minus_eq, minus = solve(-delta, f"fd{j}-minus")
+                plus_eq, plus = solve(delta, f"fd{j}-plus")
+                vm, qm, _ = rows(minus, first); vp, qp, _ = rows(plus, first)
+                A.append((vp-vm)/(2*h)); C.append((qp-qm)/(2*h))
+                amplitude.append((float(plus_eq.wout.volavgB)-float(minus_eq.wout.volavgB))/(2*h*field))
+            A, C, amplitude = np.asarray(A).T, np.asarray(C).T, np.asarray(amplitude)
+            if (not all(np.all(np.isfinite(a)) for a in (A, C, amplitude)) or
+                    np.linalg.norm(amplitude) <= 1e-12 or v0@v0 <= 0):
+                raise ValueError("Unresolved physical amplitude derivative or zero center variance")
+            N = np.linalg.svd(amplitude[None, :], full_matrices=True)[2][1:].T
+            D, E = radius*A@N, radius*C@N
+            guards = ([(q0, E)] + [(v0[b], D[b]) for fid, b in zip(ids, blocks)
+                      if fid in protected or fid in family_guards]
+                      + [(q0[b], E[b]) for fid, b in zip(ids, blocks) if fid in family_guards])
+            if not guarded:
+                guards = []
+            def constraints(z):
+                return np.asarray([1-z@z] + [float(r@r-(r+M@z)@(r+M@z))/max(float(r@r), 1e-30) for r, M in guards])
+            def constraint_jac(z):
+                return np.asarray([-2*z] + [-2*M.T@(r+M@z)/max(float(r@r), 1e-30) for r, M in guards])
+            fit = minimize(lambda z: float((v0+D@z)@(v0+D@z)/(v0@v0)), np.zeros(7),
+                jac=lambda z: 2*D.T@(v0+D@z)/(v0@v0), method="SLSQP",
+                constraints=[dict(type="ineq", fun=constraints, jac=constraint_jac)], options=dict(maxiter=1000, ftol=1e-10))
+            z = np.asarray(fit.x)
+            if not np.all(np.isfinite(z)):
+                raise ValueError("Nonfinite Gauss-Newton proposal")
+            z *= min(1., (1-16*np.finfo(float).eps)/max(np.linalg.norm(z), 1e-30))
+            step = radius*N@z
+            summary["model"] = dict(centered_action_residual=v0.tolist(), centered_action_jacobian=A.tolist(),
+                slope_jacobian=C.tolist(), amplitude_gradient=amplitude.tolist(), proposal=step.tolist(),
+                predicted_V=float((v0+A@step)@(v0+A@step)), guarded=guarded, solver_success=bool(fit.success),
+                solver_status=int(fit.status), solver_message=str(fit.message), solver_iterations=int(fit.nit),
+                center_V=float(v0@v0), center_Q=float(q0@q0), x0=x0.tolist(), scales=scale.tolist(),
+                half_step=h, trust_radius=radius, step_norm=float(np.linalg.norm(step)),
+                amplitude_linear_relative_change=float(amplitude@step))
+            if not fit.success or np.min(constraints(z)) < -2e-8 or summary["model"]["predicted_V"] >= float(v0@v0):
+                raise ValueError("No feasible descending bounded Gauss-Newton proposal")
+        else:
+            step = supplied_step.copy()
+            summary["model"] = dict(source="caller_supplied", derivative_validated_by_driver=False, guarded=guarded,
+                proposal=step.tolist(), x0=x0.tolist(), scales=scale.tolist(),
+                trust_radius=radius, step_norm=float(np.linalg.norm(step)))
         center_grid = resolution(center_eq, center)
         check_eq, check_center = solve(np.zeros(8), "check-center", check_ftol)
         center_check_grid = resolution(check_eq, check_center)
         summary["center"] = dict(resolution=center_grid, paired_resolution=center_check_grid)
-        for fraction in (1., .5):
+        for fraction in ((1.,) if supplied_step is not None else (1., .5)):
             label = "full" if fraction == 1 else "half"
             trial = dict(fraction=fraction, accepted=False); summary["trials"].append(trial)
             try:
