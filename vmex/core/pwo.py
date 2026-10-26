@@ -546,6 +546,21 @@ class PwOActionFamilies:
         if any(not np.array_equal(spectrum.get(k), self.reference.get(k)) for k in ("nfp", "s_b")):
             raise ValueError("Family continuation requires the same surface and field period")
         field, output, ordering = kernel.field, [], {}
+        c, s, m, _ = kernel.coefficients
+        frequency = kernel.frequency
+
+        def sample_grid(grid, alpha, *, derivative=False):
+            # Preserve scalar dot-product order while batching the expensive trig.
+            # Small chunks bound temporary storage for long, high-mode wells.
+            first, second = ((-frequency*c, frequency*s) if derivative else (c, s))
+            values = []
+            for start in range(0, len(grid), 32):
+                phase = m*alpha+frequency*grid[start:start+32, None]
+                co, si = np.cos(phase), np.sin(phase)
+                a, b = (si, co) if derivative else (co, si)
+                values.extend(float(first@x+second@y) for x, y in zip(a, b))
+            return np.asarray(values)
+
         for index, chart in enumerate(self.charts):
             level = chart["level_T"]; endpoints = []
             for old, determinant in zip(chart["endpoints"], chart["determinants"]):
@@ -576,7 +591,7 @@ class PwOActionFamilies:
                     radius = min(.2*width, max(width*1e-5, 4*abs(mismatch/slope)))
                     while True:
                         grid = np.linspace(center-radius, center+radius, 33)
-                        values = np.array([field(v, alpha)[0]-level for v in grid])
+                        values = sample_grid(grid, alpha)-level
                         cross = np.flatnonzero(values[:-1]*values[1:] < 0)
                         exact = grid[values == 0]
                         if len(cross)+len(exact) == 1:
@@ -590,7 +605,7 @@ class PwOActionFamilies:
                 if right <= left or field(left, alpha)[2] >= -1e-8 or field(right, alpha)[2] <= 1e-8:
                     raise ValueError("Invalid continued well orientation")
                 grid = np.linspace(left, right, max(65, int(np.ceil((right-left)*max(abs(kernel.frequency))*16/np.pi))))
-                slopes = np.array([field(z, alpha)[2] for z in grid])
+                slopes = sample_grid(grid, alpha, derivative=True)
                 cross = np.flatnonzero(slopes[:-1]*slopes[1:] < 0)
                 extrema = [brentq(lambda z: field(z, alpha)[2], grid[k], grid[k+1]) for k in cross]
                 if max(field(z, alpha)[0] for z in [(left+right)/2, *extrema]) >= level:
