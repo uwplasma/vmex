@@ -9,6 +9,8 @@ VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step,
 using raw slopes and fixed-reference action normalization.
 VMEX_PWO_REFERENCE names an accepted summary to keep its grids and bounds fixed.
 VMEX_PWO_FAMILY_CHARTS supplies JSON orbit charts to optimize family variance.
+An entry's optional component=[parent,daughter1,daughter2] adds a supplied
+binary junction's own-family variances and plateau-mean balance surrogates.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -126,6 +128,38 @@ def qp_gate_failures(metrics):
     return failed
 
 
+def component_terms(scored, component):
+    """Four local surrogate terms for a supplied parent and two daughter charts."""
+    families = scored["families"]
+    if (not isinstance(component, (list, tuple)) or len(component) != 3 or
+            any(type(i) is not int or not 0 <= i < len(families) for i in component) or
+            len(set(component)) != 3):
+        raise ValueError("Component requires three distinct parent/daughter chart indices")
+    parent, first, second = [families[i] for i in component]
+    p, a, b = [np.asarray(f["endpoints"]) for f in (parent, first, second)]
+    if (p.shape != (2, 2) or a.shape != (2, 2) or b.shape != (2, 2) or
+            not np.all(np.isfinite([p, a, b])) or
+            max(np.max(abs(p[1]-a[0])), np.max(abs(a-b))) > 1e-8):
+        raise ValueError("Component charts must share the parent/daughter event")
+    rows1, rows2 = first["rows"], second["rows"]
+    if any(not f["rows"] for f in (parent, first, second)) or any(
+            not np.all(np.isfinite([r["J"], r["u"], r["left"], r["right"]])) or r["J"] <= 0 or
+            r["right"] <= r["left"] for f in (parent, first, second) for r in f["rows"]):
+        raise ValueError("Component samples require positive actions and ordered bounce pairs")
+    if len(rows1) != len(rows2) or not rows1 or any(
+            abs(a["u"]-b["u"]) > 1e-12 for a, b in zip(rows1, rows2)):
+        raise ValueError("Component daughters require matching quadrature nodes")
+    gaps = np.array([[b["left"]-a["right"], a["left"]-b["right"]]
+                     for a, b in zip(rows1, rows2)])
+    if not np.any(np.all(gaps > 0, axis=0)):
+        raise ValueError("Component daughters must occupy distinct nonoverlapping wells")
+    means = np.array([f["mean_action_m"] for f in (parent, first, second)])
+    variances = np.array([f["variance_m2"] for f in (parent, first, second)])
+    if not np.all(np.isfinite([means, variances])) or np.any(means <= 0) or np.any(variances < 0):
+        raise ValueError("Component action statistics must be finite and physical")
+    return [float((means[0]-means[1:].sum())**2), *variances.tolist()]
+
+
 def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None, step_lengths=None,
                       family_charts=None):
     """Try up to three bounded steps using slopes or supplied family variance.
@@ -135,6 +169,8 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
     Reference spectra identify the actual half-mesh surfaces. Restarts reuse
     these charts and their normalization; family discovery is caller-supplied.
     Require descent at each sampled pitch as a conservative numerical rule.
+    An entry may supply component=[parent,daughter1,daughter2]. Its four local
+    surrogate terms supplement every existing pitch and surface descent check.
     """
     started = time.perf_counter()
     names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)", "ZBS(2,1)"]
@@ -197,16 +233,22 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
         scored = []
         for j, sp in enumerate(spectra):
             try:
-                scored.append(objectives[group][j](dict(sp, s_b=[baseline["surfaces"][j]])) if objectives else
+                result = (objectives[group][j](dict(sp, s_b=[baseline["surfaces"][j]])) if objectives else
                     physical_pwo_action_from_boozer(**sp, levels=levels[group][j], alphas=alpha[group][j],
                     reference=None if reference is None else reference[j], check_roots=True))
+                entry = family_charts[group][j] if objectives else {}
+                if "component" in entry:
+                    indices = entry["component"]
+                    terms = component_terms(result, indices)
+                    result.update(component_indices=indices, component_terms_m2=terms)
+                scored.append(result)
             except (ValueError, RuntimeError) as error:
                 raise ValueError(f"s={baseline['surfaces'][j]:.6g}, sampling group {group}: {error}") from error
         return scored
 
     def rows(scored):
         if objectives:
-            return np.array([p["value"] for s in scored for p in s["per_pitch"]])
+            return np.array([v for s in scored for v in [p["value"] for p in s["per_pitch"]]+s.get("component_terms_m2", [])])
         # Keep middle-surface pitches separate; each additional radius adds its own constraints.
         return np.array([p[k] for p in scored[0]["per_pitch"]+[s["components"] for s in scored[1:]] for k in keys])
 
@@ -235,9 +277,19 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
         if family_charts is not None:
             if len(family_charts) != 2 or any(len(g) != 3 for g in family_charts):
                 raise ValueError("Family charts require two sampling groups on three surfaces")
-            objectives = [[PwOActionFamilies(**entry) for entry in group] for group in family_charts]
+            objectives = [[PwOActionFamilies(**{k: v for k, v in entry.items() if k != "component"})
+                           for entry in group] for group in family_charts]
+            for group, scorers in zip(family_charts, objectives):
+                for entry, objective in zip(group, scorers):
+                    if "component" in entry:
+                        component_terms(objective.initial, entry["component"])
+                        if len({entry["charts"][i]["level_T"] for i in entry["component"]}) != 1:
+                            raise ValueError("Component charts must share one reflecting level")
             names[3] = "RBC(0,2)"
         summary["action_objective"] = "family_variance" if objectives else "fixed_alpha_slopes"
+        if objectives and any("component" in e for g in family_charts for e in g):
+            summary.update(action_objective="connected_component", component_scope=
+                           "Supplied binary junction surrogates supplement all pitch aggregates. No pwO qualification.")
         problem = opt.VmecProblem.from_loss(
             inp, opt.aspect_ratio, max_mode=2, vary_major_radius=False, restart_from=equilibrium,
             max_fsq_ratio=1., refine_tol=1e-13, forward_ftol=1e-13, progress=False)

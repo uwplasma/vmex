@@ -1649,6 +1649,127 @@ def test_vmex_mrx_comparison_example(tmp_path):
     assert figure.stat().st_size > 10_000
 
 
+def _pwo_component_score(scale=1.):
+    families = []
+    for index, (mean, variance) in enumerate(((7., .4), (2., .5), (3., .6))):
+        endpoints = [[0., 0.], [1., 5.]] if index == 0 else [[1., 5.], [2., 6.]]
+        left = 0. if index < 2 else 2.
+        families.append(dict(mean_action_m=mean*scale, variance_m2=variance*scale**2,
+            endpoints=endpoints, rows=[dict(u=u, left=left, right=left+1., J=mean*scale) for u in (.25, .5, .75)]))
+    return dict(families=families, per_pitch=[dict(level_T=.8, value=10.*scale**2),
+                                           dict(level_T=.9, value=scale**2)])
+
+
+def test_pwo_component_uses_separate_plateaus_and_fixed_raw_terms():
+    import runpy
+    terms = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['component_terms']
+    score = _pwo_component_score()
+    assert terms(score, [0, 1, 2]) == pytest.approx([4., .4, .5, .6])
+    assert terms(_pwo_component_score(2.), (0, 2, 1)) == pytest.approx([16., 1.6, 2.4, 2.])
+    # Symmetric daughters may share a mean; the parent retains its own plateau.
+    score['families'][2]['mean_action_m'] = 2.
+    assert terms(score, [0, 1, 2])[0] == 9.
+
+
+@pytest.mark.parametrize('component', [None, [], [0, 1], [0, 1, 2, 3], [0, 1, 1],
+                                       [True, 1, 2], [0., 1, 2], [-1, 1, 2], [0, 1, 3]])
+def test_pwo_component_rejects_invalid_selector(component):
+    import runpy
+    terms = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['component_terms']
+    with pytest.raises(ValueError, match='three distinct'):
+        terms(_pwo_component_score(), component)
+
+
+@pytest.mark.parametrize('problem', ['event', 'daughter_event', 'shape', 'nodes', 'overlap',
+                                    'crossed_order', 'nonfinite_node', 'action', 'width', 'mean', 'variance'])
+def test_pwo_component_rejects_disconnected_or_invalid_families(problem):
+    import runpy
+    terms = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['component_terms']
+    score = _pwo_component_score(); parent, first, second = score['families']
+    if problem == 'event':
+        parent['endpoints'][1][0] += .1
+    if problem == 'daughter_event':
+        second['endpoints'][1][1] += .1
+    if problem == 'shape':
+        first['endpoints'] = [[1., 5.]]
+    if problem == 'nodes':
+        second['rows'][0]['u'] += .1
+    if problem == 'overlap':
+        second['rows'][0]['left'] = .5
+    if problem == 'crossed_order':
+        second['rows'][0].update(left=-2., right=-1.)
+    if problem == 'nonfinite_node':
+        second['rows'][0]['u'] = np.nan
+    if problem == 'action':
+        parent['rows'][0]['J'] = 0.
+    if problem == 'width':
+        parent['rows'][0]['right'] = -1.
+    if problem == 'mean':
+        parent['mean_action_m'] = np.nan
+    if problem == 'variance':
+        first['variance_m2'] = -1.
+    with pytest.raises(ValueError):
+        terms(score, [0, 1, 2])
+
+
+@pytest.mark.parametrize('reject', [None, 'selected_pitch', 'other_pitch', 'other_surface', 'heldout', 'level'])
+def test_pwo_component_step_retains_unselected_and_heldout_checks(tmp_path, monkeypatch, reject):
+    import runpy
+    from types import SimpleNamespace as NS
+    example = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))
+    run = example['run_physical_step']; env = run.__globals__
+    monkeypatch.chdir(tmp_path); monkeypatch.setitem(env, 'ci_smoke', True)
+    names = ['RBC(1,1)', 'ZBS(0,1)', 'ZBS(-1,1)', 'RBC(0,2)', 'RBC(0,1)', 'ZBS(1,1)', 'ZBS(2,1)']
+    inp = NS(nfp=1, phiedge=.1, ntor=0, rbc=np.array([[1.]]), to_indata=lambda p: Path(p).touch())
+    def equilibrium(x):
+        return NS(state=x, runtime=None, result=NS(converged=True), wout=NS(aspect=6., Aminor_p=.2, volavgB=1.))
+    problem = NS(names=names, x0=np.zeros(7), equilibrium_from_x=equilibrium, input_from_x=lambda x: inp)
+    monkeypatch.setattr(example['opt'], 'VmecProblem', NS(from_loss=lambda *a, **k: problem))
+    for name, value in [('min_abs_iota', .5), ('mean_iota', .5), ('mirror_ratio', .2), ('max_elongation', 2.)]:
+        monkeypatch.setattr(example['opt'], name, lambda *a, v=value: v)
+    spectrum = dict(bmnc_b=[[1., .2]], bmns_b=[[0., 0.]], xm_b=[0, 0], xn_b=[0, 1], nfp=1,
+                    iota_b=[0.], I_b=[0.])
+    monkeypatch.setitem(env, 'boozer_spectrum_state', lambda x, runtime, surfaces, **k:
+                        dict(spectrum, s_b=surfaces, G_b=[1-float(np.sum(x))]))
+    monkeypatch.setattr(example['vj'], 'write_wout', lambda p, w: Path(p).touch())
+    class Families:
+        def __init__(self, reference, charts, length):
+            self.surface, self.heldout = reference['s_b'][0], charts[0]['heldout']
+            self.initial = _pwo_component_score()
+        def __call__(self, sp):
+            q = sp['G_b'][0]; score = _pwo_component_score(q)
+            if self.surface != .5:
+                score['per_pitch'] = [dict(level_T=.8, value=q**2)]
+            if reject == 'selected_pitch' and self.surface == .5:
+                score['per_pitch'][0]['value'] = 10./q**2
+            if ((reject == 'other_pitch' and self.surface == .5) or
+                    (reject == 'other_surface' and self.surface == .25) or
+                    (reject == 'heldout' and self.heldout)):
+                score['per_pitch'][-1]['value'] = 1./q**2
+            return score
+    monkeypatch.setitem(env, 'PwOActionFamilies', Families)
+    groups = [[dict(reference=dict(s_b=[s]), charts=[dict(level_T=.8, heldout=heldout)]*3,
+                    length=1., **({'component': [0, 1, 2]} if s == .5 else {}))
+               for s in (.5, .25, .75)] for heldout in (False, True)]
+    if reject == 'level':
+        groups[0][0]['charts'] = [dict(level_T=level, heldout=False) for level in (.8, .8, .9)]
+    result = run(inp, None, lambda inp, eq: (inp, eq), output_name='component', seed_route='qi',
+                 family_charts=groups, step_lengths=[.001])
+    assert result['accepted'] == (reject is None)
+    if reject == 'level':
+        assert 'one reflecting level' in result['rejection'] and result['search_evaluations'] == 0
+        return
+    assert result['action_objective'] == 'connected_component'
+    assert result['physical_reference']['family_charts'] == groups
+    if reject is None:
+        scored = result['trial_scores'][0][0]
+        assert len(result['physical_reference']['normalization']) == 8
+        assert len(scored['component_terms_m2']) == 4
+    else:
+        assert ('No common descent' in result.get('rejection', '') or
+                'descent checks' in result['trials'][0]['rejection'])
+
+
 def test_pwo_physical_rejection_preserves_accepted_checkpoint(tmp_path, monkeypatch):
     import runpy
     from types import SimpleNamespace
