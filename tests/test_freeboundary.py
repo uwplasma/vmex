@@ -931,8 +931,8 @@ def test_prefetch_job_list_and_turned_on_first_pass(monkeypatch):
         niter_array=np.asarray([5]))
     field = lasym_free_field()
     compiled = []
-    monkeypatch.setattr(FB, "compile_lane",
-                        lambda lane, *a, **k: compiled.append(lane) or object())
+    monkeypatch.setattr(jax.stages.Lowered, "compile",
+                        lambda self, *a, **k: compiled.append(self) or object())
     monkeypatch.setattr(FB, "_LANE_EXECUTABLES", {})
     FB._prefetch_stage_lane_set(
         inp, external_field=field, ns=8, ftol=1.0e-6, max_iterations=5,
@@ -940,7 +940,7 @@ def test_prefetch_job_list_and_turned_on_first_pass(monkeypatch):
         precon_type=None, prec2d_threshold=None, prec2d=None, use_fft=False,
         device=None, lmove_axis=None, vacuum_on=None, entry_lanes=True,
         cancel=FB.threading.Event())
-    assert [lane is FB._step_lane for lane in compiled] == [True, True, False, False]
+    assert len(compiled) == 4    # fixed and freeb step (turn-on reuses it), vacuum, fused full
 
     tags = []
 
