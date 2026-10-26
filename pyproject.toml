@@ -120,7 +120,7 @@ turbulence = [
 # 0.21.0: Boozer |B| from an angle table and stopped particles dropped across
 # devices, which `vmex --trace` relies on for its speed (ESSOS #165).
 coils = [
-  "essos>=0.21.0",
+  "essos>=0.22.0",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.

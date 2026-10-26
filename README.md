@@ -72,7 +72,7 @@ or pick what you need:
 
 | Install | Adds | Enables |
 |---|---|---|
-| `pip install "vmex[coils]"` | `essos>=0.21.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
+| `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.6`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
@@ -85,7 +85,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 |---|---|---|---|
 | `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
-| `essos` | 0.21.0 | `vmex[coils]` | `pip install "essos>=0.21.0"` |
+| `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.6 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.6"` |
 | `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
@@ -518,6 +518,9 @@ for the polish).
 - The RMS force relative to the pressure gradient falls 12× near the axis, 9× in the bulk and
   20× at the edge on a held-out grid.
 - L-BFGS stops at |grad| = 4.6e-4 after 150 iterations: a forward result, not a converged one.
+
+`vmex.core.strong_force.traced_lift` is the differentiable form of the lift, for force-balance
+certificates inside gradient-based objectives.
 
 See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 and the [validation record](docs/explanation/validation.md).
