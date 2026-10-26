@@ -35,9 +35,11 @@ RTOL = {
 DEFAULT_RTOL = 3e-3          # wp, betatotal/pol/tor, presf endpoints
 ATOL = 1e-8                  # for values that pass through ~0
 
-# Light cases run on every PR; the heavier finite-beta / high-ns cases nightly.
-LIGHT = ["solovev", "circular_tokamak"]
-HEAVY = ["li383_low_res", "cth_like_fixed_bdy", "DSHAPE", "nfp2_QA_finite_beta", "nfp4_QH_finite_beta"]
+# Every digest case runs on every PR: tokamaks, a fixed-boundary mirror-like
+# device (CTH), DSHAPE, and finite-beta QA/QH stellarators (~90 s serial,
+# ~25 s under -n 4).
+CASES = ["solovev", "circular_tokamak", "li383_low_res", "cth_like_fixed_bdy",
+         "DSHAPE", "nfp2_QA_finite_beta", "nfp4_QH_finite_beta"]
 
 
 def _solve_scalars(case: str) -> dict:
@@ -77,12 +79,6 @@ def _check(case: str) -> None:
     assert not problems, f"{case} scalar parity:\n  " + "\n  ".join(problems)
 
 
-@pytest.mark.parametrize("case", LIGHT)
-def test_scalar_parity_light(case):
-    _check(case)
-
-
-@pytest.mark.full
-@pytest.mark.parametrize("case", HEAVY)
-def test_scalar_parity_heavy(case):
+@pytest.mark.parametrize("case", CASES)
+def test_scalar_parity(case):
     _check(case)

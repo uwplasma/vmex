@@ -174,3 +174,9 @@ The resulting `boozmn_*.nc` is the standard format that the C++
   fill-valued where its producer is not implemented; the disclosed cases are
   in {doc}`/reference/wout-file` and
   {doc}`/reference/vmec2000-compatibility`.
+
+## References
+
+- A. H. Boozer, *Phys. Fluids* 24, 1999 (1981): Boozer coordinates, used for the Boozer $|B|$ panel.
+- C. Mercier, *Nucl. Fusion Suppl.* 2, 801 (1962), and M. Landreman and R. Jorge, *J. Plasma Phys.* 86, 905860510 (2020): the Mercier criterion $D_{\rm Merc}$ and magnetic well.
+- V. V. Nemov, S. V. Kasilov, W. Kernbichler and M. F. Heyn, *Phys. Plasmas* 6, 4622 (1999): effective ripple $\varepsilon_{\rm eff}$.

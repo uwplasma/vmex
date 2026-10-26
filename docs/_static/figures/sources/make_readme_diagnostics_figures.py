@@ -12,7 +12,7 @@ The figure this replaces was committed with no generator and no recorded
 input, so nobody could reproduce or check it.  Running this script also
 writes ``docs/_static/figures/readme_diagnostics.json``, recording the deck,
 its sha256, the solved scalars the README quotes, and the commit, host, and
-package versions of the run.  ``tests/test_figure_provenance.py`` fails when
+package versions of the run.  ``tests/test_repo_consistency.py`` fails when
 the figure changes without that record.
 
 The effective-ripple curve needs NEO_JAX, so the script refuses to run
@@ -37,9 +37,9 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "tools"))
 
-from benchmarks._provenance import file_sha256, git_state  # noqa: E402
+from _provenance import file_sha256, git_state  # noqa: E402
 
 FIGURES = REPO / "docs" / "_static" / "figures"
 RECORD = FIGURES / "readme_diagnostics.json"

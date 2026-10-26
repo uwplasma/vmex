@@ -6,7 +6,7 @@ a FORWARD three-term recurrence whose homogeneous modes grow like
 around mpol/ntor ~ 12) the forward pass returns garbage.  VMEC2000 computes
 the SAME wrong integrals, so two-code parity cannot see the defect; these
 tests pin the fixed ``vmex.core.vacuum._tl_stable`` (per-point
-forward/backward selection following vmecpp's singular_integrals.cc, commit
+forward/backward selection following the C++ reimplementation's singular_integrals.cc, commit
 f5dbf76, re-dimensioned threshold + Miller tail) against an independent
 reference: ``scipy.integrate.quad`` (epsrel 1e-13, epsabs 0), whose
 self-reported error stays under 1e-11 relative — beyond the 1e-10 gates.
@@ -238,7 +238,7 @@ def cth_vacuum_inputs():
     )
     rmnc, zmns, rmns, zmnc = FB._edge_fourier(state, rt)
     boundary = FB.boundary_from_coefficients(
-        rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc, modes=rt.modes, basis=basis
+        rmnc, zmns, rmns, zmnc, modes=rt.modes, basis=basis
     )
     ctor, _rbtor, axis_r, axis_z, _bsq3, _pres = FB._vacuum_scalars(state, rt)
     mg = read_mgrid(mgrid_path)
@@ -247,15 +247,12 @@ def cth_vacuum_inputs():
     )
     phi = (np.asarray(basis.zeta) * basis.onp).reshape(basis.ntheta3, basis.nzeta)
     br_c, bp_c, bz_c = field.b_cyl(np.asarray(boundary.R), phi, np.asarray(boundary.Z))
-    br_a, bp_a, bz_a = FB.axis_current_field(
-        R=np.asarray(boundary.R), Z=np.asarray(boundary.Z),
-        axis_r=np.asarray(axis_r), axis_z=np.asarray(axis_z),
-        nfp=res.nfp, plascur=float(ctor),
+    br_a, bp_a, bz_a = FB._axis_current_field(
+        boundary.R, boundary.Z, axis_r, axis_z, ctor / FB.MU0,
+        FB._axis_current_tables(basis),
     )
-    ext = FB.external_field_channels(
-        boundary=boundary,
-        br=np.asarray(br_c) + br_a, bp=np.asarray(bp_c) + bp_a,
-        bz=np.asarray(bz_c) + bz_a,
+    ext = FB._external_field_channels(
+        boundary, br_c + br_a, bp_c + bp_a, bz_c + bz_a,
         basis=basis, signgs=int(rt.setup.signgs),
     )
     return dict(
@@ -344,22 +341,18 @@ def test_cth_fixture_below_onset_and_bit_identical(cth_vacuum_inputs, monkeypatc
         jax.config.update("jax_disable_jit", prev_disable_jit)
 
     # 3. jitted: reordering-level agreement only (documented above)
-    jax.config.update("jax_disable_jit", False)
-    try:
-        new_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
-        with monkeypatch.context() as mp:
-            mp.setattr(V, "_tl_stable", forward_only)
-            old_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
-        for name, a, b in zip(names, new_j, old_j, strict=True):
-            a = np.asarray(a)
-            b = np.asarray(b)
-            scale = float(np.max(np.abs(b)))
-            diff = float(np.max(np.abs(a - b)))
-            assert diff <= 1e-11 * scale, (
-                f"jit {name}: {diff:.3e} vs scale {scale:.3e}"
-            )
-    finally:
-        jax.config.update("jax_disable_jit", prev_disable_jit)
+    new_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
+    with monkeypatch.context() as mp:
+        mp.setattr(V, "_tl_stable", forward_only)
+        old_j = V.make_vacuum_solver(basis, signgs=signgs).full(boundary, bexni)
+    for name, a, b in zip(names, new_j, old_j, strict=True):
+        a = np.asarray(a)
+        b = np.asarray(b)
+        scale = float(np.max(np.abs(b)))
+        diff = float(np.max(np.abs(a - b)))
+        assert diff <= 1e-11 * scale, (
+            f"jit {name}: {diff:.3e} vs scale {scale:.3e}"
+        )
 
 
 def test_solver_dataclass_unchanged():

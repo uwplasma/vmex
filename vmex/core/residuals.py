@@ -585,12 +585,33 @@ def apply_radial_preconditioner(
     return (result, safe) if return_safe else result
 
 
-def apply_lambda_preconditioner(force: SpectralForce, faclam: Array) -> SpectralForce:
+def apply_lambda_preconditioner(
+    force: SpectralForce, faclam: Array, m0_radial: Any = None,
+) -> SpectralForce:
     """Scale the lambda force blocks by ``faclam`` (``residue.f90``:
     ``gcl = faclam*gcl``; ``faclam`` from
-    :func:`vmex.core.preconditioner.lamcal`)."""
+    :func:`vmex.core.preconditioner.lamcal`).
+
+    With ``m0_radial`` (:func:`vmex.core.preconditioner.lamcal_m0_radial`)
+    the ``m = 0, n >= 1`` columns are instead solved against the radial
+    tridiagonal lambda block.
+    """
     faclam = jnp.asarray(faclam)
     updates = _map_blocks(force, _LAMBDA_BLOCKS, lambda b: b * faclam.astype(b.dtype))
+    if m0_radial is not None:
+        from solvax import tridiagonal_solve
+
+        sup, sub, diag = (jnp.asarray(x)[:, 1:] for x in m0_radial)
+        identity_axis = diag.at[0].set(1.0)
+        for name, axis_copy in (("force_lambda_cs", True), ("force_lambda_cc", False)):
+            block = getattr(force, name)
+            if block is None or block.shape[2] < 2:
+                continue
+            # totzsps copies lambda_1 into the symmetric axis row only.
+            d = identity_axis.at[1].add(diag[0]) if axis_copy else identity_axis
+            rhs = jnp.asarray(block)[:, 0, 1:].at[0].set(0.0)
+            x = tridiagonal_solve(sub, d, sup, rhs, method="thomas")
+            updates[name] = updates[name].at[:, 0, 1:].set(x.astype(block.dtype))
     return replace(force, **updates)
 
 

@@ -31,11 +31,6 @@ two layers:
    - :func:`quasilinear_flux_proxy` — kind ``"quasilinear_flux"``: the
      mixing-length quasilinear heat-flux proxy
      ``gamma * W_Q / k_perp_eff^2``.
-   - :func:`nonlinear_heat_flux_proxy` — kind
-     ``"nonlinear_window_heat_flux"``: GKX's smooth reduced
-     nonlinear-window heat-flux surrogate.  A documented *proxy*: a
-     production nonlinear claim still requires GKX's matched long
-     nonlinear audits, per its own docs.
    - :func:`turbulence_objective_vector` — the underlying ordered
      ``SOLVER_OBJECTIVE_NAMES`` vector
      (:data:`TURBULENCE_OBJECTIVE_NAMES`).
@@ -47,8 +42,8 @@ two layers:
    Traceability is validated in ``tests/test_turbulence.py``.
 
 The heavy dependency is optional: only the objective wrappers import
-``gkx`` (>= 2.5.0; ``pip install 'vmex[turbulence]'`` or
-``pip install 'gkx>=2.5.0'``; its ``solvax`` pin is satisfied API-wise by
+``gkx`` (>= 2.6.0; ``pip install 'vmex[turbulence]'`` or
+``pip install 'gkx>=2.6.0'``; its ``solvax`` pin is satisfied API-wise by
 the in-house solvax's ``gmres``/``tridiagonal_solve``/``chunked_jacfwd``).
 The geometry adapter works without it.
 
@@ -97,7 +92,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .solver import SolverRuntime, SpectralState
-from .statephysics import aspect_ratio
+from .statephysics import _field_line_frame, aspect_ratio
 from .stability import (
     _ballooning_context, _pest_lambda, _surface_closures,
     _surface_tables, _theta_vmec_from_pest,
@@ -114,7 +109,6 @@ __all__ = [
     "turbulence_objective_vector",
     "turbulent_growth_rate",
     "quasilinear_flux_proxy",
-    "nonlinear_heat_flux_proxy",
 ]
 
 Array = Any
@@ -155,14 +149,14 @@ def _gkx():
     except ImportError as err:  # pragma: no cover - exercised via message test
         raise ImportError(
             "the turbulence objectives need the optional dependency "
-            "gkx >= 2.5.0 (github.com/uwplasma/GKX): pip install 'vmex[turbulence]' "
-            "or pip install 'gkx>=2.5.0'.  The geometry adapter "
+            "gkx >= 2.6.0 (github.com/uwplasma/GKX): pip install 'vmex[turbulence]' "
+            "or pip install 'gkx>=2.6.0'.  The geometry adapter "
             "gk_fieldline_geometry works without it.") from err
 
 
 # ---------------------------------------------------------------------------
-# Field-line point geometry (extends stability._make_point_fn with the
-# grad-s / grad-psi projections the GK metric and drift arrays need)
+# Field-line point geometry (the ballooning set plus the grad-s
+# projections the GK metric and drift arrays need)
 # ---------------------------------------------------------------------------
 
 
@@ -170,7 +164,8 @@ def _make_gk_point_fn(m: Array, xn: Array, tabs: dict, iota: Array,
                       diota: Array, phipf_j: Array):
     """Point-evaluation closure for one flux surface (GK geometry set).
 
-    Built on :func:`vmex.core.stability._surface_closures`, so the sine-parity
+    Built on :func:`vmex.core.stability._surface_closures` and
+    :func:`vmex.core.statephysics._field_line_frame`, so the sine-parity
     spectra of an asymmetric state reach this lane from one implementation.
     Returns at ``q = (t, theta, phi)`` with ``t = s - s_j`` (evaluated at
     ``t = 0``), and ``phi_rel = phi - zeta0`` carrying the secular shear term
@@ -183,29 +178,14 @@ def _make_gk_point_fn(m: Array, xn: Array, tabs: dict, iota: Array,
         m, xn, tabs, iota, diota, phipf_j)
 
     def point(q: Array, phi_rel: Array):
-        J = jax.jacfwd(pos_fn)(q)                     # columns: e_s, e_th, e_ph
-        sqrt_g = jnp.linalg.det(J)
-        dual = jnp.linalg.inv(J)                      # rows: grad s, grad th, grad ph
-        lam_g = jax.grad(lam_fn)(q)
-        iota_t = iota + diota * q[0]
-        B = phipf_j * ((iota_t - lam_g[2]) * J[:, 1]
-                       + (1.0 + lam_g[1]) * J[:, 2]) / sqrt_g
-        modB = jnp.linalg.norm(B)
-        dB = jax.grad(modb_fn)(q)                     # (d|B|/ds, d/dth, d/dph)
-        grad_modB = dB[0] * dual[0] + dB[1] * dual[1] + dB[2] * dual[2]
-        # grad alpha with the secular shear term, alpha = theta* - iota (phi - zeta0).
-        alpha_cov = jnp.array([lam_g[0] - phi_rel * diota,
-                               1.0 + lam_g[1],
-                               lam_g[2] - iota_t])
-        grad_alpha = (alpha_cov[0] * dual[0] + alpha_cov[1] * dual[1]
-                      + alpha_cov[2] * dual[2])
-        grad_s = dual[0]
-        b_sup_phi = phipf_j * (1.0 + lam_g[1]) / sqrt_g
-        b_cross_gradb = jnp.cross(B, grad_modB)
-        return (modB, b_sup_phi,
+        f = _field_line_frame(pos_fn, lam_fn, modb_fn, q, iota=iota, diota=diota,
+                              phipf_j=phipf_j, phi_rel=phi_rel)
+        grad_alpha, grad_s = f["grad_alpha"], f["dual"][0]
+        b_cross_gradb = jnp.cross(f["B"], f["grad_modB"])
+        return (f["modB"], f["b_sup_phi"],
                 grad_alpha @ grad_alpha, grad_alpha @ grad_s, grad_s @ grad_s,
                 b_cross_gradb @ grad_alpha, b_cross_gradb @ grad_s,
-                B @ grad_modB)
+                f["B"] @ f["grad_modB"])
 
     return point
 
@@ -762,38 +742,3 @@ def quasilinear_flux_proxy(state: SpectralState, rt: SolverRuntime, **kwargs) ->
     return gkx.solver_scalar_objective_from_vector(vector, "quasilinear_flux")
 
 
-def nonlinear_heat_flux_proxy(
-    state: SpectralState,
-    rt: SolverRuntime,
-    *,
-    csat: float = 0.85,
-    saturation_floor: float = 1.0e-10,
-    **kwargs,
-) -> jnp.ndarray:
-    """Smooth reduced nonlinear-window heat-flux surrogate (traceable).
-
-    GKX objective kind ``"nonlinear_window_heat_flux"``: its
-    saturation-rule closure ``csat * max(W_Q, 0) * 2 gamma_+ /
-    (1 + 2.2 kperp_eff^2 + 0.15 gamma_+)`` mapping the linear solver row
-    to a nonlinear heat-flux proxy
-    (``gkx.objectives.vmec_transport._solver_table_to_nonlinear_window_proxy``,
-    the exact objective its VMEX optimization scripts use for this kind).
-    A smooth *surrogate* only — see the module docstring's audit caveat.
-    Eigenvector-weighted and differentiable like
-    :func:`quasilinear_flux_proxy`.  Keyword arguments as
-    :func:`turbulence_objective_vector`.
-    """
-    _gkx()
-    # Config class and tables live in GKX's consolidated vmec_transport module.
-    from gkx.objectives.vmec_transport import (
-        VMEXTransportObjectiveConfig,
-        _solver_table_to_nonlinear_window_proxy,
-    )
-
-    config = VMEXTransportObjectiveConfig(
-        kind="nonlinear_window_heat_flux",
-        nonlinear_csat=float(csat),
-        nonlinear_saturation_floor=float(saturation_floor),
-    )
-    vector = turbulence_objective_vector(state, rt, **kwargs)
-    return _solver_table_to_nonlinear_window_proxy(vector, config)

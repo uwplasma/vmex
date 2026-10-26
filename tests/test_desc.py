@@ -63,12 +63,8 @@ def test_truncation_is_minimal_and_bounds_off_grid_geometry(asymmetric):
 @pytest.fixture
 def desc_equilibrium():
     pytest.importorskip("desc")
-    import jax
     from desc.equilibrium import Equilibrium
-    previous = jax.config.jax_disable_jit
-    jax.config.update("jax_disable_jit", False)
-    yield Equilibrium
-    jax.config.update("jax_disable_jit", previous)
+    return Equilibrium
 
 
 @pytest.mark.parametrize("family,current,asymmetric,extension", [

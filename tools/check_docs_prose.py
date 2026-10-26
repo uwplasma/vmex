@@ -11,7 +11,7 @@ Mechanical checks on the Diátaxis docs tree:
 4.  No TODO/FIXME markers in any docs page.
 5.  Media budget: files under ``docs/_static`` outside the frozen
     grandfather list (README-embedded figures and their committed input
-    data) must total <= 725 KB with no single file over 150 KB.
+    data) must total <= 757 KB with no single file over 150 KB.
 
 Exit 0 when clean; exit 1 listing ``file:line: problem`` otherwise.
 """
@@ -64,21 +64,17 @@ BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
-BUDGET_TOTAL = 725 * 1024  # 550 KB + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) figures
+BUDGET_TOTAL = 757 * 1024  # 550 KB + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) and position-control (#570, 32 KB) figures
 BUDGET_FILE = 150 * 1024
 
 # Frozen: files consumed by the top-level README.md and fetched reference
 # inputs listed in ``assets/manifest.json``. The README cannot move (its paths are pinned
 # by GitHub rendering and by tests), so these are exempt from the docs media
 # budget. Additions are limited to reviewed, reproducible README figures.
-GRANDFATHERED_PREFIXES = (
-    "qi_readme_cases/",
-    "readme_best_cases/",
-)
+GRANDFATHERED_PREFIXES: tuple[str, ...] = ()
 GRANDFATHERED_FILES = {
     "figures/freeb_diiid_mgrid_beta_ns101_panel_summary.csv",
     "figures/freeb_lpqa_direct_coil_beta_ns101_panel_summary.csv",
-    "figures/minimal_seed_showcase_summary.csv",
     "figures/mirror_fixed_boundary_3d.webp",
     "figures/mirror_free_boundary_beta_scan.webp",
     "figures/pr20_wout_parity_summary.json",

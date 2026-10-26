@@ -279,11 +279,22 @@ VMEX keeps the three QI formulations separate:
 * :class:`~vmex.core.omnigenity.QIResidual` is the existing compact level-set
   objective; its call signature and defaults are unchanged.
 * :class:`~vmex.core.qi.ConstructedQIResidual` applies the fuller smooth
-  squash-and-shuffle construction to the same traceable Boozer spectrum.
-* :class:`~vmex.core.qi.JInvariantQIResidual` directly minimizes variation of
-  :math:`\mathcal J_\parallel` over complete wells. Its pitch array is supplied
-  in inverse tesla and is shared across surfaces; it is never renormalized
-  independently on each field line.
+  squash-and-shuffle construction to the same traceable Boozer spectrum. Each well starts at its
+  :math:`|B|` minimum; the grid argmin jumps a whole cell as the field moves,
+  so the residual is discontinuous there. ``argmin_softness`` replaces it by
+  the softmin centroid :math:`\sum_i i\,w_i`,
+  :math:`w_i\propto e^{-(b_i-\min b)/\tau}` (circular on a periodic line),
+  and reads the branches by linear interpolation, which makes the residual
+  continuous; an exactly QI field is still a zero.
+* :class:`~vmex.core.qi.JInvariantQIResidual` minimizes the normalized
+  dispersion of :math:`\mathcal J_\parallel` pooled over all complete wells,
+  field lines, and traced periods at each surface and pitch. Its pitch array
+  is supplied in inverse tesla and is shared across surfaces; it is never
+  renormalized independently on each field line. Wells are not matched into
+  families: two different wells can have distinct actions and produce a
+  positive residual even when both actions are independent of :math:`\alpha`.
+  Thus this objective alone does not measure within-family omnigenity or
+  establish radial drift suppression in a multiwell field.
 
 The action residual excludes cut edge wells but retains complete wells inside
 the bounded trace. A pitch block with no complete well on even one sampled field
@@ -349,18 +360,18 @@ the published :math:`g_J`: it establishes a favorable direction without
 asking a local optimizer to cross actual-well topology changes. The final
 :class:`~vmex.core.maxj.MaximumJResidual` remains the physical certificate.
 
-``QI_maxJ_continuation.py`` starts from a minimal vacuum seed, retains a
-magnetic-well target, first creates matched QI wells, uses the constructed
-field to establish the maximum-J direction, and only then ramps a negative
-slope margin in the actual field. It recomputes a common physical pitch once
-after the weak stage and freezes it throughout the remaining stages; the
-script raises if the incoming wells cannot be resolved at that pitch. The
-final stage lengthens the field-line trace and increases the number of
-field-line labels, preventing a short trace from aliasing a visibly
-non-omnigenous result.
+``QI_maxJ_continuation.py`` starts from the bundled ``nfp = 3`` QI
+equilibrium, retains a magnetic-well target, and ramps a negative slope
+margin in the actual field. Its research ladder recomputes a common physical
+pitch once after the weak stage and freezes it throughout the remaining
+stages, and its final stage lengthens the field-line trace and increases the
+number of field-line labels, preventing a short trace from aliasing a visibly
+non-omnigenous result; the five-minute default runs the middle stage alone at
+the seed's pitch. The script raises if the incoming wells cannot be resolved
+at that pitch.
 The final ``plot_wout(..., j_pitch=pitch)`` call passes that same pitch to the
-polar :math:`J(\alpha,s)` panel, making it a direct visual certificate of the
-optimized trapped-particle population.
+polar :math:`J(\alpha,s)` panel, providing a visual diagnostic of :math:`J`
+on the sampled pitch, surfaces, and field-line labels.
 
 .. _confinement-qi-fidelity:
 
@@ -594,11 +605,43 @@ field-line ODE eigenproblem
 along the straight-field-line angle :math:`\eta`, where :math:`g` is the
 line-bending term, :math:`c` the pressure/curvature drive, and :math:`f>0` the
 inertia; :math:`\lambda = (\gamma a_N/v_A)^2 > 0` flags instability.
-:func:`~vmex.core.stability.ballooning_growth_rate` reduces the batched
-eigenvalues to a smooth ``softmax`` scalar built to be driven negative as a
-stable-by-construction constraint. The full coefficient definitions are in the
-:mod:`~vmex.core.stability` module docstring and the usage recipe in
-:doc:`/reference/objectives`.
+**Discretization.** The three-point stencil on a uniform grid of step
+:math:`h` turns the ODE into a symmetric tridiagonal eigenproblem whose
+largest eigenvalue has error :math:`a h^2 + O(h^4)`. VMEX solves it on the
+grid and on its every-other-point subgrid and returns
+:math:`(4\lambda_h - \lambda_{2h})/3`, the Richardson step COBRA also takes
+(Sanchez *et al.* 2000). The coefficients oscillate along the line with the
+toroidal harmonics, about :math:`n_{fp} N/\iota` times per poloidal turn,
+so the extrapolation needs the grid to resolve them: on the bundled QA seed
+(:math:`n_{fp}=2`, :math:`\iota\approx0.42`) 32 points per turn read
+:math:`\lambda` 13 % low and 64 points 3 % low, while the extrapolation from
+128 points per turn is within 0.4 % of the converged value. The default is
+641 points over :math:`\eta\in[-5\pi,5\pi]`. An unstable mode is localized
+and converged in domain within three turns; a stable line tends to
+:math:`\lambda\to0^-` as the domain grows, so thresholds should not sit just
+below zero.
+
+**Radial derivatives.** Geometry spectra live on the full radial mesh,
+:math:`\iota` and :math:`p` on the half mesh. Each is read at the requested
+:math:`s` from the degree-4 polynomial through its five nearest nodes, so
+any :math:`s\in(0,1)` can be evaluated and the same surface is compared
+across radial grids. The second radial derivative enters :math:`\nabla|B|`,
+and :math:`\lambda` is sensitive to it: with three-point differences, as in
+COBRA, the eigenvalue on the QA seed at ``ns = 71`` is 2–6 % low, and the
+three-point value extrapolated from stencils :math:`h_s` and
+:math:`2h_s` agrees with the five-point value to 0.3 %.
+
+**Reductions.** At fixed :math:`(\alpha,\zeta_0)`, :math:`\lambda(s)` is
+rough: as :math:`\iota` changes, a long field line samples the field
+periods at different phases, and on the QA seed :math:`\lambda` at
+:math:`\alpha=0` changes sign twice between :math:`s=0.80` and
+:math:`0.83`. The maximum over a dense set of lines and ballooning
+parameters is the smooth, convergent quantity: it agrees within 5 % between
+``ns = 41`` and ``101``. :func:`~vmex.core.stability.ballooning_residual`
+returns one row :math:`\max(\lambda-\lambda_0,0)` per line (Gaur *et al.*
+2025; DESC's ``BallooningStability``), and
+:func:`~vmex.core.stability.ballooning_growth_rate` the hard maximum. The
+usage recipe is in :doc:`/reference/objectives`.
 
 
 Bootstrap current (Redl)
@@ -735,7 +778,7 @@ Axisymmetry sends
 tests anchor together with the QA-versus-unoptimized ordering.
 
 **The hard value is not a gradient objective.** The discretized
-:class:`~vmex.core.gammac.GammaC` gradient is exact but not convergent:
+:class:`~vmex.core.gammac.GammaC` sampled gradient can change sign under refinement:
 hard well detection and hard branch selection make the discretized
 :math:`\Gamma_c` piecewise in the boundary coefficients with
 grid-dependent breakpoints, and the measured li383 refinement ladder flips
@@ -749,14 +792,13 @@ cancel simultaneously (a superbanana corner) contributes
 arbitrary sign.  :class:`~vmex.core.gammac.GammaCSmooth` regularizes
 exactly these two structures on the same wells and bounce quadrature — a
 kernel floor :math:`1/\sqrt{\max(1-\lambda B, 0) + \delta}` with
-:math:`\delta` a fixed, stop-gradiented fraction of the trapped range
+:math:`\delta` a field-dependent fraction of the trapped range with live derivatives
 (which also removes the birth/death jump of the well-connection graph of
 Ochs 2025, since a newborn well's floored bounce time starts at zero
 rather than the finite oscillator period), and a per-well corner floor
 that compares the drift cancellation against the well's own
-absolute-value bounce integrals.  Its boundary derivative holds one sign
-with bounded magnitude spread on the same ladder; its value sits below
-the hard one (the smoothing deliberately cannot see structure below
-:math:`\delta` — the near-omnigenous QA ripple most of all) and anneals
-toward it as ``temperature`` decreases with a correspondingly finer
-budget.  Optimize the surrogate, report the hard value.
+absolute-value bounce integrals. Both classes freeze normalized pitch-grid
+shape derivatives, so even the smooth gradient is approximate. Check actual
+forward descent and sampling refinement for each configuration. The surrogate
+can underestimate shallow ripple wells; anneal ``temperature`` with a finer
+budget and report the independent hard value.

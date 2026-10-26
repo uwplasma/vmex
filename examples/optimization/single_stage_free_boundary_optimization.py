@@ -37,7 +37,10 @@ It takes 8 L-BFGS-B iterations and 16 trials, and every target is met,
 including the [16, 51] verification solve. The minimum |iota| rises from 0.402
 to 0.434, and the coils move by up to 14 mm after the pre-fit. The free boundary
 ends up to 0.07 m from the prescribed seed; the seed's own free boundary was
-within 0.02 m of it.
+within 0.02 m of it. The verification solve must also balance pressure across
+the boundary: its DEL-BSQ (VMEC's mean pressure jump over the mean vacuum
+pressure) ends at 6e-3 against a limit of 2e-2. With a warm JAX cache the run
+takes 129 s.
 
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
@@ -81,6 +84,7 @@ IOTA_CEILING = 0.44               # maximum |iota|: stay below the 4/9 resonance
                                   # whose islands leave no edge surface (NFP = 2)
 ASPECT_LIMIT = 6.0                # maximum aspect ratio
 NORMAL_FIELD_LIMIT = 0.01         # area-weighted RMS of B.n/|B| on the boundary
+DELBSQ_LIMIT = 0.02               # VMEC's DEL-BSQ: pressure jump across the boundary
 COIL_SURFACE_DISTANCE_LIMIT = 0.15
 COIL_DISTANCE_LIMIT = 0.17
 CURVATURE_LIMIT = 7.0
@@ -252,9 +256,9 @@ field0 = BiotSavart(coils0)
 B_phi = np.asarray(jax.vmap(field0.B)(jnp.asarray(points)))[:, 1].reshape(R.shape)
 toroidal_flux = float(np.sum(rho_weights[:, None] * B_phi * area_element)
                       * (2.0 * np.pi / theta.size))
-# VMEC counts the toroidal angle clockwise seen from above, so its PHIEDGE
-# has the opposite sign to the flux measured along +phi.
-inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field", phiedge=-toroidal_flux,
+# The free-boundary solve takes the external field along the same +phi, and
+# stops (vacuum.f, ier_flag 7) unless PHIEDGE has the sign of that field.
+inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field", phiedge=toroidal_flux,
               ns_array=np.array([NS]), ftol_array=np.array([FTOL]),
               niter_array=np.array([NITER]))
 print(f"[flux] PHIEDGE = {inp.phiedge:.6f} Wb, the fitted field's flux through the seed")
@@ -415,6 +419,7 @@ free_result = vj.solve_free_boundary_multigrid(
     final_input, external_field=field_final, verbose=not ci_smoke,
     raise_on_max_iterations=False)
 final_converged = bool(np.all(np.asarray(free_result.converged)))
+final_delbsq = float(free_result.vacuum.delbsq)
 final_context = im.runtime_from_params(
     im.params_from_input(final_input),
     vj.make_free_boundary_config(final_input, field_final, ns=final_ns[-1]).implicit)
@@ -453,6 +458,8 @@ print(f"\nObjective: {initial_value:.6e} -> {final_value:.6e} after "
 print(f"Coil lengths = {np.asarray(coils_final.length[:N_COILS])}")
 print(f"B.n/B of the coil field on the free boundary: RMS = "
       f"{100 * normal_field_rms_final:.3f}% (target <= {100 * NORMAL_FIELD_LIMIT:.1f}%)")
+print(f"Pressure jump across the free boundary (DEL-BSQ) = {final_delbsq:.2e} "
+      f"(target <= {DELBSQ_LIMIT:.0e})")
 print(f"Minimum coil-surface distance = {coil_surface_distance:.4f} m "
       f"(target >= {COIL_SURFACE_DISTANCE_LIMIT:.4f} m)")
 print(f"Minimum coil-coil distance = {coil_distance:.4f} m "
@@ -467,6 +474,7 @@ checks = (
     ("maximum |iota|", final_values["max |iota|"], IOTA_CEILING, "above"),
     ("aspect ratio", final_aspect, ASPECT_LIMIT, "above"),
     ("B.n/B RMS", normal_field_rms_final, NORMAL_FIELD_LIMIT, "above"),
+    ("DEL-BSQ", final_delbsq, DELBSQ_LIMIT, "above"),
     ("minimum coil-surface distance", coil_surface_distance, COIL_SURFACE_DISTANCE_LIMIT, "below"),
     ("minimum coil-coil distance", coil_distance, COIL_DISTANCE_LIMIT, "below"),
     ("maximum curvature", maximum_curvature, CURVATURE_LIMIT, "above"),
@@ -498,7 +506,7 @@ summary = {
               "maximum curvature": maximum_curvature,
               "verification solve converged": final_converged},
     "targets": {"min |iota| >=": IOTA_FLOOR, "aspect <=": ASPECT_LIMIT,
-                "B.n/B RMS <=": NORMAL_FIELD_LIMIT,
+                "B.n/B RMS <=": NORMAL_FIELD_LIMIT, "DEL-BSQ <=": DELBSQ_LIMIT,
                 "coil-surface distance >=": COIL_SURFACE_DISTANCE_LIMIT,
                 "coil-coil distance >=": COIL_DISTANCE_LIMIT,
                 "maximum curvature <=": CURVATURE_LIMIT},

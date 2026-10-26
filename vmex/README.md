@@ -9,9 +9,9 @@ This directory contains the Python package.
   lazy exports (`VmecInput`, `solve`, `solve_multigrid`,
   `solve_free_boundary`, wout IO, plotting, Boozer, mgrid/coils, `optimize`,
   `implicit`, `errors`).
-- `_compat.py`: JAX import/backend policy helpers (x64, persistent
-  compilation-cache directory selection) shared by `__init__.py` and
-  `core/solver.py`.
+- `_compat.py`: JAX environment defaults (x64, dispatch, XLA flags), the
+  persistent compilation-cache policy shared by `__init__.py` and
+  `core/solver.py`, and the floors of the optional extras.
 - `doctor.py`: `vmec --doctor` installation/JAX-backend diagnostics.
 - `resources/`: tiny package-bundled inputs needed after `pip install`, such
   as the `vmec --test` quick-start deck. User-facing examples live in
