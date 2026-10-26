@@ -1656,16 +1656,36 @@ def test_pwo_physical_rejection_preserves_accepted_checkpoint(tmp_path, monkeypa
     example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
     run = example["run_physical_step"]
     monkeypatch.chdir(tmp_path)
-    for name in ("input.accepted", "wout_accepted.nc"):
+    for name in ("input.accepted", "wout_accepted.nc", "accepted_summary.json"):
         (tmp_path / name).write_text("previous accepted result")
     def fail(*args, **kwargs):
         raise RuntimeError("Unconverged equilibrium")
     monkeypatch.setattr(example["opt"], "VmecProblem", SimpleNamespace(from_loss=fail))
     monkeypatch.setitem(run.__globals__, "ci_smoke", False)
     with pytest.raises(SystemExit, match="1"):
-        run(None, None, None, output_name="accepted", seed_route="qi")
-    result = json.loads((tmp_path / "accepted_summary.json").read_text())
+        inp = SimpleNamespace(nfp=2, phiedge=.1, ntor=0, rbc=np.array([[1.]]))
+        run(inp, None, None, output_name="accepted", seed_route="qi")
+    result = json.loads((tmp_path / "accepted_rejected_summary.json").read_text())
     assert not result["accepted"] and result["rejection"] == "Unconverged equilibrium"
     assert result["search_evaluations"] == result["refinement_evaluations"] == 0
-    for name in ("input.accepted", "wout_accepted.nc"):
+    for name in ("input.accepted", "wout_accepted.nc", "accepted_summary.json"):
         assert (tmp_path / name).read_text() == "previous accepted result"
+
+
+@pytest.mark.parametrize("change", [{"nfp": 3}, {"phiedge": .2}, {"R00": 2.}])
+def test_pwo_physical_restart_rejects_changed_invariants(tmp_path, monkeypatch, change):
+    import runpy
+    from types import SimpleNamespace
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    run = example["run_physical_step"]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(run.__globals__, "ci_smoke", False)
+    inp = SimpleNamespace(nfp=2, phiedge=.1, ntor=0, rbc=np.array([[1.]]))
+    reference = dict(accepted=True, physical_reference=dict(identity=dict(nfp=2, phiedge=.1, R00=1.)))
+    reference["physical_reference"]["identity"].update(change)
+    with pytest.raises(SystemExit, match="1"):
+        run(inp, None, None, output_name="restart", seed_route="qi", reference=reference)
+    result = json.loads((tmp_path / "restart_summary.json").read_text())
+    assert "same NFP, flux and R00" in result["rejection"]
+    assert result["search_evaluations"] == result["refinement_evaluations"] == 0

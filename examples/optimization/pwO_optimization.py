@@ -5,7 +5,8 @@ VMEX_PWO_SEED=near_circular runs QP conditioning before the fit; the default
 uses the bundled QI seed. VMEX_PWO_FAMILY selects canonical or mapped.
 Target calibration stays fixed; final validation requires local mirror within
 10% of the seed. Scalar and least-squares solvers minimize the same residuals.
-VMEX_PWO_METHOD=physical instead tries one bounded physical-action descent step.
+VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step.
+VMEX_PWO_REFERENCE names an accepted summary to keep its grids and bounds fixed.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -62,7 +63,7 @@ if ci_smoke:
 
 
 if METHOD == "physical":
-    STAGE_NS, FINAL_NS, MPOL, FINAL_MPOL = 32, 48, 7, 9
+    STAGE_NS, FINAL_NS, MPOL, FINAL_MPOL = 48, 48, 7, 9
     STAGE_FTOL = FINAL_FTOL = 1e-13
     PWO_OPTIONS = dict(mboz=20, nboz=20, oversample=2)
     VALIDATION_OPTIONS = dict(mboz=20, nboz=20, oversample=3)
@@ -123,7 +124,7 @@ def qp_gate_failures(metrics):
     return failed
 
 
-def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route):
+def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None):
     """One six-variable forward step; physical action, not target fit, decides acceptance."""
     started = time.perf_counter()
     names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)"]
@@ -133,58 +134,75 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route):
              2*np.pi*(np.arange(8)+.379)/8]
     fractions = [np.array([.25, .30, .335, .425, .49, .60, .67, .725, .775, .815, .85]),
                  np.array([.375, .55, .70, .90])]
+    alpha = [[a]+[2*np.pi*(np.arange(8)+shift)/8]*2 for a, shift in zip(alpha, (.281, .487))]
+    fractions = [[f]+[np.array(radial)]*2 for f, radial in
+                 zip(fractions, ([.3, .5, .7, .9], [.35, .6, .8]))]
     search_calls, validation_calls = 0, 0
     summary = dict(method="physical", seed_route=seed_route, source=QS_INPUT or SEED,
                    parameters=names, accepted=False, research_validation_complete=False)
 
     def state(eq, options):
-        sp = boozer_spectrum_state(eq.state, eq.runtime, surfaces=SURFACES, **options)
-        sp = {k: np.asarray(sp[k]) for k in
-              ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b", "G_b", "I_b", "nfp")}
-        sp["nfp"] = int(sp["nfp"])
-        t, z = np.meshgrid(2*np.pi*np.arange(129)/129,
-                          2*np.pi*np.arange(129)/(129*int(sp["nfp"])), indexing="ij")
-        B = sum(c*np.cos(m*t-n*z)+s*np.sin(m*t-n*z) for m, n, c, s in
-                zip(sp["xm_b"], sp["xn_b"], sp["bmnc_b"][0], sp["bmns_b"][0]))
+        spectra, bounds, surfaces, means, mirrors = [], [], [], [], []
+        for surface in (.5, .25, .75):
+            raw = boozer_spectrum_state(eq.state, eq.runtime, surfaces=[surface], **options)
+            sp = {k: np.asarray(raw[k]) for k in
+                  ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b", "G_b", "I_b", "nfp")}
+            sp["nfp"] = int(sp["nfp"])
+            t, z = np.meshgrid(2*np.pi*np.arange(193)/193,
+                              2*np.pi*np.arange(193)/(193*sp["nfp"]), indexing="ij")
+            B = sum(c*np.cos(m*t-n*z)+s*np.sin(m*t-n*z) for m, n, c, s in
+                    zip(sp["xm_b"], sp["xn_b"], sp["bmnc_b"][0], sp["bmns_b"][0]))
+            if not np.all(np.isfinite(B)) or B.min() <= 0:
+                raise ValueError("Nonfinite or nonpositive field")
+            spectra.append(sp); surfaces.append(float(raw["s_b"][0]))
+            bounds.append((float(B.min()), float(B.max())))
+            means.append(float(B.mean())); mirrors.append(float(np.ptp(B)/(B.max()+B.min())))
         metrics = dict(aspect=float(eq.wout.aspect), size=float(eq.wout.Aminor_p),
-                       field=float(eq.wout.volavgB), local_field=float(B.mean()),
-                       local_mirror=float(np.ptp(B)/(B.max()+B.min())),
-                       iota_min=float(opt.min_abs_iota(eq.state, eq.runtime)),
+                       field=float(eq.wout.volavgB), local_field=means, local_mirror=mirrors,
+                       surfaces=surfaces, iota_min=float(opt.min_abs_iota(eq.state, eq.runtime)),
                        iota=float(opt.mean_iota(eq.state, eq.runtime)),
                        mirror=float(opt.mirror_ratio(eq.state, eq.runtime)),
                        elongation=float(opt.max_elongation(eq.state, eq.runtime)))
-        if not np.all(np.isfinite(list(metrics.values()))) or B.min() <= 0:
-            raise ValueError("Nonfinite physical metrics or nonpositive field")
-        return sp, metrics, (float(B.min()), float(B.max()))
+        if not all(np.all(np.isfinite(v)) for v in metrics.values()):
+            raise ValueError("Nonfinite physical metrics")
+        return spectra, metrics, bounds
 
     def check(eq, metrics, baseline):
         limits = dict(aspect=ASPECT_TOLERANCE, size=SIZE_TOLERANCE,
                       field=FIELD_TOLERANCE, local_field=FIELD_TOLERANCE,
                       local_mirror=MIRROR_RELATIVE_TOLERANCE)
-        checks = {key: abs(metrics[key]/baseline[key]-1) <= tol for key, tol in limits.items()}
+        checks = {key: np.all(abs(np.asarray(metrics[key])/baseline[key]-1) <= tol)
+                  for key, tol in limits.items()}
+        checks["radial_grid"] = metrics["surfaces"] == baseline["surfaces"]
         checks.update(converged=bool(np.all(eq.result.converged)),
                       iota=metrics["iota_min"] >= IOTA_FLOOR and
                       np.sign(baseline["iota"])*metrics["iota"] >= IOTA_FLOOR,
                       mirror=MIRROR_FLOOR <= metrics["mirror"] <= MIRROR_LIMIT,
-                      local_mirror_floor=metrics["local_mirror"] >= MIRROR_FLOOR,
+                      local_mirror_floor=np.all(np.asarray(metrics["local_mirror"]) >= MIRROR_FLOOR),
                       elongation=metrics["elongation"] <= ELONGATION_LIMIT)
         if not all(checks.values()):
             raise ValueError("Physical checks failed: " + ", ".join(k for k, v in checks.items() if not v))
 
-    def score(sp, group, reference=None):
-        return physical_pwo_action_from_boozer(**sp, levels=levels[group], alphas=alpha[group],
-                                               reference=reference, check_roots=True)
+    def score(spectra, group, reference=None):
+        return [physical_pwo_action_from_boozer(**sp, levels=levels[group][j], alphas=alpha[group][j],
+                reference=None if reference is None else reference[j], check_roots=True)
+                for j, sp in enumerate(spectra)]
 
     def rows(scored):
-        return np.array([p[k] for p in scored["per_pitch"] for k in keys])
+        # Keep middle-surface pitches separate; each additional radius adds its own constraints.
+        return np.array([p[k] for p in scored[0]["per_pitch"]+[s["components"] for s in scored[1:]] for k in keys])
 
     def improves(before, after):
-        aggregate = all(after["components"][k] < before["components"][k] for k in keys)
         def worst(s):
             return max(abs(r["dJ"]/r["J"]) for r in s["rows"])
-        return aggregate and worst(after) <= worst(before)
+        return all(all(c["components"][k] < b["components"][k] for k in keys)
+                   and worst(c) <= worst(b) for b, c in zip(before, after))
 
     try:
+        identity = dict(nfp=int(inp.nfp), phiedge=float(inp.phiedge), R00=float(inp.rbc[inp.ntor, 0]))
+        if reference is not None and (not reference.get("accepted") or
+                reference["physical_reference"]["identity"] != identity):
+            raise ValueError("Reference must be an accepted step with the same NFP, flux and R00")
         problem = opt.VmecProblem.from_loss(
             inp, opt.aspect_ratio, max_mode=2, vary_major_radius=False, restart_from=equilibrium,
             max_fsq_ratio=1., refine_tol=1e-13, forward_ftol=1e-13, progress=False)
@@ -192,15 +210,30 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route):
         x0 = problem.x0.copy()
         scale = PARAMETER_STEP*abs(float(inp.rbc[inp.ntor, 0]))
         base_eq = problem.equilibrium_from_x(x0); search_calls += 1
-        base_sp, baseline, bounds = state(base_eq, PWO_OPTIONS)
-        check(base_eq, baseline, baseline)
-        levels = [bounds[0]+f*(bounds[1]-bounds[0]) for f in fractions]
-        base_scores = [score(base_sp, i) for i in range(2)]
-        normalization = rows(base_scores[0])
-        if np.any(normalization <= 0):
-            raise ValueError("Physical pitch metrics must be positive before a descent step")
-        summary.update(levels_T=[v.tolist() for v in levels], alpha=[v.tolist() for v in alpha],
-                       baseline_metrics=baseline, baseline_scores=base_scores, scale_m=scale)
+        _, reference_eq = refined(inp, base_eq); validation_calls += 1
+        fine_base, fine_metrics, bounds = state(reference_eq, VALIDATION_OPTIONS)
+        if reference is None:
+            levels = [[lo+f*(hi-lo) for (lo, hi), f in zip(bounds, group)] for group in fractions]
+            fixed = dict(identity=identity, metrics=fine_metrics,
+                         levels_T=[[v.tolist() for v in g] for g in levels],
+                         alpha=[[v.tolist() for v in g] for g in alpha])
+        else:
+            fixed = reference["physical_reference"]
+            levels, alpha = fixed["levels_T"], fixed["alpha"]
+            if any(len(g) != 3 for g in levels+alpha) or len(levels) != 2 or len(alpha) != 2:
+                raise ValueError("Reference requires two sampling groups on three surfaces")
+        baseline = fixed["metrics"]
+        check(reference_eq, fine_metrics, baseline)
+        before = [score(fine_base, i, None if reference is None else reference["refined_after"][i]) for i in range(2)]
+        base_sp, base_metrics, _ = state(base_eq, PWO_OPTIONS)
+        check(base_eq, base_metrics, baseline)
+        base_scores = [score(base_sp, i, before[i]) for i in range(2)]
+        normalization = np.asarray(rows(base_scores[0]) if reference is None else fixed["normalization"])
+        if normalization.shape != rows(base_scores[0]).shape or np.any(~np.isfinite(normalization) | (normalization <= 0)):
+            raise ValueError("Physical pitch normalization must be finite and positive")
+        fixed["normalization"] = normalization.tolist()
+        summary.update(physical_reference=fixed, baseline_metrics=base_metrics,
+                       baseline_scores=base_scores, refined_before=before, scale_m=scale)
 
         def evaluate(y):
             nonlocal search_calls
@@ -229,15 +262,12 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route):
         x, candidate, sp, train = evaluate(step_length*direction)
         trial_scores = [train, score(sp, 1, base_scores[1])]
         summary.update(direction=direction.tolist(), step_length=step_length, trial_scores=trial_scores)
-        if not np.all(rows(train) < normalization) or not all(
+        if not np.all(rows(train) < rows(base_scores[0])) or not all(
                 improves(b, c) for b, c in zip(base_scores, trial_scores)):
             raise ValueError("Candidate failed physical action descent checks")
         final_input, final_eq = refined(problem.input_from_x(x), candidate); validation_calls += 1
-        _, reference_eq = refined(inp, base_eq); validation_calls += 1
-        fine_base, fine_metrics, _ = state(reference_eq, VALIDATION_OPTIONS)
         fine_sp, final_metrics, _ = state(final_eq, VALIDATION_OPTIONS)
-        check(reference_eq, fine_metrics, baseline); check(final_eq, final_metrics, baseline)
-        before = [score(fine_base, i) for i in range(2)]
+        check(final_eq, final_metrics, baseline)
         after = [score(fine_sp, i, before[i]) for i in range(2)]
         summary.update(refined_before=before, refined_after=after, final_metrics=final_metrics)
         if not np.all(rows(after[0]) < rows(before[0])) or not all(
@@ -247,11 +277,14 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route):
         final_input.to_indata(f"input.{output_name}")
         vj.write_wout(f"wout_{output_name}.nc", final_eq.wout)
         vj.write_wout(f"wout_{output_name}_seed.nc", reference_eq.wout)
-    except (ValueError, RuntimeError) as error:
+    except (ValueError, RuntimeError, KeyError, TypeError) as error:
         summary["rejection"] = str(error)
     summary.update(search_evaluations=search_calls, refinement_evaluations=validation_calls,
                    seconds=time.perf_counter()-started)
-    Path(f"{output_name}_summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False)+"\n")
+    summary_path = Path(f"{output_name}_summary.json")
+    if not summary["accepted"] and summary_path.exists():
+        summary_path = Path(f"{output_name}_rejected_summary.json")
+    summary_path.write_text(json.dumps(summary, indent=2, allow_nan=False)+"\n")
     print(f"Physical step accepted: {summary['accepted']}; {summary.get('rejection', '')}", flush=True)
     if not summary["accepted"] and not ci_smoke:
         raise SystemExit(1)
@@ -408,7 +441,10 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized"):
         if qs_failed:
             raise RuntimeError("QP preconditioning failed " + ", ".join(qs_failed) + "; checkpoint saved")
     if METHOD == "physical":
-        return run_physical_step(seed_input, equilibrium, refined, output_name=output_name, seed_route=seed_route)
+        reference_path = os.environ.get("VMEX_PWO_REFERENCE")
+        reference = None if reference_path is None else json.loads(Path(reference_path).read_text())
+        return run_physical_step(seed_input, equilibrium, refined, output_name=output_name,
+                                 seed_route=seed_route, reference=reference)
     inp = seed_input
     seed_equilibrium = equilibrium
     aspect_ref = float(equilibrium.wout.aspect)
