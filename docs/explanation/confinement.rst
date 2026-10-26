@@ -286,10 +286,15 @@ VMEX keeps the three QI formulations separate:
   :math:`w_i\propto e^{-(b_i-\min b)/\tau}` (circular on a periodic line),
   and reads the branches by linear interpolation, which makes the residual
   continuous; an exactly QI field is still a zero.
-* :class:`~vmex.core.qi.JInvariantQIResidual` directly minimizes variation of
-  :math:`\mathcal J_\parallel` over complete wells. Its pitch array is supplied
-  in inverse tesla and is shared across surfaces; it is never renormalized
-  independently on each field line.
+* :class:`~vmex.core.qi.JInvariantQIResidual` minimizes the normalized
+  dispersion of :math:`\mathcal J_\parallel` pooled over all complete wells,
+  field lines, and traced periods at each surface and pitch. Its pitch array
+  is supplied in inverse tesla and is shared across surfaces; it is never
+  renormalized independently on each field line. Wells are not matched into
+  families: two different wells can have distinct actions and produce a
+  positive residual even when both actions are independent of :math:`\alpha`.
+  Thus this objective alone does not measure within-family omnigenity or
+  establish radial drift suppression in a multiwell field.
 
 The action residual excludes cut edge wells but retains complete wells inside
 the bounded trace. A pitch block with no complete well on even one sampled field
@@ -365,8 +370,8 @@ non-omnigenous result; the five-minute default runs the middle stage alone at
 the seed's pitch. The script raises if the incoming wells cannot be resolved
 at that pitch.
 The final ``plot_wout(..., j_pitch=pitch)`` call passes that same pitch to the
-polar :math:`J(\alpha,s)` panel, making it a direct visual certificate of the
-optimized trapped-particle population.
+polar :math:`J(\alpha,s)` panel, providing a visual diagnostic of :math:`J`
+on the sampled pitch, surfaces, and field-line labels.
 
 .. _confinement-qi-fidelity:
 
@@ -773,7 +778,7 @@ Axisymmetry sends
 tests anchor together with the QA-versus-unoptimized ordering.
 
 **The hard value is not a gradient objective.** The discretized
-:class:`~vmex.core.gammac.GammaC` gradient is exact but not convergent:
+:class:`~vmex.core.gammac.GammaC` sampled gradient can change sign under refinement:
 hard well detection and hard branch selection make the discretized
 :math:`\Gamma_c` piecewise in the boundary coefficients with
 grid-dependent breakpoints, and the measured li383 refinement ladder flips
@@ -787,14 +792,13 @@ cancel simultaneously (a superbanana corner) contributes
 arbitrary sign.  :class:`~vmex.core.gammac.GammaCSmooth` regularizes
 exactly these two structures on the same wells and bounce quadrature — a
 kernel floor :math:`1/\sqrt{\max(1-\lambda B, 0) + \delta}` with
-:math:`\delta` a fixed, stop-gradiented fraction of the trapped range
+:math:`\delta` a field-dependent fraction of the trapped range with live derivatives
 (which also removes the birth/death jump of the well-connection graph of
 Ochs 2025, since a newborn well's floored bounce time starts at zero
 rather than the finite oscillator period), and a per-well corner floor
 that compares the drift cancellation against the well's own
-absolute-value bounce integrals.  Its boundary derivative holds one sign
-with bounded magnitude spread on the same ladder; its value sits below
-the hard one (the smoothing deliberately cannot see structure below
-:math:`\delta` — the near-omnigenous QA ripple most of all) and anneals
-toward it as ``temperature`` decreases with a correspondingly finer
-budget.  Optimize the surrogate, report the hard value.
+absolute-value bounce integrals. Both classes freeze normalized pitch-grid
+shape derivatives, so even the smooth gradient is approximate. Check actual
+forward descent and sampling refinement for each configuration. The surrogate
+can underestimate shallow ripple wells; anneal ``temperature`` with a finer
+budget and report the independent hard value.

@@ -104,6 +104,7 @@ __all__ = [
     "FreeBoundaryState",
     "VacuumOutput",
     "boundary_from_coefficients",
+    "relax_free_boundary_constraint",
     "solve_free_boundary",
 ]
 
@@ -841,6 +842,42 @@ def _vacuum_executables(resolution, *, mf: int, nf: int, signgs: int, wint,
     return basis, fused, lane
 
 
+#: Relative tolerance of VMEC++'s ``VAC-VMEC I_TOR MISMATCH`` check on
+#: ``|ctor - bsubuvac| / |rbtor|``.
+ITOR_MISMATCH_TOL = 1.0e-2
+
+
+def _warn_itor_mismatch(ctor: float, bsubuvac: float, rbtor: float) -> bool:
+    """Warn when the vacuum poloidal circulation disagrees with the plasma current.
+
+    Ampere's law on the plasma boundary fixes the circulation of the vacuum
+    field (``bsubuvac``, the ``2*pi * a * -BPOL(vac)`` banner value) to the
+    toroidal current the plasma carries (``ctor``, the ``TOROIDAL CURRENT``
+    value), both in the units of ``rbtor``.  A larger disagreement means the
+    mgrid is not a vacuum field outside the boundary: the boundary encloses a
+    coil, the table carries a plasma or net toroidal current, or ``EXTCUR`` or
+    ``CURTOR`` is wrong.  VMEC++ stops there (``VAC-VMEC I_TOR MISMATCH``);
+    VMEX warns, so a run that VMEC2000 accepts is not changed.  Returns whether
+    it warned.
+    """
+
+    if not (np.isfinite(ctor) and np.isfinite(bsubuvac) and np.isfinite(rbtor)) or rbtor == 0.0:
+        return False
+    mismatch = abs((ctor - bsubuvac) / rbtor)
+    if mismatch <= ITOR_MISMATCH_TOL:
+        return False
+    fac = 1.0e-6 / MU0  # to MA, as in the vacuum banner
+    warnings.warn(
+        f"VAC-VMEC I_TOR MISMATCH: the vacuum field circulation 2*pi*a*-BPOL(vac) = "
+        f"{bsubuvac * fac:.3e} MA differs from the TOROIDAL CURRENT = {ctor * fac:.3e} MA "
+        f"by {100.0 * mismatch:.2f}% of R*BTOR(plasma) (tolerance "
+        f"{100.0 * ITOR_MISMATCH_TOL:.0f}%; VMEC++ stops here). The mgrid is not a pure "
+        "vacuum field outside the boundary: the boundary may enclose a coil, the table may "
+        "carry a net toroidal current, or EXTCUR/CURTOR may be wrong.",
+        stacklevel=2)
+    return True
+
+
 def _vacuum_step(
     *,
     carry,
@@ -912,6 +949,7 @@ def _vacuum_step(
                       "toroidal flux points against the coil field (VMEC2000 vacuum.f, ier_flag 7). "
                       "Flip the sign of PHIEDGE, or of the toroidal-field coil currents in EXTCUR"),
                 ier_flag=PHIEDGE_ERROR_FLAG)
+        _warn_itor_mismatch(fb.ctor, float(out["bsubuvac"]), fb.rbtor)
         if verbose:
             emit(
                 f"\n  In VACUUM, np = {basis.nfp:2d}  mf = {basis.mf:2d}  nf = {basis.nf:2d}"
@@ -1553,11 +1591,6 @@ def _solve_free_boundary_stage(
         else:
             rt = runtime_with_baselines(rt, _init_state, use_fft=use_fft)
     ctl = None
-    if position_control is not None:
-        ctl = position_control_state
-        if ctl is None:
-            ctl = initial_control(position_control, _init_state, rt.modes)
-        external_field = wrap_field(base_field, ctl)
     _initial_ijacob = 0
     # ``eqsolve.f`` retries a supplied axis when the first Jacobian changes
     # sign.  The fixed-boundary driver already did this in ``_solve_stage``;
@@ -1590,6 +1623,14 @@ def _solve_free_boundary_stage(
                 ier_flag=BAD_JACOBIAN_FLAG, iteration=1,
                 jacobian_resets=1, fsq=(1.0, 1.0, 1.0),
             )
+    if position_control is not None:
+        # Read the targets after the axis re-guess: a deck with a zero
+        # RAXIS_CC/ZAXIS_CS guess has R_00 = 0 until ``reguess_initial_axis``
+        # runs, which made the default target (the initial axis) zero.
+        ctl = position_control_state
+        if ctl is None:
+            ctl = initial_control(position_control, _init_state, rt.modes)
+        external_field = wrap_field(base_field, ctl)
     _axis_r0, _axis_z0 = _vacuum_scalars(_init_state, rt)[2:4]
     basis, fused_vac, vacuum_lane = _vacuum_executables(
         resolution, mf=int(inp.mpol) + 1, nf=int(inp.ntor),
@@ -2183,6 +2224,44 @@ def solve_free_boundary(
             position_control=position_control,
         )
     return stage.result
+
+
+def relax_free_boundary_constraint(
+    inp: VmecInput,
+    result: SolveResult,
+    *,
+    external_field: MgridField | None = None,
+    mgrid_path: str | Path | None = None,
+    iterations: int = 2000,
+    tcon0: float = 1e-3,
+    **solve_kwargs: Any,
+) -> SolveResult:
+    """Continue a converged free-boundary solve with a weak spectral constraint.
+
+    The ``m (m - 1)``-filtered spectral-condensation force (``tcon``, ``bcovar.f``)
+    has a normal part, so a converged free-boundary LCFS balances it as well as
+    the vacuum pressure and is not exactly a flux surface of the coils; VMEC2000
+    and VMEC++ share this.  This hot-restarts ``result.state`` at ``tcon0`` for
+    ``iterations`` iterations and returns the lowest-``fsq`` iterate (the weak
+    constraint has a slowly growing mode, so the final iterate can be far worse;
+    the continuation is replayed to the minimum when it ends a decade above it).
+    ``result.converged`` is then ``False``: judge the result by the field, not by
+    ``ftol``.  Opt-in; it needs ``mpol`` and ``ntor`` that resolve the coils
+    (docs/howto/free-boundary.md).  ``solve_kwargs`` go to :func:`solve_free_boundary`.
+    """
+    kwargs = dict(mgrid_path=mgrid_path, external_field=external_field,
+                  initial_state=result.state, tcon0=float(tcon0),
+                  error_on_no_convergence=False, **solve_kwargs)
+    relaxed = solve_free_boundary(inp, max_iterations=int(iterations), **kwargs)
+    history = np.asarray(relaxed.fsq_history, dtype=float)
+    if relaxed.converged or history.ndim != 2 or len(history) == 0:
+        return relaxed
+    fsq = np.nan_to_num(history[:, :3].sum(axis=1), nan=np.inf)
+    best = int(np.argmin(fsq)) + 1
+    if not fsq[-1] > 10.0 * fsq[best - 1]:
+        return relaxed
+    # ``max_iterations`` is a data field, so the replay reuses the compiled lanes.
+    return solve_free_boundary(inp, max_iterations=best, **{**kwargs, "verbose": False})
 
 
 def _phiedge_metric(metric: Any):
