@@ -124,13 +124,15 @@ def qp_gate_failures(metrics):
 
 
 def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route):
-    """One four-variable forward step; physical action, not target fit, decides acceptance."""
+    """One six-variable forward step; physical action, not target fit, decides acceptance."""
     started = time.perf_counter()
-    names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)"]
+    names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)"]
     keys = ("raw_Jalpha2", "relative_Jalpha2")
-    alpha = [2*np.pi*(np.arange(8)+shift)/8 for shift in (.173, .673)]
-    fractions = [np.array([.25, .335, .425, .60, .725, .775, .85]),
-                 np.array([.30, .49, .67, .815])]
+    count = len(names)
+    alpha = [np.sort(np.r_[2*np.pi*(np.arange(8)+.173)/8, 2*np.pi*(np.arange(8)+.673)/8]),
+             2*np.pi*(np.arange(8)+.379)/8]
+    fractions = [np.array([.25, .30, .335, .425, .49, .60, .67, .725, .775, .815, .85]),
+                 np.array([.375, .55, .70, .90])]
     search_calls, validation_calls = 0, 0
     summary = dict(method="physical", seed_route=seed_route, source=QS_INPUT or SEED,
                    parameters=names, accepted=False, research_validation_complete=False)
@@ -202,28 +204,28 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route):
 
         def evaluate(y):
             nonlocal search_calls
-            if search_calls >= 10:
-                raise RuntimeError("Ten search evaluations exhausted")
+            if search_calls >= 2*count+2:
+                raise RuntimeError("Search evaluation budget exhausted")
             x = x0.copy(); x[indices] += scale*y
             eq = problem.equilibrium_from_x(x); search_calls += 1
             sp, metrics, _ = state(eq, PWO_OPTIONS); check(eq, metrics, baseline)
             return x, eq, sp, score(sp, 0, base_scores[0])
 
         h, step_length = 1e-4, .003
-        gradient = np.empty((len(normalization), 4))
-        for j in range(4):
-            direction = np.eye(4)[j]
+        gradient = np.empty((len(normalization), count))
+        for j in range(count):
+            direction = np.eye(count)[j]
             minus, plus = [evaluate(sign*h*direction)[3] for sign in (-1, 1)]
             gradient[:, j] = (rows(plus)-rows(minus))/(2*h*normalization)
         norms = np.linalg.norm(gradient, axis=1)
         if np.any(~np.isfinite(norms) | (norms == 0)):
             raise ValueError("Unresolved physical gradient")
         a = gradient/norms[:, None]
-        result = linprog([0., 0., 0., 0., -1.], A_ub=np.c_[a, np.ones(len(a))],
-                         b_ub=np.zeros(len(a)), bounds=[(-1., 1.)]*4+[(None, None)], method="highs")
+        result = linprog([0.]*count+[-1.], A_ub=np.c_[a, np.ones(len(a))],
+                         b_ub=np.zeros(len(a)), bounds=[(-1., 1.)]*count+[(None, None)], method="highs")
         if not result.success or result.x[-1] <= 1e-6:
-            raise ValueError("No common descent in the four selected boundary coefficients")
-        direction = result.x[:4]/np.linalg.norm(result.x[:4])
+            raise ValueError("No common descent in the selected boundary coefficients")
+        direction = result.x[:count]/np.linalg.norm(result.x[:count])
         x, candidate, sp, train = evaluate(step_length*direction)
         trial_scores = [train, score(sp, 1, base_scores[1])]
         summary.update(direction=direction.tolist(), step_length=step_length, trial_scores=trial_scores)
