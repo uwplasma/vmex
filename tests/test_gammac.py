@@ -12,6 +12,7 @@ measured values recorded in the test docstrings, with stated headroom.
 from __future__ import annotations
 
 import dataclasses
+import gc
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,6 +35,79 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SETTINGS = dict(
     nalpha=7, num_transit=3, points_per_transit=64, num_pitch=24,
     quadrature_order=32)
+
+
+@pytest.mark.parametrize("radial", [-1., 0., 1.])
+@pytest.mark.parametrize("tangential", [-1e-8, 0., 1e-8])
+def test_hard_drift_angle_radial_limit(radial, tangential):
+    """Constant drift kernels give an analytic ratio in a complete cosine well."""
+    x = jnp.linspace(0., 2*jnp.pi, 129)
+    bmag = (1. + .2*jnp.cos(x))[None, :]
+    out = gammac.gamma_c_from_fieldlines(
+        bmag=bmag, radial_drift=jnp.full_like(bmag, radial),
+        radial_gradient=jnp.full_like(bmag, tangential),
+        drift_correction=jnp.zeros_like(bmag), tangency=jnp.ones_like(bmag),
+        dl_dx=jnp.ones_like(bmag), length=2*jnp.pi,
+        pitch=jnp.array([1.]), pitch_weights=jnp.array([1.]), max_wells=2)
+    keep = np.asarray(out["well_mask"])
+    assert keep.sum() == 1 and float(out["overflow_fraction"]) == 0.
+    expected = (2/np.pi*np.arctan(radial/tangential)
+                if tangential else np.sign(radial))
+    np.testing.assert_allclose(np.asarray(out["gamma_per_well"])[keep], expected, atol=1e-12)
+    assert np.isfinite(float(out["gamma_c"]))
+    assert (float(out["gamma_c"]) > 0.) == (radial != 0.)
+
+
+@pytest.mark.parametrize("radial", [0., 1.])
+def test_smooth_field_strength_scale_invariance(radial):
+    """B and toroidal flux scale together; the drift ingredients stay fixed."""
+    x = jnp.linspace(0., 2*jnp.pi, 129)
+    field = (1. + .2*jnp.cos(x))[None, :]
+    nodes = (jnp.arange(32) + .5)/32
+
+    def value(scale):
+        bmag = scale*field
+        pitch, weights = gammac._pitch_grid(bmag, nodes, 32)
+        return gammac.gamma_c_smooth_from_fieldlines(
+            bmag=bmag, radial_drift=jnp.full_like(bmag, radial),
+            radial_gradient=jnp.full_like(bmag, .3),
+            drift_correction=jnp.zeros_like(bmag), tangency=jnp.ones_like(bmag),
+            dl_dx=jnp.ones_like(bmag), length=2*jnp.pi,
+            pitch=pitch, pitch_weights=weights, max_wells=2,
+            temperature=.2)["gamma_c"]
+
+    baseline, derivative = jax.jit(jax.value_and_grad(value))(1.)
+    assert np.isfinite(float(baseline)) and (float(baseline) > 0.) == (radial != 0.)
+    for scale in [.8, 1.2]:
+        np.testing.assert_allclose(value(scale), baseline, rtol=1e-12, atol=1e-14)
+    h = 1e-4
+    fd = (value(1+h)-value(1-h))/(2*h)
+    np.testing.assert_allclose(fd, 0., atol=1e-9)
+    np.testing.assert_allclose(derivative, fd, atol=1e-9)
+
+
+@pytest.mark.parametrize("smooth", [False, True])
+def test_well_overflow_cannot_report_zero_confinement_cost(smooth):
+    """Two complete wells require two slots in either diagnostic lane."""
+    x = jnp.linspace(0., 2*jnp.pi, 129)
+    bmag = (1. + .2*jnp.cos(2*x))[None, :]
+    one = jnp.ones_like(bmag)
+    evaluate = (gammac.gamma_c_smooth_from_fieldlines if smooth
+                else gammac.gamma_c_from_fieldlines)
+    inputs = dict(bmag=bmag, radial_drift=one, radial_gradient=.3*one,
+                  drift_correction=0.*one, tangency=one, dl_dx=one,
+                  length=2*jnp.pi, pitch=jnp.array([1.]),
+                  pitch_weights=jnp.array([1.]))
+    limited = evaluate(**inputs, max_wells=1)
+    assert float(limited["overflow_fraction"]) == 1.
+    assert np.isnan(float(limited["gamma_c"]))
+    complete = evaluate(**inputs, max_wells=2)
+    assert float(complete["overflow_fraction"]) == 0.
+    assert np.asarray(complete["well_mask"]).sum() == 2
+    assert np.isfinite(float(complete["gamma_c"]))
+    assert float(complete["gamma_c"]) > 0.
+    np.testing.assert_allclose(
+        complete["gamma_c"], evaluate(**inputs, max_wells=4)["gamma_c"], rtol=1e-12)
 
 
 @pytest.fixture(scope="module")
@@ -147,10 +221,10 @@ def test_boundary_gradient_liveness():
     """jax.grad through the implicit solve is finite, nonzero, FD-consistent.
 
     li383 at ns=13, GammaC([0.5]). What this test can honestly assert is
-    narrower than it once claimed. The gradient of the discretized objective
-    is exact — it agrees with a central difference of the same discretization
-    at fixed resolution — but it is **not a convergent quantity**. Measured
-    ladder of d/d rbc[n=0, m=1] over (nalpha, transits, points/transit,
+    narrower than it once claimed. The sampled gradient agrees in sign and
+    rough magnitude with a central difference here, but it is **not a
+    convergent quantity**. Historical pre-scale-fix ladder of
+    d/d rbc[n=0, m=1] over (nalpha, transits, points/transit,
     pitch):
 
         (7, 3, 64, 24)    -1.254
@@ -281,16 +355,7 @@ def _smooth_ladder_objective(inp, p, nalpha, num_transit, ppt, npi):
 
 
 def test_smooth_boundary_gradient_is_fd_consistent():
-    """AD == central FD for the smooth objective at the base budget.
-
-    Same deck, index, and step as :func:`test_boundary_gradient_liveness`;
-    the smooth lane must keep the fixed-resolution exactness the hard lane
-    has, on top of the refinement stability the hard lane lacks (the full
-    ladder is the nightly :func:`
-    test_smooth_boundary_gradient_survives_the_refinement_ladder`).
-    Measured AD/FD ratio 1.09
-    (ad -0.0974, fd -0.0892 at step 1e-4).
-    """
+    """Approximate AD agrees with FD in sign and within a factor two here."""
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
     params = im.params_from_input(inp, device=None)
     index = (int(inp.ntor), 1)
@@ -312,51 +377,25 @@ def test_smooth_boundary_gradient_is_fd_consistent():
 
 @pytest.mark.full
 def test_smooth_boundary_gradient_survives_the_refinement_ladder():
-    """The exact ladder that breaks the hard gradient: sign and magnitude.
+    """Check the smooth gradient on five li383 sampling budgets.
 
-    li383 at ns=13, GammaCSmooth([0.5], temperature=0.15).total through the
-    implicit solve, d/d rbc[n=0, m=1] — the same objective, deck, and rungs
-    whose hard gradient is documented sign-erratic in
-    :func:`test_boundary_gradient_liveness` (re-measured for this commit:
-    -1.2542, +3.5180, -0.3869, -0.9879, +0.1799 — three sign changes).
-    Measured smooth ladder (identical to six figures between a CUDA GPU
-    run and an Apple-silicon CPU run):
-
-        (7, 3, 64, 24)    -0.097353
-        (7, 4, 96, 48)    -0.017064
-        (9, 5, 128, 48)   -0.037187
-        (13, 6, 192, 64)  -0.048634
-        (17, 8, 256, 96)  -0.044204
-
-    One sign everywhere — the qualitative property the hard gradient fails
-    — and the three rungs whose pitch grid resolves the floors
-    (``num_pitch >= 48``; the documented bound ``num_pitch * temperature
-    >~ 4`` puts the base rung's 24 x 0.15 = 3.6 just under it) sit in a
-    1.31x band (-0.0372, -0.0486, -0.0442).  The two coarse rungs carry
-    the residual under-resolution (overall band 5.7x, the base rung high
-    and the 7-line/4-transit rung low).  The floors act on the two
-    structures gradient decomposition identified: the near-separatrix
-    bounce-time level-curvature (kernel floor; a bare delta sweep of the
-    unfloored assembly showed +-4 gradient spikes on a total of ~0.3) and
-    the superbanana drift-angle corners (per-cell L1 corner floor).
-    Asserted: every rung finite, one sign, overall max/min <= 8
-    (measured 5.7), and the three resolved rungs within 2x (measured
-    1.31).  Five implicit-solve gradients make this the most expensive
-    test in the module — nightly ``full`` lane, with
-    :func:`test_smooth_boundary_gradient_is_fd_consistent` keeping a
-    single-budget sentinel in the PR lane.
+    Require finite nonzero gradients with one sign, an overall magnitude
+    band below 8x, and a band below 2x on the three finest grids. These
+    case-specific bounds do not establish general derivative convergence.
+    Clear compilation caches between grids to bound this nightly test's RAM.
     """
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
     params = im.params_from_input(inp, device=None)
     index = (int(inp.ntor), 1)
     ladder = [(7, 3, 64, 24), (7, 4, 96, 48), (9, 5, 128, 48),
               (13, 6, 192, 64), (17, 8, 256, 96)]
-    gradients = [
-        float(np.asarray(jax.grad(
+    gradients = []
+    for rung in ladder:
+        gradients.append(float(np.asarray(jax.grad(
             lambda p: _smooth_ladder_objective(inp, p, *rung)
-        )(params).rbc)[index])
-        for rung in ladder
-    ]
+        )(params).rbc)[index]))
+        jax.clear_caches()
+        gc.collect()
     assert all(np.isfinite(g) and g != 0.0 for g in gradients), gradients
     assert len({np.sign(g) for g in gradients}) == 1, (
         f"sign flip in smooth ladder: {gradients}")
@@ -466,7 +505,7 @@ def test_gamma_c_respects_the_stellarator_reflection():
       pitch grid fixed under differentiation took the violation to 6.6e-11 and
       moved the physical gradient by 1.8e-4.
 
-    Measured here: ratio 5.8e-11 against a physical ``d/dR_cos`` of 2.6e+03.
+    Historical pre-scale-fix ratio: 5.8e-11 against ``d/dR_cos`` of 2.6e+03.
     """
     inp = dataclasses.replace(
         VmecInput.from_file(DATA_DIR / "input.li383_low_res"), lasym=True)
@@ -492,7 +531,7 @@ def test_gamma_c_respects_the_stellarator_reflection():
     # The smooth surrogate must hold the same identity: its floors are
     # built from reflection-even quantities through *soft* extrema and L1
     # bounce integrals, so their live derivatives keep the pair symmetry
-    # that hard min/max breaks.  Measured ratio 4.3e-12.
+    # that hard min/max breaks.  Historical pre-scale-fix ratio 4.3e-12.
     def total_smooth(spectral):
         return gammac.gamma_c_smooth_state(
             spectral, rt, surfaces=(0.5,), nalpha=6, num_transit=3,
