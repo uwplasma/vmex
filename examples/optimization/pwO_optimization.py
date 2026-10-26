@@ -169,6 +169,31 @@ def component_terms(scored, component):
     return [float((means[0]-means[1:].sum())**2), *variances.tolist()]
 
 
+def family_gradient_rows(scored, baseline, entry):
+    """Linearize statistics at baseline actions before differencing trial rows.
+
+    Fixed chart weights and length retain each pitch's objective normalization.
+    Finite differences of the action rows still have finite-step error.
+    """
+    variances = np.array([
+        2*sum(r["weight"]*(r["J"]-before["mean_action_m"])*(s["J"]-r["J"])
+              for r, s in zip(before["rows"], after["rows"], strict=True))
+        for before, after in zip(baseline["families"], scored["families"], strict=True)])
+    charts = entry["charts"]
+    rows = []
+    for pitch in scored["per_pitch"]:
+        weights = np.array([c["weight"] if c["level_T"] == pitch["level_T"] else 0.
+                            for c in charts])
+        rows.append(float(weights@variances/weights.sum()/entry["length"]**2))
+    if "component" in entry:
+        indices = entry["component"]
+        balances = [s["families"][indices[0]]["mean_action_m"]-
+                    sum(s["families"][i]["mean_action_m"] for i in indices[1:])
+                    for s in (baseline, scored)]
+        rows.extend([2*balances[0]*(balances[1]-balances[0]), *variances[indices].tolist()])
+    return rows
+
+
 def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None, step_lengths=None,
                       family_charts=None):
     """Try up to three bounded steps using slopes or supplied family variance.
@@ -347,7 +372,13 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
         for j in range(count):
             direction = np.eye(count)[j]
             minus, plus = [evaluate(sign*h*direction)[3] for sign in (-1, 1)]
-            gradient[:, j] = (rows(plus)-rows(minus))/(2*h*normalization)
+            if objectives:
+                linearized = [np.concatenate([family_gradient_rows(s, b, e) for s, b, e in
+                              zip(scored, base_scores[0], family_charts[0], strict=True)])
+                              for scored in (minus, plus)]
+                gradient[:, j] = (linearized[1]-linearized[0])/(2*h*normalization)
+            else:
+                gradient[:, j] = (rows(plus)-rows(minus))/(2*h*normalization)
         norms = np.linalg.norm(gradient, axis=1)
         if np.any(~np.isfinite(norms) | (norms == 0)):
             raise ValueError("Unresolved physical gradient")

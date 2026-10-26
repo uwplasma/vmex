@@ -1674,7 +1674,9 @@ def _pwo_component_score(scale=1.):
         endpoints = [[0., 0.], [1., 5.]] if index == 0 else [[1., 5.], [2., 6.]]
         left = 0. if index < 2 else 2.
         families.append(dict(mean_action_m=mean*scale, variance_m2=variance*scale**2,
-            endpoints=endpoints, rows=[dict(u=u, left=left, right=left+1., J=mean*scale) for u in (.25, .5, .75)]))
+            endpoints=endpoints, rows=[dict(u=u, weight=1/3, left=left, right=left+1.,
+                J=(mean+offset*np.sqrt(1.5*variance))*scale)
+                for u, offset in zip((.25, .5, .75), (-1., 0., 1.))]))
     return dict(families=families, per_pitch=[dict(level_T=.8, value=10.*scale**2),
                                            dict(level_T=.9, value=scale**2)])
 
@@ -1688,6 +1690,43 @@ def test_pwo_component_uses_separate_plateaus_and_fixed_raw_terms():
     # Symmetric daughters may share a mean; the parent retains its own plateau.
     score['families'][2]['mean_action_m'] = 2.
     assert terms(score, [0, 1, 2])[0] == 9.
+
+
+def test_pwo_family_gradient_avoids_scalar_variance_fd_sign_reversal():
+    import runpy
+    linearize = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['family_gradient_rows']
+    h = 1e-4
+    def score(t):
+        amplitude = 1e-3+t-2e5*t*t
+        actions = 5.+amplitude*np.array([-1., 0., 1.])
+        weights = np.array([.25, .5, .25]); mean = weights@actions
+        family = dict(mean_action_m=mean, variance_m2=weights@((actions-mean)**2),
+                      rows=[dict(J=J, weight=w) for J, w in zip(actions, weights)])
+        return dict(families=[family], per_pitch=[dict(level_T=.8)])
+    baseline, minus, plus = score(0.), score(-h), score(h)
+    entry = dict(charts=[dict(level_T=.8, weight=1.)], length=.5)
+    scalar_fd = (plus['families'][0]['variance_m2']-minus['families'][0]['variance_m2'])/(2*h*.5**2)
+    chain_fd = (np.array(linearize(plus, baseline, entry))-
+                linearize(minus, baseline, entry))/(2*h)
+    assert scalar_fd < 0
+    assert chain_fd == pytest.approx([1e-3/.5**2], rel=1e-9)
+
+
+def test_pwo_family_gradient_keeps_pitch_weights_length_and_component_units():
+    import runpy
+    linearize = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['family_gradient_rows']
+    def score(scale):
+        result = _pwo_component_score(scale)
+        result['families'].append(result['families'][1])
+        return result
+    entry = dict(charts=[dict(level_T=level, weight=w)
+                        for level, w in zip((.8, .8, .8, .9), (1., 2., 3., 999.))],
+                 length=2., component=[0, 1, 2])
+    baseline = score(1.); h = 1e-4
+    derivative = (np.array(linearize(score(1+h), baseline, entry))-
+                  linearize(score(1-h), baseline, entry))/(2*h)
+    # Pitch averages divide by length squared; the four component terms remain m².
+    assert derivative == pytest.approx([(1*.8+2*1.+3*1.2)/(6*4), 1./4, 8., .8, 1., 1.2])
 
 
 @pytest.mark.parametrize('component', [None, [], [0, 1], [0, 1, 2, 3], [0, 1, 1],
@@ -1757,6 +1796,7 @@ def test_pwo_component_step_retains_unselected_and_heldout_checks(tmp_path, monk
             self.initial = _pwo_component_score()
         def __call__(self, sp):
             q = sp['G_b'][0]; score = _pwo_component_score(q)
+            score['families'].append(score['families'][1])
             if self.surface != .5:
                 score['per_pitch'] = [dict(level_T=.8, value=q**2)]
             if reject == 'selected_pitch' and self.surface == .5:
@@ -1767,7 +1807,8 @@ def test_pwo_component_step_retains_unselected_and_heldout_checks(tmp_path, monk
                 score['per_pitch'][-1]['value'] = 1./q**2
             return score
     monkeypatch.setitem(env, 'PwOActionFamilies', Families)
-    groups = [[dict(reference=dict(s_b=[s]), charts=[dict(level_T=.8, heldout=heldout)]*3,
+    groups = [[dict(reference=dict(s_b=[s]), charts=[dict(level_T=level, weight=1., heldout=heldout)
+                                                   for level in (.8, .8, .8, .9)],
                     length=1., **({'component': [0, 1, 2]} if s == .5 else {}))
                for s in (.5, .25, .75)] for heldout in (False, True)]
     if reject == 'level':
