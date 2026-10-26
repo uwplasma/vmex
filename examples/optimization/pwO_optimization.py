@@ -9,6 +9,8 @@ VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step,
 using raw slopes and fixed-reference action normalization.
 VMEX_PWO_REFERENCE names an accepted summary to keep its grids and bounds fixed.
 VMEX_PWO_FAMILY_CHARTS supplies JSON orbit charts to optimize family variance.
+A dictionary selects run_centered_variance_step before seed preparation or QP
+conditioning; a list retains the three-surface action-step route.
 An entry's optional component=[parent,daughter1,daughter2] adds a supplied
 binary junction's own-family variances and plateau-mean balance surrogates.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
@@ -434,6 +436,248 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
     return summary
 
 
+def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
+    """Take one matched-seed, centered-action variance step on supplied families.
+
+    ``policy`` supplies input/restart paths, positive ``fixed_B_T`` (T),
+    and training/validation entries containing PwOActionFamilies constructor
+    arguments (reference, charts, length), plus optional transform dictionaries.
+    References may be dictionaries or NPZ paths; each needs explicit single s_b.
+    Charts retain IDs, endpoints, reflecting levels, normalized weights and
+    length across resolutions; validation may refine their nodes. Optional parent_families
+    IDs protect those variances when guarded=True also protects aggregate Q.
+    Scales=.02 m, half_step=1e-4 and trust_radius=.03 are discretionary local
+    defaults. All eight max_mode=1 coefficients vary with fixed R00 and flux.
+    The deck's grid/FTOL are retained; ftol_check defaults to 100*deck FTOL,
+    a paired numerical sensitivity check, not an accuracy guarantee. Every
+    solve restarts independently from the original restart, never a trial.
+    The finite screen sums per-state observed tolerance/band/node changes,
+    requiring a resolved V decrease and no resolved protected-metric increases.
+    This empirical envelope is not a rigorous error bound. Only sampled local
+    progress is reported; no pwO qualification follows.
+    """
+    started = time.perf_counter()
+    inp = vj.VmecInput.from_file(Path(policy["input"]))
+    seed = Path(policy["restart"])
+    field = float(policy["fixed_B_T"])
+    h, radius = float(policy.get("half_step", 1e-4)), float(policy.get("trust_radius", .03))
+    scale = np.broadcast_to(np.asarray(policy.get("scales", .02), float), (8,)).copy()
+    ftol = float(np.asarray(inp.ftol_array)[-1])
+    check_ftol = float(policy.get("ftol_check", 100*ftol))
+    if not np.all(np.isfinite([field, h, radius, ftol, check_ftol])) or min(field, h, radius, ftol, check_ftol) <= 0:
+        raise ValueError("Positive finite fixed_B_T, FD/trust scales and FTOLs required")
+    names = list(opt.boundary_dof_names(inp, 1, vary_major_radius=False))
+    if len(names) != 8 or np.any(~np.isfinite(scale) | (scale <= 0)) or check_ftol <= ftol:
+        raise ValueError("Require eight symmetric boundary modes, positive scales and a looser paired FTOL check")
+    x0 = opt.pack_boundary(inp, 1, vary_major_radius=False)
+    scorers, transforms = [], []
+    for key, band in (("training", 10), ("validation", 20)):
+        entry = dict(policy[key]); reference = entry.pop("reference")
+        transforms.append(entry.pop("transform", dict(mboz=band, nboz=band, oversample=3)))
+        if isinstance(reference, (str, Path)):
+            with np.load(reference, allow_pickle=False) as archive:
+                reference = {k: archive[k].copy() for k in archive.files}
+        reference = {k: np.asarray(v) for k, v in reference.items()}
+        reference["nfp"] = np.asarray(reference["nfp"]).item()
+        if np.shape(reference.get("s_b")) != (1,) or not np.all(np.isfinite(reference["s_b"])):
+            raise ValueError("Each reference requires one explicit finite half-mesh surface s_b")
+        scorers.append(PwOActionFamilies(reference=reference, **entry))
+    first, second = scorers
+    def identities(scorer):
+        return [(c["id"], c["level_T"]) for c in scorer.charts]
+    if (identities(first) != identities(second) or len(set(c["id"] for c in first.charts)) != len(first.charts)
+            or any(not np.array_equal(a["endpoints"], b["endpoints"])
+                   for a, b in zip(first.charts, second.charts, strict=True))
+            or not np.array_equal(first.weights, second.weights) or first.length != second.length
+            or not np.array_equal(first.reference["s_b"], second.reference["s_b"])
+            or int(first.reference["nfp"]) != int(inp.nfp) or int(second.reference["nfp"]) != int(inp.nfp)):
+        raise ValueError("Training/validation require the same ordered IDs, endpoints, levels, weights, length, surface and NFP")
+    ids = [c["id"] for c in first.charts]
+    protected = list(policy.get("parent_families", []))
+    if any(fid not in ids for fid in protected):
+        raise ValueError("Unknown protected family ID")
+    guarded = policy.get("guarded", True)
+    if not isinstance(guarded, bool) or any(not isinstance(fid, str) or not fid for fid in ids):
+        raise ValueError("guarded must be boolean and chart IDs must be nonempty strings")
+    summary = dict(method="centered_family_variance", accepted=False, pwO_qualified=False,
+        research_validation_complete=False, policy=policy, parameters=names, cases={}, trials=[], MHD_solves=0,
+        scope="Supplied families and pitches only; bounded local progress, no global or confinement claim.")
+
+    def save_summary():
+        summary["seconds"] = time.perf_counter()-started
+        Path(f"{output_name}_summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False,
+            default=lambda value: value.tolist() if isinstance(value, np.ndarray) else str(value))+"\n")
+
+    def rows(score, scorer):
+        v, q, blocks = [], [], []
+        for family, chart, weight in zip(score["families"], scorer.charts, scorer.weights, strict=True):
+            data = family["rows"]
+            u, w, J, dJ = (np.asarray([r[k] for r in data]) for k in ("u", "weight", "J", "dJ"))
+            if (not np.array_equal(u, [r["u"] for r in chart["rows"]]) or
+                    not np.array_equal(w, [r["weight"] for r in chart["rows"]])):
+                raise ValueError("Family quadrature identity changed")
+            start = len(v); v.extend(np.sqrt(weight*w)*(J-w@J)/scorer.length)
+            q.extend(np.sqrt(weight*w)*dJ); blocks.append(slice(start, len(v)))
+        v, q = np.asarray(v), np.asarray(q)
+        if (not np.all(np.isfinite([*v, *q])) or
+                not np.isclose(v@v, score["value"], rtol=2e-10, atol=1e-15) or
+                not np.isclose(q@q, score["raw_Jalpha2"], rtol=2e-10, atol=1e-15)):
+            raise ValueError("Centered action residual does not reproduce aggregate variance")
+        return v, q, blocks
+
+    def score(eq, index, band_index=None):
+        scorer = scorers[index]
+        raw = boozer_spectrum_state(eq.state, eq.runtime,
+            surfaces=scorer.reference["s_b"].tolist(), **transforms[index if band_index is None else band_index])
+        spectrum = {k: np.asarray(raw[k]) for k in
+            ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b", "G_b", "I_b", "nfp", "s_b")}
+        spectrum["nfp"] = np.asarray(spectrum["nfp"]).item()
+        if any(not np.array_equal(spectrum[k], scorer.reference[k]) for k in ("s_b", "nfp")):
+            raise ValueError("Boozer surface or field period changed")
+        factor = field/float(eq.wout.volavgB)
+        for key in ("bmnc_b", "bmns_b", "G_b", "I_b"):
+            spectrum[key] = spectrum[key]*factor
+        result = scorer(spectrum); rows(result, scorer)
+        return result
+
+    def solve(displacement, label, tolerance=ftol):
+        deck = opt.unpack_boundary(inp, x0+scale*displacement, 1, vary_major_radius=False)
+        if tolerance != ftol:
+            ladder = np.asarray(inp.ftol_array).copy(); ladder[-1] = tolerance
+            deck = replace(deck, ftol_array=ladder)
+        summary["MHD_solves"] += 1
+        summary["cases"][label] = dict(status="solving", requested_FTOL=tolerance)
+        save_summary()
+        eq = opt.solve_equilibrium(deck, initial_state=restart_state(seed, deck), raise_on_max_iterations=True)
+        stored = float(np.asarray(eq.inp.ftol_array)[-1])
+        errors = [float(getattr(eq.result, k)) for k in ("fsqr", "fsqz", "fsql")]
+        if (stored != tolerance or not bool(np.all(eq.result.converged)) or
+                any(not np.isfinite(e) or not 0 <= e <= stored for e in errors)):
+            raise ValueError(f"{label}: failed convergence at actual stored FTOL")
+        amplitude = float(eq.wout.volavgB)
+        if not np.isfinite(amplitude) or amplitude <= 0:
+            raise ValueError("Invalid physical volume-average field")
+        input_path, wout_path = f"input.{output_name}_{label}", f"wout_{output_name}_{label}.nc"
+        # Keep converged checkpoints even when subsequent chart continuation fails.
+        deck.to_indata(input_path); vj.write_wout(wout_path, eq.wout)
+        summary["cases"][label].update(status="converged", stored_FTOL=stored, force_errors=errors,
+            physical_volavgB_T=amplitude, normalization_factor=field/amplitude,
+            input_path=input_path, wout_path=wout_path)
+        save_summary()
+        result = score(eq, 0); summary["cases"][label]["training"] = result; save_summary()
+        print(f"Centered variance {label}: V={result['value']:.8g}", flush=True)
+        return eq, result
+
+    def resolution(eq, training):
+        return {"0_0": training, **{f"{node}_{band}": score(eq, node, band)
+            for node, band in ((0, 1), (1, 0), (1, 1))}}
+
+    def assessment(before, before_check, after, after_check):
+        def metrics(score):
+            return dict(V=float(score["value"]), Q=float(score["raw_Jalpha2"]),
+                **{fid+"_V": float(f["variance_m2"])/second.length**2
+                   for fid, f in zip(ids, score["families"], strict=True)})
+        grids = [{k: metrics(v) for k, v in grid.items()} for grid in
+                 (before, before_check, after, after_check)]
+        report = {}
+        for key in grids[0]["1_1"]:
+            values = [grid["1_1"][key] for grid in grids]
+            state_changes = []
+            for grid, check in ((grids[0], grids[1]), (grids[2], grids[3])):
+                changes = dict(equilibrium_tolerance=abs(grid["1_1"][key]-check["1_1"][key]),
+                    spectral_band=max(abs(g[f"{n}_1"][key]-g[f"{n}_0"][key])
+                                      for g in (grid, check) for n in (0, 1)),
+                    quadrature_nodes=max(abs(g[f"1_{b}"][key]-g[f"0_{b}"][key])
+                                         for g in (grid, check) for b in (0, 1)))
+                changes["total"] = sum(changes.values()); state_changes.append(changes)
+            gain = values[0]-values[2]
+            floor = 128*np.finfo(float).eps*max(1., *[abs(v[key]) for g in grids for v in g.values()])
+            envelope = sum(c["total"] for c in state_changes)+floor
+            classification = ("decrease_beyond_observed_changes" if gain > envelope else
+                "increase_beyond_observed_changes" if gain < -envelope else "unresolved_observed_changes")
+            report[key] = dict(center_finest=values[0], trial_finest=values[2], gain=gain,
+                change_percent=None if values[0] == 0 else 100*(values[2]/values[0]-1),
+                state_changes=state_changes, empirical_total_change=envelope, roundoff_floor=floor,
+                paired_equilibrium_gain_change=abs(gain-(values[1]-values[3])),
+                measured_nonincrease=gain >= 0, classification=classification)
+        checks = dict(V=report["V"]["classification"] == "decrease_beyond_observed_changes")
+        if guarded:
+            checks.update({key: report[key]["classification"] != "increase_beyond_observed_changes"
+                           for key in ["Q", *[fid+"_V" for fid in protected]]})
+        return report, checks
+
+    try:
+        seed = vj.read_wout(seed)
+        center_eq, center = solve(np.zeros(8), "center")
+        v0, q0, blocks = rows(center, first)
+        A, C, amplitude = [], [], []
+        for j in range(8):
+            delta = np.eye(8)[j]*h
+            minus_eq, minus = solve(-delta, f"fd{j}-minus")
+            plus_eq, plus = solve(delta, f"fd{j}-plus")
+            vm, qm, _ = rows(minus, first); vp, qp, _ = rows(plus, first)
+            A.append((vp-vm)/(2*h)); C.append((qp-qm)/(2*h))
+            amplitude.append((float(plus_eq.wout.volavgB)-float(minus_eq.wout.volavgB))/(2*h*field))
+        A, C, amplitude = np.asarray(A).T, np.asarray(C).T, np.asarray(amplitude)
+        if (not all(np.all(np.isfinite(a)) for a in (A, C, amplitude)) or
+                np.linalg.norm(amplitude) <= 1e-12 or v0@v0 <= 0):
+            raise ValueError("Unresolved physical amplitude derivative or zero center variance")
+        N = np.linalg.svd(amplitude[None, :], full_matrices=True)[2][1:].T
+        D, E = radius*A@N, radius*C@N
+        guards = [(q0, E)] + [(v0[b], D[b]) for fid, b in zip(ids, blocks) if fid in protected]
+        if not guarded:
+            guards = []
+        def constraints(z):
+            return np.asarray([1-z@z] + [float(r@r-(r+M@z)@(r+M@z))/max(float(r@r), 1e-30) for r, M in guards])
+        def constraint_jac(z):
+            return np.asarray([-2*z] + [-2*M.T@(r+M@z)/max(float(r@r), 1e-30) for r, M in guards])
+        fit = minimize(lambda z: float((v0+D@z)@(v0+D@z)/(v0@v0)), np.zeros(7),
+            jac=lambda z: 2*D.T@(v0+D@z)/(v0@v0), method="SLSQP",
+            constraints=[dict(type="ineq", fun=constraints, jac=constraint_jac)], options=dict(maxiter=1000, ftol=1e-10))
+        z = np.asarray(fit.x)
+        if not np.all(np.isfinite(z)):
+            raise ValueError("Nonfinite Gauss-Newton proposal")
+        z *= min(1., (1-16*np.finfo(float).eps)/max(np.linalg.norm(z), 1e-30))
+        step = radius*N@z
+        summary["model"] = dict(centered_action_residual=v0.tolist(), centered_action_jacobian=A.tolist(),
+            slope_jacobian=C.tolist(), amplitude_gradient=amplitude.tolist(), proposal=step.tolist(),
+            predicted_V=float((v0+A@step)@(v0+A@step)), guarded=guarded, solver_success=bool(fit.success),
+            solver_status=int(fit.status), solver_message=str(fit.message), solver_iterations=int(fit.nit),
+            center_V=float(v0@v0), center_Q=float(q0@q0), x0=x0.tolist(), scales=scale.tolist(),
+            half_step=h, trust_radius=radius, step_norm=float(np.linalg.norm(step)),
+            amplitude_linear_relative_change=float(amplitude@step))
+        if not fit.success or np.min(constraints(z)) < -2e-8 or summary["model"]["predicted_V"] >= float(v0@v0):
+            raise ValueError("No feasible descending bounded Gauss-Newton proposal")
+        center_grid = resolution(center_eq, center)
+        check_eq, check_center = solve(np.zeros(8), "check-center", check_ftol)
+        center_check_grid = resolution(check_eq, check_center)
+        summary["center"] = dict(resolution=center_grid, paired_resolution=center_check_grid)
+        for fraction in (1., .5):
+            label = "full" if fraction == 1 else "half"
+            trial = dict(fraction=fraction, accepted=False); summary["trials"].append(trial)
+            try:
+                trial_eq, after = solve(fraction*step, label)
+                grid = resolution(trial_eq, after)
+                paired_eq, paired = solve(fraction*step, "check-"+label, check_ftol)
+                paired_grid = resolution(paired_eq, paired)
+                report, checks = assessment(center_grid, center_check_grid, grid, paired_grid)
+                trial.update(resolution=grid, paired_resolution=paired_grid,
+                    assessment=report, checks=checks, accepted=all(checks.values()))
+                if trial["accepted"]:
+                    summary.update(accepted=True, accepted_fraction=fraction)
+                    trial_eq.inp.to_indata(f"input.{output_name}")
+                    vj.write_wout(f"wout_{output_name}.nc", trial_eq.wout)
+                    break
+            except (ValueError, RuntimeError) as error:
+                trial["rejection"] = str(error)
+    except (ValueError, RuntimeError) as error:
+        summary["rejection"] = str(error)
+    summary["finite_screen_pass"] = summary["accepted"]
+    save_summary()
+    print(f"Sampled local variance progress accepted: {summary['accepted']}; no pwO qualification", flush=True)
+    return summary
+
+
 def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None):
     """Optimize with fixed flux, R00, linear edge-zero pressure and zero current.
 
@@ -443,6 +687,15 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
     stage. Current is prescribed, not bootstrap-consistent. Derivatives hold
     the solver's released m=1 gauge fixed.
     """
+    chart_path = os.environ.get("VMEX_PWO_FAMILY_CHARTS")
+    family_charts = None if chart_path is None or METHOD != "physical" else json.loads(Path(chart_path).read_text())
+    if METHOD == "physical" and isinstance(family_charts, dict):
+        if tuple(beta_targets) != (0.0,) or physical_steps is not None:
+            raise ValueError("Centered variance policy requires vacuum beta_targets and its own trust bound")
+        summary = run_centered_variance_step(family_charts, output_name=output_name)
+        if not summary["accepted"] and not ci_smoke:
+            raise SystemExit(1)
+        return summary
     if (FAMILY not in ("canonical", "mapped") or METHOD not in ("scalar", "least_squares", "physical")
             or PENALTY not in ("equality", "interval")):
         raise ValueError("require canonical|mapped family, scalar|least_squares|physical method, and equality|interval penalty")
@@ -587,8 +840,6 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
     if METHOD == "physical":
         reference_path = os.environ.get("VMEX_PWO_REFERENCE")
         reference = None if reference_path is None else json.loads(Path(reference_path).read_text())
-        chart_path = os.environ.get("VMEX_PWO_FAMILY_CHARTS")
-        family_charts = None if chart_path is None else json.loads(Path(chart_path).read_text())
         return run_physical_step(seed_input, equilibrium, refined, output_name=output_name,
                                  seed_route=seed_route, reference=reference, step_lengths=physical_steps,
                                  family_charts=family_charts)

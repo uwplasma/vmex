@@ -1960,3 +1960,338 @@ def test_pwo_physical_family_step_checks_heldout_charts(tmp_path, monkeypatch, r
                         reference=result, step_lengths=[.001])
         assert continued['accepted']
         assert continued['physical_reference'] == result['physical_reference']
+
+
+def test_pwo_physical_policy_dispatches_before_seed_preparation(tmp_path, monkeypatch):
+    """A saved low-iota physical policy bypasses QP and surrogate preparation."""
+    import runpy
+
+    example = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))
+    run = example['run']; env = run.__globals__
+    env.update(METHOD='physical', SEED='near_circular', QS_INPUT='unused-qp-input')
+    policy = dict(input='saved-low-iota-input', restart='frozen-seed-wout',
+                  fixed_B_T=1., training=[], validation=[])
+    path = tmp_path / 'policy.json'; path.write_text(json.dumps(policy))
+    monkeypatch.setenv('VMEX_PWO_FAMILY_CHARTS', str(path))
+    monkeypatch.setattr(example['vj'].VmecInput, 'from_file',
+                        lambda *a, **k: pytest.fail('legacy seed preparation ran'))
+    monkeypatch.setattr(example['opt'], 'QuasisymmetryRatioResidual',
+                        lambda *a, **k: pytest.fail('QP preconditioning ran'))
+    calls = []
+    monkeypatch.setitem(env, 'run_centered_variance_step',
+                        lambda p, **k: calls.append((p, k)) or {'accepted': True})
+    assert run(output_name='low-iota') == {'accepted': True}
+    assert calls == [(policy, {'output_name': 'low-iota'})]
+    for kwargs in (dict(beta_targets=(0., .01)), dict(physical_steps=[.001])):
+        with pytest.raises(ValueError):
+            run(**kwargs)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('smoke', [False, True])
+def test_pwo_physical_policy_dispatch_reports_failed_screen(tmp_path, monkeypatch, smoke):
+    import runpy
+
+    run = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['run']
+    env = run.__globals__
+    env.update(METHOD='physical', ci_smoke=smoke)
+    path = tmp_path / 'policy.json'; path.write_text('{}')
+    monkeypatch.setenv('VMEX_PWO_FAMILY_CHARTS', str(path))
+    rejected = dict(accepted=False, rejection='unresolved finite gain')
+    monkeypatch.setitem(env, 'run_centered_variance_step', lambda *a, **k: rejected)
+    if smoke:
+        assert run() == rejected
+    else:
+        with pytest.raises(SystemExit, match='1'):
+            run()
+
+
+@pytest.mark.parametrize('charts', [None, [[{'legacy': True}]*3]*2])
+def test_pwo_physical_list_and_default_keep_legacy_dispatch(tmp_path, monkeypatch, charts):
+    import runpy
+    from types import SimpleNamespace as NS
+
+    example = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))
+    run = example['run']; env = run.__globals__
+    env.update(METHOD='physical', SEED='qi', QS_INPUT=None)
+    monkeypatch.delenv('VMEX_PWO_REFERENCE', raising=False)
+    monkeypatch.delenv('VMEX_PWO_FAMILY_CHARTS', raising=False)
+    if charts is not None:
+        path = tmp_path / 'charts.json'; path.write_text(json.dumps(charts))
+        monkeypatch.setenv('VMEX_PWO_FAMILY_CHARTS', str(path))
+    monkeypatch.setattr(example['opt'], 'solve_equilibrium', lambda *a, **k: NS())
+    monkeypatch.setitem(env, 'run_centered_variance_step',
+                        lambda *a, **k: pytest.fail('legacy dispatch changed'))
+    calls = []
+    monkeypatch.setitem(env, 'run_physical_step',
+                        lambda *a, **k: calls.append(k) or {'accepted': True})
+    assert run(physical_steps=[.001]) == {'accepted': True}
+    assert calls[0]['family_charts'] == charts
+    assert calls[0]['step_lengths'] == [.001]
+    assert calls[0]['seed_route'] == 'qi'
+
+
+def _pwo_centered_case(tmp_path, monkeypatch, mode='descent'):
+    """Analytic family actions with a distinct field-amplitude direction."""
+    import copy
+    import runpy
+    from dataclasses import replace
+    from types import SimpleNamespace as NS
+
+    example = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))
+    run = example['run_centered_variance_step']; env = run.__globals__
+    monkeypatch.chdir(tmp_path)
+    deck = example['vj'].VmecInput.from_file(DATA_DIR / 'input.minimal_seed_nfp2')
+    opt = example['opt']; x0 = opt.pack_boundary(deck, 1, vary_major_radius=False)
+    input_path = tmp_path / 'input.seed'; deck.to_indata(input_path)
+    seed_path = tmp_path / 'wout_seed.nc'; seed_path.touch()
+    restarts, solves, normalized, reads = [], [], [], []
+    frozen_source = object()
+
+    def read_wout(source):
+        assert Path(source) == seed_path
+        reads.append(source)
+        return frozen_source
+
+    def restart(source, inp):
+        assert source is frozen_source
+        token = np.zeros(1); restarts.append(token)
+        return token
+
+    def solve(inp, *, initial_state, raise_on_max_iterations):
+        assert raise_on_max_iterations and initial_state is restarts[-1]
+        assert initial_state[0] == 0.  # Any reuse of a previous solve is visible.
+        initial_state[0] = len(restarts)
+        y = (opt.pack_boundary(inp, 1, vary_major_radius=False)-x0)/.02
+        assert inp.nfp == deck.nfp and inp.phiedge == deck.phiedge
+        assert inp.rbc[inp.ntor, 0] == deck.rbc[deck.ntor, 0]
+        assert inp.mpol == deck.mpol and inp.ntor == deck.ntor
+        np.testing.assert_array_equal(inp.ns_array, deck.ns_array)
+        tolerance = float(inp.ftol_array[-1]); amplitude = 2.*(1+.2*y[0])
+        if mode == 'amplitude':
+            amplitude = 2.
+        solves.append((y.copy(), tolerance))
+        result = NS(converged=mode != 'unconverged', fsqr=tolerance/2,
+                    fsqz=tolerance/3, fsql=tolerance/4)
+        if mode == 'force' and np.linalg.norm(y) > .001:
+            result.fsqr = 2*tolerance
+        if mode == 'nonfinite_field':
+            amplitude = np.nan
+        stored_input = replace(inp, ftol_array=np.asarray(inp.ftol_array)*10) if mode == 'stored_ftol' else inp
+        return NS(inp=stored_input, state=NS(y=y, amplitude=amplitude, tolerance=tolerance),
+                  runtime=None, result=result, wout=NS(volavgB=amplitude))
+
+    def spectrum(state, runtime, surfaces, **options):
+        assert surfaces == [.5]
+        amplitude = state.amplitude
+        shift = .1 if ((mode == 'tolerance' and state.tolerance != deck.ftol_array[-1]) or
+                       (mode == 'band' and options['mboz'] == 20)) else 0.
+        # All four dimensionful arrays require the same fixed-B normalization.
+        return dict(bmnc_b=amplitude*np.array([[1., .2]]),
+                    bmns_b=amplitude*np.array([[0., .1]]), xm_b=np.array([0, 1]),
+                    xn_b=np.array([0, 0]), iota_b=np.array([.02]),
+                    G_b=np.array([amplitude*(1+state.y[1]+shift)]),
+                    I_b=np.array([amplitude*(.4 if mode == 'crossed' and
+                        state.tolerance != deck.ftol_array[-1] and options['mboz'] == 10 else .3)]), nfp=2,
+                    s_b=np.array([.6] if mode == 'surface' else surfaces))
+
+    class Families:
+        def __init__(self, reference, charts, length):
+            if isinstance(reference['nfp'], (bool, np.bool_)) or not isinstance(reference['nfp'], (int, np.integer)):
+                raise ValueError('nfp must be an integer scalar')
+            self.reference, self.charts, self.length = reference, charts, length
+            self.weights = np.array([c['weight'] for c in charts], dtype=float)
+            self.weights /= self.weights.sum()
+
+        def __call__(self, sp):
+            assert isinstance(sp['nfp'], (int, np.integer)) and not isinstance(sp['nfp'], (bool, np.bool_))
+            np.testing.assert_allclose(sp['bmnc_b'], [[1., .2]], atol=1e-14)
+            np.testing.assert_allclose(sp['bmns_b'], [[0., .1]], atol=1e-14)
+            assert any(np.allclose(sp['I_b'], [value], atol=1e-14)
+                       for value in ((.3, .4) if mode == 'crossed' else (.3,)))
+            np.testing.assert_array_equal(sp['iota_b'], [.02])
+            t = float(sp['G_b'][0])-1.; normalized.append(t)
+            curvature = {'half': 50., 'no_descent': 100.}.get(mode, 0.)
+            factor = 1-t+curvature*t*t
+            if mode == 'validation' and self.charts[0].get('heldout'):
+                factor = 1+t
+            if mode == 'nodes' and self.charts[0].get('heldout'):
+                factor *= 1.2
+            if mode == 'crossed' and not self.charts[0].get('heldout') and sp['I_b'][0] > .35:
+                factor *= 1.2
+            families = []
+            for index, chart in enumerate(self.charts):
+                weights = np.array([r['weight'] for r in chart['rows']])
+                offsets = np.arange(len(weights), dtype=float)
+                offsets -= weights@offsets
+                local = 1+t if mode == 'parent' and index == 0 else factor
+                actions = 10.+100*t+(index+1)*local*offsets
+                slopes = (1+t if mode == 'slope' else factor)*offsets
+                mean = weights@actions
+                family_rows = [dict(u=r['u'], weight=r['weight'], J=J, dJ=dJ)
+                               for r, J, dJ in zip(chart['rows'], actions, slopes)]
+                if mode == 'quadrature':
+                    family_rows[0]['weight'] += .01
+                families.append(dict(mean_action_m=float(mean),
+                    variance_m2=float(weights@((actions-mean)**2)), rows=family_rows))
+            value = sum(w*f['variance_m2'] for w, f in zip(self.weights, families))/self.length**2
+            raw_q = sum(w*sum(r['weight']*r['dJ']**2 for r in f['rows'])
+                        for w, f in zip(self.weights, families))
+            if mode == 'bad_variance':
+                value *= 2
+            return dict(value=float(value), raw_Jalpha2=float(raw_q), families=families)
+
+    reference = dict(nfp=2, s_b=[.5], xm_b=[0, 1], xn_b=[0, 0])
+    charts = [dict(id=f'family-{i}', level_T=.8, weight=w, endpoints=[[0., 0.], [1., 1.]],
+                   rows=[dict(u=u, weight=q) for u, q in zip((.2, .5, .8), (.2, .3, .5))])
+              for i, w in enumerate((1., 3.))]
+    training = dict(reference=reference, charts=charts, length=2.)
+    validation = copy.deepcopy(training)
+    for chart in validation['charts']:
+        chart['heldout'] = True
+    policy = dict(input=str(input_path), restart=str(seed_path), fixed_B_T=1.,
+                  training=training, validation=validation, parent_families=['family-0'])
+    monkeypatch.setitem(env, 'restart_state', restart)
+    monkeypatch.setitem(env, 'boozer_spectrum_state', spectrum)
+    monkeypatch.setitem(env, 'PwOActionFamilies', Families)
+    monkeypatch.setattr(opt, 'solve_equilibrium', solve)
+    monkeypatch.setattr(example['vj'], 'read_wout', read_wout)
+    monkeypatch.setattr(example['vj'], 'write_wout', lambda path, wout: Path(path).touch())
+    return run, policy, NS(restarts=restarts, solves=solves, normalized=normalized, reads=reads, deck=deck)
+
+
+@pytest.mark.parametrize('reference_files', [False, True])
+def test_pwo_centered_family_step_uses_fixed_weights_and_independent_restarts(tmp_path, monkeypatch, reference_files):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    if reference_files:
+        for group in ('training', 'validation'):
+            reference = tmp_path / f'{group}.npz'
+            np.savez(reference, **policy[group]['reference'])
+            policy[group]['reference'] = str(reference)
+    result = run(policy, output_name='centered')
+    assert result['accepted'] and not result['pwO_qualified']
+    assert not result['research_validation_complete']
+    assert len(result['parameters']) == 8
+    assert len(calls.reads) == 1
+    assert len(calls.restarts) == len({id(s) for s in calls.restarts}) == len(calls.solves)
+    assert result['MHD_solves'] == len(calls.solves)
+    first = calls.solves[:17]
+    np.testing.assert_array_equal(first[0][0], np.zeros(8))
+    for j in range(8):
+        np.testing.assert_allclose(first[1+2*j][0], -1e-4*np.eye(8)[j], atol=1e-14)
+        np.testing.assert_allclose(first[2+2*j][0], 1e-4*np.eye(8)[j], atol=1e-14)
+    residual = np.asarray(result['model']['centered_action_residual'])
+    centered = np.array([0., 1., 2.])-1.3
+    expected = np.r_[np.sqrt(.25*np.array([.2, .3, .5]))*centered/2,
+                     np.sqrt(.75*np.array([.2, .3, .5]))*centered]
+    np.testing.assert_allclose(residual, expected, atol=1e-14)
+    jacobian = np.asarray(result['model']['centered_action_jacobian'])
+    np.testing.assert_allclose(jacobian[:, 1], -expected, atol=2e-11)
+    np.testing.assert_allclose(np.delete(jacobian, 1, axis=1), 0., atol=2e-11)
+    step = np.asarray(result['model']['proposal'])
+    assert np.linalg.norm(step) <= policy.get('trust_radius', .03)*(1+1e-12)
+    assert abs(np.asarray(result['model']['amplitude_gradient'])@step) < 1e-12
+    assert result['cases']['center']['normalization_factor'] == .5
+    assert calls.normalized and (tmp_path / 'wout_centered.nc').exists()
+    saved = json.loads((tmp_path / 'centered_summary.json').read_text())
+    assert saved['accepted'] and saved['model'] == result['model']
+
+
+@pytest.mark.parametrize('mode,guarded,protected,accepted,fraction', [
+    ('half', True, True, True, .5), ('no_descent', True, True, False, None),
+    ('validation', True, True, False, None), ('slope', True, True, False, None),
+    ('slope', False, True, True, 1.), ('parent', True, True, False, None),
+    ('parent', True, False, True, 1.),
+])
+def test_pwo_centered_family_step_requires_actual_guarded_progress(
+        tmp_path, monkeypatch, mode, guarded, protected, accepted, fraction):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch, mode)
+    policy['guarded'] = guarded
+    if not protected:
+        policy['parent_families'] = []
+    result = run(policy, output_name='progress')
+    assert result['accepted'] == accepted
+    assert result.get('accepted_fraction') == fraction
+    assert (tmp_path / 'wout_progress.nc').exists() == accepted
+    if mode in ('half', 'no_descent'):
+        assert result['model']['predicted_V'] < np.sum(np.square(result['model']['centered_action_residual']))
+        assert len(result['trials']) == 2 and not result['trials'][0]['accepted']
+    assert all(np.linalg.norm(y) <= .03*(1+1e-10) for y, tolerance in calls.solves)
+
+
+@pytest.mark.parametrize('mode,message', [
+    ('unconverged', 'actual stored FTOL'), ('force', 'actual stored FTOL'),
+    ('stored_ftol', 'actual stored FTOL'),
+    ('nonfinite_field', 'volume-average field'), ('quadrature', 'quadrature identity'),
+    ('bad_variance', 'aggregate variance'), ('surface', 'surface or field period'),
+    ('amplitude', 'amplitude derivative'),
+])
+def test_pwo_centered_family_step_rejects_invalid_numerical_evidence(tmp_path, monkeypatch, mode, message):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch, mode)
+    result = run(policy, output_name='invalid-evidence')
+    assert not result['accepted']
+    errors = [result.get('rejection', '')]+[t.get('rejection', '') for t in result['trials']]
+    assert any(message in error for error in errors)
+    assert not (tmp_path / 'wout_invalid-evidence.nc').exists()
+
+
+@pytest.mark.parametrize('mode,source', [('nodes', 'quadrature_nodes'), ('band', 'spectral_band'),
+                                      ('tolerance', 'equilibrium_tolerance'), ('crossed', 'spectral_band')])
+def test_pwo_centered_family_step_does_not_accept_unresolved_finite_gain(tmp_path, monkeypatch, mode, source):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch, mode)
+    result = run(policy, output_name='uncertainty')
+    assert not result['accepted'] and not result['finite_screen_pass']
+    for trial in result['trials']:
+        assessment = trial['assessment']['V']
+        assert assessment['gain'] > 0  # The actual action improves on the finest check.
+        assert assessment['classification'] == 'unresolved_observed_changes'
+        assert any(change[source] > 0 for change in assessment['state_changes'])
+        assert not trial['checks']['V']
+    assert len(result['trials']) == 2
+
+
+@pytest.mark.parametrize('change', ['field', 'nonfinite_field', 'half_step', 'trust_radius',
+    'scales', 'ftol_check', 'surface', 'id', 'duplicate', 'level', 'weights', 'length',
+    'validation_surface', 'nfp', 'float_nfp', 'fractional_nfp', 'bool_nfp',
+    'parent', 'guarded', 'empty_id', 'endpoints'])
+def test_pwo_centered_family_policy_rejects_inconsistent_fixed_data(tmp_path, monkeypatch, change):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    if change in ('field', 'nonfinite_field'):
+        policy['fixed_B_T'] = 0. if change == 'field' else np.nan
+    elif change in ('half_step', 'trust_radius'):
+        policy[change] = 0.
+    elif change == 'scales':
+        policy['scales'] = [np.nan]*8
+    elif change == 'ftol_check':
+        policy['ftol_check'] = float(calls.deck.ftol_array[-1])
+    elif change == 'surface':
+        policy['training']['reference'].pop('s_b')
+    elif change == 'id':
+        policy['validation']['charts'][0]['id'] = 'changed'
+    elif change == 'duplicate':
+        for group in ('training', 'validation'):
+            policy[group]['charts'][1]['id'] = 'family-0'
+    elif change == 'level':
+        policy['validation']['charts'][0]['level_T'] += .01
+    elif change == 'endpoints':
+        policy['validation']['charts'][0]['endpoints'][1][0] += .01
+    elif change == 'weights':
+        policy['validation']['charts'][0]['weight'] = 2.
+    elif change == 'length':
+        policy['validation']['length'] = 3.
+    elif change == 'validation_surface':
+        policy['validation']['reference']['s_b'] = [.6]
+    elif change == 'nfp':
+        policy['validation']['reference']['nfp'] = 3
+    elif change in ('float_nfp', 'fractional_nfp', 'bool_nfp'):
+        policy['training']['reference']['nfp'] = dict(float_nfp=2., fractional_nfp=2.1, bool_nfp=True)[change]
+    elif change == 'parent':
+        policy['parent_families'] = ['absent-family']
+    elif change == 'guarded':
+        policy['guarded'] = 'false'
+    elif change == 'empty_id':
+        for group in ('training', 'validation'):
+            policy[group]['charts'][1]['id'] = ''
+    with pytest.raises(ValueError):
+        run(policy, output_name='bad-policy')
+    assert not calls.solves
