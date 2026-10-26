@@ -1131,6 +1131,25 @@ def test_pwo_canonical_seed_phase_matches_periodic_field(nfp, iota, t1, t2, thet
     np.testing.assert_allclose(score["B_target"], expected["B_target"], atol=2e-14, rtol=2e-14)
 
 
+def test_pwo_canonical_calibration_holds_broad_finite_p_mean_and_mirror():
+    import runpy
+    from vmex.core.pwo import canonical_pwo_field
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    theta = 2 * np.pi * np.arange(96)[:, None] / 96
+    zeta = 2 * np.pi * np.arange(96)[None, :] / (2 * 96)
+    shape = dict(iota=-0.03774573741535906, nfp=2, t1=0.3,
+                 t2=-0.07549147483071812, p=2, theta_center=0.0, zeta_center=0.0)
+    unit = np.asarray(canonical_pwo_field(theta, zeta, bmin=1.0, bmax=2.0, **shape)["B_target"]) - 1
+    assert unit.min() > 1e-9  # Finite-p tails violate the former zero-minimum assumption.
+    mean, mirror = 0.92, 0.29
+    bmin, bmax = example["canonical_target_bounds"](unit, mean, mirror)
+    assert 0 < bmin < bmax
+    calibrated = np.asarray(canonical_pwo_field(theta, zeta, bmin=bmin, bmax=bmax, **shape)["B_target"])
+    assert calibrated.mean() == pytest.approx(mean, rel=1e-13)
+    assert np.ptp(calibrated) / (calibrated.max() + calibrated.min()) == pytest.approx(mirror, rel=1e-13)
+
+
 def test_pwo_qp_gate_and_penalty_controls():
     import runpy
 

@@ -86,6 +86,15 @@ def make_target(surfaces, *, family, bmin, bmax, b_ref, options, grid, iota_sign
     raise ValueError("family must be canonical or mapped")
 
 
+def canonical_target_bounds(unit_shape, mean, mirror):
+    """Hold sampled target mean/mirror even when finite-p tails lift its minimum."""
+    average = float(np.mean(unit_shape))
+    low, high = float(np.min(unit_shape)), float(np.max(unit_shape))
+    span = 2 * mirror * mean / (high - low - mirror * (high + low - 2 * average))
+    bmin = mean - span * average
+    return bmin, bmin + span
+
+
 def canonical_seed_phase(field, target, nfp):
     """Choose once among the four stellarator-symmetric angular origins."""
     if any(size % 2 for size in target.shape[-2:]):
@@ -572,9 +581,8 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
         unit_shape = np.asarray(probe_data["B_target"]) - 1.0
         shape_mean = float(unit_shape.mean())
         mirror_ref = (bmax - bmin) / (bmax + bmin)
-        midpoint = b_ref / (1 + mirror_ref * (2 * shape_mean - 1))
         raw_bounds = [bmin, bmax]
-        bmin, bmax = midpoint * (1 - mirror_ref), midpoint * (1 + mirror_ref)
+        bmin, bmax = canonical_target_bounds(unit_shape, b_ref, mirror_ref)
         calibrated = bmin + (bmax - bmin) * unit_shape
         attained_mirror = float(np.ptp(calibrated) / (calibrated.max() + calibrated.min()))
         if not (0 < bmin < bmax and np.isfinite(bmax) and
