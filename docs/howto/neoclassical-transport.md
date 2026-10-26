@@ -63,3 +63,13 @@ temperature with `T_i = T_e`, scaling the on-axis density from the reactor
 profiles of Landreman, Buller and Drevlak (2022). That split is an
 assumption, stated in the figure caption, and the kinetic current is only as
 good as it is. A vacuum WOUT uses DKX's generic reference plasma.
+
+## Use the bootstrap current in an optimization
+
+`examples/optimization/QI_optimization_bootstrap_er.py` puts the DKX `<j·B>`
+at each surface's ambipolar `E_r` inside a QI boundary optimization
+(`KineticBootstrapMismatch(ambipolar=True)`, DKX 2.12.0 or later). The root is
+found by a damped Newton iteration warm-started from the previous step, and its
+derivative is one adjoint solve per surface. The README section
+"Quasi-isodynamic design with a self-consistent bootstrap current" shows the
+result.
