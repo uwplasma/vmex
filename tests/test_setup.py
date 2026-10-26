@@ -31,7 +31,7 @@ from vmex.core.geometry import (
 )
 from vmex.core.input import VmecInput
 from vmex.core.setup import (
-    geometry_state,
+    _geometry_state_arrays,
     interior_guess,
     run_setup,
 )
@@ -41,6 +41,13 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 RTOL = 1e-12
 ATOL = 1e-13
+
+
+def geometry_state(setup, *, modes):
+    """Evolution-basis state -> ``real_space_geometry`` keyword inputs."""
+    return _geometry_state_arrays(
+        (setup.R_cos, setup.R_sin, setup.Z_cos, setup.Z_sin, setup.lambda_cos, setup.lambda_sin),
+        modes=modes, lthreed=setup.lthreed, lasym=setup.lasym, lconm1=setup.lconm1)
 
 SIGNGS = -1
 

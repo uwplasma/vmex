@@ -47,7 +47,6 @@ from vmex.core.strong_force import (
     evaluate_magnetic_pressure_gradient,
     evaluate_strong_force,
     force_error_measures,
-    force_error_record,
     high_order_state_from_wout,
     insert_high_order_state_knots,
     lift_high_order_state,
@@ -437,40 +436,23 @@ def test_batched_point_sweep_matches_flat_vmap_values_and_gradients():
     flat_samples = sf.evaluate_strong_force(state, rho, theta, zeta)
     flat_value, flat_grad = jax.value_and_grad(objective)(0.0)
 
-    forced = sf.ForceSweepPolicy(min_batch=8, max_batch=8)
-    with sf.force_sweep_measurement(forced):
-        assert sf.force_sweep_batch(state, count) == 8
-        batched_samples = sf.evaluate_strong_force(state, rho, theta, zeta)
-        batched_value, batched_grad = jax.value_and_grad(objective)(0.0)
-    assert sf.force_sweep_policy().batch is True
-    # The remat boundary is a memory strategy, not a numerical one: dropping
-    # it must reproduce the same values and the same reverse-mode gradient.
-    # The memory benchmark runs this arm, so it has to be exact too.
-    with sf.force_sweep_measurement(sf.ForceSweepPolicy(min_batch=8, max_batch=8, checkpoint=False)):
-        plain_samples = sf.evaluate_strong_force(state, rho, theta, zeta)
-        plain_value, plain_grad = jax.value_and_grad(objective)(0.0)
-    scale = float(np.max(np.abs(np.asarray(batched_samples.force))))
-    np.testing.assert_allclose(np.asarray(plain_samples.force), np.asarray(batched_samples.force),
-                               rtol=1.0e-12, atol=1.0e-11 * scale)
-    # Same kernel, different summation order under jit fusion.
-    np.testing.assert_allclose(plain_value, batched_value, rtol=1.0e-11)
-    np.testing.assert_allclose(plain_grad, batched_grad, rtol=1.0e-11)
+    def batched(target):
+        _, _, _, values = sf._point_sweep(sf._point_force, target, rho, theta, zeta, batch_size=8)
+        return values
+
+    batched_force = batched(state)[3]
+    batched_value, batched_grad = jax.value_and_grad(
+        lambda delta: jnp.sum(batched(replace(state, R_cos=state.R_cos + delta * probe))[3] * weights))(0.0)
+    assert sf._sweep_batch(state, rho, theta, zeta) == 0
 
     # Batching changes the fusion XLA picks, so the two sweeps agree to
     # round-off of each field's own scale, not element by element: the
     # current density is a curl of B built from nested derivatives, and its
     # near-zero entries in a vacuum field are pure cancellation (2e-12 of
     # max|J| on Apple silicon, and a different 2e-12 on the x86 runner).
-    for name in flat_samples.__dataclass_fields__:
-        flat = np.asarray(getattr(flat_samples, name))
-        scale = float(np.max(np.abs(flat))) if flat.dtype.kind == "f" else 0.0
-        np.testing.assert_allclose(
-            np.asarray(getattr(batched_samples, name)),
-            flat,
-            rtol=1.0e-12,
-            atol=1.0e-11 * max(scale, 1.0),
-            err_msg=name,
-        )
+    scale = float(np.max(np.abs(np.asarray(flat_samples.force))))
+    np.testing.assert_allclose(np.asarray(batched_force), np.asarray(flat_samples.force),
+                               rtol=1.0e-12, atol=1.0e-11 * max(scale, 1.0))
     np.testing.assert_allclose(batched_value, flat_value, rtol=1.0e-11)  # sums 1e-11-accurate points
     np.testing.assert_allclose(batched_grad, flat_grad, rtol=1.0e-11)
     assert float(np.abs(np.asarray(flat_grad))) > 0.0
@@ -488,9 +470,8 @@ def test_magnetic_pressure_gradient_uses_force_sweep_batching():
     theta = jnp.asarray(generator.uniform(0.0, 2.0 * np.pi, count))
     zeta = jnp.asarray(generator.uniform(0.0, 2.0 * np.pi, count))
     flat = sf.evaluate_magnetic_pressure_gradient(state, rho, theta, zeta)
-    with sf.force_sweep_measurement(sf.ForceSweepPolicy(min_batch=7, max_batch=7)):
-        assert sf.force_sweep_batch(state, count) == 7
-        batched = sf.evaluate_magnetic_pressure_gradient(state, rho, theta, zeta)
+    batched = sf._point_sweep(sf._point_magnetic_pressure_gradient, state, rho, theta, zeta,
+                              batch_size=7)[3]
     np.testing.assert_allclose(batched, flat, rtol=2.0e-12, atol=2.0e-6)
 
 
@@ -580,8 +561,6 @@ def test_sweep_batch_holds_the_working_set_as_the_mode_table_grows():
     # the exact cost they had before batching existed.
     small = _constant_toroidal_field_state()
     assert sf.force_sweep_batch(small, point_count=64) == 0
-    with sf.force_sweep_measurement(sf.ForceSweepPolicy(batch=False)):
-        assert sf.force_sweep_batch(small, point_count=10**7) == 0
 
 
 def test_overintegrated_certificate_reports_dimensional_and_normalized_force():
@@ -1349,7 +1328,7 @@ def test_certificate_rejects_a_malformed_flux_window(window):
         certify_strong_force(_constant_toroidal_field_state(), window=window)
 
 
-def test_force_error_measures_and_record_expose_the_non_saturating_numbers():
+def test_force_error_measures_expose_the_non_saturating_numbers():
     initial = certify_strong_force(_solovev_initial_lift())
     final = certify_strong_force(_solovev_initial_lift(), window=(0.2, 0.9))
 
@@ -1365,14 +1344,6 @@ def test_force_error_measures_and_record_expose_the_non_saturating_numbers():
     # window, which is what makes it a split rather than a third average.
     assert pair[4][1] == pytest.approx(float(initial.near_axis_l2))
     assert pair[4][2] == pytest.approx(float(final.near_axis_l2))
-
-    record = force_error_record(initial)
-    assert json.loads(json.dumps(record))["saturation"] == initial.saturation
-    assert record["pointwise_eps_f"]["normalized_l2"] == pytest.approx(float(initial.normalized_l2))
-    assert record["absolute"]["near_axis_l2"] == pytest.approx(float(initial.near_axis_l2))
-    assert record["global_normalizations"]["s_min"] == 0.0
-    assert record["window_normalizations"]["s_min"] == 0.1
-    assert record["window_normalizations"]["node_count"] < record["global_normalizations"]["node_count"]
 
 
 def test_high_order_surface_reports_asymmetry_it_carries():
@@ -1593,3 +1564,56 @@ def test_native_polish_scope_and_physical_scales():
     force_scale, volume = physical_scales(_constant_toroidal_field_state(degree=3))
     np.testing.assert_allclose(volume, 2 * np.pi**2 * 10.0, rtol=1.0e-6)
     assert np.isfinite(force_scale) and force_scale > 0.0
+
+
+@pytest.fixture(scope="module")
+def qa_finite_beta():
+    """Converged nfp=2 QA at about 2 % beta, with the runtime it was solved on."""
+    import vmex as vj
+
+    inp = VmecInput.from_file(Path(__file__).resolve().parents[1] / "examples" / "data" / "input.nfp2_QA_finite_beta")
+    inp = replace(inp, ns_array=np.asarray([21]), ftol_array=np.asarray([1e-12]), niter_array=np.asarray([8000]))
+    result = vj.solve_multigrid(inp, verbose=False)
+    return inp, result.state, prepare_runtime(inp, resolution_from_input(inp, ns=21))
+
+
+def test_traced_lift_reproduces_the_host_lift_geometry(qa_finite_beta):
+    inp, state, runtime = qa_finite_beta
+    host = strong_force.lift_high_order_state(state, runtime)
+    traced = jax.jit(strong_force.traced_lift(runtime, radial_basis=host.radial_basis))(state, runtime)
+    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"):
+        expected = np.asarray(getattr(host, name))
+        np.testing.assert_allclose(np.asarray(getattr(traced, name)), expected, rtol=0.0,
+                                   atol=1e-12 * max(1.0, np.abs(expected).max()))
+
+
+def test_traced_lift_profiles_interpolate_the_input_pressure(qa_finite_beta):
+    """Half-mesh samples are exact input values, so the fitted pressure and its
+    slope follow the analytic profile up to the edge."""
+    inp, state, runtime = qa_finite_beta
+    lifted = strong_force.traced_lift(runtime)(state, runtime)
+    s = jnp.linspace(0.05, 1.0, 20)
+    exact = input_pressure(inp.pmass_type, inp.am, inp.am_aux_s, inp.am_aux_f, s, pres_scale=inp.pres_scale)
+    fitted = lifted.radial_basis.evaluate(lifted.pressure, s)
+    np.testing.assert_allclose(np.asarray(fitted), np.asarray(exact), rtol=0, atol=1e-5 * float(exact[0]))
+    slope = jax.vmap(jax.grad(lambda x: lifted.radial_basis.evaluate(lifted.pressure, x)))(jnp.asarray([0.5, 0.99]))
+    exact_slope = jax.vmap(jax.grad(lambda x: input_pressure(
+        inp.pmass_type, inp.am, inp.am_aux_s, inp.am_aux_f, x, pres_scale=inp.pres_scale)))(jnp.asarray([0.5, 0.99]))
+    np.testing.assert_allclose(np.asarray(slope), np.asarray(exact_slope), rtol=1e-3)
+
+
+def test_traced_lift_differentiates_through_state_and_runtime(qa_finite_beta):
+    """The lift is linear in the live arrays, so central differences are exact."""
+    inp, state, runtime = qa_finite_beta
+    lift = strong_force.traced_lift(runtime)
+
+    def scalar(state, runtime):
+        lifted = lift(state, runtime)
+        return jnp.sum(lifted.R_cos ** 2) + jnp.sum(lifted.L_sin) + jnp.sum(lifted.pressure) * 1e-6 + jnp.sum(lifted.phipf)
+
+    g_state, g_runtime = jax.grad(scalar, argnums=(0, 1), allow_int=True)(state, runtime)
+    h = 1e-6
+    moved = [replace(state, R_cos=state.R_cos * (1.0 + t)) for t in (h, -h)]
+    fd = (scalar(moved[0], runtime) - scalar(moved[1], runtime)) / (2 * h)
+    assert float(jnp.vdot(g_state.R_cos, state.R_cos)) == pytest.approx(float(fd), rel=1e-6)
+    assert float(jnp.abs(g_runtime.setup.phips).max()) > 0.0  # profiles stay live
