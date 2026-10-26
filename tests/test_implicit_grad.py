@@ -830,6 +830,7 @@ def _assert_stability_gradients(
     include_profiles,
     metric_names=("DMerc",),
     direction_labels=None,
+    h=1.0e-4,
 ):
     name, inp, cfg, p0, _, _, _ = case
     ntor = int(inp.ntor)
@@ -891,7 +892,7 @@ def _assert_stability_gradients(
         for label, tangent in directions:
             ad = _tree_dot(grad, tangent)
             fd, info = im.frozen_path_directional_fd(
-                p0, cfg, metric, tangent, h=1.0e-4
+                p0, cfg, metric, tangent, h=h
             )
             residual = max(info["newton_res"])
             scale = max(abs(ad), abs(fd), 1.0e-12)
@@ -1443,7 +1444,12 @@ def test_lasym_3d_stability_gradients_vs_frozen_path_fd(lasym_3d):
     """LASYM Mercier/Glasser derivatives include the RBS/ZBC families."""
     _assert_stability_gradients(
         lasym_3d, include_profiles=False, metric_names=("DMerc", "D_R"),
-        direction_labels={"RBS(1,1)", "ZBC(1,1)"})
+        direction_labels={"RBS(1,1)", "ZBC(1,1)"},
+        # VMEC2000's atan2 shift turns this deck by pi/2 (rbc + zbs = 0); the
+        # central difference then converges as h^2 (measured DMerc/RBS(1,1)
+        # vs the adjoint: 2.2e-4 at 1e-4, 2.2e-6 at 1e-5), so h = 1e-5.
+        h=1.0e-5)
+
 
 @pytest.mark.parametrize("lasym", [False, True])
 def test_equilibrium_wout_unconstrained_basis_matches_constrained(lasym):

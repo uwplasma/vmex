@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.11.11"
+version = "0.12.0"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -107,7 +107,7 @@ freeb = [
 # eigen-objectives in forward mode (the implicit least-squares Jacobian);
 # 2.5.0 is the release `vmex --turbulence` is built and timed against.
 turbulence = [
-  "gkx>=2.5.0",
+  "gkx>=2.6.0",
   # gkx's own jax floor.
   "jax>=0.10.1",
   "jaxlib>=0.10.1",

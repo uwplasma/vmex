@@ -2043,6 +2043,9 @@ class VacuumOutput:
     bsubv: np.ndarray
     bsupu: np.ndarray
     bsupv: np.ndarray
+    #: VMEC's DEL-BSQ: mean absolute pressure jump across the edge over the mean
+    #: vacuum pressure, from the last NESTOR update (0 is exact balance).
+    delbsq: float = float("nan")
 
 
 @dataclass(frozen=True)
@@ -2073,6 +2076,7 @@ class SolveResult:
     native_equilibrium: Any = None
     strong_force: Any = None
     polish_report: Any = None
+    position_control: Any = None
 
 
 def _result_from_carry(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
@@ -2328,6 +2332,12 @@ def _resolve_use_fft(
     return backend != "cpu" or platform.machine().lower() in ("arm64", "aarch64")
 
 
+def _on_gpu(tree: Any) -> bool:
+    """True when the first array leaf of ``tree`` lives on a non-CPU device."""
+    leaf = jax.tree_util.tree_leaves(tree)[0]
+    return next(iter(leaf.devices())).platform != "cpu"
+
+
 def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
               ijacob: int, verbose: bool, emit,
               time_step0: float, nstep: int,
@@ -2353,11 +2363,18 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         residuals=initial_residuals,
     )
 
+    # Silent GPU solves have no per-block host work (rows, stop hook): take
+    # the single-sync while lane (identical iterates; each host sync costs
+    # 20-25% on GPU).  CPU keeps the cheaper-to-compile block lane.
+    if (mode == "cli" and not verbose and STOP_HOOK.get() is None
+            and _on_gpu(state0)):
+        mode = "jit"
     if mode == "jit":
         # The while lanes donate the carry; _initial_carry aliases some leaves
         # (xstore=state, shared cache zeros), so copy to distinct buffers —
         # same rationale as the CLI-lane copy below, values bit-for-bit
         # unchanged.
+        carry, rt = commit_to_single_device((carry, rt))
         carry = _distinct_buffers(carry)
         return (_while_lane_fft if use_fft else _while_lane)(carry, rt)
 

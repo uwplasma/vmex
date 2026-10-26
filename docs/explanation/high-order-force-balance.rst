@@ -113,3 +113,9 @@ narrowest inserted span and widens ``MPOL`` to hold the padded modes, so the
 file carries the certified state.  Non-axisymmetric equilibria need a
 matrix-free Gauss--Newton on the same ``A = D S`` structure and are future
 work.
+
+The same two WOUT files through ``vmex --plot``. The summary's
+``<|F|>/<|grad(B^2/2mu0)|>`` falls from 3.9e-4 to 7.7e-6.
+
+.. image:: /_static/figures/readme_polish_plot.webp
+   :alt: vmex --plot of the unpolished and polished WOUT files

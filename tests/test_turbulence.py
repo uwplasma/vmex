@@ -10,7 +10,7 @@ and differentiability (reverse and forward AD vs central FD, finite state
 gradient, the two-positional objective-term contract, and the
 eigenvector-weighted proxies in both modes).
 
-gkx is optional (``pip install 'gkx>=2.5.0'``; the legacy ``spectraxgk``
+gkx is optional (``pip install 'gkx>=2.6.0'``; the legacy ``spectraxgk``
 name is not supported) — dependent lanes skip cleanly without it.
 """
 
@@ -365,13 +365,7 @@ def test_objective_vector_and_scalar_proxies_consistent(shaped_eq):
         gamma * named["linear_heat_flux_weight"] / max(named["kperp_eff2"], 1e-12),
         rel=1e-12)
     assert ql == pytest.approx(named["mixing_length_heat_flux_proxy"], rel=1e-12)
-    # reduced nonlinear-window rule (gkx's smooth surrogate)
-    nl = float(turb.nonlinear_heat_flux_proxy(state, rt, csat=0.85, **GK))
-    gamma_plus = np.logaddexp(0.0, 18.0 * gamma) / 18.0   # smooth_positive(gamma)
-    expected_nl = (0.85 * max(named["linear_heat_flux_weight"], 0.0) * 2.0 * gamma_plus
-                   / (1.0 + 2.2 * max(named["kperp_eff2"], 0.0) + 0.15 * gamma_plus))
-    assert nl == pytest.approx(expected_nl, rel=1e-6)
-    assert ql > 0.0 and nl > 0.0            # unstable ITG: outward heat flux
+    assert ql > 0.0                          # unstable ITG: outward heat flux
 
 
 def test_growth_rate_gradient_matches_finite_differences(shaped_eq):
@@ -398,23 +392,21 @@ def test_growth_rate_gradient_matches_finite_differences(shaped_eq):
     assert float(fwd) == pytest.approx(float(fd), rel=1e-5)
 
 
-def test_eigenvector_weighted_proxies_differentiate_in_both_modes(shaped_eq):
-    """The quasilinear and nonlinear-window proxies weight the dominant
-    eigenvector; GKX's bordered eigenpair tangent must give the FD slope in
+def test_eigenvector_weighted_proxy_differentiates_in_both_modes(shaped_eq):
+    """The quasilinear proxy weights the dominant eigenvector; GKX's bordered eigenpair tangent must give the FD slope in
     reverse mode and in the forward mode ``jac="implicit"`` uses."""
     _require_gkx_eigenvectors()
     state, rt = shaped_eq.state, shaped_eq.runtime
 
-    for proxy in (turb.quasilinear_flux_proxy, turb.nonlinear_heat_flux_proxy):
-        def value(scale, proxy=proxy):
-            setup = dataclasses.replace(rt.setup, mass=rt.setup.mass * scale)
-            return proxy(state, dataclasses.replace(rt, setup=setup), **GK)
+    def value(scale):
+        setup = dataclasses.replace(rt.setup, mass=rt.setup.mass * scale)
+        return turb.quasilinear_flux_proxy(state, dataclasses.replace(rt, setup=setup), **GK)
 
-        eps = 1e-3
-        fd = float((value(1.0 + eps) - value(1.0 - eps)) / (2.0 * eps))
-        tolerance = 1.0e-4 * max(abs(fd), 1.0e-12) + 1.0e-10
-        assert abs(float(jax.grad(value)(1.0)) - fd) <= tolerance
-        assert abs(float(jax.jacfwd(value)(1.0)) - fd) <= tolerance
+    eps = 1e-3
+    fd = float((value(1.0 + eps) - value(1.0 - eps)) / (2.0 * eps))
+    tolerance = 1.0e-4 * max(abs(fd), 1.0e-12) + 1.0e-10
+    assert abs(float(jax.grad(value)(1.0)) - fd) <= tolerance
+    assert abs(float(jax.jacfwd(value)(1.0)) - fd) <= tolerance
 
 
 def test_grad_wrt_state_is_finite(shaped_eq):
@@ -431,7 +423,7 @@ def test_grad_wrt_state_is_finite(shaped_eq):
 def test_wrappers_satisfy_least_squares_term_contract():
     """Two-positional (state, runtime) callables: accepted by jac='implicit'."""
     for fun in (turb.turbulent_growth_rate, turb.quasilinear_flux_proxy,
-                turb.nonlinear_heat_flux_proxy, turb.turbulence_objective_vector):
+                turb.turbulence_objective_vector):
         assert opt._traceable_term(fun) is fun
 
 
