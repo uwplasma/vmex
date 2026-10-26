@@ -66,10 +66,19 @@ good as it is. A vacuum WOUT uses DKX's generic reference plasma.
 
 ## Use the bootstrap current in an optimization
 
-`examples/optimization/QI_optimization_bootstrap_er.py` puts the DKX `<j·B>`
-at each surface's ambipolar `E_r` inside a QI boundary optimization
-(`KineticBootstrapMismatch(ambipolar=True)`, DKX 2.12.0 or later). The root is
-found by a damped Newton iteration warm-started from the previous step, and its
-derivative is one adjoint solve per surface. The README section
-"Quasi-isodynamic design with a self-consistent bootstrap current" shows the
-result.
+`examples/optimization/QI_optimization_bootstrap_er.py` designs a finite-beta QI
+boundary whose own current is the DKX bootstrap current. It alternates two
+steps. A Picard step solves the equilibrium, evaluates `<j·B>` with
+`KineticBootstrapMismatch(ambipolar=True)` (DKX 2.12.0 or later) at the
+ambipolar `E_r` of each kinetic surface, and passes it to
+`self_consistent_bootstrap(..., current_model=...)`, which inverts the
+`<j·B>` identity for the enclosed current until it stops changing. A shape stage
+then optimizes the boundary at that fixed current. DKX is only evaluated
+forward: the optimizer's program contains no root finder, so the Jacobian costs
+what a Redl-only optimization costs. The DKX call is jitted once with the
+enclosed current of the runtime as an argument, because a runtime differs
+between equilibria of one resolution only in that array; compiling it per
+equilibrium costs about 40 s each. The script asserts that the final
+equilibrium `<j·B>` matches DKX within 5 % rms on the kinetic surfaces; between
+them the Picard profile is a monotone cubic through the DKX values. The README section "Quasi-isodynamic design with a
+self-consistent bootstrap current" gives the result.

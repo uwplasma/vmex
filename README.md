@@ -275,22 +275,34 @@ maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
 ### Quasi-isodynamic design with a self-consistent bootstrap current
 
-![Bootstrap current, ambipolar E_r and objective history of the QI optimization](docs/_static/figures/readme_qi_bootstrap_er.webp)
+![Boundary and Boozer |B| before and after the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_shape.webp)
 
-At finite beta the bootstrap current of a quasi-isodynamic field depends strongly on the radial electric field.
-`QI_optimization_bootstrap_er.py` evaluates the [DKX](https://github.com/uwplasma/DKX) `<j·B>` of each kinetic surface at
-its own ambipolar ion root `E_r`, found inside the objective, and optimizes the boundary and a current spline against it
+![Ambipolar E_r, bootstrap current and objective history of the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_current.webp)
+
+The bootstrap current of a quasi-isodynamic field depends strongly on the radial electric field, and the Redl formula,
+which assumes quasi-axisymmetry, does not describe it (13 to 16 MA T/m² here against 0.3 to 1.7 from DKX).
+`QI_optimization_bootstrap_er.py` alternates a Picard update of the applied current profile to the
+[DKX](https://github.com/uwplasma/DKX) `<j·B>` at each surface's ambipolar ion-root `E_r` with QI shape stages at that
+fixed current (`max_mode` 1 then 3). It starts from the vacuum QI boundary `input.QI_nfp2_initial` at `β = 1.5 %`
 (needs `vmex[neoclassical]`; see the [neoclassical guide](docs/howto/neoclassical-transport.md)):
 
 ```console
 python examples/optimization/QI_optimization_bootstrap_er.py
 ```
 
-Left to right: `<j·B>` on the two kinetic surfaces from the equilibrium, Redl and DKX, before (the Redl-consistent seed)
-and after; the `E_r` root; the objective history. In this short default run the objective falls from 16.6 to 3.5 and
-the constructed-QI residual from 1.60 to 0.33, while the equilibrium and DKX currents are not yet matched; the
-research ladder in the script spends more evaluations. Runtime: 15 min on 8 CPU cores, compilation included
-([script](docs/_static/figures/sources/make_qi_bootstrap_er_figure.py)).
+| | seed (consistent current) | optimized |
+|---|---|---|
+| constructed-QI residual | 5.6e-3 | 2.0e-3 |
+| mirror ratio (limit 0.21) | 0.240 | 0.208 |
+| aspect ratio (limit 10) | 10.0 | 9.9 |
+| min \|ι\| (floor 0.5) | 0.56 | 0.59 |
+| β (target 1.5 %) | 1.50 % | 1.50 % |
+| rms(`<j·B>` equilibrium − DKX) / rms(DKX) | 1.8 % | 1.7 % |
+
+The consistency error is taken on four kinetic surfaces, between which the profile is a monotone cubic through the DKX
+values; the script asserts it stays below 5 %. The final toroidal current is 269 kA. A full run takes 10 to 12 min
+on 8 CPU cores of a shared workstation, compilation included, and the CI smoke pass about 5 min
+([figure script](docs/_static/figures/sources/make_qi_bootstrap_er_figure.py)).
 
 ### Free boundary with coils
 

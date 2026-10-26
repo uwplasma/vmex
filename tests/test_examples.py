@@ -1172,6 +1172,9 @@ def test_low_bootstrap_optimization_examples(script_name, output, dependency, tm
         assert (tmp_path / f"{output}_boozer_modB.png").exists()
     if dependency == "dkx":
         assert "Redl" in out and "DKX" in out
+    if script_name == "QI_optimization_bootstrap_er.py":
+        # the example asserts its own consistency limit; the report line is the evidence
+        assert re.search(r"<j\.B> inconsistency \(rms, VMEX vs DKX\): [0-9.]+", out)
 
 
 @pytest.mark.full  # nightly: optional optimizer interoperability, cold JAX compilation
