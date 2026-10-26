@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from scipy.integrate import quad
+from scipy.optimize import brentq
 
 import jax
 import jax.numpy as jnp
@@ -67,6 +69,125 @@ def test_action_residual_zero_and_non_qi_ordering():
         for points in (32, 64, 128)
     ]
     assert abs(totals[1] - totals[2]) < abs(totals[0] - totals[2])
+
+
+def test_action_residual_pools_distinct_alpha_independent_well_families():
+    # B(phi) = 2 + 0.4 cos(2 phi) + 0.15 sin(phi) has two distinct trapped
+    # wells per period and no alpha dependence (all Fourier modes have m=0).
+    out = qi.j_invariant_qi_residual_from_boozer(
+        bmnc_b=[[2.0, 0.4, 0.0]], bmns_b=[[0.0, 0.0, 0.15]],
+        xm_b=[0.0, 0.0, 0.0], xn_b=[0.0, -2.0, -1.0],
+        iota_b=[0.4], G_b=[2.0], I_b=[0.0], nfp=1,
+        pitch=[0.5], nalpha=3, num_periods=1,
+        points_per_period=128, max_wells=2, quadrature_order=32)
+
+    action = np.asarray(out["action"])[0, :, 0, :]
+    assert np.asarray(out["valid_pitch"])[0, 0]
+    assert np.asarray(out["usable_mask"])[0, :, 0, :].all()
+    np.testing.assert_allclose(action - action[0], 0.0, atol=1.0e-12)
+    assert abs(action[0, 0] - action[0, 1]) > 0.5
+    expected_pooled_variance = ((action[0, 0] - action[0, 1]) / action[0].sum()) ** 2
+    assert float(out["total"]) == pytest.approx(expected_pooled_variance)
+    assert float(out["total"]) > 0.1
+
+
+def _two_family_options(amplitude=0.0):
+    return dict(
+        bmnc_b=jnp.array([[2.0, 0.4, 0.0, amplitude]]),
+        bmns_b=[[0.0, 0.0, 0.15, 0.0]],
+        xm_b=[0.0, 0.0, 0.0, 1.0], xn_b=[0.0, -2.0, -1.0, 0.0],
+        iota_b=[0.0], G_b=[2.0], I_b=[0.0], nfp=1,
+        pitch=[0.5], num_periods=1, points_per_period=1024,
+        max_wells=2, quadrature_order=128)
+
+
+def test_local_alpha_derivative_vanishes_for_distinct_invariant_families():
+    out = qi.j_invariant_alpha_derivative_from_boozer(
+        alpha=[0.2, 1.1], **_two_family_options())
+    assert np.asarray(out["usable_mask"]).all()
+    action = np.asarray(out["action"])[0, 0, 0]
+    assert abs(action[0] - action[1]) > 0.5
+    np.testing.assert_array_equal(out["action_alpha_derivative"], 0.0)
+    for alpha in ([], [[0.0, 0.1]]):
+        with pytest.raises(ValueError, match="alpha"):
+            qi.j_invariant_alpha_derivative_from_boozer(
+                alpha=alpha, **_two_family_options())
+
+
+def test_local_alpha_derivative_matches_moving_root_oracle_and_parameter_ad():
+    # Independent continuous-field quadrature moves both roots with alpha.
+    # It includes the Boozer line element 2/B as well as the speed factor.
+    def reference_actions(alpha):
+        def field(phi):
+            return 2.0 + 0.4 * np.cos(2 * phi) + 0.15 * np.sin(phi) + 0.06 * np.cos(alpha)
+
+        roots = [brentq(lambda phi: field(phi) - 2.0, lo, hi)
+                 for lo, hi in zip(np.arange(4) * np.pi / 2,
+                                   np.arange(1, 5) * np.pi / 2)]
+        values = []
+        for left, right in (roots[:2], roots[2:]):
+            midpoint, width = (left + right) / 2, (right - left) / 2
+
+            def integrand(angle):
+                b = field(midpoint + width * np.sin(angle))
+                return 4 * np.sqrt(max(1 - 0.5 * b, 0.0)) / b * width * np.cos(angle)
+
+            values.append(quad(integrand, -np.pi / 2, np.pi / 2,
+                               epsabs=1e-12, epsrel=1e-12)[0])
+        return np.array(values)
+
+    alpha = 0.7
+    step = 1.0e-5
+    reference = (reference_actions(alpha + step) - reference_actions(alpha - step)) / (2 * step)
+    for reference_step in (1.0e-4, 1.0e-6):
+        estimate = (reference_actions(alpha + reference_step)
+                    - reference_actions(alpha - reference_step)) / (2 * reference_step)
+        np.testing.assert_allclose(estimate, reference, rtol=1e-7)
+
+    def evaluate(amplitude):
+        return qi.j_invariant_alpha_derivative_from_boozer(
+            alpha=alpha, **_two_family_options(amplitude))
+
+    out = jax.jit(evaluate)(0.06)
+    np.testing.assert_allclose(out["action"][0, 0, 0], reference_actions(alpha), rtol=3e-5)
+    np.testing.assert_allclose(out["action_alpha_derivative"][0, 0, 0], reference, rtol=5e-4)
+    assert np.all(np.abs(reference) > 0.05)
+
+    def objective(amplitude):
+        return jnp.sum(evaluate(amplitude)["action_alpha_derivative"] ** 2)
+
+    derivative = jax.grad(objective)(0.06)
+    # Larger steps can cross the piecewise-linear interpolation cells.
+    for parameter_step in (1.0e-5, 1.0e-6):
+        finite_difference = (objective(0.06 + parameter_step)
+                             - objective(0.06 - parameter_step)) / (2 * parameter_step)
+        np.testing.assert_allclose(derivative, finite_difference, rtol=5e-4)
+
+
+@pytest.mark.parametrize("status,pitch,max_wells", [
+    ("absent", 0.3, 2), ("marginal", 1 / 1.6, 2),
+    ("merged", 1 / 2.4, 2), ("overflow", 0.5, 1),
+])
+def test_local_alpha_derivative_masks_invalid_topology(status, pitch, max_wells):
+    options = _two_family_options()
+    options.update(pitch=[pitch], max_wells=max_wells,
+                   bmns_b=[[0.0, 0.0, 0.0, 0.0]])
+    out = qi.j_invariant_alpha_derivative_from_boozer(alpha=0.0, **options)
+    assert np.asarray(out[status]).all()
+    assert np.isnan(np.asarray(out["action_alpha_derivative"])).all()
+
+
+def test_local_alpha_derivative_retains_complete_wells_in_a_cut_trace():
+    out = qi.j_invariant_alpha_derivative_from_boozer(
+        alpha=[0.0], bmnc_b=[[1.0, -0.2]], xm_b=[0.0, 0.0],
+        xn_b=[0.0, 1.0], iota_b=[0.0], G_b=[1.0], I_b=[0.0],
+        nfp=1, pitch=[1.0], num_periods=2, points_per_period=32, max_wells=3)
+    assert np.asarray(out["truncated"]).all()
+    usable = np.asarray(out["usable_mask"])
+    assert usable.sum() == 1
+    derivative = np.asarray(out["action_alpha_derivative"])
+    np.testing.assert_array_equal(derivative[usable], 0.0)
+    assert np.isnan(derivative[~usable]).all()
 
 
 def test_action_residual_ad_matches_finite_difference():
