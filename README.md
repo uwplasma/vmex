@@ -519,6 +519,9 @@ for the polish).
   20× at the edge on a held-out grid.
 - L-BFGS stops at |grad| = 4.6e-4 after 150 iterations: a forward result, not a converged one.
 
+`vmex.core.strong_force.traced_lift` is the differentiable form of the lift, for force-balance
+certificates inside gradient-based objectives.
+
 See the [polishing reference](https://vmex.readthedocs.io/en/latest/explanation/high-order-force-balance.html)
 and the [validation record](docs/explanation/validation.md).
 
