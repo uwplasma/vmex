@@ -19,7 +19,9 @@ variational-problem
 iteration
 interior-field
 nestor-vacuum
+position-control
 high-order-force-balance
+solver-landscape
 ```
 
 ## Derivatives

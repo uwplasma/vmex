@@ -60,3 +60,18 @@ vj.write_wout("wout_aspect_optimized.nc", equilibrium.wout)
 `problem.jax_value_and_grad` fits JAXopt and Optax. Add QI, QS, mirror,
 elongation, iota, or stability tuples without changing the optimizer wiring;
 the complete pattern is in {doc}`/howto/optimize-a-boundary`.
+
+## Model and references
+
+The optimizer minimizes a weighted sum of squares $\sum_i w_i\,(f_i(x) - t_i)^2$ over boundary
+coefficients $x$, each $f_i$ evaluated on a solved equilibrium and differentiated implicitly
+({doc}`first-gradient`). SciPy's trust-region least-squares solver is used because the residual
+Jacobian is available exactly and the problems are small and smooth. Quasisymmetry enters through the
+two-term residual
+
+$$f_{QS} = \left\langle \left(\frac{1}{B^3}\,\big[(N - \iota M)\,\mathbf{B}\times\nabla B\cdot\nabla\psi - (MG + NI)\,\mathbf{B}\cdot\nabla B\big]\right)^2\right\rangle ,$$
+
+which vanishes on a surface where $|B|$ depends on $\psi$ and $M\theta - N\varphi$ only.
+
+- M. Landreman and E. J. Paul, *Phys. Rev. Lett.* 128, 035001 (2022): precise quasisymmetry by this residual.
+- M. A. Branch, T. F. Coleman and Y. Li, *SIAM J. Sci. Comput.* 21, 1 (1999): the trust-region reflective method in `scipy.optimize.least_squares`.

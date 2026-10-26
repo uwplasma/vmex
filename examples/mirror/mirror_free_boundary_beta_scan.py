@@ -3,12 +3,12 @@
 
 Two circular ESSOS coils make an axisymmetric vacuum mirror. The script
 continues the coupled plasma-boundary-vacuum equilibrium through the beta
-points in ``BETAS`` (0, 10, 50 and 80 %), each solved to the residual
+points in ``BETAS`` (0, 10 and 80 %), each solved to the residual
 tolerance ``FTOL``; no prescribed finite-beta boundary is plotted. The points
-through 10 % are the supported lane and must pass the strong-force gate; 50
-and 80 % are extended validation outside the supported model range. Each
-point costs about a minute on a laptop CPU, so add intermediate points (1, 3,
-25 %, ...) only when the extra minutes are wanted. It writes one MOUT and
+through 10 % are the supported lane and must pass the strong-force gate; 80 %
+is extended validation outside the supported model range. Each point costs
+about a minute on a laptop CPU, so add intermediate points (1, 3, 25, 50 %,
+...) only when the extra minutes are wanted. It writes one MOUT and
 restart file per point, a JSON summary, the mirror ratios, per-state figures
 for three points, and the beta-scan composite.
 
@@ -43,7 +43,7 @@ from vmex.mirror.output import (
 )
 
 # Requested central beta of each point; the scan continues from vacuum:
-BETAS = np.asarray([0.0, 0.10, 0.50, 0.80])
+BETAS = np.asarray([0.0, 0.10, 0.80])     # research scan: [0.0, 0.10, 0.50, 0.80]
 
 # Largest beta of the supported lane, and its strong-force gate:
 SUPPORTED_BETA_MAX = 0.10
@@ -55,7 +55,7 @@ NXI = 13
 SPLINE_ELEMENTS = 7
 
 # Exterior (vacuum) boundary-integral resolution:
-EXTERIOR_NTHETA = 12
+EXTERIOR_NTHETA = 10               # research: 12
 EXTERIOR_ORDER = 6
 EXTERIOR_SPECTRAL_SIDE_DENSITY = True
 

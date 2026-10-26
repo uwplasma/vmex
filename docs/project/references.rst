@@ -112,9 +112,8 @@ Confinement objectives and optimization:
     stellarators with self-consistent bootstrap current and energetic particle
     confinement,” *Physics of Plasmas* 29, 082501 (2022), arXiv:2205.02914,
     doi:10.1063/5.0098166 —
-    the self-consistent bootstrap iteration reproduced in
-    ``benchmarks/*_bootstrap_selfconsistent.py``; the compact finite-beta
-    optimization workflows are ``examples/optimization/*_optimization_bootstrap.py``.
+    the compact finite-beta optimization workflows are
+    ``examples/optimization/*_optimization_bootstrap.py``.
 
 27. R. Jorge, A. Goodman, M. Landreman, J. Rodrigues, and F. Wechsung,
     “Single-stage stellarator optimization: combining coils with fixed
@@ -235,3 +234,23 @@ Numerical implementation:
     :math:`\langle|\mathbf F|\rangle / \langle|\nabla p|\rangle` reported
     beside the pointwise certificate, and its vacuum-safe companion that
     divides by the volume-averaged magnetic pressure gradient instead.
+
+49. R. Sanchez, S. P. Hirshman, J. C. Whitson, and A. S. Ware, “COBRA: an
+    optimized code for fast analysis of ideal ballooning stability of
+    three-dimensional magnetic equilibria,” *Journal of Computational
+    Physics* 161, 576 (2000), doi:10.1006/jcph.2000.6514 — the three-point
+    field-line eigenproblem and its Richardson extrapolation in the step,
+    adopted by :mod:`vmex.core.stability`.
+
+50. R. Gaur, S. Buller, M. E. Ruth, M. Landreman, I. G. Abel, and
+    W. D. Dorland, “An adjoint-based method for optimizing MHD equilibria
+    against the infinite-n, ideal ballooning mode,” *Journal of Plasma
+    Physics* 89, 905890518 (2023), arXiv:2302.07673,
+    doi:10.1017/S0022377823000995 — the field-line eigenproblem in the PEST
+    angle and the per-surface hinge objective.
+
+51. R. Gaur et al., “Omnigenous stellarators with improved ideal and kinetic
+    ballooning stability,” *Plasma Physics and Controlled Fusion* 67, 125015
+    (2025), arXiv:2410.04576 — the inertia coefficient used here and the
+    hinge-plus-maximum objective over surfaces, field lines and ballooning
+    parameters that DESC's ``BallooningStability`` implements.

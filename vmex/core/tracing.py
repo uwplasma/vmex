@@ -116,9 +116,9 @@ class AlphaTracingResult:
     """Alpha-loss diagnostics from one :func:`trace_alphas` call.
 
     ``initial_conditions`` holds the births ``(s, theta_B, zeta_B, v_par/v)``;
-    ``final_states`` holds ``(s, theta_B, zeta_B, v_par, v)`` at the loss,
-    thermalisation or final time; ``lost_times`` and ``thermalized_times`` are
-    ``-1`` for particles without that outcome. Collisionless ``energy_error``
+    ``final_states`` holds ``(s, theta_B, zeta_B, v_par, v)`` at the last interior state before
+    a loss, thermalisation or final time; ``lost_times`` and
+    ``thermalized_times`` are ``-1`` for particles without that outcome. Collisionless ``energy_error``
     is the maximum ``|E/E_initial - 1|`` over accepted steps, per particle.
     With collisions, the reference resets after each collision kick, so the
     metric measures orbital step error separately from collisional changes.
@@ -490,6 +490,21 @@ def sample_births(field, n: int, *, s: float = 0.25, birth: str = "surface",
         return np.concatenate(out)[:n]
 
 
+def _particle_parameters(energy_eV, mass, charge):
+    """Validate optional energy [eV], mass [kg] and signed charge [C]; None keeps the alpha value."""
+    out = []
+    for name, value in (("energy_eV", energy_eV), ("mass", mass), ("charge", charge)):
+        if value is not None:
+            try:
+                value = float(value) if np.ndim(value) == 0 else np.nan
+            except (TypeError, ValueError, OverflowError):
+                value = np.nan
+            if not np.isfinite(value) or (value == 0 if name == "charge" else value <= 0):
+                raise ValueError(f"{name} must be a finite {'nonzero' if name == 'charge' else 'positive'} scalar")
+        out.append(value)
+    return tuple(out)
+
+
 def trace_alphas(
     source: Any,
     *,
@@ -510,11 +525,14 @@ def trace_alphas(
     mboz: int = 32,
     nboz: int = 32,
     mode_tolerance: float = MODE_TOLERANCE,
+    energy_eV: float | None = None,
+    mass: float | None = None,
+    charge: float | None = None,
     progress: Any = None,
     devices: Any = None,
     check_resolution: bool = True,
 ) -> AlphaTracingResult:
-    """Trace fusion alphas through a wout file or in-memory equilibrium.
+    """Trace charged guiding centers; defaults remain fusion-born alphas.
 
     Parameters
     ----------
@@ -543,6 +561,13 @@ def trace_alphas(
         ``"dopri8"`` take fixed steps of ``timestep``.
     compact:
         Enable survivor compaction when supported; ``False`` disables it.
+    energy_eV, mass, charge:
+        Optional kinetic energy [eV], mass [kg] and signed charge [C].
+        Each omitted value retains its fusion-alpha default. This does not
+        change the birth measure or the collisional background; with
+        ``collisions=True`` any particle below 1.5 times the local temperature
+        is counted as thermalised, so low-energy ions (a few keV against
+        ``T0_keV``) thermalise almost at once.
     progress:
         ``None``, or ``progress(done, total)``, called as the horizon advances
         (ESSOS runs it in host-side chunks; the orbits are unchanged).
@@ -555,12 +580,26 @@ def trace_alphas(
     check_resolution:
         Warn when :func:`spectral_truncation` exceeds
         :data:`RESOLUTION_TOLERANCE` (see :func:`truncation_message`).
+
+    ``wall_time_s`` measures orbit integration. Metadata additionally reports
+    setup and total API wall times. ``compile_time_s`` includes JAX compilation
+    during setup; ``trace_compile_time_s`` covers integration only. Compilation
+    telemetry overlaps wall time and must not be added to it.
     """
+    total_start = time.perf_counter()
+    energy_eV, mass, charge = _particle_parameters(energy_eV, mass, charge)
     import jax
 
     require_optional("essos", "alpha-particle tracing")
     from essos import constants
     from essos.boozer import trace_boozer
+
+    mass = constants.ALPHA_PARTICLE_MASS if mass is None else mass
+    charge = constants.ALPHA_PARTICLE_CHARGE if charge is None else charge
+    energy = constants.FUSION_ALPHA_PARTICLE_ENERGY if energy_eV is None else energy_eV * constants.ELEMENTARY_CHARGE
+    speed = float(np.sqrt(2 * energy / mass))
+    if not np.isfinite(speed) or speed <= 0:
+        raise ValueError("energy and mass must produce a finite positive speed")
 
     if method not in METHODS:
         raise ValueError(f"method must be one of {', '.join(METHODS)}")
@@ -595,11 +634,10 @@ def trace_alphas(
     compile_start = _COMPILE_S[0]
     field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance)
     births = sample_births(field, nparticles, s=s, birth=birth, seed=seed, ne0=ne0, T0_keV=T0_keV)
-    mass, charge = constants.ALPHA_PARTICLE_MASS, constants.ALPHA_PARTICLE_CHARGE
-    energy = constants.FUSION_ALPHA_PARTICLE_ENERGY
     start = time.perf_counter()
+    trace_compile_start = _COMPILE_S[0]
     trace = trace_boozer(
-        field, *births.T, speed=float(np.sqrt(2 * energy / mass)), mass=mass,
+        field, *births.T, speed=speed, mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
         n_save=min(int(times_to_trace), 101), seed=int(seed),
         species=background_species(ne0, T0_keV) if collisions else None,
@@ -642,7 +680,11 @@ def trace_alphas(
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
         compile_time_s=_COMPILE_S[0] - compile_start,
+        trace_compile_time_s=_COMPILE_S[0] - trace_compile_start,
+        setup_time_s=start - total_start,
         devices=len(devices), platform=devices[0].platform,
         versions={name: version(name) for name in ("vmex", "essos", "jax", "booz_xform_jax")},
+        particle_mass_kg=float(mass), particle_charge_C=float(charge),
     )
+    result.metadata["total_wall_time_s"] = time.perf_counter() - total_start
     return result

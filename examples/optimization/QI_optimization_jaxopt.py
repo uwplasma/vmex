@@ -33,7 +33,8 @@ MAX_MODE = 3
 
 # JAXopt solver, and the iterations it may spend:
 METHOD = "LM"                     # LBFGS's line search stalls on this problem
-BUDGET = 3
+BUDGET = 2
+# Research budget (over the 5-minute laptop default): BUDGET = 3
 LINE_SEARCH_STEPS = 10
 INITIAL_STEP = 0.0                # LBFGS picks its own step when this is zero
 
@@ -156,10 +157,12 @@ else:
     )
 
 params = jnp.zeros_like(x0)
+print("Evaluating the seed (first call compiles)...", flush=True)
 state = solver.init_state(params)
 monitor = OptimizationMonitor(problem)
 monitor.record(x_from_y(params), cost=float(state.value), optimality=optimality(state), terms={})
 for iteration in range(1, BUDGET + 1):
+    print(f"JAXopt step {iteration} of at most {BUDGET}...", flush=True)
     params, state = solver.update(params, state)
     monitor.record(x_from_y(params), cost=float(state.value), optimality=optimality(state),
                    iteration=iteration, terms={})

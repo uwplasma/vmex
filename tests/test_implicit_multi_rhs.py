@@ -223,13 +223,14 @@ def test_block_response_forward_transpose_and_fd():
         np.testing.assert_allclose(
             directional, finite_difference, rtol=2e-5, atol=2e-8
         )
-def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeypatch):
-    """A column the corrector leaves uncertified is refined through the block factors.
+def test_block_preconditioned_corrector_recovers_a_poor_direct_solve(monkeypatch):
+    """A column the direct block solve misses is certified by the corrector.
 
-    Before refinement, one such column sent the automatic optimizer Jacobian to the
-    reverse lane, which maps a pullback over every residual row (655 s instead of
-    27 s for 17,716 rows and 48 columns). A stalled corrector is simulated here: it
-    returns a perturbed warm start with a non-converged report.
+    The corrector is GMRES on the raw operator, right-preconditioned by the
+    same block factors, so a perturbed direct solve converges back to the
+    reference in one preconditioned iteration instead of sending the optimizer Jacobian
+    to the reverse lane (655 s instead of 27 s for 17,716 rows and 48
+    columns on the stage that motivated block refinement).
     """
     inp, cfg, p0 = _small_solovev_setup()
     state, mask = im.solve_implicit_with_aux(p0, cfg)
@@ -246,21 +247,12 @@ def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeyp
 
     reference, report = respond()
     assert np.all(np.asarray(report.converged))
-
-    def stalled(A, b, cfg, *, x0=None, max_restarts=None, rtol=None):
-        return jax.tree.map(lambda value: 1.001 * value, x0), im.LinearResponseReport(
-            residual_norm=jnp.asarray(1.0e30), tolerance=jnp.asarray(0.0),
-            iterations=jnp.asarray(1, jnp.int32), converged=jnp.asarray(False))
-
-    monkeypatch.setattr(im, "_adjoint_solve", stalled)
-    passes = im._BLOCK_REFINEMENT_PASSES
-    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", 0)
-    _, unrefined = respond()
-    assert not np.any(np.asarray(unrefined.converged))
-    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", passes)
-    refined, report = respond()
+    direct = im._raw_block_solve
+    monkeypatch.setattr(im, "_raw_block_solve", lambda *a, **k: (
+        jax.tree.map(lambda value: 1.001 * value, direct(*a, **k)[0]), None))
+    corrected, report = respond()
     assert np.all(np.asarray(report.converged))
-    assert _relative_difference(refined, reference) < 1e-8
+    assert _relative_difference(corrected, reference) < 1e-7
 
 
 def test_raw_block_probe_chunking_preserves_exact_factors():
@@ -314,6 +306,50 @@ def test_colored_bands_match_the_per_row_build(monkeypatch, deck, ns, ntor):
         np.testing.assert_allclose(
             getattr(colored, name), getattr(per_row, name), rtol=0, atol=1e-12 * scale
         )
+
+
+def _jaxpr_array_sizes(jaxpr):
+    """Element counts of every array an equation of ``jaxpr`` (nested too) produces."""
+    sizes = []
+    for eqn in jaxpr.eqns:
+        sizes += [int(np.prod(v.aval.shape, dtype=np.int64)) for v in eqn.outvars
+                  if hasattr(v.aval, "shape")]
+        for value in eqn.params.values():
+            for inner in value if isinstance(value, (list, tuple)) else [value]:
+                inner = getattr(inner, "jaxpr", inner)
+                if hasattr(inner, "eqns"):
+                    sizes += _jaxpr_array_sizes(inner)
+    return sizes
+
+
+@pytest.mark.parametrize("ns,block", [(24, 3), (13, 4)])
+def test_colored_bands_recover_bands_without_a_quadratic_intermediate(ns, block):
+    """The band extraction stays linear in the radial count.
+
+    The colored build holds ``3 * block * ns * block`` responses.  Selecting
+    each row's color before its surface once built an
+    ``(ns, block, ns, block)`` array -- ``ns / 3`` times the responses, 30 GB
+    per band for the ns = 65 integer 3-D deck -- so no equation of the traced
+    build may exceed a small multiple of the responses, and the bands must
+    still equal the operator's blocks exactly.
+    """
+    rng = np.random.default_rng(ns)
+    lower, diagonal, upper = (jnp.asarray(rng.standard_normal((ns, block, block)))
+                              for _ in range(3))
+    lower, upper = lower.at[0].set(0.0), upper.at[-1].set(0.0)
+
+    def operator(tangent):
+        return im.block_tridiag_matvec(lower, diagonal, upper, tangent)
+
+    identity = lambda value: value  # noqa: E731
+    build = lambda: im._colored_bands(  # noqa: E731
+        operator, identity, identity, identity, ns, block, jnp.float64, 5)
+    got = build()
+    for name, mine, theirs in zip(("lower", "diagonal", "upper"), got,
+                                  (lower, diagonal, upper)):
+        np.testing.assert_allclose(mine, theirs, rtol=0, atol=1e-14, err_msg=name)
+    responses = 3 * block * ns * block
+    assert max(_jaxpr_array_sizes(jax.make_jaxpr(build)().jaxpr)) <= 2 * responses
 
 
 @pytest.mark.full
