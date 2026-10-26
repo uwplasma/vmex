@@ -380,13 +380,14 @@ def _action_spectrum(*, broken=False):
 
 
 @pytest.mark.parametrize("current_sign", [-1., 1.])
-def test_physical_action_qs_limit_and_boozer_line_element(current_sign):
+@pytest.mark.parametrize("points_per_period", [1023, 1024])
+def test_physical_action_qs_limit_and_boozer_line_element(current_sign, points_per_period):
     from scipy.integrate import quad
 
     spectrum = _action_spectrum()
     spectrum.update(G_b=current_sign*spectrum["G_b"], I_b=current_sign*spectrum["I_b"])
     result = physical_pwo_action_from_boozer(
-        **spectrum, levels=[1.5], alphas=[.2, .5, .8], check_roots=True)
+        **spectrum, levels=[1.5], alphas=[.2, .5, .8], check_roots=True, points_per_period=points_per_period)
     # Integrate in the QS angle independently of the root/coordinate mapping.
     # Both legs give 2*|G+iota*I|, and dtheta/dzeta=iota.
     integral = quad(lambda theta: np.sqrt(1-(1.5+.2*np.cos(theta))/1.5)

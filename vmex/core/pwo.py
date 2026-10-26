@@ -323,11 +323,14 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     def field(z, alpha):
         phase = m*alpha+freq*z; co, si = np.cos(phase), np.sin(phase)
         return float(c@co+s@si), float((-m*c)@si+(m*s)@co), float((-freq*c)@si+(freq*s)@co)
-    def root_sets(alpha, ppp, end):
-        z = np.linspace(-4*period, end*period, (end+4)*ppp+1); sample = np.zeros_like(z)
-        for k in range(0, len(c), 64):
-            phase = m[k:k+64, None]*alpha+freq[k:k+64, None]*z
-            sample += (-freq[k:k+64]*c[k:k+64])@np.sin(phase)+(freq[k:k+64]*s[k:k+64])@np.cos(phase)
+    def root_sets(alpha, ppp, end, samples=None):
+        if samples is None:
+            z = np.linspace(-4*period, end*period, (end+4)*ppp+1); sample = np.zeros_like(z)
+            for k in range(0, len(c), 64):
+                phase = m[k:k+64, None]*alpha+freq[k:k+64, None]*z
+                sample += (-freq[k:k+64]*c[k:k+64])@np.sin(phase)+(freq[k:k+64]*s[k:k+64])@np.cos(phase)
+        else:
+            z, sample = samples
         idx = np.flatnonzero(sample[:-1]*sample[1:] < 0)
         critical = np.unique([brentq(lambda x: field(x, alpha)[2], z[j], z[j+1], xtol=1e-13) for j in idx]+z[sample == 0].tolist())
         boundaries = np.unique(np.r_[z[0], critical, z[-1]])
@@ -340,7 +343,7 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
                 raise ValueError("Reflecting level near a stationary-point tangency")
             idx = np.flatnonzero((B[:-1]-level)*(B[1:]-level) < 0)
             result.append(np.unique([brentq(lambda x: field(x, alpha)[0]-level, boundaries[j], boundaries[j+1], xtol=1e-13) for j in idx]+boundaries[B == level].tolist()))
-        return result, critical
+        return result, critical, (z, sample)
     def integral(alpha, left, right, level, derivative):
         mid, width = .5*(left+right), .5*(right-left)
         def fun(t):
@@ -363,7 +366,7 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
             return any(min(right, r["right"]) > max(left, r["left"]) for r in tracked[ip])
         end = 8
         while True:
-            fine, critical = root_sets(alpha, points_per_period, end)
+            fine, critical, samples = root_sets(alpha, points_per_period, end)
             incomplete = any(len(r) and selected(r[-1], np.inf, ip) and field(r[-1], alpha)[2] < 0
                              for ip, r in enumerate(fine))
             if not incomplete:
@@ -374,7 +377,9 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
         critical_census.append(dict(alpha_index=ai, count=len(critical), positions_rad=critical.tolist(),
                                     right_extent_periods=end))
         if check_roots:
-            coarse, oldcritical = root_sets(alpha, points_per_period//2, end)
+            # Nested grids share field evaluations, but isolate their roots independently.
+            coarse_samples = tuple(v[::2] for v in samples) if points_per_period % 2 == 0 else None
+            coarse, oldcritical, _ = root_sets(alpha, points_per_period//2, end, coarse_samples)
             if len(oldcritical) != len(critical) or np.max(abs(oldcritical-critical), initial=0) > 1e-9:
                 raise ValueError(f"Critical-point refinement disagreement at {ai}")
             critical_census[-1]["coarse_fine_maximum_discrepancy_rad"] = float(np.max(abs(oldcritical-critical), initial=0))
