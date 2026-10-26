@@ -5,7 +5,8 @@ VMEX_PWO_SEED=near_circular runs QP conditioning before the fit; the default
 uses the bundled QI seed. VMEX_PWO_FAMILY selects canonical or mapped.
 Target calibration stays fixed; final validation requires local mirror within
 10% of the seed. Scalar and least-squares solvers minimize the same residuals.
-VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step.
+VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step,
+using raw slopes and fixed-reference action normalization.
 VMEX_PWO_REFERENCE names an accepted summary to keep its grids and bounds fixed.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
@@ -125,10 +126,10 @@ def qp_gate_failures(metrics):
 
 
 def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, reference=None, step_lengths=None):
-    """Try up to three decreasing step lengths along one six-variable descent direction."""
+    """Try up to three decreasing step lengths along one seven-variable descent direction."""
     started = time.perf_counter()
-    names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)"]
-    keys = ("raw_Jalpha2", "relative_Jalpha2")
+    names = ["RBC(1,1)", "ZBS(0,1)", "ZBS(-1,1)", "RBC(2,1)", "RBC(0,1)", "ZBS(1,1)", "ZBS(2,1)"]
+    keys = ("raw_Jalpha2", "fixed_relative_Jalpha2")
     count = len(names)
     alpha = [np.sort(np.r_[2*np.pi*(np.arange(8)+.173)/8, 2*np.pi*(np.arange(8)+.673)/8]),
              2*np.pi*(np.arange(8)+.379)/8]
