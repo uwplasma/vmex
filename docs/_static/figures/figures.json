@@ -785,7 +785,9 @@
       "hardware": "x86_64 Linux workstation (36 cores, 8 used), CPU, JAX 0.12.0, DKX 2.12.0",
       "reproducible": "command",
       "bytes_verified": true,
-      "used_in": [],
+      "used_in": [
+        "README.md"
+      ],
       "note": "Runs examples/optimization/QI_optimization_bootstrap_er.py at its default settings (about 15 min on 8 cores, compilation included) and draws, from the objects it leaves behind, <j.B> on the two kinetic surfaces from the VMEX equilibrium, the Redl formula and DKX at the ambipolar E_r, before (the self-consistent Redl seed) and after the optimization; the ambipolar ion-root E_r on those surfaces; and the monitor's objective history. 1100 px WebP, quality 40. Rendered twice on the recording host, in separate trees, with byte-identical output."
     }
   ]
