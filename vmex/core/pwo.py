@@ -277,7 +277,7 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
 
 def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
         nfp, levels, alphas, bmns_b=None, reference=None, points_per_period=1024,
-        check_roots=False, match_critical_census=False):
+        check_roots=False, match_critical_census=False, max_periods=32):
     """Host NumPy/SciPy fixed-alpha physical action and action-slope diagnostic.
 
     Accept one surface, coefficient vectors or rows, scalar iota/G/I, physical
@@ -285,7 +285,8 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     modes include NFP. J=2|G+iota*I| integral sqrt(1-B/level)/B dzeta is in m;
     dJ/dalpha is in m/rad. Components average squared slopes per well, then
     equally across pitches; callers must freeze any normalization/weights.
-    Search [-4,8] field periods, selecting left bounces in [0,1) period.
+    Select left bounces in [0,1) field period. Search from -4 to 8 periods,
+    doubling the right extent up to max_periods to complete long wells.
     Stationary points precede bounce isolation to retain narrow barriers.
     Finite sign-change scans (optionally checked at half resolution) do not
     prove exhaustive root isolation or within-family pwO invariance. This
@@ -296,6 +297,7 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     from scipy.optimize import brentq, linear_sum_assignment
 
     _integer(nfp, 1, "nfp"); _integer(points_per_period, 8, "points_per_period")
+    _integer(max_periods, 8, "max_periods")
     c, m, n = (np.asarray(v, dtype=float) for v in (bmnc_b, xm_b, xn_b))
     if c.ndim == 2 and c.shape[0] == 1:
         c = c[0]
@@ -319,8 +321,8 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     def field(z, alpha):
         phase = m*alpha+freq*z; co, si = np.cos(phase), np.sin(phase)
         return float(c@co+s@si), float((-m*c)@si+(m*s)@co), float((-freq*c)@si+(freq*s)@co)
-    def root_sets(alpha, ppp):
-        z = np.linspace(-4*period, 8*period, 12*ppp+1); sample = np.zeros_like(z)
+    def root_sets(alpha, ppp, end):
+        z = np.linspace(-4*period, end*period, (end+4)*ppp+1); sample = np.zeros_like(z)
         for k in range(0, len(c), 64):
             phase = m[k:k+64, None]*alpha+freq[k:k+64, None]*z
             sample += (-freq[k:k+64]*c[k:k+64])@np.sin(phase)+(freq[k:k+64]*s[k:k+64])@np.cos(phase)
@@ -351,10 +353,19 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
         return out[:2]
     rows, checks, critical_census = [], [], []
     for ai, alpha in enumerate(alphas):
-        fine, critical = root_sets(alpha, points_per_period)
-        critical_census.append(dict(alpha_index=ai, count=len(critical), positions_rad=critical.tolist()))
+        end = 8
+        while True:
+            fine, critical = root_sets(alpha, points_per_period, end)
+            incomplete = any(len(r) and 0 <= r[-1] < period and field(r[-1], alpha)[2] < 0 for r in fine)
+            if not incomplete:
+                break
+            if end == max_periods:
+                raise ValueError(f"Incomplete well at alpha {ai} after {end} field periods")
+            end = min(2*end, max_periods)
+        critical_census.append(dict(alpha_index=ai, count=len(critical), positions_rad=critical.tolist(),
+                                    right_extent_periods=end))
         if check_roots:
-            coarse, oldcritical = root_sets(alpha, points_per_period//2)
+            coarse, oldcritical = root_sets(alpha, points_per_period//2, end)
             if len(oldcritical) != len(critical) or np.max(abs(oldcritical-critical), initial=0) > 1e-9:
                 raise ValueError(f"Critical-point refinement disagreement at {ai}")
             critical_census[-1]["coarse_fine_maximum_discrepancy_rad"] = float(np.max(abs(oldcritical-critical), initial=0))
@@ -366,8 +377,8 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
             for j, left in enumerate(roots):
                 if not 0 <= left < period:
                     continue
-                if j+1 == len(roots):
-                    raise ValueError(f"Selected left endpoint without full right bounce: {(ai, ip)}")
+                if field(left, alpha)[2] > 0:
+                    continue
                 right = roots[j+1]
                 if field(.5*(left+right), alpha)[0] >= level:
                     continue

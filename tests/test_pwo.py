@@ -471,3 +471,17 @@ def test_physical_action_rejects_mismatched_reference(mismatch):
         spectrum["bmns_b"][0, 1] = -.2*np.sin(1.)
     with pytest.raises(ValueError):
         physical_pwo_action_from_boozer(**spectrum, **options, reference=reference, match_critical_census=True)
+
+
+def test_physical_action_extends_long_well_without_truncation():
+    spectrum = _action_spectrum()
+    spectrum["iota_b"] = [.05]
+    options = dict(levels=[1.5], alphas=[np.pi/2-.05], check_roots=True)
+    result = physical_pwo_action_from_boozer(**spectrum, **options)
+    np.testing.assert_allclose([result["rows"][0][k] for k in ("left", "right")],
+                               [1., 1.+np.pi/.05], atol=1e-10)
+    assert result["critical_census"][0]["right_extent_periods"] == 16
+    assert result["counts"] == [[1]]
+    assert abs(result["rows"][0]["dJ"]) < 1e-8
+    with pytest.raises(ValueError, match="Incomplete well"):
+        physical_pwo_action_from_boozer(**spectrum, **options, max_periods=8)
