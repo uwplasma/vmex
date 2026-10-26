@@ -53,6 +53,7 @@ links to the module that documents it.
   :func:`~vmex.core.strong_force.high_order_state_from_wout` /
   :func:`~vmex.core.strong_force.lift_high_order_state` — axis-regular
   continuous reconstruction
+  (:func:`~vmex.core.strong_force.traced_lift` is its traceable form)
 - :func:`~vmex.core.strong_force.evaluate_high_order_fields` →
   :class:`~vmex.core.strong_force.HighOrderFieldSamples`;
   :func:`~vmex.core.strong_force.evaluate_high_order_surface` →

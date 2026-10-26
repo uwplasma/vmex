@@ -1244,8 +1244,9 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             f"{meta['devices']} {meta['platform']} device(s)"
         )
         emit(
-            f" Tracing took {result.wall_time_s:.2f} s "
-            f"(compile {meta['compile_time_s']:.2f} s)"
+            f" Tracing took {meta['total_wall_time_s']:.2f} s including setup "
+            f"(setup {meta['setup_time_s']:.2f} s, orbits {result.wall_time_s:.2f} s; "
+            f"JAX compile {meta['compile_time_s']:.2f} s included)"
         )
         emit(
             f" Loss fraction: {100.0 * result.loss_fraction:.2f}% "

@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 from .bounce import bounce_action_from_boozer
@@ -18,8 +19,43 @@ Array = Any
 __all__ = [
     "ConstructedQIResidual",
     "JInvariantQIResidual",
+    "j_invariant_alpha_derivative_from_boozer",
     "j_invariant_qi_residual_from_boozer",
 ]
+
+
+def j_invariant_alpha_derivative_from_boozer(*, alpha, **bounce_options):
+    """Return the local action derivative at fixed physical pitch.
+
+    ``alpha`` is a scalar or nonempty one-dimensional array of Boozer
+    field-line labels in radians; remaining arguments go to
+    :func:`~vmex.core.bounce.bounce_action_from_boozer`. Its diagnostics gain
+    ``action_alpha_derivative`` with the shape of ``action``. A JVP shifts
+    each independent label, differentiating the sampled field, line element,
+    and turning points without pairing wells between labels.
+
+    Invalid wells contain NaN; exclude them from downstream objectives.
+    Complete interior wells remain usable in a cut trace (``truncated``).
+    Derivatives assume unchanged sampled topology; further parameter AD also
+    assumes unchanged interpolation cells. Crossings and quadrature nodes
+    changing cells can cause jumps, and near-separatrix derivatives can be
+    ill-conditioned beyond the sampled marginal/merged guard. Check spatial,
+    label, trace-length, and pitch convergence separately. This supplies no
+    population weights or scalar transport measure.
+    """
+    alpha = jnp.atleast_1d(jnp.asarray(alpha, dtype=jnp.float64))
+    if alpha.ndim != 1 or alpha.size == 0:
+        raise ValueError("alpha must be scalar or nonempty one-dimensional")
+
+    def actions(labels):
+        out = bounce_action_from_boozer(alpha=labels, **bounce_options)
+        return out["action"], out
+
+    _, derivative, out = jax.jvp(
+        actions, (alpha,), (jnp.ones_like(alpha),), has_aux=True)
+    out["action_alpha_derivative"] = jnp.where(
+        out["usable_mask"], derivative, jnp.nan)
+    return out
 
 
 def j_invariant_qi_residual_from_boozer(
@@ -40,11 +76,17 @@ def j_invariant_qi_residual_from_boozer(
     max_wells: int | None = None,
     quadrature_order: int = 64,
 ) -> dict[str, Array]:
-    """Measure variation of bounce action at shared physical pitch.
+    """Measure pooled complete-well action dispersion at shared physical pitch.
 
-    Complete wells from all field lines and periods are compared on each
-    surface. Edge-cut wells are excluded, while marginal, merged, overflow,
-    or absent pitch blocks return NaN instead of a plausible zero.
+    For each surface and pitch, ``action_mean`` pools every usable well across
+    field lines and periods. ``total`` sums the surface-weighted, mean-normalized
+    variance about that pooled mean over pitches. Distinct well families can
+    therefore give a positive residual even when each family's action is
+    independent of the field-line label; this is not a matched-well measure of
+    omnigenity or radial drift.
+
+    Edge-cut wells are excluded, while marginal, merged, overflow, or absent
+    pitch blocks return NaN instead of a plausible zero.
     """
     bmnc_b = jnp.asarray(bmnc_b, dtype=jnp.float64)
     if bmnc_b.ndim != 2:
@@ -144,7 +186,10 @@ class ConstructedQIResidual(_QIResidualTerm):
 
 
 class JInvariantQIResidual(_QIResidualTerm):
-    """Bounce-action invariance residual at caller-supplied physical pitch."""
+    """Pooled complete-well action dispersion at supplied physical pitch.
+
+    See :func:`j_invariant_qi_residual_from_boozer` for its interpretation.
+    """
 
     name = "j_invariant_qi"
 
