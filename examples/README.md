@@ -47,6 +47,9 @@ that research budget as one commented set of constants next to the default.
   - `free_boundary_essos_coils.py` — free-boundary beta scan directly from
     ESSOS coils (tabulated to a temporary mgrid); `PRES_SCALE` is calibrated per point so the
     *actual* wout `betatotal` hits 0/1/2/3 %.
+  - `free_boundary_relax_constraint.py` — relax a free-boundary equilibrium in
+    the ESSOS coils with the spectral constraint off; prints `|B|` against
+    Biot-Savart before and after.
   - `free_boundary_position_control.py` — a DIII-D-like free-boundary tokamak
     with a mis-set vertical field, solved with and without
     `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
@@ -183,7 +186,7 @@ that research budget as one commented set of constants next to the default.
   states where maximum-J and quasisymmetry conflict near the axis.
 - `optimization/omnigenity_epsilon_gammac_maxj.py` refines the finite-beta QA
   with one seed-normalized scalar objective — quasisymmetry ratio (effective
-  ripple proxy), the derivative-safe `GammaCSmooth` surrogate, and the
+  ripple proxy), the smooth `GammaCSmooth` surrogate, and the
   outer-volume maximum-J residual — then reports hard `Gamma_c` and NEO_JAX
   `epsilon_eff^(3/2)` before and after.
 - `epsilon_effective.py` computes the NEO_JAX effective ripple from a solved
