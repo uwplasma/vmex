@@ -116,9 +116,9 @@ class AlphaTracingResult:
     """Alpha-loss diagnostics from one :func:`trace_alphas` call.
 
     ``initial_conditions`` holds the births ``(s, theta_B, zeta_B, v_par/v)``;
-    ``final_states`` holds ``(s, theta_B, zeta_B, v_par, v)`` at the loss,
-    thermalisation or final time; ``lost_times`` and ``thermalized_times`` are
-    ``-1`` for particles without that outcome. Collisionless ``energy_error``
+    ``final_states`` holds ``(s, theta_B, zeta_B, v_par, v)`` at the last interior state before
+    a loss, thermalisation or final time; ``lost_times`` and
+    ``thermalized_times`` are ``-1`` for particles without that outcome. Collisionless ``energy_error``
     is the maximum ``|E/E_initial - 1|`` over accepted steps, per particle.
     With collisions, the reference resets after each collision kick, so the
     metric measures orbital step error separately from collisional changes.
@@ -580,7 +580,13 @@ def trace_alphas(
     check_resolution:
         Warn when :func:`spectral_truncation` exceeds
         :data:`RESOLUTION_TOLERANCE` (see :func:`truncation_message`).
+
+    ``wall_time_s`` measures orbit integration. Metadata additionally reports
+    setup and total API wall times. ``compile_time_s`` includes JAX compilation
+    during setup; ``trace_compile_time_s`` covers integration only. Compilation
+    telemetry overlaps wall time and must not be added to it.
     """
+    total_start = time.perf_counter()
     energy_eV, mass, charge = _particle_parameters(energy_eV, mass, charge)
     import jax
 
@@ -629,6 +635,7 @@ def trace_alphas(
     field, bx = boozer_field(wout, mboz=mboz, nboz=nboz, mode_tolerance=mode_tolerance)
     births = sample_births(field, nparticles, s=s, birth=birth, seed=seed, ne0=ne0, T0_keV=T0_keV)
     start = time.perf_counter()
+    trace_compile_start = _COMPILE_S[0]
     trace = trace_boozer(
         field, *births.T, speed=speed, mass=mass,
         charge=charge, tmax=float(tmax), timestep=float(timestep),
@@ -673,8 +680,11 @@ def trace_alphas(
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),
         compile_time_s=_COMPILE_S[0] - compile_start,
+        trace_compile_time_s=_COMPILE_S[0] - trace_compile_start,
+        setup_time_s=start - total_start,
         devices=len(devices), platform=devices[0].platform,
         versions={name: version(name) for name in ("vmex", "essos", "jax", "booz_xform_jax")},
         particle_mass_kg=float(mass), particle_charge_C=float(charge),
     )
+    result.metadata["total_wall_time_s"] = time.perf_counter() - total_start
     return result
