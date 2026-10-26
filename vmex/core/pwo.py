@@ -356,8 +356,27 @@ def _pwo_action_kernel(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp, bmns_b=None
                 raise ValueError("Nonpositive interior field or parallel energy")
             value = -Ba*(1-B/(2*level))/(B*B*np.sqrt(par)) if derivative else np.sqrt(par)/B
             return 2*factor*value*width*np.cos(t)
+        extrema = tuple(extrema)
         points = [np.arcsin((z-midpoint)/width) for z in extrema if -width < z-midpoint < width]
         out = quad(fun, -np.pi/2, np.pi/2, points=points, epsabs=1e-9, epsrel=1e-8, limit=150, full_output=1)
+        if len(out) > 3:
+            interior = sorted(z for z in extrema if -width < z-midpoint < width)
+            extra_points = []
+            for previous, z, following in zip([left, *interior], interior, [*interior[1:], right]):
+                phase = m*alpha+freq*z
+                terms = c*np.cos(phase)+s*np.sin(phase)
+                gap = fsum((level, *(-terms)))
+                curvature = -float((freq*freq)@terms)
+                if not np.isfinite(gap) or not np.isfinite(curvature) or gap <= 0 or curvature >= 0:
+                    continue
+                # Resolve a rounded interior cusp at its local quadratic scale;
+                # never change an accepted first call or cross another extremum.
+                length = np.sqrt(2*gap/(-curvature))
+                if previous < z-length < z < z+length < following:
+                    extra_points.extend(np.arcsin((point-midpoint)/width) for point in (z-length, z+length))
+            if extra_points and len(points)+len(extra_points) < 150:
+                out = quad(fun, -np.pi/2, np.pi/2, points=points+extra_points,
+                           epsabs=1e-9, epsrel=1e-8, limit=150, full_output=1)
         if len(out) > 3:
             raise ValueError(out[3])
         return out[:2]

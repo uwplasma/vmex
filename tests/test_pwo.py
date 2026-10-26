@@ -600,6 +600,93 @@ def test_action_kernel_polishes_shallow_bounces_without_clipping_energy(alpha, d
         kernel.integral(alpha, 0., 2*np.pi, kernel.field(0., alpha)[0], False)
 
 
+def _near_reflecting_long_well(depth, *, iota=-.0377, periods=12):
+    """Generated three-mode well with an almost-reflecting interior maximum."""
+    from scipy.optimize import brentq
+
+    alpha = .7
+    kernel = PwOActionFamilies._kernel(dict(bmnc_b=[1., .1, -.08],
+        xm_b=[0, 0, 1], xn_b=[0, -2, 0], iota_b=iota, G_b=1., I_b=0., nfp=2))
+    critical = brentq(lambda z: kernel.field(z, alpha)[2], -.02, .02, xtol=1e-13)
+    level = kernel.field(critical, alpha)[0]+depth
+    left = brentq(lambda z: kernel.field(z, alpha)[0]-level, -np.pi, -np.pi/2, xtol=1e-13)
+    right = brentq(lambda z: kernel.field(z, alpha)[0]-level,
+                   (periods-.5)*np.pi, periods*np.pi, xtol=1e-13)
+    # The slow mode's slope is below .0031, while the fast mode has opposite
+    # signs exceeding .0079 at these bracket endpoints around each extremum.
+    extrema = [brentq(lambda z: kernel.field(z, alpha)[2],
+                     k*np.pi/2-.02, k*np.pi/2+.02, xtol=1e-13) for k in range(-2, 2*periods+1)]
+    return kernel, alpha, left, right, level, [z for z in extrema if left < z < right]
+
+
+@pytest.mark.parametrize("depth", [1e-7, 1e-8, 1e-9])
+def test_near_reflecting_action_matches_independent_extrema_panel_sums(monkeypatch, depth):
+    from math import fsum
+    import scipy.integrate
+
+    kernel, alpha, left, right, level, extrema = _near_reflecting_long_well(depth)
+    actual = [kernel.integral(alpha, left, right, level, derivative, extrema=extrema)
+              for derivative in (False, True)]
+    quad = scipy.integrate.quad
+    def independently_partitioned(fun, lower, upper, *, points, epsabs, epsrel, limit, full_output):
+        edges = [lower, *sorted(points), upper]
+        parts = [quad(fun, a, b, epsabs=epsabs*(b-a)/(upper-lower),
+                      epsrel=epsrel, limit=limit, full_output=full_output)
+                 for a, b in zip(edges, edges[1:])]
+        assert all(len(part) == 3 for part in parts), "Independent panel quadrature did not converge"
+        total, error = (fsum(part[index] for part in parts) for index in (0, 1))
+        # Signed dJ may cancel across panels; enforce the ORIGINAL global
+        # tolerance as well as every local call's unchanged failure flag.
+        assert error <= max(epsabs, epsrel*abs(total))
+        return total, error, {}
+    monkeypatch.setattr(scipy.integrate, "quad", independently_partitioned)
+    # The kernel captures quad at construction, so rebuild after replacement.
+    kernel, alpha, left, right, level, extrema = _near_reflecting_long_well(depth)
+    for derivative, (value, error) in zip((False, True), actual):
+        expected, _ = kernel.integral(alpha, left, right, level, derivative, extrema=extrema)
+        assert error <= max(1e-9, 1e-8*abs(value))
+        assert abs(value-expected) <= max(1e-9, 1e-8*abs(expected))
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_natural_width_retry_preserves_success_and_failure(monkeypatch, accepted):
+    import scipy.integrate
+
+    calls = []
+    def fake_quad(fun, lower, upper, **options):
+        calls.append(options)
+        if accepted:
+            return 1., 0., {}
+        return 0., 0., {}, "roundoff prevents the requested tolerance"
+    monkeypatch.setattr(scipy.integrate, "quad", fake_quad)
+    kernel, alpha, left, right, level, extrema = _near_reflecting_long_well(1e-8)
+    if accepted:
+        assert kernel.integral(alpha, left, right, level, False, extrema=extrema) == (1., 0.)
+        assert len(calls) == 1
+    else:
+        with pytest.raises(ValueError, match="roundoff prevents the requested tolerance"):
+            kernel.integral(alpha, left, right, level, False, extrema=extrema)
+        assert len(calls) == 2
+        assert len(calls[1]["points"]) > len(calls[0]["points"])
+    assert all(call["epsabs"] == 1e-9 and call["epsrel"] == 1e-8 and call["limit"] == 150 for call in calls)
+
+
+def test_natural_width_retry_keeps_original_failure_above_point_budget(monkeypatch):
+    import scipy.integrate
+
+    calls = []
+    def failed_quad(*args, **kwargs):
+        calls.append(kwargs)
+        return 0., 0., {}, "original quadrature failure"
+    monkeypatch.setattr(scipy.integrate, "quad", failed_quad)
+    kernel, alpha, left, right, level, extrema = _near_reflecting_long_well(
+        1e-8, iota=-.009, periods=50)
+    assert 100 <= len(extrema) < 150
+    with pytest.raises(ValueError, match="original quadrature failure"):
+        kernel.integral(alpha, left, right, level, False, extrema=extrema)
+    assert len(calls) == 1
+
+
 def _action_family(level=.81):
     spectrum = dict(bmnc_b=[1., .2, .02], bmns_b=[0., 0., 0.],
                     xm_b=[0, 0, 1], xn_b=[0, 1, 0], iota_b=0., G_b=1., I_b=0., nfp=1)
