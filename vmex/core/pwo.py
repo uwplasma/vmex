@@ -284,7 +284,10 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
     Tesla reflecting levels, and alpha=theta-iota*zeta in radians. Toroidal
     modes include NFP. J=2|G+iota*I| integral sqrt(1-B/level)/B dzeta is in m;
     dJ/dalpha is in m/rad. Components average squared slopes per well, then
-    equally across pitches; callers must freeze any normalization/weights.
+    equally across pitches. ``relative_Jalpha2`` uses each current J;
+    ``fixed_relative_Jalpha2`` uses the initial ``reference_J`` carried through
+    well matches (legacy references initialize it from J). Compare both to
+    distinguish slope reduction from a changing action denominator.
     Select left bounces in [0,1) field period. Search from -4 to 8 periods,
     doubling the right extent up to max_periods to complete long wells.
     Stationary points precede bounce isolation to retain narrow barriers.
@@ -400,7 +403,7 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
                 dJ, de = integral(alpha, left, right, level, True)
                 if not np.isfinite(J+dJ+Je+de) or J <= 0:
                     raise ValueError("Invalid action or derivative")
-                rows.append(dict(alpha_index=ai, pitch_index=ip, left=left, right=right, J=J, dJ=dJ, J_error=Je, dJ_error=de))
+                rows.append(dict(alpha_index=ai, pitch_index=ip, left=left, right=right, J=J, dJ=dJ, J_error=Je, dJ_error=de, reference_J=J))
     counts = [[sum(r["alpha_index"] == ai and r["pitch_index"] == ip for r in rows) for ip in range(len(levels))] for ai in range(len(alphas))]
     matches = []
     if reference is not None:
@@ -421,15 +424,20 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
                 for i, j in zip(*linear_sum_assignment(cost)):
                     if cost[i, j] >= .2:
                         raise ValueError(f"Unmatched candidate well at {(ai, ip)}")
+                    anchor = aa[i].get("reference_J", aa[i]["J"])
+                    if not np.isfinite(anchor) or anchor <= 0:
+                        raise ValueError("Reference actions must be finite and positive")
+                    bb[j]["reference_J"] = float(anchor)
                     matches.append(dict(alpha_index=ai, pitch_index=ip, maximum_relative_endpoint_shift=float(cost[i, j])))
     per_pitch = []
     for ip in range(len(levels)):
         rr = [r for r in rows if r["pitch_index"] == ip]
         if not rr:
             raise ValueError(f"No complete wells at pitch {ip}")
-        per_pitch.append(dict(pitch_index=ip, wells=len(rr), raw_Jalpha2=float(np.mean([r["dJ"]**2 for r in rr])), relative_Jalpha2=float(np.mean([(r["dJ"]/r["J"])**2 for r in rr]))))
+        per_pitch.append(dict(pitch_index=ip, wells=len(rr), raw_Jalpha2=float(np.mean([r["dJ"]**2 for r in rr])), relative_Jalpha2=float(np.mean([(r["dJ"]/r["J"])**2 for r in rr])),
+                              fixed_relative_Jalpha2=float(np.mean([(r["dJ"]/r["reference_J"])**2 for r in rr]))))
     return dict(levels=levels.tolist(), alphas=alphas.tolist(), rows=rows, counts=counts, per_pitch=per_pitch,
-                components={k: float(np.mean([p[k] for p in per_pitch])) for k in ("raw_Jalpha2", "relative_Jalpha2")},
+                components={k: float(np.mean([p[k] for p in per_pitch])) for k in ("raw_Jalpha2", "relative_Jalpha2", "fixed_relative_Jalpha2")},
                 root_checks=checks, critical_census=critical_census, matches=matches, family_invariance_qualified=False)
 
 

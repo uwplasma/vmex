@@ -515,3 +515,32 @@ def test_physical_action_rejects_reference_well_split_or_merge(merge):
     spectrum["bmnc_b"][2] = 0. if merge else .3
     with pytest.raises(ValueError, match="well counts differ"):
         physical_pwo_action_from_boozer(**spectrum, **options, reference=reference)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_physical_action_preserves_reference_normalization(legacy):
+    spectrum = _action_spectrum(broken=True)
+    options = dict(levels=[1.48, 1.55], alphas=[.4])
+    first = physical_pwo_action_from_boozer(**spectrum, **options)
+    anchors = [r["J"] for r in first["rows"]]
+    if legacy:
+        for row in first["rows"]:
+            del row["reference_J"]
+    spectrum["bmnc_b"][0, 0] -= .002
+    second = physical_pwo_action_from_boozer(**spectrum, **options, reference=first)
+    spectrum["bmnc_b"][0, 0] -= .002
+    third = physical_pwo_action_from_boozer(**spectrum, **options, reference=second)
+    assert [r["reference_J"] for r in third["rows"]] == anchors
+    fixed = np.mean([(r["dJ"]/anchor)**2 for r, anchor in zip(third["rows"], anchors)])
+    assert third["components"]["fixed_relative_Jalpha2"] == pytest.approx(fixed)
+    assert not np.isclose(fixed, third["components"]["relative_Jalpha2"], rtol=1e-3)
+
+
+@pytest.mark.parametrize("anchor", [0., -1., np.nan, np.inf])
+def test_physical_action_rejects_invalid_reference_normalization(anchor):
+    spectrum = _action_spectrum(broken=True)
+    options = dict(levels=[1.5], alphas=[.4])
+    reference = physical_pwo_action_from_boozer(**spectrum, **options)
+    reference["rows"][0]["reference_J"] = anchor
+    with pytest.raises(ValueError, match="Reference actions"):
+        physical_pwo_action_from_boozer(**spectrum, **options, reference=reference)
