@@ -288,26 +288,30 @@ def workflows(names, inp_by_kind, n_points, passes, block_factor, device):
 
 @contextlib.contextmanager
 def profiled(calls: dict):
-    """Synchronized call count and wall time of the host-dispatched block executables."""
-    originals = {}
-    for name in ("_refine_block_factor_core", "_refine_block_step_core"):
-        if not hasattr(im, name):
-            continue
-        originals[name] = getattr(im, name)
+    """Synchronized call count and wall time of the host-dispatched executables.
 
-        def wrapper(*a, _f=originals[name], _n=name, **k):
+    The fixed-boundary block factorization and Newton step, and the
+    free-boundary host adjoint with its transpose matvecs.
+    """
+    from vmex.core import freeboundary_implicit as fbi
+    targets = [(im, "_refine_block_factor_core"), (im, "_refine_block_step_core"),
+               (fbi, "_host_adjoint"), (fbi, "_transpose_matvec")]
+    originals = [(module, name, getattr(module, name)) for module, name in targets
+                 if hasattr(module, name)]
+    for module, name, original in originals:
+        def wrapper(*a, _f=original, _n=name, **k):
             t0 = time.perf_counter()
             out = jax.block_until_ready(_f(*a, **k))
             record = calls.setdefault(_n, {"calls": 0, "seconds": 0.0})
             record["calls"] += 1
             record["seconds"] += time.perf_counter() - t0
             return out
-        setattr(im, name, wrapper)
+        setattr(module, name, wrapper)
     try:
         yield
     finally:
-        for name, original in originals.items():
-            setattr(im, name, original)
+        for module, name, original in originals:
+            setattr(module, name, original)
 
 
 def run_passes(fn, x0, steps, passes, cfg, context):
