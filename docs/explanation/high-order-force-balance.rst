@@ -25,6 +25,14 @@ state undoes VMEX's ``m=1`` constrained variables and Fourier normalization,
 keeps the magnetic axis and the fixed boundary exact, and removes the lambda
 ``(0,0)`` gauge coefficient structurally.
 
+:func:`~vmex.core.strong_force.traced_lift` ``(runtime)`` returns the same lift
+as a JAX map ``lift(state, runtime)``.  At fixed grid, basis, mode table and
+endpoint rules the constrained fit is linear, so it is traceable and
+differentiable in the state and the live boundary, flux and profile arrays and
+can sit inside a differentiated objective, for example a force-balance
+certificate.  Geometry matches the host lift to round-off; profiles are fitted
+to their exact half-mesh samples.
+
 Independent certificate
 -----------------------
 

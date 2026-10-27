@@ -112,6 +112,7 @@ _harden_compilation_cache()
 import jax.numpy as jnp
 from jax import lax
 
+from .aot import aot_lane, compile_lane, release as aot_release
 from .device import (
     AUTO,
     GPU_MAX_SPECTRAL_MODES,
@@ -1596,6 +1597,18 @@ def reguess_initial_axis(
 # -- Iteration body (evolve.f + TimeStepControl + the eqsolve.f checks) ----------------------------------------------
 
 
+@functools.partial(jax.jit, static_argnames="use_fft")
+def _eval_pass(args: tuple, rt: SolverRuntime, *, use_fft: bool) -> _EvalResult:
+    """One funct3d pass as a module-level ``jit``, so the body traces it once.
+
+    ``_make_body`` needs the pass's output structure (``jax.eval_shape``) and
+    then the pass itself inside the scan; with a per-call closure both traced
+    the whole force chain.  Keyed on avals, the second use hits the trace cache.
+    """
+    return _evaluate(args[0], args[1], args[2], args[3], args[4], rt, args[5],
+                     use_fft=use_fft)
+
+
 def _make_body(
     rt: SolverRuntime,
     *,
@@ -1743,8 +1756,7 @@ def _make_body(
             # values the old e2 call passed.  Runtime op sequence per trip is
             # unchanged.
             def eval_lane(args):
-                return _evaluate(args[0], args[1], args[2], args[3], args[4],
-                                 rt, args[5], use_fft=use_fft)
+                return _eval_pass(args, rt, use_fft=use_fft)
 
             args0 = (state_e1, carry.cache, it, carry.iter1, carry.fsqz,
                      carry.fsqr + carry.fsqz)
@@ -2147,7 +2159,7 @@ def _while_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
 
-@functools.partial(jax.jit, donate_argnums=(0,))
+@aot_lane(donate_argnums=(0,))
 def _block_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     """One ``BLOCK_SIZE``-iteration ``lax.scan`` block (CLI lane), structural.
 
@@ -2169,7 +2181,7 @@ def _while_lane_fft(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
 
-@functools.partial(jax.jit, donate_argnums=(0,))
+@aot_lane(donate_argnums=(0,))
 def _block_lane_fft(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     """Donated CLI block using separable Fourier synthesis."""
     body = _make_body(rt, use_fft=True)
@@ -2234,7 +2246,7 @@ def _prefetch_block_lane(
     key = _lane_signature(lane_name, carry, rt)
     if key in _LANE_EXECUTABLES or key in _USED_LANE_KEYS:
         return True
-    _LANE_EXECUTABLES[key] = lane.lower(carry, rt).compile()
+    _LANE_EXECUTABLES[key] = compile_lane(lane, carry, rt)
     return True
 
 
@@ -2246,6 +2258,7 @@ def _release_used_lane_executables() -> None:
     jit caches, while a just-prefetched — not yet used — executable for the
     NEXT rung survives the release.
     """
+    aot_release()
     for key in list(_LANE_EXECUTABLES):
         if key in _USED_LANE_KEYS:
             del _LANE_EXECUTABLES[key]
@@ -2279,6 +2292,12 @@ def _resolve_use_fft(
     return backend != "cpu" or platform.machine().lower() in ("arm64", "aarch64")
 
 
+def _on_gpu(tree: Any) -> bool:
+    """True when the first array leaf of ``tree`` lives on a non-CPU device."""
+    leaf = jax.tree_util.tree_leaves(tree)[0]
+    return next(iter(leaf.devices())).platform != "cpu"
+
+
 def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
               ijacob: int, verbose: bool, emit,
               time_step0: float, nstep: int,
@@ -2304,11 +2323,18 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         residuals=initial_residuals,
     )
 
+    # Silent GPU solves have no per-block host work (rows, stop hook): take
+    # the single-sync while lane (identical iterates; each host sync costs
+    # 20-25% on GPU).  CPU keeps the cheaper-to-compile block lane.
+    if (mode == "cli" and not verbose and STOP_HOOK.get() is None
+            and _on_gpu(state0)):
+        mode = "jit"
     if mode == "jit":
         # The while lanes donate the carry; _initial_carry aliases some leaves
         # (xstore=state, shared cache zeros), so copy to distinct buffers —
         # same rationale as the CLI-lane copy below, values bit-for-bit
         # unchanged.
+        carry, rt = commit_to_single_device((carry, rt))
         carry = _distinct_buffers(carry)
         return (_while_lane_fft if use_fft else _while_lane)(carry, rt)
 
