@@ -56,8 +56,8 @@ dependencies = [
   # (batching.NotMapped). The same holds for every uwplasma floor below: each
   # is the first release that declares floors for what it imports, so
   # installing into an environment with older packages upgrades them
-  # (nightly.yml "stale" lane). 0.33.0 is the floor because the raw-force block
-  # factors use block_thomas_factor(normalized=True), first released there.
+  # (nightly.yml "stale" lane). 0.34.0 is the floor: block cyclic reduction (0.33.0 added the
+  # normalized Thomas factors the raw-force block solver uses).
   "solvax>=0.33.0",
 ]
 
