@@ -218,6 +218,9 @@ downstream kinetic codes.
 .. automodule:: vmex.core.boozer_tables
    :members:
 
+.. automodule:: vmex.core.spline_solve
+   :members:
+
 Straight-axis mirrors
 ---------------------
 
