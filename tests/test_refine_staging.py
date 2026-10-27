@@ -245,7 +245,8 @@ def test_block_finish_reaches_the_krylov_anchor_with_one_factorization(monkeypat
         return float(im._tree_norm(F(P(value), p0)))
 
     def counted(**patch):
-        keys = ("refinement_krylov_iterations", "refinement_factorizations")
+        keys = ("refinement_krylov_iterations", "refinement_factorizations",
+                "block_factorizations")
         stats = im._SOLVE_STATS.setdefault(cfg, dict.fromkeys(im._COUNTERS, 0))
         before = {key: stats[key] for key in keys}
         with monkeypatch.context() as m:
@@ -265,6 +266,8 @@ def test_block_finish_reaches_the_krylov_anchor_with_one_factorization(monkeypat
     assert certificate(block) <= cfg.refine_tol
     assert krylov_work["refinement_factorizations"] == 0
     assert block_work["refinement_factorizations"] == 1
+    assert block_work["block_factorizations"] == 1  # every host factorization is counted
+    assert krylov_work["block_factorizations"] == 0
     assert block_work["refinement_krylov_iterations"] < krylov_work["refinement_krylov_iterations"]
     moved = im._tree_norm(jax.tree.map(jnp.subtract, block, krylov))
     assert float(moved) <= 1.0e-8 * float(im._tree_norm(krylov))

@@ -35,6 +35,7 @@ report; run stages and workflows in separate processes for clean cold passes.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import inspect
 import json
 import os
@@ -109,10 +110,13 @@ def nbytes(tree) -> int:
     return int(sum(leaf.nbytes for leaf in jax.tree.leaves(tree) if hasattr(leaf, "nbytes")))
 
 
-def peaks(device=None) -> dict:
+ACTIVE_DEVICE = []  # the --device placement, for the device peak
+
+
+def peaks() -> dict:
     """Process peak RSS and, where reported, the peak device allocation."""
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    stats = (device or jax.devices()[0]).memory_stats() or {}
+    stats = (ACTIVE_DEVICE or jax.devices())[0].memory_stats() or {}
     return {"process_peak_rss_bytes": int(rss) * (1 if sys.platform == "darwin" else 1024),
             "device_peak_bytes": stats.get("peak_bytes_in_use")}
 
@@ -176,10 +180,12 @@ def stage_timings(inp, repeats, warmups, save_bands, block_factor, device):
     # solve costs minutes of compilation) and moved to the stage device
     cpu = jax.devices("cpu")[0]
     cpu_cfg = im.make_config(inp, device=cpu, **kwargs)
-    state, mask = im.solve_implicit_with_aux(im.params_from_input(inp, device=cpu), cpu_cfg)
+    with jax.default_device(cpu):
+        state, mask = im.solve_implicit_with_aux(im.params_from_input(inp, device=cpu), cpu_cfg)
     place = (lambda t: jax.device_put(t, device)) if device is not None else (lambda t: t)
     params = im.params_from_input(inp, device=device)
     state, mask = place(state), place(mask)
+    im._template_runtime(cfg)  # host-built; must not be first built while tracing
     fields = im._active_state_fields(cfg)
     probe = int(np.ceil(np.sqrt(len(fields) * int(mask.R_cos.shape[1]))))
     factor = (lambda *b: im._block_factor(*b, cfg)) if SELECTABLE else (
@@ -280,18 +286,44 @@ def workflows(names, inp_by_kind, n_points, passes, block_factor, device):
     return out
 
 
+@contextlib.contextmanager
+def profiled(calls: dict):
+    """Synchronized call count and wall time of the host-dispatched block executables."""
+    originals = {}
+    for name in ("_refine_block_factor_core", "_refine_block_step_core"):
+        if not hasattr(im, name):
+            continue
+        originals[name] = getattr(im, name)
+
+        def wrapper(*a, _f=originals[name], _n=name, **k):
+            t0 = time.perf_counter()
+            out = jax.block_until_ready(_f(*a, **k))
+            record = calls.setdefault(_n, {"calls": 0, "seconds": 0.0})
+            record["calls"] += 1
+            record["seconds"] += time.perf_counter() - t0
+            return out
+        setattr(im, name, wrapper)
+    try:
+        yield
+    finally:
+        for name, original in originals.items():
+            setattr(im, name, original)
+
+
 def run_passes(fn, x0, steps, passes, cfg, context):
     """Cold pass then ``passes`` warm passes; counter deltas and results per pass."""
     records, value = [], None
     for index in range(passes + 1):
         before = dict(im._SOLVE_STATS.get(cfg, {}))
-        times = []
-        for step in steps:
-            t0 = time.perf_counter()
-            value = jax.block_until_ready(fn(x0 + step))
-            times.append(time.perf_counter() - t0)
+        times, calls = [], {}
+        with profiled(calls):
+            for step in steps:
+                t0 = time.perf_counter()
+                value = jax.block_until_ready(fn(x0 + step))
+                times.append(time.perf_counter() - t0)
         after = im._SOLVE_STATS.get(cfg, {})
         records.append({"pass": "cold" if index == 0 else "warm", "seconds": times,
+                        "host_executables": calls,
                         "counters": {k: None if v is None else float(v) - float(before.get(k) or 0)
                                      for k, v in after.items()}})
     flat = np.concatenate([np.ravel(np.asarray(leaf)) for leaf in jax.tree.leaves(value)])
@@ -342,7 +374,8 @@ def metadata(cache_dir, cache_files_before):
             return None
     return {"vmex_sha": sha(REPO), "solvax_version": solvax.__version__,
             "vmex_version": vmex.__version__, "jax_version": jax.__version__,
-            "default_device": str(jax.devices()[0]), "x64": bool(jax.config.read("jax_enable_x64")),
+            "default_device": str(jax.devices()[0]), "devices": [str(d) for d in jax.devices()],
+            "x64": bool(jax.config.read("jax_enable_x64")),
             "platform": platform.platform(), "cpu_count": os.cpu_count(),
             "load_average_start": list(os.getloadavg()), "argv": sys.argv,
             "xla_flags": os.environ.get("XLA_FLAGS", ""), "cache_dir_files_before": cache_files_before,
@@ -376,6 +409,7 @@ def main() -> int:
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
     jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
     device = None if args.device == "default" else jax.devices(args.device)[0]
+    ACTIVE_DEVICE.extend([device] if device is not None else [])
     names = [] if args.workflows == "none" else args.workflows.split(",")
     inputs = {k: problem_input(k, args.smoke) for k in {n.split("_")[0] for n in names} & {"qa", "qi"}}
     result = {"benchmark": "vmex_block_solver", **metadata(cache, before),
