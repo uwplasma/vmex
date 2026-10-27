@@ -172,8 +172,14 @@ def backward_error(operator, solution, rhs, transpose):
 def stage_timings(inp, repeats, warmups, save_bands, block_factor, device):
     kwargs = dict(block_factor=block_factor) if SELECTABLE else {}
     cfg = im.make_config(inp, device=device, **kwargs)
+    # the seed root is solved on the CPU (physics is device independent; a GPU
+    # solve costs minutes of compilation) and moved to the stage device
+    cpu = jax.devices("cpu")[0]
+    cpu_cfg = im.make_config(inp, device=cpu, **kwargs)
+    state, mask = im.solve_implicit_with_aux(im.params_from_input(inp, device=cpu), cpu_cfg)
+    place = (lambda t: jax.device_put(t, device)) if device is not None else (lambda t: t)
     params = im.params_from_input(inp, device=device)
-    state, mask = im.solve_implicit_with_aux(params, cfg)
+    state, mask = place(state), place(mask)
     fields = im._active_state_fields(cfg)
     probe = int(np.ceil(np.sqrt(len(fields) * int(mask.R_cos.shape[1]))))
     factor = (lambda *b: im._block_factor(*b, cfg)) if SELECTABLE else (
