@@ -66,6 +66,8 @@ try:  # the block-factor backends exist from the factor-reuse/cyclic branches
 except ImportError:
     resolve_block_factor = None
 SELECTABLE = "block_factor" in inspect.signature(im.make_config).parameters
+NORMALIZED = "normalized=True" in inspect.getsource(im)  # factor-reuse branch onward
+THOMAS_VARIANT = "thomas_normalized" if NORMALIZED else "thomas_stored_band"
 QA_ASPECT, QI_OPTIONS = 6.0, dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 
 
@@ -174,8 +176,9 @@ def stage_timings(inp, repeats, warmups, save_bands, block_factor, device):
     state, mask = im.solve_implicit_with_aux(params, cfg)
     fields = im._active_state_fields(cfg)
     probe = int(np.ceil(np.sqrt(len(fields) * int(mask.R_cos.shape[1]))))
-    factor = (lambda *b: im._block_factor(*b, cfg)) if SELECTABLE else solvax.block_thomas_factor
-    resolved = resolve_block_factor(block_factor, device) if SELECTABLE else "thomas_stored_band"
+    factor = (lambda *b: im._block_factor(*b, cfg)) if SELECTABLE else (
+        lambda *b: solvax.block_thomas_factor(*b, normalized=NORMALIZED))
+    resolved = resolve_block_factor(block_factor, device) if SELECTABLE else THOMAS_VARIANT
 
     def system(z, p, frozen, dof_mask, with_factors=False):
         return im._raw_block_system(p, cfg, frozen, dof_mask, fields, probe, z_star=z,
@@ -267,7 +270,7 @@ def workflows(names, inp_by_kind, n_points, passes, block_factor, device):
                 "n_dofs": int(prob.x0.size), "config_device": str(cfg.device),
                 "block_factor_requested": block_factor,
                 "block_factor_resolved": resolve_block_factor(block_factor, cfg.device)
-                if SELECTABLE else "thomas_stored_band"})
+                if SELECTABLE else THOMAS_VARIANT})
     return out
 
 
