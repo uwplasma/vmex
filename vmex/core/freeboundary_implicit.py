@@ -1664,6 +1664,7 @@ def _host_adjoint(
         k=min(cfg.adjoint_gcrot_k, shape[0]),
         maxiter=cfg.adjoint_maxiter, x0=x0_flat,
     )
+    im._count(cfg, adjoints=1, adjoint_krylov_iterations=calls)
     tolerance = float(im._adjoint_acceptance(
         cfg, np.linalg.norm(np.asarray(rhs_flat))))
     if certify:
