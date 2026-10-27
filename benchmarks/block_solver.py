@@ -356,15 +356,26 @@ def free_boundary_workflow(n_points, passes, block_factor):
         field_from_parameters=lambda p: BiotSavart(coils.with_dofs(base + scales * p)),
         **(dict(block_factor=block_factor) if SELECTABLE else {}))
     context = im.runtime_from_params(params, config.implicit)
-    fn = jax.value_and_grad(lambda p: im.aspect_ratio(
-        solve_free_boundary_implicit(params, p, config), context))
+    forward = lambda p: im.aspect_ratio(  # noqa: E731
+        solve_free_boundary_implicit(params, p, config), context)
+    fn = jax.value_and_grad(forward)
     rng = np.random.default_rng(1)
     steps = [np.zeros(base.size)] + [0.01 * rng.standard_normal(base.size)
                                      for _ in range(n_points - 1)]
-    return run_passes(fn, jnp.zeros(base.size), steps, passes, config.implicit,
-                      {"n_dofs": int(base.size), "config_device": str(config.implicit.device),
-                       "block_factor_resolved": resolve_block_factor(block_factor, config.implicit.device)
-                       if SELECTABLE else THOMAS_VARIANT})
+    resolved = (resolve_block_factor(block_factor, config.implicit.device)
+                if SELECTABLE else THOMAS_VARIANT)
+    result = run_passes(fn, jnp.zeros(base.size), steps, passes, config.implicit,
+                        {"n_dofs": int(base.size), "config_device": str(config.implicit.device),
+                         "block_factor_resolved": resolved})
+    # the value alone (root plus anchor, no adjoint), warm, at the same points
+    jax.block_until_ready(forward(jnp.asarray(steps[0])))  # compile
+    forward_times = []
+    for step in steps * passes:
+        t0 = time.perf_counter()
+        jax.block_until_ready(forward(jnp.asarray(step)))
+        forward_times.append(time.perf_counter() - t0)
+    result["forward_only_seconds"] = forward_times
+    return result
 
 
 def metadata(cache_dir, cache_files_before):
