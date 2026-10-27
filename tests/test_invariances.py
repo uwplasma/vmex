@@ -8,6 +8,9 @@ with the untransformed run to solver round-off:
 - ``nfp=5`` vs ``nfp=1`` for an axisymmetric deck run through the 3-D path;
 - uniform length rescaling ``R, Z -> L R, L Z`` with ``phiedge -> L**2 phiedge``
   and ``curtor -> L curtor`` (B unchanged): ``V ~ L**3``, ``wb ~ L**3``;
+- field reversal ``phiedge, curtor -> -phiedge, -curtor`` (``signgs`` unchanged),
+  alone and combined with the mirror image, on the deck's nonzero current profile;
+- free-boundary coil-current rescaling (see the last test);
 - coarse-to-fine continuation vs the direct solve at the same final ``ns``.
 """
 
@@ -94,3 +97,35 @@ def test_continuation_matches_direct_solve(base):
     assert got["wb"] == pytest.approx(ref["wb"], rel=1e-9)
     assert got["vol"] == pytest.approx(ref["vol"], rel=1e-9)
     np.testing.assert_allclose(got["iota"], ref["iota"], atol=1e-5)
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+def test_field_reversal_with_current_is_exact(base, mirror):
+    """B -> -B (phiedge, curtor flipped) leaves wb, volume, iota and iterations."""
+    inp, ref = base
+    rev = replace(inp, phiedge=-inp.phiedge, curtor=-inp.curtor)
+    if mirror:
+        rev = replace(rev, zbs=-inp.zbs, zaxis_s=-inp.zaxis_s)
+    _same_shape(_solve(rev), ref)
+
+
+def test_free_boundary_coil_current_rescaling():
+    """EXTCUR, PHIEDGE, CURTOR -> c x and PRES_SCALE -> c^2 x: B -> c B (c = 2, exact).
+
+    The normalised equilibrium (boundary shape, iota, iteration count) is
+    unchanged because every force residual is normalised by the field energy;
+    ``wb`` scales as c^2.  Fixed iteration budget on the LASYM-small deck.
+    """
+    inp = vj.VmecInput.from_file(DATA / "input.cth_like_free_bdy_lasym_small")
+    inp = replace(inp, niter_array=[100])
+    c = 2.0
+    big = replace(inp, extcur=c * inp.extcur, phiedge=c * inp.phiedge,
+                  curtor=c * inp.curtor, pres_scale=c**2 * inp.pres_scale)
+    run = lambda i: vj.solve_free_boundary_multigrid(  # noqa: E731
+        i, mgrid_path=DATA / i.mgrid_file, verbose=False,
+        raise_on_max_iterations=False)
+    a, b = run(inp), run(big)
+    assert a.iterations == b.iterations
+    np.testing.assert_allclose(b.rmnc[-1], a.rmnc[-1], rtol=1e-8, atol=1e-10)
+    np.testing.assert_allclose(b.zmns[-1], a.zmns[-1], rtol=1e-8, atol=1e-10)
+    assert b.wb == pytest.approx(c**2 * a.wb, rel=1e-8)
