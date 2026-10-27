@@ -1366,7 +1366,10 @@ _PERTURB_SEED: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
 # ``adjoint_certificate_fallbacks`` counts the adjoints that a cheaper
 # operator failed to certify and that were finished on the exact transpose,
 # so a lane silently sliding back to the general Krylov cost is visible in
-# the record rather than only in the wall time.  These counters key on the
+# the record rather than only in the wall time.  ``block_factorizations`` counts
+# the raw block-band factorizations performed on the host, ``block_bands_reused``
+# the Jacobian requests served by the previous bands and ``block_bands_rejected``
+# those that had bands to reuse but moved past the tolerance or the parameters.  These counters key on the
 # solve, not on the adjoint lane: :func:`_canonical_config` deliberately
 # shares one config per content, and the free-boundary adjoint solver is a
 # property of the caller's configuration rather than of the solve, so a
@@ -1389,7 +1392,8 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "adjoint_krylov_iterations", "adjoint_seconds",
              "adjoint_certificate_fallbacks", "anchors", "anchor_steps",
              "anchor_krylov_iterations", "anchor_factorizations",
-             "anchor_seconds", "abandoned_rungs")
+             "anchor_seconds", "abandoned_rungs", "block_factorizations",
+             "block_bands_reused", "block_bands_rejected")
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []
@@ -1804,7 +1808,10 @@ def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
     hit = _LAST_BANDS.get(cfg)
     if z is None and hit is not None and hit[0] == key and (
             np.linalg.norm(zp - hit[1]) <= _BANDS_REUSE_TOL * np.linalg.norm(zp)):
+        _count(cfg, block_bands_reused=1)
         return hit[2]
+    _count(cfg, block_factorizations=1,
+           block_bands_rejected=int(z is None and hit is not None))
     bands = _refine_block_factor_core(*arguments, cfg)
     _LAST_BANDS[cfg] = (key, zp, bands)
     return bands
