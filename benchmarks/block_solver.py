@@ -261,7 +261,7 @@ def workflows(names, inp_by_kind, n_points, passes, block_factor, device):
     kwargs = dict(block_factor=block_factor) if SELECTABLE else {}
     for name in names:
         if name == "fb_grad":
-            out[name] = free_boundary_workflow(n_points, passes)
+            out[name] = free_boundary_workflow(n_points, passes, block_factor)
             continue
         kind, mode = name.split("_")
         inp, terms = inp_by_kind[kind]
@@ -331,7 +331,7 @@ def run_passes(fn, x0, steps, passes, cfg, context):
             "result_device": platform_of(value), **peaks()}
 
 
-def free_boundary_workflow(n_points, passes):
+def free_boundary_workflow(n_points, passes, block_factor):
     """``value_and_grad`` of the aspect ratio through the coupled free-boundary root."""
     from essos.coils import Coils
     from essos.fields import BiotSavart
@@ -353,7 +353,8 @@ def free_boundary_workflow(n_points, passes):
     params = im.params_from_input(inp)
     config = make_free_boundary_config(
         inp, BiotSavart(coils), ns=ns, ftol=ftol, max_iterations=niter, adjoint_tol=1e-9,
-        field_from_parameters=lambda p: BiotSavart(coils.with_dofs(base + scales * p)))
+        field_from_parameters=lambda p: BiotSavart(coils.with_dofs(base + scales * p)),
+        **(dict(block_factor=block_factor) if SELECTABLE else {}))
     context = im.runtime_from_params(params, config.implicit)
     fn = jax.value_and_grad(lambda p: im.aspect_ratio(
         solve_free_boundary_implicit(params, p, config), context))
@@ -362,7 +363,8 @@ def free_boundary_workflow(n_points, passes):
                                      for _ in range(n_points - 1)]
     return run_passes(fn, jnp.zeros(base.size), steps, passes, config.implicit,
                       {"n_dofs": int(base.size), "config_device": str(config.implicit.device),
-                       "block_factor_resolved": "not_applicable_coupled_free_boundary_root"})
+                       "block_factor_resolved": resolve_block_factor(block_factor, config.implicit.device)
+                       if SELECTABLE else THOMAS_VARIANT})
 
 
 def metadata(cache_dir, cache_files_before):
