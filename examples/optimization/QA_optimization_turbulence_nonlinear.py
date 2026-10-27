@@ -143,7 +143,8 @@ inp = replace(inp, rbc=rbc, zbs=zbs)
 ### Set up the gyrokinetic model ##############################################
 
 TUBES = [(s, alpha) for s in TUBE_S for alpha in TUBE_ALPHAS]
-grid = gkx.build_spectral_grid(gkx.GridConfig(Nx=NX, Ny=NY, Nz=NZ, Lx=LX, Ly=LY))
+grid = gkx.build_spectral_grid(gkx.GridConfig(Nx=NX, Ny=NY, Nz=NZ, Lx=LX, Ly=LY,
+                                                  ky_layout="full"))  # the state below holds both signs of ky
 terms = gkx.TermConfig(collisions=1.0, hypercollisions=1.0, hyperdiffusion=1.0,
                        end_damping=1.0, nonlinear=1.0, apar=0.0, bpar=0.0)
 
@@ -161,7 +162,7 @@ def gk_parameters(geometry):
         p_hyper_m=float(min(20, max(N_HERMITE // 2, 1))),
         hypercollisions_const=0.0, hypercollisions_kz=1.0,
         D_hyper=0.05, p_hyper_kperp=2.0,
-        damp_ends_amp=0.1, damp_ends_widthfrac=0.125)
+        damp_ends_widthfrac=0.125)
 
 
 def noise_seed():

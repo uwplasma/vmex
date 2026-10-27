@@ -20,6 +20,7 @@ links to the module that documents it.
 - :func:`~vmex.core.multigrid.solve_file` — run a deck the way the CLI does
   (directives honored, ``wout_<case>.nc`` written)
 - :func:`~vmex.core.freeboundary.solve_free_boundary` — NESTOR free boundary
+- :func:`~vmex.core.freeboundary.relax_free_boundary_constraint` — remove the constraint bias of a free-boundary LCFS
 - :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
 - :func:`~vmex.core.freeboundary.solve_phiedge` — PHIEDGE whose free-boundary
   LCFS meets a target outboard radius or volume
@@ -52,6 +53,7 @@ links to the module that documents it.
   :func:`~vmex.core.strong_force.high_order_state_from_wout` /
   :func:`~vmex.core.strong_force.lift_high_order_state` — axis-regular
   continuous reconstruction
+  (:func:`~vmex.core.strong_force.traced_lift` is its traceable form)
 - :func:`~vmex.core.strong_force.evaluate_high_order_fields` →
   :class:`~vmex.core.strong_force.HighOrderFieldSamples`;
   :func:`~vmex.core.strong_force.evaluate_high_order_surface` →
@@ -226,6 +228,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "solve_multigrid": (".core.multigrid", "solve_multigrid"),
     "solve_free_boundary_multigrid": (
         ".core.multigrid", "solve_free_boundary_multigrid"),
+    "relax_free_boundary_constraint": (".core.freeboundary", "relax_free_boundary_constraint"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     "solve_phiedge": (".core.freeboundary", "solve_phiedge"),
     "phiedge_root": (".core.freeboundary_implicit", "phiedge_root"),

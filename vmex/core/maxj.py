@@ -367,7 +367,7 @@ def qi_and_maximum_j_from_boozer(
     qi_options: dict[str, Any] | None = None,
     maxj_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate the J-invariance and maximum-J residuals from one Boozer pass.
+    """Evaluate pooled action dispersion and maximum-J from one Boozer pass.
 
     :class:`~vmex.core.qi.JInvariantQIResidual` and :class:`MaximumJResidual`
     each run their own :func:`~vmex.core.omnigenity.boozer_spectrum_state`
@@ -399,7 +399,7 @@ def qi_and_maximum_j_from_boozer(
 
 
 class JInvariantQIAndMaximumJResidual(_ResidualTerm):
-    """Joint J-invariance and maximum-J rows from one Boozer transform."""
+    """Joint pooled action dispersion and maximum-J rows from one Boozer transform."""
 
     name = "j_invariant_qi_and_maximum_j"
 

@@ -716,8 +716,6 @@ def _free_boundary_plan(args, inp, input_path: Path, *, emit):
       ``external_field`` from :func:`_coils_mgrid_field` (``nextcur = 0``: the
       coil currents live in the coils file, not in EXTCUR).
     """
-    import numpy as np
-
     coils_arg = getattr(args, "coils", None)
     if not bool(inp.lfreeb):
         if coils_arg:
@@ -759,13 +757,10 @@ def _free_boundary_plan(args, inp, input_path: Path, *, emit):
         )
         return None
 
-    from .mgrid import read_mgrid
+    from .mgrid import deck_extcur, read_mgrid
 
     data = read_mgrid(mgrid)
-    extcur = np.zeros((int(data.nextcur),), dtype=float)
-    given = np.atleast_1d(np.asarray(
-        inp.extcur if inp.extcur is not None else [], dtype=float)).ravel()
-    extcur[: min(given.size, extcur.size)] = given[: extcur.size]
+    extcur = deck_extcur(inp.extcur, data)
     return _FreeBoundaryPlan(
         solver_kwargs={"mgrid_path": mgrid},
         nextcur=int(data.nextcur), extcur=extcur,
@@ -1249,8 +1244,9 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
             f"{meta['devices']} {meta['platform']} device(s)"
         )
         emit(
-            f" Tracing took {result.wall_time_s:.2f} s "
-            f"(compile {meta['compile_time_s']:.2f} s)"
+            f" Tracing took {meta['total_wall_time_s']:.2f} s including setup "
+            f"(setup {meta['setup_time_s']:.2f} s, orbits {result.wall_time_s:.2f} s; "
+            f"JAX compile {meta['compile_time_s']:.2f} s included)"
         )
         emit(
             f" Loss fraction: {100.0 * result.loss_fraction:.2f}% "
