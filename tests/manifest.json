@@ -16,6 +16,7 @@
     ["tests/mirror/test_sample_closed_polyline.py", "mirror", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-mirror-spline", "full-mirror-spline"]],
     ["tests/mirror/test_splines.py", "mirror", "integration", "slow", "cpu-gpu", "none", "analytic", ["pr-mirror-spline", "full-mirror-spline"]],
     ["tests/mirror/test_turbulence.py", "mirror", "ad", "medium", "cpu-gpu", "none", "fd", ["pr-mirror-field", "full-mirror-field"]],
+    ["tests/test_aot_lane.py", "infrastructure", "unit", "fast", "cpu", "none", "none", ["pr-parity-c1", "pr-fast", "full-core-a-c"]],
     ["tests/test_bounce.py", "diagnostics", "ad", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c2", "full-core-a-c"]],
     ["tests/test_bootstrap.py", "diagnostics", "oracle", "slow", "cpu", "golden", "external", ["pr-parity-b", "full-core-a-c"]],
     ["tests/test_boozer_tables.py", "diagnostics", "oracle", "medium", "cpu", "golden", "golden", ["pr-parity-c1", "full-core-a-c"]],
