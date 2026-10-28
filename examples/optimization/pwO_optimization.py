@@ -456,24 +456,52 @@ def canonical_pitch_weights(policy, charts):
     return weights
 
 
-def canonical_slope_rows(score, scorer, pitch_weights):
+def canonical_slope_rows(score, scorer, pitch_weights, *, return_pitch_values=False):
     """Live canonical measure, with caller-supplied ownership; no /occupancy."""
     residual = []
+    values = dict.fromkeys(pitch_weights, 0.)
     period = 2*np.pi/int(scorer.reference["nfp"])
     for family, chart in zip(score["families"], scorer.charts, strict=True):
         a, b = family["alpha_domain"]
         if not np.all(np.isfinite([a, b])) or b <= a:
             raise ValueError("Invalid continued canonical alpha span")
         mass = (b-a)/(2*np.pi)*pitch_weights[chart["level_T"]]
+        start = len(residual)
         for row, reference in zip(family["rows"], chart["rows"], strict=True):
             if (row["u"] != reference["u"] or row["weight"] != reference["weight"]
                     or not 0 <= row["left"] < period):
                 raise ValueError("Canonical quadrature identity or left-bounce ownership changed")
             residual.append(np.sqrt(mass*row["weight"])*row["dJ"]/scorer.length)
+        block = np.asarray(residual[start:])
+        values[chart["level_T"]] += float(block@block)/pitch_weights[chart["level_T"]]
     residual = np.asarray(residual)
     if not np.all(np.isfinite(residual)):
         raise ValueError("Nonfinite canonical slope residual")
-    return residual
+    return (residual, values) if return_pitch_values else residual
+
+
+def fit_action_step(residual, matrix, constraints, constraint_jac, *, pitch_blocks=None):
+    """Fit the aggregate residual, or its worst relative pitch improvement."""
+    if pitch_blocks is None:
+        return minimize(lambda z: float((residual+matrix@z)@(residual+matrix@z)/(residual@residual)),
+            np.zeros(matrix.shape[1]), jac=lambda z: 2*matrix.T@(residual+matrix@z)/(residual@residual),
+            method="SLSQP", constraints=[dict(type="ineq", fun=constraints, jac=constraint_jac)],
+            options=dict(maxiter=1000, ftol=1e-10))
+    baselines = np.array([residual[b]@residual[b] for b in pitch_blocks])
+    if not np.all(np.isfinite(baselines)) or np.any(baselines <= 0):
+        raise ValueError("maximin_relative requires positive baseline M at every pitch")
+    def margins(v):
+        z, t = v[:-1], v[-1]
+        return np.r_[constraints(z), [1-t-(residual[b]+matrix[b]@z)@(residual[b]+matrix[b]@z)/base
+                                      for b, base in zip(pitch_blocks, baselines, strict=True)]]
+    def jac(v):
+        z = v[:-1]
+        return np.vstack([np.column_stack((constraint_jac(z), np.zeros(len(constraints(z))))),
+            [np.r_[-2*matrix[b].T@(residual[b]+matrix[b]@z)/base, -1.]
+             for b, base in zip(pitch_blocks, baselines, strict=True)]])
+    return minimize(lambda v: -v[-1], np.zeros(matrix.shape[1]+1),
+        jac=lambda v: np.r_[np.zeros(matrix.shape[1]), -1.], method="SLSQP",
+        constraints=[dict(type="ineq", fun=margins, jac=jac)], options=dict(maxiter=1000, ftol=1e-10))
 
 
 def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
@@ -485,6 +513,10 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     It requires pitch_weights=[{"level_T": ..., "weight": ...}, ...] with one
     positive record per distinct pitch, summing to one without normalization.
     Each chart uses its pitch weight; chart weights remain V/Q diagnostics/guards.
+    step_strategy="aggregate" is the default. Canonical-only "maximin_relative"
+    maximizes the smallest relative training-pitch M decrease and requires each
+    pitch's actual finite decrease to exceed its FTOL/band/node envelope.
+    This optional optimization choice is not a per-family monotonicity law.
     Charts require independent discovery. The normalized finite screen has no
     physical amplitude/geometry bound; native GN constrains amplitude only to
     first order, and supplied steps bypass that constraint.
@@ -516,6 +548,10 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     if objective not in ("centered_variance", "canonical_slope"):
         raise ValueError("objective must be centered_variance or canonical_slope")
     canonical = objective == "canonical_slope"
+    strategy = policy.get("step_strategy", "aggregate")
+    if strategy not in ("aggregate", "maximin_relative") or (strategy != "aggregate" and not canonical):
+        raise ValueError("step_strategy must be aggregate or canonical-only maximin_relative")
+    balanced = strategy == "maximin_relative"
     inp = vj.VmecInput.from_file(Path(policy["input"]))
     seed = Path(policy["restart"])
     field = float(policy["fixed_B_T"])
@@ -569,7 +605,7 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     guarded = policy.get("guarded", True)
     if not isinstance(guarded, bool) or any(not isinstance(fid, str) or not fid for fid in ids):
         raise ValueError("guarded must be boolean and chart IDs must be nonempty strings")
-    summary = dict(method="canonical_family_slope" if canonical else "centered_family_variance", objective=objective, accepted=False, pwO_qualified=False,
+    summary = dict(method="canonical_family_slope" if canonical else "centered_family_variance", objective=objective, step_strategy=strategy, accepted=False, pwO_qualified=False,
         research_validation_complete=False, policy=policy, parameters=names, cases={}, trials=[], MHD_solves=0,
         proposal_source="caller_supplied" if supplied_step is not None else "centered_FD_Gauss_Newton",
         scope="Supplied families and pitches only; bounded local progress, no global or confinement claim.")
@@ -620,8 +656,9 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
             spectrum[key] = spectrum[key]*factor
         result = scorer(spectrum); rows(result, scorer)
         if canonical:
-            residual = objective_rows(result, scorer)
+            residual, pitch_values = canonical_slope_rows(result, scorer, pitch_weights, return_pitch_values=True)
             result["canonical_M"] = float(residual@residual)
+            result["canonical_M_per_pitch"] = [dict(level_T=level, M=value) for level, value in pitch_values.items()]
         return result
 
     def solve(displacement, label, tolerance=ftol):
@@ -662,6 +699,8 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         def metrics(score):
             return dict(V=float(score["value"]), Q=float(score["raw_Jalpha2"]),
                 **({"M": float(score["canonical_M"])} if canonical else {}),
+                **({f"pitch_{i}_M": float(value["M"]) for i, value in enumerate(score["canonical_M_per_pitch"])}
+                   if balanced else {}),
                 **{fid+"_V": float(f["variance_m2"])/second.length**2
                    for fid, f in zip(ids, score["families"], strict=True)},
                 **{fid+"_Q": float(f["raw_Jalpha2"])
@@ -691,6 +730,9 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
                 measured_nonincrease=gain >= 0, classification=classification)
         key = "M" if canonical else "V"
         checks = {key: report[key]["classification"] == "decrease_beyond_observed_changes"}
+        if balanced:
+            checks.update({f"pitch_{i}_M": report[f"pitch_{i}_M"]["classification"] == "decrease_beyond_observed_changes"
+                           for i in range(len(pitch_weights))})
         if guarded:
             checks.update({key: report[key]["classification"] != "increase_beyond_observed_changes"
                            for key in ["Q", *[fid+"_V" for fid in [*protected, *family_guards]],
@@ -702,6 +744,13 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         center_eq, center = solve(np.zeros(8), "center")
         v0, q0, blocks = rows(center, first)
         objective0 = objective_rows(center, first)
+        pitch_blocks = None
+        if balanced:
+            pitch_blocks = [np.concatenate([np.arange(b.start, b.stop) for b, chart in zip(blocks, first.charts)
+                                            if chart["level_T"] == level]) for level in pitch_weights]
+            if any(objective0[b]@objective0[b] <= 0 for b in pitch_blocks):
+                raise ValueError("maximin_relative requires positive baseline M at every pitch")
+            summary["balanced_pitches_T"] = list(pitch_weights)
         if supplied_step is None:
             A, C, variance_jacobian, amplitude = [], [], [], []
             for j in range(8):
@@ -729,10 +778,8 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
                 return np.asarray([1-z@z] + [float(r@r-(r+M@z)@(r+M@z))/max(float(r@r), 1e-30) for r, M in guards])
             def constraint_jac(z):
                 return np.asarray([-2*z] + [-2*M.T@(r+M@z)/max(float(r@r), 1e-30) for r, M in guards])
-            fit = minimize(lambda z: float((objective0+D@z)@(objective0+D@z)/(objective0@objective0)), np.zeros(7),
-                jac=lambda z: 2*D.T@(objective0+D@z)/(objective0@objective0), method="SLSQP",
-                constraints=[dict(type="ineq", fun=constraints, jac=constraint_jac)], options=dict(maxiter=1000, ftol=1e-10))
-            z = np.asarray(fit.x)
+            fit = fit_action_step(objective0, D, constraints, constraint_jac, pitch_blocks=pitch_blocks)
+            z = np.asarray(fit.x[:-1] if balanced else fit.x)
             if not np.all(np.isfinite(z)):
                 raise ValueError("Nonfinite Gauss-Newton proposal")
             z *= min(1., (1-16*np.finfo(float).eps)/max(np.linalg.norm(z), 1e-30))
@@ -747,6 +794,12 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
                 center_V=float(v0@v0), center_Q=float(q0@q0), x0=x0.tolist(), scales=scale.tolist(),
                 half_step=h, trust_radius=radius, step_norm=float(np.linalg.norm(step)),
                 amplitude_linear_relative_change=float(amplitude@step))
+            if balanced:
+                summary["model"].update(maximin_t=float(fit.x[-1]), predicted_pitch_relative_decreases=[
+                    float(1-(objective0[b]+A[b]@step)@(objective0[b]+A[b]@step)/(objective0[b]@objective0[b]))
+                    for b in pitch_blocks])
+            if (balanced and min(summary["model"]["predicted_pitch_relative_decreases"]) <= 0):
+                raise ValueError("No positive maximin_relative proposal")
             if not fit.success or np.min(constraints(z)) < -2e-8 or summary["model"]["predicted_objective"] >= float(objective0@objective0):
                 raise ValueError("No feasible descending bounded Gauss-Newton proposal")
         else:

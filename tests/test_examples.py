@@ -2478,3 +2478,125 @@ def test_pwo_family_policy_requires_matching_periodic_metadata(tmp_path, monkeyp
     with pytest.raises(ValueError, match='periodic seams'):
         run(policy)
     assert not calls.solves
+
+
+def _pwo_balanced_case(tmp_path, monkeypatch, *, nonlinear=False, zero_pitch=False):
+    """Three coupled pitches: one shape direction trades off the middle pitch."""
+    import copy
+
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    env = run.__globals__; original_spectrum = env['boozer_spectrum_state']
+    original_families = env['PwOActionFamilies']
+    def spectrum(state, *args, **kwargs):
+        sp = original_spectrum(state, *args, **kwargs)
+        sp['I_b'] = np.array([state.amplitude*(.3+state.y[2])])
+        return sp
+    class Families(original_families):
+        def __call__(self, sp):
+            result = super().__call__(dict(sp, I_b=np.array([.3])))
+            t, u = float(sp['G_b'][0])-1., float(sp['I_b'][0])-.3
+            factors = [1-2*t, 1+.2*t-.25*u, 1-2*t]
+            if nonlinear:
+                factors[1] += 10*(t*t+u*u)
+            if zero_pitch:
+                factors[1] = 0.
+            for family, factor in zip(result['families'], factors, strict=True):
+                weights = np.array([r['weight'] for r in family['rows']])
+                offsets = np.arange(len(weights)); offsets = offsets-weights@offsets
+                for row, offset in zip(family['rows'], offsets, strict=True):
+                    row['dJ'] = factor*offset
+                family['raw_Jalpha2'] = float(weights@(factor*offsets)**2)
+            result['raw_Jalpha2'] = float(self.weights@np.array([f['raw_Jalpha2'] for f in result['families']]))
+            return result
+    levels = [.8, .9, 1.]
+    for key in ('training', 'validation'):
+        source = policy[key]['charts'][0]
+        policy[key]['charts'] = [dict(copy.deepcopy(source), id=f'coupled-{i}', level_T=level, weight=1.)
+                                 for i, level in enumerate(levels)]
+    # Deliberately differ from chart order; finite pitch labels must stay stable.
+    policy.update(objective='canonical_slope', step_strategy='maximin_relative', guarded=False,
+                  pitch_weights=[dict(level_T=level, weight=1/3) for level in [.9, 1., .8]],
+                  parent_families=[], family_guards=[])
+    monkeypatch.setitem(env, 'boozer_spectrum_state', spectrum)
+    monkeypatch.setitem(env, 'PwOActionFamilies', Families)
+    return run, policy, calls
+
+
+def test_pwo_three_pitch_fit_balances_a_coupled_tradeoff():
+    import runpy
+
+    fit = runpy.run_path(str(EXAMPLES/'optimization'/'pwO_optimization.py'))['fit_action_step']
+    q = np.ones(3); matrix = np.array([[-.4, 0.], [.04, -.05], [-.4, 0.]])
+    def constraints(z):
+        return np.array([1-z@z])
+    def jac(z):
+        return np.array([-2*z])
+    aggregate = fit(q, matrix, constraints, jac)
+    balanced = fit(q, matrix, constraints, jac, pitch_blocks=[np.array([i]) for i in range(3)])
+    assert aggregate.success and balanced.success
+    assert (q+matrix@aggregate.x)[1]**2 > q[1]**2
+    after = q+matrix@balanced.x[:-1]
+    assert np.all(after**2 < q**2) and balanced.x[-1] > 0
+    np.testing.assert_allclose(1-after**2, balanced.x[-1], atol=1e-9)
+    with pytest.raises(ValueError, match='positive baseline M'):
+        fit(np.array([1., 0., 1.]), matrix, constraints, jac,
+            pitch_blocks=[np.array([i]) for i in range(3)])
+
+
+@pytest.mark.parametrize('objective,strategy', [('canonical_slope', 'unknown'),
+    ('canonical_slope', None), ('centered_variance', 'maximin_relative')])
+def test_pwo_step_strategy_rejects_invalid_policy_before_solves(tmp_path, monkeypatch, objective, strategy):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    policy.update(objective=objective, step_strategy=strategy)
+    with pytest.raises(ValueError, match='step_strategy'):
+        run(policy)
+    assert not calls.solves
+
+
+@pytest.mark.parametrize('supplied', [False, True])
+def test_pwo_maximin_rejects_zero_pitch_before_fd_or_finite_trial(tmp_path, monkeypatch, supplied):
+    run, policy, calls = _pwo_balanced_case(tmp_path, monkeypatch, zero_pitch=True)
+    if supplied:
+        policy['proposed_step'] = [0., .003, .029, 0., 0., 0., 0., 0.]
+    result = run(policy, output_name='zero-pitch')
+    assert not result['accepted'] and 'positive baseline M' in result['rejection']
+    assert len(calls.solves) == 1
+
+
+def test_pwo_native_maximin_uses_existing_fd_and_stable_pitch_mapping(tmp_path, monkeypatch):
+    run, policy, calls = _pwo_balanced_case(tmp_path, monkeypatch)
+    result = run(policy, output_name='balanced-native')
+    assert result['accepted'] and result['step_strategy'] == 'maximin_relative'
+    assert result['MHD_solves'] == len(calls.solves) == 20
+    assert result['model']['maximin_t'] > 0
+    assert min(result['model']['predicted_pitch_relative_decreases']) > 0
+    assert result['balanced_pitches_T'] == [.9, 1., .8]
+    center = result['cases']['center']['training']
+    assert [r['level_T'] for r in center['canonical_M_per_pitch']] == [.9, 1., .8]
+    expected = np.array([1.5, 2.5, .5])*.61/(8*np.pi)
+    np.testing.assert_allclose([r['M'] for r in center['canonical_M_per_pitch']], expected, atol=1e-14)
+    assert sum(r['M']/3 for r in center['canonical_M_per_pitch']) == pytest.approx(center['canonical_M'])
+    trial = result['trials'][0]
+    assert all(trial['checks'][f'pitch_{i}_M'] for i in range(3))
+    assert all(trial['assessment'][f'pitch_{i}_M']['change_percent'] < 0 for i in range(3))
+
+
+@pytest.mark.parametrize('nonlinear,strategy,accepted', [(False, 'maximin_relative', True),
+    (True, 'aggregate', True), (True, 'maximin_relative', False)])
+def test_pwo_supplied_step_balances_actual_pitches_not_only_aggregate(
+        tmp_path, monkeypatch, nonlinear, strategy, accepted):
+    run, policy, calls = _pwo_balanced_case(tmp_path, monkeypatch, nonlinear=nonlinear)
+    policy.update(step_strategy=strategy, proposed_step=[0., .003, .029, 0., 0., 0., 0., 0.])
+    monkeypatch.setitem(run.__globals__, 'minimize',
+                        lambda *args, **kwargs: pytest.fail('Supplied step refitted'))
+    result = run(policy, output_name='balanced-supplied')
+    assert result['accepted'] == accepted and result['MHD_solves'] == len(calls.solves) == 4
+    assert result['proposal_source'] == 'caller_supplied' and len(result['trials']) == 1
+    trial = result['trials'][0]
+    assert trial['checks']['M']  # Aggregate improves even when the middle pitch regresses.
+    if strategy == 'maximin_relative':
+        assert trial['checks']['pitch_0_M'] == (not nonlinear)  # Declared first pitch is .9.
+        if nonlinear:
+            assert trial['assessment']['pitch_0_M']['classification'] == 'increase_beyond_observed_changes'
+    else:
+        assert trial['checks'] == {'M': True}
