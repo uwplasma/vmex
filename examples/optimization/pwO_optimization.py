@@ -8,7 +8,8 @@ Target calibration stays fixed; final validation requires local mirror within
 VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step,
 using raw slopes and fixed-reference action normalization.
 VMEX_PWO_REFERENCE names an accepted summary to keep its grids and bounds fixed.
-VMEX_PWO_FAMILY_CHARTS supplies JSON orbit charts to optimize family variance.
+VMEX_PWO_FAMILY_CHARTS supplies JSON orbit charts to optimize family variance
+or, with objective="canonical_slope", live-span canonical squared slopes.
 A dictionary selects run_centered_variance_step before seed preparation or QP
 conditioning; a list retains the three-surface action-step route.
 An entry's optional component=[parent,daughter1,daughter2] adds a supplied
@@ -436,8 +437,57 @@ def run_physical_step(inp, equilibrium, refined, *, output_name, seed_route, ref
     return summary
 
 
+def canonical_pitch_weights(policy, charts):
+    """Validate explicitly declared pitch masses, without normalizing them."""
+    entries = policy.get("pitch_weights")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("canonical_slope requires explicit pitch_weights records")
+    weights = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"level_T", "weight"}:
+            raise ValueError("pitch_weights records require level_T and weight")
+        level, weight = float(entry["level_T"]), float(entry["weight"])
+        if not np.all(np.isfinite([level, weight])) or min(level, weight) <= 0 or level in weights:
+            raise ValueError("pitch_weights require distinct positive finite levels and weights")
+        weights[level] = weight
+    if set(weights) != {c["level_T"] for c in charts} or not np.isclose(
+            sum(weights.values()), 1., rtol=0., atol=1e-12):
+        raise ValueError("pitch_weights must cover every chart pitch and sum to one")
+    return weights
+
+
+def canonical_slope_rows(score, scorer, pitch_weights):
+    """Live canonical measure, with caller-supplied ownership; no /occupancy."""
+    residual = []
+    period = 2*np.pi/int(scorer.reference["nfp"])
+    for family, chart in zip(score["families"], scorer.charts, strict=True):
+        a, b = family["alpha_domain"]
+        if not np.all(np.isfinite([a, b])) or b <= a:
+            raise ValueError("Invalid continued canonical alpha span")
+        mass = (b-a)/(2*np.pi)*pitch_weights[chart["level_T"]]
+        for row, reference in zip(family["rows"], chart["rows"], strict=True):
+            if (row["u"] != reference["u"] or row["weight"] != reference["weight"]
+                    or not 0 <= row["left"] < period):
+                raise ValueError("Canonical quadrature identity or left-bounce ownership changed")
+            residual.append(np.sqrt(mass*row["weight"])*row["dJ"]/scorer.length)
+    residual = np.asarray(residual)
+    if not np.all(np.isfinite(residual)):
+        raise ValueError("Nonfinite canonical slope residual")
+    return residual
+
+
 def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
-    """Take one matched-seed, centered-action variance step on supplied families.
+    """Take one matched-seed action step on supplied families.
+
+    objective="centered_variance" is the default. Opt-in "canonical_slope"
+    minimizes M=sum_pitch pitch_weight * integral sum_wells (dJ/dalpha/L)^2
+    dalpha/(2*pi), using live spans and no trapped-measure renormalization.
+    It requires pitch_weights=[{"level_T": ..., "weight": ...}, ...] with one
+    positive record per distinct pitch, summing to one without normalization.
+    Each chart uses its pitch weight; chart weights remain V/Q diagnostics/guards.
+    Charts require independent discovery. The normalized finite screen has no
+    physical amplitude/geometry bound; native GN constrains amplitude only to
+    first order, and supplied steps bypass that constraint.
 
     ``policy`` supplies input/restart paths, positive ``fixed_B_T`` (T),
     and training/validation entries containing PwOActionFamilies constructor
@@ -457,11 +507,15 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     a paired numerical sensitivity check, not an accuracy guarantee. Every
     solve restarts independently from the original restart, never a trial.
     The finite screen sums per-state observed tolerance/band/node changes,
-    requiring a resolved V decrease and no resolved protected-metric increases.
+    requiring a resolved selected-objective decrease and no protected-metric increases.
     This empirical envelope is not a rigorous error bound. Only sampled local
     progress is reported; no pwO qualification follows.
     """
     started = time.perf_counter()
+    objective = policy.get("objective", "centered_variance")
+    if objective not in ("centered_variance", "canonical_slope"):
+        raise ValueError("objective must be centered_variance or canonical_slope")
+    canonical = objective == "canonical_slope"
     inp = vj.VmecInput.from_file(Path(policy["input"]))
     seed = Path(policy["restart"])
     field = float(policy["fixed_B_T"])
@@ -499,10 +553,14 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     if (identities(first) != identities(second) or len(set(c["id"] for c in first.charts)) != len(first.charts)
             or any(not np.array_equal(a["endpoints"], b["endpoints"])
                    for a, b in zip(first.charts, second.charts, strict=True))
+            or any(a.get("periodic", False) != b.get("periodic", False)
+                   or not np.array_equal(a.get("seam_roots"), b.get("seam_roots"))
+                   for a, b in zip(first.charts, second.charts, strict=True))
             or not np.array_equal(first.weights, second.weights) or first.length != second.length
             or not np.array_equal(first.reference["s_b"], second.reference["s_b"])
             or int(first.reference["nfp"]) != int(inp.nfp) or int(second.reference["nfp"]) != int(inp.nfp)):
-        raise ValueError("Training/validation require the same ordered IDs, endpoints, levels, weights, length, surface and NFP")
+        raise ValueError("Training/validation require the same IDs, endpoints, periodic seams, levels, weights, length, surface and NFP")
+    pitch_weights = canonical_pitch_weights(policy, first.charts) if canonical else None
     ids = [c["id"] for c in first.charts]
     protected = list(policy.get("parent_families", []))
     family_guards = list(policy.get("family_guards", []))
@@ -511,10 +569,17 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     guarded = policy.get("guarded", True)
     if not isinstance(guarded, bool) or any(not isinstance(fid, str) or not fid for fid in ids):
         raise ValueError("guarded must be boolean and chart IDs must be nonempty strings")
-    summary = dict(method="centered_family_variance", accepted=False, pwO_qualified=False,
+    summary = dict(method="canonical_family_slope" if canonical else "centered_family_variance", objective=objective, accepted=False, pwO_qualified=False,
         research_validation_complete=False, policy=policy, parameters=names, cases={}, trials=[], MHD_solves=0,
         proposal_source="caller_supplied" if supplied_step is not None else "centered_FD_Gauss_Newton",
         scope="Supplied families and pitches only; bounded local progress, no global or confinement claim.")
+
+    if canonical:
+        summary.update(independent_canonical_census_performed=False,
+            canonical_normalization=dict(alpha_denominator=2*np.pi,
+                length_m=first.length, fixed_B_T=field,
+                pitch_weights=policy["pitch_weights"], trapped_fraction_renormalized=False),
+            acceptance_limits="Normalized local slope screen only; no independent census, physical field-amplitude or geometry bound.")
 
     def save_summary():
         summary["seconds"] = time.perf_counter()-started
@@ -538,6 +603,9 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
             raise ValueError("Centered action residual does not reproduce aggregate variance")
         return v, q, blocks
 
+    def objective_rows(score, scorer):
+        return canonical_slope_rows(score, scorer, pitch_weights) if canonical else rows(score, scorer)[0]
+
     def score(eq, index, band_index=None):
         scorer = scorers[index]
         raw = boozer_spectrum_state(eq.state, eq.runtime,
@@ -551,6 +619,9 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         for key in ("bmnc_b", "bmns_b", "G_b", "I_b"):
             spectrum[key] = spectrum[key]*factor
         result = scorer(spectrum); rows(result, scorer)
+        if canonical:
+            residual = objective_rows(result, scorer)
+            result["canonical_M"] = float(residual@residual)
         return result
 
     def solve(displacement, label, tolerance=ftol):
@@ -578,7 +649,9 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
             input_path=input_path, wout_path=wout_path)
         save_summary()
         result = score(eq, 0); summary["cases"][label]["training"] = result; save_summary()
-        print(f"Centered variance {label}: V={result['value']:.8g}", flush=True)
+        metric = "M" if canonical else "V"
+        value = result["canonical_M"] if canonical else result["value"]
+        print(f"Family action {label}: {metric}={value:.8g}", flush=True)
         return eq, result
 
     def resolution(eq, training):
@@ -588,6 +661,7 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     def assessment(before, before_check, after, after_check):
         def metrics(score):
             return dict(V=float(score["value"]), Q=float(score["raw_Jalpha2"]),
+                **({"M": float(score["canonical_M"])} if canonical else {}),
                 **{fid+"_V": float(f["variance_m2"])/second.length**2
                    for fid, f in zip(ids, score["families"], strict=True)},
                 **{fid+"_Q": float(f["raw_Jalpha2"])
@@ -615,7 +689,8 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
                 state_changes=state_changes, empirical_total_change=envelope, roundoff_floor=floor,
                 paired_equilibrium_gain_change=abs(gain-(values[1]-values[3])),
                 measured_nonincrease=gain >= 0, classification=classification)
-        checks = dict(V=report["V"]["classification"] == "decrease_beyond_observed_changes")
+        key = "M" if canonical else "V"
+        checks = {key: report[key]["classification"] == "decrease_beyond_observed_changes"}
         if guarded:
             checks.update({key: report[key]["classification"] != "increase_beyond_observed_changes"
                            for key in ["Q", *[fid+"_V" for fid in [*protected, *family_guards]],
@@ -626,22 +701,26 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         seed = vj.read_wout(seed)
         center_eq, center = solve(np.zeros(8), "center")
         v0, q0, blocks = rows(center, first)
+        objective0 = objective_rows(center, first)
         if supplied_step is None:
-            A, C, amplitude = [], [], []
+            A, C, variance_jacobian, amplitude = [], [], [], []
             for j in range(8):
                 delta = np.eye(8)[j]*h
                 minus_eq, minus = solve(-delta, f"fd{j}-minus")
                 plus_eq, plus = solve(delta, f"fd{j}-plus")
                 vm, qm, _ = rows(minus, first); vp, qp, _ = rows(plus, first)
-                A.append((vp-vm)/(2*h)); C.append((qp-qm)/(2*h))
+                A.append((objective_rows(plus, first)-objective_rows(minus, first))/(2*h))
+                variance_jacobian.append((vp-vm)/(2*h)); C.append((qp-qm)/(2*h))
                 amplitude.append((float(plus_eq.wout.volavgB)-float(minus_eq.wout.volavgB))/(2*h*field))
             A, C, amplitude = np.asarray(A).T, np.asarray(C).T, np.asarray(amplitude)
+            variance_jacobian = np.asarray(variance_jacobian).T
             if (not all(np.all(np.isfinite(a)) for a in (A, C, amplitude)) or
-                    np.linalg.norm(amplitude) <= 1e-12 or v0@v0 <= 0):
-                raise ValueError("Unresolved physical amplitude derivative or zero center variance")
+                    np.linalg.norm(amplitude) <= 1e-12 or objective0@objective0 <= 0):
+                raise ValueError("Unresolved physical amplitude derivative or zero objective")
             N = np.linalg.svd(amplitude[None, :], full_matrices=True)[2][1:].T
             D, E = radius*A@N, radius*C@N
-            guards = ([(q0, E)] + [(v0[b], D[b]) for fid, b in zip(ids, blocks)
+            variance_step = radius*variance_jacobian@N
+            guards = ([(q0, E)] + [(v0[b], variance_step[b]) for fid, b in zip(ids, blocks)
                       if fid in protected or fid in family_guards]
                       + [(q0[b], E[b]) for fid, b in zip(ids, blocks) if fid in family_guards])
             if not guarded:
@@ -650,22 +729,25 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
                 return np.asarray([1-z@z] + [float(r@r-(r+M@z)@(r+M@z))/max(float(r@r), 1e-30) for r, M in guards])
             def constraint_jac(z):
                 return np.asarray([-2*z] + [-2*M.T@(r+M@z)/max(float(r@r), 1e-30) for r, M in guards])
-            fit = minimize(lambda z: float((v0+D@z)@(v0+D@z)/(v0@v0)), np.zeros(7),
-                jac=lambda z: 2*D.T@(v0+D@z)/(v0@v0), method="SLSQP",
+            fit = minimize(lambda z: float((objective0+D@z)@(objective0+D@z)/(objective0@objective0)), np.zeros(7),
+                jac=lambda z: 2*D.T@(objective0+D@z)/(objective0@objective0), method="SLSQP",
                 constraints=[dict(type="ineq", fun=constraints, jac=constraint_jac)], options=dict(maxiter=1000, ftol=1e-10))
             z = np.asarray(fit.x)
             if not np.all(np.isfinite(z)):
                 raise ValueError("Nonfinite Gauss-Newton proposal")
             z *= min(1., (1-16*np.finfo(float).eps)/max(np.linalg.norm(z), 1e-30))
             step = radius*N@z
-            summary["model"] = dict(centered_action_residual=v0.tolist(), centered_action_jacobian=A.tolist(),
+            summary["model"] = dict(centered_action_residual=v0.tolist(), centered_action_jacobian=variance_jacobian.tolist(),
+                objective_residual=objective0.tolist(), objective_jacobian=A.tolist(),
+                center_objective=float(objective0@objective0),
+                predicted_objective=float((objective0+A@step)@(objective0+A@step)),
                 slope_jacobian=C.tolist(), amplitude_gradient=amplitude.tolist(), proposal=step.tolist(),
-                predicted_V=float((v0+A@step)@(v0+A@step)), guarded=guarded, solver_success=bool(fit.success),
+                predicted_V=float((v0+variance_jacobian@step)@(v0+variance_jacobian@step)), guarded=guarded, solver_success=bool(fit.success),
                 solver_status=int(fit.status), solver_message=str(fit.message), solver_iterations=int(fit.nit),
                 center_V=float(v0@v0), center_Q=float(q0@q0), x0=x0.tolist(), scales=scale.tolist(),
                 half_step=h, trust_radius=radius, step_norm=float(np.linalg.norm(step)),
                 amplitude_linear_relative_change=float(amplitude@step))
-            if not fit.success or np.min(constraints(z)) < -2e-8 or summary["model"]["predicted_V"] >= float(v0@v0):
+            if not fit.success or np.min(constraints(z)) < -2e-8 or summary["model"]["predicted_objective"] >= float(objective0@objective0):
                 raise ValueError("No feasible descending bounded Gauss-Newton proposal")
         else:
             step = supplied_step.copy()
@@ -698,7 +780,7 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
         summary["rejection"] = str(error)
     summary["finite_screen_pass"] = summary["accepted"]
     save_summary()
-    print(f"Sampled local variance progress accepted: {summary['accepted']}; no pwO qualification", flush=True)
+    print(f"Sampled local {objective} progress accepted: {summary['accepted']}; no pwO qualification", flush=True)
     return summary
 
 

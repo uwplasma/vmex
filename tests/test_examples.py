@@ -2124,16 +2124,17 @@ def _pwo_centered_case(tmp_path, monkeypatch, mode='descent'):
                 weights = np.array([r['weight'] for r in chart['rows']])
                 offsets = np.arange(len(weights), dtype=float)
                 offsets -= weights@offsets
-                local = 1+t if mode == 'parent' and index == 0 else factor
+                local = 1+t if mode == 'canonical' or (mode == 'parent' and index == 0) else factor
                 actions = 10.+100*t+(index+1)*local*offsets
                 slopes = (1+t if mode == 'slope' or (mode == 'family_slope' and index == 0)
                           else factor)*offsets
                 mean = weights@actions
-                family_rows = [dict(u=r['u'], weight=r['weight'], J=J, dJ=dJ)
+                family_rows = [dict(u=r['u'], weight=r['weight'], J=J, dJ=dJ, left=.2+.3*index)
                                for r, J, dJ in zip(chart['rows'], actions, slopes)]
                 if mode == 'quadrature':
                     family_rows[0]['weight'] += .01
                 families.append(dict(mean_action_m=float(mean),
+                    alpha_domain=[.2, .2+(.5+index)*(1+.4*t)],
                     variance_m2=float(weights@((actions-mean)**2)),
                     raw_Jalpha2=float(weights@(slopes**2)), rows=family_rows))
             value = sum(w*f['variance_m2'] for w, f in zip(self.weights, families))/self.length**2
@@ -2357,3 +2358,123 @@ def test_pwo_centered_family_slope_guard_applies_to_optimizer_model(tmp_path, mo
     result = run(policy, output_name='guard-model')
     assert not result['accepted'] and 'No feasible descending' in result['rejection']
     assert result['MHD_solves'] == len(calls.solves) == 17 and not result['trials']
+
+
+@pytest.mark.parametrize('canonical', [False, True])
+def test_pwo_policy_dispatch_preserves_explicit_objective(tmp_path, monkeypatch, canonical):
+    import runpy
+
+    run = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))['run']
+    env = run.__globals__; env.update(METHOD='physical', SEED='near_circular')
+    policy = {'objective': 'canonical_slope' if canonical else 'centered_variance'}
+    path = tmp_path/'policy.json'; path.write_text(json.dumps(policy))
+    monkeypatch.setenv('VMEX_PWO_FAMILY_CHARTS', str(path))
+    calls = []
+    monkeypatch.setitem(env, 'run_centered_variance_step',
+                        lambda p, **k: calls.append(p) or {'accepted': True})
+    assert run()['accepted'] and calls == [policy]
+
+
+def test_pwo_canonical_rows_use_live_unequal_spans_and_declared_pitch_mass():
+    """Direct integration oracle exposes fixed-weight and /occupied-measure bugs."""
+    import copy
+    import runpy
+    from types import SimpleNamespace as NS
+
+    example = runpy.run_path(str(EXAMPLES/'optimization'/'pwO_optimization.py'))
+    rows = example['canonical_slope_rows']; weights = example['canonical_pitch_weights']
+    charts = [dict(level_T=level, weight=999., rows=[dict(u=.25, weight=.4), dict(u=.75, weight=.6)])
+              for level in (.8, .8, 1.1)]
+    scorer = NS(charts=charts, reference={'nfp': 2}, length=2.)
+    score = {'families': [dict(alpha_domain=[a, b], rows=[
+        dict(u=.25, weight=.4, dJ=d, left=.2), dict(u=.75, weight=.6, dJ=2*d, left=.3)])
+        for (a, b), d in zip(((0., .2), (.4, 1.5), (2., 2.7)), (2., 3., 5.))]}
+    policy = dict(pitch_weights=[dict(level_T=.8, weight=.3), dict(level_T=1.1, weight=.7)])
+    pitches = weights(policy, charts)
+    expected = np.concatenate([np.sqrt(pitch*span*np.array([.4, .6])/(2*np.pi))*np.array([d, 2*d])/2
+        for pitch, span, d in ((.3, .2, 2.), (.3, 1.1, 3.), (.7, .7, 5.))])
+    q = rows(score, scorer, pitches)
+    np.testing.assert_allclose(q, expected, rtol=2e-15)
+    moved = copy.deepcopy(score); moved['families'][1]['alpha_domain'][1] += .6
+    expected_M = q@q + .3*.6/(2*np.pi)*(.4*3**2+.6*6**2)/4
+    actual = rows(moved, scorer, pitches)
+    assert actual@actual == pytest.approx(expected_M)
+    assert not np.isclose(actual@actual, q@q)
+    moved['families'][0]['rows'][0]['left'] = np.pi
+    with pytest.raises(ValueError, match='ownership'):
+        rows(moved, scorer, pitches)
+    moved = copy.deepcopy(score); moved['families'][0]['alpha_domain'] = [1., .5]
+    with pytest.raises(ValueError, match='span'):
+        rows(moved, scorer, pitches)
+    moved = copy.deepcopy(score); moved['families'][0]['rows'][0]['weight'] = .5
+    with pytest.raises(ValueError, match='quadrature'):
+        rows(moved, scorer, pitches)
+    moved = copy.deepcopy(score); moved['families'][0]['rows'][0]['dJ'] = np.nan
+    with pytest.raises(ValueError, match='Nonfinite'):
+        rows(moved, scorer, pitches)
+
+
+@pytest.mark.parametrize('records', [None, [], {}, [{'level_T': .8}],
+    [{'level_T': .8, 'weight': 0.}], [{'level_T': .8, 'weight': np.nan}],
+    [{'level_T': .8, 'weight': .4}], [{'level_T': .9, 'weight': 1.}],
+    [{'level_T': .8, 'weight': .5}, {'level_T': .8, 'weight': .5}],
+    [{'level_T': .8, 'weight': 1., 'extra': 0}]])
+def test_pwo_canonical_policy_rejects_invalid_pitch_masses_before_solves(tmp_path, monkeypatch, records):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    policy.update(objective='canonical_slope', pitch_weights=records)
+    with pytest.raises(ValueError, match='pitch_weights'):
+        run(policy)
+    assert not calls.solves
+
+
+def test_pwo_canonical_policy_rejects_unknown_objective(tmp_path, monkeypatch):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    policy['objective'] = 'unknown'
+    with pytest.raises(ValueError, match='objective'):
+        run(policy)
+    assert not calls.solves
+
+
+def test_pwo_canonical_native_gn_and_finite_screen_optimize_live_slope(tmp_path, monkeypatch):
+    """Slope falls while centered variance rises; native GN must follow slope."""
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch, 'canonical')
+    policy.update(objective='canonical_slope', pitch_weights=[dict(level_T=.8, weight=1.)], guarded=False)
+    result = run(policy, output_name='canonical')
+    assert result['accepted'] and result['method'] == 'canonical_family_slope'
+    assert result['objective'] == 'canonical_slope' and not result['pwO_qualified']
+    model = result['model']; q0 = np.asarray(model['objective_residual'])
+    expected = np.r_[np.sqrt(.5/(2*np.pi)*np.array([.2, .3, .5])),
+                     np.sqrt(1.5/(2*np.pi)*np.array([.2, .3, .5]))]*(np.tile([0., 1., 2.], 2)-1.3)/2
+    np.testing.assert_allclose(q0, expected, atol=1e-14)
+    np.testing.assert_allclose(np.asarray(model['objective_jacobian'])[:, 1], -.8*q0, atol=2e-10)
+    assert model['proposal'][1] > 0 and model['predicted_objective'] < model['center_objective']
+    assert model['predicted_V'] > model['center_V']
+    trial = result['trials'][0]
+    assert trial['checks'] == {'M': True}
+    assert trial['assessment']['M']['classification'] == 'decrease_beyond_observed_changes'
+    assert trial['assessment']['V']['change_percent'] > 0
+    assert result['MHD_solves'] == len(calls.solves)
+
+
+@pytest.mark.parametrize('mode,source', [('nodes', 'quadrature_nodes'), ('band', 'spectral_band'),
+                                      ('tolerance', 'equilibrium_tolerance')])
+def test_pwo_canonical_supplied_step_requires_resolved_m(tmp_path, monkeypatch, mode, source):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch, mode)
+    step = np.zeros(8); step[1] = .03
+    policy.update(objective='canonical_slope', pitch_weights=[dict(level_T=.8, weight=1.)],
+                  proposed_step=step.tolist(), guarded=False)
+    result = run(policy, output_name='canonical-unresolved')
+    assert not result['accepted'] and len(result['trials']) == 1
+    assessment = result['trials'][0]['assessment']['M']
+    assert assessment['gain'] > 0 and assessment['classification'] == 'unresolved_observed_changes'
+    assert any(change[source] > 0 for change in assessment['state_changes'])
+    assert not result['trials'][0]['checks']['M']
+
+
+@pytest.mark.parametrize('key,value', [('periodic', True), ('seam_roots', [1., 2.])])
+def test_pwo_family_policy_requires_matching_periodic_metadata(tmp_path, monkeypatch, key, value):
+    run, policy, calls = _pwo_centered_case(tmp_path, monkeypatch)
+    policy['validation']['charts'][0][key] = value
+    with pytest.raises(ValueError, match='periodic seams'):
+        run(policy)
+    assert not calls.solves

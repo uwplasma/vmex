@@ -812,3 +812,97 @@ def test_action_family_allows_fourier_refinement_and_reordering():
     result = objective(refined)
     for key in ('value', 'raw_Jalpha2', 'fixed_relative_variance'):
         assert result[key] == pytest.approx(objective.initial[key], rel=1e-10)
+
+
+
+def _periodic_action_family():
+    # No tangencies exist at level 1: every alpha has one regular well.
+    spectrum = dict(bmnc_b=[1., .2, .02], bmns_b=[0., 0., .013],
+                    xm_b=[0, 0, 1], xn_b=[0, 1, 0], iota_b=0., G_b=1., I_b=0., nfp=1)
+    nodes, weights = np.polynomial.legendre.leggauss(8)
+    rows = []
+    for u, weight in zip((nodes+1)/2, weights/2):
+        alpha = 2*np.pi*u
+        width = np.arccos(.1*np.cos(alpha)+.065*np.sin(alpha))
+        rows.append(dict(u=u, weight=weight, left=np.pi-width, right=np.pi+width))
+    width = np.arccos(.1)
+    chart = dict(periodic=True, level_T=1., weight=1., endpoints=[[0., 0.], [2*np.pi, 0.]],
+                 seam_roots=[np.pi-width, np.pi+width], rows=rows)
+    return spectrum, chart
+
+
+def test_periodic_action_family_uses_fixed_cuts_and_independent_full_alpha_wells(monkeypatch):
+    spectrum, chart = _periodic_action_family()
+    monkeypatch.setattr(PwOActionFamilies, '_event',
+                        staticmethod(lambda *args: pytest.fail('Fixed cut treated as a tangency')))
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    for sp in (spectrum, dict(spectrum, iota_b=.001)):
+        result = objective(sp); family = result['families'][0]
+        np.testing.assert_array_equal(family['alpha_domain'], [0., 2*np.pi])
+        np.testing.assert_array_equal(family['endpoints'], chart['endpoints'])
+        assert family['periodic'] and len(family['rows']) == len(chart['rows'])
+        assert all(0 < r['u'] < 1 for r in family['rows'])
+        first, last = family['seam_checks']
+        assert first['weight'] == last['weight'] == 0.
+        assert first['alpha'] == 0. and last['alpha'] == 2*np.pi
+        assert abs(first['dJ']) > .01  # Sine parity makes derivative closure nontrivial.
+        np.testing.assert_allclose([first[k] for k in ('left', 'right', 'J', 'dJ')],
+                                   [last[k] for k in ('left', 'right', 'J', 'dJ')], atol=1e-10)
+        alphas = [r['alpha'] for r in family['rows']]
+        independent = physical_pwo_action_from_boozer(**sp, levels=[1.], alphas=alphas)
+        assert independent['counts'] == [[1] for _ in alphas]
+        for key in ('J', 'dJ'):
+            np.testing.assert_allclose([r[key] for r in family['rows']],
+                                       [r[key] for r in independent['rows']], atol=1e-10, rtol=1e-9)
+        assert not result['global_topology_proof']
+
+
+@pytest.mark.parametrize('problem', ['flag', 'cut', 'missing', 'shape', 'nonfinite', 'reversed',
+    'copy', 'mismatch', 'row_copy', 'barrier'])
+def test_periodic_action_family_rejects_invalid_chart_and_seam(problem):
+    spectrum, chart = _periodic_action_family()
+    if problem == 'flag':
+        chart['periodic'] = 'true'
+    elif problem == 'cut':
+        chart['endpoints'][1][1] = .1
+    elif problem == 'missing':
+        chart.pop('seam_roots')
+    elif problem == 'shape':
+        chart['seam_roots'] = [1.]
+    elif problem == 'nonfinite':
+        chart['seam_roots'][1] = np.nan
+    elif problem == 'reversed':
+        chart['seam_roots'].reverse()
+    elif problem == 'copy':
+        chart['seam_roots'] = [z+2*np.pi for z in chart['seam_roots']]
+    elif problem == 'mismatch':
+        chart['seam_roots'][0] += .01
+    elif problem == 'row_copy':
+        chart['rows'][0]['left'] += 2*np.pi
+        chart['rows'][0]['right'] += 2*np.pi
+    elif problem == 'barrier':
+        chart['seam_roots'][1] += 2*np.pi
+    with pytest.raises(ValueError):
+        PwOActionFamilies(spectrum, [chart], length=.4)
+
+
+def test_periodic_action_family_preserves_lost_root_guard():
+    spectrum, chart = _periodic_action_family()
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    with pytest.raises(ValueError, match='lost family bounce root'):
+        objective(dict(spectrum, bmnc_b=[1., 0., .02]))
+
+
+def test_periodic_action_family_rejects_seam_action_mismatch(monkeypatch):
+    spectrum, chart = _periodic_action_family()
+    original = PwOActionFamilies._kernel
+    def inconsistent(sp):
+        kernel = original(sp); integral = kernel.integral
+        def shifted(alpha, *args, **kwargs):
+            value, error = integral(alpha, *args, **kwargs)
+            return value+(.001 if alpha == 2*np.pi else 0.), error
+        kernel.integral = shifted
+        return kernel
+    monkeypatch.setattr(PwOActionFamilies, '_kernel', staticmethod(inconsistent))
+    with pytest.raises(ValueError, match='seam well did not close'):
+        PwOActionFamilies(spectrum, [chart], length=.4)

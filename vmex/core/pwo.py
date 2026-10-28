@@ -535,6 +535,14 @@ class PwOActionFamilies:
     root brackets to 20% of each reference well width. These are local
     numerical trust limits, not universal pwO constraints.
 
+    A chart with periodic=True instead supplies fixed alpha cuts
+    endpoints=[[0,0],[2*pi,0]] and seam_roots=[left,right] from an independent
+    census at alpha=0. Its full alpha span stays fixed as iota changes.
+    Regular seam wells at alpha=0 and 2*pi must match without wrapping zeta;
+    these zero-weight checks are reported separately from quadrature rows.
+    Canonical left roots must remain in [0,2*pi/nfp). Branch permutations and
+    new/lost wells require independent discovery, never fabricated tangencies.
+
     Track those tangencies and bounce roots on trial spectra. Reference chart
     weights, action means and length remain fixed. Aggregate/per-pitch variance and raw
     slopes describe these charts only: no automatic family discovery, global
@@ -557,13 +565,24 @@ class PwOActionFamilies:
             if domain[1] <= domain[0]:
                 raise ValueError("Chart endpoints must bound an increasing alpha interval")
             chart["endpoints"], chart["reference_domain"] = q, domain
+            periodic = chart.get("periodic", False)
+            if not isinstance(periodic, bool):
+                raise ValueError("Chart periodic must be boolean")
             determinants = []
-            for point in q:
-                value, jac = self._event(self.base, level, point)
-                determinant = float(np.linalg.det(jac))
-                if np.linalg.norm(value) > 1e-8 or not np.isfinite(determinant) or abs(determinant) <= 1e-10:
-                    raise ValueError("Chart endpoint is not a regular tangency")
-                determinants.append(determinant)
+            if periodic:
+                seam = np.asarray(chart.get("seam_roots", []), dtype=float)
+                if (not np.array_equal(q, [[0., 0.], [2*np.pi, 0.]]) or seam.shape != (2,)
+                        or not np.all(np.isfinite(seam)) or not 0 <= seam[0] < self.base.period
+                        or seam[1] <= seam[0]):
+                    raise ValueError("Periodic chart requires full-alpha fixed cuts and canonical seam_roots")
+                chart["seam_roots"] = seam
+            else:
+                for point in q:
+                    value, jac = self._event(self.base, level, point)
+                    determinant = float(np.linalg.det(jac))
+                    if np.linalg.norm(value) > 1e-8 or not np.isfinite(determinant) or abs(determinant) <= 1e-10:
+                        raise ValueError("Chart endpoint is not a regular tangency")
+                    determinants.append(determinant)
             chart["determinants"] = determinants
             nodes = np.asarray([[r[k] for k in ("u", "weight", "left", "right")] for r in chart["rows"]], dtype=float)
             if (nodes.ndim != 2 or nodes.shape[1:] != (4,) or len(nodes) < 3 or not np.all(np.isfinite(nodes))
@@ -617,24 +636,32 @@ class PwOActionFamilies:
 
         for index, chart in enumerate(self.charts):
             level = chart["level_T"]; endpoints = []
-            for old, determinant in zip(chart["endpoints"], chart["determinants"]):
-                fit = root(lambda q: self._event(kernel, level, q), old, jac=True, tol=1e-11)
-                residual, jac = self._event(kernel, level, fit.x)
-                newdet = float(np.linalg.det(jac))
-                if (not np.all(np.isfinite(fit.x)) or not np.isfinite(newdet) or np.linalg.norm(residual) > 1e-8
-                        or newdet*determinant <= 0 or abs(newdet) < .01*abs(determinant)
-                        or np.linalg.norm(fit.x-old) > .2):
-                    raise ValueError("Lost tangency or exceeded local event trust range")
-                endpoints.append(fit.x)
+            periodic = chart.get("periodic", False)
+            if periodic:
+                endpoints = chart["endpoints"].copy()
+            else:
+                for old, determinant in zip(chart["endpoints"], chart["determinants"]):
+                    fit = root(lambda q: self._event(kernel, level, q), old, jac=True, tol=1e-11)
+                    residual, jac = self._event(kernel, level, fit.x)
+                    newdet = float(np.linalg.det(jac))
+                    if (not np.all(np.isfinite(fit.x)) or not np.isfinite(newdet) or np.linalg.norm(residual) > 1e-8
+                            or newdet*determinant <= 0 or abs(newdet) < .01*abs(determinant)
+                            or np.linalg.norm(fit.x-old) > .2):
+                        raise ValueError("Lost tangency or exceeded local event trust range")
+                    endpoints.append(fit.x)
             endpoints = np.asarray(endpoints)
             a, b = endpoints[:, 0]-kernel.iota*endpoints[:, 1]
             old_a, old_b = chart["reference_domain"]
             if not .25 < (b-a)/(old_b-old_a) < 4:
                 raise ValueError("Family span left local trust range")
-            ordering.setdefault(level, []).extend(zip((old_a, old_b), (a, b)))
+            if not periodic:
+                ordering.setdefault(level, []).extend(zip((old_a, old_b), (a, b)))
             shifts = endpoints[:, 1]-chart["endpoints"][:, 1]
             rows = []
-            for u, weight, left, right in chart["nodes"]:
+            nodes = chart["nodes"]
+            if periodic:
+                nodes = np.vstack(([0., 0., *chart["seam_roots"]], nodes, [1., 0., *chart["seam_roots"]]))
+            for u, weight, left, right in nodes:
                 alpha = a+(b-a)*u; old_alpha = old_a+(old_b-old_a)*u
                 width = right-left; predictor = (1-u)*shifts[0]+u*shifts[1]; roots = []
                 for z in (left, right):
@@ -658,6 +685,8 @@ class PwOActionFamilies:
                 left, right = roots
                 if right <= left or field(left, alpha)[2] >= -1e-8 or field(right, alpha)[2] <= 1e-8:
                     raise ValueError("Invalid continued well orientation")
+                if periodic and not 0 <= left < kernel.period:
+                    raise ValueError("Periodic family left bounce left the canonical cell")
                 grid = np.linspace(left, right, max(65, int(np.ceil((right-left)*max(abs(kernel.frequency))*16/np.pi))))
                 slopes = sample_grid(grid, alpha, derivative=True)
                 cross = np.flatnonzero(slopes[:-1]*slopes[1:] < 0)
@@ -669,12 +698,22 @@ class PwOActionFamilies:
                 if not np.all(np.isfinite([J, dJ, error, derivative_error])) or J <= 0:
                     raise ValueError("Invalid family action quadrature")
                 rows.append(dict(u=u, weight=weight, alpha=alpha, left=left, right=right, J=J, dJ=dJ))
+            seam_report = {}
+            if periodic:
+                first, last = rows[0], rows[-1]
+                if (not np.allclose([first[k] for k in ("left", "right")],
+                                    [last[k] for k in ("left", "right")], rtol=0., atol=1e-8)
+                        or not np.allclose([first[k] for k in ("J", "dJ")],
+                                           [last[k] for k in ("J", "dJ")], rtol=1e-8, atol=1e-8)):
+                    raise ValueError("Periodic family seam well did not close")
+                seam_report = dict(periodic=True, seam_checks=[first, last])
+                rows = rows[1:-1]
             weights = np.array([r["weight"] for r in rows]); actions = np.array([r["J"] for r in rows])
             mean = float(weights@actions); variance = float(weights@((actions-mean)**2))
             anchor = self.initial["families"][index]["mean_action_m"] if hasattr(self, "initial") else mean
             output.append(dict(mean_action_m=mean, variance_m2=variance, fixed_relative_variance=variance/anchor**2,
                                raw_Jalpha2=float(weights@np.array([r["dJ"]**2 for r in rows])),
-                               alpha_domain=[a, b], endpoints=endpoints.tolist(), rows=rows))
+                               alpha_domain=[a, b], endpoints=endpoints.tolist(), rows=rows, **seam_report))
         for pairs in ordering.values():
             pairs.sort()
             if any(y[0]-x[0] > 1e-6 and y[1] <= x[1] for x, y in zip(pairs, pairs[1:])):
