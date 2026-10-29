@@ -899,15 +899,18 @@ def test_integrator_keywords_reach_essos(solovev_wout, monkeypatch):
     original, seen = essos.boozer.trace_boozer, []
 
     def recording(*args, **kwargs):
-        seen.append({k: kwargs.get(k) for k in ("method", "tolerance", "compact")})
+        seen.append({k: kwargs.get(k) for k in ("method", "tolerance", "compact", "n_save")})
         return original(*args, **kwargs)
 
     monkeypatch.setattr(essos.boozer, "trace_boozer", recording)
     kwargs = {k: v for k, v in TRACE_KWARGS.items() if k != "method"}
+    kwargs["times_to_trace"] = 401
     default = trace_alphas(solovev_wout, **kwargs)
     trace_alphas(solovev_wout, **kwargs, method="rk4", compact=False)
-    assert seen == [dict(method="adaptive8", tolerance=TOLERANCE, compact=True),
-                    dict(method="rk4", tolerance=None, compact=False)]
+    assert seen == [dict(method="adaptive8", tolerance=TOLERANCE, compact=True, n_save=101),
+                    dict(method="rk4", tolerance=None, compact=False, n_save=101)]
+    assert default.metadata["orbit_output_samples"] == 101
+    assert default.metadata["loss_curve_samples"] == len(default.times) == 401
     assert default.metadata["integrator"].startswith("adaptive Dopri8, tolerance")
     with pytest.raises(ValueError, match="method must be one of"):
         trace_alphas(None, method="unknown")
