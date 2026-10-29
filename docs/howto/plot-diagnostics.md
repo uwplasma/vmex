@@ -79,8 +79,9 @@ error, which `equif` could not show, not a solver failure. WOUT's `equif`
 ({func}`~vmex.core.postprocess.force_balance`) is not plotted: it is bounded
 by 1 and equals 1 on every surface of a currentless vacuum, however well
 converged.
-The confinement panel's two right-axis profiles are radial *trends*, not
-transport numbers: both diagnostics run at bounded summary resolution, they
+Both confinement profiles use bounded summary resolution. Refine the NEO
+settings and the $\Gamma_c$ field-line, pitch, and bounce quadrature before
+quantitative comparisons; even radial ordering can change. The diagnostics
 share the summary's one in-process Boozer transform where the mathematics is
 common (NEO consumes it directly; $\Gamma_c$ keeps its validated real-space
 field-line route), and the computed profiles are cached per in-memory WOUT so

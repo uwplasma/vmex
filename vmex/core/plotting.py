@@ -901,13 +901,11 @@ def _boozer_summary_data(
 # Confinement summary (effective ripple + Gamma_c) with a bounded cache
 # ==========================================================================
 
-#: Compact ``Gamma_c`` sampling for the summary trend panel — radial ordering
-#: quality, not publication numbers (the ``diagnostic_neo_config`` analogue;
-#: the value carries the resolution scatter documented in
-#: :func:`vmex.core.gammac.gamma_c_state`).
+#: Bounded summary sampling. Refine field-line, pitch, and bounce quadrature
+#: before quantitative comparisons; this budget does not guarantee convergence.
 _GAMMA_C_DIAGNOSTIC = dict(
-    nalpha=5, num_transit=3, points_per_transit=48, num_pitch=16,
-    quadrature_order=16)
+    nalpha=9, num_transit=4, points_per_transit=128, num_pitch=32,
+    quadrature_order=32)
 
 #: Radial targets of the summary ``Gamma_c`` profile (snapped to distinct
 #: interior full-mesh rows of the WOUT grid).
