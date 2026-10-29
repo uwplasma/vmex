@@ -870,10 +870,10 @@ def test_asymmetric_boundary_cartesian_coordinates():
     np.testing.assert_allclose(_boozer_boundary_xyz(bz, theta, zeta), expected, atol=1e-14)
 
 
-@pytest.mark.parametrize("energy, expected", [(1e-6, "(converged, below 0.001)"),
+@pytest.mark.parametrize("energy, expected", [(1e-6, "(below 0.001; orbit convergence requires separate checks)"),
                                               (5e-2, "the orbits are not converged. Rerun with --trace-tolerance 3e-08")])
-def test_cli_reports_whether_the_orbits_converged(solovev_wout, tmp_path, monkeypatch, energy, expected):
-    """The energy check names the step to rerun with when the orbits are not converged."""
+def test_cli_reports_energy_check(solovev_wout, tmp_path, monkeypatch, energy, expected):
+    """Energy drift can reject an orbit solve but cannot certify its convergence."""
     from vmex.core import tracing
 
     real = tracing.trace_alphas
