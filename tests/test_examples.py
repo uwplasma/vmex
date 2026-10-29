@@ -2600,3 +2600,256 @@ def test_pwo_supplied_step_balances_actual_pitches_not_only_aggregate(
             assert trial['assessment']['pitch_0_M']['classification'] == 'increase_beyond_observed_changes'
     else:
         assert trial['checks'] == {'M': True}
+
+
+def _pwo_confinement_case(tmp_path, monkeypatch, mode='valid', lasym=False):
+    """Real INDATA and Fourier updates; analytic external MHD/Boozer/NEO services."""
+    import runpy
+    from dataclasses import replace
+    from types import SimpleNamespace as NS
+    import scipy.optimize
+    example = runpy.run_path(str(EXAMPLES / 'optimization' / 'pwO_optimization.py'))
+    run = example['run_confinement']; env = run.__globals__; opt = example['opt']
+    monkeypatch.chdir(tmp_path)
+    seed = example['vj'].VmecInput.from_file(DATA_DIR / 'input.minimal_seed_nfp2').change_resolution(mpol=5, ntor=4)
+    seed = replace(seed, lasym=lasym, ncurr=1, curtor=321., pres_scale=123.,
+                   am=np.array([1., -.4, .1]), ac=np.array([1., .2]), ai=np.array([.4, .03]))
+    arrays = {name: np.array(getattr(seed, name), copy=True) for name in ['rbc', 'zbs', 'raxis_c', 'zaxis_s']}
+    arrays['rbc'][seed.ntor+1, 4] = .0027; arrays['zbs'][seed.ntor-2, 3] = .0043
+    arrays['raxis_c'][1] = .03; arrays['zaxis_s'][2] = .02
+    seed = replace(seed, **arrays)
+    input_path = tmp_path / 'input.external'; seed.to_indata(input_path)
+    seed = example['vj'].VmecInput.from_file(input_path)
+    parameters = ['RBC(-1,3)', 'ZBS(2,4)']+(['RBS(1,3)', 'ZBC(-2,4)'] if lasym else [])
+    names = opt.boundary_dof_names(seed, 4); selected = [names.index(n) for n in parameters]
+    x0 = opt.pack_boundary(seed, 4); calls = NS(decks=[], restarts=[], writes=[], local=[], global_=0, census=[])
+    source = object(); monkeypatch.setattr(example['vj'], 'read_wout', lambda _: source)
+
+    def restart(wout, deck):
+        assert wout is source
+        token = [False]; calls.restarts.append(token); return token
+
+    def solve(deck, *, initial_state, raise_on_max_iterations):
+        assert raise_on_max_iterations and initial_state is calls.restarts[-1] and not initial_state[0]
+        initial_state[0] = True; calls.decks.append(deck)
+        x = (opt.pack_boundary(deck, 4)[selected]-x0[selected])/.0003
+        ftol = float(seed.ftol_array[-1]); bad = mode == 'force' and np.any(x)
+        result = NS(converged=True, fsqr=ftol*(2 if bad else .5), fsqz=ftol/3, fsql=ftol/4)
+        return NS(inp=deck, result=result, wout=NS(x=float(x[0]), aspect=6., Aminor_p=.2, volavgB=1., lasym=lasym, refined=deck.mpol>seed.mpol))
+
+    def write(filename, wout):
+        calls.writes.append((str(filename), wout)); Path(filename).touch()
+    monkeypatch.setitem(env, 'restart_state', restart)
+    monkeypatch.setattr(opt, 'solve_equilibrium', solve)
+    monkeypatch.setattr(example['vj'], 'write_wout', write)
+
+    class Boozer:
+        def __init__(self, **kw):
+            self.band = kw['mboz']; self.asym = lasym
+        def read_wout_data(self, wout):
+            self.wout = wout; self.nfp = seed.nfp
+            self.s_in = np.array([.25]) if mode == 'collapse' else np.array([.25, .75])
+            if wout.refined and mode == 'surface_roundoff':
+                self.s_in = np.nextafter(self.s_in, np.inf)
+            if wout.refined and mode == 'surface_shift' and wout.x:
+                self.s_in = self.s_in+1e-4
+            self.iota = np.full(len(self.s_in), .6)
+        def run(self, *, jit):
+            assert jit is True
+            n = len(self.compute_surfs); marker = 1+.01*self.wout.x
+            self.s_b = self.s_in[self.compute_surfs]
+            self.xm_b, self.xn_b = np.array([0, 1]), np.array([0, seed.nfp])
+            self.bmnc_b = np.tile([[marker], [.2]], (1, n))
+            self.rmnc_b = np.tile([[1.], [.1]], (1, n))
+            self.zmns_b = self.numns_b = np.zeros((2, n))
+            self.Boozer_G, self.Boozer_I = np.ones(n), np.zeros(n)
+            self.rmns_b = self.zmnc_b = self.numnc_b = self.bmns_b = np.zeros((2, n))
+
+    class Family:
+        def __init__(self, reference, charts, length):
+            self.reference = reference; self.charts = charts; self.group = charts[0]['group']
+            self.initial = {'families': [dict(mean_action_m=1.1)]}
+        def __call__(self, spectrum):
+            np.testing.assert_array_equal(spectrum['s_b'], self.reference['s_b'])
+            changed = abs(spectrum['bmnc_b'][0, 0]-1) > 1e-9
+            if changed and mode == self.group+'_family':
+                raise ValueError('Lost '+self.group+' family')
+            return {'families': [dict(rows=[{'J': v} for v in [1., 1.1, 1.2]], alpha_domain=[0., 2.])]}
+
+    def census(**kw):
+        assert kw['check_roots'] and kw['match_critical_census']
+        assert kw['points_per_period'] == 256 and kw['max_periods'] == 64
+        np.testing.assert_allclose(kw['alphas'], (np.arange(8)+.5)*2*np.pi/8)
+        token = {'census_id': len(calls.census)}
+        calls.census.append(dict(arguments=kw, result=token))
+        if mode == 'census' and kw['reference'] is not None:
+            raise ValueError('Independent critical census changed')
+        return token
+    monkeypatch.setitem(env, 'physical_pwo_action_from_boozer', census)
+
+    def neo(booz, *, config, **kw):
+        assert kw['jax_surface_scan'] is False
+        changed = abs(booz['bmnc_b'][0, 0]-1) > 1e-9; out = []
+        for i, s in enumerate(booz['s_b']):
+            value = [1e-4, 1e-6][i]*(.8 if changed else 1.)
+            if changed and mode == 'tradeoff' and i == 1:
+                value = 1.1e-6
+            if changed and mode == 'holdout_ripple' and config.npart > 80:
+                value *= 2
+            if changed and mode == 'resolution_gain' and config.npart > 80:
+                value = [1e-4, 1e-6][i]*.95
+            d = dict(approximation_used=changed and mode == 'neo_approx',
+                     rational_correction_valid=not(changed and mode == 'neo_rational'), final_n=1000,
+                     rational_correction_applied=False)
+            out.append(NS(epsilon_effective=np.nan if changed and mode == 'neo_nan' else value,
+                diagnostics=d, s=s+.01 if changed and mode == 'neo_surface' else s,
+                iota=np.nan if changed and mode == 'neo_iota' else .6,
+                b_ref=np.nan if changed and mode == 'neo_reference' else 1.2, r_ref=1.))
+        return out[:1] if changed and mode == 'neo_count' else out
+    monkeypatch.setitem(sys.modules, 'booz_xform_jax', NS(Booz_xform=Boozer))
+    monkeypatch.setitem(sys.modules, 'neo_jax', NS(NeoConfig=lambda **kw: NS(**kw), run_neo=neo))
+    monkeypatch.setitem(env, 'PwOActionFamilies', Family)
+
+    def local(fun, x, **kw):
+        calls.local.append(kw); assert kw['method'] == 'Nelder-Mead'
+        assert fun(np.zeros(len(x))) == 1.  # Seed is cached, never solved again by the optimizer.
+        if mode == 'budget':
+            for point in kw['options']['initial_simplex']:
+                fun(point)
+        else:
+            point = np.full(len(x), -.1); point[0] = .2; fun(point); fun(point)
+        return NS()
+    def global_(fun, bounds, **kw):
+        assert fun(np.zeros(len(bounds))) == 1.
+        for j in range(100):
+            calls.global_ += 1; point = np.zeros(len(bounds)); point[0] = .001*(j+1); fun(point)
+    monkeypatch.setitem(env, 'minimize', local)
+    monkeypatch.setattr(scipy.optimize, 'differential_evolution', global_)
+    def charts(group):
+        return [dict(reference={'nfp': seed.nfp, 's_b': [s]},
+                     charts=[{'group': group, 'level_T': 1.1}], length=1.) for s in [.25, .75]]
+    policy = dict(input=str(input_path), restart='external.nc', parameters=parameters, scales=.0003,
+        surfaces=[.25, .75], training=charts('training'), validation=charts('validation'),
+        global_steps=1 if mode == 'budget' else 0, global_calls=2, local_calls=len(parameters)+1)
+    return run, policy, seed, calls, selected, x0
+
+
+@pytest.mark.parametrize('lasym', [False, True])
+def test_pwo_confinement_preserves_external_input_and_independent_restarts(tmp_path, monkeypatch, lasym):
+    run, policy, seed, calls, selected, x0 = _pwo_confinement_case(tmp_path, monkeypatch, lasym=lasym)
+    for group in ['training', 'validation']:
+        path = tmp_path/(group+'.npz'); np.savez(path, **policy[group][0]['reference'])
+        policy[group][0]['reference'] = str(path)
+    result = run(policy, output_name='direct')
+    assert result['accepted'] and not result['pwO_qualified']
+    from vmex import optimize as opt
+    for deck in calls.decks:
+        for name in ['phiedge', 'curtor', 'ncurr', 'pres_scale', 'pmass_type', 'pcurr_type', 'piota_type']:
+            assert getattr(deck, name) == getattr(seed, name)
+        for name in ['am', 'ac', 'ai', 'aphi', 'am_aux_s', 'am_aux_f', 'ac_aux_s', 'ac_aux_f', 'ai_aux_s', 'ai_aux_f']:
+            np.testing.assert_array_equal(getattr(deck, name), getattr(seed, name))
+        for name in ['raxis_c', 'zaxis_s', 'raxis_s', 'zaxis_c']:
+            np.testing.assert_array_equal(getattr(deck, name)[:seed.ntor+1], getattr(seed, name))
+        values = opt.pack_boundary(deck, 4); mask = np.ones(len(x0), bool); mask[selected] = False
+        np.testing.assert_array_equal(values[mask], x0[mask])
+        assert deck.rbc[deck.ntor, 0] == seed.rbc[seed.ntor, 0]
+    assert len(calls.restarts) == len(calls.decks) and len({id(t) for t in calls.restarts}) == len(calls.restarts)
+    assert len(result['cases']) == 1  # Seed and repeated optimizer point are cached.
+    assert len(calls.decks) == 4  # Coarse/refined baseline and coarse/refined best only.
+    assert np.all(np.asarray(result['best_training']['x']) != 0)  # All selected m3/m4/LASYM modes moved.
+    assert (tmp_path/'input.direct').exists() and (tmp_path/'wout_direct.nc').exists()
+    assert len(calls.census) == 4
+    for i in range(2):
+        assert calls.census[i]['arguments']['reference'] is None
+        assert calls.census[i+2]['arguments']['reference'] is calls.census[i]['result']
+    assert (tmp_path/'input.direct_seed_check').exists() and (tmp_path/'input.direct_candidate_check').exists()
+    assert calls.decks[-1].mpol > seed.mpol  # Accepted checkpoint follows independent refined solve.
+    assert calls.local[0]['options']['initial_simplex'].shape == (len(selected)+1, len(selected))
+
+
+@pytest.mark.parametrize('mode', ['force', 'neo_nan', 'neo_iota', 'neo_surface', 'neo_count', 'neo_approx',
+                                  'neo_rational', 'neo_reference', 'training_family', 'validation_family', 'holdout_ripple', 'resolution_gain', 'census'])
+def test_pwo_confinement_rejects_invalid_training_or_independent_holdout(tmp_path, monkeypatch, mode):
+    run, policy, _, calls, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, mode)
+    result = run(policy, output_name='rejected')
+    assert not result['accepted']
+    assert not (tmp_path/'input.rejected').exists() and not (tmp_path/'wout_rejected.nc').exists()
+    holdout = mode in ['validation_family', 'holdout_ripple', 'resolution_gain', 'census']
+    assert (tmp_path/'input.rejected_candidate').exists() == holdout
+    assert any('seed' in name for name, _ in calls.writes)
+    if mode == 'census':
+        assert 'critical census changed' in result['validation_rejection']
+        assert calls.census[-1]['arguments']['reference'] is calls.census[0]['result']
+        assert (tmp_path/'input.rejected_candidate_check').exists()
+    if not holdout:
+        assert not any(row['valid'] for row in result['cases'])
+
+
+@pytest.mark.parametrize('mode,message', [('collapse', 'collapsed'), ('ftol', 'force tolerance')])
+def test_pwo_confinement_rejects_surface_collapse_before_optimization(tmp_path, monkeypatch, mode, message):
+    from dataclasses import replace
+    run, policy, seed, calls, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, mode)
+    if mode == 'ftol':
+        monkeypatch.setattr(type(seed), 'from_file', lambda _: replace(seed, ftol_array=np.array([0.])))
+    with pytest.raises(ValueError, match=message):
+        run(policy, output_name='collapse')
+    assert not calls.local and not (tmp_path/'input.collapse').exists()
+
+
+def test_pwo_confinement_limits_actual_global_and_local_work(tmp_path, monkeypatch):
+    run, policy, _, calls, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, 'budget')
+    result = run(policy, output_name='budget')
+    assert calls.global_ == policy['global_calls']+1  # Extra request stops before another solve.
+    assert len(result['cases']) <= policy['global_calls']+policy['local_calls']
+    assert calls.local[0]['options']['maxfev'] == policy['local_calls']
+    policy['local_calls'] = len(policy['parameters'])
+    with pytest.raises(ValueError, match='D\\+1'):
+        run(policy, output_name='bad_budget')
+
+
+def test_pwo_confinement_uses_common_normalization_for_surface_tradeoff(tmp_path, monkeypatch):
+    run, policy, _, _, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, 'tradeoff')
+    result = run(policy, output_name='tradeoff')
+    assert result['accepted']
+    assert result['best_training']['objective'] == pytest.approx((.8e-4+1.1e-6)/(1e-4+1e-6))
+
+
+@pytest.mark.parametrize('mode,accepted', [('surface_roundoff', True), ('surface_shift', False)])
+def test_pwo_confinement_distinguishes_surface_roundoff_from_physical_shift(tmp_path, monkeypatch, mode, accepted):
+    run, policy, _, _, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, mode)
+    result = run(policy, output_name='surface')
+    assert result['accepted'] is accepted
+    if accepted:
+        assert result['checked_baseline']['actual_s'] == result['baseline']['actual_s']
+        assert result['validation']['actual_s'] == result['baseline']['actual_s']
+    else:
+        assert 'surfaces changed' in result['validation_rejection']
+        assert not (tmp_path/'input.surface').exists()
+
+
+@pytest.mark.parametrize('updates', [dict(parameters=['RBC(0,0)']), dict(scales=0.),
+    dict(surfaces=[.75, .25]), dict(neo={'rational_surface_policy': 'approximate'}),
+    dict(training=[]), dict(training=[{'reference': {'nfp': 99, 's_b': [.25]}}]),
+    dict(family_rtol=-1), dict(check_resolution=[2, 1, 1, 2, 2]), dict(free=True)])
+def test_pwo_confinement_rejects_invalid_policy_before_solves(tmp_path, monkeypatch, updates):
+    from dataclasses import replace
+    run, policy, seed, calls, _, _ = _pwo_confinement_case(tmp_path, monkeypatch)
+    if updates.get('free'):
+        monkeypatch.setattr(type(seed), 'from_file', lambda _: replace(seed, lfreeb=True, mgrid_file='external_grid.nc'))
+    policy.update({k: v for k, v in updates.items() if k != 'free'})
+    with pytest.raises(ValueError):
+        run(policy, output_name='invalid')
+    assert not calls.decks
+
+
+@pytest.mark.parametrize('bad', [False, True])
+def test_pwo_confinement_policy_dispatch(tmp_path, monkeypatch, bad):
+    run, _, _, _, _, _ = _pwo_confinement_case(tmp_path, monkeypatch)
+    env = run.__globals__; path = tmp_path/'policy.json'; path.write_text('{}')
+    monkeypatch.setitem(env, 'METHOD', 'confinement'); monkeypatch.setenv('VMEX_PWO_POLICY', str(path))
+    monkeypatch.setitem(env, 'run_confinement', lambda p, **kw: {'accepted': True})
+    if bad:
+        with pytest.raises(ValueError, match='preserves supplied profiles'):
+            env['run'](beta_targets=(0., .01))
+    else:
+        assert env['run']() == {'accepted': True}

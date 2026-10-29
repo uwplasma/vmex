@@ -613,6 +613,48 @@ spatial derivative. Third spatial derivatives and their parameter VJPs remain
 expensive; the examples print progress before each order and use compact grids
 for a bounded cold run.
 
+pwO confinement continuation
+----------------------------
+
+``examples/optimization/pwO_optimization.py`` supports direct NEO ripple search::
+
+   VMEX_PWO_METHOD=confinement VMEX_PWO_POLICY=policy.json python examples/optimization/pwO_optimization.py
+
+Install ``vmex[neoclassical]`` with NEO_JAX 1.1.1 or newer. The JSON policy supplies
+``input``, ``restart``, sorted ``surfaces``, named boundary ``parameters``
+(for example ``["RBC(0,3)", "ZBS(0,4)"]``), and optional positive ``scales`` in
+metres. Each scaled displacement is bounded to [-1, 1]. Input profiles, flux,
+R00, unselected harmonics and input axis coefficients remain fixed. This route
+requires a fixed boundary; the equilibrium axis responds to boundary changes.
+
+``training`` and ``validation`` are nonempty lists of ``PwOActionFamilies``
+constructor dictionaries: ``reference`` (an NPZ path or spectrum mapping),
+``charts`` and ``length``. References identify exact selected half-mesh surfaces.
+Supply independently discovered families and withheld pitches; local chart
+continuation does not discover new families. Physical Tesla levels remain fixed.
+Each family's sampled action range uses its fixed reference mean, with default
+``family_rtol=0`` allowing no increase. Its alpha span must retain at least half
+its baseline value. These are conservative search guards, not pwO identities.
+
+``global_steps`` and ``global_calls`` bound differential evolution;
+``local_calls`` bounds a full-simplex Nelder-Mead search (at least D+1 calls).
+Defaults are 2, 32 and 32. The objective is the weighted mean of
+``epsilon_eff**(3/2)``, normalized by the seed's fixed weighted mean.
+Optional ``weights`` correspond to the complete, unchanged surface list.
+
+Acceptance re-solves both boundaries with ``check_resolution=[ns,mpol,ntor,ntheta,nzeta]``
+(default: three times as many radial intervals and increased angular resolution),
+increases ``band`` from 32 to ``check_band=40``, doubles NEO pitch/spatial sampling,
+and tightens rational sampling. Actual surfaces must stay identical. The gain
+must exceed the observed resolution changes and pass the validation-family guards.
+A separate eight-alpha well census at the validation pitches checks root refinement,
+complete wells and correspondence with the refined seed; unresolved changes reject
+the candidate. This finite census does not prove global topology.
+The summary retains rejected trials and raw per-surface ripple. ``*_candidate``
+files are provisional; unsuffixed outputs are written only after acceptance.
+Acceptance is a finite numerical screen, not a full-pwO certificate. Independently
+check orbit census, additional surfaces/pitches and transport before promotion.
+
 Resources and reproducibility
 -----------------------------
 

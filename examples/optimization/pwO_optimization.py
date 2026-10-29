@@ -14,6 +14,8 @@ A dictionary selects run_centered_variance_step before seed preparation or QP
 conditioning; a list retains the three-surface action-step route.
 An entry's optional component=[parent,daughter1,daughter2] adds a supplied
 binary junction's own-family variances and plateau-mean balance surrogates.
+VMEX_PWO_METHOD=confinement and VMEX_PWO_POLICY=<JSON> optimize direct NEO
+ripple from an external equilibrium, with supplied family guards and holdouts.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -837,6 +839,256 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     return summary
 
 
+def run_confinement(policy, *, output_name="pwO_optimized"):
+    """Bounded ripple search with supplied local orbit-family guards.
+
+    Preserve the input profiles and resolution. Every trial restarts the same
+    WOUT. Charts are discovered independently; their continuation is local and
+    does not certify the topology outside the supplied samples or full pwO.
+    """
+    from booz_xform_jax import Booz_xform
+    from neo_jax import NeoConfig, run_neo
+    from scipy.optimize import differential_evolution
+    from vmex.core.neoclassical import _neo_boozer_data
+
+    inp = vj.VmecInput.from_file(policy["input"])
+    source = vj.read_wout(policy["restart"])
+    if inp.lfreeb:
+        raise ValueError("Confinement continuation requires a fixed-boundary input")
+    max_mode = max(int(inp.mpol)-1, int(inp.ntor))
+    names = opt.boundary_dof_names(inp, max_mode, vary_major_radius=False)
+    selected = policy["parameters"]
+    if not selected or len(set(selected)) != len(selected) or any(n not in names for n in selected):
+        raise ValueError("parameters must be distinct available boundary modes, excluding R00")
+    indices = np.array([names.index(n) for n in selected])
+    x0 = opt.pack_boundary(inp, max_mode, vary_major_radius=False)
+    scales = np.broadcast_to(np.asarray(policy.get("scales", .0003), float), indices.shape)
+    surfaces = np.asarray(policy["surfaces"], float)
+    weights = np.asarray(policy.get("weights", np.ones(len(surfaces))), float)
+    if (surfaces.ndim != 1 or not len(surfaces) or np.any(np.diff(surfaces) <= 0)
+            or np.any((surfaces <= 0) | (surfaces >= 1)) or weights.shape != surfaces.shape
+            or not np.all(np.isfinite([*surfaces, *weights, *scales]))
+            or np.any(weights <= 0) or np.any(scales <= 0)):
+        raise ValueError("Require sorted unique interior surfaces and positive finite weights/scales")
+    weights = weights/weights.sum()
+    band = int(policy.get("band", 32)); check_band = int(policy.get("check_band", 40))
+    global_steps = int(policy.get("global_steps", 2)); local_calls = int(policy.get("local_calls", 32))
+    global_calls = int(policy.get("global_calls", 32))
+    if band < 2 or check_band <= band or global_steps < 0 or global_calls < 0 or local_calls < len(indices)+1:
+        raise ValueError("Require a finer validation band, nonnegative global budgets and at least D+1 local calls")
+    settings = dict(theta_n=192, phi_n=192, npart=80, multra=2, nstep_per=80,
+        nstep_min=800, nstep_max=2000, acc_req=.005, ref_swi=2,
+        max_rational_field_periods=100000, rational_surface_policy="error")
+    settings.update(policy.get("neo", {}))
+    if settings.get("rational_surface_policy") != "error":
+        raise ValueError("Approximate rational-surface treatment is not allowed")
+    configs = [NeoConfig(**settings), NeoConfig(**dict(settings,
+        npart=2*settings["npart"], nstep_per=2*settings["nstep_per"], acc_req=settings["acc_req"]/2))]
+    scorers = []
+    for group in ("training", "validation"):
+        entries = []
+        for entry in policy[group]:
+            entry = dict(entry); reference = entry.pop("reference")
+            if isinstance(reference, str):
+                with np.load(reference, allow_pickle=False) as data:
+                    reference = dict(data)
+            reference = {k: np.asarray(v) for k, v in reference.items()}
+            reference["nfp"] = int(reference["nfp"])
+            if np.shape(reference.get("s_b")) != (1,) or reference["nfp"] != inp.nfp:
+                raise ValueError("Each chart reference needs one surface and the input NFP")
+            entries.append(PwOActionFamilies(reference=reference, **entry))
+        if not entries:
+            raise ValueError("Both training and independent validation orbit charts are required")
+        scorers.append(entries)
+    tolerance = float(policy.get("family_rtol", 0.))
+    if not np.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("family_rtol must be finite and nonnegative")
+    resolution = policy.get("check_resolution", [3*(int(inp.ns_array[-1])-1)+1,
+        int(inp.mpol)+2, int(inp.ntor)+2, int(inp.ntheta)+8, int(inp.nzeta)+8])
+    if (len(resolution) != 5 or any(type(n) is not int for n in resolution)
+            or resolution[0] <= inp.ns_array[-1]
+            or any(a < b for a, b in zip(resolution[1:], [inp.mpol, inp.ntor, inp.ntheta, inp.nzeta]))):
+        raise ValueError("check_resolution must refine NS and retain all angular modes/grid points")
+    started = time.perf_counter()
+    summary = dict(method="confinement", policy=policy, accepted=False, pwO_qualified=False,
+        research_validation_complete=False, cases=[], objective="weighted epsilon_eff^(3/2) / fixed seed weighted mean",
+        scope="Bounded search and supplied local families only; independent global orbit census still required")
+
+    def save():
+        summary["seconds"] = time.perf_counter()-started
+        Path(f"{output_name}_summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False,
+            default=lambda v: v.tolist() if isinstance(v, np.ndarray) else str(v))+"\n")
+
+    def score(eq, refinement, reference=None):
+        bx = Booz_xform(verbose=0, mboz=check_band if refinement else band,
+                       nboz=check_band if refinement else band)
+        bx.read_wout_data(eq.wout)
+        ids = [int(np.argmin(abs(np.asarray(bx.s_in)-s))) for s in surfaces]
+        actual = np.asarray(bx.s_in)[ids]
+        if len(set(ids)) != len(ids) or ("actual_s" in summary and not np.allclose(actual, summary["actual_s"], rtol=0, atol=8*np.finfo(float).eps)):
+            raise ValueError("Requested surfaces collapsed or actual half-mesh surfaces changed")
+        actual = np.asarray(summary.get("actual_s", actual))  # Equal physical meshes can differ by one ulp.
+        bx.compute_surfs = ids; bx.run(jit=True)
+        booz = _neo_boozer_data(bx, ids)
+        spectra, bounds = [], []
+        theta = np.arange(128)*2*np.pi/128
+        zeta = theta/int(inp.nfp)
+        for i in range(len(ids)):
+            sp = dict(bmnc_b=np.asarray(booz["bmnc_b"])[:, i:i+1].T,
+                bmns_b=np.asarray(booz.get("bmns_b", np.zeros_like(booz["bmnc_b"])))[:, i:i+1].T,
+                xm_b=booz["ixm_b"], xn_b=booz["ixn_b"], iota_b=booz["iota_b"][i:i+1],
+                G_b=booz["bvco_b"][i:i+1], I_b=booz["buco_b"][i:i+1], nfp=int(inp.nfp), s_b=actual[i:i+1])
+            field = np.zeros((128, 128))
+            for m, n, c, s in zip(sp["xm_b"], sp["xn_b"], sp["bmnc_b"][0], sp["bmns_b"][0], strict=True):
+                phase = m*theta[:, None]-n*zeta[None, :]
+                field += c*np.cos(phase)+s*np.sin(phase)
+            lo, hi = float(field.min()), float(field.max())
+            if not 0 < lo < hi:
+                raise ValueError("Require a positive field and finite mirror on every surface")
+            bounds.extend([float(field.mean()), (hi-lo)/(hi+lo), float(sp["iota_b"][0])])
+            spectra.append(sp)
+        ranges, spans, census = [], [], []
+        for index, scorer in enumerate(scorers[refinement]):
+            matches = np.flatnonzero(np.isclose(actual, float(scorer.reference["s_b"][0]), rtol=0, atol=1e-12))
+            if len(matches) != 1:
+                raise ValueError("Chart surface must equal an actual selected half-mesh surface")
+            spectrum = spectra[int(matches[0])]
+            result = scorer(spectrum)
+            if refinement:
+                census.append(physical_pwo_action_from_boozer(
+                    **{k: v for k, v in spectrum.items() if k != "s_b"},
+                    levels=sorted(set(c["level_T"] for c in scorer.charts)),
+                    alphas=(np.arange(8)+.5)*2*np.pi/8, points_per_period=256, max_periods=64,
+                    check_roots=True, match_critical_census=True,
+                    reference=None if reference is None else reference["census"][index]))
+            for family, initial in zip(result["families"], scorer.initial["families"], strict=True):
+                ranges.append(float(np.ptp([r["J"] for r in family["rows"]])/initial["mean_action_m"]))
+                spans.append(float(np.diff(family["alpha_domain"])[0]))
+        results = run_neo(booz, config=configs[refinement], use_jax=True, progress=False, jax_surface_scan=False)
+        eps, diagnostics = [], []
+        if len(results) != len(ids):
+            raise ValueError("NEO returned a different surface count")
+        for i, result in enumerate(results):
+            d = dict(result.diagnostics); value = float(result.epsilon_effective)
+            if (not np.all(np.isfinite([value, result.s, result.iota, result.b_ref, result.r_ref]))
+                    or min(value, float(result.b_ref), float(result.r_ref)) <= 0 or d.get("approximation_used")
+                    or not d.get("rational_correction_valid", False)
+                    or abs(float(result.s)-actual[i]) > 1e-12
+                    or abs(float(result.iota)-float(booz["iota_b"][i])) > 1e-12):
+                raise ValueError("Invalid NEO value, rational correction, iota or surface")
+            eps.append(value)
+            diagnostics.append(dict(b_ref_T=float(result.b_ref), r_ref_m=float(result.r_ref),
+                                    final_n=int(d["final_n"]), rational_correction_applied=bool(d["rational_correction_applied"])))
+        metrics = [float(eq.wout.aspect), float(eq.wout.Aminor_p), float(eq.wout.volavgB), *bounds]
+        if not np.all(np.isfinite([*metrics, *ranges, *spans])):
+            raise ValueError("Nonfinite geometry or family statistics")
+        return dict(eps32=eps, metrics=metrics, family_ranges=ranges, family_spans=spans,
+                    actual_s=actual.tolist(), NEO=diagnostics, census=census,
+                    force_errors=[float(getattr(eq.result, k)) for k in ("fsqr", "fsqz", "fsql")])
+
+    def solve(x, refinement=False):
+        values = x0.copy(); values[indices] += scales*np.asarray(x)
+        deck = opt.unpack_boundary(inp, values, max_mode, vary_major_radius=False)
+        if refinement:
+            ns, mpol, ntor, ntheta, nzeta = resolution
+            deck = replace(deck, ns_array=np.array([ns]), ftol_array=np.array([inp.ftol_array[-1]]),
+                niter_array=np.array([inp.niter_array[-1]])).change_resolution(
+                    mpol=mpol, ntor=ntor, ntheta=ntheta, nzeta=nzeta)
+        print(f"MHD solve: NS={deck.ns_array[-1]}, refinement={refinement}", flush=True)
+        eq = opt.solve_equilibrium(deck, initial_state=restart_state(source, deck), raise_on_max_iterations=True)
+        ftol = float(inp.ftol_array[-1])
+        errors = np.array([float(getattr(eq.result, k)) for k in ("fsqr", "fsqz", "fsql")])
+        if (float(eq.inp.ftol_array[-1]) != ftol or not np.isfinite(ftol) or ftol <= 0
+                or not np.all(eq.result.converged) or not np.all(np.isfinite(errors))
+                or np.any((errors < 0) | (errors > ftol))):
+            raise ValueError("Equilibrium did not meet the input force tolerance")
+        return eq
+
+    def admissible(row, baseline):
+        a, b = np.asarray(row["metrics"]), np.asarray(baseline["metrics"])
+        limits = np.array([.03, .03, .05]+[.05, .10, .05]*len(surfaces))
+        if np.any(b == 0) or np.any(abs(a/b-1) > limits):
+            return False
+        return bool(np.all(np.asarray(row["family_ranges"]) <= (1+tolerance)*np.asarray(baseline["family_ranges"])+1e-12)
+                    and np.all(np.asarray(row["family_spans"]) >= .5*np.asarray(baseline["family_spans"])))
+
+    summary["status"] = "baseline"; save()
+    baseline_eq = solve(np.zeros(len(indices)))
+    save_seed_checkpoint(inp, baseline_eq, output_name, "seed")
+    baseline = score(baseline_eq, 0); summary["actual_s"] = baseline["actual_s"]
+    refined_baseline = solve(np.zeros(len(indices)), True)
+    save_seed_checkpoint(refined_baseline.inp, refined_baseline, output_name, "seed_check")
+    checked_baseline = score(refined_baseline, 1)
+    if not admissible(baseline, baseline) or not admissible(checked_baseline, checked_baseline):
+        raise ValueError("Seed has zero iota or invalid family/geometry reference")
+    summary.update(baseline=baseline, checked_baseline=checked_baseline,
+        check_resolution=resolution, neo_settings=[settings, dict(settings,
+            npart=2*settings["npart"], nstep_per=2*settings["nstep_per"], acc_req=settings["acc_req"]/2)])
+    best = dict(x=np.zeros(len(indices)), value=1., eq=baseline_eq, measured=baseline)
+    cache = {tuple(np.zeros(len(indices))): 1.}; save()
+    budget = len(cache)+global_calls
+
+    class BudgetReached(Exception):
+        pass
+
+    def objective(x):
+        key = tuple(np.round(x, 12))
+        if key in cache:
+            return cache[key]
+        if len(cache) >= budget:
+            raise BudgetReached
+        row = dict(x=np.asarray(x).tolist(), valid=False); summary["cases"].append(row)
+        value = 1e6; summary["status"] = "search"; save()
+        try:
+            eq = solve(x); measured = score(eq, 0); row.update(measured)
+            row["valid"] = admissible(measured, baseline)
+            if row["valid"]:
+                value = float(weights@np.asarray(measured["eps32"])/(weights@np.asarray(baseline["eps32"])))
+                if value < best["value"]:
+                    best.update(x=np.asarray(x).copy(), value=value, eq=eq, measured=measured)
+        except (ValueError, RuntimeError) as error:
+            row["rejection"] = str(error)
+        row["objective"] = value; cache[key] = value; save()
+        print(f"Confinement trial {len(cache)}: {value:.9g}, admissible={row['valid']}", flush=True)
+        return value
+
+    bounds = [(-1., 1.)]*len(indices)
+    if global_steps and global_calls:
+        try:
+            differential_evolution(objective, bounds, maxiter=global_steps, popsize=4,
+                seed=int(policy.get("seed", 0)), polish=False, x0=np.zeros(len(indices)), workers=1)
+        except BudgetReached:
+            pass
+    budget = len(cache)+local_calls
+    simplex = np.tile(best["x"], (len(indices)+1, 1))
+    for j in range(len(indices)):
+        simplex[j+1, j] += .1 if best["x"][j] <= .9 else -.1
+    minimize(objective, best["x"], method="Nelder-Mead", bounds=bounds,
+        options=dict(maxfev=local_calls, initial_simplex=simplex, xatol=1e-3))
+    summary["best_training"] = dict(x=best["x"].tolist(), objective=best["value"])
+    if best["value"] < 1:
+        save_seed_checkpoint(best["eq"].inp, best["eq"], output_name, "candidate")
+        try:
+            refined = solve(best["x"], True)
+            save_seed_checkpoint(refined.inp, refined, output_name, "candidate_check")
+            checked = score(refined, 1, checked_baseline)
+            before, after = [float(weights@np.asarray(row["eps32"])) for row in (baseline, best["measured"])]
+            check_before, check_after = [float(weights@np.asarray(row["eps32"])) for row in (checked_baseline, checked)]
+            envelope = abs(check_before-before)+abs(check_after-after)
+            summary["ripple_gain"] = dict(training=before-after, validation=check_before-check_after,
+                observed_resolution_change=envelope)
+            summary["validation"] = checked
+            summary["accepted"] = bool(admissible(checked, checked_baseline)
+                and min(before-after, check_before-check_after) > envelope)
+            if summary["accepted"]:
+                refined.inp.to_indata(f"input.{output_name}")
+                vj.write_wout(f"wout_{output_name}.nc", refined.wout)
+        except (ValueError, RuntimeError) as error:
+            summary["validation_rejection"] = str(error)
+    summary["status"] = "completed"; save()
+    return summary
+
+
 def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None):
     """Optimize with fixed flux, R00, linear edge-zero pressure and zero current.
 
@@ -846,6 +1098,11 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
     stage. Current is prescribed, not bootstrap-consistent. Derivatives hold
     the solver's released m=1 gauge fixed.
     """
+    if METHOD == "confinement":
+        if tuple(beta_targets) != (0.0,) or physical_steps is not None:
+            raise ValueError("Confinement mode preserves supplied profiles; no beta ladder or physical_steps")
+        policy = json.loads(Path(os.environ["VMEX_PWO_POLICY"]).read_text())
+        return run_confinement(policy, output_name=output_name)
     chart_path = os.environ.get("VMEX_PWO_FAMILY_CHARTS")
     family_charts = None if chart_path is None or METHOD != "physical" else json.loads(Path(chart_path).read_text())
     if METHOD == "physical" and isinstance(family_charts, dict):
