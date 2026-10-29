@@ -69,8 +69,8 @@ ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
               max_wells=20, quadrature_order=24)
 ACTION_MBOZ = 10
 
-# Research resolution. The hard Gamma_c carries 10-20 % scatter at the shipped
-# budgets, so quote the budget with any number taken from this script:
+# Research resolution. Refine hard Gamma_c before interpreting candidate changes;
+# quote the sampling budget with every reported value:
 #   MAX_MODE, MAXITER = 3, 40
 #   GC_BUDGET = dict(nalpha=9, num_transit=5, points_per_transit=128,
 #                    num_pitch=48, quadrature_order=32)

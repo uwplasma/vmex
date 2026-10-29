@@ -1650,7 +1650,7 @@ def _summary_figure(
         # and Gamma_c sharing the dimensionless right axis.
         _profile_panel(
             axes[0, 1], s, 1.0e-3 * np.asarray(wout.presf, dtype=float),
-            xlabel=_S_LABEL, ylabel=r"$p$ [kPa]", title="pressure and confinement",
+            xlabel=_S_LABEL, ylabel=r"$p$ [kPa]", title="pressure and confinement\n(compact diagnostics)",
             color=_LINE_COLORS[1],
         )
         axes[0, 1].lines[0].set_label(r"$p$")
