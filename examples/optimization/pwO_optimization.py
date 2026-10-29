@@ -3,8 +3,12 @@
 
 VMEX_PWO_SEED=near_circular runs QP conditioning before the fit; the default
 uses the bundled QI seed. VMEX_PWO_FAMILY selects canonical or mapped.
-Target calibration stays fixed; final validation requires local mirror within
-10% of the seed. Scalar and least-squares solvers minimize the same residuals.
+VMEX_PWO_MAX_MODE=8 opens 288 boundary parameters; VMEX_PWO_MAXITER sets the budget.
+VMEX_PWO_TARGET names a JSON file with bmin/bmax in Tesla, target_iota, t1 and t2;
+p and angular centers are optional. This fixes the target independently of the
+seed and allows its mirror depth to change within the physical bounds.
+Without that file, calibration holds the seed mean/mirror and final mirror must
+stay within 10%. Scalar and least-squares solvers minimize the same residuals.
 VMEX_PWO_METHOD=physical tries one bounded three-surface action descent step,
 using raw slopes and fixed-reference action normalization.
 VMEX_PWO_REFERENCE names an accepted summary to keep its grids and bounds fixed.
@@ -78,17 +82,79 @@ if METHOD == "physical":
     VALIDATION_OPTIONS = dict(mboz=20, nboz=20, oversample=3)
 
 
-def make_target(surfaces, *, family, bmin, bmax, b_ref, options, grid, iota_sign=1.0, theta_center=0.0, zeta_center=0.0):
+if not ci_smoke:
+    if "VMEX_PWO_MAX_MODE" in os.environ:
+        mode = int(os.environ["VMEX_PWO_MAX_MODE"])
+        if mode < 1:
+            raise ValueError("VMEX_PWO_MAX_MODE must be positive")
+        MAX_MODES, MAXITER = [mode], [MAXITER[-1]]
+        MPOL = max(MPOL, mode + 1)
+        FINAL_MPOL = max(FINAL_MPOL, MPOL + 2)
+        PWO_OPTIONS = dict(PWO_OPTIONS, mboz=max(PWO_OPTIONS["mboz"], 2 * mode),
+                           nboz=max(PWO_OPTIONS["nboz"], 2 * mode))
+        GRID = max(GRID, 6 * mode)
+        VALIDATION_OPTIONS = dict(VALIDATION_OPTIONS,
+                                  mboz=max(VALIDATION_OPTIONS["mboz"], 2 * PWO_OPTIONS["mboz"]),
+                                  nboz=max(VALIDATION_OPTIONS["nboz"], 2 * PWO_OPTIONS["nboz"]))
+        VALIDATION_GRID = max(VALIDATION_GRID, 2 * GRID + 1)
+    if "VMEX_PWO_MAXITER" in os.environ:
+        budget = int(os.environ["VMEX_PWO_MAXITER"])
+        if budget < 1:
+            raise ValueError("VMEX_PWO_MAXITER must be positive")
+        MAXITER = [budget] * len(MAX_MODES)
+
+
+def make_target(surfaces, *, family, bmin, bmax, b_ref, options, grid, iota_sign=1.0, theta_center=0.0, zeta_center=0.0, target_parameters=None):
     """Build the fixed physical target shared by the stage-1 and coil examples."""
     if iota_sign not in (-1.0, 1.0):
         raise ValueError("iota_sign must be fixed at +1 or -1 from the seed")
+    if target_parameters is not None and family != "canonical":
+        raise ValueError("Explicit target parameters require the canonical family")
     if family == "canonical":
-        return CanonicalPwOResidual(surfaces, bmin=bmin, bmax=bmax, t1=-0.3 * iota_sign,
-                                    t2=3.0 * iota_sign, theta_center=theta_center, zeta_center=zeta_center, p=2, ntheta=grid, nzeta=grid, **options)
+        parameters = dict(bmin=bmin, bmax=bmax, t1=-0.3 * iota_sign, t2=3.0 * iota_sign,
+                          theta_center=theta_center, zeta_center=zeta_center, p=2)
+        if target_parameters is not None:
+            parameters.update(validate_target_parameters(target_parameters, iota_sign=iota_sign))
+        return CanonicalPwOResidual(surfaces, **parameters, ntheta=grid, nzeta=grid, **options)
     if family == "mapped":
         return MappedPwOResidual(surfaces, b_ref=b_ref, a=0.3, b=0.0, c=-2.0,
                                  eta_min=2.8, ngamma=grid, neta=grid, **options)
     raise ValueError("family must be canonical or mapped")
+
+
+def validate_target_parameters(parameters, *, iota_sign=None):
+    """Validate explicit Tesla bounds and a fixed signed canonical construction."""
+    required = {"bmin", "bmax", "target_iota", "t1", "t2"}
+    allowed = required | {"p", "theta_center", "zeta_center"}
+    if not isinstance(parameters, dict) or not required <= parameters.keys() or parameters.keys() - allowed:
+        raise ValueError("Explicit target requires bmin,bmax,target_iota,t1,t2 and only optional p,theta_center,zeta_center")
+    try:
+        finite = all(not isinstance(v, bool) and np.ndim(v) == 0 and np.isfinite(v)
+                     for v in parameters.values())
+    except TypeError:
+        finite = False
+    if (not finite or not 0 < parameters["bmin"] < parameters["bmax"]
+            or parameters["target_iota"] == 0):
+        raise ValueError("Explicit target requires finite scalar parameters, positive distinct Tesla bounds and nonzero target_iota")
+    if iota_sign is not None and iota_sign * parameters["target_iota"] <= 0:
+        raise ValueError("target_iota must retain the seed's signed iota")
+    # The core canonical kernel validates p, nonsingularity and torus separation.
+    return dict(parameters)
+
+
+def target_physics_rows(out, surface_field_ref, surface_mirror_ref, target_parameters=None):
+    """Keep physical envelopes while allowing an explicit target's mirror depth."""
+    field = out["B"] if "B_target" in out else out["B_mapped"]
+    mirror = out["mirror"]
+    rows = [out["residuals1d"],
+            hold_ratio(jnp.mean(field, axis=(1, 2)), jnp.asarray(surface_field_ref), FIELD_TOLERANCE, PENALTY),
+            jnp.maximum(MIRROR_FLOOR - mirror, 0) / MIRROR_FLOOR]
+    if target_parameters is None:
+        rows.append(hold_ratio(mirror, jnp.asarray(surface_mirror_ref), MIRROR_RELATIVE_TOLERANCE, PENALTY))
+    else:
+        rows.append(jnp.maximum(jnp.abs(out["iota_b"] - target_parameters["target_iota"])
+                                - QS_IOTA_TOLERANCE, 0) / QS_IOTA_TOLERANCE)
+    return jnp.concatenate(rows)
 
 
 def canonical_target_bounds(unit_shape, mean, mirror):
@@ -123,6 +189,25 @@ def save_seed_checkpoint(deck, equilibrium, output_name, label):
     """Save each independently solved boundary before a later stage can fail."""
     deck.to_indata(f"input.{output_name}_{label}")
     vj.write_wout(f"wout_{output_name}_{label}.nc", equilibrium.wout)
+
+
+def scalar_checkpoint_callback(stage, x0, step, monitor, output_name):
+    """Save the exact best accepted scalar iterate before later work can fail."""
+    best = np.inf
+
+    def record(intermediate_result):
+        nonlocal best
+        x = x0 + step * intermediate_result.x
+        cost = float(intermediate_result.fun)
+        monitor({"x": x, "fun": cost})
+        if np.isfinite(cost) and cost < best:
+            equilibrium = stage.equilibrium_from_x(x)
+            save_seed_checkpoint(stage.input_from_x(x), equilibrium, output_name, "best")
+            Path(f"{output_name}_best.json").write_text(json.dumps(
+                dict(cost=cost, x=x.tolist()), indent=2, allow_nan=False) + "\n")
+            best = cost
+
+    return record
 
 
 def qp_gate_failures(metrics):
@@ -1227,6 +1312,11 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
     stage. Current is prescribed, not bootstrap-consistent. Derivatives hold
     the solver's released m=1 gauge fixed.
     """
+    target_path = os.environ.get("VMEX_PWO_TARGET") or None
+    if target_path and (FAMILY != "canonical" or METHOD not in ("scalar", "least_squares")):
+        raise ValueError("VMEX_PWO_TARGET requires canonical scalar or least_squares fitting")
+    target_parameters = (None if target_path is None else
+                         validate_target_parameters(json.loads(Path(target_path).read_text())))
     if METHOD == "confinement":
         if tuple(beta_targets) != (0.0,) or physical_steps is not None:
             raise ValueError("Confinement mode preserves supplied profiles; no beta ladder or physical_steps")
@@ -1264,13 +1354,15 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
             ncurr=1, curtor=0.0, pcurr_type="power_series", ac=np.zeros(21), delt=0.5,
             ns_array=np.array([STAGE_NS]), ftol_array=np.array([STAGE_FTOL]),
             niter_array=np.array([NITER])).change_resolution(
-                mpol=MPOL, ntor=MPOL, ntheta=2 * MPOL + 6, nzeta=2 * MPOL + 4)
+                mpol=MPOL, ntor=MPOL, ntheta=max(2 * MPOL + 6, 4 * max(MAX_MODES)),
+                nzeta=max(2 * MPOL + 4, 4 * max(MAX_MODES)))
 
     def refined(deck, source):
         deck = replace(deck, ns_array=np.array([FINAL_NS]), ftol_array=np.array([FINAL_FTOL]),
                        niter_array=np.array([NITER])).change_resolution(
                            mpol=FINAL_MPOL, ntor=FINAL_MPOL,
-                           ntheta=2 * FINAL_MPOL + 10, nzeta=2 * FINAL_MPOL + 8)
+                           ntheta=max(2 * FINAL_MPOL + 10, 4 * max(MAX_MODES)),
+                           nzeta=max(2 * FINAL_MPOL + 8, 4 * max(MAX_MODES)))
         eq = opt.solve_equilibrium(deck, initial_state=restart_state(source.wout, deck),
                                   raise_on_max_iterations=True, verbose=not ci_smoke)
         return deck, eq
@@ -1398,13 +1490,19 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
         raise ValueError("the seed must have finite nonzero rotational transform")
     iota_sign = float(np.sign(seed_iota))
     # Calibrate physical target bounds once, never from an optimizer trial.
-    probe = CanonicalPwOResidual(SURFACES, bmin=1.0, bmax=2.0,
-                                 t1=-0.3 * iota_sign, t2=3.0 * iota_sign, zeta_center=0.0, ntheta=GRID, nzeta=GRID, **PWO_OPTIONS)
+    probe = make_target(SURFACES, family="canonical", bmin=1.0, bmax=2.0, b_ref=1.0,
+                        options=PWO_OPTIONS, grid=GRID, iota_sign=iota_sign,
+                        target_parameters=target_parameters)
     probe_data = probe.compute_state(equilibrium.state, equilibrium.runtime)
     sampled = np.asarray(probe_data["B"])
     bmin, bmax, b_ref = float(sampled.min()), float(sampled.max()), float(sampled.mean())
     calibration, theta_center, zeta_center = None, 0.0, 0.0
-    if FAMILY == "canonical":
+    if target_parameters is not None:
+        target_parameters = validate_target_parameters(target_parameters, iota_sign=iota_sign)
+        bmin, bmax = target_parameters["bmin"], target_parameters["bmax"]
+        theta_center = target_parameters.get("theta_center", 0.0)
+        zeta_center = target_parameters.get("zeta_center", 0.0)
+    elif FAMILY == "canonical":
         unit_shape = np.asarray(probe_data["B_target"]) - 1.0
         shape_mean = float(unit_shape.mean())
         mirror_ref = (bmax - bmin) / (bmax + bmin)
@@ -1427,7 +1525,8 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
     def construction(options, grid, surfaces=SURFACES):
         return make_target(surfaces, family=FAMILY, bmin=bmin, bmax=bmax,
                            b_ref=b_ref, options=options, grid=grid, iota_sign=iota_sign,
-                           theta_center=theta_center, zeta_center=zeta_center)
+                           theta_center=theta_center, zeta_center=zeta_center,
+                           target_parameters=target_parameters)
 
     target = construction(PWO_OPTIONS, GRID)
     field_key = "B" if FAMILY == "canonical" else "B_mapped"
@@ -1438,15 +1537,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
     def physics_rows(state, runtime):
         # A single live transform supplies the fit and local anti-collapse controls.
         out = target.compute_state(state, runtime)
-        B = out[field_key]
-        local_mean = jnp.mean(B, axis=(1, 2))
-        local_mirror = out["mirror"]
-        rows = [out["residuals1d"],
-            hold_ratio(local_mean, jnp.asarray(surface_field_ref), FIELD_TOLERANCE, PENALTY),
-            jnp.maximum(MIRROR_FLOOR - local_mirror, 0) / MIRROR_FLOOR]
-        rows.append(hold_ratio(local_mirror, jnp.asarray(surface_mirror_ref),
-                               MIRROR_RELATIVE_TOLERANCE, PENALTY))
-        return jnp.concatenate(rows)
+        return target_physics_rows(out, surface_field_ref, surface_mirror_ref, target_parameters)
 
     unit_beta = None
     if beta_targets[-1] > 0:
@@ -1489,6 +1580,9 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
             adjoint_tol=1e-8, progress=not ci_smoke, evaluation_progress=not ci_smoke,
             jacobian_batch_size=1)
         full_x = problem.x0.copy()
+        if METHOD == "scalar" and not stages:
+            exact_seed = problem.equilibrium_from_x(full_x)
+            save_seed_checkpoint(problem.input_from_x(full_x), exact_seed, output_name, "seed_training")
         for max_mode, budget in zip(MAX_MODES, MAXITER):
             stage = problem.subproblem(max_mode=max_mode, x=full_x)
             monitor.problem = stage
@@ -1499,9 +1593,7 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
                     monitor.cache_evaluation(x0 + step * y, value, gradient)
                     return value, step * gradient
 
-                def record(intermediate_result):
-                    monitor({"x": x0 + step * intermediate_result.x, "fun": intermediate_result.fun})
-
+                record = scalar_checkpoint_callback(stage, x0, step, monitor, output_name)
                 initial = float(value_and_gradient(np.zeros_like(x0))[0])
                 result = minimize(
                     value_and_gradient, np.zeros_like(x0), jac=True, method="L-BFGS-B",
@@ -1560,8 +1652,12 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
         "field held": abs(metrics["volavgB_T"] / field_ref - 1) <= FIELD_TOLERANCE,
         "converged": bool(np.all(np.asarray(final_equilibrium.result.converged))),
     }
-    checks["training-surface mirror held"] = bool(np.all(
-        abs(local_mirror / surface_mirror_ref - 1) <= MIRROR_RELATIVE_TOLERANCE))
+    if target_parameters is None:
+        checks["training-surface mirror held"] = bool(np.all(
+            abs(local_mirror / surface_mirror_ref - 1) <= MIRROR_RELATIVE_TOLERANCE))
+    else:
+        checks["signed surface iota near target"] = bool(np.all(
+            abs(np.asarray(final_score["iota_b"]) - target_parameters["target_iota"]) <= QS_IOTA_TOLERANCE))
     if beta_targets[-1] > 0:
         checks["beta held"] = abs(metrics["beta"] / beta_targets[-1] - 1) <= BETA_TOLERANCE
     unmet = [name for name, met in checks.items() if not met]
@@ -1578,10 +1674,13 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
                                          training_metrics=qs_training_metrics,
                                          metrics=qs_metrics)),
                    stages=stages, metrics=metrics, actual_s=np.asarray(final_score["s_b"]).tolist(),
-                   target=dict(calibration=calibration, theta_center_rad=theta_center, zeta_center_rad=zeta_center, p=2, bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref,
+                   target=dict(calibration=calibration, explicit_parameters=target_parameters,
+                               theta_center_rad=theta_center, zeta_center_rad=zeta_center,
+                               p=2 if target_parameters is None else target_parameters.get("p", 2), bmin_T=bmin, bmax_T=bmax, b_ref_T=b_ref,
                                surface_field_ref_T=surface_field_ref.tolist(), iota_sign=iota_sign,
                                surface_mirror_ref=surface_mirror_ref.tolist(),
-                               t1=-0.3 * iota_sign, t2=3.0 * iota_sign,
+                               t1=-0.3 * iota_sign if target_parameters is None else target_parameters["t1"],
+                               t2=3.0 * iota_sign if target_parameters is None else target_parameters["t2"],
                                a=0.3, b=0.0, c=-2.0, eta_min=2.8),
                    settings=dict(stage_ns=STAGE_NS, stage_ftol=STAGE_FTOL, mpol=MPOL,
                                  penalty=PENALTY, mirror_train_target=MIRROR_TRAIN_TARGET,
@@ -1590,7 +1689,9 @@ def run(*, beta_targets=(0.0,), output_name="pwO_optimized", physical_steps=None
                                  niter=NITER, grid=GRID, validation_grid=VALIDATION_GRID,
                                  transform=PWO_OPTIONS, validation_transform=VALIDATION_OPTIONS,
                                  mode_ladder=MAX_MODES, iteration_budgets=MAXITER,
-                                 mirror_relative_tolerance=MIRROR_RELATIVE_TOLERANCE),
+                                 mirror_relative_tolerance=MIRROR_RELATIVE_TOLERANCE,
+                                 hold_seed_mirror=target_parameters is None,
+                                 target_iota_tolerance=None if target_parameters is None else QS_IOTA_TOLERANCE),
                    phiedge_Wb=float(inp.phiedge), pres_scale_Pa=float(inp.pres_scale),
                    pressure="p(s)=PRES_SCALE*(1-s)", current="zero enclosed toroidal current",
                    checks=checks, unmet=unmet, construction_diagnostics=construction_diagnostics,

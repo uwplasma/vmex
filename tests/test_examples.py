@@ -3037,3 +3037,154 @@ def test_pwo_confinement_adjoint_never_promotes_failed_independent_guards(tmp_pa
         assert not any(row['valid'] for row in result['cases'])
     else:
         assert result['validation_rejection']
+
+
+def test_pwo_mode8_override_prepares_288_boundary_variables(monkeypatch):
+    import runpy
+    from vmex import optimize as opt
+
+    monkeypatch.setenv("VMEX_EXAMPLES_CI", "0")
+    monkeypatch.setenv("VMEX_PWO_METHOD", "scalar")
+    monkeypatch.setenv("VMEX_PWO_SEED", "qi")
+    monkeypatch.delenv("VMEX_PWO_QS_INPUT", raising=False)
+    monkeypatch.setenv("VMEX_PWO_MAX_MODE", "8")
+    monkeypatch.setenv("VMEX_PWO_MAXITER", "20")
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    assert example["MAX_MODES"] == [8] and example["MAXITER"] == [20]
+    decks = []
+
+    def capture(deck, **kwargs):
+        decks.append(deck)
+        raise RuntimeError("captured prepared input")
+
+    monkeypatch.setattr(opt, "solve_equilibrium", capture)
+    with pytest.raises(RuntimeError, match="captured prepared input"):
+        example["run"]()
+    deck = decks[0]
+    assert deck.mpol >= 9 and deck.ntor >= 8
+    assert deck.ntheta >= 32 and deck.nzeta >= 32
+    assert len(opt.pack_boundary(deck, 8, vary_major_radius=False)) == 288
+    assert example["FINAL_MPOL"] > example["MPOL"]
+    assert example["PWO_OPTIONS"]["mboz"] >= 16 and example["PWO_OPTIONS"]["nboz"] >= 16
+    assert example["GRID"] >= 48
+    assert example["VALIDATION_OPTIONS"]["mboz"] >= 2 * example["PWO_OPTIONS"]["mboz"]
+    assert example["VALIDATION_GRID"] >= 2 * example["GRID"] + 1
+    monkeypatch.setenv("VMEX_EXAMPLES_CI", "1")
+    smoke = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    assert smoke["MAX_MODES"] == [1] and smoke["MAXITER"] == [1]
+    assert smoke["PWO_OPTIONS"]["mboz"] == 4 and smoke["GRID"] == 12
+    assert smoke["VALIDATION_GRID"] == 17
+
+
+@pytest.mark.parametrize("name", ["VMEX_PWO_MAX_MODE", "VMEX_PWO_MAXITER"])
+def test_pwo_budget_overrides_reject_nonpositive_values(monkeypatch, name):
+    import runpy
+
+    monkeypatch.setenv("VMEX_EXAMPLES_CI", "0")
+    monkeypatch.setenv(name, "0")
+    with pytest.raises(ValueError, match=name + " must be positive"):
+        runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+
+
+def test_pwo_scalar_checkpoint_keeps_best_accepted_physical_vector(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    callback = example["scalar_checkpoint_callback"]
+    saved, monitored = [], []
+    monkeypatch.setitem(callback.__globals__, "save_seed_checkpoint",
+                        lambda deck, eq, output, label: saved.append((deck, eq, label)))
+    stage = SimpleNamespace(input_from_x=lambda x: x.copy(), equilibrium_from_x=lambda x: x.copy())
+    output = str(tmp_path / "fit")
+    record = callback(stage, np.array([1., 2.]), np.array([.1, .2]), monitored.append, output)
+    record(SimpleNamespace(x=np.array([.5, -.5]), fun=3.))
+    record(SimpleNamespace(x=np.array([.8, -.8]), fun=4.))
+    record(SimpleNamespace(x=np.array([.2, -.2]), fun=np.nan))
+    record(SimpleNamespace(x=np.array([.1, -.1]), fun=2.))
+    assert len(saved) == 2 and len(monitored) == 4
+    np.testing.assert_allclose(saved[-1][0], [1.01, 1.98])
+    np.testing.assert_array_equal(saved[-1][0], saved[-1][1])
+    assert saved[-1][2] == "best"
+    metadata = json.loads(Path(output + "_best.json").read_text())
+    assert metadata["cost"] == 2.
+    np.testing.assert_allclose(metadata["x"], [1.01, 1.98])
+
+
+def test_pwo_explicit_target_keeps_tesla_shape_and_allows_new_mirror(monkeypatch):
+    import runpy
+    import vmex.core.pwo as pwo
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    parameters = dict(bmin=.85, bmax=1.15, target_iota=-.42, t1=.3, t2=-2.)
+    target = example["make_target"]([.5], family="canonical", bmin=.1, bmax=9., b_ref=1.,
+                                    options={}, grid=24, iota_sign=-1., target_parameters=parameters)
+    spectrum = dict(bmnc_b=np.array([[1., .15]]), bmns_b=np.zeros((1, 2)),
+                    xm_b=np.array([0, 1]), xn_b=np.array([0, 0]), iota_b=np.array([-.43]), nfp=2)
+    monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: dict(spectrum))
+    first = target.compute_state(None, None)
+    spectrum["iota_b"] = np.array([-.41])
+    second = target.compute_state(None, None)
+    np.testing.assert_array_equal(first["B_target"], second["B_target"])
+    assert first["iota_b"][0] != second["iota_b"][0]
+    assert target.options["bmin"] == .85 and target.options["bmax"] == 1.15
+    assert first["mirror"][0] == pytest.approx(.15)
+    out = {**second, "residuals1d": np.zeros(1)}
+    fixed = example["target_physics_rows"](out, [1.], [.33], parameters)
+    legacy = example["target_physics_rows"](out, [1.], [.33])
+    np.testing.assert_allclose(fixed, 0., atol=1e-12)
+    assert np.linalg.norm(legacy) > 1.
+    out["iota_b"] = np.array([-.39])
+    assert example["target_physics_rows"](out, [1.], [.33], parameters)[-1] > 0
+    out["mirror"] = np.array([.01])
+    assert example["target_physics_rows"](out, [1.], [.33], parameters)[-2] > 0
+    with pytest.raises(ValueError, match="signed iota"):
+        example["make_target"]([.5], family="canonical", bmin=1., bmax=2., b_ref=1.,
+                               options={}, grid=24, iota_sign=1., target_parameters=parameters)
+    singular = example["make_target"]([.5], family="canonical", bmin=1., bmax=2., b_ref=1.,
+                                      options={}, grid=24, iota_sign=-1.,
+                                      target_parameters={**parameters, "t1": 1., "t2": 1.})
+    with pytest.raises(ValueError, match="canonical target needs"):
+        singular.compute_state(None, None)
+
+
+@pytest.mark.parametrize("change", [{"extra": 1}, {"bmin": 0}, {"bmax": .8},
+                                    {"target_iota": 0}, {"t1": np.nan}, {"t2": [2]}])
+def test_pwo_explicit_target_rejects_invalid_configuration(change):
+    import runpy
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    parameters = dict(bmin=.85, bmax=1.15, target_iota=-.42, t1=.3, t2=-2.)
+    with pytest.raises(ValueError, match="Explicit target"):
+        example["validate_target_parameters"]({**parameters, **change})
+
+
+def test_pwo_explicit_target_skips_seed_mirror_calibration(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace as NS
+
+    parameters = dict(bmin=.85, bmax=1.15, target_iota=-.42, t1=.3, t2=-2.)
+    path = tmp_path / "target.json"; path.write_text(json.dumps(parameters))
+    monkeypatch.setenv("VMEX_PWO_TARGET", str(path))
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    run = example["run"]; env = run.__globals__
+    env.update(SEED="qi", QS_INPUT=None, METHOD="scalar", FAMILY="canonical")
+    monkeypatch.setitem(env, "canonical_target_bounds", lambda *a: pytest.fail("seed mirror calibration ran"))
+    eq = NS(state=None, runtime=None, wout=NS(aspect=6., Aminor_p=.1, volavgB=1.))
+    monkeypatch.setattr(example["opt"], "solve_equilibrium", lambda *a, **k: eq)
+    monkeypatch.setattr(example["opt"], "mean_iota", lambda *a: -.42)
+    monkeypatch.setattr(example["CanonicalPwOResidual"], "compute_state", lambda *a: dict(
+        B=np.ones((1, 24, 24)), B_target=np.ones((1, 24, 24)), mirror=np.array([.33])))
+
+    def captured_factory(*args, **kwargs):
+        raise RuntimeError("reached scalar factory")
+
+    monkeypatch.setattr(example["opt"].VmecProblem, "from_loss", captured_factory)
+    with pytest.raises(RuntimeError, match="reached scalar factory"):
+        run()
+    env["FAMILY"] = "mapped"
+    with pytest.raises(ValueError, match="requires canonical"):
+        run()
+    env.update(FAMILY="canonical", METHOD="physical")
+    with pytest.raises(ValueError, match="requires canonical"):
+        run()

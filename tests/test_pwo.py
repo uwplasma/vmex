@@ -142,6 +142,23 @@ def test_canonical_residual_grid_normalization_and_both_parities():
     assert abs(float(symmetric["total"])-float(fine["total"])) > 1e-5
 
 
+def test_fixed_canonical_target_keeps_widths_and_field_derivatives():
+    kwargs = dict(**_spectrum(2), bmin=1.1, bmax=1.9, ntheta=12, nzeta=16)
+    fixed = dict(kwargs, target_iota=np.array([.7, .6]))
+    baseline = canonical_pwo_residual_from_boozer(**fixed)
+    moved = canonical_pwo_residual_from_boozer(**dict(fixed, iota_b=np.array([.65, .72])))
+    np.testing.assert_array_equal(baseline["B_target"], moved["B_target"])
+    np.testing.assert_array_equal(baseline["residuals1d"], moved["residuals1d"])
+    live = canonical_pwo_residual_from_boozer(**dict(kwargs, iota_b=np.array([.65, .72])))
+    assert np.max(abs(live["B_target"]-moved["B_target"])) > .01
+    def loss(amplitude):
+        coefficients = jnp.asarray(kwargs["bmnc_b"]).at[:, 1].set(amplitude)
+        return canonical_pwo_residual_from_boozer(**dict(fixed, bmnc_b=coefficients))["total"]
+    derivative = jax.jit(jax.grad(loss))(.08)
+    difference = (loss(.08001)-loss(.07999))/.00002
+    np.testing.assert_allclose(derivative, difference, rtol=1e-8, atol=1e-10)
+
+
 @pytest.mark.parametrize("kwargs", [dict(nfp=0), dict(bmin=0.), dict(bmax=1.1),
                                      dict(iota=-3.), dict(t1=1/3), dict(p=1.5)])
 def test_invalid_canonical_parameters_are_rejected(kwargs):

@@ -197,7 +197,7 @@ def _finish(residual, B, valid, weight):
 def canonical_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
         bmin, bmax, bmns_b=None, t1=-0.3, t2=3.0, p=2, theta_center=0.0,
         zeta_center=None, images=2, minimum_corner_margin=None, minimum_lattice_margin=0.05, ntheta=32,
-        nzeta=32, weights=None):
+        nzeta=32, weights=None, target_iota=None):
     """Normalized pointwise target fit with live signed iota and both parities.
 
     Surface weights sum to one; angular quadrature is uniform and normalized.
@@ -205,6 +205,8 @@ def canonical_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     ``minimum_lattice_margin`` prevents touching translated parallelograms.
     ``minimum_corner_margin`` optionally restores the older centered-cell
     containment restriction; by default a cut-crossing target is allowed.
+    ``target_iota`` fixes the target widths independently of the equilibrium;
+    callers must constrain the live signed iota near that construction value.
     """
     _integer(ntheta, 4, "ntheta"); _integer(nzeta, 4, "nzeta")
     if minimum_corner_margin is not None and not 0 <= minimum_corner_margin < 1:
@@ -220,7 +222,8 @@ def canonical_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
                ("theta_center", theta_center))}
     if zeta_center is not None:
         params["zeta_center"] = _surface(zeta_center, cosine.shape[0], "zeta_center")
-    target = canonical_pwo_field(theta, zeta, iota=iota[:, None, None], nfp=nfp,
+    construction_iota = iota[:, None, None] if target_iota is None else _surface(target_iota, cosine.shape[0], "target_iota")
+    target = canonical_pwo_field(theta, zeta, iota=construction_iota, nfp=nfp,
                                 p=p, images=images, **params)
     valid = valid & jnp.all(target["valid"], axis=(1, 2)) & (target["lattice_margin"][:, 0, 0] >= minimum_lattice_margin)
     if minimum_corner_margin is not None:
@@ -919,7 +922,8 @@ class CanonicalPwOResidual(_PwOResidual):
     """Periodic canonical field fit; options match its pure Boozer kernel.
 
     ``bmin`` and ``bmax`` are fixed positive physical Tesla bounds. Widths
-    depend on the live signed iota; use the reflected t1/t2 signs when
+    depend on the live signed iota unless ``target_iota`` is supplied;
+    use the reflected t1/t2 signs when
     reflecting iota. Construct a new term to change fixed target parameters,
     or call the pure kernel with explicit array parameters for joint AD.
     """
