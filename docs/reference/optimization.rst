@@ -620,12 +620,15 @@ pwO confinement continuation
 
    VMEX_PWO_METHOD=confinement VMEX_PWO_POLICY=policy.json python examples/optimization/pwO_optimization.py
 
-Install ``vmex[neoclassical]`` with NEO_JAX 1.1.1 or newer. The JSON policy supplies
-``input``, ``restart``, sorted ``surfaces``, named boundary ``parameters``
+Install ``vmex[neoclassical]`` and a NEO_JAX build supporting ``NeoConfig(reverse_mode=True)``.
+The JSON policy supplies ``input``, ``restart``, sorted ``surfaces``, optional named boundary ``parameters``
 (for example ``["RBC(0,3)", "ZBS(0,4)"]``), and optional positive ``scales`` in
 metres. Each scaled displacement is bounded to [-1, 1]. Input profiles, flux,
 R00, unselected harmonics and input axis coefficients remain fixed. This route
 requires a fixed boundary; the equilibrium axis responds to boundary changes.
+Omit ``parameters`` to vary all modes through ``max_mode``. Setting ``max_mode=8``
+raises the state resolution to at least MPOL=9, NTOR=8 and opens 288 symmetric
+coefficients; MPOL counts modes starting at zero.
 
 ``training`` and ``validation`` are nonempty lists of ``PwOActionFamilies``
 constructor dictionaries: ``reference`` (an NPZ path or spectrum mapping),
@@ -636,11 +639,18 @@ Each family's sampled action range uses its fixed reference mean, with default
 ``family_rtol=0`` allowing no increase. Its alpha span must retain at least half
 its baseline value. These are conservative search guards, not pwO identities.
 
-``global_steps`` and ``global_calls`` bound differential evolution;
-``local_calls`` bounds a full-simplex Nelder-Mead search (at least D+1 calls).
-Defaults are 2, 32 and 32. The objective is the weighted mean of
+The default ``optimizer="adjoint"`` uses a scalar equilibrium adjoint and bounded
+L-BFGS-B, with ``local_calls=32`` limiting evaluated candidates. Its loss is the weighted mean of
 ``epsilon_eff**(3/2)``, normalized by the seed's fixed weighted mean.
 Optional ``weights`` correspond to the complete, unchanged surface list.
+Squared violations of geometry, action-range and span limits carry weight 10.
+Live Boozer geometry, iota, G/I and implicitly differentiated bounce roots feed
+the loss. Host action/quadrature checks apply at each evaluated candidate;
+Two boundary differences on the adjoint's fixed residual and m=1 gauge must agree
+within 2% plus 1e-6 absolute, with frozen Newton residuals below 1e-12.
+Discrete family discovery and acceptance remain independent checks.
+``optimizer="derivative_free"`` retains differential evolution (``global_steps=2``,
+``global_calls=32``) followed by Nelder-Mead (at least D+1 ``local_calls``).
 
 Acceptance re-solves both boundaries with ``check_resolution=[ns,mpol,ntor,ntheta,nzeta]``
 (default: three times as many radial intervals and increased angular resolution),

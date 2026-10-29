@@ -9,6 +9,8 @@ import numpy as np
 __all__ = [
     "diagnostic_neo_config",
     "epsilon_effective_from_boozer",
+    "epsilon_effective_from_spectrum",
+    "epsilon_effective_state",
     "epsilon_effective_from_wout",
 ]
 
@@ -85,6 +87,57 @@ def epsilon_effective_from_boozer(booz: Any, *, config=None):
     else:
         surfaces = np.arange(np.asarray(values).size, dtype=float)
     return surfaces, values
+
+
+def epsilon_effective_from_spectrum(spectrum, *, config=None):
+    r"""Return ``(s, epsilon_eff**(3/2))`` from a live VMEX Boozer spectrum.
+
+    ``spectrum`` is the surface-first result of
+    :func:`~vmex.core.omnigenity.boozer_spectrum_state` with
+    ``geometry=True``. Full R/Z and ``phi - zeta_B`` harmonics, both magnetic
+    parities, and live iota/G/I feed NEO. No WOUT or NumPy conversion enters
+    this path, so a JAX-native NEO configuration composes with state and
+    implicit-boundary differentiation. Surface selection and mode lists
+    remain static. The returned profile has physical NEO units and carries
+    no objective weights or seed normalization.
+
+    Scalar VJPs require ``NeoConfig(reverse_mode=True)``; the default NEO
+    path supports forward JVPs. Reverse mode currently supports first derivatives.
+    """
+    import jax.numpy as jnp
+
+    geometry = ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b",
+                "rmns_b", "zmnc_b", "pmnc_b", "bmns_b")
+    # Include sine partners even for symmetric inputs. This also avoids
+    # inspecting traced coefficient values to infer stellarator symmetry.
+    booz = {name: jnp.asarray(spectrum[name]).T for name in geometry}
+    booz.update(
+        nfp_b=int(spectrum["nfp"]), ns_b=int(booz["bmnc_b"].shape[1]),
+        mode_first=True, asym=True,
+        ixm_b=spectrum["xm_b"], ixn_b=spectrum["xn_b"],
+        iota_b=spectrum["iota_b"], buco_b=spectrum["I_b"],
+        bvco_b=spectrum["G_b"], s_b=spectrum["s_b"],
+    )
+    return epsilon_effective_from_boozer(booz, config=config)
+
+
+def epsilon_effective_state(
+    state, rt, *, surfaces, mboz: int = 16, nboz: int = 12,
+    oversample: int = 2, config=None,
+):
+    r"""Traceable physical ``epsilon_eff**(3/2)`` on selected state surfaces.
+
+    Use :func:`epsilon_effective_from_spectrum` when other objective terms
+    share the same live Boozer transform. A scalar loss can reduce this
+    profile with its explicitly chosen fixed surface weights.
+    """
+    from .omnigenity import boozer_spectrum_state
+
+    spectrum = boozer_spectrum_state(
+        state, rt, surfaces=surfaces, mboz=mboz, nboz=nboz,
+        oversample=oversample, geometry=True,
+    )
+    return epsilon_effective_from_spectrum(spectrum, config=config)
 
 
 def epsilon_effective_from_wout(

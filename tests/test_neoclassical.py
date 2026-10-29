@@ -16,6 +16,86 @@ from vmex.core import neoclassical
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
+@pytest.mark.parametrize("lasym", [False, True])
+def test_state_spectrum_adapter_preserves_live_geometry_and_ad(monkeypatch, lasym):
+    """Every physical field survives layout conversion and both AD directions."""
+    import jax
+    import jax.numpy as jnp
+
+    names = ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b",
+             "rmns_b", "zmnc_b", "pmnc_b", "bmns_b")
+    reference = np.arange(1., 7.).reshape(2, 3) / 10
+    config = object()
+
+    def spectrum(x):
+        fields = {name: (i + 1) * reference * x[i]
+                  if lasym or i < 4 else jnp.zeros_like(reference)
+                  for i, name in enumerate(names)}
+        return dict(fields, nfp=3, xm_b=np.array([0, 1, 2]),
+                    xn_b=np.array([0, 3, -3]), iota_b=x[8] * jnp.array([.4, .5]),
+                    G_b=x[9] * jnp.array([2., 3.]), I_b=x[10] * jnp.array([.1, .2]),
+                    s_b=jnp.array([.25, .75]))
+
+    def run_neo(booz, **kwargs):
+        assert booz["nfp_b"] == 3 and booz["ns_b"] == 2
+        assert booz["mode_first"] is True and booz["asym"] is True
+        assert kwargs == dict(config=config, use_jax=True, progress=False, jax_surface_scan=True)
+        # Distinct mode and field coefficients detect a wrong transpose,
+        # missing parity, or a changed sign of the toroidal-angle harmonics.
+        profile = sum((i + 1) * jnp.array([1., 2., 4.]) @ booz[name]
+                      for i, name in enumerate(names))
+        profile += 3 * booz["iota_b"] + 5 * booz["buco_b"] + 7 * booz["bvco_b"]
+        return SimpleNamespace(eps_eff=profile ** 2)
+
+    monkeypatch.setattr(neoclassical, "_neo_imports", lambda: (None, run_neo))
+    weights = jnp.array([.3, .7])
+
+    def loss(x):
+        surfaces, profile = neoclassical.epsilon_effective_from_spectrum(spectrum(x), config=config)
+        return weights @ profile + 0 * jnp.sum(surfaces)
+
+    def oracle(x):
+        fields = spectrum(x)
+        profile = sum((i + 1) * (fields[name] @ jnp.array([1., 2., 4.]))
+                      for i, name in enumerate(names))
+        return weights @ (profile + 3 * fields["iota_b"] + 5 * fields["I_b"] + 7 * fields["G_b"]) ** 2
+
+    x = jnp.linspace(.8, 1.2, 11)
+    direction = jnp.linspace(-.3, .4, 11)
+    value, gradient = jax.jit(jax.value_and_grad(loss))(x)
+    expected, expected_gradient = jax.value_and_grad(oracle)(x)
+    np.testing.assert_allclose(value, expected, rtol=1e-13)
+    np.testing.assert_allclose(gradient, expected_gradient, rtol=1e-13, atol=1e-13)
+    _, tangent = jax.jit(lambda p: jax.jvp(loss, (p,), (direction,)))(x)
+    _, pullback = jax.vjp(loss, x)
+    np.testing.assert_allclose(tangent, pullback(jnp.array(1.))[0] @ direction, rtol=1e-13)
+    step = 1e-5
+    np.testing.assert_allclose(tangent, (oracle(x + step*direction) - oracle(x - step*direction))/(2*step), rtol=1e-8)
+
+
+def test_state_ripple_wrapper_requests_full_shared_boozer_geometry(monkeypatch):
+    from vmex.core import omnigenity
+
+    calls = {}
+    state, runtime, config, spectrum = object(), object(), object(), object()
+
+    def transform(st, rt, **kwargs):
+        assert st is state and rt is runtime
+        calls.update(kwargs)
+        return spectrum
+
+    def evaluate(sp, **kwargs):
+        assert sp is spectrum and kwargs == dict(config=config)
+        return "actual_s", "physical_eps32"
+
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", transform)
+    monkeypatch.setattr(neoclassical, "epsilon_effective_from_spectrum", evaluate)
+    assert neoclassical.epsilon_effective_state(
+        state, runtime, surfaces=[.3, .7], mboz=8, nboz=6, oversample=3,
+        config=config) == ("actual_s", "physical_eps32")
+    assert calls == dict(surfaces=[.3, .7], mboz=8, nboz=6, oversample=3, geometry=True)
+
+
 def test_epsilon_effective_boozer_adapter_preserves_surface_labels(monkeypatch):
     values = np.array([1.0e-4, 2.0e-4])
     calls = {}

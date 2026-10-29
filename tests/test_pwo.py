@@ -831,6 +831,46 @@ def _periodic_action_family():
     return spectrum, chart
 
 
+@pytest.mark.parametrize("periodic", [False, True])
+def test_action_family_jax_vjp_matches_continued_physical_actions(periodic):
+    spectrum, chart = (_periodic_action_family if periodic else _action_family)()
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    point = np.r_[spectrum["bmnc_b"], spectrum["bmns_b"], .01, -1.1, .2]
+
+    def unpack(x):
+        return dict(spectrum, bmnc_b=x[:3], bmns_b=x[3:6], iota_b=x[6], G_b=x[7], I_b=x[8])
+
+    certified = objective(unpack(point))
+    keys = ("value", "raw_Jalpha2", "fixed_relative_variance")
+    def values(x):
+        result = objective.jax_components(unpack(x), continuation=certified, quadrature_order=32)
+        return jnp.stack([result[key] for key in keys])
+
+    result, pullback = jax.vjp(jax.jit(values), jnp.asarray(point))
+    np.testing.assert_allclose(result, [certified[key] for key in keys], rtol=2e-8, atol=2e-10)
+    cotangent = np.array([.7, .2, .3])
+    gradient, = pullback(jnp.asarray(cotangent))
+    finite_difference = []
+    for direction in np.eye(len(point)):
+        step = 2e-6
+        plus, minus = (objective(unpack(point+sign*step*direction)) for sign in (1, -1))
+        finite_difference.append(sum(weight*(plus[key]-minus[key])/(2*step)
+                                     for key, weight in zip(keys, cotangent)))
+    np.testing.assert_allclose(gradient, finite_difference, rtol=4e-5, atol=2e-6)
+    # Forward mode exercises the same implicit roots independently of the VJP.
+    direction = jnp.asarray(np.linspace(-.2, .2, len(point)))
+    _, tangent = jax.jvp(values, (jnp.asarray(point),), (direction,))
+    np.testing.assert_allclose(cotangent@tangent, gradient@direction, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize("periodic", [False, True])
+def test_action_family_jax_invalidates_singular_or_lost_roots(periodic):
+    spectrum, chart = (_periodic_action_family if periodic else _action_family)()
+    objective = PwOActionFamilies(spectrum, [chart], length=.4)
+    invalid = dict(spectrum, bmnc_b=jnp.array([1., 0., .02]))
+    assert not np.isfinite(objective.jax_components(invalid)["value"])
+
+
 def test_periodic_action_family_uses_fixed_cuts_and_independent_full_alpha_wells(monkeypatch):
     spectrum, chart = _periodic_action_family()
     monkeypatch.setattr(PwOActionFamilies, '_event',

@@ -839,11 +839,77 @@ def run_centered_variance_step(policy, *, output_name="pwO_optimized"):
     return summary
 
 
+def confinement_loss(equilibrium, surfaces, band, scorers, baseline, weights, config, tolerance):
+    """Physical ripple and continuous constraint penalties for one scalar adjoint."""
+    from vmex.core.neoclassical import epsilon_effective_from_spectrum
+    from vmex.core.statephysics import _aspect_scalars, _field_chain
+
+    def spectrum(state, runtime):
+        return boozer_spectrum_state(state, runtime, surfaces=surfaces,
+            mboz=band, nboz=band, oversample=1, geometry=True)
+
+    def surface(sp, index):
+        return {k: sp[k][index:index+1] if k in ("bmnc_b", "bmns_b", "iota_b", "G_b", "I_b", "s_b") else sp[k]
+                for k in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b", "G_b", "I_b", "s_b", "nfp")}
+
+    initial = spectrum(equilibrium.state, equilibrium.runtime)
+    indices = [int(np.argmin(abs(np.asarray(initial["s_b"])-float(s.reference["s_b"][0])))) for s in scorers]
+    reports = [scorer(surface(initial, i)) for scorer, i in zip(scorers, indices)]
+
+    def validate(state, runtime):
+        sp = spectrum(state, runtime)
+        for scorer, i, report in zip(scorers, indices, reports):
+            candidate = surface(sp, i)
+            actual = scorer(candidate)
+            traced = scorer.jax_components(candidate, continuation=report)
+            for a, b in zip(traced["families"], actual["families"]):
+                if (not np.allclose(a["actions"], [r["J"] for r in b["rows"]], rtol=1e-7, atol=1e-10)
+                        or not np.allclose(a["alpha_domain"], b["alpha_domain"], rtol=0, atol=1e-9)):
+                    raise ValueError("Action branch or quadrature disagrees with independent host integration")
+    validate(equilibrium.state, equilibrium.runtime)
+    _, eps = epsilon_effective_from_spectrum(initial, config=config)
+    if not np.allclose(eps, baseline["eps32"], rtol=1e-3, atol=1e-10):
+        raise ValueError("State-native ripple disagrees with independent WOUT evaluation")
+    reference = jnp.asarray(baseline["metrics"])
+    limits = jnp.asarray([.03, .03, .05]+[.05, .10, .05]*len(surfaces))
+    range_ref, span_ref = (jnp.asarray(baseline[k]) for k in ("family_ranges", "family_spans"))
+    normalizer = float(weights@np.asarray(baseline["eps32"]))
+    theta = jnp.arange(128)*2*jnp.pi/128
+    poloidal = initial["xm_b"][:, None]*theta
+    toroidal = initial["xn_b"][:, None]*theta/initial["nfp"]
+    ct, st, cz, sz = jnp.cos(poloidal), jnp.sin(poloidal), jnp.cos(toroidal), jnp.sin(toroidal)
+
+    def loss(state, runtime):
+        sp = spectrum(state, runtime)
+        _, eps = epsilon_effective_from_spectrum(sp, config=config)
+        c, s = sp["bmnc_b"][:, :, None], sp["bmns_b"][:, :, None]
+        field = jnp.einsum("smi,mj->sij", c*ct+s*st, cz)+jnp.einsum("smi,mj->sij", c*st-s*ct, sz)
+        low, high = jnp.min(field, axis=(1, 2)), jnp.max(field, axis=(1, 2))
+        radius, _, aspect, volume = _aspect_scalars(state, runtime)
+        energy = _field_chain(state, runtime)[-1]
+        mean_field = jnp.sqrt(2*energy.wb*(2*jnp.pi)**2/volume)
+        metrics = jnp.concatenate((jnp.stack((aspect, radius, mean_field)),
+            jnp.stack((jnp.mean(field, axis=(1, 2)), (high-low)/(high+low), sp["iota_b"]), axis=1).ravel()))
+        ranges, spans = [], []
+        for scorer, i, report in zip(scorers, indices, reports):
+            out = scorer.jax_components(surface(sp, i), continuation=report)
+            for family, anchor in zip(out["families"], scorer.initial["families"]):
+                ranges.append(family["action_range_m"]/anchor["mean_action_m"])
+                spans.append(jnp.diff(family["alpha_domain"])[0])
+        penalties = jnp.concatenate((jnp.maximum(jnp.abs(metrics/reference-1)/limits-1, 0),
+            jnp.maximum((jnp.stack(ranges)-(1+tolerance)*range_ref)/jnp.maximum(range_ref, 1e-8), 0),
+            jnp.maximum(.5-jnp.stack(spans)/span_ref, 0)))
+        return jnp.asarray(weights)@eps/normalizer+10*jnp.vdot(penalties, penalties)
+    loss.validate = validate
+    return loss
+
+
 def run_confinement(policy, *, output_name="pwO_optimized"):
     """Bounded ripple search with supplied local orbit-family guards.
 
-    Preserve the input profiles and resolution. Every trial restarts the same
-    WOUT. Charts are discovered independently; their continuation is local and
+    Preserve profiles; explicit max_mode may raise the state resolution.
+    Adjoint trials warm-start; final checks restart the original WOUT.
+    Charts are discovered independently; their continuation is local and
     does not certify the topology outside the supplied samples or full pwO.
     """
     from booz_xform_jax import Booz_xform
@@ -855,9 +921,17 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     source = vj.read_wout(policy["restart"])
     if inp.lfreeb:
         raise ValueError("Confinement continuation requires a fixed-boundary input")
-    max_mode = max(int(inp.mpol)-1, int(inp.ntor))
+    optimizer = policy.get("optimizer", "adjoint")
+    if optimizer not in ("adjoint", "derivative_free"):
+        raise ValueError("optimizer must be adjoint or derivative_free")
+    max_mode = int(policy.get("max_mode", max(int(inp.mpol)-1, int(inp.ntor))))
+    if max_mode < 1:
+        raise ValueError("max_mode must be positive")
+    if "max_mode" in policy and (max_mode >= inp.mpol or max_mode > inp.ntor):
+        inp = inp.change_resolution(mpol=max(int(inp.mpol), max_mode+1), ntor=max(int(inp.ntor), max_mode),
+            ntheta=max(int(inp.ntheta), 2*max_mode+8), nzeta=max(int(inp.nzeta), 2*max_mode+8))
     names = opt.boundary_dof_names(inp, max_mode, vary_major_radius=False)
-    selected = policy["parameters"]
+    selected = policy.get("parameters", names)
     if not selected or len(set(selected)) != len(selected) or any(n not in names for n in selected):
         raise ValueError("parameters must be distinct available boundary modes, excluding R00")
     indices = np.array([names.index(n) for n in selected])
@@ -874,8 +948,9 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     band = int(policy.get("band", 32)); check_band = int(policy.get("check_band", 40))
     global_steps = int(policy.get("global_steps", 2)); local_calls = int(policy.get("local_calls", 32))
     global_calls = int(policy.get("global_calls", 32))
-    if band < 2 or check_band <= band or global_steps < 0 or global_calls < 0 or local_calls < len(indices)+1:
-        raise ValueError("Require a finer validation band, nonnegative global budgets and at least D+1 local calls")
+    minimum_calls = len(indices)+1 if optimizer == "derivative_free" else 1
+    if band < 2 or check_band <= band or global_steps < 0 or global_calls < 0 or local_calls < minimum_calls:
+        raise ValueError("Require a finer validation band, nonnegative global budgets and local calls >= D+1 (derivative_free) or 1 (adjoint)")
     settings = dict(theta_n=192, phi_n=192, npart=80, multra=2, nstep_per=80,
         nstep_min=800, nstep_max=2000, acc_req=.005, ref_swi=2,
         max_rational_field_periods=100000, rational_surface_policy="error")
@@ -910,7 +985,7 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
             or any(a < b for a, b in zip(resolution[1:], [inp.mpol, inp.ntor, inp.ntheta, inp.nzeta]))):
         raise ValueError("check_resolution must refine NS and retain all angular modes/grid points")
     started = time.perf_counter()
-    summary = dict(method="confinement", policy=policy, accepted=False, pwO_qualified=False,
+    summary = dict(method="confinement", optimizer=optimizer, parameters=selected, policy=policy, accepted=False, pwO_qualified=False,
         research_validation_complete=False, cases=[], objective="weighted epsilon_eff^(3/2) / fixed seed weighted mean",
         scope="Bounded search and supplied local families only; independent global orbit census still required")
 
@@ -996,6 +1071,9 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
                     mpol=mpol, ntor=ntor, ntheta=ntheta, nzeta=nzeta)
         print(f"MHD solve: NS={deck.ns_array[-1]}, refinement={refinement}", flush=True)
         eq = opt.solve_equilibrium(deck, initial_state=restart_state(source, deck), raise_on_max_iterations=True)
+        return certify(eq)
+
+    def certify(eq):
         ftol = float(inp.ftol_array[-1])
         errors = np.array([float(getattr(eq.result, k)) for k in ("fsqr", "fsqz", "fsql")])
         if (float(eq.inp.ftol_array[-1]) != ftol or not np.isfinite(ftol) or ftol <= 0
@@ -1031,7 +1109,7 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     class BudgetReached(Exception):
         pass
 
-    def objective(x):
+    def objective(x, eq=None):
         key = tuple(np.round(x, 12))
         if key in cache:
             return cache[key]
@@ -1040,7 +1118,8 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
         row = dict(x=np.asarray(x).tolist(), valid=False); summary["cases"].append(row)
         value = 1e6; summary["status"] = "search"; save()
         try:
-            eq = solve(x); measured = score(eq, 0); row.update(measured)
+            eq = solve(x) if eq is None else certify(eq)
+            measured = score(eq, 0); row.update(measured)
             row["valid"] = admissible(measured, baseline)
             if row["valid"]:
                 value = float(weights@np.asarray(measured["eps32"])/(weights@np.asarray(baseline["eps32"])))
@@ -1053,18 +1132,68 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
         return value
 
     bounds = [(-1., 1.)]*len(indices)
-    if global_steps and global_calls:
+    if optimizer == "derivative_free" and global_steps and global_calls:
         try:
             differential_evolution(objective, bounds, maxiter=global_steps, popsize=4,
                 seed=int(policy.get("seed", 0)), polish=False, x0=np.zeros(len(indices)), workers=1)
         except BudgetReached:
             pass
     budget = len(cache)+local_calls
-    simplex = np.tile(best["x"], (len(indices)+1, 1))
-    for j in range(len(indices)):
-        simplex[j+1, j] += .1 if best["x"][j] <= .9 else -.1
-    minimize(objective, best["x"], method="Nelder-Mead", bounds=bounds,
-        options=dict(maxfev=local_calls, initial_simplex=simplex, xatol=1e-3))
+    if optimizer == "adjoint":
+        import jax
+        from vmex.core import implicit as im
+
+        loss = confinement_loss(baseline_eq, surfaces, band, scorers[0], baseline, weights,
+            NeoConfig(**dict(settings, reverse_mode=True)), tolerance)
+        problem = opt.VmecProblem.from_loss(inp, loss, max_mode=max_mode, vary_major_radius=False,
+            restart_from=baseline_eq, max_fsq_ratio=1., refine_tol=1e-13, adjoint_tol=1e-8).subproblem(active=selected)
+        origin = problem.x0.copy()
+        def value_and_gradient(y):
+            if tuple(np.round(y, 12)) not in cache and len(cache) >= budget:
+                raise BudgetReached
+            x = origin+scales*y
+            value, gradient = problem.value_and_grad(x)
+            eq = problem.equilibrium_from_x(x)
+            loss.validate(eq.state, eq.runtime)
+            if not np.all(np.isfinite([value, *gradient])):
+                raise RuntimeError("Nonfinite confinement value or adjoint")
+            objective(y, eq)
+            return value, scales*gradient
+        zero = np.zeros(len(indices))
+        value, gradient = value_and_gradient(zero)
+        direction = np.random.default_rng(0).normal(size=len(indices))
+        direction /= np.linalg.norm(direction)
+        steps = [1e-2, 5e-3]
+        cfg = problem.metadata["config"]
+        params = im.params_from_input(inp, device=cfg.device)
+        full_direction = jnp.zeros_like(jnp.asarray(x0)).at[indices].set(scales*direction)
+        _, arrays = jax.jvp(lambda x: opt.boundary_arrays_from_x(inp, x, max_mode),
+                            (jnp.asarray(x0),), (full_direction,))
+        delta = replace(jax.tree.map(jnp.zeros_like, params), **dict(zip(("rbc", "zbs", "rbs", "zbc"), arrays)))
+        # Match the adjoint's fixed residual and released m=1 gauge.
+        checks = [im.frozen_path_directional_fd(params, cfg, loss, delta, h=h,
+                  newton_steps=20, newton_rtol=1e-13) for h in steps]
+        differences = [d for d, _ in checks]
+        residuals = np.asarray([info["newton_res"] for _, info in checks])
+        tangent = float(gradient@direction)
+        summary["gradient_check"] = dict(value=float(value), adjoint=tangent, finite_differences=differences,
+            steps=steps, frozen_residuals=residuals.tolist(), path="fixed residual and m=1 gauge")
+        save()
+        if (not np.all(np.isfinite(residuals)) or np.max(residuals) > 1e-12
+                or not np.all(np.isfinite([value, *gradient, *differences]))) or any(
+                abs(d-tangent) > 1e-6+.02*max(abs(d), abs(tangent)) for d in differences):
+            raise RuntimeError("Confinement adjoint failed the independent boundary directional check")
+        try:
+            minimize(value_and_gradient, zero, jac=True, method="L-BFGS-B", bounds=bounds,
+                options=dict(maxiter=local_calls, maxfun=local_calls, maxls=10, ftol=1e-12, gtol=1e-7))
+        except BudgetReached:
+            pass
+    else:
+        simplex = np.tile(best["x"], (len(indices)+1, 1))
+        for j in range(len(indices)):
+            simplex[j+1, j] += .1 if best["x"][j] <= .9 else -.1
+        minimize(objective, best["x"], method="Nelder-Mead", bounds=bounds,
+            options=dict(maxfev=local_calls, initial_simplex=simplex, xatol=1e-3))
     summary["best_training"] = dict(x=best["x"].tolist(), objective=best["value"])
     if best["value"] < 1:
         save_seed_checkpoint(best["eq"].inp, best["eq"], output_name, "candidate")

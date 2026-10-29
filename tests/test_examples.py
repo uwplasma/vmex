@@ -2728,7 +2728,7 @@ def _pwo_confinement_case(tmp_path, monkeypatch, mode='valid', lasym=False):
     def charts(group):
         return [dict(reference={'nfp': seed.nfp, 's_b': [s]},
                      charts=[{'group': group, 'level_T': 1.1}], length=1.) for s in [.25, .75]]
-    policy = dict(input=str(input_path), restart='external.nc', parameters=parameters, scales=.0003,
+    policy = dict(optimizer='derivative_free', input=str(input_path), restart='external.nc', parameters=parameters, scales=.0003,
         surfaces=[.25, .75], training=charts('training'), validation=charts('validation'),
         global_steps=1 if mode == 'budget' else 0, global_calls=2, local_calls=len(parameters)+1)
     return run, policy, seed, calls, selected, x0
@@ -2828,6 +2828,7 @@ def test_pwo_confinement_distinguishes_surface_roundoff_from_physical_shift(tmp_
 
 
 @pytest.mark.parametrize('updates', [dict(parameters=['RBC(0,0)']), dict(scales=0.),
+    dict(optimizer='unknown'), dict(max_mode=0),
     dict(surfaces=[.75, .25]), dict(neo={'rational_surface_policy': 'approximate'}),
     dict(training=[]), dict(training=[{'reference': {'nfp': 99, 's_b': [.25]}}]),
     dict(family_rtol=-1), dict(check_resolution=[2, 1, 1, 2, 2]), dict(free=True)])
@@ -2853,3 +2854,186 @@ def test_pwo_confinement_policy_dispatch(tmp_path, monkeypatch, bad):
             env['run'](beta_targets=(0., .01))
     else:
         assert env['run']() == {'accepted': True}
+
+
+@pytest.mark.parametrize('disagreement', [None, 'ripple', 'actions', 'candidate_actions', 'candidate_branch'])
+def test_pwo_confinement_scalar_loss_has_live_physics_and_penalty_gradients(tmp_path, monkeypatch, disagreement):
+    import jax
+    import jax.numpy as jnp
+    from types import SimpleNamespace as NS
+    from vmex.core import neoclassical, statephysics
+    run, _, _, _, _, _ = _pwo_confinement_case(tmp_path, monkeypatch)
+    env = run.__globals__
+
+    def spectrum(state, runtime, **kwargs):
+        assert kwargs['geometry'] is True and kwargs['oversample'] == 1
+        return dict(bmnc_b=jnp.array([[1+.01*state[0], .2*(1+.2*state[1])]]),
+                    bmns_b=jnp.zeros((1, 2)), xm_b=np.array([0, 1]), xn_b=np.array([0, 2]),
+                    iota_b=jnp.array([.6+.01*state[2]]), G_b=jnp.array([1.]), I_b=jnp.array([0.]),
+                    s_b=jnp.array([.25]), nfp=2)
+
+    class Family:
+        reference = {'s_b': [.25]}
+        initial = {'families': [dict(mean_action_m=1.1)]}
+        def __call__(self, sp):
+            x = float((sp['bmnc_b'][0, 0]-1)/.01)
+            actions = np.array([1., 1.1, 1.2])+x*np.array([-.02, .01, .05])
+            return {'families': [dict(rows=[{'J': v} for v in actions], alpha_domain=[0., 2*(1-.8*x)])]}
+        def jax_components(self, sp, **kwargs):
+            x = (sp['bmnc_b'][0, 0]-1)/.01
+            actions = jnp.array([1., 1.1, 1.2])+x*jnp.array([-.02, .01, .05])
+            return {'families': [dict(actions=actions+(1 if disagreement == 'actions' else .01*x if disagreement == 'candidate_actions' else 0),
+                action_range_m=jnp.max(actions)-jnp.min(actions),
+                alpha_domain=jnp.array([0., 2*(1-.8*x)+(.01*x if disagreement == 'candidate_branch' else 0)]))]}
+
+    monkeypatch.setitem(env, 'boozer_spectrum_state', spectrum)
+    def ripple(sp, **kwargs):
+        return sp['s_b'], sp['bmnc_b'][:, 0]**2+.3*sp['iota_b']+.02*sp['G_b']
+    monkeypatch.setattr(neoclassical, 'epsilon_effective_from_spectrum', ripple)
+    monkeypatch.setattr(statephysics, '_aspect_scalars',
+        lambda st, rt: (.2*(1+.05*st[2]), 0., 6*(1+.04*st[0]), 1.))
+    monkeypatch.setattr(statephysics, '_field_chain',
+        lambda st, rt: (NS(wb=(1+.08*st[1])**2/(2*(2*jnp.pi)**2)),))
+    baseline = dict(eps32=[1.2+(1 if disagreement == 'ripple' else 0)],
+        metrics=[6., .2, 1., 1., .2, .6], family_ranges=[.2/1.1], family_spans=[2.])
+    arguments = (NS(state=jnp.zeros(3), runtime=None), [.25], 8, [Family()], baseline, np.array([1.]), None, 0.)
+    if disagreement in ['ripple', 'actions']:
+        with pytest.raises(ValueError, match='disagrees' if disagreement == 'ripple' else 'quadrature'):
+            env['confinement_loss'](*arguments)
+        return
+    loss = env['confinement_loss'](*arguments)
+    if disagreement:
+        with pytest.raises(ValueError, match='branch or quadrature'):
+            loss.validate(jnp.array([.8, .9, .7]), None)
+        return
+    value_and_gradient = jax.jit(jax.value_and_grad(lambda st: loss(st, None)))
+    np.testing.assert_allclose(value_and_gradient(jnp.zeros(3))[0], 1., atol=1e-13)
+    point, direction = jnp.array([.8, .9, .7]), jnp.array([.2, -.3, .4])
+    value, gradient = value_and_gradient(point)
+    assert value > float(ripple(spectrum(point, None, geometry=True, oversample=1))[1][0]/1.2)
+    assert np.all(np.isfinite(gradient)) and np.all(np.abs(gradient) > 1e-5)
+    for step in [1e-4, 5e-5]:
+        fd = (loss(point+step*direction, None)-loss(point-step*direction, None))/(2*step)
+        np.testing.assert_allclose(gradient@direction, fd, rtol=2e-6, atol=1e-8)
+
+
+def _pwo_confinement_adjoint_case(tmp_path, monkeypatch, mode='valid', all_modes=False):
+    import jax
+    import jax.numpy as jnp
+    from dataclasses import replace
+    from types import SimpleNamespace as NS
+    from vmex.core import implicit as im
+    run, policy, seed, calls, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, mode)
+    env, opt = run.__globals__, run.__globals__['opt']
+    policy.pop('optimizer')  # The default is the scalar adjoint.
+    policy.update(global_steps=1, scales=.0003 if all_modes else [.0002, .0005], local_calls=2)
+    if all_modes:
+        policy.pop('parameters'); policy['max_mode'] = 8
+    def loss_factory(*args):
+        assert args[-2].reverse_mode is True
+        def loss(state, runtime):
+            return jnp.sum(state)
+        loss.validate = lambda state, runtime: None
+        return loss
+    monkeypatch.setitem(env, 'confinement_loss', loss_factory)
+
+    def factory(inp, loss, **kwargs):
+        names = opt.boundary_dof_names(inp, kwargs['max_mode'])
+        origin = opt.pack_boundary(inp, kwargs['max_mode'])
+        calls.problem = NS(inp=inp, kwargs=kwargs, names=names, origins=[], gradients=[])
+        def subproblem(*, active):
+            ids = np.array([names.index(n) for n in active]); x0 = origin[ids].copy()
+            scales = np.broadcast_to(policy['scales'], x0.shape)
+            coefficients = jnp.linspace(.2, .4, len(ids))
+            def fun(x):
+                return 1+jnp.vdot((x-jnp.asarray(x0))/jnp.asarray(scales), coefficients)
+            pair = jax.jit(jax.value_and_grad(fun))
+            def value_and_grad(x):
+                value, gradient = pair(x)
+                calls.problem.origins.append(np.array(x)); calls.problem.gradients.append(np.array(gradient))
+                factor = np.nan if mode == 'nonfinite' or (mode == 'trial_nonfinite' and np.any(x != x0)) else 2 if mode == 'gradient' else 1
+                return float(value), np.asarray(gradient)*factor
+            def equilibrium(x):
+                full = origin.copy(); full[ids] = x
+                deck = opt.unpack_boundary(inp, full, kwargs['max_mode'])
+                eq = opt.solve_equilibrium(deck,
+                    initial_state=env['restart_state'](env['vj'].read_wout('external.nc'), deck),
+                    raise_on_max_iterations=True)
+                eq.state, eq.runtime = np.asarray(x), None
+                return eq
+            cfg = NS(device=None, inp=inp, max_mode=kwargs['max_mode'], ids=ids, scales=scales, coefficients=coefficients)
+            return NS(x0=x0, value_and_grad=value_and_grad, equilibrium_from_x=equilibrium, metadata={'config': cfg})
+        return NS(subproblem=subproblem)
+    monkeypatch.setattr(opt.VmecProblem, 'from_loss', factory)
+    def frozen(params, cfg, loss, delta, *, h, newton_steps, newton_rtol):
+        assert newton_steps == 20 and newton_rtol == 1e-13
+        deck = replace(cfg.inp, **{key: np.asarray(getattr(delta, key)) for key in ('rbc', 'zbs', 'rbs', 'zbc')})
+        dx = opt.pack_boundary(deck, cfg.max_mode)[cfg.ids]
+        return float((dx/cfg.scales)@cfg.coefficients), {'newton_res': [1e-8 if mode == 'residual' else 1e-14]*2}
+    monkeypatch.setattr(im, 'frozen_path_directional_fd', frozen)
+    def local(pair, zero, **kwargs):
+        calls.local.append(kwargs)
+        assert kwargs['jac'] is True and kwargs['method'] == 'L-BFGS-B'
+        point = np.full(len(zero), -.1); point[0] = .2
+        value, gradient = pair(point)
+        np.testing.assert_allclose(gradient, np.linspace(.2, .4, len(zero)), rtol=1e-13)
+        assert np.isfinite(value)
+        return NS()
+    monkeypatch.setitem(env, 'minimize', local)
+    return run, policy, seed, calls
+
+
+@pytest.mark.parametrize('all_modes', [False, True])
+def test_pwo_confinement_adjoint_scales_selected_coefficients_and_opens_mode8(tmp_path, monkeypatch, all_modes):
+    run, policy, seed, calls = _pwo_confinement_adjoint_case(tmp_path, monkeypatch, all_modes=all_modes)
+    result = run(policy, output_name='adjoint')
+    assert result['accepted'] and result['optimizer'] == 'adjoint' and calls.global_ == 0
+    assert len(calls.local) == 1 and result['gradient_check']['finite_differences']
+    np.testing.assert_allclose(result['gradient_check']['finite_differences'], result['gradient_check']['adjoint'], rtol=1e-10)
+    assert calls.problem.kwargs['restart_from'].inp.mpol == calls.problem.inp.mpol
+    assert calls.problem.kwargs['vary_major_radius'] is False
+    assert calls.problem.inp.rbc[calls.problem.inp.ntor, 0] == seed.rbc[seed.ntor, 0]
+    if all_modes:
+        assert calls.problem.inp.mpol == 9 and calls.problem.inp.ntor == 8
+        assert len(result['parameters']) == len(calls.problem.names) == 288
+        assert 'RBC(8,8)' in result['parameters'] and 'RBC(0,0)' not in result['parameters']
+    else:
+        assert result['parameters'] == policy['parameters']
+        displacement = calls.problem.origins[-1]-calls.problem.origins[0]
+        np.testing.assert_allclose(displacement, np.asarray(policy['scales'])*[.2, -.1], atol=1e-17)
+
+
+@pytest.mark.parametrize('mode', ['gradient', 'residual', 'nonfinite', 'trial_nonfinite'])
+def test_pwo_confinement_adjoint_gradient_failure_stops_before_promotion(tmp_path, monkeypatch, mode):
+    run, policy, _, calls = _pwo_confinement_adjoint_case(tmp_path, monkeypatch, mode)
+    with pytest.raises(RuntimeError, match='directional check' if mode in ('gradient', 'residual') else 'Nonfinite'):
+        run(policy, output_name='bad_gradient')
+    assert len(calls.local) == (1 if mode == 'trial_nonfinite' else 0) and calls.global_ == 0
+    assert not (tmp_path/'input.bad_gradient').exists()
+    if mode != 'nonfinite':
+        assert json.loads((tmp_path/'bad_gradient_summary.json').read_text())['gradient_check']
+
+
+def test_pwo_confinement_adjoint_budget_stops_before_another_gradient(tmp_path, monkeypatch):
+    run, policy, _, calls = _pwo_confinement_adjoint_case(tmp_path, monkeypatch)
+    policy['local_calls'] = 1
+    def search(pair, zero, **kwargs):
+        pair(zero+.1)
+        pair(zero+.2)
+        pytest.fail('Candidate budget did not stop the search')
+    monkeypatch.setitem(run.__globals__, 'minimize', search)
+    result = run(policy, output_name='bounded')
+    assert len(result['cases']) == 1 and len(calls.problem.gradients) == 2
+
+
+@pytest.mark.parametrize('mode', ['force', 'training_family', 'neo_rational', 'validation_family', 'census'])
+def test_pwo_confinement_adjoint_never_promotes_failed_independent_guards(tmp_path, monkeypatch, mode):
+    run, policy, _, calls = _pwo_confinement_adjoint_case(tmp_path, monkeypatch, mode)
+    result = run(policy, output_name='adjoint_rejected')
+    assert not result['accepted'] and len(calls.local) == 1
+    assert not (tmp_path/'input.adjoint_rejected').exists()
+    assert not (tmp_path/'wout_adjoint_rejected.nc').exists()
+    if mode in ['force', 'training_family', 'neo_rational']:
+        assert not any(row['valid'] for row in result['cases'])
+    else:
+        assert result['validation_rejection']

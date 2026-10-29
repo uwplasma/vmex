@@ -523,7 +523,7 @@ def physical_pwo_action_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b,
 
 
 class PwOActionFamilies:
-    """Local host-side action variance on explicitly supplied orbit charts.
+    """Local physical action statistics on explicitly supplied orbit charts.
 
     Each chart supplies ``level_T``, two unwrapped ``endpoints`` [theta, zeta]
     at nondegenerate tangencies, a positive fixed ``weight``, and ``rows``
@@ -546,7 +546,8 @@ class PwOActionFamilies:
     Track those tangencies and bounce roots on trial spectra. Reference chart
     weights, action means and length remain fixed. Aggregate/per-pitch variance and raw
     slopes describe these charts only: no automatic family discovery, global
-    topology proof, JAX differentiation or pwO qualification is provided.
+    topology proof or pwO qualification is provided. ``jax_components`` gives
+    branch-local derivatives after host continuation has certified the chart.
     """
 
     def __init__(self, reference, charts, *, length):
@@ -697,7 +698,17 @@ class PwOActionFamilies:
                 dJ, derivative_error = kernel.integral(alpha, left, right, level, True, extrema=extrema)
                 if not np.all(np.isfinite([J, dJ, error, derivative_error])) or J <= 0:
                     raise ValueError("Invalid family action quadrature")
-                rows.append(dict(u=u, weight=weight, alpha=alpha, left=left, right=right, J=J, dJ=dJ))
+                quadrature_points = []
+                for previous, z, following in zip([left, *extrema], extrema, [*extrema[1:], right]):
+                    phase = m*alpha+frequency*z
+                    terms = c*np.cos(phase)+s*np.sin(phase)
+                    gap, curvature = level-np.sum(terms), -np.sum(frequency**2*terms)
+                    if gap > 0 and curvature < 0:
+                        scale = np.sqrt(2*gap/-curvature)
+                        if previous < z-scale < z < z+scale < following:
+                            quadrature_points.extend((z-scale, z+scale))
+                rows.append(dict(u=u, weight=weight, alpha=alpha, left=left, right=right,
+                                 J=J, dJ=dJ, extrema=extrema, quadrature_points=quadrature_points))
             seam_report = {}
             if periodic:
                 first, last = rows[0], rows[-1]
@@ -732,6 +743,136 @@ class PwOActionFamilies:
                     raw_Jalpha2=float(weights@np.array([f["raw_Jalpha2"] for f in output])),
                     fixed_relative_variance=float(weights@np.array([f["fixed_relative_variance"] for f in output])),
                     families=output, family_invariance_qualified=False, global_topology_proof=False)
+
+    def jax_components(self, spectrum, *, continuation=None, quadrature_order=64):
+        """Differentiate continuous actions on a host-certified local branch.
+
+        ``continuation=self(spectrum)`` supplies certified numerical seeds and
+        quadrature panels. Reusing them across a local step requires comparing
+        the new actions with independent host continuation. Roots and
+        tangencies move by implicit differentiation, including signed iota and
+        physical Tesla/G/I dependence; chart weights and reference means stay
+        fixed. Census, branch matching and trust checks remain host operations.
+        Compare this fixed-panel quadrature with the certified host values;
+        increase ``quadrature_order`` if unresolved. No derivatives of topology
+        changes are defined. Both JVP and scalar VJP are supported.
+        """
+        _integer(quadrature_order, 8, "quadrature_order")
+        certified = self.initial if continuation is None else continuation
+        c = jnp.asarray(spectrum["bmnc_b"], dtype=jnp.float64).reshape(-1)
+        s = jnp.asarray(spectrum.get("bmns_b", jnp.zeros_like(c)), dtype=jnp.float64).reshape(-1)
+        m, n = (jnp.asarray(spectrum[k], dtype=jnp.float64) for k in ("xm_b", "xn_b"))
+        iota, current_G, current_I = (jnp.asarray(spectrum[k], dtype=jnp.float64).reshape(())
+                                      for k in ("iota_b", "G_b", "I_b"))
+        frequency = m*iota-n
+        factor = 2*jnp.abs(current_G+iota*current_I)
+        abscissa, gauss_weight = np.polynomial.legendre.leggauss(quadrature_order)
+
+        def implicit(fun, seed):
+            def solve(f, q):
+                def step(_, x):
+                    return x-jnp.linalg.solve(jax.jacfwd(f)(x), f(x))
+                return jax.lax.fori_loop(0, 5, step, q)
+            def tangent_solve(g, y):
+                return jnp.linalg.solve(jax.vmap(g)(jnp.eye(y.size)).T, y)
+            q = jax.lax.custom_root(fun, jnp.asarray(seed), solve, tangent_solve)
+            jac = jax.jacfwd(fun)(q)
+            valid = (jnp.all(jnp.isfinite(q)) & jnp.all(jnp.isfinite(jac))
+                     & (jnp.max(jnp.abs(fun(q))) < 1e-10*(1+jnp.sum(jnp.abs(c)+jnp.abs(s))))
+                     & (jnp.abs(jnp.linalg.det(jac)) > 1e-12*jnp.max(jnp.abs(jac))**2))
+            return jnp.where(valid, q, jnp.nan)
+
+        families = []
+        for index, (chart, report) in enumerate(zip(self.charts, certified["families"])):
+            level = chart["level_T"]
+            endpoints = jnp.asarray(report["endpoints"])
+            if not chart.get("periodic", False):
+                def event(q):
+                    phase = m*q[0]-n*q[1]
+                    derivative = -c*jnp.sin(phase)+s*jnp.cos(phase)
+                    return jnp.stack((jnp.sum(c*jnp.cos(phase)+s*jnp.sin(phase))-level,
+                                      jnp.sum(frequency*derivative)))
+                endpoints = jax.vmap(lambda q: implicit(event, q))(endpoints)
+                determinants = jax.vmap(lambda q: jnp.linalg.det(jax.jacfwd(event)(q)))(endpoints)
+                regular = (jnp.all(determinants*jnp.asarray(chart["determinants"]) > 0)
+                           & jnp.all(jnp.abs(determinants) > .01*jnp.abs(jnp.asarray(chart["determinants"])))
+                           & jnp.all(jnp.linalg.norm(endpoints-jnp.asarray(chart["endpoints"]), axis=1) <= .2))
+                endpoints = jnp.where(regular, endpoints, jnp.nan)
+            domain = endpoints[:, 0]-iota*endpoints[:, 1]
+            ratio = (domain[1]-domain[0])/np.diff(chart["reference_domain"])[0]
+            domain = jnp.where((ratio > .25) & (ratio < 4), domain, jnp.nan)
+            # Freeze only the integration partition, never a physical endpoint.
+            partitions = []
+            for row in report["rows"]:
+                left, right = row["left"], row["right"]
+                width, midpoint = (right-left)/2, (right+left)/2
+                points = [*row.get("extrema", ()), *row.get("quadrature_points", ())]
+                cuts = np.r_[-np.pi/2, np.arcsin(np.clip(
+                    (np.asarray(points)-midpoint)/width, -1., 1.)), np.pi/2]
+                cuts = np.unique(cuts)
+                t = np.concatenate([(a+b)/2+(b-a)*abscissa/2 for a, b in zip(cuts[:-1], cuts[1:])])
+                w = np.concatenate([(b-a)*gauss_weight/2 for a, b in zip(cuts[:-1], cuts[1:])])
+                partitions.append((t, w))
+            size = max(len(t) for t, _ in partitions)
+            ts = jnp.asarray(np.stack([np.pad(t, (0, size-len(t))) for t, _ in partitions]))
+            ws = jnp.asarray(np.stack([np.pad(w, (0, size-len(w))) for _, w in partitions]))
+            seeds = jnp.asarray([[r["left"], r["right"]] for r in report["rows"]])
+            u = jnp.asarray(chart["nodes"][:, 0])
+            alphas = domain[0]+(domain[1]-domain[0])*u
+            shifts = endpoints[:, 1]-jnp.asarray(report["endpoints"])[:, 1]
+            predictors = (1-u)*shifts[0]+u*shifts[1]
+
+            def action(args):
+                alpha, seed, t, w, predictor = args
+                def bounce(z):
+                    phase = m*alpha+z[:, None]*frequency
+                    return jnp.sum(c*jnp.cos(phase)+s*jnp.sin(phase), axis=1)-level
+                roots = implicit(bounce, seed)
+                phase = m*alpha+roots[:, None]*frequency
+                root_slopes = jnp.sum(frequency*(-c*jnp.sin(phase)+s*jnp.cos(phase)), axis=1)
+                regular = ((roots[1] > roots[0]) & (root_slopes[0] < -1e-8) & (root_slopes[1] > 1e-8)
+                           & jnp.all(jnp.abs(roots-seed-predictor) <= .2*(seed[1]-seed[0])))
+                roots = jnp.where(regular, roots, jnp.nan)
+                width = (roots[1]-roots[0])/2
+                side = (t > 0).astype(jnp.int32)
+                displacement = jnp.where(t > 0, -2*width*jnp.sin((jnp.pi/2-t)/2)**2,
+                                         2*width*jnp.sin((t+jnp.pi/2)/2)**2)
+                phase = m*alpha+roots[side, None]*frequency
+                A, D = c*jnp.cos(phase)+s*jnp.sin(phase), -c*jnp.sin(phase)+s*jnp.cos(phase)
+                shift = displacement[:, None]*frequency
+                sn, cm1 = jnp.sin(shift), -2*jnp.sin(shift/2)**2
+                gap = -jnp.sum(A*cm1+D*sn, axis=1)
+                B = level-gap
+                Ba = jnp.sum(m*(-A*sn+D*(1+cm1)), axis=1)
+                parallel = jnp.sqrt(gap/level)
+                measure = factor*width*jnp.cos(t)*w
+                J = jnp.sum(measure*parallel/B)
+                dJ = jnp.sum(-measure*Ba*(1-B/(2*level))/(B*B*parallel))
+                return jnp.where(jnp.all((gap > 0) & (B > 0)) & (factor > 0),
+                                 jnp.stack((J, dJ)), jnp.nan)
+
+            values = jax.lax.map(jax.checkpoint(action), (alphas, seeds, ts, ws, predictors))
+            actions, slopes = values[:, 0], values[:, 1]
+            weights = jnp.asarray(chart["nodes"][:, 1])
+            mean = weights@actions
+            variance = weights@((actions-mean)**2)
+            families.append(dict(mean_action_m=mean, variance_m2=variance,
+                fixed_relative_variance=variance/self.initial["families"][index]["mean_action_m"]**2,
+                raw_Jalpha2=weights@(slopes**2), actions=actions, slopes=slopes,
+                action_range_m=jnp.max(actions)-jnp.min(actions), alpha_domain=domain))
+        weights = jnp.asarray(self.weights)
+        def aggregate(key):
+            return weights@jnp.stack([f[key] for f in families])
+        levels = np.asarray([c["level_T"] for c in self.charts])
+        per_pitch = []
+        for level in np.unique(levels):
+            indices = np.flatnonzero(levels == level)
+            pitch_weights = weights[indices]/jnp.sum(weights[indices])
+            per_pitch.append(dict(level_T=float(level), value=pitch_weights@jnp.stack(
+                [families[k]["variance_m2"] for k in indices])/self.length**2))
+        return dict(value=aggregate("variance_m2")/self.length**2, per_pitch=per_pitch,
+                    raw_Jalpha2=aggregate("raw_Jalpha2"),
+                    fixed_relative_variance=aggregate("fixed_relative_variance"), families=families)
 
 
 class _PwOResidual:
