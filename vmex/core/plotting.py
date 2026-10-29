@@ -1360,7 +1360,7 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     levels = np.linspace(float(periodic.min()), float(periodic.max()), 15)
     filled = ax.contourf(x, y, periodic, levels=levels, cmap=_CMAP_J, extend="both")
     ax.contour(x, y, periodic, levels=levels, colors="0.25", linewidths=0.35, alpha=0.65)
-    fig.colorbar(filled, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
+    fig.colorbar(filled, ax=ax, pad=0.02, label=r"$\langle J\rangle_{\mathrm{wells}}\,/\,(v R_0)$")
     radius = max(1.0, float(np.max(j_info["s_b"])))
     ax.axhline(0.0, color="white", linewidth=0.6, alpha=0.75)
     ax.axvline(0.0, color="white", linewidth=0.6, alpha=0.75)
@@ -1368,7 +1368,7 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(r"$s\cos\alpha$"); ax.set_ylabel(r"$s\sin\alpha$")
     ax.set_title(
-        "second adiabatic invariant\n"
+        "well-averaged second invariant\n"
         rf"$1/\lambda={j_info['pitch_inverse']:.3g}$ T")
 
 
