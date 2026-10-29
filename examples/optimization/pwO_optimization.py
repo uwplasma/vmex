@@ -21,6 +21,8 @@ binary junction's own-family variances and plateau-mean balance surrogates.
 VMEX_PWO_METHOD=confinement and VMEX_PWO_POLICY=<JSON> optimize direct NEO
 ripple from an external equilibrium. Omit both training/validation orbit charts
 for transport-only optimization; independent MHD/Boozer/NEO holdouts remain.
+optimizer="proposals" evaluates supplied normalized boundary steps without
+requiring a gradient certificate; each step is bounded by the policy's scales.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -1012,8 +1014,8 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     if inp.lfreeb:
         raise ValueError("Confinement continuation requires a fixed-boundary input")
     optimizer = policy.get("optimizer", "adjoint")
-    if optimizer not in ("adjoint", "derivative_free"):
-        raise ValueError("optimizer must be adjoint or derivative_free")
+    if optimizer not in ("adjoint", "derivative_free", "proposals"):
+        raise ValueError("optimizer must be adjoint, derivative_free or proposals")
     max_mode = int(policy.get("max_mode", max(int(inp.mpol)-1, int(inp.ntor))))
     if max_mode < 1:
         raise ValueError("max_mode must be positive")
@@ -1041,6 +1043,11 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     minimum_calls = len(indices)+1 if optimizer == "derivative_free" else 1
     if band < 2 or check_band <= band or global_steps < 0 or global_calls < 0 or local_calls < minimum_calls:
         raise ValueError("Require a finer validation band, nonnegative global budgets and local calls >= D+1 (derivative_free) or 1 (adjoint)")
+    proposals = np.asarray(policy.get("proposals", []), float)
+    if optimizer == "proposals" and (proposals.ndim != 2 or proposals.shape[1] != len(indices)
+            or not 0 < len(proposals) <= local_calls or not np.all(np.isfinite(proposals))
+            or np.any(abs(proposals) > 1)):
+        raise ValueError("proposals must contain 1..local_calls finite normalized steps with one entry per parameter, bounded by [-1,1]")
     settings = dict(theta_n=192, phi_n=192, npart=80, multra=2, nstep_per=80,
         nstep_min=800, nstep_max=2000, acc_req=.005, ref_swi=2,
         max_rational_field_periods=100000, rational_surface_policy="error")
@@ -1232,7 +1239,10 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
         except BudgetReached:
             pass
     budget = len(cache)+local_calls
-    if optimizer == "adjoint":
+    if optimizer == "proposals":
+        for proposal in proposals:
+            objective(proposal)
+    elif optimizer == "adjoint":
         import jax
         from vmex.core import implicit as im
 

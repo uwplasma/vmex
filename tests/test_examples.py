@@ -3019,6 +3019,26 @@ def test_transport_only_search_retains_physics_checks_without_family_requirement
         run(policy)
 
 
+@pytest.mark.parametrize('mode', ['valid', 'neo_rational', 'force', 'holdout_ripple'])
+def test_transport_proposals_use_independent_acceptance_without_gradients(tmp_path, monkeypatch, mode):
+    run, policy, _, calls, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, mode)
+    policy.pop('training'); policy.pop('validation')
+    policy.update(optimizer='proposals', proposals=[[.2, -.1], [.1, 0.]])
+    result = run(policy, output_name='proposals')
+    assert result['accepted'] == (mode == 'valid')
+    assert not calls.local and not calls.global_ and 'gradient_check' not in result
+    assert len(result['cases']) == 2
+
+
+@pytest.mark.parametrize('proposals', [[], [[0.]], [[0., np.nan]], [[1.1, 0.]], [[0., 0.]]*4])
+def test_transport_proposals_reject_invalid_steps_before_solving(tmp_path, monkeypatch, proposals):
+    run, policy, _, calls, _, _ = _pwo_confinement_case(tmp_path, monkeypatch)
+    policy.update(optimizer='proposals', proposals=proposals, local_calls=3)
+    with pytest.raises(ValueError, match='proposals must'):
+        run(policy)
+    assert not calls.decks
+
+
 @pytest.mark.parametrize('mode', ['gradient', 'residual', 'nonfinite', 'trial_nonfinite'])
 def test_pwo_confinement_adjoint_gradient_failure_stops_before_promotion(tmp_path, monkeypatch, mode):
     run, policy, _, calls = _pwo_confinement_adjoint_case(tmp_path, monkeypatch, mode)
