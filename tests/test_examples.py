@@ -2856,7 +2856,7 @@ def test_pwo_confinement_policy_dispatch(tmp_path, monkeypatch, bad):
         assert env['run']() == {'accepted': True}
 
 
-@pytest.mark.parametrize('disagreement', [None, 'ripple', 'actions', 'candidate_actions', 'candidate_branch'])
+@pytest.mark.parametrize('disagreement', [None, 'ripple', 'actions', 'candidate_actions', 'candidate_branch', 'no_charts'])
 def test_pwo_confinement_scalar_loss_has_live_physics_and_penalty_gradients(tmp_path, monkeypatch, disagreement):
     import jax
     import jax.numpy as jnp
@@ -2896,18 +2896,22 @@ def test_pwo_confinement_scalar_loss_has_live_physics_and_penalty_gradients(tmp_
         lambda st, rt: (NS(wb=(1+.08*st[1])**2/(2*(2*jnp.pi)**2)),))
     baseline = dict(eps32=[1.2+(1 if disagreement == 'ripple' else 0)],
         metrics=[6., .2, 1., 1., .2, .6], family_ranges=[.2/1.1], family_spans=[2.])
-    arguments = (NS(state=jnp.zeros(3), runtime=None), [.25], 8, [Family()], baseline, np.array([1.]), None, 0.)
+    if disagreement == 'no_charts':
+        baseline.update(family_ranges=[], family_spans=[])
+    arguments = (NS(state=jnp.zeros(3), runtime=None), [.25], 8,
+                 [] if disagreement == 'no_charts' else [Family()], baseline, np.array([1.]), None, 0.)
     if disagreement in ['ripple', 'actions']:
         with pytest.raises(ValueError, match='disagrees' if disagreement == 'ripple' else 'quadrature'):
             env['confinement_loss'](*arguments)
         return
     loss = env['confinement_loss'](*arguments)
-    if disagreement:
+    if disagreement and disagreement != 'no_charts':
         with pytest.raises(ValueError, match='branch or quadrature'):
             loss.validate(jnp.array([.8, .9, .7]), None)
         return
     value_and_gradient = jax.jit(jax.value_and_grad(lambda st: loss(st, None)))
     np.testing.assert_allclose(value_and_gradient(jnp.zeros(3))[0], 1., atol=1e-13)
+    loss.validate(jnp.zeros(3), None)
     point, direction = jnp.array([.8, .9, .7]), jnp.array([.2, -.3, .4])
     value, gradient = value_and_gradient(point)
     assert value > float(ripple(spectrum(point, None, geometry=True, oversample=1))[1][0]/1.2)
@@ -3001,6 +3005,18 @@ def test_pwo_confinement_adjoint_scales_selected_coefficients_and_opens_mode8(tm
         assert result['parameters'] == policy['parameters']
         displacement = calls.problem.origins[-1]-calls.problem.origins[0]
         np.testing.assert_allclose(displacement, np.asarray(policy['scales'])*[.2, -.1], atol=1e-17)
+
+
+@pytest.mark.parametrize('mode', ['training_family', 'validation_family', 'census', 'neo_rational', 'force', 'holdout_ripple'])
+def test_transport_only_search_retains_physics_checks_without_family_requirements(tmp_path, monkeypatch, mode):
+    run, policy, _, calls = _pwo_confinement_adjoint_case(tmp_path, monkeypatch, mode)
+    policy.pop('training'); policy.pop('validation')
+    result = run(policy, output_name='transport')
+    assert result['accepted'] == (mode in ['training_family', 'validation_family', 'census'])
+    assert not result['family_guards'] and not result['pwO_qualified'] and not calls.census
+    policy['training'] = []
+    with pytest.raises(ValueError, match='Supply both'):
+        run(policy)
 
 
 @pytest.mark.parametrize('mode', ['gradient', 'residual', 'nonfinite', 'trial_nonfinite'])

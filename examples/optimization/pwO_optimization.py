@@ -19,7 +19,8 @@ conditioning; a list retains the three-surface action-step route.
 An entry's optional component=[parent,daughter1,daughter2] adds a supplied
 binary junction's own-family variances and plateau-mean balance surrogates.
 VMEX_PWO_METHOD=confinement and VMEX_PWO_POLICY=<JSON> optimize direct NEO
-ripple from an external equilibrium, with supplied family guards and holdouts.
+ripple from an external equilibrium. Omit both training/validation orbit charts
+for transport-only optimization; independent MHD/Boozer/NEO holdouts remain.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -942,6 +943,8 @@ def confinement_loss(equilibrium, surfaces, band, scorers, baseline, weights, co
     reports = [scorer(surface(initial, i)) for scorer, i in zip(scorers, indices)]
 
     def validate(state, runtime):
+        if not scorers:
+            return
         sp = spectrum(state, runtime)
         for scorer, i, report in zip(scorers, indices, reports):
             candidate = surface(sp, i)
@@ -981,16 +984,18 @@ def confinement_loss(equilibrium, surfaces, band, scorers, baseline, weights, co
             for family, anchor in zip(out["families"], scorer.initial["families"]):
                 ranges.append(family["action_range_m"]/anchor["mean_action_m"])
                 spans.append(jnp.diff(family["alpha_domain"])[0])
+        ranges = jnp.stack(ranges) if ranges else jnp.empty(0)
+        spans = jnp.stack(spans) if spans else jnp.empty(0)
         penalties = jnp.concatenate((jnp.maximum(jnp.abs(metrics/reference-1)/limits-1, 0),
-            jnp.maximum((jnp.stack(ranges)-(1+tolerance)*range_ref)/jnp.maximum(range_ref, 1e-8), 0),
-            jnp.maximum(.5-jnp.stack(spans)/span_ref, 0)))
+            jnp.maximum((ranges-(1+tolerance)*range_ref)/jnp.maximum(range_ref, 1e-8), 0),
+            jnp.maximum(.5-spans/span_ref, 0)))
         return jnp.asarray(weights)@eps/normalizer+10*jnp.vdot(penalties, penalties)
     loss.validate = validate
     return loss
 
 
 def run_confinement(policy, *, output_name="pwO_optimized"):
-    """Bounded ripple search with supplied local orbit-family guards.
+    """Bounded ripple search with optional local orbit-family guards.
 
     Preserve profiles; explicit max_mode may raise the state resolution.
     Adjoint trials warm-start; final checks restart the original WOUT.
@@ -1045,9 +1050,11 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     configs = [NeoConfig(**settings), NeoConfig(**dict(settings,
         npart=2*settings["npart"], nstep_per=2*settings["nstep_per"], acc_req=settings["acc_req"]/2))]
     scorers = []
+    if ("training" in policy) != ("validation" in policy):
+        raise ValueError("Supply both training and validation orbit charts, or omit both")
     for group in ("training", "validation"):
         entries = []
-        for entry in policy[group]:
+        for entry in policy.get(group, []):
             entry = dict(entry); reference = entry.pop("reference")
             if isinstance(reference, str):
                 with np.load(reference, allow_pickle=False) as data:
@@ -1057,9 +1064,9 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
             if np.shape(reference.get("s_b")) != (1,) or reference["nfp"] != inp.nfp:
                 raise ValueError("Each chart reference needs one surface and the input NFP")
             entries.append(PwOActionFamilies(reference=reference, **entry))
-        if not entries:
-            raise ValueError("Both training and independent validation orbit charts are required")
         scorers.append(entries)
+    if bool(scorers[0]) != bool(scorers[1]):
+        raise ValueError("Both training and independent validation orbit charts are required when guarding families")
     tolerance = float(policy.get("family_rtol", 0.))
     if not np.isfinite(tolerance) or tolerance < 0:
         raise ValueError("family_rtol must be finite and nonnegative")
@@ -1071,8 +1078,9 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
         raise ValueError("check_resolution must refine NS and retain all angular modes/grid points")
     started = time.perf_counter()
     summary = dict(method="confinement", optimizer=optimizer, parameters=selected, policy=policy, accepted=False, pwO_qualified=False,
+        family_guards=bool(scorers[0]),
         research_validation_complete=False, cases=[], objective="weighted epsilon_eff^(3/2) / fixed seed weighted mean",
-        scope="Bounded search and supplied local families only; independent global orbit census still required")
+        scope="Effective ripple search; finite-collisionality transport and particle confinement are not certified")
 
     def save():
         summary["seconds"] = time.perf_counter()-started
