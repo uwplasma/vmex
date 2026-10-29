@@ -1000,7 +1000,7 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     """Bounded ripple search with optional local orbit-family guards.
 
     Preserve profiles; explicit max_mode may raise the state resolution.
-    Adjoint trials warm-start; final checks restart the original WOUT.
+    Adjoint trials warm-start; final checks restart the refined seed WOUT.
     Charts are discovered independently; their continuation is local and
     does not certify the topology outside the supplied samples or full pwO.
     """
@@ -1161,6 +1161,8 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
                     actual_s=actual.tolist(), NEO=diagnostics, census=census,
                     force_errors=[float(getattr(eq.result, k)) for k in ("fsqr", "fsqz", "fsql")])
 
+    refined_source = source
+
     def solve(x, refinement=False):
         values = x0.copy(); values[indices] += scales*np.asarray(x)
         deck = opt.unpack_boundary(inp, values, max_mode, vary_major_radius=False)
@@ -1170,7 +1172,8 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
                 niter_array=np.array([inp.niter_array[-1]])).change_resolution(
                     mpol=mpol, ntor=ntor, ntheta=ntheta, nzeta=nzeta)
         print(f"MHD solve: NS={deck.ns_array[-1]}, refinement={refinement}", flush=True)
-        eq = opt.solve_equilibrium(deck, initial_state=restart_state(source, deck), raise_on_max_iterations=True)
+        eq = opt.solve_equilibrium(deck, initial_state=restart_state(refined_source if refinement else source, deck),
+            raise_on_max_iterations=True)
         return certify(eq)
 
     def certify(eq):
@@ -1195,6 +1198,7 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     save_seed_checkpoint(inp, baseline_eq, output_name, "seed")
     baseline = score(baseline_eq, 0); summary["actual_s"] = baseline["actual_s"]
     refined_baseline = solve(np.zeros(len(indices)), True)
+    refined_source = refined_baseline.wout
     save_seed_checkpoint(refined_baseline.inp, refined_baseline, output_name, "seed_check")
     checked_baseline = score(refined_baseline, 1)
     if not admissible(baseline, baseline) or not admissible(checked_baseline, checked_baseline):

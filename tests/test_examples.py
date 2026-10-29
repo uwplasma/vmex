@@ -2622,11 +2622,12 @@ def _pwo_confinement_case(tmp_path, monkeypatch, mode='valid', lasym=False):
     seed = example['vj'].VmecInput.from_file(input_path)
     parameters = ['RBC(-1,3)', 'ZBS(2,4)']+(['RBS(1,3)', 'ZBC(-2,4)'] if lasym else [])
     names = opt.boundary_dof_names(seed, 4); selected = [names.index(n) for n in parameters]
-    x0 = opt.pack_boundary(seed, 4); calls = NS(decks=[], restarts=[], writes=[], local=[], global_=0, census=[])
+    x0 = opt.pack_boundary(seed, 4); calls = NS(decks=[], restarts=[], restart_sources=[], writes=[], local=[], global_=0, census=[])
     source = object(); monkeypatch.setattr(example['vj'], 'read_wout', lambda _: source)
 
     def restart(wout, deck):
-        assert wout is source
+        assert wout is source or any(name.endswith('_seed_check.nc') and saved is wout for name, saved in calls.writes)
+        calls.restart_sources.append(wout)
         token = [False]; calls.restarts.append(token); return token
 
     def solve(deck, *, initial_state, raise_on_max_iterations):
@@ -2756,6 +2757,8 @@ def test_pwo_confinement_preserves_external_input_and_independent_restarts(tmp_p
     assert len(calls.restarts) == len(calls.decks) and len({id(t) for t in calls.restarts}) == len(calls.restarts)
     assert len(result['cases']) == 1  # Seed and repeated optimizer point are cached.
     assert len(calls.decks) == 4  # Coarse/refined baseline and coarse/refined best only.
+    assert all(w is calls.restart_sources[0] for w in calls.restart_sources[:3])
+    assert calls.restart_sources[-1] is next(w for name, w in calls.writes if name.endswith('_seed_check.nc'))
     assert np.all(np.asarray(result['best_training']['x']) != 0)  # All selected m3/m4/LASYM modes moved.
     assert (tmp_path/'input.direct').exists() and (tmp_path/'wout_direct.nc').exists()
     assert len(calls.census) == 4
