@@ -288,3 +288,40 @@ def save_outputs(joint, u, equilibrium, surface, *, prefix, make_movie=False, su
             nphi=joint.nphi, ntheta=joint.ntheta, cmap="jet")
     for output in vj.plot_wout(path, ".").values():
         print(f"Wrote {output}")
+
+
+def design_target_report(metrics, free, *, iota_floor, aspect_limit, normal_field_limit,
+                         clearance, coil_distance, curvature, beta_bounds,
+                         delbsq_limit, boundary_distance_limit):
+    """Print one verdict and return JSON-ready targets, misses, and success.
+
+    Nonfinite metrics fail their bounds. A failed independent solve cannot
+    pass, and provisional free-boundary metrics are never treated as checks.
+    """
+    limits = [("min |iota|", iota_floor, "min"), ("aspect", aspect_limit, "max"),
+              ("B.n/B RMS", normal_field_limit, "max"),
+              ("coil-surface distance", clearance, "min"),
+              ("coil-coil distance", coil_distance, "min"),
+              ("maximum curvature", curvature, "max"),
+              ("beta", beta_bounds[0], "min"), ("beta", beta_bounds[1], "max")]
+    held = [("DEL-BSQ", "delbsq", delbsq_limit, "max"),
+            ("boundary distance", "sampled_boundary_distance_m", boundary_distance_limit, "max"),
+            ("min |iota|", "min_abs_iota", iota_floor, "min"),
+            ("aspect", "aspect", aspect_limit, "max"),
+            ("coil-surface distance", "coil_surface_distance_m", clearance, "min"),
+            ("beta", "beta", beta_bounds[0], "min"), ("beta", "beta", beta_bounds[1], "max")]
+    rows = [(name, metrics[name], bound, kind) for name, bound, kind in limits]
+    if free["converged"]:
+        rows += [(f"held {name}", free[key], bound, kind) for name, key, bound, kind in held]
+    unmet = [f"{name} {value:.4g} {'below' if kind == 'min' else 'above'} {bound:.4g}"
+             for name, value, bound, kind in rows
+             if not np.isfinite(value) or not (value >= bound if kind == "min" else value <= bound)]
+    if not metrics["verification solve converged"]:
+        unmet.append("the finer fixed-boundary verification did not converge")
+    if not free["converged"]:
+        unmet.append("the post-optimization free-boundary verification did not converge")
+    targets = {f"{name} {'>=' if kind == 'min' else '<='}": bound
+               for name, bound, kind in limits + [(f"held {n}", b, k) for n, _, b, k in held]}
+    print("This run did NOT meet its stated targets: " + "; ".join(unmet)
+          if unmet else "All stated targets met.")
+    return {"targets": targets, "unmet": unmet, "met": not unmet}

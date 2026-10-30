@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -33,6 +34,74 @@ pytestmark = pytest.mark.skipif(
     not FBD._HAVE_VCJ,
     reason="requires virtual_casing_jax",
 )
+
+
+def test_joint_trial_rejection_is_costly_differentiable_and_cached():
+    """An uncertified equilibrium cannot beat the seed or evaluate coil costs."""
+    from vmex.core.single_stage import SingleStageProblem
+    from vmex.core.monitoring import OptimizationMonitor
+
+    # Exercise the host optimizer contract without compiling an equilibrium.
+    joint = SingleStageProblem.__new__(SingleStageProblem)
+    joint.problem = SimpleNamespace(metadata={"term_slices": [("plasma", 0, 1)]})
+    joint.monitor = OptimizationMonitor()
+    joint.counts, joint._cached = {"trials": 0, "rejected": 0}, {}
+    joint.rejected_trial_cost = 10.0
+    coil_calls = []
+
+    def plasma_vg(u):
+        accepted = float(u[0]) < 0.5
+        return ((2.0, (np.array([2.0 if accepted else 0.0]), np.array([0.0]))),
+                np.zeros(1))
+
+    def coil_vg(u):
+        coil_calls.append(np.asarray(u))
+        return ((2.0, np.array([2.0, 0.0, 0.0, 0.0])), np.zeros(1))
+
+    joint._plasma_vg, joint._coil_vg = plasma_vg, coil_vg
+    seed, gradient = joint.value_and_grad(np.zeros(1))
+    assert seed == 1.0
+    gradient[:] = 123  # SciPy must not be able to mutate the cached gradient.
+    assert joint.value_and_grad(np.zeros(1))[1][0] == 0
+    assert joint.counts["trials"] == 1
+    value, gradient = joint.value_and_grad(np.ones(1))
+    assert value > seed
+    step = 1e-5
+    difference = (joint.value_and_grad(np.array([1 + step]))[0]
+                  - joint.value_and_grad(np.array([1 - step]))[0]) / (2 * step)
+    np.testing.assert_allclose(gradient[0], difference, rtol=1e-9)
+    assert joint.counts["rejected"] == 3
+    assert len(coil_calls) == 1
+
+
+@pytest.mark.parametrize("failure", [None, "fixed solve", "free solve", "fixed NaN", "held infinity"])
+def test_joint_design_verdict_requires_finite_metrics_and_both_solves(failure, capsys):
+    """A good fitted boundary cannot hide a failed or nonfinite held-boundary check."""
+    from vmex.core.single_stage import design_target_report
+
+    metrics = {"min |iota|": 0.5, "aspect": 5.0, "B.n/B RMS": 0.001,
+               "coil-surface distance": 0.2, "coil-coil distance": 0.2,
+               "maximum curvature": 5.0, "beta": 0.005, "verification solve converged": True}
+    free = {"converged": True, "delbsq": 0.001, "sampled_boundary_distance_m": 0.001,
+            "min_abs_iota": 0.5, "aspect": 5.0, "coil_surface_distance_m": 0.2, "beta": 0.005}
+    if failure == "fixed solve":
+        metrics["verification solve converged"] = False
+    elif failure == "free solve":
+        free = {"converged": False}  # Failed solves need no physical metrics.
+    elif failure == "fixed NaN":
+        metrics["B.n/B RMS"] = np.nan
+    elif failure == "held infinity":
+        free["min_abs_iota"] = np.inf
+    verdict = design_target_report(
+        metrics, free, iota_floor=0.42, aspect_limit=6, normal_field_limit=0.01,
+        clearance=0.15, coil_distance=0.17, curvature=7, beta_bounds=(0.0045, 0.0055),
+        delbsq_limit=0.02, boundary_distance_limit=0.02)
+    assert verdict["met"] == (failure is None)
+    assert bool(verdict["unmet"]) == (failure is not None)
+    assert "held DEL-BSQ <=" in verdict["targets"]
+    output = capsys.readouterr().out
+    assert output.count("All stated targets met.") == (failure is None)
+    assert output.count("did NOT meet its stated targets") == (failure is not None)
 
 
 @pytest.fixture(scope="module")
