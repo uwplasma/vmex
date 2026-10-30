@@ -1268,24 +1268,22 @@ def test_fixed_boundary_single_stage_optimization(tmp_path):
     assert b'Name="B_dot_n_over_B"' in surface_vtk
 
 
-def test_finite_beta_single_stage_seed_flux_matches_cartesian_stokes(monkeypatch):
-    """The fitted coil field and VMEC flux must have the same physical sign.
-
-    Run only the example's coil pre-fit and flux calibration, then independently
-    integrate the Cartesian vector potential; no equilibrium or VC derivative.
-    """
+def test_finite_beta_single_stage_seed_flux_matches_cartesian_stokes():
+    """Compare the production +phi area integral with an independent A.dl integral."""
     pytest.importorskip("essos")
-    pytest.importorskip("virtual_casing_jax")
-    monkeypatch.setenv("VMEX_EXAMPLES_CI", "1")
-    path = EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py"
-    source = path.read_text()
-    calibration = next(node for node in ast.parse(source).body
-                       if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
-                       and any(kw.arg == "phiedge" for kw in node.value.keywords))
-    namespace = {"__file__": str(path), "__name__": "__flux_calibration_test__"}
-    exec(compile("\n".join(source.splitlines()[:calibration.end_lineno]), str(path), "exec"),
-         namespace)
-    inp, coils = namespace["inp"], namespace["coils0"]
+    from dataclasses import replace
+    from essos.coils import Coils, CreateEquallySpacedCurves
+    from vmex import VmecInput
+    from vmex.core.single_stage import toroidal_flux
+
+    inp = VmecInput.from_file(EXAMPLES / "data" / "input.minimal_seed_nfp2")
+    rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+    rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = 0.195
+    rbc[inp.ntor + 1, 1], zbs[inp.ntor + 1, 1] = 0.10, -0.10
+    inp = replace(inp, rbc=rbc, zbs=zbs)
+    coils = Coils(CreateEquallySpacedCurves(
+        3, 2, 1.0, 0.5, n_segments=24, nfp=2, stellsym=True), np.full(3, 2.7e5))
+    flux = toroidal_flux(inp, coils)
     theta = np.arange(512) * 2 * np.pi / 512
     m = np.arange(inp.rbc.shape[1])
     phase = np.outer(theta, m)
@@ -1300,8 +1298,8 @@ def test_finite_beta_single_stage_seed_flux_matches_cartesian_stokes(monkeypatch
         current[None, :, None, None] * dash[None, :, :, :] / distance[..., None], axis=1), axis=1)
     # Increasing theta has normal -Y. Minus A.dl measures +phi flux (+Y at phi=0).
     flux_plus_phi = -float(np.sum(potential * tangent) * 2 * np.pi / theta.size)
-    assert abs(flux_plus_phi) > 1e-6
-    assert inp.phiedge == pytest.approx(flux_plus_phi, rel=1e-9)
+    assert flux_plus_phi > 1e-6
+    assert flux == pytest.approx(flux_plus_phi, rel=1e-9)
 
 
 @pytest.mark.full  # nightly: one finite-beta VMEX + VCJ + ESSOS graph
