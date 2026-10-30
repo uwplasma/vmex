@@ -35,6 +35,18 @@ the minimum |iota| rises from 0.407 to 0.430 and beta ends at 0.498%. (At an
 earlier commit, 14 iterations took 19 trials, reached 0.430 and 0.502%, and
 moved the boundary by up to 8 mm and the coils by up to 11 mm.)
 
+Set ``VMEX_LOW_TRANSPORT=1`` for an NFP4 near-circular A=10 non-QS
+search using the mapped-field transport proxy and a signed iota floor.
+``VMEX_LOW_TRANSPORT_MODE=1`` restricts the boundary to mode 1 (default 2).
+Each search uses NS35, M5/N5, equilibrium FTOL 1e-12 and optimizer ftol 1e-3.
+The weak-transform circular seed did not converge at this pressure within
+the short solve budget. First run ``pwO_optimization.py --outdir low_transport`` from the
+near-circular vacuum seed, then run this script with ``VMEX_LOW_TRANSPORT=1``
+and ``VMEX_LOW_TRANSPORT_INPUT=low_transport/input.trial``. This explicitly
+continues that boundary at finite pressure with simultaneous plasma/coil steps.
+The low-transport mode needs ``vmex[neoclassical]`` and screens NEO Q for non-regression.
+Particle tracing is required before promotion.
+
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """
@@ -148,6 +160,28 @@ MAKE_MOVIE = False
 # ``(x, objects) -> values``.
 MOVIE_SURFACE_COLOR = "absB"
 
+# Optional non-QS low-transport search, sharing the simultaneous coil machinery.
+# VMEX_LOW_TRANSPORT=1 selects it; VMEX_LOW_TRANSPORT_MODE=1 or 2 sets the boundary modes.
+# The mapped-field variance is a search proxy; it does not certify confinement.
+low_transport = os.environ.get("VMEX_LOW_TRANSPORT") == "1"
+if low_transport:
+    NFP = 4
+    warm_start = os.environ.get("VMEX_LOW_TRANSPORT_INPUT")
+    if not warm_start:
+        raise ValueError("Finite-beta low transport needs VMEX_LOW_TRANSPORT_INPUT: "
+                         "first run pwO_optimization.py --outdir low_transport, then set "
+                         "VMEX_LOW_TRANSPORT_INPUT=low_transport/input.trial")
+    INPUT_FILE = Path(warm_start)
+    if INPUT_FILE.resolve() == Path("input.single_stage_finite_beta_optimized").resolve():
+        raise ValueError("Run in a new output directory to preserve VMEX_LOW_TRANSPORT_INPUT")
+    MAX_MODE = int(os.environ.get("VMEX_LOW_TRANSPORT_MODE", "2"))
+    if MAX_MODE not in (1, 2):
+        raise ValueError("VMEX_LOW_TRANSPORT_MODE must be 1 or 2")
+    ASPECT_LIMIT, ASPECT_CONSTRAINT, IOTA_FLOOR = 10.1, 10.0, 0.41
+    N_COILS, COIL_MINOR_RADIUS = 2, 0.6
+    COIL_DISTANCE_WEIGHT, CURVATURE_WEIGHT = 1e6, 100.0
+    MAXITER, MAX_TRIALS = 30, 150
+
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 2, 4, 2
@@ -156,6 +190,13 @@ if ci_smoke:
 ###############################################################################
 # End of input parameters.
 ###############################################################################
+
+# Match the vacuum shaping driver's transform cost without increasing coil penalties.
+iota_penalty_scale = (IOTA_CONSTRAINT * np.sqrt(2e5 / CONSTRAINT_WEIGHT)
+                      if low_transport else 1.0)
+
+iota_report_label = "min signed iota" if low_transport else "min |iota|"
+iota_print_label = "Minimum signed iota" if low_transport else "Minimum |iota|"
 
 started = time.perf_counter()
 
@@ -166,14 +207,34 @@ started = time.perf_counter()
 # VmecInput is frozen, so copy its arrays before shaping the seed boundary.
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = SEED_MINOR_RADIUS
-rbc[inp.ntor + 1, 1], zbs[inp.ntor + 1, 1] = SEED_ELLIPSE, -SEED_ELLIPSE
+if not low_transport:
+    rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = SEED_MINOR_RADIUS
+    rbc[inp.ntor + 1, 1], zbs[inp.ntor + 1, 1] = SEED_ELLIPSE, -SEED_ELLIPSE
+elif inp.nfp != NFP or inp.lasym or inp.lfreeb:
+    raise ValueError("VMEX_LOW_TRANSPORT_INPUT must be an NFP4 stellarator-symmetric fixed boundary")
 mpol = max(MAX_MODE + 2, 5)
 am = np.zeros(21)
 am[:len(PRESSURE_PROFILE)] = PRESSURE_PROFILE
 inp = replace(inp, rbc=rbc, zbs=zbs, delt=0.5, pmass_type="power_series", am=am,
-              pres_scale=1.0, ncurr=1, curtor=0.0, ac=np.zeros(21)).change_resolution(
+              pres_scale=1.0, ncurr=1, curtor=0.0, ac=np.zeros(21),
+              gamma=0.0, bloat=1.0, spres_ped=1.0).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+if low_transport:
+    inp = replace(inp, ns_array=np.array([35]), ftol_array=np.array([1e-12]),
+                  niter_array=np.array([2000]))
+
+
+def minimum_transform(state, runtime):
+    if not low_transport:
+        return opt.min_abs_iota(state, runtime)
+    from vmex.core.statephysics import _iotas_half
+    half = _iotas_half(state, runtime)
+    full = jnp.concatenate((jnp.array([1.5*half[1]-.5*half[2]]),
+                            .5*(half[1:-1]+half[2:]),
+                            jnp.array([1.5*half[-1]-.5*half[-2]])))
+    return jnp.min(full)
+
+
 surface_seed = surfacerzfourier_from_boundary(
     jnp.asarray(inp.rbc), jnp.asarray(inp.zbs), NFP, nphi=NPHI, ntheta=NTHETA)
 
@@ -278,10 +339,14 @@ toroidal_flux = float(np.sum(rho_weights[:, None] * B_phi * area_element)
 inp = replace(inp, phiedge=-toroidal_flux)
 # Beta is proportional to the pressure at fixed boundary and flux, so one seed
 # solve at PRES_SCALE = 1 gives the scale.
-beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
+unit_pressure_equilibrium = opt.solve_equilibrium(inp)
+beta_at_unit_pressure = float(unit_pressure_equilibrium.wout.betatotal)
 inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
 print(f"[flux] PHIEDGE = {inp.phiedge:.6f} Wb from the fitted coils; "
       f"PRES_SCALE = {inp.pres_scale:.1f} Pa for beta {100 * TARGET_BETA:.2f}%")
+if low_transport:
+    pressure_seed = opt.solve_equilibrium(
+        inp, initial_state=unit_pressure_equilibrium.solution, raise_on_max_iterations=True)
 
 
 def relative_beta(equilibrium_state, solver_context):
@@ -292,9 +357,25 @@ def relative_beta(equilibrium_state, solver_context):
 # equilibrium solve. Quasisymmetry and beta are its objective; the limits are
 # added below.
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
+
+objective_terms = [(qs.residuals_state, 0.0, 1.0)]
+objective_name = "quasisymmetry"
+if low_transport:
+    from vmex.core.pwo import MappedPwOResidual
+    qs = MappedPwOResidual(
+        (.25, 16.5/34, .75), mboz=8, nboz=8, oversample=2,
+        b_ref=np.array([2.7123510440502594, 2.699696279828112, 2.6832357706580665])
+              * abs(inp.phiedge) / .083,
+        a=.3, b=0., c=-2., eta_min=2.8, ngamma=32, neta=32)
+    objective_terms = [(qs.residuals_state, 0.0, 2/.004813522516264787),
+                       (opt.aspect_ratio, 10.0, 200.0)]
+    objective_name = "mapped transport proxy"
+
 plasma_problem = opt.VmecProblem.from_tuples(
-    inp, [(qs.residuals_state, 0.0, 1.0), (relative_beta, 1.0, 1.0)], max_mode=MAX_MODE,
-    use_ess=True, progress=not ci_smoke)
+    inp, objective_terms + [(relative_beta, 1.0, 1.0)], max_mode=MAX_MODE,
+    use_ess=True, progress=not ci_smoke,
+    **(dict(forward_ftol=1e-12, forward_max_iterations=2000, refine_tol=1e-12,
+            max_fsq_ratio=1.0, restart_from=pressure_seed) if low_transport else {}))
 
 # One variable vector holds both halves. SciPy works in dimensionless
 # increments u, with x = x0 + scales * u, so every dof moves on a similar scale.
@@ -350,7 +431,7 @@ def plasma_objective(u):
             inp, coils, state, ctx, NPHI, NTHETA, precision)
         rms = jnp.sqrt(jnp.sum(weights * normal_field**2))
         return hinge(jnp.stack([
-            opt.min_abs_iota(state, ctx) / IOTA_CONSTRAINT - 1.0,
+            iota_penalty_scale * (minimum_transform(state, ctx) / IOTA_CONSTRAINT - 1.0),
             1.0 - opt.aspect_ratio(state, ctx) / ASPECT_CONSTRAINT,
             1.0 - rms / NORMAL_FIELD_CONSTRAINT]))
 
@@ -372,7 +453,7 @@ coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective, has_aux=True))
 monitor = opt.OptimizationMonitor(plasma_problem)
 counts, cached = {"trials": 0, "rejected": 0}, {}
 COIL_TERMS = ("coil length", "coil curvature", "coil separation", "coil-surface separation")
-n_qs_rows = plasma_problem.metadata["term_slices"][0][2]
+n_qs_rows = plasma_problem.metadata["term_slices"][-1][1]
 
 
 def value_and_grad(u):
@@ -403,7 +484,7 @@ def value_and_grad(u):
     (coil_value, coil_costs_), coil_gradient = coil_value_and_grad(jnp.asarray(u))
     cached.setdefault("scale", 1.0 / float(plasma_value + coil_value))
     scale = cached["scale"]
-    terms = {"quasisymmetry": 0.5 * float(rows[:n_qs_rows] @ rows[:n_qs_rows]),
+    terms = {objective_name: 0.5 * float(rows[:n_qs_rows] @ rows[:n_qs_rows]),
              "beta": 0.5 * float(rows[n_qs_rows:] @ rows[n_qs_rows:]),
              "iota/aspect/B.n penalty": float(np.asarray(plasma_penalty)[0])}
     terms.update(zip(COIL_TERMS, map(float, np.asarray(coil_costs_))))
@@ -422,9 +503,9 @@ print(f"Fixed-boundary VMEX + virtual casing + ESSOS at beta {100 * TARGET_BETA:
       f"{n_boundary} boundary and {x_coils0.size} coil variables, exact reverse-mode "
       "derivatives")
 report = opt.EquilibriumReporter(
-    ("QA total", qs.total, ".6e"), ("beta", opt.volume_average_beta, ".4%"),
+    ("mapped proxy" if low_transport else "QA total", qs.total, ".6e"), ("beta", opt.volume_average_beta, ".4%"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
-    ("min |iota|", opt.min_abs_iota, ".4f"))
+    (iota_report_label, minimum_transform, ".4f"))
 seed_values = report("seed", seed_equilibrium)
 
 u = np.zeros_like(x0)
@@ -434,7 +515,7 @@ initial_value = monitor.records[0].cost
 result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", callback=monitor,
                   bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size,
                   options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
-                           "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
+                           "maxls": 20, "ftol": 1e-3 if low_transport else 1e-12, "gtol": 1e-8})
 u, final_value = result.x, float(result.fun)
 print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials "
       f"({counts['rejected']} rejected), "
@@ -449,16 +530,43 @@ optimization_seconds = time.perf_counter() - started
 # makes the quasisymmetry residual trivially small. Re-solve on a finer radial
 # and surface grid and compare every target explicitly.
 x_final = x0 + scales * u
+optimizer_result_certified = True
+selected_accepted_iteration = int(result.nit)
+try:
+    equilibrium = plasma_problem.equilibrium_from_x(x_final[:n_boundary])
+except RuntimeError:
+    if not low_transport:
+        raise
+    optimizer_result_certified = False
+    for accepted_u, record in reversed(list(zip(monitor.x_history, monitor.records))):
+        try:
+            candidate = x0 + scales * accepted_u
+            equilibrium = plasma_problem.equilibrium_from_x(candidate[:n_boundary])
+            u, x_final, final_value = accepted_u, candidate, record.cost
+            selected_accepted_iteration = record.iteration
+            break
+        except RuntimeError:
+            continue
+    else:
+        u, equilibrium = monitor.x_history[0], seed_equilibrium
+        x_final, final_value = x0 + scales * u, monitor.records[0].cost
+        selected_accepted_iteration = 0
+    print(f"Optimizer result failed equilibrium certification; using certified accepted "
+          f"iteration {selected_accepted_iteration}.")
 _, coils_final = objects_from_x(jnp.asarray(x_final))
-equilibrium = plasma_problem.equilibrium_from_x(x_final[:n_boundary])
 # FTOL 1e-12 rather than tighter: 1e-13 is out of reach even at ns=50 here, and
 # a verification solve that cannot converge verifies nothing.
 final_input = replace(plasma_problem.input_from_x(x_final[:n_boundary]),
-                      ns_array=np.array([31 if ci_smoke else 101]),
-                      ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-12]),
-                      niter_array=np.array([8000]))
+                      ns_array=np.array([35 if low_transport else (31 if ci_smoke else 101)]),
+                      ftol_array=np.array([1e-12 if low_transport else (1.0e-10 if ci_smoke else 1.0e-12)]),
+                      niter_array=np.array([2000 if low_transport else 8000]))
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution, verbose=not ci_smoke)
+
+# Preserve the converged proposal even if a later screen cannot finish.
+input_path = final_input.to_indata("input.single_stage_finite_beta_optimized")
+wout_path = vj.write_wout("wout_single_stage_finite_beta_optimized.nc", final_equilibrium.wout)
+coils_final.to_json("coils_single_stage_finite_beta_optimized.json")
 
 surface_final = surfacerzfourier_from_boundary(
     jnp.asarray(final_input.rbc), jnp.asarray(final_input.zbs), NFP, nphi=61, ntheta=64)
@@ -480,7 +588,7 @@ coil_distance = min(
     float(np.linalg.norm(gamma[i][:, None] - gamma[j][None], axis=2).min())
     for i in range(len(gamma)) for j in range(i + 1, len(gamma)))
 maximum_curvature = float(np.max(np.asarray(coils_final.curvature)))
-minimum_iota = float(opt.min_abs_iota(final_equilibrium.state, final_equilibrium.runtime))
+minimum_iota = float(minimum_transform(final_equilibrium.state, final_equilibrium.runtime))
 final_aspect = float(opt.aspect_ratio(final_equilibrium.state, final_equilibrium.runtime))
 final_beta = float(opt.volume_average_beta(final_equilibrium.state, final_equilibrium.runtime))
 final_converged = bool(np.all(np.asarray(final_equilibrium.result.converged)))
@@ -502,13 +610,13 @@ print(f"Minimum coil-coil distance = {coil_distance:.4f} m "
       f"(target >= {COIL_DISTANCE_LIMIT:.4f} m)")
 print(f"Maximum curvature = {maximum_curvature:.4f} 1/m "
       f"(target <= {CURVATURE_LIMIT:.4f} 1/m)")
-print(f"Minimum |iota| = {minimum_iota:.4f} (target >= {IOTA_FLOOR:.4f})")
+print(f"{iota_print_label} = {minimum_iota:.4f} (target >= {IOTA_FLOOR:.4f})")
 print(f"Aspect ratio = {final_aspect:.4f} (target <= {ASPECT_LIMIT:.4f})")
 print(f"Volume-average beta = {100 * final_beta:.4f}% (target {100 * TARGET_BETA:.2f}% "
       f"within {100 * BETA_TOLERANCE:.0f}%)")
 
 checks = (
-    ("minimum |iota|", minimum_iota, IOTA_FLOOR, "below"),
+    (iota_print_label.lower(), minimum_iota, IOTA_FLOOR, "below"),
     ("aspect ratio", final_aspect, ASPECT_LIMIT, "above"),
     ("B.n/B RMS", normal_field_rms_final, NORMAL_FIELD_LIMIT, "above"),
     ("minimum coil-surface distance", coil_surface_distance, COIL_SURFACE_DISTANCE_LIMIT, "below"),
@@ -520,8 +628,27 @@ checks = (
 unmet = [f"{name} {value:.4g} {side} the {limit:.4g} limit"
          for name, value, limit, side in checks
          if (value < limit if side == "below" else value > limit)]
+if low_transport:
+    if final_aspect < 9.9:
+        unmet.append(f"aspect ratio {final_aspect:.4g} below the 9.9 limit")
+    if not np.asarray(qs.compute_state(final_equilibrium.state, final_equilibrium.runtime)["valid"]).all():
+        unmet.append("the mapped-coordinate domain is invalid")
 if not final_converged:
-    unmet.append("the ns=101 verification solve did not converge")
+    unmet.append("the verification solve did not converge")
+transport_screen = {}
+if low_transport:
+    try:
+        from pwO_optimization import transport
+        seed_q, final_q = transport(seed_equilibrium.wout), transport(final_equilibrium.wout)
+        passed = bool(np.all(final_q <= seed_q))
+        transport_screen = dict(NEO_seed=seed_q.tolist(), NEO_final=final_q.tolist(),
+                                transport_screen_passed=passed)
+        print(f"NEO Q: {seed_q} -> {final_q}; non-regression = {passed}")
+    except Exception as error:
+        transport_screen = dict(transport_screen_passed=False, transport_error=str(error))
+    if not transport_screen["transport_screen_passed"]:
+        unmet.append("NEO non-regression failed; keep the seed boundary")
+
 if unmet:
     print("\nThis run did NOT meet its stated targets: " + "; ".join(unmet) + ".")
     if ci_smoke:
@@ -532,31 +659,38 @@ else:
 summary = {
     "example": "single_stage_optimization_finite_beta.py", "smoke": ci_smoke,
     "optimization_seconds": round(optimization_seconds, 1),
+    "objective": objective_name, "low_transport": low_transport,
+    "particle_qualified": False, "max_mode": MAX_MODE,
+    "optimizer_result_certified": optimizer_result_certified,
+    "selected_accepted_iteration": selected_accepted_iteration,
+    "input": str(INPUT_FILE), "verification_surface_grid": [61, 64],
+    "initial_objective": initial_value, "final_objective": final_value,
+    "boundary_change_norm": float(np.linalg.norm(x_final[:n_boundary]-x_boundary0)),
+    "coil_change_norm": float(np.linalg.norm(x_final[n_boundary:]-x_coils0)),
     "coil_fit_iterations": int(coil_fit.nit), "trials": counts["trials"],
     "lbfgsb_iterations": int(result.nit),
     "equilibrium_solves": monitor.records[-1].equilibrium_solves,
     "phiedge": float(inp.phiedge), "pres_scale": float(inp.pres_scale),
     "seed": seed_values,
-    "final": {**final_values, "min |iota|": minimum_iota, "aspect": final_aspect,
+    "final": {**final_values, iota_report_label: minimum_iota, "aspect": final_aspect,
               "B.n/B RMS": normal_field_rms_final, "B.n/B max": normal_field_max,
               "coil-surface distance": coil_surface_distance,
               "coil-coil distance": coil_distance,
               "maximum curvature": maximum_curvature, "beta": final_beta,
-              "verification solve converged": final_converged},
-    "targets": {"min |iota| >=": IOTA_FLOOR, "aspect <=": ASPECT_LIMIT,
+              "verification solve converged": final_converged,
+              "force errors": {k: float(getattr(final_equilibrium.result, k))
+                               for k in ("fsqr", "fsqz", "fsql")}},
+    "targets": {f"{iota_report_label} >=": IOTA_FLOOR, "aspect <=": ASPECT_LIMIT,
                 "B.n/B RMS <=": NORMAL_FIELD_LIMIT,
                 "coil-surface distance >=": COIL_SURFACE_DISTANCE_LIMIT,
                 "coil-coil distance >=": COIL_DISTANCE_LIMIT,
                 "maximum curvature <=": CURVATURE_LIMIT,
                 "beta": [TARGET_BETA * (1 - BETA_TOLERANCE),
                          TARGET_BETA * (1 + BETA_TOLERANCE)]},
-    "unmet": unmet, "met": not unmet,
+    **transport_screen, "unmet": unmet, "met": not unmet,
 }
 Path("single_stage_optimization_finite_beta_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
-input_path = final_input.to_indata("input.single_stage_finite_beta_optimized")
-wout_path = vj.write_wout("wout_single_stage_finite_beta_optimized.nc", final_equilibrium.wout)
-coils_final.to_json("coils_single_stage_finite_beta_optimized.json")
 # ESSOS writes |B| and B.n/B on the surface and the filaments for ParaView.
 surface_initial = surfacerzfourier_from_boundary(rbc0, zbs0, NFP, nphi=60, ntheta=60)
 surface_initial.to_vtk("surface_single_stage_finite_beta_initial", field=BiotSavart(coils0))

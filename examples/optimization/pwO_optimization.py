@@ -1,9 +1,11 @@
-"""Short continuation of the bundled non-QS low-transport equilibrium.
+"""Optimize low transport from a near-circular vacuum torus at fixed aspect 10.
 
 The mapped-field residual is a search proxy, not a pwO or confinement test.
 Geometry residuals and hard full-surface field checks accompany it. NEO screens the
 proposal after optimization; fresh particle tracing is required before promotion.
-Run with vmex[neoclassical]. The bundled input is never overwritten.
+Shape boundary modes 1 then 2; --input continues a supplied configuration.
+Optional --beta applies p proportional to 1-s at zero toroidal current.
+Run with vmex[neoclassical]. Existing input files are never overwritten.
 """
 from pathlib import Path
 from dataclasses import replace
@@ -12,6 +14,7 @@ import json
 import os
 import time
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
@@ -22,15 +25,13 @@ from vmex.core.omnigenity import boozer_spectrum_state
 from vmex.core.pwo import mapped_pwo_residual_from_boozer
 from vmex.core.statephysics import _field_chain, _iotas_half
 
-vj.configure()
-
-INPUT = Path(__file__).resolve().parents[1] / "data" / "input.low_transport"
+INPUT = Path(__file__).resolve().parents[1] / "data" / "input.minimal_seed_nfp4"
 SURFACES = (.25, 16.5 / 34, .75)
 # Fixed calibration from the original NFP4 seed; do not reset between batches.
-B_REF = jnp.array([2.7123510440502594, 2.699696279828112, 2.6832357706580665])
-B_MAX_REF = jnp.array([2.9284215849767965, 2.979692353278536, 3.008858221344288])
+B_REF = np.array([2.7123510440502594, 2.699696279828112, 2.6832357706580665])
+B_MAX_REF = np.array([2.9284215849767965, 2.979692353278536, 3.008858221344288])
 RAW_SCALE = .004813522516264787
-MAX_ITERATIONS, NITER = 10, 2000
+MAX_ITERATIONS, NITER = 15, 2000
 FORWARD_FTOL, ROOT_TOL = 1e-12, 1e-12
 
 
@@ -64,8 +65,8 @@ def residuals(state, runtime):
         mapped["residuals1d"]/jnp.sqrt(RAW_SCALE), geometry_residuals(state, runtime)))
 
 
-def physical_metrics(eq):
-    mapped, low, high, mirror = field_terms(eq.state, eq.runtime)
+def physical_metrics(eq, fields=None):
+    mapped, low, high, mirror = field_terms(eq.state, eq.runtime) if fields is None else fields
     _, jacobian, _, field, _ = _field_chain(eq.state, eq.runtime)
     signed_jacobian = np.asarray(jacobian.sqrt_g)[1:]*float(eq.runtime.setup.signgs)
     pressure = np.asarray(field.pressure)
@@ -124,34 +125,90 @@ def transport_improves(baseline, trial):
                 and np.all(b <= a) and b.mean() < .99*a.mean())
 
 
-def main(input_file=INPUT, outdir=Path("low_transport"), maxiter=MAX_ITERATIONS):
+def near_circular_input():
+    """A10 circular torus with a 5%-of-minor-radius helical perturbation.
+
+    The perturbation selects positive transform; an exactly circular vacuum
+    torus has zero first-order transform sensitivity. Its initial transform is
+    about 0.01, so the transform constraint is part of the actual optimization.
+    """
+    inp = vj.VmecInput.from_file(INPUT)
+    rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+    rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = .1
+    rbc[inp.ntor+1, 1], zbs[inp.ntor+1, 1] = -.005, .005
+    return replace(inp, rbc=rbc, zbs=zbs)
+
+
+def main(input_file=None, outdir=Path("low_transport"), maxiter=MAX_ITERATIONS, beta=0.):
+    vj.configure()
     if not 1 <= maxiter <= 30:
-        raise ValueError("maxiter must be between 1 and 30")
+        raise ValueError("maxiter must be between 1 and 30 per mode stage")
+    if not np.isfinite(beta) or not 0 <= beta <= .005:
+        raise ValueError("beta must be a volume-average fraction between 0 and .005")
     start = time.monotonic()
     outdir = Path(outdir)
-    if outdir.resolve() == INPUT.parent.resolve():
-        raise ValueError("Write proposals outside the bundled input directory")
+    if outdir.resolve() == INPUT.parent.resolve() or (input_file is not None
+            and outdir.resolve() == Path(input_file).resolve().parent):
+        raise ValueError("Write proposals outside the source input directory")
     if (outdir/"summary.json").exists():
         raise ValueError("Use a new output directory for each batch")
-    outdir.mkdir(parents=True, exist_ok=True)
-    inp = vj.VmecInput.from_file(input_file)
+    if beta and input_file is None:
+        # The weak-transform seed did not converge at 0.5% pressure on this
+        # solve budget. Shape its vacuum field first, then raise pressure.
+        vacuum = main(None, outdir/"vacuum", maxiter, 0.)
+        if "selected_evaluation" not in vacuum:
+            raise RuntimeError("Vacuum shaping needs a feasible proposal before pressure continuation")
+        report = main(outdir/"vacuum"/"input.trial", outdir, maxiter, beta)
+        report["vacuum_start"] = str(outdir/"vacuum"/"summary.json")
+        report["pressure_continuation_seconds"] = report["seconds"]
+        report["vacuum_seconds"] = vacuum["seconds"]
+        report["seconds"] = time.monotonic()-start
+        (outdir/"summary.json").write_text(json.dumps(report, indent=2, allow_nan=False)+"\n")
+        return report
+    inp = near_circular_input() if input_file is None else vj.VmecInput.from_file(input_file)
     if (inp.nfp != 4 or inp.lasym or inp.lfreeb or inp.phiedge != .083
             or inp.rbc[inp.ntor, 0] != 1 or inp.curtor != 0
-            or inp.ncurr != 1 or inp.pmass_type != "power_series" or np.any(inp.am != 0)):
-        raise ValueError("This fixed calibration requires the bundled NFP4 vacuum configuration")
+            or inp.ncurr != 1 or inp.pmass_type != "power_series"
+            or (beta and (inp.gamma != 0 or inp.bloat != 1 or inp.spres_ped != 1))):
+        raise ValueError("Use an NFP4 zero-current vacuum or linear finite-beta input with GAMMA=0, BLOAT=SPRES_PED=1 and the fixed flux and scale")
+    pressure = np.asarray(inp.am)
+    vacuum = not np.any(pressure != 0)
+    linear_pressure = (pressure.size >= 2 and np.array_equal(pressure[:2], [1., -1.])
+                       and not np.any(pressure[2:] != 0))
+    if not vacuum and not (beta and linear_pressure):
+        raise ValueError("Use a vacuum input or the declared finite-beta pressure p proportional to 1-s")
+    outdir.mkdir(parents=True, exist_ok=True)
     inp = replace(inp, ns_array=np.array([35]), ftol_array=np.array([FORWARD_FTOL]),
                   niter_array=np.array([NITER]), delt=.5).change_resolution(
                       mpol=5, ntor=5, ntheta=16, nzeta=14)
+    if beta:
+        if vacuum:
+            inp = replace(inp, am=np.array([1., -1.]), ac=np.zeros(21), pres_scale=1.)
+        calibration = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
+        measured_beta = float(calibration.wout.betatotal)
+        if not np.isfinite(measured_beta) or measured_beta <= 0:
+            raise ValueError("Pressure calibration must yield finite positive beta")
+        inp = replace(inp, pres_scale=inp.pres_scale*beta/measured_beta)
     seed = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
+
+    def objective(state, runtime):
+        r = residuals(state, runtime)
+        return (jnp.concatenate((r, jnp.atleast_1d(opt.volume_average_beta(state, runtime)/beta-1)))
+                if beta else r)
+
     problem = opt.VmecProblem.from_tuples(
-        inp, [(residuals, 0., 1.)], max_mode=2, vary_major_radius=False,
+        inp, [(objective, 0., 1.)], max_mode=2, vary_major_radius=False,
         use_ess=True, ess_alpha=1.2, restart_from=seed, forward_ftol=FORWARD_FTOL,
         forward_max_iterations=NITER, refine_tol=ROOT_TOL, adjoint_tol=1e-8, max_fsq_ratio=1.)
-    x0 = problem.x0.copy()
-    step = .02*np.asarray(problem.scales)
+    diagnostics = jax.jit(lambda state, runtime: (objective(state, runtime), field_terms(state, runtime)))
+    x = problem.x0.copy()
     history, best, cached = [], None, {}
     report = dict(status="running", iterations=[], particle_qualified=False,
-                  optimizer_ftol=1e-3, maxiter=maxiter, input=str(input_file))
+                  optimizer_ftol=1e-3, maxiter_per_stage=maxiter,
+                  input=str(input_file) if input_file is not None else "near-circular NFP4",
+                  beta_target=beta, seed_perturbation_m=.005 if input_file is None else None,
+                  normalization="Fixed original NFP4 calibration, shared by every stage",
+                  settings=dict(ns=35, mpol=5, ntor=5, ftol=FORWARD_FTOL, niter=NITER))
 
     def save():
         report.update(evaluations=history, seconds=time.monotonic()-start)
@@ -160,63 +217,83 @@ def main(input_file=INPUT, outdir=Path("low_transport"), maxiter=MAX_ITERATIONS)
         temporary.write_text(json.dumps(report, indent=2, allow_nan=False)+"\n")
         temporary.replace(path)
 
-    def evaluate(x):
+    def evaluate(y):
         nonlocal best
-        key = np.asarray(x).tobytes()
+        key = np.asarray(y).tobytes()
         if key in cached:
             return cached[key]
-        r = np.asarray(problem.residual(x))
-        eq = problem.equilibrium_from_x(x)
-        if not np.allclose(r, np.asarray(residuals(eq.state, eq.runtime)), rtol=1e-8, atol=1e-10):
+        r = np.asarray(problem.residual(y))
+        eq = problem.equilibrium_from_x(y)
+        recomputed, fields = diagnostics(eq.state, eq.runtime)
+        if not np.allclose(r, np.asarray(recomputed), rtol=1e-8, atol=1e-10):
             raise RuntimeError("Exported equilibrium does not reproduce the optimized residual")
-        row = dict(evaluation=len(history), cost=.5*float(r@r), **physical_metrics(eq))
+        row = dict(evaluation=len(history), cost=.5*float(r@r), **physical_metrics(eq, fields))
+        row["beta"] = float(eq.wout.betatotal)
+        row["feasible"] &= not beta or .9*beta <= row["beta"] <= 1.1*beta
         history.append(row)
         if row["feasible"] and (best is None or row["raw"] < best[0]):
-            best = (row["raw"], np.asarray(x).copy())
-            problem.input_from_x(x).to_indata(outdir/"input.trial")
+            best = (row["raw"], np.asarray(y).copy())
+            problem.input_from_x(y).to_indata(outdir/"input.trial")
             vj.write_wout(outdir/"wout_trial.nc", eq.wout)
             report["selected_evaluation"] = row["evaluation"]
         cached[key] = r
         save()
-        print(f"evaluation {row['evaluation']}: proxy={row['raw']:.6g}, feasible={row['feasible']}", flush=True)
+        print(f"evaluation {row['evaluation']}: proxy={row['raw']:.6g}, iota={row['iota_min']:.6g}, feasible={row['feasible']}", flush=True)
         return r
 
-    def callback(intermediate_result):
-        report["iterations"].append(dict(iteration=int(intermediate_result.nit),
-                                          nfev=int(intermediate_result.nfev), cost=float(intermediate_result.fun@intermediate_result.fun/2)))
-        save()
-        if intermediate_result.nit >= maxiter:
-            raise StopIteration
-
-    evaluate(x0)
-    if best is None:
-        raise RuntimeError("The incumbent failed physical checks")
-    baseline = problem.equilibrium_from_x(x0).wout
-    vj.write_wout(outdir/"wout_incumbent.nc", baseline)
+    evaluate(x)
+    problem.input_from_x(x).to_indata(outdir/"input.seed")
+    vj.write_wout(outdir/"wout_seed.nc", problem.equilibrium_from_x(x).wout)
+    # An explicit input continues its incumbent; a circular start shapes modes
+    # 1 then 2, reusing the same equilibrium and derivative executable shapes.
+    modes = [1, 2] if input_file is None else [2]
     try:
-        result = least_squares(evaluate, x0, jac=problem.residual_jac, x_scale=step,
-                               bounds=(x0-.25*step, x0+.25*step), max_nfev=5*maxiter+5,
-                               ftol=1e-3, xtol=1e-10, gtol=1e-7, callback=callback)
-        evaluate(result.x)
-        before = transport(vj.read_wout(outdir/"wout_incumbent.nc"))
-        after = transport(vj.read_wout(outdir/"wout_trial.nc"))
-        passed = transport_improves(before, after)
-        report.update(status="completed", stopping_reason=str(result.message), nfev=int(result.nfev),
-                      baseline_Q=before.tolist(), trial_Q=after.tolist(), transport_screen_passed=passed,
-                      decision="Particle qualification required" if passed else "Keep incumbent")
+        for mode in modes:
+            stage = problem.subproblem(max_mode=mode, x=x)
+            step = .02*np.asarray(stage.scales)
+            stage_iterations = 0
+
+            def callback(intermediate_result):
+                nonlocal stage_iterations
+                stage_iterations += 1
+                report["iterations"].append(dict(mode=mode, iteration=stage_iterations,
+                    nfev=int(intermediate_result.nfev), cost=float(intermediate_result.fun@intermediate_result.fun/2)))
+                save()
+                if stage_iterations >= maxiter:
+                    raise StopIteration
+
+            result = least_squares(lambda y: evaluate(stage.embed(y)), stage.x0,
+                jac=stage.residual_jac, x_scale=step,
+                bounds=(stage.x0-5*step, stage.x0+5*step) if input_file is None else
+                       (stage.x0-.25*step, stage.x0+.25*step),
+                max_nfev=5*maxiter+5, ftol=1e-3, xtol=1e-10, gtol=1e-7, callback=callback)
+            x = stage.embed(result.x)
+            evaluate(x)
+            problem.input_from_x(x).to_indata(outdir/f"input.mode{mode}")
+        report.update(status="completed", stopping_reason=str(result.message), nfev=len(history))
+        if best is None:
+            report.update(transport_screen_passed=False, decision="No physically feasible proposal; keep the qualified candidate")
+        else:
+            before = transport(vj.read_wout(outdir/"wout_seed.nc"))
+            after = transport(vj.read_wout(outdir/"wout_trial.nc"))
+            passed = transport_improves(before, after)
+            report.update(baseline_Q=before.tolist(), trial_Q=after.tolist(), transport_screen_passed=passed,
+                          decision="Particle qualification required; keep the qualified candidate" if passed else "Keep the qualified candidate")
+            print(f"NEO mean Q: {before.mean():.6g} -> {after.mean():.6g}", flush=True)
     except Exception as error:
-        report.update(status="failed", error=str(error), decision="Keep incumbent")
+        report.update(status="failed", error=str(error), decision="Keep the qualified candidate")
         save()
         raise
     save()
-    print(f"NEO mean Q: {before.mean():.6g} -> {after.mean():.6g}; {report['decision']}", flush=True)
+    print(report["decision"], flush=True)
     return report
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=INPUT)
+    parser.add_argument("--input", type=Path, help="Continue a saved input instead of the near-circular start")
     parser.add_argument("--outdir", type=Path, default=Path("low_transport"))
     parser.add_argument("--maxiter", type=int, default=1 if os.getenv("VMEX_EXAMPLES_CI") == "1" else MAX_ITERATIONS)
+    parser.add_argument("--beta", type=float, default=0., help="Volume-average beta fraction (0 to .005); p proportional to 1-s, zero toroidal current")
     args = parser.parse_args()
-    main(args.input, args.outdir, args.maxiter)
+    main(args.input, args.outdir, args.maxiter, args.beta)

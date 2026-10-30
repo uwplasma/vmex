@@ -105,11 +105,12 @@ that research budget as one commented set of constants next to the default.
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
-  `pwO_optimization.py` continues the bundled `input.low_transport` non-QS
-  candidate for at most 10 iterations. It uses one mapped-field proxy with
-  geometry and field safeguards, then screens the proposal with NEO. A lower
-  proxy does not establish confinement; proposals still require particle checks.
-  See [the continuation settings](../docs/reference/optimization.rst#low-transport-continuation).
+  `pwO_optimization.py` shapes the existing NFP4 near-circular seed in modes
+  1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with
+  aspect/iota constraints and screens proposals with NEO. `--beta .005` adds
+  pressure continuation; the single-stage examples accept `VMEX_LOW_TRANSPORT=1`.
+  A lower proxy does not establish confinement; particle checks remain separate.
+  See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
 
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
   through the toroidal flux: at zero net current beta depends on PRES_SCALE /

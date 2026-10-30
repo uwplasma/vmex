@@ -613,26 +613,45 @@ spatial derivative. Third spatial derivatives and their parameter VJPs remain
 expensive; the examples print progress before each order and use compact grids
 for a bounded cold run.
 
-Low-transport continuation
+Low-transport optimization
 --------------------------
 
-``examples/optimization/pwO_optimization.py`` starts from the bundled non-QS
-``input.low_transport`` candidate. Install ``vmex[neoclassical]`` and run::
+``examples/optimization/pwO_optimization.py`` uses the existing
+``input.minimal_seed_nfp4`` with a helical perturbation of 5% of the minor radius.
+Install ``vmex[neoclassical]`` and run::
 
-   python examples/optimization/pwO_optimization.py --maxiter 10 --outdir low_transport
+   python examples/optimization/pwO_optimization.py --maxiter 15 --outdir low_transport
 
-The example keeps NS35, M5/N5, force tolerance 1e-12, a 2000-iteration solver
-cap and boundary modes through 2. Implicit residual Jacobians drive bounded
-least squares with optimizer ``ftol=1e-3`` and a local bound of 0.005 m times
-the ESS scale. A mapped-field proxy is combined only with aspect and signed-iota
-residuals; full-surface field bounds are hard acceptance checks. No symmetry,
-magnetic-well or maximum-J term is required.
+Boundary modes 1 then 2 share NS35, M5/N5, force tolerance 1e-12 and a
+2000-iteration solver cap. Implicit residual Jacobians drive bounded least
+squares with optimizer ``ftol=1e-3``; ``--maxiter`` caps each mode stage.
+The mapped-field proxy is combined with aspect ratio 10 and a signed-iota
+floor of 0.42. Field bounds are acceptance checks. No symmetry or magnetic-well
+penalty is used. ``--input PATH`` continues a saved boundary in mode 2.
 
-The output contains the incumbent and trial WOUTs, ``input.trial`` and an
-iteration summary. A matched NEO screen requires improvement at every sampled
-radius and at least 1% in their mean. It never replaces the bundled candidate.
-Passing this coarse screen still requires finer equilibrium/NEO calculations
-and fresh particle tracing. The mapped residual does not certify pwO.
+``--beta .005`` first shapes in vacuum, then applies a zero-current pressure
+profile proportional to ``1-s`` and targets 0.5% volume-average beta.
+An explicit ``--input`` skips the vacuum shaping stage.
+
+The existing simultaneous coil/plasma examples also accept this objective::
+
+   VMEX_LOW_TRANSPORT=1 VMEX_LOW_TRANSPORT_INPUT=low_transport/input.trial \
+       python examples/optimization/single_stage_optimization.py
+   VMEX_LOW_TRANSPORT=1 VMEX_LOW_TRANSPORT_INPUT=low_transport/input.trial \
+       python examples/optimization/single_stage_optimization_finite_beta.py
+
+Use the transport-screened boundary for joint continuation. Direct joint shaping
+from the near-circular seed improved the proxy but worsened NEO transport.
+The finite-beta example requires a vacuum-shaped input: the initial low-iota seed
+did not converge at its target pressure on this budget. Both low-transport joint
+examples require NEO non-regression at every sampled radius.
+``VMEX_LOW_TRANSPORT_MODE=1`` restricts either simultaneous search to mode 1.
+
+The boundary driver saves seed/trial WOUTs, ``input.trial`` and iteration
+history. A matched NEO screen requires improvement at every sampled radius
+and at least 1% in their mean. Input files are never overwritten. The proxy
+does not certify pwO or particle confinement; qualify promising boundaries
+with finer equilibrium/NEO calculations and fresh particle tracing.
 
 Resources and reproducibility
 -----------------------------
