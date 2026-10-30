@@ -106,7 +106,8 @@ def test_declared_floors_match_every_copy() -> None:
     readme = _read("README.md")
     quoted = dict(re.findall(r'"([A-Za-z0-9_.-]+)>=([0-9][^"]*)"', readme))
     assert {"solvax", "booz_xform_jax", "essos", "virtual-casing-jax", "gkx", "dkx"} <= set(quoted)
-    assert all(everything[n] == f for n, f in quoted.items() if n not in {"jax", "jaxlib"})
+    # Optional integrations can require a newer version than the core install.
+    assert all(core.get(n, everything[n]) == f for n, f in quoted.items() if n not in {"jax", "jaxlib"})
     for extra in ("all", "coils", "freeb", "neoclassical", "turbulence", "optimizers"):
         assert f'pip install "vmex[{extra}]"' in readme, extra
     nightly = WORKFLOWS["nightly.yml"]

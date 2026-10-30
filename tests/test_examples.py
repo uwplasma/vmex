@@ -1121,6 +1121,17 @@ def test_low_transport_near_circular_seed():
     assert inp.ncurr == 1 and inp.curtor == 0 and not np.any(inp.am)
 
 
+def test_low_transport_rejects_old_neo_before_solving(tmp_path, monkeypatch):
+    import runpy
+    from vmex import _compat
+
+    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
+    monkeypatch.setattr(_compat.importlib_metadata, "version", lambda name: "1.1.0")
+    with pytest.raises(ImportError, match=r"neo-jax>=1\.1\.1"):
+        example["main"](outdir=tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
 @pytest.mark.parametrize("beta", [-.001, .01, float("nan")])
 def test_low_transport_near_circular_rejects_invalid_beta(tmp_path, beta):
     import runpy

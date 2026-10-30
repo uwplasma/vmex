@@ -20,6 +20,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 import vmex as vj
+from vmex._compat import require_optional
 from vmex import optimize as opt
 from vmex.core.omnigenity import boozer_spectrum_state
 from vmex.core.pwo import mapped_pwo_residual_from_boozer
@@ -177,6 +178,7 @@ def main(input_file=None, outdir=Path("low_transport"), maxiter=MAX_ITERATIONS, 
                        and not np.any(pressure[2:] != 0))
     if not vacuum and not (beta and linear_pressure):
         raise ValueError("Use a vacuum input or the declared finite-beta pressure p proportional to 1-s")
+    require_optional("neo-jax", "low-transport NEO screen")
     outdir.mkdir(parents=True, exist_ok=True)
     inp = replace(inp, ns_array=np.array([35]), ftol_array=np.array([FORWARD_FTOL]),
                   niter_array=np.array([NITER]), delt=.5).change_resolution(
