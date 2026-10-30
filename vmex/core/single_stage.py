@@ -91,7 +91,7 @@ class CoilPenalty:
 
 
 def total_normal_field(inp, coils, state, runtime, nphi, ntheta, precision, *, digits=4):
-    """Total-field normal residual divided by equilibrium |B|, and area weights."""
+    """Total-field normal residual divided by equilibrium ``|B|``, and area weights."""
     data = vc.surface_field_data_from_state(inp, state, runtime=runtime, nphi=nphi, ntheta=ntheta)
     interface = vc.PlasmaVacuumInterface.from_surface_data(data, digits=digits, precision=precision)
     return interface.bnormal_residual(coil_field(coils)) / jnp.linalg.norm(data.B_total, axis=0), interface.weights
