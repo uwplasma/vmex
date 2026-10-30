@@ -2719,7 +2719,8 @@ def _pwo_confinement_case(tmp_path, monkeypatch, mode='valid', lasym=False):
                 fun(point)
         else:
             point = np.full(len(x), -.1); point[0] = .2; fun(point); fun(point)
-        return NS()
+        kw['callback'](point)
+        return NS(success=True, message='Simplex tolerances satisfied', nit=1, nfev=2)
     def global_(fun, bounds, **kw):
         assert fun(np.zeros(len(bounds))) == 1.
         for j in range(100):
@@ -2832,6 +2833,7 @@ def test_pwo_confinement_distinguishes_surface_roundoff_from_physical_shift(tmp_
 
 @pytest.mark.parametrize('updates', [dict(parameters=['RBC(0,0)']), dict(scales=0.),
     dict(optimizer='unknown'), dict(max_mode=0),
+    dict(optimizer_ftol=0.), dict(optimizer_ftol=np.nan),
     dict(constraints={}), dict(constraints={'aspect': [6., 5.], 'iota_min': .41}),
     dict(constraints={'aspect': [5., 6.], 'iota_min': np.nan}),
     dict(optimizer='adjoint', constraints={'aspect': [5., 6.], 'iota_min': .41}),
@@ -3018,7 +3020,8 @@ def _pwo_confinement_adjoint_case(tmp_path, monkeypatch, mode='valid', all_modes
         value, gradient = pair(point)
         np.testing.assert_allclose(gradient, np.linspace(.2, .4, len(zero)), rtol=1e-13)
         assert np.isfinite(value)
-        return NS()
+        kwargs['callback'](point)
+        return NS(success=True, message='Relative function decrease satisfied', nit=1, nfev=1)
     monkeypatch.setitem(env, 'minimize', local)
     return run, policy, seed, calls
 
@@ -3096,6 +3099,21 @@ def test_pwo_confinement_adjoint_budget_stops_before_another_gradient(tmp_path, 
     monkeypatch.setitem(run.__globals__, 'minimize', search)
     result = run(policy, output_name='bounded')
     assert len(result['cases']) == 1 and len(calls.problem.gradients) == 2
+    assert not result['termination']['success']
+    assert result['termination']['message'] == 'Evaluation budget reached'
+
+
+@pytest.mark.parametrize('adjoint', [False, True])
+def test_pwo_confinement_optimizer_tolerance_and_iteration_history(tmp_path, monkeypatch, adjoint):
+    case = _pwo_confinement_adjoint_case if adjoint else _pwo_confinement_case
+    run, policy, _, calls, *_ = case(tmp_path, monkeypatch)
+    policy['optimizer_ftol'] = .002
+    result = run(policy, output_name='history')
+    assert calls.local[0]['options']['ftol' if adjoint else 'fatol'] == .002
+    assert result['optimizer_ftol'] == .002 and result['termination']['nit'] == 1
+    assert result['termination']['success'] and result['accepted']
+    assert len(result['iterations']) == 1
+    assert result['iterations'][0]['best_objective'] == result['best_training']['objective']
 
 
 @pytest.mark.parametrize('mode', ['force', 'training_family', 'neo_rational', 'validation_family', 'census'])

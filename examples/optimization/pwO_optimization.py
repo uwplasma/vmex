@@ -26,6 +26,9 @@ requiring a gradient certificate; each step is bounded by the policy's scales.
 Forward searches may supply constraints={"aspect": [9.9, 10.1], "iota_min": 0.41}
 to replace seed-relative geometry bounds with an aspect interval and a signed
 full-profile iota floor. Input profiles, flux and R00 remain fixed.
+optimizer_ftol defaults to 1e-3: relative decrease for L-BFGS-B, normalized
+objective spread for Nelder-Mead. Iterations and termination are saved separately
+from candidate acceptance; the equilibrium force tolerance is unchanged.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -1052,6 +1055,9 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     band = int(policy.get("band", 32)); check_band = int(policy.get("check_band", 40))
     global_steps = int(policy.get("global_steps", 2)); local_calls = int(policy.get("local_calls", 32))
     global_calls = int(policy.get("global_calls", 32))
+    optimizer_ftol = float(policy.get("optimizer_ftol", 1e-3))
+    if not np.isfinite(optimizer_ftol) or optimizer_ftol <= 0:
+        raise ValueError("optimizer_ftol must be positive and finite")
     minimum_calls = len(indices)+1 if optimizer == "derivative_free" else 1
     if band < 2 or check_band <= band or global_steps < 0 or global_calls < 0 or local_calls < minimum_calls:
         raise ValueError("Require a finer validation band, nonnegative global budgets and local calls >= D+1 (derivative_free) or 1 (adjoint)")
@@ -1098,7 +1104,8 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     started = time.perf_counter()
     summary = dict(method="confinement", optimizer=optimizer, parameters=selected, policy=policy, accepted=False, pwO_qualified=False,
         family_guards=bool(scorers[0]),
-        research_validation_complete=False, cases=[], objective="weighted epsilon_eff^(3/2) / fixed seed weighted mean",
+        research_validation_complete=False, cases=[], iterations=[], optimizer_ftol=optimizer_ftol,
+        objective="weighted epsilon_eff^(3/2) / fixed seed weighted mean",
         scope="Effective ripple search; finite-collisionality transport and particle confinement are not certified")
 
     def save():
@@ -1262,6 +1269,21 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
         return value
 
     bounds = [(-1., 1.)]*len(indices)
+    def monitor(_):
+        summary["iterations"].append(dict(iteration=len(summary["iterations"])+1,
+            evaluations=len(cache)-1, best_objective=best["value"], seconds=time.perf_counter()-started))
+        save()
+
+    def local_search(fun, x, **kwargs):
+        try:
+            result = minimize(fun, x, bounds=bounds, callback=monitor, **kwargs)
+            summary["termination"] = dict(success=bool(result.success), message=str(result.message),
+                nit=int(result.nit), nfev=int(result.nfev))
+        except BudgetReached:
+            summary["termination"] = dict(success=False, message="Evaluation budget reached",
+                nit=len(summary["iterations"]), nfev=None)
+        save()
+
     if optimizer == "derivative_free" and global_steps and global_calls:
         try:
             differential_evolution(objective, bounds, maxiter=global_steps, popsize=4,
@@ -1272,6 +1294,8 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     if optimizer == "proposals":
         for proposal in proposals:
             objective(proposal)
+        summary["termination"] = dict(success=False, message="Proposal batch completed; convergence not assessed",
+            nit=0, nfev=len(proposals))
     elif optimizer == "adjoint":
         import jax
         from vmex.core import implicit as im
@@ -1316,17 +1340,14 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
                 or not np.all(np.isfinite([value, *gradient, *differences]))) or any(
                 abs(d-tangent) > 1e-6+.02*max(abs(d), abs(tangent)) for d in differences):
             raise RuntimeError("Confinement adjoint failed the independent boundary directional check")
-        try:
-            minimize(value_and_gradient, zero, jac=True, method="L-BFGS-B", bounds=bounds,
-                options=dict(maxiter=local_calls, maxfun=local_calls, maxls=10, ftol=1e-12, gtol=1e-7))
-        except BudgetReached:
-            pass
+        local_search(value_and_gradient, zero, jac=True, method="L-BFGS-B",
+            options=dict(maxiter=local_calls, maxfun=local_calls, maxls=10, ftol=optimizer_ftol, gtol=1e-7))
     else:
         simplex = np.tile(best["x"], (len(indices)+1, 1))
         for j in range(len(indices)):
             simplex[j+1, j] += .1 if best["x"][j] <= .9 else -.1
-        minimize(objective, best["x"], method="Nelder-Mead", bounds=bounds,
-            options=dict(maxfev=local_calls, initial_simplex=simplex, xatol=1e-3))
+        local_search(objective, best["x"], method="Nelder-Mead",
+            options=dict(maxfev=local_calls, initial_simplex=simplex, xatol=1e-3, fatol=optimizer_ftol))
     summary["best_training"] = dict(x=best["x"].tolist(), objective=best["value"])
     if best["value"] < 1:
         save_seed_checkpoint(best["eq"].inp, best["eq"], output_name, "candidate")
