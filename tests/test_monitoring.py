@@ -496,3 +496,52 @@ def test_trace_prints_one_line_per_evaluation():
         silent.cache_evaluation(np.array([float(index)]), cost, np.array([cost]))
     assert "trial" not in quiet.getvalue()
 
+
+
+def test_feasible_candidate_checkpoint_survives_bad_trials_and_screen_failure(tmp_path, monkeypatch):
+    import vmex as vj
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    written = []
+    monkeypatch.setattr(vj, "write_wout", lambda path, w: written.append(w))
+
+    def equilibrium(x):
+        if x[0] == 4:
+            raise RuntimeError("decision vector did not produce a usable VMEC equilibrium")
+        return SimpleNamespace(wout=float(x[0]), x=x)
+
+    problem = SimpleNamespace(residual=lambda x: x.copy(), equilibrium_from_x=equilibrium,
+        input_from_x=lambda x: SimpleNamespace(to_indata=lambda path: Path(path).write_text(str(x[0]))))
+    def inspect(eq):
+        return eq.x, dict(raw=float(eq.x[0]), feasible=bool(eq.x[0] >= 2))
+
+    monitor = FeasibleCandidateMonitor(problem, inspect, tmp_path, maxiter=1)
+    with np.testing.assert_raises_regex(ValueError, "invalid NEO"):
+        with monitor:
+            for value in (3., 2., 1., 4., 2.):
+                monitor(np.array([value]))
+            raise ValueError("invalid NEO")
+    assert written == [3., 2.]
+    assert (tmp_path / "input.trial").read_text() == "2.0"
+    assert monitor.report["selected_evaluation"] == 1
+    assert len(monitor.report["evaluations"]) == 4  # repeated point is cached
+    assert monitor.report["status"] == "failed"
+    assert monitor.report["error"] == "invalid NEO"
+    with np.testing.assert_raises(StopIteration):
+        monitor.callback(2)(OptimizeResult(nfev=5, fun=np.array([2.])))
+    assert monitor.report["iterations"][0]["mode"] == 2
+    with np.testing.assert_raises_regex(ValueError, "new output directory"):
+        FeasibleCandidateMonitor(problem, inspect, tmp_path, maxiter=1)
+
+
+def test_candidate_monitor_rejects_nonfinite_score_before_writing(tmp_path):
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    problem = SimpleNamespace(residual=lambda x: np.array([1.]), equilibrium_from_x=lambda x: None)
+    monitor = FeasibleCandidateMonitor(problem,
+        lambda eq: (np.array([1.]), {"feasible": True, "raw": float("nan")}), tmp_path, maxiter=1)
+    with np.testing.assert_raises_regex(ValueError, "score must be finite"):
+        with monitor:
+            monitor(np.array([0.]))
+    assert monitor.best is None and not (tmp_path / "input.trial").exists()
+    assert monitor.report["status"] == "failed"

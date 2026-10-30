@@ -656,7 +656,7 @@ particle qualification or MHD-stability assessment.
 
 ``single_stage_optimization_pwO.py`` adds the mapped residual to the existing
 finite-beta plasma/coil objective and checks a subsequent free-boundary solve.
-It requires ``vmex[coils,neoclassical]``. The retained three-step check reduces
+It requires ``vmex[coils,freeb,neoclassical]``. The retained three-step check reduces
 total cost by 35.8%, but mean Q increases by 70.7%, engineering limits fail,
 and the free-boundary solve does not converge. This is an example of objective
 composition, not a qualified low-transport coil design. A small normal-field

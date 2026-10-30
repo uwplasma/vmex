@@ -253,3 +253,14 @@ def test_epsilon_effective_lasym_identities():
     reference = ripple(asymmetric)
     np.testing.assert_allclose(ripple(mirrored), reference, rtol=3e-2)
     assert np.all(reference > 10 * ripple(dataclasses.replace(asymmetric, lasym=False)))
+
+
+@pytest.mark.parametrize("trial, expected", [
+    ([.8, .9, .9], True), ([.8, 1.01, .8], False),
+    ([.999, .999, .999], False), ([0, .5, .5], False),
+    ([float("nan"), .5, .5], False), ([.5, .5], False),
+])
+def test_transport_screen_rejects_radial_tradeoffs(trial, expected):
+    from vmex.core.neoclassical import transport_improves
+
+    assert transport_improves([1., 1., 1.], trial) is expected

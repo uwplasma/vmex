@@ -313,7 +313,7 @@ consequences of it. [Figure generator and frozen data](docs/_static/figures/sour
 Pressure continuation reaches volume-average β = 0.4985%, with a further 6.22% reduction in
 independently checked mean Q; particles were not checked at finite pressure.
 `examples/optimization/single_stage_optimization_pwO.py` also composes the mapped term with plasma and coil objectives
-(requires `vmex[coils]`). Its three-step check lowers total cost by 35.8% but raises mean Q by
+(requires `vmex[coils,freeb,neoclassical]`). Its three-step check lowers total cost by 35.8% but raises mean Q by
 70.7%, misses engineering limits and fails the subsequent free-boundary solve. It does not
 provide a qualified coil configuration. See the [workflow](docs/reference/optimization.rst)
 and [physics and normalization](docs/explanation/confinement.rst).

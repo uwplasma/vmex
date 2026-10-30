@@ -183,6 +183,50 @@ class MappedPwOResidual:
         """Return the flat traceable least-squares residual."""
         return self.compute_state(state, rt)["residuals1d"]
 
+    def diagnostics_state(self, state, rt, *, ntheta=64, nzeta=64):
+        """Mapped residual and full-surface field extrema from one Boozer transform."""
+        mapped = self.compute_state(state, rt)
+        theta = 2*jnp.pi*jnp.arange(ntheta)[None, :, None]/ntheta
+        zeta = 2*jnp.pi*jnp.arange(nzeta)[None, None, :]/(mapped["nfp"]*nzeta)
+        field = _evaluate(mapped["bmnc_b"], mapped["bmns_b"], mapped["xm_b"],
+                          mapped["xn_b"], theta, zeta)
+        low, high = field.min(axis=(1, 2)), field.max(axis=(1, 2))
+        return mapped, low, high, (high-low)/(high+low)
+
+    def physical_metrics(self, eq, *, bmax_ref, aspect_bounds, iota_floor,
+                         force_tol=1e-12, mirror_floor=.05, fields=None):
+        """Check force balance, oriented volume, positive B² and full-surface limits.
+
+        ``bmax_ref`` is a fixed ceiling, in Tesla, on each sampled surface.
+        The iota floor is signed. These checks do not certify orbit confinement.
+        """
+        from .statephysics import _field_chain
+
+        mapped, low, high, mirror = (self.diagnostics_state(eq.state, eq.runtime)
+                                    if fields is None else fields)
+        _, jacobian, _, field, _ = _field_chain(eq.state, eq.runtime)
+        signed_jacobian = np.asarray(jacobian.sqrt_g)[1:]*float(eq.runtime.setup.signgs)
+        pressure = np.asarray(field.pressure)
+        pressure = pressure[:, None, None] if pressure.ndim == 1 else pressure
+        B2 = np.asarray(2*(field.total_pressure-pressure))[1:]
+        forces = [float(getattr(eq.result, k)) for k in ("fsqr", "fsqz", "fsql")]
+        row = dict(aspect=float(eq.wout.aspect), iota_min=float(np.min(eq.wout.iotaf)),
+                   force_errors=forces, raw=float(mapped["total"]), beta=float(eq.wout.betatotal),
+                   Bmin=np.asarray(low).tolist(), Bmax=np.asarray(high).tolist(),
+                   mirror=np.asarray(mirror).tolist())
+        row["feasible"] = bool(
+            np.isfinite(forces).all() and max(forces) <= force_tol
+            and aspect_bounds[0] <= row["aspect"] <= aspect_bounds[1]
+            and row["iota_min"] > iota_floor
+            and np.isfinite(B2).all() and B2.min() > 0
+            and np.isfinite(signed_jacobian).all() and signed_jacobian.min() > 0
+            and np.asarray(mapped["valid"]).all()
+            and np.isfinite(low).all() and np.all(np.asarray(low) > 0)
+            and np.isfinite(high).all() and np.isfinite(mirror).all()
+            and np.all(np.asarray(high) <= np.asarray(bmax_ref))
+            and np.all(np.asarray(mirror) >= mirror_floor))
+        return row
+
     def total_state(self, state, rt):
         """Return the sum of squared residuals on a live state."""
         return self.compute_state(state, rt)["total"]

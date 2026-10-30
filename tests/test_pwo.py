@@ -190,3 +190,45 @@ def test_traced_invalid_map_reports_false_and_nonfinite_residual(reference):
     valid, residual = jax.jit(evaluate)(reference)
     assert not np.any(valid)
     assert not np.isfinite(residual).all()
+
+
+def test_full_surface_diagnostics_reuse_transform_and_include_sine_modes(monkeypatch):
+    spectrum = _spectrum(ns=2)
+    mapped = MappedPwOResidual([.25, .75], b_ref=[1.5, 1.5])
+    calls = []
+
+    def compute(state, runtime):
+        calls.append((state, runtime))
+        return {**spectrum, "total": 0.}
+
+    monkeypatch.setattr(mapped, "compute_state", compute)
+    _, low, high, mirror = mapped.diagnostics_state(None, None, ntheta=9, nzeta=11)
+    theta, zeta = np.meshgrid(2*np.pi*np.arange(9)/9, 2*np.pi*np.arange(11)/33, indexing="ij")
+    field = np.zeros((2, 9, 11))
+    for j, (m, n) in enumerate(zip(spectrum["xm_b"], spectrum["xn_b"])):
+        field += (spectrum["bmnc_b"][:, j, None, None]*np.cos(m*theta-n*zeta)
+                  + spectrum["bmns_b"][:, j, None, None]*np.sin(m*theta-n*zeta))
+    np.testing.assert_allclose(low, field.min(axis=(1, 2)), rtol=1e-14)
+    np.testing.assert_allclose(high, field.max(axis=(1, 2)), rtol=1e-14)
+    np.testing.assert_allclose(mirror, (high-low)/(high+low), rtol=1e-14)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("low, high, mirror, feasible", [
+    (1., 2., 1/3, True), (-.01, 2., 1.01, False), (float("nan"), 2., .1, False),
+    (1., float("inf"), .1, False), (1., 2., float("nan"), False),
+])
+def test_physical_metrics_reject_invalid_full_surface_field(monkeypatch, low, high, mirror, feasible):
+    from types import SimpleNamespace as NS
+    from vmex.core import statephysics
+
+    eq = NS(state=None, runtime=NS(setup=NS(signgs=1)),
+            wout=NS(aspect=10., iotaf=np.array([.6, .7]), betatotal=0.),
+            result=NS(fsqr=1e-14, fsqz=1e-14, fsql=1e-14))
+    jacobian = NS(sqrt_g=np.ones((3, 2, 2)))
+    field = NS(pressure=np.zeros(3), total_pressure=np.ones((3, 2, 2)))
+    monkeypatch.setattr(statephysics, "_field_chain", lambda state, rt: (None, jacobian, None, field, None))
+    mapped = MappedPwOResidual([.5], b_ref=1.)
+    result = mapped.physical_metrics(eq, bmax_ref=[3.], aspect_bounds=(9.9, 10.1), iota_floor=.41,
+        fields=({"total": .01, "valid": np.array([True])}, [low], [high], [mirror]))
+    assert result["feasible"] is feasible

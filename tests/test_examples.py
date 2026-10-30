@@ -112,6 +112,8 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
+    "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
+    "examples/optimization/single_stage_optimization_pwO.py": "requires the finite-beta continuation; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
@@ -1075,81 +1077,15 @@ def test_qi_optimization_example(tmp_path):
     assert (tmp_path / "wout_QI_optimized.nc").exists()
 
 
-@pytest.mark.parametrize("trial, expected", [
-    ([.8, .9, .9], True), ([.8, 1.01, .8], False),
-    ([.999, .999, .999], False), ([0, .5, .5], False),
-    ([float("nan"), .5, .5], False), ([.5, .5], False),
-])
-def test_low_transport_screen_rejects_radial_tradeoffs(trial, expected):
-    import runpy
-
-    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
-    assert example["transport_improves"]([1., 1., 1.], trial) is expected
-
-
-@pytest.mark.parametrize("overrides, beta", [
-    (dict(pmass_type="cubic_spline", pres_scale=1.,
-          am_aux_s=np.array([0., 1.]), am_aux_f=np.array([1., 0.])), 0.),
-    (dict(gamma=5/3), .005), (dict(bloat=2.), .005), (dict(spres_ped=.8), .005),
-])
-def test_low_transport_rejects_other_pressure_models(tmp_path, overrides, beta):
-    import runpy
-    from dataclasses import replace
-    import vmex as vj
-
-    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
-    inp = vj.VmecInput.from_file(DATA_DIR / "input.minimal_seed_nfp4")
-    bad = replace(inp, **overrides)
-    path = tmp_path / "input.spline"
-    bad.to_indata(path)
-    with pytest.raises(ValueError, match="vacuum"):
-        example["main"](path, tmp_path / "out", 1, beta)
-
-
-def test_low_transport_near_circular_seed():
-    import runpy
-
-    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
-    inp = example["near_circular_input"]()
-    # The circle has minor radius .1; the 5 mm perturbation breaks the
-    # zero-transform stationary point without supplying a preoptimized shape.
-    assert inp.rbc[inp.ntor, 0] == 1
-    assert inp.rbc[inp.ntor, 1] == inp.zbs[inp.ntor, 1] == .1
-    assert inp.rbc[inp.ntor+1, 1] == -.005
-    assert inp.zbs[inp.ntor+1, 1] == .005
-    assert np.count_nonzero(inp.rbc) == 3 and np.count_nonzero(inp.zbs) == 2
-    assert inp.ncurr == 1 and inp.curtor == 0 and not np.any(inp.am)
-
-
-def test_low_transport_rejects_old_neo_before_solving(tmp_path, monkeypatch):
-    import runpy
-    from vmex import _compat
-
-    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
-    monkeypatch.setattr(_compat.importlib_metadata, "version", lambda name: "1.1.0")
-    with pytest.raises(ImportError, match=r"neo-jax>=1\.1\.1"):
-        example["main"](outdir=tmp_path / "out")
-    assert not (tmp_path / "out").exists()
-
-
-@pytest.mark.parametrize("beta", [-.001, .01, float("nan")])
-def test_low_transport_near_circular_rejects_invalid_beta(tmp_path, beta):
-    import runpy
-
-    example = runpy.run_path(str(EXAMPLES / "optimization" / "pwO_optimization.py"))
-    with pytest.raises(ValueError, match="beta"):
-        example["main"](outdir=tmp_path, beta=beta)
-
-
 @pytest.mark.full
 def test_low_transport_example(tmp_path):
     pytest.importorskip("booz_xform_jax")
     pytest.importorskip("neo_jax")
     source = DATA_DIR / "input.minimal_seed_nfp4"
     original = source.read_bytes()
-    _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path,
-                 args=("--outdir", str(tmp_path)))
-    summary = json.loads((tmp_path / "summary.json").read_text())
+    _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
+    outdir = tmp_path / "low_transport"
+    summary = json.loads((outdir / "summary.json").read_text())
     assert summary["status"] == "completed" and not summary["particle_qualified"]
     assert len(summary["iterations"]) <= 2
     assert {row["mode"] for row in summary["iterations"]} == {1, 2}
@@ -1157,11 +1093,11 @@ def test_low_transport_example(tmp_path):
     assert min(row["cost"] for row in summary["evaluations"]) < summary["evaluations"][0]["cost"]
     assert source.read_bytes() == original
     for name in ("input.seed", "wout_seed.nc", "input.mode1", "input.mode2"):
-        assert (tmp_path / name).exists()
+        assert (outdir / name).exists()
     if "selected_evaluation" in summary:
         assert summary["evaluations"][summary["selected_evaluation"]]["feasible"]
         assert len(summary["baseline_Q"]) == len(summary["trial_Q"]) == 3
-        assert (tmp_path / "input.trial").exists()
+        assert (outdir / "input.trial").exists()
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve
