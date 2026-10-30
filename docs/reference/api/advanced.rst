@@ -139,6 +139,9 @@ Free boundary
 .. automodule:: vmex.core.virtual_casing
    :members:
 
+.. automodule:: vmex.core.single_stage
+   :members:
+
 .. automodule:: vmex.core.mgrid
    :members:
 
