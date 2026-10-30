@@ -1317,15 +1317,8 @@ def test_fixed_boundary_single_stage_least_squares(tmp_path):
 
 
 @pytest.mark.full  # nightly: exact VMEX+ESSOS reverse-mode graph and ParaView output
-@pytest.mark.parametrize("low_transport", [False, True])
-def test_fixed_boundary_single_stage_optimization(tmp_path, monkeypatch, low_transport):
+def test_fixed_boundary_single_stage_optimization(tmp_path):
     pytest.importorskip("essos")
-    monkeypatch.delenv("VMEX_LOW_TRANSPORT_INPUT", raising=False)
-    monkeypatch.setenv("VMEX_LOW_TRANSPORT", "1" if low_transport else "0")
-    if low_transport:
-        pytest.importorskip("neo_jax")
-        pytest.importorskip("booz_xform_jax")
-        monkeypatch.setenv("VMEX_LOW_TRANSPORT_MODE", "1")
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization.py", tmp_path, timeout=1800)
     # Smoke mode caps the budget, so only the fall of the objective is asserted.
@@ -1336,27 +1329,13 @@ def test_fixed_boundary_single_stage_optimization(tmp_path, monkeypatch, low_tra
     assert "[stage 1]" not in out
     for diagnostic in ("B.n/B: area-weighted RMS", "Minimum coil-surface distance",
                        "Minimum coil-coil distance", "Maximum curvature", "Coil lengths",
-                       "Minimum signed iota = " if low_transport else "Minimum |iota| = ", "Aspect ratio = "):
+                       "Minimum |iota| = ", "Aspect ratio = "):
         assert diagnostic in out
     normal = re.search(r"B\.n/B: area-weighted RMS = ([0-9.]+)%, max = ([0-9.]+)%", out)
     assert normal is not None and all(np.isfinite(float(value)) for value in normal.groups())
     summary = json.loads((tmp_path / "single_stage_optimization_summary.json").read_text())
     assert summary["smoke"] and summary["trials"] >= 1
     assert summary["met"] == (not summary["unmet"])
-    if low_transport:
-        assert summary["objective"] == "mapped transport proxy"
-        assert summary["final_objective"] < summary["initial_objective"]
-        assert summary["boundary_change_norm"] > 0 and summary["coil_change_norm"] > 0
-        assert "transport_screen_passed" in summary
-        if "NEO_final" in summary:
-            seed_q, final_q = np.asarray(summary["NEO_seed"]), np.asarray(summary["NEO_final"])
-            assert seed_q.shape == final_q.shape == (3,)
-            assert np.isfinite(seed_q).all() and np.isfinite(final_q).all()
-            assert summary["transport_screen_passed"] == bool(np.all(final_q <= seed_q))
-        else:
-            assert summary["transport_error"]
-        if not summary["transport_screen_passed"]:
-            assert not summary["met"]
     verdict = "All stated targets met." if summary["met"] else "did NOT meet its stated targets"
     assert verdict in out
     for name in ("wout_single_stage_optimized.nc", "single_stage_objectives.png",
@@ -1369,49 +1348,21 @@ def test_fixed_boundary_single_stage_optimization(tmp_path, monkeypatch, low_tra
 
 
 @pytest.mark.full  # nightly: one finite-beta VMEX + VCJ + ESSOS graph
-@pytest.mark.parametrize("low_transport", [False, True])
-def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch, low_transport):
+def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch):
     pytest.importorskip("essos")
-    monkeypatch.delenv("VMEX_LOW_TRANSPORT_INPUT", raising=False)
-    monkeypatch.setenv("VMEX_LOW_TRANSPORT", "1" if low_transport else "0")
-    if low_transport:
-        pytest.importorskip("neo_jax")
-        pytest.importorskip("booz_xform_jax")
-        monkeypatch.setenv("VMEX_LOW_TRANSPORT_MODE", "2")
-        # The weak-transform finite-pressure circular seed did not converge on
-        # this budget. Generate the vacuum boundary with the public shaping driver.
-        vacuum_dir = tmp_path / "vacuum"
-        _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path,
-                     args=("--maxiter", "15", "--outdir", str(vacuum_dir)), timeout=1800)
-        monkeypatch.setenv("VMEX_LOW_TRANSPORT_INPUT", str(vacuum_dir / "input.trial"))
     pytest.importorskip("virtual_casing_jax")
     # Keep this independent compile from filling a shared developer cache.
     monkeypatch.setenv("VMEX_COMPILATION_CACHE", "disabled")
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
         tmp_path, timeout=1800)
-    for diagnostic in ("[final] mapped proxy" if low_transport else "[final] QA total",
-                       "(B_coils + B_plasma).n/B: area-weighted RMS",
+    for diagnostic in ("[final] QA total", "(B_coils + B_plasma).n/B: area-weighted RMS",
                        "Volume-average beta = ", "Coil lengths", "Maximum curvature",
-                       "Minimum signed iota = " if low_transport else "Minimum |iota| = ", "Aspect ratio = "):
+                       "Minimum |iota| = ", "Aspect ratio = "):
         assert diagnostic in out
     summary = json.loads(
         (tmp_path / "single_stage_optimization_finite_beta_summary.json").read_text())
     assert summary["met"] == (not summary["unmet"])
-    if low_transport:
-        assert summary["objective"] == "mapped transport proxy"
-        assert summary["final_objective"] < summary["initial_objective"]
-        assert summary["boundary_change_norm"] > 0 and summary["coil_change_norm"] > 0
-        assert "transport_screen_passed" in summary
-        if "NEO_final" in summary:
-            seed_q, final_q = np.asarray(summary["NEO_seed"]), np.asarray(summary["NEO_final"])
-            assert seed_q.shape == final_q.shape == (3,)
-            assert np.isfinite(seed_q).all() and np.isfinite(final_q).all()
-            assert summary["transport_screen_passed"] == bool(np.all(final_q <= seed_q))
-        else:
-            assert summary["transport_error"]
-        if not summary["transport_screen_passed"]:
-            assert not summary["met"]
     assert summary["met"] or "did NOT meet its stated targets" in out
     for name in ("wout_single_stage_finite_beta_optimized.nc",
                  "single_stage_finite_beta_objectives.png",
@@ -1569,21 +1520,3 @@ def test_vmex_mrx_comparison_example(tmp_path):
     assert "force residual" in out and "|B| difference" in out
     figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
     assert figure.stat().st_size > 10_000
-
-
-@pytest.mark.parametrize("name, output", [
-    ("single_stage_optimization.py", "input.single_stage_optimized"),
-    ("single_stage_optimization_finite_beta.py", "input.single_stage_finite_beta_optimized"),
-])
-def test_low_transport_joint_preserves_input(tmp_path, name, output, monkeypatch):
-    pytest.importorskip("essos")
-    seed = tmp_path / output
-    contents = (DATA_DIR / "input.minimal_seed_nfp4").read_bytes()
-    seed.write_bytes(contents)
-    monkeypatch.setenv("VMEX_LOW_TRANSPORT", "1")
-    monkeypatch.setenv("VMEX_LOW_TRANSPORT_INPUT", str(seed))
-    env = dict(os.environ, PYTHONPATH=str(REPO) + os.pathsep + os.environ.get("PYTHONPATH", ""))
-    result = subprocess.run([sys.executable, str(EXAMPLES / "optimization" / name)],
-                            cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
-    assert result.returncode != 0 and "preserve VMEX_LOW_TRANSPORT_INPUT" in result.stderr
-    assert seed.read_bytes() == contents

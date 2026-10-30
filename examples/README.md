@@ -108,7 +108,7 @@ that research budget as one commented set of constants next to the default.
   `pwO_optimization.py` shapes the existing NFP4 near-circular seed in modes
   1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with
   aspect/iota constraints and screens proposals with NEO. `--beta .005` adds
-  pressure continuation; the single-stage examples accept `VMEX_LOW_TRANSPORT=1`.
+  pressure continuation.
   A lower proxy does not establish confinement; particle checks remain separate.
   See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
 

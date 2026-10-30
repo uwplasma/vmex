@@ -633,20 +633,6 @@ penalty is used. ``--input PATH`` continues a saved boundary in mode 2.
 profile proportional to ``1-s`` and targets 0.5% volume-average beta.
 An explicit ``--input`` skips the vacuum shaping stage.
 
-The existing simultaneous coil/plasma examples also accept this objective::
-
-   VMEX_LOW_TRANSPORT=1 VMEX_LOW_TRANSPORT_INPUT=low_transport/input.trial \
-       python examples/optimization/single_stage_optimization.py
-   VMEX_LOW_TRANSPORT=1 VMEX_LOW_TRANSPORT_INPUT=low_transport/input.trial \
-       python examples/optimization/single_stage_optimization_finite_beta.py
-
-Use the transport-screened boundary for joint continuation. Direct joint shaping
-from the near-circular seed improved the proxy but worsened NEO transport.
-The finite-beta example requires a vacuum-shaped input: the initial low-iota seed
-did not converge at its target pressure on this budget. Both low-transport joint
-examples require NEO non-regression at every sampled radius.
-``VMEX_LOW_TRANSPORT_MODE=1`` restricts either simultaneous search to mode 1.
-
 The boundary driver saves seed/trial WOUTs, ``input.trial`` and iteration
 history. A matched NEO screen requires improvement at every sampled radius
 and at least 1% in their mean. Input files are never overwritten. The proxy
