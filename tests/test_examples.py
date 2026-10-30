@@ -2862,10 +2862,14 @@ def test_pwo_confinement_absolute_constraints_check_full_profile_and_refinement(
             w.Aminor_p *= 1.1  # Absolute constraints replace the seed-relative size bound.
             if failure == 'axis' or (failure == 'fine_axis' and w.refined):
                 w.iotaf[0] = .40  # Selected Boozer surfaces still have iota=.6.
-            if failure == 'aspect': w.aspect = 6.2
-            if failure == 'jacobian': w.gmnc *= -1
-            if failure == 'sine_jacobian': w.gmns[:, 1] = 2.
-            if failure == 'nonfinite': w.iotaf[0] = np.nan
+            if failure == 'aspect':
+                w.aspect = 6.2
+            if failure == 'jacobian':
+                w.gmnc *= -1
+            if failure == 'sine_jacobian':
+                w.gmns[:, 1] = 2.
+            if failure == 'nonfinite':
+                w.iotaf[0] = np.nan
         return eq
     monkeypatch.setattr(opt, 'solve_equilibrium', solve)
     result = run(policy, output_name='absolute')
