@@ -23,6 +23,9 @@ ripple from an external equilibrium. Omit both training/validation orbit charts
 for transport-only optimization; independent MHD/Boozer/NEO holdouts remain.
 optimizer="proposals" evaluates supplied normalized boundary steps without
 requiring a gradient certificate; each step is bounded by the policy's scales.
+Forward searches may supply constraints={"aspect": [9.9, 10.1], "iota_min": 0.41}
+to replace seed-relative geometry bounds with an aspect interval and a signed
+full-profile iota floor. Input profiles, flux and R00 remain fixed.
 Neither target fitting nor sampled action descent establishes pwO or confinement.
 """
 
@@ -1016,6 +1019,15 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     optimizer = policy.get("optimizer", "adjoint")
     if optimizer not in ("adjoint", "derivative_free", "proposals"):
         raise ValueError("optimizer must be adjoint, derivative_free or proposals")
+    constraints = policy.get("constraints")
+    if constraints is not None:
+        if (not isinstance(constraints, dict) or set(constraints) != {"aspect", "iota_min"}
+                or np.shape(constraints["aspect"]) != (2,) or np.ndim(constraints["iota_min"]) != 0
+                or not np.all(np.isfinite([*constraints["aspect"], constraints["iota_min"]]))
+                or not 1 < constraints["aspect"][0] < constraints["aspect"][1]):
+            raise ValueError("constraints require a finite aspect interval above 1 and signed iota_min")
+        if optimizer == "adjoint":
+            raise ValueError("Absolute constraints require a forward search: derivative_free or proposals")
     max_mode = int(policy.get("max_mode", max(int(inp.mpol)-1, int(inp.ntor))))
     if max_mode < 1:
         raise ValueError("max_mode must be positive")
@@ -1157,7 +1169,17 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
         metrics = [float(eq.wout.aspect), float(eq.wout.Aminor_p), float(eq.wout.volavgB), *bounds]
         if not np.all(np.isfinite([*metrics, *ranges, *spans])):
             raise ValueError("Nonfinite geometry or family statistics")
-        return dict(eps32=eps, metrics=metrics, family_ranges=ranges, family_spans=spans,
+        iota_min = None
+        if constraints is not None:
+            iota = np.asarray(eq.wout.iotaf)
+            phase = np.asarray(eq.wout.xm_nyq)[:, None, None]*theta[None, :, None] - np.asarray(eq.wout.xn_nyq)[:, None, None]*zeta[None, None, :]
+            jacobian = float(eq.wout.signgs)*np.asarray(eq.wout.gmnc)[1:] @ np.cos(phase).reshape(len(phase), -1)
+            if eq.wout.lasym:
+                jacobian += float(eq.wout.signgs)*np.asarray(eq.wout.gmns)[1:] @ np.sin(phase).reshape(len(phase), -1)
+            if not np.all(np.isfinite(iota)) or not np.all(np.isfinite(jacobian)) or np.min(jacobian) <= 0:
+                raise ValueError("Require finite full-profile iota and positive oriented Jacobian")
+            iota_min = float(np.min(iota))
+        return dict(eps32=eps, metrics=metrics, family_ranges=ranges, family_spans=spans, iota_min=iota_min,
                     actual_s=actual.tolist(), NEO=diagnostics, census=census,
                     force_errors=[float(getattr(eq.result, k)) for k in ("fsqr", "fsqz", "fsql")])
 
@@ -1187,8 +1209,12 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
 
     def admissible(row, baseline):
         a, b = np.asarray(row["metrics"]), np.asarray(baseline["metrics"])
-        limits = np.array([.03, .03, .05]+[.05, .10, .05]*len(surfaces))
-        if np.any(b == 0) or np.any(abs(a/b-1) > limits):
+        if constraints is None:
+            limits = np.array([.03, .03, .05]+[.05, .10, .05]*len(surfaces))
+            if np.any(b == 0) or np.any(abs(a/b-1) > limits):
+                return False
+        elif not (constraints["aspect"][0] <= a[0] <= constraints["aspect"][1]
+                  and row["iota_min"] > constraints["iota_min"]):
             return False
         return bool(np.all(np.asarray(row["family_ranges"]) <= (1+tolerance)*np.asarray(baseline["family_ranges"])+1e-12)
                     and np.all(np.asarray(row["family_spans"]) >= .5*np.asarray(baseline["family_spans"])))
@@ -1202,7 +1228,7 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
     save_seed_checkpoint(refined_baseline.inp, refined_baseline, output_name, "seed_check")
     checked_baseline = score(refined_baseline, 1)
     if not admissible(baseline, baseline) or not admissible(checked_baseline, checked_baseline):
-        raise ValueError("Seed has zero iota or invalid family/geometry reference")
+        raise ValueError("Seed violates the geometry, iota or orbit-family constraints")
     summary.update(baseline=baseline, checked_baseline=checked_baseline,
         check_resolution=resolution, neo_settings=[settings, dict(settings,
             npart=2*settings["npart"], nstep_per=2*settings["nstep_per"], acc_req=settings["acc_req"]/2)])

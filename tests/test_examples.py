@@ -2832,6 +2832,9 @@ def test_pwo_confinement_distinguishes_surface_roundoff_from_physical_shift(tmp_
 
 @pytest.mark.parametrize('updates', [dict(parameters=['RBC(0,0)']), dict(scales=0.),
     dict(optimizer='unknown'), dict(max_mode=0),
+    dict(constraints={}), dict(constraints={'aspect': [6., 5.], 'iota_min': .41}),
+    dict(constraints={'aspect': [5., 6.], 'iota_min': np.nan}),
+    dict(optimizer='adjoint', constraints={'aspect': [5., 6.], 'iota_min': .41}),
     dict(surfaces=[.75, .25]), dict(neo={'rational_surface_policy': 'approximate'}),
     dict(training=[]), dict(training=[{'reference': {'nfp': 99, 's_b': [.25]}}]),
     dict(family_rtol=-1), dict(check_resolution=[2, 1, 1, 2, 2]), dict(free=True)])
@@ -2844,6 +2847,32 @@ def test_pwo_confinement_rejects_invalid_policy_before_solves(tmp_path, monkeypa
     with pytest.raises(ValueError):
         run(policy, output_name='invalid')
     assert not calls.decks
+
+
+@pytest.mark.parametrize('failure', [None, 'axis', 'fine_axis', 'aspect', 'jacobian', 'sine_jacobian', 'nonfinite'])
+def test_pwo_confinement_absolute_constraints_check_full_profile_and_refinement(tmp_path, monkeypatch, failure):
+    run, policy, _, _, _, _ = _pwo_confinement_case(tmp_path, monkeypatch, lasym=failure == 'sine_jacobian')
+    policy['constraints'] = {'aspect': [5.9, 6.1], 'iota_min': .41}
+    opt = run.__globals__['opt']; original = opt.solve_equilibrium
+    def solve(*args, **kwargs):
+        eq = original(*args, **kwargs); w = eq.wout; changed = bool(w.x)
+        w.iotaf = np.array([.6, .6]); w.signgs = 1; w.xm_nyq = np.array([0, 1]); w.xn_nyq = np.zeros(2)
+        w.gmnc = np.tile([1., 0.], (2, 1)); w.gmns = np.zeros((2, 2))
+        if changed:
+            w.Aminor_p *= 1.1  # Absolute constraints replace the seed-relative size bound.
+            if failure == 'axis' or (failure == 'fine_axis' and w.refined):
+                w.iotaf[0] = .40  # Selected Boozer surfaces still have iota=.6.
+            if failure == 'aspect': w.aspect = 6.2
+            if failure == 'jacobian': w.gmnc *= -1
+            if failure == 'sine_jacobian': w.gmns[:, 1] = 2.
+            if failure == 'nonfinite': w.iotaf[0] = np.nan
+        return eq
+    monkeypatch.setattr(opt, 'solve_equilibrium', solve)
+    result = run(policy, output_name='absolute')
+    assert result['accepted'] == (failure is None)
+    if failure is None:
+        assert result['validation']['iota_min'] == .6
+        assert result['validation']['metrics'][1] == pytest.approx(.22)
 
 
 @pytest.mark.parametrize('bad', [False, True])
