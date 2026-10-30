@@ -36,8 +36,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_joint_trial_rejection_is_costly_differentiable_and_cached():
-    """An uncertified equilibrium cannot beat the seed or evaluate coil costs."""
+@pytest.mark.parametrize("seed_cost", [0.0, 2.0])
+def test_joint_trial_rejection_is_costly_differentiable_and_cached(seed_cost):
+    """Reject by status even before calibration; valid zero costs stay finite."""
     from vmex.core.single_stage import SingleStageProblem
     from vmex.core.monitoring import OptimizationMonitor
 
@@ -51,27 +52,33 @@ def test_joint_trial_rejection_is_costly_differentiable_and_cached():
 
     def plasma_vg(u):
         accepted = float(u[0]) < 0.5
-        return ((2.0, (np.array([2.0 if accepted else 0.0]), np.array([0.0]))),
+        return ((seed_cost, (np.array([np.sqrt(2 * seed_cost)]), np.array([0.0]),
+                            np.asarray(0 if accepted else 1))),
                 np.zeros(1))
 
     def coil_vg(u):
         coil_calls.append(np.asarray(u))
-        return ((2.0, np.array([2.0, 0.0, 0.0, 0.0])), np.zeros(1))
+        return ((seed_cost, np.array([seed_cost, 0.0, 0.0, 0.0])), np.zeros(1))
 
     joint._plasma_vg, joint._coil_vg = plasma_vg, coil_vg
+    rejected, _ = joint.value_and_grad(np.ones(1))
+    assert rejected > 1
+    assert not coil_calls
     seed, gradient = joint.value_and_grad(np.zeros(1))
-    assert seed == 1.0
+    assert seed == (1.0 if seed_cost else 0.0)
     gradient[:] = 123  # SciPy must not be able to mutate the cached gradient.
     assert joint.value_and_grad(np.zeros(1))[1][0] == 0
-    assert joint.counts["trials"] == 1
+    assert joint.counts["trials"] == 2
+    assert joint.value_and_grad(np.array([0.25]))[0] == seed
+    assert joint.counts["rejected"] == 1  # A fresh valid zero fit remains accepted.
     value, gradient = joint.value_and_grad(np.ones(1))
     assert value > seed
     step = 1e-5
     difference = (joint.value_and_grad(np.array([1 + step]))[0]
                   - joint.value_and_grad(np.array([1 - step]))[0]) / (2 * step)
     np.testing.assert_allclose(gradient[0], difference, rtol=1e-9)
-    assert joint.counts["rejected"] == 3
-    assert len(coil_calls) == 1
+    assert joint.counts["rejected"] == 4
+    assert len(coil_calls) == 2
 
 
 @pytest.mark.parametrize("failure", [None, "fixed solve", "free solve", "fixed NaN", "held infinity"])

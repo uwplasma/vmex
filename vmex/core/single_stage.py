@@ -136,7 +136,8 @@ class SingleStageProblem:
                                        1 - opt.aspect_ratio(state, runtime) / aspect_limit,
                                        1 - rms / normal_field_limit)), constraint_weight)
 
-            return problem.jax_objective_from_state(x[:self.n_boundary], limits, n_extra_terms=1)
+            return problem.jax_objective_from_state(
+                x[:self.n_boundary], limits, n_extra_terms=1, return_status=True)
 
         def coil_objective(u):
             surface, trial_coils = self.objects_from_x(jnp.asarray(self.x0) + self.scales * u)
@@ -165,9 +166,9 @@ class SingleStageProblem:
         if cache.get("key") == u.tobytes():
             return cache["value"], cache["gradient"].copy()
         self.counts["trials"] += 1
-        (plasma_value, (rows, penalty)), plasma_gradient = self._plasma_vg(jnp.asarray(u))
+        (plasma_value, (rows, penalty, status)), plasma_gradient = self._plasma_vg(jnp.asarray(u))
         rows = np.asarray(rows)
-        if not np.any(rows) and "scale" in cache:
+        if int(np.asarray(status)) != 0:
             self.counts["rejected"] += 1
             distance, cost = float(np.linalg.norm(u)), self.rejected_trial_cost
             value = cost * (1 + distance)**2
@@ -175,7 +176,8 @@ class SingleStageProblem:
             print(f"  trial {self.counts['trials']}: no certified equilibrium, rejected", flush=True)
         else:
             (coil_value, costs), coil_gradient = self._coil_vg(jnp.asarray(u))
-            cache.setdefault("scale", 1 / float(plasma_value + coil_value))
+            total = float(plasma_value + coil_value)
+            cache.setdefault("scale", 1 / total if total > 0 else 1.0)
             scale = cache["scale"]
             terms = {name: 0.5 * float(rows[start:stop] @ rows[start:stop])
                      for name, start, stop in self.problem.metadata["term_slices"]}
