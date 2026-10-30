@@ -11,15 +11,20 @@ At finite beta the plasma currents make a field of their own, so the coils
 no longer have to be tangent to the boundary by themselves: the condition is
 that the TOTAL field is, (B_coils + B_plasma).n = 0. Virtual casing computes
 B_plasma on the boundary from the converged equilibrium on every trial, and
-the normal-field limit applies to that total. With zero edge pressure the
-normal condition is the whole interface condition, so no pressure-balance
-term is needed.
+the normal-field limit applies to that total. This is a fixed-boundary
+coil-fit objective; the independent free-boundary check below tests pressure
+balance and the resulting held boundary.
 
 The coil field also sets the field strength, which now matters: the coils
 are fitted to the seed first (as in ``single_stage_optimization.py``), the
 toroidal flux PHIEDGE is read off the fitted field, and the pressure is
 scaled so the seed equilibrium sits at the target beta. A beta term in the
 objective keeps it there as the boundary moves.
+
+After the fixed-boundary checks, a cold NESTOR free-boundary solve in the
+optimized coils' field checks whether those same flux, pressure and current
+profiles can be held. Its convergence, pressure jump and boundary displacement
+are reported separately; a failed solve cannot pass the final checks.
 
 The objective is that of ``single_stage_optimization.py`` plus
 
@@ -29,16 +34,11 @@ with the normal-field limit applied to the total field. Self-consistent
 bootstrap current and current-profile optimization are not part of this
 example.
 
-Measured end to end on an Apple M3 Max laptop with a cold JAX cache: about
-290 s. It takes 12 L-BFGS-B iterations and 16 trials, and every target is met:
-the minimum |iota| rises from 0.407 to 0.430 and beta ends at 0.498%. (At an
-earlier commit, 14 iterations took 19 trials, reached 0.430 and 0.502%, and
-moved the boundary by up to 8 mm and the coils by up to 11 mm.)
-
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """
 
+import gc
 import json
 import os
 from dataclasses import replace
@@ -49,15 +49,17 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import minimize
+from scipy.spatial import cKDTree
 
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core import virtual_casing as vc
+from vmex.core.errors import VmecError
 
 from essos.coils import Coils, CreateEquallySpacedCurves
 from essos.fields import BiotSavart
 from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
-from essos.surfaces import surfacerzfourier_from_boundary
+from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
 
 # Number of field periods, and the seed deck the boundary is shaped from:
 NFP = 2
@@ -87,6 +89,8 @@ NORMAL_FIELD_LIMIT = 0.01         # area-weighted RMS of B.n/|B| on the boundary
 COIL_SURFACE_DISTANCE_LIMIT = 0.15
 COIL_DISTANCE_LIMIT = 0.17
 CURVATURE_LIMIT = 7.0
+DELBSQ_LIMIT = 0.02               # NESTOR's relative pressure mismatch
+FREE_BOUNDARY_DISTANCE_LIMIT = 0.02  # sampled distance to the fitted target [m]
 
 # Values the optimizer is given instead. They are tighter than the limits above
 # for two reasons: the check re-solves on a finer radial and surface grid, and a
@@ -127,9 +131,8 @@ REJECTED_TRIAL_COST = 10.0
 PARAMETER_BOUND = 3.0
 
 # Budgets. One trial is one equilibrium solve, one virtual-casing evaluation
-# and one adjoint. The script's own end-of-run check passes at iterations 12,
-# 14, 16 and 20 and fails at 10 (aspect 6.002), measured; 14 iterations took 19
-# trials. 12 keeps a laptop run under 5 minutes; raise MAXITER to go further.
+# and one adjoint. These caps bound the search; the independent checks below
+# determine whether the returned design meets the targets.
 MAXITER = 12
 MAX_TRIALS = 35
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
@@ -274,8 +277,9 @@ points = np.stack([R, np.zeros_like(R), Z], axis=-1).reshape(-1, 3)
 B_phi = np.asarray(coil_field(coils0)(jnp.asarray(points)))[:, 1].reshape(R.shape)
 toroidal_flux = float(np.sum(rho_weights[:, None] * B_phi * area_element)
                       * (2.0 * np.pi / theta.size))
-# VMEC counts the toroidal angle the other way round, hence the sign.
-inp = replace(inp, phiedge=-toroidal_flux)
+# Physical +phi is +Y at phi=0, as in ESSOS and VMEX's external-field provider.
+# NESTOR rejects a PHIEDGE whose sign opposes the external toroidal field.
+inp = replace(inp, phiedge=toroidal_flux)
 # Beta is proportional to the pressure at fixed boundary and flux, so one seed
 # solve at PRES_SCALE = 1 gives the scale.
 beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
@@ -448,6 +452,11 @@ optimization_seconds = time.perf_counter() - started
 # A lower objective proves nothing on its own: a boundary with no transform
 # makes the quasisymmetry residual trivially small. Re-solve on a finer radial
 # and surface grid and compare every target explicitly.
+# Trial-gradient executables are no longer needed; release them before the
+# independent, finer-grid checks. Their recompilation cost remains in runtime.
+jax.clear_caches()
+gc.collect()
+print("[verify] finer fixed-boundary equilibrium and virtual casing", flush=True)
 x_final = x0 + scales * u
 _, coils_final = objects_from_x(jnp.asarray(x_final))
 equilibrium = plasma_problem.equilibrium_from_x(x_final[:n_boundary])
@@ -457,6 +466,9 @@ final_input = replace(plasma_problem.input_from_x(x_final[:n_boundary]),
                       ns_array=np.array([31 if ci_smoke else 101]),
                       ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-12]),
                       niter_array=np.array([8000]))
+# Preserve the optimized design even if an independent verification fails.
+input_path = final_input.to_indata("input.single_stage_finite_beta_optimized")
+coils_final.to_json("coils_single_stage_finite_beta_optimized.json")
 final_equilibrium = opt.solve_equilibrium(
     final_input, initial_state=equilibrium.solution, verbose=not ci_smoke)
 
@@ -484,6 +496,50 @@ minimum_iota = float(opt.min_abs_iota(final_equilibrium.state, final_equilibrium
 final_aspect = float(opt.aspect_ratio(final_equilibrium.state, final_equilibrium.runtime))
 final_beta = float(opt.volume_average_beta(final_equilibrium.state, final_equilibrium.runtime))
 final_converged = bool(np.all(np.asarray(final_equilibrium.result.converged)))
+
+# A small normal-field residual alone does not show that the coils hold the
+# prescribed boundary. Re-solve with its flux/pressure/current unchanged, cold,
+# using the same verification ladder as the free-boundary companion example.
+jax.clear_caches()
+gc.collect()
+print("[verify] cold NESTOR free boundary", flush=True)
+free_ns = [16] if ci_smoke else [16, 51]
+free_input = replace(final_input, lfreeb=True, mgrid_file="direct ESSOS field",
+                     ns_array=np.array(free_ns),
+                     ftol_array=np.full(len(free_ns), 1e-10 if ci_smoke else 1e-12),
+                     niter_array=np.full(len(free_ns), 8000))
+free_check = {"converged": False, "phiedge": float(free_input.phiedge),
+              "ns": free_ns, "metrics_provisional": True}
+free_started = time.perf_counter()
+try:
+    free_result = vj.solve_free_boundary_multigrid(
+        free_input, external_field=BiotSavart(coils_final), verbose=not ci_smoke,
+        raise_on_max_iterations=False)
+    free_converged = bool(np.all(np.asarray(free_result.converged))) and free_result.vacuum is not None
+    free_wout = vj.wout_from_state(
+        inp=free_input, state=free_result.state, fsqr=free_result.fsqr,
+        fsqz=free_result.fsqz, fsql=free_result.fsql, niter=free_result.iterations,
+        converged=free_result.converged, vacuum_output=free_result.vacuum)
+    free_path = vj.write_wout("wout_single_stage_finite_beta_free_check.nc", free_wout)
+    held_points = np.asarray(SurfaceRZFourier.from_wout_file(
+        free_path, nphi=61, ntheta=64, close=False).gamma).reshape(-1, 3)
+    displacement = max(cKDTree(points).query(held_points)[0].max(),
+                       cKDTree(held_points).query(points)[0].max())
+    held_clearance = min(float(np.linalg.norm(c[:, None] - held_points[None], axis=2).min())
+                         for c in gamma)
+    free_check.update(
+        converged=free_converged, metrics_provisional=not free_converged,
+        iterations=int(free_result.iterations),
+        force_errors={k: float(getattr(free_result, k)) for k in ("fsqr", "fsqz", "fsql")},
+        delbsq=float(free_result.vacuum.delbsq) if free_result.vacuum is not None else None,
+        aspect=float(free_wout.aspect),
+        beta=float(free_wout.betatotal), min_abs_iota=float(np.min(np.abs(free_wout.iotas[1:]))),
+        sampled_boundary_distance_m=float(displacement),
+        coil_surface_distance_m=held_clearance)
+except VmecError as exc:
+    free_check["error"] = str(exc)
+free_check["seconds"] = time.perf_counter() - free_started
+print("[free boundary] " + json.dumps(free_check))
 
 ###############################################################################
 ### Print, plot and save ######################################################
@@ -522,6 +578,22 @@ unmet = [f"{name} {value:.4g} {side} the {limit:.4g} limit"
          if (value < limit if side == "below" else value > limit)]
 if not final_converged:
     unmet.append("the ns=101 verification solve did not converge")
+if not free_check["converged"]:
+    unmet.append("the post-optimization free-boundary verification did not converge")
+else:
+    for name, value, limit, side in (
+        ("held DEL-BSQ", free_check["delbsq"], DELBSQ_LIMIT, "above"),
+        ("held boundary distance", free_check["sampled_boundary_distance_m"],
+         FREE_BOUNDARY_DISTANCE_LIMIT, "above"),
+        ("held minimum |iota|", free_check["min_abs_iota"], IOTA_FLOOR, "below"),
+        ("held aspect ratio", free_check["aspect"], ASPECT_LIMIT, "above"),
+        ("held coil-surface distance", free_check["coil_surface_distance_m"],
+         COIL_SURFACE_DISTANCE_LIMIT, "below"),
+        ("held beta", free_check["beta"], TARGET_BETA * (1 - BETA_TOLERANCE), "below"),
+        ("held beta", free_check["beta"], TARGET_BETA * (1 + BETA_TOLERANCE), "above"),
+    ):
+        if not np.isfinite(value) or (value < limit if side == "below" else value > limit):
+            unmet.append(f"{name} {value:.4g} {side} the {limit:.4g} limit")
 if unmet:
     print("\nThis run did NOT meet its stated targets: " + "; ".join(unmet) + ".")
     if ci_smoke:
@@ -536,6 +608,7 @@ summary = {
     "lbfgsb_iterations": int(result.nit),
     "equilibrium_solves": monitor.records[-1].equilibrium_solves,
     "phiedge": float(inp.phiedge), "pres_scale": float(inp.pres_scale),
+    "free_boundary_verification": free_check,
     "seed": seed_values,
     "final": {**final_values, "min |iota|": minimum_iota, "aspect": final_aspect,
               "B.n/B RMS": normal_field_rms_final, "B.n/B max": normal_field_max,
@@ -548,15 +621,15 @@ summary = {
                 "coil-surface distance >=": COIL_SURFACE_DISTANCE_LIMIT,
                 "coil-coil distance >=": COIL_DISTANCE_LIMIT,
                 "maximum curvature <=": CURVATURE_LIMIT,
+                "held DEL-BSQ <=": DELBSQ_LIMIT,
+                "held boundary distance <=": FREE_BOUNDARY_DISTANCE_LIMIT,
                 "beta": [TARGET_BETA * (1 - BETA_TOLERANCE),
                          TARGET_BETA * (1 + BETA_TOLERANCE)]},
     "unmet": unmet, "met": not unmet,
 }
 Path("single_stage_optimization_finite_beta_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
-input_path = final_input.to_indata("input.single_stage_finite_beta_optimized")
 wout_path = vj.write_wout("wout_single_stage_finite_beta_optimized.nc", final_equilibrium.wout)
-coils_final.to_json("coils_single_stage_finite_beta_optimized.json")
 # ESSOS writes |B| and B.n/B on the surface and the filaments for ParaView.
 surface_initial = surfacerzfourier_from_boundary(rbc0, zbs0, NFP, nphi=60, ntheta=60)
 surface_initial.to_vtk("surface_single_stage_finite_beta_initial", field=BiotSavart(coils0))

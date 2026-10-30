@@ -1268,6 +1268,42 @@ def test_fixed_boundary_single_stage_optimization(tmp_path):
     assert b'Name="B_dot_n_over_B"' in surface_vtk
 
 
+def test_finite_beta_single_stage_seed_flux_matches_cartesian_stokes(monkeypatch):
+    """The fitted coil field and VMEC flux must have the same physical sign.
+
+    Run only the example's coil pre-fit and flux calibration, then independently
+    integrate the Cartesian vector potential; no equilibrium or VC derivative.
+    """
+    pytest.importorskip("essos")
+    pytest.importorskip("virtual_casing_jax")
+    monkeypatch.setenv("VMEX_EXAMPLES_CI", "1")
+    path = EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py"
+    source = path.read_text()
+    calibration = next(node for node in ast.parse(source).body
+                       if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                       and any(kw.arg == "phiedge" for kw in node.value.keywords))
+    namespace = {"__file__": str(path), "__name__": "__flux_calibration_test__"}
+    exec(compile("\n".join(source.splitlines()[:calibration.end_lineno]), str(path), "exec"),
+         namespace)
+    inp, coils = namespace["inp"], namespace["coils0"]
+    theta = np.arange(512) * 2 * np.pi / 512
+    m = np.arange(inp.rbc.shape[1])
+    phase = np.outer(theta, m)
+    rc, zs = inp.rbc.sum(axis=0), inp.zbs.sum(axis=0)
+    r, z = np.cos(phase) @ rc, np.sin(phase) @ zs
+    dr, dz = -np.sin(phase) @ (m * rc), np.cos(phase) @ (m * zs)
+    points, tangent = np.stack((r, np.zeros_like(r), z), axis=-1), np.stack(
+        (dr, np.zeros_like(dr), dz), axis=-1)
+    gamma, dash, current = map(np.asarray, (coils.gamma, coils.gamma_dash, coils.currents))
+    distance = np.linalg.norm(points[:, None, None, :] - gamma[None, :, :, :], axis=-1)
+    potential = 1e-7 * np.mean(np.sum(
+        current[None, :, None, None] * dash[None, :, :, :] / distance[..., None], axis=1), axis=1)
+    # Increasing theta has normal -Y. Minus A.dl measures +phi flux (+Y at phi=0).
+    flux_plus_phi = -float(np.sum(potential * tangent) * 2 * np.pi / theta.size)
+    assert abs(flux_plus_phi) > 1e-6
+    assert inp.phiedge == pytest.approx(flux_plus_phi, rel=1e-9)
+
+
 @pytest.mark.full  # nightly: one finite-beta VMEX + VCJ + ESSOS graph
 def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch):
     pytest.importorskip("essos")
@@ -1283,9 +1319,20 @@ def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch):
         assert diagnostic in out
     summary = json.loads(
         (tmp_path / "single_stage_optimization_finite_beta_summary.json").read_text())
+    free_check = summary["free_boundary_verification"]
+    assert "[free boundary]" in out
+    assert free_check["phiedge"] == summary["phiedge"]
+    if not free_check["converged"]:
+        assert not summary["met"]
+        assert "the post-optimization free-boundary verification did not converge" in summary["unmet"]
+    else:
+        assert not free_check["metrics_provisional"]
+        assert (tmp_path / "wout_single_stage_finite_beta_free_check.nc").exists()
     assert summary["met"] == (not summary["unmet"])
     assert summary["met"] or "did NOT meet its stated targets" in out
-    for name in ("wout_single_stage_finite_beta_optimized.nc",
+    for name in ("input.single_stage_finite_beta_optimized",
+                 "coils_single_stage_finite_beta_optimized.json",
+                 "wout_single_stage_finite_beta_optimized.nc",
                  "single_stage_finite_beta_objectives.png",
                  "surface_single_stage_finite_beta_initial.vts",
                  "coils_single_stage_finite_beta_initial.vtu",
