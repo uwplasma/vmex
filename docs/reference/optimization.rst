@@ -374,6 +374,40 @@ distance implementation.
    0.17 or newer: ``pip install "vmex[coils]"``. Earlier releases lack the
    ``Coils.from_json``/``Coils.with_dofs`` API these examples use.
 
+For a fixed-flux joint search, :class:`vmex.core.single_stage.SingleStageProblem`
+combines any existing ``VmecProblem`` objective with coil geometry costs and
+transform, aspect, and total normal-field limits. The plasma objective remains
+explicit in the example; the helper does not select quasisymmetry or another
+field target::
+
+   from vmex.core.single_stage import CoilPenalty, SingleStageProblem
+
+   penalties = CoilPenalty(length_target=5.5, curvature_limit=6.9,
+                           coil_distance=0.19, surface_distance=0.16)
+   joint = SingleStageProblem(
+       problem, coils, penalties, nphi=37, ntheta=32,
+       iota_floor=0.43, aspect_limit=5.97, normal_field_limit=0.008)
+   result = scipy.optimize.minimize(
+       joint.value_and_grad, np.zeros_like(joint.x0), jac=True,
+       method="L-BFGS-B", callback=joint.monitor,
+       bounds=[(-3, 3)] * joint.x0.size)
+
+The optimizer varies ``u`` with ``x = joint.x0 + joint.scales*u``. Currents
+stay fixed while coil shapes and boundary modes vary. Virtual-casing precision
+is planned once on the seed and frozen throughout the search; uncertified
+equilibrium trials receive a finite rejection cost above the normalized seed.
+``toroidal_flux(inp, coils)`` measures the physical positive-phi flux for seed
+calibration, independently of the poloidal traversal direction.
+
+``verify_design(joint, result.x, prefix=...)`` saves the design, re-solves on a
+finer fixed-boundary grid, and cold-solves NESTOR with unchanged flux, pressure,
+and current profiles. It returns the equilibrium, surface, fixed-boundary
+metrics, and free-boundary report. ``design_target_report`` checks those metrics
+against explicit limits; failed solves and nonfinite values cannot pass.
+``save_outputs`` writes the equilibrium, geometry, objective history, and plots.
+See ``examples/optimization/single_stage_optimization_finite_beta.py`` for the
+complete setup and reporting calls.
+
 For a finite-beta prescribed boundary, virtual casing gives the field of the
 enclosed plasma currents. The physical exterior field is that contribution
 plus the actual ESSOS coil field. The two interface residuals used by the
@@ -389,8 +423,9 @@ example are
 The second is a normalized total-pressure jump, not a pressure-profile error.
 It supplies the tangential-field magnitude condition that ``B.n/B`` alone
 does not constrain, even when the input pressure vanishes at the LCFS. The
-fixed-boundary examples vary boundary and coil variables together; they do
-not call NESTOR. A coil-only free-boundary optimization must instead
+fixed-boundary searches vary boundary and coil variables together without
+calling NESTOR on optimization trials; NESTOR can independently verify the
+returned design. A coil-only free-boundary optimization must instead
 differentiate the fully reconverged NESTOR root. The experimental public path
 keeps the construction visible in the driver::
 
