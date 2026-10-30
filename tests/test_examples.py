@@ -3101,6 +3101,7 @@ def test_pwo_confinement_adjoint_budget_stops_before_another_gradient(tmp_path, 
     assert len(result['cases']) == 1 and len(calls.problem.gradients) == 2
     assert not result['termination']['success']
     assert result['termination']['message'] == 'Evaluation budget reached'
+    assert result['termination']['nit'] is None
 
 
 @pytest.mark.parametrize('adjoint', [False, True])

@@ -1281,7 +1281,7 @@ def run_confinement(policy, *, output_name="pwO_optimized"):
                 nit=int(result.nit), nfev=int(result.nfev))
         except BudgetReached:
             summary["termination"] = dict(success=False, message="Evaluation budget reached",
-                nit=len(summary["iterations"]), nfev=None)
+                nit=None, nfev=None)
         save()
 
     if optimizer == "derivative_free" and global_steps and global_calls:
