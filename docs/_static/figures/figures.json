@@ -769,6 +769,25 @@
         "README.md"
       ],
       "note": "RMS force over RMS pressure gradient by region on a held-out grid, before and after the prescribed-current polish of the finite-beta QA (laptop defaults: mpol 5, ntor 4, ns 51, 150 L-BFGS iterations). Lossless WebP; rerunning the command reproduces these bytes."
+    },
+    {
+      "path": "docs/_static/figures/readme_low_transport.webp",
+      "sha256": "b0235e494be91284f2d3d8341250adacb3c54ea1557bd8d361cea3b8c289f95b",
+      "bytes": 64666,
+      "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
+      "command": "python docs/_static/figures/sources/make_low_transport_figure.py",
+      "inputs": [
+        "docs/_static/figures/sources/low_transport_plot_data.npz"
+      ],
+      "record": null,
+      "generated": "2026-10-30",
+      "hardware": null,
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Frozen near-circle vacuum comparison: NS103/M7N7 boundary, Boozer-band-32 unfilled |B| contours at s=0.4853, matched NEO acc_req=.005, and 256 paired 3.52 MeV alpha loss curves at s=.5 for 10 ms at common 6 T/1.7 m scale. Adjacent NPZ stores exact plot inputs and SHA256 hashes of original retained WOUT, Boozer, NEO and particle files. The generator documents extraction; rendering performs no new physics calculation. Rendered twice with byte-identical output."
     }
   ]
 }

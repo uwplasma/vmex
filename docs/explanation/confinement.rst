@@ -207,6 +207,74 @@ isodynamic** (QI) field is an omnigenous field whose :math:`|B|` contours close
 poloidal and the bootstrap current is small by construction — the target of the
 nfp1–nfp4 decks in ``examples/data/``.
 
+.. _confinement-mapped-pwo:
+
+Mapped contour variance
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The squeezed poloidal-omnigenity map of `Liu et al. (2026)
+<https://arxiv.org/abs/2603.12139v1>`_ motivates
+:class:`~vmex.core.pwo.MappedPwOResidual`. With :math:`N=N_{\rm fp}`,
+:math:`x=\eta` on the left branch and :math:`x=2\pi-\eta` on the right, set
+
+.. math::
+
+   D(x)&=(\pi-x)(1-cx),\qquad
+   S(x,y)=ax\sin(y+b\sin y),\qquad \kappa=\iota D(x)/N,\\
+   \theta_B&=\gamma,\\
+   \zeta_{B,L}&=[\pi-S(x,\gamma+\kappa)-D(x)]/N,\\
+   \zeta_{B,R}&=[\pi+S(x,-\gamma+\kappa)+D(x)]/N.
+
+The signed :math:`\iota=d\theta_B/d\zeta_B` is retained. The mapped angle
+:math:`\gamma` differs from the field-line label
+:math:`\alpha=\theta_B-\iota\zeta_B`. The example fixes
+:math:`(a,b,c)=(0.3,0,-2)` and :math:`\eta\in[2.8,2\pi-2.8]`.
+A conservative positive-Jacobian bound and a span shorter than one field
+period certify the cut against folding and duplicate toroidal coverage.
+The cut covers approximately 71.8% of Boozer-coordinate area; its fraction
+of the eta interval is only 10.9%. Neither number is an orbit fraction.
+
+For mapped field :math:`\mathcal B_{sij}`, uniform endpoint-free gamma
+nodes and midpoint eta nodes, the residual is
+
+.. math::
+
+   r_{sij}=\sqrt{\frac{w_s}{N_\gamma N_\eta}}
+     \frac{\mathcal B_{sij}-\overline{\mathcal B}_{sj}}{B_{{\rm ref},s}},
+   \qquad
+   f_{\rm map}=\sum_{sij}r_{sij}^2
+     =\sum_s\frac{w_s}{B_{{\rm ref},s}^2}
+       \left\langle\operatorname{Var}_\gamma\mathcal B_s\right\rangle_\eta.
+
+Here :math:`\sum_s w_s=1`, and :math:`B_{{\rm ref},s}>0` is a frozen field
+scale. Discrete Parseval identifies the gamma variance with the power in
+all nonconstant discrete gamma harmonics. There is no Jacobian weight,
+so this is not a physical-area or bounce-time average. A fixed reference
+also means weakening the field lowers the score; hold flux and size fixed
+and check full-surface field bounds.
+
+Action invariance requires more. At fixed energy and magnetic moment,
+vanishing bounce-averaged radial drift requires
+:math:`\partial_\alpha J=0`. Equal-field points on the two ideal mapped
+branches have separation :math:`\Delta\zeta_B=2D(x)/N` along a field line.
+A common monotone branch profile can therefore give field-line-independent
+bounce separation for wells entirely inside the mapped region, the
+construction underlying `Landreman and Catto (2012)
+<https://arxiv.org/abs/1112.5725>`_. Small sampled variance alone establishes
+neither that profile nor common extrema, complete wells, compatible well
+transitions or radial action behavior. It does not certify omnigenity,
+piecewise omnigenity, quasi-isodynamicity or particle confinement.
+
+The vacuum example combines this contour fit with aspect-ratio and signed-
+transform controls. Independently refined mean
+:math:`Q=\epsilon_{\rm eff}^{3/2}` falls by 91.63% from its near-circle seed;
+a separate paired 256-alpha experiment reduces weighted 10 ms loss from
+100% to 3.309% at one launch surface. These are measurements of the combined
+objective, not a bound from mapped variance to Q or losses. They do not
+isolate the mapped term's contribution. A finite-pressure continuation has
+a smaller, 6.22% refined Q gain and no particle check. The README includes
+the retained boundary, unfilled Boozer contours and actual loss curves.
+
 Bounce action
 ~~~~~~~~~~~~~
 

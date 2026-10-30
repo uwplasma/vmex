@@ -349,6 +349,38 @@ When both terms use the same surfaces and pitch,
 :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual` concatenates their
 cost-weighted rows after one shared Boozer transform.
 
+Mapped-field contour variance
+-----------------------------
+
+:class:`~vmex.core.pwo.MappedPwOResidual` evaluates a live Boozer spectrum on
+fixed mapped coordinates and returns flattened least-squares rows. Supply
+positive, frozen reference fields in tesla, one per requested surface::
+
+   from vmex.core.pwo import MappedPwOResidual
+
+   mapped = MappedPwOResidual(
+       [0.25, 0.5, 0.75], b_ref=[2.71, 2.70, 2.68],
+       a=0.3, b=0.0, c=-2.0, eta_min=2.8, ngamma=32, neta=32)
+
+``b_ref`` should be measured on the starting equilibrium and held fixed
+through optimization and comparison. ``total`` is the sum of squared rows:
+the surface-weighted gamma variance divided by ``b_ref**2``, averaged over
+eta. Surface weights are normalized to sum to one; this is a coordinate
+average, without a physical-area Jacobian factor.
+
+``compute_state`` also returns the mapped field, branch means, Jacobian,
+conservative Jacobian lower bound, toroidal-span upper bound and sampled
+area fraction. The map rejects uncertified nonfolding domains, nonpositive
+reference fields and nonpositive mapped fields. Full-surface field bounds,
+geometry and transport remain separate checks. ``diagnostics_state`` reuses
+the transform for sampled full-surface extrema; ``physical_metrics`` checks
+these limits, signed iota, aspect ratio, oriented Jacobian and solver residuals.
+The signed transform is live;
+freeze the map parameters, cut, quadrature and reference fields, not iota.
+See :ref:`confinement-mapped-pwo` for the formula and its relation to bounce
+action. ``examples/optimization/pwO_optimization.py`` supplies a complete
+boundary workflow with feasible checkpoints and an independent NEO screen.
+
 Fast-ion confinement (Gamma_c)
 ------------------------------
 

@@ -616,28 +616,52 @@ for a bounded cold run.
 Low-transport optimization
 --------------------------
 
-``examples/optimization/pwO_optimization.py`` uses the existing
-``input.minimal_seed_nfp4`` with a helical perturbation of 5% of the minor radius.
-Install ``vmex[neoclassical]`` and run::
+Install ``vmex[neoclassical]`` and run the vacuum example::
 
-   python examples/optimization/pwO_optimization.py --maxiter 15 --outdir low_transport
+   python examples/optimization/pwO_optimization.py
 
+The file-level settings select the input, output directory, resolution and
+iteration budget. The default edits ``input.minimal_seed_nfp4`` in memory:
+major radius 1 m, minor radius 0.1 m, and a 0.005 m helical perturbation.
 Boundary modes 1 then 2 share NS35, M5/N5, force tolerance 1e-12 and a
-2000-iteration solver cap. Implicit residual Jacobians drive bounded least
-squares with optimizer ``ftol=1e-3``; ``--maxiter`` caps each mode stage.
-The mapped-field proxy is combined with aspect ratio 10 and a signed-iota
+2000-iteration solver cap. Bounded least squares uses implicit residual
+Jacobians, optimizer ``ftol=1e-3`` and 15 iterations per stage.
+
+The mapped-field residual is combined with aspect ratio 10 and a signed-iota
 floor of 0.42. Field bounds are acceptance checks. No symmetry or magnetic-well
-penalty is used. ``--input PATH`` continues a saved boundary in mode 2.
+penalty is used. Its fixed map, cut and field normalization are described in
+:ref:`confinement-mapped-pwo`; the name does not certify piecewise omnigenity.
 
-``--beta .005`` first shapes in vacuum, then applies a zero-current pressure
-profile proportional to ``1-s`` and targets 0.5% volume-average beta.
-An explicit ``--input`` skips the vacuum shaping stage.
+The vacuum run writes seed/trial WOUTs, ``input.trial`` and iteration history
+to ``low_transport/``. ``input.trial`` and ``wout_trial.nc`` retain the
+lowest-scoring feasible candidate; an infeasible terminal iterate cannot
+overwrite it. A matched NEO screen requires improvement at every sampled
+radius and at least 1% in their mean. That threshold is a selection rule,
+not an error estimate. Refine the equilibrium, Boozer transform and NEO
+calculation, then trace fresh particles to qualify a selected boundary.
+The README figure records such a comparison; running the example does not
+repeat its particle study.
 
-The boundary driver saves seed/trial WOUTs, ``input.trial`` and iteration
-history. A matched NEO screen requires improvement at every sampled radius
-and at least 1% in their mean. Input files are never overwritten. The proxy
-does not certify pwO or particle confinement; qualify promising boundaries
-with finer equilibrium/NEO calculations and fresh particle tracing.
+Continue the saved vacuum shape to finite pressure with::
+
+   python examples/optimization/pwO_optimization_finite_beta.py
+
+Run the vacuum example first: pressure continuation requires its saved
+``low_transport/input.trial`` and writes ``low_transport_finite_beta/``.
+The zero-current pressure profile is proportional to ``1-s`` and targets
+0.5% volume-average beta. Pressure rescaling is followed
+by a new nonlinear equilibrium solve. The retained result reaches 0.4985%
+beta and reduces independently refined mean Q by 6.22%; it has no finite-beta
+particle qualification or MHD-stability assessment.
+
+``single_stage_optimization_pwO.py`` adds the mapped residual to the existing
+finite-beta plasma/coil objective and checks a subsequent free-boundary solve.
+It requires ``vmex[coils,neoclassical]``. The retained three-step check reduces
+total cost by 35.8%, but mean Q increases by 70.7%, engineering limits fail,
+and the free-boundary solve does not converge. This is an example of objective
+composition, not a qualified low-transport coil design. A small normal-field
+error on a prescribed surface cannot establish that coils hold that surface
+at the prescribed flux.
 
 Resources and reproducibility
 -----------------------------
