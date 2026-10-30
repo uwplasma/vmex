@@ -628,13 +628,6 @@ def _validate_indata_modes(
             "anisotropic-pressure/flow (ANIMEC) physics is not implemented",
         )
 
-    if float(first("TVOLUME", -1.0)) > 0.0:
-        raise UnsupportedInputModeError(
-            "D00G_VOLUME_RESCALE_UNSUPPORTED",
-            "TVOLUME/LVOLUME_RFIX",
-            "VMEC2000 boundary-volume rescaling is not implemented",
-        )
-
     precon_type = str(first("PRECON_TYPE", "NONE")).strip().upper()
     if precon_type not in {"", "NONE", "DEFAULT", "GMRES"}:
         raise UnsupportedInputModeError(
@@ -778,6 +771,8 @@ class VmecInput:
     zbs: Any = None              #: Z boundary sin(m u - n nfp v)
     rbs: Any = None              #: R boundary sin (lasym)
     zbc: Any = None              #: Z boundary cos (lasym)
+    tvolume: float = -1.0        #: rescale the boundary to this volume [m^3] (<= 0: off)
+    lvolume_rfix: bool = False   #: hold the m = 0 harmonics when rescaling
 
     # -- free boundary (readin.f) --
     lfreeb: bool = True          #: forced False when mgrid_file == 'NONE'
@@ -819,6 +814,8 @@ class VmecInput:
         set_(self, "precon_type", str(self.precon_type).strip())
         set_(self, "mgrid_file", str(self.mgrid_file).strip())
         set_(self, "restart_wout", str(self.restart_wout).strip())
+        set_(self, "tvolume", float(self.tvolume))
+        set_(self, "lvolume_rfix", bool(self.lvolume_rfix))
         set_(self, "lposition_control", bool(self.lposition_control))
         set_(self, "position_target", float(self.position_target))
         set_(self, "position_interval", int(self.position_interval))
@@ -1289,6 +1286,8 @@ class VmecInput:
             precon_type=str(get("PRECON_TYPE", "NONE")),
             prec2d_threshold=float(get("PREC2D_THRESHOLD", 1e-30)),
             restart_wout=str(get("RESTART_WOUT", "")),
+            tvolume=float(get("TVOLUME", -1.0)),
+            lvolume_rfix=bool(get("LVOLUME_RFIX", False)),
             lposition_control=bool(get("LPOSITION_CONTROL", False)),
             position_target=float(get("POSITION_TARGET", 0.0)),
             position_interval=int(get("POSITION_INTERVAL", 20)),
@@ -1445,6 +1444,9 @@ class VmecInput:
         put("PREC2D_THRESHOLD", self.prec2d_threshold)
         if self.restart_wout:
             put("RESTART_WOUT", self.restart_wout)
+        if self.tvolume > 0.0:
+            put("TVOLUME", self.tvolume)
+            put("LVOLUME_RFIX", self.lvolume_rfix)
         if self.lposition_control:
             put("LPOSITION_CONTROL", True)
             put("POSITION_TARGET", self.position_target)
