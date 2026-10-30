@@ -200,7 +200,7 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
     """Save the design, re-solve finely, then cold-solve the held free boundary.
 
     Returns ``(equilibrium, surface, metrics, free_check)``. Free-boundary
-    metrics are provisional unless every solver rung converged with vacuum data.
+    metrics are provisional unless the final grid converged with vacuum data.
     Flux, pressure, and current profiles are unchanged in both checks.
     """
     from essos.fields import BiotSavart
