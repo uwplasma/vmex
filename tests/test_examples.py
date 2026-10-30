@@ -1311,9 +1311,8 @@ def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch):
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
         tmp_path, timeout=1800)
-    for diagnostic in ("[final] QA total", "(B_coils + B_plasma).n/B: area-weighted RMS",
-                       "Volume-average beta = ", "Coil lengths", "Maximum curvature",
-                       "Minimum |iota| = ", "Aspect ratio = "):
+    for diagnostic in ("[final] QA total", "B.n/B RMS = ", "beta = ", "Coil lengths",
+                       "maximum curvature = ", "min |iota| = ", "aspect = "):
         assert diagnostic in out
     summary = json.loads(
         (tmp_path / "single_stage_optimization_finite_beta_summary.json").read_text())
@@ -1396,7 +1395,9 @@ def test_single_stage_examples_use_general_surface_output_and_movie_colors() -> 
     vacuum = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
     finite = (EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py").read_text()
     assert "from pyevtk" not in finite
-    assert "surface_initial.to_vtk" in finite
+    assert "save_outputs(joint" in finite
+    outputs = (REPO / "vmex" / "core" / "single_stage.py").read_text()
+    assert "surf.to_vtk" in outputs
     for source in (vacuum, finite):
         assert "MOVIE_SURFACE_COLOR" in source and "surface_color=" in source
 
@@ -1431,10 +1432,12 @@ def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
         assert "ncurr=1, curtor=0.0, ac=np.zeros(21)" in source
         for bootstrap in ("vmex.core.bootstrap", "RedlBootstrapMismatch", "KineticProfiles"):
             assert bootstrap not in source
-    for source in (fixed, auglag, squares, free, finite, free_finite):
+    for source in (fixed, auglag, squares, free, free_finite):
         assert "did NOT meet its stated targets" in source
         assert "if unmet and not ci_smoke:\n    raise SystemExit(1)" in source
         assert "_summary.json" in source
+    assert "design_target_report(" in finite and "_summary.json" in finite
+    assert 'if verdict["unmet"] and not ci_smoke:\n    raise SystemExit(1)' in finite
 
 
 # Cold, on two cores, the finite-beta script takes 1.4 min; most of it is the

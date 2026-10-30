@@ -1,44 +1,13 @@
 #!/usr/bin/env python
-r"""Single-stage fixed-boundary optimization at finite beta with VMEX + ESSOS.
+"""Finite-beta QA boundary/coil optimization with VMEX, virtual casing, and ESSOS.
 
-``single_stage_optimization.py`` at volume-average beta 0.5%: the same seed,
-targets, weights and coils, with a pressure profile p ~ (1 - s) and
-no net toroidal current (NCURR = 1, CURTOR = 0, AC = 0). The plasma boundary
-and the coils are optimized together; VMEX solves the fixed-boundary
-equilibrium on every trial and differentiates it implicitly.
-
-At finite beta the plasma currents make a field of their own, so the coils
-no longer have to be tangent to the boundary by themselves: the condition is
-that the TOTAL field is, (B_coils + B_plasma).n = 0. Virtual casing computes
-B_plasma on the boundary from the converged equilibrium on every trial, and
-the normal-field limit applies to that total. This is a fixed-boundary
-coil-fit objective; the independent free-boundary check below tests pressure
-balance and the resulting held boundary.
-
-The coil field also sets the field strength, which now matters: the coils
-are fitted to the seed first (as in ``single_stage_optimization.py``), the
-toroidal flux PHIEDGE is read off the fitted field, and the pressure is
-scaled so the seed equilibrium sits at the target beta. A beta term in the
-objective keeps it there as the boundary moves.
-
-After the fixed-boundary checks, a cold NESTOR free-boundary solve in the
-optimized coils' field checks whether those same flux, pressure and current
-profiles can be held. Its convergence, pressure jump and boundary displacement
-are reported separately; a failed solve cannot pass the final checks.
-
-The objective is that of ``single_stage_optimization.py`` plus
-
-    (1/2) (<beta> / TARGET_BETA - 1)^2
-
-with the normal-field limit applied to the total field. Self-consistent
-bootstrap current and current-profile optimization are not part of this
-example.
-
-Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
-exits 0. Otherwise a run that misses a target says which and exits 1.
+The fitted coils set the seed's positive toroidal flux. Pressure is calibrated
+for 0.5% beta with p(s) proportional to 1-s and zero net toroidal current.
+Each trial uses a fixed-boundary equilibrium and the total-field normal
+residual; a finer fixed-boundary solve and a cold NESTOR solve independently
+check the optimized design. VMEX_EXAMPLES_CI=1 runs a bounded smoke pass.
 """
 
-import gc
 import json
 import os
 from dataclasses import replace
@@ -49,124 +18,51 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import minimize
-from scipy.spatial import cKDTree
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core import virtual_casing as vc
-from vmex.core.errors import VmecError
-
+from vmex.core.single_stage import (
+    CoilPenalty, SingleStageProblem, hinge, normal_field_rms, toroidal_flux,
+    verify_design, save_outputs, design_target_report,
+)
 from essos.coils import Coils, CreateEquallySpacedCurves
-from essos.fields import BiotSavart
-from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
-from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
+from essos.surfaces import surfacerzfourier_from_boundary
 
-# Number of field periods, and the seed deck the boundary is shaped from:
+# Input parameters.
 NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
-
-# Highest boundary Fourier mode number that is varied:
 MAX_MODE = 2
-
-# Flux surfaces the quasisymmetry residual is evaluated on:
 SURFACES = np.linspace(0.05, 1.0, 6)
-
-# Seed boundary: a rotating ellipse of aspect ratio about 5.97. RBC(1,1) and
-# ZBS(1,1) carry opposite signs; equal signs give a circle and no transform.
-SEED_MINOR_RADIUS = 0.195
-SEED_ELLIPSE = 0.10
-
-# Volume-average beta, pressure profile p(s) = PRES_SCALE * (1 - s) as VMEC
-# power-series coefficients, and no net toroidal current:
+SEED_MINOR_RADIUS, SEED_ELLIPSE = 0.195, 0.10
 TARGET_BETA = 0.005
 PRESSURE_PROFILE = [1.0, -1.0]
-BETA_TOLERANCE = 0.1              # relative, for the final check
+BETA_TOLERANCE = 0.1
 
-# Targets the finished design is checked against:
-IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
-ASPECT_LIMIT = 6.0                # maximum aspect ratio
-NORMAL_FIELD_LIMIT = 0.01         # area-weighted RMS of B.n/|B| on the boundary
-COIL_SURFACE_DISTANCE_LIMIT = 0.15
-COIL_DISTANCE_LIMIT = 0.17
-CURVATURE_LIMIT = 7.0
-DELBSQ_LIMIT = 0.02               # NESTOR's relative pressure mismatch
-FREE_BOUNDARY_DISTANCE_LIMIT = 0.02  # sampled distance to the fitted target [m]
-
-# Values the optimizer is given instead. They are tighter than the limits above
-# for two reasons: the check re-solves on a finer radial and surface grid, and a
-# quadratic penalty settles just inside the threshold it is handed.
-IOTA_CONSTRAINT = 0.43
-ASPECT_CONSTRAINT = 5.97
-NORMAL_FIELD_CONSTRAINT = 0.008
+# Final limits; optimization constraints are tighter to allow for finer checks.
+IOTA_FLOOR, ASPECT_LIMIT, NORMAL_FIELD_LIMIT = 0.42, 6.0, 0.01
+COIL_SURFACE_DISTANCE_LIMIT, COIL_DISTANCE_LIMIT, CURVATURE_LIMIT = 0.15, 0.17, 7.0
+DELBSQ_LIMIT, FREE_BOUNDARY_DISTANCE_LIMIT = 0.02, 0.02
+IOTA_CONSTRAINT, ASPECT_CONSTRAINT, NORMAL_FIELD_CONSTRAINT = 0.43, 5.97, 0.008
 CURVATURE_OBJECTIVE_LIMIT = 6.9
-COIL_DISTANCE_CONSTRAINT = 0.19
-COIL_SURFACE_DISTANCE_CONSTRAINT = 0.16
+COIL_DISTANCE_CONSTRAINT, COIL_SURFACE_DISTANCE_CONSTRAINT = 0.19, 0.16
 
-# Coils: number of unique shapes, Fourier order, and the circle they start on.
-# The aspect-6 seed reaches about 0.3 m from the circle R = 1, so radius 0.5
-# starts the coils about 0.2 m out, above the 0.15 m clearance limit.
-N_COILS = 3
-COIL_ORDER = 4
-COIL_MAJOR_RADIUS = 1.0
-COIL_MINOR_RADIUS = 0.5
-COIL_CURRENT = 2.7e5
-N_SEGMENTS = 64
-STELLSYM = True
-
-# Weights, and the longest coil the optimizer may build. The length term is
-# one-sided: coils shorter than LENGTH_TARGET cost nothing, so it never pulls
-# against quasisymmetry or the normal field.
-LENGTH_TARGET = 5.5
-LENGTH_WEIGHT = 0.5
-CURVATURE_WEIGHT = 10.0
-COIL_DISTANCE_WEIGHT = 1.0e4
-COIL_SURFACE_DISTANCE_WEIGHT = 1.0e4
-CONSTRAINT_WEIGHT = 1.0e3
-# Cost of a trial without a certified equilibrium, in units of the seed cost:
-REJECTED_TRIAL_COST = 10.0
-
-# Bound on each scaled variable. They keep a trial boundary inside the range
-# the seed solve converges on; L-BFGS-B rather than BFGS because BFGS cannot
-# represent a bound.
-PARAMETER_BOUND = 3.0
-
-# Budgets. One trial is one equilibrium solve, one virtual-casing evaluation
-# and one adjoint. These caps bound the search; the independent checks below
-# determine whether the returned design meets the targets.
-MAXITER = 12
-MAX_TRIALS = 35
-COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
-
-# Surface grid the coil objective uses. A toroidal count commensurate with the
-# coil number aliases narrow B.n/B structure, so 37 rather than 36.
-NPHI, NTHETA = 37, 32
-# Significant digits of the virtual-casing plasma field:
-VC_DIGITS = 4
-
-# A compact GIF of the accepted iterates. Off by default: with "absB" colour
-# every frame re-solves its equilibrium, which took longer than the whole
-# 14-iteration optimization (measured).
-MAKE_MOVIE = False
-# Surface colour in that GIF: None, "absB", "B.n/B", or a callable
-# ``(x, objects) -> values``.
-MOVIE_SURFACE_COLOR = "absB"
+N_COILS, COIL_ORDER, N_SEGMENTS, STELLSYM = 3, 4, 64, True
+COIL_MAJOR_RADIUS, COIL_MINOR_RADIUS, COIL_CURRENT = 1.0, 0.5, 2.7e5
+LENGTH_TARGET, LENGTH_WEIGHT, CURVATURE_WEIGHT = 5.5, 0.5, 10.0
+COIL_DISTANCE_WEIGHT, COIL_SURFACE_DISTANCE_WEIGHT = 1.0e4, 1.0e4
+CONSTRAINT_WEIGHT, REJECTED_TRIAL_COST, PARAMETER_BOUND = 1.0e3, 10.0, 3.0
+MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 12, 35, 200
+NPHI, NTHETA, VC_DIGITS = 37, 32, 4  # 37 avoids aliasing the three-coil field.
+MAKE_MOVIE, MOVIE_SURFACE_COLOR = False, "absB"
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 2, 4, 2
     N_SEGMENTS, COIL_ORDER, NPHI, NTHETA = 24, 2, 8, 8
 
-###############################################################################
-# End of input parameters.
-###############################################################################
-
+# Seed and coil pre-fit.
 started = time.perf_counter()
-
-###############################################################################
-### Set up the seed and fit the coils to it ###################################
-###############################################################################
-
-# VmecInput is frozen, so copy its arrays before shaping the seed boundary.
+print("Running single_stage_optimization_finite_beta.py")
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = SEED_MINOR_RADIUS
@@ -179,483 +75,111 @@ inp = replace(inp, rbc=rbc, zbs=zbs, delt=0.5, pmass_type="power_series", am=am,
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 surface_seed = surfacerzfourier_from_boundary(
     jnp.asarray(inp.rbc), jnp.asarray(inp.zbs), NFP, nphi=NPHI, ntheta=NTHETA)
-
-curves0 = CreateEquallySpacedCurves(
+curves = CreateEquallySpacedCurves(
     N_COILS, COIL_ORDER, COIL_MAJOR_RADIUS, COIL_MINOR_RADIUS,
     n_segments=N_SEGMENTS, nfp=NFP, stellsym=STELLSYM)
-coils_circular = Coils(curves0, np.full(N_COILS, COIL_CURRENT))
-x_coils_circular = np.asarray(curves0.dofs).ravel()
+coils_circular = Coils(curves, np.full(N_COILS, COIL_CURRENT))
+x_coils_circular = np.asarray(curves.dofs).ravel()
 coil_scales = np.full(x_coils_circular.size, 0.05)
+coil_penalty = CoilPenalty(
+    LENGTH_TARGET, CURVATURE_OBJECTIVE_LIMIT, COIL_DISTANCE_CONSTRAINT,
+    COIL_SURFACE_DISTANCE_CONSTRAINT, LENGTH_WEIGHT, CURVATURE_WEIGHT,
+    COIL_DISTANCE_WEIGHT, COIL_SURFACE_DISTANCE_WEIGHT)
 
 
-def coils_from_dofs(x_coils):
-    return coils_circular.with_dofs(jnp.concatenate((x_coils, coils_circular.dofs_currents)))
+def coils_from_dofs(x):
+    return coils_circular.with_dofs(jnp.concatenate((x, coils_circular.dofs_currents)))
 
 
-def normalized_normal_field(coils, surface):
-    """B.n / |B| of the coil field alone on a surface."""
-    field = BiotSavart(coils)
-    B = jax.vmap(field.B)(surface.gamma.reshape(-1, 3)).reshape(surface.gamma.shape)
-    return jnp.sum(B * surface.unitnormal, axis=2) / jnp.linalg.norm(B, axis=2)
+def coil_fit_objective(u):
+    coils = coils_from_dofs(jnp.asarray(x_coils_circular) + coil_scales * u)
+    constraint = 1 - normal_field_rms(coils, surface_seed) / NORMAL_FIELD_CONSTRAINT
+    return jnp.sum(coil_penalty(coils, surface_seed)) + hinge(constraint[None], CONSTRAINT_WEIGHT)
 
 
-def normal_field_rms(coils, surface):
-    weights = surface.area_element / jnp.sum(surface.area_element)
-    return jnp.sqrt(jnp.sum(weights * normalized_normal_field(coils, surface)**2))
-
-
-def coil_field(coils):
-    """The coil Biot-Savart field as a batched callable, for virtual casing and plots."""
-    field = BiotSavart(coils)
-    return lambda points: jax.vmap(field.B)(points.reshape(-1, 3)).reshape(points.shape)
-
-
-def hinge(constraints):
-    """Quadratic penalty for constraints written as c >= 0, normalized by their limits."""
-    return 0.5 * CONSTRAINT_WEIGHT * jnp.sum(jnp.maximum(-constraints, 0.0)**2)
-
-
-def coil_costs(coils, surface):
-    """Coil length, curvature, separation and clearance to ``surface``."""
-    length = jnp.sqrt(LENGTH_WEIGHT) * jnp.maximum(coils.length[:N_COILS] - LENGTH_TARGET, 0.0)
-    curvature = jnp.sqrt(CURVATURE_WEIGHT) * jnp.maximum(
-        coils.curvature[:N_COILS] - CURVATURE_OBJECTIVE_LIMIT, 0.0)
-    return jnp.asarray([
-        0.5 * jnp.vdot(length, length),
-        0.5 * jnp.vdot(curvature, curvature),
-        0.5 * COIL_DISTANCE_WEIGHT * loss_coil_separation(
-            coils, COIL_DISTANCE_CONSTRAINT, block_size=32),
-        0.5 * COIL_SURFACE_DISTANCE_WEIGHT * loss_coil_surface_distance(
-            coils, surface, COIL_SURFACE_DISTANCE_CONSTRAINT, block_size=32),
-    ])
-
-
-def coil_fit_objective(u_coils):
-    """The coil half of the objective with the boundary frozen at the seed.
-
-    At 0.5% beta the plasma's own normal field is small, so the vacuum
-    condition B_coils.n = 0 is a good enough target for a starting point.
-    """
-    coils = coils_from_dofs(jnp.asarray(x_coils_circular) + jnp.asarray(coil_scales) * u_coils)
-    normal_field = 1.0 - normal_field_rms(coils, surface_seed) / NORMAL_FIELD_CONSTRAINT
-    return jnp.sum(coil_costs(coils, surface_seed)) + hinge(normal_field[None])
-
-
-print("Running single_stage_optimization_finite_beta.py")
-coil_fit_value_and_grad = jax.jit(jax.value_and_grad(coil_fit_objective))
+coil_fit_vg = jax.jit(jax.value_and_grad(coil_fit_objective))
 coil_fit = minimize(
-    lambda u: tuple(map(np.asarray, coil_fit_value_and_grad(jnp.asarray(u)))),
+    lambda u: tuple(map(np.asarray, coil_fit_vg(jnp.asarray(u)))),
     np.zeros_like(x_coils_circular), jac=True, method="L-BFGS-B",
     bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils_circular.size,
     options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
-x_coils0 = x_coils_circular + coil_scales * coil_fit.x
-coils0 = coils_from_dofs(jnp.asarray(x_coils0))
+coils0 = coils_from_dofs(jnp.asarray(x_coils_circular + coil_scales * coil_fit.x))
 print(f"[coil fit] {coil_fit.nit} L-BFGS-B iterations, no equilibrium solves: B.n/B RMS "
       f"= {100 * float(normal_field_rms(coils0, surface_seed)):.3f}% on the seed")
 
-###############################################################################
-### Set up the equilibrium ####################################################
-###############################################################################
-
-# The toroidal flux the coils put through the seed's phi = 0 cross-section
-# (Gauss-Legendre in radius, uniform in angle) fixes the field strength, and
-# with it the pressure a given beta needs. At phi = 0 every toroidal harmonic
-# has phase m*theta, so the cross-section sums the boundary over n.
-rho, rho_weights = np.polynomial.legendre.leggauss(24)
-rho, rho_weights = 0.5 * (rho + 1.0), 0.5 * rho_weights
-theta = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
-m = np.arange(inp.rbc.shape[1])
-rbc_phi0, zbs_phi0 = inp.rbc.sum(axis=0), inp.zbs.sum(axis=0)
-R_edge = np.cos(np.outer(theta, m)) @ rbc_phi0
-Z_edge = np.sin(np.outer(theta, m)) @ zbs_phi0
-dR_edge = -np.sin(np.outer(theta, m)) @ (m * rbc_phi0)
-dZ_edge = np.cos(np.outer(theta, m)) @ (m * zbs_phi0)
-R = rbc_phi0[0] + rho[:, None] * (R_edge - rbc_phi0[0])
-Z = rho[:, None] * Z_edge
-area_element = rho[:, None] * ((R_edge - rbc_phi0[0]) * dZ_edge - Z_edge * dR_edge)
-points = np.stack([R, np.zeros_like(R), Z], axis=-1).reshape(-1, 3)
-B_phi = np.asarray(coil_field(coils0)(jnp.asarray(points)))[:, 1].reshape(R.shape)
-toroidal_flux = float(np.sum(rho_weights[:, None] * B_phi * area_element)
-                      * (2.0 * np.pi / theta.size))
-# Physical +phi is +Y at phi=0, as in ESSOS and VMEX's external-field provider.
-# NESTOR rejects a PHIEDGE whose sign opposes the external toroidal field.
-inp = replace(inp, phiedge=toroidal_flux)
-# Beta is proportional to the pressure at fixed boundary and flux, so one seed
-# solve at PRES_SCALE = 1 gives the scale.
+# Flux and pressure calibration, then the explicit QA + beta plasma objective.
+inp = replace(inp, phiedge=toroidal_flux(inp, coils0))
 beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
 inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
 print(f"[flux] PHIEDGE = {inp.phiedge:.6f} Wb from the fitted coils; "
       f"PRES_SCALE = {inp.pres_scale:.1f} Pa for beta {100 * TARGET_BETA:.2f}%")
 
 
-def relative_beta(equilibrium_state, solver_context):
-    return opt.volume_average_beta(equilibrium_state, solver_context) / TARGET_BETA
+def relative_beta(state, runtime):
+    return opt.volume_average_beta(state, runtime) / TARGET_BETA
 
 
-# A VmecProblem owns the boundary-mode convention, the dof scaling and the
-# equilibrium solve. Quasisymmetry and beta are its objective; the limits are
-# added below.
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 plasma_problem = opt.VmecProblem.from_tuples(
     inp, [(qs.residuals_state, 0.0, 1.0), (relative_beta, 1.0, 1.0)], max_mode=MAX_MODE,
     use_ess=True, progress=not ci_smoke)
-
-# One variable vector holds both halves. SciPy works in dimensionless
-# increments u, with x = x0 + scales * u, so every dof moves on a similar scale.
-x_boundary0 = plasma_problem.x0
-rbc0, zbs0 = plasma_problem.boundary_from_x(x_boundary0)
-x0 = np.concatenate([x_boundary0, x_coils0])
-scales = np.concatenate([0.02 * plasma_problem.scales, coil_scales])
-n_boundary = x_boundary0.size
-
-
-def objects_from_x(x):
-    """The boundary surface and the coils implied by one variable vector."""
-    rbc, zbs = plasma_problem.boundary_from_x(x[:n_boundary])
-    surface = surfacerzfourier_from_boundary(rbc, zbs, NFP, nphi=NPHI, ntheta=NTHETA)
-    return surface, coils_from_dofs(x[n_boundary:])
-
-
-# Virtual casing picks its quadrature once, on the concrete seed, so that the
-# plasma field stays differentiable in the boundary on every trial.
-seed_equilibrium = plasma_problem.equilibrium_from_x(x_boundary0)
-precision = vc.plan_vc_precision(vc.surface_field_data_from_state(
-    inp, seed_equilibrium.solution, runtime=seed_equilibrium.solver_context,
-    nphi=NPHI, ntheta=NTHETA), digits=VC_DIGITS)
-
-
-def total_normal_field(input_, coils, equilibrium_state, solver_context, nphi, ntheta,
-                       precision):
-    """(B_coils + B_plasma).n / |B| on the boundary, and its area weights."""
-    surface_data = vc.surface_field_data_from_state(
-        input_, equilibrium_state, runtime=solver_context, nphi=nphi, ntheta=ntheta)
-    interface = vc.PlasmaVacuumInterface.from_surface_data(
-        surface_data, digits=VC_DIGITS, precision=precision)
-    B = jnp.linalg.norm(surface_data.B_total, axis=0)
-    return interface.bnormal_residual(coil_field(coils)) / B, interface.weights
-
-
-###############################################################################
-### Set up the objective ######################################################
-###############################################################################
-
-def plasma_objective(u):
-    """Quasisymmetry, beta, the transform floor, the aspect and normal-field limits.
-
-    One equilibrium solve, one virtual-casing evaluation and one adjoint.
-    Floor the profile minimum rather than its average: a mean target is
-    satisfiable while an interior surface sits near zero transform.
-    """
-    x = jnp.asarray(x0) + jnp.asarray(scales) * u
-    _, coils = objects_from_x(x)
-
-    def limits(state, ctx):
-        normal_field, weights = total_normal_field(
-            inp, coils, state, ctx, NPHI, NTHETA, precision)
-        rms = jnp.sqrt(jnp.sum(weights * normal_field**2))
-        return hinge(jnp.stack([
-            opt.min_abs_iota(state, ctx) / IOTA_CONSTRAINT - 1.0,
-            1.0 - opt.aspect_ratio(state, ctx) / ASPECT_CONSTRAINT,
-            1.0 - rms / NORMAL_FIELD_CONSTRAINT]))
-
-    return plasma_problem.jax_objective_from_state(x[:n_boundary], limits, n_extra_terms=1)
-
-
-def coil_objective(u):
-    """Coil regularization. Pure JAX, no solve."""
-    surface, coils = objects_from_x(jnp.asarray(x0) + jnp.asarray(scales) * u)
-    costs = coil_costs(coils, surface)
-    return jnp.sum(costs), costs
-
-
-plasma_value_and_grad = jax.jit(jax.value_and_grad(plasma_objective, has_aux=True))
-coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective, has_aux=True))
-
-# The monitor prints one row per evaluation and records the history for the
-# plot and the movie at the end.
-monitor = opt.OptimizationMonitor(plasma_problem)
-counts, cached = {"trials": 0, "rejected": 0}, {}
-COIL_TERMS = ("coil length", "coil curvature", "coil separation", "coil-surface separation")
-n_qs_rows = plasma_problem.metadata["term_slices"][0][2]
-
-
-def value_and_grad(u):
-    """What SciPy calls: the two halves evaluated once, added, and divided by the seed cost.
-
-    The seed cost is about 1e5 (coil and limit penalties); dividing by it puts
-    the seed at 1. A trial without a certified equilibrium comes back with
-    zero residual rows, and its built-in rejection cost is sized for the
-    quasisymmetry terms alone, far below 1e5, so a line search would accept
-    it. It gets REJECTED_TRIAL_COST * (1 + |u|)^2 instead, with its exact
-    gradient: above every accepted value, so it is never accepted.
-    """
-    u = np.asarray(u, dtype=float)
-    if cached.get("key") == u.tobytes():          # SciPy re-asks at the same point
-        return cached["value"], cached["gradient"].copy()
-    counts["trials"] += 1
-    (plasma_value, (rows, plasma_penalty)), plasma_gradient = \
-        plasma_value_and_grad(jnp.asarray(u))
-    rows = np.asarray(rows)
-    if not np.any(rows) and "scale" in cached:
-        counts["rejected"] += 1
-        distance = float(np.linalg.norm(u))
-        value = REJECTED_TRIAL_COST * (1.0 + distance) ** 2
-        gradient = 2.0 * REJECTED_TRIAL_COST * (1.0 + distance) * u / max(distance, 1e-300)
-        print(f"  trial {counts['trials']}: no certified equilibrium, rejected", flush=True)
-        cached.update(key=u.tobytes(), value=value, gradient=gradient)
-        return value, gradient.copy()
-    (coil_value, coil_costs_), coil_gradient = coil_value_and_grad(jnp.asarray(u))
-    cached.setdefault("scale", 1.0 / float(plasma_value + coil_value))
-    scale = cached["scale"]
-    terms = {"quasisymmetry": 0.5 * float(rows[:n_qs_rows] @ rows[:n_qs_rows]),
-             "beta": 0.5 * float(rows[n_qs_rows:] @ rows[n_qs_rows:]),
-             "iota/aspect/B.n penalty": float(np.asarray(plasma_penalty)[0])}
-    terms.update(zip(COIL_TERMS, map(float, np.asarray(coil_costs_))))
-    value, gradient = monitor.cache_evaluation(
-        u, scale * (plasma_value + coil_value), scale * (plasma_gradient + coil_gradient),
-        {name: scale * term for name, term in terms.items()})
-    cached.update(key=u.tobytes(), value=value, gradient=gradient)
-    return value, gradient.copy()
-
-
-###############################################################################
-### Run the optimization ######################################################
-###############################################################################
-
-print(f"Fixed-boundary VMEX + virtual casing + ESSOS at beta {100 * TARGET_BETA:.2f}%: "
-      f"{n_boundary} boundary and {x_coils0.size} coil variables, exact reverse-mode "
-      "derivatives")
+joint = SingleStageProblem(
+    plasma_problem, coils0, coil_penalty, nphi=NPHI, ntheta=NTHETA,
+    iota_floor=IOTA_CONSTRAINT, aspect_limit=ASPECT_CONSTRAINT,
+    normal_field_limit=NORMAL_FIELD_CONSTRAINT, constraint_weight=CONSTRAINT_WEIGHT,
+    vc_digits=VC_DIGITS, rejected_trial_cost=REJECTED_TRIAL_COST)
 report = opt.EquilibriumReporter(
     ("QA total", qs.total, ".6e"), ("beta", opt.volume_average_beta, ".4%"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
     ("min |iota|", opt.min_abs_iota, ".4f"))
-seed_values = report("seed", seed_equilibrium)
+seed_values = report("seed", joint.seed_equilibrium)
 
-u = np.zeros_like(x0)
-vj.FunctionProblem.from_functions(u, value_and_grad=value_and_grad).compile_value_and_gradient(
+# Optimization: dimensionless increments, one equilibrium/VC/adjoint per trial.
+u = np.zeros_like(joint.x0)
+vj.FunctionProblem.from_functions(u, value_and_grad=joint.value_and_grad).compile_value_and_gradient(
     report_interval=10.0)
-initial_value = monitor.records[0].cost
-result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", callback=monitor,
-                  bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size,
-                  options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
-                           "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
-u, final_value = result.x, float(result.fun)
-print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials "
-      f"({counts['rejected']} rejected), "
-      f"status {result.status}: {result.message}", flush=True)
+initial_value = joint.monitor.records[0].cost
+result = minimize(
+    joint.value_and_grad, u, jac=True, method="L-BFGS-B", callback=joint.monitor,
+    bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * u.size,
+    options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
+             "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
+u = result.x
 optimization_seconds = time.perf_counter() - started
+print(f"[solve] {result.nit} L-BFGS-B iterations, {joint.counts['trials']} trials "
+      f"({joint.counts['rejected']} rejected), status {result.status}: {result.message}", flush=True)
 
-###############################################################################
-### Check the result against the targets ######################################
-###############################################################################
+# Independent verification and final reporting.
+prefix = "single_stage_finite_beta"
+equilibrium, surface, metrics, free = verify_design(
+    joint, u, prefix=prefix, ns=31 if ci_smoke else 101,
+    ftol=1e-10 if ci_smoke else 1e-12, free_ns=[16] if ci_smoke else [16, 51],
+    free_ftol=1e-10 if ci_smoke else 1e-12, verbose=not ci_smoke)
+final_values = report("final", equilibrium)
+print(f"Objective: {initial_value:.6e} -> {result.fun:.6e}")
+print(f"Coil lengths = {np.asarray(joint.objects_from_x(joint.x0 + joint.scales * u)[1].length[:N_COILS])}")
+for name, value in metrics.items():
+    print(f"{name} = {value:.6g}")
 
-# A lower objective proves nothing on its own: a boundary with no transform
-# makes the quasisymmetry residual trivially small. Re-solve on a finer radial
-# and surface grid and compare every target explicitly.
-# Trial-gradient executables are no longer needed; release them before the
-# independent, finer-grid checks. Their recompilation cost remains in runtime.
-jax.clear_caches()
-gc.collect()
-print("[verify] finer fixed-boundary equilibrium and virtual casing", flush=True)
-x_final = x0 + scales * u
-_, coils_final = objects_from_x(jnp.asarray(x_final))
-equilibrium = plasma_problem.equilibrium_from_x(x_final[:n_boundary])
-# FTOL 1e-12 rather than tighter: 1e-13 is out of reach even at ns=50 here, and
-# a verification solve that cannot converge verifies nothing.
-final_input = replace(plasma_problem.input_from_x(x_final[:n_boundary]),
-                      ns_array=np.array([31 if ci_smoke else 101]),
-                      ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-12]),
-                      niter_array=np.array([8000]))
-# Preserve the optimized design even if an independent verification fails.
-input_path = final_input.to_indata("input.single_stage_finite_beta_optimized")
-coils_final.to_json("coils_single_stage_finite_beta_optimized.json")
-final_equilibrium = opt.solve_equilibrium(
-    final_input, initial_state=equilibrium.solution, verbose=not ci_smoke)
-
-surface_final = surfacerzfourier_from_boundary(
-    jnp.asarray(final_input.rbc), jnp.asarray(final_input.zbs), NFP, nphi=61, ntheta=64)
-# The total field's normal component, with virtual casing replanned on the
-# finer grid of the optimized boundary.
-final_data = vc.surface_field_data_from_state(
-    final_input, final_equilibrium.solution, runtime=final_equilibrium.solver_context,
-    nphi=61, ntheta=64)
-normal_field, area = map(np.asarray, total_normal_field(
-    final_input, coils_final, final_equilibrium.solution, final_equilibrium.solver_context,
-    61, 64, vc.plan_vc_precision(final_data, digits=VC_DIGITS)))
-normal_field_rms_final = float(np.sqrt(np.sum(area * normal_field**2)))
-normal_field_max = float(np.max(np.abs(normal_field)))
-gamma = np.asarray(coils_final.gamma)
-points = np.asarray(surface_final.gamma).reshape(-1, 3)
-coil_surface_distance = min(
-    float(np.linalg.norm(c[:, None] - points[None], axis=2).min()) for c in gamma)
-coil_distance = min(
-    float(np.linalg.norm(gamma[i][:, None] - gamma[j][None], axis=2).min())
-    for i in range(len(gamma)) for j in range(i + 1, len(gamma)))
-maximum_curvature = float(np.max(np.asarray(coils_final.curvature)))
-minimum_iota = float(opt.min_abs_iota(final_equilibrium.state, final_equilibrium.runtime))
-final_aspect = float(opt.aspect_ratio(final_equilibrium.state, final_equilibrium.runtime))
-final_beta = float(opt.volume_average_beta(final_equilibrium.state, final_equilibrium.runtime))
-final_converged = bool(np.all(np.asarray(final_equilibrium.result.converged)))
-
-# A small normal-field residual alone does not show that the coils hold the
-# prescribed boundary. Re-solve with its flux/pressure/current unchanged, cold,
-# using the same verification ladder as the free-boundary companion example.
-jax.clear_caches()
-gc.collect()
-print("[verify] cold NESTOR free boundary", flush=True)
-free_ns = [16] if ci_smoke else [16, 51]
-free_input = replace(final_input, lfreeb=True, mgrid_file="direct ESSOS field",
-                     ns_array=np.array(free_ns),
-                     ftol_array=np.full(len(free_ns), 1e-10 if ci_smoke else 1e-12),
-                     niter_array=np.full(len(free_ns), 8000))
-free_check = {"converged": False, "phiedge": float(free_input.phiedge),
-              "ns": free_ns, "metrics_provisional": True}
-free_started = time.perf_counter()
-try:
-    free_result = vj.solve_free_boundary_multigrid(
-        free_input, external_field=BiotSavart(coils_final), verbose=not ci_smoke,
-        raise_on_max_iterations=False)
-    free_converged = bool(np.all(np.asarray(free_result.converged))) and free_result.vacuum is not None
-    free_wout = vj.wout_from_state(
-        inp=free_input, state=free_result.state, fsqr=free_result.fsqr,
-        fsqz=free_result.fsqz, fsql=free_result.fsql, niter=free_result.iterations,
-        converged=free_result.converged, vacuum_output=free_result.vacuum)
-    free_path = vj.write_wout("wout_single_stage_finite_beta_free_check.nc", free_wout)
-    held_points = np.asarray(SurfaceRZFourier.from_wout_file(
-        free_path, nphi=61, ntheta=64, close=False).gamma).reshape(-1, 3)
-    displacement = max(cKDTree(points).query(held_points)[0].max(),
-                       cKDTree(held_points).query(points)[0].max())
-    held_clearance = min(float(np.linalg.norm(c[:, None] - held_points[None], axis=2).min())
-                         for c in gamma)
-    free_check.update(
-        converged=free_converged, metrics_provisional=not free_converged,
-        iterations=int(free_result.iterations),
-        force_errors={k: float(getattr(free_result, k)) for k in ("fsqr", "fsqz", "fsql")},
-        delbsq=float(free_result.vacuum.delbsq) if free_result.vacuum is not None else None,
-        aspect=float(free_wout.aspect),
-        beta=float(free_wout.betatotal), min_abs_iota=float(np.min(np.abs(free_wout.iotas[1:]))),
-        sampled_boundary_distance_m=float(displacement),
-        coil_surface_distance_m=held_clearance)
-except VmecError as exc:
-    free_check["error"] = str(exc)
-free_check["seconds"] = time.perf_counter() - free_started
-print("[free boundary] " + json.dumps(free_check))
-
-###############################################################################
-### Print, plot and save ######################################################
-###############################################################################
-
-final_values = report("final", final_equilibrium)
-print(f"\nObjective: {initial_value:.6e} -> {final_value:.6e} after "
-      f"{result.nit} L-BFGS-B iterations and {counts['trials']} trials")
-print(f"Coil lengths = {np.asarray(coils_final.length[:N_COILS])}")
-print(f"(B_coils + B_plasma).n/B: area-weighted RMS = {100 * normal_field_rms_final:.3f}%, "
-      f"max = {100 * normal_field_max:.3f}% (target RMS <= "
-      f"{100 * NORMAL_FIELD_LIMIT:.1f}%; the maximum is reported, not optimized)")
-print(f"Minimum coil-surface distance = {coil_surface_distance:.4f} m "
-      f"(target >= {COIL_SURFACE_DISTANCE_LIMIT:.4f} m)")
-print(f"Minimum coil-coil distance = {coil_distance:.4f} m "
-      f"(target >= {COIL_DISTANCE_LIMIT:.4f} m)")
-print(f"Maximum curvature = {maximum_curvature:.4f} 1/m "
-      f"(target <= {CURVATURE_LIMIT:.4f} 1/m)")
-print(f"Minimum |iota| = {minimum_iota:.4f} (target >= {IOTA_FLOOR:.4f})")
-print(f"Aspect ratio = {final_aspect:.4f} (target <= {ASPECT_LIMIT:.4f})")
-print(f"Volume-average beta = {100 * final_beta:.4f}% (target {100 * TARGET_BETA:.2f}% "
-      f"within {100 * BETA_TOLERANCE:.0f}%)")
-
-checks = (
-    ("minimum |iota|", minimum_iota, IOTA_FLOOR, "below"),
-    ("aspect ratio", final_aspect, ASPECT_LIMIT, "above"),
-    ("B.n/B RMS", normal_field_rms_final, NORMAL_FIELD_LIMIT, "above"),
-    ("minimum coil-surface distance", coil_surface_distance, COIL_SURFACE_DISTANCE_LIMIT, "below"),
-    ("minimum coil-coil distance", coil_distance, COIL_DISTANCE_LIMIT, "below"),
-    ("maximum curvature", maximum_curvature, CURVATURE_LIMIT, "above"),
-    ("beta", final_beta, TARGET_BETA * (1 - BETA_TOLERANCE), "below"),
-    ("beta", final_beta, TARGET_BETA * (1 + BETA_TOLERANCE), "above"),
-)
-unmet = [f"{name} {value:.4g} {side} the {limit:.4g} limit"
-         for name, value, limit, side in checks
-         if (value < limit if side == "below" else value > limit)]
-if not final_converged:
-    unmet.append("the ns=101 verification solve did not converge")
-if not free_check["converged"]:
-    unmet.append("the post-optimization free-boundary verification did not converge")
-else:
-    for name, value, limit, side in (
-        ("held DEL-BSQ", free_check["delbsq"], DELBSQ_LIMIT, "above"),
-        ("held boundary distance", free_check["sampled_boundary_distance_m"],
-         FREE_BOUNDARY_DISTANCE_LIMIT, "above"),
-        ("held minimum |iota|", free_check["min_abs_iota"], IOTA_FLOOR, "below"),
-        ("held aspect ratio", free_check["aspect"], ASPECT_LIMIT, "above"),
-        ("held coil-surface distance", free_check["coil_surface_distance_m"],
-         COIL_SURFACE_DISTANCE_LIMIT, "below"),
-        ("held beta", free_check["beta"], TARGET_BETA * (1 - BETA_TOLERANCE), "below"),
-        ("held beta", free_check["beta"], TARGET_BETA * (1 + BETA_TOLERANCE), "above"),
-    ):
-        if not np.isfinite(value) or (value < limit if side == "below" else value > limit):
-            unmet.append(f"{name} {value:.4g} {side} the {limit:.4g} limit")
-if unmet:
-    print("\nThis run did NOT meet its stated targets: " + "; ".join(unmet) + ".")
-    if ci_smoke:
-        print("Smoke mode caps the budget far below what the targets need; exit status 0.")
-else:
-    print("\nAll stated targets met.")
-
+beta_bounds = TARGET_BETA * (1 - BETA_TOLERANCE), TARGET_BETA * (1 + BETA_TOLERANCE)
+verdict = design_target_report(
+    metrics, free, iota_floor=IOTA_FLOOR, aspect_limit=ASPECT_LIMIT,
+    normal_field_limit=NORMAL_FIELD_LIMIT, clearance=COIL_SURFACE_DISTANCE_LIMIT,
+    coil_distance=COIL_DISTANCE_LIMIT, curvature=CURVATURE_LIMIT, beta_bounds=beta_bounds,
+    delbsq_limit=DELBSQ_LIMIT, boundary_distance_limit=FREE_BOUNDARY_DISTANCE_LIMIT)
 summary = {
-    "example": "single_stage_optimization_finite_beta.py", "smoke": ci_smoke,
+    "example": Path(__file__).name, "smoke": ci_smoke,
     "optimization_seconds": round(optimization_seconds, 1),
-    "coil_fit_iterations": int(coil_fit.nit), "trials": counts["trials"],
+    "coil_fit_iterations": int(coil_fit.nit), **joint.counts,
     "lbfgsb_iterations": int(result.nit),
-    "equilibrium_solves": monitor.records[-1].equilibrium_solves,
+    "equilibrium_solves": joint.monitor.records[-1].equilibrium_solves,
     "phiedge": float(inp.phiedge), "pres_scale": float(inp.pres_scale),
-    "free_boundary_verification": free_check,
-    "seed": seed_values,
-    "final": {**final_values, "min |iota|": minimum_iota, "aspect": final_aspect,
-              "B.n/B RMS": normal_field_rms_final, "B.n/B max": normal_field_max,
-              "coil-surface distance": coil_surface_distance,
-              "coil-coil distance": coil_distance,
-              "maximum curvature": maximum_curvature, "beta": final_beta,
-              "verification solve converged": final_converged},
-    "targets": {"min |iota| >=": IOTA_FLOOR, "aspect <=": ASPECT_LIMIT,
-                "B.n/B RMS <=": NORMAL_FIELD_LIMIT,
-                "coil-surface distance >=": COIL_SURFACE_DISTANCE_LIMIT,
-                "coil-coil distance >=": COIL_DISTANCE_LIMIT,
-                "maximum curvature <=": CURVATURE_LIMIT,
-                "held DEL-BSQ <=": DELBSQ_LIMIT,
-                "held boundary distance <=": FREE_BOUNDARY_DISTANCE_LIMIT,
-                "beta": [TARGET_BETA * (1 - BETA_TOLERANCE),
-                         TARGET_BETA * (1 + BETA_TOLERANCE)]},
-    "unmet": unmet, "met": not unmet,
+    "free_boundary_verification": free, "seed": seed_values,
+    "final": {**final_values, **metrics},
+    **verdict,
 }
 Path("single_stage_optimization_finite_beta_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-
-wout_path = vj.write_wout("wout_single_stage_finite_beta_optimized.nc", final_equilibrium.wout)
-# ESSOS writes |B| and B.n/B on the surface and the filaments for ParaView.
-surface_initial = surfacerzfourier_from_boundary(rbc0, zbs0, NFP, nphi=60, ntheta=60)
-surface_initial.to_vtk("surface_single_stage_finite_beta_initial", field=BiotSavart(coils0))
-coils0.to_vtk("coils_single_stage_finite_beta_initial")
-surface_final.to_vtk("surface_single_stage_finite_beta_optimized", field=BiotSavart(coils_final))
-coils_final.to_vtk("coils_single_stage_finite_beta_optimized")
-print(f"Wrote {input_path}\nWrote {wout_path}")
-print("Wrote coils_single_stage_finite_beta_optimized.json and single_stage_optimization_finite_beta_summary.json")
-print("Wrote initial and optimized surface/coils VTK files")
-
-print("Plotting results...")
-vj.plot_optimization_objects("single_stage_finite_beta_optimization.png",
-                             ("Initial", surface_initial, coils0),
-                             ("Optimized", surface_final, coils_final))
-monitor.save("single_stage_finite_beta_objectives.csv")
-monitor.plot("single_stage_finite_beta_objectives.png", title="Finite-beta single-stage objective terms")
-print("Wrote single_stage_finite_beta_optimization.png")
-print("Wrote single_stage_finite_beta_objectives.csv and single_stage_finite_beta_objectives.png")
-if MAKE_MOVIE:
-    print("Making movie of accepted iterates...")
-    monitor.movie_surface_coils(
-        "single_stage_finite_beta_optimization.gif", objects_from_x, x0=x0, scales=scales,
-        surface_color=MOVIE_SURFACE_COLOR, plasma_problem=plasma_problem,
-        external_field=lambda objects: coil_field(objects[1]), nphi=NPHI, ntheta=NTHETA,
-        cmap="jet")
-for path in vj.plot_wout(wout_path, ".").values():
-    print(f"Wrote {path}")
-if unmet and not ci_smoke:
+save_outputs(joint, u, equilibrium, surface, prefix=prefix,
+             make_movie=MAKE_MOVIE, surface_color=MOVIE_SURFACE_COLOR)
+if verdict["unmet"] and not ci_smoke:
     raise SystemExit(1)
