@@ -676,7 +676,6 @@ def trace_alphas(
         integrator=(f"adaptive {'Dopri8' if method == 'adaptive8' else 'Dopri5'}, tolerance {tolerance:g}"
                     if method.startswith("adaptive") else f"{method.upper()}") + " (Boozer guiding centre)",
         compact=bool(compact), boozer_modes=int(field.xm.size), spectral_truncation=truncation,
-        orbit_output_samples=min(int(times_to_trace), 101), loss_curve_samples=int(times_to_trace),
         mode_tolerance=float(mode_tolerance), mboz=int(mboz), nboz=int(nboz),
         scale_target=scale, b_scale=b_scale, r_scale=r_scale,
         volavgB=float(wout.volavgB), Aminor_p=float(wout.Aminor_p),

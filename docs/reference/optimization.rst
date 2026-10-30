@@ -613,57 +613,26 @@ spatial derivative. Third spatial derivatives and their parameter VJPs remain
 expensive; the examples print progress before each order and use compact grids
 for a bounded cold run.
 
-pwO confinement continuation
-----------------------------
+Low-transport continuation
+--------------------------
 
-``examples/optimization/pwO_optimization.py`` supports direct NEO ripple search::
+``examples/optimization/pwO_optimization.py`` starts from the bundled non-QS
+``input.low_transport`` candidate. Install ``vmex[neoclassical]`` and run::
 
-   VMEX_PWO_METHOD=confinement VMEX_PWO_POLICY=policy.json python examples/optimization/pwO_optimization.py
+   python examples/optimization/pwO_optimization.py --maxiter 10 --outdir low_transport
 
-Install ``vmex[neoclassical]`` and a NEO_JAX build supporting ``NeoConfig(reverse_mode=True)``.
-The JSON policy supplies ``input``, ``restart``, sorted ``surfaces``, optional named boundary ``parameters``
-(for example ``["RBC(0,3)", "ZBS(0,4)"]``), and optional positive ``scales`` in
-metres. Each scaled displacement is bounded to [-1, 1]. Input profiles, flux,
-R00, unselected harmonics and input axis coefficients remain fixed. This route
-requires a fixed boundary; the equilibrium axis responds to boundary changes.
-Omit ``parameters`` to vary all modes through ``max_mode``. Setting ``max_mode=8``
-raises the state resolution to at least MPOL=9, NTOR=8 and opens 288 symmetric
-coefficients; MPOL counts modes starting at zero.
+The example keeps NS35, M5/N5, force tolerance 1e-12, a 2000-iteration solver
+cap and boundary modes through 2. Implicit residual Jacobians drive bounded
+least squares with optimizer ``ftol=1e-3`` and a local bound of 0.005 m times
+the ESS scale. A mapped-field proxy is combined only with aspect and signed-iota
+residuals; full-surface field bounds are hard acceptance checks. No symmetry,
+magnetic-well or maximum-J term is required.
 
-``training`` and ``validation`` are nonempty lists of ``PwOActionFamilies``
-constructor dictionaries: ``reference`` (an NPZ path or spectrum mapping),
-``charts`` and ``length``. References identify exact selected half-mesh surfaces.
-Supply independently discovered families and withheld pitches; local chart
-continuation does not discover new families. Physical Tesla levels remain fixed.
-Each family's sampled action range uses its fixed reference mean, with default
-``family_rtol=0`` allowing no increase. Its alpha span must retain at least half
-its baseline value. These are conservative search guards, not pwO identities.
-
-The default ``optimizer="adjoint"`` uses a scalar equilibrium adjoint and bounded
-L-BFGS-B, with ``local_calls=32`` limiting evaluated candidates. Its loss is the weighted mean of
-``epsilon_eff**(3/2)``, normalized by the seed's fixed weighted mean.
-Optional ``weights`` correspond to the complete, unchanged surface list.
-Squared violations of geometry, action-range and span limits carry weight 10.
-Live Boozer geometry, iota, G/I and implicitly differentiated bounce roots feed
-the loss. Host action/quadrature checks apply at each evaluated candidate;
-Two boundary differences on the adjoint's fixed residual and m=1 gauge must agree
-within 2% plus 1e-6 absolute, with frozen Newton residuals below 1e-12.
-Discrete family discovery and acceptance remain independent checks.
-``optimizer="derivative_free"`` retains differential evolution (``global_steps=2``,
-``global_calls=32``) followed by Nelder-Mead (at least D+1 ``local_calls``).
-
-Acceptance re-solves both boundaries with ``check_resolution=[ns,mpol,ntor,ntheta,nzeta]``
-(default: three times as many radial intervals and increased angular resolution),
-increases ``band`` from 32 to ``check_band=40``, doubles NEO pitch/spatial sampling,
-and tightens rational sampling. Actual surfaces must stay identical. The gain
-must exceed the observed resolution changes and pass the validation-family guards.
-A separate eight-alpha well census at the validation pitches checks root refinement,
-complete wells and correspondence with the refined seed; unresolved changes reject
-the candidate. This finite census does not prove global topology.
-The summary retains rejected trials and raw per-surface ripple. ``*_candidate``
-files are provisional; unsuffixed outputs are written only after acceptance.
-Acceptance is a finite numerical screen, not a full-pwO certificate. Independently
-check orbit census, additional surfaces/pitches and transport before promotion.
+The output contains the incumbent and trial WOUTs, ``input.trial`` and an
+iteration summary. A matched NEO screen requires improvement at every sampled
+radius and at least 1% in their mean. It never replaces the bundled candidate.
+Passing this coarse screen still requires finer equilibrium/NEO calculations
+and fresh particle tracing. The mapped residual does not certify pwO.
 
 Resources and reproducibility
 -----------------------------

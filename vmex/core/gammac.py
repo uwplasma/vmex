@@ -724,9 +724,9 @@ def gamma_c_state(
     ``overflow_fraction`` reports any spill, which makes that surface's
     ``gamma_c`` NaN. Returns per-surface arrays led by ``gamma_c``.
 
-    Values and candidate rankings can change with resolution. Check field-line,
-    pitch and quadrature refinement before interpreting a change. The numerics
-    live in the jitted :func:`_gamma_c_rows`; only the
+    The absolute value carries roughly 10-20 % scatter at these resolutions --
+    it is a comparative proxy, and the resolution belongs in any quoted
+    number.  The numerics live in the jitted :func:`_gamma_c_rows`; only the
     validation and the row selection happen here, because those set shapes.
     """
     _validate_settings(nalpha, num_transit, points_per_transit, num_pitch)

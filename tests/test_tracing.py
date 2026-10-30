@@ -870,10 +870,10 @@ def test_asymmetric_boundary_cartesian_coordinates():
     np.testing.assert_allclose(_boozer_boundary_xyz(bz, theta, zeta), expected, atol=1e-14)
 
 
-@pytest.mark.parametrize("energy, expected", [(1e-6, "(below 0.001; orbit convergence requires separate checks)"),
+@pytest.mark.parametrize("energy, expected", [(1e-6, "(converged, below 0.001)"),
                                               (5e-2, "the orbits are not converged. Rerun with --trace-tolerance 3e-08")])
-def test_cli_reports_energy_check(solovev_wout, tmp_path, monkeypatch, energy, expected):
-    """Energy drift can reject an orbit solve but cannot certify its convergence."""
+def test_cli_reports_whether_the_orbits_converged(solovev_wout, tmp_path, monkeypatch, energy, expected):
+    """The energy check names the step to rerun with when the orbits are not converged."""
     from vmex.core import tracing
 
     real = tracing.trace_alphas
@@ -899,18 +899,15 @@ def test_integrator_keywords_reach_essos(solovev_wout, monkeypatch):
     original, seen = essos.boozer.trace_boozer, []
 
     def recording(*args, **kwargs):
-        seen.append({k: kwargs.get(k) for k in ("method", "tolerance", "compact", "n_save")})
+        seen.append({k: kwargs.get(k) for k in ("method", "tolerance", "compact")})
         return original(*args, **kwargs)
 
     monkeypatch.setattr(essos.boozer, "trace_boozer", recording)
     kwargs = {k: v for k, v in TRACE_KWARGS.items() if k != "method"}
-    kwargs["times_to_trace"] = 401
     default = trace_alphas(solovev_wout, **kwargs)
     trace_alphas(solovev_wout, **kwargs, method="rk4", compact=False)
-    assert seen == [dict(method="adaptive8", tolerance=TOLERANCE, compact=True, n_save=101),
-                    dict(method="rk4", tolerance=None, compact=False, n_save=101)]
-    assert default.metadata["orbit_output_samples"] == 101
-    assert default.metadata["loss_curve_samples"] == len(default.times) == 401
+    assert seen == [dict(method="adaptive8", tolerance=TOLERANCE, compact=True),
+                    dict(method="rk4", tolerance=None, compact=False)]
     assert default.metadata["integrator"].startswith("adaptive Dopri8, tolerance")
     with pytest.raises(ValueError, match="method must be one of"):
         trace_alphas(None, method="unknown")

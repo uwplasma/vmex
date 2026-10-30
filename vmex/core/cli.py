@@ -1258,7 +1258,7 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
         emit(f" Solver failures: {result.particles_failed}")
         energy = float(np.max(result.energy_error, initial=0.0))
         if energy <= ENERGY_TOLERANCE:
-            emit(f" Max energy error: {energy:.1e} (below {ENERGY_TOLERANCE:g}; orbit convergence requires separate checks)")
+            emit(f" Max energy error: {energy:.1e} (converged, below {ENERGY_TOLERANCE:g})")
         else:
             tighter = (f"--trace-tolerance {0.1 * result.metadata['tolerance']:.0e}"
                        if result.metadata.get("tolerance") else

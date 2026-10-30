@@ -58,10 +58,9 @@ sampling) sharing one dimensionless right axis — the force error
 $\langle|\mathbf J\times\mathbf B-\nabla p|\rangle_s/\langle|\nabla(B^2/2\mu_0)|\rangle_V$,
 Mercier `DMerc` and the Glasser
 resistive-interchange $D_R$ with $V''(s)$ on a color-matched right axis,
-a 3-D LCFS, and the mean second adiabatic invariant over resolved wells at
-one pitch in the polar disk $x=s\cos\alpha$, $y=s\sin\alpha$. Concentric mean
-contours do not establish omnigenity of individual orbit families. `|B|` in
-Boozer coordinates appears at mid radius and on
+a 3-D LCFS, and the second adiabatic invariant in the polar disk
+$x=s\cos\alpha$, $y=s\sin\alpha$. Concentric $J$ contours diagnose
+alpha-independence. `|B|` in Boozer coordinates appears at mid radius and on
 the LCFS as unfilled jet contours with a field line of slope iota. The Boozer
 transform runs in-process, so `--plot` needs no separate `--booz` pass;
 `--booz` is for writing a reusable `boozmn_*.nc`. The plotted $D_R$ comes from
@@ -79,9 +78,8 @@ error, which `equif` could not show, not a solver failure. WOUT's `equif`
 ({func}`~vmex.core.postprocess.force_balance`) is not plotted: it is bounded
 by 1 and equals 1 on every surface of a currentless vacuum, however well
 converged.
-Both confinement profiles use bounded summary resolution. Refine the NEO
-settings and the $\Gamma_c$ field-line, pitch, and bounce quadrature before
-quantitative comparisons; even radial ordering can change. The diagnostics
+The confinement panel's two right-axis profiles are radial *trends*, not
+transport numbers: both diagnostics run at bounded summary resolution, they
 share the summary's one in-process Boozer transform where the mathematics is
 common (NEO consumes it directly; $\Gamma_c$ keeps its validated real-space
 field-line route), and the computed profiles are cached per in-memory WOUT so

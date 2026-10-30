@@ -901,11 +901,13 @@ def _boozer_summary_data(
 # Confinement summary (effective ripple + Gamma_c) with a bounded cache
 # ==========================================================================
 
-#: Bounded summary sampling. Refine field-line, pitch, and bounce quadrature
-#: before quantitative comparisons; this budget does not guarantee convergence.
+#: Compact ``Gamma_c`` sampling for the summary trend panel — radial ordering
+#: quality, not publication numbers (the ``diagnostic_neo_config`` analogue;
+#: the value carries the resolution scatter documented in
+#: :func:`vmex.core.gammac.gamma_c_state`).
 _GAMMA_C_DIAGNOSTIC = dict(
-    nalpha=9, num_transit=4, points_per_transit=128, num_pitch=32,
-    quadrature_order=32)
+    nalpha=5, num_transit=3, points_per_transit=48, num_pitch=16,
+    quadrature_order=16)
 
 #: Radial targets of the summary ``Gamma_c`` profile (snapped to distinct
 #: interior full-mesh rows of the WOUT grid).
@@ -1358,7 +1360,7 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     levels = np.linspace(float(periodic.min()), float(periodic.max()), 15)
     filled = ax.contourf(x, y, periodic, levels=levels, cmap=_CMAP_J, extend="both")
     ax.contour(x, y, periodic, levels=levels, colors="0.25", linewidths=0.35, alpha=0.65)
-    fig.colorbar(filled, ax=ax, pad=0.02, label=r"$\langle J\rangle_{\mathrm{wells}}\,/\,(v R_0)$")
+    fig.colorbar(filled, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
     radius = max(1.0, float(np.max(j_info["s_b"])))
     ax.axhline(0.0, color="white", linewidth=0.6, alpha=0.75)
     ax.axvline(0.0, color="white", linewidth=0.6, alpha=0.75)
@@ -1366,7 +1368,7 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(r"$s\cos\alpha$"); ax.set_ylabel(r"$s\sin\alpha$")
     ax.set_title(
-        "well-averaged second invariant\n"
+        "second adiabatic invariant\n"
         rf"$1/\lambda={j_info['pitch_inverse']:.3g}$ T")
 
 
@@ -1648,7 +1650,7 @@ def _summary_figure(
         # and Gamma_c sharing the dimensionless right axis.
         _profile_panel(
             axes[0, 1], s, 1.0e-3 * np.asarray(wout.presf, dtype=float),
-            xlabel=_S_LABEL, ylabel=r"$p$ [kPa]", title="pressure and confinement\n(compact diagnostics)",
+            xlabel=_S_LABEL, ylabel=r"$p$ [kPa]", title="pressure and confinement",
             color=_LINE_COLORS[1],
         )
         axes[0, 1].lines[0].set_label(r"$p$")
