@@ -223,7 +223,18 @@ def main(input_file=None, outdir=Path("low_transport"), maxiter=MAX_ITERATIONS, 
         if key in cached:
             return cached[key]
         r = np.asarray(problem.residual(y))
-        eq = problem.equilibrium_from_x(y)
+        try:
+            eq = problem.equilibrium_from_x(y)
+        except RuntimeError as error:
+            if (str(error) != "decision vector did not produce a usable VMEC equilibrium"
+                    or not np.isfinite(r).all()):
+                raise
+            history.append(dict(evaluation=len(history), cost=.5*float(r@r),
+                                feasible=False, error=str(error)))
+            cached[key] = r
+            save()
+            print(f"evaluation {len(history)-1}: unusable equilibrium, rejected", flush=True)
+            return r
         recomputed, fields = diagnostics(eq.state, eq.runtime)
         if not np.allclose(r, np.asarray(recomputed), rtol=1e-8, atol=1e-10):
             raise RuntimeError("Exported equilibrium does not reproduce the optimized residual")

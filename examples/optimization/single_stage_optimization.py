@@ -408,8 +408,11 @@ u = coil_fit.x
 vj.FunctionProblem.from_functions(u, value_and_grad=value_and_grad).compile_value_and_gradient(
     report_interval=10.0)
 initial_value = monitor.records[0].cost
+boundary_bound = .25 if low_transport and warm_start else PARAMETER_BOUND
+coil_bound_center = coil_fit.x[n_boundary:] if low_transport and warm_start else np.zeros(x_coils0.size)
 result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", callback=monitor,
-                  bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size,
+                  bounds=[(-boundary_bound, boundary_bound)] * n_boundary
+                         + [(c-PARAMETER_BOUND, c+PARAMETER_BOUND) for c in coil_bound_center],
                   options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
                            "maxls": 20, "ftol": 1e-3 if low_transport else 1e-12, "gtol": 1e-8})
 u, final_value = result.x, float(result.fun)
@@ -551,6 +554,10 @@ summary = {
     "input": str(INPUT_FILE),
     "initial_objective": initial_value, "final_objective": final_value,
     "boundary_change_norm": float(np.linalg.norm(x_final[:n_boundary]-x_boundary0)),
+    "max_boundary_coefficient_change_m": float(np.max(np.abs(x_final[:n_boundary]-x_boundary0))),
+    "max_coil_coefficient_change_m": float(np.max(np.abs((scales * (u-coil_fit.x))[n_boundary:]))),
+    "active_boundary_bounds": int(np.isclose(np.abs(u[:n_boundary]), boundary_bound).sum()),
+    "active_coil_bounds": int(np.isclose(np.abs(u[n_boundary:]-coil_bound_center), PARAMETER_BOUND).sum()),
     "coil_change_norm": float(np.linalg.norm((scales * (u-coil_fit.x))[n_boundary:])),
     "coil_fit_iterations": int(coil_fit.nit), "trials": counts["trials"],
     "rejected_trials": counts["rejected"],
