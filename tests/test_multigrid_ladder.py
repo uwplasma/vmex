@@ -630,3 +630,45 @@ def test_hot_restart_25pct_target():
     inp2 = dataclasses.replace(inp, rbc=rbc)
     hot = solver.solve(inp2, ftol=1e-14, initial_state=base.state)
     assert hot.converged and hot.iterations < 0.25 * base.iterations
+
+
+def test_bad_jacobian_soft_restarts_recover_without_retry_budget() -> None:
+    """irst=2: restore the stored state, shrink DELT, and still converge.
+
+    solovev at DELT=10 (20x the stable step) hits the bad-Jacobian restart
+    path repeatedly (< 75 resets, so no JAC75 abort) with the outer retry off;
+    the equilibrium is the DELT=0.5 one to the ftol scale.
+    """
+    import dataclasses
+
+    base = dataclasses.replace(
+        _load_input("solovev"), lforbal=True, ns_array=np.asarray([11]),
+        ftol_array=np.asarray([1.0e-7]), niter_array=np.asarray([500]),
+        delt=0.5)
+    ref = multigrid.solve_multigrid(base, device="cpu", jacobian_retries=0)
+    assert ref.jacobian_resets == 0
+    got = multigrid.solve_multigrid(
+        dataclasses.replace(base, delt=10.0), device="cpu", jacobian_retries=0)
+    assert 0 < got.jacobian_resets < 75 and got.converged
+    assert got.time_step < 10.0
+    assert got.wb == pytest.approx(ref.wb, rel=1e-5)
+
+
+def test_ladder_gives_up_with_more_iter_status_not_silently() -> None:
+    """An exhausted last stage raises ier=2 (or reports unconverged); no silent success.
+
+    Non-final exhausted rungs hand their xc to the next rung (VMEC2000); the
+    early-exit switches LGIVEUP/FGIVEUP are refused at parse time.
+    """
+    from vmex.core.errors import MORE_ITER_FLAG, VmecConvergenceError
+    from vmex.core.input import UnsupportedInputModeError
+
+    inp = _load_input("cth_like_fixed_bdy")
+    kw = dict(ns_array=[5, 9], ftol_array=[1e-8, 1e-10], niter_array=[5, 5])
+    with pytest.raises(VmecConvergenceError) as exc:
+        multigrid.solve_multigrid(inp, **kw)
+    assert exc.value.ier_flag == MORE_ITER_FLAG and exc.value.iteration == 5
+    soft = multigrid.solve_multigrid(inp, raise_on_max_iterations=False, **kw)
+    assert not soft.converged and soft.iterations == 5
+    with pytest.raises(UnsupportedInputModeError):
+        VmecInput.from_indata_text("&INDATA\nLGIVEUP = T\nFGIVEUP = 3.0\n/\n")

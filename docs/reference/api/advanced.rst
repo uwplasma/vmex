@@ -162,6 +162,9 @@ that the objective modules share live in one place and are re-exported by
 .. automodule:: vmex.core.omnigenity
    :members:
 
+.. automodule:: vmex.core.aot
+   :members:
+
 .. automodule:: vmex.core.bounce
    :members:
 
