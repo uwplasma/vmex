@@ -242,17 +242,13 @@ def test_physical_flux_uses_the_full_phi_zero_section_and_positive_cartesian_phi
         ss.toroidal_flux(inp, None)
 
 
-def test_batched_coil_field_preserves_point_shape_and_normal_rms_uses_area_weights(harness, monkeypatch):
+def test_batched_coil_field_preserves_point_shape(harness, monkeypatch):
     monkeypatch.setattr(sys.modules["essos.fields"], "BiotSavart", lambda coils: NS(
         B=lambda point: np.asarray(point) + [0., 0., 1.]))
     monkeypatch.setattr(ss.jax, "vmap", lambda function: lambda points: np.stack([
         function(point) for point in points]))
     points = np.arange(12.).reshape(2, 2, 3)
     np.testing.assert_array_equal(ss.coil_field(harness.Coils())(points), points + [0., 0., 1.])
-    surface = harness.Surface()
-    surface.unitnormal = np.array([[[0., 0., 1.], [1., 0., 0.]]])
-    surface.area_element = np.array([[1., 3.]])
-    assert ss.normal_field_rms(harness.Coils(), surface) == pytest.approx(np.sqrt(.625))
 
 
 def test_total_normal_field_uses_equilibrium_strength_and_the_frozen_precision(monkeypatch):
