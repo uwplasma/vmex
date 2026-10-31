@@ -663,13 +663,13 @@ Boundary modes 1 then 2 share NS35, M5/N5, force tolerance 1e-12 and a
 2000-iteration solver cap. Bounded least squares uses implicit residual
 Jacobians, optimizer ``ftol=1e-3`` and 15 iterations per stage.
 
-The mapped-field residual is combined with aspect ratio 6, a signed-iota
+The pwO residual is combined with aspect ratio 6, a signed-iota
 floor of 0.42 and mirror ratio below 0.2. The mirror penalty targets 0.18;
 no symmetry or magnetic-well penalty is used. Live B00 normalization replaces
 reference-field arrays, and an automatic initial cost scale sets the term weight.
 Three equally spaced requests are snapped to actual VMEC half-mesh radii.
 The fixed map and cut are described in
-:ref:`confinement-mapped-pwo`; the name does not certify piecewise omnigenity.
+:ref:`confinement-mapped-pwo`.
 
 The vacuum run writes seed/trial WOUTs, ``input.trial`` and iteration history
 to ``low_transport/``. ``input.trial`` and ``wout_trial.nc`` retain the
@@ -694,7 +694,7 @@ NFP2 continuation improves coarse mean Q by 26.6% in three iterations.
 Finite-beta particle confinement and MHD stability remain unverified.
 
 ``single_stage_optimization_pwO.py`` first fits coils to the fixed plasma,
-then adds the mapped residual to the joint boundary/coil objective. Coil
+then adds the pwO residual to the joint boundary/coil objective. Coil
 length, curvature and distances are normalized by the seed minor radius;
 dense geometry sampling checks constraints between field quadrature nodes.
 It requires ``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold
@@ -729,7 +729,7 @@ The main entry points are :func:`vmex.core.optimize.make_problem`,
 
 ESSOS supplies coil curves, Biot–Savart fields and integrated distance penalties.
 ``vmex.core.single_stage`` shares the VMEX adjoint and verification workflow
-between the QA and mapped-field examples. Its normalized geometry option
+between the QA and pwO examples. Its normalized geometry option
 penalizes the worst sampled gap and curvature; ESSOS's integrated losses use
 a different measure. Length is an upper bound here; ESSOS's length loss instead
 penalizes deviations on both sides of its target. The flux quadrature retains VMEC's

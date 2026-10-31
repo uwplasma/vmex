@@ -772,8 +772,8 @@
     },
     {
       "path": "docs/_static/figures/readme_low_transport.webp",
-      "sha256": "c9d755bf6f24636c37b7e411adb466f2d0bd217ed0d05b50b37c91074bfd099a",
-      "bytes": 73140,
+      "sha256": "74bf9bec1e7915ce32421c6a8337e6594d6ff4d648774effbae0d003899ee3ff",
+      "bytes": 71544,
       "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
       "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
       "inputs": [],
@@ -806,8 +806,8 @@
     },
     {
       "path": "docs/_static/figures/readme_low_transport_comparison.webp",
-      "sha256": "2db758a0880f5026fb5aac61ba807d337618859d0d536bc441fb3770a7b86458",
-      "bytes": 30826,
+      "sha256": "d5d24f34adeb1541c97196182a68ecc5553343a605936d2afb3b422c731175ab",
+      "bytes": 42738,
       "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
       "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
       "inputs": [],
@@ -820,6 +820,23 @@
         "README.md"
       ],
       "note": "Available matched NEO and particle comparisons from qualification/summary.json; unfinished cases are labeled."
+    },
+    {
+      "path": "docs/_static/figures/readme_low_transport_coils.webp",
+      "sha256": "1b1bbfd76be35555521346a267e0fdeba6d5616c456caa0f6bcb58421ea64f35",
+      "bytes": 82224,
+      "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
+      "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-10-31",
+      "hardware": null,
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Four-period pwO vacuum boundary and fitted ESSOS coils. Requires the private qualification directory and sibling stage2/a6-relaxed/n2_L7_w100 and mapped/mirror-nfp4 evidence. Cold free-boundary verification uses the same coil set."
     }
   ]
 }

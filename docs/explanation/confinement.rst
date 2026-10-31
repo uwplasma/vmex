@@ -209,8 +209,8 @@ nfp1–nfp4 decks in ``examples/data/``.
 
 .. _confinement-mapped-pwo:
 
-Mapped contour variance
-~~~~~~~~~~~~~~~~~~~~~~~
+pwO contour variance
+~~~~~~~~~~~~~~~~~~~~
 
 The squeezed poloidal-omnigenity map of `Liu et al. (2026)
 <https://arxiv.org/abs/2603.12139v1>`_ motivates
@@ -254,9 +254,7 @@ There is no Jacobian weight, so this is neither a physical-area nor a bounce-tim
 average. Requested surfaces can be equally spaced; Boozer evaluation uses the
 nearest VMEC half-mesh surfaces and reports their actual radii.
 
-Call the workflow **mapped-field low-transport optimization**. It is inspired by
-the PO–pwO construction, but the class name identifies the map, not a certified
-property of an optimized equilibrium. In `Velasco et al. (2024)
+The **pwO optimization** uses the PO–pwO contour construction. In `Velasco et al. (2024)
 <https://arxiv.org/abs/2405.07634v2>`_, pwO requires field-line-independent action
 within each well class and compatible transitions between classes. These
 conditions need independent checks; a low contour-fit residual is insufficient.

@@ -6,7 +6,7 @@
 Read WOUT, Boozer, NEO and particle outputs from a qualification directory.
 No simulation or transport dataset is stored in this repository. Use
 --evidence /path/to/qualification to reproduce the retained comparison.
-Rendering needs NumPy, Matplotlib, Pillow and SciPy.
+Rendering needs NumPy, Matplotlib, Pillow, SciPy and ESSOS.
 """
 from pathlib import Path
 import argparse
@@ -22,13 +22,11 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 OUT = HERE.parent / "readme_low_transport.webp"
 NAMES = ("seed2", "mapped2")
-LABELS = ("Near-circular seed", "Optimized")
+LABELS = ("Near-circular seed", "pwO")
 COLORS = ("#566a79", "#c56627")
 
 
 def extract(root):
-    from scipy.io import netcdf_file
-
     arrays, hashes = {}, {}
 
     def source(relative):
@@ -48,24 +46,23 @@ def extract(root):
             arrays[f"loss_times{i}"], arrays[f"weights{i}"] = z["loss_times"], z["weights"]
             arrays[f"births{i}"] = z["births"]
     assert np.array_equal(arrays.pop("births0"), arrays.pop("births1"))
-    with netcdf_file(source("mapped2/wout.nc"), mmap=False) as f:
-        for key in ("rmnc", "zmns"):
-            arrays[key] = f.variables[key].data[-1].copy()
-        for key in ("xm", "xn"):
-            arrays[key] = f.variables[key].data.copy()
-        arrays["edge_B"] = 1.5*f.variables["bmnc"].data[-1].copy()-.5*f.variables["bmnc"].data[-2].copy()
-        arrays["m_B"] = f.variables["xm_nyq"].data.copy()
-        arrays["n_B"] = f.variables["xn_nyq"].data.copy()
+    arrays.update(boundary_data(source("mapped2/wout.nc")))
     arrays["source_sha256"] = np.array(json.dumps(hashes, sort_keys=True))
     return arrays
 
 
-def draw(z):
-    plt.rcParams.update({"font.size": 10, "axes.titlesize": 11, "axes.labelsize": 10,
-                         "legend.fontsize": 9, "font.family": "DejaVu Sans"})
-    fig = plt.figure(figsize=(12, 6.3), dpi=150, layout="constrained")
-    grid = fig.add_gridspec(2, 3, height_ratios=(1.12, 1))
-    boundary = fig.add_subplot(grid[0, 0], projection="3d")
+def boundary_data(path):
+    from scipy.io import netcdf_file
+
+    with netcdf_file(path, mmap=False) as f:
+        z = {key: f.variables[key].data[-1].copy() for key in ("rmnc", "zmns")}
+        z.update({key: f.variables[key].data.copy() for key in ("xm", "xn")})
+        z["edge_B"] = 1.5*f.variables["bmnc"].data[-1].copy()-.5*f.variables["bmnc"].data[-2].copy()
+        z["m_B"], z["n_B"] = (f.variables[k].data.copy() for k in ("xm_nyq", "xn_nyq"))
+    return z
+
+
+def draw_boundary(fig, boundary, z):
     theta, phi = np.meshgrid(np.linspace(0, 2*np.pi, 65), np.linspace(0, 2*np.pi, 193))
     phase = theta[..., None]*z["xm"]-phi[..., None]*z["xn"]
     R = np.sum(z["rmnc"]*np.cos(phase), axis=-1)
@@ -78,9 +75,18 @@ def draw(z):
     fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap="viridis"), ax=boundary,
                  orientation="horizontal", shrink=.65, pad=0, label="|B| [T]")
     boundary.set_box_aspect((np.ptp(X), np.ptp(Y), np.ptp(Z)))
+
+
+def draw(z):
+    plt.rcParams.update({"font.size": 10, "axes.titlesize": 11, "axes.labelsize": 10,
+                         "legend.fontsize": 9, "font.family": "DejaVu Sans"})
+    fig = plt.figure(figsize=(12, 6.3), dpi=150, layout="constrained")
+    grid = fig.add_gridspec(2, 3, height_ratios=(1.12, 1))
+    boundary = fig.add_subplot(grid[0, 0], projection="3d")
+    draw_boundary(fig, boundary, z)
     boundary.view_init(elev=35, azim=-45)
     boundary.set_axis_off()
-    boundary.set_title(f"Optimized vacuum boundary, nfp = {int(z['nfp'])}", pad=0)
+    boundary.set_title(f"pwO vacuum boundary, nfp = {int(z['nfp'])}", pad=0)
 
     theta, zeta = np.meshgrid(np.linspace(0, 2*np.pi, 161),
                               np.linspace(0, 2*np.pi/int(z["nfp"]), 161), indexing="ij")
@@ -159,17 +165,19 @@ def comparisons(root):
     save(fig, OUT.with_name("readme_low_transport_nfp.webp"))
 
     data = json.loads((root / "summary.json").read_text())["cases"]
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6), dpi=150)
-    fig.subplots_adjust(left=.07, right=.98, top=.86, bottom=.3, wspace=.25)
+    fig, axes = plt.subplots(3, 1, figsize=(9, 11), dpi=150)
+    fig.subplots_adjust(left=.12, right=.98, top=.95, bottom=.20, hspace=.34)
     handles, labels, missing = [], [], []
     for name, label in (("seed4", "Seed4"), ("QA", "QA4"), ("QH", "QH4"),
-            ("QP", "QP4"), ("QI", "QI4"), ("mapped4", "Mapped4"),
-            ("seed2", "Seed2"), ("QA_nfp2", "QA2"), ("mapped2", "Mapped2")):
+            ("QP", "QP4"), ("QI", "QI4"), ("mapped4", "pwO4"),
+            ("seed2", "Seed2"), ("QA_nfp2", "QA2"), ("mapped2", "pwO2")):
         row = data.get(name, {})
         if not row.get("Q"):
             missing.append(label+": transport and particles"); continue
         line, = axes[0].semilogy(row["actual_s"], np.array(row["Q"])**(2/3), "o-", label=label)
         handles.append(line); labels.append(label)
+        iota = row["refined_equilibrium"]["full_signed_iota"]
+        axes[2].plot(np.linspace(0, 1, len(iota)), iota, color=line.get_color())
         particle = row.get("particles", {})
         if particle.get("status") == "completed":
             axes[1].plot(1000*np.array(particle["times_s"]), 100*np.array(particle["weighted_loss_curve"]),
@@ -178,14 +186,39 @@ def comparisons(root):
             missing.append(label+": particles")
     axes[0].set(xlabel="Normalized toroidal flux s", ylabel=r"Effective ripple $\epsilon_{\rm eff}$")
     axes[1].set(xlabel="Time [ms]", ylabel="Weighted alpha loss [%]", xlim=(0, 10), ylim=(-2, 103))
+    axes[2].axhline(.41, color="black", ls=":", lw=1, label="Iota floor")
+    axes[2].set(xlabel="Normalized toroidal flux s", ylabel=r"Rotational transform $\iota$")
+    axes[2].legend(frameon=False, loc="upper right")
     for ax in axes:
         ax.grid(alpha=.2)
         ax.spines[["top", "right"]].set_visible(False)
-    fig.suptitle("Transport and particle confinement at aspect ratio 6", fontsize=14)
-    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(.5, .13), ncol=5, frameon=False)
-    fig.text(.5, .08, "256 paired 3.52 MeV alphas; s=0.5; volume-RMS B=6 T; minor radius=1.7 m", ha="center")
-    fig.text(.5, .04, "Not completed: "+"; ".join(missing), ha="center", fontsize=9)
+    fig.suptitle("pwO and symmetry controls at aspect ratio 6", fontsize=14)
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(.5, .085), ncol=5, frameon=False)
+    fig.text(.5, .055, "256 paired 3.52 MeV alphas; s=0.5; volume-RMS B=6 T; minor radius=1.7 m", ha="center")
+    fig.text(.5, .025, "Not completed: "+"; ".join(missing), ha="center", fontsize=9)
     save(fig, OUT.with_name("readme_low_transport_comparison.webp"))
+
+
+def coil_figure(root):
+    """Render the accepted ESSOS coil set and its fixed-boundary target."""
+    from essos.coils import Coils
+
+    coils = Coils.from_json(str(root.parent / "stage2/a6-relaxed/n2_L7_w100/coils.json"))
+    coils.n_segments = 384
+    curves = np.asarray(coils.gamma)
+    z = boundary_data(root.parent / "mapped/mirror-nfp4/low_transport/wout_trial.nc")
+    fig = plt.figure(figsize=(10, 5.5), dpi=150, layout="constrained")
+    for index, (elevation, azimuth) in enumerate(((35, -45), (90, 0)), 1):
+        ax = fig.add_subplot(1, 2, index, projection="3d")
+        draw_boundary(fig, ax, z)
+        for curve in curves:
+            curve = np.concatenate((curve, curve[:1]))
+            ax.plot(*curve.T, color="#b65c32", lw=1.1)
+        ax.set_box_aspect(np.ptp(curves.reshape(-1, 3), axis=0))
+        ax.view_init(elev=elevation, azim=azimuth)
+        ax.set_axis_off()
+    fig.suptitle("pwO4: two unique coils · normal-field RMS 0.674%\nCold free boundary: 4.4 mm from target", fontsize=12)
+    save(fig, OUT.with_name("readme_low_transport_coils.webp"))
 
 
 if __name__ == "__main__":
@@ -194,3 +227,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     draw(extract(args.evidence))
     comparisons(args.evidence)
+    coil_figure(args.evidence)

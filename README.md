@@ -279,17 +279,16 @@ maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
 ![Two-period boundary colored by magnetic-field strength, Boozer contours, transport and alpha losses](docs/_static/figures/readme_low_transport.webp)
 
-**Mapped-field optimization** shapes the magnetic wells without imposing quasisymmetry.
+**pwO optimization** shapes the magnetic wells without imposing quasisymmetry.
 It minimizes the variation of |B| along contours of a squeezed omnigenous mapping,
 following the [PO–pwO construction](https://arxiv.org/abs/2603.12139v1):
 
 $$
-f_{\mathrm{map}}=\sum_s \frac{w_s}{B_{00,s}^{2}}\left\langle\operatorname{Var}_{\gamma} B_s(\gamma,\eta)\right\rangle_{\eta}.
+f_{\mathrm{map}}=\sum_s \frac{w_s}{B_{00,s}^{2}}\left\langle\mathrm{Var}_{\gamma} B_s(\gamma,\eta)\right\rangle_{\eta}.
 $$
 
 The mean field B₀₀ supplies the normalization. Aspect ratio 6, finite rotational
 transform and a mirror limit keep the search away from weak-transform or extreme-mirror solutions.
-The resulting fields are non-QS; piecewise omnigenity has not been established.
 
 The two-period result lowers $Q = \epsilon_{\mathrm{eff}}^{3/2}$ by **52.6%** and alpha losses from **100% to 6.73%**.
 The particle comparison uses 256 paired 3.52 MeV alphas over 10 ms at a common
@@ -304,22 +303,24 @@ volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lower
 | 3 | 6.001 | 0.442 | Coarse mean Q +191%; rejected |
 | 4 | 6.001 | 0.438 | Refined mean Q −27.5% |
 
-![Effective ripple and alpha losses compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
+![Effective ripple, alpha losses and iota profiles compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
 
-QH4 and QA2 have lower effective ripple. The mapped two-period field loses fewer alphas
+QH4 and QA2 have lower effective ripple. The pwO two-period field loses fewer alphas
 than QA2 (6.73% versus 24.12%); its difference from QH4 (7.97%) is unresolved within
 sampling uncertainty. All candidates target the same aspect ratio and iota floor;
-actual transforms differ, and only the mapped runs impose the mirror ceiling.
-
-Two unique coils reproduce the four-period vacuum boundary with 0.674% normal-field
-RMS error; a cold free-boundary solve stays within 4.4 mm of the target.
-The two-period finite-beta coil fit still misses its field-error limits and stops before joint optimization.
+actual transforms differ, and only the pwO runs impose the mirror ceiling.
 
 Examples: [vacuum](examples/optimization/pwO_optimization.py),
 [finite beta](examples/optimization/pwO_optimization_finite_beta.py),
 [single stage](examples/optimization/single_stage_optimization_pwO.py).
 [Physics](docs/explanation/confinement.rst) · [workflow](docs/reference/optimization.rst) ·
 [figure generator](docs/_static/figures/sources/make_low_transport_figure.py).
+
+![Four-period pwO boundary colored by magnetic-field strength and fitted coils](docs/_static/figures/readme_low_transport_coils.webp)
+
+Two unique coils reproduce the four-period vacuum boundary with 0.674% normal-field
+RMS error; a cold free-boundary solve stays within 4.4 mm of the target.
+The two-period finite-beta coil fit still misses its field-error limits and stops before joint optimization.
 
 ### Free boundary with coils
 
