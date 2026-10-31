@@ -133,8 +133,8 @@ that research budget as one commented set of constants next to the default.
   values by stiff quadratic rows, in two `max_mode` stages of scaled L-BFGS-B.
   An eigensolve that does not converge makes the objective non-finite, so it is
   rejected rather than scored low. It re-solves the initial and final boundaries
-  at ns = 91 and recomputes every family at higher bandwidth with fresh
-  eigensolves. The run takes hours; the smoke pass only shows that it executes.
+  at ns = 91 and recomputes every family there with fresh eigensolves at the
+  same bandwidth. The run takes hours; the smoke pass only shows that it executes.
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
   constraint is a quadratic penalty and the optimizer is one bounded L-BFGS-B
