@@ -696,7 +696,7 @@ vacuum driver automates this construction when ``NFP=1``; its NFP3
 path uses the same step control after a native three-period QA precursor.
 The NFP3 refined mean Q falls 87.2%, with paired losses down from 100% to
 26.8%. Fresh public runs changing only NFP completed in 562 s (NFP1) and
-516 s (NFP3), each below 3 GiB on eight logical CPUs on office.
+516 s (NFP3), each below 3 GiB on eight logical CPUs.
 
 Continue the saved vacuum shape to finite pressure with::
 
