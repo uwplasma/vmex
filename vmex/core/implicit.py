@@ -599,6 +599,23 @@ def _params_committed_device(params: ImplicitParams):
     return devices.pop() if devices else None
 
 
+def _concrete_build():
+    """Context for building a cached host table: concrete even under a trace.
+
+    The first call of a memoized builder can arrive inside an outer
+    ``jax.jit`` (``jit(value_and_grad(f))``), where its array ops would be
+    staged: tracers would be cached and a nested ``jit`` carrying
+    ``compiler_options`` is rejected.  ``ensure_compile_time_eval`` evaluates
+    them eagerly instead.  It is entered only inside a trace, because it is
+    part of the jit cache key (``eager_constant_folding``) and would make the
+    eager path compile a second copy of every lane the builder dispatches.
+    """
+    from jax._src.core import trace_state_clean
+    if trace_state_clean():
+        return contextlib.nullcontext()
+    return jax.ensure_compile_time_eval()
+
+
 @functools.lru_cache(maxsize=8)
 def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
     """Reference (host-built) runtime at the config's base input.
@@ -617,10 +634,7 @@ def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
     rows) would commit to JAX's default device and poison every runtime
     later assembled from this template on another device.
     """
-    # ``ensure_compile_time_eval``: the first call can come from inside an
-    # outer ``jax.jit`` trace (``jit(value_and_grad(f))``); everything here is
-    # concrete host data, so build it eagerly and never cache a tracer.
-    with jax.ensure_compile_time_eval(), _device_context(cfg):
+    with _concrete_build(), _device_context(cfg):
         return _device_pin(cfg, prepare_runtime(
             cfg.inp, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, lconm1=cfg.lconm1,
@@ -739,9 +753,7 @@ def _boundary_pack_tables(cfg: ImplicitConfig):
             a[k], b[k], c[k], d[k] = 0.5, -0.5, 0.5, 0.5
             e[k], f[k], g[k], h[k] = 0.5, 0.5, 0.5, -0.5
 
-    # Concrete device constants even when the first call is inside an outer
-    # trace: a traced ``jnp.asarray`` would cache tracers.
-    with jax.ensure_compile_time_eval():
+    with _concrete_build():
         tab = types.SimpleNamespace(
             agg=jnp.asarray(agg), agg_sgn=jnp.asarray(agg_sgn),
             keep=jnp.asarray(keep), m_pos=jnp.asarray(m_pos),
