@@ -17,7 +17,7 @@ from vmex import optimize as opt
 from vmex._compat import require_optional
 from vmex.core.monitoring import FeasibleCandidateMonitor
 from vmex.core.neoclassical import screen_transport, transport_improves
-from vmex.core.pwo import MappedPwOResidual
+from vmex.core.pwo import MappedPwOResidual, transport_backtrack
 from vmex.core.implicit import iota_profile
 from vmex.core.restart import restart_state
 
@@ -105,6 +105,7 @@ monitor = FeasibleCandidateMonitor(problem, inspect_candidate, OUTPUT_DIR,
     settings=dict(ns=NS, mpol=MPOL, ntor=NTOR, ftol=FTOL, niter=NITER))
 with monitor:
     x = problem.x0.copy()
+    start = x.copy()
     monitor(x)
     problem.input_from_x(x).to_indata(OUTPUT_DIR / "input.seed")
     vj.write_wout(OUTPUT_DIR / "wout_seed.nc", problem.equilibrium_from_x(x).wout)
@@ -131,7 +132,10 @@ with monitor:
         after = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_trial.nc"), actual_surfaces)
         monitor.save(baseline_Q=before.tolist(), trial_Q=after.tolist(),
                      transport_screen_passed=transport_improves(before, after))
-        print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> {after.mean():.6g}")
+        if not monitor.report["transport_screen_passed"]:
+            transport_backtrack(monitor, start, x, before, actual_surfaces, seed=seed)
+        print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> "
+              f"{np.mean(monitor.report['trial_Q']):.6g}")
         for path in vj.plot_wout(OUTPUT_DIR / "wout_trial.nc", OUTPUT_DIR).values():
             print(f"Wrote {path}")
     monitor.save(status="completed")

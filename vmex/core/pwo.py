@@ -352,7 +352,7 @@ def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces, *, seed)
 
     ``start`` is the saved precursor; ``proposal`` is the full pwO optimizer
     direction. A smaller mapped variance than the precursor and strict NEO
-    improvement on every radius versus the original circle are required.
+    improvement on every radius versus ``baseline_Q`` are required.
     ``start`` must be the first monitored vector. Independent forward solves
     restart from its saved ``seed`` equilibrium, avoiding optimizer-cache
     revisits after a long optimization. Checkpoints retain the full direction.
