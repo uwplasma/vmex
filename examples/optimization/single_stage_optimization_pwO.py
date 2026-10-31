@@ -1,17 +1,9 @@
 #!/usr/bin/env python
-"""Joint pwO and coil optimization in vacuum or at finite beta.
+"""Optimize a pwO plasma and ESSOS coils in vacuum or at finite beta.
 
-Run pwO_optimization.py, then pwO_optimization_finite_beta.py first. Coils and
-boundary vary together; VMEC total flux and physical field targets stay fixed.
-The finite-beta prefit matches the frozen total normal-field target and fits
-common current to B_VMEC minus B_plasma, without equating coil flux to PHIEDGE.
-The short default run tests the workflow, not a qualified coil design: its
-transport and held-boundary checks must be read before using the result.
-
-Set INPUT_FILE, TARGET_BETA=0, COILS_INPUT, and COIL_FIT_MAXITER=0 to continue
-an independently verified vacuum stage-2 fit. The seed coil file sets the coil
-count, Fourier order, symmetry, and quadrature unchanged.
-"""
+Run the vacuum and finite-beta examples first. COILS_INPUT accepts an
+ESSOS stage-2 fit; COIL_FIT_MAXITER=0 keeps its shapes. TARGET_BETA=0
+selects vacuum. The final checks include a cold free-boundary solve and NEO."""
 
 import gc
 import json

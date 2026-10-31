@@ -1,9 +1,7 @@
-"""Reduce transport from a nearly circular vacuum torus.
+"""Optimize pwO contour variance from a near-circular vacuum torus.
 
-The pwO contour variance, aspect ratio and iota floor define the objective.
-NEO independently screens transport; this objective does not certify pwO or
-particle confinement. Install vmex[neoclassical]; edit the inputs below.
-"""
+Aspect ratio, signed iota and mirror limits constrain the shape; NEO
+screens the selected equilibrium. Requires vmex[neoclassical]."""
 import os
 from dataclasses import replace
 from pathlib import Path

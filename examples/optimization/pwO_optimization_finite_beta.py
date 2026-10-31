@@ -1,9 +1,7 @@
-"""Continue the vacuum pwO candidate at beta=0.5%, with p proportional to 1-s.
+"""Continue the vacuum pwO equilibrium at beta=0.5%, with p proportional to 1-s.
 
-Run pwO_optimization.py first. Pressure is calibrated at fixed toroidal flux;
-the field normalization follows the live Boozer mean. The mode-2
-continuation is checked with NEO; finite-beta particle confinement is unverified.
-"""
+Run pwO_optimization.py first. Pressure is calibrated at fixed toroidal
+flux, then the boundary is optimized and checked with NEO."""
 import json
 import os
 from dataclasses import replace
