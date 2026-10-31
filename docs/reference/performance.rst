@@ -239,6 +239,20 @@ bound, so a large workload keeps its own working set.  Set
 ``VMEX_CACHE_MAX_ENTRIES`` to change the bound, or to ``0`` to disable
 trimming.
 
+JAX's own byte bound is left off (``jax_compilation_cache_max_size=-1``).
+With a finite bound JAX also takes a directory lock and re-scans the
+directory on every write, and a cold first value and gradient on
+``input.li383_low_res`` at ``ns=31`` (914 programs, Apple M4, JAX 0.12.0.1)
+took 40.0 s against 22.9 s unbounded (22.2 s with the cache off, record
+``benchmarks/compilation_cache_size_m4.json``); a second
+process reloads the cache in 5.6 s against 5.8 s.  VMEX trims the directory
+itself at import: to the entry bound above and to a byte bound that scales with
+the free disk (2 to 20 GiB), oldest entries first.  Without JAX's lock a
+concurrent process can read a half-written entry; JAX then warns and
+compiles that program.  Six concurrent processes on one empty directory
+finished without error.  ``VMEX_COMPILATION_CACHE_MAX_SIZE=<bytes>`` turns
+JAX's bounded cache back on.
+
 JAX never writes a program that contains a host callback to the cache.  The
 fixed-boundary optimization Jacobians (block and per-column GMRES) therefore
 take the host-solved equilibrium as an argument instead of calling the solve
