@@ -526,7 +526,7 @@ objective, a JAX port of the COBRA eigenproblem in the Gaur
 *et al.* formulation (*Plasma Phys. Control. Fusion* **67**, 125015 (2025),
 arXiv:2410.04576), with field-line coefficients per simsopt's
 COBRA-validated ``vmec_fieldlines`` conventions and a batched
-symmetric-tridiagonal ``eigvalsh`` solve:
+banded symmetric-tridiagonal solve (bisection for the top root, Hellmann--Feynman first derivative):
 
 - :func:`~vmex.core.stability.ballooning_lambda` — the most-unstable
   eigenvalue per (surface, field line, ballooning parameter); ``λ > 0`` is
