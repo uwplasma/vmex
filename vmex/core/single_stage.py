@@ -34,6 +34,19 @@ def normal_field_rms(coils, surface):
     return jnp.sqrt(jnp.sum(weights * normal**2))
 
 
+def common_current_scale(coil_B, external_target_B, weights):
+    """Area-weighted least-squares common current factor for a fixed target.
+
+    Fields use Cartesian ``(3, nphi, ntheta)`` arrays. At finite beta the
+    external target is ``B_VMEC - B_plasma``; total PHIEDGE is not the coil
+    flux. This calibration fits boundary field strength, not exact flux or
+    pressure balance. The caller must reject a nonfinite or zero factor.
+    """
+    numerator = jnp.sum(weights * jnp.sum(coil_B * external_target_B, axis=0))
+    denominator = jnp.sum(weights * jnp.sum(coil_B**2, axis=0))
+    return numerator / denominator
+
+
 def toroidal_flux(inp, coils, *, nr=24, ntheta=128):
     """Physical +phi flux through the stellarator-symmetric phi=0 section.
 
