@@ -416,6 +416,7 @@ class SolverRuntime:
     jmax: int                           # evolved radial rows (fixed: ns-1)
     lforbal: bool = False               # tomnsp_mod.f m=1,n=0 force replacement
     lmove_axis: bool = True             # funct3d.f first-force irst=4 path
+    m1_gauge: SpectralState | None = None  # prescribed released interior family
 
     # -- free-boundary seam (core/freeboundary.py; funct3d.f/forces.f) ------
     # lfreeb=True selects the vacuum-coupled lane: the edge row is evolved
@@ -693,6 +694,50 @@ def _loop_driver_config(
     )
 
 
+def _m1_gauge_component(state: SpectralState, modes, *, lasym: bool) -> SpectralState:
+    """Released interior Z family in the signed packing; edge/axis stay zero."""
+    m, n = np.asarray(modes.m), np.asarray(modes.n)
+    pos = np.flatnonzero((m == 1) & (n > 0))
+    neg = np.asarray([np.flatnonzero((m == 1) & (n == -n[k]))[0] for k in pos], int)
+    out = jax.tree.map(jnp.zeros_like, state)
+    zs = out.Z_sin
+    if pos.size:
+        anti = .5 * (state.Z_sin[1:-1, pos] - state.Z_sin[1:-1, neg])
+        zs = zs.at[1:-1, pos].set(anti).at[1:-1, neg].set(-anti)
+    zc = out.Z_cos
+    if lasym:
+        if pos.size:
+            sym = .5 * (state.Z_cos[1:-1, pos] + state.Z_cos[1:-1, neg])
+            zc = zc.at[1:-1, pos].set(sym).at[1:-1, neg].set(sym)
+        zero = np.flatnonzero((m == 1) & (n == 0))
+        zc = zc.at[1:-1, zero].set(state.Z_cos[1:-1, zero])
+    return replace(out, Z_sin=zs, Z_cos=zc)
+
+
+def _validated_m1_gauge(reference, resolution):
+    if reference is None:
+        return None
+    modes = _static_tables(resolution)[0]
+    expected = (int(resolution.ns), int(modes.mnmax))
+    if any(np.shape(a) != expected for a in jax.tree.leaves(reference)):
+        raise ValueError(f"m1_gauge must have the solve's spectral shape {expected}")
+    gauge = _m1_gauge_component(reference, modes, lasym=bool(resolution.lasym))
+    if not all(np.isfinite(np.asarray(a)).all() for a in jax.tree.leaves(gauge)):
+        raise ValueError("m1_gauge released family must be finite")
+    return gauge
+
+
+def _prescribed_m1_gauge(state, rt, *, velocity=False):
+    if rt.m1_gauge is None:
+        return state
+    gauge = _m1_gauge_component(state, rt.modes, lasym=rt.setup.lasym)
+    return replace(
+        state,
+        Z_sin=state.Z_sin - gauge.Z_sin + (0 if velocity else rt.m1_gauge.Z_sin),
+        Z_cos=state.Z_cos - gauge.Z_cos + (0 if velocity else rt.m1_gauge.Z_cos),
+    )
+
+
 def prepare_runtime(
     source: VmecInput | RunSetup,
     resolution: Resolution | None = None,
@@ -701,6 +746,7 @@ def prepare_runtime(
     tcon0: float | None = None,
     gamma: float | None = None,
     lconm1: bool = True, lforbal: bool | None = None,
+    m1_gauge: SpectralState | None = None,
     setup: RunSetup | None = None,
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
@@ -735,6 +781,8 @@ def prepare_runtime(
     from .._compat import require_x64
 
     require_x64()
+    if m1_gauge is not None and bool(getattr(source, "lfreeb", False)):
+        raise ValueError("m1_gauge is supported only for fixed-boundary solves")
     if isinstance(source, RunSetup):
         if resolution is None:
             raise ValueError("prepare_runtime(RunSetup) requires a Resolution")
@@ -784,6 +832,7 @@ def prepare_runtime(
         jmax=int(resolution.ns) - 1,
         lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
         lmove_axis=bool(defaults["lmove_axis"]),
+        m1_gauge=_validated_m1_gauge(m1_gauge, resolution),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
         lambda_m0_floor=lambda_m0_floor,
@@ -1070,7 +1119,7 @@ def _force_pipeline(
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
     zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
-    released = zero_m1_z_force(rotated, zero_gate)
+    released = zero_m1_z_force(rotated, True if rt.m1_gauge is not None else zero_gate)
     spectral_finite = (
         _all_finite((spectral, rotated, released)) if collect_health else passing
     )
@@ -1858,6 +1907,8 @@ def _make_body(
             eq_reset, jax.tree.map(jnp.zeros_like, carry.xcdot),
             _select(stepping, xcdot_n, carry.xcdot),
         )
+        state_out = _prescribed_m1_gauge(state_out, rt)
+        xcdot_out = _prescribed_m1_gauge(xcdot_out, rt, velocity=True)
         delt_n = delt_r * jnp.where(eq_reset, JACOBIAN_RESET_FACTOR, 1.0)
         ijacob_n = ijacob_r + eq_reset.astype(ijacob_r.dtype)
         iter1_n = jnp.where(eq_reset, it, iter1_r)
@@ -1943,12 +1994,14 @@ def _initial_carry(
     loop-driver initial ``DELT`` (:func:`_loop_driver_config`) — a carry
     VALUE only, so it never keys a lane recompile.
     """
+    state = _prescribed_m1_gauge(state, rt)
     dtype = rt.setup.s_full.dtype
     one = jnp.asarray(1.0, dtype=dtype)
     zeros = (
         jax.tree.map(lambda leaf: _host_zeros(leaf.shape, leaf.dtype), state)
         if xcdot is None else xcdot
     )
+    zeros = _prescribed_m1_gauge(zeros, rt, velocity=True)
     delt0 = jnp.asarray(float(time_step0), dtype=dtype)
     zero, inf = _host_zeros((), dtype), jnp.asarray(jnp.inf, dtype=dtype)
     # NOTE: scalar counters/flags carry explicit (non-weak) dtypes so that the
@@ -2686,6 +2739,7 @@ def solve(
     gamma: float | None = None, nstep: int | None = None,
     lconm1: bool = True, verbose: bool = False, emit=emit_flushed,
     initial_state: SpectralState | None = None,
+    m1_gauge: SpectralState | None = None,
     restart_from: Any = None,
     device: Any = AUTO,
     precon_type: str | None = None, prec2d_threshold: float | None = None,
@@ -2719,6 +2773,13 @@ def solve(
     or at ``ijacob >= 75`` (``jac75_flag``), and :class:`VmecConvergenceError`
     when ``max_iterations`` is exhausted (``more_iter_flag``); both carry the
     final iteration and ``(fsqr, fsqz, fsql)`` diagnostics.
+
+    ``m1_gauge`` optionally prescribes ONLY the released interior m=1 Z
+    family from a same-resolution reference state. It holds that family
+    fixed from initialization through every native iteration, including
+    velocity/restart resets; the boundary still follows the current input.
+    This explicit coordinate contract differs from the default VMEC path,
+    which lets the early iterations select the released family.
 
     ``initial_state`` hot-restarts the solve from a previous
     :class:`SpectralState` at the *same* resolution (e.g. ``result.state`` of
@@ -2785,6 +2846,8 @@ def solve(
     polish = _resolve_force_balance_polish(
         source, polish, polish_force_balance
     )
+    if m1_gauge is not None and polish is not False:
+        raise ValueError("m1_gauge cannot be combined with force-balance polishing")
     if polish is not False and not isinstance(source, VmecInput):
         raise ValueError("force-balance polishing requires a VmecInput source")
     if restart_from is not None:
@@ -2806,6 +2869,7 @@ def solve(
     initial_state = _put_numeric_leaves(
         initial_state, _placement_device(device, resolution)
     )
+    m1_gauge = _put_numeric_leaves(m1_gauge, _placement_device(device, resolution))
     time_step0, nstep_cadence = _loop_driver_config(
         source, time_step=time_step, nstep=nstep
     )
@@ -2813,7 +2877,7 @@ def solve(
         rt = prepare_runtime(
             source, resolution, ftol=ftol, max_iterations=max_iterations,
             tcon0=tcon0, gamma=gamma,
-            lconm1=lconm1, precon_type=precon_type,
+            lconm1=lconm1, m1_gauge=m1_gauge, precon_type=precon_type,
             prec2d_threshold=prec2d_threshold, prec2d=prec2d,
             use_fft=use_fft_resolved, lambda_m0_floor=lambda_m0_floor,
         )

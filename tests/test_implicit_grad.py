@@ -280,6 +280,152 @@ def test_three_surface_raw_kernel_matches_global_nonlinear_rows(case):
 # ---------------------------------------------------------------------------
 
 
+def _m1_test_input(lasym):
+    inp = VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres")
+    inp = inp.change_resolution(mpol=3, ntor=2, ntheta=12, nzeta=10)
+    return dataclasses.replace(inp, lasym=lasym, ns_array=np.array([5]))
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+@pytest.mark.parametrize("lconm1", [False, True])
+def test_released_m1_projector_matches_force_support(lasym, lconm1):
+    """VMEC2000 releases the Z equation even without its m=1 basis rotation.
+
+    Compare the structural mask against the differentiated force oracle and
+    project an actual fresh force, including the asymmetric n=0 Z equation.
+    Boundary rows must still follow the full parameter-dependent boundary.
+    """
+    inp = _m1_test_input(lasym)
+    cfg = im.make_config(inp, lconm1=lconm1)
+    p = im.params_from_input(inp)
+    from vmex.core.setup import run_setup
+    setup = run_setup(inp, cfg.resolution, lconm1=lconm1,
+                      infer_axis_if_missing=True)
+    rt = solver.prepare_runtime(inp, cfg.resolution, setup=setup)
+    state = solver._initial_state(rt.setup)
+    mask = im._fixed_boundary_dof_mask(cfg)
+    assert _mask_bit_ident(mask, im._dof_mask(state, rt, cfg))
+    project = im._dof_projector(cfg, mask)
+    force = solver.evaluate_forces(state, rt)[0]
+    for actual, expected in zip(jax.tree.leaves(project(force)),
+                                jax.tree.leaves(force), strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-15)
+    # The nullspace is a pair combination, invisible to an elementwise mask.
+    pos, neg = im._m1_pair_columns(cfg)
+    zero = jax.tree.map(jnp.zeros_like, state)
+    released = dataclasses.replace(
+        zero, Z_sin=zero.Z_sin.at[1, pos].set(1).at[1, neg].set(-1))
+    assert _tnorm(project(released)) == 0
+    if lasym:
+        released = dataclasses.replace(
+            zero, Z_cos=zero.Z_cos.at[1, pos].set(1).at[1, neg].set(1))
+        assert _tnorm(project(released)) == 0
+    tangent = dataclasses.replace(jax.tree.map(jnp.zeros_like, p),
+                                 zbs=jnp.zeros_like(p.zbs).at[3, 1].set(1))
+    def assembled(pp):
+        return im._assemble(state, im.runtime_from_params(pp, cfg),
+                            state, project, im._edge_mask(cfg))
+    derivative = jax.jvp(assembled, (p,), (tangent,))[1]
+    boundary_derivative = jax.jvp(lambda pp: im._boundary_from_params(pp, cfg),
+                                  (p,), (tangent,))[1]
+    for actual, expected in zip((derivative.R_cos[-1], derivative.R_sin[-1],
+                                 derivative.Z_cos[-1], derivative.Z_sin[-1]),
+                                boundary_derivative[:4], strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=0)
+    assert _tnorm(derivative) > 0
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_prescribed_m1_gauge_keeps_only_released_interior_family(lasym):
+    inp = _m1_test_input(lasym)
+    resolution = solver.resolution_from_input(inp)
+    shape = (resolution.ns, solver._static_tables(resolution)[0].mnmax)
+    rng = np.random.default_rng(42)
+    reference = solver.SpectralState(**{
+        name: jnp.asarray(rng.normal(size=shape)) for name in im._STATE_FIELDS})
+    cfg = im.make_config(inp, m1_gauge=reference)
+    # Structural executable caching must retain the prescribed family while
+    # ignoring reference components outside that family.
+    unused_changed = dataclasses.replace(reference, R_cos=reference.R_cos + 1.0)
+    assert im.make_config(inp, m1_gauge=unused_changed) is cfg
+    other_reference = jax.tree.map(lambda value: 2.0 * value, reference)
+    other_cfg = im.make_config(inp, m1_gauge=other_reference)
+    assert other_cfg != cfg
+    assert other_cfg._structure() != cfg._structure()
+    rt = im.runtime_from_params(im.params_from_input(inp), cfg)
+    project = im._dof_projector(cfg, im._fixed_boundary_dof_mask(cfg))
+    assert _tnorm(project(rt.m1_gauge)) < 1e-15
+    for field in jax.tree.leaves(rt.m1_gauge):
+        assert np.all(np.asarray(field)[[0, -1]] == 0)
+    state = solver._initial_state(rt.setup)
+    replaced = solver._prescribed_m1_gauge(state, rt)
+    np.testing.assert_allclose(_tnorm(project(replaced)), _tnorm(project(state)),
+                               rtol=1e-14)
+    np.testing.assert_allclose(
+        _tnorm(solver._m1_gauge_component(replaced, rt.modes, lasym=lasym)),
+        _tnorm(rt.m1_gauge), rtol=1e-14)
+    velocity = solver._prescribed_m1_gauge(reference, rt, velocity=True)
+    assert _tnorm(solver._m1_gauge_component(velocity, rt.modes, lasym=lasym)) < 1e-15
+    for actual, expected in zip(jax.tree.leaves(replaced),jax.tree.leaves(state),strict=True):
+        np.testing.assert_array_equal(actual[-1],expected[-1])
+    with pytest.raises(ValueError, match="single-resolution"):
+        im.make_config(dataclasses.replace(inp,ns_array=np.array([5,9])),
+                       multigrid=True,m1_gauge=reference)
+    with pytest.raises(ValueError, match="fixed-boundary"):
+        im.make_config(dataclasses.replace(inp,lfreeb=True,mgrid_file="mgrid.test"),m1_gauge=reference)
+    with pytest.raises(ValueError, match="fixed-boundary"):
+        solver.prepare_runtime(dataclasses.replace(inp, lfreeb=True,mgrid_file="mgrid.test"), m1_gauge=reference)
+    from vmex.core.multigrid import solve_multigrid
+    with pytest.raises(ValueError, match="single-resolution"):
+        solve_multigrid(dataclasses.replace(inp, ns_array=np.array([5, 9])), m1_gauge=reference)
+    with pytest.raises(ValueError, match="polishing"):
+        solver.solve(inp, m1_gauge=reference, polish_force_balance=True)
+    with pytest.raises(ValueError, match="polishing"):
+        solve_multigrid(inp, m1_gauge=reference, polish_force_balance=True)
+    from vmex import optimize as opt
+    with pytest.raises(ValueError, match="polishing"):
+        opt.VmecProblem.from_loss(inp, opt.mean_iota,
+            solve_kwargs={"m1_gauge": reference, "polish_force_balance": True})
+    with pytest.raises(ValueError, match="spectral shape"):
+        solver.prepare_runtime(inp,m1_gauge=jax.tree.map(lambda x:x[:-1],reference))
+    with pytest.raises(ValueError, match="finite"):
+        solver.prepare_runtime(inp,m1_gauge=jax.tree.map(lambda x:x*jnp.nan,reference))
+
+
+@pytest.mark.full
+def test_prescribed_m1_gauge_mean_iota_matches_ordinary_resolves():
+    """The public scalar lane and independent native solves share one gauge."""
+    from vmex import optimize as opt
+    inp = VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres")
+    inp = inp.change_resolution(mpol=3, ntor=3, ntheta=12, nzeta=12)
+    inp = dataclasses.replace(inp, ns_array=np.array([9]),
+                              ftol_array=np.array([1e-20]),
+                              niter_array=np.array([15000]), delt=.5)
+    reference = opt.solve_equilibrium(inp, raise_on_max_iterations=True, use_fft=False)
+    kwargs = {"m1_gauge": reference.solution}
+    problem = opt.VmecProblem.from_loss(
+        inp, opt.mean_iota, max_mode=1, use_ess=False,
+        solve_kwargs=kwargs, restart_from=reference, warm_start=None,
+        adjoint_tol=1e-8, max_fsq_ratio=1., refine_tol=1e-10)
+    x0 = problem.x0.copy()
+    value, gradient = problem.value_and_grad(x0)
+    assert np.isfinite(value) and np.isfinite(gradient).all()
+    direction = np.zeros_like(x0)
+    direction[list(problem.dof_names).index("ZBS(-1,1)")] = 1
+    ad = float(gradient @ direction)
+    h = 1e-4
+    for initial in (None, reference.solution):
+        values = []
+        for sign in (1, -1):
+            eq = opt.solve_equilibrium(
+                problem.input_from_x(x0+sign*h*direction), initial_state=initial,
+                raise_on_max_iterations=True, use_fft=False, **kwargs)
+            assert eq.result.converged
+            values.append(float(opt.mean_iota(eq.solution, eq.solver_context)))
+        fd = (values[0]-values[1])/(2*h)
+        assert abs(fd-ad) <= .01*max(abs(fd),abs(ad))
+
+
 def test_residual_zero_at_fixed_point(case):
     name, inp, cfg, p0, x_star, rt, mask = case
     assert _mask_bit_ident(mask, im._fixed_boundary_dof_mask(cfg)), (
@@ -1303,3 +1449,69 @@ def test_lasym_3d_stability_gradients_vs_frozen_path_fd(lasym_3d):
         # central difference then converges as h^2 (measured DMerc/RBS(1,1)
         # vs the adjoint: 2.2e-4 at 1e-4, 2.2e-6 at 1e-5), so h = 1e-5.
         h=1.0e-5)
+
+
+@pytest.mark.parametrize("lasym", [False, True])
+def test_equilibrium_wout_unconstrained_basis_matches_constrained(lasym):
+    """Manufactured 3-D geometry exports identically in either m=1 basis."""
+    from types import SimpleNamespace
+
+    from vmex import optimize as opt
+    from vmex.core.residuals import m1_physical_to_constrained
+    from vmex.core.transforms import physical_to_internal_scale
+
+    inp = _m1_test_input(lasym)
+    runtime = solver.prepare_runtime(inp, lconm1=False)
+    modes = runtime.modes
+    scale = physical_to_internal_scale(modes, runtime.trig)
+    s = np.linspace(0., 1., 5)
+    q = np.sqrt(s)
+    shape = (5, modes.mnmax)
+    arrays = {name: np.zeros(shape) for name in im._STATE_FIELDS}
+
+    def put(name, m, n, coefficient):
+        column = np.flatnonzero((modes.m == m) & (modes.n == n)).item()
+        arrays[name][:, column] = coefficient * scale[column]
+
+    put("R_cos", 0, 0, np.full(5, 10.))
+    put("R_cos", 1, 0, .8*q)
+    put("Z_sin", 1, 0, q)
+    put("R_cos", 1, 1, .02*q)
+    put("R_cos", 1, -1, -.01*q)
+    put("Z_sin", 1, 1, .015*q)
+    put("Z_sin", 1, -1, .025*q)
+    put("R_cos", 2, 1, .003*s)
+    put("L_sin", 1, 1, .001*s)
+    if lasym:
+        put("R_sin", 1, 0, .02*q)
+        put("Z_cos", 1, 0, .03*q)
+        put("R_sin", 1, 1, .015*q)
+        put("Z_cos", 1, -1, -.01*q)
+        put("L_cos", 1, 1, .0003*s)
+    state = solver.SpectralState(**{k: jnp.asarray(v) for k, v in arrays.items()})
+    rc, zs, rs, zc = m1_physical_to_constrained(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
+        modes=modes, lthreed=True, lasym=lasym)
+    constrained = dataclasses.replace(state, R_cos=rc, Z_sin=zs, R_sin=rs, Z_cos=zc)
+    # Exporting a manufactured state is permitted; no nonlinear solve or
+    # equilibrium/confinement claim is part of this basis regression.
+    result = SimpleNamespace(fsqr=0., fsqz=0., fsql=0., iterations=0, converged=False)
+    actual = opt.Equilibrium(inp, state, runtime, result).wout
+    true_runtime = solver.prepare_runtime(inp, lconm1=True)
+    expected = opt.Equilibrium(inp, constrained, true_runtime, result).wout
+    fields = ("rmnc", "zmns", "bmnc", "gmnc", "bsubumnc", "bsubvmnc",
+              "bsupumnc", "bsupvmnc", "lmns")
+    if lasym:
+        fields += ("rmns", "zmnc", "bmns", "gmns", "lmnc")
+    for name in fields:
+        np.testing.assert_allclose(getattr(actual, name), getattr(expected, name),
+                                   rtol=2e-13, atol=2e-13)
+    # Pin the original physical coefficients independently of basis parity;
+    # this catches accidental mscale/nscale or sqrt(s) conversion as well.
+    for output, name in [("rmnc", "R_cos"), ("zmns", "Z_sin")] + (
+            [("rmns", "R_sin"), ("zmnc", "Z_cos")] if lasym else []):
+        np.testing.assert_allclose(getattr(actual, output), arrays[name]/scale,
+                                   rtol=2e-13, atol=2e-13)
+    assert np.isfinite(actual.bmnc).all()
+    for name in im._STATE_FIELDS:
+        np.testing.assert_array_equal(np.asarray(getattr(state, name)), arrays[name])
