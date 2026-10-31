@@ -10,6 +10,8 @@ import jax.numpy as jnp
 
 from vmex.core import single_stage as ss
 
+_REAL_RESAMPLE_COILS = ss._resample_coils
+
 
 @dataclass
 class Deck:
@@ -43,6 +45,7 @@ def harness(monkeypatch, tmp_path):
     events = []
     monkeypatch.setattr(ss.jax, "clear_caches", lambda: events.append("clear caches"))
     monkeypatch.setattr(ss.gc, "collect", lambda: None)
+    monkeypatch.setattr(ss, "_resample_coils", lambda coils, n_segments: coils)
 
     class Coils:
         dofs_curves = np.array([1., 2., 3.])
@@ -360,34 +363,24 @@ def test_dense_geometry_reconstruction_preserves_currents_symmetry_and_surface_p
     calls = []
     coils = _GeometryCoils(harness.Coils.gamma, [1., 2.], harness.Coils.curvature)
     coils.dofs_curves, coils.currents, coils.nfp, coils.stellsym = np.arange(6.), np.array([20., 30.]), 4, True
+    coils.n_segments = 512
     surface = harness.Surface()
     surface.rc, surface.zs, surface.rs, surface.zc = [1.], [.2], [.03], [.04]
     surface.nfp, surface.mpol, surface.ntor = 4, 2, 2
-    module = ModuleType("essos.coils")
-
-    def curves(*args):
-        calls.append(("curves", args))
-        return "dense curves"
-
-    def dense_coils(curves, currents):
-        calls.append(("coils", curves, currents))
-        return coils
+    coils.copy = lambda: coils
 
     def dense_surface(*args, **kwargs):
         calls.append(("surface", args, kwargs))
         return surface
 
-    module.Curves, module.Coils = curves, dense_coils
-    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(ss, "_resample_coils", _REAL_RESAMPLE_COILS)
     monkeypatch.setattr(sys.modules["essos.surfaces"], "SurfaceRZFourier", dense_surface)
     penalty = ss.CoilPenalty(1.5, 4., 1.5, .7, normalized=True,
                              geometry_segments=144, surface_grid=(68, 32))
     expected = replace(penalty, geometry_segments=None, surface_grid=None)(coils, surface)
     np.testing.assert_array_equal(penalty(coils, surface), expected)
-    np.testing.assert_array_equal(calls[0][1][0], coils.dofs_curves)
-    assert calls[0][1][1:] == (144, 4, True)
-    np.testing.assert_array_equal(calls[1][2], [20., 30.])
-    assert calls[2][2] == {"nphi": 68, "ntheta": 32, "close": False,
+    assert coils.n_segments == 512
+    assert calls[0][2] == {"nphi": 68, "ntheta": 32, "close": False,
                             "range_torus": "full torus", "rs": [.03], "zc": [.04]}
 
 
@@ -413,3 +406,61 @@ def test_vacuum_normal_field_uses_exact_zero_plasma_field_without_virtual_casing
     assert ss._vacuum_input(replace(inp, pres_scale=1., am=np.zeros(2)))
     assert not ss._vacuum_input(replace(inp, pres_scale=1., am=np.zeros(2), pmass_type="cubic_spline"))
     assert not ss._vacuum_input(replace(inp, pcurr_type="cubic_spline"))
+
+
+def test_verification_checks_curvature_between_field_quadrature_nodes(harness, monkeypatch):
+    h = harness
+    grids = []
+    dense = NS(gamma=h.final_coils.gamma, curvature=np.array([[8., 9.]]))
+    monkeypatch.setattr(ss, "_resample_coils", lambda coils, nodes: grids.append(nodes) or dense)
+    monkeypatch.setattr(ss.opt, "solve_equilibrium", lambda *a, **kw: h.fine)
+    def free(*a, **kw):
+        raise ss.VmecError("skip independent free solve in geometry contract")
+    monkeypatch.setattr(ss.vj, "solve_free_boundary_multigrid", free)
+    _, _, metrics, _ = ss.verify_design(h.joint, np.zeros(5), prefix="dense", geometry_segments=64, verbose=False)
+    assert grids == [384]
+    assert metrics["maximum curvature"] == 9.
+    assert metrics["maximum curvature"] > h.final_coils.curvature.max()
+
+
+@pytest.mark.parametrize(("existing", "requested", "expected"), [(48, 384, 384), (512, 64, 512)])
+def test_geometry_resampling_preserves_the_original_and_its_metadata(existing, requested, expected):
+    """Run the real helper, retaining all copied metadata and a finer user grid."""
+    coils = NS(n_segments=existing, marker=object())
+    coils.copy = lambda: NS(n_segments=coils.n_segments, marker=coils.marker)
+    rebuilt = ss._resample_coils(coils, requested)
+    assert rebuilt is not coils and rebuilt.marker is coils.marker
+    assert rebuilt.n_segments == expected
+    assert coils.n_segments == existing
+
+
+@pytest.mark.parametrize(("existing", "requested", "expected"), [(48, 384, 384), (512, 64, 512)])
+def test_geometry_resampling_preserves_scaled_essos_coils_and_ad(existing, requested, expected):
+    """Physical geometry, current normalization, and differentiation survive copying."""
+    essos = pytest.importorskip("essos.coils")
+    coefficients = np.zeros((2, 3, 5))
+    coefficients[:, 0, 0] = [1., 2.]
+    coefficients[:, 0, 1] = [.3, .4]
+    coefficients[:, 1, 2] = [.2, .25]
+    coils = essos.Coils(essos.Curves(jnp.asarray(coefficients), existing, 4, True,
+                                    scaling_factor=.2, scale_fixed=3.),
+                        jnp.array([20., 30.]), currents_scale=5.)
+    original_gamma = np.asarray(coils.gamma)
+    rebuilt = ss._resample_coils(coils, requested)
+    np.testing.assert_allclose(np.asarray(rebuilt.gamma)[:, ::expected // existing], original_gamma, atol=1e-13)
+    np.testing.assert_array_equal(rebuilt.dofs_curves, coils.dofs_curves)
+    np.testing.assert_array_equal(rebuilt.currents, coils.currents)
+    assert rebuilt.currents_scale == coils.currents_scale
+    assert (rebuilt.n_segments, rebuilt.nfp, rebuilt.stellsym) == (expected, 4, True)
+    assert (rebuilt.curves.scaling_factor, rebuilt.curves.scale_fixed) == (.2, 3.)
+    assert coils.n_segments == existing
+
+    def objective(dofs, resample):
+        trial = coils.with_dofs(dofs)
+        trial = ss._resample_coils(trial, requested) if resample else trial
+        return jnp.sum(trial.gamma[:, 0]**2) + 1e-6*jnp.sum(trial.currents**2)
+
+    direct = ss.jax.value_and_grad(lambda dofs: objective(dofs, False))(coils.dofs)
+    copied = ss.jax.value_and_grad(lambda dofs: objective(dofs, True))(coils.dofs)
+    for actual, expected_value in zip(copied, direct):
+        np.testing.assert_allclose(actual, expected_value, rtol=1e-12, atol=1e-12)

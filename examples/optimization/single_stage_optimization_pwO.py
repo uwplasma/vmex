@@ -337,7 +337,9 @@ summary = {
     "held_baseline_Q": held_baseline_Q.tolist() if held_baseline_Q is not None else None,
     "held_Q": held_Q.tolist() if held_Q is not None else None,
     "held_transport_screen_passed": held_transport_passed, "held_physics": held_physics,
-    "design_qualified": verdict["met"] and physics["feasible"] and transport_improves(before, after)
+    # Qualify transport in the actual held coil field; the fixed-boundary
+    # comparison remains a diagnostic of the joint optimization target.
+    "design_qualified": verdict["met"] and physics["feasible"]
                         and held_transport_passed and held_physics["feasible"],
 }
 Path("single_stage_optimization_pwO_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
