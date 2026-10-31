@@ -485,8 +485,12 @@ def test_block_adjoint_acceptance_stops_at_the_roundoff_of_the_residual():
     10 eps ``|| |J|^T |mu| ||``.  A multiplier that solves the wrong system
     still misses it.
     """
-    system, pullback, mu_true = _cancelling_block_system()
-    b = pullback(mu_true)
+    system, exact, mu_true = _cancelling_block_system()
+    b = exact(mu_true)
+
+    def pullback(mu):  # the raw VJP carries round-off of the size of its terms
+        return exact(mu) + 1.0e-16 * jnp.ones_like(mu)
+
     cfg = SimpleNamespace(adjoint_tol=1.0e-11)
     mu, residual, tolerance = im._block_adjoint(system, pullback, b, cfg, 1.0e-11)
     # the rhs is 1e-9 against products of 2: the old relative test could not pass
