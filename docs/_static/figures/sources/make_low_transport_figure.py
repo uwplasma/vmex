@@ -189,11 +189,11 @@ def comparisons(root):
                           refined_equilibrium=dict(full_signed_iota=iota), coarse=True)
     fig, axes = plt.subplots(3, 1, figsize=(9, 11), dpi=150)
     fig.subplots_adjust(left=.12, right=.98, top=.95, bottom=.20, hspace=.34)
-    axes[2].set_prop_cycle(color=["#566a79", "#99a3af", "#2c7fb8", "#e34a33",
+    axes[2].set_prop_cycle(color=["#566a79", "#bfc4c9", "#99a3af", "#2c7fb8", "#e34a33",
                                    "#7b3294", "#8c564b", "#c78a00", "#b85b20", "#007d63",
                                    "#afbecf", "#269fd0", "#242424"])
     handles, labels, missing = [], [], []
-    for name, label in (("seed1", "Seed1"), ("seed4", "Seed4"), ("QA", "QA4"), ("QH", "QH4"),
+    for name, label in (("seed1", "Seed1"), ("seed3", "Seed3"), ("seed4", "Seed4"), ("QA", "QA4"), ("QH", "QH4"),
             ("QP", "QP4"), ("QI", "QI4"), ("pwo1", "pwO1"), ("pwo3", "pwO3"), ("mapped4", "pwO4"),
             ("seed2", "Seed2"), ("QA_nfp2", "QA2"), ("mapped2", "pwO2")):
         row = data.get(name, {})

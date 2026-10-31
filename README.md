@@ -279,8 +279,8 @@ maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
 ![Two-period boundary colored by magnetic-field strength, Boozer contours, transport and alpha losses](docs/_static/figures/readme_low_transport.webp)
 
-**pwO optimization** shapes the magnetic wells without imposing quasisymmetry.
-It minimizes the variation of |B| along contours of a squeezed omnigenous mapping,
+**pwO optimization** minimizes the variation of |B| along contours of a squeezed
+omnigenous mapping,
 following the [PO–pwO construction](https://arxiv.org/abs/2603.12139v1):
 
 $$
@@ -300,13 +300,13 @@ volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lower
 |---|---:|---:|---|
 | 1 | 6.007 | 0.421 | Refined mean Q −67.0%; QA precursor |
 | 2 | 6.003 | 0.494 | Refined mean Q −52.6% |
-| 3 | 6.006 | 0.420 | Coarse mean Q −86.8%; QA precursor |
+| 3 | 6.006 | 0.418 | Refined mean Q −87.2%; QA precursor |
 | 4 | 6.001 | 0.438 | Refined mean Q −27.5% |
 
 The one-period construction uses a QA precursor, physical toroidal harmonics through n=4,
 and a NEO-screened pwO step. Its paired alpha losses fall from 100% to 30.0%.
-The direct mode-2 start still fails. A similar QA-to-pwO step gives the
-three-period result; its refinement and particle checks are pending.
+The three-period case follows the same QA-to-pwO path and lowers paired losses
+from 100% to 26.8%.
 
 ![Effective ripple, alpha losses and iota profiles compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
 

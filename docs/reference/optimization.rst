@@ -658,14 +658,16 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 The file-level settings select the input, output directory, resolution and
 iteration budget. The default sets ``NFP=2`` and edits ``input.minimal_seed_nfp4`` in memory:
 major radius 1 m, minor radius 1/6 m, and a helical perturbation of 5% of the
-minor radius. ``NFP`` changes the field-period count without changing the seed shape.
+minor radius. For NFP1 the near-circle seed retains a physical n=2 harmonic.
+NFP1 and NFP3 use a QA precursor, followed by five pwO steps and
+NEO-constrained backtracking. NFP2 and NFP4 use the direct pwO mode ladder.
 Boundary modes 1 then 2 share NS35, M5/N5, force tolerance 1e-12 and a
 2000-iteration solver cap. Bounded least squares uses implicit residual
 Jacobians, optimizer ``ftol=1e-3`` and 15 iterations per stage.
 
 The pwO residual is combined with aspect ratio 6, a signed-iota
 floor of 0.42 and mirror ratio below 0.2. The mirror penalty targets 0.18;
-no symmetry or magnetic-well penalty is used. Live B00 normalization replaces
+the final pwO stage has no symmetry or magnetic-well penalty. Live B00 normalization replaces
 reference-field arrays, and an automatic initial cost scale sets the term weight.
 Three equally spaced requests are snapped to actual VMEC half-mesh radii.
 The fixed map and cut are described in
@@ -690,7 +692,11 @@ It reduces pwO variance by 11.9% and mean Q by 65.6% relative to the
 near-circle seed, at A=6.007 and minimum signed iota=0.4198. This
 independent NS103/M7/N7 check finds a 67.0% mean-Q reduction and
 30.0% weighted alpha loss, against 100% in its near-circle seed. The
-construction is not yet automated by changing ``NFP`` in the vacuum example.
+vacuum driver automates this construction when ``NFP=1``; its NFP3
+path uses the same step control after a native three-period QA precursor.
+The NFP3 refined mean Q falls 87.2%, with paired losses down from 100% to
+26.8%. Fresh public runs changing only NFP completed in 562 s (NFP1) and
+516 s (NFP3), each below 3 GiB on eight logical CPUs on office.
 
 Continue the saved vacuum shape to finite pressure with::
 
