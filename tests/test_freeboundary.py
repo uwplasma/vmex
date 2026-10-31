@@ -920,3 +920,39 @@ def test_relax_free_boundary_constraint_keeps_flat_converged_and_nan_traces(monk
         calls = _fake_relaxation(monkeypatch, fsq, converged=converged)
         out = FB.relax_free_boundary_constraint("deck", result, iterations=len(fsq))
         assert len(calls) == 1 and out.iterations == len(fsq) and not out.replayed
+
+
+def test_prefetch_job_list_and_turned_on_first_pass(monkeypatch):
+    """The prefetch worker queues the shared step lane for turn-on; a carried
+    vacuum state runs its first pass through that lane (compiles stubbed)."""
+    inp = dataclasses.replace(
+        lasym_free_input(REPO / "examples" / "data"),
+        ns_array=np.asarray([8]), ftol_array=np.asarray([1.0e-6]),
+        niter_array=np.asarray([5]))
+    field = lasym_free_field()
+    compiled = []
+    monkeypatch.setattr(jax.stages.Lowered, "compile",
+                        lambda self, *a, **k: compiled.append(self) or object())
+    monkeypatch.setattr(FB, "_LANE_EXECUTABLES", {})
+    FB._prefetch_stage_lane_set(
+        inp, external_field=field, ns=8, ftol=1.0e-6, max_iterations=5,
+        time_step=None, tcon0=None, gamma=None, nstep=None, lconm1=True,
+        precon_type=None, prec2d_threshold=None, prec2d=None, use_fft=False,
+        device=None, lmove_axis=None, vacuum_on=None, entry_lanes=True,
+        cancel=FB.threading.Event())
+    assert len(compiled) == 4    # fixed and freeb step (turn-on reuses it), vacuum, fused full
+
+    tags = []
+
+    def fake_call_lane(tag, lane, args, static=None, *, notice=None):
+        tags.append(tag)
+        carry = args[0]
+        return dataclasses.replace(carry, done=jnp.asarray(True),
+                                   ier=jnp.full_like(carry.ier, 11))
+
+    monkeypatch.setattr(FB, "_call_lane", fake_call_lane)
+    FB._solve_free_boundary_stage(
+        inp, external_field=field, max_iterations=5,
+        error_on_no_convergence=False,
+        vacuum_continuation=FB.FreeBoundaryState(ivac=2, turned_on=True))
+    assert tags[-1] == ("fb_step", False)
