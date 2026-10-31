@@ -26,14 +26,6 @@ def coil_field(coils):
     return lambda points: jax.vmap(field.B)(points.reshape(-1, 3)).reshape(points.shape)
 
 
-def normal_field_rms(coils, surface):
-    """Area-weighted RMS of the coil field's normalized normal component."""
-    field = coil_field(coils)(surface.gamma)
-    normal = jnp.sum(field * surface.unitnormal, axis=2) / jnp.linalg.norm(field, axis=2)
-    weights = surface.area_element / jnp.sum(surface.area_element)
-    return jnp.sqrt(jnp.sum(weights * normal**2))
-
-
 def common_current_scale(coil_B, external_target_B, weights):
     """Area-weighted least-squares common current factor for a fixed target.
 
@@ -112,20 +104,15 @@ class CoilPenalty:
             curvature = jnp.maximum(coils.curvature[:n] / self.curvature_limit - 1, 0)
             gamma, points = coils.gamma, surface.gamma.reshape(-1, 3)
 
-            def pair_distance(i, j):
-                squared = jnp.sum((gamma[i, :, None] - gamma[j, None, :])**2, axis=-1)
-                return jnp.sqrt(jnp.min(squared) + 1e-30)
+            def distance(first, second):
+                return jnp.sqrt(jnp.min(jnp.sum((first[:, None] - second[None, :])**2, axis=-1)) + 1e-30)
 
             pairs = jnp.triu_indices(len(coils), 1)
-            gap = (jnp.max(jnp.maximum(1 - jax.vmap(pair_distance)(*pairs) / self.coil_distance, 0))
+            gap = (jnp.max(jnp.maximum(1 - jax.vmap(lambda i, j: distance(gamma[i], gamma[j]))(*pairs) / self.coil_distance, 0))
                    if len(coils) > 1 else 0.)
 
-            def clearance(curve):
-                squared = jnp.sum((curve[:, None] - points[None, :])**2, axis=-1)
-                return jnp.sqrt(jnp.min(squared) + 1e-30)
-
             surface_gap = jnp.max(jnp.maximum(
-                1 - jax.vmap(clearance)(gamma[:n]) / self.surface_distance, 0))
+                1 - jax.vmap(lambda curve: distance(curve, points))(gamma[:n]) / self.surface_distance, 0))
             return .5 * jnp.asarray([
                 self.length_weight * jnp.mean(length**2),
                 self.curvature_weight * jnp.max(curvature**2),

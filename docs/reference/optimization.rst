@@ -726,3 +726,11 @@ The main entry points are :func:`vmex.core.optimize.make_problem`,
 :class:`vmex.core.problem.Evaluation`, and
 :class:`vmex.core.monitoring.OptimizationMonitor`, and
 :class:`vmex.core.monitoring.EquilibriumReporter`.
+
+ESSOS supplies coil curves, Biot–Savart fields and integrated distance penalties.
+``vmex.core.single_stage`` shares the VMEX adjoint and verification workflow
+between the QA and mapped-field examples. Its normalized geometry option
+penalizes the worst sampled gap and curvature; ESSOS's integrated losses use
+a different measure. Length is an upper bound here; ESSOS's length loss instead
+penalizes deviations on both sides of its target. The flux quadrature retains VMEC's
+positive-phi sign convention.

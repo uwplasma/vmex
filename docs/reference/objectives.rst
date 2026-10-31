@@ -349,6 +349,11 @@ When both terms use the same surfaces and pitch,
 :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual` concatenates their
 cost-weighted rows after one shared Boozer transform.
 
+The constructed-QI interpolation fixes the first well wall at its prescribed
+maximum field. This removes roundoff amplification at nearly coincident nodes
+and preserves its derivative. Existing ``ConstructedQIResidual`` optimizers
+use the correction without script changes; it does not change the QI target.
+
 Mapped-field contour variance
 -----------------------------
 

@@ -230,7 +230,9 @@ convergence checks, constraints, scaling and finite-difference verification.
 The infinite-n ideal ballooning mode ([Dewar and Glasser 1983](https://doi.org/10.1063/1.864113),
 [Gaur et al. 2023](https://arxiv.org/abs/2302.07673)) is the eigenproblem along a field line,
 
-$$\frac{d}{d\eta}\Big(g\,\frac{dX}{d\eta}\Big) + c\,X = \lambda\,f\,X,\qquad X(\pm\eta_b)=0,$$
+$$
+\frac{d}{d\eta}\Big(g\,\frac{dX}{d\eta}\Big) + c\,X = \lambda\,f\,X,\qquad X(\pm\eta_b)=0,
+$$
 
 with line bending `g`, pressure and curvature drive `c` and inertia `f > 0`. A line is unstable
 when its largest eigenvalue `λ = (γ a_N/v_A)²` is positive. VMEX discretizes it with finite
@@ -275,61 +277,49 @@ maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
 ### Low transport from a near-circular start
 
-`examples/optimization/pwO_optimization.py` starts from an existing near-circular
-two-period seed and adjusts boundary modes 1 then 2, using implicit equilibrium derivatives
-and 15 iterations per stage. Set `NFP` to choose the field-period count.
-The objective combines aspect ratio 6, a signed-transform floor of 0.42,
-a mirror-ratio limit of 0.2, and the normalized mapped contour variance:
+![Two-period boundary colored by magnetic-field strength, Boozer contours, transport and alpha losses](docs/_static/figures/readme_low_transport.webp)
 
-$$f_{\rm map}=\sum_s \frac{w_s}{B_{00,s}^2}\left\langle\operatorname{Var}_\gamma B_s(\gamma,\eta)\right\rangle_\eta.$$
+**Mapped-field optimization** shapes the magnetic wells without imposing quasisymmetry.
+It minimizes the variation of |B| along contours of a squeezed omnigenous mapping,
+following the [PO–pwO construction](https://arxiv.org/abs/2603.12139v1):
 
-The live Boozer mean field `B00` removes the reference-field arrays. An automatic
-initial cost scale sets the contour term's optimization weight. Three equally spaced surface requests
-use the nearest VMEC half-mesh radii, printed by the script.
-The mirror penalty aims 10% below its acceptance limit. These are explicit design
-choices, not a proof of confinement.
+$$
+f_{\mathrm{map}}=\sum_s \frac{w_s}{B_{00,s}^{2}}\left\langle\operatorname{Var}_{\gamma} B_s(\gamma,\eta)\right\rangle_{\eta}.
+$$
 
-We call this **mapped-field low-transport optimization**. Its map follows the
-[PO–pwO construction](https://arxiv.org/abs/2603.12139v1); the fit alone does not
-establish field-line-independent bounce action within each well class or
-compatible well transitions, which are needed to claim pwO.
+The mean field B₀₀ supplies the normalization. Aspect ratio 6, finite rotational
+transform and a mirror limit keep the search away from weak-transform or extreme-mirror solutions.
+The resulting fields are non-QS; piecewise omnigenity has not been established.
 
-```console
-pip install "vmex[neoclassical]"
-python examples/optimization/pwO_optimization.py
-python examples/optimization/pwO_optimization_finite_beta.py
-```
+The two-period result lowers $Q = \epsilon_{\mathrm{eff}}^{3/2}$ by **52.6%** and alpha losses from **100% to 6.73%**.
+The particle comparison uses 256 paired 3.52 MeV alphas over 10 ms at a common
+volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lowers coarse Q another 26.6%.
 
-Edit the file-level settings to change the run. The vacuum driver writes `low_transport/`;
-the pressure continuation reads `low_transport/input.trial` and writes `low_transport_finite_beta/`.
-Both keep feasible checkpoints and apply a separate NEO transport screen.
+![NFP 1–4 boundaries colored by magnetic-field strength, unfilled field contours and objective histories](docs/_static/figures/readme_low_transport_nfp.webp)
 
-![Optimized 3D boundary, seed and optimized unfilled Boozer field contours, effective-ripple geometry factor, and paired alpha-particle loss curves](docs/_static/figures/readme_low_transport.webp)
+| Field periods | Aspect ratio | Minimum ι | Transport result |
+|---|---:|---:|---|
+| 1 | 7.659 | 0.368 | Aspect and transform targets missed |
+| 2 | 6.003 | 0.494 | Refined mean Q −52.6% |
+| 3 | 6.001 | 0.442 | Coarse mean Q +191%; rejected |
+| 4 | 6.001 | 0.438 | Refined mean Q −27.5% |
 
-Independent NS103/M7N7 equilibria and Boozer-band-32 NEO calculations reduce
-mean `Q = ε_eff^(3/2)` by **52.56%** for the two-period candidate, with aspect
-ratio 6.003 and minimum signed transform 0.494. At a common volume-RMS field
-of 6 T and minor radius 1.7 m, 256 paired 3.52 MeV alphas launched at `s=0.5`
-give 10 ms weighted losses of **100% → 6.73%** (256/256 → 17/256 launches).
-No integration failed; the 95% bootstrap interval is 3.75–9.99%. These
-single-surface, collisionless measurements do not establish reactor confinement. [Figure generator](docs/_static/figures/sources/make_low_transport_figure.py);
-its simulation inputs are external, with no transport dataset bundled here.
+![Effective ripple and alpha losses compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
 
-The same 30-step budget at NFP1 did not reach the aspect/iota constraints.
-NFP3 passed geometry checks but worsened coarse mean Q by 191%; NFP4 improved
-independently refined mean Q by 27.46%. A small mapped residual alone is
-therefore insufficient: retain only candidates that pass the separate NEO screen.
-The two-period β≈0.5% continuation improves coarse mean Q by another 26.6% in
-three iterations; finite-beta particles have not been checked.
+QH4 and QA2 have lower effective ripple. The mapped two-period field loses fewer alphas
+than QA2 (6.73% versus 24.12%); its difference from QH4 (7.97%) is unresolved within
+sampling uncertainty. All candidates target the same aspect ratio and iota floor;
+actual transforms differ, and only the mapped runs impose the mirror ceiling.
 
-Stage-2 fitting of the four-period vacuum candidate gives two unique coils,
-0.674% dense normal-field RMS error and a converged cold free-boundary solve
-within 4.4 mm of the target. Coil clearance and spacing exceed half the minor
-radius, and maximum curvature times minor radius is 0.697. These geometric checks do not qualify an engineering design.
-`examples/optimization/single_stage_optimization_pwO.py` uses these coil controls
-for a finite-beta prefit (`vmex[coils,freeb,neoclassical]`). Its NFP2 finite-beta prefit remains unqualified (4.06% normal-field error,
-9.77% pressure-jump RMS); the acceptance gate stops it before joint optimization.
-See the [workflow](docs/reference/optimization.rst) and [physics](docs/explanation/confinement.rst).
+Two unique coils reproduce the four-period vacuum boundary with 0.674% normal-field
+RMS error; a cold free-boundary solve stays within 4.4 mm of the target.
+The two-period finite-beta coil fit still misses its field-error limits and stops before joint optimization.
+
+Examples: [vacuum](examples/optimization/pwO_optimization.py),
+[finite beta](examples/optimization/pwO_optimization_finite_beta.py),
+[single stage](examples/optimization/single_stage_optimization_pwO.py).
+[Physics](docs/explanation/confinement.rst) · [workflow](docs/reference/optimization.rst) ·
+[figure generator](docs/_static/figures/sources/make_low_transport_figure.py).
 
 ### Free boundary with coils
 
