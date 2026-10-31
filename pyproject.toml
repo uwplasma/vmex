@@ -78,10 +78,10 @@ optimizers = [
 ]
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
-# 1.0.6 is the first release that keeps the sine Boozer spectra, so LASYM
-# equilibria get an effective ripple (NEO_JAX #7).
+# 1.1.1 supplies rational-surface validity diagnostics for optimization screens.
 neoclassical = [
-  "neo-jax>=1.0.6",
+  "neo-jax>=1.1.1",
+  "booz_xform_jax>=0.5.0",
   "dkx>=2.8.0",
 ]
 # Virtual-casing fields and adjoints; not a NESTOR equilibrium adjoint.

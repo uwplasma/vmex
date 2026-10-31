@@ -769,6 +769,74 @@
         "README.md"
       ],
       "note": "RMS force over RMS pressure gradient by region on a held-out grid, before and after the prescribed-current polish of the finite-beta QA (laptop defaults: mpol 5, ntor 4, ns 51, 150 L-BFGS iterations). Lossless WebP; rerunning the command reproduces these bytes."
+    },
+    {
+      "path": "docs/_static/figures/readme_low_transport.webp",
+      "sha256": "74bf9bec1e7915ce32421c6a8337e6594d6ff4d648774effbae0d003899ee3ff",
+      "bytes": 71544,
+      "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
+      "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-10-31",
+      "hardware": null,
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Retained vacuum comparison from independently refined WOUT, Boozer, NEO and particle outputs supplied to the generator. Data are not bundled. NS103/M7N7, Boozer band32, NEO acc_req=.005, 256 paired 3.52 MeV alphas at s=.5 for 10 ms at 6 T / 1.7 m; unfilled contours. Rendering performs no new physics calculation."
+    },
+    {
+      "path": "docs/_static/figures/readme_low_transport_nfp.webp",
+      "sha256": "2acf5e2791edc893079497c0aa11e613929dff958ac60dd682c864fcffdaca21",
+      "bytes": 188428,
+      "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
+      "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-10-31",
+      "hardware": null,
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "NFP1 and NFP3 use QA-seeded, NEO-backtracked constructions; NFP1 has physical n<=4. Their bottom panels show accepted/rejected step fractions. NFP2 and NFP4 show direct trials and accepted-iteration objectives. All 3D boundaries use |B|, with unfilled VMEC-angle contours. Requires sibling mapped/ experiment outputs."
+    },
+    {
+      "path": "docs/_static/figures/readme_low_transport_comparison.webp",
+      "sha256": "9bda569405da7d7126162da57147350efb83ef34beac0a44c40eb90271d8a05b",
+      "bytes": 49690,
+      "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
+      "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-10-31",
+      "hardware": null,
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Available matched NEO and particle comparisons from qualification/summary.json; unfinished cases are labeled."
+    },
+    {
+      "path": "docs/_static/figures/readme_low_transport_coils.webp",
+      "sha256": "86daf5885542df86ff7113f4928977e388c44e4d3359b4c98074b782cdb19f0f",
+      "bytes": 74226,
+      "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
+      "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-10-31",
+      "hardware": null,
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Four-period pwO vacuum and finite-beta held-coil equilibria. Requires private qualification and sibling stage2/public-warm-nfp4-final and stage2/public-warm-finite-tight evidence. Both designs pass engineering and cold free-boundary checks; the finite-beta transport tradeoff is stated in the README."
     }
   ]
 }

@@ -734,7 +734,7 @@ def require_x64() -> None:
 # Checked where each is first used, so that an environment left behind by
 # `git pull` over an editable install fails with the fix, not a TypeError.
 OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.11",
-                     "neo-jax": "1.0.6", "gkx": "2.6.0",
+                     "neo-jax": "1.1.1", "gkx": "2.6.0",
                      "dkx": "2.8.0"}
 
 

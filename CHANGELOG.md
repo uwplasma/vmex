@@ -4,9 +4,9 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- Correct the single-stage QA flux sign and finite-pressure coil-current fit.
-  Share verification helpers and reject nonfinite metrics in ESSOS examples.
-- Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid.
+- Add pwO vacuum, finite-beta and coil examples with independent transport checks.
+- Refactor finite-beta QA and fix flux/current calibration; skip vacuum VC and verify final-grid free-boundary convergence.
+- Fix constructed-QI first-wall interpolation under a shifted toroidal origin.
 
 ## 0.12.0 - 2026-10-21
 

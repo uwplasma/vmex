@@ -112,6 +112,8 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
+    "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
+    "examples/optimization/single_stage_optimization_pwO.py": "requires the finite-beta continuation; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
@@ -175,6 +177,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QH_optimization_bootstrap.py",
     "examples/optimization/QI_maxJ_continuation.py",
     "examples/optimization/QI_optimization.py",
+    "examples/optimization/pwO_optimization.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
     "examples/optimization/QI_optimization_jaxopt.py",
@@ -1072,6 +1075,29 @@ def test_qi_optimization_example(tmp_path):
     assert totals is not None
     assert all(np.isfinite(float(value)) for value in totals.groups())
     assert (tmp_path / "wout_QI_optimized.nc").exists()
+
+
+@pytest.mark.full
+def test_low_transport_example(tmp_path):
+    pytest.importorskip("booz_xform_jax")
+    pytest.importorskip("neo_jax")
+    source = DATA_DIR / "input.minimal_seed_nfp4"
+    original = source.read_bytes()
+    _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
+    outdir = tmp_path / "low_transport"
+    summary = json.loads((outdir / "summary.json").read_text())
+    assert summary["status"] == "completed" and not summary["particle_qualified"]
+    assert len(summary["iterations"]) <= 2
+    assert {row["mode"] for row in summary["iterations"]} == {1, 2}
+    assert summary["seed_perturbation_m"] == .05/6
+    assert min(row["cost"] for row in summary["evaluations"]) < summary["evaluations"][0]["cost"]
+    assert source.read_bytes() == original
+    for name in ("input.seed", "wout_seed.nc", "input.mode1", "input.mode2"):
+        assert (outdir / name).exists()
+    if "selected_evaluation" in summary:
+        assert summary["evaluations"][summary["selected_evaluation"]]["feasible"]
+        assert len(summary["baseline_Q"]) == len(summary["trial_Q"]) == 3
+        assert (outdir / "input.trial").exists()
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve
