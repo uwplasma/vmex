@@ -26,6 +26,13 @@ def coil_field(coils):
     return lambda points: jax.vmap(field.B)(points.reshape(-1, 3)).reshape(points.shape)
 
 
+def _resample_coils(coils, n_segments):
+    """Evaluate unchanged Fourier curves on an independent geometry grid."""
+    geometry = coils.copy()
+    geometry.n_segments = max(n_segments, coils.n_segments)
+    return geometry
+
+
 def common_current_scale(coil_B, external_target_B, weights):
     """Area-weighted least-squares common current factor for a fixed target.
 
@@ -214,12 +221,13 @@ def _clearance(gamma, points):
 
 
 def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
-                  free_ns=(16, 51), free_ftol=1e-12, verbose=True):
+                  free_ns=(16, 51), free_ftol=1e-12, geometry_segments=384, verbose=True):
     """Save the design, re-solve finely, then cold-solve the held free boundary.
 
     Returns ``(equilibrium, surface, metrics, free_check)``. Free-boundary
     metrics are provisional unless the final grid converged with vacuum data.
     Flux, pressure, and current profiles are unchanged in both checks.
+    Coil engineering metrics use at least 384 points per Fourier curve.
     """
     from essos.fields import BiotSavart
     from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
@@ -242,13 +250,14 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
         inp, coils, equilibrium.solution, equilibrium.solver_context, 61, 64,
         None if _vacuum_input(inp) else vc.plan_vc_precision(data, digits=joint.vc_digits),
         digits=joint.vc_digits))
-    gamma, points = np.asarray(coils.gamma), np.asarray(surface.gamma).reshape(-1, 3)
+    geometry = _resample_coils(coils, max(384, geometry_segments))
+    gamma, points = np.asarray(geometry.gamma), np.asarray(surface.gamma).reshape(-1, 3)
     metrics = {"B.n/B RMS": float(np.sqrt(np.sum(area * normal**2))),
                "B.n/B max": float(np.max(np.abs(normal))),
                "coil-surface distance": _clearance(gamma, points),
                "coil-coil distance": min(float(cKDTree(gamma[i]).query(gamma[j])[0].min())
                                          for i in range(len(gamma)) for j in range(i + 1, len(gamma))),
-               "maximum curvature": float(np.max(np.asarray(coils.curvature))),
+               "maximum curvature": float(np.max(np.asarray(geometry.curvature))),
                "min |iota|": float(opt.min_abs_iota(equilibrium.state, equilibrium.runtime)),
                "aspect": float(opt.aspect_ratio(equilibrium.state, equilibrium.runtime)),
                "beta": float(opt.volume_average_beta(equilibrium.state, equilibrium.runtime)),
