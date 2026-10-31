@@ -78,6 +78,10 @@ started = time.perf_counter()
 print("Running single_stage_optimization_pwO.py")
 inp = vj.VmecInput.from_file(INPUT_FILE)
 NFP = inp.nfp
+reference = vj.VmecInput.from_file(INPUT_FILE.with_name("input.seed"))
+reference_wout = vj.read_wout(INPUT_FILE.with_name("wout_seed.nc"))
+if reference.nfp != NFP:
+    raise ValueError("The transport reference must have the same field periods")
 if (inp.lasym or inp.lfreeb or inp.phiedge <= 0
         or inp.rbc[inp.ntor, 0] != 1 or inp.curtor != 0 or inp.ncurr != 1):
     raise ValueError("Use the candidate at its original flux and length scale with zero prescribed current")
@@ -285,15 +289,12 @@ if free["converged"]:
     print("[verify] matched NEO on the cold held-coil equilibrium", flush=True)
     # Measure the retained transport benefit against the preceding pwO run's
     # seed, keeping this design's physical flux, pressure and current profiles.
-    reference = vj.VmecInput.from_file(INPUT_FILE.with_name("input.seed")).change_resolution(
-        mpol=inp.mpol, ntor=inp.ntor)
-    if reference.nfp != NFP:
-        raise ValueError("The transport reference must have the same field periods")
+    reference = reference.change_resolution(mpol=inp.mpol, ntor=inp.ntor)
     reference = replace(inp, rbc=reference.rbc, zbs=reference.zbs,
         ns_array=np.array([free["final_ns"]]), ftol_array=np.array([1e-12]),
         niter_array=np.array([8000]))
     held_baseline = opt.solve_equilibrium(reference, initial_state=restart_state(
-        vj.read_wout(INPUT_FILE.with_name("wout_seed.nc")), reference), raise_on_max_iterations=True)
+        reference_wout, reference), raise_on_max_iterations=True)
     held_surfaces = np.asarray(mapped.compute_state(held_baseline.state, held_baseline.runtime)["s_b"])
     held_baseline_Q = screen_transport(held_baseline.wout, held_surfaces)
     held_wout = vj.read_wout(f"wout_{prefix}_free_check.nc")
