@@ -229,6 +229,14 @@ throughput, is the binding constraint; ``None`` is the widest and the most
 memory-hungry. ``adjoint_tol`` and ``adjoint_maxiter`` control the certified
 Krylov solves.
 
+``block_factor="auto"`` is the default factor backend of the block lane:
+cyclic reduction when the implicit work runs on a GPU, the normalized Thomas
+sweep otherwise. Pass ``"thomas"`` or ``"cyclic_reduction"`` to
+:meth:`~vmex.core.problem.VmecProblem.from_tuples` (or
+:func:`~vmex.core.optimize.least_squares`) to force one; the Jacobians agree
+to round-off. The rule and its measured basis are in
+:doc:`/reference/performance`.
+
 ``derivative_method="finite_difference"`` accepts opaque host objectives. It
 uses independent equilibrium probes and ``workers=None`` automatically uses
 the CPUs available to the process. Select ``fd_method="2-point"`` or

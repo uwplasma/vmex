@@ -161,6 +161,7 @@ from jax.flatten_util import ravel_pytree
 from solvax import (
     auto_chunk_size,
     block_tridiag_matvec,
+    block_cyclic_reduction_factor,
     block_thomas_factor,
     block_thomas_solve,
     chunk_map,
@@ -169,7 +170,8 @@ from solvax import (
 )
 
 from .device import (
-    AUTO, _put_numeric_leaves, commit_to_single_device, resolve_implicit_device,
+    AUTO, _put_numeric_leaves, commit_to_single_device, resolve_block_factor,
+    resolve_implicit_device,
 )
 from .errors import AdjointSolveError, VmecError
 from .fields import magnetic_fields, metric_elements
@@ -372,6 +374,12 @@ class ImplicitConfig:
     #: gradient evaluated outside such a context creates its constants on
     #: JAX's default device and mixes devices with the committed state.
     device: Any = None
+    #: block-tridiagonal factor backend of the raw-force and free-boundary
+    #: bulk systems: ``"auto"`` (GPU: ``"cyclic_reduction"``, otherwise
+    #: ``"thomas"``, from ``device``; see
+    #: :func:`vmex.core.device.resolve_block_factor`), ``"thomas"`` or
+    #: ``"cyclic_reduction"``.  Both give the same solves to round-off.
+    block_factor: str = AUTO
 
     def _structure(self) -> tuple:
         """Content token without the adjoint tolerances (cached)."""
@@ -415,6 +423,7 @@ def make_config(
     max_fsq_ratio: float = 1.0e2,
     hot_restart: bool = False,
     device: Any = None,
+    block_factor: str = AUTO,
 ) -> ImplicitConfig:
     """Build the static config; ``resolution`` is the (final-stage) grid.
 
@@ -425,7 +434,8 @@ def make_config(
 
     ``device`` is the already-RESOLVED placement device (pass the result of
     :func:`vmex.core.device.resolve_implicit_device`, not a policy string) —
-    see :class:`ImplicitConfig.device`.
+    see :class:`ImplicitConfig.device`.  ``block_factor`` selects the
+    block-factor backend (:class:`ImplicitConfig.block_factor`).
     """
     if multigrid and ns is None:
         ns = int(np.max(np.asarray(inp.ns_array)))
@@ -436,6 +446,7 @@ def make_config(
         max_iterations = int(np.asarray(inp.niter_array).ravel()[-1])
     if not np.isfinite(max_fsq_ratio) or max_fsq_ratio <= 0.0:
         raise ValueError("max_fsq_ratio must be finite and positive")
+    resolve_block_factor(block_factor)  # validate
     refine_tol = float(refine_tol)
     if not refine_tol > 0.0:
         raise ValueError("refine_tol must be positive or numpy.inf")
@@ -452,6 +463,7 @@ def make_config(
         refine_tol=refine_tol,
         max_fsq_ratio=float(max_fsq_ratio),
         hot_restart=bool(hot_restart), device=device,
+        block_factor=block_factor,
     ))
 
 
@@ -2799,6 +2811,18 @@ def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk
     return lower.at[0].set(0.0), diagonal, upper.at[-1].set(0.0)
 
 
+def _block_factor(lower: Array, diagonal: Array, upper: Array,
+                  cfg: ImplicitConfig):
+    """Factor scaled bands with the backend ``cfg.block_factor`` resolves to.
+
+    Both return values are accepted by :func:`solvax.block_thomas_solve`
+    (primal and transpose); the choice is static at trace time.
+    """
+    if resolve_block_factor(cfg.block_factor, cfg.device) == "cyclic_reduction":
+        return block_cyclic_reduction_factor(lower, diagonal, upper)
+    return block_thomas_factor(lower, diagonal, upper, normalized=True)
+
+
 def _raw_block_system(
     params: ImplicitParams,
     cfg: ImplicitConfig,
@@ -2978,8 +3002,8 @@ def _raw_block_system(
         diagonal_scaled = diagonal_r * column_scale[:, None, :]
         upper_scaled = upper_r * column_scale[jnp.minimum(
             jnp.arange(ns) + 1, ns - 1)][:, None, :]
-        factors = (block_thomas_factor(
-            lower_scaled, diagonal_scaled, upper_scaled, normalized=True)
+        factors = (_block_factor(
+            lower_scaled, diagonal_scaled, upper_scaled, cfg)
                    if factor else None)
 
     def band_operator(tangent):

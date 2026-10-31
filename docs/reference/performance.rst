@@ -218,6 +218,44 @@ throughput crossover does not transfer.  The placement policy and how to
 measure on your own hardware are in :doc:`/howto/run-on-gpu` and
 :doc:`/explanation/architecture`.
 
+Block-factor backend (2026-10-23)
+---------------------------------
+
+The block-tridiagonal factorization behind the implicit Jacobian and adjoint
+lanes (``block_factor``) has two backends: ``"thomas"``, the sequential Schur
+sweep, and ``"cyclic_reduction"``, which eliminates every odd block row at
+once down to 8 rows and finishes with Thomas
+(:func:`solvax.block_cyclic_reduction_factor`).  Both retain partial pivoting
+inside the blocks and give the same certified solves to round-off.  The
+default ``"auto"`` picks cyclic reduction when the implicit work runs on a
+GPU and Thomas otherwise.  The platform is that of ``ImplicitConfig.device``
+(the resolved placement the implicit lanes commit to), else of an active
+``jax.default_device``, else ``jax.default_backend()``; because high-level
+optimization pins implicit work to the CPU, ``"auto"`` reaches cyclic
+reduction there only with an explicit ``device="gpu"`` (or JAX placement).
+Pass ``block_factor="thomas"`` or ``"cyclic_reduction"`` to
+:func:`vmex.core.optimize.make_problem`,
+:func:`~vmex.core.optimize.least_squares`,
+:func:`vmex.core.implicit.make_config` or
+:func:`vmex.core.freeboundary_implicit.make_free_boundary_config`
+to override it.
+
+Measured by SOLVAX's paired kernel benchmark (cyclic reduction divided by
+normalized Thomas, 150-row blocks of the QA ``max_mode=2`` system):
+
+===============  ==============  ===========  ==============
+Device           Factor          Apply        Transpose apply
+===============  ==============  ===========  ==============
+RTX A4000        0.4-0.6x        0.2-0.6x     0.1-0.4x
+CPU              1.3-1.6x        --           --
+===============  ==============  ===========  ==============
+
+At 384-row blocks the A4000 factor ratio is about 1.0x, so the GPU gain
+shrinks as the dense block work dominates.  The cutoff (2 to 8) changes
+little and is fixed at 8.  ``python benchmarks/block_solver.py --block-factor
+thomas`` (or ``cyclic_reduction``) reproduces the stage and workflow timings
+for either backend.
+
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
 
