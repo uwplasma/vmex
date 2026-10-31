@@ -293,6 +293,7 @@ transform and a mirror limit keep the search away from weak-transform or extreme
 The two-period result lowers $Q = \epsilon_{\mathrm{eff}}^{3/2}$ by **52.6%** and alpha losses from **100% to 6.73%**.
 The particle comparison uses 256 paired 3.52 MeV alphas over 10 ms at a common
 volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lowers coarse Q another 26.6%.
+Finite-beta boundary polishes at NFP1, NFP3 and NFP4 are rejected by the NEO screen.
 
 ![NFP 1–4 boundaries colored by magnetic-field strength, unfilled field contours and objective histories](docs/_static/figures/readme_low_transport_nfp.webp)
 
@@ -327,7 +328,7 @@ Examples: [vacuum](examples/optimization/pwO_optimization.py),
 Joint vacuum optimization lowers the objective by 9.0%; the coils retain a 14.6%
 mean-Q reduction from the near-circle seed. The cold free boundary is 5.25 mm
 from the target. At β≈0.5%, the fit reaches 0.592% normal-field RMS error and
-4.90 mm displacement. Its mean Q improves 7.5%, with a 2.3% inner-radius increase
+4.90 mm displacement. Its mean Q improves 7.2%, with a 2.3% inner-radius increase
 that fails the strict transport screen.
 
 ### Free boundary with coils

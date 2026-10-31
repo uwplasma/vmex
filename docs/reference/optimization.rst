@@ -708,6 +708,10 @@ The zero-current pressure profile is proportional to ``1-s`` and targets
 0.5% volume-average beta. The saved vacuum WOUT starts pressure calibration;
 each pressure change is followed by a nonlinear equilibrium solve. The
 NFP2 continuation improves coarse mean Q by 26.6% in three iterations.
+NFP1, NFP3 and NFP4 boundary polishes lower contour variance but fail NEO,
+including step fractions down to 1/64. The script exits with an error and
+preserves the calibrated ``input.seed`` and ``wout_seed.nc``; its
+``input.trial`` is not accepted. Smaller steps cannot repair every proxy direction.
 Finite-beta particle confinement and MHD stability remain unverified.
 
 ``single_stage_optimization_pwO.py`` first fits coils to the fixed plasma,
