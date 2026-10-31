@@ -45,8 +45,9 @@ links to the module that documents it.
 - :func:`~vmex.core.turbulence.gk_fieldline_geometry_from_wout` — GK
   field-line geometry from any compatible wout, without a solve
 - :func:`~vmex.core.scaling.scale_input` / :func:`~vmex.core.scaling.scale_wout`
-  / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms;
-  :func:`~vmex.core.scaling.match_b0` sets ``|B|`` on the axis
+  / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms
+- :func:`~vmex.core.scaling.axis_field` / :func:`~vmex.core.scaling.match_b0` —
+  ``|B|`` on the magnetic axis, and the scaled deck that sets it
 
 **High-order reconstruction and strong-force certificate**
 
