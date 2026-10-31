@@ -1402,6 +1402,34 @@ def test_single_stage_examples_use_general_surface_output_and_movie_colors() -> 
         assert "MOVIE_SURFACE_COLOR" in source and "surface_color=" in source
 
 
+@pytest.mark.parametrize("script", [
+    "single_stage_optimization.py",
+    "single_stage_optimization_augmented_lagrangian.py",
+    "single_stage_optimization_least_squares.py",
+    "single_stage_free_boundary_optimization.py",
+    "single_stage_free_boundary_optimization_finite_beta.py",
+])
+def test_single_stage_example_verdict_rejects_nonfinite_metrics(script):
+    """Exercise each shipped verdict without compiling its equilibrium solver."""
+    path = EXAMPLES / "optimization" / script
+    tree = ast.parse(path.read_text(), filename=str(path))
+    verdict = next(node for node in tree.body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "unmet"
+                           for target in node.targets))
+    code = compile(ast.Module(body=[verdict], type_ignores=[]), str(path), "exec")
+    checks = [(f"{side} {value}", value, 1., side)
+              for side in ("below", "above") for value in (np.nan, np.inf, -np.inf)]
+    checks += [("valid lower", 1., 1., "below"), ("valid upper", 1., 1., "above"),
+               ("missed lower", .5, 1., "below"), ("missed upper", 2., 1., "above")]
+    namespace = {"np": np, "checks": checks}
+    exec(code, namespace)
+    unmet = namespace["unmet"]
+    assert len(unmet) == 8
+    assert all(any(message.startswith(f"{name} ") for message in unmet)
+               for name, *_ in checks[:6] + checks[-2:])
+    assert not any("valid" in message for message in unmet)
+
+
 def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
     """Targets are constraints checked at the end; a missed one is a non-zero exit."""
     fixed = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
