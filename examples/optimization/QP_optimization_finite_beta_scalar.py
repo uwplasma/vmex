@@ -106,6 +106,9 @@ inp = replace(inp, rbc=rbc, zbs=zbs, pmass_type="power_series", am=am,
 equilibrium = opt.solve_equilibrium(inp)
 closed_form_beta = float(equilibrium.wout.betatotal)
 inp = replace(inp, phiedge=closed_form_phiedge * np.sqrt(closed_form_beta / TARGET_BETA))
+# Hold the seed's plasma volume at fixed major radius (TVOLUME with
+# LVOLUME_RFIX), so the optimizer cannot change the plasma size:
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)
 equilibrium = opt.solve_equilibrium(inp, initial_state=equilibrium.solution)
 print(f"PHIEDGE: closed form {closed_form_phiedge:.6f} Wb gives beta "
       f"{closed_form_beta:.4%}; corrected {inp.phiedge:.6f} Wb gives beta "

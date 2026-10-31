@@ -31,6 +31,7 @@ from vmex.core.geometry import (
 )
 from vmex.core.input import VmecInput
 from vmex.core.setup import (
+    boundary_volume,
     rescale_boundary_volume,
     _geometry_state_arrays,
     interior_guess,
@@ -287,5 +288,8 @@ def test_tvolume_rescales_boundary_to_the_exact_volume(rfix, tmp_path):
     rbc = jnp.asarray(inp.rbc)
     np.testing.assert_allclose(volume(rbc), 4.0, rtol=1e-13)
     assert float(jnp.max(jnp.abs(jax.grad(volume)(rbc)))) < 1e-12
-    held = rescale_boundary_volume(rbc, inp.rbs, inp.zbc, inp.zbs, inp)[0][:, 0]
-    assert np.allclose(held, rbc[:, 0]) == rfix
+    scaled = rescale_boundary_volume(rbc, inp.rbs, inp.zbc, inp.zbs, inp)
+    assert np.allclose(scaled[0][:, 0], rbc[:, 0]) == rfix
+    rescaled = dataclasses.replace(inp, **dict(zip(("rbc", "rbs", "zbc", "zbs"),
+                                                   map(np.asarray, scaled))))
+    np.testing.assert_allclose(boundary_volume(rescaled), 4.0, rtol=1e-13)
