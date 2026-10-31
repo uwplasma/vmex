@@ -330,3 +330,125 @@ def test_physical_metrics_reject_invalid_full_surface_field(monkeypatch, low, hi
     result = mapped.physical_metrics(eq, bmax_ref=[3.], aspect_bounds=(9.9, 10.1), iota_floor=.41,
         fields=({"total": .01, "valid": np.array([True])}, [low], [high], [mirror]))
     assert result["feasible"] is feasible
+
+
+def test_one_period_representation_retains_physical_n4_and_axis():
+    from dataclasses import replace
+    from pathlib import Path
+    from vmex.core.input import VmecInput
+    from vmex.core.pwo import one_field_period
+
+    inp = VmecInput.from_file(Path(__file__).resolve().parents[1] /
+                              "examples/data/input.minimal_seed_nfp4")
+    rbc, zbs, axis = inp.rbc.copy(), inp.zbs.copy(), inp.raxis_c.copy()
+    rbc[inp.ntor+2, 2], zbs[inp.ntor-2, 1], axis[2] = .013, -.009, .002
+    inp = replace(inp, nfp=2, rbc=rbc, zbs=zbs, raxis_c=axis)
+    converted = one_field_period(inp)
+    assert converted.nfp == 1
+    assert converted.rbc[inp.ntor+4, 2] == .013
+    assert converted.zbs[inp.ntor-4, 1] == -.009
+    assert converted.raxis_c[4] == .002
+    phi = np.linspace(0, 2*np.pi, 37)
+    np.testing.assert_allclose(.013*np.cos(2*.7-2*inp.nfp*phi),
+                              converted.rbc[inp.ntor+4, 2]*np.cos(2*.7-4*phi))
+    rbc[inp.ntor+3, 1] = .001
+    with pytest.raises(ValueError, match="retain all physical"):
+        one_field_period(replace(inp, rbc=rbc))
+
+
+@pytest.mark.parametrize("nfp", [2, 3])
+def test_qa_precursor_retains_best_feasible_trial_and_native_weight(tmp_path, monkeypatch, nfp):
+    from types import SimpleNamespace
+    import scipy.optimize
+    import vmex as vj
+    from vmex import optimize as opt
+    from vmex.core.pwo import qa_precursor
+
+    monkeypatch.setattr(jax, "jit", lambda f: f)
+    monkeypatch.setattr(vj, "write_wout", lambda path, w: path.write_text(str(w)))
+    monkeypatch.setattr(opt, "QuasisymmetryRatioResidual", lambda *a, **k: SimpleNamespace(
+        residuals_state=lambda state, rt: jnp.array([2*state]),
+        total_state=lambda state, rt: 4*state**2))
+    def deck(x):
+        return SimpleNamespace(nfp=nfp, to_indata=lambda path: path.write_text(str(x)))
+
+    def eq(x):
+        return SimpleNamespace(state=float(x[0]), runtime=None, wout=float(x[0]))
+    captured = {}
+
+    def problem_from_tuples(inp, terms, **kwargs):
+        residual = terms[0][0]
+        captured["initial"] = np.asarray(residual(1., None))
+        problem = SimpleNamespace(x0=np.array([1.]), residual=lambda x: residual(x[0], None),
+            equilibrium_from_x=eq, input_from_x=lambda x: deck(x[0]))
+        problem.subproblem = lambda max_mode, x: SimpleNamespace(
+            x0=x, scales=np.ones(1), embed=lambda y: y, residual_jac=None, mode=max_mode)
+        return problem
+
+    monkeypatch.setattr(opt.VmecProblem, "from_tuples", problem_from_tuples)
+    calls = []
+
+    def least_squares(fun, x0, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            fun(np.array([.2]))  # best feasible trial before the rejected terminal iterate
+        x = np.array([.6 if len(calls) == 1 else .1])
+        fun(x)
+        return SimpleNamespace(x=x, message="bounded fake optimizer")
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", least_squares)
+    mapped = SimpleNamespace(surfaces=np.array([.25, .5, .75]),
+        diagnostics_state=lambda state, rt: (None, None, None, jnp.array([.19])),
+        physical_metrics=lambda eq, **kwargs: dict(raw=1., feasible=eq.state >= .2))
+    inp, selected = qa_precursor(deck(1.), eq([1.]), mapped,
+        lambda state, rt: jnp.zeros(1), tmp_path, maxiter=1, optimizer_ftol=.001,
+        mirror_limit=.2, mirror_weight=100.,
+        physical_options=dict(aspect_bounds=(5.9, 6.1), iota_floor=.41))
+    assert selected.state == .2
+    assert (tmp_path / "input.mode2").read_text() == "0.1"
+    assert (tmp_path / "input.trial").read_text() == "0.2"
+    expected = np.sqrt(2)*(2 if nfp == 2 else 1)
+    assert captured["initial"][0] == pytest.approx(expected)
+    assert len(captured["initial"]) == (2 if nfp == 2 else 3)
+
+
+@pytest.mark.parametrize("rejection", [None, "physics", "variance", "unusable"])
+def test_transport_backtrack_requires_every_radius_physics_and_variance(tmp_path, monkeypatch, rejection):
+    from types import SimpleNamespace
+    import vmex as vj
+    from vmex.core import neoclassical
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+    from vmex.core.pwo import transport_backtrack
+
+    monkeypatch.setattr(vj, "write_wout", lambda path, w: path.write_text(str(w)))
+    # Half step improves the mean but worsens the outermost surface.
+    monkeypatch.setattr(neoclassical, "screen_transport", lambda w, surfaces:
+        np.array([.1, .1, 1.01]) if w == .5 else np.full(3, .5))
+    def equilibrium(x):
+        if rejection == "unusable" and x[0] in (1., .5):
+            raise RuntimeError("decision vector did not produce a usable VMEC equilibrium")
+        return SimpleNamespace(wout=x[0])
+
+    problem = SimpleNamespace(residual=lambda x: np.array([1-x[0]]),
+        equilibrium_from_x=equilibrium,
+        input_from_x=lambda x: SimpleNamespace(to_indata=lambda path: path.write_text(str(x[0]))))
+
+    def inspect(eq):
+        raw = (1-eq.wout)**2 if rejection != "variance" else 1+eq.wout
+        return np.array([1-eq.wout]), dict(raw=raw, feasible=rejection != "physics")
+
+    monitor = FeasibleCandidateMonitor(problem, inspect, tmp_path, maxiter=1)
+    start, proposal = np.array([0.]), np.array([1.])
+    monitor(start)
+    monitor(proposal)
+    accepted = transport_backtrack(monitor, start, proposal, np.ones(3), [.25, .5, .75])
+    assert (tmp_path / "input.direction").read_text() == "1.0"
+    assert accepted == (rejection in (None, "unusable"))
+    if accepted:
+        assert monitor.report["accepted_alpha"] == .25
+        assert (tmp_path / "input.trial").read_text() == "0.25"
+        assert monitor.best[1][0] == .25
+        assert not monitor.report["backtracking"][0]["accepted"]
+    else:
+        assert len(monitor.report["backtracking"]) == 6
+        assert not monitor.report["transport_screen_passed"]

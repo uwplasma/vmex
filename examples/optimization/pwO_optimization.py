@@ -3,6 +3,7 @@
 Aspect ratio, signed iota and mirror limits constrain the shape; NEO
 screens the selected equilibrium. Requires vmex[neoclassical]."""
 import os
+import gc
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,8 +17,9 @@ from vmex import optimize as opt
 from vmex._compat import require_optional
 from vmex.core.monitoring import FeasibleCandidateMonitor
 from vmex.core.neoclassical import screen_transport, transport_improves
-from vmex.core.pwo import MappedPwOResidual
+from vmex.core.pwo import MappedPwOResidual, one_field_period, qa_precursor, transport_backtrack
 from vmex.core.implicit import iota_profile
+from vmex.core.restart import restart_state
 
 NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.minimal_seed_nfp4"
@@ -59,26 +61,58 @@ def inspect_candidate(eq):
 
 
 vj.configure()
+if (OUTPUT_DIR / "summary.json").exists():
+    raise ValueError("Use a new output directory for each optimization")
 require_optional("neo-jax", "low-transport NEO screen")
 print("[setup] near-circular vacuum torus, boundary modes 1 then 2", flush=True)
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = 1/ASPECT_TARGET
 rbc[inp.ntor+1, 1], zbs[inp.ntor+1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-inp = replace(inp, nfp=NFP, rbc=rbc, zbs=zbs, phiedge=.083*(10/ASPECT_TARGET)**2)
+inp = replace(inp, nfp=2 if NFP == 1 else NFP, rbc=rbc, zbs=zbs, phiedge=.083*(10/ASPECT_TARGET)**2)
 inp = replace(inp, ns_array=np.array([NS]), ftol_array=np.array([FTOL]),
               niter_array=np.array([NITER]), delt=.5).change_resolution(
                   mpol=MPOL, ntor=NTOR, ntheta=16, nzeta=14)
+# NFP1 starts in the twofold near-circle subspace; keep physical n=2.
+precursor_input = inp
+if NFP == 1:
+    inp = one_field_period(inp)
 seed = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
+circle = seed
 mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
+physical_options = dict(aspect_bounds=(ASPECT_TARGET-.1, ASPECT_TARGET+.1), iota_floor=.41)
+problem_options = dict(use_ess=True, ess_alpha=1.2, forward_ftol=FTOL,
+    forward_max_iterations=NITER, refine_tol=FTOL, adjoint_tol=1e-8, max_fsq_ratio=1.)
+if NFP in (1, 3):
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    inp.to_indata(OUTPUT_DIR / "input.seed")
+    vj.write_wout(OUTPUT_DIR / "wout_seed.nc", circle.wout)
+    qa_seed = (opt.solve_equilibrium(precursor_input, raise_on_max_iterations=True)
+               if NFP == 1 else seed)
+    inp, seed = qa_precursor(precursor_input, qa_seed, mapped, geometry_residuals,
+        OUTPUT_DIR / "QA", maxiter=MAX_ITERATIONS, optimizer_ftol=OPTIMIZER_FTOL,
+        mirror_limit=MIRROR_LIMIT, mirror_weight=MIRROR_WEIGHT,
+        physical_options=physical_options, **problem_options)
+    if NFP == 1:
+        # Full QA2 max-mode-2 boundary retains physical n=4; vary n<=2 below.
+        inp = one_field_period(inp)
+        rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+        rbc[inp.ntor+1, 1], zbs[inp.ntor+1, 1] = -.001/ASPECT_TARGET, .001/ASPECT_TARGET
+        inp = replace(inp, rbc=rbc, zbs=zbs)
+        seed = opt.solve_equilibrium(inp, initial_state=restart_state(
+            replace(seed.wout, nfp=1), inp), raise_on_max_iterations=True)
+    jax.block_until_ready(seed.state)
+    jax.clear_caches()
+    gc.collect()
+    MAX_MODES, MAX_PARAMETER_CHANGE = [2], .25
+    MAX_ITERATIONS = 1 if ci_smoke else 5
 # Freeze only an automatic initial cost scale; field normalization stays live.
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
 actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
 print(f"[setup] initial pwO cost {initial_scale:.6g}; Boozer surfaces {actual_surfaces}")
 problem = opt.VmecProblem.from_tuples(
     inp, [(objective, 0., 1.)], max_mode=2, vary_major_radius=False,
-    use_ess=True, ess_alpha=1.2, restart_from=seed, forward_ftol=FTOL,
-    forward_max_iterations=NITER, refine_tol=FTOL, adjoint_tol=1e-8, max_fsq_ratio=1.)
+    restart_from=seed, **problem_options)
 # JIT shares the Boozer transform between the residual and independent field checks.
 diagnostics = jax.jit(lambda state, runtime: (objective(state, runtime),
                                              mapped.diagnostics_state(state, runtime)))
@@ -89,9 +123,11 @@ monitor = FeasibleCandidateMonitor(problem, inspect_candidate, OUTPUT_DIR,
     settings=dict(ns=NS, mpol=MPOL, ntor=NTOR, ftol=FTOL, niter=NITER))
 with monitor:
     x = problem.x0.copy()
+    start = x.copy()
     monitor(x)
-    problem.input_from_x(x).to_indata(OUTPUT_DIR / "input.seed")
-    vj.write_wout(OUTPUT_DIR / "wout_seed.nc", problem.equilibrium_from_x(x).wout)
+    seed_name = "pwo_seed" if NFP in (1, 3) else "seed"
+    problem.input_from_x(x).to_indata(OUTPUT_DIR / f"input.{seed_name}")
+    vj.write_wout(OUTPUT_DIR / f"wout_{seed_name}.nc", problem.equilibrium_from_x(x).wout)
 
     # Reuse one equilibrium/derivative compilation while exposing boundary modes in stages.
     for mode in MAX_MODES:
@@ -110,12 +146,19 @@ with monitor:
     monitor.save(stopping_reason=str(result.message),
                  transport_screen_passed=False)
     print("[verify] matched NEO screen of the best feasible candidate", flush=True)
-    if monitor.best is not None:
+    if NFP in (1, 3):
+        before = screen_transport(circle.wout, actual_surfaces)
+        monitor.save(baseline_Q=before.tolist(),
+            baseline="original near-circle; NFP1 retains the physical n2 harmonic", precursor="QA")
+        transport_backtrack(monitor, start, x, before, actual_surfaces)
+    elif monitor.best is not None:
         before = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_seed.nc"), actual_surfaces)
         after = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_trial.nc"), actual_surfaces)
         monitor.save(baseline_Q=before.tolist(), trial_Q=after.tolist(),
                      transport_screen_passed=transport_improves(before, after))
-        print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> {after.mean():.6g}")
+    if monitor.report["transport_screen_passed"]:
+        print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> "
+              f"{np.mean(monitor.report['trial_Q']):.6g}")
         for path in vj.plot_wout(OUTPUT_DIR / "wout_trial.nc", OUTPUT_DIR).values():
             print(f"Wrote {path}")
     monitor.save(status="completed")

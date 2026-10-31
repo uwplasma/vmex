@@ -15,7 +15,8 @@ import jax.numpy as jnp
 
 from .omnigenity import boozer_spectrum_state
 
-__all__ = ["squeezed_pwo_coordinates", "mapped_pwo_residual_from_boozer", "MappedPwOResidual"]
+__all__ = ["squeezed_pwo_coordinates", "mapped_pwo_residual_from_boozer", "MappedPwOResidual",
+           "one_field_period", "qa_precursor", "transport_backtrack"]
 
 
 def _require(condition, message):
@@ -252,3 +253,143 @@ class MappedPwOResidual:
     def total(self, eq):
         """Return the scalar objective on a converged equilibrium."""
         return self.total_state(eq.state, eq.runtime)
+
+
+def one_field_period(inp):
+    """Represent the same boundary/axis with NFP=1, retaining physical toroidal n.
+
+    The input resolution must accommodate every nonzero physical harmonic;
+    in particular an NFP=2 max-mode-2 precursor needs physical n=4.
+    """
+    from dataclasses import replace
+
+    coefficients = {}
+    for name in ("rbc", "zbs", "rbs", "zbc", "raxis_c", "zaxis_s", "raxis_s", "zaxis_c"):
+        old = np.asarray(getattr(inp, name))
+        new = np.zeros_like(old)
+        boundary = old.ndim == 2
+        for row in range(old.shape[0]):
+            n = row-inp.ntor if boundary else row
+            physical_n = n*inp.nfp
+            if abs(physical_n) > inp.ntor:
+                if np.any(old[row] != 0):
+                    raise ValueError("NTOR cannot retain all physical toroidal harmonics")
+            else:
+                new[physical_n+inp.ntor if boundary else physical_n] = old[row]
+        coefficients[name] = new
+    return replace(inp, nfp=1, **coefficients)
+
+
+def qa_precursor(inp, seed, mapped, geometry, outdir, *, maxiter, optimizer_ftol,
+                 mirror_limit, mirror_weight, physical_options, **problem_options):
+    """Checkpoint a native QA precursor through boundary modes 1 and 2.
+
+    NFP2 uses the unit-weight native QA residual and geometry guards. NFP3
+    uses automatic initial native-cost normalization and the mirror penalty.
+    Return the best feasible native-QA trial, including intermediate trials.
+    The precursor is separate from the later pure mapped-pwO optimization.
+    """
+    from .. import optimize as opt, write_wout
+    from scipy.optimize import least_squares
+    from .monitoring import FeasibleCandidateMonitor
+
+    native = opt.QuasisymmetryRatioResidual(mapped.surfaces, helicity_m=1, helicity_n=0)
+    scale = (float(native.total_state(seed.state, seed.runtime)) or 1.) if inp.nfp == 3 else 1.
+
+    def objective(state, runtime):
+        residuals = [native.residuals_state(state, runtime)/jnp.sqrt(scale), geometry(state, runtime)]
+        if inp.nfp == 3:
+            mirror = mapped.diagnostics_state(state, runtime)[3]
+            residuals.append(jnp.sqrt(mirror_weight)*jnp.maximum(mirror/(.9*mirror_limit)-1, 0))
+        return jnp.sqrt(2)*jnp.concatenate(residuals)
+
+    diagnostics = jax.jit(lambda state, rt: (objective(state, rt), native.total_state(state, rt),
+                                           mapped.diagnostics_state(state, rt)))
+
+    def inspect(eq):
+        residual, raw, fields = diagnostics(eq.state, eq.runtime)
+        metrics = mapped.physical_metrics(eq, **physical_options,
+            mirror_ceiling=mirror_limit if inp.nfp == 3 else 1., fields=fields)
+        metrics["mapped_raw"], metrics["raw"] = metrics["raw"], float(raw)
+        return np.asarray(residual), metrics
+
+    problem = opt.VmecProblem.from_tuples(inp, [(objective, 0., 1.)], max_mode=2,
+        vary_major_radius=False, restart_from=seed, **problem_options)
+    monitor = FeasibleCandidateMonitor(problem, inspect, outdir, maxiter=maxiter,
+                                       family="QA precursor", nfp=inp.nfp, initial_scale=scale)
+    with monitor:
+        x = problem.x0.copy()
+        monitor(x)
+        inp.to_indata(monitor.outdir / "input.seed")
+        write_wout(monitor.outdir / "wout_seed.nc", seed.wout)
+        for mode in (1, 2):
+            stage = problem.subproblem(max_mode=mode, x=x)
+            step = .02*np.asarray(stage.scales)
+            result = least_squares(lambda y: monitor(stage.embed(y)), stage.x0,
+                jac=stage.residual_jac, x_scale=step,
+                bounds=(stage.x0-5*step, stage.x0+5*step), max_nfev=5*maxiter+5,
+                ftol=optimizer_ftol, xtol=1e-10, gtol=1e-7,
+                callback=monitor.callback(mode), verbose=2)
+            x = stage.embed(result.x)
+            monitor(x)
+            problem.input_from_x(x).to_indata(monitor.outdir / f"input.mode{mode}")
+            write_wout(monitor.outdir / f"wout_mode{mode}.nc", problem.equilibrium_from_x(x).wout)
+        monitor.save(status="completed", stopping_reason=str(result.message))
+        if monitor.best is None:
+            raise RuntimeError("No physically feasible QA precursor; keep the original circle")
+        x = monitor.best[1]
+        return problem.input_from_x(x), problem.equilibrium_from_x(x)
+
+
+def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces):
+    """Accept the first dyadic pwO step passing physics and matched NEO guards.
+
+    ``start`` is the saved precursor; ``proposal`` is the full pwO optimizer
+    direction. A smaller mapped variance than the precursor and strict NEO
+    improvement on every radius versus the original circle are required.
+    Checkpoints keep the full direction even when its transport is rejected.
+    """
+    from .. import write_wout
+    from .neoclassical import screen_transport, transport_improves
+
+    problem = monitor.problem
+    initial = monitor.inspect(problem.equilibrium_from_x(start))[1]["raw"]
+    def equilibrium(x):
+        try:
+            return problem.equilibrium_from_x(x)
+        except RuntimeError as error:
+            if str(error) != "decision vector did not produce a usable VMEC equilibrium":
+                raise
+            return None
+
+    problem.input_from_x(proposal).to_indata(monitor.outdir / "input.direction")
+    full = equilibrium(proposal)
+    if full is not None:
+        write_wout(monitor.outdir / "wout_direction.nc", full.wout)
+    trials = []
+    for power in range(1, 7):
+        alpha = 2.**-power
+        x = start+alpha*(proposal-start)
+        monitor(x)
+        eq = equilibrium(x)
+        if eq is None:
+            trials.append(dict(alpha=alpha, error="Unusable equilibrium", accepted=False))
+            monitor.save(backtracking=trials, transport_screen_passed=False)
+            continue
+        _, metrics = monitor.inspect(eq)
+        admissible = metrics["feasible"] and metrics["raw"] < initial
+        q = screen_transport(eq.wout, surfaces) if admissible else None
+        accepted = bool(admissible and transport_improves(baseline_Q, q))
+        trials.append(dict(alpha=alpha, physics=metrics,
+                           Q=None if q is None else q.tolist(), accepted=accepted))
+        monitor.save(backtracking=trials, transport_screen_passed=accepted)
+        if accepted:
+            problem.input_from_x(x).to_indata(monitor.outdir / "input.trial")
+            write_wout(monitor.outdir / "wout_trial.nc", eq.wout)
+            monitor.best = (metrics["raw"], x.copy())
+            monitor.save(trial_Q=q.tolist(), accepted_alpha=alpha,
+                selected_evaluation=min(monitor.report["evaluations"],
+                    key=lambda row: abs(row.get("raw", np.inf)-metrics["raw"]))["evaluation"],
+                initial_pwO=initial, pwO_reduction=1-metrics["raw"]/initial)
+            return True
+    return False
