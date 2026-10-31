@@ -153,8 +153,9 @@ from .printing import (
 from .residuals import (
     ForceResiduals, PreconditionedResiduals, apply_lambda_preconditioner,
     apply_radial_preconditioner, edge_force_condition, force_residuals,
-    m1_constrained_to_physical, m1_residue_rotation, m1_zero_condition,
-    preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
+    m1_constrained_to_physical, m1_physical_to_constrained,
+    m1_residue_rotation, m1_zero_condition, preconditioned_residuals,
+    scale_m1_preconditioner_rhs, scalxc_scale_force,
     zero_m1_z_force,
 )
 from .setup import RunSetup, guess_axis, interior_guess, run_setup
@@ -794,6 +795,54 @@ def prepare_runtime(
     return replace(rt, rcon0=rcon0, zcon0=zcon0)
 
 
+def _polar_rotated_state(rt: SolverRuntime, state: SpectralState) -> SpectralState:
+    """Re-parametrise ``state`` into the edge's m = 1 polar angle (``lasym``).
+
+    ``delta = atan2(Rs - Zc, Rc + Zs)`` of the edge row's ``(m, n) = (1, 0)``
+    pair, the formula ``readin.f`` applies to the boundary, rotates every
+    shell, ``(m, n)`` pair and lambda by ``m * delta``.  The edge is what the
+    fixed-boundary solver pins, so its ``delta`` is zero for any state the
+    solver or a wout produced; below round-off the state is returned
+    unchanged.  Traceable: the skip is a ``where``, not a Python branch.
+    """
+    m = np.asarray(rt.modes.m, dtype=int)
+    n = np.asarray(rt.modes.n, dtype=int)
+    index = np.where((m == 1) & (n == 0))[0]
+    if index.size == 0:
+        return state
+    i1 = int(index[0])
+    R_cos, Z_sin, R_sin, Z_cos = m1_constrained_to_physical(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
+        modes=rt.modes, lthreed=rt.setup.lthreed, lasym=True,
+        lconm1=rt.setup.lconm1)
+    dtype = R_cos.dtype
+    delta = jnp.arctan2(R_sin[-1, i1] - Z_cos[-1, i1], R_cos[-1, i1] + Z_sin[-1, i1])
+    delta = jnp.where(jnp.abs(delta) > 100 * jnp.finfo(dtype).eps, delta, 0.0)
+    angle = delta * jnp.asarray(m, dtype=dtype)[None, :]
+    c, s = jnp.cos(angle), jnp.sin(angle)
+
+    def rotate(cos_part, sin_part):
+        return cos_part * c + sin_part * s, sin_part * c - cos_part * s
+
+    R_cos2, R_sin2 = rotate(R_cos, R_sin)
+    Z_cos2, Z_sin2 = rotate(Z_cos, Z_sin)
+    L_cos2, L_sin2 = rotate(state.L_cos, state.L_sin)
+    R_cos2, Z_sin2, R_sin2, Z_cos2 = m1_physical_to_constrained(
+        R_cos2, Z_sin2, R_sin2, Z_cos2,
+        modes=rt.modes, lthreed=rt.setup.lthreed, lasym=True,
+        lconm1=rt.setup.lconm1)
+
+    def pick(new, old):
+        return jnp.where(delta != 0.0, new, jnp.asarray(old, dtype=dtype))
+
+    return replace(
+        state,
+        R_cos=pick(R_cos2, state.R_cos), R_sin=pick(R_sin2, state.R_sin),
+        Z_cos=pick(Z_cos2, state.Z_cos), Z_sin=pick(Z_sin2, state.Z_sin),
+        L_cos=pick(L_cos2, state.L_cos), L_sin=pick(L_sin2, state.L_sin),
+    )
+
+
 def hot_restart_state(rt: SolverRuntime, state: SpectralState) -> SpectralState:
     """Adapt a previous solve's state to this runtime's boundary (hot restart).
 
@@ -807,9 +856,24 @@ def hot_restart_state(rt: SolverRuntime, state: SpectralState) -> SpectralState:
     held fixed) — which lands the edge row exactly on the new boundary
     (``facj(ns) = 1``) and keeps the interior near equilibrium (measured:
     initial ``fsqr ~ 4e-6`` for a 1% ``RBC(0,1)`` perturbation on cth).
-    Lambda is carried over unchanged.
+    Lambda is carried over unchanged, except for the ``lasym`` polar rotation
+    below.
+
+    ``lasym`` decks: ``readin.f`` rotates the *boundary* poloidal angle by
+    ``delta = atan2(rbs(0,1) - zbc(0,1), rbc(0,1) + zbs(0,1))`` so the edge
+    satisfies the m = 1 polar condition ``R1s = Z1c``.  A state supplied in
+    the unrotated angle (e.g. an exact surface family projected from the
+    deck's own boundary) has an edge whose ``delta`` is nonzero; the edge
+    would then be sheared against the interior, and lambda would belong to
+    the wrong angle.  Such a state is re-parametrised first, every shell by
+    the edge's ``delta`` (``theta' = theta - delta``, each ``(m, n)`` pair
+    rotated by ``m * delta``, lambda included).  States from this solver, a
+    wout, or any deck whose edge is already polar have ``delta = 0`` and pass
+    through bit-for-bit.
     """
     setup = rt.setup
+    if setup.lasym:
+        state = _polar_rotated_state(rt, state)
     s = jnp.asarray(setup.s_full)
     dtype = s.dtype
     m = np.asarray(rt.modes.m, dtype=int)

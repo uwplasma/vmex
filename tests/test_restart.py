@@ -452,3 +452,91 @@ def test_iteration_budget_is_not_a_compile_key():
     budget = solver.prepare_runtime(inp, max_iterations=int(inp.niter_array[0]) // 10)
     assert jax.tree.structure(full) == jax.tree.structure(budget)
     assert int(budget.max_iterations) == int(inp.niter_array[0]) // 10
+
+
+# ---------------------------------------------------------------------------
+# LASYM polar angle: a state in the unrotated angle must be re-parametrised
+# ---------------------------------------------------------------------------
+
+
+def _rotate_state(state, rt, angle):
+    """Re-parametrise ``state`` by ``theta -> theta - angle`` (every (m, n) pair by m*angle)."""
+    from vmex.core.residuals import (
+        m1_constrained_to_physical, m1_physical_to_constrained,
+    )
+
+    kw = dict(modes=rt.modes, lthreed=False, lasym=True)
+    R_cos, Z_sin, R_sin, Z_cos = m1_constrained_to_physical(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos, **kw)
+    phase = angle * np.asarray(rt.modes.m)[None, :]
+    c, s = np.cos(phase), np.sin(phase)
+
+    def rot(cos_part, sin_part):
+        return cos_part * c + sin_part * s, sin_part * c - cos_part * s
+
+    R_cos, R_sin = rot(R_cos, R_sin)
+    Z_cos, Z_sin = rot(Z_cos, Z_sin)
+    L_cos, L_sin = rot(state.L_cos, state.L_sin)
+    R_cos, Z_sin, R_sin, Z_cos = m1_physical_to_constrained(
+        R_cos, Z_sin, R_sin, Z_cos, **kw)
+    return dataclasses.replace(state, R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos,
+                               Z_sin=Z_sin, L_cos=L_cos, L_sin=L_sin)
+
+
+def _first_iteration_residuals(rt, state):
+    import jax.numpy as jnp
+
+    rt = solver.runtime_with_baselines(rt, state)
+    one = jnp.asarray(1)
+    out = solver._evaluate_lane(state, solver._zero_cache(rt), one, one,
+                                jnp.asarray(1.0), rt)
+    return float(out.residuals.fsqr), float(out.residuals.fsqz)
+
+
+def test_hot_restart_rotates_lasym_state_into_the_polar_angle():
+    """``readin.f`` rotates the boundary by delta = atan2(rbs-zbc, rbc+zbs); a
+    supplied state in the old angle is rotated with it, not sheared against it.
+
+    The unrotated state is the converged tilted-tokamak equilibrium re-expressed
+    in the deck's own boundary angle (delta = 0.46 rad).  Measured (NS 9): max
+    |restarted - converged| 1.4e-1 before the fix, 1e-16 after; iteration-1
+    fsqr/fsqz 2.3e-2/7.0e-2 before, 7.5e-12/9.5e-12 (the converged level) after.
+    """
+    inp = VmecInput.from_file(DATA / "input.up_down_asymmetric_tokamak")
+    inp = dataclasses.replace(inp, ns_array=[9], niter_array=[3000],
+                              ftol_array=[1e-10])
+    cold = solver.solve(inp, ftol=1e-10, max_iterations=3000)
+    assert cold.converged
+    rt = solver.prepare_runtime(inp, solver.resolution_from_input(inp))
+    delta = np.arctan2(float(inp.rbs[0, 1] - inp.zbc[0, 1]),
+                       float(inp.rbc[0, 1] + inp.zbs[0, 1]))
+    assert abs(delta) > 0.1
+    unrotated = _rotate_state(cold.state, rt, -delta)
+
+    def edge_gap(state):
+        return max(float(np.max(np.abs(
+            np.asarray(getattr(state, k))[-1]
+            - np.asarray(getattr(rt.setup, k))[-1])))
+            for k in ("R_cos", "R_sin", "Z_cos", "Z_sin"))
+
+    assert edge_gap(cold.state) < 1e-12
+    assert edge_gap(unrotated) > 1e-2               # the defect is exercised
+
+    restarted = solver.hot_restart_state(rt, unrotated)
+    assert edge_gap(restarted) < 1e-12
+    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(restarted, name)),
+            np.asarray(getattr(cold.state, name)), rtol=0, atol=1e-12)
+    fsqr, fsqz = _first_iteration_residuals(rt, restarted)
+    fsqr0, fsqz0 = _first_iteration_residuals(
+        rt, solver.hot_restart_state(rt, cold.state))
+    assert fsqr < 1e-6 and fsqz < 1e-6
+    assert fsqr == pytest.approx(fsqr0, rel=1e-6)
+    assert fsqz == pytest.approx(fsqz0, rel=1e-6)
+
+    # a state already in the polar angle (solver output, wout) is untouched
+    again = solver.hot_restart_state(rt, cold.state)
+    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"):
+        np.testing.assert_array_equal(np.asarray(getattr(again, name)),
+                                      np.asarray(getattr(cold.state, name)))
