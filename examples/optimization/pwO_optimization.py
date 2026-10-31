@@ -61,7 +61,7 @@ def inspect_candidate(eq):
 
 
 vj.configure()
-if (OUTPUT_DIR / "summary.json").exists():
+if any(OUTPUT_DIR.rglob("summary.json")):
     raise ValueError("Use a new output directory for each optimization")
 require_optional("neo-jax", "low-transport NEO screen")
 print("[setup] near-circular vacuum torus, boundary modes 1 then 2", flush=True)

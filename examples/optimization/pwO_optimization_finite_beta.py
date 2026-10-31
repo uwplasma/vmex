@@ -68,6 +68,8 @@ def inspect_candidate(eq):
 
 
 vj.configure()
+if any(OUTPUT_DIR.rglob("summary.json")):
+    raise ValueError("Use a new output directory for each optimization")
 require_optional("neo-jax", "low-transport NEO screen")
 print("[setup] finite-beta continuation at fixed flux", flush=True)
 vacuum_report = json.loads(INPUT_FILE.with_name("summary.json").read_text())
