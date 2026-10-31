@@ -370,7 +370,8 @@ def test_qa_precursor_retains_best_feasible_trial_and_native_weight(tmp_path, mo
         residuals_state=lambda state, rt: jnp.array([2*state]),
         total_state=lambda state, rt: 4*state**2))
     def deck(x):
-        return SimpleNamespace(nfp=nfp, to_indata=lambda path: path.write_text(str(x)))
+        return SimpleNamespace(nfp=nfp, value=float(x),
+            to_indata=lambda path: path.write_text(str(x)))
 
     def eq(x):
         return SimpleNamespace(state=float(x[0]), runtime=None, wout=float(x[0]))
@@ -379,8 +380,18 @@ def test_qa_precursor_retains_best_feasible_trial_and_native_weight(tmp_path, mo
     def problem_from_tuples(inp, terms, **kwargs):
         residual = terms[0][0]
         captured["initial"] = np.asarray(residual(1., None))
-        problem = SimpleNamespace(x0=np.array([1.]), residual=lambda x: residual(x[0], None),
-            equilibrium_from_x=eq, input_from_x=lambda x: deck(x[0]))
+        current = [None]
+
+        def evaluated_residual(x):
+            current[0] = float(x[0])
+            return residual(x[0], None)
+
+        def current_equilibrium(x):
+            assert float(x[0]) == current[0], "Cannot revisit an earlier optimizer equilibrium"
+            return eq(x)
+
+        problem = SimpleNamespace(x0=np.array([1.]), residual=evaluated_residual,
+            equilibrium_from_x=current_equilibrium, input_from_x=lambda x: deck(x[0]))
         problem.subproblem = lambda max_mode, x: SimpleNamespace(
             x0=x, scales=np.ones(1), embed=lambda y: y, residual_jac=None, mode=max_mode)
         return problem
@@ -404,7 +415,10 @@ def test_qa_precursor_retains_best_feasible_trial_and_native_weight(tmp_path, mo
         lambda state, rt: jnp.zeros(1), tmp_path, maxiter=1, optimizer_ftol=.001,
         mirror_limit=.2, mirror_weight=100.,
         physical_options=dict(aspect_bounds=(5.9, 6.1), iota_floor=.41))
-    assert selected.state == .2
+    assert inp.value == selected.state == .2
+    import json
+    report = json.loads((tmp_path / "summary.json").read_text())
+    assert report["evaluations"][report["selected_evaluation"]]["raw"] == pytest.approx(4*.2**2)
     assert (tmp_path / "input.mode2").read_text() == "0.1"
     assert (tmp_path / "input.trial").read_text() == "0.2"
     expected = np.sqrt(2)*(2 if nfp == 2 else 1)

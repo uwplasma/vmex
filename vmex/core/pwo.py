@@ -306,11 +306,16 @@ def qa_precursor(inp, seed, mapped, geometry, outdir, *, maxiter, optimizer_ftol
     diagnostics = jax.jit(lambda state, rt: (objective(state, rt), native.total_state(state, rt),
                                            mapped.diagnostics_state(state, rt)))
 
+    best_equilibrium = (np.inf, None)
+
     def inspect(eq):
+        nonlocal best_equilibrium
         residual, raw, fields = diagnostics(eq.state, eq.runtime)
         metrics = mapped.physical_metrics(eq, **physical_options,
             mirror_ceiling=mirror_limit if inp.nfp == 3 else 1., fields=fields)
         metrics["mapped_raw"], metrics["raw"] = metrics["raw"], float(raw)
+        if metrics["feasible"] and metrics["raw"] < best_equilibrium[0]:
+            best_equilibrium = (metrics["raw"], eq)
         return np.asarray(residual), metrics
 
     problem = opt.VmecProblem.from_tuples(inp, [(objective, 0., 1.)], max_mode=2,
@@ -339,7 +344,7 @@ def qa_precursor(inp, seed, mapped, geometry, outdir, *, maxiter, optimizer_ftol
         if monitor.best is None:
             raise RuntimeError("No physically feasible QA precursor; keep the original circle")
         x = monitor.best[1]
-        return problem.input_from_x(x), problem.equilibrium_from_x(x)
+        return problem.input_from_x(x), best_equilibrium[1]
 
 
 def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces, *, seed):
