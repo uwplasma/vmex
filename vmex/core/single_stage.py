@@ -88,11 +88,48 @@ class CoilPenalty:
     curvature_weight: float = 10.0
     distance_weight: float = 1e4
     surface_weight: float = 1e4
+    normalized: bool = False
+    geometry_segments: int | None = None
+    surface_grid: tuple[int, int] | None = None
 
     def __call__(self, coils, surface):
         """Return length, curvature, separation, and clearance costs."""
         from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
         n = coils.dofs_currents.size
+        if self.geometry_segments is not None:
+            from essos.coils import Coils, Curves
+            coils = Coils(Curves(coils.dofs_curves, self.geometry_segments,
+                                 coils.nfp, coils.stellsym), coils.currents[:n])
+        if self.surface_grid is not None:
+            from essos.surfaces import SurfaceRZFourier
+            surface = SurfaceRZFourier(
+                surface.rc, surface.zs, surface.nfp, surface.mpol, surface.ntor,
+                nphi=self.surface_grid[0], ntheta=self.surface_grid[1], close=False,
+                range_torus="full torus", rs=surface.rs, zc=surface.zc)
+        if self.normalized:
+            # Worst sampled gaps/curvature are not diluted by extra coils or nodes.
+            length = jnp.maximum(coils.length[:n] / self.length_target - 1, 0)
+            curvature = jnp.maximum(coils.curvature[:n] / self.curvature_limit - 1, 0)
+            gamma, points = coils.gamma, surface.gamma.reshape(-1, 3)
+
+            def pair_distance(i, j):
+                squared = jnp.sum((gamma[i, :, None] - gamma[j, None, :])**2, axis=-1)
+                return jnp.sqrt(jnp.min(squared) + 1e-30)
+
+            pairs = jnp.triu_indices(len(coils), 1)
+            gap = (jnp.max(jnp.maximum(1 - jax.vmap(pair_distance)(*pairs) / self.coil_distance, 0))
+                   if len(coils) > 1 else 0.)
+
+            def clearance(curve):
+                squared = jnp.sum((curve[:, None] - points[None, :])**2, axis=-1)
+                return jnp.sqrt(jnp.min(squared) + 1e-30)
+
+            surface_gap = jnp.max(jnp.maximum(
+                1 - jax.vmap(clearance)(gamma[:n]) / self.surface_distance, 0))
+            return .5 * jnp.asarray([
+                self.length_weight * jnp.mean(length**2),
+                self.curvature_weight * jnp.max(curvature**2),
+                self.distance_weight * gap**2, self.surface_weight * surface_gap**2])
         length = jnp.sqrt(self.length_weight) * jnp.maximum(coils.length[:n] - self.length_target, 0)
         curvature = jnp.sqrt(self.curvature_weight) * jnp.maximum(
             coils.curvature[:n] - self.curvature_limit, 0)

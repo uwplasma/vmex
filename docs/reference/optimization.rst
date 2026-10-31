@@ -656,15 +656,19 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
    python examples/optimization/pwO_optimization.py
 
 The file-level settings select the input, output directory, resolution and
-iteration budget. The default edits ``input.minimal_seed_nfp4`` in memory:
-major radius 1 m, minor radius 0.1 m, and a 0.005 m helical perturbation.
+iteration budget. The default sets ``NFP=2`` and edits ``input.minimal_seed_nfp4`` in memory:
+major radius 1 m, minor radius 1/6 m, and a helical perturbation of 5% of the
+minor radius. ``NFP`` changes the field-period count without changing the seed shape.
 Boundary modes 1 then 2 share NS35, M5/N5, force tolerance 1e-12 and a
 2000-iteration solver cap. Bounded least squares uses implicit residual
 Jacobians, optimizer ``ftol=1e-3`` and 15 iterations per stage.
 
-The mapped-field residual is combined with aspect ratio 10 and a signed-iota
-floor of 0.42. Field bounds are acceptance checks. No symmetry or magnetic-well
-penalty is used. Its fixed map, cut and field normalization are described in
+The mapped-field residual is combined with aspect ratio 6, a signed-iota
+floor of 0.42 and mirror ratio below 0.2. The mirror penalty targets 0.18;
+no symmetry or magnetic-well penalty is used. Live B00 normalization replaces
+reference-field arrays, and an automatic initial cost scale sets the term weight.
+Three equally spaced requests are snapped to actual VMEC half-mesh radii.
+The fixed map and cut are described in
 :ref:`confinement-mapped-pwo`; the name does not certify piecewise omnigenity.
 
 The vacuum run writes seed/trial WOUTs, ``input.trial`` and iteration history
@@ -684,19 +688,19 @@ Continue the saved vacuum shape to finite pressure with::
 Run the vacuum example first: pressure continuation requires its saved
 ``low_transport/input.trial`` and writes ``low_transport_finite_beta/``.
 The zero-current pressure profile is proportional to ``1-s`` and targets
-0.5% volume-average beta. Pressure rescaling is followed
-by a new nonlinear equilibrium solve. The retained result reaches 0.4985%
-beta and reduces independently refined mean Q by 6.22%; it has no finite-beta
-particle qualification or MHD-stability assessment.
+0.5% volume-average beta. The saved vacuum WOUT starts pressure calibration;
+each pressure change is followed by a nonlinear equilibrium solve. The
+NFP2 continuation improves coarse mean Q by 26.6% in three iterations.
+Finite-beta particle confinement and MHD stability remain unverified.
 
-``single_stage_optimization_pwO.py`` adds the mapped residual to the existing
-finite-beta plasma/coil objective and checks a subsequent free-boundary solve.
-It requires ``vmex[coils,freeb,neoclassical]``. The retained three-step check reduces
-total cost by 35.8%, but mean Q increases by 70.7%, engineering limits fail,
-and the free-boundary solve does not converge. This is an example of objective
-composition, not a qualified low-transport coil design. A small normal-field
-error on a prescribed surface cannot establish that coils hold that surface
-at the prescribed flux.
+``single_stage_optimization_pwO.py`` first fits coils to the fixed plasma,
+then adds the mapped residual to the joint boundary/coil objective. Coil
+length, curvature and distances are normalized by the seed minor radius;
+dense geometry sampling checks constraints between field quadrature nodes.
+It requires ``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold
+free-boundary solve. At finite pressure, coil flux need not equal total
+``PHIEDGE``: common current is fitted to the external boundary vector
+``B_VMEC - B_plasma`` and pressure balance is verified separately.
 
 Resources and reproducibility
 -----------------------------

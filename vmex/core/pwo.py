@@ -104,13 +104,15 @@ def _finish(residual, B, valid, weight):
 
 
 def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
-        b_ref, bmns_b=None, a=0.3, b=0.0, c=-2.0, eta_min=2.8,
+        b_ref=None, bmns_b=None, a=0.3, b=0.0, c=-2.0, eta_min=2.8,
         ngamma=32, neta=32, weights=None):
-    """Mapped-gamma variance over a fixed eta interval, divided by B_ref squared.
+    """Mapped-gamma variance divided by the live Boozer mean field squared.
 
     Eta midpoint quadrature covers [eta_min,2*pi-eta_min]. Gamma is uniform
     and endpoint-free. Discrete Parseval in gamma makes this the power of all
-    nonconstant gamma harmonics, averaged over eta, divided by B_ref squared.
+    nonconstant gamma harmonics, averaged over eta. The default normalization
+    is invariant under field rescaling and differentiated with the spectrum.
+    An explicit ``b_ref`` instead uses a fixed positive reference in Tesla.
     No Fourier periodicity in the cut eta direction is assumed.
     """
     _integer(ngamma, 4, "ngamma"); _integer(neta, 4, "neta")
@@ -118,6 +120,12 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
         raise ValueError("eta_min must be fixed strictly between zero and pi")
     cosine, sine, m, n, iota, weight, valid = _spectrum(bmnc_b, bmns_b, xm_b, xn_b, iota_b, nfp, weights)
     ns = cosine.shape[0]
+    constant = (m == 0) & (n == 0)
+    mean_field = jnp.sum(jnp.where(constant, cosine, 0), axis=1)
+    variance = .5*jnp.sum(jnp.where(constant, 0, cosine*cosine+sine*sine), axis=1)
+    if b_ref is None:
+        valid = valid & (jnp.sum(constant) == 1) & (mean_field > 0)
+        b_ref = mean_field
     a, b, c, reference = (_surface(x, ns, name) for name, x in
                            (("a", a), ("b", b), ("c", c), ("b_ref", b_ref)))
     gamma = 2*jnp.pi*jnp.arange(ngamma)[None, :, None]/ngamma
@@ -140,6 +148,8 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     mean = jnp.mean(B, axis=1, keepdims=True)
     out = _finish((B-mean)/reference, B, valid, weight)
     out.update({"B_mapped": B, "B_mean_gamma": mean, "gamma": gamma[0, :, 0],
+                "B00": mean_field, "field_variance": variance,
+                "mapped_variance": jnp.mean((B-mean)**2, axis=(1, 2)),
                 "eta": eta[0, 0, :], "jacobian": coordinates["jacobian"],
                 "jacobian_lower_bound": bound[:, 0, 0],
                 "toroidal_span_upper": span_upper[:, 0, 0],
@@ -149,7 +159,7 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
 
 
 class MappedPwOResidual:
-    """Squeezed LC mapped-field variance with a fixed domain and Tesla B_ref.
+    """Squeezed LC mapped-field variance with a fixed domain and live B00 scale.
 
     Options match :func:`mapped_pwo_residual_from_boozer`. A conservative
     positive Jacobian bound rejects maps whose nonfolding is not certified.
@@ -193,11 +203,11 @@ class MappedPwOResidual:
         low, high = field.min(axis=(1, 2)), field.max(axis=(1, 2))
         return mapped, low, high, (high-low)/(high+low)
 
-    def physical_metrics(self, eq, *, bmax_ref, aspect_bounds, iota_floor,
-                         force_tol=1e-12, mirror_floor=.05, fields=None):
+    def physical_metrics(self, eq, *, aspect_bounds, iota_floor, bmax_ref=None,
+                         force_tol=1e-12, mirror_floor=.05, mirror_ceiling=1., fields=None):
         """Check force balance, oriented volume, positive B² and full-surface limits.
 
-        ``bmax_ref`` is a fixed ceiling, in Tesla, on each sampled surface.
+        Optional ``bmax_ref`` sets a fixed ceiling in Tesla on each surface.
         The iota floor is signed. These checks do not certify orbit confinement.
         """
         from .statephysics import _field_chain
@@ -223,8 +233,9 @@ class MappedPwOResidual:
             and np.asarray(mapped["valid"]).all()
             and np.isfinite(low).all() and np.all(np.asarray(low) > 0)
             and np.isfinite(high).all() and np.isfinite(mirror).all()
-            and np.all(np.asarray(high) <= np.asarray(bmax_ref))
-            and np.all(np.asarray(mirror) >= mirror_floor))
+            and (bmax_ref is None or np.all(np.asarray(high) <= np.asarray(bmax_ref)))
+            and np.all(np.asarray(mirror) >= mirror_floor)
+            and np.all(np.asarray(mirror) <= mirror_ceiling))
         return row
 
     def total_state(self, state, rt):

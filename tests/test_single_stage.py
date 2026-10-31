@@ -1,5 +1,5 @@
 """Single-stage orchestration contracts without optional solvers or field codes."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
 import sys
@@ -322,6 +322,24 @@ class _GeometryCoils:
         return len(self.gamma)
 
 
+@pytest.mark.parametrize("ncoils", [1, 2])
+def test_normalized_geometry_costs_are_invariant_under_physical_scale_and_node_count(harness, monkeypatch, ncoils):
+    _geometry_objectives(monkeypatch)
+    gamma = harness.Coils.gamma[:ncoils]
+    lengths, curvature = np.array([1., 2.])[:ncoils], harness.Coils.curvature[:ncoils]
+    coils = _GeometryCoils(gamma, lengths, curvature)
+    surface = harness.Surface()
+    penalty = ss.CoilPenalty(1.5, 4., 1.5, .7, normalized=True)
+    initial = penalty(coils, surface)
+    assert np.all(initial >= 0)
+    for scale in (.25, 3.):
+        dense = _GeometryCoils(np.repeat(gamma * scale, 3, axis=1), lengths * scale,
+                               np.repeat(curvature / scale, 3, axis=1))
+        scaled_penalty = replace(penalty, length_target=1.5 * scale, curvature_limit=4. / scale,
+                                 coil_distance=1.5 * scale, surface_distance=.7 * scale)
+        np.testing.assert_allclose(scaled_penalty(dense, NS(gamma=surface.gamma * scale)), initial)
+    if ncoils == 1:
+        assert initial[2] == 0.  # No distinct coil pair exists.
 
 
 def test_legacy_coil_self_costs_count_only_unique_coils(harness, monkeypatch):
@@ -336,3 +354,39 @@ def test_legacy_coil_self_costs_count_only_unique_coils(harness, monkeypatch):
     np.testing.assert_array_equal(penalty(coils, harness.Surface()), before)
     coils.length[0] = 3.
     assert penalty(coils, harness.Surface())[0] > before[0]
+
+
+def test_dense_geometry_reconstruction_preserves_currents_symmetry_and_surface_partners(harness, monkeypatch):
+    _geometry_objectives(monkeypatch)
+    calls = []
+    coils = _GeometryCoils(harness.Coils.gamma, [1., 2.], harness.Coils.curvature)
+    coils.dofs_curves, coils.currents, coils.nfp, coils.stellsym = np.arange(6.), np.array([20., 30.]), 4, True
+    surface = harness.Surface()
+    surface.rc, surface.zs, surface.rs, surface.zc = [1.], [.2], [.03], [.04]
+    surface.nfp, surface.mpol, surface.ntor = 4, 2, 2
+    module = ModuleType("essos.coils")
+
+    def curves(*args):
+        calls.append(("curves", args))
+        return "dense curves"
+
+    def dense_coils(curves, currents):
+        calls.append(("coils", curves, currents))
+        return coils
+
+    def dense_surface(*args, **kwargs):
+        calls.append(("surface", args, kwargs))
+        return surface
+
+    module.Curves, module.Coils = curves, dense_coils
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(sys.modules["essos.surfaces"], "SurfaceRZFourier", dense_surface)
+    penalty = ss.CoilPenalty(1.5, 4., 1.5, .7, normalized=True,
+                             geometry_segments=144, surface_grid=(68, 32))
+    expected = replace(penalty, geometry_segments=None, surface_grid=None)(coils, surface)
+    np.testing.assert_array_equal(penalty(coils, surface), expected)
+    np.testing.assert_array_equal(calls[0][1][0], coils.dofs_curves)
+    assert calls[0][1][1:] == (144, 4, True)
+    np.testing.assert_array_equal(calls[1][2], [20., 30.])
+    assert calls[2][2] == {"nphi": 68, "ntheta": 32, "close": False,
+                            "range_torus": "full torus", "rs": [.03], "zc": [.04]}

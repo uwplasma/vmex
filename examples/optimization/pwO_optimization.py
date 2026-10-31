@@ -1,4 +1,4 @@
-"""Reduce transport from a nearly circular NFP4 vacuum torus.
+"""Reduce transport from a nearly circular vacuum torus.
 
 The mapped-field variance, aspect ratio and iota floor define the objective.
 NEO independently screens transport; this objective does not certify pwO or
@@ -21,16 +21,14 @@ from vmex.core.neoclassical import screen_transport, transport_improves
 from vmex.core.pwo import MappedPwOResidual
 from vmex.core.implicit import iota_profile
 
+NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.minimal_seed_nfp4"
 OUTPUT_DIR = Path("low_transport")
-SEED_PERTURBATION = .005          # 5% of the minor radius, with positive transform
 MAX_MODES, MAX_PARAMETER_CHANGE = [1, 2], 5.
-# Fixed calibration: preserve flux, length scale and B_REF across continuations.
-SURFACES = (.25, 16.5 / 34, .75)
-B_REF = np.array([2.7123510440502594, 2.699696279828112, 2.6832357706580665])
-B_MAX_REF = np.array([2.9284215849767965, 2.979692353278536, 3.008858221344288])
-RAW_SCALE = .004813522516264787
-ASPECT_TARGET, IOTA_TARGET = 10., .42
+SURFACES = jnp.linspace(.25, .75, 3)
+ASPECT_TARGET, IOTA_TARGET = 6., .42
+SEED_PERTURBATION = .05/ASPECT_TARGET  # 5% of the minor radius, positive transform
+MIRROR_LIMIT, MIRROR_WEIGHT = .2, 100.
 MAX_ITERATIONS, NITER = 15, 2000
 NS, MPOL, NTOR, FTOL = 35, 5, 5, 1e-12
 OPTIMIZER_FTOL = 1e-3
@@ -47,16 +45,18 @@ def geometry_residuals(state, runtime):
 
 
 def objective(state, runtime):
+    fields = mapped.diagnostics_state(state, runtime)
     residual = jnp.sqrt(2)*jnp.concatenate((
-        mapped.residuals_state(state, runtime)/jnp.sqrt(RAW_SCALE),
-        geometry_residuals(state, runtime)))
+        fields[0]["residuals1d"]/jnp.sqrt(initial_scale),
+        geometry_residuals(state, runtime),
+        jnp.sqrt(MIRROR_WEIGHT)*jnp.maximum(fields[3]/(.9*MIRROR_LIMIT)-1, 0)))
     return residual
 
 
 def inspect_candidate(eq):
     residual, fields = diagnostics(eq.state, eq.runtime)
-    metrics = mapped.physical_metrics(eq, bmax_ref=1.1*B_MAX_REF,
-                                     aspect_bounds=(9.9, 10.1), iota_floor=.41, fields=fields)
+    metrics = mapped.physical_metrics(eq, mirror_ceiling=MIRROR_LIMIT,
+        aspect_bounds=(ASPECT_TARGET-.1, ASPECT_TARGET+.1), iota_floor=.41, fields=fields)
     return np.asarray(residual), metrics
 
 
@@ -65,14 +65,18 @@ require_optional("neo-jax", "low-transport NEO screen")
 print("[setup] near-circular vacuum torus, boundary modes 1 then 2", flush=True)
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = .1
+rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = 1/ASPECT_TARGET
 rbc[inp.ntor+1, 1], zbs[inp.ntor+1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-inp = replace(inp, rbc=rbc, zbs=zbs)
+inp = replace(inp, nfp=NFP, rbc=rbc, zbs=zbs, phiedge=.083*(10/ASPECT_TARGET)**2)
 inp = replace(inp, ns_array=np.array([NS]), ftol_array=np.array([FTOL]),
               niter_array=np.array([NITER]), delt=.5).change_resolution(
                   mpol=MPOL, ntor=NTOR, ntheta=16, nzeta=14)
 seed = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
-mapped = MappedPwOResidual(SURFACES, b_ref=B_REF, mboz=8, nboz=8, oversample=2)
+mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
+# Freeze only an automatic initial cost scale; field normalization stays live.
+initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
+actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
+print(f"[setup] initial mapped cost {initial_scale:.6g}; Boozer surfaces {actual_surfaces}")
 problem = opt.VmecProblem.from_tuples(
     inp, [(objective, 0., 1.)], max_mode=2, vary_major_radius=False,
     use_ess=True, ess_alpha=1.2, restart_from=seed, forward_ftol=FTOL,
@@ -82,7 +86,8 @@ diagnostics = jax.jit(lambda state, runtime: (objective(state, runtime),
                                              mapped.diagnostics_state(state, runtime)))
 monitor = FeasibleCandidateMonitor(problem, inspect_candidate, OUTPUT_DIR,
     maxiter=MAX_ITERATIONS, optimizer_ftol=OPTIMIZER_FTOL, particle_qualified=False,
-    input=str(INPUT_FILE), beta_target=0., seed_perturbation_m=SEED_PERTURBATION,
+    input=str(INPUT_FILE), nfp=NFP, initial_scale=initial_scale, mirror_limit=MIRROR_LIMIT,
+    requested_surfaces=np.asarray(SURFACES).tolist(), actual_surfaces=actual_surfaces.tolist(), beta_target=0., seed_perturbation_m=SEED_PERTURBATION,
     settings=dict(ns=NS, mpol=MPOL, ntor=NTOR, ftol=FTOL, niter=NITER))
 with monitor:
     x = problem.x0.copy()
@@ -108,8 +113,8 @@ with monitor:
                  transport_screen_passed=False)
     print("[verify] matched NEO screen of the best feasible candidate", flush=True)
     if monitor.best is not None:
-        before = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_seed.nc"), SURFACES)
-        after = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_trial.nc"), SURFACES)
+        before = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_seed.nc"), actual_surfaces)
+        after = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_trial.nc"), actual_surfaces)
         monitor.save(baseline_Q=before.tolist(), trial_Q=after.tolist(),
                      transport_screen_passed=transport_improves(before, after))
         print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> {after.mean():.6g}")
@@ -118,3 +123,6 @@ with monitor:
     monitor.save(status="completed")
     print(f"Wrote {OUTPUT_DIR / 'summary.json'}. Transport screen passed: "
           f"{monitor.report['transport_screen_passed']}. Particle tracing is a separate check.")
+
+if not ci_smoke and not monitor.report["transport_screen_passed"]:
+    raise SystemExit("Transport did not improve; keep the input equilibrium")

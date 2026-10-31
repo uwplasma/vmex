@@ -62,6 +62,103 @@ def test_mapped_residual_matches_manual_sine_cosine_variance():
     assert np.all(result["valid"])
 
 
+def test_default_live_mean_normalization_is_invariant_to_surface_field_scale():
+    spectrum = _spectrum(2)
+    # Put the constant mode last: its location is not part of the contract.
+    permutation = [1, 2, 0]
+    for key in ("bmnc_b", "bmns_b"):
+        spectrum[key] = spectrum[key][:, permutation] * np.array([[1.], [1.3]])
+    for key in ("xm_b", "xn_b"):
+        spectrum[key] = spectrum[key][permutation]
+    options = dict(ngamma=8, neta=8, weights=[1., 3.])
+    baseline = mapped_pwo_residual_from_boozer(**spectrum, **options)
+    explicit = mapped_pwo_residual_from_boozer(
+        **spectrum, b_ref=[1.5, 1.95], **options)
+    np.testing.assert_allclose(baseline["residuals1d"], explicit["residuals1d"], atol=1e-15)
+    scale = np.array([[.2], [4.5]])
+    scaled = mapped_pwo_residual_from_boozer(
+        **(spectrum | {key: spectrum[key]*scale for key in ("bmnc_b", "bmns_b")}),
+        **options)
+    np.testing.assert_allclose(scaled["residuals1d"], baseline["residuals1d"], atol=1e-15)
+    assert float(scaled["total"]) == pytest.approx(float(baseline["total"]), rel=1e-13)
+
+
+def test_live_mean_jvp_and_vjp_include_the_normalizing_constant_mode():
+    spectrum = _spectrum(2)
+    cosine = jnp.array([[1.5, .08, -.06], [1.7, .04, -.09]])
+    sine = jnp.array([[0., -.04, .025], [0., .03, -.02]])
+    direction = jnp.array([[.13, 0., 0.], [-.07, 0., 0.]])
+
+    def residual(cosine, sine):
+        return mapped_pwo_residual_from_boozer(
+            **(spectrum | dict(bmnc_b=cosine, bmns_b=sine)),
+            weights=[1., 3.], ngamma=8, neta=8)["residuals1d"]
+
+    value, tangent = jax.jit(lambda x: jax.jvp(
+        lambda c: residual(c, sine), (x,), (direction,)))(cosine)
+    # A constant-field perturbation cancels from B-mean_gamma(B). Only the
+    # quotient's denominator changes: dr/dB00 = -r/B00 on each surface.
+    rows = np.asarray(value).reshape(2, -1)
+    expected = -rows*np.asarray(direction[:, :1]/cosine[:, :1])
+    np.testing.assert_allclose(tangent, expected.ravel(), rtol=2e-12, atol=1e-15)
+    cotangent = jnp.linspace(-.3, .5, value.size)
+    _, pullback = jax.vjp(lambda c: residual(c, sine), cosine)
+    expected_constant_gradient = -np.sum(
+        np.asarray(cotangent).reshape(2, -1)*rows, axis=1)/np.asarray(cosine[:, 0])
+    np.testing.assert_allclose(pullback(cotangent)[0][:, 0], expected_constant_gradient,
+                               rtol=2e-12, atol=1e-15)
+    # Scaling both Fourier parities has zero tangent; a detached denominator
+    # would incorrectly leave a tangent equal to the residual itself.
+    _, scale_tangent = jax.jit(lambda c, s: jax.jvp(
+        residual, (c, s), (c, s)))(cosine, sine)
+    np.testing.assert_allclose(scale_tangent, 0., atol=2e-15)
+
+
+@pytest.mark.parametrize("constant", [0., -.1, np.nan, np.inf])
+def test_default_live_mean_rejects_nonpositive_or_nonfinite_constant(constant):
+    # This toroidal harmonic is positive on the mapped cut even when B00<=0.
+    # Hence the default must reject its normalization, not merely negative B.
+    spectrum = dict(bmnc_b=np.array([[constant, -1.]]),
+        xm_b=np.array([0, 0]), xn_b=np.array([0, 3]), iota_b=np.array([.7]), nfp=3)
+    options = dict(a=0., eta_min=3.05, ngamma=8, neta=8)
+    if np.isfinite(constant):
+        control = mapped_pwo_residual_from_boozer(**spectrum, b_ref=1., **options)
+        assert np.all(control["valid"])
+    with pytest.raises(ValueError):
+        mapped_pwo_residual_from_boozer(**spectrum, **options)
+
+    def traced(cosine):
+        result = mapped_pwo_residual_from_boozer(
+            **(spectrum | dict(bmnc_b=cosine)), **options)
+        return result["valid"], result["residuals1d"]
+    valid, residual = jax.jit(traced)(jnp.asarray(spectrum["bmnc_b"]))
+    assert not np.any(valid)
+    assert not np.isfinite(residual).all()
+
+
+@pytest.mark.parametrize("constant_modes", [0, 2])
+def test_default_live_mean_requires_exactly_one_constant_fourier_mode(constant_modes):
+    spectrum = _spectrum()
+    if constant_modes == 0:
+        spectrum.update(bmnc_b=np.array([[-1.]]), bmns_b=np.array([[0.]]),
+                        xm_b=np.array([0]), xn_b=np.array([3]))
+    else:
+        spectrum["xm_b"][1] = spectrum["xn_b"][1] = 0
+    options = dict(a=0., eta_min=3.05, ngamma=8, neta=8)
+    control = mapped_pwo_residual_from_boozer(**spectrum, b_ref=1., **options)
+    assert np.all(control["valid"])
+    with pytest.raises(ValueError):
+        mapped_pwo_residual_from_boozer(**spectrum, **options)
+
+    def traced(cosine):
+        result = mapped_pwo_residual_from_boozer(
+            **(spectrum | dict(bmnc_b=cosine)), **options)
+        return result["valid"], result["residuals1d"]
+    valid, residual = jax.jit(traced)(jnp.asarray(spectrum["bmnc_b"]))
+    assert not np.any(valid)
+    assert not np.isfinite(residual).all()
+
+
 def test_mapped_qi_limit_has_zero_residual_but_generic_field_does_not():
     spectra = dict(bmnc_b=np.array([[1.5, .2]]), bmns_b=np.array([[0., .1]]),
                    xm_b=np.array([0, 0]), xn_b=np.array([0, 3]), iota_b=np.array([.7]), nfp=3)
@@ -117,7 +214,8 @@ def test_invalid_spectrum_contract(kwargs):
 
 
 @pytest.mark.parametrize("kwargs", [dict(eta_min=0.), dict(eta_min=np.pi), dict(eta_min=np.nan),
-    dict(c=0.), dict(a=10.), dict(b_ref=0.), dict(ngamma=3), dict(neta=3)])
+    dict(c=0.), dict(a=10.), dict(b_ref=0.), dict(b_ref=[1., 2.]),
+    dict(ngamma=3), dict(neta=3)])
 def test_invalid_map_is_rejected(kwargs):
     with pytest.raises(ValueError):
         mapped_pwo_residual_from_boozer(**_spectrum(), **(dict(b_ref=1.5) | kwargs))

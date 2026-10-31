@@ -16,6 +16,92 @@ from vmex.core import neoclassical
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
+@pytest.fixture
+def transport_screen_backend(monkeypatch):
+    """Exercise the screening adapter without a Boozer solve or a NEO run."""
+    calls = {"runs": 0, "neo_calls": 0}
+    valid = dict(rational_correction_valid=True, approximation_used=False,
+                 rational_work_limit_exceeded=False)
+    calls["results"] = [SimpleNamespace(s=s, epsilon_effective=value, diagnostics=valid.copy())
+                        for s, value in [(.75, 3.e-4), (.25, 1.e-4)]]
+
+    class Boozer:
+        s_in = np.array([.25, .5, .75])
+
+        def __init__(self, **kwargs):
+            calls["booz_options"] = kwargs
+
+        def read_wout_data(self, wout):
+            calls["wout"] = wout
+
+        def run(self, **kwargs):
+            calls["runs"] += 1
+            calls["run_options"] = kwargs
+            calls["indices"] = list(self.compute_surfs)
+
+    def config(**kwargs):
+        calls["config_options"] = kwargs
+        return SimpleNamespace(**kwargs)
+
+    def run_neo(booz, **kwargs):
+        calls["neo_calls"] += 1
+        calls["neo_data"], calls["neo_options"] = booz, kwargs
+        return calls["results"]
+
+    monkeypatch.setitem(sys.modules, "booz_xform_jax", SimpleNamespace(Booz_xform=Boozer))
+    monkeypatch.setattr(neoclassical, "_neo_imports", lambda: (config, run_neo))
+    monkeypatch.setattr(neoclassical, "_neo_boozer_data",
+                        lambda bx, indices: {"s_b": bx.s_in[indices]})
+    return calls
+
+
+@pytest.mark.parametrize("custom_config", [False, True])
+def test_transport_screen_preserves_order_and_uses_strict_forward_settings(
+    transport_screen_backend, custom_config,
+):
+    calls = transport_screen_backend
+    config = object() if custom_config else None
+    wout = object()
+    values = neoclassical.screen_transport(wout, [.75, .25], mboz=8, nboz=6, config=config)
+    assert calls["wout"] is wout
+    assert calls["booz_options"] == dict(verbose=0, mboz=8, nboz=6)
+    assert calls["indices"] == [2, 0] and calls["run_options"] == dict(jit=True)
+    np.testing.assert_array_equal(calls["neo_data"]["s_b"], [.75, .25])
+    np.testing.assert_array_equal(values, [3.e-4, 1.e-4])
+    options = calls["neo_options"]
+    assert options["use_jax"] and not options["progress"] and not options["jax_surface_scan"]
+    if custom_config:
+        assert options["config"] is config and "config_options" not in calls
+    else:
+        assert calls["config_options"] == dict(theta_n=192, phi_n=192, npart=80,
+            multra=2, nstep_per=80, nstep_min=800, nstep_max=2000, acc_req=.005,
+            ref_swi=2, max_rational_field_periods=100000, rational_surface_policy="error")
+
+
+def test_transport_screen_rejects_snapping_before_running_either_backend(transport_screen_backend):
+    calls = transport_screen_backend
+    with pytest.raises(ValueError, match="requested half-mesh radii"):
+        neoclassical.screen_transport(object(), [.251, .75])
+    assert calls["runs"] == calls["neo_calls"] == 0
+
+
+@pytest.mark.parametrize("value, diagnostic_update", [
+    (np.nan, {}), (np.inf, {}), (0., {}), (-1.e-4, {}),
+    (1.e-4, {"rational_correction_valid": False}),
+    (1.e-4, {"approximation_used": True}),
+    (1.e-4, {"rational_work_limit_exceeded": True}),
+])
+def test_transport_screen_rejects_an_invalid_surface_instead_of_a_partial_profile(
+    transport_screen_backend, value, diagnostic_update,
+):
+    calls = transport_screen_backend
+    calls["results"][1].epsilon_effective = value
+    calls["results"][1].diagnostics.update(diagnostic_update)
+    with pytest.raises(ValueError, match="Invalid NEO screen at s=0.25.*keep the incumbent"):
+        neoclassical.screen_transport(object(), [.75, .25])
+    assert calls["runs"] == calls["neo_calls"] == 1
+
+
 def test_epsilon_effective_boozer_adapter_preserves_surface_labels(monkeypatch):
     values = np.array([1.0e-4, 2.0e-4])
     calls = {}

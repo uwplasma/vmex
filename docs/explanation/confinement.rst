@@ -240,18 +240,26 @@ nodes and midpoint eta nodes, the residual is
 .. math::
 
    r_{sij}=\sqrt{\frac{w_s}{N_\gamma N_\eta}}
-     \frac{\mathcal B_{sij}-\overline{\mathcal B}_{sj}}{B_{{\rm ref},s}},
+     \frac{\mathcal B_{sij}-\overline{\mathcal B}_{sj}}{B_{00,s}},
    \qquad
    f_{\rm map}=\sum_{sij}r_{sij}^2
-     =\sum_s\frac{w_s}{B_{{\rm ref},s}^2}
+     =\sum_s\frac{w_s}{B_{00,s}^2}
        \left\langle\operatorname{Var}_\gamma\mathcal B_s\right\rangle_\eta.
 
-Here :math:`\sum_s w_s=1`, and :math:`B_{{\rm ref},s}>0` is a frozen field
-scale. Discrete Parseval identifies the gamma variance with the power in
-all nonconstant discrete gamma harmonics. There is no Jacobian weight,
-so this is not a physical-area or bounce-time average. A fixed reference
-also means weakening the field lowers the score; hold flux and size fixed
-and check full-surface field bounds.
+Here :math:`\sum_s w_s=1`. The live Boozer mean :math:`B_{00,s}>0`
+makes the objective invariant under field rescaling; its derivative is included.
+An explicit ``b_ref`` can instead supply a frozen reference. Discrete Parseval
+identifies the gamma variance with power in nonconstant gamma harmonics.
+There is no Jacobian weight, so this is neither a physical-area nor a bounce-time
+average. Requested surfaces can be equally spaced; Boozer evaluation uses the
+nearest VMEC half-mesh surfaces and reports their actual radii.
+
+Call the workflow **mapped-field low-transport optimization**. It is inspired by
+the PO–pwO construction, but the class name identifies the map, not a certified
+property of an optimized equilibrium. In `Velasco et al. (2024)
+<https://arxiv.org/abs/2405.07634v2>`_, pwO requires field-line-independent action
+within each well class and compatible transitions between classes. These
+conditions need independent checks; a low contour-fit residual is insufficient.
 
 Action invariance requires more. At fixed energy and magnetic moment,
 vanishing bounce-averaged radial drift requires
@@ -265,15 +273,15 @@ neither that profile nor common extrema, complete wells, compatible well
 transitions or radial action behavior. It does not certify omnigenity,
 piecewise omnigenity, quasi-isodynamicity or particle confinement.
 
-The vacuum example combines this contour fit with aspect-ratio and signed-
-transform controls. Independently refined mean
-:math:`Q=\epsilon_{\rm eff}^{3/2}` falls by 91.63% from its near-circle seed;
+The aspect-ratio-6, two-period example combines this contour fit with signed-
+transform and mirror controls. Independently refined mean
+:math:`Q=\epsilon_{\rm eff}^{3/2}` falls by 52.56% from its near-circle seed;
 a separate paired 256-alpha experiment reduces weighted 10 ms loss from
-100% to 3.309% at one launch surface. These are measurements of the combined
-objective, not a bound from mapped variance to Q or losses. They do not
-isolate the mapped term's contribution. A finite-pressure continuation has
-a smaller, 6.22% refined Q gain and no particle check. The README includes
-the retained boundary, unfilled Boozer contours and actual loss curves.
+100% to 6.73% at one launch surface, at common volume-RMS field and minor radius.
+These are measurements of the combined objective, not a bound from mapped
+variance to Q or losses. A three-period trial lowered the proxy but worsened Q;
+independent transport checks remain essential. The README shows the retained
+boundary, unfilled Boozer contours and measured loss curves.
 
 Bounce action
 ~~~~~~~~~~~~~

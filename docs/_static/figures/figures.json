@@ -772,22 +772,20 @@
     },
     {
       "path": "docs/_static/figures/readme_low_transport.webp",
-      "sha256": "b0235e494be91284f2d3d8341250adacb3c54ea1557bd8d361cea3b8c289f95b",
-      "bytes": 64666,
+      "sha256": "34b35646b2af1d547f4c71acbf6eddbc258307e9e054ed9c3eb511401217afcf",
+      "bytes": 77834,
       "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
-      "command": "python docs/_static/figures/sources/make_low_transport_figure.py",
-      "inputs": [
-        "docs/_static/figures/sources/low_transport_plot_data.npz"
-      ],
+      "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
+      "inputs": [],
       "record": null,
       "generated": "2026-10-30",
       "hardware": null,
-      "reproducible": "command",
-      "bytes_verified": true,
+      "reproducible": "external-data",
+      "bytes_verified": false,
       "used_in": [
         "README.md"
       ],
-      "note": "Frozen near-circle vacuum comparison: NS103/M7N7 boundary, Boozer-band-32 unfilled |B| contours at s=0.4853, matched NEO acc_req=.005, and 256 paired 3.52 MeV alpha loss curves at s=.5 for 10 ms at common 6 T/1.7 m scale. Adjacent NPZ stores exact plot inputs and SHA256 hashes of original retained WOUT, Boozer, NEO and particle files. The generator documents extraction; rendering performs no new physics calculation. Rendered twice with byte-identical output."
+      "note": "Retained vacuum comparison from independently refined WOUT, Boozer, NEO and particle outputs supplied to the generator. Data are not bundled. NS103/M7N7, Boozer band32, NEO acc_req=.005, 256 paired 3.52 MeV alphas at s=.5 for 10 ms at 6 T / 1.7 m; unfilled contours. Rendering performs no new physics calculation."
     }
   ]
 }

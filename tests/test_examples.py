@@ -1089,7 +1089,7 @@ def test_low_transport_example(tmp_path):
     assert summary["status"] == "completed" and not summary["particle_qualified"]
     assert len(summary["iterations"]) <= 2
     assert {row["mode"] for row in summary["iterations"]} == {1, 2}
-    assert summary["seed_perturbation_m"] == .005
+    assert summary["seed_perturbation_m"] == .05/6
     assert min(row["cost"] for row in summary["evaluations"]) < summary["evaluations"][0]["cost"]
     assert source.read_bytes() == original
     for name in ("input.seed", "wout_seed.nc", "input.mode1", "input.mode2"):
