@@ -45,9 +45,7 @@ _WOUT_POWERS = {
     **{name: (1, 2) for name in (
         "phi", "phipf", "chi", "chipf", "phips",
     )},
-    **{name: (2, 0) for name in (
-        "presf", "mass", "pres", "bdotb", "am_aux_f",
-    )},
+    **{name: (2, 0) for name in ("presf", "pres", "bdotb")},
     **{name: (0, 3) for name in ("volume_p", "vp", "gmnc", "gmns")},
     **{name: (1, -1) for name in (
         "bdotgradv", "bsupumnc", "bsupvmnc", "bsupumns", "bsupvmns",
@@ -174,7 +172,10 @@ def scale_input(
     - ``pres_scale``, the multiplier VMEC applies on top of the ``am`` /
       ``am_aux_f`` pressure profile: ``b_scale**2``, so pressure in Pa scales
       as ``b_scale**2`` while the profile *shape* coefficients stay as
-      written;
+      written.  With ``gamma != 0`` the profile is a mass,
+      ``p = mass / V'**gamma`` and ``mass ~ (phips R00)**gamma``, which carries
+      ``b_scale**gamma`` of its own, so the factor is ``b_scale**(2 - gamma)``
+      (``r_scale`` cancels);
     - ``extcur``, the external coil-group currents (A): ``b_scale * r_scale``;
     - ``curtor``, the net toroidal current (A): ``b_scale * r_scale``, but
       **only when** ``ncurr == 1``.  With ``ncurr == 0`` VMEC prescribes iota
@@ -209,7 +210,7 @@ def scale_input(
     changes = {name: _times(getattr(inp, name), r) for name in _INPUT_LENGTHS}
     changes.update(
         phiedge=inp.phiedge * b * r**2,
-        pres_scale=inp.pres_scale * b**2,
+        pres_scale=inp.pres_scale * b ** (2.0 - float(inp.gamma)),
         curtor=inp.curtor * b * r if inp.ncurr == 1 else inp.curtor,
         extcur=_times(inp.extcur, b * r),
     )
@@ -313,8 +314,10 @@ def scale_wout(
       ``currvmnc`` families; and the NESTOR potential ``potsin``/``potcos``;
     - ``(1, 2)`` fluxes in Wb — ``phi``, ``chi`` and their radial derivatives
       ``phipf``, ``chipf``, ``phips``;
-    - ``(2, 0)`` pressure-like quantities — ``presf``, ``pres`` (Pa),
-      ``mass``, and ``bdotb`` (T^2);
+    - ``(2, 0)`` pressure-like quantities — ``presf``, ``pres`` (Pa), and
+      ``bdotb`` (T^2); ``mass = pres * V'**gamma`` scales as
+      ``b_scale**2 * r_scale**(3 * gamma)``, and the ``am_aux_f`` knots as
+      ``b_scale**(2 - gamma)`` like ``am`` (below);
     - ``(0, 3)`` volumes in m^3 — ``volume_p``, ``vp``, and the Jacobian
       harmonics ``gmnc``/``gmns``;
     - ``(2, 3)`` energies — ``wb``, ``wp``;
@@ -363,7 +366,12 @@ def scale_wout(
         name: _times(getattr(data, name), b**b_power * r**r_power)
         for name, (b_power, r_power) in _WOUT_POWERS.items()
     }
-    changes["am"] = _scale_pressure_coefficients(data.pmass_type, data.am, b**2)
+    # ``mass = pres * V'**gamma``; ``am``/``am_aux_f`` re-run with
+    # ``pres_scale = 1``, so with ``gamma != 0`` they follow ``scale_input``.
+    gamma, p_factor = float(data.gamma), b ** (2.0 - float(data.gamma))
+    changes["am"] = _scale_pressure_coefficients(data.pmass_type, data.am, p_factor)
+    changes["am_aux_f"] = _times(data.am_aux_f, p_factor)
+    changes["mass"] = _times(data.mass, b**2 * r ** (3.0 * gamma))
     return replace(data, **changes)
 
 

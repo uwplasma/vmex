@@ -170,6 +170,38 @@ def test_scale_wout_commutes_with_finite_beta_solve(finite_beta_similarity):
     )
 
 
+def test_adiabatic_pressure_scales_as_b_to_two_minus_gamma():
+    """``GAMMA != 0`` makes the pressure profile a mass: PRES_SCALE ~ B**(2-gamma)."""
+    inp = VmecInput.from_file(DATA / "input.shaped_tokamak_pressure")
+    inp = dataclasses.replace(
+        inp,
+        gamma=1.4,
+        ns_array=np.array([9]),
+        ftol_array=np.array([1e-12]),
+        niter_array=np.array([3000]),
+    )
+    b, r = 1.5, 1.3
+
+    def run(deck):
+        result = solve_multigrid(deck, verbose=False)
+        assert result.converged
+        return wout_from_state(
+            inp=deck, state=result.state, fsqr=float(result.fsqr),
+            fsqz=float(result.fsqz), fsql=float(result.fsql),
+            niter=int(result.iterations), converged=True,
+        )
+
+    original = run(inp)
+    scaled_input = scale_input(inp, b_scale=b, r_scale=r)
+    assert scaled_input.pres_scale == pytest.approx(inp.pres_scale * b**0.6)
+    scaled_wout = scale_wout(original, b_scale=b, r_scale=r)
+    _assert_wout_similarity(run(scaled_input), scaled_wout)
+    # The echoed profile re-runs with PRES_SCALE = 1, so it carries the same factor.
+    np.testing.assert_allclose(scaled_wout.am, b**0.6 * original.am)
+    knots = dataclasses.replace(original, am_aux_f=np.ones(3))
+    np.testing.assert_allclose(scale_wout(knots, b_scale=b).am_aux_f, b**0.6)
+
+
 def test_scale_wout_keeps_pressure_coefficients_consistent_with_presf(
     finite_beta_similarity,
 ):
