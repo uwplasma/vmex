@@ -341,42 +341,49 @@ def qa_precursor(inp, seed, mapped, geometry, outdir, *, maxiter, optimizer_ftol
         return problem.input_from_x(x), problem.equilibrium_from_x(x)
 
 
-def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces):
+def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces, *, seed):
     """Accept the first dyadic pwO step passing physics and matched NEO guards.
 
     ``start`` is the saved precursor; ``proposal`` is the full pwO optimizer
     direction. A smaller mapped variance than the precursor and strict NEO
     improvement on every radius versus the original circle are required.
-    Checkpoints keep the full direction even when its transport is rejected.
+    ``start`` must be the first monitored vector. Independent forward solves
+    restart from its saved ``seed`` equilibrium, avoiding optimizer-cache
+    revisits after a long optimization. Checkpoints retain the full direction.
     """
-    from .. import write_wout
+    from .. import optimize as opt, write_wout
+    from .errors import VmecConvergenceError, VmecJacobianError, VmecNumericalError
     from .neoclassical import screen_transport, transport_improves
+    from .restart import restart_state
 
     problem = monitor.problem
-    initial = monitor.inspect(problem.equilibrium_from_x(start))[1]["raw"]
+    initial = monitor.report["evaluations"][0]["raw"]
+
     def equilibrium(x):
+        inp = problem.input_from_x(x)
         try:
-            return problem.equilibrium_from_x(x)
-        except RuntimeError as error:
-            if str(error) != "decision vector did not produce a usable VMEC equilibrium":
-                raise
-            return None
+            return opt.solve_equilibrium(inp, initial_state=restart_state(seed.wout, inp),
+                                         raise_on_max_iterations=True), None
+        except (VmecConvergenceError, VmecJacobianError, VmecNumericalError) as error:
+            return None, str(error)
 
     problem.input_from_x(proposal).to_indata(monitor.outdir / "input.direction")
-    full = equilibrium(proposal)
-    if full is not None:
-        write_wout(monitor.outdir / "wout_direction.nc", full.wout)
     trials = []
     for power in range(1, 7):
         alpha = 2.**-power
         x = start+alpha*(proposal-start)
-        monitor(x)
-        eq = equilibrium(x)
+        eq, error = equilibrium(x)
         if eq is None:
-            trials.append(dict(alpha=alpha, error="Unusable equilibrium", accepted=False))
+            trials.append(dict(alpha=alpha, error=error, accepted=False))
             monitor.save(backtracking=trials, transport_screen_passed=False)
             continue
-        _, metrics = monitor.inspect(eq)
+        residual, metrics = monitor.inspect(eq)
+        residual = np.asarray(residual)
+        if not np.isfinite(residual).all() or not np.isfinite(residual@residual):
+            raise ValueError("Backtracking residual and cost must be finite")
+        history = monitor.report["evaluations"]
+        row = dict(evaluation=len(history), cost=.5*float(residual@residual), **metrics)
+        history.append(row)
         admissible = metrics["feasible"] and metrics["raw"] < initial
         q = screen_transport(eq.wout, surfaces) if admissible else None
         accepted = bool(admissible and transport_improves(baseline_Q, q))
@@ -388,8 +395,7 @@ def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces):
             write_wout(monitor.outdir / "wout_trial.nc", eq.wout)
             monitor.best = (metrics["raw"], x.copy())
             monitor.save(trial_Q=q.tolist(), accepted_alpha=alpha,
-                selected_evaluation=min(monitor.report["evaluations"],
-                    key=lambda row: abs(row.get("raw", np.inf)-metrics["raw"]))["evaluation"],
+                selected_evaluation=row["evaluation"],
                 initial_pwO=initial, pwO_reduction=1-metrics["raw"]/initial)
             return True
     return False

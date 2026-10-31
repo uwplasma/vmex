@@ -150,7 +150,7 @@ with monitor:
         before = screen_transport(circle.wout, actual_surfaces)
         monitor.save(baseline_Q=before.tolist(),
             baseline="original near-circle; NFP1 retains the physical n2 harmonic", precursor="QA")
-        transport_backtrack(monitor, start, x, before, actual_surfaces)
+        transport_backtrack(monitor, start, x, before, actual_surfaces, seed=seed)
     elif monitor.best is not None:
         before = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_seed.nc"), actual_surfaces)
         after = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_trial.nc"), actual_surfaces)

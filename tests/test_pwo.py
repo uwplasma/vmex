@@ -416,7 +416,9 @@ def test_qa_precursor_retains_best_feasible_trial_and_native_weight(tmp_path, mo
 def test_transport_backtrack_requires_every_radius_physics_and_variance(tmp_path, monkeypatch, rejection):
     from types import SimpleNamespace
     import vmex as vj
-    from vmex.core import neoclassical
+    from vmex import optimize as opt
+    from vmex.core import neoclassical, restart
+    from vmex.core.errors import VmecConvergenceError
     from vmex.core.monitoring import FeasibleCandidateMonitor
     from vmex.core.pwo import transport_backtrack
 
@@ -424,31 +426,56 @@ def test_transport_backtrack_requires_every_radius_physics_and_variance(tmp_path
     # Half step improves the mean but worsens the outermost surface.
     monkeypatch.setattr(neoclassical, "screen_transport", lambda w, surfaces:
         np.array([.1, .1, 1.01]) if w == .5 else np.full(3, .5))
-    def equilibrium(x):
-        if rejection == "unusable" and x[0] in (1., .5):
-            raise RuntimeError("decision vector did not produce a usable VMEC equilibrium")
-        return SimpleNamespace(wout=x[0])
+    profiles, restarted, solved = object(), object(), []
 
+    def forward(inp, *, initial_state, raise_on_max_iterations):
+        assert inp.profiles is profiles  # boundary interpolation preserves physics inputs
+        assert initial_state is restarted and raise_on_max_iterations
+        solved.append(inp.x)
+        if rejection == "unusable" and inp.x == .5:
+            raise VmecConvergenceError("bounded candidate did not converge")
+        return SimpleNamespace(wout=inp.x)
+
+    def restart_seed(wout, inp):
+        assert wout == 0. and inp.profiles is profiles
+        return restarted
+
+    monkeypatch.setattr(opt, "solve_equilibrium", forward)
+    monkeypatch.setattr(restart, "restart_state", restart_seed)
     problem = SimpleNamespace(residual=lambda x: np.array([1-x[0]]),
-        equilibrium_from_x=equilibrium,
-        input_from_x=lambda x: SimpleNamespace(to_indata=lambda path: path.write_text(str(x[0]))))
+        equilibrium_from_x=lambda x: SimpleNamespace(wout=x[0]),
+        input_from_x=lambda x: SimpleNamespace(x=float(x[0]), profiles=profiles,
+            to_indata=lambda path: path.write_text(str(x[0]))))
 
     def inspect(eq):
         raw = (1-eq.wout)**2 if rejection != "variance" else 1+eq.wout
-        return np.array([1-eq.wout]), dict(raw=raw, feasible=rejection != "physics")
+        return np.array([1-eq.wout]), dict(raw=raw, feasible=rejection != "physics",
+            force_errors=[1e-13, 1e-14, 1e-15], aspect=6.01, iota_min=.42)
 
     monitor = FeasibleCandidateMonitor(problem, inspect, tmp_path, maxiter=1)
     start, proposal = np.array([0.]), np.array([1.])
     monitor(start)
     monitor(proposal)
-    accepted = transport_backtrack(monitor, start, proposal, np.ones(3), [.25, .5, .75])
+
+    def unusable_optimizer_revisit(x):
+        pytest.fail("Backtracking must not revisit optimizer equilibria, including the start")
+
+    problem.equilibrium_from_x = unusable_optimizer_revisit
+    problem.residual = unusable_optimizer_revisit
+    accepted = transport_backtrack(monitor, start, proposal, np.ones(3), [.25, .5, .75],
+                                   seed=SimpleNamespace(wout=0.))
     assert (tmp_path / "input.direction").read_text() == "1.0"
+    assert 0. not in solved and 1. not in solved
     assert accepted == (rejection in (None, "unusable"))
     if accepted:
+        assert solved == [.5, .25]
         assert monitor.report["accepted_alpha"] == .25
         assert (tmp_path / "input.trial").read_text() == "0.25"
         assert monitor.best[1][0] == .25
         assert not monitor.report["backtracking"][0]["accepted"]
+        row = monitor.report["evaluations"][monitor.report["selected_evaluation"]]
+        assert row["raw"] == .75**2 and row["force_errors"] == [1e-13, 1e-14, 1e-15]
+        assert row["aspect"] == 6.01 and row["iota_min"] == .42
     else:
         assert len(monitor.report["backtracking"]) == 6
         assert not monitor.report["transport_screen_passed"]
