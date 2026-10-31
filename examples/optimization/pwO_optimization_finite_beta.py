@@ -17,7 +17,7 @@ from vmex import optimize as opt
 from vmex._compat import require_optional
 from vmex.core.monitoring import FeasibleCandidateMonitor
 from vmex.core.neoclassical import screen_transport, transport_improves
-from vmex.core.pwo import MappedPwOResidual, transport_backtrack
+from vmex.core.pwo import MappedPwOResidual, transport_backtrack, qa_precursor
 from vmex.core.implicit import iota_profile
 from vmex.core.restart import restart_state
 
@@ -41,6 +41,12 @@ def geometry_residuals(state, runtime):
     full = iota_profile(state, runtime)
     return jnp.concatenate((jnp.atleast_1d((opt.aspect_ratio(state, runtime)-ASPECT_TARGET)/.1),
                             jnp.sqrt(10/full.size)*jnp.maximum((IOTA_TARGET-full)/.01, 0)))
+
+
+def precursor_geometry(state, runtime):
+    """Keep beta and transform controlled during the QA precursor."""
+    return jnp.concatenate((geometry_residuals(state, runtime), jnp.atleast_1d(
+        opt.volume_average_beta(state, runtime)/TARGET_BETA-1)))
 
 
 def objective(state, runtime):
@@ -87,6 +93,17 @@ if not np.isfinite(measured_beta) or measured_beta <= 0:
 inp = replace(inp, pres_scale=TARGET_BETA/measured_beta)
 seed = opt.solve_equilibrium(inp, initial_state=calibration.state, raise_on_max_iterations=True)
 mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
+if inp.nfp in (1, 3):
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    inp.to_indata(OUTPUT_DIR / "input.seed")
+    vj.write_wout(OUTPUT_DIR / "wout_seed.nc", seed.wout)
+    inp, seed = qa_precursor(inp, seed, mapped, precursor_geometry, OUTPUT_DIR / "QA",
+        maxiter=MAX_ITERATIONS, optimizer_ftol=OPTIMIZER_FTOL,
+        mirror_limit=MIRROR_LIMIT, mirror_weight=MIRROR_WEIGHT,
+        physical_options=dict(aspect_bounds=(ASPECT_TARGET-.1, ASPECT_TARGET+.1), iota_floor=.41),
+        use_ess=True, ess_alpha=1.2, forward_ftol=FTOL, forward_max_iterations=NITER,
+        refine_tol=FTOL, adjoint_tol=1e-8, max_fsq_ratio=1.)
+    MAX_ITERATIONS = 1 if ci_smoke else 5
 # Freeze only an automatic initial cost scale; field normalization stays live.
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
 actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
@@ -107,8 +124,9 @@ with monitor:
     x = problem.x0.copy()
     start = x.copy()
     monitor(x)
-    problem.input_from_x(x).to_indata(OUTPUT_DIR / "input.seed")
-    vj.write_wout(OUTPUT_DIR / "wout_seed.nc", problem.equilibrium_from_x(x).wout)
+    seed_name = "pwo_seed" if inp.nfp in (1, 3) else "seed"
+    problem.input_from_x(x).to_indata(OUTPUT_DIR / f"input.{seed_name}")
+    vj.write_wout(OUTPUT_DIR / f"wout_{seed_name}.nc", problem.equilibrium_from_x(x).wout)
 
     # Reuse one equilibrium/derivative compilation while exposing boundary modes in stages.
     for mode in MAX_MODES:
