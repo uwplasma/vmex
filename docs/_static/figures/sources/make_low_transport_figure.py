@@ -138,12 +138,14 @@ def comparisons(root):
     from scipy.io import netcdf_file
 
     fig, axes = plt.subplots(3, 4, figsize=(14, 10), dpi=150, layout="constrained")
-    statuses = ("Targets missed", "NEO improved", "NEO worsened", "NEO improved")
+    statuses = ("QA to pwO: NEO improved", "NEO improved", "NEO worsened", "NEO improved")
     theta, phi = np.meshgrid(np.linspace(0, 2*np.pi, 81), np.linspace(0, 2*np.pi, 81), indexing="ij")
     for col, nfp in enumerate(range(1, 5)):
         folder = root.parent / "mapped" / f"mirror-nfp{nfp}" / "low_transport"
+        if nfp == 1:
+            folder = root.parent / "mapped/nfp1-qa2-full-20261031/backtrack"
         record = json.loads((folder / "summary.json").read_text())
-        selected = "selected_evaluation" in record
+        selected = nfp == 1 or "selected_evaluation" in record
         stem = "trial" if selected else "terminal"
         picture = folder / (f"{stem}_boundary3d.png" if selected else f"terminal/{stem}_boundary3d.png")
         axes[0, col].imshow(plt.imread(picture)); axes[0, col].axis("off")
@@ -157,21 +159,39 @@ def comparisons(root):
         axes[1, col].set(xlabel="VMEC toroidal angle", ylabel="VMEC poloidal angle",
                          title="Mid-radius |B| [T]")
         fig.colorbar(contour, ax=axes[1, col], shrink=.75)
-        cost = np.array([record["evaluations"][0]["cost"]]+[r["cost"] for r in record["iterations"]])
-        axes[2, col].semilogy(np.arange(len(cost)), cost/cost[0], color="#306d86")
-        axes[2, col].set(xlabel="Accepted iteration", ylabel="Total objective / initial",
-                         title="Optimization history")
+        if nfp == 1:
+            points = sorted([(0., 1., True)]+[(r["alpha"], r["physics"]["raw"]/record["initial_pwO"],
+                           r["accepted"]) for r in record["trials"]])
+            axes[2, col].plot([r[0] for r in points], [r[1] for r in points], color="gray")
+            for x, y, accepted in points:
+                axes[2, col].scatter(x, y, color="#306d86" if accepted else "#bc3939", zorder=3)
+            axes[2, col].set(xlabel="Fraction of proposed pwO step", ylabel="pwO variance / QA seed",
+                             title="NEO backtracking (red: rejected)")
+        else:
+            cost = np.array([record["evaluations"][0]["cost"]]+[r["cost"] for r in record["iterations"]])
+            axes[2, col].semilogy(np.arange(len(cost)), cost/cost[0], color="#306d86")
+            axes[2, col].set(xlabel="Accepted iteration", ylabel="Total objective / initial",
+                             title="Optimization history")
         axes[2, col].grid(alpha=.2)
     save(fig, OUT.with_name("readme_low_transport_nfp.webp"))
 
     data = json.loads((root / "summary.json").read_text())["cases"]
+    if "pwo1" not in data:
+        folder = root.parent / "mapped/nfp1-qa2-full-20261031/backtrack"
+        row = json.loads((folder / "summary.json").read_text())
+        with netcdf_file(folder / "wout_trial.nc", mmap=False) as f:
+            iota = f.variables["iotaf"].data.copy().tolist()
+        data["pwo1"] = dict(Q=row["accepted"]["Q"], actual_s=[.25, 16.5/34, .75],
+                           refined_equilibrium=dict(full_signed_iota=iota), coarse=True)
     fig, axes = plt.subplots(3, 1, figsize=(9, 11), dpi=150)
     fig.subplots_adjust(left=.12, right=.98, top=.95, bottom=.20, hspace=.34)
     handles, labels, missing = [], [], []
     for name, label in (("seed4", "Seed4"), ("QA", "QA4"), ("QH", "QH4"),
-            ("QP", "QP4"), ("QI", "QI4"), ("mapped4", "pwO4"),
+            ("QP", "QP4"), ("QI", "QI4"), ("pwo1", "pwO1"), ("mapped4", "pwO4"),
             ("seed2", "Seed2"), ("QA_nfp2", "QA2"), ("mapped2", "pwO2")):
         row = data.get(name, {})
+        if row.get("coarse"):
+            label += " (NS35)"
         iota = row.get("refined_equilibrium", {}).get("full_signed_iota")
         if iota is None:
             iota = json.loads((root / name / "coarse-iota.json").read_text())["iotaf"]

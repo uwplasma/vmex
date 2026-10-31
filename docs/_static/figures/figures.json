@@ -789,8 +789,8 @@
     },
     {
       "path": "docs/_static/figures/readme_low_transport_nfp.webp",
-      "sha256": "46066aef3a3d82a139980e4040b79ac87e26f53188068fb0c1e039f024684bef",
-      "bytes": 193064,
+      "sha256": "61e2cd77548038a9ac0632bf3450376dd5f458592808f6cded37ea4ab2ee6e0c",
+      "bytes": 195128,
       "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
       "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
       "inputs": [],
@@ -806,8 +806,8 @@
     },
     {
       "path": "docs/_static/figures/readme_low_transport_comparison.webp",
-      "sha256": "5c295f60a64e2796fa8cff6ba25e8d1ab8e54d302a652116cc1efee6312be638",
-      "bytes": 44206,
+      "sha256": "f4e5758c424bcd3c8d018880170bfc4aa97e1caf1ed2f9405c099b5fed6f0c39",
+      "bytes": 45894,
       "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
       "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
       "inputs": [],

@@ -681,6 +681,15 @@ calculation, then trace fresh particles to qualify a selected boundary.
 The README figure records such a comparison; running the example does not
 repeat its particle study.
 
+The one-period construction starts with the NFP2, mode-2 QA precursor.
+Representing the same physical boundary at NFP1 maps each toroidal index
+``n`` to ``2*n``, requiring boundary harmonics through n=4. An odd n=1
+perturbation breaks the two-period symmetry. Five pwO steps supply a
+direction; halving that step until NEO accepts retains a quarter step.
+It reduces pwO variance by 11.9% and mean Q by 65.6% relative to the
+near-circle seed, at A=6.007 and minimum signed iota=0.4198. This
+construction is not yet automated by changing ``NFP`` in the vacuum example.
+
 Continue the saved vacuum shape to finite pressure with::
 
    python examples/optimization/pwO_optimization_finite_beta.py

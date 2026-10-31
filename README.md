@@ -298,10 +298,14 @@ volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lower
 
 | Field periods | Aspect ratio | Minimum ι | Transport result |
 |---|---:|---:|---|
-| 1 | 7.659 | 0.368 | Aspect and transform targets missed |
+| 1 | 6.007 | 0.420 | Coarse mean Q −65.6%; QA precursor |
 | 2 | 6.003 | 0.494 | Refined mean Q −52.6% |
 | 3 | 6.001 | 0.442 | Coarse mean Q +191%; rejected |
 | 4 | 6.001 | 0.438 | Refined mean Q −27.5% |
+
+The one-period construction uses a QA precursor, physical toroidal harmonics through n=4,
+and a NEO-screened pwO step. The direct mode-2 start still fails; independent refinement and
+particle checks are pending.
 
 ![Effective ripple, alpha losses and iota profiles compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
 
