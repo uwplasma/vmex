@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 """Finite-beta QA boundary/coil optimization with VMEX, virtual casing, and ESSOS.
 
-The fitted coils set the seed's positive toroidal flux. Pressure is calibrated
-for 0.5% beta with p(s) proportional to 1-s and zero net toroidal current.
+The circular vacuum seed chooses the positive total flux before pressure is
+calibrated for 0.5% beta. The finite-beta coil prefit then matches the frozen
+external boundary field, B_VMEC minus B_plasma, without identifying external
+coil flux with total PHIEDGE. The pressure is proportional to 1-s and net
+toroidal current is zero.
 Each trial uses a fixed-boundary equilibrium and the total-field normal
 residual; a finer fixed-boundary solve and a cold NESTOR solve independently
 check the optimized design. VMEX_EXAMPLES_CI=1 runs a bounded smoke pass.
@@ -21,8 +24,9 @@ from scipy.optimize import minimize
 
 import vmex as vj
 from vmex import optimize as opt
+from vmex.core import virtual_casing as vc
 from vmex.core.single_stage import (
-    CoilPenalty, SingleStageProblem, hinge, normal_field_rms, toroidal_flux,
+    CoilPenalty, SingleStageProblem, coil_field, common_current_scale, hinge, toroidal_flux,
     verify_design, save_outputs, design_target_report,
 )
 from essos.coils import Coils, CreateEquallySpacedCurves
@@ -79,6 +83,35 @@ curves = CreateEquallySpacedCurves(
     N_COILS, COIL_ORDER, COIL_MAJOR_RADIUS, COIL_MINOR_RADIUS,
     n_segments=N_SEGMENTS, nfp=NFP, stellsym=STELLSYM)
 coils_circular = Coils(curves, np.full(N_COILS, COIL_CURRENT))
+# Choose the total flux/physical scale from a vacuum circular seed BEFORE
+# pressure is introduced. It is not the final finite-beta external coil flux.
+seed_total_flux = toroidal_flux(inp, coils_circular)
+if not np.isfinite(seed_total_flux) or seed_total_flux <= 0:
+    raise ValueError("The vacuum seed must have finite positive physical flux")
+inp = replace(inp, phiedge=seed_total_flux)
+beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
+if not np.isfinite(beta_at_unit_pressure) or beta_at_unit_pressure <= 0:
+    raise ValueError("The unit-pressure seed must have finite positive beta")
+inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
+
+
+def relative_beta(state, runtime):
+    return opt.volume_average_beta(state, runtime) / TARGET_BETA
+
+
+qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
+plasma_problem = opt.VmecProblem.from_tuples(
+    inp, [(qs.residuals_state, 0.0, 1.0), (relative_beta, 1.0, 1.0)], max_mode=MAX_MODE,
+    use_ess=True, progress=not ci_smoke)
+seed_equilibrium = plasma_problem.equilibrium_from_x(plasma_problem.x0)
+seed_data = vc.surface_field_data_from_state(
+    inp, seed_equilibrium.solution, runtime=seed_equilibrium.solver_context,
+    nphi=NPHI, ntheta=NTHETA)
+seed_interface = vc.PlasmaVacuumInterface.from_surface_data(
+    seed_data, digits=VC_DIGITS, precision=vc.plan_vc_precision(seed_data, digits=VC_DIGITS))
+external_target_B = seed_data.B_total - seed_interface.B_plasma
+seed_Bmag = jnp.linalg.norm(seed_data.B_total, axis=0)
+
 x_coils_circular = np.asarray(curves.dofs).ravel()
 coil_scales = np.full(x_coils_circular.size, 0.05)
 coil_penalty = CoilPenalty(
@@ -91,9 +124,18 @@ def coils_from_dofs(x):
     return coils_circular.with_dofs(jnp.concatenate((x, coils_circular.dofs_currents)))
 
 
+def coil_fit_field(coils):
+    field = seed_interface.external_B(coil_field(coils))
+    factor = common_current_scale(field, external_target_B, seed_interface.weights)
+    normal = (factor * jnp.sum(field * seed_interface.normal, axis=0)
+              + seed_interface.Bn_plasma) / seed_Bmag
+    return factor, jnp.sqrt(jnp.sum(seed_interface.weights * normal**2))
+
+
 def coil_fit_objective(u):
     coils = coils_from_dofs(jnp.asarray(x_coils_circular) + coil_scales * u)
-    constraint = 1 - normal_field_rms(coils, surface_seed) / NORMAL_FIELD_CONSTRAINT
+    _, rms = coil_fit_field(coils)
+    constraint = 1 - rms / NORMAL_FIELD_CONSTRAINT
     return jnp.sum(coil_penalty(coils, surface_seed)) + hinge(constraint[None], CONSTRAINT_WEIGHT)
 
 
@@ -104,25 +146,21 @@ coil_fit = minimize(
     bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x_coils_circular.size,
     options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
 coils0 = coils_from_dofs(jnp.asarray(x_coils_circular + coil_scales * coil_fit.x))
-print(f"[coil fit] {coil_fit.nit} L-BFGS-B iterations, no equilibrium solves: B.n/B RMS "
-      f"= {100 * float(normal_field_rms(coils0, surface_seed)):.3f}% on the seed")
+current_factor, fitted_rms = coil_fit_field(coils0)
+current_factor = float(current_factor)
+if not np.isfinite(current_factor) or current_factor == 0:
+    raise ValueError("The external boundary field must admit a finite nonzero current fit")
+coils0 = coils0.with_dofs(jnp.concatenate((coils0.dofs_curves.ravel(),
+                                         coils0.dofs_currents * current_factor)))
+print(f"[coil fit] {coil_fit.nit} iterations on a frozen finite-beta target: total B.n/B RMS "
+      f"= {100 * float(fitted_rms):.3f}%; current boundary-vector fit {current_factor:.6g}")
+print(f"[field calibration] total PHIEDGE = {inp.phiedge:.6f} Wb; "
+      f"PRES_SCALE = {inp.pres_scale:.1f} Pa for beta {100 * TARGET_BETA:.2f}%. "
+      "Boundary-vector current calibration is not an exact external-flux constraint.")
+seed_coil_flux = toroidal_flux(inp, coils0)
+seed_pressure_jump = seed_interface.pressure_balance_residual(coil_field(coils0)) / seed_Bmag**2
+seed_pressure_jump_rms = float(jnp.sqrt(jnp.sum(seed_interface.weights * seed_pressure_jump**2)))
 
-# Flux and pressure calibration, then the explicit QA + beta plasma objective.
-inp = replace(inp, phiedge=toroidal_flux(inp, coils0))
-beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
-inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
-print(f"[flux] PHIEDGE = {inp.phiedge:.6f} Wb from the fitted coils; "
-      f"PRES_SCALE = {inp.pres_scale:.1f} Pa for beta {100 * TARGET_BETA:.2f}%")
-
-
-def relative_beta(state, runtime):
-    return opt.volume_average_beta(state, runtime) / TARGET_BETA
-
-
-qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
-plasma_problem = opt.VmecProblem.from_tuples(
-    inp, [(qs.residuals_state, 0.0, 1.0), (relative_beta, 1.0, 1.0)], max_mode=MAX_MODE,
-    use_ess=True, progress=not ci_smoke)
 joint = SingleStageProblem(
     plasma_problem, coils0, coil_penalty, nphi=NPHI, ntheta=NTHETA,
     iota_floor=IOTA_CONSTRAINT, aspect_limit=ASPECT_CONSTRAINT,
@@ -174,6 +212,10 @@ summary = {
     "lbfgsb_iterations": int(result.nit),
     "equilibrium_solves": joint.monitor.records[-1].equilibrium_solves,
     "phiedge": float(inp.phiedge), "pres_scale": float(inp.pres_scale),
+    "coil_current_calibration": "external_boundary_vector_least_squares",
+    "coil_current_factor": current_factor, "external_flux_constrained": False,
+    "seed_coil_toroidal_flux": seed_coil_flux,
+    "seed_normalized_pressure_jump_rms": seed_pressure_jump_rms,
     "free_boundary_verification": free, "seed": seed_values,
     "final": {**final_values, **metrics},
     **verdict,
