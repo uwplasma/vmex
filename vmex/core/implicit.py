@@ -2978,7 +2978,8 @@ def _raw_block_system(
         diagonal_scaled = diagonal_r * column_scale[:, None, :]
         upper_scaled = upper_r * column_scale[jnp.minimum(
             jnp.arange(ns) + 1, ns - 1)][:, None, :]
-        factors = (block_thomas_factor(lower_scaled, diagonal_scaled, upper_scaled)
+        factors = (block_thomas_factor(
+            lower_scaled, diagonal_scaled, upper_scaled, normalized=True)
                    if factor else None)
 
     def band_operator(tangent):
