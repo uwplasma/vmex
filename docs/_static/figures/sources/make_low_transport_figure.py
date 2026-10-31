@@ -207,21 +207,27 @@ def coil_figure(root):
     """Render the accepted ESSOS coil set and its fixed-boundary target."""
     from essos.coils import Coils
 
-    coils = Coils.from_json(str(root.parent / "stage2/a6-relaxed/n2_L7_w100/coils.json"))
-    coils.n_segments = 384
-    curves = np.asarray(coils.gamma)
-    z = boundary_data(root.parent / "mapped/mirror-nfp4/low_transport/wout_trial.nc")
     fig = plt.figure(figsize=(10, 5.5), dpi=150, layout="constrained")
-    for index, (elevation, azimuth) in enumerate(((35, -45), (90, 0)), 1):
+    for index, (name, label) in enumerate((("public-warm-nfp4-final", "Vacuum"),
+                                         ("public-warm-finite-tight", "Finite beta")), 1):
+        folder = root.parent / "stage2" / name
+        record = json.loads((folder / "single_stage_optimization_pwO_summary.json").read_text())
+        free = record["free_boundary_verification"]
+        coils = Coils.from_json(str(folder / "coils_single_stage_pwO_optimized.json"))
+        coils.n_segments = 384
+        curves = np.asarray(coils.gamma)
+        z = boundary_data(folder / "wout_single_stage_pwO_free_check.nc")
         ax = fig.add_subplot(1, 2, index, projection="3d")
         draw_boundary(fig, ax, z)
         for curve in curves:
             curve = np.concatenate((curve, curve[:1]))
             ax.plot(*curve.T, color="#b65c32", lw=1.1)
         ax.set_box_aspect(np.ptp(curves.reshape(-1, 3), axis=0))
-        ax.view_init(elev=elevation, azim=azimuth)
+        ax.view_init(elev=35, azim=-45)
         ax.set_axis_off()
-    fig.suptitle("pwO4: two unique coils · normal-field RMS 0.674%\nCold free boundary: 4.4 mm from target", fontsize=12)
+        ax.set_title(f"{label}: beta = {100*free['beta']:.3f}%\n"
+                     f"Cold free boundary: {1000*free['sampled_boundary_distance_m']:.2f} mm from target")
+    fig.suptitle("pwO4 equilibria held by two unique coils", fontsize=12)
     save(fig, OUT.with_name("readme_low_transport_coils.webp"))
 
 

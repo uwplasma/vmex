@@ -319,9 +319,11 @@ Examples: [vacuum](examples/optimization/pwO_optimization.py),
 
 ![Four-period pwO boundary colored by magnetic-field strength and fitted coils](docs/_static/figures/readme_low_transport_coils.webp)
 
-Two unique coils reproduce the four-period vacuum boundary with 0.674% normal-field
-RMS error; a cold free-boundary solve stays within 4.4 mm of the target.
-The two-period finite-beta coil fit still misses its field-error limits and stops before joint optimization.
+Joint vacuum optimization lowers the objective by 9.0%; the coils retain a 14.6%
+mean-Q reduction from the near-circle seed. The cold free boundary is 5.25 mm
+from the target. At β≈0.5%, the fit reaches 0.592% normal-field RMS error and
+4.90 mm displacement. Its mean Q improves 7.5%, with a 2.3% inner-radius increase
+that fails the strict transport screen.
 
 ### Free boundary with coils
 

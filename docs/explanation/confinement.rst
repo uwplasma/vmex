@@ -277,8 +277,10 @@ transform and mirror controls. Independently refined mean
 a separate paired 256-alpha experiment reduces weighted 10 ms loss from
 100% to 6.73% at one launch surface, at common volume-RMS field and minor radius.
 These are measurements of the combined objective, not a bound from mapped
-variance to Q or losses. A three-period trial lowered the proxy but worsened Q;
-independent transport checks remain essential. The README shows the retained
+variance to Q or losses. QA preconditioning does not remove this limitation:
+five NFP3 pwO steps lowered the variance by 26%, but mean Q rose from
+3.41e-6 to 2.97e-3, above the near-circle value 5.02e-4. Independent
+transport checks remain essential. The README shows the retained
 boundary, unfilled Boozer contours and measured loss curves.
 
 Bounce action

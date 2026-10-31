@@ -823,8 +823,8 @@
     },
     {
       "path": "docs/_static/figures/readme_low_transport_coils.webp",
-      "sha256": "1b1bbfd76be35555521346a267e0fdeba6d5616c456caa0f6bcb58421ea64f35",
-      "bytes": 82224,
+      "sha256": "86daf5885542df86ff7113f4928977e388c44e4d3359b4c98074b782cdb19f0f",
+      "bytes": 74226,
       "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
       "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
       "inputs": [],
@@ -836,7 +836,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "Four-period pwO vacuum boundary and fitted ESSOS coils. Requires the private qualification directory and sibling stage2/a6-relaxed/n2_L7_w100 and mapped/mirror-nfp4 evidence. Cold free-boundary verification uses the same coil set."
+      "note": "Four-period pwO vacuum and finite-beta held-coil equilibria. Requires private qualification and sibling stage2/public-warm-nfp4-final and stage2/public-warm-finite-tight evidence. Both designs pass engineering and cold free-boundary checks; the finite-beta transport tradeoff is stated in the README."
     }
   ]
 }
