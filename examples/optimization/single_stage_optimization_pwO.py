@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Joint mapped-field and coil optimization at beta=0.5%.
+"""Joint pwO and coil optimization in vacuum or at finite beta.
 
 Run pwO_optimization.py, then pwO_optimization_finite_beta.py first. Coils and
 boundary vary together; VMEC total flux and physical field targets stay fixed.
@@ -7,6 +7,10 @@ The finite-beta prefit matches the frozen total normal-field target and fits
 common current to B_VMEC minus B_plasma, without equating coil flux to PHIEDGE.
 The short default run tests the workflow, not a qualified coil design: its
 transport and held-boundary checks must be read before using the result.
+
+Set INPUT_FILE, TARGET_BETA=0, COILS_INPUT, and COIL_FIT_MAXITER=0 to continue
+an independently verified vacuum stage-2 fit. The seed coil file sets the coil
+count, Fourier order, symmetry, and quadrature unchanged.
 """
 
 import gc
@@ -19,7 +23,7 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, OptimizeResult
 
 import vmex as vj
 from vmex import optimize as opt
@@ -36,8 +40,8 @@ from essos.coils import Coils, CreateEquallySpacedCurves
 from essos.surfaces import surfacerzfourier_from_boundary
 
 # Input parameters.
-NFP = 2
 INPUT_FILE = Path("low_transport_finite_beta/input.trial")
+COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
 MAX_MODE = 2
 SURFACES = jnp.linspace(.25, .75, 3)
 MIRROR_LIMIT = .2
@@ -61,6 +65,7 @@ COIL_DISTANCE_WEIGHT, COIL_SURFACE_DISTANCE_WEIGHT = 100., 100.
 COIL_FIT_PARAMETER_BOUND = 4.0
 CONSTRAINT_WEIGHT, REJECTED_TRIAL_COST, PARAMETER_BOUND = 1.0e3, 10.0, 3.0
 MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 3, 12, 250
+OPTIMIZER_FTOL = 1e-8
 NPHI, NTHETA, VC_DIGITS = 17, 24, 4  # Odd toroidal count avoids aliasing the two-coil field.
 MAKE_MOVIE, MOVIE_SURFACE_COLOR = False, "absB"
 
@@ -69,15 +74,21 @@ if ci_smoke:
     MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 2, 4, 2
     N_SEGMENTS, COIL_ORDER, NPHI, NTHETA = 24, 2, 8, 8
 
+if TARGET_BETA < 0 or not np.isfinite(TARGET_BETA):
+    raise ValueError("TARGET_BETA must be finite and nonnegative")
+if COIL_FIT_MAXITER == 0 and COILS_INPUT is None:
+    raise ValueError("Skipping the prefit requires COILS_INPUT")
+
 # Seed and coil pre-fit.
 vj.configure()
 require_optional("neo-jax", "low-transport NEO screen")
 started = time.perf_counter()
 print("Running single_stage_optimization_pwO.py")
 inp = vj.VmecInput.from_file(INPUT_FILE)
-if (inp.nfp != NFP or inp.lasym or inp.lfreeb or inp.phiedge <= 0
+NFP = inp.nfp
+if (inp.lasym or inp.lfreeb or inp.phiedge <= 0
         or inp.rbc[inp.ntor, 0] != 1 or inp.curtor != 0 or inp.ncurr != 1):
-    raise ValueError("Use the finite-beta candidate at its original flux and length scale")
+    raise ValueError("Use the candidate at its original flux and length scale with zero prescribed current")
 mpol = max(MAX_MODE + 2, 5)
 am = np.zeros(21)
 am[:len(PRESSURE_PROFILE)] = PRESSURE_PROFILE
@@ -88,32 +99,49 @@ inp = replace(inp, delt=0.5, ns_array=np.array([35]),
 # Keep the input total flux and physical pressure calibration fixed before
 # constructing the finite-beta target. No equilibrium solve occurs in a coil trial.
 previous = vj.read_wout(INPUT_FILE.with_name("wout_trial.nc"))
-calibration = opt.solve_equilibrium(inp, initial_state=restart_state(previous, inp),
-                                    raise_on_max_iterations=True)
-beta_at_unit_pressure = float(calibration.wout.betatotal)
-if not np.isfinite(beta_at_unit_pressure) or beta_at_unit_pressure <= 0:
-    raise ValueError("The unit-pressure seed must have finite positive beta")
-inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
+if TARGET_BETA:
+    calibration = opt.solve_equilibrium(inp, initial_state=restart_state(previous, inp),
+                                        raise_on_max_iterations=True)
+    beta_at_unit_pressure = float(calibration.wout.betatotal)
+    if not np.isfinite(beta_at_unit_pressure) or beta_at_unit_pressure <= 0:
+        raise ValueError("The unit-pressure seed must have finite positive beta")
+    inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
+    initial_state = calibration.state
+else:
+    inp = replace(inp, pres_scale=0.)
+    initial_state = restart_state(previous, inp)
 
 
 def relative_beta(state, runtime):
     return opt.volume_average_beta(state, runtime) / TARGET_BETA
 
 
-seed = opt.solve_equilibrium(inp, initial_state=calibration.state, raise_on_max_iterations=True)
+seed = opt.solve_equilibrium(inp, initial_state=initial_state, raise_on_max_iterations=True)
 mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
 actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
+plasma_terms = [(mapped.residuals_state, 0.0, 2 / initial_scale)]
+if TARGET_BETA:
+    plasma_terms.append((relative_beta, 1.0, 1.0))
 plasma_problem = opt.VmecProblem.from_tuples(
-    inp, [(mapped.residuals_state, 0.0, 2 / initial_scale), (relative_beta, 1.0, 1.0)], max_mode=MAX_MODE,
+    inp, plasma_terms, max_mode=MAX_MODE,
     use_ess=True, restart_from=seed, progress=not ci_smoke, forward_ftol=1e-12,
     forward_max_iterations=2000, refine_tol=1e-12, adjoint_tol=1e-8, max_fsq_ratio=1.)
 seed_equilibrium = plasma_problem.equilibrium_from_x(plasma_problem.x0)
 seed_data = vc.surface_field_data_from_state(
     inp, seed_equilibrium.solution, runtime=seed_equilibrium.solver_context,
     nphi=NPHI, ntheta=NTHETA)
-seed_interface = vc.PlasmaVacuumInterface.from_surface_data(
-    seed_data, digits=VC_DIGITS, precision=vc.plan_vc_precision(seed_data, digits=VC_DIGITS))
+if TARGET_BETA:
+    seed_interface = vc.PlasmaVacuumInterface.from_surface_data(
+        seed_data, digits=VC_DIGITS, precision=vc.plan_vc_precision(seed_data, digits=VC_DIGITS))
+else:
+    # Zero pressure and prescribed current mean no plasma field or VC solve.
+    area = jnp.linalg.norm(seed_data.area_vector, axis=0)
+    seed_interface = vc.PlasmaVacuumInterface(
+        gamma=seed_data.gamma, normal=seed_data.normal, phi_grid=seed_data.phi,
+        weights=area / jnp.sum(area), B_plasma=jnp.zeros_like(seed_data.B_total),
+        Bn_plasma=jnp.zeros_like(area), Bin_mag2=jnp.sum(seed_data.B_total**2, axis=0),
+        p_edge=0., nfp=NFP)
 external_target_B = seed_data.B_total - seed_interface.B_plasma
 seed_Bmag = jnp.linalg.norm(seed_data.B_total, axis=0)
 
@@ -130,9 +158,17 @@ surface_seed = surfacerzfourier_from_boundary(
 curves = CreateEquallySpacedCurves(
     N_COILS, COIL_ORDER, COIL_MAJOR_RADIUS, COIL_MINOR_RADIUS,
     n_segments=N_SEGMENTS, nfp=NFP, stellsym=STELLSYM)
-coils_circular = Coils(curves, np.full(N_COILS, COIL_CURRENT))
-x_coils_circular = np.asarray(curves.dofs).ravel()
-n_coil_shape = x_coils_circular.size
+coils_initial = Coils(curves, np.full(N_COILS, COIL_CURRENT))
+if COILS_INPUT is not None:
+    coils_initial = Coils.from_json(str(COILS_INPUT))
+    if coils_initial.nfp != NFP or coils_initial.stellsym != STELLSYM:
+        raise ValueError("Seed coils must match the equilibrium field periods and stellarator symmetry")
+    if not np.all(np.isfinite(np.asarray(coils_initial.dofs))):
+        raise ValueError("Seed coil DOFs must be finite")
+    N_COILS = coils_initial.dofs_currents.size
+    N_SEGMENTS = coils_initial.n_segments
+x_coils_initial = np.asarray(coils_initial.dofs_curves).ravel()
+n_coil_shape = x_coils_initial.size
 coil_scales = np.full(n_coil_shape, .5 * a)
 coil_penalty = CoilPenalty(
     LENGTH_TARGET, CURVATURE_OBJECTIVE_LIMIT, COIL_DISTANCE_CONSTRAINT,
@@ -143,10 +179,10 @@ coil_penalty = CoilPenalty(
 
 
 def coils_from_u(u):
-    shape = jnp.asarray(x_coils_circular) + coil_scales * u[:n_coil_shape]
+    shape = jnp.asarray(x_coils_initial) + coil_scales * u[:n_coil_shape]
     relative_current = u[n_coil_shape:] - jnp.mean(u[n_coil_shape:])
-    currents = coils_circular.dofs_currents * jnp.exp(.25 * relative_current)
-    return coils_circular.with_dofs(jnp.concatenate((shape, currents)))
+    currents = coils_initial.dofs_currents * jnp.exp(.25 * relative_current)
+    return coils_initial.with_dofs(jnp.concatenate((shape, currents)))
 
 
 def coil_fit_field(coils):
@@ -169,11 +205,11 @@ def coil_fit_objective(u):
 
 
 coil_fit_vg = jax.jit(jax.value_and_grad(coil_fit_objective))
-coil_fit = minimize(
-    lambda u: tuple(map(np.asarray, coil_fit_vg(jnp.asarray(u)))),
+coil_fit = (OptimizeResult(x=np.zeros(n_coil_shape + N_COILS), nit=0) if COIL_FIT_MAXITER == 0 else minimize(
+    lambda u, value_and_grad=coil_fit_vg: tuple(map(np.asarray, value_and_grad(jnp.asarray(u)))),
     np.zeros(n_coil_shape + N_COILS), jac=True, method="L-BFGS-B",
     bounds=[(-COIL_FIT_PARAMETER_BOUND, COIL_FIT_PARAMETER_BOUND)] * (n_coil_shape + N_COILS),
-    options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
+    options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10}))
 coils0 = coils_from_u(jnp.asarray(coil_fit.x))
 current_factor, fitted_rms, fitted_pressure = coil_fit_field(coils0)
 current_factor = float(current_factor)
@@ -181,7 +217,7 @@ if not np.isfinite(current_factor) or current_factor == 0:
     raise ValueError("The external boundary field must admit a finite nonzero current fit")
 coils0 = coils0.with_dofs(jnp.concatenate((coils0.dofs_curves.ravel(),
                                          coils0.dofs_currents * current_factor)))
-print(f"[coil fit] {coil_fit.nit} iterations, frozen finite-beta target: total B.n/B RMS "
+print(f"[coil fit] {coil_fit.nit} iterations, frozen target: total B.n/B RMS "
       f"= {100 * float(fitted_rms):.3f}%; common-current boundary-vector fit {current_factor:.6g}")
 print(f"[field calibration] total PHIEDGE = {inp.phiedge:.6f} Wb; "
       f"PRES_SCALE = {inp.pres_scale:.1f} Pa for beta {100 * TARGET_BETA:.2f}%. "
@@ -205,7 +241,7 @@ joint = SingleStageProblem(
     normal_field_limit=NORMAL_FIELD_CONSTRAINT, constraint_weight=CONSTRAINT_WEIGHT,
     vc_digits=VC_DIGITS, rejected_trial_cost=REJECTED_TRIAL_COST)
 report = opt.EquilibriumReporter(
-    ("mapped variance", mapped.total, ".6e"), ("beta", opt.volume_average_beta, ".4%"),
+    ("pwO variance", mapped.total, ".6e"), ("beta", opt.volume_average_beta, ".4%"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
     ("min |iota|", opt.min_abs_iota, ".4f"))
 seed_values = report("seed", joint.seed_equilibrium)
@@ -219,7 +255,7 @@ result = minimize(
     joint.value_and_grad, u, jac=True, method="L-BFGS-B", callback=joint.monitor,
     bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * u.size,
     options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
-             "maxls": 20, "ftol": 1e-3, "gtol": 1e-8})
+             "maxls": 20, "ftol": OPTIMIZER_FTOL, "gtol": 1e-8})
 u = result.x
 optimization_seconds = time.perf_counter() - started
 print(f"[solve] {result.nit} L-BFGS-B iterations, {joint.counts['trials']} trials "
@@ -250,14 +286,41 @@ verdict = design_target_report(
 print("[verify] matched NEO comparison", flush=True)
 before = screen_transport(joint.seed_equilibrium.wout, actual_surfaces)
 after = screen_transport(coarse.wout, actual_surfaces)
+held_Q = held_baseline_Q = held_surfaces = None
+held_physics = {"feasible": False}
+held_transport_passed = False
+if free["converged"]:
+    print("[verify] matched NEO on the cold held-coil equilibrium", flush=True)
+    # Match the seed radial grid to the converged held equilibrium, independently
+    # of the coarse joint-optimization grid and its separate NEO comparison.
+    held_baseline = opt.solve_equilibrium(
+        replace(inp, ns_array=np.array([free["final_ns"]]), ftol_array=np.array([1e-12]),
+                niter_array=np.array([8000])), initial_state=joint.seed_equilibrium.solution,
+        raise_on_max_iterations=True)
+    held_surfaces = np.asarray(mapped.compute_state(held_baseline.state, held_baseline.runtime)["s_b"])
+    held_baseline_Q = screen_transport(held_baseline.wout, held_surfaces)
+    held_wout = vj.read_wout(f"wout_{prefix}_free_check.nc")
+    held_iota = np.asarray(held_wout.iotaf)
+    held_physics = {"aspect": float(held_wout.aspect), "min_signed_full_iota": float(held_iota.min())}
+    held_physics["feasible"] = bool(np.isfinite(held_iota).all() and held_iota.min() > IOTA_FLOOR
+                                    and 5.9 <= held_physics["aspect"] <= ASPECT_LIMIT)
+    held_Q = screen_transport(held_wout, held_surfaces)
+    held_transport_passed = transport_improves(held_baseline_Q, held_Q)
+    print(f"Held-coil NEO mean epsilon_eff^(3/2): {held_baseline_Q.mean():.6g} -> {held_Q.mean():.6g}")
 physics = mapped.physical_metrics(coarse, mirror_ceiling=MIRROR_LIMIT,
                                   aspect_bounds=(5.9, 6.1), iota_floor=IOTA_FLOOR)
 print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> {after.mean():.6g}")
 summary = {
     "example": Path(__file__).name, "smoke": ci_smoke,
+    "input": str(INPUT_FILE.resolve()), "nfp": NFP, "beta_target": TARGET_BETA,
+    "seed_coils": str(Path(COILS_INPUT).resolve()) if COILS_INPUT else None,
+    "prefit_skipped": COIL_FIT_MAXITER == 0,
     "optimization_seconds": round(optimization_seconds, 1),
     "coil_fit_iterations": int(coil_fit.nit), **joint.counts,
     "lbfgsb_iterations": int(result.nit),
+    "initial_objective": initial_value, "final_objective": float(result.fun),
+    "boundary_step_norm": float(np.linalg.norm(joint.scales[:joint.n_boundary] * u[:joint.n_boundary])),
+    "coil_step_norm": float(np.linalg.norm(joint.scales[joint.n_boundary:] * u[joint.n_boundary:])),
     "equilibrium_solves": joint.monitor.records[-1].equilibrium_solves,
     "phiedge": float(inp.phiedge), "pres_scale": float(inp.pres_scale),
     "coil_current_calibration": "external_boundary_vector_least_squares",
@@ -270,7 +333,12 @@ summary = {
     **verdict, "particle_qualified": False, "coarse_physics": physics,
     "baseline_Q": before.tolist(), "trial_Q": after.tolist(),
     "transport_screen_passed": transport_improves(before, after),
-    "design_qualified": verdict["met"] and physics["feasible"] and transport_improves(before, after),
+    "held_surfaces": held_surfaces.tolist() if held_surfaces is not None else None,
+    "held_baseline_Q": held_baseline_Q.tolist() if held_baseline_Q is not None else None,
+    "held_Q": held_Q.tolist() if held_Q is not None else None,
+    "held_transport_screen_passed": held_transport_passed, "held_physics": held_physics,
+    "design_qualified": verdict["met"] and physics["feasible"] and transport_improves(before, after)
+                        and held_transport_passed and held_physics["feasible"],
 }
 Path("single_stage_optimization_pwO_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 save_outputs(joint, u, equilibrium, surface, prefix=prefix,

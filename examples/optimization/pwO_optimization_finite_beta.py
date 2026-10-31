@@ -1,9 +1,10 @@
-"""Continue the vacuum mapped-field candidate at beta=0.5%, with p proportional to 1-s.
+"""Continue the vacuum pwO candidate at beta=0.5%, with p proportional to 1-s.
 
 Run pwO_optimization.py first. Pressure is calibrated at fixed toroidal flux;
 the field normalization follows the live Boozer mean. The mode-2
 continuation is checked with NEO; finite-beta particle confinement is unverified.
 """
+import json
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -65,6 +66,10 @@ def inspect_candidate(eq):
 vj.configure()
 require_optional("neo-jax", "low-transport NEO screen")
 print("[setup] finite-beta continuation at fixed flux", flush=True)
+vacuum_report = json.loads(INPUT_FILE.with_name("summary.json").read_text())
+if (vacuum_report.get("status") != "completed"
+        or vacuum_report.get("transport_screen_passed") is not True):
+    raise ValueError("Use a completed vacuum pwO candidate that passes its NEO transport screen")
 inp = vj.VmecInput.from_file(INPUT_FILE)
 if (inp.lasym or inp.lfreeb or inp.phiedge <= 0
         or inp.rbc[inp.ntor, 0] != 1 or inp.ncurr != 1 or inp.curtor != 0
@@ -87,7 +92,7 @@ mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
 # Freeze only an automatic initial cost scale; field normalization stays live.
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
 actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
-print(f"[setup] initial mapped cost {initial_scale:.6g}; Boozer surfaces {actual_surfaces}")
+print(f"[setup] initial pwO cost {initial_scale:.6g}; Boozer surfaces {actual_surfaces}")
 problem = opt.VmecProblem.from_tuples(
     inp, [(objective, 0., 1.)], max_mode=2, vary_major_radius=False,
     use_ess=True, ess_alpha=1.2, restart_from=seed, forward_ftol=FTOL,

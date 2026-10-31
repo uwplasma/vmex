@@ -309,6 +309,7 @@ QH4 and QA2 have lower effective ripple. The pwO two-period field loses fewer al
 than QA2 (6.73% versus 24.12%); its difference from QH4 (7.97%) is unresolved within
 sampling uncertainty. All candidates target the same aspect ratio and iota floor;
 actual transforms differ, and only the pwO runs impose the mirror ceiling.
+QI refinement did not converge; its dashed iota profile is from the coarse equilibrium.
 
 Examples: [vacuum](examples/optimization/pwO_optimization.py),
 [finite beta](examples/optimization/pwO_optimization_finite_beta.py),

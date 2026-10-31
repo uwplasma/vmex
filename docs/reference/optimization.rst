@@ -697,8 +697,12 @@ Finite-beta particle confinement and MHD stability remain unverified.
 then adds the pwO residual to the joint boundary/coil objective. Coil
 length, curvature and distances are normalized by the seed minor radius;
 dense geometry sampling checks constraints between field quadrature nodes.
-It requires ``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold
-free-boundary solve. At finite pressure, coil flux need not equal total
+Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
+keeps an accepted fit. ``TARGET_BETA=0`` selects vacuum. The field checks
+still apply to supplied coils. The script requires
+``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold free-boundary
+solve and its NEO transport at matched radial resolution. At finite pressure,
+coil flux need not equal total
 ``PHIEDGE``: common current is fitted to the external boundary vector
 ``B_VMEC - B_plasma`` and pressure balance is verified separately.
 
@@ -733,4 +737,5 @@ between the QA and pwO examples. Its normalized geometry option
 penalizes the worst sampled gap and curvature; ESSOS's integrated losses use
 a different measure. Length is an upper bound here; ESSOS's length loss instead
 penalizes deviations on both sides of its target. The flux quadrature retains VMEC's
-positive-phi sign convention.
+positive-phi sign convention. Zero pressure and zero prescribed current use
+the exact zero plasma field, avoiding virtual casing in the vacuum objective.

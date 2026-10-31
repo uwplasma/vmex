@@ -16,6 +16,8 @@ class Deck:
     nfp: int = 4
     phiedge: float = .23
     pres_scale: float = 30000.
+    pmass_type: str = "power_series"
+    pcurr_type: str = "power_series"
     curtor: float = 17.
     ncurr: int = 1
     lasym: bool = False
@@ -110,7 +112,7 @@ def harness(monkeypatch, tmp_path):
               fine=fine, joint=joint, final_coils=final_coils)
 
 
-@pytest.mark.parametrize("outcome", ["converged", "not converged", "no vacuum", "vmec error"])
+@pytest.mark.parametrize("outcome", ["converged", "not converged", "no vacuum", "early rung", "vmec error"])
 def test_verification_preserves_physics_and_independently_checks_the_held_boundary(harness, monkeypatch, outcome):
     h = harness
     solves = []
@@ -123,7 +125,8 @@ def test_verification_preserves_physics_and_independently_checks_the_held_bounda
         solves.append(("free", inp, kwargs))
         if outcome == "vmec error":
             raise ss.VmecError("independent free solve failed")
-        return NS(converged=np.array([True, outcome != "not converged"]), state="free state",
+        return NS(converged=np.array([True, outcome != "not converged"]),
+                  state=NS(R_cos=np.zeros((16 if outcome == "early rung" else 41, 2))),
                   fsqr=1e-13, fsqz=2e-13, fsql=3e-13, iterations=14,
                   vacuum=None if outcome == "no vacuum" else NS(delbsq=.001))
 
@@ -265,7 +268,7 @@ def test_total_normal_field_uses_equilibrium_strength_and_the_frozen_precision(m
     monkeypatch.setattr(ss.vc, "surface_field_data_from_state", lambda *a, **kw: data)
     monkeypatch.setattr(ss.vc, "PlasmaVacuumInterface", NS(from_surface_data=lambda *a, **kw: (
         calls.append(kw) or interface)))
-    normal, actual_weights = ss.total_normal_field("input", "coils", "state", "context", 1, 2,
+    normal, actual_weights = ss.total_normal_field(Deck(), "coils", "state", "context", 1, 2,
                                                    "caller precision", digits=5)
     np.testing.assert_allclose(normal, [[.1, .2]])
     assert actual_weights is weights
@@ -386,3 +389,27 @@ def test_dense_geometry_reconstruction_preserves_currents_symmetry_and_surface_p
     np.testing.assert_array_equal(calls[1][2], [20., 30.])
     assert calls[2][2] == {"nphi": 68, "ntheta": 32, "close": False,
                             "range_torus": "full torus", "rs": [.03], "zc": [.04]}
+
+
+def test_vacuum_normal_field_uses_exact_zero_plasma_field_without_virtual_casing(monkeypatch):
+    inp = replace(Deck(), pres_scale=0., curtor=0., ac=np.zeros(2))
+    data = NS(B_total=jnp.array([[[0., 0.]], [[0., 0.]], [[3., 4.]]]),
+              normal=jnp.array([[[0., 0.]], [[0., 0.]], [[1., 1.]]]),
+              area_vector=jnp.array([[[0., 0.]], [[0., 0.]], [[1., 3.]]]),
+              gamma="points", phi="angles")
+    monkeypatch.setattr(ss.vc, "surface_field_data_from_state", lambda *a, **kw: data)
+    monkeypatch.setattr(ss, "coil_field", lambda coils: "field")
+    monkeypatch.setattr(ss.vc, "external_B_cartesian", lambda *a: data.B_total * .1)
+    monkeypatch.setattr(ss.vc.PlasmaVacuumInterface, "from_surface_data",
+                        lambda *a, **kw: pytest.fail("vacuum needs no virtual casing"))
+    normal, weights = ss.total_normal_field(inp, "coils", "state", "context", 1, 2, None)
+    np.testing.assert_allclose(normal, [[.1, .1]])
+    np.testing.assert_allclose(weights, [[.25, .75]])
+    assert ss._vacuum_input(inp)
+    assert not ss._vacuum_input(replace(inp, curtor=1.))
+    assert not ss._vacuum_input(replace(inp, ac=np.ones(2)))
+    assert not ss._vacuum_input(replace(inp, ncurr=0))
+    assert not ss._vacuum_input(replace(inp, pres_scale=1.))
+    assert ss._vacuum_input(replace(inp, pres_scale=1., am=np.zeros(2)))
+    assert not ss._vacuum_input(replace(inp, pres_scale=1., am=np.zeros(2), pmass_type="cubic_spline"))
+    assert not ss._vacuum_input(replace(inp, pcurr_type="cubic_spline"))

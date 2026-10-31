@@ -172,12 +172,16 @@ def comparisons(root):
             ("QP", "QP4"), ("QI", "QI4"), ("mapped4", "pwO4"),
             ("seed2", "Seed2"), ("QA_nfp2", "QA2"), ("mapped2", "pwO2")):
         row = data.get(name, {})
-        if not row.get("Q"):
-            missing.append(label+": transport and particles"); continue
-        line, = axes[0].semilogy(row["actual_s"], np.array(row["Q"])**(2/3), "o-", label=label)
+        iota = row.get("refined_equilibrium", {}).get("full_signed_iota")
+        if iota is None:
+            iota = json.loads((root / name / "coarse-iota.json").read_text())["iotaf"]
+            label += " (NS35)"
+        line, = axes[2].plot(np.linspace(0, 1, len(iota)), iota,
+                             ls="--" if "NS35" in label else "-")
         handles.append(line); labels.append(label)
-        iota = row["refined_equilibrium"]["full_signed_iota"]
-        axes[2].plot(np.linspace(0, 1, len(iota)), iota, color=line.get_color())
+        if not row.get("Q"):
+            missing.append(label+": refined transport and particles"); continue
+        axes[0].semilogy(row["actual_s"], np.array(row["Q"])**(2/3), "o-", color=line.get_color())
         particle = row.get("particles", {})
         if particle.get("status") == "completed":
             axes[1].plot(1000*np.array(particle["times_s"]), 100*np.array(particle["weighted_loss_curve"]),

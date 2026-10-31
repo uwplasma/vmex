@@ -806,8 +806,8 @@
     },
     {
       "path": "docs/_static/figures/readme_low_transport_comparison.webp",
-      "sha256": "d5d24f34adeb1541c97196182a68ecc5553343a605936d2afb3b422c731175ab",
-      "bytes": 42738,
+      "sha256": "5c295f60a64e2796fa8cff6ba25e8d1ab8e54d302a652116cc1efee6312be638",
+      "bytes": 44206,
       "generator": "docs/_static/figures/sources/make_low_transport_figure.py",
       "command": "python docs/_static/figures/sources/make_low_transport_figure.py --evidence /path/to/qualification",
       "inputs": [],

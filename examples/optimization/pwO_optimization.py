@@ -1,6 +1,6 @@
 """Reduce transport from a nearly circular vacuum torus.
 
-The mapped-field variance, aspect ratio and iota floor define the objective.
+The pwO contour variance, aspect ratio and iota floor define the objective.
 NEO independently screens transport; this objective does not certify pwO or
 particle confinement. Install vmex[neoclassical]; edit the inputs below.
 """
@@ -76,7 +76,7 @@ mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
 # Freeze only an automatic initial cost scale; field normalization stays live.
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
 actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
-print(f"[setup] initial mapped cost {initial_scale:.6g}; Boozer surfaces {actual_surfaces}")
+print(f"[setup] initial pwO cost {initial_scale:.6g}; Boozer surfaces {actual_surfaces}")
 problem = opt.VmecProblem.from_tuples(
     inp, [(objective, 0., 1.)], max_mode=2, vary_major_radius=False,
     use_ess=True, ess_alpha=1.2, restart_from=seed, forward_ftol=FTOL,
