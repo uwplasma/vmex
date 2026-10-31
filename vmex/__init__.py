@@ -45,7 +45,8 @@ links to the module that documents it.
 - :func:`~vmex.core.turbulence.gk_fieldline_geometry_from_wout` — GK
   field-line geometry from any compatible wout, without a solve
 - :func:`~vmex.core.scaling.scale_input` / :func:`~vmex.core.scaling.scale_wout`
-  / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms
+  / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms;
+  :func:`~vmex.core.scaling.match_b0` sets ``|B|`` on the axis
 
 **High-order reconstruction and strong-force certificate**
 
@@ -328,6 +329,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "surface_field_data_from_wout": (
         ".core.virtual_casing", "surface_field_data_from_wout"),
     # dimensional scaling
+    "axis_field": (".core.scaling", "axis_field"),
+    "match_b0": (".core.scaling", "match_b0"),
     "scale_input": (".core.scaling", "scale_input"),
     "scale_mgrid": (".core.scaling", "scale_mgrid"),
     "scale_wout": (".core.scaling", "scale_wout"),
