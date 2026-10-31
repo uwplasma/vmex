@@ -688,6 +688,8 @@ perturbation breaks the two-period symmetry. Five pwO steps supply a
 direction; halving that step until NEO accepts retains a quarter step.
 It reduces pwO variance by 11.9% and mean Q by 65.6% relative to the
 near-circle seed, at A=6.007 and minimum signed iota=0.4198. This
+independent NS103/M7/N7 check finds a 67.0% mean-Q reduction and
+30.0% weighted alpha loss, against 100% in its near-circle seed. The
 construction is not yet automated by changing ``NFP`` in the vacuum example.
 
 Continue the saved vacuum shape to finite pressure with::

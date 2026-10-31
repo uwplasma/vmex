@@ -280,7 +280,8 @@ These are measurements of the combined objective, not a bound from mapped
 variance to Q or losses. QA preconditioning does not remove this limitation:
 five NFP3 pwO steps lowered the variance by 26%, but mean Q rose from
 3.41e-6 to 2.97e-3, above the near-circle value 5.02e-4. Independent
-transport checks remain essential. The README shows the retained
+transport checks remain essential. A NEO-screened quarter step instead
+retains an 86.8% mean-Q reduction from the NFP3 near-circle seed. The README shows the retained
 boundary, unfilled Boozer contours and measured loss curves.
 
 Bounce action

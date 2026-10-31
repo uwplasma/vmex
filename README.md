@@ -298,18 +298,19 @@ volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lower
 
 | Field periods | Aspect ratio | Minimum ι | Transport result |
 |---|---:|---:|---|
-| 1 | 6.007 | 0.420 | Coarse mean Q −65.6%; QA precursor |
+| 1 | 6.007 | 0.421 | Refined mean Q −67.0%; QA precursor |
 | 2 | 6.003 | 0.494 | Refined mean Q −52.6% |
-| 3 | 6.001 | 0.442 | Coarse mean Q +191%; rejected |
+| 3 | 6.006 | 0.420 | Coarse mean Q −86.8%; QA precursor |
 | 4 | 6.001 | 0.438 | Refined mean Q −27.5% |
 
 The one-period construction uses a QA precursor, physical toroidal harmonics through n=4,
-and a NEO-screened pwO step. The direct mode-2 start still fails; independent refinement and
-particle checks are pending.
+and a NEO-screened pwO step. Its paired alpha losses fall from 100% to 30.0%.
+The direct mode-2 start still fails. A similar QA-to-pwO step gives the
+three-period result; its refinement and particle checks are pending.
 
 ![Effective ripple, alpha losses and iota profiles compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
 
-QH4 and QA2 have lower effective ripple. The pwO two-period field loses fewer alphas
+QH4 and QA2 have lower effective ripple than pwO2. The two-period field loses fewer alphas
 than QA2 (6.73% versus 24.12%); its difference from QH4 (7.97%) is unresolved within
 sampling uncertainty. All candidates target the same aspect ratio and iota floor;
 actual transforms differ, and only the pwO runs impose the mirror ceiling.
