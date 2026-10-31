@@ -617,7 +617,10 @@ def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
     rows) would commit to JAX's default device and poison every runtime
     later assembled from this template on another device.
     """
-    with _device_context(cfg):
+    # ``ensure_compile_time_eval``: the first call can come from inside an
+    # outer ``jax.jit`` trace (``jit(value_and_grad(f))``); everything here is
+    # concrete host data, so build it eagerly and never cache a tracer.
+    with jax.ensure_compile_time_eval(), _device_context(cfg):
         return _device_pin(cfg, prepare_runtime(
             cfg.inp, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, lconm1=cfg.lconm1,
@@ -736,13 +739,16 @@ def _boundary_pack_tables(cfg: ImplicitConfig):
             a[k], b[k], c[k], d[k] = 0.5, -0.5, 0.5, 0.5
             e[k], f[k], g[k], h[k] = 0.5, 0.5, 0.5, -0.5
 
-    tab = types.SimpleNamespace(
-        agg=jnp.asarray(agg), agg_sgn=jnp.asarray(agg_sgn),
-        keep=jnp.asarray(keep), m_pos=jnp.asarray(m_pos),
-        ni_k=ni_k, m_k=m_arr,
-        a=jnp.asarray(a), b=jnp.asarray(b), c=jnp.asarray(c), d=jnp.asarray(d),
-        e=jnp.asarray(e), f=jnp.asarray(f), g=jnp.asarray(g), h=jnp.asarray(h),
-    )
+    # Concrete device constants even when the first call is inside an outer
+    # trace: a traced ``jnp.asarray`` would cache tracers.
+    with jax.ensure_compile_time_eval():
+        tab = types.SimpleNamespace(
+            agg=jnp.asarray(agg), agg_sgn=jnp.asarray(agg_sgn),
+            keep=jnp.asarray(keep), m_pos=jnp.asarray(m_pos),
+            ni_k=ni_k, m_k=m_arr,
+            a=jnp.asarray(a), b=jnp.asarray(b), c=jnp.asarray(c), d=jnp.asarray(d),
+            e=jnp.asarray(e), f=jnp.asarray(f), g=jnp.asarray(g), h=jnp.asarray(h),
+        )
     _PACK_TABLE_CACHE[key] = tab
     return tab
 
