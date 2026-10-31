@@ -374,6 +374,40 @@ distance implementation.
    0.17 or newer: ``pip install "vmex[coils]"``. Earlier releases lack the
    ``Coils.from_json``/``Coils.with_dofs`` API these examples use.
 
+For a fixed-flux joint search, :class:`vmex.core.single_stage.SingleStageProblem`
+combines any existing ``VmecProblem`` objective with coil geometry costs and
+transform, aspect, and total normal-field limits. The plasma objective remains
+explicit in the example; the helper does not select quasisymmetry or another
+field target::
+
+   from vmex.core.single_stage import CoilPenalty, SingleStageProblem
+
+   penalties = CoilPenalty(length_target=5.5, curvature_limit=6.9,
+                           coil_distance=0.19, surface_distance=0.16)
+   joint = SingleStageProblem(
+       problem, coils, penalties, nphi=37, ntheta=32,
+       iota_floor=0.43, aspect_limit=5.97, normal_field_limit=0.008)
+   result = scipy.optimize.minimize(
+       joint.value_and_grad, np.zeros_like(joint.x0), jac=True,
+       method="L-BFGS-B", callback=joint.monitor,
+       bounds=[(-3, 3)] * joint.x0.size)
+
+The optimizer varies ``u`` with ``x = joint.x0 + joint.scales*u``. Currents
+stay fixed while coil shapes and boundary modes vary. Virtual-casing precision
+is planned once on the seed and frozen throughout the search; uncertified
+equilibrium trials receive a finite rejection cost above the normalized seed.
+``toroidal_flux(inp, coils)`` measures the physical positive-phi flux for seed
+calibration, independently of the poloidal traversal direction.
+
+``verify_design(joint, result.x, prefix=...)`` saves the design, re-solves on a
+finer fixed-boundary grid, and cold-solves NESTOR with unchanged flux, pressure,
+and current profiles. It returns the equilibrium, surface, fixed-boundary
+metrics, and free-boundary report. ``design_target_report`` checks those metrics
+against explicit limits; failed solves and nonfinite values cannot pass.
+``save_outputs`` writes the equilibrium, geometry, objective history, and plots.
+See ``examples/optimization/single_stage_optimization_finite_beta.py`` for the
+complete setup and reporting calls.
+
 For a finite-beta prescribed boundary, virtual casing gives the field of the
 enclosed plasma currents. The physical exterior field is that contribution
 plus the actual ESSOS coil field. The two interface residuals used by the
@@ -389,8 +423,9 @@ example are
 The second is a normalized total-pressure jump, not a pressure-profile error.
 It supplies the tangential-field magnitude condition that ``B.n/B`` alone
 does not constrain, even when the input pressure vanishes at the LCFS. The
-fixed-boundary examples vary boundary and coil variables together; they do
-not call NESTOR. A coil-only free-boundary optimization must instead
+fixed-boundary searches vary boundary and coil variables together without
+calling NESTOR on optimization trials; NESTOR can independently verify the
+returned design. A coil-only free-boundary optimization must instead
 differentiate the fully reconverged NESTOR root. The experimental public path
 keeps the construction visible in the driver::
 
@@ -613,6 +648,92 @@ spatial derivative. Third spatial derivatives and their parameter VJPs remain
 expensive; the examples print progress before each order and use compact grids
 for a bounded cold run.
 
+Low-transport optimization
+--------------------------
+
+Install ``vmex[neoclassical]`` and run the vacuum example::
+
+   python examples/optimization/pwO_optimization.py
+
+The file-level settings select the input, output directory, resolution and
+iteration budget. The default sets ``NFP=2`` and edits ``input.minimal_seed_nfp4`` in memory:
+major radius 1 m, minor radius 1/6 m, and a helical perturbation of 5% of the
+minor radius. For NFP1 the near-circle seed retains a physical n=2 harmonic.
+NFP1 and NFP3 use a QA precursor, followed by five pwO steps and
+NEO-constrained backtracking. NFP2 and NFP4 use the direct pwO mode ladder.
+Boundary modes 1 then 2 share NS35, M5/N5, force tolerance 1e-12 and a
+2000-iteration solver cap. Bounded least squares uses implicit residual
+Jacobians, optimizer ``ftol=1e-3`` and 15 iterations per stage.
+
+The pwO residual is combined with aspect ratio 6, a signed-iota
+floor of 0.42 and mirror ratio below 0.2. The mirror penalty targets 0.18;
+the final pwO stage has no symmetry or magnetic-well penalty. Live B00 normalization replaces
+reference-field arrays, and an automatic initial cost scale sets the term weight.
+Three equally spaced requests are snapped to actual VMEC half-mesh radii.
+The fixed map and cut are described in
+:ref:`confinement-mapped-pwo`.
+
+The vacuum run writes seed/trial WOUTs, ``input.trial`` and iteration history
+to ``low_transport/``. ``input.trial`` and ``wout_trial.nc`` retain the
+lowest-scoring feasible candidate; an infeasible terminal iterate cannot
+overwrite it. A matched NEO screen requires improvement at every sampled
+radius and at least 1% in their mean. That threshold is a selection rule,
+not an error estimate. Refine the equilibrium, Boozer transform and NEO
+calculation, then trace fresh particles to qualify a selected boundary.
+The README figure records such a comparison; running the example does not
+repeat its particle study.
+
+The one-period construction starts with the NFP2, mode-2 QA precursor.
+Representing the same physical boundary at NFP1 maps each toroidal index
+``n`` to ``2*n``, requiring boundary harmonics through n=4. An odd n=1
+perturbation breaks the two-period symmetry. Five pwO steps supply a
+direction; halving that step until NEO accepts retains a quarter step.
+It reduces pwO variance by 11.9% and mean Q by 65.6% relative to the
+near-circle seed, at A=6.007 and minimum signed iota=0.4198. This
+independent NS103/M7/N7 check finds a 67.0% mean-Q reduction and
+30.0% weighted alpha loss, against 100% in its near-circle seed. The
+vacuum driver automates this construction when ``NFP=1``; its NFP3
+path uses the same step control after a native three-period QA precursor.
+The NFP3 refined mean Q falls 87.2%, with paired losses down from 100% to
+26.8%. Fresh public runs changing only NFP completed in 562 s (NFP1) and
+516 s (NFP3), each below 3 GiB on eight logical CPUs.
+
+Continue the saved vacuum shape to finite pressure with::
+
+   python examples/optimization/pwO_optimization_finite_beta.py
+
+Run the vacuum example first: pressure continuation requires its saved
+``low_transport/input.trial`` and writes ``low_transport_finite_beta/``.
+The zero-current pressure profile is proportional to ``1-s`` and targets
+0.5% volume-average beta. The saved vacuum WOUT starts pressure calibration;
+each pressure change is followed by a nonlinear equilibrium solve. The
+NFP2 continuation improves coarse mean Q by 26.6% in three iterations.
+NFP1 and NFP3 use a QA precursor at finite pressure, followed by five pwO
+steps and NEO backtracking. The original pressure-calibrated start remains
+in ``input.seed`` and ``wout_seed.nc``; the pwO start uses ``input.pwo_seed``
+and ``wout_pwo_seed.nc``. Independent NS103/M7/N7 checks find mean-Q
+reductions of 44.2% and 25.8%, with minimum iota 0.425 and 0.438. The full
+runs take 281 s and 348 s, below 3.3 GiB on eight logical CPUs.
+The direct NFP4 boundary polish fails NEO, including step fractions down
+to 1/64. Its calibrated seed is preserved and ``input.trial`` is not accepted.
+Finite-beta particle confinement and MHD stability remain unverified.
+
+``single_stage_optimization_pwO.py`` first fits coils to the fixed plasma,
+then adds the pwO residual to the joint boundary/coil objective. Coil
+length, curvature and distances are normalized by the seed minor radius;
+dense geometry sampling checks constraints between field quadrature nodes.
+Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
+keeps an accepted fit. ``TARGET_BETA=0`` selects vacuum. The field checks
+still apply to supplied coils. The script requires
+``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold free-boundary
+solve and its NEO transport at matched radial resolution. The held-coil
+transport screen compares with the preceding pwO run's ``input.seed``, using
+the final design's flux, pressure and current profiles for both equilibria.
+The fixed-boundary target comparison is also printed. At finite pressure,
+coil flux need not equal total
+``PHIEDGE``: common current is fitted to the external boundary vector
+``B_VMEC - B_plasma`` and pressure balance is verified separately.
+
 Resources and reproducibility
 -----------------------------
 
@@ -637,3 +758,12 @@ The main entry points are :func:`vmex.core.optimize.make_problem`,
 :class:`vmex.core.problem.Evaluation`, and
 :class:`vmex.core.monitoring.OptimizationMonitor`, and
 :class:`vmex.core.monitoring.EquilibriumReporter`.
+
+ESSOS supplies coil curves, Biot–Savart fields and integrated distance penalties.
+``vmex.core.single_stage`` shares the VMEX adjoint and verification workflow
+between the QA and pwO examples. Its normalized geometry option
+penalizes the worst sampled gap and curvature; ESSOS's integrated losses use
+a different measure. Length is an upper bound here; ESSOS's length loss instead
+penalizes deviations on both sides of its target. The flux quadrature retains VMEC's
+positive-phi sign convention. Zero pressure and zero prescribed current use
+the exact zero plasma field, avoiding virtual casing in the vacuum objective.

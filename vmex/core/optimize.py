@@ -1225,6 +1225,10 @@ def quasi_isodynamic_residual(
 
         shuffled = jax.vmap(jax.vmap(interp_one, in_axes=(0, 0)), in_axes=(0, 0))(
             x_target, signed_phi)
+        # The first coordinate is exactly -lend, whose target is the wall.
+        # Subtracting phimin can move it into the tiny artificial node ramp
+        # through roundoff; evaluate that boundary condition directly.
+        shuffled = shuffled.at[..., 0].set(1.0)
         constructed_bnorm = shuffled
         shuffle_res = (shuffled - b_alpha) * sqrt_w * shuffle_profile_weight
         if float(argmin_softness) > 0.0:

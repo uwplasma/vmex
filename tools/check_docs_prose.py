@@ -84,6 +84,11 @@ GRANDFATHERED_FILES = {
     "figures/readme_equilibrium_showcase.webp",
     "figures/readme_essos_beta_scan.webp",
     "figures/readme_interior_field.webp",
+    # Reproducible README comparison.
+    "figures/readme_low_transport.webp",
+    "figures/readme_low_transport_nfp.webp",
+    "figures/readme_low_transport_comparison.webp",
+    "figures/readme_low_transport_coils.webp",
     "figures/readme_optimization.webp",
     "figures/readme_polish_before_after.webp",
     "figures/readme_polish_plot.webp",
