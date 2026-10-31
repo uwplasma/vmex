@@ -76,6 +76,10 @@ vj.configure()
 require_optional("neo-jax", "low-transport NEO screen")
 started = time.perf_counter()
 print("Running single_stage_optimization_pwO.py")
+plasma_report = json.loads(INPUT_FILE.with_name("summary.json").read_text())
+if (plasma_report.get("status") != "completed"
+        or plasma_report.get("transport_screen_passed") is not True):
+    raise ValueError("Use a completed pwO plasma run that passes its NEO transport screen")
 inp = vj.VmecInput.from_file(INPUT_FILE)
 NFP = inp.nfp
 reference = vj.VmecInput.from_file(INPUT_FILE.with_name("input.seed"))
