@@ -323,6 +323,7 @@ def qa_precursor(inp, seed, mapped, geometry, outdir, *, maxiter, optimizer_ftol
         inp.to_indata(monitor.outdir / "input.seed")
         write_wout(monitor.outdir / "wout_seed.nc", seed.wout)
         for mode in (1, 2):
+            print(f"[QA precursor] NFP={inp.nfp}, max_mode={mode}", flush=True)
             stage = problem.subproblem(max_mode=mode, x=x)
             step = .02*np.asarray(stage.scales)
             result = least_squares(lambda y: monitor(stage.embed(y)), stage.x0,
@@ -374,6 +375,7 @@ def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces, *, seed)
         x = start+alpha*(proposal-start)
         eq, error = equilibrium(x)
         if eq is None:
+            print(f"[NEO backtrack] alpha={alpha:g}: equilibrium rejected", flush=True)
             trials.append(dict(alpha=alpha, error=error, accepted=False))
             monitor.save(backtracking=trials, transport_screen_passed=False)
             continue
@@ -387,6 +389,8 @@ def transport_backtrack(monitor, start, proposal, baseline_Q, surfaces, *, seed)
         admissible = metrics["feasible"] and metrics["raw"] < initial
         q = screen_transport(eq.wout, surfaces) if admissible else None
         accepted = bool(admissible and transport_improves(baseline_Q, q))
+        mean_q = float(np.mean(q)) if q is not None else float("nan")
+        print(f"[NEO backtrack] alpha={alpha:g}, mean Q={mean_q:.6g}, accepted={accepted}", flush=True)
         trials.append(dict(alpha=alpha, physics=metrics,
                            Q=None if q is None else q.tolist(), accepted=accepted))
         monitor.save(backtracking=trials, transport_screen_passed=accepted)
