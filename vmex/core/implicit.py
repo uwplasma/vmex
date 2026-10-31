@@ -1609,6 +1609,51 @@ _REFINE_BLOCK_STALL = 0.1
 _REFINE_FAR_STALL = 1.0e6
 
 
+#: ``ftol`` the host solve is resumed to when the block finish cannot certify
+#: the state.  On ``nfp2_QA`` (ns 31, ``ftol`` 1e-12) the Newton steps cannot
+#: cross a flat valley of the residual: ``|F|`` 1.2e-06 goes to 8e-04 after one
+#: exact step and no iterate beats the start, so the Krylov replay spends
+#: 2,100 iterations (3.5-4.4 s) to return the host state unchanged.  Resuming
+#: the descent takes 2,000 iterations (1.4 s) to ``|F|`` 1.3e-07, which the
+#: block finish certifies at nearby points (2.9e-11) and which is ten times
+#: closer to the root where it does not.
+_REFINE_RESUME_FTOL = 1.0e-14
+
+#: The resumed solve may spend this multiple of the host solve's iterations
+#: (``nfp2_QA``: 183 and 2,034, a factor 11) before the Krylov replay takes over.
+_REFINE_RESUME_BUDGET = 20
+
+
+def _anchor_residual(cfg: ImplicitConfig, params: ImplicitParams,
+                     state: SpectralState, dof_mask: SpectralState) -> float:
+    """``|F(P(state))|`` with ``state`` as its own frozen state."""
+    state, params, dof_mask = commit_to_single_device((state, params, dof_mask))
+    F = residual_fn(cfg, state, dof_mask)
+    return float(_tree_norm(F(_dof_projector(cfg, dof_mask)(state), params)))
+
+
+def _resumed_refinement(cfg: ImplicitConfig, params: ImplicitParams,
+                        state: SpectralState, dof_mask: SpectralState,
+                        iterations: int) -> SpectralState | None:
+    """Block-refine ``state`` after resuming its host solve to ``_REFINE_RESUME_FTOL``.
+
+    ``None`` when the resumed solve fails or exhausts its budget, so the caller
+    replays the Krylov refinement from ``state``.
+    """
+    try:
+        result = solve(
+            input_with_params(cfg.inp, params), cfg.resolution,
+            ftol=_REFINE_RESUME_FTOL,
+            max_iterations=min(cfg.max_iterations, _REFINE_RESUME_BUDGET * iterations),
+            mode=cfg.mode, lconm1=cfg.lconm1, initial_state=state,
+            use_fft=False, device=AUTO)
+    except VmecError:
+        return None
+    if not bool(result.converged):
+        return None
+    return _refined_state(cfg, params, result.state, dof_mask, krylov=False)
+
+
 def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState,
                         dof_mask: SpectralState) -> SpectralState:
@@ -1618,11 +1663,29 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
     if hit is None or hit[0] != key:
         with _timed(cfg, "refinement"):
             _count(cfg, refinements=1)
+            guess = _LAST_REFINEMENT_CORRECTION.get(cfg)
+            solved = _LAST_SOLVE.get(cfg)
+            resume = (_REFINE_BLOCK_MAX_STEPS > 0 and _REFINE_RESUME_FTOL < cfg.ftol
+                      and solved is not None and solved[0] == key
+                      and bool(solved[1].converged))
+            # A converged solve whose block finish misses is resumed to a
+            # tighter ftol before the Krylov replay is paid for.
             refined = _refined_state(
-                cfg, params, state, dof_mask,
-                initial_correction=_LAST_REFINEMENT_CORRECTION.get(cfg),
-            )
+                cfg, params, state, dof_mask, initial_correction=guess,
+                krylov=not resume)
             stalled = _ANCHOR_STALLED.pop(id(cfg), False)
+            missed = (_anchor_residual(cfg, params, refined, dof_mask)
+                      if resume and not stalled else 0.0)
+            if missed > cfg.refine_tol:
+                resumed = _resumed_refinement(
+                    cfg, params, state, dof_mask, int(solved[1].iterations))
+                if resumed is not None and _anchor_residual(
+                        cfg, params, resumed, dof_mask) < missed:
+                    refined = resumed
+                else:
+                    refined = _refined_state(
+                        cfg, params, state, dof_mask, initial_correction=guess)
+                    stalled = _ANCHOR_STALLED.pop(id(cfg), False)
             correction = jax.tree.map(jnp.subtract, refined, state)
             correction_norm = float(_tree_norm(correction))
         if not stalled and np.isfinite(correction_norm) and correction_norm > 0.0:
@@ -1815,7 +1878,7 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
                    state: SpectralState,
                    dof_mask: SpectralState,
                    *, initial_correction: SpectralState | None = None,
-                   ) -> SpectralState:
+                   krylov: bool = True) -> SpectralState:
     """Newton-refine ``state`` onto the root of the frozen residual ``F``.
 
     The implicit function theorem defines the derivative of the equilibrium
@@ -1881,6 +1944,8 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
         if _REFINE_BLOCK_MAX_STEPS > 0 and block > _REFINE_FAR_STALL * tol:
             _ANCHOR_STALLED[id(cfg)] = True
             return z, residual
+        if not krylov:
+            return (block_z, block) if block < residual else (z, residual)
         # The block finish missed: replay the Krylov refinement from the same
         # start and keep whichever lands lower.
         best_z, best = z, residual
