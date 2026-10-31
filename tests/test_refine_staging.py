@@ -20,6 +20,7 @@ no repeated full solves):
 from __future__ import annotations
 
 import dataclasses
+import types
 from pathlib import Path
 
 import jax
@@ -408,3 +409,87 @@ def test_block_stall_far_from_root_skips_krylov_and_rejects_the_trial(monkeypatc
     assert int(status) == 3 and im._LAST_REFINED[cfg][2]
 
 
+
+
+def _resume_setup(monkeypatch):
+    """A converged solve whose block finish is made to miss at the host state."""
+    inp, _, p0 = _small_solovev_setup()
+    cfg = im.make_config(inp, ftol=1.0e-8, max_iterations=1000)
+    # Equal configs share one object, hence one refinement memo.
+    for memo in (im._LAST_REFINED, im._LAST_REFINEMENT_CORRECTION, im._LAST_SOLVE):
+        memo.pop(cfg, None)
+    host = im._host_solve(cfg, p0)
+    state, mask = _host_state(cfg, p0)
+    real_step, real_krylov = im._refine_block_step, im._refine_step
+    krylov_steps = []
+
+    def missing(config, params, frozen, dof_mask, z, factors):
+        out = real_step(config, params, frozen, dof_mask, z, factors)
+        if np.array_equal(np.asarray(frozen.R_cos), np.asarray(host.state.R_cos)):
+            fz = im.residual_fn(config, frozen, dof_mask)(z, params)
+            return z, fz, im._tree_norm(fz), out[3]
+        return out
+
+    def counted(*args):
+        krylov_steps.append(1)
+        return real_krylov(*args)
+
+    monkeypatch.setattr(im, "_refine_block_step", missing)
+    monkeypatch.setattr(im, "_refine_step", counted)
+    return cfg, p0, state, mask, krylov_steps
+
+
+def _certificate(cfg, p0, state, mask):
+    return im._anchor_residual(cfg, p0, state, mask)
+
+
+def test_missed_block_finish_resumes_the_solve_instead_of_the_krylov_replay(monkeypatch) -> None:
+    """A converged solve the block finish cannot certify is resumed to a tighter ftol."""
+    cfg, p0, state, mask, krylov_steps = _resume_setup(monkeypatch)
+    assert _certificate(cfg, p0, state, mask) > cfg.refine_tol
+    refined = im._refine_fixed_point(cfg, p0, state, mask)
+    assert _certificate(cfg, p0, refined, mask) <= cfg.refine_tol
+    assert not krylov_steps
+
+
+def test_failed_resume_replays_the_krylov_refinement(monkeypatch) -> None:
+    """An unconverged, failing or no better resume falls back to the Krylov replay."""
+    class Unconverged:
+        converged = False
+
+    def raises(*args, **kwargs):
+        raise VmecError("no")
+
+    for resume in (lambda *a, **k: Unconverged(), raises, "host"):
+        with monkeypatch.context() as m:
+            cfg, p0, state, mask, krylov_steps = _resume_setup(m)
+            if resume == "host":
+                same = types.SimpleNamespace(converged=True, state=state)
+                resume = lambda *a, **k: same  # noqa: E731
+            m.setattr(im, "solve", resume)
+            refined = im._refine_fixed_point(cfg, p0, state, mask)
+            assert krylov_steps
+            assert _certificate(cfg, p0, refined, mask) <= cfg.refine_tol
+
+
+def test_resume_that_the_block_finish_cannot_certify_is_kept(monkeypatch) -> None:
+    """A resumed state closer to the root is the anchor even when it is not certified."""
+    cfg, p0, state, mask, krylov_steps = _resume_setup(monkeypatch)
+
+    def never(config, params, frozen, dof_mask, z, factors):
+        fz = im.residual_fn(config, frozen, dof_mask)(z, params)
+        return z, fz, im._tree_norm(fz), jnp.asarray(0.0)
+
+    monkeypatch.setattr(im, "_refine_block_step", never)
+    refined = im._refine_fixed_point(cfg, p0, state, mask)
+    assert not krylov_steps
+    assert _certificate(cfg, p0, refined, mask) < _certificate(cfg, p0, state, mask)
+
+
+def test_block_only_refinement_skips_the_krylov_replay(monkeypatch) -> None:
+    """``krylov=False`` ends a missed block finish at the start state."""
+    cfg, p0, state, mask, krylov_steps = _resume_setup(monkeypatch)
+    refined = im._refined_state(cfg, p0, state, mask, krylov=False)
+    assert not krylov_steps
+    for a, b in zip(jax.tree.leaves(refined), jax.tree.leaves(state)):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
