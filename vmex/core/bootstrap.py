@@ -918,6 +918,8 @@ def self_consistent_bootstrap(
     degree: int = 12,
     s_eval=None,
     solve_kwargs: dict | None = None,
+    current_model=None,
+    initial_state=None,
     verbose: bool = False,
 ) -> BootstrapPicardResult:
     """Fixed-boundary Picard iteration to a bootstrap-consistent current profile.
@@ -948,6 +950,11 @@ def self_consistent_bootstrap(
     stable.  ``degree`` is clipped to ``ns - 2``.  The first solve uses
     ``inp``'s own current settings (any ``pcurr_type``); every refit
     switches to ``ncurr=1`` + ``power_series``.
+
+    ``current_model(equilibrium, s_eval, jr)`` replaces the Redl ``<J.B>``
+    ``jr`` [A T/m^2] on ``s_eval`` in step 2, e.g. by a kinetic calculation
+    on the solved equilibrium; the loop then converges to that current.
+    ``initial_state`` hot-starts the first solve.
     """
     from . import optimize as opt
 
@@ -962,7 +969,7 @@ def self_consistent_bootstrap(
     mismatch = RedlBootstrapMismatch(profiles, helicity_n,
                                      surfaces=np.clip(s_eval, 0.05, 0.95))
     history: list[dict] = []
-    state = None
+    state = initial_state
     dIds_applied = None   # I'(s_full) currently driving the equilibrium
     eq = None
     converged = False
@@ -985,6 +992,8 @@ def self_consistent_bootstrap(
 
         geom = redl_geometry_from_wout(w, s_eval)
         jr, _ = j_dot_B_redl(profiles, geom, helicity_n)
+        if current_model is not None:
+            jr = current_model(eq, s_eval, jr)
         jr_full = np.interp(s_full, np.concatenate([[0.0], s_eval, [1.0]]),
                             np.concatenate([[0.0], np.asarray(jr), [0.0]]))
         fsa_B2_full = np.interp(s_full, s_eval, np.asarray(geom.fsa_B2))

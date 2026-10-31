@@ -702,6 +702,23 @@ def test_self_consistent_bootstrap_picard_converges():
     assert res.history[-1]["delta"] <= 1e-3
 
 
+def test_self_consistent_bootstrap_current_model_hook():
+    """``current_model`` replaces the Redl <J.B> the loop inverts: the model sees
+    the solved equilibrium and a smaller target gives a smaller applied current."""
+    calls = []
+
+    def half(eq, s_eval, jr):
+        calls.append((eq.wout.ns, np.asarray(s_eval).size))
+        return 0.5 * jr
+
+    kwargs = dict(n_iter=1, degree=6, s_eval=np.linspace(0.02, 0.98, 25))
+    inp = _tokamak_ncurr1(curtor=-2.0e5, ac01=(1.0, 0.0))
+    full = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, **kwargs)
+    model = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, current_model=half, **kwargs)
+    assert calls and calls[0][1] == 25
+    assert abs(model.input.curtor) < 0.75 * abs(full.input.curtor)
+
+
 def test_current_dof_packing_and_validation():
     """Scaled AC/CURTOR dof block: pack/apply round trip + input validation."""
     inp = _tokamak_ncurr1()

@@ -735,7 +735,7 @@ def require_x64() -> None:
 # `git pull` over an editable install fails with the fix, not a TypeError.
 OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.9",
                      "neo-jax": "1.0.6", "gkx": "2.6.0",
-                     "dkx": "2.8.0"}
+                     "dkx": "2.12.0"}
 
 
 def require_optional(name: str, feature: str) -> None:

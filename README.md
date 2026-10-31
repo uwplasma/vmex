@@ -74,7 +74,7 @@ or pick what you need:
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.6`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.6`, `dkx>=2.12.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -88,7 +88,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
 | `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
 | `neo-jax` | 1.0.6 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.6"` |
-| `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
+| `dkx` | 2.12.0 | `vmex[neoclassical]` | `pip install "dkx>=2.12.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
@@ -272,6 +272,37 @@ field-period count, from `examples/optimization/QA_optimization.py` and its QH a
 Quasi-isodynamic designs at four field-period counts: the `|B|` contours close poloidally as `nfp`
 rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
 maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
+
+### Quasi-isodynamic design with a self-consistent bootstrap current
+
+![Boundary and Boozer |B| before and after the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_shape.webp)
+
+![Ambipolar E_r, bootstrap current and objective history of the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_current.webp)
+
+The bootstrap current of a quasi-isodynamic field depends strongly on the radial electric field, and the Redl formula,
+which assumes quasi-axisymmetry, does not describe it (13 to 16 MA T/m² here against 0.3 to 1.7 from DKX).
+`QI_optimization_bootstrap_er.py` alternates a Picard update of the applied current profile to the
+[DKX](https://github.com/uwplasma/DKX) `<j·B>` at each surface's ambipolar ion-root `E_r` with QI shape stages at that
+fixed current (`max_mode` 1 then 3). It starts from the vacuum QI boundary `input.QI_nfp2_initial` at `β = 1.5 %`
+(needs `vmex[neoclassical]`; see the [neoclassical guide](docs/howto/neoclassical-transport.md)):
+
+```console
+python examples/optimization/QI_optimization_bootstrap_er.py
+```
+
+| | seed (consistent current) | optimized |
+|---|---|---|
+| constructed-QI residual | 5.6e-3 | 2.0e-3 |
+| mirror ratio (limit 0.21) | 0.240 | 0.208 |
+| aspect ratio (limit 10) | 10.0 | 9.9 |
+| min \|ι\| (floor 0.5) | 0.56 | 0.59 |
+| β (target 1.5 %) | 1.50 % | 1.50 % |
+| rms(`<j·B>` equilibrium − DKX) / rms(DKX) | 1.8 % | 1.7 % |
+
+The consistency error is taken on four kinetic surfaces, between which the profile is a monotone cubic through the DKX
+values; the script asserts it stays below 5 %. The final toroidal current is 269 kA. A full run takes 10 to 12 min
+on 8 CPU cores of a shared workstation, compilation included, and the CI smoke pass about 5 min
+([figure script](docs/_static/figures/sources/make_qi_bootstrap_er_figure.py)).
 
 ### Free boundary with coils
 
