@@ -1337,15 +1337,25 @@ def test_finite_beta_single_stage_optimization(tmp_path, monkeypatch):
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
         tmp_path, timeout=1800)
-    for diagnostic in ("[final] QA total", "(B_coils + B_plasma).n/B: area-weighted RMS",
-                       "Volume-average beta = ", "Coil lengths", "Maximum curvature",
-                       "Minimum |iota| = ", "Aspect ratio = "):
+    for diagnostic in ("[final] QA total", "B.n/B RMS = ", "beta = ", "Coil lengths",
+                       "maximum curvature = ", "min |iota| = ", "aspect = "):
         assert diagnostic in out
     summary = json.loads(
         (tmp_path / "single_stage_optimization_finite_beta_summary.json").read_text())
+    free_check = summary["free_boundary_verification"]
+    assert "[free boundary]" in out
+    assert free_check["phiedge"] == summary["phiedge"]
+    if not free_check["converged"]:
+        assert not summary["met"]
+        assert "the post-optimization free-boundary verification did not converge" in summary["unmet"]
+    else:
+        assert not free_check["metrics_provisional"]
+        assert (tmp_path / "wout_single_stage_finite_beta_free_check.nc").exists()
     assert summary["met"] == (not summary["unmet"])
     assert summary["met"] or "did NOT meet its stated targets" in out
-    for name in ("wout_single_stage_finite_beta_optimized.nc",
+    for name in ("input.single_stage_finite_beta_optimized",
+                 "coils_single_stage_finite_beta_optimized.json",
+                 "wout_single_stage_finite_beta_optimized.nc",
                  "single_stage_finite_beta_objectives.png",
                  "surface_single_stage_finite_beta_initial.vts",
                  "coils_single_stage_finite_beta_initial.vtu",
@@ -1411,9 +1421,39 @@ def test_single_stage_examples_use_general_surface_output_and_movie_colors() -> 
     vacuum = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
     finite = (EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py").read_text()
     assert "from pyevtk" not in finite
-    assert "surface_initial.to_vtk" in finite
+    assert "save_outputs(joint" in finite
+    outputs = (REPO / "vmex" / "core" / "single_stage.py").read_text()
+    assert "surf.to_vtk" in outputs
     for source in (vacuum, finite):
         assert "MOVIE_SURFACE_COLOR" in source and "surface_color=" in source
+
+
+@pytest.mark.parametrize("script", [
+    "single_stage_optimization.py",
+    "single_stage_optimization_augmented_lagrangian.py",
+    "single_stage_optimization_least_squares.py",
+    "single_stage_free_boundary_optimization.py",
+    "single_stage_free_boundary_optimization_finite_beta.py",
+])
+def test_single_stage_example_verdict_rejects_nonfinite_metrics(script):
+    """Exercise each shipped verdict without compiling its equilibrium solver."""
+    path = EXAMPLES / "optimization" / script
+    tree = ast.parse(path.read_text(), filename=str(path))
+    verdict = next(node for node in tree.body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "unmet"
+                           for target in node.targets))
+    code = compile(ast.Module(body=[verdict], type_ignores=[]), str(path), "exec")
+    checks = [(f"{side} {value}", value, 1., side)
+              for side in ("below", "above") for value in (np.nan, np.inf, -np.inf)]
+    checks += [("valid lower", 1., 1., "below"), ("valid upper", 1., 1., "above"),
+               ("missed lower", .5, 1., "below"), ("missed upper", 2., 1., "above")]
+    namespace = {"np": np, "checks": checks}
+    exec(code, namespace)
+    unmet = namespace["unmet"]
+    assert len(unmet) == 8
+    assert all(any(message.startswith(f"{name} ") for message in unmet)
+               for name, *_ in checks[:6] + checks[-2:])
+    assert not any("valid" in message for message in unmet)
 
 
 def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
@@ -1446,10 +1486,12 @@ def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
         assert "ncurr=1, curtor=0.0, ac=np.zeros(21)" in source
         for bootstrap in ("vmex.core.bootstrap", "RedlBootstrapMismatch", "KineticProfiles"):
             assert bootstrap not in source
-    for source in (fixed, auglag, squares, free, finite, free_finite):
+    for source in (fixed, auglag, squares, free, free_finite):
         assert "did NOT meet its stated targets" in source
         assert "if unmet and not ci_smoke:\n    raise SystemExit(1)" in source
         assert "_summary.json" in source
+    assert "design_target_report(" in finite and "_summary.json" in finite
+    assert 'if verdict["unmet"] and not ci_smoke:\n    raise SystemExit(1)' in finite
 
 
 # Cold, on two cores, the finite-beta script takes 1.4 min; most of it is the

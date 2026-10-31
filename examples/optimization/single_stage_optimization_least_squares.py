@@ -422,7 +422,7 @@ checks = (
 )
 unmet = [f"{name} {value:.4g} {side} the {limit:.4g} limit"
          for name, value, limit, side in checks
-         if (value < limit if side == "below" else value > limit)]
+         if not np.isfinite(value) or (value < limit if side == "below" else value > limit)]
 if not final_converged:
     unmet.append("the ns=101 verification solve did not converge")
 if unmet:
