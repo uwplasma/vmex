@@ -6,8 +6,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 - Correct the single-stage QA flux sign and finite-pressure coil-current fit.
   Share verification helpers and reject nonfinite metrics in ESSOS examples.
-- Skip virtual casing for prescribed vacuum fields and require the final radial
-  grid to converge in single-stage free-boundary verification.
+- Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid.
 
 ## 0.12.0 - 2026-10-21
 
