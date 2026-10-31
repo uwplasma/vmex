@@ -311,8 +311,8 @@ mean `Q = ε_eff^(3/2)` by **52.56%** for the two-period candidate, with aspect
 ratio 6.003 and minimum signed transform 0.494. At a common volume-RMS field
 of 6 T and minor radius 1.7 m, 256 paired 3.52 MeV alphas launched at `s=0.5`
 give 10 ms weighted losses of **100% → 6.73%** (256/256 → 17/256 launches).
-No integration failed; the 95% bootstrap interval is 3.75–9.99%.
-These single-surface, collisionless measurements do not establish reactor confinement. [Figure generator](docs/_static/figures/sources/make_low_transport_figure.py);
+No integration failed; the 95% bootstrap interval is 3.75–9.99%. These
+single-surface, collisionless measurements do not establish reactor confinement. [Figure generator](docs/_static/figures/sources/make_low_transport_figure.py);
 its simulation inputs are external, with no transport dataset bundled here.
 
 The same 30-step budget at NFP1 did not reach the aspect/iota constraints.
@@ -327,8 +327,8 @@ Stage-2 fitting of the four-period vacuum candidate gives two unique coils,
 within 4.4 mm of the target. Coil clearance and spacing exceed half the minor
 radius, and maximum curvature times minor radius is 0.697. These geometric checks do not qualify an engineering design.
 `examples/optimization/single_stage_optimization_pwO.py` uses these coil controls
-for a finite-beta prefit before joint optimization (`vmex[coils,freeb,neoclassical]`).
-It independently checks field errors, transport and a cold free-boundary solve.
+for a finite-beta prefit (`vmex[coils,freeb,neoclassical]`). Its NFP2 finite-beta prefit remains unqualified (4.06% normal-field error,
+9.77% pressure-jump RMS); the acceptance gate stops it before joint optimization.
 See the [workflow](docs/reference/optimization.rst) and [physics](docs/explanation/confinement.rst).
 
 ### Free boundary with coils
