@@ -227,7 +227,11 @@ the Jacobian. Set
 ``jacobian_batch_size=1`` for the serial pass when peak memory, not
 throughput, is the binding constraint; ``None`` is the widest and the most
 memory-hungry. ``adjoint_tol`` and ``adjoint_maxiter`` control the certified
-Krylov solves.
+Krylov solves.  The block adjoint is accepted when its residual is below
+``10 * adjoint_tol * ||rhs||`` or at the round-off level of the residual
+(10 eps ``|| |J|^T |mu| ||``), whichever is larger, so a right-hand side that
+is small against the multiplier, such as the energy ``wb``, does not fall
+through to the Krylov solve.
 
 ``derivative_method="finite_difference"`` accepts opaque host objectives. It
 uses independent equilibrium probes and ``workers=None`` automatically uses

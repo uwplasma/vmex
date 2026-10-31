@@ -3206,20 +3206,45 @@ class _AdjointStats(NamedTuple):
     tolerance: Array
 
 
+def _residual_roundoff(system: _RawBlockSystem, mu: SpectralState):
+    """Round-off level of the residual of ``J_raw^T mu``: ``|| |J|^T |mu| || * eps``.
+
+    A residual this small certifies ``mu`` as the exact answer for a raw
+    Jacobian perturbed at machine precision, which is all double precision
+    can deliver; it is measured from the stored bands, so it costs one
+    banded product.
+    """
+    def transpose(band):
+        return jnp.swapaxes(jnp.abs(band), -1, -2)
+
+    lower = jnp.zeros_like(system.upper).at[1:].set(transpose(system.upper[:-1]))
+    upper = jnp.zeros_like(system.lower).at[:-1].set(transpose(system.lower[1:]))
+    scale = block_tridiag_matvec(
+        lower, transpose(system.diagonal), upper, jnp.abs(system.pack(mu)))
+    return (_ADJOINT_RESIDUAL_SLACK * jnp.finfo(scale.dtype).eps
+            * jnp.linalg.norm(scale))
+
+
 def _block_adjoint(system: _RawBlockSystem, pullback: Callable,
                    b: SpectralState, cfg: ImplicitConfig, tol):
     """Raw multiplier ``J_raw^-T b`` from the transposed block factors.
 
     One refinement pass solves again for the residual measured with
     ``pullback``, the independent raw VJP.  Returns ``(mu, residual_norm,
-    tolerance)`` with the tolerance of :func:`_adjoint_acceptance`.
+    tolerance)``: the tolerance of :func:`_adjoint_acceptance`, but never
+    below the round-off level of the residual (:func:`_residual_roundoff`).
+    A residual relative to ``||b||`` cannot reach ``adjoint_tol = 1e-11`` when
+    ``b`` is small against ``J^-T b`` (an objective that is stationary at the
+    equilibrium, such as ``wb``): the residual stops at round-off and the
+    solve used to fall through to a GCROT run that stalls.
     """
     def defect(mu):
         return jax.tree.map(jnp.subtract, b, system.project(pullback(mu)))
 
     mu = _raw_block_apply(system, b, transpose=True)
     mu = jax.tree.map(jnp.add, mu, _raw_block_apply(system, defect(mu), transpose=True))
-    return mu, _tree_norm(defect(mu)), _adjoint_acceptance(cfg, _tree_norm(b), tol)
+    return mu, _tree_norm(defect(mu)), jnp.maximum(
+        _adjoint_acceptance(cfg, _tree_norm(b), tol), _residual_roundoff(system, mu))
 
 
 @functools.partial(jax.jit, static_argnames=("cfg",))

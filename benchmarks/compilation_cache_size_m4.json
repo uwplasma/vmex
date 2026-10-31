@@ -1,0 +1,24 @@
+{
+ "commit": "6802acb3",
+ "host": "Apple M4, 10 cores, macOS, shared with other work (load 2-18); upper bounds",
+ "jax": "0.12.0.1",
+ "case": "input.li383_low_res, ns=31, ftol=1e-12: first jax.value_and_grad of a QS objective through vmex.implicit.run, 914 compiled programs",
+ "cache_min_compile_time_s": 0,
+ "first_gradient_s": {
+  "cache_off": [22.3, 22.1],
+  "finite_max_size_cold": [40.0, 40.0],
+  "finite_max_size_cached": [5.8],
+  "unbounded_cold": [22.9],
+  "unbounded_cached": [5.6]
+ },
+ "backend_compile_s_in_cold_run": {
+  "finite_max_size": 35.0,
+  "unbounded": 18.1,
+  "cache_off": 17.6
+ },
+ "concurrent_processes": {
+  "setting": "unbounded, 6 processes started together on one empty cache directory, nfp2_QA ns=31 solve",
+  "errors": 0,
+  "first_call_s": [6.379, 6.418, 6.414, 6.352, 6.349, 6.395]
+ }
+}
