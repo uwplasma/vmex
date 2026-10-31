@@ -74,10 +74,14 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
     carries it, the extra pins that floor, and the instruction is gone -- so
     what has to stay true is that the floor and the API agree.
     """
-    import tomllib
     from importlib.metadata import version
 
     from packaging.version import Version
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
 
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
