@@ -18,8 +18,10 @@ from vmex.core.multigrid import solve_free_boundary_multigrid, solve_multigrid
 from vmex.core.postprocess import full_mesh_from_half
 from vmex.core.scaling import (
     aries_cs_scales,
+    axis_field,
     b00_axis,
     input_minor_radius,
+    match_b0,
     probe_input,
     scale_input,
     scale_mgrid,
@@ -616,3 +618,50 @@ def test_cli_default_input_scaling_reconverges_to_aries_cs(tmp_path, capsys):
     )
     assert abs(scaled_wout.volavgB / 5.8646 - 1.0) <= 2.0 * declared_error
     assert scaled_wout.Aminor_p == pytest.approx(1.7044, rel=2e-12)
+
+
+def test_axis_field_sums_the_m0_harmonics_extrapolated_to_the_axis():
+    bmnc = np.zeros((4, 3))
+    bmnc[1], bmnc[2] = [1.0, 0.2, 9.0], [1.0, 0.1, 9.0]
+    bmns = np.zeros((4, 3))
+    bmns[1], bmns[2] = [0.0, 0.4, 9.0], [0.0, 0.2, 9.0]
+    wout = SimpleNamespace(
+        bmnc=bmnc, bmns=None, xm_nyq=np.array([0, 0, 1]), xn_nyq=np.array([0, 2, 0]),
+    )
+    # m = 0 only: 1 + 0.25 cos(2 phi); the m = 1 column is an artifact.
+    assert axis_field(wout, 0.3) == pytest.approx(1.0 + 0.25 * np.cos(0.6))
+    wout.bmns = bmns
+    assert axis_field(wout, 0.3) == pytest.approx(
+        1.0 + 0.25 * np.cos(0.6) - 0.5 * np.sin(0.6)
+    )
+
+
+@pytest.mark.parametrize(
+    "name, changes",
+    [
+        ("LandremanPaul2021_QA_lowres", dict(ns_array=np.array([9]))),
+        ("shaped_tokamak_pressure", dict(ns_array=np.array([9]), gamma=1.4)),
+    ],
+)
+def test_match_b0_reproduces_the_target_axis_field(name, changes):
+    """Vacuum and finite-beta decks: re-solving the matched deck gives ``b0_target``."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA / f"input.{name}"),
+        ftol_array=np.array([1e-13]),
+        niter_array=np.array([4000]),
+        **changes,
+    )
+
+    def run(deck):
+        result = solve_multigrid(deck, verbose=False)
+        assert result.converged
+        return wout_from_state(
+            inp=deck, state=result.state, fsqr=float(result.fsqr),
+            fsqz=float(result.fsqz), fsql=float(result.fsql),
+            niter=int(result.iterations), converged=True,
+        )
+
+    original = run(inp)
+    target, phi = 1.7 * axis_field(original), 0.0
+    matched = match_b0(inp, original, target, phi)
+    assert axis_field(run(matched), phi) == pytest.approx(target, rel=1e-10)
