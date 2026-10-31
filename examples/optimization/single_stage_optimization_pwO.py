@@ -201,9 +201,11 @@ def coil_fit_objective(u):
 
 
 coil_fit_vg = jax.jit(jax.value_and_grad(coil_fit_objective))
+print(f"[coil fit] {N_COILS} unique coils, at most {COIL_FIT_MAXITER} iterations", flush=True)
 coil_fit = (OptimizeResult(x=np.zeros(n_coil_shape + N_COILS), nit=0) if COIL_FIT_MAXITER == 0 else minimize(
     lambda u, value_and_grad=coil_fit_vg: tuple(map(np.asarray, value_and_grad(jnp.asarray(u)))),
     np.zeros(n_coil_shape + N_COILS), jac=True, method="L-BFGS-B",
+    callback=opt.OptimizationMonitor(print_every=25),
     bounds=[(-COIL_FIT_PARAMETER_BOUND, COIL_FIT_PARAMETER_BOUND)] * (n_coil_shape + N_COILS),
     options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10}))
 coils0 = coils_from_u(jnp.asarray(coil_fit.x))
