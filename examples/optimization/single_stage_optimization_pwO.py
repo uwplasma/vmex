@@ -283,12 +283,17 @@ held_physics = {"feasible": False}
 held_transport_passed = False
 if free["converged"]:
     print("[verify] matched NEO on the cold held-coil equilibrium", flush=True)
-    # Match the seed radial grid to the converged held equilibrium, independently
-    # of the coarse joint-optimization grid and its separate NEO comparison.
-    held_baseline = opt.solve_equilibrium(
-        replace(inp, ns_array=np.array([free["final_ns"]]), ftol_array=np.array([1e-12]),
-                niter_array=np.array([8000])), initial_state=joint.seed_equilibrium.solution,
-        raise_on_max_iterations=True)
+    # Measure the retained transport benefit against the preceding pwO run's
+    # seed, keeping this design's physical flux, pressure and current profiles.
+    reference = vj.VmecInput.from_file(INPUT_FILE.with_name("input.seed")).change_resolution(
+        mpol=inp.mpol, ntor=inp.ntor)
+    if reference.nfp != NFP:
+        raise ValueError("The transport reference must have the same field periods")
+    reference = replace(inp, rbc=reference.rbc, zbs=reference.zbs,
+        ns_array=np.array([free["final_ns"]]), ftol_array=np.array([1e-12]),
+        niter_array=np.array([8000]))
+    held_baseline = opt.solve_equilibrium(reference, initial_state=restart_state(
+        vj.read_wout(INPUT_FILE.with_name("wout_seed.nc")), reference), raise_on_max_iterations=True)
     held_surfaces = np.asarray(mapped.compute_state(held_baseline.state, held_baseline.runtime)["s_b"])
     held_baseline_Q = screen_transport(held_baseline.wout, held_surfaces)
     held_wout = vj.read_wout(f"wout_{prefix}_free_check.nc")
@@ -325,6 +330,7 @@ summary = {
     **verdict, "particle_qualified": False, "coarse_physics": physics,
     "baseline_Q": before.tolist(), "trial_Q": after.tolist(),
     "transport_screen_passed": transport_improves(before, after),
+    "held_reference_input": str(INPUT_FILE.with_name("input.seed").resolve()),
     "held_surfaces": held_surfaces.tolist() if held_surfaces is not None else None,
     "held_baseline_Q": held_baseline_Q.tolist() if held_baseline_Q is not None else None,
     "held_Q": held_Q.tolist() if held_Q is not None else None,

@@ -701,7 +701,10 @@ Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
 keeps an accepted fit. ``TARGET_BETA=0`` selects vacuum. The field checks
 still apply to supplied coils. The script requires
 ``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold free-boundary
-solve and its NEO transport at matched radial resolution. At finite pressure,
+solve and its NEO transport at matched radial resolution. The held-coil
+transport screen compares with the preceding pwO run's ``input.seed``, using
+the final design's flux, pressure and current profiles for both equilibria.
+The fixed-boundary target comparison is also printed. At finite pressure,
 coil flux need not equal total
 ``PHIEDGE``: common current is fitted to the external boundary vector
 ``B_VMEC - B_plasma`` and pressure balance is verified separately.
