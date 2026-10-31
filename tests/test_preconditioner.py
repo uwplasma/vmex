@@ -366,8 +366,10 @@ def test_lambda_m0_radial_block_inverts_the_force_jacobian():
         rt = replace(base, lambda_m0_floor=floor)
         cache = S.evaluate_forces(state, rt)[2].cache
 
+        # ``state`` is an argument, not a closed-over constant: XLA:CPU in
+        # jaxlib 0.6 (Python 3.10) mis-folds the constant lambda tangent here.
         @jax.jit
-        def response(direction, rt=rt, cache=cache):
+        def response(state, direction, rt=rt, cache=cache):
             def gc(lam):
                 return S._preconditioned_force_signed(
                     replace(state, L_sin=lam), cache, rt, iteration=jnp.asarray(30),
@@ -375,7 +377,7 @@ def test_lambda_m0_radial_block_inverts_the_force_jacobian():
             return jax.jvp(gc, (state.L_sin,), (direction,))[1]
 
         jac = -np.stack([
-            response(jnp.zeros_like(state.L_sin).at[j, column].set(1.0))
+            response(state, jnp.zeros_like(state.L_sin).at[j, column].set(1.0))
             for j in range(1, 12)
         ], axis=1)
         spectra[floor] = np.sort(np.linalg.eigvals(jac / np.median(np.diag(jac))).real)

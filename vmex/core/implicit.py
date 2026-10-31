@@ -2173,10 +2173,12 @@ def _forward_trace_context():
     """
     from jax._src import config as jax_config, mesh as jax_mesh
 
-    # jax >= 0.10 moved the state from ``config`` to ``mesh``.
+    # jax >= 0.10 moved the state from ``config`` to ``mesh`` (and with it
+    # ``config_ext``, still in ``config`` on the jax 0.6 that Python 3.10 gets).
     state = getattr(jax_mesh, "abstract_mesh_context_manager", None) or \
         jax_config.abstract_mesh_context_manager
-    previous = state.swap_local(jax_mesh.config_ext.unset)
+    config_ext = getattr(jax_mesh, "config_ext", None) or jax_config.config_ext
+    previous = state.swap_local(config_ext.unset)
     try:
         yield
     finally:

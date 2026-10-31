@@ -7,12 +7,14 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
 
 ## Requirements
 
-- Python 3.11+, and 3.12+ recommended: jax and jaxlib 0.11 require Python 3.12,
-  so a 3.11 environment resolves JAX 0.10.2 at the newest. CI tests 3.11, 3.12
-  and 3.13.
+- Python 3.10+, and 3.12+ recommended: jax and jaxlib 0.11 require Python 3.12,
+  so a 3.11 environment resolves JAX 0.10.2 at the newest, and Python 3.10
+  resolves JAX 0.6.2 and SciPy 1.15.3. CI tests 3.10, 3.11, 3.12 and 3.13.
 - Installed automatically: `numpy`, `jax` + `jaxlib` (0.9.2 or newer, the
-  oldest release CI tests), `scipy` (1.16 or newer: the optimization examples
-  pass `least_squares(callback=...)`, which SciPy 1.16 introduced),
+  oldest release CI tests; 0.6.2 or newer on Python 3.10), `scipy` (1.16 or
+  newer: the optimization examples pass `least_squares(callback=...)`, which
+  SciPy 1.16 introduced, so on Python 3.10, where SciPy stops at 1.15, those
+  examples do not run),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
   `booz_xform_jax>=0.4.3` and `solvax>=0.27.0` (the linear solvers). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to

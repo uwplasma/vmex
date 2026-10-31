@@ -14,7 +14,10 @@ import inspect
 import json
 import re
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -78,17 +81,19 @@ def test_release_metadata_agrees() -> None:
     assert {"tests*", "docs*", "examples*", "tools*"} <= set(find["exclude"])
     assert PROJECT["scripts"] == {"vmex": "vmex.core.cli:main", "vmec": "vmex.core.cli:main"}
     assert {"setuptools", "packaging"} <= set(PYPROJECT["build-system"]["requires"])
-    assert PROJECT["requires-python"] == ">=3.11"
+    assert PROJECT["requires-python"] == ">=3.10"
     assert PROJECT["urls"]["Repository"] == "https://github.com/uwplasma/vmex"
     names = {Requirement(dep).name for dep in PROJECT["dependencies"]}
     assert {"matplotlib", "booz_xform_jax", "numpy", "packaging"} <= names
     assert not {"plots", "plot", "qi", "booz"} & set(EXTRAS)
 
 
-def _floors(*extras: str) -> dict[str, str]:
+def _floors(*extras: str, python: str = "3.11") -> dict[str, str]:
     floors: dict[str, str] = {}
     for dep in [*PROJECT["dependencies"], *(r for name in extras for r in EXTRAS[name])]:
         requirement = Requirement(dep)
+        if requirement.marker is not None and not requirement.marker.evaluate({"python_version": python}):
+            continue  # floors that apply to another Python (jax, scipy)
         for spec in (s for s in requirement.specifier if s.operator == ">="):
             floors[requirement.name] = max(floors.get(requirement.name, spec.version),
                                            spec.version, key=Version)
@@ -98,7 +103,7 @@ def _floors(*extras: str) -> dict[str, str]:
 def test_declared_floors_match_every_copy() -> None:
     from vmex._compat import OPTIONAL_MINIMUMS
 
-    core = _floors()
+    core = _floors(python=".".join(map(str, sys.version_info[:2])))
     assert {name: Version(core[name]).release for name in vmex._MINIMUM_VERSIONS} \
         == vmex._MINIMUM_VERSIONS
     everything = _floors(*EXTRAS)
@@ -135,8 +140,9 @@ def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
 
 def test_import_guard_names_the_fix_and_skips_unknown_metadata(monkeypatch) -> None:
     monkeypatch.setattr(vmex, "_package_version",
-                        lambda name: "1.15.3" if name == "scipy" else "0.11.1")
-    with pytest.raises(ImportError, match=r'scipy >= 1\.16 \(found 1\.15\.3\).*pip install -U "scipy>=1\.16"'):
+                        lambda name: "1.14.1" if name == "scipy" else "0.11.1")
+    floor = re.escape(".".join(map(str, vmex._MINIMUM_VERSIONS["scipy"])))
+    with pytest.raises(ImportError, match=rf'scipy >= {floor} \(found 1\.14\.1\).*pip install -U "scipy>={floor}"'):
         vmex._check_supported_versions()
 
     def missing(name):
@@ -147,8 +153,8 @@ def test_import_guard_names_the_fix_and_skips_unknown_metadata(monkeypatch) -> N
     monkeypatch.setattr(vmex, "_package_version", missing)
     assert vmex._check_supported_versions() is None
     monkeypatch.setattr(vmex, "_sys", SimpleNamespace(
-        version_info=(3, 10, 14), version="3.10.14 (main, Mar 1 2026)"))
-    with pytest.raises(ImportError, match=r"Python >= 3\.11 \(found 3\.10\.14\)"):
+        version_info=(3, 9, 18), version="3.9.18 (main, Mar 1 2026)"))
+    with pytest.raises(ImportError, match=r"Python >= 3\.10 \(found 3\.9\.18\)"):
         vmex._check_supported_versions()
 
 

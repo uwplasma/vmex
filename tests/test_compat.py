@@ -761,6 +761,7 @@ def test_explicit_cache_dir_is_split_by_machine(clean_cache_env):
     different subdirectories of the same user path.
     """
     mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)  # jaxlib < 0.10 keeps the cache off
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/shared/jax")
     mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-aaaa")
     first = _compat._default_compilation_cache_dir()
@@ -797,6 +798,7 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
         if "COMPILATION_CACHE" not in key and not key.startswith("VMEX_")
     }
     env["HOME"] = str(tmp_path)
+    env["VMEX_COMPILATION_CACHE"] = "1"  # jaxlib < 0.10 keeps the cache off unless asked
     fingerprint = _compat._cache_machine_fingerprint()
     expected = tmp_path / ".cache" / "vmex" / "jax_cache" / fingerprint
     assert pathlib.Path(_import_cache_dir(env)) == expected

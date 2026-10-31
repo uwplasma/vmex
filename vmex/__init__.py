@@ -159,16 +159,21 @@ from packaging.version import Version as _Version
 
 # Oldest supported versions, equal to the pyproject.toml floors.  SciPy 1.16
 # added the least_squares(callback=) that the optimization examples pass.
-_MINIMUM_VERSIONS = {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2),
-                     "booz_xform_jax": (0, 4, 3), "solvax": (0, 27, 0)}
+# SciPy 1.16 and JAX 0.7+ need Python 3.11, so Python 3.10 has lower floors.
+_MINIMUM_VERSIONS = (
+    {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2),
+     "booz_xform_jax": (0, 4, 3), "solvax": (0, 27, 0)}
+    if _sys.version_info >= (3, 11) else
+    {"scipy": (1, 15), "jax": (0, 6, 2), "jaxlib": (0, 6, 2),
+     "booz_xform_jax": (0, 4, 3), "solvax": (0, 27, 0)})
 
 
 def _check_supported_versions() -> None:
     """Fail at import, not deep inside an example, on an unsupported stack."""
-    if _sys.version_info < (3, 11):
+    if _sys.version_info < (3, 10):
         raise ImportError(
-            f"vmex requires Python >= 3.11 (found {_sys.version.split()[0]}); "
-            "install vmex in a Python 3.11+ environment.")
+            f"vmex requires Python >= 3.10 (found {_sys.version.split()[0]}); "
+            "install vmex in a Python 3.10+ environment.")
     for name, minimum in _MINIMUM_VERSIONS.items():
         try:
             found = _package_version(name)
