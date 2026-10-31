@@ -95,9 +95,22 @@ class CoilPenalty:
                 coils, surface, self.surface_distance, block_size=32)])
 
 
+def _vacuum_input(inp):
+    """Recognize prescribed zero pressure and current, without solving VC."""
+    zero_pressure = (inp.pres_scale == 0 or
+                     (inp.pmass_type == "power_series" and np.all(np.asarray(inp.am) == 0)))
+    return (zero_pressure and inp.ncurr == 1 and inp.curtor == 0
+            and inp.pcurr_type == "power_series" and np.all(np.asarray(inp.ac) == 0))
+
+
 def total_normal_field(inp, coils, state, runtime, nphi, ntheta, precision, *, digits=4):
     """Total-field normal residual divided by equilibrium ``|B|``, and area weights."""
     data = vc.surface_field_data_from_state(inp, state, runtime=runtime, nphi=nphi, ntheta=ntheta)
+    if _vacuum_input(inp):
+        field = vc.external_B_cartesian(coil_field(coils), data.gamma, data.phi)
+        area = jnp.linalg.norm(data.area_vector, axis=0)
+        return (jnp.sum(field * data.normal, axis=0) / jnp.linalg.norm(data.B_total, axis=0),
+                area / jnp.sum(area))
     interface = vc.PlasmaVacuumInterface.from_surface_data(data, digits=digits, precision=precision)
     return interface.bnormal_residual(coil_field(coils)) / jnp.linalg.norm(data.B_total, axis=0), interface.weights
 
@@ -122,7 +135,7 @@ class SingleStageProblem:
         self.seed_equilibrium = problem.equilibrium_from_x(problem.x0)
         inp = problem.input_from_x(problem.x0)
         self.nfp = inp.nfp
-        precision = vc.plan_vc_precision(vc.surface_field_data_from_state(
+        precision = None if _vacuum_input(inp) else vc.plan_vc_precision(vc.surface_field_data_from_state(
             inp, self.seed_equilibrium.solution, runtime=self.seed_equilibrium.solver_context,
             nphi=nphi, ntheta=ntheta), digits=vc_digits)
         self.monitor = opt.OptimizationMonitor(problem)
@@ -227,7 +240,8 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
                                            runtime=equilibrium.solver_context, nphi=61, ntheta=64)
     normal, area = map(np.asarray, total_normal_field(
         inp, coils, equilibrium.solution, equilibrium.solver_context, 61, 64,
-        vc.plan_vc_precision(data, digits=joint.vc_digits), digits=joint.vc_digits))
+        None if _vacuum_input(inp) else vc.plan_vc_precision(data, digits=joint.vc_digits),
+        digits=joint.vc_digits))
     gamma, points = np.asarray(coils.gamma), np.asarray(surface.gamma).reshape(-1, 3)
     metrics = {"B.n/B RMS": float(np.sqrt(np.sum(area * normal**2))),
                "B.n/B max": float(np.max(np.abs(normal))),
@@ -249,14 +263,17 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
     started = time.perf_counter()
     try:
         result = vj.solve_free_boundary_multigrid(
-            free_inp, external_field=BiotSavart(coils), verbose=verbose, raise_on_max_iterations=False)
-        converged = bool(np.all(np.asarray(result.converged))) and result.vacuum is not None
+            free_inp, external_field=BiotSavart(coils), verbose=verbose, raise_on_max_iterations=False,
+            release_stage_cache=True)
+        final_ns = int(result.state.R_cos.shape[0])
+        converged = (bool(np.all(np.asarray(result.converged))) and result.vacuum is not None
+                     and final_ns == free_ns[-1])
         wout = vj.wout_from_state(inp=free_inp, state=result.state, fsqr=result.fsqr,
                                   fsqz=result.fsqz, fsql=result.fsql, niter=result.iterations,
                                   converged=result.converged, vacuum_output=result.vacuum)
         path = vj.write_wout(f"wout_{prefix}_free_check.nc", wout)
         held = np.asarray(SurfaceRZFourier.from_wout_file(path, nphi=61, ntheta=64, close=False).gamma).reshape(-1, 3)
-        free.update(converged=converged, metrics_provisional=not converged,
+        free.update(converged=converged, metrics_provisional=not converged, final_ns=final_ns,
                     iterations=int(result.iterations),
                     force_errors={k: float(getattr(result, k)) for k in ("fsqr", "fsqz", "fsql")},
                     delbsq=float(result.vacuum.delbsq) if result.vacuum is not None else None,

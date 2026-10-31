@@ -1,8 +1,13 @@
 # Changelog
 
-Release notes are mirrored from the GitHub releases, which carry each release
-in full. A number appears here only where a committed artifact backs it; each
-record under `benchmarks/` names the revision it was measured at.
+Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision.
+
+## Unreleased
+
+- Correct the single-stage QA flux sign and finite-pressure coil-current fit.
+  Share verification helpers and reject nonfinite metrics in ESSOS examples.
+- Skip virtual casing for prescribed vacuum fields and require the final radial
+  grid to converge in single-stage free-boundary verification.
 
 ## 0.12.0 - 2026-10-21
 
