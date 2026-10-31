@@ -131,8 +131,11 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
                            (("a", a), ("b", b), ("c", c), ("b_ref", b_ref)))
     gamma = 2*jnp.pi*jnp.arange(ngamma)[None, :, None]/ngamma
     eta = eta_min+(2*jnp.pi-2*eta_min)*(jnp.arange(neta)[None, None, :]+0.5)/neta
-    coordinates = squeezed_pwo_coordinates(gamma, eta, iota=iota[:, None, None], nfp=nfp, a=a, b=b, c=c)
-    B = _evaluate(cosine, sine, m, n, coordinates["theta"], coordinates["zeta"])
+    # The map is built for positive iota. A mirror image (zeta -> -zeta, iota -> -iota)
+    # is the same device, so negative iota reads the same map at -zeta.
+    coordinates = squeezed_pwo_coordinates(gamma, eta, iota=jnp.abs(iota[:, None, None]), nfp=nfp, a=a, b=b, c=c)
+    B = _evaluate(cosine, sine, m, n, coordinates["theta"],
+                  jnp.where(iota[:, None, None] < 0, -1.0, 1.0)*coordinates["zeta"])
     # Sufficient global bound over the entire cut domain, including between nodes.
     bound = ((1-jnp.abs(a)*jnp.pi*jnp.abs(iota[:, None, None]/nfp)*(1+jnp.abs(b)))
              * (1+c*jnp.pi-2*c*eta_min)-jnp.abs(a))/nfp

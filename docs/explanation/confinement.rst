@@ -225,7 +225,9 @@ The squeezed poloidal-omnigenity map of `Liu et al. (2026)
    \zeta_{B,L}&=[\pi-S(x,\gamma+\kappa)-D(x)]/N,\\
    \zeta_{B,R}&=[\pi+S(x,-\gamma+\kappa)+D(x)]/N.
 
-The signed :math:`\iota=d\theta_B/d\zeta_B` is retained. The mapped angle
+The map uses :math:`|\iota|`, with :math:`\iota=d\theta_B/d\zeta_B`; negative
+:math:`\iota` reads it at :math:`-\zeta_B`, so a mirror image has the same
+residual. The mapped angle
 :math:`\gamma` differs from the field-line label
 :math:`\alpha=\theta_B-\iota\zeta_B`. The example fixes
 :math:`(a,b,c)=(0.3,0,-2)` and :math:`\eta\in[2.8,2\pi-2.8]`.

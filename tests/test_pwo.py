@@ -248,6 +248,17 @@ def test_locally_nonfolding_map_with_global_overlap_is_rejected():
         mapped_pwo_residual_from_boozer(**_spectrum(), b_ref=1.5, eta_min=eta_min)
 
 
+def test_mapped_residual_is_the_same_for_a_mirror_image():
+    # zeta -> -zeta flips iota and n; the device, hence the residual, is unchanged.
+    field = dict(bmnc_b=[[1., .1, .05, .02]], bmns_b=[[0., .03, -.02, .01]],
+                 xm_b=np.array([0, 0, 1, 1]), nfp=3)
+    xn = np.array([0, 3, 0, 3])
+    right = mapped_pwo_residual_from_boozer(xn_b=xn, iota_b=[.7], **field)
+    left = mapped_pwo_residual_from_boozer(xn_b=-xn, iota_b=[-.7], **field)
+    np.testing.assert_allclose(left["total"], right["total"], rtol=1e-13)
+    assert right["total"] > 0
+
+
 def test_mapped_residual_jvp_vjp_and_independent_finite_difference():
     # Different surface weights, both Fourier parities and signed live iota.
     x = jnp.array([1.5, .08, -.06, 1.7, .04, -.09,
@@ -263,7 +274,9 @@ def test_mapped_residual_jvp_vjp_and_independent_finite_difference():
         values = np.asarray(values)
         gamma = 2*np.pi*np.arange(12)[None, :, None]/12
         eta = (2.8+(2*np.pi-5.6)*(np.arange(10)+.5)/10)[None, None, :]
-        theta, zeta = _map(gamma, eta, iota=values[12:14, None, None])
+        iota = values[12:14, None, None]
+        theta, zeta = _map(gamma, eta, iota=np.abs(iota))
+        zeta = np.sign(iota)*zeta
         phase = theta[..., None]*modes["xm_b"]-zeta[..., None]*modes["xn_b"]
         field = np.sum(values[:6].reshape(2, 1, 1, 3)*np.cos(phase)
                        + values[6:12].reshape(2, 1, 1, 3)*np.sin(phase), axis=-1)
