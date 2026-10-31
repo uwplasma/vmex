@@ -31,6 +31,7 @@ from vmex.core.geometry import (
 )
 from vmex.core.input import VmecInput
 from vmex.core.setup import (
+    rescale_boundary_volume,
     _geometry_state_arrays,
     interior_guess,
     run_setup,
@@ -262,3 +263,29 @@ def test_geometry_chain_from_setup_is_jittable(case):
     flag_jit, tau_jit = jax.jit(sign_flag)(setup)
     assert bool(flag_eager) == bool(flag_jit) == False  # noqa: E712
     _allclose(tau_jit, tau_eager, "tau (jit)")
+
+
+@pytest.mark.parametrize("rfix", [False, True])
+def test_tvolume_rescales_boundary_to_the_exact_volume(rfix, tmp_path):
+    """TVOLUME hits the target exactly, LVOLUME_RFIX holds m = 0, and the
+    traced rescaling makes the volume independent of the boundary dofs."""
+    inp = VmecInput.from_file(
+        Path(__file__).resolve().parents[1] / "examples/data/input.li383_low_res")
+    inp = dataclasses.replace(inp, tvolume=4.0, lvolume_rfix=rfix)
+    assert VmecInput.from_file(inp.to_indata(tmp_path / "input.v")).tvolume == 4.0
+
+    def volume(rbc):  # brute-force 2 pi^2 <R^2 Z_theta> on a fine grid
+        rbc, _, _, zbs = rescale_boundary_volume(rbc, inp.rbs, inp.zbc, inp.zbs, inp)
+        u, v = np.meshgrid(np.linspace(0, 2 * np.pi, 64, endpoint=False),
+                           np.linspace(0, 2 * np.pi / inp.nfp, 32, endpoint=False))
+        m, n = np.arange(inp.mpol), np.arange(-inp.ntor, inp.ntor + 1)[:, None]
+        a = m * u[..., None, None] - n * inp.nfp * v[..., None, None]
+        r = jnp.sum(rbc * np.cos(a), axis=(-2, -1))
+        zu = jnp.sum(m * zbs * np.cos(a), axis=(-2, -1))
+        return 2 * np.pi**2 * jnp.abs(jnp.mean(r**2 * zu))
+
+    rbc = jnp.asarray(inp.rbc)
+    np.testing.assert_allclose(volume(rbc), 4.0, rtol=1e-13)
+    assert float(jnp.max(jnp.abs(jax.grad(volume)(rbc)))) < 1e-12
+    held = rescale_boundary_volume(rbc, inp.rbs, inp.zbc, inp.zbs, inp)[0][:, 0]
+    assert np.allclose(held, rbc[:, 0]) == rfix

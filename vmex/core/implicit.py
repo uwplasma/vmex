@@ -184,7 +184,8 @@ from .residuals import (
     zero_m1_z_force,
 )
 from .setup import (
-    RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess)
+    RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess,
+    rescale_boundary_volume)
 from .solver import (
     STOP_HOOK, SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
     _force_to_state, _initial_state, _physical_coefficients,
@@ -769,11 +770,11 @@ def _boundary_from_params(params: ImplicitParams, cfg: ImplicitConfig):
     lthreed = ntor > 0
     lasym = bool(res.lasym)
 
-    rbc = jnp.asarray(params.rbc)
-    zbs = jnp.asarray(params.zbs)
+    rbc, rbs, zbc, zbs = (jnp.asarray(a) for a in
+                          (params.rbc, params.rbs, params.zbc, params.zbs))
+    if cfg.inp.tvolume > 0.0:
+        rbc, rbs, zbc, zbs = rescale_boundary_volume(rbc, rbs, zbc, zbs, cfg.inp)
     if lasym:
-        rbs = jnp.asarray(params.rbs)
-        zbc = jnp.asarray(params.zbc)
         rbc, rbs, zbc, zbs = _lasym_delta_rotation_traceable(
             rbc, rbs, zbc, zbs, cfg, mpol=mpol, ntor=ntor)
 

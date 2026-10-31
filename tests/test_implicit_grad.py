@@ -1303,3 +1303,16 @@ def test_lasym_3d_stability_gradients_vs_frozen_path_fd(lasym_3d):
         # central difference then converges as h^2 (measured DMerc/RBS(1,1)
         # vs the adjoint: 2.2e-4 at 1e-4, 2.2e-6 at 1e-5), so h = 1e-5.
         h=1.0e-5)
+
+
+@pytest.mark.parametrize("rfix", [False, True])
+def test_traced_tvolume_rescaling_matches_run_setup(rfix):
+    inp = dataclasses.replace(VmecInput.from_file(str(DATA_DIR / "input.li383_low_res")),
+                              tvolume=4.0, lvolume_rfix=rfix)
+    cfg = im.make_config(inp, ns=7)
+    rt_ref = solver.prepare_runtime(inp, cfg.resolution, ftol=cfg.ftol,
+                                    max_iterations=cfg.max_iterations)
+    rt_p = im.runtime_from_params(im.params_from_input(inp), cfg)
+    for name in ("rcon0", "zcon0"):
+        np.testing.assert_allclose(np.asarray(getattr(rt_ref, name)),
+                                   np.asarray(getattr(rt_p, name)), rtol=0.0, atol=1e-13)
