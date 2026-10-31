@@ -1086,13 +1086,23 @@ def test_second_host_device_values_and_gradients_with_outer_context():
 
 
 @_requires_host_rig
-def test_second_host_device_unconverged_adjoint_raises_typed_error():
+def test_second_host_device_unconverged_adjoint_raises_typed_error(monkeypatch):
     """An exhausted adjoint Krylov budget must raise, never return (the
     backward once discarded GCROT convergence info, turning an unconverged
-    adjoint into a plausible gradient).  A 2-vector budget (m=2, k=1, one
-    restart) against an unreachable tolerance forces non-convergence; the
-    reverse pass must surface the typed AdjointSolveError."""
+    adjoint into a plausible gradient).  The block adjoint is made to miss its
+    certificate, so the reverse pass falls through to GCROT; a 2-vector budget
+    (m=2, k=1, one restart) against an unreachable tolerance forces
+    non-convergence there, and the reverse pass must surface the typed
+    AdjointSolveError.  (The block acceptance has a round-off floor, so a tiny
+    tolerance alone no longer rejects it.)"""
     _assert_no_platform_pins()
+    real_block = im._adjoint_block_core
+
+    def missed(*args):
+        mu, stats = real_block(*args)
+        return mu, stats._replace(converged=jax.numpy.asarray(False))
+
+    monkeypatch.setattr(im, "_adjoint_block_core", missed)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     params = im.params_from_input(inp, device=HOST_DEVICES[1])
 
