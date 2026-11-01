@@ -1,169 +1,203 @@
-"""Optimize pwO contour variance from a near-circular vacuum torus.
+#!/usr/bin/env python
+"""Optimize a boundary for piecewise omnigenity with a magnetic well.
 
-Aspect ratio, signed iota and mirror limits constrain the shape; NEO
-screens the selected equilibrium. Requires vmex[neoclassical]."""
+SciPy nonlinear least squares varies the boundary Fourier coefficients of a
+vacuum equilibrium in stages of increasing mode number, exactly as
+``QA_optimization.py``. The residual vector holds the mapped pwO contour
+variance, the aspect ratio, a floor on the rotational transform, the magnetic
+well and a ceiling on the mirror ratio, and VMEX supplies its exact Jacobian.
+The verified boundary is then compared with the seed by a matched NEO
+calculation of epsilon_eff^(3/2). Requires vmex[neoclassical].
+"""
+
 import os
-import gc
 from dataclasses import replace
 from pathlib import Path
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex._compat import require_optional
-from vmex.core.monitoring import FeasibleCandidateMonitor
-from vmex.core.neoclassical import screen_transport, transport_improves
-from vmex.core.pwo import MappedPwOResidual, one_field_period, qa_precursor, transport_backtrack
-from vmex.core.implicit import iota_profile
-from vmex.core.restart import restart_state
+from vmex.core.neoclassical import screen_transport
+from vmex.core.pwo import MappedPwOResidual
 
-NFP = 2
-INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.minimal_seed_nfp4"
-OUTPUT_DIR = Path("low_transport")
-MAX_MODES, MAX_PARAMETER_CHANGE = [1, 2], 5.
-SURFACES = jnp.linspace(.25, .75, 3)
-ASPECT_TARGET, IOTA_TARGET = 6., .42
-SEED_PERTURBATION = .05/ASPECT_TARGET  # 5% of the minor radius, positive transform
-MIRROR_LIMIT, MIRROR_WEIGHT = .2, 100.
-MAX_ITERATIONS, NITER = 15, 2000
-NS, MPOL, NTOR, FTOL = 35, 5, 5, 1e-12
-OPTIMIZER_FTOL = 1e-3
+# Number of field periods, and the seed deck the boundary is shaped from:
+NFP = 4
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
+# Rotating-ellipse amplitude added to the circular seed. The exactly circular
+# torus has zero first-order iota sensitivity; this gives the optimizer a basin:
+SEED_PERTURBATION = 0.05
+
+# Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
+SURFACES = np.linspace(0.1, 0.85, 4)
+MBOZ = 16
+
+# Mode ladder: highest boundary mode number varied in each stage, and the
+# residual evaluations each stage may spend:
+# MAX_MODES = [1, 2, 3]
+# MAX_NFEV = [15, 30, 50]
+# STAGE_FTOL = [1e-11, 1e-12, 1e-13]
+# ASPECT_TARGET = 5.0
+# MAGNETIC_WELL_TARGET = 0.01
+
+# Alternative settings for a larger design space:
+MAX_MODES = [1, 3, 5, 7, 9]
+MAX_NFEV = [15, 25, 30, 40, 50]
+STAGE_FTOL = [1e-11, 1e-11, 1e-12, 1e-13, 1e-13]    # equilibrium tolerance of each stage
+ASPECT_TARGET = 3.5
+MAGNETIC_WELL_TARGET = 0.07
+
+# Targets:
+IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
+MIRROR_LIMIT = 0.2                # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
+
+# Step control. One scaled variable moves a low-order coefficient by
+# PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
+PARAMETER_STEP = 0.02
+MAX_PARAMETER_CHANGE = 5.0
+ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
+VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
+
+# Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
+# but never below MINIMUM_MPOL:
+MINIMUM_MPOL = 5
+
+# Verification solve of the optimized boundary:
+FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
+FINAL_FTOL = 1.0e-12
+FINAL_NITER = 20000
+
+# Every output file name contains this:
+OUTPUT_NAME = f"pwO_optimized_nfp{NFP}"
+
+# VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAX_ITERATIONS = 1
+    MAX_MODES, MAX_NFEV, STAGE_FTOL = [1], [4], [1.0e-11]
+    FINAL_NS, FINAL_FTOL = [31], 1.0e-10
 
-def geometry_residuals(state, runtime):
-    """Aspect and signed full-profile iota; an average can hide a low-transform surface."""
-    full = iota_profile(state, runtime)
-    return jnp.concatenate((jnp.atleast_1d((opt.aspect_ratio(state, runtime)-ASPECT_TARGET)/.1),
-                            jnp.sqrt(10/full.size)*jnp.maximum((IOTA_TARGET-full)/.01, 0)))
+###############################################################################
+# End of input parameters.
+###############################################################################
 
+### Set up the equilibrium ####################################################
 
-def objective(state, runtime):
-    fields = mapped.diagnostics_state(state, runtime)
-    residual = jnp.sqrt(2)*jnp.concatenate((
-        fields[0]["residuals1d"]/jnp.sqrt(initial_scale),
-        geometry_residuals(state, runtime),
-        jnp.sqrt(MIRROR_WEIGHT)*jnp.maximum(fields[3]/(.9*MIRROR_LIMIT)-1, 0)))
-    return residual
-
-
-def inspect_candidate(eq):
-    residual, fields = diagnostics(eq.state, eq.runtime)
-    metrics = mapped.physical_metrics(eq, mirror_ceiling=MIRROR_LIMIT,
-        aspect_bounds=(ASPECT_TARGET-.1, ASPECT_TARGET+.1), iota_floor=.41, fields=fields)
-    return np.asarray(residual), metrics
-
-
-vj.configure()
-if any(OUTPUT_DIR.rglob("summary.json")):
-    raise ValueError("Use a new output directory for each optimization")
-require_optional("neo-jax", "low-transport NEO screen")
-print("[setup] near-circular vacuum torus, boundary modes 1 then 2", flush=True)
+# VmecInput is frozen, so copy its arrays before shaping the seed boundary.
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = 1/ASPECT_TARGET
-rbc[inp.ntor+1, 1], zbs[inp.ntor+1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-inp = replace(inp, nfp=2 if NFP == 1 else NFP, rbc=rbc, zbs=zbs, phiedge=.083*(10/ASPECT_TARGET)**2)
-inp = replace(inp, ns_array=np.array([NS]), ftol_array=np.array([FTOL]),
-              niter_array=np.array([NITER]), delt=.5).change_resolution(
-                  mpol=MPOL, ntor=NTOR, ntheta=16, nzeta=14)
-# NFP1 starts in the twofold near-circle subspace; keep physical n=2.
-precursor_input = inp
-if NFP == 1:
-    inp = one_field_period(inp)
-seed = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
-circle = seed
-mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
-physical_options = dict(aspect_bounds=(ASPECT_TARGET-.1, ASPECT_TARGET+.1), iota_floor=.41)
-problem_options = dict(use_ess=True, ess_alpha=1.2, forward_ftol=FTOL,
-    forward_max_iterations=NITER, refine_tol=FTOL, adjoint_tol=1e-8, max_fsq_ratio=1.)
-if NFP in (1, 3):
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    inp.to_indata(OUTPUT_DIR / "input.seed")
-    vj.write_wout(OUTPUT_DIR / "wout_seed.nc", circle.wout)
-    qa_seed = (opt.solve_equilibrium(precursor_input, raise_on_max_iterations=True)
-               if NFP == 1 else seed)
-    inp, seed = qa_precursor(precursor_input, qa_seed, mapped, geometry_residuals,
-        OUTPUT_DIR / "QA", maxiter=MAX_ITERATIONS, optimizer_ftol=OPTIMIZER_FTOL,
-        mirror_limit=MIRROR_LIMIT, mirror_weight=MIRROR_WEIGHT,
-        physical_options=physical_options, **problem_options)
-    if NFP == 1:
-        # Full QA2 max-mode-2 boundary retains physical n=4; vary n<=2 below.
-        inp = one_field_period(inp)
-        rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-        rbc[inp.ntor+1, 1], zbs[inp.ntor+1, 1] = -.001/ASPECT_TARGET, .001/ASPECT_TARGET
-        inp = replace(inp, rbc=rbc, zbs=zbs)
-        seed = opt.solve_equilibrium(inp, initial_state=restart_state(
-            replace(seed.wout, nfp=1), inp), raise_on_max_iterations=True)
-    jax.block_until_ready(seed.state)
-    jax.clear_caches()
-    gc.collect()
-    MAX_MODES, MAX_PARAMETER_CHANGE = [2], .25
-    MAX_ITERATIONS = 1 if ci_smoke else 5
-# Freeze only an automatic initial cost scale; field normalization stays live.
-initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
-actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
-print(f"[setup] initial pwO cost {initial_scale:.6g}; Boozer surfaces {actual_surfaces}")
-problem = opt.VmecProblem.from_tuples(
-    inp, [(objective, 0., 1.)], max_mode=2, vary_major_radius=False,
-    restart_from=seed, **problem_options)
-# JIT shares the Boozer transform between the residual and independent field checks.
-diagnostics = jax.jit(lambda state, runtime: (objective(state, runtime),
-                                             mapped.diagnostics_state(state, runtime)))
-monitor = FeasibleCandidateMonitor(problem, inspect_candidate, OUTPUT_DIR,
-    maxiter=MAX_ITERATIONS, optimizer_ftol=OPTIMIZER_FTOL, particle_qualified=False,
-    input=str(INPUT_FILE), nfp=NFP, initial_scale=initial_scale, mirror_limit=MIRROR_LIMIT,
-    requested_surfaces=np.asarray(SURFACES).tolist(), actual_surfaces=actual_surfaces.tolist(), beta_target=0., seed_perturbation_m=SEED_PERTURBATION,
-    settings=dict(ns=NS, mpol=MPOL, ntor=NTOR, ftol=FTOL, niter=NITER))
-with monitor:
-    x = problem.x0.copy()
-    start = x.copy()
-    monitor(x)
-    seed_name = "pwo_seed" if NFP in (1, 3) else "seed"
-    problem.input_from_x(x).to_indata(OUTPUT_DIR / f"input.{seed_name}")
-    vj.write_wout(OUTPUT_DIR / f"wout_{seed_name}.nc", problem.equilibrium_from_x(x).wout)
+rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
+inp = replace(inp, rbc=rbc, zbs=zbs)
 
-    # Reuse one equilibrium/derivative compilation while exposing boundary modes in stages.
-    for mode in MAX_MODES:
-        print(f"[optimize] max_mode={mode}, at most {MAX_ITERATIONS} iterations", flush=True)
-        stage = problem.subproblem(max_mode=mode, x=x)
-        step = .02*np.asarray(stage.scales)
-        result = least_squares(lambda y: monitor(stage.embed(y)), stage.x0,
-            jac=stage.residual_jac, x_scale=step,
-            bounds=(stage.x0-MAX_PARAMETER_CHANGE*step, stage.x0+MAX_PARAMETER_CHANGE*step),
-            max_nfev=5*MAX_ITERATIONS+5, ftol=OPTIMIZER_FTOL, xtol=1e-10, gtol=1e-7,
-            callback=monitor.callback(mode), verbose=2)
-        x = stage.embed(result.x)
-        monitor(x)
-        problem.input_from_x(x).to_indata(OUTPUT_DIR / f"input.mode{mode}")
+### Set up the objective ######################################################
 
-    monitor.save(stopping_reason=str(result.message),
-                 transport_screen_passed=False)
-    print("[verify] matched NEO screen of the best feasible candidate", flush=True)
-    if NFP in (1, 3):
-        before = screen_transport(circle.wout, actual_surfaces)
-        monitor.save(baseline_Q=before.tolist(),
-            baseline="original near-circle; NFP1 retains the physical n2 harmonic", precursor="QA")
-        transport_backtrack(monitor, start, x, before, actual_surfaces, seed=seed)
-    elif monitor.best is not None:
-        before = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_seed.nc"), actual_surfaces)
-        after = screen_transport(vj.read_wout(OUTPUT_DIR / "wout_trial.nc"), actual_surfaces)
-        monitor.save(baseline_Q=before.tolist(), trial_Q=after.tolist(),
-                     transport_screen_passed=transport_improves(before, after))
-    if monitor.report["transport_screen_passed"]:
-        print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> "
-              f"{np.mean(monitor.report['trial_Q']):.6g}")
-        for path in vj.plot_wout(OUTPUT_DIR / "wout_trial.nc", OUTPUT_DIR).values():
-            print(f"Wrote {path}")
-    monitor.save(status="completed")
-    print(f"Wrote {OUTPUT_DIR / 'summary.json'}. Transport screen passed: "
-          f"{monitor.report['transport_screen_passed']}. Particle tracing is a separate check.")
+def iota_floor(equilibrium_state, solver_context):
+    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
+    return jnp.maximum(
+        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
-if not ci_smoke and not monitor.report["transport_screen_passed"]:
-    raise SystemExit("Transport did not improve; keep the input equilibrium")
+
+def mirror_excess(equilibrium_state, solver_context):
+    """Hinge on the full-surface mirror ratio, which the mapped variance does not see."""
+    mirror = pwo.diagnostics_state(equilibrium_state, solver_context)[3]
+    return jnp.maximum(mirror - MIRROR_LIMIT, 0.0)
+
+
+# Each term is (function, target, weight).
+pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2)
+objective_function_terms = [
+    (pwo, 0.0, PWO_WEIGHT),
+    (opt.aspect_ratio, ASPECT_TARGET, 1.0),
+    (iota_floor, 0.0, 100.0),
+    (opt.magnetic_well, MAGNETIC_WELL_TARGET, 100.0),
+    (mirror_excess, 0.0, 100.0),
+]
+
+report = opt.EquilibriumReporter(
+    ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
+    ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
+monitor = opt.OptimizationMonitor()
+
+### Run the optimization ######################################################
+
+seed_input = inp
+equilibrium = opt.solve_equilibrium(inp)
+report("seed", equilibrium)
+# Stages that share a boundary resolution share ONE problem, as in
+# QA_optimization.py: every jitted graph is compiled once for the whole group.
+resolution_of = {max_mode: max(max_mode + 2, MINIMUM_MPOL) for max_mode in MAX_MODES}
+group_max_mode = {
+    max_mode: max(other for other in MAX_MODES
+                  if resolution_of[other] == resolution_of[max_mode])
+    for max_mode in MAX_MODES}
+problem, mpol = None, None
+for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
+    print(f"\n===== pwO stage, max_mode = {max_mode} =====")
+    if resolution_of[max_mode] != mpol:
+        mpol = resolution_of[max_mode]
+        # The decks' iteration caps are too low for a new resolution's seed solve.
+        inp = replace(inp, delt=0.5, ftol_array=np.array([stage_ftol]),
+                      niter_array=np.array([20000])).change_resolution(
+            mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+        problem = opt.VmecProblem.from_tuples(
+            inp, objective_function_terms, max_mode=group_max_mode[max_mode],
+            vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
+            ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+            progress=True)
+        x = problem.x0
+        monitor.problem = problem
+        if not ci_smoke:
+            problem.compile_residual_and_jacobian()
+    stage = problem.subproblem(max_mode=max_mode, x=x)
+    print(f"dof_names = {stage.dof_names}")
+    step = PARAMETER_STEP * stage.scales
+    result = least_squares(
+        stage.residual, stage.x0, jac=stage.residual_jac,
+        x_scale=step, max_nfev=max_nfev,
+        bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
+                stage.x0 + MAX_PARAMETER_CHANGE * step),
+        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
+    x = stage.embed(result.x)
+    inp = problem.input_from_x(x)
+    equilibrium = problem.equilibrium_from_x(x)
+    report(f"mode {max_mode}", equilibrium)
+
+### Check the result ##########################################################
+
+# The optimizer's grid is not the certificate: re-solve the optimized boundary
+# on a finer radial grid to a tighter tolerance and quote that.
+final_resolution = dict(ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
+final_equilibrium = equilibrium
+for ns in FINAL_NS:
+    final_input = replace(inp, ns_array=np.array([ns]), **final_resolution)
+    final_equilibrium = opt.solve_equilibrium(
+        final_input, initial_state=final_equilibrium.solution,
+        verbose=not ci_smoke, raise_on_max_iterations=True)
+
+# Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
+seed_equilibrium = opt.solve_equilibrium(
+    replace(seed_input, ns_array=np.array([FINAL_NS[-1]]), **final_resolution),
+    verbose=False, raise_on_max_iterations=True)
+half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
+neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
+seed_Q = screen_transport(seed_equilibrium.wout, neo_surfaces)
+final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
+
+### Print, plot and save ######################################################
+
+final_total = report("final", final_equilibrium)["pwO total"]
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET)
+print(f"\npwO total {final_total:.3e}")
+print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
+
+input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
+wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
+print(f"Wrote {input_path}\nWrote {wout_path}")
+print(f"Wrote {monitor.save(f'{OUTPUT_NAME}_objectives.csv')}")
+print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
+for path in vj.plot_wout(wout_path, ".").values():
+    print(f"Wrote {path}")

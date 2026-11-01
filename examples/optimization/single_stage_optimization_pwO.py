@@ -1,16 +1,15 @@
 #!/usr/bin/env python
-"""Optimize a pwO plasma and ESSOS coils in vacuum or at finite beta.
+"""Optimize a finite-beta pwO plasma and ESSOS coils together.
 
-Run the vacuum and finite-beta examples first. COILS_INPUT accepts an
-ESSOS stage-2 fit; COIL_FIT_MAXITER=0 keeps its shapes. TARGET_BETA=0
-selects vacuum. The final checks include a cold free-boundary solve and NEO."""
+Run ``pwO_optimization.py`` and ``pwO_optimization_finite_beta.py`` first.
+COILS_INPUT accepts an ESSOS stage-2 fit; COIL_FIT_MAXITER=0 keeps its shapes.
+A cold free-boundary solve and NEO check the design. Requires vmex[neoclassical].
+"""
 
 import gc
-import json
 import os
 from dataclasses import replace
 from pathlib import Path
-import time
 
 import jax
 import jax.numpy as jnp
@@ -26,17 +25,17 @@ from vmex.core.single_stage import (
 from vmex.core import virtual_casing as vc
 from vmex.core.restart import restart_state
 from vmex.core.pwo import MappedPwOResidual
-from vmex.core.neoclassical import screen_transport, transport_improves
-from vmex._compat import require_optional
+from vmex.core.neoclassical import screen_transport
 from essos.coils import Coils, CreateEquallySpacedCurves
 from essos.surfaces import surfacerzfourier_from_boundary
 
 # Input parameters.
-INPUT_FILE = Path("low_transport_finite_beta/input.trial")
+NFP = 4
+INPUT_FILE = Path(f"input.pwO_finite_beta_nfp{NFP}")
+WOUT_FILE = Path(f"wout_pwO_finite_beta_nfp{NFP}.nc")
 COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
 MAX_MODE = 2
-SURFACES = jnp.linspace(.25, .75, 3)
-MIRROR_LIMIT = .2
+SURFACES = np.linspace(.25, .75, 3)
 TARGET_BETA = 0.005
 PRESSURE_PROFILE = [1.0, -1.0]
 BETA_TOLERANCE = 0.1
@@ -66,29 +65,11 @@ if ci_smoke:
     MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 2, 4, 2
     N_SEGMENTS, COIL_ORDER, NPHI, NTHETA = 24, 2, 8, 8
 
-if TARGET_BETA < 0 or not np.isfinite(TARGET_BETA):
-    raise ValueError("TARGET_BETA must be finite and nonnegative")
 if COIL_FIT_MAXITER == 0 and COILS_INPUT is None:
     raise ValueError("Skipping the prefit requires COILS_INPUT")
 
 # Seed and coil pre-fit.
-vj.configure()
-require_optional("neo-jax", "low-transport NEO screen")
-started = time.perf_counter()
-print("Running single_stage_optimization_pwO.py")
-plasma_report = json.loads(INPUT_FILE.with_name("summary.json").read_text())
-if (plasma_report.get("status") != "completed"
-        or plasma_report.get("transport_screen_passed") is not True):
-    raise ValueError("Use a completed pwO plasma run that passes its NEO transport screen")
 inp = vj.VmecInput.from_file(INPUT_FILE)
-NFP = inp.nfp
-reference = vj.VmecInput.from_file(INPUT_FILE.with_name("input.seed"))
-reference_wout = vj.read_wout(INPUT_FILE.with_name("wout_seed.nc"))
-if reference.nfp != NFP:
-    raise ValueError("The transport reference must have the same field periods")
-if (inp.lasym or inp.lfreeb or inp.phiedge <= 0
-        or inp.rbc[inp.ntor, 0] != 1 or inp.curtor != 0 or inp.ncurr != 1):
-    raise ValueError("Use the candidate at its original flux and length scale with zero prescribed current")
 mpol = max(MAX_MODE + 2, 5)
 am = np.zeros(21)
 am[:len(PRESSURE_PROFILE)] = PRESSURE_PROFILE
@@ -98,7 +79,7 @@ inp = replace(inp, delt=0.5, ns_array=np.array([35]),
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 # Keep the input total flux and physical pressure calibration fixed before
 # constructing the finite-beta target. No equilibrium solve occurs in a coil trial.
-previous = vj.read_wout(INPUT_FILE.with_name("wout_trial.nc"))
+previous = vj.read_wout(WOUT_FILE)
 if TARGET_BETA:
     calibration = opt.solve_equilibrium(inp, initial_state=restart_state(previous, inp),
                                         raise_on_max_iterations=True)
@@ -119,7 +100,6 @@ def relative_beta(state, runtime):
 seed = opt.solve_equilibrium(inp, initial_state=initial_state, raise_on_max_iterations=True)
 mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
-actual_surfaces = np.asarray(mapped.compute_state(seed.state, seed.runtime)["s_b"])
 plasma_terms = [(mapped.residuals_state, 0.0, 2 / initial_scale)]
 if TARGET_BETA:
     plasma_terms.append((relative_beta, 1.0, 1.0))
@@ -259,13 +239,8 @@ result = minimize(
     options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
              "maxls": 20, "ftol": OPTIMIZER_FTOL, "gtol": 1e-8})
 u = result.x
-optimization_seconds = time.perf_counter() - started
 print(f"[solve] {result.nit} L-BFGS-B iterations, {joint.counts['trials']} trials "
       f"({joint.counts['rejected']} rejected), status {result.status}: {result.message}", flush=True)
-
-# Keep the coarse equilibrium for a matched NEO comparison after fine-grid checks.
-x_final = joint.x0 + joint.scales * u
-coarse = plasma_problem.equilibrium_from_x(x_final[:joint.n_boundary])
 
 # Independent verification and final reporting.
 prefix = "single_stage_pwO"
@@ -285,70 +260,19 @@ verdict = design_target_report(
     normal_field_limit=NORMAL_FIELD_LIMIT, clearance=COIL_SURFACE_DISTANCE_LIMIT,
     coil_distance=COIL_DISTANCE_LIMIT, curvature=CURVATURE_LIMIT, beta_bounds=beta_bounds,
     delbsq_limit=DELBSQ_LIMIT, boundary_distance_limit=FREE_BOUNDARY_DISTANCE_LIMIT)
-print("[verify] matched NEO comparison", flush=True)
-before = screen_transport(joint.seed_equilibrium.wout, actual_surfaces)
-after = screen_transport(coarse.wout, actual_surfaces)
-held_Q = held_baseline_Q = held_surfaces = None
-held_physics = {"feasible": False}
-held_transport_passed = False
-if free["converged"]:
-    print("[verify] matched NEO on the cold held-coil equilibrium", flush=True)
-    # Measure the retained transport benefit against the preceding pwO run's
-    # seed, keeping this design's physical flux, pressure and current profiles.
-    reference = reference.change_resolution(mpol=inp.mpol, ntor=inp.ntor)
-    reference = replace(inp, rbc=reference.rbc, zbs=reference.zbs,
-        ns_array=np.array([free["final_ns"]]), ftol_array=np.array([1e-12]),
-        niter_array=np.array([8000]))
-    held_baseline = opt.solve_equilibrium(reference, initial_state=restart_state(
-        reference_wout, reference), raise_on_max_iterations=True)
-    held_surfaces = np.asarray(mapped.compute_state(held_baseline.state, held_baseline.runtime)["s_b"])
-    held_baseline_Q = screen_transport(held_baseline.wout, held_surfaces)
-    held_wout = vj.read_wout(f"wout_{prefix}_free_check.nc")
-    held_iota = np.asarray(held_wout.iotaf)
-    held_physics = {"aspect": float(held_wout.aspect), "min_signed_full_iota": float(held_iota.min())}
-    held_physics["feasible"] = bool(np.isfinite(held_iota).all() and held_iota.min() > IOTA_FLOOR
-                                    and 5.9 <= held_physics["aspect"] <= ASPECT_LIMIT)
-    held_Q = screen_transport(held_wout, held_surfaces)
-    held_transport_passed = transport_improves(held_baseline_Q, held_Q)
-    print(f"Held-coil NEO mean epsilon_eff^(3/2): {held_baseline_Q.mean():.6g} -> {held_Q.mean():.6g}")
-physics = mapped.physical_metrics(coarse, mirror_ceiling=MIRROR_LIMIT,
-                                  aspect_bounds=(5.9, 6.1), iota_floor=IOTA_FLOOR)
-print(f"NEO mean epsilon_eff^(3/2): {before.mean():.6g} -> {after.mean():.6g}")
-summary = {
-    "example": Path(__file__).name, "smoke": ci_smoke,
-    "input": str(INPUT_FILE.resolve()), "nfp": NFP, "beta_target": TARGET_BETA,
-    "seed_coils": str(Path(COILS_INPUT).resolve()) if COILS_INPUT else None,
-    "prefit_skipped": COIL_FIT_MAXITER == 0,
-    "optimization_seconds": round(optimization_seconds, 1),
-    "coil_fit_iterations": int(coil_fit.nit), **joint.counts,
-    "lbfgsb_iterations": int(result.nit),
-    "initial_objective": initial_value, "final_objective": float(result.fun),
-    "boundary_step_norm": float(np.linalg.norm(joint.scales[:joint.n_boundary] * u[:joint.n_boundary])),
-    "coil_step_norm": float(np.linalg.norm(joint.scales[joint.n_boundary:] * u[joint.n_boundary:])),
-    "equilibrium_solves": joint.monitor.records[-1].equilibrium_solves,
-    "phiedge": float(inp.phiedge), "pres_scale": float(inp.pres_scale),
-    "coil_current_calibration": "external_boundary_vector_least_squares",
-    "coil_current_factor": current_factor,
-    "external_flux_constrained": False,
-    "seed_coil_toroidal_flux": seed_coil_flux,
-    "seed_normalized_pressure_jump_rms": seed_pressure_jump_rms,
-    "free_boundary_verification": free, "seed": seed_values,
-    "final": {**final_values, **metrics},
-    **verdict, "particle_qualified": False, "coarse_physics": physics,
-    "baseline_Q": before.tolist(), "trial_Q": after.tolist(),
-    "transport_screen_passed": transport_improves(before, after),
-    "held_reference_input": str(INPUT_FILE.with_name("input.seed").resolve()),
-    "held_surfaces": held_surfaces.tolist() if held_surfaces is not None else None,
-    "held_baseline_Q": held_baseline_Q.tolist() if held_baseline_Q is not None else None,
-    "held_Q": held_Q.tolist() if held_Q is not None else None,
-    "held_transport_screen_passed": held_transport_passed, "held_physics": held_physics,
-    # Qualify transport in the actual held coil field; the fixed-boundary
-    # comparison remains a diagnostic of the joint optimization target.
-    "design_qualified": verdict["met"] and physics["feasible"]
-                        and held_transport_passed and held_physics["feasible"],
-}
-Path("single_stage_optimization_pwO_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+
+# Matched NEO: the seed on the verification grid, the same half-mesh surfaces.
+half_mesh = (np.arange(100) + 0.5) / 100
+neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
+seed_fine = opt.solve_equilibrium(
+    replace(inp, ns_array=np.array([101]), ftol_array=np.array([1e-12]),
+            niter_array=np.array([20000])),
+    initial_state=seed.solution, verbose=False, raise_on_max_iterations=True)
+if not ci_smoke:
+    print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: "
+          f"seed {screen_transport(seed_fine.wout, neo_surfaces)}, "
+          f"final {screen_transport(equilibrium.wout, neo_surfaces)}")
 save_outputs(joint, u, equilibrium, surface, prefix=prefix,
              make_movie=MAKE_MOVIE, surface_color=MOVIE_SURFACE_COLOR)
-if not summary["design_qualified"] and not ci_smoke:
+if verdict["unmet"] and not ci_smoke:
     raise SystemExit(1)

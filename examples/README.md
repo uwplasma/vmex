@@ -109,7 +109,8 @@ that research budget as one commented set of constants next to the default.
   1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with
   aspect/iota constraints and screens proposals with NEO. Run
   `pwO_optimization_finite_beta.py` next for pressure continuation, then
-  `single_stage_optimization_pwO.py` to optimize coils and boundary together.
+  `single_stage_optimization_pwO.py` to optimize coils and boundary together;
+  each reads the previous script's `input.` and `wout_` files.
   A lower proxy does not establish confinement; particle checks remain separate.
   See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
 
