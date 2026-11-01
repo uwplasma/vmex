@@ -117,8 +117,8 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     No Fourier periodicity in the cut eta direction is assumed.
     """
     _integer(ngamma, 4, "ngamma"); _integer(neta, 4, "neta")
-    if not np.isfinite(eta_min) or not 0 < eta_min < np.pi:
-        raise ValueError("eta_min must be fixed strictly between zero and pi")
+    _require(jnp.isfinite(eta_min) & (eta_min > 0) & (eta_min < jnp.pi),
+             "eta_min must be strictly between zero and pi")
     cosine, sine, m, n, iota, weight, valid = _spectrum(bmnc_b, bmns_b, xm_b, xn_b, iota_b, nfp, weights)
     ns = cosine.shape[0]
     constant = (m == 0) & (n == 0)
