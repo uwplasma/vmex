@@ -13,6 +13,7 @@ the mechanism is explained in ``docs/explanation/architecture.rst``.
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 
 import numpy as np
@@ -217,3 +218,46 @@ def test_parallel_finite_difference_and_problem_ensemble():
         )
     with pytest.raises(ValueError, match="equal length"):
         parallel.evaluate_problems(problems, [problems[0].x0])
+
+
+
+class _Doubled:
+    """Picklable worker function that also reports the worker's core count."""
+
+    def __call__(self, x):
+        cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 1
+        return np.append(2.0 * np.asarray(x), cores)
+
+
+def _build_doubled():
+    return _Doubled()
+
+
+def _gpu_env(x):
+    return os.environ.get("CUDA_VISIBLE_DEVICES")
+
+
+def _build_gpu_env():
+    return _gpu_env
+
+
+def test_process_workers_pin_cores_and_match_serial_jacobian():
+    """Spawned workers keep order, pin one core each and reproduce the Jacobian."""
+    x = np.array([0.3, -0.7])
+    with parallel.ProcessWorkers(_build_doubled, 2) as pool:
+        rows = pool.map([x, 2 * x])
+        jacobian = parallel.finite_difference_jacobian(None, x, pool=pool)
+    np.testing.assert_array_equal(rows[1][:2], 4 * x)
+    if hasattr(os, "sched_getaffinity"):
+        assert [row[2] for row in rows] == [1.0, 1.0]
+    np.testing.assert_allclose(jacobian[:2], 2 * np.eye(2), atol=1e-8)
+
+
+def test_process_workers_deal_gpus_and_refuse_oversubscription(tmp_path):
+    with parallel.ProcessWorkers(
+        _build_gpu_env, 2, gpus=[7], cache_dir=tmp_path
+    ) as pool:
+        assert pool.map([0, 1]) == ["7", "7"]
+    if hasattr(os, "sched_getaffinity"):
+        with pytest.raises(ValueError, match="exceeds"):
+            parallel.ProcessWorkers(_build_doubled, 10**6)

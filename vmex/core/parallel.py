@@ -27,11 +27,13 @@ single-solve path (which stays byte-identical) and imposes no new dependency.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
 __all__ = [
+    "ProcessWorkers",
     "available_cpus",
     "default_workers",
     "evaluate_problems",
@@ -131,6 +133,66 @@ def map_ensemble(
         return list(pool.map(_call, items))
 
 
+_worker_fn: Any = None
+
+
+def _start_worker(build, cores, gpu, cache_dir, slots) -> None:
+    """Pin one spawned worker to its share of the node, then build its function."""
+    global _worker_fn
+    with slots.get_lock():
+        slot = slots.value
+        slots.value += 1
+    if cores:
+        os.sched_setaffinity(0, cores[slot])
+    if gpu:
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu[slot]
+    if cache_dir:
+        os.environ["VMEX_COMPILATION_CACHE_DIR"] = str(cache_dir)
+    _worker_fn = build()
+
+
+def _call_worker(item: Any) -> Any:
+    return _worker_fn(item)
+
+
+class ProcessWorkers:
+    """A pool of spawned processes, each with its own cores or GPU group.
+
+    ``build`` is a picklable zero-argument factory run once per worker; it
+    returns the function ``map`` applies, for example a problem's ``residual``.
+    Workers share ``cache_dir`` so only the first compiles.  ``threads`` cores
+    are pinned to each worker from the cores this process may use, which also
+    sizes XLA's pool.  ``gpus`` lists device ids dealt round-robin, so
+    ``gpus=[0, 1], workers=4`` gives two workers per GPU.  A script that
+    creates this must guard it with ``if __name__ == "__main__"``.
+    """
+
+    def __init__(self, build: Callable[[], Callable], workers: int, *,
+                 threads: int = 1, gpus: Sequence[int] = (),
+                 cache_dir: Any = None) -> None:
+        cores: list[list[int]] = []
+        if not gpus and hasattr(os, "sched_getaffinity"):
+            free = sorted(os.sched_getaffinity(0))
+            if workers * threads > len(free):
+                raise ValueError(f"{workers} x {threads} exceeds {len(free)} cores")
+            cores = [free[i * threads:(i + 1) * threads] for i in range(workers)]
+        gpu = [str(gpus[i % len(gpus)]) for i in range(workers)] if gpus else []
+        context = multiprocessing.get_context("spawn")
+        slots = context.Value("i", 0)
+        self._pool = ProcessPoolExecutor(
+            workers, mp_context=context, initializer=_start_worker,
+            initargs=(build, cores, gpu, cache_dir, slots))
+
+    def map(self, items: Iterable[Any]) -> list[Any]:
+        return list(self._pool.map(_call_worker, items))
+
+    def __enter__(self) -> "ProcessWorkers":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self._pool.shutdown()
+
+
 def finite_difference_jacobian(
     fun: Callable[[Any], Any],
     x: Any,
@@ -138,6 +200,7 @@ def finite_difference_jacobian(
     method: str = "3-point",
     rel_step: float | None = None,
     workers: int | None = None,
+    pool: ProcessWorkers | None = None,
 ) -> Any:
     """Differentiate an opaque host function with independent parallel probes.
 
@@ -145,7 +208,8 @@ def finite_difference_jacobian(
     ``"2-point"`` is forward and first-order accurate.  ``workers=None`` uses
     :func:`default_workers`, while ``workers=1`` is deterministic serial
     execution.  Every probe receives its own copy of ``x`` and ``fun`` must not
-    mutate shared state.
+    mutate shared state.  With ``pool``, the probes run in that pool's
+    processes through its own function, and ``fun`` and ``workers`` are unused.
     """
     import numpy as np
 
@@ -175,8 +239,8 @@ def finite_difference_jacobian(
             plus[j] += step[j]
             points.extend((minus, plus))
 
-    values = [np.asarray(value, dtype=float).ravel() for value in map_ensemble(
-        fun, points, workers=workers
+    values = [np.asarray(value, dtype=float).ravel() for value in (
+        pool.map(points) if pool else map_ensemble(fun, points, workers=workers)
     )]
     if not values:
         return np.empty((0, 0), dtype=float)
