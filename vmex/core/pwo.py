@@ -136,27 +136,25 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     coordinates = squeezed_pwo_coordinates(gamma, eta, iota=jnp.abs(iota[:, None, None]), nfp=nfp, a=a, b=b, c=c)
     B = _evaluate(cosine, sine, m, n, coordinates["theta"],
                   jnp.where(iota[:, None, None] < 0, -1.0, 1.0)*coordinates["zeta"])
-    # Sufficient global bound over the entire cut domain, including between nodes.
-    bound = ((1-jnp.abs(a)*jnp.pi*jnp.abs(iota[:, None, None]/nfp)*(1+jnp.abs(b)))
-             * (1+c*jnp.pi-2*c*eta_min)-jnp.abs(a))/nfp
+    # Theta equals gamma, so each line of constant gamma maps to one line of constant
+    # theta. The map is one-to-one on the torus exactly when zeta increases along each
+    # line and the line spans less than one field period; both are checked here on the nodes.
+    ends = squeezed_pwo_coordinates(gamma, jnp.stack((eta_min*jnp.ones(()), 2*jnp.pi-eta_min))[None, None, :],
+                                    iota=jnp.abs(iota[:, None, None]), nfp=nfp, a=a, b=b, c=c)["zeta"]
+    span = jnp.max(ends[:, :, 1]-ends[:, :, 0], axis=1)
+    jacobian_min = jnp.min(coordinates["jacobian"], axis=(1, 2))
     distance_at_cut = c*eta_min**2-(1+c*jnp.pi)*eta_min+jnp.pi
-    # Positive local Jacobian is insufficient on a torus: a lifted interval
-    # longer than one field period would cover physical points twice.
-    span_upper = 2*(distance_at_cut+jnp.abs(a)*eta_min*jnp.minimum(
-        1.0, jnp.abs(iota[:, None, None]*distance_at_cut/nfp)*(1+jnp.abs(b))))/nfp
     valid_map = (jnp.isfinite(a) & jnp.isfinite(b) & jnp.isfinite(c)
-                 & (c < -1/jnp.pi) & (eta_min >= jnp.pi+1/c)
-                 & jnp.isfinite(reference) & (reference > 0) & (bound > 0)
-                 & (distance_at_cut > 0) & (span_upper < 2*jnp.pi/nfp))
-    valid = valid & valid_map[:, 0, 0] & jnp.all(coordinates["jacobian"] > 0, axis=(1, 2))
+                 & (c < -1/jnp.pi) & jnp.isfinite(reference) & (reference > 0)
+                 & (distance_at_cut > 0) & (span[:, None, None] < 2*jnp.pi/nfp))
+    valid = valid & valid_map[:, 0, 0] & (jacobian_min > 0)
     mean = jnp.mean(B, axis=1, keepdims=True)
     out = _finish((B-mean)/reference, B, valid, weight)
     out.update({"B_mapped": B, "B_mean_gamma": mean, "gamma": gamma[0, :, 0],
                 "B00": mean_field, "field_variance": variance,
                 "mapped_variance": jnp.mean((B-mean)**2, axis=(1, 2)),
                 "eta": eta[0, 0, :], "jacobian": coordinates["jacobian"],
-                "jacobian_lower_bound": bound[:, 0, 0],
-                "toroidal_span_upper": span_upper[:, 0, 0],
+                "jacobian_min": jacobian_min, "toroidal_span": span,
                 "eta_fraction": 1-eta_min/jnp.pi,
                 "mapped_area_fraction": jnp.mean(coordinates["jacobian"], axis=(1, 2))*(2*jnp.pi-2*eta_min)*nfp/(2*jnp.pi)})
     return out
@@ -165,8 +163,8 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
 class MappedPwOResidual:
     """Squeezed LC mapped-field variance with a fixed domain and live B00 scale.
 
-    Options match :func:`mapped_pwo_residual_from_boozer`. A conservative
-    positive Jacobian bound rejects maps whose nonfolding is not certified.
+    Options match :func:`mapped_pwo_residual_from_boozer`. Maps that fold or
+    cover a point twice on the evaluated nodes are rejected.
     Field normalization, mirror floors and full-surface diagnostics remain
     separate physical requirements.
     """
