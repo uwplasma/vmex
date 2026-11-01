@@ -24,6 +24,7 @@ import pytest
 
 from vmex.core import implicit as im
 from vmex.core.fourier import mode_table, trig_tables
+from vmex.core.scaling import scale_input
 from vmex.core.geometry import (
     half_mesh_jacobian,
     real_space_geometry,
@@ -264,6 +265,25 @@ def test_geometry_chain_from_setup_is_jittable(case):
     flag_jit, tau_jit = jax.jit(sign_flag)(setup)
     assert bool(flag_eager) == bool(flag_jit) == False  # noqa: E712
     _allclose(tau_jit, tau_eager, "tau (jit)")
+
+
+@pytest.mark.parametrize("rfix", [False, True])
+def test_tvolume_scales_with_length_and_has_the_documented_null_direction(rfix):
+    """scale_input keeps a TVOLUME deck's r_scale, and scaling the rescaled
+    harmonics leaves the rescaled boundary unchanged."""
+    inp = dataclasses.replace(VmecInput.from_file(DATA_DIR / "input.li383_low_res"),
+                              tvolume=4.0, lvolume_rfix=rfix)
+    scaled = scale_input(inp, r_scale=2.0)
+    assert scaled.tvolume == 32.0
+    assert scale_input(dataclasses.replace(inp, tvolume=-1.0), r_scale=2.0).tvolume == -1.0
+    base = rescale_boundary_volume(inp.rbc, inp.rbs, inp.zbc, inp.zbs, inp)
+    doubled = rescale_boundary_volume(scaled.rbc, scaled.rbs, scaled.zbc, scaled.zbs, scaled)
+    np.testing.assert_allclose(doubled[0], 2.0 * np.asarray(base[0]), atol=1e-12)
+    factor = np.where(np.arange(inp.mpol) > 0, 1.1, 1.0) if rfix else 1.1
+    moved = rescale_boundary_volume(*(np.asarray(a) * factor for a in
+                                      (inp.rbc, inp.rbs, inp.zbc, inp.zbs)), inp)
+    np.testing.assert_allclose(moved[0], base[0], atol=1e-11)
+    np.testing.assert_allclose(moved[3], base[3], atol=1e-11)
 
 
 @pytest.mark.parametrize("rfix", [False, True])

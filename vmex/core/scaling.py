@@ -176,6 +176,7 @@ def scale_input(
       as ``b_scale**2`` while the profile *shape* coefficients stay as
       written;
     - ``extcur``, the external coil-group currents (A): ``b_scale * r_scale``;
+    - ``tvolume``, the boundary-volume target (m^3), when active: ``r_scale**3``;
     - ``curtor``, the net toroidal current (A): ``b_scale * r_scale``, but
       **only when** ``ncurr == 1``.  With ``ncurr == 0`` VMEC prescribes iota
       and never reads ``curtor``, so the stored value is passed through
@@ -212,6 +213,7 @@ def scale_input(
         pres_scale=inp.pres_scale * b**2,
         curtor=inp.curtor * b * r if inp.ncurr == 1 else inp.curtor,
         extcur=_times(inp.extcur, b * r),
+        tvolume=inp.tvolume * r**3 if inp.tvolume > 0.0 else inp.tvolume,
     )
     return replace(inp, **changes)
 
