@@ -24,7 +24,7 @@ from vmex.core.neoclassical import screen_transport
 from vmex.core.pwo import MappedPwOResidual
 
 # Number of field periods, and the seed deck the boundary is shaped from:
-NFP = 4
+NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Rotating-ellipse amplitude added to the circular seed. The exactly circular
@@ -37,22 +37,23 @@ MBOZ = 16
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-# MAX_MODES = [1, 2, 3]
-# MAX_NFEV = [15, 30, 50]
-# STAGE_FTOL = [1e-11, 1e-12, 1e-13]
-# ASPECT_TARGET = 5.0
-# MAGNETIC_WELL_TARGET = 0.01
+MAX_MODES = [1, 2]
+MAX_NFEV = [15, 30]
+STAGE_FTOL = [1e-11, 1e-12]
+ASPECT_TARGET = 6.0
+MAGNETIC_WELL_TARGET = 0.01
 
 # Alternative settings for a larger design space:
-MAX_MODES = [1, 3, 5, 7, 9]
-MAX_NFEV = [15, 25, 30, 40, 50]
-STAGE_FTOL = [1e-11, 1e-11, 1e-12, 1e-13, 1e-13]    # equilibrium tolerance of each stage
-ASPECT_TARGET = 3.5
-MAGNETIC_WELL_TARGET = 0.07
+# MAX_MODES = [1, 3, 5, 7]
+# MAX_NFEV = [15, 25, 30, 40]
+# STAGE_FTOL = [1e-11, 1e-11, 1e-12, 1e-13]    # equilibrium tolerance of each stage
+# ASPECT_TARGET = 3.5
+# MAGNETIC_WELL_TARGET = 0.07
 
 # Targets:
-IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
-MIRROR_LIMIT = 0.2                # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+IOTA_FLOOR = 0.42                 # minimum |iota| over the profile; use 0.31 for NFP = 1
+MIRROR_LIMIT = 0.15               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+AXIS_LIMIT = 0.2                  # maximum RMS helical excursion of the magnetic axis, metres
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
 
 # Step control. One scaled variable moves a low-order coefficient by
@@ -106,6 +107,19 @@ def mirror_excess(equilibrium_state, solver_context):
     return jnp.maximum(mirror - MIRROR_LIMIT, 0.0)
 
 
+def axis_excursion(equilibrium_state, solver_context):
+    """RMS size of the axis' n != 0 harmonics; undoes the state's sqrt(2) mode scaling."""
+    modes = solver_context.modes
+    helical = (np.asarray(modes.m) == 0) & (np.asarray(modes.n) != 0)
+    return jnp.sqrt(2 * jnp.sum(equilibrium_state.R_cos[0, helical]**2
+                                + equilibrium_state.Z_sin[0, helical]**2))
+
+
+def axis_excess(equilibrium_state, solver_context):
+    """Hinge on the axis excursion: a strongly helical axis cannot be re-solved on a finer grid."""
+    return jnp.maximum(axis_excursion(equilibrium_state, solver_context) - AXIS_LIMIT, 0.0)
+
+
 # Each term is (function, target, weight).
 pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2)
 objective_function_terms = [
@@ -114,11 +128,14 @@ objective_function_terms = [
     (iota_floor, 0.0, 100.0),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, 100.0),
     (mirror_excess, 0.0, 100.0),
+    (axis_excess, 0.0, 100.0),
 ]
 
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
-    ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
+    ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"),
+    ("axis excursion", axis_excursion, ".4f"),
+    ("max mirror", lambda state, rt: jnp.max(pwo.diagnostics_state(state, rt)[3]), ".3f"))
 monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################

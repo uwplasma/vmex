@@ -22,7 +22,7 @@ from vmex.core.pwo import MappedPwOResidual
 from vmex.core.restart import restart_state
 
 # Number of field periods, and the vacuum result this script continues:
-NFP = 4
+NFP = 2
 INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
 WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
 
@@ -43,7 +43,7 @@ MAX_NFEV = [25]
 ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
-MIRROR_LIMIT = 0.2                # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+MIRROR_LIMIT = 0.15               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
 
 # Step control. One scaled variable moves a low-order coefficient by

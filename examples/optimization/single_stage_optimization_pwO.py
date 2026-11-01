@@ -30,7 +30,7 @@ from essos.coils import Coils, CreateEquallySpacedCurves
 from essos.surfaces import surfacerzfourier_from_boundary
 
 # Input parameters.
-NFP = 4
+NFP = 2
 INPUT_FILE = Path(f"input.pwO_finite_beta_nfp{NFP}")
 WOUT_FILE = Path(f"wout_pwO_finite_beta_nfp{NFP}.nc")
 COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
@@ -74,7 +74,7 @@ mpol = max(MAX_MODE + 2, 5)
 am = np.zeros(21)
 am[:len(PRESSURE_PROFILE)] = PRESSURE_PROFILE
 inp = replace(inp, delt=0.5, ns_array=np.array([35]),
-              ftol_array=np.array([1e-12]), niter_array=np.array([2000]), pmass_type="power_series", am=am,
+              ftol_array=np.array([1e-12]), niter_array=np.array([4000]), pmass_type="power_series", am=am,
               pres_scale=1.0, ncurr=1, curtor=0.0, ac=np.zeros(21)).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 # Keep the input total flux and physical pressure calibration fixed before
@@ -106,7 +106,7 @@ if TARGET_BETA:
 plasma_problem = opt.VmecProblem.from_tuples(
     inp, plasma_terms, max_mode=MAX_MODE,
     use_ess=True, restart_from=seed, progress=not ci_smoke, forward_ftol=1e-12,
-    forward_max_iterations=2000, refine_tol=1e-12, adjoint_tol=1e-8, max_fsq_ratio=1.)
+    forward_max_iterations=4000, refine_tol=1e-12, adjoint_tol=1e-8, max_fsq_ratio=1.)
 seed_equilibrium = plasma_problem.equilibrium_from_x(plasma_problem.x0)
 seed_data = vc.surface_field_data_from_state(
     inp, seed_equilibrium.solution, runtime=seed_equilibrium.solver_context,
