@@ -201,6 +201,10 @@ def _vacuum_inputs(state: SpectralState, rt) -> tuple:
     return (*_edge_fourier(state, rt), ctor, axis_r, axis_z)
 
 
+#: NESTOR inputs linearized together by :func:`_edge_response`.
+_EDGE_RESPONSE_CHUNK = 16
+
+
 # Module scope with ``cfg`` the only static key: every per-gradient array is
 # an argument, so one executable serves a whole optimization and no trial's
 # arrays are baked into a cached trace.
@@ -229,11 +233,15 @@ def _edge_response(cfg: FreeBoundaryImplicitConfig, params, field_parameters,
     def kernel(vector):
         return cfg.vacuum_program.bsq_edge(*unflatten(vector), field)
 
-    value, jacobian = jax.vmap(
-        lambda tangent: jax.jvp(kernel, (flat,), (tangent,)),
-        out_axes=(None, -1),
-    )(jnp.eye(flat.size, dtype=flat.dtype))
-    return jax.lax.stop_gradient((value, jacobian, flat))
+    # One primal, then the tangents a chunk at a time: a full-width vmap holds
+    # every intermediate of Biot-Savart and of NESTOR's assembly once per input.
+    # Padding with zero columns keeps one chunk width, so one compiled body.
+    value, tangent_map = jax.linearize(kernel, flat)
+    chunk = min(_EDGE_RESPONSE_CHUNK, flat.size)
+    tangents = jnp.eye(flat.size + -flat.size % chunk, flat.size, dtype=flat.dtype)
+    columns = jax.lax.map(jax.vmap(tangent_map), tangents.reshape(-1, chunk, flat.size))
+    jacobian = jnp.moveaxis(columns.reshape(-1, value.size), 0, -1)[:, :flat.size]
+    return jax.lax.stop_gradient((value, jacobian.reshape(*value.shape, -1), flat))
 
 
 def _linearized_bsqvac(state, rt, response):
@@ -1043,10 +1051,14 @@ def _host_boundary_schur_adjoint(
         if radial_row + 1 < ns:
             blocks.append(upper[radial_row]); indices.append(radial_row + 1)
         indptr.append(len(blocks))
+    blocks = np.asarray(blocks)
+    del lower, middle, upper  # the scaled bands stay in ``blocks`` until tocsc
     sparse_bulk = bsr_matrix(
-        (np.asarray(blocks), np.asarray(indices), np.asarray(indptr)),
+        (blocks, np.asarray(indices), np.asarray(indptr)),
         shape=(ns * block_size, ns * block_size)).tocsc()
+    del blocks
     bulk_lu = SpluFactorization(sparse_bulk)
+    del sparse_bulk
 
     def sparse_inverse_packed(packed, *, transpose):
         values = np.asarray(packed)
