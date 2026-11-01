@@ -633,27 +633,23 @@ def _baseline_struct(cfg: FreeBoundaryImplicitConfig):
 
 def _callback(params, field_parameters, cfg):
     rcon_struct, zcon_struct = _baseline_struct(cfg)
-    return jax.pure_callback(
-        im._host_callable(_host_solve_and_mask, cfg),
+    return im._host_call(
+        cfg.implicit, im._host_callable(_host_solve_and_mask, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct),
-        params, field_parameters,
-        sharding=im._callback_sharding(cfg.implicit),
-    )
+        params, field_parameters)
 
 
 def _callback_status(params, field_parameters, cfg):
     """Return the free-boundary state, linearization data, and solve status."""
     rcon_struct, zcon_struct = _baseline_struct(cfg)
     scalar = jax.ShapeDtypeStruct((), jnp.float64)
-    return jax.pure_callback(
-        im._host_callable(_host_solve_and_mask_status, cfg),
+    return im._host_call(
+        cfg.implicit, im._host_callable(_host_solve_and_mask_status, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct, jax.ShapeDtypeStruct((), jnp.int32),
          scalar, scalar),
-        params, field_parameters,
-        sharding=im._callback_sharding(cfg.implicit),
-    )
+        params, field_parameters)
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2,))

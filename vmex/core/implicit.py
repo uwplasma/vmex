@@ -2235,6 +2235,22 @@ def _callback_sharding(cfg: ImplicitConfig):
     return jax.sharding.SingleDeviceSharding(cfg.device)
 
 
+def _host_call(cfg: ImplicitConfig, host: Callable, result_shape, *args):
+    """``pure_callback`` that does not occupy an accelerator with a host solve.
+
+    Compiling for a GPU from a callback that a GPU computation is waiting on
+    deadlocks, so a concrete call with an accelerator ``cfg.device`` dispatches
+    the callback on the CPU and moves its results back.  Under ``jax.jit`` the
+    enclosing computation owns the placement and cannot be changed from here.
+    """
+    if (getattr(cfg.device, "platform", "cpu") == "cpu"
+            or any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves(args))):
+        return jax.pure_callback(host, result_shape, *args, sharding=_callback_sharding(cfg))
+    cpu = jax.devices("cpu")[0]
+    with jax.default_device(cpu):
+        return _device_pin(cfg, jax.pure_callback(host, result_shape, *jax.device_put(args, cpu)))
+
+
 def _on_host(fn: Callable, cfg: Any, *args):
     """Run a ``pure_callback`` host body in the main thread's trace context.
 
@@ -2301,11 +2317,8 @@ def _callback_solve(params: ImplicitParams, cfg: ImplicitConfig):
     instead — see the module docstring.
     """
     try:
-        return jax.pure_callback(
-            _host_callable(_host_solve_and_mask, cfg),
-            (_state_struct(cfg), _state_struct(cfg)), params,
-            sharding=_callback_sharding(cfg),
-        )
+        return _host_call(cfg, _host_callable(_host_solve_and_mask, cfg),
+                          (_state_struct(cfg), _state_struct(cfg)), params)
     except Exception:
         if _HOST_ERROR:
             raise _HOST_ERROR.pop() from None
@@ -2316,12 +2329,10 @@ def _callback_solve_status(params: ImplicitParams, cfg: ImplicitConfig):
     """Return state, mask, status, FSQ, and FSQ/ftol without exceptions."""
     status_struct = jax.ShapeDtypeStruct((), jnp.int32)
     scalar_struct = jax.ShapeDtypeStruct((), jnp.float64)
-    return jax.pure_callback(
-        _host_callable(_host_solve_and_mask_status, cfg),
+    return _host_call(
+        cfg, _host_callable(_host_solve_and_mask_status, cfg),
         (_state_struct(cfg), _state_struct(cfg), status_struct, scalar_struct, scalar_struct),
-        params,
-        sharding=_callback_sharding(cfg),
-    )
+        params)
 
 
 def _state_struct(cfg: ImplicitConfig) -> SpectralState:
