@@ -54,3 +54,14 @@ def test_lasym_odd_m_uses_inner_half_mesh_sqrt_s() -> None:
     assert currumns[j, 0] == 0.0
     np.testing.assert_allclose(currvmns[j, 0], expected, rtol=2.0e-15)
     assert not np.isclose(currvmns[j, 0], legacy, rtol=1.0e-8)
+
+
+def test_full_mesh_bsubs_is_not_averaged_as_half_mesh() -> None:
+    """A full-mesh ``bsubsmns`` enters on its own surface, without a half-cell shift."""
+    ns, s = 11, np.linspace(0, 1, 11)
+    zeros = np.zeros((ns, 2))
+    bsubsmns = np.stack((np.sqrt(s), s), axis=1)  # m = 1 and m = 2 radial scalings
+    _, currvmnc, _, _ = compute_currents(
+        bsubsmns=bsubsmns, bsubumnc=zeros, bsubvmnc=zeros,
+        xm_nyq=np.asarray([1, 2]), xn_nyq=np.asarray([0, 0]))
+    np.testing.assert_allclose(currvmnc[2:-1]*MU0, -bsubsmns[2:-1]*[1, 2], rtol=1e-13)

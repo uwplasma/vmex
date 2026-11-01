@@ -172,11 +172,7 @@ def _current_terms(bs, bu, bv, xm_nyq, xn_nyq, *, shalf, sfull, ohs, ns):
     t3 = np.zeros((ns, mn))
     odd = (np.asarray(xm_nyq).astype(int) % 2) == 1
     for j in range(1, ns - 1):  # Fortran js = 2, ns-1
-        t1[j] = np.where(
-            odd,
-            0.5 * (shalf[j + 1] * bs[j + 1] + shalf[j] * bs[j]) / sfull[j],
-            0.5 * (bs[j + 1] + bs[j]),
-        )
+        t1[j] = bs[j]  # bsubs is already on the full mesh
         bu0 = bu[j] / shalf[j]
         bu1 = bu[j + 1] / shalf[j + 1]
         t2[j] = np.where(
