@@ -649,7 +649,7 @@ def j_dot_B_redl(
 
     # Factor of ELEMENTARY_CHARGE converts temperatures from eV to J:
     pref = -geom.G * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
-    # Density gradients of each species; Redl eq (17) has p*dln(ne), the constant-Zeff limit:
+    # Landreman 2022 (A1), Redl eq (2) with separate gradients; ni=ne/Zeff assumes one ion species.
     dnds_term = pref * (Te_s * d_ne_d_s + Ti_s * d_ni_d_s) * L31
     dTeds_term = pref * pe_s * (L31 + L32) * (d_Te_d_s / Te_s)
     dTids_term = pref * pi_s * (L31 + L34 * alpha) * (d_Ti_d_s / Ti_s)

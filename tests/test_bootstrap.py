@@ -337,7 +337,7 @@ def test_j_dot_B_redl_formula_parity_zeff():
 
 
 def test_constant_zeff_keeps_the_published_density_term():
-    """Redl eq (17) holds at constant Zeff: dni/ni = dne/ne, so p*dln(ne) is recovered."""
+    """Landreman 2022 (A1), Redl eq (2) with separate gradients: at constant Zeff dni/ni = dne/ne."""
     profiles = bs.KineticProfiles(
         ne_coeffs=4.13e20 * np.array([1, 0, 0, 0, 0, -1.0]), Te_coeffs=12.0e3 * np.array([1, -1.0]),
         Ti_coeffs=11.0e3 * np.array([1, -0.9]), Zeff_coeffs=np.array([1.8]))
