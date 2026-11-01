@@ -274,6 +274,13 @@ def rescale_boundary_volume(rbc, rbs, zbc, zbs, inp: VmecInput):
     with ``V(c) = A c^2 + B c^3`` solved exactly by Newton's method, where
     VMEC2000 uses the Pappus estimate ``c = sqrt(tvolume/V)``.  Traceable:
     the scale factor carries the derivative of the volume constraint.
+
+    An optimizer's raw boundary coefficients therefore hold a null direction:
+    the overall scale of what gets rescaled (the ``m > 0`` harmonics with
+    ``lvolume_rfix``, every harmonic otherwise) does not change the solved
+    boundary.  Trust-region least squares tolerates it; hold one such
+    coefficient fixed for a nonsingular Jacobian (a fixed ``RBC(0,0)`` already
+    does so without ``lvolume_rfix``).
     """
     mpol, ntor, nfp = int(inp.mpol), int(inp.ntor), int(inp.nfp)
     rbc, rbs, zbc, zbs = (jnp.asarray(a, dtype=float) for a in (rbc, rbs, zbc, zbs))
