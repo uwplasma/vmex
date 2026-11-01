@@ -49,7 +49,10 @@ profile shapes do not change. Dimensional quantities scale as:
 
 For inputs, pressure scales once through `PRES_SCALE`; `AM`, `AM_AUX_F`,
 current/iota profiles, and every normalized spline coordinate remain shape
-data. `CURTOR` scales only in prescribed-current mode.
+data. `CURTOR` scales only in prescribed-current mode. With `GAMMA != 0` the
+pressure profile is a mass (`p = mass / V'^GAMMA`), so `PRES_SCALE` scales as
+$B_s^{2-\gamma}$ (independent of $R_s$) and `scale_wout` applies the same factor
+to `AM`/`AM_AUX_F`.
 
 A wout records no `PRES_SCALE`, so `scale_wout` puts $B_s^2$ into the
 coefficients it echoes: every `AM_AUX_F` knot value, and the entries of `AM`
