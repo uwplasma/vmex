@@ -587,6 +587,32 @@ def test_host_callback_is_not_pinned_across_platforms():
     same = im._callback_sharding(
         dataclasses.replace(cfg, device=jax.devices(here)[0]))
     assert isinstance(same, jax.sharding.SingleDeviceSharding)
+def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
+    """A concrete call on a GPU config dispatches on the CPU; a traced one cannot."""
+    import dataclasses
+
+    from vmex.core import implicit as im
+
+    class _FakeGpu:
+        platform = "gpu"
+
+    cfg = dataclasses.replace(
+        im.make_config(VmecInput.from_file(DATA / "input.solovev"), multigrid=True),
+        device=_FakeGpu())
+    pinned = []
+    monkeypatch.setattr(im, "_device_pin", lambda _, tree: pinned.append(
+        jax.config.jax_default_device) or tree)
+    shape = jax.ShapeDtypeStruct((2,), jnp.float64)
+    x = jnp.ones(2)
+    double = lambda v: np.asarray(v) * 2.0  # noqa: E731
+
+    np.testing.assert_array_equal(im._host_call(cfg, double, shape, x), [2.0, 2.0])
+    assert pinned == [jax.devices("cpu")[0]]
+    if jax.default_backend() == "cpu":
+        jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
+        assert len(pinned) == 1
+
+
 def test_host_callback_reuses_main_thread_executables():
     """A lane traced on the main thread is not traced again in a callback.
 
