@@ -16,7 +16,7 @@ Buller & Drevlak, Phys. Plasmas 29, 082501 (2022).
   ``<J.B>`` formula (eqs. 10-16, 19-21 with the Sauter 18b-18e
   collisionalities), transcribed verbatim from simsopt ``j_dot_B_Redl``
   including its quasisymmetry isomorphism: ``iota -> iota - nfp*helicity_n``
-  everywhere iota appears, ``G`` unshifted.
+  everywhere iota appears, with the prefactor ``G -> G + N*I``.
 - :class:`KineticProfiles` / :func:`profile_value_and_dds` — polynomial
   ``ne/Te/Ti/Zeff`` profiles in ``s`` (lowest order first, simsopt
   ``ProfilePolynomial`` convention), value + analytic d/ds via Horner.
@@ -647,7 +647,8 @@ def j_dot_B_redl(
         / (1 + 0.004 * nu_i * nu_i * (f_t ** 6))
 
     # Factor of ELEMENTARY_CHARGE converts temperatures from eV to J:
-    pref = -geom.G * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
+    # Landreman 2022 (A1): the quasisymmetric prefactor is G + N*I, not G.
+    pref = -(geom.G + helicity_N * geom.I) * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
     dnds_term = pref * (ne_s * Te_s + ni_s * Ti_s) * L31 * (d_ne_d_s / ne_s)
     dTeds_term = pref * pe_s * (L31 + L32) * (d_Te_d_s / Te_s)
     dTids_term = pref * pi_s * (L31 + L34 * alpha) * (d_Ti_d_s / Ti_s)
