@@ -650,6 +650,20 @@ def test_bloat_needs_prescribed_current_as_in_vmec2000():
         prepare_runtime(inp, resolution_from_input(inp))
 
 
+def test_bloat_scales_phiedge_as_vmec2000_readin_does():
+    """readin.f: ``phiedge = phiedge*bloat``. Reference values are from xvmec2000 on this deck."""
+    from vmex.core.optimize import solve_equilibrium
+
+    inp = replace(
+        VmecInput.from_file(Path(__file__).parents[1] / "examples" / "data" / "input.DSHAPE"),
+        ncurr=1, bloat=1.5, curtor=1.0e5, ac=np.array([1.0, -1.0]), ns_array=np.array([16, 51]),
+        niter_array=np.array([2000, 8000]), ftol_array=np.array([1e-8, 1e-12]))
+    wout = solve_equilibrium(inp, verbose=False).wout
+    np.testing.assert_allclose(np.asarray(wout.phi)[-1], 1.5, rtol=1e-12)
+    np.testing.assert_allclose(float(wout.betatotal), 0.009819100644525736, rtol=1e-9)
+    np.testing.assert_allclose(float(wout.wb), 0.1367896735406013, rtol=1e-9)
+
+
 @pytest.mark.parametrize("ending", [
     "\n/\n", "\n/", " /\n", " / ! end of INDATA\n", "\n&END\n", "\n $end\n",
     " ! a comment with a / slash\n/\n",
