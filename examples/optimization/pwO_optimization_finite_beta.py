@@ -2,11 +2,12 @@
 """Continue a vacuum pwO boundary to finite beta, with p proportional to 1-s.
 
 Run ``pwO_optimization.py`` first with ASPECT_TARGET = 6.0 and
-MAGNETIC_WELL_TARGET = 0.01: from a vacuum magnetic hill (its default, well
-about -0.05) this continuation does not reach a well. Pressure is calibrated at fixed toroidal
-flux, then the workflow is that of the vacuum example with beta and Mercier
-stability added to the residual vector. NEO compares the vacuum start at this
-pressure with the result. Requires vmex[neoclassical].
+MAGNETIC_WELL_TARGET = 0.01, plus ELONGATION_LIMIT = 6.0 at NFP 1: from a
+vacuum magnetic hill (its default, well about -0.05) this continuation does
+not reach a well. Pressure is calibrated at fixed toroidal flux, then the
+workflow is that of the vacuum example with beta and Mercier stability added
+to the residual vector. NEO compares the vacuum start at this pressure with
+the result. Requires vmex[neoclassical].
 """
 
 import os
@@ -55,7 +56,7 @@ FTOL_ARRAY = np.array([1e-12])
 ASPECT_TARGET = 6.0
 ASPECT_WEIGHT = 10.0
 IOTA_FLOOR = 0.31 if NFP == 1 else 0.42  # minimum |iota| over the profile
-IOTA_WEIGHT = 1.0e3
+IOTA_WEIGHT = 1.0e4
 MAGNETIC_WELL_FLOOR = 0.01
 MAGNETIC_WELL_WEIGHT = 1.0e3
 MERCIER_S_MIN = 0.2               # DMerc inward of this is set by the radial grid
