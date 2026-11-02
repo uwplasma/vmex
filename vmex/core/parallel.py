@@ -76,12 +76,14 @@ class ProcessWorkers:
     are pinned to each worker from the cores this process may use, which also
     sizes XLA's pool.  ``gpus`` lists device ids dealt round-robin, so
     ``gpus=[0, 1], workers=4`` gives two workers per GPU.  A script that
-    creates this must guard it with ``if __name__ == "__main__"``.
+    creates this must guard it with ``if __name__ == "__main__"``.  By default
+    there is one worker per GPU in ``gpus``, otherwise one per ``threads`` cores.
     """
 
-    def __init__(self, build: Callable[[], Callable], workers: int, *,
-                 threads: int = 1, gpus: Sequence[int] = (),
+    def __init__(self, build: Callable[[], Callable], workers: int | None = None,
+                 *, threads: int = 1, gpus: Sequence[int] = (),
                  cache_dir: Any = None) -> None:
+        workers = workers or len(gpus) or max(available_cpus() // threads, 1)
         cores: list[list[int]] = []
         if not gpus and hasattr(os, "sched_getaffinity"):
             free = sorted(os.sched_getaffinity(0))
@@ -96,6 +98,7 @@ class ProcessWorkers:
             initargs=(build, cores, gpu, cache_dir, slots))
 
     def map(self, items: Iterable[Any]) -> list[Any]:
+        """Apply the workers' function to ``items``, keeping their order."""
         return list(self._pool.map(_call_worker, items))
 
     def __enter__(self) -> "ProcessWorkers":

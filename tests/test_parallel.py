@@ -213,9 +213,11 @@ def test_process_workers_pin_cores_and_match_serial_jacobian():
 
 def test_process_workers_deal_gpus_and_refuse_oversubscription(tmp_path):
     with parallel.ProcessWorkers(
-        _build_gpu_env, 2, gpus=[7], cache_dir=tmp_path
+        _build_gpu_env, gpus=[7], cache_dir=tmp_path
     ) as pool:
         assert pool.map([0, 1]) == ["7", "7"]
+    with parallel.ProcessWorkers(_build_doubled, threads=10**6) as pool:
+        assert pool.map([1.0])[0][0] == 2.0
     if hasattr(os, "sched_getaffinity"):
         with pytest.raises(ValueError, match="exceeds"):
             parallel.ProcessWorkers(_build_doubled, 10**6)
