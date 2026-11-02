@@ -177,7 +177,9 @@ VMEC releases the m=1 constrained `Z_sin` pair combination (`Z_cos` on
 lasym) once `fsqz < 1e-6`, so it has no equation at the root and a cold solve
 leaves it wherever its own path did. The linearization holds it fixed, so every
 fixed-boundary solve of a config keeps it at the config's first converged
-state, and the Newton anchor puts the evolved dofs back on the root. Before
+state, and the Newton anchor puts the evolved dofs back on the root. Where
+that anchor stalls, far from the reference, the solve's own state is anchored
+instead. Before
 this hold, on `li383_low_res` at `ftol = 1e-13`, the implicit mean-iota
 derivative differed from cold re-solve differences by 1.0 % along RBC(1,1)
 and 2.8 % along ZBS(-1,1). On the nfp=2 seed (mpol = ntor = 5, ns = 16) an

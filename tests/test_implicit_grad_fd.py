@@ -174,6 +174,33 @@ def test_li383_resolve_fd_matches_the_implicit_derivative():
             assert rel < 1e-4
 
 
+def test_a_stalled_held_anchor_falls_back_to_the_solve_state(monkeypatch):
+    """Far from the reference the held family can leave Newton's basin; the
+    solve's own state is then anchored, as before the hold."""
+    inp = VmecInput.from_file(str(DATA_DIR / "input.solovev"))
+    cfg = im.make_config(inp, ftol=1e-10, max_iterations=2000)
+    p0 = im.params_from_input(inp)
+    im._host_solve_and_mask_impl(cfg, p0)  # sets the reference
+    p1 = dataclasses.replace(p0, phiedge=p0.phiedge * 1.01)
+    solved = im._host_solve(cfg, p1).state
+    starts, original = [], im._refine_fixed_point
+
+    def refine(cfg_, params, state, mask):
+        starts.append(state)
+        out = original(cfg_, params, state, mask)
+        if len(starts) == 1:  # pretend the held start stalled
+            hit = im._LAST_REFINED[cfg_]
+            im._LAST_REFINED[cfg_] = (hit[0], hit[1], True)
+        return out
+
+    monkeypatch.setattr(im, "_refine_fixed_point", refine)
+    im._host_solve_and_mask_impl(cfg, p1)
+    assert len(starts) == 2
+    for a, b in zip(jax.tree.leaves(starts[1]), jax.tree.leaves(solved)):
+        np.testing.assert_array_equal(a, b)
+    assert not im._LAST_REFINED[cfg][2]
+
+
 # ---------------------------------------------------------------------------
 # 8. typed errors through pure_callback (zero-crash policy)
 # ---------------------------------------------------------------------------

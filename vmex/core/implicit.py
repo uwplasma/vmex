@@ -90,8 +90,9 @@ equation at the root, so a cold solve leaves it wherever its own path did,
 about 0.5 per unit boundary change on ``li383_low_res``.  The linearization
 holds it fixed, so every solve of a config keeps it at the config's first
 converged state (``_held_directions``) and the anchor puts the evolved dofs
-back on the root.  A re-solve FD then measures the map the adjoint
-differentiates.  Before, on ``li383_low_res``, ``d(mean iota)/d(RBC(1,1))``
+back on the root; where that anchor stalls, far from the reference, the
+solve's own state is anchored as before.  Near the reference a re-solve
+FD then measures the map the adjoint differentiates.  Before, on ``li383_low_res``, ``d(mean iota)/d(RBC(1,1))``
 differed from re-solves by 1.0%, ``d(iota_edge)/d(RBC(-1,1))`` changed sign,
 and an interior coefficient objective on the nfp=2 seed was 6.5x off; now
 all three agree to within 4e-6 (``test_li383_resolve_fd_matches_the_implicit_derivative``).
@@ -2073,7 +2074,8 @@ def _held_directions(cfg: ImplicitConfig, mask, result) -> SpectralState:
     config's first converged state makes the forward map the one the adjoint
     differentiates: on the nfp=2 seed (mpol = ntor = 5, ns = 16) a re-solve
     FD of ``mean(Z_sin[8]**2)`` in ``RBC(1,1)`` was 0.154 of the adjoint.
-    The anchor below then puts the evolved dofs back on the root.
+    The anchor below then puts the evolved dofs back on the root; where it
+    cannot, the solve's own state is anchored instead, as before.
     """
     if bool(result.converged):
         _GAUGE_REFERENCE.setdefault(cfg, result.state)
@@ -2160,10 +2162,17 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # beside the parameters before refining: on cfg.device, or where the
     # callback payload is committed when no device is carried.
     home = cfg.device if cfg.device is not None else _params_committed_device(params)
-    state = _refine_fixed_point(
-        cfg, params, state if home is None else jax.device_put(state, home),
-        _device_pin(cfg, jax.tree.map(jnp.asarray, mask)))
-    return as_np(state), mask
+    pinned_mask = _device_pin(cfg, jax.tree.map(jnp.asarray, mask))
+    for start in (state, result.state):
+        refined = _refine_fixed_point(
+            cfg, params, start if home is None else jax.device_put(start, home),
+            pinned_mask)
+        if start is result.state or not _LAST_REFINED[cfg][2]:
+            break
+        # Far from the reference its family can leave Newton's basin (the
+        # scalar QA example's first long step stalled); keep this solve's own.
+        _LAST_REFINED.pop(cfg)
+    return as_np(refined), mask
 
 
 def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
