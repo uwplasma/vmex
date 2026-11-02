@@ -140,6 +140,12 @@ def make_free_boundary_config(
     Newton-refined until ``|F| <= refine_tol`` and differentiated there.  A
     solve the anchor cannot land is status 3.  ``inf`` skips the anchor and
     restores the unanchored behaviour.
+
+    Memory needs no tuning: internal chunk widths follow from the problem size.
+    ``schur_probe_chunk_size`` is advanced: it sets how many edge columns of
+    the Schur adjoint are probed together.  The default 1 uses least memory;
+    raise it only to trade memory for speed on a machine with room to spare.
+    The gradient does not depend on it beyond round-off.
     """
     if not inp.lfreeb:
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
@@ -203,6 +209,21 @@ def _vacuum_inputs(state: SpectralState, rt) -> tuple:
     return (*_edge_fourier(state, rt), ctor, axis_r, axis_z)
 
 
+def _map_columns(function, columns):
+    """``function`` over the last axis, ``ceil(sqrt(n))`` columns at a time.
+
+    The width comes from the problem alone, so peak memory needs no tuning and
+    no machine changes the executable.  Padding with zero columns keeps one
+    width, so one compiled body; ``function`` must be linear.
+    """
+    width = auto_chunk_size(columns.shape[-1])
+    moved = jnp.moveaxis(columns, -1, 0)
+    padded = jnp.pad(moved, [(0, -moved.shape[0] % width)] + [(0, 0)] * (moved.ndim - 1))
+    mapped = jax.lax.map(jax.vmap(function), padded.reshape(-1, width, *moved.shape[1:]))
+    stacked = mapped.reshape(-1, *mapped.shape[2:])[:moved.shape[0]]
+    return jnp.moveaxis(stacked, 0, -1)
+
+
 # Module scope with ``cfg`` the only static key: every per-gradient array is
 # an argument, so one executable serves a whole optimization and no trial's
 # arrays are baked into a cached trace.
@@ -232,15 +253,10 @@ def _edge_response(cfg: FreeBoundaryImplicitConfig, params, field_parameters,
         return cfg.vacuum_program.bsq_edge(*unflatten(vector), field)
 
     # One primal, then the tangents a chunk at a time: a full-width vmap holds
-    # every intermediate of Biot-Savart and of NESTOR's assembly once per input.
-    # Padding with zero columns keeps one chunk width, so one compiled body.  The
-    # width comes from the problem alone, so no machine changes the executable.
+    # every intermediate of Biot-Savart and NESTOR's assembly once per input.
     value, tangent_map = jax.linearize(kernel, flat)
-    chunk = auto_chunk_size(flat.size)
-    tangents = jnp.eye(flat.size + -flat.size % chunk, flat.size, dtype=flat.dtype)
-    columns = jax.lax.map(jax.vmap(tangent_map), tangents.reshape(-1, chunk, flat.size))
-    jacobian = jnp.moveaxis(columns.reshape(-1, value.size), 0, -1)[:, :flat.size]
-    return jax.lax.stop_gradient((value, jacobian.reshape(*value.shape, -1), flat))
+    jacobian = _map_columns(tangent_map, jnp.eye(flat.size, dtype=flat.dtype))
+    return jax.lax.stop_gradient((value, jacobian, flat))
 
 
 def _linearized_bsqvac(state, rt, response):
@@ -1249,7 +1265,7 @@ def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
         lambda bsq: pack(_projected_residual_lane(
             z, params, field_parameters, frozen, rcon0, zcon0, dof_mask, bsq,
             None, cfg=cfg, formulation="raw")), value)
-    columns = jax.vmap(force_of_pressure, in_axes=-1, out_axes=-1)(jacobian)
+    columns = _map_columns(force_of_pressure, jacobian)
     columns = columns.reshape(-1, columns.shape[-1])
 
     def inputs(packed):
@@ -1266,7 +1282,7 @@ def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
         solved = block_thomas_solve(factors, scaled[..., None])[..., 0]
         return (solved * column_scale).ravel()
 
-    solved = jax.vmap(bulk_inverse, in_axes=-1, out_axes=-1)(columns)
+    solved = _map_columns(bulk_inverse, columns)
     capacitance = jnp.eye(rows.shape[0], dtype=rows.dtype) + rows @ solved
     return solved, rows, jax.scipy.linalg.lu_factor(capacitance)
 
@@ -1531,14 +1547,13 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0,
 
 
 def _bulk_probe_chunk(cfg, mask) -> int:
-    """Bulk-block probe chunk of the anchor and the Schur adjoint: one block.
+    """Bulk-block probe chunk of the anchor and the Schur adjoint: one field.
 
-    Each probe differentiates a three-surface kernel, so a full block of
-    cotangents is small; on the single-stage deck (block 150) the blocks
-    assemble in 1.1 s against 2.6 s at the fixed-boundary refinement's
-    ``ceil(sqrt(block))`` and 6.6 s one column at a time.
+    Each probe differentiates a three-surface kernel.  At 8/8/31 one field of
+    cotangents takes half the peak of a full block in the same time, and it
+    divides the block, so there is no separate tail to compile.
     """
-    return len(im._active_state_fields(cfg.implicit)) * int(mask.R_cos.shape[1])
+    return int(mask.R_cos.shape[1])
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
