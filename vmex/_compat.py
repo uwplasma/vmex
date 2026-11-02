@@ -40,17 +40,19 @@ _CACHE_ATIME_SUFFIX = "-atime"
 
 
 def _default_cache_max_size(path: str | None = None) -> int:
-    """Bytes to retain in the persistent compilation cache.
+    """Bytes of executables VMEX keeps in the persistent compilation cache.
 
-    The bound has to be finite: JAX takes its cross-process cache lock only
-    when eviction is enabled, so an unbounded cache lets concurrent VMEX runs
-    race writing the same executable.  It also has to be large.  One
-    free-boundary or single-stage executable is tens of megabytes and a single
-    optimization walks a whole family of them, so the historical 1 GiB bound
-    sat permanently at its cap and evicted the executables the next stage
-    asked for -- every run paid a cold compile that the cache existed to
-    avoid.  Scale with the filesystem that holds the cache and cap at a size
-    any current workstation can spare.
+    VMEX enforces the bound itself, once per process (:func:`_prune_cache_entries`),
+    and leaves JAX's own eviction off.  JAX's bounded cache takes a
+    directory-wide lock and re-scans the directory on every write, which made
+    a cold first gradient on a bundled deck take 40.0 s instead of 22.9 s.
+
+    The bound has to be large.  One free-boundary or single-stage executable
+    is tens of megabytes and a single optimization walks a whole family of
+    them, so the historical 1 GiB bound sat permanently at its cap and evicted
+    the executables the next stage asked for -- every run paid a cold compile
+    that the cache existed to avoid.  Scale with the filesystem that holds the
+    cache and cap at a size any current workstation can spare.
     """
     try:
         import shutil
@@ -62,7 +64,8 @@ def _default_cache_max_size(path: str | None = None) -> int:
     return int(min(_CACHE_SIZE_CEILING, max(_CACHE_SIZE_FLOOR, scaled)))
 
 
-def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
+def _prune_cache_entries(cache_dir: str, max_entries: int,
+                         max_bytes: int | None = None) -> int:
     """Drop the least recently used cache entries above ``max_entries``.
 
     JAX's LRU cache re-scans the whole cache directory on every *write*: each
@@ -88,6 +91,12 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
     1,024 (10.2 s, against 9.7 s with the plain cap); and the worst case, 4,026
     recent entries, costs 17.9 s, where a fixed 4,096 cap costs 19.0 s on any
     mature cache (a write scans 99 ms at 4,026 entries against 26 ms at 1,024).
+
+    ``max_bytes`` bounds the directory's size as well (``None``: no byte
+    bound), dropping the oldest entries first.  JAX's own byte bound is off
+    by default (see :func:`_default_cache_max_size`), so this is the only one.
+    Entries JAX did not stamp with an atime sidecar, which is every entry
+    when its eviction is off, are dated by their file times.
     Returns the number of entries removed.
     """
     try:
@@ -95,7 +104,8 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
 
         path = pathlib.Path(cache_dir)
         entries = list(path.glob(f"*{_CACHE_ENTRY_SUFFIX}"))
-        if len(entries) <= max_entries:
+        sizes = {entry: entry.stat().st_size for entry in entries} if max_bytes else {}
+        if len(entries) <= max_entries and sum(sizes.values()) <= (max_bytes or 0):
             return 0
     except Exception:  # missing directory, unreadable filesystem
         return 0
@@ -119,6 +129,11 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
             try:
                 return int.from_bytes(sidecar.read_bytes(), "little")
             except Exception:
+                pass
+            try:
+                stamp = entry.stat()
+                return max(stamp.st_mtime_ns, stamp.st_atime_ns)
+            except OSError:
                 return 0
 
         import time
@@ -128,6 +143,13 @@ def _prune_cache_entries(cache_dir: str, max_entries: int) -> int:
         recent_cutoff = time.time_ns() - _CACHE_RECENT_SECONDS * 1_000_000_000
         recent = sum(1 for entry in ordered if atimes[entry] >= recent_cutoff)
         keep = max(max_entries, min(recent, 4 * max_entries))
+        if max_bytes:
+            held = 0
+            for index, entry in enumerate(ordered[:keep]):
+                held += sizes[entry]
+                if held > max_bytes:
+                    keep = index
+                    break
         for entry in ordered[keep:]:
             sidecar = entry.with_name(
                 entry.name[: -len(_CACHE_ENTRY_SUFFIX)] + _CACHE_ATIME_SUFFIX
@@ -443,7 +465,8 @@ def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None
         # re-scans it (see _prune_cache_entries).  0 disables the bound.
         max_entries = int(_env("CACHE_MAX_ENTRIES", str(_CACHE_MAX_ENTRIES)))
         if max_entries > 0:
-            _prune_cache_entries(cache_dir, max_entries)
+            _prune_cache_entries(cache_dir, max_entries,
+                                 _default_cache_max_size(cache_dir))
     except Exception:
         pass
     try:
@@ -487,11 +510,15 @@ def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None
     except Exception:
         pass
     try:
-        # JAX's file cache takes its cross-process lock only when eviction is
-        # enabled.  A finite default therefore prevents concurrent VMEX runs
-        # from writing the same executable at once, as well as bounding disk.
-        max_size = _env("COMPILATION_CACHE_MAX_SIZE",
-                        str(_default_cache_max_size(cache_dir)))
+        # JAX's own eviction stays off (its default, -1): with it on, every
+        # cache write scans the directory under a lock (first gradient of a
+        # bundled deck, cold: 40.0 s against 22.9 s).  VMEX bounds the
+        # directory itself in _prune_cache_entries.  Without eviction JAX
+        # writes entries without its lock; a reader that meets a half-written
+        # entry warns and recompiles, and every entry is a valid executable
+        # for its key.  VMEX_COMPILATION_CACHE_MAX_SIZE=<bytes> turns JAX's
+        # bounded cache back on.
+        max_size = _env("COMPILATION_CACHE_MAX_SIZE")
         if max_size:
             jax_module.config.update("jax_compilation_cache_max_size", int(max_size))
     except Exception:
