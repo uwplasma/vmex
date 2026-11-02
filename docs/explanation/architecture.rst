@@ -163,8 +163,9 @@ implicit-gradient work to the CPU when VMEX owns placement
 (:func:`~vmex.core.device.resolve_implicit_device`), because the gradient graph
 is launch-bound on an accelerator; low-level :func:`~vmex.core.implicit.run`
 follows JAX placement unless given ``device="auto"``. Free-boundary implicit
-solves are the exception: above the forward-solve size rule ``"auto"`` takes the
-GPU, whose single gradients were measured faster at the same accuracy. Mirror solves, whose
+solves are the exception: above the forward-solve size rule ``"auto"`` runs eager
+gradients on the GPU, measured faster at the same accuracy, and reruns on the CPU
+if the GPU runs out of memory. Mirror solves, whose
 SciPy control loop calls JAX repeatedly, default to the CPU
 (:func:`~vmex.core.device.resolve_mirror_device`). Explicit devices and JAX
 placement contexts are honored on all three paths.

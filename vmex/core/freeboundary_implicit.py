@@ -27,6 +27,7 @@ from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax._src.core import is_concrete
 from jax.flatten_util import ravel_pytree
 from scipy.sparse import bsr_matrix
 from scipy.sparse.linalg import LinearOperator, gcrotmk
@@ -36,7 +37,7 @@ from solvax import (
 from solvax import gmres as _solvax_gmres
 
 from . import implicit as im
-from .device import AUTO, gpu_fits_free_boundary, recommended_device, resolve_implicit_device
+from .device import AUTO, recommended_device, resolve_implicit_device
 from .freeboundary import (
     _edge_fourier,
     _presf_ns_scale,
@@ -74,7 +75,7 @@ class FreeBoundaryImplicitConfig:
     adjoint_fail: str = "error"
     schur_probe_chunk_size: int = 1
     vacuum_program: Any = None
-    #: GPU sibling that ``device="auto"`` uses for concrete calls.
+    #: GPU sibling that ``device="auto"`` uses for eager calls.
     concrete: Any = None
 
     @property
@@ -109,12 +110,15 @@ def make_free_boundary_config(
     actual current/coil parameters to :func:`solve_free_boundary_implicit`.
     ``external_field`` here is the concrete reference used to fix resolution.
     ``device="auto"`` on a GPU host, unless the process pins JAX placement,
-    takes the GPU when :func:`~vmex.core.device.recommended_device` does and
-    the CPU otherwise: measured warm gradients run faster on the GPU from
-    mpol=ntor=5, ns=16 upward and match the CPU to 2e-10, at a first-call
-    compile about twice as slow. It stays on the CPU when the estimated memory
-    does not fit the GPU and under ``jax.jit``, which cannot move the host solve
-    off a GPU. Pass ``device="cpu"`` for one-shot gradients.
+    runs eager values and gradients on the GPU when
+    :func:`~vmex.core.device.recommended_device` does and on the CPU otherwise;
+    under ``jax.jit``, which cannot move the host solve off a GPU, it stays on
+    the CPU.  Measured warm gradients run faster on the GPU from mpol=ntor=5,
+    ns=16 upward and match the CPU to 2e-10.  No memory estimate is made: a
+    solve that runs out of GPU memory warns and reruns on the CPU, which that
+    configuration keeps.  Pass ``device="cpu"`` for a few one-shot gradients,
+    which do not repay the GPU's slower first compile, or on a nearly full
+    shared GPU; ``device="gpu"`` forces the GPU outside ``jit``.
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
@@ -158,8 +162,8 @@ def make_free_boundary_config(
     resolution = free_boundary_resolution(inp, external_field, ns=ns)
     solve_device = resolve_implicit_device(device, resolution)
     auto_gpu = None
-    if (device == AUTO and solve_device is not None and recommended_device(resolution) == "gpu"
-            and gpu_fits_free_boundary(resolution, jax.devices("gpu")[0])):
+    if (device == AUTO and solve_device is not None and jax.default_backend() == "gpu"
+            and recommended_device(resolution) == "gpu"):
         auto_gpu = jax.devices("gpu")[0]
     cfg = im.make_config(
         inp, ns=resolution.ns, ftol=ftol, max_iterations=max_iterations,
@@ -1811,14 +1815,32 @@ solve_free_boundary_implicit_status.defvjp(_solve_status_fwd, _solve_status_bwd)
 
 
 def _auto_placed(solve):
-    """Take ``device="auto"``'s GPU only for a concrete call; jit stays on the CPU."""
+    """Run ``device="auto"``'s GPU sibling for eager calls, gradients included.
+
+    Under ``jax.jit`` the host solve cannot leave the GPU, so it stays on the
+    CPU.  Whether a solve fits is left to the allocator, the only party that
+    sees XLA's real buffers, the device and other processes on it: a solve
+    that exhausts GPU memory warns and reruns on the CPU, which that
+    configuration then keeps.
+    """
     @functools.wraps(solve)
     def placed(params, field_parameters, cfg):
-        traced = any(isinstance(leaf, jax.core.Tracer)
-                     for leaf in jax.tree.leaves((params, field_parameters)))
-        return solve(params, field_parameters, cfg if traced or cfg.concrete is None else cfg.concrete)
+        leaves = jax.tree.leaves((params, field_parameters))
+        if cfg.concrete is None or cfg in _GPU_EXHAUSTED or not all(map(is_concrete, leaves)):
+            return solve(params, field_parameters, cfg)
+        try:
+            return solve(params, field_parameters, cfg.concrete)
+        except Exception as error:  # XLA's JaxRuntimeError, or a callback's wrapping of it
+            if "RESOURCE_EXHAUSTED" not in str(error):
+                raise
+        warnings.warn("device='auto': the free-boundary solve ran out of GPU memory; this "
+                      "configuration uses the CPU from now on.", RuntimeWarning, stacklevel=2)
+        _GPU_EXHAUSTED.add(cfg)
+        return solve(params, field_parameters, cfg)
     return placed
 
+
+_GPU_EXHAUSTED: set[FreeBoundaryImplicitConfig] = set()
 
 solve_free_boundary_implicit = _auto_placed(solve_free_boundary_implicit)
 solve_free_boundary_implicit_status = _auto_placed(solve_free_boundary_implicit_status)

@@ -617,10 +617,10 @@ def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
     jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
 
 
-@pytest.mark.parametrize("recommended, fits, chosen", [
-    ("gpu", True, "gpu"), ("gpu", False, None), ("cpu", True, None)])
-def test_free_boundary_auto_takes_the_gpu_only_when_large_and_fitting(
-        monkeypatch, recommended, fits, chosen):
+@pytest.mark.parametrize("recommended, backend, chosen", [
+    ("gpu", "gpu", "gpu"), ("gpu", "tpu", None), ("cpu", "gpu", None)])
+def test_free_boundary_auto_takes_the_gpu_only_when_large(
+        monkeypatch, recommended, backend, chosen):
     import dataclasses
     from types import SimpleNamespace
 
@@ -631,7 +631,7 @@ def test_free_boundary_auto_takes_the_gpu_only_when_large_and_fitting(
     monkeypatch.setattr(fbi.jax, "devices", lambda _: ["gpu"])
     monkeypatch.setattr(fbi, "resolve_implicit_device", lambda *_: "cpu")
     monkeypatch.setattr(fbi, "recommended_device", lambda _: recommended)
-    monkeypatch.setattr(fbi, "gpu_fits_free_boundary", lambda *_: fits)
+    monkeypatch.setattr(fbi.jax, "default_backend", lambda: backend)
     monkeypatch.setattr(fbi, "free_boundary_resolution", lambda *_, **__: base.resolution)
     monkeypatch.setattr(fbi, "_vacuum_program", lambda _: "program")
     monkeypatch.setattr(im, "make_config", lambda _, **k: dataclasses.replace(base, device=k["device"]))
@@ -641,32 +641,30 @@ def test_free_boundary_auto_takes_the_gpu_only_when_large_and_fitting(
     assert (made.concrete and made.concrete.implicit.device) == chosen
 
 
-def test_free_boundary_auto_gpu_is_for_concrete_calls_only():
-    from types import SimpleNamespace
-
+def test_free_boundary_auto_gpu_is_for_eager_calls_and_falls_back(monkeypatch):
+    """Eager values and gradients take the GPU sibling, jit the CPU; GPU exhaustion falls back once."""
     from vmex.core import freeboundary_implicit as fbi
 
-    gpu = SimpleNamespace(concrete=None)
-    cfg = SimpleNamespace(concrete=gpu)
-    placed = fbi._auto_placed(lambda p, f, c: c if isinstance(p, float) else jnp.zeros(()))
-    assert placed(1.0, None, cfg) is gpu
-    assert placed(1.0, None, gpu) is gpu
+    gpu = type("Gpu", (), {"concrete": None})()
+    cfg = type("Auto", (), {"concrete": gpu})()
     seen = []
-    jax.jit(lambda p: fbi._auto_placed(lambda q, f, c: seen.append(c) or q)(p, None, cfg))(jnp.ones(2))
-    assert seen == [cfg]
 
+    def solve(p, f, c):
+        seen.append(c)
+        if c is gpu and f is not None:
+            raise RuntimeError(f"INTERNAL: CpuCallback error: {f}: Out of memory")
+        return p * 2.0
 
-def test_gpu_fits_free_boundary_uses_available_memory():
-    from types import SimpleNamespace
-
-    def device(limit, used=0):
-        return SimpleNamespace(memory_stats=lambda: {"bytes_limit": limit, "bytes_in_use": used})
-
-    small, large = SimpleNamespace(ns=31, mnmax=128), SimpleNamespace(ns=51, mnmax=288)
-    assert dev.gpu_fits_free_boundary(small, device(16 * 2**30))
-    assert not dev.gpu_fits_free_boundary(small, device(16 * 2**30, 15 * 2**30))
-    assert not dev.gpu_fits_free_boundary(large, device(16 * 2**30))
-    assert not dev.gpu_fits_free_boundary(small, SimpleNamespace(memory_stats=lambda: None))
+    monkeypatch.setattr(fbi, "_GPU_EXHAUSTED", set())
+    placed = fbi._auto_placed(solve)
+    assert jax.grad(lambda p: placed(p, None, cfg))(1.0) == 2.0
+    jax.jit(lambda p: placed(p, None, cfg))(1.0)
+    assert seen == [gpu, cfg]
+    with pytest.raises(RuntimeError, match="INVALID_ARGUMENT"):
+        placed(1.0, "INVALID_ARGUMENT", cfg)
+    with pytest.warns(RuntimeWarning, match="GPU memory"):
+        assert placed(1.0, "RESOURCE_EXHAUSTED", cfg) == 2.0
+    assert placed(1.0, None, cfg) == 2.0 and seen[3:] == [gpu, cfg, cfg]
 
 
 def test_free_boundary_callbacks_use_the_host_call(monkeypatch):
