@@ -29,11 +29,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.flatten_util import ravel_pytree
-from scipy.sparse import bsr_matrix
+from scipy.linalg import lapack as scipy_lapack
 from scipy.sparse.linalg import LinearOperator, gcrotmk
-from solvax import (
-    SpluFactorization, auto_chunk_size, block_thomas_factor, block_thomas_solve,
-)
+from solvax import auto_chunk_size, block_thomas_factor, block_thomas_solve
 from solvax import gmres as _solvax_gmres
 
 from .._compat import require_x64
@@ -1102,36 +1100,29 @@ def _host_boundary_schur_adjoint(
     nedge = int(edge_basis.shape[1])
     chunk = int(cfg.schur_probe_chunk_size)
 
-    # The raw radial system is strongly scaled near the magnetic axis. A
-    # globally pivoted sparse LU is materially more accurate there than the
-    # no-pivot block-Thomas elimination, while retaining O(ns) block storage.
+    # The raw radial system is strongly scaled near the magnetic axis, where
+    # no-pivot block-Thomas elimination loses digits.  LAPACK's banded LU
+    # pivots rows across the whole band, which is partial pivoting on the full
+    # matrix, in (6 b - 2) x ns b storage for b unknowns per surface.  SuperLU,
+    # used here before, refused the same system with a MemoryError from its
+    # 32-bit workspace at ns = 51, b = 864, holding 4 GB.
     ns, block_size = np.asarray(diagonal).shape[:2]
     bulk_row_scale = np.asarray(row_scale)
     bulk_column_scale = np.asarray(column_scale)
-    previous = np.maximum(np.arange(ns) - 1, 0)
-    following = np.minimum(np.arange(ns) + 1, ns - 1)
-    lower = (bulk_row_scale[:, :, None] * np.asarray(lower_blocks)
-             * bulk_column_scale[previous, None, :])
-    middle = (bulk_row_scale[:, :, None] * np.asarray(diagonal)
-              * bulk_column_scale[:, None, :])
-    upper = (bulk_row_scale[:, :, None] * np.asarray(upper_blocks)
-             * bulk_column_scale[following, None, :])
-    blocks, indices, indptr = [], [], [0]
-    for radial_row in range(ns):
-        if radial_row:
-            blocks.append(lower[radial_row]); indices.append(radial_row - 1)
-        blocks.append(middle[radial_row]); indices.append(radial_row)
-        if radial_row + 1 < ns:
-            blocks.append(upper[radial_row]); indices.append(radial_row + 1)
-        indptr.append(len(blocks))
-    blocks = np.asarray(blocks)
-    del lower, middle, upper  # the scaled bands stay in ``blocks`` until tocsc
-    sparse_bulk = bsr_matrix(
-        (blocks, np.asarray(indices), np.asarray(indptr)),
-        shape=(ns * block_size, ns * block_size)).tocsc()
-    del blocks
-    bulk_lu = SpluFactorization(sparse_bulk)
-    del sparse_bulk
+    half = 2 * block_size - 1
+    band = np.zeros((3 * half + 1, ns * block_size), order="F")
+    local_row, local_column = np.indices((block_size, block_size))
+    for shift, blocks in ((-1, lower_blocks), (0, diagonal), (1, upper_blocks)):
+        blocks = np.asarray(blocks)
+        for radial_row in range(max(0, -shift), ns - max(0, shift)):
+            column = radial_row + shift
+            band[2 * half + (radial_row - column) * block_size + local_row
+                 - local_column, column * block_size + local_column] = (
+                bulk_row_scale[radial_row, :, None] * blocks[radial_row]
+                * bulk_column_scale[column, None, :])
+    bulk_factors, bulk_pivots, _ = scipy_lapack.dgbtrf(
+        band, half, half, overwrite_ab=True)
+    del band
 
     def sparse_inverse_packed(packed, *, transpose):
         values = np.asarray(packed)
@@ -1141,8 +1132,9 @@ def _host_boundary_schur_adjoint(
         scale_solution = bulk_row_scale if transpose else bulk_column_scale
         flat_rhs = np.moveaxis(values * scale_rhs[None], 0, -1).reshape(
             ns * block_size, -1)
-        flat_solution = np.asarray(bulk_lu.solve(
-            flat_rhs, trans="T" if transpose else "N"))
+        flat_solution = scipy_lapack.dgbtrs(
+            bulk_factors, half, half, flat_rhs, bulk_pivots,
+            trans=1 if transpose else 0)[0]
         solution = np.moveaxis(
             flat_solution.reshape(ns, block_size, -1), -1, 0)
         solution = solution * scale_solution[None]
@@ -1298,7 +1290,7 @@ def _anchor_norm(z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
 def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
     """Block-Thomas factors of the scaled bulk block tridiagonal.
 
-    The same two-sided scaling the Schur adjoint's sparse LU uses; here the
+    The same two-sided scaling the Schur adjoint's banded LU uses; here the
     factors only precondition, so the fixed-boundary refinement's JAX block
     elimination (``implicit._refine_block_factor_core``) is accurate enough
     and keeps each Krylov solve inside one compiled program.
