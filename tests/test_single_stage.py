@@ -25,6 +25,9 @@ class Deck:
     lasym: bool = False
     lfreeb: bool = False
     mgrid_file: str = "NONE"
+    ntheta: int = 0
+    nzeta: int = 0
+    delt: float = 1.
     rbc: object = field(default_factory=lambda: np.ones((3, 2)))
     zbs: object = field(default_factory=lambda: np.zeros((3, 2)))
     am: object = field(default_factory=lambda: np.array([1., -1.]))
@@ -153,6 +156,7 @@ def test_verification_preserves_physics_and_independently_checks_the_held_bounda
     np.testing.assert_array_equal(solves[1][1].ns_array, [16, 41])
     np.testing.assert_array_equal(solves[1][1].ftol_array, [1e-10, 1e-10])
     assert solves[1][1].lfreeb and solves[1][1].mgrid_file == "direct ESSOS field"
+    assert (solves[1][1].ntheta, solves[1][1].nzeta, solves[1][1].delt) == (32, 32, .3)
     assert "initial_state" not in solves[1][2]  # A cold independent check.
     assert solves[1][2]["external_field"].coils is h.final_coils
     assert solves[1][2]["raise_on_max_iterations"] is False

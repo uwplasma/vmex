@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Optimize a finite-beta pwO plasma and ESSOS coils together.
 
-Run ``pwO_optimization.py`` and ``pwO_optimization_finite_beta.py`` first.
+Run ``pwO_optimization.py`` first. A finite-beta plasma stage frees the pwO
+map as in that example; the joint plasma and coil stage holds the map fixed.
 COILS_INPUT accepts an ESSOS stage-2 fit; COIL_FIT_MAXITER=0 keeps its shapes.
 A cold free-boundary solve and NEO check the design. Requires vmex[neoclassical].
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import minimize, OptimizeResult
+from scipy.optimize import least_squares, minimize, OptimizeResult
 
 import vmex as vj
 from vmex import optimize as opt
@@ -24,21 +25,27 @@ from vmex.core.single_stage import (
 )
 from vmex.core import virtual_casing as vc
 from vmex.core.restart import restart_state
-from vmex.core.pwo import MappedPwOResidual
+from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 from vmex.core.neoclassical import screen_transport
 from essos.coils import Coils, CreateEquallySpacedCurves
 from essos.surfaces import surfacerzfourier_from_boundary
 
 # Input parameters.
-NFP = 2
-INPUT_FILE = Path(f"input.pwO_finite_beta_nfp{NFP}")
-WOUT_FILE = Path(f"wout_pwO_finite_beta_nfp{NFP}.nc")
+NFP = 4
+INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
+WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
 COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
 MAX_MODE = 2
 SURFACES = np.linspace(.25, .75, 3)
 TARGET_BETA = 0.005
 PRESSURE_PROFILE = [1.0, -1.0]
 BETA_TOLERANCE = 0.1
+
+# Initial pwO map (a, b, c, eta_min) and the names the plasma stage may change:
+MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
+FREE_MAP = ("a", "b", "c", "eta_min")
+PWO_WEIGHT, EDGE_JACOBIAN_FLOOR = 1.0e3, 0.25
+PLASMA_MAX_NFEV, PLASMA_STEP, PLASMA_MAX_CHANGE = 15, 0.02, 1.0
 
 # Final limits; optimization constraints are tighter to allow for finer checks.
 IOTA_FLOOR, ASPECT_LIMIT, NORMAL_FIELD_LIMIT = 0.41, 6.1, 0.02
@@ -55,14 +62,14 @@ LENGTH_WEIGHT, CURVATURE_WEIGHT = 10., 100.
 COIL_DISTANCE_WEIGHT, COIL_SURFACE_DISTANCE_WEIGHT = 100., 100.
 COIL_FIT_PARAMETER_BOUND = 4.0
 CONSTRAINT_WEIGHT, REJECTED_TRIAL_COST, PARAMETER_BOUND = 1.0e3, 10.0, 3.0
-MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 3, 12, 250
+MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 3, 12, 1500
 OPTIMIZER_FTOL = 1e-8
 NPHI, NTHETA, VC_DIGITS = 17, 24, 4  # Odd toroidal count avoids aliasing the two-coil field.
 MAKE_MOVIE, MOVIE_SURFACE_COLOR = False, "absB"
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 2, 4, 2
+    MAXITER, MAX_TRIALS, COIL_FIT_MAXITER, PLASMA_MAX_NFEV = 2, 4, 2, 2
     N_SEGMENTS, COIL_ORDER, NPHI, NTHETA = 24, 2, 8, 8
 
 if COIL_FIT_MAXITER == 0 and COILS_INPUT is None:
@@ -97,12 +104,40 @@ def relative_beta(state, runtime):
     return opt.volume_average_beta(state, runtime) / TARGET_BETA
 
 
+def boozer_spectrum(state, runtime):
+    """The field and iota the map reads; FreeMapProblem turns these rows into the pwO residual."""
+    return mapped.spectrum_state(state, runtime)
+
+
 seed = opt.solve_equilibrium(inp, initial_state=initial_state, raise_on_max_iterations=True)
-mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2)
+mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2, limit_map=True, **MAP_PARAMETERS)
+edge_jacobian = (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0)
+beta_term = [(relative_beta, 1.0, 1.0)] if TARGET_BETA else []
+
+# Plasma stage: boundary and pwO map together, as in pwO_optimization.py.
+start_inp, start = inp, seed
+stage = opt.VmecProblem.from_tuples(inp, [
+    (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_CONSTRAINT), 0.0, 100.0),
+    (opt.Hinge(opt.aspect_ratio, ceiling=ASPECT_CONSTRAINT), 0.0, 100.0), edge_jacobian] + beta_term,
+    max_mode=MAX_MODE, use_ess=True, restart_from=seed, progress=not ci_smoke)
+free_map = FreeMapProblem(stage, mapped, seed, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+step = np.concatenate((PLASMA_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
+change = np.concatenate((PLASMA_MAX_CHANGE * step[:free_map.nx], np.full(len(FREE_MAP), np.inf)))
+fit = least_squares(free_map.residual, free_map.x0, jac=free_map.residual_jac, x_scale=step,
+                    max_nfev=PLASMA_MAX_NFEV, bounds=(free_map.x0 - change, free_map.x0 + change),
+                    ftol=1e-6, xtol=1e-10, verbose=2)
+MAP_PARAMETERS = free_map.values(fit.x)
+mapped.options.update(MAP_PARAMETERS)
+print(f"map = {MAP_PARAMETERS}")
+inp, seed = stage.input_from_x(fit.x[:free_map.nx]), stage.equilibrium_from_x(fit.x[:free_map.nx])
+del stage, free_map
+jax.clear_caches()
+gc.collect()
+
+# The joint stage holds the map fixed at the plasma-stage values.
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
-plasma_terms = [(mapped.residuals_state, 0.0, 2 / initial_scale)]
-if TARGET_BETA:
-    plasma_terms.append((relative_beta, 1.0, 1.0))
+plasma_terms = [(mapped.residuals_state, 0.0, 2 / initial_scale), edge_jacobian] + beta_term
 plasma_problem = opt.VmecProblem.from_tuples(
     inp, plasma_terms, max_mode=MAX_MODE,
     use_ess=True, restart_from=seed, progress=not ci_smoke, forward_ftol=1e-12,
@@ -265,9 +300,9 @@ verdict = design_target_report(
 half_mesh = (np.arange(100) + 0.5) / 100
 neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
 seed_fine = opt.solve_equilibrium(
-    replace(inp, ns_array=np.array([101]), ftol_array=np.array([1e-12]),
+    replace(start_inp, ns_array=np.array([101]), ftol_array=np.array([1e-12]),
             niter_array=np.array([20000])),
-    initial_state=seed.solution, verbose=False, raise_on_max_iterations=True)
+    initial_state=start.solution, verbose=False, raise_on_max_iterations=True)
 if not ci_smoke:
     print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: "
           f"seed {screen_transport(seed_fine.wout, neo_surfaces)}, "

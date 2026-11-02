@@ -295,7 +295,9 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
     jax.clear_caches()
     gc.collect()
     print("[verify] cold NESTOR free boundary", flush=True)
+    # NESTOR needs a finer angular grid and a smaller step than the fixed-boundary solve.
     free_inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field", ns_array=np.array(free_ns),
+                       ntheta=max(inp.ntheta, 32), nzeta=max(inp.nzeta, 32), delt=min(inp.delt, .3),
                        ftol_array=np.full(len(free_ns), free_ftol), niter_array=np.full(len(free_ns), 8000))
     free = {"converged": False, "phiedge": float(inp.phiedge),
             "ns": list(free_ns), "metrics_provisional": True}

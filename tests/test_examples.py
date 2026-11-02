@@ -113,7 +113,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
     "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
-    "examples/optimization/single_stage_optimization_pwO.py": "requires the finite-beta continuation; joint numerical/physics validation is separate",
+    "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
