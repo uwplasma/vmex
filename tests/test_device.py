@@ -619,6 +619,7 @@ def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
 def test_free_boundary_auto_takes_the_gpu_only_when_large_and_fitting(
         monkeypatch, recommended, fits, chosen):
     import dataclasses
+    from types import SimpleNamespace
 
     from vmex.core import freeboundary_implicit as fbi
     from vmex.core import implicit as im
@@ -632,7 +633,7 @@ def test_free_boundary_auto_takes_the_gpu_only_when_large_and_fitting(
     monkeypatch.setattr(fbi, "_vacuum_program", lambda _: "program")
     monkeypatch.setattr(im, "make_config", lambda _, **k: dataclasses.replace(base, device=k["device"]))
 
-    made = fbi.make_free_boundary_config(dataclasses.replace(base.inp, lfreeb=True), object(), device="auto")
+    made = fbi.make_free_boundary_config(SimpleNamespace(lfreeb=True), object(), device="auto")
     assert made.implicit.device == "cpu"
     assert (made.concrete and made.concrete.implicit.device) == chosen
 
