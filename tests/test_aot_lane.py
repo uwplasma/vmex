@@ -15,19 +15,29 @@ _SCRIPT = textwrap.dedent("""
     import sys, jax, jax.numpy as jnp, numpy as np
     from pathlib import Path
     from vmex.core import aot
+    jax.config.update("jax_num_cpu_devices", int(sys.argv[3]))
     aot._directory = lambda: Path(sys.argv[1]) / "aot"
     jax.config.update("jax_compilation_cache_dir", sys.argv[1] + "/xla")
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
     jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-    def fn(x, y, *, k=2):
-        return jax.lax.fori_loop(0, 5, lambda i, c: c * k + y, x)
+    @jax.tree_util.register_pytree_node_class
+    class Field:                 # computes in its unflatten, like an ESSOS field
+        def __init__(self, y):
+            self.y, self.scale = y, jnp.asarray(y).sum()
+        def tree_flatten(self):
+            return (self.y,), None
+        @classmethod
+        def tree_unflatten(cls, _, leaves):
+            return cls(*leaves)
+    def fn(x, f, *, k=2):
+        return jax.lax.fori_loop(0, 5, lambda i, c: c * k + f.y, x)
     lane = aot.AotLane(fn, static_argnames=("k",))
     if sys.argv[2] == "build":   # the persistent cache already holds this program
-        jax.jit(fn, static_argnames=("k",))(jnp.arange(4.0), jnp.ones(4), k=3)
+        jax.jit(fn, static_argnames=("k",))(jnp.arange(4.0), Field(jnp.ones(4)), k=3)
         jax.clear_caches()
     if sys.argv[2] == "load":
         lane.jit = None          # a cached lane must not trace or lower
-    x, y = jnp.arange(4.0), jnp.ones(4)
+    x, y = jnp.arange(4.0), Field(jnp.ones(4))
     got = lane(x, y, k=3)
     np.testing.assert_array_equal(got, jax.jit(fn, static_argnames=("k",))(x, y, k=3)
                                   if sys.argv[2] == "build" else np.load(sys.argv[1] + "/want.npy"))
@@ -35,10 +45,12 @@ _SCRIPT = textwrap.dedent("""
 """)
 
 
-def test_executable_reloads_in_a_fresh_process(tmp_path):
-    """Also when the build was served by the persistent cache (its blobs fail to run)."""
+@pytest.mark.parametrize("devices", [1, 4])
+def test_executable_reloads_in_a_fresh_process(tmp_path, devices):
+    """Also when the build was served by the persistent cache (its blobs fail to run),
+    on a backend with several devices, and for a pytree that computes in its unflatten."""
     for mode in ("build", "load"):
-        subprocess.run([sys.executable, "-c", _SCRIPT, str(tmp_path), mode],
+        subprocess.run([sys.executable, "-c", _SCRIPT, str(tmp_path), mode, str(devices)],
                        check=True, capture_output=True)
     assert len(list((tmp_path / "aot").glob("*.aot"))) == 1
 
