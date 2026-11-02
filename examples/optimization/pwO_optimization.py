@@ -21,8 +21,7 @@ from scipy.optimize import least_squares
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core.neoclassical import screen_transport
-from vmex.core.pwo import MappedPwOResidual
-from vmex.core.statephysics import _field_chain
+from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 
 # Number of field periods, and the seed deck the boundary is shaped from:
 NFP = 3
@@ -36,6 +35,12 @@ SEED_PERTURBATION = 0.05
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
 SURFACES = np.linspace(0.1, 0.9, 5)
 MBOZ = 16
+
+# Initial values of the pwO map (a, b, c, eta_min), and which of them the
+# optimizer may change; remove a name to hold it fixed. Every value inside
+# FreeMapProblem.MAP_BOUNDS is clipped to a one-to-one map on every surface:
+MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
+FREE_MAP = ("a", "b", "c", "eta_min")
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
@@ -102,54 +107,27 @@ inp = replace(inp, rbc=rbc, zbs=zbs)
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
+def max_mirror(equilibrium_state, solver_context):
+    """Full-surface mirror ratio on the pwO surfaces, which the mapped variance does not see."""
+    return pwo.diagnostics_state(equilibrium_state, solver_context)[3]
 
 
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the full-surface mirror ratio, which the mapped variance does not see."""
-    mirror = pwo.diagnostics_state(equilibrium_state, solver_context)[3]
-    return jnp.maximum(mirror - MIRROR_LIMIT, 0.0)
-
-
-def axis_excursion(equilibrium_state, solver_context):
-    """RMS size of the axis' n != 0 harmonics; undoes the state's sqrt(2) mode scaling."""
-    modes = solver_context.modes
-    helical = (np.asarray(modes.m) == 0) & (np.asarray(modes.n) != 0)
-    return jnp.sqrt(2 * jnp.sum(equilibrium_state.R_cos[0, helical]**2
-                                + equilibrium_state.Z_sin[0, helical]**2))
-
-
-def axis_excess(equilibrium_state, solver_context):
-    """Hinge on the axis excursion: a strongly helical axis cannot be re-solved on a finer grid."""
-    return jnp.maximum(axis_excursion(equilibrium_state, solver_context) - AXIS_LIMIT, 0.0)
-
-
-def edge_jacobian_excess(equilibrium_state, solver_context):
-    """Hinge on the Jacobian spread of the three outer cells: a near-zero cell flips sign on a finer grid."""
-    tau = _field_chain(equilibrium_state, solver_context)[1].tau * solver_context.setup.signgs
-    tau = tau[-3:].reshape(3, -1)
-    return jnp.maximum(EDGE_JACOBIAN_FLOOR - jnp.min(tau, axis=1) / jnp.max(tau, axis=1), 0.0)
-
-
-def elongation_excess(equilibrium_state, solver_context):
-    """Hinge on the cross-section elongation above its limit."""
-    return jnp.maximum(
-        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
+def boozer_spectrum(equilibrium_state, solver_context):
+    """The field and iota the map reads; FreeMapProblem turns these rows into the pwO residual."""
+    return pwo.spectrum_state(equilibrium_state, solver_context)
 
 
 # Each term is (function, target, weight).
-pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2)
+pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
+                        **MAP_PARAMETERS)
 objective_function_terms = [
-    (pwo, 0.0, PWO_WEIGHT),
+    (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 100.0),
-    (mirror_excess, 0.0, 100.0),
-    (axis_excess, 0.0, 100.0),
-    (edge_jacobian_excess, 0.0, 100.0),
-    (elongation_excess, 0.0, 10.0),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 100.0),
+    (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
+    (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
+    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
+    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
 ]
 if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
@@ -158,8 +136,8 @@ if MAGNETIC_WELL_TARGET > 0:
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("elongation", opt.max_elongation, ".4f"),
-    ("axis excursion", axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
-    ("max mirror", lambda state, rt: jnp.max(pwo.diagnostics_state(state, rt)[3]), ".3f"))
+    ("axis excursion", opt.axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
+    ("max mirror", lambda state, rt: jnp.max(max_mirror(state, rt)), ".3f"))
 monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
@@ -198,14 +176,18 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    step = PARAMETER_STEP * stage.scales
+    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    # Map variables are sigmoid-scaled, so a unit step spans their bounds.
+    step = np.concatenate((PARAMETER_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
+    change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
     result = least_squares(
-        stage.residual, stage.x0, jac=stage.residual_jac,
-        x_scale=step, max_nfev=max_nfev,
-        bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
-                stage.x0 + MAX_PARAMETER_CHANGE * step),
+        joint.residual, joint.x0, jac=joint.residual_jac,
+        x_scale=step, max_nfev=max_nfev, bounds=(joint.x0 - change, joint.x0 + change),
         ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
-    x = stage.embed(result.x)
+    x = stage.embed(result.x[:joint.nx])
+    MAP_PARAMETERS = joint.values(result.x)
+    pwo.options.update(MAP_PARAMETERS)
+    print(f"map = {MAP_PARAMETERS}")
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)

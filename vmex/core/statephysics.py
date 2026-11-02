@@ -406,6 +406,25 @@ def soft_min_abs_iota(
     return jnp.sum(magnitude * jax.nn.softmax(-magnitude / tau))
 
 
+def edge_jacobian_ratio(state: SpectralState, rt: SolverRuntime, *, cells: int = 3) -> Array:
+    """Min/max Jacobian ratio over each of the outermost ``cells`` radial cells.
+
+    A ratio near zero marks a cell pinched flat at one point. It passes on the
+    optimizer's grid but changes sign when the boundary is re-solved on a finer
+    one, so a floor of about 0.25 keeps the final solve well posed.
+    """
+    tau = (_field_chain(state, rt)[1].tau * rt.setup.signgs)[-cells:].reshape(cells, -1)
+    return jnp.min(tau, axis=1) / jnp.max(tau, axis=1)
+
+
+def axis_excursion(state: SpectralState, rt: SolverRuntime) -> Array:
+    """RMS size of the magnetic axis' n != 0 harmonics, in metres."""
+    modes = rt.modes
+    helical = (np.asarray(modes.m) == 0) & (np.asarray(modes.n) != 0)
+    # The state stores modes with a sqrt(2) scaling that this undoes.
+    return jnp.sqrt(2 * jnp.sum(state.R_cos[0, helical]**2 + state.Z_sin[0, helical]**2))
+
+
 def edge_iota(state: SpectralState, rt: SolverRuntime) -> Array:
     """Rotational transform at the boundary (wout ``iotaf[-1]`` convention:
     linear extrapolation of the half mesh, ``1.5 iotas[-1] - 0.5 iotas[-2]``).

@@ -248,6 +248,17 @@ def test_locally_nonfolding_map_with_global_overlap_is_rejected():
         mapped_pwo_residual_from_boozer(**_spectrum(), b_ref=1.5, eta_min=eta_min)
 
 
+def test_map_validity_is_the_exact_one_to_one_condition():
+    # The old global bound rejected the first map; a real span near one period is fine.
+    field = dict(bmnc_b=[[1., .1, .05, .02]], xm_b=np.array([0, 0, 1, 1]),
+                 xn_b=np.array([0, 3, 0, 3]), iota_b=[.8], nfp=3, c=-2.)
+    wide = mapped_pwo_residual_from_boozer(a=.4, b=.4, **field)
+    assert wide["toroidal_span"][0] < 2*np.pi/3 and wide["jacobian_min"][0] > 0
+    assert bool(wide["valid"][0])
+    with pytest.raises(ValueError):  # a line longer than one field period covers points twice
+        mapped_pwo_residual_from_boozer(a=.6, b=0., **field)
+
+
 def test_mapped_residual_is_the_same_for_a_mirror_image():
     # zeta -> -zeta flips iota and n; the device, hence the residual, is unchanged.
     field = dict(bmnc_b=[[1., .1, .05, .02]], bmns_b=[[0., .03, -.02, .01]],

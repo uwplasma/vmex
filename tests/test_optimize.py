@@ -270,6 +270,17 @@ def test_min_abs_iota_gradient_is_finite_and_matches_fd(solovev_eq):
     np.testing.assert_allclose(float(jvp), float(fd), rtol=2e-5, atol=1e-10)
 
 
+def test_hinge_is_zero_inside_its_band_and_the_distance_outside(solovev_eq):
+    eq = solovev_eq
+    ratio = np.asarray(opt.edge_jacobian_ratio(eq.state, eq.runtime))
+    assert ratio.shape == (3,) and np.all((ratio > 0) & (ratio <= 1))
+    inside = opt.Hinge(opt.edge_jacobian_ratio, floor=0.0, ceiling=1.0)
+    assert np.all(np.asarray(inside(eq.state, eq.runtime)) == 0.0)
+    above = opt.Hinge(opt.edge_jacobian_ratio, floor=1.5)
+    np.testing.assert_allclose(above(eq.state, eq.runtime), 1.5 - ratio, rtol=1e-12)
+    assert float(opt.axis_excursion(eq.state, eq.runtime)) == pytest.approx(0.0, abs=1e-12)
+
+
 def test_scalar_targets_vs_golden(solovev_eq):
     """Scalars vs golden VMEC2000 wout values: the golden run is an
     independently converged state (ftol 1e-14), so tolerances carry solver
