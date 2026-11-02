@@ -32,7 +32,7 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed
 SEED_PERTURBATION = 0.05
 
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
-SURFACES = np.linspace(0.1, 0.9, 5)
+SURFACES = np.linspace(0.1, 0.9, 8)
 MBOZ = 16
 
 # Initial values of the pwO map (a, b, c, eta_min), and which of them the
@@ -57,8 +57,8 @@ BOOTSTRAP_WEIGHT = {"band": 1.0e3 if NFP == 3 else 1.0e4,  # NFP 2 under-flatten
 MAX_MODES = [1, 2, 3, 4, 5]
 MAX_NFEV = [15]*len(MAX_MODES)
 # STAGE_FTOL = [1e-13 if NFP==2 else 1e-12]*len(MAX_MODES)
-ASPECT_TARGET = 5.5
-MAGNETIC_WELL_TARGET = 0 #0.04
+ASPECT_TARGET = 6.0
+MAGNETIC_WELL_TARGET = 0.01      # 0 turns the well off
 MAGNETIC_WELL_WEIGHT = 1e3
 ELONGATION_LIMIT = 9.0
 NS_ARRAY = np.array([35])
@@ -133,7 +133,7 @@ pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=
 objective_function_terms = [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 100.0),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 1000.0),
     (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
@@ -195,7 +195,7 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
     joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
                            band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
-    step = np.concatenate((PARAMETER_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
+    step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
     result = least_squares(
         joint.residual, joint.x0, jac=joint.residual_jac,
