@@ -1014,11 +1014,21 @@ def _balanced_dense_solver(schur):
 
 
 def _host_schur_lane(cfg, *args):
-    """``pure_callback`` body of the Schur adjoint under an outer ``jax.jit``."""
-    with im._device_context(cfg.implicit):
-        args = im._device_pin(cfg.implicit, jax.tree.map(jnp.asarray, args))
-        return jax.tree.map(np.asarray, _host_boundary_schur_adjoint(
-            cfg, *args, fail=cfg.adjoint_fail))
+    """``pure_callback`` body of the Schur adjoint under an outer ``jax.jit``.
+
+    A typed failure is relayed like the forward solve's: kept in
+    ``implicit._HOST_ERROR`` behind a short sentinel naming its class.
+    """
+    im._HOST_ERROR.clear()
+    try:
+        with im._device_context(cfg.implicit):
+            args = im._device_pin(cfg.implicit, jax.tree.map(jnp.asarray, args))
+            return jax.tree.map(np.asarray, _host_boundary_schur_adjoint(
+                cfg, *args, fail=cfg.adjoint_fail))
+    except VmecError as exc:
+        im._HOST_ERROR.append(exc)
+        raise RuntimeError(f"boundary-Schur adjoint failed with {type(exc).__name__}: "
+                           f"{str(exc)[:200]}") from None
 
 
 def _host_boundary_schur_adjoint(

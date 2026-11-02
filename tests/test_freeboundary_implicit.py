@@ -605,6 +605,14 @@ def test_traced_pullback_runs_the_host_schur_lane(monkeypatch):
     staged = jax.jit(lambda value: fbi._solve_bwd_impl(cfg, saved, value))(bar)
     assert calls == [cfg, cfg]
     np.testing.assert_allclose(staged, eager, rtol=1.0e-14, atol=0.0)
+    # A typed failure keeps its class behind the callback's runtime error.
+    failure = AdjointSolveError("stalled")
+    monkeypatch.setattr(fbi, "_host_boundary_schur_adjoint",
+                        lambda *_a, **_k: (_ for _ in ()).throw(failure))
+    with pytest.raises(Exception, match="AdjointSolveError: stalled"):
+        jax.jit(lambda value: fbi._solve_bwd_impl(cfg, saved, value))(2.0 * bar)
+    assert im._HOST_ERROR == [failure]
+    im._HOST_ERROR.clear()
 
 
 def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
