@@ -595,8 +595,16 @@ and the [benchmark records](benchmarks/).
 `vj.parallel.solve_ensemble(inputs, workers=None)` solves independent cases concurrently and returns
 results in input order, each identical to solving that input alone; `workers=1` is the serial
 baseline. Set worker and device budgets with the
-[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
-kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
+[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html).
+
+## Running on CPU, GPU and whole nodes
+
+The defaults need no flags: float64, a persistent compilation cache, every CPU the process may use,
+and on-demand GPU memory. `--device auto` picks CPU or GPU per stage from problem size; optimization
+gradients, the dense vacuum solve and mirror solves stay on CPU. One solve uses one device: VMEX does
+not shard a solve across GPUs, and a second GPU only helps independent cases. On a large node, run
+many independent cases rather than one solve on all cores. What each default does and when to change
+it: [running on CPU, GPU and whole nodes](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html#running-on-cpu-gpu-and-whole-nodes).
 
 ## Running the examples
 

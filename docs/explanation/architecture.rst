@@ -230,10 +230,10 @@ callbacks. ``vmap`` over the host callback cannot handle ensembles of
 different shapes and degenerates to a vectorized host loop for equal shapes.
 
 **Multi-GPU.** JAX's multi-device model is explicit sharding; it does not turn
-a host callback or an unsharded solve into a multi-GPU program. Placing
-independent ensemble members on distinct devices works today through explicit
-``device=`` arguments. Sharding one large traced solve (``mode="jit"``) across
-devices with ``jax.sharding`` is future work and has not been measured.
+a host callback or an unsharded solve into a multi-GPU program. One solve uses
+one device. Independent cases can each take their own explicit ``device=``, but
+VMEX assigns none itself and has no measured multi-GPU scaling figure. Sharding
+one large traced solve (``mode="jit"``) with ``jax.sharding`` is not implemented.
 
 Naming conventions
 ------------------
