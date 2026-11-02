@@ -582,7 +582,7 @@ def test_free_boundary_multigrid_auto_relocates_every_carry(monkeypatch):
     field = MgridField(
         *(jax.numpy.ones((1, kp, 2, 2)) for _ in range(3)),
         extcur=jax.numpy.ones(1), rmin=0.0, rmax=1.0,
-        zmin=-1.0, zmax=1.0, nfp=1,
+        zmin=-1.0, zmax=1.0, nfp=int(inp.nfp),  # read_mgrid rejects a table of another NFP
     )
     seen = []
 
