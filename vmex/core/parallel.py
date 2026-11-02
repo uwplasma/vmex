@@ -27,7 +27,6 @@ single-solve path (which stays byte-identical) and imposes no new dependency.
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
