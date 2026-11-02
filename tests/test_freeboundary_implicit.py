@@ -76,6 +76,14 @@ def test_free_boundary_config_validates_adjoint_solver():
     for name in fbi._ADJOINT_SOLVERS:
         assert make_free_boundary_config(
             inp, field, adjoint_solver=name).adjoint_solver == name
+    # The host callbacks return float64: without x64 the solve says so.
+    cfg = make_free_boundary_config(inp, field)
+    jax.config.update("jax_enable_x64", False)
+    try:
+        with pytest.raises(RuntimeError, match="float64"):
+            fbi._baseline_struct(cfg)
+    finally:
+        jax.config.update("jax_enable_x64", True)
 
 
 def test_free_boundary_config_validates_adjoint_fail():

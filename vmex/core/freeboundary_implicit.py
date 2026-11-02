@@ -36,6 +36,7 @@ from solvax import (
 )
 from solvax import gmres as _solvax_gmres
 
+from .._compat import require_x64
 from . import implicit as im
 from .device import AUTO, recommended_device, resolve_implicit_device
 from .freeboundary import (
@@ -645,6 +646,8 @@ def _host_solve_and_mask_status(cfg, params_np, field_parameters_np):
 
 
 def _baseline_struct(cfg: FreeBoundaryImplicitConfig):
+    # Both callbacks declare float64 results; say why before JAX refuses them.
+    require_x64()
     rt = im._template_runtime(cfg.implicit)
     return jax.tree.map(
         lambda value: jax.ShapeDtypeStruct(value.shape, jnp.float64), rt.rcon0
