@@ -44,11 +44,13 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 # Zero bootstrap current. The mapped field alone already has a zero collisionless
 # bootstrap geometric factor for every map; the current comes from the unmapped
 # band where B_max lives. "band" flattens B across that band (sufficient, not
-# necessary); "geometric" leaves the band free and minimizes the collisionless
-# bootstrap ratio (1 for QA, 0 for zero current) on SURFACES; None does neither.
-# Check the result with a finite-collisionality D31: the ratio is collisionless:
+# necessary; DKX confirms it lowers the current, at higher edge eps_eff);
+# "geometric" leaves the band free and minimizes the collisionless bootstrap
+# ratio (1 for QA, 0 for zero current) on SURFACES, which DKX does not confirm
+# at reactor collisionality; None does neither:
 BOOTSTRAP_TERM = None
-BOOTSTRAP_WEIGHT = {"band": 1.0e3, "geometric": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
+BOOTSTRAP_WEIGHT = {"band": 1.0e3 if NFP == 3 else 1.0e4,  # NFP 2 under-flattens at 1e3
+                    "geometric": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
