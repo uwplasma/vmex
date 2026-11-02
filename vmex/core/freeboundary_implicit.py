@@ -506,7 +506,16 @@ def _host_solve_and_mask_impl(
     if bool(result.converged) or fsq / icfg.ftol <= icfg.max_fsq_ratio:
         with im._timed(icfg, "anchor"):
             state, report = _anchor_root(
-                cfg, params, field_parameters, state, mask, rcon0, zcon0)
+                cfg, params, field_parameters, state, mask, rcon0, zcon0, False)
+            for factor in _ANCHOR_DESCENT_FTOL:
+                if report.certified:
+                    break
+                # Outside Newton's basin: descend closer, from where it stopped.
+                stage = solve(**_continuation(stage), ftol=factor * icfg.ftol,
+                              error_on_no_convergence=False)
+                state, rcon0, zcon0 = stage.result.state, stage.rcon0, stage.zcon0
+                state, report = _anchor_root(
+                    cfg, params, field_parameters, state, mask, rcon0, zcon0)
         if error_on_no_convergence and not report.certified:
             raise VmecConvergenceError(
                 "the free-boundary solve met ftol but Newton did not anchor "
@@ -1146,6 +1155,13 @@ _ANCHOR_TEST_FORCING = 1.0e-2
 #: from 0.11 to 1.8; a quarter step from the same state lands.
 _ANCHOR_FIRST_DAMPING = (1.0, 0.25, 0.0625)
 
+#: ``ftol`` factors of the further descents when a host state is outside
+#: Newton's basin, which the first step's damping test detects.  At 8/8/31 on a
+#: finite-beta coil deck ``ftol = 1e-10`` lies 0.058 from the root, mostly
+#: lambda m <= 4, n = 0, and Newton never lands; ``1e-12`` lies 0.007 and lands
+#: in 5 undamped steps.
+_ANCHOR_DESCENT_FTOL = (1.0e-2, 1.0e-4)
+
 #: Add NESTOR's coupling to the bulk preconditioner (:func:`_anchor_coupling`);
 #: off, the bulk factors alone precondition (4-8x the Krylov iterations).
 _ANCHOR_WOODBURY = True
@@ -1307,7 +1323,8 @@ class _AnchorReport:
     attempts: int = 0
 
 
-def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
+def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0,
+                 patient=True):
     """Newton-anchor a converged free-boundary state on its coupled root.
 
     VMEC's convergence test is not a root test for this residual.  ``ftol``
@@ -1348,7 +1365,8 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
     ones differ by 2.8 % and 5 %.  A run that does not certify returns the
     host state with ``certified=False``; the callers turn that into an
     uncertified trial (status 3) or an error, never a silent pass.
-    ``refine_tol = inf`` disables the anchor.
+    ``refine_tol = inf`` disables the anchor.  ``patient=False`` gives up at
+    once if the first step needs damping, so the caller can descend instead.
     """
     icfg = cfg.implicit
     tol = float(icfg.refine_tol)
@@ -1468,6 +1486,9 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
                 damping = max(_ANCHOR_MIN_DAMPING, 0.5 * damping)
             if attempt_step == 0:
                 first_accepted = damping if passed else 0.0
+                if damping < 1.0 and not patient:
+                    first_accepted = 0.0
+                    break
             if not passed:
                 if debug:
                     print(f"[vmex anchor] step {steps}: no damped step passes "

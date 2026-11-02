@@ -793,6 +793,32 @@ def test_an_unanchored_solve_is_never_certified(monkeypatch):
     assert anchored and int(status) == 3
     with pytest.raises(VmecConvergenceError, match="did not anchor"):
         fbi._host_solve_and_mask(cfg, params, field.extcur)
+    # It descended further twice before giving up, with exception-free solves.
+    assert len(anchored) == 2 * (1 + len(fbi._ANCHOR_DESCENT_FTOL))
+
+    # A further descent that lands is certified, with that descent's stage.
+    descents, calls = [], []
+
+    def lands_after_descent(_cfg, _params, _field, host_state, *args):
+        calls.append(args)
+        return host_state, fbi._AnchorReport(
+            certified=len(calls) == 2, initial_residual=1.0, residual=1.0)
+
+    far = fbi._solve_free_boundary_stage
+
+    def counted(*args, **kwargs):
+        descents.append(kwargs)
+        return far(*args, **kwargs)
+
+    monkeypatch.setattr(fbi, "_solve_free_boundary_stage", counted)
+    monkeypatch.setattr(fbi, "_anchor_root", lands_after_descent)
+    *_, status, _fsq, _ratio = fbi._host_solve_and_mask_status(
+        cfg, params, field.extcur)
+    assert int(status) == 0 and len(calls) == 2
+    assert calls[0][-1] is False and len(calls[1]) == 3  # impatient, then patient
+    assert descents[-1]["ftol"] == 1.0e-2 * cfg.implicit.ftol
+    assert descents[-1]["error_on_no_convergence"] is False
+
     # No pullback runs for it: both cotangents are exactly zero.
     cotangents = fbi._solve_status_bwd(
         cfg, (params, field.extcur, state, state, runtime.rcon0,
@@ -933,9 +959,9 @@ def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
     monkeypatch.setattr(fbi, "_anchor_coupling", lambda *_a, **_k: "coupling")
     monkeypatch.setattr(fbi, "_edge_response", response)
 
-    def run():
+    def run(patient=True):
         return fbi._anchor_root(cfg, im.params_from_input(inp), field.extcur,
-                                state, mask, runtime.rcon0, runtime.zcon0)
+                                state, mask, runtime.rcon0, runtime.zcon0, patient)
 
     return run, state, mask, cfg, root, calls
 
@@ -985,6 +1011,14 @@ def test_newton_anchor_never_certifies_what_it_cannot_land(
     assert not report.certified
     assert report.attempts == len(fbi._ANCHOR_FIRST_DAMPING) == report.steps
     assert report.residual < report.initial_residual
+
+    # Impatient: a first step that needs damping stops at once, however it lands.
+    run, state, *_ = _toy_anchor(monkeypatch)
+    monkeypatch.setattr(fbi, "_ANCHOR_MAX_STEPS", 25)
+    monkeypatch.setattr(fbi, "_ANCHOR_FIRST_DAMPING", (0.25, 0.0625))
+    assert run()[1].certified
+    _, report = run(patient=False)
+    assert not report.certified and report.steps == 1 and report.attempts == 1
 
     run, state, *_ = _toy_anchor(monkeypatch, refine_tol=np.inf)
     anchored, report = run()
