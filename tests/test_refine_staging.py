@@ -493,3 +493,18 @@ def test_block_only_refinement_skips_the_krylov_replay(monkeypatch) -> None:
     assert not krylov_steps
     for a, b in zip(jax.tree.leaves(refined), jax.tree.leaves(state)):
         np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_resume_budget_has_a_floor_for_hot_restarted_solves(monkeypatch) -> None:
+    """A hot-restarted solve of few iterations still gets a resume that can finish."""
+    cfg, p0, state, mask, _ = _resume_setup(monkeypatch)
+    budgets = []
+
+    def fake(*args, max_iterations, **kwargs):
+        budgets.append(max_iterations)
+        return types.SimpleNamespace(converged=False)
+
+    monkeypatch.setattr(im, "solve", fake)
+    for iterations in (25, 10 * im._REFINE_RESUME_MIN_ITERATIONS):
+        assert im._resumed_refinement(cfg, p0, state, mask, iterations) is None
+    assert budgets == [min(cfg.max_iterations, im._REFINE_RESUME_MIN_ITERATIONS), cfg.max_iterations]

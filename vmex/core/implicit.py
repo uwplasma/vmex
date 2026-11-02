@@ -1623,6 +1623,11 @@ _REFINE_RESUME_FTOL = 1.0e-14
 #: (``nfp2_QA``: 183 and 2,034, a factor 11) before the Krylov replay takes over.
 _REFINE_RESUME_BUDGET = 20
 
+#: Floor of that budget: a hot-restarted solve takes few iterations (25 at a
+#: shift of 1e-6) but the resume still needs about 2,000, and a budget of 500
+#: made the gradient slower than the Krylov replay alone (68 s against 52 s).
+_REFINE_RESUME_MIN_ITERATIONS = 4000
+
 
 def _anchor_residual(cfg: ImplicitConfig, params: ImplicitParams,
                      state: SpectralState, dof_mask: SpectralState) -> float:
@@ -1644,7 +1649,8 @@ def _resumed_refinement(cfg: ImplicitConfig, params: ImplicitParams,
         result = solve(
             input_with_params(cfg.inp, params), cfg.resolution,
             ftol=_REFINE_RESUME_FTOL,
-            max_iterations=min(cfg.max_iterations, _REFINE_RESUME_BUDGET * iterations),
+            max_iterations=min(cfg.max_iterations, max(
+                _REFINE_RESUME_MIN_ITERATIONS, _REFINE_RESUME_BUDGET * iterations)),
             mode=cfg.mode, lconm1=cfg.lconm1, initial_state=state,
             use_fft=False, device=AUTO)
     except VmecError:
