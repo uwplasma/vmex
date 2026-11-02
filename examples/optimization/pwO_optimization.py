@@ -20,7 +20,6 @@ from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.neoclassical import screen_transport
 from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 
 # Number of field periods, and the seed deck the boundary is shaped from:
@@ -205,6 +204,7 @@ for ns in FINAL_NS:
         verbose=not ci_smoke, raise_on_max_iterations=True)
 
 # # Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
+# from vmex.core.neoclassical import screen_transport
 # seed_equilibrium = opt.solve_equilibrium(
 #     replace(seed_input, ns_array=np.array([FINAL_NS[-1]]), **final_resolution),
 #     verbose=False, raise_on_max_iterations=True)

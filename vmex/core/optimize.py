@@ -800,6 +800,7 @@ class Hinge:
         self.name = getattr(fun, "__name__", type(fun).__name__)
 
     def __call__(self, state: SpectralState, rt: SolverRuntime) -> Array:
+        """Return the distance of ``fun`` outside the band, zero inside."""
         value = self.fun(state, rt)
         below = 0.0 if self.floor is None else jnp.maximum(self.floor - value, 0.0)
         above = 0.0 if self.ceiling is None else jnp.maximum(value - self.ceiling, 0.0)
