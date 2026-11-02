@@ -188,6 +188,7 @@ __all__ = [
     "least_squares",
     "minimize",
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
+    "BootstrapFiniteNuResidual",  # noqa: F822 - provided lazily by __getattr__ below
     "BootstrapGeometricResidual",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
@@ -201,7 +202,8 @@ Array = Any
 def __getattr__(name: str):  # PEP 562 lazy re-export
     # bootstrap.py lazily imports this module inside self_consistent_bootstrap,
     # so the f_boot objective is re-exported lazily to keep the two decoupled.
-    if name in ("RedlBootstrapMismatch", "BootstrapGeometricResidual"):
+    if name in ("RedlBootstrapMismatch", "BootstrapGeometricResidual",
+                "BootstrapFiniteNuResidual"):
         from . import bootstrap
         return getattr(bootstrap, name)
     # gammac.py sits on the stability/turbulence field-line lane; the lazy

@@ -47,10 +47,12 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 # necessary; DKX confirms it lowers the current, at higher edge eps_eff);
 # "geometric" leaves the band free and minimizes the collisionless bootstrap
 # ratio (1 for QA, 0 for zero current) on SURFACES, which DKX does not confirm
-# at reactor collisionality; None does neither:
+# at reactor collisionality; "finite_nu" minimizes the equivalent-ripple spread of
+# int dl/B over field lines (Albert et al. 2024), the leading finite-nu off-set;
+# None does none of them:
 BOOTSTRAP_TERM = None
 BOOTSTRAP_WEIGHT = {"band": 1.0e3 if NFP == 3 else 1.0e4,  # NFP 2 under-flattens at 1e3
-                    "geometric": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
+                    "geometric": 1.0e2, "finite_nu": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
@@ -143,6 +145,8 @@ if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
         (opt.magnetic_well, MAGNETIC_WELL_TARGET, MAGNETIC_WELL_WEIGHT))
 bootstrap = opt.BootstrapGeometricResidual(SURFACES)
+if BOOTSTRAP_TERM == "finite_nu":
+    objective_function_terms.append((opt.BootstrapFiniteNuResidual(SURFACES), 0.0, BOOTSTRAP_WEIGHT))
 if BOOTSTRAP_TERM == "geometric":
     objective_function_terms.append((bootstrap, 0.0, BOOTSTRAP_WEIGHT))
 

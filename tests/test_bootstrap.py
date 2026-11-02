@@ -947,3 +947,31 @@ def test_geometric_factor_matches_bootsj(config):
     G, current = np.asarray(wout.bvco)[j - 1], np.asarray(wout.buco)[j - 1]
     gnorm = -booz["iota_b"] * (G * out["Delta_G"] + current * out["Delta_I"]) / (G * out["f_t"])
     np.testing.assert_allclose(gnorm, BOOTSJ_GNORM[config], rtol=1.5e-2)
+
+
+# ---------------------------------------------------------------------------
+# Finite-collisionality equivalent-ripple spread (Albert et al. 2024, eq. 85)
+# ---------------------------------------------------------------------------
+
+
+def _spread(xm, xn, bmnc, iota=(0.42, 0.61), nfp=3):
+    return bs.equivalent_ripple_spread(
+        bmnc_b=jnp.tile(jnp.asarray(bmnc, float), (len(iota), 1)), xm_b=np.array(xm),
+        xn_b=np.array(xn), iota_b=jnp.asarray(iota), nfp=nfp)
+
+
+def test_equivalent_ripples_vanish_for_omnigenous_and_not_for_helical_fields():
+    # B(zeta) only (poloidally closed contours) and B(theta) (tokamak/QA) give equal
+    # period integrals on every line (m=0 modes average out over a period); a helical
+    # B(theta - zeta) with iota off the helicity does not.
+    np.testing.assert_allclose(_spread([0, 0, 0], [0, 3, 6], [1.0, 0.15, 0.03]), 0.0, atol=1e-7)
+    qh = _spread([0, 1], [0, 3], [1.0, 0.15])
+    assert np.all(np.asarray(qh) > 1e-3)
+
+
+def test_finite_nu_residual_is_differentiable_and_rows_scale_with_amplitude():
+    def f(eps):
+        return jnp.sum(_spread([0, 1], [0, 3], [1.0, eps]))
+    g = jax.grad(f)(0.1)
+    assert np.isfinite(g) and g > 0
+    assert float(f(0.2)) > 1.9 * float(f(0.1))
