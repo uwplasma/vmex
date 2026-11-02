@@ -594,7 +594,7 @@ def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=seed, vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -635,7 +635,7 @@ def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=object(), vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -720,7 +720,7 @@ def test_stalled_restart_goes_cold_within_the_budget(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=object(), vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0, iterations=300))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0, iterations=300))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -767,7 +767,7 @@ def test_an_unanchored_solve_is_never_certified(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=state, vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -1102,6 +1102,14 @@ def test_free_boundary_current_gradient_matches_resolve_finite_difference():
     np.testing.assert_allclose(
         derivative, finite_difference, rtol=2.0e-2, atol=2.0e-4
     )
+
+    # What the adjoint holds fixed, the forward solve must hold too.
+    frozen = []
+    for sign in (1.0, -1.0):
+        saved = fbi._solve_status_fwd(params, current + sign * step, cfg)[1]
+        project = im._dof_projector(cfg.implicit, saved[3])
+        frozen.append(_flat(jax.tree.map(jnp.subtract, saved[2], project(saved[2]))))
+    np.testing.assert_array_equal(frozen[0], frozen[1])
 
 
 @pytest.mark.full
