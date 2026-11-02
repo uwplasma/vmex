@@ -2,9 +2,9 @@
 """Continue a vacuum pwO boundary to finite beta, with p proportional to 1-s.
 
 Run ``pwO_optimization.py`` first. Pressure is calibrated at fixed toroidal
-flux, then the workflow is that of the vacuum example with beta added to the
-residual vector. NEO compares the vacuum start at this pressure with the result.
-Requires vmex[neoclassical].
+flux, then the workflow is that of the vacuum example with beta and Mercier
+stability added to the residual vector. NEO compares the vacuum start at this
+pressure with the result. Requires vmex[neoclassical].
 """
 
 import os
@@ -18,49 +18,60 @@ from scipy.optimize import least_squares
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core.neoclassical import screen_transport
-from vmex.core.pwo import MappedPwOResidual
+from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 from vmex.core.restart import restart_state
 
 # Number of field periods, and the vacuum result this script continues:
-NFP = 2
+NFP = 3
+print(f"finite-beta pwO optimization, NFP = {NFP}")
 INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
 WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
 
-# Volume-averaged beta the pressure is calibrated to, and the optimizer's grid:
+# Volume-averaged beta the pressure is calibrated to:
 TARGET_BETA = 0.005
-NS, FTOL, NITER = 31, 1.0e-12, 5500
 
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
-SURFACES = np.linspace(0.25, 0.75, 3)
-MBOZ = 8
+SURFACES = np.linspace(0.1, 0.9, 5)
+MBOZ = 16
+
+# Initial values of the pwO map (a, b, c, eta_min), and which of them the
+# optimizer may change; remove a name to hold it fixed:
+MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
+FREE_MAP = ("a", "b", "c", "eta_min")
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend:
-MAX_MODES = [2]
+# residual evaluations each stage may spend. Higher vacuum modes stay fixed:
+MAX_MODES = [3]
 MAX_NFEV = [25]
+NS_ARRAY = np.array([35])
+NITER_ARRAY = np.array([5000])
+FTOL_ARRAY = np.array([1e-12])
 
 # Targets:
 ASPECT_TARGET = 6.0
-MAGNETIC_WELL_TARGET = 0.01
-IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
-MIRROR_LIMIT = 0.15               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+ASPECT_WEIGHT = 10.0
+IOTA_FLOOR = 0.31 if NFP == 1 else 0.42  # minimum |iota| over the profile
+MAGNETIC_WELL_FLOOR = 0.01
+MAGNETIC_WELL_WEIGHT = 1.0e3
+MERCIER_S_MIN = 0.2               # DMerc inward of this is set by the radial grid
+MERCIER_WEIGHT = 100.0
+MIRROR_LIMIT = 0.16               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
+ELONGATION_LIMIT = 9.0
+EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
 
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
-PARAMETER_STEP = 0.02
+PARAMETER_STEP = 0.05
 MAX_PARAMETER_CHANGE = 1.0        # a continuation stays near its vacuum start
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
 
-# Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
-# but never below MINIMUM_MPOL:
-MINIMUM_MPOL = 5
-
 # Verification solve of the optimized boundary:
-FINAL_NS = 71
-FINAL_FTOL = 1.0e-12
-FINAL_NITER = 20000
+FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
+FINAL_FTOL = 1.0e-10
+FINAL_NITER = 30000
 
 # Every output file name contains this:
 OUTPUT_NAME = f"pwO_finite_beta_nfp{NFP}"
@@ -69,7 +80,7 @@ OUTPUT_NAME = f"pwO_finite_beta_nfp{NFP}"
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAX_MODES, MAX_NFEV = [1], [4]
-    FINAL_NS, FINAL_FTOL = 31, 1.0e-10
+    FINAL_NS, FINAL_FTOL = [31], 1.0e-10
 
 ###############################################################################
 # End of input parameters.
@@ -78,52 +89,71 @@ if ci_smoke:
 ### Set up the equilibrium ####################################################
 
 inp = vj.VmecInput.from_file(INPUT_FILE)
-inp = replace(inp, am=np.array([1.0, -1.0]), pres_scale=1.0, ns_array=np.array([NS]),
-              ftol_array=np.array([FTOL]), niter_array=np.array([NITER]))
+inp = replace(inp, am=np.array([1.0, -1.0]), pres_scale=1.0, ns_array=NS_ARRAY,
+              ftol_array=FTOL_ARRAY, niter_array=NITER_ARRAY)
 calibration = opt.solve_equilibrium(
     inp, initial_state=restart_state(vj.read_wout(WOUT_FILE), inp),
     raise_on_max_iterations=True)
 inp = replace(inp, pres_scale=TARGET_BETA / float(calibration.wout.betatotal))
-restart = calibration.solution
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
+def max_mirror(equilibrium_state, solver_context):
+    """Full-surface mirror ratio on the pwO surfaces, which the mapped variance does not see."""
+    return pwo.diagnostics_state(equilibrium_state, solver_context)[3]
 
 
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the full-surface mirror ratio, which the mapped variance does not see."""
-    mirror = pwo.diagnostics_state(equilibrium_state, solver_context)[3]
-    return jnp.maximum(mirror - MIRROR_LIMIT, 0.0)
+def boozer_spectrum(equilibrium_state, solver_context):
+    """The field and iota the map reads; FreeMapProblem turns these rows into the pwO residual."""
+    return pwo.spectrum_state(equilibrium_state, solver_context)
+
+
+def dmerc(equilibrium_state, solver_context):
+    """DMerc from MERCIER_S_MIN to inside the edge; positive is stable."""
+    values = opt.d_merc_state(equilibrium_state, solver_context)
+    s = np.linspace(0.0, 1.0, values.shape[0])
+    return values[(s >= MERCIER_S_MIN) & (s < 1.0)]
+
+
+def mercier(equilibrium_state, solver_context):
+    """DMerc hinge, log-bounded: DMerc diverges at zero shear and would swamp every other row."""
+    return jnp.log1p(opt.Hinge(dmerc, floor=0.0)(equilibrium_state, solver_context))
 
 
 # Each term is (function, target, weight).
-pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2)
+pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
+                        **MAP_PARAMETERS)
 objective_function_terms = [
-    (pwo, 0.0, PWO_WEIGHT),
-    (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 100.0),
-    (opt.magnetic_well, MAGNETIC_WELL_TARGET, 100.0),
-    (mirror_excess, 0.0, 100.0),
+    (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
+    (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 100.0),
+    (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0, MAGNETIC_WELL_WEIGHT),
+    (mercier, 0.0, MERCIER_WEIGHT),
+    (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
+    (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
+    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
+    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
     (opt.volume_average_beta, TARGET_BETA, 1.0 / TARGET_BETA**2),
 ]
 
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
-    ("beta", opt.volume_average_beta, ".3%"), ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
+    ("beta", opt.volume_average_beta, ".3%"), ("min |iota|", opt.min_abs_iota, ".4f"),
+    ("magnetic well", opt.magnetic_well, ".4f"),
+    ("min DMerc", lambda state, rt: jnp.min(dmerc(state, rt)), ".3e"),
+    ("axis excursion", opt.axis_excursion, ".4f"),
+    ("max mirror", lambda state, rt: jnp.max(max_mirror(state, rt)), ".3f"))
 monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 
 seed_input = inp
-equilibrium = opt.solve_equilibrium(inp, initial_state=restart)
+equilibrium = seed = opt.solve_equilibrium(inp, initial_state=calibration.solution)
 report("seed", equilibrium)
 # Stages that share a boundary resolution share ONE problem, as in
 # QA_optimization.py: every jitted graph is compiled once for the whole group.
-resolution_of = {max_mode: max(max_mode + 2, MINIMUM_MPOL) for max_mode in MAX_MODES}
+# The resolution never drops below the vacuum deck's, which holds its higher modes.
+resolution_of = {max_mode: max(max_mode + 2, inp.mpol) for max_mode in MAX_MODES}
 group_max_mode = {
     max_mode: max(other for other in MAX_MODES
                   if resolution_of[other] == resolution_of[max_mode])
@@ -146,14 +176,18 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    step = PARAMETER_STEP * stage.scales
+    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    # Map variables are sigmoid-scaled, so a unit step spans their bounds.
+    step = np.concatenate((PARAMETER_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
+    change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
     result = least_squares(
-        stage.residual, stage.x0, jac=stage.residual_jac,
-        x_scale=step, max_nfev=max_nfev,
-        bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
-                stage.x0 + MAX_PARAMETER_CHANGE * step),
+        joint.residual, joint.x0, jac=joint.residual_jac,
+        x_scale=step, max_nfev=max_nfev, bounds=(joint.x0 - change, joint.x0 + change),
         ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
-    x = stage.embed(result.x)
+    x = stage.embed(result.x[:joint.nx])
+    MAP_PARAMETERS = joint.values(result.x)
+    pwo.options.update(MAP_PARAMETERS)
+    print(f"map = {MAP_PARAMETERS}")
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)
@@ -161,32 +195,33 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
 ### Check the result ##########################################################
 
 # The optimizer's grid is not the certificate: re-solve the optimized boundary
-# on a finer radial grid to a tighter tolerance and quote that.
-final_resolution = dict(ns_array=np.array([FINAL_NS]), ftol_array=np.array([FINAL_FTOL]),
-                        niter_array=np.array([FINAL_NITER]))
-final_input = replace(inp, **final_resolution)
-final_equilibrium = opt.solve_equilibrium(
-    final_input, initial_state=equilibrium.solution,
-    verbose=not ci_smoke, raise_on_max_iterations=True)
+# and the seed on a finer radial grid to a tighter tolerance and quote that.
+final_resolution = dict(ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
+final_equilibrium = equilibrium
+for ns in FINAL_NS:
+    final_input = replace(inp, ns_array=np.array([ns]), **final_resolution)
+    final_equilibrium = opt.solve_equilibrium(
+        final_input, initial_state=final_equilibrium.solution,
+        verbose=not ci_smoke, raise_on_max_iterations=True)
+    seed = opt.solve_equilibrium(
+        replace(seed_input, ns_array=np.array([ns]), **final_resolution),
+        initial_state=seed.solution, verbose=False, raise_on_max_iterations=True)
 
 # Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
-seed_equilibrium = opt.solve_equilibrium(
-    replace(seed_input, **final_resolution), verbose=False, raise_on_max_iterations=True)
-half_mesh = (np.arange(FINAL_NS - 1) + 0.5) / (FINAL_NS - 1)
+half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
 neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
-seed_Q = screen_transport(seed_equilibrium.wout, neo_surfaces)
+seed_Q = screen_transport(seed.wout, neo_surfaces)
 final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
 
 ### Print, plot and save ######################################################
 
-final_total = report("final", final_equilibrium)["pwO total"]
-final_beta = float(opt.volume_average_beta(final_equilibrium.solution,
-                                           final_equilibrium.solver_context))
+final = report("final", final_equilibrium)
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
-                   well_floor=MAGNETIC_WELL_TARGET,
-                   extra=[("beta", final_beta, 0.9 * TARGET_BETA, "min"),
-                          ("beta", final_beta, 1.1 * TARGET_BETA, "max")])
-print(f"\npwO total {final_total:.3e}")
+                   well_floor=0.0,
+                   extra=[("min DMerc", final["min DMerc"], 0.0, "min"),
+                          ("beta", final["beta"], 0.9 * TARGET_BETA, "min"),
+                          ("beta", final["beta"], 1.1 * TARGET_BETA, "max")])
+print(f"\npwO total {final['pwO total']:.3e}")
 print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
