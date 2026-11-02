@@ -106,3 +106,20 @@ def test_donating_lane_matches_jit_and_never_reuses_donated_inputs(tmp_path, mon
     monkeypatch.setattr(lane, "executable", lambda *a, **k: failing_after_donation)
     with pytest.raises(RuntimeError, match="device failure"):
         lane(jnp.arange(4.0), y)
+
+
+def test_target_device_follows_jit_placement():
+    """Committed leaves fix the device, then a default-device context; two devices skip the cache."""
+    cpu = jax.devices("cpu")[0]
+
+    class Spread:                                   # committed to two devices
+        committed, shape, dtype, weak_type = True, (2,), np.dtype("float64"), False
+
+        def devices(self):
+            return {"d0", "d1"}
+
+    assert aot._device([Spread()]) is None
+    assert aot._structure((jnp.ones(2), Spread()), {}) is None
+    assert aot._device([jax.device_put(jnp.ones(2), cpu)]) == cpu
+    with jax.default_device(cpu):
+        assert aot._device([np.ones(2)]) == cpu
