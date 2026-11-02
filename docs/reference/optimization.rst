@@ -437,8 +437,8 @@ eliminates the block-tridiagonal radial bulk and solves only the evolved-edge
 correction before checking the full coupled residual. Local three-surface
 rows and a pivoted sparse band solve reduce its cold cost substantially, but
 local-row compilation still keeps it opt-in. It is a host lane: under an
-outer ``jax.jit`` the pullback warns and uses the staged coupled GCROT solve
-instead, so call the objective eagerly to keep it. ``device="auto"`` uses the CPU
+outer ``jax.jit`` the pullback runs it behind a ``jax.pure_callback`` on the
+saved root, so jit and eager calls take the same solver and gradient. ``device="auto"`` uses the CPU
 for this response on accelerator hosts; an explicit ``device="gpu"`` or
 process-wide JAX placement overrides that measured lower-memory default.
 
