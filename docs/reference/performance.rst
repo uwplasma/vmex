@@ -262,6 +262,21 @@ With jaxlib < 0.10 the cache defaults to off, because those releases crash
 deserializing large cached CPU executables; ``VMEX_COMPILATION_CACHE=1``
 forces it on.
 
+The solver step and block lanes and the free-boundary vacuum loop and full
+vacuum update are also stored as serialized executables under ``aot/`` in the
+cache directory, so a new process runs them without tracing or lowering.
+Each loads onto the one device its arguments use.  A warm ``cth_like``
+free-boundary solve (36-core x86 host, pinned to 4 loaded cores, JAX 0.12.0.1,
+4 alternated runs) takes 14.8–17.4 s against 16.9–23.2 s before; tracing,
+lowering and loading drop from 4.6–6.1 s to 2.2–2.5 s.  A first free-boundary
+value and gradient in a new process hits the cache for all of its 332
+programs and still spends 51–62 s tracing, lowering and loading them
+(no change outside the noise, 3 runs): those adjoint programs take the
+user's field function as a static argument, which no file can be keyed on.
+The defaults need no change.  Point ``VMEX_COMPILATION_CACHE_DIR`` at
+node-local disk when the home filesystem is slow or shared by many concurrent
+jobs, and set ``VMEX_COMPILATION_CACHE=0`` only when disk is scarce.
+
 High-mode FFT synthesis (commit ``ecfbe31d``, 2026-07-28)
 ---------------------------------------------------------
 
