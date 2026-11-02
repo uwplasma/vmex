@@ -796,33 +796,28 @@ def _solve_bwd_impl(cfg, saved, state_bar):
     traced = any(
         isinstance(value, jax.core.Tracer) for value in jax.tree.leaves(rhs)
     )
-    if traced:
+    if cfg.adjoint_solver == "boundary_schur":
+        # A host lane: under an outer jax.jit it runs behind a pure_callback
+        # on the concrete saved root, so jit and eager take the same solver.
+        args = (z_star, params, field_parameters, frozen, rcon0, zcon0, mask, rhs)
+        lam = jax.pure_callback(
+            im._host_callable(_host_schur_lane, cfg),
+            jax.tree.map(lambda leaf: jax.ShapeDtypeStruct(
+                leaf.shape, leaf.dtype), rhs),
+            *args, sharding=im._callback_sharding(cfg.implicit),
+        ) if traced else _host_boundary_schur_adjoint(
+            cfg, *args, fail=cfg.adjoint_fail)
+        residual = _projected_residual(cfg, mask, formulation="raw")
+    elif traced:
         # An outer jax.jit needs a staged Krylov loop. Ordinary SciPy/JAXopt
         # drivers call the concrete lane below, which compiles only one
         # transpose matvec and has a much smaller cold memory peak.
-        if cfg.adjoint_solver == "boundary_schur":
-            warnings.warn(
-                "adjoint_solver='boundary_schur' is a host lane and is not "
-                "available under jax.jit; this pullback uses the staged "
-                "coupled GCROT solve instead. That is a different solver, so "
-                "the gradient agrees only to the Krylov tolerance, and it is "
-                "the slower of the two -- measured on the free-boundary "
-                "single-stage deck at ns = 25, one warm value-and-gradient "
-                "costs 5.1 s through the Schur lane against 38.6 s staged. "
-                "Call the objective eagerly to keep the Schur lane.",
-                RuntimeWarning, stacklevel=2)
         _, state_pullback = jax.vjp(
             lambda z: residual(
                 z, params, field_parameters, frozen, rcon0, zcon0), z_star
         )
         lam, _ = im._adjoint_solve_gcrot(
             lambda cotangent: state_pullback(cotangent)[0], rhs, cfg.implicit)
-    elif cfg.adjoint_solver == "boundary_schur":
-        lam = _host_boundary_schur_adjoint(
-            cfg, z_star, params, field_parameters, frozen, rcon0, zcon0,
-            mask, rhs, fail=cfg.adjoint_fail,
-        )
-        residual = _projected_residual(cfg, mask, formulation="raw")
     elif cfg.adjoint_solver == "edge_response":
         response = _edge_response(
             cfg, params, field_parameters, frozen, rcon0, zcon0)
@@ -1051,6 +1046,24 @@ def _balanced_dense_solver(schur):
         return column_scale * balanced_solution
 
     return solve_reduced, condition
+
+
+def _host_schur_lane(cfg, *args):
+    """``pure_callback`` body of the Schur adjoint under an outer ``jax.jit``.
+
+    A typed failure is relayed like the forward solve's: kept in
+    ``implicit._HOST_ERROR`` behind a short sentinel naming its class.
+    """
+    im._HOST_ERROR.clear()
+    try:
+        with im._device_context(cfg.implicit):
+            args = im._device_pin(cfg.implicit, jax.tree.map(jnp.asarray, args))
+            return jax.tree.map(np.asarray, _host_boundary_schur_adjoint(
+                cfg, *args, fail=cfg.adjoint_fail))
+    except VmecError as exc:
+        im._HOST_ERROR.append(exc)
+        raise RuntimeError(f"boundary-Schur adjoint failed with {type(exc).__name__}: "
+                           f"{str(exc)[:200]}") from None
 
 
 def _host_boundary_schur_adjoint(
