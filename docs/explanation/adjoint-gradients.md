@@ -173,19 +173,18 @@ Use two complementary checks:
   Also check repeated parameters after unrelated trials and in a new problem
   instance. This tests the parameter dependence used by an optimizer.
 
-The two checks do not coincide exactly, and the difference is measured. VMEC
-releases the m=1 constrained `Z_sin` pair combination once `fsqz < 1e-6`.
-The linearization holds it at its converged value, while each cold re-solve
-freezes it wherever its own path left it. On `li383_low_res` at `ftol = 1e-13`
-the implicit mean-iota derivative differs from cold re-solve differences by
-1.0 % along RBC(1,1) and 2.8 % along ZBS(-1,1). The frozen-path check agrees
-to 7e-7. Adding the iota response to the family's drift alone closes the gap
-to 2.3e-6 and 1.6e-5. Across `mpol` 4–8 and `ns` 16–64 the gap spans
-0.06–2.8 % and does not fall monotonically. In the continuum this coordinate is
-an angle gauge, so neither number is wrong; the implicit value is the
-derivative with that gauge held fixed.
-`tests/test_implicit_grad_fd.py::test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family`
-checks the closure.
+VMEC releases the m=1 constrained `Z_sin` pair combination (`Z_cos` on
+lasym) once `fsqz < 1e-6`, so it has no equation at the root and a cold solve
+leaves it wherever its own path did. The linearization holds it fixed, so every
+fixed-boundary solve of a config keeps it at the config's first converged
+state, and the Newton anchor puts the evolved dofs back on the root. Before
+this hold, on `li383_low_res` at `ftol = 1e-13`, the implicit mean-iota
+derivative differed from cold re-solve differences by 1.0 % along RBC(1,1)
+and 2.8 % along ZBS(-1,1). On the nfp=2 seed (mpol = ntor = 5, ns = 16) an
+objective on interior `Z_sin` coefficients was 6.5x off. Both now agree to
+within 4e-6.
+`tests/test_implicit_grad_fd.py::test_li383_resolve_fd_matches_the_implicit_derivative`
+checks this.
 
 For free-boundary solves, compare against re-solves anchored by Newton steps
 on the same projected coupled residual. A converged free-boundary solve at
@@ -199,7 +198,8 @@ different points (see the [research plan](https://github.com/uwplasma/vmex/blob/
 Mirror ratio, iota and Boozer/QI diagnostics can amplify root, sampling or
 branch-selection differences. On `li383_low_res`,
 $d(\iota_{\mathrm{edge}})/d(\mathrm{RBC}(-1,1))$ is $-0.773$ from the adjoint
-but $+0.045$ from a naive central difference through the full host solver. If independent differences disagree or change
+and was $+0.045$ from a naive central difference through the full host solver
+before the hold above; it now agrees to 1e-6. If independent differences disagree or change
 sign, inspect those causes rather than dismissing the check or assuming the
 adjoint is wrong. Compare raw/projected residuals, frozen state components and
 independently refined diagnostics. If no agreement window is resolved, report

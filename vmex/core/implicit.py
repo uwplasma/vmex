@@ -81,27 +81,20 @@ Gradient checking solver-sensitive metrics
 ------------------------------------------
 The adjoint gradient is the derivative of the fixed point of the *frozen*
 residual ``F`` — the preconditioner/``tcon``/m=1 branch/dof mask are captured
-once at the base parameters, not re-derived.  For solver-sensitive metrics
-(``iota`` at ``ncurr=1``, mirror ratio, magnetic well, Boozer/QI residual) a
-naive re-solve FD is *not* a valid reference — it can sign-flip; use
-:func:`frozen_path_directional_fd`, which reproduces the adjoint to solver
-accuracy (full rationale on that function; ``tests/test_implicit_grad.py``).
+once at the base parameters, not re-derived.
+:func:`frozen_path_directional_fd` reproduces the adjoint to solver accuracy
+(full rationale on that function; ``tests/test_implicit_grad.py``).
 
-At a tight ``ftol``, with the state anchored as above, the difference that
-remains between the adjoint and a cold re-solve FD is the released m=1
-``Z_sin`` pair combination alone.  The linearization holds it at its
-converged value.  Each cold solve instead freezes it wherever its own path
-left it, which moves it by about 0.5 per unit boundary change on
-``li383_low_res``.  In the continuum this coordinate is an angle gauge, so
-iota depends on it only through discretization error.  On
-``li383_low_res``, ``d(mean iota)/d(RBC(1,1))`` is -2.5515 from the adjoint
-and -2.5261 from the re-solves (1.0%).  Adding the iota response to that
-drift alone closes the gap to 2e-6
-(``test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family``).
-The gap does not fall monotonically as ``mpol``/``ntor``/``ns`` are refined.
-Over ``mpol`` 4-8 and ``ns`` 16-64 it spans 0.06-1.0% on ``RBC(1,1)`` and
-0.1-2.8% on ``ZBS(-1,1)``.  The finest case tested, ``mpol = 8`` and
-``ns = 32``, gives 0.27% and 0.87%.
+The released m=1 ``Z_sin`` pair combination (``Z_cos`` on lasym) has no
+equation at the root, so a cold solve leaves it wherever its own path did,
+about 0.5 per unit boundary change on ``li383_low_res``.  The linearization
+holds it fixed, so every solve of a config keeps it at the config's first
+converged state (``_held_directions``) and the anchor puts the evolved dofs
+back on the root.  A re-solve FD then measures the map the adjoint
+differentiates.  Before, on ``li383_low_res``, ``d(mean iota)/d(RBC(1,1))``
+differed from re-solves by 1.0%, ``d(iota_edge)/d(RBC(-1,1))`` changed sign,
+and an interior coefficient objective on the nfp=2 seed was 6.5x off; now
+all three agree to within 4e-6 (``test_li383_resolve_fd_matches_the_implicit_derivative``).
 
 Strict and optimization-safe callback lanes
 ---------------------------------------------
@@ -2065,6 +2058,36 @@ def _mask_cache_key(cfg: ImplicitConfig) -> tuple:
     return (cfg.resolution, bool(cfg.lconm1), int(cfg.inp.ncurr))
 
 
+# cfg -> the first converged state, whose constrained directions every later
+# solve of the config keeps (see _held_directions).
+_GAUGE_REFERENCE: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
+    weakref.WeakKeyDictionary()
+
+
+def _held_directions(cfg: ImplicitConfig, mask, result) -> SpectralState:
+    """``result.state`` with every frozen entry taken from the reference.
+
+    The released m=1 ``Z_sin`` pair combination (and ``Z_cos`` on lasym)
+    has no equation at the root, so a cold solve leaves it wherever its own
+    path did, while the linearization holds it fixed.  Holding it at the
+    config's first converged state makes the forward map the one the adjoint
+    differentiates: on the nfp=2 seed (mpol = ntor = 5, ns = 16) a re-solve
+    FD of ``mean(Z_sin[8]**2)`` in ``RBC(1,1)`` was 0.154 of the adjoint.
+    The anchor below then puts the evolved dofs back on the root.
+    """
+    if bool(result.converged):
+        _GAUGE_REFERENCE.setdefault(cfg, result.state)
+    reference = _GAUGE_REFERENCE.get(cfg)
+    if reference is None:
+        return result.state
+    project = _dof_projector(cfg, jax.tree.map(jnp.asarray, mask))
+    edge = _edge_mask(cfg)
+    keep = lambda x: jax.tree.map(  # noqa: E731
+        lambda p, e, v: p + e * v, project(x), edge, x)
+    return jax.tree.map(lambda a, b, b_kept: a + b - b_kept,
+                        keep(result.state), reference, keep(reference))
+
+
 def _host_solve_and_mask(cfg: ImplicitConfig, params_np, *,
                          refine: bool = True) -> tuple:
     # This function executes on a pure_callback WORKER THREAD, where the
@@ -2119,6 +2142,7 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     if mask is None:
         mask = as_np(_fixed_boundary_dof_mask(cfg))
         _MASK_CACHE[cache_key] = mask
+    state = _held_directions(cfg, mask, result)
     # Anchor the state at the root of the residual the adjoint linearizes, so
     # every consumer — value, cotangent and linearization — reads the same
     # point (see _refined_state).  ``refine=False`` is the problem-factory
@@ -2131,13 +2155,13 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     # anchor does, and the anchor was most of its cost.
     if not refine or (refine == "certified" and not (
             bool(result.converged) or _fsq(result) <= cfg.max_fsq_ratio * cfg.ftol)):
-        return as_np(result.state), mask
+        return as_np(state), mask
     # The forward solve picks its own device (AUTO), so rehome its state
     # beside the parameters before refining: on cfg.device, or where the
     # callback payload is committed when no device is carried.
     home = cfg.device if cfg.device is not None else _params_committed_device(params)
     state = _refine_fixed_point(
-        cfg, params, result.state if home is None else jax.device_put(result.state, home),
+        cfg, params, state if home is None else jax.device_put(state, home),
         _device_pin(cfg, jax.tree.map(jnp.asarray, mask)))
     return as_np(state), mask
 
@@ -4032,13 +4056,13 @@ def frozen_path_directional_fd(
 
     A naive full re-solve at ``params +/- h*tangent`` lets the solver's internal
     convergence logic -- the ``bcovar`` preconditioner, the ``tcon`` constraint
-    scaling, the m=1 ``gcz`` zeroing branch (``residue.f90``), the dof mask, the
-    multigrid schedule, and exactly where the ``ftol`` crossing lands -- re-form
-    slightly differently at each perturbed point.  For a solver-sensitive metric
-    that path variation is an O(1) contribution that can inflate or even
-    sign-flip the finite difference (measured on ``li383_low_res``:
-    ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the adjoint, but the naive
-    central FD reads ``+0.045`` -- wrong sign).
+    scaling, the dof mask, the multigrid schedule, and exactly where the
+    ``ftol`` crossing lands -- re-form slightly differently at each perturbed
+    point.  Before the released m=1 family was held at the config's reference
+    (module docstring), that path variation sign-flipped the finite difference
+    on ``li383_low_res``: ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the
+    adjoint, but the naive central FD read ``+0.045``.  The re-solve now agrees
+    to 1e-6 there; this helper still isolates the linearization from the rest.
 
     The implicit adjoint deliberately does *not* differentiate through that
     logic: it linearizes the fixed point of the **frozen** residual ``F`` (the

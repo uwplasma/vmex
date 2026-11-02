@@ -56,9 +56,9 @@ memory no matter how many iterations the forward solve took
   exactly what the agreement printed above shows.
 
 One caveat worth knowing before you rely on FD checks yourself: for
-solver-sensitive outputs (iota, mirror ratio, magnetic well) a naive
-re-solving finite difference is not a valid reference — the frozen-path
-check in {doc}`/explanation/adjoint-gradients` is.
+solver-sensitive outputs (iota, mirror ratio, magnetic well) a re-solving
+finite difference can pick up the solver's path; the frozen-path check in
+{doc}`/explanation/adjoint-gradients` isolates the linearization.
 
 ## Model and references
 
