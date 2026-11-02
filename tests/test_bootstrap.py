@@ -865,3 +865,85 @@ def test_filter_bsubuv_lasym_halves_the_self_conjugate_nyquist_modes():
     assert out_u.shape == bsubu.shape and out_v.shape == bsubv.shape
     assert np.all(np.isfinite(out_u)) and np.all(np.isfinite(out_v))
     assert float(np.max(np.abs(out_u - bsubu))) > 1e-3
+
+
+# ---------------------------------------------------------------------------
+# Shaing-Callen geometric factor (bootstrap_geometric_factor)
+# ---------------------------------------------------------------------------
+
+
+def _geometric(xm, xn, bmnc, iota=(0.42, 0.61), nfp=3, **kw):
+    return bs.bootstrap_geometric_factor(
+        bmnc_b=jnp.tile(jnp.asarray(bmnc, float), (len(iota), 1)), xm_b=np.array(xm),
+        xn_b=np.array(xn), iota_b=jnp.asarray(iota), nfp=nfp, **kw)
+
+
+def test_geometric_factor_tokamak_limit_fixes_the_g4_sign():
+    """B(theta): f_s + <u B^2> = -G f_t/iota (HPN 2017 sign of the h equation)."""
+    out = _geometric([0, 1, 2], [0, 0, 0], [1.0, 0.15, 0.02], damping=0.0, sharpness=1e6)
+    theta = 2 * np.pi * np.arange(64) / 64
+    B = 1.0 + 0.15 * np.cos(theta) + 0.02 * np.cos(2 * theta)
+    B = np.broadcast_to(B[:, None], (64, 64))[None]
+    f_t = bs.compute_trapped_fraction(B, B ** -2, n_lambda=32)[-1]
+    np.testing.assert_allclose(out["f_t"], f_t[0], rtol=1e-12)
+    np.testing.assert_allclose(out["Delta_G"], -f_t[0] / np.array([0.42, 0.61]), rtol=1e-10)
+    np.testing.assert_allclose(out["Delta_I"], 0.0, atol=1e-14)
+    np.testing.assert_allclose(out["ratio"], 1.0, rtol=1e-10)
+
+
+def test_geometric_factor_qh_and_poloidally_closed_limits():
+    iota = np.array([0.42, 0.61])
+    qh = _geometric([0, 1], [0, 3], [1.0, 0.15], sharpness=1e6)
+    np.testing.assert_allclose(qh["ratio"], iota / (iota - 3), rtol=2e-3)
+    closed = _geometric([0, 0, 0], [0, 3, 6], [1.0, 0.15, 0.03])
+    np.testing.assert_allclose(closed["ratio"], 0.0, atol=1e-14)
+    assert np.all(np.asarray(closed["Delta_I"]) > 0.1)
+    mixed = _geometric([0, 1, 0, 1, 2], [0, 0, 3, 3, -3], [1.0, 0.12, 0.1, 0.02, 0.01])
+    assert np.all((np.asarray(mixed["ratio"]) > 0.2) & (np.asarray(mixed["ratio"]) < 0.8))
+
+
+def test_geometric_factor_jvp_matches_finite_difference():
+    xm, xn = [0, 1, 0, 1, 2], [0, 0, 3, 3, -3]
+    b0, i0 = jnp.array([1.0, 0.12, 0.1, 0.02, 0.01]), jnp.array([0.42, 0.61])
+    db, di = jnp.array([0.0, 0.3, -0.5, 1.0, 0.7]), jnp.array([0.2, -0.1])
+
+    def f(b, iota):
+        return _geometric(xm, xn, b, iota=iota)["ratio"]
+
+    _, tangent = jax.jvp(lambda e: f(b0 + e * db, i0 + e * di), (0.0,), (1.0,))
+    h = 1e-5
+    fd = (f(b0 + h * db, i0 + h * di) - f(b0 - h * db, i0 - h * di)) / (2 * h)
+    np.testing.assert_allclose(tangent, fd, rtol=1e-6, atol=1e-9)
+
+
+def test_geometric_residual_on_tokamak_matches_redl_prefactor(eq):
+    """Axisymmetric equilibrium: ratio 1 and -(G D_G + I D_I) = G f_t/iota of Redl."""
+    surfaces = np.array([0.2, 0.5, 0.8])
+    term = opt.BootstrapGeometricResidual(surfaces, mboz=8, nboz=0, sharpness=1e5)
+    out = term.compute_state(eq.state, eq.runtime)
+    np.testing.assert_allclose(out["ratio"], 1.0, atol=5e-3)
+    np.testing.assert_allclose(out["total"], np.mean(np.asarray(out["ratio"]) ** 2), rtol=1e-12)
+    geom = bs.redl_geometry_from_state(eq.state, eq.runtime, surfaces=np.asarray(out["s_b"]))
+    current = -(out["G_b"] * out["Delta_G"] + out["I_b"] * out["Delta_I"])
+    np.testing.assert_allclose(current, geom.G * geom.f_t / geom.iota, rtol=2e-2)
+
+
+#: STELLOPT BOOTSJ ``gnorm`` (damp_bs = 0.01, mbuse = nbuse = 32, booz_xform
+#: 32x32) on half-mesh surfaces j = 21, 61, 101, 141, 181 of the published
+#: QA/QH beta = 2.5% optima.
+BOOTSJ_GNORM = {"QA_beta2.5": [0.80968, 1.0337, 0.85960, 0.70748, 0.96333],
+                "QH_beta2.5": [-0.38010, -0.35110, -0.33070, -0.31382, -0.32089]}
+
+
+@needs_zenodo
+@pytest.mark.parametrize("config", sorted(BOOTSJ_GNORM))
+def test_geometric_factor_matches_bootsj(config):
+    wout = bs.read_wout(OPTIMA[config][0])
+    j = np.array([21, 61, 101, 141, 181])
+    booz = opt.boozer_modes_from_wout(wout, surfaces=(j - 1.5) / (len(wout.iotas) - 1),
+                                      mboz=32, nboz=32)
+    out = bs.bootstrap_geometric_factor(
+        **{k: booz[k] for k in ("bmnc_b", "xm_b", "xn_b", "iota_b", "nfp")}, sharpness=1e5)
+    G, current = np.asarray(wout.bvco)[j - 1], np.asarray(wout.buco)[j - 1]
+    gnorm = -booz["iota_b"] * (G * out["Delta_G"] + current * out["Delta_I"]) / (G * out["f_t"])
+    np.testing.assert_allclose(gnorm, BOOTSJ_GNORM[config], rtol=1.5e-2)
