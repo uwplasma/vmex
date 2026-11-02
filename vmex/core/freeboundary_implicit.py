@@ -1008,6 +1008,10 @@ def _edge_basis(cfg: FreeBoundaryImplicitConfig, dof_mask, packed_mask, dtype):
     return jnp.asarray(np.stack(columns, axis=1), dtype=dtype)
 
 
+#: Exact-transpose refinement steps of the Schur adjoint before its fallback.
+_SCHUR_REFINEMENTS = 3
+
+
 def _balanced_dense_solver(schur):
     """Two-sided balanced dense solve of one small edge Schur matrix."""
     tiny = np.finfo(schur.dtype).tiny
@@ -1016,12 +1020,18 @@ def _balanced_dense_solver(schur):
     column_scale = 1.0 / np.maximum(np.max(np.abs(row_scaled), axis=0), tiny)
     balanced = row_scaled * column_scale[None, :]
     condition = np.linalg.cond(balanced)
+    # One factorization on JAX's LU: NumPy's threaded LAPACK refactored on
+    # every call and spun its pool, 3 s and 40 CPU-s per 143x143 solve on a
+    # busy node against about 1 ms here.
+    factors = (jax.scipy.linalg.lu_factor(jnp.asarray(balanced))
+               if np.isfinite(condition)
+               and condition < 1.0 / np.finfo(schur.dtype).eps else None)
 
     def solve_reduced(value):
         scaled_rhs = row_scale * value
-        if np.isfinite(condition) and condition < 1.0 / np.finfo(
-                schur.dtype).eps:
-            balanced_solution = np.linalg.solve(balanced, scaled_rhs)
+        if factors is not None:
+            balanced_solution = np.asarray(jax.scipy.linalg.lu_solve(
+                factors, jnp.asarray(scaled_rhs)))
         else:
             # The edge system can inherit redundant m=1 directions. A
             # rank-revealing solve avoids amplifying them; the exact
@@ -1150,33 +1160,44 @@ def _host_boundary_schur_adjoint(
         return np.asarray(edge_values) + np.asarray(
             _edge_rows(jnp.asarray(solved), mask, edge_basis, cfg=cfg))
 
-    base = sparse_inverse(rhs, transpose=True)
-    edge_rhs = np.asarray(_edge_rows_of_tree(base, mask, edge_basis, cfg=cfg))
-
-    identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
+    identity = np.eye(nedge, dtype=np.dtype(dtype))
     schur = probe(identity, edge_pullback).T
     solve_reduced, condition = _balanced_dense_solver(schur)
-    edge_solution = solve_reduced(edge_rhs)
-    # Dense iterative refinement is cheap at edge size and recovers the
-    # residual digits lost to the raw near-axis scaling.
-    for _ in range(3):
-        edge_solution += solve_reduced(edge_rhs - schur @ edge_solution)
     if im._adjoint_debug_enabled():
         print(f"[vmex adjoint] balanced Schur condition={condition:.3e}")
 
-    correction_rows = _edge_probe_columns(
-        jnp.asarray(np.atleast_2d(edge_solution), dtype), edge_pullback,
-        lower_blocks, diagonal, upper_blocks, mask, edge_basis, cfg=cfg,
-        chunk=chunk)[0]
-    correction = _unpack_projected(
-        jnp.asarray(sparse_inverse_packed(
-            np.asarray(correction_rows), transpose=True)), mask, cfg=cfg)
-    solution = jax.tree.map(jnp.subtract, base, correction)
-    defect = jax.tree.map(
-        jnp.subtract, rhs, _apply_pullback(coupled_pullback, solution))
-    residual_norm = float(im._tree_norm(defect))
+    def schur_inverse(value):
+        """The reduced solve: exact on the response-linearized transpose."""
+        base = sparse_inverse(value, transpose=True)
+        edge_rhs = np.asarray(_edge_rows_of_tree(
+            base, mask, edge_basis, cfg=cfg))
+        edge_solution = solve_reduced(edge_rhs)
+        # Dense iterative refinement is cheap at edge size and recovers the
+        # residual digits lost to the raw near-axis scaling.
+        for _ in range(3):
+            edge_solution += solve_reduced(edge_rhs - schur @ edge_solution)
+        correction_rows = _edge_probe_columns(
+            jnp.asarray(np.atleast_2d(edge_solution), dtype), edge_pullback,
+            lower_blocks, diagonal, upper_blocks, mask, edge_basis, cfg=cfg,
+            chunk=chunk)[0]
+        return jax.tree.map(jnp.subtract, base, _unpack_projected(
+            jnp.asarray(sparse_inverse_packed(
+                np.asarray(correction_rows), transpose=True)), mask, cfg=cfg))
+
     rhs_norm = float(im._tree_norm(rhs))
     tolerance = float(im._adjoint_acceptance(icfg, rhs_norm))
+    solution = schur_inverse(rhs)
+    # A miss is a few digits at most, 4e-7 against 1e-7 at 8/8/31: refine on
+    # the exact coupled transpose, about 0.3 s a step, before the cold Krylov
+    # fallback, which took 300 s there.
+    for step in range(_SCHUR_REFINEMENTS + 1):
+        defect = jax.tree.map(
+            jnp.subtract, rhs, _apply_pullback(coupled_pullback, solution))
+        residual_norm = float(im._tree_norm(defect))
+        if not np.isfinite(residual_norm) or residual_norm <= tolerance:
+            break
+        if step < _SCHUR_REFINEMENTS:
+            solution = jax.tree.map(jnp.add, solution, schur_inverse(defect))
     if not np.isfinite(residual_norm) or residual_norm > tolerance:
         # The raw near-axis scaling can leave the reduced solve a few ulps
         # outside the strict certificate. Continue from it with the original
