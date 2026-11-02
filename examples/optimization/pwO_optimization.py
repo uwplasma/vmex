@@ -43,9 +43,12 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 
 # Zero bootstrap current. The mapped field alone already has a zero collisionless
 # bootstrap geometric factor for every map; the current comes from the unmapped
-# band where B_max lives, so these rows flatten B across that band:
-ZERO_BOOTSTRAP_MAP = False
-BOOTSTRAP_BAND_WEIGHT = 1.0e3
+# band where B_max lives. "band" flattens B across that band (sufficient, not
+# necessary); "geometric" leaves the band free and minimizes the collisionless
+# bootstrap ratio (1 for QA, 0 for zero current) on SURFACES; None does neither.
+# Check the result with a finite-collisionality D31: the ratio is collisionless:
+BOOTSTRAP_TERM = None
+BOOTSTRAP_WEIGHT = {"band": 1.0e3, "geometric": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
@@ -137,10 +140,15 @@ objective_function_terms = [
 if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
         (opt.magnetic_well, MAGNETIC_WELL_TARGET, MAGNETIC_WELL_WEIGHT))
+bootstrap = opt.BootstrapGeometricResidual(SURFACES)
+if BOOTSTRAP_TERM == "geometric":
+    objective_function_terms.append((bootstrap, 0.0, BOOTSTRAP_WEIGHT))
 
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("band spread", lambda state, rt: pwo.compute_state(state, rt)["band_total"], ".6e"),
+    ("bootstrap ratio", lambda state, rt: jnp.max(jnp.abs(
+        bootstrap.compute_state(state, rt)["ratio"])), ".3f"),
     ("mean iota", opt.mean_iota, ".4f"), ("elongation", opt.max_elongation, ".4f"),
     ("axis excursion", opt.axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
     ("max mirror", lambda state, rt: jnp.max(max_mirror(state, rt)), ".3f"))
@@ -183,7 +191,7 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
     joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
-                           band_weight=BOOTSTRAP_BAND_WEIGHT if ZERO_BOOTSTRAP_MAP else 0.)
+                           band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
