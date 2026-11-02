@@ -1157,19 +1157,26 @@ def _host_boundary_schur_adjoint(
 
     rhs_norm = float(im._tree_norm(rhs))
     tolerance = float(im._adjoint_acceptance(icfg, rhs_norm))
-    solution = schur_inverse(rhs)
     # A miss is a few digits at most, 4e-7 against 1e-7 at 8/8/31: refine on
     # the exact coupled transpose, about 0.3 s a step, before the cold Krylov
-    # fallback, which took 300 s there.
+    # fallback, which took 300 s there.  This is a stationary iteration, so it
+    # contracts only where the reduced solve is a good inverse: a step that
+    # does not lower the exact residual ends it, and the best iterate is kept.
+    trial, solution, residual_norm = schur_inverse(rhs), None, np.inf
     for step in range(_SCHUR_REFINEMENTS + 1):
         defect = jax.tree.map(
-            jnp.subtract, rhs, _apply_pullback(coupled_pullback, solution))
-        residual_norm = float(im._tree_norm(defect))
-        if not np.isfinite(residual_norm) or residual_norm <= tolerance:
+            jnp.subtract, rhs, _apply_pullback(coupled_pullback, trial))
+        trial_norm = float(im._tree_norm(defect))
+        if im._adjoint_debug_enabled():
+            print(f"[vmex adjoint] Schur certificate step={step} "
+                  f"residual={trial_norm:.3e} tolerance={tolerance:.3e}")
+        if not trial_norm < residual_norm:
             break
-        if step < _SCHUR_REFINEMENTS:
-            solution = jax.tree.map(jnp.add, solution, schur_inverse(defect))
-    if not np.isfinite(residual_norm) or residual_norm > tolerance:
+        solution, residual_norm = trial, trial_norm
+        if residual_norm <= tolerance or step == _SCHUR_REFINEMENTS:
+            break
+        trial = jax.tree.map(jnp.add, trial, schur_inverse(defect))
+    if not residual_norm <= tolerance:
         # The raw near-axis scaling can leave the reduced solve a few ulps
         # outside the strict certificate. Continue from it with the original
         # coupled operator; this changes no mathematics and usually needs only
