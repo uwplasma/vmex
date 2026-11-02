@@ -28,10 +28,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.flatten_util import ravel_pytree
-from scipy.sparse import bsr_matrix
+from scipy.linalg import get_lapack_funcs
 from scipy.sparse.linalg import LinearOperator, gcrotmk
 from solvax import (
-    SpluFactorization, auto_chunk_size, block_thomas_factor, block_thomas_solve,
+    auto_chunk_size, block_thomas_factor, block_thomas_solve,
 )
 from solvax import gmres as _solvax_gmres
 
@@ -1005,6 +1005,48 @@ def _balanced_dense_solver(schur):
     return solve_reduced, condition
 
 
+def _banded_bulk_transpose_solver(lower, diagonal, upper, row_scale,
+                                  column_scale):
+    """``v -> A^-T v`` for a batch ``(k, ns, b)``, by LAPACK banded LU.
+
+    ``S = diag(row_scale) A diag(column_scale)`` is block tridiagonal, so its
+    rows reach ``2b - 1`` columns either side; ``gbtrf`` factors that band
+    with row partial pivoting in ``ns b (6b - 2)`` scalars, twice the blocks.
+    It replaced scipy's SuperLU, whose 32-bit build sizes its first workspace
+    as ``30 nnz(S)`` and raised MemoryError once ``nnz(S)`` passed 7.2e7
+    (12/12/51 has 1.07e8) with tens of GB free.  Block Thomas, which pivots
+    only inside each Schur block, gave a 12x larger coupled-certificate
+    residual at 8/8/31 and an 8x slower Krylov fallback.
+    """
+    ns, size = diagonal.shape[:2]
+    rows, columns = np.asarray(row_scale), np.asarray(column_scale)
+    band_width = 2 * size - 1
+    band = np.zeros((3 * band_width + 1, ns * size), np.asarray(diagonal).dtype,
+                    order="F")
+    local = np.arange(size)
+    for row in range(ns):
+        for column, blocks in ((row - 1, lower), (row, diagonal),
+                               (row + 1, upper)):
+            if 0 <= column < ns:
+                i = row * size + local[:, None]
+                j = column * size + local[None, :]
+                band[2 * band_width + i - j, j] = (
+                    rows[row][:, None] * np.asarray(blocks[row])
+                    * columns[column][None, :])
+    gbtrf, gbtrs = get_lapack_funcs(("gbtrf", "gbtrs"), (band,))
+    factors, pivots, info = gbtrf(band, band_width, band_width, overwrite_ab=1)
+    if info != 0:
+        raise np.linalg.LinAlgError(f"singular free-boundary bulk (gbtrf {info})")
+
+    def solve(values):
+        flat = np.moveaxis(values * columns, 0, -1).reshape(ns * size, -1)
+        solved = gbtrs(factors, band_width, band_width, flat, pivots,
+                       trans=1)[0]
+        return np.moveaxis(solved.reshape(ns, size, -1), -1, 0) * rows
+
+    return solve
+
+
 def _host_boundary_schur_adjoint(
     cfg, z_star, params, field_parameters, frozen, rcon0, zcon0, mask, rhs,
     *, fail="error",
@@ -1019,7 +1061,7 @@ def _host_boundary_schur_adjoint(
 
     where ``U`` injects the evolved edge row. Direct three-surface assembly
     already retains every terminal VMEC stencil coupling in ``A``; only
-    NESTOR's response to the moving edge remains in ``E``. One sparse bulk
+    NESTOR's response to the moving edge remains in ``E``. One banded bulk
     factorization and the edge solve recover the full adjoint. ``E``'s
     columns come from NESTOR's dense edge response (:func:`_edge_response`),
     its exact linearization at this root, so each costs a VMEC transpose
@@ -1060,68 +1102,30 @@ def _host_boundary_schur_adjoint(
     nedge = int(edge_basis.shape[1])
     chunk = int(cfg.schur_probe_chunk_size)
 
-    # The raw radial system is strongly scaled near the magnetic axis. A
-    # globally pivoted sparse LU is materially more accurate there than the
-    # no-pivot block-Thomas elimination, while retaining O(ns) block storage.
-    ns, block_size = np.asarray(diagonal).shape[:2]
-    bulk_row_scale = np.asarray(row_scale)
-    bulk_column_scale = np.asarray(column_scale)
-    previous = np.maximum(np.arange(ns) - 1, 0)
-    following = np.minimum(np.arange(ns) + 1, ns - 1)
-    lower = (bulk_row_scale[:, :, None] * np.asarray(lower_blocks)
-             * bulk_column_scale[previous, None, :])
-    middle = (bulk_row_scale[:, :, None] * np.asarray(diagonal)
-              * bulk_column_scale[:, None, :])
-    upper = (bulk_row_scale[:, :, None] * np.asarray(upper_blocks)
-             * bulk_column_scale[following, None, :])
-    blocks, indices, indptr = [], [], [0]
-    for radial_row in range(ns):
-        if radial_row:
-            blocks.append(lower[radial_row]); indices.append(radial_row - 1)
-        blocks.append(middle[radial_row]); indices.append(radial_row)
-        if radial_row + 1 < ns:
-            blocks.append(upper[radial_row]); indices.append(radial_row + 1)
-        indptr.append(len(blocks))
-    blocks = np.asarray(blocks)
-    del lower, middle, upper  # the scaled bands stay in ``blocks`` until tocsc
-    sparse_bulk = bsr_matrix(
-        (blocks, np.asarray(indices), np.asarray(indptr)),
-        shape=(ns * block_size, ns * block_size)).tocsc()
-    del blocks
-    bulk_lu = SpluFactorization(sparse_bulk)
-    del sparse_bulk
+    # The raw radial system is strongly scaled near the magnetic axis; a
+    # pivoted banded LU of the whole bulk keeps the certificate residual of
+    # the sparse LU it replaces (see :func:`_banded_bulk_transpose_solver`).
+    bulk_solve = _banded_bulk_transpose_solver(
+        lower_blocks, diagonal, upper_blocks, row_scale, column_scale)
 
-    def sparse_inverse_packed(packed, *, transpose):
+    def sparse_inverse_packed(packed):
         values = np.asarray(packed)
-        batched = values.ndim == 3
-        values = values if batched else values[None]
-        scale_rhs = bulk_column_scale if transpose else bulk_row_scale
-        scale_solution = bulk_row_scale if transpose else bulk_column_scale
-        flat_rhs = np.moveaxis(values * scale_rhs[None], 0, -1).reshape(
-            ns * block_size, -1)
-        flat_solution = np.asarray(bulk_lu.solve(
-            flat_rhs, trans="T" if transpose else "N"))
-        solution = np.moveaxis(
-            flat_solution.reshape(ns, block_size, -1), -1, 0)
-        solution = solution * scale_solution[None]
-        return solution if batched else solution[0]
+        solved = bulk_solve(values if values.ndim == 3 else values[None])
+        return jnp.asarray(solved if values.ndim == 3 else solved[0])
 
-    def sparse_inverse(tree, *, transpose):
-        packed = sparse_inverse_packed(
-            np.asarray(_pack_projected(tree, mask, cfg=cfg)),
-            transpose=transpose)
-        return _unpack_projected(jnp.asarray(packed), mask, cfg=cfg)
+    def sparse_inverse(tree):
+        return _unpack_projected(sparse_inverse_packed(
+            _pack_projected(tree, mask, cfg=cfg)), mask, cfg=cfg)
 
     def probe(edge_values, pullback):
         """Schur columns for a batch of edge directions, exact or modelled."""
         packed = _edge_probe_columns(
             jnp.asarray(edge_values, dtype), pullback, lower_blocks, diagonal,
             upper_blocks, mask, edge_basis, cfg=cfg, chunk=chunk)
-        solved = sparse_inverse_packed(np.asarray(packed), transpose=True)
-        return np.asarray(edge_values) + np.asarray(
-            _edge_rows(jnp.asarray(solved), mask, edge_basis, cfg=cfg))
+        return np.asarray(edge_values) + np.asarray(_edge_rows(
+            sparse_inverse_packed(packed), mask, edge_basis, cfg=cfg))
 
-    base = sparse_inverse(rhs, transpose=True)
+    base = sparse_inverse(rhs)
     edge_rhs = np.asarray(_edge_rows_of_tree(base, mask, edge_basis, cfg=cfg))
 
     identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
@@ -1140,8 +1144,7 @@ def _host_boundary_schur_adjoint(
         lower_blocks, diagonal, upper_blocks, mask, edge_basis, cfg=cfg,
         chunk=chunk)[0]
     correction = _unpack_projected(
-        jnp.asarray(sparse_inverse_packed(
-            np.asarray(correction_rows), transpose=True)), mask, cfg=cfg)
+        sparse_inverse_packed(correction_rows), mask, cfg=cfg)
     solution = jax.tree.map(jnp.subtract, base, correction)
     defect = jax.tree.map(
         jnp.subtract, rhs, _apply_pullback(coupled_pullback, solution))
@@ -1238,7 +1241,7 @@ def _anchor_norm(z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
 def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
     """Block-Thomas factors of the scaled bulk block tridiagonal.
 
-    The same two-sided scaling the Schur adjoint's sparse LU uses; here the
+    The same two-sided scaling the Schur adjoint's banded LU uses; here the
     factors only precondition, so the fixed-boundary refinement's JAX block
     elimination (``implicit._refine_block_factor_core``) is accurate enough
     and keeps each Krylov solve inside one compiled program.
