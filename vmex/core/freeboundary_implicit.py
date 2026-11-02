@@ -504,7 +504,6 @@ def _host_solve_and_mask_impl(
         rt_mask = dataclasses.replace(
             rt, rcon0=rcon0, zcon0=zcon0, lfreeb=True,
             jmax=int(icfg.resolution.ns),
-            bsqvac_edge=jax.lax.stop_gradient(stage.vacuum.bsqvac),
             # Host value on purpose: this runtime only discovers which dofs
             # have structural force support, a discrete answer that no
             # derivative is taken through.  The adjoint lanes above use the
@@ -513,6 +512,14 @@ def _host_solve_and_mask_impl(
                 _presf_ns_scale(inp, int(icfg.resolution.ns))
             ),
         )
+        bsqvac = stage.vacuum.bsqvac
+        if bsqvac is None:
+            # A trial that ran out of iterations before fsq fell to the
+            # activation threshold (NCSX at nzeta = 6 < 2*ntor + 1 stalls
+            # at fsq 1.1e-3) never called NESTOR; evaluate it once here.
+            bsqvac = cfg.vacuum_program.bsq(state, rt_mask, field)
+        rt_mask = dataclasses.replace(
+            rt_mask, bsqvac_edge=jax.lax.stop_gradient(bsqvac))
         force = lambda x: evaluate_forces(x, rt_mask)[0]  # noqa: E731
         mask = im._dof_mask(
             state, rt_mask, icfg, evaluator=force, fixed_edge=False
