@@ -52,7 +52,7 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 # None does none of them:
 BOOTSTRAP_TERM = None
 BOOTSTRAP_WEIGHT = {"band": 1.0e3 if NFP == 3 else 1.0e4,  # NFP 2 under-flattens at 1e3
-                    "geometric": 1.0e2, "finite_nu": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
+                    "geometric": 1.0e2, "finite_nu": 1.0e3}.get(BOOTSTRAP_TERM, 0.0)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
