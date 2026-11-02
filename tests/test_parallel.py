@@ -223,3 +223,19 @@ def test_process_workers_deal_gpus_and_refuse_oversubscription(tmp_path):
     if hasattr(os, "sched_getaffinity"):
         with pytest.raises(ValueError, match="exceeds"):
             parallel.ProcessWorkers(_build_doubled, 10**6)
+
+
+def test_worker_start_applies_its_slot_in_process(monkeypatch, tmp_path):
+    """The spawned-side setup, run here because coverage cannot see the child."""
+    import multiprocessing
+
+    pinned = []
+    monkeypatch.setattr(parallel.os, "sched_setaffinity",
+                        lambda _pid, cores: pinned.append(cores), raising=False)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    monkeypatch.setenv("VMEX_COMPILATION_CACHE_DIR", "")
+    slots = multiprocessing.get_context("spawn").Value("i", 1)
+    parallel._start_worker(_build_gpu_env, [[0], [5]], ["0", "3"], tmp_path, slots)
+    assert pinned == [[5]] and slots.value == 2
+    assert os.environ["VMEX_COMPILATION_CACHE_DIR"] == str(tmp_path)
+    assert parallel._call_worker(None) == "3"
