@@ -30,7 +30,9 @@ import numpy as np
 from jax.flatten_util import ravel_pytree
 from scipy.sparse import bsr_matrix
 from scipy.sparse.linalg import LinearOperator, gcrotmk
-from solvax import SpluFactorization, block_thomas_factor, block_thomas_solve
+from solvax import (
+    SpluFactorization, auto_chunk_size, block_thomas_factor, block_thomas_solve,
+)
 from solvax import gmres as _solvax_gmres
 
 from . import implicit as im
@@ -201,10 +203,6 @@ def _vacuum_inputs(state: SpectralState, rt) -> tuple:
     return (*_edge_fourier(state, rt), ctor, axis_r, axis_z)
 
 
-#: NESTOR inputs linearized together by :func:`_edge_response`.
-_EDGE_RESPONSE_CHUNK = 16
-
-
 # Module scope with ``cfg`` the only static key: every per-gradient array is
 # an argument, so one executable serves a whole optimization and no trial's
 # arrays are baked into a cached trace.
@@ -235,9 +233,10 @@ def _edge_response(cfg: FreeBoundaryImplicitConfig, params, field_parameters,
 
     # One primal, then the tangents a chunk at a time: a full-width vmap holds
     # every intermediate of Biot-Savart and of NESTOR's assembly once per input.
-    # Padding with zero columns keeps one chunk width, so one compiled body.
+    # Padding with zero columns keeps one chunk width, so one compiled body.  The
+    # width comes from the problem alone, so no machine changes the executable.
     value, tangent_map = jax.linearize(kernel, flat)
-    chunk = min(_EDGE_RESPONSE_CHUNK, flat.size)
+    chunk = auto_chunk_size(flat.size)
     tangents = jnp.eye(flat.size + -flat.size % chunk, flat.size, dtype=flat.dtype)
     columns = jax.lax.map(jax.vmap(tangent_map), tangents.reshape(-1, chunk, flat.size))
     jacobian = jnp.moveaxis(columns.reshape(-1, value.size), 0, -1)[:, :flat.size]
