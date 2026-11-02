@@ -8,6 +8,8 @@ skip when the required hardware is unavailable.
 from __future__ import annotations
 
 import contextlib
+import gc
+import weakref
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -639,6 +641,11 @@ def test_free_boundary_auto_takes_the_gpu_only_when_large(
     made = fbi.make_free_boundary_config(SimpleNamespace(lfreeb=True), object(), device="auto")
     assert made.implicit.device == "cpu"
     assert (made.concrete and made.concrete.implicit.device) == chosen
+    if made.concrete is not None:  # the fallback map must not keep dropped configs alive
+        sibling = weakref.ref(made.concrete)
+        del made
+        gc.collect()
+        assert sibling() is None and not fbi._AUTO_OF
 
 
 def test_free_boundary_auto_gpu_is_for_eager_calls_and_falls_back(monkeypatch):

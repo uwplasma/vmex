@@ -21,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import warnings
+import weakref
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -1870,9 +1871,12 @@ def _exhausted(error, auto, stage) -> bool:
     return True
 
 
-_GPU_EXHAUSTED: set[FreeBoundaryImplicitConfig] = set()
+# Weak, so configs a long scan or optimization drops are freed with their
+# vacuum programs; the auto config holds its sibling, so the value is weak.
+_GPU_EXHAUSTED: weakref.WeakSet[FreeBoundaryImplicitConfig] = weakref.WeakSet()
 #: The ``device="auto"`` config of each GPU sibling, for the gradient's fallback.
-_AUTO_OF: dict[FreeBoundaryImplicitConfig, FreeBoundaryImplicitConfig] = {}
+_AUTO_OF: weakref.WeakValueDictionary[FreeBoundaryImplicitConfig, FreeBoundaryImplicitConfig] = (
+    weakref.WeakValueDictionary())
 
 solve_free_boundary_implicit = _auto_placed(solve_free_boundary_implicit)
 solve_free_boundary_implicit_status = _auto_placed(solve_free_boundary_implicit_status)
