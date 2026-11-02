@@ -309,7 +309,7 @@ def test_balanced_dense_solver_survives_a_rank_deficient_edge_system():
         np.array([2.0, -1.0]), rtol=1.0e-12, atol=0.0)
 
 
-def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
+def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient(monkeypatch, capsys):
     """The radial-elimination lanes reuse one executable and strand no arrays.
 
     Every per-gradient array -- the bulk blocks, the mask, the saved
@@ -398,6 +398,25 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
         "adjoint_certificate_fallbacks"]
     assert after == before + 1
     np.testing.assert_allclose(forced, elimination, rtol=1.0e-6, atol=0.0)
+
+    # Inexact Schur probes: scale NESTOR's edge response. A small error is
+    # refined away on the exact transpose; a wrong sign does not contract,
+    # stops after one step and falls back once, counted, to the same gradient.
+    response = fbi._edge_response
+    for scale, steps, fallbacks in ((1.0005, 3, 0), (-1.0, 2, 1)):
+        monkeypatch.setattr(fbi, "_edge_response", lambda *a, s=scale, **k: (
+            lambda value, jacobian, inputs: (value, s * jacobian, inputs))(
+                *response(*a, **k)))
+        before = (im._SOLVE_STATS.get(schur.implicit) or {}).get(
+            "adjoint_certificate_fallbacks", 0) or 0
+        capsys.readouterr()
+        with monkeypatched_debug():
+            inexact = np.asarray(fbi._solve_bwd_impl(
+                schur, saved[:6], state_bar)[1])
+        assert capsys.readouterr().out.count("Schur certificate step=") == steps
+        assert ((im._SOLVE_STATS.get(schur.implicit) or {}).get(
+            "adjoint_certificate_fallbacks", 0) or 0) == before + fallbacks
+        np.testing.assert_allclose(inexact, elimination, rtol=1.0e-6, atol=0.0)
 
 
 def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
