@@ -672,11 +672,13 @@ Run the vacuum example first, with the same ``NFP``: the continuation reads its
 proportional to ``1-s``, calibrated to 0.5% volume-average beta at fixed flux,
 and the beta error joins the objective list.
 
-``single_stage_optimization_pwO.py`` first fits coils to the fixed plasma,
-then adds the pwO residual to the joint boundary/coil objective. Coil
+``single_stage_optimization_pwO.py`` reads the vacuum result, calibrates the
+pressure, and runs one finite-beta plasma stage with the pwO map free. It then
+fits coils to the fixed plasma and adds the pwO residual, with the map held,
+to the joint boundary/coil objective. Coil
 length, curvature and distances are normalized by the seed minor radius;
 dense geometry sampling checks constraints between field quadrature nodes.
-Run the finite-beta example first. Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
+Run the vacuum example first. Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
 keeps an accepted fit. ``TARGET_BETA=0`` selects vacuum. The field checks
 still apply to supplied coils. The script requires
 ``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold free-boundary
