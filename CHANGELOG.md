@@ -6,9 +6,7 @@ record under `benchmarks/` names the revision it was measured at.
 
 ## Unreleased
 
-- **Free-boundary gradients:** `make_free_boundary_config` now defaults to
-  `adjoint_solver="boundary_schur"`. `coupled_gcrot` stays as an advanced
-  cross-check.
+- `make_free_boundary_config` now defaults to `adjoint_solver="boundary_schur"`.
 
 ## 0.12.0 - 2026-10-21
 
