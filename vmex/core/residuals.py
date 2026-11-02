@@ -66,6 +66,7 @@ __all__ = [
     "m1_physical_to_constrained",
     "m1_residue_rotation",
     "zero_m1_z_force",
+    "hold_m1_family",
     "m1_zero_condition",
     "edge_force_condition",
     "scalxc_scale_force",
@@ -359,6 +360,29 @@ def zero_m1_z_force(force: SpectralForce, enabled: Array) -> SpectralForce:
         mask = jnp.asarray(enabled).astype(block.dtype)
         updates[name] = block.at[:, 1, :].set(block[:, 1, :] * (1.0 - mask))
     return replace(force, **updates) if updates else force
+
+
+def hold_m1_family(state, source, modes: ModeTable, *, lasym: bool):
+    """``state`` with the m=1 constrained coordinate taken from ``source``.
+
+    ``(Rss - Zcs)/2`` (lasym: ``(Rsc - Zcc)/2``, all n), whose force
+    :func:`zero_m1_z_force` zeroes: the antisymmetric ``Z_sin`` part of each
+    ``(+n, -n)`` pair (lasym: the symmetric ``Z_cos`` part and ``n = 0``).
+    """
+    m, n = np.asarray(modes.m, dtype=int), np.asarray(modes.n, dtype=int)
+    index = {(a, b): k for k, (a, b) in enumerate(zip(m, n))}
+    pos, neg = (np.asarray([index[(1, k * j)] for j in range(1, int(n.max()) + 1)], dtype=int) for k in (1, -1))
+
+    def take(x, y, sign):
+        x, y = jnp.asarray(x), jnp.asarray(y)
+        d = 0.5 * ((y[:, pos] - x[:, pos]) + sign * (y[:, neg] - x[:, neg]))
+        return x.at[:, pos].add(d).at[:, neg].add(sign * d)
+
+    out = {"Z_sin": take(state.Z_sin, source.Z_sin, -1.0)} if pos.size else {}
+    if lasym:
+        z = take(state.Z_cos, source.Z_cos, 1.0) if pos.size else jnp.asarray(state.Z_cos)
+        out["Z_cos"] = z.at[:, index[(1, 0)]].set(jnp.asarray(source.Z_cos)[:, index[(1, 0)]])
+    return replace(state, **out)
 
 
 def m1_zero_condition(*, fsqz_previous: Array, iterations_since_restart: Array) -> Array:

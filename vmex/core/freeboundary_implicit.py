@@ -368,6 +368,7 @@ def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
         presf_ns_scale=_presf_ns_scale_traceable(
             params, icfg.inp, int(icfg.resolution.ns)),
     )
+    state = im._held(state, rt)
     if response is not None:
         bsqvac = _linearized_bsqvac(state, rt, response)
     elif fixed_bsqvac is None:
@@ -469,6 +470,7 @@ def _continuation(stage) -> dict:
     return dict(initial_state=stage.continuation_state)
 
 
+@im._holding_m1
 def _host_solve_and_mask_impl(
     cfg, params_np, field_parameters_np, *, error_on_no_convergence=True,
 ):
@@ -541,21 +543,6 @@ def _host_solve_and_mask_impl(
         )
         _FREE_MASK_CACHE[key] = mask
 
-    # The projector's complement (the m=1 pair's antisymmetric Z, released only
-    # early in a VMEC run) has no equation at the root, so the host leaves it
-    # wherever its history did. The adjoint holds it fixed, so hold it at the
-    # one reference here too: left to vary, a gradient missed 0.96 % of a
-    # converged central difference on a boundary-spectrum objective.
-    project = im._dof_projector(icfg, jax.tree.map(jnp.asarray, mask))
-
-    def held_directions(solved):
-        reference_state = reference.result.state
-        return jax.tree.map(
-            lambda active, base, base_active: active + base - base_active,
-            project(solved), reference_state, project(reference_state))
-
-    state = held_directions(state)
-
     # Anchor a certifiable state on the coupled root the adjoint linearizes,
     # so the value, the objective's cotangent and the linearization all read
     # the same point (see _anchor_root).  An uncertifiable solve is never
@@ -573,8 +560,7 @@ def _host_solve_and_mask_impl(
                 # Outside Newton's basin: descend closer, from where it stopped.
                 stage = solve(**_continuation(stage), ftol=factor * icfg.ftol,
                               error_on_no_convergence=False)
-                state = held_directions(stage.result.state)
-                rcon0, zcon0 = stage.rcon0, stage.zcon0
+                state, rcon0, zcon0 = stage.result.state, stage.rcon0, stage.zcon0
                 state, report = _anchor_root(
                     cfg, params, field_parameters, state, mask, rcon0, zcon0)
         if error_on_no_convergence and not report.certified:

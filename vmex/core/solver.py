@@ -155,7 +155,7 @@ from .residuals import (
     apply_radial_preconditioner, edge_force_condition, force_residuals,
     m1_constrained_to_physical, m1_residue_rotation, m1_zero_condition,
     preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
-    zero_m1_z_force,
+    zero_m1_z_force, hold_m1_family,
 )
 from .setup import RunSetup, guess_axis, interior_guess, run_setup
 from .step import (
@@ -416,6 +416,7 @@ class SolverRuntime:
     jmax: int                           # evolved radial rows (fixed: ns-1)
     lforbal: bool = False               # tomnsp_mod.f m=1,n=0 force replacement
     lmove_axis: bool = True             # funct3d.f first-force irst=4 path
+    hold_m1: bool = False               # never release the m=1 constrained Z (HOLD_M1)
 
     # -- free-boundary seam (core/freeboundary.py; funct3d.f/forces.f) ------
     # lfreeb=True selects the vacuum-coupled lane: the edge row is evolved
@@ -483,7 +484,7 @@ class SolverRuntime:
 
 _register(SolverRuntime, meta=(
     "resolution", "gamma", "tcon0",
-    "jmax", "lforbal", "lmove_axis",
+    "jmax", "lforbal", "lmove_axis", "hold_m1",
     "lfreeb", "prec2d", "trajectory_rows", "lambda_m0_floor",
 ))
 
@@ -784,6 +785,7 @@ def prepare_runtime(
         jmax=int(resolution.ns) - 1,
         lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
         lmove_axis=bool(defaults["lmove_axis"]),
+        hold_m1=bool(HOLD_M1.get() and setup.lconm1 and (resolution.ntor > 0 or resolution.lasym)),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
         lambda_m0_floor=lambda_m0_floor,
@@ -1069,7 +1071,8 @@ def _force_pipeline(
 
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
-    zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
+    zero_gate = (jnp.asarray(True) if rt.hold_m1 else m1_zero_condition(
+        fsqz_previous=fsqz_previous, iterations_since_restart=iteration))
     released = zero_m1_z_force(rotated, zero_gate)
     spectral_finite = (
         _all_finite((spectral, rotated, released)) if collect_health else passing
@@ -1943,6 +1946,9 @@ def _initial_carry(
     loop-driver initial ``DELT`` (:func:`_loop_driver_config`) — a carry
     VALUE only, so it never keys a lane recompile.
     """
+    if rt.hold_m1:
+        state = hold_m1_family(state, _initial_state(rt.setup), rt.modes,
+                               lasym=bool(rt.resolution.lasym))
     dtype = rt.setup.s_full.dtype
     one = jnp.asarray(1.0, dtype=dtype)
     zeros = (
@@ -2271,6 +2277,12 @@ def _release_used_lane_executables() -> None:
 #: (:func:`vmex.core.implicit._host_solve`) sets it, around one host solve.
 STOP_HOOK: contextvars.ContextVar[Callable | None] = contextvars.ContextVar(
     "vmex_stop_hook", default=None)
+
+#: Set by the implicit (differentiable) solves: runtimes built meanwhile never
+#: release the m=1 constrained Z force and start each stage with that family on
+#: the input's ``profil3d.f`` guess, so the root does not depend on the path.
+HOLD_M1: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "vmex_hold_m1", default=False)
 
 
 def _resolve_use_fft(

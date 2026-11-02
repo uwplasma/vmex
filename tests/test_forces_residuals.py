@@ -92,6 +92,30 @@ def test_m1_mappings_roundtrip(case):
             _allclose(phys, orig, f"m1 identity {name}")
 
 
+def test_hold_m1_family_sets_only_the_constrained_coordinate(case):
+    """The coordinate comes from ``source`` and nothing else moves: the
+    difference is antisymmetric in each ``Z_sin`` pair (symmetric in ``Z_cos``
+    plus ``n = 0`` on lasym), and holding twice changes nothing."""
+    rt, x = case.rt, case.state
+    rng = np.random.default_rng(0)
+    y = jax.tree.map(lambda a: jnp.asarray(rng.standard_normal(np.shape(a))), x)
+    lasym = bool(rt.resolution.lasym)
+    h = newr.hold_m1_family(x, y, rt.modes, lasym=lasym)
+    m, n = np.asarray(rt.modes.m), np.asarray(rt.modes.n)
+    pairs = [(np.flatnonzero((m == 1) & (n == j))[0], np.flatnonzero((m == 1) & (n == -j))[0]) for j in range(1, n.max() + 1)]
+    for name, sign in (("Z_sin", -1.0), ("Z_cos", 1.0))[:1 + lasym]:
+        d, e = (np.asarray(getattr(h, name)) - np.asarray(getattr(t, name)) for t in (x, y))
+        for p, q in pairs:
+            _allclose(d[:, p] - sign * d[:, q], 0.0 * d[:, p], f"{name} pair kept")
+            _allclose(e[:, p] + sign * e[:, q], 0.0 * e[:, p], f"{name} pair taken")
+        mask = np.ones(m.size, bool); mask[[k for pq in pairs for k in pq]] = False  # noqa: E702
+        mask[(m == 1) & (n == 0)] = name == "Z_sin"
+        assert not np.any(d[:, mask])
+    assert lasym or np.array_equal(np.asarray(h.Z_cos), np.asarray(x.Z_cos))
+    for a, b in zip(jax.tree.leaves(newr.hold_m1_family(h, y, rt.modes, lasym=lasym)), jax.tree.leaves(h)):
+        _allclose(a, b, "hold twice")
+
+
 # ---------------------------------------------------------------------------
 # residuals.py: release conditions (residue.f90 / funct3d.f gating)
 # ---------------------------------------------------------------------------
