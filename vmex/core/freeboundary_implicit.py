@@ -30,7 +30,9 @@ import numpy as np
 from jax.flatten_util import ravel_pytree
 from scipy.sparse import bsr_matrix
 from scipy.sparse.linalg import LinearOperator, gcrotmk
-from solvax import SpluFactorization, block_thomas_factor, block_thomas_solve
+from solvax import (
+    SpluFactorization, auto_chunk_size, block_thomas_factor, block_thomas_solve,
+)
 from solvax import gmres as _solvax_gmres
 
 from . import implicit as im
@@ -138,6 +140,12 @@ def make_free_boundary_config(
     Newton-refined until ``|F| <= refine_tol`` and differentiated there.  A
     solve the anchor cannot land is status 3.  ``inf`` skips the anchor and
     restores the unanchored behaviour.
+
+    Memory needs no tuning: internal chunk widths follow from the problem size.
+    ``schur_probe_chunk_size`` is advanced: it sets how many edge columns of
+    the Schur adjoint are probed together.  The default 1 uses least memory;
+    raise it only to trade memory for speed on a machine with room to spare.
+    The gradient does not depend on it beyond round-off.
     """
     if not inp.lfreeb:
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
@@ -201,6 +209,21 @@ def _vacuum_inputs(state: SpectralState, rt) -> tuple:
     return (*_edge_fourier(state, rt), ctor, axis_r, axis_z)
 
 
+def _map_columns(function, columns):
+    """``function`` over the last axis, ``ceil(sqrt(n))`` columns at a time.
+
+    The width comes from the problem alone, so peak memory needs no tuning and
+    no machine changes the executable.  Padding with zero columns keeps one
+    width, so one compiled body; ``function`` must be linear.
+    """
+    width = auto_chunk_size(columns.shape[-1])
+    moved = jnp.moveaxis(columns, -1, 0)
+    padded = jnp.pad(moved, [(0, -moved.shape[0] % width)] + [(0, 0)] * (moved.ndim - 1))
+    mapped = jax.lax.map(jax.vmap(function), padded.reshape(-1, width, *moved.shape[1:]))
+    stacked = mapped.reshape(-1, *mapped.shape[2:])[:moved.shape[0]]
+    return jnp.moveaxis(stacked, 0, -1)
+
+
 # Module scope with ``cfg`` the only static key: every per-gradient array is
 # an argument, so one executable serves a whole optimization and no trial's
 # arrays are baked into a cached trace.
@@ -229,10 +252,10 @@ def _edge_response(cfg: FreeBoundaryImplicitConfig, params, field_parameters,
     def kernel(vector):
         return cfg.vacuum_program.bsq_edge(*unflatten(vector), field)
 
-    value, jacobian = jax.vmap(
-        lambda tangent: jax.jvp(kernel, (flat,), (tangent,)),
-        out_axes=(None, -1),
-    )(jnp.eye(flat.size, dtype=flat.dtype))
+    # One primal, then the tangents a chunk at a time: a full-width vmap holds
+    # every intermediate of Biot-Savart and NESTOR's assembly once per input.
+    value, tangent_map = jax.linearize(kernel, flat)
+    jacobian = _map_columns(tangent_map, jnp.eye(flat.size, dtype=flat.dtype))
     return jax.lax.stop_gradient((value, jacobian, flat))
 
 
@@ -496,6 +519,21 @@ def _host_solve_and_mask_impl(
         )
         _FREE_MASK_CACHE[key] = mask
 
+    # The projector's complement (the m=1 pair's antisymmetric Z, released only
+    # early in a VMEC run) has no equation at the root, so the host leaves it
+    # wherever its history did. The adjoint holds it fixed, so hold it at the
+    # one reference here too: left to vary, a gradient missed 0.96 % of a
+    # converged central difference on a boundary-spectrum objective.
+    project = im._dof_projector(icfg, jax.tree.map(jnp.asarray, mask))
+
+    def held_directions(solved):
+        reference_state = reference.result.state
+        return jax.tree.map(
+            lambda active, base, base_active: active + base - base_active,
+            project(solved), reference_state, project(reference_state))
+
+    state = held_directions(state)
+
     # Anchor a certifiable state on the coupled root the adjoint linearizes,
     # so the value, the objective's cotangent and the linearization all read
     # the same point (see _anchor_root).  An uncertifiable solve is never
@@ -506,7 +544,17 @@ def _host_solve_and_mask_impl(
     if bool(result.converged) or fsq / icfg.ftol <= icfg.max_fsq_ratio:
         with im._timed(icfg, "anchor"):
             state, report = _anchor_root(
-                cfg, params, field_parameters, state, mask, rcon0, zcon0)
+                cfg, params, field_parameters, state, mask, rcon0, zcon0, False)
+            for factor in _ANCHOR_DESCENT_FTOL:
+                if report.certified:
+                    break
+                # Outside Newton's basin: descend closer, from where it stopped.
+                stage = solve(**_continuation(stage), ftol=factor * icfg.ftol,
+                              error_on_no_convergence=False)
+                state = held_directions(stage.result.state)
+                rcon0, zcon0 = stage.rcon0, stage.zcon0
+                state, report = _anchor_root(
+                    cfg, params, field_parameters, state, mask, rcon0, zcon0)
         if error_on_no_convergence and not report.certified:
             raise VmecConvergenceError(
                 "the free-boundary solve met ftol but Newton did not anchor "
@@ -1034,10 +1082,14 @@ def _host_boundary_schur_adjoint(
         if radial_row + 1 < ns:
             blocks.append(upper[radial_row]); indices.append(radial_row + 1)
         indptr.append(len(blocks))
+    blocks = np.asarray(blocks)
+    del lower, middle, upper  # the scaled bands stay in ``blocks`` until tocsc
     sparse_bulk = bsr_matrix(
-        (np.asarray(blocks), np.asarray(indices), np.asarray(indptr)),
+        (blocks, np.asarray(indices), np.asarray(indptr)),
         shape=(ns * block_size, ns * block_size)).tocsc()
+    del blocks
     bulk_lu = SpluFactorization(sparse_bulk)
+    del sparse_bulk
 
     def sparse_inverse_packed(packed, *, transpose):
         values = np.asarray(packed)
@@ -1146,6 +1198,13 @@ _ANCHOR_TEST_FORCING = 1.0e-2
 #: from 0.11 to 1.8; a quarter step from the same state lands.
 _ANCHOR_FIRST_DAMPING = (1.0, 0.25, 0.0625)
 
+#: ``ftol`` factors of the further descents when a host state is outside
+#: Newton's basin, which the first step's damping test detects.  At 8/8/31 on a
+#: finite-beta coil deck ``ftol = 1e-10`` lies 0.058 from the root, mostly
+#: lambda m <= 4, n = 0, and Newton never lands; ``1e-12`` lies 0.007 and lands
+#: in 5 undamped steps.
+_ANCHOR_DESCENT_FTOL = (1.0e-2, 1.0e-4)
+
 #: Add NESTOR's coupling to the bulk preconditioner (:func:`_anchor_coupling`);
 #: off, the bulk factors alone precondition (4-8x the Krylov iterations).
 _ANCHOR_WOODBURY = True
@@ -1222,7 +1281,7 @@ def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
         lambda bsq: pack(_projected_residual_lane(
             z, params, field_parameters, frozen, rcon0, zcon0, dof_mask, bsq,
             None, cfg=cfg, formulation="raw")), value)
-    columns = jax.vmap(force_of_pressure, in_axes=-1, out_axes=-1)(jacobian)
+    columns = _map_columns(force_of_pressure, jacobian)
     columns = columns.reshape(-1, columns.shape[-1])
 
     def inputs(packed):
@@ -1230,16 +1289,16 @@ def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
         return ravel_pytree(_vacuum_inputs(state, rt))[0]
 
     _, inputs_t = jax.vjp(inputs, jnp.zeros(shape, row_scale.dtype))
-    rows = jax.vmap(lambda e: inputs_t(e)[0])(
-        jnp.eye(columns.shape[-1], dtype=columns.dtype))
-    rows = rows.reshape(rows.shape[0], -1)
+    rows = _map_columns(lambda e: inputs_t(e)[0],
+                        jnp.eye(columns.shape[-1], dtype=columns.dtype))
+    rows = jnp.moveaxis(rows, -1, 0).reshape(columns.shape[-1], -1)
 
     def bulk_inverse(flat):
         scaled = flat.reshape(shape) * row_scale
         solved = block_thomas_solve(factors, scaled[..., None])[..., 0]
         return (solved * column_scale).ravel()
 
-    solved = jax.vmap(bulk_inverse, in_axes=-1, out_axes=-1)(columns)
+    solved = _map_columns(bulk_inverse, columns)
     capacitance = jnp.eye(rows.shape[0], dtype=rows.dtype) + rows @ solved
     return solved, rows, jax.scipy.linalg.lu_factor(capacitance)
 
@@ -1307,7 +1366,8 @@ class _AnchorReport:
     attempts: int = 0
 
 
-def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
+def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0,
+                 patient=True):
     """Newton-anchor a converged free-boundary state on its coupled root.
 
     VMEC's convergence test is not a root test for this residual.  ``ftol``
@@ -1348,7 +1408,8 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
     ones differ by 2.8 % and 5 %.  A run that does not certify returns the
     host state with ``certified=False``; the callers turn that into an
     uncertified trial (status 3) or an error, never a silent pass.
-    ``refine_tol = inf`` disables the anchor.
+    ``refine_tol = inf`` disables the anchor.  ``patient=False`` gives up at
+    once if the first step needs damping, so the caller can descend instead.
     """
     icfg = cfg.implicit
     tol = float(icfg.refine_tol)
@@ -1468,6 +1529,9 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
                 damping = max(_ANCHOR_MIN_DAMPING, 0.5 * damping)
             if attempt_step == 0:
                 first_accepted = damping if passed else 0.0
+                if damping < 1.0 and not patient:
+                    first_accepted = 0.0
+                    break
             if not passed:
                 if debug:
                     print(f"[vmex anchor] step {steps}: no damped step passes "
@@ -1499,14 +1563,13 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0):
 
 
 def _bulk_probe_chunk(cfg, mask) -> int:
-    """Bulk-block probe chunk of the anchor and the Schur adjoint: one block.
+    """Bulk-block probe chunk of the anchor and the Schur adjoint: one field.
 
-    Each probe differentiates a three-surface kernel, so a full block of
-    cotangents is small; on the single-stage deck (block 150) the blocks
-    assemble in 1.1 s against 2.6 s at the fixed-boundary refinement's
-    ``ceil(sqrt(block))`` and 6.6 s one column at a time.
+    Each probe differentiates a three-surface kernel.  At 8/8/31 one field of
+    cotangents takes half the peak of a full block in the same time, and it
+    divides the block, so there is no separate tail to compile.
     """
-    return len(im._active_state_fields(cfg.implicit)) * int(mask.R_cos.shape[1])
+    return int(mask.R_cos.shape[1])
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
