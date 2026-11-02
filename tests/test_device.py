@@ -608,35 +608,61 @@ def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
 
     np.testing.assert_array_equal(im._host_call(cfg, double, shape, x), [2.0, 2.0])
     assert pinned == [jax.devices("cpu")[0]]
-    if jax.default_backend() == "cpu":
-        with pytest.warns(UserWarning, match="hangs"):
-            jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
-        assert len(pinned) == 1
+    monkeypatch.setattr(im.jax, "default_backend", lambda: "gpu")
+    with pytest.raises(ValueError, match="deadlock"):
+        jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
+    assert len(pinned) == 1
 
 
-@pytest.mark.parametrize("recommended, platform", [("gpu", "gpu"), ("cpu", "cpu")])
-def test_free_boundary_auto_follows_the_size_rule(monkeypatch, recommended, platform):
-    from types import SimpleNamespace
+@pytest.mark.parametrize("recommended, fits, chosen", [
+    ("gpu", True, "gpu"), ("gpu", False, None), ("cpu", True, None)])
+def test_free_boundary_auto_takes_the_gpu_only_when_large_and_fitting(
+        monkeypatch, recommended, fits, chosen):
+    import dataclasses
 
     from vmex.core import freeboundary_implicit as fbi
     from vmex.core import implicit as im
 
-    devices = {"cpu": "cpu-device", "gpu": "gpu-device"}
-    monkeypatch.setattr(fbi.jax, "devices", lambda kind: [devices[kind]])
-    monkeypatch.setattr(fbi, "resolve_implicit_device", lambda *_: "cpu-device")
+    base = im.make_config(VmecInput.from_file(DATA / "input.solovev"), multigrid=True)
+    monkeypatch.setattr(fbi.jax, "devices", lambda _: ["gpu"])
+    monkeypatch.setattr(fbi, "resolve_implicit_device", lambda *_: "cpu")
     monkeypatch.setattr(fbi, "recommended_device", lambda _: recommended)
-    monkeypatch.setattr(fbi, "free_boundary_resolution", lambda *_, **__: SimpleNamespace(ns=9))
+    monkeypatch.setattr(fbi, "gpu_fits_free_boundary", lambda *_: fits)
+    monkeypatch.setattr(fbi, "free_boundary_resolution", lambda *_, **__: base.resolution)
+    monkeypatch.setattr(fbi, "_vacuum_program", lambda _: "program")
+    monkeypatch.setattr(im, "make_config", lambda _, **k: dataclasses.replace(base, device=k["device"]))
 
-    class _Stop(Exception):
-        pass
+    made = fbi.make_free_boundary_config(dataclasses.replace(base.inp, lfreeb=True), object(), device="auto")
+    assert made.implicit.device == "cpu"
+    assert (made.concrete and made.concrete.implicit.device) == chosen
 
-    def stop(*_, device, **__):
-        assert device == devices[platform]
-        raise _Stop
 
-    monkeypatch.setattr(im, "make_config", stop)
-    with pytest.raises(_Stop):
-        fbi.make_free_boundary_config(SimpleNamespace(lfreeb=True), object(), device="auto")
+def test_free_boundary_auto_gpu_is_for_concrete_calls_only():
+    from types import SimpleNamespace
+
+    from vmex.core import freeboundary_implicit as fbi
+
+    gpu = SimpleNamespace(concrete=None)
+    cfg = SimpleNamespace(concrete=gpu)
+    placed = fbi._auto_placed(lambda p, f, c: c if isinstance(p, float) else jnp.zeros(()))
+    assert placed(1.0, None, cfg) is gpu
+    assert placed(1.0, None, gpu) is gpu
+    seen = []
+    jax.jit(lambda p: fbi._auto_placed(lambda q, f, c: seen.append(c) or q)(p, None, cfg))(jnp.ones(2))
+    assert seen == [cfg]
+
+
+def test_gpu_fits_free_boundary_uses_available_memory():
+    from types import SimpleNamespace
+
+    def device(limit, used=0):
+        return SimpleNamespace(memory_stats=lambda: {"bytes_limit": limit, "bytes_in_use": used})
+
+    small, large = SimpleNamespace(ns=31, mnmax=128), SimpleNamespace(ns=51, mnmax=288)
+    assert dev.gpu_fits_free_boundary(small, device(16 * 2**30))
+    assert not dev.gpu_fits_free_boundary(small, device(16 * 2**30, 15 * 2**30))
+    assert not dev.gpu_fits_free_boundary(large, device(16 * 2**30))
+    assert not dev.gpu_fits_free_boundary(small, SimpleNamespace(memory_stats=lambda: None))
 
 
 def test_free_boundary_callbacks_use_the_host_call(monkeypatch):

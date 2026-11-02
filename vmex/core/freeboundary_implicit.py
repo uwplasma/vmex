@@ -36,7 +36,7 @@ from solvax import (
 from solvax import gmres as _solvax_gmres
 
 from . import implicit as im
-from .device import AUTO, recommended_device, resolve_implicit_device
+from .device import AUTO, gpu_fits_free_boundary, recommended_device, resolve_implicit_device
 from .freeboundary import (
     _edge_fourier,
     _presf_ns_scale,
@@ -74,6 +74,8 @@ class FreeBoundaryImplicitConfig:
     adjoint_fail: str = "error"
     schur_probe_chunk_size: int = 1
     vacuum_program: Any = None
+    #: GPU sibling that ``device="auto"`` uses for concrete calls.
+    concrete: Any = None
 
     @property
     def resolution(self):
@@ -110,9 +112,9 @@ def make_free_boundary_config(
     takes the GPU when :func:`~vmex.core.device.recommended_device` does and
     the CPU otherwise: measured warm gradients run faster on the GPU from
     mpol=ntor=5, ns=16 upward and match the CPU to 2e-10, at a first-call
-    compile about twice as slow. Pass ``device="cpu"`` for one-shot gradients
-    or when GPU memory is short, and under ``jax.jit``, which cannot move the
-    host solve off a GPU.
+    compile about twice as slow. It stays on the CPU when the estimated memory
+    does not fit the GPU and under ``jax.jit``, which cannot move the host solve
+    off a GPU. Pass ``device="cpu"`` for one-shot gradients.
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
@@ -155,8 +157,10 @@ def make_free_boundary_config(
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
     resolution = free_boundary_resolution(inp, external_field, ns=ns)
     solve_device = resolve_implicit_device(device, resolution)
-    if device == AUTO and solve_device is not None and recommended_device(resolution) == "gpu":
-        solve_device = jax.devices("gpu")[0]
+    auto_gpu = None
+    if (device == AUTO and solve_device is not None and recommended_device(resolution) == "gpu"
+            and gpu_fits_free_boundary(resolution, jax.devices("gpu")[0])):
+        auto_gpu = jax.devices("gpu")[0]
     cfg = im.make_config(
         inp, ns=resolution.ns, ftol=ftol, max_iterations=max_iterations,
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
@@ -182,7 +186,11 @@ def make_free_boundary_config(
         adjoint_fail=adjoint_fail,
         schur_probe_chunk_size=int(schur_probe_chunk_size),
     )
-    return dataclasses.replace(config, vacuum_program=_vacuum_program(config))
+    def with_vacuum(built):
+        return dataclasses.replace(built, vacuum_program=_vacuum_program(built))
+
+    return dataclasses.replace(with_vacuum(config), concrete=None if auto_gpu is None else with_vacuum(
+        dataclasses.replace(config, implicit=dataclasses.replace(cfg, device=auto_gpu))))
 
 
 def _vacuum_program(cfg: FreeBoundaryImplicitConfig):
@@ -1800,6 +1808,20 @@ def _phiedge_root_bwd(residual, grads, phiedge_bar):
 
 solve_free_boundary_implicit.defvjp(_solve_fwd, _solve_bwd)
 solve_free_boundary_implicit_status.defvjp(_solve_status_fwd, _solve_status_bwd)
+
+
+def _auto_placed(solve):
+    """Take ``device="auto"``'s GPU only for a concrete call; jit stays on the CPU."""
+    @functools.wraps(solve)
+    def placed(params, field_parameters, cfg):
+        traced = any(isinstance(leaf, jax.core.Tracer)
+                     for leaf in jax.tree.leaves((params, field_parameters)))
+        return solve(params, field_parameters, cfg if traced or cfg.concrete is None else cfg.concrete)
+    return placed
+
+
+solve_free_boundary_implicit = _auto_placed(solve_free_boundary_implicit)
+solve_free_boundary_implicit_status = _auto_placed(solve_free_boundary_implicit_status)
 phiedge_root.defvjp(_phiedge_root_fwd, _phiedge_root_bwd)
 
 

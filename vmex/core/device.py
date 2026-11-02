@@ -46,6 +46,7 @@ __all__ = [
     "recommended_device",
     "resolve_device",
     "resolve_implicit_device",
+    "gpu_fits_free_boundary",
     "resolve_mirror_device",
     "device_context",
     "device_scope",
@@ -173,6 +174,17 @@ def resolve_implicit_device(device: Any = AUTO, resolution: Any = None):
         return jax.devices("cpu")[0]
     except RuntimeError:  # pragma: no cover - CPU device always present
         return None
+
+
+def gpu_fits_free_boundary(resolution: Any, device: Any) -> bool:
+    """Whether a free-boundary gradient's anchor is estimated to fit on ``device``.
+
+    The bytes grow like ``ns * mnmax**3``, fitted to the measured peaks:
+    3.1 GB at 8/8/31; 12/12/51 exhausted a 16 GB GPU.
+    """
+    stats = device.memory_stats() or {}
+    available = stats.get("bytes_limit", 0) - stats.get("bytes_in_use", 0)
+    return 44 * int(resolution.ns) * int(resolution.mnmax) ** 3 < available
 
 
 def resolve_mirror_device(device: Any = AUTO):

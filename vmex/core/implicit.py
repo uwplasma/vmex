@@ -144,7 +144,6 @@ import collections
 import contextlib
 import dataclasses
 import functools
-import warnings
 import os
 import sys
 import time
@@ -2242,13 +2241,14 @@ def _host_call(cfg: ImplicitConfig, host: Callable, result_shape, *args):
     Compiling for a GPU from a callback that a GPU computation is waiting on
     deadlocks, so a concrete call with an accelerator ``cfg.device`` dispatches
     the callback on the CPU and moves its results back.  Under ``jax.jit`` the
-    enclosing computation owns the placement and cannot be changed from here.
+    enclosing GPU computation owns the placement, so that case raises instead.
     """
     on_accelerator = getattr(cfg.device, "platform", "cpu") != "cpu"
     traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves(args))
-    if traced and on_accelerator:
-        warnings.warn("jax.jit over an implicit solve on a GPU hangs if the host solve "
-                      "must compile; use device='cpu' here.", stacklevel=2)
+    if traced and on_accelerator and jax.default_backend() == cfg.device.platform:
+        raise ValueError(
+            "jax.jit over an implicit solve with an explicit GPU device can deadlock when the "
+            "host solve compiles; use device='cpu', device='auto', or call it outside jit.")
     if traced or not on_accelerator:
         return jax.pure_callback(host, result_shape, *args, sharding=_callback_sharding(cfg))
     cpu = jax.devices("cpu")[0]
