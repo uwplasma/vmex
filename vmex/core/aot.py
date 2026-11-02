@@ -79,6 +79,16 @@ def _directory() -> Path | None:
     return Path(base) / "aot" if base else None
 
 
+def _initialize_lapack() -> None:
+    """Bind the CPU LAPACK kernels, which JAX otherwise does only while lowering.
+
+    A loaded executable skips lowering, so its first LU or solve would call
+    an unbound kernel and crash the process.
+    """
+    from jaxlib import lapack
+    lapack._lapack.initialize()
+
+
 def _device(leaves: list) -> Any:
     """The one device ``jax.jit`` runs these leaves on, or None (several).
 
@@ -178,6 +188,7 @@ class AotLane:
         path = directory / f"{self.name}-{digest}.aot"
         compiled = None
         try:
+            _initialize_lapack()
             payload, in_tree, out_tree = pickle.loads(path.read_bytes())
             compiled = _se.deserialize_and_load(
                 payload, in_tree, out_tree, backend=device.client,

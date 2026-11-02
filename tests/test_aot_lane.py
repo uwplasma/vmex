@@ -30,7 +30,8 @@ _SCRIPT = textwrap.dedent("""
         def tree_unflatten(cls, _, leaves):
             return cls(*leaves)
     def fn(x, f, *, k=2):
-        return jax.lax.fori_loop(0, 5, lambda i, c: c * k + f.y, x)
+        # The solve is a LAPACK call, which a loaded executable must find bound.
+        return jax.lax.fori_loop(0, 5, lambda i, c: jnp.linalg.solve(2 * jnp.eye(4), c) * k + f.y, x)
     lane = aot.AotLane(fn, static_argnames=("k",))
     if sys.argv[2] == "build":   # the persistent cache already holds this program
         jax.jit(fn, static_argnames=("k",))(jnp.arange(4.0), Field(jnp.ones(4)), k=3)
@@ -48,7 +49,8 @@ _SCRIPT = textwrap.dedent("""
 @pytest.mark.parametrize("devices", [1, 4])
 def test_executable_reloads_in_a_fresh_process(tmp_path, devices):
     """Also when the build was served by the persistent cache (its blobs fail to run),
-    on a backend with several devices, and for a pytree that computes in its unflatten."""
+    on a backend with several devices, for a pytree that computes in its unflatten,
+    and for a program whose first call in the process is a LAPACK kernel."""
     for mode in ("build", "load"):
         subprocess.run([sys.executable, "-c", _SCRIPT, str(tmp_path), mode, str(devices)],
                        check=True, capture_output=True)
