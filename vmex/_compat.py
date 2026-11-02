@@ -29,6 +29,7 @@ import os
 import platform
 
 
+_MAX_THREADS = 16                    # past this, measured CPU time grows much faster than speed
 _CACHE_FORMAT_VERSION = "4"
 _CACHE_MAX_ENTRIES = 1024            # resident executables; see _prune_cache_entries
 _CACHE_RECENT_SECONDS = 24 * 3600    # entries used this recently survive the cap, up to 4x it
@@ -677,6 +678,7 @@ def configure(*, x64: bool = True, compilation_cache: bool = True,
     applied here, by the ``vmex`` command, and on first use of
     :mod:`vmex.core` or :mod:`vmex.mirror` when this was not called before.
 
+    - thread and device defaults: see :doc:`/howto/parallel-ensembles`.
     - ``x64``: float64 (``jax_enable_x64``).  The solver needs it, and
       :func:`require_x64` refuses to solve without it.
     - ``compilation_cache``: the machine-scoped persistent XLA cache
@@ -689,6 +691,15 @@ def configure(*, x64: bool = True, compilation_cache: bool = True,
       (``VMEX_JAX_LOGGING_LEVEL`` or ``JAX_LOGGING_LEVEL`` overrides;
       ``INHERIT`` leaves it).
     """
+    from solvax import available_cpus
+
+    # Neither pool sees a quota or a scheduler allocation, and idle pools spin.
+    # NPROC is read when the JAX backend starts, OPENBLAS_NUM_THREADS when SciPy
+    # loads BLAS: values already set, or set too late to apply, stay the user's.
+    cpus = available_cpus()
+    os.environ.setdefault("NPROC", str(min(cpus, _MAX_THREADS)))
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", str(min(cpus, _MAX_THREADS)))
+    os.environ.setdefault("ESSOS_CPU_DEVICES", str(cpus))
     import jax
 
     jax.config.update("jax_enable_x64", bool(x64))
