@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 """Continue a vacuum pwO boundary to finite beta, with p proportional to 1-s.
 
-Run ``pwO_optimization.py`` first. Pressure is calibrated at fixed toroidal
+Run ``pwO_optimization.py`` first with ASPECT_TARGET = 6.0 and
+MAGNETIC_WELL_TARGET = 0.01: from a vacuum magnetic hill (its default, well
+about -0.05) this continuation does not reach a well. Pressure is calibrated at fixed toroidal
 flux, then the workflow is that of the vacuum example with beta and Mercier
 stability added to the residual vector. NEO compares the vacuum start at this
 pressure with the result. Requires vmex[neoclassical].
@@ -24,11 +26,13 @@ from vmex.core.restart import restart_state
 # Number of field periods, and the vacuum result this script continues:
 NFP = 3
 print(f"finite-beta pwO optimization, NFP = {NFP}")
-INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
-WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
+VACUUM_NAME = f"pwO_optimized_nfp{NFP}_well0.01"
+INPUT_FILE = Path(f"input.{VACUUM_NAME}")
+WOUT_FILE = Path(f"wout_{VACUUM_NAME}.nc")
 
 # Volume-averaged beta the pressure is calibrated to:
 TARGET_BETA = 0.005
+BETA_WEIGHT = 100.0               # on the relative beta error
 
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
 SURFACES = np.linspace(0.1, 0.9, 5)
@@ -42,18 +46,20 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend. Higher vacuum modes stay fixed:
 MAX_MODES = [3]
-MAX_NFEV = [25]
+MAX_NFEV = [80]
 NS_ARRAY = np.array([35])
-NITER_ARRAY = np.array([5000])
+NITER_ARRAY = np.array([20000])
 FTOL_ARRAY = np.array([1e-12])
 
 # Targets:
 ASPECT_TARGET = 6.0
 ASPECT_WEIGHT = 10.0
 IOTA_FLOOR = 0.31 if NFP == 1 else 0.42  # minimum |iota| over the profile
+IOTA_WEIGHT = 1.0e3
 MAGNETIC_WELL_FLOOR = 0.01
 MAGNETIC_WELL_WEIGHT = 1.0e3
 MERCIER_S_MIN = 0.2               # DMerc inward of this is set by the radial grid
+MERCIER_MARGIN = 0.1              # DMerc floor on the optimizer grid; the final grid differs
 MERCIER_WEIGHT = 100.0
 MIRROR_LIMIT = 0.16               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
 AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
@@ -64,9 +70,14 @@ PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
 PARAMETER_STEP = 0.05
-MAX_PARAMETER_CHANGE = 1.0        # a continuation stays near its vacuum start
+MAX_PARAMETER_CHANGE = 5.0
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
+
+# Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
+# but never below the vacuum deck's or MINIMUM_MPOL. DMerc needs more modes
+# than the boundary: at NFP 1 its geodesic term is 10x too large at mpol 7.
+MINIMUM_MPOL = 13 if NFP == 1 else 7
 
 # Verification solve of the optimized boundary:
 FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
@@ -89,7 +100,9 @@ if ci_smoke:
 ### Set up the equilibrium ####################################################
 
 inp = vj.VmecInput.from_file(INPUT_FILE)
-inp = replace(inp, am=np.array([1.0, -1.0]), pres_scale=1.0, ns_array=NS_ARRAY,
+mpol = max(inp.mpol, MINIMUM_MPOL)
+inp = replace(inp.change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4),
+              am=np.array([1.0, -1.0]), pres_scale=1.0, ns_array=NS_ARRAY,
               ftol_array=FTOL_ARRAY, niter_array=NITER_ARRAY)
 calibration = opt.solve_equilibrium(
     inp, initial_state=restart_state(vj.read_wout(WOUT_FILE), inp),
@@ -117,7 +130,7 @@ def dmerc(equilibrium_state, solver_context):
 
 def mercier(equilibrium_state, solver_context):
     """DMerc hinge, log-bounded: DMerc diverges at zero shear and would swamp every other row."""
-    return jnp.log1p(opt.Hinge(dmerc, floor=0.0)(equilibrium_state, solver_context))
+    return jnp.log1p(opt.Hinge(dmerc, floor=MERCIER_MARGIN)(equilibrium_state, solver_context))
 
 
 # Each term is (function, target, weight).
@@ -126,14 +139,14 @@ pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=
 objective_function_terms = [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 100.0),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
     (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0, MAGNETIC_WELL_WEIGHT),
     (mercier, 0.0, MERCIER_WEIGHT),
     (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
     (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
-    (opt.volume_average_beta, TARGET_BETA, 1.0 / TARGET_BETA**2),
+    (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT / TARGET_BETA**2),
 ]
 
 report = opt.EquilibriumReporter(
@@ -152,7 +165,7 @@ equilibrium = seed = opt.solve_equilibrium(inp, initial_state=calibration.soluti
 report("seed", equilibrium)
 # Stages that share a boundary resolution share ONE problem, as in
 # QA_optimization.py: every jitted graph is compiled once for the whole group.
-# The resolution never drops below the vacuum deck's, which holds its higher modes.
+# The resolution never drops below the deck's, which holds the higher vacuum modes.
 resolution_of = {max_mode: max(max_mode + 2, inp.mpol) for max_mode in MAX_MODES}
 group_max_mode = {
     max_mode: max(other for other in MAX_MODES
