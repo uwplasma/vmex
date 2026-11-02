@@ -612,6 +612,9 @@ def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
     with pytest.raises(ValueError, match="deadlock"):
         jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
     assert len(pinned) == 1
+    monkeypatch.setattr(im, "_LAST_SOLVE", {cfg: "seed solve"})
+    monkeypatch.setattr(im, "_callback_sharding", lambda _: None)
+    jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
 
 
 @pytest.mark.parametrize("recommended, fits, chosen", [

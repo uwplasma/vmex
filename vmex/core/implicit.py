@@ -2241,14 +2241,16 @@ def _host_call(cfg: ImplicitConfig, host: Callable, result_shape, *args):
     Compiling for a GPU from a callback that a GPU computation is waiting on
     deadlocks, so a concrete call with an accelerator ``cfg.device`` dispatches
     the callback on the CPU and moves its results back.  Under ``jax.jit`` the
-    enclosing GPU computation owns the placement, so that case raises instead.
+    enclosing GPU computation owns the placement, so that case raises unless an
+    earlier concrete solve of this config (the optimizer's seed) already compiled.
     """
     on_accelerator = getattr(cfg.device, "platform", "cpu") != "cpu"
     traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves(args))
-    if traced and on_accelerator and jax.default_backend() == cfg.device.platform:
+    if (traced and on_accelerator and jax.default_backend() == cfg.device.platform
+            and _LAST_SOLVE.get(cfg) is None):
         raise ValueError(
             "jax.jit over an implicit solve with an explicit GPU device can deadlock when the "
-            "host solve compiles; use device='cpu', device='auto', or call it outside jit.")
+            "host solve compiles; solve once outside jit first, or use device='cpu' or 'auto'.")
     if traced or not on_accelerator:
         return jax.pure_callback(host, result_shape, *args, sharding=_callback_sharding(cfg))
     cpu = jax.devices("cpu")[0]
