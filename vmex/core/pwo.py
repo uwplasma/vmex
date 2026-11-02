@@ -331,11 +331,13 @@ class FreeMapProblem:
         self.x0 = np.concatenate((np.asarray(stage.x0), np.log(fraction/(1-fraction))))
 
     def residual(self, z):
+        """Return the stage residual with the spectrum rows replaced by the mapped pwO rows."""
         raw = np.asarray(self.stage.residual(z[:self.nx]))
         return np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
                                raw[self.nspec:]))
 
     def residual_jac(self, z):
+        """Return the joint Jacobian over the boundary and the free map variables."""
         raw = np.asarray(self.stage.residual(z[:self.nx]))
         full = np.asarray(self.stage.residual_jac(z[:self.nx]))
         boundary, free = (np.asarray(q) for q in self._columns(
