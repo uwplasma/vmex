@@ -45,7 +45,7 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 # bootstrap geometric factor for every map; the current comes from the unmapped
 # band where B_max lives, so these rows flatten B across that band:
 ZERO_BOOTSTRAP_MAP = False
-BOOTSTRAP_BAND_WEIGHT = 1.0e3
+BOOTSTRAP_BAND_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
