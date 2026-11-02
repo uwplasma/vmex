@@ -613,6 +613,24 @@ def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
         assert len(pinned) == 1
 
 
+def test_free_boundary_callbacks_use_the_host_call(monkeypatch):
+    from types import SimpleNamespace
+
+    from vmex.core import freeboundary_implicit as fbi
+    from vmex.core import implicit as im
+
+    cfg = SimpleNamespace(implicit="implicit")
+    monkeypatch.setattr(fbi, "_baseline_struct", lambda _: ("rcon", "zcon"))
+    monkeypatch.setattr(im, "_state_struct", lambda _: "state")
+    monkeypatch.setattr(im, "_host_callable", lambda fn, _: fn)
+    monkeypatch.setattr(im, "_host_call", lambda *call: call)
+
+    for callback, host in ((fbi._callback, fbi._host_solve_and_mask),
+                           (fbi._callback_status, fbi._host_solve_and_mask_status)):
+        implicit, called, _, *args = callback("params", "field", cfg)
+        assert (implicit, called, args) == ("implicit", host, ["params", "field"])
+
+
 def test_host_callback_reuses_main_thread_executables():
     """A lane traced on the main thread is not traced again in a callback.
 
