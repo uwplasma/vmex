@@ -745,6 +745,31 @@ def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
     assert fbi._FREE_LAST_RESULT[cfg].marker == "rebuild"
 
 
+def test_trial_stopped_before_vacuum_activation_reports_status_2(monkeypatch):
+    """A budget spent before NESTOR ever ran is status 2, not a crash.
+
+    The dof mask was found from the stage's NESTOR edge pressure, which is
+    ``None`` until fsq reaches the activation threshold (seen on NCSX at
+    nzeta = 6, which stalls above it).
+    """
+    from vmex.core.freeboundary import ACTIVATION_FSQ
+
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-6]), niter_array=np.array([3]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(
+        inp, field, ns=8, ftol=1.0e-6, max_iterations=3, device="cpu",
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current))
+    monkeypatch.setattr(fbi, "_FREE_MASK_CACHE", {})
+    *_, mask, _rcon0, _zcon0, status, fsq, _ratio = (
+        fbi._host_solve_and_mask_status(
+            cfg, im.params_from_input(inp), field.extcur))
+    assert fsq > ACTIVATION_FSQ and int(status) == 2
+    assert np.asarray(mask.R_cos)[-1].any()  # the edge rows are evolved
+
+
 def test_restart_budget_is_the_cold_reference_cost():
     """A restart gets what the cold reference needed, within [cap/10, cap]."""
     icfg = SimpleNamespace(max_iterations=4000)
