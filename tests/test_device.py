@@ -609,7 +609,8 @@ def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
     np.testing.assert_array_equal(im._host_call(cfg, double, shape, x), [2.0, 2.0])
     assert pinned == [jax.devices("cpu")[0]]
     if jax.default_backend() == "cpu":
-        jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
+        with pytest.warns(UserWarning, match="hangs"):
+            jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
         assert len(pinned) == 1
 
 
