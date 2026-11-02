@@ -124,6 +124,9 @@ and composable with both gradient modes:
   :func:`~vmex.core.optimize.max_elongation` — equivalent-ellipse boundary
   elongation from Fourier-exact area and perimeter line integrals over one
   field period;
+- :func:`~vmex.core.optimize.min_boundary_curvature_radius` — the smallest
+  poloidal radius of curvature of the boundary cross-sections, in metres; a
+  floor keeps out tips sharper than coils can hold;
 - :func:`~vmex.core.optimize.magnetic_well` — the standard vacuum-well
   measure (positive = well, stabilizing).
 
