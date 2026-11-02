@@ -212,7 +212,7 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
                       niter_array=NITER_ARRAY).change_resolution(
             mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
         problem = opt.VmecProblem.from_tuples(
-            inp, objective_function_terms + [gamma_c_term] * gamma_c + [dkx_term] * dkx,
+            inp, objective_function_terms + [gamma_c_term] * gamma_c + [dkx_term for _ in range(dkx)],
             max_mode=group_max_mode[max_mode],
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
             ess_alpha=ESS_ALPHA, restart_from=equilibrium,
