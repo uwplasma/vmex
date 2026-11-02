@@ -1734,3 +1734,12 @@ def test_free_boundary_trial_state_is_anchored_on_the_coupled_root():
         assert again_status == 0
         for a, b in zip(jax.tree.leaves(again), jax.tree.leaves(state)):
             np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+@pytest.mark.parametrize("columns", [1, 7, 9, 10])
+def test_map_columns_matches_a_full_width_vmap(columns):
+    matrix = jnp.arange(4.0 * columns).reshape(4, columns)
+    apply = lambda column: jnp.outer(column, jnp.arange(1.0, 3.0))  # noqa: E731
+    mapped = fbi._map_columns(apply, matrix)
+    assert mapped.shape == (4, 2, columns)
+    assert jnp.array_equal(mapped, jax.vmap(apply, in_axes=-1, out_axes=-1)(matrix))
