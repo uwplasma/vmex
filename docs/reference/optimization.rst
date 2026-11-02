@@ -431,12 +431,13 @@ plasma--vacuum root. Every status-0 state is anchored there (to
 ``refine_tol``, 1e-10 by default), so its value and its adjoint refer to the
 same point; VMEC's ``ftol`` alone leaves the state off that root along weakly
 damped directions.
-The certified whole-state GCROT transpose remains the default.
-``adjoint_solver="boundary_schur"`` selects the advanced boundary-Schur lane, which
+The default ``adjoint_solver="boundary_schur"`` needs no tuning: it
 eliminates the block-tridiagonal radial bulk and solves only the evolved-edge
-correction before checking the full coupled residual. Local three-surface
-rows and a pivoted sparse band solve reduce its cold cost substantially, but
-local-row compilation still keeps it opt-in. It is a host lane: under an
+correction before checking the full coupled residual. Set
+``"coupled_gcrot"`` only to cross-check a suspect gradient, or when the
+default's banded factor of ``ns`` dense per-surface blocks does not fit host
+memory: GCROT is matrix-free but may not converge on 3-D decks. The default is a
+host lane: under an
 outer ``jax.jit`` the pullback warns and uses the staged coupled GCROT solve
 instead, so call the objective eagerly to keep it. ``device="auto"`` uses the CPU
 for this response on accelerator hosts; an explicit ``device="gpu"`` or
