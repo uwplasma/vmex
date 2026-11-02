@@ -73,6 +73,7 @@ def test_free_boundary_config_validates_adjoint_solver():
     inp, field = lasym_free_input(DATA), lasym_free_field()
     with pytest.raises(ValueError, match="adjoint_solver must be one of"):
         make_free_boundary_config(inp, field, adjoint_solver="dense")
+    assert make_free_boundary_config(inp, field).adjoint_solver == "boundary_schur"
     for name in fbi._ADJOINT_SOLVERS:
         assert make_free_boundary_config(
             inp, field, adjoint_solver=name).adjoint_solver == name

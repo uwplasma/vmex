@@ -54,8 +54,9 @@ from .solver import SpectralState, evaluate_forces
 
 Array = Any
 
-#: ``coupled_gcrot`` is the certified default; ``boundary_schur`` eliminates
-#: the radial bulk and assembles the edge system column by column;
+#: ``boundary_schur`` (the default) eliminates the radial bulk and assembles
+#: the edge system column by column; ``coupled_gcrot`` iterates the whole-state
+#: transpose;
 #: ``edge_response`` iterates the coupled transpose on a dense model of
 #: NESTOR.
 _ADJOINT_SOLVERS = ("boundary_schur", "coupled_gcrot", "edge_response")
@@ -72,7 +73,7 @@ class FreeBoundaryImplicitConfig:
 
     implicit: im.ImplicitConfig
     field_from_parameters: Callable[[Any], Any]
-    adjoint_solver: str = "coupled_gcrot"
+    adjoint_solver: str = "boundary_schur"
     adjoint_fail: str = "error"
     schur_probe_chunk_size: int = 1
     vacuum_program: Any = None
@@ -96,7 +97,7 @@ def make_free_boundary_config(
     adjoint_maxiter: int = 300,
     adjoint_gcrot_m: int = 30,
     adjoint_gcrot_k: int = 5,
-    adjoint_solver: str = "coupled_gcrot",
+    adjoint_solver: str = "boundary_schur",
     adjoint_fail: str = "error",
     schur_probe_chunk_size: int = 1,
     field_from_parameters: Callable[[Any], Any] | None = None,
@@ -120,15 +121,20 @@ def make_free_boundary_config(
     which that configuration keeps.  Pass ``device="cpu"`` for a few one-shot gradients,
     which do not repay the GPU's slower first compile, or on a nearly full
     shared GPU; ``device="gpu"`` forces the GPU outside ``jit``.
-    ``adjoint_solver="coupled_gcrot"`` is the certified default;
-    ``"boundary_schur"`` selects the advanced radial-elimination path, which
-    stays well conditioned on marginally converged roots where the coupled
-    Krylov solve stalls.  ``"edge_response"`` is the coupled Krylov solve
-    with NESTOR's response to the edge built once as a dense matrix instead
+    The default ``adjoint_solver="boundary_schur"`` eliminates the radial bulk
+    and certifies its answer on the exact coupled transpose, refining there if
+    it misses.  It needs no tuning.  The others are advanced settings:
+    ``"coupled_gcrot"`` is the matrix-free whole-state solve, also what an outer
+    ``jax.jit`` runs; set it only to cross-check a suspect gradient, since it
+    costs 2-50x more on 3-D decks.  ``"edge_response"`` is the coupled Krylov
+    solve with NESTOR's response to the edge built once as a dense matrix instead
     of re-swept in reverse mode on every iteration: the matvec then costs no
     NESTOR call, the answer is certified on the exact coupled transpose, and
     a certificate that misses continues on that exact operator, so the lane
-    is never less accurate than the default -- only cheaper.
+    is never less accurate than ``"coupled_gcrot"`` -- only cheaper; it has no
+    measured advantage over the default.  ``schur_probe_chunk_size`` trades
+    memory for speed in the elimination; raise it only if edge assembly
+    dominates a profile and memory allows.
     ``adjoint_fail="best_effort"`` returns the stalled
     Krylov solution with a warning instead of raising, so one bad trial in an
     optimization is a poor search direction the line search rejects rather
