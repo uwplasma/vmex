@@ -118,7 +118,8 @@ def make_free_boundary_config(
     solve or gradient that runs out of GPU memory warns and reruns on the CPU,
     which that configuration keeps.  Pass ``device="cpu"`` for a few one-shot gradients,
     which do not repay the GPU's slower first compile, or on a nearly full
-    shared GPU; ``device="gpu"`` forces the GPU outside ``jit``.
+    shared GPU; ``device="gpu"`` forces the GPU outside ``jit`` and, under
+    ``jit``, warns and runs the host solve and adjoint on the CPU.
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
@@ -793,11 +794,10 @@ def _solve_bwd_impl(cfg, saved, state_bar):
         # A host lane: under an outer jax.jit it runs behind a pure_callback
         # on the concrete saved root, so jit and eager take the same solver.
         args = (z_star, params, field_parameters, frozen, rcon0, zcon0, mask, rhs)
-        lam = jax.pure_callback(
-            im._host_callable(_host_schur_lane, cfg),
+        lam = im._host_call(
+            cfg.implicit, im._host_callable(_host_schur_lane, cfg),
             jax.tree.map(lambda leaf: jax.ShapeDtypeStruct(
-                leaf.shape, leaf.dtype), rhs),
-            *args, sharding=im._callback_sharding(cfg.implicit),
+                leaf.shape, leaf.dtype), rhs), *args,
         ) if traced else _host_boundary_schur_adjoint(
             cfg, *args, fail=cfg.adjoint_fail)
         residual = _projected_residual(cfg, mask, formulation="raw")
@@ -1888,7 +1888,9 @@ def _auto_placed(solve):
         traced = any(isinstance(jax.lax.stop_gradient(leaf), jax.core.Tracer)
                      for leaf in jax.tree.leaves((params, field_parameters))
                      if isinstance(leaf, jax.core.Tracer))
-        if cfg.concrete is None or cfg in _GPU_EXHAUSTED or traced:
+        if traced:
+            return solve(params, field_parameters, _traced_config(cfg))
+        if cfg.concrete is None or cfg in _GPU_EXHAUSTED:
             return solve(params, field_parameters, cfg)
         try:
             return solve(params, field_parameters, cfg.concrete)
@@ -1897,6 +1899,29 @@ def _auto_placed(solve):
                 raise
         return solve(params, field_parameters, cfg)
     return placed
+
+
+def _traced_config(cfg):
+    """``cfg`` for a ``jax.jit`` trace, or a CPU copy of an explicit GPU config.
+
+    Compiling for the GPU from a host callback that a GPU computation waits on
+    deadlocks, so under ``jit`` an explicit GPU device runs its host solve and
+    adjoint on the CPU, as ``device="auto"`` does there.  The copy is cached:
+    it is a jit key and keys the hot-restart cache.
+    """
+    device = getattr(getattr(cfg, "implicit", None), "device", None)
+    if getattr(device, "platform", "cpu") == "cpu" or jax.default_backend() != device.platform:
+        return cfg
+    if cfg not in _CPU_OF:
+        warnings.warn("device='gpu' under jax.jit: the free-boundary host solve and adjoint run on "
+                      "the CPU, since compiling for the GPU inside a jitted GPU computation "
+                      "deadlocks; call the objective eagerly to keep the GPU.",
+                      RuntimeWarning, stacklevel=4)
+        cpu = dataclasses.replace(cfg, implicit=dataclasses.replace(
+            cfg.implicit, device=jax.devices("cpu")[0]))
+        with im._concrete_build():
+            _CPU_OF[cfg] = dataclasses.replace(cpu, vacuum_program=_vacuum_program(cpu))
+    return _CPU_OF[cfg]
 
 
 def _exhausted(error, auto, stage) -> bool:
@@ -1915,6 +1940,7 @@ def _exhausted(error, auto, stage) -> bool:
 
 
 _GPU_EXHAUSTED: set[FreeBoundaryImplicitConfig] = set()
+_CPU_OF: dict[FreeBoundaryImplicitConfig, FreeBoundaryImplicitConfig] = {}
 #: The ``device="auto"`` config of each GPU sibling, for the gradient's fallback.
 _AUTO_OF: dict[FreeBoundaryImplicitConfig, FreeBoundaryImplicitConfig] = {}
 

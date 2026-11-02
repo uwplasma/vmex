@@ -615,6 +615,23 @@ def test_traced_pullback_runs_the_host_schur_lane(monkeypatch):
     im._HOST_ERROR.clear()
 
 
+def test_traced_explicit_gpu_config_runs_on_the_cpu(monkeypatch):
+    """Under jit an explicit GPU config is swapped for one cached CPU copy."""
+    @dataclasses.dataclass(frozen=True)
+    class Implicit:
+        device: object
+
+    gpu = SimpleNamespace(platform="gpu")
+    cfg = fbi.FreeBoundaryImplicitConfig(implicit=Implicit(gpu), field_from_parameters=None)
+    monkeypatch.setattr(fbi, "_CPU_OF", {})
+    monkeypatch.setattr(fbi, "_vacuum_program", lambda built: built.implicit.device)
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    with pytest.warns(RuntimeWarning, match="run on the CPU"):
+        sibling = fbi._traced_config(cfg)
+    assert sibling.implicit.device.platform == "cpu" == sibling.vacuum_program.platform
+    assert fbi._traced_config(cfg) is sibling and fbi._traced_config(sibling) is sibling
+
+
 def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     """A bad cached state is discarded, but implementation errors are not."""
     inp = dataclasses.replace(
