@@ -659,12 +659,45 @@ def test_free_boundary_auto_gpu_is_for_eager_calls_and_falls_back(monkeypatch):
     placed = fbi._auto_placed(solve)
     assert jax.grad(lambda p: placed(p, None, cfg))(1.0) == 2.0
     jax.jit(lambda p: placed(p, None, cfg))(1.0)
-    assert seen == [gpu, cfg]
+    jax.vmap(lambda p: placed(p, None, cfg))(jnp.ones(2))
+    assert seen == [gpu, cfg, cfg]
+    with monkeypatch.context() as patch:  # AD tracers kept by a future JAX degrade to the CPU
+        patch.setattr(fbi.jax.lax, "stop_gradient", lambda leaf: leaf)
+        jax.grad(lambda p: placed(p, None, cfg))(1.0)
+    assert seen.pop() is cfg
     with pytest.raises(RuntimeError, match="INVALID_ARGUMENT"):
         placed(1.0, "INVALID_ARGUMENT", cfg)
     with pytest.warns(RuntimeWarning, match="GPU memory"):
         assert placed(1.0, "RESOURCE_EXHAUSTED", cfg) == 2.0
-    assert placed(1.0, None, cfg) == 2.0 and seen[3:] == [gpu, cfg, cfg]
+    assert placed(1.0, None, cfg) == 2.0 and seen[4:] == [gpu, cfg, cfg]
+
+
+@pytest.mark.parametrize("error", ["RESOURCE_EXHAUSTED: Out of memory", "INVALID_ARGUMENT"])
+def test_free_boundary_auto_gradient_falls_back_to_the_cpu(monkeypatch, error):
+    from types import SimpleNamespace
+
+    from vmex.core import freeboundary_implicit as fbi
+
+    cpu = jax.devices("cpu")[0]
+    gpu, auto = type("Gpu", (), {"implicit": SimpleNamespace(device=cpu)})(), type("Auto", (), {})()
+    calls = []
+
+    def bwd(cfg, saved, state_bar):
+        calls.append(cfg)
+        if cfg is gpu:
+            raise RuntimeError(error)
+        return jnp.ones(2), None
+
+    monkeypatch.setattr(fbi, "_placed_bwd", bwd)
+    monkeypatch.setattr(fbi, "_AUTO_OF", {gpu: auto})
+    monkeypatch.setattr(fbi, "_GPU_EXHAUSTED", set())
+    if error.startswith("INVALID"):
+        with pytest.raises(RuntimeError, match=error):
+            fbi._solve_bwd(gpu, "saved", "bar")
+        return
+    with pytest.warns(RuntimeWarning, match="gradient ran out of GPU memory"):
+        params_bar, _ = fbi._solve_bwd(gpu, "saved", "bar")
+    assert calls == [gpu, auto] and fbi._GPU_EXHAUSTED == {auto} and params_bar.devices() == {cpu}
 
 
 def test_free_boundary_callbacks_use_the_host_call(monkeypatch):
