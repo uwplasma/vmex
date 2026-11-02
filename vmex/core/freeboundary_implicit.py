@@ -21,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import warnings
+import weakref
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -37,7 +38,7 @@ from solvax import gmres as _solvax_gmres
 
 from .._compat import require_x64
 from . import implicit as im
-from .device import AUTO, resolve_implicit_device
+from .device import AUTO, recommended_device, resolve_implicit_device
 from .freeboundary import (
     _edge_fourier,
     _presf_ns_scale,
@@ -75,6 +76,8 @@ class FreeBoundaryImplicitConfig:
     adjoint_fail: str = "error"
     schur_probe_chunk_size: int = 1
     vacuum_program: Any = None
+    #: GPU sibling that ``device="auto"`` uses for eager calls.
+    concrete: Any = None
 
     @property
     def resolution(self):
@@ -107,9 +110,16 @@ def make_free_boundary_config(
     smaller AD graph, pass ``field_from_parameters`` and then supply only the
     actual current/coil parameters to :func:`solve_free_boundary_implicit`.
     ``external_field`` here is the concrete reference used to fix resolution.
-    ``device="auto"`` uses the CPU for the coupled implicit response on an
-    accelerator host unless the process already pins JAX placement; pass an
-    explicit device to override that measured lower-memory default.
+    ``device="auto"`` on a GPU host, unless the process pins JAX placement,
+    runs eager values and gradients on the GPU when
+    :func:`~vmex.core.device.recommended_device` does and on the CPU otherwise;
+    under ``jax.jit``, which cannot move the host solve off a GPU, it stays on
+    the CPU.  Measured warm gradients run faster on the GPU from mpol=ntor=5,
+    ns=16 upward and match the CPU to 7e-10.  No memory estimate is made: a
+    solve or gradient that runs out of GPU memory warns and reruns on the CPU,
+    which that configuration keeps.  Pass ``device="cpu"`` for a few one-shot gradients,
+    which do not repay the GPU's slower first compile, or on a nearly full
+    shared GPU; ``device="gpu"`` forces the GPU outside ``jit``.
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
@@ -152,6 +162,10 @@ def make_free_boundary_config(
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
     resolution = free_boundary_resolution(inp, external_field, ns=ns)
     solve_device = resolve_implicit_device(device, resolution)
+    auto_gpu = None
+    if (device == AUTO and solve_device is not None and jax.default_backend() == "gpu"
+            and recommended_device(resolution) == "gpu"):
+        auto_gpu = jax.devices("gpu")[0]
     cfg = im.make_config(
         inp, ns=resolution.ns, ftol=ftol, max_iterations=max_iterations,
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
@@ -177,7 +191,15 @@ def make_free_boundary_config(
         adjoint_fail=adjoint_fail,
         schur_probe_chunk_size=int(schur_probe_chunk_size),
     )
-    return dataclasses.replace(config, vacuum_program=_vacuum_program(config))
+    def with_vacuum(built):
+        return dataclasses.replace(built, vacuum_program=_vacuum_program(built))
+
+    built = with_vacuum(config)
+    if auto_gpu is None:
+        return built
+    sibling = with_vacuum(dataclasses.replace(config, implicit=dataclasses.replace(cfg, device=auto_gpu)))
+    _AUTO_OF[sibling] = built = dataclasses.replace(built, concrete=sibling)
+    return built
 
 
 def _vacuum_program(cfg: FreeBoundaryImplicitConfig):
@@ -636,27 +658,23 @@ def _baseline_struct(cfg: FreeBoundaryImplicitConfig):
 
 def _callback(params, field_parameters, cfg):
     rcon_struct, zcon_struct = _baseline_struct(cfg)
-    return jax.pure_callback(
-        im._host_callable(_host_solve_and_mask, cfg),
+    return im._host_call(
+        cfg.implicit, im._host_callable(_host_solve_and_mask, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct),
-        params, field_parameters,
-        sharding=im._callback_sharding(cfg.implicit),
-    )
+        params, field_parameters)
 
 
 def _callback_status(params, field_parameters, cfg):
     """Return the free-boundary state, linearization data, and solve status."""
     rcon_struct, zcon_struct = _baseline_struct(cfg)
     scalar = jax.ShapeDtypeStruct((), jnp.float64)
-    return jax.pure_callback(
-        im._host_callable(_host_solve_and_mask_status, cfg),
+    return im._host_call(
+        cfg.implicit, im._host_callable(_host_solve_and_mask_status, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct, jax.ShapeDtypeStruct((), jnp.int32),
          scalar, scalar),
-        params, field_parameters,
-        sharding=im._callback_sharding(cfg.implicit),
-    )
+        params, field_parameters)
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
@@ -742,6 +760,17 @@ def _solve_fwd(params, field_parameters, cfg):
 
 
 def _solve_bwd(cfg, saved, state_bar):
+    try:
+        return _placed_bwd(cfg, saved, state_bar)
+    except Exception as error:
+        auto = _AUTO_OF.get(cfg)
+        if not _exhausted(error, auto, "gradient"):
+            raise
+    # The CPU config re-pins the saved arrays; the cotangents return to the GPU.
+    return jax.device_put(_placed_bwd(auto, saved, state_bar), cfg.implicit.device)
+
+
+def _placed_bwd(cfg, saved, state_bar):
     icfg = cfg.implicit
     with im._device_context(icfg), im._forward_trace_context():
         # Committed like the forward anchor's arguments, so its lanes are reused.
@@ -1842,6 +1871,59 @@ def _phiedge_root_bwd(residual, grads, phiedge_bar):
 
 solve_free_boundary_implicit.defvjp(_solve_fwd, _solve_bwd)
 solve_free_boundary_implicit_status.defvjp(_solve_status_fwd, _solve_status_bwd)
+
+
+def _auto_placed(solve):
+    """Run ``device="auto"``'s GPU sibling for eager calls, gradients included.
+
+    Under ``jax.jit`` or ``jax.vmap`` the host solve cannot leave the GPU, so
+    it stays on the CPU.  ``stop_gradient`` returns an AD tracer's concrete
+    primal but keeps those tracers, which tells the cases apart with public
+    API alone; should a JAX release keep AD tracers too, calls fall back to
+    the CPU, never to a hang.  Whether a solve fits is left to the allocator,
+    the only party that sees XLA's real buffers, the device and other
+    processes on it (see :func:`_exhausted`).
+    """
+    @functools.wraps(solve)
+    def placed(params, field_parameters, cfg):
+        traced = any(isinstance(jax.lax.stop_gradient(leaf), jax.core.Tracer)
+                     for leaf in jax.tree.leaves((params, field_parameters))
+                     if isinstance(leaf, jax.core.Tracer))
+        if cfg.concrete is None or cfg in _GPU_EXHAUSTED or traced:
+            return solve(params, field_parameters, cfg)
+        try:
+            return solve(params, field_parameters, cfg.concrete)
+        except Exception as error:
+            if not _exhausted(error, cfg, "solve"):
+                raise
+        return solve(params, field_parameters, cfg)
+    return placed
+
+
+def _exhausted(error, auto, stage) -> bool:
+    """Whether ``error`` is ``auto``'s GPU running out of memory; if so it keeps the CPU.
+
+    XLA raises ``RESOURCE_EXHAUSTED`` directly or inside a host callback's
+    error.  The forward solve and the gradient both fall back, because the
+    gradient's first-call compiles can raise the peak above the forward's.
+    """
+    if auto is None or "RESOURCE_EXHAUSTED" not in str(error):
+        return False
+    warnings.warn(f"device='auto': the free-boundary {stage} ran out of GPU memory and reruns on the "
+                  "CPU, which this configuration keeps from now on.", RuntimeWarning, stacklevel=3)
+    _GPU_EXHAUSTED.add(auto)
+    return True
+
+
+# Weak, so configs a long scan or optimization drops are freed with their
+# vacuum programs; the auto config holds its sibling, so the value is weak.
+_GPU_EXHAUSTED: weakref.WeakSet[FreeBoundaryImplicitConfig] = weakref.WeakSet()
+#: The ``device="auto"`` config of each GPU sibling, for the gradient's fallback.
+_AUTO_OF: weakref.WeakValueDictionary[FreeBoundaryImplicitConfig, FreeBoundaryImplicitConfig] = (
+    weakref.WeakValueDictionary())
+
+solve_free_boundary_implicit = _auto_placed(solve_free_boundary_implicit)
+solve_free_boundary_implicit_status = _auto_placed(solve_free_boundary_implicit_status)
 phiedge_root.defvjp(_phiedge_root_fwd, _phiedge_root_bwd)
 
 
