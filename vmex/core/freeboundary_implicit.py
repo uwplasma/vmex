@@ -36,7 +36,7 @@ from solvax import (
 from solvax import gmres as _solvax_gmres
 
 from . import implicit as im
-from .device import AUTO, resolve_implicit_device
+from .device import AUTO, recommended_device, resolve_implicit_device
 from .freeboundary import (
     _edge_fourier,
     _presf_ns_scale,
@@ -106,9 +106,13 @@ def make_free_boundary_config(
     smaller AD graph, pass ``field_from_parameters`` and then supply only the
     actual current/coil parameters to :func:`solve_free_boundary_implicit`.
     ``external_field`` here is the concrete reference used to fix resolution.
-    ``device="auto"`` uses the CPU for the coupled implicit response on an
-    accelerator host unless the process already pins JAX placement; pass an
-    explicit device to override that measured lower-memory default.
+    ``device="auto"`` on a GPU host, unless the process pins JAX placement,
+    takes the GPU when :func:`~vmex.core.device.recommended_device` does and
+    the CPU otherwise: measured warm gradients run faster on the GPU from
+    mpol=ntor=5, ns=16 upward and match the CPU to 2e-10, at a first-call
+    compile about twice as slow. Pass ``device="cpu"`` for one-shot gradients
+    or when GPU memory is short, and under ``jax.jit``, which cannot move the
+    host solve off a GPU.
     ``adjoint_solver="coupled_gcrot"`` is the certified default;
     ``"boundary_schur"`` selects the advanced radial-elimination path, which
     stays well conditioned on marginally converged roots where the coupled
@@ -151,6 +155,8 @@ def make_free_boundary_config(
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
     resolution = free_boundary_resolution(inp, external_field, ns=ns)
     solve_device = resolve_implicit_device(device, resolution)
+    if device == AUTO and solve_device is not None and recommended_device(resolution) == "gpu":
+        solve_device = jax.devices("gpu")[0]
     cfg = im.make_config(
         inp, ns=resolution.ns, ftol=ftol, max_iterations=max_iterations,
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
