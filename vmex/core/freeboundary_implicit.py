@@ -1273,9 +1273,9 @@ def _anchor_coupling(z, params, field_parameters, frozen, rcon0, zcon0,
         return ravel_pytree(_vacuum_inputs(state, rt))[0]
 
     _, inputs_t = jax.vjp(inputs, jnp.zeros(shape, row_scale.dtype))
-    rows = jax.vmap(lambda e: inputs_t(e)[0])(
-        jnp.eye(columns.shape[-1], dtype=columns.dtype))
-    rows = rows.reshape(rows.shape[0], -1)
+    rows = _map_columns(lambda e: inputs_t(e)[0],
+                        jnp.eye(columns.shape[-1], dtype=columns.dtype))
+    rows = jnp.moveaxis(rows, -1, 0).reshape(columns.shape[-1], -1)
 
     def bulk_inverse(flat):
         scaled = flat.reshape(shape) * row_scale
