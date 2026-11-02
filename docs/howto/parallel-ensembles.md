@@ -16,7 +16,7 @@ results = vj.parallel.solve_ensemble(inputs, workers=4)    # list[SolveResult]
 `solve_ensemble` threads {func}`vmex.core.multigrid.solve_multigrid`
 (default) or {func}`vmex.core.solver.solve` (`multigrid=False`) over the
 ensemble and returns the results in input order. `workers=None` uses
-{func}`vmex.core.parallel.default_workers`.
+{func}`vmex.core.parallel.available_cpus`, clamped to the ensemble size.
 
 For anything that is not a plain solve, use the general primitive
 {func}`vmex.core.parallel.map_ensemble`, which threads any independent

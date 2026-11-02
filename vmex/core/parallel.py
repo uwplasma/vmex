@@ -29,109 +29,21 @@ from __future__ import annotations
 
 import multiprocessing
 import os
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from typing import Any, Callable, Iterable, Sequence, TypeVar
+from concurrent.futures import ProcessPoolExecutor
+from typing import Any, Callable, Iterable, Sequence
+
+from solvax.parallel import available_cpus
+from solvax.parallel import map_independent as map_ensemble
 
 __all__ = [
     "ProcessWorkers",
     "available_cpus",
-    "default_workers",
     "evaluate_problems",
     "finite_difference_gradient",
     "finite_difference_jacobian",
     "map_ensemble",
     "solve_ensemble",
 ]
-
-_T = TypeVar("_T")
-_R = TypeVar("_R")
-
-
-def available_cpus() -> int:
-    """Return the number of CPUs available, respecting scheduler limits."""
-    counts: list[int] = []
-    process_count = getattr(os, "process_cpu_count", None)
-    if process_count is not None:
-        count = process_count()
-        if count:
-            counts.append(int(count))
-    affinity = getattr(os, "sched_getaffinity", None)
-    if affinity is not None:
-        try:
-            counts.append(len(affinity(0)))
-        except OSError:
-            pass
-    for name in ("SLURM_CPUS_PER_TASK", "PBS_NP", "NSLOTS", "LSB_DJOB_NUMPROC"):
-        try:
-            count = int(os.environ.get(name, ""))
-        except ValueError:
-            continue
-        if count > 0:
-            counts.append(count)
-    counts.append(int(os.cpu_count() or 1))
-    return max(min(counts), 1)
-
-
-def default_workers(n_items: int, workers: int | None = None) -> int:
-    """Resolve the worker count for an ``n_items`` ensemble.
-
-    ``None`` uses the CPUs available to this process, including scheduler
-    affinity limits.  An explicit value is clamped to ``[1, n_items]``.
-    """
-    n_items = max(int(n_items), 1)
-    if workers is None:
-        return min(n_items, available_cpus())
-    return max(1, min(int(workers), n_items))
-
-
-def map_ensemble(
-    fn: Callable[[_T], _R],
-    items: Iterable[_T],
-    *,
-    workers: int | None = None,
-    return_exceptions: bool = False,
-) -> list[_R]:
-    """Apply ``fn`` to each of ``items`` concurrently on CPU; keep input order.
-
-    The general primitive behind :func:`solve_ensemble`.  ``fn`` must be an
-    *independent* per-item computation (e.g. a full ``vj.solve`` /
-    ``implicit.run`` / ``jax.value_and_grad`` over one input) that shares no
-    mutable state with the others — which every vmex forward solve is, since
-    each builds its own runtime and the compiled-executable cache is
-    thread-safe.  Under those conditions the results are byte-identical to a
-    serial ``[fn(x) for x in items]`` (the concurrency only overlaps the
-    GIL-releasing XLA execution windows).
-
-    ``workers`` — see :func:`default_workers`.  With ``workers=1`` the pool
-    runs sequentially (a clean serial baseline for scaling measurements).
-
-    ``return_exceptions=False`` (default) re-raises the first item's exception
-    (preserving vmex's typed :class:`~vmex.core.errors.VmecError` taxonomy),
-    exactly as a serial loop would.  ``return_exceptions=True`` instead places
-    the caught exception object in that slot so one failed ensemble member does
-    not abort the batch (useful for optimization ensembles / robustness scans).
-    """
-    items = list(items)
-    if not items:
-        return []
-    n_workers = default_workers(len(items), workers)
-
-    def _call(x: _T) -> Any:
-        if return_exceptions:
-            try:
-                return fn(x)
-            except Exception as exc:  # noqa: BLE001 - deliberately captured
-                return exc
-        return fn(x)
-
-    if n_workers == 1:
-        return [_call(x) for x in items]
-
-    with ThreadPoolExecutor(max_workers=n_workers) as pool:
-        # executor.map preserves input order and propagates exceptions on
-        # iteration (when return_exceptions is False, _call already re-raises).
-        return list(pool.map(_call, items))
-
 
 _worker_fn: Any = None
 
