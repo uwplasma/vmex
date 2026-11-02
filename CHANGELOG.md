@@ -4,6 +4,12 @@ Release notes are mirrored from the GitHub releases, which carry each release
 in full. A number appears here only where a committed artifact backs it; each
 record under `benchmarks/` names the revision it was measured at.
 
+## Unreleased
+
+- **Free-boundary gradients:** `make_free_boundary_config` now defaults to
+  `adjoint_solver="boundary_schur"`. `coupled_gcrot` stays as an advanced
+  cross-check.
+
 ## 0.12.0 - 2026-10-21
 
 - **Faster optimization.** Implicit executables are keyed on problem structure
