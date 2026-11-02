@@ -599,6 +599,23 @@ def _params_committed_device(params: ImplicitParams):
     return devices.pop() if devices else None
 
 
+def _concrete_build():
+    """Context for building a cached host table: concrete even under a trace.
+
+    The first call of a memoized builder can arrive inside an outer
+    ``jax.jit`` (``jit(value_and_grad(f))``), where its array ops would be
+    staged: tracers would be cached and a nested ``jit`` carrying
+    ``compiler_options`` is rejected.  ``ensure_compile_time_eval`` evaluates
+    them eagerly instead.  It is entered only inside a trace, because it is
+    part of the jit cache key (``eager_constant_folding``) and would make the
+    eager path compile a second copy of every lane the builder dispatches.
+    """
+    from jax._src.core import trace_state_clean
+    if trace_state_clean():
+        return contextlib.nullcontext()
+    return jax.ensure_compile_time_eval()
+
+
 @functools.lru_cache(maxsize=8)
 def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
     """Reference (host-built) runtime at the config's base input.
@@ -617,7 +634,7 @@ def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
     rows) would commit to JAX's default device and poison every runtime
     later assembled from this template on another device.
     """
-    with _device_context(cfg):
+    with _concrete_build(), _device_context(cfg):
         return _device_pin(cfg, prepare_runtime(
             cfg.inp, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, lconm1=cfg.lconm1,
@@ -736,13 +753,14 @@ def _boundary_pack_tables(cfg: ImplicitConfig):
             a[k], b[k], c[k], d[k] = 0.5, -0.5, 0.5, 0.5
             e[k], f[k], g[k], h[k] = 0.5, 0.5, 0.5, -0.5
 
-    tab = types.SimpleNamespace(
-        agg=jnp.asarray(agg), agg_sgn=jnp.asarray(agg_sgn),
-        keep=jnp.asarray(keep), m_pos=jnp.asarray(m_pos),
-        ni_k=ni_k, m_k=m_arr,
-        a=jnp.asarray(a), b=jnp.asarray(b), c=jnp.asarray(c), d=jnp.asarray(d),
-        e=jnp.asarray(e), f=jnp.asarray(f), g=jnp.asarray(g), h=jnp.asarray(h),
-    )
+    with _concrete_build():
+        tab = types.SimpleNamespace(
+            agg=jnp.asarray(agg), agg_sgn=jnp.asarray(agg_sgn),
+            keep=jnp.asarray(keep), m_pos=jnp.asarray(m_pos),
+            ni_k=ni_k, m_k=m_arr,
+            a=jnp.asarray(a), b=jnp.asarray(b), c=jnp.asarray(c), d=jnp.asarray(d),
+            e=jnp.asarray(e), f=jnp.asarray(f), g=jnp.asarray(g), h=jnp.asarray(h),
+        )
     _PACK_TABLE_CACHE[key] = tab
     return tab
 
@@ -3206,20 +3224,45 @@ class _AdjointStats(NamedTuple):
     tolerance: Array
 
 
+def _residual_roundoff(system: _RawBlockSystem, mu: SpectralState):
+    """Round-off level of the residual of ``J_raw^T mu``: ``|| |J|^T |mu| || * eps``.
+
+    A residual this small certifies ``mu`` as the exact answer for a raw
+    Jacobian perturbed at machine precision, which is all double precision
+    can deliver; it is measured from the stored bands, so it costs one
+    banded product.
+    """
+    def transpose(band):
+        return jnp.swapaxes(jnp.abs(band), -1, -2)
+
+    lower = jnp.zeros_like(system.upper).at[1:].set(transpose(system.upper[:-1]))
+    upper = jnp.zeros_like(system.lower).at[:-1].set(transpose(system.lower[1:]))
+    scale = block_tridiag_matvec(
+        lower, transpose(system.diagonal), upper, jnp.abs(system.pack(mu)))
+    return (_ADJOINT_RESIDUAL_SLACK * jnp.finfo(scale.dtype).eps
+            * jnp.linalg.norm(scale))
+
+
 def _block_adjoint(system: _RawBlockSystem, pullback: Callable,
                    b: SpectralState, cfg: ImplicitConfig, tol):
     """Raw multiplier ``J_raw^-T b`` from the transposed block factors.
 
     One refinement pass solves again for the residual measured with
     ``pullback``, the independent raw VJP.  Returns ``(mu, residual_norm,
-    tolerance)`` with the tolerance of :func:`_adjoint_acceptance`.
+    tolerance)``: the tolerance of :func:`_adjoint_acceptance`, but never
+    below the round-off level of the residual (:func:`_residual_roundoff`).
+    A residual relative to ``||b||`` cannot reach ``adjoint_tol = 1e-11`` when
+    ``b`` is small against ``J^-T b`` (an objective that is stationary at the
+    equilibrium, such as ``wb``): the residual stops at round-off and the
+    solve used to fall through to a GCROT run that stalls.
     """
     def defect(mu):
         return jax.tree.map(jnp.subtract, b, system.project(pullback(mu)))
 
     mu = _raw_block_apply(system, b, transpose=True)
     mu = jax.tree.map(jnp.add, mu, _raw_block_apply(system, defect(mu), transpose=True))
-    return mu, _tree_norm(defect(mu)), _adjoint_acceptance(cfg, _tree_norm(b), tol)
+    return mu, _tree_norm(defect(mu)), jnp.maximum(
+        _adjoint_acceptance(cfg, _tree_norm(b), tol), _residual_roundoff(system, mu))
 
 
 @functools.partial(jax.jit, static_argnames=("cfg",))
