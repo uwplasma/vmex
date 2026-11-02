@@ -26,6 +26,9 @@ Buller & Drevlak, Phys. Plasmas 29, 082501 (2022).
 - :func:`redl_geometry_from_state` — traceable lane on
   ``(SpectralState, SolverRuntime)`` using the solver's half-mesh internal
   grid; iota/G/I from ``_iotas_half``/``surface_currents``.
+- :func:`bootstrap_geometric_factor` / :class:`BootstrapGeometricResidual` —
+  collisionless Shaing-Callen geometry ``G Delta_G + I Delta_I`` from the
+  Boozer ``|B|`` spectrum, valid for QA, QH, QI and pwO alike.
 - :func:`vmec_j_dot_B` — equilibrium
   ``<J.B>`` via the MHD identity (validated against the Zenodo
   ``convertSfincsToVmecCurrentProfile`` script and the wout ``jdotb``):
@@ -65,6 +68,7 @@ import jax.numpy as jnp
 
 from .fields import surface_currents
 from .input import VmecInput
+from .omnigenity import _ResidualTerm
 from .profiles import MU0
 from .solver import SolverRuntime, SpectralState
 from .statephysics import (
@@ -87,6 +91,8 @@ __all__ = [
     "redl_geometry_from_wout",
     "redl_geometry_from_state",
     "j_dot_B_redl",
+    "bootstrap_geometric_factor",
+    "BootstrapGeometricResidual",
     "vmec_j_dot_B",
     "RedlBootstrapMismatch",
     "BootstrapPicardResult",
@@ -667,6 +673,120 @@ def j_dot_B_redl(
         "dTids_term": dTids_term, "jdotB": jdotB,
     }
     return jdotB, details
+
+
+# ===========================================================================
+# Shaing-Callen geometric factor from the Boozer |B| spectrum
+# ===========================================================================
+
+
+def bootstrap_geometric_factor(*, bmnc_b, xm_b, xn_b, iota_b, nfp, bmns_b=None,
+                               ntheta: int = 64, nzeta: int = 64, n_lambda: int = 32,
+                               damping: float = 1e-2, sharpness: float = 1e3):
+    r"""Collisionless bootstrap geometry ``f_s + <u B^2> = G Delta_G + I Delta_I``.
+
+    Helander, Parra & Newton, J. Plasma Phys. 83, 905830206 (2017), eq. 71:
+    ``b.grad u = -(b x grad psi).grad B^-2`` and, per pitch ``lambda``,
+    ``b.grad h = +(b x grad psi).grad xi^-1`` (``xi = sqrt(1 - lambda B)``),
+    with ``u = h = 0`` at ``B_max``, ``g4 = xi h`` and
+    ``f_s = (3<B^2>/4) int_0^{1/B_max} <g4> lambda dlambda / <xi>``.
+    In Boozer angles each Fourier mode ``exp i(m theta + k zeta)`` (``k``
+    physical, including ``nfp``) solves to
+    ``u_mk = -(G m - I k)/(iota m + k) [B^-2]_mk`` and
+    ``h_mk = +(G m - I k)/(iota m + k) [xi^-1]_mk`` (Nakajima et al., Nucl.
+    Fusion 29, 605 (1989), eqs. 3, 6-7, 12-13 with ``g2 = -u B^2``,
+    ``g3 = h``; Shaing et al., Phys. Fluids B 1, 1663 (1989), eqs. 18, 26).
+    Pseudo-spectral on a ``ntheta x nzeta`` one-period grid; the tokamak
+    limit is ``f_s + <u B^2> = -G f_t / iota`` exactly. Matches STELLOPT
+    BOOTSJ ``gnorm = -iota (G Delta_G + I Delta_I)/(G f_t)`` to ~1%.
+
+    Resonances ``d = iota m + k -> 0`` use BOOTSJ's damping
+    ``1/d -> d/(d^2 + (damping iota m)^2)`` (``damping`` is BOOTSJ's
+    ``damp_bs``; ``m = 0`` modes never resonate; QA is scaled by
+    ``1/(1 + damping^2)``). The ``B_max`` constants are a softmax over grid
+    points, ``w ~ exp(sharpness (B - B_max)/(B_max - B_min))``, continuous
+    when the maximum jumps; ``u`` and ``h`` vary as ``sqrt(B_max - B)``
+    there, so softer weights bias the result (QA ratio 0.97 at 200, 0.996
+    at 1e3 on a 64-point grid).
+
+    Returns ``{f_t, Delta_G, Delta_I, ratio, B_max}`` per surface, with
+    ``ratio = -iota Delta_G / f_t``: 1 for QA, ``iota/(iota - N)`` for QH
+    (``B(theta - N zeta)``), 0 for poloidally closed contours (QI, QP).
+    """
+    m_b, k_b = jnp.asarray(xm_b), jnp.asarray(xn_b)
+    iota = jnp.atleast_1d(jnp.asarray(iota_b))[:, None, None]
+    theta = 2 * jnp.pi * jnp.arange(ntheta) / ntheta
+    zeta = 2 * jnp.pi * jnp.arange(nzeta) / (nfp * nzeta)
+    phase = m_b * theta[:, None, None] - k_b * zeta[None, :, None]
+    B = jnp.einsum("sk,tzk->stz", jnp.asarray(bmnc_b), jnp.cos(phase))
+    if bmns_b is not None:
+        B = B + jnp.einsum("sk,tzk->stz", jnp.asarray(bmns_b), jnp.sin(phase))
+    Bmax, Bmin = B.max(axis=(1, 2)), B.min(axis=(1, 2))
+    w = jax.nn.softmax((sharpness * (B - Bmax[:, None, None])
+                        / (Bmax - Bmin)[:, None, None]).reshape(B.shape[0], -1), axis=-1)
+    w = w.reshape(B.shape)
+
+    m = (np.fft.fftfreq(ntheta) * ntheta)[:, None]
+    k = (np.fft.fftfreq(nzeta) * nzeta * nfp)[None, :]
+    keep = (m != 0) | (k != 0)
+    d = iota * m + k
+    D = jnp.where(keep, d / jnp.where(keep, d * d + (damping * iota * m) ** 2, 1.0), 0.0)
+    coef = jnp.stack((m * D, -k * D))           # (2: G, I, nsurf, ntheta, nzeta)
+
+    def solve(f):                                # (..., 2, nsurf, ...) zero at B_max
+        g = jnp.fft.ifft2(coef * jnp.fft.fft2(f)[..., None, :, :, :]).real
+        return g - jnp.sum(w * g, axis=(-2, -1), keepdims=True)
+
+    Bm2 = B ** -2
+    vol = Bm2.mean(axis=(1, 2))                  # <Q> = mean(Q B^-2)/mean(B^-2)
+    uB2 = -solve(Bm2).mean(axis=(-2, -1)) / vol
+
+    nodes, weights = np.polynomial.legendre.leggauss(int(n_lambda))
+    t = 0.5 * (nodes + 1.0)
+    lam = (1.0 - t * t)[:, None] / Bmax           # (nlambda, nsurf); xi >= t at B_max
+    xi = jnp.sqrt(1.0 - lam[:, :, None, None] * B)
+    fsa_xi = jnp.mean(xi * Bm2, axis=(-2, -1))
+    g4 = jnp.mean((xi * Bm2)[:, None] * solve(1.0 / xi), axis=(-2, -1)) / fsa_xi[:, None]
+    quad = (0.75 / vol / Bmax) * (weights * t)[:, None] * lam
+    f_t = 1.0 - jnp.sum(quad * vol / fsa_xi, axis=0)
+    Delta = jnp.sum(quad[:, None] * g4, axis=0) + uB2
+    return {"f_t": f_t, "Delta_G": Delta[0], "Delta_I": Delta[1],
+            "ratio": -iota[:, 0, 0] * Delta[0] / f_t, "B_max": Bmax}
+
+
+class BootstrapGeometricResidual(_ResidualTerm):
+    """Least-squares rows ``sqrt(w_j) * ratio(s_j)`` of :func:`bootstrap_geometric_factor`.
+
+    ``ratio = -iota Delta_G / f_t`` is the collisionless bootstrap current per
+    unit QA-equivalent current at fixed profiles: 1 for QA, ``iota/(iota-N)``
+    for QH, 0 for exactly omnigenous fields with poloidally closed contours.
+    ``Delta_G = 0`` on every surface gives zero bootstrap current for any
+    profiles once the enclosed toroidal current vanishes (``I Delta_I`` is
+    then zero). Collisionless (``1/nu``) theory: validate designs with a
+    finite-collisionality ``D_31``. Avoid low-order rational surfaces.
+    ``weights`` default to uniform and are normalized to sum 1.
+    """
+
+    name = "bootstrap_geometric"
+
+    def __init__(self, surfaces, *, weights=None, mboz: int = 16, nboz: int = 16,
+                 oversample: int = 2, **options):
+        self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
+        weights = np.ones_like(self.surfaces) if weights is None else np.asarray(weights, float)
+        if weights.shape != self.surfaces.shape or np.any(weights < 0) or weights.sum() <= 0:
+            raise ValueError("weights must be nonnegative, one per surface, not all zero")
+        self.weights = np.sqrt(weights / weights.sum())
+        self.mboz, self.nboz, self.oversample, self.options = mboz, nboz, oversample, options
+
+    def compute_state(self, state, rt):
+        """Boozer spectrum plus ``f_t``, ``Delta_G``, ``Delta_I``, ``ratio`` and the rows."""
+        booz = self._boozer(state, rt)
+        out = bootstrap_geometric_factor(
+            bmnc_b=booz["bmnc_b"], bmns_b=booz.get("bmns_b"), xm_b=booz["xm_b"],
+            xn_b=booz["xn_b"], iota_b=booz["iota_b"], nfp=booz["nfp"], **self.options)
+        out.update(booz, residuals1d=self.weights * out["ratio"])
+        out["total"] = jnp.sum(out["residuals1d"] ** 2)
+        return out
 
 
 # ===========================================================================
