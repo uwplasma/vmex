@@ -227,7 +227,11 @@ the Jacobian. Set
 ``jacobian_batch_size=1`` for the serial pass when peak memory, not
 throughput, is the binding constraint; ``None`` is the widest and the most
 memory-hungry. ``adjoint_tol`` and ``adjoint_maxiter`` control the certified
-Krylov solves.
+Krylov solves.  The block adjoint is accepted when its residual is below
+``10 * adjoint_tol * ||rhs||`` or at the round-off level of the residual
+(10 eps ``|| |J|^T |mu| ||``), whichever is larger, so a right-hand side that
+is small against the multiplier, such as the energy ``wb``, does not fall
+through to the Krylov solve.
 
 ``derivative_method="finite_difference"`` accepts opaque host objectives. It
 uses independent equilibrium probes and ``workers=None`` automatically uses
@@ -427,14 +431,15 @@ plasma--vacuum root. Every status-0 state is anchored there (to
 ``refine_tol``, 1e-10 by default), so its value and its adjoint refer to the
 same point; VMEC's ``ftol`` alone leaves the state off that root along weakly
 damped directions.
-The certified whole-state GCROT transpose remains the default.
-``adjoint_solver="boundary_schur"`` selects the advanced boundary-Schur lane, which
+The default ``adjoint_solver="boundary_schur"`` needs no tuning: it
 eliminates the block-tridiagonal radial bulk and solves only the evolved-edge
-correction before checking the full coupled residual. Local three-surface
-rows and a pivoted sparse band solve reduce its cold cost substantially, but
-local-row compilation still keeps it opt-in. It is a host lane: under an
-outer ``jax.jit`` the pullback warns and uses the staged coupled GCROT solve
-instead, so call the objective eagerly to keep it. ``device="auto"`` uses the CPU
+correction before checking the full coupled residual. Set
+``"coupled_gcrot"`` only to cross-check a suspect gradient, or when the
+default's banded factor of ``ns`` dense per-surface blocks does not fit host
+memory: GCROT is matrix-free but may not converge on 3-D decks. The default is a
+host lane: under an outer ``jax.jit`` the pullback runs it behind a
+``jax.pure_callback`` on the saved root, so jit and eager calls take the same
+solver and gradient. ``device="auto"`` uses the CPU
 for this response on accelerator hosts; an explicit ``device="gpu"`` or
 process-wide JAX placement overrides that measured lower-memory default.
 

@@ -66,7 +66,7 @@ def configured(**overrides):
     return aspect_from_coils
 
 
-aspect_from_coils = configured()
+aspect_from_coils = configured(adjoint_solver="coupled_gcrot")
 
 parameters = jnp.zeros(base_dofs.size)
 print("Solving the free-boundary equilibrium and its coupled adjoint (first call compiles)...", flush=True)
@@ -89,7 +89,7 @@ print(f"Coupled GCROT adjoint done (aspect {float(aspect):.6f}); running the edg
 # 1.6e-02 apart, and the central difference below read 0 at the smoke-test
 # settings; it now agrees with both to 1.1e-04 and 1.1e-05, the difference
 # quotient's own truncation at this step.
-schur_gradient = jax.grad(configured(adjoint_solver="boundary_schur"))(parameters)
+schur_gradient = jax.grad(configured())(parameters)
 schur = jnp.vdot(schur_gradient, direction)
 disagreement = jnp.abs(autodiff - schur) / jnp.abs(schur)
 

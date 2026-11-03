@@ -428,6 +428,12 @@ def input_minor_radius(inp: VmecInput) -> float:
     return float(np.sqrt(2.0 * abs(np.mean(r * zu))))
 
 
+def _axis_harmonics(b: Any, data: WoutData) -> tuple[Any, Any]:
+    """``m = 0`` harmonics of half-mesh ``b`` at ``s = 0`` and their ``xn_nyq``."""
+    b, m0 = np.asarray(b), np.asarray(data.xm_nyq) == 0
+    return (1.5 * b[1] - 0.5 * b[2])[m0], np.asarray(data.xn_nyq)[m0]
+
+
 def b00_axis(data: WoutData) -> float:
     """Boozer ``B00`` on the magnetic axis, ``int B^2 dl / int B dl`` [T].
 
@@ -437,9 +443,7 @@ def b00_axis(data: WoutData) -> float:
     from the first two half-mesh surfaces and the curve comes from the axis
     row of ``rmnc``/``zmns``.
     """
-    m0 = np.asarray(data.xm_nyq) == 0
-    b = np.asarray(data.bmnc)
-    b_axis, xn_b = (1.5 * b[1] - 0.5 * b[2])[m0], np.asarray(data.xn_nyq)[m0]
+    b_axis, xn_b = _axis_harmonics(data.bmnc, data)
     g0 = np.asarray(data.xm) == 0
     xn, r, z = np.asarray(data.xn)[g0], np.asarray(data.rmnc)[0, g0], np.asarray(data.zmns)[0, g0]
     phi = np.linspace(0.0, 2.0 * np.pi / int(data.nfp), 256, endpoint=False)[:, None]
@@ -448,6 +452,37 @@ def b00_axis(data: WoutData) -> float:
                  + (np.sin(xn * phi) @ (xn * r)) ** 2
                  + (np.cos(xn * phi) @ (xn * z)) ** 2)
     return float(np.sum(field**2 * dl) / np.sum(field * dl))
+
+
+def axis_field(data: WoutData, phi: float = 0.0) -> float:
+    """``|B|`` on the magnetic axis at toroidal angle ``phi`` [T].
+
+    The ``m = 0`` Nyquist harmonics of the half-mesh ``bmnc`` (and ``bmns`` for
+    ``lasym``) are extrapolated to ``s = 0`` as ``1.5 b[1] - 0.5 b[2]`` and
+    summed at ``phi`` (radians), ``sum_n b_n cos(n phi) - b'_n sin(n phi)`` with
+    ``n = xn_nyq``.  Only ``m = 0`` survives at the axis; the extrapolated
+    ``m > 0`` harmonics are discretization artifacts there.  This is the
+    point value that :func:`b00_axis` averages along the axis.  It is not
+    ``wout.b0 = rbtor0 / R_axis``, a toroidal-component quantity that differs
+    from ``|B|`` wherever the axis is tilted.
+    """
+    cos_n, xn = _axis_harmonics(data.bmnc, data)
+    field = float(np.sum(cos_n * np.cos(xn * phi)))
+    if data.bmns is not None:
+        field -= float(np.sum(_axis_harmonics(data.bmns, data)[0] * np.sin(xn * phi)))
+    return abs(field)
+
+
+def match_b0(
+    inp: VmecInput, data: WoutData, b0_target: float, phi: float = 0.0,
+) -> VmecInput:
+    """Scale ``inp`` so that :func:`axis_field` at ``phi`` becomes ``b0_target`` [T].
+
+    ``data`` is the converged wout of ``inp``.  Shape, iota and beta are
+    unchanged (``scale_input`` with ``b_scale = b0_target / axis_field``), so
+    re-solving the returned deck gives ``b0_target`` at the same ``ns``.
+    """
+    return scale_input(inp, b_scale=abs(b0_target) / axis_field(data, phi))
 
 
 def scale_reference(data: WoutData, target: str = "volavgB") -> tuple[float, float]:
