@@ -359,6 +359,7 @@ _CXX_JSON = (
 def test_cxx_vmec_json_defaults_are_accepted_and_others_raise() -> None:
     """The reimplementation's writer emits every key; non-default ones fail."""
     assert VmecInput.from_json_text(_CXX_JSON).nfp == 2
+    VmecInput.from_json_text(_CXX_JSON[:-1] + ', "backup_evaluated_state": false}')
     for key, bad in (("iteration_style", "parvmec"), ("vacuum_mpol", 4),
                      ("lgiveup", True), ("ntor_geometry", 5)):
         text = _CXX_JSON[:-1]
@@ -688,3 +689,37 @@ def test_every_fortran_namelist_terminator_ends_indata(ending):
     inp = VmecInput.from_indata_text(head + ending + "\n&BOOTIN\n NFP = 7\n/\n")
     assert (inp.mpol, inp.nfp, inp.mgrid_file) == (2, 3, "path/to/mgrid.nc")
     np.testing.assert_array_equal(np.asarray(inp.am)[:3], [1.0, 2.0, 0.0])
+
+
+_SOLOVEV_JSON = (
+    '{"mpol": 6, "ntor": 0, "delt": 0.9, "ncurr": 0, "nstep": 250,'
+    ' "ns_array": [5], "niter_array": [1000], "ftol_array": [1e-12],'
+    ' "am": [0.125, -0.125], "ai": [1.0], "raxis_c": [4.0], "zaxis_s": [0.0],'
+    ' "rbc": [{"n": 0, "m": 0, "value": 3.999}, {"n": 0, "m": 1, "value": 1.026},'
+    ' {"n": 0, "m": 2, "value": -0.068}],'
+    ' "zbs": [{"n": 0, "m": 0, "value": 0.0}, {"n": 0, "m": 1, "value": 1.58},'
+    ' {"n": 0, "m": 2, "value": 0.01}]}'
+)
+_SOLOVEV_INDATA = """&INDATA
+DELT = 0.9  NCURR = 0  NSTEP = 250  MPOL = 6  NTOR = 0
+NS_ARRAY = 5  NITER_ARRAY = 1000  FTOL_ARRAY = 1E-12
+AM = 0.125 -0.125  AI = 1  RAXIS_CC = 4  ZAXIS_CS = 0
+RBC(0,0) = 3.999  ZBS(0,0) = 0.000
+RBC(0,1) = 1.026  ZBS(0,1) = 1.580
+RBC(0,2) = -0.068  ZBS(0,2) = 0.010
+/
+"""
+
+
+def test_cxx_vmec_json_solves_like_the_equivalent_indata() -> None:
+    """A published example of that JSON format equals its INDATA deck."""
+    import vmex as vj
+
+    a = VmecInput.from_json_text(_SOLOVEV_JSON)
+    b = VmecInput.from_indata_text(_SOLOVEV_INDATA)
+    for name in ("rbc", "zbs", "am", "ai", "raxis_c", "zaxis_s", "ns_array"):
+        np.testing.assert_array_equal(getattr(a, name), getattr(b, name))
+    ra, rb = (vj.solve_multigrid(i, verbose=False) for i in (a, b))
+    assert ra.converged and rb.converged
+    np.testing.assert_allclose(float(ra.fsqr), float(rb.fsqr), atol=1e-14)
+    assert int(ra.iterations) == int(rb.iterations)

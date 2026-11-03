@@ -27,6 +27,34 @@ normalizations are applied on construction (the :mod:`vmex.core.input`
 docstring has the exact rules).  Unknown names and active unsupported
 physics fail before setup.
 
+The JSON input of the C++ VMEC reimplementation is read key by key.  Every
+key is either implemented or raises an error that names it:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Keys
+     - Status
+   * - ``lasym``, ``nfp``, ``mpol``, ``ntor``, ``ntheta``, ``nzeta``,
+       ``ns_array``, ``ftol_array``, ``niter_array``, ``nstep``, ``delt``,
+       ``tcon0``, ``lforbal``, ``phiedge``, ``ncurr``, ``curtor``, ``bloat``,
+       ``gamma``, ``pres_scale``, ``spres_ped``, ``*_type``, ``am*``, ``ai*``,
+       ``ac*``, ``aphi``, ``raxis_c``, ``zaxis_s``, ``raxis_s``, ``zaxis_c``,
+       ``rbc``, ``zbs``, ``rbs``, ``zbc``, ``lfreeb``, ``mgrid_file``,
+       ``extcur``, ``nvacskip``, ``free_boundary_method`` (``nestor``)
+     - Implemented; same meaning as the INDATA name.
+   * - ``backup_evaluated_state``, ``return_outputs_even_if_not_converged``
+     - Accepted with any value; VMEX always returns its final state.
+   * - ``mpol_geometry``, ``ntor_geometry``, ``vacuum_mpol``, ``vacuum_ntor``,
+       ``signgs``, ``iteration_style``, ``lgiveup``, ``fgiveup``, ``lbsubs``,
+       ``lambda_preconditioner_scale``,
+       ``lambda_precondition_checkerboard_terms``, ``always_fix_m1_gauge``
+     - Accepted at the default only (``-1``/``0`` sizes follow ``mpol``/``ntor``,
+       ``signgs=-1``, ``vmec_8_52``); any other value raises
+       ``UnsupportedInputModeError``.
+   * - ``free_boundary_method`` other than ``nestor``, any unknown key
+     - Raises an error naming the key.
+
 ``VmecInput`` has value semantics: its arrays are owned and read-only, so an
 in-place edit cannot invalidate a compiled solve.  Copy the array, edit it,
 and build the new deck with ``dataclasses.replace``.

@@ -698,9 +698,11 @@ _JSON_DEFAULT_ONLY: Dict[str, Any] = {
     "lgiveup": False, "fgiveup": 30.0, "lbsubs": False,
     "lambda_preconditioner_scale": 0.5,
     "lambda_precondition_checkerboard_terms": 0.001,
-    "backup_evaluated_state": True, "always_fix_m1_gauge": False,
-    "return_outputs_even_if_not_converged": False,
+    "always_fix_m1_gauge": False,
 }
+# Accepted at any value: VMEX always returns its final state and keeps no
+# backup of the evaluated state, so neither changes a converged solve.
+_JSON_ANY_VALUE = ("backup_evaluated_state", "return_outputs_even_if_not_converged")
 
 
 def _json_is_default(data: Dict[str, Any], key: str, default: Any) -> bool:
@@ -732,7 +734,7 @@ def _validate_json_modes(data: Dict[str, Any]) -> None:
 
     field_names = {field.name for field in fields(VmecInput)}
     known = (field_names | {"adiabatic_index", "free_boundary_method"}
-             | set(_JSON_DEFAULT_ONLY))
+             | set(_JSON_DEFAULT_ONLY) | set(_JSON_ANY_VALUE))
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(
