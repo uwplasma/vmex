@@ -773,6 +773,7 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
         shape = (1, len(alpha), 1, 1)
         return {"action": jax.numpy.broadcast_to(pitch, shape),
                 "bounce_time": jax.numpy.ones(shape),
+                "well_left": jax.numpy.zeros(shape),
                 "usable_mask": jax.numpy.ones(shape, dtype=bool)}
 
     monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)
