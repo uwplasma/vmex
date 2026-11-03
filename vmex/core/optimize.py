@@ -123,8 +123,11 @@ from .statephysics import (
     elongation_profile,
     iota_edge,
     max_elongation,
+    min_boundary_curvature_radius,
     mean_iota,
     min_abs_iota,
+    edge_jacobian_ratio,
+    axis_excursion,
     soft_min_abs_iota,
     volume,
     volume_average_beta,
@@ -148,6 +151,9 @@ __all__ = [
     "aspect_ratio",
     "mean_iota",
     "min_abs_iota",
+    "edge_jacobian_ratio",
+    "axis_excursion",
+    "Hinge",
     "soft_min_abs_iota",
     "edge_iota",
     "iota_edge",
@@ -158,6 +164,7 @@ __all__ = [
     "weighted_magnetic_well",
     "elongation_profile",
     "max_elongation",
+    "min_boundary_curvature_radius",
     "d_merc",
     "d_merc_state",
     "mercier_stability_residual",
@@ -783,6 +790,25 @@ class QuasisymmetryRatioResidual:
 # conventions) — live in statephysics.py (Item I.7 consolidation) and are
 # re-exported here unchanged; ``iota_edge`` is the naming-flip alias of
 # ``edge_iota`` (implicit.py exposes the mirror alias).
+
+
+class Hinge:
+    """An inequality as a residual: zero inside ``[floor, ceiling]``, the distance outside.
+
+    ``fun`` is any ``(state, runtime)`` metric, scalar or per surface, so
+    ``(Hinge(min_abs_iota, floor=0.42), 0.0, 100.0)`` is an objective tuple.
+    """
+
+    def __init__(self, fun: Callable, *, floor: Any = None, ceiling: Any = None):
+        self.fun, self.floor, self.ceiling = fun, floor, ceiling
+        self.name = getattr(fun, "__name__", type(fun).__name__)
+
+    def __call__(self, state: SpectralState, rt: SolverRuntime) -> Array:
+        """Return the distance of ``fun`` outside the band, zero inside."""
+        value = self.fun(state, rt)
+        below = 0.0 if self.floor is None else jnp.maximum(self.floor - value, 0.0)
+        above = 0.0 if self.ceiling is None else jnp.maximum(value - self.ceiling, 0.0)
+        return below + above
 
 
 def report_targets(
