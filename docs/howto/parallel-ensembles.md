@@ -57,3 +57,32 @@ cores.
 
 The mechanism, and why `pmap` and `vmap` were rejected, is in
 {doc}`/explanation/architecture`.
+
+## Threads and devices on an allocation
+
+VMEX sizes itself to the allocation the first time {mod}`vmex.core` is used.
+No setting is needed for a CPU or GPU job. The CPU count is the smallest of the
+affinity mask, the cgroup quota, the Slurm, PBS, SGE or LSF allocation, and the
+host size.
+
+| Resource | Default | Set your own with |
+| --- | --- | --- |
+| XLA threads in one solve | CPUs, at most 16 | `NPROC` |
+| BLAS threads in one solve | CPUs, at most 16 | `OPENBLAS_NUM_THREADS` |
+| ESSOS CPU devices | CPUs | `ESSOS_CPU_DEVICES` |
+| Ensemble workers | CPUs, at most one per item | `workers=` |
+| GPU | every GPU JAX sees, placed by `device="auto"` | `CUDA_VISIBLE_DEVICES`, `device=` |
+
+A value you set always wins. Set environment variables before starting Python;
+they have no effect once the JAX backend or SciPy's BLAS has loaded.
+
+Advanced settings, for when the default is not the best choice:
+
+- Many equilibria on one node: use one process or worker per few cores and
+  divide the threads, for example `NPROC=4 OPENBLAS_NUM_THREADS=4`. Independent
+  solves scale much better than threads inside one solve.
+- Well above 8 poloidal and toroidal modes on a large exclusive node: compare
+  `NPROC=36` against the default on your case. It can gain a little wall time
+  for a large increase in CPU time.
+- Small cases: `NPROC=8 OPENBLAS_NUM_THREADS=8` uses less CPU for about the same
+  wall time.

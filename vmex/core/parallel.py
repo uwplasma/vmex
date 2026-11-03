@@ -27,9 +27,10 @@ single-solve path (which stays byte-identical) and imposes no new dependency.
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable, Sequence, TypeVar
+
+from solvax import available_cpus
 
 __all__ = [
     "available_cpus",
@@ -43,31 +44,6 @@ __all__ = [
 
 _T = TypeVar("_T")
 _R = TypeVar("_R")
-
-
-def available_cpus() -> int:
-    """Return the number of CPUs available, respecting scheduler limits."""
-    counts: list[int] = []
-    process_count = getattr(os, "process_cpu_count", None)
-    if process_count is not None:
-        count = process_count()
-        if count:
-            counts.append(int(count))
-    affinity = getattr(os, "sched_getaffinity", None)
-    if affinity is not None:
-        try:
-            counts.append(len(affinity(0)))
-        except OSError:
-            pass
-    for name in ("SLURM_CPUS_PER_TASK", "PBS_NP", "NSLOTS", "LSB_DJOB_NUMPROC"):
-        try:
-            count = int(os.environ.get(name, ""))
-        except ValueError:
-            continue
-        if count > 0:
-            counts.append(count)
-    counts.append(int(os.cpu_count() or 1))
-    return max(min(counts), 1)
 
 
 def default_workers(n_items: int, workers: int | None = None) -> int:
