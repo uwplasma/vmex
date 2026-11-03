@@ -1158,7 +1158,7 @@ def _j_invariant_map(
     booz: dict[str, Any],
     *,
     pitch: float | None = None,
-    pitch_fraction: float = 0.5,
+    pitch_fraction: float = 0.25,
     nalpha: int = 96,
     points_per_period: int = 64,
     quadrature_order: int = 32,
@@ -1246,8 +1246,11 @@ def _j_invariant_map(
         )
         action = np.asarray(out["action"])[0, :, 0, :]       # (nalpha, nwells)
         usable = np.asarray(out["usable_mask"])[0, :, 0, :]
-        # Later wells on the line belong to other labels: keep the first one.
-        first = np.argmax(usable, axis=-1)[:, None]
+        # Later wells on the line belong to other labels: keep the deepest
+        # usable well starting within one field period of the first.
+        left = np.where(usable, np.asarray(out["well_left"])[0, :, 0, :], np.inf)
+        usable = usable & (left < left.min(axis=-1, keepdims=True) + 2.0 * np.pi / nfp)
+        first = np.argmax(np.where(usable, action, -np.inf), axis=-1)[:, None]
         found = usable.any(axis=-1)
         j_map[k] = np.where(found, np.take_along_axis(action, first, -1)[:, 0], np.nan)
         tau = np.asarray(out["bounce_time"])[0, :, 0, :]
@@ -1258,9 +1261,13 @@ def _j_invariant_map(
     orbits = None
     if rows.size >= 4:
         from .maxj import drift_orbits
-        launch = np.asarray(booz["s_b"])[rows[:: max(1, rows.size // 5)]]
+        # Launch off the axis, where the polar map resolves alpha poorly, and
+        # inside the edge, where every drift surface would start lost.
+        launch = np.asarray(booz["s_b"])[rows]
+        launch = launch[(launch >= 0.2) & (launch <= 0.85)]
+        launch = launch[:: max(1, launch.size // 5)]
         orbits = {key: np.asarray(value) for key, value in drift_orbits(
-            j_map, tau_map, booz["s_b"], alpha, launch).items()}
+            j_map, tau_map, booz["s_b"], alpha, launch, length=8.0, nsteps=512).items()}
     return {
         "alpha": alpha,
         "s_b": booz["s_b"],
@@ -1354,11 +1361,14 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
 
 
 def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
-    """Velasco-style polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``.
+    """Polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``.
 
-    Unfilled ``J`` contours carry the colorbar; dashed curves are the drift
-    surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over about
-    one precession turn, and the grey circle is the LCFS ``s = 1``.
+    The colored curves are ``J`` contours. The dark curves drawn over them
+    are drift surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over
+    about one precession turn, solid if they close inside the LCFS and dashed
+    red if they reach it; dots mark the launch points. Where an orbit follows
+    a contour, the colored curve shows along its edges. The title gives the
+    pitch as ``v_par/v`` where ``|B|`` is smallest.
     """
     length_scale = abs(float(r_major))
     if not np.isfinite(length_scale) or length_scale <= np.finfo(float).tiny:
@@ -1378,27 +1388,57 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     periodic = np.ma.concatenate([masked, masked[:, :1]], axis=1)
     alpha2d, s2d = np.meshgrid(alpha, j_info["s_b"])
     x, y = s2d * np.cos(alpha2d), s2d * np.sin(alpha2d)
-    levels = np.linspace(float(periodic.min()), float(periodic.max()), 15)
-    lines = ax.contour(x, y, periodic, levels=levels, cmap=_CMAP_J, linewidths=1.0)
-    fig.colorbar(lines, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
-    orbits = j_info.get("orbits")
-    for k, (s_orbit, a_orbit) in enumerate(
-            zip(*(orbits["s"], orbits["alpha"])) if orbits else ()):
-        ax.plot(s_orbit * np.cos(a_orbit), s_orbit * np.sin(a_orbit), "k--",
-                linewidth=0.9, label="drift surfaces" if k == 0 else None)
-    if orbits:
-        ax.legend(loc="lower left", framealpha=0.8)
-    radius = max(1.0, float(np.max(j_info["s_b"])))
+    levels = np.linspace(float(periodic.min()), float(periodic.max()), 12)
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    ax.contour(x, y, periodic, levels=levels, cmap=_CMAP_J, linewidths=3.2)
+    # A continuous bar reads better than twelve stripes; the contours sample it.
+    mappable = ScalarMappable(Normalize(levels[0], levels[-1]), cmap=_CMAP_J)
+    fig.colorbar(mappable, ax=ax, pad=0.02,
+                 label=r"second adiabatic invariant $J\,/\,(v R_0)$")
+    from matplotlib import colormaps
+    from matplotlib.lines import Line2D
     from matplotlib.patches import Circle
-    ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.4", linewidth=0.8))
-    ax.axhline(0.0, color="0.6", linewidth=0.5)
-    ax.axvline(0.0, color="0.6", linewidth=0.5)
+    circle = ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.15", linewidth=2.8))
+    # Drift surfaces: black if the orbit closes inside the LCFS, red if lost.
+    orbits = j_info.get("orbits")
+    handles = [Line2D([], [], color=colormaps[_CMAP_J](0.6), linewidth=3.2,
+                      label=r"contours of $J$ (second adiabatic invariant)"),
+               Line2D([], [], color="0.15", linewidth=2.8, label="last closed flux surface")]
+    for s_orbit, a_orbit in zip(*(orbits["s"], orbits["alpha"])) if orbits else ():
+        outside = np.abs(s_orbit) >= 1.0
+        lost = bool(outside.any())
+        turned = np.abs(a_orbit - a_orbit[0]) >= 2.0 * np.pi
+        # Stop at the LCFS, or after one loop of a closed drift surface.
+        end = int(np.argmax(outside)) + 2 if lost else (
+            int(np.argmax(turned)) + 2 if turned.any() else s_orbit.size)
+        color = "#c0392b" if lost else "black"
+        ax.plot(s_orbit[:end] * np.cos(a_orbit[:end]), s_orbit[:end] * np.sin(a_orbit[:end]),
+                color=color, linewidth=1.6, linestyle="--" if lost else "-",
+                clip_path=circle)
+        ax.plot(s_orbit[0] * np.cos(a_orbit[0]), s_orbit[0] * np.sin(a_orbit[0]),
+                "o", color=color, markersize=7, markeredgecolor="white")
+    if orbits:
+        lost = np.any(np.abs(orbits["s"]) >= 1.0, axis=-1)
+        handles += [Line2D([], [], color="black", linewidth=1.6,
+                           label=f"drift surface, confined ({int((~lost).sum())})"),
+                    Line2D([], [], color="#c0392b", linewidth=1.6, linestyle="--",
+                           label=f"drift surface, reaches the LCFS ({int(lost.sum())})"),
+                    Line2D([], [], color="black", linestyle="none", marker="o", markersize=7,
+                           markeredgecolor="white", label="bounce centre at launch")]
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.2),
+              ncol=1, framealpha=1.0, edgecolor="0.7")
+    radius = 1.08
     ax.set_xlim(-radius, radius); ax.set_ylim(-radius, radius)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel(r"$s\cos\alpha$"); ax.set_ylabel(r"$s\sin\alpha$")
-    ax.set_title(
-        "second adiabatic invariant\n"
-        rf"$1/\lambda={j_info['pitch_inverse']:.3g}$ T")
+    ax.set_xticks([-1, 0, 1]); ax.set_yticks([-1, 0, 1])
+    ax.set_xlabel(r"$s\,\cos\alpha$"); ax.set_ylabel(r"$s\,\sin\alpha$")
+    # v_par/v at the deepest point of |B|: 0 is the most deeply trapped
+    # particle, sqrt(1 - Bmin/Bmax) the barely trapped one.
+    b_min = float(np.nanmin(j_info["b_min"]))
+    xi = np.sqrt(max(0.0, 1.0 - b_min / j_info["pitch_inverse"]))
+    ax.set_title("second adiabatic invariant and drift surfaces\n"
+                 rf"trapped particles with $v_\parallel/v={xi:.2f}$ at $B_{{\min}}$")
 
 
 def _boozer_modB_panel(ax, fig, booz: dict[str, Any], k: int, *, title: str) -> None:
@@ -1829,7 +1869,7 @@ def plot_summary(
         Physical pitch ``lambda = 1/B*`` in T^-1 for the ``J`` map.  Following
         one physical ``lambda`` radially is what makes ``dJ/dpsi`` meaningful,
         so pass the pitch an optimization targeted to certify it at the same
-        value.  By default a ``B*`` halfway into the trapping band common to
+        value.  By default a ``B*`` a quarter of the way into the trapping band common to
         every plotted surface is chosen automatically.
 
     Returns
