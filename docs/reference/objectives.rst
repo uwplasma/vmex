@@ -747,6 +747,14 @@ Which objectives differentiate how
      - yes
      - yes
      - traceable ``L_grad_B`` lane (soft-min via ``softmin_k``)
+   * - :func:`~vmex.core.optimize.l_grad_b_excess_state`
+     - yes
+     - yes
+     - one-sided pointwise rows for a minimum gradient scale length
+   * - :func:`~vmex.core.optimize.weighted_magnetic_well`
+     - yes
+     - yes
+     - volume-derivative well between two user-chosen radial regions
    * - :func:`~vmex.core.optimize.d_merc_state`,
        :func:`~vmex.core.optimize.mercier_stability_residual`
      - yes

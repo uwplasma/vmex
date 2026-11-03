@@ -392,6 +392,9 @@ def test_analytic_mode_projection_boundary_derivative(cth_vacuum_inputs, include
 def test_analytic_sum_assigns_positive_n_to_t_minus():
     """Pin ``analysesum2``: exchanging T+ and T- moves this ``wb`` by 17%.
 
+    The 100-iteration state follows the time step, which stays 0.7 through the
+    vacuum turn-on (as in VMEC2000), so the pin moved from 0.00155058552.
+
     The assignment itself was checked against quadrature of the subtracted
     kernel, where T- agrees to 0.2% and T+ misses by 25-33%.
     """
@@ -402,4 +405,4 @@ def test_analytic_sum_assigns_positive_n_to_t_minus():
     result = vj.solve_free_boundary_multigrid(
         dataclasses.replace(inp, niter_array=[100]), mgrid_path=data / inp.mgrid_file,
         verbose=False, raise_on_max_iterations=False)
-    assert float(result.wb) == pytest.approx(0.00155058552, rel=1e-4)
+    assert float(result.wb) == pytest.approx(0.00212844995, rel=1e-4)
