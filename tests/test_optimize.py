@@ -179,6 +179,25 @@ def test_boundary_elongation_is_traceable_and_grid_converged(solovev_eq):
     assert np.max(np.abs(gradient)) > 0.0
 
 
+
+def test_min_boundary_curvature_radius_matches_dense_geometry(solovev_eq):
+    """The smallest boundary curvature radius agrees with a dense independent curve."""
+    eq = solovev_eq
+    inp = eq.inp
+    theta = np.linspace(0.0, 2.0 * np.pi, 4096, endpoint=False)
+    m = np.arange(inp.rbc.shape[1])
+    R = np.cos(np.outer(theta, m)) @ inp.rbc[inp.ntor]
+    Z = np.sin(np.outer(theta, m)) @ inp.zbs[inp.ntor]
+    h = theta[1]
+    R1, Z1 = ((np.roll(f, -1) - np.roll(f, 1)) / (2 * h) for f in (R, Z))
+    R2, Z2 = ((np.roll(f, -1) - 2 * f + np.roll(f, 1)) / h**2 for f in (R, Z))
+    dense = np.min((R1**2 + Z1**2)**1.5 / np.abs(R1 * Z2 - Z1 * R2))
+    radius = opt.min_boundary_curvature_radius(eq.state, eq.runtime)
+    np.testing.assert_allclose(float(radius), dense, rtol=1e-3)  # sampled minimum
+    gradient = jax.grad(lambda z_sin: opt.min_boundary_curvature_radius(
+        dataclasses.replace(eq.state, Z_sin=z_sin), eq.runtime))(eq.state.Z_sin)
+    assert np.all(np.isfinite(np.asarray(gradient))) and np.max(np.abs(np.asarray(gradient))) > 0.0
+
 def test_solve_equilibrium_forwards_verbose(monkeypatch, solovev_eq):
     """The public final-solve helper exposes the VMEC iteration table flag."""
     captured = {}
