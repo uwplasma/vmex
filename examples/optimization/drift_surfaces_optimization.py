@@ -6,8 +6,8 @@ vacuum equilibrium in stages of increasing mode number, exactly as in
 ``QA_optimization.py``, with quasisymmetry replaced by drift confinement. For
 six physical pitches across the trapped window,
 :class:`~vmex.core.maxj.DriftConfinementResidual` launches bounce-centre
-orbits on three surfaces and eight field-line labels, follows them for about
-10 ms of a 3.5 MeV alpha at reactor scale, and penalizes how far each drift
+orbits on three surfaces and eight field-line labels, traces each drift
+surface once, and penalizes how far each drift
 surface reaches toward the LCFS. The weighted mean reach is reported as
 ``Gamma_W``. No symmetry is imposed. VMEX supplies the exact Jacobian.
 """
@@ -40,9 +40,9 @@ START_RADII = (0.15, 0.25, 0.4)
 TRAPPING_DEPTHS = (0.1, 0.25, 0.4, 0.55, 0.7, 0.85)
 
 # Drift-orbit sampling: field lines, traced periods, quadrature, RK4 steps,
-# and the integration time, t_phys m v^2 / (Z e psi_edge) = 4000 for 10 ms:
+# and the arc length each drift surface is traced over in the polar plane:
 DRIFT_OPTIONS = dict(nalpha=32, points_per_period=48, num_periods=16,
-                     max_wells=40, quadrature_order=24, nsteps=512, t_final=4000.0)
+                     max_wells=40, quadrature_order=24, nsteps=512, length=8.0)
 BOOZER_MODES = 10
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
