@@ -46,6 +46,8 @@ links to the module that documents it.
   field-line geometry from any compatible wout, without a solve
 - :func:`~vmex.core.scaling.scale_input` / :func:`~vmex.core.scaling.scale_wout`
   / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms
+- :func:`~vmex.core.setup.boundary_volume` — input-boundary volume, the
+  ``TVOLUME`` that holds an optimized plasma at its seed size
 
 **High-order reconstruction and strong-force certificate**
 
@@ -329,6 +331,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.virtual_casing", "surface_field_data_from_wout"),
     # dimensional scaling
     "scale_input": (".core.scaling", "scale_input"),
+    "boundary_volume": (".core.setup", "boundary_volume"),
     "scale_mgrid": (".core.scaling", "scale_mgrid"),
     "scale_wout": (".core.scaling", "scale_wout"),
     # errors
