@@ -223,8 +223,8 @@ Numerical implementation:
 
 47. X. S. Li, “An Overview of SuperLU: Algorithms, Implementation, and User
     Interface,” *ACM Transactions on Mathematical Software* 31, 302–325
-    (2005) — globally pivoted sparse factorization used for the equilibrated
-    block-banded radial solve, doi:10.1145/1089014.1089017.
+    (2005) — the sparse factorization the boundary-Schur bulk solve used
+    before its banded LU, doi:10.1145/1089014.1089017.
 
 48. D. Panici, R. Conlin, D. W. Dudt, K. Unalmis, and E. Kolemen, “The DESC
     stellarator code suite. Part 1: Quick and accurate equilibria
