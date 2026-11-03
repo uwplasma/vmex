@@ -16,7 +16,7 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
   SciPy 1.16 introduced, so on Python 3.10, where SciPy stops at 1.15, those
   examples do not run),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
-  `booz_xform_jax>=0.4.3` and `solvax>=0.27.0` (the linear solvers). `import
+  `booz_xform_jax>=0.4.3` and `solvax>=0.35.0` (the linear solvers). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to
   upgrade.
 

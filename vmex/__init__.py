@@ -164,10 +164,10 @@ from packaging.version import Version as _Version
 # SciPy 1.16 and JAX 0.7+ need Python 3.11, so Python 3.10 has lower floors.
 _MINIMUM_VERSIONS = (
     {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2),
-     "booz_xform_jax": (0, 4, 3), "solvax": (0, 27, 0)}
+     "booz_xform_jax": (0, 4, 3), "solvax": (0, 35, 0)}
     if _sys.version_info >= (3, 11) else
     {"scipy": (1, 15), "jax": (0, 6, 2), "jaxlib": (0, 6, 2),
-     "booz_xform_jax": (0, 4, 3), "solvax": (0, 27, 0)})
+     "booz_xform_jax": (0, 4, 3), "solvax": (0, 35, 0)})
 
 
 def _check_supported_versions() -> None:
