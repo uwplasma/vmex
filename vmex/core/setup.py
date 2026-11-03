@@ -688,7 +688,9 @@ def flux_profiles(
     torflux, torflux_deriv = _torflux_functions(inp.aphi)
 
     two_pi = 2.0 * np.pi
-    psi_edge = jnp.asarray(signgs * inp.phiedge / two_pi, dtype=dtype)
+    # readin.f: phiedge = phiedge*bloat; BLOAT = 0 means 1 here as there.
+    bloat = inp.bloat if float(inp.bloat) != 0.0 else 1.0
+    psi_edge = jnp.asarray(signgs * inp.phiedge * bloat / two_pi, dtype=dtype)
     torflux_edge = psi_edge
     tf1 = torflux(jnp.asarray(1.0, dtype=dtype))
     torflux_edge = jnp.where(tf1 != 0.0, torflux_edge / jnp.where(tf1 != 0.0, tf1, 1.0),
