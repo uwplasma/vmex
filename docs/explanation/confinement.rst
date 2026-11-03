@@ -432,8 +432,9 @@ when :math:`\hat s + \delta_s \ge 1` for the banana width
 every surface; it does not raise the rank correlation but excludes the
 high-mirror fields (0.5 to 0.95) that a reach term alone can reward.
 ``clamp=True`` freezes the fit at the outermost surface with a well.
-None of them predicts the 70 to 90 per cent trapped losses of the
-quasi-axisymmetric fields, which sit at zero reach.
+None of them predicts the large NFP 2 trapped losses (70 per cent of the
+trapped particles of one optimized field, and 54 per cent of the barely
+trapped ones of the QA field), whose reach stays near zero.
 ``drift_surfaces.py`` shows the orbits of
 a quasi-axisymmetric equilibrium and the gradient of ``s_max``.
 
