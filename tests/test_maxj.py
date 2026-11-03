@@ -443,3 +443,41 @@ def test_drift_confinement_residual_reach_rows(monkeypatch):
     assert rows.shape == (4 + 2 * 8,) and bool(jnp.all(jnp.isfinite(rows)))
     assert bool(jnp.all((out["reach"] >= 0.0) & (out["reach"] < 1.0)))
     assert float(out["gamma_w"]) == pytest.approx(float(jnp.mean(out["reach"])))
+
+
+def test_birth_pitches_window_and_weights():
+    bmag = _bmag_stack = jnp.asarray([[[1.0, 1.2, 1.4, 1.2]], [[1.1, 1.3, 1.5, 1.3]]])
+    pitch, weight = maxj.birth_pitches(bmag, 5, birth=0)
+    assert float(jnp.sum(weight)) == pytest.approx(1.0)
+    # B_* = 1/pitch lies between the largest line minimum and the smallest maximum.
+    assert bool(jnp.all((1.0 / pitch > 1.1) & (1.0 / pitch < 1.4)))
+    # xi0 = v_par/v at B_min of the birth surface: lambda = (1 - xi0^2)/B_min <= 1/B_min.
+    assert bool(jnp.all(pitch <= 1.0))
+    _, trapped = maxj.birth_pitches(bmag, 5, birth=0, measure="trapped")
+    assert float(jnp.sum(trapped)) == pytest.approx(1.0) and bool(jnp.all(trapped > 0.0))
+
+
+def test_drift_orbits_clamp_freezes_fields_beyond_finite_surfaces():
+    s, alpha, action, tau = _synthetic_drift()
+    action = action.at[-2:].set(jnp.nan)
+    free = maxj.drift_orbits(action, tau, s, alpha, 0.5, 0.0, t_final=2.0, nsteps=64)
+    held = maxj.drift_orbits(action, tau, s, alpha, 0.5, 0.0, t_final=2.0, nsteps=64, clamp=True)
+    assert bool(jnp.all(jnp.isfinite(held["s"])))
+    assert float(held["s_max"][0]) <= float(free["s_max"][0]) + 1.0e-12
+
+
+def test_drift_confinement_mirror_and_fow_rows(monkeypatch):
+    booz = _boozer(1.02)
+    monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    options = dict(mboz=2, nboz=2, nalpha=8, points_per_period=32, num_periods=2,
+                   max_wells=4, nsteps=16, t_final=0.1)
+    term = maxj.DriftConfinementResidual(
+        [0.25, 0.75], [1.0 / 1.1], [0.5], launch_alpha=4, mirror_target=0.05,
+        mirror_weight=2.0, fow=0.03, clamp=True, **options)
+    out = term.compute_state(None, None)
+    assert out["residuals1d"].shape == (4 + 2 + 4,)
+    assert out["mirror"].shape == (2,) and bool(jnp.all(out["mirror"] > 0.05))
+    assert 0.0 <= float(out["gamma_fow"]) <= 1.0
+    mirror_rows = out["residuals1d"][4:6]
+    np.testing.assert_allclose(mirror_rows, 2.0 * (out["mirror"] - 0.05) / np.sqrt(2.0))
